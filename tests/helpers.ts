@@ -1936,12 +1936,14 @@ export interface DiffRangeShape {
   /** The anchors that cut the step out of the command: its heading and the next one. */
   stepFrom: string
   stepTo: string
-  /** The reachability command up to its SHA placeholder, such as "cat-file -t {sha}". */
+  /** The reachability rule as the step states it: the command with its SHA placeholder, then what it must print. */
   reachability: string
   /** The range the command builds from the stored head. */
   incrementalRange: string
   /** The stored head's file name, such as ".last-review-head". */
   marker: string
+  /** The directory under `{gd}/devflow/` that holds the marker: "reviews" or "bug-analysis". */
+  dir: string
 }
 
 /** The parts of the fresh-base text that differ per command. */
@@ -1978,6 +1980,93 @@ function collectFullRangeDefects(body: string, shape: DiffRangeShape): string[] 
  * length all stay inside the shape.
  */
 const NAME_CLASS_COPY_RE = /\^[^`\s]*\[(?=[^\]`]*\+)(?=[^\]`]*@)(?=[^\]`]*,)(?=[^\]`]*#)[^\]`]*\][^`\s]*\$/g
+
+/**
+ * A flagged `rm`: `rm -f`, `rm -rf`, `rm --force`, in any spacing. The plain `rm --` form is not one. Prompt text
+ * removes a file with the plain form only, because a permission layer refuses the flagged forms. Test files import
+ * this one pattern, so the sink guard and the base-ref guard judge a removal the same way.
+ */
+export const FLAGGED_RM = /\brm\s+-{1,2}[A-Za-z]/
+
+/** How each resolver call starts: bind the name file and arm the one trap that removes it with a flagless rm. */
+export const NAME_FILE_TRAP = 'F="{name file}"; trap \'rm -- "$F"\' EXIT;'
+
+/**
+ * How `ensure-pr-ready` step 4a removes its name file: a trailing `rm` in the D11 shell, after the last create attempt.
+ * The D11 trap runs `exit` on INT and TERM, so the trailing `rm` is not reached then, and the text says so.
+ * A use site adds the closing period.
+ */
+export const NAME_FILE_REMOVAL = 'in that same shell and after the last create attempt, `rm -- "$F"`. That `rm` runs when the shell reaches it; an INT or TERM signal skips it and leaves the file in the temp directory'
+
+/** The clause after each base-name class: the match is judged by reading and the value never reaches a command. A use site adds its own parentheses or punctuation. */
+export const JUDGE_BY_READING = 'judge the match by reading; never pass the value to a command'
+
+/** The sentence after every Write step: a failed Write is a missing value and never a shell write. */
+export const WRITE_FAILURE = 'If the Write tool fails, treat the value as missing; never write it with a shell command.'
+
+/**
+ * The one text of the name-file procedure that three prompts carry: `ensure-pr-ready` step 5a, `validate-branch` step 6 and the
+ * /implement re-validation step. Each constant below is written as is in all three; the `name-file-procedure` rule of
+ * tests/guards/base-ref-guard.test.ts holds them equal, and the per-prompt tests import these instead of spelling them again.
+ */
+
+/** The producer's tail: the status of the first `gh` call is kept in `G` and echoed with the status of the call that writes the name file. */
+export const PRODUCER_STATUS_CAPTURE = 'G=$?; gh pr view'
+export const PRODUCER_NAME_TAIL = '--json baseRefName --jq .baseRefName > "$F"; echo "gh=$G,$?"'
+
+/** What a failed `gh` means: either printed status is not 0. */
+export const GH_FAILED_RULE = '`gh` failed when either status printed in `gh=` is not 0'
+
+/** What "no PR applies" covers: a checkout without a PR, without `gh` or without a GitHub remote takes the default branch. */
+export const NO_PR_DEFINITION = '(none for the branch, `gh` missing or logged out, or no GitHub remote)'
+
+/** A failed `gh` that shows there is no PR: the default branch is the base. */
+export const NO_PR_CLAUSE = `\`gh\` failed and its output shows that no PR applies ${NO_PR_DEFINITION}`
+
+/** A failed `gh` that does not show that: no name can be trusted. */
+export const OTHER_GH_FAILURE_CLAUSE = '`gh` failed and its output does not show that no PR applies'
+
+/** The command that prints the remote default branch: for-each-ref with no pipe. It prints one empty line when origin/HEAD is not a symbolic ref. */
+export const DEFAULT_BRANCH_PROBE = 'git -C "{worktree}" for-each-ref --format=\'%(symref:lstrip=3)\' refs/remotes/origin/HEAD'
+
+/** The origin read that fills the name file by redirect. */
+export const ORIGIN_HEAD_READ = `F="{name file}"; ${DEFAULT_BRANCH_PROBE} > "$F"`
+
+/** The `main` probe of the fallback, and the `master` fallback that follows it. */
+export const MAIN_PROBE = 'git -C "{worktree}" rev-parse --verify --quiet main'
+export const MASTER_FALLBACK = 'otherwise `master` the same way'
+
+/** The default-branch fill, from the origin read to the Write-failure rule. A file whose only content is an empty line counts as empty. */
+export const DEFAULT_BRANCH_FILL = `\`${ORIGIN_HEAD_READ}\`; when the file reads as empty (a file whose only content is an empty line is empty), \`main\` if \`${MAIN_PROBE}\` succeeds, ${MASTER_FALLBACK}; write a literal name with the Write tool, after a Read of the file. ${WRITE_FAILURE}`
+
+/**
+ * A shell write into the name or title file `$F`: a `>` or `>>` redirect, spaced or not, quoted or not, or a `tee`
+ * with any flags that names it. A `<` read and a longer variable such as `$FILE` are not one.
+ */
+const SHELL_WRITE_INTO_F = /(?:>>?\s*|\btee\b(?:\s+-\S+)*\s+)"?\$(?:\{F\}|F(?!\w))/g
+
+/** How many shell writes into `$F` a text holds. */
+export function countShellWritesIntoF(text: string): number {
+  return [...text.matchAll(SHELL_WRITE_INTO_F)].length
+}
+
+/** One known-bad shell write of a value into `$F` for each spelling `countShellWritesIntoF` counts: a probe seeded into a prompt must be reported. */
+export const SHELL_WRITE_PROBES: ReadonlyArray<readonly [label: string, command: string]> = [
+  ['spaced and quoted redirect', 'printf \'%s\' "{value}" > "$F"'],
+  ['unspaced redirect', 'printf \'%s\' "{value}" >"$F"'],
+  ['unquoted redirect', 'printf \'%s\' "{value}" > $F'],
+  ['unspaced and unquoted redirect', 'printf \'%s\' "{value}" >$F'],
+  ['append redirect', 'printf \'%s\' "{value}" >> "$F"'],
+  ['tee', 'printf \'%s\' "{value}" | tee "$F"'],
+  ['tee with a flag', 'printf \'%s\' "{value}" | tee -a "$F"'],
+]
+
+/** `text` with the one occurrence of `from` replaced by `to`; it throws unless there is exactly one, so no seed is inert. */
+export function seedOnce(text: string, from: string, to: string): string {
+  const first = text.indexOf(from)
+  if (first === -1 || text.indexOf(from, first + from.length) !== -1) throw new Error(`seedOnce: expected exactly one "${from.slice(0, 80)}" — the seed is inert`)
+  return text.slice(0, first) + to + text.slice(first + from.length)
+}
 
 /** Every copy of the base-name check in a text, exact or widened. */
 export function findNameClassCopies(text: string): string[] {
@@ -2024,8 +2113,10 @@ export function collectFreshBaseDefects(body: string, shape: DiffRangeShape, par
 }
 
 /**
- * The stored head: the file counts only when git reports it untracked (exit 1, the `-C` path double-quoted;
- * any other exit takes the full-range path), and it is checked as a commit ID, before any git command or
+ * The stored head: read from `{gd}/devflow/{dir}/{branch-slug}/{marker}`, where `{gd}` is what `rev-parse
+ * --absolute-git-dir` prints, and written there in one Bash call that a failed write never stops; no path
+ * of the marker sits in the docs tree and the head has no tracked-file probe. The head is checked as a commit
+ * ID (exactly 40 or 64 lowercase hex) and `cat-file -t` must print `commit`, before any git command or
  * `DIFF_RANGE` takes it.
  */
 export function collectStoredHeadDefects(body: string, shape: DiffRangeShape): string[] {
@@ -2040,13 +2131,19 @@ export function collectStoredHeadDefects(body: string, shape: DiffRangeShape): s
   const uses = [shape.reachability, `Set \`DIFF_RANGE\` to \`${shape.incrementalRange}\``].map(use => s.indexOf(use))
   if (uses.some(at => at === -1)) out.push(`${shape.step} lost the reachability check or the incremental range`)
   else if (uses.some(at => at < check)) out.push(`the stored ${shape.head} head is used before it is checked`)
-  const tracked = /^[^\n]*ls-files --error-unmatch[^\n]*/m.exec(s)
-  if (tracked === null || !tracked[0].includes(shape.marker)) out.push(`the stored ${shape.head} head is not ignored when git tracks it`)
+  const read = s.split('\n').filter(l => l.includes(shape.marker))
+  const readPath = `\`{gd}/devflow/${shape.dir}/{branch-slug}/${shape.marker}\``
+  if (read.length !== 1 || !read[0].includes(readPath)) out.push(`the stored ${shape.head} head is not read under the absolute git directory`)
+  else if (!read[0].includes(`\`{gd}\` being what \`git -C "{worktree}" rev-parse --absolute-git-dir\` prints:`)) out.push(`${shape.step} does not say what {gd} is`)
+  if (new RegExp(`\\.devflow/docs/[^\\s\`"]*${escapeRe(shape.marker)}`).test(body)) out.push(`the ${shape.head} head marker sits in the docs tree`)
+  if (/ls-files/.test(s)) out.push(`${shape.step} checks the ${shape.head} head with the tracked-file probe ls-files`)
+  const writes = body.split('\n').filter(l => l.includes(shape.marker) && l.includes('rev-parse HEAD'))
+  if (writes.length !== 1) out.push(`the ${shape.head} head is written ${writes.length} times, expected once`)
   else {
-    if (!/git -C "[^"]+" ls-files --error-unmatch/.test(tracked[0])) out.push(`the tracked-file check of the ${shape.head} head does not double-quote its -C path`)
-    if (!/ exits 1\b/.test(tracked[0]) || !tracked[0].includes('any other exit takes the full-range path')) out.push(`the ${shape.head} head counts as untracked on more than exit 1`)
-    const trackedAt = s.indexOf('ls-files --error-unmatch')
-    if (trackedAt > check || uses.some(at => at !== -1 && at < trackedAt)) out.push(`the stored ${shape.head} head is used before the tracked-file check`)
+    const tree = /git -C "([^"]+)" rev-parse --absolute-git-dir/.exec(writes[0])?.[1]
+    const call = `In one Bash call run \`M="$(git -C "${tree}" rev-parse --absolute-git-dir)/devflow/${shape.dir}/{branch-slug}" && mkdir -p "$M" && git -C "${tree}" rev-parse HEAD > "$M/${shape.marker}"\`.`
+    if (tree === undefined || !writes[0].includes(call)) out.push(`the ${shape.head} head is not written in one Bash call that makes the directory and then lets git write the SHA`)
+    if (!writes[0].endsWith(' A failed or refused write never stops the run and is not retried another way.')) out.push(`the ${shape.head} head writer does not say a failed write never stops the run`)
   }
   return out
 }
@@ -2054,15 +2151,19 @@ export function collectStoredHeadDefects(body: string, shape: DiffRangeShape): s
 /** The shape of a valid branch slug, stated once in each review command. */
 const SLUG_PATTERN = '^[A-Za-z0-9._-]{1,200}$'
 
+/** The one evidence render line of /code-review and /bug-analysis: it carries the slug and runs before the Extract line. */
+export const EVIDENCE_RENDER_LINE = 'node "$HOME/.devflow/scripts/verify-evidence.cjs" render --plan "{worktree}/.devflow/docs/evidence-{branch_slug}.md"; echo "exit=$?"'
+
 /**
- * The lines that put the branch slug, or a directory under it, into command text. The evidence render is
- * left out: it runs only for a valid slug (the gate is the slug collector's), before the Git agent spawn.
+ * The lines that put the branch slug, or a directory under it, into command text. Only the exact evidence
+ * render line is left out: it runs only for a valid slug (the gate is the slug collector's), before the Git
+ * agent spawn. Any other line, a verify-evidence line included, is a sink.
  */
 export function slugSinkLines(body: string): Array<{ at: number; line: string }> {
   const sinks: Array<{ at: number; line: string }> = []
   let at = 0
   for (const line of body.split('\n')) {
-    if (/\{(?:branch-slug|branch_slug|REVIEW_DIR|ANALYSIS_DIR)\}/.test(line) && !line.includes('verify-evidence.cjs')) sinks.push({ at, line })
+    if (/\{(?:branch-slug|branch_slug|REVIEW_DIR|ANALYSIS_DIR)\}/.test(line) && line !== EVIDENCE_RENDER_LINE) sinks.push({ at, line })
     at += line.length + 1
   }
   return sinks

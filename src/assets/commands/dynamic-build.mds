@@ -175,7 +175,7 @@ TASK_DESCRIPTION: ${TICKET}
 ISSUE_REQUIRED: ${ISSUE_REQUIRED}
 APPLY_CONVENTIONS: ${APPLY_CONVENTIONS}
 ${ISSUE_INPUT !== "(none)" ? "ISSUE_INPUT: " + ISSUE_INPUT : ""}
-Return: {"branch": "<the - **Branch name**: value under your ### Branch, or (none)>", "issueId": "<the - **Issue ID**: value under your ### Handoff Values, or (none)>", "prLinkLine": "<the - **PR link line**: value, or (none)>"}`, { agentType: "Git" })
+Return: {"branch": "<the - **Branch name**: value under your ### Branch, or (none)>", "issueId": "<the - **Issue ID**: value under your ### Handoff Values, or (none)>", "prLinkLine": "<the - **PR link line**: value, or (none)>", "baseSha": "<the 40 or 64 hex git rev-parse HEAD prints before step 4>"}`, { agentType: "Git" })
 );
 
 // The ticket's own Handoff Values, read from setup-task's Output — never derived from ISSUE_INPUT.
@@ -185,6 +185,7 @@ const ISSUE_NUMBER = ISSUE_ID_SHAPE.test(String(setup?.issueId ?? "")) ? setup.i
 const ISSUE_PR_LINK = setup?.prLinkLine || "(none)";  // "(none)" ⇒ the wave PR carries no closing reference for this ticket
 // The branch setup-task created, as it reported it: every later phase and the merge use it. The engine never names one.
 const BRANCH = typeof setup?.branch === "string" && setup.branch.trim() !== "" && setup.branch.trim() !== "(none)" ? setup.branch : "(none)";
+const BASE_SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(String(setup?.baseSha ?? "")) ? setup.baseSha : "(none)";  // the commit the ticket branch was forked from
 
 // Ticket-link stop, before implement. The workflow cannot ask, so it never records an exception: it stops.
 if (ISSUE_REQUIRED === "true" && ISSUE_NUMBER === "(none)") {
@@ -194,6 +195,11 @@ if (ISSUE_REQUIRED === "true" && ISSUE_NUMBER === "(none)") {
 // Branch stop, before implement: with no branch there is nothing to build on or merge — a correctness stop, not a shape gate.
 if (BRANCH === "(none)") {
   return { ticket: TICKET, branch: BRANCH, verdict: "ESCALATED", issueId: ISSUE_NUMBER, issuePrLink: ISSUE_PR_LINK, escalations: [{ type: "branch-missing", description: "setup-task reported no branch name — check its Output, then re-run" }] };
+}
+
+// Base stop: every review range starts at the commit the ticket branch was forked from.
+if (BASE_SHA === "(none)") {
+  return { ticket: TICKET, branch: BRANCH, verdict: "ESCALATED", issueId: ISSUE_NUMBER, issuePrLink: ISSUE_PR_LINK, escalations: [{ type: "base-missing", description: "setup-task reported no base commit — check its Output, then re-run" }] };
 }
 
 // Phase 2: Implement
@@ -323,10 +329,9 @@ Self-verify your fix compiles and the scenarios pass, following your Running com
 
 // Phase 5: Review → verify → fix (single pass)
 const reviewResult = await phase("review", async () => {
-  // Review scope: the entire branch diff from the base branch to HEAD. No base SHA is tracked —
-  // Review agents diff the branch against its merge-base with the default branch.
+  // Review scope: the entire branch diff, from the commit the ticket branch was forked from to HEAD.
   // The pass runs exactly ONCE.
-  const reviewScope = `Review the full branch diff on branch ${BRANCH}. Diff the branch against its merge-base with the default branch (do not guess a base SHA — compute the merge-base from git).`;
+  const reviewScope = `Review the full branch diff on branch ${BRANCH}.\nDIFF_RANGE: ${BASE_SHA}...HEAD\n`;
 
   // Review agent focus list (order = index mapping for dead-reviewer detection)
   const reviewFocuses = ["security", "architecture", "performance", "complexity", "consistency", "regression", "testing", "reliability"];
@@ -370,13 +375,12 @@ Focus discipline: ${focus}. Return: {"focus": "${focus}", "reviewed": true, "fil
     return { survivingFindings: [], fixedFindings: [], coverageGaps };
   }
 
-  // Adversarial verification — bounded 2-3 agent panel, majority-survives
-  // Panel asks perspective-diverse questions over the WHOLE finding set (not one agent per finding).
-  // A finding survives if >50% of panel agents CONFIRM it.
+  // Adversarial panel over the WHOLE finding set (not one agent per finding): >50% CONFIRMED survives
   const VERIFY_PANEL = 3;
   const panels = await parallel(
     Array.from({ length: VERIFY_PANEL }, (_, lens) => () =>
       agent(`Adversarially verify all ${allFindings.length} findings on branch ${BRANCH}.
+DIFF_RANGE: ${BASE_SHA}...HEAD
 Lens ${lens + 1} of ${VERIFY_PANEL}:
 ${["Does each finding actually reproduce in the current code? Hunt for findings that describe patterns not present in the diff.",
    "Is each finding a real issue or a false positive in context? Consider intent, surrounding code, and project conventions.",
@@ -394,16 +398,13 @@ ${JSON.stringify(allFindings.map((f, i) => ({ index: i, description: f.descripti
     panels.filter(p => (p.verdicts || []).find(v => v.index === i)?.verdict === "CONFIRMED").length > VERIFY_PANEL / 2
   );
 
-  // No confirmed findings — coverageGaps carry forward and block PASS downstream; also eliminates the empty-batch parallel() path
+  // No confirmed findings: coverageGaps carry forward and block PASS downstream
   if (confirmedFindings.length === 0) {
     return { survivingFindings: [], fixedFindings: [], coverageGaps };
   }
 
-  // Batched fix Code agents — one file per set of sub-batches; max 5 findings per sub-batch.
-  // Sub-batches for the SAME file run sequentially (never two Code agents editing the same file concurrently —
-  // concurrent same-file edits cause index contention and lost fixes).
-  // Sub-batches for DISTINCT files run in parallel (different code areas — safe per concurrency doctrine).
-  // A finding with no file field gets its own singleton group (unknown scope — never mix with known files).
+  // Sub-batches (max 5 findings): same file in sequence, distinct files in parallel.
+  // A finding with no file is a singleton group.
   const MAX_BATCH = 5;  // max 5 findings per sub-batch
   const fileGroups = {};
   for (let fi = 0; fi < confirmedFindings.length; fi++) {
@@ -413,9 +414,7 @@ ${JSON.stringify(allFindings.map((f, i) => ({ index: i, description: f.descripti
     fileGroups[key].push(f);
   }
 
-  // One entry per distinct file; each entry runs its sub-batches sequentially.
-  // Distinct-file groups are paced in chunks of FIX_CHUNK — same pacing bar as the Review spawn
-  // path — to avoid launching all Code agents at once on a large branch (reliability: explicit bound).
+  // One entry per file; FIX_CHUNK chunks bound concurrent Code agents
   const FIX_CHUNK = 5;
   // issue-fix SCOPE per finding: CRITICAL or HIGH takes the Careful protocol (failing regression test first); anything else is Standard.
   const CAREFUL_SEVERITIES = new Set(["critical", "high"]);
@@ -761,12 +760,14 @@ Do NOT ask questions mid-workflow — that is impossible (F4). The workflow only
 
 7. **Wave PR evidence** — only when step 6 reported the wave PR, after it; it never blocks, and every outcome below goes into the run summary. Take `{n}` from step 6's `- **PR**: #{n}` line when `{n}` matches `^[1-9][0-9]{0,9}$` as a whole; no such line ⇒ record `TRACEABILITY: DEGRADED (wave PR number not captured)` and skip this step. `PR_TEST_PLAN_BLOCK` `(none)` ⇒ record `Wave evidence: skipped (no wave test plan)` and skip it.
 
+   **Changed files.** Take `{base_ref}` from step 6's `- **Base ref**:` line; only when it is 40 or 64 lowercase hex, run `git -C "{integration worktree root}" diff --name-only --diff-filter=d {base_ref}...HEAD; echo "exit=$?"`. Unless it ran and printed `exit=0`, record `TRACEABILITY: DEGRADED (wave base unusable)` and skip this step.
+
    **(a) Test the wave.** Spawn one Test agent on the integration worktree with the wave test plan — the TP lines of the `## Test Plan` section step 3(b) wrote to `{integration worktree root}/.devflow/docs/evidence-wave-{slug}.md`:
 
 ```
 Agent(subagent_type="Test"):
 "ORIGINAL_REQUEST: the merged tickets of wave/{slug}, as the wave test plan names them
-FILES_CHANGED: {the files wave/{slug} changes against the - **Base**: branch step 6 reported}
+FILES_CHANGED: {the file list that diff printed}
 TEST_PLAN: {the TP lines of the wave evidence file's ## Test Plan section}
 WORKTREE_PATH: {integration worktree root}
 Cover every TEST_PLAN line on the integration branch as it stands. Report PASS or FAIL with evidence."

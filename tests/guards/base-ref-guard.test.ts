@@ -7,25 +7,31 @@
  * reference. It collects every shell line that names a base value and checks each site
  * against the rules below.
  *
- *   AC-8   A base name reaches a shell line only through the resolver call or the PR
- *          target, double-quoted and after its base-name check. Every other command takes
- *          the BASE_REF value (a commit id).
+ *   AC-8   A base name never reaches a shell line. The Write tool puts it in a temp file, and the
+ *          resolver call and the PR target read that file. A name file or a title file is
+ *          removed with the plain `rm --` form: a flagged `rm` (`-f`, `-rf`, `--force`) in a
+ *          resolver call or beside either file is a finding. Every other command takes the
+ *          BASE_REF value (a commit id).
  *   AC-9   Every base source carries a check that equals the exported STRICT_NAME_RE and
  *          states the allowed set. The code-review and bug-analysis commands carry no copy
  *          of it. No prompt copies LINE_RE or FALLBACK_LINE.
  *   AC-10  Diff sinks take the BASE_REF value. A non-zero diff exit stops the step, and an
  *          empty list counts only with exit 0.
- *   AC-15  The invocation text is accepted by the script's own argument parser. Every
- *          resolver call is counted per file (the call budget).
+ *   AC-15  The invocation text is accepted by the script's own argument parser. The name slot
+ *          holds `--name-stdin`, and the call reads the name file with `< "$F"`. No resolver
+ *          call carries a name word, a shell variable bound to the name or an extra positional
+ *          word. Every resolver call is counted per file (the call budget).
  *   AC-16  No built prompt carries a flagged base site: every collector finds nothing.
  *
  * This file holds the sweeps that find a new site anywhere in the corpus. The text one command
  * or one Git op states alone belongs to its own guard: the review commands' Return, Extract,
  * full-range, DIFF_RANGE and freshness text (`collectFreshBaseDefects` in tests/helpers.ts, driven
  * by tests/guards/code-review-diff-gating.test.ts and tests/bug-analysis/structural.test.ts), the
- * review agent's DIFF_RANGE fallback (code-review-diff-gating), /implement's Phase 1 and
- * re-validation text (tests/evidence/implement-flow.test.ts) and the Git ops' steps 5 to 7
- * (tests/git-agent.test.ts).
+ * review agent's DIFF_RANGE rule (code-review-diff-gating), /implement's Phase 1 and
+ * re-validation text (tests/evidence/implement-flow.test.ts), the Git ops' steps 5 to 7
+ * (tests/git-agent.test.ts) and the ticket command's base commit, review ranges and changed-files
+ * step (tests/dynamic/wave-flow.test.ts). The ticket command is swept like any other prompt
+ * for base names and class copies; its `BRANCH_NAME` class variant is the one exempt copy.
  *
  * How a site is identified. Every collector returns Findings: a file label, the curation
  * arm, a rule and an anchor. For a shell line the anchor is the command text. For a
@@ -38,11 +44,24 @@
 
 import { describe, it, expect } from 'vitest'
 import { createRequire } from 'module'
-import { readFileSync } from 'fs'
+import { execFileSync } from 'child_process'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
 import * as path from 'path'
 
 import {
+  DEFAULT_BRANCH_FILL,
+  DEFAULT_BRANCH_PROBE,
+  FLAGGED_RM,
+  GH_FAILED_RULE,
+  MASTER_FALLBACK,
   MIN_COMPILED_PROMPTS,
+  NAME_FILE_TRAP,
+  NO_PR_CLAUSE,
+  NO_PR_DEFINITION,
+  OTHER_GH_FAILURE_CLAUSE,
+  PRODUCER_NAME_TAIL,
+  PRODUCER_STATUS_CAPTURE,
   ROOT,
   collectStaleOutputs,
   compiledPrompts,
@@ -54,14 +73,15 @@ import {
   requireDistFiles,
   resolveAllAgents,
   resolveCurationOffSource,
+  seedOnce,
 } from '../helpers.js'
-import { RESOLVE_BASE_SCRIPT } from '../evidence/seam.js'
+import { RESOLVE_BASE_SCRIPT, SUBPROCESS_TIMEOUT_MS } from '../evidence/seam.js'
 
 // ---------------------------------------------------------------------------
 // The script seam: the exported constants are the one source of truth
 // ---------------------------------------------------------------------------
 
-interface ParsedArgs { readonly kind: 'ok' | 'usage' }
+interface ParsedArgs { readonly kind: 'ok' | 'stdin' | 'usage' }
 
 interface ResolverExports {
   readonly STRICT_NAME_RE: RegExp
@@ -166,25 +186,24 @@ function commandSpans(line: SourceLine): string[] {
   return spans
 }
 
-/**
- * The placeholders that stand for a base NAME (the default-branch probe value is one): the brace forms, and the
- * angle-bracket forms that the `B=` binding of a resolver call uses. The literal `<base>` stays as written.
- */
-const NAME_PATTERN = '(?:\\{(?:BASE_BRANCH|base_branch|base|base branch|default)\\}|<(?:name|base_branch)>)'
-const hasName = (s: string): boolean => new RegExp(NAME_PATTERN).test(s)
-const nameHits = (s: string): RegExpMatchArray[] => [...s.matchAll(new RegExp(NAME_PATTERN, 'g'))]
-const HEX_PATTERN = '\\{(?:BASE_REF|base_ref)\\}'
-
-function insideDoubleQuotes(span: string, index: number): boolean {
-  let quote: string | null = null
-  for (let i = 0; i < index; i++) {
-    const c = span[i]
-    if (c === '\\' && quote !== "'") { i++; continue }
-    if (quote === null && (c === '"' || c === "'")) quote = c
-    else if (quote === c) quote = null
-  }
-  return quote === '"'
+/** Every code span on a line, whatever command it holds: a whole line in a shell fence, and each inline code span. */
+function codeSpans(line: SourceLine): string[] {
+  if (line.tag !== null && TEMPLATE_TAGS.has(line.tag)) return []
+  const trimmed = line.text.trim()
+  if (line.tag !== null && SHELL_TAGS.has(line.tag)) return trimmed === '' ? [] : [trimmed]
+  return [...line.text.matchAll(/`([^`]+)`/g)].map(m => m[1])
 }
+
+/**
+ * The placeholders that stand for a base NAME (the default-branch probe value is one): the brace forms anywhere, and
+ * the angle-bracket forms only as the value of a variable binding (`B=<name>`, `B="<name>"`). A bare angle placeholder
+ * is something else, such as `<isCrossRepository, else false>`. The literal `<base>` stays as written.
+ */
+const BRACE_NAME = '\\{(?:BASE_BRANCH|base_branch|base|base branch|default)\\}'
+const BOUND_ANGLE_NAME = '\\b[A-Za-z_]\\w*="?<(?:name|base_branch)>"?'
+const NAME_PATTERN = `(?:${BRACE_NAME}|${BOUND_ANGLE_NAME})`
+const hasName = (s: string): boolean => new RegExp(NAME_PATTERN).test(s)
+const HEX_PATTERN = '\\{(?:BASE_REF|base_ref)\\}'
 
 interface Word {
   readonly value: string
@@ -265,7 +284,7 @@ function listItem(text: string, start: RegExp): string | null {
 // Findings
 // ---------------------------------------------------------------------------
 
-const RULES = ['shell-name', 'strict-copy', 'grammar-copy', 'diff-range', 'sink-exit', 'resolver-call', 'reason-fix-table'] as const
+const RULES = ['shell-name', 'strict-copy', 'grammar-copy', 'diff-range', 'sink-exit', 'resolver-call', 'file-removal', 'reason-fix-table', 'name-file-procedure'] as const
 
 type Rule = typeof RULES[number]
 
@@ -289,11 +308,20 @@ const describeFinding = (f: Finding): string => `${f.file} [${f.arm}] ${f.rule} 
 // Deferred scope: kept outside the name-site collectors
 // ---------------------------------------------------------------------------
 
-/** These prompts take the resolved base in a later change; until then their base sites stay out of the name-site collectors. */
+/** These prompts stay out of the name-site collectors. Each holds a site those collectors would report, and the test at the end checks that it does. */
 const DEFERRED_FILES: readonly string[] = [
-  'commands/dynamic-build.md',
+  // Its caller passes the resolved range.
   'agents/debug.md',
 ]
+
+/**
+ * The one copy of the class that a built prompt may hold besides `STRICT_NAME_RE.source`: the ticket command's
+ * `BRANCH_NAME`, the same class less its `origin/` refusal. Only this exact text is exempt, and only in that command.
+ */
+const ENGINE_BRANCH_VARIANT: { readonly file: string; readonly copy: string } = {
+  file: 'commands/dynamic-build.md',
+  copy: '^(?![-#]|(?:@|(?:FETCH_|ORIG_|MERGE_)?HEAD)$)(?!.*\\.\\.)[A-Za-z0-9._/+@,#-]{1,200}$',
+}
 
 /** The review-focus skill files keep their literal range wording until #545 (review-focus skills read the base from DIFF_RANGE) lands. */
 const DEFERRED_SKILL_FILES: readonly string[] = [
@@ -325,31 +353,22 @@ const CHECKED_SOURCES: Readonly<Record<string, string>> = {
 /** The review commands take the checked name from ensure-pr-ready; they carry no copy. */
 const REVIEW_COMMANDS: readonly string[] = ['commands/code-review.md', 'commands/bug-analysis.md']
 
-function isAllowedUse(span: string): boolean {
-  return span.includes('resolve-base.cjs') || /\bgh pr create\b[^\n]*--base\b/.test(span)
-}
-
 /** A line that holds the exact copy of the strict class and states the allowed set. */
 function hasCheckLine(text: string): boolean {
   return text.split('\n').some(line => line.includes(`\`${STRICT}\``) && ALLOWED_SET_PARTS.every(part => line.includes(part)))
 }
 
+/** A base name never reaches a shell line: the resolver call and the PR target read it from the name file. */
 function collectNameSites(p: Prompt, includeDeferred = false): Finding[] {
   if (!includeDeferred && DEFERRED_FILES.includes(p.file)) return []
   const found: Finding[] = []
-  const guardAt = p.text.indexOf(STRICT)
   for (const line of sourceLines(p.text)) {
     for (const span of commandSpans(line)) {
-      const hits = nameHits(span)
-      if (hits.length === 0) continue
-      const reasons: string[] = []
-      if (!isAllowedUse(span)) reasons.push('only the resolver call and the PR target take a base name')
-      if (hits.some(h => !insideDoubleQuotes(span, h.index ?? 0))) reasons.push('the name is not double-quoted')
-      if (guardAt === -1 || guardAt > line.offset) reasons.push('no exact base-name check precedes it')
-      if (reasons.length > 0) found.push({ rule: 'shell-name', file: p.file, arm: p.arm, anchor: squash(span), detail: reasons.join('; ') })
+      if (!hasName(span)) continue
+      found.push({ rule: 'shell-name', file: p.file, arm: p.arm, anchor: squash(span), detail: 'a base name reaches a shell line; a command takes it only from the name file' })
     }
     for (const copy of findNameClassCopies(line.text)) {
-      if (copy === STRICT) continue
+      if (copy === STRICT || (p.file === ENGINE_BRANCH_VARIANT.file && copy === ENGINE_BRANCH_VARIANT.copy)) continue
       found.push({ rule: 'strict-copy', file: p.file, arm: p.arm, anchor: `copy ${copy.slice(0, 60)}`, detail: 'a copy of the class differs from STRICT_NAME_RE.source' })
     }
   }
@@ -390,7 +409,7 @@ const CALL_BUDGET: Readonly<Record<string, CallBudget>> = {
   'commands/code-review.md': { direct: 0, spawns: 1 },
   // One call per run.
   'commands/bug-analysis.md': { direct: 0, spawns: 1 },
-  // One ensure-pr-ready call per wave PR; counted here, the file is not edited.
+  // One ensure-pr-ready call per wave PR.
   'commands/dynamic-build.md': { direct: 0, spawns: 1 },
   'git-ops/ensure-pr-ready.md': { direct: 1, mode: 'pr' },
   // One call per validate-branch run.
@@ -403,7 +422,17 @@ function callSpans(p: Prompt): string[] {
   return sourceLines(p.text).flatMap(line => commandSpans(line).filter(s => s.includes('resolve-base.cjs')))
 }
 
-/** Why a resolver call is not the invocation the script accepts; empty when it is. */
+/** The shell variables a resolver call may bind or expand: HOME in the script path, the name file F and the cross value X. */
+const CALL_VARIABLES: ReadonlySet<string> = new Set(['HOME', 'F', 'X'])
+const VARIABLE_BINDING_RE = /^([A-Za-z_]\w*)=/
+const VARIABLE_EXPANSION_RE = /\$\{?([A-Za-z_]\w*)\}?/g
+
+/**
+ * Why a resolver call is not the invocation the script accepts; empty when it is. The name slot holds `--name-stdin`,
+ * the call reads the name file with `< "$F"`, and the span binds and expands no variable but F and X. A positional
+ * name, a variable bound to the name, its expansion and a flagged `rm` are each reported. An extra positional word
+ * is reported through the script's own parser, which refuses any argument count but 2 and 4.
+ */
 function invocationErrors(span: string): string[] {
   const words = shellWords(span)
   const at = words.findIndex(w => w.value.endsWith('resolve-base.cjs'))
@@ -413,13 +442,20 @@ function invocationErrors(span: string): string[] {
   if (words[at].value !== SCRIPT_REF) errors.push(`the script path is not ${SCRIPT_REF}`)
   const args: Word[] = []
   for (const w of words.slice(at + 1)) {
-    if (w.value === ';' || /^\d*>/.test(w.value)) break
+    if (w.value === ';' || w.value.startsWith('<') || /^\d*>/.test(w.value)) break
     args.push(w)
   }
   const crossAt = args.findIndex(w => w.value === '--cross')
-  const argv = args.map((w, i) => (i === 1 ? 'name' : crossAt !== -1 && i === crossAt + 1 && /^[${]/.test(w.value) ? 'true' : w.value))
-  if (resolver.parseArgs(argv).kind !== 'ok') errors.push('the script refuses these arguments')
-  if (args[1] !== undefined && args[1].quoted !== 'double') errors.push('the name is not a double-quoted word')
+  const argv = args.map((w, i) => (crossAt !== -1 && i === crossAt + 1 && /^[${]/.test(w.value) ? 'true' : w.value))
+  if (resolver.parseArgs(argv).kind === 'usage') errors.push('the script refuses these arguments')
+  if (args[1]?.value !== '--name-stdin') errors.push('the name slot does not hold --name-stdin; a positional name is not allowed')
+  const redirect = words.slice(at + 1 + args.length)
+  if (redirect[0]?.value !== '<' || redirect[1]?.value !== '$F' || redirect[1].quoted !== 'double') errors.push('the call does not read the name file with `< "$F"`')
+  const bound = words.slice(0, at).map(w => VARIABLE_BINDING_RE.exec(w.value)?.[1]).filter((v): v is string => v !== undefined && !CALL_VARIABLES.has(v))
+  if (bound.length > 0) errors.push(`a shell variable is bound before the call: ${bound.join(', ')}`)
+  const expanded = [...span.matchAll(VARIABLE_EXPANSION_RE)].map(m => m[1]).filter(v => !CALL_VARIABLES.has(v))
+  if (expanded.length > 0) errors.push(`a shell variable is expanded in the call: ${expanded.join(', ')}`)
+  if (FLAGGED_RM.test(span)) errors.push('the name file is removed with a flagged rm')
   if (!/echo "exit=\$\?"/.test(span)) errors.push('the exit status is not echoed')
   return errors
 }
@@ -447,6 +483,19 @@ function callFindings(p: Prompt): Unmet[] {
     if (spawns !== budget.spawns) out.push({ anchor: 'ensure-pr-ready spawns', detail: `found ${spawns}, expected ${budget.spawns}` })
   }
   return out
+}
+
+/** A code span that names a name file or a title file: the file placeholders, or the `$F` operand that holds the file. */
+const FILE_OPERAND_RE = /\{(?:name|title) file\}|\$\{?F\b/
+
+/**
+ * Name files and title files are removed with the plain `rm --` form. A flagged `rm` in a span that names either file
+ * is reported; a resolver call is judged whole by `invocationErrors`, and an unrelated flagged `rm` is not this rule's.
+ */
+function fileRemovalFindings(p: Prompt): Unmet[] {
+  return sourceLines(p.text).flatMap(codeSpans)
+    .filter(span => FILE_OPERAND_RE.test(span) && !span.includes('resolve-base.cjs') && FLAGGED_RM.test(span))
+    .map(span => ({ anchor: 'name or title file removal', detail: `a flagged rm beside a name or title file: ${squash(span).slice(0, 80)}` }))
 }
 
 /** The REASONs that end a base line as degraded or stop with no fix to name. */
@@ -482,6 +531,40 @@ function fixTableFindings(p: Prompt): Unmet[] {
   else if (table !== CANONICAL_FIX_TABLE) out.push({ anchor: 'reason-fix table', detail: 'the sentence differs from the ensure-pr-ready step 5b sentence' })
   return out
 }
+
+/** The prompts that write the name file for a base: each carries the one text of the name-file procedure. */
+const PROCEDURE_FILES: readonly string[] = ['git-ops/ensure-pr-ready.md', 'git-ops/validate-branch.md', 'references/implement-revalidate.md']
+
+/** The default-branch fill as a copy writes it: from the origin read to the Write-failure rule, inside one line. */
+const DEFAULT_FILL_RE = /`F="\{name file\}"; git -C[^\n]*?never write it with a shell command\./
+
+/** The producer's tail without the status of the first `gh` call. */
+const UNCAPTURED_PRODUCER_TAIL = '--jq .baseRefName > "$F"; echo "gh=$?"'
+
+const occurrences = (text: string, part: string): number => text.split(part).length - 1
+
+/**
+ * Why a copy of the name-file procedure differs from the one text (the exports of tests/helpers.ts); empty when it equals
+ * it. The producer keeps the status of both `gh` calls, the two `gh` failure splits are written once each, with the
+ * definition of "no PR applies", and the default-branch fill is equal to the one text, an empty line counting as empty.
+ */
+function nameFileProcedureFindings(p: Prompt): Unmet[] {
+  const out: Unmet[] = []
+  const flag = (anchor: string, detail: string): void => { out.push({ anchor, detail }) }
+  if (occurrences(p.text, PRODUCER_STATUS_CAPTURE) !== 1) flag('producer status', 'the producer does not keep the status of the first gh call before the call that writes the name file')
+  if (occurrences(p.text, PRODUCER_NAME_TAIL) !== 1) flag('producer status', 'the producer does not echo the statuses of both gh calls')
+  if (p.text.includes(UNCAPTURED_PRODUCER_TAIL)) flag('producer status', 'the producer echoes only the status of the second gh call')
+  if (occurrences(p.text, GH_FAILED_RULE) !== 1) flag('gh-failed rule', 'the text does not say once that either printed status makes gh fail')
+  if (occurrences(p.text, 'shows that no PR applies') !== 1 || occurrences(p.text, NO_PR_CLAUSE) !== 1) flag('no-PR clause', 'the default-branch trigger is not written once, with the definition of "no PR applies"')
+  if (occurrences(p.text, 'does not show that no PR applies') !== 1 || occurrences(p.text, OTHER_GH_FAILURE_CLAUSE) !== 1) flag('other-failure clause', 'the gh failure that leaves no name is not written once as the one text')
+  const fill = DEFAULT_FILL_RE.exec(p.text)?.[0]
+  if (fill === undefined) flag('default-branch fill', 'the text has no default-branch fill')
+  else if (fill !== DEFAULT_BRANCH_FILL) flag('default-branch fill', 'the default-branch fill differs from the one text')
+  return out
+}
+
+/** A text that holds the whole procedure once, as the probes seed it. */
+const PROCEDURE_TEXT = `\`cd "{worktree}" && ${PRODUCER_STATUS_CAPTURE} ${PRODUCER_NAME_TAIL}\`. ${GH_FAILED_RULE}. If ${NO_PR_CLAUSE}, take the default branch: ${DEFAULT_BRANCH_FILL} Stop if ${OTHER_GH_FAILURE_CLAUSE}.`
 
 interface SinkSpec {
   readonly file: string
@@ -553,7 +636,13 @@ function sinkFindings(p: Prompt): Unmet[] {
   })
 }
 
-const CALL_SEED = (rest: string): string => `node "${SCRIPT_REF}" ${rest}`
+const CALL_SEED = (rest: string, script: string = SCRIPT_REF): string => `node "${script}" ${rest}`
+/** What a resolver call span holds before the script: the name file bound and removed by a plain-rm trap, the worktree and the cross value. */
+const CALL_PREFIX = `${NAME_FILE_TRAP} cd "{worktree}" && X=false && `
+/** A resolver call as the Git ops and the re-validation reference write it. */
+const callOf = (rest: string, prefix: string = CALL_PREFIX, script: string = SCRIPT_REF): string => `${prefix}${CALL_SEED(rest, script)}`
+const PR_REST = 'pr --name-stdin --cross "${X}" < "$F"; echo "exit=$?"'
+const LOCAL_REST = 'local --name-stdin < "$F"; echo "exit=$?"'
 const CHECK_SEED = `Stop the run unless it matches \`${STRICT}\`, telling the user it allows ASCII letters, digits and \`._/+@,#-\`, at most 200; no leading \`-\` or \`#\`, no \`origin/\` prefix, no \`..\`.`
 const STALE_CHECK_SEED = 'Stop the run unless it matches `^[A-Za-z0-9._/+@,#-]{1,200}$`, telling the user it allows only ASCII letters, digits and `._/+@,#-`, at most 200.'
 
@@ -586,8 +675,19 @@ const REQUIREMENTS: readonly Requirement[] = [
     probe: {
       file: 'git-ops/ensure-pr-ready.md',
       anchor: 'invocation',
-      bad: `5a. ${'`'}${CALL_SEED('pr "${B}" --cross maybe; echo "exit=$?"')}${'`'}`,
-      good: `5a. ${'`'}${CALL_SEED('pr "${B}" --cross "${C}"; echo "exit=$?"')}${'`'}`,
+      bad: `5a. ${'`'}${callOf('pr --name-stdin --cross maybe < "$F"; echo "exit=$?"')}${'`'}`,
+      good: `5a. ${'`'}${callOf(PR_REST)}${'`'}`,
+    },
+  },
+  {
+    rule: 'file-removal',
+    files: '*',
+    check: fileRemovalFindings,
+    probe: {
+      file: 'git-ops/ensure-pr-ready.md',
+      anchor: 'name or title file removal',
+      bad: 'An empty file ends with Status BLOCKED after `rm -f "{name file}"`.',
+      good: 'An empty file ends with Status BLOCKED after `rm -- "{name file}"`.',
     },
   },
   {
@@ -599,6 +699,17 @@ const REQUIREMENTS: readonly Requirement[] = [
       anchor: 'reason-fix table',
       bad: (CANONICAL_FIX_TABLE ?? '').replace('no-ref or timeout', 'timeout'),
       good: CANONICAL_FIX_TABLE ?? '',
+    },
+  },
+  {
+    rule: 'name-file-procedure',
+    files: PROCEDURE_FILES,
+    check: nameFileProcedureFindings,
+    probe: {
+      file: 'git-ops/validate-branch.md',
+      anchor: 'default-branch fill',
+      bad: PROCEDURE_TEXT.replace(MASTER_FALLBACK, 'else `master` the same way'),
+      good: PROCEDURE_TEXT,
     },
   },
   {
@@ -672,11 +783,12 @@ describe('the corpus the guard reads', () => {
     expect([...named].filter(file => !present.has(file))).toEqual([])
   })
 
-  it('the shell-name collector matches every resolver call span, whatever spelling binds the name', () => {
+  it('every resolver call span reads the name file on stdin and holds no name word', () => {
     const spans = prompts.flatMap(callSpans)
     const budgeted = prompts.reduce((total, p) => total + (CALL_BUDGET[p.file]?.direct ?? 0), 0)
     expect(spans.length, 'the resolver call spans differ from the call budget').toBe(budgeted)
-    expect(spans.filter(span => !hasName(span)).map(squash), 'a resolver call span that the name pattern does not match').toEqual([])
+    expect(spans.filter(hasName).map(squash), 'a resolver call span that holds a name word').toEqual([])
+    expect(spans.filter(span => !/ --name-stdin\b[^;]*< "\$F"; echo "exit=\$\?"/.test(span)).map(squash), 'a resolver call span that does not read the name file').toEqual([])
   })
 
   it('the shell-line collector sees base-value lines: names and BASE_REF uses', () => {
@@ -704,17 +816,18 @@ describe('known-bad probes: each collector reports the seeded bad text and passe
     expect(nameSites('git-ops/validate-branch.md', '```bash\ngit -C "{worktree}" diff {base_branch}...HEAD\n```')).toHaveLength(1)
   })
 
-  it('shell-name: a double-quoted resolver call without a check before it is reported', () => {
-    expect(nameSites('commands/implement.md', `\`${CALL_SEED('local "{BASE_BRANCH}"')}\``)).toHaveLength(1)
+  it('shell-name: a resolver call or a PR target that takes the name as a word is reported, quoted or not, checked or not', () => {
+    for (const named of ['local "{BASE_BRANCH}"', 'local {BASE_BRANCH}', 'pr "{base_branch}" --cross "${X}"']) {
+      expect(nameSites('commands/implement.md', `\`${CALL_SEED(named)}\``), named).toHaveLength(1)
+      expect(nameSites('commands/implement.md', `${CHECKED}\`${CALL_SEED(named)}\``), `checked ${named}`).toHaveLength(1)
+    }
+    expect(nameSites('git-ops/ensure-pr-ready.md', `${CHECKED}\`gh pr create --base "{BASE_BRANCH}"\``)).toHaveLength(1)
   })
 
-  it('shell-name: an unquoted resolver call after its check is reported', () => {
-    expect(nameSites('commands/implement.md', `${CHECKED}\`${CALL_SEED('local {BASE_BRANCH}')}\``)).toHaveLength(1)
-  })
-
-  it('shell-name: the resolver call and the PR target after their check pass, and so do BASE_REF uses', () => {
-    expect(nameSites('commands/implement.md', `${CHECKED}\`${CALL_SEED('local "{BASE_BRANCH}"')}\``)).toEqual([])
-    expect(nameSites('commands/implement.md', `${CHECKED}\`gh pr create --base "{BASE_BRANCH}"\``)).toEqual([])
+  it('shell-name: the stdin resolver call, the file-read PR target and BASE_REF uses pass', () => {
+    expect(nameSites('commands/implement.md', `\`${callOf(PR_REST)}\``)).toEqual([])
+    expect(nameSites('commands/implement.md', `\`${callOf(LOCAL_REST)}\``)).toEqual([])
+    expect(nameSites('git-ops/ensure-pr-ready.md', '`test -s "$F" && gh pr create … --base="$(cat -- "$F")"`')).toEqual([])
     expect(nameSites('commands/implement.md', 'run `git diff --name-only --diff-filter=d {BASE_REF}...HEAD`')).toEqual([])
     expect(nameSites('git-ops/validate-branch.md', '`git -C "{worktree}" diff --name-only {base_ref}...HEAD; echo "exit=$?"`')).toEqual([])
   })
@@ -723,25 +836,45 @@ describe('known-bad probes: each collector reports the seeded bad text and passe
     expect(nameSites('git-ops/validate-branch.md', '```markdown\n{list of files, from git diff {base}...HEAD --name-only}\n```')).toEqual([])
   })
 
-  /** A resolver call as the Git ops and the re-validation reference write it: the name is bound to `B` first. */
-  const bound = (value: string): string => `\`cd "{worktree}" && B=${value} && X=false && ${CALL_SEED('pr "${B}" --cross "${X}"; echo "exit=$?"')}\``
+  const BOUND_PREFIX = (value: string): string => `cd "{worktree}" && B=${value} && X=false && `
 
-  it('shell-name: an unquoted angle-bracket name binding in a resolver call is reported, the double-quoted binding is not', () => {
+  it('shell-name: a variable bound to an angle-bracket name is reported, quoted or not, in the argument-form call', () => {
     for (const placeholder of ['<name>', '<base_branch>']) {
-      expect(nameSites('git-ops/ensure-pr-ready.md', `${CHECKED}${bound(placeholder)}`), `B=${placeholder}`).toHaveLength(1)
-      expect(nameSites('git-ops/ensure-pr-ready.md', `${CHECKED}${bound(`"${placeholder}"`)}`), `B="${placeholder}"`).toEqual([])
+      for (const value of [placeholder, `"${placeholder}"`]) {
+        expect(nameSites('git-ops/ensure-pr-ready.md', `\`${callOf('pr "${B}" --cross "${X}"; echo "exit=$?"', BOUND_PREFIX(value))}\``), `B=${value}`).toHaveLength(1)
+      }
     }
   })
 
-  it('shell-name: an angle-bracket name binding without its check before it is reported', () => {
-    for (const placeholder of ['<name>', '<base_branch>']) {
-      expect(nameSites('git-ops/validate-branch.md', bound(`"${placeholder}"`)), `B="${placeholder}"`).toHaveLength(1)
-    }
+  it('shell-name: an angle-bracket name counts only in a binding, and an unrelated placeholder in a shell span is not reported', () => {
+    expect(nameSites('git-ops/ensure-pr-ready.md', '`cd "{worktree}" && X=<isCrossRepository, else false> && git rev-parse HEAD`')).toEqual([])
+    expect(nameSites('git-ops/ensure-pr-ready.md', '`git -C "{worktree}" log -1 <name>`')).toEqual([])
+    expect(nameSites('git-ops/ensure-pr-ready.md', '`git -C "{worktree}" log -1 B=<name>`')).toHaveLength(1)
   })
 
   it('strict-copy: a stale copy outside a base source is reported, the exact copy is not', () => {
     expect(nameSites('agents/seeded.md', STALE_CHECK_SEED)).toHaveLength(1)
     expect(nameSites('agents/seeded.md', CHECKED)).toEqual([])
+  })
+
+  it('shell-name: the ticket command is swept like any other prompt, so a base name seeded into a shell span of either curation variant is reported', () => {
+    const variants = prompts.filter(p => p.file === 'commands/dynamic-build.md')
+    expect(variants.map(p => p.arm).sort()).toEqual(['off', 'on'])
+    for (const p of variants) {
+      expect(collectNameSites(p), `${p.arm}: the built command`).toEqual([])
+      const sites = collectNameSites({ ...p, text: `${p.text}\nRun \`git diff --name-only {BASE_BRANCH}...HEAD\`.\n` })
+      expect(sites.map(f => f.rule), `${p.arm}: the seeded name`).toEqual(['shell-name'])
+    }
+  })
+
+  it('strict-copy: the ticket command\'s own variant of the class is the one exempt copy; a widened variant there, or the variant in another prompt, is reported', () => {
+    const { file, copy } = ENGINE_BRANCH_VARIANT
+    const copySites = (at: string, text: string): string[] => collectNameSites(seeded(at, text)).filter(f => f.rule === 'strict-copy').map(f => f.anchor)
+    for (const p of prompts.filter(q => q.file === file)) expect(p.text, `${p.arm}: the built command holds the exempt variant`).toContain(copy)
+    expect(copySites(file, `const BRANCH_NAME = /${copy}/;`)).toEqual([])
+    expect(copySites(file, `const BRANCH_NAME = /${copy.replace('{1,200}', '{1,255}')}/;`)).toHaveLength(1)
+    expect(copySites(file, `const BRANCH_NAME = /${copy.replace('+@,#', '+~@,#')}/;`)).toHaveLength(1)
+    expect(copySites('agents/seeded.md', `const BRANCH_NAME = /${copy}/;`)).toHaveLength(1)
   })
 
   describe('strict-copy: any other check of the class is reported, in a base source as much as outside one', () => {
@@ -837,18 +970,98 @@ describe('known-bad probes: each collector reports the seeded bad text and passe
     })
   })
 
-  it('resolver-call: a wrong script path, an unquoted name, a bad mode and a missing exit echo are each reported', () => {
-    const errors = (rest: string, script = SCRIPT_REF): string[] => invocationErrors(`node "${script}" ${rest}`)
-    expect(errors('local "{BASE_BRANCH}"; echo "exit=$?"')).toEqual([])
-    expect(errors('local "{BASE_BRANCH}"; echo "exit=$?"', '$HOME/.devflow/scripts/other.cjs').join()).toContain('script')
-    expect(errors('local {BASE_BRANCH}; echo "exit=$?"').join()).toContain('double-quoted')
-    expect(errors('both "{BASE_BRANCH}"; echo "exit=$?"').join()).toContain('refuses')
-    expect(errors('local "{BASE_BRANCH}"').join()).toContain('exit status')
-    expect(errors('pr "{BASE_BRANCH}" --cross yes; echo "exit=$?"').join()).toContain('refuses')
+  it('resolver-call: the stdin call in each mode is accepted', () => {
+    expect(invocationErrors(callOf(PR_REST))).toEqual([])
+    expect(invocationErrors(callOf(LOCAL_REST))).toEqual([])
+  })
+
+  describe('resolver-call: each seeded bad call is reported for its own defect', () => {
+    const ARGUMENT_FORM_PREFIX = BOUND_PREFIX('"<name>"')
+    const bad: ReadonlyArray<readonly [string, string, string]> = [
+      ['the argument-form call: a bound variable, its expansion and no stdin', callOf('pr "${B}" --cross "${X}"; echo "exit=$?"', ARGUMENT_FORM_PREFIX), 'a shell variable is bound before the call: B'],
+      ['the argument-form call: the expansion of the bound variable', callOf('pr "${B}" --cross "${X}"; echo "exit=$?"', ARGUMENT_FORM_PREFIX), 'a shell variable is expanded in the call: B'],
+      ['the argument-form call: the name slot', callOf('pr "${B}" --cross "${X}"; echo "exit=$?"', ARGUMENT_FORM_PREFIX), 'the name slot does not hold --name-stdin'],
+      ['a literal name in the name slot, with the file on stdin', callOf('local main < "$F"; echo "exit=$?"'), 'the name slot does not hold --name-stdin'],
+      ['a missing --name-stdin in pr mode', callOf('pr --cross "${X}" < "$F"; echo "exit=$?"'), 'the name slot does not hold --name-stdin'],
+      ['a missing --name-stdin in local mode', callOf('local < "$F"; echo "exit=$?"'), 'the name slot does not hold --name-stdin'],
+      ['a missing stdin redirect', callOf('pr --name-stdin --cross "${X}"; echo "exit=$?"'), 'the call does not read the name file'],
+      ['a stdin redirect of another file', callOf('local --name-stdin < "$G"; echo "exit=$?"'), 'the call does not read the name file'],
+      ['an unquoted stdin redirect', callOf('local --name-stdin < $F; echo "exit=$?"'), 'the call does not read the name file'],
+      ['an extra positional word after the flag', callOf('local --name-stdin main < "$F"; echo "exit=$?"'), 'the script refuses these arguments'],
+      ['an extra positional word after the cross value', callOf('pr --name-stdin --cross "${X}" main < "$F"; echo "exit=$?"'), 'the script refuses these arguments'],
+      ['a flagged rm -f trap', callOf(PR_REST, CALL_PREFIX.replace('rm --', 'rm -f')), 'a flagged rm'],
+      ['a flagged rm -rf trap', callOf(PR_REST, CALL_PREFIX.replace('rm --', 'rm -rf')), 'a flagged rm'],
+      ['a wrong script path', callOf(LOCAL_REST, CALL_PREFIX, '$HOME/.devflow/other/resolve-base.cjs'), 'the script path'],
+      ['a bad mode', callOf('both --name-stdin < "$F"; echo "exit=$?"'), 'refuses'],
+      ['a cross value that is not true or false', callOf('pr --name-stdin --cross yes < "$F"; echo "exit=$?"'), 'refuses'],
+      ['a missing exit echo', callOf('local --name-stdin < "$F"'), 'exit status'],
+    ]
+    it.each(bad)('%s', (_label, call, detail) => {
+      expect(invocationErrors(call).join('; ')).toContain(detail)
+    })
+  })
+
+  it('resolver-call: every built resolver span reports each defect seeded into its own text', () => {
+    const spans = prompts.flatMap(callSpans)
+    expect(spans.length, 'the corpus holds too few resolver call spans').toBeGreaterThanOrEqual(5)
+    const mutations: ReadonlyArray<readonly [string, (span: string) => string]> = [
+      ['a positional name in the name slot', span => span.replace('--name-stdin', '"${B}"')],
+      ['no --name-stdin', span => span.replace('--name-stdin ', '')],
+      ['no stdin redirect', span => span.replace(' < "$F"', '')],
+      ['a trap with rm -f', span => span.replace('rm -- ', 'rm -f ')],
+      ['a trap with rm -rf', span => span.replace('rm -- ', 'rm -rf ')],
+      ['an extra positional word', span => span.replace(' < "$F"', ' main < "$F"')],
+    ]
+    for (const span of spans) {
+      expect(invocationErrors(span), squash(span).slice(0, 80)).toEqual([])
+      for (const [label, mutate] of mutations) {
+        const mutated = mutate(span)
+        expect(mutated, `${label} did not change the span`).not.toBe(span)
+        expect(invocationErrors(mutated), `${label}: ${squash(span).slice(0, 80)}`).not.toEqual([])
+      }
+    }
+  })
+
+  it('file-removal: every built prompt that removes a name or title file reports the flagged spelling of each of its removal spans', () => {
+    const removalSpans = (p: Prompt): string[] => sourceLines(p.text).flatMap(codeSpans)
+      .filter(span => FILE_OPERAND_RE.test(span) && span.includes('rm -- ') && !span.includes('resolve-base.cjs'))
+    const holders = prompts.filter(p => removalSpans(p).length > 0)
+    expect(holders.length, 'the corpus holds too few name or title file removals').toBeGreaterThanOrEqual(2)
+    for (const p of holders) {
+      expect(fileRemovalFindings(p), p.file).toEqual([])
+      const flagged = { ...p, text: p.text.replace(/rm -- /g, 'rm -f ') }
+      expect(fileRemovalFindings(flagged), `${p.file} [${p.arm}]: one finding per removal span`).toHaveLength(removalSpans(p).length)
+    }
+  })
+
+  describe('file-removal: a flagged rm beside a name file or a title file is reported', () => {
+    const removals = (text: string, file = 'git-ops/ensure-pr-ready.md'): string[] => fileRemovalFindings(seeded(file, text)).map(u => u.anchor)
+    const flagged = ['rm -f', 'rm -rf', 'rm --force', 'rm -r']
+
+    for (const form of flagged) {
+      it(`${form} on the name file, the title file and the $F operand`, () => {
+        expect(removals(`after \`${form} "{name file}"\``)).toHaveLength(1)
+        expect(removals(`after \`${form} "{title file}"\``)).toHaveLength(1)
+        expect(removals(`Run \`F="{title file}"; trap '${form} "$F"' EXIT; test -s "$F" && gh pr edit {PR_NUMBER} --title="$(cat -- "$F")"; echo "gh=$?"\`.`)).toHaveLength(1)
+        expect(removals(`\`\`\`bash\nF="{name file}"\ntrap '${form} "$F"' EXIT\n\`\`\``)).toHaveLength(1)
+      })
+    }
+
+    it('the plain rm -- form passes, and so does a flagged rm of an unrelated file', () => {
+      expect(removals('after `rm -- "{name file}"`, and `rm -- "{title file}"`')).toEqual([])
+      expect(removals('Run `F="{title file}"; trap \'rm -- "$F"\' EXIT; test -s "$F" && gh pr edit {PR_NUMBER} --title="$(cat -- "$F")"`.')).toEqual([])
+      expect(removals('```bash\ntrap \'rm -rf "${CODEQL_TMP}"\' EXIT INT TERM\n```', 'commands/bug-analysis.md')).toEqual([])
+    })
+
+    it('a flagged rm in a resolver call is the call rule\'s finding, not a second one', () => {
+      const span = callOf(PR_REST, CALL_PREFIX.replace('rm --', 'rm -f'))
+      expect(removals(`\`${span}\``)).toEqual([])
+      expect(callFindings(seeded('git-ops/ensure-pr-ready.md', `\`${span}\``)).map(u => u.detail).join('; ')).toContain('a flagged rm')
+    })
   })
 
   it('resolver-call: a call count over or under the budget is reported', () => {
-    const call = `\`${CALL_SEED('local "{BASE_BRANCH}"; echo "exit=$?"')}\`\n`
+    const call = `\`${callOf(LOCAL_REST)}\`\n`
     const anchors = (file: string, text: string): string[] => callFindings(seeded(file, text)).map(u => u.anchor)
     expect(anchors('agents/seeded.md', call)).toContain('call count')
     expect(anchors('commands/dynamic-build.md', 'OPERATION: ensure-pr-ready')).toEqual([])
@@ -857,8 +1070,8 @@ describe('known-bad probes: each collector reports the seeded bad text and passe
   })
 
   it('resolver-call: the re-validation reference makes one pr call and one local call, never two of a mode', () => {
-    const pr = `\`${CALL_SEED('pr "${B}" --cross "${X}"; echo "exit=$?"')}\``
-    const local = `\`${CALL_SEED('local "${B}"; echo "exit=$?"')}\``
+    const pr = `\`${callOf(PR_REST)}\``
+    const local = `\`${callOf(LOCAL_REST)}\``
     const details = (text: string): string[] => callFindings(seeded('references/implement-revalidate.md', text)).map(u => u.detail)
     expect(details(`${pr} when gh returned a PR, else ${local}`)).toEqual([])
     expect(details(`${pr} when gh returned a PR, else ${pr}`)).toEqual(['modes pr,pr where local,pr are expected'])
@@ -883,8 +1096,60 @@ describe('known-bad probes: each collector reports the seeded bad text and passe
   })
 })
 
-describe('accepted names reach each use as one literal word (AC-8)', () => {
+describe('the name-file procedure is one text in the Git ops and the re-validation step', () => {
+  const details = (text: string): string[] => nameFileProcedureFindings(seeded('git-ops/validate-branch.md', text)).map(u => u.detail)
+  const SECOND_STATUS_ONLY = 'the producer echoes only the status of the second gh call'
+  const FILL_DIFFERS = 'the default-branch fill differs from the one text'
+
+  it('each of the three prompts is in the corpus and carries the one text', () => {
+    for (const file of PROCEDURE_FILES) {
+      const copy = prompts.find(p => p.file === file)
+      expect(copy, `${file} is not in the corpus`).toBeDefined()
+      expect(nameFileProcedureFindings(copy ?? seeded(file, '')).map(u => u.detail), file).toEqual([])
+    }
+  })
+
+  it('the seeded one text is accepted', () => {
+    expect(details(PROCEDURE_TEXT)).toEqual([])
+  })
+
+  it('the origin read prints one empty line when origin/HEAD is not a symbolic ref, and nothing when it is absent', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'base-ref-guard-'))
+    try {
+      const env = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' }
+      const git = (...args: string[]): string => execFileSync('git', ['-C', dir, ...args], { env, encoding: 'utf-8' })
+      const originRead = (): string => execFileSync('sh', ['-c', DEFAULT_BRANCH_PROBE.replace('"{worktree}"', '"$1"'), 'sh', dir], { env, encoding: 'utf-8' })
+      git('init', '-q')
+      git('-c', 'user.name=probe', '-c', 'user.email=probe@example.invalid', 'commit', '-q', '--allow-empty', '-m', 'probe')
+      expect(originRead(), 'no origin/HEAD').toBe('')
+      git('update-ref', 'refs/remotes/origin/HEAD', 'HEAD')
+      expect(originRead(), 'origin/HEAD is a direct ref').toBe('\n')
+      git('update-ref', 'refs/remotes/origin/main', 'HEAD')
+      git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main')
+      expect(originRead(), 'origin/HEAD is a symbolic ref').toBe('main\n')
+    } finally {
+      rmSync(dir, { recursive: true })
+    }
+  })
+
+  it('a copy that drifts from the one text is reported by part', () => {
+    const drifted = (from: string, to: string): string => seedOnce(PROCEDURE_TEXT, from, to)
+    expect(details(drifted(MASTER_FALLBACK, 'else `master` the same way'))).toEqual([FILL_DIFFERS])
+    expect(details(drifted(' (a file whose only content is an empty line is empty)', ''))).toEqual([FILL_DIFFERS])
+    expect(details(drifted('write a literal name with the Write tool, after a Read of the file', 'written with the Write tool after a Read of the file'))).toEqual([FILL_DIFFERS])
+    expect(details(drifted(PRODUCER_STATUS_CAPTURE, 'gh pr view'))).toEqual(['the producer does not keep the status of the first gh call before the call that writes the name file'])
+    expect(details(drifted(PRODUCER_NAME_TAIL, UNCAPTURED_PRODUCER_TAIL))).toEqual(['the producer does not echo the statuses of both gh calls', SECOND_STATUS_ONLY])
+    expect(details(drifted(GH_FAILED_RULE, '`gh` failed when its status is not 0'))).toEqual(['the text does not say once that either printed status makes gh fail'])
+    expect(details(drifted(` ${NO_PR_DEFINITION}`, ''))).toEqual(['the default-branch trigger is not written once, with the definition of "no PR applies"'])
+    expect(details(drifted(OTHER_GH_FAILURE_CLAUSE, '`gh` failed'))).toEqual(['the gh failure that leaves no name is not written once as the one text'])
+    expect(details('No fill is written here.')).toContain('the text has no default-branch fill')
+  })
+})
+
+describe('accepted names reach the PR target as one literal word read from the name file (AC-8)', () => {
   const SPECIALS = [...'._/+@,#-']
+  /** The PR target of step 4a: the name is the content of the name file, never command text. */
+  const PR_TARGET = '--base="$(cat -- "$F")"'
 
   /** A corpus of names the class admits: plain names, slash names, and each admitted special at the middle and the end. */
   function acceptedNames(): string[] {
@@ -893,37 +1158,43 @@ describe('accepted names reach each use as one literal word (AC-8)', () => {
     return names
   }
 
-  /** The uses: every resolver call and PR target that takes a name in the corpus, and the seeded forms of both. */
-  function useTemplates(): string[] {
-    const fromCorpus = prompts.flatMap(p => sourceLines(p.text).flatMap(commandSpans)).filter(s => hasName(s) && isAllowedUse(s))
-    return [...fromCorpus, CALL_SEED('local "{BASE_BRANCH}"; echo "exit=$?"'), CALL_SEED('pr "{BASE_BRANCH}" --cross false'), 'gh pr create --base "{BASE_BRANCH}"']
-  }
-
   it('the class admits every generated name', () => {
     const names = acceptedNames()
     expect(names.length).toBeGreaterThanOrEqual(20)
     expect(names.filter(n => !resolver.STRICT_NAME_RE.test(n))).toEqual([])
   })
 
-  it('each admitted name stays one double-quoted word and every character in it is literal', () => {
-    const uses = useTemplates()
-    expect(uses.length).toBeGreaterThanOrEqual(3)
-    const bad: string[] = []
-    for (const name of acceptedNames()) {
-      if (/[$`\\"!]/.test(name)) bad.push(`${name}: holds a character that is not literal inside double quotes`)
-      for (const use of uses) {
-        const filled = use.replace(new RegExp(NAME_PATTERN, 'g'), () => name)
-        // The name is one double-quoted word, or the double-quoted value of the `B=` binding that the call then passes as "${B}".
-        const kept = shellWords(filled).some(w => (w.value === name && w.quoted === 'double') || (w.value === `B=${name}` && filled.includes(`B="${name}"`)))
-        if (!kept) bad.push(`${name}: not one double-quoted word in ${use.slice(0, 60)}`)
-      }
-    }
-    expect(bad).toEqual([])
+  it('the built step 4a passes the PR base only in the file-read form', () => {
+    const op = prompts.find(p => p.file === 'git-ops/ensure-pr-ready.md')
+    expect(op, 'ensure-pr-ready is not in the corpus').toBeDefined()
+    expect(op?.text.includes(PR_TARGET), `step 4a holds no ${PR_TARGET}`).toBe(true)
+    const targets = sourceLines(op?.text ?? '').flatMap(commandSpans).filter(span => /\bgh pr create\b/.test(span) && /--base\b/.test(span))
+    expect(targets.length, 'no gh pr create span passes a base').toBeGreaterThanOrEqual(1)
+    expect(targets.filter(span => !span.includes(PR_TARGET)).map(squash), 'a gh pr create span that does not read the base from the name file').toEqual([])
   })
+
+  it('each admitted name read from the name file is one word with every character literal', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'base-ref-guard-'))
+    try {
+      const names = acceptedNames()
+      const files = names.map((name, i) => {
+        const file = path.join(dir, `name-${i}`)
+        writeFileSync(file, `${name}\n`)
+        return file
+      })
+      // one shell reads every name file in turn, each through the PR target text, and prints the word count and the first word
+      const script = `read_back() { F="$1"; set -- ${PR_TARGET}; printf '%s\\n' "$#:$1"; }; for f in "$@"; do read_back "$f"; done`
+      const out = execFileSync('/bin/sh', ['-c', script, 'sh', ...files], { encoding: 'utf-8', timeout: SUBPROCESS_TIMEOUT_MS })
+      expect(out.split('\n').slice(0, -1)).toEqual(names.map(name => `1:--base=${name}`))
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 2 * SUBPROCESS_TIMEOUT_MS)
 
   it('known-bad probe: a name outside the class is refused, and an unquoted use does not keep it as a quoted word', () => {
     expect(resolver.STRICT_NAME_RE.test('a b')).toBe(false)
     expect(resolver.STRICT_NAME_RE.test('a"b')).toBe(false)
+    expect(resolver.STRICT_NAME_RE.test('a$b')).toBe(false)
     expect(shellWords('git diff main...HEAD').some(w => w.quoted === 'double')).toBe(false)
   })
 })
