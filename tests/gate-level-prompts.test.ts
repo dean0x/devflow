@@ -994,7 +994,7 @@ describe('the init prompt and devflow gates describe the same levels', () => {
         + '/implement and /resolve also read the level and name it in their report; at standard and lean they skip Polish, and full keeps it. '
         + 'At lean, /implement skips Harden on a docs-only diff. '
         + 'At standard and lean, /implement runs one Evaluate pass and at most one Fix round. '
-        + 'At standard and lean, /resolve applies severity tiers: it fixes CRITICAL, HIGH, severe MEDIUM and security findings in batches, fixes prose-only findings with text edits alone, and sends the rest to one backlog issue.',
+        + 'At standard and lean, /resolve applies severity tiers: it fixes or escalates every security finding, fixes CRITICAL, HIGH and severe MEDIUM findings in the branch\'s own code, fixes prose-only MEDIUM findings with text edits alone, and sends lower findings and pre-existing non-security findings to one backlog issue.',
       );
     });
 
