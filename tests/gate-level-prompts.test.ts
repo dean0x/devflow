@@ -979,8 +979,8 @@ describe('the init prompt and devflow gates describe the same levels', () => {
     it('GATE_LEVEL_HINTS', () => {
       expect({ ...GATE_LEVEL_HINTS }, `GATE_LEVEL_HINTS changed. ${UPDATE_BOTH}`).toEqual({
         full: 'the most checking: every review focus, the full planning shape and Polish',
-        standard: 'fewer review focuses and planning agents, and no Polish in /implement and /resolve (the default)',
-        lean: 'the least checking, and no Polish in /implement and /resolve; /implement also has Validate run the project lint pack, and skips Harden on a docs-only diff',
+        standard: 'fewer review focuses and planning agents, no Polish in /implement and /resolve, and one Evaluate pass in /implement (the default)',
+        lean: 'the least checking, and no Polish in /implement and /resolve; /implement also runs one Evaluate pass, has Validate run the project lint pack, and skips Harden on a docs-only diff',
       });
     });
 
@@ -992,7 +992,8 @@ describe('the init prompt and devflow gates describe the same levels', () => {
         '/code-review and /plan read the level: standard and lean run fewer review focuses and fewer planning agents. '
         + 'At lean, /implement has Validate run the project\'s lint pack. '
         + '/implement and /resolve also read the level and name it in their report; at standard and lean they skip Polish, and full keeps it. '
-        + 'At lean, /implement skips Harden on a docs-only diff.',
+        + 'At lean, /implement skips Harden on a docs-only diff. '
+        + 'At standard and lean, /implement runs one Evaluate pass and at most one Fix round.',
       );
     });
 
