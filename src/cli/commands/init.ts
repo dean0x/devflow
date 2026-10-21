@@ -767,11 +767,11 @@ export interface DisabledQueueDrainIO {
  * queue is a symbolic link (D-CLI-NO-SYMLINK), one for a curation drain that
  * could not list the backups (the live queue is drained then), one for a curation
  * drain that left the project alone because git tracks a data folder or did not answer
- * (the fixed notice of a skipped move), and one for a memory drain that left the project
+ * (the fixed notice of a paused curation area), and one for a memory drain that left the project
  * alone because git tracks the memory folder or did not answer (the fixed notice of a
- * paused memory area); the caller prints them. When the move step has
- * printed that notice for the ledger root (`shownSkip`, its reason), the drain's line
- * does not repeat it.
+ * paused memory area); the caller prints them. When the move step has printed its own
+ * notice of a skipped move for the ledger root (`shownSkip`, its reason), the curation
+ * drain's line is only the short sentence that the queue was not drained.
  */
 export async function drainDisabledFeatureQueues(
   opts: {
