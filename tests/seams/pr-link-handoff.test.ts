@@ -2,7 +2,7 @@ import { describe, it, expect, afterAll } from 'vitest'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
-import { ROOT, buildCommittedTree, cleanupCommittedTree, collectCodeSpawnSites, collectOrderViolations, ensurePrReadyReference, gitOperationReferenceCorpus, JUDGE_BY_READING, NAME_FILE_REMOVAL, requireDistFile, walkFiles, WRITE_FAILURE } from '../helpers.js'
+import { ROOT, buildCommittedTree, cleanupCommittedTree, collectCodeSpawnSites, collectOrderViolations, ensurePrReadyReference, gitOperationReferenceCorpus, JUDGE_BY_READING, NAME_FILE_REMOVAL, PR_ONLY_KEYS, requireDistFile, walkFiles, WRITE_FAILURE } from '../helpers.js'
 import { compiledSkillRefsDir } from '../../src/core/assets.js'
 
 /** The generated `devflow:git` reference tree — the providers' own mechanics. */
@@ -684,9 +684,6 @@ interface SpawnPayload {
   /** The contiguous non-blank run of lines the key sits in — one spawn payload. */
   readonly block: string
 }
-
-/** The keys only the PR-opening Git spawn takes. A Code spawn carrying one is a PR input with no PR to open. */
-const PR_ONLY_KEYS = ['ISSUE_NUMBER', 'ISSUE_PR_LINK', 'PR_EXCEPTIONS'] as const
 
 /**
  * Named collector: the Code spawn sites that carry a PR-only key as a prompt line.

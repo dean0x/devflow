@@ -7,7 +7,7 @@
 
 import { expect } from 'vitest'
 
-import { escapeRe, readAgentReference } from '../helpers.js'
+import { escapeRe, readAgentReference, sectionBetween } from '../helpers.js'
 
 // ---------------------------------------------------------------------------
 // The decided text, written by hand from the issue and the gate decisions
@@ -23,7 +23,7 @@ export const LEVEL_CMDS: readonly LevelCmd[] = ['implement', 'resolve']
 
 /** The rows that the reference of each command holds, as the lines of the file. A row joins the list in the change that decides it. */
 export const DECIDED_ROWS: Readonly<Record<LevelCmd, readonly string[]>> = {
-  implement: ['| 3 Polish | skip | skip |', '| 4 Self-Review | - | apply: harden-scope |'],
+  implement: ['| 3 Polish | skip | skip |', '| 4 Self-Review | - | apply: harden-scope |', '| 5 Alignment Check | pass level; apply: single-pass | pass level; apply: single-pass |'],
   resolve: ['| 6 Polish | skip | skip |'],
 }
 
@@ -41,6 +41,18 @@ export const REFS: Readonly<Record<string, string>> = {
 }
 
 export const countOf = (text: string, needle: string): number => text.split(needle).length - 1
+
+/**
+ * The section that the line opening with `opening` starts: that line and the lines after it, up to the next line that
+ * starts with `next`, or to the end of the text when no such line follows. Null when no line opens with `opening`. The one
+ * heading-section slicer of the level guards, built on `sectionBetween`: the section starts at the heading itself.
+ */
+export function headingSection(text: string, opening: string, next: string): string | null {
+  const at = text.indexOf(`\n${opening}`)
+  if (at === -1) return null
+  const rest = text.slice(at + 1)
+  return sectionBetween(rest, opening, `\n${next}`) ?? rest
+}
 
 export interface RefSection { readonly heading: string; readonly lines: readonly string[] }
 export interface ParsedRef { readonly title: string; readonly preamble: readonly string[]; readonly sections: readonly RefSection[] }
@@ -89,6 +101,22 @@ export const LEVELS = Object.keys(LEVEL_CELL_INDEX) as readonly LevelColumn[]
 
 /** The cell of the row `row` for `level`; undefined when the line is not a row. */
 export const levelCell = (row: string, level: LevelColumn): string | undefined => rowCells(row)?.[LEVEL_CELL_INDEX[level]]
+
+// ---------------------------------------------------------------------------
+// The /implement Phase 5 re-check loop at `full`
+// ---------------------------------------------------------------------------
+
+/**
+ * The lines of the `full` Phase 5 re-check loop of /implement, each trimmed and each held once by the Phase 5 section. The
+ * full-fences guard pins them in the compiled command, and the levels guard ties the step numbers of the `single-pass`
+ * bullet to the two numbered steps here: the test of the attempt cap (index 1) and the report to the user (index 3).
+ */
+export const FULL_LOOP_LINES: readonly string[] = [
+  '2. Increment `alignment_fix_count`',
+  '3. If `alignment_fix_count <= 2`:',
+  '- Loop back to Phase 5 (re-check alignment). The fix is not validated here: the Phase 6 run covers it.',
+  '4. If `alignment_fix_count > 2`: Report misalignments to user for decision',
+]
 
 // ---------------------------------------------------------------------------
 // Probes

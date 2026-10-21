@@ -16,6 +16,11 @@
  * someone back to the docs. The three sites that state the lean Harden skip in detail (the README, docs/cli-reference.md
  * and the /implement section of docs/commands.md) each state the two report notes of the `harden-scope` bullet once, and
  * state the skip in a sentence that names `lean` and neither `standard` nor `full`. The two docs hold the same block.
+ * The `5 Alignment Check` row (`pass level; apply: single-pass`) has the effect "one Evaluate pass": each site that covers
+ * `/implement` says it once, and both init hints say it, because neither cell of the row is `-`. Two more phrases of the route
+ * after that pass are checked on their own: the README, docs/cli-reference.md and the /implement section of docs/commands.md
+ * each state "one Fix round" once, and the two docs state the route of a Fix round that does not complete ("anything other
+ * than COMPLETE") once. The README leaves that sentence out. This is a known limit, so the check does not hold it to one.
  *
  * Each doc is read at import. A missing file, paragraph or section throws, so the guard never skips. The decided rows
  * and the two references come from `level-guard-helpers.ts`. `implement-resolve-levels.test.ts` holds the other arms.
@@ -39,6 +44,15 @@ const POLISH_SKIP = /\b(?:skips?|no) Polish\b/
 /** What a doc site says when it states the lean Harden skip: "skip Harden on a docs-only diff" or "skips Harden on a docs-only diff". */
 const HARDEN_DOCS_SKIP = /\bskips? Harden on a docs-only diff\b/
 
+/** What a doc site says when it states the single Evaluate pass of the `5 Alignment Check` row: "runs one Evaluate pass". */
+const EVALUATE_SINGLE_PASS = /\bone Evaluate pass\b/
+
+/** What a doc site says when it states the Fix round that follows the single Evaluate pass: "one Fix round runs". */
+const EVALUATE_ONE_FIX_ROUND = /\bone Fix round\b/
+
+/** What a doc site says when it states where a Fix round that does not complete goes: "anything other than COMPLETE". */
+const EVALUATE_FIX_ROUTE = /\banything other than COMPLETE\b/
+
 /**
  * What a doc site must say for each shipped row, keyed by `${cmd}:` plus the full row line. A change to one cell is a new
  * key, so it sends someone back to the docs. A row with no entry here is reported.
@@ -46,6 +60,7 @@ const HARDEN_DOCS_SKIP = /\bskips? Harden on a docs-only diff\b/
 const ROW_EFFECTS: ReadonlyMap<string, RegExp> = new Map([
   ['implement:| 3 Polish | skip | skip |', POLISH_SKIP],
   ['implement:| 4 Self-Review | - | apply: harden-scope |', HARDEN_DOCS_SKIP],
+  ['implement:| 5 Alignment Check | pass level; apply: single-pass | pass level; apply: single-pass |', EVALUATE_SINGLE_PASS],
   ['resolve:| 6 Polish | skip | skip |', POLISH_SKIP],
 ])
 
@@ -190,6 +205,21 @@ export function collectHardenDetailDefects(detailed: readonly DocSite[], shared:
   ]
 }
 
+/** One phrase of the route after the single Evaluate pass, with what it says (for a defect line) and the sites that owe it. */
+interface RouteCheck { readonly what: string; readonly re: RegExp; readonly sites: readonly DocSite[] }
+
+/**
+ * Check 6 of the doc sites, run on its own: the route after the single Evaluate pass. Each site of a check states its phrase
+ * exactly once. The defects come in the order of the checks, then of their sites.
+ */
+export function collectEvaluateRouteDefects(checks: readonly RouteCheck[]): string[] {
+  return checks.flatMap(({ what, re, sites }) => sites.flatMap(site => {
+    const times = matchCount(site.text, re)
+    if (times === 1) return []
+    return [times === 0 ? `${site.label} does not state ${what}` : `${site.label} states ${what} ${times} times, expected once`]
+  }))
+}
+
 /** The report notes that the `harden-scope` bullet of a /implement reference sets, each in backticks as `Harden: <word>`. A missing bullet or a bullet with no note throws at import, so the check never reads nothing. */
 function hardenNotesOf(ref: string): string[] {
   const bullets = (sectionOf(parseRef(ref), '## Rules')?.lines ?? []).filter(line => line.startsWith('- **harden-scope:**'))
@@ -238,6 +268,15 @@ const HARDEN_DETAIL_SITES: readonly ReadSite[] = [README_SITE, CLI_REFERENCE_SIT
 /** The two docs of the commands that carry one block for the Harden skip: the block is the same text at both. */
 const HARDEN_SHARED_SITES: readonly ReadSite[] = [CLI_REFERENCE_SITE, COMMANDS_IMPLEMENT_SITE]
 const HARDEN_NOTES: readonly string[] = hardenNotesOf(REFS.implement)
+/** The sites that state the Fix round after the single Evaluate pass: the README and the two docs. */
+const FIX_ROUND_SITES: readonly ReadSite[] = [README_SITE, CLI_REFERENCE_SITE, COMMANDS_IMPLEMENT_SITE]
+/** The sites that state the route of a Fix round that does not complete: the two docs. The README leaves the sentence out, a known limit. */
+const FIX_ROUTE_SITES: readonly ReadSite[] = [CLI_REFERENCE_SITE, COMMANDS_IMPLEMENT_SITE]
+/** The checks of the route after the single Evaluate pass, over the real sites. */
+const EVALUATE_ROUTE_CHECKS: readonly RouteCheck[] = [
+  { what: 'the one Fix round after the single Evaluate pass', re: EVALUATE_ONE_FIX_ROUND, sites: FIX_ROUND_SITES },
+  { what: 'the route of a Fix round that does not complete', re: EVALUATE_FIX_ROUTE, sites: FIX_ROUTE_SITES },
+]
 
 describe('the doc sites state the effect of each shipped row and keep no retired claim (TP-6)', () => {
   /** Test-only sites: the probes do not depend on what the real docs say, so they hold before and after the rows ship. */
@@ -274,6 +313,11 @@ describe('the doc sites state the effect of each shipped row and keep no retired
     for (const key of ROW_EFFECTS.keys()) expect(key, key).toMatch(/^(?:implement|resolve):\| \d+[a-z]? \S.* \| \S.* \| \S.* \|$/)
     for (const text of ['they skip Polish', 'it skips Polish', 'and no Polish (the default)']) expect(POLISH_SKIP.test(text), text).toBe(true)
     for (const text of ['Polish is skipped', 'keeps Polish', 'the full plan shape and Polish', 'noPolish']) expect(POLISH_SKIP.test(text), text).toBe(false)
+  })
+
+  it('EVALUATE_SINGLE_PASS reads "one Evaluate pass", and nothing less', () => {
+    for (const text of ['runs one Evaluate pass', 'one Evaluate pass in /implement']) expect(EVALUATE_SINGLE_PASS.test(text), text).toBe(true)
+    for (const text of ['one Evaluate run', 'Evaluate passes once', 'one evaluate pass', 'oneEvaluate pass']) expect(EVALUATE_SINGLE_PASS.test(text), text).toBe(false)
   })
 
   it('HARDEN_DOCS_SKIP reads a skip of Harden on a docs-only diff, and nothing less', () => {
@@ -427,7 +471,12 @@ describe('the doc sites state the effect of each shipped row and keep no retired
   const withRowCmds = LEVEL_CMDS.filter(cmd => DECIDED_ROWS[cmd].length > 0)
 
   it('known-bad probes (real sites): the decided rows are the ones the probes loop over', () => {
-    expect(shippedRows.map(({ cmd, row }) => `${cmd}:${row}`)).toEqual(['implement:| 3 Polish | skip | skip |', 'implement:| 4 Self-Review | - | apply: harden-scope |', 'resolve:| 6 Polish | skip | skip |'])
+    expect(shippedRows.map(({ cmd, row }) => `${cmd}:${row}`)).toEqual([
+      'implement:| 3 Polish | skip | skip |',
+      'implement:| 4 Self-Review | - | apply: harden-scope |',
+      'implement:| 5 Alignment Check | pass level; apply: single-pass | pass level; apply: single-pass |',
+      'resolve:| 6 Polish | skip | skip |',
+    ])
     expect(withRowCmds).toEqual(['implement', 'resolve'])
   })
 
@@ -557,5 +606,63 @@ describe('the doc sites state the effect of each shipped row and keep no retired
     const dropped = edit(cli, 'The compliance lens is exactly `off`. ', '')
     expect(collectHardenDetailDefects([], [dropped, commands], HARDEN_NOTES), 'a condition dropped from one doc').toEqual([`${cli.label} and ${commands.label} hold different Harden blocks`])
     expect(collectHardenDetailDefects([], [cli, edit(commands, 'No loaded instruction, rules or imported file names the path. ', '')], HARDEN_NOTES), 'a condition dropped from the other doc').toEqual([`${cli.label} and ${commands.label} hold different Harden blocks`])
+  })
+
+  it('EVALUATE_ONE_FIX_ROUND and EVALUATE_FIX_ROUTE read their wording, and nothing less', () => {
+    for (const text of ['one Fix round runs', 'On a misalignment, one Fix round runs and Evaluate does not run again.']) expect(EVALUATE_ONE_FIX_ROUND.test(text), text).toBe(true)
+    for (const text of ['one fix round', 'up to two Fix rounds', 'one Fix rounds', 'oneFix round']) expect(EVALUATE_ONE_FIX_ROUND.test(text), text).toBe(false)
+    for (const text of ['reports anything other than COMPLETE', 'If the Fix round reports anything other than COMPLETE, it asks you.']) expect(EVALUATE_FIX_ROUTE.test(text), text).toBe(true)
+    for (const text of ['anything other than complete', 'other than COMPLETE', 'anything other than COMPLETED', 'anythingother than COMPLETE']) expect(EVALUATE_FIX_ROUTE.test(text), text).toBe(false)
+  })
+
+  describe('the sites state the Fix round and the Fix route of the single Evaluate pass', () => {
+    const roundSentence = 'On a misalignment, one Fix round runs and Evaluate does not run again.'
+    const routeSentence = 'If the Fix round reports anything other than COMPLETE, `/implement` reports the misalignments to you for a decision.'
+    const probe = (text: string, label = 'the probe site'): DocSite => ({ label, text, cmds: ['implement'] })
+    const roundCheck = (...sites: DocSite[]): RouteCheck => ({ what: 'the Fix round probe', re: EVALUATE_ONE_FIX_ROUND, sites })
+    const routeCheck = (...sites: DocSite[]): RouteCheck => ({ what: 'the Fix route probe', re: EVALUATE_FIX_ROUTE, sites })
+
+    it('known-bad probes (test-only sites): a site with its phrase once is clean, and a site without it, or with it twice, is reported', () => {
+      expect(collectEvaluateRouteDefects([roundCheck(probe(roundSentence)), routeCheck(probe(routeSentence))])).toEqual([])
+      expect(collectEvaluateRouteDefects([roundCheck(probe(routeSentence))]), 'no Fix round').toEqual(['the probe site does not state the Fix round probe'])
+      expect(collectEvaluateRouteDefects([routeCheck(probe(roundSentence))]), 'no Fix route').toEqual(['the probe site does not state the Fix route probe'])
+      expect(collectEvaluateRouteDefects([roundCheck(probe(`${roundSentence} ${roundSentence}`))]), 'the Fix round twice').toEqual(['the probe site states the Fix round probe 2 times, expected once'])
+      expect(collectEvaluateRouteDefects([routeCheck(probe(`${routeSentence} ${routeSentence}`))]), 'the Fix route twice').toEqual(['the probe site states the Fix route probe 2 times, expected once'])
+    })
+
+    it('known-bad probes (test-only sites): a site owes only the phrases of the checks that name it, and the defects follow the order of the checks and their sites', () => {
+      expect(collectEvaluateRouteDefects([routeCheck(probe(routeSentence)), roundCheck(probe(roundSentence))]), 'a site of one check owes nothing of the other').toEqual([])
+      expect(collectEvaluateRouteDefects([]), 'no check').toEqual([])
+      expect(collectEvaluateRouteDefects([roundCheck(probe('Nothing.', 'site 1'), probe(roundSentence, 'site 2'), probe('Nothing.', 'site 3')), routeCheck(probe('Nothing.', 'site 4'))])).toEqual([
+        'site 1 does not state the Fix round probe',
+        'site 3 does not state the Fix round probe',
+        'site 4 does not state the Fix route probe',
+      ])
+    })
+
+    it('known-bad probes (real sites): the checks cover the README and the two docs for the Fix round, the two docs for the route, and the real texts leave no defect', () => {
+      expect(FIX_ROUND_SITES.map(s => s.label)).toEqual([
+        'the README.md Gate level paragraph',
+        'the docs/cli-reference.md What reads it paragraph',
+        'the docs/commands.md /implement section',
+      ])
+      expect(FIX_ROUTE_SITES.map(s => s.label)).toEqual(['the docs/cli-reference.md What reads it paragraph', 'the docs/commands.md /implement section'])
+      expect(EVALUATE_ROUTE_CHECKS.map(check => check.re)).toEqual([EVALUATE_ONE_FIX_ROUND, EVALUATE_FIX_ROUTE])
+      for (const real of [...FIX_ROUND_SITES, ...FIX_ROUTE_SITES]) expect(DOC_SITES, real.label).toContain(real)
+      expect(collectEvaluateRouteDefects(EVALUATE_ROUTE_CHECKS)).toEqual([])
+    })
+
+    it('known-bad probes (real sites): a real site with its Fix round or Fix route phrase taken out or repeated is reported', () => {
+      for (const check of EVALUATE_ROUTE_CHECKS) {
+        for (const real of check.sites) {
+          const without: DocSite = { ...real, text: seed(real.text, check.re, 'does nothing special') }
+          expect(collectEvaluateRouteDefects([{ ...check, sites: [without] }]), `${real.label}: ${check.what} taken out`).toEqual([`${real.label} does not state ${check.what}`])
+          const phrase = real.text.match(check.re)
+          expect(phrase, `${real.label}: the phrase is there`).not.toBeNull()
+          const repeated: DocSite = { ...real, text: `${real.text} ${phrase?.[0] ?? ''}` }
+          expect(collectEvaluateRouteDefects([{ ...check, sites: [repeated] }]), `${real.label}: ${check.what} repeated`).toEqual([`${real.label} states ${check.what} 2 times, expected once`])
+        }
+      }
+    })
   })
 })

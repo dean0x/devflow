@@ -357,6 +357,72 @@ describe('each variant states the mode contract it owns (D-CODE-OPERATION-MODES,
   })
 })
 
+// ── The alignment-fix Protocol (#483) ───────────────────────────────────────────────────────────────────────
+//
+// /implement runs Evaluate once at `standard` and `lean` and at `full` counts the attempts itself in its Phase 5 loop.
+// Fix therefore names neither a re-run of Evaluate nor an attempt count: its Protocol is the two lines below.
+
+const ALIGNMENT_FIX_HEADING = '## Mode: alignment-fix'
+
+/** The `alignment-fix` Protocol of the compiled Fix agent, line for line. */
+const ALIGNMENT_FIX_PROTOCOL: readonly string[] = [
+  '1. Fix only what is listed in `MISALIGNMENTS` — no scope expansion',
+  '2. Commit and push.',
+]
+
+/** A re-run or an attempt count. The word Evaluate stays allowed: the mode names the agent that found the misalignments. */
+const RERUN_OR_ATTEMPT = /\bre-?runs?\b|\battempts?\b/i
+
+/** Named collector: the `alignment-fix` mode of a compiled Fix agent holds exactly its two Protocol lines and names no re-run or attempt count. */
+export function collectAlignmentFixDefects(body: string): string[] {
+  const parts = body.split(`\n${ALIGNMENT_FIX_HEADING}\n`)
+  if (parts.length !== 2) return [`"${ALIGNMENT_FIX_HEADING}" is absent or repeated`]
+  const section = parts[1].split('\n## ')[0]
+  const lines = section.split('\n')
+  const marker = lines.indexOf('**Protocol:**')
+  const protocol = marker === -1 ? [] : lines.slice(marker + 1).filter(line => line.trim() !== '')
+  const out: string[] = []
+  if (protocol.join('\n') !== ALIGNMENT_FIX_PROTOCOL.join('\n')) out.push(`the alignment-fix Protocol is ${JSON.stringify(protocol)}, expected ${JSON.stringify(ALIGNMENT_FIX_PROTOCOL)}`)
+  const rerun = section.match(RERUN_OR_ATTEMPT)
+  if (rerun !== null) out.push(`the alignment-fix mode names a re-run or an attempt count ("${rerun[0]}")`)
+  return out
+}
+
+describe('the alignment-fix Protocol is its two lines, with no re-run of Evaluate and no attempt count, in both builds of the Fix agent (#483)', () => {
+  const slug = codeSlugOf('Fix')
+  const builds = (): ReadonlyArray<readonly [label: string, text: string]> => {
+    const off = resolveCurationOffSource('agents', slug)
+    expect(off, `dist/curation-off/agents/${slug}.md is absent — run \`npm run build:mds\` first`).not.toBeNull()
+    return [[`dist/agents/${slug}.md`, resolveAgentSource(slug).content], [`dist/curation-off/agents/${slug}.md`, off!]]
+  }
+
+  it('each build holds exactly the two Protocol lines', () => {
+    for (const [label, text] of builds()) expect(collectAlignmentFixDefects(text), label).toEqual([])
+  })
+
+  it('known-bad probe: the removed clause restored, a changed step 1, a third line and a lost heading are each reported', () => {
+    const protocolText = ALIGNMENT_FIX_PROTOCOL.join('\n')
+    const withProtocol = (text: string, replacement: string): string => {
+      expect(text.split(protocolText), 'the alignment-fix Protocol occurs once').toHaveLength(2)
+      return text.replace(protocolText, () => replacement)
+    }
+    const oldClause = `${ALIGNMENT_FIX_PROTOCOL[0]}\n2. Commit and push; orchestrator re-runs Evaluate agent after each attempt (max 2 attempts total)`
+    const protocolOf = (...lines: string[]): string => `the alignment-fix Protocol is ${JSON.stringify(lines)}, expected ${JSON.stringify(ALIGNMENT_FIX_PROTOCOL)}`
+    for (const [label, text] of builds()) {
+      expect(collectAlignmentFixDefects(withProtocol(text, oldClause)), `${label}: the removed clause`).toEqual([
+        protocolOf(ALIGNMENT_FIX_PROTOCOL[0], '2. Commit and push; orchestrator re-runs Evaluate agent after each attempt (max 2 attempts total)'),
+        'the alignment-fix mode names a re-run or an attempt count ("re-runs")',
+      ])
+      const changed = ALIGNMENT_FIX_PROTOCOL[0].replace(' — no scope expansion', '')
+      expect(collectAlignmentFixDefects(withProtocol(text, `${changed}\n${ALIGNMENT_FIX_PROTOCOL[1]}`)), `${label}: a changed step 1`).toEqual([protocolOf(changed, ALIGNMENT_FIX_PROTOCOL[1])])
+      expect(collectAlignmentFixDefects(withProtocol(text, `${protocolText}\n3. Report the commit.`)), `${label}: a third line`).toEqual([protocolOf(...ALIGNMENT_FIX_PROTOCOL, '3. Report the commit.')])
+      const noHeading = text.replace(ALIGNMENT_FIX_HEADING, '## Mode: align')
+      expect(noHeading, `${label}: the seed must land`).not.toBe(text)
+      expect(collectAlignmentFixDefects(noHeading), `${label}: a lost heading`).toEqual([`"${ALIGNMENT_FIX_HEADING}" is absent or repeated`])
+    }
+  })
+})
+
 // ── The Code family opens no PR (D-PR-BY-GIT, AC-203) and each variant stays under its body ceiling ────────
 //
 // The Git agent's ensure-pr-ready opens the PR under every strategy, so no Code body carries PR text:
@@ -370,7 +436,7 @@ describe('each variant states the mode contract it owns (D-CODE-OPERATION-MODES,
 const CODE_BODY_MAX_BYTES = 10_735
 
 /** The compiled Fix agent body, in bytes. Registered as `fix-body-max`; lowered, never raised. */
-const FIX_BODY_MAX_BYTES = 8_479
+const FIX_BODY_MAX_BYTES = 8_401
 
 /** The compiled Refactor agent body, in bytes. Registered as `refactor-body-max`; lowered, never raised. */
 const REFACTOR_BODY_MAX_BYTES = 6_410
