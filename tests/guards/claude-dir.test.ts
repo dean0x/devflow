@@ -227,6 +227,7 @@ const agentFile = (name: string): string => rel(resolveAgentSource(name).path)
 
 const SYNTHESIZE_FILE = agentFile('synthesize')
 const CURATE_FILE = agentFile('curate')
+const VALIDATE_FILE = agentFile('validate')
 
 /** Sanctioned-line counts by file name. A name can be absent, so a lookup yields `undefined` and the caller states the default. */
 type SiteRows = Readonly<Partial<Record<string, number>>>
@@ -245,6 +246,7 @@ export const SITE_ROWS: SiteRows = {
   'dist/curation-off/commands/resolve.md': 1,
   [SYNTHESIZE_FILE]: 1,
   [CURATE_FILE]: 2,
+  [VALIDATE_FILE]: 1,
 }
 
 /** What a file holds once the sanctioned line is taken out and each prose entry scoped to the file is replaced. */

@@ -17,6 +17,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Validate re-runs each failed test file alone** ([#477](https://github.com/dean0x/devflow/issues/477)).
+  - After a failed test run, Validate re-runs each failed test file alone, once, with verbose output.
+    The bound is 20 files.
+    Validate waits at most 120 seconds for each re-run, so the worst case is 40 minutes for each Validate run.
+    The 120 seconds is a bound on the wait, not on the re-run: the platform moves a foreground command that reaches its timeout to the background, where it runs to the end (see `docs/reference/platform-assumptions.md`).
+    A re-run that times out makes the file REAL.
+    A re-run starts only after the path passes a strict check, and it uses the full run's own test command with only that file added.
+  - Only the Phase 6 validation in `/implement` labels files, because only that run is given the branch base.
+    In every other run, including the re-validation after QA fixes, the re-runs give failure detail and every failure is REAL.
+  - A file is PASSED-ALONE only if all of these hold:
+    the path is checked and tracked, neither the branch nor the working tree changed the file, its failure was a timeout, a spawn error or a resource error,
+    the re-run used only that file with no name filter, it exited 0, and the tests that failed in the full run ran and passed.
+    Every other failure is REAL and goes to Fix.
+  - The cause is the failure that the test runner reports.
+    An assertion failure is REAL, also when its message names a timeout.
+    A child-process timeout that a test reports as a failed assertion is therefore REAL.
+    Issue [#332](https://github.com/dean0x/devflow/issues/332) tracks the repair of such tests.
+  - The gate and its `gate:validate` claim pass only when the PASSED-ALONE files explain every failure.
+    Only Validate's own report lists them, on one `Passed alone:` line.
+    The `/implement` summary and the PR body do not show that line.
+  - The re-run steps are in the agent reference `validate/passed-alone.md`.
+    After updating, run `devflow init`.
 - **`/implement` runs one Evaluate pass at `standard` and `lean`** ([#483](https://github.com/dean0x/devflow/issues/483)).
   - At `standard` and `lean`, Phase 5 runs Evaluate once and spawns Fix at most once. It never spawns Evaluate again. `full` is unchanged.
     If Fix returns COMPLETE, the report shows `MISALIGNED (fixed once, not re-checked)` and Phase 6 starts. Any other Fix report sends the misalignments to you for a decision.

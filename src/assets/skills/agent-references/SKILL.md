@@ -12,6 +12,8 @@ allowed-tools: Read
      other modes do not, so the agent body stays small and the spawn reads one file on demand.
      D-MODE-BY-PATH: Synthesize reads exactly one synthesize/{mode}.md by explicit path.
      D-MAINTAIN-ON-DUE: Curate reads curate/maintain.md only after claim-due hands out an entry.
+     Validate reads validate/passed-alone.md after a failed Test row, once per run; an unread file
+     accepts no path, so nothing is re-run and every failure is REAL.
      D-CMD-REF-HAND: a command moves a rare branch here (hand-authored, byte for byte) and keeps only
      the condition and the read path, so a run that never takes the branch never carries its text.
      Only text with no curation arm and no Git-spawn fence moves.
@@ -37,6 +39,7 @@ allowed-tools: Read
 |--------------------------|-------|-----------|
 | `synthesize/{mode}.md` | Synthesize | The prompt's `Mode:` line names `{mode}` |
 | `curate/maintain.md` | Curate | `claim-due` hands out at least one entry |
+| `validate/passed-alone.md` | Validate | A Test row failed |
 | `commands/{name}.md` | The command named in the file | The command's condition for that branch holds |
 
 The installed directory is `{claude_dir}/skills/devflow:agent-references/`, where `{claude_dir}` is Claude Code's directory: `CLAUDE_CONFIG_DIR` when that is set to an absolute path, else `$HOME/.claude`.
