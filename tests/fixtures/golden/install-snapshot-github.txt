@@ -76,6 +76,8 @@ d .claude/skills/devflow:agent-references/references/synthesize/
 - .claude/skills/devflow:agent-references/references/synthesize/planning.md
 - .claude/skills/devflow:agent-references/references/synthesize/research.md
 - .claude/skills/devflow:agent-references/references/synthesize/review.md
+d .claude/skills/devflow:agent-references/references/validate/
+- .claude/skills/devflow:agent-references/references/validate/passed-alone.md
 d .claude/skills/devflow:apply-decisions/
 - .claude/skills/devflow:apply-decisions/SKILL.md
 d .claude/skills/devflow:apply-feature-knowledge/

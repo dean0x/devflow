@@ -58,7 +58,7 @@ devflow/
 │       │   │   ├── SKILL.md
 │       │   │   └── references/
 │       │   ├── agent-references/     # Reference-only skill: never preloaded; read by explicit path
-│       │   │   └── references/       # synthesize/, curate/, commands/ (rare command branches)
+│       │   │   └── references/       # synthesize/, curate/, validate/, commands/ (rare command branches)
 │       │   ├── software-design/
 │       │   └── ...
 │       ├── agents/                   # 20 agents — hand-authored .md, plus MDS generator hosts (.mds → dist/agents/)

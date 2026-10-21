@@ -54,7 +54,7 @@ const EXEMPT_MARKERS: Readonly<Record<string, readonly string[]>> = {
   // D-CODE-VARIANTS: the variants share Code's Output section from one partial, so they name the same exempt fields.
   fix: ['`## Verification` block', '`commitShas`', '`unresolved`'],
   refactor: ['`## Verification` block', '`commitShas`', '`unresolved`'],
-  validate: ['`HEAD:` line', '| Command | Status | Exit | Duration |', '`Lint pack:` line', '30 lines per failing command'],
+  validate: ['`HEAD:` line', '`Passed alone:` line', '| Command | Status | Exit | Duration |', '`Lint pack:` line', '30 lines per failing command'],
   test: ['### Test Plan Evidence', '| ID | TP | Type |', '### Evidence Log'],
   harden: ['`### Status` line', '`status` return field'],
   polish: ['completion status', 'commits'],
@@ -239,6 +239,15 @@ describe('D-REPORT-CAP: the report cap on the roster', () => {
     )
     const pathless = real.replace('gives its path', 'says nothing')
     expect(collectCapDefects('test', pathless)).toContain('test: the cap line lacks "gives its path"')
+  })
+
+  it('known-bad probe: a validate cap line that drops the Passed alone line is reported', () => {
+    const real = resolveAgentSource('validate').content
+    const dropped = real.replace('the `Passed alone:` line, ', '')
+    expect(dropped, 'the seed must land').not.toBe(real)
+    expect(collectCapDefects('validate', dropped)).toEqual([
+      'validate: the cap line does not name its exempt field "`Passed alone:` line"',
+    ])
   })
 
   it('known-bad probe: a ## line inside a fenced template is not a section boundary', () => {
