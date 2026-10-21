@@ -282,36 +282,27 @@ _qar_trim_overflow() {
 # area: the shell twin of AREA_PATHSPECS in lib/tracked-areas.cjs, in the leaf's order and
 # spelling (tests/decisions/tracked-area-parity.test.ts holds the two equal, element by
 # element). `.devflow` is spelled twice, the second time with the fl ligature (U+FB02,
-# bytes ef ac 82), which a case-folding file system opens as the same name. Fails for any
-# other word.
+# bytes ef ac 82), which a case-folding file system opens as the same name. The `.devflow`
+# entry itself (a link, a gitlink or a plain file) stands over every folder: the character
+# class keeps `glob` from matching it as a leading directory. Fails for any other word.
 _qta_specs() {
-  local _qs_fl=$'\xef\xac\x82' _qs_dir=""
-  _QTA_SPECS=()
-  case "${1:-}" in curation|memory|both) ;; *) return 1 ;; esac
-  if [ "$1" != "memory" ]; then
-    for _qs_dir in ".devflow" ".dev${_qs_fl}ow"; do
-      _QTA_SPECS+=(
-        ":(icase,literal)${_qs_dir}/learning"
-        ":(icase,literal)${_qs_dir}/curation"
-        ":(icase,glob)${_qs_dir}/learning.backup-*"
-        ":(icase,glob)${_qs_dir}/learning.backup-*/**"
-      )
-    done
-  else
-    for _qs_dir in ".devflow" ".dev${_qs_fl}ow"; do
-      _QTA_SPECS+=(":(icase,literal)${_qs_dir}/memory")
-    done
-  fi
-  # The `.devflow` entry itself (a link, a gitlink or a plain file), which stands over
-  # every folder: the character class keeps `glob` from matching it as a leading directory.
+  local _qs_fl=$'\xef\xac\x82' _qs_dir="" _qs_curation=() _qs_memory=() _qs_entry=()
   for _qs_dir in ".devflow" ".dev${_qs_fl}ow"; do
-    _QTA_SPECS+=(":(icase,glob)[.]${_qs_dir#.}")
+    _qs_curation+=(
+      ":(icase,literal)${_qs_dir}/learning"
+      ":(icase,literal)${_qs_dir}/curation"
+      ":(icase,glob)${_qs_dir}/learning.backup-*"
+      ":(icase,glob)${_qs_dir}/learning.backup-*/**"
+    )
+    _qs_memory+=(":(icase,literal)${_qs_dir}/memory")
+    _qs_entry+=(":(icase,glob)[.]${_qs_dir#.}")
   done
-  if [ "$1" = "both" ]; then
-    for _qs_dir in ".devflow" ".dev${_qs_fl}ow"; do
-      _QTA_SPECS+=(":(icase,literal)${_qs_dir}/memory")
-    done
-  fi
+  case "${1:-}" in
+    curation) _QTA_SPECS=("${_qs_curation[@]}" "${_qs_entry[@]}") ;;
+    memory) _QTA_SPECS=("${_qs_memory[@]}" "${_qs_entry[@]}") ;;
+    both) _QTA_SPECS=("${_qs_curation[@]}" "${_qs_entry[@]}" "${_qs_memory[@]}") ;;
+    *) _QTA_SPECS=(); return 1 ;;
+  esac
   return 0
 }
 
@@ -455,14 +446,18 @@ _qar_area_of() {
 queue_append_row() {
   _qar_area_of "$1" "$2"
   case "$_QAR_AREA" in
-    memory) _qar_gate "$1" true "" false ;;
-    curation) _qar_gate "" false "$1" true ;;
-    *) _qar_gate "$1" true "$1" true ;;
-  esac
-  case "$_QAR_AREA" in
-    memory) if [ "$_QAR_MEMORY_ON" != "true" ]; then return 0; fi ;;
-    curation) if [ "$_QAR_CURATION_ON" != "true" ]; then return 0; fi ;;
-    *) if [ "$_QAR_MEMORY_ON" != "true" ] || [ "$_QAR_CURATION_ON" != "true" ]; then return 0; fi ;;
+    memory)
+      _qar_gate "$1" true "" false
+      if [ "$_QAR_MEMORY_ON" != "true" ]; then return 0; fi
+      ;;
+    curation)
+      _qar_gate "" false "$1" true
+      if [ "$_QAR_CURATION_ON" != "true" ]; then return 0; fi
+      ;;
+    *)
+      _qar_gate "$1" true "$1" true
+      if [ "$_QAR_MEMORY_ON" != "true" ] || [ "$_QAR_CURATION_ON" != "true" ]; then return 0; fi
+      ;;
   esac
   _qar_build_row "$3" "$4" "$5" || return 0
   if _qar_append "$1" "$2" "$_QAR_ROW"; then _qar_trim_overflow "$_QAR_FILE"; fi
@@ -475,7 +470,6 @@ queue_append_both() {
   local _qab_memory_enabled="$5" _qab_curation_enabled="$6"
   local _qab_role="$7" _qab_content="$8" _qab_ts="$9" _qab_row=""
 
-  if [ "$_qab_memory_enabled" != "true" ] && [ "$_qab_curation_enabled" != "true" ]; then return 0; fi
   # A paused queue reads as not enabled: the gate comes before the row is built.
   _qar_gate "$_qab_memory_root" "$_qab_memory_enabled" "$_qab_curation_root" "$_qab_curation_enabled"
   _qab_memory_enabled="$_QAR_MEMORY_ON"

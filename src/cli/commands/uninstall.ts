@@ -6,6 +6,7 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getInstallationPaths, getClaudeDirectory, getHomeDirectory, getManagedSettingsPath } from '../../targets/claude-code/claude-paths.js';
 import { getGitRoot } from '../../core/git.js';
+import type { PausedArea } from '../../core/area-pause-notice.js';
 import { isSameLocation } from '../../core/same-location.js';
 import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, buildAssetMaps, getAllSkillNames, getAllAgentNames, getAllCommandNames, parsePluginSelection, resolveFeatureRedirect, prefixSkillName, unprefixSkillName, skillsOf, FEATURE_OWNED_SKILLS, type PluginDefinition } from '../../core/plugins.js';
 import { readManifest, removeManifestPlugins } from '../../core/manifest.js';
@@ -359,9 +360,6 @@ const TRACKED_ENTRIES: ReadonlyArray<ProjectDataEntry> = DEVFLOW_TRACKED_PATHS.m
   isDir: tracked.endsWith('/'),
 }));
 
-/** The data areas whose folders sit under a repository's `.devflow/`: the areas of the tracked-areas check. */
-export type ProjectDataArea = 'curation' | 'memory';
-
 /** The memory folder's name under `.devflow/`, by the name the path helper gives it. */
 const MEMORY_FOLDER_NAME = path.basename(getMemoryDir(path.sep));
 
@@ -371,7 +369,7 @@ const MEMORY_FOLDER_NAME = path.basename(getMemoryDir(path.sep));
  * memory folder. Decided by name alone, whatever the kind of entry, and without regard to
  * ASCII letter case, as the tracked-areas check matches them.
  */
-function projectDataAreaOf(name: string): ProjectDataArea | null {
+function projectDataAreaOf(name: string): PausedArea | null {
   const lower = name.toLowerCase();
   if (lower === CURATION_DIR_NAME || lower === LEGACY_NAMES.folder || lower.startsWith(LEGACY_NAMES.backupPrefix)) return 'curation';
   if (lower === MEMORY_FOLDER_NAME) return 'memory';
@@ -388,7 +386,7 @@ function projectDataAreaOf(name: string): ProjectDataArea | null {
  */
 export function partitionProjectData(
   entries: ReadonlyArray<ProjectDataEntry>,
-  pausedAreas: ReadonlySet<ProjectDataArea> = new Set(),
+  pausedAreas: ReadonlySet<PausedArea> = new Set(),
 ): {
   remove: ProjectDataEntry[];
   keep: ProjectDataEntry[];
@@ -409,7 +407,7 @@ export function partitionProjectData(
 }
 
 /** The answer of the tracked-areas check for `area` at `root`: injected for tests. */
-export type ProjectDataAreaProbe = (root: string, area: ProjectDataArea) => Promise<TrackedAreasAnswer>;
+export type ProjectDataAreaProbe = (root: string, area: PausedArea) => Promise<TrackedAreasAnswer>;
 
 /** The check's own answer, from the package's own copy of it. */
 const probeProjectDataArea: ProjectDataAreaProbe = async (root, area) => (await probeTrackedArea(root, area)).answer;
@@ -424,12 +422,12 @@ async function pausedProjectDataAreas(
   gitRoot: string,
   entries: ReadonlyArray<ProjectDataEntry>,
   probe: ProjectDataAreaProbe,
-): Promise<Set<ProjectDataArea>> {
+): Promise<Set<PausedArea>> {
   const present = new Set(entries.flatMap((entry) => {
     const area = projectDataAreaOf(entry.name);
     return area === null ? [] : [area];
   }));
-  const answers = await Promise.all([...present].map(async (area): Promise<[ProjectDataArea, TrackedAreasAnswer]> => {
+  const answers = await Promise.all([...present].map(async (area): Promise<[PausedArea, TrackedAreasAnswer]> => {
     try {
       return [area, await probe(gitRoot, area)];
     } catch {

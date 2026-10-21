@@ -30,6 +30,15 @@
 // another way (the TypeScript seam's bounded async runner, the settings resolver's
 // injected exec) executes that description and hands the result to judgeTrackedAreas, so
 // every runner gives the answer this leaf gives.
+//
+// COPIES: the leaf is not the only place that holds some of these lists. The shell twin in
+// the capture gate file (hooks/queue-append) keeps its own copy of the pathspecs
+// (`_qta_specs`) and of the list of git variables it removes (the `unset` line of
+// `_qta_probe`), because it runs git without node. Two folder-to-area maps restate which
+// folder belongs to which area: `_qar_area_of` in that file and `projectDataAreaOf` in
+// src/cli/commands/uninstall.ts. Each copy is held equal to the lists here by
+// tests/decisions/tracked-area-parity.test.ts, so a change to a list here fails that test
+// until every copy follows it.
 
 'use strict';
 
