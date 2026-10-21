@@ -49,7 +49,7 @@ const INTRO_SENTENCES: ReadonlyArray<readonly [string, string]> = [
   ['narrow-only', 'The tiers only narrow. They re-route only a group primary that the matrix sent to FIX_NOW and that is no security finding, and they never promote another verdict.'],
   ['highest-tier', 'A duplicate group takes the highest tier of any member, in the order CRITICAL or HIGH, SEVERE, BATCH, DEFER, pre-existing.'],
   ['severity and category', 'Read `severity` and `category` (`blocking`, `should-fix` or `pre-existing`) from each issue.'],
-  ['defect not lens', 'Judge the defect, not the lens of the reviewer.'],
+  ['defect not lens', 'Judge the defect, not the review lens.'],
   ['first match', 'Apply the steps in order; the first that matches decides.'],
 ]
 

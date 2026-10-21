@@ -526,11 +526,11 @@
     },
     {
       "id": "triage-tiers-ref-max",
-      "ceiling": 4588,
-      "pattern": "const TRIAGE_TIERS_REF_MAX_BYTES = 4_588",
+      "ceiling": 4579,
+      "pattern": "const TRIAGE_TIERS_REF_MAX_BYTES = 4_579",
       "occurrences": 1,
       "sourceFile": "tests/guards/agent-references.test.ts",
-      "description": "references/triage/severity-tiers.md of the agent-references skill, in bytes. The Triage agent reads it whole, once per run, at the standard level (the default) or lean, so it is standing context on the default path of /resolve. Measured 4,588 when #484 added it, with no headroom. May be LOWERED, never raised."
+      "description": "references/triage/severity-tiers.md of the agent-references skill, in bytes. The Triage agent reads it whole, once per run, at the standard level (the default) or lean, so it is standing context on the default path of /resolve. Measured 4,579 when #484 added it, with no headroom. May be LOWERED, never raised."
     },
     {
       "id": "curate-body-max",

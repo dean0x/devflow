@@ -43,7 +43,7 @@ const RESOLVE_LEVELS_REF_MAX_BYTES = 2_690
 const IMPLEMENT_LEVELS_REF_MAX_BYTES = 3_921
 
 /** The Triage severity-tiers reference, in bytes. Registered as `triage-tiers-ref-max`; lowered, never raised. */
-const TRIAGE_TIERS_REF_MAX_BYTES = 4_588
+const TRIAGE_TIERS_REF_MAX_BYTES = 4_579
 
 /** The Validate passed-alone re-run reference, in bytes. Registered as `validate-passed-alone-ref-max`; lowered, never raised. */
 const VALIDATE_PASSED_ALONE_REF_MAX_BYTES = 3_427
