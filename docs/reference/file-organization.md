@@ -36,6 +36,7 @@ devflow/
 │   │   ├── curation-move.ts          # Typed seam onto hooks/lib/curation-move.cjs, the one-time move of the old ledger folder
 │   │   ├── curation-move-notice.ts   # The pointer, refused and skipped lines for a project still on the old ledger folder, and the shim's marker paths; the HUD and `devflow curation` share it
 │   │   ├── curation-move-skip.ts     # The fixed notice of a skipped move (git tracks files in a data folder, or git did not answer)
+│   │   ├── tracked-areas.ts          # Typed seam onto hooks/lib/tracked-areas.cjs, the check the drains of `devflow curation` and init ask before they delete a queue file
 │   │   └── ...                       # feature-config.ts, curate-tuning-config.ts, …
 │   ├── hud/                          # HUD module (TypeScript source)
 │   │   ├── index.ts                  # Entry point: stdin → gather → render → stdout
@@ -135,7 +136,7 @@ devflow/
 │                   ├── project-paths.cjs   # Project slug + path resolution
 │                   ├── render-decisions.cjs # Renders decisions.md, pitfalls.md and index.md from the ledger (render / --check CLI)
 │                   ├── safe-path.cjs       # Path safety validation
-│                   └── tracked-areas.cjs   # Leaf: does git track any entry under the data folders `.devflow/learning/` and `.devflow/curation/`? One bounded `git ls-files` call; the move asks it first
+│                   └── tracked-areas.cjs   # Leaf: does git track any entry under the data folders `.devflow/learning/` and `.devflow/curation/`, under a backup folder, or at `.devflow` itself? One bounded `git ls-files` call; the move, the backup sweep and the queue drains ask it first
 ├── scripts/                          # Dev tooling
 │   ├── build-mds.ts                  # MDS compiler: command hosts → dist/commands/*.md, agent generator hosts → dist/agents/*.md, reference modules → dist/skills/git/references/**
 │   ├── bump-version.ts               # Version bump script

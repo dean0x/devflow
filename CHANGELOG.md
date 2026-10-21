@@ -108,6 +108,8 @@ the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-convention
   The ledger files, the swept files and the claim owner file stay in the backup.
   Without this drain, a later `--enable` and init would merge those rows into the live queue.
   The drain deletes nothing when a backup folder, or one of its queue files, is a symbolic link, and it says so.
+  The drain also deletes nothing when git tracks any entry under a data folder or a backup folder, or when a `.git` entry stands and git does not answer.
+  It then prints the notice that the git check shows (see Outcomes that need action).
   If the backups cannot be listed for another reason, the drain still removes the queue files of the live and the old folder, and prints a warning that the backups were not drained.
 - `devflow curation --status` prints one `Backup:` line for each backup folder.
   The line shows how many pending rows the backup still holds.
@@ -118,7 +120,6 @@ the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-convention
   A backup made on re-upgrade can hold the only copy of entries that 3.7 wrote. Check them before you delete it.
 - An init merges rows from at most 50 backup folders in one run. It passes over a folder that holds no pending rows,
   so a later folder is reached when the earlier ones are done.
-- The move skips a project when git tracks files in `.devflow/learning/` or `.devflow/curation/`, or when git does not answer. devflow then shows what to do.
 
 **The queue cap:**
 - A merge fills a pending queue up to 100 lines and no further.
@@ -141,18 +142,25 @@ the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-convention
   Nothing moves. Init prints `Ledger move refused for <root>`.
   The HUD and `devflow curation --status` print `Curation: move refused, see the hook log`.
   Remove the cause, then run `devflow init` or start a new session.
-- Skipped by git: git tracks files in `.devflow/learning/` or `.devflow/curation/`, or git does not answer.
-  Nothing in the project changes. Init prints `Ledger move skipped for <root>` and the reason.
-  A curation command that writes prints the same reason and writes nothing. The HUD prints `Curation: move skipped`.
-  The notice tells you to run `git ls-files .devflow`, and to run `git rm --cached` in the main checkout.
-  A session start tries again.
+- Skipped by the git check: git tracks any entry under `.devflow/learning/`, `.devflow/curation/` or a backup folder
+  (`.devflow/learning.backup-*`), or tracks an entry named `.devflow`. The same outcome applies when a `.git` entry stands and git does not answer.
+  Nothing in the project changes. Init prints `Ledger move skipped for <root>` and a fixed notice that holds nothing from the repository.
+  The HUD prints `Curation: move skipped, git tracks files in .devflow/learning/ or .devflow/curation/`
+  or `Curation: move skipped, git did not answer`.
+  `devflow curation --status`, `--list` and `--show` print the whole notice. The HUD and these commands print the skip also when `.devflow/curation/` exists.
+  While the old folder is there, `--restore`, `--clear`, `--reset` and `--configure` (project scope) print the notice, change nothing and exit 1.
+  `--enable` and `--disable` print the notice as a warning, and their exit code does not change.
+  `--disable`, `--clear` and an init with curation off delete no queue file in these cases. `--disable` and `--clear` print the notice once.
+  When git tracks files, the notice tells you to run `git ls-files .devflow`, and then `git rm --cached <file>`, in the checkout that holds the folders.
+  When git does not answer, the notice tells you to check that git runs in the project. The move runs again at the next session start or the next init.
+  A session start runs the check again in both cases.
 - Not yet moved: `devflow curation --status`, `--list`, `--show` and the HUD print
   `Curation: run devflow init, or open Claude Code in this project after it`.
   They do not read the old folder.
 - Failed: init prints `Ledger move failed for <root>` and copies nothing. The next init tries again.
   A move that fails at session start shows the same `Curation: move refused, see the hook log` line as a refusal.
   The hook log names the cause. The next session start tries again.
-- Skipped: git did not name the project's repository within one second, for example on a hung mount.
+- Skipped, no repository: git did not name the project's repository within one second, for example on a hung mount.
   Init prints `Ledger move skipped for <root>: git did not answer in time.` and does not count the project as moved.
   The other projects move. The next init tries again, and a session start in the project moves it too.
 
