@@ -93,6 +93,14 @@ interface MainDeps {
   stderr?: (text: string) => void
   formatLine?: (fields: EvidenceFields) => unknown
 }
+interface FactsComment {
+  readonly login: string
+  readonly association: string
+  readonly body: string
+  readonly viewerDidAuthor: boolean
+  readonly commentId: string
+}
+interface EditTarget { readonly id: string; readonly marker: string; readonly editable: boolean }
 interface VerifyEvidence {
   readonly EXIT_CODES: Readonly<Record<string, number>>
   readonly CAPS: Readonly<Record<string, number>>
@@ -100,6 +108,7 @@ interface VerifyEvidence {
   main(argv: readonly string[], deps?: MainDeps): Outcome
   settleOutcome(outcome: unknown): Outcome
   commentIdOf(url: unknown, pr: number): string
+  editTarget(pr: { readonly comments: readonly FactsComment[] }): EditTarget | null
 }
 
 const req = createRequire(import.meta.url)
@@ -214,7 +223,7 @@ describe('module surface', () => {
     expect(Object.keys(VE).sort()).toEqual([
       'CAPS', 'EXIT_CODES', 'PR_FIELDS', 'main', 'settleOutcome',
       'BODY_STATUSES', 'COMMENT_STATUSES', 'readinessVerdict', 'renderPublishBlock', 'parsePublishBlock', 'renderReadinessBlock', 'parseReadinessBlock',
-      'commentIdOf',
+      'commentIdOf', 'editTarget',
     ].sort())
   })
 
@@ -1008,6 +1017,22 @@ describe('trusted record — refresh mode reads claims from it (D-VERIFY-RECORD)
     expect(verifyScn({ scn: { body, runs, comments, permissions: { maint: 'write' } } }).states.get(1)).toBe('FAILED')
   })
 
+  it('the viewer\'s newest comment is the record even after a trusted teammate\'s comment: list position decides', () => {
+    const teammate = recordComment(HEAD, [{ id: 1, state: 'FAILED', sha: HEAD, line: CI, run: '101/1' }], 'd'.repeat(12))
+    const viewerNew = recordComment(HEAD, [
+      { id: 1, state: 'VERIFIED-CI', sha: HEAD, line: CI, run: '101/1' },
+      { id: 2, state: 'ATTESTED-LOCAL', sha: HEAD, line: LOCAL, exit: 0 },
+    ], 'f'.repeat(12))
+    const v = verifyScn({ scn: { body, runs, permissions: { maint: 'write' }, comments: [
+      { login: 'devbot', body: good, viewerDidAuthor: true },
+      { login: 'maint', association: 'COLLABORATOR', body: teammate },
+      { login: 'devbot', body: viewerNew, viewerDidAuthor: true },
+    ] } })
+    expect(v.code, v.stderr).toBe(0)
+    expect(v.states.get(1)).toBe('VERIFIED-CI')
+    expect(v.states.get(2)).toBe('ATTESTED-LOCAL')
+  })
+
   it('an untrusted newer marker comment does not displace the trusted record', () => {
     const spoof = recordComment(HEAD, [{ id: 1, state: 'FAILED', sha: HEAD, line: CI }])
     const v = verifyScn({ scn: { body, runs, comments: [
@@ -1614,7 +1639,7 @@ describe('comment rendering and publication (D-VERIFY-PUBLICATION, D4/D5)', () =
   })
 })
 
-describe('commentIdOf — the comment id is parsed once, at the boundary (SEC-M1)', () => {
+describe('commentIdOf — the comment id is parsed once, at the boundary', () => {
   const url = (id: string, pull = '7', host = 'github.com'): string => `https://${host}/o/r/pull/${pull}#issuecomment-${id}`
 
   const ACCEPTED: ReadonlyArray<readonly [string, string, string]> = [
@@ -1663,6 +1688,81 @@ describe('commentIdOf — the comment id is parsed once, at the boundary (SEC-M1
   })
 })
 
+describe('editTarget — the viewer\'s newest evidence comment, and whether editing it is safe', () => {
+  const key = 'a'.repeat(12)
+  const markerLine = (head = HEAD, k = key): string => `${PE.MARKERS.EVIDENCE_OPEN} head:${head} key:${k} -->`
+  const comment = (o: Partial<FactsComment> & { readonly body: string }): FactsComment => ({
+    login: 'mallory', association: 'NONE', viewerDidAuthor: false, commentId: '', ...o,
+  })
+  const own = (body: string, commentId = ''): FactsComment => comment({ login: 'devbot', body, viewerDidAuthor: true, commentId })
+  const foreign = (body: string): FactsComment => comment({ body })
+  const target = (...comments: FactsComment[]): EditTarget | null => VE.editTarget({ comments })
+
+  it('is null with no comment and with only another login\'s evidence comment', () => {
+    expect(target()).toBeNull()
+    expect(target(foreign(`${markerLine()}\nbody`))).toBeNull()
+    expect(target(own('a plain comment'))).toBeNull()
+  })
+
+  it('takes the viewer\'s comment whatever its head and key, with its id and its marker line', () => {
+    const line = markerLine(OLD, 'b'.repeat(12))
+    expect(target(own(`${line}\nrecords`, '1001'))).toEqual({ id: '1001', marker: line, editable: true })
+    expect(VE.editTarget({ comments: [own(`${markerLine()}\n`, '')] })).toMatchObject({ id: '' })
+  })
+
+  it('matches the head prefix on the first line only, and exactly', () => {
+    const open = PE.MARKERS.EVIDENCE_OPEN
+    expect(target(own(`${open} key:${key} -->\nbody`))).toBeNull()
+    expect(target(own(`intro\n${markerLine()}`))).toBeNull()
+    expect(target(own(`${open} head -->`))).toBeNull()
+    expect(target(own(`${open}  head:${HEAD}`))).toBeNull()
+    expect(target(own(` ${markerLine()}`))).toBeNull()
+    expect(target(own(`${open} head:`))).toMatchObject({ marker: `${open} head:` })
+    expect(target(own(`${markerLine()}\r\nbody`))).toMatchObject({ marker: markerLine() })
+  })
+
+  it('every line the strict marker grammar accepts is a target', () => {
+    for (const line of [markerLine(), markerLine(OLD, '0'.repeat(12)), markerLine(BASE, 'f'.repeat(12))]) {
+      expect(PE.MARKERS.EVIDENCE_RE.test(line)).toBe(true)
+      expect(target(own(line))).toMatchObject({ marker: line })
+    }
+  })
+
+  it('the newest of two viewer matches wins', () => {
+    const older = markerLine(OLD)
+    const newer = markerLine(HEAD)
+    expect(target(own(older, '1001'), own(newer, '1002'))).toEqual({ id: '1002', marker: newer, editable: true })
+    expect(target(own(newer, '1002'), own('a note'), own(older, '1003'))).toMatchObject({ id: '1003', marker: older })
+  })
+
+  it('is not editable when a strict evidence marker from another login comes after it', () => {
+    expect(target(own(markerLine(OLD), '1001'), foreign(markerLine(HEAD)))).toEqual({ id: '1001', marker: markerLine(OLD), editable: false })
+    expect(target(own(markerLine(OLD), '1001'), foreign('a note'), foreign(`${markerLine(HEAD)}\nbody`))).toMatchObject({ editable: false })
+  })
+
+  it('stays editable when only a prefix-only comment from another login comes after it (not a record)', () => {
+    const open = PE.MARKERS.EVIDENCE_OPEN
+    expect(target(own(markerLine(OLD), '1001'), foreign(`${open} head:${HEAD}`))).toMatchObject({ editable: true })
+    expect(target(own(markerLine(OLD), '1001'), foreign(`${markerLine(HEAD)} trailing`))).toMatchObject({ editable: true })
+    expect(target(own(markerLine(OLD), '1001'), foreign(`intro\n${markerLine(HEAD)}`))).toMatchObject({ editable: true })
+  })
+
+  it('stays editable when the other login\'s strict marker comes before it', () => {
+    expect(target(foreign(markerLine(HEAD)), own(markerLine(OLD), '1001'))).toMatchObject({ id: '1001', editable: true })
+  })
+
+  it('a viewer comment after the target never blocks it', () => {
+    expect(target(own(markerLine(OLD), '1001'), own('a note', '1002'))).toMatchObject({ id: '1001', editable: true })
+  })
+
+  it('a malformed own comment (the prefix alone) is a valid target, so an edit repairs it', () => {
+    const open = PE.MARKERS.EVIDENCE_OPEN
+    const bad = `${open} head:nothex key:zz -->`
+    expect(PE.MARKERS.EVIDENCE_RE.test(bad)).toBe(false)
+    expect(target(own(markerLine(OLD), '1001'), own(`${bad}\ngarbled`, '1002'))).toEqual({ id: '1002', marker: bad, editable: true })
+  })
+})
+
 describe('dedupe — the viewer\'s own marker line, never a spoof', () => {
   const CI = tpLine(1, 'x', 'ci')
   const file = evidenceFile([CI], [claimLine(1, 'PASS', HEAD)])
@@ -1687,6 +1787,40 @@ describe('dedupe — the viewer\'s own marker line, never a spoof', () => {
     })
     expect(failing.fields?.key).not.toBe(first.fields?.key)
     expect(failing.fields?.posted).toBe('no')
+  })
+
+  const viewer = (text: string): CommentSpec => ({ login: 'devbot', body: text.trimEnd(), viewerDidAuthor: true })
+
+  it('an older exact match followed by the viewer\'s newer comment of another key ⇒ posted:no (the newest is the target)', () => {
+    const first = verifyScn({ scn: { runs }, evidence: file })
+    const otherKey = first.comment.replace(first.fields?.key ?? '', 'e'.repeat(12))
+    expect(otherKey).not.toBe(first.comment)
+    expect(verifyScn({ scn: { runs, comments: [viewer(first.comment), viewer(otherKey)] }, evidence: file }).fields?.posted).toBe('no')
+    expect(verifyScn({ scn: { runs, comments: [viewer(otherKey), viewer(first.comment)] }, evidence: file }).fields?.posted).toBe('yes')
+  })
+
+  it('the viewer\'s newest prefix comment decides, even when it is malformed ⇒ posted:no', () => {
+    const first = verifyScn({ scn: { runs }, evidence: file })
+    const malformed = `${PE.MARKERS.EVIDENCE_OPEN} head:garbled\nbody`
+    expect(verifyScn({ scn: { runs, comments: [viewer(first.comment), viewer(malformed)] }, evidence: file }).fields?.posted).toBe('no')
+  })
+
+  it('a comment rendered in stub and read under full at the same head and key ⇒ posted:yes (the marker line is mode-independent)', () => {
+    const stub = verifyScn({ scn: { runs }, evidence: file, publication: 'auto' })
+    const full = verifyScn({ scn: { runs, comments: [viewer(stub.comment)] }, evidence: file, publication: 'full' })
+    expect(full.fields?.key).toBe(stub.fields?.key)
+    expect(full.fields?.posted).toBe('yes')
+  })
+
+  it('another login\'s strict marker after the exact match leaves posted:yes (a skip, not a write)', () => {
+    const first = verifyScn({ scn: { runs }, evidence: file })
+    const later: CommentSpec = { login: 'mallory', association: 'NONE', body: first.comment.trimEnd() }
+    expect(verifyScn({ scn: { runs, comments: [viewer(first.comment), later] }, evidence: file }).fields?.posted).toBe('yes')
+  })
+
+  it('off stays posted:n/a whatever the viewer already posted', () => {
+    const first = verifyScn({ scn: { runs }, evidence: file })
+    expect(verifyScn({ scn: { runs, comments: [viewer(first.comment)] }, evidence: file, publication: 'off' }).fields?.posted).toBe('n/a')
   })
 })
 
@@ -2098,6 +2232,14 @@ function codeLines(source: string): string[] {
   return source.split('\n').map(l => (/^\s*(\*|\/\/|\/\*)/.test(l) ? '' : l))
 }
 
+/** The text of `function name(...) { ... }`, up to the closing brace at column 0; '' when absent. */
+function functionSource(source: string, name: string): string {
+  const start = source.indexOf(`function ${name}(`)
+  if (start === -1) return ''
+  const end = source.indexOf('\n}\n', start)
+  return end === -1 ? '' : source.slice(start, end + 2)
+}
+
 /**
  * Every way to reach a shell or a second spawn path: `shell: true`, exec/execSync,
  * execFile/execFileSync, and any child_process.spawnSync beyond the one production
@@ -2185,6 +2327,17 @@ describe('source guards (verify-evidence.cjs)', () => {
   it('parsePrJson keeps a comment\'s id, never its url, and takes it from commentIdOf', () => {
     expect(SOURCE).toContain('commentId: commentIdOf(x.url, pr)')
     expect(SOURCE).toContain('login: string, association: string, body: string, viewerDidAuthor: boolean, commentId: string')
+  })
+
+  it('the head prefix is built once, from the evidence open literal, and the strict trust functions never name it', () => {
+    expect(SOURCE).toContain("const EVIDENCE_HEAD_PREFIX = PE.MARKERS.EVIDENCE_OPEN + ' head:';")
+    expect(codeLines(SOURCE).filter(l => /\bEVIDENCE_HEAD_PREFIX\s*=/.test(l))).toHaveLength(1)
+    const strict = ['markerComments', 'resolveTrust', 'findTrustedRecord']
+    const namers = (src: string): string[] => strict.filter(name => functionSource(src, name).includes('EVIDENCE_HEAD_PREFIX'))
+    for (const name of strict) expect(functionSource(SOURCE, name).length, `${name} must be in the corpus`).toBeGreaterThan(80)
+    expect(namers(SOURCE)).toEqual([])
+    const probe = SOURCE.replace('function markerComments(pr) {', 'function markerComments(pr) {\n  const p = EVIDENCE_HEAD_PREFIX;')
+    expect(namers(probe)).toEqual(['markerComments'])
   })
 
   it('no marker literal: every marker is built from pr-evidence MARKERS', () => {

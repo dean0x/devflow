@@ -181,6 +181,12 @@ const SHA40_RE = /^[0-9a-f]{40}$/;
 const COMMENT_URL_RE = /^https:\/\/[^/\s?#]+\/[^/\s?#]+\/[^/\s?#]+\/pull\/([1-9][0-9]{0,9})#issuecomment-([1-9][0-9]{0,19})$/;
 /** A comment id as a string of digits: up to 20, so an id beyond 2^53 stays exact. */
 const COMMENT_ID_RE = /^[1-9][0-9]{0,19}$/;
+/**
+ * What the first line of every evidence comment starts with, whatever its head and
+ * key (D-MARKERS: built from the marker object, never typed). Only editTarget reads
+ * it; the strict trust functions keep to PE.MARKERS.EVIDENCE_RE.
+ */
+const EVIDENCE_HEAD_PREFIX = PE.MARKERS.EVIDENCE_OPEN + ' head:';
 
 /** A review state that decides a login's position on the PR (D6). */
 const DECISIVE_REVIEW_STATES = new Set(['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED']);
@@ -788,6 +794,38 @@ function viewerLogin(pr) {
  */
 function markerComments(pr) {
   return pr.comments.filter(c => PE.MARKERS.EVIDENCE_RE.test(firstLine(c.body))).reverse();
+}
+
+/**
+ * @typedef {{ id: string, marker: string, editable: boolean }} EditTarget
+ *   `id` is the comment's id ('' when unreadable); `marker` is its first line;
+ *   `editable` is false when a later comment from another login is itself an
+ *   evidence marker.
+ */
+
+/**
+ * The comment a publish would edit in place: the viewer's NEWEST comment whose first
+ * line starts with the evidence head prefix, whatever its key. "The viewer's" is the
+ * server-asserted `viewerDidAuthor` flag, so only an own comment is ever a target
+ * (never a maintainer's or a bot's comment). A malformed own comment (the prefix
+ * alone) is a valid target, so an edit repairs it.
+ *
+ * `editable` guards the trust order: verify trusts the newest evidence comment by
+ * list position, and an edit keeps its old position, so editing is safe only when
+ * no strict marker comment from another login comes after the target. A later
+ * prefix-only comment from another login is not a record and does not block. The
+ * strict trust functions (markerComments, resolveTrust, findTrustedRecord) stay as
+ * they are.
+ *
+ * @param {{ comments: readonly PrComment[] }} pr  chronological, newest last
+ * @returns {EditTarget | null}
+ */
+function editTarget(pr) {
+  const at = pr.comments.findLastIndex(c => c.viewerDidAuthor && firstLine(c.body).startsWith(EVIDENCE_HEAD_PREFIX));
+  if (at === -1) return null;
+  const c = pr.comments[at];
+  const editable = !pr.comments.slice(at + 1).some(x => !x.viewerDidAuthor && PE.MARKERS.EVIDENCE_RE.test(firstLine(x.body)));
+  return Object.freeze({ id: c.commentId, marker: firstLine(c.body), editable });
 }
 
 /**
@@ -1476,22 +1514,24 @@ function bodyUpdate(io, plan, ev, body) {
 
 /**
  * The comment (D-VERIFY-PUBLICATION) and whether it is already posted: only the
- * viewer's own comment whose first line is this exact marker (head and key)
- * counts, so a spoofed marker never suppresses a post. `off`, or nothing to
- * record, is no comment (`n/a`). Null when it fails to render.
+ * viewer's own NEWEST evidence comment (the edit target) whose first line is this
+ * exact marker (head and key) counts, so a spoofed marker never suppresses a post
+ * and an older exact match behind a newer own comment of another key reads `no`
+ * (the newer one is what a publish edits). `off`, or nothing to record, is no
+ * comment (`n/a`). Null when it fails to render.
  *
  * @param {{ tps: readonly any[] }} plan
  * @param {any} ev
  * @param {'full' | 'off' | 'stub'} mode
- * @param {PrFacts} pr
+ * @param {EditTarget | null} target
  * @returns {{ text: string, posted: 'yes' | 'no' | 'n/a' } | null}
  */
-function commentUpdate(plan, ev, mode, pr) {
+function commentUpdate(plan, ev, mode, target) {
   if (mode === 'off' || (ev.records.length === 0 && ev.exceptions.length === 0)) return { text: '', posted: 'n/a' };
   const rendered = PE.render(plan, ev, mode);
   if (!rendered.ok) return null;
   const marker = firstLine(rendered.value.text);
-  const posted = pr.comments.some(c => c.viewerDidAuthor && firstLine(c.body) === marker) ? 'yes' : 'no';
+  const posted = target !== null && target.marker === marker ? 'yes' : 'no';
   return { text: rendered.value.text, posted };
 }
 
@@ -1589,7 +1629,7 @@ function runVerify(io, args, deps) {
     exceptions,
   };
   const body = bodyUpdate(io, plan, ev, pr.body);
-  const comment = commentUpdate(plan, ev, mode, pr);
+  const comment = commentUpdate(plan, ev, mode, editTarget(pr));
   if (body === null || comment === null) return refuse(io, EXIT_CODES.OUTPUT_GATE_REFUSED, 'the block or the comment failed to render');
 
   const line = gateEvidenceLine(deps, {
@@ -2576,4 +2616,5 @@ module.exports = Object.freeze({
   renderReadinessBlock,
   parseReadinessBlock,
   commentIdOf,
+  editTarget,
 });
