@@ -21,6 +21,7 @@ import { createHash } from 'crypto'
 import { describe, it, expect } from 'vitest'
 
 import { isAgentBlock, parseFences, requireDistFile, resolveCurationOffSource } from '../helpers.js'
+import { FULL_LOOP_LINES, countOf, headingSection } from './level-guard-helpers.js'
 
 const REPIN_COMMAND = 'REPIN_FENCES=1 npx vitest run tests/guards/implement-resolve-full-fences.test.ts --reporter=verbose'
 
@@ -251,22 +252,10 @@ function fenceOf(text: string, heading: string, agent: string): string {
 
 const PHASE_5_HEADING = '### Phase 5: Alignment Check'
 
-/** The lines of the `full` Phase 5 re-check loop of /implement, each trimmed and each held once by the Phase 5 section. */
-const FULL_LOOP_LINES: readonly string[] = [
-  '2. Increment `alignment_fix_count`',
-  '3. If `alignment_fix_count <= 2`:',
-  '- Loop back to Phase 5 (re-check alignment). The fix is not validated here: the Phase 6 run covers it.',
-  '4. If `alignment_fix_count > 2`: Report misalignments to user for decision',
-]
-
 /** The lines of the Phase 5 section of a compiled /implement, trimmed, up to the next `### ` heading; null when the heading is absent or repeated. */
 function phase5Lines(body: string): string[] | null {
-  const lines = body.split('\n')
-  const starts = lines.flatMap((line, i) => (line === PHASE_5_HEADING ? [i] : []))
-  if (starts.length !== 1) return null
-  const rest = lines.slice(starts[0] + 1)
-  const end = rest.findIndex(line => line.startsWith('### '))
-  return (end === -1 ? rest : rest.slice(0, end)).map(line => line.trim())
+  const section = countOf(body, `\n${PHASE_5_HEADING}\n`) === 1 ? headingSection(body, PHASE_5_HEADING, '### ') : null
+  return section === null ? null : section.split('\n').slice(1).map(line => line.trim())
 }
 
 /** Named collector (AC-3 of #483): each line of the `full` re-check loop appears exactly once in Phase 5 of the compiled /implement. */
