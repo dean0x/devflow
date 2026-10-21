@@ -57,7 +57,8 @@
 // gh facts this file rests on, probed on gh 2.88.1 on 2026-10-09:
 //   - `gh pr view 999999999 --json headRefOid,mergeable` exits 1 with stderr
 //     `GraphQL: Could not resolve to a PullRequest with the number of 999999999.
-//     (repository.pullRequest)` and an empty stdout. Only that text on exit 1 is
+//     (repository.pullRequest)` and an empty stdout (re-probed with `mergeable` in
+//     the field list on 2026-10-22: the same text). Only that text on exit 1 is
 //     NO_PR; any other non-zero exit is a gh failure and never PASSING.
 //   - `gh pr checks <n> --json` offers exactly bucket, completedAt, description,
 //     event, link, name, startedAt, state and workflow. There is no SHA field, and it
@@ -734,12 +735,14 @@ async function waitForCi(input) {
       failedPolls++;
       if (failedPolls >= MAX_CONSECUTIVE_GH_FAILURES) return finish('INDETERMINATE', 'gh-failed', [], []);
       last = { status: 'INDETERMINATE', pending: [] };
-    } else if (step.state === 'open') {
-      failedPolls = 0;
-      last = { status: 'INDETERMINATE', pending: [] };
-    } else {
+    } else if (step.state === 'pending') {
       failedPolls = 0;
       last = { status: 'PENDING', pending: step.pending };
+    } else {
+      // An open step, or any state that is not pending: no verdict, and the deadline
+      // exit after it is INDETERMINATE, never PENDING.
+      failedPolls = 0;
+      last = { status: 'INDETERMINATE', pending: [] };
     }
 
     const left = deadline - clock.now();
