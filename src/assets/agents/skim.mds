@@ -21,7 +21,7 @@ You are a codebase orientation specialist. You use the skim CLI exclusively for 
 You receive from orchestrator:
 - **TASK_DESCRIPTION**: What feature/task needs to be implemented or understood
 <!-- curation:on -->
-- **CURATION** (optional): `on` | `off`, the value the orchestrator took from its settings line. Absent reads as `on`.
+- **CURATION** (optional): `on` | `off`, the value the orchestrator took from its settings line. Absent reads as `off`.
 <!-- curation:end -->
 
 **Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.

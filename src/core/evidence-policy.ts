@@ -336,8 +336,8 @@ export function loadEvidencePolicyModule(dir: string = scriptsDir()): EvidencePo
 
 /**
  * Load the settings resolver from `dir` (default: the package's own scripts
- * directory) and shape-check its surface. A `resolveSettings()` call makes one
- * local `git` call and no network call (D-SETTINGS-LOCAL-ONLY).
+ * directory) and shape-check its surface. A `resolveSettings()` call makes a few
+ * local `git` calls and no network call (D-SETTINGS-LOCAL-ONLY).
  */
 export function loadSettingsModule(dir: string = scriptsDir()): SettingsLoad {
   return loadScript<SettingsModule>(join(dir, SETTINGS_SCRIPT_NAME), SETTINGS_MODULE_SURFACE);
@@ -453,11 +453,13 @@ export function settingsSourceFile(source: Exclude<SettingsSwitchSource, 'machin
  * layer narrows it — `disabled (.devflow/project.json)` — and null otherwise, so a
  * `--status` whose machine switch alone decides prints exactly what it always has
  * (D-FEATURES-NARROW-ONLY). A repository file that exists but is unreadable fails
- * every field closed but the compliance lens, and a switch that closed off is
- * labelled with that file —
- * `disabled (.devflow/project.json is unreadable)` — since commands act on it. Any
- * other failure (the resolver failed to load, or git could not answer) yields
- * null: it knows nothing about this repository.
+ * every field closed but the compliance lens and the memory and curation switches, and
+ * the one switch that closed off (knowledge) is labelled with that file —
+ * `disabled (.devflow/project.json is unreadable)` — since commands act on it. The
+ * memory and curation switches of such a resolution are the machine's, narrowed by what
+ * git tracks (a narrowing that carries source `machine`): no file turned them off, so
+ * they get no label. Any other failure (the resolver failed to load, or git could not
+ * answer) yields null: it knows nothing about this repository.
  */
 export function narrowedSwitchLabel(
   loaded: SettingsLoad,
@@ -467,7 +469,7 @@ export function narrowedSwitchLabel(
   if (!loaded.ok) return null;
   const settings = loaded.value.resolveSettings(opts);
   if (!settings.ok) {
-    if (settings.unreadable === null || settings.switches[feature].on) return null;
+    if (settings.unreadable === null || feature !== 'knowledge' || settings.switches[feature].on) return null;
     return `disabled (${settingsSourceFile(settings.unreadable)} is unreadable)`;
   }
   const state = settings.switches[feature];

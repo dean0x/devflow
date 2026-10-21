@@ -115,7 +115,13 @@ const LIB = NODE_REQUIRE(PROJECT_CONFIG_LIB) as LibModule;
 
 const FAIL_CLOSED =
   'TRACKER=github TRACKER_SOURCE=default TRACKER_WARN=invalid SITE=none KEY=none '
-  + 'REVIEW_PUBLICATION=off COMPLIANCE=generic MEMORY=on CURATION=on KNOWLEDGE=off GATE_LEVEL=full';
+  + 'REVIEW_PUBLICATION=off COMPLIANCE=generic MEMORY=off CURATION=off KNOWLEDGE=off GATE_LEVEL=full';
+
+/**
+ * What an unreadable repository file resolves to on a machine with both switches on: the
+ * fail-closed fields, with MEMORY and CURATION as the machine set them.
+ */
+const UNREADABLE_LINE = FAIL_CLOSED.replace('MEMORY=off CURATION=off', 'MEMORY=on CURATION=on');
 
 const DEFAULT_LINE =
   'TRACKER=github TRACKER_SOURCE=default TRACKER_WARN=none SITE=none KEY=none '
@@ -244,6 +250,11 @@ function complianceTokenOf(s: Settings): string {
 /** A settings line with its COMPLIANCE field blanked — every field a broken file owns. */
 function withoutCompliance(line: string): string {
   return line.replace(/ COMPLIANCE=[^ ]*/, ' COMPLIANCE=*');
+}
+
+/** A settings line with its MEMORY and CURATION fields blanked — the two switches the machine and the areas decide. */
+function withoutSwitches(line: string): string {
+  return line.replace(/ MEMORY=\w+ CURATION=\w+/, ' MEMORY=* CURATION=*');
 }
 
 // ---------------------------------------------------------------------------
@@ -1024,7 +1035,13 @@ describe('readRepoLayers: the seam the hooks\' one parser fork reads through (D-
       // resolveSettings fails its fields closed (whole-file rule) — all but the
       // compliance lens, which is whatever the readable layers fold to.
       if (row.unreadable === undefined) expect(viaLayers.switches, row.name).toEqual(viaResolve.switches);
-      else expect(withoutCompliance(SETTINGS.formatSettingsLine(viaResolve)), row.name).toBe(withoutCompliance(FAIL_CLOSED));
+      else {
+        expect(withoutSwitches(withoutCompliance(SETTINGS.formatSettingsLine(viaResolve))), row.name)
+          .toBe(withoutSwitches(withoutCompliance(FAIL_CLOSED)));
+        // The two data switches stay as the machine set them; knowledge fails closed.
+        expect(viaResolve.switches.memory.on, row.name).toBe(isMachineFeatureOn(row.manifest, 'memory'));
+        expect(viaResolve.switches.curation.on, row.name).toBe(isMachineFeatureOn(row.manifest, 'curation'));
+      }
     }
   });
 
@@ -1071,13 +1088,18 @@ describe('TP-49: the shared switch fixture table (tests/fixtures/settings-switch
 
   it.each(SETTINGS_SWITCH_TABLE.map(r => [r.name, r] as const))('%s', (_name, row) => {
     const s = settingsFor({ project: row.project ?? undefined, personal: row.personal ?? undefined }, row.manifest);
-    // An unreadable row resolves to the fail-closed switches (whole-file rule);
-    // its `expect` is the fold's answer, which the readRepoLayers test holds.
+    // An unreadable row resolves to the fail-closed knowledge switch (whole-file rule) and
+    // the machine's own memory and curation switches; its `expect` is the fold's answer,
+    // which the readRepoLayers test holds.
     expect({
       memory: s.switches.memory.on,
       curation: s.switches.curation.on,
       knowledge: s.switches.knowledge.on,
-    }).toEqual(row.unreadable === undefined ? row.expect : { memory: true, curation: true, knowledge: false });
+    }).toEqual(row.unreadable === undefined ? row.expect : {
+      memory: isMachineFeatureOn(row.manifest, 'memory'),
+      curation: isMachineFeatureOn(row.manifest, 'curation'),
+      knowledge: false,
+    });
     expect(s.unreadable).toBe(row.unreadable ?? null);
   });
 });
@@ -1518,8 +1540,8 @@ describe('TP-30 (AC-26): a malformed evidence leaves tracker and features in the
 // ---------------------------------------------------------------------------
 
 describe('whole-file rule: an unreadable project.json or config.json fails its own fields closed, never the lens', () => {
-  /** The fail-closed line carrying another compliance lens instead of generic. */
-  const failClosedWith = (compliance: string): string => FAIL_CLOSED.replace('COMPLIANCE=generic', `COMPLIANCE=${compliance}`);
+  /** The unreadable-file line carrying another compliance lens instead of generic. */
+  const failClosedWith = (compliance: string): string => UNREADABLE_LINE.replace('COMPLIANCE=generic', `COMPLIANCE=${compliance}`);
   const MACHINE_WITH = (frameworks: string[]) => ({ features: { ...MANIFEST_ON.features, compliance: { enabled: true, frameworks } } });
   const PADDED = `{"compliance":["hipaa"],"pad":"${'x'.repeat(4097)}"}`;
   const UNREADABLE: ReadonlyArray<readonly [string, string | Buffer]> = [
@@ -1535,14 +1557,14 @@ describe('whole-file rule: an unreadable project.json or config.json fails its o
   ];
   const COMPLIANCE_OFF_MACHINE = { features: { ...MANIFEST_ON.features, compliance: { enabled: false, frameworks: [] } } };
 
-  it.each(UNREADABLE)('project.json with %s ⇒ the fail-closed line', (_label, body) => {
+  it.each(UNREADABLE)('project.json with %s ⇒ the fail-closed fields', (_label, body) => {
     const repo = fs.mkdtempSync(path.join(tmp, 'repo-'));
     writeRepoFile('project.json', body, repo);
     writeRepoFile('config.json', '{"reviewPublication":"full"}', repo);
     const s = settingsFor({}, COMPLIANCE_OFF_MACHINE, repo);
     expect(s.ok).toBe(false);
     expect(s.unreadable).toBe('project');
-    expect(SETTINGS.formatSettingsLine(s)).toBe(FAIL_CLOSED);
+    expect(SETTINGS.formatSettingsLine(s)).toBe(UNREADABLE_LINE);
   });
 
   it.each(UNREADABLE)('config.json with %s ⇒ its fields fail closed; the lens is the readable layers\' (off here)', (_label, body) => {
@@ -1664,10 +1686,10 @@ describe('whole-file rule: an unreadable project.json or config.json fails its o
     }
 
     it.each([
-      ['no manifest ⇒ the constant line', null, FAIL_CLOSED],
-      ['machine compliance off ⇒ the constant line', JSON.stringify(COMPLIANCE_OFF_MACHINE), FAIL_CLOSED],
+      ['no manifest ⇒ the fail-closed fields, the machine switches', null, UNREADABLE_LINE],
+      ['machine compliance off ⇒ the fail-closed fields, the machine switches', JSON.stringify(COMPLIANCE_OFF_MACHINE), UNREADABLE_LINE],
       ['a hipaa machine keeps its lens', JSON.stringify(MACHINE_WITH(['hipaa'])), 'hipaa'],
-      ['an unreadable manifest ⇒ the constant line', '{ "features": { "compliance": ', FAIL_CLOSED],
+      ['an unreadable manifest ⇒ the fail-closed fields, the machine switches', '{ "features": { "compliance": ', UNREADABLE_LINE],
     ] as const)('%s', (_label, manifest, expected) => {
       const r = runBroken(manifest);
       expect(r.status, r.stderr).toBe(0);
@@ -1689,7 +1711,7 @@ describe('repository files are never followed or opened when not regular', () =>
     const s = settingsFor({}, MANIFEST_ON, root);
     expect(s.ok).toBe(false);
     expect(s.unreadable).toBe('project');
-    expect(SETTINGS.formatSettingsLine(s)).toBe(FAIL_CLOSED);
+    expect(SETTINGS.formatSettingsLine(s)).toBe(UNREADABLE_LINE);
   });
 
   it('flags a legacy policy.json in the worktree for the CLI\'s migration hint', () => {
