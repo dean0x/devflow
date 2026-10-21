@@ -293,16 +293,24 @@ Do the step below after you update.
 
 - **Validate re-runs each failed test file alone** ([#477](https://github.com/dean0x/devflow/issues/477)).
   - After a failed test run, Validate re-runs each failed test file alone, once, with verbose output.
-    The bound is 20 files, and each re-run takes 120 seconds at most.
+    The bound is 20 files.
+    Validate waits at most 120 seconds for each re-run, so the worst case is 40 minutes for each Validate run.
+    The 120 seconds is a bound on the wait, not on the re-run: the platform moves a foreground command that reaches its timeout to the background, where it runs to the end (see `docs/reference/platform-assumptions.md`).
+    A re-run that times out makes the file REAL.
     A re-run starts only after the path passes a strict check, and it uses the full run's own test command with only that file added.
-  - Only the validation in `/implement` labels files, because only that run is given the branch base.
-    In every other run, the re-runs give failure detail and every failure is REAL.
+  - Only the Phase 6 validation in `/implement` labels files, because only that run is given the branch base.
+    In every other run, including the re-validation after QA fixes, the re-runs give failure detail and every failure is REAL.
   - A file is PASSED-ALONE only if all of these hold:
-    the path is checked and tracked, the branch did not change the file, its failure was a timeout, a spawn error or a resource error,
+    the path is checked and tracked, neither the branch nor the working tree changed the file, its failure was a timeout, a spawn error or a resource error,
     the re-run used only that file with no name filter, it exited 0, and the tests that failed in the full run ran and passed.
     Every other failure is REAL and goes to Fix.
+  - The cause is the failure that the test runner reports.
+    An assertion failure is REAL, also when its message names a timeout.
+    A child-process timeout that a test reports as a failed assertion is therefore REAL.
+    Issue [#332](https://github.com/dean0x/devflow/issues/332) tracks the repair of such tests.
   - The gate and its `gate:validate` claim pass only when the PASSED-ALONE files explain every failure.
-    The report lists them on one `Passed alone:` line.
+    Only Validate's own report lists them, on one `Passed alone:` line.
+    The `/implement` summary and the PR body do not show that line.
   - The re-run steps are in the agent reference `validate/passed-alone.md`.
     After updating, run `devflow init`.
 - **`/implement` skips Harden at `lean` on a docs-only diff** ([#482](https://github.com/dean0x/devflow/issues/482)). At `lean`, `/implement` skips Phase 4 Harden when the diff is docs-only. The decision reads path names only. It reads no diff content and runs no detection script. Harden is skipped only when all of these hold: the compliance lens is exactly `off`; the branch diff list is not empty; no Code report names a deleted, renamed or moved path; and every changed path is the root `README.md`, the root `CHANGELOG.md` or a `.md` file under the root `docs/`. A path on that list has no segment that starts with a dot, no double quote in its name and no file name that agents load as instructions, in any letter case. No loaded instruction, rules or imported file names the path. A tests-only diff runs Harden. When the decision is unclear, Harden runs. The run report says `Harden: ran` or `Harden: SKIPPED (docs-only diff)` at `lean` only. `full` and `standard` do not change. When Harden runs, it reads the whole branch diff. `/code-review` security runs at every level. The README, the CLI reference and the command reference state the rule. Known limits at `lean` on a docs-only diff: stub and wiring detection does not run; the pitfall check of public text in README and CHANGELOG does not run; a path that only a not-yet-loaded instruction file, such as a nested one, names is not seen; and Harden does not review a delete or a rename that no Code report names ([#571](https://github.com/dean0x/devflow/issues/571)). The docs-only check reads path names. It does not look at symlinks, file-type changes, or docs files that a site generator compiles. Run `devflow gates --set standard` or `--set full` to keep Harden on every diff.
