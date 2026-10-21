@@ -68,8 +68,6 @@ export type TrackedAreaCall = TrackedAreaInspection | TrackedAreaCommand;
 export interface TrackedAreasModule {
   /** Whether git tracks any entry under the curation area's folders at `root` (an absolute path). */
   checkTrackedAreas(root: unknown): TrackedAreasAnswer;
-  /** Whether git tracks any entry under the folders of `area` at `root`; an unknown area answers `unknown`. */
-  checkTrackedArea(root: unknown, area: unknown): TrackedAreasAnswer;
   /** Whether a git call is due for `area` at `root`, and the call (cwd, argv, env) when it is. Starts no process. */
   trackedAreaCall(root: unknown, area: unknown, baseEnv?: NodeJS.ProcessEnv): TrackedAreaCall;
   /** The answer, with its cause, of the result `spawnSync` (or a runner shaped like it) gave for the call. */
@@ -82,7 +80,6 @@ export interface TrackedAreasModule {
  */
 export const TRACKED_AREAS_SURFACE = Object.freeze({
   checkTrackedAreas: 'function',
-  checkTrackedArea: 'function',
   trackedAreaCall: 'function',
   judgeTrackedAreas: 'function',
 } as const satisfies Record<keyof TrackedAreasModule, SurfaceKind>);

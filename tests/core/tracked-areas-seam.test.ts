@@ -48,9 +48,9 @@ describe('loadTrackedAreas: the package copy, shape-checked, never a throw', () 
     expect(loaded.ok && loaded.value).toBe(NODE_REQUIRE(LEAF));
   });
 
-  it('names the four functions the CLI, the HUD and the settings resolver call, and the module exports each as a function', () => {
+  it('names the three functions the CLI, the HUD and the settings resolver call, and the module exports each as a function', () => {
     expect(Object.keys(TRACKED_AREAS_SURFACE).sort()).toEqual([
-      'checkTrackedArea', 'checkTrackedAreas', 'judgeTrackedAreas', 'trackedAreaCall',
+      'checkTrackedAreas', 'judgeTrackedAreas', 'trackedAreaCall',
     ]);
     expect(Object.values(TRACKED_AREAS_SURFACE).every(kind => kind === 'function')).toBe(true);
     const leaf = NODE_REQUIRE(LEAF) as Record<string, unknown>;
@@ -75,7 +75,7 @@ describe('loadTrackedAreas: the package copy, shape-checked, never a throw', () 
     expect(!loaded.ok && loaded.error.kind === 'unusable' && loaded.error.detail).toMatch(/checkTrackedAreas/);
   });
 
-  it.each(['checkTrackedArea', 'trackedAreaCall', 'judgeTrackedAreas'])('a module that lacks %s is an unusable error naming it', (missing) => {
+  it.each(['checkTrackedAreas', 'trackedAreaCall', 'judgeTrackedAreas'])('a module that lacks %s is an unusable error naming it', (missing) => {
     const dir = path.join(tmp, `lacks-${missing}`);
     const file = path.join(dir, TRACKED_AREAS_SCRIPT_NAME);
     fs.mkdirSync(path.dirname(file), { recursive: true });
