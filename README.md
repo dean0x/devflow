@@ -258,7 +258,7 @@ A PR carries a test plan: one TP line per acceptance criterion, in one fixed sha
 | `FAILED` | a fail, a non-zero exit code, or a failing CI run |
 | `INDETERMINATE` | something the verdict needs could not be resolved, such as a CI run still in progress or expired |
 
-Only the first two count as verified, and the block ticks exactly those lines. `update-pr-evidence` re-derives every state at the PR's head, updates the block — reduced to one counts line when the lines would push the body past its size limit — and edits its own evidence comment for that head in place, or posts one when it has none. `/implement`, `/resolve` and the wave PR of `/dynamic-build` all refresh it.
+Only the first two count as verified, and the block ticks exactly those lines. `update-pr-evidence` re-derives every state at the PR's head, updates the block — reduced to one counts line when the lines would push the body past its size limit — and edits the evidence comment your login posted so it names the new head. It posts a new comment only when your login has none, or when a newer evidence comment from another user follows it. `/implement`, `/resolve` and the wave PR of `/dynamic-build` all refresh it.
 
 The evidence comment is a counts-only **STUB** unless `reviewPublication` is `full`. **FULL** adds the scenario table, with links to the CI runs, and the reasons for any self-attested exception, and falls back to the STUB above 55,000 characters. `off` posts no evidence comment, except under a `required` policy, where it becomes the STUB. A self-attested exception — no tracker issue, or no test plan — is recorded in the PR body under `## Evidence Exceptions`, with who attested it and when.
 
