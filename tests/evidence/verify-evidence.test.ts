@@ -99,6 +99,7 @@ interface VerifyEvidence {
   readonly PR_FIELDS: string
   main(argv: readonly string[], deps?: MainDeps): Outcome
   settleOutcome(outcome: unknown): Outcome
+  commentIdOf(url: unknown, pr: number): string
 }
 
 const req = createRequire(import.meta.url)
@@ -213,6 +214,7 @@ describe('module surface', () => {
     expect(Object.keys(VE).sort()).toEqual([
       'CAPS', 'EXIT_CODES', 'PR_FIELDS', 'main', 'settleOutcome',
       'BODY_STATUSES', 'COMMENT_STATUSES', 'readinessVerdict', 'renderPublishBlock', 'parsePublishBlock', 'renderReadinessBlock', 'parseReadinessBlock',
+      'commentIdOf',
     ].sort())
   })
 
@@ -1612,6 +1614,55 @@ describe('comment rendering and publication (D-VERIFY-PUBLICATION, D4/D5)', () =
   })
 })
 
+describe('commentIdOf — the comment id is parsed once, at the boundary (SEC-M1)', () => {
+  const url = (id: string, pull = '7', host = 'github.com'): string => `https://${host}/o/r/pull/${pull}#issuecomment-${id}`
+
+  const ACCEPTED: ReadonlyArray<readonly [string, string, string]> = [
+    ['a github.com pull comment url', url('123456'), '123456'],
+    ['a GHES host (the host is not pinned)', url('9', '7', 'ghe.example.com'), '9'],
+    ['a 20-digit id, kept exact as a string', url('12345678901234567890'), '12345678901234567890'],
+    ['a one-digit id', url('1'), '1'],
+  ]
+  for (const [label, input, id] of ACCEPTED) {
+    it(`accepts ${label}`, () => {
+      expect(VE.commentIdOf(input, PR)).toBe(id)
+    })
+  }
+
+  const REFUSED: ReadonlyArray<readonly [string, unknown]> = [
+    ['another PR\'s number', url('5', '8')],
+    ['a pull number with a leading zero', url('5', '07')],
+    ['an id with a leading zero', url('0123')],
+    ['an id of zero', url('0')],
+    ['a 21-digit id', url('123456789012345678901')],
+    ['a trailing character', `${url('123')}x`],
+    ['a trailing newline', `${url('123')}\n`],
+    ['an embedded space', url('12 3')],
+    ['plain http', url('123').replace('https:', 'http:')],
+    ['the /issues/ form', url('123').replace('/pull/', '/issues/')],
+    ['a query string before the fragment', `https://github.com/o/r/pull/${PR}?x=1#issuecomment-123`],
+    ['a path after the pull number', `https://github.com/o/r/pull/${PR}/files#issuecomment-123`],
+    ['another fragment', `https://github.com/o/r/pull/${PR}#discussion_r123`],
+    ['no fragment', `https://github.com/o/r/pull/${PR}`],
+    ['a url longer than 400 characters', url('123', '7', `${'h'.repeat(390)}.com`)],
+    ['the empty string', ''],
+    ['undefined', undefined],
+    ['null', null],
+    ['a number', 123],
+    ['an object', { url: url('123') }],
+  ]
+  for (const [label, input] of REFUSED) {
+    it(`refuses ${label}`, () => {
+      expect(VE.commentIdOf(input, PR)).toBe('')
+    })
+  }
+
+  it('reads the pull number against the PR that was asked for', () => {
+    expect(VE.commentIdOf(url('123', '8'), 8)).toBe('123')
+    expect(VE.commentIdOf(url('123', '8'), PR)).toBe('')
+  })
+})
+
 describe('dedupe — the viewer\'s own marker line, never a spoof', () => {
   const CI = tpLine(1, 'x', 'ci')
   const file = evidenceFile([CI], [claimLine(1, 'PASS', HEAD)])
@@ -2121,6 +2172,19 @@ describe('source guards (verify-evidence.cjs)', () => {
     expect(codeLines(SOURCE).filter(l => l.includes('/collaborators/')).length, 'the permission call must be in the corpus').toBeGreaterThanOrEqual(1)
     expect(collect(SOURCE)).toEqual([])
     expect(collect(`${SOURCE}\n  gh(io, ['api', 'repos/{owner}/{repo}/collaborators/' + login + '/permission'], 1)\n`)).toHaveLength(1)
+  })
+
+  it('a comment id reaches gh\'s argv only through commentIdArg() (COMMENT_ID_RE-gated, throwing)', () => {
+    const gate = SOURCE.match(/function commentIdArg\(id\) \{[^}]*\}/)
+    expect(gate, 'commentIdArg must sit next to loginArg').not.toBeNull()
+    expect(gate?.[0]).toContain('COMMENT_ID_RE.test(id)')
+    expect(gate?.[0]).toContain("throw new Error('verify-evidence: unchecked comment id')")
+    expect(SOURCE.indexOf('function commentIdArg(')).toBeGreaterThan(SOURCE.indexOf('function loginArg('))
+  })
+
+  it('parsePrJson keeps a comment\'s id, never its url, and takes it from commentIdOf', () => {
+    expect(SOURCE).toContain('commentId: commentIdOf(x.url, pr)')
+    expect(SOURCE).toContain('login: string, association: string, body: string, viewerDidAuthor: boolean, commentId: string')
   })
 
   it('no marker literal: every marker is built from pr-evidence MARKERS', () => {

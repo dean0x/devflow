@@ -173,6 +173,15 @@ const PR_FIELDS = 'body,comments,reviews,author,headRefOid,baseRefOid,isCrossRep
 const PR_RE = /^[1-9][0-9]{0,9}$/;
 const SHA40_RE = /^[0-9a-f]{40}$/;
 
+/**
+ * A pull-request comment's url, anchored: the pull number, then the numeric id in the
+ * fragment. The host is not pinned (GitHub Enterprise Server hosts work). There is no
+ * `m` flag, so `$` is the end of the string and a trailing newline is refused.
+ */
+const COMMENT_URL_RE = /^https:\/\/[^/\s?#]+\/[^/\s?#]+\/[^/\s?#]+\/pull\/([1-9][0-9]{0,9})#issuecomment-([1-9][0-9]{0,19})$/;
+/** A comment id as a string of digits: up to 20, so an id beyond 2^53 stays exact. */
+const COMMENT_ID_RE = /^[1-9][0-9]{0,19}$/;
+
 /** A review state that decides a login's position on the PR (D6). */
 const DECISIVE_REVIEW_STATES = new Set(['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED']);
 
@@ -215,7 +224,8 @@ const USAGE = [
  *   summary, never input bytes. `ghCap` replaces CAPS.GH_CALLS for a stage that
  *   carries a budget of its own (`publish`'s writes).
  *
- * @typedef {{ login: string, association: string, body: string, viewerDidAuthor: boolean }} PrComment
+ * @typedef {{ login: string, association: string, body: string, viewerDidAuthor: boolean, commentId: string }} PrComment
+ *   `commentId` is the comment's numeric id as digits, or '' when its url did not parse.
  * @typedef {{ login: string, association: string, state: string }} PrReview
  * @typedef {{ number: number, head: string, base: string, body: string, author: string,
  *   isCrossRepository: boolean | undefined, comments: readonly PrComment[],
@@ -625,6 +635,19 @@ function loginArg(login) {
   return login;
 }
 
+/**
+ * Assert a comment id before it reaches gh's argv (an API path segment):
+ * COMMENT_ID_RE, so no `/`, `..`, `?` or option can ride on PR data. commentIdOf
+ * only ever yields such ids; this is that precondition held at the sink.
+ *
+ * @param {string} id
+ * @returns {string}
+ */
+function commentIdArg(id) {
+  if (typeof id !== 'string' || !COMMENT_ID_RE.test(id)) throw new Error('verify-evidence: unchecked comment id');
+  return id;
+}
+
 // ---------------------------------------------------------------------------
 // The PR (one gh pr view)
 // ---------------------------------------------------------------------------
@@ -644,6 +667,21 @@ function obj(v) {
 function loginOf(author) {
   const login = obj(author).login;
   return typeof login === 'string' && login.length <= 100 ? login : '';
+}
+
+/**
+ * The numeric id of a PR comment, read from its url, as the digits themselves:
+ * never Number(), so an id beyond 2^53 stays exact. '' unless the url is a bounded
+ * string of the anchored pull-comment form AND names the PR that was read.
+ *
+ * @param {unknown} url
+ * @param {number} pr
+ * @returns {string}
+ */
+function commentIdOf(url, pr) {
+  if (typeof url !== 'string' || url.length > MAX_URL_CHARS) return '';
+  const m = COMMENT_URL_RE.exec(url);
+  return m !== null && m[1] === String(pr) ? m[2] : '';
 }
 
 /**
@@ -671,6 +709,7 @@ function parsePrJson(json, pr) {
       association: typeof x.authorAssociation === 'string' ? x.authorAssociation : '',
       body: typeof x.body === 'string' ? x.body : '',
       viewerDidAuthor: x.viewerDidAuthor === true,
+      commentId: commentIdOf(x.url, pr),
     });
   });
   const reviews = o.reviews.slice(-CAPS.REVIEWS).map(r => {
@@ -2536,4 +2575,5 @@ module.exports = Object.freeze({
   parsePublishBlock,
   renderReadinessBlock,
   parseReadinessBlock,
+  commentIdOf,
 });
