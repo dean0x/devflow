@@ -6,6 +6,10 @@
  * curation --disable` and the drain `devflow init` runs when curation is switched off
  * (src/cli/commands/init.ts) run: the same drain, and the pending rows of the backups
  * a move left as well.
+ *
+ * Both drains answer `skipped`, and delete nothing, when git tracks any entry under a
+ * data folder or a backup folder, or does not answer (the tracked-areas check). The
+ * line a caller prints for such a drain is {@link formatCurationNotDrained}.
  */
 
 import * as path from 'path';
@@ -16,9 +20,20 @@ import {
   getCurationPendingTurnsPath,
   getCurationPendingTurnsProcessingPath,
 } from './project-paths.js';
-import { loadCurationMove, type CurationMoveLoad } from './curation-move.js';
+import { loadCurationMove, type CurationMoveLoad, type MoveSkipReason } from './curation-move.js';
+import { MOVE_SKIP_NOTICE } from './curation-move-skip.js';
 import { formatCurationStoreUnavailable } from './curation-store.js';
-import { drainQueueFiles, type QueueDrain } from './queue-drain.js';
+import { drainQueueFiles, formatRefusedDrain, type QueueDrain } from './queue-drain.js';
+import { loadTrackedAreas, type TrackedAreasAnswer, type TrackedAreasLoad } from './tracked-areas.js';
+
+/** A drain that deleted nothing because git tracks files in a curation data folder (`tracked`) or did not answer (`unknown`). */
+export interface SkippedQueueDrain {
+  readonly drained: false;
+  readonly skipped: MoveSkipReason;
+}
+
+/** What {@link drainCurationQueue} and {@link drainDisabledCurationQueue} did: a {@link QueueDrain}, or a {@link SkippedQueueDrain}. */
+export type CurationQueueDrain = QueueDrain | SkippedQueueDrain;
 
 /** The folders to check for links, and the queue files to delete, in the live and the old ledger folder of `gitRoot`. */
 function liveQueueTargets(gitRoot: string): { readonly folders: readonly string[]; readonly files: readonly string[] } {
@@ -48,11 +63,23 @@ function liveQueueTargets(gitRoot: string): { readonly folders: readonly string[
  * queue files go; the ledger, the log and the tuning file stay, and so does every
  * backup folder a move left (see {@link drainDisabledCurationQueue}).
  *
+ * Asks first the question the disable drain asks (see {@link drainDisabledCurationQueue}):
+ * when git tracks any entry under the data folders or a backup folder of `gitRoot`, or
+ * a `.git` entry stands and git does not answer, nothing is deleted and the answer is
+ * `skipped`.
+ *
  * Refused, deleting nothing in either folder, when `.devflow` or either ledger
  * folder under `gitRoot` is a symbolic link (D-CLI-NO-SYMLINK). ENOENT-tolerant;
  * other errors propagate.
+ *
+ * `loadTracking` is the check's loader; its default is the package's own copy.
  */
-export async function drainCurationQueue(gitRoot: string): Promise<QueueDrain> {
+export async function drainCurationQueue(
+  gitRoot: string,
+  loadTracking: () => TrackedAreasLoad = loadTrackedAreas,
+): Promise<CurationQueueDrain> {
+  const skipped = trackedSkip(gitRoot, loadTracking);
+  if (skipped !== null) return skipped;
   const { folders, files } = liveQueueTargets(gitRoot);
   return drainQueueFiles(folders, files);
 }
@@ -66,6 +93,14 @@ export async function drainCurationQueue(gitRoot: string): Promise<QueueDrain> {
  * the turns the drain exists to discard. The backups are read within the sweep's
  * bounds: 500 backup folders, and 200 files in each.
  *
+ * Asks first whether git tracks any entry under the data folders or a backup folder of
+ * `gitRoot`, the question the move asks (the tracked-areas check). A folder that git
+ * tracks is the repository's content, so the drain leaves the project alone: it deletes
+ * nothing in the live folder, the old folder or any backup, and answers `skipped` with
+ * the reason `tracked`, or `unknown` when a `.git` entry stands and git did not answer
+ * (a check that cannot be loaded, or a root that is not absolute, answers `unknown`
+ * too). A root with no `.git` entry makes no git call and drains as usual.
+ *
  * Refused, deleting nothing anywhere, when a link is in the way: `.devflow`, either
  * ledger folder, a backup folder that may hold rows, or one of a backup's queue files.
  * The answer names the link. ENOENT-tolerant. Any other failure of the backup list, a
@@ -73,12 +108,16 @@ export async function drainCurationQueue(gitRoot: string): Promise<QueueDrain> {
  * drain of the live and the old folder: those drain as usual, and the answer carries
  * a `warning` that the backups were not drained, which the caller prints.
  *
- * `load` is the move module's loader; the default is the package's own copy.
+ * `load` is the move module's loader and `loadTracking` the check's; each default is
+ * the package's own copy.
  */
 export async function drainDisabledCurationQueue(
   gitRoot: string,
   load: () => CurationMoveLoad = loadCurationMove,
-): Promise<QueueDrain> {
+  loadTracking: () => TrackedAreasLoad = loadTrackedAreas,
+): Promise<CurationQueueDrain> {
+  const skipped = trackedSkip(gitRoot, loadTracking);
+  if (skipped !== null) return skipped;
   const { folders, files } = liveQueueTargets(gitRoot);
   const loaded = load();
   const listed = loaded.ok ? loaded.value.backupQueueFiles(gitRoot) : null;
@@ -89,6 +128,31 @@ export async function drainDisabledCurationQueue(
   if (!drain.drained) return drain;
   const failure = !loaded.ok ? formatCurationStoreUnavailable(loaded.error) : listed !== null && !listed.ok ? listed.error.message : null;
   return failure === null ? drain : { drained: true, warning: formatBackupsNotDrained(failure) };
+}
+
+/**
+ * The skipped answer for `root`, or null when the drain may go on. The tracked-areas
+ * check decides; a check that cannot be loaded cannot answer, so it is `unknown`.
+ */
+function trackedSkip(root: string, load: () => TrackedAreasLoad): SkippedQueueDrain | null {
+  const loaded = load();
+  const answer: TrackedAreasAnswer = loaded.ok ? loaded.value.checkTrackedAreas(root) : 'unknown';
+  return answer === 'untracked' ? null : { drained: false, skipped: answer };
+}
+
+/**
+ * The line a caller prints for a drain that deleted nothing: the fixed notice of a
+ * skipped project (no repository content in it), or the refusal at a link. When the
+ * caller has just printed that notice (`shown`, the reason it showed), the line does
+ * not repeat it.
+ */
+export function formatCurationNotDrained(
+  drain: Exclude<CurationQueueDrain, { readonly drained: true }>,
+  shown: MoveSkipReason | null = null,
+): string {
+  if (!('skipped' in drain)) return formatRefusedDrain('curation', drain.linkedFolder);
+  const line = 'The curation queue was not drained.';
+  return shown === drain.skipped ? line : `${line} ${MOVE_SKIP_NOTICE[drain.skipped]}`;
 }
 
 /** The warning for a disable drain that could not list the backups: the live queue is drained, the backups are not. */

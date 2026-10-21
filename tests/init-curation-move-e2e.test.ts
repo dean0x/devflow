@@ -16,6 +16,8 @@ import { promises as fs, readdirSync } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { requireBuiltCli, sandboxEnv } from './helpers.js';
+import { trackInGit } from './decisions/curation-fixtures.js';
+import { MOVE_SKIP_NOTICE } from '../src/core/curation-move-skip.js';
 
 const CLI = requireBuiltCli();
 const SUBPROCESS_TIMEOUT_MS = 60_000;
@@ -146,6 +148,36 @@ describe('init moves the project ledger folder (TP-7, TP-8, TP-14)', () => {
     const displaced = readdirSync(backup).filter(name => name.startsWith(`${LEDGER_FILE}.displaced-`));
     expect(displaced, 'one displaced copy of the ledger file').toHaveLength(1);
     expect(await fs.readFile(path.join(backup, displaced[0]), 'utf-8'), 'the copy holds the new folder\'s one-row ledger').toBe(newFolderLedger);
+  });
+
+  it('skips the merge of a backup that git tracks, prints the skip notice and leaves both folders as they are', { timeout: MULTI_RUN_TIMEOUT_MS }, async () => {
+    const row = '{"role":"user","content":"backup row","ts":1}\n';
+    const backup = path.join(repo, '.devflow', 'learning.backup-20261017T020304Z-ab12cd34');
+    await fs.mkdir(backup, { recursive: true });
+    await fs.writeFile(path.join(backup, '.pending-turns.jsonl'), row, 'utf-8');
+    await fs.mkdir(newDir(), { recursive: true });
+    await fs.writeFile(path.join(newDir(), LEDGER_FILE), LEDGER, 'utf-8');
+    trackInGit(repo, path.relative(repo, path.join(backup, '.pending-turns.jsonl')));
+
+    const out = runInit(repo, '--curation');
+
+    expect(out).toContain(`Ledger move skipped for ${repo}`);
+    expect(await fs.readFile(path.join(backup, '.pending-turns.jsonl'), 'utf-8'), 'the tracked backup keeps its rows').toBe(row);
+    expect(await exists(path.join(backup, '.pending-turns.jsonl.swept-20261017T020304Z-ab12cd34')), 'nothing is renamed in the backup').toBe(false);
+    expect(await exists(path.join(newDir(), '.pending-turns.jsonl')), 'no row reaches the new queue').toBe(false);
+    expect(await fs.readFile(path.join(newDir(), LEDGER_FILE), 'utf-8')).toBe(LEDGER);
+  });
+
+  it('prints the skip notice once when curation is off and git tracks a data folder', { timeout: MULTI_RUN_TIMEOUT_MS }, async () => {
+    await seedOldFolder();
+    trackInGit(repo, path.relative(repo, path.join(oldDir(), LEDGER_FILE)));
+
+    const out = runInit(repo, '--no-curation');
+
+    expect(out).toContain(`Ledger move skipped for ${repo}`);
+    expect(out).toContain('The curation queue was not drained.');
+    expect(out.split(MOVE_SKIP_NOTICE.tracked).length - 1, 'one notice').toBe(1);
+    expect(await exists(path.join(oldDir(), '.pending-turns.jsonl')), 'the queue file stays').toBe(true);
   });
 
   it('refuses a linked old folder, names the root, exits 0 and touches nothing it points at (TP-27)', { timeout: MULTI_RUN_TIMEOUT_MS }, async () => {

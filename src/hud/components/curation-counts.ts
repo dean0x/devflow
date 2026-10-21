@@ -4,6 +4,7 @@ import type { ComponentResult, GatherContext, CurationCountsData } from '../type
 import { dim } from '../colors.js';
 import { getDecisionsLedgerPath } from '../../core/project-paths.js';
 import { formatMoveNotice, gatherMoveNotice } from '../../core/curation-move-notice.js';
+import { isMoveSkipReason } from '../../core/curation-move-skip.js';
 import { getLedgerRoot, LEDGER_ROOT_TIMEOUT_MS, type LedgerRootOptions } from '../../core/ledger-root.js';
 import { isActiveDecisionsStatus } from '../../core/observations.js';
 
@@ -116,7 +117,9 @@ export function gatherCurationCounts(cwd: string): CurationCountsData | null {
  * root (getLedgerRoot — the main checkout in a linked worktree, the repository
  * root from a subdirectory), or `cwd` itself outside a git work tree. One git
  * call, bounded by the HUD's per-command budget; run it alongside the git
- * status gather, not after it (D-LEDGER-MAIN-WORKTREE).
+ * status gather, not after it (D-LEDGER-MAIN-WORKTREE). Where the old ledger folder
+ * still stands it adds the move notice (gatherMoveNotice): any notice when both counts
+ * are zero, a skip notice only when a count is above zero.
  */
 export async function gatherLedgerCurationCounts(
   cwd: string,
@@ -125,9 +128,10 @@ export async function gatherLedgerCurationCounts(
   const root = await getLedgerRoot(cwd, { ...options, timeoutMs: LEDGER_ROOT_TIMEOUT_MS });
   const ledgerRoot = root ?? cwd;
   const counts = gatherCurationCounts(ledgerRoot);
-  if (counts !== null && counts.decisions + counts.pitfalls > 0) return counts;
-
   const move = gatherMoveNotice(ledgerRoot, options.home ?? os.homedir());
+  if (counts !== null && counts.decisions + counts.pitfalls > 0) {
+    return isMoveSkipReason(move) ? { ...counts, move } : counts;
+  }
   if (move === null) return counts;
   return { decisions: counts?.decisions ?? 0, pitfalls: counts?.pitfalls ?? 0, move };
 }
@@ -135,8 +139,10 @@ export async function gatherLedgerCurationCounts(
 /**
  * HUD component: decisions/pitfalls counts.
  * Shows how many active ADR/PF entries the project has accumulated. When there are
- * none and the ledger folder still has its old name, it shows the pointer or the
- * refused line instead. Returns null when no ledger exists or every entry is retired.
+ * none and the ledger folder still has its old name, it shows the pointer, the refused
+ * line or the skip line instead. When the move was skipped (git tracks files in a data
+ * folder, or git did not answer), the skip line also follows the counts. Returns null
+ * when no ledger exists or every entry is retired.
  */
 export default async function curationCounts(
   ctx: GatherContext,
@@ -159,6 +165,7 @@ export default async function curationCounts(
   // part and joins with a middot for a list of independent facts): "Curation:
   // N decisions, M pitfalls" reads as a single sentence, so the whole string
   // is dimmed once and parts are comma-joined rather than middot-separated.
-  const raw = `Curation: ${parts.join(', ')}`;
+  const counts = parts.join(', ');
+  const raw = isMoveSkipReason(data.move) ? formatMoveNotice(data.move, counts) : `Curation: ${counts}`;
   return { text: dim(raw), raw };
 }

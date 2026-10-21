@@ -19,6 +19,8 @@ import {
 } from '../src/cli/commands/init.js';
 import { LEDGER_ROOT_TIMEOUT_MS, type LedgerRootLookup } from '../src/core/ledger-root.js';
 import { installedVersionMatches } from '../src/targets/claude-code/curation-install.js';
+import { MOVE_SKIP_NOTICE } from '../src/core/curation-move-skip.js';
+import { initGitRepo, pathWithFailingGit, snapshotTree, trackInGit } from './decisions/curation-fixtures.js';
 import type { ManifestData } from '../src/core/manifest.js';
 
 const NOW = '2026-09-26T00:00:00.000Z';
@@ -281,6 +283,74 @@ describe('drainDisabledFeatureQueues (D-INIT-DRAIN-AFTER-SWITCH)', () => {
     }
   });
 
+  it('returns the fixed notice of a curation drain that left the project alone, and still drains memory first', async () => {
+    const calls: string[] = [];
+    const io: DisabledQueueDrainIO = {
+      drainMemoryQueue: async (r) => { calls.push(`memory:${r}`); return { drained: true }; },
+      drainCurationQueue: async (r) => { calls.push(`curation:${r}`); return { drained: false, skipped: 'tracked' }; },
+    };
+    const refused = await drainDisabledFeatureQueues({ gitRoot: ROOT, ledgerRoot: ROOT, memoryEnabled: false, curationEnabled: false, manifestWritten: true }, io);
+    expect(calls).toEqual([`memory:${ROOT}`, `curation:${ROOT}`]);
+    expect(refused).toEqual([expect.stringContaining(MOVE_SKIP_NOTICE.tracked)]);
+  });
+
+  it.each(['tracked', 'unknown'] as const)('prints only the short sentence when the move step has just printed the %s notice', async (reason) => {
+    const io: DisabledQueueDrainIO = {
+      drainMemoryQueue: async () => ({ drained: true }),
+      drainCurationQueue: async () => ({ drained: false, skipped: reason }),
+    };
+    const refused = await drainDisabledFeatureQueues(
+      { gitRoot: ROOT, ledgerRoot: ROOT, memoryEnabled: false, curationEnabled: false, manifestWritten: true, shownSkip: reason },
+      io,
+    );
+    expect(refused).toEqual(['The curation queue was not drained.']);
+  });
+
+  it('prints the whole notice when the move step printed the notice of another reason', async () => {
+    const io: DisabledQueueDrainIO = {
+      drainMemoryQueue: async () => ({ drained: true }),
+      drainCurationQueue: async () => ({ drained: false, skipped: 'tracked' }),
+    };
+    const refused = await drainDisabledFeatureQueues(
+      { gitRoot: ROOT, ledgerRoot: ROOT, memoryEnabled: false, curationEnabled: false, manifestWritten: true, shownSkip: 'unknown' },
+      io,
+    );
+    expect(refused).toEqual([`The curation queue was not drained. ${MOVE_SKIP_NOTICE.tracked}`]);
+  });
+
+  describe.each(['tracked', 'unknown'] as const)('with the real drains: the tracked-folder check answers %s', (reason) => {
+    it('curation off deletes no curation file, returns the fixed notice, and still drains the memory queue', async () => {
+      const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-init-drain-skip-'));
+      vi.stubEnv('HOME', path.join(tmp, 'home'));
+      try {
+        const repo = path.join(tmp, 'repo');
+        await fs.mkdir(repo);
+        initGitRepo(repo);
+        const queue = '.pending-turns.jsonl';
+        for (const dir of ['learning', 'curation', 'memory']) {
+          await fs.mkdir(path.join(repo, '.devflow', dir), { recursive: true });
+          await fs.writeFile(path.join(repo, '.devflow', dir, queue), '{"role":"user"}\n');
+        }
+        if (reason === 'tracked') trackInGit(repo, `.devflow/learning/${queue}`);
+        else vi.stubEnv('PATH', pathWithFailingGit(tmp));
+        const curationFolders = (): Map<string, string> => new Map([
+          ...snapshotTree(path.join(repo, '.devflow', 'learning')),
+          ...[...snapshotTree(path.join(repo, '.devflow', 'curation'))].map(([k, v]) => [`curation/${k}`, v] as const),
+        ]);
+        const before = curationFolders();
+
+        const refused = await drainDisabledFeatureQueues({ gitRoot: repo, ledgerRoot: repo, memoryEnabled: false, curationEnabled: false, manifestWritten: true });
+
+        expect(curationFolders()).toEqual(before);
+        expect(refused).toEqual([expect.stringContaining(MOVE_SKIP_NOTICE[reason])]);
+        await expect(fs.lstat(path.join(repo, '.devflow', 'memory', queue)), 'the memory queue is drained').rejects.toThrow(/ENOENT/);
+      } finally {
+        vi.unstubAllEnvs();
+        await fs.rm(tmp, { recursive: true, force: true });
+      }
+    });
+  });
+
   it('drains only the features that are off', async () => {
     const memOff = recorder();
     await drainDisabledFeatureQueues({ gitRoot: ROOT, ledgerRoot: ROOT, memoryEnabled: false, curationEnabled: true, manifestWritten: true }, memOff.io);
@@ -438,7 +508,7 @@ describe("init asks for its own repository's ledger root within the shared budge
 
         expect(report.movedCount).toBe(0);
         expect(report.lines.filter((line) => line.includes(repo))).toEqual([
-          `Ledger move skipped for ${repo}: git did not answer in time. Nothing was moved. The next init tries again.`,
+          `Ledger move skipped for ${repo}: git did not answer in time. Nothing was moved. The next init or session start tries again.`,
         ]);
         await expect(fs.stat(path.join(repo, '.devflow', 'learning'))).resolves.toBeTruthy();
       });

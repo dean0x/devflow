@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Validate re-runs each failed test file alone** ([#477](https://github.com/dean0x/devflow/issues/477)).
+  - After a failed test run, Validate re-runs each failed test file alone, once, with verbose output.
+    The bound is 20 files.
+    Validate waits at most 120 seconds for each re-run, so the worst case is 40 minutes for each Validate run.
+    The 120 seconds is a bound on the wait, not on the re-run: the platform moves a foreground command that reaches its timeout to the background, where it runs to the end (see `docs/reference/platform-assumptions.md`).
+    A re-run that times out makes the file REAL.
+    A re-run starts only after the path passes a strict check, and it uses the full run's own test command with only that file added.
+  - Only the Phase 6 validation in `/implement` labels files, because only that run is given the branch base.
+    In every other run, including the re-validation after QA fixes, the re-runs give failure detail and every failure is REAL.
+  - A file is PASSED-ALONE only if all of these hold:
+    the path is checked and tracked, neither the branch nor the working tree changed the file, its failure was a timeout, a spawn error or a resource error,
+    the re-run used only that file with no name filter, it exited 0, and the tests that failed in the full run ran and passed.
+    Every other failure is REAL and goes to Fix.
+  - The cause is the failure that the test runner reports.
+    An assertion failure is REAL, also when its message names a timeout.
+    A child-process timeout that a test reports as a failed assertion is therefore REAL.
+    Issue [#332](https://github.com/dean0x/devflow/issues/332) tracks the repair of such tests.
+  - The gate and its `gate:validate` claim pass only when the PASSED-ALONE files explain every failure.
+    Only Validate's own report lists them, on one `Passed alone:` line.
+    The `/implement` summary and the PR body do not show that line.
+  - The re-run steps are in the agent reference `validate/passed-alone.md`.
+    After updating, run `devflow init`.
+
+---
+
+## [3.8.0] - 2026-10-21
+
 ### Upgrade notes — Curation rename
 
 The learning feature is now called curation ([#529](https://github.com/dean0x/devflow/issues/529)).
@@ -108,6 +137,8 @@ the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-convention
   The ledger files, the swept files and the claim owner file stay in the backup.
   Without this drain, a later `--enable` and init would merge those rows into the live queue.
   The drain deletes nothing when a backup folder, or one of its queue files, is a symbolic link, and it says so.
+  The drain also deletes nothing when git tracks any entry under a data folder or a backup folder, or when a `.git` entry stands and git does not answer.
+  It then prints the notice that the git check shows (see Outcomes that need action).
   If the backups cannot be listed for another reason, the drain still removes the queue files of the live and the old folder, and prints a warning that the backups were not drained.
 - `devflow curation --status` prints one `Backup:` line for each backup folder.
   The line shows how many pending rows the backup still holds.
@@ -118,11 +149,6 @@ the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-convention
   A backup made on re-upgrade can hold the only copy of entries that 3.7 wrote. Check them before you delete it.
 - An init merges rows from at most 50 backup folders in one run. It passes over a folder that holds no pending rows,
   so a later folder is reached when the earlier ones are done.
-- A queue file that git tracks is never merged, because the repository supplied it.
-  The move does not carry it into the new folder, not even in a whole-folder move.
-  The pass that finds it renames it in the backup to `<name>.tracked-<stamp>-<8 hex>`, and a note says how many files stayed and under what names.
-  No later init, status count or drain reads that file, so it stays inert also after you commit its deletion.
-  If git is missing, times out or fails, the move merges nothing from that folder and says so. A later init tries again.
 
 **The queue cap:**
 - A merge fills a pending queue up to 100 lines and no further.
@@ -145,13 +171,26 @@ the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-convention
   Nothing moves. Init prints `Ledger move refused for <root>`.
   The HUD and `devflow curation --status` print `Curation: move refused, see the hook log`.
   Remove the cause, then run `devflow init` or start a new session.
+- Skipped by the git check: git tracks any entry under `.devflow/learning/`, `.devflow/curation/` or a backup folder
+  (`.devflow/learning.backup-*`), or tracks an entry named `.devflow` ([#598](https://github.com/dean0x/devflow/issues/598)). The same outcome applies when a `.git` entry stands and git does not answer.
+  Nothing in the project changes. Init prints `Ledger move skipped for <root>` and a fixed notice that holds nothing from the repository.
+  The HUD prints `Curation: move skipped, git tracks files in the .devflow data folders`
+  or `Curation: move skipped, git did not answer`.
+  `devflow curation --status`, `--list` and `--show` print the whole notice. The HUD and these commands print the skip also when `.devflow/curation/` exists.
+  While the old folder is there, `--restore`, `--clear`, `--reset` and `--configure` (project scope) print the notice, change nothing and exit 1.
+  `--enable` and `--disable` print the notice as a warning, and their exit code does not change.
+  `--disable`, `--clear` and an init with curation off delete no queue file in these cases, and each prints the notice once.
+  When init has printed the notice in its `Ledger move skipped for <root>` line, its drain adds only `The curation queue was not drained.`
+  When git tracks files, the notice tells you to run `git ls-files .devflow`, and then `git rm --cached <file>`, in the checkout that holds the folders.
+  When git does not answer, the notice tells you to check that git runs in the project. The move runs again at the next session start or the next init.
+  A session start runs the check again in both cases.
 - Not yet moved: `devflow curation --status`, `--list`, `--show` and the HUD print
   `Curation: run devflow init, or open Claude Code in this project after it`.
   They do not read the old folder.
 - Failed: init prints `Ledger move failed for <root>` and copies nothing. The next init tries again.
   A move that fails at session start shows the same `Curation: move refused, see the hook log` line as a refusal.
   The hook log names the cause. The next session start tries again.
-- Skipped: git did not name the project's repository within one second, for example on a hung mount.
+- Skipped, no repository: git did not name the project's repository within one second, for example on a hung mount.
   Init prints `Ledger move skipped for <root>: git did not answer in time.` and does not count the project as moved.
   The other projects move. The next init tries again, and a session start in the project moves it too.
 
@@ -291,28 +330,6 @@ Do the step below after you update.
 
 ### Changed
 
-- **Validate re-runs each failed test file alone** ([#477](https://github.com/dean0x/devflow/issues/477)).
-  - After a failed test run, Validate re-runs each failed test file alone, once, with verbose output.
-    The bound is 20 files.
-    Validate waits at most 120 seconds for each re-run, so the worst case is 40 minutes for each Validate run.
-    The 120 seconds is a bound on the wait, not on the re-run: the platform moves a foreground command that reaches its timeout to the background, where it runs to the end (see `docs/reference/platform-assumptions.md`).
-    A re-run that times out makes the file REAL.
-    A re-run starts only after the path passes a strict check, and it uses the full run's own test command with only that file added.
-  - Only the Phase 6 validation in `/implement` labels files, because only that run is given the branch base.
-    In every other run, including the re-validation after QA fixes, the re-runs give failure detail and every failure is REAL.
-  - A file is PASSED-ALONE only if all of these hold:
-    the path is checked and tracked, neither the branch nor the working tree changed the file, its failure was a timeout, a spawn error or a resource error,
-    the re-run used only that file with no name filter, it exited 0, and the tests that failed in the full run ran and passed.
-    Every other failure is REAL and goes to Fix.
-  - The cause is the failure that the test runner reports.
-    An assertion failure is REAL, also when its message names a timeout.
-    A child-process timeout that a test reports as a failed assertion is therefore REAL.
-    Issue [#332](https://github.com/dean0x/devflow/issues/332) tracks the repair of such tests.
-  - The gate and its `gate:validate` claim pass only when the PASSED-ALONE files explain every failure.
-    Only Validate's own report lists them, on one `Passed alone:` line.
-    The `/implement` summary and the PR body do not show that line.
-  - The re-run steps are in the agent reference `validate/passed-alone.md`.
-    After updating, run `devflow init`.
 - **`/implement` skips Harden at `lean` on a docs-only diff** ([#482](https://github.com/dean0x/devflow/issues/482)). At `lean`, `/implement` skips Phase 4 Harden when the diff is docs-only. The decision reads path names only. It reads no diff content and runs no detection script. Harden is skipped only when all of these hold: the compliance lens is exactly `off`; the branch diff list is not empty; no Code report names a deleted, renamed or moved path; and every changed path is the root `README.md`, the root `CHANGELOG.md` or a `.md` file under the root `docs/`. A path on that list has no segment that starts with a dot, no double quote in its name and no file name that agents load as instructions, in any letter case. No loaded instruction, rules or imported file names the path. A tests-only diff runs Harden. When the decision is unclear, Harden runs. The run report says `Harden: ran` or `Harden: SKIPPED (docs-only diff)` at `lean` only. `full` and `standard` do not change. When Harden runs, it reads the whole branch diff. `/code-review` security runs at every level. The README, the CLI reference and the command reference state the rule. Known limits at `lean` on a docs-only diff: stub and wiring detection does not run; the pitfall check of public text in README and CHANGELOG does not run; a path that only a not-yet-loaded instruction file, such as a nested one, names is not seen; and Harden does not review a delete or a rename that no Code report names ([#571](https://github.com/dean0x/devflow/issues/571)). The docs-only check reads path names. It does not look at symlinks, file-type changes, or docs files that a site generator compiles. Run `devflow gates --set standard` or `--set full` to keep Harden on every diff.
 - **`/implement` and `/resolve` skip Polish at `standard` and `lean`** ([#481](https://github.com/dean0x/devflow/issues/481)).
   - At `standard` and `lean`, `/implement` skips Phase 3 Polish, and `/resolve` skips Phase 6 Polish in each worktree at that level.
@@ -368,6 +385,9 @@ Do the step below after you update.
     Each names the cause and a fix.
     `/resolve` takes its branch diff from the Git agent's `validate-branch`, which returns BLOCKED in that case.
   - Run `devflow init` after you update, to install the script and the updated commands.
+- **SessionStart loads the current working memory once** ([#591](https://github.com/dean0x/devflow/issues/591)).
+  - It does not load pre-compaction memory snapshots, also when a snapshot is newer or the current memory is missing.
+  - SessionStart does not delete or move the existing `backup.json` file. The next PreCompact writes it again with Git state only.
 
 ---
 
@@ -2118,6 +2138,7 @@ devflow init
 ---
 
 [Unreleased]: https://github.com/dean0x/devflow/compare/v3.8.0...HEAD
+[3.8.0]: https://github.com/dean0x/devflow/compare/v3.7.0...v3.8.0
 [3.7.0]: https://github.com/dean0x/devflow/compare/v3.6.0...v3.7.0
 [3.6.0]: https://github.com/dean0x/devflow/compare/v3.5.0...v3.6.0
 [3.5.0]: https://github.com/dean0x/devflow/compare/v3.4.0...v3.5.0
