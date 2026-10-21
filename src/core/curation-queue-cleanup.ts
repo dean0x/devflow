@@ -26,14 +26,14 @@ import { formatCurationStoreUnavailable } from './curation-store.js';
 import { drainQueueFiles, formatRefusedDrain, type QueueDrain } from './queue-drain.js';
 import { loadTrackedAreas, type TrackedAreasAnswer, type TrackedAreasLoad } from './tracked-areas.js';
 
-/**
- * What {@link drainCurationQueue} and {@link drainDisabledCurationQueue} did: a
- * {@link QueueDrain}, or `skipped`, which deleted nothing because git tracks files in a
- * curation data folder (`tracked`) or did not answer (`unknown`).
- */
-export type CurationQueueDrain =
-  | QueueDrain
-  | { readonly drained: false; readonly skipped: MoveSkipReason };
+/** A drain that deleted nothing because git tracks files in a curation data folder (`tracked`) or did not answer (`unknown`). */
+export interface SkippedQueueDrain {
+  readonly drained: false;
+  readonly skipped: MoveSkipReason;
+}
+
+/** What {@link drainCurationQueue} and {@link drainDisabledCurationQueue} did: a {@link QueueDrain}, or a {@link SkippedQueueDrain}. */
+export type CurationQueueDrain = QueueDrain | SkippedQueueDrain;
 
 /** The folders to check for links, and the queue files to delete, in the live and the old ledger folder of `gitRoot`. */
 function liveQueueTargets(gitRoot: string): { readonly folders: readonly string[]; readonly files: readonly string[] } {
@@ -134,7 +134,7 @@ export async function drainDisabledCurationQueue(
  * The skipped answer for `root`, or null when the drain may go on. The tracked-areas
  * check decides; a check that cannot be loaded cannot answer, so it is `unknown`.
  */
-function trackedSkip(root: string, load: () => TrackedAreasLoad): { readonly drained: false; readonly skipped: MoveSkipReason } | null {
+function trackedSkip(root: string, load: () => TrackedAreasLoad): SkippedQueueDrain | null {
   const loaded = load();
   const answer: TrackedAreasAnswer = loaded.ok ? loaded.value.checkTrackedAreas(root) : 'unknown';
   return answer === 'untracked' ? null : { drained: false, skipped: answer };

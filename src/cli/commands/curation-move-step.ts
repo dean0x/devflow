@@ -557,7 +557,9 @@ export async function runInitCurationMove(
     if (result.ok) {
       lines.push(...result.value.lines);
       movedCount = result.value.movedCount;
-      leftAlone = result.value.outcomes.flatMap(outcome => outcome.kind === 'left-alone' ? [{ root: outcome.root, reason: outcome.reason }] : []);
+      leftAlone = result.value.outcomes.flatMap(
+        outcome => outcome.kind === 'left-alone' ? [{ root: outcome.root, reason: outcome.reason }] : [],
+      );
     } else {
       lines.push(`The ledger move did not run: ${result.error.message}.`);
     }

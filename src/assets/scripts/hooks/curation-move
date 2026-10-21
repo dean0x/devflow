@@ -23,8 +23,8 @@
 #      (an earlier attempt was refused or failed; the refused marker), curation-move.<key>.busy
 #      (a fresh queue claim held the move, and a claim can last 15 minutes), and
 #      curation-move.<key>.tracked and curation-move.<key>.unknown (the move was skipped: git
-#      tracks files in a curation data folder, or git did not answer). A marker means return, with no fork and no log
-#      line. A second argument `retry` (session start) removes all four first, so a
+#      tracks files in a curation data folder, or git did not answer). A marker means
+#      return, with no fork and no log line. A second argument `retry` (session start) removes all four first, so a
 #      refusal, a skip and a claim are looked at again once per session; that removal
 #      forks only when a marker exists. The HUD and status read every marker but the busy
 #      one: a busy move is not a refusal.

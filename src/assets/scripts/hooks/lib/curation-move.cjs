@@ -1021,9 +1021,9 @@ function curationMoveFinish(ctx, { whole }) {
  * an entry named `.devflow` itself (checkTrackedAreas). If it does, or if a `.git` entry
  * stands and git does not answer, the answer is `skipped` with the reason `tracked` or
  * `unknown`, and nothing at all changes: the folders, the machine directory and the
- * journal stay as they are. With `unknown` the answer also
- * carries `cause`, one fixed word that says why git did not answer (UNKNOWN_CAUSES in
- * tracked-areas.cjs). A root with no `.git` entry makes no git call.
+ * journal stay as they are. With `unknown` the answer also carries `cause`, one fixed
+ * word that says why git did not answer (UNKNOWN_CAUSES in tracked-areas.cjs). A root
+ * with no `.git` entry makes no git call.
  *
  * Otherwise the machine directory is made if absent, and every lock the pass needs is
  * taken with no wait: the move lock, the old folder's store lock and queue lock, and,
