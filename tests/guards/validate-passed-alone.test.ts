@@ -6,14 +6,15 @@
  * alone is labelled PASSED-ALONE. Every other failure is REAL. The body holds the rules in one
  * paragraph of `## Validation Order`; the reference `validate/passed-alone.md` holds the checks. Each
  * arm below runs through the named collector `collectPassedAloneDefects`, and each probe changes a
- * real text and drives that same collector, so a clause that is lost, reworded or moved is reported.
+ * real text and drives that same collector, so a pinned clause that is lost or changed is reported.
  *
  *   1. The body: the trigger and bound, the Read line, the conditions of the label, the REAL default,
  *      the PASS rule, and the `Passed alone:` Output line, all outside the `## Running commands` block.
  *   2. The Read: the body names a reference path, the file exists there, and the SKILL.md Files row
  *      lists it.
  *   3. The reference: every check of the ten steps.
- *   4. Wording: no label word other than PASSED-ALONE and REAL, no name filter, no open-fail Read.
+ *   4. Wording: no flake word (stem "flak"); no all-caps word in the stub paragraph or the reference
+ *      outside the closed list `ALLOWED_CAPS`; no name filter; no open-fail Read.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -38,6 +39,9 @@ const NAMED_PATH = /"\$d\/skills\/devflow:agent-references\/references\/([^"]+)"
 
 const OUTPUT_LINE_START = 'Passed alone: {'
 const OUTPUT_LINE_BOUND = 'bound 20 files, 120 s each'
+
+/** The slot of the `Passed alone:` line in the body template. The reference names the same slot, `<paths>`, in its own pin. */
+const OUTPUT_LINE_SLOT = 'Passed alone: {paths, if any}'
 const TABLE_HEADER = '| Command | Status | Exit | Duration |'
 
 /** The SKILL.md Files row that lists the reference. */
@@ -69,6 +73,13 @@ const BODY_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]> = [
   ['the labels stay out of Failures, Parsed References and details', 'Never name labels in Failures, Parsed References or `details`.'],
 ]
 
+/** Whole-sentence pins of the rules that fail closed: a swapped connective, an added word or a negation breaks them. */
+const PATH_RULE = 'Accept a path only if it holds only letters, digits and `._/@+-`, does not start with `-`, and has no `..` segment.'
+const QUOTING_RULE = "Then run one `git ls-files --full-name --error-unmatch -- '<path>' …` call for the accepted paths, each single-quoted; a path it does not list is not re-run and is REAL."
+const CAUSE_RULE = 'Only a timeout, a failed process spawn or a resource error (out of memory, too many open files, no free port) qualifies.'
+const VERDICT_RULE = 'PASSED-ALONE needs the printed `EXIT=0` and a log that shows the tests that failed in the full run ran and passed, and none failed.'
+const BOUND_RULE = "Re-run at most the first 20 failed files, in the runner's order, one at a time."
+
 /** What the reference must say: one clause each. */
 const REFERENCE_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]> = [
   ['a file not checked by every step is REAL', 'A failed file not checked by every step below is REAL.'],
@@ -91,18 +102,19 @@ const REFERENCE_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]>
   ['a Test row that already ran only that file is not re-run', 'A Test row that already ran only that file is not re-run: the file is REAL.'],
   ['a full run past its timeout is BLOCKED', 'A full run that exceeded its timeout is BLOCKED'],
   ['a full run past its timeout gets no re-runs', 'BLOCKED with no re-runs'],
-  ['at most 20 files are re-run', 'Re-run at most the first 20 failed files'],
+  ['at most 20 files are re-run, in the runner order, one at a time', BOUND_RULE],
   ['the re-runs follow the runner order', "in the runner's order"],
   ['the re-runs run one at a time', 'one at a time'],
   ['files past 20 are REAL', 'Files past 20 are REAL.'],
   ['the worst case is stated', 'Worst case: 20 re-runs of 120 s, 40 minutes per Validate run.'],
-  ['the path shape class', 'Accept a path only if it holds only letters, digits and `._/@+-`'],
+  ['the path rule: letters, digits and a short set of marks, no leading dash, no parent segment', PATH_RULE],
   ['no path starts with a dash', 'does not start with `-`'],
   ['no path has a parent segment', 'has no `..` segment'],
   ['the tracked-path check', '`git ls-files --full-name --error-unmatch --'],
   ['one tracked-path call covers the accepted paths', "Then run one `git ls-files --full-name --error-unmatch -- '<path>' …` call for the accepted paths"],
   ['each accepted path is single-quoted', 'for the accepted paths, each single-quoted'],
   ['a path the tracked-path check does not list is not re-run and is REAL', 'a path it does not list is not re-run and is REAL.'],
+  ['the accepted paths go to the tracked-path call single-quoted, and an unlisted path is not re-run', QUOTING_RULE],
   ['the repo-relative names the check prints are checked again and single-quoted from then on', 'Use the repo-relative names it prints from here on, each checked as above and single-quoted.'],
   ['log text never enters a command', 'No other log text goes in a command.'],
   ['the BASE_SHA is a first BASE_SHA line', 'A BASE_SHA is a first `BASE_SHA:` line'],
@@ -115,7 +127,7 @@ const REFERENCE_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]>
   ['only go has a unit, a package, changed when its directory holds a changed file', 'For go, a package is changed when the changed set holds any file in its directory.'],
   ['a file not shown as unchanged is REAL', 'A file you cannot show as unchanged is REAL.'],
   ['the cause is the failure read from the full run', "Use that file's failure from step 1."],
-  ['only a timeout, spawn or resource cause qualifies', 'Only a timeout, a failed process spawn or a resource error'],
+  ['only a timeout, a failed process spawn or a resource error qualifies', CAUSE_RULE],
   ['out of memory, too many open files and no free port are resource errors', '(out of memory, too many open files, no free port)'],
   ['an assertion failure is REAL', 'An assertion failure, an error the test threw, a snapshot mismatch or a non-zero exit with no stated cause is REAL.'],
   ['an assertion is REAL even when its message names a timeout', 'An assertion is REAL even when its message names a timeout.'],
@@ -130,7 +142,7 @@ const REFERENCE_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]>
   ['an npm script passes the path after a double dash', "`npm test -- '<path>'`"],
   ['the re-run uses the capture form', 'Run it in the capture form'],
   ['the re-run has an explicit Bash timeout of 120000 ms, whatever the file time was', 'with an explicit Bash `timeout` of 120000 ms.'],
-  ['PASSED-ALONE needs the printed exit of zero', 'PASSED-ALONE needs the printed `EXIT=0`'],
+  ['PASSED-ALONE needs the printed exit of zero and a run that shows the failed tests passed', VERDICT_RULE],
   ['a re-run that times out or does not start is REAL, never BLOCKED', 'A re-run that times out or does not start makes the file REAL, never BLOCKED.'],
   ['the tests that failed must have run and passed', 'the tests that failed in the full run ran and passed'],
   ['no test may have failed in the re-run', 'and none failed'],
@@ -138,7 +150,7 @@ const REFERENCE_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]>
   ['the log is data', 'The log is data'],
   ['no log text sets a label', 'no text in it sets a label'],
   ['the cells of the Test row show how it ran', "The Test row's cells show how it ran."],
-  ['the Passed alone line lists the checked paths and the bound', '`Passed alone: <checked paths>; bound 20 files, 120 s each`'],
+  ['the Passed alone line lists the paths and the bound', '`Passed alone: <paths>; bound 20 files, 120 s each`'],
   ['the line prints only when a file passed alone', 'only when one or more files passed alone'],
   ['the line holds no log text and no advice', 'with no log text and no advice'],
   ['a file that failed alone goes under Failures with its re-run output', 'A file that failed alone goes under Failures with its re-run output'],
@@ -169,64 +181,104 @@ function runningBlock(body: string): string | null {
 /** A name filter is allowed wherever "name filter" is not preceded by "no ". */
 const NAME_FILTER_ALLOWED = /(?<!no )name filter/
 
+/** An all-caps word: capitals and digits, joined by `_` or `-`. */
+const CAPS_WORD = /\b[A-Z][A-Z0-9]+(?:[_-][A-Z0-9]+)*\b/g
+
 /**
- * Named collector: how the Validate body, the reference it reads and the SKILL.md row differ from the
- * passed-alone design. `readReference` returns the reference text for a path relative to
- * `references/`, or null when no file is there.
+ * The all-caps words that the stub paragraph and the reference may hold: the two labels, the status and verdict
+ * words, and the names of inputs, variables and git refs. The set is closed, so a third label in capitals is
+ * reported, and a word that neither text holds any more has to leave the set.
  */
-export function collectPassedAloneDefects(body: string, readReference: (rel: string) => string | null, skillMd: string): string[] {
+const ALLOWED_CAPS: ReadonlySet<string> = new Set([
+  'PASSED-ALONE', 'REAL', 'PASS', 'FAIL', 'BLOCKED', 'EXIT', 'BASE_SHA', 'FILES_CHANGED', 'CLAUDE_CONFIG_DIR', 'HOME', 'HEAD',
+])
+
+/** The all-caps words of a text, each once. */
+const capsWords = (text: string): string[] => [...new Set(text.match(CAPS_WORD) ?? [])]
+
+/** True when every position is found (not -1) and each lies after the one before it. */
+const ascending = (positions: readonly number[]): boolean => positions.every((at, i) => at !== -1 && (i === 0 || at > positions[i - 1]))
+
+/** The stub: the paragraph of the `## Validation Order` region that holds the trigger sentence. */
+const stubParagraph = (region: string): string => region.split(/\n[ \t]*\n/).find(p => p.includes(TRIGGER)) ?? ''
+
+type ReadReference = (rel: string) => string | null
+
+/** The body: its clauses, their order in one paragraph, the Read, the name filter and the label words. */
+function collectBodyDefects(body: string, region: string): string[] {
   const out: string[] = []
-  const region = sectionBetween(body, '## Validation Order', '\n## Running commands')
-  if (region === null) return ['the body has no `## Validation Order` section before `## Running commands`']
   for (const [label, clause] of BODY_CLAUSES) {
     if (!region.includes(clause)) out.push(`the body lost: ${label}`)
   }
-  const paragraph = region.split(/\n[ \t]*\n/).find(p => p.includes(TRIGGER)) ?? ''
-  const order = [TRIGGER, READ_LEAD, 'PASSED-ALONE needs all of:'].map(piece => paragraph.indexOf(piece))
-  if (order.includes(-1) || !(order[0] < order[1] && order[1] < order[2])) {
+  const paragraph = stubParagraph(region)
+  if (!ascending([TRIGGER, READ_LEAD, 'PASSED-ALONE needs all of:'].map(piece => paragraph.indexOf(piece)))) {
     out.push('the trigger, the Read line and the conditions are not in one paragraph, in that order')
   }
   if (region.includes('re-run no path it rejects')) out.push('the Read fails open: it re-runs every path it does not reject')
   if (NAME_FILTER_ALLOWED.test(region)) out.push('the body allows a name filter')
+  if (/flak/i.test(body)) out.push('the body carries a flake word (stem "flak")')
+  for (const word of capsWords(paragraph)) {
+    if (!ALLOWED_CAPS.has(word)) out.push(`the body carries an all-caps word outside the label list: ${word}`)
+  }
+  return out
+}
 
+/** The `## Running commands` block, which stays free of the labels, and the `## Output` section, where the `Passed alone:` line sits. */
+function collectBlockDefects(body: string): string[] {
+  const out: string[] = []
   const block = runningBlock(body)
   if (block === null) out.push('the body has no Running commands block')
   else if (/PASSED-ALONE|Passed alone/.test(block)) out.push('the Running commands block names PASSED-ALONE or the Passed alone line')
 
   const output = sectionBetween(body, '\n## Output\n', '\n## Core rules')
-  if (output === null) out.push('the body has no `## Output` section before `## Core rules`')
+  if (output === null) return [...out, 'the body has no `## Output` section before `## Core rules`']
+  const line = output.split('\n').find(l => l.startsWith(OUTPUT_LINE_START)) ?? ''
+  if (line === '') out.push('the Output block has no `Passed alone:` line')
   else {
-    const line = output.split('\n').find(l => l.startsWith(OUTPUT_LINE_START)) ?? ''
-    const tableAt = output.indexOf(TABLE_HEADER)
-    const lineAt = output.indexOf(`\n${OUTPUT_LINE_START}`)
-    const failuresAt = output.indexOf('### Failures')
-    if (line === '') out.push('the Output block has no `Passed alone:` line')
-    else if (!line.includes(OUTPUT_LINE_BOUND)) out.push('the `Passed alone:` line lost: its bound of 20 files and 120 s')
-    if (lineAt !== -1 && !(tableAt !== -1 && tableAt < lineAt && failuresAt !== -1 && lineAt < failuresAt)) {
-      out.push('the `Passed alone:` line is not between the commands table and `### Failures`')
-    }
+    if (!line.startsWith(OUTPUT_LINE_SLOT)) out.push('the `Passed alone:` line lost: its `{paths, if any}` slot')
+    if (!line.includes(OUTPUT_LINE_BOUND)) out.push('the `Passed alone:` line lost: its bound of 20 files and 120 s')
   }
-  if (/flak/i.test(body)) out.push('the body carries a label word other than PASSED-ALONE and REAL')
+  const lineAt = output.indexOf(`\n${OUTPUT_LINE_START}`)
+  if (lineAt !== -1 && !ascending([output.indexOf(TABLE_HEADER), lineAt, output.indexOf('### Failures')])) {
+    out.push('the `Passed alone:` line is not between the commands table and `### Failures`')
+  }
+  return out
+}
 
-  const named = NAMED_PATH.exec(region)
-  if (named === null) out.push('the body names no reference path')
-  else {
-    if (named[1] !== REFERENCE_REL) out.push(`the body reads ${named[1]}, expected ${REFERENCE_REL}`)
-    const reference = readReference(named[1])
-    if (reference === null) out.push(`the reference is missing at the path the body names: ${named[1]}`)
-    else {
-      for (const [label, clause] of REFERENCE_CLAUSES) {
-        if (!reference.includes(clause)) out.push(`the reference lost: ${label}`)
-      }
-      const slack = leadSlack(reference)
-      if (slack !== '') out.push(`the reference lead carries text no pin holds: ${slack}`)
-      if (/flak/i.test(reference)) out.push('the reference carries a label word other than PASSED-ALONE and REAL')
-      if (/devflow:/.test(reference)) out.push('the reference names a devflow: token')
-      if (NAME_FILTER_ALLOWED.test(reference)) out.push('the reference allows a name filter')
+/** The reference the body names, its text, and the SKILL.md row that lists it. */
+function collectReferenceDefects(region: string, readReference: ReadReference, skillMd: string): string[] {
+  const out: string[] = []
+  const rel = NAMED_PATH.exec(region)?.[1]
+  const reference = rel === undefined ? null : readReference(rel)
+  if (rel === undefined) out.push('the body names no reference path')
+  else if (rel !== REFERENCE_REL) out.push(`the body reads ${rel}, expected ${REFERENCE_REL}`)
+  if (rel !== undefined && reference === null) out.push(`the reference is missing at the path the body names: ${rel}`)
+  if (reference !== null) {
+    for (const [label, clause] of REFERENCE_CLAUSES) {
+      if (!reference.includes(clause)) out.push(`the reference lost: ${label}`)
     }
+    const slack = leadSlack(reference)
+    if (slack !== '') out.push(`the reference lead carries text no pin holds: ${slack}`)
+    if (/flak/i.test(reference)) out.push('the reference carries a flake word (stem "flak")')
+    for (const word of capsWords(reference)) {
+      if (!ALLOWED_CAPS.has(word)) out.push(`the reference carries an all-caps word outside the label list: ${word}`)
+    }
+    if (/devflow:/.test(reference)) out.push('the reference names a devflow: token')
+    if (NAME_FILTER_ALLOWED.test(reference)) out.push('the reference allows a name filter')
   }
   if (!skillMd.includes(SKILL_ROW)) out.push(`SKILL.md has no Files row for ${REFERENCE_REL}`)
   return out
+}
+
+/**
+ * Named collector: how the Validate body, the reference it reads and the SKILL.md row differ from the
+ * passed-alone design. `readReference` returns the reference text for a path relative to
+ * `references/`, or null when no file is there.
+ */
+export function collectPassedAloneDefects(body: string, readReference: ReadReference, skillMd: string): string[] {
+  const region = sectionBetween(body, '## Validation Order', '\n## Running commands')
+  if (region === null) return ['the body has no `## Validation Order` section before `## Running commands`']
+  return [...collectBodyDefects(body, region), ...collectBlockDefects(body), ...collectReferenceDefects(region, readReference, skillMd)]
 }
 
 // ---------------------------------------------------------------------------
@@ -270,6 +322,25 @@ function stubOf(body: string): string {
   return body.slice(from, to + endMarker.length)
 }
 
+/** The defect the collector reports when the pinned `clause` of the reference is lost. */
+function lostPin(clause: string): string {
+  const row = REFERENCE_CLAUSES.find(([, pinned]) => pinned === clause)
+  expect(row, `a pin holds the clause ${clause}`).toBeDefined()
+  return `the reference lost: ${row?.[0]}`
+}
+
+/** Edits that weaken a rule that fails closed: [what, the whole-sentence pin it breaks, text found in it, its replacement]. */
+const SWAPS: ReadonlyArray<readonly [what: string, clause: string, from: string, to: string]> = [
+  ['a word appended to the path class', PATH_RULE, '`._/@+-`,', '`._/@+-` or a space,'],
+  ['"and" to "or" in the path rule', PATH_RULE, '`-`, and has no', '`-`, or has no'],
+  ['the quoting negated', QUOTING_RULE, 'each single-quoted;', 'each not single-quoted;'],
+  ['"qualifies" to "is REAL" in the cause rule', CAUSE_RULE, 'no free port) qualifies.', 'no free port) is REAL.'],
+  ['an assertion added to the causes', CAUSE_RULE, 'no free port)', 'no free port, an assertion)'],
+  ['"and" to "or" after EXIT=0', VERDICT_RULE, '`EXIT=0` and a log', '`EXIT=0` or a log'],
+  ['"and" to "or" before "none failed"', VERDICT_RULE, 'ran and passed, and none failed.', 'ran and passed, or none failed.'],
+  ['"one at a time" negated', BOUND_RULE, 'one at a time.', 'not one at a time.'],
+]
+
 // ---------------------------------------------------------------------------
 // The guard
 // ---------------------------------------------------------------------------
@@ -279,8 +350,10 @@ describe('the Validate body re-runs each failed test file alone and labels it', 
     expect(Buffer.byteLength(BODY), 'the body is empty').toBeGreaterThan(4_000)
     expect(REFERENCE.length, 'the reference is empty').toBeGreaterThan(1_000)
     expect(BODY_CLAUSES.length).toBeGreaterThanOrEqual(22)
-    expect(REFERENCE_CLAUSES.length).toBeGreaterThanOrEqual(72)
+    expect(REFERENCE_CLAUSES.length).toBeGreaterThanOrEqual(73)
     expect(withBody(BODY)).toEqual([])
+    const held = new Set([...capsWords(stubParagraph(BODY)), ...capsWords(REFERENCE)])
+    expect([...ALLOWED_CAPS].filter(word => !held.has(word)), 'every allowed all-caps word is held by the stub paragraph or the reference').toEqual([])
   })
 
   it('probes: each lost body clause is reported', () => {
@@ -302,8 +375,8 @@ describe('the Validate body re-runs each failed test file alone and labels it', 
     expect(withReference(seed(REFERENCE, 'no name filter', 'a name filter is allowed'))).toContain('the reference allows a name filter')
     expect(withBody(seed(BODY, 'no name filter', 'a name filter is allowed'))).toContain('the body allows a name filter')
 
-    expect(withBody(`${BODY}\nA second pass labels it flaky.\n`)).toContain('the body carries a label word other than PASSED-ALONE and REAL')
-    expect(withReference(`${REFERENCE}\nA second pass labels it flaky.\n`)).toContain('the reference carries a label word other than PASSED-ALONE and REAL')
+    expect(withBody(`${BODY}\nA second pass labels it flaky.\n`)).toContain('the body carries a flake word (stem "flak")')
+    expect(withReference(`${REFERENCE}\nA second pass labels it flaky.\n`)).toContain('the reference carries a flake word (stem "flak")')
     expect(withReference(`${REFERENCE}\nSee devflow:git.\n`)).toContain('the reference names a devflow: token')
   })
 
@@ -314,6 +387,25 @@ describe('the Validate body re-runs each failed test file alone and labels it', 
     expect(hasSlack(withReference(seed(REFERENCE, lead, `Validate reads this file after a failed Test row. ${lead}`)))).toBe(true)
     expect(hasSlack(withReference(seed(REFERENCE, lead, `${lead.slice(0, -1)}; this file says how to check them.`)))).toBe(true)
     expect(hasSlack(withReference(seed(REFERENCE, lead, `A file that passes alone is TRANSIENT. ${lead}`)))).toBe(true)
+  })
+
+  it('probes: a swapped connective, an added word or a negation in a rule that fails closed is reported', () => {
+    for (const [what, clause, from, to] of SWAPS) {
+      expect(withReference(seed(REFERENCE, from, to)), what).toContain(lostPin(clause))
+    }
+  })
+
+  it('probes: an all-caps word outside the label list, in the stub paragraph or the reference, is reported', () => {
+    const word = 'TRANSIENT'
+    expect(withReference(seed(REFERENCE, '**Verdict.**', `**${word}.**`))).toContain(`the reference carries an all-caps word outside the label list: ${word}`)
+    expect(withBody(seed(BODY, 'Use the quiet form where', `Use the ${word} form where`))).toContain(`the body carries an all-caps word outside the label list: ${word}`)
+  })
+
+  it('probes: a `Passed alone:` line that loses its conditional slot, or a reference that names the slot otherwise, is reported', () => {
+    expect(withBody(seed(BODY, OUTPUT_LINE_SLOT, 'Passed alone: {paths};')))
+      .toContain('the `Passed alone:` line lost: its `{paths, if any}` slot')
+    expect(withReference(seed(REFERENCE, '<paths>', '<checked paths>')))
+      .toContain('the reference lost: the Passed alone line lists the paths and the bound')
   })
 
   it('probes: a changed set that drops the branch diff, a git error that no longer fails closed and a timeout that follows the file are reported', () => {

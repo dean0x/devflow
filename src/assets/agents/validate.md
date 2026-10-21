@@ -23,7 +23,7 @@ You run the project's validation commands and report the results; never fix code
 - **VALIDATION_SCOPE**: `full` | `changed-only` (a test-filter hint)
 - **GATE_LEVEL**, **BASE_SHA** (optional): see Lint pack.
 
-**Worktree Support**: with `WORKTREE_PATH`, follow the `devflow:worktree-support` skill; else use cwd.
+**Worktree Support**: with `WORKTREE_PATH`, follow the `devflow:worktree-support` skill.
 
 ## Validation Order
 
@@ -72,7 +72,7 @@ HEAD: {`git rev-parse HEAD`, read before the first command}
 | Command | Status | Exit | Duration |
 |---|---|---|---|
 
-Passed alone: {paths}; bound 20 files, 120 s each
+Passed alone: {paths, if any}; bound 20 files, 120 s each
 
 ### Failures (if FAIL)
 
