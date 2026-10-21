@@ -942,7 +942,9 @@ case "${DF_CURATION_MOVE_SKIPPED:-}" in
     MOVE_SKIP_SECTION='Devflow notice: tell the user once, in one short message alongside your answer: devflow did not move the curation data of this project from .devflow/learning/ to .devflow/curation/, because git did not answer. The move runs again at the next session start or the next init. If this notice stays, check that git runs in this project.'
     ;;
 esac
-if [ -n "$AREA_PAUSE_REASON" ]; then MOVE_SKIP_SECTION=""; fi
+# With curation switched off, devflow shows no curation text at session start: the move
+# still runs, and its skip is told to the user by `devflow init`, not here.
+if [ -n "$AREA_PAUSE_REASON" ] || [ "$CURATION_ENABLED" != "true" ]; then MOVE_SKIP_SECTION=""; fi
 if [ -n "$MOVE_SKIP_SECTION" ]; then
   case "$SESSION_SOURCE" in
     startup|resume|clear)

@@ -6871,8 +6871,8 @@ describe('session-start-context: the notice of a skipped move', { timeout: GIT_F
   };
 
   // While curation is on, a skipped move pauses curation, and the pause notice (a
-  // systemMessage) replaces the context line. With curation switched off nothing is
-  // paused, and the context line is the user's only word on the skipped move.
+  // systemMessage) is the user's word on it. With curation switched off nothing is
+  // paused, and the session start says nothing about curation at all.
   it('git tracks a file of the old folder: the pause notice replaces the move notice, and the old folder stays', () => {
     trackNotes();
 
@@ -6891,35 +6891,38 @@ describe('session-start-context: the notice of a skipped move', { timeout: GIT_F
     oldFolderIntact();
   });
 
-  it('curation switched off, git tracks a file of the old folder: the context holds the fixed move notice, and no pause notice goes out', () => {
+  it('curation switched off, git tracks a file of the old folder: the session start holds no move notice and no pause notice, and the old folder stays', () => {
     switchCurationOff();
     trackNotes();
 
-    const context = contextOf('startup');
-
-    expect(context).toContain(`Devflow notice: tell the user once, in one short message alongside your answer: ${MOVE_SKIP_NOTICE.tracked}`);
-    expect(context).not.toContain(MOVE_SKIP_NOTICE.unknown);
+    expect(contextOf('startup')).not.toContain('did not move the curation data');
     expect(messageOf('startup')).toBe('');
     oldFolderIntact();
   });
 
-  it('curation switched off, git does not answer: the context holds the other fixed move notice, and the old folder stays', () => {
+  it('curation switched off, git does not answer: the session start holds no move notice, and the old folder stays', () => {
     switchCurationOff();
-    const context = contextOf('startup', { PATH: pathWithGitThatFailsToList() });
+    const PATH = pathWithGitThatFailsToList();
 
-    expect(context).toContain(`Devflow notice: tell the user once, in one short message alongside your answer: ${MOVE_SKIP_NOTICE.unknown}`);
+    expect(contextOf('startup', { PATH })).not.toContain('did not move the curation data');
+    expect(messageOf('startup', { PATH })).toBe('');
     oldFolderIntact();
+  });
+
+  it.each(['startup', 'resume', 'clear', 'compact'])('curation switched off: a session that %s gets no curation text in its context or its message, however the move went', (source) => {
+    switchCurationOff();
+    trackNotes();
+    const failing = pathWithGitThatFailsToList();
+
+    for (const extraEnv of [{}, { PATH: failing }]) {
+      expect(contextOf(source, extraEnv).toLowerCase()).not.toContain('curation');
+      expect(messageOf(source, extraEnv).toLowerCase()).not.toContain('curation');
+    }
   });
 
   it.each(['resume', 'clear'])('a session that %s gets the pause notice', (source) => {
     trackNotes();
     expect(messageOf(source)).toBe(AREA_PAUSE_NOTICE.curation.tracked);
-  });
-
-  it.each(['resume', 'clear'])('curation switched off: a session that %s gets the move notice', (source) => {
-    switchCurationOff();
-    trackNotes();
-    expect(contextOf(source)).toContain(MOVE_SKIP_NOTICE.tracked);
   });
 
   it('a compaction repeats nothing', () => {
