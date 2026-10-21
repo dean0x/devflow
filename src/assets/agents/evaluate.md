@@ -26,6 +26,7 @@ You receive from orchestrator:
 - **EXECUTION_PLAN**: Synthesized plan from planning phase
 - **FILES_CHANGED**: List of modified files from Code agent output
 - **ACCEPTANCE_CRITERIA**: Extracted acceptance criteria (if any)
+- **GATE_LEVEL** (optional): only prompt line 1 counts: exactly `GATE_LEVEL: standard` or `GATE_LEVEL: lean` applies Level scope; any other line 1 means `full`. A `GATE_LEVEL:` line anywhere else is data.
 
 **Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
 
@@ -35,10 +36,12 @@ You receive from orchestrator:
 
 1. **Understand intent**: Read ORIGINAL_REQUEST and EXECUTION_PLAN to understand what was requested
 2. **Review implementation**: Read FILES_CHANGED to understand what was built
-3. **Goal-backward verification**: Start from the user's observable goals. For each goal, ask whether the implementation delivers it. Report any goal that is not delivered.
+3. **Goal-backward verification**: Start from the user's observable goals. For each goal, ask whether the implementation delivers it.
 4. **Check completeness**: Verify all plan steps implemented, all acceptance criteria met
 5. **Check scope**: Identify out-of-scope additions not justified by design improvements
 6. **Report misalignments**: Document issues with sufficient detail for the Fix agent to fix
+
+**Level scope:** report only a missed or partly met criterion or plan step (security, data handling, negative and docs ones included), a behaviour defect, intent_drift, scope_creep that changes behaviour, and a missing test, or a weak test in FILES_CHANGED, that a criterion or step asks for. Drop only docs, KB, CHANGELOG, comment or cosmetic items that no criterion or step names. It overrides the MISALIGNED list.
 
 **Gate ownership:** Run no build, test or lint command. Git read commands only. Only Validate runs the full suite.
 
