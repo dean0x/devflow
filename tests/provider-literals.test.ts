@@ -1616,6 +1616,13 @@ describe('manage-debt item sources', () => {
     ).toContain(`${jira.label}: the item-source rule is absent`);
 
     expect(
+      collectManageDebtSourceDrift(
+        swap(github, github.text.replace(MANAGE_DEBT_RULE, `${MANAGE_DEBT_RULE}\n\n${MANAGE_DEBT_RULE}`)),
+      ),
+      'a reference that states the rule twice must be reported',
+    ).toContain(`${github.label}: the item-source rule does not occur exactly once`);
+
+    expect(
       collectRowVerdictDrift('| `manage-debt` | Update the backlog |', contract),
       'a row that names neither verdict must be reported',
     ).toEqual(['row: names no FIX_SEPARATE', 'row: names no TECH_DEBT']);
