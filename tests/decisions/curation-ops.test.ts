@@ -1117,7 +1117,8 @@ describe('claim-due (D-DUE-ORDER)', { timeout: 30_000 }, () => {
     seedCurationTree(dir, { ledger: [] });
     expect(runJsonHelper(dir, ['claim-due'])).toEqual({ code: 0, stdout: 'ref none\ndue none\n', stderr: '' });
 
-    const fetched = initGitRepo(dir, { 'a.txt': 'one\n' });
+    // The curation data stays out of the commit: devflow refuses ops while git tracks it.
+    const fetched = initGitRepo(dir, { 'a.txt': 'one\n', '.gitignore': '.devflow/\n' });
     git(dir, ['update-ref', 'refs/remotes/origin/main', fetched]);
     git(dir, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main']);
     git(dir, ['commit', '-q', '--allow-empty', '-m', 'local work']);

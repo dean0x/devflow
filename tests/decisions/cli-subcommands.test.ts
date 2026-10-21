@@ -584,22 +584,25 @@ describe('curation --clear', { timeout: 30_000 }, () => {
     expect(backupPendingPresent(backup)).toEqual([true, true, true, true]);
   });
 
-  it('keeps the queue and the backups, and prints the fixed notice, when git tracks a file of the data folder', async () => {
-    seedCorpus(root);
+  it('refuses and changes nothing, queue and backups included, when git tracks a file of the data folder', async () => {
+    const paths = seedCorpus(root);
     seedQueue(root);
     const backup = seedBackup(root);
     trackInGit(root, '.devflow/curation/.pending-turns.jsonl');
+    const before = { log: fs.readFileSync(paths.log, 'utf8'), ledger: fs.readFileSync(paths.ledger, 'utf8') };
 
     const run = await runCuration(['--clear']);
 
+    expect(run.error).toBe(`clear: git tracks files in the curation data folders under ${root}; nothing was written`);
+    expect(run.success).toBe('');
+    expect(run.exitCode).toBe(1);
+    expect(fs.readFileSync(paths.log, 'utf8')).toBe(before.log);
+    expect(fs.readFileSync(paths.ledger, 'utf8')).toBe(before.ledger);
     expect(queueFilesPresent(root)).toEqual([true, true, true]);
     expect(backupPendingPresent(backup)).toEqual([true, true, true, true]);
-    expect(run.success).toBe('Cleared 1 observation no entry uses and kept 3 that entries use.');
-    expect(run.warn).toBe(`The curation queue was not drained. ${MOVE_SKIP_NOTICE.tracked}`);
-    expect(run.exitCode).toBe(0);
   });
 
-  it('keeps the queue, and prints the fixed notice, when git tracks a file of a backup folder', async () => {
+  it('refuses and keeps the queue when git tracks a file of a backup folder', async () => {
     seedCorpus(root);
     seedQueue(root);
     const backup = seedBackup(root);
@@ -607,12 +610,13 @@ describe('curation --clear', { timeout: 30_000 }, () => {
 
     const run = await runCuration(['--clear']);
 
+    expect(run.error).toBe(`clear: git tracks files in the curation data folders under ${root}; nothing was written`);
+    expect(run.exitCode).toBe(1);
     expect(queueFilesPresent(root)).toEqual([true, true, true]);
     expect(backupPendingPresent(backup)).toEqual([true, true, true, true]);
-    expect(run.warn).toBe(`The curation queue was not drained. ${MOVE_SKIP_NOTICE.tracked}`);
   });
 
-  it('keeps the queue, and prints the fixed notice, when a .git entry stands and git does not answer', async () => {
+  it('refuses and keeps the queue when a .git entry stands and git does not answer', async () => {
     seedCorpus(root);
     seedQueue(root);
     initGitRepo(root);
@@ -620,9 +624,9 @@ describe('curation --clear', { timeout: 30_000 }, () => {
 
     const run = await runCuration(['--clear']);
 
+    expect(run.error).toBe(`clear: git did not answer whether it tracks files in the curation data folders under ${root}; nothing was written`);
+    expect(run.exitCode).toBe(1);
     expect(queueFilesPresent(root)).toEqual([true, true, true]);
-    expect(run.warn).toBe(`The curation queue was not drained. ${MOVE_SKIP_NOTICE.unknown}`);
-    expect(run.exitCode).toBe(0);
   });
 
   it('drains the queue as before in a repository that tracks nothing in the data folders', async () => {

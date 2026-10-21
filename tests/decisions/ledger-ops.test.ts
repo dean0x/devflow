@@ -1047,7 +1047,8 @@ function initGitRepoWithFile(dir: string, relFile: string, content: string): voi
   const absFile = path.join(dir, relFile);
   fs.mkdirSync(path.dirname(absFile), { recursive: true });
   fs.writeFileSync(absFile, content, 'utf8');
-  execSync('git add -A', { cwd: dir, env: COLLISION_GIT_ENV });
+  // Only the cited file is staged: the curation data folders stay untracked.
+  execFileSync('git', ['add', '--', relFile], { cwd: dir, env: COLLISION_GIT_ENV });
   execSync('git commit -q -m init', { cwd: dir, env: COLLISION_GIT_ENV });
 }
 
