@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Residual risk: at `standard` and `lean`, nothing checks the one Fix round against the criteria again. Phase 6 Validate and Phase 7 QA cover behaviour. A non-behavioural criterion or the removal of unrequested code has no later check before the PR opens.
   - Known limit: no CI test checks where the level line lands in a spawn prompt at run time.
 - **devflow ignores curation and memory files that git tracks, and says so at session start** ([#626](https://github.com/dean0x/devflow/issues/626)). When git tracks a file in a curation or memory data folder, or does not answer, devflow reads and writes no file in that folder. One fixed notice at session start says what to run to untrack the files. `devflow curation`, `devflow memory`, the HUD and `devflow uninstall` leave such a folder alone.
+  - On a paused project, `devflow curation --list`, `--show`, `--clear`, `--reset`, `--restore` and `--configure` (project scope) print the pause notice and exit 1. `devflow curation --status` and `devflow memory --status` print the notice and exit 0.
+  - The settings line that `resolve-settings.cjs` prints when it fails now reads `MEMORY=off CURATION=off`. It read `MEMORY=on CURATION=on` before.
+  - A direct Skim delegation that passes no `CURATION` value now reports `(none)` under "Active Decisions". An absent value now reads as `off`.
+  - A checkout where a `.git` entry exists but git does not answer now pauses both features.
 
 ---
 
