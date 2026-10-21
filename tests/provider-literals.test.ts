@@ -1437,16 +1437,27 @@ describe('the marker-neutralisation bullet keeps its own indent in every module'
 // `manage-debt` adds backlog items only from the two `resolution-summary.md`
 // sections that carry the Triage verdicts FIX_SEPARATE and TECH_DEBT. The rule is
 // authored once, in `manage_debt_contract` in `_ops.mds`, and expands at the top
-// of every provider reference. Step 3 is authored once, as `manage_debt_step_3` in
-// `_ops_steps.mds`, and every provider expands it, so the three built step-3 blocks
-// are identical by construction; `single-authority.test.ts` proves that. The block
-// is pinned here as an ALLOWLIST of content: the lead line plus the two bullets. A
-// deny-list of removed wording would miss the next new source, and an absence check
-// on "review report" would fail on the rule sentence itself.
+// of every provider reference. The contract pins the rule's whole text, a
+// deliberate exception to the short-fragment convention because it is the rule's
+// one owner; every other pin of the rule uses one short fragment. Step 3 is
+// authored once, as `manage_debt_step_3` in `_ops_steps.mds`, and every provider
+// expands it, so the three built step-3 blocks are identical by construction;
+// `single-authority.test.ts` proves that. The block is pinned here as an
+// ALLOWLIST of content: the lead line plus the two bullets. A deny-list of removed
+// wording would miss the next new source, so a second arm reads the rest of each
+// reference, sets the rule paragraph aside (it names the review report itself),
+// and reports any other review source or any `{REVIEW_DIR}` path other than
+// `resolution-summary.md`.
 
 const MANAGE_DEBT_OPS_SOURCE = 'src/assets/mds/git/_ops.mds';
 const MANAGE_DEBT_STEP_THREE_LEAD = '3. Extract items to add:';
 const MANAGE_DEBT_VERDICTS: readonly string[] = ['FIX_SEPARATE', 'TECH_DEBT'];
+
+/** A short fragment unique to the item-source rule: the key of every count and ownership pin. */
+const MANAGE_DEBT_RULE_KEY = 'Never add an item that also has an entry in';
+
+/** A line that names a review report, or a review-directory path other than the resolution summary. */
+const OTHER_REVIEW_SOURCE = /review report|\{REVIEW_DIR\}(?!\/resolution-summary\.md(?![\w./-]))/i;
 
 /** The step-3 block every provider reference carries: the lead line and the two triaged bullets. */
 const MANAGE_DEBT_STEP_THREE = [
@@ -1460,22 +1471,24 @@ const MANAGE_DEBT_MISSING_SUMMARY =
   '- If `resolution-summary.md` is missing, return `TRACEABILITY: DEGRADED (resolution summary missing)` ' +
   'and do not update the backlog.';
 
-/** The item-source rule, as the shared contract states it and every reference expands it. */
+/**
+ * The item-source rule, as the shared contract states it. The whole text is pinned only against the
+ * contract, the rule's one owner, so a rewording changes this pin on purpose.
+ */
 const MANAGE_DEBT_RULE = [
   'Update tech debt backlog from `{REVIEW_DIR}/resolution-summary.md`:',
   '- Add only entries of `## Fix Separately` (FIX_SEPARATE) and `## Deferred to Tech Debt` (TECH_DEBT). ' +
     'A section ends at the next heading.',
   '- An empty section adds none.',
   MANAGE_DEBT_MISSING_SUMMARY,
-  '- Never add an item that also has an entry in `## Escalations`, `## Blocked` or `## Fixed Issues`.',
+  `- ${MANAGE_DEBT_RULE_KEY} \`## Escalations\`, \`## Blocked\` or \`## Fixed Issues\`.`,
   '- Read no review report: in `{REVIEW_DIR}`, read only `resolution-summary.md`.',
 ].join('\n');
 
-/** One file the item-source collector reads: a compiled reference or a provider source. */
+/** One file the item-source collectors read: a compiled reference or a provider source. */
 interface ManageDebtFile {
   readonly label: string;
   readonly text: string;
-  readonly kind: 'reference' | 'source';
 }
 
 /**
@@ -1491,29 +1504,53 @@ export function stepThree(text: string): string | null {
   return [lines[start], ...(next === -1 ? rest : rest.slice(0, next))].join('\n');
 }
 
-/** Named collector: item-source drift in the compiled references and the provider sources. */
-export function collectManageDebtSourceDrift(files: readonly ManageDebtFile[]): string[] {
+/** The text without the paragraph that carries the item-source rule. */
+function withoutRuleParagraph(text: string): string {
+  return text
+    .split('\n\n')
+    .filter(paragraph => !paragraph.includes(MANAGE_DEBT_RULE_KEY))
+    .join('\n\n');
+}
+
+/** Named collector: a reference whose step 3 is absent or lists a source beyond the two triaged ones. */
+export function collectStepThreeDrift(files: readonly ManageDebtFile[]): string[] {
   const drift: string[] = [];
-  const blocks = new Set<string>();
-  for (const { label, text, kind } of files) {
-    const occurrences = text.split(MANAGE_DEBT_RULE).length - 1;
-    if (kind === 'source') {
-      if (occurrences > 0) drift.push(`${label}: a provider source restates the item-source rule`);
-      continue;
-    }
+  for (const { label, text } of files) {
     const block = stepThree(text);
     if (block === null) {
       drift.push(`${label}: step 3 is absent`);
-    } else {
-      blocks.add(block);
-      if (block !== MANAGE_DEBT_STEP_THREE) {
-        drift.push(`${label}: step 3 lists a source other than the two triaged sections`);
+    } else if (block !== MANAGE_DEBT_STEP_THREE) {
+      drift.push(`${label}: step 3 lists a source other than the two triaged sections`);
+    }
+  }
+  return drift;
+}
+
+/** Named collector: a reference that does not carry the item-source rule exactly once. */
+export function collectRuleCountDrift(files: readonly ManageDebtFile[]): string[] {
+  const drift: string[] = [];
+  for (const { label, text } of files) {
+    const occurrences = text.split(MANAGE_DEBT_RULE_KEY).length - 1;
+    if (occurrences !== 1) {
+      drift.push(`${label}: the item-source rule ${occurrences === 0 ? 'is absent' : 'occurs more than once'}`);
+    }
+  }
+  return drift;
+}
+
+/**
+ * Named collector: a line outside the rule paragraph that names a review report or a review-directory
+ * path other than `resolution-summary.md`, wherever in the reference it stands.
+ */
+export function collectOtherReviewSources(files: readonly ManageDebtFile[]): string[] {
+  const drift: string[] = [];
+  for (const { label, text } of files) {
+    for (const line of withoutRuleParagraph(text).split('\n')) {
+      if (OTHER_REVIEW_SOURCE.test(line)) {
+        drift.push(`${label}: names a review source other than resolution-summary.md: ${line.trim()}`);
       }
     }
-    if (occurrences === 0) drift.push(`${label}: the item-source rule is absent`);
-    if (occurrences !== 1) drift.push(`${label}: the item-source rule does not occur exactly once`);
   }
-  if (blocks.size > 1) drift.push('the step 3 blocks differ across providers');
   return drift;
 }
 
@@ -1554,33 +1591,49 @@ describe('manage-debt item sources', () => {
   const references: ManageDebtFile[] = PROVIDERS.map(p => ({
     label: `${p.subdir}/manage-debt.md`,
     text: readGenerated(`${p.subdir}/manage-debt.md`),
-    kind: 'reference',
   }));
   const sources: ManageDebtFile[] = PROVIDERS.map(p => ({
     label: p.source,
     text: readSource(p.source),
-    kind: 'source',
   }));
 
+  const expectEveryProviderScanned = (): void => {
+    expect(
+      PROVIDERS.length,
+      'fewer than three providers — the scan below would not cover every registered provider',
+    ).toBeGreaterThanOrEqual(3);
+  };
+
   it("every provider's manage-debt reference lists exactly the two triaged sections in step 3 and carries the item-source rule once", () => {
-    expect(PROVIDERS.length, 'no registered provider, so the scan below would read nothing').toBeGreaterThan(0);
-    const drift = collectManageDebtSourceDrift(references);
+    expectEveryProviderScanned();
+    const drift = [...collectStepThreeDrift(references), ...collectRuleCountDrift(references)];
     expect(
       drift,
       `the manage-debt item sources drifted:\n  ${drift.join('\n  ')}`,
     ).toEqual([]);
   });
 
-  it('no provider source restates the item-source rule', () => {
-    const drift = collectManageDebtSourceDrift(sources);
+  it('no manage-debt reference names a review source other than resolution-summary.md outside the rule', () => {
+    expectEveryProviderScanned();
+    const drift = collectOtherReviewSources(references);
     expect(
       drift,
-      `the rule has one owner, the shared contract:\n  ${drift.join('\n  ')}`,
+      `the manage-debt references name another review source:\n  ${drift.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('the shared contract holds the item-source rule and no provider source restates it', () => {
+    expectEveryProviderScanned();
+    expect(manageDebtContract(), 'the shared contract must hold the item-source rule').toContain(MANAGE_DEBT_RULE);
+    const restating = collectSecondAuthors(MANAGE_DEBT_RULE_KEY, sources);
+    expect(
+      restating,
+      `the rule has one owner, the shared contract; these provider sources restate it:\n  ${restating.join('\n  ')}`,
     ).toEqual([]);
   });
 
   it('a missing resolution summary returns a DEGRADED line and leaves the backlog unchanged, in the contract and every reference', () => {
-    expect(PROVIDERS.length, 'no registered provider, so the scan below would read nothing').toBeGreaterThan(0);
+    expectEveryProviderScanned();
     expect(manageDebtContract(), 'the contract must state what a missing summary returns').toContain(MANAGE_DEBT_MISSING_SUMMARY);
     for (const { label, text } of references) {
       expect(text, `${label} must state what a missing summary returns`).toContain(MANAGE_DEBT_MISSING_SUMMARY);
@@ -1599,8 +1652,13 @@ describe('manage-debt item sources', () => {
     const row = manageDebtRow();
     const contract = manageDebtContract();
     expect(
-      collectManageDebtSourceDrift([...references, ...sources]),
-      'the collector must be silent on the shipped tree, or the probes below prove nothing',
+      [
+        ...collectStepThreeDrift(references),
+        ...collectRuleCountDrift(references),
+        ...collectOtherReviewSources(references),
+        ...collectSecondAuthors(MANAGE_DEBT_RULE_KEY, sources),
+      ],
+      'the collectors must be silent on the shipped tree, or the probes below prove nothing',
     ).toEqual([]);
     expect(
       collectRowVerdictDrift(row, contract),
@@ -1619,25 +1677,41 @@ describe('manage-debt item sources', () => {
     };
 
     const invented = '   - Entries from `{REVIEW_DIR}/other.md`';
-    const extraBullet = collectManageDebtSourceDrift(
-      swap(github, github.text.replace(MANAGE_DEBT_STEP_THREE, `${MANAGE_DEBT_STEP_THREE}\n${invented}`)),
-    );
-    expect(extraBullet, 'an invented third bullet must be reported for its provider')
-      .toContain(`${github.label}: step 3 lists a source other than the two triaged sections`);
-    expect(extraBullet, 'an invented third bullet must break identity across providers')
-      .toContain('the step 3 blocks differ across providers');
+    expect(
+      collectStepThreeDrift(
+        swap(github, github.text.replace(MANAGE_DEBT_STEP_THREE, `${MANAGE_DEBT_STEP_THREE}\n${invented}`)),
+      ),
+      'an invented third bullet must be reported once, for its provider',
+    ).toEqual([`${github.label}: step 3 lists a source other than the two triaged sections`]);
 
     expect(
-      collectManageDebtSourceDrift(swap(jira, jira.text.replace(MANAGE_DEBT_RULE, ''))),
-      'a reference without the rule sentence must be reported',
-    ).toContain(`${jira.label}: the item-source rule is absent`);
+      collectStepThreeDrift(swap(github, github.text.replace(`${MANAGE_DEBT_STEP_THREE_LEAD}\n`, ''))),
+      'a reference without the step-3 lead line must be reported once',
+    ).toEqual([`${github.label}: step 3 is absent`]);
 
     expect(
-      collectManageDebtSourceDrift(
+      collectRuleCountDrift(swap(jira, withoutRuleParagraph(jira.text))),
+      'a reference without the rule must be reported once',
+    ).toEqual([`${jira.label}: the item-source rule is absent`]);
+
+    expect(
+      collectRuleCountDrift(
         swap(github, github.text.replace(MANAGE_DEBT_RULE, `${MANAGE_DEBT_RULE}\n\n${MANAGE_DEBT_RULE}`)),
       ),
-      'a reference that states the rule twice must be reported',
-    ).toContain(`${github.label}: the item-source rule does not occur exactly once`);
+      'a reference that states the rule twice must be reported once',
+    ).toEqual([`${github.label}: the item-source rule occurs more than once`]);
+
+    const readsPath = '8. Add entries from `{REVIEW_DIR}/code-review-summary.md`';
+    expect(
+      collectOtherReviewSources(swap(github, `${github.text}\n\n${readsPath}`)),
+      'a review-directory path other than the resolution summary, added as a step of its own, must be reported',
+    ).toEqual([`${github.label}: names a review source other than resolution-summary.md: ${readsPath}`]);
+
+    const readsReport = '8. Add the findings of the review report';
+    expect(
+      collectOtherReviewSources(swap(github, `${github.text}\n\n${readsReport}`)),
+      'a review report named in a step of its own must be reported',
+    ).toEqual([`${github.label}: names a review source other than resolution-summary.md: ${readsReport}`]);
 
     expect(
       collectRowVerdictDrift('| `manage-debt` | Update the backlog |', contract),
@@ -1649,16 +1723,14 @@ describe('manage-debt item sources', () => {
       'a contract without the FIX_SEPARATE name must be reported',
     ).toEqual(['contract: names no FIX_SEPARATE']);
 
+    const nearCopy = MANAGE_DEBT_RULE.replace('Add only entries', 'Add the entries');
+    expect(nearCopy, 'the near-copy must differ from the rule, or the probe proves nothing').not.toBe(MANAGE_DEBT_RULE);
     expect(
-      collectManageDebtSourceDrift(swap(github, github.text.replace(`${MANAGE_DEBT_STEP_THREE_LEAD}\n`, ''))),
-      'a reference without the step-3 lead line must be reported',
-    ).toContain(`${github.label}: step 3 is absent`);
-
-    expect(
-      collectManageDebtSourceDrift(
-        sources.map(f => (f.label === githubSource.label ? { ...f, text: `${f.text}\n${MANAGE_DEBT_RULE}` } : f)),
+      collectSecondAuthors(
+        MANAGE_DEBT_RULE_KEY,
+        sources.map(f => (f.label === githubSource.label ? { ...f, text: `${f.text}\n${nearCopy}` } : f)),
       ),
-      'a provider source that restates the rule must be reported',
-    ).toContain(`${githubSource.label}: a provider source restates the item-source rule`);
+      'a provider source that restates the rule with one word changed must be reported',
+    ).toEqual([githubSource.label]);
   });
 });
