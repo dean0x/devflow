@@ -11,12 +11,14 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
+import { createRequire } from 'module';
 import * as os from 'os';
 import * as path from 'path';
 
 import {
   GIT_ENV,
   JSON_HELPER,
+  PROJECT_PATHS,
   ROOT,
   initGitRepo,
   makeV2LedgerRow,
@@ -31,6 +33,9 @@ import {
 
 const RENDERER = path.join(ROOT, 'src/assets/scripts/hooks/lib/render-decisions.cjs');
 const store = requireCurationStore();
+const projectPaths = createRequire(import.meta.url)(PROJECT_PATHS) as {
+  curationMoveJournalPath(machineDir: string, realRoot: string): string;
+};
 
 const TOKEN = 'aaaaaaaaaaaaaaaa';
 const CURATION_FILES = ['.devflow/curation/decisions-log.jsonl', '.devflow/curation/decisions-ledger.jsonl'] as const;
@@ -285,15 +290,30 @@ describe('a store operation where git tracks the curation data folders', { timeo
 
     it('lets withDecisionsLock refuse before it runs its body or looks for the journal', () => {
       trackCuration();
+      // An unfinished move: a machine-side journal beside the old folder. Alone, it makes a writer answer busy.
+      const home = path.join(base, 'home');
+      fs.mkdirSync(path.join(home, '.devflow'), { recursive: true });
+      fs.mkdirSync(path.join(root, '.devflow', 'learning'));
+      const journal = projectPaths.curationMoveJournalPath(path.join(home, '.devflow'), fs.realpathSync(root));
+      fs.writeFileSync(journal, '{}');
       let ran = false;
 
-      const result = store.withDecisionsLock('put-observation', root, () => {
-        ran = true;
-        return { ok: true, value: null };
-      });
+      const savedHome = process.env.HOME;
+      process.env.HOME = home;
+      let result;
+      try {
+        result = store.withDecisionsLock('put-observation', root, () => {
+          ran = true;
+          return { ok: true, value: null };
+        });
+      } finally {
+        if (savedHome === undefined) delete process.env.HOME;
+        else process.env.HOME = savedHome;
+      }
 
       expect(result).toMatchObject({ ok: false, error: { kind: 'tracked' } });
       expect(ran).toBe(false);
+      expect(fs.existsSync(journal)).toBe(true);
     });
 
     it('keeps the refusal of a linked tree first: not-a-directory, before the tracked check', () => {
