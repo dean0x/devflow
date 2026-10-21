@@ -10,7 +10,7 @@
  * Scope: fenced spawns only. A spawn written in prose is not covered.
  *
  * One more arm covers the text between two spawns (#483): the `full` re-check loop of /implement Phase 5. A fence digest
- * does not see it, because the loop is prose. `collectFullLoopDefects` holds each of its lines once, in both builds.
+ * does not see it, because the loop is prose. `collectFullLoopDefects` holds each of its lines once, in this order, in both builds.
  *
  * A change that edits a fence on purpose repins only that fence: run the repin case and apply what it prints to
  * `PINNED_FENCES`. It prints only the rows that changed or were added, to paste over the row with the same heading,
@@ -258,14 +258,17 @@ function phase5Lines(body: string): string[] | null {
   return section === null ? null : section.split('\n').slice(1).map(line => line.trim())
 }
 
-/** Named collector (AC-3 of #483): each line of the `full` re-check loop appears exactly once in Phase 5 of the compiled /implement. */
+/** Named collector (AC-3 of #483): each line of the `full` re-check loop appears exactly once in Phase 5 of the compiled /implement, and the lines follow the order of `FULL_LOOP_LINES`. */
 export function collectFullLoopDefects(body: string): string[] {
   const section = phase5Lines(body)
   if (section === null) return [`"${PHASE_5_HEADING}" is absent or repeated`]
-  return FULL_LOOP_LINES.flatMap(line => {
+  const presence = FULL_LOOP_LINES.flatMap(line => {
     const held = section.filter(l => l === line).length
     return held === 1 ? [] : [`Phase 5 holds the line "${line}" ${held} times, expected 1`]
   })
+  if (presence.length > 0) return presence
+  const at = FULL_LOOP_LINES.map(line => section.indexOf(line))
+  return FULL_LOOP_LINES.flatMap((line, i) => (i > 0 && at[i] < at[i - 1] ? [`Phase 5 holds the line "${line}" before the line "${FULL_LOOP_LINES[i - 1]}", expected after`] : []))
 }
 
 describe('the corpus is real', () => {
@@ -361,7 +364,7 @@ describe('the full-level Phase 5 re-check loop is as written (AC-3 of #483)', ()
     expect(collectFullLoopDefects(text)).toEqual([])
   })
 
-  it.each(builds)('$label: known-bad probes: a changed cap, a removed loop-back line, a removed re-check, a renumbered report step, a repeated line and a moved line are each reported', ({ text }) => {
+  it.each(builds)('$label: known-bad probes: a changed cap, a removed loop-back line, a removed re-check, a renumbered report step, a repeated line, a moved line and a loop-back line below step 4 are each reported', ({ text }) => {
     const missing = (line: string): string[] => [`Phase 5 holds the line "${line}" 0 times, expected 1`]
     expect(collectFullLoopDefects(seed(text, FULL_LOOP_LINES[1], '3. If `alignment_fix_count <= 1`:')), 'cap changed from 2 to 1').toEqual(missing(FULL_LOOP_LINES[1]))
     expect(collectFullLoopDefects(seed(text, `   ${LOOP_BACK}\n`, '')), 'loop-back line removed').toEqual(missing(LOOP_BACK))
@@ -369,6 +372,7 @@ describe('the full-level Phase 5 re-check loop is as written (AC-3 of #483)', ()
     expect(collectFullLoopDefects(seed(text, FULL_LOOP_LINES[3], FULL_LOOP_LINES[3].replace('4.', '5.'))), 'step 4 renumbered').toEqual(missing(FULL_LOOP_LINES[3]))
     expect(collectFullLoopDefects(seed(text, FULL_LOOP_LINES[0], `${FULL_LOOP_LINES[0]}\n${FULL_LOOP_LINES[0]}`)), 'a repeated line').toEqual([`Phase 5 holds the line "${FULL_LOOP_LINES[0]}" 2 times, expected 1`])
     expect(collectFullLoopDefects(seed(seed(text, `   ${LOOP_BACK}\n`, ''), '### Phase 6: Validate', `### Phase 6: Validate\n\n${LOOP_BACK}`)), 'the line moved out of Phase 5').toEqual(missing(LOOP_BACK))
+    expect(collectFullLoopDefects(seed(seed(text, `   ${LOOP_BACK}\n`, ''), FULL_LOOP_LINES[3], `${FULL_LOOP_LINES[3]}\n   ${LOOP_BACK}`)), 'the loop-back line below step 4').toEqual([`Phase 5 holds the line "${FULL_LOOP_LINES[3]}" before the line "${LOOP_BACK}", expected after`])
     expect(collectFullLoopDefects(seed(text, PHASE_5_HEADING, '### Phase 5: Check')), 'heading renamed').toEqual([`"${PHASE_5_HEADING}" is absent or repeated`])
   })
 })
