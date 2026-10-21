@@ -141,9 +141,11 @@ export interface ConfigCountsData {
 
 /**
  * Decisions/pitfalls counts data for the curationCounts component. `move` is set only
- * when both counts are zero and the old folder exists: a pointer to a session start or
- * `devflow init` (the move has not run), or the refused line (the move was tried and
- * refused).
+ * when the old folder exists. With both counts zero it is the pointer to a session start
+ * or `devflow init` (the move has not run), the refused line (the move was tried and
+ * refused), or a skip notice (the move was tried and git tracks files in a data folder,
+ * or git did not answer). With a count above zero it is a skip notice only, which the
+ * component shows after the counts.
  */
 export interface CurationCountsData {
   decisions: number;

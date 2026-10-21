@@ -13,9 +13,10 @@
 // through src/core/curation-move.ts. A throw means a broken invariant or an I/O
 // failure, never an expected outcome.
 //
-// Loading: node built-ins and three sibling libs. This module requires the store for
+// Loading: node built-ins and four sibling libs. This module requires the store for
 // its primitives (readTextUnlinked, appendNoFollow, the quarantine, renderAll); the
-// store never requires this module. The store's write guard reads the move journal through
+// store never requires this module. The tracked-areas check is a leaf that requires
+// neither of them. The store's write guard reads the move journal through
 // project-paths.cjs and its own helpers, so a store write loads no move code.
 //
 // TS COUNTERPART: src/core/curation-move.ts transcribes the functions the CLI calls
@@ -23,7 +24,6 @@
 
 'use strict';
 
-const childProcess = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
@@ -64,6 +64,7 @@ const {
   physicalPath,
   homeDirOrNull,
 } = require('./curation-store.cjs');
+const { checkTrackedAreas, inspectTrackedAreas } = require('./tracked-areas.cjs');
 
 // ---------------------------------------------------------------------------
 // The one-time ledger move
@@ -162,16 +163,6 @@ function queueFormOf(name) {
   return QUEUE_FORMS.find(entry => entry.re.test(name)) || null;
 }
 
-/**
- * The name a tracked queue file takes when a pass finds that git tracks it: the file's own
- * name and `.tracked-<stamp>-<hex>`. The name is none of the queue forms, so no sweep,
- * status count or drain ever reads it again. It stays in the folder, which becomes the
- * backup, as the repository's content.
- */
-const TRACKED_NAME_RE = new RegExp(
-  `^(?:${escapeRegExp(QUEUE_NAME)}|${escapeRegExp(CLAIM_NAME)})(?:\\.(?:merging|overflow)-${MOVE_UNIQUE_TAIL_RE})?\\.tracked-${MOVE_UNIQUE_TAIL_RE}$`,
-);
-
 /** Names of the files the renderer writes: the move never carries them, the new folder rebuilds its own. */
 const RENDERED_NAMES = new Set([getDecisionsFilePath, getPitfallsFilePath, getDecisionsIndexPath].map(nameOfHelper));
 
@@ -187,7 +178,6 @@ const ENTRY = Object.freeze({
   LOCK: 'lock',
   RECOVERY: 'recovery',
   QUEUE_FORM: 'queue-form',
-  TRACKED: 'tracked',
   DISPLACED: 'displaced',
   RENDERED: 'rendered',
   JOURNAL: 'journal',
@@ -206,9 +196,6 @@ const ENTRY = Object.freeze({
  * folder). A rendered file, a journal-named file and an unknown entry are never read
  * or renamed: a link among them never refuses a move.
  *
- * A tracked entry (a queue file that git tracks, renamed by the pass that found it) is
- * never read or renamed again, so it is not link-checked; it stays in the backup.
- *
  * leftBehind: the entry stays in the backup, and one note lists it.
  */
 const MOVE_ENTRY_CLASSES = Object.freeze({
@@ -218,7 +205,6 @@ const MOVE_ENTRY_CLASSES = Object.freeze({
   [ENTRY.LOCK]: Object.freeze({ linkChecked: true, leftBehind: false }),
   [ENTRY.RECOVERY]: Object.freeze({ linkChecked: true, leftBehind: false }),
   [ENTRY.QUEUE_FORM]: Object.freeze({ linkChecked: true, leftBehind: false }),
-  [ENTRY.TRACKED]: Object.freeze({ linkChecked: false, leftBehind: true }),
   [ENTRY.DISPLACED]: Object.freeze({ linkChecked: true, leftBehind: false }),
   [ENTRY.RENDERED]: Object.freeze({ linkChecked: false, leftBehind: false }),
   [ENTRY.JOURNAL]: Object.freeze({ linkChecked: false, leftBehind: true }),
@@ -240,7 +226,6 @@ function moveEntryClass(name) {
   if (name === STORE_LOCK_NAME || name === QUEUE_LOCK_NAME) return ENTRY.LOCK;
   if (RECOVERY_FILE_RE.test(name)) return ENTRY.RECOVERY;
   if (queueFormOf(name) !== null) return ENTRY.QUEUE_FORM;
-  if (TRACKED_NAME_RE.test(name)) return ENTRY.TRACKED;
   if (DISPLACED_RES.some(re => re.test(name))) return ENTRY.DISPLACED;
   if (RENDERED_NAMES.has(name)) return ENTRY.RENDERED;
   if (name === OLD_FOLDER_JOURNAL_NAME) return ENTRY.JOURNAL;
@@ -434,8 +419,8 @@ function relocateLocks(held, from, to) {
  * applies: one rename(2) carries the whole folder, its locks included. A private,
  * swept or overflow queue file sitting directly in the old folder refuses the move,
  * because the rename would carry it into the live folder, where no sweep reads it. A
- * file named like a journal, or a queue file that git tracks (or may track), never gets
- * here: moveLedger takes the per-entry path for it (oldFolderNeedsEntryPath).
+ * file named like a journal never gets here: moveLedger takes the per-entry path for it
+ * (oldFolderNeedsEntryPath).
  *
  * @param {{ oldDir: string, newDir: string }} ctx
  * @returns {{ ok: true, value: { notes: string[] } } | { ok: false, error: { kind: string, message: string } }}
@@ -477,89 +462,8 @@ const MOVE_MAX_NAMES_LISTED = 20;
 /** The largest ledger the move's re-render reads, in bytes: far above a ledger the store grows. */
 const LEDGER_RENDER_MAX_BYTES = 64 * 1024 * 1024;
 
-/** The longest one `git ls-files` call may run (ms). */
-const MOVE_GIT_TIMEOUT_MS = 5000;
-
-/** The most output one `git ls-files` call may return, in bytes. */
-const MOVE_GIT_MAX_BUFFER = 16 * 1024 * 1024;
-
 /** The folder under the ledger root that holds both ledger folders and the backups. */
 const DEVFLOW_DIR_NAME = '.devflow';
-
-/**
- * The files git tracks under the ledger root's `.devflow` folder, as '/'-separated
- * paths relative to the root: one `git ls-files` call, with a bound on its time and its
- * output, an argv and no shell. Reading the index makes git run the command a
- * repository's config names in `core.fsmonitor`, so the call turns that off for itself,
- * as every git read of the curation store does: the call is a pure read.
- *
- * A directory that is not in a git working tree has no tracked file, and answers an
- * empty set. Every other failure (git missing, a timeout, a full buffer, a non-zero
- * exit) answers a reason: the caller cannot tell what git tracks and must merge nothing.
- *
- * @param {string} root - the ledger root, an absolute path
- * @returns {{ ok: true, tracked: Set<string> } | { ok: false, reason: string }}
- */
-function listTrackedDevflowFiles(root) {
-  const run = childProcess.spawnSync('git', ['-c', 'core.fsmonitor=false', 'ls-files', '-z', '--', DEVFLOW_DIR_NAME], {
-    cwd: root,
-    timeout: MOVE_GIT_TIMEOUT_MS,
-    maxBuffer: MOVE_GIT_MAX_BUFFER,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    encoding: 'utf8',
-    env: { ...process.env, LC_ALL: 'C', GIT_OPTIONAL_LOCKS: '0' },
-  });
-  if (run.error) {
-    const code = run.error.code;
-    if (code === 'ENOENT') return { ok: false, reason: 'git is not installed' };
-    if (code === 'ETIMEDOUT') return { ok: false, reason: 'git timed out' };
-    return { ok: false, reason: `git could not run (${code || 'unknown error'})` };
-  }
-  if (run.status === 128 && /not a git repository/i.test(run.stderr || '')) return { ok: true, tracked: new Set() };
-  if (run.status !== 0) return { ok: false, reason: `git exited with ${run.status} when it listed the tracked files` };
-  return { ok: true, tracked: new Set(String(run.stdout).split('\0').filter(Boolean)) };
-}
-
-/**
- * @typedef {{ ok: true, tracked: Set<string> } | { ok: false, reason: string }} TrackedFiles
- * @typedef {{ files: () => TrackedFiles, firstReport: (key: string) => boolean }} GitLookup
- */
-
-/**
- * What one pass knows about git: the tracked files, asked once, and which findings it
- * has reported. `files()` runs listTrackedDevflowFiles on the first call and answers the
- * same result after that, so a pass that merges the old folder and then sweeps the backup
- * it made asks git once. `firstReport(key)` is true the first time it sees a key, so the
- * sweep of that backup does not repeat a note the merge of the old folder made.
- *
- * @param {string} root - the ledger root, an absolute path
- * @returns {GitLookup}
- */
-function gitLookup(root) {
-  let answer = null;
-  const reported = new Set();
-  return {
-    files: () => {
-      if (answer === null) answer = listTrackedDevflowFiles(root);
-      return answer;
-    },
-    firstReport: key => {
-      if (reported.has(key)) return false;
-      reported.add(key);
-      return true;
-    },
-  };
-}
-
-/**
- * True when git tracks the queue file `name` of the folder `dirName`, or the file of
- * that name in the old folder. A backup is the old folder renamed, so a repository's
- * committed file still stands in the index under the old folder's name until the user
- * commits its removal.
- */
-function isTrackedQueueFile(tracked, dirName, name) {
-  return tracked.has(`${DEVFLOW_DIR_NAME}/${dirName}/${name}`) || tracked.has(`${DEVFLOW_DIR_NAME}/${LEGACY_NAMES.folder}/${name}`);
-}
 
 /** `YYYYMMDDTHHMMSSZ` for an epoch ms. */
 function utcStamp(now) {
@@ -737,26 +641,6 @@ function mergeQueueFile(ctx, file, targetDir) {
 }
 
 /**
- * Take a queue file that git tracks out of every queue form: rename it, with no replace,
- * to `<name>.tracked-<stamp>-<hex>` (TRACKED_NAME_RE) in the same folder. The pass that
- * finds the file decides once. Without the rename, the file stays under a queue name, and
- * the index entry that made it tracked goes when the user commits the deletion that the
- * move caused: a later sweep would then merge the repository's rows. A path that is not a
- * regular file is left as it is.
- *
- * @param {{ now: number }} ctx
- * @param {string} file
- * @returns {string} the new name of the file, or its own name when it was left as it is
- */
-function parkTrackedQueueFile(ctx, file) {
-  const stat = lstatOrNull(file);
-  if (stat === null || !stat.isFile()) return path.basename(file);
-  const parked = `${path.basename(file)}.tracked-${uniqueTail(ctx.now)}`;
-  renameNoReplace(file, path.join(path.dirname(file), parked));
-  return parked;
-}
-
-/**
  * The queue rule: merge a folder's pending queue (and, for a stale claim, its
  * processing batch) into the target folder's pending queue.
  *
@@ -766,18 +650,7 @@ function parkTrackedQueueFile(ctx, file) {
  * create a fresh queue that the next run catches, and the private file goes through
  * mergeQueueFile. With `overflow` set, overflow files are merged too.
  *
- * A queue file that git tracks is never merged: the repository supplied it. The pass that
- * finds it renames it, with no replace, to a name that no queue form matches
- * (parkTrackedQueueFile), so no later pass, status count or drain reads it, and one note
- * lists the new names. The index is read once per pass (ctx.git) and a file counts as
- * tracked under the folder's own name or under the old folder's name, because a backup is
- * the old folder renamed. When git cannot say what it tracks (not installed, a timeout, a
- * failure), nothing from the folder is merged and one note says why: the files stay as
- * they are, and the next pass asks again. A folder outside a git working tree has no
- * tracked file. A finding is noted once for the pass, so the sweep of the backup that a
- * merge just made does not repeat the merge's notes.
- *
- * @param {{ now: number, git: GitLookup }} ctx
+ * @param {{ now: number }} ctx
  * @param {{ dir: string, targetDir: string, bases: string[], overflow?: boolean }} opts
  *   dir: the folder holding the files; targetDir: the folder whose queue receives the
  *   lines; bases: the live queue files to rename and merge, in order
@@ -785,23 +658,6 @@ function parkTrackedQueueFile(ctx, file) {
  */
 function curationMoveMergeQueue(ctx, { dir, targetDir, bases, overflow = false }) {
   const total = { files: 0, merged: 0, overflowed: 0, notes: [] };
-  const dirName = path.basename(dir);
-  const tracked = [];
-  let unknown = null;
-  // A queue file a repository committed is content the repository supplied, not rows a
-  // capture hook wrote: it is parked under a name no queue form matches. When git cannot
-  // say which files it tracks, nothing from this folder is merged, and a later pass asks again.
-  const mayMerge = name => {
-    if (unknown !== null) return false;
-    const answer = ctx.git.files();
-    if (!answer.ok) {
-      unknown = answer.reason;
-      return false;
-    }
-    if (!isTrackedQueueFile(answer.tracked, dirName, name)) return true;
-    tracked.push({ name, parked: parkTrackedQueueFile(ctx, path.join(dir, name)) });
-    return false;
-  };
   const take = file => {
     const result = mergeQueueFile(ctx, file, targetDir);
     total.merged += result.merged;
@@ -814,23 +670,15 @@ function curationMoveMergeQueue(ctx, { dir, targetDir, bases, overflow = false }
     return record !== null && (record.form === 'private' || (overflow && record.form === 'overflow'));
   };
   const waiting = fs.readdirSync(dir).filter(isWanted).sort().slice(0, MOVE_MAX_QUEUE_FILES);
-  for (const name of waiting) if (mayMerge(name)) take(path.join(dir, name));
+  for (const name of waiting) take(path.join(dir, name));
 
   for (const base of bases) {
     const live = path.join(dir, base);
     const stat = lstatOrNull(live);
-    if (stat === null || !stat.isFile() || !mayMerge(base)) continue;
+    if (stat === null || !stat.isFile()) continue;
     const privateFile = path.join(dir, `${base}.merging-${uniqueTail(ctx.now)}`);
     renameNoReplace(live, privateFile);
     take(privateFile);
-  }
-  if (unknown !== null && ctx.git.firstReport('unknown')) {
-    total.notes.push(`queue files in ${dirName} were not merged: git could not tell which of them it tracks (${unknown}); they stay for the next pass`);
-  }
-  const held = tracked.filter(({ name }) => ctx.git.firstReport(`tracked:${name}`));
-  if (held.length > 0) {
-    const shown = held.slice(0, MOVE_MAX_NAMES_LISTED).map(({ parked }) => parked).join(', ');
-    total.notes.push(`${held.length} queue ${held.length === 1 ? 'file' : 'files'} tracked by git stayed in ${dirName}, not merged, now named: ${shown}${held.length > MOVE_MAX_NAMES_LISTED ? ', ...' : ''}`);
   }
   return total;
 }
@@ -842,7 +690,7 @@ function curationMoveMergeQueue(ctx, { dir, targetDir, bases, overflow = false }
  * folder absent it does nothing. The caller holds the move lock and the new folder's
  * queue lock.
  *
- * @param {{ now: number, newDir: string, git: GitLookup }} ctx
+ * @param {{ now: number, newDir: string }} ctx
  * @param {string} backupDir
  * @returns {{ files: number, merged: number, overflowed: number, notes: string[] }}
  */
@@ -1121,7 +969,7 @@ function curationMoveEntries(ctx) {
  * the last step that may throw. A step added after it must not throw, or must update
  * locksAfter.
  *
- * @param {{ root: string, oldDir: string, newDir: string, devflowDir: string, now: number, git: GitLookup }} ctx
+ * @param {{ root: string, oldDir: string, newDir: string, devflowDir: string, now: number }} ctx
  * @param {{ whole: boolean }} opts - whole: the folder itself was renamed, so there is no backup
  * @returns {{ notes: string[], rendered: boolean, backup: string|null }}
  * @throws when the backup rename fails
@@ -1166,17 +1014,27 @@ function curationMoveFinish(ctx, { whole }) {
  * The root must be a real ledger root (curationMoveRefusal). With no old folder the
  * answer is `none`, from two lstat calls, and nothing is locked, created or read; a
  * journal that is left in the machine directory is stale then, and the next store write
- * on the root removes it (moveJournalHoldsWriters). Otherwise the machine
- * directory is made if absent, and every lock the pass needs is taken with no wait: the
- * move lock, the old folder's store lock and queue lock, and, when the new folder
- * exists, its two. Any busy lock releases what was taken and answers `busy`; a fresh
- * claim in either folder answers `busy` with the reason `claim`. With the new folder absent the whole folder is
- * renamed (curationMoveWhole), unless the old folder holds a file named like a journal
- * or a queue file that git tracks (oldFolderNeedsEntryPath): then an empty new folder is
- * made and the pass takes the per-entry path. A pass that then answers busy, or fails
- * before it changes anything, removes that empty folder again. Errors
- * (EXDEV, EBUSY, EACCES, EROFS, any other I/O failure) answer an `io-error` Result and
- * copy nothing: the old folder stays whole.
+ * on the root removes it (moveJournalHoldsWriters).
+ *
+ * Right after the refusal checks, and before it makes, locks, reads or renames anything,
+ * the pass asks whether git tracks any entry under a data folder or a backup folder, or
+ * an entry named `.devflow` itself (checkTrackedAreas). If it does, or if a `.git` entry
+ * stands and git does not answer, the answer is `skipped` with the reason `tracked` or
+ * `unknown`, and nothing at all changes: the folders, the machine directory and the
+ * journal stay as they are. With `unknown` the answer also carries `cause`, one fixed
+ * word that says why git did not answer (UNKNOWN_CAUSES in tracked-areas.cjs). A root
+ * with no `.git` entry makes no git call.
+ *
+ * Otherwise the machine directory is made if absent, and every lock the pass needs is
+ * taken with no wait: the move lock, the old folder's store lock and queue lock, and,
+ * when the new folder exists, its two. Any busy lock releases what was taken and answers
+ * `busy`; a fresh claim in either folder answers `busy` with the reason `claim`. With
+ * the new folder absent the whole folder is renamed (curationMoveWhole), unless the old
+ * folder holds a file named like a journal (oldFolderNeedsEntryPath): then an empty new
+ * folder is made and the pass takes the per-entry path. A pass that then answers busy,
+ * or fails before it changes anything, removes that empty folder again. Errors (EXDEV,
+ * EBUSY, EACCES, EROFS, any other I/O failure) answer an `io-error` Result and copy
+ * nothing: the old folder stays whole.
  *
  * @param {unknown} root - the ledger root, an absolute path
  * @param {{ machineDir?: string, homeDir?: string, now?: number }} [options]
@@ -1186,6 +1044,7 @@ function curationMoveFinish(ctx, { whole }) {
  *
  * @returns {{ ok: true, value: { state: 'none', notes: string[] }
  *   | { state: 'busy', reason?: 'claim', notes: string[] }
+ *   | { state: 'skipped', reason: 'tracked'|'unknown', cause?: string, notes: string[] }
  *   | { state: 'moved', mode: 'whole-folder'|'kept-new'|'moved-in', backup: string|null, rendered: boolean, notes: string[] } }
  *   | { ok: false, error: { kind: 'refused'|'io-error', message: string } }}
  */
@@ -1227,7 +1086,7 @@ function oldFolderAbsent(root) {
  * @param {{ machineDir?: string, homeDir?: string, now?: number }} [options]
  * @param {{ stopIfOldFolderAbsent?: boolean }} [flags]
  * @returns {{ ok: true, value: { root: string, realRoot: string, devflowDir: string, oldDir: string,
- *   newDir: string, machineDir: string, journal: string, now: number, git: GitLookup } | null }
+ *   newDir: string, machineDir: string, journal: string, now: number } | null }
  *   | { ok: false, error: { kind: 'refused'|'io-error', message: string } }}
  */
 function moveContext(opName, root, { machineDir, homeDir, now = Date.now() } = {}, { stopIfOldFolderAbsent = false } = {}) {
@@ -1248,7 +1107,6 @@ function moveContext(opName, root, { machineDir, homeDir, now = Date.now() } = {
         root: path.resolve(root), realRoot, devflowDir,
         oldDir: path.join(devflowDir, LEGACY_NAMES.folder), newDir: path.join(devflowDir, CURATION_DIR_NAME),
         machineDir: machine, journal: curationMoveJournalPath(machine, realRoot), now,
-        git: gitLookup(path.resolve(root)),
       },
     };
   } catch (err) {
@@ -1267,6 +1125,14 @@ function moveLedgerUnscrubbed(root, options = {}) {
   let result = null;
   try {
     if (lstatOrNull(ctx.oldDir) === null) return { ok: true, value: { state: 'none', notes: [] } };
+
+    // Git's index decides, before this pass makes, locks, reads or renames anything.
+    // The check runs before the move takes its locks, and every session start checks again.
+    const tracking = inspectTrackedAreas(ctx.root);
+    if (tracking.answer !== 'untracked') {
+      const cause = tracking.cause === null ? {} : { cause: tracking.cause };
+      return { ok: true, value: { state: 'skipped', reason: tracking.answer, ...cause, notes: [] } };
+    }
 
     fs.mkdirSync(machine, { recursive: true, mode: 0o700 });
     let newExisted = lstatOrNull(ctx.newDir) !== null;
@@ -1306,24 +1172,13 @@ function moveLedgerUnscrubbed(root, options = {}) {
 /**
  * True when the old folder must not be renamed whole, because the one rename would carry
  * something into the live folder that must stay in the backup: a file named like a
- * journal (repository content, never read), or a queue file that git tracks (the
- * repository supplied it, so no merge takes it). When the old folder holds a pending or
- * processing queue file and git cannot say what it tracks, it fails closed as the merge
- * does: the per-entry path then merges nothing and says why. The index is asked only when
- * such a queue file is there, and once per pass (ctx.git).
+ * journal (repository content, never read).
  *
- * @param {{ oldDir: string, git: GitLookup }} ctx
+ * @param {{ oldDir: string }} ctx
  * @returns {boolean}
  */
 function oldFolderNeedsEntryPath(ctx) {
-  if (lstatOrNull(path.join(ctx.oldDir, OLD_FOLDER_JOURNAL_NAME)) !== null) return true;
-  const queueFiles = [QUEUE_NAME, CLAIM_NAME].filter(name => {
-    const stat = lstatOrNull(path.join(ctx.oldDir, name));
-    return stat !== null && stat.isFile();
-  });
-  if (queueFiles.length === 0) return false;
-  const answer = ctx.git.files();
-  return !answer.ok || queueFiles.some(name => isTrackedQueueFile(answer.tracked, path.basename(ctx.oldDir), name));
+  return lstatOrNull(path.join(ctx.oldDir, OLD_FOLDER_JOURNAL_NAME)) !== null;
 }
 
 /** Remove `dir` when it is empty; any other outcome (it holds something, it is gone) leaves it, and nothing throws. */
@@ -1453,11 +1308,20 @@ function claimIsFresh(file, now) {
  * and the pass looks into at most MOVE_MAX_BACKUPS_SCANNED backups. With the new
  * folder absent or no backup it answers `none`.
  *
+ * Before it makes, locks or merges anything, the sweep asks the same question the move
+ * asks (checkTrackedAreas), which covers the backup folders too. If git tracks any
+ * entry under a data folder or a backup folder, or if a `.git` entry stands and git
+ * does not answer, the answer is `skipped` with the reason `tracked` or `unknown` and
+ * zero counts, and nothing changes: the folders, the machine directory and the locks
+ * stay as they are. A root with no `.git` entry makes no git call, and neither does a
+ * pass that finds nothing to merge.
+ *
  * @param {unknown} root - the ledger root, an absolute path
  * @param {{ machineDir?: string, homeDir?: string, now?: number }} [options]
  * Every message and note is one line with no control character (scrubMoveResult).
  *
- * @returns {{ ok: true, value: { state: 'none'|'busy'|'swept', files: number, merged: number, overflowed: number, notes: string[] } }
+ * @returns {{ ok: true, value: { state: 'none'|'busy'|'swept', files: number, merged: number, overflowed: number, notes: string[] }
+ *   | { state: 'skipped', reason: 'tracked'|'unknown', files: number, merged: number, overflowed: number, notes: string[] } }
  *   | { ok: false, error: { kind: 'refused'|'io-error', message: string } }}
  */
 function sweepLedgerBackups(root, options = {}) {
@@ -1466,7 +1330,7 @@ function sweepLedgerBackups(root, options = {}) {
 
 /** sweepLedgerBackups before its messages and notes are made single-line. */
 function sweepLedgerBackupsUnscrubbed(root, options = {}) {
-  const idle = state => ({ ok: true, value: { state, files: 0, merged: 0, overflowed: 0, notes: [] } });
+  const idle = (state, extra = {}) => ({ ok: true, value: { state, ...extra, files: 0, merged: 0, overflowed: 0, notes: [] } });
   const opened = moveContext(SWEEP_OP, root, options);
   if (!opened.ok) return opened;
   const ctx = opened.value;
@@ -1475,6 +1339,12 @@ function sweepLedgerBackupsUnscrubbed(root, options = {}) {
     if (lstatOrNull(ctx.newDir) === null) return idle('none');
     const backups = backupsHoldingRows(devflowDir).slice(0, MOVE_MAX_BACKUPS);
     if (backups.length === 0) return idle('none');
+
+    // Git's index decides, before this pass makes a folder, takes a lock or merges a row.
+    // The check runs before the sweep takes its locks, and each later run checks again.
+    const tracking = checkTrackedAreas(ctx.root);
+    if (tracking !== 'untracked') return idle('skipped', { reason: tracking });
+
     for (const name of backups) {
       const problem = backupProblem(path.join(devflowDir, name));
       if (problem !== null) return moveRefused(SWEEP_OP, problem);

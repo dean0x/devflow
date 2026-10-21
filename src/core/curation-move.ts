@@ -32,10 +32,21 @@ export interface LedgerMoveOptions {
 }
 
 /**
+ * Why a pass left a project alone and changed nothing: git tracks files in a curation
+ * data folder (`tracked`), or a `.git` entry stands and git did not answer (`unknown`).
+ * The one declaration of the reasons: the notice module (curation-move-skip.ts), the
+ * HUD's notice, the init step and the drains import it from here.
+ */
+export type MoveSkipReason = 'tracked' | 'unknown';
+
+/**
  * `moveLedger`'s answer. `none`: no old folder, nothing was locked or created.
  * `busy`: a lock or a fresh claim is held, try again at the next event; `reason` is
  * `claim` when a fresh queue claim held it, which can last 15 minutes, and is absent
- * when a lock or a folder that changed held it. `moved`: the
+ * when a lock or a folder that changed held it. `skipped`: the move left the project
+ * alone and changed nothing, for the `reason` ({@link MoveSkipReason}); with `unknown`,
+ * `cause` is one fixed word that says why git did not answer (a spawn error, a time
+ * out, an exit status), never git's own text. `moved`: the
  * folder was renamed whole (`whole-folder`), the new folder won and the old one is
  * the backup (`kept-new`), or the old ledger set moved into the new folder and the
  * old one is the backup (`moved-in`); `backup` names the backup folder under
@@ -45,6 +56,12 @@ export type LedgerMoveOutcome =
   | { readonly state: 'none'; readonly notes: readonly string[] }
   | { readonly state: 'busy'; readonly reason?: 'claim'; readonly notes: readonly string[] }
   | {
+    readonly state: 'skipped';
+    readonly reason: MoveSkipReason;
+    readonly cause?: string;
+    readonly notes: readonly string[];
+  }
+  | {
     readonly state: 'moved';
     readonly mode: 'whole-folder' | 'kept-new' | 'moved-in';
     readonly backup: string | null;
@@ -52,14 +69,27 @@ export type LedgerMoveOutcome =
     readonly notes: readonly string[];
   };
 
-/** `sweepLedgerBackups`'s answer: the queue files merged out of the backups a move left. */
-export interface LedgerSweepOutcome {
-  readonly state: 'none' | 'busy' | 'swept';
-  readonly files: number;
-  readonly merged: number;
-  readonly overflowed: number;
-  readonly notes: readonly string[];
-}
+/**
+ * `sweepLedgerBackups`'s answer: the queue files merged out of the backups a move left.
+ * `skipped`: the sweep left the project alone and changed nothing, for the `reason`
+ * ({@link MoveSkipReason}), and the counts are zero.
+ */
+export type LedgerSweepOutcome =
+  | {
+    readonly state: 'none' | 'busy' | 'swept';
+    readonly files: number;
+    readonly merged: number;
+    readonly overflowed: number;
+    readonly notes: readonly string[];
+  }
+  | {
+    readonly state: 'skipped';
+    readonly reason: MoveSkipReason;
+    readonly files: number;
+    readonly merged: number;
+    readonly overflowed: number;
+    readonly notes: readonly string[];
+  };
 
 /** One backup folder a move left under `.devflow`, with the rows its unswept queue files still hold. */
 export interface LedgerBackupRows {
@@ -89,8 +119,10 @@ export type BackupQueueFilesError = CurationStoreError & { readonly path?: strin
 export interface CurationMoveModule {
   /**
    * Move the old ledger folder to the new name, once, or merge it into a new folder
-   * that already exists. Never waits on a lock. Error kinds: `refused` (the root or a
-   * link among the set is unsafe; nothing was changed), `io-error`.
+   * that already exists. It leaves the project alone when git tracks files in a curation
+   * data folder, or when a `.git` entry stands and git does not answer. Never waits on
+   * a lock. Error kinds: `refused` (the root or a link among the set is unsafe; nothing
+   * was changed), `io-error`.
    */
   moveLedger(root: string, opts?: LedgerMoveOptions): CurationStoreResult<LedgerMoveOutcome>;
   /** Merge what the backups a move left hold into the new folder's pending queue; same error kinds as `moveLedger`. */
