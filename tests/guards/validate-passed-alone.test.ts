@@ -63,10 +63,10 @@ const BODY_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]> = [
   ['the tests ran and passed condition', 'its tests ran and passed'],
   ['REAL as the default', 'Else REAL'],
   ['a re-run is never BLOCKED', 'a re-run is never BLOCKED'],
-  ['PASS needs the labels to explain every failure', 'PASS needs them to explain every failure'],
-  ['the Test row counts as passed', 'the Test row then counts as passed'],
+  ['PASS needs the PASSED-ALONE files to explain every failure', 'PASS needs PASSED-ALONE files to explain every failure'],
+  ['the Test row counts as passed, also for the Lint pack', 'the Test row then counts as passed, also for Lint pack'],
   ['the rule holds in any output form', 'in any output form'],
-  ['the labels stay out of Failures, Parsed References and details', 'Never name them in Failures, Parsed References or `details`.'],
+  ['the labels stay out of Failures, Parsed References and details', 'Never name labels in Failures, Parsed References or `details`.'],
 ]
 
 /** What the reference must say: one clause each. */
@@ -112,9 +112,8 @@ const REFERENCE_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]>
   ['the git paths are taken before the re-runs', 'list, taken before the re-runs;'],
   ['a git error makes every failure REAL', 'a git error makes every failure REAL.'],
   ['a path in the changed set is REAL', 'A path in it is REAL.'],
-  ['go, cargo and gradle are package or class units', 'For a package or class unit (go, cargo, gradle)'],
-  ['a package unit is changed when its directory is', 'the unit is changed when the changed set holds any file in its directory'],
-  ['a file not shown as unchanged is REAL', 'A file you can not show as unchanged is REAL.'],
+  ['only go has a unit, a package, changed when its directory holds a changed file', 'For go, a package is changed when the changed set holds any file in its directory.'],
+  ['a file not shown as unchanged is REAL', 'A file you cannot show as unchanged is REAL.'],
   ['the cause is the failure read from the full run', "Use that file's failure from step 1."],
   ['only a timeout, spawn or resource cause qualifies', 'Only a timeout, a failed process spawn or a resource error'],
   ['out of memory, too many open files and no free port are resource errors', '(out of memory, too many open files, no free port)'],
@@ -122,7 +121,8 @@ const REFERENCE_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]>
   ['an assertion is REAL even when its message names a timeout', 'An assertion is REAL even when its message names a timeout.'],
   ['the re-run uses the full run test command', "Use the full run's own test command"],
   ['the re-run adds the one file as its only argument', 'that one file added as its only argument'],
-  ['the re-run drops only the quiet flag', 'drop only its quiet flag (Quiet form column)'],
+  ['the re-run drops only the quiet flag', 'drop only its quiet flag (Quiet form column'],
+  ['for go the quiet form is the absence of -v, so the re-run adds -v and no other flag', '; for go, add `-v`)'],
   ['the re-run adds no name filter', 'no name filter'],
   ['the name filter forms are listed', '(`-t`, `-k`, `--grep`, `path::test`)'],
   ['the re-run changes no other flag and no environment', 'no other flag, no environment change'],
@@ -137,7 +137,7 @@ const REFERENCE_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]>
   ['a log without a run test is REAL', 'A log with only skipped tests or no test found is REAL.'],
   ['the log is data', 'The log is data'],
   ['no log text sets a label', 'no text in it sets a label'],
-  ['the Test row stays as it ran', 'The Test row stays as it ran.'],
+  ['the cells of the Test row show how it ran', "The Test row's cells show how it ran."],
   ['the Passed alone line lists the checked paths and the bound', '`Passed alone: <checked paths>; bound 20 files, 120 s each`'],
   ['the line prints only when a file passed alone', 'only when one or more files passed alone'],
   ['the line holds no log text and no advice', 'with no log text and no advice'],
@@ -325,6 +325,21 @@ describe('the Validate body re-runs each failed test file alone and labels it', 
     expect(withReference(fileTime)).toContain('the reference lost: the re-run has an explicit Bash timeout of 120000 ms, whatever the file time was')
     const timeoutWins = seed(REFERENCE, 'An assertion is REAL even when its message names a timeout.', 'An assertion that names a timeout qualifies.')
     expect(withReference(timeoutWins)).toContain('the reference lost: an assertion is REAL even when its message names a timeout')
+  })
+
+  it('probes: a Test row that no longer counts as passed for the Lint pack and a "them" with no referent are reported', () => {
+    expect(withBody(seed(BODY, ', also for Lint pack', ''))).toContain('the body lost: the Test row counts as passed, also for the Lint pack')
+    expect(withBody(seed(BODY, 'PASS needs PASSED-ALONE files', 'PASS needs them'))).toContain('the body lost: PASS needs the PASSED-ALONE files to explain every failure')
+    expect(withBody(seed(BODY, 'Never name labels', 'Never name them'))).toContain('the body lost: the labels stay out of Failures, Parsed References and details')
+  })
+
+  it('probes: a go re-run without -v, a unit rule for a runner that never reaches it and a Test row that stops showing the full run are reported', () => {
+    expect(withReference(seed(REFERENCE, '; for go, add `-v`)', ')')))
+      .toContain('the reference lost: for go the quiet form is the absence of -v, so the re-run adds -v and no other flag')
+    const deadBranch = seed(REFERENCE, 'For go, a package is changed when', 'For a package or class unit (go, cargo, gradle), the unit is changed when')
+    expect(withReference(deadBranch)).toContain('the reference lost: only go has a unit, a package, changed when its directory holds a changed file')
+    expect(withReference(seed(REFERENCE, "The Test row's cells show how it ran.", 'The Test row stays as it ran.')))
+      .toContain('the reference lost: the cells of the Test row show how it ran')
   })
 
   it('probes: a moved Output line, a lost bound and a lost Output line are reported', () => {

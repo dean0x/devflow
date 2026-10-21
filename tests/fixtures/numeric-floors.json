@@ -518,19 +518,19 @@
     },
     {
       "id": "validate-body-max",
-      "ceiling": 6027,
-      "pattern": "const VALIDATE_BODY_MAX_BYTES = 6_027",
+      "ceiling": 6016,
+      "pattern": "const VALIDATE_BODY_MAX_BYTES = 6_016",
       "occurrences": 1,
       "sourceFile": "tests/guards/validate-lint-pack.test.ts",
-      "description": "The Validate agent body, src/assets/agents/validate.md, in bytes. It is hand-authored. The lean lint-pack wiring and the per-file passed-alone re-run rule (the re-run sentence, the Read line with its conditions, and the Passed alone: line) are funded with named cuts in the same body; it measures 6,027 at #477, with no headroom. May be LOWERED, never raised: a later addition funds itself with a cut."
+      "description": "The Validate agent body, src/assets/agents/validate.md, in bytes. It is hand-authored. The lean lint-pack wiring and the per-file passed-alone re-run rule (the re-run sentence, the Read line with its conditions, and the Passed alone: line) are funded with named cuts in the same body; it measures 6,016 at #477, with no headroom. May be LOWERED, never raised: a later addition funds itself with a cut."
     },
     {
       "id": "validate-passed-alone-ref-max",
-      "ceiling": 3450,
-      "pattern": "const VALIDATE_PASSED_ALONE_REF_MAX_BYTES = 3_450",
+      "ceiling": 3435,
+      "pattern": "const VALIDATE_PASSED_ALONE_REF_MAX_BYTES = 3_435",
       "occurrences": 1,
       "sourceFile": "tests/guards/agent-references.test.ts",
-      "description": "references/validate/passed-alone.md of the agent-references skill, in bytes. Validate reads it once per run, after a failed Test row, so it is standing context on that path only. Measured 3,450 at #477, with no headroom. May be LOWERED, never raised."
+      "description": "references/validate/passed-alone.md of the agent-references skill, in bytes. Validate reads it once per run, after a failed Test row, so it is standing context on that path only. Measured 3,435 at #477, with no headroom. May be LOWERED, never raised."
     },
     {
       "id": "command-bug-analysis-max",

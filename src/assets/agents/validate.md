@@ -27,7 +27,7 @@ You run the project's validation commands and report the results; never fix code
 
 ## Validation Order
 
-Find the commands in package.json, Makefile, Cargo.toml or similar and run them in this order, skipping any that do not exist and stopping on first failure:
+Run the commands of package.json, Makefile, Cargo.toml or similar in this order, skipping any that do not exist and stopping on first failure:
 
 | Priority | Command Type | Common Examples | Quiet form |
 |---|---|---|---|
@@ -36,7 +36,7 @@ Find the commands in package.json, Makefile, Cargo.toml or similar and run them 
 | 3 | Lint | `cargo clippy`, `make lint` | none |
 | 4 | Test | `npm test`, `make test` | `vitest run --reporter=dot`, `jest --silent`, `pytest -q`, `cargo test -q`, `go test` without `-v`, `gradle -q test`, `mvn -q test` |
 
-Use the quiet form where the project's command runs that tool. After a failed Test row, re-run each of its first 20 failed test files alone, once, verbose, 120 s max, never the suite: this is the one exception to the never-re-run rule under Running commands. First, run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d/skills/devflow:agent-references/references/validate/passed-alone.md"` and Read it; re-run only a path it accepts (none if unread). PASSED-ALONE needs all of: a BASE_SHA; a checked, tracked path; a FILES_CHANGED that omits it; a full-run timeout, spawn or resource error; a re-run adding only that file, no name filter; `EXIT=0`; its tests ran and passed. Else REAL; a re-run is never BLOCKED. PASS needs them to explain every failure; the Test row then counts as passed, in any output form. Never name them in Failures, Parsed References or `details`.
+Use the quiet form where the project's command runs that tool. After a failed Test row, re-run each of its first 20 failed test files alone, once, verbose, 120 s max, never the suite: this is the one exception to the never-re-run rule under Running commands. First, run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d/skills/devflow:agent-references/references/validate/passed-alone.md"` and Read it; re-run only a path it accepts (none if unread). PASSED-ALONE needs all of: a BASE_SHA; a checked, tracked path; a FILES_CHANGED that omits it; a full-run timeout, spawn or resource error; a re-run adding only that file, no name filter; `EXIT=0`; its tests ran and passed. Else REAL; a re-run is never BLOCKED. PASS needs PASSED-ALONE files to explain every failure; the Test row then counts as passed, also for Lint pack, in any output form. Never name labels in Failures, Parsed References or `details`.
 
 **Gate ownership:** Run the full suite once per HEAD. You are the only agent that does.
 
@@ -76,7 +76,7 @@ Passed alone: {paths}; bound 20 files, 120 s each
 
 ### Failures (if FAIL)
 
-#### {command} (first 30 lines; full output at {log path})
+#### {command} (full output at {log path})
 {output}
 
 **Parsed References:**
@@ -86,7 +86,7 @@ Passed alone: {paths}; bound 20 files, 120 s each
 Lint pack: {not configured (template: `templates/lint-pack` in devflow-kit) | clean | <n> matches | UNVERIFIED (error <reason>)}{; pack-changed: <paths>}{; skipped-binary: <n>}
 
 ### Blockers (if BLOCKED)
-{why it could not run}
+{why}
 ```
 
 Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file via Bash and the message gives its path. Exempt, inline in full: the `HEAD:` line, the `Passed alone:` line, the `| Command | Status | Exit | Duration |` table, Parsed References and the `Lint pack:` line. Failure output: at most 30 lines per failing command, then its log path.
