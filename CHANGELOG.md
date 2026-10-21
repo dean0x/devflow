@@ -15,8 +15,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 **Stale-install window:**
 - Until you run `devflow init`, your installed level reference has no Evaluate row, so Evaluate runs as at `full`. If the reference is new and the installed Evaluate agent is old, `/implement` runs one pass at the full report scope.
 
+### Upgrade notes — Severity tiers by level
+
+**What changes:**
+- At `standard`, the default, and at `lean`, `/resolve` no longer gives every FIX_NOW item its own fix. Triage sorts each kept item into a severity tier. `full` is unchanged.
+  - CRITICAL, HIGH, severe MEDIUM and security findings keep a fix for each issue.
+  - A prose-only finding is fixed in a batch. If Code must change logic to fix it, Code leaves it unedited and the item goes to Fix Separately.
+  - Lower MEDIUM and LOW findings go to Fix Separately. One backlog issue records them.
+  - A pre-existing finding that is not a security finding goes to Fix Separately, also when the branch touched its file. Until now, `/resolve` fixed such a finding in a touched file.
+  - A security finding stays FIX_NOW or ESCALATED at every severity, LOW and pre-existing included.
+- Run `devflow gates --set full` to keep today's `/resolve`: one fix for each FIX_NOW item, and a pre-existing finding in a touched file is fixed.
+
+**Stale-install window:**
+- Until you run `devflow init`, your installed `/resolve` and Triage agent have no tiers, so they behave as at `full`. If Triage is new and the installed reference is missing or unreadable, Triage applies no tier, keeps every verdict and reports `Tiers: not applied (reference unreadable)`.
+
 ### Changed
 
+- **`/resolve` applies severity tiers at `standard` and `lean`** ([#484](https://github.com/dean0x/devflow/issues/484)).
+  - At `standard` and `lean`, Triage reads a new reference, `triage/severity-tiers.md`, once, after its normal checks. It runs a nine-step checklist in order, and the first step that matches decides.
+    The checklist only narrows. It never changes a FALSE_POSITIVE, BY_DESIGN or ESCALATED verdict, and it never moves a finding up.
+    A duplicate group takes the highest tier of its members. At `full`, the Triage agent text is byte-for-byte what it was.
+  - A security finding is judged by the defect that Triage reads in the code, not by its label or severity. A security control that fails open or is weakened, and a false security or safety claim, count as security at every severity.
+  - A prose-only fix runs as a Code `issue-fix` batch with the Risk Tier `Standard, prose only`. No new agent is spawned. If Code leaves an item unedited for a logic change, `/resolve` records it as Fix Separately with the Reason `needs a logic change`.
+  - A DEFER item goes to Fix Separately with the Reason `severity tier: DEFER`. The manage-debt step puts the items of one run in one shared backlog issue.
+  - Each issue cell in `resolution-summary.md` starts with its severity in brackets when the issue has one, for example `[HIGH]`. The `**Gate level**` header can carry a level note.
+  - The gate level hints, the effect text of `devflow gates`, `README.md`, `docs/cli-reference.md` and `docs/commands.md` name the tiers.
+  - Residual risk: the tiers rest on the Triage classification, and no live test checks it. The guards pin the text that the agents read. A finding that Triage ranks too low waits in the backlog issue until a later review brings it back.
+- **The level references state that a waiting phase starts at once** ([#600](https://github.com/dean0x/devflow/issues/600)).
+  - The Skipped line of `resolve-levels.md` and `implement-levels.md` now says: a phase that waits for a skipped phase starts at once.
+  - The `harden-scope` bullet of `implement-levels.md` no longer says `, and Phase 5 starts at once`, because the Skipped line now covers it.
+  - Behaviour is unchanged. Only the wording moved.
 - **Validate re-runs each failed test file alone** ([#477](https://github.com/dean0x/devflow/issues/477)).
   - After a failed test run, Validate re-runs each failed test file alone, once, with verbose output.
     The bound is 20 files.
