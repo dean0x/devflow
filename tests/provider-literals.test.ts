@@ -1455,13 +1455,21 @@ const MANAGE_DEBT_STEP_THREE = [
   '   - `## Deferred to Tech Debt` entries from `{REVIEW_DIR}/resolution-summary.md` (TECH_DEBT from Triage agent)',
 ].join('\n');
 
+/** The item of the rule that names what the operation returns when the resolution summary is missing. */
+const MANAGE_DEBT_MISSING_SUMMARY =
+  '- If `resolution-summary.md` is missing, return `TRACEABILITY: DEGRADED (resolution summary missing)` ' +
+  'and do not update the backlog.';
+
 /** The item-source rule, as the shared contract states it and every reference expands it. */
-const MANAGE_DEBT_RULE =
-  'Update tech debt backlog. Add only rows of `## Fix Separately` (FIX_SEPARATE) and ' +
-  '`## Deferred to Tech Debt` (TECH_DEBT) in `{REVIEW_DIR}/resolution-summary.md`; a section ends at ' +
-  'the next heading; a missing file or empty section adds none. Never add an item that also has a row ' +
-  'in `## Escalations`, `## Blocked` or `## Fixed Issues`. Read no review report: in `{REVIEW_DIR}`, ' +
-  'read only `resolution-summary.md`.';
+const MANAGE_DEBT_RULE = [
+  'Update tech debt backlog from `{REVIEW_DIR}/resolution-summary.md`:',
+  '- Add only entries of `## Fix Separately` (FIX_SEPARATE) and `## Deferred to Tech Debt` (TECH_DEBT). ' +
+    'A section ends at the next heading.',
+  '- An empty section adds none.',
+  MANAGE_DEBT_MISSING_SUMMARY,
+  '- Never add an item that also has an entry in `## Escalations`, `## Blocked` or `## Fixed Issues`.',
+  '- Read no review report: in `{REVIEW_DIR}`, read only `resolution-summary.md`.',
+].join('\n');
 
 /** One file the item-source collector reads: a compiled reference or a provider source. */
 interface ManageDebtFile {
@@ -1569,6 +1577,14 @@ describe('manage-debt item sources', () => {
       drift,
       `the rule has one owner, the shared contract:\n  ${drift.join('\n  ')}`,
     ).toEqual([]);
+  });
+
+  it('a missing resolution summary returns a DEGRADED line and leaves the backlog unchanged, in the contract and every reference', () => {
+    expect(PROVIDERS.length, 'no registered provider, so the scan below would read nothing').toBeGreaterThan(0);
+    expect(manageDebtContract(), 'the contract must state what a missing summary returns').toContain(MANAGE_DEBT_MISSING_SUMMARY);
+    for (const { label, text } of references) {
+      expect(text, `${label} must state what a missing summary returns`).toContain(MANAGE_DEBT_MISSING_SUMMARY);
+    }
   });
 
   it("the Git agent's manage-debt row and the contract name the same two verdicts", () => {
