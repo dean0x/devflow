@@ -730,6 +730,7 @@ describe('devflow gates (help and usage)', () => {
     expect(run.out).toContain("At lean, /implement has Validate run the project's lint pack.");
     expect(run.out).toContain('/implement and /resolve also read the level and name it in their report');
     expect(run.out).toContain('at standard and lean they skip Polish, and full keeps it');
+    expect(run.out).toContain('At lean, /implement skips Harden on a docs-only diff.');
     expect(run.out).not.toContain('hold no phase rules yet');
     expect(run.out).not.toContain('#480');
     expect(run.out).not.toContain('#473');
