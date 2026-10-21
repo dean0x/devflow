@@ -277,7 +277,7 @@ describe('a store operation where git tracks the curation data folders', { timeo
       trackCuration();
       const before = snapshot();
 
-      expect(call()).toEqual({ ok: false, error: { kind: 'tracked', message: trackedLine(op, root) } });
+      expect(call()).toEqual({ ok: false, error: { kind: 'tracked', reason: 'tracked', message: trackedLine(op, root) } });
       expect(snapshot()).toEqual(before);
       expect(fs.existsSync(paths.lockDir)).toBe(false);
     });
@@ -285,7 +285,7 @@ describe('a store operation where git tracks the curation data folders', { timeo
     it('answers kind tracked, with the did-not-answer line, where git did not answer', () => {
       fs.mkdirSync(path.join(root, '.git'));
 
-      expect(store.readListing(root)).toEqual({ ok: false, error: { kind: 'tracked', message: unknownLine('list', root) } });
+      expect(store.readListing(root)).toEqual({ ok: false, error: { kind: 'tracked', reason: 'unknown', message: unknownLine('list', root) } });
     });
 
     it('lets withDecisionsLock refuse before it runs its body or looks for the journal', () => {
