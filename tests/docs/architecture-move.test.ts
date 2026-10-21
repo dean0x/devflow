@@ -27,6 +27,7 @@ import * as path from 'path';
 import { readManifest } from '../../src/core/manifest.js';
 import { readMachineFeature } from '../../src/core/feature-switch.js';
 import { readGateManifest } from '../../src/core/gate-level.js';
+import { AREA_PAUSE_NOTICE } from '../../src/core/area-pause-notice.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 
@@ -183,14 +184,79 @@ describe('the docs name whose backups uninstall removes', () => {
   });
 });
 
-describe('CLAUDE.md names the two rules that architecture.md describes', () => {
+describe('the docs describe a paused data folder in the same words', () => {
+  const cliLines = readFileSync(path.join(ROOT, 'docs/cli-reference.md'), 'utf8').split('\n');
+  const changelog = readFileSync(path.join(ROOT, 'CHANGELOG.md'), 'utf8');
+  const architecture = lineStarting(ARCHITECTURE_LINES, '**Tracked data folders**');
+  const hooksMemory = lineStarting(HOOKS_LINES, '**A paused memory folder.**');
+  const hooksCuration = lineStarting(HOOKS_LINES, '**A paused curation folder.**');
+  const cliCuration = lineStarting(cliLines, 'When git tracks a file in a curation data folder at the ledger root');
+  const cliMemory = lineStarting(cliLines, 'The memory folder of a checkout (`.devflow/memory/`)');
+  const untrackSteps = ['`git ls-files .devflow`', '`git rm --cached <file>`'];
+
+  it('treats a git that does not answer like a git that tracks', () => {
+    for (const text of [architecture, hooksMemory, hooksCuration]) {
+      expect(text).toMatch(/`unknown` pauses (?:an area )?like `tracked`/);
+    }
+    for (const text of [cliCuration, cliMemory]) {
+      expect(text).toContain('does not answer');
+    }
+  });
+
+  it('names the two commands that the fixed notice tells the user to run', () => {
+    for (const area of ['curation', 'memory'] as const) {
+      for (const step of untrackSteps) expect(AREA_PAUSE_NOTICE[area].tracked).toContain(step.replace(/`/g, ''));
+    }
+    for (const text of [hooksCuration, cliCuration, cliMemory]) {
+      for (const step of untrackSteps) expect(text).toContain(step);
+    }
+  });
+
+  it('gives the exit code of the curation status and of the other curation commands', () => {
+    expect(cliCuration).toContain('`--status` prints the machine state line, then the fixed pause notice, and exits 0.');
+    expect(cliCuration).toContain('`--list`, `--show`, `--restore`, `--reset`, `--clear` and `--configure` (project scope) print the notice as an error, change nothing and exit 1.');
+  });
+
+  it('names the memory command that prints the notice and the three that skip the drain', () => {
+    expect(cliMemory).toContain('`memory --status`');
+    expect(cliMemory).toContain('exits 0');
+    for (const command of ['memory --clear', 'memory --disable', 'init --no-memory']) {
+      expect(cliMemory).toContain(command);
+      expect(hooksMemory).toContain(command);
+    }
+  });
+
+  it('names the bound on the probe of the memory worker', () => {
+    expect(hooksMemory).toContain('`DEVFLOW_BG_AREA_PROBE_SECS` seconds (default 5, from 1 to 60)');
+  });
+
+  it('says in the changelog what the change does, once, with its issue link', () => {
+    const entry = '- **devflow ignores curation and memory files that git tracks, and says so at session start** ([#626](https://github.com/dean0x/devflow/issues/626)).';
+    expect(changelog.split(entry)).toHaveLength(2);
+  });
+});
+
+describe('CLAUDE.md names the rules that architecture.md describes', () => {
   const dataMove = lineStarting(ARCHITECTURE_LINES, '**Curation data move**');
   const switchRule = lineStarting(ARCHITECTURE_LINES, '**Curation switch**');
   const invariants = CLAUDE_MD.split('\n').filter(line => /^\d+\. /.test(line));
 
   it('numbers the invariants one to n with no gap', () => {
     expect(invariants.map(line => Number.parseInt(line, 10))).toEqual(invariants.map((_line, index) => index + 1));
-    expect(invariants.length).toBeGreaterThanOrEqual(43);
+    expect(invariants.length).toBeGreaterThanOrEqual(44);
+  });
+
+  it('a folder that git tracks, or git not answering, pauses the feature, and architecture.md says so', () => {
+    const trackedFolders = lineStarting(ARCHITECTURE_LINES, '**Tracked data folders**');
+    expect(invariants[43]).toBe('44. When git tracks the curation or memory folder, or does not answer, that feature reads and writes no file there.');
+    expect(trackedFolders).toContain('devflow reads and writes no file in that area\'s folders');
+    expect(trackedFolders).toContain('`unknown` pauses an area like `tracked`');
+  });
+
+  it('the tracked data folders paragraph follows the curation switch paragraph', () => {
+    const leads = ARCHITECTURE_LINES.map(line => /^\*\*([^*]+)\*\*/.exec(line)?.[1]).filter(lead => lead !== undefined);
+    expect(leads.indexOf('Curation switch')).toBeGreaterThanOrEqual(0);
+    expect(leads.indexOf('Tracked data folders')).toBe(leads.indexOf('Curation switch') + 1);
   });
 
   it('the old folder is only moved, never read as a ledger', () => {

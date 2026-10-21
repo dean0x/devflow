@@ -120,6 +120,19 @@ The move skips a project, and changes nothing in it, when git tracks any entry u
 
 `--enable` and `--disable` write the machine switch under both manifest keys, `features.curation` and `features.learning`, so a 3.7 install reads the same value. They try the move of the current project once and wait for no lock. If the move is skipped, they print the notice as a warning, and the exit code does not change. Under version skew they write both keys and move nothing. Only `--disable` drains the queue. The drain deletes the queue files of the current project in each ledger folder that exists and in the backups. When git tracks any entry under `.devflow/learning/`, `.devflow/curation/` or a backup folder, or does not answer, the drain deletes no queue file. It prints the notice once, and the switch stays recorded.
 
+When git tracks a file in a curation data folder at the ledger root (the curation folder, the old ledger folder or a backup folder), or a `.git` entry stands and git does not answer, curation is paused for the project, and these commands read and write nothing there. `--status` prints the machine state line, then the fixed pause notice, and exits 0. `--list`, `--show`, `--restore`, `--reset`, `--clear` and `--configure` (project scope) print the notice as an error, change nothing and exit 1. They ask before they read a ledger file, take a lock or ask you to confirm. `--enable` and `--disable` are not refused: `--disable` records the switch and deletes no queue file. The notice holds nothing from the repository. When git tracks files, it says to run `git ls-files .devflow`, then `git rm --cached <file>` for the files that git lists, in the main checkout, and to delete them if you did not make them. When git did not answer, it says that the check runs again at the next session start, and that you should check that git runs in the project if the notice stays. The pause ends when the files are untracked: the next command or session start asks git again.
+
+## Working Memory
+
+```bash
+npx devflow-kit memory --enable           # Enable working memory in every project (a repository can opt out)
+npx devflow-kit memory --disable          # Disable working memory in every project; drains the queue of the current project
+npx devflow-kit memory --status           # Show the state
+npx devflow-kit memory --clear            # Clean up queue files from the current project or from all projects
+```
+
+The memory folder of a checkout (`.devflow/memory/`) is paused while git tracks a file in it, or while a `.git` entry stands and git does not answer. `memory --status` asks at the git root of the current directory. For a paused folder it prints the state, then the fixed memory notice, and exits 0. `memory --clear`, `memory --disable` and `devflow init --no-memory` skip the queue drain of a paused project, leave its queue files in place and print the notice. `memory --clear` prints it as a warning for each paused project. The other two print `The memory queue was not drained.` and the notice. The notice says what is paused and why. When git tracks files, it says to run `git ls-files .devflow`, then `git rm --cached <file>`, in this checkout, and to delete the files if you did not make them. When git did not answer, it says that the check runs again at the next session start. The memory hooks and the memory worker read and write nothing in a paused folder (see `docs/reference/hooks.md`).
+
 ## Feature Knowledge
 
 ```bash
@@ -339,6 +352,8 @@ npx devflow-kit hud --no-detail      # Hide tool/agent descriptions
 
 The HUD also shows your OpenAI Codex usage limits (the weekly window, plus the 5-hour window when your plan has one) next to the Claude quota. It reads them from Codex's own session logs under `~/.codex/sessions`, makes no network call, and shows nothing when you do not use Codex.
 
+When `.devflow/curation/` exists and git tracks a file in a curation data folder, or does not answer, the HUD shows no curation counts and no skip line.
+
 A `statusLine` is devflow's only when its command ends in `/.devflow/scripts/hud.sh` (or the older `/.devflow/scripts/statusline.sh`). Any other `statusLine` is yours: `init`, `init --no-hud`, `hud --disable` and `uninstall` leave it alone, and `hud --enable` asks before replacing it.
 
 ## Security (Deny List)
@@ -533,4 +548,4 @@ npx devflow-kit uninstall
 | `--dry-run` | Show what would be removed |
 | `--verbose` | Show detailed output |
 
-**Project data.** A full uninstall run interactively inside a git repository offers to remove that repository's `.devflow/` at the git root, wherever in the repository you run it. Before asking, it lists what it would remove and what it keeps: `features/`, `conventions.md`, `policy.json` and `project.json` are shared through git and are always kept, so an uncommitted edit to one of them survives. Outside a git repository, or in a repository rooted at your home directory (whose `.devflow/` is the machine-wide install), the step is skipped. If the repository's `.devflow` is a symbolic link, the step is skipped too and says so: devflow does not follow the link, so neither the link nor what it points to is touched, and `--dry-run` reports the same. `--keep-docs`, a non-interactive run, and answering no all leave `.devflow/` as it was.
+**Project data.** A full uninstall run interactively inside a git repository offers to remove that repository's `.devflow/` at the git root, wherever in the repository you run it. Before asking, it lists what it would remove and what it keeps: `features/`, `conventions.md`, `policy.json` and `project.json` are shared through git and are always kept, so an uncommitted edit to one of them survives. Outside a git repository, or in a repository rooted at your home directory (whose `.devflow/` is the machine-wide install), the step is skipped. If the repository's `.devflow` is a symbolic link, the step is skipped too and says so: devflow does not follow the link, so neither the link nor what it points to is touched, and `--dry-run` reports the same. `--keep-docs`, a non-interactive run, and answering no all leave `.devflow/` as it was. A data area that git tracks files in, or that git did not answer for, is kept whatever you answer: the curation area is the curation folder, the old ledger folder and the backup folders, and the memory area is `memory/`. The list names them on a `Keep (git tracks them, or git did not answer):` line, `--dry-run` marks each one `kept`, and the final `Kept:` line names them. The line and the marks are absent when nothing is kept for this reason.

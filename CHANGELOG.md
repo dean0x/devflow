@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Expected effect: about 25-30% less spend on Evaluate and its fixes. This figure comes from the studied episodes and is not measured here.
   - Residual risk: at `standard` and `lean`, nothing checks the one Fix round against the criteria again. Phase 6 Validate and Phase 7 QA cover behaviour. A non-behavioural criterion or the removal of unrequested code has no later check before the PR opens.
   - Known limit: no CI test checks where the level line lands in a spawn prompt at run time.
+- **devflow ignores curation and memory files that git tracks, and says so at session start** ([#626](https://github.com/dean0x/devflow/issues/626)). When git tracks a file in a curation or memory data folder, or does not answer, devflow reads and writes no file in that folder. One fixed notice at session start says what to run to untrack the files. `devflow curation`, `devflow memory`, the HUD and `devflow uninstall` leave such a folder alone.
 
 ---
 
