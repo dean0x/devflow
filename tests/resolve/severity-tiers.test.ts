@@ -402,6 +402,32 @@ export function collectResolveSideDefects(body: string, ref: string): string[] {
   return out
 }
 
+/** The text of the prose-only value up to its colon: the part that a consumer names. */
+const PROSE_ONLY_OPENER = PROSE_ONLY.slice(0, PROSE_ONLY.indexOf(':'))
+
+/** The two Code bodies that carry the issue-fix inputs: curation on and curation off. */
+const CODE_ON = resolveAgentSource('code').content
+const CODE_OFF = resolveCurationOffSource('agents', 'code')
+if (CODE_OFF === null) throw new Error('dist/curation-off/agents/code.md is absent: run `npm run build:mds`')
+const CODE_BUILDS: ReadonlyArray<{ readonly label: string; readonly body: string }> = [
+  { label: 'curation on', body: CODE_ON },
+  { label: 'curation off', body: CODE_OFF },
+]
+
+/**
+ * How a Code body falls short of naming the third SCOPE value that /resolve sends: the SCOPE bullet of Input Context and the
+ * `**Inputs:**` line of the issue-fix mode each hold the prose-only opener in a code span, once.
+ */
+export function collectCodeScopeSeamDefects(body: string): string[] {
+  const out: string[] = []
+  const opener = `\`${PROSE_ONLY_OPENER}\``
+  const input = body.split('\n').filter(line => line.startsWith('- **SCOPE**'))
+  if (input.length !== 1 || countOf(input[0], opener) !== 1) out.push('the Code SCOPE input bullet does not name the prose-only opener')
+  const inputs = body.split('\n').filter(line => line.startsWith('**Inputs:**'))
+  if (inputs.length !== 1 || countOf(inputs[0], opener) !== 1) out.push('the Code issue-fix Inputs line does not name the prose-only opener')
+  return out
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -686,6 +712,17 @@ describe('resolve.mds reads what Triage writes (TP-5, TP-12, TP-14, TP-15, TP-16
   it('the move bullet gives the Reason that the prose-only value hands Code', () => {
     expect(PROSE_ONLY).toContain('needs a logic change')
     expect(COLLECT_MOVE).toContain('Reason `needs a logic change`')
+  })
+
+  it.each(CODE_BUILDS)('$label: the Code body names the prose-only value in its SCOPE input and its issue-fix inputs', ({ body }) => {
+    expect(collectCodeScopeSeamDefects(body)).toEqual([])
+  })
+
+  it.each(CODE_BUILDS)('$label: known-bad probe on the Code seam: a SCOPE input without the prose-only opener is reported', ({ body }) => {
+    const input = 'the Code SCOPE input bullet does not name the prose-only opener'
+    const inputs = 'the Code issue-fix Inputs line does not name the prose-only opener'
+    expect(collectCodeScopeSeamDefects(seedOnce(body, 'Blast-radius scope hint (Standard | Careful | `Standard, prose only`)', 'Blast-radius scope hint (Standard | Careful)')), 'the input bullet').toEqual([input])
+    expect(collectCodeScopeSeamDefects(seedOnce(body, '`SCOPE` (Standard | Careful | `Standard, prose only` per issue', '`SCOPE` (Standard | Careful per issue')), 'the Inputs line').toEqual([inputs])
   })
 
   it.each(RESOLVE_BUILDS)('$label: known-bad probes on the parse line: a paraphrased value, a second copy, a dropped Careful default and a dropped SCOPE sentence are each reported', ({ body }) => {
