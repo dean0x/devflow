@@ -70,6 +70,7 @@ interface CiWaitApi {
   readonly STATUSES: readonly string[]
   readonly CI_WAIT_MAX_SECONDS: number
   classifyChecks(checks: ReadonlyArray<{ name: string; bucket: string; workflow?: string }>): { status: string; reason: string | null }
+  mergeGate(status: string | null, mergeable: unknown, workflowsActive?: boolean | null): 'keep' | 'open' | 'conflict'
 }
 const CW = createRequire(import.meta.url)(CI_WAIT_SCRIPT) as CiWaitApi
 
@@ -530,6 +531,72 @@ describe('#421 AC-14: ci-wait\'s classifier agrees with check-ci-status step 5 o
   })
 })
 
+// ---------------------------------------------------------------------------
+// D-CI-MERGE-STATE, D-CI-WORKFLOWS — the one gate both scripts apply (AC-4, AC-7)
+// ---------------------------------------------------------------------------
+
+type GateResult = 'keep' | 'open' | 'conflict'
+/** What a probe of the repository's workflow files told: an answer, or no answer (not read, or failed). */
+type WorkflowsAnswer = boolean | null | undefined
+
+const GATE_MERGEABLES: ReadonlyArray<string | null | undefined> = ['MERGEABLE', 'CONFLICTING', 'UNKNOWN', null, undefined, '', 'SOMETHING_NEW']
+const GATE_ANSWERS: ReadonlyArray<WorkflowsAnswer> = [true, false, null, undefined]
+
+/**
+ * The gate written out independently of the script, from the rule alone. A conflict is
+ * a conflict. PASSING stands only on MERGEABLE. NO_CI stands only on MERGEABLE when the
+ * repository has no active workflow file; any other probe answer, or none, is not a
+ * verdict. FAILING, PENDING, INDETERMINATE and NO_PR do not depend on either input.
+ */
+function gateModel(status: string | null, mergeable: unknown, answer: WorkflowsAnswer): GateResult {
+  if (mergeable === 'CONFLICTING') return 'conflict'
+  if (status === 'PASSING') return mergeable === 'MERGEABLE' ? 'keep' : 'open'
+  if (status === 'NO_CI') return mergeable === 'MERGEABLE' && answer === false ? 'keep' : 'open'
+  return 'keep'
+}
+
+/** Named collector: the (status, mergeable, probe answer) triples on which a gate differs from the model. */
+function collectGateDisagreements(gate: (status: string | null, mergeable: unknown, answer: WorkflowsAnswer) => GateResult): string[] {
+  const out: string[] = []
+  for (const status of [null, ...CW.STATUSES]) {
+    for (const mergeable of GATE_MERGEABLES) {
+      for (const answer of GATE_ANSWERS) {
+        const want = gateModel(status, mergeable, answer)
+        const got = gate(status, mergeable, answer)
+        if (want !== got) out.push(`${String(status)} on ${String(mergeable)} with ${String(answer)}: model ${want}, gate ${got}`)
+      }
+    }
+  }
+  return out
+}
+
+describe('D-CI-MERGE-STATE and D-CI-WORKFLOWS: the shared gate over every status, merge value and probe answer', () => {
+  it('equals the model on the whole domain', () => {
+    expect(CW.STATUSES.length, 'no statuses').toBe(6)
+    expect(GATE_MERGEABLES.length * GATE_ANSWERS.length * (CW.STATUSES.length + 1), 'the domain is empty').toBeGreaterThanOrEqual(150)
+    expect(collectGateDisagreements((status, mergeable, answer) => CW.mergeGate(status, mergeable, answer))).toEqual([])
+  })
+
+  it('gives NO_CI only for MERGEABLE with no active workflow: true, null and an omitted value are never a NO_CI', () => {
+    expect(CW.mergeGate('NO_CI', 'MERGEABLE', false)).toBe('keep')
+    for (const answer of [true, null, undefined]) expect(CW.mergeGate('NO_CI', 'MERGEABLE', answer), String(answer)).toBe('open')
+    expect(CW.mergeGate('NO_CI', 'MERGEABLE'), 'the argument left out').toBe('open')
+    for (const mergeable of GATE_MERGEABLES.filter(m => m !== 'MERGEABLE')) {
+      for (const answer of GATE_ANSWERS) expect(CW.mergeGate('NO_CI', mergeable, answer), `${String(mergeable)} with ${String(answer)}`).not.toBe('keep')
+    }
+  })
+
+  it('known-bad probes: a gate that ignores the probe, passes an unknown merge state, or lets a conflict through is reported', () => {
+    const ignoresProbe = (status: string | null, mergeable: unknown): GateResult => CW.mergeGate(status, mergeable, false)
+    expect(collectGateDisagreements(ignoresProbe).some(d => d.startsWith('NO_CI on MERGEABLE with true'))).toBe(true)
+    const trustsNull = (status: string | null, mergeable: unknown, answer: WorkflowsAnswer): GateResult => CW.mergeGate(status, mergeable, answer ?? false)
+    expect(collectGateDisagreements(trustsNull).some(d => d.startsWith('NO_CI on MERGEABLE with null'))).toBe(true)
+    const unknownPasses = (status: string | null, mergeable: unknown, answer: WorkflowsAnswer): GateResult => (mergeable === 'UNKNOWN' ? 'keep' : CW.mergeGate(status, mergeable, answer))
+    expect(collectGateDisagreements(unknownPasses).some(d => d.includes('on UNKNOWN'))).toBe(true)
+    const noConflict = (status: string | null, mergeable: unknown, answer: WorkflowsAnswer): GateResult => (mergeable === 'CONFLICTING' ? 'open' : CW.mergeGate(status, mergeable, answer))
+    expect(collectGateDisagreements(noConflict).some(d => d.includes('on CONFLICTING'))).toBe(true)
+  })
+})
 
 // ---------------------------------------------------------------------------
 // check-merge-readiness — step 4 and the ladder (AC-14)
