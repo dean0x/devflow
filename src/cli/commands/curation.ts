@@ -100,12 +100,11 @@ function requireStore(): CurationStoreModule | null {
 }
 
 /**
- * Which fixed notice a store refusal of kind `tracked` takes: `unknown` when the store's
- * message says git did not answer, `tracked` otherwise. The store words are fixed, and a
- * test holds them to this reading.
+ * Which fixed notice a store refusal of kind `tracked` takes: the reason the store names
+ * on the refusal. A refusal that names none is `unknown`, the notice that claims least.
  */
 function pauseReasonOf(error: CurationStoreError): PauseReason {
-  return error.message.includes('did not answer') ? 'unknown' : 'tracked';
+  return error.reason ?? 'unknown';
 }
 
 /**
@@ -761,8 +760,9 @@ async function tryMoveForToggle(ledgerRoot: string): Promise<MoveSkipReason | nu
  * variants and skill (D-LEARNING-VARIANT-INSTALL), the current project's ledger
  * folder move, and on disable a drained queue in every ledger folder that exists and
  * in the backups a move left. The drain deletes no queue file, and prints the fixed
- * notice of a skipped move once, when git tracks any entry under a data folder or a
- * backup folder, or does not answer.
+ * pause notice of the curation area, when git tracks any entry under a data folder or a
+ * backup folder, or does not answer. A move that has just printed its own notice for the
+ * same reason leaves the drain's line short, so the cause is told once.
  * Never requires a git root: the switch is not a per-project setting.
  *
  * Under version skew the toggle records the switch and moves nothing; otherwise it

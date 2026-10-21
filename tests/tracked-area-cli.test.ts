@@ -311,13 +311,31 @@ describe('curation commands where the store, not the CLI check, finds the area p
     expect(everything()).toEqual(before);
   });
 
-  it('the store words the CLI reads the reason from stay fixed', () => {
+  it('a root whose path holds the words of the unknown message still reads as the tracked notice', async () => {
+    root = path.join(tmp, 'git did not answer');
+    fs.mkdirSync(root);
+    vi.mocked(getLedgerRoot).mockResolvedValue(root);
+    vi.mocked(getGitRoot).mockResolvedValue(root);
+    vi.spyOn(process, 'cwd').mockReturnValue(root);
+    seedCuration();
+    trackInGit(root, '.devflow/curation/decisions-ledger.jsonl');
+    vi.mocked(probeTrackedArea).mockResolvedValueOnce({ answer: 'untracked', cause: null });
+    const before = everything();
+
+    const run = await runCuration(['--restore', 'ADR-001']);
+
+    expect(run.error).toBe(AREA_PAUSE_NOTICE.curation.tracked);
+    expect(run.exitCode).toBe(1);
+    expect(everything()).toEqual(before);
+  });
+
+  it('the store names the reason of a tracked refusal: tracked where git tracks files, unknown where git did not answer', () => {
     seedCuration();
     trackInGit(root, '.devflow/curation/decisions-ledger.jsonl');
     const tracked = store.readListing(root);
     expect(tracked.ok).toBe(false);
     expect(!tracked.ok && tracked.error.kind).toBe('tracked');
-    expect(!tracked.ok && tracked.error.message).not.toContain('did not answer');
+    expect(!tracked.ok && tracked.error.reason).toBe('tracked');
 
     const other = path.join(tmp, 'other');
     fs.mkdirSync(other);
@@ -327,7 +345,7 @@ describe('curation commands where the store, not the CLI check, finds the area p
     const unknown = store.readListing(other);
     expect(unknown.ok).toBe(false);
     expect(!unknown.ok && unknown.error.kind).toBe('tracked');
-    expect(!unknown.ok && unknown.error.message).toContain('did not answer');
+    expect(!unknown.ok && unknown.error.reason).toBe('unknown');
   });
 });
 

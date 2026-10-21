@@ -1108,7 +1108,7 @@ describe('curation --enable/--disable: the curation switch and the folder move (
       expect(readSwitchKeys(devflowDir)).toEqual({ curation: false, learning: false });
       expect(snapshotTree(path.join(root, '.devflow'), { stat: true })).toEqual(before);
       expect(queueIn(old)).toEqual([true, true, true]);
-      expect(run.warn.split('\n').at(-1), 'no move ran, so the drain prints the whole notice').toBe(`The curation queue was not drained. ${MOVE_SKIP_NOTICE.tracked}`);
+      expect(run.warn.split('\n').at(-1), 'no move ran, so the drain prints the whole notice').toBe(`The curation queue was not drained. ${AREA_PAUSE_NOTICE.curation.tracked}`);
       expect(run.exitCode).toBe(0);
     });
   });
@@ -1224,7 +1224,7 @@ describe('curation --enable/--disable: the curation switch and the folder move (
       expect(readSwitchKeys(devflowDir)).toEqual({ curation: false, learning: false });
       expect(snapshotTree(path.join(root, '.devflow'), { stat: true })).toEqual(before);
       expect(backupPendingPresent(backup)).toEqual([true, true, true, true]);
-      expect(run.warn, 'no move ran, so the drain prints the whole notice').toBe(`The curation queue was not drained. ${MOVE_SKIP_NOTICE.tracked}`);
+      expect(run.warn, 'no move ran, so the drain prints the whole notice').toBe(`The curation queue was not drained. ${AREA_PAUSE_NOTICE.curation.tracked}`);
       expect(run.exitCode).toBe(0);
     });
 
@@ -1240,7 +1240,7 @@ describe('curation --enable/--disable: the curation switch and the folder move (
       expect(snapshotTree(path.join(root, '.devflow'))).toEqual(before);
       expect(queueFilesPresent(root)).toEqual([true, true, true]);
       expect(backupPendingPresent(backup)).toEqual([true, true, true, true]);
-      expect(run.warn).toContain(MOVE_SKIP_NOTICE.tracked);
+      expect(run.warn).toContain(AREA_PAUSE_NOTICE.curation.tracked);
     });
 
     it('--disable in a repository that tracks nothing in the data folders moves the folder and drains the queue', async () => {

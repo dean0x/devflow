@@ -642,17 +642,21 @@ function linkedFolder(opName, dir) {
  * call of the op's own is made. The answer is asked once per root for the life of the
  * process (inspectTrackedAreaOnce), so the heartbeat, the op and its lock share one call.
  *
+ * The refusal carries `reason`, `tracked` where git tracks files and `unknown` where it
+ * did not answer, so a caller that picks a notice reads the field, never the message.
+ *
  * @param {string} opName - operation name, for the message
  * @param {string} root - project root
- * @returns {{ ok: false, error: { kind: 'tracked', message: string } } | null}
+ * @returns {{ ok: false, error: { kind: 'tracked', reason: 'tracked'|'unknown', message: string } } | null}
  */
 function trackedCurationArea(opName, root) {
   const { answer } = inspectTrackedAreaOnce(root, 'curation');
   if (answer === 'untracked') return null;
-  const fact = answer === 'tracked' ? 'git tracks files' : 'git did not answer whether it tracks files';
+  const reason = answer === 'tracked' ? 'tracked' : 'unknown';
+  const fact = reason === 'tracked' ? 'git tracks files' : 'git did not answer whether it tracks files';
   return {
     ok: false,
-    error: { kind: 'tracked', message: `${opName}: ${fact} in the curation data folders under ${root}; nothing was written` },
+    error: { kind: 'tracked', reason, message: `${opName}: ${fact} in the curation data folders under ${root}; nothing was written` },
   };
 }
 
@@ -2497,7 +2501,7 @@ function warmScopeMatcher(ledgerRows, scopeMatches) {
  *   now: epoch ms (default Date.now()); scopeMatches: default gitScopeMatcher(root)
  * @returns {{ ok: true, value: { ref: { ref: 'origin/HEAD'|'HEAD', commit: string } | null, due: Array<{ anchor_id: string, reason: string, bytes: number }> } }
  *   | { ok: false, error: { kind: string, message: string } }}
- *   due is selectDue's answer; errors are withDecisionsLock's not-a-directory,
+ *   due is selectDue's answer; errors are withDecisionsLock's tracked, not-a-directory,
  *   no-curation-dir and busy
  */
 function claimDue(root, { now = Date.now(), timeoutMs, scopeMatches } = {}) {

@@ -19,7 +19,6 @@ import {
 } from '../src/cli/commands/init.js';
 import { LEDGER_ROOT_TIMEOUT_MS, type LedgerRootLookup } from '../src/core/ledger-root.js';
 import { installedVersionMatches } from '../src/targets/claude-code/curation-install.js';
-import { MOVE_SKIP_NOTICE } from '../src/core/curation-move-skip.js';
 import { AREA_PAUSE_NOTICE } from '../src/core/area-pause-notice.js';
 import { initGitRepo, pathWithFailingGit, snapshotTree, trackInGit } from './decisions/curation-fixtures.js';
 import type { ManifestData } from '../src/core/manifest.js';
@@ -292,7 +291,7 @@ describe('drainDisabledFeatureQueues (D-INIT-DRAIN-AFTER-SWITCH)', () => {
     };
     const refused = await drainDisabledFeatureQueues({ gitRoot: ROOT, ledgerRoot: ROOT, memoryEnabled: false, curationEnabled: false, manifestWritten: true }, io);
     expect(calls).toEqual([`memory:${ROOT}`, `curation:${ROOT}`]);
-    expect(refused).toEqual([expect.stringContaining(MOVE_SKIP_NOTICE.tracked)]);
+    expect(refused).toEqual([expect.stringContaining(AREA_PAUSE_NOTICE.curation.tracked)]);
   });
 
   it.each(['tracked', 'unknown'] as const)('prints only the short sentence when the move step has just printed the %s notice', async (reason) => {
@@ -316,7 +315,7 @@ describe('drainDisabledFeatureQueues (D-INIT-DRAIN-AFTER-SWITCH)', () => {
       { gitRoot: ROOT, ledgerRoot: ROOT, memoryEnabled: false, curationEnabled: false, manifestWritten: true, shownSkip: 'unknown' },
       io,
     );
-    expect(refused).toEqual([`The curation queue was not drained. ${MOVE_SKIP_NOTICE.tracked}`]);
+    expect(refused).toEqual([`The curation queue was not drained. ${AREA_PAUSE_NOTICE.curation.tracked}`]);
   });
 
   describe.each(['tracked', 'unknown'] as const)('with the real drains: the tracked-folder check answers %s', (reason) => {
@@ -345,12 +344,12 @@ describe('drainDisabledFeatureQueues (D-INIT-DRAIN-AFTER-SWITCH)', () => {
         expect(curationFolders()).toEqual(before);
         const memoryQueue = fs.lstat(path.join(repo, '.devflow', 'memory', queue));
         if (reason === 'tracked') {
-          expect(refused).toEqual([expect.stringContaining(MOVE_SKIP_NOTICE[reason])]);
+          expect(refused).toEqual([expect.stringContaining(AREA_PAUSE_NOTICE.curation[reason])]);
           await expect(memoryQueue, 'the memory queue is drained').rejects.toThrow(/ENOENT/);
         } else {
           expect(refused).toEqual([
             `The memory queue was not drained. ${AREA_PAUSE_NOTICE.memory.unknown}`,
-            expect.stringContaining(MOVE_SKIP_NOTICE[reason]),
+            expect.stringContaining(AREA_PAUSE_NOTICE.curation[reason]),
           ]);
           await expect(memoryQueue, 'git did not answer for the memory folder either, so its queue stays').resolves.toBeDefined();
         }

@@ -12,7 +12,6 @@ import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { drainCurationQueue, drainDisabledCurationQueue, formatCurationNotDrained } from '../../src/core/curation-queue-cleanup.js';
-import { MOVE_SKIP_NOTICE } from '../../src/core/curation-move-skip.js';
 import { loadCurationMove, type CurationMoveLoad } from '../../src/core/curation-move.js';
 import { AREA_PAUSE_NOTICE } from '../../src/core/area-pause-notice.js';
 import { drainMemoryQueue, formatMemoryNotDrained } from '../../src/cli/commands/memory.js';
@@ -492,8 +491,15 @@ describe('formatCurationNotDrained', () => {
   const SENTENCE = 'The curation queue was not drained.';
 
   it.each(['tracked', 'unknown'] as const)('says the %s notice in full when the caller printed none', (reason) => {
-    expect(formatCurationNotDrained({ drained: false, skipped: reason })).toBe(`${SENTENCE} ${MOVE_SKIP_NOTICE[reason]}`);
-    expect(formatCurationNotDrained({ drained: false, skipped: reason }, null)).toBe(`${SENTENCE} ${MOVE_SKIP_NOTICE[reason]}`);
+    expect(formatCurationNotDrained({ drained: false, skipped: reason })).toBe(`${SENTENCE} ${AREA_PAUSE_NOTICE.curation[reason]}`);
+    expect(formatCurationNotDrained({ drained: false, skipped: reason }, null)).toBe(`${SENTENCE} ${AREA_PAUSE_NOTICE.curation[reason]}`);
+  });
+
+  it.each(['tracked', 'unknown'] as const)('says the area is paused, not that a move was skipped, for the reason %s', (reason) => {
+    const line = formatCurationNotDrained({ drained: false, skipped: reason });
+
+    expect(line).toContain('Devflow curation is paused');
+    expect(line).not.toContain('did not move');
   });
 
   it.each(['tracked', 'unknown'] as const)('does not repeat the %s notice the caller just printed', (reason) => {
@@ -501,13 +507,13 @@ describe('formatCurationNotDrained', () => {
   });
 
   it('says the notice in full when the caller printed the notice of the other reason', () => {
-    expect(formatCurationNotDrained({ drained: false, skipped: 'tracked' }, 'unknown')).toBe(`${SENTENCE} ${MOVE_SKIP_NOTICE.tracked}`);
+    expect(formatCurationNotDrained({ drained: false, skipped: 'tracked' }, 'unknown')).toBe(`${SENTENCE} ${AREA_PAUSE_NOTICE.curation.tracked}`);
   });
 
   it('names the link of a refused drain, whatever the caller printed', () => {
     const refused = formatCurationNotDrained({ drained: false, linkedFolder: '/repo/.devflow' }, 'tracked');
     expect(refused).toContain('/repo/.devflow');
-    expect(refused).not.toContain(MOVE_SKIP_NOTICE.tracked);
+    expect(refused).not.toContain(AREA_PAUSE_NOTICE.curation.tracked);
   });
 });
 
