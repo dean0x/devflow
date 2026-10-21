@@ -6,10 +6,11 @@
  * of a build, typecheck or test command saves the output tokens without losing the verdict. The
  * "Validation Order" table in `validate.md` gains a Quiet form column, and one sentence after it
  * states the per-file re-run rule: after a failed Test row, re-run each of its first 20 failed test
- * files alone, once, verbose, never the suite. That sentence is the stated exception to the never-re-run rule in the shared
- * `## Running commands` block, so it sits outside the block, which this change leaves byte-identical
- * in the Code, Fix, Refactor, Validate and Test agents (`tests/guards/running-commands-parity.test.ts` owns the
- * bytes; the arm here asserts the quiet form never entered it).
+ * files alone, once, verbose, never the suite. That sentence is the stated exception to the
+ * never-re-run rule in the shared `## Running commands` block, so it sits outside the block, which
+ * this change leaves byte-identical in the Code, Fix, Refactor, Validate and Test agents
+ * (`tests/guards/running-commands-parity.test.ts` owns the bytes; the arm here asserts the quiet form
+ * never entered it).
  *
  * The five language rules (`typescript`, `python`, `go`, `java`, `rust`) each gain exactly one
  * quiet-form bullet with their `paths` frontmatter untouched; `react` names no test runner and gains
