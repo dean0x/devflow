@@ -283,6 +283,20 @@ Do the step below after you update.
 
 ### Changed
 
+- **Validate re-runs each failed test file alone** ([#477](https://github.com/dean0x/devflow/issues/477)).
+  - After a failed test run, Validate re-runs each failed test file alone, once, with verbose output.
+    The bound is 20 files, and each re-run takes 120 seconds at most.
+    A re-run starts only after the path passes a strict check, and it uses the full run's own test command with only that file added.
+  - Only the validation in `/implement` labels files, because only that run is given the branch base.
+    In every other run, the re-runs give failure detail and every failure is REAL.
+  - A file is PASSED-ALONE only if all of these hold:
+    the path is checked and tracked, the branch did not change the file, its failure was a timeout, a spawn error or a resource error,
+    the re-run used only that file with no name filter, it exited 0, and the tests that failed in the full run ran and passed.
+    Every other failure is REAL and goes to Fix.
+  - The gate and its `gate:validate` claim pass only when the PASSED-ALONE files explain every failure.
+    The report lists them on one `Passed alone:` line.
+  - The re-run steps are in the agent reference `validate/passed-alone.md`.
+    After updating, run `devflow init`.
 - **`/implement` and `/resolve` skip Polish at `standard` and `lean`** ([#481](https://github.com/dean0x/devflow/issues/481)).
   - At `standard` and `lean`, `/implement` skips Phase 3 Polish, and `/resolve` skips Phase 6 Polish in each worktree at that level.
     At `full`, both spawn Polish.
