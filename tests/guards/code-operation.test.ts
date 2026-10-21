@@ -370,7 +370,7 @@ describe('each variant states the mode contract it owns (D-CODE-OPERATION-MODES,
 const CODE_BODY_MAX_BYTES = 10_735
 
 /** The compiled Fix agent body, in bytes. Registered as `fix-body-max`; lowered, never raised. */
-const FIX_BODY_MAX_BYTES = 8_479
+const FIX_BODY_MAX_BYTES = 8_401
 
 /** The compiled Refactor agent body, in bytes. Registered as `refactor-body-max`; lowered, never raised. */
 const REFACTOR_BODY_MAX_BYTES = 6_410
