@@ -27,8 +27,11 @@ const REFERENCE_REL = 'validate/passed-alone.md'
 /** The first words of the trigger sentence, which every other body clause follows in one paragraph. */
 const TRIGGER = 'After a failed Test row, re-run each of its first 20 failed test files alone, once,'
 
+/** The lead of the Read line. "First" puts the Read before any re-run, so no path from the log reaches a command unchecked. */
+const READ_LEAD = 'First, run '
+
 /** The line that reads the reference: the sanctioned resolution, then the `printf` that shows the file's path. */
-const READ_LINE = `Then run \`${SANCTIONED_RESOLUTION} printf '%s\\n' "$d/skills/devflow:agent-references/references/${REFERENCE_REL}"\``
+const READ_LINE = `${READ_LEAD}\`${SANCTIONED_RESOLUTION} printf '%s\\n' "$d/skills/devflow:agent-references/references/${REFERENCE_REL}"\``
 
 /** The path the body hands to the Read, as a capture group over the reference-relative name. */
 const NAMED_PATH = /"\$d\/skills\/devflow:agent-references\/references\/([^"]+)"/
@@ -45,7 +48,8 @@ const BODY_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]> = [
   ['the trigger and the bound of 20 files', TRIGGER],
   ['the time limit of 120 s', '120 s max'],
   ['the Read of the reference through the sanctioned directory line', READ_LINE],
-  ['the Read is followed by re-running only an accepted path', 'and Read it; re-run only a path it accepts.'],
+  ['the Read is followed by re-running only an accepted path', 'and Read it; re-run only a path it accepts'],
+  ['an unread reference accepts no path', 'accepts (none if unread).'],
   ['the conditions open', 'PASSED-ALONE needs all of:'],
   ['a BASE_SHA condition', 'a BASE_SHA;'],
   ['a checked, tracked path condition', 'a checked, tracked path'],
@@ -118,7 +122,7 @@ export function collectPassedAloneDefects(body: string, readReference: (rel: str
     if (!region.includes(clause)) out.push(`the body lost: ${label}`)
   }
   const paragraph = region.split(/\n[ \t]*\n/).find(p => p.includes(TRIGGER)) ?? ''
-  const order = [TRIGGER, 'Then run ', 'PASSED-ALONE needs all of:'].map(piece => paragraph.indexOf(piece))
+  const order = [TRIGGER, READ_LEAD, 'PASSED-ALONE needs all of:'].map(piece => paragraph.indexOf(piece))
   if (order.includes(-1) || !(order[0] < order[1] && order[1] < order[2])) {
     out.push('the trigger, the Read line and the conditions are not in one paragraph, in that order')
   }
@@ -196,7 +200,7 @@ const withReference = (reference: string | null): string[] => collectPassedAlone
 
 /** The stub: from the Read line to the end of its last sentence. */
 function stubOf(body: string): string {
-  const from = body.indexOf('Then run ')
+  const from = body.indexOf(READ_LEAD)
   const endMarker = 'Parsed References or `details`.'
   const to = body.indexOf(endMarker, from)
   expect(from, 'the stub starts in the body').toBeGreaterThan(-1)
@@ -260,8 +264,13 @@ describe('the Validate body re-runs each failed test file alone and labels it', 
   })
 
   it('probes: a blank line between the trigger sentence and the Read line is reported, because the Read loses its trigger', () => {
-    const split = seed(BODY, 'Running commands. Then run ', 'Running commands.\n\nThen run ')
+    const split = seed(BODY, `Running commands. ${READ_LEAD}`, `Running commands.\n\n${READ_LEAD}`)
     expect(withBody(split)).toContain('the trigger, the Read line and the conditions are not in one paragraph, in that order')
+  })
+
+  it('probes: a Read that comes after the re-runs is reported, because a log path would reach a command unchecked', () => {
+    const late = seed(BODY, `Running commands. ${READ_LEAD}`, 'Running commands. Then run ')
+    expect(withBody(late)).toContain('the body lost: the Read of the reference through the sanctioned directory line')
   })
 
   it('probes: a Read that re-runs a path it does not reject is reported', () => {
