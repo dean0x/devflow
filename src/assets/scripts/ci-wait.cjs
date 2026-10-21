@@ -25,11 +25,15 @@
 // unparseable line, an unlisted status or a non-zero exit as INDETERMINATE.
 //
 // Design constraints (binding):
-//   - D-CI-WAIT-INLINE: this is plumbing. The only judgment in it is the bucket
-//     classifier, which mirrors check-ci-status step 5 clause for clause. Every
-//     subprocess is `gh`, spawned through exec() with an argv array and
-//     `shell: false`, stdin ignored, a timeout and a maxBuffer. gh output never
-//     reaches stdout raw: a check name passes sanitizeName() first.
+//   - D-CI-WAIT-INLINE: this is plumbing. The only judgment in it is the classifier
+//     and the merge gate: check-ci-status step 5 over `bucket`, plus the stricter
+//     workflow rule (D-CI-WORKFLOW-RULE) and the merge-state rule
+//     (D-CI-MERGE-STATE). Every subprocess is `gh`, spawned through exec() with an
+//     argv array and `shell: false`, stdin ignored, a timeout and a maxBuffer. gh
+//     output never reaches stdout raw: a check name passes sanitizeName() first.
+//   - D-CI-WORKFLOW-RULE, D-CI-MERGE-STATE: PASSING means that at least one GitHub
+//     Actions check passed on the head, none is pending or failing, and GitHub
+//     reported the PR mergeable. It does not prove that the test workflow ran by name.
 //   - D-CI-NO-LITERAL-SLEEP: the wait happens inside node, through clock.sleep(),
 //     never through a shell `sleep`. Claude Code 2.1.294 blocks any Bash command
 //     that starts with a literal `sleep N`, so no prompt and no script may wait that
@@ -42,14 +46,19 @@
 //     name lists), and every wait is capped at CI_WAIT_MAX_SECONDS.
 //
 // gh facts this file rests on, probed on gh 2.88.1 on 2026-10-09:
-//   - `gh pr view 999999999 --json headRefOid` exits 1 with stderr `GraphQL: Could
-//     not resolve to a PullRequest with the number of 999999999.
+//   - `gh pr view 999999999 --json headRefOid,mergeable` exits 1 with stderr
+//     `GraphQL: Could not resolve to a PullRequest with the number of 999999999.
 //     (repository.pullRequest)` and an empty stdout. Only that text on exit 1 is
 //     NO_PR; any other non-zero exit is a gh failure and never PASSING.
 //   - `gh pr checks <n> --json` offers exactly bucket, completedAt, description,
 //     event, link, name, startedAt, state and workflow. There is no SHA field, and it
 //     reports only the PR's current head. So the head is bound by comparing
 //     `gh pr view --json headRefOid` with `--head` (D-CI-HEAD-BINDING).
+//   - `workflow` names the GitHub Actions workflow of a check, and is "" for a commit
+//     status and for a third-party app's check run (probed on public PRs, gh 2.88.1,
+//     2026-10-22).
+//   - `gh pr view --json mergeable` is MERGEABLE, CONFLICTING or UNKNOWN. GitHub
+//     computes it lazily, so UNKNOWN is common right after a push or a base move.
 
 'use strict';
 
@@ -69,10 +78,13 @@ const STATUSES = Object.freeze(['PASSING', 'FAILING', 'PENDING', 'NO_CI', 'NO_PR
 /**
  * D-CI-REASONS: why an INDETERMINATE was returned. `unrecognised-bucket` also covers
  * a set of buckets that gives no verdict (every check `skipping`): the classifier
- * could call neither a pass nor a failure.
+ * could call neither a pass nor a failure. `no-workflow-check` is a set of passes
+ * with no GitHub Actions job among them (D-CI-WORKFLOW-RULE); `merge-conflict` is a
+ * head that GitHub reports as conflicting (D-CI-MERGE-STATE).
  */
 const REASONS = Object.freeze([
   'gh-failed', 'unparseable', 'unrecognised-bucket', 'head-mismatch', 'deadline', 'usage',
+  'no-workflow-check', 'merge-conflict',
 ]);
 
 /** `gh pr checks` categorises `state` into these buckets (gh 2.88.1, `--help`). */
@@ -85,10 +97,10 @@ const BUCKETS = Object.freeze(['pass', 'fail', 'pending', 'skipping', 'cancel'])
  *                                Bash timeout of 600000 ms the callers pass
  *   POLL_INTERVAL_SECONDS        the sleep between polls; polls cost no model tokens,
  *                                so the cadence is set by gh latency and rate limits
- *   SETTLE_WINDOW_SECONDS        how long a head mismatch or an empty check list may
- *                                persist before it is a verdict (GitHub creates
- *                                checks and moves the PR head a few seconds after a
- *                                push)
+ *   SETTLE_WINDOW_SECONDS        how long a head mismatch, an empty check list or a
+ *                                list of external checks only may persist before it
+ *                                is a verdict (GitHub creates checks and moves the PR
+ *                                head a few seconds after a push)
  *   GH_CALL_CAP_SECONDS          one gh call's timeout is min(this, time remaining),
  *                                so the last call ends before the deadline
  *   MAX_POLLS                    the loop bound when the clock does not move
@@ -156,7 +168,8 @@ const USAGE_LINE = 'CI INDETERMINATE pr=- head=- waited=0 reason=usage';
  * @typedef {{ now: () => number, sleep: (ms: number) => Promise<void> }} Clock
  *   `now` is in milliseconds. Tests inject a clock whose sleep and exec advance it.
  *
- * @typedef {{ name: string, bucket: string }} Check
+ * @typedef {{ name: string, bucket: string, workflow?: string }} Check
+ *   `workflow` is the GitHub Actions workflow name; "" or absent marks an external check.
  * @typedef {{ status: string, reason: string | null, failing: string[], pending: string[] }} Classification
  * @typedef {{ status: string, pr: string, head: string, failing: string[], pending: string[],
  *   waited: number, reason: string | null }} CiResult
@@ -224,14 +237,22 @@ function formatNames(names) {
 }
 
 /**
- * D-CI-CLASSIFIER: check-ci-status step 5, clause for clause, over `bucket`. In
- * priority order: any `pending` is PENDING; else any `fail` or `cancel` is FAILING;
- * else every check `pass` or `skipping` with at least one `pass` is PASSING; else
- * INDETERMINATE. PASSING is a positive conjunction, so an undocumented bucket, an
- * all-`skipping` set or an empty set never reaches it. merge-readiness.test.ts runs
- * every bucket multiset of 1 to 3 checks through this and through the prose clauses
- * and requires the statuses to agree. (The empty set is not classified here: an empty
- * list is "no checks", which waitForCi settles before it classifies.)
+ * D-CI-CLASSIFIER: check-ci-status step 5 over `bucket`, plus the stricter workflow
+ * rule. In priority order: any `pending` is PENDING; else any `fail` or `cancel` is
+ * FAILING; else every check `pass` or `skipping` with at least one `pass` is PASSING;
+ * else INDETERMINATE. PASSING is a positive conjunction, so an undocumented bucket, an
+ * all-`skipping` set or an empty set never reaches it.
+ *
+ * D-CI-WORKFLOW-RULE: a set that passes by step 5 is PASSING only when at least one
+ * passing check is a GitHub Actions job (a non-empty string `workflow`). A set with
+ * passes from external checks alone, a commit status or a third-party app, is
+ * INDETERMINATE (no-workflow-check): the repository's workflow may not have run. So
+ * PASSING proves that a GitHub Actions check passed and nothing is pending or failing;
+ * it does not prove that the test workflow ran by name. merge-readiness.test.ts runs
+ * every multiset of 1 to 3 checks through this and through the prose clauses and
+ * requires the statuses to agree, or this to be stricter only by no-workflow-check.
+ * (The empty set is not classified here: an empty list is "no checks", which
+ * waitForCi settles before it classifies.)
  *
  * @param {readonly Check[]} checks
  * @returns {Classification}
@@ -240,6 +261,7 @@ function classifyChecks(checks) {
   const failing = [];
   const pending = [];
   let pass = 0;
+  let actionsPass = 0;
   let unrecognised = 0;
   const count = Math.min(Array.isArray(checks) ? checks.length : 0, MAX_CHECKS);
   for (let i = 0; i < count; i++) {
@@ -248,14 +270,21 @@ function classifyChecks(checks) {
       case 'pending': pending.push(check.name); break;
       case 'fail':
       case 'cancel': failing.push(check.name); break;
-      case 'pass': pass++; break;
+      case 'pass':
+        pass++;
+        if (typeof check.workflow === 'string' && check.workflow !== '') actionsPass++;
+        break;
       case 'skipping': break;
       default: unrecognised++;
     }
   }
   if (pending.length > 0) return { status: 'PENDING', reason: null, failing, pending };
   if (failing.length > 0) return { status: 'FAILING', reason: null, failing, pending };
-  if (unrecognised === 0 && pass > 0) return { status: 'PASSING', reason: null, failing, pending };
+  if (unrecognised === 0 && pass > 0) {
+    return actionsPass > 0
+      ? { status: 'PASSING', reason: null, failing, pending }
+      : { status: 'INDETERMINATE', reason: 'no-workflow-check', failing, pending };
+  }
   return { status: 'INDETERMINATE', reason: 'unrecognised-bucket', failing, pending };
 }
 
@@ -355,13 +384,18 @@ function parseJson(text) {
 }
 
 /**
+ * The `gh pr view --json headRefOid,mergeable` reply. Only `headRefOid` is strict: a
+ * `mergeable` that is absent or not a string is read as null, the same as UNKNOWN,
+ * and never makes the reply unparseable.
+ *
  * @param {string} stdout
- * @returns {string | null}  the 40-hex headRefOid, or null for any other shape
+ * @returns {{ oid: string, mergeable: string | null } | null}  null for any other shape
  */
-function parseHeadRefOid(stdout) {
+function parseView(stdout) {
   const value = parseJson(stdout);
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
-  return typeof value.headRefOid === 'string' && HEAD_RE.test(value.headRefOid) ? value.headRefOid : null;
+  if (typeof value.headRefOid !== 'string' || !HEAD_RE.test(value.headRefOid)) return null;
+  return { oid: value.headRefOid, mergeable: typeof value.mergeable === 'string' ? value.mergeable : null };
 }
 
 /**
@@ -374,7 +408,7 @@ function parseChecks(stdout) {
   const checks = [];
   for (const row of value) {
     if (row === null || typeof row !== 'object' || typeof row.name !== 'string' || typeof row.bucket !== 'string') return null;
-    checks.push({ name: row.name, bucket: row.bucket });
+    checks.push({ name: row.name, bucket: row.bucket, workflow: typeof row.workflow === 'string' ? row.workflow : '' });
   }
   return checks;
 }
@@ -400,22 +434,90 @@ function settle(firstAt, now, settleMs) {
 }
 
 /**
+ * D-CI-MERGE-STATE: the one merge rule. GitHub computes `mergeable` lazily, and runs
+ * no pull request workflow on a conflicting PR, so the checks of a head say nothing
+ * about the PR unless GitHub reports it MERGEABLE. `status` is a classifier status
+ * ('NO_CI' for an empty list), or null before any check is read; `mergeable` is the
+ * `gh pr view` value in any shape. The answer is one of:
+ *   'conflict'  mergeable is CONFLICTING, whatever the status.
+ *   'open'      PASSING or NO_CI while mergeable is anything but MERGEABLE (UNKNOWN,
+ *               absent or odd). It is neither a verdict nor a conflict: waitForCi keeps
+ *               the wait open for another read, and a single read takes it as unknown.
+ *   'keep'      the status stands. FAILING, PENDING and INDETERMINATE do not depend on
+ *               the merge state.
+ *
+ * @param {string | null} status
+ * @param {unknown} mergeable
+ * @returns {'conflict' | 'open' | 'keep'}
+ */
+function mergeGate(status, mergeable) {
+  if (mergeable === 'CONFLICTING') return 'conflict';
+  if ((status === 'PASSING' || status === 'NO_CI') && mergeable !== 'MERGEABLE') return 'open';
+  return 'keep';
+}
+
+/**
+ * The outcome of one poll on the named head, as a pure function of what the poll read
+ * (D-CI-WORKFLOW-RULE, D-CI-MERGE-STATE). `verdict` is the classification of the rows,
+ * or null for an empty list. `windowDone` is whether the settle window has run out; it
+ * only matters for an empty list and for rows that are all external (no-workflow-check),
+ * the two cases a late GitHub Actions run can still change. The outcome is one of:
+ *   pending  keep waiting: a pending check, or an unsettled window
+ *   open     a pass that the merge state does not yet allow (see mergeGate)
+ *   done     a final status and reason, with the failing and pending names
+ *
+ * @param {Classification | null} verdict
+ * @param {unknown} mergeable
+ * @param {boolean} windowDone
+ * @returns {{ state: 'pending', pending: string[] } | { state: 'open' }
+ *   | { state: 'done', status: string, reason: string | null, failing: string[], pending: string[] }}
+ */
+function matchedStep(verdict, mergeable, windowDone) {
+  const gate = mergeGate(verdict === null ? 'NO_CI' : verdict.status, mergeable);
+  if (gate === 'conflict') return { state: 'done', status: 'INDETERMINATE', reason: 'merge-conflict', failing: [], pending: [] };
+  if (verdict === null) {
+    if (!windowDone) return { state: 'pending', pending: [] };
+    return gate === 'open'
+      ? { state: 'open' }
+      : { state: 'done', status: 'NO_CI', reason: null, failing: [], pending: [] };
+  }
+  if (verdict.reason === 'no-workflow-check') {
+    return windowDone
+      ? { state: 'done', status: 'INDETERMINATE', reason: 'no-workflow-check', failing: [], pending: [] }
+      : { state: 'pending', pending: [] };
+  }
+  if (verdict.status === 'PENDING') return { state: 'pending', pending: verdict.pending };
+  if (gate === 'open') return { state: 'open' };
+  return { state: 'done', status: verdict.status, reason: verdict.reason, failing: verdict.failing, pending: verdict.pending };
+}
+
+/**
  * D-CI-HEAD-BINDING: wait for the CI verdict of `head`, and of nothing else. `gh pr
  * checks` has no SHA field and reports the PR's current head, so each poll reads
  * `headRefOid` first. A different value means the checks on offer belong to another
- * head: they are not read, and the poll is PENDING until SETTLE_WINDOW_SECONDS have
- * passed since the first mismatch (GitHub moves the head and creates checks a few
- * seconds after a push), then INDETERMINATE (head-mismatch). A matching head clears
- * the mismatch clock. An empty check list settles the same way into NO_CI. Nothing
- * here is PASSING unless a poll saw this head and every check a pass.
+ * head: they are not read, the merge state is not used, and the poll is PENDING until
+ * SETTLE_WINDOW_SECONDS have passed since the first mismatch (GitHub moves the head
+ * and creates checks a few seconds after a push), then INDETERMINATE (head-mismatch).
+ * A matching head clears the mismatch clock. Nothing here is PASSING unless a poll saw
+ * this head, every check a pass, one of them a GitHub Actions job
+ * (D-CI-WORKFLOW-RULE), and GitHub reported the PR mergeable (D-CI-MERGE-STATE).
  *
- * Per poll: `gh pr view <n> --json headRefOid`, then `gh pr checks <n> --json
- * name,state,bucket` (exit 0 or 8 are results, as in check-ci-status step 3). A
- * PENDING poll sleeps min(POLL_INTERVAL_SECONDS, remaining) and polls again; any
- * other result returns. A poll whose gh call fails is not a result: three failed
- * polls in a row are INDETERMINATE (gh-failed), fewer are retried. The loop stops at
- * the deadline or after MAX_POLLS with its last state: PENDING stays PENDING, and
- * anything unknown becomes INDETERMINATE (deadline).
+ * D-CI-MERGE-STATE, on a matching head: `mergeable` CONFLICTING is INDETERMINATE
+ * (merge-conflict) at once, before the checks are read. An empty check list settles
+ * into NO_CI after the same window, and a pass is PASSING, only when the same poll
+ * reads MERGEABLE; UNKNOWN, an absent value or any other leaves the step open (not
+ * PENDING), so a head that never reads MERGEABLE ends INDETERMINATE (deadline). Rows
+ * that are all external checks share the empty list's window, which a pending or
+ * failing row clears, and end INDETERMINATE (no-workflow-check) when it runs out.
+ *
+ * Per poll: `gh pr view <n> --json headRefOid,mergeable`, then `gh pr checks <n>
+ * --json name,state,bucket,workflow` (exit 0 or 8 are results, as in check-ci-status
+ * step 3). A PENDING or open poll sleeps min(POLL_INTERVAL_SECONDS, remaining) and
+ * polls again; any other result returns. A poll whose gh call fails is not a result:
+ * three failed polls in a row are INDETERMINATE (gh-failed), fewer are retried. The
+ * loop stops at the deadline or after MAX_POLLS with its last state: PENDING stays
+ * PENDING, and anything unknown, an open step included, becomes INDETERMINATE
+ * (deadline).
  *
  * It never throws: an exec that throws is a gh failure.
  *
@@ -475,26 +577,32 @@ async function waitForCi(input) {
   for (let poll = 0; poll < MAX_POLLS; poll++) {
     if (clock.now() >= deadline) break;
 
-    const view = await gh(['pr', 'view', pr, '--json', 'headRefOid']);
+    const view = await gh(['pr', 'view', pr, '--json', 'headRefOid,mergeable']);
     if (view === null) break;
     if (view.answered && view.status === 1 && NO_PR_RE.test(view.stderr)) return finish('NO_PR', null, [], []);
 
-    /** @type {{ state: 'failed' } | { state: 'pending', pending: string[] } | { state: 'done', result: CiResult }} */
+    /**
+     * @type {{ state: 'failed' } | { state: 'pending', pending: string[] } | { state: 'open' }
+     *   | { state: 'done', result: CiResult }}
+     */
     let step;
     if (!view.answered || view.status !== 0) {
       step = { state: 'failed' };
     } else {
-      const oid = parseHeadRefOid(view.stdout);
-      if (oid === null) return finish('INDETERMINATE', 'unparseable', [], []);
-      if (oid !== head) {
+      const parsed = parseView(view.stdout);
+      if (parsed === null) return finish('INDETERMINATE', 'unparseable', [], []);
+      if (parsed.oid !== head) {
         const mismatch = settle(firstMismatchAt, clock.now(), settleMs);
         firstMismatchAt = mismatch.firstAt;
         step = mismatch.done
           ? { state: 'done', result: finish('INDETERMINATE', 'head-mismatch', [], []) }
           : { state: 'pending', pending: [] };
+      } else if (mergeGate(null, parsed.mergeable) === 'conflict') {
+        firstMismatchAt = null;
+        step = { state: 'done', result: finish('INDETERMINATE', 'merge-conflict', [], []) };
       } else {
         firstMismatchAt = null;
-        const checks = await gh(['pr', 'checks', pr, '--json', 'name,state,bucket']);
+        const checks = await gh(['pr', 'checks', pr, '--json', 'name,state,bucket,workflow']);
         if (checks === null) break;
         const isResult = checks.answered && (checks.status === 0 || checks.status === 8);
         const isEmpty = checks.answered && checks.status === 1 && NO_CHECKS_RE.test(checks.stderr);
@@ -503,19 +611,19 @@ async function waitForCi(input) {
         } else {
           const rows = isResult ? parseChecks(checks.stdout) : [];
           if (rows === null) return finish('INDETERMINATE', 'unparseable', [], []);
-          if (rows.length === 0) {
+          const verdict = rows.length > 0 ? classifyChecks(rows) : null;
+          let windowDone = false;
+          if (verdict === null || verdict.reason === 'no-workflow-check') {
             const empty = settle(firstEmptyAt, clock.now(), settleMs);
             firstEmptyAt = empty.firstAt;
-            step = empty.done
-              ? { state: 'done', result: finish('NO_CI', null, [], []) }
-              : { state: 'pending', pending: [] };
+            windowDone = empty.done;
           } else {
             firstEmptyAt = null;
-            const verdict = classifyChecks(rows);
-            step = verdict.status === 'PENDING'
-              ? { state: 'pending', pending: verdict.pending }
-              : { state: 'done', result: finish(verdict.status, verdict.reason, verdict.failing, verdict.pending) };
           }
+          const next = matchedStep(verdict, parsed.mergeable, windowDone);
+          step = next.state === 'done'
+            ? { state: 'done', result: finish(next.status, next.reason, next.failing, next.pending) }
+            : next;
         }
       }
     }
@@ -524,6 +632,9 @@ async function waitForCi(input) {
     if (step.state === 'failed') {
       failedPolls++;
       if (failedPolls >= MAX_CONSECUTIVE_GH_FAILURES) return finish('INDETERMINATE', 'gh-failed', [], []);
+      last = { status: 'INDETERMINATE', pending: [] };
+    } else if (step.state === 'open') {
+      failedPolls = 0;
       last = { status: 'INDETERMINATE', pending: [] };
     } else {
       failedPolls = 0;
@@ -647,6 +758,8 @@ module.exports = Object.freeze({
   sanitizeName,
   formatNames,
   classifyChecks,
+  mergeGate,
+  matchedStep,
   renderLine,
   checkLine,
   waitForCi,

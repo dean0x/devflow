@@ -23,9 +23,21 @@
  *   D-CI-HEAD-BINDING    AC-12: only the head the caller named is classified. A
  *                        mismatched `headRefOid` is PENDING through the settle window,
  *                        then INDETERMINATE (head-mismatch); its checks are never read.
- *   D-CI-CLASSIFIER      AC-14: the classifier agrees with check-ci-status step 5. That
- *                        parity case lives in merge-readiness.test.ts, beside the prose
- *                        interpreter; this suite holds the classifier's own rows.
+ *   D-CI-CLASSIFIER      AC-14: the classifier agrees with check-ci-status step 5 over
+ *                        `bucket`. That parity case lives in merge-readiness.test.ts,
+ *                        beside the prose interpreter; this suite holds the classifier's
+ *                        own rows.
+ *   D-CI-WORKFLOW-RULE   PASSING needs a passing check that is a GitHub Actions job (a
+ *                        non-empty `workflow`). Passes from external checks alone are
+ *                        PENDING through the settle window, then INDETERMINATE
+ *                        (no-workflow-check). The window is the empty list's own clock,
+ *                        which a pending or failing row clears.
+ *   D-CI-MERGE-STATE     `mergeable` CONFLICTING on the named head is INDETERMINATE
+ *                        (merge-conflict) at once. NO_CI and PASSING need MERGEABLE in
+ *                        the same poll; UNKNOWN, absent or any other value keeps the wait
+ *                        open, and the deadline gives INDETERMINATE (deadline), never
+ *                        PENDING. mergeGate and matchedStep hold the rule as pure
+ *                        functions, tested as tables.
  *   D-CI-NO-EXIT /       The script never calls process.exit, runs gh through one
  *   D-CI-NO-LITERAL-     spawnSync with no shell, and waits inside node: Claude Code
  *   SLEEP                2.1.294 blocks a Bash command that starts with a literal
@@ -53,8 +65,13 @@ import { WARM_HOOK_TIMEOUT_MS, buildScriptedShim, createFakeBin, scopedEnv, warm
 // The .cjs seam — transcribed from the module's JSDoc; open it before changing
 // ---------------------------------------------------------------------------
 
-interface Check { name: string; bucket: string }
+interface Check { name: string; bucket: string; workflow?: string }
 interface Classification { status: string; reason: string | null; failing: string[]; pending: string[] }
+type MergeGateResult = 'keep' | 'open' | 'conflict'
+type MatchedStep =
+  | { state: 'pending'; pending: string[] }
+  | { state: 'open' }
+  | { state: 'done'; status: string; reason: string | null; failing: string[]; pending: string[] }
 interface CiResult { status: string; pr: string; head: string; failing: string[]; pending: string[]; waited: number; reason: string | null }
 interface ExecResult { status: number | null; stdout?: string; stderr?: string; error?: { code?: string } }
 type ExecFn = (file: string, args: string[], opts: Record<string, unknown>) => ExecResult
@@ -78,6 +95,8 @@ interface CiWait {
   sanitizeName(name: unknown): string
   formatNames(names: readonly string[]): string
   classifyChecks(checks: readonly Check[]): Classification
+  mergeGate(status: string | null, mergeable: unknown): MergeGateResult
+  matchedStep(verdict: Classification | null, mergeable: unknown, windowDone: boolean): MatchedStep
   renderLine(result: CiResult): string
   checkLine(line: string): boolean
   waitForCi(input: { pr: string; head: string; exec: ExecFn; clock: Clock }): Promise<CiResult>
@@ -147,9 +166,19 @@ class World {
   of(kind: Kind): Recorded[] { return this.calls.filter(c => c.args[1] === kind) }
 }
 
-const viewOk = (head = HEAD): Reply => ({ stdout: JSON.stringify({ headRefOid: head }) })
-const rows = (...buckets: string[]): string => JSON.stringify(buckets.map((bucket, i) => ({ name: `check-${i + 1}`, state: bucket.toUpperCase(), bucket })))
-const checksOk = (...buckets: string[]): Reply => ({ stdout: rows(...buckets), status: buckets.includes('pending') ? 8 : 0 })
+/** The view reply; `mergeable` null omits the key, as gh does when it has no answer to give. */
+const viewOk = (head = HEAD, mergeable: string | null = 'MERGEABLE'): Reply => ({
+  stdout: JSON.stringify(mergeable === null ? { headRefOid: head } : { headRefOid: head, mergeable }),
+})
+/** One check row: a GitHub Actions job names its workflow; an external status or app check has an empty one. */
+type Spec = readonly [bucket: string, workflow: string]
+const specRows = (...specs: Spec[]): string => JSON.stringify(specs.map(([bucket, workflow], i) => ({ name: `check-${i + 1}`, state: bucket.toUpperCase(), bucket, workflow })))
+const specsOk = (...specs: Spec[]): Reply => ({ stdout: specRows(...specs), status: specs.some(([bucket]) => bucket === 'pending') ? 8 : 0 })
+const actions = (...buckets: string[]): Spec[] => buckets.map(bucket => [bucket, 'CI'] as const)
+const external = (...buckets: string[]): Spec[] => buckets.map(bucket => [bucket, ''] as const)
+const rows = (...buckets: string[]): string => specRows(...actions(...buckets))
+const checksOk = (...buckets: string[]): Reply => specsOk(...actions(...buckets))
+const externalOk = (...buckets: string[]): Reply => specsOk(...external(...buckets))
 const argvOf = (head = HEAD, pr = PR): string[] => ['node', 'ci-wait.cjs', '--pr', pr, '--head', head]
 
 interface Ran { line: string; stdout: string; code: number; world: World }
@@ -180,8 +209,22 @@ const waitedOf = (line: string): number => Number(field(line, 'waited'))
 describe('D-CI-WAIT-BOUNDS: the module carries its bounds and its vocabulary', () => {
   it('exports the six statuses in check-ci-status\'s order, the reasons and the documented buckets', () => {
     expect(CW.STATUSES).toEqual(['PASSING', 'FAILING', 'PENDING', 'NO_CI', 'NO_PR', 'INDETERMINATE'])
-    expect(CW.REASONS).toEqual(['gh-failed', 'unparseable', 'unrecognised-bucket', 'head-mismatch', 'deadline', 'usage'])
+    expect(CW.REASONS).toEqual(['gh-failed', 'unparseable', 'unrecognised-bucket', 'head-mismatch', 'deadline', 'usage', 'no-workflow-check', 'merge-conflict'])
     expect(CW.BUCKETS).toEqual(['pass', 'fail', 'pending', 'skipping', 'cancel'])
+  })
+
+  it('ends the reasons with the two workflow and merge-state reasons, which only an INDETERMINATE line may carry', () => {
+    expect(CW.REASONS.slice(-2)).toEqual(['no-workflow-check', 'merge-conflict'])
+    const indeterminate = 'CI INDETERMINATE pr=12 head=aaaaaaa failing=- pending=- waited=2'
+    for (const reason of ['no-workflow-check', 'merge-conflict']) {
+      expect(CW.LINE_RE.test(`${indeterminate} reason=${reason}`), reason).toBe(true)
+      expect(CW.checkLine(`${indeterminate} reason=${reason}`), reason).toBe(true)
+      expect(CW.checkLine(`CI PASSING pr=12 head=aaaaaaa failing=- pending=- waited=2 reason=${reason}`), `${reason} on PASSING`).toBe(false)
+      expect(CW.checkLine(`CI NO_CI pr=12 head=aaaaaaa failing=- pending=- waited=2 reason=${reason}`), `${reason} on NO_CI`).toBe(false)
+    }
+    for (const unlisted of ['no-workflow', 'merge-conflicts', 'no-workflow-check-x', 'Merge-Conflict']) {
+      expect(CW.checkLine(`${indeterminate} reason=${unlisted}`), unlisted).toBe(false)
+    }
   })
 
   it('holds the constants the ticket pins', () => {
@@ -502,8 +545,9 @@ describe('the settle windows: a head mismatch and an empty check list each keep 
       ? { ...viewOk(OLD_HEAD), took: nth === 3 ? lastTook : 10_000 }
       : checksOk('pass'))
     // Empty path: a view and a checks call take 5 s each, so polls fall 30 s apart as well.
+    // The head reads MERGEABLE: NO_CI needs it, and the boundary is the window alone.
     const empty = (lastTook: number): Script => ({ kind, nth }) => (kind === 'view'
-      ? { ...viewOk(), took: 5_000 }
+      ? { ...viewOk(HEAD, 'MERGEABLE'), took: 5_000 }
       : { stdout: '[]', took: nth === 3 ? lastTook : 5_000 })
 
     it('mismatch path: 90,000 ms settles at the fourth read', async () => {
@@ -537,6 +581,271 @@ describe('the settle windows: a head mismatch and an empty check list each keep 
       expect(r.world.sleeps).toEqual([20_000, 20_000, 20_000, 20_000])
       expect(waitedOf(r.line)).toBe(130)
     })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The workflow rule through the wait: PASSING needs a GitHub Actions job that passed
+// ---------------------------------------------------------------------------
+
+describe('the workflow rule: a pass from an external check alone is no CI verdict', () => {
+  it('external-only passing checks: PENDING through the 90 s window, then no-workflow-check, never PASSING', async () => {
+    const r = await run(({ kind }) => (kind === 'view' ? viewOk() : externalOk('pass', 'pass')))
+    expect(r.line).toMatch(/^CI INDETERMINATE pr=12 head=aaaaaaa failing=- pending=- waited=\d+ reason=no-workflow-check$/)
+    // Each poll is 22 s: the window opens after the first checks call (2 s), and the sixth read (112 s) is the first past 90 s.
+    expect(r.world.of('checks')).toHaveLength(6)
+    expect(waitedOf(r.line)).toBeGreaterThanOrEqual(90)
+    expect(waitedOf(r.line)).toBeLessThan(150)
+  })
+
+  it('a skipped workflow job beside a passing external check ends no-workflow-check', async () => {
+    const r = await run(({ kind }) => (kind === 'view' ? viewOk() : specsOk(['skipping', 'CI'], ['pass', ''])))
+    expect(statusOf(r.line)).toBe('INDETERMINATE')
+    expect(field(r.line, 'reason')).toBe('no-workflow-check')
+  })
+
+  it('a workflow pass beside an external pass on a mergeable head is PASSING, with the exact line pinned', async () => {
+    const r = await run(({ kind }) => (kind === 'view' ? viewOk() : specsOk(['pass', 'CI'], ['pass', ''])))
+    expect(r.line).toBe('CI PASSING pr=12 head=aaaaaaa failing=- pending=- waited=2')
+    expect(r.world.sleeps).toEqual([])
+  })
+
+  it('external-only, then a pending workflow row, then external-only again: the window restarts at the second stretch', async () => {
+    // Each checks call takes 25 s. One clock for the whole run would settle at the third read (118 s after
+    // the first external-only result at 26 s); a restart needs 90 s after the third read's result.
+    const r = await run(({ kind, nth }) => {
+      if (kind === 'view') return viewOk()
+      return { ...(nth === 1 ? specsOk(['pass', ''], ['pending', 'CI']) : externalOk('pass')), took: 25_000 }
+    })
+    const checks = r.world.of('checks')
+    expect(field(r.line, 'reason')).toBe('no-workflow-check')
+    const secondStretchStart = checks[2].elapsedBefore + 25_000
+    expect(r.world.elapsed - secondStretchStart, 'no verdict before 90 s of the second stretch').toBeGreaterThanOrEqual(90_000)
+    expect(checks[checks.length - 2].elapsedBefore + 25_000 - secondStretchStart, 'the read before the last is still inside the window').toBeLessThan(90_000)
+    expect(checks).toHaveLength(5)
+  })
+
+  it('an empty list that turns external-only keeps the window from the first empty poll', async () => {
+    const r = await run(({ kind, nth }) => (kind === 'view' ? viewOk() : nth < 2 ? { stdout: '[]' } : externalOk('pass')))
+    expect(field(r.line, 'reason')).toBe('no-workflow-check')
+    expect(r.world.of('checks'), 'the sixth read is the first past 90 s from the first empty poll').toHaveLength(6)
+  })
+
+  it('a pending workflow row beside a passing external check is PENDING to the deadline', async () => {
+    const r = await run(({ kind }) => (kind === 'view' ? viewOk() : specsOk(['pass', ''], ['pending', 'CI'])))
+    expect(r.line).toMatch(/^CI PENDING pr=12 head=aaaaaaa failing=- pending=check-2 waited=\d+$/)
+  })
+
+  it('a failing external check beside a workflow pass is FAILING at once', async () => {
+    const r = await run(({ kind }) => (kind === 'view' ? viewOk() : specsOk(['fail', ''], ['pass', 'CI'])))
+    expect(r.line).toBe('CI FAILING pr=12 head=aaaaaaa failing=check-1 pending=- waited=2')
+    expect(r.world.sleeps).toEqual([])
+  })
+
+  it('a workflow field that is absent or not a string does not break the reply, and counts as external', async () => {
+    const odd = JSON.stringify([{ name: 'a', state: 'SUCCESS', bucket: 'pass' }, { name: 'b', state: 'SUCCESS', bucket: 'pass', workflow: 7 }, { name: 'c', state: 'SUCCESS', bucket: 'pass', workflow: null }])
+    const r = await run(({ kind }) => (kind === 'view' ? viewOk() : { stdout: odd }))
+    expect(field(r.line, 'reason')).toBe('no-workflow-check')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The merge state: a conflicting head ends at once; an unknown one never passes
+// ---------------------------------------------------------------------------
+
+describe('the merge state: CONFLICTING ends at once, and anything but MERGEABLE never reads NO_CI or PASSING', () => {
+  it('CONFLICTING with no checks: merge-conflict at once, with no checks call and no sleep', async () => {
+    const r = await run(({ kind }) => (kind === 'view' ? viewOk(HEAD, 'CONFLICTING') : { stdout: '[]' }))
+    expect(r.line).toBe('CI INDETERMINATE pr=12 head=aaaaaaa failing=- pending=- waited=1 reason=merge-conflict')
+    expect(r.world.calls).toHaveLength(1)
+    expect(r.world.of('checks')).toHaveLength(0)
+    expect(r.world.sleeps).toEqual([])
+  })
+
+  it('CONFLICTING with a passing workflow check, or with external-only checks, is still merge-conflict', async () => {
+    for (const reply of [checksOk('pass'), externalOk('pass'), specsOk(['pass', 'CI'], ['pass', ''])]) {
+      const r = await run(({ kind }) => (kind === 'view' ? viewOk(HEAD, 'CONFLICTING') : reply))
+      expect(field(r.line, 'reason')).toBe('merge-conflict')
+      expect(r.world.of('checks'), 'the rows are not read').toHaveLength(0)
+    }
+  })
+
+  it('CONFLICTING with an empty check list is merge-conflict, never NO_CI', async () => {
+    const r = await run(({ kind }) => (kind === 'view' ? viewOk(HEAD, 'CONFLICTING') : { status: 1, stderr: NO_CHECKS_STDERR }))
+    expect(statusOf(r.line)).toBe('INDETERMINATE')
+    expect(field(r.line, 'reason')).toBe('merge-conflict')
+  })
+
+  it('a head mismatch while CONFLICTING stays head-mismatch after the window: the merge state is not used', async () => {
+    const r = await run(({ kind }) => (kind === 'view' ? viewOk(OLD_HEAD, 'CONFLICTING') : checksOk('pass')))
+    expect(field(r.line, 'reason')).toBe('head-mismatch')
+    expect(waitedOf(r.line)).toBeGreaterThanOrEqual(90)
+    expect(r.world.of('checks')).toHaveLength(0)
+  })
+
+  it('a conflict that appears on a later poll ends the wait at that poll', async () => {
+    const r = await run(({ kind, nth }) => (kind === 'view' ? viewOk(HEAD, nth < 2 ? 'MERGEABLE' : 'CONFLICTING') : checksOk('pending')))
+    expect(field(r.line, 'reason')).toBe('merge-conflict')
+    expect(r.world.of('checks')).toHaveLength(2)
+  })
+
+  it('MERGEABLE on every poll with an empty list still settles into NO_CI', async () => {
+    const r = await run(({ kind }) => (kind === 'view' ? viewOk(HEAD, 'MERGEABLE') : { stdout: '[]' }))
+    expect(statusOf(r.line)).toBe('NO_CI')
+  })
+
+  it('UNKNOWN on every poll with an empty list never prints NO_CI: INDETERMINATE (deadline) inside 570 s', async () => {
+    const r = await run(({ kind }) => (kind === 'view' ? viewOk(HEAD, 'UNKNOWN') : { stdout: '[]' }))
+    expect(statusOf(r.line)).toBe('INDETERMINATE')
+    expect(field(r.line, 'reason')).toBe('deadline')
+    expect(waitedOf(r.line)).toBeGreaterThan(500)
+    expect(waitedOf(r.line)).toBeLessThanOrEqual(570)
+  })
+
+  it('an absent, null, empty, non-string or unlisted mergeable value behaves as UNKNOWN and is never unparseable', async () => {
+    const replies: ReadonlyArray<string> = [
+      JSON.stringify({ headRefOid: HEAD }),
+      JSON.stringify({ headRefOid: HEAD, mergeable: null }),
+      JSON.stringify({ headRefOid: HEAD, mergeable: '' }),
+      JSON.stringify({ headRefOid: HEAD, mergeable: 7 }),
+      JSON.stringify({ headRefOid: HEAD, mergeable: ['MERGEABLE'] }),
+      JSON.stringify({ headRefOid: HEAD, mergeable: 'mergeable' }),
+      JSON.stringify({ headRefOid: HEAD, mergeable: 'SOMETHING_NEW' }),
+    ]
+    for (const stdout of replies) {
+      const r = await run(({ kind }) => (kind === 'view' ? { stdout } : { stdout: '[]' }))
+      expect(statusOf(r.line), stdout).toBe('INDETERMINATE')
+      expect(field(r.line, 'reason'), stdout).toBe('deadline')
+    }
+  })
+
+  it('UNKNOWN on the early polls, then MERGEABLE with an empty list: NO_CI as soon as the window has passed', async () => {
+    // Polls are 22 s apart: the window (opened at 2 s) is done at the sixth read (112 s), so the first MERGEABLE read after it settles.
+    const r = await run(({ kind, nth }) => (kind === 'view' ? viewOk(HEAD, nth < 6 ? 'UNKNOWN' : 'MERGEABLE') : { stdout: '[]' }))
+    expect(statusOf(r.line)).toBe('NO_CI')
+    expect(r.world.of('checks')).toHaveLength(7)
+  })
+
+  it('MERGEABLE inside the window does not shorten it: NO_CI waits for the 90 s from the first empty result', async () => {
+    const r = await run(({ kind, nth }) => (kind === 'view' ? viewOk(HEAD, nth === 0 ? 'UNKNOWN' : 'MERGEABLE') : { stdout: '[]' }))
+    expect(statusOf(r.line)).toBe('NO_CI')
+    expect(r.world.of('checks')).toHaveLength(6)
+  })
+
+  it('UNKNOWN beside a passing workflow check is not PASSING on that poll; MERGEABLE on a later poll is', async () => {
+    const r = await run(({ kind, nth }) => (kind === 'view' ? viewOk(HEAD, nth < 2 ? 'UNKNOWN' : 'MERGEABLE') : checksOk('pass')))
+    expect(r.line).toMatch(/^CI PASSING pr=12 head=aaaaaaa failing=- pending=- waited=\d+$/)
+    expect(r.world.of('checks')).toHaveLength(3)
+    expect(r.world.sleeps).toEqual([20_000, 20_000])
+  })
+
+  it('UNKNOWN or an absent value beside a passing workflow check to the deadline: INDETERMINATE (deadline), never PENDING or PASSING', async () => {
+    for (const mergeable of ['UNKNOWN', null]) {
+      const r = await run(({ kind }) => (kind === 'view' ? viewOk(HEAD, mergeable) : checksOk('pass')))
+      expect(statusOf(r.line), String(mergeable)).toBe('INDETERMINATE')
+      expect(field(r.line, 'reason'), String(mergeable)).toBe('deadline')
+    }
+  })
+
+  it('an open poll resets the failed-poll count: failures separated by an open poll never reach three in a row', async () => {
+    const r = await run(({ kind, nth }) => {
+      if (kind === 'checks') return checksOk('pass')
+      if (nth === 0 || nth === 1 || nth === 3 || nth === 4) return { status: 1, stderr: 'HTTP 502\n' }
+      return viewOk(HEAD, 'UNKNOWN')
+    })
+    expect(field(r.line, 'reason')).toBe('deadline')
+  })
+
+  it('PENDING and FAILING do not wait on the merge state', async () => {
+    const failing = await run(({ kind }) => (kind === 'view' ? viewOk(HEAD, 'UNKNOWN') : checksOk('pass', 'fail')))
+    expect(statusOf(failing.line)).toBe('FAILING')
+    expect(failing.world.sleeps).toEqual([])
+    const pending = await run(({ kind }) => (kind === 'view' ? viewOk(HEAD, null) : checksOk('pass', 'pending')))
+    expect(statusOf(pending.line)).toBe('PENDING')
+  })
+
+  it('external-only checks on an UNKNOWN head still end no-workflow-check after the window', async () => {
+    const r = await run(({ kind }) => (kind === 'view' ? viewOk(HEAD, 'UNKNOWN') : externalOk('pass')))
+    expect(field(r.line, 'reason')).toBe('no-workflow-check')
+  })
+})
+
+describe('mergeGate: one pure rule maps a classifier status and a mergeable value to keep, open or conflict', () => {
+  const MERGEABLES: ReadonlyArray<string | null> = ['MERGEABLE', 'CONFLICTING', 'UNKNOWN', null]
+  // Columns follow MERGEABLES.
+  const TABLE: ReadonlyArray<readonly [string, readonly MergeGateResult[]]> = [
+    ['PASSING', ['keep', 'conflict', 'open', 'open']],
+    ['NO_CI', ['keep', 'conflict', 'open', 'open']],
+    ['FAILING', ['keep', 'conflict', 'keep', 'keep']],
+    ['PENDING', ['keep', 'conflict', 'keep', 'keep']],
+    ['INDETERMINATE', ['keep', 'conflict', 'keep', 'keep']],
+  ]
+
+  for (const [status, expected] of TABLE) {
+    MERGEABLES.forEach((mergeable, i) => {
+      it(`${status} on ${String(mergeable)} is ${expected[i]}`, () => {
+        expect(CW.mergeGate(status, mergeable)).toBe(expected[i])
+      })
+    })
+  }
+
+  it('a status not read yet (null) is a conflict on CONFLICTING and kept otherwise', () => {
+    expect(CW.mergeGate(null, 'CONFLICTING')).toBe('conflict')
+    for (const mergeable of ['MERGEABLE', 'UNKNOWN', null]) expect(CW.mergeGate(null, mergeable)).toBe('keep')
+  })
+
+  it('a value that is not one of the three is not a conflict and lets neither PASSING nor NO_CI through', () => {
+    for (const odd of [undefined, '', 'mergeable', 'SOMETHING_NEW', 7, {}, ['MERGEABLE']]) {
+      expect(CW.mergeGate('PASSING', odd)).toBe('open')
+      expect(CW.mergeGate('NO_CI', odd)).toBe('open')
+      expect(CW.mergeGate('FAILING', odd)).toBe('keep')
+    }
+  })
+})
+
+describe('matchedStep: the outcome of a poll on the named head, as a pure function', () => {
+  const verdict = (specs: Spec[]): Classification => CW.classifyChecks(specs.map(([bucket, workflow], i) => ({ name: `check-${i + 1}`, bucket, workflow })))
+  const done = (status: string, reason: string | null, failing: string[] = [], pending: string[] = []): MatchedStep => ({ state: 'done', status, reason, failing, pending })
+
+  it('an empty list: pending inside the window; NO_CI after it on MERGEABLE; open after it on anything else', () => {
+    expect(CW.matchedStep(null, 'MERGEABLE', false)).toEqual({ state: 'pending', pending: [] })
+    expect(CW.matchedStep(null, 'UNKNOWN', false)).toEqual({ state: 'pending', pending: [] })
+    expect(CW.matchedStep(null, 'MERGEABLE', true)).toEqual(done('NO_CI', null))
+    expect(CW.matchedStep(null, 'UNKNOWN', true)).toEqual({ state: 'open' })
+    expect(CW.matchedStep(null, null, true)).toEqual({ state: 'open' })
+    expect(CW.matchedStep(null, 'CONFLICTING', true)).toEqual(done('INDETERMINATE', 'merge-conflict'))
+    expect(CW.matchedStep(null, 'CONFLICTING', false)).toEqual(done('INDETERMINATE', 'merge-conflict'))
+  })
+
+  it('external-only rows: pending inside the window, no-workflow-check after it, whatever the merge state but CONFLICTING', () => {
+    const v = verdict(external('pass'))
+    expect(CW.matchedStep(v, 'MERGEABLE', false)).toEqual({ state: 'pending', pending: [] })
+    for (const mergeable of ['MERGEABLE', 'UNKNOWN', null]) expect(CW.matchedStep(v, mergeable, true)).toEqual(done('INDETERMINATE', 'no-workflow-check'))
+    expect(CW.matchedStep(v, 'CONFLICTING', true)).toEqual(done('INDETERMINATE', 'merge-conflict'))
+  })
+
+  it('a workflow pass: PASSING on MERGEABLE at any window state; open on UNKNOWN or absent; merge-conflict on CONFLICTING', () => {
+    const v = verdict(actions('pass'))
+    for (const windowDone of [false, true]) {
+      expect(CW.matchedStep(v, 'MERGEABLE', windowDone)).toEqual(done('PASSING', null))
+      expect(CW.matchedStep(v, 'UNKNOWN', windowDone)).toEqual({ state: 'open' })
+      expect(CW.matchedStep(v, null, windowDone)).toEqual({ state: 'open' })
+      expect(CW.matchedStep(v, 'CONFLICTING', windowDone)).toEqual(done('INDETERMINATE', 'merge-conflict'))
+    }
+  })
+
+  it('pending and failing rows do not depend on the merge state', () => {
+    const pending = verdict([['pass', 'CI'], ['pending', 'CI']])
+    const failing = verdict([['pass', 'CI'], ['fail', 'CI']])
+    for (const mergeable of ['MERGEABLE', 'UNKNOWN', null]) {
+      expect(CW.matchedStep(pending, mergeable, true)).toEqual({ state: 'pending', pending: ['check-2'] })
+      expect(CW.matchedStep(failing, mergeable, true)).toEqual(done('FAILING', null, ['check-2']))
+    }
+  })
+
+  it('an unrecognised bucket is a verdict at once, and a window state does not change it', () => {
+    const v = verdict([['pass', 'CI'], ['neutral', 'CI']])
+    for (const windowDone of [false, true]) expect(CW.matchedStep(v, 'MERGEABLE', windowDone)).toEqual(done('INDETERMINATE', 'unrecognised-bucket'))
   })
 })
 
@@ -684,8 +993,8 @@ describe('AC-11: a bad argv prints one usage line and makes no gh call', () => {
   it('gh is spawned with an argv array, the file `gh`, no shell, and only the PR number and fixed words', async () => {
     const r = await run(({ kind }) => (kind === 'view' ? viewOk() : checksOk('pass')))
     expect(r.world.calls.map(c => [c.file, ...c.args])).toEqual([
-      ['gh', 'pr', 'view', PR, '--json', 'headRefOid'],
-      ['gh', 'pr', 'checks', PR, '--json', 'name,state,bucket'],
+      ['gh', 'pr', 'view', PR, '--json', 'headRefOid,mergeable'],
+      ['gh', 'pr', 'checks', PR, '--json', 'name,state,bucket,workflow'],
     ])
     expect(r.world.calls.every(c => c.shell === false)).toBe(true)
   })
@@ -701,7 +1010,7 @@ describe('AC-11: a bad argv prints one usage line and makes no gh call', () => {
 // ---------------------------------------------------------------------------
 
 describe('D-CI-CLASSIFIER: the bucket classifier', () => {
-  const c = (...buckets: string[]): Check[] => buckets.map((bucket, i) => ({ name: `n${i}`, bucket }))
+  const c = (...buckets: string[]): Check[] => buckets.map((bucket, i) => ({ name: `n${i}`, bucket, workflow: 'CI' }))
   const ROWS: ReadonlyArray<readonly [string[], string]> = [
     [['pass'], 'PASSING'],
     [['pass', 'skipping'], 'PASSING'],
@@ -732,8 +1041,42 @@ describe('D-CI-CLASSIFIER: the bucket classifier', () => {
     expect(CW.classifyChecks(c('pass')).reason).toBeNull()
   })
 
+  describe('the workflow rule: PASSING needs a passing check that is a GitHub Actions job', () => {
+    const row = (bucket: string, workflow?: unknown): Check => ({ name: 'n', bucket, ...(workflow === undefined ? {} : { workflow: workflow as string }) })
+
+    it('a lone external pass is INDETERMINATE (no-workflow-check)', () => {
+      expect(CW.classifyChecks([row('pass', '')])).toEqual({ status: 'INDETERMINATE', reason: 'no-workflow-check', failing: [], pending: [] })
+    })
+
+    it('a pass whose workflow is absent, null or not a string counts as external', () => {
+      for (const workflow of [undefined, null, 7, {}, ['CI']]) {
+        expect(CW.classifyChecks([row('pass', workflow)]).reason, JSON.stringify(workflow)).toBe('no-workflow-check')
+      }
+    })
+
+    it('a skipped workflow job beside an external pass is no-workflow-check', () => {
+      expect(CW.classifyChecks([row('skipping', 'CI'), row('pass', '')]).reason).toBe('no-workflow-check')
+    })
+
+    it('one workflow pass is enough, beside external passes and skips', () => {
+      expect(CW.classifyChecks([row('pass', ''), row('pass', 'CI'), row('skipping', 'CI')]).status).toBe('PASSING')
+    })
+
+    it('pending and failing still outrank the workflow rule, and an unrecognised bucket outranks no-workflow-check', () => {
+      expect(CW.classifyChecks([row('pass', ''), row('pending', 'CI')]).status).toBe('PENDING')
+      expect(CW.classifyChecks([row('pass', ''), row('pending', '')]).status).toBe('PENDING')
+      expect(CW.classifyChecks([row('pass', 'CI'), row('fail', '')]).status).toBe('FAILING')
+      expect(CW.classifyChecks([row('pass', ''), row('neutral', 'CI')]).reason).toBe('unrecognised-bucket')
+    })
+
+    it('all-skipping rows keep their own reason, whatever the workflow', () => {
+      expect(CW.classifyChecks([row('skipping', 'CI')]).reason).toBe('unrecognised-bucket')
+      expect(CW.classifyChecks([row('skipping', '')]).reason).toBe('unrecognised-bucket')
+    })
+  })
+
   it('reads its input in bounded steps', () => {
-    const many = Array.from({ length: 5000 }, () => ({ name: 'n', bucket: 'pass' }))
+    const many = Array.from({ length: 5000 }, () => ({ name: 'n', bucket: 'pass', workflow: 'CI' }))
     expect(CW.classifyChecks(many).status).toBe('PASSING')
   })
 })
@@ -768,21 +1111,31 @@ describe('the script as a process: the usage line, and a scripted gh', () => {
 
   it('a passing PR through the real spawnSync: gh is called with the fixed argv and the line is PASSING', () => {
     const shim = buildScriptedShim(bin, root, [
-      { tool: 'gh', args: ['pr', 'view', '12', '--json', 'headRefOid'], stdout: JSON.stringify({ headRefOid: HEAD }) },
-      { tool: 'gh', args: ['pr', 'checks', '12', '--json', 'name,state,bucket'], stdout: rows('pass', 'skipping') },
+      { tool: 'gh', args: ['pr', 'view', '12', '--json', 'headRefOid,mergeable'], stdout: JSON.stringify({ headRefOid: HEAD, mergeable: 'MERGEABLE' }) },
+      { tool: 'gh', args: ['pr', 'checks', '12', '--json', 'name,state,bucket,workflow'], stdout: rows('pass', 'skipping') },
     ])
     const r = runScript(['--pr', '12', '--head', HEAD], { PATH: `${shim.dir}${path.delimiter}${process.env.PATH ?? ''}`, ...shim.env })
     expect(r.stdout).toMatch(/^CI PASSING pr=12 head=aaaaaaa failing=- pending=- waited=\d+\n$/)
     expect(r.status).toBe(0)
     expect(shim.readLog()).toEqual([
-      ['gh', 'pr', 'view', '12', '--json', 'headRefOid'],
-      ['gh', 'pr', 'checks', '12', '--json', 'name,state,bucket'],
+      ['gh', 'pr', 'view', '12', '--json', 'headRefOid,mergeable'],
+      ['gh', 'pr', 'checks', '12', '--json', 'name,state,bucket,workflow'],
     ])
+  })
+
+  it('a conflicting PR through the real spawnSync is merge-conflict after one call, the view asking headRefOid,mergeable', () => {
+    const shim = buildScriptedShim(bin, root, [
+      { tool: 'gh', args: ['pr', 'view', '12', '--json', 'headRefOid,mergeable'], stdout: JSON.stringify({ headRefOid: HEAD, mergeable: 'CONFLICTING' }) },
+    ])
+    const r = runScript(['--pr', '12', '--head', HEAD], { PATH: `${shim.dir}${path.delimiter}${process.env.PATH ?? ''}`, ...shim.env })
+    expect(r.stdout).toMatch(/^CI INDETERMINATE pr=12 head=aaaaaaa failing=- pending=- waited=\d+ reason=merge-conflict\n$/)
+    expect(r.status).toBe(0)
+    expect(shim.readLog()).toEqual([['gh', 'pr', 'view', '12', '--json', 'headRefOid,mergeable']])
   })
 
   it('a missing pull request through the real spawnSync is NO_PR', () => {
     const shim = buildScriptedShim(bin, root, [
-      { tool: 'gh', args: ['pr', 'view', '999999999', '--json', 'headRefOid'], exit: 1, stderr: NO_PR_STDERR },
+      { tool: 'gh', args: ['pr', 'view', '999999999', '--json', 'headRefOid,mergeable'], exit: 1, stderr: NO_PR_STDERR },
     ])
     const r = runScript(['--pr', '999999999', '--head', HEAD], { PATH: `${shim.dir}${path.delimiter}${process.env.PATH ?? ''}`, ...shim.env })
     expect(r.stdout).toMatch(/^CI NO_PR pr=999999999 head=aaaaaaa failing=- pending=- waited=\d+\n$/)
@@ -791,8 +1144,8 @@ describe('the script as a process: the usage line, and a scripted gh', () => {
 
   it('failing checks through the real spawnSync name the failing check on the one line, sanitized', () => {
     const shim = buildScriptedShim(bin, root, [
-      { tool: 'gh', args: ['pr', 'view', '7', '--json', 'headRefOid'], stdout: JSON.stringify({ headRefOid: HEAD }) },
-      { tool: 'gh', args: ['pr', 'checks', '7', '--json', 'name,state,bucket'], stdout: JSON.stringify([{ name: 'lint\u001b[0m', state: 'FAILURE', bucket: 'fail' }]) },
+      { tool: 'gh', args: ['pr', 'view', '7', '--json', 'headRefOid,mergeable'], stdout: JSON.stringify({ headRefOid: HEAD, mergeable: 'MERGEABLE' }) },
+      { tool: 'gh', args: ['pr', 'checks', '7', '--json', 'name,state,bucket,workflow'], stdout: JSON.stringify([{ name: 'lint\u001b[0m', state: 'FAILURE', bucket: 'fail', workflow: 'CI' }]) },
     ])
     const r = runScript(['--pr', '7', '--head', HEAD], { PATH: `${shim.dir}${path.delimiter}${process.env.PATH ?? ''}`, ...shim.env })
     expect(r.stdout).toMatch(/^CI FAILING pr=7 head=aaaaaaa failing=lint__0m pending=- waited=\d+\n$/)
@@ -870,6 +1223,7 @@ describe('source guards (ci-wait.cjs)', () => {
     for (const marker of [
       'D-CI-WAIT-INLINE', 'D-CI-NO-LITERAL-SLEEP', 'D-CI-NO-EXIT', 'D-CI-WAIT-BOUNDS', 'D-CI-HEAD-BINDING',
       'D-CI-CLASSIFIER', 'D-CI-SANITIZE', 'D-CI-LINE', 'D-CI-ARGV', 'D-CI-STATUSES',
+      'D-CI-WORKFLOW-RULE', 'D-CI-MERGE-STATE',
     ]) {
       expect(SOURCE, `${marker} missing`).toContain(marker)
     }
