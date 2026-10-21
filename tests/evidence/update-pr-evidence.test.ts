@@ -846,6 +846,18 @@ describe('the viewer\'s own evidence comment is edited in place, never doubled',
     expect(commentBodies(r)).toEqual([own.body])
   })
 
+  it('22b. the same own comment behind a strict marker of another login is no edit target: a new comment is posted, nothing degrades', SPAWN_BUDGET, () => {
+    const own = { ...olderOwn(H1, KEY_A), url: '' }
+    const theirs = foreignComment(`${markerLine(H1, KEY_B)}\nTheir evidence text.\n`)
+    const r = runOnce({ scenario: { comments: [own, theirs] } })
+    expect(r.code, r.stderr).toBe(0)
+    expect(commentPart(r)).toEqual({ status: 'POSTED', reason: null })
+    expect(r.stdout).not.toContain('comment id unreadable')
+    expect(patchCalls(r.calls)).toEqual([])
+    expect(verbs(r.writes)).toEqual(['pr edit', 'pr comment'])
+    expect(commentBodies(r).slice(0, 2)).toEqual([own.body, theirs.body])
+  })
+
   it('23. a comment that does not read back as written, or cannot be read, is DEGRADED (comment read-back mismatch), never EDITED', SPAWN_BUDGET, () => {
     const mismatch = runOnce({ scenario: { comments: [olderOwn()], commentEditStores: 'Somebody else rewrote the comment.\n' } })
     expect(commentPart(mismatch)).toEqual({ status: 'DEGRADED', reason: 'comment read-back mismatch' })
