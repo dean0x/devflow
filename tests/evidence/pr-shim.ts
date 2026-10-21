@@ -29,11 +29,20 @@
  *   commentEditTrimsNewline  the comment edit stores the file with one trailing newline cut
  *   commentReadBack  the exact stdout the comment read-back answers instead of the stored
  *              body as a JSON string (an answer that does not parse, or is not a string)
+ *   mergeable  the `mergeable` answer of each `pr view` that asks for it: a string, `null` to
+ *              leave the key out, absent for 'MERGEABLE' (so a scenario that names no merge state
+ *              reads like a clean PR)
+ *   workflows  the rows (`path`, `state`) the workflow list answers: default none, which reads
+ *              as a repository without a workflow file. The reply's `total_count` is their count
+ *   workflowsReply  the exact stdout the workflow list answers instead of the rows (an answer
+ *              that does not parse). A failed list call is a `failures` entry that matches the
+ *              argv `api repos/{owner}/{repo}/actions/workflows?per_page=100`
  *
  * Comments carry a pull-comment `url` (`.../pull/7#issuecomment-<n>`, n from 1001 in the
  * order they are seeded and posted) unless a scenario seeds one, `''` included. The comment
  * edit and its read-back are scripted for one argv shape each, as are the GraphQL thread
- * count and the repository `html_url` (`https://github.com/o/r`); any other `api` argv exits 97.
+ * count, the workflow list and the repository `html_url` (`https://github.com/o/r`); any other
+ * `api` argv exits 97.
  * An edit answers with a JSON body of at least 8 KiB unless it runs `--silent`, so a write
  * buffer that is too small shows. `pr comment`, `pr edit` and the comment edit are the writes.
  */
@@ -80,6 +89,12 @@ export interface ShimScenario {
   readonly commentReadBack?: string
   readonly heads?: readonly string[]
   readonly noPr?: boolean
+  /** `mergeable` answer: a string, `null` to leave the key out, absent for 'MERGEABLE'. */
+  readonly mergeable?: string | null
+  /** The workflow list's rows. Absent answers a repository without a workflow file. */
+  readonly workflows?: ReadonlyArray<{ readonly path: string; readonly state: string }>
+  /** The exact stdout the workflow list answers instead of the rows. */
+  readonly workflowsReply?: string
   /** `reviewDecision` answer: a string, or null for "no rule asks for a review". */
   readonly reviewDecision?: string | null
   /** `pr checks` rows; absent answers "no checks reported". */
@@ -164,6 +179,7 @@ if (a === 'pr' && b === 'view') {
     number: pr.number, headRefOid: pr.headRefOid, baseRefOid: pr.baseRefOid, body,
     author: { login: pr.author }, comments: pr.comments, reviews: pr.reviews,
     isCrossRepository: false, reviewDecision: state.reviewDecision === undefined ? '' : state.reviewDecision,
+    mergeable: state.mergeable === null ? undefined : state.mergeable,
   }
   const picked = {}
   for (const f of fields) picked[f] = all[f]
@@ -219,6 +235,14 @@ if (a === 'api' && COMMENT_PATH_RE.test(b || '')) {
   const target = commentById(COMMENT_PATH_RE.exec(b)[1])
   if (target === undefined) stop('gh: Not Found (HTTP 404)\n')
   out(state.commentReadBack !== undefined ? state.commentReadBack : JSON.stringify(target.body) + '\n')
+  process.exit(0)
+}
+if (a === 'api' && b === 'repos/{owner}/{repo}/actions/workflows?per_page=100') {
+  // gh api repos/{owner}/{repo}/actions/workflows?per_page=100: the whole argv, nothing else
+  if (args.length !== 2) unscripted()
+  log()
+  const rows = state.workflows || []
+  out(state.workflowsReply !== undefined ? state.workflowsReply : { total_count: rows.length, workflows: rows })
   process.exit(0)
 }
 if (a === 'api' && b === 'repos/{owner}/{repo}') {
@@ -305,6 +329,9 @@ export function createGhShim(root: string, scenario: ShimScenario = {}): GhShim 
     nextCommentId,
     noPr: scenario.noPr ?? false,
     reviewDecision: scenario.reviewDecision,
+    mergeable: scenario.mergeable === undefined ? 'MERGEABLE' : scenario.mergeable,
+    workflows: scenario.workflows,
+    workflowsReply: scenario.workflowsReply,
     checks: scenario.checks,
     checksExit: scenario.checksExit,
     threads: scenario.threads,
