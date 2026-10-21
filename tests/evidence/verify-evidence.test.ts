@@ -77,7 +77,7 @@ interface TpRecord {
 interface PrEvidence {
   readonly STATES: readonly State[]
   readonly LIMITS: Readonly<Record<string, number>>
-  readonly MARKERS: Readonly<{ BLOCK_START: string; BLOCK_END: string; EVIDENCE_OPEN: string; EVIDENCE_RE: RegExp }>
+  readonly MARKERS: Readonly<{ BLOCK_START: string; BLOCK_END: string; EVIDENCE_OPEN: string; EVIDENCE_HEAD_PREFIX: string; EVIDENCE_RE: RegExp }>
   readonly EVIDENCE_LINE_RE: RegExp
   parsePlan(text: unknown): Result<{ tps: readonly { id: number; line: string }[] }>
   parseBlock(text: unknown): Result<{ kind: 'lines'; ticked: readonly number[] } | { kind: 'counts'; total: number; verified: number }>
@@ -2358,15 +2358,33 @@ describe('source guards (verify-evidence.cjs)', () => {
     expect(SOURCE).toContain('login: string, association: string, body: string, viewerDidAuthor: boolean, commentId: string')
   })
 
-  it('the head prefix is built once, from the evidence open literal, and the strict trust functions never name it', () => {
-    expect(SOURCE).toContain("const EVIDENCE_HEAD_PREFIX = PE.MARKERS.EVIDENCE_OPEN + ' head:';")
-    expect(codeLines(SOURCE).filter(l => /\bEVIDENCE_HEAD_PREFIX\s*=/.test(l))).toHaveLength(1)
+  it('the head prefix is read from pr-evidence MARKERS, never rebuilt here, and the strict trust functions never name it', () => {
+    const named = (src: string): string[] => codeLines(src).filter(l => l.includes('EVIDENCE_HEAD_PREFIX'))
+    const rebuilt = (src: string): string[] => codeLines(src).filter(l => l.includes("' head:'"))
+    expect(functionSource(SOURCE, 'editTarget')).toContain('startsWith(PE.MARKERS.EVIDENCE_HEAD_PREFIX)')
+    expect(named(SOURCE), 'editTarget is the one reader').toHaveLength(1)
+    expect(rebuilt(SOURCE)).toEqual([])
+    expect(rebuilt(`${SOURCE}\nconst h = PE.MARKERS.EVIDENCE_OPEN + ' head:';\n`)).toHaveLength(1)
     const strict = ['markerComments', 'resolveTrust', 'findTrustedRecord']
     const namers = (src: string): string[] => strict.filter(name => functionSource(src, name).includes('EVIDENCE_HEAD_PREFIX'))
     for (const name of strict) expect(functionSource(SOURCE, name).length, `${name} must be in the corpus`).toBeGreaterThan(80)
     expect(namers(SOURCE)).toEqual([])
-    const probe = SOURCE.replace('function markerComments(pr) {', 'function markerComments(pr) {\n  const p = EVIDENCE_HEAD_PREFIX;')
+    const probe = SOURCE.replace('function markerComments(pr) {', 'function markerComments(pr) {\n  const p = PE.MARKERS.EVIDENCE_HEAD_PREFIX;')
+    expect(probe, 'the seed must land').not.toBe(SOURCE)
     expect(namers(probe)).toEqual(['markerComments'])
+  })
+
+  it('the failed-write reason is picked in one helper that runs no gh call, and the three writes use it', () => {
+    const phrase = "'5xx on update-pr-evidence'"
+    const spelled = (src: string): string[] => codeLines(src).filter(l => l.includes(phrase))
+    const helper = functionSource(SOURCE, 'writeFailedPart')
+    expect(helper.length, 'writeFailedPart must be in the corpus').toBeGreaterThan(40)
+    expect(helper).toContain(phrase)
+    expect(helper).not.toMatch(/\bgh(?:Write)?\(/)
+    expect(spelled(SOURCE)).toHaveLength(1)
+    expect(functionSource(SOURCE, 'publishBody').match(/writeFailedPart\(/g)).toHaveLength(1)
+    expect(functionSource(SOURCE, 'publishComment').match(/writeFailedPart\(/g)).toHaveLength(2)
+    expect(spelled(`${SOURCE}\n  return degradedPart(r.serverError ? ${phrase} : 'x');\n`)).toHaveLength(2)
   })
 
   it('no marker literal: every marker is built from pr-evidence MARKERS', () => {

@@ -91,12 +91,14 @@ const LIMITS = Object.freeze({
  * D-MARKERS: the ONLY home of the marker literals. Every other site builds a
  * marker from these fields, and a source guard holds that no literal appears
  * outside this object. The block markers bracket the PR body's test-plan block;
- * the evidence marker is the first line of an evidence comment.
+ * the evidence marker is the first line of an evidence comment, and its head prefix
+ * is what that line starts with whatever its head and key.
  */
 const MARKERS = Object.freeze({
   BLOCK_START: '<!-- devflow:test-plan -->',
   BLOCK_END: '<!-- /devflow:test-plan -->',
   EVIDENCE_OPEN: '<!-- devflow:evidence',
+  EVIDENCE_HEAD_PREFIX: '<!-- devflow:evidence head:',
   EVIDENCE_RE: Object.freeze(/^<!-- devflow:evidence head:(?<head>[0-9a-f]{40}) key:(?<key>[0-9a-f]{12}) -->$/),
 });
 
@@ -1250,7 +1252,7 @@ function cell(text) {
  */
 function stubLines(ev, t) {
   return [
-    MARKERS.EVIDENCE_OPEN + ' head:' + ev.head + ' key:' + ev.key + ' -->',
+    MARKERS.EVIDENCE_HEAD_PREFIX + ev.head + ' key:' + ev.key + ' -->',
     EVIDENCE_HEADING + ' ' + EM_DASH + ' ' + ev.head.slice(0, 7),
     tallyLine(t),
     '',

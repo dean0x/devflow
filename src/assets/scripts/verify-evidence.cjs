@@ -185,13 +185,6 @@ const SHA40_RE = /^[0-9a-f]{40}$/;
 const COMMENT_URL_RE = /^https:\/\/[^/\s?#]+\/[^/\s?#]+\/[^/\s?#]+\/pull\/([1-9][0-9]{0,9})#issuecomment-([1-9][0-9]{0,19})$/;
 /** A comment id as a string of digits: up to 20, so an id beyond 2^53 stays exact. */
 const COMMENT_ID_RE = /^[1-9][0-9]{0,19}$/;
-/**
- * What the first line of every evidence comment starts with, whatever its head and
- * key (D-MARKERS: built from the marker object, never typed). Only editTarget reads
- * it; the strict trust functions keep to PE.MARKERS.EVIDENCE_RE.
- */
-const EVIDENCE_HEAD_PREFIX = PE.MARKERS.EVIDENCE_OPEN + ' head:';
-
 /** A review state that decides a login's position on the PR (D6). */
 const DECISIVE_REVIEW_STATES = new Set(['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED']);
 
@@ -811,8 +804,8 @@ function markerComments(pr) {
  * The comment a publish would edit in place: the viewer's NEWEST comment whose first
  * line starts with the evidence head prefix, whatever its key. "The viewer's" is the
  * server-asserted `viewerDidAuthor` flag, so only an own comment is ever a target
- * (never a maintainer's or a bot's comment). A malformed own comment (the prefix
- * alone) is a valid target, so an edit repairs it.
+ * (never another login's comment, such as a maintainer's or a bot's). A malformed own
+ * comment (the prefix alone) is a valid target, so an edit repairs it.
  *
  * `editable` guards the trust order: verify trusts the newest evidence comment by
  * list position, and an edit keeps its old position, so editing is safe only when
@@ -825,7 +818,7 @@ function markerComments(pr) {
  * @returns {EditTarget | null}
  */
 function editTarget(pr) {
-  const at = pr.comments.findLastIndex(c => c.viewerDidAuthor && firstLine(c.body).startsWith(EVIDENCE_HEAD_PREFIX));
+  const at = pr.comments.findLastIndex(c => c.viewerDidAuthor && firstLine(c.body).startsWith(PE.MARKERS.EVIDENCE_HEAD_PREFIX));
   if (at === -1) return null;
   const c = pr.comments[at];
   const editable = !pr.comments.slice(at + 1).some(x => !x.viewerDidAuthor && PE.MARKERS.EVIDENCE_RE.test(firstLine(x.body)));
@@ -2014,6 +2007,18 @@ function ghWrite(io, args) {
 }
 
 /**
+ * The DEGRADED part for a gh write that failed: the 5xx phrase after a server error,
+ * else the phrase of the failed step. It runs no gh call.
+ *
+ * @param {{ ok: boolean, serverError: boolean }} result  what ghWrite returned
+ * @param {string} reason  a fixed phrase from this file
+ * @returns {Part}
+ */
+function writeFailedPart(result, reason) {
+  return degradedPart(result.serverError ? '5xx on update-pr-evidence' : reason);
+}
+
+/**
  * The context for the writes: a gh budget and a deadline of their own, the same
  * notes. The throttle flag carries over, so a rate limit that verify hit stops the
  * writes too.
@@ -2051,7 +2056,7 @@ function publishBody(io, pr, fields, files) {
   if (outcome === 'conflict') return okPart('SKIPPED');
   if (outcome !== 'ok' && outcome !== 'resplice') return degradedPart('splice ' + outcome);
   const edit = ghWrite(io, ['pr', 'edit', String(pr), '--body-file', files.body]);
-  if (!edit.ok) return degradedPart(edit.serverError ? '5xx on update-pr-evidence' : 'gh pr edit failed');
+  if (!edit.ok) return writeFailedPart(edit, 'gh pr edit failed');
   const back = runReadback(io, { kind: 'readback', pr, expect: files.body });
   return back.code === EXIT_CODES.OK && back.stdout === 'READBACK ok\n' ? okPart('EDITED') : degradedPart('body read-back mismatch');
 }
@@ -2083,7 +2088,8 @@ function commentReadsBack(io, id, expected) {
  * scrub. When the viewer's own evidence comment is a safe target (no strict marker
  * from another login follows it), that comment is edited in place (one PATCH of the
  * scrubbed file) and read back against it. Otherwise a new comment is posted once.
- * A comment that already carries this head and key is skipped. A failed edit or
+ * A comment that already carries this head and key is skipped. An own target with no
+ * readable id is DEGRADED before the scrub, with no write. A failed edit or
  * read-back is a DEGRADED result and never falls back to a post. Nothing is deleted.
  *
  * @param {Io} io  the write-stage context
@@ -2107,20 +2113,20 @@ function publishComment(io, pr, fields, files, target) {
     const patch = ghWrite(io, ['api', '--method', 'PATCH',
       'repos/{owner}/{repo}/issues/comments/' + commentIdArg(target.id),
       '-F', 'body=@' + files.comment, '--silent']);
-    if (!patch.ok) return degradedPart(patch.serverError ? '5xx on update-pr-evidence' : 'comment edit failed');
+    if (!patch.ok) return writeFailedPart(patch, 'comment edit failed');
     return commentReadsBack(io, target.id, text) ? okPart('EDITED') : degradedPart('comment read-back mismatch');
   }
   const post = ghWrite(io, ['pr', 'comment', String(pr), '--body-file', files.comment]);
-  if (post.ok) return okPart('POSTED');
-  return degradedPart(post.serverError ? '5xx on update-pr-evidence' : 'gh pr comment failed');
+  return post.ok ? okPart('POSTED') : writeFailedPart(post, 'gh pr comment failed');
 }
 
 /**
  * The whole update-pr-evidence operation, in the order the operation always had:
  * verify; only on `body:changed` scrub, splice, `gh pr edit`, read back; only on
  * `posted:no` scrub, then edit the viewer's own evidence comment in place and read it
- * back, or post a new one when there is none to edit. The work files live in one
- * private directory this call makes and removes.
+ * back, or post a new one when there is none to edit or a newer evidence comment from
+ * another login follows it. The work files live in one private directory this call
+ * makes and removes.
  *
  * @param {Io} io
  * @param {Extract<ParsedArgs, { kind: 'publish' }>} args

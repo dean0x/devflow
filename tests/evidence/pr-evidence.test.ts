@@ -134,7 +134,7 @@ interface PrEvidence {
   readonly LIMITS: Readonly<Record<string, number>>
   readonly TRUSTED_ASSOCIATIONS: readonly string[]
   readonly TRUSTED_PERMISSIONS: readonly string[]
-  readonly MARKERS: Readonly<{ BLOCK_START: string; BLOCK_END: string; EVIDENCE_OPEN: string; EVIDENCE_RE: RegExp }>
+  readonly MARKERS: Readonly<{ BLOCK_START: string; BLOCK_END: string; EVIDENCE_OPEN: string; EVIDENCE_HEAD_PREFIX: string; EVIDENCE_RE: RegExp }>
   readonly TP_LINE_RE: RegExp
   readonly CLAIM_LINE_RE: RegExp
   readonly EXCEPTION_LINE_RE: RegExp
@@ -390,6 +390,18 @@ describe('marker grammar', () => {
       `<!-- devflow:evidence key:0123456789ab head:${HEAD} -->`,
     ]
     for (const line of bad) expect(PE.MARKERS.EVIDENCE_RE.test(line), line).toBe(false)
+  })
+
+  it('EVIDENCE_HEAD_PREFIX is the open literal plus " head:" and starts every rendered marker line, byte for byte', () => {
+    expect(PE.MARKERS.EVIDENCE_HEAD_PREFIX).toBe(`${PE.MARKERS.EVIDENCE_OPEN} head:`)
+    expect(PE.MARKERS.EVIDENCE_HEAD_PREFIX).toBe('<!-- devflow:evidence head:')
+    const ev = evidence()
+    for (const mode of ['stub', 'full']) {
+      const first = unwrap(PE.render(PLAN, ev, mode)).text.split('\n')[0]
+      expect(first, mode).toBe(`<!-- devflow:evidence head:${ev.head} key:${ev.key} -->`)
+      expect(first.startsWith(PE.MARKERS.EVIDENCE_HEAD_PREFIX), mode).toBe(true)
+      expect(PE.MARKERS.EVIDENCE_RE.test(first), mode).toBe(true)
+    }
   })
 
   it('every marker literal in the source sits inside the MARKERS definition', () => {
