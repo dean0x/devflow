@@ -38,12 +38,14 @@ import * as path from 'path';
 import { pooled } from '../../core/pool.js';
 import { describeEchoedValue } from '../../core/echo-value.js';
 import type { LedgerRootLookup } from '../../core/ledger-root.js';
+import { MOVE_SKIP_NOTICE } from '../../core/curation-move-skip.js';
 import { CURATION_DIR_NAME, CURATION_TUNING_FILE_NAME, LEGACY_NAMES, getGlobalCurateTuningConfigPath } from '../../core/project-paths.js';
 import type {
   CurationMoveModule,
   LedgerMoveOptions,
   LedgerMoveOutcome,
   LedgerSweepOutcome,
+  MoveSkipReason,
 } from '../../core/curation-move.js';
 
 /** At most this many projects are probed or moved at once (the migration runner's pool). */
@@ -99,6 +101,9 @@ export type BackupSweepReport =
   | { readonly state: 'busy' }
   | { readonly state: 'failed'; readonly message: string };
 
+/** What the sweep answers beyond a report: it left the project alone, for a {@link MoveSkipReason}. */
+type SweepSkip = { readonly state: 'skipped'; readonly reason: MoveSkipReason };
+
 /**
  * What happened to one project. `moved`: the folder moved (`mode`), or the new folder
  * won and the old one became the backup; `rendered` is false when the index was not
@@ -106,9 +111,11 @@ export type BackupSweepReport =
  * nothing moved. `busy`: a lock is held and the project moves at its next event, or, with
  * `reason` `claim`, a queue claim holds the move and it runs after Curate finishes.
  * `refused`: a link or another unsafe state; nothing changed. `error`: an I/O failure;
- * nothing was copied and the old folder is whole. `skipped`: the project's git root
- * lookup did not answer in time, so its ledger root is unknown and nothing was tried;
- * `root` is the project root init was given.
+ * nothing was copied and the old folder is whole. `skipped`: the project's git root lookup
+ * did not answer in time, so its ledger root is unknown and nothing was tried; `root` is
+ * the project root init was given. `left-alone`: the move, or the backup sweep, changed
+ * nothing because git tracks files in a curation data folder (`tracked`), or a `.git`
+ * entry stands and git did not answer (`unknown`); `root` is the ledger root.
  */
 export type ProjectMoveOutcome =
   | {
@@ -124,7 +131,8 @@ export type ProjectMoveOutcome =
   | { readonly kind: 'busy'; readonly root: string; readonly reason?: 'claim' }
   | { readonly kind: 'refused'; readonly root: string; readonly message: string }
   | { readonly kind: 'error'; readonly root: string; readonly message: string }
-  | { readonly kind: 'skipped'; readonly root: string; readonly reason: 'git-root-timed-out' };
+  | { readonly kind: 'skipped'; readonly root: string; readonly reason: 'git-root-timed-out' }
+  | { readonly kind: 'left-alone'; readonly root: string; readonly reason: MoveSkipReason };
 
 export interface ProjectLedgerMoveReport {
   /** One outcome per target, in target order. */
@@ -271,12 +279,16 @@ async function moveOne(root: string, opts: SharedMoveOptions, io: SharedMoveIO):
   }
   const answer: LedgerMoveOutcome = moved.value;
   if (answer.state === 'busy') return answer.reason === 'claim' ? { kind: 'busy', root, reason: 'claim' } : { kind: 'busy', root };
+  if (answer.state === 'skipped') return { kind: 'left-alone', root, reason: answer.reason };
 
-  const sweep = await sweepIfBackup(root, io, storeOpts);
+  const swept = await sweepIfBackup(root, io, storeOpts);
   if (answer.state === 'moved') {
+    // A sweep that skips right after a move left the project alone; the next init says why.
+    const sweep = swept?.state === 'skipped' ? null : swept;
     return { kind: 'moved', root, mode: answer.mode, backup: answer.backup, rendered: answer.rendered, notes: answer.notes, sweep };
   }
-  return { kind: 'unchanged', root, sweep };
+  if (swept?.state === 'skipped') return { kind: 'left-alone', root, reason: swept.reason };
+  return { kind: 'unchanged', root, sweep: swept };
 }
 
 /** Run the backup sweep when `.devflow` holds a backup folder; answer null when there is nothing to report. */
@@ -284,7 +296,7 @@ async function sweepIfBackup(
   root: string,
   io: SharedMoveIO,
   storeOpts: () => LedgerMoveOptions,
-): Promise<BackupSweepReport | null> {
+): Promise<BackupSweepReport | SweepSkip | null> {
   let entries: readonly string[] | null;
   try {
     entries = await io.readdir(path.join(root, '.devflow'));
@@ -303,16 +315,18 @@ async function sweepIfBackup(
   return reportSweep(swept.value);
 }
 
-function reportSweep(swept: LedgerSweepOutcome): BackupSweepReport | null {
+function reportSweep(swept: LedgerSweepOutcome): BackupSweepReport | SweepSkip | null {
   switch (swept.state) {
     case 'none':
       return null;
     case 'busy':
       return { state: 'busy' };
+    case 'skipped':
+      return { state: 'skipped', reason: swept.reason };
     case 'swept':
       return { state: 'swept', files: swept.files, merged: swept.merged, overflowed: swept.overflowed, notes: swept.notes };
     default: {
-      const unreachable: never = swept.state;
+      const unreachable: never = swept;
       return unreachable;
     }
   }
@@ -347,8 +361,11 @@ export function describeOutcome(outcome: ProjectMoveOutcome): string[] {
     case 'skipped':
       lines.push(
         `Ledger move skipped for ${describeMoveText(outcome.root)}: git did not answer in time. ` +
-        'Nothing was moved. The next init tries again.',
+        'Nothing was moved. The next init or session start tries again.',
       );
+      break;
+    case 'left-alone':
+      lines.push(`Ledger move skipped for ${describeMoveText(outcome.root)}: ${MOVE_SKIP_NOTICE[outcome.reason]}`);
       break;
     case 'moved':
       if (!outcome.rendered) {
@@ -481,12 +498,30 @@ export interface InitCurationMoveIO {
   readonly tuning: GlobalTuningMoveIO;
 }
 
+/** A project the move left alone: its ledger root, and the reason whose fixed notice is in the report's lines. */
+export interface LeftAloneProject {
+  readonly root: string;
+  readonly reason: MoveSkipReason;
+}
+
 export interface InitCurationMoveReport {
   /** The lines init prints, in order: the tuning file first, then one for each project that did not move cleanly. */
   readonly lines: readonly string[];
   /** The move notice, printed once per run: set only when at least one project moved. */
   readonly notice: string | null;
   readonly movedCount: number;
+  /** The projects the move left alone, in target order. */
+  readonly leftAlone: readonly LeftAloneProject[];
+}
+
+/**
+ * The reason whose fixed notice the report's lines carry for the project at ledger root
+ * `root`, or null when they carry none. A caller that prints a second line about the same
+ * project passes it to {@link formatCurationNotDrained}, so the notice is printed once.
+ */
+export function shownSkipAt(report: Pick<InitCurationMoveReport, 'leftAlone'>, root: string | null): MoveSkipReason | null {
+  if (root === null) return null;
+  return report.leftAlone.find(project => project.root === root)?.reason ?? null;
 }
 
 /** The notice init prints once when a project moved. */
@@ -512,20 +547,24 @@ export async function runInitCurationMove(
     lines.push(`The global tuning file was not renamed: ${describeFailure(error)}.`);
   }
   let movedCount = 0;
+  let leftAlone: readonly LeftAloneProject[] = [];
   if ('unavailable' in io.ledger) {
     lines.push(`The ledger move did not run: ${io.ledger.unavailable}. The next init tries again.`);
-    return { lines, notice: null, movedCount };
+    return { lines, notice: null, movedCount, leftAlone };
   }
   try {
     const result = await moveProjectLedgers(opts, io.ledger);
     if (result.ok) {
       lines.push(...result.value.lines);
       movedCount = result.value.movedCount;
+      leftAlone = result.value.outcomes.flatMap(
+        outcome => outcome.kind === 'left-alone' ? [{ root: outcome.root, reason: outcome.reason }] : [],
+      );
     } else {
       lines.push(`The ledger move did not run: ${result.error.message}.`);
     }
   } catch (error) {
     lines.push(`The ledger move did not run: ${describeMoveText(describeFailure(error))}.`);
   }
-  return { lines, notice: movedCount > 0 ? moveNotice(movedCount) : null, movedCount };
+  return { lines, notice: movedCount > 0 ? moveNotice(movedCount) : null, movedCount, leftAlone };
 }

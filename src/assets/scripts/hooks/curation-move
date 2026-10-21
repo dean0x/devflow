@@ -19,13 +19,15 @@
 #      link, is the home directory or the machine directory (~/.devflow), or a link
 #      sits on the way down to its .devflow. The op refuses the same set.
 #   3. Compute the marker key (df_curation_move_key) with builtins only, and test the
-#      two markers, files at the logs root: curation-move.<key>.skip (an earlier attempt
-#      was refused or failed) and curation-move.<key>.busy (a fresh queue claim held the
-#      move, and a claim can last 15 minutes). A marker means return, with no fork and
-#      no log line. A second argument `retry` (session start) removes both markers
-#      first, so a refusal and a claim are looked at again once per session; that
-#      removal forks only when a marker exists. The HUD and status read only the skip
-#      marker: a busy move is not a refusal.
+#      four markers, files at the logs root, never inside the project: curation-move.<key>.skip
+#      (an earlier attempt was refused or failed; the refused marker), curation-move.<key>.busy
+#      (a fresh queue claim held the move, and a claim can last 15 minutes), and
+#      curation-move.<key>.tracked and curation-move.<key>.unknown (the move was skipped: git
+#      tracks files in a curation data folder, or git did not answer). A marker means
+#      return, with no fork and no log line. A second argument `retry` (session start) removes all four first, so a
+#      refusal, a skip and a claim are looked at again once per session; that removal
+#      forks only when a marker exists. The HUD and status read every marker but the busy
+#      one: a busy move is not a refusal.
 #   4. Fork node once, with the root as one argv word (no path is ever part of the
 #      script text); the op knows the two folder names itself. The op answers on its first line:
 #        moved <mode>   one log line (the mode, then the backup folder and the notes
@@ -34,11 +36,20 @@
 #                       lock is held, which does not last);
 #        busy claim     nothing is logged, and the busy marker is written, so no event
 #                       forks node again until the next session start;
+#        skipped <why>  <why> is `tracked` or `unknown`. Nothing in the project changed.
+#                       One log line (with `unknown`, the fixed cause word from the
+#                       op's `cause <word>` line), the marker of that reason is
+#                       written, and DF_CURATION_MOVE_SKIPPED is set to the reason, so
+#                       the hook that called the shim can tell the user
+#                       (session-start-context);
 #        none           nothing (the folder went away after the probe);
 #        anything else, or a non-zero exit (a refusal or an I/O error): one log line,
-#                       and the skip marker is written.
+#                       and the refused marker is written.
 #   Hooks that run under `set -e` call it as a plain statement: every path ends in
 #   `return 0`, the marker write and the node call are guarded.
+#
+#   DF_CURATION_MOVE_SKIPPED is empty at every call, and holds the reason only after the
+#   call that ran node and got a skip.
 #
 # df_curation_move_key <root>
 #   Sets DF_CURATION_MOVE_KEY to the marker key of <root>: a 32-bit hash over every
@@ -117,11 +128,15 @@ df_curation_move_plain() {
   return 0
 }
 
-# The two marker paths of the key in DF_CURATION_MOVE_KEY, built here and nowhere else.
+# The marker paths of the key in DF_CURATION_MOVE_KEY, built here and nowhere else. The
+# refused marker keeps the file suffix `.skip` (getCurationMoveMarkerPath in
+# src/core/curation-move-notice.ts).
 _df_cm_markers() {
   local _stem="$HOME/.devflow/logs/curation-move.${DF_CURATION_MOVE_KEY}"
-  DF_CM_SKIP_MARKER="${_stem}.skip"
+  DF_CM_REFUSED_MARKER="${_stem}.skip"
   DF_CM_BUSY_MARKER="${_stem}.busy"
+  DF_CM_TRACKED_MARKER="${_stem}.tracked"
+  DF_CM_UNKNOWN_MARKER="${_stem}.unknown"
   return 0
 }
 
@@ -170,20 +185,59 @@ _df_cm_report_moved() {
   return 0
 }
 
-# Log the refusal in $1 (the op's first line) and write the skip marker.
+# Log the refusal in $1 (the op's first line) and write the refused marker.
 _df_cm_mark_refused() {
   if declare -F log >/dev/null 2>&1; then
-    log "Curation move skipped: ${1:0:200}; not tried again until the next session start"
+    log "Curation move refused: ${1:0:200}; not tried again until the next session start"
   fi
-  _df_cm_mark "$DF_CM_SKIP_MARKER"
+  _df_cm_mark "$DF_CM_REFUSED_MARKER"
+  return 0
+}
+
+# Set DF_CM_CAUSE to the fixed word of the `cause <word>` line in the op's whole answer $1
+# (lowercase letters and hyphens, at most 32 bytes), or to "" when there is none.
+_df_cm_cause() {
+  local _rest="${1#*$'\n'}" _word=""
+  DF_CM_CAUSE=""
+  if [ "$_rest" = "$1" ]; then return 0; fi
+  case "${_rest%%$'\n'*}" in
+    "cause "*) _word="${_rest%%$'\n'*}"; _word="${_word#cause }" ;;
+  esac
+  case "$_word" in
+    ""|*[!a-z-]*) ;;
+    *) if [ "${#_word}" -le 32 ]; then DF_CM_CAUSE="$_word"; fi ;;
+  esac
+  return 0
+}
+
+# Log the skip for reason $1 (`tracked` or `unknown`), write its marker and record the
+# reason in DF_CURATION_MOVE_SKIPPED. $2 is the op's whole answer, whose cause word the
+# `unknown` line carries. The log words are fixed: they hold nothing from the project.
+_df_cm_mark_skipped() {
+  local _why="$1" _words="" _marker=""
+  DF_CURATION_MOVE_SKIPPED="$_why"
+  case "$_why" in
+    tracked)
+      _words="git tracks files in the .devflow data folders"
+      _marker="$DF_CM_TRACKED_MARKER" ;;
+    *)
+      _df_cm_cause "${2:-}"
+      _words="git did not answer${DF_CM_CAUSE:+ ($DF_CM_CAUSE)}"
+      _marker="$DF_CM_UNKNOWN_MARKER" ;;
+  esac
+  if declare -F log >/dev/null 2>&1; then
+    log "Curation move skipped: $_words; not tried again until the next session start"
+  fi
+  _df_cm_mark "$_marker"
   return 0
 }
 
 df_curation_move() {
   local _root="$1" _retry="${2:-}"
   local _devflow="" _back="$PWD" _real="" _home_real="" _machine_real=""
-  local _helper="" _out="" _rc=0 _first=""
+  local _helper="" _out="" _rc=0 _first="" _marker=""
 
+  DF_CURATION_MOVE_SKIPPED=""
   [ -n "$_root" ] || return 0
   [ -n "${HOME:-}" ] || return 0
   df_curation_move_names
@@ -211,11 +265,13 @@ df_curation_move() {
   # 3. The markers.
   df_curation_move_key "$_root" || return 0
   _df_cm_markers
+  set -- "$DF_CM_REFUSED_MARKER" "$DF_CM_BUSY_MARKER" "$DF_CM_TRACKED_MARKER" "$DF_CM_UNKNOWN_MARKER"
   if [ "$_retry" = "retry" ]; then
-    _df_cm_clear "$DF_CM_SKIP_MARKER"
-    _df_cm_clear "$DF_CM_BUSY_MARKER"
+    for _marker in "$@"; do _df_cm_clear "$_marker"; done
   fi
-  if _df_cm_present "$DF_CM_SKIP_MARKER" || _df_cm_present "$DF_CM_BUSY_MARKER"; then return 0; fi
+  for _marker in "$@"; do
+    if _df_cm_present "$_marker"; then return 0; fi
+  done
 
   # 4. The one fork. 2>&1 so a refusal's message reaches the log line.
   _helper="${BASH_SOURCE[0]%/*}/json-helper.cjs"
@@ -227,6 +283,8 @@ df_curation_move() {
     case "$_first" in
       busy|none) return 0 ;;
       "busy claim") _df_cm_mark "$DF_CM_BUSY_MARKER"; return 0 ;;
+      "skipped tracked") _df_cm_mark_skipped tracked; return 0 ;;
+      "skipped unknown") _df_cm_mark_skipped unknown "$_out"; return 0 ;;
       "moved "*) _df_cm_report_moved "$_out" "$_first"; return 0 ;;
     esac
   fi

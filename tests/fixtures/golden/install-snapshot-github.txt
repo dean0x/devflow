@@ -316,6 +316,7 @@ d .devflow/scripts/core/
 - .devflow/scripts/core/ansi.js
 - .devflow/scripts/core/cache.js
 - .devflow/scripts/core/curation-move-notice.js
+- .devflow/scripts/core/curation-move-skip.js
 - .devflow/scripts/core/fs-atomic.js
 - .devflow/scripts/core/git.js
 - .devflow/scripts/core/ledger-root.js
@@ -350,6 +351,7 @@ x .devflow/scripts/hooks/lib/mkdir-lock.cjs
 x .devflow/scripts/hooks/lib/project-paths.cjs
 x .devflow/scripts/hooks/lib/render-decisions.cjs
 x .devflow/scripts/hooks/lib/safe-path.cjs
+x .devflow/scripts/hooks/lib/tracked-areas.cjs
 x .devflow/scripts/hooks/log-paths
 x .devflow/scripts/hooks/memory-permission
 x .devflow/scripts/hooks/memory-worker
