@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes — Evaluate by level
+
+**What you must do:**
+- At `standard`, the default, and at `lean`, `/implement` now runs one Evaluate pass and at most one alignment Fix round, with no second Evaluate. Run `devflow gates --set full` to keep up to two Fix rounds, each checked again.
+
+**Stale-install window:**
+- Until you run `devflow init`, your installed level reference has no Evaluate row, so Evaluate runs as at `full`. If the reference is new and the installed Evaluate agent is old, `/implement` runs one pass at the full report scope.
+
+### Changed
+
+- **`/implement` runs one Evaluate pass at `standard` and `lean`** ([#483](https://github.com/dean0x/devflow/issues/483)).
+  - At `standard` and `lean`, Phase 5 runs Evaluate once and spawns Fix at most once. It never spawns Evaluate again. `full` is unchanged.
+    If Fix returns COMPLETE, the report shows `MISALIGNED (fixed once, not re-checked)` and Phase 6 starts. Any other Fix report sends the misalignments to you for a decision.
+  - Evaluate keeps every criterion and plan step in scope, security, data handling, negative and docs ones included. It drops only docs, KB, CHANGELOG, comment or cosmetic items that no criterion or step names.
+    `/dynamic-build` and `/dynamic-plan` keep the full scope.
+  - Evaluate reads the level only from line 1 of its prompt. The level line goes first in every spawn prompt of the phase, right after a leading `OPERATION:` line.
+    The Fix agent no longer says that the command runs Evaluate again after each attempt.
+  - Expected effect: about 25-30% less spend on Evaluate and its fixes. This figure comes from the studied episodes and is not measured here.
+  - Residual risk: at `standard` and `lean`, nothing checks the one Fix round against the criteria again. Phase 6 Validate and Phase 7 QA cover behaviour. A non-behavioural criterion or the removal of unrequested code has no later check before the PR opens.
+  - Known limit: no CI test checks where the level line lands in a spawn prompt at run time.
+
 ---
 
 ## [3.8.0] - 2026-10-21
@@ -259,14 +280,6 @@ Do the step below after you update.
 **Stale-install window:**
 - Until you run `devflow init`, your installed level reference has no Harden row, so Harden runs at every level.
 
-### Upgrade notes — Evaluate by level
-
-**What you must do:**
-- At `standard`, the default, and at `lean`, `/implement` now runs one Evaluate pass and at most one alignment Fix round, with no second Evaluate. Run `devflow gates --set full` to keep up to two Fix rounds, each checked again.
-
-**Stale-install window:**
-- Until you run `devflow init`, your installed level reference has no Evaluate row, so Evaluate runs as at `full`. If the reference is new and the installed Evaluate agent is old, `/implement` runs one pass at the full report scope.
-
 ### Added
 
 - **`devflow init` asks for the gate level** ([#543](https://github.com/dean0x/devflow/issues/543), [#507](https://github.com/dean0x/devflow/issues/507)).
@@ -313,16 +326,6 @@ Do the step below after you update.
 
 ### Changed
 
-- **`/implement` runs one Evaluate pass at `standard` and `lean`** ([#483](https://github.com/dean0x/devflow/issues/483)).
-  - At `standard` and `lean`, Phase 5 runs Evaluate once and spawns Fix at most once. It never spawns Evaluate again. `full` is unchanged.
-    If Fix returns COMPLETE, the report shows `MISALIGNED (fixed once, not re-checked)` and Phase 6 starts. Any other Fix report sends the misalignments to you for a decision.
-  - Evaluate keeps every criterion and plan step in scope, security, data handling, negative and docs ones included. It drops only docs, KB, CHANGELOG, comment or cosmetic items that no criterion or step names.
-    `/dynamic-build` and `/dynamic-plan` keep the full scope.
-  - Evaluate reads the level only from line 1 of its prompt. The level line goes first in every spawn prompt of the phase, right after a leading `OPERATION:` line.
-    The Fix agent no longer says that the command runs Evaluate again after each attempt.
-  - Expected effect: about 25-30% less spend on Evaluate and its fixes. This figure comes from the studied episodes and is not measured here.
-  - Residual risk: at `standard` and `lean`, nothing checks the one Fix round against the criteria again. Phase 6 Validate and Phase 7 QA cover behaviour. A non-behavioural criterion or the removal of unrequested code has no later check before the PR opens.
-  - Known limit: no CI test checks where the level line lands in a spawn prompt at run time.
 - **`/implement` skips Harden at `lean` on a docs-only diff** ([#482](https://github.com/dean0x/devflow/issues/482)). At `lean`, `/implement` skips Phase 4 Harden when the diff is docs-only. The decision reads path names only. It reads no diff content and runs no detection script. Harden is skipped only when all of these hold: the compliance lens is exactly `off`; the branch diff list is not empty; no Code report names a deleted, renamed or moved path; and every changed path is the root `README.md`, the root `CHANGELOG.md` or a `.md` file under the root `docs/`. A path on that list has no segment that starts with a dot, no double quote in its name and no file name that agents load as instructions, in any letter case. No loaded instruction, rules or imported file names the path. A tests-only diff runs Harden. When the decision is unclear, Harden runs. The run report says `Harden: ran` or `Harden: SKIPPED (docs-only diff)` at `lean` only. `full` and `standard` do not change. When Harden runs, it reads the whole branch diff. `/code-review` security runs at every level. The README, the CLI reference and the command reference state the rule. Known limits at `lean` on a docs-only diff: stub and wiring detection does not run; the pitfall check of public text in README and CHANGELOG does not run; a path that only a not-yet-loaded instruction file, such as a nested one, names is not seen; and Harden does not review a delete or a rename that no Code report names ([#571](https://github.com/dean0x/devflow/issues/571)). The docs-only check reads path names. It does not look at symlinks, file-type changes, or docs files that a site generator compiles. Run `devflow gates --set standard` or `--set full` to keep Harden on every diff.
 - **`/implement` and `/resolve` skip Polish at `standard` and `lean`** ([#481](https://github.com/dean0x/devflow/issues/481)).
   - At `standard` and `lean`, `/implement` skips Phase 3 Polish, and `/resolve` skips Phase 6 Polish in each worktree at that level.
