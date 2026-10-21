@@ -42,6 +42,11 @@ interface VerifyApi {
   settleOutcome(outcome: unknown): { code: number; stdout: string }
   parseReadinessBlock(text: string): ReadinessBlock | null
   renderReadinessBlock(block: ReadinessBlock): string
+  bindCiHead(ci: CiRead, viewHead: unknown, evidenceHead: unknown): CiRead
+}
+interface CiRead {
+  status: string
+  failing: string
 }
 interface EvidenceApi {
   exception(line: string): { ok: boolean; value?: unknown }
@@ -82,9 +87,14 @@ function green(over: ShimScenario = {}): ShimScenario {
   return { reviewDecision: 'APPROVED', checks: PASSING, threads: RESOLVED, comments: [RECORD_COMMENT], ...over }
 }
 
-function run(scenario: ShimScenario, require: 'true' | 'false' | null = 'false', extra: readonly string[] = []): ScriptRun {
+function run(
+  scenario: ShimScenario,
+  require: 'true' | 'false' | null = 'false',
+  extra: readonly string[] = [],
+  mutate?: (source: string) => string,
+): ScriptRun {
   const args = ['readiness', '--pr', '7', ...(require === null ? [] : ['--require-non-author-approval', require]), ...extra]
-  return runScript({ scenario, args })[0]
+  return runScript({ scenario, args, mutate })[0]
 }
 
 function block(r: ScriptRun): ReadinessBlock {
@@ -242,6 +252,215 @@ describe('AC-204: readiness prints the contract block and reads without writing'
       expect(r.stdout.endsWith('\n\n')).toBe(false)
     }
   })
+})
+
+// ---------------------------------------------------------------------------
+// The shared CI gate and the head rule — readiness reads CI like the wait does
+// ---------------------------------------------------------------------------
+
+const VIEW_ARGV = ['pr', 'view', '7', '--json', 'reviewDecision,mergeable,headRefOid']
+const CHECKS_ARGV = ['pr', 'checks', '7', '--json', 'name,state,bucket,workflow']
+const WORKFLOWS_ARGV = ['api', 'repos/{owner}/{repo}/actions/workflows?per_page=100']
+const OTHER_HEAD = 'd'.repeat(40)
+const WORKFLOW_FILE = { path: '.github/workflows/ci.yml', state: 'active' }
+const FAILED_ROW = { name: 'e2e', state: 'FAILURE', bucket: 'fail', workflow: 'CI' }
+const PENDING_ROW = { name: 'e2e', state: 'PENDING', bucket: 'pending', workflow: 'CI' }
+const NOT_A_PLAN = { body: '<!-- devflow:test-plan -->\nnot a plan\n', comments: [] }
+const UNKNOWN_CI = { status: 'NOT_READY', reason: 'status unknown', ci: 'INDETERMINATE' } as const
+
+const verbs = (r: ScriptRun): string[] => r.calls.map(c => c.args.slice(0, 2).join(' '))
+const callsTo = (r: ScriptRun, argv: readonly string[]): ScriptRun['calls'][number][] =>
+  r.calls.filter(c => argv.every((a, i) => c.args[i] === a))
+
+describe('readiness reads CI through the shared merge gate', () => {
+  it('13. a workflow pass on a MERGEABLE PR reads PASSING and READY; the first read asks the decision, the merge state and the head', SPAWN_BUDGET, () => {
+    const r = run(green())
+    expect(r.code, r.stderr).toBe(0)
+    expect(block(r).ci).toBe('PASSING')
+    expect(status(r)).toBe('READY')
+    expect(r.calls[0].args).toEqual(VIEW_ARGV)
+    expect(callsTo(r, ['pr', 'checks']).map(c => c.args)).toEqual([CHECKS_ARGV])
+    expect(callsTo(r, WORKFLOWS_ARGV), 'rows make no workflow probe').toEqual([])
+    expect(r.writes).toEqual([])
+  })
+
+  it('14. a CONFLICTING PR reads unknown whatever the rows say, makes no checks call, and still shows the decision', SPAWN_BUDGET, () => {
+    const cases: ReadonlyArray<readonly [string, ShimScenario]> = [
+      ['passing rows', {}],
+      ['an empty list', { checks: undefined }],
+      ['a failing row', { checks: [...PASSING, FAILED_ROW] }],
+    ]
+    for (const [label, over] of cases) {
+      const r = run(green({ ...over, mergeable: 'CONFLICTING' }))
+      expect(r.code, `${label}: ${r.stderr}`).toBe(0)
+      expect(block(r), label).toMatchObject({ ...UNKNOWN_CI, decision: 'APPROVED' })
+      expect(callsTo(r, ['pr', 'checks']), `${label}: no checks call`).toEqual([])
+      expect(callsTo(r, WORKFLOWS_ARGV), `${label}: no workflow probe`).toEqual([])
+    }
+  })
+
+  it('15. a merge state that is not MERGEABLE (UNKNOWN, absent, odd) is never PASSING or NO_CI and never DEGRADED', SPAWN_BUDGET, () => {
+    for (const mergeable of ['UNKNOWN', null, 'SOMETHING_NEW']) {
+      const label = String(mergeable ?? 'absent')
+      for (const [rows, over] of [['passing rows', {}], ['an empty list', { checks: undefined }]] as const) {
+        const r = run(green({ ...over, mergeable }))
+        expect(r.code, `${label}, ${rows}: ${r.stderr}`).toBe(0)
+        expect(block(r), `${label}, ${rows}`).toMatchObject({ ...UNKNOWN_CI, decision: 'APPROVED' })
+        expect(callsTo(r, WORKFLOWS_ARGV), `${label}, ${rows}: no probe unless MERGEABLE`).toEqual([])
+      }
+    }
+    // FAILING and PENDING do not depend on the merge state.
+    expect(status(run(green({ mergeable: 'UNKNOWN', checks: [...PASSING, FAILED_ROW] })))).toBe('NOT_READY (CI failing: e2e)')
+    expect(status(run(green({ mergeable: null, checks: [...PASSING, PENDING_ROW], checksExit: 8 })))).toBe('NOT_READY (CI pending)')
+  })
+
+  it('16. a PR that does not conflict makes the same calls as before the merge rules; a conflict drops the checks call', SPAWN_BUDGET, () => {
+    const clean = run(green())
+    expect(verbs(clean)).toEqual(['pr view', 'api graphql', 'pr checks', 'pr view'])
+    expect(clean.writes).toEqual([])
+    const conflicting = run(green({ mergeable: 'CONFLICTING' }))
+    expect(verbs(conflicting)).toEqual(verbs(clean).filter(v => v !== 'pr checks'))
+  })
+})
+
+describe('an empty list asks the workflow list; CI counts for the head the evidence was read at', () => {
+  it('17. an empty list on a MERGEABLE PR is NO_CI and READY only when no workflow file is active', SPAWN_BUDGET, () => {
+    const none = run(green({ checks: undefined }))
+    expect(block(none).ci).toBe('NO_CI')
+    expect(status(none)).toBe('READY')
+    expect(callsTo(none, ['api']).filter(c => c.args[1] !== 'graphql').map(c => c.args), 'one fixed read-only call, no PR number or head').toEqual([WORKFLOWS_ARGV])
+
+    const notFiles = run(green({
+      checks: undefined,
+      workflows: [{ path: 'dynamic/copilot-pull-request-reviewer/x', state: 'active' }, { path: '.github/workflows/old.yml', state: 'disabled_manually' }],
+    }))
+    expect(block(notFiles).ci, 'a dynamic path and a disabled file are no workflow that could still start').toBe('NO_CI')
+    expect(status(notFiles)).toBe('READY')
+
+    const active = run(green({ checks: undefined, workflows: [WORKFLOW_FILE] }))
+    expect(active.code, active.stderr).toBe(0)
+    expect(block(active)).toMatchObject(UNKNOWN_CI)
+  })
+
+  it('18. a probe that fails, cannot be read or is one page of many reads unknown, not DEGRADED', SPAWN_BUDGET, () => {
+    const withoutProbe = run(green({ checks: undefined, mergeable: 'UNKNOWN' }))
+    const failed = run(green({ checks: undefined, failures: [{ match: WORKFLOWS_ARGV, times: 3, stderr: 'gh: Bad Gateway (HTTP 502)\n' }] }))
+    expect(failed.code, failed.stderr).toBe(0)
+    expect(block(failed)).toMatchObject(UNKNOWN_CI)
+    expect(callsTo(failed, WORKFLOWS_ARGV).map(c => c.failed), 'one call, no retry').toEqual([true])
+    expect(failed.calls.length, 'the failed probe adds one call').toBe(withoutProbe.calls.length + 1)
+    for (const workflowsReply of ['not json', '{"total_count":150,"workflows":[]}']) {
+      const r = run(green({ checks: undefined, workflowsReply }))
+      expect(r.code, `${workflowsReply}: ${r.stderr}`).toBe(0)
+      expect(block(r), workflowsReply).toMatchObject(UNKNOWN_CI)
+    }
+  })
+
+  it('19. a head that moved between the decision read and the evidence read turns PASSING and NO_CI into unknown, not DEGRADED', SPAWN_BUDGET, () => {
+    for (const [label, over] of [['PASSING', {}], ['NO_CI', { checks: undefined }]] as const) {
+      const r = run(green({ ...over, heads: [SHIM_HEAD, OTHER_HEAD] }))
+      expect(r.code, `${label}: ${r.stderr}`).toBe(0)
+      expect(block(r), label).toMatchObject(UNKNOWN_CI)
+    }
+  })
+
+  it('20. the same head on both reads keeps READY; FAILING and PENDING keep their arms when the head moved', SPAWN_BUDGET, () => {
+    const same = run(green({ heads: [SHIM_HEAD, SHIM_HEAD] }))
+    expect(block(same).ci).toBe('PASSING')
+    expect(status(same)).toBe('READY')
+    const moved = { heads: [SHIM_HEAD, OTHER_HEAD] }
+    const failing = run(green({ ...moved, checks: [...PASSING, FAILED_ROW] }))
+    expect(block(failing).ci).toBe('FAILING')
+    expect(status(failing)).toBe('NOT_READY (CI failing: e2e)')
+    const pending = run(green({ ...moved, checks: [...PASSING, PENDING_ROW], checksExit: 8 }))
+    expect(block(pending).ci).toBe('PENDING')
+    expect(status(pending)).toBe('NOT_READY (CI pending)')
+  })
+
+  it('21. a head that cannot be read, or evidence that is unknown, leaves CI unknown and never DEGRADED', SPAWN_BUDGET, () => {
+    const noHead = run(green({ heads: ['not-a-sha', SHIM_HEAD] }))
+    expect(noHead.code, noHead.stderr).toBe(0)
+    expect(block(noHead)).toMatchObject(UNKNOWN_CI)
+    for (const over of [{}, { checks: undefined }]) {
+      const r = run(green({ ...NOT_A_PLAN, ...over }))
+      expect(r.code, r.stderr).toBe(0)
+      expect(block(r), 'with the evidence unknown CI is never PASSING or NO_CI').toMatchObject({ status: 'NOT_READY', reason: 'test-plan evidence unavailable', ci: 'INDETERMINATE' })
+    }
+  })
+})
+
+describe('bindCiHead: CI counts only for the head the evidence was read at', () => {
+  const A = 'a'.repeat(40)
+  const B = 'b'.repeat(40)
+  const UNKNOWN = { status: 'INDETERMINATE', failing: '-' }
+  const heads: ReadonlyArray<readonly [unknown, unknown]> = [
+    [A, B], [A, null], [null, A], [null, null], [A, undefined], [undefined, A],
+    [A, 'a'.repeat(39)], ['a'.repeat(39), 'a'.repeat(39)], [A.toUpperCase(), A.toUpperCase()], [1, 1],
+  ]
+
+  it('keeps PASSING and NO_CI only when both heads are 40 hex and equal', () => {
+    for (const status of ['PASSING', 'NO_CI']) {
+      const ci = { status, failing: '-' }
+      expect(VE.bindCiHead(ci, A, A)).toEqual(ci)
+      for (const [view, evidence] of heads) expect(VE.bindCiHead(ci, view, evidence), `${status} ${String(view)} ${String(evidence)}`).toEqual(UNKNOWN)
+      expect(ci, 'the input is not changed').toEqual({ status, failing: '-' })
+    }
+  })
+
+  it('leaves every other status as it is, whatever the heads', () => {
+    for (const ci of [{ status: 'FAILING', failing: 'unit' }, { status: 'PENDING', failing: '-' }, UNKNOWN, { status: 'NO_PR', failing: '-' }]) {
+      for (const [view, evidence] of [[A, A], ...heads] as const) expect(VE.bindCiHead(ci, view, evidence)).toEqual(ci)
+    }
+  })
+})
+
+describe('known-bad probes: a readiness script that drops one rule reads READY where the real one does not', () => {
+  /** One source text replaced; it must appear exactly once, or the probe tests nothing. */
+  const seed = (find: string, replacement: string) => (source: string): string => {
+    expect(source.split(find), `the seed "${find}" must land once`).toHaveLength(2)
+    return source.replace(find, replacement)
+  }
+  const both = (...seeds: Array<(source: string) => string>) => (source: string): string => seeds.reduce((text, one) => one(text), source)
+  const PASSING_GATE = "CW.mergeGate(c.status, mergeable, null) !== 'keep'"
+  const CONFLICT_GATE = "CW.mergeGate(null, mergeable) === 'conflict'"
+
+  const probes: ReadonlyArray<{ name: string; scenario: ShimScenario; mutate: (source: string) => string }> = [
+    {
+      name: 'the NO_CI gate',
+      scenario: green({ checks: undefined, mergeable: 'UNKNOWN' }),
+      mutate: seed("CW.mergeGate('NO_CI', mergeable, active) === 'keep' ?", 'true ?'),
+    },
+    {
+      name: 'the PASSING gate',
+      scenario: green({ mergeable: 'UNKNOWN' }),
+      mutate: seed(PASSING_GATE, "CW.mergeGate(c.status, mergeable, null) === 'conflict'"),
+    },
+    {
+      name: 'the CONFLICTING gate',
+      scenario: green({ mergeable: 'CONFLICTING' }),
+      mutate: both(seed(CONFLICT_GATE, "CW.mergeGate(null, mergeable) === 'never'"), seed(PASSING_GATE, "CW.mergeGate(c.status, mergeable, null) === 'open'")),
+    },
+    {
+      name: 'the head comparison',
+      scenario: green({ heads: [SHIM_HEAD, OTHER_HEAD] }),
+      mutate: seed('&& viewHead === evidenceHead', '&& true'),
+    },
+    {
+      name: 'the workflows rule',
+      scenario: green({ checks: undefined, workflows: [WORKFLOW_FILE] }),
+      mutate: seed("mergeable === 'MERGEABLE' ? probeWorkflows(io) : null", "mergeable === 'MERGEABLE' ? false : null"),
+    },
+  ]
+
+  expect(probes, 'one probe per rule').toHaveLength(5)
+  for (const { name, scenario, mutate } of probes) {
+    it(`${name}: dropped, a PR that is not ready reads READY`, SPAWN_BUDGET, () => {
+      expect(status(run(scenario)), `${name} in force`).toBe('NOT_READY (status unknown)')
+      const bad = run(scenario, 'false', [], mutate)
+      expect(bad.code, bad.stderr).toBe(0)
+      expect(status(bad), `${name} dropped`).toBe('READY')
+    })
+  }
 })
 
 const PE_BLOCK_START = '<!-- devflow:test-plan -->'
