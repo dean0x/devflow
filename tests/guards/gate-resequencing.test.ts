@@ -20,6 +20,9 @@
  *   D-CI-WAIT-INLINE         /resolve no longer claims one push path: its CI gate pushes
  *                            with its own command, and its test-plan refresh and its
  *                            Report cover any successful push of the run.
+ *   D-EVALUATE-NO-PR-INPUT   (#483) Evaluate takes no PR input: the Evaluate spawn of
+ *                            /implement, in both builds, and `evaluate.md` hold no PR
+ *                            key, no PR word and no pull request text.
  *
  * Every guard has a named collector, a non-empty-corpus assertion and a known-bad probe
  * run through the same collector. The absence guards (no READY, no stub judgment in
@@ -31,7 +34,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import * as path from 'path'
 
-import { ROOT, requireDistFile, resolveAgentSource } from '../helpers.js'
+import { PR_ONLY_KEYS, ROOT, isAgentBlock, parseFences, requireDistFile, resolveAgentSource, resolveCurationOffSource } from '../helpers.js'
 
 const skill = (rel: string): string => readFileSync(path.join(ROOT, 'src', 'assets', 'skills', 'quality-gates', rel), 'utf-8')
 
@@ -299,5 +302,63 @@ describe('D-CI-WAIT-INLINE (#421): /resolve no longer claims a single push path'
     ])
     expect(collectResolvePushDefects(md.replace(RESOLVE_PUSH, 'git status'))).toEqual(expect.arrayContaining(['Phase 8 names no push of its own']))
     expect(collectResolvePushDefects(md.replace('- Push: {pushed (Phase 7, a CI-fix push, or both) |', '- Push: {pushed |'))).toEqual(['the Report\'s Push line does not cover any successful push'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// D-EVALUATE-NO-PR-INPUT (#483)
+// ---------------------------------------------------------------------------
+
+const PR_KEY_LINE = new RegExp(`^[ \\t]*"?(?:${PR_ONLY_KEYS.join('|')}): `)
+const PR_WORD = /\bPR\b|PR_/
+const PULL_REQUEST = /pull request/i
+
+/**
+ * Named collector: each line of an Evaluate spawn fence of /implement or of `evaluate.md` that carries a PR key at its
+ * start, a PR word or the text "pull request". Rendered as `<source> line <n>: <line>`.
+ */
+function collectEvaluatePrInputDefects(fences: readonly string[], agentBody: string): string[] {
+  const scan = (source: string, text: string): string[] =>
+    text.split('\n').flatMap((line, i) => (PR_KEY_LINE.test(line) || PR_WORD.test(line) || PULL_REQUEST.test(line) ? [`${source} line ${i + 1}: ${line.trim()}`] : []))
+  return [...fences.flatMap((fence, i) => scan(`Evaluate spawn fence ${i + 1}`, fence)), ...scan('evaluate.md', agentBody)]
+}
+
+/** The Evaluate spawn fences of /implement in both builds, keyed by build label. */
+function evaluateSpawnFences(): ReadonlyArray<{ readonly label: string; readonly fences: string[] }> {
+  const off = resolveCurationOffSource('commands', 'implement')
+  if (off === null) throw new Error('dist/curation-off/commands/implement.md is absent: run `npm run build:mds`')
+  return [
+    { label: 'dist/commands/implement.md', text: requireDistFile('implement.md') },
+    { label: 'dist/curation-off/commands/implement.md', text: off },
+  ].map(({ label, text }) => ({ label, fences: parseFences(text).filter(fence => isAgentBlock(fence, 'Evaluate')) }))
+}
+
+describe('D-EVALUATE-NO-PR-INPUT (#483): Evaluate takes no PR input', () => {
+  it('the Evaluate spawn of /implement, in both builds, and evaluate.md hold no PR key, PR word or pull request text', () => {
+    const agentBody = resolveAgentSource('evaluate').content
+    expect(agentBody.length, 'evaluate.md: nothing read').toBeGreaterThan(500)
+    for (const { label, fences } of evaluateSpawnFences()) {
+      expect(fences, `${label}: one Evaluate spawn fence`).toHaveLength(1)
+      expect(fences[0], `${label}: the fence is the Phase 5 spawn`).toContain('ORIGINAL_REQUEST:')
+      expect(collectEvaluatePrInputDefects(fences, agentBody), label).toEqual([])
+    }
+  })
+
+  it('known-bad probes: a PR key, a PR word and pull request text seeded into the fence or the agent are each reported by the same collector', () => {
+    const agentBody = resolveAgentSource('evaluate').content
+    const next = agentBody.split('\n').length + 1
+    const ANCHOR = '\nACCEPTANCE_CRITERIA:'
+    for (const { label, fences } of evaluateSpawnFences()) {
+      const [fence] = fences
+      expect(fence, `${label}: the seed anchor is in the fence`).toContain(ANCHOR)
+      const at = fence.slice(0, fence.indexOf(ANCHOR)).split('\n').length + 1
+      for (const line of ['PR_DESCRIPTION_GUIDANCE: {x}', 'ISSUE_PR_LINK: {x}', 'ISSUE_NUMBER: {x}', 'PR_EXCEPTIONS: {x}', 'The PR body: {x}', 'Read the Pull Request first.']) {
+        const seeded = fence.replace(ANCHOR, () => `\n${line}${ANCHOR}`)
+        expect(collectEvaluatePrInputDefects([seeded], agentBody), `${label}: "${line}" in the fence`).toEqual([`Evaluate spawn fence 1 line ${at}: ${line}`])
+      }
+    }
+    for (const line of ['Read the PR body.', 'Compare the pull request description.', 'Set PR_DESCRIPTION_GUIDANCE first.']) {
+      expect(collectEvaluatePrInputDefects([], `${agentBody}\n${line}\n`), `"${line}" in the agent`).toEqual([`evaluate.md line ${next}: ${line}`])
+    }
   })
 })

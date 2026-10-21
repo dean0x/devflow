@@ -86,7 +86,7 @@ When `OPERATION: alignment-fix`, you are fixing intent/plan misalignments identi
 
 **Protocol:**
 1. Fix only what is listed in `MISALIGNMENTS` — no scope expansion
-2. Commit and push; orchestrator re-runs Evaluate agent after each attempt (max 2 attempts total)
+2. Commit and push.
 
 ## Mode: qa-fix
 

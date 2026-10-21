@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes — Evaluate by level
+
+**What you must do:**
+- At `standard`, the default, and at `lean`, `/implement` now runs one Evaluate pass and at most one alignment Fix round, with no second Evaluate. Run `devflow gates --set full` to keep up to two Fix rounds, each checked again.
+
+**Stale-install window:**
+- Until you run `devflow init`, your installed level reference has no Evaluate row, so Evaluate runs as at `full`. If the reference is new and the installed Evaluate agent is old, `/implement` runs one pass at the full report scope.
+
+### Changed
+
+- **`/implement` runs one Evaluate pass at `standard` and `lean`** ([#483](https://github.com/dean0x/devflow/issues/483)).
+  - At `standard` and `lean`, Phase 5 runs Evaluate once and spawns Fix at most once. It never spawns Evaluate again. `full` is unchanged.
+    If Fix returns COMPLETE, the report shows `MISALIGNED (fixed once, not re-checked)` and Phase 6 starts. Any other Fix report sends the misalignments to you for a decision.
+  - Evaluate keeps every criterion and plan step in scope, security, data handling, negative and docs ones included. It drops only docs, KB, CHANGELOG, comment or cosmetic items that no criterion or step names.
+    `/dynamic-build` and `/dynamic-plan` keep the full scope.
+  - Evaluate reads the level only from line 1 of its prompt. The level line goes first in every spawn prompt of the phase, right after a leading `OPERATION:` line.
+    The Fix agent no longer says that the command runs Evaluate again after each attempt.
+  - Expected effect: about 25-30% less spend on Evaluate and its fixes. This figure comes from the studied episodes and is not measured here.
+  - Residual risk: at `standard` and `lean`, nothing checks the one Fix round against the criteria again. Phase 6 Validate and Phase 7 QA cover behaviour. A non-behavioural criterion or the removal of unrequested code has no later check before the PR opens.
+  - Known limit: no CI test checks where the level line lands in a spawn prompt at run time.
+
 ---
 
 ## [3.8.0] - 2026-10-21
