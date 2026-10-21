@@ -55,7 +55,7 @@ const INTRO_SENTENCES: ReadonlyArray<readonly [string, string]> = [
 
 /** Steps 0 to 8 as the lines of the reference, in order. */
 const STEP_LINES: readonly string[] = [
-  '0. A security finding keeps its matrix verdict, FIX_NOW or ESCALATED, at every severity: LOW, unlabelled, pre-existing or in a duplicate group. It never takes the prose-only value. Judge security by the defect read in the code, not by its type or severity label: a security control that fails open or is weakened, or a false security or safety claim, is a security finding at every severity. ESCALATED, FALSE_POSITIVE, BY_DESIGN, FIX_SEPARATE, TECH_DEBT and DUPLICATE verdicts never change.',
+  '0. A security finding keeps its matrix verdict, FIX_NOW or ESCALATED, at every severity: LOW, unlabelled, pre-existing or in a duplicate group. It never takes the prose-only value. Judge security by the defect read in the code, not only by its type or severity label: a security control that fails open or is weakened, or a false security or safety claim, is a security finding at every severity. ESCALATED, FALSE_POSITIVE, BY_DESIGN, FIX_SEPARATE, TECH_DEBT and DUPLICATE verdicts never change.',
   '1. Pre-existing, except a security finding → FIX_SEPARATE, Reason `pre-existing`. CRITICAL or HIGH → FIX_NOW. LOW, except a security finding → DEFER, also when its type label is severe. An absent category counts as blocking. An issue with no severity label takes steps 2-8. Steps 2-8 apply to MEDIUM.',
   '2. Treat agent-executed text (prompts, skills, commands, recipes) as code for steps 3-6.',
   '3. A reachable input gives wrong output or state; a fix landed on one path but not on its sibling; or something is called or read that nothing produces → SEVERE.',

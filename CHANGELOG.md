@@ -34,8 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`/resolve` applies severity tiers at `standard` and `lean`** ([#484](https://github.com/dean0x/devflow/issues/484)).
   - At `standard` and `lean`, Triage reads a new reference, `triage/severity-tiers.md`, once, after its normal checks. It runs a nine-step checklist in order, and the first step that matches decides.
     The checklist only narrows. It never changes a FALSE_POSITIVE, BY_DESIGN or ESCALATED verdict, and it never moves a finding up.
-    A duplicate group takes the highest tier of its members. At `full`, the Triage agent text is byte-for-byte what it was.
-  - A security finding is judged by the defect that Triage reads in the code, not by its label or severity. A security control that fails open or is weakened, and a false security or safety claim, count as security at every severity.
+    A duplicate group takes the highest tier of its members. At `full`, Triage skips the new section, and the rest of the Triage agent text is byte-for-byte what it was.
+  - Triage judges a security finding by its label and also by the defect that it reads in the code, at every severity. A security control that fails open or is weakened, and a false security or safety claim, count as security at every severity.
   - A prose-only fix runs as a Code `issue-fix` batch with the Risk Tier `Standard, prose only`. No new agent is spawned. If Code leaves an item unedited for a logic change, `/resolve` records it as Fix Separately with the Reason `needs a logic change`.
   - A DEFER item goes to Fix Separately with the Reason `severity tier: DEFER`. The manage-debt step puts the items of one run in one shared backlog issue.
   - Each issue cell in `resolution-summary.md` starts with its severity in brackets when the issue has one, for example `[HIGH]`. The `**Gate level**` header can carry a level note.

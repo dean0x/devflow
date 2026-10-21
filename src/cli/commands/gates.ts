@@ -75,7 +75,7 @@ export const GATE_LEVEL_MEANINGS: Readonly<Record<GateLevel, string>> = Object.f
  * reference.
  */
 export const GATE_LEVEL_EFFECT =
-  '/code-review and /plan read the level: standard and lean run fewer review focuses and fewer planning agents. At lean, /implement has Validate run the project\'s lint pack. /implement and /resolve also read the level and name it in their report; at standard and lean they skip Polish, and full keeps it. At lean, /implement skips Harden on a docs-only diff. At standard and lean, /implement runs one Evaluate pass and at most one Fix round. At standard and lean, /resolve applies severity tiers: it fixes CRITICAL, HIGH, severe MEDIUM and security findings in batches, fixes prose-only findings in separate batches, and sends the rest to one backlog issue.';
+  '/code-review and /plan read the level: standard and lean run fewer review focuses and fewer planning agents. At lean, /implement has Validate run the project\'s lint pack. /implement and /resolve also read the level and name it in their report; at standard and lean they skip Polish, and full keeps it. At lean, /implement skips Harden on a docs-only diff. At standard and lean, /implement runs one Evaluate pass and at most one Fix round. At standard and lean, /resolve applies severity tiers: it fixes CRITICAL, HIGH, severe MEDIUM and security findings in batches, fixes prose-only findings with text edits alone, and sends the rest to one backlog issue.';
 
 const MACHINE_MANIFEST_NAME = 'manifest.json';
 const MACHINE_INVALID_LINE = `invalid (${MACHINE_MANIFEST_NAME}; reads as ${MALFORMED_GATE_LEVEL_READS_AS})`;

@@ -130,7 +130,7 @@ MUST become a tracked manage-debt ticket. Never report-only.
 
 At `full`, skip this section and triage as written. At `standard` or `lean`, run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"` in Bash and Read `<that directory>/skills/devflow:agent-references/references/triage/severity-tiers.md` whole, in one Read. Apply its checklist after the matrix, whole or not at all. If the Read fails, or the file lacks `## Severity Tiers`, step 0 or its last line `End of checklist.`, apply no tier to any item and keep every matrix verdict. Add one line to `### Summary`: `- Tiers: applied` or `- Tiers: not applied (reference unreadable)`.
 
-The tiers only narrow: they re-route only a non-security primary that the matrix sent to FIX_NOW, and promote no other verdict. A security finding keeps its matrix verdict, FIX_NOW or ESCALATED, at every severity: LOW, unlabelled, pre-existing or in a duplicate group. It never takes the prose-only value. Judge security by the defect read in the code, not by its type or severity label: a security control that fails open or is weakened, or a false security or safety claim, is a security finding at every severity.
+The tiers only narrow: they re-route only a non-security primary that the matrix sent to FIX_NOW, and promote no other verdict. A security finding keeps its matrix verdict, FIX_NOW or ESCALATED, at every severity: LOW, unlabelled, pre-existing or in a duplicate group. It never takes the prose-only value. Judge security by the defect read in the code, not only by its type or severity label: a security control that fails open or is weakened, or a false security or safety claim, is a security finding at every severity.
 
 ## Output
 
