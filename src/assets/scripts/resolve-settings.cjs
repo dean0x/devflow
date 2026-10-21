@@ -777,6 +777,19 @@ function foldSettings(inputs) {
   });
 }
 
+/**
+ * The settings for the layers as read: the whole-file rule's resolution for the first layer
+ * that could not be read (project before personal), else the fold of the layers.
+ *
+ * @param {SettingsInputs} inputs
+ * @returns {Settings}
+ */
+function settingsOfLayers(inputs) {
+  if (inputs.project.kind === 'invalid') return unreadableSettings('project', inputs);
+  if (inputs.personal.kind === 'invalid') return unreadableSettings('personal', inputs);
+  return foldSettings(inputs);
+}
+
 // ---------------------------------------------------------------------------
 // Gathering the layers (the imperative shell — D-SETTINGS-LOCAL-ONLY)
 // ---------------------------------------------------------------------------
@@ -1180,9 +1193,7 @@ function resolveSettings(opts, deps) {
       defaultBranch: defaultBranchCompliance(exec, toplevel.root),
       retiredPolicyFile: existsNoFollow(path.join(toplevel.root, '.devflow', 'policy.json')),
     };
-    const folded = layers.project.kind === 'invalid' ? unreadableSettings('project', inputs)
-      : layers.personal.kind === 'invalid' ? unreadableSettings('personal', inputs)
-        : foldSettings(inputs);
+    const folded = settingsOfLayers(inputs);
     const asked = { memory: folded.switches.memory.on, curation: folded.switches.curation.on };
     let curationRoot = null;
     if (asked.curation) {
