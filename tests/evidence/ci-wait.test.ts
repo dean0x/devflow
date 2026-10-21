@@ -38,6 +38,12 @@
  *                        open, and the deadline gives INDETERMINATE (deadline), never
  *                        PENDING. mergeGate and matchedStep hold the rule as pure
  *                        functions, tested as tables.
+ *   D-CI-WORKFLOWS       An empty check list reads NO_CI only when the settle window is
+ *                        done, GitHub reports the PR MERGEABLE, and one read-only probe of
+ *                        the repository's workflow list finds no active workflow file under
+ *                        `.github/workflows/`. An active one ends the window as INDETERMINATE
+ *                        (no-workflow-check); a probe that fails or cannot be read never
+ *                        gives NO_CI. The probe is made at most once, and only on that path.
  *   D-CI-NO-EXIT /       The script never calls process.exit, runs gh through one
  *   D-CI-NO-LITERAL-     spawnSync with no shell, and waits inside node: Claude Code
  *   SLEEP                2.1.294 blocks a Bash command that starts with a literal
@@ -48,7 +54,8 @@
  * scripted gh) go through scopedEnv() and name their cwd.
  *
  * NOT covered: gh's behaviour itself. The `gh pr view` not-found text and the `gh pr
- * checks --json` fields are transcribed from probes on gh 2.88.1 (2026-10-09).
+ * checks --json` fields are transcribed from probes on gh 2.88.1 (2026-10-09); the
+ * workflow list's `total_count`, `path` and `state` fields from a probe on 2026-10-22.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
@@ -59,7 +66,7 @@ import * as os from 'os'
 import * as path from 'path'
 
 import { CI_WAIT_SCRIPT } from './seam.js'
-import { WARM_HOOK_TIMEOUT_MS, buildScriptedShim, createFakeBin, scopedEnv, warmFakeBin, type FakeBin } from '../evidence-policy/scripted-shim.js'
+import { WARM_HOOK_TIMEOUT_MS, buildScriptedShim, createFakeBin, scopedEnv, warmFakeBin, type FakeBin, type ScriptedShim } from '../evidence-policy/scripted-shim.js'
 
 // ---------------------------------------------------------------------------
 // The .cjs seam — transcribed from the module's JSDoc; open it before changing
@@ -71,6 +78,7 @@ type MergeGateResult = 'keep' | 'open' | 'conflict'
 type MatchedStep =
   | { state: 'pending'; pending: string[] }
   | { state: 'open' }
+  | { state: 'probe' }
   | { state: 'done'; status: string; reason: string | null; failing: string[]; pending: string[] }
 interface CiResult { status: string; pr: string; head: string; failing: string[]; pending: string[]; waited: number; reason: string | null }
 interface ExecResult { status: number | null; stdout?: string; stderr?: string; error?: { code?: string } }
@@ -91,12 +99,14 @@ interface CiWait {
   readonly NAMES_LISTED: number
   readonly LINE_RE: RegExp
   readonly USAGE_LINE: string
+  readonly WORKFLOWS_ARGS: readonly string[]
   parseArgs(args: readonly string[]): { pr: string; head: string } | null
   sanitizeName(name: unknown): string
   formatNames(names: readonly string[]): string
   classifyChecks(checks: readonly Check[]): Classification
-  mergeGate(status: string | null, mergeable: unknown): MergeGateResult
-  matchedStep(verdict: Classification | null, mergeable: unknown, windowDone: boolean): MatchedStep
+  mergeGate(status: string | null, mergeable: unknown, workflowsActive?: boolean | null): MergeGateResult
+  matchedStep(verdict: Classification | null, mergeable: unknown, windowDone: boolean, workflowsActive?: boolean | null): MatchedStep
+  parseActiveWorkflows(stdout: string): boolean | null
   renderLine(result: CiResult): string
   checkLine(line: string): boolean
   waitForCi(input: { pr: string; head: string; exec: ExecFn; clock: Clock }): Promise<CiResult>
@@ -123,8 +133,16 @@ const DEFAULT_CALL_MS = 1000
 
 /** What the fake gh does with one call. `took` is the call's duration; `hang` runs out its timeout. */
 interface Reply { status?: number | null; stdout?: string; stderr?: string; error?: { code: string }; took?: number; hang?: boolean }
-type Kind = 'view' | 'checks'
-type Script = (call: { kind: Kind; nth: number; elapsed: number }) => Reply
+/** A `gh api` call is the workflows probe; it has its own script, so the scripts of the other two stay as they are. */
+type Kind = 'view' | 'checks' | 'workflows'
+type Script = (call: { kind: 'view' | 'checks'; nth: number; elapsed: number }) => Reply
+type WorkflowsScript = (call: { nth: number; elapsed: number }) => Reply
+
+/**
+ * The default workflows reply: a repository with no workflow at all. It takes no virtual
+ * time, so the window tests keep their pinned `waited`; the probe-timing tests name `took`.
+ */
+const NO_WORKFLOWS: Reply = { stdout: JSON.stringify({ total_count: 0, workflows: [] }), took: 0 }
 
 interface Recorded { file: string; args: string[]; timeout: number; elapsedBefore: number; shell: unknown }
 
@@ -134,9 +152,13 @@ class World {
   readonly calls: Recorded[] = []
   readonly sleeps: number[] = []
   readonly violations: string[] = []
-  private readonly counts: Record<Kind, number> = { view: 0, checks: 0 }
+  private readonly counts: Record<Kind, number> = { view: 0, checks: 0, workflows: 0 }
 
-  constructor(private readonly script: Script, private readonly moves = true) {}
+  constructor(
+    private readonly script: Script,
+    private readonly moves = true,
+    private readonly workflows: WorkflowsScript = () => NO_WORKFLOWS,
+  ) {}
 
   get elapsed(): number { return this.t - this.start }
 
@@ -149,8 +171,12 @@ class World {
     if (opts.shell === true) this.violations.push('gh was run through a shell')
     if (!(timeout > 0 && timeout <= 30_000)) this.violations.push(`a gh timeout of ${timeout} ms is outside (0, 30000]`)
     if (this.elapsed + timeout > MAX_MS + 1) this.violations.push(`a gh call at ${this.elapsed} ms was given ${timeout} ms, past ${MAX_MS}`)
-    const kind: Kind = args[1] === 'view' ? 'view' : 'checks'
-    const reply = this.script({ kind, nth: this.counts[kind]++, elapsed: this.elapsed })
+    let kind: Kind = 'checks'
+    if (args[0] === 'api') kind = 'workflows'
+    else if (args[1] === 'view') kind = 'view'
+    const reply = kind === 'workflows'
+      ? this.workflows({ nth: this.counts.workflows++, elapsed: this.elapsed })
+      : this.script({ kind, nth: this.counts[kind]++, elapsed: this.elapsed })
     const took = reply.hang === true ? timeout : Math.min(reply.took ?? DEFAULT_CALL_MS, timeout)
     if (this.moves) this.t += took
     if (reply.hang === true) return { status: null, error: { code: 'ETIMEDOUT' } }
@@ -163,7 +189,7 @@ class World {
     sleep: async ms => { this.sleeps.push(ms); if (this.moves) this.t += ms },
   }
 
-  of(kind: Kind): Recorded[] { return this.calls.filter(c => c.args[1] === kind) }
+  of(kind: Kind): Recorded[] { return this.calls.filter(c => (kind === 'workflows' ? c.args[0] === 'api' : c.args[1] === kind)) }
 }
 
 /** The view reply; `mergeable` null omits the key, as gh does when it has no answer to give. */
@@ -184,8 +210,8 @@ const argvOf = (head = HEAD, pr = PR): string[] => ['node', 'ci-wait.cjs', '--pr
 interface Ran { line: string; stdout: string; code: number; world: World }
 
 /** Run main() over a world; asserts the contract every case shares. */
-async function run(script: Script, opts: { moves?: boolean; argv?: string[] } = {}): Promise<Ran> {
-  const world = new World(script, opts.moves ?? true)
+async function run(script: Script, opts: { moves?: boolean; argv?: string[]; workflows?: WorkflowsScript } = {}): Promise<Ran> {
+  const world = new World(script, opts.moves ?? true, opts.workflows)
   const out = await CW.main(opts.argv ?? argvOf(), { exec: world.exec, clock: world.clock })
   expect(out.stdout, 'stdout is exactly one line').toMatch(/^[^\n]+\n$/)
   const line = out.stdout.slice(0, -1)
@@ -770,9 +796,241 @@ describe('the merge state: CONFLICTING ends at once, and anything but MERGEABLE 
   })
 })
 
-describe('mergeGate: one pure rule maps a classifier status and a mergeable value to keep, open or conflict', () => {
+// ---------------------------------------------------------------------------
+// D-CI-WORKFLOWS: an empty list is no CI only when the repository has no active workflow file
+// ---------------------------------------------------------------------------
+
+/** The probe's argv: gh fills `{owner}/{repo}` from the repository of the working directory. */
+const WORKFLOWS_ARGV = ['api', 'repos/{owner}/{repo}/actions/workflows?per_page=100']
+const CI_YML = { id: 1, name: 'CI', path: '.github/workflows/ci.yml', state: 'active' }
+const DYNAMIC_ROW = { id: 7, name: 'Copilot code review', path: 'dynamic/copilot-pull-request-reviewer/copilot-pull-request-reviewer', state: 'active' }
+const inactiveRows = (count: number): object[] => Array.from({ length: count }, (_, i) => ({ id: i + 1, name: `w${i}`, path: `.github/workflows/w${i}.yml`, state: 'disabled_manually' }))
+/** The list gh returns for the probe; `total` defaults to the number of rows given. */
+const workflowJson = (workflowRows: ReadonlyArray<unknown>, total: number = workflowRows.length): string => JSON.stringify({ total_count: total, workflows: workflowRows })
+const workflowList = (workflowRows: ReadonlyArray<unknown>, total?: number): Reply => ({ stdout: workflowJson(workflowRows, total), took: 0 })
+const BAD_PROBE: Reply = { status: 1, stderr: 'HTTP 502: Bad Gateway\n' }
+const emptyList: Script = ({ kind }) => (kind === 'view' ? viewOk() : { stdout: '[]' })
+
+/** Replies that are not the whole workflow list: bad JSON, a bad row, or a page that is not all of it. */
+const UNREADABLE: ReadonlyArray<readonly [string, string]> = [
+  ['empty stdout', ''],
+  ['text that is not JSON', 'not json'],
+  ['an array', '[]'],
+  ['an object without the list', '{}'],
+  ['a total that is not a number', JSON.stringify({ total_count: '0', workflows: [] })],
+  ['a negative total', workflowJson([], -1)],
+  ['no total', JSON.stringify({ workflows: [] })],
+  ['a list that is not an array', JSON.stringify({ total_count: 0, workflows: {} })],
+  ['a row that is null', workflowJson([null], 1)],
+  ['a row without a path', workflowJson([{ state: 'disabled_manually' }])],
+  ['a row whose path is not a string', workflowJson([{ path: 7, state: 'disabled_manually' }])],
+  ['a row without a state', workflowJson([{ path: 'dynamic/x' }])],
+  ['a row whose state is not a string', workflowJson([{ path: 'dynamic/x', state: true }])],
+  ['a malformed row beside an active one', workflowJson([CI_YML, { state: 'active' }])],
+  ['a first page of 100 inactive rows out of 150', workflowJson(inactiveRows(100), 150)],
+  ['no rows out of a total of 1', workflowJson([], 1)],
+  ['more rows than the total', workflowJson(inactiveRows(2), 1)],
+  ['a list of 101 rows, one more than a page', workflowJson(inactiveRows(101))],
+  ['a list of 150 rows whose total says 150', workflowJson(inactiveRows(150))],
+  ['a string total beside an active row', JSON.stringify({ total_count: '1', workflows: [CI_YML] })],
+  ['a fractional total beside an active row', workflowJson([CI_YML], 1.5)],
+  ['a negative total beside an active row', workflowJson([CI_YML], -1)],
+]
+
+describe('parseActiveWorkflows: the workflow list as a pure function', () => {
+  it('is true when a row is active and its path is a file under .github/workflows/', () => {
+    expect(CW.parseActiveWorkflows(workflowJson([CI_YML]))).toBe(true)
+    expect(CW.parseActiveWorkflows(workflowJson([DYNAMIC_ROW, ...inactiveRows(2), CI_YML]))).toBe(true)
+  })
+
+  it('is true for an incomplete page that already shows an active workflow file', () => {
+    expect(CW.parseActiveWorkflows(workflowJson([CI_YML, ...inactiveRows(99)], 150))).toBe(true)
+  })
+
+  it('is false for a complete list with no active workflow file: empty, dynamic paths, disabled, deleted, or a path that only looks like one', () => {
+    const looksLike = ['.github/workflows', 'github/workflows/ci.yml', '.github/workflow/ci.yml', 'docs/.github/workflows/ci.yml', ' .github/workflows/ci.yml']
+      .map((path, i) => ({ id: 20 + i, name: 'x', path, state: 'active' }))
+    const deleted = { ...CI_YML, id: 3, state: 'deleted' }
+    const inactiveStates = ['disabled_manually', 'disabled_inactivity', 'disabled_fork', 'Active', 'active ', ''].map((state, i) => ({ ...CI_YML, id: 30 + i, state }))
+    for (const complete of [[], [DYNAMIC_ROW], inactiveRows(3), [deleted], looksLike, inactiveStates]) {
+      expect(CW.parseActiveWorkflows(workflowJson(complete)), JSON.stringify(complete)).toBe(false)
+    }
+  })
+
+  it('is false for a complete page of 100 rows, none of them active', () => {
+    expect(CW.parseActiveWorkflows(workflowJson(inactiveRows(100)))).toBe(false)
+  })
+
+  for (const [label, stdout] of UNREADABLE) {
+    it(`is null for ${label}`, () => {
+      expect(CW.parseActiveWorkflows(stdout)).toBeNull()
+    })
+  }
+
+  it('is null for a value that is not text', () => {
+    for (const odd of [undefined, null, 7, {}] as unknown as string[]) expect(CW.parseActiveWorkflows(odd)).toBeNull()
+  })
+})
+
+describe('D-CI-WORKFLOWS: an empty check list is NO_CI only when the repository has no active workflow file', () => {
+  it('an active workflow file: PENDING through the window, then no-workflow-check, never NO_CI', async () => {
+    const r = await run(emptyList, { workflows: () => workflowList([CI_YML]) })
+    expect(r.line).toMatch(/^CI INDETERMINATE pr=12 head=aaaaaaa failing=- pending=- waited=\d+ reason=no-workflow-check$/)
+    const checks = r.world.of('checks')
+    const firstEmptyAt = checks[0].elapsedBefore + DEFAULT_CALL_MS
+    expect(checks, 'the sixth read is the first past 90 s, as it is for NO_CI').toHaveLength(6)
+    expect(r.world.sleeps).toEqual([20_000, 20_000, 20_000, 20_000, 20_000])
+    expect(checks[4].elapsedBefore + DEFAULT_CALL_MS - firstEmptyAt, 'the fifth read is still inside the window').toBeLessThan(90_000)
+    const probes = r.world.of('workflows')
+    expect(probes, 'one probe, made once the window is done').toHaveLength(1)
+    expect(probes[0].elapsedBefore - firstEmptyAt).toBeGreaterThanOrEqual(90_000)
+    expect(waitedOf(r.line)).toBeGreaterThanOrEqual(90)
+    expect(waitedOf(r.line)).toBeLessThan(150)
+  })
+
+  describe('no active workflow file: NO_CI at 90,000 ms after the first empty result and not at 89,999 ms', () => {
+    // A view and a checks call take 5 s each, so polls fall 30 s apart and the fourth read is 90 s after the first result.
+    const slowEmpty = (lastTook: number): Script => ({ kind, nth }) => (kind === 'view'
+      ? { ...viewOk(), took: 5_000 }
+      : { stdout: '[]', took: nth === 3 ? lastTook : 5_000 })
+    const NONE: ReadonlyArray<readonly [string, Reply]> = [
+      ['an empty list of workflows', workflowList([])],
+      ['only dynamic paths', workflowList([DYNAMIC_ROW, { ...DYNAMIC_ROW, id: 8, path: 'dynamic/dependabot/dependabot-updates' }])],
+      ['only disabled or deleted rows', workflowList([{ ...CI_YML, state: 'disabled_manually' }, { ...CI_YML, id: 2, state: 'disabled_inactivity' }, { ...CI_YML, id: 3, state: 'deleted' }])],
+      ['only paths outside .github/workflows/', workflowList([{ ...CI_YML, path: 'docs/.github/workflows/ci.yml' }, { ...CI_YML, id: 2, path: '.github/workflow/ci.yml' }])],
+    ]
+    for (const [label, reply] of NONE) {
+      it(`${label}: 90,000 ms settles at the fourth read, with one probe`, async () => {
+        const r = await run(slowEmpty(5_000), { workflows: () => reply })
+        expect(statusOf(r.line)).toBe('NO_CI')
+        expect(r.world.of('checks')).toHaveLength(4)
+        expect(r.world.of('workflows')).toHaveLength(1)
+        expect(waitedOf(r.line)).toBe(100)
+      })
+
+      it(`${label}: 89,999 ms does not settle, so the probe waits for the fifth read`, async () => {
+        const r = await run(slowEmpty(4_999), { workflows: () => reply })
+        expect(statusOf(r.line)).toBe('NO_CI')
+        expect(r.world.of('checks')).toHaveLength(5)
+        expect(r.world.of('workflows')).toHaveLength(1)
+        expect(waitedOf(r.line)).toBe(130)
+      })
+    }
+  })
+
+  it('an empty list that turns into rows inside the window makes no probe: the late workflow check decides', async () => {
+    const r = await run(({ kind, nth }) => (kind === 'view' ? viewOk() : nth < 2 ? { stdout: '[]' } : checksOk('pass')), { workflows: () => workflowList([CI_YML]) })
+    expect(statusOf(r.line)).toBe('PASSING')
+    expect(r.world.of('workflows')).toHaveLength(0)
+  })
+
+  it('UNKNOWN, then MERGEABLE after the window: the probe waits for MERGEABLE and is made once', async () => {
+    const r = await run(({ kind, nth }) => (kind === 'view' ? viewOk(HEAD, nth < 6 ? 'UNKNOWN' : 'MERGEABLE') : { stdout: '[]' }), { workflows: () => workflowList([CI_YML]) })
+    expect(field(r.line, 'reason')).toBe('no-workflow-check')
+    expect(r.world.of('checks')).toHaveLength(7)
+    expect(r.world.of('workflows')).toHaveLength(1)
+  })
+
+  it('PASSING, FAILING, PENDING, CONFLICTING, a head mismatch, UNKNOWN to the deadline and rows with no Actions pass make no probe', async () => {
+    const cases: ReadonlyArray<readonly [string, Script]> = [
+      ['PASSING', ({ kind }) => (kind === 'view' ? viewOk() : checksOk('pass'))],
+      ['FAILING', ({ kind }) => (kind === 'view' ? viewOk() : checksOk('pass', 'fail'))],
+      ['PENDING', ({ kind }) => (kind === 'view' ? viewOk() : checksOk('pass', 'pending'))],
+      ['CONFLICTING with no checks', ({ kind }) => (kind === 'view' ? viewOk(HEAD, 'CONFLICTING') : { stdout: '[]' })],
+      ['a head mismatch with no checks', ({ kind }) => (kind === 'view' ? viewOk(OLD_HEAD) : { stdout: '[]' })],
+      ['UNKNOWN to the deadline with no checks', ({ kind }) => (kind === 'view' ? viewOk(HEAD, 'UNKNOWN') : { stdout: '[]' })],
+      ['external-only rows', ({ kind }) => (kind === 'view' ? viewOk() : externalOk('pass'))],
+      ['a workflow pass beside an external pass', ({ kind }) => (kind === 'view' ? viewOk() : specsOk(['pass', 'CI'], ['pass', '']))],
+    ]
+    for (const [label, script] of cases) {
+      const r = await run(script, { workflows: () => workflowList([CI_YML]) })
+      expect(r.world.of('workflows'), label).toHaveLength(0)
+    }
+  })
+
+  it('the probe argv is exact and read-only: no flag, no PR number, no head, a timeout of at most 30 s, no shell', async () => {
+    const r = await run(emptyList)
+    expect(CW.WORKFLOWS_ARGS).toEqual(WORKFLOWS_ARGV)
+    expect(Object.isFrozen(CW.WORKFLOWS_ARGS)).toBe(true)
+    const [probe] = r.world.of('workflows')
+    expect(probe.file).toBe('gh')
+    expect(probe.args).toEqual(WORKFLOWS_ARGV)
+    expect(probe.args.filter(arg => arg.startsWith('-')), 'no -f, -F, -X, --method or --input').toEqual([])
+    expect(probe.args.join(' ')).not.toContain(HEAD)
+    expect(probe.args).not.toContain(PR)
+    expect(probe.timeout).toBeLessThanOrEqual(30_000)
+    expect(probe.shell).toBe(false)
+  })
+
+  describe('a failed probe is a failed poll', () => {
+    it('three in a row are INDETERMINATE (gh-failed), never NO_CI', async () => {
+      const r = await run(emptyList, { workflows: () => BAD_PROBE })
+      expect(r.line).toMatch(/^CI INDETERMINATE pr=12 head=aaaaaaa failing=- pending=- waited=\d+ reason=gh-failed$/)
+      expect(r.world.of('workflows')).toHaveLength(3)
+    })
+
+    it('a probe that hangs, errors or exits non-zero counts the same', async () => {
+      const failures: Reply[] = [{ hang: true }, { error: { code: 'ENOENT' } }, { status: 4, stderr: 'gh: not found\n' }, { status: 1, stderr: 'HTTP 403: Resource not accessible\n' }]
+      for (const failure of failures) {
+        const r = await run(emptyList, { workflows: () => failure })
+        expect(field(r.line, 'reason'), JSON.stringify(failure)).toBe('gh-failed')
+        expect(r.world.of('workflows'), JSON.stringify(failure)).toHaveLength(3)
+      }
+    })
+
+    it('one failed probe, then an answer: the next poll reads the view and the checks again, and the answer decides', async () => {
+      const callKeys = (world: World): string[] => world.calls.map(c => (c.args[0] === 'api' ? 'api' : c.args[1]))
+      const noActive = await run(emptyList, { workflows: ({ nth }) => (nth === 0 ? BAD_PROBE : workflowList([])) })
+      expect(statusOf(noActive.line)).toBe('NO_CI')
+      expect(callKeys(noActive.world).slice(-6)).toEqual(['view', 'checks', 'api', 'view', 'checks', 'api'])
+      expect(noActive.world.of('workflows')).toHaveLength(2)
+      const active = await run(emptyList, { workflows: ({ nth }) => (nth === 0 ? BAD_PROBE : workflowList([CI_YML])) })
+      expect(field(active.line, 'reason')).toBe('no-workflow-check')
+      expect(active.world.of('workflows')).toHaveLength(2)
+    })
+
+    it('two failed probes, then an answer: the failures were not three in a row', async () => {
+      const r = await run(emptyList, { workflows: ({ nth }) => (nth < 2 ? BAD_PROBE : workflowList([])) })
+      expect(statusOf(r.line)).toBe('NO_CI')
+      expect(r.world.of('workflows')).toHaveLength(3)
+    })
+  })
+
+  describe('a reply that cannot be read, or is only a page of the list, never gives NO_CI', () => {
+    for (const [label, stdout] of UNREADABLE) {
+      it(`${label}: INDETERMINATE (unparseable) after one probe`, async () => {
+        const r = await run(emptyList, { workflows: () => ({ stdout, took: 0 }) })
+        expect(r.line).toMatch(/^CI INDETERMINATE pr=12 head=aaaaaaa failing=- pending=- waited=\d+ reason=unparseable$/)
+        expect(r.world.of('workflows')).toHaveLength(1)
+      })
+    }
+  })
+
+  describe('the probe is bounded by the deadline like every other gh call', () => {
+    // The view reads UNKNOWN until 560 s on a clock that the view does not move; the polls fall 20 s apart.
+    const lateMergeable = (checksTook: number): Script => ({ kind, elapsed }) => (kind === 'view'
+      ? { ...viewOk(HEAD, elapsed < 560_000 ? 'UNKNOWN' : 'MERGEABLE'), took: 0 }
+      : { stdout: '[]', took: elapsed < 560_000 ? 0 : checksTook })
+
+    it('no time left: no call is made, and the run ends INDETERMINATE (deadline), never NO_CI', async () => {
+      const r = await run(lateMergeable(10_000), { workflows: () => workflowList([]) })
+      expect(r.line).toMatch(/^CI INDETERMINATE pr=12 head=aaaaaaa failing=- pending=- waited=570 reason=deadline$/)
+      expect(r.world.of('workflows')).toHaveLength(0)
+    })
+
+    it('10 s left: the probe is given those 10 s, and a probe that hangs ends INDETERMINATE (deadline)', async () => {
+      const r = await run(lateMergeable(0), { workflows: () => ({ hang: true }) })
+      expect(r.line).toMatch(/^CI INDETERMINATE pr=12 head=aaaaaaa failing=- pending=- waited=570 reason=deadline$/)
+      const probes = r.world.of('workflows')
+      expect(probes).toHaveLength(1)
+      expect(probes[0].timeout).toBe(10_000)
+    })
+  })
+})
+
+describe('mergeGate: one pure rule maps a classifier status, a mergeable value and the workflow probe to keep, open or conflict', () => {
   const MERGEABLES: ReadonlyArray<string | null> = ['MERGEABLE', 'CONFLICTING', 'UNKNOWN', null]
-  // Columns follow MERGEABLES.
+  // Columns follow MERGEABLES. For NO_CI the rows read as if the repository had no active workflow (workflowsActive false).
   const TABLE: ReadonlyArray<readonly [string, readonly MergeGateResult[]]> = [
     ['PASSING', ['keep', 'conflict', 'open', 'open']],
     ['NO_CI', ['keep', 'conflict', 'open', 'open']],
@@ -780,14 +1038,42 @@ describe('mergeGate: one pure rule maps a classifier status and a mergeable valu
     ['PENDING', ['keep', 'conflict', 'keep', 'keep']],
     ['INDETERMINATE', ['keep', 'conflict', 'keep', 'keep']],
   ]
+  // What the probe answered, or did not: true and false are answers, null and an omitted argument are not one.
+  const PROBES: ReadonlyArray<readonly [string, boolean | null | undefined]> = [['false', false], ['true', true], ['null', null], ['omitted', undefined]]
 
   for (const [status, expected] of TABLE) {
     MERGEABLES.forEach((mergeable, i) => {
-      it(`${status} on ${String(mergeable)} is ${expected[i]}`, () => {
-        expect(CW.mergeGate(status, mergeable)).toBe(expected[i])
+      it(`${status} on ${String(mergeable)} with no active workflow is ${expected[i]}`, () => {
+        expect(CW.mergeGate(status, mergeable, false)).toBe(expected[i])
       })
     })
   }
+
+  it('the probe answer changes nothing but NO_CI: every other status reads the same under true, false, null and omitted', () => {
+    for (const [status, expected] of TABLE.filter(([status]) => status !== 'NO_CI')) {
+      MERGEABLES.forEach((mergeable, i) => {
+        for (const [label, probe] of PROBES) expect(CW.mergeGate(status, mergeable, probe), `${status} on ${String(mergeable)}, probe ${label}`).toBe(expected[i])
+      })
+    }
+  })
+
+  it('NO_CI stands only on MERGEABLE with no active workflow: true, null and an omitted value are open', () => {
+    expect(CW.mergeGate('NO_CI', 'MERGEABLE', false)).toBe('keep')
+    for (const probe of [true, null, undefined]) expect(CW.mergeGate('NO_CI', 'MERGEABLE', probe), String(probe)).toBe('open')
+    expect(CW.mergeGate('NO_CI', 'MERGEABLE'), 'the argument omitted altogether').toBe('open')
+  })
+
+  it('a conflict is a conflict whatever the probe said, and an unsettled merge state stays open under every probe answer', () => {
+    for (const [label, probe] of PROBES) {
+      expect(CW.mergeGate('NO_CI', 'CONFLICTING', probe), label).toBe('conflict')
+      expect(CW.mergeGate('NO_CI', 'UNKNOWN', probe), label).toBe('open')
+      expect(CW.mergeGate('NO_CI', null, probe), label).toBe('open')
+    }
+  })
+
+  it('a probe answer that is not a boolean never lets NO_CI through', () => {
+    for (const odd of ['false', 0, '', {}, []] as unknown as Array<boolean | null>) expect(CW.mergeGate('NO_CI', 'MERGEABLE', odd), String(odd)).toBe('open')
+  })
 
   it('a status not read yet (null) is a conflict on CONFLICTING and kept otherwise', () => {
     expect(CW.mergeGate(null, 'CONFLICTING')).toBe('conflict')
@@ -797,7 +1083,7 @@ describe('mergeGate: one pure rule maps a classifier status and a mergeable valu
   it('a value that is not one of the three is not a conflict and lets neither PASSING nor NO_CI through', () => {
     for (const odd of [undefined, '', 'mergeable', 'SOMETHING_NEW', 7, {}, ['MERGEABLE']]) {
       expect(CW.mergeGate('PASSING', odd)).toBe('open')
-      expect(CW.mergeGate('NO_CI', odd)).toBe('open')
+      expect(CW.mergeGate('NO_CI', odd, false)).toBe('open')
       expect(CW.mergeGate('FAILING', odd)).toBe('keep')
     }
   })
@@ -807,14 +1093,23 @@ describe('matchedStep: the outcome of a poll on the named head, as a pure functi
   const verdict = (specs: Spec[]): Classification => CW.classifyChecks(specs.map(([bucket, workflow], i) => ({ name: `check-${i + 1}`, bucket, workflow })))
   const done = (status: string, reason: string | null, failing: string[] = [], pending: string[] = []): MatchedStep => ({ state: 'done', status, reason, failing, pending })
 
-  it('an empty list: pending inside the window; NO_CI after it on MERGEABLE; open after it on anything else', () => {
-    expect(CW.matchedStep(null, 'MERGEABLE', false)).toEqual({ state: 'pending', pending: [] })
-    expect(CW.matchedStep(null, 'UNKNOWN', false)).toEqual({ state: 'pending', pending: [] })
-    expect(CW.matchedStep(null, 'MERGEABLE', true)).toEqual(done('NO_CI', null))
-    expect(CW.matchedStep(null, 'UNKNOWN', true)).toEqual({ state: 'open' })
-    expect(CW.matchedStep(null, null, true)).toEqual({ state: 'open' })
-    expect(CW.matchedStep(null, 'CONFLICTING', true)).toEqual(done('INDETERMINATE', 'merge-conflict'))
-    expect(CW.matchedStep(null, 'CONFLICTING', false)).toEqual(done('INDETERMINATE', 'merge-conflict'))
+  it('an empty list: pending inside the window, whatever the probe said; open after it on anything but MERGEABLE; a conflict ends it', () => {
+    for (const probe of [undefined, null, true, false]) {
+      expect(CW.matchedStep(null, 'MERGEABLE', false, probe)).toEqual({ state: 'pending', pending: [] })
+      expect(CW.matchedStep(null, 'UNKNOWN', false, probe)).toEqual({ state: 'pending', pending: [] })
+      expect(CW.matchedStep(null, 'UNKNOWN', true, probe)).toEqual({ state: 'open' })
+      expect(CW.matchedStep(null, null, true, probe)).toEqual({ state: 'open' })
+      expect(CW.matchedStep(null, 'CONFLICTING', true, probe)).toEqual(done('INDETERMINATE', 'merge-conflict'))
+      expect(CW.matchedStep(null, 'CONFLICTING', false, probe)).toEqual(done('INDETERMINATE', 'merge-conflict'))
+    }
+  })
+
+  it('an empty list after the window on MERGEABLE: NO_CI only for a probe that found no active workflow, no-workflow-check for one that did, a probe request otherwise', () => {
+    expect(CW.matchedStep(null, 'MERGEABLE', true, false)).toEqual(done('NO_CI', null))
+    expect(CW.matchedStep(null, 'MERGEABLE', true, true)).toEqual(done('INDETERMINATE', 'no-workflow-check'))
+    expect(CW.matchedStep(null, 'MERGEABLE', true, null)).toEqual({ state: 'probe' })
+    expect(CW.matchedStep(null, 'MERGEABLE', true, undefined)).toEqual({ state: 'probe' })
+    expect(CW.matchedStep(null, 'MERGEABLE', true), 'the argument omitted altogether').toEqual({ state: 'probe' })
   })
 
   it('external-only rows: pending inside the window, no-workflow-check after it, whatever the merge state but CONFLICTING', () => {
@@ -822,6 +1117,17 @@ describe('matchedStep: the outcome of a poll on the named head, as a pure functi
     expect(CW.matchedStep(v, 'MERGEABLE', false)).toEqual({ state: 'pending', pending: [] })
     for (const mergeable of ['MERGEABLE', 'UNKNOWN', null]) expect(CW.matchedStep(v, mergeable, true)).toEqual(done('INDETERMINATE', 'no-workflow-check'))
     expect(CW.matchedStep(v, 'CONFLICTING', true)).toEqual(done('INDETERMINATE', 'merge-conflict'))
+  })
+
+  it('rows never ask for the probe and ignore its answer: only an empty list depends on the repository\'s workflow files', () => {
+    const rowsets = [verdict(external('pass')), verdict(actions('pass')), verdict([['pass', 'CI'], ['pending', 'CI']]), verdict([['pass', 'CI'], ['fail', 'CI']]), verdict([['pass', 'CI'], ['neutral', 'CI']])]
+    for (const v of rowsets) {
+      for (const windowDone of [false, true]) {
+        const base = CW.matchedStep(v, 'MERGEABLE', windowDone)
+        expect(base.state).not.toBe('probe')
+        for (const probe of [null, true, false]) expect(CW.matchedStep(v, 'MERGEABLE', windowDone, probe)).toEqual(base)
+      }
+    }
   })
 
   it('a workflow pass: PASSING on MERGEABLE at any window state; open on UNKNOWN or absent; merge-conflict on CONFLICTING', () => {
@@ -1085,20 +1391,37 @@ describe('D-CI-CLASSIFIER: the bucket classifier', () => {
 // The real script, as a process
 // ---------------------------------------------------------------------------
 
+/**
+ * A preload for the real script: a timer's wait is added to the clock instead of being
+ * slept, so the 90 s settle window passes at once. The gh calls stay real spawns of the fake.
+ */
+const VIRTUAL_TIME = [
+  "'use strict';",
+  'const realNow = Date.now.bind(Date);',
+  'const realSetTimeout = global.setTimeout;',
+  'let skipped = 0;',
+  'Date.now = () => realNow() + skipped;',
+  'global.setTimeout = (fn, ms, ...rest) => { skipped += Number(ms) || 0; return realSetTimeout(fn, 0, ...rest); };',
+  '',
+].join('\n')
+
 describe('the script as a process: the usage line, and a scripted gh', () => {
   let root: string
   let bin: FakeBin
+  let virtualTime: string
 
   beforeAll(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ci-wait-'))
     bin = createFakeBin(root, ['gh'])
+    virtualTime = path.join(root, 'virtual-time.cjs')
+    fs.writeFileSync(virtualTime, VIRTUAL_TIME)
     // macOS scans a newly written executable on its first run; pay it here, once.
     warmFakeBin(bin, root)
   }, WARM_HOOK_TIMEOUT_MS)
   afterAll(() => { fs.rmSync(root, { recursive: true, force: true }) })
 
-  function runScript(args: string[], extra: Record<string, string> = {}): { status: number | null; stdout: string; stderr: string } {
-    const r = spawnSync(process.execPath, [CI_WAIT_SCRIPT, ...args], {
+  function runScript(args: string[], extra: Record<string, string> = {}, nodeArgs: string[] = []): { status: number | null; stdout: string; stderr: string } {
+    const r = spawnSync(process.execPath, [...nodeArgs, CI_WAIT_SCRIPT, ...args], {
       cwd: root, env: scopedEnv(root, extra), encoding: 'utf8', timeout: 60_000,
     })
     return { status: r.status, stdout: r.stdout, stderr: r.stderr }
@@ -1131,6 +1454,44 @@ describe('the script as a process: the usage line, and a scripted gh', () => {
     expect(r.stdout).toMatch(/^CI INDETERMINATE pr=12 head=aaaaaaa failing=- pending=- waited=\d+ reason=merge-conflict\n$/)
     expect(r.status).toBe(0)
     expect(shim.readLog()).toEqual([['gh', 'pr', 'view', '12', '--json', 'headRefOid,mergeable']])
+  })
+
+  describe('an empty check list through the real spawnSync, the settle window passed on a virtual clock', () => {
+    const emptyListShim = (workflows: object): ScriptedShim => buildScriptedShim(bin, root, [
+      { tool: 'gh', args: ['pr', 'view', '12', '--json', 'headRefOid,mergeable'], stdout: JSON.stringify({ headRefOid: HEAD, mergeable: 'MERGEABLE' }) },
+      { tool: 'gh', args: ['pr', 'checks', '12', '--json', 'name,state,bucket,workflow'], exit: 1, stderr: NO_CHECKS_STDERR },
+      { tool: 'gh', args: WORKFLOWS_ARGV, stdout: JSON.stringify(workflows) },
+    ])
+    const runEmpty = (shim: ScriptedShim): { status: number | null; stdout: string; stderr: string } =>
+      runScript(['--pr', '12', '--head', HEAD], { PATH: `${shim.dir}${path.delimiter}${process.env.PATH ?? ''}`, ...shim.env }, ['-r', virtualTime])
+
+    it('an active workflow file: the no-workflow-check line, and the log shows the one probe with its exact argv', () => {
+      const shim = emptyListShim({ total_count: 1, workflows: [CI_YML] })
+      const r = runEmpty(shim)
+      expect(r.stdout).toMatch(/^CI INDETERMINATE pr=12 head=aaaaaaa failing=- pending=- waited=\d+ reason=no-workflow-check\n$/)
+      expect(r.status).toBe(0)
+      const log = shim.readLog()
+      expect(log.filter(call => call[1] === 'api')).toEqual([['gh', ...WORKFLOWS_ARGV]])
+      expect(log.filter(call => call[1] === 'pr' && call[2] === 'checks'), 'the window was read through').toHaveLength(6)
+      expect(log[log.length - 1], 'the probe is the last call').toEqual(['gh', ...WORKFLOWS_ARGV])
+    })
+
+    it('no workflow at all: the NO_CI line, after the same probe', () => {
+      const shim = emptyListShim({ total_count: 0, workflows: [] })
+      const r = runEmpty(shim)
+      expect(r.stdout).toMatch(/^CI NO_CI pr=12 head=aaaaaaa failing=- pending=- waited=\d+\n$/)
+      expect(shim.readLog().filter(call => call[1] === 'api')).toEqual([['gh', ...WORKFLOWS_ARGV]])
+    })
+
+    it('an unscripted probe (gh exits non-zero) is never NO_CI: gh-failed after three failed polls', () => {
+      const shim = buildScriptedShim(bin, root, [
+        { tool: 'gh', args: ['pr', 'view', '12', '--json', 'headRefOid,mergeable'], stdout: JSON.stringify({ headRefOid: HEAD, mergeable: 'MERGEABLE' }) },
+        { tool: 'gh', args: ['pr', 'checks', '12', '--json', 'name,state,bucket,workflow'], exit: 1, stderr: NO_CHECKS_STDERR },
+      ])
+      const r = runEmpty(shim)
+      expect(r.stdout).toMatch(/^CI INDETERMINATE pr=12 head=aaaaaaa failing=- pending=- waited=\d+ reason=gh-failed\n$/)
+      expect(shim.readLog().filter(call => call[1] === 'api')).toHaveLength(3)
+    })
   })
 
   it('a missing pull request through the real spawnSync is NO_PR', () => {
@@ -1191,6 +1552,16 @@ function collectSettleSites(source: string): { comparisons: number; windows: str
   }
 }
 
+/** Quoted flags that make `gh api` send a body or change its method; the one probe has none. */
+function collectApiWriteFlags(source: string): string[] {
+  return [...codeLines(source).join('\n').matchAll(/['"`](?:-f|-F|-X|--field|--raw-field|--method|--input)['"`]/g)].map(m => m[0])
+}
+
+/** Quoted `api` words in code lines: each is a `gh api` call site. */
+function collectApiSites(source: string): string[] {
+  return [...codeLines(source).join('\n').matchAll(/['"`]api['"`]/g)].map(m => m[0])
+}
+
 describe('source guards (ci-wait.cjs)', () => {
   it('no shell, no exec, no literal sleep, one production spawnSync', () => {
     expect(SOURCE.length).toBeGreaterThan(1000)
@@ -1223,10 +1594,20 @@ describe('source guards (ci-wait.cjs)', () => {
     for (const marker of [
       'D-CI-WAIT-INLINE', 'D-CI-NO-LITERAL-SLEEP', 'D-CI-NO-EXIT', 'D-CI-WAIT-BOUNDS', 'D-CI-HEAD-BINDING',
       'D-CI-CLASSIFIER', 'D-CI-SANITIZE', 'D-CI-LINE', 'D-CI-ARGV', 'D-CI-STATUSES',
-      'D-CI-WORKFLOW-RULE', 'D-CI-MERGE-STATE',
+      'D-CI-WORKFLOW-RULE', 'D-CI-MERGE-STATE', 'D-CI-WORKFLOWS',
     ]) {
       expect(SOURCE, `${marker} missing`).toContain(marker)
     }
+  })
+
+  it('the one gh api call is the workflows probe: a single site, read-only, through the bounded gh call', () => {
+    expect(SOURCE.length).toBeGreaterThan(1000)
+    expect(collectApiSites(SOURCE)).toHaveLength(1)
+    expect(collectApiWriteFlags(SOURCE)).toEqual([])
+    expect([...codeLines(SOURCE).join('\n').matchAll(/\bgh\(\s*WORKFLOWS_ARGS\s*\)/g)]).toHaveLength(1)
+    const probe = `${SOURCE}\nconst bad = ['api', 'x', '-X', 'POST', "--method", 'DELETE', \`-f\`, '-F', '--input', '--field']`
+    expect(collectApiSites(probe)).toHaveLength(2)
+    expect(collectApiWriteFlags(probe)).toHaveLength(6)
   })
 
   it('the settle comparison appears once, in the helper, and each window calls the helper once on its own clock', () => {
