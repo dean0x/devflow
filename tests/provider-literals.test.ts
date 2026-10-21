@@ -1495,7 +1495,7 @@ interface ManageDebtFile {
  * The lines from the exact step-3 lead line up to, but not including, the first later line that
  * starts step 4. Null when the lead line is missing.
  */
-export function stepThree(text: string): string | null {
+export function manageDebtStepThree(text: string): string | null {
   const lines = text.split('\n');
   const start = lines.indexOf(MANAGE_DEBT_STEP_THREE_LEAD);
   if (start === -1) return null;
@@ -1516,7 +1516,7 @@ function withoutRuleParagraph(text: string): string {
 export function collectStepThreeDrift(files: readonly ManageDebtFile[]): string[] {
   const drift: string[] = [];
   for (const { label, text } of files) {
-    const block = stepThree(text);
+    const block = manageDebtStepThree(text);
     if (block === null) {
       drift.push(`${label}: step 3 is absent`);
     } else if (block !== MANAGE_DEBT_STEP_THREE) {
@@ -1648,89 +1648,116 @@ describe('manage-debt item sources', () => {
     ).toEqual([]);
   });
 
-  it('known-bad probe: each invented drift is reported', () => {
-    const row = manageDebtRow();
-    const contract = manageDebtContract();
-    expect(
-      [
-        ...collectStepThreeDrift(references),
-        ...collectRuleCountDrift(references),
-        ...collectOtherReviewSources(references),
-        ...collectSecondAuthors(MANAGE_DEBT_RULE_KEY, sources),
-      ],
-      'the collectors must be silent on the shipped tree, or the probes below prove nothing',
-    ).toEqual([]);
-    expect(
-      collectRowVerdictDrift(row, contract),
-      'the row collector must be silent on the shipped tree, or the probes below prove nothing',
-    ).toEqual([]);
-
-    const github = references.find(f => f.label.startsWith('tracker/github/'));
-    const jira = references.find(f => f.label.startsWith('tracker/jira/'));
-    const githubSource = sources.find(f => f.label.includes('_github.mds'));
-    if (github === undefined || jira === undefined || githubSource === undefined) {
-      throw new Error('the GitHub or Jira provider is not registered, so a probe has no file to change');
-    }
-    const swap = (file: ManageDebtFile, text: string): ManageDebtFile[] => {
-      expect(text, `the change to ${file.label} was a no-op, so the probe cannot be shown live`).not.toBe(file.text);
-      return references.map(f => (f.label === file.label ? { ...f, text } : f));
+  describe('known-bad probes: each invented drift is reported once', () => {
+    /** The registered file whose label holds `fragment`; throws so a probe never runs on nothing. */
+    const registered = (files: readonly ManageDebtFile[], fragment: string): ManageDebtFile => {
+      const file = files.find(f => f.label.includes(fragment));
+      if (file === undefined) {
+        throw new Error(`no registered file matches ${fragment}, so a probe has no file to change`);
+      }
+      return file;
     };
 
-    const invented = '   - Entries from `{REVIEW_DIR}/other.md`';
-    expect(
-      collectStepThreeDrift(
-        swap(github, github.text.replace(MANAGE_DEBT_STEP_THREE, `${MANAGE_DEBT_STEP_THREE}\n${invented}`)),
-      ),
-      'an invented third bullet must be reported once, for its provider',
-    ).toEqual([`${github.label}: step 3 lists a source other than the two triaged sections`]);
+    /** `files` with one file's text replaced; the replacement must differ, or the probe proves nothing. */
+    const swap = (files: readonly ManageDebtFile[], file: ManageDebtFile, text: string): ManageDebtFile[] => {
+      expect(text, `the change to ${file.label} was a no-op, so the probe cannot be shown live`).not.toBe(file.text);
+      return files.map(f => (f.label === file.label ? { ...f, text } : f));
+    };
 
-    expect(
-      collectStepThreeDrift(swap(github, github.text.replace(`${MANAGE_DEBT_STEP_THREE_LEAD}\n`, ''))),
-      'a reference without the step-3 lead line must be reported once',
-    ).toEqual([`${github.label}: step 3 is absent`]);
+    it('the collectors are silent on the shipped tree, so a reported line comes from the probe', () => {
+      expectEveryProviderScanned();
+      expect(
+        [
+          ...collectStepThreeDrift(references),
+          ...collectRuleCountDrift(references),
+          ...collectOtherReviewSources(references),
+          ...collectSecondAuthors(MANAGE_DEBT_RULE_KEY, sources),
+        ],
+        'the collectors must be silent on the shipped tree, or the probes below prove nothing',
+      ).toEqual([]);
+      expect(
+        collectRowVerdictDrift(manageDebtRow(), manageDebtContract()),
+        'the row collector must be silent on the shipped tree, or the probes below prove nothing',
+      ).toEqual([]);
+    });
 
-    expect(
-      collectRuleCountDrift(swap(jira, withoutRuleParagraph(jira.text))),
-      'a reference without the rule must be reported once',
-    ).toEqual([`${jira.label}: the item-source rule is absent`]);
+    it('a third source in step 3 is reported for its provider', () => {
+      const github = registered(references, 'tracker/github/');
+      const invented = '   - Entries from `{REVIEW_DIR}/other.md`';
+      expect(
+        collectStepThreeDrift(
+          swap(references, github, github.text.replace(MANAGE_DEBT_STEP_THREE, `${MANAGE_DEBT_STEP_THREE}\n${invented}`)),
+        ),
+        'an invented third bullet must be reported once, for its provider',
+      ).toEqual([`${github.label}: step 3 lists a source other than the two triaged sections`]);
+    });
 
-    expect(
-      collectRuleCountDrift(
-        swap(github, github.text.replace(MANAGE_DEBT_RULE, `${MANAGE_DEBT_RULE}\n\n${MANAGE_DEBT_RULE}`)),
-      ),
-      'a reference that states the rule twice must be reported once',
-    ).toEqual([`${github.label}: the item-source rule occurs more than once`]);
+    it('a reference without the step-3 lead line is reported as absent', () => {
+      const github = registered(references, 'tracker/github/');
+      expect(
+        collectStepThreeDrift(swap(references, github, github.text.replace(`${MANAGE_DEBT_STEP_THREE_LEAD}\n`, ''))),
+        'a reference without the step-3 lead line must be reported once',
+      ).toEqual([`${github.label}: step 3 is absent`]);
+    });
 
-    const readsPath = '8. Add entries from `{REVIEW_DIR}/code-review-summary.md`';
-    expect(
-      collectOtherReviewSources(swap(github, `${github.text}\n\n${readsPath}`)),
-      'a review-directory path other than the resolution summary, added as a step of its own, must be reported',
-    ).toEqual([`${github.label}: names a review source other than resolution-summary.md: ${readsPath}`]);
+    it('a reference without the item-source rule is reported as absent', () => {
+      const jira = registered(references, 'tracker/jira/');
+      expect(
+        collectRuleCountDrift(swap(references, jira, withoutRuleParagraph(jira.text))),
+        'a reference without the rule must be reported once',
+      ).toEqual([`${jira.label}: the item-source rule is absent`]);
+    });
 
-    const readsReport = '8. Add the findings of the review report';
-    expect(
-      collectOtherReviewSources(swap(github, `${github.text}\n\n${readsReport}`)),
-      'a review report named in a step of its own must be reported',
-    ).toEqual([`${github.label}: names a review source other than resolution-summary.md: ${readsReport}`]);
+    it('a reference that states the item-source rule twice is reported', () => {
+      const github = registered(references, 'tracker/github/');
+      expect(
+        collectRuleCountDrift(
+          swap(references, github, github.text.replace(MANAGE_DEBT_RULE, `${MANAGE_DEBT_RULE}\n\n${MANAGE_DEBT_RULE}`)),
+        ),
+        'a reference that states the rule twice must be reported once',
+      ).toEqual([`${github.label}: the item-source rule occurs more than once`]);
+    });
 
-    expect(
-      collectRowVerdictDrift('| `manage-debt` | Update the backlog |', contract),
-      'a row that names neither verdict must be reported',
-    ).toEqual(['row: names no FIX_SEPARATE', 'row: names no TECH_DEBT']);
+    it('a step that adds entries from another review-directory path is reported', () => {
+      const github = registered(references, 'tracker/github/');
+      const readsPath = '8. Add entries from `{REVIEW_DIR}/code-review-summary.md`';
+      expect(
+        collectOtherReviewSources(swap(references, github, `${github.text}\n\n${readsPath}`)),
+        'a review-directory path other than the resolution summary, added as a step of its own, must be reported',
+      ).toEqual([`${github.label}: names a review source other than resolution-summary.md: ${readsPath}`]);
+    });
 
-    expect(
-      collectRowVerdictDrift(row, contract.split('FIX_SEPARATE').join('')),
-      'a contract without the FIX_SEPARATE name must be reported',
-    ).toEqual(['contract: names no FIX_SEPARATE']);
+    it('a step that names the review report is reported', () => {
+      const github = registered(references, 'tracker/github/');
+      const readsReport = '8. Add the findings of the review report';
+      expect(
+        collectOtherReviewSources(swap(references, github, `${github.text}\n\n${readsReport}`)),
+        'a review report named in a step of its own must be reported',
+      ).toEqual([`${github.label}: names a review source other than resolution-summary.md: ${readsReport}`]);
+    });
 
-    const nearCopy = MANAGE_DEBT_RULE.replace('Add only entries', 'Add the entries');
-    expect(nearCopy, 'the near-copy must differ from the rule, or the probe proves nothing').not.toBe(MANAGE_DEBT_RULE);
-    expect(
-      collectSecondAuthors(
-        MANAGE_DEBT_RULE_KEY,
-        sources.map(f => (f.label === githubSource.label ? { ...f, text: `${f.text}\n${nearCopy}` } : f)),
-      ),
-      'a provider source that restates the rule with one word changed must be reported',
-    ).toEqual([githubSource.label]);
+    it('a Git agent row that names neither verdict is reported', () => {
+      expect(
+        collectRowVerdictDrift('| `manage-debt` | Update the backlog |', manageDebtContract()),
+        'a row that names neither verdict must be reported',
+      ).toEqual(['row: names no FIX_SEPARATE', 'row: names no TECH_DEBT']);
+    });
+
+    it('a contract without the FIX_SEPARATE name is reported', () => {
+      expect(
+        collectRowVerdictDrift(manageDebtRow(), manageDebtContract().split('FIX_SEPARATE').join('')),
+        'a contract without the FIX_SEPARATE name must be reported',
+      ).toEqual(['contract: names no FIX_SEPARATE']);
+    });
+
+    it('a provider source that restates the rule with one word changed is reported', () => {
+      const githubSource = registered(sources, '_github.mds');
+      const nearCopy = MANAGE_DEBT_RULE.replace('Add only entries', 'Add the entries');
+      expect(nearCopy, 'the near-copy must differ from the rule, or the probe proves nothing').not.toBe(MANAGE_DEBT_RULE);
+      expect(
+        collectSecondAuthors(MANAGE_DEBT_RULE_KEY, swap(sources, githubSource, `${githubSource.text}\n${nearCopy}`)),
+        'a provider source that restates the rule with one word changed must be reported',
+      ).toEqual([githubSource.label]);
+    });
   });
 });
