@@ -208,7 +208,7 @@ describe('a store operation where git tracks the curation data folders', { timeo
     expect(helper(['list']).code).toBe(0);
   });
 
-  it('pauses on the legacy learning folder and on a backup folder', () => {
+  it('pauses on the old ledger folder and on a backup folder', () => {
     initUntracked();
     trackInGit(root, ['.devflow/learning/decisions-log.jsonl', '.devflow/learning.backup-20261001T000001Z-00000001/queue'], { commit: true });
 

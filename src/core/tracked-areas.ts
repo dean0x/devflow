@@ -5,8 +5,8 @@
  * `hooks/lib/tracked-areas.cjs`, never a second implementation of it.
  *
  * The check answers whether git tracks any entry under one of devflow's data folders at
- * a root, one area at a time: the curation area (the curation folder, the legacy
- * learning folder and the backup folders), the memory area (the memory folder) or both. The
+ * a root, one area at a time: the curation area (the curation folder, the old
+ * ledger folder and the backup folders), the memory area (the memory folder) or both. The
  * one-time ledger move and the backup sweep ask it before they change anything, and so
  * does the drain of a switched-off curation (src/core/curation-queue-cleanup.ts). The
  * module is loaded with the evidence-policy seam's `loadScript` from the package's own

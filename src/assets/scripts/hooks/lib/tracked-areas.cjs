@@ -2,7 +2,7 @@
 //
 // Does git track any entry under one of devflow's data folders at a root? One
 // `git ls-files` call over a fixed set of pathspecs answers `tracked`, `untracked` or
-// `unknown`, for one area at a time: `curation` (the curation folder, the legacy learning
+// `unknown`, for one area at a time: `curation` (the curation folder, the old ledger
 // folder and the backup folders), `memory` (the memory folder) or `both` (the union of the
 // two, one call, for a caller that serves both areas at one root). The one-time ledger move
 // and the backup sweep ask it for the curation area before they lock, read or rename

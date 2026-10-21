@@ -632,7 +632,7 @@ function linkedFolder(opName, dir) {
 
 /**
  * The refusal of an op run where git tracks files in the curation data folders under
- * `root` (the curation folder, the legacy learning folder and the backup folders), or does
+ * `root` (the curation folder, the old ledger folder and the backup folders), or does
  * not say whether it does, or null where git tracks none. A folder that git tracks is the
  * repository's content, so the curation feature is paused there: the op reads and writes
  * nothing. The messages state the fact and name no command; the root is shown so the
