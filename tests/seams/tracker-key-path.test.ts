@@ -32,6 +32,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import { createRequire } from 'module';
 import * as os from 'os';
@@ -169,8 +170,10 @@ describe('tracker sentinel: the TS writer and the shell reader agree on every pr
       const home = path.join(tmpRoot, `home-${provider}`);
       const devflowDir = path.join(home, '.devflow');
       const project = path.join(tmpRoot, `project-${provider}`);
-      // A git marker, because Section 3 is gated on the project being a checkout.
-      fs.mkdirSync(path.join(project, '.git'), { recursive: true });
+      // A real repository, because Section 3 is gated on the project being a checkout and
+      // an empty `.git` folder would pause curation.
+      fs.mkdirSync(project, { recursive: true });
+      execFileSync('git', ['init', '-q'], { cwd: project, stdio: 'pipe' });
       fs.mkdirSync(path.join(devflowDir, 'logs'), { recursive: true });
 
       const written = await applyTrackerSentinel(devflowDir, provider);

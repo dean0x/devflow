@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach } from 'vitest';
-import { execSync, spawnSync } from 'child_process';
+import { execFileSync, execSync, spawnSync } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -47,7 +47,7 @@ import { HOOK_RUN_ALLOWANCE_MS, HOOKS_DIR, NODE_EXEC_STALL_MS, runHook } from '.
 // nowhere else (D-ONE-HOME), so the developer's own ~/.devflow can never decide
 // the outcome (AC-3.22).
 
-describe('session-start-context: tracker setup directive (Section 3)', () => {
+describe('session-start-context: tracker setup directive (Section 3)', { timeout: HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS }, () => {
   const CONTEXT_HOOK = path.join(HOOKS_DIR, 'session-start-context');
   const HOOK_SOURCE = fs.readFileSync(CONTEXT_HOOK, 'utf-8');
 
@@ -73,12 +73,12 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
   let homeDir: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-tracker-'));
-    // A `.git` marker, because Section 3 is gated on the project root being
-    // inside a repository. An empty directory is enough for df_has_git_marker's
-    // `-e` walk and is NOT a repository to `git rev-parse`, so df_resolve_root
-    // still takes its non-git fallback and PROJECT_ROOT is the cwd, unchanged.
-    fs.mkdirSync(path.join(tmpDir, '.git'));
+    tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-tracker-')));
+    // A real repository, because Section 3 is gated on the project root being inside
+    // one. An empty `.git` folder is no repository: git would not answer the check of
+    // the curation folders, and curation would pause. The folder is its own realpath,
+    // so PROJECT_ROOT is the cwd, unchanged.
+    execSync('git init -q', { cwd: tmpDir, stdio: 'pipe' });
     homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-tracker-home-'));
     fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
   });
@@ -87,6 +87,15 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
     fs.rmSync(homeDir, { recursive: true, force: true });
   });
+
+  /**
+   * A real repository at `dir`, made with an argument vector so a hostile folder name
+   * stays one argument. A project root below the real repository of `tmpDir` needs its own.
+   */
+  function makeRepoAt(dir: string): void {
+    fs.mkdirSync(dir, { recursive: true });
+    execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'pipe' });
+  }
 
   // ---------------------------------------------------------------------------
   // Fixture seeding — never an empty HOME
@@ -1894,7 +1903,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     it(`no tracker directive when the project root carries ${label}`, () => {
       const hostile = path.join(tmpDir, `proj${infix}${PATH_PAYLOAD}`);
       // Its own `.git`: a project root is a toplevel (D-HOOKS-TOPLEVEL-ONLY).
-      fs.mkdirSync(path.join(hostile, '.git'), { recursive: true });
+      makeRepoAt(hostile);
       seedDecisionsTldr(hostile);
       seedTracker(homeDir, { provider: 'jira' });
 
@@ -1929,7 +1938,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     // emitting. This is the probe that says they did not.
     const cleanRoot = path.join(tmpDir, 'proj-clean');
     // Its own `.git`: a project root is a toplevel (D-HOOKS-TOPLEVEL-ONLY).
-    fs.mkdirSync(path.join(cleanRoot, '.git'), { recursive: true });
+    makeRepoAt(cleanRoot);
     seedDecisionsTldr(cleanRoot);
     seedTracker(homeDir, { provider: 'jira' });
     const viaRoot = contextOf(run(sessionStart(cleanRoot)).stdout);
@@ -1947,7 +1956,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
   it('the same guard suppresses the CURATION directive — one control, both sinks', () => {
     const hostile = path.join(tmpDir, `proj\n${PATH_PAYLOAD}`);
     // Its own `.git`: a project root is a toplevel (D-HOOKS-TOPLEVEL-ONLY).
-    fs.mkdirSync(path.join(hostile, '.git'), { recursive: true });
+    makeRepoAt(hostile);
     fs.mkdirSync(path.join(hostile, '.devflow', 'curation'), { recursive: true });
     seedDecisionsTldr(hostile);
     fs.writeFileSync(
@@ -1965,7 +1974,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
 
     // Non-vacuity: the identical fixture under a clean root does emit it.
     const clean = path.join(tmpDir, 'proj-curation-clean');
-    fs.mkdirSync(path.join(clean, '.git'), { recursive: true });
+    makeRepoAt(clean);
     fs.mkdirSync(path.join(clean, '.devflow', 'curation'), { recursive: true });
     fs.writeFileSync(
       path.join(clean, '.devflow', 'curation', '.pending-turns.jsonl'),
@@ -2038,7 +2047,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     // Section 3, which does embed it, must still refuse.
     const cleanRoot = path.join(tmpDir, 'clean-root');
     // Its own `.git`: a project root is a toplevel (D-HOOKS-TOPLEVEL-ONLY).
-    fs.mkdirSync(path.join(cleanRoot, '.git'), { recursive: true });
+    makeRepoAt(cleanRoot);
     fs.mkdirSync(path.join(cleanRoot, '.devflow', 'curation'), { recursive: true });
     seedDecisionsTldr(cleanRoot);
     fs.writeFileSync(
@@ -2110,7 +2119,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     // Claude Code names the worktree for `feat/x` as `feat+x`; the gate admits `+`.
     const plus = path.join(tmpDir, 'feat+extend-flags-registry');
     // Its own `.git`: a project root is a toplevel (D-HOOKS-TOPLEVEL-ONLY).
-    fs.mkdirSync(path.join(plus, '.git'), { recursive: true });
+    makeRepoAt(plus);
     fs.mkdirSync(path.join(plus, '.devflow', 'curation'), { recursive: true });
     fs.writeFileSync(
       path.join(plus, '.devflow', 'curation', '.pending-turns.jsonl'),
@@ -2134,7 +2143,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     it(`a path carrying a ${label} is refused by the positive shape gate`, () => {
       const hostile = path.join(tmpDir, `${infix}-root`);
       // Its own `.git`: a project root is a toplevel (D-HOOKS-TOPLEVEL-ONLY).
-      fs.mkdirSync(path.join(hostile, '.git'), { recursive: true });
+      makeRepoAt(hostile);
       fs.mkdirSync(path.join(hostile, '.devflow', 'curation'), { recursive: true });
       seedDecisionsTldr(hostile);
       fs.writeFileSync(

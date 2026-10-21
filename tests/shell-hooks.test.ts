@@ -11,6 +11,7 @@ import { buildRoutingConfigJson } from '../src/core/proxy-state.js';
 import { CURATION_DIR_NAME, LEGACY_NAMES, curationMoveMarkerKey } from '../src/core/project-paths.js';
 import { getCurationMoveMarkerPath } from '../src/core/curation-move-notice.js';
 import { MOVE_SKIP_NOTICE } from '../src/core/curation-move-skip.js';
+import { AREA_PAUSE_NOTICE } from '../src/core/area-pause-notice.js';
 import {
   PROJECT_PATHS, git, makeV2LedgerRow, makeV2LogRow, pathWithFailingGit, snapshotTree, toJsonl, trackInGit,
 } from './decisions/curation-fixtures.js';
@@ -690,6 +691,14 @@ describe('hooks anchor .devflow/ to the project root (no stray nested .devflow/)
 // #390 — git-only scaffolding, the worktree ledger at main, detached HEAD
 // =============================================================================
 
+/**
+ * A real repository with no commit, in a folder that is its own realpath. git answers every
+ * question about it, so the session start hook can tell that git tracks nothing there.
+ */
+function initEmptyRepo(dir: string): void {
+  execSync('git init -q', { cwd: dir, stdio: 'pipe' });
+}
+
 /** A repository with one commit, so worktrees and detached checkouts are possible. */
 function initCommittedRepo(dir: string): void {
   fs.mkdirSync(dir, { recursive: true });
@@ -956,7 +965,7 @@ describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19
    */
   const PASS_RULE =
     'Decisions (direct delegations only — workflow skills load their own): ' +
-    'read this index once, then pass each agent that takes DECISIONS_CONTEXT the index lines that touch its work, ' +
+    'when the settings line does not say CURATION=off, read this index once, then pass each agent that takes DECISIONS_CONTEXT the index lines that touch its work, ' +
     "verbatim, behind a (slice: N of M entries — full index: this index's path) line and with the footer.";
 
   /** The PROJECT DECISIONS section of the injected context, up to the blank line that ends it. */
@@ -4096,16 +4105,16 @@ describe('run-hook behavioral', () => {
 // ignored. session-start-context (always-on) now sources ensure-root-gitignore early,
 // covering exactly that case.
 
-describe('session-start-context root .gitignore (memory-independent)', () => {
+describe('session-start-context root .gitignore (memory-independent)', { timeout: NODE_RUN_MS }, () => {
   const CONTEXT_HOOK = path.join(HOOKS_DIR, 'session-start-context');
 
   let tmpDir: string;
   let homeDir: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-ignore-'));
+    tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-ignore-')));
     // The carve-out is project work, written only inside a git project (D-HOOKS-GIT-ONLY).
-    fs.mkdirSync(path.join(tmpDir, '.git'));
+    initEmptyRepo(tmpDir);
     homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-ignore-home-'));
     fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
   });
@@ -4214,17 +4223,17 @@ describe('session-start-context root .gitignore (memory-independent)', () => {
 // ~/.devflow/manifest.json, which the checkout's project.json / config.json can
 // only narrow (D-FEATURES-NARROW-ONLY).
 
-describe('session-start-context: curation maintenance directive (Section 2)', () => {
+describe('session-start-context: curation maintenance directive (Section 2)', { timeout: NODE_RUN_MS }, () => {
   const CONTEXT_HOOK = path.join(HOOKS_DIR, 'session-start-context');
 
   let tmpDir: string;
   let homeDir: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-curation-'));
+    tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-curation-')));
     // Curation is project work, active only inside a git project (D-HOOKS-GIT-ONLY).
-    // An empty `.git` is a marker, not a repository, so the root stays tmpDir.
-    fs.mkdirSync(path.join(tmpDir, '.git'));
+    // An empty `.git` folder is no repository: git does not answer and curation pauses.
+    initEmptyRepo(tmpDir);
     homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-curation-home-'));
     fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'curation'), { recursive: true });
@@ -4262,7 +4271,7 @@ describe('session-start-context: curation maintenance directive (Section 2)', ()
     expect(ctx).toContain('Never mention');
     expect(ctx).toContain('first visible words');
     // The prompt names the project root the agent must operate from
-    // (a marker-only `.git` → df_resolve_roots falls back to the cwd as given).
+    // (the project root is the git top level, which is tmpDir itself).
     expect(ctx).toContain(`Project root: ${tmpDir}`);
     // The directive never spawns anything itself — the queue is untouched.
     expect(fs.existsSync(queuePath(tmpDir))).toBe(true);
@@ -4767,7 +4776,7 @@ describe('session-start-context: curation maintenance directive (Section 2)', ()
 // a link leads to is treated as absent and each refusal is logged once. MARKER is
 // a made-up string standing in for that file's content.
 
-describe('session-start-context never reads through a symbolic link under .devflow into the session or an agent directive (D-HOOKS-NO-SYMLINK)', () => {
+describe('session-start-context never reads through a symbolic link under .devflow into the session or an agent directive (D-HOOKS-NO-SYMLINK)', { timeout: NODE_RUN_MS }, () => {
   const CONTEXT_HOOK = path.join(HOOKS_DIR, 'session-start-context');
   const MARKER = 'made-up-marker-6b2f0e';
 
@@ -4777,9 +4786,9 @@ describe('session-start-context never reads through a symbolic link under .devfl
   let outsideDir: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-nolink-'));
+    tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-nolink-')));
     // Curation is project work, active only inside a git project (D-HOOKS-GIT-ONLY).
-    fs.mkdirSync(path.join(tmpDir, '.git'));
+    initEmptyRepo(tmpDir);
     homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-nolink-home-'));
     fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
     curationDir = path.join(tmpDir, '.devflow', 'curation');
@@ -6840,32 +6849,75 @@ describe('session-start-context: the notice of a skipped move', { timeout: GIT_F
   function contextOf(source: string, extraEnv: Record<string, string> = {}): string {
     const res = runHook(SESSION_CONTEXT, { cwd: main, source }, homeDir, extraEnv);
     expect(res.exitCode, res.stderr).toBe(0);
-    return res.stdout.trim() === '' ? '' : (JSON.parse(res.stdout).hookSpecificOutput.additionalContext as string);
+    if (res.stdout.trim() === '') return '';
+    return (JSON.parse(res.stdout).hookSpecificOutput?.additionalContext as string | undefined) ?? '';
   }
+
+  /** The systemMessage a session of `source` starts with ('' when none). */
+  function messageOf(source: string, extraEnv: Record<string, string> = {}): string {
+    const res = runHook(SESSION_CONTEXT, { cwd: main, source }, homeDir, extraEnv);
+    expect(res.exitCode, res.stderr).toBe(0);
+    return res.stdout.trim() === '' ? '' : ((JSON.parse(res.stdout).systemMessage as string | undefined) ?? '');
+  }
+
+  /** Switch curation off machine-wide: the move still runs, the curation sections do not. */
+  const switchCurationOff = (): void => {
+    fs.writeFileSync(path.join(homeDir, '.devflow', 'manifest.json'), JSON.stringify({ version: '2.0.0', features: { curation: false } }));
+  };
 
   const oldFolderIntact = (): void => {
     expect(fs.readFileSync(path.join(main, '.devflow', OLD, 'notes.txt'), 'utf-8')).toBe('kept\n');
     expect(fs.existsSync(path.join(main, '.devflow', NEW)), 'no new folder beside the old one').toBe(false);
   };
 
-  it('git tracks a file of the old folder: the context holds the fixed notice, and the old folder stays', () => {
+  // While curation is on, a skipped move pauses curation, and the pause notice (a
+  // systemMessage) replaces the context line. With curation switched off nothing is
+  // paused, and the context line is the user's only word on the skipped move.
+  it('git tracks a file of the old folder: the pause notice replaces the move notice, and the old folder stays', () => {
+    trackNotes();
+
+    const res = runHook(SESSION_CONTEXT, { cwd: main, source: 'startup' }, homeDir);
+
+    expect(res.exitCode, res.stderr).toBe(0);
+    expect(JSON.parse(res.stdout)).toEqual({ systemMessage: AREA_PAUSE_NOTICE.curation.tracked });
+    expect(res.stdout).not.toContain('did not move the curation data');
+    oldFolderIntact();
+  });
+
+  it('git does not answer: the other pause notice goes out, and the old folder stays', () => {
+    const PATH = pathWithGitThatFailsToList();
+    expect(messageOf('startup', { PATH })).toBe(AREA_PAUSE_NOTICE.curation.unknown);
+    expect(contextOf('startup', { PATH })).not.toContain('did not move the curation data');
+    oldFolderIntact();
+  });
+
+  it('curation switched off, git tracks a file of the old folder: the context holds the fixed move notice, and no pause notice goes out', () => {
+    switchCurationOff();
     trackNotes();
 
     const context = contextOf('startup');
 
     expect(context).toContain(`Devflow notice: tell the user once, in one short message alongside your answer: ${MOVE_SKIP_NOTICE.tracked}`);
     expect(context).not.toContain(MOVE_SKIP_NOTICE.unknown);
+    expect(messageOf('startup')).toBe('');
     oldFolderIntact();
   });
 
-  it('git does not answer: the context holds the other fixed notice, and the old folder stays', () => {
+  it('curation switched off, git does not answer: the context holds the other fixed move notice, and the old folder stays', () => {
+    switchCurationOff();
     const context = contextOf('startup', { PATH: pathWithGitThatFailsToList() });
 
     expect(context).toContain(`Devflow notice: tell the user once, in one short message alongside your answer: ${MOVE_SKIP_NOTICE.unknown}`);
     oldFolderIntact();
   });
 
-  it.each(['resume', 'clear'])('a session that %s gets the notice', (source) => {
+  it.each(['resume', 'clear'])('a session that %s gets the pause notice', (source) => {
+    trackNotes();
+    expect(messageOf(source)).toBe(AREA_PAUSE_NOTICE.curation.tracked);
+  });
+
+  it.each(['resume', 'clear'])('curation switched off: a session that %s gets the move notice', (source) => {
+    switchCurationOff();
     trackNotes();
     expect(contextOf(source)).toContain(MOVE_SKIP_NOTICE.tracked);
   });
@@ -6873,6 +6925,7 @@ describe('session-start-context: the notice of a skipped move', { timeout: GIT_F
   it('a compaction repeats nothing', () => {
     trackNotes();
     expect(contextOf('compact')).not.toContain('did not move the curation data');
+    expect(messageOf('compact')).toBe('');
   });
 
   it('a project that moves cleanly gets no notice', () => {
@@ -6885,12 +6938,13 @@ describe('session-start-context: the notice of a skipped move', { timeout: GIT_F
 
   it('a session start looks again after the files are untracked, and moves the folder', () => {
     trackNotes();
-    expect(contextOf('startup')).toContain(MOVE_SKIP_NOTICE.tracked);
+    expect(messageOf('startup')).toBe(AREA_PAUSE_NOTICE.curation.tracked);
     execSync(`git rm -q --cached -- .devflow/${OLD}/notes.txt`, { cwd: main, stdio: 'pipe' });
 
     const context = contextOf('startup');
 
     expect(context).not.toContain('did not move the curation data');
+    expect(messageOf('startup')).toBe('');
     expect(fs.existsSync(path.join(main, '.devflow', OLD))).toBe(false);
     expect(fs.readFileSync(path.join(main, '.devflow', NEW, 'notes.txt'), 'utf-8')).toBe('kept\n');
   });
@@ -6910,6 +6964,21 @@ describe('session-start-context: the notice of a skipped move', { timeout: GIT_F
     expect(notice).not.toContain("'");
     const escaped = notice.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     expect(hook).toMatch(new RegExp(`\\n  ${reason}\\)\\n    MOVE_SKIP_SECTION='[^']*${escaped}'\\n`));
+  });
+
+  it.each(['tracked', 'unknown'] as const)('holds the words of the curation pause notice for %s as the one single-quoted assignment of its arm, with nothing interpolated', (reason) => {
+    const hook = fs.readFileSync(SESSION_CONTEXT, 'utf-8');
+    const notice = AREA_PAUSE_NOTICE.curation[reason];
+    expect(notice).not.toContain("'");
+    const escaped = notice.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    expect(hook).toMatch(new RegExp(`\\n  ${reason}\\)\\n    AREA_PAUSE_MESSAGE='${escaped}'\\n`));
+  });
+
+  it.each(
+    Object.entries(AREA_PAUSE_NOTICE).flatMap(([area, byReason]) => Object.entries(byReason).map(([reason, notice]) => [area, reason, notice] as const)),
+  )('the %s notice for %s holds no path, count or git output: fixed words, and the two commands to run when git tracks files', (_area, reason, notice) => {
+    expect(notice).not.toMatch(/[/\\]|\d/);
+    expect(notice.match(/`[^`]*`/g) ?? []).toEqual(reason === 'tracked' ? ['`git ls-files .devflow`', '`git rm --cached <file>`'] : []);
   });
 });
 
