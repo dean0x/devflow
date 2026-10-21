@@ -6,6 +6,10 @@
  * curation --disable` and the drain `devflow init` runs when curation is switched off
  * (src/cli/commands/init.ts) run: the same drain, and the pending rows of the backups
  * a move left as well.
+ *
+ * Both drains answer `skipped`, and delete nothing, when git tracks any entry under a
+ * data folder or a backup folder, or does not answer (the tracked-areas check). The
+ * line a caller prints for such a drain is {@link formatCurationNotDrained}.
  */
 
 import * as path from 'path';
@@ -61,7 +65,8 @@ function liveQueueTargets(gitRoot: string): { readonly folders: readonly string[
  *
  * Asks first the question the disable drain asks (see {@link drainDisabledCurationQueue}):
  * when git tracks any entry under the data folders or a backup folder of `gitRoot`, or
- * does not answer, nothing is deleted and the answer is `skipped`.
+ * a `.git` entry stands and git does not answer, nothing is deleted and the answer is
+ * `skipped`.
  *
  * Refused, deleting nothing in either folder, when `.devflow` or either ledger
  * folder under `gitRoot` is a symbolic link (D-CLI-NO-SYMLINK). ENOENT-tolerant;

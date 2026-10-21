@@ -1017,10 +1017,11 @@ function curationMoveFinish(ctx, { whole }) {
  * on the root removes it (moveJournalHoldsWriters).
  *
  * Right after the refusal checks, and before it makes, locks, reads or renames anything,
- * the pass asks whether git tracks any entry under either folder (checkTrackedAreas). If
- * it does, or if a `.git` entry stands and git does not answer, the answer is `skipped`
- * with the reason `tracked` or `unknown`, and nothing at all changes: the folders, the
- * machine directory and the journal stay as they are. With `unknown` the answer also
+ * the pass asks whether git tracks any entry under a data folder or a backup folder, or
+ * an entry named `.devflow` itself (checkTrackedAreas). If it does, or if a `.git` entry
+ * stands and git does not answer, the answer is `skipped` with the reason `tracked` or
+ * `unknown`, and nothing at all changes: the folders, the machine directory and the
+ * journal stay as they are. With `unknown` the answer also
  * carries `cause`, one fixed word that says why git did not answer (UNKNOWN_CAUSES in
  * tracked-areas.cjs). A root with no `.git` entry makes no git call.
  *

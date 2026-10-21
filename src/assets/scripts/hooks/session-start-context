@@ -23,6 +23,11 @@
 # Section 4: Legacy install notice — one line when this repository still carries
 # a retired project-local devflow install (its .claude/settings.json registers
 # devflow hooks), pointing at `devflow uninstall --scope local`.
+# Section 4b: Curation move skipped notice — one fixed line when the one-time move of
+# the old ledger folder left the project alone because git tracks files in a curation
+# data folder (`tracked`) or did not answer (`unknown`); the `curation-move` shim sets
+# DF_CURATION_MOVE_SKIPPED, and on a session that starts, resumes or is cleared the line
+# tells the main model to tell the user once.
 # Section 5: Compaction resume directive — on a `compact` SessionStart, one fixed
 # line telling the model to re-read the devflow command it was running from the
 # phase in progress (D-COMPACT-RESUME-DIRECTIVE).
@@ -75,9 +80,9 @@ source "$SCRIPT_DIR/json-parse" || { echo "session-start-context: failed to sour
 if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
 
 # One subprocess yields both fields: the working directory and the SessionStart
-# `source` (startup|resume|clear|compact) that Section 5 gates on, so the directive
-# costs no fork of its own. Sections 3 and 4 keep reading `source` themselves, where
-# they gate (startup|clear), so neither depends on this value.
+# `source` (startup|resume|clear|compact) that Sections 4b (startup|resume|clear) and 5
+# (compact) gate on, so neither costs a fork of its own. Sections 3 and 4 keep reading
+# `source` themselves, where they gate (startup|clear), so neither depends on this value.
 _SC_FIELDS=$(printf '%s' "$INPUT" | json_extract_cwd_field "source")
 CWD="${_SC_FIELDS%%$'\001'*}"
 SESSION_SOURCE="${_SC_FIELDS#*$'\001'}"
@@ -257,11 +262,12 @@ CURATION_ENABLED="$_QG_CURATION"
 # clear and compact: on the LEDGER root (the main worktree's, in a linked worktree),
 # before Section 1's heal can create a folder, and whether or not the curation
 # switch is on, because the old folder holds the project's decisions either way. The
-# `retry` word clears an earlier refusal's marker and an earlier busy marker (a fresh
-# queue claim held the move), so a refused or claimed root is looked at once per
-# session. A held, refused or skipped move leaves the old folder in place. A skipped
-# move (git tracks files in a data folder, or git did not answer) sets
-# DF_CURATION_MOVE_SKIPPED, and Section 4b tells the user.
+# `retry` word clears the four markers of an earlier attempt (refused, busy because a
+# fresh queue claim held the move, tracked and unknown), so a refused, claimed or skipped
+# root is looked at once per session. A held, refused or skipped move leaves the old
+# folder in place. A skipped move (git tracks files in a data folder or a backup folder,
+# or git did not answer) sets DF_CURATION_MOVE_SKIPPED to `tracked` or `unknown`, and
+# Section 4b tells the user.
 DF_CURATION_MOVE_SKIPPED=""
 if [ -n "$PROJECT_OK" ]; then
   df_curation_move "$LEDGER_ROOT" retry 2>/dev/null || true

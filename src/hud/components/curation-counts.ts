@@ -117,7 +117,9 @@ export function gatherCurationCounts(cwd: string): CurationCountsData | null {
  * root (getLedgerRoot — the main checkout in a linked worktree, the repository
  * root from a subdirectory), or `cwd` itself outside a git work tree. One git
  * call, bounded by the HUD's per-command budget; run it alongside the git
- * status gather, not after it (D-LEDGER-MAIN-WORKTREE).
+ * status gather, not after it (D-LEDGER-MAIN-WORKTREE). Where the old ledger folder
+ * still stands it adds the move notice (gatherMoveNotice): any notice when both counts
+ * are zero, a skip notice only when a count is above zero.
  */
 export async function gatherLedgerCurationCounts(
   cwd: string,
@@ -137,8 +139,10 @@ export async function gatherLedgerCurationCounts(
 /**
  * HUD component: decisions/pitfalls counts.
  * Shows how many active ADR/PF entries the project has accumulated. When there are
- * none and the ledger folder still has its old name, it shows the pointer or the
- * refused line instead. Returns null when no ledger exists or every entry is retired.
+ * none and the ledger folder still has its old name, it shows the pointer, the refused
+ * line or the skip line instead. When the move was skipped (git tracks files in a data
+ * folder, or git did not answer), the skip line also follows the counts. Returns null
+ * when no ledger exists or every entry is retired.
  */
 export default async function curationCounts(
   ctx: GatherContext,

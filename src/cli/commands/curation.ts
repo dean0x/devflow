@@ -180,8 +180,9 @@ async function moveReadNotice(ledgerRoot: string): Promise<MoveReadNotice | null
  * project scope of --configure). Installed scripts of another version read and create
  * another ledger folder, so they refuse with the skew line. Then, where the old folder
  * is present, the shared move runs with no wait: a busy lock prints a retry message,
- * a queue claim that holds the move prints its own message, and a refused or failed move
- * prints its reason; either way nothing is written.
+ * a queue claim that holds the move prints its own message, a refused or failed move
+ * prints its reason, and a skipped move (git tracks files in a data folder, or git did
+ * not answer) prints the fixed notice; in each case nothing is written.
  * `undone` completes "Nothing was …". Answers true when the caller may write.
  */
 async function prepareToWrite(ledgerRoot: string, undone: string): Promise<boolean> {
@@ -600,7 +601,9 @@ async function handleReset(): Promise<void> {
  * a busy lock or a refusal leaves both the log and the queue as they were, so a
  * failed clear changes nothing. The old folder moves first (prepareToWrite), so the
  * clear and the drain reach the data the hooks use; a backup folder a move left
- * stays in place.
+ * stays in place. When git tracks any entry under a data folder or a backup folder, or
+ * does not answer, the drain deletes no queue file and a warning carries the fixed
+ * notice.
  */
 async function handleClear(): Promise<void> {
   const ledgerRoot = await requireLedgerRoot('clear not performed');
@@ -681,9 +684,10 @@ async function convergeInstalledVariants(enabled: boolean): Promise<'converged' 
 /**
  * The toggle's move of the current project's ledger folder: tried once with no wait,
  * and only where the old folder is present. A busy move is not an error — the project
- * moves at its next event — and a refusal or a failure is a warning: the switch is
- * already recorded, so neither changes the exit code. Answers the skip reason whose
- * fixed notice it printed, or null when it printed none.
+ * moves at its next event — and a refusal, a failure or a skip (git tracks files in a
+ * data folder, or git did not answer) is a warning: the switch is already recorded, so
+ * none of them changes the exit code. Answers the skip reason whose fixed notice it
+ * printed, or null when it printed none.
  */
 async function tryMoveForToggle(ledgerRoot: string): Promise<MoveSkipReason | null> {
   if (!(await oldLedgerFolderPresent(ledgerRoot))) return null;
@@ -702,8 +706,9 @@ async function tryMoveForToggle(ledgerRoot: string): Promise<MoveSkipReason | nu
  * the manifest value (both machine keys, written first), the installed prompt
  * variants and skill (D-LEARNING-VARIANT-INSTALL), the current project's ledger
  * folder move, and on disable a drained queue in every ledger folder that exists and
- * in the backups a move left. The drain deletes nothing, and prints the fixed notice
- * of a skipped move, when git tracks a data folder or does not answer.
+ * in the backups a move left. The drain deletes no queue file, and prints the fixed
+ * notice of a skipped move once, when git tracks any entry under a data folder or a
+ * backup folder, or does not answer.
  * Never requires a git root: the switch is not a per-project setting.
  *
  * Under version skew the toggle records the switch and moves nothing; otherwise it
