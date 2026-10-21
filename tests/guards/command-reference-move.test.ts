@@ -50,7 +50,7 @@ interface Moved {
   readonly heading: string
   /** UTF-8 length of the removed text without its trailing newline. */
   readonly bytes: number
-  /** SHA-256 of those bytes, taken from `main:src/assets/commands/implement.mds` and `_partials/_evidence_policy.mds`. The continuation path's hash is that of its edited text, which holds a guarded `BASE_BRANCH` record that Phases 3-7 read for the branch diff, a step that takes `GATE_LEVEL` from the Phase 1 settings step for Phase 6, the base resolution (pr mode for a PR, local mode without one) so Phases 3-7 run the branch diff from a fresh base, a tightened branch-name validation, and a checkout root that the path resolves itself when Phase 1 does not run. The path reads the base name into a fresh file and passes it to the resolver on stdin. */
+  /** SHA-256 of those bytes, per `was`: `src/assets/commands/implement.mds` and `_partials/_evidence_policy.mds`. The continuation path's hash is that of its current text, which holds a guarded `BASE_BRANCH` record that Phases 3-7 read for the branch diff, a step that takes `GATE_LEVEL` from the Phase 1 settings step for Phase 6, the base resolution (pr mode for a PR, local mode without one) so Phases 3-7 run the branch diff from a fresh base, a strict branch-name validation, and a checkout root that the path resolves itself when Phase 1 does not run. The path reads the base name into a fresh file and passes it to the resolver on stdin. */
   readonly sha256: string
   readonly was: string
 }

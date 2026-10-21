@@ -9,7 +9,7 @@
 //
 // Usage, from the worktree (the caller changes into it first):
 //   node resolve-base.cjs <local|pr> --name-stdin [--cross <true|false>] < name-file
-//     local         the pre-PR rule: origin's tip is chosen only when the local fork point
+//     local         the no-PR rule: origin's tip is chosen only when the local fork point
 //                   is an ancestor of origin's fork point
 //     pr            the PR rule: origin's tip whenever it resolves (fresh, or cached after a
 //                   failed fetch), otherwise the local tip
@@ -53,13 +53,13 @@
 // (STRICT_NAME_RE), then `git check-ref-format`, then
 // the origin URL, then the cross-repository flag, then the fetch (after the read of
 // core.sshCommand), then the tip of each ref, then the merge base of each tip with HEAD,
-// then the ancestry check (the pre-PR rule only), then the choice of tip, then the
+// then the ancestry check (the no-PR rule only), then the choice of tip, then the
 // verification of BASE_REF. A name that fails either name check makes no further git call.
 //
 // Design constraints (binding):
 //   - Plumbing: every decision here is a fixed comparison of git answers. The ancestry
 //     checks are deterministic, and the keep-local policy is a rule, not a judgement.
-//   - Keep-local policy: in the pre-PR rule a local base that holds commits origin lacks
+//   - Keep-local policy: in the no-PR rule a local base that holds commits origin lacks
 //     (local-ahead or diverged) stays the base. The branch was cut from it, so those
 //     commits are the branch's own context. Only a local fork point that is an ancestor
 //     of origin's moves the base to origin.
@@ -324,7 +324,7 @@ function stopWith(reason, fetch = 'skipped') {
 
 /**
  * The fork points of both refs, or null when a ref is absent or has no fork point. Both the
- * ancestry question and the pre-PR choice need them.
+ * ancestry question and the no-PR choice need them.
  *
  * @param {Side | null} local
  * @param {Side | null} remote
@@ -784,7 +784,7 @@ function sidesOf(ctx, name, readRemote) {
 }
 
 /**
- * Whether the local fork point is an ancestor of origin's. Asked only in the pre-PR rule,
+ * Whether the local fork point is an ancestor of origin's. Asked only in the no-PR rule,
  * and only when both sides have a fork point; null otherwise.
  *
  * @param {Context} ctx
@@ -912,7 +912,7 @@ function readNameFromStdin(ctx) {
  * the header states. Every path returns a Selection. A local git call that gives no answer is
  * resolver-unavailable at every call site; the fetch has its own outcomes (fetch-failed,
  * timeout, no-remote-branch). An answered call that cannot be used maps by its call site, as
- * the header states. The ancestry check runs only in the pre-PR rule.
+ * the header states. The ancestry check runs only in the no-PR rule.
  *
  * @param {Request} req
  * @param {Context} ctx
