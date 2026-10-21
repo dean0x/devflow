@@ -76,7 +76,7 @@ A pipeline's exit status swallows a scrubber crash (fail-open). Chain with `&&` 
 | `fetch-issue` | Fetch tracker issue for implementation |
 | `fetch-issues-batch` | Fetch multiple tracker issues for multi-issue planning |
 | `post-review-summary` | Post consolidated review-summary comment per review run (D7) |
-| `manage-debt` | Update tech debt backlog with pre-existing issues |
+| `manage-debt` | Add FIX_SEPARATE and TECH_DEBT items to backlog |
 | `check-ci-status` | Check CI/PR check status for a branch |
 | `create-release` | Create GitHub release with version tag |
 | `gather-release-evidence` | Collect commits, shipped issues and a per-commit trace map since the last release (D4) |
@@ -89,7 +89,7 @@ A pipeline's exit status swallows a scrubber crash (fail-open). Chain with `&&` 
 | `associate-release` | Add shipped issues to the release marker (never replace) |
 | `ensure-traceable-issue` | Create or enrich a tracker issue from the D3 template (D5) |
 | `post-wave-report` | Post wave completion summary as a tracking-issue comment (marker-deduped) |
-| `update-pr-evidence` | Test-plan block + SHA-keyed evidence comment (append-only) |
+| `update-pr-evidence` | Test-plan block + evidence comment (edited in place) |
 
 **Decision Marker Legend:**
 

@@ -32,7 +32,7 @@ import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 
-import { PR_EVIDENCE_SCRIPT, VERIFY_EVIDENCE_SCRIPT } from './seam.js'
+import { PR_EVIDENCE_SCRIPT, VERIFY_EVIDENCE_SCRIPT, functionBodyOf, markerLine } from './seam.js'
 import {
   type ExecFn,
   type ExecResult,
@@ -77,7 +77,7 @@ interface TpRecord {
 interface PrEvidence {
   readonly STATES: readonly State[]
   readonly LIMITS: Readonly<Record<string, number>>
-  readonly MARKERS: Readonly<{ BLOCK_START: string; BLOCK_END: string; EVIDENCE_OPEN: string; EVIDENCE_RE: RegExp }>
+  readonly MARKERS: Readonly<{ BLOCK_START: string; BLOCK_END: string; EVIDENCE_OPEN: string; EVIDENCE_HEAD_PREFIX: string; EVIDENCE_RE: RegExp }>
   readonly EVIDENCE_LINE_RE: RegExp
   parsePlan(text: unknown): Result<{ tps: readonly { id: number; line: string }[] }>
   parseBlock(text: unknown): Result<{ kind: 'lines'; ticked: readonly number[] } | { kind: 'counts'; total: number; verified: number }>
@@ -93,12 +93,22 @@ interface MainDeps {
   stderr?: (text: string) => void
   formatLine?: (fields: EvidenceFields) => unknown
 }
+interface FactsComment {
+  readonly login: string
+  readonly association: string
+  readonly body: string
+  readonly viewerDidAuthor: boolean
+  readonly commentId: string
+}
+interface EditTarget { readonly id: string; readonly marker: string; readonly editable: boolean }
 interface VerifyEvidence {
   readonly EXIT_CODES: Readonly<Record<string, number>>
   readonly CAPS: Readonly<Record<string, number>>
   readonly PR_FIELDS: string
   main(argv: readonly string[], deps?: MainDeps): Outcome
   settleOutcome(outcome: unknown): Outcome
+  commentIdOf(url: unknown, pr: number): string
+  editTarget(pr: { readonly comments: readonly FactsComment[] }): EditTarget | null
 }
 
 const req = createRequire(import.meta.url)
@@ -213,6 +223,7 @@ describe('module surface', () => {
     expect(Object.keys(VE).sort()).toEqual([
       'CAPS', 'EXIT_CODES', 'PR_FIELDS', 'main', 'settleOutcome',
       'BODY_STATUSES', 'COMMENT_STATUSES', 'readinessVerdict', 'renderPublishBlock', 'parsePublishBlock', 'renderReadinessBlock', 'parseReadinessBlock',
+      'commentIdOf', 'editTarget',
     ].sort())
   })
 
@@ -1006,6 +1017,22 @@ describe('trusted record — refresh mode reads claims from it (D-VERIFY-RECORD)
     expect(verifyScn({ scn: { body, runs, comments, permissions: { maint: 'write' } } }).states.get(1)).toBe('FAILED')
   })
 
+  it('the viewer\'s newest comment is the record even after a trusted teammate\'s comment: list position decides', () => {
+    const teammate = recordComment(HEAD, [{ id: 1, state: 'FAILED', sha: HEAD, line: CI, run: '101/1' }], 'd'.repeat(12))
+    const viewerNew = recordComment(HEAD, [
+      { id: 1, state: 'VERIFIED-CI', sha: HEAD, line: CI, run: '101/1' },
+      { id: 2, state: 'ATTESTED-LOCAL', sha: HEAD, line: LOCAL, exit: 0 },
+    ], 'f'.repeat(12))
+    const v = verifyScn({ scn: { body, runs, permissions: { maint: 'write' }, comments: [
+      { login: 'devbot', body: good, viewerDidAuthor: true },
+      { login: 'maint', association: 'COLLABORATOR', body: teammate },
+      { login: 'devbot', body: viewerNew, viewerDidAuthor: true },
+    ] } })
+    expect(v.code, v.stderr).toBe(0)
+    expect(v.states.get(1)).toBe('VERIFIED-CI')
+    expect(v.states.get(2)).toBe('ATTESTED-LOCAL')
+  })
+
   it('an untrusted newer marker comment does not displace the trusted record', () => {
     const spoof = recordComment(HEAD, [{ id: 1, state: 'FAILED', sha: HEAD, line: CI }])
     const v = verifyScn({ scn: { body, runs, comments: [
@@ -1612,6 +1639,129 @@ describe('comment rendering and publication (D-VERIFY-PUBLICATION, D4/D5)', () =
   })
 })
 
+describe('commentIdOf — the comment id is parsed once, at the boundary', () => {
+  const url = (id: string, pull = '7', host = 'github.com'): string => `https://${host}/o/r/pull/${pull}#issuecomment-${id}`
+
+  const ACCEPTED: ReadonlyArray<readonly [string, string, string]> = [
+    ['a github.com pull comment url', url('123456'), '123456'],
+    ['a GHES host (the host is not pinned)', url('9', '7', 'ghe.example.com'), '9'],
+    ['a 20-digit id, kept exact as a string', url('12345678901234567890'), '12345678901234567890'],
+    ['a one-digit id', url('1'), '1'],
+  ]
+  for (const [label, input, id] of ACCEPTED) {
+    it(`accepts ${label}`, () => {
+      expect(VE.commentIdOf(input, PR)).toBe(id)
+    })
+  }
+
+  const REFUSED: ReadonlyArray<readonly [string, unknown]> = [
+    ['another PR\'s number', url('5', '8')],
+    ['a pull number with a leading zero', url('5', '07')],
+    ['an id with a leading zero', url('0123')],
+    ['an id of zero', url('0')],
+    ['a 21-digit id', url('123456789012345678901')],
+    ['a trailing character', `${url('123')}x`],
+    ['a trailing newline', `${url('123')}\n`],
+    ['an embedded space', url('12 3')],
+    ['plain http', url('123').replace('https:', 'http:')],
+    ['the /issues/ form', url('123').replace('/pull/', '/issues/')],
+    ['a query string before the fragment', `https://github.com/o/r/pull/${PR}?x=1#issuecomment-123`],
+    ['a path after the pull number', `https://github.com/o/r/pull/${PR}/files#issuecomment-123`],
+    ['another fragment', `https://github.com/o/r/pull/${PR}#discussion_r123`],
+    ['no fragment', `https://github.com/o/r/pull/${PR}`],
+    ['a url longer than 400 characters', url('123', '7', `${'h'.repeat(390)}.com`)],
+    ['the empty string', ''],
+    ['undefined', undefined],
+    ['null', null],
+    ['a number', 123],
+    ['an object', { url: url('123') }],
+  ]
+  for (const [label, input] of REFUSED) {
+    it(`refuses ${label}`, () => {
+      expect(VE.commentIdOf(input, PR)).toBe('')
+    })
+  }
+
+  it('reads the pull number against the PR that was asked for', () => {
+    expect(VE.commentIdOf(url('123', '8'), 8)).toBe('123')
+    expect(VE.commentIdOf(url('123', '8'), PR)).toBe('')
+  })
+})
+
+describe('editTarget — the viewer\'s newest evidence comment, and whether editing it is safe', () => {
+  const key = 'a'.repeat(12)
+  const comment = (o: Partial<FactsComment> & { readonly body: string }): FactsComment => ({
+    login: 'mallory', association: 'NONE', viewerDidAuthor: false, commentId: '', ...o,
+  })
+  const own = (body: string, commentId = ''): FactsComment => comment({ login: 'devbot', body, viewerDidAuthor: true, commentId })
+  const foreign = (body: string): FactsComment => comment({ body })
+  const target = (...comments: FactsComment[]): EditTarget | null => VE.editTarget({ comments })
+
+  it('is null with no comment and with only another login\'s evidence comment', () => {
+    expect(target()).toBeNull()
+    expect(target(foreign(`${markerLine(HEAD, key)}\nbody`))).toBeNull()
+    expect(target(own('a plain comment'))).toBeNull()
+  })
+
+  it('takes the viewer\'s comment whatever its head and key, with its id and its marker line', () => {
+    const line = markerLine(OLD, 'b'.repeat(12))
+    expect(target(own(`${line}\nrecords`, '1001'))).toEqual({ id: '1001', marker: line, editable: true })
+    expect(VE.editTarget({ comments: [own(`${markerLine(HEAD, key)}\n`, '')] })).toMatchObject({ id: '' })
+  })
+
+  it('matches the head prefix on the first line only, and exactly', () => {
+    const open = PE.MARKERS.EVIDENCE_OPEN
+    expect(target(own(`${open} key:${key} -->\nbody`))).toBeNull()
+    expect(target(own(`intro\n${markerLine(HEAD, key)}`))).toBeNull()
+    expect(target(own(`${open} head -->`))).toBeNull()
+    expect(target(own(`${open}  head:${HEAD}`))).toBeNull()
+    expect(target(own(` ${markerLine(HEAD, key)}`))).toBeNull()
+    expect(target(own(`${open} head:`))).toMatchObject({ marker: `${open} head:` })
+    expect(target(own(`${markerLine(HEAD, key)}\r\nbody`))).toMatchObject({ marker: markerLine(HEAD, key) })
+  })
+
+  it('every line the strict marker grammar accepts is a target', () => {
+    for (const line of [markerLine(HEAD, key), markerLine(OLD, '0'.repeat(12)), markerLine(BASE, 'f'.repeat(12))]) {
+      expect(PE.MARKERS.EVIDENCE_RE.test(line)).toBe(true)
+      expect(target(own(line))).toMatchObject({ marker: line })
+    }
+  })
+
+  it('the newest of two viewer matches wins', () => {
+    const older = markerLine(OLD, key)
+    const newer = markerLine(HEAD, key)
+    expect(target(own(older, '1001'), own(newer, '1002'))).toEqual({ id: '1002', marker: newer, editable: true })
+    expect(target(own(newer, '1002'), own('a note'), own(older, '1003'))).toMatchObject({ id: '1003', marker: older })
+  })
+
+  it('is not editable when a strict evidence marker from another login comes after it', () => {
+    expect(target(own(markerLine(OLD, key), '1001'), foreign(markerLine(HEAD, key)))).toEqual({ id: '1001', marker: markerLine(OLD, key), editable: false })
+    expect(target(own(markerLine(OLD, key), '1001'), foreign('a note'), foreign(`${markerLine(HEAD, key)}\nbody`))).toMatchObject({ editable: false })
+  })
+
+  it('stays editable when only a prefix-only comment from another login comes after it (not a record)', () => {
+    const open = PE.MARKERS.EVIDENCE_OPEN
+    expect(target(own(markerLine(OLD, key), '1001'), foreign(`${open} head:${HEAD}`))).toMatchObject({ editable: true })
+    expect(target(own(markerLine(OLD, key), '1001'), foreign(`${markerLine(HEAD, key)} trailing`))).toMatchObject({ editable: true })
+    expect(target(own(markerLine(OLD, key), '1001'), foreign(`intro\n${markerLine(HEAD, key)}`))).toMatchObject({ editable: true })
+  })
+
+  it('stays editable when the other login\'s strict marker comes before it', () => {
+    expect(target(foreign(markerLine(HEAD, key)), own(markerLine(OLD, key), '1001'))).toMatchObject({ id: '1001', editable: true })
+  })
+
+  it('a viewer comment after the target never blocks it', () => {
+    expect(target(own(markerLine(OLD, key), '1001'), own('a note', '1002'))).toMatchObject({ id: '1001', editable: true })
+  })
+
+  it('a malformed own comment (the prefix alone) is a valid target, so an edit repairs it', () => {
+    const open = PE.MARKERS.EVIDENCE_OPEN
+    const bad = `${open} head:nothex key:zz -->`
+    expect(PE.MARKERS.EVIDENCE_RE.test(bad)).toBe(false)
+    expect(target(own(markerLine(OLD, key), '1001'), own(`${bad}\ngarbled`, '1002'))).toEqual({ id: '1002', marker: bad, editable: true })
+  })
+})
+
 describe('dedupe — the viewer\'s own marker line, never a spoof', () => {
   const CI = tpLine(1, 'x', 'ci')
   const file = evidenceFile([CI], [claimLine(1, 'PASS', HEAD)])
@@ -1636,6 +1786,40 @@ describe('dedupe — the viewer\'s own marker line, never a spoof', () => {
     })
     expect(failing.fields?.key).not.toBe(first.fields?.key)
     expect(failing.fields?.posted).toBe('no')
+  })
+
+  const viewer = (text: string): CommentSpec => ({ login: 'devbot', body: text.trimEnd(), viewerDidAuthor: true })
+
+  it('an older exact match followed by the viewer\'s newer comment of another key ⇒ posted:no (the newest is the target)', () => {
+    const first = verifyScn({ scn: { runs }, evidence: file })
+    const otherKey = first.comment.replace(first.fields?.key ?? '', 'e'.repeat(12))
+    expect(otherKey).not.toBe(first.comment)
+    expect(verifyScn({ scn: { runs, comments: [viewer(first.comment), viewer(otherKey)] }, evidence: file }).fields?.posted).toBe('no')
+    expect(verifyScn({ scn: { runs, comments: [viewer(otherKey), viewer(first.comment)] }, evidence: file }).fields?.posted).toBe('yes')
+  })
+
+  it('the viewer\'s newest prefix comment decides, even when it is malformed ⇒ posted:no', () => {
+    const first = verifyScn({ scn: { runs }, evidence: file })
+    const malformed = `${PE.MARKERS.EVIDENCE_OPEN} head:garbled\nbody`
+    expect(verifyScn({ scn: { runs, comments: [viewer(first.comment), viewer(malformed)] }, evidence: file }).fields?.posted).toBe('no')
+  })
+
+  it('a comment rendered in stub and read under full at the same head and key ⇒ posted:yes (the marker line is mode-independent)', () => {
+    const stub = verifyScn({ scn: { runs }, evidence: file, publication: 'auto' })
+    const full = verifyScn({ scn: { runs, comments: [viewer(stub.comment)] }, evidence: file, publication: 'full' })
+    expect(full.fields?.key).toBe(stub.fields?.key)
+    expect(full.fields?.posted).toBe('yes')
+  })
+
+  it('another login\'s strict marker after the exact match leaves posted:yes (a skip, not a write)', () => {
+    const first = verifyScn({ scn: { runs }, evidence: file })
+    const later: CommentSpec = { login: 'mallory', association: 'NONE', body: first.comment.trimEnd() }
+    expect(verifyScn({ scn: { runs, comments: [viewer(first.comment), later] }, evidence: file }).fields?.posted).toBe('yes')
+  })
+
+  it('off stays posted:n/a whatever the viewer already posted', () => {
+    const first = verifyScn({ scn: { runs }, evidence: file })
+    expect(verifyScn({ scn: { runs, comments: [viewer(first.comment)] }, evidence: file, publication: 'off' }).fields?.posted).toBe('n/a')
   })
 })
 
@@ -2121,6 +2305,78 @@ describe('source guards (verify-evidence.cjs)', () => {
     expect(codeLines(SOURCE).filter(l => l.includes('/collaborators/')).length, 'the permission call must be in the corpus').toBeGreaterThanOrEqual(1)
     expect(collect(SOURCE)).toEqual([])
     expect(collect(`${SOURCE}\n  gh(io, ['api', 'repos/{owner}/{repo}/collaborators/' + login + '/permission'], 1)\n`)).toHaveLength(1)
+  })
+
+  it('a comment id reaches gh\'s argv only through commentIdArg() (COMMENT_ID_RE-gated, throwing)', () => {
+    const gate = SOURCE.match(/function commentIdArg\(id\) \{[^}]*\}/)
+    expect(gate, 'commentIdArg must sit next to loginArg').not.toBeNull()
+    expect(gate?.[0]).toContain('COMMENT_ID_RE.test(id)')
+    expect(gate?.[0]).toContain("throw new Error('verify-evidence: unchecked comment id')")
+  })
+
+  it('every comments-path line holds commentIdArg(), so no unchecked id reaches the path', () => {
+    const lines = (src: string): string[] => codeLines(src).filter(l => l.includes('/issues/comments/'))
+    expect(lines(SOURCE).length, 'the edit and its read-back must be in the corpus').toBeGreaterThanOrEqual(2)
+    expect(lines(SOURCE).filter(l => !l.includes('commentIdArg('))).toEqual([])
+    expect(lines(`${SOURCE}\n  gh(io, ['api', 'repos/{owner}/{repo}/issues/comments/' + id], 1)\n`).filter(l => !l.includes('commentIdArg('))).toHaveLength(1)
+  })
+
+  it('the comment is never deleted: no DELETE word and no -X flag in the code', () => {
+    const collect = (src: string): string[] => codeLines(src).filter(l => /\bDELETE\b/.test(l) || l.includes("'-X'"))
+    expect(codeLines(SOURCE).length).toBeGreaterThan(1000)
+    expect(collect(SOURCE)).toEqual([])
+    expect(collect(`${SOURCE}\n  ghWrite(io, ['api', '--method', 'DELETE', 'x']);\n`)).toHaveLength(1)
+    expect(collect(`${SOURCE}\n  ghWrite(io, ['api', '-X', 'PUT', 'x']);\n`)).toHaveLength(1)
+  })
+
+  it('--method appears once and is PATCH; the edit sends the body file and nothing else, silent', () => {
+    const methods = (src: string): string[] => [...codeLines(src).join('\n').matchAll(/'--method', '(\w+)'/g)].map(m => m[1])
+    expect(methods(SOURCE)).toEqual(['PATCH'])
+    expect(methods(`${SOURCE}\n  ghWrite(io, ['api', '--method', 'DELETE', 'x']);\n`)).toEqual(['PATCH', 'DELETE'])
+    const edit = functionBodyOf(SOURCE, 'publishComment')
+    expect(edit.length, 'publishComment must be in the corpus').toBeGreaterThan(200)
+    expect(edit).toContain("'-F', 'body=@' + files.comment, '--silent']")
+    const fields = (src: string): string[] => [...functionBodyOf(src, 'publishComment').matchAll(/'-[fF]'/g)].map(m => m[0])
+    expect(fields(SOURCE)).toEqual(["'-F'"])
+    const seeded = SOURCE.replace("'--silent']", "'-f', 'x=y', '--silent']")
+    expect(seeded, 'the seed must land').not.toBe(SOURCE)
+    expect(fields(seeded)).toHaveLength(2)
+  })
+
+  it('parsePrJson builds each comment with an id from commentIdOf and with no url', () => {
+    const parse = functionBodyOf(SOURCE, 'parsePrJson')
+    expect(parse.length, 'parsePrJson must be in the corpus').toBeGreaterThan(200)
+    expect(parse).toContain('commentId: commentIdOf(x.url, pr)')
+    expect(parse).not.toMatch(/\burl:/)
+  })
+
+  it('the head prefix is read from pr-evidence MARKERS, never rebuilt here, and the strict trust functions never name it', () => {
+    const named = (src: string): string[] => codeLines(src).filter(l => l.includes('EVIDENCE_HEAD_PREFIX'))
+    const rebuilt = (src: string): string[] => codeLines(src).filter(l => l.includes("' head:'"))
+    expect(functionBodyOf(SOURCE, 'editTarget')).toContain('startsWith(PE.MARKERS.EVIDENCE_HEAD_PREFIX)')
+    expect(named(SOURCE), 'editTarget is the one reader').toHaveLength(1)
+    expect(rebuilt(SOURCE)).toEqual([])
+    expect(rebuilt(`${SOURCE}\nconst h = PE.MARKERS.EVIDENCE_OPEN + ' head:';\n`)).toHaveLength(1)
+    const strict = ['markerComments', 'resolveTrust', 'findTrustedRecord']
+    const namers = (src: string): string[] => strict.filter(name => functionBodyOf(src, name).includes('EVIDENCE_HEAD_PREFIX'))
+    for (const name of strict) expect(functionBodyOf(SOURCE, name).length, `${name} must be in the corpus`).toBeGreaterThan(80)
+    expect(namers(SOURCE)).toEqual([])
+    const probe = SOURCE.replace('function markerComments(pr) {', 'function markerComments(pr) {\n  const p = PE.MARKERS.EVIDENCE_HEAD_PREFIX;')
+    expect(probe, 'the seed must land').not.toBe(SOURCE)
+    expect(namers(probe)).toEqual(['markerComments'])
+  })
+
+  it('the failed-write reason is picked in one helper that runs no gh call, and the three writes use it', () => {
+    const phrase = "'5xx on update-pr-evidence'"
+    const spelled = (src: string): string[] => codeLines(src).filter(l => l.includes(phrase))
+    const helper = functionBodyOf(SOURCE, 'writeFailedPart')
+    expect(helper.length, 'writeFailedPart must be in the corpus').toBeGreaterThan(40)
+    expect(helper).toContain(phrase)
+    expect(helper).not.toMatch(/\bgh(?:Write)?\(/)
+    expect(spelled(SOURCE)).toHaveLength(1)
+    expect(functionBodyOf(SOURCE, 'publishBody').match(/writeFailedPart\(/g)).toHaveLength(1)
+    expect(functionBodyOf(SOURCE, 'publishComment').match(/writeFailedPart\(/g)).toHaveLength(2)
+    expect(spelled(`${SOURCE}\n  return degradedPart(r.serverError ? ${phrase} : 'x');\n`)).toHaveLength(2)
   })
 
   it('no marker literal: every marker is built from pr-evidence MARKERS', () => {
