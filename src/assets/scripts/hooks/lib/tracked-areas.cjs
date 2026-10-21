@@ -368,6 +368,37 @@ function checkTrackedArea(root, area) {
   return inspectTrackedArea(root, area).answer;
 }
 
+/** The most answers the per-process memo of inspectTrackedAreaOnce holds. */
+const ANSWER_MEMO_MAX_ENTRIES = 64;
+
+/** The answers inspectTrackedAreaOnce has given in this process, by area and root, oldest first. */
+const answerMemo = new Map();
+
+/**
+ * {@link inspectTrackedArea}, asked once per root and area for the life of the process: a
+ * later ask for the same root and area gets the first answer and makes no git call, even if
+ * the project changed meanwhile. For a one-shot process (json-helper, the render check)
+ * whose steps each ask before they read or write: together they cost one git call. A
+ * long-lived caller, or one that changes what git tracks, asks inspectTrackedArea. The
+ * memo holds at most ANSWER_MEMO_MAX_ENTRIES answers; past that the oldest goes. Each
+ * answer is a new object.
+ *
+ * @param {unknown} root - an absolute path
+ * @param {unknown} area - 'curation', 'memory' or 'both'
+ * @returns {{ answer: 'tracked' | 'untracked' | 'unknown', cause: string | null }}
+ */
+function inspectTrackedAreaOnce(root, area) {
+  const key = typeof root === 'string' && typeof area === 'string' ? area + '\0' + root : null;
+  const known = key === null ? undefined : answerMemo.get(key);
+  if (known !== undefined) return { answer: known.answer, cause: known.cause };
+  const answer = inspectTrackedArea(root, area);
+  if (key !== null) {
+    if (answerMemo.size >= ANSWER_MEMO_MAX_ENTRIES) answerMemo.delete(answerMemo.keys().next().value);
+    answerMemo.set(key, Object.freeze({ answer: answer.answer, cause: answer.cause }));
+  }
+  return answer;
+}
+
 /**
  * Whether git tracks any entry under the curation area's folders at `root`: the check the
  * ledger move, the backup sweep and the drains ask. {@link inspectTrackedArea} for the
@@ -398,12 +429,14 @@ module.exports = {
   GIT_REDIRECT_VARIABLES,
   TRACKED_AREAS_GIT_TIMEOUT_MS,
   TRACKED_AREAS_GIT_MAX_BUFFER,
+  ANSWER_MEMO_MAX_ENTRIES,
   UNKNOWN_CAUSES,
   gitEnvWithoutRedirects,
   judgeTrackedAreas,
   classifyTrackedAreas,
   trackedAreaCall,
   inspectTrackedArea,
+  inspectTrackedAreaOnce,
   checkTrackedArea,
   inspectTrackedAreas,
   checkTrackedAreas,

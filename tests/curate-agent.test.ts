@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { promises as fs } from 'fs';
 import * as fsSync from 'fs';
 import { createRequire } from 'module';
+import { spawnSync } from 'child_process';
 import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
@@ -234,6 +235,47 @@ describe('curate agent', () => {
       for (const op of ['`list`', '`show <anchor|obs_id>`', '`restore-anchor <anchor>`']) {
         expect(content, op).toContain(op);
       }
+    });
+
+    it('names no op for the area check: a paused curation area reaches the run as a refusal of the first op', () => {
+      expect(content).not.toContain('tracked-area');
+      expect(content).toMatch(phrase('A non-zero exit — stop and report its stderr line.'));
+    });
+
+    it('quotes no text of the tracked refusal, which the store words as a fact with no command', () => {
+      const tmp = fsSync.mkdtempSync(path.join(os.tmpdir(), 'curate-tracked-'));
+      try {
+        const root = fsSync.realpathSync(tmp);
+        const run = (args: string[]): void => {
+          spawnSync('git', args, { cwd: root, env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' }, stdio: 'ignore' });
+        };
+        fsSync.mkdirSync(path.join(root, '.devflow', 'curation'), { recursive: true });
+        fsSync.writeFileSync(path.join(root, '.devflow', 'curation', 'decisions-ledger.jsonl'), '');
+        run(['init', '-q']);
+        run(['add', '-f', '.devflow/curation/decisions-ledger.jsonl']);
+        const { claimQueue } = createRequire(import.meta.url)(CURATION_STORE) as {
+          claimQueue: (root: string) => { ok: boolean; error: { kind: string; message: string } };
+        };
+
+        const refused = claimQueue(root);
+
+        expect(refused.ok).toBe(false);
+        expect(refused.error.kind).toBe('tracked');
+        expect(refused.error.message).toBe(`claim-queue: git tracks files in the curation data folders under ${root}; nothing was written`);
+        expect(refused.error.message).not.toMatch(/[`$]|\b(?:run|use|try)\b/);
+        for (const line of content.split('\n')) expect(line).not.toContain('git tracks files');
+      } finally {
+        fsSync.rmSync(tmp, { recursive: true, force: true });
+      }
+    });
+
+    it('touches the processing marker only after the claim: the heartbeat command stands below claim-queue in Step 0', () => {
+      const claim = content.indexOf('json-helper.cjs" claim-queue');
+      const touch = content.indexOf('touch -c .devflow/curation/.pending-turns.processing');
+      expect(claim).toBeGreaterThan(-1);
+      expect(touch).toBeGreaterThan(claim);
+      expect(content.indexOf('touch -c')).toBe(touch);
+      expect(content).toMatch(inOrder(['## Step 0 — Claim the queue', 'json-helper.cjs" claim-queue', '**Heartbeat**', 'touch -c .devflow/curation/.pending-turns.processing']));
     });
 
     it('calls the ops plainly: they self-lock, and nothing wraps them in a lock', () => {

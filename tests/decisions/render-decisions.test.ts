@@ -1065,6 +1065,22 @@ describe('CLI --check', { timeout: 30_000 }, () => {
     expect(snapshotTree(tmpDir)).toEqual(before);
   });
 
+  it('refuses first where git tracks the curation files: exit 1, the one fixed line, nothing changed', () => {
+    seedCurationTree(tmpDir, { ledger: [makeDecisionRow()] });
+    expect(runRenderer(tmpDir, ['render', tmpDir]).code).toBe(0);
+    const root = fs.realpathSync(tmpDir);
+    for (const args of [['-c', 'init.defaultBranch=main', 'init', '-q'], ['add', '-f', '.devflow/curation/decisions-ledger.jsonl']]) {
+      expect(spawnSync('git', args, { cwd: root, encoding: 'utf8' }).status).toBe(0);
+    }
+    const before = snapshotTree(tmpDir);
+
+    const run = runRenderer(root, ['--check', root]);
+
+    expect(run.code, 'a rendered tree that is in sync still refuses').toBe(1);
+    expect(run.stderr).toBe(`render-decisions: git tracks files in the curation data folders under ${root}; nothing was written\n`);
+    expect(snapshotTree(tmpDir)).toEqual(before);
+  });
+
   it('takes no lock: it runs to completion while the lock is held', () => {
     const paths = seedCurationTree(tmpDir);
     expect(runRenderer(tmpDir, ['render', tmpDir]).code).toBe(0);

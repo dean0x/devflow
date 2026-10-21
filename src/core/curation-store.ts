@@ -105,6 +105,7 @@ export interface ShownEntry {
 export const CURATION_STORE_ERROR_KINDS = [
   'no-curation-dir',
   'not-a-directory',
+  'tracked',
   'not-a-file',
   'busy',
   'refused',

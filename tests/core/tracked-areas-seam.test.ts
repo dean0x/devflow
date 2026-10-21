@@ -26,7 +26,7 @@ import { useWarmFakeExecutables } from '../helpers/warm-fake-executable.js';
 
 const NODE_REQUIRE = createRequire(import.meta.url);
 const LEAF = path.join(ROOT, 'src', 'assets', 'scripts', 'hooks', 'lib', 'tracked-areas.cjs');
-const AREAS: readonly TrackedArea[] = ['curation', 'memory'];
+const AREAS: ReadonlyArray<Exclude<TrackedArea, 'both'>> = ['curation', 'memory'];
 /** The two data areas and their union: every area the probe answers for. */
 const ALL_AREAS: readonly TrackedArea[] = [...AREAS, 'both'];
 

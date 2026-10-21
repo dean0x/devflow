@@ -52,6 +52,8 @@ interface TrackedAreas {
   classifyTrackedAreas(result: unknown): TrackedAnswer;
   trackedAreaCall(root: unknown, area: unknown, baseEnv?: NodeJS.ProcessEnv): Inspection | GitCall;
   inspectTrackedArea(root: unknown, area: unknown, options?: unknown): Inspection;
+  inspectTrackedAreaOnce(root: unknown, area: unknown): Inspection;
+  ANSWER_MEMO_MAX_ENTRIES: number;
   checkTrackedArea(root: unknown, area: unknown): TrackedAnswer;
   inspectTrackedAreas(root: unknown): Inspection;
   checkTrackedAreas(root: unknown): TrackedAnswer;
@@ -276,6 +278,102 @@ describe('gitEnvWithoutRedirects', () => {
 
   it('answers an empty object for an environment with nothing in it', () => {
     expect(leaf.gitEnvWithoutRedirects({})).toEqual({});
+  });
+});
+
+describe('inspectTrackedAreaOnce', () => {
+  let tmp: string;
+  let root: string;
+
+  beforeEach(() => {
+    tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'tracked-once-')));
+    root = path.join(tmp, 'project');
+    fs.mkdirSync(root);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const gitCallsOf = (spy: { mock: { calls: unknown[][] } }): unknown[][] => spy.mock.calls.filter(([command]) => command === 'git');
+
+  it('answers what inspectTrackedArea answers, for each area', () => {
+    initGitRepo(root, { [`.devflow/${MEMORY_FOLDER}/WORKING-MEMORY.md`]: 'wm\n' });
+
+    expect(leaf.inspectTrackedAreaOnce(root, 'memory')).toEqual({ answer: 'tracked', cause: null });
+    expect(leaf.inspectTrackedAreaOnce(root, 'curation')).toEqual({ answer: 'untracked', cause: null });
+    expect(leaf.inspectTrackedAreaOnce(root, 'both')).toEqual({ answer: 'tracked', cause: null });
+  });
+
+  it('asks git once per root and area for the life of the process, whatever the project does meanwhile', () => {
+    initGitRepo(root, { 'README.md': 'readme\n' });
+    const calls = vi.spyOn(nodeChildProcess, 'spawnSync');
+
+    const first = leaf.inspectTrackedAreaOnce(root, 'curation');
+    trackInGit(root, [`.devflow/${NEW_FOLDER}/decisions.md`], { commit: true });
+    const second = leaf.inspectTrackedAreaOnce(root, 'curation');
+
+    expect(first).toEqual({ answer: 'untracked', cause: null });
+    expect(second).toEqual(first);
+    expect(gitCallsOf(calls)).toHaveLength(1);
+    expect(leaf.inspectTrackedArea(root, 'curation').answer, 'a direct ask still reads the index').toBe('tracked');
+  });
+
+  it('keeps one answer per area and per root', () => {
+    initGitRepo(root, { 'README.md': 'readme\n' });
+    const other = path.join(tmp, 'other');
+    fs.mkdirSync(other);
+    initGitRepo(other, { [`.devflow/${NEW_FOLDER}/decisions.md`]: 'd\n' });
+    const calls = vi.spyOn(nodeChildProcess, 'spawnSync');
+
+    expect(leaf.inspectTrackedAreaOnce(root, 'curation').answer).toBe('untracked');
+    expect(leaf.inspectTrackedAreaOnce(root, 'memory').answer).toBe('untracked');
+    expect(leaf.inspectTrackedAreaOnce(other, 'curation').answer).toBe('tracked');
+    expect(leaf.inspectTrackedAreaOnce(other, 'memory').answer).toBe('untracked');
+    expect(gitCallsOf(calls)).toHaveLength(4);
+    leaf.inspectTrackedAreaOnce(root, 'curation');
+    leaf.inspectTrackedAreaOnce(other, 'memory');
+    expect(gitCallsOf(calls)).toHaveLength(4);
+  });
+
+  it('keeps an unknown answer and its cause as well', () => {
+    fs.mkdirSync(path.join(root, '.git'));
+    const calls = vi.spyOn(nodeChildProcess, 'spawnSync');
+
+    expect(leaf.inspectTrackedAreaOnce(root, 'curation')).toEqual({ answer: 'unknown', cause: 'git-exit-status' });
+    expect(leaf.inspectTrackedAreaOnce(root, 'curation')).toEqual({ answer: 'unknown', cause: 'git-exit-status' });
+    expect(gitCallsOf(calls)).toHaveLength(1);
+  });
+
+  it('makes no git call for a root with no .git entry', () => {
+    const calls = vi.spyOn(nodeChildProcess, 'spawnSync');
+
+    expect(leaf.inspectTrackedAreaOnce(root, 'both')).toEqual({ answer: 'untracked', cause: null });
+    expect(gitCallsOf(calls)).toEqual([]);
+  });
+
+  it('answers unknown for an area it does not know, and for a root that is not an absolute path', () => {
+    expect(leaf.inspectTrackedAreaOnce(root, 'nonsense')).toEqual({ answer: 'unknown', cause: 'check-failed' });
+    expect(leaf.inspectTrackedAreaOnce('project', 'curation')).toEqual({ answer: 'unknown', cause: 'root-not-absolute' });
+    expect(leaf.inspectTrackedAreaOnce(undefined, 'curation')).toEqual({ answer: 'unknown', cause: 'root-not-absolute' });
+    expect(leaf.inspectTrackedAreaOnce(root, undefined)).toEqual({ answer: 'unknown', cause: 'check-failed' });
+  });
+
+  it('answers a new object each time, so a caller can not change the next answer', () => {
+    const first = leaf.inspectTrackedAreaOnce(root, 'curation') as { answer: string; cause: string | null };
+    first.answer = 'tracked';
+
+    expect(leaf.inspectTrackedAreaOnce(root, 'curation')).toEqual({ answer: 'untracked', cause: null });
+  });
+
+  it('keeps at most ANSWER_MEMO_MAX_ENTRIES answers: the oldest goes first', () => {
+    expect(leaf.ANSWER_MEMO_MAX_ENTRIES).toBe(64);
+    expect(leaf.inspectTrackedAreaOnce(root, 'curation').answer).toBe('untracked');
+    for (let i = 0; i < leaf.ANSWER_MEMO_MAX_ENTRIES; i++) leaf.inspectTrackedAreaOnce(path.join(tmp, `filler-${i}`), 'curation');
+    initGitRepo(root, { [`.devflow/${NEW_FOLDER}/decisions.md`]: 'd\n' });
+
+    expect(leaf.inspectTrackedAreaOnce(root, 'curation').answer, 'the first answer was dropped, so git is asked again').toBe('tracked');
   });
 });
 

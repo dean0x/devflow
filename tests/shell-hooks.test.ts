@@ -340,7 +340,7 @@ describe('json-helper.js operations', () => {
     expect(parsed.hookSpecificOutput.additionalContext).toBe('test preamble');
   });
 
-  it('a generic op loads none of the curation modules; a curation op loads the store, the renderer only to render, the move module only to move', () => {
+  it('a generic op loads none of the curation modules; a curation op loads the store, the renderer only to render, the move module only to move, the tracked-area op the check alone', () => {
     // Every hook that falls back from jq to node runs a generic op, so the curation
     // store loads only for a curation op, the renderer and formatter only when that
     // op renders, and the move module only for the move op.
@@ -365,13 +365,13 @@ describe('json-helper.js operations', () => {
         expect(run.status, run.stderr).toBe(0);
         return fs.readFileSync(record, 'utf8').split('\n')
           .map(file => path.basename(file))
-          .filter(name => /^(?:curation-store|curation-move|render-decisions|decisions-format|mkdir-lock|project-paths)\.cjs$/.test(name))
+          .filter(name => /^(?:curation-store|curation-move|render-decisions|decisions-format|mkdir-lock|project-paths|tracked-areas)\.cjs$/.test(name))
           .sort();
       };
 
       expect(curationModulesLoadedBy(['get-field', 'cwd'], '{"cwd":"/tmp"}')).toEqual([]);
       // claim-queue answers none outside a curation tree, so it exits 0 here, and renders nothing.
-      expect(curationModulesLoadedBy(['claim-queue'], '')).toEqual(['curation-store.cjs', 'mkdir-lock.cjs', 'project-paths.cjs']);
+      expect(curationModulesLoadedBy(['claim-queue'], '')).toEqual(['curation-store.cjs', 'mkdir-lock.cjs', 'project-paths.cjs', 'tracked-areas.cjs']);
       // restore-anchor renders the entry it restores.
       const curationDir = path.join(probeDir, '.devflow', 'curation');
       fs.mkdirSync(curationDir, { recursive: true });
@@ -380,13 +380,15 @@ describe('json-helper.js operations', () => {
         `${JSON.stringify({ id: 'obs_lazy_one', type: 'decision', anchor_id: 'ADR-001', decisions_status: 'Retired' })}\n`,
       );
       expect(curationModulesLoadedBy(['restore-anchor', 'ADR-001'], '')).toEqual([
-        'curation-store.cjs', 'decisions-format.cjs', 'mkdir-lock.cjs', 'project-paths.cjs', 'render-decisions.cjs',
+        'curation-store.cjs', 'decisions-format.cjs', 'mkdir-lock.cjs', 'project-paths.cjs', 'render-decisions.cjs', 'tracked-areas.cjs',
       ]);
+      // The tracked-area op loads the check and the path helpers it requires, and neither the store nor the move module.
+      expect(curationModulesLoadedBy(['tracked-area', 'curation', probeDir], '')).toEqual(['project-paths.cjs', 'tracked-areas.cjs']);
       // Only the move op loads the move module, which then builds on the store.
       const home = path.join(probeDir, 'home');
       fs.mkdirSync(home);
       expect(curationModulesLoadedBy(['move-ledger', probeDir], '', { ...process.env, HOME: home })).toEqual([
-        'curation-move.cjs', 'curation-store.cjs', 'mkdir-lock.cjs', 'project-paths.cjs',
+        'curation-move.cjs', 'curation-store.cjs', 'mkdir-lock.cjs', 'project-paths.cjs', 'tracked-areas.cjs',
       ]);
     } finally {
       fs.rmSync(probeDir, { recursive: true, force: true });
