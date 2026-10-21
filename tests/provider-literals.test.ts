@@ -1437,11 +1437,12 @@ describe('the marker-neutralisation bullet keeps its own indent in every module'
 // `manage-debt` adds backlog items only from the two `resolution-summary.md`
 // sections that carry the Triage verdicts FIX_SEPARATE and TECH_DEBT. The rule is
 // authored once, in `manage_debt_contract` in `_ops.mds`, and expands at the top
-// of every provider reference. Each provider keeps its own step 3, so the three
-// step-3 blocks are pinned here as an ALLOWLIST: the lead line plus the two
-// bullets, identical across providers. A deny-list of removed wording would miss
-// the next new source, and an absence check on "review report" would fail on the
-// rule sentence itself.
+// of every provider reference. Step 3 is authored once, as `manage_debt_step_3` in
+// `_ops_steps.mds`, and every provider expands it, so the three built step-3 blocks
+// are identical by construction; `single-authority.test.ts` proves that. The block
+// is pinned here as an ALLOWLIST of content: the lead line plus the two bullets. A
+// deny-list of removed wording would miss the next new source, and an absence check
+// on "review report" would fail on the rule sentence itself.
 
 const MANAGE_DEBT_OPS_SOURCE = 'src/assets/mds/git/_ops.mds';
 const MANAGE_DEBT_STEP_THREE_LEAD = '3. Extract items to add:';

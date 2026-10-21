@@ -152,9 +152,7 @@ Load when the resolved tracker provider is `github` and the operation is `manage
 
 1. Find or create "Tech Debt Backlog" issue with `tech-debt` label
 2. Check issue body size; archive if > 60000 chars (per devflow:git)
-3. Extract items to add:
-   - `## Fix Separately` entries from `{REVIEW_DIR}/resolution-summary.md` (FIX_SEPARATE from Triage agent)
-   - `## Deferred to Tech Debt` entries from `{REVIEW_DIR}/resolution-summary.md` (TECH_DEBT from Triage agent)
+{{opsteps.manage_debt_step_3()}}
 4. Deduplicate against existing items using semantic matching
 5. Remove items that have been fixed (verify in codebase)
 6. Compose updated issue body to `$DEVFLOW_BODY_RAW`; apply the Comment-sink scrub (D11) and post via `gh issue edit {number} --body-file "$DEVFLOW_BODY"`
