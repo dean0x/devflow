@@ -17,6 +17,7 @@ import * as path from 'path';
 
 import { git, initGitRepo, PROJECT_PATHS, trackInGit } from './curation-fixtures.js';
 import { probeTrackedArea } from '../../src/core/tracked-areas.js';
+import { partitionProjectData } from '../../src/cli/commands/uninstall.js';
 import { useWarmFakeExecutables } from '../helpers/warm-fake-executable.js';
 
 type Answer = 'tracked' | 'untracked' | 'unknown';
@@ -36,14 +37,16 @@ const JSON_HELPER = path.join(HOOKS_DIR, 'json-helper.cjs');
 const LEAF_PATH = path.join(HOOKS_DIR, 'lib', 'tracked-areas.cjs');
 const nodeRequire = createRequire(import.meta.url);
 const leaf = nodeRequire(LEAF_PATH) as Leaf;
-const { LEGACY_NAMES, CURATION_DIR_NAME } = nodeRequire(PROJECT_PATHS) as {
+const { LEGACY_NAMES, CURATION_DIR_NAME, getMemoryDir } = nodeRequire(PROJECT_PATHS) as {
   LEGACY_NAMES: { folder: string; backupPrefix: string };
   CURATION_DIR_NAME: string;
+  getMemoryDir(projectRoot: string): string;
 };
 
 const AREAS: readonly Area[] = ['curation', 'memory', 'both'];
 const LIGATURE = '\u{FB02}';
-const BACKUP = `${LEGACY_NAMES.backupPrefix}20261001T000001Z-00000001`;
+const BACKUP_SUFFIX = '20261001T000001Z-00000001';
+const BACKUP = `${LEGACY_NAMES.backupPrefix}${BACKUP_SUFFIX}`;
 const SHELL = '/bin/bash';
 
 /** The answers a fixture expects, per area. */
@@ -394,5 +397,75 @@ describe('the shell twin makes the call the leaf describes', () => {
     const source = fs.readFileSync(QUEUE_APPEND, 'utf8');
     expect(source).toContain('| { IFS= read -r -n 1 _qp_c; }; then\n    _qp_st=("${PIPESTATUS[@]}")\n  else\n    _qp_st=("${PIPESTATUS[@]}")\n  fi');
     expect(source).not.toMatch(/\|\| true[^\n]*\n[^\n]*PIPESTATUS/);
+  });
+});
+
+describe('the folder-to-area maps name the folders the leaf names', () => {
+  type DataArea = 'curation' | 'memory';
+  const DATA_AREAS: readonly DataArea[] = ['curation', 'memory'];
+  const MEMORY_FOLDER = path.basename(getMemoryDir(path.sep));
+  const REPO = '/repo';
+
+  /**
+   * The folder names the leaf's pathspecs of an area cover under the plain `.devflow`
+   * spelling. A glob that ends in `*` is the backup folders: it stands for one backup name.
+   */
+  function leafFolders(area: DataArea): string[] {
+    const names = leaf.AREA_PATHSPECS[area].flatMap(spec => {
+      const match = /^:\(icase,(?:literal|glob)\)\.devflow\/(.+?)(?:\/\*\*)?$/.exec(spec);
+      if (match === null) return [];
+      return [match[1].endsWith('*') ? `${match[1].slice(0, -1)}${BACKUP_SUFFIX}` : match[1]];
+    });
+    return [...new Set(names)];
+  }
+
+  const FOLDERS: ReadonlyArray<readonly [DataArea, string]> = DATA_AREAS.flatMap(area => leafFolders(area).map(name => [area, name] as const));
+
+  it('reads the leaf pathspecs as the curation folder, the old ledger folder, a backup folder and the memory folder', () => {
+    expect(leafFolders('curation').sort()).toEqual([CURATION_DIR_NAME, LEGACY_NAMES.folder, BACKUP].sort());
+    expect(leafFolders('memory')).toEqual([MEMORY_FOLDER]);
+  });
+
+  describe('the shell twin (_qar_area_of)', () => {
+    const shellAreaOf = (queue: string): string => {
+      const run = spawnSync(SHELL, ['-c', `source "${QUEUE_APPEND}"\n_qar_area_of "$1" "$2"\nprintf '%s' "$_QAR_AREA"`, '_', REPO, queue], { encoding: 'utf8' });
+      expect(run.status, run.stderr).toBe(0);
+      return run.stdout;
+    };
+
+    it.each(FOLDERS.filter(([, name]) => name !== BACKUP))('puts a queue in %s/%s in the same area as the leaf', (area, name) => {
+      expect(shellAreaOf(`${REPO}/.devflow/${name}/.pending-turns.jsonl`)).toBe(area);
+    });
+
+    it('puts a queue in a backup folder in neither area, so it reads as both: paused when either area is', () => {
+      expect(shellAreaOf(`${REPO}/.devflow/${BACKUP}/.pending-turns.jsonl`)).toBe('both');
+    });
+
+    it.each([`${REPO}/elsewhere/.pending-turns.jsonl`, `${REPO}/.devflow/features/.pending-turns.jsonl`])('puts a queue at %s in both areas', (queue) => {
+      expect(shellAreaOf(queue)).toBe('both');
+    });
+  });
+
+  describe('the uninstall cleanup (projectDataAreaOf, through partitionProjectData)', () => {
+    const entryOf = (name: string): { name: string; isDir: boolean } => ({ name, isDir: true });
+    const OTHER: Readonly<Record<DataArea, DataArea>> = { curation: 'memory', memory: 'curation' };
+
+    it.each(FOLDERS)('keeps %s/%s when its own area is paused and removes it when only the other area is', (area, name) => {
+      for (const spelling of [name, name.toUpperCase()]) {
+        const own = partitionProjectData([entryOf(spelling)], new Set([area]));
+        expect(own.keepPaused, spelling).toEqual([entryOf(spelling)]);
+        expect(own.remove, spelling).toEqual([]);
+
+        const other = partitionProjectData([entryOf(spelling)], new Set([OTHER[area]]));
+        expect(other.keepPaused, spelling).toEqual([]);
+        expect(other.remove, spelling).toEqual([entryOf(spelling)]);
+      }
+    });
+
+    it('removes a folder that belongs to no area even when both areas are paused', () => {
+      const result = partitionProjectData([entryOf('scratch')], new Set<DataArea>(DATA_AREAS));
+      expect(result.keepPaused).toEqual([]);
+      expect(result.remove).toEqual([entryOf('scratch')]);
+    });
   });
 });

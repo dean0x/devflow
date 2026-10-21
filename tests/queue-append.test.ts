@@ -1548,6 +1548,9 @@ describe('queue_append_both and queue_append_row: the tracked-area gate', () => 
   });
 
   it('is not ended under set -e by an untracked, tracked or unanswered area', () => {
+    const broken = path.join(tmpDir, 'broken');
+    fs.mkdirSync(path.join(broken, '.git'), { recursive: true });
+
     const { exitCode, stdout } = run(`
       queue_tracked_area "${root}" both git
       echo "after-untracked"
@@ -1556,11 +1559,18 @@ describe('queue_append_both and queue_append_row: the tracked-area gate', () => 
       queue_tracked_area "${root}" both git
       echo "after-tracked cur=$DF_TRACKED_AREA_CURATION mem=$DF_TRACKED_AREA_MEMORY"
       queue_tracked_area "/no/such/root" memory git
+      echo "after-no-git mem=$DF_TRACKED_AREA_MEMORY"
+      queue_tracked_area "${broken}" memory git
       echo "after-unknown mem=$DF_TRACKED_AREA_MEMORY"
     `);
 
     expect(exitCode).toBe(0);
-    expect(stdout.trim().split('\n')).toEqual(['after-untracked', 'after-tracked cur=untracked mem=tracked', 'after-unknown mem=untracked']);
+    expect(stdout.trim().split('\n')).toEqual([
+      'after-untracked',
+      'after-tracked cur=untracked mem=tracked',
+      'after-no-git mem=untracked',
+      'after-unknown mem=unknown',
+    ]);
   });
 });
 
