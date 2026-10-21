@@ -28,6 +28,8 @@ interface Inspection {
 }
 
 type Area = 'curation' | 'memory';
+/** The areas the leaf checks: the two data areas and their union. */
+type CheckedArea = Area | 'both';
 
 /** What `trackedAreaCall` answers when no git call is due, or the call to make. */
 interface GitCall {
@@ -39,7 +41,7 @@ interface GitCall {
 interface TrackedAreas {
   TRACKED_AREA_PATHSPECS: readonly string[];
   MEMORY_AREA_PATHSPECS: readonly string[];
-  AREA_PATHSPECS: Readonly<Record<Area, readonly string[]>>;
+  AREA_PATHSPECS: Readonly<Record<CheckedArea, readonly string[]>>;
   DEVFLOW_SPELLINGS: readonly string[];
   GIT_REDIRECT_VARIABLES: readonly string[];
   TRACKED_AREAS_GIT_TIMEOUT_MS: number;
@@ -196,11 +198,31 @@ describe('MEMORY_AREA_PATHSPECS and AREA_PATHSPECS', () => {
     expect(Object.isFrozen(leaf.MEMORY_AREA_PATHSPECS)).toBe(true);
   });
 
-  it('maps the two areas, and only them, to their sets (the curation set is the one the move asks for)', () => {
-    expect(Object.keys(leaf.AREA_PATHSPECS).sort()).toEqual(['curation', 'memory']);
+  it('maps the two areas and their union, and only them, to their sets (the curation set is the one the move asks for)', () => {
+    expect(Object.keys(leaf.AREA_PATHSPECS).sort()).toEqual(['both', 'curation', 'memory']);
     expect(leaf.AREA_PATHSPECS.curation).toBe(leaf.TRACKED_AREA_PATHSPECS);
     expect(leaf.AREA_PATHSPECS.memory).toBe(leaf.MEMORY_AREA_PATHSPECS);
     expect(Object.isFrozen(leaf.AREA_PATHSPECS)).toBe(true);
+  });
+
+  it('lists the union as the curation set, then the memory set, with each entry once', () => {
+    const entryGlobs = leaf.DEVFLOW_SPELLINGS.map(dir => ':(icase,glob)[.]' + dir.slice(1));
+    const memoryOnly = leaf.MEMORY_AREA_PATHSPECS.filter(spec => !entryGlobs.includes(spec));
+    expect(memoryOnly).toEqual([
+      `:(icase,literal).devflow/${MEMORY_FOLDER}`,
+      `:(icase,literal).dev${LIGATURE}ow/${MEMORY_FOLDER}`,
+    ]);
+    expect([...leaf.AREA_PATHSPECS.both]).toEqual([...leaf.TRACKED_AREA_PATHSPECS, ...memoryOnly]);
+    expect(new Set(leaf.AREA_PATHSPECS.both).size).toBe(leaf.AREA_PATHSPECS.both.length);
+    for (const spec of [...leaf.TRACKED_AREA_PATHSPECS, ...leaf.MEMORY_AREA_PATHSPECS]) expect(leaf.AREA_PATHSPECS.both).toContain(spec);
+    expect(Object.isFrozen(leaf.AREA_PATHSPECS.both)).toBe(true);
+  });
+
+  it('leaves the curation set and the memory set as they were, each frozen and apart from the union', () => {
+    expect(leaf.AREA_PATHSPECS.both).not.toBe(leaf.TRACKED_AREA_PATHSPECS);
+    expect(leaf.AREA_PATHSPECS.both).not.toBe(leaf.MEMORY_AREA_PATHSPECS);
+    expect(Object.isFrozen(leaf.TRACKED_AREA_PATHSPECS)).toBe(true);
+    expect(Object.isFrozen(leaf.MEMORY_AREA_PATHSPECS)).toBe(true);
   });
 
   it('has no glob character in the folder name it matches as a literal', () => {
@@ -636,6 +658,8 @@ describe('checkTrackedAreas', () => {
 // ---------------------------------------------------------------------------
 
 const AREAS: readonly Area[] = ['curation', 'memory'];
+/** Every area the leaf answers for: the two data areas and their union. */
+const CHECKED_AREAS: readonly CheckedArea[] = [...AREAS, 'both'];
 const otherOf = (area: Area): Area => (area === 'curation' ? 'memory' : 'curation');
 
 /** The folders each area covers: git tracking an entry at or below one pauses that area only. */
@@ -844,8 +868,110 @@ describe('the answer per data folder', () => {
     expect(leaf.checkTrackedArea(root, 'memory')).toBe('tracked');
   });
 
+  describe('the both area', () => {
+    it.each([
+      ['the curation folder', FOLDERS.curation[0]],
+      ['the legacy learning folder', FOLDERS.curation[1]],
+      ['a backup folder', FOLDERS.curation[2]],
+      ['the memory folder', FOLDERS.memory[0]],
+    ])('answers tracked when git tracks a file below %s', (_name, folder) => {
+      commitRepo({ [`${folder}/note.txt`]: 'x\n' });
+
+      expect(leaf.inspectTrackedArea(root, 'both')).toEqual({ answer: 'tracked', cause: null });
+      expect(leaf.checkTrackedArea(root, 'both')).toBe('tracked');
+    });
+
+    it.each(devflowEntryCases)('answers tracked when git tracks $name', ({ setup }) => {
+      setup();
+
+      expect(leaf.checkTrackedArea(root, 'both')).toBe('tracked');
+    });
+
+    it('answers tracked when git tracks a file below the memory folder in the upper-case spelling', () => {
+      commitRepo({ [`.DEVFLOW/${MEMORY_FOLDER.toUpperCase()}/NOTE.TXT`]: 'x\n' });
+      expect(leaf.checkTrackedArea(root, 'both')).toBe('tracked');
+    });
+
+    it('answers tracked when git tracks a folder of each area', () => {
+      commitRepo({ [`${FOLDERS.curation[0]}/decisions.md`]: 'd\n', [`${FOLDERS.memory[0]}/WORKING-MEMORY.md`]: 'wm\n' });
+
+      expect(leaf.checkTrackedArea(root, 'both')).toBe('tracked');
+    });
+
+    it('answers untracked for a repository that tracks only other files of .devflow, with every folder on disk', () => {
+      commitRepo({
+        'README.md': 'readme\n',
+        '.devflow/project.json': '{}\n',
+        '.devflow/features/x/KNOWLEDGE.md': 'kb\n',
+      });
+      for (const folder of [...FOLDERS.curation, ...FOLDERS.memory]) {
+        fs.mkdirSync(path.join(root, folder), { recursive: true });
+        fs.writeFileSync(path.join(root, folder, 'note.txt'), 'untracked\n');
+      }
+
+      expect(leaf.inspectTrackedArea(root, 'both')).toEqual({ answer: 'untracked', cause: null });
+    });
+
+    it('answers unknown for a git that exits non-zero with nothing listed, with the cause of the single areas', () => {
+      fs.mkdirSync(path.join(root, '.git'));
+
+      for (const area of CHECKED_AREAS) {
+        expect(leaf.inspectTrackedArea(root, area), area).toEqual({ answer: 'unknown', cause: 'git-exit-status' });
+      }
+    });
+
+    it('asks git once, over the curation set and then the memory entries, so one call covers both folders', () => {
+      commitRepo({ 'README.md': 'readme\n' });
+      const calls = vi.spyOn(nodeChildProcess, 'spawnSync');
+
+      leaf.checkTrackedArea(root, 'both');
+
+      const made = gitCalls(calls) as Array<[string, string[]]>;
+      expect(made).toHaveLength(1);
+      expect(made[0][1].slice(0, 6)).toEqual(['--no-literal-pathspecs', '-c', 'core.fsmonitor=false', 'ls-files', '-z', '--']);
+      expect(made[0][1].slice(6)).toEqual([...leaf.AREA_PATHSPECS.both]);
+      expect(made[0][1].slice(6, 6 + leaf.TRACKED_AREA_PATHSPECS.length)).toEqual([...leaf.TRACKED_AREA_PATHSPECS]);
+    });
+
+    it('answers tracked when the listing is longer than the buffer', () => {
+      const files: Record<string, string> = {};
+      for (let i = 0; i < 200; i++) files[`.devflow/${MEMORY_FOLDER}/${'n'.repeat(40)}-${i}.txt`] = 'x\n';
+      commitRepo(files);
+
+      expect(leaf.checkTrackedArea(root, 'both')).toBe('tracked');
+    });
+
+    it('does not turn a tracked memory folder untracked under redirecting git variables', () => {
+      commitRepo({ [`${FOLDERS.memory[0]}/note.txt`]: 'x\n' });
+      vi.stubEnv('GIT_INDEX_FILE', path.join(tmp, 'nonexistent-index'));
+      vi.stubEnv('GIT_DIR', path.join(tmp, 'nonexistent-dir'));
+      vi.stubEnv('GIT_LITERAL_PATHSPECS', '1');
+
+      expect(leaf.checkTrackedArea(root, 'both')).toBe('tracked');
+    });
+
+    it('runs to the same answer as inspectTrackedArea when a runner executes the call and judges the result', () => {
+      commitRepo({ [`${FOLDERS.memory[0]}/note.txt`]: 'x\n' });
+      const call = leaf.trackedAreaCall(root, 'both') as GitCall;
+      const result = nodeChildProcess.spawnSync('git', call.argv, { cwd: call.cwd, env: call.env, stdio: ['ignore', 'pipe', 'ignore'] });
+
+      expect(leaf.judgeTrackedAreas(result)).toEqual({ answer: 'tracked', cause: null });
+      expect(leaf.judgeTrackedAreas(result)).toEqual(leaf.inspectTrackedArea(root, 'both'));
+    });
+
+    it('is the union: tracked exactly when the curation area or the memory area is tracked', () => {
+      commitRepo({ 'README.md': 'readme\n' });
+      expect([leaf.checkTrackedArea(root, 'curation'), leaf.checkTrackedArea(root, 'memory'), leaf.checkTrackedArea(root, 'both')]).toEqual(['untracked', 'untracked', 'untracked']);
+      stage({ [`${FOLDERS.memory[0]}/a.txt`]: 'a\n' });
+      expect([leaf.checkTrackedArea(root, 'curation'), leaf.checkTrackedArea(root, 'memory'), leaf.checkTrackedArea(root, 'both')]).toEqual(['untracked', 'tracked', 'tracked']);
+      git(root, ['rm', '-q', '--cached', '-r', '--', FOLDERS.memory[0]]);
+      stage({ [`${FOLDERS.curation[0]}/a.txt`]: 'a\n' });
+      expect([leaf.checkTrackedArea(root, 'curation'), leaf.checkTrackedArea(root, 'memory'), leaf.checkTrackedArea(root, 'both')]).toEqual(['tracked', 'untracked', 'tracked']);
+    });
+  });
+
   describe('a root with no .git entry', () => {
-    it.each(AREAS)('makes no git call and answers untracked for the %s area', (area) => {
+    it.each(CHECKED_AREAS)('makes no git call and answers untracked for the %s area', (area) => {
       fs.mkdirSync(path.join(root, '.devflow', MEMORY_FOLDER), { recursive: true });
       const calls = vi.spyOn(nodeChildProcess, 'spawnSync');
 
@@ -857,9 +983,10 @@ describe('the answer per data folder', () => {
 
   describe('an area the leaf does not know', () => {
     it.each([
-      ['both', 'both'],
       ['an empty string', ''],
       ['another case', 'Memory'],
+      ['both in another case', 'Both'],
+      ['a list of both areas', ['curation', 'memory']],
       ['undefined', undefined],
       ['null', null],
       ['a number', 7],
@@ -883,7 +1010,7 @@ describe('the answer per data folder', () => {
   });
 
   describe('a root that is not an absolute path', () => {
-    it.each(AREAS)('answers unknown with the cause root-not-absolute, with no git call, for the %s area', (area) => {
+    it.each(CHECKED_AREAS)('answers unknown with the cause root-not-absolute, with no git call, for the %s area', (area) => {
       const calls = vi.spyOn(nodeChildProcess, 'spawnSync');
 
       for (const bad of [undefined, null, 42, {}, '', 'project', '.']) {
@@ -894,20 +1021,22 @@ describe('the answer per data folder', () => {
   });
 
   describe('the git call of an area', () => {
-    it('is the call checkTrackedAreas makes for the curation area, and the same call over the memory set for the memory area', () => {
+    it('is the call checkTrackedAreas makes for the curation area, and the same call over the memory set, or over the union, for the other two', () => {
       commitRepo({ 'README.md': 'readme\n' });
       const calls = vi.spyOn(nodeChildProcess, 'spawnSync');
 
       leaf.checkTrackedAreas(root);
       leaf.checkTrackedArea(root, 'curation');
       leaf.checkTrackedArea(root, 'memory');
+      leaf.checkTrackedArea(root, 'both');
 
       const made = gitCalls(calls) as Array<[string, string[], { cwd: string; timeout: number; maxBuffer: number; shell?: boolean }]>;
-      expect(made).toHaveLength(3);
+      expect(made).toHaveLength(4);
       const lead = ['--no-literal-pathspecs', '-c', 'core.fsmonitor=false', 'ls-files', '-z', '--'];
       expect(made[0][1]).toEqual([...lead, ...leaf.TRACKED_AREA_PATHSPECS]);
       expect(made[1][1]).toEqual(made[0][1]);
       expect(made[2][1]).toEqual([...lead, ...leaf.MEMORY_AREA_PATHSPECS]);
+      expect(made[3][1]).toEqual([...lead, ...leaf.AREA_PATHSPECS.both]);
       for (const [, , options] of made) {
         expect(options.cwd).toBe(root);
         expect(options.timeout).toBe(5000);
@@ -979,7 +1108,7 @@ describe('the answer per data folder', () => {
       expect(leaf.inspectTrackedArea(root, area)).toEqual({ answer: 'unknown', cause: 'git-not-found' });
     });
 
-    it.each(AREAS)('answers unknown, with the cause git-timed-out, when git does not answer in time (%s)', (area) => {
+    it.each(CHECKED_AREAS)('answers unknown, with the cause git-timed-out, when git does not answer in time (%s)', (area) => {
       commitRepo({ 'README.md': 'readme\n' });
       const real = nodeChildProcess.spawnSync;
       vi.spyOn(nodeChildProcess, 'spawnSync').mockImplementation(((command: string, ...rest: unknown[]) => {
@@ -990,7 +1119,7 @@ describe('the answer per data folder', () => {
       expect(leaf.inspectTrackedArea(root, area)).toEqual({ answer: 'unknown', cause: 'git-timed-out' });
     });
 
-    it.each(AREAS)('never throws: a spawn that throws answers unknown with the cause check-failed (%s)', (area) => {
+    it.each(CHECKED_AREAS)('never throws: a spawn that throws answers unknown with the cause check-failed (%s)', (area) => {
       commitRepo({ 'README.md': 'readme\n' });
       vi.spyOn(nodeChildProcess, 'spawnSync').mockImplementation((() => {
         throw new TypeError('bad argument');
@@ -1030,7 +1159,7 @@ describe('the answer per data folder', () => {
   describe('trackedAreaCall', () => {
     const NO_CALL = ['spawnSync', 'spawn', 'execFileSync', 'execFile', 'execSync', 'exec', 'fork'] as const;
 
-    it.each(AREAS)('answers untracked, and prescribes no call, when the root has no .git entry (%s)', (area) => {
+    it.each(CHECKED_AREAS)('answers untracked, and prescribes no call, when the root has no .git entry (%s)', (area) => {
       expect(leaf.trackedAreaCall(root, area)).toEqual({ answer: 'untracked', cause: null });
     });
 
@@ -1046,7 +1175,7 @@ describe('the answer per data folder', () => {
 
     it('answers unknown with the cause check-failed for an area the leaf does not know', () => {
       fs.mkdirSync(path.join(root, '.git'));
-      for (const bad of ['both', '', undefined, 'constructor', '__proto__']) {
+      for (const bad of ['', 'Both', undefined, 'constructor', '__proto__']) {
         expect(leaf.trackedAreaCall(root, bad), String(bad)).toEqual({ answer: 'unknown', cause: 'check-failed' });
       }
     });
@@ -1058,7 +1187,7 @@ describe('the answer per data folder', () => {
       expect(leaf.trackedAreaCall(colonRoot, 'memory')).toEqual({ answer: 'unknown', cause: 'ceiling-unusable' });
     });
 
-    it.each(AREAS)('prescribes the call for the %s area: the root, the argv, a scrubbed environment', (area) => {
+    it.each(CHECKED_AREAS)('prescribes the call for the %s area: the root, the argv, a scrubbed environment', (area) => {
       fs.mkdirSync(path.join(root, '.git'));
       vi.stubEnv('GIT_INDEX_FILE', '/nonexistent');
       vi.stubEnv('GIT_DIR', '/nonexistent');

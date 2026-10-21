@@ -6,7 +6,7 @@
  *
  * The check answers whether git tracks any entry under one of devflow's data folders at
  * a root, one area at a time: the curation area (the curation folder, the legacy
- * learning folder and the backup folders) or the memory area (the memory folder). The
+ * learning folder and the backup folders), the memory area (the memory folder) or both. The
  * one-time ledger move and the backup sweep ask it before they change anything, and so
  * does the drain of a switched-off curation (src/core/curation-queue-cleanup.ts). The
  * module is loaded with the evidence-policy seam's `loadScript` from the package's own
@@ -36,8 +36,11 @@ export const TRACKED_AREAS_SCRIPT_NAME = join('hooks', 'lib', 'tracked-areas.cjs
  */
 export type TrackedAreasAnswer = 'tracked' | 'untracked' | 'unknown';
 
-/** The data areas the check knows: the leaf's AREA_PATHSPECS keys. */
-export type TrackedArea = 'curation' | 'memory';
+/**
+ * The areas the check knows: the leaf's AREA_PATHSPECS keys. `both` is the union of the
+ * two data areas, answered by one git call, for a caller that serves both at one root.
+ */
+export type TrackedArea = 'curation' | 'memory' | 'both';
 
 /**
  * An answer with the reason for an `unknown` one: a fixed word from the leaf's

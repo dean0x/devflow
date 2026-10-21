@@ -27,6 +27,8 @@ import { useWarmFakeExecutables } from '../helpers/warm-fake-executable.js';
 const NODE_REQUIRE = createRequire(import.meta.url);
 const LEAF = path.join(ROOT, 'src', 'assets', 'scripts', 'hooks', 'lib', 'tracked-areas.cjs');
 const AREAS: readonly TrackedArea[] = ['curation', 'memory'];
+/** The two data areas and their union: every area the probe answers for. */
+const ALL_AREAS: readonly TrackedArea[] = [...AREAS, 'both'];
 
 let tmp: string;
 
@@ -106,7 +108,7 @@ describe('probeTrackedArea: the leaf\'s call, run asynchronously, answered by th
   const BUDGET_MS = 300;
   /** What a probe may take beyond its budget: the kill grace plus a loaded machine. */
   const MARGIN_MS = 3_000;
-  const FOLDER: Record<TrackedArea, string> = { curation: '.devflow/curation', memory: '.devflow/memory' };
+  const FOLDER: Record<'curation' | 'memory', string> = { curation: '.devflow/curation', memory: '.devflow/memory' };
   const leaf = NODE_REQUIRE(LEAF) as Leaf;
   let base: string;
   let root: string;
@@ -153,10 +155,18 @@ describe('probeTrackedArea: the leaf\'s call, run asynchronously, answered by th
     it.each(AREAS)('answers tracked when git tracks the %s folder, and untracked for the other area', async (area) => {
       initGitRepo(root);
       trackInGit(root, [`${FOLDER[area]}/note.txt`], { commit: true });
-      const other: TrackedArea = area === 'curation' ? 'memory' : 'curation';
+      const other: 'curation' | 'memory' = area === 'curation' ? 'memory' : 'curation';
 
       expect(await probeTrackedArea(root, area)).toEqual({ answer: 'tracked', cause: null });
       expect(await probeTrackedArea(root, other)).toEqual({ answer: 'untracked', cause: null });
+    });
+
+    it('answers tracked for the union when git tracks either folder, and untracked when it tracks neither', async () => {
+      initGitRepo(root, { 'README.md': 'readme\n' });
+      expect(await probeTrackedArea(root, 'both')).toEqual({ answer: 'untracked', cause: null });
+      trackInGit(root, ['.devflow/memory/note.txt'], { commit: true });
+      expect(await probeTrackedArea(root, 'both')).toEqual({ answer: 'tracked', cause: null });
+      expect(await probeTrackedArea(root, 'curation')).toEqual({ answer: 'untracked', cause: null });
     });
 
     it('answers untracked for both areas when git tracks nothing in the data folders', async () => {
@@ -167,7 +177,7 @@ describe('probeTrackedArea: the leaf\'s call, run asynchronously, answered by th
       for (const area of AREAS) expect(await probeTrackedArea(root, area), area).toEqual({ answer: 'untracked', cause: null });
     });
 
-    it('answers what the leaf answers on a matrix of projects, for both areas', async () => {
+    it('answers what the leaf answers on a matrix of projects, for every area', async () => {
       const projects: Array<[name: string, build: (dir: string) => void]> = [
         ['nothing tracked', dir => { initGitRepo(dir, { 'README.md': 'readme\n' }); }],
         ['curation tracked', dir => { initGitRepo(dir, { '.devflow/curation/decisions.md': 'x\n' }); }],
@@ -184,7 +194,7 @@ describe('probeTrackedArea: the leaf\'s call, run asynchronously, answered by th
         const dir = path.join(base, `matrix-${projects.findIndex(entry => entry[0] === name)}`);
         fs.mkdirSync(dir);
         build(dir);
-        for (const area of AREAS) {
+        for (const area of ALL_AREAS) {
           expect(await probeTrackedArea(dir, area), `${name} / ${area}`).toEqual(leaf.inspectTrackedArea(dir, area));
         }
       }
@@ -213,7 +223,7 @@ describe('probeTrackedArea: the leaf\'s call, run asynchronously, answered by th
   });
 
   describe('where the leaf prescribes no call', () => {
-    it.each(AREAS)('answers untracked for the %s area, and starts no git, when the root has no .git entry', async (area) => {
+    it.each(ALL_AREAS)('answers untracked for the %s area, and starts no git, when the root has no .git entry', async (area) => {
       const marker = path.join(base, 'git-ran');
       process.env.PROBE_MARKER = marker;
       fakeGit('echo ran >> "$PROBE_MARKER"\nexit 0');
@@ -233,7 +243,7 @@ describe('probeTrackedArea: the leaf\'s call, run asynchronously, answered by th
       process.env.PROBE_MARKER = marker;
       fakeGit('echo ran >> "$PROBE_MARKER"\nexit 0');
 
-      expect(await probeTrackedArea(root, 'both' as TrackedArea)).toEqual({ answer: 'unknown', cause: 'check-failed' });
+      expect(await probeTrackedArea(root, 'Both' as TrackedArea)).toEqual({ answer: 'unknown', cause: 'check-failed' });
       expect(await probeTrackedArea(root, 'constructor' as TrackedArea)).toEqual({ answer: 'unknown', cause: 'check-failed' });
       expect(fs.existsSync(marker)).toBe(false);
     });
@@ -248,7 +258,7 @@ describe('probeTrackedArea: the leaf\'s call, run asynchronously, answered by th
   });
 
   describe('the call it makes', () => {
-    it.each(AREAS)('runs the leaf\'s argv and scrubbed environment in the root, for the %s area', async (area) => {
+    it.each(ALL_AREAS)('runs the leaf\'s argv and scrubbed environment in the root, for the %s area', async (area) => {
       dotGit();
       const record = path.join(base, 'record');
       fs.mkdirSync(record);

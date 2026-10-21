@@ -3,7 +3,8 @@
 // Does git track any entry under one of devflow's data folders at a root? One
 // `git ls-files` call over a fixed set of pathspecs answers `tracked`, `untracked` or
 // `unknown`, for one area at a time: `curation` (the curation folder, the legacy learning
-// folder and the backup folders) or `memory` (the memory folder). The one-time ledger move
+// folder and the backup folders), `memory` (the memory folder) or `both` (the union of the
+// two, one call, for a caller that serves both areas at one root). The one-time ledger move
 // and the backup sweep ask it for the curation area before they lock, read or rename
 // anything: a folder that git tracks is the repository's content, so they leave it alone.
 //
@@ -88,10 +89,18 @@ const MEMORY_AREA_PATHSPECS = Object.freeze([
   ...DEVFLOW_SPELLINGS.map(dir => ':(icase,glob)[.]' + dir.slice(1)),
 ]);
 
+/**
+ * The pathspecs of the two areas together: the curation set, then the memory set, each
+ * pathspec once (the `.devflow` entry forms stand in both sets). One call over this set
+ * answers `tracked` when git tracks anything either area covers.
+ */
+const BOTH_AREAS_PATHSPECS = Object.freeze([...new Set([...TRACKED_AREA_PATHSPECS, ...MEMORY_AREA_PATHSPECS])]);
+
 /** The pathspecs of each area, by the area's name: the closed set of areas the check knows. */
 const AREA_PATHSPECS = Object.freeze({
   curation: TRACKED_AREA_PATHSPECS,
   memory: MEMORY_AREA_PATHSPECS,
+  both: BOTH_AREAS_PATHSPECS,
 });
 
 /**
@@ -236,15 +245,15 @@ function entryExists(target) {
 }
 
 /**
- * The pathspecs of `area`, or null when the leaf does not know the area. Only the two
- * own names count: a name from the object prototype is no area.
+ * The pathspecs of `area`, or null when the leaf does not know the area. Only the own
+ * names of AREA_PATHSPECS count: a name from the object prototype is no area.
  *
  * @param {unknown} area
  * @returns {readonly string[] | null}
  */
 function pathspecsOf(area) {
   if (typeof area !== 'string' || !Object.prototype.hasOwnProperty.call(AREA_PATHSPECS, area)) return null;
-  return AREA_PATHSPECS[/** @type {'curation' | 'memory'} */ (area)];
+  return AREA_PATHSPECS[/** @type {'curation' | 'memory' | 'both'} */ (area)];
 }
 
 /**
@@ -271,7 +280,7 @@ function pathspecsOf(area) {
  * one, and answers `unknown`. Each answer is a new object.
  *
  * @param {unknown} root - an absolute path
- * @param {unknown} area - 'curation' or 'memory'
+ * @param {unknown} area - 'curation', 'memory' or 'both'
  * @param {NodeJS.ProcessEnv} [baseEnv] - the environment the call's own derives from (default: the process environment)
  * @returns {{ answer: 'tracked' | 'untracked' | 'unknown', cause: string | null } | { cwd: string, argv: string[], env: NodeJS.ProcessEnv }}
  */
@@ -309,8 +318,9 @@ function timeoutOf(options) {
 }
 
 /**
- * Whether git tracks any entry under the folders of `area` ('curation' or 'memory') at
- * `root`, or an entry named `.devflow` itself (a link, a gitlink or a file). The index
+ * Whether git tracks any entry under the folders of `area` ('curation', 'memory' or 'both',
+ * the union of the two) at `root`, or an entry named `.devflow` itself (a link, a gitlink or
+ * a file). The index
  * decides, not the disk, and a staged entry counts. The answer carries the cause (a value
  * of UNKNOWN_CAUSES) when it is `unknown`, and null otherwise.
  *
@@ -324,7 +334,7 @@ function timeoutOf(options) {
  * default TRACKED_AREAS_GIT_TIMEOUT_MS) and an output bound.
  *
  * @param {unknown} root - an absolute path
- * @param {unknown} area - 'curation' or 'memory'
+ * @param {unknown} area - 'curation', 'memory' or 'both'
  * @param {{ timeoutMs?: number }} [options]
  * @returns {{ answer: 'tracked' | 'untracked' | 'unknown', cause: string | null }}
  */
@@ -351,7 +361,7 @@ function inspectTrackedArea(root, area, options) {
  * The answer of {@link inspectTrackedArea}, without its cause.
  *
  * @param {unknown} root - an absolute path
- * @param {unknown} area - 'curation' or 'memory'
+ * @param {unknown} area - 'curation', 'memory' or 'both'
  * @returns {'tracked' | 'untracked' | 'unknown'}
  */
 function checkTrackedArea(root, area) {
