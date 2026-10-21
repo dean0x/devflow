@@ -22,7 +22,7 @@
  * probe. Every reader reads BUILT artifacts.
  */
 
-import { describe, it, expect, afterAll } from 'vitest'
+import { describe, it, expect, afterAll, beforeAll } from 'vitest'
 import { createRequire } from 'module'
 import * as fs from 'fs'
 import { readFileSync } from 'fs'
@@ -30,8 +30,8 @@ import * as path from 'path'
 
 import { compiledSkillRefsDir } from '../../src/core/assets.js'
 import { extractOpSectionFromCorpus, gitOperationReferenceCorpus, prHostRel } from '../helpers.js'
-import { cleanShimRoots, COMMENT_URL, runScript, SHIM_HEAD, SHIM_PR, type Redact, type ScriptRun, type ShimCall, type ShimComment, type ShimScenario } from './pr-shim.js'
-import { PR_EVIDENCE_SCRIPT, VERIFY_EVIDENCE_SCRIPT, CI_WAIT_SCRIPT, TOP_LEVEL_FUNCTION_RE, functionBodyOf, markerLine } from './seam.js'
+import { cleanShimRoots, COMMENT_URL, runScript, SHIM_HEAD, SHIM_PR, warmGhShim, type Redact, type ScriptRun, type ShimCall, type ShimComment, type ShimScenario } from './pr-shim.js'
+import { PR_EVIDENCE_SCRIPT, VERIFY_EVIDENCE_SCRIPT, CI_WAIT_SCRIPT, SUBPROCESS_TIMEOUT_MS, TOP_LEVEL_FUNCTION_RE, functionBodyOf, markerLine } from './seam.js'
 
 interface EvidenceFields {
   pr: number
@@ -484,6 +484,7 @@ interface RunOptions {
   readonly mutate?: (source: string) => string
 }
 
+beforeAll(warmGhShim, SUBPROCESS_TIMEOUT_MS)
 afterAll(cleanShimRoots)
 
 /** Lay out one scenario and run `publish` once (or `runs` times over the same fake PR). */
@@ -874,6 +875,30 @@ describe('the viewer\'s own evidence comment is edited in place, never doubled',
     expect(verbs(unreadable.writes)).toEqual(['pr edit', 'api --method'])
   })
 
+  it('23b. a stored comment that lost its one trailing newline still reads back equal: EDITED', SPAWN_BUDGET, () => {
+    const r = runOnce({ scenario: { comments: [olderOwn()], commentEditTrimsNewline: true } })
+    expect(r.code, r.stderr).toBe(0)
+    expect(commentPart(r), r.stdout).toEqual({ status: 'EDITED', reason: null })
+    expect(r.stdout).not.toContain('TRACEABILITY')
+    const sent = patchCalls(r.calls)[0].file ?? ''
+    expect(sent, 'the file sent ends in a newline').toMatch(/\n$/)
+    expect(r.pr.comments[0].body, 'the fake stored it without that newline').toBe(sent.slice(0, -1))
+    expect(readBackCalls(r.calls)).toHaveLength(1)
+    expect(verbs(r.writes)).toEqual(['pr edit', 'api --method'])
+  })
+
+  it('23c. a read-back answer that is not JSON, or JSON but not a string, is DEGRADED (comment read-back mismatch): never EDITED, no fallback post', SPAWN_BUDGET, () => {
+    for (const answer of ['this is not json\n', '', '42\n', 'null\n', '["a body"]\n', '{"body":"a body"}\n']) {
+      const label = JSON.stringify(answer)
+      const r = runOnce({ scenario: { comments: [olderOwn()], commentReadBack: answer } })
+      expect(commentPart(r), label).toEqual({ status: 'DEGRADED', reason: 'comment read-back mismatch' })
+      expect(r.stdout, label).toContain('TRACEABILITY: DEGRADED (comment read-back mismatch)')
+      expect(readBackCalls(r.calls), label).toHaveLength(1)
+      expect(verbs(r.writes), `${label}: no fallback post`).toEqual(['pr edit', 'api --method'])
+      expect(commentBodies(r), label).toHaveLength(1)
+    }
+  })
+
   it('24. a 4xx on the edit is not retried: DEGRADED (comment edit failed), no read-back, no post', SPAWN_BUDGET, () => {
     for (const stderr of ['gh: Forbidden (HTTP 403)\n', 'gh: Not Found (HTTP 404)\n']) {
       const r = runOnce({ scenario: { comments: [olderOwn()], failures: [{ match: ['api', '--method', 'PATCH'], times: 5, stderr }] } })
@@ -952,6 +977,25 @@ describe('the viewer\'s own evidence comment is edited in place, never doubled',
     expect(text).toContain('| TP |')
     expect(Buffer.byteLength(text), 'larger than the line buffer the writes use').toBeGreaterThan(4096)
     expect(readBackCalls(r.calls)).toHaveLength(1)
+  })
+
+  it('28b. a secret in the scenario table reaches neither the comment edit nor the stored comment (D11)', SPAWN_BUDGET, () => {
+    const r = runOnce({
+      tps: [tpLine(1, `Rotates the key ${SECRET} on login`)],
+      scenario: { comments: [olderOwn()] },
+      args: ['publish', '--pr', '7', '--evidence', 'evidence.md', '--publication', 'full'],
+    })
+    expect(r.code, r.stderr).toBe(0)
+    expect(commentPart(r), r.stdout).toEqual({ status: 'EDITED', reason: null })
+    expect(r.stdout).toContain('**Comment**: EDITED')
+    const patches = patchCalls(r.calls)
+    expect(patches).toHaveLength(1)
+    expect(patches[0].file ?? '', 'an empty file proves nothing').not.toBe('')
+    expect(patches[0].file).not.toContain(SECRET)
+    const stored = r.pr.comments[0].body
+    expect(stored).toContain('| TP |')
+    expect(stored).not.toContain(SECRET)
+    expect(r.pr.comments, 'the edit is in place, no second comment').toHaveLength(1)
   })
 
   it('29. a comment that redaction grows past the cap is not edited in', SPAWN_BUDGET, () => {
