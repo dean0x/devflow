@@ -9,6 +9,9 @@
  *
  * Scope: fenced spawns only. A spawn written in prose is not covered.
  *
+ * One more arm covers the text between two spawns (#483): the `full` re-check loop of /implement Phase 5. A fence digest
+ * does not see it, because the loop is prose. `collectFullLoopDefects` holds each of its lines once, in both builds.
+ *
  * A change that edits a fence on purpose repins only that fence: run the repin case and apply what it prints to
  * `PINNED_FENCES`. It prints only the rows that changed or were added, to paste over the row with the same heading,
  * agent type and ordinal, and a `gone` line for each pinned row that has no fence, to delete. It writes no file.
@@ -246,6 +249,36 @@ function fenceOf(text: string, heading: string, agent: string): string {
   return (found as SpawnFence).fence
 }
 
+const PHASE_5_HEADING = '### Phase 5: Alignment Check'
+
+/** The lines of the `full` Phase 5 re-check loop of /implement, each trimmed and each held once by the Phase 5 section. */
+const FULL_LOOP_LINES: readonly string[] = [
+  '2. Increment `alignment_fix_count`',
+  '3. If `alignment_fix_count <= 2`:',
+  '- Loop back to Phase 5 (re-check alignment). The fix is not validated here: the Phase 6 run covers it.',
+  '4. If `alignment_fix_count > 2`: Report misalignments to user for decision',
+]
+
+/** The lines of the Phase 5 section of a compiled /implement, trimmed, up to the next `### ` heading; null when the heading is absent or repeated. */
+function phase5Lines(body: string): string[] | null {
+  const lines = body.split('\n')
+  const starts = lines.flatMap((line, i) => (line === PHASE_5_HEADING ? [i] : []))
+  if (starts.length !== 1) return null
+  const rest = lines.slice(starts[0] + 1)
+  const end = rest.findIndex(line => line.startsWith('### '))
+  return (end === -1 ? rest : rest.slice(0, end)).map(line => line.trim())
+}
+
+/** Named collector (AC-3 of #483): each line of the `full` re-check loop appears exactly once in Phase 5 of the compiled /implement. */
+export function collectFullLoopDefects(body: string): string[] {
+  const section = phase5Lines(body)
+  if (section === null) return [`"${PHASE_5_HEADING}" is absent or repeated`]
+  return FULL_LOOP_LINES.flatMap(line => {
+    const held = section.filter(l => l === line).length
+    return held === 1 ? [] : [`Phase 5 holds the line "${line}" ${held} times, expected 1`]
+  })
+}
+
 describe('the corpus is real', () => {
   it('reads the four compiled files, each with spawn fences, and pins every one of them', () => {
     expect(FILES.map(f => f.label)).toEqual(Object.keys(PINNED_FENCES))
@@ -324,5 +357,29 @@ describe('every fenced Agent( spawn equals its pinned sha256 (AC-2)', () => {
 
   it.skipIf(process.env.REPIN_FENCES !== '1')('prints the rows to repin in PINNED_FENCES (set REPIN_FENCES=1; writes no file)', () => {
     console.log(`\n${repinReport(FILES, PINNED_FENCES)}\n`)
+  })
+})
+
+describe('the full-level Phase 5 re-check loop is as written (AC-3 of #483)', () => {
+  const builds = FILES.filter(f => f.label.endsWith('/implement.md'))
+  const LOOP_BACK = FULL_LOOP_LINES[2]
+
+  it('reads both builds of /implement', () => {
+    expect(builds.map(f => f.label)).toEqual(['dist/commands/implement.md', 'dist/curation-off/commands/implement.md'])
+  })
+
+  it.each(builds)('$label: Phase 5 holds the counter, the two-attempt test, the loop-back line and the user report once each', ({ text }) => {
+    expect(collectFullLoopDefects(text)).toEqual([])
+  })
+
+  it.each(builds)('$label: known-bad probes: a changed cap, a removed loop-back line, a removed re-check, a renumbered report step, a repeated line and a moved line are each reported', ({ text }) => {
+    const missing = (line: string): string[] => [`Phase 5 holds the line "${line}" 0 times, expected 1`]
+    expect(collectFullLoopDefects(seed(text, FULL_LOOP_LINES[1], '3. If `alignment_fix_count <= 1`:')), 'cap changed from 2 to 1').toEqual(missing(FULL_LOOP_LINES[1]))
+    expect(collectFullLoopDefects(seed(text, `   ${LOOP_BACK}\n`, '')), 'loop-back line removed').toEqual(missing(LOOP_BACK))
+    expect(collectFullLoopDefects(seed(text, 'Loop back to Phase 5 (re-check alignment).', 'Loop back to Phase 5.')), '"(re-check alignment)" removed').toEqual(missing(LOOP_BACK))
+    expect(collectFullLoopDefects(seed(text, FULL_LOOP_LINES[3], FULL_LOOP_LINES[3].replace('4.', '5.'))), 'step 4 renumbered').toEqual(missing(FULL_LOOP_LINES[3]))
+    expect(collectFullLoopDefects(seed(text, FULL_LOOP_LINES[0], `${FULL_LOOP_LINES[0]}\n${FULL_LOOP_LINES[0]}`)), 'a repeated line').toEqual([`Phase 5 holds the line "${FULL_LOOP_LINES[0]}" 2 times, expected 1`])
+    expect(collectFullLoopDefects(seed(seed(text, `   ${LOOP_BACK}\n`, ''), '### Phase 6: Validate', `### Phase 6: Validate\n\n${LOOP_BACK}`)), 'the line moved out of Phase 5').toEqual(missing(LOOP_BACK))
+    expect(collectFullLoopDefects(seed(text, PHASE_5_HEADING, '### Phase 5: Check')), 'heading renamed').toEqual([`"${PHASE_5_HEADING}" is absent or repeated`])
   })
 })
