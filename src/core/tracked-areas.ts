@@ -21,7 +21,9 @@
  */
 
 import { execFile, type ExecFileException } from 'child_process';
-import { join } from 'path';
+import { existsSync } from 'fs';
+import { dirname, join, resolve } from 'path';
+import { fileURLToPath } from 'url';
 import { scriptsDir } from './assets.js';
 import { loadScript, type EvidencePolicyLoadError, type Result, type SurfaceKind } from './evidence-policy.js';
 
@@ -88,12 +90,30 @@ export const TRACKED_AREAS_SURFACE = Object.freeze({
 export type TrackedAreasLoad = Result<TrackedAreasModule, EvidencePolicyLoadError>;
 
 /**
- * Load the tracked-areas module from `dir` (default: the package's own scripts
- * directory) and shape-check its surface. Never throws: a missing file is
- * `not-found`; a module that throws on load or lacks a surface key is `unusable`.
+ * The scripts directory that holds the check module for this copy of the code. A copy
+ * installed under ~/.devflow/scripts/ (the HUD's) sits in `core/` beside `hooks/`, so the
+ * directory above it is the scripts directory; any other copy (the package's dist/ or
+ * src/) reads the package's own scripts directory. Throws only when neither exists, so
+ * the callers below call it inside their own guard.
  */
-export function loadTrackedAreas(dir: string = scriptsDir()): TrackedAreasLoad {
-  return loadScript<TrackedAreasModule>(join(dir, TRACKED_AREAS_SCRIPT_NAME), TRACKED_AREAS_SURFACE);
+function trackedAreasScriptsDir(): string {
+  const installed = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+  return existsSync(join(installed, TRACKED_AREAS_SCRIPT_NAME)) ? installed : scriptsDir();
+}
+
+/**
+ * Load the tracked-areas module from `dir` (default: the scripts directory of this copy
+ * of the code, see trackedAreasScriptsDir) and shape-check its surface. Never throws: a
+ * missing file, or a scripts directory that can not be found, is `not-found` or
+ * `unusable`; a module that throws on load or lacks a surface key is `unusable`.
+ */
+export function loadTrackedAreas(dir?: string): TrackedAreasLoad {
+  try {
+    return loadScript<TrackedAreasModule>(join(dir ?? trackedAreasScriptsDir(), TRACKED_AREAS_SCRIPT_NAME), TRACKED_AREAS_SURFACE);
+  } catch (err: unknown) {
+    const detail = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: { kind: 'unusable', path: TRACKED_AREAS_SCRIPT_NAME, detail } };
+  }
 }
 
 /**
@@ -123,7 +143,7 @@ const CHECK_FAILED: TrackedAreaInspection = Object.freeze({ answer: 'unknown', c
 export interface ProbeTrackedAreaOptions {
   /** Stop waiting for git after this many ms (a positive finite number; otherwise TRACKED_AREA_PROBE_TIMEOUT_MS). */
   readonly timeoutMs?: number;
-  /** The scripts directory to load the leaf from (default: the package's own). */
+  /** The scripts directory to load the leaf from (default: the one of this copy of the code). */
   readonly dir?: string;
 }
 
@@ -198,10 +218,10 @@ export async function probeTrackedArea(
   area: TrackedArea,
   options: ProbeTrackedAreaOptions = {},
 ): Promise<TrackedAreaInspection> {
-  const loaded = loadTrackedAreas(options.dir);
-  if (!loaded.ok) return CHECK_FAILED;
-  const { trackedAreaCall, judgeTrackedAreas } = loaded.value;
   try {
+    const loaded = loadTrackedAreas(options.dir);
+    if (!loaded.ok) return CHECK_FAILED;
+    const { trackedAreaCall, judgeTrackedAreas } = loaded.value;
     const call = trackedAreaCall(root, area);
     if (!('argv' in call)) return call;
     const requested = options.timeoutMs;
