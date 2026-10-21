@@ -62,6 +62,7 @@ import { curationCommand } from '../../src/cli/commands/curation.js';
 import * as p from '@clack/prompts';
 import { getCurationMoveMarkerPath } from '../../src/core/curation-move-notice.js';
 import { MOVE_SKIP_NOTICE } from '../../src/core/curation-move-skip.js';
+import { AREA_PAUSE_NOTICE } from '../../src/core/area-pause-notice.js';
 import {
   getCurationPendingTurnsPath,
   getCurationPendingTurnsProcessingPath,
@@ -593,7 +594,7 @@ describe('curation --clear', { timeout: 30_000 }, () => {
 
     const run = await runCuration(['--clear']);
 
-    expect(run.error).toBe(`clear: git tracks files in the curation data folders under ${root}; nothing was written`);
+    expect(run.error).toBe(AREA_PAUSE_NOTICE.curation.tracked);
     expect(run.success).toBe('');
     expect(run.exitCode).toBe(1);
     expect(fs.readFileSync(paths.log, 'utf8')).toBe(before.log);
@@ -610,7 +611,7 @@ describe('curation --clear', { timeout: 30_000 }, () => {
 
     const run = await runCuration(['--clear']);
 
-    expect(run.error).toBe(`clear: git tracks files in the curation data folders under ${root}; nothing was written`);
+    expect(run.error).toBe(AREA_PAUSE_NOTICE.curation.tracked);
     expect(run.exitCode).toBe(1);
     expect(queueFilesPresent(root)).toEqual([true, true, true]);
     expect(backupPendingPresent(backup)).toEqual([true, true, true, true]);
@@ -624,7 +625,7 @@ describe('curation --clear', { timeout: 30_000 }, () => {
 
     const run = await runCuration(['--clear']);
 
-    expect(run.error).toBe(`clear: git did not answer whether it tracks files in the curation data folders under ${root}; nothing was written`);
+    expect(run.error).toBe(AREA_PAUSE_NOTICE.curation.unknown);
     expect(run.exitCode).toBe(1);
     expect(queueFilesPresent(root)).toEqual([true, true, true]);
   });
@@ -1797,15 +1798,14 @@ describe('curation --restore/--clear/--reset move the old folder first (#529)', 
       }
     });
 
-    it.each(WRITERS)('%s with a project whose old folder git tracks writes nothing, prints the fixed notice and exits 1', async (_flag, args, undone) => {
+    it.each(WRITERS)('%s with a project whose old folder git tracks writes nothing, prints the fixed notice and exits 1', async (_flag, args) => {
       const old = seedOldFolder(root);
       trackInGit(root, '.devflow/learning/decisions-ledger.jsonl');
       const before = snapshotTree(path.join(root, '.devflow'));
 
       const run = await runCuration(args);
 
-      expect(run.error).toContain(MOVE_SKIP_NOTICE.tracked);
-      expect(run.error).toContain(`Nothing was ${undone}.`);
+      expect(run.error).toBe(AREA_PAUSE_NOTICE.curation.tracked);
       expect(run.success).toBe('');
       expect(run.exitCode).toBe(1);
       expect(fs.existsSync(old)).toBe(true);
@@ -1813,7 +1813,7 @@ describe('curation --restore/--clear/--reset move the old folder first (#529)', 
       expect(snapshotTree(path.join(root, '.devflow'))).toEqual(before);
     });
 
-    it.each(WRITERS)('%s with a project where git does not answer writes nothing, prints the fixed notice and exits 1', async (_flag, args, undone) => {
+    it.each(WRITERS)('%s with a project where git does not answer writes nothing, prints the fixed notice and exits 1', async (_flag, args) => {
       seedOldFolder(root);
       initGitRepo(root);
       vi.stubEnv('PATH', pathWithFailingGit(devflowDir));
@@ -1821,8 +1821,7 @@ describe('curation --restore/--clear/--reset move the old folder first (#529)', 
 
       const run = await runCuration(args);
 
-      expect(run.error).toContain(MOVE_SKIP_NOTICE.unknown);
-      expect(run.error).toContain(`Nothing was ${undone}.`);
+      expect(run.error).toBe(AREA_PAUSE_NOTICE.curation.unknown);
       expect(run.exitCode).toBe(1);
       expect(snapshotTree(path.join(root, '.devflow'))).toEqual(before);
     });

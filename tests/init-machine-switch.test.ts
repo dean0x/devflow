@@ -20,6 +20,7 @@ import {
 import { LEDGER_ROOT_TIMEOUT_MS, type LedgerRootLookup } from '../src/core/ledger-root.js';
 import { installedVersionMatches } from '../src/targets/claude-code/curation-install.js';
 import { MOVE_SKIP_NOTICE } from '../src/core/curation-move-skip.js';
+import { AREA_PAUSE_NOTICE } from '../src/core/area-pause-notice.js';
 import { initGitRepo, pathWithFailingGit, snapshotTree, trackInGit } from './decisions/curation-fixtures.js';
 import type { ManifestData } from '../src/core/manifest.js';
 
@@ -319,7 +320,7 @@ describe('drainDisabledFeatureQueues (D-INIT-DRAIN-AFTER-SWITCH)', () => {
   });
 
   describe.each(['tracked', 'unknown'] as const)('with the real drains: the tracked-folder check answers %s', (reason) => {
-    it('curation off deletes no curation file, returns the fixed notice, and still drains the memory queue', async () => {
+    it('curation off deletes no curation file and returns the fixed notice; the memory queue drains unless git did not answer for it either', async () => {
       const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-init-drain-skip-'));
       vi.stubEnv('HOME', path.join(tmp, 'home'));
       try {
@@ -342,8 +343,17 @@ describe('drainDisabledFeatureQueues (D-INIT-DRAIN-AFTER-SWITCH)', () => {
         const refused = await drainDisabledFeatureQueues({ gitRoot: repo, ledgerRoot: repo, memoryEnabled: false, curationEnabled: false, manifestWritten: true });
 
         expect(curationFolders()).toEqual(before);
-        expect(refused).toEqual([expect.stringContaining(MOVE_SKIP_NOTICE[reason])]);
-        await expect(fs.lstat(path.join(repo, '.devflow', 'memory', queue)), 'the memory queue is drained').rejects.toThrow(/ENOENT/);
+        const memoryQueue = fs.lstat(path.join(repo, '.devflow', 'memory', queue));
+        if (reason === 'tracked') {
+          expect(refused).toEqual([expect.stringContaining(MOVE_SKIP_NOTICE[reason])]);
+          await expect(memoryQueue, 'the memory queue is drained').rejects.toThrow(/ENOENT/);
+        } else {
+          expect(refused).toEqual([
+            `The memory queue was not drained. ${AREA_PAUSE_NOTICE.memory.unknown}`,
+            expect.stringContaining(MOVE_SKIP_NOTICE[reason]),
+          ]);
+          await expect(memoryQueue, 'git did not answer for the memory folder either, so its queue stays').resolves.toBeDefined();
+        }
       } finally {
         vi.unstubAllEnvs();
         await fs.rm(tmp, { recursive: true, force: true });

@@ -14,7 +14,8 @@ import * as path from 'path';
 import { drainCurationQueue, drainDisabledCurationQueue, formatCurationNotDrained } from '../../src/core/curation-queue-cleanup.js';
 import { MOVE_SKIP_NOTICE } from '../../src/core/curation-move-skip.js';
 import { loadCurationMove, type CurationMoveLoad } from '../../src/core/curation-move.js';
-import { drainMemoryQueue } from '../../src/cli/commands/memory.js';
+import { AREA_PAUSE_NOTICE } from '../../src/core/area-pause-notice.js';
+import { drainMemoryQueue, formatMemoryNotDrained } from '../../src/cli/commands/memory.js';
 import { initGitRepo, pathWithFailingGit, snapshotTree, trackInGit } from '../decisions/curation-fixtures.js';
 
 const KEEP = 'a file outside the project, which no drain may delete\n';
@@ -507,5 +508,79 @@ describe('formatCurationNotDrained', () => {
     const refused = formatCurationNotDrained({ drained: false, linkedFolder: '/repo/.devflow' }, 'tracked');
     expect(refused).toContain('/repo/.devflow');
     expect(refused).not.toContain(MOVE_SKIP_NOTICE.tracked);
+  });
+});
+
+describe('drainMemoryQueue leaves a project alone when git tracks the memory folder or does not answer', () => {
+  const FILES = ['.pending-turns.jsonl', '.pending-turns.processing'] as const;
+  const memoryDir = (): string => path.join(root, '.devflow', 'memory');
+  const devflowTree = (): Map<string, string> => snapshotTree(path.join(root, '.devflow'), { stat: true });
+
+  it.each([
+    ['a queue file of the memory folder', '.devflow/memory/.pending-turns.jsonl'],
+    ['a working memory file', '.devflow/memory/WORKING-MEMORY.md'],
+  ] as const)('git tracks %s: nothing is deleted, and the answer is a tracked skip', async (_name, tracked) => {
+    initGitRepo(root);
+    await seed(memoryDir(), FILES);
+    trackInGit(root, tracked);
+    const before = devflowTree();
+
+    expect(await drainMemoryQueue(root)).toEqual({ drained: false, skipped: 'tracked' });
+    expect(devflowTree()).toEqual(before);
+  });
+
+  it('a .git entry stands and git does not answer: nothing is deleted, and the answer is an unknown skip', async () => {
+    initGitRepo(root);
+    await seed(memoryDir(), FILES);
+    const before = devflowTree();
+    vi.stubEnv('PATH', pathWithFailingGit(tmp));
+
+    expect(await drainMemoryQueue(root)).toEqual({ drained: false, skipped: 'unknown' });
+    expect(devflowTree()).toEqual(before);
+  });
+
+  it('a root that is not absolute cannot be checked: the answer is an unknown skip', async () => {
+    expect(await drainMemoryQueue('relative/path')).toEqual({ drained: false, skipped: 'unknown' });
+  });
+
+  it('a repository that tracks nothing in the memory folder drains the queue, and keeps the tracked files elsewhere', async () => {
+    initGitRepo(root, { 'README.md': 'content of the repository\n', '.devflow/notes.md': 'a tracked note\n' });
+    await seed(memoryDir(), FILES);
+
+    expect(await drainMemoryQueue(root)).toEqual({ drained: true });
+
+    expect(await present(memoryDir(), FILES)).toEqual([false, false]);
+    expect(await present(root, ['README.md', '.devflow/notes.md'])).toEqual([true, true]);
+  });
+
+  it('tracked curation files do not pause the memory queue: the areas are separate', async () => {
+    initGitRepo(root);
+    await seed(memoryDir(), FILES);
+    trackInGit(root, '.devflow/curation/decisions-ledger.jsonl');
+
+    expect(await drainMemoryQueue(root)).toEqual({ drained: true });
+    expect(await present(memoryDir(), FILES)).toEqual([false, false]);
+  });
+
+  it('a project with no .git entry makes no git call and drains as usual', async () => {
+    await seed(memoryDir(), FILES);
+    vi.stubEnv('PATH', pathWithFailingGit(tmp));
+
+    expect(await drainMemoryQueue(root)).toEqual({ drained: true });
+    expect(await present(memoryDir(), FILES)).toEqual([false, false]);
+  });
+});
+
+describe('formatMemoryNotDrained', () => {
+  const SENTENCE = 'The memory queue was not drained.';
+
+  it.each(['tracked', 'unknown'] as const)('says the %s notice of the memory area in full', (reason) => {
+    expect(formatMemoryNotDrained({ drained: false, skipped: reason })).toBe(`${SENTENCE} ${AREA_PAUSE_NOTICE.memory[reason]}`);
+  });
+
+  it('names the link of a refused drain', () => {
+    const refused = formatMemoryNotDrained({ drained: false, linkedFolder: '/repo/.devflow' });
+    expect(refused).toContain('/repo/.devflow');
+    expect(refused).not.toContain(AREA_PAUSE_NOTICE.memory.tracked);
   });
 });

@@ -21,6 +21,8 @@ import {
   readRunningVersion,
 } from '../../targets/claude-code/curation-install.js';
 import { getLedgerRoot } from '../../core/ledger-root.js';
+import { AREA_PAUSE_NOTICE, type PauseReason } from '../../core/area-pause-notice.js';
+import { probeTrackedArea } from '../../core/tracked-areas.js';
 import { drainCurationQueue, drainDisabledCurationQueue, formatCurationNotDrained } from '../../core/curation-queue-cleanup.js';
 import { firstSymbolicLink } from '../../core/linked-path.js';
 import { describeMoveText, describeOutcome } from './curation-move-step.js';
@@ -97,10 +99,38 @@ function requireStore(): CurationStoreModule | null {
   return null;
 }
 
+/**
+ * Which fixed notice a store refusal of kind `tracked` takes: `unknown` when the store's
+ * message says git did not answer, `tracked` otherwise. The store words are fixed, and a
+ * test holds them to this reading.
+ */
+function pauseReasonOf(error: CurationStoreError): PauseReason {
+  return error.message.includes('did not answer') ? 'unknown' : 'tracked';
+}
+
+/**
+ * The fixed line of a paused curation area at `ledgerRoot`, or null when git tracks
+ * nothing in the curation folders there. The area is paused when git tracks files in the
+ * curation folder, the old ledger folder or a backup folder, or when a `.git` entry stands
+ * and git did not answer; a root with no `.git` entry makes no git call. Every command
+ * asks first, before it reads a ledger file, takes a lock or prompts.
+ */
+async function pausedCurationLine(ledgerRoot: string): Promise<string | null> {
+  const { answer } = await probeTrackedArea(ledgerRoot, 'curation');
+  return answer === 'untracked' ? null : AREA_PAUSE_NOTICE.curation[answer];
+}
+
+/** Say that a command changed nothing because the curation area is paused: the fixed `line`, exit code 1. */
+function refusePaused(line: string): void {
+  p.log.error(line);
+  process.exitCode = 1;
+}
+
 /** What a writer says when the store refused; `undone` completes "Nothing was …". */
 function storeRefusal(error: CurationStoreError, undone: string): string {
   switch (error.kind) {
     case 'no-curation-dir': return NO_CURATION_DATA;
+    case 'tracked': return AREA_PAUSE_NOTICE.curation[pauseReasonOf(error)];
     case 'busy': return `The curation store is busy: another run holds its lock. Nothing was ${undone}; try again in a moment.`;
     default: return error.message;
   }
@@ -177,15 +207,21 @@ async function moveReadNotice(ledgerRoot: string): Promise<MoveReadNotice | null
 
 /**
  * The gate every writing subcommand passes first (--restore, --clear, --reset and the
- * project scope of --configure). Installed scripts of another version read and create
- * another ledger folder, so they refuse with the skew line. Then, where the old folder
- * is present, the shared move runs with no wait: a busy lock prints a retry message,
- * a queue claim that holds the move prints its own message, a refused or failed move
- * prints its reason, and a skipped move (git tracks files in a data folder, or git did
- * not answer) prints the fixed notice; in each case nothing is written.
+ * project scope of --configure). A paused curation area (git tracks files in a data
+ * folder, or git did not answer) refuses with the fixed notice before anything else, so
+ * a clear or a reset never reaches its confirm prompt. Installed scripts of another
+ * version read and create another ledger folder, so they refuse with the skew line.
+ * Then, where the old folder is present, the shared move runs with no wait: a busy lock
+ * prints a retry message, a queue claim that holds the move prints its own message, and
+ * a refused or failed move prints its reason; in each case nothing is written.
  * `undone` completes "Nothing was …". Answers true when the caller may write.
  */
 async function prepareToWrite(ledgerRoot: string, undone: string): Promise<boolean> {
+  const paused = await pausedCurationLine(ledgerRoot);
+  if (paused !== null) {
+    refusePaused(paused);
+    return false;
+  }
   const skew = await installedScriptsSkew(getDevFlowDirectory());
   if (skew !== null) {
     p.log.error(skew);
@@ -309,7 +345,8 @@ function backupLines(ledgerRoot: string): { lines: string[]; warning: string | n
  * whose ledger still sits in the old folder gets the HUD's pointer (or refused line, or
  * the notice of a skipped move) in place of the counts; a project with both folders and
  * a skipped move gets the notice with the counts; a project with backup folders gets one
- * line for each.
+ * line for each. A paused area (git tracks files in a data folder, or did not answer)
+ * gets the fixed notice after the machine switch, nothing is read, and the exit code is 0.
  */
 async function handleStatus(): Promise<void> {
   // D-FEATURES-NARROW-ONLY: the machine switch is the manifest's and reads the
@@ -323,6 +360,11 @@ async function handleStatus(): Promise<void> {
   const trackedWarning = personalConfigTrackedWarning(settingsModule, { dir: process.cwd() });
   if (trackedWarning !== null) p.log.warn(trackedWarning);
   const ledgerRoot = await getLedgerRoot();
+  const paused = await pausedCurationLine(ledgerRoot ?? process.cwd());
+  if (paused !== null) {
+    p.log.info(`${stateLine}\n${paused}`);
+    return;
+  }
   if (!ledgerRoot) {
     p.log.info(`${stateLine}\nEntries: not in a git project`);
     return;
@@ -355,13 +397,19 @@ async function handleStatus(): Promise<void> {
 
 /**
  * `--list`: the store's listing — the same text json-helper's `list` op prints —
- * on stdout. Read-only. Outside a git project it reads the current directory. Where
- * the ledger still sits in the old folder it prints the pointer, the refused line or the
- * notice of a skipped move in place of the listing; with both folders and a skipped move
- * it prints the notice before the listing.
+ * on stdout. Read-only. Outside a git project it reads the current directory. A paused
+ * area prints the fixed notice and exits 1, and reads nothing. Where the ledger still
+ * sits in the old folder it prints the pointer, the refused line or the notice of a
+ * skipped move in place of the listing; with both folders and a skipped move it prints
+ * the notice before the listing.
  */
 async function handleList(): Promise<void> {
   const root = (await getLedgerRoot()) ?? process.cwd();
+  const paused = await pausedCurationLine(root);
+  if (paused !== null) {
+    refusePaused(paused);
+    return;
+  }
   const notice = await moveReadNotice(root);
   if (notice !== null) p.log.info(notice.line);
   if (notice?.kind === 'instead') return;
@@ -383,12 +431,18 @@ async function handleList(): Promise<void> {
 /**
  * `--show <id>`: one entry, by its anchor or its observation id, as the JSON
  * json-helper's `show` op prints, made terminal-safe. Read-only. Outside a git
- * project it reads the current directory. Where the ledger still sits in the old
- * folder it prints the pointer, the refused line or the notice of a skipped move as the
- * refusal; with both folders and a skipped move it prints the notice on stderr and goes on.
+ * project it reads the current directory. A paused area prints the fixed notice as the
+ * refusal and reads nothing. Where the ledger still sits in the old folder it prints the
+ * pointer, the refused line or the notice of a skipped move as the refusal; with both
+ * folders and a skipped move it prints the notice on stderr and goes on.
  */
 async function handleShow(key: string): Promise<void> {
   const root = (await getLedgerRoot()) ?? process.cwd();
+  const paused = await pausedCurationLine(root);
+  if (paused !== null) {
+    refusePaused(paused);
+    return;
+  }
   const notice = await moveReadNotice(root);
   if (notice?.kind === 'instead') {
     p.log.error(notice.line);

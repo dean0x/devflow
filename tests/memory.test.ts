@@ -405,7 +405,7 @@ describe('cleanQueueFiles', () => {
 
   it('returns cleaned=0 when no projects provided', async () => {
     const result = await cleanQueueFiles([]);
-    expect(result).toEqual({ cleaned: 0, projects: [], refused: [] });
+    expect(result).toEqual({ cleaned: 0, projects: [], refused: [], paused: [] });
   });
 
   it('cleans both queue files when both exist', async () => {
@@ -436,7 +436,7 @@ describe('cleanQueueFiles', () => {
     await fs.mkdir(memDir, { recursive: true });
 
     const result = await cleanQueueFiles([tmpDir]);
-    expect(result).toEqual({ cleaned: 0, projects: [], refused: [] });
+    expect(result).toEqual({ cleaned: 0, projects: [], refused: [], paused: [] });
   });
 
   // D-CLI-NO-SYMLINK: `devflow memory --clear` walks every known project, and a
@@ -462,7 +462,7 @@ describe('cleanQueueFiles', () => {
 
         const kept = await Promise.all(files.map(file => fs.access(file).then(() => true, () => false)));
         expect(kept, 'nothing is deleted through the link').toEqual([true, true]);
-        expect(result).toEqual({ cleaned: 1, projects: [plain], refused: [path.join(project, linked)] });
+        expect(result).toEqual({ cleaned: 1, projects: [plain], refused: [path.join(project, linked)], paused: [] });
       } finally {
         vi.unstubAllEnvs();
       }
@@ -477,7 +477,7 @@ describe('cleanQueueFiles', () => {
     await fs.mkdir(path.join(memDir, '.working-memory.lock'), { recursive: true });
 
     const result = await cleanQueueFiles([tmpDir]);
-    expect(result).toEqual({ cleaned: 0, projects: [], refused: [] });
+    expect(result).toEqual({ cleaned: 0, projects: [], refused: [], paused: [] });
     // File should remain untouched
     await expect(fs.access(path.join(memDir, '.pending-turns.jsonl'))).resolves.toBeUndefined();
   });
