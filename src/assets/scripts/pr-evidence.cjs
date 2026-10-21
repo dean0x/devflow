@@ -92,13 +92,14 @@ const LIMITS = Object.freeze({
  * marker from these fields, and a source guard holds that no literal appears
  * outside this object. The block markers bracket the PR body's test-plan block;
  * the evidence marker is the first line of an evidence comment, and its head prefix
- * is what that line starts with whatever its head and key.
+ * is what that line starts with whatever its head and key. The head prefix is the
+ * evidence open literal plus ' head:', so it adds no literal of its own.
  */
 const MARKERS = Object.freeze({
   BLOCK_START: '<!-- devflow:test-plan -->',
   BLOCK_END: '<!-- /devflow:test-plan -->',
   EVIDENCE_OPEN: '<!-- devflow:evidence',
-  EVIDENCE_HEAD_PREFIX: '<!-- devflow:evidence head:',
+  get EVIDENCE_HEAD_PREFIX() { return this.EVIDENCE_OPEN + ' head:'; },
   EVIDENCE_RE: Object.freeze(/^<!-- devflow:evidence head:(?<head>[0-9a-f]{40}) key:(?<key>[0-9a-f]{12}) -->$/),
 });
 

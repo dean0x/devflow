@@ -404,6 +404,13 @@ describe('marker grammar', () => {
     }
   })
 
+  it('EVIDENCE_HEAD_PREFIX is derived from EVIDENCE_OPEN: the source spells no head-prefix literal', () => {
+    const spelled = (src: string): string[] => src.split('\n').filter(l => /['"`]<!-- devflow:evidence head:/.test(l)).map(l => l.trim())
+    expect(PE.MARKERS.EVIDENCE_HEAD_PREFIX).toBe(PE.MARKERS.EVIDENCE_OPEN + ' head:')
+    expect(spelled(SOURCE)).toEqual([])
+    expect(spelled(`${SOURCE}\nconst h = '<!-- devflow:evidence head:';\n`)).toHaveLength(1)
+  })
+
   it('every marker literal in the source sits inside the MARKERS definition', () => {
     const literals = collectMarkerLiterals(SOURCE)
     expect(literals.length, 'no marker literal found — the collector is blind').toBeGreaterThanOrEqual(3)
