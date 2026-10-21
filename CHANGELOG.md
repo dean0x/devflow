@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [3.8.0] - 2026-10-21
+
 ### Upgrade notes — Curation rename
 
 The learning feature is now called curation ([#529](https://github.com/dean0x/devflow/issues/529)).
@@ -143,7 +147,7 @@ the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-convention
   The HUD and `devflow curation --status` print `Curation: move refused, see the hook log`.
   Remove the cause, then run `devflow init` or start a new session.
 - Skipped by the git check: git tracks any entry under `.devflow/learning/`, `.devflow/curation/` or a backup folder
-  (`.devflow/learning.backup-*`), or tracks an entry named `.devflow`. The same outcome applies when a `.git` entry stands and git does not answer.
+  (`.devflow/learning.backup-*`), or tracks an entry named `.devflow` ([#598](https://github.com/dean0x/devflow/issues/598)). The same outcome applies when a `.git` entry stands and git does not answer.
   Nothing in the project changes. Init prints `Ledger move skipped for <root>` and a fixed notice that holds nothing from the repository.
   The HUD prints `Curation: move skipped, git tracks files in the .devflow data folders`
   or `Curation: move skipped, git did not answer`.
@@ -374,6 +378,9 @@ Do the step below after you update.
     Each names the cause and a fix.
     `/resolve` takes its branch diff from the Git agent's `validate-branch`, which returns BLOCKED in that case.
   - Run `devflow init` after you update, to install the script and the updated commands.
+- **SessionStart loads the current working memory once** ([#591](https://github.com/dean0x/devflow/issues/591)).
+  - It does not load pre-compaction memory snapshots, also when a snapshot is newer or the current memory is missing.
+  - SessionStart does not delete or move the existing `backup.json` file. The next PreCompact writes it again with Git state only.
 
 ---
 
@@ -2124,6 +2131,7 @@ devflow init
 ---
 
 [Unreleased]: https://github.com/dean0x/devflow/compare/v3.8.0...HEAD
+[3.8.0]: https://github.com/dean0x/devflow/compare/v3.7.0...v3.8.0
 [3.7.0]: https://github.com/dean0x/devflow/compare/v3.6.0...v3.7.0
 [3.6.0]: https://github.com/dean0x/devflow/compare/v3.5.0...v3.6.0
 [3.5.0]: https://github.com/dean0x/devflow/compare/v3.4.0...v3.5.0
