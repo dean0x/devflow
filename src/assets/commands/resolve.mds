@@ -209,7 +209,7 @@ Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE."
 
 Wait for Triage agent to complete before proceeding. Parse verdict ledger from Triage agent output:
 - **ESCALATED**: Security issues requiring human escalation
-- **FIX_NOW**: Valid issues assigned to Code agents (with risk tier: Standard | Careful)
+- **FIX_NOW**: Valid issues assigned to Code agents (with risk tier: Standard | Careful | `Standard, prose only: edit text alone; agent instructions count as logic; if this issue needs a logic change, leave it unedited and name it`; any other value counts as Careful). SCOPE gives one `{id}: {tier}` line per issue.
 - **FALSE_POSITIVE**: Issues the Review agent got wrong (with cited evidence)
 - **BY_DESIGN**: Intentional code (with a recorded decision, stated in words, or a code doc citation)
 - **FIX_SEPARATE**: Valid but out of blast-radius scope (must become manage-debt ticket)
@@ -274,6 +274,7 @@ Spawn distinct-file batch Code agents **in a single message** (parallel). Sequen
 Collect from each Code agent:
 - `{status, commitShas, unresolved}` per batch
 - `## Verification` block (commands run + results)
+- An unresolved prose-only issue → FIX_SEPARATE in TRIAGE_RESULTS, Reason `needs a logic change`; other unresolved issues stay Blocked
 
 ### Phase 5: Write resolution-summary.md
 
@@ -285,6 +286,8 @@ Collect from each Code agent:
 Set `Tracked` for FIX_SEPARATE and TECH_DEBT items to `(pending)` — to be backfilled after Phase 9 manage-debt (or `TRACEABILITY: DEGRADED ({reason})` if manage-debt degrades).
 
 DUPLICATE issues are listed **only** in `## Duplicates` — never in `## Fixed Issues`, `## False Positives`, `## By Design`, `## Fix Separately`, `## Deferred to Tech Debt`, `## Escalations`, or `## Blocked`. A duplicate of a FALSE_POSITIVE primary therefore leaves only the primary in the `False Positive` row and the `## False Positives` section; the same holds for every other outcome the duplicate inherits.
+
+Open each Issue cell with its severity in brackets when it has one, as `[HIGH]`.
 
 Use the template from the Output Artifact section below.
 
@@ -644,7 +647,7 @@ Written in Phase 5 (Collect Results) to `{TARGET_DIR}/resolution-summary.md`:
 **Date**: {RESOLUTION_TS}
 **Review**: {TARGET_DIR_REL}
 **Command**: /resolve
-**Gate level**: {GATE_LEVEL}
+**Gate level**: {GATE_LEVEL, with any level note}
 
 <!-- curation:on -->
 ## Decisions Citations

@@ -235,7 +235,7 @@ const SPECS: readonly LevelSpec[] = [IMPLEMENT, RESOLVE]
 /** The pinned report lines (arm g) and cut routes (arm h). */
 const IMPLEMENT_REPORT = "Display completion summary with phase status, `Gate level: {GATE_LEVEL}` with any level note, Validate's `Lint pack:` line if any, PR info, and next steps."
 const RESOLVE_DISPLAY = '**Total Issues**: {n}\n**Gate level**: {GATE_LEVEL, with any level note}\n\n### Results'
-const RESOLVE_HEADER = '**Command**: /resolve\n**Gate level**: {GATE_LEVEL}\n\n'
+const RESOLVE_HEADER = '**Command**: /resolve\n**Gate level**: {GATE_LEVEL, with any level note}\n\n'
 const ROUTE_EMPTY = 'If FIX_NOW list is empty: skip to Phase 5, then run Phases 9, 9b, 9c and 10.'
 const ROUTE_PUSH = '**Route after push:** VERIFICATION_STATUS = PASS → continue to Phase 8 (CI gate). FAILED or SKIPPED → skip Phase 8 and continue with Phase 9 and the later phases in order.'
 /** The phases that the empty route names, in the order it names them. The comparison sorts both sides. */
@@ -1878,9 +1878,11 @@ describe('the report names the level (AC-4)', () => {
   it('known-bad probes (/resolve): the display line and the summary header line are each required', () => {
     const body = bodyOf(RESOLVE)
     expect(collectReportDefects(body, RESOLVE), 'the unmodified display and summary header have no defect').toEqual([])
-    expect(collectReportDefects(seed(body, '**Gate level**: {GATE_LEVEL, with any level note}\n', ''), RESOLVE)).toEqual(['the display lacks the Gate level line between **Total Issues** and ### Results'])
+    expect(collectReportDefects(seed(body, RESOLVE_DISPLAY, '**Total Issues**: {n}\n\n### Results'), RESOLVE)).toEqual(['the display lacks the Gate level line between **Total Issues** and ### Results'])
     expect(collectReportDefects(seed(body, RESOLVE_HEADER, '**Command**: /resolve\n\n'), RESOLVE)).toEqual(['the summary template lacks the Gate level line right after **Command**: /resolve'])
-    expect(collectReportDefects(seed(body, '**Gate level**: {GATE_LEVEL}\n\n', '**Gate level**: {GATE_LEVEL}\n\n## Extra\n\n'), RESOLVE)).toEqual(['the Gate level header line is not followed by the curation arm or ## Statistics'])
+    expect(collectReportDefects(seed(body, RESOLVE_HEADER, `${RESOLVE_HEADER}## Extra\n\n`), RESOLVE)).toEqual(['the Gate level header line is not followed by the curation arm or ## Statistics'])
+    expect(collectReportDefects(seed(body, RESOLVE_HEADER, '**Command**: /resolve\n**Gate level**: {GATE_LEVEL}\n\n'), RESOLVE), 'the header without the level note').toEqual(['the summary template lacks the Gate level line right after **Command**: /resolve'])
+    expect(collectReportDefects(seed(body, RESOLVE_HEADER, '**Gate level**: {GATE_LEVEL, with any level note}\n**Command**: /resolve\n\n'), RESOLVE), 'the header line before the Command line').toEqual(['the summary template lacks the Gate level line right after **Command**: /resolve'])
   })
 })
 

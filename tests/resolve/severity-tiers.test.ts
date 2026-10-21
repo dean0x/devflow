@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { createHash } from 'crypto'
-import { loadFile, readAgentReference, resolveAgentSource, resolveCurationOffSource, sectionBetween, SANCTIONED_RESOLUTION_PRINT } from '../helpers.js'
+import { loadFile, readAgentReference, requireDistFile, resolveAgentSource, resolveCurationOffSource, sectionBetween, SANCTIONED_RESOLUTION_PRINT } from '../helpers.js'
 import { countOf, seed, seedOnce } from '../guards/level-guard-helpers.js'
 
 // -------------------------------------------------------------------------
@@ -23,6 +23,8 @@ const REFERENCE = readAgentReference('triage/severity-tiers.md')
 const TRIAGE_ON = resolveAgentSource('triage').content
 const TRIAGE_OFF = resolveCurationOffSource('agents', 'triage')
 if (TRIAGE_OFF === null) throw new Error('dist/curation-off/agents/triage.md is absent: run `npm run build:mds`')
+const RESOLVE_OFF = resolveCurationOffSource('commands', 'resolve')
+if (RESOLVE_OFF === null) throw new Error('dist/curation-off/commands/resolve.md is absent: run `npm run build:mds`')
 
 interface TriageBuild { readonly label: string; readonly body: string; readonly bytes: number; readonly sha256: string }
 /** The two Triage builds, each with the length and sha256 it had before the Gate Level bullet and section were added. */
@@ -306,6 +308,95 @@ export function collectSkillRegistrationDefects(skill: string): string[] {
 }
 
 // ---------------------------------------------------------------------------
+// The resolve side of the seam: resolve.mds reads what Triage writes
+// ---------------------------------------------------------------------------
+
+const FIX_NOW_OPENER = '- **FIX_NOW**: '
+/** The Phase 2 parse line: the prose-only value joins the risk-tier list, any other value counts as Careful, and SCOPE gives one line per issue. */
+const FIX_NOW_LINE = `- **FIX_NOW**: Valid issues assigned to Code agents (with risk tier: Standard | Careful | \`${PROSE_ONLY}\`; any other value counts as Careful). SCOPE gives one \`{id}: {tier}\` line per issue.`
+const PHASE_3_BULLETS = [
+  '- **Same-file issues** → one batch (one Code agent per file)',
+  '- **Distinct-file issues** → parallel Code agents',
+  '- **Max 5 issues per batch** — chunk large sets',
+] as const
+const ROUTE_EMPTY = 'If FIX_NOW list is empty: skip to Phase 5, then run Phases 9, 9b, 9c and 10.'
+const COLLECT_STATUS = '- `{status, commitShas, unresolved}` per batch'
+const COLLECT_VERIFICATION = '- `## Verification` block (commands run + results)'
+/** The Phase 4 collect bullet: only a prose-only issue that Code left unresolved moves to the backlog path. */
+const COLLECT_MOVE = '- An unresolved prose-only issue → FIX_SEPARATE in TRIAGE_RESULTS, Reason `needs a logic change`; other unresolved issues stay Blocked'
+const SEVERITY_SENTENCE = 'Open each Issue cell with its severity in brackets when it has one, as `[HIGH]`.'
+const DUPLICATE_PARAGRAPH_OPENER = 'DUPLICATE issues are listed **only** in `## Duplicates`'
+const TEMPLATE_LINE = 'Use the template from the Output Artifact section below.'
+const PHASE_7_SKIPPED = 'If no fixes were made (CODE_AGENT_RESULTS contains 0 commits) → set VERIFICATION_STATUS = SKIPPED, skip: "No fixes applied — skipping Verification Gate."'
+const ROUTE_PUSH = '**Route after push:** VERIFICATION_STATUS = PASS → continue to Phase 8 (CI gate). FAILED or SKIPPED → skip Phase 8 and continue with Phase 9 and the later phases in order.'
+const MANAGE_DEBT_GATE = 'If any issues are FIX_SEPARATE or TECH_DEBT, spawn Git agent.'
+const BACKFILL = 'backfill `Tracked = {ISSUE_REF}` in resolution-summary.md for each FIX_SEPARATE and TECH_DEBT item'
+const SUMMARY_HEADINGS = ['Fixed Issues', 'False Positives', 'By Design', 'Fix Separately', 'Escalations', 'Blocked', 'Duplicates'] as const
+const FIX_SEPARATELY_HEADER = '| Issue | File:Line | Reason | Tracked |'
+const SUMMARY_HEADER = '**Command**: /resolve\n**Gate level**: {GATE_LEVEL, with any level note}\n\n'
+
+/** The prose-only value of the BATCH bullet of the reference: the last code span of that line. */
+const verdictLiteral = (ref: string): string | null => {
+  const line = ref.split('\n').find(l => l.startsWith('- BATCH: ')) ?? ''
+  return /`([^`]+)`$/.exec(line)?.[1] ?? null
+}
+
+/**
+ * How a compiled /resolve falls short of the Triage reference, outside the curation arms: the parse line carries the
+ * prose-only value once and equal to the Verdicts value, Phase 3 keeps its three bullets and no Refactor spawn exists, the
+ * Phase 4 collect list moves only an unresolved prose-only issue, Phase 5 opens the Issue cell with the severity, the empty
+ * route, the Phase 7 SKIPPED line, the Phase 9 gate and backfill and the summary headings stay as they were, and the summary
+ * header names the level with any level note.
+ */
+export function collectResolveSideDefects(body: string, ref: string): string[] {
+  const out: string[] = []
+  const parse = body.split('\n').filter(line => line.startsWith(FIX_NOW_OPENER))
+  if (parse.length !== 1) out.push(`the body holds ${parse.length} "${FIX_NOW_OPENER}" parse lines, expected 1`)
+  else if (parse[0] !== FIX_NOW_LINE) out.push('the FIX_NOW parse line is not the pinned line')
+  const literal = parse.length === 1 ? (/ \| `([^`]+)`; any other value counts as Careful\)/.exec(parse[0])?.[1] ?? null) : null
+  if (literal === null) out.push('the parse line carries no prose-only value followed by "any other value counts as Careful"')
+  else if (literal !== verdictLiteral(ref)) out.push('the parse line value is not byte for byte the Verdicts value of the reference')
+  const n = countOf(body, PROSE_ONLY)
+  if (n !== 1) out.push(`the prose-only value occurs ${n} times in the command, expected once (in the parse line)`)
+  if (body.includes('subagent_type="Refactor"') || body.includes('agentType: "Refactor"')) out.push('the command spawns a Refactor agent')
+
+  const phase3 = sectionBetween(body, '### Phase 3: Batch FIX_NOW Issues\n', '### Phase 4:')
+  if (phase3 === null) out.push('no Phase 3')
+  else {
+    const bullets = phase3.split('\n').filter(line => line.startsWith('- '))
+    if (bullets.join('\n') !== PHASE_3_BULLETS.join('\n')) out.push('Phase 3 does not hold exactly its same-file, distinct-file and max-5 bullets')
+    if (countOf(phase3, ROUTE_EMPTY) !== 1) out.push('Phase 3 lacks the pinned empty-route line')
+  }
+
+  const phase4 = sectionBetween(body, '### Phase 4: Fix (Code agent × N)\n', '### Phase 5:')
+  const collect = phase4?.split('Collect from each Code agent:\n')[1]
+  if (collect === undefined) out.push('Phase 4 has no collect list')
+  else if (collect.split('\n').filter(line => line.startsWith('- ')).join('\n') !== [COLLECT_STATUS, COLLECT_VERIFICATION, COLLECT_MOVE].join('\n')) out.push('the Phase 4 collect list is not the status bullet, the Verification bullet and the move bullet, in that order')
+
+  const phase5 = sectionBetween(body, '### Phase 5: Write resolution-summary.md\n', '### Phase 6:')
+  if (phase5 === null) out.push('no Phase 5')
+  else {
+    const [dup, sentence, template] = [DUPLICATE_PARAGRAPH_OPENER, SEVERITY_SENTENCE, TEMPLATE_LINE].map(text => phase5.indexOf(text))
+    if (countOf(phase5, SEVERITY_SENTENCE) !== 1 || !(dup > -1 && dup < sentence && sentence < template)) out.push('Phase 5 lacks the severity sentence once, between the DUPLICATE paragraph and the template line')
+  }
+
+  const phase7 = sectionBetween(body, '### Phase 7: Verification Gate', '### Phase 8:')
+  if (phase7 === null || countOf(phase7, PHASE_7_SKIPPED) !== 1) out.push('Phase 7 lacks the pinned SKIPPED line')
+  if (countOf(body, ROUTE_PUSH) !== 1) out.push('the route after push is not the pinned line')
+  const phase9 = sectionBetween(body, '### Phase 9: Manage Debt', '### Phase 9b:')
+  if (phase9 === null || countOf(phase9, MANAGE_DEBT_GATE) !== 1 || countOf(phase9, 'OPERATION: manage-debt') !== 1) out.push('Phase 9 lacks the manage-debt gate for FIX_SEPARATE and TECH_DEBT')
+  if (phase9 === null || countOf(phase9, BACKFILL) !== 1) out.push('Phase 9 lacks the Tracked backfill line')
+
+  for (const heading of SUMMARY_HEADINGS) {
+    const count = countOf(body, `\n## ${heading}\n`)
+    if (count !== 1) out.push(`the summary template holds ${count} "## ${heading}" headings, expected 1`)
+  }
+  if (countOf(body, `\n${FIX_SEPARATELY_HEADER}\n`) !== 1) out.push('the Fix Separately table lost its Reason and Tracked columns')
+  if (countOf(body, SUMMARY_HEADER) !== 1) out.push('the summary header is not the Command line followed by "**Gate level**: {GATE_LEVEL, with any level note}"')
+  return out
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -543,5 +634,85 @@ describe('agent-references SKILL.md names the Triage reference (TP-40)', () => {
     expect(collectSkillRegistrationDefects(seedOnce(SKILL, `${SKILL_ROW}\n`, ''))).toEqual(['the Files table lacks the triage/severity-tiers.md row with owner Triage'])
     expect(collectSkillRegistrationDefects(seedOnce(SKILL, '| `triage/severity-tiers.md` | Triage |', '| `triage/severity-tiers.md` | Evaluate |'))).toEqual(['the Files table lacks the triage/severity-tiers.md row with owner Triage'])
     expect(collectSkillRegistrationDefects(seedOnce(SKILL, 'a failed or partial read applies no tier.', 'a failed read applies no tier.'))).toEqual(['the header comment lacks the Triage severity-tiers sentence'])
+  })
+})
+
+const RESOLVE_BUILDS: ReadonlyArray<{ readonly label: string; readonly body: string }> = [
+  { label: 'curation on', body: requireDistFile('resolve.md') },
+  { label: 'curation off', body: RESOLVE_OFF },
+]
+
+describe('resolve.mds reads what Triage writes (TP-5, TP-12, TP-14, TP-15, TP-16, TP-17, TP-19, TP-20, TP-33)', () => {
+  it.each(RESOLVE_BUILDS)('$label: the parse line, Phase 3, the Phase 4 collect list, Phase 5, the unchanged routes and the summary header', ({ body }) => {
+    expect(collectResolveSideDefects(body, REFERENCE)).toEqual([])
+  })
+
+  it('the prose-only value is 139 bytes and equal in the reference and the pinned parse line', () => {
+    expect(Buffer.byteLength(PROSE_ONLY)).toBe(139)
+    expect(verdictLiteral(REFERENCE)).toBe(PROSE_ONLY)
+    expect(FIX_NOW_LINE).toContain(`\`${PROSE_ONLY}\`; any other value counts as Careful`)
+  })
+
+  it('the move bullet gives the Reason that the prose-only value hands Code', () => {
+    expect(PROSE_ONLY).toContain('needs a logic change')
+    expect(COLLECT_MOVE).toContain('Reason `needs a logic change`')
+  })
+
+  it.each(RESOLVE_BUILDS)('$label: known-bad probes on the parse line: a paraphrased value, a second copy, a dropped Careful default and a dropped SCOPE sentence are each reported', ({ body }) => {
+    const parse = body.split('\n').find(line => line.startsWith(FIX_NOW_OPENER)) as string
+    const pinned = 'the FIX_NOW parse line is not the pinned line'
+    expect(collectResolveSideDefects(seedOnce(body, 'edit text alone;', 'edit text only;'), REFERENCE), 'a paraphrased value').toEqual([
+      pinned,
+      'the parse line value is not byte for byte the Verdicts value of the reference',
+      'the prose-only value occurs 0 times in the command, expected once (in the parse line)',
+    ])
+    expect(collectResolveSideDefects(seedOnce(body, parse, `${parse} \`${PROSE_ONLY}\``), REFERENCE), 'a second copy').toEqual([
+      pinned,
+      'the prose-only value occurs 2 times in the command, expected once (in the parse line)',
+    ])
+    expect(collectResolveSideDefects(seedOnce(body, '; any other value counts as Careful)', ')'), REFERENCE), 'the Careful default dropped').toEqual([
+      pinned,
+      'the parse line carries no prose-only value followed by "any other value counts as Careful"',
+    ])
+    expect(collectResolveSideDefects(seedOnce(body, ' SCOPE gives one `{id}: {tier}` line per issue.', ''), REFERENCE), 'the SCOPE sentence dropped').toEqual([pinned])
+    expect(collectResolveSideDefects(seedOnce(body, ' | Careful | `', ' | `'), REFERENCE), 'the Careful value dropped from the list').toEqual([pinned])
+    expect(collectResolveSideDefects(body, seedOnce(REFERENCE, 'edit text alone;', 'edit text only;')), 'the reference value changed').toEqual(['the parse line value is not byte for byte the Verdicts value of the reference'])
+  })
+
+  it.each(RESOLVE_BUILDS)('$label: known-bad probes on Phase 3 and the spawns: a Refactor spawn, a fourth bullet, a reworded bullet and a changed empty route are each reported', ({ body }) => {
+    const bullets = 'Phase 3 does not hold exactly its same-file, distinct-file and max-5 bullets'
+    expect(collectResolveSideDefects(seedOnce(body, '### Phase 3: Batch FIX_NOW Issues\n', '### Phase 3: Batch FIX_NOW Issues\n\nAgent(subagent_type="Refactor"):\n'), REFERENCE), 'a Refactor spawn').toEqual(['the command spawns a Refactor agent'])
+    expect(collectResolveSideDefects(seedOnce(body, '### Phase 3: Batch FIX_NOW Issues\n', '### Phase 3: Batch FIX_NOW Issues\n\nconst x = { agentType: "Refactor" }\n'), REFERENCE), 'a dynamic Refactor spawn').toEqual(['the command spawns a Refactor agent'])
+    expect(collectResolveSideDefects(seedOnce(body, `${PHASE_3_BULLETS[2]}\n`, `${PHASE_3_BULLETS[2]}\n- **Prose-only issues** → one batch\n`), REFERENCE), 'a fourth bullet').toEqual([bullets])
+    expect(collectResolveSideDefects(seedOnce(body, '**Max 5 issues per batch**', '**Max 9 issues per batch**'), REFERENCE), 'a reworded bullet').toEqual([bullets])
+    expect(collectResolveSideDefects(seedOnce(body, ROUTE_EMPTY, 'If FIX_NOW list is empty: skip to Phase 5.'), REFERENCE), 'the empty route').toEqual(['Phase 3 lacks the pinned empty-route line'])
+  })
+
+  it.each(RESOLVE_BUILDS)('$label: known-bad probes on Phase 4: a dropped move bullet, a move bullet before the Verification bullet, a changed Reason and a widened move are each reported', ({ body }) => {
+    const list = 'the Phase 4 collect list is not the status bullet, the Verification bullet and the move bullet, in that order'
+    expect(collectResolveSideDefects(seedOnce(body, `\n${COLLECT_MOVE}`, ''), REFERENCE), 'the move bullet dropped').toEqual([list])
+    expect(collectResolveSideDefects(seedOnce(body, `${COLLECT_VERIFICATION}\n${COLLECT_MOVE}`, `${COLLECT_MOVE}\n${COLLECT_VERIFICATION}`), REFERENCE), 'the move bullet first').toEqual([list])
+    expect(collectResolveSideDefects(seedOnce(body, 'Reason `needs a logic change`;', 'Reason `deferred`;'), REFERENCE), 'a changed Reason').toEqual([list])
+    expect(collectResolveSideDefects(seedOnce(body, 'An unresolved prose-only issue', 'An unresolved issue'), REFERENCE), 'a move for every unresolved issue').toEqual([list])
+    expect(collectResolveSideDefects(seedOnce(body, '; other unresolved issues stay Blocked', ''), REFERENCE), 'the Blocked rule dropped').toEqual([list])
+  })
+
+  it.each(RESOLVE_BUILDS)('$label: known-bad probes on Phase 5: a dropped severity sentence and one placed after the template line are each reported', ({ body }) => {
+    const lacks = 'Phase 5 lacks the severity sentence once, between the DUPLICATE paragraph and the template line'
+    expect(collectResolveSideDefects(seedOnce(body, `${SEVERITY_SENTENCE}\n\n`, ''), REFERENCE), 'dropped').toEqual([lacks])
+    expect(collectResolveSideDefects(seedOnce(body, `${SEVERITY_SENTENCE}\n\n${TEMPLATE_LINE}`, `${TEMPLATE_LINE}\n\n${SEVERITY_SENTENCE}`), REFERENCE), 'after the template line').toEqual([lacks])
+    expect(collectResolveSideDefects(seedOnce(body, 'severity in brackets', 'severity'), REFERENCE), 'reworded').toEqual([lacks])
+  })
+
+  it.each(RESOLVE_BUILDS)('$label: known-bad probes on the unchanged lines: the SKIPPED line, the route after push, the manage-debt gate, the backfill, a summary heading, the Fix Separately columns and the header are each reported', ({ body }) => {
+    expect(collectResolveSideDefects(seedOnce(body, 'skipping Verification Gate."', 'continuing."'), REFERENCE)).toEqual(['Phase 7 lacks the pinned SKIPPED line'])
+    expect(collectResolveSideDefects(seedOnce(body, 'FAILED or SKIPPED → skip Phase 8', 'FAILED → skip Phase 8'), REFERENCE)).toEqual(['the route after push is not the pinned line'])
+    expect(collectResolveSideDefects(seedOnce(body, MANAGE_DEBT_GATE, 'If any issues are FIX_SEPARATE, spawn Git agent.'), REFERENCE)).toEqual(['Phase 9 lacks the manage-debt gate for FIX_SEPARATE and TECH_DEBT'])
+    expect(collectResolveSideDefects(seedOnce(body, BACKFILL, 'backfill `Tracked = {ISSUE_REF}` for each deferred item'), REFERENCE)).toEqual(['Phase 9 lacks the Tracked backfill line'])
+    expect(collectResolveSideDefects(seedOnce(body, '\n## Fix Separately\n', '\n## Fix Separate\n'), REFERENCE)).toEqual(['the summary template holds 0 "## Fix Separately" headings, expected 1'])
+    expect(collectResolveSideDefects(seedOnce(body, `\n${FIX_SEPARATELY_HEADER}\n`, '\n| Issue | File:Line | Reason |\n'), REFERENCE)).toEqual(['the Fix Separately table lost its Reason and Tracked columns'])
+    const headerFault = 'the summary header is not the Command line followed by "**Gate level**: {GATE_LEVEL, with any level note}"'
+    expect(collectResolveSideDefects(seedOnce(body, SUMMARY_HEADER, '**Command**: /resolve\n**Gate level**: {GATE_LEVEL}\n\n'), REFERENCE), 'the note dropped').toEqual([headerFault])
+    expect(collectResolveSideDefects(seedOnce(body, SUMMARY_HEADER, '**Command**: /resolve\n\n'), REFERENCE), 'the line removed').toEqual([headerFault])
   })
 })
