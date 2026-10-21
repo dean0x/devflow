@@ -29,6 +29,8 @@ devflow memory --disable               # Toggle off
 devflow memory --status                # Check current state
 ```
 
+**Paused memory.** While git tracks a file in `.devflow/memory/` of the checkout, or a `.git` entry stands and git does not answer, devflow reads and writes no file there. Memory is paused for that checkout. On startup, resume and `/clear`, session start shows one notice. To find the tracked files, run `git ls-files .devflow`. To untrack a file, run `git rm --cached <file>` in the checkout. Each session start asks git again, so memory resumes when git tracks no file there. For the full rules, see the paused memory folder paragraph in the Working Memory section of `docs/reference/hooks.md`.
+
 ## File Structure
 
 ```
