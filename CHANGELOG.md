@@ -61,6 +61,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - A refused edit prints `DEGRADED (comment edit failed)`.
     An own comment with no readable id prints `DEGRADED (comment id unreadable)`.
     A failed edit never falls back to a new post.
+- **CI PASSING needs a passing GitHub Actions check on a mergeable PR** ([#618](https://github.com/dean0x/devflow/issues/618)).
+  - The CI wait and the merge-readiness report now read `CI PASSING` only when at least one GitHub Actions check passed on the PR head, no check is pending or failing, and GitHub reports the PR mergeable.
+    Before, a PR with only external checks, for example a scanner, could read `CI PASSING` while its build and tests never ran.
+    A PR with a merge conflict could do the same, because GitHub starts no workflow on it.
+  - These cases now read "status unknown" instead of a pass or "no CI":
+    a PR with only external checks (`reason=no-workflow-check`), a PR with a merge conflict (`reason=merge-conflict`), and a repository with active workflows but no run on the head (`reason=no-workflow-check`).
+    A merge state that GitHub does not report in time ends the wait with `reason=deadline`.
+  - "No CI" needs a mergeable PR with no checks and no active workflow file under `.github/workflows/`. A repository with no workflow file still reads "no CI".
+    When a PR has no checks and the token cannot read Actions workflows, the wait ends with `reason=gh-failed`.
+  - The merge-readiness report reads CI for the PR head. It counts a pass or "no CI" only when the PR head it read is the head of the evidence.
+    It reads CI once and does not wait, so right after a push or a base move it can say "status unknown".
+  - If your CI is not GitHub Actions, or your workflow does not run on the PR (stacked PRs, `paths` filters, release-only workflows, fork PRs that wait for approval), check the CI result on the PR page before merging.
+    The gate then reports "CI status unknown — verify manually before merging".
+  - Known limit: `CI PASSING` shows that a GitHub Actions check passed, not that the test workflow ran by name.
 
 ---
 
