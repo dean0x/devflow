@@ -79,7 +79,7 @@ const TEMPLATE_CALL = 'agent(`'
 
 /**
  * The text of each Evaluate spawn: from the nearest template-literal call before the marker up to and including the
- * marker. The /dynamic-plan call opens 26 lines above its marker, so a fixed line look-back would cut it short.
+ * marker. The /dynamic-plan call opens 25 lines above its marker, so a fixed line look-back would cut it short.
  */
 function evaluateSpawnTexts(body: string): string[] {
   return [...body.matchAll(EVALUATE_MARKER)].map(marker => {
