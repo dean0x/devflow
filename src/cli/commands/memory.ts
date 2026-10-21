@@ -8,6 +8,7 @@ import { writeSettingsFileAtomic } from '../../core/fs-atomic.js';
 import { discoverProjectGitRoots } from '../../targets/claude-code/post-install.js';
 import { getGitRoot } from '../../core/git.js';
 import { firstSymbolicLink } from '../../core/linked-path.js';
+import { pooled } from '../../core/pool.js';
 import {
   getMemoryDir,
   getPendingTurnsPath,
@@ -276,6 +277,9 @@ export async function filterProjectsWithMemory(gitRoots: string[]): Promise<stri
   return checks.filter((c) => c.has).map((c) => c.root);
 }
 
+/** At most this many projects are checked and cleaned at once, so `memory --clear` starts few git processes. */
+export const CLEAN_QUEUE_POOL_LIMIT = 8;
+
 /**
  * Clean up memory queue files from the given project paths.
  * Skips projects where the background updater lock is held to avoid data loss,
@@ -283,13 +287,16 @@ export async function filterProjectsWithMemory(gitRoots: string[]): Promise<stri
  * folder, or a `.git` entry stands and git did not answer; `paused` names each such
  * project with the reason), and refuses, deleting nothing there, a project whose
  * `.devflow` or `.devflow/memory` is a symbolic link (D-CLI-NO-SYMLINK); `refused` names
- * each such link. Returns the count of projects from which at least one file was removed.
+ * each such link. At most {@link CLEAN_QUEUE_POOL_LIMIT} projects are handled at once.
+ * Returns the count of projects from which at least one file was removed.
  */
 export async function cleanQueueFiles(
   projectPaths: string[],
 ): Promise<{ cleaned: number; projects: string[]; refused: string[]; paused: Array<{ project: string; reason: PauseReason }> }> {
-  const results = await Promise.all(
-    projectPaths.map(async (project): Promise<{ cleaned: string } | { refused: string } | { paused: PauseReason; project: string } | null> => {
+  const settled = await pooled(
+    projectPaths,
+    CLEAN_QUEUE_POOL_LIMIT,
+    async (project): Promise<{ cleaned: string } | { refused: string } | { paused: PauseReason; project: string } | null> => {
       const reason = await memoryPauseReason(project);
       if (reason !== null) return { paused: reason, project };
       const memDir = getMemoryDir(project);
@@ -314,8 +321,12 @@ export async function cleanQueueFiles(
         fs.unlink(getPendingTurnsProcessingPath(project)).then(() => true).catch(() => false),
       ]);
       return (q || pr) ? { cleaned: project } : null;
-    }),
+    },
   );
+  const results = settled.map((entry) => {
+    if (entry.status === 'rejected') throw entry.reason;
+    return entry.value;
+  });
   const cleanedProjects = results.flatMap((r) => (r !== null && 'cleaned' in r ? [r.cleaned] : []));
   const refused = results.flatMap((r) => (r !== null && 'refused' in r ? [r.refused] : []));
   const paused = results.flatMap((r) => (r !== null && 'paused' in r ? [{ project: r.project, reason: r.paused }] : []));

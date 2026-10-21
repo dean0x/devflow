@@ -3,7 +3,14 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { exec, execFileSync } from 'child_process';
-import { addMemoryHooks, removeMemoryHooks, hasMemoryHooks, countMemoryHooks, convergeMemoryHooks, cleanQueueFiles, hasMemoryDir, filterProjectsWithMemory, MEMORY_MIN_PERMISSION_VERSION, workingMemoryNote } from '../src/cli/commands/memory.js';
+import { addMemoryHooks, removeMemoryHooks, hasMemoryHooks, countMemoryHooks, convergeMemoryHooks, cleanQueueFiles, CLEAN_QUEUE_POOL_LIMIT, hasMemoryDir, filterProjectsWithMemory, MEMORY_MIN_PERMISSION_VERSION, workingMemoryNote } from '../src/cli/commands/memory.js';
+import { probeTrackedArea } from '../src/core/tracked-areas.js';
+
+// A pass-through spy: every test below runs the real probe unless it swaps one in.
+vi.mock('../src/core/tracked-areas.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/core/tracked-areas.js')>();
+  return { ...actual, probeTrackedArea: vi.fn(actual.probeTrackedArea) };
+});
 
 /**
  * Seed a temp HOME that stands in for `~/.devflow`.
@@ -497,6 +504,36 @@ describe('cleanQueueFiles', () => {
     expect(result.projects).toContain(projA);
     expect(result.projects).toContain(projB);
     expect(result.projects).toContain(projC);
+  });
+
+  it('starts at most CLEAN_QUEUE_POOL_LIMIT area probes at once, however many projects are known', async () => {
+    const actualProbe = (await vi.importActual<typeof import('../src/core/tracked-areas.js')>('../src/core/tracked-areas.js')).probeTrackedArea;
+    let inFlight = 0;
+    let peak = 0;
+    vi.mocked(probeTrackedArea).mockImplementation(async () => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      inFlight -= 1;
+      return { answer: 'untracked', cause: null };
+    });
+    try {
+      const projects: string[] = [];
+      for (let i = 0; i < CLEAN_QUEUE_POOL_LIMIT * 3; i += 1) {
+        const project = path.join(tmpDir, `project-${i}`);
+        await fs.mkdir(path.join(project, '.devflow', 'memory'), { recursive: true });
+        await fs.writeFile(path.join(project, '.devflow', 'memory', '.pending-turns.jsonl'), 'data');
+        projects.push(project);
+      }
+
+      const result = await cleanQueueFiles(projects);
+
+      expect(result.cleaned, 'every project is still cleaned').toBe(projects.length);
+      expect(peak, 'the probes ran side by side').toBeGreaterThan(1);
+      expect(peak, 'but never more than the bound at once').toBeLessThanOrEqual(CLEAN_QUEUE_POOL_LIMIT);
+    } finally {
+      vi.mocked(probeTrackedArea).mockImplementation(actualProbe);
+    }
   });
 
   it('cleans unlocked projects and skips locked ones in same batch', async () => {
