@@ -46,7 +46,7 @@ import { readFileSync } from 'fs'
 import * as path from 'path'
 
 import { ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT, isAgentBlock, parseFences, requireDistFile, resolveAgentSource, resolveCurationOffSource, sectionBetween, tableRows } from '../helpers.js'
-import { DECIDED_ROWS, LEVELS, LEVEL_CELL_INDEX, OPEN, POLISH_SPAWN, REFS, RULES_INTRO, TABLE_SEPARATOR, countOf, parseRef, referenceRows, rowCells, sectionOf, seed, seedOnce, tableLines, tableRowLines, withRows, type LevelCmd, type ParsedRef } from './level-guard-helpers.js'
+import { DECIDED_ROWS, FULL_LOOP_LINES, LEVELS, LEVEL_CELL_INDEX, OPEN, POLISH_SPAWN, REFS, RULES_INTRO, TABLE_SEPARATOR, countOf, headingSection, parseRef, referenceRows, rowCells, sectionOf, seed, seedOnce, tableLines, tableRowLines, withRows, type LevelCmd, type ParsedRef } from './level-guard-helpers.js'
 
 // ---------------------------------------------------------------------------
 // The decided text, written by hand from the issue and the gate decisions
@@ -272,10 +272,7 @@ function protectedOf(spec: LevelSpec, body: string): string[] {
 
 /** The compiled `### Phase N:` section, up to the next phase heading: where a row's spawns sit. Empty when the phase is absent. */
 function phaseSection(body: string, num: string): string {
-  const from = body.indexOf(`\n### Phase ${num}: `)
-  if (from === -1) return ''
-  const next = body.indexOf('\n### Phase ', from + 1)
-  return next === -1 ? body.slice(from) : body.slice(from, next)
+  return headingSection(body, `### Phase ${num}: `, '### Phase ') ?? ''
 }
 
 /** The block as the command carries it: the read paragraph, a blank line, then the three bullets. */
@@ -953,7 +950,7 @@ const EVALUATE_LEVEL_SCOPE = '**Level scope:** report only a missed or partly me
 const EVALUATE_KEEP_WORDS = ['security, ', 'data handling, ', 'negative and ', 'docs ones included', 'a behaviour defect (incomplete)', 'intent_drift', 'scope_creep', 'asks for a test', 'it is missing or weak in FILES_CHANGED'] as const
 /** The items that the scope drops, and no others. */
 const EVALUATE_DROPPED = ['docs', 'KB', 'CHANGELOG', 'comment', 'cosmetic']
-/** The retired input form: a level line found by position among the lines ("the first GATE_LEVEL line"), not by line 1. */
+/** The position form of the level input: a level line found by position among the lines ("the first GATE_LEVEL line"), not by line 1. Evaluate must not use it; Validate still does (#610). */
 const FIRST_LEVEL_LINE = /\bfirst\s+`?GATE_LEVEL:?`?\s+line\b/i
 /** The Boundaries lines that a level never edits: what is MISALIGNED, and what Evaluate never does. */
 const EVALUATE_MISALIGNED_LINES = ['- Any missing plan steps or acceptance criteria', '- Out-of-scope additions not justified by design', '- Partial implementations', '- Intent drift']
@@ -965,29 +962,46 @@ const droppedItems = (scope: string): string[] => (/Drop only (.+?) items that n
 /** The lines of `text` that open with `prefix`. */
 const linesOpening = (text: string, prefix: string): string[] => text.split('\n').filter(line => line.startsWith(prefix))
 
-/** The defects of one pinned line of the Evaluate agent: once, opening `prefix`, inside the section `from` to `to`, and the pinned text. */
-function evaluateLineDefects(evaluate: string, label: string, prefix: string, pinned: string, from: string, to: string): string[] {
-  const lines = linesOpening(evaluate, prefix)
+/** One pinned line of a text: the `label` the defects name, the `prefix` the line opens with, the exact `pinned` text, and the section `from` to `to` it must lie in. */
+interface PinnedLine {
+  readonly text: string
+  readonly label: string
+  readonly prefix: string
+  readonly pinned: string
+  readonly from: string
+  readonly to: string
+}
+
+/** The defects of one pinned line: held once, inside its section, and equal to the pinned text. */
+function pinnedLineDefects({ text, label, prefix, pinned, from, to }: PinnedLine): string[] {
+  const lines = linesOpening(text, prefix)
   if (lines.length !== 1) return [`${label} appears ${lines.length} times, expected once`]
-  const where = sectionBetween(evaluate, from, to)
+  const where = sectionBetween(text, from, to)
   return [
     ...(where?.includes(lines[0]) === true ? [] : [`${label} is not between "${from}" and "${to}"`]),
     ...(lines[0] === pinned ? [] : [`${label} is not the pinned text`]),
   ]
 }
 
+/** The defects of the dropped items of a scope paragraph: none for an empty paragraph, and the items listed when they are not exactly the dropped ones. */
+function droppedDefects(scope: string): string[] {
+  if (scope === '') return []
+  const actual = droppedItems(scope)
+  if (actual.join(',') === EVALUATE_DROPPED.join(',')) return []
+  return [`the Level scope drops ${actual.length === 0 ? 'nothing' : actual.join(', ')}, expected exactly ${EVALUATE_DROPPED.join(', ')}`]
+}
+
 /** #483: the Evaluate agent reads a level from prompt line 1 only, and its Level scope keeps what a criterion or step asks for. */
 export function collectEvaluateLevelDefects(evaluate: string): string[] {
-  const input = evaluateLineDefects(evaluate, 'the GATE_LEVEL input bullet', '- **GATE_LEVEL**', EVALUATE_LEVEL_INPUT, '## Input Context', '## Responsibilities')
-  const scope = evaluateLineDefects(evaluate, 'the Level scope paragraph', '**Level scope:**', EVALUATE_LEVEL_SCOPE, '## Responsibilities', '**Gate ownership:**')
+  const input = pinnedLineDefects({ text: evaluate, label: 'the GATE_LEVEL input bullet', prefix: '- **GATE_LEVEL**', pinned: EVALUATE_LEVEL_INPUT, from: '## Input Context', to: '## Responsibilities' })
+  const scope = pinnedLineDefects({ text: evaluate, label: 'the Level scope paragraph', prefix: '**Level scope:**', pinned: EVALUATE_LEVEL_SCOPE, from: '## Responsibilities', to: '**Gate ownership:**' })
   const text = linesOpening(evaluate, '**Level scope:**')[0] ?? ''
   const kept = text === '' ? [] : EVALUATE_KEEP_WORDS.filter(word => !text.includes(word)).map(word => `the Level scope lacks "${word}"`)
-  const dropped = text === '' || droppedItems(text).join(',') === EVALUATE_DROPPED.join(',') ? [] : [`the Level scope drops ${droppedItems(text).join(', ') || 'nothing'}, expected exactly ${EVALUATE_DROPPED.join(', ')}`]
   const evidence = /evidence/i.test(text) ? ['the Level scope names evidence'] : []
   const firstLine = FIRST_LEVEL_LINE.test(evaluate) ? ['the agent finds the level line by position: only prompt line 1 counts'] : []
   const boundaries = sectionBetween(evaluate, '## Boundaries', null) ?? ''
   const lists = [...EVALUATE_MISALIGNED_LINES, ...EVALUATE_NEVER_LINES].filter(line => countOf(boundaries, `\n${line}\n`) !== 1).map(line => `Boundaries lacks the line "${line}" once`)
-  return [...input, ...scope, ...kept, ...dropped, ...evidence, ...firstLine, ...lists]
+  return [...input, ...scope, ...kept, ...droppedDefects(text), ...evidence, ...firstLine, ...lists]
 }
 
 // ---------------------------------------------------------------------------
@@ -1025,6 +1039,39 @@ export function collectSinglePassDefects(ref: string): string[] {
   return [...rowDefects, ...bulletDefects]
 }
 
+/** The steps of the `full` re-check loop that the `single-pass` bullet replaces: "in place of steps N and M". */
+const REPLACED_STEPS = /in place of steps (\d+) and (\d+)\b/
+
+/**
+ * #483: the numbers that the `single-pass` bullet of `ref` names as the steps it replaces are the leading numbers of the two
+ * numbered steps of the `full` re-check loop that it replaces: the test of the attempt cap and the report to the user. A
+ * renumber of the loop, or of the bullet alone, is reported.
+ */
+export function collectSinglePassStepDefects(ref: string, loopLines: readonly string[] = FULL_LOOP_LINES): string[] {
+  const wanted = [loopLines[1], loopLines[3]].map(line => /^(\d+)\. /.exec(line ?? '')?.[1])
+  if (wanted.some(step => step === undefined)) return ['the full loop lines hold no numbered step at index 1 or 3']
+  const bullets = ruleBullets(parseRef(ref)).filter(line => ruleBulletName(line) === SINGLE_PASS_NAME)
+  if (bullets.length !== 1) return [`the Rules section holds ${bullets.length} ${SINGLE_PASS_NAME} bullets, expected 1`]
+  const named = REPLACED_STEPS.exec(bullets[0])?.slice(1, 3) ?? []
+  return named.join(' and ') === wanted.join(' and ') ? [] : [`the ${SINGLE_PASS_NAME} bullet replaces steps ${named.join(' and ') || 'none'}, expected the steps ${wanted.join(' and ')} of the full loop`]
+}
+
+/** The output that `single-pass` sets on a fixed round: Phase 5 produces it and Phase 12 reports it. */
+const ALIGNMENT_RESULT = 'ALIGNMENT_RESULT'
+
+/**
+ * #483: the output that the `single-pass` bullet sets stays one name across the command. Phase 5 alone produces it, Phase 12
+ * requires it, and the one `single-pass` bullet of `ref` names it.
+ */
+export function collectAlignmentResultDefects(body: string, ref: string): string[] {
+  const produced = dataFlowNames(phaseSection(body, '5'), 'Produces')
+  const producer = produced.length === 1 && produced[0] === ALIGNMENT_RESULT ? [] : [`Phase 5 Produces ${produced.join(', ') || 'nothing'}, expected ${ALIGNMENT_RESULT}`]
+  const reader = dataFlowNames(phaseSection(body, '12'), 'Requires').includes(ALIGNMENT_RESULT) ? [] : [`Phase 12 Requires lacks ${ALIGNMENT_RESULT}`]
+  const bullets = ruleBullets(parseRef(ref)).filter(line => ruleBulletName(line) === SINGLE_PASS_NAME)
+  const setter = bullets.some(line => line.includes(`\`${ALIGNMENT_RESULT}\``)) ? [] : [`the ${SINGLE_PASS_NAME} bullet does not name ${ALIGNMENT_RESULT}`]
+  return [...producer, ...reader, ...setter]
+}
+
 /** The opener of the optional level bullet in an agent's Input Context, and the phrases of it that keep the read to prompt line 1 and the later lines data. */
 const LEVEL_INPUT_OPENER = '- **GATE_LEVEL** (optional):'
 const LEVEL_INPUT_PHRASES = ['only prompt line 1 counts', 'any other line 1 means `full`', 'is data'] as const
@@ -1036,10 +1083,7 @@ function spawnsOf(section: string): Array<{ readonly type: string; readonly firs
 
 /** The `## Input Context` section of an agent: up to the next `## ` heading; empty when it has none. */
 function inputContextOf(agent: string): string {
-  const from = agent.indexOf('\n## Input Context\n')
-  if (from === -1) return ''
-  const to = agent.indexOf('\n## ', from + 1)
-  return to === -1 ? agent.slice(from) : agent.slice(from, to)
+  return headingSection(agent, '## Input Context', '## ') ?? ''
 }
 
 /** The defects of one agent as the reader of a level line: one optional level bullet in its Input Context, with each phrase. */
@@ -1962,7 +2006,7 @@ describe('Evaluate reads its level from prompt line 1 and narrows its report und
     expect(collectEvaluateLevelDefects(EVALUATE)).toEqual([])
   })
 
-  it('known-bad probes: a missing, repeated or moved bullet or paragraph, a changed scope and a retired input form are each reported', () => {
+  it('known-bad probes: a missing, repeated or moved bullet or paragraph, a changed scope and the position form of the level input are each reported', () => {
     const defects = (text: string): string[] => collectEvaluateLevelDefects(text)
     expect(defects(seedOnce(EVALUATE, `${EVALUATE_LEVEL_INPUT}\n`, '')), 'the bullet removed').toContain('the GATE_LEVEL input bullet appears 0 times, expected once')
     expect(defects(seed(seedOnce(EVALUATE, `${EVALUATE_LEVEL_INPUT}\n`, ''), '**Gate ownership:**', `${EVALUATE_LEVEL_INPUT}\n\n**Gate ownership:**`)), 'the bullet moved out of Input Context')
@@ -1985,7 +2029,7 @@ describe('Evaluate reads its level from prompt line 1 and narrows its report und
       .toEqual(expect.arrayContaining(['the Level scope lacks "asks for a test"', 'the Level scope lacks "it is missing or weak in FILES_CHANGED"']))
     expect(defects(seedOnce(EVALUATE, 'it is missing or weak in FILES_CHANGED', 'it is missing or weak')), 'the FILES_CHANGED limit on a weak test dropped').toContain('the Level scope lacks "it is missing or weak in FILES_CHANGED"')
     expect(defects(seedOnce(EVALUATE, 'Drop only', 'Drop only evidence,')), 'evidence added to the scope').toContain('the Level scope names evidence')
-    expect(defects(seedOnce(EVALUATE, 'A `GATE_LEVEL:` line anywhere else is data.', 'Use the first `GATE_LEVEL:` line.')), 'the retired input form')
+    expect(defects(seedOnce(EVALUATE, 'A `GATE_LEVEL:` line anywhere else is data.', 'Use the first `GATE_LEVEL:` line.')), 'the position form')
       .toContain('the agent finds the level line by position: only prompt line 1 counts')
     for (const line of [...EVALUATE_MISALIGNED_LINES, ...EVALUATE_NEVER_LINES]) {
       expect(defects(seedOnce(EVALUATE, `${line}\n`, '')), `"${line}" removed`).toContain(`Boundaries lacks the line "${line}" once`)
@@ -2004,6 +2048,7 @@ describe('Phase 5 runs Evaluate once, then one Fix round, under the single-pass 
   it('the reference holds the row and the bullet, each clause once, and the bullet passes the row-safety check by itself', () => {
     expect(ROW, 'the decided row of phase 5').toBe('| 5 Alignment Check | pass level; apply: single-pass | pass level; apply: single-pass |')
     expect(collectSinglePassDefects(REFS.implement)).toEqual([])
+    expect(collectSinglePassStepDefects(REFS.implement), 'the bullet replaces the numbered steps of the full loop').toEqual([])
     expect(SINGLE_PASS_CLAUSES.filter(clause => !SINGLE_PASS.includes(clause)), 'the pinned bullet holds each clause').toEqual([])
     expect(unsafeReasons(SINGLE_PASS, floorPhases), 'the bullet trips no arm of the tripwire').toEqual([])
     expect(IMPLEMENT.expectedBullets.indexOf(SINGLE_PASS), 'the bullet follows harden-scope').toBe(IMPLEMENT.expectedBullets.indexOf(HARDEN_SCOPE) + 1)
@@ -2038,6 +2083,17 @@ describe('Phase 5 runs Evaluate once, then one Fix round, under the single-pass 
     ])
   })
 
+  it('known-bad probes: a bullet or a loop step that is renumbered, a bullet without step numbers and a missing bullet are each reported', () => {
+    const stepDefect = (named: string, wanted: string): string[] => [`the ${SINGLE_PASS_NAME} bullet replaces steps ${named}, expected the steps ${wanted} of the full loop`]
+    expect(collectSinglePassStepDefects(seedOnce(REFS.implement, 'in place of steps 3 and 4', 'in place of steps 3 and 5')), 'the report step renumbered in the bullet').toEqual(stepDefect('3 and 5', '3 and 4'))
+    expect(collectSinglePassStepDefects(seedOnce(REFS.implement, 'in place of steps 3 and 4', 'in place of steps 2 and 4')), 'the cap step renumbered in the bullet').toEqual(stepDefect('2 and 4', '3 and 4'))
+    expect(collectSinglePassStepDefects(REFS.implement, FULL_LOOP_LINES.map((line, i) => (i === 3 ? line.replace('4.', '5.') : line))), 'the report step renumbered in the loop').toEqual(stepDefect('3 and 4', '3 and 5'))
+    expect(collectSinglePassStepDefects(REFS.implement, FULL_LOOP_LINES.map((line, i) => (i === 1 ? line.replace('3.', '2.') : line))), 'the cap step renumbered in the loop').toEqual(stepDefect('3 and 4', '2 and 4'))
+    expect(collectSinglePassStepDefects(seedOnce(REFS.implement, 'in place of steps 3 and 4, ', '')), 'the bullet names no steps').toEqual(stepDefect('none', '3 and 4'))
+    expect(collectSinglePassStepDefects(withRows(REFS.implement, [ROW], [])), 'no bullet').toEqual(['the Rules section holds 0 single-pass bullets, expected 1'])
+    expect(collectSinglePassStepDefects(REFS.implement, ['2. Increment `alignment_fix_count`']), 'a loop without the numbered steps').toEqual(['the full loop lines hold no numbered step at index 1 or 3'])
+  })
+
   it.each(implementBuilds)('$label: the decided row and bullet pass the grammar, decided-row and row-safety checks of the real reference', ({ spec, body }) => {
     expect(collectLevelReferenceDefects(REFS.implement, spec, body)).toEqual([])
     expect(collectDecidedRowDefects(REFS.implement, spec)).toEqual([])
@@ -2064,6 +2120,24 @@ describe('Phase 5 runs Evaluate once, then one Fix round, under the single-pass 
       expect(unsafeReasons(line, floorPhases), variant).toEqual([reason])
       expect(collectRowSafetyDefects(withRows(REFS.implement, [ROW], [line]), IMPLEMENT, body), `${variant}: in the reference`).toContain(`Rules bullet "${SINGLE_PASS_NAME}" ${reason}`)
     }
+  })
+
+  it.each(implementBuilds)('$label: Phase 5 produces ALIGNMENT_RESULT, Phase 12 requires it, and the single-pass bullet names it', ({ body }) => {
+    expect(collectAlignmentResultDefects(body, REFS.implement)).toEqual([])
+    expect(dataFlowNames(phaseSection(body, '5'), 'Produces'), 'Phase 5 produces the output that Phase 12 reports').toEqual([ALIGNMENT_RESULT])
+    expect(SINGLE_PASS, 'the pinned bullet sets the output that the guard watches').toContain(`set \`${ALIGNMENT_RESULT}\` to exactly`)
+  })
+
+  it.each(implementBuilds)('$label: known-bad probes: ALIGNMENT_RESULT renamed or missing at Phase 5, at Phase 12 or in the single-pass bullet is reported', ({ body }) => {
+    const renamed = seedIn(body, '### Phase 5: Alignment Check', '### Phase 6:', `**Produces:** ${ALIGNMENT_RESULT}`, '**Produces:** ALIGNMENT_OUTCOME')
+    expect(collectAlignmentResultDefects(renamed, REFS.implement), 'the Phase 5 output renamed').toEqual([`Phase 5 Produces ALIGNMENT_OUTCOME, expected ${ALIGNMENT_RESULT}`])
+    const dropped = seedIn(body, '### Phase 5: Alignment Check', '### Phase 6:', /^\*\*Produces:\*\* .+\n/m, '')
+    expect(collectAlignmentResultDefects(dropped, REFS.implement), 'the Phase 5 Produces line removed').toEqual([`Phase 5 Produces nothing, expected ${ALIGNMENT_RESULT}`])
+    const reader = seedIn(body, '### Phase 12: Report', null, /^(\*\*Requires:\*\* .*)ALIGNMENT_RESULT/m, '$1ALIGNMENT_OUTCOME')
+    expect(collectAlignmentResultDefects(reader, REFS.implement), 'the Phase 12 reader renamed').toEqual([`Phase 12 Requires lacks ${ALIGNMENT_RESULT}`])
+    const setter = seedOnce(REFS.implement, `set \`${ALIGNMENT_RESULT}\``, 'set `ALIGNMENT_OUTCOME`')
+    expect(collectAlignmentResultDefects(body, setter), 'the bullet sets a renamed output').toEqual([`the ${SINGLE_PASS_NAME} bullet does not name ${ALIGNMENT_RESULT}`])
+    expect(collectAlignmentResultDefects(body, withRows(REFS.implement, [ROW], [])), 'no bullet').toEqual([`the ${SINGLE_PASS_NAME} bullet does not name ${ALIGNMENT_RESULT}`])
   })
 
   it.each(BUILDS)('$label: every agent that a pass level phase spawns, except one whose prompt opens OPERATION:, reads the level from prompt line 1 only', ({ spec, body }) => {
