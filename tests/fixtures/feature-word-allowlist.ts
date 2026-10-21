@@ -123,13 +123,6 @@ export const FEATURE_WORD_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
       'session-start move finds the old folder.',
   },
   {
-    path: `${HOOKS}session-start-context`,
-    pattern: /\.devflow\/learning\/`?(?: or| to) `?\.devflow\/curation\//,
-    reason:
-      'The fixed notice of a skipped move, and the comment above it, name the pre-rename folder ' +
-      'and the current one, so the user sees which folders git tracks.',
-  },
-  {
     path: HOOKS,
     pattern: /\bold learning\/ (?:ledger )?(?:folder|name)/,
     reason:
