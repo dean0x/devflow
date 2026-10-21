@@ -160,6 +160,14 @@ export const FEATURE_WORD_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
       'turns the feature off.',
   },
   {
+    path: `${HOOKS}queue-append`,
+    pattern: /\$\{_qs_dir\}\/learning(?:\.backup-\*(?:\/\*\*)?)?"|\.devflow\/learning\/\*\|/,
+    reason:
+      'The tracked-area check lists the pre-rename ledger folder and its backup folders beside ' +
+      'the current folder, and the queue gate maps a queue below the pre-rename folder to the ' +
+      'curation area. The lists are the ones the shared check holds.',
+  },
+  {
     path: `${HOOKS}session-start-context`,
     pattern: /agents\.learning\.model|agent `learning`\.|drops `learning`,/,
     reason:

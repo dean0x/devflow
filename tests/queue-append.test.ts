@@ -1345,6 +1345,225 @@ describe('queue_read_gates <manifest> <root>: the repository narrows, never wide
   });
 });
 
+// ---------------------------------------------------------------------------
+// The tracked-area gate: no row for a queue whose area git tracks (or did not answer for),
+// decided before the row is built, with the git calls counted.
+// ---------------------------------------------------------------------------
+
+describe('queue_append_both and queue_append_row: the tracked-area gate', () => {
+  const writeFakeExecutable = useWarmFakeExecutables();
+  let tmpDir: string;
+  let root: string;
+  let memory: string;
+  let curation: string;
+  let forkLog: string;
+  let gitLog: string;
+
+  const git = (...args: string[]): void => {
+    execSync(`git ${args.map((a) => `'${a}'`).join(' ')}`, { cwd: root, stdio: 'pipe' });
+  };
+
+  beforeEach(() => {
+    tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'queue-append-gate-')));
+    root = path.join(tmpDir, 'repo');
+    memory = path.join(root, '.devflow', 'memory', '.pending-turns.jsonl');
+    curation = path.join(root, '.devflow', 'curation', '.pending-turns.jsonl');
+    forkLog = path.join(tmpDir, 'forks.log');
+    gitLog = path.join(tmpDir, 'git.log');
+    const shimDir = path.join(tmpDir, 'shim');
+    fs.mkdirSync(root);
+    fs.mkdirSync(shimDir);
+    git('init', '-q');
+    for (const name of ['node', 'jq', 'git']) {
+      const real = resolveOnPath(name, process.env.PATH ?? '/usr/bin:/bin');
+      if (real === undefined) continue;
+      const log = name === 'git' ? gitLog : forkLog;
+      writeFakeExecutable(path.join(shimDir, name), `#!/bin/bash\necho ${name === 'git' ? '"$*"' : name} >> "${log}"\nexec "${real}" "$@"\n`);
+    }
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  const shimEnv = (): NodeJS.ProcessEnv => ({
+    ...process.env,
+    PATH: `${path.join(tmpDir, 'shim')}:${process.env.PATH ?? '/usr/bin:/bin'}`,
+  });
+  const forks = (): string[] => (fs.existsSync(forkLog) ? fs.readFileSync(forkLog, 'utf-8').trim().split('\n').filter(Boolean) : []);
+  /** The `git ls-files` calls the gate made. */
+  const listCalls = (): string[] => (fs.existsSync(gitLog) ? fs.readFileSync(gitLog, 'utf-8').split('\n').filter((l) => l.includes(' ls-files ')) : []);
+  const reset = (): void => {
+    fs.rmSync(forkLog, { force: true });
+    fs.rmSync(gitLog, { force: true });
+  };
+  /** Run `script` with the dependency chain sourced and `log` echoing to stdout. */
+  const run = (script: string): { stdout: string; exitCode: number } => {
+    const res = spawnSync('bash', ['-c', withQueueAppend(`log() { echo "LOG: $*"; }\n${script}`)], { env: shimEnv(), encoding: 'utf-8' });
+    return { stdout: res.stdout, exitCode: res.status ?? 1 };
+  };
+  const both = (flags = '"true" "true"', memoryRoot = root, curationRoot = root): { stdout: string; exitCode: number } =>
+    run(`queue_append_both "${memoryRoot}" "${memory}" "${curationRoot}" "${curation}" ${flags} "user" "we chose X over Y" "5"`);
+  const track = (...rels: string[]): void => {
+    for (const rel of rels) {
+      fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+      fs.writeFileSync(path.join(root, rel), 'content of the repository\n');
+    }
+    git('add', '-f', '--', ...rels);
+  };
+  const rowCount = (file: string): number => (fs.existsSync(file) ? fs.readFileSync(file, 'utf-8').split('\n').filter(Boolean).length : 0);
+
+  it('an untracked project costs one git call when both roots are equal, and the row is still built once', () => {
+    const { exitCode } = both();
+
+    expect(exitCode).toBe(0);
+    expect(listCalls()).toHaveLength(1);
+    expect(rowCount(memory)).toBe(1);
+    expect(rowCount(curation)).toBe(1);
+    expect(forks().filter((f) => f === 'jq' || f === 'node')).toHaveLength(1);
+  });
+
+  it('roots that differ cost one call each, and one queue on costs one call', () => {
+    const other = path.join(tmpDir, 'main-checkout');
+    fs.mkdirSync(other);
+    execSync('git init -q', { cwd: other, stdio: 'pipe' });
+    reset();
+
+    expect(both('"true" "true"', root, other).exitCode).toBe(0);
+    expect(listCalls()).toHaveLength(2);
+
+    reset();
+    expect(both('"false" "true"').exitCode).toBe(0);
+    expect(listCalls()).toHaveLength(1);
+
+    reset();
+    expect(both('"false" "false"').exitCode).toBe(0);
+    expect(listCalls(), 'neither queue on: nothing asked').toHaveLength(0);
+    expect(forks()).toEqual([]);
+  });
+
+  it('the same root and area are asked once per process', () => {
+    const { exitCode } = run(`
+      queue_append_both "${root}" "${memory}" "${root}" "${curation}" "true" "true" "user" "one" "1"
+      queue_append_both "${root}" "${memory}" "${root}" "${curation}" "true" "true" "user" "two" "2"
+      queue_append_row "${root}" "${memory}" "user" "three" "3"
+    `);
+
+    expect(exitCode).toBe(0);
+    expect(listCalls()).toHaveLength(1);
+    expect(rowCount(memory)).toBe(3);
+    expect(rowCount(curation)).toBe(2);
+  });
+
+  it('a root with no .git entry makes no git call and appends as before', () => {
+    fs.rmSync(path.join(root, '.git'), { recursive: true, force: true });
+
+    expect(both().exitCode).toBe(0);
+
+    expect(listCalls()).toHaveLength(0);
+    expect(rowCount(memory)).toBe(1);
+    expect(rowCount(curation)).toBe(1);
+  });
+
+  it('a tracked curation queue reads as off for the call: the row is built once, memory takes it, curation is left alone with one log line', () => {
+    track('.devflow/curation/.pending-turns.jsonl');
+    const before = fs.readFileSync(curation, 'utf-8');
+
+    const { exitCode, stdout } = both();
+
+    expect(exitCode).toBe(0);
+    expect(fs.readFileSync(curation, 'utf-8')).toBe(before);
+    expect(rowCount(memory)).toBe(1);
+    expect(stdout.match(/LOG: Queue skipped: the curation area is paused/g)).toHaveLength(1);
+    expect(stdout).not.toContain('the memory area is paused');
+    expect(listCalls(), 'one union call, then one call per area').toHaveLength(3);
+    expect(forks().filter((f) => f === 'jq' || f === 'node')).toHaveLength(1);
+  });
+
+  it('a tracked memory queue reads as off for the call: curation takes the row', () => {
+    track('.devflow/memory/.pending-turns.jsonl');
+
+    const { stdout } = both();
+
+    expect(rowCount(memory), 'the tracked queue holds its own row only').toBe(1);
+    expect(fs.readFileSync(memory, 'utf-8')).toBe('content of the repository\n');
+    expect(rowCount(curation)).toBe(1);
+    expect(stdout).toContain('LOG: Queue skipped: the memory area is paused');
+  });
+
+  it('both areas paused: nothing is built, so no jq or node process runs, and no file is made', () => {
+    track('.devflow/memory/.pending-turns.jsonl', '.devflow/curation/.pending-turns.jsonl');
+    reset();
+
+    const { exitCode, stdout } = both();
+
+    expect(exitCode).toBe(0);
+    expect(forks()).toEqual([]);
+    expect(stdout.match(/LOG: Queue skipped/g)).toHaveLength(2);
+    expect(fs.readFileSync(curation, 'utf-8')).toBe('content of the repository\n');
+  });
+
+  it('git that fails reads as unknown: both queues are paused and no folder is made', () => {
+    fs.rmSync(path.join(root, '.git', 'HEAD'));
+    fs.rmSync(path.join(root, '.devflow'), { recursive: true, force: true });
+
+    const { exitCode } = both();
+
+    expect(exitCode).toBe(0);
+    expect(fs.existsSync(path.join(root, '.devflow'))).toBe(false);
+  });
+
+  it('queue_append_row asks for the area of its queue: a tracked memory queue is skipped, the curation queue is not', () => {
+    track('.devflow/memory/.pending-turns.jsonl');
+
+    const { exitCode, stdout } = run(`
+      queue_append_row "${root}" "${memory}" "user" "memory row" "1"
+      queue_append_row "${root}" "${curation}" "user" "curation row" "2"
+    `);
+
+    expect(exitCode).toBe(0);
+    expect(fs.readFileSync(memory, 'utf-8')).toBe('content of the repository\n');
+    expect(rowCount(curation)).toBe(1);
+    expect(stdout.match(/LOG: Queue skipped: the memory area is paused/g)).toHaveLength(1);
+  });
+
+  it('queue_append_row for the old ledger folder asks the curation area', () => {
+    track('.devflow/learning/notes.txt');
+    const queue = path.join(root, '.devflow', 'learning', '.pending-turns.jsonl');
+
+    const { exitCode, stdout } = run(`queue_append_row "${root}" "${queue}" "user" "row" "1"`);
+
+    expect(exitCode).toBe(0);
+    expect(fs.existsSync(queue)).toBe(false);
+    expect(stdout).toContain('LOG: Queue skipped: the curation area is paused');
+  });
+
+  it('queue_append_row for a queue in neither area is paused when either area is', () => {
+    track('.devflow/memory/note.txt');
+    const elsewhere = path.join(root, 'elsewhere', '.pending-turns.jsonl');
+
+    expect(run(`queue_append_row "${root}" "${elsewhere}" "user" "row" "1"`).exitCode).toBe(0);
+
+    expect(fs.existsSync(elsewhere)).toBe(false);
+  });
+
+  it('is not ended under set -e by an untracked, tracked or unanswered area', () => {
+    const { exitCode, stdout } = run(`
+      queue_tracked_area "${root}" both git
+      echo "after-untracked"
+      mkdir -p "${root}/.devflow/memory" && echo x > "${root}/.devflow/memory/n.txt" && git -C "${root}" add -f .devflow/memory/n.txt
+      _QTA_ASKED_CURATION=""; _QTA_ASKED_MEMORY=""
+      queue_tracked_area "${root}" both git
+      echo "after-tracked cur=$DF_TRACKED_AREA_CURATION mem=$DF_TRACKED_AREA_MEMORY"
+      queue_tracked_area "/no/such/root" memory git
+      echo "after-unknown mem=$DF_TRACKED_AREA_MEMORY"
+    `);
+
+    expect(exitCode).toBe(0);
+    expect(stdout.trim().split('\n')).toEqual(['after-untracked', 'after-tracked cur=untracked mem=tracked', 'after-unknown mem=untracked']);
+  });
+});
+
 describe('every gate caller hands queue_read_gates its checkout root', () => {
   // D-FEATURES-NARROW-ONLY: a caller that omits <root> would silently ignore the
   // repository's narrowing, so the call shape is pinned across all of them.
