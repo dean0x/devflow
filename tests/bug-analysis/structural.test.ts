@@ -14,7 +14,7 @@
 // cannot silently remove safety-critical patterns.
 
 import { describe, it, expect } from 'vitest';
-import { loadFile, extractSection, resolveAgentSource, resolveCurationOffSource, collectFreshBaseDefects, collectSlugCheckDefects, collectStoredHeadDefects, slugSinkLines, type DiffRangeShape } from '../helpers';
+import { loadFile, extractSection, resolveAgentSource, resolveCurationOffSource, collectFreshBaseDefects, collectSlugCheckDefects, collectStoredHeadDefects, slugSinkLines, EVIDENCE_RENDER_LINE, type DiffRangeShape } from '../helpers';
 
 const content = loadFile('dist/commands/bug-analysis.md');
 const agentContent = resolveAgentSource('debug').content;
@@ -115,12 +115,13 @@ describe('bug-analysis.md — incremental detection', () => {
 
   it('Step 2a uses git cat-file to verify SHA reachability (rebase safety)', () => {
     const step2a = extractSection(content, 'Step 2a:', 'Step 2b:');
-    expect(step2a).toMatch(/git cat-file/);
+    expect(step2a).toMatch(/git -C "\{worktree\}" cat-file -t \{sha\}` must print `commit`/);
   });
 
-  it('Phase 7 writes HEAD SHA to .last-analysis-head after analysis completes', () => {
+  it('Phase 7 writes HEAD SHA to .last-analysis-head under the absolute git directory after analysis completes', () => {
     const phase7 = extractSection(content, '### Phase 7:', '## Architecture');
     expect(phase7).toContain('.last-analysis-head');
+    expect(phase7).toContain('rev-parse --absolute-git-dir');
   });
 
   it('no-new-commits case documented with stop condition', () => {
@@ -145,9 +146,10 @@ const ANALYSIS_RANGE: DiffRangeShape = {
   step: 'Step 2a',
   stepFrom: 'Step 2a:',
   stepTo: 'Step 2b:',
-  reachability: 'git cat-file -t {sha}',
+  reachability: 'git -C "{worktree}" cat-file -t {sha}` must print `commit`',
   incrementalRange: '{sha}...HEAD',
   marker: '.last-analysis-head',
+  dir: 'bug-analysis',
 };
 
 // The facts /code-review shares live in the helpers; this adds Step 2b, the stop row, the Phase 7 slot and the Debug command.
@@ -241,15 +243,19 @@ describe('bug-analysis.md — DIFF_RANGE starts at the fresh base that ensure-pr
   it('known-bad probe: a directory made before the head and base checks is reported', () => {
     const made = /^3\. Create timestamped analysis directory:[^\n]*\n/m.exec(content);
     expect(made, 'Step 2a creates the analysis directory as its step 3').not.toBeNull();
-    const early = content.replace(made?.[0] ?? '', '').replace('1. Check `{worktree}/.devflow/docs/bug-analysis/{branch-slug}/.last-analysis-head`', `${made?.[0] ?? ''}1. Check \`{worktree}/.devflow/docs/bug-analysis/{branch-slug}/.last-analysis-head\``);
+    const early = content.replace(made?.[0] ?? '', '').replace('1. Check `{gd}/devflow/bug-analysis/{branch-slug}/.last-analysis-head`,', `${made?.[0] ?? ''}1. Check \`{gd}/devflow/bug-analysis/{branch-slug}/.last-analysis-head\`,`);
     expect(early, 'the probe must move the directory step').not.toBe(content);
     expect(collectAnalysisFreshBaseDefects(early)).toContain('Step 2a does not create the directory after the head and base checks');
   });
 });
 
-describe('bug-analysis.md — the stored analysis head is tracked-free and checked as a commit ID (Step 2a)', () => {
+describe('bug-analysis.md — the stored analysis head sits under the git directory and is checked as a commit ID (Step 2a)', () => {
   const CHECK = ' The stored analysis head is checked as a commit ID: use it only when it is exactly 40 or 64 lowercase hex, else take the full-range path';
-  const TRACKED = 'The analysis head counts only when `git -C "{worktree}/.devflow/docs/bug-analysis/{branch-slug}" ls-files --error-unmatch -- .last-analysis-head >/dev/null 2>&1` exits 1; any other exit takes the full-range path.';
+  const READ = '`{gd}/devflow/bug-analysis/{branch-slug}/.last-analysis-head`';
+  const GD = ', `{gd}` being what `git -C "{worktree}" rev-parse --absolute-git-dir` prints';
+  const WRITE = 'In one Bash call run `M="$(git -C "{worktree}" rev-parse --absolute-git-dir)/devflow/bug-analysis/{branch-slug}" && mkdir -p "$M" && git -C "{worktree}" rev-parse HEAD > "$M/.last-analysis-head"`.';
+  const NEVER_STOPS = ' A failed or refused write never stops the run and is not retried another way.';
+  const NOT_ONE_CALL = 'the analysis head is not written in one Bash call that makes the directory and then lets git write the SHA';
   const seed = (from: string, to: string): string => {
     const next = content.replace(from, to);
     expect(next, `the seed ${from} must change the text`).not.toBe(content);
@@ -260,6 +266,12 @@ describe('bug-analysis.md — the stored analysis head is tracked-free and check
     expect(collectStoredHeadDefects(content, ANALYSIS_RANGE)).toEqual([]);
   });
 
+  it('no marker path sits in the docs tree, and the reader takes none from there', () => {
+    expect(content).not.toMatch(/\.devflow\/docs\/[^\s`"]*\.last-analysis-head/);
+    expect(content).toContain(READ);
+    expect(content).toContain(WRITE + NEVER_STOPS);
+  });
+
   it('known-bad probes: a missing, weakened or late check is reported', () => {
     expect(collectStoredHeadDefects(seed(CHECK, ''), ANALYSIS_RANGE))
       .toContain('the stored analysis head is not checked as a commit ID');
@@ -267,30 +279,52 @@ describe('bug-analysis.md — the stored analysis head is tracked-free and check
       .toContain('the stored analysis head check does not require exactly 40 or 64 lowercase hex');
     expect(collectStoredHeadDefects(seed('else take the full-range path', 'else go on'), ANALYSIS_RANGE))
       .toContain('a stored analysis head that fails the check does not take the full-range path');
-    const late = seed(CHECK, '').replace('git cat-file -t {sha}', `git cat-file -t {sha}${CHECK}`);
+    const late = seed(CHECK, '').replace('must print `commit`', `must print \`commit\`${CHECK}`);
     expect(collectStoredHeadDefects(late, ANALYSIS_RANGE)).toContain('the stored analysis head is used before it is checked');
   });
 
   it('known-bad probes: a missing step, reachability check or incremental range is reported', () => {
     expect(collectStoredHeadDefects(content.replaceAll('Step 2a:', 'Step 2z:'), ANALYSIS_RANGE))
       .toEqual(['no Step 2a (incremental detection)']);
-    expect(collectStoredHeadDefects(seed('git cat-file -t {sha}', 'git cat-file -t {head}'), ANALYSIS_RANGE))
+    expect(collectStoredHeadDefects(seed('cat-file -t {sha}', 'cat-file -t {head}'), ANALYSIS_RANGE))
       .toContain('Step 2a lost the reachability check or the incremental range');
     expect(collectStoredHeadDefects(seed('Set `DIFF_RANGE` to `{sha}...HEAD`', 'Set `DIFF_RANGE` to `{sha}..HEAD`'), ANALYSIS_RANGE))
       .toContain('Step 2a lost the reachability check or the incremental range');
+    expect(collectStoredHeadDefects(seed('git -C "{worktree}" cat-file -t {sha}', 'git -C {worktree} cat-file -t {sha}'), ANALYSIS_RANGE))
+      .toContain('Step 2a lost the reachability check or the incremental range');
   });
 
-  it('known-bad probes: a missing, late, unquoted or wider-than-exit-1 tracked-file check is reported', () => {
-    expect(collectStoredHeadDefects(seed(TRACKED, ''), ANALYSIS_RANGE))
-      .toContain('the stored analysis head is not ignored when git tracks it');
-    const late = seed(TRACKED, '').replace('git cat-file -t {sha}', `git cat-file -t {sha}; ${TRACKED}`);
-    expect(collectStoredHeadDefects(late, ANALYSIS_RANGE)).toContain('the stored analysis head is used before the tracked-file check');
-    expect(collectStoredHeadDefects(seed('exits 1; any other exit takes the full-range path', 'exits 1; any other exit goes on'), ANALYSIS_RANGE))
-      .toContain('the analysis head counts as untracked on more than exit 1');
-    expect(collectStoredHeadDefects(seed(' exits 1;', ' exits 0;'), ANALYSIS_RANGE))
-      .toContain('the analysis head counts as untracked on more than exit 1');
-    expect(collectStoredHeadDefects(seed('git -C "{worktree}/.devflow/docs/bug-analysis/{branch-slug}" ls-files', 'git -C {worktree}/.devflow/docs/bug-analysis/{branch-slug} ls-files'), ANALYSIS_RANGE))
-      .toContain('the tracked-file check of the analysis head does not double-quote its -C path');
+  it('known-bad probe: a reachability check that does not require the type commit is reported', () => {
+    expect(collectStoredHeadDefects(seed(' must print `commit`; if not', '; if not'), ANALYSIS_RANGE))
+      .toContain('Step 2a lost the reachability check or the incremental range');
+    expect(collectStoredHeadDefects(seed(' must print `commit`; if not', ' must exit 0; if not'), ANALYSIS_RANGE))
+      .toContain('Step 2a lost the reachability check or the incremental range');
+  });
+
+  it('known-bad probes: a marker read from the docs tree, an unnamed git directory or a kept tracked-file check is reported', () => {
+    expect(collectStoredHeadDefects(seed(READ + GD, '`{worktree}/.devflow/docs/bug-analysis/{branch-slug}/.last-analysis-head`'), ANALYSIS_RANGE))
+      .toEqual(expect.arrayContaining(['the stored analysis head is not read under the absolute git directory', 'the analysis head marker sits in the docs tree']));
+    expect(collectStoredHeadDefects(seed(GD, ''), ANALYSIS_RANGE))
+      .toEqual(['Step 2a does not say what {gd} is']);
+    expect(collectStoredHeadDefects(seed('`{gd}/devflow/bug-analysis/', '`{gd}/bug-analysis/'), ANALYSIS_RANGE))
+      .toContain('the stored analysis head is not read under the absolute git directory');
+    expect(collectStoredHeadDefects(seed(CHECK, `${CHECK}\n     - The analysis head counts only when \`git -C "{worktree}" ls-files --error-unmatch -- .last-analysis-head\` exits 1.`), ANALYSIS_RANGE))
+      .toContain('Step 2a checks the analysis head with the tracked-file probe ls-files');
+  });
+
+  it('known-bad probes: a marker write that is split, kept in the docs tree, missing or allowed to stop the run is reported', () => {
+    expect(collectStoredHeadDefects(seed(NEVER_STOPS, ''), ANALYSIS_RANGE))
+      .toEqual(['the analysis head writer does not say a failed write never stops the run']);
+    expect(collectStoredHeadDefects(seed(' && mkdir -p "$M" &&', ' &&'), ANALYSIS_RANGE))
+      .toEqual([NOT_ONE_CALL]);
+    expect(collectStoredHeadDefects(seed('In one Bash call run', 'Run'), ANALYSIS_RANGE))
+      .toEqual([NOT_ONE_CALL]);
+    expect(collectStoredHeadDefects(seed('rev-parse HEAD > "$M/.last-analysis-head"', 'rev-parse HEAD > "{worktree}/.devflow/docs/bug-analysis/{branch-slug}/.last-analysis-head"'), ANALYSIS_RANGE))
+      .toEqual(expect.arrayContaining([NOT_ONE_CALL, 'the analysis head marker sits in the docs tree']));
+    expect(collectStoredHeadDefects(seed('rev-parse HEAD > "$M/.last-analysis-head"', 'rev-parse HEAD'), ANALYSIS_RANGE))
+      .toEqual(['the analysis head is written 0 times, expected once']);
+    expect(collectStoredHeadDefects(`${content}\n${WRITE}${NEVER_STOPS}\n`, ANALYSIS_RANGE))
+      .toEqual(['the analysis head is written 2 times, expected once']);
   });
 });
 
@@ -326,6 +360,16 @@ describe('bug-analysis.md — the branch slug is checked once, before any comman
     expect(collectSlugCheckDefects(seed('Spawn Git agent:', 'Run `mkdir -p {worktree}/.devflow/docs/bug-analysis/{branch-slug}`.\n\nSpawn Git agent:')))
       .toEqual([expect.stringContaining('a slug sink comes before the Extract line')]);
     expect(collectSlugCheckDefects('no slug text')).toEqual(['no Extract line']);
+  });
+
+  it('only the evidence render line is exempt from the sink scan', () => {
+    expect(content.split('\n')).toContain(EVIDENCE_RENDER_LINE);
+    expect(slugSinkLines(content).map(sink => sink.line)).not.toContain(EVIDENCE_RENDER_LINE);
+  });
+
+  it('known-bad probe: a verify-evidence line that carries the slug before the Extract line is reported', () => {
+    expect(collectSlugCheckDefects(seed('render --plan "{worktree}/.devflow/docs/evidence-{branch_slug}.md";', 'render --plan "{worktree}/.devflow/docs/evidence-{branch_slug}.md" --out "{worktree}/.devflow/docs/bug-analysis/{branch-slug}/x.md";')))
+      .toEqual([expect.stringContaining('a slug sink comes before the Extract line')]);
   });
 });
 

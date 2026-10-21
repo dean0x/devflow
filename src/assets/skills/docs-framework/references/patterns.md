@@ -11,7 +11,6 @@ Correct patterns for Devflow documentation artifacts with templates and helper f
 ```
 .devflow/docs/
 ├── reviews/{branch-slug}/          # Code review reports per branch
-│   ├── .last-review-head           # HEAD SHA of last completed review
 │   ├── {timestamp}/                # Timestamped review directory
 │   │   ├── {focus}.md              # Review agent reports (security.md, architecture.md, etc.)
 │   │   ├── review-summary.md       # Synthesize agent output
@@ -23,6 +22,8 @@ Correct patterns for Devflow documentation artifacts with templates and helper f
 │   └── {slug}/{timestamp}/         # /dynamic-plan: {ticket-slug}-plan.md, DECISIONS-NEEDED.md
 └── CATCH_UP.md                     # Latest summary (overwritten)
 ```
+
+The incremental head markers (`.last-review-head`, `.last-analysis-head`) are not part of this tree. They live at `<git dir>/devflow/{reviews|bug-analysis}/{branch-slug}/<marker>`, where `<git dir>` is the path that `git rev-parse --absolute-git-dir` prints. Each worktree has its own markers.
 
 ### Setup Variations
 
@@ -36,7 +37,6 @@ Correct patterns for Devflow documentation artifacts with templates and helper f
 ```
 .devflow/docs/
 ├── reviews/feat-auth/
-│   ├── .last-review-head
 │   └── 2025-01-05_1430/
 │       ├── security.md
 │       ├── architecture.md
@@ -53,7 +53,6 @@ Correct patterns for Devflow documentation artifacts with templates and helper f
 ```
 .devflow/docs/
 ├── reviews/feat-auth/
-│   ├── .last-review-head
 │   ├── 2025-01-05_1430/
 │   │   ├── security.md
 │   │   ├── ...
@@ -133,7 +132,7 @@ Always lowercase:
 - `security.md` - Review report (in timestamped directory)
 - `review-summary.md` - Combined summary (in timestamped directory)
 - `resolution-summary.md` - Resolution summary (in timestamped directory)
-- `.last-review-head` - SHA marker for incremental reviews
+- `.last-review-head` - SHA marker for incremental reviews, kept under the worktree's git directory
 - `jwt-authentication.2025-01-05_1430.md` - Design doc
 
 ---

@@ -67,11 +67,10 @@ If `pr_number` is absent, set `PR_DESCRIPTION` to `(none)`.
 **Produces:** DIFF_RANGE, ANALYSIS_DIR
 **Requires:** BRANCH_INFO
 
-1. Check `{worktree}/.devflow/docs/bug-analysis/{branch-slug}/.last-analysis-head`:
+1. Check `{gd}/devflow/bug-analysis/{branch-slug}/.last-analysis-head`, `{gd}` being what `git -C "{worktree}" rev-parse --absolute-git-dir` prints:
    - **If exists AND `--full` NOT set:**
-     - The analysis head counts only when `git -C "{worktree}/.devflow/docs/bug-analysis/{branch-slug}" ls-files --error-unmatch -- .last-analysis-head >/dev/null 2>&1` exits 1; any other exit takes the full-range path.
-     - Read the SHA from the file. The stored analysis head is checked as a commit ID: use it only when it is exactly 40 or 64 lowercase hex, else take the full-range path
-     - Verify reachable: `git cat-file -t {sha}` — if exit code non-zero (rebase invalidated SHA), take the full-range path
+     - The stored analysis head is checked as a commit ID: use it only when it is exactly 40 or 64 lowercase hex, else take the full-range path
+     - Verify reachable: `git -C "{worktree}" cat-file -t {sha}` must print `commit`; if not (rebase invalidated SHA), take the full-range path
      - If SHA == current HEAD → "No new commits since last analysis. Use --full for a full re-analysis." Stop.
      - Set `DIFF_RANGE` to `{sha}...HEAD`
    - **Full-range path (no marker, or `--full`):**
@@ -266,7 +265,7 @@ Output: {ANALYSIS_DIR}/bug-analysis-summary.md"
 
 **Requires:** BRANCH_INFO, ANALYSIS_DIR
 
-1. Write current HEAD SHA to `{worktree}/.devflow/docs/bug-analysis/{branch-slug}/.last-analysis-head`
+1. In one Bash call run `M="$(git -C "{worktree}" rev-parse --absolute-git-dir)/devflow/bug-analysis/{branch-slug}" && mkdir -p "$M" && git -C "{worktree}" rev-parse HEAD > "$M/.last-analysis-head"`. A failed or refused write never stops the run and is not retried another way.
 2. Report to user:
 
 ```

@@ -17,6 +17,9 @@
  *   AC-11 The local branch, HEAD, index and worktree stay unchanged; no FETCH_HEAD, tag,
  *         promisor setting or shallow file appears.
  *   AC-12/13/14 live in resolve-base-process.test.ts (argv, environment, process group).
+ *   The name on standard input (--name-stdin): the read, its cap and its refusals, the checks that
+ *         run before any other git call, and the argument form that never reads, are tested below
+ *         through an injected descriptor and over real git.
  *
  * Scenario letters used by the tables below (the local rule):
  *   A fresh         local base and origin base are the same commit
@@ -75,11 +78,19 @@ interface SpawnResult {
   pid?: number
 }
 type SpawnFn = (file: string, args: string[], opts: Record<string, unknown>) => SpawnResult
+/** The three operations on file descriptor 0 that the script performs; each is replaceable in a test. */
+interface StdinPort {
+  isatty(): boolean
+  read(buf: Buffer, offset: number, length: number): number
+  wait(ms: number): void
+}
 interface Deps {
   spawn?: SpawnFn
   env?: NodeJS.ProcessEnv
   cwd?: string
   fetchTimeoutMs?: number
+  now?: () => number
+  stdin?: Partial<StdinPort>
   formatLine?: (r: Selection) => string
 }
 interface ResolveBase {
@@ -87,9 +98,13 @@ interface ResolveBase {
   readonly LINE_RE: RegExp
   readonly FALLBACK_LINE: string
   readonly FETCH_TIMEOUT_MS: number
+  readonly RUN_BUDGET_MS: number
   readonly REASON_NOTES: Readonly<Record<Reason, Note>>
   isStrictName(name: unknown): boolean
-  parseArgs(args: readonly string[]): { kind: 'ok'; mode: Mode; name: string; cross: boolean } | { kind: 'usage' }
+  parseArgs(args: readonly string[]):
+    | { kind: 'ok'; mode: Mode; name: string; cross: boolean }
+    | { kind: 'stdin'; mode: Mode; cross: boolean }
+    | { kind: 'usage' }
   select(facts: Facts): Selection
   formatLine(r: Selection): string
   checkLine(line: unknown): boolean
@@ -186,19 +201,20 @@ describe('the output grammar (AC-6)', () => {
   })
 })
 
-describe('the strict name class (AC-7)', () => {
-  const ACCEPTED = [
-    'main', 'master', 'develop', 'release/1.2', 'feature/a-b_c', 'fix/495-x', 'user/jane+tag', 'v1.0.0',
-    'a,b', 'a#b', 'x@y', 'a.b', 'A', '0', 'a/b/c', 'origin', 'originx/y', 'HEADx', 'xHEAD', 'FETCH_HEADS',
-    'a'.repeat(200),
-  ]
-  const REFUSED = [
-    '', '-x', '--help', '-', '#x', '#', 'origin/main', 'origin/', 'a..b', '..', 'a/../b', '@', 'HEAD', 'FETCH_HEAD',
-    'ORIG_HEAD', 'MERGE_HEAD', 'a b', 'a\tb', 'a\nb', 'a\rb', 'a\0b', 'a;b', 'a|b', 'a&b', 'a$b', '$(id)', '`id`',
-    'a"b', "a'b", 'a\\b', 'a*b', 'a?b', 'a[b', 'a{b}', 'a:b', 'a~b', 'a^b', 'a!b', 'a<b', 'a>b', 'a(b', 'a)b',
-    'a=b', 'a%b', 'é', 'a\u202eb', 'a'.repeat(201), 'main\n',
-  ]
+/** Names the strict class admits, and names it refuses. */
+const ACCEPTED = [
+  'main', 'master', 'develop', 'release/1.2', 'feature/a-b_c', 'fix/495-x', 'user/jane+tag', 'v1.0.0',
+  'a,b', 'a#b', 'x@y', 'a.b', 'A', '0', 'a/b/c', 'origin', 'originx/y', 'HEADx', 'xHEAD', 'FETCH_HEADS',
+  'a'.repeat(200),
+]
+const REFUSED = [
+  '', '-x', '--help', '-', '#x', '#', 'origin/main', 'origin/', 'a..b', '..', 'a/../b', '@', 'HEAD', 'FETCH_HEAD',
+  'ORIG_HEAD', 'MERGE_HEAD', 'a b', 'a\tb', 'a\nb', 'a\rb', 'a\0b', 'a;b', 'a|b', 'a&b', 'a$b', '$(id)', '`id`',
+  'a"b', "a'b", 'a\\b', 'a*b', 'a?b', 'a[b', 'a{b}', 'a:b', 'a~b', 'a^b', 'a!b', 'a<b', 'a>b', 'a(b', 'a)b',
+  'a=b', 'a%b', 'é', 'a\u202eb', 'a'.repeat(201), 'main\n',
+]
 
+describe('the strict name class (AC-7)', () => {
   it('admits the closed set: ASCII letters, digits and ._/+@,#-, at most 200', () => {
     for (const name of ACCEPTED) expect(RB.STRICT_NAME_RE.test(name), JSON.stringify(name)).toBe(true)
     for (const name of ACCEPTED) expect(RB.isStrictName(name), JSON.stringify(name)).toBe(true)
@@ -239,6 +255,23 @@ describe('the arguments (usage)', () => {
     const bad: string[][] = [
       [], ['local'], ['fork', 'main'], ['LOCAL', 'main'], ['local', 'main', 'extra'], ['local', 'main', '--cross'],
       ['local', 'main', '--cross', 'yes'], ['local', 'main', '--cross', 'true', 'x'], ['local', 'main', '--other', 'true'],
+    ]
+    for (const args of bad) expect(RB.parseArgs(args), JSON.stringify(args)).toEqual({ kind: 'usage' })
+  })
+
+  it('reads <local|pr> --name-stdin and an optional --cross <true|false> as the standard-input form', () => {
+    expect(RB.parseArgs(['local', '--name-stdin'])).toEqual({ kind: 'stdin', mode: 'local', cross: false })
+    expect(RB.parseArgs(['pr', '--name-stdin'])).toEqual({ kind: 'stdin', mode: 'pr', cross: false })
+    expect(RB.parseArgs(['pr', '--name-stdin', '--cross', 'true'])).toEqual({ kind: 'stdin', mode: 'pr', cross: true })
+    expect(RB.parseArgs(['local', '--name-stdin', '--cross', 'false'])).toEqual({ kind: 'stdin', mode: 'local', cross: false })
+  })
+
+  it('is a usage result when --name-stdin is mixed with a positional name or any other shape', () => {
+    const bad: string[][] = [
+      ['--name-stdin'], ['local', 'main', '--name-stdin'], ['local', '--name-stdin', 'main'], ['pr', 'main', '--name-stdin', 'true'],
+      ['local', '--name-stdin', '--cross'], ['local', '--name-stdin', '--cross', 'yes'], ['local', '--name-stdin', '--cross', 'true', 'x'],
+      ['local', 'main', '--cross', '--name-stdin'], ['local', '--name-stdin', '--name-stdin'], ['fork', '--name-stdin'],
+      ['LOCAL', '--name-stdin'], ['local', '--name-stdin', '--other', 'true'], ['local', '--name-stdin', 'main', '--cross', 'true'],
     ]
     for (const args of bad) expect(RB.parseArgs(args), JSON.stringify(args)).toEqual({ kind: 'usage' })
   })
@@ -484,15 +517,78 @@ function countingSpawn(home: string): { spawn: SpawnFn; calls: string[][] } {
 
 const isFetchCall = (call: readonly string[]): boolean => call.includes('fetch')
 
-/** One in-process run over real git; asserts the contract every path owes (AC-6). */
-function runBase(w: World, mode: Mode, name: string, o: { cross?: boolean; spawn?: SpawnFn; env?: Record<string, string> } = {}): Run {
-  const argv = ['node', 'resolve-base.cjs', mode, name, ...(o.cross === undefined ? [] : ['--cross', String(o.cross)])]
-  const out = RB.main(argv, { cwd: w.work, env: scopedEnv(w.home, o.env ?? {}), spawn: o.spawn })
+/** The contract every path owes (AC-6): exit 0 and one conforming line. */
+function checkedRun(out: { code: number; line: string }): Run {
   expect(out.code).toBe(0)
   expect(out.line).toMatch(RB.LINE_RE)
   expect(RB.checkLine(out.line)).toBe(true)
   expect(out.line).not.toContain('\n')
   return { line: out.line, f: fieldsOf(out.line) }
+}
+
+/** One in-process run over real git; asserts the contract every path owes (AC-6). */
+function runBase(w: World, mode: Mode, name: string, o: { cross?: boolean; spawn?: SpawnFn; env?: Record<string, string> } = {}): Run {
+  const argv = ['node', 'resolve-base.cjs', mode, name, ...(o.cross === undefined ? [] : ['--cross', String(o.cross)])]
+  return checkedRun(RB.main(argv, { cwd: w.work, env: scopedEnv(w.home, o.env ?? {}), spawn: o.spawn }))
+}
+
+/**
+ * A fake file descriptor 0: hands `input` out in reads of at most `chunk` bytes, then reports the end.
+ * With `clock`, each wait moves the clock by `advance` ms (by the wait's own ms when `advance` is absent).
+ */
+interface FakeStdin {
+  readonly port: StdinPort
+  /** The length each read asked for, in order. */
+  readonly asked: number[]
+  /** The ms of each wait, in order. */
+  readonly waits: number[]
+  readonly handed: () => number
+  readonly ttyChecks: () => number
+}
+
+function fakeStdin(
+  input: string | Buffer,
+  o: { tty?: boolean; chunk?: number; eagainFirst?: number; failWith?: string; clock?: { t: number }; advance?: number } = {},
+): FakeStdin {
+  const bytes = typeof input === 'string' ? Buffer.from(input, 'utf8') : input
+  let pos = 0
+  let eagain = o.eagainFirst ?? 0
+  let ttyChecks = 0
+  const asked: number[] = []
+  const waits: number[] = []
+  const port: StdinPort = {
+    isatty: () => { ttyChecks += 1; return o.tty === true },
+    read: (buf, offset, length) => {
+      asked.push(length)
+      if (o.failWith !== undefined) throw Object.assign(new Error('read failed'), { code: o.failWith })
+      if (eagain > 0) {
+        eagain -= 1
+        throw Object.assign(new Error('try again'), { code: 'EAGAIN' })
+      }
+      const n = Math.min(length, o.chunk ?? length, bytes.length - pos)
+      bytes.copy(buf, offset, pos, pos + n)
+      pos += n
+      return n
+    },
+    wait: ms => { waits.push(ms); if (o.clock !== undefined) o.clock.t += o.advance ?? ms },
+  }
+  return { port, asked, waits, handed: () => pos, ttyChecks: () => ttyChecks }
+}
+
+/** One in-process run of the standard-input form over real git. */
+function runStdin(w: World, mode: Mode, input: string | Buffer, o: { cross?: boolean; spawn?: SpawnFn } = {}): Run {
+  const argv = ['node', 'resolve-base.cjs', mode, '--name-stdin', ...(o.cross === undefined ? [] : ['--cross', String(o.cross)])]
+  return checkedRun(RB.main(argv, { cwd: w.work, env: scopedEnv(w.home), spawn: o.spawn, stdin: fakeStdin(input).port }))
+}
+
+/** A git that records every call and answers exit 1 (check-ref-format refuses; nothing else is reached). */
+function refusingGit(): { spawn: SpawnFn; calls: string[][] } {
+  const calls: string[][] = []
+  const spawn: SpawnFn = (file, args) => {
+    calls.push([file, ...args])
+    return { status: 1, stdout: Buffer.from(''), stderr: Buffer.from('') }
+  }
+  return { spawn, calls }
 }
 
 function expectWant(r: Run, want: Want): void {
@@ -786,6 +882,299 @@ describe('names that fail a check (AC-7)', SPAWN_BUDGET, () => {
       const fetch = calls.find(isFetchCall)
       expect(fetch?.at(-1), name).toBe(`+refs/heads/${name}:refs/remotes/origin/${name}`)
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The name on standard input
+// ---------------------------------------------------------------------------
+
+describe('the name on standard input', () => {
+  const NODE_CWD = '/work/tree'
+  const ENV = {}
+  const INVALID = 'BASE_REF=none TIP=none FETCH=skipped REASON=invalid-name NOTE=stop'
+  const UNAVAILABLE = 'BASE_REF=none TIP=none FETCH=skipped REASON=resolver-unavailable NOTE=stop'
+  const USAGE = 'BASE_REF=none TIP=none FETCH=skipped REASON=usage NOTE=stop'
+  const STDIN_ARGV = ['node', 'resolve-base.cjs', 'pr', '--name-stdin']
+
+  /** Run the stdin form against a recording git that refuses; returns the outcome, the git calls and the fake descriptor. */
+  function viaStdin(input: string | Buffer, o: { tty?: boolean; chunk?: number; failWith?: string } = {}): { out: { code: number; line: string }; calls: string[][]; fd: FakeStdin } {
+    const { spawn, calls } = refusingGit()
+    const fd = fakeStdin(input, o)
+    return { out: RB.main(STDIN_ARGV, { cwd: NODE_CWD, env: ENV, spawn, stdin: fd.port }), calls, fd }
+  }
+
+  describe('the read', () => {
+    it('strips exactly one trailing LF or CRLF, or none, and never trims', () => {
+      for (const text of ['main', 'main\n', 'main\r\n']) {
+        const { calls } = viaStdin(text)
+        expect(calls[0]?.slice(-2), JSON.stringify(text)).toEqual(['check-ref-format', 'refs/heads/main'])
+      }
+      for (const text of [' main', 'main ', 'main\t', '\tmain', 'main\n ', 'main \n']) {
+        const { out, calls } = viaStdin(text)
+        expect(out, JSON.stringify(text)).toEqual({ code: 0, line: INVALID })
+        expect(calls, JSON.stringify(text)).toEqual([])
+      }
+    })
+
+    it('reads a name delivered in several short reads', () => {
+      const { calls, fd } = viaStdin('release/1.x\r\n', { chunk: 3 })
+      expect(calls[0]?.slice(-2)).toEqual(['check-ref-format', 'refs/heads/release/1.x'])
+      expect(fd.handed()).toBe(13)
+    })
+
+    it('treats empty input as resolver-unavailable, with no git call', () => {
+      const { out, calls } = viaStdin('')
+      expect(out).toEqual({ code: 0, line: UNAVAILABLE })
+      expect(calls).toEqual([])
+    })
+
+    it('treats a lone newline as an empty name, which the strict class refuses', () => {
+      for (const text of ['\n', '\r\n']) {
+        const { out, calls } = viaStdin(text)
+        expect(out, JSON.stringify(text)).toEqual({ code: 0, line: INVALID })
+        expect(calls, JSON.stringify(text)).toEqual([])
+      }
+    })
+
+    it('treats a failed read as resolver-unavailable, with no git call', () => {
+      for (const code of ['EIO', 'EBADF', 'EISDIR', 'EINVAL']) {
+        const { out, calls } = viaStdin('main\n', { failWith: code })
+        expect(out, code).toEqual({ code: 0, line: UNAVAILABLE })
+        expect(calls, code).toEqual([])
+      }
+    })
+
+    it('refuses a terminal without reading it', () => {
+      const { out, calls, fd } = viaStdin('main\n', { tty: true })
+      expect(out).toEqual({ code: 0, line: UNAVAILABLE })
+      expect(calls).toEqual([])
+      expect(fd.asked, 'a terminal is never read').toEqual([])
+      expect(fd.ttyChecks()).toBe(1)
+    })
+
+    it('checks for a terminal before the first read', () => {
+      const { fd } = viaStdin('main\n')
+      expect(fd.ttyChecks()).toBe(1)
+      expect(fd.asked.length).toBeGreaterThan(0)
+    })
+
+    it('treats a descriptor whose terminal check throws as unreadable', () => {
+      const { spawn, calls } = refusingGit()
+      const port: Partial<StdinPort> = { isatty: () => { throw new Error('no such descriptor') }, read: () => { throw new Error('must not be read') } }
+      expect(RB.main(STDIN_ARGV, { cwd: NODE_CWD, env: ENV, spawn, stdin: port })).toEqual({ code: 0, line: UNAVAILABLE })
+      expect(calls).toEqual([])
+    })
+
+    it('gives invalid-name for input over 256 bytes and never truncates it', () => {
+      for (const text of ['a'.repeat(257), 'a'.repeat(256) + '\n', 'main\n' + 'x'.repeat(300), 'main' + ' '.repeat(260)]) {
+        const { out, calls, fd } = viaStdin(text)
+        expect(out, text.slice(0, 20)).toEqual({ code: 0, line: INVALID })
+        expect(calls, text.slice(0, 20)).toEqual([])
+        expect(fd.handed(), 'the read stops one byte past the cap').toBeLessThanOrEqual(257)
+        expect(Math.max(...fd.asked), 'no read asks for more than cap + 1').toBeLessThanOrEqual(257)
+      }
+    })
+
+    it('reads at most 257 bytes however long the input is', () => {
+      const { fd } = viaStdin('b'.repeat(100_000), { chunk: 100 })
+      expect(fd.handed()).toBe(257)
+      expect(Math.max(...fd.asked)).toBeLessThanOrEqual(257)
+    })
+
+    it('gives invalid-name for NUL, CR, non-ASCII bytes and a second line', () => {
+      const bad: Array<string | Buffer> = [
+        'ma\0in', 'main\0', 'main\0\n', 'ma\rin', 'main\r', 'main\r\r\n',
+        Buffer.from('mäin\n', 'utf8'), Buffer.from([0x6d, 0xff, 0x0a]), Buffer.from('main\u202E\n', 'utf8'),
+        'main\nother\n', 'main\n\n', 'main\r\n\r\n', 'main\nmain', '\nmain', 'a\nb',
+      ]
+      for (const text of bad) {
+        const { out, calls } = viaStdin(text)
+        expect(out, JSON.stringify(Buffer.from(text).toString('latin1'))).toEqual({ code: 0, line: INVALID })
+        expect(calls, JSON.stringify(Buffer.from(text).toString('latin1'))).toEqual([])
+      }
+    })
+  })
+
+  describe('the checks run before any other git call', () => {
+    it('a name outside the strict class makes no git call and creates nothing', () => {
+      const marker = path.join(os.tmpdir(), `devflow-rb-stdin-${process.pid}-created`)
+      const hostile = [`$(touch ${marker})`, `\`touch ${marker}\``, `a;touch ${marker}`, '-x', '#x', 'origin/main', 'a..b', 'HEAD', 'a b', '--name-stdin']
+      for (const name of hostile) {
+        const { out, calls } = viaStdin(name + '\n')
+        expect(out, name).toEqual({ code: 0, line: INVALID })
+        expect(calls, name).toEqual([])
+      }
+      expect(fs.existsSync(marker)).toBe(false)
+    })
+
+    it('a name the class admits but check-ref-format refuses stops after exactly that one call', () => {
+      for (const name of ['a.lock', 'a/', '/a', 'a//b', '.a', 'a.', 'a/.b', 'x/y.lock']) {
+        const { out, calls } = viaStdin(name + '\n')
+        expect(out, name).toEqual({ code: 0, line: INVALID })
+        expect(calls, name).toHaveLength(1)
+        expect(calls[0].slice(0, 4), name).toEqual(['git', '-c', 'core.fsmonitor=false', 'check-ref-format'])
+      }
+    })
+
+    it('hands every name the class admits to check-ref-format unchanged', () => {
+      for (const name of ACCEPTED) {
+        const { calls } = viaStdin(name + '\n')
+        expect(calls, name).toEqual([['git', '-c', 'core.fsmonitor=false', 'check-ref-format', 'refs/heads/' + name]])
+      }
+    })
+
+    it('gives the same refusal for the same name by argument and by standard input', () => {
+      for (const name of [...ACCEPTED, ...REFUSED.filter(n => !/[\r\n\0]/.test(n))]) {
+        const fromStdin = refusingGit()
+        const fromArgs = refusingGit()
+        const a = RB.main(STDIN_ARGV, { cwd: NODE_CWD, env: ENV, spawn: fromStdin.spawn, stdin: fakeStdin(Buffer.from(name + '\n', 'utf8')).port })
+        const b = RB.main(['node', 'resolve-base.cjs', 'pr', name], { cwd: NODE_CWD, env: ENV, spawn: fromArgs.spawn })
+        if (name === '') expect(a.line, 'an empty name read from a lone newline').toBe(INVALID)
+        expect(a, JSON.stringify(name)).toEqual(b)
+        expect(fromStdin.calls, JSON.stringify(name)).toEqual(fromArgs.calls)
+      }
+    })
+  })
+
+  describe('the argument form and usage never read', () => {
+    const watching = (): { port: Partial<StdinPort>; touched: () => number } => {
+      let touched = 0
+      const trip = (): never => { touched += 1; throw new Error('standard input must not be touched') }
+      return { port: { isatty: trip, read: trip, wait: trip }, touched: () => touched }
+    }
+
+    it('the argument form reads nothing', () => {
+      const { port, touched } = watching()
+      const { spawn, calls } = refusingGit()
+      const out = RB.main(['node', 'resolve-base.cjs', 'pr', 'main'], { cwd: NODE_CWD, env: ENV, spawn, stdin: port })
+      expect(out).toEqual({ code: 0, line: INVALID })
+      expect(calls).toHaveLength(1)
+      expect(touched()).toBe(0)
+    })
+
+    it('a positional name next to --name-stdin is a usage stop that reads nothing and runs no git call', () => {
+      const shapes = [
+        ['pr', 'main', '--name-stdin'], ['pr', '--name-stdin', 'main'], ['pr', 'main', '--name-stdin', '--cross', 'true'],
+        ['pr', '--name-stdin', 'main', '--cross', 'true'], ['pr', 'main', '--cross', 'true', '--name-stdin'], ['--name-stdin'],
+        ['pr', '--name-stdin', '--cross'], ['pr', '--name-stdin', '--cross', 'maybe'], ['fork', '--name-stdin'],
+      ]
+      for (const args of shapes) {
+        const { port, touched } = watching()
+        const { spawn, calls } = refusingGit()
+        const out = RB.main(['node', 'resolve-base.cjs', ...args], { cwd: NODE_CWD, env: ENV, spawn, stdin: port })
+        expect(out, JSON.stringify(args)).toEqual({ code: 0, line: USAGE })
+        expect(calls, JSON.stringify(args)).toEqual([])
+        expect(touched(), JSON.stringify(args)).toBe(0)
+      }
+    })
+  })
+
+  describe('a wait for input counts inside the run budget', () => {
+    /** The script's STDIN_WAIT_MS: how long one wait for input sleeps. */
+    const WAIT_MS = 10
+    /** The script's STDIN_MAX_WAITS: the run budget spent in waits of WAIT_MS. */
+    const MAX_WAITS = RB.RUN_BUDGET_MS / WAIT_MS
+
+    it('gives resolver-unavailable, with no git call, when a descriptor never has input', () => {
+      const clock = { t: 0 }
+      const fd = fakeStdin('', { eagainFirst: Infinity, clock })
+      const { spawn, calls } = refusingGit()
+      const out = RB.main(STDIN_ARGV, { cwd: NODE_CWD, env: ENV, spawn, now: () => clock.t, stdin: fd.port })
+      expect(out).toEqual({ code: 0, line: UNAVAILABLE })
+      expect(calls).toEqual([])
+      expect(fd.waits.length).toBeGreaterThan(0)
+      expect(fd.waits.reduce((a, b) => a + b, 0), 'the waits never pass the run budget').toBeLessThanOrEqual(RB.RUN_BUDGET_MS)
+      expect(fd.asked.length, 'one read before the first wait, then one after each wait').toBe(fd.waits.length + 1)
+    })
+
+    it('stops at the wait count when the clock never moves', () => {
+      // The input runs dry after MAX_WAITS + 2 failed reads, so a loop with no wait-count stop ends in the assertions below.
+      const fd = fakeStdin('', { eagainFirst: MAX_WAITS + 2 })
+      const { spawn, calls } = refusingGit()
+      const out = RB.main(STDIN_ARGV, { cwd: NODE_CWD, env: ENV, spawn, now: () => 0, stdin: fd.port })
+      expect(out).toEqual({ code: 0, line: UNAVAILABLE })
+      expect(calls).toEqual([])
+      expect(fd.waits).toHaveLength(MAX_WAITS)
+      expect(new Set(fd.waits)).toEqual(new Set([WAIT_MS]))
+      expect(fd.asked, 'one read before the first wait, then one after each wait').toHaveLength(MAX_WAITS + 1)
+    })
+
+    it('stops at the run deadline, after 3 waits, when each wait moves the clock past 40% of the budget', () => {
+      const clock = { t: 0 }
+      const fd = fakeStdin('', { eagainFirst: Infinity, clock, advance: RB.RUN_BUDGET_MS * 0.4 })
+      const { spawn, calls } = refusingGit()
+      const out = RB.main(STDIN_ARGV, { cwd: NODE_CWD, env: ENV, spawn, now: () => clock.t, stdin: fd.port })
+      expect(out).toEqual({ code: 0, line: UNAVAILABLE })
+      expect(calls).toEqual([])
+      expect(fd.waits).toEqual([WAIT_MS, WAIT_MS, WAIT_MS])
+      expect(fd.asked, 'one read before the first wait, then one after each wait').toHaveLength(4)
+    })
+
+    it('waits out a descriptor that has no input yet, then reads the name', () => {
+      const clock = { t: 0 }
+      const fd = fakeStdin('main\n', { eagainFirst: 5, clock })
+      const { spawn, calls } = refusingGit()
+      const out = RB.main(STDIN_ARGV, { cwd: NODE_CWD, env: ENV, spawn, now: () => clock.t, stdin: fd.port })
+      expect(out).toEqual({ code: 0, line: INVALID })
+      expect(fd.waits).toHaveLength(5)
+      expect(calls[0]?.slice(-2)).toEqual(['check-ref-format', 'refs/heads/main'])
+    })
+
+    it('starts no git call when the read has used the whole budget', () => {
+      const clock = { t: 0 }
+      let reads = 0
+      const port: Partial<StdinPort> = {
+        isatty: () => false,
+        read: (buf, offset) => {
+          reads += 1
+          if (reads > 1) return 0
+          clock.t += RB.RUN_BUDGET_MS
+          return buf.write('main\n', offset, 'latin1')
+        },
+      }
+      const { spawn, calls } = refusingGit()
+      const out = RB.main(['node', 'resolve-base.cjs', 'pr', '--name-stdin'], { cwd: NODE_CWD, env: ENV, spawn, now: () => clock.t, stdin: port })
+      expect(out).toEqual({ code: 0, line: UNAVAILABLE })
+      expect(calls).toEqual([])
+    })
+  })
+
+  describe('over real git', SPAWN_BUDGET, () => {
+    it('gives the same line as the argument form in both modes, for a name with and without its line end', () => {
+      const s = buildScenario('stale', 'main')
+      for (const mode of ['local', 'pr'] as const) {
+        const viaArg = runBase(s.w, mode, 'main')
+        expectWant(viaArg, s.want[mode])
+        for (const text of ['main', 'main\n', 'main\r\n']) {
+          const viaFd = runStdin(s.w, mode, text)
+          expect(viaFd.line, `${mode} ${JSON.stringify(text)}`).toBe(viaArg.line)
+        }
+      }
+    })
+
+    it('reads a slash name and honours --cross', () => {
+      const w = newWorld()
+      git(w.work, w.home, 'branch', '-q', 'release/1.x', 'origin/release/1.x')
+      git(w.work, w.home, 'checkout', '-q', '-b', 'feat', 'release/1.x')
+      commitFile(w.work, w.home, 'feature.txt')
+      const viaFd = runStdin(w, 'pr', 'release/1.x\n')
+      expect(viaFd.line).toBe(runBase(w, 'pr', 'release/1.x').line)
+      expect(viaFd.f.REASON).toBe('fresh')
+      const cross = runStdin(w, 'pr', 'release/1.x\n', { cross: true })
+      expect(cross.line).toBe(runBase(w, 'pr', 'release/1.x', { cross: true }).line)
+      expect(cross.f).toMatchObject({ FETCH: 'skipped', REASON: 'fork-origin', NOTE: 'info' })
+    })
+
+    it('makes no fetch for a refused name, whatever the way it arrived', () => {
+      const w = newWorld()
+      for (const text of ['a.lock\n', '$(id)\n', 'main\nmain\n', '']) {
+        const { spawn, calls } = countingSpawn(w.home)
+        const r = runStdin(w, 'pr', text, { spawn })
+        expect(r.f.NOTE, JSON.stringify(text)).toBe('stop')
+        expect(calls.filter(isFetchCall), JSON.stringify(text)).toEqual([])
+      }
+    })
   })
 })
 

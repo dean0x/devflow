@@ -28,7 +28,6 @@ All generated documentation lives under `.devflow/docs/` at the checkout's tople
 ```
 .devflow/docs/
 ├── reviews/{branch-slug}/              # /code-review, per branch
-│   ├── .last-review-head              # HEAD SHA of the last completed review (incremental)
 │   └── {timestamp}/                   # one directory per review
 │       ├── {focus}.md                 # Review agent report (security.md, architecture.md, ...)
 │       ├── review-summary.md          # Synthesize agent output
@@ -36,7 +35,6 @@ All generated documentation lives under `.devflow/docs/` at the checkout's tople
 │       ├── evidence.md                # /resolve: appended test-plan claims
 │       └── stale-plan.md              # /resolve: stale test-plan lines
 ├── bug-analysis/{branch-slug}/         # /bug-analysis, per branch
-│   ├── .last-analysis-head            # HEAD SHA of the last analysis (incremental)
 │   └── {timestamp}/
 │       ├── {focus}.md                 # Debug agent report
 │       ├── static-findings.md         # Raw static analysis tool output
@@ -70,6 +68,8 @@ All generated documentation lives under `.devflow/docs/` at the checkout's tople
 ```
 
 `{ISSUE_ID}` is the filesystem-safe issue identifier the Git agent emits as `- **Issue ID**:` under `### Handoff Values`. A multi-issue batch fetch returns none, which is why that variant is named `multi-`.
+
+The head markers for incremental runs are not part of this tree. `/code-review` and `/bug-analysis` keep each one under the git directory of the worktree, at `<git dir>/devflow/reviews/{branch-slug}/.last-review-head` and `<git dir>/devflow/bug-analysis/{branch-slug}/.last-analysis-head`. `<git dir>` is the path that `git rev-parse --absolute-git-dir` prints, so each worktree has its own markers.
 
 ---
 
@@ -112,7 +112,7 @@ TOPIC_SLUG=$(s=$(echo "$TOPIC" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9
 |------|---------|---------|
 | Special indexes | `UPPERCASE.md` | `WORKING-MEMORY.md`, `INDEX.md` |
 | Reports and summaries | `{focus}.md`, `review-summary.md`, `bug-analysis-summary.md`, `research-summary.md`, `static-findings.md`, `resolution-summary.md` in the run directory | `2025-12-26_1430/security.md` |
-| Head markers | `.last-review-head`, `.last-analysis-head` | Plain text file with SHA |
+| Head markers | `<git dir>/devflow/reviews/{branch-slug}/.last-review-head`, `<git dir>/devflow/bug-analysis/{branch-slug}/.last-analysis-head` | Plain text file with SHA |
 | Status logs | `{timestamp}.md` | `2025-12-26_1430.md` |
 | Design documents | `{ISSUE_ID}-{topic-slug}.{timestamp}.md` | `42-jwt-auth.2026-04-07_1430.md` |
 | Design (several issues) | `multi-{topic-slug}.{timestamp}.md` | `multi-jwt-auth.2026-04-07_1430.md` |
@@ -141,8 +141,8 @@ ensure_docs_dir() { mkdir -p "$(get_docs_root)/.devflow/docs/$1"; }
 
 ### Who Writes What
 
-- **Reviews**: the Review agents and the Synthesize agent (review mode) write into `reviews/{branch-slug}/{timestamp}/`; `/resolve` adds `resolution-summary.md` (Phase 5); `/code-review` overwrites `.last-review-head` with the HEAD SHA.
-- **Bug analysis**: the Debug agents and the Synthesize agent (bug-analysis mode) write into `bug-analysis/{branch-slug}/{timestamp}/`; `/bug-analysis` overwrites `.last-analysis-head` with the HEAD SHA.
+- **Reviews**: the Review agents and the Synthesize agent (review mode) write into `reviews/{branch-slug}/{timestamp}/`; `/resolve` adds `resolution-summary.md` (Phase 5); `/code-review` overwrites its `.last-review-head` marker, under the git directory, with the HEAD SHA.
+- **Bug analysis**: the Debug agents and the Synthesize agent (bug-analysis mode) write into `bug-analysis/{branch-slug}/{timestamp}/`; `/bug-analysis` overwrites its `.last-analysis-head` marker, under the git directory, with the HEAD SHA.
 - **Research**: the Research agents write `{type}.md`, and the Synthesize agent (research mode) writes `research-summary.md` through `RESEARCH_BASE_DIR`, both into `research/{topic-slug}/{timestamp}/`.
 - **Design**: `/plan` writes the design document; `/dynamic-plan` writes `design/{slug}/{timestamp}/`, `/dynamic-tickets` `tickets/{slug}/{timestamp}/`, `/dynamic-build` `waves/{slug}/{timestamp}/` and `evidence-wave-{slug}.md`.
 - **Handoff and evidence**: `/implement` writes `evidence-{branch-slug}.md`, which stays after the PR, and the handoff file, to which each Code agent appends one phase section and which is deleted once the PR exists.

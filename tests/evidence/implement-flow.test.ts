@@ -51,15 +51,29 @@ import * as path from 'path'
 import {
   CODE_AGENT_TYPES,
   collectOrderViolations,
+  DEFAULT_BRANCH_FILL,
   ensurePrReadyReference,
+  GH_FAILED_RULE,
   isAgentBlock,
+  JUDGE_BY_READING,
+  MAIN_PROBE,
+  MASTER_FALLBACK,
+  NAME_FILE_TRAP,
+  NO_PR_CLAUSE,
+  ORIGIN_HEAD_READ,
+  OTHER_GH_FAILURE_CLAUSE,
   parseFences,
+  PRODUCER_NAME_TAIL,
+  PRODUCER_STATUS_CAPTURE,
   readAgentReference,
   requireDistFile,
   resolveAgentSource,
   resolveCurationOffSource,
   ROOT,
+  SHELL_WRITE_PROBES,
+  WRITE_FAILURE,
   walkFiles,
+  countShellWritesIntoF,
   type OrderRule,
 } from '../helpers.js'
 import { PROJECT_CONFIG_LIB, SETTINGS_SCRIPT, scopedEnv } from '../evidence-policy/scripted-shim.js'
@@ -394,6 +408,35 @@ describe('AC-9: /plan keeps a checked `## Test Plan` section', () => {
     expect(collectPlanTestPlanDefects(late)).toEqual([
       `plan.md: [the plan is checked before the artifact is written] "${PLAN_CHECK}" does not precede "${PLAN_WRITE}"`,
     ])
+  })
+})
+
+/** Named collector: the first principle says that the main session never tests, builds or fixes, and that "Spawn X" means the Agent tool. */
+function collectOrchestrationPrincipleDefects(md: string): string[] {
+  const line = md.split('\n').find(l => l.startsWith('1. **Orchestration only**'))
+  if (line === undefined) return ['the first principle is not the Orchestration-only principle']
+  const out: string[] = []
+  if (!line.includes('never does work itself (no tests, builds or fixes)')) out.push('the first principle does not say that the main session never runs tests, builds or fixes')
+  if (!line.includes('"Spawn X" means call the Agent tool')) out.push('the first principle does not say that "Spawn X" means call the Agent tool')
+  return out
+}
+
+describe('#561: the first principle of /implement keeps the main session to plumbing', () => {
+  it('says that the main session never tests, builds or fixes, and that spawn means the Agent tool', () => {
+    expect(collectOrchestrationPrincipleDefects(implementMd())).toEqual([])
+  })
+
+  it('known-bad probes: a lost clause and a principle that is not first are each reported', () => {
+    const md = implementMd()
+    const noWork = md.replace('never does work itself (no tests, builds or fixes)', 'does its own work')
+    expect(noWork, 'the seed must land').not.toBe(md)
+    expect(collectOrchestrationPrincipleDefects(noWork)).toEqual(['the first principle does not say that the main session never runs tests, builds or fixes'])
+    const noAgent = md.replace('"Spawn X" means call the Agent tool', '"Spawn X" means ask')
+    expect(noAgent, 'the seed must land').not.toBe(md)
+    expect(collectOrchestrationPrincipleDefects(noAgent)).toEqual(['the first principle does not say that "Spawn X" means call the Agent tool'])
+    const second = md.replace('1. **Orchestration only**', '2. **Orchestration only**')
+    expect(second, 'the seed must land').not.toBe(md)
+    expect(collectOrchestrationPrincipleDefects(second)).toEqual(['the first principle is not the Orchestration-only principle'])
   })
 })
 
@@ -1240,6 +1283,7 @@ function collectBaseBranchGuardDefects(md: string, revalidate: string = revalida
   const record = md.split('\n').find(l => l.startsWith('Record the current branch name as `BASE_BRANCH`'))
   if (!guarded(record)) out.push(`Phase 1 records BASE_BRANCH without stopping the run unless it matches \`${BASE_BRANCH_PATTERN}\``)
   else if (md.indexOf(record!) > md.indexOf('OPERATION: setup-task')) out.push('the BASE_BRANCH guard comes after the setup-task spawn')
+  else if (!record!.includes(`\`${BASE_BRANCH_PATTERN}\` (${JUDGE_BY_READING})`)) out.push('Phase 1 does not say that the match is judged by reading, never by passing the value to a command')
   const captured = md.split('\n').find(l => l.startsWith('- `BASE_BRANCH`: Branch this feature was created from'))
   if (captured === undefined || !captured.includes(CAPTURED_CHECK)) out.push('the captured BASE_BRANCH is not checked again by the setup check before the base resolves')
   const rerecord = revalidate.split('\n').find(l => l.startsWith('3. **Record BASE_BRANCH**'))
@@ -1249,11 +1293,17 @@ function collectBaseBranchGuardDefects(md: string, revalidate: string = revalida
   else if (rerecord!.indexOf(BASE_BRANCH_PATTERN) > rerecord!.indexOf(REVALIDATE_BRANCH_DIFF)) out.push('the re-validation guard comes after the branch diff')
   else if (!rerecord!.includes('baseRefName')) out.push('the re-validation path does not say where BASE_BRANCH comes from when Phase 1 is skipped')
   else if (!rerecord!.includes('never the name')) out.push('the re-validation stop line does not say that it never writes the name')
+  else if (!rerecord!.includes(`\`${BASE_BRANCH_PATTERN}\` (${JUDGE_BY_READING})`)) out.push('the re-validation path does not say that the match is judged by reading, never by passing the value to a command')
   const call = revalidate.split('\n').find(l => l.includes(RESOLVER))
-  if (call === undefined || !/ pr "\$\{B\}" --cross "/.test(call) || !call.includes('isCrossRepository')) {
-    out.push('the re-validation path does not run the pr-mode resolver over the checked name with the cross flag from isCrossRepository')
-  } else if (!/ local "\$\{B\}"/.test(call)) {
-    out.push('the re-validation path does not run the local-mode resolver over the checked name when gh returned no PR')
+  const spans = (call ?? '').match(/`[^`]*resolve-base\.cjs[^`]*`/g) ?? []
+  const prSpan = spans.find(s => s.includes(' pr '))
+  const localSpan = spans.find(s => s.includes(' local '))
+  if (call === undefined || prSpan === undefined || !/ pr --name-stdin --cross "\$\{X\}" < "\$F"; echo "exit=\$\?"/.test(prSpan) || !call.includes('isCrossRepository')) {
+    out.push('the re-validation path does not run the pr-mode resolver over the name file on stdin with the cross flag from isCrossRepository')
+  } else if (localSpan === undefined || !/ local --name-stdin < "\$F"; echo "exit=\$\?"/.test(localSpan)) {
+    out.push('the re-validation path does not run the local-mode resolver over the name file on stdin when gh returned no PR')
+  } else if (![prSpan, localSpan].every(span => span.startsWith(`\`${NAME_FILE_TRAP} `))) {
+    out.push('a re-validation resolver call does not bind the name file and arm the trap that removes it with a flagless rm')
   } else if (rerecord !== undefined && revalidate.indexOf(call) < revalidate.indexOf(rerecord)) {
     out.push('the re-validation path resolves the base before it checks the name')
   }
@@ -1309,6 +1359,9 @@ describe('#452: BASE_BRANCH is checked before it reaches a shell line', () => {
     const unchecked = md.replace(`; ${CAPTURED_CHECK}`, '')
     expect(unchecked, 'the seed must land').not.toBe(md)
     expect(collectBaseBranchGuardDefects(unchecked)).toEqual(['the captured BASE_BRANCH is not checked again by the setup check before the base resolves'])
+    const unread = md.replace(record, () => record.replace(` (${JUDGE_BY_READING})`, ''))
+    expect(unread, 'the seed must land').not.toBe(md)
+    expect(collectBaseBranchGuardDefects(unread)).toEqual(['Phase 1 does not say that the match is judged by reading, never by passing the value to a command'])
 
     const reval = revalidateReference()
     const rerecord = reval.split('\n').find(l => l.startsWith('3. **Record BASE_BRANCH**'))!
@@ -1330,19 +1383,106 @@ describe('#452: BASE_BRANCH is checked before it reaches a shell line', () => {
     expect(namesIt, 'the seed must land').not.toBe(rerecord)
     expect(collectBaseBranchGuardDefects(md, reval.replace(rerecord, () => namesIt))).toEqual(['the re-validation stop line does not say that it never writes the name'])
     expect(collectBaseBranchGuardDefects(md, reval.replace(rerecord, ''))).toEqual([lostReval])
+    const unreadReval = rerecord.replace(` (${JUDGE_BY_READING})`, '')
+    expect(unreadReval, 'the seed must land').not.toBe(rerecord)
+    expect(collectBaseBranchGuardDefects(md, reval.replace(rerecord, () => unreadReval))).toEqual(['the re-validation path does not say that the match is judged by reading, never by passing the value to a command'])
 
     const call = reval.split('\n').find(l => l.includes(RESOLVER))!
-    const lostCall = 'the re-validation path does not run the pr-mode resolver over the checked name with the cross flag from isCrossRepository'
+    const lostCall = 'the re-validation path does not run the pr-mode resolver over the name file on stdin with the cross flag from isCrossRepository'
     expect(collectBaseBranchGuardDefects(md, reval.replace(call, ''))).toEqual([lostCall])
-    expect(collectBaseBranchGuardDefects(md, reval.replace(call, () => call.replace(' pr "', ' local "')))).toEqual([lostCall])
+    expect(collectBaseBranchGuardDefects(md, reval.replace(call, () => call.replace(' pr --name-stdin', ' local --name-stdin')))).toEqual([lostCall])
     expect(collectBaseBranchGuardDefects(md, reval.replace(call, () => call.replaceAll('isCrossRepository', 'x')))).toEqual([lostCall])
-    const noLocal = call.replace(' local "', ' pr "')
+    const argvName = call.replace(' pr --name-stdin --cross "${X}" < "$F"', ' pr "${B}" --cross "${X}"')
+    expect(argvName, 'the seed must land').not.toBe(call)
+    expect(collectBaseBranchGuardDefects(md, reval.replace(call, () => argvName))).toEqual([lostCall])
+    const prNoStdin = call.replace(' pr --name-stdin --cross "${X}" < "$F"', ' pr --name-stdin --cross "${X}"')
+    expect(prNoStdin, 'the seed must land').not.toBe(call)
+    expect(collectBaseBranchGuardDefects(md, reval.replace(call, () => prNoStdin))).toEqual([lostCall])
+    const lostLocal = 'the re-validation path does not run the local-mode resolver over the name file on stdin when gh returned no PR'
+    const noLocal = call.replace(' local --name-stdin', ' pr --name-stdin')
     expect(noLocal, 'the seed must land').not.toBe(call)
-    expect(collectBaseBranchGuardDefects(md, reval.replace(call, () => noLocal))).toEqual(['the re-validation path does not run the local-mode resolver over the checked name when gh returned no PR'])
+    expect(collectBaseBranchGuardDefects(md, reval.replace(call, () => noLocal))).toEqual([lostLocal])
+    const localNoStdin = call.replace(' local --name-stdin < "$F"', ' local --name-stdin')
+    expect(localNoStdin, 'the seed must land').not.toBe(call)
+    expect(collectBaseBranchGuardDefects(md, reval.replace(call, () => localNoStdin))).toEqual([lostLocal])
+    const localArgv = call.replace(' local --name-stdin < "$F"', ' local "${B}"')
+    expect(localArgv, 'the seed must land').not.toBe(call)
+    expect(collectBaseBranchGuardDefects(md, reval.replace(call, () => localArgv))).toEqual([lostLocal])
+    const lostTrap = 'a re-validation resolver call does not bind the name file and arm the trap that removes it with a flagless rm'
+    const noTrap = call.replace(`${NAME_FILE_TRAP} `, '')
+    expect(noTrap, 'the seed must land').not.toBe(call)
+    expect(collectBaseBranchGuardDefects(md, reval.replace(call, () => noTrap))).toEqual([lostTrap])
+    const flaggedTrap = call.replace(`trap 'rm -- "$F"' EXIT`, `trap 'rm -f "$F"' EXIT`)
+    expect(flaggedTrap, 'the seed must land').not.toBe(call)
+    expect(collectBaseBranchGuardDefects(md, reval.replace(call, () => flaggedTrap))).toEqual([lostTrap])
     expect(collectBaseBranchGuardDefects(md, reval.replace(`${rerecord}\n${call}`, () => `${call}\n${rerecord}`))).toEqual(['the re-validation path resolves the base before it checks the name'])
     const lostUnavailable = 'the re-validation path does not read other resolver output as resolver-unavailable with the re-run, then devflow init fix'
     expect(collectBaseBranchGuardDefects(md, reval.replace('`REASON=resolver-unavailable`', 'a stop'))).toEqual([lostUnavailable])
     expect(collectBaseBranchGuardDefects(md, reval.replace(`\`${RESOLVER_FIX}\``, '`run devflow init`'))).toEqual([lostUnavailable])
+  })
+})
+
+/** The one Bash call that starts the re-validation base step: the fork flag to stdout, the PR base name to a fresh temp file, the gh status echoed. */
+const REVALIDATE_PRODUCER = `cd "{worktree}" && F="$(mktemp)" && echo "F=$F" && gh pr view --json isCrossRepository --jq .isCrossRepository; ${PRODUCER_STATUS_CAPTURE} ${PRODUCER_NAME_TAIL}`
+/** The no-PR default branch, in the order the step takes it: the origin read, then main, then master, each checked by the same rev-parse. */
+const REVALIDATE_NO_PR_CHAIN = [NO_PR_CLAUSE, ORIGIN_HEAD_READ, MAIN_PROBE, MASTER_FALLBACK] as const
+const REVALIDATE_STOP_ON_GH = `Stop the run, after \`rm -- "{name file}"\`, if ${OTHER_GH_FAILURE_CLAUSE}, or the file is empty after every fallback.`
+const REVALIDATE_STOP_ON_CLASS = 'Stop the run, after `rm -- "{name file}"`, unless the name matches'
+
+/** Named collector: how the re-validation base step gets the name into a file, takes the no-PR default branch and removes the file on its stops. */
+function collectRevalidateNameFileDefects(revalidate: string): string[] {
+  const step = revalidate.split('\n').find(l => l.startsWith('3. **Record BASE_BRANCH**'))
+  if (step === undefined) return ['no re-validation base step']
+  const out: string[] = []
+  const need = (what: string, ok: boolean): void => { if (!ok) out.push(what) }
+  const chainAt = REVALIDATE_NO_PR_CHAIN.map(part => step.indexOf(part))
+  need('the fork flag and the PR base name are read in one Bash call, the name going to a fresh temp file', step.includes(`\`${REVALIDATE_PRODUCER}\``) && step.includes('`{name file}` is the printed `F=` path'))
+  need('a gh failure that shows no PR takes the default branch by for-each-ref, then main, then master, before any stop line', chainAt.every((at, n) => at >= 0 && (n === 0 || at > chainAt[n - 1])) && chainAt[chainAt.length - 1] < step.indexOf('Stop the run'))
+  need('the default branch is read with for-each-ref, never by symbolic-ref, abbrev-ref or a pipe', !/symbolic-ref|abbrev-ref|\| *sed/.test(step))
+  need('a gh failure is read from either printed status', step.includes(GH_FAILED_RULE))
+  need('the default branch is filled by the origin read, main, master and the Write tool, an empty line counts as empty, and a failed Write is a missing value', step.includes(DEFAULT_BRANCH_FILL))
+  need('only the two reads redirect into the name file', countShellWritesIntoF(step) === 2)
+  need('the name file is read with the Read tool', step.includes('Read `{name file}` with the Read tool: its one line is the name.'))
+  need('a gh failure that shows no missing PR, or an empty file, stops the run after removing the name file', step.includes(REVALIDATE_STOP_ON_GH))
+  need('a name outside the class stops the run after removing the name file', step.includes(REVALIDATE_STOP_ON_CLASS))
+  const call = revalidate.split('\n').find(l => l.includes(RESOLVER)) ?? ''
+  need('one pr-mode call runs when gh returned a PR, else one local-mode call, each reading the name file', (call.match(/resolve-base\.cjs/g) ?? []).length === 2 && / pr --name-stdin [^`]*` when gh returned a PR, else `[^`]* local --name-stdin /.test(call))
+  return out
+}
+
+describe('#561: the re-validation base step passes the name through a file', () => {
+  const seeded = (from: string, to: string): string => {
+    const real = revalidateReference()
+    const wounded = real.replace(from, () => to)
+    expect(wounded, 'the seed must land').not.toBe(real)
+    return wounded
+  }
+
+  it('reads the name into a fresh file, takes the no-PR default branch by for-each-ref, main, master, and removes the file on each stop', () => {
+    expect(collectRevalidateNameFileDefects(revalidateReference())).toEqual([])
+  })
+
+  it('known-bad probes: each lost part is reported by name', () => {
+    expect(collectRevalidateNameFileDefects(seeded(REVALIDATE_PRODUCER, 'gh pr view --json baseRefName,isCrossRepository'))).toContain('the fork flag and the PR base name are read in one Bash call, the name going to a fresh temp file')
+    const noProbe = 'a gh failure that shows no PR takes the default branch by for-each-ref, then main, then master, before any stop line'
+    expect(collectRevalidateNameFileDefects(seeded('shows that no PR applies', 'shows a PR'))).toContain(noProbe)
+    const filled = 'the default branch is filled by the origin read, main, master and the Write tool, an empty line counts as empty, and a failed Write is a missing value'
+    expect(collectRevalidateNameFileDefects(seeded('rev-parse --verify --quiet main', 'rev-parse --verify --quiet trunk'))).toEqual([noProbe, filled])
+    expect(collectRevalidateNameFileDefects(seeded(MASTER_FALLBACK, 'otherwise `master`'))).toEqual([noProbe, filled])
+    expect(collectRevalidateNameFileDefects(seeded("for-each-ref --format='%(symref:lstrip=3)' refs/remotes/origin/HEAD", 'symbolic-ref --quiet --short refs/remotes/origin/HEAD'))).toEqual([noProbe, 'the default branch is read with for-each-ref, never by symbolic-ref, abbrev-ref or a pipe', filled])
+    expect(collectRevalidateNameFileDefects(seeded(WRITE_FAILURE, ''))).toEqual([filled])
+    expect(collectRevalidateNameFileDefects(seeded('write a literal name with the Write tool, after a Read of the file', 'write a literal name with a shell command'))).toEqual([filled])
+    expect(collectRevalidateNameFileDefects(seeded(' (a file whose only content is an empty line is empty)', ''))).toEqual([filled])
+    expect(collectRevalidateNameFileDefects(seeded(GH_FAILED_RULE, '`gh` failed when its first status is not 0'))).toEqual(['a gh failure is read from either printed status'])
+    expect(collectRevalidateNameFileDefects(seeded('Read `{name file}` with the Read tool: its one line is the name.', ''))).toEqual(['the name file is read with the Read tool'])
+    expect(collectRevalidateNameFileDefects(seeded(REVALIDATE_STOP_ON_GH, 'Stop the run if gh failed.'))).toEqual(['a gh failure that shows no missing PR, or an empty file, stops the run after removing the name file'])
+    expect(collectRevalidateNameFileDefects(seeded(REVALIDATE_STOP_ON_CLASS, 'Stop the run unless the name matches'))).toEqual(['a name outside the class stops the run after removing the name file'])
+    expect(collectRevalidateNameFileDefects(seeded(' Read `{name file}` with the Read tool', ' printf "%s" "{BASE_BRANCH}" > "$F"; Read `{name file}` with the Read tool'))).toEqual(['only the two reads redirect into the name file'])
+    for (const [spelling, shellWrite] of SHELL_WRITE_PROBES) {
+      expect(collectRevalidateNameFileDefects(seeded(' Read `{name file}` with the Read tool', ` ${shellWrite}; Read \`{name file}\` with the Read tool`)), spelling).toEqual(['only the two reads redirect into the name file'])
+    }
+    expect(collectRevalidateNameFileDefects(seeded(' when gh returned a PR, else ', ' always, then '))).toEqual(['one pr-mode call runs when gh returned a PR, else one local-mode call, each reading the name file'])
+    expect(collectRevalidateNameFileDefects(revalidateReference().replace('3. **Record BASE_BRANCH**', '3. **Base**'))).toEqual(['no re-validation base step'])
   })
 })
 
@@ -1430,12 +1570,14 @@ describe('#421 AC-26: the cross-references match the new phase numbers', () => {
 // #495 — Phase 1 resolves a fresh base once and every later diff starts at it
 // ---------------------------------------------------------------------------
 
-/** The call: the local rule over the checked name, in the worktree, with the exit status echoed. */
-const FRESH_BASE_CALL = 'cd "{worktree}" && B="{BASE_BRANCH}" && node "$HOME/.devflow/scripts/resolve-base.cjs" local "${B}"; echo "exit=$?"'
+/** The call: the local rule over the name file read on stdin, in the worktree, with the file removed on every exit and the exit status echoed. */
+const FRESH_BASE_CALL = `${NAME_FILE_TRAP} cd "{worktree}" && node "$HOME/.devflow/scripts/resolve-base.cjs" local --name-stdin < "$F"; echo "exit=$?"`
 
 /** What the fresh-base step states: [what it must say, the text that says it]. */
 const FRESH_BASE_PARTS: ReadonlyArray<readonly [string, string]> = [
-  ['the local-rule call over the checked name, in the worktree, with the exit status echoed', `run \`${FRESH_BASE_CALL}\``],
+  ['the name written with the Write tool to a fresh temp file, after one Read of it', 'write `BASE_BRANCH` with the Write tool to the file that `F="$(mktemp)" && echo "F=$F"` prints, after one Read of it'],
+  ['a failed Write counts as a missing value and is never done by a shell command', WRITE_FAILURE],
+  ['the local-rule call over the name file on stdin, in the worktree, with the trap and the exit status echoed', `run \`${FRESH_BASE_CALL}\``],
   ['the accepted-line test (40 or 64 hex, or none) with exit=0', 'Output other than one `BASE_REF=` line (40 or 64 hex, or `none`) with `exit=0`'],
   ['unusable output reads as resolver-unavailable', '`REASON=resolver-unavailable`'],
   ['BASE_REF is recorded', 'Record `BASE_REF`.'],
@@ -1484,6 +1626,22 @@ describe('#495: /implement resolves a fresh base once, before Phase 2, and every
     expect(collectImplementFreshBaseDefects(seeded)).toContain(`the fresh-base step lacks: ${what}`)
   })
 
+  it('known-bad probes: a name word, a call that reads no file and a flagged rm in the trap are each reported', () => {
+    const md = implementMd()
+    const callPart = 'the fresh-base step lacks: the local-rule call over the name file on stdin, in the worktree, with the trap and the exit status echoed'
+    for (const wounded of [
+      FRESH_BASE_CALL.replace(' --name-stdin < "$F"', ' "${B}"'),
+      FRESH_BASE_CALL.replace(' < "$F"', ''),
+      FRESH_BASE_CALL.replace('trap \'rm -- "$F"\'', 'trap \'rm -f "$F"\''),
+      FRESH_BASE_CALL.replace('trap \'rm -- "$F"\' EXIT; ', ''),
+    ]) {
+      expect(wounded, 'the seed must land').not.toBe(FRESH_BASE_CALL)
+      const seeded = md.replace(FRESH_BASE_CALL, () => wounded)
+      expect(seeded, 'the seed must land').not.toBe(md)
+      expect(collectImplementFreshBaseDefects(seeded)).toEqual([callPart])
+    }
+  })
+
   it('known-bad probes: a lost step, a lost channel, a lost product, a bare-name Validate base and a hex PR target are each reported', () => {
     const md = implementMd()
     expect(collectImplementFreshBaseDefects(md.replace('**Fresh base.**', '**Base.**'))).toEqual(['no fresh-base step'])
@@ -1517,5 +1675,6 @@ describe('#495: the curation-off build of /implement states the same fresh-base 
     expect(collectFilesChangedDefects(off)).toEqual([])
     expect(collectBaseBranchGuardDefects(off)).toEqual([])
     expect(collectInlineResolverDefects(off)).toEqual([])
+    expect(collectOrchestrationPrincipleDefects(off)).toEqual([])
   })
 })

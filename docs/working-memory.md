@@ -83,10 +83,11 @@ Devflow creates project documentation in `.devflow/docs/`:
 ```
 .devflow/docs/
 ├── reviews/{branch-slug}/              # Review reports per branch
-│   ├── .last-review-head              # HEAD SHA for incremental reviews
 │   └── {timestamp}/                   # Timestamped review directory
 │       ├── {focus}.md                 # Review agent reports
 │       ├── review-summary.md          # Synthesize agent output
 │       └── resolution-summary.md      # Written by /resolve
 └── design/                            # Implementation plans
 ```
+
+The incremental head markers are not part of this tree. `/code-review` and `/bug-analysis` keep each marker under the git directory of the worktree, at `<git dir>/devflow/reviews/{branch-slug}/.last-review-head` and `<git dir>/devflow/bug-analysis/{branch-slug}/.last-analysis-head`. `<git dir>` is the path that `git rev-parse --absolute-git-dir` prints, so each worktree has its own markers.

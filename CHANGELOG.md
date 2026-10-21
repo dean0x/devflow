@@ -192,11 +192,16 @@ Do the step below after you update.
 - `/code-review` and `/bug-analysis` stop when the branch name does not fit the allowed characters and length. The message states the allowed characters. In `/code-review` multi-worktree mode, this blocks only that worktree.
 - The Git agent's `validate-branch` returns BLOCKED in the same cases. `/resolve` takes its branch diff from it.
 - The Git agent's `ensure-pr-ready` stops only on a base name outside the allowed set, or one that git refuses. For any other base stop it prints `TRACEABILITY: DEGRADED (base {REASON}; fix: {fix})` and goes on.
+- `/dynamic-build`: a ticket whose setup reports no base commit stops with the `base-missing` escalation. Check the setup output, then re-run.
 
 **New resolver call:**
 - `ensure-pr-ready` calls `resolve-base.cjs` in `pr` mode with the base branch of the PR, or with the default branch when no PR applies. The call makes at most one fetch of the base branch.
 - `/implement` passes the base ref that it resolved in Phase 1, so a normal `/implement` run makes one fetch.
 - The `/dynamic-build` wave PR step runs `ensure-pr-ready` with no base ref, so that step makes this call.
+- The base resolver reads the base name from standard input (`--name-stdin`), so the name is not part of shell command text ([#561](https://github.com/dean0x/devflow/issues/561)).
+- The Git agent's `ensure-pr-ready` and `validate-branch` write the base name to a file. The step checks the status of both `gh` calls. It treats `gh` as failed when either status is not 0.
+- In `ensure-pr-ready` and `validate-branch`, a name file whose only content is an empty line counts as empty. The default-branch path then takes `main`, or else `master`.
+- `validate-branch` takes the default branch as the base when no PR applies: the branch has none, `gh` is missing or logged out, or the repository has no GitHub remote.
 
 **Stale-install window:**
 - Until you run `devflow init`, the installed commands and Git agent do not call the resolver.
@@ -205,6 +210,18 @@ Do the step below after you update.
 - A fetch that stops at its 45-second bound can leave a `refs/remotes/origin/<name>.lock` file in the git directory. Later runs then report `fetch-failed` until you delete the file.
 - The fetch needs git 2.29 or newer. With an older git, every run reports `fetch-failed` and prints the base warning.
 - The fetch runs no askpass program. Where an askpass program is the only credential source, a remote that needs credentials gives `fetch-failed` on every run, with the base warning.
+
+### Upgrade notes — Review markers
+
+**What changes:**
+- Incremental review and analysis markers are stored under the git directory of each worktree; the first run after the update covers the full branch.
+
+### Upgrade notes — Review ranges
+
+**What changes:**
+- `/dynamic-build`: in single-ticket mode, the review covers the diff from the commit the ticket branch was forked from to HEAD. On a non-default start branch, that is the ticket's own commits.
+- `/dynamic-build`: the wave evidence step lists the changed files with a diff from the base ref of the wave PR. The base ref must be a commit ID of 40 or 64 lowercase hex digits, and the diff must exit 0. If not, the step is skipped, and the run summary holds `TRACEABILITY: DEGRADED (wave base unusable)`.
+- A Review agent with no patch file and no usable diff range returns `reviewed: false`. After one retry, the engine records a coverage gap, and the run verdict is never PASS.
 
 ### Upgrade notes — Level readers
 

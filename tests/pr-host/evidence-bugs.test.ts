@@ -872,6 +872,8 @@ describe('only a trusted first-comment author can exclude a thread (§3.6, AC-5)
 // /resolve turns it into `fork_no_push` and keeps posting what does not need a push.
 
 const FORK_REASON = 'TRACEABILITY: DEGRADED (cannot push to fork)'
+/** The PR-details read that validate-branch step 6 makes first: the two fork fields come from it. */
+const FORK_PR_FIELDS = '--json isCrossRepository,maintainerCanModify,number,headRepositoryOwner,headRepository'
 
 /**
  * `maintainerCanModify` says whether the BASE repo's maintainers may push to the
@@ -912,7 +914,7 @@ export function collectMissingForkPreflight(files: ForkFiles): string[] {
     for (const term of terms) if (!text.includes(term)) out.push(`${label}: missing ${term}`)
   }
   need('pr/validate-branch.md', files.validateBranch, [
-    '--json baseRefName,isCrossRepository,maintainerCanModify',
+    FORK_PR_FIELDS,
     FORK_PUSH_ACCESS,
     FORK_REASON,
   ])
@@ -1003,7 +1005,7 @@ describe('a fork PR without maintainer edits degrades instead of failing a push 
       resolve: files.resolve.split('`fork_no_push`').join('`something_else`'),
     }
     const found = collectMissingForkPreflight(wounded)
-    expect(found).toContain('pr/validate-branch.md: missing --json baseRefName,isCrossRepository,maintainerCanModify')
+    expect(found).toContain(`pr/validate-branch.md: missing ${FORK_PR_FIELDS}`)
     expect(found).toContain('pr/validate-branch.md: missing ' + FORK_REASON)
     for (const site of ['Step 0b', 'Phase 7', 'Phase 8', 'Step 9b-1']) {
       expect(found).toContain(`/resolve ${site}: missing \`fork_no_push\``)

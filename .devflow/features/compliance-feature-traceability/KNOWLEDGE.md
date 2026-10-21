@@ -10,7 +10,7 @@ directories:
   - src/assets/mds/git
   - src/assets/commands/_partials/_tracker.mds
 created: 2026-10-10
-updated: 2026-10-13
+updated: 2026-10-21
 ---
 
 # Compliance Traceability Contract (Git Agent)
@@ -143,7 +143,7 @@ GitHub rendering is stable: `Tracked = #{n}`, `Depends on: #{n}`, `42-jwt-auth.{
 - **Principle 8 marker neutralisation.** Before wrapping remote content in `<untrusted-issue-body>` or `<external-thread>`, scan it (case-insensitively, whitespace tolerated inside the tag) for the literal closing marker and insert a backslash before the slash. Applies to `fetch-issue`, `fetch-issues-batch`, `setup-task` and `fetch-review-threads`. Principle 8 in `git.md`'s `## Principles` also carries a "Never reproduced in a posted body" sub-bullet naming all four comment-posting ops (`post-review-summary`, `post-resolution-summary`, `post-wave-report`, `backlink-shipped-issues`), stated once at principle level, with `post-resolution-summary`'s op-local restatement as the one exception that must also read from that operation's own reference alone.
 - **Containment is four obligations**: every producer, every repetition, every escape, and the untrusted-versus-local boundary. `setup-task` wraps the remote fields (`title`, `description`, `criteria`) in `<untrusted-issue-body>` and leaves the locally derived issue number outside. `fetch-issues-batch` shows the wrapper on each issue in its template (never "etc.") and wraps each independently.
 - **`ensure-pr-ready` step 4b / `ensure-traceable-issue`.** External content (PR body, issue title, labels) is bound to shell variables and applied via `--body-file {temp_file}` or `"$VAR"`. A `Closes #{n}` addition that step 4b resolves itself (no `ISSUE_PR_LINK` was given) requires `gh issue view {n} --json number,state` with `.state` of `"open"` (mechanics in `tracker/github/ensure-pr-ready.md`); branches like `chore/2026-cleanup` or `fix/2fa-login` can produce false numeric matches, and the existence check is the guard.
-- **PR retitle (step 4c, `APPLY_CONVENTIONS` true only).** A composed title containing any of `` $ ` \ " ' ; | & < > `` or a newline skips the retitle silently; otherwise it is bound to `DEVFLOW_PR_TITLE` and passed as `--title "$DEVFLOW_PR_TITLE"`. A failed retitle never blocks the PR.
+- **PR retitle (step 4c, `APPLY_CONVENTIONS` true only).** A composed title containing any of `` $ ` \ " ' ; | & < > `` or a newline skips the retitle silently (judged by reading, never passed to a command). Otherwise the Write tool puts the title in a `mktemp` file after a Read, and `gh pr edit {PR_NUMBER} --title="$(cat -- "$F")"` runs after `test -s "$F"` under `trap 'rm -- "$F"' EXIT`; a failed Write skips the retitle. A failed retitle never blocks the PR.
 - **Branch-name metacharacter guard (`setup-task` step 1b, the shared `conventions_step` in `tracker/_common.mds`).** `.devflow/conventions.md` is git-tracked, team-shared third-party input. A composed branch name (type + separator + slug) holding any of `` $ ` \ " ' ; | & < > # ``, whitespace or a newline discards the convention for the heuristic defaults; the validated name is bound to `DEVFLOW_BRANCH` before use.
 - **Single-sink validation.** The provider-resolution contract is the one convergence point for traceability filename composition; no other line composes a path from the provider token.
 

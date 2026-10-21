@@ -27,7 +27,7 @@ import {
   VARIANT_MODULES,
   operationReferenceRel,
 } from '../src/core/mds-variants.js';
-import { ROOT, resolveAgentSource, resolveAllAgents, gitAgentSinkCorpus, gitOperationReferenceCorpus, extractOpSectionFromCorpus, collectUnfencedH2, loadFile, requireDistFile, walkFiles, isPrHostEntryPath, type CorpusEntry } from './helpers.js';
+import { ROOT, resolveAgentSource, resolveAllAgents, gitAgentSinkCorpus, gitOperationReferenceCorpus, extractOpSectionFromCorpus, collectUnfencedH2, loadFile, requireDistFile, walkFiles, isPrHostEntryPath, NAME_FILE_TRAP, NAME_FILE_REMOVAL, WRITE_FAILURE, JUDGE_BY_READING, SHELL_WRITE_PROBES, countShellWritesIntoF, DEFAULT_BRANCH_PROBE, PRODUCER_STATUS_CAPTURE, PRODUCER_NAME_TAIL, GH_FAILED_RULE, NO_PR_CLAUSE, NO_PR_DEFINITION, OTHER_GH_FAILURE_CLAUSE, ORIGIN_HEAD_READ, MAIN_PROBE, MASTER_FALLBACK, DEFAULT_BRANCH_FILL, type CorpusEntry } from './helpers.js';
 import { RESOLVE_BASE_SCRIPT } from './evidence/seam.js';
 
 /**
@@ -3252,16 +3252,25 @@ describe('git agent: text moved out of the always-loaded agent still reaches its
 // PR ops use a fresh base for branch diffs (#495)
 //
 // `ensure-pr-ready` (step 5) and `validate-branch` (steps 6 and 7) are the two Git ops that
-// read a base. Each checks the PR's base name in the prompt, binds it to a shell variable,
-// runs the base resolver once in `pr` mode, and keeps the commit id it prints. Every
-// later diff takes that id and never the name. Both ops are read from their single
-// GitHub reference; `ensure-pr-ready` step 5 is the same text under every provider, which
+// read a base. Each writes the PR's base name to a temp file, judges it by reading against
+// the strict class, and runs the base resolver once in `pr` mode with that file on stdin: the
+// name never reaches a command line. It keeps the commit id the resolver prints, and every
+// later diff takes that id and never the name. Steps 4a and 4c hand the base and the title to
+// `gh` from a file the same way. Both ops are read from their single GitHub reference;
+// `ensure-pr-ready` step 5 is the same text under every provider, which
 // tests/guards/base-ref-guard.test.ts compares.
 // ---------------------------------------------------------------------------
 
 const BASE_RESOLVER = createRequire(import.meta.url)(RESOLVE_BASE_SCRIPT) as { readonly STRICT_NAME_RE: RegExp };
 const BASE_CHECK = `\`${BASE_RESOLVER.STRICT_NAME_RE.source}\``;
-const PR_MODE_CALL = 'node "$HOME/.devflow/scripts/resolve-base.cjs" pr "${B}" --cross "${X}"; echo "exit=$?"';
+/** The resolver call: pr mode, the name read on stdin from the file, the exit status echoed. */
+const PR_MODE_CALL = 'node "$HOME/.devflow/scripts/resolve-base.cjs" pr --name-stdin --cross "${X}" < "$F"; echo "exit=$?"';
+/** What both ops run in one Bash call: bind the name file with its trap, read the cross flag, run the resolver. */
+const PR_RESOLVER_RUN = `${NAME_FILE_TRAP} cd "{worktree}" && X=<isCrossRepository, else false> && ${PR_MODE_CALL}`;
+/** The one Bash call that opens ensure-pr-ready step 5: the cross flag to stdout, the PR base name to a fresh file. */
+const ENSURE_PRODUCER = `cd "{worktree}" && F="$(mktemp)" && echo "F=$F" && gh pr view --json isCrossRepository --jq .isCrossRepository; ${PRODUCER_STATUS_CAPTURE} ${PRODUCER_NAME_TAIL}`;
+/** The one Bash call that opens validate-branch step 6: the PR details to stdout, the PR base name to a fresh file. */
+const VALIDATE_PRODUCER = `cd "{worktree}" && F="$(mktemp)" && echo "F=$F" && gh pr view {number} --json isCrossRepository,maintainerCanModify,number,headRepositoryOwner,headRepository; ${PRODUCER_STATUS_CAPTURE} {number} ${PRODUCER_NAME_TAIL}`;
 /** The one reason-to-fix sentence: ensure-pr-ready 5b and validate-branch step 6 each carry it byte for byte. */
 const BASE_FIX_TABLE = 'Fix by REASON: no-merge-base `git fetch --unshallow`; no-ref or timeout `git fetch origin <base>` (`<base>` stays as written); resolver-unavailable `re-run; if it repeats, run devflow init`; invalid-name the allowed set, never the name; any other REASON none, and `; fix: {fix}` is left out.';
 const BASE_DEGRADED_LINE = '`TRACEABILITY: DEGRADED (base {REASON}; fix: {fix})`';
@@ -3287,18 +3296,31 @@ function subStep(step: string, id: string): string {
   return lines.slice(first, last).join('\n');
 }
 
-/** The default-branch probe both ops carry: origin/HEAD by symbolic-ref (no pipe), then main, then master. */
-const DEFAULT_BRANCH_PROBE = 'git -C "{worktree}" symbolic-ref --quiet --short refs/remotes/origin/HEAD';
-const MAIN_PROBE = 'git -C "{worktree}" rev-parse --verify --quiet main';
-const OLD_DEFAULT_BRANCH_PROBE = 'git -C "{worktree}" rev-parse --abbrev-ref origin/HEAD 2>/dev/null | sed \'s|origin/||\'';
+/** A step's text from its label to the next step's label, blank lines inside it included; empty when either label is absent. */
+function stepSpan(section: string, label: string, next: string): string {
+  const from = section.indexOf(`\n${label}. `);
+  const to = from === -1 ? -1 : section.indexOf(`\n${next}. `, from + 1);
+  return to === -1 ? '' : section.slice(from + 1, to);
+}
 
-/** The `master` fallback in both ops: it is tried only after `main`, and checked the same way, so a repository with neither has no default branch. */
-const MASTER_FALLBACK = 'else `master` the same way';
+/** `section` without the first copy of `text` that sits at or after the step `label`; the section itself when there is none. */
+function dropFromStep(section: string, label: string, text: string): string {
+  const from = section.indexOf(`\n${label}. `);
+  const at = from === -1 ? -1 : section.indexOf(text, from);
+  return at === -1 ? section : section.slice(0, at) + section.slice(at + text.length);
+}
 
-/** True when `text` reads origin/HEAD with symbolic-ref, strips its `origin/` prefix, then tries main, then master (checked the same way as main). */
-function probesDefaultBranch(text: string): boolean {
-  const at = [DEFAULT_BRANCH_PROBE, 'minus its `origin/` prefix', MAIN_PROBE, MASTER_FALLBACK].map(part => text.indexOf(part));
-  return at.every((i, n) => i >= 0 && (n === 0 || i > at[n - 1])) && !text.includes('abbrev-ref') && !/\| *sed/.test(text);
+/** The default-branch read both ops carry: origin/HEAD by for-each-ref (no pipe), then main, then master. */
+/** Two seeded bad reads of the default branch: one through a pipe, one by symbolic-ref. */
+const PIPED_DEFAULT_BRANCH_PROBE = 'git -C "{worktree}" rev-parse --abbrev-ref origin/HEAD 2>/dev/null | sed \'s|origin/||\'';
+const SYMBOLIC_REF_PROBE = 'git -C "{worktree}" symbolic-ref --quiet --short refs/remotes/origin/HEAD';
+/** What ensure-pr-ready 5a tries before the origin read: a BASE_BRANCH the caller gave. */
+const GIVEN_BASE = 'a given `BASE_BRANCH`';
+
+/** True when `text` takes `lead`, then reads origin/HEAD by for-each-ref, then tries main, then master (checked the same way as main), with no symbolic-ref, abbrev-ref or pipe. */
+function probesDefaultBranch(text: string, lead: readonly string[]): boolean {
+  const at = [...lead, ORIGIN_HEAD_READ, MAIN_PROBE, MASTER_FALLBACK].map(part => text.indexOf(part));
+  return at.every((i, n) => i >= 0 && (n === 0 || i > at[n - 1])) && !/symbolic-ref|abbrev-ref/.test(text) && !/\| *sed/.test(text);
 }
 
 /** The names of the checks `text` fails; empty when every check holds. */
@@ -3306,46 +3328,100 @@ function failed(checks: ReadonlyArray<readonly [string, boolean]>): string[] {
   return checks.filter(([, ok]) => !ok).map(([name]) => name);
 }
 
-/** Named collector: the checks the ensure-pr-ready step 5 text fails (the base name, its check, the resolver call and the exits). */
+/** What a step states about its name or title file: [the step it sits in, what it must say, the text that says it]. */
+type FilePart = readonly [label: string, what: string, text: string];
+
+/** Steps 4a, 4c and 5a of ensure-pr-ready: the base name, the base and the title each reach `gh` and the resolver through a file. */
+const ENSURE_FILE_PARTS: readonly FilePart[] = [
+  ['4a', '4a checks a given BASE_BRANCH by reading, before it runs any command', `When \`BASE_BRANCH\` is given, check it first against the step-5a name check (${JUDGE_BY_READING}). A mismatch ends with Status BLOCKED and no PR, naming only the allowed set.`],
+  ['4a', '4a writes a given BASE_BRANCH to a fresh temp file with the Write tool after a Read, and reads it back', 'Then run `F="$(mktemp)" && echo "F=$F"`, Read that file, Write `BASE_BRANCH` to it with the Write tool, and Read it back.'],
+  ['4a', '4a treats a failed Write as a missing value', WRITE_FAILURE],
+  ['4a', '4a opens no PR when the name file reads back empty, and removes it', 'An empty file ends with Status BLOCKED and no PR, after `rm -- "{name file}"`.'],
+  ['4a', '4a passes the base to gh pr create only from the name file, after test -s', 'then `test -s "$F" && gh pr create … --base="$(cat -- "$F")"`'],
+  ['4a', '4a removes the name file after the last create attempt, and says an INT or TERM signal skips that removal', `${NAME_FILE_REMOVAL}.`],
+  ['4a', '4a keeps the D11 trap unchanged and arms no second exit trap', 'The D11 trap stays unchanged: its rm list does not gain the name file, and no second EXIT trap is armed.'],
+  ['4a', '4a opens no PR when test -s fails', 'A failed `test -s` ends with Status BLOCKED and no PR.'],
+  ['4c', '4c judges the title by reading and keeps its deny-list', `Skip the retitle (leave the PR title as-is, no error) if the composed title contains any of \`\` $ \` \\ " ' ; | & < > \`\` or a newline; ${JUDGE_BY_READING}.`],
+  ['4c', '4c writes the title to a fresh temp file with the Write tool after a Read', 'Run `F="$(mktemp)" && echo "F=$F"`, Read that file, and Write the title to it with the Write tool.'],
+  ['4c', '4c treats a failed Write as a missing value', WRITE_FAILURE],
+  ['4c', '4c skips the retitle on a missing title, removing the title file', 'A missing title skips the retitle after `rm -- "{title file}"`.'],
+  ['4c', '4c passes the title to gh pr edit only from the title file, under the flagless trap', 'Otherwise run `F="{title file}"; trap \'rm -- "$F"\' EXIT; test -s "$F" && gh pr edit {PR_NUMBER} --title="$(cat -- "$F")"; echo "gh=$?"`.'],
+  ['4c', '4c degrades on a failed edit and never blocks the PR', 'On any 4xx/5xx from `gh pr edit`: emit `TRACEABILITY: DEGRADED ({reason})` and continue — a failed retitle never blocks the PR.'],
+  ['5', '5a reads the cross flag and writes the PR base name to a fresh temp file in one Bash call, with gh= echoed', `\`${ENSURE_PRODUCER}\``],
+  ['5', '5a reads a gh failure from either printed status', GH_FAILED_RULE],
+  ['5', '5a takes the default branch only when gh failed and its output shows that no PR applies', `If ${NO_PR_CLAUSE}, the name is the default branch`],
+  ['5', '5a defines "no PR applies" as none for the branch, gh missing or logged out, or no GitHub remote', NO_PR_DEFINITION],
+  ['5', '5a fills the default branch by the origin read, main, master and the Write tool, an empty line counting as empty', DEFAULT_BRANCH_FILL],
+  ['5', '5a treats a failed Write as a missing value', WRITE_FAILURE],
+  ['5', '5a reads the name file with the Read tool', 'Read `{name file}` with the Read tool: its one line is the name.'],
+  ['5', '5a removes the name file on every exit but the last, which the trap removes', 'Every exit below but the last runs `rm -- "{name file}"`.'],
+];
+
+/** Step 6 of validate-branch: the PR details and the base name come from one Bash call, and every stop removes the name file. */
+const VALIDATE_FILE_PARTS: readonly FilePart[] = [
+  ['6', 'step 6 reads the PR details and writes the base name to a fresh temp file in one Bash call, with gh= echoed', `\`${VALIDATE_PRODUCER}\``],
+  ['6', 'step 6 reads a gh failure from either printed status', GH_FAILED_RULE],
+  ['6', 'step 6 takes the default branch only when gh failed and its output shows that no PR applies', `If ${NO_PR_CLAUSE}, take the default branch`],
+  ['6', 'step 6 defines "no PR applies" as none for the branch, gh missing or logged out, or no GitHub remote', NO_PR_DEFINITION],
+  ['6', 'step 6 fills the default branch by the origin read, main, master and the Write tool, an empty line counting as empty', DEFAULT_BRANCH_FILL],
+  ['6', 'step 6 treats a failed Write as a missing value', WRITE_FAILURE],
+  ['6', 'step 6 reads the name file with the Read tool', 'Read `{name file}` with the Read tool: its one line is `base_branch`'],
+  ['6', 'step 6 returns BLOCKED, removing the name file and skipping step 7, when the base cannot be determined', `If \`base_branch\` cannot be determined (${OTHER_GH_FAILURE_CLAUSE}, or the file is empty after every fallback): run \`rm -- "{name file}"\`, return BLOCKED, never an empty \`### Diff Scope\`; skip step 7`],
+  ['6', 'step 6 judges the name by reading, and a mismatch removes the name file, returns BLOCKED and skips step 7', `${JUDGE_BY_READING}. On a mismatch run \`rm -- "{name file}"\`, return BLOCKED with that allowed set, never the name; skip step 7`],
+];
+
+/** Named collector: the checks the ensure-pr-ready steps 4a, 4c and 5 text fails (the base and title files, the base name, its check, the resolver call and the exits). */
 function collectEnsurePrReadyBaseDefects(section: string): string[] {
+  const step4a = stepSpan(section, '4a', '4b');
+  const step4c = stepSpan(section, '4c', '5');
   const step5 = numberedStep(section, '5');
   const a = subStep(step5, '5a');
   const b = subStep(step5, '5b');
   const exits = a.split('\n').filter(l => /^\s+- /.test(l));
   const [noName = '', refused = '', givenRef = '', resolve = ''] = exits;
   const outputLine = section.split('\n').find(l => l.startsWith('{`TRACEABILITY: DEGRADED (base ')) ?? '';
+  const scope: Readonly<Record<string, string>> = { '4a': step4a, '4c': step4c, '5': a };
   return failed([
     ['the Output returns the base ref right after the Base line', section.includes('- **Base**: {base_branch}\n- **Base ref**: {base_ref}\n')],
     ['5a gives each of its four exits its own sub-bullet', exits.length === 4],
-    ['5a takes the default branch when there is no PR, by symbolic-ref then main then master, before any exit', probesDefaultBranch(a) && a.indexOf(DEFAULT_BRANCH_PROBE) < a.indexOf(exits[0] ?? '') && a.includes('no PR applies')],
-    ['5a takes the unreadable exit, not the default branch, on any other gh failure', noName.includes('any other `gh` failure') && !a.split('\n')[0].includes('fails')],
+    ['5a takes the default branch when there is no PR, by for-each-ref then main then master, before any exit', probesDefaultBranch(a, [GIVEN_BASE]) && a.indexOf(ORIGIN_HEAD_READ) < a.indexOf(exits[0] ?? '') && a.split('\n')[0].includes('its output shows that no PR applies')],
+    ['5a takes the unreadable exit, not the default branch, on any other gh failure', noName.includes(OTHER_GH_FAILURE_CLAUSE) && noName.includes('the file is empty after every fallback') && noName.includes('any other `gh` failure') && !/`gh` fail(?:s|ed)(?! and its output shows that no PR applies)/.test(a.split('\n')[0].replace(GH_FAILED_RULE, ''))],
     ['5a keeps the PR line, degrades and skips the rest of step 5 when no name is found', noName.includes('keep the PR line') && noName.includes('`(unreadable)`') && noName.includes('`TRACEABILITY: DEGRADED (base name unreadable; fix: re-run)`') && noName.includes('skip the rest of step 5') && noName.includes('no default branch')],
-    ['5a carries the exact base-name check', refused.includes(BASE_CHECK)],
+    ['5a carries the exact base-name check, judged by reading', refused.includes(`${BASE_CHECK} (${JUDGE_BY_READING})`)],
     ['5a shows the rejected Base line and names only the allowed set', refused.includes('`(rejected)`') && refused.includes('never the name') && refused.includes('ASCII letters, digits and `._/+@,#-`')],
-    ['5a reads the cross flag from isCrossRepository', a.includes('`isCrossRepository`') && resolve.includes('X=<isCrossRepository, else false>')],
+    ['5a reads the cross flag from isCrossRepository', a.includes('--json isCrossRepository --jq .isCrossRepository') && resolve.includes('X=<isCrossRepository, else false>')],
     ['5a skips the resolver for a given hex BASE_REF on the same base name', givenRef.includes('When `BASE_REF` is 40 or 64 lowercase hex and the name equals `BASE_BRANCH`, skip the resolver and 5b: `base_ref` is `BASE_REF`')],
-    ['5a runs the pr-mode call last, after the check, in one Bash call', resolve.includes(PR_MODE_CALL) && resolve.includes('in one Bash call') && a.indexOf(BASE_CHECK) < a.indexOf('When `BASE_REF`') && a.indexOf('When `BASE_REF`') < a.indexOf(PR_MODE_CALL)],
-    ['5a keeps the name out of prose', resolve.includes('only as `${B}`')],
+    ['5a runs the pr-mode call last, after the check, in one Bash call', resolve.includes(PR_RESOLVER_RUN) && resolve.includes('in one Bash call') && a.indexOf(BASE_CHECK) < a.indexOf('When `BASE_REF`') && a.indexOf('When `BASE_REF`') < a.indexOf(PR_RESOLVER_RUN)],
+    ['5a keeps the name off every command line: the resolver reads it from the file on stdin', resolve.includes('< "$F"') && !/\$\{B\}|\bB=|\{BASE_BRANCH\}|\{base_branch\}/.test(a)],
+    ['4a hands the base to gh pr create only from the name file', (step4a.match(/--base\S*/g) ?? []).length > 0 && (step4a.match(/--base\S*/g) ?? []).every(flag => flag === '--base="$(cat')],
+    ['4a arms no second exit trap', !step4a.includes("trap '")],
+    ['5a fills the name file only by its two reads and the Write tool: no shell write of the value', countShellWritesIntoF(a) === 2],
+    ['4a and 4c fill their files only with the Write tool: no shell redirect into the file', countShellWritesIntoF(step4a) === 0 && countShellWritesIntoF(step4c) === 0],
+    ['a failed scrub creates the PR, and the name file stays until the last create attempt', section.includes('**On scrubber failure** (non-zero exit or script missing): still create the PR') && step4a.includes('after the last create attempt')],
+    ['4c hands the title to gh pr edit only from the title file', (step4c.match(/--title\S*/g) ?? []).length > 0 && (step4c.match(/--title\S*/g) ?? []).every(flag => flag === '--title="$(cat')],
+    ...ENSURE_FILE_PARTS.map(([label, what, text]): readonly [string, boolean] => [what, scope[label].includes(text)]),
     ['the Input lists BASE_REF as optional', section.includes('`BASE_BRANCH` (optional), `BASE_REF` (optional)')],
     ['5b takes the one BASE_REF line only with exit=0 and reads other output as resolver-unavailable', b.includes('`BASE_REF=`') && b.includes('together with `exit=0`') && b.includes('`REASON=resolver-unavailable`') && b.includes('run devflow init')],
     ['5b returns base_ref and prints REASON', b.includes('`base_ref`') && b.includes('print REASON')],
     ['5b stops only on an invalid name', b.includes('Only an invalid name stops this operation')],
     ['5b prints the DEGRADED base line with its fix for degraded and stop', b.includes('`degraded`') && b.includes('`stop`') && b.includes(BASE_DEGRADED_LINE)],
     ['5b carries the reason-to-fix table', b.includes(BASE_FIX_TABLE)],
-    ['the Output names the step-5 DEGRADED lines and an invalid name as the only BLOCKED cause', outputLine.includes(BASE_DEGRADED_LINE) && outputLine.includes('`(base name unreadable; fix: re-run)`') && outputLine.includes('only an invalid base name makes the Status BLOCKED')],
+    ['the Output names the step-5 DEGRADED lines, an invalid base name and an unwritable step-4a base as the only BLOCKED causes', outputLine.includes(BASE_DEGRADED_LINE) && outputLine.includes('`(base name unreadable; fix: re-run)`') && outputLine.includes('only an invalid base name, or a step-4a base that cannot be written, makes the Status BLOCKED')],
   ]);
 }
 
-/** Named collector: the checks the validate-branch steps 6 and 7 text fails (the default-branch probe, the base check, the resolver call and the diff). */
+/** Named collector: the checks the validate-branch steps 6 and 7 text fails (the name file, the default-branch read, the base check, the resolver call and the diff). */
 function collectValidateBranchBaseDefects(section: string): string[] {
   const step6 = numberedStep(section, '6');
   const step7 = numberedStep(section, '7');
   const contract = section.slice(0, section.indexOf('**Input:**'));
   return failed([
-    ['step 6 carries the exact base-name check', step6.includes(BASE_CHECK)],
+    ['step 6 carries the exact base-name check, judged by reading', step6.includes(`${BASE_CHECK}`) && step6.includes(`; ${JUDGE_BY_READING}.`)],
     ['step 6 returns BLOCKED with the allowed set on a refused name', /BLOCKED with that allowed set, never the name/.test(step6)],
-    ['step 6 reads the cross flag from isCrossRepository', step6.includes('X=<isCrossRepository, else false>')],
-    ['step 6 runs the pr-mode call', step6.includes(PR_MODE_CALL)],
+    ['step 6 fills the name file only by its two reads and the Write tool: no shell write of the value', countShellWritesIntoF(step6) === 2],
+    ['step 6 reads the cross flag from isCrossRepository', step6.includes('--json isCrossRepository,') && step6.includes('X=<isCrossRepository, else false>')],
+    ['step 6 runs the pr-mode call', step6.includes(PR_RESOLVER_RUN)],
+    ['step 6 keeps the name off every command line: the resolver reads it from the file on stdin', step6.includes('< "$F"') && !/\$\{B\}|\bB=|\{BASE_BRANCH\}|\{base_branch\}/.test(step6)],
     ['step 6 returns BLOCKED when the base ref is none or not hex', /`base_ref` of `none` or not 40 or 64 hex returns BLOCKED/.test(step6)],
     ['step 6 reads other resolver output as resolver-unavailable', step6.includes('`REASON=resolver-unavailable`') && step6.includes('run devflow init')],
     ['step 6 takes the BASE_REF line only with exit=0', step6.includes('one `BASE_REF=` line with `exit=0`')],
@@ -3353,8 +3429,9 @@ function collectValidateBranchBaseDefects(section: string): string[] {
     ['step 6 carries the reason-to-fix table', step6.includes(BASE_FIX_TABLE)],
     ['step 6 continues on a degraded base with the DEGRADED line and its fix', step6.includes(BASE_DEGRADED_LINE) && step6.includes('`degraded`')],
     ['step 6 never gives an empty Diff Scope', step6.includes('never an empty `### Diff Scope`') && !/intentional empty/i.test(section)],
-    ['step 6 takes the default branch by symbolic-ref with no pipe, then main, then master', probesDefaultBranch(step6)],
+    ['step 6 takes the default branch by for-each-ref with no pipe, then main, then master', probesDefaultBranch(step6, [])],
     ['step 6 probes the default branch without a name placeholder', !/\{(?:default|base_branch)\}/.test(step6.replace(/`base_branch`/g, ''))],
+    ...VALIDATE_FILE_PARTS.map(([, what, text]): readonly [string, boolean] => [what, step6.includes(text)]),
     ['step 7 diffs against the hex base ref and echoes the exit status', step7.includes('git -C "{worktree}" diff --name-only {base_ref}...HEAD; echo "exit=$?"') && step7.includes('40 or 64 hex')],
     ['step 7 treats a non-zero exit as BLOCKED and an empty list as valid only with exit 0', step7.includes('a non-zero exit is BLOCKED') && step7.includes('empty list counts only with `exit=0`')],
     ['the contract says it fetches the base and lists the diff against base_ref', contract.includes('it fetches the base branch at most once (the remote-tracking ref only), lists the diff against `base_ref`') && !/read-only/i.test(contract)],
@@ -3374,8 +3451,8 @@ describe('git agent: PR ops use a fresh base for branch diffs (#495)', () => {
   });
 
   it('the cross-repository flag of ensure-pr-ready comes from the same PR field that validate-branch step 6 reads', () => {
-    expect(numberedStep(validateSection(), '6')).toContain('`isCrossRepository`');
-    expect(subStep(numberedStep(ensureSection(), '5'), '5a')).toContain('`isCrossRepository`');
+    expect(numberedStep(validateSection(), '6')).toContain('--json isCrossRepository,');
+    expect(subStep(numberedStep(ensureSection(), '5'), '5a')).toContain('--json isCrossRepository --jq .isCrossRepository');
   });
 
   it('the remote-I/O sweep counts the resolver: both ops that run it name its script', () => {
@@ -3383,12 +3460,123 @@ describe('git agent: PR ops use a fresh base for branch diffs (#495)', () => {
     expect(naming).toEqual(['ensure-pr-ready', 'validate-branch']);
   });
 
+  it.each(ENSURE_FILE_PARTS)('known-bad probe: dropping the text of step %s that says "%s" from ensure-pr-ready is reported', (label, what, text) => {
+    const ensure = ensureSection();
+    const seeded = dropFromStep(ensure, label, text);
+    expect(seeded, 'the seed must land').not.toBe(ensure);
+    expect(collectEnsurePrReadyBaseDefects(seeded)).toContain(what);
+  });
+
+  it.each(VALIDATE_FILE_PARTS)('known-bad probe: dropping the text of step %s that says "%s" from validate-branch is reported', (label, what, text) => {
+    const validate = validateSection();
+    const seeded = dropFromStep(validate, label, text);
+    expect(seeded, 'the seed must land').not.toBe(validate);
+    expect(collectValidateBranchBaseDefects(seeded)).toContain(what);
+  });
+
+  it('known-bad probes: a gh failure with no PR is routed to the default branch and never to the unreadable exit', () => {
+    const ensure = ensureSection();
+    const unreadable = '5a takes the unreadable exit, not the default branch, on any other gh failure';
+    // ensure-pr-ready: only the first line may route a gh failure, and only one that shows no PR applies.
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace(' and any other `gh` failure', ''))).toEqual([unreadable]);
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('`gh` failed and its output does not show that no PR applies, or the file', 'the file'))).toEqual([unreadable]);
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('or the file is empty after every fallback; a PR', 'a PR'))).toEqual([unreadable]);
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('If `gh` failed and its output shows that no PR applies (', 'If `gh` failed ('))).toContain(unreadable);
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('its output shows that no PR applies', 'its output shows that a PR applies'))).toContain('5a takes the default branch when there is no PR, by for-each-ref then main then master, before any exit');
+    // validate-branch: the same trigger on both sides.
+    const validate = validateSection();
+    const noPr = 'step 6 takes the default branch only when gh failed and its output shows that no PR applies';
+    const noPrDefinition = 'step 6 defines "no PR applies" as none for the branch, gh missing or logged out, or no GitHub remote';
+    expect(collectValidateBranchBaseDefects(validate.replace(NO_PR_CLAUSE, '`gh` failed'))).toEqual([noPr, noPrDefinition]);
+    expect(collectValidateBranchBaseDefects(validate.replace(` ${NO_PR_DEFINITION}`, ''))).toEqual([noPr, noPrDefinition]);
+    expect(collectValidateBranchBaseDefects(validate.replace('(`gh` failed and its output does not show that no PR applies, or the file is empty after every fallback)', '(the file is empty after every fallback)'))).toEqual(['step 6 returns BLOCKED, removing the name file and skipping step 7, when the base cannot be determined']);
+  });
+
+  it('known-bad probes: a name word, a call that reads no file and a flagged rm in the trap are each reported', () => {
+    const ensure = ensureSection();
+    const resolverRun = '5a runs the pr-mode call last, after the check, in one Bash call';
+    const offCommandLine = '5a keeps the name off every command line: the resolver reads it from the file on stdin';
+    const wounded = [
+      PR_RESOLVER_RUN.replace(' --name-stdin --cross "${X}" < "$F"', ' "${B}" --cross "${X}"'),
+      PR_RESOLVER_RUN.replace(' < "$F"', ''),
+      PR_RESOLVER_RUN.replace('trap \'rm -- "$F"\'', 'trap \'rm -f "$F"\''),
+      PR_RESOLVER_RUN.replace('trap \'rm -- "$F"\' EXIT; ', ''),
+      PR_RESOLVER_RUN.replace(' pr --name-stdin', ' local --name-stdin'),
+    ];
+    for (const run of wounded) {
+      expect(run, 'the seed must land').not.toBe(PR_RESOLVER_RUN);
+      const seeded = ensure.replace(PR_RESOLVER_RUN, () => run);
+      expect(seeded, 'the seed must land').not.toBe(ensure);
+      expect(collectEnsurePrReadyBaseDefects(seeded), run).toContain(resolverRun);
+    }
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace(' < "$F"; echo "exit=$?"', '; echo "exit=$?"'))).toContain(offCommandLine);
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('X=<isCrossRepository, else false> && ', 'B="{name}" && X=<isCrossRepository, else false> && '))).toContain(offCommandLine);
+    const validate = validateSection();
+    for (const run of wounded) {
+      const seeded = validate.replace(PR_RESOLVER_RUN, () => run);
+      expect(seeded, 'the seed must land').not.toBe(validate);
+      expect(collectValidateBranchBaseDefects(seeded), run).toContain('step 6 runs the pr-mode call');
+    }
+  });
+
+  it('known-bad probes: a shell write of the name, the base or the title into its file is reported, in every spelling', () => {
+    const ensure = ensureSection();
+    const validate = validateSection();
+    for (const [spelling, shellWrite] of SHELL_WRITE_PROBES) {
+      const seeds: ReadonlyArray<readonly [string, string, string]> = [
+        ['write a literal name with the Write tool, after a Read of the file', `write a literal name with \`${shellWrite}\``, '5a fills the name file only by its two reads and the Write tool: no shell write of the value'],
+        ['Read that file, Write `BASE_BRANCH` to it with the Write tool, and Read it back.', `Read that file, then run \`${shellWrite}\`, and Read it back.`, '4a and 4c fill their files only with the Write tool: no shell redirect into the file'],
+        ['Read that file, and Write the title to it with the Write tool.', `Read that file, then run \`${shellWrite}\`.`, '4a and 4c fill their files only with the Write tool: no shell redirect into the file'],
+      ];
+      for (const [from, to, what] of seeds) {
+        const seeded = ensure.replace(from, () => to);
+        expect(seeded, 'the seed must land').not.toBe(ensure);
+        expect(collectEnsurePrReadyBaseDefects(seeded), `${spelling}: ${what}`).toContain(what);
+      }
+      const written = validate.replace('write a literal name with the Write tool, after a Read of the file', () => `write a literal name with \`${shellWrite}\``);
+      expect(written, 'the seed must land').not.toBe(validate);
+      expect(collectValidateBranchBaseDefects(written), `${spelling}: step 6`).toContain('step 6 fills the name file only by its two reads and the Write tool: no shell write of the value');
+    }
+  });
+
+  it('a read from the name file and a longer variable are not shell writes', () => {
+    expect(countShellWritesIntoF('node resolve-base.cjs pr --name-stdin < "$F"; echo "$FILE" > "$FILE"; cat -- "$F" | wc -c')).toBe(0);
+    expect(countShellWritesIntoF('gh pr view --json baseRefName --jq .baseRefName > "$F"; echo "gh=$?"')).toBe(1);
+    expect(countShellWritesIntoF('x >"${F}" && y | tee -a $F')).toBe(2);
+  });
+
+  it('known-bad probes: a base or title that reaches gh as command text, and a second exit trap, are each reported', () => {
+    const ensure = ensureSection();
+    const baseFile = '4a hands the base to gh pr create only from the name file';
+    const titleFile = '4c hands the title to gh pr edit only from the title file';
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('--base="$(cat -- "$F")"', '--base "$BASE_BRANCH"'))).toContain(baseFile);
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('--base="$(cat -- "$F")"', '--base="{BASE_BRANCH}"'))).toContain(baseFile);
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('--title="$(cat -- "$F")"', '--title="{title}"'))).toContain(titleFile);
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('--title="$(cat -- "$F")"', '--title "$TITLE"'))).toContain(titleFile);
+    const secondTrap = ensure.replace('then `test -s "$F" && gh pr create', 'then `trap \'rm -- "$F"\' EXIT; test -s "$F" && gh pr create');
+    expect(secondTrap, 'the seed must land').not.toBe(ensure);
+    expect(collectEnsurePrReadyBaseDefects(secondTrap)).toContain('4a arms no second exit trap');
+  });
+
+  it('known-bad probes: a scrubber failure that skips the PR, or a name file removed before the last create attempt, is reported', () => {
+    const ensure = ensureSection();
+    const scrub = 'a failed scrub creates the PR, and the name file stays until the last create attempt';
+    const failedScrub = ensure.replace('**On scrubber failure** (non-zero exit or script missing): still create the PR', '**On scrubber failure** (non-zero exit or script missing): create no PR');
+    expect(failedScrub, 'the seed must land').not.toBe(ensure);
+    expect(collectEnsurePrReadyBaseDefects(failedScrub)).toEqual([scrub]);
+    const early = ensure.replace('after the last create attempt', 'after the first create attempt');
+    expect(early, 'the seed must land').not.toBe(ensure);
+    expect(collectEnsurePrReadyBaseDefects(early)).toContain(scrub);
+  });
+
   it('known-bad probes: each defect in seeded text is reported by name', () => {
     const ensure = ensureSection();
     const validate = collectValidateBranchBaseDefects(validateSection());
     expect(validate).toEqual([]);
+    const defaultBranch = '5a takes the default branch when there is no PR, by for-each-ref then main then master, before any exit';
     expect(collectEnsurePrReadyBaseDefects(ensure.replace('- **Base ref**: {base_ref}\n', ''))).toEqual(['the Output returns the base ref right after the Base line']);
-    expect(collectEnsurePrReadyBaseDefects(ensure.replace(BASE_CHECK, '`^[a-z]+$`'))).toContain('5a carries the exact base-name check');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace(BASE_CHECK, '`^[a-z]+$`'))).toContain('5a carries the exact base-name check, judged by reading');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace(`${BASE_CHECK} (${JUDGE_BY_READING})`, BASE_CHECK))).toContain('5a carries the exact base-name check, judged by reading');
     expect(collectEnsurePrReadyBaseDefects(ensure.replace('X=<isCrossRepository', 'X=<false'))).toContain('5a reads the cross flag from isCrossRepository');
     expect(collectEnsurePrReadyBaseDefects(ensure.replace('Only an invalid name stops this operation', 'Any failure stops this operation'))).toContain('5b stops only on an invalid name');
     expect(collectEnsurePrReadyBaseDefects(ensure.replace(BASE_FIX_TABLE, ''))).toContain('5b carries the reason-to-fix table');
@@ -3396,29 +3584,32 @@ describe('git agent: PR ops use a fresh base for branch diffs (#495)', () => {
     expect(collectEnsurePrReadyBaseDefects(ensure.replace('keep the PR line', 'drop the PR line'))).toContain('5a keeps the PR line, degrades and skips the rest of step 5 when no name is found');
     expect(collectEnsurePrReadyBaseDefects(ensure.replace('skip the rest of step 5', 'skip 5b'))).toContain('5a keeps the PR line, degrades and skips the rest of step 5 when no name is found');
     expect(collectEnsurePrReadyBaseDefects(ensure.replace('skip the resolver and 5b', 'run the resolver'))).toContain('5a skips the resolver for a given hex BASE_REF on the same base name');
-    expect(collectEnsurePrReadyBaseDefects(ensure.replace(DEFAULT_BRANCH_PROBE, OLD_DEFAULT_BRANCH_PROBE))).toContain('5a takes the default branch when there is no PR, by symbolic-ref then main then master, before any exit');
-    expect(collectEnsurePrReadyBaseDefects(ensure.replace(MAIN_PROBE, 'git -C "{worktree}" rev-parse --verify --quiet master'))).toContain('5a takes the default branch when there is no PR, by symbolic-ref then main then master, before any exit');
-    expect(collectEnsurePrReadyBaseDefects(ensure.replace(MASTER_FALLBACK, 'else `master`'))).toContain('5a takes the default branch when there is no PR, by symbolic-ref then main then master, before any exit');
-    expect(collectEnsurePrReadyBaseDefects(ensure.replace('no PR applies', 'a PR applies'))).toContain('5a takes the default branch when there is no PR, by symbolic-ref then main then master, before any exit');
-    expect(collectEnsurePrReadyBaseDefects(ensure.replace(', or any other `gh` failure', ''))).toEqual(['5a takes the unreadable exit, not the default branch, on any other gh failure']);
-    expect(collectEnsurePrReadyBaseDefects(ensure.replace('If it shows that no PR applies (', 'If the call fails or finds no PR ('))).toContain('5a takes the unreadable exit, not the default branch, on any other gh failure');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace(DEFAULT_BRANCH_PROBE, PIPED_DEFAULT_BRANCH_PROBE))).toContain(defaultBranch);
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace(DEFAULT_BRANCH_PROBE, SYMBOLIC_REF_PROBE))).toContain(defaultBranch);
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace(GIVEN_BASE, 'the literal `main`'))).toContain(defaultBranch);
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace(MAIN_PROBE, 'git -C "{worktree}" rev-parse --verify --quiet master'))).toContain(defaultBranch);
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace(MASTER_FALLBACK, 'otherwise `master`'))).toContain(defaultBranch);
     expect(collectEnsurePrReadyBaseDefects(ensure.replace('\n      - No name', '\n         No name'))).toContain('5a gives each of its four exits its own sub-bullet');
     expect(collectEnsurePrReadyBaseDefects(ensure.replace('`BASE_REF` (optional), ', ''))).toEqual(['the Input lists BASE_REF as optional']);
-    expect(collectEnsurePrReadyBaseDefects(ensure.replace(' or `(base name unreadable; fix: re-run)`', ''))).toEqual(['the Output names the step-5 DEGRADED lines and an invalid name as the only BLOCKED cause']);
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace(' or `(base name unreadable; fix: re-run)`', ''))).toEqual(['the Output names the step-5 DEGRADED lines, an invalid base name and an unwritable step-4a base as the only BLOCKED causes']);
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace(', or a step-4a base that cannot be written,', ''))).toEqual(['the Output names the step-5 DEGRADED lines, an invalid base name and an unwritable step-4a base as the only BLOCKED causes']);
     const sectionValidate = validateSection();
+    const validateDefault = 'step 6 takes the default branch by for-each-ref with no pipe, then main, then master';
+    const validateFill = 'step 6 fills the default branch by the origin read, main, master and the Write tool, an empty line counting as empty';
     expect(collectValidateBranchBaseDefects(sectionValidate.replace(BASE_FIX_TABLE, ''))).toContain('step 6 carries the reason-to-fix table');
     expect(collectValidateBranchBaseDefects(sectionValidate.replace('with `exit=0`', ''))).toContain('step 6 takes the BASE_REF line only with exit=0');
     expect(collectValidateBranchBaseDefects(sectionValidate.replace('naming REASON and its fix', 'naming REASON'))).toContain('step 6 names the fix in its BLOCKED result');
     expect(collectValidateBranchBaseDefects(sectionValidate.replace('it fetches the base branch at most once (the remote-tracking ref only), lists', 'it is a read-only check, lists'))).toEqual(['the contract says it fetches the base and lists the diff against base_ref']);
-    expect(collectValidateBranchBaseDefects(sectionValidate.replace(DEFAULT_BRANCH_PROBE, OLD_DEFAULT_BRANCH_PROBE))).toEqual(['step 6 takes the default branch by symbolic-ref with no pipe, then main, then master']);
-    expect(collectValidateBranchBaseDefects(sectionValidate.replace(MAIN_PROBE, 'git -C "{worktree}" rev-parse --verify --quiet master'))).toContain('step 6 takes the default branch by symbolic-ref with no pipe, then main, then master');
-    expect(collectValidateBranchBaseDefects(sectionValidate.replace(MASTER_FALLBACK, 'else `master`'))).toContain('step 6 takes the default branch by symbolic-ref with no pipe, then main, then master');
+    expect(collectValidateBranchBaseDefects(sectionValidate.replace(DEFAULT_BRANCH_PROBE, PIPED_DEFAULT_BRANCH_PROBE))).toEqual([validateDefault, validateFill]);
+    expect(collectValidateBranchBaseDefects(sectionValidate.replace(DEFAULT_BRANCH_PROBE, SYMBOLIC_REF_PROBE))).toEqual([validateDefault, validateFill]);
+    expect(collectValidateBranchBaseDefects(sectionValidate.replace(MAIN_PROBE, 'git -C "{worktree}" rev-parse --verify --quiet master'))).toContain(validateDefault);
+    expect(collectValidateBranchBaseDefects(sectionValidate.replace(MASTER_FALLBACK, 'else `master`'))).toContain(validateDefault);
     expect(collectValidateBranchBaseDefects(sectionValidate.replace(MAIN_PROBE, 'git -C "{worktree}" rev-parse --verify --quiet {base_branch}'))).toContain('step 6 probes the default branch without a name placeholder');
     expect(collectValidateBranchBaseDefects(sectionValidate.replace(MAIN_PROBE, 'git -C "{worktree}" rev-parse --verify --quiet {default}'))).toContain('step 6 probes the default branch without a name placeholder');
     expect(collectValidateBranchBaseDefects(sectionValidate.replace('never an empty `### Diff Scope`', 'an empty `### Diff Scope` is fine'))).toContain('step 6 never gives an empty Diff Scope');
     expect(collectValidateBranchBaseDefects(sectionValidate.replace('diff --name-only {base_ref}...HEAD; echo "exit=$?"', 'diff {base_branch}...HEAD --name-only'))).toContain('step 7 diffs against the hex base ref and echoes the exit status');
     expect(collectValidateBranchBaseDefects(sectionValidate.replace('X=<isCrossRepository', 'X=<false'))).toContain('step 6 reads the cross flag from isCrossRepository');
-    expect(collectValidateBranchBaseDefects(sectionValidate.replace(PR_MODE_CALL, () => PR_MODE_CALL.replace(' pr "', ' local "')))).toContain('step 6 runs the pr-mode call');
+    expect(collectValidateBranchBaseDefects(sectionValidate.replace(PR_MODE_CALL, () => PR_MODE_CALL.replace(' pr --name-stdin', ' local --name-stdin')))).toContain('step 6 runs the pr-mode call');
     expect(collectValidateBranchBaseDefects(sectionValidate.replace('`REASON=resolver-unavailable`', 'a stop'))).toContain('step 6 reads other resolver output as resolver-unavailable');
     expect(collectValidateBranchBaseDefects(sectionValidate.replace('`base_ref` of `none` or not 40 or 64 hex returns BLOCKED', '`base_ref` of `none` goes on'))).toContain('step 6 returns BLOCKED when the base ref is none or not hex');
     expect(collectValidateBranchBaseDefects(`${sectionValidate}\nWhen the base cannot be determined, emit an intentional empty \`### Diff Scope\` block.`)).toContain('step 6 never gives an empty Diff Scope');
