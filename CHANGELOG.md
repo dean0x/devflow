@@ -237,6 +237,14 @@ Do the step below after you update.
 **Stale-install window:**
 - Until you run `devflow init`, your install has no level row that skips Polish, so Polish still runs at every level. An install from 3.7.0 has no level reference at all. The installed quality rule also lacks its new bullet.
 
+### Upgrade notes — Harden by level
+
+**What you must do:**
+- At `lean`, `/implement` now skips Harden on a docs-only diff. Run `devflow gates --set standard` or `--set full` to keep Harden on every diff.
+
+**Stale-install window:**
+- Until you run `devflow init`, your installed level reference has no Harden row, so Harden runs at every level.
+
 ### Added
 
 - **`devflow init` asks for the gate level** ([#543](https://github.com/dean0x/devflow/issues/543), [#507](https://github.com/dean0x/devflow/issues/507)).
@@ -297,6 +305,7 @@ Do the step below after you update.
     The report lists them on one `Passed alone:` line.
   - The re-run steps are in the agent reference `validate/passed-alone.md`.
     After updating, run `devflow init`.
+- **`/implement` skips Harden at `lean` on a docs-only diff** ([#482](https://github.com/dean0x/devflow/issues/482)). At `lean`, `/implement` skips Phase 4 Harden when the diff is docs-only. The decision reads path names only. It reads no diff content and runs no detection script. Harden is skipped only when all of these hold: the compliance lens is exactly `off`; the branch diff list is not empty; no Code report names a deleted, renamed or moved path; and every changed path is the root `README.md`, the root `CHANGELOG.md` or a `.md` file under the root `docs/`. A path on that list has no segment that starts with a dot, no double quote in its name and no file name that agents load as instructions, in any letter case. No loaded instruction, rules or imported file names the path. A tests-only diff runs Harden. When the decision is unclear, Harden runs. The run report says `Harden: ran` or `Harden: SKIPPED (docs-only diff)` at `lean` only. `full` and `standard` do not change. When Harden runs, it reads the whole branch diff. `/code-review` security runs at every level. The README, the CLI reference and the command reference state the rule. Known limits at `lean` on a docs-only diff: stub and wiring detection does not run; the pitfall check of public text in README and CHANGELOG does not run; a path that only a not-yet-loaded instruction file, such as a nested one, names is not seen; and Harden does not review a delete or a rename that no Code report names ([#571](https://github.com/dean0x/devflow/issues/571)). The docs-only check reads path names. It does not look at symlinks, file-type changes, or docs files that a site generator compiles. Run `devflow gates --set standard` or `--set full` to keep Harden on every diff.
 - **`/implement` and `/resolve` skip Polish at `standard` and `lean`** ([#481](https://github.com/dean0x/devflow/issues/481)).
   - At `standard` and `lean`, `/implement` skips Phase 3 Polish, and `/resolve` skips Phase 6 Polish in each worktree at that level.
     At `full`, both spawn Polish.
