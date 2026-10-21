@@ -608,11 +608,14 @@ describe('curation --clear', { timeout: 30_000 }, () => {
     seedQueue(root);
     const backup = seedBackup(root);
     trackInGit(root, `.devflow/${BACKUP_NAME}/.pending-turns.jsonl`);
+    const before = snapshotTree(path.join(root, '.devflow'));
 
     const run = await runCuration(['--clear']);
 
     expect(run.error).toBe(AREA_PAUSE_NOTICE.curation.tracked);
+    expect(run.success).toBe('');
     expect(run.exitCode).toBe(1);
+    expect(snapshotTree(path.join(root, '.devflow')), 'the log, the ledger, the queue and the backups keep their bytes').toEqual(before);
     expect(queueFilesPresent(root)).toEqual([true, true, true]);
     expect(backupPendingPresent(backup)).toEqual([true, true, true, true]);
   });
@@ -622,11 +625,14 @@ describe('curation --clear', { timeout: 30_000 }, () => {
     seedQueue(root);
     initGitRepo(root);
     vi.stubEnv('PATH', pathWithFailingGit(devflowDir));
+    const before = snapshotTree(path.join(root, '.devflow'));
 
     const run = await runCuration(['--clear']);
 
     expect(run.error).toBe(AREA_PAUSE_NOTICE.curation.unknown);
+    expect(run.success).toBe('');
     expect(run.exitCode).toBe(1);
+    expect(snapshotTree(path.join(root, '.devflow')), 'the log, the ledger and the queue keep their bytes').toEqual(before);
     expect(queueFilesPresent(root)).toEqual([true, true, true]);
   });
 
