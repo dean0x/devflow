@@ -526,11 +526,11 @@
     },
     {
       "id": "validate-passed-alone-ref-max",
-      "ceiling": 3454,
-      "pattern": "const VALIDATE_PASSED_ALONE_REF_MAX_BYTES = 3_454",
+      "ceiling": 3450,
+      "pattern": "const VALIDATE_PASSED_ALONE_REF_MAX_BYTES = 3_450",
       "occurrences": 1,
       "sourceFile": "tests/guards/agent-references.test.ts",
-      "description": "references/validate/passed-alone.md of the agent-references skill, in bytes. Validate reads it once per run, after a failed Test row, so it is standing context on that path only. Measured 3,454 at #477, with no headroom. May be LOWERED, never raised."
+      "description": "references/validate/passed-alone.md of the agent-references skill, in bytes. Validate reads it once per run, after a failed Test row, so it is standing context on that path only. Measured 3,450 at #477, with no headroom. May be LOWERED, never raised."
     },
     {
       "id": "command-bug-analysis-max",

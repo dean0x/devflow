@@ -72,9 +72,9 @@ const BODY_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]> = [
 /** What the reference must say: one clause each. */
 const REFERENCE_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]> = [
   ['a file not checked by every step is REAL', 'A failed file not checked by every step below is REAL.'],
-  ['the body decides each label and the reference says how to check', "The body's rules decide each label"],
+  ['the body decides each label', "The body's rules decide each label"],
   ['only a run given a BASE_SHA labels files', 'Only a run given a BASE_SHA labels files'],
-  ['any other run gives failure detail only and every failure is REAL', 'the re-runs give failure detail only, and every failure is REAL.'],
+  ['any other run gives failure detail only and every failure is REAL', 'in any other run the re-runs give failure detail only, and every failure is REAL.'],
   ['the failed files come from the whole log', "Grep the full run's log, not only its tail"],
   ['the failed files, their count and their causes are read in one Grep', 'Do this in one Grep.'],
   ['the runner count of failed files is read', "the runner's count of failed files"],
@@ -101,20 +101,25 @@ const REFERENCE_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]>
   ['no path has a parent segment', 'has no `..` segment'],
   ['the tracked-path check', '`git ls-files --full-name --error-unmatch --'],
   ['one tracked-path call covers the accepted paths', "Then run one `git ls-files --full-name --error-unmatch -- '<path>' …` call for the accepted paths"],
-  ['each path is single-quoted', 'single-quoted'],
+  ['each accepted path is single-quoted', 'for the accepted paths, each single-quoted'],
   ['a path the tracked-path check does not list is not re-run and is REAL', 'a path it does not list is not re-run and is REAL.'],
-  ['the repo-relative names the check prints are used from then on', 'Use the repo-relative names it prints from here on.'],
+  ['the repo-relative names the check prints are checked again and single-quoted from then on', 'Use the repo-relative names it prints from here on, each checked as above and single-quoted.'],
   ['log text never enters a command', 'No other log text goes in a command.'],
   ['the BASE_SHA is a first BASE_SHA line', 'A BASE_SHA is a first `BASE_SHA:` line'],
   ['the BASE_SHA shape and the unlabelled default', 'matching `^[0-9a-f]{40}$`; without one, label nothing: every failure is REAL.'],
-  ['changed and uncommitted paths are REAL', 'A path that FILES_CHANGED lists, or that `git status --porcelain` lists before the re-runs, is REAL.'],
+  ['the changed set is FILES_CHANGED plus the branch diff from BASE_SHA', 'The changed set is FILES_CHANGED plus the paths that `git diff --name-only <BASE_SHA>...HEAD`'],
+  ['the changed set holds the uncommitted paths', 'and `git status --porcelain` list'],
+  ['the git paths are taken before the re-runs', 'list, taken before the re-runs;'],
+  ['a git error makes every failure REAL', 'a git error makes every failure REAL.'],
+  ['a path in the changed set is REAL', 'A path in it is REAL.'],
   ['go, cargo and gradle are package or class units', 'For a package or class unit (go, cargo, gradle)'],
-  ['a package unit is changed when its directory is', 'the unit is changed when FILES_CHANGED lists any file in its directory'],
+  ['a package unit is changed when its directory is', 'the unit is changed when the changed set holds any file in its directory'],
   ['a file not shown as unchanged is REAL', 'A file you can not show as unchanged is REAL.'],
   ['the cause is the failure read from the full run', "Use that file's failure from step 1."],
   ['only a timeout, spawn or resource cause qualifies', 'Only a timeout, a failed process spawn or a resource error'],
   ['out of memory, too many open files and no free port are resource errors', '(out of memory, too many open files, no free port)'],
   ['an assertion failure is REAL', 'An assertion failure, an error the test threw, a snapshot mismatch or a non-zero exit with no stated cause is REAL.'],
+  ['an assertion is REAL even when its message names a timeout', 'An assertion is REAL even when its message names a timeout.'],
   ['the re-run uses the full run test command', "Use the full run's own test command"],
   ['the re-run adds the one file as its only argument', 'that one file added as its only argument'],
   ['the re-run drops only the quiet flag', 'drop only its quiet flag (Quiet form column)'],
@@ -124,9 +129,7 @@ const REFERENCE_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]>
   ['go passes the package of the file', "For go, pass the file's package"],
   ['an npm script passes the path after a double dash', "`npm test -- '<path>'`"],
   ['the re-run uses the capture form', 'Run it in the capture form'],
-  ['the re-run has an explicit Bash timeout', 'with an explicit Bash `timeout`'],
-  ['the re-run timeout is the file time plus 30 s, or 120 s when the log shows none', "the file's time in the full run plus 30 s, or 120 s when the log shows none"],
-  ['the re-run timeout has a ceiling', 'at most 120000 ms'],
+  ['the re-run has an explicit Bash timeout of 120000 ms, whatever the file time was', 'with an explicit Bash `timeout` of 120000 ms.'],
   ['PASSED-ALONE needs the printed exit of zero', 'PASSED-ALONE needs the printed `EXIT=0`'],
   ['a re-run that times out or does not start is REAL, never BLOCKED', 'A re-run that times out or does not start makes the file REAL, never BLOCKED.'],
   ['the tests that failed must have run and passed', 'the tests that failed in the full run ran and passed'],
@@ -141,6 +144,19 @@ const REFERENCE_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]>
   ['a file that failed alone goes under Failures with its re-run output', 'A file that failed alone goes under Failures with its re-run output'],
   ['a file that failed alone goes into Parsed References', 'and into Parsed References.'],
 ]
+
+/** The lead of the reference: from the end of its heading line to the first numbered step. */
+function leadOf(reference: string): string {
+  const from = reference.indexOf('\n\n')
+  const to = reference.indexOf('\n1. ')
+  return from === -1 || to <= from ? '' : reference.slice(from, to)
+}
+
+/** What a reference lead holds once every pinned clause and its punctuation are taken out. */
+function leadSlack(reference: string): string {
+  const rest = REFERENCE_CLAUSES.reduce((text, [, clause]) => text.split(clause).join(' '), leadOf(reference))
+  return rest.replace(/[.;:,]/g, ' ').replace(/\s+/g, ' ').trim()
+}
 
 /** The `## Running commands` block: from its heading to the next `## ` heading. */
 function runningBlock(body: string): string | null {
@@ -202,6 +218,8 @@ export function collectPassedAloneDefects(body: string, readReference: (rel: str
       for (const [label, clause] of REFERENCE_CLAUSES) {
         if (!reference.includes(clause)) out.push(`the reference lost: ${label}`)
       }
+      const slack = leadSlack(reference)
+      if (slack !== '') out.push(`the reference lead carries text no pin holds: ${slack}`)
       if (/flak/i.test(reference)) out.push('the reference carries a label word other than PASSED-ALONE and REAL')
       if (/devflow:/.test(reference)) out.push('the reference names a devflow: token')
       if (NAME_FILTER_ALLOWED.test(reference)) out.push('the reference allows a name filter')
@@ -261,7 +279,7 @@ describe('the Validate body re-runs each failed test file alone and labels it', 
     expect(Buffer.byteLength(BODY), 'the body is empty').toBeGreaterThan(4_000)
     expect(REFERENCE.length, 'the reference is empty').toBeGreaterThan(1_000)
     expect(BODY_CLAUSES.length).toBeGreaterThanOrEqual(22)
-    expect(REFERENCE_CLAUSES.length).toBeGreaterThanOrEqual(69)
+    expect(REFERENCE_CLAUSES.length).toBeGreaterThanOrEqual(72)
     expect(withBody(BODY)).toEqual([])
   })
 
@@ -287,6 +305,26 @@ describe('the Validate body re-runs each failed test file alone and labels it', 
     expect(withBody(`${BODY}\nA second pass labels it flaky.\n`)).toContain('the body carries a label word other than PASSED-ALONE and REAL')
     expect(withReference(`${REFERENCE}\nA second pass labels it flaky.\n`)).toContain('the reference carries a label word other than PASSED-ALONE and REAL')
     expect(withReference(`${REFERENCE}\nSee devflow:git.\n`)).toContain('the reference names a devflow: token')
+  })
+
+  it('probes: text in the reference lead that no pin holds is reported, so a swapped sentence cannot add a label', () => {
+    const lead = "The body's rules decide each label."
+    const hasSlack = (defects: string[]): boolean => defects.some(d => d.startsWith('the reference lead carries text no pin holds'))
+    expect(hasSlack(withReference(REFERENCE))).toBe(false)
+    expect(hasSlack(withReference(seed(REFERENCE, lead, `Validate reads this file after a failed Test row. ${lead}`)))).toBe(true)
+    expect(hasSlack(withReference(seed(REFERENCE, lead, `${lead.slice(0, -1)}; this file says how to check them.`)))).toBe(true)
+    expect(hasSlack(withReference(seed(REFERENCE, lead, `A file that passes alone is TRANSIENT. ${lead}`)))).toBe(true)
+  })
+
+  it('probes: a changed set that drops the branch diff, a git error that no longer fails closed and a timeout that follows the file are reported', () => {
+    const noDiff = seed(REFERENCE, ' `git diff --name-only <BASE_SHA>...HEAD` and', '')
+    expect(withReference(noDiff)).toContain('the reference lost: the changed set is FILES_CHANGED plus the branch diff from BASE_SHA')
+    const openError = seed(REFERENCE, 'a git error makes every failure REAL.', 'a git error is ignored.')
+    expect(withReference(openError)).toContain('the reference lost: a git error makes every failure REAL')
+    const fileTime = seed(REFERENCE, 'of 120000 ms.', "of the file's time in the full run plus 30 s.")
+    expect(withReference(fileTime)).toContain('the reference lost: the re-run has an explicit Bash timeout of 120000 ms, whatever the file time was')
+    const timeoutWins = seed(REFERENCE, 'An assertion is REAL even when its message names a timeout.', 'An assertion that names a timeout qualifies.')
+    expect(withReference(timeoutWins)).toContain('the reference lost: an assertion is REAL even when its message names a timeout')
   })
 
   it('probes: a moved Output line, a lost bound and a lost Output line are reported', () => {
