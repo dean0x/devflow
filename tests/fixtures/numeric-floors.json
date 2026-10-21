@@ -518,11 +518,19 @@
     },
     {
       "id": "validate-body-max",
-      "ceiling": 6049,
-      "pattern": "const VALIDATE_BODY_MAX_BYTES = 6_049",
+      "ceiling": 6031,
+      "pattern": "const VALIDATE_BODY_MAX_BYTES = 6_031",
       "occurrences": 1,
       "sourceFile": "tests/guards/validate-lint-pack.test.ts",
-      "description": "The Validate agent body, src/assets/agents/validate.md, in bytes. It is hand-authored. The lean lint-pack wiring (the Lint pack section, the Output slot, the Input bullet and the digest line) is funded with named cuts in the same body and measures 6,045; the ceiling is the size before that change. The cut pool of the Output example is kept for later Validate edits. May be LOWERED, never raised: a later addition funds itself with a cut."
+      "description": "The Validate agent body, src/assets/agents/validate.md, in bytes. It is hand-authored. The lean lint-pack wiring and the per-file passed-alone re-run rule (the re-run sentence, the Read line with its conditions, and the Passed alone: line) are funded with named cuts in the same body; it measures 6,031 at #477, with no headroom. May be LOWERED, never raised: a later addition funds itself with a cut."
+    },
+    {
+      "id": "validate-passed-alone-ref-max",
+      "ceiling": 3454,
+      "pattern": "const VALIDATE_PASSED_ALONE_REF_MAX_BYTES = 3_454",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/agent-references.test.ts",
+      "description": "references/validate/passed-alone.md of the agent-references skill, in bytes. Validate reads it once per run, after a failed Test row, so it is standing context on that path only. Measured 3,454 at #477, with no headroom. May be LOWERED, never raised."
     },
     {
       "id": "command-bug-analysis-max",
