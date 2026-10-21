@@ -15,7 +15,7 @@ import {
   gatherMoveNotice,
   getCurationMoveMarkerPath,
 } from '../../src/core/curation-move-notice.js';
-import { MOVE_SKIP_NOTICE } from '../../src/core/curation-move-skip.js';
+import { MOVE_SKIP_NOTICE, isMoveSkipReason } from '../../src/core/curation-move-skip.js';
 import { curationMoveMarkerKey } from '../../src/core/project-paths.js';
 
 describe('getCurationMoveMarkerPath', () => {
@@ -25,7 +25,7 @@ describe('getCurationMoveMarkerPath', () => {
     );
   });
 
-  it('names the skip markers by the same key, beside the refusal marker', () => {
+  it('names the refusal marker with the file suffix skip, and the skip markers by the same key', () => {
     const key = curationMoveMarkerKey('/work/project');
     expect(getCurationMoveMarkerPath('/home/dean', '/work/project', 'tracked')).toBe(
       path.join('/home/dean', '.devflow', 'logs', `curation-move.${key}.tracked`),
@@ -33,7 +33,7 @@ describe('getCurationMoveMarkerPath', () => {
     expect(getCurationMoveMarkerPath('/home/dean', '/work/project', 'unknown')).toBe(
       path.join('/home/dean', '.devflow', 'logs', `curation-move.${key}.unknown`),
     );
-    expect(getCurationMoveMarkerPath('/home/dean', '/work/project', 'skip')).toBe(getCurationMoveMarkerPath('/home/dean', '/work/project'));
+    expect(getCurationMoveMarkerPath('/home/dean', '/work/project', 'refused')).toBe(getCurationMoveMarkerPath('/home/dean', '/work/project'));
   });
 
   it('keeps a short root and a non-ASCII root distinct, each under its own key', () => {
@@ -127,6 +127,13 @@ describe('gatherMoveNotice', () => {
 });
 
 describe('formatMoveNotice', () => {
+  it('puts the entry counts before the notice on the same line', () => {
+    expect(formatMoveNotice('tracked', '2 decisions, 1 pitfall')).toBe(
+      'Curation: 2 decisions, 1 pitfall; move skipped, git tracks files in .devflow/learning/ or .devflow/curation/',
+    );
+    expect(formatMoveNotice('unknown', '1 pitfall')).toBe('Curation: 1 pitfall; move skipped, git did not answer');
+  });
+
   it('prints the pointer and the refused line, each on one line that starts "Curation: "', () => {
     expect(formatMoveNotice('pointer')).toBe('Curation: run devflow init, or open Claude Code in this project after it');
     expect(formatMoveNotice('refused')).toBe('Curation: move refused, see the hook log');
@@ -153,15 +160,25 @@ describe('MOVE_SKIP_NOTICE', () => {
   it('says what happened, how to find the files and what to do, in the fixed words', () => {
     expect(MOVE_SKIP_NOTICE.tracked).toBe(
       'devflow did not move the curation data of this project from .devflow/learning/ to .devflow/curation/, '
-      + 'because git tracks files in one of these folders. '
+      + 'because git tracks files in a curation data folder. '
       + 'To find them, run `git ls-files .devflow`. '
-      + 'Untrack them with `git rm --cached`, and delete them if you did not make them. '
-      + 'Run these commands in the main checkout.',
+      + 'Untrack them with `git rm --cached <file>`, and delete them if you did not make them. '
+      + 'Run these commands in the checkout that holds these folders.',
     );
     expect(MOVE_SKIP_NOTICE.unknown).toBe(
       'devflow did not move the curation data of this project from .devflow/learning/ to .devflow/curation/, '
       + 'because git did not answer. '
-      + 'The move runs again at the next session start.',
+      + 'The move runs again at the next session start or the next init. '
+      + 'If this notice stays, check that git runs in this project.',
     );
+  });
+});
+
+describe('isMoveSkipReason', () => {
+  it('is true for each reason that has a notice and false for everything else', () => {
+    expect(Object.keys(MOVE_SKIP_NOTICE).every(isMoveSkipReason)).toBe(true);
+    for (const other of ['pointer', 'refused', 'git-root-timed-out', 'toString', '__proto__', '', 'Tracked', null, undefined, 7, {}]) {
+      expect(isMoveSkipReason(other), String(other)).toBe(false);
+    }
   });
 });

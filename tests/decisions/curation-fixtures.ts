@@ -175,23 +175,34 @@ export function seedCurationTree(
   return paths;
 }
 
-/** Every file under `dir`, relative to it, with its bytes — for "this call wrote nothing" assertions. */
-export function snapshotTree(dir: string): Map<string, string> {
-  const files = new Map<string, string>();
+/** What {@link snapshotTree} records beyond each entry's content. */
+export interface SnapshotOptions {
+  /** Also record each entry's type, mode and mtime, and the root folder's own. */
+  readonly stat?: boolean;
+}
+
+/**
+ * Every entry under `dir`, relative to it, with what it holds: a folder as '', a link
+ * as its target (never followed), a file as its bytes. For "this call changed nothing"
+ * assertions; with `stat` the mode and the mtime of every entry are part of the answer.
+ */
+export function snapshotTree(dir: string, { stat = false }: SnapshotOptions = {}): Map<string, string> {
+  const entries = new Map<string, string>();
+  const describe = (abs: string): string => {
+    const info = fs.lstatSync(abs);
+    const body = info.isSymbolicLink() ? `-> ${fs.readlinkSync(abs)}` : info.isDirectory() ? '' : fs.readFileSync(abs, 'latin1');
+    return stat ? `${info.mode.toString(8)} ${info.mtimeMs} ${body}` : body;
+  };
   const walk = (rel: string): void => {
-    const abs = path.join(dir, rel);
-    for (const entry of fs.readdirSync(abs, { withFileTypes: true })) {
+    for (const entry of fs.readdirSync(path.join(dir, rel), { withFileTypes: true })) {
       const child = rel ? path.join(rel, entry.name) : entry.name;
-      if (entry.isDirectory()) {
-        files.set(child + path.sep, '');
-        walk(child);
-      } else {
-        files.set(child, fs.readFileSync(path.join(dir, child), 'latin1'));
-      }
+      entries.set(entry.isDirectory() ? child + path.sep : child, describe(path.join(dir, child)));
+      if (entry.isDirectory()) walk(child);
     }
   };
+  if (stat) entries.set('.', describe(dir));
   walk('');
-  return files;
+  return entries;
 }
 
 // ---------------------------------------------------------------------------
@@ -230,13 +241,52 @@ export function initGitRepo(dir: string, files: Readonly<Record<string, string>>
   return git(dir, ['rev-parse', 'HEAD']);
 }
 
-/** A PATH that holds a `git` which always exits non-zero, and nothing else; the program is linked under `dir`. */
-export function pathWithFailingGit(dir: string): string {
+/**
+ * Make `dir` a git repository (when it is not one yet) and force-add each of `rels` (paths
+ * below `dir`; one that is absent is written first) to its index, so that git tracks it
+ * whatever the ignore rules say. With `commit` the entries are committed as well; without
+ * it they are only staged.
+ */
+export function trackInGit(dir: string, rels: string | readonly string[], { commit = false }: { readonly commit?: boolean } = {}): void {
+  const list = typeof rels === 'string' ? [rels] : rels;
+  if (!fs.existsSync(path.join(dir, '.git'))) git(dir, ['-c', 'init.defaultBranch=main', 'init', '-q']);
+  for (const rel of list) {
+    const abs = path.join(dir, rel);
+    const present = (() => {
+      try {
+        fs.lstatSync(abs);
+        return true;
+      } catch {
+        return false;
+      }
+    })();
+    if (present) continue;
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, 'content of the repository\n');
+  }
+  git(dir, ['add', '-f', '--', ...list]);
+  if (commit) git(dir, ['commit', '-q', '-m', 'add files']);
+}
+
+/**
+ * A PATH that is a folder under `dir` and nothing else: it holds a `git` that always
+ * exits non-zero, linked to the system's `false` (a fresh script is slow to start on
+ * some machines), and, with `node`, the running node. Answers the folder.
+ */
+export function pathWithFailingGit(dir: string, { node = false }: { readonly node?: boolean } = {}): string {
   const bin = path.join(dir, 'failing-git-bin');
   fs.mkdirSync(bin, { recursive: true });
   const failing = ['/usr/bin/false', '/bin/false'].find(candidate => fs.existsSync(candidate));
   if (failing === undefined) throw new Error('no false program on this machine');
   fs.symlinkSync(failing, path.join(bin, 'git'));
+  if (node) fs.symlinkSync(process.execPath, path.join(bin, 'node'));
+  return bin;
+}
+
+/** A PATH that is an empty folder under `dir`: no `git` and no other command. Answers the folder. */
+export function pathWithoutGit(dir: string): string {
+  const bin = path.join(dir, 'no-git-bin');
+  fs.mkdirSync(bin, { recursive: true });
   return bin;
 }
 

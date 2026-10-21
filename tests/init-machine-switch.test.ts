@@ -20,7 +20,7 @@ import {
 import { LEDGER_ROOT_TIMEOUT_MS, type LedgerRootLookup } from '../src/core/ledger-root.js';
 import { installedVersionMatches } from '../src/targets/claude-code/curation-install.js';
 import { MOVE_SKIP_NOTICE } from '../src/core/curation-move-skip.js';
-import { git, initGitRepo, pathWithFailingGit, snapshotTree } from './decisions/curation-fixtures.js';
+import { initGitRepo, pathWithFailingGit, snapshotTree, trackInGit } from './decisions/curation-fixtures.js';
 import type { ManifestData } from '../src/core/manifest.js';
 
 const NOW = '2026-09-26T00:00:00.000Z';
@@ -307,7 +307,7 @@ describe('drainDisabledFeatureQueues (D-INIT-DRAIN-AFTER-SWITCH)', () => {
           await fs.mkdir(path.join(repo, '.devflow', dir), { recursive: true });
           await fs.writeFile(path.join(repo, '.devflow', dir, queue), '{"role":"user"}\n');
         }
-        if (reason === 'tracked') git(repo, ['add', '-f', '--', `.devflow/learning/${queue}`]);
+        if (reason === 'tracked') trackInGit(repo, `.devflow/learning/${queue}`);
         else vi.stubEnv('PATH', pathWithFailingGit(tmp));
         const curationFolders = (): Map<string, string> => new Map([
           ...snapshotTree(path.join(repo, '.devflow', 'learning')),
@@ -484,7 +484,7 @@ describe("init asks for its own repository's ledger root within the shared budge
 
         expect(report.movedCount).toBe(0);
         expect(report.lines.filter((line) => line.includes(repo))).toEqual([
-          `Ledger move skipped for ${repo}: git did not answer in time. Nothing was moved. The next init tries again.`,
+          `Ledger move skipped for ${repo}: git did not answer in time. Nothing was moved. The next init or session start tries again.`,
         ]);
         await expect(fs.stat(path.join(repo, '.devflow', 'learning'))).resolves.toBeTruthy();
       });

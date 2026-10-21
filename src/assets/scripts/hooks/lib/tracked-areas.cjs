@@ -10,7 +10,7 @@
 // built-ins only) and requires neither the store nor the move module (the move requires
 // the store; the store never requires the move), so either of them, and a check for
 // another folder, can use it. No function here prints or exits, and nothing throws:
-// every failure is the answer `unknown`.
+// every failure is the answer `unknown`, with a cause from the closed set UNKNOWN_CAUSES.
 //
 // The folder names come from project-paths.cjs, which owns them: AREA_FOLDERS lists the
 // data folders and the backup prefix names the folders the move leaves behind. To cover
@@ -64,6 +64,23 @@ const TRACKED_AREA_PATHSPECS = Object.freeze([
   ...DEVFLOW_SPELLINGS.map(dir => ':(icase,glob)[.]' + dir.slice(1)),
 ]);
 
+/**
+ * Why a check answered `unknown`, as one fixed word. The words come from this list
+ * alone: they name a spawn error code, a time out, a signal, an exit status or the step
+ * that failed, and never carry git's own text or a path.
+ */
+const UNKNOWN_CAUSES = Object.freeze({
+  rootNotAbsolute: 'root-not-absolute',
+  gitEntryUnreadable: 'git-entry-unreadable',
+  ceilingUnusable: 'ceiling-unusable',
+  checkFailed: 'check-failed',
+  gitNotFound: 'git-not-found',
+  gitTimedOut: 'git-timed-out',
+  gitStopped: 'git-stopped',
+  gitExitStatus: 'git-exit-status',
+  gitNotRun: 'git-not-run',
+});
+
 /** The longest the git call may run (ms). */
 const TRACKED_AREAS_GIT_TIMEOUT_MS = 5000;
 
@@ -112,25 +129,51 @@ function trackedAreasGitEnv(base, ceiling) {
 }
 
 /**
- * The answer of one `git ls-files` call, from the result `spawnSync` gave:
+ * The answer of one `git ls-files` call, from the result `spawnSync` gave, with the
+ * cause when the answer is `unknown` (null otherwise):
  *   tracked    any output byte, whatever the exit status or error (the call listed an
  *              entry), and an output past the buffer cap (ENOBUFS)
  *   untracked  exit 0 with nothing listed
- *   unknown    every other result: a spawn error, a timeout, a signal, a non-zero exit
- *              with nothing listed, or a result of the wrong shape
- * Pure: it reads only the fields `error.code`, `status` and `stdout`.
+ *   unknown    every other result, with the cause: git-not-found (spawn error ENOENT),
+ *              git-timed-out (ETIMEDOUT), git-not-run (another spawn error, or a result
+ *              of the wrong shape), git-stopped (a signal ended it), git-exit-status (a
+ *              non-zero exit with nothing listed)
+ * Pure: it reads only the fields `error.code`, `status`, `signal` and `stdout`.
+ *
+ * @param {unknown} result
+ * @returns {{ answer: 'tracked' | 'untracked' | 'unknown', cause: string | null }}
+ */
+function judgeTrackedAreas(result) {
+  if (result === null || typeof result !== 'object') return unknownBecause(UNKNOWN_CAUSES.gitNotRun);
+  const { error, status, signal, stdout } = /** @type {{ error?: { code?: unknown }, status?: unknown, signal?: unknown, stdout?: unknown }} */ (result);
+  if (error && error.code === 'ENOBUFS') return { answer: 'tracked', cause: null };
+  const listed = (typeof stdout === 'string' || Buffer.isBuffer(stdout)) && stdout.length > 0;
+  if (listed) return { answer: 'tracked', cause: null };
+  if (error) {
+    if (error.code === 'ENOENT') return unknownBecause(UNKNOWN_CAUSES.gitNotFound);
+    return unknownBecause(error.code === 'ETIMEDOUT' ? UNKNOWN_CAUSES.gitTimedOut : UNKNOWN_CAUSES.gitNotRun);
+  }
+  if (status === 0) return { answer: 'untracked', cause: null };
+  if (typeof status === 'number') return unknownBecause(UNKNOWN_CAUSES.gitExitStatus);
+  return unknownBecause(typeof signal === 'string' ? UNKNOWN_CAUSES.gitStopped : UNKNOWN_CAUSES.gitNotRun);
+}
+
+/**
+ * @param {string} cause - a value of UNKNOWN_CAUSES
+ * @returns {{ answer: 'unknown', cause: string }}
+ */
+function unknownBecause(cause) {
+  return { answer: 'unknown', cause };
+}
+
+/**
+ * The answer of {@link judgeTrackedAreas}, without its cause.
  *
  * @param {unknown} result
  * @returns {'tracked' | 'untracked' | 'unknown'}
  */
 function classifyTrackedAreas(result) {
-  if (result === null || typeof result !== 'object') return 'unknown';
-  const { error, status, stdout } = /** @type {{ error?: { code?: unknown }, status?: unknown, stdout?: unknown }} */ (result);
-  if (error && error.code === 'ENOBUFS') return 'tracked';
-  const listed = (typeof stdout === 'string' || Buffer.isBuffer(stdout)) && stdout.length > 0;
-  if (listed) return 'tracked';
-  if (error || status !== 0) return 'unknown';
-  return 'untracked';
+  return judgeTrackedAreas(result).answer;
 }
 
 /**
@@ -152,11 +195,12 @@ function entryExists(target) {
 /**
  * Whether git tracks any entry under the covered folders at `root`, or an entry named
  * `.devflow` itself (a link, a gitlink or a file). The index decides, not the disk, and
- * a staged entry counts.
+ * a staged entry counts. The answer carries the cause (a value of UNKNOWN_CAUSES) when
+ * it is `unknown`, and null otherwise.
  *
  *   untracked  no `.git` entry at the root (no git call is made), or git listed nothing
  *   tracked    git listed an entry
- *   unknown    a `.git` entry stands and git did not answer (see classifyTrackedAreas),
+ *   unknown    a `.git` entry stands and git did not answer (see judgeTrackedAreas),
  *              the `.git` entry could not be probed, or the root is not an absolute path
  *              string (no git call is made)
  *
@@ -170,16 +214,16 @@ function entryExists(target) {
  * named as one, and answers `unknown`.
  *
  * @param {unknown} root - an absolute path
- * @returns {'tracked' | 'untracked' | 'unknown'}
+ * @returns {{ answer: 'tracked' | 'untracked' | 'unknown', cause: string | null }}
  */
-function checkTrackedAreas(root) {
-  if (typeof root !== 'string' || !path.isAbsolute(root)) return 'unknown';
+function inspectTrackedAreas(root) {
+  if (typeof root !== 'string' || !path.isAbsolute(root)) return unknownBecause(UNKNOWN_CAUSES.rootNotAbsolute);
   try {
     const gitEntry = entryExists(path.join(root, '.git'));
-    if (gitEntry === null) return 'unknown';
-    if (gitEntry === false) return 'untracked';
+    if (gitEntry === null) return unknownBecause(UNKNOWN_CAUSES.gitEntryUnreadable);
+    if (gitEntry === false) return { answer: 'untracked', cause: null };
     const ceiling = path.dirname(fs.realpathSync(root));
-    if (ceiling.includes(path.delimiter)) return 'unknown';
+    if (ceiling.includes(path.delimiter)) return unknownBecause(UNKNOWN_CAUSES.ceilingUnusable);
     const result = childProcess.spawnSync('git', ['--no-literal-pathspecs', '-c', 'core.fsmonitor=false', 'ls-files', '-z', '--', ...TRACKED_AREA_PATHSPECS], {
       cwd: root,
       env: trackedAreasGitEnv(process.env, ceiling),
@@ -189,14 +233,27 @@ function checkTrackedAreas(root) {
       windowsHide: true,
       shell: false,
     });
-    return classifyTrackedAreas(result);
+    return judgeTrackedAreas(result);
   } catch (_) {
-    return 'unknown';
+    return unknownBecause(UNKNOWN_CAUSES.checkFailed);
   }
+}
+
+/**
+ * The answer of {@link inspectTrackedAreas}, without its cause.
+ *
+ * @param {unknown} root - an absolute path
+ * @returns {'tracked' | 'untracked' | 'unknown'}
+ */
+function checkTrackedAreas(root) {
+  return inspectTrackedAreas(root).answer;
 }
 
 module.exports = {
   TRACKED_AREA_PATHSPECS,
+  UNKNOWN_CAUSES,
+  judgeTrackedAreas,
   classifyTrackedAreas,
+  inspectTrackedAreas,
   checkTrackedAreas,
 };

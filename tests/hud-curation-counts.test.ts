@@ -254,7 +254,7 @@ describe('gatherLedgerCurationCounts resolves the ledger root like the hooks', {
   });
 });
 
-describe('the old ledger folder: the pointer and the refused line, only in the empty branch (#529, TP-17, TP-27)', () => {
+describe('the old ledger folder: the pointer and the refused line only without counts, a skipped move beside them (#529, TP-17, TP-27)', () => {
   let base: string;
   let root: string;
   let home: string;
@@ -344,11 +344,34 @@ describe('the old ledger folder: the pointer and the refused line, only in the e
     expect(await gatherLedgerCurationCounts(root, { home })).toEqual({ decisions: 0, pitfalls: 0, move: 'pointer' });
   });
 
-  it('does not test the old folder when the new ledger has counts', async () => {
+  it('shows neither the pointer nor the refused line beside the counts of the new ledger', async () => {
     fs.mkdirSync(newDir(), { recursive: true });
     fs.writeFileSync(path.join(newDir(), 'decisions-ledger.jsonl'), makeRow('decision') + '\n');
     fs.mkdirSync(oldDir(), { recursive: true });
     fs.writeFileSync(markerPath(), '');
+
+    expect(await gatherLedgerCurationCounts(root, { home })).toEqual({ decisions: 1, pitfalls: 0 });
+  });
+
+  it.each([
+    ['tracked', 'Curation: 1 decision; move skipped, git tracks files in .devflow/learning/ or .devflow/curation/'],
+    ['unknown', 'Curation: 1 decision; move skipped, git did not answer'],
+  ] as const)('shows the skipped line beside the counts of the new ledger when the %s marker stands', async (reason, line) => {
+    fs.mkdirSync(newDir(), { recursive: true });
+    fs.writeFileSync(path.join(newDir(), 'decisions-ledger.jsonl'), makeRow('decision') + '\n');
+    fs.mkdirSync(oldDir(), { recursive: true });
+    fs.writeFileSync(getCurationMoveMarkerPath(home, root, reason), '');
+
+    const data = await gatherLedgerCurationCounts(root, { home });
+
+    expect(data).toEqual({ decisions: 1, pitfalls: 0, move: reason });
+    expect(await rendered(data)).toBe(line);
+  });
+
+  it('shows no skipped line beside the counts once the old folder is gone', async () => {
+    fs.mkdirSync(newDir(), { recursive: true });
+    fs.writeFileSync(path.join(newDir(), 'decisions-ledger.jsonl'), makeRow('decision') + '\n');
+    fs.writeFileSync(getCurationMoveMarkerPath(home, root, 'tracked'), '');
 
     expect(await gatherLedgerCurationCounts(root, { home })).toEqual({ decisions: 1, pitfalls: 0 });
   });
@@ -369,8 +392,13 @@ describe('the old ledger folder: the pointer and the refused line, only in the e
     expect((await gatherLedgerCurationCounts(root, { home }))?.move).toBe('pointer');
   });
 
-  it('renders the notice only for empty counts: counts win over a stray notice', async () => {
+  it('renders the pointer and the refused line only for empty counts: counts win over them', async () => {
     expect(await rendered({ decisions: 2, pitfalls: 0, move: 'pointer' })).toBe('Curation: 2 decisions');
+    expect(await rendered({ decisions: 2, pitfalls: 1, move: 'refused' })).toBe('Curation: 2 decisions, 1 pitfall');
+  });
+
+  it('renders a skipped move after the counts', async () => {
+    expect(await rendered({ decisions: 2, pitfalls: 1, move: 'unknown' })).toBe('Curation: 2 decisions, 1 pitfall; move skipped, git did not answer');
   });
 
   it('keeps the label the same length as before the rename', async () => {

@@ -217,7 +217,7 @@ describe('moveProjectLedgers: the targets', () => {
     expect(report.lines[0]).toContain('/w/stalled');
     expect(report.lines[0]).toMatch(/skipped/);
     expect(report.lines[0]).toMatch(/did not answer in time/);
-    expect(report.lines[0]).toMatch(/next init tries again/);
+    expect(report.lines[0]).toMatch(/next init or session start tries again/);
   });
 
   it('prints a line for a timed-out project even when nothing else moves', async () => {
@@ -336,7 +336,7 @@ describe('moveProjectLedgers: the outcome of each project', () => {
   ] as const)('a project that the store skipped for the reason %s is skipped, is not swept, and its line is the fixed notice', async (reason, answer) => {
     const { io, rec } = fakeIO({ moves: { '/w/a': ok(answer) }, devflowEntries: { '/w/a': ['learning.backup-20260101'] } });
     const report = reportOf(await moveProjectLedgers(options({ projectRoots: ['/w/a'] }), io));
-    expect(report.outcomes[0]).toEqual({ kind: 'skipped', root: '/w/a', reason });
+    expect(report.outcomes[0]).toEqual({ kind: 'left-alone', root: '/w/a', reason });
     expect(report.movedCount).toBe(0);
     expect(report.lines).toEqual([`Ledger move skipped for /w/a: ${MOVE_SKIP_NOTICE[reason]}`]);
     expect(rec.order, 'a skipped project is not swept').toEqual(['move:/w/a']);
@@ -363,7 +363,7 @@ describe('moveProjectLedgers: the outcome of each project', () => {
       sweeps: { '/w/a': ok({ state: 'skipped', reason, files: 0, merged: 0, overflowed: 0, notes: [] }) },
     });
     const report = reportOf(await moveProjectLedgers(options({ projectRoots: ['/w/a'] }), io));
-    expect(report.outcomes[0]).toEqual({ kind: 'skipped', root: '/w/a', reason });
+    expect(report.outcomes[0]).toEqual({ kind: 'left-alone', root: '/w/a', reason });
     expect(report.movedCount).toBe(0);
     expect(report.lines).toEqual([`Ledger move skipped for /w/a: ${MOVE_SKIP_NOTICE[reason]}`]);
     expect(rec.order).toEqual(['move:/w/a', 'sweep:/w/a']);
@@ -382,7 +382,7 @@ describe('moveProjectLedgers: the outcome of each project', () => {
 
   it('moveLedgerRoot answers the skip, for the curation command', async () => {
     const { io } = fakeIO({ moves: { '/w/a': ok(SKIPPED_TRACKED) } });
-    expect(await moveLedgerRoot('/w/a', { homeDir: HOME, machineDir: MACHINE }, io)).toEqual({ kind: 'skipped', root: '/w/a', reason: 'tracked' });
+    expect(await moveLedgerRoot('/w/a', { homeDir: HOME, machineDir: MACHINE }, io)).toEqual({ kind: 'left-alone', root: '/w/a', reason: 'tracked' });
   });
 
   it('prints one line for a refused project and names the reason', async () => {
@@ -584,10 +584,13 @@ describe('moveLedgerRoot: the move one root gets from configure and the toggles'
     ]);
     expect(describeOutcome({ kind: 'refused', root: '/w/a', message: 'a link' })).toEqual([expect.stringContaining('refused')]);
     expect(describeOutcome({ kind: 'skipped', root: '/w/a', reason: 'git-root-timed-out' })).toEqual([
-      'Ledger move skipped for /w/a: git did not answer in time. Nothing was moved. The next init tries again.',
+      'Ledger move skipped for /w/a: git did not answer in time. Nothing was moved. The next init or session start tries again.',
     ]);
-    expect(describeOutcome({ kind: 'skipped', root: '/w/a', reason: 'tracked' })).toEqual([
+    expect(describeOutcome({ kind: 'left-alone', root: '/w/a', reason: 'tracked' })).toEqual([
       `Ledger move skipped for /w/a: ${MOVE_SKIP_NOTICE.tracked}`,
+    ]);
+    expect(describeOutcome({ kind: 'left-alone', root: '/w/a', reason: 'unknown' })).toEqual([
+      `Ledger move skipped for /w/a: ${MOVE_SKIP_NOTICE.unknown}`,
     ]);
     expect(describeOutcome({ kind: 'error', root: '/w/a', message: 'x' })).toHaveLength(1);
     expect(describeOutcome({ kind: 'unchanged', root: '/w/a', sweep: null })).toEqual([]);
@@ -601,8 +604,8 @@ describe('moveLedgerRoot: the move one root gets from configure and the toggles'
       { kind: 'refused', root, message },
       { kind: 'error', root, message },
       { kind: 'skipped', root, reason: 'git-root-timed-out' },
-      { kind: 'skipped', root, reason: 'tracked' },
-      { kind: 'skipped', root, reason: 'unknown' },
+      { kind: 'left-alone', root, reason: 'tracked' },
+      { kind: 'left-alone', root, reason: 'unknown' },
       { kind: 'unchanged', root, sweep: { state: 'failed', message } },
       { kind: 'unchanged', root, sweep: { state: 'busy' } },
       { kind: 'moved', root, mode: 'moved-in', backup: null, rendered: false, notes: [], sweep: { state: 'failed', message } },

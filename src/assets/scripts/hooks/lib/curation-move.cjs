@@ -64,7 +64,7 @@ const {
   physicalPath,
   homeDirOrNull,
 } = require('./curation-store.cjs');
-const { checkTrackedAreas } = require('./tracked-areas.cjs');
+const { checkTrackedAreas, inspectTrackedAreas } = require('./tracked-areas.cjs');
 
 // ---------------------------------------------------------------------------
 // The one-time ledger move
@@ -1020,8 +1020,9 @@ function curationMoveFinish(ctx, { whole }) {
  * the pass asks whether git tracks any entry under either folder (checkTrackedAreas). If
  * it does, or if a `.git` entry stands and git does not answer, the answer is `skipped`
  * with the reason `tracked` or `unknown`, and nothing at all changes: the folders, the
- * machine directory and the journal stay as they are. A root with no `.git` entry makes
- * no git call.
+ * machine directory and the journal stay as they are. With `unknown` the answer also
+ * carries `cause`, one fixed word that says why git did not answer (UNKNOWN_CAUSES in
+ * tracked-areas.cjs). A root with no `.git` entry makes no git call.
  *
  * Otherwise the machine directory is made if absent, and every lock the pass needs is
  * taken with no wait: the move lock, the old folder's store lock and queue lock, and,
@@ -1042,7 +1043,7 @@ function curationMoveFinish(ctx, { whole }) {
  *
  * @returns {{ ok: true, value: { state: 'none', notes: string[] }
  *   | { state: 'busy', reason?: 'claim', notes: string[] }
- *   | { state: 'skipped', reason: 'tracked'|'unknown', notes: string[] }
+ *   | { state: 'skipped', reason: 'tracked'|'unknown', cause?: string, notes: string[] }
  *   | { state: 'moved', mode: 'whole-folder'|'kept-new'|'moved-in', backup: string|null, rendered: boolean, notes: string[] } }
  *   | { ok: false, error: { kind: 'refused'|'io-error', message: string } }}
  */
@@ -1125,8 +1126,12 @@ function moveLedgerUnscrubbed(root, options = {}) {
     if (lstatOrNull(ctx.oldDir) === null) return { ok: true, value: { state: 'none', notes: [] } };
 
     // Git's index decides, before this pass makes, locks, reads or renames anything.
-    const tracking = checkTrackedAreas(ctx.root);
-    if (tracking !== 'untracked') return { ok: true, value: { state: 'skipped', reason: tracking, notes: [] } };
+    // The check runs before the move takes its locks, and every session start checks again.
+    const tracking = inspectTrackedAreas(ctx.root);
+    if (tracking.answer !== 'untracked') {
+      const cause = tracking.cause === null ? {} : { cause: tracking.cause };
+      return { ok: true, value: { state: 'skipped', reason: tracking.answer, ...cause, notes: [] } };
+    }
 
     fs.mkdirSync(machine, { recursive: true, mode: 0o700 });
     let newExisted = lstatOrNull(ctx.newDir) !== null;
@@ -1335,6 +1340,7 @@ function sweepLedgerBackupsUnscrubbed(root, options = {}) {
     if (backups.length === 0) return idle('none');
 
     // Git's index decides, before this pass makes a folder, takes a lock or merges a row.
+    // The check runs before the sweep takes its locks, and each later run checks again.
     const tracking = checkTrackedAreas(ctx.root);
     if (tracking !== 'untracked') return idle('skipped', { reason: tracking });
 

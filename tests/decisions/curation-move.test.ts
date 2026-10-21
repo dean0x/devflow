@@ -21,7 +21,8 @@ import * as path from 'path';
 import { spawnSync } from 'child_process';
 
 import {
-  GIT_ENV, JSON_HELPER, CURATION_STORE, CURATION_MOVE, PROJECT_PATHS, git, makeV2LedgerRow, makeV2LogRow, toJsonl,
+  GIT_ENV, JSON_HELPER, CURATION_STORE, CURATION_MOVE, PROJECT_PATHS, git, makeV2LedgerRow, makeV2LogRow, pathWithFailingGit,
+  pathWithoutGit, snapshotTree, toJsonl, trackInGit,
 } from './curation-fixtures.js';
 import { HOOK_RUN_ALLOWANCE_MS, NODE_EXEC_STALL_MS } from '../shell-hooks-helpers.js';
 
@@ -42,7 +43,7 @@ type MovedMode = 'whole-folder' | 'kept-new' | 'moved-in';
 type MoveValue =
   | { state: 'none'; notes: string[] }
   | { state: 'busy'; reason?: 'claim'; notes: string[] }
-  | { state: 'skipped'; reason: 'tracked' | 'unknown'; notes: string[] }
+  | { state: 'skipped'; reason: 'tracked' | 'unknown'; cause?: string; notes: string[] }
   | { state: 'moved'; mode: MovedMode; backup: string | null; rendered: boolean; notes: string[] };
 
 interface SweepValue {
@@ -169,26 +170,6 @@ const seedNew = (files: Record<string, string | null>): void => seed(site.newDir
 
 const read = (file: string): string => fs.readFileSync(file, 'utf8');
 
-/**
- * Every entry under `dir` and what it holds: a folder as '', a link as its target
- * (never followed), a file as its bytes. A refused move must leave this unchanged.
- */
-function snapshotTree(dir: string): Map<string, string> {
-  const entries = new Map<string, string>();
-  const walk = (rel: string): void => {
-    for (const entry of fs.readdirSync(path.join(dir, rel), { withFileTypes: true })) {
-      const child = rel ? path.join(rel, entry.name) : entry.name;
-      const abs = path.join(dir, child);
-      if (entry.isSymbolicLink()) entries.set(child, `-> ${fs.readlinkSync(abs)}`);
-      else if (entry.isDirectory()) {
-        entries.set(child + path.sep, '');
-        walk(child);
-      } else entries.set(child, fs.readFileSync(abs, 'latin1'));
-    }
-  };
-  walk('');
-  return entries;
-}
 const exists = (file: string): boolean => fs.existsSync(file) || isLink(file);
 const isLink = (file: string): boolean => {
   try {
@@ -2090,42 +2071,10 @@ describe('the move leaves a project alone when git tracks files in its data fold
   const TRACKED_NEW_FILE = `.devflow/${NEW}/notes.txt`;
 
   /** Make the project a git repository with `rels` (paths relative to the root, written if absent) committed. */
-  function commitInRepo(...rels: string[]): void {
-    git(site.root, ['-c', 'init.defaultBranch=main', 'init', '-q']);
-    for (const rel of rels) {
-      const file = path.join(site.root, rel);
-      if (!exists(file)) {
-        fs.mkdirSync(path.dirname(file), { recursive: true });
-        fs.writeFileSync(file, 'content of the repository\n');
-      }
-    }
-    git(site.root, ['add', '-f', '--', ...rels]);
-    git(site.root, ['commit', '-q', '-m', 'add files']);
-  }
-
-  /** Every entry under `dir` with its type, mode, mtime and content: a skipped move must leave this unchanged. */
-  function statTree(dir: string): Map<string, string> {
-    const entries = new Map<string, string>();
-    const describe_ = (abs: string): string => {
-      const stat = fs.lstatSync(abs);
-      const body = stat.isFile() ? fs.readFileSync(abs, 'latin1') : stat.isSymbolicLink() ? fs.readlinkSync(abs) : '';
-      return `${stat.mode.toString(8)} ${stat.mtimeMs} ${body}`;
-    };
-    const walk = (rel: string): void => {
-      for (const entry of fs.readdirSync(path.join(dir, rel))) {
-        const child = rel ? path.join(rel, entry) : entry;
-        const abs = path.join(dir, child);
-        entries.set(child, describe_(abs));
-        if (fs.lstatSync(abs).isDirectory()) walk(child);
-      }
-    };
-    entries.set('.', describe_(dir));
-    walk('');
-    return entries;
-  }
+  const commitInRepo = (...rels: string[]): void => trackInGit(site.root, rels, { commit: true });
 
   /** The project as the old folder and the new one hold it, for the "nothing changed" checks. */
-  const areas = (): Map<string, string> => statTree(site.devflow);
+  const areas = (): Map<string, string> => snapshotTree(site.devflow, { stat: true });
 
   /** A move that must answer `skipped`, with its reason. */
   function skippedValue(): Extract<MoveValue, { state: 'skipped' }> {
@@ -2135,28 +2084,19 @@ describe('the move leaves a project alone when git tracks files in its data fold
     return result.value;
   }
 
-  /** Assert the move skipped for `reason` and changed nothing: both folders as they were, no machine directory. */
-  function expectSkip(reason: 'tracked' | 'unknown'): void {
+  /**
+   * Assert the move skipped for `reason` (with `cause` when git did not answer) and changed
+   * nothing: both folders as they were, mode and mtime too, no machine directory.
+   */
+  function expectSkip(reason: 'tracked' | 'unknown', cause?: string): void {
     const before = areas();
-    expect(skippedValue()).toEqual({ state: 'skipped', reason, notes: [] });
+    expect(skippedValue()).toEqual({ state: 'skipped', reason, ...(cause === undefined ? {} : { cause }), notes: [] });
     expect(areas()).toEqual(before);
     expect(exists(site.machineDir)).toBe(false);
     expect(names(site.devflow).filter(name => name.startsWith('learning.backup-'))).toEqual([]);
   }
 
   const gitCalls = (spy: { mock: { calls: unknown[][] } }): unknown[][] => spy.mock.calls.filter(([command]) => command === 'git');
-
-  /** A directory that is the whole of PATH, with a `git` that always exits non-zero when `failingGit` is set. */
-  function onlyPath(failingGit: boolean): string {
-    const bin = path.join(site.tmp, 'bin');
-    fs.mkdirSync(bin, { recursive: true });
-    if (failingGit) {
-      const failing = ['/usr/bin/false', '/bin/false'].find(candidate => fs.existsSync(candidate));
-      if (failing === undefined) throw new Error('no false program on this machine');
-      fs.symlinkSync(failing, path.join(bin, 'git'));
-    }
-    return bin;
-  }
 
   /** An old folder that holds a ledger set and a tuning file, no queue. */
   const seedWhole = (): void => seedOld({ ...ledgerSet('old'), 'learning.json': 'tuning\n' });
@@ -2182,7 +2122,7 @@ describe('the move leaves a project alone when git tracks files in its data fold
     seedWhole();
     commitInRepo('README.md');
     fs.writeFileSync(path.join(site.oldDir, 'staged.txt'), 'staged\n');
-    git(site.root, ['add', '-f', '--', `.devflow/${OLD}/staged.txt`]);
+    trackInGit(site.root, `.devflow/${OLD}/staged.txt`);
 
     expectSkip('tracked');
   });
@@ -2214,27 +2154,27 @@ describe('the move leaves a project alone when git tracks files in its data fold
   it('skips with the reason unknown when a .git entry stands and git fails', () => {
     seedWhole();
     commitInRepo('README.md');
-    vi.stubEnv('PATH', onlyPath(true));
+    vi.stubEnv('PATH', pathWithFailingGit(site.tmp));
 
-    expectSkip('unknown');
+    expectSkip('unknown', 'git-exit-status');
   });
 
   it('skips with the reason unknown when a .git entry stands and git is not on the PATH', () => {
     seedWhole();
     commitInRepo('README.md');
-    vi.stubEnv('PATH', onlyPath(false));
+    vi.stubEnv('PATH', pathWithoutGit(site.tmp));
 
-    expectSkip('unknown');
+    expectSkip('unknown', 'git-not-found');
   });
 
   it('moves at the next try after git answers again', () => {
     seedWhole();
     commitInRepo('README.md');
-    vi.stubEnv('PATH', onlyPath(true));
-    expectSkip('unknown');
+    const workingPath = process.env.PATH ?? '';
+    vi.stubEnv('PATH', pathWithFailingGit(site.tmp));
+    expectSkip('unknown', 'git-exit-status');
 
-    vi.unstubAllEnvs();
-    vi.stubEnv('HOME', site.home);
+    vi.stubEnv('PATH', workingPath);
     expect(movedValue().mode).toBe('whole-folder');
   });
 
@@ -2375,7 +2315,7 @@ describe('the move leaves a project alone when git tracks files in its data fold
     it('skips with the reason unknown, and changes nothing, when a .git entry stands and git fails', () => {
       seedBackup();
       commitInRepo('README.md');
-      vi.stubEnv('PATH', onlyPath(true));
+      vi.stubEnv('PATH', pathWithFailingGit(site.tmp));
       const before = areas();
 
       expect(mover.sweepLedgerBackups(site.root, opts())).toEqual(SKIPPED_UNKNOWN);
@@ -2578,24 +2518,24 @@ describe('json-helper move-ledger (TP-36, argument half)', { timeout: HOOK_RUN_A
 
   it('prints skipped tracked, exit 0, and changes nothing, while git tracks a file of the old folder', () => {
     seedOld(ledgerSet('one'));
-    git(site.root, ['-c', 'init.defaultBranch=main', 'init', '-q']);
-    git(site.root, ['add', '-f', '--', `.devflow/${OLD}/${LOG}`]);
-    const before = snapshotTree(site.root);
+    trackInGit(site.root, `.devflow/${OLD}/${LOG}`);
+    const before = snapshotTree(site.devflow, { stat: true });
 
     expect(runMoveLedger([site.root])).toEqual({ code: 0, stdout: 'skipped tracked\n', stderr: '' });
-    expect(snapshotTree(site.root)).toEqual(before);
+    expect(snapshotTree(site.devflow, { stat: true })).toEqual(before);
     expect(exists(site.machineDir)).toBe(false);
   });
 
-  it('prints skipped unknown, exit 0, and changes nothing, when git does not answer', () => {
+  it('prints skipped unknown and the fixed cause word, exit 0, and changes nothing, when git does not answer', () => {
     seedOld(ledgerSet('one'));
     // A work tree around the project: its empty .git is not answered from the outside.
     git(site.tmp, ['-c', 'init.defaultBranch=main', 'init', '-q']);
     fs.mkdirSync(path.join(site.root, '.git'));
-    const before = snapshotTree(site.root);
+    const before = snapshotTree(site.devflow, { stat: true });
 
-    expect(runMoveLedger([site.root])).toEqual({ code: 0, stdout: 'skipped unknown\n', stderr: '' });
-    expect(snapshotTree(site.root)).toEqual(before);
+    expect(runMoveLedger([site.root])).toEqual({ code: 0, stdout: 'skipped unknown\ncause git-exit-status\n', stderr: '' });
+    expect(snapshotTree(site.devflow, { stat: true })).toEqual(before);
+    expect(exists(site.machineDir)).toBe(false);
   });
 
   it('prints busy, exit 0, while the move lock is held', () => {

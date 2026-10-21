@@ -4,6 +4,7 @@ import type { ComponentResult, GatherContext, CurationCountsData } from '../type
 import { dim } from '../colors.js';
 import { getDecisionsLedgerPath } from '../../core/project-paths.js';
 import { formatMoveNotice, gatherMoveNotice } from '../../core/curation-move-notice.js';
+import { isMoveSkipReason } from '../../core/curation-move-skip.js';
 import { getLedgerRoot, LEDGER_ROOT_TIMEOUT_MS, type LedgerRootOptions } from '../../core/ledger-root.js';
 import { isActiveDecisionsStatus } from '../../core/observations.js';
 
@@ -125,9 +126,10 @@ export async function gatherLedgerCurationCounts(
   const root = await getLedgerRoot(cwd, { ...options, timeoutMs: LEDGER_ROOT_TIMEOUT_MS });
   const ledgerRoot = root ?? cwd;
   const counts = gatherCurationCounts(ledgerRoot);
-  if (counts !== null && counts.decisions + counts.pitfalls > 0) return counts;
-
   const move = gatherMoveNotice(ledgerRoot, options.home ?? os.homedir());
+  if (counts !== null && counts.decisions + counts.pitfalls > 0) {
+    return isMoveSkipReason(move) ? { ...counts, move } : counts;
+  }
   if (move === null) return counts;
   return { decisions: counts?.decisions ?? 0, pitfalls: counts?.pitfalls ?? 0, move };
 }
@@ -159,6 +161,7 @@ export default async function curationCounts(
   // part and joins with a middot for a list of independent facts): "Curation:
   // N decisions, M pitfalls" reads as a single sentence, so the whole string
   // is dimmed once and parts are comma-joined rather than middot-separated.
-  const raw = `Curation: ${parts.join(', ')}`;
+  const counts = parts.join(', ');
+  const raw = isMoveSkipReason(data.move) ? formatMoveNotice(data.move, counts) : `Curation: ${counts}`;
   return { text: dim(raw), raw };
 }

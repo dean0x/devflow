@@ -12,7 +12,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { git, initGitRepo, PROJECT_PATHS } from './curation-fixtures.js';
+import { git, initGitRepo, pathWithFailingGit, pathWithoutGit, PROJECT_PATHS, trackInGit } from './curation-fixtures.js';
 
 type TrackedAnswer = 'tracked' | 'untracked' | 'unknown';
 
@@ -22,10 +22,18 @@ interface SpawnAnswer {
   stdout?: Buffer | string | null;
 }
 
+interface Inspection {
+  answer: TrackedAnswer;
+  cause: string | null;
+}
+
 interface TrackedAreas {
   TRACKED_AREA_PATHSPECS: readonly string[];
+  UNKNOWN_CAUSES: Readonly<Record<string, string>>;
+  judgeTrackedAreas(result: unknown): Inspection;
   classifyTrackedAreas(result: unknown): TrackedAnswer;
-  checkTrackedAreas(root: string): TrackedAnswer;
+  inspectTrackedAreas(root: unknown): Inspection;
+  checkTrackedAreas(root: unknown): TrackedAnswer;
 }
 
 const LEAF = path.resolve(import.meta.dirname, '../../src/assets/scripts/hooks/lib/tracked-areas.cjs');
@@ -71,6 +79,45 @@ describe('classifyTrackedAreas — the answer of one git ls-files call', () => {
 
   it.each(answers)('%s', (_name, result, expected) => {
     expect(leaf.classifyTrackedAreas(result)).toBe(expected);
+  });
+});
+
+describe('judgeTrackedAreas — the answer of one git ls-files call, with its cause', () => {
+  const judged: Array<[name: string, result: unknown, expected: Inspection]> = [
+    ['exit 0 with nothing listed', { status: 0, stdout: Buffer.alloc(0) }, { answer: 'untracked', cause: null }],
+    ['an entry listed', { status: 0, stdout: Buffer.from('.devflow/learning/a\0') }, { answer: 'tracked', cause: null }],
+    ['an entry listed with a non-zero exit', { status: 1, stdout: Buffer.from('.devflow/curation/a\0') }, { answer: 'tracked', cause: null }],
+    ['output past the buffer cap', { error: errorWith('ENOBUFS'), status: null, stdout: Buffer.alloc(0) }, { answer: 'tracked', cause: null }],
+    ['git is not installed', { error: errorWith('ENOENT'), status: null, stdout: null }, { answer: 'unknown', cause: 'git-not-found' }],
+    ['a timeout with nothing listed', { error: errorWith('ETIMEDOUT'), status: null, signal: 'SIGTERM', stdout: Buffer.alloc(0) }, { answer: 'unknown', cause: 'git-timed-out' }],
+    ['a spawn error of any other kind', { error: errorWith('EACCES'), status: null, stdout: null }, { answer: 'unknown', cause: 'git-not-run' }],
+    ['a non-zero exit with nothing listed', { status: 128, stdout: Buffer.alloc(0) }, { answer: 'unknown', cause: 'git-exit-status' }],
+    ['a process ended by a signal', { status: null, signal: 'SIGKILL', stdout: Buffer.alloc(0) }, { answer: 'unknown', cause: 'git-stopped' }],
+    ['no exit status and no signal', { status: null, stdout: Buffer.alloc(0) }, { answer: 'unknown', cause: 'git-not-run' }],
+    ['no result at all', undefined, { answer: 'unknown', cause: 'git-not-run' }],
+    ['a result of the wrong shape', 'tracked', { answer: 'unknown', cause: 'git-not-run' }],
+  ];
+
+  it.each(judged)('%s', (_name, result, expected) => {
+    expect(leaf.judgeTrackedAreas(result)).toEqual(expected);
+    expect(leaf.classifyTrackedAreas(result)).toBe(expected.answer);
+  });
+});
+
+describe('UNKNOWN_CAUSES', () => {
+  it('is a frozen closed set of fixed words that the shell can log: lowercase letters and hyphens, at most 32 bytes', () => {
+    const words = Object.values(leaf.UNKNOWN_CAUSES);
+    expect(Object.isFrozen(leaf.UNKNOWN_CAUSES)).toBe(true);
+    expect(new Set(words).size).toBe(words.length);
+    for (const word of words) expect(word).toMatch(/^[a-z]+(?:-[a-z]+)*$/);
+    for (const word of words) expect(Buffer.byteLength(word)).toBeLessThanOrEqual(32);
+  });
+
+  it('names the nine causes', () => {
+    expect(Object.values(leaf.UNKNOWN_CAUSES).sort()).toEqual([
+      'ceiling-unusable', 'check-failed', 'git-entry-unreadable', 'git-exit-status', 'git-not-found',
+      'git-not-run', 'git-stopped', 'git-timed-out', 'root-not-absolute',
+    ]);
   });
 });
 
@@ -133,25 +180,10 @@ describe('checkTrackedAreas', () => {
       fs.mkdirSync(path.dirname(abs), { recursive: true });
       fs.writeFileSync(abs, content);
     }
-    git(root, ['add', '-f', '--', ...Object.keys(files)]);
+    trackInGit(root, Object.keys(files));
   }
 
   const gitCalls = (spy: { mock: { calls: unknown[][] } }): unknown[][] => spy.mock.calls.filter(([command]) => command === 'git');
-
-  /**
-   * A directory that is the whole of PATH. `git` in it, when given, is a link to a program
-   * that always exits non-zero (a fresh script is slow to start on some machines).
-   */
-  function pathWith(options: { failingGit: boolean }): string {
-    const bin = path.join(tmp, 'bin');
-    fs.mkdirSync(bin, { recursive: true });
-    if (options.failingGit) {
-      const failing = ['/usr/bin/false', '/bin/false'].find(candidate => fs.existsSync(candidate));
-      if (failing === undefined) throw new Error('no false program on this machine');
-      fs.symlinkSync(failing, path.join(bin, 'git'));
-    }
-    return bin;
-  }
 
   it('makes no git call and answers untracked when the root has no .git entry', () => {
     fs.mkdirSync(path.join(root, '.devflow', 'learning'), { recursive: true });
@@ -282,18 +314,19 @@ describe('checkTrackedAreas', () => {
   });
 
   it.each([
-    ['no root', undefined],
-    ['a null root', null],
-    ['a number', 42],
-    ['an object', {}],
-    ['an empty string', ''],
-    ['a relative path', 'project'],
-    ['a dot', '.'],
-    ['a path with a NUL byte', '/tmp/a\u0000b'],
-  ])('answers unknown, with no git call and no throw, for %s', (_name, badRoot) => {
+    ['no root', undefined, 'root-not-absolute'],
+    ['a null root', null, 'root-not-absolute'],
+    ['a number', 42, 'root-not-absolute'],
+    ['an object', {}, 'root-not-absolute'],
+    ['an empty string', '', 'root-not-absolute'],
+    ['a relative path', 'project', 'root-not-absolute'],
+    ['a dot', '.', 'root-not-absolute'],
+    ['a path with a NUL byte', '/tmp/a\u0000b', 'git-entry-unreadable'],
+  ])('answers unknown, with no git call and no throw, for %s', (_name, badRoot, cause) => {
     const calls = vi.spyOn(nodeChildProcess, 'spawnSync');
 
-    expect(leaf.checkTrackedAreas(badRoot as never)).toBe('unknown');
+    expect(leaf.checkTrackedAreas(badRoot)).toBe('unknown');
+    expect(leaf.inspectTrackedAreas(badRoot)).toEqual({ answer: 'unknown', cause });
     expect(gitCalls(calls)).toEqual([]);
   });
 
@@ -304,6 +337,7 @@ describe('checkTrackedAreas', () => {
     const calls = vi.spyOn(nodeChildProcess, 'spawnSync');
 
     expect(leaf.checkTrackedAreas(colonRoot)).toBe('unknown');
+    expect(leaf.inspectTrackedAreas(colonRoot)).toEqual({ answer: 'unknown', cause: 'ceiling-unusable' });
     expect(gitCalls(calls)).toEqual([]);
   });
 
@@ -312,6 +346,7 @@ describe('checkTrackedAreas', () => {
     fs.mkdirSync(path.join(root, '.git'));
 
     expect(leaf.checkTrackedAreas(root)).toBe('unknown');
+    expect(leaf.inspectTrackedAreas(root)).toEqual({ answer: 'unknown', cause: 'git-exit-status' });
   });
 
   it('answers unknown for an empty .git at a root reached through a link, inside another repository', () => {
@@ -344,16 +379,18 @@ describe('checkTrackedAreas', () => {
 
   it('answers unknown when a .git entry stands and git exits non-zero', () => {
     commitRepo({ '.devflow/learning/decisions.md': 'x\n' });
-    vi.stubEnv('PATH', pathWith({ failingGit: true }));
+    vi.stubEnv('PATH', pathWithFailingGit(tmp));
 
     expect(leaf.checkTrackedAreas(root)).toBe('unknown');
+    expect(leaf.inspectTrackedAreas(root)).toEqual({ answer: 'unknown', cause: 'git-exit-status' });
   });
 
   it('answers unknown when a .git entry stands and git is not on the PATH', () => {
     commitRepo({ '.devflow/learning/decisions.md': 'x\n' });
-    vi.stubEnv('PATH', pathWith({ failingGit: false }));
+    vi.stubEnv('PATH', pathWithoutGit(tmp));
 
     expect(leaf.checkTrackedAreas(root)).toBe('unknown');
+    expect(leaf.inspectTrackedAreas(root)).toEqual({ answer: 'unknown', cause: 'git-not-found' });
   });
 
   it('answers unknown when a .git entry stands and is not a repository', () => {
@@ -370,15 +407,39 @@ describe('checkTrackedAreas', () => {
     }) as never);
 
     expect(leaf.checkTrackedAreas(root)).toBe('unknown');
+    expect(leaf.inspectTrackedAreas(root)).toEqual({ answer: 'unknown', cause: 'git-timed-out' });
   });
 
-  it('never throws: a spawn that throws answers unknown', () => {
+  it('never throws: a spawn that throws answers unknown, with the cause check-failed', () => {
     commitRepo({ 'README.md': 'readme\n' });
     vi.spyOn(nodeChildProcess, 'spawnSync').mockImplementation((() => {
       throw new TypeError('bad argument');
     }) as never);
 
     expect(leaf.checkTrackedAreas(root)).toBe('unknown');
+    expect(leaf.inspectTrackedAreas(root)).toEqual({ answer: 'unknown', cause: 'check-failed' });
+  });
+
+  it.skipIf(process.getuid?.() === 0)('answers unknown, with the cause git-entry-unreadable, when the .git entry can not be probed', () => {
+    fs.chmodSync(root, 0o000);
+    try {
+      expect(leaf.inspectTrackedAreas(root)).toEqual({ answer: 'unknown', cause: 'git-entry-unreadable' });
+    } finally {
+      fs.chmodSync(root, 0o700);
+    }
+  });
+
+  it('gives no cause for an answer of tracked or untracked, and the same answer through checkTrackedAreas', () => {
+    expect(leaf.inspectTrackedAreas(root)).toEqual({ answer: 'untracked', cause: null });
+    commitRepo({ '.devflow/learning/decisions.md': 'x\n' });
+    expect(leaf.inspectTrackedAreas(root)).toEqual({ answer: 'tracked', cause: null });
+    expect(leaf.checkTrackedAreas(root)).toBe('tracked');
+  });
+
+  it('only ever names a cause from UNKNOWN_CAUSES', () => {
+    fs.mkdirSync(path.join(root, '.git'));
+    const { cause } = leaf.inspectTrackedAreas(root);
+    expect(Object.values(leaf.UNKNOWN_CAUSES)).toContain(cause);
   });
 
   it('is not misled by an index or git directory named in the environment', () => {

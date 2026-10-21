@@ -37,7 +37,11 @@
  *
  * Words that tell the user which commands to run are not calls. Two phrases of the
  * notice for a skipped ledger move are listed in NOTICE_COMMAND_PHRASES, and a match
- * that stands at exactly one of them is skipped. devflow never runs these commands.
+ * that stands at exactly one of them is skipped. devflow never runs these commands. The
+ * exemption is closed two ways: it is honoured in the two files that hold the notice
+ * (NOTICE_FILES) alone, and in the shell file only for a phrase inside a single-quoted
+ * span of its line, because the same words outside single quotes would run as a command
+ * substitution.
  *
  * What a green run does NOT prove
  * -------------------------------
@@ -131,12 +135,45 @@ const JS_COMMENT = /^\s*(?:\*|\/\/|\/\*)/;
  */
 const NOTICE_COMMAND_PHRASES: readonly string[] = [
   'run `git ls-files .devflow`',
-  'with `git rm --cached`',
+  'with `git rm --cached <file>`',
 ];
 
-/** True when the `git` at `gitIndex` is the one inside a phrase of NOTICE_COMMAND_PHRASES. */
-function insideNoticeCommandPhrase(content: string, gitIndex: number): boolean {
-  return NOTICE_COMMAND_PHRASES.some(phrase => content.startsWith(phrase, gitIndex - phrase.indexOf('git')));
+/** The two files that hold the notice: the TypeScript copy and the session start hook's. The only files where the phrases are prose. */
+const NOTICE_TS_FILE = 'src/core/curation-move-skip.ts';
+const NOTICE_SHELL_FILE = 'src/assets/scripts/hooks/session-start-context';
+const NOTICE_FILES: readonly string[] = [NOTICE_TS_FILE, NOTICE_SHELL_FILE];
+
+/**
+ * True when `index` stands inside a single-quoted span of its shell line. A scan from the
+ * start of the line: a double-quoted span and a backslash escape are read as the shell
+ * reads them, so an apostrophe inside double quotes opens nothing.
+ */
+function insideSingleQuotes(content: string, index: number): boolean {
+  let state: 'none' | 'single' | 'double' = 'none';
+  for (let i = content.lastIndexOf('\n', index - 1) + 1; i < index; i++) {
+    const char = content[i];
+    if (state === 'single') {
+      if (char === "'") state = 'none';
+    } else if (char === '\\') {
+      i++;
+    } else if (state === 'double') {
+      if (char === '"') state = 'none';
+    } else if (char === "'" || char === '"') {
+      state = char === "'" ? 'single' : 'double';
+    }
+  }
+  return state === 'single';
+}
+
+/**
+ * True when the `git` at `gitIndex` of `entry` is the one inside a phrase of
+ * NOTICE_COMMAND_PHRASES, in a file that holds the notice and, in a shell file, inside
+ * single quotes.
+ */
+function insideNoticeCommandPhrase(entry: CorpusEntry, gitIndex: number): boolean {
+  if (!NOTICE_FILES.includes(entry.path)) return false;
+  const atPhrase = NOTICE_COMMAND_PHRASES.some(phrase => entry.content.startsWith(phrase, gitIndex - phrase.indexOf('git')));
+  return atPhrase && (!SHELL_FILE(entry.path) || insideSingleQuotes(entry.content, gitIndex));
 }
 
 /**
@@ -166,14 +203,14 @@ function findUnguardedIndexReads(corpus: readonly CorpusEntry[]): UnguardedRead[
     if (SHELL_FILE(entry.path)) {
       for (const m of content.matchAll(SHELL_CALL)) {
         if (onCommentLine(content, m.index, SHELL_COMMENT)) continue;
-        if (insideNoticeCommandPhrase(content, m.index)) continue;
+        if (insideNoticeCommandPhrase(entry, m.index)) continue;
         if (!SHELL_OVERRIDE.test(m[1])) report(m.index, m[0]);
       }
       continue;
     }
     for (const m of content.matchAll(JS_COMMAND_STRING)) {
       if (onCommentLine(content, m.index, JS_COMMENT)) continue;
-      if (insideNoticeCommandPhrase(content, m.index + m[0].indexOf('git'))) continue;
+      if (insideNoticeCommandPhrase(entry, m.index + m[0].indexOf('git'))) continue;
       if (!SHELL_OVERRIDE.test(m[2])) report(m.index, m[0]);
     }
     const wrappers = guardedWrappers(entry);
@@ -235,6 +272,16 @@ describe('every index-reading git call turns core.fsmonitor off (D-NO-FSMONITOR)
     ).toEqual([]);
   });
 
+  it('each file that holds the skipped-move notice holds every phrase the guard skips', () => {
+    for (const file of NOTICE_FILES) {
+      const entry = corpus.find(e => e.path === file);
+      expect(entry, `${file} is in the corpus`).toBeDefined();
+      for (const phrase of NOTICE_COMMAND_PHRASES) {
+        expect(entry?.content, `${file} holds \`${phrase}\``).toContain(phrase);
+      }
+    }
+  });
+
   it('the carve-out file defines its classifier, which keeps the override for every answer but `true`', () => {
     const hud = corpus.find(e => e.path === CARVE_OUT_FILE);
     expect(hud?.content).toMatch(CARVE_OUT_CLASSIFIER_DEFINITION);
@@ -264,8 +311,14 @@ describe('no-fsmonitor-index-read guard: seeded probes', () => {
     { name: 'a git-named wrapper call', entry: { path: 'src/hud/x.ts', content: "await gitExec(['diff', '--shortstat', base], cwd);" } },
     { name: 'a wrapper call across lines', entry: { path: JS, content: "runGit(exec, root,\n  ['add', '--', file], MAX);" } },
     { name: 'a command string', entry: { path: 'src/core/x.ts', content: "execSync('git commit -m x');" } },
-    { name: 'a shell call after the words of a notice', entry: { path: SH, content: "N='run `git ls-files .devflow`'; git ls-files -z\n" } },
-    { name: 'a notice phrase with other arguments', entry: { path: SH, content: "N='run `git ls-files .devflow --others`'\n" } },
+    { name: 'a shell call after the words of a notice', entry: { path: NOTICE_SHELL_FILE, content: "N='run `git ls-files .devflow`'; git ls-files -z\n" } },
+    { name: 'a notice phrase with other arguments', entry: { path: NOTICE_SHELL_FILE, content: "N='run `git ls-files .devflow --others`'\n" } },
+    { name: 'a notice phrase in double quotes in a shell file', entry: { path: NOTICE_SHELL_FILE, content: 'N="run `git ls-files .devflow`"\n' } },
+    { name: 'a notice phrase outside any quotes in a shell file', entry: { path: NOTICE_SHELL_FILE, content: 'echo run `git ls-files .devflow`\n' } },
+    { name: 'a notice phrase in double quotes after a closed single-quoted word', entry: { path: NOTICE_SHELL_FILE, content: "N='a'\"run `git ls-files .devflow`\"\n" } },
+    { name: 'a notice phrase in single quotes in another shell file', entry: { path: SH, content: "N='run `git ls-files .devflow`'\n" } },
+    { name: 'a notice phrase in another TypeScript file', entry: { path: 'src/core/x.ts', content: "const T = 'run `git ls-files .devflow`';" } },
+    { name: 'the rm phrase in another TypeScript file', entry: { path: 'src/core/x.ts', content: "const T = 'with `git rm --cached <file>`';" } },
     {
       name: 'a call through an unguarded wrapper',
       entry: { path: JS, content: "function git(io, args) {\n  return run(io, 'git', [...args]);\n}\ngit(io, ['status']);" },
@@ -300,12 +353,17 @@ describe('no-fsmonitor-index-read guard: seeded probes', () => {
     expect(findUnguardedIndexReads(clean)).toEqual([]);
   });
 
-  it('does not report the words of a notice that name a command for the user to run', () => {
-    const notice = 'To find them, run `git ls-files .devflow`. Untrack them with `git rm --cached`, and delete them.';
+  it('does not report the words of a notice that name a command for the user to run, in the files that hold the notice', () => {
+    const notice = 'To find them, run `git ls-files .devflow`. Untrack them with `git rm --cached <file>`, and delete them.';
     expect(findUnguardedIndexReads([
-      { path: SH, content: `MOVE_SKIP_SECTION='${notice}'\n` },
-      { path: 'src/core/x.ts', content: `const T = '${notice}';\nconst U =\n  \`${notice}\`;` },
+      { path: NOTICE_SHELL_FILE, content: `MOVE_SKIP_SECTION='Devflow notice: ${notice}'\n` },
+      { path: NOTICE_TS_FILE, content: `const T = '${notice}';\nconst U =\n  \`${notice}\`;` },
     ])).toEqual([]);
+  });
+
+  it('does not take an apostrophe inside double quotes as the start of a single-quoted span', () => {
+    const content = 'echo "it\'s done"; N=\'run `git ls-files .devflow`\'\n';
+    expect(findUnguardedIndexReads([{ path: NOTICE_SHELL_FILE, content }])).toEqual([]);
   });
 
   const CARVE_OUT = [

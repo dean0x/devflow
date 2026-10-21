@@ -56,7 +56,7 @@ import { convergeFlagsIntoSettings, countActiveFlags, readViewMode, type FlagsRe
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
 import { writeSettingsFileAtomic } from '../../core/fs-atomic.js';
 import { writeManagedConfig, readConfigIfPresent, DEFAULT_CONFIG, type FeatureConfig, type ManagedConfigWriteError } from '../../core/feature-config.js';
-import { drainDisabledCurationQueue, formatCurationNotDrained, type DisabledCurationDrain } from '../../core/curation-queue-cleanup.js';
+import { drainDisabledCurationQueue, formatCurationNotDrained, type CurationQueueDrain } from '../../core/curation-queue-cleanup.js';
 import { formatRefusedDrain, type QueueDrain } from '../../core/queue-drain.js';
 import { removeManagedDenyList, describeManagedDenyRemoval } from './security.js';
 import { resolveInitSeed, applyCliToggles, resolveResetGatedInputs, resolvePluginsToInstall } from './init-seed.js';
@@ -741,7 +741,7 @@ export async function lookupDrainLedgerRoot(
 /** The queue drains `drainDisabledFeatureQueues` performs — injected for tests. */
 export interface DisabledQueueDrainIO {
   drainMemoryQueue(projectRoot: string): Promise<QueueDrain>;
-  drainCurationQueue(ledgerRoot: string): Promise<DisabledCurationDrain>;
+  drainCurationQueue(ledgerRoot: string): Promise<CurationQueueDrain>;
 }
 
 /**

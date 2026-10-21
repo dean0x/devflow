@@ -16,6 +16,7 @@ import { promises as fs, readdirSync } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { requireBuiltCli, sandboxEnv } from './helpers.js';
+import { trackInGit } from './decisions/curation-fixtures.js';
 
 const CLI = requireBuiltCli();
 const SUBPROCESS_TIMEOUT_MS = 60_000;
@@ -155,7 +156,7 @@ describe('init moves the project ledger folder (TP-7, TP-8, TP-14)', () => {
     await fs.writeFile(path.join(backup, '.pending-turns.jsonl'), row, 'utf-8');
     await fs.mkdir(newDir(), { recursive: true });
     await fs.writeFile(path.join(newDir(), LEDGER_FILE), LEDGER, 'utf-8');
-    execFileSync('git', ['add', '-f', '--', path.relative(repo, path.join(backup, '.pending-turns.jsonl'))], { cwd: repo });
+    trackInGit(repo, path.relative(repo, path.join(backup, '.pending-turns.jsonl')));
 
     const out = runInit(repo, '--curation');
 

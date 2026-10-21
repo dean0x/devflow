@@ -262,6 +262,7 @@ CURATION_ENABLED="$_QG_CURATION"
 # session. A held, refused or skipped move leaves the old folder in place. A skipped
 # move (git tracks files in a data folder, or git did not answer) sets
 # DF_CURATION_MOVE_SKIPPED, and Section 4b tells the user.
+DF_CURATION_MOVE_SKIPPED=""
 if [ -n "$PROJECT_OK" ]; then
   df_curation_move "$LEDGER_ROOT" retry 2>/dev/null || true
 fi
@@ -868,20 +869,21 @@ fi
 
 # --- Section 4b: Curation move skipped notice ---
 # The move of the old curation folder leaves a project alone when git tracks files in
-# `.devflow/learning/` or `.devflow/curation/`, or when git does not answer
-# (curation-move sets DF_CURATION_MOVE_SKIPPED at the call above). The user cannot see the
-# hook log, so one fixed line goes into the context on a session that starts fresh, and the
-# model tells the user once. Each line is a constant: a single-quoted string that
-# interpolates nothing, so no repository content reaches the model through it. Its words
-# are MOVE_SKIP_NOTICE in src/core/curation-move-skip.ts (tests/shell-hooks.test.ts holds
-# the two equal). A compaction repeats nothing.
+# a curation data folder, or when git does not answer (curation-move sets
+# DF_CURATION_MOVE_SKIPPED at the call above, and the line before that call empties it).
+# The user cannot see the hook log, so one fixed line goes into the context on a session
+# that starts, resumes or is cleared, and the model tells the user once per such session.
+# Each line is a constant: a single-quoted string that interpolates nothing, so no
+# repository content reaches the model through it. Its words are MOVE_SKIP_NOTICE in
+# src/core/curation-move-skip.ts (tests/shell-hooks.test.ts holds the two equal). A
+# compaction repeats nothing.
 MOVE_SKIP_SECTION=""
 case "${DF_CURATION_MOVE_SKIPPED:-}" in
   tracked)
-    MOVE_SKIP_SECTION='Devflow notice: tell the user once, in one short message alongside your answer: devflow did not move the curation data of this project from .devflow/learning/ to .devflow/curation/, because git tracks files in one of these folders. To find them, run `git ls-files .devflow`. Untrack them with `git rm --cached`, and delete them if you did not make them. Run these commands in the main checkout.'
+    MOVE_SKIP_SECTION='Devflow notice: tell the user once, in one short message alongside your answer: devflow did not move the curation data of this project from .devflow/learning/ to .devflow/curation/, because git tracks files in a curation data folder. To find them, run `git ls-files .devflow`. Untrack them with `git rm --cached <file>`, and delete them if you did not make them. Run these commands in the checkout that holds these folders.'
     ;;
   unknown)
-    MOVE_SKIP_SECTION='Devflow notice: tell the user once, in one short message alongside your answer: devflow did not move the curation data of this project from .devflow/learning/ to .devflow/curation/, because git did not answer. The move runs again at the next session start.'
+    MOVE_SKIP_SECTION='Devflow notice: tell the user once, in one short message alongside your answer: devflow did not move the curation data of this project from .devflow/learning/ to .devflow/curation/, because git did not answer. The move runs again at the next session start or the next init. If this notice stays, check that git runs in this project.'
     ;;
 esac
 if [ -n "$MOVE_SKIP_SECTION" ]; then

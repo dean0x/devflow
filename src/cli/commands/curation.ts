@@ -23,9 +23,9 @@ import {
 import { getLedgerRoot } from '../../core/ledger-root.js';
 import { drainCurationQueue, drainDisabledCurationQueue, formatCurationNotDrained } from '../../core/curation-queue-cleanup.js';
 import { firstSymbolicLink } from '../../core/linked-path.js';
-import { formatRefusedDrain } from '../../core/queue-drain.js';
 import { describeMoveText, describeOutcome } from './curation-move-step.js';
 import { describeMoveNotice, gatherMoveNotice } from '../../core/curation-move-notice.js';
+import { isMoveSkipReason } from '../../core/curation-move-skip.js';
 import { runSharedMove, type SharedMoveResult } from './curation-move-io.js';
 import {
   formatCurationStoreUnavailable,
@@ -34,7 +34,7 @@ import {
   type CurationStoreError,
   type CurationStoreModule,
 } from '../../core/curation-store.js';
-import { loadCurationMove } from '../../core/curation-move.js';
+import { loadCurationMove, type MoveSkipReason } from '../../core/curation-move.js';
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -156,17 +156,23 @@ function moveProblemLines(outcome: SharedMoveResult): string[] {
 }
 
 /**
- * The line a read-only command prints instead of reading, for a project whose ledger
- * still sits in the old folder: the pointer, the refused line when the hook's move left
- * a marker for this root, or the notice of a skipped move. The HUD makes the same
- * existence tests and prints the same words, in its short form (`gatherMoveNotice`).
- * Null when the new folder is there, or the old one is not. The old ledger is never opened.
+ * What a read-only command says about the move of the old ledger folder. `instead`: the
+ * ledger still sits in the old folder (the new folder is not there), so the line replaces
+ * the read: the pointer, the refused line when the hook's move left a marker for this
+ * root, or the notice of a skipped move. `beside`: both folders are there and a skip
+ * marker stands, so the line goes with the read, which goes on as usual. The HUD makes
+ * the same existence tests and prints the same words, in its short form
+ * (`gatherMoveNotice`).
  */
-async function pendingMoveLine(ledgerRoot: string): Promise<string | null> {
+type MoveReadNotice = { readonly kind: 'instead' | 'beside'; readonly line: string };
+
+/** The move notice of a read-only command, or null when there is none. The old ledger is never opened. */
+async function moveReadNotice(ledgerRoot: string): Promise<MoveReadNotice | null> {
   const newFolderPresent = await isDirectory(getCurationDir(ledgerRoot)).catch(() => false);
-  if (newFolderPresent) return null;
   const notice = gatherMoveNotice(ledgerRoot, os.homedir());
-  return notice === null ? null : describeMoveNotice(notice);
+  if (notice === null) return null;
+  if (!newFolderPresent) return { kind: 'instead', line: describeMoveNotice(notice) };
+  return isMoveSkipReason(notice) ? { kind: 'beside', line: describeMoveNotice(notice) } : null;
 }
 
 /**
@@ -299,8 +305,10 @@ function backupLines(ledgerRoot: string): { lines: string[]; warning: string | n
 /**
  * `--status`: the machine switch, then the counts the store reads. Reads only:
  * malformed lines are counted, never quarantined, and no scope is checked. A project
- * whose ledger still sits in the old folder gets the HUD's pointer (or refused line)
- * in place of the counts; a project with backup folders gets one line for each.
+ * whose ledger still sits in the old folder gets the HUD's pointer (or refused line, or
+ * the notice of a skipped move) in place of the counts; a project with both folders and
+ * a skipped move gets the notice with the counts; a project with backup folders gets one
+ * line for each.
  */
 async function handleStatus(): Promise<void> {
   // D-FEATURES-NARROW-ONLY: the machine switch is the manifest's and reads the
@@ -318,21 +326,22 @@ async function handleStatus(): Promise<void> {
     p.log.info(`${stateLine}\nEntries: not in a git project`);
     return;
   }
-  const pending = await pendingMoveLine(ledgerRoot);
-  if (pending !== null) {
-    p.log.info(`${stateLine}\n${pending}`);
+  const notice = await moveReadNotice(ledgerRoot);
+  if (notice?.kind === 'instead') {
+    p.log.info(`${stateLine}\n${notice.line}`);
     return;
   }
+  const head = notice === null ? stateLine : `${stateLine}\n${notice.line}`;
   const loaded = loadCurationStore();
   if (!loaded.ok) {
-    p.log.info(`${stateLine}\nEntries: unavailable (${formatCurationStoreUnavailable(loaded.error)})`);
+    p.log.info(`${head}\nEntries: unavailable (${formatCurationStoreUnavailable(loaded.error)})`);
     return;
   }
   const store = loaded.value;
   const { ledgerRows, logRows, rejected } = store.readCurationState(ledgerRoot);
   const listing = store.buildListing(ledgerRows, logRows, { rejected });
   const backups = backupLines(ledgerRoot);
-  p.log.info([stateLine, ...entryCountLines(listing, logRows.length, store.INACTIVE_STATUSES), ...backups.lines].join('\n'));
+  p.log.info([head, ...entryCountLines(listing, logRows.length, store.INACTIVE_STATUSES), ...backups.lines].join('\n'));
   if (backups.warning !== null) p.log.warn(backups.warning);
   const { ledger, log } = listing.malformed;
   if (ledger + log > 0) {
@@ -346,15 +355,15 @@ async function handleStatus(): Promise<void> {
 /**
  * `--list`: the store's listing — the same text json-helper's `list` op prints —
  * on stdout. Read-only. Outside a git project it reads the current directory. Where
- * the ledger still sits in the old folder it prints the pointer or the refused line.
+ * the ledger still sits in the old folder it prints the pointer, the refused line or the
+ * notice of a skipped move in place of the listing; with both folders and a skipped move
+ * it prints the notice before the listing.
  */
 async function handleList(): Promise<void> {
   const root = (await getLedgerRoot()) ?? process.cwd();
-  const pending = await pendingMoveLine(root);
-  if (pending !== null) {
-    p.log.info(pending);
-    return;
-  }
+  const notice = await moveReadNotice(root);
+  if (notice !== null) p.log.info(notice.line);
+  if (notice?.kind === 'instead') return;
   const store = requireStore();
   if (!store) return;
   const listed = store.readListing(root);
@@ -374,16 +383,19 @@ async function handleList(): Promise<void> {
  * `--show <id>`: one entry, by its anchor or its observation id, as the JSON
  * json-helper's `show` op prints, made terminal-safe. Read-only. Outside a git
  * project it reads the current directory. Where the ledger still sits in the old
- * folder it prints the pointer or the refused line as the refusal.
+ * folder it prints the pointer, the refused line or the notice of a skipped move as the
+ * refusal; with both folders and a skipped move it prints the notice on stderr and goes on.
  */
 async function handleShow(key: string): Promise<void> {
   const root = (await getLedgerRoot()) ?? process.cwd();
-  const pending = await pendingMoveLine(root);
-  if (pending !== null) {
-    p.log.error(pending);
+  const notice = await moveReadNotice(root);
+  if (notice?.kind === 'instead') {
+    p.log.error(notice.line);
     process.exitCode = 1;
     return;
   }
+  // The JSON goes to stdout, so the notice of a skip goes to stderr.
+  if (notice !== null) process.stderr.write(`${notice.line}\n`);
   const store = requireStore();
   if (!store) return;
   const shown = store.showByKey(root, key);
@@ -626,7 +638,7 @@ async function handleClear(): Promise<void> {
     `Cleared ${counted(cleared.value.cleared, 'observation')} no entry uses and kept ${cleared.value.kept} ` +
     `that entries use${drain.drained ? '; drained the curation queue.' : '.'}`,
   );
-  if (!drain.drained) p.log.warn(formatRefusedDrain('curation', drain.linkedFolder));
+  if (!drain.drained) p.log.warn(formatCurationNotDrained(drain));
 }
 
 /**
@@ -670,16 +682,18 @@ async function convergeInstalledVariants(enabled: boolean): Promise<'converged' 
  * The toggle's move of the current project's ledger folder: tried once with no wait,
  * and only where the old folder is present. A busy move is not an error — the project
  * moves at its next event — and a refusal or a failure is a warning: the switch is
- * already recorded, so neither changes the exit code.
+ * already recorded, so neither changes the exit code. Answers the skip reason whose
+ * fixed notice it printed, or null when it printed none.
  */
-async function tryMoveForToggle(ledgerRoot: string): Promise<void> {
-  if (!(await oldLedgerFolderPresent(ledgerRoot))) return;
+async function tryMoveForToggle(ledgerRoot: string): Promise<MoveSkipReason | null> {
+  if (!(await oldLedgerFolderPresent(ledgerRoot))) return null;
   const outcome = await runSharedMove(ledgerRoot);
-  if (outcome.kind === 'moved' || outcome.kind === 'unchanged') return;
+  if (outcome.kind === 'moved' || outcome.kind === 'unchanged') return null;
   for (const line of moveProblemLines(outcome)) {
     if (outcome.kind === 'busy') p.log.info(color.dim(describeMoveText(line)));
     else p.log.warn(describeMoveText(line));
   }
+  return outcome.kind === 'left-alone' ? outcome.reason : null;
 }
 
 /**
@@ -705,7 +719,7 @@ async function handleToggle(enabled: boolean): Promise<void> {
 
   const converged = await convergeInstalledVariants(enabled);
   const ledgerRoot = await getLedgerRoot();
-  if (converged === 'converged' && ledgerRoot) await tryMoveForToggle(ledgerRoot);
+  const shownSkip = converged === 'converged' && ledgerRoot ? await tryMoveForToggle(ledgerRoot) : null;
 
   if (enabled) {
     p.log.success('Curation enabled in every project (a repository can opt out)');
@@ -720,7 +734,7 @@ async function handleToggle(enabled: boolean): Promise<void> {
   // keeps every file: the switch is recorded, and the drain warns instead.
   if (ledgerRoot) {
     const drain = await drainDisabledCurationQueue(ledgerRoot);
-    if (!drain.drained) p.log.warn(formatCurationNotDrained(drain));
+    if (!drain.drained) p.log.warn(formatCurationNotDrained(drain, shownSkip));
     else if (drain.warning !== undefined) p.log.warn(drain.warning);
   }
   p.log.success('Curation disabled in every project');

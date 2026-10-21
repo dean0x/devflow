@@ -14,7 +14,8 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { CURATION_DIR_NAME, LEGACY_NAMES, curationMoveMarkerKey } from './project-paths.js';
-import { MOVE_SKIP_NOTICE, type MoveSkipReason } from './curation-move-skip.js';
+import { MOVE_SKIP_NOTICE, isMoveSkipReason } from './curation-move-skip.js';
+import type { MoveSkipReason } from './curation-move.js';
 
 /**
  * What a project whose ledger is still in the old folder is told: `pointer` (nothing
@@ -25,22 +26,30 @@ import { MOVE_SKIP_NOTICE, type MoveSkipReason } from './curation-move-skip.js';
 export type CurationMoveNotice = 'pointer' | 'refused' | MoveSkipReason;
 
 /**
- * The marker suffixes the `curation-move` shim writes: `skip` for a refusal or a failure,
- * and one for each {@link MoveSkipReason}.
+ * The markers the `curation-move` shim writes: `refused` for a refusal or a failure
+ * of the move, and one for each {@link MoveSkipReason}. Only the move that git
+ * skipped is a skip: a refusal is the `refused` marker, whose file ends in `.skip`.
  */
-export type MoveMarkerKind = 'skip' | MoveSkipReason;
+export type MoveMarkerKind = 'refused' | MoveSkipReason;
+
+/** The file suffix of each marker kind, as the shim writes it. */
+const MARKER_SUFFIX: Readonly<Record<MoveMarkerKind, string>> = {
+  refused: 'skip',
+  tracked: 'tracked',
+  unknown: 'unknown',
+};
 
 /**
  * The marker the `curation-move` shim writes for the ledger root `root`:
- * `<home>/.devflow/logs/curation-move.<key>.<kind>`, the key being the root's
- * {@link curationMoveMarkerKey}. Without `kind` it is the refusal marker (`skip`). The
- * shim builds the same paths in `_df_cm_markers` (src/assets/scripts/hooks/curation-move);
- * tests/shell-hooks.test.ts runs that function and requires the two to agree for short,
- * long and non-ASCII roots. Every marker stands outside the project, so a skipped move
- * writes nothing into it.
+ * `<home>/.devflow/logs/curation-move.<key>.<suffix>`, the key being the root's
+ * {@link curationMoveMarkerKey}. Without `kind` it is the refusal marker (`refused`, the
+ * suffix `skip`). The shim builds the same paths in `_df_cm_markers`
+ * (src/assets/scripts/hooks/curation-move); tests/shell-hooks.test.ts runs that function
+ * and requires the two to agree for short, long and non-ASCII roots. Every marker stands
+ * outside the project, so a skipped move writes nothing into it.
  */
-export function getCurationMoveMarkerPath(home: string, root: string, kind: MoveMarkerKind = 'skip'): string {
-  return path.join(home, '.devflow', 'logs', `curation-move.${curationMoveMarkerKey(root)}.${kind}`);
+export function getCurationMoveMarkerPath(home: string, root: string, kind: MoveMarkerKind = 'refused'): string {
+  return path.join(home, '.devflow', 'logs', `curation-move.${curationMoveMarkerKey(root)}.${MARKER_SUFFIX[kind]}`);
 }
 
 /** Whether anything, a link included, sits at `target`. One lstat, never followed. */
@@ -57,7 +66,7 @@ function exists(target: string): boolean {
 const MARKER_NOTICES: ReadonlyArray<readonly [MoveMarkerKind, CurationMoveNotice]> = [
   ['tracked', 'tracked'],
   ['unknown', 'unknown'],
-  ['skip', 'refused'],
+  ['refused', 'refused'],
 ];
 
 /**
@@ -79,9 +88,12 @@ const MOVE_NOTICE_TEXT: Readonly<Record<CurationMoveNotice, string>> = {
   unknown: 'move skipped, git did not answer',
 };
 
-/** The one line the HUD prints for a notice. */
-export function formatMoveNotice(notice: CurationMoveNotice): string {
-  return `Curation: ${MOVE_NOTICE_TEXT[notice]}`;
+/**
+ * The one line the HUD prints for a notice. With `counts` (the entry counts, such as
+ * `2 decisions, 1 pitfall`) the notice follows them on the same line.
+ */
+export function formatMoveNotice(notice: CurationMoveNotice, counts?: string): string {
+  return counts === undefined ? `Curation: ${MOVE_NOTICE_TEXT[notice]}` : `Curation: ${counts}; ${MOVE_NOTICE_TEXT[notice]}`;
 }
 
 /**
@@ -90,5 +102,5 @@ export function formatMoveNotice(notice: CurationMoveNotice): string {
  * because these commands have room to say what to do.
  */
 export function describeMoveNotice(notice: CurationMoveNotice): string {
-  return notice === 'tracked' || notice === 'unknown' ? `Curation: ${MOVE_SKIP_NOTICE[notice]}` : formatMoveNotice(notice);
+  return isMoveSkipReason(notice) ? `Curation: ${MOVE_SKIP_NOTICE[notice]}` : formatMoveNotice(notice);
 }
