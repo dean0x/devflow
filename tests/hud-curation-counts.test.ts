@@ -302,7 +302,7 @@ describe('the old ledger folder: the pointer and the refused line only without c
   });
 
   it.each([
-    ['tracked', 'Curation: move skipped, git tracks files in .devflow/learning/ or .devflow/curation/'],
+    ['tracked', 'Curation: move skipped, git tracks files in the .devflow data folders'],
     ['unknown', 'Curation: move skipped, git did not answer'],
   ] as const)('shows the skipped line when the shim left the %s marker for this root', async (reason, line) => {
     fs.mkdirSync(oldDir(), { recursive: true });
@@ -354,7 +354,7 @@ describe('the old ledger folder: the pointer and the refused line only without c
   });
 
   it.each([
-    ['tracked', 'Curation: 1 decision; move skipped, git tracks files in .devflow/learning/ or .devflow/curation/'],
+    ['tracked', 'Curation: 1 decision; move skipped, git tracks files in the .devflow data folders'],
     ['unknown', 'Curation: 1 decision; move skipped, git did not answer'],
   ] as const)('shows the skipped line beside the counts of the new ledger when the %s marker stands', async (reason, line) => {
     fs.mkdirSync(newDir(), { recursive: true });

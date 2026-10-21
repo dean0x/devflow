@@ -145,7 +145,7 @@ the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-convention
 - Skipped by the git check: git tracks any entry under `.devflow/learning/`, `.devflow/curation/` or a backup folder
   (`.devflow/learning.backup-*`), or tracks an entry named `.devflow`. The same outcome applies when a `.git` entry stands and git does not answer.
   Nothing in the project changes. Init prints `Ledger move skipped for <root>` and a fixed notice that holds nothing from the repository.
-  The HUD prints `Curation: move skipped, git tracks files in .devflow/learning/ or .devflow/curation/`
+  The HUD prints `Curation: move skipped, git tracks files in the .devflow data folders`
   or `Curation: move skipped, git did not answer`.
   `devflow curation --status`, `--list` and `--show` print the whole notice. The HUD and these commands print the skip also when `.devflow/curation/` exists.
   While the old folder is there, `--restore`, `--clear`, `--reset` and `--configure` (project scope) print the notice, change nothing and exit 1.

@@ -218,7 +218,7 @@ _df_cm_mark_skipped() {
   DF_CURATION_MOVE_SKIPPED="$_why"
   case "$_why" in
     tracked)
-      _words="git tracks files in .devflow/$DF_CM_OLD_FOLDER/ or .devflow/$DF_CM_NEW_FOLDER/"
+      _words="git tracks files in the .devflow data folders"
       _marker="$DF_CM_TRACKED_MARKER" ;;
     *)
       _df_cm_cause "${2:-}"

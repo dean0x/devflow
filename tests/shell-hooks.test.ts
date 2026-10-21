@@ -6234,7 +6234,7 @@ describe('curation-move: the shim that moves the old ledger folder (#529)', { ti
 
   describe('a move that git blocks: tracked files or no answer from git', () => {
     const CLEAN = { status: 0, stdout: '', stderr: '' };
-    const TRACKED_LOG = 'Curation move skipped: git tracks files in .devflow/learning/ or .devflow/curation/; not tried again until the next session start';
+    const TRACKED_LOG = 'Curation move skipped: git tracks files in the .devflow data folders; not tried again until the next session start';
     const UNKNOWN_LOG = 'Curation move skipped: git did not answer (git-exit-status); not tried again until the next session start';
     const trackedMarkerOf = (at: string): string => getCurationMoveMarkerPath(homeDir, at, 'tracked');
     const unknownMarkerOf = (at: string): string => getCurationMoveMarkerPath(homeDir, at, 'unknown');

@@ -129,7 +129,7 @@ describe('gatherMoveNotice', () => {
 describe('formatMoveNotice', () => {
   it('puts the entry counts before the notice on the same line', () => {
     expect(formatMoveNotice('tracked', '2 decisions, 1 pitfall')).toBe(
-      'Curation: 2 decisions, 1 pitfall; move skipped, git tracks files in .devflow/learning/ or .devflow/curation/',
+      'Curation: 2 decisions, 1 pitfall; move skipped, git tracks files in the .devflow data folders',
     );
     expect(formatMoveNotice('unknown', '1 pitfall')).toBe('Curation: 1 pitfall; move skipped, git did not answer');
   });
@@ -140,7 +140,7 @@ describe('formatMoveNotice', () => {
   });
 
   it('prints a skipped move on one short line that names the folders or the reason', () => {
-    expect(formatMoveNotice('tracked')).toBe('Curation: move skipped, git tracks files in .devflow/learning/ or .devflow/curation/');
+    expect(formatMoveNotice('tracked')).toBe('Curation: move skipped, git tracks files in the .devflow data folders');
     expect(formatMoveNotice('unknown')).toBe('Curation: move skipped, git did not answer');
   });
 });

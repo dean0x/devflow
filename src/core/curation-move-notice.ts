@@ -13,7 +13,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { CURATION_DIR_NAME, LEGACY_NAMES, curationMoveMarkerKey } from './project-paths.js';
+import { LEGACY_NAMES, curationMoveMarkerKey } from './project-paths.js';
 import { MOVE_SKIP_NOTICE, isMoveSkipReason } from './curation-move-skip.js';
 import type { MoveSkipReason } from './curation-move.js';
 
@@ -84,7 +84,7 @@ export function gatherMoveNotice(ledgerRoot: string, home: string): CurationMove
 const MOVE_NOTICE_TEXT: Readonly<Record<CurationMoveNotice, string>> = {
   pointer: 'run devflow init, or open Claude Code in this project after it',
   refused: 'move refused, see the hook log',
-  tracked: `move skipped, git tracks files in .devflow/${LEGACY_NAMES.folder}/ or .devflow/${CURATION_DIR_NAME}/`,
+  tracked: 'move skipped, git tracks files in the .devflow data folders',
   unknown: 'move skipped, git did not answer',
 };
 
