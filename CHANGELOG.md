@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The orchestrator charter names only installed workflows and routes to every roster agent.**
+  - The charter now names only the workflows that you installed, and it also routes to the Test, Evaluate, Harden and Synthesize agents.
+  - A plan handoff no longer points to `devflow:implement` when it is not installed. The prompt gets a generic reminder instead.
+  - Run `devflow init` after you update to refresh the charter.
+
 ---
 
 ## [3.9.0] - 2026-10-22
