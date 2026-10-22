@@ -251,6 +251,7 @@ const PRIOR_SUMMARY_NEEDLES = [
   'any case',
   'starting `Private`',
   'to the next unfenced heading with as many `#` or fewer',
+  'Close any fence it leaves open',
 ] as const
 const STEP_4_OPENER = '4. Otherwise: set CYCLE_NUMBER = count + 1.'
 
@@ -329,7 +330,7 @@ describe('private sections stay out of posted summaries — writer lines and the
     expect(collectPrivateMarkerDefects(PRIVATE_MARKER_FILES)).toEqual([])
   })
 
-  const CODE_REVIEW_CLAUSE = ' minus each section from a heading line (fenced or not, any case) starting `Private` to the next unfenced heading with as many `#` or fewer'
+  const CODE_REVIEW_CLAUSE = ' minus each section from a heading line (fenced or not, any case) starting `Private` to the next unfenced heading with as many `#` or fewer. Close any fence it leaves open'
   const SEEDED_REMOVALS: Readonly<Record<PrivateMarkerKind, { readonly remove: (body: string) => string; readonly defects: (label: string) => string[] }>> = {
     synthesize: {
       remove: body => seedOnce(body, `3. ${WRITER_LINE}\n`, ''),

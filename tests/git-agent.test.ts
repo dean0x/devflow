@@ -1680,6 +1680,10 @@ describe('git agent — static content guards', () => {
       why: 'compose, cap and re-cap use only the stripped text; the local file is not edited',
     },
     {
+      literal: 'Then close any fence the strip leaves open.',
+      why: 'a private heading inside a public fence strips its closing fence; the post would render later text as code',
+    },
+    {
       literal: '`**Status**: DEGRADED (no postable summary)`',
       why: 'the fail-closed report, with the fixed reason the registry holds',
     },
