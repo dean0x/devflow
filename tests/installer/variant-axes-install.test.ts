@@ -122,7 +122,7 @@ async function seedPackage(): Promise<void> {
     if (axes.compliance) await write(inPkg(`${TREE.complianceOff}/${kind}/${name}.md`), text(name, 'COMPLIANCE-OFF'));
     if (axes.curation && axes.compliance) await write(inPkg(`${TREE.bothOff}/${kind}/${name}.md`), text(name, 'BOTH-OFF'));
   }
-  await write(inPkg('src/assets/agents/evaluate.md'), text('evaluate', 'SRC'));
+  await write(inPkg(path.posix.join('src', 'assets', 'agents', 'evaluate.md')), text('evaluate', 'SRC'));
   await writeManifest();
 }
 

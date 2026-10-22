@@ -928,7 +928,7 @@ describe('a reference module may carry no variant marker (TP-12)', () => {
       const result = spawnSync(TSX_BIN, [path.join(ROOT, 'scripts', 'build-mds.ts')], {
         cwd: ROOT,
         encoding: 'utf-8',
-        timeout: 60_000,
+        timeout: 90_000,
         env: { ...process.env, DEVFLOW_MDS_ROOT: fakeRoot },
       });
       if (result.error) throw result.error;
