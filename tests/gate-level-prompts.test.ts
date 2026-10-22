@@ -642,6 +642,17 @@ describe('runGateLevelStep', () => {
     expect(notes[0].message).toContain('.devflow/config.json');
   });
 
+  it('the note names every command that devflow gates says reads the level', async () => {
+    const { prompts, levelQueue, notes } = makePrompts();
+    levelQueue.push({ kind: 'accept' });
+
+    await runGateLevelStep({ stored: undefined, prompts });
+
+    const commands = [...new Set(GATE_LEVEL_EFFECT.match(/(?<=^|\s)\/[a-z][a-z-]*/g) ?? [])];
+    expect(commands, 'GATE_LEVEL_EFFECT names the commands that read the level').toContain('/resolve');
+    for (const command of commands) expect(notes[0].message, command).toContain(command);
+  });
+
   it('the note on a first install names the default', async () => {
     const { prompts, levelQueue, notes } = makePrompts();
     levelQueue.push({ kind: 'accept' });

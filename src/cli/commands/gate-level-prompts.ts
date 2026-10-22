@@ -456,10 +456,10 @@ export async function runGateLevelStep(opts: {
 
   prompts.note(
     `${currentSettingLines(stored, storedOrigin)}\n\n` +
-    'Sets how much checking /code-review, /plan and /implement apply on this\n' +
-    'machine. A personal "gateLevel" in a repository\'s .devflow/config.json\n' +
-    'overrides it in that repository. Change it later with\n' +
-    'devflow gates --set <level>.\n\n' +
+    'Sets how much checking /code-review, /plan, /implement and /resolve\n' +
+    'apply on this machine. A personal "gateLevel" in a repository\'s\n' +
+    '.devflow/config.json overrides it in that repository. Change it later\n' +
+    'with devflow gates --set <level>.\n\n' +
     formatGateLevelCatalogue(),
     'Gate level',
   );
