@@ -423,6 +423,8 @@ const BOUND = '{bound} -k 10 280 ';
 const BOUND_PROBE = 'command -v timeout || command -v gtimeout';
 const STATUS_LOOP = `for t in semgrep snyk codeql; do printf '%s=%s\\n' "$t" "$(command -v "$t" || echo no)"; done`;
 const EXIT_PRINT = "printf '\\nexit=%s\\n' ";
+const NONE_ASSIGNMENT = 'Set `STATIC_FINDINGS` to `(none)`.';
+const DID_NOT_RUN_ASSIGNMENT = 'set `STATIC_FINDINGS` to "Static analysis did not run';
 const STATED_TIMEOUT = /Bash `timeout` at (\d+) \(CodeQL: (\d+)\)/;
 const BASH_TIMEOUT_CEILING_MS = 600000;
 
@@ -463,6 +465,7 @@ function collectStaticBoundDefects(phase2: string): string[] {
     if (!lines.includes(STATUS_LOOP)) out.push('the Step 2c fence does not print one status line per tool');
   }
   out.push(...collectDidNotRunBranchDefects(step2c ?? ''));
+  out.push(...collectExitLineOrderDefects(phase2));
 
   for (const part of [
     'never one unbounded',
@@ -493,6 +496,30 @@ function collectDidNotRunBranchDefects(step2c: string): string[] {
   if (someBranch === -1) out.push('Step 2c has no "If some are available" branch');
   if (noneBranch !== -1 && someBranch !== -1 && noneBranch > someBranch) out.push('the all-no branch does not come before the "If some are available" branch');
   if (didNotRun === -1 || someBranch === -1 || didNotRun < someBranch) out.push('the did-not-run sentence is not in the "If some are available" branch of Step 2c');
+  if (noneBranch !== -1 && someBranch !== -1 && !step2c.slice(noneBranch, someBranch).includes(NONE_ASSIGNMENT)) out.push('the all-no branch does not set STATIC_FINDINGS to (none)');
+  if (someBranch !== -1 && !step2c.slice(someBranch).includes(DID_NOT_RUN_ASSIGNMENT)) out.push('the did-not-run sentence is not assigned to STATIC_FINDINGS');
+  return out;
+}
+
+const fenceWith = (phase2: string, tool: string): string[] => fenceLines(bashFences(phase2).find(fence => fenceLines(fence).some(line => line.includes(tool))) ?? '\n');
+
+/** Each scanner fence prints its own tool's status, on a line that comes after the scanner (and the Snyk filter). */
+function collectExitLineOrderDefects(phase2: string): string[] {
+  const out: string[] = [];
+  const semgrep = fenceWith(phase2, 'semgrep scan').find(line => line.includes('semgrep scan')) ?? '';
+  const pipeline = semgrep.indexOf('set -o pipefail; git diff');
+  const semgrepExit = semgrep.indexOf(`${EXIT_PRINT}"$?"`);
+  if (pipeline === -1 || semgrepExit < semgrep.indexOf('semgrep scan') || semgrep.indexOf('semgrep scan') < pipeline) out.push('the Semgrep exit line does not follow its pipeline on the same line, printing "$?"');
+
+  const snyk = fenceWith(phase2, 'snyk code test');
+  const assigned = snyk.findIndex(line => line.startsWith('S=$('));
+  const filtered = Math.max(...snyk.map((line, index) => (line.includes('jq ') ? index : -1)));
+  const snykExit = snyk.indexOf(`${EXIT_PRINT}"$E"`);
+  if (assigned === -1 || snykExit <= assigned || snykExit <= filtered) out.push('the Snyk exit line does not follow the scanner and the filter, printing "$E"');
+
+  const codeql = fenceWith(phase2, 'codeql database');
+  const codeqlStatus = codeql.indexOf('CODEQL_EXIT=$?');
+  if (codeqlStatus === -1 || codeql.indexOf(`${EXIT_PRINT}"$CODEQL_EXIT"`) <= codeqlStatus) out.push('the CodeQL exit line does not follow CODEQL_EXIT=$?, printing "$CODEQL_EXIT"');
   return out;
 }
 
@@ -603,6 +630,28 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(collectStaticBoundDefects(phase2Of(swapped))).toContain('Step 2c has no "If some are available" branch');
     const reordered = seed('No static analysis tools found', 'Static analysis tools found');
     expect(collectStaticBoundDefects(phase2Of(reordered))).toContain('Step 2c has no all-no branch warning');
+  });
+
+  it('known-bad probes: a lost status assignment in Step 2c is reported', () => {
+    const defects = (from: string, to: string): string[] => collectStaticBoundDefects(phase2Of(seed(from, to)));
+    expect(defects(DID_NOT_RUN_ASSIGNMENT, DID_NOT_RUN_ASSIGNMENT.replace('set `STATIC_FINDINGS` to', 'note'))).toContain('the did-not-run sentence is not assigned to STATIC_FINDINGS');
+    expect(defects(NONE_ASSIGNMENT, '')).toContain('the all-no branch does not set STATIC_FINDINGS to (none)');
+  });
+
+  it.each(builds)('each scanner prints its own status after its scanner line (%s)', (_label, body) => {
+    expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
+    expect(collectExitLineOrderDefects(phase2Of(body ?? ''))).toEqual([]);
+  });
+
+  it('known-bad probes: an exit line that comes early or prints the wrong status is reported', () => {
+    const defects = (body: string): string[] => collectExitLineOrderDefects(phase2Of(body));
+    const semgrepLine = /^(set -o pipefail; git diff .*semgrep scan .*?); (printf '\\nexit=%s\\n' "\$\?")$/m;
+    expect(semgrepLine.test(content), 'the Semgrep line must match the probe pattern').toBe(true);
+    expect(defects(content.replace(semgrepLine, (_m, pipeline: string, exit: string) => `${exit}; ${pipeline}`))).toContain('the Semgrep exit line does not follow its pipeline on the same line, printing "$?"');
+    const snykExit = `${EXIT_PRINT}"$E"\n`;
+    expect(defects(content.replace(snykExit, () => '').replace('S=$(', () => `${snykExit}S=$(`))).toContain('the Snyk exit line does not follow the scanner and the filter, printing "$E"');
+    expect(defects(seed(snykExit, `${EXIT_PRINT}"$?"\n`))).toContain('the Snyk exit line does not follow the scanner and the filter, printing "$E"');
+    expect(defects(seed(`${EXIT_PRINT}"$CODEQL_EXIT"`, `${EXIT_PRINT}"$?"`))).toContain('the CodeQL exit line does not follow CODEQL_EXIT=$?, printing "$CODEQL_EXIT"');
   });
 
   it('known-bad probes: a report that hides a scanner that did not run or finish is reported', () => {
