@@ -74,12 +74,14 @@ import { WARM_HOOK_TIMEOUT_MS, buildScriptedShim, createFakeBin, scopedEnv, warm
 
 interface Check { name: string; bucket: string; workflow?: string }
 interface Classification { status: string; reason: string | null; failing: string[]; pending: string[] }
-type MergeGateResult = 'keep' | 'open' | 'conflict'
+type MergeGateResult = 'keep' | 'conflict' | 'await-merge-state' | 'probe' | 'workflow-active'
 type MatchedStep =
   | { state: 'pending'; pending: string[] }
   | { state: 'open' }
   | { state: 'probe' }
   | { state: 'done'; status: string; reason: string | null; failing: string[]; pending: string[] }
+interface GhAnswer { answered: boolean; status: number | null; stdout: string; stderr: string }
+type WorkflowsAsk = { kind: 'deadline' } | { kind: 'failed' } | { kind: 'unparseable' } | { kind: 'answer'; active: boolean }
 interface CiResult { status: string; pr: string; head: string; failing: string[]; pending: string[]; waited: number; reason: string | null }
 interface ExecResult { status: number | null; stdout?: string; stderr?: string; error?: { code?: string } }
 type ExecFn = (file: string, args: string[], opts: Record<string, unknown>) => ExecResult
@@ -104,9 +106,11 @@ interface CiWait {
   sanitizeName(name: unknown): string
   formatNames(names: readonly string[]): string
   classifyChecks(checks: readonly Check[]): Classification
+  isConflicting(mergeable: unknown): boolean
   mergeGate(status: string | null, mergeable: unknown, workflowsActive?: boolean | null): MergeGateResult
   matchedStep(verdict: Classification | null, mergeable: unknown, windowDone: boolean, workflowsActive?: boolean | null): MatchedStep
   parseActiveWorkflows(stdout: string): boolean | null
+  askWorkflows(gh: (args: string[]) => Promise<GhAnswer | null>): Promise<WorkflowsAsk>
   renderLine(result: CiResult): string
   checkLine(line: string): boolean
   waitForCi(input: { pr: string; head: string; exec: ExecFn; clock: Clock }): Promise<CiResult>
@@ -1028,12 +1032,27 @@ describe('D-CI-WORKFLOWS: an empty check list is NO_CI only when the repository 
   })
 })
 
-describe('mergeGate: one pure rule maps a classifier status, a mergeable value and the workflow probe to keep, open or conflict', () => {
+describe('isConflicting: the one-input conflict predicate', () => {
+  it('is true for CONFLICTING and for nothing else', () => {
+    expect(CW.isConflicting('CONFLICTING')).toBe(true)
+    for (const other of ['MERGEABLE', 'UNKNOWN', null, undefined, '', 'conflicting', 'SOMETHING_NEW', 7, {}, ['CONFLICTING']]) expect(CW.isConflicting(other), String(other)).toBe(false)
+  })
+
+  it('agrees with the gate: mergeGate answers conflict for every status exactly when the predicate is true', () => {
+    for (const status of [null, ...CW.STATUSES]) {
+      for (const mergeable of ['MERGEABLE', 'CONFLICTING', 'UNKNOWN', null, undefined, 'SOMETHING_NEW']) {
+        expect(CW.mergeGate(status, mergeable, false) === 'conflict', `${String(status)} on ${String(mergeable)}`).toBe(CW.isConflicting(mergeable))
+      }
+    }
+  })
+})
+
+describe('mergeGate: one pure rule gives a classifier status, a mergeable value and the workflow probe one answer per case', () => {
   const MERGEABLES: ReadonlyArray<string | null> = ['MERGEABLE', 'CONFLICTING', 'UNKNOWN', null]
   // Columns follow MERGEABLES. For NO_CI the rows read as if the repository had no active workflow (workflowsActive false).
   const TABLE: ReadonlyArray<readonly [string, readonly MergeGateResult[]]> = [
-    ['PASSING', ['keep', 'conflict', 'open', 'open']],
-    ['NO_CI', ['keep', 'conflict', 'open', 'open']],
+    ['PASSING', ['keep', 'conflict', 'await-merge-state', 'await-merge-state']],
+    ['NO_CI', ['keep', 'conflict', 'await-merge-state', 'await-merge-state']],
     ['FAILING', ['keep', 'conflict', 'keep', 'keep']],
     ['PENDING', ['keep', 'conflict', 'keep', 'keep']],
     ['INDETERMINATE', ['keep', 'conflict', 'keep', 'keep']],
@@ -1057,22 +1076,23 @@ describe('mergeGate: one pure rule maps a classifier status, a mergeable value a
     }
   })
 
-  it('NO_CI stands only on MERGEABLE with no active workflow: true, null and an omitted value are open', () => {
+  it('NO_CI on MERGEABLE has one answer per probe state: false keeps, true is workflow-active, null and an omitted value ask for the probe', () => {
     expect(CW.mergeGate('NO_CI', 'MERGEABLE', false)).toBe('keep')
-    for (const probe of [true, null, undefined]) expect(CW.mergeGate('NO_CI', 'MERGEABLE', probe), String(probe)).toBe('open')
-    expect(CW.mergeGate('NO_CI', 'MERGEABLE'), 'the argument omitted altogether').toBe('open')
+    expect(CW.mergeGate('NO_CI', 'MERGEABLE', true)).toBe('workflow-active')
+    for (const probe of [null, undefined]) expect(CW.mergeGate('NO_CI', 'MERGEABLE', probe), String(probe)).toBe('probe')
+    expect(CW.mergeGate('NO_CI', 'MERGEABLE'), 'the argument omitted altogether').toBe('probe')
   })
 
-  it('a conflict is a conflict whatever the probe said, and an unsettled merge state stays open under every probe answer', () => {
+  it('a conflict is a conflict whatever the probe said, and an unsettled merge state awaits under every probe answer', () => {
     for (const [label, probe] of PROBES) {
       expect(CW.mergeGate('NO_CI', 'CONFLICTING', probe), label).toBe('conflict')
-      expect(CW.mergeGate('NO_CI', 'UNKNOWN', probe), label).toBe('open')
-      expect(CW.mergeGate('NO_CI', null, probe), label).toBe('open')
+      expect(CW.mergeGate('NO_CI', 'UNKNOWN', probe), label).toBe('await-merge-state')
+      expect(CW.mergeGate('NO_CI', null, probe), label).toBe('await-merge-state')
     }
   })
 
-  it('a probe answer that is not a boolean never lets NO_CI through', () => {
-    for (const odd of ['false', 0, '', {}, []] as unknown as Array<boolean | null>) expect(CW.mergeGate('NO_CI', 'MERGEABLE', odd), String(odd)).toBe('open')
+  it('a probe answer that is not a boolean never lets NO_CI through: it asks for the probe again', () => {
+    for (const odd of ['false', 0, '', {}, []] as unknown as Array<boolean | null>) expect(CW.mergeGate('NO_CI', 'MERGEABLE', odd), String(odd)).toBe('probe')
   })
 
   it('a status not read yet (null) is a conflict on CONFLICTING and kept otherwise', () => {
@@ -1082,8 +1102,8 @@ describe('mergeGate: one pure rule maps a classifier status, a mergeable value a
 
   it('a value that is not one of the three is not a conflict and lets neither PASSING nor NO_CI through', () => {
     for (const odd of [undefined, '', 'mergeable', 'SOMETHING_NEW', 7, {}, ['MERGEABLE']]) {
-      expect(CW.mergeGate('PASSING', odd)).toBe('open')
-      expect(CW.mergeGate('NO_CI', odd, false)).toBe('open')
+      expect(CW.mergeGate('PASSING', odd)).toBe('await-merge-state')
+      expect(CW.mergeGate('NO_CI', odd, false)).toBe('await-merge-state')
       expect(CW.mergeGate('FAILING', odd)).toBe('keep')
     }
   })
@@ -1110,6 +1130,39 @@ describe('matchedStep: the outcome of a poll on the named head, as a pure functi
     expect(CW.matchedStep(null, 'MERGEABLE', true, null)).toEqual({ state: 'probe' })
     expect(CW.matchedStep(null, 'MERGEABLE', true, undefined)).toEqual({ state: 'probe' })
     expect(CW.matchedStep(null, 'MERGEABLE', true), 'the argument omitted altogether').toEqual({ state: 'probe' })
+  })
+
+  it('maps each gate answer to exactly one step, and reads neither the merge state nor the probe itself', () => {
+    const MERGEABLES: Array<string | null> = ['MERGEABLE', 'CONFLICTING', 'UNKNOWN', null]
+    const PROBES: Array<boolean | null | undefined> = [true, false, null, undefined]
+    // The independent table: gate answer -> the step an empty list takes once its window is done.
+    const emptyAfterWindow: Record<MergeGateResult, MatchedStep> = {
+      'conflict': done('INDETERMINATE', 'merge-conflict'),
+      'await-merge-state': { state: 'open' },
+      'probe': { state: 'probe' },
+      'workflow-active': done('INDETERMINATE', 'no-workflow-check'),
+      'keep': done('NO_CI', null),
+    }
+    const seen = new Set<MergeGateResult>()
+    for (const mergeable of MERGEABLES) {
+      for (const probe of PROBES) {
+        const gate = CW.mergeGate('NO_CI', mergeable, probe)
+        seen.add(gate)
+        expect(CW.matchedStep(null, mergeable, true, probe), `empty list on ${String(mergeable)} with ${String(probe)}: gate ${gate}`).toEqual(emptyAfterWindow[gate])
+      }
+    }
+    expect([...seen].sort(), 'the domain reaches every gate answer').toEqual(['await-merge-state', 'conflict', 'keep', 'probe', 'workflow-active'])
+    // A workflow pass: keep stands, awaiting waits, a conflict ends it.
+    const passing = verdict(actions('pass'))
+    const passingByGate: Partial<Record<MergeGateResult, MatchedStep>> = {
+      'keep': done('PASSING', null),
+      'await-merge-state': { state: 'open' },
+      'conflict': done('INDETERMINATE', 'merge-conflict'),
+    }
+    for (const mergeable of MERGEABLES) {
+      const gate = CW.mergeGate('PASSING', mergeable)
+      expect(CW.matchedStep(passing, mergeable, true), `a pass on ${String(mergeable)}: gate ${gate}`).toEqual(passingByGate[gate])
+    }
   })
 
   it('external-only rows: pending inside the window, no-workflow-check after it, whatever the merge state but CONFLICTING', () => {
@@ -1152,6 +1205,43 @@ describe('matchedStep: the outcome of a poll on the named head, as a pure functi
   it('an unrecognised bucket is a verdict at once, and a window state does not change it', () => {
     const v = verdict([['pass', 'CI'], ['neutral', 'CI']])
     for (const windowDone of [false, true]) expect(CW.matchedStep(v, 'MERGEABLE', windowDone)).toEqual(done('INDETERMINATE', 'unrecognised-bucket'))
+  })
+})
+
+describe('askWorkflows: the one workflow probe, as one discriminated result', () => {
+  const reply = (over: Partial<GhAnswer> = {}): GhAnswer => ({ answered: true, status: 0, stdout: '', stderr: '', ...over })
+  const list = (rows: unknown[], total = rows.length): string => JSON.stringify({ total_count: total, workflows: rows })
+  const ACTIVE = { path: '.github/workflows/ci.yml', state: 'active' }
+  const ask = async (answer: GhAnswer | null): Promise<{ result: WorkflowsAsk; calls: string[][] }> => {
+    const calls: string[][] = []
+    const result = await CW.askWorkflows(async args => { calls.push(args); return answer })
+    return { result, calls }
+  }
+
+  it('makes one call, over the pinned workflow-list argv', async () => {
+    const { calls } = await ask(reply({ stdout: list([ACTIVE]) }))
+    expect(calls).toEqual([[...CW.WORKFLOWS_ARGS]])
+  })
+
+  it('no time left for the call (gh gave no answer object) is deadline', async () => {
+    expect((await ask(null)).result).toEqual({ kind: 'deadline' })
+  })
+
+  it('a call that was not answered, or that exited non-zero, is failed whatever it printed', async () => {
+    expect((await ask(reply({ answered: false, status: null, stdout: list([ACTIVE]) }))).result).toEqual({ kind: 'failed' })
+    for (const status of [1, 2, 8, null]) expect((await ask(reply({ status, stdout: list([ACTIVE]) }))).result, String(status)).toEqual({ kind: 'failed' })
+  })
+
+  it('a reply the parser cannot read, a bad row and an incomplete page are unparseable', async () => {
+    for (const stdout of ['not json', '[]', '{}', list([{ path: 1, state: 'active' }]), list([], 150), list([{ path: 'dynamic/x', state: 'active' }], 2)]) {
+      expect((await ask(reply({ stdout }))).result, stdout).toEqual({ kind: 'unparseable' })
+    }
+  })
+
+  it('an active workflow file answers true, and a whole list with none answers false', async () => {
+    expect((await ask(reply({ stdout: list([ACTIVE]) }))).result).toEqual({ kind: 'answer', active: true })
+    expect((await ask(reply({ stdout: list([]) }))).result).toEqual({ kind: 'answer', active: false })
+    expect((await ask(reply({ stdout: list([{ path: '.github/workflows/old.yml', state: 'disabled_manually' }]) }))).result).toEqual({ kind: 'answer', active: false })
   })
 })
 
@@ -1562,6 +1652,19 @@ function collectApiSites(source: string): string[] {
   return [...codeLines(source).join('\n').matchAll(/['"`]api['"`]/g)].map(m => m[0])
 }
 
+/** Code lines of waitForCi that open a block deeper than `limit` spaces of indent. */
+function collectDeepBlocks(source: string, limit: number): string[] {
+  const code = codeLines(source).join('\n')
+  const start = code.indexOf('async function waitForCi(')
+  const wait = start < 0 ? '' : code.slice(start, code.indexOf('\n}\n', start))
+  return wait.split('\n').filter(line => /\{\s*$/.test(line) && line.length - line.trimStart().length > limit).map(line => line.trim())
+}
+
+/** A loop-level variable that would keep the workflow probe's answer from one poll to the next. */
+function collectProbeAnswerLets(source: string): string[] {
+  return [...codeLines(source).join('\n').matchAll(/\blet\s+workflowsActive\b/g)].map(m => m[0])
+}
+
 describe('source guards (ci-wait.cjs)', () => {
   it('no shell, no exec, no literal sleep, one production spawnSync', () => {
     expect(SOURCE.length).toBeGreaterThan(1000)
@@ -1623,6 +1726,19 @@ describe('source guards (ci-wait.cjs)', () => {
       '',
     ].join('\n')
     expect(collectSettleSites(probe)).toEqual({ comparisons: 2, windows: ['firstMismatchAt', 'firstMismatchAt'] })
+  })
+
+  it('the poll loop stays flat: no block in waitForCi opens deeper than four levels', () => {
+    expect(SOURCE).toContain('async function waitForCi(')
+    expect(collectDeepBlocks(SOURCE, 8)).toEqual([])
+    const probe = SOURCE.replace('async function waitForCi(input) {', "async function waitForCi(input) {\n            if (deep) {\n            }")
+    expect(collectDeepBlocks(probe, 8)).toEqual(['if (deep) {'])
+  })
+
+  it('the probe answer ends the run in the poll that got it: no loop-level variable keeps it, and nothing calls it a cache', () => {
+    expect(collectProbeAnswerLets(SOURCE)).toEqual([])
+    expect(SOURCE).not.toMatch(/\bcache\b/i)
+    expect(collectProbeAnswerLets(`${SOURCE}\nlet workflowsActive = null`)).toHaveLength(1)
   })
 
   it('pins the ratchet constant exactly once, as the manifest spells it', () => {

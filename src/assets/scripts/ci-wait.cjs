@@ -207,6 +207,8 @@ const WORKFLOWS_DIR = '.github/workflows/';
  *   waited: number, reason: string | null }} CiResult
  *   `head` is the first 7 hex characters.
  * @typedef {{ pr: string, head: string, exec: ExecFn, clock: Clock, env?: NodeJS.ProcessEnv }} WaitInput
+ * @typedef {{ state: 'deadline' } | { state: 'failed' } | { state: 'pending', pending: string[] } | { state: 'open' }
+ *   | { state: 'done', result: CiResult }} PollStep
  * @typedef {{ exec?: ExecFn, clock?: Clock, env?: NodeJS.ProcessEnv }} MainDeps
  * @typedef {{ code: number, stdout: string }} Outcome
  */
@@ -496,6 +498,18 @@ function settle(firstAt, now, settleMs) {
 }
 
 /**
+ * D-CI-MERGE-STATE: whether GitHub reports the PR as conflicting. It is the one rule for a
+ * conflict. mergeGate answers 'conflict' by it, and a caller that has read only the merge
+ * state asks it before it reads any check.
+ *
+ * @param {unknown} mergeable  the `gh pr view` value in any shape
+ * @returns {boolean}
+ */
+function isConflicting(mergeable) {
+  return mergeable === 'CONFLICTING';
+}
+
+/**
  * D-CI-MERGE-STATE, D-CI-WORKFLOWS: the one merge rule. GitHub computes `mergeable`
  * lazily, and runs no pull request workflow on a conflicting PR, so the checks of a head
  * say nothing about the PR unless GitHub reports it MERGEABLE. An empty check list says
@@ -503,25 +517,45 @@ function settle(firstAt, now, settleMs) {
  * `status` is a classifier status ('NO_CI' for an empty list), or null before any check
  * is read; `mergeable` is the `gh pr view` value in any shape; `workflowsActive` is what
  * the workflow probe found: true (an active workflow file), false (none), or null or
- * left out when it was not made or gave no answer. The answer is one of:
- *   'conflict'  mergeable is CONFLICTING, whatever the status.
- *   'open'      PASSING while mergeable is anything but MERGEABLE (UNKNOWN, absent or
- *               odd); NO_CI unless mergeable is MERGEABLE and workflowsActive is false.
- *               It is neither a verdict nor a conflict: waitForCi keeps the wait open
- *               for another read, and a single read takes it as unknown.
- *   'keep'      the status stands. FAILING, PENDING and INDETERMINATE do not depend on
- *               the merge state or the probe.
+ * left out when it was not made or gave no answer. Each case has its own answer, so a
+ * caller never reads `mergeable` or `workflowsActive` again:
+ *   'conflict'           isConflicting(mergeable), whatever the status.
+ *   'await-merge-state'  PASSING or NO_CI while mergeable is anything but MERGEABLE
+ *                        (UNKNOWN, absent or odd). It is neither a verdict nor a conflict:
+ *                        waitForCi keeps the wait open for another read, and a single read
+ *                        takes it as unknown.
+ *   'probe'              NO_CI on MERGEABLE with no usable probe answer (null, left out or
+ *                        not a boolean): the workflow list has to be asked.
+ *   'workflow-active'    NO_CI on MERGEABLE, and the probe found an active workflow file:
+ *                        a run may still start.
+ *   'keep'               the status stands: PASSING on MERGEABLE, NO_CI on MERGEABLE with a
+ *                        probe that found no workflow file, and FAILING, PENDING and
+ *                        INDETERMINATE, which do not depend on the merge state or the probe.
  *
  * @param {string | null} status
  * @param {unknown} mergeable
  * @param {boolean | null} [workflowsActive]
- * @returns {'conflict' | 'open' | 'keep'}
+ * @returns {'conflict' | 'await-merge-state' | 'probe' | 'workflow-active' | 'keep'}
  */
 function mergeGate(status, mergeable, workflowsActive) {
-  if (mergeable === 'CONFLICTING') return 'conflict';
-  if (status === 'PASSING' && mergeable !== 'MERGEABLE') return 'open';
-  if (status === 'NO_CI' && (mergeable !== 'MERGEABLE' || workflowsActive !== false)) return 'open';
-  return 'keep';
+  if (isConflicting(mergeable)) return 'conflict';
+  const mergeableNow = mergeable === 'MERGEABLE';
+  if (status === 'PASSING') return mergeableNow ? 'keep' : 'await-merge-state';
+  if (status !== 'NO_CI') return 'keep';
+  if (!mergeableNow) return 'await-merge-state';
+  if (workflowsActive === true) return 'workflow-active';
+  return workflowsActive === false ? 'keep' : 'probe';
+}
+
+/**
+ * @param {string} status
+ * @param {string | null} reason
+ * @param {string[]} [failing]
+ * @param {string[]} [pending]
+ * @returns {{ state: 'done', status: string, reason: string | null, failing: string[], pending: string[] }}
+ */
+function done(status, reason, failing = [], pending = []) {
+  return { state: 'done', status, reason, failing, pending };
 }
 
 /**
@@ -531,41 +565,60 @@ function mergeGate(status, mergeable, workflowsActive) {
  * run out; it only matters for an empty list and for rows that are all external
  * (no-workflow-check), the two cases a late GitHub Actions run can still change.
  * `workflowsActive` is the probe's answer (see mergeGate) and matters for an empty list
- * only. The outcome is one of:
+ * only. This function never reads `mergeable` or `workflowsActive` itself: each answer of
+ * mergeGate maps to one step. The outcome is one of:
  *   pending  keep waiting: a pending check, or an unsettled window
- *   open     a pass or an empty list that the merge state does not yet allow (see mergeGate)
- *   probe    an empty list, window done, MERGEABLE, and no probe answer yet: the caller
- *            makes the one workflow probe, then asks again with its answer
+ *   open     a pass or an empty list while the gate awaits the merge state
+ *   probe    an empty list, window done, and the gate asks for the probe: the caller makes
+ *            the one workflow probe, then asks again with its answer
  *   done     a final status and reason, with the failing and pending names
- * An empty list is NO_CI only for `workflowsActive === false`; true is
- * INDETERMINATE (no-workflow-check); null or left out is a request to probe.
+ * An empty list is NO_CI only when the gate keeps it (the probe found no workflow file);
+ * a workflow-active gate is INDETERMINATE (no-workflow-check).
  *
  * @param {Classification | null} verdict
  * @param {unknown} mergeable
  * @param {boolean} windowDone
  * @param {boolean | null} [workflowsActive]
  * @returns {{ state: 'pending', pending: string[] } | { state: 'open' } | { state: 'probe' }
- *   | { state: 'done', status: string, reason: string | null, failing: string[], pending: string[] }}
+ *   | ReturnType<typeof done>}
  */
 function matchedStep(verdict, mergeable, windowDone, workflowsActive) {
   const gate = mergeGate(verdict === null ? 'NO_CI' : verdict.status, mergeable, workflowsActive);
-  if (gate === 'conflict') return { state: 'done', status: 'INDETERMINATE', reason: 'merge-conflict', failing: [], pending: [] };
+  if (gate === 'conflict') return done('INDETERMINATE', 'merge-conflict');
   if (verdict === null) {
     if (!windowDone) return { state: 'pending', pending: [] };
-    if (gate === 'keep') return { state: 'done', status: 'NO_CI', reason: null, failing: [], pending: [] };
-    if (mergeable !== 'MERGEABLE') return { state: 'open' };
-    return workflowsActive === true
-      ? { state: 'done', status: 'INDETERMINATE', reason: 'no-workflow-check', failing: [], pending: [] }
-      : { state: 'probe' };
+    if (gate === 'keep') return done('NO_CI', null);
+    if (gate === 'workflow-active') return done('INDETERMINATE', 'no-workflow-check');
+    if (gate === 'probe') return { state: 'probe' };
+    return { state: 'open' };
   }
   if (verdict.reason === 'no-workflow-check') {
-    return windowDone
-      ? { state: 'done', status: 'INDETERMINATE', reason: 'no-workflow-check', failing: [], pending: [] }
-      : { state: 'pending', pending: [] };
+    return windowDone ? done('INDETERMINATE', 'no-workflow-check') : { state: 'pending', pending: [] };
   }
   if (verdict.status === 'PENDING') return { state: 'pending', pending: verdict.pending };
-  if (gate === 'open') return { state: 'open' };
-  return { state: 'done', status: verdict.status, reason: verdict.reason, failing: verdict.failing, pending: verdict.pending };
+  if (gate !== 'keep') return { state: 'open' };
+  return done(verdict.status, verdict.reason, verdict.failing, verdict.pending);
+}
+
+/**
+ * D-CI-WORKFLOWS: the one workflow probe, as one result. `gh` is waitForCi's bounded gh
+ * call, so the probe gets its timeout and, with no time left, no call at all. The result is
+ * one of:
+ *   deadline     no time was left, so no call was made
+ *   failed       the call was not answered or exited non-zero: a failed poll
+ *   unparseable  the reply cannot be read, or is one page of many (parseActiveWorkflows)
+ *   answer       `active`: true for some active workflow file, false for none
+ *
+ * @param {(args: readonly string[]) => Promise<GhAnswer | null>} gh
+ * @returns {Promise<{ kind: 'deadline' } | { kind: 'failed' } | { kind: 'unparseable' }
+ *   | { kind: 'answer', active: boolean }>}
+ */
+async function askWorkflows(gh) {
+  const probe = await gh(WORKFLOWS_ARGS);
+  if (probe === null) return { kind: 'deadline' };
+  if (!probe.answered || probe.status !== 0) return { kind: 'failed' };
+  const active = parseActiveWorkflows(probe.stdout);
+  return active === null ? { kind: 'unparseable' } : { kind: 'answer', active };
 }
 
 /**
@@ -589,13 +642,14 @@ function matchedStep(verdict, mergeable, windowDone, workflowsActive) {
  *
  * D-CI-WORKFLOWS: an empty list whose window is done on a MERGEABLE head is NO_CI only
  * when the repository has no active workflow file, because a workflow may start late.
- * The poll that gets there makes the one probe, `gh api` over WORKFLOWS_ARGS, through
- * the same bounded gh call (timeout min(GH_CALL_CAP_SECONDS, time left), none when no
- * time is left, which ends the loop as for any call). `workflowsActive` keeps the
- * answer: it is a cache, not a window, and no settle() clock runs for it. An active
- * workflow file ends the window as INDETERMINATE (no-workflow-check); none is NO_CI. A
- * probe whose gh call fails is a failed poll, and a reply parseActiveWorkflows cannot
- * read is INDETERMINATE (unparseable). No other path makes the probe.
+ * The poll that gets there makes the one probe (askWorkflows), `gh api` over
+ * WORKFLOWS_ARGS, through the same bounded gh call (timeout min(GH_CALL_CAP_SECONDS,
+ * time left), none when no time is left, which ends the loop as for any call). An answered
+ * probe ends the run in that poll, so no later poll reads it and no settle() clock runs
+ * for it. An active workflow file ends the window as INDETERMINATE (no-workflow-check);
+ * none is NO_CI. A probe whose gh call fails is a failed poll, and a reply
+ * parseActiveWorkflows cannot read is INDETERMINATE (unparseable). No other path makes
+ * the probe.
  *
  * Per poll: `gh pr view <n> --json headRefOid,mergeable`, then `gh pr checks <n>
  * --json name,state,bucket,workflow` (exit 0 or 8 are results, as in check-ci-status
@@ -655,81 +709,88 @@ async function waitForCi(input) {
     return normalize(res);
   };
 
-  let failedPolls = 0;
   let firstMismatchAt = null;
   let firstEmptyAt = null;
-  /** The workflow probe's answer: null until a probe has been answered. A cache, not a window. */
-  let workflowsActive = null;
+
+  /**
+   * A step that ends the run with a result.
+   *
+   * @param {string} status
+   * @param {string | null} reason
+   * @param {string[]} failing
+   * @param {string[]} pending
+   * @returns {PollStep}
+   */
+  const resultStep = (status, reason, failing, pending) => ({ state: 'done', result: finish(status, reason, failing, pending) });
+
+  /**
+   * The step for what matchedStep decided. A probe request cannot be a final step: it is
+   * no verdict, and the wait stays open.
+   *
+   * @param {ReturnType<typeof matchedStep>} next
+   * @returns {PollStep}
+   */
+  const stepOf = next => {
+    if (next.state === 'done') return resultStep(next.status, next.reason, next.failing, next.pending);
+    return next.state === 'probe' ? { state: 'open' } : next;
+  };
+
+  /**
+   * One poll: the view, then, on a matching head that does not conflict, the checks, then,
+   * on the one path that needs it, the workflow probe. Both settle windows run here.
+   *
+   * @returns {Promise<PollStep>}
+   */
+  const readPoll = async () => {
+    const view = await gh(['pr', 'view', pr, '--json', 'headRefOid,mergeable']);
+    if (view === null) return { state: 'deadline' };
+    if (view.answered && view.status === 1 && NO_PR_RE.test(view.stderr)) return resultStep('NO_PR', null, [], []);
+    if (!view.answered || view.status !== 0) return { state: 'failed' };
+    const parsed = parseView(view.stdout);
+    if (parsed === null) return resultStep('INDETERMINATE', 'unparseable', [], []);
+    if (parsed.oid !== head) {
+      const mismatch = settle(firstMismatchAt, clock.now(), settleMs);
+      firstMismatchAt = mismatch.firstAt;
+      return mismatch.done ? resultStep('INDETERMINATE', 'head-mismatch', [], []) : { state: 'pending', pending: [] };
+    }
+    firstMismatchAt = null;
+    if (isConflicting(parsed.mergeable)) return resultStep('INDETERMINATE', 'merge-conflict', [], []);
+
+    const checks = await gh(['pr', 'checks', pr, '--json', 'name,state,bucket,workflow']);
+    if (checks === null) return { state: 'deadline' };
+    const isResult = checks.answered && (checks.status === 0 || checks.status === 8);
+    const isEmpty = checks.answered && checks.status === 1 && NO_CHECKS_RE.test(checks.stderr);
+    if (!isResult && !isEmpty) return { state: 'failed' };
+    const rows = isResult ? parseChecks(checks.stdout) : [];
+    if (rows === null) return resultStep('INDETERMINATE', 'unparseable', [], []);
+    const verdict = rows.length > 0 ? classifyChecks(rows) : null;
+    let windowDone = false;
+    if (verdict === null || verdict.reason === 'no-workflow-check') {
+      const empty = settle(firstEmptyAt, clock.now(), settleMs);
+      firstEmptyAt = empty.firstAt;
+      windowDone = empty.done;
+    } else {
+      firstEmptyAt = null;
+    }
+
+    const next = matchedStep(verdict, parsed.mergeable, windowDone, null);
+    if (next.state !== 'probe') return stepOf(next);
+    const asked = await askWorkflows(gh);
+    if (asked.kind === 'deadline') return { state: 'deadline' };
+    if (asked.kind === 'failed') return { state: 'failed' };
+    if (asked.kind === 'unparseable') return resultStep('INDETERMINATE', 'unparseable', [], []);
+    return stepOf(matchedStep(verdict, parsed.mergeable, windowDone, asked.active));
+  };
+
+  let failedPolls = 0;
   /** @type {{ status: string, pending: string[] }} */
   let last = { status: 'INDETERMINATE', pending: [] };
 
   for (let poll = 0; poll < MAX_POLLS; poll++) {
     if (clock.now() >= deadline) break;
 
-    const view = await gh(['pr', 'view', pr, '--json', 'headRefOid,mergeable']);
-    if (view === null) break;
-    if (view.answered && view.status === 1 && NO_PR_RE.test(view.stderr)) return finish('NO_PR', null, [], []);
-
-    /**
-     * @type {{ state: 'failed' } | { state: 'pending', pending: string[] } | { state: 'open' }
-     *   | { state: 'done', result: CiResult }}
-     */
-    let step;
-    if (!view.answered || view.status !== 0) {
-      step = { state: 'failed' };
-    } else {
-      const parsed = parseView(view.stdout);
-      if (parsed === null) return finish('INDETERMINATE', 'unparseable', [], []);
-      if (parsed.oid !== head) {
-        const mismatch = settle(firstMismatchAt, clock.now(), settleMs);
-        firstMismatchAt = mismatch.firstAt;
-        step = mismatch.done
-          ? { state: 'done', result: finish('INDETERMINATE', 'head-mismatch', [], []) }
-          : { state: 'pending', pending: [] };
-      } else if (mergeGate(null, parsed.mergeable) === 'conflict') {
-        firstMismatchAt = null;
-        step = { state: 'done', result: finish('INDETERMINATE', 'merge-conflict', [], []) };
-      } else {
-        firstMismatchAt = null;
-        const checks = await gh(['pr', 'checks', pr, '--json', 'name,state,bucket,workflow']);
-        if (checks === null) break;
-        const isResult = checks.answered && (checks.status === 0 || checks.status === 8);
-        const isEmpty = checks.answered && checks.status === 1 && NO_CHECKS_RE.test(checks.stderr);
-        if (!isResult && !isEmpty) {
-          step = { state: 'failed' };
-        } else {
-          const rows = isResult ? parseChecks(checks.stdout) : [];
-          if (rows === null) return finish('INDETERMINATE', 'unparseable', [], []);
-          const verdict = rows.length > 0 ? classifyChecks(rows) : null;
-          let windowDone = false;
-          if (verdict === null || verdict.reason === 'no-workflow-check') {
-            const empty = settle(firstEmptyAt, clock.now(), settleMs);
-            firstEmptyAt = empty.firstAt;
-            windowDone = empty.done;
-          } else {
-            firstEmptyAt = null;
-          }
-          /** @type {ReturnType<typeof matchedStep> | { state: 'failed' }} */
-          let next = matchedStep(verdict, parsed.mergeable, windowDone, workflowsActive);
-          if (next.state === 'probe') {
-            const probe = await gh(WORKFLOWS_ARGS);
-            if (probe === null) break;
-            const answer = probe.answered && probe.status === 0 ? parseActiveWorkflows(probe.stdout) : undefined;
-            if (answer === null) return finish('INDETERMINATE', 'unparseable', [], []);
-            if (answer === undefined) {
-              next = { state: 'failed' };
-            } else {
-              workflowsActive = answer;
-              next = matchedStep(verdict, parsed.mergeable, windowDone, workflowsActive);
-            }
-          }
-          step = next.state === 'done'
-            ? { state: 'done', result: finish(next.status, next.reason, next.failing, next.pending) }
-            : next;
-        }
-      }
-    }
-
+    const step = await readPoll();
+    if (step.state === 'deadline') break;
     if (step.state === 'done') return step.result;
     if (step.state === 'failed') {
       failedPolls++;
@@ -739,8 +800,8 @@ async function waitForCi(input) {
       failedPolls = 0;
       last = { status: 'PENDING', pending: step.pending };
     } else {
-      // An open step, or any state that is not pending: no verdict, and the deadline
-      // exit after it is INDETERMINATE, never PENDING.
+      // An open step: no verdict, and the deadline exit after it is INDETERMINATE, never
+      // PENDING.
       failedPolls = 0;
       last = { status: 'INDETERMINATE', pending: [] };
     }
@@ -863,9 +924,11 @@ module.exports = Object.freeze({
   sanitizeName,
   formatNames,
   classifyChecks,
+  isConflicting,
   mergeGate,
   matchedStep,
   parseActiveWorkflows,
+  askWorkflows,
   renderLine,
   checkLine,
   waitForCi,

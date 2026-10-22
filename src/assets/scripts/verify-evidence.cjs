@@ -2399,16 +2399,17 @@ function probeWorkflows(io) {
 /**
  * An empty check list is NO_CI only on a MERGEABLE PR whose repository has no active
  * workflow file (the shared gate decides): else a workflow run may still be to come.
- * The workflow list is asked only on a MERGEABLE PR, so a PR that cannot be NO_CI costs
- * no call.
+ * The workflow list is asked only when the gate asks for it, so a PR that cannot be NO_CI
+ * costs no call. A gate answer other than keep is INDETERMINATE.
  *
  * @param {Io} io
  * @param {string | null} mergeable
  * @returns {{ status: string, failing: string }}
  */
 function readEmptyCi(io, mergeable) {
-  const active = mergeable === 'MERGEABLE' ? probeWorkflows(io) : null;
-  return CW.mergeGate('NO_CI', mergeable, active) === 'keep' ? { status: 'NO_CI', failing: '-' } : CI_INDETERMINATE;
+  const first = CW.mergeGate('NO_CI', mergeable);
+  const gate = first === 'probe' ? CW.mergeGate('NO_CI', mergeable, probeWorkflows(io)) : first;
+  return gate === 'keep' ? { status: 'NO_CI', failing: '-' } : CI_INDETERMINATE;
 }
 
 /**
@@ -2431,7 +2432,7 @@ function readEmptyCi(io, mergeable) {
  * @returns {{ status: string, failing: string }}
  */
 function readCi(io, pr, mergeable) {
-  if (CW.mergeGate(null, mergeable) === 'conflict') return CI_INDETERMINATE;
+  if (CW.isConflicting(mergeable)) return CI_INDETERMINATE;
   const r = gh(io, ['pr', 'checks', String(pr), '--json', 'name,state,bucket,workflow'], READINESS_MAX_BUFFER);
   if (!answered(r)) return CI_INDETERMINATE;
   if (r.status !== 0 && r.status !== 8) {

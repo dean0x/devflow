@@ -422,13 +422,13 @@ describe('known-bad probes: a readiness script that drops one rule reads READY w
   }
   const both = (...seeds: Array<(source: string) => string>) => (source: string): string => seeds.reduce((text, one) => one(text), source)
   const PASSING_GATE = "CW.mergeGate(c.status, mergeable, null) !== 'keep'"
-  const CONFLICT_GATE = "CW.mergeGate(null, mergeable) === 'conflict'"
+  const CONFLICT_GATE = 'CW.isConflicting(mergeable)'
 
   const probes: ReadonlyArray<{ name: string; scenario: ShimScenario; mutate: (source: string) => string }> = [
     {
       name: 'the NO_CI gate',
       scenario: green({ checks: undefined, mergeable: 'UNKNOWN' }),
-      mutate: seed("CW.mergeGate('NO_CI', mergeable, active) === 'keep' ?", 'true ?'),
+      mutate: seed("gate === 'keep' ? { status: 'NO_CI'", "true ? { status: 'NO_CI'"),
     },
     {
       name: 'the PASSING gate',
@@ -438,7 +438,7 @@ describe('known-bad probes: a readiness script that drops one rule reads READY w
     {
       name: 'the CONFLICTING gate',
       scenario: green({ mergeable: 'CONFLICTING' }),
-      mutate: both(seed(CONFLICT_GATE, "CW.mergeGate(null, mergeable) === 'never'"), seed(PASSING_GATE, "CW.mergeGate(c.status, mergeable, null) === 'open'")),
+      mutate: both(seed(CONFLICT_GATE, 'false'), seed(PASSING_GATE, "CW.mergeGate(c.status, mergeable, null) === 'await-merge-state'")),
     },
     {
       name: 'the head comparison',
@@ -448,7 +448,7 @@ describe('known-bad probes: a readiness script that drops one rule reads READY w
     {
       name: 'the workflows rule',
       scenario: green({ checks: undefined, workflows: [WORKFLOW_FILE] }),
-      mutate: seed("mergeable === 'MERGEABLE' ? probeWorkflows(io) : null", "mergeable === 'MERGEABLE' ? false : null"),
+      mutate: seed("CW.mergeGate('NO_CI', mergeable, probeWorkflows(io))", "CW.mergeGate('NO_CI', mergeable, false)"),
     },
   ]
 
