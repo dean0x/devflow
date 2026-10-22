@@ -69,7 +69,9 @@ const PE = createRequire(import.meta.url)(PR_EVIDENCE_SCRIPT) as EvidenceGrammar
 interface CiWaitApi {
   readonly STATUSES: readonly string[]
   readonly CI_WAIT_MAX_SECONDS: number
-  classifyChecks(checks: ReadonlyArray<{ name: string; bucket: string }>): { status: string }
+  classifyChecks(checks: ReadonlyArray<{ name: string; bucket: string; workflow?: string }>): { status: string; reason: string | null }
+  isConflicting(mergeable: unknown): boolean
+  mergeGate(status: string | null, mergeable: unknown, workflowsActive?: boolean | null): 'keep' | 'conflict' | 'await-merge-state' | 'probe' | 'workflow-active'
 }
 const CW = createRequire(import.meta.url)(CI_WAIT_SCRIPT) as CiWaitApi
 
@@ -172,17 +174,21 @@ function classify(clauses: readonly Clause[], buckets: readonly string[]): { sta
   return null
 }
 
-/** Every bucket multiset of 1–3 checks, over gh's buckets plus one it does not document. */
-function bucketDomain(): string[][] {
-  const alphabet = [...GH_BUCKETS, UNDOCUMENTED_BUCKET]
-  const out: string[][] = []
-  const grow = (prefix: string[], from: number): void => {
+/** Every multiset of 1–3 members of the alphabet, each as a non-decreasing run of its indexes. */
+function multisets<T>(alphabet: readonly T[]): T[][] {
+  const out: T[][] = []
+  const grow = (prefix: T[], from: number): void => {
     if (prefix.length > 0) out.push(prefix)
     if (prefix.length === 3) return
     for (let i = from; i < alphabet.length; i++) grow([...prefix, alphabet[i]], i)
   }
   grow([], 0)
   return out
+}
+
+/** Every bucket multiset of 1–3 checks, over gh's buckets plus one it does not document. */
+function bucketDomain(): string[][] {
+  return multisets([...GH_BUCKETS, UNDOCUMENTED_BUCKET])
 }
 
 /**
@@ -450,7 +456,45 @@ function collectClassifierDisagreements(prose: readonly Clause[], classifier: Bu
   return out
 }
 
-const scriptClassifier: BucketClassifier = buckets => CW.classifyChecks(buckets.map((bucket, i) => ({ name: `check-${i}`, bucket }))).status
+/** A check row as the workflow rule sees it: gh's bucket, and the Actions workflow name (empty for an external check). */
+interface MixedRow { readonly bucket: string; readonly workflow: string }
+type MixedClassifier = (rows: readonly MixedRow[]) => { status: string; reason: string | null }
+
+/** With every row a GitHub Actions job, the workflow rule has nothing to add: the script must equal the prose exactly. */
+const scriptClassifier: BucketClassifier = buckets => CW.classifyChecks(buckets.map((bucket, i) => ({ name: `check-${i}`, bucket, workflow: 'CI' }))).status
+
+const scriptMixed: MixedClassifier = rows => CW.classifyChecks(rows.map((row, i) => ({ name: `check-${i}`, bucket: row.bucket, workflow: row.workflow })))
+
+/** Every multiset of 1–3 rows over gh's buckets (plus one it does not document), each as an Actions job or an external check. */
+function mixedRowDomain(): MixedRow[][] {
+  const alphabet = [...GH_BUCKETS, UNDOCUMENTED_BUCKET].flatMap(bucket => ['CI', ''].map(workflow => ({ bucket, workflow })))
+  return multisets(alphabet)
+}
+
+/**
+ * Named collector: the row multisets on which a classifier is anything but step 5 over
+ * `bucket` made stricter by the workflow rule. A defect is (i) a status that differs
+ * from the executed prose, unless the prose says PASSING and the script says
+ * INDETERMINATE for no-workflow-check, or a no-workflow-check anywhere else; and (ii) on
+ * a prose PASSING, a script that passes when no passing row is an Actions job, or does
+ * not pass when one is.
+ */
+function collectStricterOnlyDefects(prose: readonly Clause[], classifier: MixedClassifier): string[] {
+  const out: string[] = []
+  for (const rows of mixedRowDomain()) {
+    const label = rows.map(r => `${r.bucket}/${r.workflow === '' ? 'external' : 'actions'}`).join(', ')
+    const want = classify(prose, rows.map(r => r.bucket))?.status
+    const got = classifier(rows)
+    const stricter = want === 'PASSING' && got.status === 'INDETERMINATE' && got.reason === 'no-workflow-check'
+    if (got.status !== want && !stricter) out.push(`[${label}]: prose ${want}, script ${got.status} differs beyond the workflow rule`)
+    if (got.reason === 'no-workflow-check' && want !== 'PASSING') out.push(`[${label}]: script says no-workflow-check where the prose says ${want}`)
+    if (want === 'PASSING') {
+      const actionsPass = rows.some(r => r.bucket === 'pass' && r.workflow !== '')
+      if ((got.status === 'PASSING') !== actionsPass) out.push(`[${label}]: script ${got.status} when ${actionsPass ? 'an Actions row passed' : 'no Actions row passed'}`)
+    }
+  }
+  return out
+}
 
 describe('#421 AC-14: ci-wait\'s classifier agrees with check-ci-status step 5 on every bucket multiset', () => {
   const prose = (): Clause[] => parseClassifier(processSteps(requirePrRef('check-ci-status')).get(5) ?? '').filter((c): c is Clause => typeof c !== 'string')
@@ -469,8 +513,105 @@ describe('#421 AC-14: ci-wait\'s classifier agrees with check-ci-status step 5 o
     const skipPass: BucketClassifier = buckets => (buckets.every(b => b === 'skipping') ? 'PASSING' : scriptClassifier(buckets))
     expect(collectClassifierDisagreements(prose(), skipPass)).toEqual(expect.arrayContaining(['[skipping]: prose INDETERMINATE, script PASSING']))
   })
+
+  it('over mixed Actions and external rows, the script is the prose or stricter only by no-workflow-check, and passes exactly when an Actions row passed', () => {
+    expect(prose().length, 'no clause parsed — the interpreter is blind').toBe(4)
+    expect(mixedRowDomain().length, 'the mixed-row domain is empty').toBeGreaterThanOrEqual(400)
+    expect(collectStricterOnlyDefects(prose(), scriptMixed)).toEqual([])
+  })
+
+  it('known-bad probes: a classifier that ignores the workflow, passes over the prose, never passes or misplaces the reason is reported', () => {
+    const ignoresWorkflow: MixedClassifier = rows => scriptMixed(rows.map(r => ({ bucket: r.bucket, workflow: 'CI' })))
+    expect(collectStricterOnlyDefects(prose(), ignoresWorkflow).some(d => d.includes('no Actions row passed'))).toBe(true)
+    const lenient: MixedClassifier = rows => ({ status: rows.some(r => r.bucket === 'pending') ? 'PENDING' : rows.some(r => r.bucket === 'fail' || r.bucket === 'cancel') ? 'FAILING' : 'PASSING', reason: null })
+    expect(collectStricterOnlyDefects(prose(), lenient).some(d => d.includes('differs beyond the workflow rule'))).toBe(true)
+    const neverPasses: MixedClassifier = rows => { const r = scriptMixed(rows); return r.status === 'PASSING' ? { status: 'INDETERMINATE', reason: 'no-workflow-check' } : r }
+    expect(collectStricterOnlyDefects(prose(), neverPasses).some(d => d.includes('an Actions row passed'))).toBe(true)
+    const misplaced: MixedClassifier = rows => { const r = scriptMixed(rows); return r.status === 'INDETERMINATE' ? { status: 'INDETERMINATE', reason: 'no-workflow-check' } : r }
+    expect(collectStricterOnlyDefects(prose(), misplaced).some(d => d.includes('says no-workflow-check where the prose says'))).toBe(true)
+  })
 })
 
+// ---------------------------------------------------------------------------
+// D-CI-MERGE-STATE, D-CI-WORKFLOWS — the one gate both scripts apply (AC-4, AC-7)
+// ---------------------------------------------------------------------------
+
+type GateResult = 'keep' | 'conflict' | 'await-merge-state' | 'probe' | 'workflow-active'
+/** What a probe of the repository's workflow files told: an answer, or no answer (not read, or failed). */
+type WorkflowsAnswer = boolean | null | undefined
+
+const GATE_MERGEABLES: ReadonlyArray<string | null | undefined> = ['MERGEABLE', 'CONFLICTING', 'UNKNOWN', null, undefined, '', 'SOMETHING_NEW']
+const GATE_ANSWERS: ReadonlyArray<WorkflowsAnswer> = [true, false, null, undefined]
+
+/**
+ * The gate written out independently of the script, from the rule alone, one answer per
+ * case. A conflict is a conflict. PASSING stands only on MERGEABLE; on any other value it
+ * awaits the merge state. NO_CI awaits the merge state too unless MERGEABLE; on MERGEABLE
+ * a probe answer of true is workflow-active, false stands, and no answer asks for the
+ * probe. FAILING, PENDING, INDETERMINATE and NO_PR do not depend on either input.
+ */
+function gateModel(status: string | null, mergeable: unknown, answer: WorkflowsAnswer): GateResult {
+  if (mergeable === 'CONFLICTING') return 'conflict'
+  if (status === 'PASSING') return mergeable === 'MERGEABLE' ? 'keep' : 'await-merge-state'
+  if (status !== 'NO_CI') return 'keep'
+  if (mergeable !== 'MERGEABLE') return 'await-merge-state'
+  if (answer === true) return 'workflow-active'
+  return answer === false ? 'keep' : 'probe'
+}
+
+/** Named collector: the (status, mergeable, probe answer) triples on which a gate differs from the model. */
+function collectGateDisagreements(gate: (status: string | null, mergeable: unknown, answer: WorkflowsAnswer) => GateResult): string[] {
+  const out: string[] = []
+  for (const status of [null, ...CW.STATUSES]) {
+    for (const mergeable of GATE_MERGEABLES) {
+      for (const answer of GATE_ANSWERS) {
+        const want = gateModel(status, mergeable, answer)
+        const got = gate(status, mergeable, answer)
+        if (want !== got) out.push(`${String(status)} on ${String(mergeable)} with ${String(answer)}: model ${want}, gate ${got}`)
+      }
+    }
+  }
+  return out
+}
+
+describe('D-CI-MERGE-STATE and D-CI-WORKFLOWS: the shared gate over every status, merge value and probe answer', () => {
+  it('equals the model on the whole domain', () => {
+    expect(CW.STATUSES.length, 'no statuses').toBe(6)
+    expect(GATE_MERGEABLES.length * GATE_ANSWERS.length * (CW.STATUSES.length + 1), 'the domain is empty').toBeGreaterThanOrEqual(150)
+    expect(collectGateDisagreements((status, mergeable, answer) => CW.mergeGate(status, mergeable, answer))).toEqual([])
+  })
+
+  it('gives NO_CI only for MERGEABLE with no active workflow: true is workflow-active, null and an omitted value ask for the probe', () => {
+    expect(CW.mergeGate('NO_CI', 'MERGEABLE', false)).toBe('keep')
+    expect(CW.mergeGate('NO_CI', 'MERGEABLE', true)).toBe('workflow-active')
+    for (const answer of [null, undefined]) expect(CW.mergeGate('NO_CI', 'MERGEABLE', answer), String(answer)).toBe('probe')
+    expect(CW.mergeGate('NO_CI', 'MERGEABLE'), 'the argument left out').toBe('probe')
+    for (const mergeable of GATE_MERGEABLES.filter(m => m !== 'MERGEABLE')) {
+      for (const answer of GATE_ANSWERS) expect(CW.mergeGate('NO_CI', mergeable, answer), `${String(mergeable)} with ${String(answer)}`).not.toBe('keep')
+    }
+  })
+
+  it('known-bad probes: a gate that ignores the probe, merges two of its answers, passes an unknown merge state, or lets a conflict through is reported', () => {
+    const ignoresProbe = (status: string | null, mergeable: unknown): GateResult => CW.mergeGate(status, mergeable, false)
+    expect(collectGateDisagreements(ignoresProbe).some(d => d.startsWith('NO_CI on MERGEABLE with true'))).toBe(true)
+    const trustsNull = (status: string | null, mergeable: unknown, answer: WorkflowsAnswer): GateResult => CW.mergeGate(status, mergeable, answer ?? false)
+    expect(collectGateDisagreements(trustsNull).some(d => d.startsWith('NO_CI on MERGEABLE with null'))).toBe(true)
+    const unknownPasses = (status: string | null, mergeable: unknown, answer: WorkflowsAnswer): GateResult => (mergeable === 'UNKNOWN' ? 'keep' : CW.mergeGate(status, mergeable, answer))
+    expect(collectGateDisagreements(unknownPasses).some(d => d.includes('on UNKNOWN'))).toBe(true)
+    const noConflict = (status: string | null, mergeable: unknown, answer: WorkflowsAnswer): GateResult => (mergeable === 'CONFLICTING' ? 'await-merge-state' : CW.mergeGate(status, mergeable, answer))
+    expect(collectGateDisagreements(noConflict).some(d => d.includes('on CONFLICTING'))).toBe(true)
+    const probeAsWait = (status: string | null, mergeable: unknown, answer: WorkflowsAnswer): GateResult => {
+      const gate = CW.mergeGate(status, mergeable, answer)
+      return gate === 'probe' ? 'await-merge-state' : gate
+    }
+    expect(collectGateDisagreements(probeAsWait).some(d => d.startsWith('NO_CI on MERGEABLE with null'))).toBe(true)
+    const activeAsKeep = (status: string | null, mergeable: unknown, answer: WorkflowsAnswer): GateResult => {
+      const gate = CW.mergeGate(status, mergeable, answer)
+      return gate === 'workflow-active' ? 'keep' : gate
+    }
+    expect(collectGateDisagreements(activeAsKeep).some(d => d.startsWith('NO_CI on MERGEABLE with true'))).toBe(true)
+  })
+})
 
 // ---------------------------------------------------------------------------
 // check-merge-readiness — step 4 and the ladder (AC-14)

@@ -23,7 +23,9 @@ allowed-tools: Read
      full shape.
      /implement reads commands/implement-levels.md at the start of Phase 3 at standard or lean, once
      per run. /resolve reads commands/resolve-levels.md in Step 0d when any worktree is standard or
-     lean, once per run. A failed read applies no row and keeps the level. -->
+     lean, once per run. A failed read applies no row and keeps the level.
+     Triage reads triage/severity-tiers.md when prompt line 1 is GATE_LEVEL standard or lean, once per
+     spawn; a failed or partial read applies no tier. -->
 
 ## Iron Law
 
@@ -40,6 +42,7 @@ allowed-tools: Read
 | `synthesize/{mode}.md` | Synthesize | The prompt's `Mode:` line names `{mode}` |
 | `curate/maintain.md` | Curate | `claim-due` hands out at least one entry |
 | `validate/passed-alone.md` | Validate | A Test row failed |
+| `triage/severity-tiers.md` | Triage | Prompt line 1 is `GATE_LEVEL: standard` or `GATE_LEVEL: lean` |
 | `commands/{name}.md` | The command named in the file | The command's condition for that branch holds |
 
 The installed directory is `{claude_dir}/skills/devflow:agent-references/`, where `{claude_dir}` is Claude Code's directory: `CLAUDE_CONFIG_DIR` when that is set to an absolute path, else `$HOME/.claude`.

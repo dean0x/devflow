@@ -21,7 +21,7 @@ import { readdirSync } from 'fs'
 
 import {
   RETIRED_INLINE_EXPANSION, SANCTIONED_RESOLUTION, SYNTHESIZE_MODES, agentReferencePath, isAgentBlock, parseFences,
-  readAgentReference, requireDistFile, requireDistFiles, resolveAgentSource,
+  readAgentReference, requireDistFile, requireDistFiles, resolveAgentSource, resolveCurationOffSource,
 } from '../helpers.js'
 
 /** The Synthesize agent body, in bytes. Registered as `synthesize-body-max`; lowered, never raised. */
@@ -35,6 +35,21 @@ const CODE_REVIEW_LEVELS_REF_MAX_BYTES = 1_349
 
 /** The `/plan` gate-level reference, in bytes. Registered as `plan-levels-ref-max`; lowered, never raised. */
 const PLAN_LEVELS_REF_MAX_BYTES = 4_056
+
+/** The `/resolve` gate-level reference, in bytes. Registered as `resolve-levels-ref-max`; lowered, never raised. */
+const RESOLVE_LEVELS_REF_MAX_BYTES = 2_690
+
+/** The `/implement` gate-level reference, in bytes. Registered as `implement-levels-ref-max`; lowered, never raised. */
+const IMPLEMENT_LEVELS_REF_MAX_BYTES = 3_921
+
+/** The Triage severity-tiers reference, in bytes. Registered as `triage-tiers-ref-max`; lowered, never raised. */
+const TRIAGE_TIERS_REF_MAX_BYTES = 4_562
+
+/** The Triage agent body of the curation-on build, dist/agents/triage.md, in bytes. Registered as `triage-body-max`; lowered, never raised. */
+const TRIAGE_BODY_MAX_BYTES = 11_813
+
+/** The Triage agent body of the curation-off build, dist/curation-off/agents/triage.md, in bytes. Registered as `triage-body-curation-off-max`; lowered, never raised. */
+const TRIAGE_BODY_CURATION_OFF_MAX_BYTES = 11_029
 
 /** The Validate passed-alone re-run reference, in bytes. Registered as `validate-passed-alone-ref-max`; lowered, never raised. */
 const VALIDATE_PASSED_ALONE_REF_MAX_BYTES = 3_427
@@ -205,6 +220,22 @@ export function collectSizeDefects(label: string, text: string, ceiling: number)
   return bytes > ceiling ? [`${label} is ${bytes} bytes, ceiling ${ceiling}`] : []
 }
 
+describe('the Triage body sits under its ceiling in both builds (#484)', () => {
+  const off = resolveCurationOffSource('agents', 'triage')
+  if (off === null) throw new Error('dist/curation-off/agents/triage.md is absent: run `npm run build:mds`')
+  const builds: ReadonlyArray<readonly [string, string, number]> = [
+    ['curation on', resolveAgentSource('triage').content, TRIAGE_BODY_MAX_BYTES],
+    ['curation off', off, TRIAGE_BODY_CURATION_OFF_MAX_BYTES],
+  ]
+
+  it.each(builds)('%s: the Triage body fits its ceiling, and a probe one byte under its size is reported', (label, body, ceiling) => {
+    expect(Buffer.byteLength(body), 'the body is read: the guard would pass vacuously on an empty one').toBeGreaterThan(8_000)
+    expect(collectSizeDefects(`triage.md (${label})`, body, ceiling)).toEqual([])
+    const bytes = Buffer.byteLength(body)
+    expect(collectSizeDefects(`triage.md (${label})`, body, bytes - 1)).toEqual([`triage.md (${label}) is ${bytes} bytes, ceiling ${bytes - 1}`])
+  })
+})
+
 describe('the Synthesize and Curate bodies sit under their ceilings, and the moved text lives in the references (AC-401)', () => {
   const synthesize = resolveAgentSource('synthesize').content
   const curate = resolveAgentSource('curate').content
@@ -233,6 +264,30 @@ describe('the Synthesize and Curate bodies sit under their ceilings, and the mov
     expect(collectSizeDefects('plan-levels.md', ref, PLAN_LEVELS_REF_MAX_BYTES)).toEqual([])
     const bytes = Buffer.byteLength(ref)
     expect(collectSizeDefects('plan-levels.md', ref, bytes - 1)).toEqual([`plan-levels.md is ${bytes} bytes, ceiling ${bytes - 1}`])
+  })
+
+  it('the resolve gate-level reference fits `resolve-levels-ref-max`, and a probe one byte under its size is reported', () => {
+    const ref = readAgentReference('commands/resolve-levels.md')
+    expect(Buffer.byteLength(ref), 'the reference is read: the guard would pass vacuously on an empty one').toBeGreaterThan(400)
+    expect(collectSizeDefects('resolve-levels.md', ref, RESOLVE_LEVELS_REF_MAX_BYTES)).toEqual([])
+    const bytes = Buffer.byteLength(ref)
+    expect(collectSizeDefects('resolve-levels.md', ref, bytes - 1)).toEqual([`resolve-levels.md is ${bytes} bytes, ceiling ${bytes - 1}`])
+  })
+
+  it('the implement gate-level reference fits `implement-levels-ref-max`, and a probe one byte under its size is reported', () => {
+    const ref = readAgentReference('commands/implement-levels.md')
+    expect(Buffer.byteLength(ref), 'the reference is read: the guard would pass vacuously on an empty one').toBeGreaterThan(400)
+    expect(collectSizeDefects('implement-levels.md', ref, IMPLEMENT_LEVELS_REF_MAX_BYTES)).toEqual([])
+    const bytes = Buffer.byteLength(ref)
+    expect(collectSizeDefects('implement-levels.md', ref, bytes - 1)).toEqual([`implement-levels.md is ${bytes} bytes, ceiling ${bytes - 1}`])
+  })
+
+  it('the Triage severity-tiers reference fits `triage-tiers-ref-max`, and a probe one byte under its size is reported', () => {
+    const ref = readAgentReference('triage/severity-tiers.md')
+    expect(Buffer.byteLength(ref), 'the reference is read: the guard would pass vacuously on an empty one').toBeGreaterThan(1_000)
+    expect(collectSizeDefects('severity-tiers.md', ref, TRIAGE_TIERS_REF_MAX_BYTES)).toEqual([])
+    const bytes = Buffer.byteLength(ref)
+    expect(collectSizeDefects('severity-tiers.md', ref, bytes - 1)).toEqual([`severity-tiers.md is ${bytes} bytes, ceiling ${bytes - 1}`])
   })
 
   it('the passed-alone reference fits `validate-passed-alone-ref-max`, and a probe one byte under its size is reported', () => {

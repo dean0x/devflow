@@ -222,7 +222,7 @@ describe('module surface', () => {
     expect(Object.isFrozen(VE)).toBe(true)
     expect(Object.keys(VE).sort()).toEqual([
       'CAPS', 'EXIT_CODES', 'PR_FIELDS', 'main', 'settleOutcome',
-      'BODY_STATUSES', 'COMMENT_STATUSES', 'readinessVerdict', 'renderPublishBlock', 'parsePublishBlock', 'renderReadinessBlock', 'parseReadinessBlock',
+      'BODY_STATUSES', 'COMMENT_STATUSES', 'readinessVerdict', 'bindCiHead', 'renderPublishBlock', 'parsePublishBlock', 'renderReadinessBlock', 'parseReadinessBlock',
       'commentIdOf', 'editTarget',
     ].sort())
   })
@@ -2410,7 +2410,7 @@ describe('source guards (verify-evidence.cjs)', () => {
       'D-VERIFY-RECORD', 'D-VERIFY-APPROVAL', 'D-VERIFY-BASE-FETCH', 'D-VERIFY-IN-PR', 'D-VERIFY-HTML-URL',
       'D-VERIFY-VERIFYING-SHA', 'D-VERIFY-PUBLICATION', 'D-VERIFY-CAS',
       'D-OP-SCRIPT-POINTER', 'D-OP-BLOCK-GATE', 'D-PUBLISH-BOUNDS', 'D-PUBLISH-SCRUB-GATE',
-      'D-READINESS-LADDER', 'D-READINESS-THREADS', 'D-READINESS-CLASSIFIER',
+      'D-READINESS-LADDER', 'D-READINESS-THREADS', 'D-READINESS-CLASSIFIER', 'D-READINESS-WORKFLOWS', 'D-READINESS-HEAD',
     ]) {
       expect(SOURCE, `${marker} missing`).toContain(marker)
     }

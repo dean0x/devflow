@@ -177,10 +177,7 @@ Load when the resolved tracker provider is `jira` and the operation is `manage-d
 
 1. Find or create the rolling "Tech Debt Backlog" item. `## Tech Debt` defaults to a **single rolling item**, so this operation looks for exactly one: use the *search* capability once with a structured filter over the resolved project and the tech-debt label. Absent ⇒ create it with the *create issue* capability, using only the field names `## Required Fields` allows.
 2. Check the item's description length against the `{{comment_cap()}}`-character cap; archive when it is over.
-3. Extract items to add:
-   - `## Fix Separately` entries from `{REVIEW_DIR}/resolution-summary.md` (FIX_SEPARATE from Triage agent)
-   - `## Deferred to Tech Debt` entries from `{REVIEW_DIR}/resolution-summary.md` (TECH_DEBT from Triage agent)
-   - Pre-existing issues (Category 3) from review reports
+{{opsteps.manage_debt_step_3()}}
 4. Deduplicate against existing items using semantic matching.
 5. Remove items that have been fixed (verify in codebase).
 6. Compose the updated description and post it through the gate in `### Posting gate` below, using the *update description* capability.

@@ -15,8 +15,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 **Stale-install window:**
 - Until you run `devflow init`, your installed level reference has no Evaluate row, so Evaluate runs as at `full`. If the reference is new and the installed Evaluate agent is old, `/implement` runs one pass at the full report scope.
 
+### Upgrade notes — Severity tiers by level
+
+**What changes:**
+- At `standard`, the default, and at `lean`, `/resolve` no longer fixes every finding that the matrix sends to FIX_NOW. Triage sorts each kept item into a severity tier. `full` keeps today's triage and fixes. At every level, each issue cell in `resolution-summary.md` starts with its severity in brackets.
+  - CRITICAL, HIGH and severe MEDIUM findings in the branch's own code stay FIX_NOW.
+  - A prose-only MEDIUM finding is fixed with text edits alone. If Code must change logic to fix it, Code leaves it unedited and the item goes to Fix Separately.
+  - Lower MEDIUM and LOW findings go to Fix Separately. One backlog issue records them.
+  - A pre-existing finding that is not a security finding goes to Fix Separately, also when the branch touched its file. Until now, `/resolve` fixed such a finding in a touched file.
+  - A security finding stays FIX_NOW or ESCALATED at every severity, LOW and pre-existing included.
+- Run `devflow gates --set full` to keep today's `/resolve`: Triage applies no tiers, every FIX_NOW item is fixed, and a pre-existing finding in a touched file is fixed.
+
+**Stale-install window:**
+- Until you run `devflow init`, your installed `/resolve` and Triage agent have no tiers, so they behave as at `full`. If Triage is new and the installed reference is missing or unreadable, Triage applies no tier, keeps every verdict and reports `Tiers: not applied (reference unreadable)`.
+
 ### Changed
 
+- **`/resolve` applies severity tiers at `standard` and `lean`** ([#484](https://github.com/dean0x/devflow/issues/484)).
+  - At `standard` and `lean`, Triage reads a new reference, `triage/severity-tiers.md`, once, after its normal checks. It runs a nine-step checklist in order, and the first step that matches decides.
+    The checklist only narrows. It never changes a FALSE_POSITIVE, BY_DESIGN or ESCALATED verdict, and it never moves a finding up.
+    A duplicate group takes the highest tier of its members. At `full`, Triage skips the new section, and the rest of the Triage agent text is byte-for-byte what it was.
+  - Triage judges a security finding by its label and also by the defect that it reads in the code, at every severity. A security control that fails open or is weakened, and a false security or safety claim, count as security at every severity.
+  - A prose-only fix goes to Code `issue-fix` with the Risk Tier `Standard, prose only`. No new agent is spawned. If Code leaves an item unedited for a logic change, `/resolve` records it as Fix Separately with the Reason `needs a logic change`.
+  - A DEFER item goes to Fix Separately with the Reason `severity tier: DEFER`. The manage-debt step puts the items of one run in one shared backlog issue.
+  - At every level, each issue cell in `resolution-summary.md` starts with its severity in brackets when the issue has one, for example `[HIGH]`. The `**Gate level**` header can carry a level note.
+  - The gate level hints, the effect text of `devflow gates`, `README.md`, `docs/cli-reference.md` and `docs/commands.md` name the tiers.
+  - Residual risk: the tiers rest on the Triage classification, and no live test checks it. The guards pin the text that the agents read. A finding that Triage ranks too low waits in the backlog issue until a later review brings it back.
+- **The level references state that a waiting phase starts at once** ([#600](https://github.com/dean0x/devflow/issues/600)).
+  - The Skipped line of `resolve-levels.md` and `implement-levels.md` now says: a phase that waits for a skipped phase starts at once.
+  - The `harden-scope` bullet of `implement-levels.md` no longer says `, and Phase 5 starts at once`, because the Skipped line now covers it.
+  - Behaviour is unchanged. Only the wording moved.
 - **Validate re-runs each failed test file alone** ([#477](https://github.com/dean0x/devflow/issues/477)).
   - After a failed test run, Validate re-runs each failed test file alone, once, with verbose output.
     The bound is 20 files.
@@ -57,6 +85,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Sections marked private stay out of posted summaries** ([#567](https://github.com/dean0x/devflow/issues/567)).
+  - A review or resolution summary can hold a section whose heading starts with the word `Private`, in any letter case, for example `## Private notes`. A heading line inside a code block counts too.
+  - The PR comment leaves that section out, up to the next heading of the same or a higher level. This holds for the full report and for the stub.
+  - If no public text remains, devflow posts no comment and reports `**Status**: DEGRADED (no postable summary)`.
+  - The review and resolution writers now put text that must stay out of the PR comment in a final `## Private notes` section.
+  - The strip does not edit your local summary file.
+  - Run `devflow init` after you update.
+- **`/resolve` adds only triaged items to the tech debt backlog** ([#630](https://github.com/dean0x/devflow/issues/630)).
+  - Under GitHub, Linear and Jira, the `manage-debt` operation takes backlog items only from the `## Fix Separately` and `## Deferred to Tech Debt` sections of `resolution-summary.md`.
+  - If `resolution-summary.md` is missing, the operation returns `TRACEABILITY: DEGRADED (resolution summary missing)` and leaves the backlog unchanged.
+  - Run `devflow init` after you update.
 - **The evidence comment is edited in place** ([#504](https://github.com/dean0x/devflow/issues/504)).
   - A PR keeps one evidence comment across pushes.
     `update-pr-evidence` edits your own evidence comment in place for each new head.
@@ -66,6 +105,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - A refused edit prints `DEGRADED (comment edit failed)`.
     An own comment with no readable id prints `DEGRADED (comment id unreadable)`.
     A failed edit never falls back to a new post.
+- **CI PASSING needs a passing GitHub Actions check on a mergeable PR** ([#618](https://github.com/dean0x/devflow/issues/618)).
+  - The CI wait and the merge-readiness report now read CI as passing only when at least one GitHub Actions check passed on the PR head, no check is pending or failing, and GitHub reports the PR mergeable.
+    Before, a PR with only external checks, for example a scanner, could read CI as passing while its build and tests never ran.
+    A PR with a merge conflict could do the same, because GitHub starts no pull request workflow on it.
+  - These cases now read "status unknown" instead of a pass or "no CI":
+    a PR with only external checks (`reason=no-workflow-check`), a PR with a merge conflict (`reason=merge-conflict`), and a repository with active workflows but no run on the head (`reason=no-workflow-check`).
+    A PR with a merge conflict reads `reason=merge-conflict` even when a check fails or is pending.
+    The gate does not report those checks until you resolve the conflict.
+    A merge state that GitHub does not report in time ends the wait with `reason=deadline`.
+    A PR that is merged or closed ends the wait at once with `reason=not-open`. It does not wait for a merge state.
+  - "No CI" needs a mergeable PR with no checks and no active workflow file under `.github/workflows/`. A repository with no workflow file still reads "no CI".
+    When a PR has no checks and the token cannot read Actions workflows, the wait ends with `reason=gh-failed`.
+  - The merge-readiness report reads CI for the PR head. It counts a pass or "no CI" only when the PR head it read is the head of the evidence.
+    It reads CI once and does not wait, so right after a push or a base move it can say "status unknown".
+  - If your CI is not GitHub Actions, or your workflow does not run on the PR (stacked PRs, `paths` filters, release-only workflows, fork PRs that wait for approval), check the CI result on the PR page before merging.
+    The gate then reports "CI status unknown — verify manually before merging".
+  - Known limit: a passing result shows that a GitHub Actions check passed, not that the test workflow ran by name.
+  - Run `devflow init` after you update.
 
 ---
 

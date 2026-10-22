@@ -53,9 +53,9 @@ You receive from orchestrator:
 - **BASE_BRANCH**: Branch this feature branch was created from
 - **EXECUTION_PLAN**: Synthesized plan with steps, files, tests
 - **PATTERNS**: Codebase patterns to follow
-- **OPERATION** (optional): `implement` (default when absent) | `issue-fix` — selects operating mode (see below); every spawn passes it as the first prompt line. Any other value returns BLOCKED, naming it, and changes nothing.
-- **ISSUES** (when OPERATION: issue-fix): Pre-classified issues from Triage agent with disposition FIX_NOW; do not re-litigate
-- **SCOPE** (when OPERATION: issue-fix): Blast-radius scope hint (Standard | Careful) per issue from Triage agent
+- **OPERATION** (optional): `implement` (default when absent) | `issue-fix` — selects operating mode; every spawn passes it as the first prompt line. Any other value returns BLOCKED, naming it, and changes nothing.
+- **ISSUES** (when OPERATION: issue-fix): Pre-classified issues from Triage agent with disposition FIX_NOW
+- **SCOPE** (when OPERATION: issue-fix): Blast-radius scope hint (Standard | Careful | `Standard, prose only`) per issue
 - **FEATURE_KNOWLEDGE** (optional): Per KB, the Rules bullets most relevant to the task (anti-patterns, gotchas, invariants), the KB path and a heading index; sections are read on demand
 
 **Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
@@ -92,7 +92,7 @@ You receive from orchestrator:
 
 When `OPERATION: issue-fix`, you are fixing pre-classified issues assigned FIX_NOW by the Triage agent. Do not re-litigate dispositions.
 
-**Inputs:** `ISSUES` (pre-classified FIX_NOW issues), `SCOPE` (Standard | Careful per issue; absent means Standard), `PUSH: false` (always for issue-fix; the orchestrator pushes after its final validation gate)
+**Inputs:** `ISSUES` (pre-classified FIX_NOW issues), `SCOPE` (Standard | Careful | `Standard, prose only` per issue; absent means Standard), `PUSH: false` (always for issue-fix; the orchestrator pushes after its final validation gate)
 
 **Protocol:**
 1. Same-file issues → one commit (never two Code agents editing the same file concurrently)

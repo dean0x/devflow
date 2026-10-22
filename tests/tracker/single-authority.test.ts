@@ -14,7 +14,9 @@
  *
  * A fourth section, D-NEUTRAL-STEP-MOVE, is the other direction of the same idea:
  * the provider-neutral STEP TEXT of the tracker operations is authored once in
- * `_steps.mds` and must read identically in all three providers' references.
+ * `_steps.mds` (or, when it sits at a numbered position among a provider's own
+ * steps, in `_ops_steps.mds`) and must read identically in all three providers'
+ * references.
  *
  * The failure both registries exist to catch is a provider mechanics file
  * RESTATING one of those sentences: the rule then has two authorities, and the
@@ -1132,13 +1134,22 @@ describe('tracker contract: one authority per normative sentence [DR-19]', () =>
 // hoisted identity lookup would break the capability-hoist guard); the GraphQL null
 // alias rule; and the learn-conventions pointer sentence (a literal reference path
 // the budget model scans the agent's own op section for).
+//
+// A step that all three providers run identically but that sits at a numbered
+// position among a provider's own steps has the other home, `_ops_steps.mds`
+// (`partial: 'opsteps'`), imported by the alias `opsteps`. The same arms read it
+// from there. `manage-debt`'s step 3 is the one such step registered: it names
+// the two sections the operation reads its items from, so three copies would
+// each need the same hand edit.
 
-/** A moved step: the `_steps.mds` define that holds it, the op it belongs to, and the conditions it must keep. */
+/** A moved step: the define that holds it, the op it belongs to, and the conditions it must keep. */
 interface NeutralStep {
   readonly define: string;
   readonly op: string;
   /** Clauses that gate the step. They travel with it: deduplication applies to facts, never to a condition on an action. */
   readonly conditions: readonly string[];
+  /** The partial that holds the define, by import alias. `steps` (`_steps.mds`) when absent. */
+  readonly partial?: keyof typeof NEUTRAL_PARTIAL_FILES;
 }
 
 export const NEUTRAL_STEPS: readonly NeutralStep[] = [
@@ -1165,11 +1176,18 @@ export const NEUTRAL_STEPS: readonly NeutralStep[] = [
     op: 'post-wave-report',
     conditions: ['if repo-relative, resolve against WORKTREE_PATH when supplied, else against cwd'],
   },
+  { define: 'manage_debt_step_3', op: 'manage-debt', partial: 'opsteps', conditions: [] },
 ];
 
 const TRACKER_SRC_DIR = path.join(path.resolve(import.meta.dirname, '../..'), 'src', 'assets', 'mds', 'tracker');
 
-/** The body of one `@define name():` in `_steps.mds`, byte-exact, or null when absent. */
+/** The partials a neutral step can live in, by the alias the provider modules import them under. */
+const NEUTRAL_PARTIAL_FILES = {
+  steps: path.join(TRACKER_SRC_DIR, '_steps.mds'),
+  opsteps: path.join(TRACKER_SRC_DIR, '..', 'git', '_ops_steps.mds'),
+} as const;
+
+/** The body of one `@define name():` in a partial's source, byte-exact, or null when absent. */
 function commonDefineBody(source: string, name: string): string | null {
   const open = `@define ${name}():\n`;
   const at = source.indexOf(open);
@@ -1198,7 +1216,13 @@ function collectDroppedConditions(step: NeutralStep, references: ReadonlyMap<str
 }
 
 describe('D-NEUTRAL-STEP-MOVE: moved step text is authored once and identical in all three providers', () => {
-  const common = requireFile('shared partial', path.join(TRACKER_SRC_DIR, '_steps.mds'));
+  const partialSources = {
+    steps: requireFile('shared partial', NEUTRAL_PARTIAL_FILES.steps),
+    opsteps: requireFile('shared partial', NEUTRAL_PARTIAL_FILES.opsteps),
+  };
+  const partialOf = (step: NeutralStep): keyof typeof NEUTRAL_PARTIAL_FILES => step.partial ?? 'steps';
+  const bodyOf = (step: NeutralStep): string | null =>
+    commonDefineBody(partialSources[partialOf(step)], step.define);
   const providers = VARIANT_MODULES
     .filter(mod => mod.subdir.startsWith('tracker/'))
     .map(mod => mod.subdir.slice('tracker/'.length));
@@ -1215,14 +1239,16 @@ describe('D-NEUTRAL-STEP-MOVE: moved step text is authored once and identical in
     }
   });
 
-  it('each step is one _steps.mds define, expanded by every provider module and spelled out in none', () => {
+  it('each step is one define in its shared partial, expanded by every provider module and spelled out in none', () => {
     for (const step of NEUTRAL_STEPS) {
-      const body = commonDefineBody(common, step.define);
-      expect(body, `_steps.mds has no @define ${step.define}`).not.toBeNull();
-      expect(common.includes(`@export ${step.define}\n`) || common.endsWith(`@export ${step.define}`), `${step.define} is exported`).toBe(true);
+      const partial = partialOf(step);
+      const home = partialSources[partial];
+      const body = bodyOf(step);
+      expect(body, `${path.basename(NEUTRAL_PARTIAL_FILES[partial])} has no @define ${step.define}`).not.toBeNull();
+      expect(home.includes(`@export ${step.define}\n`) || home.endsWith(`@export ${step.define}`), `${step.define} is exported`).toBe(true);
       for (const provider of providers) {
         const source = requireFile('provider module', path.join(TRACKER_SRC_DIR, `_${provider}.mds`));
-        const calls = source.split(`{{steps.${step.define}()}}`).length - 1;
+        const calls = source.split(`{{${partial}.${step.define}()}}`).length - 1;
         expect(calls, `_${provider}.mds must expand ${step.define} exactly once`).toBe(1);
         expect(
           source.includes(body!.split('\n')[0]),
@@ -1234,7 +1260,7 @@ describe('D-NEUTRAL-STEP-MOVE: moved step text is authored once and identical in
 
   it('the three generated copies of each step are byte-identical', () => {
     const problems = NEUTRAL_STEPS.flatMap(step =>
-      collectDivergentCopies(step, commonDefineBody(common, step.define)!, referencesFor(step.op)));
+      collectDivergentCopies(step, bodyOf(step)!, referencesFor(step.op)));
     expect(problems, `a provider reference diverged from the shared define:\n  ${problems.join('\n  ')}`).toEqual([]);
   });
 
@@ -1242,7 +1268,7 @@ describe('D-NEUTRAL-STEP-MOVE: moved step text is authored once and identical in
     const step = NEUTRAL_STEPS.find(s => s.define === 'wave_report_read_step')!;
     const refs = referencesFor(step.op);
     const jira = refs.get('jira')!;
-    const body = commonDefineBody(common, step.define)!;
+    const body = bodyOf(step)!;
     expect(jira.includes(body), 'the seed must start from a faithful copy').toBe(true);
     const edited = new Map(refs).set('jira', jira.replace('use as-is', 'use verbatim'));
     expect(edited.get('jira')).not.toBe(jira);
@@ -1252,7 +1278,7 @@ describe('D-NEUTRAL-STEP-MOVE: moved step text is authored once and identical in
   it('the text that moved is no longer in the always-loaded agent', () => {
     const agent = requireFile('agent', path.join(REFS_DIR, '..', '..', '..', 'agents', 'git.md'));
     for (const step of NEUTRAL_STEPS) {
-      const firstLine = commonDefineBody(common, step.define)!.split('\n')[0];
+      const firstLine = bodyOf(step)!.split('\n')[0];
       expect(agent.includes(firstLine), `${step.define} is still spelled in git.md`).toBe(false);
     }
   });

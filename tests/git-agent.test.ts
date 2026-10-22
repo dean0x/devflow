@@ -123,15 +123,23 @@ function operationReferencesCorpus(): CorpusEntry[] {
 let opReferencesMemo: CorpusEntry[] | undefined;
 
 /**
- * A copy of the sink corpus with one PR-host file's content replaced by `transform`.
+ * A copy of a corpus with one PR-host file's content replaced by `transform`.
+ *
+ * `corpus` defaults to the sink corpus; a probe whose live guard reads another corpus
+ * (the operation references) passes that one, so the seed always edits the corpus the
+ * collector reads.
  *
  * Shared by the known-bad probes below that seed a defect into a single
  * `references/pr/{op}.md` entry and drive the live guard's own predicate over
  * the result — the seeding is scaffolding common to both probes, the
  * defect and the predicate are what make each one distinct.
  */
-function seedPrHostFile(op: string, transform: (content: string) => string): CorpusEntry[] {
-  return cachedSinkCorpus().map(entry =>
+function seedPrHostFile(
+  op: string,
+  transform: (content: string) => string,
+  corpus: CorpusEntry[] = cachedSinkCorpus(),
+): CorpusEntry[] {
+  return corpus.map(entry =>
     isPrHostEntryPath(entry.path, op)
       ? { path: entry.path, content: transform(entry.content) }
       : entry,
@@ -1645,6 +1653,89 @@ describe('git agent — static content guards', () => {
    */
   const D10_FAIL_CLOSED_LITERAL = 'treat as PUBLIC';
 
+  /** The rule's marker spelling, named once: the first row below and the probes that seed it away read this string. */
+  const PRIVATE_MARKER_LITERAL = 'the word `Private` (any case)';
+
+  /**
+   * The private-section rule's load-bearing clauses, each of which a summary op must be
+   * able to reach: the rule is one LLM-applied control, so each op's reference must carry
+   * every clause. The same rows feed the non-vacuity arm below.
+   */
+  const PRIVATE_SECTION_ROWS: readonly { readonly literal: string; readonly why: string }[] = [
+    {
+      literal: PRIVATE_MARKER_LITERAL,
+      why: 'the marker spelling; a private section would reach the posted comment',
+    },
+    {
+      literal: 'of 0-3 spaces, 1-6 `#`,',
+      why: 'the start shape; an indented code line or a level-7 line would start or miss a private section',
+    },
+    {
+      literal: 'a space or tab and the word',
+      why: 'the start shape; a tab after the heading marks starts a private section too',
+    },
+    {
+      literal: 'fenced or not',
+      why: 'a start inside a fence must still strip; a fenced start would stay in the post',
+    },
+    {
+      literal: 'not followed by a letter or digit',
+      why: 'the follow-set; a comma, dash or period after the word is still a private heading',
+    },
+    {
+      literal: 'It ends before the next unfenced heading (0-3 spaces) with as many `#` as its start or fewer',
+      why: 'the end rule; text under a nested heading of a private section would reach the post',
+    },
+    {
+      literal: 'else at end of file; an unclosed fence in it runs it to end of file',
+      why: 'the end rule; a last or unclosed private section would stay in the post',
+    },
+    {
+      literal: 'When unsure, strip more.',
+      why: 'the tie-break; an unclear case would stay in the post',
+    },
+    {
+      literal: 'The read strips them before either mode',
+      why: 'strip at the read, so STUB never reads private text either',
+    },
+    {
+      literal: 'closing at each cut any fence the cut leaves open',
+      why: 'a private heading inside a public fence strips its closing fence; the post would render later text as code',
+    },
+    {
+      literal: 'use only the stripped text; the file stays unedited',
+      why: 'compose, cap and re-cap use only the stripped text; the local file is not edited',
+    },
+    {
+      literal: 'A failed read or strip',
+      why: 'a failed read or strip would let unstripped text reach the compose step',
+    },
+    {
+      literal: 'blank stripped text',
+      why: 'when no public text remains, no comment is posted',
+    },
+    {
+      literal: 'before the scrub, a body line of that start shape',
+      why: 'the backstop scan on the composed body',
+    },
+    {
+      literal: '→ post nothing',
+      why: 'the failure outcome; any other outcome would still comment on the PR',
+    },
+    {
+      literal: '`**Status**: DEGRADED (no postable summary)`',
+      why: 'the fail-closed report, with the fixed reason the registry holds',
+    },
+    {
+      literal: 'never quote private text',
+      why: 'the failure report must not repeat the private text it withheld',
+    },
+    {
+      literal: '**Stripped**: {n} private sections',
+      why: 'the op report tells the caller how many sections the strip removed, so a long cut is not silent',
+    },
+  ];
+
   /** Every D10 literal each summary op must be able to reach, with its reason. */
   const D10_PER_OP_LITERALS: readonly { readonly literal: string; readonly why: string }[] = [
     {
@@ -1662,6 +1753,7 @@ describe('git agent — static content guards', () => {
       literal: 'Full summary withheld (public repository).',
       why: 'changing this line alters the stub template seen by PR reviewers',
     },
+    ...PRIVATE_SECTION_ROWS,
   ];
 
   /**
@@ -1675,7 +1767,7 @@ describe('git agent — static content guards', () => {
   const d10Reaches = (corpus: CorpusEntry[], op: string, literal: string): boolean =>
     extractOpSection(corpus, op, 'union').includes(literal);
 
-  it('D10: every summary op reaches the probe, the three visibility values, the fail-closed rule and the stub sentence', () => {
+  it('D10: every summary op reaches the probe, the three visibility values, the fail-closed rule, the stub sentence and every private-section rule row', () => {
     for (const op of D10_SUMMARY_OPS) {
       for (const { literal, why } of D10_PER_OP_LITERALS) {
         expect(
@@ -1703,6 +1795,289 @@ describe('git agent — static content guards', () => {
       'the per-op predicate must lose exactly the op whose mechanics were emptied — if it loses ' +
       'both or neither, the seeding missed the file and the probe is inert',
     ).toEqual(['post-resolution-summary']);
+  });
+
+  // ── Private sections stay out of the posted summaries ──────────────────────
+  //
+  // One LLM-applied rule, defined once in `_ops_pr.mds` and expanded into both summary
+  // contracts. Each arm below names its collector and drives a known-bad seed through that
+  // same collector, so a narrowed collector takes its probe red.
+
+  const PRIVATE_RULE_LABEL = '**Private sections:**';
+  const PRIVATE_RULE_CALL = '{{private_sections_rule()}}';
+  const PRIVATE_SOURCE_REL = 'src/assets/mds/git/_ops_pr.mds';
+
+  /** The rule line of one op's own section ('sole': the file the agent tells a spawn to read). */
+  const privateRuleLine = (corpus: CorpusEntry[], op: string): string =>
+    extractOpSection(corpus, op, 'sole')
+      .split('\n')
+      .find(line => line.startsWith(PRIVATE_RULE_LABEL)) ?? '';
+
+  /** Each summary op's own placeholder for the stripped file; the FULL template must read it. */
+  const FULL_PLACEHOLDERS: Readonly<Record<(typeof D10_SUMMARY_OPS)[number], string>> = {
+    'post-review-summary': '{stripped review-summary.md}',
+    'post-resolution-summary': '{stripped resolution-summary.md}',
+  };
+
+  /**
+   * Collector: per summary op, the FULL template defects — a section that names the old
+   * whole-file placeholder, or a FULL block (`**FULL mode:**` up to `**STUB mode`) that
+   * lacks the op's own stripped placeholder. 'union' over the sink corpus: the template
+   * lives in the PR-host tree. Each defect reports its own reason, so a probe can prove
+   * one condition at a time.
+   */
+  function collectFullPlaceholderDefects(corpus: CorpusEntry[]): string[] {
+    return D10_SUMMARY_OPS.flatMap(op => {
+      const sec = extractOpSection(corpus, op, 'union');
+      const start = sec.indexOf('**FULL mode:**');
+      const end = sec.indexOf('**STUB mode', start);
+      const fullBlock = start === -1 || end === -1 ? '' : sec.slice(start, end);
+      return [
+        ...(sec.includes('{full content of') ? [`${op}: names the whole-file placeholder`] : []),
+        ...(fullBlock.includes(FULL_PLACEHOLDERS[op]) ? [] : [`${op}: FULL block lacks ${FULL_PLACEHOLDERS[op]}`]),
+      ];
+    });
+  }
+
+  /**
+   * Collector: defects in the rule line across the two ops' own sections — a missing line,
+   * or two lines that differ. The copies are one define expanded twice, so they match by
+   * construction; a hand edit to one copy is the drift this reports.
+   */
+  function collectPrivateRuleDrift(corpus: CorpusEntry[]): string[] {
+    const lines = D10_SUMMARY_OPS.map(op => ({ op, line: privateRuleLine(corpus, op) }));
+    const defects = lines.filter(({ line }) => line === '').map(({ op }) => `${op}: no rule line`);
+    const distinct = new Set(lines.map(({ line }) => line));
+    return distinct.size > 1 ? [...defects, 'the two rule lines differ'] : defects;
+  }
+
+  /**
+   * Collector: every file of the corpus that holds the wrong number of rule labels — exactly
+   * one in each summary op's own PR-host reference, none anywhere else (git.md and every
+   * provider's references included), and a summary op whose reference is absent. Counted per
+   * file over the whole sink corpus ('union'), so a copy in any generated reference is a
+   * defect; the drift collector above reads only the first line of each op's own section.
+   */
+  function collectPrivateRuleLabelDefects(corpus: CorpusEntry[]): string[] {
+    const absent = D10_SUMMARY_OPS
+      .filter(op => !corpus.some(entry => isPrHostEntryPath(entry.path, op)))
+      .map(op => `${op}: no PR-host reference in the corpus`);
+    const miscounted = corpus.flatMap(entry => {
+      const expected = D10_SUMMARY_OPS.some(op => isPrHostEntryPath(entry.path, op)) ? 1 : 0;
+      const found = entry.content.split(PRIVATE_RULE_LABEL).length - 1;
+      return found === expected
+        ? []
+        : [`${referenceRelPath(entry.path) ?? path.basename(entry.path)}: label count ${found}, expected ${expected}`];
+    });
+    return [...absent, ...miscounted];
+  }
+
+  /**
+   * Collector: the ops whose rule line does not sit above `### Process`. The compose step is
+   * a step inside Process, so a rule above the heading is above the compose step as well; a
+   * separate compose condition could never report a defect alone.
+   */
+  function collectPrivateRuleOrderDefects(corpus: CorpusEntry[]): string[] {
+    return D10_SUMMARY_OPS.filter(op => {
+      const sec = extractOpSection(corpus, op, 'sole');
+      const rule = sec.indexOf(PRIVATE_RULE_LABEL);
+      const process = sec.indexOf('### Process');
+      return rule === -1 || process === -1 || rule > process;
+    });
+  }
+
+  /** Collector: the contract defines in a partial whose body calls the private-sections rule. */
+  function collectPrivateRuleCallers(source: string): string[] {
+    const callers: string[] = [];
+    for (const m of source.matchAll(/^@define (\w+)\(\):\n([\s\S]*?)\n@end$/gm)) {
+      if (m[1] !== 'private_sections_rule' && m[2].includes(PRIVATE_RULE_CALL)) callers.push(m[1]);
+    }
+    return callers.sort();
+  }
+
+  it('private sections: every private-section row is absent without the PR-host tree (union arms are non-vacuous)', () => {
+    for (const op of D10_SUMMARY_OPS) {
+      const narrowed = extractOpSectionOrEmpty(sinkCorpusWithoutPrHost(), op);
+      for (const { literal } of PRIVATE_SECTION_ROWS) {
+        expect(
+          narrowed.includes(literal),
+          `${op}: "${literal}" is reachable without references/pr/, so the union arm proves nothing`,
+        ).toBe(false);
+      }
+    }
+  });
+
+  it('private sections known-bad probe: dropping the marker spelling from ONE pr/ file is reported for that op only', () => {
+    const seeded = seedPrHostFile('post-review-summary', c => c.split(PRIVATE_MARKER_LITERAL).join('the word `Secret`'));
+    expect(
+      D10_SUMMARY_OPS.filter(op => d10Reaches(seeded, op, PRIVATE_MARKER_LITERAL)),
+      'the per-op predicate must lose exactly the op whose reference lost the spelling',
+    ).toEqual(['post-resolution-summary']);
+  });
+
+  /**
+   * Weaker spellings of the rule. Each one drops an effect the rule exists for, so some row of
+   * PRIVATE_SECTION_ROWS must stop reaching the edited op, or that edit would pass this guard.
+   */
+  const PRIVATE_RULE_WEAKENINGS: readonly { readonly from: string; readonly to: string; readonly effect: string }[] = [
+    {
+      from: 'It ends before the next unfenced heading (0-3 spaces) with as many `#` as its start or fewer, else',
+      to: 'It ends before the next heading, else',
+      effect: 'text under a nested heading of a private section would reach the post',
+    },
+    {
+      from: 'blank stripped text or, ',
+      to: '',
+      effect: 'a summary with no public text would still be posted',
+    },
+    {
+      from: '→ post nothing; report',
+      to: '→ post the stub; report',
+      effect: 'a failed strip would still post a comment',
+    },
+    {
+      from: ' and never quote private text',
+      to: '',
+      effect: 'the failure report could repeat private text',
+    },
+    {
+      from: 'When unsure, strip more.',
+      to: 'When unsure, keep it.',
+      effect: 'an unclear case would stay in the post',
+    },
+    {
+      from: 'of 0-3 spaces, 1-6 `#`, a space',
+      to: 'of any `#`, a space',
+      effect: 'an indented code line or a level-7 line would start or miss a private section',
+    },
+  ];
+
+  it('private sections known-bad probe: each weaker spelling of the rule is reported for that op only', () => {
+    const unreported = PRIVATE_RULE_WEAKENINGS.filter(({ from, to }) => {
+      const seeded = seedPrHostFile('post-review-summary', c => c.split(from).join(to));
+      const reportedOps = D10_SUMMARY_OPS.filter(op =>
+        PRIVATE_SECTION_ROWS.some(({ literal }) => !d10Reaches(seeded, op, literal)),
+      );
+      return reportedOps.join() !== 'post-review-summary';
+    }).map(({ effect }) => effect);
+    expect(
+      unreported,
+      'no row reports these weaker rules for the edited op alone — or the seed missed its anchor',
+    ).toEqual([]);
+  });
+
+  it("private sections: each FULL template reads its own op's stripped file, and no op keeps the whole-file placeholder", () => {
+    expect(collectFullPlaceholderDefects(cachedSinkCorpus())).toEqual([]);
+  });
+
+  it('private sections known-bad probe: each FULL template defect is reported alone, for that op only', () => {
+    const resolution = FULL_PLACEHOLDERS['post-resolution-summary'];
+    const review = FULL_PLACEHOLDERS['post-review-summary'];
+    const defectsAfter = (op: string, transform: (content: string) => string): string[] =>
+      collectFullPlaceholderDefects(seedPrHostFile(op, transform));
+
+    // Whole-file placeholder added, stripped placeholder kept: the first condition alone.
+    expect(
+      defectsAfter('post-resolution-summary', c =>
+        c.replace(resolution, `${resolution}\n{full content of resolution-summary.md}`),
+      ),
+    ).toEqual(['post-resolution-summary: names the whole-file placeholder']);
+
+    // Stripped placeholder removed, nothing added: the second condition alone.
+    expect(defectsAfter('post-resolution-summary', c => c.replace(resolution, ''))).toEqual([
+      `post-resolution-summary: FULL block lacks ${resolution}`,
+    ]);
+
+    // The placeholder present elsewhere in the section, but not inside the FULL block.
+    expect(
+      defectsAfter('post-resolution-summary', c => `${c.replace(resolution, '')}\n${resolution}\n`),
+    ).toEqual([`post-resolution-summary: FULL block lacks ${resolution}`]);
+
+    // The other op's stripped placeholder in this op's FULL block is not its own.
+    expect(defectsAfter('post-review-summary', c => c.replace(review, resolution))).toEqual([
+      `post-review-summary: FULL block lacks ${review}`,
+    ]);
+  });
+
+  it('private sections: both ops carry one byte-identical, non-empty rule line', () => {
+    expect(collectPrivateRuleDrift(operationReferencesCorpus())).toEqual([]);
+  });
+
+  it('private sections known-bad probe: a rule line edited in one op is reported by the drift collector', () => {
+    // Seeds the corpus the collector reads (the operation-references corpus), not the sink corpus.
+    const seeded = seedPrHostFile(
+      'post-review-summary',
+      c => c.replace('When unsure, strip more.', 'When unsure, keep it.'),
+      operationReferencesCorpus(),
+    );
+    expect(collectPrivateRuleDrift(seeded)).toEqual(['the two rule lines differ']);
+  });
+
+  it("private sections: the rule label occurs once in each summary op's reference and in no other generated reference", () => {
+    expect(collectPrivateRuleLabelDefects(cachedSinkCorpus())).toEqual([]);
+  });
+
+  it('private sections known-bad probe: a second copy of the rule is reported in a summary op and in any other reference', () => {
+    const copy = (c: string): string => `${c}\n${PRIVATE_RULE_LABEL} a hand-written copy\n`;
+    expect(collectPrivateRuleLabelDefects(seedPrHostFile('post-review-summary', copy))).toEqual([
+      'pr/post-review-summary.md: label count 2, expected 1',
+    ]);
+    expect(collectPrivateRuleLabelDefects(seedPrHostFile('check-ci-status', copy))).toEqual([
+      'pr/check-ci-status.md: label count 1, expected 0',
+    ]);
+    expect(
+      collectPrivateRuleLabelDefects(
+        seedPrHostFile('post-resolution-summary', c => c.replace(PRIVATE_RULE_LABEL, 'Private sections:')),
+      ),
+    ).toEqual(['pr/post-resolution-summary.md: label count 0, expected 1']);
+  });
+
+  it('private sections: in each op the rule sits above the Process heading', () => {
+    expect(collectPrivateRuleOrderDefects(operationReferencesCorpus())).toEqual([]);
+  });
+
+  it('private sections known-bad probe: a rule moved below the Process heading is reported for that op only', () => {
+    const seeded = seedPrHostFile(
+      'post-resolution-summary',
+      c => {
+        const lines = c.split('\n');
+        const at = lines.findIndex(line => line.startsWith(PRIVATE_RULE_LABEL));
+        const [rule] = lines.splice(at, 1);
+        lines.splice(lines.findIndex(line => line.startsWith('5. Compose body')), 0, rule);
+        return lines.join('\n');
+      },
+      operationReferencesCorpus(),
+    );
+    expect(collectPrivateRuleOrderDefects(seeded)).toEqual(['post-resolution-summary']);
+  });
+
+  it('private sections: one define at the source, called from exactly the two summary contracts', () => {
+    const ops = loadFile(PRIVATE_SOURCE_REL);
+    expect(ops, `${PRIVATE_SOURCE_REL} has no private_sections_rule define`).toContain('@define private_sections_rule():');
+    expect(collectPrivateRuleCallers(ops)).toEqual(['post_resolution_summary_contract', 'post_review_summary_contract']);
+    for (const file of ['_pr.mds', '_references.mds']) {
+      const text = loadFile(`src/assets/mds/git/${file}`);
+      expect(text, `${file} restates the rule label`).not.toContain(PRIVATE_RULE_LABEL);
+      expect(text, `${file} restates the marker spelling`).not.toContain(PRIVATE_MARKER_LITERAL);
+    }
+  });
+
+  it('private sections known-bad probe: a third caller of the rule is reported by the callers collector', () => {
+    const seeded = loadFile(PRIVATE_SOURCE_REL).replace(
+      'Check CI/PR check status for a branch\'s pull request.',
+      `Check CI/PR check status for a branch's pull request.\n\n${PRIVATE_RULE_CALL}`,
+    );
+    expect(collectPrivateRuleCallers(seeded)).toEqual([
+      'check_ci_status_contract',
+      'post_resolution_summary_contract',
+      'post_review_summary_contract',
+    ]);
+  });
+
+  it('private sections: the publication gate no longer says full content and defers composing to each op', () => {
+    const gate = readGeneratedReference('publication-gate.md');
+    expect(gate).not.toContain('full content');
+    expect(gate).toContain('4. Compose body (defined per op).');
   });
 
   it('D10: review-summary dedup marker appears ≥2× in post-review-summary (full mode + stub template)', () => {

@@ -52,8 +52,8 @@ const COMMAND_MAX_BYTES: ReadonlyArray<readonly [string, Build, number]> = [
   ['release', 'off', 19_609],
   ['research', 'on', 14_894],
   ['research', 'off', 10_838],
-  ['resolve', 'on', 51_753],
-  ['resolve', 'off', 48_553],
+  ['resolve', 'on', 51_543],
+  ['resolve', 'off', 48_343],
   ['self-review', 'on', 15_228],
   ['self-review', 'off', 12_156],
 ]
