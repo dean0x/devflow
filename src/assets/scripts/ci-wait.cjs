@@ -116,7 +116,7 @@ const BUCKETS = Object.freeze(['pass', 'fail', 'pending', 'skipping', 'cancel'])
  *                                Bash timeout of 600000 ms the callers pass
  *   POLL_INTERVAL_SECONDS        the sleep between polls; polls cost no model tokens,
  *                                so the cadence is set by gh latency and rate limits
- *   WORKFLOWS_PAGE_ROWS         the rows asked of the workflow list in its one page
+ *   WORKFLOWS_PAGE_ROWS          the rows asked of the workflow list in its one page
  *   GH_CALL_CAP_SECONDS          one gh call's timeout is min(this, time remaining),
  *                                so the last call ends before the deadline
  *   MAX_POLLS                    the loop bound when the clock does not move
@@ -399,6 +399,17 @@ function normalize(res) {
     stdout: errored ? '' : asText(res.stdout),
     stderr: errored ? '' : asText(res.stderr).slice(0, STDERR_KEEP),
   };
+}
+
+/**
+ * Whether a gh call ran out its timeout: spawnSync then reports the error code ETIMEDOUT.
+ * A call that failed in any other way, fast or slow, did not.
+ *
+ * @param {ExecResult | null} res
+ * @returns {boolean}
+ */
+function timedOut(res) {
+  return res !== null && typeof res === 'object' && Boolean(res.error) && res.error.code === 'ETIMEDOUT';
 }
 
 // ---------------------------------------------------------------------------
@@ -710,8 +721,8 @@ async function askWorkflows(gh) {
  * remaining) and polls again; any other result returns. A poll whose gh call fails is not a
  * result: three failed polls in a row are INDETERMINATE (gh-failed), fewer are retried; a
  * pending, open or stall poll in between clears the count. A gh call that the time left cut
- * below GH_CALL_CAP_SECONDS and that did not answer is the deadline, not a failed poll: that
- * poll does not count.
+ * below GH_CALL_CAP_SECONDS and that ran out that timeout is the deadline, not a failed poll:
+ * that poll does not count. Any other failure of that call is a failed poll.
  *
  * The loop stops at the deadline or after MAX_POLLS. The last counted poll gives the line:
  * PENDING stays PENDING, a stall gives its status and reason, and an open or a failed poll,
@@ -744,8 +755,8 @@ async function waitForCi(input) {
   /**
    * One gh call, its timeout min(GH_CALL_CAP_SECONDS, time left). It is null, with no
    * call made, when no time is left. It is also null for a call that the time left held
-   * below GH_CALL_CAP_SECONDS and that did not answer: the deadline cut it short, so it is
-   * no failed poll.
+   * below GH_CALL_CAP_SECONDS and that ran out that timeout: the deadline cut it short, so
+   * it is no failed poll. A call that fails in any other way is a failed poll.
    *
    * @param {string[]} args
    * @returns {Promise<GhAnswer | null>}
@@ -753,7 +764,6 @@ async function waitForCi(input) {
   const gh = async args => {
     const left = Math.floor(deadline - clock.now());
     if (left < 1) return null;
-    const cutShort = left < GH_CALL_CAP_SECONDS * 1000;
     let res = null;
     try {
       res = await exec('gh', [...args], {
@@ -767,8 +777,8 @@ async function waitForCi(input) {
     } catch (_) {
       res = null;
     }
-    const answer = normalize(res);
-    return cutShort && !answer.answered ? null : answer;
+    const cutShort = left < GH_CALL_CAP_SECONDS * 1000 && timedOut(res);
+    return cutShort ? null : normalize(res);
   };
 
   /** The probe's first answer, kept for the run; null until a probe answers. */

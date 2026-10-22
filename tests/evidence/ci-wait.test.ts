@@ -690,6 +690,14 @@ describe('the deadline tail: the line at the deadline comes from the last counte
       expect(r.world.of('view').at(-1)?.timeout).toBeLessThan(30_000)
     })
 
+    for (const code of ['ENOBUFS', 'ENOENT']) {
+      it(`a capped last call that fails fast (${code}) is a failed poll, so a NO_CI stall never ends the wait before 570 s`, async () => {
+        const r = await run(({ kind, elapsed }) => (kind === 'view' ? viewOk() : elapsed >= LAST_POLLS_FROM_MS ? { error: { code } } : { stdout: '[]' }))
+        expect(r.line).toBe('CI INDETERMINATE pr=12 head=aaaaaaa failing=- pending=- waited=570 reason=deadline')
+        expect(r.world.of('checks').at(-1)?.timeout, 'the failed call was a capped one').toBeLessThan(30_000)
+      })
+    }
+
     it('a hang that has the full 30 s to run is a failed poll, so it does not keep a stall', async () => {
       // A checks call that hangs from 400 s on has its full 30 s to run: that is a failed poll, and three in a row are gh-failed.
       const r = await run(({ kind, elapsed }) => (kind === 'view' ? viewOk() : elapsed >= 400_000 ? { hang: true } : { stdout: '[]' }))
