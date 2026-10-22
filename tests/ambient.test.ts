@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import * as p from '@clack/prompts';
 import { addAmbientHook, removeAmbientHook, hasAmbientHook, removeLegacyCommandsRule, createAmbientCommand, COMMANDS_RULE_PATH } from '../src/cli/commands/ambient.js';
 import type { StreamResult } from './integration/helpers.js';
 import {
@@ -767,6 +768,120 @@ describe('ambient --enable uses the canonical devflow dir (TP-24, AC-20)', () =>
     const converged = await fs.readFile(settingsPath, 'utf-8');
     await createAmbientCommand().parseAsync(['--enable'], { from: 'user' });
     expect(await fs.readFile(settingsPath, 'utf-8')).toBe(converged);
+  });
+});
+
+/**
+ * `ambient --enable` registers hooks, but the charter and the agents it routes to come from
+ * `devflow init`. When the manifest does not list devflow-ambient the command says so, once.
+ * The manifest is read without healing or rewriting, and the hooks are registered either way.
+ */
+describe('ambient --enable reports when the ambient agents are not installed', () => {
+  const WARNING = 'Ambient agents are not installed. Run `devflow init` to install them.';
+  let tmpHome: string;
+  let settingsPath: string;
+  let manifestPath: string;
+  let warn: MockInstance<typeof p.log.warn>;
+  let info: MockInstance<typeof p.log.info>;
+
+  async function writeManifest(plugins: string[]): Promise<void> {
+    await fs.writeFile(manifestPath, JSON.stringify({
+      version: '3.9.0',
+      plugins,
+      scope: 'user',
+      features: { ambient: false, memory: true },
+      installedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    }, null, 2) + '\n', 'utf-8');
+  }
+
+  async function enable(): Promise<void> {
+    await createAmbientCommand().parseAsync(['--enable'], { from: 'user' });
+  }
+
+  async function registeredHookNames(): Promise<string[]> {
+    const settings = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
+    const commands: string[] = [
+      ...settings.hooks.UserPromptSubmit.flatMap((g: { hooks: { command: string }[] }) => g.hooks.map((h) => h.command)),
+      ...settings.hooks.SessionStart.flatMap((g: { hooks: { command: string }[] }) => g.hooks.map((h) => h.command)),
+    ];
+    return commands.map((c) => c.split(' ').pop() ?? '').sort();
+  }
+
+  beforeEach(async () => {
+    tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-ambient-warn-'));
+    vi.stubEnv('HOME', tmpHome);
+    vi.stubEnv('CLAUDE_CONFIG_DIR', '');
+    await fs.mkdir(path.join(tmpHome, '.claude'), { recursive: true });
+    await fs.mkdir(path.join(tmpHome, '.devflow'), { recursive: true });
+    settingsPath = path.join(tmpHome, '.claude', 'settings.json');
+    manifestPath = path.join(tmpHome, '.devflow', 'manifest.json');
+    warn = vi.spyOn(p.log, 'warn').mockImplementation(() => undefined);
+    info = vi.spyOn(p.log, 'info').mockImplementation(() => undefined);
+    vi.spyOn(p.log, 'success').mockImplementation(() => undefined);
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    await fs.rm(tmpHome, { recursive: true, force: true });
+  });
+
+  it('warns once when there is no manifest, and still registers both hooks', async () => {
+    await enable();
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(WARNING);
+    expect(await registeredHookNames()).toEqual(['preamble', 'session-start-orchestrator']);
+  });
+
+  it('warns once when the manifest lists plugins but not devflow-ambient, and still registers both hooks', async () => {
+    await writeManifest(['devflow-core-skills', 'devflow-implement']);
+
+    await enable();
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(WARNING);
+    expect(await registeredHookNames()).toEqual(['preamble', 'session-start-orchestrator']);
+  });
+
+  it('warns once when the manifest is not a usable record', async () => {
+    await fs.writeFile(manifestPath, '{ not json', 'utf-8');
+
+    await enable();
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(WARNING);
+  });
+
+  it('is silent when the manifest lists devflow-ambient, and still registers both hooks', async () => {
+    await writeManifest(['devflow-core-skills', 'devflow-ambient']);
+
+    await enable();
+
+    expect(warn).not.toHaveBeenCalled();
+    expect(await registeredHookNames()).toEqual(['preamble', 'session-start-orchestrator']);
+  });
+
+  it('warns on a run that finds ambient mode already enabled, once per run', async () => {
+    await enable();
+    expect(warn).toHaveBeenCalledTimes(1);
+
+    await enable();
+
+    expect(info).toHaveBeenCalledWith('Ambient mode already enabled');
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenLastCalledWith(WARNING);
+  });
+
+  it('describes plan handoffs as running devflow:implement only when it is installed', async () => {
+    await writeManifest(['devflow-ambient']);
+
+    await enable();
+
+    const lines = info.mock.calls.map((call) => String(call[0]));
+    expect(lines.some((l) => l.includes('plan handoffs run devflow:implement when it is installed'))).toBe(true);
+    expect(lines.some((l) => l.includes('auto-run'))).toBe(false);
   });
 });
 

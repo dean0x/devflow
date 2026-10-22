@@ -34,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - A scanner that fails, times out or exits with an error is named in the report with its exit status.
   - Each scanner's time bound ends before its Bash call does, and file names reach the scanners safely.
   - Semgrep and Snyk now run one after the other.
+- **The orchestrator charter names only installed workflows and routes to every roster agent.**
+  - The charter now names only the workflows that you installed, and it also routes to the Test, Evaluate, Harden and Synthesize agents.
+  - A plan handoff no longer points to `devflow:implement` when it is not installed. The prompt gets a generic reminder instead.
+  - Run `devflow init` after you update to refresh the charter.
 
 ---
 

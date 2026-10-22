@@ -497,6 +497,30 @@ export async function removeManifestPlugins(
 }
 
 /**
+ * The plugin names `<devflowDir>/manifest.json` records as installed, or null when there is no usable record.
+ * Read only: unlike {@link readManifest} it never heals, never takes the manifest lock and writes nothing, so
+ * the file stays byte-identical. That is the property a selective uninstall needs. Its caller works from the
+ * record as `removeManifestPlugins` does, and a heal would rewrite a manifest the uninstall did not mean to
+ * touch (and write through a link in a legacy local install).
+ *
+ * A record is a manifest {@link readManifest} would accept: valid JSON that holds every required field.
+ * Anything else is null, never an empty list, so a caller can tell "nothing recorded" from "nothing
+ * installed". Entries that are not strings are skipped.
+ */
+export async function readManifestPlugins(devflowDir: string): Promise<string[] | null> {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(await fs.readFile(path.join(devflowDir, 'manifest.json'), 'utf-8'));
+  } catch {
+    return null;
+  }
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+  const record = raw as Record<string, unknown>;
+  if (!hasRequiredManifestFields(record)) return null;
+  return (record.plugins as unknown[]).filter((entry): entry is string => typeof entry === 'string');
+}
+
+/**
  * Merge new plugins into existing plugin list (union, no duplicates).
  * Preserves order: existing plugins first, then new ones appended.
  */

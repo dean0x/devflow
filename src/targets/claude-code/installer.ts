@@ -14,6 +14,7 @@ import { stampAgentTools } from '../../core/agent-frontmatter.js';
 import { TRACKER_MCP_SERVERS_DEFAULT, trackerServerTools } from '../../core/tracker.js';
 import { BUILTIN_OVERRIDE_AGENTS, findForeignAgentOwner } from './agent-type-owner.js';
 import { restampInstalledCommands } from './language-stamp.js';
+import { CHARTER_RELPATH, HANDOFF_SENTINEL_RELPATH, installRenderedCharter } from './charter-render.js';
 
 // ---------------------------------------------------------------------------
 // Shadow override reporting types
@@ -286,18 +287,24 @@ export interface Spinner {
 // ---------------------------------------------------------------------------
 
 /**
- * Recursively copy a directory tree.
+ * Recursively copy a directory tree. `exclude` holds absolute SOURCE paths that the copy
+ * skips (a file, or a directory with everything below it); omitted, everything is copied.
  */
-export async function copyDirectory(src: string, dest: string): Promise<void> {
+export async function copyDirectory(
+  src: string,
+  dest: string,
+  exclude?: ReadonlySet<string>,
+): Promise<void> {
   await fs.mkdir(dest, { recursive: true });
   const entries = await fs.readdir(src, { withFileTypes: true });
 
   for (const entry of entries) {
     const srcPath = path.join(src, entry.name);
     const destPath = path.join(dest, entry.name);
+    if (exclude?.has(srcPath)) continue;
 
     if (entry.isDirectory()) {
-      await copyDirectory(srcPath, destPath);
+      await copyDirectory(srcPath, destPath, exclude);
     } else {
       await fs.copyFile(srcPath, destPath);
     }
@@ -1600,9 +1607,19 @@ export async function composeScripts(scriptsTarget: string): Promise<void> {
   // mirrored dist/hud/ closure), so a re-run gave package.json an exec bit the first
   // run never did and re-init stopped being a no-op on disk (#388 AC-3). Scoping the
   // chmod to the copied entries makes the first and every later run agree.
+  //
+  // D-CHARTER-INSTALL-RENDER: the orchestrator charter and the implement sentinel are
+  // NOT part of this verbatim copy. The charter is installed as a render of the packaged
+  // source for the installed plugin set, and the sentinel exists only while implement is
+  // installed; `installRenderedCharter` is the only writer of both, so no copy here can put
+  // the full source charter or a stale sentinel back over a render.
   const srcScripts = scriptsDir();
+  const rendered = new Set([
+    path.join(srcScripts, CHARTER_RELPATH),
+    path.join(srcScripts, HANDOFF_SENTINEL_RELPATH),
+  ]);
   try {
-    await copyDirectory(srcScripts, scriptsTarget);
+    await copyDirectory(srcScripts, scriptsTarget, rendered);
     if (process.platform !== 'win32') {
       for (const entry of await fs.readdir(srcScripts, { withFileTypes: true })) {
         const copied = path.join(scriptsTarget, entry.name);
@@ -2313,6 +2330,17 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   spinner.message('Installing scripts...');
   const scriptsTarget = path.join(devflowDir, 'scripts');
   await composeScripts(scriptsTarget);
+
+  // D-CHARTER-INSTALL-RENDER: the orchestrator charter and the implement sentinel are
+  // written here and nowhere else, from the EFFECTIVE selection (a partial install keeps
+  // what earlier runs installed). It is its own step, outside composeScripts' catch-all, so
+  // the render's failure handling is the writer's own: a warning, never an abort.
+  await installRenderedCharter({
+    scriptsDir: scriptsTarget,
+    plugins: options.effectivePlugins ?? plugins,
+    warn,
+    sentinelMode: 'sync',
+  });
 
   spinner.stop('Components installed via file copy');
   return report;
