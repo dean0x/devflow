@@ -1,28 +1,27 @@
 /**
  * The doc sites of the /implement and /resolve level references (TP-6, an item of the test plan of PR #574, which
- * implements #481). The sites are the `devflow gates` text, the init hints, README.md, docs/cli-reference.md and
+ * implements #481). The sites are the `devflow gates` text, README.md, docs/cli-reference.md and
  * docs/commands.md. Each site that covers a command states the effect of each shipped row of that command exactly once,
  * and no site keeps a retired "no rows" claim. The check runs through the named collector `collectDocSiteDefects`, and
  * known-bad probes run over the same collector.
  *
  * The check proves that a site carries the effect phrase once. It does not prove which command the phrase names: a site
  * that covers both commands and names one satisfies the check for both. It does not prove which level the phrase names
- * at a site that covers every level, so a README line that names only `lean` passes. The two init hints are checked per
- * level: each is read by its own cell of a row, and a hint states the effect of a row only when its cell for that level
- * is not `-`. The facet row of `tests/gate-level-prompts.test.ts` ties the levels whose hint says "no Polish" to the
- * `devflow gates` clause that names them.
+ * at a site that covers every level, so a README line that names only `lean` passes. The init hints are no site: each is one
+ * short line that fits an 80-column terminal, so it states no effect of a row. The facet rows of
+ * `tests/gate-level-prompts.test.ts` tie the levels whose hint says "no Polish" to the `devflow gates` clause that names them.
  *
  * Two more checks sit beside it. A `ROW_EFFECTS` entry that names no shipped row is reported, so a retired row sends
  * someone back to the docs. The three sites that state the lean Harden skip in detail (the README, docs/cli-reference.md
  * and the /implement section of docs/commands.md) each state the two report notes of the `harden-scope` bullet once, and
  * state the skip in a sentence that names `lean` and neither `standard` nor `full`. The two docs hold the same block.
  * The `5 Alignment Check` row (`pass level; apply: single-pass`) has the effect "one Evaluate pass": each site that covers
- * `/implement` says it once, and both init hints say it, because neither cell of the row is `-`. Two more phrases of the route
+ * `/implement` says it once. Two more phrases of the route
  * after that pass are checked on their own: the README, docs/cli-reference.md and the /implement section of docs/commands.md
  * each state "one Fix round" once, and the two docs state the route of a Fix round that does not complete ("anything other
  * than COMPLETE") once. The README leaves that sentence out. This is a known limit, so the check does not hold it to one.
  * The `2 Global Triage` row of the /resolve reference (`pass level`) has the effect "applies severity tiers" (or "severity tiers in
- * /resolve"): each site that covers `/resolve` says it once, and both init hints say it, because neither cell of the row is `-`.
+ * /resolve"): each site that covers `/resolve` says it once.
  *
  * Each doc is read at import. A missing file, paragraph or section throws, so the guard never skips. The decided rows
  * and the two references come from `level-guard-helpers.ts`. `implement-resolve-levels.test.ts` holds the other arms.
@@ -32,7 +31,6 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import * as path from 'path'
 
-import { GATE_LEVEL_HINTS } from '../../src/cli/commands/gate-level-prompts.js'
 import { GATE_LEVEL_EFFECT } from '../../src/cli/commands/gates.js'
 import { ROOT } from '../helpers.js'
 import { DECIDED_ROWS, LEVELS, LEVEL_CMDS, OPEN, REFS, countOf, levelCell, parseRef, referenceRows, rowCells, sectionOf, seed, seedOnce, withRows, type LevelCmd, type LevelColumn } from './level-guard-helpers.js'
@@ -78,7 +76,7 @@ const changeLastCell = (row: string): string => (row.endsWith(' skip |') ? row.r
 
 /**
  * One text that states what the levels do, named as a defect names it, with the commands whose rows it covers. A site that
- * describes one level (an init hint) carries `level`, and owes the effect of a row only when its cell for that level is not `-`.
+ * describes one level carries `level`, and owes the effect of a row only when its cell for that level is not `-`.
  */
 interface DocSite { readonly label: string; readonly text: string; readonly cmds: ReadonlyArray<LevelCmd>; readonly level?: LevelColumn }
 
@@ -134,8 +132,8 @@ function collectEffectCountDefects(site: DocSite, shipped: readonly ShippedRows[
  * effect of that row exactly once. Once any table has a row, no site keeps a retired claim. While no table has a row, no
  * site owes an effect and none is barred a retired claim. The match is on a phrase: it does not tell which command the
  * phrase names, so a site that covers both commands and names one satisfies the check for both. It does not tell which
- * level the phrase names either, so a README line that names only `lean` passes. The two init hints are the exception:
- * each is read as one level, so it states the effect of a row only when its cell for that level is not `-`.
+ * level the phrase names either, so a README line that names only `lean` passes. A site read as one level (`level`) states the effect of
+ * a row only when its cell for that level is not `-`; no shipped site is read that way.
  * The defects come in this order: the unregistered rows, then for each site its retired claims and its effect counts.
  */
 export function collectDocSiteDefects(sites: readonly DocSite[], refs: Readonly<Record<string, string>>, effects: ReadonlyMap<string, RegExp> = ROW_EFFECTS): string[] {
@@ -274,8 +272,6 @@ const CHANGELOG_TIERS_SITE: ReadSite = { label: 'the CHANGELOG.md severity tiers
 const COMMANDS_IMPLEMENT_SITE: ReadSite = { label: 'the docs/commands.md /implement section', text: sectionOfDoc('docs/commands.md', COMMANDS_DOC_TEXT, '## /implement'), cmds: ['implement'], min: 500 }
 const DOC_SITES: readonly ReadSite[] = [
   { label: 'the devflow gates text', text: GATE_LEVEL_EFFECT, cmds: BOTH_COMMANDS, min: 150 },
-  { label: 'the init hint at standard', text: GATE_LEVEL_HINTS.standard, cmds: BOTH_COMMANDS, level: 'standard', min: 40 },
-  { label: 'the init hint at lean', text: GATE_LEVEL_HINTS.lean, cmds: BOTH_COMMANDS, level: 'lean', min: 40 },
   README_SITE,
   CLI_REFERENCE_SITE,
   COMMANDS_IMPLEMENT_SITE,
@@ -307,14 +303,12 @@ describe('the doc sites state the effect of each shipped row and keep no retired
   it('the sites are the registered ones, each read from the product, and the shipped tables leave no defect', () => {
     expect(DOC_SITES.map(s => `${s.label}: ${s.cmds.join(', ')}`)).toEqual([
       'the devflow gates text: implement, resolve',
-      'the init hint at standard: implement, resolve',
-      'the init hint at lean: implement, resolve',
       'the README.md Gate level paragraph: implement, resolve',
       'the docs/cli-reference.md What reads it paragraph: implement, resolve',
       'the docs/commands.md /implement section: implement',
       'the docs/commands.md /resolve section: resolve',
     ])
-    expect(DOC_SITES.map(s => s.level), 'only the two init hints are read as one level').toEqual([undefined, 'standard', 'lean', undefined, undefined, undefined, undefined])
+    expect(DOC_SITES.map(s => s.level), 'no shipped site is read as one level').toEqual([undefined, undefined, undefined, undefined, undefined])
     for (const { label, text, min } of DOC_SITES) expect(text.length, `${label}: nothing read`).toBeGreaterThan(min)
     expect(collectDocSiteDefects(DOC_SITES, REFS)).toEqual([])
   })
@@ -538,37 +532,6 @@ describe('the doc sites state the effect of each shipped row and keep no retired
       }
     }
     expect(covered.size, 'every shipped row was probed at a real site').toBe(shippedRows.length)
-  })
-
-  const atLevel = (level: NonNullable<DocSite['level']>): DocSite => {
-    const found = DOC_SITES.filter(s => s.level === level)
-    expect(found.length, `one real site is read as ${level}`).toBe(1)
-    return found[0]
-  }
-
-  it('known-bad probes (real sites): the shipped Harden row is stated at the init hint for lean and not at the one for standard', () => {
-    const row = '| 4 Self-Review | - | apply: harden-scope |'
-    expect(DECIDED_ROWS.implement, 'the shipped /implement table holds the Harden row').toContain(row)
-    expect(levelCell(row, 'standard'), 'the standard cell of the Harden row').toBe('-')
-    const standard = atLevel('standard')
-    const lean = atLevel('lean')
-    expect(collectDocSiteDefects([{ ...standard, text: `${standard.text} It also skips Harden on a docs-only diff.` }], REFS), 'the standard hint with the phrase').toEqual([
-      `the init hint at standard states the effect of the implement row ${row}, whose standard cell is -`,
-    ])
-    expect(collectDocSiteDefects([{ ...lean, text: seed(lean.text, HARDEN_DOCS_SKIP, 'does nothing special') }], REFS), 'the lean hint with the phrase taken out').toEqual([
-      `the init hint at lean does not state the effect of the implement row ${row}: it must match ${HARDEN_DOCS_SKIP}`,
-    ])
-  })
-
-  it('known-bad probes (real sites): a row whose standard cell is - is not stated at the init hint for standard, and is stated at the one for lean', () => {
-    const row = '| 3 Polish | - | skip |'
-    const refs = { ...REFS, implement: withRows(REFS.implement, [row]) }
-    const effects = new Map<string, RegExp>([...ROW_EFFECTS, [`implement:${row}`, POLISH_SKIP]])
-    expect(collectDocSiteDefects([atLevel('standard')], refs, effects)).toEqual([
-      `the init hint at standard states the effect of the implement row ${row}, whose standard cell is -`,
-    ])
-    expect(collectDocSiteDefects([atLevel('lean')], refs, effects)).toEqual([])
-    expect(collectDocSiteDefects(DOC_SITES.filter(s => s.level === undefined), refs, effects), 'a site that is read as no level').toEqual([])
   })
 
   it('known-bad probes (real sites): a retired claim put back at any real site is reported', () => {

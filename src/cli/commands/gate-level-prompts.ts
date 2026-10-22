@@ -51,23 +51,21 @@ import type { ManifestData } from '../../core/manifest.js';
 export const GATE_LEVEL_SELECT_MESSAGE = 'Gate level for this machine';
 
 /**
- * The one-line effect of each level, as the select hint and the catalogue show it.
- * Each hint says what its level does. GATE_LEVEL_EFFECT in gates.ts says which commands
- * read the level. Change a hint when what a level does changes. A command that reads the
+ * One short line for each level, as the select hint and the catalogue show it.
+ * clack never wraps a note or a hint, so a hint stays within 60 characters and holds no line
+ * break (a guard in `tests/gate-level-prompts.test.ts` holds both). The full effects of each
+ * level live in GATE_LEVEL_EFFECT in gates.ts, in `devflow gates` and in the docs.
+ * Change a hint when the level it names changes how much it checks. A command that reads the
  * level and has no rule that changes a phase leaves the hints true, so it changes
  * GATE_LEVEL_EFFECT alone. One test pins the exact text of both tables, so a change to
  * either fails it until you check the other table and update the pin; further rows check
  * the clauses the two tables share (the lint pack level, the levels that run fewer review
- * focuses and the levels that skip Polish). The clauses that lean skips Harden on a
- * docs-only diff, that standard and lean run one Evaluate pass and that standard and lean
- * apply severity tiers in /resolve have no facet row in `tests/gate-level-prompts.test.ts`:
- * the docs guard checks each at every doc site, against its row in the /implement or
- * /resolve level reference.
+ * focuses and the levels that skip Polish).
  */
 export const GATE_LEVEL_HINTS: Readonly<Record<GateLevel, string>> = Object.freeze({
-  full: 'the most checking: every review focus, the full planning shape and Polish',
-  standard: 'fewer review focuses and planning agents, no Polish in /implement and /resolve, severity tiers in /resolve, and one Evaluate pass in /implement (the default)',
-  lean: 'the least checking, and no Polish in /implement and /resolve; /resolve also applies severity tiers; /implement also runs one Evaluate pass, has Validate run the project lint pack, and skips Harden on a docs-only diff',
+  full: 'the most checking: every review focus, and Polish',
+  standard: 'fewer review focuses, no Polish (the default)',
+  lean: 'the least checking: no Polish, Validate runs the lint pack',
 });
 
 /** Build clack select options for the gate level list, most to least checking. */
@@ -77,7 +75,7 @@ export function gateLevelChoices(): Array<{ value: GateLevel; label: string; hin
 
 /**
  * Format a padded level catalogue suitable for a clack note body.
- * Produces: `  standard  fewer review focuses and planning agents, no Polish in /implement and /resolve, severity tiers in /resolve, and one Evaluate pass in /implement (the default)`
+ * Produces: `  standard  fewer review focuses, no Polish (the default)`
  */
 export function formatGateLevelCatalogue(): string {
   const width = Math.max(...GATE_LEVELS.map(level => level.length));
@@ -96,7 +94,8 @@ export function formatGateLevelCatalogue(): string {
  *   unreadable  nowhere: the manifest cannot be read at all, or stores a level that cannot be
  *               written back as JSON, so what it stored is unknown
  */
-export type StoredGateLevelOrigin = 'manifest' | 'rejected' | 'unreadable';
+export const STORED_GATE_LEVEL_ORIGINS = ['manifest', 'rejected', 'unreadable'] as const;
+export type StoredGateLevelOrigin = (typeof STORED_GATE_LEVEL_ORIGINS)[number];
 
 /** The raw stored level and where it was found. `value` is `undefined` when none is recorded. */
 export interface StoredGateLevel {
@@ -304,17 +303,24 @@ export function gateLevelPromptSeed(stored: unknown, origin: StoredGateLevelOrig
   return appliedLevel(classifyGateLevel(stored, origin));
 }
 
-/** The "Current setting" lines of the prompt note, from the stored value and where it was found. */
+/** The "Current setting" lines of the prompt note, from the stored value and where it was found. Each line fits the 72 columns the note allows. */
 function currentSettingLines(stored: unknown, origin: StoredGateLevelOrigin): string {
   switch (origin) {
     case 'manifest':
       return `Current setting: ${describeGateLevel(stored)}`;
     case 'rejected':
-      return `Current setting: ${describeGateLevel(stored)}\n` +
-        'It comes from a manifest that devflow rejects. Init replaces that manifest and keeps this level unless you choose another.';
+      return [
+        `Current setting: ${describeGateLevel(stored)}`,
+        'It comes from a manifest that devflow rejects.',
+        'Init replaces that manifest and keeps this level',
+        'unless you choose another.',
+      ].join('\n');
     case 'unreadable':
-      return 'Current setting: unknown\n' +
-        `The stored gate level cannot be read, so ${DEFAULT_GATE_LEVEL} applies until you choose a level.`;
+      return [
+        'Current setting: unknown',
+        `The stored gate level cannot be read, so ${DEFAULT_GATE_LEVEL} applies`,
+        'until you choose a level.',
+      ].join('\n');
     default: {
       const exhaustive: never = origin;
       return exhaustive;

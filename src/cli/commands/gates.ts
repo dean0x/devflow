@@ -63,9 +63,10 @@ export const GATE_LEVEL_MEANINGS: Readonly<Record<GateLevel, string>> = Object.f
 /**
  * Which commands read the level today; each later command that reads it updates this text.
  *
- * The init prompt says what each level does in GATE_LEVEL_HINTS (gate-level-prompts.ts).
- * Change the hints too when what a level does changes. A command that reads the level and
- * has no rule that changes a phase leaves the hints true, so it changes this text alone.
+ * The init prompt gives each level one short line in GATE_LEVEL_HINTS (gate-level-prompts.ts);
+ * this text and the docs hold the full effects. Change the hints too when a level changes
+ * how much it checks. A command that reads the level and has no rule that changes a phase
+ * leaves the hints true, so it changes this text alone.
  * One test pins the exact text of both tables, so a change to either fails it until you
  * check the other table and update the pin; further rows check the clauses the two tables
  * share (the lint pack level, the levels that run fewer review focuses and the levels that
