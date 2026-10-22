@@ -324,6 +324,7 @@ describe('installViaFileCopy rules report', () => {
 
       const report = await installViaFileCopy({
         curation: true,
+        compliance: true,
         plugins: [],
         claudeDir: localClaudeDir,
         devflowDir: localDevflowDir,
@@ -359,6 +360,7 @@ describe('installViaFileCopy rules report', () => {
 
       const report = await installViaFileCopy({
         curation: true,
+        compliance: true,
         plugins: [],
         claudeDir: localClaudeDir,
         devflowDir: localDevflowDir,
@@ -391,6 +393,7 @@ describe('installViaFileCopy rules report', () => {
 
       const report = await installViaFileCopy({
         curation: true,
+        compliance: true,
         plugins: [],
         claudeDir: localClaudeDir,
         devflowDir: localDevflowDir,
@@ -428,6 +431,7 @@ describe('installViaFileCopy rules report', () => {
       await expect(
         installViaFileCopy({
           curation: true,
+          compliance: true,
           plugins: [],
           claudeDir: localClaudeDir,
           devflowDir: localDevflowDir,
