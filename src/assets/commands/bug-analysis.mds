@@ -131,7 +131,7 @@ printf '\nexit=%s\n' "$E"
 ```
 Without `jq` the SARIF is unfiltered: note that.
 
-**CodeQL** (if available AND (`--full` OR Semgrep/Snyk found HIGH/CRITICAL findings); if Semgrep or Snyk did not complete, report "CodeQL: skipped" and why):
+**CodeQL** (if available AND (`--full` OR Semgrep/Snyk found HIGH/CRITICAL findings)):
 ```bash
 CODEQL_TMP=$(mktemp -d)
 trap 'rm -rf "${CODEQL_TMP}"' EXIT INT TERM
@@ -332,7 +332,6 @@ Run `/resolve` to process and fix these findings.
 | All static tools unavailable | Warn, proceed with semantic-only analysis |
 | `--no-static` flag | Skip Phase 2c and 2d entirely; `STATIC_FINDINGS=(none)` |
 | `--full` flag | Bypass incremental detection (Step 2a), run full diff from base |
-| CodeQL database creation fails | Skip CodeQL, note in output, continue with other tools |
 | A scanner did not run or did not complete | Name the tool and why in `STATIC_FINDINGS`, not `(none)` |
 
 ## Resolve Compatibility
