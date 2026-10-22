@@ -21,6 +21,8 @@
  * after that pass are checked on their own: the README, docs/cli-reference.md and the /implement section of docs/commands.md
  * each state "one Fix round" once, and the two docs state the route of a Fix round that does not complete ("anything other
  * than COMPLETE") once. The README leaves that sentence out. This is a known limit, so the check does not hold it to one.
+ * The `2 Global Triage` row of the /resolve reference (`pass level`) has the effect "applies severity tiers" (or "severity tiers in
+ * /resolve"): each site that covers `/resolve` says it once, and both init hints say it, because neither cell of the row is `-`.
  *
  * Each doc is read at import. A missing file, paragraph or section throws, so the guard never skips. The decided rows
  * and the two references come from `level-guard-helpers.ts`. `implement-resolve-levels.test.ts` holds the other arms.
@@ -41,6 +43,9 @@ const RETIRED_CLAIMS = ['no phase rules yet', 'no rows yet'] as const
 /** What a doc site says when it states that Polish is skipped: "skip Polish", "skips Polish" or "no Polish". */
 const POLISH_SKIP = /\b(?:skips?|no) Polish\b/
 
+/** What a doc site says when it states the severity tiers of the `2 Global Triage` row: "applies severity tiers" or "severity tiers in /resolve". Case matters, and a hyphenated file name does not count. A mention that states no effect ("no severity tiers", "severity tiers in /implement") does not count. */
+const SEVERITY_TIERS = /\bapplies severity tiers\b|\bseverity tiers in \/resolve\b/
+
 /** What a doc site says when it states the lean Harden skip: "skip Harden on a docs-only diff" or "skips Harden on a docs-only diff". */
 const HARDEN_DOCS_SKIP = /\bskips? Harden on a docs-only diff\b/
 
@@ -53,6 +58,9 @@ const EVALUATE_ONE_FIX_ROUND = /\bone Fix round\b/
 /** What a doc site says when it states where a Fix round that does not complete goes: "anything other than COMPLETE". */
 const EVALUATE_FIX_ROUTE = /\banything other than COMPLETE\b/
 
+/** What no text about the tiers says: "in batches" or "in a batch". Phase 3 of /resolve batches every FIX_NOW item by file at every level, so a batching mode is no effect of a tier. A prose-only item differs by its text-only edit. */
+const BATCHING = /\bin (?:a )?batch(?:es)?\b/
+
 /**
  * What a doc site must say for each shipped row, keyed by `${cmd}:` plus the full row line. A change to one cell is a new
  * key, so it sends someone back to the docs. A row with no entry here is reported.
@@ -61,6 +69,7 @@ const ROW_EFFECTS: ReadonlyMap<string, RegExp> = new Map([
   ['implement:| 3 Polish | skip | skip |', POLISH_SKIP],
   ['implement:| 4 Self-Review | - | apply: harden-scope |', HARDEN_DOCS_SKIP],
   ['implement:| 5 Alignment Check | pass level; apply: single-pass | pass level; apply: single-pass |', EVALUATE_SINGLE_PASS],
+  ['resolve:| 2 Global Triage | pass level | pass level |', SEVERITY_TIERS],
   ['resolve:| 6 Polish | skip | skip |', POLISH_SKIP],
 ])
 
@@ -249,10 +258,19 @@ interface ReadSite extends DocSite { readonly min: number }
 const README_TEXT = readFileSync(path.join(ROOT, 'README.md'), 'utf-8')
 const CLI_REFERENCE_TEXT = readFileSync(path.join(ROOT, 'docs', 'cli-reference.md'), 'utf-8')
 const COMMANDS_DOC_TEXT = readFileSync(path.join(ROOT, 'docs', 'commands.md'), 'utf-8')
+const CHANGELOG_TEXT = readFileSync(path.join(ROOT, 'CHANGELOG.md'), 'utf-8')
+
+/** The `### ` section of CHANGELOG.md that opens with `heading`, to the next `### ` heading. A missing or repeated section throws at import, so the guard never skips. */
+function changelogSectionOf(heading: string): string {
+  const found = CHANGELOG_TEXT.split('\n### ').filter(part => part.startsWith(heading))
+  if (found.length !== 1) throw new Error(`CHANGELOG.md holds ${found.length} sections that open "### ${heading}", expected 1`)
+  return found[0]
+}
 const BOTH_COMMANDS: DocSite['cmds'] = ['implement', 'resolve']
 /** The texts that say what a level does to /implement and /resolve. Only the README, cli-reference and commands doc paragraphs and sections that name the level are read, so a "no Polish" elsewhere in a file cannot satisfy the check. */
 const README_SITE: ReadSite = { label: 'the README.md Gate level paragraph', text: paragraphOf('README.md', README_TEXT, OPEN), cmds: BOTH_COMMANDS, min: 500 }
 const CLI_REFERENCE_SITE: ReadSite = { label: 'the docs/cli-reference.md What reads it paragraph', text: paragraphOf('docs/cli-reference.md', CLI_REFERENCE_TEXT, '**What reads it.**'), cmds: BOTH_COMMANDS, min: 500 }
+const CHANGELOG_TIERS_SITE: ReadSite = { label: 'the CHANGELOG.md severity tiers upgrade note', text: changelogSectionOf('Upgrade notes — Severity tiers by level'), cmds: ['resolve'], min: 500 }
 const COMMANDS_IMPLEMENT_SITE: ReadSite = { label: 'the docs/commands.md /implement section', text: sectionOfDoc('docs/commands.md', COMMANDS_DOC_TEXT, '## /implement'), cmds: ['implement'], min: 500 }
 const DOC_SITES: readonly ReadSite[] = [
   { label: 'the devflow gates text', text: GATE_LEVEL_EFFECT, cmds: BOTH_COMMANDS, min: 150 },
@@ -318,6 +336,20 @@ describe('the doc sites state the effect of each shipped row and keep no retired
   it('EVALUATE_SINGLE_PASS reads "one Evaluate pass", and nothing less', () => {
     for (const text of ['runs one Evaluate pass', 'one Evaluate pass in /implement']) expect(EVALUATE_SINGLE_PASS.test(text), text).toBe(true)
     for (const text of ['one Evaluate run', 'Evaluate passes once', 'one evaluate pass', 'oneEvaluate pass']) expect(EVALUATE_SINGLE_PASS.test(text), text).toBe(false)
+  })
+
+  it('SEVERITY_TIERS reads a statement of the tiers, and nothing less', () => {
+    for (const text of ['applies severity tiers', 'severity tiers in /resolve', '/resolve also applies severity tiers;']) expect(SEVERITY_TIERS.test(text), text).toBe(true)
+    for (const text of ['no severity tiers', 'severity tiers in /implement', 'one severity tier', 'severity-tiers.md', 'Severity tiers', 'severity tiered', 'noseverity tiers', 'applies severity tier', 'severity tiers in /resolved']) expect(SEVERITY_TIERS.test(text), text).toBe(false)
+  })
+
+  it('BATCHING reads "in batches" and "in a batch", and nothing less', () => {
+    for (const text of ['keeps in batches', 'fixed in a batch', 'in batch']) expect(BATCHING.test(text), text).toBe(true)
+    for (const text of ['one batch per file', 'batching', 'in a batcher', 'inbatches']) expect(BATCHING.test(text), text).toBe(false)
+  })
+
+  it('no doc site and no upgrade note describes the tiers by a batching mode', () => {
+    for (const { label, text } of [...DOC_SITES, CHANGELOG_TIERS_SITE]) expect(text, label).not.toMatch(BATCHING)
   })
 
   it('HARDEN_DOCS_SKIP reads a skip of Harden on a docs-only diff, and nothing less', () => {
@@ -475,6 +507,7 @@ describe('the doc sites state the effect of each shipped row and keep no retired
       'implement:| 3 Polish | skip | skip |',
       'implement:| 4 Self-Review | - | apply: harden-scope |',
       'implement:| 5 Alignment Check | pass level; apply: single-pass | pass level; apply: single-pass |',
+      'resolve:| 2 Global Triage | pass level | pass level |',
       'resolve:| 6 Polish | skip | skip |',
     ])
     expect(withRowCmds).toEqual(['implement', 'resolve'])
