@@ -1043,7 +1043,7 @@ function lineIsInSection(lines: readonly string[], index: number, section: strin
   return next === -1 || index < next;
 }
 
-/** Named collector: how the three inception lines depart from their design. */
+/** Named collector: how the doc-sweep, owner and probe lines depart from their design. */
 export function collectSweepOwnerProbeDefects(quality: string, testing: string): string[] {
   const texts = { quality, testing };
   const out: string[] = [];
@@ -1169,6 +1169,10 @@ describe('quality rule doc-sweep and owner bullets, testing skill assertion prob
     expect(defectsWith(PROBE_LINE, text => text.replace('## Quality Gates', () => '## Gates'))).toEqual([
       'the probe line is not in the Quality Gates section',
     ]);
+    // Quality Gates is the last `## ` heading, so only a heading added after it gives the section an end above the line.
+    const belowNextHeading = (text: string, line: string): string =>
+      `${replaceLine(text, `${line}\n`, '').trimEnd()}\n\n## Appendix\n\n${line}\n`;
+    expect(defectsWith(PROBE_LINE, belowNextHeading)).toEqual(['the probe line is not in the Quality Gates section']);
 
     // Oversize seeds compute their padding from the shipped size, so they stay valid when a later edit shortens a bullet.
     const realTotal = Buffer.byteLength(lineOf(SWEEP_BULLET), 'utf-8') + Buffer.byteLength(lineOf(OWNER_BULLET), 'utf-8');
