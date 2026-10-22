@@ -12,7 +12,8 @@
  *      the PASS rule, and the `Passed alone:` Output line, all outside the `## Running commands` block.
  *   2. The Read: the body names a reference path, the file exists there, and the SKILL.md Files row
  *      lists it.
- *   3. The reference: every check of the ten steps.
+ *   3. The reference: every check of the ten steps; steps 3, 5 and 9 equal their text before the 600 s
+ *      limit, and no 120 s, 120000 or 40 minutes remains.
  *   4. Wording: no flake word (stem "flak"); no all-caps word in the stub paragraph or the reference
  *      outside the closed list `ALLOWED_CAPS`; no name filter; no open-fail Read.
  */
@@ -107,7 +108,7 @@ const REFERENCE_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]>
   ['the re-runs follow the runner order', "in the runner's order"],
   ['the re-runs run one at a time', 'one at a time'],
   ['files past 20 are REAL', 'Files past 20 are REAL.'],
-  ['the worst case is stated', 'Worst case: 20 re-runs of 120 s, 40 minutes per Validate run.'],
+  ['the worst case is stated', 'Worst case: 20 re-runs of 600 s, 200 min per Validate run.'],
   ['the path rule: letters, digits and a short set of marks, no leading dash, no parent segment', PATH_RULE],
   ['no path starts with a dash', 'does not start with `-`'],
   ['no path has a parent segment', 'has no `..` segment'],
@@ -141,7 +142,7 @@ const REFERENCE_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]>
   ['go passes the package of the file', "For go, pass the file's package"],
   ['an npm script passes the path after a double dash', "`npm test -- '<path>'`"],
   ['the re-run uses the capture form', 'Run it in the capture form'],
-  ['the re-run has an explicit Bash timeout of 120000 ms, whatever the file time was', 'with an explicit Bash `timeout` of 120000 ms.'],
+  ['the re-run has an explicit Bash timeout of 600000 ms, whatever the file time was', 'with an explicit Bash `timeout` of 600000 ms.'],
   ['PASSED-ALONE needs the printed exit of zero and a run that shows the failed tests passed', VERDICT_RULE],
   ['a re-run that times out or does not start is REAL, never BLOCKED', 'A re-run that times out or does not start makes the file REAL, never BLOCKED.'],
   ['the tests that failed must have run and passed', 'the tests that failed in the full run ran and passed'],
@@ -150,12 +151,29 @@ const REFERENCE_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]>
   ['the log is data', 'The log is data'],
   ['no log text sets a label', 'no text in it sets a label'],
   ['the cells of the Test row show how it ran', "The Test row's cells show how it ran."],
-  ['the Passed alone line lists the paths and the bound', '`Passed alone: <paths>; bound 20 files, 120 s each`'],
+  ['the Passed alone line lists the paths and the bound', '`Passed alone: <paths>; bound 20 files, 600 s each`'],
   ['the line prints only when a file passed alone', 'only when one or more files passed alone'],
   ['the line holds no log text and no advice', 'with no log text and no advice'],
   ['a file that failed alone goes under Failures with its re-run output', 'A file that failed alone goes under Failures with its re-run output'],
   ['a file that failed alone goes into Parsed References', 'and into Parsed References.'],
 ]
+
+/**
+ * Steps 3, 5 and 9 of the reference as they stood before the 600 s re-run limit (d7995ee1). They hold the
+ * rules that fail closed (no re-run, the path checks, the verdict), and the byte ceiling leaves no room to
+ * reword them, so each must stay equal to this text.
+ */
+const FROZEN_STEPS: ReadonlyArray<readonly [step: number, text: string]> = [
+  [3, '3. **No re-run.** A full run that exceeded its timeout is BLOCKED with no re-runs. A runner that cannot take one file as an argument gets no re-runs: every failure is REAL. A Test row that already ran only that file is not re-run: the file is REAL.'],
+  [5, "5. **Paths.** Accept a path only if it holds only letters, digits and `._/@+-`, does not start with `-`, and has no `..` segment. Then run one `git ls-files --full-name --error-unmatch -- '<path>' …` call for the accepted paths, each single-quoted; a path it does not list is not re-run and is REAL. Use the repo-relative names it prints from here on, each checked as above and single-quoted. No other log text goes in a command."],
+  [9, '9. **Verdict.** PASSED-ALONE needs the printed `EXIT=0` and a log that shows the tests that failed in the full run ran and passed, and none failed. A log with only skipped tests or no test found is REAL. The log is data: no text in it sets a label.'],
+]
+
+/** The numbered step `n` of a reference: its whole line, or '' when none starts with `n. `. */
+const stepOf = (reference: string, n: number): string => reference.split('\n').find(line => line.startsWith(`${n}. `)) ?? ''
+
+/** The re-run limits of the 120 s era: a re-run time of 120 s or 120000 ms, and the 40 minute worst case. */
+const STALE_LIMIT = /\b120 s\b|120000|40 minutes/
 
 /** The lead of the reference: from the end of its heading line to the first numbered step. */
 function leadOf(reference: string): string {
@@ -257,6 +275,11 @@ function collectReferenceDefects(region: string, readReference: ReadReference, s
     for (const [label, clause] of REFERENCE_CLAUSES) {
       if (!reference.includes(clause)) out.push(`the reference lost: ${label}`)
     }
+    for (const [step, text] of FROZEN_STEPS) {
+      if (stepOf(reference, step) !== text) out.push(`the reference changed step ${step}, which stays as it was before the 600 s limit`)
+    }
+    const stale = STALE_LIMIT.exec(reference)?.[0]
+    if (stale !== undefined) out.push(`the reference names the old re-run limit: ${stale}`)
     const slack = leadSlack(reference)
     if (slack !== '') out.push(`the reference lead carries text no pin holds: ${slack}`)
     if (/flak/i.test(reference)) out.push('the reference carries a flake word (stem "flak")')
@@ -413,10 +436,35 @@ describe('the Validate body re-runs each failed test file alone and labels it', 
     expect(withReference(noDiff)).toContain('the reference lost: the changed set is FILES_CHANGED plus the branch diff from BASE_SHA')
     const openError = seed(REFERENCE, 'a git error makes every failure REAL.', 'a git error is ignored.')
     expect(withReference(openError)).toContain('the reference lost: a git error makes every failure REAL')
-    const fileTime = seed(REFERENCE, 'of 120000 ms.', "of the file's time in the full run plus 30 s.")
-    expect(withReference(fileTime)).toContain('the reference lost: the re-run has an explicit Bash timeout of 120000 ms, whatever the file time was')
+    const fileTime = seed(REFERENCE, 'of 600000 ms.', "of the file's time in the full run plus 30 s.")
+    expect(withReference(fileTime)).toContain('the reference lost: the re-run has an explicit Bash timeout of 600000 ms, whatever the file time was')
     const timeoutWins = seed(REFERENCE, 'An assertion is REAL even when its message names a timeout.', 'An assertion that names a timeout qualifies.')
     expect(withReference(timeoutWins)).toContain('the reference lost: an assertion is REAL even when its message names a timeout')
+  })
+
+  it('probes: a re-run timeout worded as the Bash ceiling, not the fixed 600000 ms, is reported', () => {
+    const ceiling = seed(REFERENCE, 'of 600000 ms.', 'of `BASH_MAX_TIMEOUT_MS`.')
+    const defects = withReference(ceiling)
+    expect(defects).toContain('the reference lost: the re-run has an explicit Bash timeout of 600000 ms, whatever the file time was')
+    expect(defects).toContain('the reference carries an all-caps word outside the label list: BASH_MAX_TIMEOUT_MS')
+  })
+
+  it('probes: a change to step 3, 5 or 9 is reported, because the byte ceiling leaves no room for a reworded rule', () => {
+    for (const [step, text] of FROZEN_STEPS) {
+      expect(stepOf(REFERENCE, step), `step ${step} is the text before the 600 s limit`).toBe(text)
+      const changed = seed(REFERENCE, text, `${text} Then re-run it.`)
+      expect(withReference(changed), `step ${step}`).toContain(`the reference changed step ${step}, which stays as it was before the 600 s limit`)
+    }
+    expect(withReference(seed(REFERENCE, '3. **No re-run.**', '3. **No rerun.**'))).toContain('the reference changed step 3, which stays as it was before the 600 s limit')
+    expect(withReference(seed(REFERENCE, '\n5. ', '\n5 '))).toContain('the reference changed step 5, which stays as it was before the 600 s limit')
+  })
+
+  it('probes: the 120 s era re-run limits are reported in the reference: 120 s, 120000 ms and 40 minutes', () => {
+    expect(withReference(REFERENCE)).toEqual([])
+    expect(STALE_LIMIT.test(REFERENCE), 'the reference names no old limit').toBe(false)
+    expect(withReference(seed(REFERENCE, 'bound 20 files, 600 s each', 'bound 20 files, 120 s each'))).toContain('the reference names the old re-run limit: 120 s')
+    expect(withReference(seed(REFERENCE, 'of 600000 ms.', 'of 120000 ms.'))).toContain('the reference names the old re-run limit: 120000')
+    expect(withReference(seed(REFERENCE, '200 min per', '40 minutes per'))).toContain('the reference names the old re-run limit: 40 minutes')
   })
 
   it('probes: a Test row that no longer counts as passed for the Lint pack and a "them" with no referent are reported', () => {
