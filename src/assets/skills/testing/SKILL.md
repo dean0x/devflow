@@ -134,4 +134,4 @@ Quarantine flaky tests immediately — a suite that sometimes passes is worse th
 - [ ] All branches covered: happy path + errors + edge cases
 - [ ] Test names describe expected behavior [4]
 - [ ] Tests follow Arrange-Act-Assert structure [17]
-- [ ] No flaky patterns (race conditions, timing dependencies) [11][18]
+- [ ] No flaky patterns [11][18]
