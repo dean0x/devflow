@@ -1254,6 +1254,39 @@ describe('hook-log-init: first invocation for a fresh log dir', () => {
   });
 });
 
+/**
+ * The routing roster is derived from the devflow-ambient plugin's agents, never listed, so an
+ * ambient agent the charter forgets fails here. `curate` is spawned by a session-start hook and is
+ * never a routing target. An agent is spelled as the charter writes it: its slug, capitalised.
+ */
+function ambientRosterNames(): string[] {
+  const ambient = DEVFLOW_PLUGINS.find(plugin => plugin.name === 'devflow-ambient');
+  expect(ambient, 'the devflow-ambient plugin is registered').toBeDefined();
+  return (ambient?.agents ?? [])
+    .filter(slug => slug !== 'curate')
+    .map(slug => slug.charAt(0).toUpperCase() + slug.slice(1));
+}
+
+/** Whole-word match, so `Codebase` does not name Code and `GitHub` does not name Git. */
+function namesAgent(text: string, agent: string): boolean {
+  return new RegExp(`\\b${agent}\\b`).test(text);
+}
+
+/**
+ * Every agent slug any plugin registers, spelled as the charter writes it. The preamble reminder
+ * must name none of them, so this covers Fix and Debug as well as the devflow-ambient roster.
+ */
+function allRosterAgentNames(): string[] {
+  const slugs = new Set(DEVFLOW_PLUGINS.flatMap(plugin => plugin.agents));
+  return [...slugs].map(slug => slug.charAt(0).toUpperCase() + slug.slice(1));
+}
+
+/** The skills and agents a preamble reminder names: any `devflow:` token or whole-word roster agent. */
+function reminderNamings(text: string): string[] {
+  const agents = allRosterAgentNames().filter(agent => namesAgent(text, agent));
+  return /devflow:/.test(text) ? ['devflow:', ...agents] : agents;
+}
+
 // =============================================================================
 // preamble — orchestrator charter mode (Suites 1-4)
 // =============================================================================
@@ -1397,6 +1430,24 @@ describe('preamble — orchestrator charter mode', () => {
       const out = runPreamble('fix the auth bug');
       const parsed = JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } };
       expect(parsed.hookSpecificOutput.additionalContext).toBe(REMINDER_TEMPLATE);
+    });
+
+    it('F2c: reminder names no devflow skill and no roster agent, in the template and in the hook output', () => {
+      const out = runPreamble('fix the auth bug');
+      const parsed = JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } };
+      const emitted = parsed.hookSpecificOutput.additionalContext;
+      expect(emitted).toContain('Orchestrator reminder:');
+      expect(REMINDER_TEMPLATE).toContain('Orchestrator reminder:');
+      expect(allRosterAgentNames().length, 'no roster derived').toBeGreaterThan(0);
+      expect(reminderNamings(REMINDER_TEMPLATE), 'template names a skill or agent').toEqual([]);
+      expect(reminderNamings(emitted), 'hook output names a skill or agent').toEqual([]);
+    });
+
+    it('F2d: known-bad probe: a reminder that names devflow:debug and the Debug agent is flagged', () => {
+      const bad = REMINDER_TEMPLATE +
+        ' Send debug work to the devflow:debug skill, never to the Debug agent.';
+      expect(reminderNamings(bad)).toEqual(['devflow:', 'Debug']);
+      expect(reminderNamings('Orchestrator reminder: coordinate. Fix the Codebase on GitHub.')).toEqual(['Fix']);
     });
 
     it('F2b: reminder names no model (no haiku/sonnet/opus)', () => {
@@ -2109,24 +2160,6 @@ describe('session-start-orchestrator', () => {
     expect(ctx).toContain('Implement the following plan:');
     expect(ctx).toContain('devflow:implement');
   });
-
-  /**
-   * The routing roster is derived from the devflow-ambient plugin's agents, never listed, so an
-   * ambient agent the charter forgets fails here. `curate` is spawned by a session-start hook and is
-   * never a routing target. An agent is spelled as the charter writes it: its slug, capitalised.
-   */
-  function ambientRosterNames(): string[] {
-    const ambient = DEVFLOW_PLUGINS.find(plugin => plugin.name === 'devflow-ambient');
-    expect(ambient, 'the devflow-ambient plugin is registered').toBeDefined();
-    return (ambient?.agents ?? [])
-      .filter(slug => slug !== 'curate')
-      .map(slug => slug.charAt(0).toUpperCase() + slug.slice(1));
-  }
-
-  /** Whole-word match, so `Codebase` does not name Code and `GitHub` does not name Git. */
-  function namesAgent(text: string, agent: string): boolean {
-    return new RegExp(`\\b${agent}\\b`).test(text);
-  }
 
   it('AC-F1: additionalContext routes by roster agent and pins no model (no haiku/sonnet/opus)', () => {
     const { stdout } = runHook(ORCHESTRATOR_HOOK, { cwd: tmpDir }, homeDir);
