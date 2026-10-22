@@ -14,6 +14,8 @@
  *     from a manifest readManifest refuses, the level a run carries into the manifest it
  *     writes, and the prompt and summary texts for a level read from one or not readable at all
  *   - formatGateLevelRow: the gate-level row of the Recommended settings note
+ *   - the prompt fits an 80-column terminal: one short hint per level, and a note line of at
+ *     most 72 characters for every origin of the stored level
  *   - parity with devflow gates: the two level tables and the malformed wording agree
  *   - init.ts wiring: both wizard paths call the one shared helper with their own mode
  *
@@ -29,6 +31,7 @@ import * as path from 'path';
 import {
   GATE_LEVEL_HINTS,
   GATE_LEVEL_SELECT_MESSAGE,
+  STORED_GATE_LEVEL_ORIGINS,
   carriedGateLevel,
   classifyGateLevel,
   describeGateLevel,
@@ -477,11 +480,129 @@ describe('gateLevelChoices and formatGateLevelCatalogue', () => {
     expect(marked.map(c => c.value)).toEqual([DEFAULT_GATE_LEVEL]);
   });
 
+  it('holds no parenthesis in a hint, because clack shows a select row as `label (hint)`', () => {
+    for (const { value, hint } of gateLevelChoices()) expect(hint, value).not.toMatch(/[()]/);
+  });
+
   it('prints one catalogue line per level', () => {
     const lines = formatGateLevelCatalogue().split('\n');
     expect(lines[0]).toBe('Levels:');
     expect(lines).toHaveLength(1 + GATE_LEVELS.length);
     GATE_LEVELS.forEach((level, i) => expect(lines[i + 1]).toContain(level));
+  });
+});
+
+// ── The prompt fits an 80-column terminal ──────────────────────────────────────
+
+/**
+ * clack never wraps a note: it pads every row to the longest line and draws the border to that
+ * width, and the select hard-wraps the active option without its gutter. A long hint or note line
+ * therefore breaks the box and the list. A hint stays within 60 characters, so the active option
+ * row (`label (hint)` after the gutter and the marker) fits 80 columns. A note line stays within
+ * 72, so the box (the line plus six characters of border and padding) fits 80.
+ */
+const GATE_LEVEL_HINT_MAX = 60;
+const GATE_LEVEL_NOTE_LINE_MAX = 72;
+
+/** One note the step showed, and the origin of the stored level it was built for. */
+interface PromptNote {
+  readonly origin: string;
+  readonly stored: string;
+  readonly message: string;
+}
+
+/**
+ * Named collector: where the gate-level prompt would not fit an 80-column terminal. It reads the
+ * hint of each level and every line of each note.
+ */
+export function collectGateLevelPromptLengthDefects(
+  hints: Readonly<Record<string, string>>,
+  notes: readonly PromptNote[],
+): string[] {
+  const out: string[] = [];
+  for (const [level, hint] of Object.entries(hints)) {
+    if (/[\r\n]/.test(hint)) out.push(`the hint for ${level} holds a line break`);
+    if (hint.length > GATE_LEVEL_HINT_MAX) {
+      out.push(`the hint for ${level} is ${hint.length} characters, over the ${GATE_LEVEL_HINT_MAX} limit`);
+    }
+  }
+  for (const note of notes) {
+    note.message.split('\n').forEach((line, index) => {
+      if (line.length > GATE_LEVEL_NOTE_LINE_MAX) {
+        out.push(
+          `a note line (${note.origin} origin, stored ${note.stored}, line ${index + 1}) is ${line.length} characters, `
+          + `over the ${GATE_LEVEL_NOTE_LINE_MAX} limit`,
+        );
+      }
+    });
+  }
+  return out;
+}
+
+/** The stored values a note is built for: nothing recorded, every level, and a malformed value. */
+const NOTE_STORED_VALUES: readonly unknown[] = [undefined, ...GATE_LEVELS, 'ZZ-raw-canary'];
+
+/** The note the real step shows, for every origin of the stored level and every stored value. */
+async function showRealNotes(): Promise<PromptNote[]> {
+  const out: PromptNote[] = [];
+  for (const origin of STORED_GATE_LEVEL_ORIGINS) {
+    for (const stored of NOTE_STORED_VALUES) {
+      const { prompts, levelQueue, notes } = makePrompts();
+      levelQueue.push({ kind: 'accept' });
+      await runGateLevelStep({ stored, storedOrigin: origin, prompts });
+      expect(notes).toHaveLength(1);
+      out.push({ origin, stored: JSON.stringify(stored) ?? 'undefined', message: notes[0].message });
+    }
+  }
+  return out;
+}
+
+describe('the gate-level prompt fits an 80-column terminal', () => {
+  it('every hint is one short line and every note line fits, for every origin of the stored level', async () => {
+    const notes = await showRealNotes();
+
+    // Non-vacuity: every origin the source lists was shown, with every stored value, and the
+    // text checked is the whole note, catalogue included.
+    expect(STORED_GATE_LEVEL_ORIGINS).toHaveLength(3);
+    expect(Object.isFrozen(STORED_GATE_LEVEL_ORIGINS)).toBe(true);
+    expect(new Set(notes.map(note => note.origin))).toEqual(new Set(STORED_GATE_LEVEL_ORIGINS));
+    expect(notes).toHaveLength(STORED_GATE_LEVEL_ORIGINS.length * NOTE_STORED_VALUES.length);
+    expect(Object.keys(GATE_LEVEL_HINTS)).toEqual([...GATE_LEVELS]);
+    for (const note of notes) {
+      expect(note.message).toContain('Levels:');
+      expect(note.message).toContain('devflow gates --set <level>');
+    }
+    const longest = Math.max(...notes.flatMap(note => note.message.split('\n').map(line => line.length)));
+    expect(longest).toBeGreaterThan(40);
+
+    expect(collectGateLevelPromptLengthDefects(GATE_LEVEL_HINTS, notes)).toEqual([]);
+  });
+
+  it('known-bad probe: a long hint, a hint with a line break and a long note line are each reported by the same collector', () => {
+    const clean: Record<string, string> = Object.fromEntries(GATE_LEVELS.map(level => [level, 'a short hint']));
+    const text = (length: number): string => 'x'.repeat(length);
+    const note = (origin: string, message: string): PromptNote => ({ origin, stored: '"lean"', message });
+    const noteLine = `line 1\nline 2\n${text(GATE_LEVEL_NOTE_LINE_MAX + 1)}`;
+
+    // Non-vacuity: the collector reports nothing for text exactly at each limit.
+    expect(collectGateLevelPromptLengthDefects(
+      { ...clean, lean: text(GATE_LEVEL_HINT_MAX) },
+      [note('manifest', text(GATE_LEVEL_NOTE_LINE_MAX))],
+    )).toEqual([]);
+
+    // The probe ranges over every level and every origin the source lists, never one member.
+    for (const level of GATE_LEVELS) {
+      expect(collectGateLevelPromptLengthDefects({ ...clean, [level]: text(GATE_LEVEL_HINT_MAX + 1) }, []))
+        .toEqual([`the hint for ${level} is ${GATE_LEVEL_HINT_MAX + 1} characters, over the ${GATE_LEVEL_HINT_MAX} limit`]);
+      expect(collectGateLevelPromptLengthDefects({ ...clean, [level]: 'one line\nanother line' }, []))
+        .toEqual([`the hint for ${level} holds a line break`]);
+    }
+    for (const origin of STORED_GATE_LEVEL_ORIGINS) {
+      expect(collectGateLevelPromptLengthDefects(clean, [note(origin, noteLine)])).toEqual([
+        `a note line (${origin} origin, stored "lean", line 3) is ${GATE_LEVEL_NOTE_LINE_MAX + 1} characters, `
+        + `over the ${GATE_LEVEL_NOTE_LINE_MAX} limit`,
+      ]);
+    }
   });
 });
 
@@ -524,6 +645,17 @@ describe('runGateLevelStep', () => {
     expect(notes[0].message).toContain('Current setting: lean');
     expect(notes[0].message).toContain('devflow gates --set');
     expect(notes[0].message).toContain('.devflow/config.json');
+  });
+
+  it('the note names every command that devflow gates says reads the level', async () => {
+    const { prompts, levelQueue, notes } = makePrompts();
+    levelQueue.push({ kind: 'accept' });
+
+    await runGateLevelStep({ stored: undefined, prompts });
+
+    const commands = [...new Set(GATE_LEVEL_EFFECT.match(/(?<=^|\s)\/[a-z][a-z-]*/g) ?? [])];
+    expect(commands, 'GATE_LEVEL_EFFECT names the commands that read the level').toContain('/resolve');
+    for (const command of commands) expect(notes[0].message, command).toContain(command);
   });
 
   it('the note on a first install names the default', async () => {
@@ -978,9 +1110,9 @@ describe('the init prompt and devflow gates describe the same levels', () => {
 
     it('GATE_LEVEL_HINTS', () => {
       expect({ ...GATE_LEVEL_HINTS }, `GATE_LEVEL_HINTS changed. ${UPDATE_BOTH}`).toEqual({
-        full: 'the most checking: every review focus, the full planning shape and Polish',
-        standard: 'fewer review focuses and planning agents, no Polish in /implement and /resolve, severity tiers in /resolve, and one Evaluate pass in /implement (the default)',
-        lean: 'the least checking, and no Polish in /implement and /resolve; /resolve also applies severity tiers; /implement also runs one Evaluate pass, has Validate run the project lint pack, and skips Harden on a docs-only diff',
+        full: 'the most checking: every review focus, and Polish',
+        standard: 'fewer review focuses, no Polish; the default',
+        lean: 'the least checking: no Polish, Validate runs the lint pack',
       });
     });
 

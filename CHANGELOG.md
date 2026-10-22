@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The gate-level step of `devflow init` fits an 80-column terminal** ([#658](https://github.com/dean0x/devflow/issues/658)).
+  - Each level hint is now one short line, and no line of the step note is longer than 72 characters.
+  - The step note names `/resolve` with the other commands that read the level.
+  - The full effect of each level stays in `devflow gates` and in the docs.
 - **`/bug-analysis` no longer reports "no findings" when static analysis could not run** ([#649](https://github.com/dean0x/devflow/issues/649)).
   - Without GNU `timeout` or `gtimeout` (stock macOS), it runs no scanner and says so. Install coreutils to enable it.
   - A scanner that fails, times out or exits with an error is named in the report with its exit status.
