@@ -36,6 +36,8 @@
 //   - D-CI-WORKFLOW-RULE, D-CI-MERGE-STATE: PASSING means that at least one GitHub
 //     Actions check passed on the head, none is pending or failing, and GitHub
 //     reported the PR mergeable. It does not prove that the test workflow ran by name.
+//   - D-CI-PR-STATE: a PR that is not OPEN ends the run at once as INDETERMINATE
+//     (not-open): see waitForCi.
 //   - D-CI-WORKFLOWS: an empty check list may be a run that GitHub Actions has not
 //     started yet. It is NO_CI only when the settle window is done, GitHub reports
 //     the PR mergeable, and one read-only probe of the repository's workflow list finds
@@ -55,11 +57,11 @@
 //     name lists), and every wait is capped at CI_WAIT_MAX_SECONDS.
 //
 // gh facts this file rests on, probed on gh 2.88.1 on 2026-10-09:
-//   - `gh pr view 999999999 --json headRefOid,mergeable` exits 1 with stderr
+//   - `gh pr view 999999999 --json headRefOid,mergeable,state` exits 1 with stderr
 //     `GraphQL: Could not resolve to a PullRequest with the number of 999999999.
-//     (repository.pullRequest)` and an empty stdout (re-probed with `mergeable` in
-//     the field list on 2026-10-22: the same text). Only that text on exit 1 is
-//     NO_PR; any other non-zero exit is a gh failure and never PASSING.
+//     (repository.pullRequest)` and an empty stdout (re-probed with `mergeable` and
+//     `state` in the field list on 2026-10-22: the same text). Only that text on exit 1
+//     is NO_PR; any other non-zero exit is a gh failure and never PASSING.
 //   - `gh pr checks <n> --json` offers exactly bucket, completedAt, description,
 //     event, link, name, startedAt, state and workflow. There is no SHA field, and it
 //     reports only the PR's current head. So the head is bound by comparing
@@ -68,7 +70,9 @@
 //     status and for a third-party app's check run (probed on public PRs, gh 2.88.1,
 //     2026-10-22).
 //   - `gh pr view --json mergeable` is MERGEABLE, CONFLICTING or UNKNOWN. GitHub
-//     computes it lazily, so UNKNOWN is common right after a push or a base move.
+//     computes it lazily, so UNKNOWN is common right after a push or a base move. A
+//     merged PR reads `state` MERGED with `mergeable` UNKNOWN (probed on gh 2.88.1,
+//     2026-10-22), which is why the poll asks `state` (D-CI-PR-STATE).
 //   - `gh api` fills the placeholders `{owner}` and `{repo}` from the repository of the
 //     current directory (`gh api --help`), and a call with no field flag is a GET.
 //     `repos/{owner}/{repo}/actions/workflows?per_page=100` answers `{ total_count,
@@ -100,11 +104,12 @@ const STATUSES = Object.freeze(['PASSING', 'FAILING', 'PENDING', 'NO_CI', 'NO_PR
  * could call neither a pass nor a failure. `no-workflow-check` is a set of passes
  * with no GitHub Actions job among them (D-CI-WORKFLOW-RULE), or an empty check list
  * on a repository with an active workflow file (D-CI-WORKFLOWS); `merge-conflict` is a
- * head that GitHub reports as conflicting (D-CI-MERGE-STATE).
+ * head that GitHub reports as conflicting (D-CI-MERGE-STATE); `not-open` is a PR that is
+ * merged or closed (D-CI-PR-STATE).
  */
 const REASONS = Object.freeze([
   'gh-failed', 'unparseable', 'unrecognised-bucket', 'head-mismatch', 'deadline', 'usage',
-  'no-workflow-check', 'merge-conflict',
+  'no-workflow-check', 'merge-conflict', 'not-open',
 ]);
 
 /** `gh pr checks` categorises `state` into these buckets (gh 2.88.1, `--help`). */
@@ -186,6 +191,9 @@ const USAGE_LINE = 'CI INDETERMINATE pr=- head=- waited=0 reason=usage';
 const WORKFLOWS_ARGS = Object.freeze(['api', 'repos/{owner}/{repo}/actions/workflows?per_page=' + WORKFLOWS_PAGE_ROWS]);
 /** A workflow file lives here; the `dynamic/...` paths GitHub adds for its own apps do not. */
 const WORKFLOWS_DIR = '.github/workflows/';
+
+/** The fields every `gh pr view` call of a poll asks for. */
+const VIEW_FIELDS = 'headRefOid,mergeable,state';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -418,18 +426,20 @@ function parseJson(text) {
 }
 
 /**
- * The `gh pr view --json headRefOid,mergeable` reply. Only `headRefOid` is strict: a
- * `mergeable` that is absent or not a string is read as null, the same as UNKNOWN,
- * and never makes the reply unparseable.
+ * The `gh pr view --json headRefOid,mergeable,state` reply. `headRefOid` and `state` are
+ * strict: a head that is not 40 lowercase hex, or a `state` that is not a string, makes the
+ * reply unparseable. A `mergeable` that is absent or not a string is read as null, the same
+ * as UNKNOWN, and never makes the reply unparseable.
  *
  * @param {string} stdout
- * @returns {{ oid: string, mergeable: string | null } | null}  null for any other shape
+ * @returns {{ oid: string, mergeable: string | null, state: string } | null}  null for any other shape
  */
 function parseView(stdout) {
   const value = parseJson(stdout);
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
   if (typeof value.headRefOid !== 'string' || !HEAD_RE.test(value.headRefOid)) return null;
-  return { oid: value.headRefOid, mergeable: typeof value.mergeable === 'string' ? value.mergeable : null };
+  if (typeof value.state !== 'string') return null;
+  return { oid: value.headRefOid, mergeable: typeof value.mergeable === 'string' ? value.mergeable : null, state: value.state };
 }
 
 /**
@@ -635,6 +645,12 @@ async function askWorkflows(gh) {
  * before and after its checks, every check a pass, one of them a GitHub Actions job
  * (D-CI-WORKFLOW-RULE), and GitHub reported the PR mergeable (D-CI-MERGE-STATE).
  *
+ * D-CI-PR-STATE: GitHub reports `mergeable` UNKNOWN for a merged PR for good (gh 2.88.1,
+ * probed on 2026-10-22), so a PR that is no longer open would wait to the deadline for a
+ * merge state that never comes. The first read of a poll also asks `state`: anything but
+ * the exact string OPEN ends the run at once as INDETERMINATE (not-open), before the head
+ * is compared, and a `state` that is not a string is unparseable. Never PASSING.
+ *
  * D-CI-MERGE-STATE, on a matching head: `mergeable` CONFLICTING is INDETERMINATE
  * (merge-conflict) at once, before the checks are read. An empty check list settles
  * after the same window, and a pass is PASSING, only when the same poll reads
@@ -654,7 +670,7 @@ async function askWorkflows(gh) {
  * parseActiveWorkflows cannot read is INDETERMINATE (unparseable). No other path makes
  * the probe.
  *
- * Per poll: `gh pr view <n> --json headRefOid,mergeable`, then `gh pr checks <n>
+ * Per poll: `gh pr view <n> --json headRefOid,mergeable,state`, then `gh pr checks <n>
  * --json name,state,bucket,workflow` (exit 0 or 8 are results, as in check-ci-status
  * step 3), then the same view call again (a bounded gh call like the others, not made
  * when no time is left), then, on that one path, the workflow probe. A PENDING or open
@@ -739,7 +755,7 @@ async function waitForCi(input) {
     return next.state === 'probe' ? { state: 'open' } : next;
   };
 
-  const viewArgs = ['pr', 'view', pr, '--json', 'headRefOid,mergeable'];
+  const viewArgs = ['pr', 'view', pr, '--json', VIEW_FIELDS];
 
   /**
    * One poll: the view, then, on a matching head that does not conflict, the checks, then
@@ -755,6 +771,7 @@ async function waitForCi(input) {
     if (!view.answered || view.status !== 0) return { state: 'failed' };
     const parsed = parseView(view.stdout);
     if (parsed === null) return resultStep('INDETERMINATE', 'unparseable', [], []);
+    if (parsed.state !== 'OPEN') return resultStep('INDETERMINATE', 'not-open', [], []);
     if (parsed.oid !== head) {
       const mismatch = settle(firstMismatchAt, clock.now(), settleMs);
       firstMismatchAt = mismatch.firstAt;

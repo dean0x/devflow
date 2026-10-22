@@ -218,9 +218,9 @@ class World {
   of(kind: Kind): Recorded[] { return this.calls.filter(c => (kind === 'workflows' ? c.args[0] === 'api' : c.args[1] === kind)) }
 }
 
-/** The view reply; `mergeable` null omits the key, as gh does when it has no answer to give. */
-const viewOk = (head = HEAD, mergeable: string | null = 'MERGEABLE'): Reply => ({
-  stdout: JSON.stringify(mergeable === null ? { headRefOid: head } : { headRefOid: head, mergeable }),
+/** The view reply; `mergeable` null omits the key, as gh does when it has no answer to give. `state` is OPEN, CLOSED or MERGED. */
+const viewOk = (head = HEAD, mergeable: string | null = 'MERGEABLE', state = 'OPEN'): Reply => ({
+  stdout: JSON.stringify(mergeable === null ? { headRefOid: head, state } : { headRefOid: head, mergeable, state }),
 })
 /** One check row: a GitHub Actions job names its workflow; an external status or app check has an empty one. */
 type Spec = readonly [bucket: string, workflow: string]
@@ -261,20 +261,20 @@ const waitedOf = (line: string): number => Number(field(line, 'waited'))
 describe('D-CI-WAIT-BOUNDS: the module carries its bounds and its vocabulary', () => {
   it('exports the six statuses in check-ci-status\'s order, the reasons and the documented buckets', () => {
     expect(CW.STATUSES).toEqual(['PASSING', 'FAILING', 'PENDING', 'NO_CI', 'NO_PR', 'INDETERMINATE'])
-    expect(CW.REASONS).toEqual(['gh-failed', 'unparseable', 'unrecognised-bucket', 'head-mismatch', 'deadline', 'usage', 'no-workflow-check', 'merge-conflict'])
+    expect(CW.REASONS).toEqual(['gh-failed', 'unparseable', 'unrecognised-bucket', 'head-mismatch', 'deadline', 'usage', 'no-workflow-check', 'merge-conflict', 'not-open'])
     expect(CW.BUCKETS).toEqual(['pass', 'fail', 'pending', 'skipping', 'cancel'])
   })
 
-  it('ends the reasons with the two workflow and merge-state reasons, which only an INDETERMINATE line may carry', () => {
-    expect(CW.REASONS.slice(-2)).toEqual(['no-workflow-check', 'merge-conflict'])
+  it('ends the reasons with the workflow, merge-state and PR-state reasons, which only an INDETERMINATE line may carry', () => {
+    expect(CW.REASONS.slice(-3)).toEqual(['no-workflow-check', 'merge-conflict', 'not-open'])
     const indeterminate = 'CI INDETERMINATE pr=12 head=aaaaaaa failing=- pending=- waited=2'
-    for (const reason of ['no-workflow-check', 'merge-conflict']) {
+    for (const reason of ['no-workflow-check', 'merge-conflict', 'not-open']) {
       expect(CW.LINE_RE.test(`${indeterminate} reason=${reason}`), reason).toBe(true)
       expect(CW.checkLine(`${indeterminate} reason=${reason}`), reason).toBe(true)
       expect(CW.checkLine(`CI PASSING pr=12 head=aaaaaaa failing=- pending=- waited=2 reason=${reason}`), `${reason} on PASSING`).toBe(false)
       expect(CW.checkLine(`CI NO_CI pr=12 head=aaaaaaa failing=- pending=- waited=2 reason=${reason}`), `${reason} on NO_CI`).toBe(false)
     }
-    for (const unlisted of ['no-workflow', 'merge-conflicts', 'no-workflow-check-x', 'Merge-Conflict']) {
+    for (const unlisted of ['no-workflow', 'merge-conflicts', 'no-workflow-check-x', 'Merge-Conflict', 'not-opened', 'Not-Open', 'not_open']) {
       expect(CW.checkLine(`${indeterminate} reason=${unlisted}`), unlisted).toBe(false)
     }
   })
@@ -584,7 +584,8 @@ describe('AC-12: the checks count for the head only when the head is the same af
     ['errors', { error: { code: 'ENOENT' } }],
     ['is not JSON', { stdout: '<html>rate limited</html>' }],
     ['has no headRefOid', { stdout: '{"mergeable":"MERGEABLE"}' }],
-    ['has a short headRefOid', { stdout: '{"headRefOid":"aaaa","mergeable":"MERGEABLE"}' }],
+    ['has a short headRefOid', { stdout: '{"headRefOid":"aaaa","mergeable":"MERGEABLE","state":"OPEN"}' }],
+    ['has no state', { stdout: JSON.stringify({ headRefOid: HEAD, mergeable: 'MERGEABLE' }) }],
   ]
   for (const [label, reply] of unreadable) {
     it(`a second head read that ${label} is a failed poll: three in a row are INDETERMINATE (gh-failed), never PASSING`, async () => {
@@ -832,13 +833,13 @@ describe('the merge state: CONFLICTING ends at once, and anything but MERGEABLE 
 
   it('an absent, null, empty, non-string or unlisted mergeable value behaves as UNKNOWN and is never unparseable', async () => {
     const replies: ReadonlyArray<string> = [
-      JSON.stringify({ headRefOid: HEAD }),
-      JSON.stringify({ headRefOid: HEAD, mergeable: null }),
-      JSON.stringify({ headRefOid: HEAD, mergeable: '' }),
-      JSON.stringify({ headRefOid: HEAD, mergeable: 7 }),
-      JSON.stringify({ headRefOid: HEAD, mergeable: ['MERGEABLE'] }),
-      JSON.stringify({ headRefOid: HEAD, mergeable: 'mergeable' }),
-      JSON.stringify({ headRefOid: HEAD, mergeable: 'SOMETHING_NEW' }),
+      JSON.stringify({ headRefOid: HEAD, state: 'OPEN' }),
+      JSON.stringify({ headRefOid: HEAD, mergeable: null, state: 'OPEN' }),
+      JSON.stringify({ headRefOid: HEAD, mergeable: '', state: 'OPEN' }),
+      JSON.stringify({ headRefOid: HEAD, mergeable: 7, state: 'OPEN' }),
+      JSON.stringify({ headRefOid: HEAD, mergeable: ['MERGEABLE'], state: 'OPEN' }),
+      JSON.stringify({ headRefOid: HEAD, mergeable: 'mergeable', state: 'OPEN' }),
+      JSON.stringify({ headRefOid: HEAD, mergeable: 'SOMETHING_NEW', state: 'OPEN' }),
     ]
     for (const stdout of replies) {
       const r = await run(({ kind }) => (kind === 'view' ? { stdout } : { stdout: '[]' }))
@@ -938,6 +939,73 @@ const UNREADABLE: ReadonlyArray<readonly [string, string]> = [
   ['a fractional total beside an active row', workflowJson([CI_YML], 1.5)],
   ['a negative total beside an active row', workflowJson([CI_YML], -1)],
 ]
+
+describe('the PR state: a PR that is not open ends at once as INDETERMINATE (not-open), never PASSING', () => {
+  /** A passing PR as GitHub reports it once it is merged or closed: the merge state is UNKNOWN, as gh 2.88.1 prints it. */
+  const ended = (state: string, mergeable: string | null = 'UNKNOWN'): Script => ({ kind }) => (kind === 'view' ? viewOk(HEAD, mergeable, state) : checksOk('pass'))
+
+  for (const state of ['MERGED', 'CLOSED']) {
+    it(`${state} with passing checks: not-open after the first call, with no checks call and no sleep`, async () => {
+      const r = await run(ended(state))
+      expect(r.line).toBe('CI INDETERMINATE pr=12 head=aaaaaaa failing=- pending=- waited=1 reason=not-open')
+      expect(r.world.calls.map(c => c.args[1])).toEqual(['view'])
+      expect(r.world.sleeps).toEqual([])
+    })
+
+    it(`${state} that GitHub reports as MERGEABLE is still not-open, never PASSING`, async () => {
+      const r = await run(ended(state, 'MERGEABLE'))
+      expect(statusOf(r.line)).toBe('INDETERMINATE')
+      expect(field(r.line, 'reason')).toBe('not-open')
+      expect(r.world.of('checks')).toHaveLength(0)
+    })
+
+    it(`${state} on a head that is not the named head is not-open at once, not a head-mismatch after the settle window`, async () => {
+      const r = await run(({ kind }) => (kind === 'view' ? viewOk(OLD_HEAD, 'UNKNOWN', state) : checksOk('pass')))
+      expect(field(r.line, 'reason')).toBe('not-open')
+      expect(r.world.calls).toHaveLength(1)
+    })
+  }
+
+  it('a PR that is merged on a later poll ends at that poll', async () => {
+    const r = await run(({ kind, nth }) => (kind === 'view' ? viewOk(HEAD, 'UNKNOWN', nth < 2 ? 'OPEN' : 'MERGED') : checksOk('pass')))
+    expect(field(r.line, 'reason')).toBe('not-open')
+    expect(r.world.of('checks')).toHaveLength(2)
+    expect(r.world.sleeps).toEqual([20_000, 20_000])
+  })
+
+  it('an OPEN PR reads as it did: PASSING on MERGEABLE, and the deadline on UNKNOWN', async () => {
+    const passing = await run(({ kind }) => (kind === 'view' ? viewOk(HEAD, 'MERGEABLE', 'OPEN') : checksOk('pass')))
+    expect(passing.line).toBe('CI PASSING pr=12 head=aaaaaaa failing=- pending=- waited=2')
+    const unknown = await run(({ kind }) => (kind === 'view' ? viewOk(HEAD, 'UNKNOWN', 'OPEN') : checksOk('pass')))
+    expect(field(unknown.line, 'reason')).toBe('deadline')
+  })
+
+  it('a state that is not the exact string OPEN is not-open', async () => {
+    for (const state of ['open', 'Open', 'DRAFT', '', 'OPEN ']) {
+      const r = await run(ended(state, 'MERGEABLE'))
+      expect(field(r.line, 'reason'), JSON.stringify(state)).toBe('not-open')
+    }
+  })
+
+  it('a view reply with no state, or a state that is not a string, is unparseable at once', async () => {
+    for (const stdout of [
+      JSON.stringify({ headRefOid: HEAD, mergeable: 'MERGEABLE' }),
+      JSON.stringify({ headRefOid: HEAD, mergeable: 'MERGEABLE', state: null }),
+      JSON.stringify({ headRefOid: HEAD, mergeable: 'MERGEABLE', state: 1 }),
+      JSON.stringify({ headRefOid: HEAD, mergeable: 'MERGEABLE', state: ['OPEN'] }),
+    ]) {
+      const r = await run(({ kind }) => (kind === 'view' ? { stdout } : checksOk('pass')))
+      expect(statusOf(r.line), stdout).toBe('INDETERMINATE')
+      expect(field(r.line, 'reason'), stdout).toBe('unparseable')
+      expect(r.world.calls, stdout).toHaveLength(1)
+    }
+  })
+
+  it('a pull request that does not exist is still NO_PR: the state is read only from a reply that answered', async () => {
+    const r = await run(() => ({ status: 1, stderr: NO_PR_STDERR }))
+    expect(statusOf(r.line)).toBe('NO_PR')
+  })
+})
 
 describe('parseActiveWorkflows: the workflow list as a pure function', () => {
   it('is true when a row is active and its path is a file under .github/workflows/', () => {
@@ -1487,9 +1555,9 @@ describe('AC-11: a bad argv prints one usage line and makes no gh call', () => {
   it('gh is spawned with an argv array, the file `gh`, no shell, and only the PR number and fixed words', async () => {
     const r = await run(({ kind }) => (kind === 'view' ? viewOk() : checksOk('pass')))
     expect(r.world.calls.map(c => [c.file, ...c.args])).toEqual([
-      ['gh', 'pr', 'view', PR, '--json', 'headRefOid,mergeable'],
+      ['gh', 'pr', 'view', PR, '--json', 'headRefOid,mergeable,state'],
       ['gh', 'pr', 'checks', PR, '--json', 'name,state,bucket,workflow'],
-      ['gh', 'pr', 'view', PR, '--json', 'headRefOid,mergeable'],
+      ['gh', 'pr', 'view', PR, '--json', 'headRefOid,mergeable,state'],
     ])
     expect(r.world.calls.every(c => c.shell === false)).toBe(true)
   })
@@ -1623,32 +1691,32 @@ describe('the script as a process: the usage line, and a scripted gh', () => {
 
   it('a passing PR through the real spawnSync: gh is called with the fixed argv and the line is PASSING', () => {
     const shim = buildScriptedShim(bin, root, [
-      { tool: 'gh', args: ['pr', 'view', '12', '--json', 'headRefOid,mergeable'], stdout: JSON.stringify({ headRefOid: HEAD, mergeable: 'MERGEABLE' }) },
+      { tool: 'gh', args: ['pr', 'view', '12', '--json', 'headRefOid,mergeable,state'], stdout: JSON.stringify({ headRefOid: HEAD, mergeable: 'MERGEABLE', state: 'OPEN' }) },
       { tool: 'gh', args: ['pr', 'checks', '12', '--json', 'name,state,bucket,workflow'], stdout: rows('pass', 'skipping') },
     ])
     const r = runScript(['--pr', '12', '--head', HEAD], { PATH: `${shim.dir}${path.delimiter}${process.env.PATH ?? ''}`, ...shim.env })
     expect(r.stdout).toMatch(/^CI PASSING pr=12 head=aaaaaaa failing=- pending=- waited=\d+\n$/)
     expect(r.status).toBe(0)
     expect(shim.readLog()).toEqual([
-      ['gh', 'pr', 'view', '12', '--json', 'headRefOid,mergeable'],
+      ['gh', 'pr', 'view', '12', '--json', 'headRefOid,mergeable,state'],
       ['gh', 'pr', 'checks', '12', '--json', 'name,state,bucket,workflow'],
-      ['gh', 'pr', 'view', '12', '--json', 'headRefOid,mergeable'],
+      ['gh', 'pr', 'view', '12', '--json', 'headRefOid,mergeable,state'],
     ])
   })
 
-  it('a conflicting PR through the real spawnSync is merge-conflict after one call, the view asking headRefOid,mergeable', () => {
+  it('a conflicting PR through the real spawnSync is merge-conflict after one call, the view asking headRefOid,mergeable,state', () => {
     const shim = buildScriptedShim(bin, root, [
-      { tool: 'gh', args: ['pr', 'view', '12', '--json', 'headRefOid,mergeable'], stdout: JSON.stringify({ headRefOid: HEAD, mergeable: 'CONFLICTING' }) },
+      { tool: 'gh', args: ['pr', 'view', '12', '--json', 'headRefOid,mergeable,state'], stdout: JSON.stringify({ headRefOid: HEAD, mergeable: 'CONFLICTING', state: 'OPEN' }) },
     ])
     const r = runScript(['--pr', '12', '--head', HEAD], { PATH: `${shim.dir}${path.delimiter}${process.env.PATH ?? ''}`, ...shim.env })
     expect(r.stdout).toMatch(/^CI INDETERMINATE pr=12 head=aaaaaaa failing=- pending=- waited=\d+ reason=merge-conflict\n$/)
     expect(r.status).toBe(0)
-    expect(shim.readLog()).toEqual([['gh', 'pr', 'view', '12', '--json', 'headRefOid,mergeable']])
+    expect(shim.readLog()).toEqual([['gh', 'pr', 'view', '12', '--json', 'headRefOid,mergeable,state']])
   })
 
   describe('an empty check list through the real spawnSync, the settle window passed on a virtual clock', () => {
     const emptyListShim = (workflows: object): ScriptedShim => buildScriptedShim(bin, root, [
-      { tool: 'gh', args: ['pr', 'view', '12', '--json', 'headRefOid,mergeable'], stdout: JSON.stringify({ headRefOid: HEAD, mergeable: 'MERGEABLE' }) },
+      { tool: 'gh', args: ['pr', 'view', '12', '--json', 'headRefOid,mergeable,state'], stdout: JSON.stringify({ headRefOid: HEAD, mergeable: 'MERGEABLE', state: 'OPEN' }) },
       { tool: 'gh', args: ['pr', 'checks', '12', '--json', 'name,state,bucket,workflow'], exit: 1, stderr: NO_CHECKS_STDERR },
       { tool: 'gh', args: WORKFLOWS_ARGV, stdout: JSON.stringify(workflows) },
     ])
@@ -1675,7 +1743,7 @@ describe('the script as a process: the usage line, and a scripted gh', () => {
 
     it('an unscripted probe (gh exits non-zero) is never NO_CI: gh-failed after three failed polls', () => {
       const shim = buildScriptedShim(bin, root, [
-        { tool: 'gh', args: ['pr', 'view', '12', '--json', 'headRefOid,mergeable'], stdout: JSON.stringify({ headRefOid: HEAD, mergeable: 'MERGEABLE' }) },
+        { tool: 'gh', args: ['pr', 'view', '12', '--json', 'headRefOid,mergeable,state'], stdout: JSON.stringify({ headRefOid: HEAD, mergeable: 'MERGEABLE', state: 'OPEN' }) },
         { tool: 'gh', args: ['pr', 'checks', '12', '--json', 'name,state,bucket,workflow'], exit: 1, stderr: NO_CHECKS_STDERR },
       ])
       const r = runEmpty(shim)
@@ -1686,7 +1754,7 @@ describe('the script as a process: the usage line, and a scripted gh', () => {
 
   it('a missing pull request through the real spawnSync is NO_PR', () => {
     const shim = buildScriptedShim(bin, root, [
-      { tool: 'gh', args: ['pr', 'view', '999999999', '--json', 'headRefOid,mergeable'], exit: 1, stderr: NO_PR_STDERR },
+      { tool: 'gh', args: ['pr', 'view', '999999999', '--json', 'headRefOid,mergeable,state'], exit: 1, stderr: NO_PR_STDERR },
     ])
     const r = runScript(['--pr', '999999999', '--head', HEAD], { PATH: `${shim.dir}${path.delimiter}${process.env.PATH ?? ''}`, ...shim.env })
     expect(r.stdout).toMatch(/^CI NO_PR pr=999999999 head=aaaaaaa failing=- pending=- waited=\d+\n$/)
@@ -1695,7 +1763,7 @@ describe('the script as a process: the usage line, and a scripted gh', () => {
 
   it('failing checks through the real spawnSync name the failing check on the one line, sanitized', () => {
     const shim = buildScriptedShim(bin, root, [
-      { tool: 'gh', args: ['pr', 'view', '7', '--json', 'headRefOid,mergeable'], stdout: JSON.stringify({ headRefOid: HEAD, mergeable: 'MERGEABLE' }) },
+      { tool: 'gh', args: ['pr', 'view', '7', '--json', 'headRefOid,mergeable,state'], stdout: JSON.stringify({ headRefOid: HEAD, mergeable: 'MERGEABLE', state: 'OPEN' }) },
       { tool: 'gh', args: ['pr', 'checks', '7', '--json', 'name,state,bucket,workflow'], stdout: JSON.stringify([{ name: 'lint\u001b[0m', state: 'FAILURE', bucket: 'fail', workflow: 'CI' }]) },
     ])
     const r = runScript(['--pr', '7', '--head', HEAD], { PATH: `${shim.dir}${path.delimiter}${process.env.PATH ?? ''}`, ...shim.env })
@@ -1797,7 +1865,7 @@ describe('source guards (ci-wait.cjs)', () => {
     for (const marker of [
       'D-CI-WAIT-INLINE', 'D-CI-NO-LITERAL-SLEEP', 'D-CI-NO-EXIT', 'D-CI-WAIT-BOUNDS', 'D-CI-HEAD-BINDING',
       'D-CI-CLASSIFIER', 'D-CI-SANITIZE', 'D-CI-LINE', 'D-CI-ARGV', 'D-CI-STATUSES',
-      'D-CI-WORKFLOW-RULE', 'D-CI-MERGE-STATE', 'D-CI-WORKFLOWS',
+      'D-CI-WORKFLOW-RULE', 'D-CI-MERGE-STATE', 'D-CI-WORKFLOWS', 'D-CI-PR-STATE',
     ]) {
       expect(SOURCE, `${marker} missing`).toContain(marker)
     }

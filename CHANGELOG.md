@@ -100,6 +100,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - These cases now read "status unknown" instead of a pass or "no CI":
     a PR with only external checks (`reason=no-workflow-check`), a PR with a merge conflict (`reason=merge-conflict`), and a repository with active workflows but no run on the head (`reason=no-workflow-check`).
     A merge state that GitHub does not report in time ends the wait with `reason=deadline`.
+    A PR that is merged or closed ends the wait at once with `reason=not-open`. It does not wait for a merge state.
   - "No CI" needs a mergeable PR with no checks and no active workflow file under `.github/workflows/`. A repository with no workflow file still reads "no CI".
     When a PR has no checks and the token cannot read Actions workflows, the wait ends with `reason=gh-failed`.
   - The merge-readiness report reads CI for the PR head. It counts a pass or "no CI" only when the PR head it read is the head of the evidence.
