@@ -15,7 +15,11 @@
  * curation-off file. The compliance axis works the same way: a body is split on
  * both axes into four variants, keyed `on`, `curation-off`, `compliance-off` and
  * `both-off`, and the build writes a variant only for a host that has an arm on
- * the axis that variant turns off.
+ * the axis that variant turns off. The off variants go to dist/curation-off/,
+ * dist/compliance-off/ and dist/curation-compliance-off/, and the manifest
+ * dist/variant-axes.json records which axes each host carries an arm on. The install
+ * order of the trees per machine is owned by src/core/assets.ts, and the install refusal
+ * for a compliance-off machine by src/targets/claude-code/installer.ts.
  *
  * The arms are whole-line markers in the host or in a partial it expands. Each
  * axis has the same three:
