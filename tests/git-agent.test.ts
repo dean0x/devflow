@@ -1647,21 +1647,21 @@ describe('git agent — static content guards', () => {
 
   /**
    * The private-section rule's load-bearing clauses, each of which a summary op must be
-   * able to reach: the rule is one LLM-applied control, so a clause dropped from one op's
-   * reference is a section that op posts. The same rows feed the non-vacuity arm below.
+   * able to reach: the rule is one LLM-applied control, so each op's reference must carry
+   * every clause. The same rows feed the non-vacuity arm below.
    */
   const PRIVATE_SECTION_ROWS: readonly { readonly literal: string; readonly why: string }[] = [
     {
       literal: 'the word `Private` (any case)',
-      why: 'the marker spelling; a narrower spelling posts a section the writer marked private',
+      why: 'the marker spelling; a private section would reach the posted comment',
     },
     {
       literal: 'a space or tab and the word',
-      why: 'the start shape; CommonMark accepts a tab after the heading marks, so a space-only shape posts a tab-marked private section',
+      why: 'the start shape; a tab after the heading marks starts a private section too',
     },
     {
       literal: 'fenced or not',
-      why: 'a start inside a fence must still strip, or a bad fence makes the strip fail open',
+      why: 'a start inside a fence must still strip; a fenced start would stay in the post',
     },
     {
       literal: 'not followed by a letter or digit',
@@ -1669,7 +1669,7 @@ describe('git agent — static content guards', () => {
     },
     {
       literal: 'else at end of file; an unclosed fence inside it runs it to end of file',
-      why: 'the end rule; without it a last or unclosed section stays in the post',
+      why: 'the end rule; a last or unclosed private section would stay in the post',
     },
     {
       literal: 'Step 4 strips them before either mode',
