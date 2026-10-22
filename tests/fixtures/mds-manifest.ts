@@ -21,7 +21,8 @@
  *       "14 command outputs byte-…"     — the dist/-vs-src/ byte compare is non-vacuous
  *   - tests/packaging.test.ts
  *       Guard 6                         — the same output set, the generator hosts' compiled
- *                                         agents, the curation-off variants and the shipped
+ *                                         agents, the curation-off, compliance-off and both-off
+ *                                         variants, the variant manifest and the shipped
  *                                         .mds sources, inside the tarball
  *   - tests/curation/curation-variants-build.test.ts
  *       CURATION_VARIANT_HOSTS          — the curation-off files on disk, both directions
