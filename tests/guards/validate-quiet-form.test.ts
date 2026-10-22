@@ -23,7 +23,7 @@ import * as path from 'path'
 import { ROOT, collectUnfencedH2, resolveAgentSource } from '../helpers.js'
 
 const BLOCK_HEADING = '## Running commands'
-const FALLBACK = "After a failed Test row, re-run each of its first 20 failed test files alone, once, verbose, 120 s max, never the suite: this is the one exception to the never-re-run rule under Running commands."
+const FALLBACK = "After a failed Test row, re-run each of its first 20 failed test files alone, once, verbose, 600 s max, never the suite: this is the one exception to the never-re-run rule under Running commands."
 
 /** The Validation Order table, row by row, as trimmed cells. */
 export function tableRows(body: string): string[][] {

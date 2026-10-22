@@ -16,6 +16,9 @@
  *      limit, and no 120 s, 120000 or 40 minutes remains.
  *   4. Wording: no flake word (stem "flak"); no all-caps word in the stub paragraph or the reference
  *      outside the closed list `ALLOWED_CAPS`; no name filter; no open-fail Read.
+ *   5. The old limit: the body, the Validation step of docs/commands.md and the text-guards knowledge
+ *      entry name no 120 s, 120 seconds, 120000 or 40 minutes; `collectStaleLimitSiteDefects` checks the
+ *      last two, and each site has a known-bad probe.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -39,7 +42,7 @@ const READ_LINE = `${READ_LEAD}\`${SANCTIONED_RESOLUTION} printf '%s\\n' "$d/ski
 const NAMED_PATH = /"\$d\/skills\/devflow:agent-references\/references\/([^"]+)"/
 
 const OUTPUT_LINE_START = 'Passed alone: {'
-const OUTPUT_LINE_BOUND = 'bound 20 files, 120 s each'
+const OUTPUT_LINE_BOUND = 'bound 20 files, 600 s each'
 
 /** The slot of the `Passed alone:` line in the body template. The reference names the same slot, `<paths>`, in its own pin. */
 const OUTPUT_LINE_SLOT = 'Passed alone: {paths, if any}'
@@ -52,7 +55,7 @@ const SKILL_ROW = `| \`${REFERENCE_REL}\` | Validate | A Test row failed |`
 const BODY_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]> = [
   ['the full run uses the quiet form where the project command runs that tool', "Use the quiet form where the project's command runs that tool."],
   ['the trigger and the bound of 20 files', TRIGGER],
-  ['the re-run is verbose and limited to 120 s', ' verbose, 120 s max'],
+  ['the re-run is verbose and limited to 600 s', ' verbose, 600 s max'],
   ['the re-run is never the suite', 'never the suite'],
   ['the re-run is the one exception to the never-re-run rule', 'this is the one exception to the never-re-run rule under Running commands.'],
   ['the Read of the reference through the sanctioned directory line', READ_LINE],
@@ -172,8 +175,8 @@ const FROZEN_STEPS: ReadonlyArray<readonly [step: number, text: string]> = [
 /** The numbered step `n` of a reference: its whole line, or '' when none starts with `n. `. */
 const stepOf = (reference: string, n: number): string => reference.split('\n').find(line => line.startsWith(`${n}. `)) ?? ''
 
-/** The re-run limits of the 120 s era: a re-run time of 120 s or 120000 ms, and the 40 minute worst case. */
-const STALE_LIMIT = /\b120 s\b|120000|40 minutes/
+/** The re-run limits of the 120 s era: a re-run time of 120 s, 120 seconds or 120000 ms, and the 40 minute worst case. */
+const STALE_LIMIT = /\b120 s\b|\b120 seconds\b|120000|40 minutes/
 
 /** The lead of the reference: from the end of its heading line to the first numbered step. */
 function leadOf(reference: string): string {
@@ -235,6 +238,8 @@ function collectBodyDefects(body: string, region: string): string[] {
   if (region.includes('re-run no path it rejects')) out.push('the Read fails open: it re-runs every path it does not reject')
   if (NAME_FILTER_ALLOWED.test(region)) out.push('the body allows a name filter')
   if (/flak/i.test(body)) out.push('the body carries a flake word (stem "flak")')
+  const stale = STALE_LIMIT.exec(body)?.[0]
+  if (stale !== undefined) out.push(`the body names the old re-run limit: ${stale}`)
   for (const word of capsWords(paragraph)) {
     if (!ALLOWED_CAPS.has(word)) out.push(`the body carries an all-caps word outside the label list: ${word}`)
   }
@@ -254,7 +259,7 @@ function collectBlockDefects(body: string): string[] {
   if (line === '') out.push('the Output block has no `Passed alone:` line')
   else {
     if (!line.startsWith(OUTPUT_LINE_SLOT)) out.push('the `Passed alone:` line lost: its `{paths, if any}` slot')
-    if (!line.includes(OUTPUT_LINE_BOUND)) out.push('the `Passed alone:` line lost: its bound of 20 files and 120 s')
+    if (!line.includes(OUTPUT_LINE_BOUND)) out.push('the `Passed alone:` line lost: its bound of 20 files and 600 s')
   }
   const lineAt = output.indexOf(`\n${OUTPUT_LINE_START}`)
   if (lineAt !== -1 && !ascending([output.indexOf(TABLE_HEADER), lineAt, output.indexOf('### Failures')])) {
@@ -304,6 +309,35 @@ export function collectPassedAloneDefects(body: string, readReference: ReadRefer
   return [...collectBodyDefects(body, region), ...collectBlockDefects(body), ...collectReferenceDefects(region, readReference, skillMd)]
 }
 
+/** The line of docs/commands.md that holds the /implement Validation step. */
+const DOCS_STEP_START = '5. **Validation**'
+
+/** The line of the text-guards knowledge that holds the entry on Validate's passed-alone re-runs. */
+const KB_ENTRY_START = "- **Validate's passed-alone re-runs.**"
+
+/**
+ * Named collector: the old re-run limit in the two texts that restate the bound outside the agent. `docs` is
+ * docs/commands.md, `knowledge` is the text-guards KNOWLEDGE.md. A site whose line is gone is reported too, so
+ * a reworded or moved line cannot pass for a clean one. CHANGELOG.md and the test files are not checked: they
+ * keep the old limit in words on purpose.
+ */
+export function collectStaleLimitSiteDefects(docs: string, knowledge: string): string[] {
+  const sites: ReadonlyArray<readonly [label: string, text: string, start: string]> = [
+    ['the docs Validation step', docs, DOCS_STEP_START],
+    ['the text-guards knowledge entry', knowledge, KB_ENTRY_START],
+  ]
+  const out: string[] = []
+  for (const [label, text, start] of sites) {
+    const line = text.split('\n').find(l => l.startsWith(start))
+    if (line === undefined) out.push(`${label} is missing: no line starts with ${start}`)
+    else {
+      const stale = STALE_LIMIT.exec(line)?.[0]
+      if (stale !== undefined) out.push(`${label} names the old re-run limit: ${stale}`)
+    }
+  }
+  return out
+}
+
 // ---------------------------------------------------------------------------
 // Corpus
 // ---------------------------------------------------------------------------
@@ -321,6 +355,8 @@ function readReference(rel: string): string | null {
 }
 
 const REFERENCE = readReference(REFERENCE_REL) ?? ''
+const DOCS = readFileSync(path.join(ROOT, 'docs', 'commands.md'), 'utf-8')
+const KNOWLEDGE = readFileSync(path.join(ROOT, '.devflow', 'features', 'test-harness-text-guards', 'KNOWLEDGE.md'), 'utf-8')
 
 /** Replace `from` with `to` in a text, failing the test when the seed did not change it. */
 function seed(text: string, from: string | RegExp, to: string): string {
@@ -334,6 +370,12 @@ const withBody = (body: string): string[] => collectPassedAloneDefects(body, rea
 
 /** The collector over a changed reference, with the real body and SKILL.md row. */
 const withReference = (reference: string | null): string[] => collectPassedAloneDefects(BODY, () => reference, SKILL_MD)
+
+/** The site collector over a changed docs text, with the real knowledge text. */
+const withDocs = (docs: string): string[] => collectStaleLimitSiteDefects(docs, KNOWLEDGE)
+
+/** The site collector over a changed knowledge text, with the real docs text. */
+const withKnowledge = (knowledge: string): string[] => collectStaleLimitSiteDefects(DOCS, knowledge)
 
 /** The stub: from the Read line to the end of its last sentence. */
 function stubOf(body: string): string {
@@ -467,6 +509,29 @@ describe('the Validate body re-runs each failed test file alone and labels it', 
     expect(withReference(seed(REFERENCE, '200 min per', '40 minutes per'))).toContain('the reference names the old re-run limit: 40 minutes')
   })
 
+  it('probes: the 120 s era re-run limits are reported in the body: 120 s, 120 seconds, 120000 ms and 40 minutes', () => {
+    expect(STALE_LIMIT.test(BODY), 'the body names no old limit').toBe(false)
+    expect(withBody(seed(BODY, ' verbose, 600 s max', ' verbose, 120 s max'))).toContain('the body names the old re-run limit: 120 s')
+    expect(withBody(seed(BODY, OUTPUT_LINE_BOUND, 'bound 20 files, 120 s each'))).toContain('the body names the old re-run limit: 120 s')
+    expect(withBody(`${BODY}\nEach re-run waits at most 120 seconds.\n`)).toContain('the body names the old re-run limit: 120 seconds')
+    expect(withBody(`${BODY}\nEach re-run has a timeout of 120000 ms.\n`)).toContain('the body names the old re-run limit: 120000')
+    expect(withBody(`${BODY}\nThe worst case is 40 minutes.\n`)).toContain('the body names the old re-run limit: 40 minutes')
+  })
+
+  it('probes: the 120 s era re-run limits are reported in the docs Validation step and the text-guards knowledge entry', () => {
+    expect(collectStaleLimitSiteDefects(DOCS, KNOWLEDGE)).toEqual([])
+    expect(withDocs(seed(DOCS, 'waits at most 600 seconds', 'waits at most 120 seconds'))).toContain('the docs Validation step names the old re-run limit: 120 seconds')
+    expect(withDocs(seed(DOCS, 'waits at most 600 seconds', 'waits at most 120 s'))).toContain('the docs Validation step names the old re-run limit: 120 s')
+    expect(withDocs(seed(DOCS, 'worst case is 200 minutes', 'worst case is 40 minutes'))).toContain('the docs Validation step names the old re-run limit: 40 minutes')
+    expect(withKnowledge(seed(KNOWLEDGE, 'waits at most 600 s', 'waits at most 120 s'))).toContain('the text-guards knowledge entry names the old re-run limit: 120 s')
+    expect(withKnowledge(seed(KNOWLEDGE, 'worst case 200 minutes', 'worst case 40 minutes'))).toContain('the text-guards knowledge entry names the old re-run limit: 40 minutes')
+  })
+
+  it('probes: a docs Validation step or a knowledge entry that is gone is reported, so the limit check cannot pass on a missing line', () => {
+    expect(withDocs(seed(DOCS, DOCS_STEP_START, '5. **Checks**'))).toContain(`the docs Validation step is missing: no line starts with ${DOCS_STEP_START}`)
+    expect(withKnowledge(seed(KNOWLEDGE, KB_ENTRY_START, "- **Validate's re-runs.**"))).toContain(`the text-guards knowledge entry is missing: no line starts with ${KB_ENTRY_START}`)
+  })
+
   it('probes: a Test row that no longer counts as passed for the Lint pack and a "them" with no referent are reported', () => {
     expect(withBody(seed(BODY, ', also for Lint pack', ''))).toContain('the body lost: the Test row counts as passed, also for the Lint pack')
     expect(withBody(seed(BODY, 'PASS needs PASSED-ALONE files', 'PASS needs them'))).toContain('the body lost: PASS needs the PASSED-ALONE files to explain every failure')
@@ -488,7 +553,7 @@ describe('the Validate body re-runs each failed test file alone and labels it', 
     const lateLine = seed(seed(BODY, `${line}\n\n`, ''), '### Failures (if FAIL)\n', `### Failures (if FAIL)\n${line}\n\n`)
     expect(withBody(lateLine)).toContain('the `Passed alone:` line is not between the commands table and `### Failures`')
 
-    expect(withBody(seed(BODY, `; ${OUTPUT_LINE_BOUND}`, ''))).toContain('the `Passed alone:` line lost: its bound of 20 files and 120 s')
+    expect(withBody(seed(BODY, `; ${OUTPUT_LINE_BOUND}`, ''))).toContain('the `Passed alone:` line lost: its bound of 20 files and 600 s')
     expect(withBody(seed(BODY, `${line}\n\n`, ''))).toContain('the Output block has no `Passed alone:` line')
   })
 
