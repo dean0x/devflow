@@ -130,10 +130,7 @@ Quarantine flaky tests immediately — a suite that sometimes passes is worse th
 ## Quality Gates [4][8][17]
 
 - [ ] Setup <10 lines; use fakes over mocks for complex dependencies [1]
-- [ ] No spying on private methods or internal state [8]
-- [ ] Tests verify behavior, not implementation details [4]
 - [ ] All branches covered: happy path + errors + edge cases
 - [ ] Test names describe expected behavior [4]
 - [ ] Tests follow Arrange-Act-Assert structure [17]
-- [ ] No real delays — use fake timers [19]
 - [ ] No flaky patterns (race conditions, timing dependencies) [11][18]
