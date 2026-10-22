@@ -1838,6 +1838,13 @@ function parseWaveRow(line) {
  * like every related line, so it adds no free text to the body. A leading `Refs`
  * that names a row is that row's line, never a tracking line.
  *
+ * D-WAVE-LINKS-ONLY: a block may also be the `## Related Issues` heading and 1–WAVE_ROWS + 1
+ * `Refs #<n>` lines and nothing after them (blank lines aside): no evidence section, no
+ * rows. It parses to no tracking line and no rows. A ref may not repeat (`duplicate`).
+ * `Closes` is never admitted there: with no row, nothing has merged, so nothing may close
+ * an issue. Any other block that stops after its related lines, a lone `Closes #<n>`
+ * included, is `malformed` as before.
+ *
  * Structure is checked before the cross rules, so the first failure found is the
  * one reported. An error carries a code and a line number, never input bytes.
  *
@@ -1866,6 +1873,17 @@ function parseWaveBlock(text) {
       ref: closes === undefined ? m.groups.refs : closes,
       line: i + 1,
     }));
+  }
+  // D-WAVE-LINKS-ONLY: the related lines ran to the end of the text. Only `Refs #<n>`
+  // lines make a block of their own; every other such block is refused just below.
+  if (i >= end && related.length > 0 && related.every(rel => rel.keyword === 'Refs' && rel.ref.startsWith('#'))) {
+    /** @type {Set<string>} */
+    const seen = new Set();
+    for (const rel of related) {
+      if (seen.has(rel.ref)) return fail('duplicate', rel.line);
+      seen.add(rel.ref);
+    }
+    return ok(Object.freeze({ tracking: null, related: Object.freeze(related), rows: Object.freeze([]) }));
   }
   // rows[i] is the one blank line; indices past `end` hold only blanks, so a
   // missing section fails the first comparison that expects a non-blank line.

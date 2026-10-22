@@ -140,6 +140,11 @@ function waveBlock(related: readonly string[], rows: readonly string[], eol = '\
   ].join(eol) + trailing
 }
 
+/** A links-only block: the heading and the lines, with no evidence section after them. */
+function linksOnly(related: readonly string[], eol = '\n', trailing = eol): string {
+  return ['## Related Issues', ...related].join(eol) + trailing
+}
+
 /** The §3.1 example, verbatim. */
 const EXAMPLE_RELATED = ['Closes #12', 'Closes #14', 'Refs #13'] as const
 const EXAMPLE_ROWS = [
@@ -367,6 +372,23 @@ const RULES: readonly RuleCase[] = [
   { label: 'no rows', text: waveBlock([], []), code: 'empty' },
   { label: 'the empty string', text: '', code: 'malformed', line: 1 },
 
+  // --- a links-only block: the heading and Refs lines, nothing after them ---------
+  { label: 'a links-only block of one Refs line', text: linksOnly(['Refs #1']), code: null },
+  { label: 'a links-only block of several Refs lines in any order', text: linksOnly(['Refs #12', 'Refs #3', 'Refs #44']), code: null },
+  { label: 'a links-only block with CRLF line endings', text: linksOnly(['Refs #1', 'Refs #2'], '\r\n'), code: null },
+  { label: 'a links-only block with no trailing newline', text: linksOnly(['Refs #1'], '\n', ''), code: null },
+  { label: 'a links-only block with trailing blank lines', text: `${linksOnly(['Refs #1'])}\n\n`, code: null },
+  { label: 'a links-only block of 101 Refs lines (the cap)', text: linksOnly(Array.from({ length: 101 }, (_, i) => `Refs #${i + 1}`)), code: null },
+  { label: 'a links-only block with a Closes line (no row has merged, so nothing may close)', text: linksOnly(['Refs #1', 'Closes #2']), code: 'malformed', line: 5 },
+  { label: 'a links-only block of a keyed ref', text: linksOnly(['Refs ABC-1']), code: 'malformed', line: 4 },
+  { label: 'a links-only block of the heading alone', text: '## Related Issues\n', code: 'malformed', line: 3 },
+  { label: 'a links-only block with a repeated ref', text: linksOnly(['Refs #1', 'Refs #2', 'Refs #1']), code: 'duplicate', line: 4 },
+  { label: 'a links-only block with free text after the links', text: linksOnly(['Refs #1', 'please merge']), code: 'malformed', line: 3 },
+  { label: 'a links-only block with text after a blank line', text: `${linksOnly(['Refs #1'])}\nthanks\n`, code: 'malformed', line: 4 },
+  { label: 'a links-only block with a second heading and no table', text: `${linksOnly(['Refs #1'])}\n## Wave Evidence\n`, code: 'malformed', line: 5 },
+  { label: 'a links-only block of 102 Refs lines', text: linksOnly(Array.from({ length: 102 }, (_, i) => `Refs #${i + 1}`)), code: 'oversize', line: 103 },
+  { label: 'a links-only block under a wrong heading', text: linksOnly(['Refs #1']).replace('## Related Issues', '## Related issues'), code: 'malformed', line: 1 },
+
   // --- rows -----------------------------------------------------------------------
   { label: 'an unknown verdict', text: waveBlock(['Closes #1'], [row(1, { ticket: '#1', verdict: 'MERGED' })]), code: 'malformed', line: 7 },
   { label: 'a lowercase verdict', text: waveBlock(['Closes #1'], [row(1, { ticket: '#1', verdict: 'pass' })]), code: 'malformed', line: 7 },
@@ -549,6 +571,67 @@ describe('AC-16: a closing line on an unmerged row cannot pass', () => {
         expect(r.ok ? 'ok' : r.error.code, `${verdict} ${JSON.stringify(cells)}`).toBe('unmerged')
       }
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TP-18 — a links-only Related Issues block
+// ---------------------------------------------------------------------------
+
+describe('TP-18: a links-only Related Issues block is admitted, and nothing refused before is admitted now', () => {
+  const LINKS = linksOnly(['Refs #12', 'Refs #3'])
+  const LINKS_ONLY_LABEL = 'a links-only block'
+
+  it('check wave admits it: exit 0, nothing on stdout or stderr', () => {
+    const r = runMain(['check', 'wave', writeScratch('links.md', LINKS)])
+    expect(r.code, r.stderr).toBe(0)
+    expect(r.stdout).toBe('')
+    expect(r.stderr).toBe('')
+  })
+
+  it('parses into its Refs lines and no rows or tracking line, frozen', () => {
+    const block = unwrap(PE.parseWaveBlock(LINKS))
+    expect(Object.isFrozen(block)).toBe(true)
+    expect(block.tracking).toBeNull()
+    expect(block.rows).toEqual([])
+    expect(block.related.map(r => `${r.keyword} ${r.ref} @${r.line}`)).toEqual(['Refs #12 @2', 'Refs #3 @3'])
+    for (const r of block.related) expect(Object.isFrozen(r)).toBe(true)
+  })
+
+  it('every block the table refused before the links-only rows is still refused', () => {
+    const before = RULES.filter(c => c.code !== null && !c.label.startsWith(LINKS_ONLY_LABEL))
+    expect(before.length, 'the pre-existing refusals are in the table').toBeGreaterThanOrEqual(60)
+    expect(before.filter(c => PE.parseWaveBlock(c.text).ok).map(c => c.label)).toEqual([])
+    for (const c of before) {
+      expect(runMain(['check', 'wave', writeScratch('wave.md', c.text)]).code, c.label).toBe(5)
+    }
+  })
+
+  it('the lone Closes block that was refused stays refused: no merged row can justify a closing line', () => {
+    const lone = '## Related Issues\nCloses #1\n'
+    expect(RULES.some(c => c.text === lone && c.code === 'malformed'), 'the fixture is in the table').toBe(true)
+    const r = PE.parseWaveBlock(lone)
+    expect(r.ok ? 'ok' : `${r.error.code}@${r.error.line}`).toBe('malformed@4')
+  })
+
+  it('known-bad probe: a grammar that admits Closes lines in a links-only block is reported on the lone-Closes fixture', () => {
+    const closesToo = (text: unknown): Result<WaveBlock> =>
+      typeof text === 'string' && /^## Related Issues\n(?:(?:Refs|Closes) #[1-9][0-9]*\n)+$/.test(text)
+        ? { ok: true, value: { tracking: null, related: [], rows: [] } }
+        : PE.parseWaveBlock(text)
+    const found = collectRuleViolations(closesToo, RULES)
+    expect(found.some(f => f.startsWith('no evidence section at all: expected malformed, got admitted'))).toBe(true)
+    expect(found.some(f => f.startsWith('a links-only block with a Closes line'))).toBe(true)
+  })
+
+  it('known-bad probe: a grammar that admits no links-only block is reported on the admitted links-only rows', () => {
+    const noLinks = (text: unknown): Result<WaveBlock> => {
+      const r = PE.parseWaveBlock(text)
+      return r.ok && r.value.rows.length === 0 ? { ok: false, error: { code: 'malformed', line: 1 } } : r
+    }
+    const admitted = RULES.filter(c => c.code === null && c.label.startsWith(LINKS_ONLY_LABEL))
+    expect(admitted.length, 'the admitted links-only rows are in the table').toBeGreaterThanOrEqual(6)
+    expect(collectRuleViolations(noLinks, RULES)).toHaveLength(admitted.length)
   })
 })
 
