@@ -13,6 +13,9 @@
  *   - tests/build-mds.test.ts
  *       "MDS host discovery"            — hosts and partials on disk, both directions
  *       "expected-command-set guard"    — the dist/commands/*.md output set
+ *       "variant manifest"              — the hosts dist/variant-axes.json reports with a curation arm
+ *                                         (CURATION_VARIANT_HOSTS) and with a compliance arm
+ *                                         (COMPLIANCE_VARIANT_HOSTS), both directions
  *   - tests/build-mds-generator-hosts.test.ts
  *       "printed host/partial counts…"  — the counts the build itself prints
  *       "14 command outputs byte-…"     — the dist/-vs-src/ byte compare is non-vacuous
@@ -286,6 +289,22 @@ export const CURATION_VARIANT_HOSTS: readonly string[] = [
 
 /** The `dist/curation-off/`-relative file of every host in CURATION_VARIANT_HOSTS. */
 export const CURATION_OFF_FILES: readonly string[] = CURATION_VARIANT_HOSTS.map(h => `${h}.md`);
+
+/**
+ * The hosts whose compiled body carries a compliance arm, and therefore have a
+ * compliance-off variant: each is `<kind>/<name>`, the same spelling as
+ * CURATION_VARIANT_HOSTS and the key of the host in `dist/variant-axes.json`. Named
+ * as a set for the same reason as the curation roster: a count stays green when one
+ * host loses its arm and another gains one in the same commit.
+ *
+ * Empty while no host carries a compliance arm. The build's variant manifest is
+ * asserted against it in both directions (tests/build-mds.test.ts), so an arm added
+ * without a row, or a row left after its arm goes, turns that assertion red.
+ */
+export const COMPLIANCE_VARIANT_HOSTS: readonly string[] = [];
+
+/** The `dist/compliance-off/`-relative file of every host in COMPLIANCE_VARIANT_HOSTS. */
+export const COMPLIANCE_OFF_FILES: readonly string[] = COMPLIANCE_VARIANT_HOSTS.map(h => `${h}.md`);
 
 /**
  * Reference modules: .mds sources under src/assets/mds/ that the build COMPILES,
