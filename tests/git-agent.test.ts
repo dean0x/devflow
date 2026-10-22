@@ -123,15 +123,23 @@ function operationReferencesCorpus(): CorpusEntry[] {
 let opReferencesMemo: CorpusEntry[] | undefined;
 
 /**
- * A copy of the sink corpus with one PR-host file's content replaced by `transform`.
+ * A copy of a corpus with one PR-host file's content replaced by `transform`.
+ *
+ * `corpus` defaults to the sink corpus; a probe whose live guard reads another corpus
+ * (the operation references) passes that one, so the seed always edits the corpus the
+ * collector reads.
  *
  * Shared by the known-bad probes below that seed a defect into a single
  * `references/pr/{op}.md` entry and drive the live guard's own predicate over
  * the result — the seeding is scaffolding common to both probes, the
  * defect and the predicate are what make each one distinct.
  */
-function seedPrHostFile(op: string, transform: (content: string) => string): CorpusEntry[] {
-  return cachedSinkCorpus().map(entry =>
+function seedPrHostFile(
+  op: string,
+  transform: (content: string) => string,
+  corpus: CorpusEntry[] = cachedSinkCorpus(),
+): CorpusEntry[] {
+  return corpus.map(entry =>
     isPrHostEntryPath(entry.path, op)
       ? { path: entry.path, content: transform(entry.content) }
       : entry,
@@ -1756,7 +1764,7 @@ describe('git agent — static content guards', () => {
   const d10Reaches = (corpus: CorpusEntry[], op: string, literal: string): boolean =>
     extractOpSection(corpus, op, 'union').includes(literal);
 
-  it('D10: every summary op reaches the probe, the three visibility values, the fail-closed rule and the stub sentence', () => {
+  it('D10: every summary op reaches the probe, the three visibility values, the fail-closed rule, the stub sentence and every private-section rule row', () => {
     for (const op of D10_SUMMARY_OPS) {
       for (const { literal, why } of D10_PER_OP_LITERALS) {
         expect(
@@ -1803,14 +1811,29 @@ describe('git agent — static content guards', () => {
       .split('\n')
       .find(line => line.startsWith(PRIVATE_RULE_LABEL)) ?? '';
 
+  /** Each summary op's own placeholder for the stripped file; the FULL template must read it. */
+  const FULL_PLACEHOLDERS: Readonly<Record<(typeof D10_SUMMARY_OPS)[number], string>> = {
+    'post-review-summary': '{stripped review-summary.md}',
+    'post-resolution-summary': '{stripped resolution-summary.md}',
+  };
+
   /**
-   * Collector: the ops whose section names the old whole-file placeholder, or lacks the
-   * stripped one. 'union' over the sink corpus: the template lives in the PR-host tree.
+   * Collector: per summary op, the FULL template defects — a section that names the old
+   * whole-file placeholder, or a FULL block (`**FULL mode:**` up to `**STUB mode`) that
+   * lacks the op's own stripped placeholder. 'union' over the sink corpus: the template
+   * lives in the PR-host tree. Each defect reports its own reason, so a probe can prove
+   * one condition at a time.
    */
-  function collectFullContentPlaceholders(corpus: CorpusEntry[]): string[] {
-    return D10_SUMMARY_OPS.filter(op => {
+  function collectFullPlaceholderDefects(corpus: CorpusEntry[]): string[] {
+    return D10_SUMMARY_OPS.flatMap(op => {
       const sec = extractOpSection(corpus, op, 'union');
-      return sec.includes('{full content of') || !sec.includes('{stripped ');
+      const start = sec.indexOf('**FULL mode:**');
+      const end = sec.indexOf('**STUB mode', start);
+      const fullBlock = start === -1 || end === -1 ? '' : sec.slice(start, end);
+      return [
+        ...(sec.includes('{full content of') ? [`${op}: names the whole-file placeholder`] : []),
+        ...(fullBlock.includes(FULL_PLACEHOLDERS[op]) ? [] : [`${op}: FULL block lacks ${FULL_PLACEHOLDERS[op]}`]),
+      ];
     });
   }
 
@@ -1827,16 +1850,37 @@ describe('git agent — static content guards', () => {
   }
 
   /**
-   * Collector: the ops whose rule line does not sit above both `### Process` and the
-   * compose step, the place the agent reads it before it acts.
+   * Collector: every file of the corpus that holds the wrong number of rule labels — exactly
+   * one in each summary op's own PR-host reference, none anywhere else (git.md and every
+   * provider's references included), and a summary op whose reference is absent. Counted per
+   * file over the whole sink corpus ('union'), so a copy in any generated reference is a
+   * defect; the drift collector above reads only the first line of each op's own section.
+   */
+  function collectPrivateRuleLabelDefects(corpus: CorpusEntry[]): string[] {
+    const absent = D10_SUMMARY_OPS
+      .filter(op => !corpus.some(entry => isPrHostEntryPath(entry.path, op)))
+      .map(op => `${op}: no PR-host reference in the corpus`);
+    const miscounted = corpus.flatMap(entry => {
+      const expected = D10_SUMMARY_OPS.some(op => isPrHostEntryPath(entry.path, op)) ? 1 : 0;
+      const found = entry.content.split(PRIVATE_RULE_LABEL).length - 1;
+      return found === expected
+        ? []
+        : [`${referenceRelPath(entry.path) ?? path.basename(entry.path)}: label count ${found}, expected ${expected}`];
+    });
+    return [...absent, ...miscounted];
+  }
+
+  /**
+   * Collector: the ops whose rule line does not sit above `### Process`. The compose step is
+   * a step inside Process, so a rule above the heading is above the compose step as well; a
+   * separate compose condition could never report a defect alone.
    */
   function collectPrivateRuleOrderDefects(corpus: CorpusEntry[]): string[] {
     return D10_SUMMARY_OPS.filter(op => {
       const sec = extractOpSection(corpus, op, 'sole');
       const rule = sec.indexOf(PRIVATE_RULE_LABEL);
       const process = sec.indexOf('### Process');
-      const compose = sec.indexOf('5. Compose body');
-      return rule === -1 || process === -1 || compose === -1 || rule > process || rule > compose;
+      return rule === -1 || process === -1 || rule > process;
     });
   }
 
@@ -1852,13 +1896,6 @@ describe('git agent — static content guards', () => {
   /** Read a partial of the Git agent's MDS source; a missing file fails, never skips. */
   function readGitMdsSource(file: string): string {
     return readFileSync(path.join(ROOT, 'src', 'assets', 'mds', 'git', file), 'utf-8');
-  }
-
-  /** The operation-references corpus with one PR-host file's content replaced. */
-  function seedOperationReference(op: string, transform: (content: string) => string): CorpusEntry[] {
-    return operationReferencesCorpus().map(entry =>
-      isPrHostEntryPath(entry.path, op) ? { path: entry.path, content: transform(entry.content) } : entry,
-    );
   }
 
   it('private sections: every private-section row is absent without the PR-host tree (union arms are non-vacuous)', () => {
@@ -1932,18 +1969,37 @@ describe('git agent — static content guards', () => {
     ).toEqual([]);
   });
 
-  it('private sections: no summary op keeps the whole-file placeholder, and each FULL template names the stripped file', () => {
-    expect(collectFullContentPlaceholders(cachedSinkCorpus())).toEqual([]);
-    for (const op of D10_SUMMARY_OPS) {
-      expect(extractOpSection(cachedSinkCorpus(), op, 'union')).toContain('{stripped ');
-    }
+  it("private sections: each FULL template reads its own op's stripped file, and no op keeps the whole-file placeholder", () => {
+    expect(collectFullPlaceholderDefects(cachedSinkCorpus())).toEqual([]);
   });
 
-  it('private sections known-bad probe: a seeded whole-file placeholder is reported for that op only', () => {
-    const seeded = seedPrHostFile('post-resolution-summary', c =>
-      c.replace('{stripped resolution-summary.md}', '{full content of resolution-summary.md}'),
-    );
-    expect(collectFullContentPlaceholders(seeded)).toEqual(['post-resolution-summary']);
+  it('private sections known-bad probe: each FULL template defect is reported alone, for that op only', () => {
+    const resolution = FULL_PLACEHOLDERS['post-resolution-summary'];
+    const review = FULL_PLACEHOLDERS['post-review-summary'];
+    const defectsAfter = (op: string, transform: (content: string) => string): string[] =>
+      collectFullPlaceholderDefects(seedPrHostFile(op, transform));
+
+    // Whole-file placeholder added, stripped placeholder kept: the first condition alone.
+    expect(
+      defectsAfter('post-resolution-summary', c =>
+        c.replace(resolution, `${resolution}\n{full content of resolution-summary.md}`),
+      ),
+    ).toEqual(['post-resolution-summary: names the whole-file placeholder']);
+
+    // Stripped placeholder removed, nothing added: the second condition alone.
+    expect(defectsAfter('post-resolution-summary', c => c.replace(resolution, ''))).toEqual([
+      `post-resolution-summary: FULL block lacks ${resolution}`,
+    ]);
+
+    // The placeholder present elsewhere in the section, but not inside the FULL block.
+    expect(
+      defectsAfter('post-resolution-summary', c => `${c.replace(resolution, '')}\n${resolution}\n`),
+    ).toEqual([`post-resolution-summary: FULL block lacks ${resolution}`]);
+
+    // The other op's stripped placeholder in this op's FULL block is not its own.
+    expect(defectsAfter('post-review-summary', c => c.replace(review, resolution))).toEqual([
+      `post-review-summary: FULL block lacks ${review}`,
+    ]);
   });
 
   it('private sections: both ops carry one byte-identical, non-empty rule line', () => {
@@ -1955,24 +2011,49 @@ describe('git agent — static content guards', () => {
 
   it('private sections known-bad probe: a rule line edited in one op is reported by the drift collector', () => {
     // Seeds the corpus the collector reads (the operation-references corpus), not the sink corpus.
-    const seeded = seedOperationReference('post-review-summary', c =>
-      c.replace('When unsure, strip more.', 'When unsure, keep it.'),
+    const seeded = seedPrHostFile(
+      'post-review-summary',
+      c => c.replace('When unsure, strip more.', 'When unsure, keep it.'),
+      operationReferencesCorpus(),
     );
     expect(collectPrivateRuleDrift(seeded)).toEqual(['the two rule lines differ']);
   });
 
-  it('private sections: in each op the rule sits above the Process heading and the compose step', () => {
+  it("private sections: the rule label occurs once in each summary op's reference and in no other generated reference", () => {
+    expect(collectPrivateRuleLabelDefects(cachedSinkCorpus())).toEqual([]);
+  });
+
+  it('private sections known-bad probe: a second copy of the rule is reported in a summary op and in any other reference', () => {
+    const copy = (c: string): string => `${c}\n${PRIVATE_RULE_LABEL} a hand-written copy\n`;
+    expect(collectPrivateRuleLabelDefects(seedPrHostFile('post-review-summary', copy))).toEqual([
+      'pr/post-review-summary.md: label count 2, expected 1',
+    ]);
+    expect(collectPrivateRuleLabelDefects(seedPrHostFile('check-ci-status', copy))).toEqual([
+      'pr/check-ci-status.md: label count 1, expected 0',
+    ]);
+    expect(
+      collectPrivateRuleLabelDefects(
+        seedPrHostFile('post-resolution-summary', c => c.replace(PRIVATE_RULE_LABEL, 'Private sections:')),
+      ),
+    ).toEqual(['pr/post-resolution-summary.md: label count 0, expected 1']);
+  });
+
+  it('private sections: in each op the rule sits above the Process heading', () => {
     expect(collectPrivateRuleOrderDefects(operationReferencesCorpus())).toEqual([]);
   });
 
-  it('private sections known-bad probe: a rule moved below the compose step is reported for that op only', () => {
-    const seeded = seedOperationReference('post-resolution-summary', c => {
-      const lines = c.split('\n');
-      const at = lines.findIndex(line => line.startsWith(PRIVATE_RULE_LABEL));
-      const [rule] = lines.splice(at, 1);
-      lines.splice(lines.findIndex(line => line.startsWith('5. Compose body')), 0, rule);
-      return lines.join('\n');
-    });
+  it('private sections known-bad probe: a rule moved below the Process heading is reported for that op only', () => {
+    const seeded = seedPrHostFile(
+      'post-resolution-summary',
+      c => {
+        const lines = c.split('\n');
+        const at = lines.findIndex(line => line.startsWith(PRIVATE_RULE_LABEL));
+        const [rule] = lines.splice(at, 1);
+        lines.splice(lines.findIndex(line => line.startsWith('5. Compose body')), 0, rule);
+        return lines.join('\n');
+      },
+      operationReferencesCorpus(),
+    );
     expect(collectPrivateRuleOrderDefects(seeded)).toEqual(['post-resolution-summary']);
   });
 
