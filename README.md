@@ -179,7 +179,7 @@ To keep the knowledge bases or conventions local, add `.devflow/features/` or `.
 
 See [docs/commands.md](https://github.com/dean0x/devflow/blob/main/docs/commands.md) for detailed usage.
 
-**PR-comment publication** for `/code-review` and `/resolve` is visibility-gated (counts-only stub on public repos by default) and every posted body is secret-scrubbed before it leaves your machine. Configure via `reviewPublication` (`auto`, `full` or `off`) in your personal `.devflow/config.json`; a team value in [`.devflow/project.json`](#team-settings) is only a ceiling: it can lower yours, never raise it. Under a `required` evidence policy, `off` still posts the counts-only stub, so a record reaches the PR unless no public text remains. The [test-plan evidence](#test-plan-evidence) comment is a stub unless `reviewPublication` is `full` — details in [docs/commands.md](https://github.com/dean0x/devflow/blob/main/docs/commands.md).
+**PR-comment publication** for `/code-review` and `/resolve` is visibility-gated (counts-only stub on public repos by default) and every posted body is secret-scrubbed before it leaves your machine. Configure via `reviewPublication` (`auto`, `full` or `off`) in your personal `.devflow/config.json`; a team value in [`.devflow/project.json`](#team-settings) is only a ceiling: it can lower yours, never raise it. A summary section whose heading starts with the word `Private`, for example `## Private notes`, stays out of the comment. Under a `required` evidence policy, `off` still posts the counts-only stub, so a record reaches the PR unless no public text remains. The [test-plan evidence](#test-plan-evidence) comment is a stub unless `reviewPublication` is `full` — details in [docs/commands.md](https://github.com/dean0x/devflow/blob/main/docs/commands.md).
 
 ## Team settings
 
@@ -224,7 +224,7 @@ How much evidence a change must carry is a team decision, so it lives in the fil
 | External review threads | left alone | `/resolve` replies to them and resolves the ones it verifiably fixed |
 | Merge readiness | not checked by `/resolve` | `/resolve` checks it, and READY needs a trusted non-author approval |
 | Releases | no trace gate (`--dry-run` still shows the trace) | `/release` maps every commit since the last release to its issue; untraced commits are attested or the release halts; shipped issues are back-linked and added to the release marker |
-| `reviewPublication: off` | no PR comment | the counts-only stub still posts |
+| `reviewPublication: off` | no PR comment | the counts-only stub still posts, unless no public text remains |
 | `/dynamic-tickets` | files no issues | files the tracking issue and one issue per ticket |
 
 **Defaults.** With no committed `evidence` and no `policy.json` the policy is `standard`, unless compliance is enabled on the machine running devflow — at any framework count — which makes it `required` there, or the repository's `project.json` carries a `compliance` key — on the default branch, its tracking copy or the working tree, whatever its value — which makes it `required` everywhere.

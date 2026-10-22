@@ -80,7 +80,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Sections marked private stay out of posted summaries** ([#567](https://github.com/dean0x/devflow/issues/567)). In a review or resolution summary, a section whose heading starts with the word `Private` (for example `## Private notes`) is left out of the PR comment, up to the next heading of the same or a higher level. If no public text remains, no comment is posted. The review and resolution templates now say so. Your local summary file is unchanged. Run `devflow init` after you update.
+- **Sections marked private stay out of posted summaries** ([#567](https://github.com/dean0x/devflow/issues/567)).
+  - A review or resolution summary can hold a section whose heading starts with the word `Private`, in any letter case, for example `## Private notes`. A heading line inside a code block counts too.
+  - The PR comment leaves that section out, up to the next heading of the same or a higher level. This holds for the full report and for the stub.
+  - If no public text remains, devflow posts no comment and reports `**Status**: DEGRADED (no postable summary)`.
+  - The review and resolution writers now put text that must stay out of the PR comment in a final `## Private notes` section.
+  - The strip does not edit your local summary file.
+  - Run `devflow init` after you update.
 - **`/resolve` adds only triaged items to the tech debt backlog** ([#630](https://github.com/dean0x/devflow/issues/630)).
   - Under GitHub, Linear and Jira, the `manage-debt` operation takes backlog items only from the `## Fix Separately` and `## Deferred to Tech Debt` sections of `resolution-summary.md`.
   - If `resolution-summary.md` is missing, the operation returns `TRACEABILITY: DEGRADED (resolution summary missing)` and leaves the backlog unchanged.
