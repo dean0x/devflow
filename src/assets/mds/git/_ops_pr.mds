@@ -33,16 +33,22 @@ Pre-flight check for `/resolve`: it fetches the base branch at most once (the re
 ```
 @end
 
+@define private_sections_rule():
+**Private sections:** one starts at any line, fenced or not, of 0-3 spaces, 1-6 `#`, a space and the word `Private` (any case) not followed by a letter or digit. It ends before the next unfenced heading (0-3 spaces) with as many `#` as its start or fewer, else at end of file; an unclosed fence inside it runs it to end of file. When unsure, strip more. Step 4 strips them before either mode; compose, cap and re-cap use only the stripped text, never the file, which stays unedited. A failed read or strip, blank stripped text or, before step 6, a body line of that start shape → post nothing; report `**Status**: DEGRADED (no postable summary)` and never quote private text.
+@end
+
 @define post_review_summary_contract():
-Post a consolidated code review summary as a single PR comment per review run (D7). Marker-based deduplication — if the marker for this cycle+timestamp pair already exists, skip; never edit after posting.
+Post a consolidated code review summary as one PR comment per review run (D7), deduplicated by its cycle+timestamp marker; never edited after posting.
 
 **Input:** `PR_NUMBER`, `REVIEW_SUMMARY_PATH`, `CYCLE_NUMBER`, `REVIEW_TIMESTAMP`, `WORKTREE_PATH` (optional), `REVIEW_PUBLICATION` (optional; values: `auto` | `full` | `off` | `stub`; absent/unrecognised → `auto`)
 
-- `REVIEW_TIMESTAMP`: the review directory timestamp slug (e.g., `2026-08-20_1030`); identifies the specific review run within a cycle so a re-review in the same cycle posts its own comment while a true re-run of the same review deduplicates
+- `REVIEW_TIMESTAMP`: the review directory's timestamp slug (e.g., `2026-08-20_1030`), the run half of the dedup key, so a re-review posts its own comment
 
-**Degradation (D4):** No PR / `gh` unauthenticated → `TRACEABILITY: DEGRADED (no PR)`, warn in output, return. Summary is written to disk only.
+**Degradation (D4):** No PR / `gh` unauthenticated → `TRACEABILITY: DEGRADED (no PR)`, warn, return; the summary stays on disk.
 
-The publication gate this operation applies is the `devflow:git` skill's `references/publication-gate.md` (D10) — the step order below instantiates it.
+Its publication gate is the `devflow:git` skill's `references/publication-gate.md` (D10); the steps below instantiate it.
+
+{{private_sections_rule()}}
 
 **Output:**
 ```markdown
@@ -51,7 +57,7 @@ The publication gate this operation applies is the `devflow:git` skill's `refere
 **Cycle**: {CYCLE_NUMBER}
 **Review timestamp**: {REVIEW_TIMESTAMP}
 **Publication**: FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config) | STUB (visibility undeterminable) | STUB (evidence policy)
-**Status**: POSTED | POSTED+TRUNCATED (body exceeded 60k after redaction — `NOTE` prepended to body) | SKIPPED (already posted for cycle {N} ts:{REVIEW_TIMESTAMP}) | DEGRADED ({reason})
+**Status**: POSTED | POSTED+TRUNCATED (body exceeded 60k after redaction) | SKIPPED (already posted for cycle {N} ts:{REVIEW_TIMESTAMP}) | DEGRADED ({reason})
 ```
 @end
 
@@ -136,22 +142,24 @@ Reply to external review threads and, when conditions are met, mark them resolve
 @end
 
 @define post_resolution_summary_contract():
-Post the resolution summary as a single PR comment. Marker-based deduplication — only one comment per workflow run, never edited after posting (D8).
+Post the resolution summary as one PR comment per workflow run, deduplicated by its marker; never edited after posting (D8).
 
 **Input:** `PR_NUMBER`, `RESOLUTION_SUMMARY_PATH`, `RESOLUTION_TS`, `WORKTREE_PATH` (optional), `REVIEW_PUBLICATION` (optional; values: `auto` | `full` | `off` | `stub`; absent/unrecognised → `auto`)
 
-**Degradation (D4):** No PR → `TRACEABILITY: DEGRADED (no PR)`, warn, return. Resolution summary is already written to disk.
+**Degradation (D4):** No PR → `TRACEABILITY: DEGRADED (no PR)`, warn, return; the summary stays on disk.
 
-The publication gate this operation applies is the `devflow:git` skill's `references/publication-gate.md` (D10) — the step order below instantiates it.
+Its publication gate is the `devflow:git` skill's `references/publication-gate.md` (D10); the steps below instantiate it.
 
 The body the steps below compose MUST NOT reproduce verbatim content from any `<external-thread>` body or `<untrusted-issue-body>` — cite only internal evidence (commit SHAs, file:line from this codebase) and the thread's `ext-{N}` id.
+
+{{private_sections_rule()}}
 
 **Output:**
 ```markdown
 ## Resolution Summary Posted
 **PR**: #{number}
 **Publication**: FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config) | STUB (visibility undeterminable) | STUB (evidence policy)
-**Status**: POSTED | POSTED+TRUNCATED (body exceeded 60k after redaction — `NOTE` prepended to body) | SKIPPED (already posted) | DEGRADED ({reason})
+**Status**: POSTED | POSTED+TRUNCATED (body exceeded 60k after redaction) | SKIPPED (already posted) | DEGRADED ({reason})
 ```
 @end
 

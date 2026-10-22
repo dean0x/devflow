@@ -28,6 +28,7 @@ one file, so they are readable from the operation's section alone:
 
 - the two summary operations' sentence naming `references/publication-gate.md`
   (D10's scope property [DR-20](i) is asserted over the references that name it);
+- the two summary operations' private-sections rule;
 - `post-resolution-summary`'s non-reproduction clause (Principle 8's containment
   obligation, readable from the operation's OWN section);
 - `resolve-review-threads`' step 3, the D9 gate application, between steps 2 and 4
@@ -82,30 +83,28 @@ Load for `validate-branch` under every tracker provider.
 
 Load for `post-review-summary` under every tracker provider.
 
-**PR mechanics held here:** the author-filtered marker dedup, the visibility probe, the FULL/STUB compose templates with the 60000-character cap, and the scrub-then-post call.
-
 ### Process
 
-1. Check for existing comment with this run's marker (author-filtered — a third party posting the marker string must not suppress devflow's comment):
+1. Check for existing comment with this run's marker (author-filtered, so a third party's copy of the marker cannot suppress it):
    - Fetch viewer login: `gh api user --jq '.login'` → store as VIEWER_LOGIN
    - `gh pr view {PR_NUMBER} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
    - Search for `<!-- devflow:review-summary cycle:{CYCLE_NUMBER} ts:{REVIEW_TIMESTAMP}` in the viewer-authored comment bodies only (full pair match)
    - If found: skip — report `Skipped: already posted for cycle {CYCLE_NUMBER} ts:{REVIEW_TIMESTAMP}`
 2. Load `references/publication-gate.md` and resolve `REVIEW_PUBLICATION` by its step 2; `off` ends the op without posting.
 3. Probe (if mode not yet determined): `gh repo view --json visibility --jq '.visibility'`, case-insensitive. `PRIVATE`/`INTERNAL` → FULL; `PUBLIC` → `STUB (public repository)`; empty output, an error or any other value → `STUB (visibility undeterminable)`. **Fail-closed: on any error or unrecognised value, treat as PUBLIC (mode STUB).**
-4. Read `REVIEW_SUMMARY_PATH` — repo-relative; read it under `WORKTREE_PATH` (else cwd).
+4. Read `REVIEW_SUMMARY_PATH` (repo-relative) under `WORKTREE_PATH` (else cwd); strip it (above).
 5. Compose body:
    - **FULL mode:**
      ```
      <!-- devflow:review-summary cycle:{CYCLE_NUMBER} ts:{REVIEW_TIMESTAMP} -->
      ## Code Review — Cycle {CYCLE_NUMBER}
 
-     {full content of review-summary.md}
+     {stripped review-summary.md}
 
      ---
      *Posted by [devflow](https://github.com/dean0x/devflow) · cycle {CYCLE_NUMBER}*
      ```
-   - **STUB mode** (excluded: finding titles, file:line references, Blocking/Escalations/Third-Party/Verification sections, merge recommendation):
+   - **STUB mode** (stripped text only; excluded: all but the counts table):
      ```
      <!-- devflow:review-summary cycle:{CYCLE_NUMBER} ts:{REVIEW_TIMESTAMP} -->
      ## Code Review — Cycle {CYCLE_NUMBER}
@@ -214,28 +213,26 @@ unexplained unresolved threads.
 
 Load for `post-resolution-summary` under every tracker provider.
 
-**PR mechanics held here:** the author-filtered marker dedup, the visibility probe, the FULL/STUB compose templates with the 60000-character cap, and the scrub-then-post call.
-
 ### Process
 
-1. Check for existing marker (author-filtered — a third party posting the marker string must not suppress devflow's comment):
+1. Check for an existing marker (author-filtered, so a third party's copy of it cannot suppress devflow's comment):
    - Fetch viewer login: `gh api user --jq '.login'` → store as VIEWER_LOGIN
    - `gh pr view {PR_NUMBER} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
    - Search the viewer-authored bodies only for the exact key `<!-- devflow:resolution-summary ts:{RESOLUTION_TS} -->`
    - If found: skip — report `Skipped: already posted for ts:{RESOLUTION_TS}`
 2. Load `references/publication-gate.md` and resolve `REVIEW_PUBLICATION` by its step 2; `off` ends the op without posting.
 3. Probe (if mode not yet determined): `gh repo view --json visibility --jq '.visibility'`, case-insensitive. `PRIVATE`/`INTERNAL` → FULL; `PUBLIC` → `STUB (public repository)`; empty output, an error or any other value → `STUB (visibility undeterminable)`. **Fail-closed: on any error or unrecognised value, treat as PUBLIC (mode STUB).**
-4. Read `RESOLUTION_SUMMARY_PATH` — repo-relative; read it under `WORKTREE_PATH` (else cwd).
+4. Read `RESOLUTION_SUMMARY_PATH` (repo-relative) under `WORKTREE_PATH` (else cwd); strip it (above).
 5. Compose body (where `{TS}` = `RESOLUTION_TS`):
    - **FULL mode:**
      ```
      <!-- devflow:resolution-summary ts:{TS} -->
-     {full content of resolution-summary.md}
+     {stripped resolution-summary.md}
 
      ---
      *Posted by [devflow](https://github.com/dean0x/devflow)*
      ```
-   - **STUB mode** (excluded: finding titles, file:line references, Blocking/Escalations/Third-Party/Verification sections):
+   - **STUB mode** (stripped text only; excluded: all but the counts table):
      ```
      <!-- devflow:resolution-summary ts:{TS} -->
      ## Resolution Summary
@@ -247,7 +244,7 @@ Load for `post-resolution-summary` under every tracker provider.
      Full report: {RESOLUTION_SUMMARY_PATH} (not committed; ask the author)
      *Posted by [devflow](https://github.com/dean0x/devflow)*
      ```
-   Cap body at 60000 characters (GitHub rejects over 65536 with a 422, which the 4xx rule would silently skip); truncate lowest-value sections first (Suggestions, then Pre-existing), keeping the counts table and every Blocking entry; end with `…truncated — full report in the local review artifact {RESOLUTION_SUMMARY_PATH} (not committed; ask the author)`.
+   Cap body at 60000 characters; truncate lowest-value sections first (Suggestions, then Pre-existing), keeping the counts table and every Blocking entry; end with `…truncated — full report in the local review artifact {RESOLUTION_SUMMARY_PATH} (not committed; ask the author)`.
 6. Write body to `$DEVFLOW_BODY_RAW`; apply the Comment-sink scrub (D11) — non-zero exit or missing script → DO NOT POST. Re-check the 60000-char cap on the scrubbed body (redaction may grow it; truncate at a line boundary below 59,800 chars, keeping the truncation pointer sentence; if truncation fires here: emit `NOTE: body exceeded 60k after redaction — truncated/stub posted` in op output and prepend that notice to the body). Post: `gh pr comment {PR_NUMBER} --body-file "$DEVFLOW_BODY"`.
 7. On 5xx: retry once. If still 5xx: `TRACEABILITY: DEGRADED (5xx on post-resolution-summary)`, warn, return.
 @end
