@@ -450,10 +450,24 @@ describe('installRenderedCharter', () => {
     expect(result).toEqual({ charter: 'rewritten', sentinel: 'rewritten' });
     expect(await fs.readFile(charterPath(), 'utf-8')).toBe(SOURCE_LESS_DEBUG_FALLBACK);
     expect(await fs.readFile(sentinelPath(), 'utf-8')).toBe(SENTINEL_SOURCE);
-    expect((await fs.stat(charterPath())).mode & 0o755).toBe(0o755 & ~process.umask());
-    expect((await fs.stat(sentinelPath())).mode & 0o111).not.toBe(0);
+    expect((await fs.stat(charterPath())).mode & 0o777).toBe(0o755);
+    expect((await fs.stat(sentinelPath())).mode & 0o777).toBe(0o755);
     expect(warnings).toEqual([]);
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'gives a new file mode 0755 under any umask, the mode the script copy sets on the next run',
+    async () => {
+      const previous = process.umask(0o077);
+      try {
+        await sync(FOUNDER);
+      } finally {
+        process.umask(previous);
+      }
+      expect((await fs.stat(charterPath())).mode & 0o777).toBe(0o755);
+      expect((await fs.stat(sentinelPath())).mode & 0o777).toBe(0o755);
+    },
+  );
 
   it('writes the rendered charter for a narrowed set', async () => {
     const result = await sync(FOUNDER);

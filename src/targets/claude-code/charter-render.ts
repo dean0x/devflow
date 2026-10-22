@@ -332,6 +332,9 @@ async function writeIfChanged(
   if (mayChange !== undefined && !(await mayChange(file))) return 'failed';
   await fs.mkdir(path.dirname(file), { recursive: true });
   await writeFileAtomicExclusive(file, text, INSTALLED_MODE);
+  // A create mode passes through the umask, while composeScripts sets every file under hooks/ to 0755 on
+  // the next run whatever the umask is. Set the mode here too, or a second init changes it on disk.
+  if (process.platform !== 'win32') await fs.chmod(file, INSTALLED_MODE);
   return 'rewritten';
 }
 
