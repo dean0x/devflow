@@ -16,14 +16,24 @@ import {
   CURATION_OFF_OUTPUT_DIR,
   LEGACY_OFF_OUTPUT_DIR,
   VARIANT_KEYS,
+  VARIANT_MANIFEST_REL_PATH,
+  VARIANT_MANIFEST_VERSION,
   VARIANT_MARKER_RE,
+  containsComplianceMarker,
   containsCurationMarker,
+  containsVariantMarker,
   describeCurationSplitError,
+  describeVariantManifestError,
   describeVariantSplitError,
   curationOffRelPath,
+  emittedVariantKeys,
+  renderVariantManifest,
   splitCurationVariants,
   splitVariants,
+  variantOffRelPath,
   type CurationSplit,
+  type OffVariantKey,
+  type VariantManifestHost,
   type VariantSplit,
   type VariantSplitError,
 } from '../../src/core/curation-variants.js';
@@ -781,6 +791,168 @@ describe('containsCurationMarker', () => {
     expect(containsCurationMarker('<!--learning:end-->')).toBe(true);
     expect(containsCurationMarker('see <!-- LEARNING : off --> here')).toBe(true);
     expect(containsCurationMarker('learning:on is only a word here')).toBe(false);
+  });
+});
+
+describe('containsComplianceMarker and containsVariantMarker', () => {
+  it('containsComplianceMarker sees a valid marker, a malformed one and one embedded in prose', () => {
+    expect(containsComplianceMarker(`a\n${CON}\nb`)).toBe(true);
+    expect(containsComplianceMarker('<!--compliance:end-->')).toBe(true);
+    expect(containsComplianceMarker('see <!-- Compliance : off --> here')).toBe(true);
+  });
+
+  it('containsComplianceMarker is false for text that only mentions compliance, and for a curation marker', () => {
+    expect(containsComplianceMarker('compliance:on is a settings field\n<!-- an ordinary comment -->')).toBe(false);
+    expect(containsComplianceMarker(`${ON}\ntext\n${END}`)).toBe(false);
+    expect(containsComplianceMarker('<!-- learning:on -->')).toBe(false);
+    expect(containsComplianceMarker('')).toBe(false);
+  });
+
+  it('containsCurationMarker keeps ignoring the compliance axis', () => {
+    expect(containsCurationMarker(`${CON}\ntext\n${CEND}`)).toBe(false);
+  });
+
+  it('containsVariantMarker is the union of both axes and the retired spelling', () => {
+    expect(containsVariantMarker(ON)).toBe(true);
+    expect(containsVariantMarker(CEND)).toBe(true);
+    expect(containsVariantMarker('<!-- learning:on -->')).toBe(true);
+    expect(containsVariantMarker('curation:on and compliance:on are only words here')).toBe(false);
+    expect(containsVariantMarker('')).toBe(false);
+  });
+});
+
+describe('where each off variant lands (TP-6)', () => {
+  const OFF_KEYS: readonly OffVariantKey[] = ['curation-off', 'compliance-off', 'both-off'];
+  const DIR_OF: Readonly<Record<OffVariantKey, string>> = {
+    'curation-off': CURATION_OFF_OUTPUT_DIR,
+    'compliance-off': COMPLIANCE_OFF_OUTPUT_DIR,
+    'both-off': BOTH_OFF_OUTPUT_DIR,
+  };
+
+  it('variantOffRelPath puts a variant beside its kind under the tree of its key', () => {
+    expect(variantOffRelPath('curation-off', 'commands', 'implement.md')).toBe('dist/curation-off/commands/implement.md');
+    expect(variantOffRelPath('compliance-off', 'commands', 'implement.md')).toBe('dist/compliance-off/commands/implement.md');
+    expect(variantOffRelPath('both-off', 'agents', 'code.md')).toBe('dist/curation-compliance-off/agents/code.md');
+  });
+
+  it('every off key has its own tree and the key set is every variant key but on', () => {
+    expect([...OFF_KEYS].sort()).toEqual(VARIANT_KEYS.filter(key => key !== 'on').sort());
+    const paths = OFF_KEYS.map(key => variantOffRelPath(key, 'agents', 'x.md'));
+    expect(new Set(paths).size).toBe(OFF_KEYS.length);
+    for (const key of OFF_KEYS) expect(variantOffRelPath(key, 'agents', 'x.md')).toBe(`${DIR_OF[key]}/agents/x.md`);
+  });
+
+  it('curationOffRelPath is the curation-off case of variantOffRelPath', () => {
+    expect(curationOffRelPath('commands', 'a.md')).toBe(variantOffRelPath('curation-off', 'commands', 'a.md'));
+    expect(curationOffRelPath('agents', 'b.md')).toBe(variantOffRelPath('curation-off', 'agents', 'b.md'));
+  });
+});
+
+describe('emittedVariantKeys (TP-6)', () => {
+  it.each([
+    [false, false, ['on']],
+    [true, false, ['on', 'curation-off']],
+    [false, true, ['on', 'compliance-off']],
+    [true, true, ['on', 'curation-off', 'compliance-off', 'both-off']],
+  ] as const)('curation arm %s, compliance arm %s: writes %j', (curation, compliance, expected) => {
+    expect(emittedVariantKeys({ curation, compliance })).toEqual(expected);
+  });
+
+  it('is a subset of the variant keys, with on first and no key twice', () => {
+    for (const curation of [false, true]) {
+      for (const compliance of [false, true]) {
+        const keys = emittedVariantKeys({ curation, compliance });
+        expect(keys[0]).toBe('on');
+        expect(new Set(keys).size).toBe(keys.length);
+        for (const key of keys) expect(VARIANT_KEYS).toContain(key);
+      }
+    }
+  });
+});
+
+describe('renderVariantManifest (TP-6)', () => {
+  const host = (kind: 'commands' | 'agents', name: string, curation: boolean, compliance: boolean): VariantManifestHost => ({
+    kind,
+    name,
+    axes: { curation, compliance },
+  });
+
+  function render(hosts: readonly VariantManifestHost[]): string {
+    const result = renderVariantManifest(hosts);
+    if (!result.ok) throw new Error(`expected a manifest, got ${JSON.stringify(result.error)}`);
+    return result.value;
+  }
+
+  it('lives beside the variant trees and starts at version 1', () => {
+    expect(VARIANT_MANIFEST_REL_PATH).toBe('dist/variant-axes.json');
+    expect(VARIANT_MANIFEST_VERSION).toBe(1);
+  });
+
+  it('renders the exact bytes: version, then each host as <kind>/<name> with both axes, sorted', () => {
+    const text = render([
+      host('commands', 'implement', true, false),
+      host('agents', 'git', false, false),
+      host('agents', 'code', true, true),
+    ]);
+    expect(text).toBe(
+      [
+        '{',
+        '  "version": 1,',
+        '  "hosts": {',
+        '    "agents/code": {',
+        '      "curation": true,',
+        '      "compliance": true',
+        '    },',
+        '    "agents/git": {',
+        '      "curation": false,',
+        '      "compliance": false',
+        '    },',
+        '    "commands/implement": {',
+        '      "curation": true,',
+        '      "compliance": false',
+        '    }',
+        '  }',
+        '}',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  it('is the same bytes whatever order the hosts arrive in, and parses to the same data', () => {
+    const hosts = [host('commands', 'b', true, false), host('agents', 'a', false, true), host('commands', 'a', false, false)];
+    const forward = render(hosts);
+    expect(render([...hosts].reverse())).toBe(forward);
+    expect(render([hosts[1], hosts[2], hosts[0]])).toBe(forward);
+    const parsed = JSON.parse(forward) as { version: number; hosts: Record<string, { curation: boolean; compliance: boolean }> };
+    expect(parsed.version).toBe(VARIANT_MANIFEST_VERSION);
+    expect(Object.keys(parsed.hosts)).toEqual(['agents/a', 'commands/a', 'commands/b']);
+    expect(parsed.hosts['agents/a']).toEqual({ curation: false, compliance: true });
+  });
+
+  it('sorts by code unit, not by locale: an uppercase name comes before a lowercase one, a dash before a letter', () => {
+    const text = render([host('commands', 'a-b', false, false), host('commands', 'ab', false, false), host('commands', 'Z', false, false)]);
+    expect(Object.keys((JSON.parse(text) as { hosts: object }).hosts)).toEqual(['commands/Z', 'commands/a-b', 'commands/ab']);
+  });
+
+  it('writes the axes in a fixed order whatever order the input object lists them', () => {
+    const swapped: VariantManifestHost = { kind: 'agents', name: 'x', axes: { compliance: true, curation: false } };
+    const text = render([swapped]);
+    expect(text.indexOf('"curation"')).toBeLessThan(text.indexOf('"compliance"'));
+  });
+
+  it('an empty roster renders an empty host map and ends in a newline', () => {
+    expect(render([])).toBe('{\n  "version": 1,\n  "hosts": {}\n}\n');
+  });
+
+  it('known-bad probe: the same kind and name twice is refused, naming the host', () => {
+    const result = renderVariantManifest([host('commands', 'dup', true, false), host('commands', 'dup', false, false)]);
+    expect(result).toEqual({ ok: false, error: { kind: 'duplicate-host', host: 'commands/dup' } });
+    if (!result.ok) expect(describeVariantManifestError(result.error)).toContain('commands/dup');
+  });
+
+  it('the same name under two kinds is two hosts, not a duplicate', () => {
+    const text = render([host('commands', 'debug', true, false), host('agents', 'debug', true, false)]);
+    expect(Object.keys((JSON.parse(text) as { hosts: object }).hosts)).toEqual(['agents/debug', 'commands/debug']);
   });
 });
 

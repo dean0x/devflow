@@ -74,9 +74,12 @@
  * host that still carries it cannot ship a prompt with both variants silently equal.
  *
  * Scope guarantee: this module answers one question (what are the variants of this
- * body?) and one cheap one for the build to ask of a body that must carry no
- * curation arms (containsCurationMarker). It decides nothing about WHICH text
- * belongs in an arm: that is authoring, and the guards over the built trees hold it.
+ * body, and where do they land?) and a cheap one per axis for the build to ask of a
+ * body that must carry no arms (containsCurationMarker, containsComplianceMarker). It
+ * also renders the variant manifest the build writes beside the trees
+ * (renderVariantManifest), so the build and the installer share one layout. It decides
+ * nothing about WHICH text belongs in an arm: that is authoring, and the guards over
+ * the built trees hold it.
  */
 
 // ---------------------------------------------------------------------------
@@ -143,7 +146,28 @@ export const LEGACY_OFF_OUTPUT_DIR = 'dist/learning-off';
  * under (`implement.md`), so the two variants of one host always share a name.
  */
 export function curationOffRelPath(kind: CurationVariantKind, fileName: string): string {
-  return `${CURATION_OFF_OUTPUT_DIR}/${kind}/${fileName}`;
+  return variantOffRelPath('curation-off', kind, fileName);
+}
+
+/** A variant that turns an axis off: every variant key but `on`. */
+export type OffVariantKey = Exclude<VariantKey, 'on'>;
+
+/** The tree each off variant is written under. Total over OffVariantKey, so a new key cannot go without a tree. */
+const OFF_OUTPUT_DIRS: Readonly<Record<OffVariantKey, string>> = {
+  'curation-off': CURATION_OFF_OUTPUT_DIR,
+  'compliance-off': COMPLIANCE_OFF_OUTPUT_DIR,
+  'both-off': BOTH_OFF_OUTPUT_DIR,
+};
+
+/**
+ * POSIX repo-relative path of an off variant of an output file: the kind's folder
+ * under the tree of the variant key.
+ *
+ * `fileName` is the already-validated basename the `on` variant is written under,
+ * so every variant of one host shares a name.
+ */
+export function variantOffRelPath(key: OffVariantKey, kind: CurationVariantKind, fileName: string): string {
+  return `${OFF_OUTPUT_DIRS[key]}/${kind}/${fileName}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -184,6 +208,16 @@ const LEGACY_MARKER_FRAGMENT_RE = /<!--\s*learning\s*:/i;
 /** True when the text names a curation marker anywhere, in the current or the retired spelling, valid or not. */
 export function containsCurationMarker(text: string): boolean {
   return MARKER_FRAGMENT_RES.curation.test(text) || LEGACY_MARKER_FRAGMENT_RE.test(text);
+}
+
+/** True when the text names a compliance marker anywhere, valid or not. */
+export function containsComplianceMarker(text: string): boolean {
+  return MARKER_FRAGMENT_RES.compliance.test(text);
+}
+
+/** True when the text names a marker of either axis, or the retired spelling, valid or not. */
+export function containsVariantMarker(text: string): boolean {
+  return containsCurationMarker(text) || containsComplianceMarker(text);
 }
 
 type MarkerWord = 'on' | 'off' | 'end';
@@ -238,6 +272,22 @@ export interface VariantSplit {
    * axis has no arms, the variants that differ only on that axis are the same body.
    */
   readonly hasArms: Readonly<Record<VariantAxis, boolean>>;
+}
+
+/**
+ * The variants the build writes for a body, `on` first.
+ *
+ * A variant is written only for a host that has an arm on an axis the variant turns
+ * off: `curation-off` when the body carries a curation arm, `compliance-off` when it
+ * carries a compliance arm, and `both-off` when it carries both. A body with no arm
+ * has the one variant, because every key would give the same bytes.
+ */
+export function emittedVariantKeys(hasArms: Readonly<Record<VariantAxis, boolean>>): readonly VariantKey[] {
+  const keys: VariantKey[] = ['on'];
+  if (hasArms.curation) keys.push('curation-off');
+  if (hasArms.compliance) keys.push('compliance-off');
+  if (hasArms.curation && hasArms.compliance) keys.push('both-off');
+  return keys;
 }
 
 /** Why a body cannot be split. Every line number is 1-based, in the body that was passed. */
@@ -477,3 +527,76 @@ export function describeVariantSplitError(error: VariantSplitError): string {
 
 /** The curation-named spelling of describeVariantSplitError, for the callers that still use it. */
 export const describeCurationSplitError = describeVariantSplitError;
+
+// ---------------------------------------------------------------------------
+// The variant manifest
+// ---------------------------------------------------------------------------
+
+/**
+ * Repo-relative path of the variant manifest, written beside the variant trees.
+ *
+ * The installer reads it to learn which compiled prompts carry a curation arm and
+ * which carry a compliance arm, so it never has to guess from the files it finds.
+ */
+export const VARIANT_MANIFEST_REL_PATH = 'dist/variant-axes.json';
+
+/** The manifest format version. A change to the shape of the file raises it. */
+export const VARIANT_MANIFEST_VERSION = 1;
+
+/** One compiled prompt of the manifest: its kind, its output name and the axes it carries an arm on. */
+export interface VariantManifestHost {
+  readonly kind: CurationVariantKind;
+  /** The validated output basename, without `.md`. */
+  readonly name: string;
+  readonly axes: Readonly<Record<VariantAxis, boolean>>;
+}
+
+/** Why a manifest cannot be rendered. */
+export type VariantManifestError = { kind: 'duplicate-host'; host: string };
+
+/** The manifest key of a host: the same `<kind>/<name>` spelling the host rosters use. */
+function manifestKeyOf(host: VariantManifestHost): string {
+  return `${host.kind}/${host.name}`;
+}
+
+/** Order by UTF-16 code unit, so the order does not depend on the locale of the machine that builds. */
+function byCodeUnit(a: string, b: string): number {
+  if (a < b) return -1;
+  return a > b ? 1 : 0;
+}
+
+/**
+ * Render the manifest of a build as JSON text.
+ *
+ * Total and pure, and deterministic: the hosts are sorted by key, each host lists
+ * its axes in the VARIANT_AXES order whatever order its input object holds them in,
+ * and the text ends in a newline, so the same roster always gives the same bytes. A
+ * kind and name that appear twice are refused, because the two hosts would write one
+ * file and one of the entries would be wrong.
+ */
+export function renderVariantManifest(hosts: readonly VariantManifestHost[]): Result<string, VariantManifestError> {
+  const entries = new Map<string, Record<VariantAxis, boolean>>();
+  for (const host of hosts) {
+    const key = manifestKeyOf(host);
+    if (entries.has(key)) return Err({ kind: 'duplicate-host', host: key });
+    entries.set(key, { curation: host.axes.curation, compliance: host.axes.compliance });
+  }
+  const sorted: Record<string, Record<VariantAxis, boolean>> = {};
+  for (const key of [...entries.keys()].sort(byCodeUnit)) {
+    const axes = entries.get(key);
+    if (axes !== undefined) sorted[key] = axes;
+  }
+  return Ok(`${JSON.stringify({ version: VARIANT_MANIFEST_VERSION, hosts: sorted }, null, 2)}\n`);
+}
+
+/** Render a manifest refusal as one line a person can act on. */
+export function describeVariantManifestError(error: VariantManifestError): string {
+  switch (error.kind) {
+    case 'duplicate-host':
+      return `two hosts write ${error.host}.md — a variant manifest names each compiled prompt once`;
+    default: {
+      const unhandled: never = error.kind;
+      return `unhandled variant manifest error ${String(unhandled)}`;
+    }
+  }
+}
