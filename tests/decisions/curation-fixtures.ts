@@ -343,7 +343,7 @@ export function runJsonHelperBounded(cwd: string, args: readonly string[], bound
 // The store module
 // ---------------------------------------------------------------------------
 
-export type Result<T> = { ok: true; value: T } | { ok: false; error: { kind: string; message: string } };
+export type Result<T> = { ok: true; value: T } | { ok: false; error: { kind: string; message: string; reason?: 'tracked' | 'unknown' } };
 
 export interface ValidationError {
   field: string;

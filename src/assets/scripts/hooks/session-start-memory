@@ -64,6 +64,45 @@ if [ "$_QG_MEMORY" != "true" ]; then
   exit 0
 fi
 
+# --- Memory area check ---
+# A folder that git tracks holds the repository's content, not devflow's data. While git
+# tracks files in the memory folder of this checkout, or a `.git` entry stands and git does
+# not answer, the memory area is paused: this hook moves no batch, reads no working memory,
+# no refresh warning, no queue and no worker notice, and the worker notice stays where it is.
+# The check asks once, in node mode, so a git that hangs is cut (queue_tracked_area), and
+# asks at the project root this hook resolved, not at the ledger root.
+# One fixed notice goes to the user as a systemMessage, on a session that starts, resumes
+# or is cleared; a compaction sends nothing. It is not model context. Each arm is a constant:
+# a single-quoted string that interpolates nothing, so no repository content reaches the
+# user through it. Its words are AREA_PAUSE_NOTICE.memory in src/core/area-pause-notice.ts
+# (tests/shell-hooks.test.ts holds the two equal).
+queue_tracked_area "$PROJECT_ROOT" memory node
+if [ "${DF_TRACKED_AREA_MEMORY:-unknown}" != "untracked" ]; then
+  _SSM_PAUSE_REASON="unknown"
+  if [ "${DF_TRACKED_AREA_MEMORY:-}" = "tracked" ]; then _SSM_PAUSE_REASON="tracked"; fi
+  log "Memory paused: git tracks files in the memory folder, or did not answer (${_SSM_PAUSE_REASON}); nothing read or written"
+  AREA_PAUSE_MESSAGE=""
+  case "$_SSM_PAUSE_REASON" in
+    tracked)
+      AREA_PAUSE_MESSAGE='Devflow memory is paused for this checkout, because git tracks files in the memory folder. Devflow reads and writes nothing there while git tracks files there. To find the files, run `git ls-files .devflow`. Untrack them with `git rm --cached <file>`, then delete them if you did not make them. Run these commands in this checkout.'
+      ;;
+    unknown)
+      AREA_PAUSE_MESSAGE='Devflow memory is paused for this checkout, because git did not answer whether it tracks files in the memory folder. Devflow reads and writes nothing there until git answers. The check runs again at the next session start. If this notice stays, check that git runs in this checkout.'
+      ;;
+  esac
+  CONTEXT=""
+  SYSTEM_MESSAGE=""
+  case "$(printf '%s' "$INPUT" | json_field "source" "")" in
+    startup|resume|clear)
+      SYSTEM_MESSAGE="$AREA_PAUSE_MESSAGE"
+      dbg "memory pause notice emitted"
+      json_session_output "$CONTEXT" "$SYSTEM_MESSAGE"
+      ;;
+  esac
+  dbg "EXIT: memory area paused"
+  exit 0
+fi
+
 # --- D56c cold-path recovery: orphaned .pending-turns.processing ---
 # Self-contained (not sourced from a shared helper): applies a 300s stale-age
 # gate to .pending-turns.processing. background-memory-update is the PRIMARY

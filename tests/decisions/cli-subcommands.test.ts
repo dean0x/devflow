@@ -62,6 +62,7 @@ import { curationCommand } from '../../src/cli/commands/curation.js';
 import * as p from '@clack/prompts';
 import { getCurationMoveMarkerPath } from '../../src/core/curation-move-notice.js';
 import { MOVE_SKIP_NOTICE } from '../../src/core/curation-move-skip.js';
+import { AREA_PAUSE_NOTICE } from '../../src/core/area-pause-notice.js';
 import {
   getCurationPendingTurnsPath,
   getCurationPendingTurnsProcessingPath,
@@ -584,45 +585,55 @@ describe('curation --clear', { timeout: 30_000 }, () => {
     expect(backupPendingPresent(backup)).toEqual([true, true, true, true]);
   });
 
-  it('keeps the queue and the backups, and prints the fixed notice, when git tracks a file of the data folder', async () => {
-    seedCorpus(root);
+  it('refuses and changes nothing, queue and backups included, when git tracks a file of the data folder', async () => {
+    const paths = seedCorpus(root);
     seedQueue(root);
     const backup = seedBackup(root);
     trackInGit(root, '.devflow/curation/.pending-turns.jsonl');
+    const before = { log: fs.readFileSync(paths.log, 'utf8'), ledger: fs.readFileSync(paths.ledger, 'utf8') };
 
     const run = await runCuration(['--clear']);
 
+    expect(run.error).toBe(AREA_PAUSE_NOTICE.curation.tracked);
+    expect(run.success).toBe('');
+    expect(run.exitCode).toBe(1);
+    expect(fs.readFileSync(paths.log, 'utf8')).toBe(before.log);
+    expect(fs.readFileSync(paths.ledger, 'utf8')).toBe(before.ledger);
     expect(queueFilesPresent(root)).toEqual([true, true, true]);
     expect(backupPendingPresent(backup)).toEqual([true, true, true, true]);
-    expect(run.success).toBe('Cleared 1 observation no entry uses and kept 3 that entries use.');
-    expect(run.warn).toBe(`The curation queue was not drained. ${MOVE_SKIP_NOTICE.tracked}`);
-    expect(run.exitCode).toBe(0);
   });
 
-  it('keeps the queue, and prints the fixed notice, when git tracks a file of a backup folder', async () => {
+  it('refuses and keeps the queue when git tracks a file of a backup folder', async () => {
     seedCorpus(root);
     seedQueue(root);
     const backup = seedBackup(root);
     trackInGit(root, `.devflow/${BACKUP_NAME}/.pending-turns.jsonl`);
+    const before = snapshotTree(path.join(root, '.devflow'));
 
     const run = await runCuration(['--clear']);
 
+    expect(run.error).toBe(AREA_PAUSE_NOTICE.curation.tracked);
+    expect(run.success).toBe('');
+    expect(run.exitCode).toBe(1);
+    expect(snapshotTree(path.join(root, '.devflow')), 'the log, the ledger, the queue and the backups keep their bytes').toEqual(before);
     expect(queueFilesPresent(root)).toEqual([true, true, true]);
     expect(backupPendingPresent(backup)).toEqual([true, true, true, true]);
-    expect(run.warn).toBe(`The curation queue was not drained. ${MOVE_SKIP_NOTICE.tracked}`);
   });
 
-  it('keeps the queue, and prints the fixed notice, when a .git entry stands and git does not answer', async () => {
+  it('refuses and keeps the queue when a .git entry stands and git does not answer', async () => {
     seedCorpus(root);
     seedQueue(root);
     initGitRepo(root);
     vi.stubEnv('PATH', pathWithFailingGit(devflowDir));
+    const before = snapshotTree(path.join(root, '.devflow'));
 
     const run = await runCuration(['--clear']);
 
+    expect(run.error).toBe(AREA_PAUSE_NOTICE.curation.unknown);
+    expect(run.success).toBe('');
+    expect(run.exitCode).toBe(1);
+    expect(snapshotTree(path.join(root, '.devflow')), 'the log, the ledger and the queue keep their bytes').toEqual(before);
     expect(queueFilesPresent(root)).toEqual([true, true, true]);
-    expect(run.warn).toBe(`The curation queue was not drained. ${MOVE_SKIP_NOTICE.unknown}`);
-    expect(run.exitCode).toBe(0);
   });
 
   it('drains the queue as before in a repository that tracks nothing in the data folders', async () => {
@@ -1097,7 +1108,7 @@ describe('curation --enable/--disable: the curation switch and the folder move (
       expect(readSwitchKeys(devflowDir)).toEqual({ curation: false, learning: false });
       expect(snapshotTree(path.join(root, '.devflow'), { stat: true })).toEqual(before);
       expect(queueIn(old)).toEqual([true, true, true]);
-      expect(run.warn.split('\n').at(-1), 'no move ran, so the drain prints the whole notice').toBe(`The curation queue was not drained. ${MOVE_SKIP_NOTICE.tracked}`);
+      expect(run.warn.split('\n').at(-1), 'no move ran, so the drain prints the whole notice').toBe(`The curation queue was not drained. ${AREA_PAUSE_NOTICE.curation.tracked}`);
       expect(run.exitCode).toBe(0);
     });
   });
@@ -1213,7 +1224,7 @@ describe('curation --enable/--disable: the curation switch and the folder move (
       expect(readSwitchKeys(devflowDir)).toEqual({ curation: false, learning: false });
       expect(snapshotTree(path.join(root, '.devflow'), { stat: true })).toEqual(before);
       expect(backupPendingPresent(backup)).toEqual([true, true, true, true]);
-      expect(run.warn, 'no move ran, so the drain prints the whole notice').toBe(`The curation queue was not drained. ${MOVE_SKIP_NOTICE.tracked}`);
+      expect(run.warn, 'no move ran, so the drain prints the whole notice').toBe(`The curation queue was not drained. ${AREA_PAUSE_NOTICE.curation.tracked}`);
       expect(run.exitCode).toBe(0);
     });
 
@@ -1229,7 +1240,7 @@ describe('curation --enable/--disable: the curation switch and the folder move (
       expect(snapshotTree(path.join(root, '.devflow'))).toEqual(before);
       expect(queueFilesPresent(root)).toEqual([true, true, true]);
       expect(backupPendingPresent(backup)).toEqual([true, true, true, true]);
-      expect(run.warn).toContain(MOVE_SKIP_NOTICE.tracked);
+      expect(run.warn).toContain(AREA_PAUSE_NOTICE.curation.tracked);
     });
 
     it('--disable in a repository that tracks nothing in the data folders moves the folder and drains the queue', async () => {
@@ -1793,15 +1804,14 @@ describe('curation --restore/--clear/--reset move the old folder first (#529)', 
       }
     });
 
-    it.each(WRITERS)('%s with a project whose old folder git tracks writes nothing, prints the fixed notice and exits 1', async (_flag, args, undone) => {
+    it.each(WRITERS)('%s with a project whose old folder git tracks writes nothing, prints the fixed notice and exits 1', async (_flag, args) => {
       const old = seedOldFolder(root);
       trackInGit(root, '.devflow/learning/decisions-ledger.jsonl');
       const before = snapshotTree(path.join(root, '.devflow'));
 
       const run = await runCuration(args);
 
-      expect(run.error).toContain(MOVE_SKIP_NOTICE.tracked);
-      expect(run.error).toContain(`Nothing was ${undone}.`);
+      expect(run.error).toBe(AREA_PAUSE_NOTICE.curation.tracked);
       expect(run.success).toBe('');
       expect(run.exitCode).toBe(1);
       expect(fs.existsSync(old)).toBe(true);
@@ -1809,7 +1819,7 @@ describe('curation --restore/--clear/--reset move the old folder first (#529)', 
       expect(snapshotTree(path.join(root, '.devflow'))).toEqual(before);
     });
 
-    it.each(WRITERS)('%s with a project where git does not answer writes nothing, prints the fixed notice and exits 1', async (_flag, args, undone) => {
+    it.each(WRITERS)('%s with a project where git does not answer writes nothing, prints the fixed notice and exits 1', async (_flag, args) => {
       seedOldFolder(root);
       initGitRepo(root);
       vi.stubEnv('PATH', pathWithFailingGit(devflowDir));
@@ -1817,8 +1827,7 @@ describe('curation --restore/--clear/--reset move the old folder first (#529)', 
 
       const run = await runCuration(args);
 
-      expect(run.error).toContain(MOVE_SKIP_NOTICE.unknown);
-      expect(run.error).toContain(`Nothing was ${undone}.`);
+      expect(run.error).toBe(AREA_PAUSE_NOTICE.curation.unknown);
       expect(run.exitCode).toBe(1);
       expect(snapshotTree(path.join(root, '.devflow'))).toEqual(before);
     });

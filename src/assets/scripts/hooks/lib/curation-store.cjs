@@ -10,7 +10,8 @@
 // means a broken invariant or an I/O failure, never an expected outcome; a lock
 // held by withDecisionsLock is released on every path, the throw included.
 //
-// Loading: node built-ins and three sibling libs only. This module never requires
+// Loading: node built-ins and four sibling libs only (the path helpers, the lock, the
+// path guard and the tracked-areas check). This module never requires
 // decisions-format.cjs or render-decisions.cjs at load time: both require it, for
 // the status list and the one-line and inactive-note text they share with `list`.
 //
@@ -58,6 +59,7 @@ const {
 } = require('./project-paths.cjs');
 const { acquireMkdirLock, releaseLock } = require('./mkdir-lock.cjs');
 const { safePath } = require('./safe-path.cjs');
+const { inspectTrackedAreaOnce } = require('./tracked-areas.cjs');
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -628,6 +630,36 @@ function linkedFolder(opName, dir) {
   };
 }
 
+/**
+ * The refusal of an op run where git tracks files in the curation data folders under
+ * `root` (the curation folder, the old ledger folder and the backup folders), or does
+ * not say whether it does, or null where git tracks none. A folder that git tracks is the
+ * repository's content, so the curation feature is paused there: the op reads and writes
+ * nothing. The messages state the fact and name no command; the root is shown so the
+ * folder can be found. The check asks git about the index, not the disk, so it holds
+ * whether or not the folder is on disk, and it makes no git call for a root with no `.git`
+ * entry. It comes first in every op, before a ledger file is read, a lock is taken or a git
+ * call of the op's own is made. The answer is asked once per root for the life of the
+ * process (inspectTrackedAreaOnce), so the heartbeat, the op and its lock share one call.
+ *
+ * The refusal carries `reason`, `tracked` where git tracks files and `unknown` where it
+ * did not answer, so a caller that picks a notice reads the field, never the message.
+ *
+ * @param {string} opName - operation name, for the message
+ * @param {string} root - project root
+ * @returns {{ ok: false, error: { kind: 'tracked', reason: 'tracked'|'unknown', message: string } } | null}
+ */
+function trackedCurationArea(opName, root) {
+  const { answer } = inspectTrackedAreaOnce(root, 'curation');
+  if (answer === 'untracked') return null;
+  const reason = answer === 'tracked' ? 'tracked' : 'unknown';
+  const fact = reason === 'tracked' ? 'git tracks files' : 'git did not answer whether it tracks files';
+  return {
+    ok: false,
+    error: { kind: 'tracked', reason, message: `${opName}: ${fact} in the curation data folders under ${root}; nothing was written` },
+  };
+}
+
 /** The Stats of `file` without following a link, or null when nothing is there. */
 function lstatOrNull(file) {
   try {
@@ -744,16 +776,23 @@ function isResult(value) {
  * names. Refused here, before the lock is taken, so every writer refuses in one
  * place; the claim heartbeat makes the same check, and read-only paths still read.
  *
+ * A writer also refuses with `tracked`, changing nothing, where git tracks files in the
+ * curation data folders under its root, or does not say whether it does
+ * (trackedCurationArea). That check follows the link check and comes before the journal,
+ * the folder check and the lock, so a paused project gets no lock folder.
+ *
  * @param {string} opName - operation name, for messages
  * @param {string} root - project root
  * @param {() => { ok: boolean }} fn - the locked body; it must return a Result
  * @param {{ timeoutMs?: number, staleMs?: number }} [opts]
  * @returns {{ ok: true, value?: unknown } | { ok: false, error: { kind: string, message: string } }}
- *   fn's Result, or an error of kind `not-a-directory`, `no-curation-dir` or `busy`.
+ *   fn's Result, or an error of kind `not-a-directory`, `tracked`, `no-curation-dir` or `busy`.
  */
 function withDecisionsLock(opName, root, fn, { timeoutMs = LOCK_ACQUIRE_TIMEOUT_MS, staleMs = LOCK_STALE_MS } = {}) {
   const linked = linkedCurationFolder(root);
   if (linked !== null) return linkedFolder(opName, linked);
+  const paused = trackedCurationArea(opName, root);
+  if (paused !== null) return paused;
   const journal = moveJournalPathOrNull(root);
   const oldFolder = path.join(root, '.devflow', LEGACY_NAMES.folder);
   if (journal !== null && moveJournalHoldsWriters(journal, oldFolder)) return unfinishedMove(opName, journal);
@@ -1344,7 +1383,7 @@ function lastActivityMs(row) {
  * @param {{ now?: number, timeoutMs?: number }} [opts] - now: epoch ms (default Date.now())
  * @returns {{ ok: true, value: { rotated: number, appended: number } } | { ok: false, error: { kind: string, message: string } }}
  *   rotated: rows removed from the log; appended: rows added to the archive.
- *   Errors are withDecisionsLock's not-a-directory, no-curation-dir and busy.
+ *   Errors are withDecisionsLock's tracked, not-a-directory, no-curation-dir and busy.
  */
 function rotateObservations(root, { now = Date.now(), timeoutMs } = {}) {
   return withDecisionsLock('rotate-observations', root, () => {
@@ -1407,7 +1446,7 @@ function rotateObservations(root, { now = Date.now(), timeoutMs } = {}) {
  * @param {{ now?: number, timeoutMs?: number }} [opts] - now: epoch ms (default Date.now())
  * @returns {{ ok: true, value: { cleared: number, kept: number } } | { ok: false, error: { kind: string, message: string } }}
  *   cleared: rows removed from the log; kept: rows left in it. Error kinds:
- *   ledger-malformed, and withDecisionsLock's not-a-directory, no-curation-dir and busy.
+ *   ledger-malformed, and withDecisionsLock's tracked, not-a-directory, no-curation-dir and busy.
  */
 function clearUnreferenced(root, { now = Date.now(), timeoutMs } = {}) {
   return withDecisionsLock('clear', root, () => {
@@ -1475,7 +1514,7 @@ function removeEmptyDir(dir) {
  * @param {{ timeoutMs?: number }} [opts]
  * @returns {{ ok: true, value: { removed: number } } | { ok: false, error: { kind: string, message: string } }}
  *   removed: the entries removed from the curation directory. Errors are
- *   withDecisionsLock's not-a-directory, no-curation-dir and busy.
+ *   withDecisionsLock's tracked, not-a-directory, no-curation-dir and busy.
  */
 function resetCuration(root, { timeoutMs } = {}) {
   const curationDir = getCurationDir(root);
@@ -1643,7 +1682,8 @@ function moveQueueToClaim(queuePath, claimPath) {
  * clobber a batch, mv kept the queue's old mtime so a fresh claim could look stale
  * at once, and an unconditional final unlink deleted another run's claim.
  *
- * Without .devflow/curation/ it answers none and creates nothing.
+ * Without .devflow/curation/ it answers none and creates nothing; where git tracks files
+ * in the curation data folders it refuses, kind `tracked`, before it looks (trackedCurationArea).
  *
  * @param {string} root - project root
  * @param {{ now?: number, token?: string, timeoutMs?: number }} [opts]
@@ -1654,6 +1694,8 @@ function moveQueueToClaim(queuePath, claimPath) {
  */
 function claimQueue(root, { now = Date.now(), token = newClaimToken(), timeoutMs } = {}) {
   assertClaimToken('claimQueue', token);
+  const paused = trackedCurationArea('claim-queue', root);
+  if (paused !== null) return paused;
   if (!hasCurationDir(root)) return { ok: true, value: { state: 'none' } };
   return withDecisionsLock('claim-queue', root, () => {
     const claimPath = getCurationPendingTurnsProcessingPath(root);
@@ -1693,7 +1735,7 @@ function claimQueue(root, { now = Date.now(), token = newClaimToken(), timeoutMs
  * @param {string} token
  * @param {{ timeoutMs?: number }} [opts]
  * @returns {{ ok: true, value: { state: 'released'|'not-owner'|'gone' } } | { ok: false, error: { kind: string, message: string } }}
- *   errors include withDecisionsLock's not-a-directory, no-curation-dir and busy
+ *   errors include withDecisionsLock's tracked, not-a-directory, no-curation-dir and busy
  * @throws {TypeError} when `token` is not a claim token
  */
 function releaseClaim(root, token, { timeoutMs } = {}) {
@@ -1722,14 +1764,17 @@ function releaseClaim(root, token, { timeoutMs } = {}) {
  * takes no lock — json-helper sends it before each curation op runs. A claim in a
  * curation tree reached through a symbolic link is left alone (D-NO-LINKED-TREE):
  * `lutimes` follows a linked folder above the claim, and the op that follows
- * refuses that tree anyway.
+ * refuses that tree anyway. A claim in a project whose curation data folders git
+ * tracks, or where git does not answer, is left alone as well (trackedCurationArea).
  *
  * @param {string} root - project root
  * @param {{ now?: number }} [opts] - now: epoch ms (default Date.now())
  * @returns {{ ok: true, value: { touched: boolean } } | { ok: false, error: { kind: 'heartbeat-failed', message: string } }}
  */
 function touchClaim(root, { now = Date.now() } = {}) {
-  if (linkedCurationFolder(root) !== null) return { ok: true, value: { touched: false } };
+  if (linkedCurationFolder(root) !== null || trackedCurationArea('heartbeat', root) !== null) {
+    return { ok: true, value: { touched: false } };
+  }
   const claimPath = getCurationPendingTurnsProcessingPath(root);
   const at = new Date(now);
   try {
@@ -2231,13 +2276,15 @@ function restoreFirst(id, carriers) {
  *   observations: the count the log row holds afterwards; reprojected: the
  *   anchors re-projected, in anchor order. Error kinds: invalid-input (with
  *   problems), duplicate-log-id, restore-first, cannot-reproject, and
- *   withDecisionsLock's not-a-directory, no-curation-dir and busy.
+ *   withDecisionsLock's tracked, not-a-directory, no-curation-dir and busy.
  * @throws {TypeError} when `mode` is not a put mode
  */
 function putObservation(root, mode, input, { now = Date.now(), timeoutMs, scopeMatches } = {}) {
   if (!VALIDATION_MODES.includes(mode)) {
     throw new TypeError(`putObservation: mode must be one of ${VALIDATION_MODES.join(', ')}, got '${mode}'`);
   }
+  const paused = trackedCurationArea('put-observation', root);
+  if (paused !== null) return paused;
   const matches = scopeMatches || gitScopeMatcher(root);
   return withDecisionsLock('put-observation', root, () => putUnderLock(root, mode, input, { now, scopeMatches: matches }), { timeoutMs });
 }
@@ -2303,14 +2350,17 @@ function putUnderLock(root, mode, input, { now, scopeMatches }) {
  * The data behind `list`, read-only: buildListing over the ledger and the log as
  * they are, every glob scope checked against the files git tracks. Malformed
  * lines are counted, never quarantined (D-QUARANTINE-MALFORMED). Refuses without
- * .devflow/curation/ (D-NO-STRAY-TREE).
+ * .devflow/curation/ (D-NO-STRAY-TREE), and, before it reads a file, where git tracks files
+ * in the curation data folders (trackedCurationArea).
  *
  * @param {string} root - project root
  * @param {{ scopeMatches?: (glob: string) => boolean }} [opts] - default gitScopeMatcher(root)
  * @returns {{ ok: true, value: { active: object[], inactive: object[], observations: object[], integrity: object[], malformed: { ledger: number, log: number } } }
- *   | { ok: false, error: { kind: 'no-curation-dir', message: string } }}
+ *   | { ok: false, error: { kind: 'tracked'|'no-curation-dir', message: string } }}
  */
 function readListing(root, { scopeMatches } = {}) {
+  const paused = trackedCurationArea('list', root);
+  if (paused !== null) return paused;
   if (!hasCurationDir(root)) return noCurationDir('list', root);
   const { ledgerRows, logRows, rejected } = readCurationState(root);
   return {
@@ -2393,14 +2443,17 @@ function formatListing(listing) {
  * the log and the history as they are. When lines were skipped as malformed
  * (D-QUARANTINE-MALFORMED), a found entry gains `malformed: { ledger, log }` and
  * a not-found message says a skipped line may hold it. Refuses without
- * .devflow/curation/ (D-NO-STRAY-TREE).
+ * .devflow/curation/ (D-NO-STRAY-TREE), and, before it reads a file, where git tracks files
+ * in the curation data folders (trackedCurationArea).
  *
  * @param {string} root - project root
  * @param {string} key - an anchor id or an observation id
  * @returns {{ ok: true, value: { key: string, ledger: object[], log: object|null, history_versions: object[], flags: object[], malformed?: { ledger: number, log: number } } }
- *   | { ok: false, error: { kind: 'no-curation-dir'|'invalid-key'|'not-found', message: string } }}
+ *   | { ok: false, error: { kind: 'tracked'|'no-curation-dir'|'invalid-key'|'not-found', message: string } }}
  */
 function showByKey(root, key) {
+  const paused = trackedCurationArea('show', root);
+  if (paused !== null) return paused;
   if (!hasCurationDir(root)) return noCurationDir('show', root);
   const { ledgerRows, logRows, rejected } = readCurationState(root);
   const shown = showEntry(key, ledgerRows, logRows, { historyVersions: id => historyVersions(root, id) });
@@ -2448,10 +2501,12 @@ function warmScopeMatcher(ledgerRows, scopeMatches) {
  *   now: epoch ms (default Date.now()); scopeMatches: default gitScopeMatcher(root)
  * @returns {{ ok: true, value: { ref: { ref: 'origin/HEAD'|'HEAD', commit: string } | null, due: Array<{ anchor_id: string, reason: string, bytes: number }> } }
  *   | { ok: false, error: { kind: string, message: string } }}
- *   due is selectDue's answer; errors are withDecisionsLock's not-a-directory,
+ *   due is selectDue's answer; errors are withDecisionsLock's tracked, not-a-directory,
  *   no-curation-dir and busy
  */
 function claimDue(root, { now = Date.now(), timeoutMs, scopeMatches } = {}) {
+  const paused = trackedCurationArea('claim-due', root);
+  if (paused !== null) return paused;
   if (!hasCurationDir(root)) return noCurationDir('claim-due', root);
   const matches = scopeMatches || gitScopeMatcher(root);
   const ref = resolveVerifyRef(root);
@@ -2725,12 +2780,14 @@ function mintAnchor(ledgerRows, type, citedAnchors) {
  *   | { ok: false, error: { kind: string, message: string } }}
  *   Error kinds: not-in-log, duplicate-log-id, already-promoted, v1-observation,
  *   type-mismatch, cited-numbers-exhausted, and withDecisionsLock's
- *   not-a-directory, no-curation-dir and busy.
+ *   tracked, not-a-directory, no-curation-dir and busy.
  * @throws {TypeError} for a type other than decision or pitfall, or a malformed obsId
  */
 function assignAnchor(root, type, obsId, { now = Date.now(), timeoutMs, citedAnchors } = {}) {
   if (anchorPrefixFor(type) === null) throw new TypeError(`assignAnchor: type must be 'decision' or 'pitfall', got '${type}'`);
   if (typeof obsId !== 'string' || !OBS_ID_RE.test(obsId)) throw new TypeError('assignAnchor: obsId must be an observation id');
+  const paused = trackedCurationArea('assign-anchor', root);
+  if (paused !== null) return paused;
   if (!hasCurationDir(root)) return noCurationDir('assign-anchor', root);
   const cited = citedAnchors || collectCitedAnchorIds(root);
   return withDecisionsLock('assign-anchor', root, () => assignUnderLock(root, type, obsId, { now, cited }), { timeoutMs });
@@ -2884,7 +2941,7 @@ function recordRefreshHistory(root, plans, ledgerRows, { now }) {
  * @returns {{ ok: true, value: { refreshed: Array<{ anchor_id: string, state: 'verified'|'reprojected'|'unchanged' }> } }
  *   | { ok: false, error: { kind: string, message: string, problems?: Array<{ anchor_id: string, message: string }> } }}
  *   refreshed: each anchor once, in the order given. Error kinds: refused (with
- *   problems), and withDecisionsLock's not-a-directory, no-curation-dir and busy.
+ *   problems), and withDecisionsLock's tracked, not-a-directory, no-curation-dir and busy.
  * @throws {TypeError} when anchorIds is empty or holds anything but anchor ids
  */
 function refreshAnchors(root, anchorIds, { verified = false, now = Date.now(), timeoutMs } = {}) {
@@ -3067,9 +3124,11 @@ function restoreRefusal(kind, message) {
  * @param {{ verifyRef?: { ref: 'origin/HEAD'|'HEAD', commit: string } | null }} [opts]
  *   verifyRef: default resolveVerifyRef(root); null when there is no commit to check
  * @returns {{ ok: true, value: { path: string, quote: string, ref: string, commit: string } }
- *   | { ok: false, error: { kind: 'no-verify-ref'|'not-at-ref'|'git-failed'|'quote-not-found', message: string } }}
+ *   | { ok: false, error: { kind: 'tracked'|'no-verify-ref'|'not-at-ref'|'git-failed'|'quote-not-found', message: string } }}
  */
 function quoteAtRef(root, at, quote, { verifyRef } = {}) {
+  const paused = trackedCurationArea('retire-anchor', root);
+  if (paused !== null) return paused;
   const checkedAt = verifyRef === undefined ? resolveVerifyRef(root) : verifyRef;
   if (checkedAt === null) {
     return retireRefusal('no-verify-ref', 'there is no commit to check the quote at (not a git repository, or no commit yet); nothing was written');
@@ -3121,7 +3180,7 @@ function quoteAtRef(root, at, quote, { verifyRef } = {}) {
  *   kinds: invalid-input (with problems), quoteAtRef's, not-found,
  *   duplicate-anchor, already-inactive, successor-not-found,
  *   successor-duplicate-anchor, successor-inactive, and withDecisionsLock's
- *   not-a-directory, no-curation-dir and busy.
+ *   tracked, not-a-directory, no-curation-dir and busy.
  * @throws {TypeError} for a malformed anchorId or a status that is not inactive
  */
 function retireAnchor(root, anchorId, status, input, { now = Date.now(), timeoutMs, verifyRef } = {}) {
@@ -3129,6 +3188,8 @@ function retireAnchor(root, anchorId, status, input, { now = Date.now(), timeout
   if (!INACTIVE_STATUSES.includes(status)) {
     throw new TypeError(`retireAnchor: status must be one of ${INACTIVE_STATUSES.join(', ')}, got '${status}'`);
   }
+  const paused = trackedCurationArea('retire-anchor', root);
+  if (paused !== null) return paused;
   if (!hasCurationDir(root)) return noCurationDir('retire-anchor', root);
   const problems = retireInputProblems(anchorId, status, input);
   if (problems.length > 0) return invalidInput('retire-anchor', problems);
@@ -3200,7 +3261,7 @@ function retireUnderLock(root, anchorId, status, note, { now }) {
  * @returns {{ ok: true, value: { anchor_id: string, status: 'Accepted'|'Active' } }
  *   | { ok: false, error: { kind: string, message: string } }}
  *   Error kinds: not-found, duplicate-anchor, already-active, type-mismatch, and
- *   withDecisionsLock's not-a-directory, no-curation-dir and busy.
+ *   withDecisionsLock's tracked, not-a-directory, no-curation-dir and busy.
  * @throws {TypeError} for a malformed anchorId
  */
 function restoreAnchor(root, anchorId, { now = Date.now(), timeoutMs } = {}) {
@@ -3268,6 +3329,7 @@ module.exports = {
   writeJsonlAtomic,
   // Locking
   hasCurationDir,
+  trackedCurationArea,
   withDecisionsLock,
   // State and the ledger registry
   readCurationState,

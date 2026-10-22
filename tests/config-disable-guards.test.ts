@@ -9,7 +9,7 @@ import { execSync } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
-import { execHook } from './shell-hooks-helpers.js';
+import { execHook, HOOK_RUN_ALLOWANCE_MS, NODE_EXEC_STALL_MS } from './shell-hooks-helpers.js';
 
 const HOOKS_DIR = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks');
 
@@ -17,12 +17,13 @@ const HOOKS_DIR = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hoo
 
 /**
  * A temp project inside a git checkout: the hooks scaffold and inject project
- * context only in a git project (D-HOOKS-GIT-ONLY). An empty `.git` is a marker,
- * not a repository, so the resolved root is the directory itself.
+ * context only in a git project (D-HOOKS-GIT-ONLY). The project is a real repository in a
+ * folder that is its own realpath: an empty `.git` folder is none, git would not answer the
+ * check of the curation folders, and curation would pause.
  */
 function mkTmpDir(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-config-disable-guards-test-'));
-  fs.mkdirSync(path.join(dir, '.git'));
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-config-disable-guards-test-')));
+  execSync('git init -q', { cwd: dir, stdio: 'pipe' });
   return dir;
 }
 
@@ -197,7 +198,7 @@ describe('config guard: session-start-memory', () => {
 
 // ─── Part A: session-start-context hook ──────────────────────────────────────
 
-describe('config guard: session-start-context', () => {
+describe('config guard: session-start-context', { timeout: HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS }, () => {
   const HOOK = path.join(HOOKS_DIR, 'session-start-context');
   let tmpDir: string;
   let tmpHome: string;

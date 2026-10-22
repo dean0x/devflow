@@ -46,4 +46,12 @@ describe('CurationStoreError.kind', () => {
   it('holds each kind once', () => {
     expect(new Set(CURATION_STORE_ERROR_KINDS).size).toBe(CURATION_STORE_ERROR_KINDS.length);
   });
+
+  it('lists tracked exactly once: the kind of a refusal where git tracks the curation data folders', () => {
+    const tracked: CurationStoreError = { kind: 'tracked', message: 'list: git tracks files in the curation data folders under /project; nothing was written' };
+
+    expect(tracked.kind).toBe('tracked');
+    expect(CURATION_STORE_ERROR_KINDS.filter(kind => kind === 'tracked')).toHaveLength(1);
+    expect(kindLiterals(CURATION_STORE)).toContain('tracked');
+  });
 });

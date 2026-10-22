@@ -18,6 +18,7 @@
 
 import { join } from 'path';
 import { scriptsDir } from './assets.js';
+import type { PauseReason } from './area-pause-notice.js';
 import { loadScript, type EvidencePolicyLoadError, type Result, type SurfaceKind } from './evidence-policy.js';
 
 /** The store, relative to src/assets/scripts/ (and ~/.devflow/scripts/). */
@@ -105,6 +106,7 @@ export interface ShownEntry {
 export const CURATION_STORE_ERROR_KINDS = [
   'no-curation-dir',
   'not-a-directory',
+  'tracked',
   'not-a-file',
   'busy',
   'refused',
@@ -137,10 +139,15 @@ export const CURATION_STORE_ERROR_KINDS = [
 /** The case a store function refused with. */
 export type CurationStoreErrorKind = (typeof CURATION_STORE_ERROR_KINDS)[number];
 
-/** Why a store function refused. `kind` names the case; `message` names the op and says what was written. */
+/**
+ * Why a store function refused. `kind` names the case; `message` names the op and says what was written.
+ * `reason` is set on a `tracked` refusal: `tracked` where git tracks files in the curation data folders,
+ * `unknown` where a `.git` entry stands and git did not answer.
+ */
 export interface CurationStoreError {
   readonly kind: CurationStoreErrorKind;
   readonly message: string;
+  readonly reason?: PauseReason;
 }
 
 export type CurationStoreResult<T> = Result<T, CurationStoreError>;

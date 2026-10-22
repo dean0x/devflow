@@ -124,15 +124,16 @@ function writeMachineFeatures(homeDir: string, features: Record<string, unknown>
 }
 
 /**
- * A temp project inside a git checkout. The capture and memory hooks scaffold
+ * A temp project that is a git repository. The capture and memory hooks scaffold
  * `.devflow/` only in a git project (D-HOOKS-GIT-ONLY, via ensure-devflow-init),
- * so every fixture that expects a write carries a `.git` marker. An empty
- * directory satisfies df_has_git_marker and is not a repository to
- * `git rev-parse`, so the resolved project root is the directory itself.
+ * so every fixture that expects a write carries a `.git` entry, and the capture gate
+ * asks git whether it tracks the queue folders (an empty `.git` folder is a repository
+ * git can not answer from, which pauses both queues). The directory is the real path of
+ * the temp folder, so it is also the toplevel git reports.
  */
 function makeGitProject(prefix: string): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-  fs.mkdirSync(path.join(dir, '.git'));
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+  execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'ignore' });
   return dir;
 }
 
@@ -1159,12 +1160,13 @@ describe('capture hooks never write through a symbolic link under .devflow (D-HO
   let outsideDir: string;
 
   beforeEach(() => {
-    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cap-nolink-'));
+    tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cap-nolink-')));
     projectDir = path.join(tmp, 'repo');
     homeDir = path.join(tmp, 'home');
     outsideFile = path.join(tmp, 'outside.txt');
     outsideDir = path.join(tmp, 'outside');
-    fs.mkdirSync(path.join(projectDir, '.git'), { recursive: true });
+    fs.mkdirSync(projectDir, { recursive: true });
+    execFileSync('git', ['init', '-q'], { cwd: projectDir, stdio: 'ignore' });
     fs.mkdirSync(homeDir);
     fs.mkdirSync(outsideDir);
     fs.writeFileSync(outsideFile, UNTOUCHED);
@@ -1269,23 +1271,6 @@ describe('capture hooks never write through a symbolic link under .devflow (D-HO
       expect(modeOf(queue), `${queue} holds conversation text, so it is owner-only`).toBe('600');
     }
     expect(refusals('capture-prompt'), 'nothing was refused').toEqual([]);
-  });
-
-  it('a project whose root sits under a linked parent still captures normally', () => {
-    // Only the path below the root is checked: on macOS the temp tree itself sits
-    // behind /var -> /private/var, and this builds the same shape on any platform.
-    // The empty `.git` is a marker git cannot read, so the root stays the cwd, link included.
-    const realParent = path.join(tmp, 'real-parent');
-    const linkedParent = path.join(tmp, 'linked-parent');
-    fs.mkdirSync(path.join(realParent, 'repo', '.git'), { recursive: true });
-    fs.symlinkSync(realParent, linkedParent);
-    const cwd = path.join(linkedParent, 'repo');
-
-    expect(runHook(CAPTURE_PROMPT, { cwd, prompt: 'we chose X over Y' }, homeDir).exitCode).toBe(0);
-
-    expect(readJsonl(memoryQueue(cwd))).toHaveLength(1);
-    expect(readJsonl(curationQueue(cwd))).toHaveLength(1);
-    expect(refusals('capture-prompt', cwd), 'nothing was refused').toEqual([]);
   });
 
   // A real repository under a linked parent: git names its roots with every link

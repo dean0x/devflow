@@ -8,12 +8,15 @@ import { writeSettingsFileAtomic } from '../../core/fs-atomic.js';
 import { discoverProjectGitRoots } from '../../targets/claude-code/post-install.js';
 import { getGitRoot } from '../../core/git.js';
 import { firstSymbolicLink } from '../../core/linked-path.js';
+import { pooled } from '../../core/pool.js';
 import {
   getMemoryDir,
   getPendingTurnsPath,
   getPendingTurnsProcessingPath,
 } from '../../core/project-paths.js';
 import { drainQueueFiles, formatRefusedDrain, type QueueDrain } from '../../core/queue-drain.js';
+import { AREA_PAUSE_NOTICE, type PauseReason } from '../../core/area-pause-notice.js';
+import { probeTrackedArea } from '../../core/tracked-areas.js';
 import {
   HOOKS_DIR_SUFFIX,
   devflowHookOwner,
@@ -194,20 +197,50 @@ export function convergeMemoryHooks(settingsJson: string, enabled: boolean, devf
   return enabled ? addMemoryHooks(cleaned, devflowDir) : cleaned;
 }
 
+/** A drain that deleted nothing because git tracks files in the memory folder (`tracked`) or did not answer (`unknown`). */
+export interface SkippedMemoryDrain {
+  readonly drained: false;
+  readonly skipped: PauseReason;
+}
+
+/** What {@link drainMemoryQueue} did: a {@link QueueDrain}, or a {@link SkippedMemoryDrain}. */
+export type MemoryQueueDrain = QueueDrain | SkippedMemoryDrain;
+
+/**
+ * Why the memory area at `projectRoot` is paused, or null when git tracks nothing in the
+ * memory folder there. The area is paused when git tracks files in the memory folder, or
+ * a `.git` entry stands and git did not answer (`unknown`); a root with no `.git` entry
+ * makes no git call. The root is the checkout's toplevel, where the memory hooks work.
+ */
+async function memoryPauseReason(projectRoot: string): Promise<PauseReason | null> {
+  const { answer } = await probeTrackedArea(projectRoot, 'memory');
+  return answer === 'untracked' ? null : answer;
+}
+
 /**
  * Drain a project's pending memory queue (and a claimed batch) so stale turns
  * are not processed when memory is next switched on. Shared by `devflow init
- * --no-memory` and `devflow memory --disable`. Refused, deleting nothing, when
- * `.devflow` or `.devflow/memory` under `projectRoot` is a symbolic link
- * (D-CLI-NO-SYMLINK). ENOENT-tolerant; any other error propagates to the command
- * boundary, like drainCurationQueue.
+ * --no-memory` and `devflow memory --disable`. Deletes nothing, and answers
+ * `skipped`, when git tracks files in the memory folder or a `.git` entry stands and
+ * git does not answer: a folder that git tracks is the repository's content. Refused,
+ * deleting nothing, when `.devflow` or `.devflow/memory` under `projectRoot` is a
+ * symbolic link (D-CLI-NO-SYMLINK). ENOENT-tolerant; any other error propagates to the
+ * command boundary, like drainCurationQueue.
  */
-export async function drainMemoryQueue(projectRoot: string): Promise<QueueDrain> {
+export async function drainMemoryQueue(projectRoot: string): Promise<MemoryQueueDrain> {
+  const skipped = await memoryPauseReason(projectRoot);
+  if (skipped !== null) return { drained: false, skipped };
   const memoryDir = getMemoryDir(projectRoot);
   return drainQueueFiles([path.dirname(memoryDir), memoryDir], [
     getPendingTurnsPath(projectRoot),
     getPendingTurnsProcessingPath(projectRoot),
   ]);
+}
+
+/** The line a caller prints for a memory drain that deleted nothing: the fixed notice of a paused area, or the refusal at a link. */
+export function formatMemoryNotDrained(drain: Exclude<MemoryQueueDrain, { readonly drained: true }>): string {
+  if (!('skipped' in drain)) return formatRefusedDrain('memory', drain.linkedFolder);
+  return `The memory queue was not drained. ${AREA_PAUSE_NOTICE.memory[drain.skipped]}`;
 }
 
 interface MemoryOptions {
@@ -244,18 +277,28 @@ export async function filterProjectsWithMemory(gitRoots: string[]): Promise<stri
   return checks.filter((c) => c.has).map((c) => c.root);
 }
 
+/** At most this many projects are checked and cleaned at once, so `memory --clear` starts few git processes. */
+export const CLEAN_QUEUE_POOL_LIMIT = 8;
+
 /**
  * Clean up memory queue files from the given project paths.
  * Skips projects where the background updater lock is held to avoid data loss,
- * and refuses, deleting nothing there, a project whose `.devflow` or
- * `.devflow/memory` is a symbolic link (D-CLI-NO-SYMLINK); `refused` names each
- * such link. Returns the count of projects from which at least one file was removed.
+ * leaves a project whose memory area is paused alone (git tracks files in the memory
+ * folder, or a `.git` entry stands and git did not answer; `paused` names each such
+ * project with the reason), and refuses, deleting nothing there, a project whose
+ * `.devflow` or `.devflow/memory` is a symbolic link (D-CLI-NO-SYMLINK); `refused` names
+ * each such link. At most {@link CLEAN_QUEUE_POOL_LIMIT} projects are handled at once.
+ * Returns the count of projects from which at least one file was removed.
  */
 export async function cleanQueueFiles(
   projectPaths: string[],
-): Promise<{ cleaned: number; projects: string[]; refused: string[] }> {
-  const results = await Promise.all(
-    projectPaths.map(async (project): Promise<{ cleaned: string } | { refused: string } | null> => {
+): Promise<{ cleaned: number; projects: string[]; refused: string[]; paused: Array<{ project: string; reason: PauseReason }> }> {
+  const settled = await pooled(
+    projectPaths,
+    CLEAN_QUEUE_POOL_LIMIT,
+    async (project): Promise<{ cleaned: string } | { refused: string } | { paused: PauseReason; project: string } | null> => {
+      const reason = await memoryPauseReason(project);
+      if (reason !== null) return { paused: reason, project };
       const memDir = getMemoryDir(project);
       let linkedFolder: string | null;
       try {
@@ -278,11 +321,16 @@ export async function cleanQueueFiles(
         fs.unlink(getPendingTurnsProcessingPath(project)).then(() => true).catch(() => false),
       ]);
       return (q || pr) ? { cleaned: project } : null;
-    }),
+    },
   );
+  const results = settled.map((entry) => {
+    if (entry.status === 'rejected') throw entry.reason;
+    return entry.value;
+  });
   const cleanedProjects = results.flatMap((r) => (r !== null && 'cleaned' in r ? [r.cleaned] : []));
   const refused = results.flatMap((r) => (r !== null && 'refused' in r ? [r.refused] : []));
-  return { cleaned: cleanedProjects.length, projects: cleanedProjects, refused };
+  const paused = results.flatMap((r) => (r !== null && 'paused' in r ? [{ project: r.project, reason: r.paused }] : []));
+  return { cleaned: cleanedProjects.length, projects: cleanedProjects, refused, paused };
 }
 
 export const memoryCommand = new Command('memory')
@@ -354,9 +402,12 @@ export const memoryCommand = new Command('memory')
         targets = scope === 'local' && currentProject ? [currentProject] : allProjects;
       }
 
-      const { cleaned, projects: cleanedProjects, refused } = await cleanQueueFiles(targets);
+      const { cleaned, projects: cleanedProjects, refused, paused } = await cleanQueueFiles(targets);
       for (const project of cleanedProjects) {
         p.log.info(color.dim(`Cleaned: ${project}`));
+      }
+      for (const { project, reason } of paused) {
+        p.log.warn(`The memory queue of ${project} was not cleaned. ${AREA_PAUSE_NOTICE.memory[reason]}`);
       }
       for (const linkedFolder of refused) {
         p.log.warn(formatRefusedDrain('memory', linkedFolder));
@@ -398,6 +449,11 @@ export const memoryCommand = new Command('memory')
       const settingsModule = loadSettingsModule();
       const narrowed = enabled ? narrowedSwitchLabel(settingsModule, { dir: process.cwd() }, 'memory') : null;
       if (narrowed !== null) p.log.info(`Effective here: ${color.yellow(narrowed)}`);
+      // A paused memory area (git tracks files in the memory folder, or did not answer):
+      // the fixed notice, from the checkout's toplevel, where the memory hooks work. The
+      // current directory stands in outside a git work tree, as it does for the settings line.
+      const paused = await memoryPauseReason((await getGitRoot()) ?? process.cwd());
+      if (paused !== null) p.log.info(AREA_PAUSE_NOTICE.memory[paused]);
       const trackedWarning = personalConfigTrackedWarning(settingsModule, { dir: process.cwd() });
       if (trackedWarning !== null) p.log.warn(trackedWarning);
       return;
@@ -440,7 +496,7 @@ export const memoryCommand = new Command('memory')
     const gitRoot = await getGitRoot();
     if (gitRoot) {
       const drain = await drainMemoryQueue(gitRoot);
-      if (!drain.drained) p.log.warn(formatRefusedDrain('memory', drain.linkedFolder));
+      if (!drain.drained) p.log.warn(formatMemoryNotDrained(drain));
     }
     p.log.success('Working memory disabled in every project');
   });

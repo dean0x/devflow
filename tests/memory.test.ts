@@ -2,8 +2,15 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { exec } from 'child_process';
-import { addMemoryHooks, removeMemoryHooks, hasMemoryHooks, countMemoryHooks, convergeMemoryHooks, cleanQueueFiles, hasMemoryDir, filterProjectsWithMemory, MEMORY_MIN_PERMISSION_VERSION, workingMemoryNote } from '../src/cli/commands/memory.js';
+import { exec, execFileSync } from 'child_process';
+import { addMemoryHooks, removeMemoryHooks, hasMemoryHooks, countMemoryHooks, convergeMemoryHooks, cleanQueueFiles, CLEAN_QUEUE_POOL_LIMIT, hasMemoryDir, filterProjectsWithMemory, MEMORY_MIN_PERMISSION_VERSION, workingMemoryNote } from '../src/cli/commands/memory.js';
+import { probeTrackedArea } from '../src/core/tracked-areas.js';
+
+// A pass-through spy: every test below runs the real probe unless it swaps one in.
+vi.mock('../src/core/tracked-areas.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/core/tracked-areas.js')>();
+  return { ...actual, probeTrackedArea: vi.fn(actual.probeTrackedArea) };
+});
 
 /**
  * Seed a temp HOME that stands in for `~/.devflow`.
@@ -405,7 +412,7 @@ describe('cleanQueueFiles', () => {
 
   it('returns cleaned=0 when no projects provided', async () => {
     const result = await cleanQueueFiles([]);
-    expect(result).toEqual({ cleaned: 0, projects: [], refused: [] });
+    expect(result).toEqual({ cleaned: 0, projects: [], refused: [], paused: [] });
   });
 
   it('cleans both queue files when both exist', async () => {
@@ -436,7 +443,7 @@ describe('cleanQueueFiles', () => {
     await fs.mkdir(memDir, { recursive: true });
 
     const result = await cleanQueueFiles([tmpDir]);
-    expect(result).toEqual({ cleaned: 0, projects: [], refused: [] });
+    expect(result).toEqual({ cleaned: 0, projects: [], refused: [], paused: [] });
   });
 
   // D-CLI-NO-SYMLINK: `devflow memory --clear` walks every known project, and a
@@ -462,7 +469,7 @@ describe('cleanQueueFiles', () => {
 
         const kept = await Promise.all(files.map(file => fs.access(file).then(() => true, () => false)));
         expect(kept, 'nothing is deleted through the link').toEqual([true, true]);
-        expect(result).toEqual({ cleaned: 1, projects: [plain], refused: [path.join(project, linked)] });
+        expect(result).toEqual({ cleaned: 1, projects: [plain], refused: [path.join(project, linked)], paused: [] });
       } finally {
         vi.unstubAllEnvs();
       }
@@ -477,7 +484,7 @@ describe('cleanQueueFiles', () => {
     await fs.mkdir(path.join(memDir, '.working-memory.lock'), { recursive: true });
 
     const result = await cleanQueueFiles([tmpDir]);
-    expect(result).toEqual({ cleaned: 0, projects: [], refused: [] });
+    expect(result).toEqual({ cleaned: 0, projects: [], refused: [], paused: [] });
     // File should remain untouched
     await expect(fs.access(path.join(memDir, '.pending-turns.jsonl'))).resolves.toBeUndefined();
   });
@@ -497,6 +504,36 @@ describe('cleanQueueFiles', () => {
     expect(result.projects).toContain(projA);
     expect(result.projects).toContain(projB);
     expect(result.projects).toContain(projC);
+  });
+
+  it('starts at most CLEAN_QUEUE_POOL_LIMIT area probes at once, however many projects are known', async () => {
+    const actualProbe = (await vi.importActual<typeof import('../src/core/tracked-areas.js')>('../src/core/tracked-areas.js')).probeTrackedArea;
+    let inFlight = 0;
+    let peak = 0;
+    vi.mocked(probeTrackedArea).mockImplementation(async () => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      inFlight -= 1;
+      return { answer: 'untracked', cause: null };
+    });
+    try {
+      const projects: string[] = [];
+      for (let i = 0; i < CLEAN_QUEUE_POOL_LIMIT * 3; i += 1) {
+        const project = path.join(tmpDir, `project-${i}`);
+        await fs.mkdir(path.join(project, '.devflow', 'memory'), { recursive: true });
+        await fs.writeFile(path.join(project, '.devflow', 'memory', '.pending-turns.jsonl'), 'data');
+        projects.push(project);
+      }
+
+      const result = await cleanQueueFiles(projects);
+
+      expect(result.cleaned, 'every project is still cleaned').toBe(projects.length);
+      expect(peak, 'the probes ran side by side').toBeGreaterThan(1);
+      expect(peak, 'but never more than the bound at once').toBeLessThanOrEqual(CLEAN_QUEUE_POOL_LIMIT);
+    } finally {
+      vi.mocked(probeTrackedArea).mockImplementation(actualProbe);
+    }
   });
 
   it('cleans unlocked projects and skips locked ones in same batch', async () => {
@@ -601,7 +638,11 @@ describe('session-start-memory hook integration', () => {
   });
 });
 
-describe('session-start-context hook integration', () => {
+// The hook execs node once to ask whether git tracks the curation folders; the exec bound and
+// the test bound carry the macOS stall of a first node exec (7 s).
+const CONTEXT_HOOK_RUN_MS = 12_000;
+
+describe('session-start-context hook integration', { timeout: CONTEXT_HOOK_RUN_MS }, () => {
   let tmpDir: string;
   let tmpHome: string;
   const hookPath = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks', 'session-start-context');
@@ -609,7 +650,7 @@ describe('session-start-context hook integration', () => {
   /** Run the hook against the seeded temp HOME. Never the developer's own. */
   function runHook(cwd: string): Promise<string> {
     return new Promise((resolve, reject) => {
-      const child = exec(`bash "${hookPath}"`, { timeout: 5000, env: hookEnv(tmpHome) }, (err, stdout, stderr) => {
+      const child = exec(`bash "${hookPath}"`, { timeout: CONTEXT_HOOK_RUN_MS, env: hookEnv(tmpHome) }, (err, stdout, stderr) => {
         if (err) return reject(new Error(`Hook failed: ${err.message}\nstderr: ${stderr}`));
         resolve(stdout);
       });
@@ -619,11 +660,12 @@ describe('session-start-context hook integration', () => {
   }
 
   beforeEach(async () => {
-    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-context-hook-test-'));
+    tmpDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-context-hook-test-')));
     tmpHome = await mkTmpHome();
-    // Project context is injected only in a git project (D-HOOKS-GIT-ONLY); an
-    // empty `.git` is a marker, not a repository, so the root stays tmpDir.
-    await fs.mkdir(path.join(tmpDir, '.git'));
+    // Project context is injected only in a git project (D-HOOKS-GIT-ONLY). The project is a
+    // real repository: an empty `.git` folder is none, git would not answer the check of the
+    // curation folders, and curation would pause.
+    execFileSync('git', ['init', '-q'], { cwd: tmpDir, stdio: 'pipe' });
     await fs.mkdir(path.join(tmpDir, '.devflow', 'curation'), { recursive: true });
   });
 

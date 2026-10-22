@@ -39,7 +39,7 @@ import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
 import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafeDelete, type SafeDeleteInfo } from '../../core/safe-delete.js';
 import { generateSafeDeleteBlock, installToProfile, removeFromProfile, getInstalledVersion, SAFE_DELETE_BLOCK_VERSION } from '../../core/safe-delete-install.js';
 import { convergeAmbientHooks } from './ambient.js';
-import { convergeMemoryHooks, drainMemoryQueue, workingMemoryNote } from './memory.js';
+import { convergeMemoryHooks, drainMemoryQueue, formatMemoryNotDrained, workingMemoryNote, type MemoryQueueDrain } from './memory.js';
 import { addCaptureHooks, removeCaptureHooks } from './capture.js';
 import { removeDreamHook } from './legacy-hooks.js';
 import { addProxyHooks, removeProxyHooks, applyProxyEnv, stripProxyEnv, runProxyPreflight, buildRealPreflightDeps } from './proxy.js';
@@ -57,7 +57,6 @@ import { addContextHook, removeContextHook, hasContextHook } from './context.js'
 import { writeSettingsFileAtomic } from '../../core/fs-atomic.js';
 import { writeManagedConfig, readConfigIfPresent, DEFAULT_CONFIG, type FeatureConfig, type ManagedConfigWriteError } from '../../core/feature-config.js';
 import { drainDisabledCurationQueue, formatCurationNotDrained, type CurationQueueDrain } from '../../core/curation-queue-cleanup.js';
-import { formatRefusedDrain, type QueueDrain } from '../../core/queue-drain.js';
 import { removeManagedDenyList, describeManagedDenyRemoval } from './security.js';
 import { resolveInitSeed, applyCliToggles, resolveResetGatedInputs, resolvePluginsToInstall } from './init-seed.js';
 import { parseFrameworkList, normalizeFrameworks, type ComplianceFeatureState } from '../../core/compliance.js';
@@ -740,7 +739,7 @@ export async function lookupDrainLedgerRoot(
 
 /** The queue drains `drainDisabledFeatureQueues` performs — injected for tests. */
 export interface DisabledQueueDrainIO {
-  drainMemoryQueue(projectRoot: string): Promise<QueueDrain>;
+  drainMemoryQueue(projectRoot: string): Promise<MemoryQueueDrain>;
   drainCurationQueue(ledgerRoot: string): Promise<CurationQueueDrain>;
 }
 
@@ -766,11 +765,13 @@ export interface DisabledQueueDrainIO {
  *
  * Returns one warning for each drain refused because a folder on the way to its
  * queue is a symbolic link (D-CLI-NO-SYMLINK), one for a curation drain that
- * could not list the backups (the live queue is drained then), and one for a curation
+ * could not list the backups (the live queue is drained then), one for a curation
  * drain that left the project alone because git tracks a data folder or did not answer
- * (the fixed notice of a skipped move); the caller prints them. When the move step has
- * printed that notice for the ledger root (`shownSkip`, its reason), the drain's line
- * does not repeat it.
+ * (the fixed notice of a paused curation area), and one for a memory drain that left the project
+ * alone because git tracks the memory folder or did not answer (the fixed notice of a
+ * paused memory area); the caller prints them. When the move step has printed its own
+ * notice of a skipped move for the ledger root (`shownSkip`, its reason), the curation
+ * drain's line is only the short sentence that the queue was not drained.
  */
 export async function drainDisabledFeatureQueues(
   opts: {
@@ -787,7 +788,7 @@ export async function drainDisabledFeatureQueues(
   const refused: string[] = [];
   if (!opts.memoryEnabled && opts.gitRoot !== null) {
     const memory = await io.drainMemoryQueue(opts.gitRoot);
-    if (!memory.drained) refused.push(formatRefusedDrain('memory', memory.linkedFolder));
+    if (!memory.drained) refused.push(formatMemoryNotDrained(memory));
   }
   if (!opts.curationEnabled && opts.ledgerRoot !== null) {
     const curation = await io.drainCurationQueue(opts.ledgerRoot);

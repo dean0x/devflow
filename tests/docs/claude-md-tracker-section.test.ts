@@ -142,6 +142,30 @@ describe('architecture.md: the Tracker block', () => {
   });
 });
 
+describe('the docs on tracked data folders', () => {
+  const HOOKS_MD = readFileSync(path.join(ROOT, 'docs/reference/hooks.md'), 'utf8');
+  const CLI_MD = readFileSync(path.join(ROOT, 'docs/cli-reference.md'), 'utf8');
+  const paragraphs: ReadonlyArray<readonly [string, string, string]> = [
+    ['architecture.md', ARCHITECTURE_MD, '**Tracked data folders**'],
+    ['hooks.md (memory)', HOOKS_MD, '**A paused memory folder.**'],
+    ['hooks.md (curation)', HOOKS_MD, '**A paused curation folder.**'],
+    ['cli-reference.md (curation)', CLI_MD, 'When git tracks a file in a curation data folder at the ledger root'],
+    ['cli-reference.md (memory)', CLI_MD, 'The memory folder of a checkout'],
+  ];
+
+  for (const [label, text, start] of paragraphs) {
+    it(`${label} carries its paragraph, with no internal identifier`, () => {
+      const paragraph = text.split('\n').find(line => line.startsWith(start)) ?? '';
+      expect(paragraph.length).toBeGreaterThan(0);
+      expect(collectInternalIds(paragraph)).toEqual([]);
+    });
+  }
+
+  it('the architecture paragraph is not part of the Tracker block', () => {
+    expect(collectTrackerBlock(ARCHITECTURE_MD)).not.toContain('Tracked data folders');
+  });
+});
+
 describe('architecture.md: skill installation is described as selection-scoped', () => {
   it('carries the Selection-scoped Skill Installation paragraph', () => {
     expect(ARCHITECTURE_MD).toContain('**Selection-scoped Skill Installation**');

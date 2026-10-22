@@ -29,6 +29,9 @@
 #               for the next run (D-QUEUE-NO-ORPHAN-DELETE)
 # No parser:    neither jq nor node on PATH → exits with no LLM run; the queue and any .processing batch are left in place
 # Parser fails: jq or node exits non-zero while it reads the queue or the batch → exits with no LLM run; the turns are kept
+# Paused area:  git tracks files in the memory folder, or a `.git` entry stands and git does not answer → exits with
+#               result=skip and no LLM run, and reads, claims, writes and notices nothing; asked at the start, and again
+#               after the run, where a late answer leaves the staged file unswapped and the batch in .processing
 
 set -e
 
@@ -128,6 +131,59 @@ source "$SCRIPT_DIR/resolve-project-root" 2>/dev/null || true
 # The staged-path check, the settings JSON with the worker's Edit allow and deny rules, the
 # result line and the one-time notice (needs df_no_symlink_below from resolve-project-root).
 source "$SCRIPT_DIR/memory-permission" || { echo "background-memory-update: failed to source memory-permission" >&2; exit 1; }
+source "$SCRIPT_DIR/queue-append" || { echo "background-memory-update: failed to source queue-append" >&2; exit 1; }
+
+# --- The memory area check: git tracks files in the memory folder, or does not answer ---
+# A folder that git tracks holds the repository's content, not devflow's data. While git
+# tracks files in the memory folder of this checkout, or a `.git` entry stands and git does
+# not answer, the memory area is paused, and the worker reads and writes nothing there.
+# Sets DF_TRACKED_AREA_MEMORY to `tracked`, `untracked` or `unknown` for the project root in
+# $1: queue_tracked_area in git mode, run in a background subshell that answers by its exit
+# status (10 untracked, 11 tracked), so that a git that hangs can be cut and no file is made.
+# Every call asks git afresh: the second ask of a run must see what changed during the run.
+# The bound is DEVFLOW_BG_AREA_PROBE_SECS (default 5, at most 60; tests override it as they
+# do DEVFLOW_BG_WATCHDOG_SECS), kept by the watchdog's background-and-kill idiom: a SIGKILL
+# to the probe's process group (set -m) after a sleep, and a SIGKILL cancel of the watchdog,
+# so no exit trap runs in either subshell (the one `Run:` line, above). A probe that is
+# cut, or ends in any other status, reads `unknown`: the area stays paused. The notices of
+# memory-permission read this variable, so the worker leaves one only after this check has
+# asked and found the area free. Always returns 0.
+probe_memory_area() {
+  local _root="${1:-}" _secs _pid _wd_pid _status=1
+  DF_TRACKED_AREA_MEMORY="unknown"
+  _secs="${DEVFLOW_BG_AREA_PROBE_SECS:-5}"
+  case "$_secs" in
+    ''|*[!0123456789]*|????*) _secs=5 ;;
+  esac
+  if [ "$_secs" -lt 1 ] || [ "$_secs" -gt 60 ]; then _secs=5; fi
+  set -m
+  (
+    _QTA_ASKED_MEMORY=""
+    queue_tracked_area "$_root" memory git
+    case "$DF_TRACKED_AREA_MEMORY" in
+      untracked) exit 10 ;;
+      tracked) exit 11 ;;
+    esac
+    exit 12
+  ) </dev/null >/dev/null 2>&1 &
+  _pid=$!
+  set +m
+  (
+    sleep "$_secs"
+    kill -KILL -"$_pid" 2>/dev/null || true
+  ) </dev/null >/dev/null 2>&1 &
+  _wd_pid=$!
+  if wait "$_pid" 2>/dev/null; then _status=0; else _status=$?; fi
+  # SIGKILL, not SIGTERM, as for the other watchdogs: no trap can run in the subshell.
+  kill -KILL "$_wd_pid" 2>/dev/null || true
+  wait "$_wd_pid" 2>/dev/null || true
+  case "$_status" in
+    10) DF_TRACKED_AREA_MEMORY="untracked" ;;
+    11) DF_TRACKED_AREA_MEMORY="tracked" ;;
+  esac
+  return 0
+}
+
 PROJECT_ROOT="$(df_resolve_root "$CWD" 2>/dev/null || true)"
 [ -n "$PROJECT_ROOT" ] || PROJECT_ROOT="$CWD"
 # One canonical root feeds every path below, the staged path in the prompt and in the
@@ -136,6 +192,7 @@ PROJECT_ROOT="$(df_resolve_root "$CWD" 2>/dev/null || true)"
 PROJECT_ROOT_CANONICAL=$(cd -P -- "$PROJECT_ROOT" 2>/dev/null && pwd -P) || PROJECT_ROOT_CANONICAL=""
 if [ -z "$PROJECT_ROOT_CANONICAL" ]; then
   log "SKIP: project root could not be resolved; no LLM run"
+  probe_memory_area "$PROJECT_ROOT"
   memory_notice_write "$PROJECT_ROOT/.devflow/memory" "$PROJECT_ROOT" path
   exit 0
 fi
@@ -154,10 +211,20 @@ OK_FILE="$MEMORY_DIR/.last-refresh-ok"
 # have been disabled since spawn, or narrowed by a checkout that now carries a
 # `features.memory: false`). Same helper as every other memory/curation gate
 # (D-FEATURES-NARROW-ONLY, see queue-append).
-source "$SCRIPT_DIR/queue-append" || { echo "background-memory-update: failed to source queue-append" >&2; exit 1; }
 queue_read_gates "$DEVFLOW_MANIFEST" "$PROJECT_ROOT"
 if [ "$_QG_MEMORY" != "true" ]; then
   log "ABORT: memory disabled (disabled after spawn)"
+  exit 0
+fi
+
+# --- Ask whether git tracks files in the memory folder ---
+# The area may have become tracked since the Stop hook spawned this worker. A paused area
+# ends the run here, before the binary is resolved, a link is checked, the lock is taken or
+# a batch is claimed: nothing is read, moved or written, and no notice is left. The run's
+# `Run:` line says skip.
+probe_memory_area "$PROJECT_ROOT"
+if [ "$DF_TRACKED_AREA_MEMORY" != "untracked" ]; then
+  log "SKIP: the memory area is paused (git tracks files in the memory folder, or did not answer); nothing read or written; no LLM run"
   exit 0
 fi
 
@@ -1125,6 +1192,17 @@ case "$MEMORY_RESULT_DENIALS" in
   unknown|0) ;;
   *) RESULT_DENIED="yes" ;;
 esac
+
+# The run took minutes, so the memory area is asked again before anything lands in the
+# folder. If git tracks files there now, or does not answer, nothing below runs: the staged
+# file is not checked, moved or removed, no stamp is touched, no denied run is counted and
+# no notice is left. The batch stays in .processing.
+probe_memory_area "$PROJECT_ROOT"
+if [ "$DF_TRACKED_AREA_MEMORY" != "untracked" ]; then
+  RUN_RESULT="skip"
+  log "SKIP: the memory area is paused (git tracks files in the memory folder, or did not answer); nothing swapped or stamped; the batch stays in .processing"
+  exit 0
+fi
 
 # A folder or a link at the staged path now was put there during the run: the path was
 # empty at the spawn. It is removed the way it is before a run (memory_staged_remove), and

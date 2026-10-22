@@ -6,6 +6,7 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getInstallationPaths, getClaudeDirectory, getHomeDirectory, getManagedSettingsPath } from '../../targets/claude-code/claude-paths.js';
 import { getGitRoot } from '../../core/git.js';
+import type { PausedArea } from '../../core/area-pause-notice.js';
 import { isSameLocation } from '../../core/same-location.js';
 import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, buildAssetMaps, getAllSkillNames, getAllAgentNames, getAllCommandNames, parsePluginSelection, resolveFeatureRedirect, prefixSkillName, unprefixSkillName, skillsOf, FEATURE_OWNED_SKILLS, type PluginDefinition } from '../../core/plugins.js';
 import { readManifest, removeManifestPlugins } from '../../core/manifest.js';
@@ -43,7 +44,8 @@ import { stripDevflowTeammateModeFromJson } from '../../core/teammate-mode-clean
 import { getPackageRoot, isContainedIn } from '../../core/paths.js';
 import { firstSymbolicLink } from '../../core/linked-path.js';
 import { MANIFEST_LOCK_NAME, MANIFEST_LOCK_STALE_MARK } from '../../core/manifest-lock.js';
-import { CURATION_TUNING_FILE_NAME, LEGACY_NAMES, MOVE_JOURNAL_SUFFIX, MOVE_LOCK_PREFIX, MOVE_LOCK_SUFFIX } from '../../core/project-paths.js';
+import { CURATION_DIR_NAME, CURATION_TUNING_FILE_NAME, LEGACY_NAMES, MOVE_JOURNAL_SUFFIX, MOVE_LOCK_PREFIX, MOVE_LOCK_SUFFIX, getMemoryDir } from '../../core/project-paths.js';
+import { probeTrackedArea, type TrackedAreasAnswer } from '../../core/tracked-areas.js';
 import { restampInstalledCommands } from '../../targets/claude-code/language-stamp.js';
 import { installCommandsAndAgents } from '../../targets/claude-code/installer.js';
 
@@ -333,6 +335,12 @@ export interface ProjectDataPlan {
   remove: ReadonlyArray<ProjectDataEntry>;
   /** Tracked entries (DEVFLOW_TRACKED_PATHS) present under `dir`; they always stay. */
   keep: ReadonlyArray<ProjectDataEntry>;
+  /**
+   * Entries of a data area (curation or memory) that git tracks files in, or that git did
+   * not answer for; they stay, sorted by name. Empty where git tracks nothing in the
+   * area's folders.
+   */
+  keepPaused: ReadonlyArray<ProjectDataEntry>;
 }
 
 /**
@@ -352,23 +360,81 @@ const TRACKED_ENTRIES: ReadonlyArray<ProjectDataEntry> = DEVFLOW_TRACKED_PATHS.m
   isDir: tracked.endsWith('/'),
 }));
 
+/** The memory folder's name under `.devflow/`, by the name the path helper gives it. */
+const MEMORY_FOLDER_NAME = path.basename(getMemoryDir(path.sep));
+
+/**
+ * The data area an entry under `.devflow/` belongs to, or null. The curation area holds the
+ * curation folder, the old ledger folder and the backup folders; the memory area holds the
+ * memory folder. Decided by name alone, whatever the kind of entry, and without regard to
+ * ASCII letter case, as the tracked-areas check matches them.
+ */
+function projectDataAreaOf(name: string): PausedArea | null {
+  const lower = name.toLowerCase();
+  if (lower === CURATION_DIR_NAME || lower === LEGACY_NAMES.folder || lower.startsWith(LEGACY_NAMES.backupPrefix)) return 'curation';
+  if (lower === MEMORY_FOLDER_NAME) return 'memory';
+  return null;
+}
+
 /**
  * Split the entries under a repository's `.devflow/` into what a confirmed cleanup
  * removes and what it keeps (D-UNINSTALL-CARVE-OUT). An entry is kept only when both
  * its name and its kind match a tracked path, so a stray FILE named `features` is
- * not mistaken for the tracked directory. PURE — both lists sorted by name.
+ * not mistaken for the tracked directory. An entry of a paused data area (`pausedAreas`:
+ * git tracks files in the area's folders, or did not answer) is kept too, in
+ * `keepPaused`. PURE — all three lists sorted by name.
  */
-export function partitionProjectData(entries: ReadonlyArray<ProjectDataEntry>): {
+export function partitionProjectData(
+  entries: ReadonlyArray<ProjectDataEntry>,
+  pausedAreas: ReadonlySet<PausedArea> = new Set(),
+): {
   remove: ProjectDataEntry[];
   keep: ProjectDataEntry[];
+  keepPaused: ProjectDataEntry[];
 } {
   const isTracked = (entry: ProjectDataEntry): boolean =>
     TRACKED_ENTRIES.some((t) => t.name === entry.name && t.isDir === entry.isDir);
+  const isPaused = (entry: ProjectDataEntry): boolean => {
+    const area = projectDataAreaOf(entry.name);
+    return area !== null && pausedAreas.has(area);
+  };
   const byName = (a: ProjectDataEntry, b: ProjectDataEntry): number => a.name.localeCompare(b.name);
   return {
-    remove: entries.filter((e) => !isTracked(e)).sort(byName),
+    remove: entries.filter((e) => !isTracked(e) && !isPaused(e)).sort(byName),
     keep: entries.filter(isTracked).sort(byName),
+    keepPaused: entries.filter((e) => !isTracked(e) && isPaused(e)).sort(byName),
   };
+}
+
+/** The answer of the tracked-areas check for `area` at `root`: injected for tests. */
+export type ProjectDataAreaProbe = (root: string, area: PausedArea) => Promise<TrackedAreasAnswer>;
+
+/** The check's own answer, from the package's own copy of it. */
+const probeProjectDataArea: ProjectDataAreaProbe = async (root, area) => (await probeTrackedArea(root, area)).answer;
+
+/**
+ * The data areas that hold an entry in `entries` and are paused at `gitRoot`: git tracks
+ * files in the area's folders, or a `.git` entry stands and git did not answer. An area
+ * with no entry is not asked, and a root with no `.git` entry makes no git call. A probe
+ * that fails to answer counts as `unknown`, so the area is kept.
+ */
+async function pausedProjectDataAreas(
+  gitRoot: string,
+  entries: ReadonlyArray<ProjectDataEntry>,
+  probe: ProjectDataAreaProbe,
+): Promise<Set<PausedArea>> {
+  const present = new Set(entries.flatMap((entry) => {
+    const area = projectDataAreaOf(entry.name);
+    return area === null ? [] : [area];
+  }));
+  const answers = await Promise.all([...present].map(async (area): Promise<[PausedArea, TrackedAreasAnswer]> => {
+    try {
+      return [area, await probe(gitRoot, area)];
+    } catch {
+      return [area, 'unknown'];
+    }
+  }));
+  return new Set(answers.flatMap(([area, answer]) => (answer === 'untracked' ? [] : [area])));
 }
 
 /**
@@ -384,11 +450,19 @@ export function partitionProjectData(entries: ReadonlyArray<ProjectDataEntry>): 
  * A `.devflow` that is a symbolic link to anywhere else is skipped too, and never
  * followed: its target is a directory devflow cannot prove it wrote, so a
  * confirmed cleanup must not empty it — nor unlink a link the user made.
+ *
+ * A folder that git tracks is the repository's content, not devflow's data. The
+ * curation area (the curation folder, the old ledger folder and the backup folders)
+ * and the memory area (the memory folder) are each asked of the tracked-areas check at
+ * the git root, when an entry of the area stands. An area that git tracks files in, or
+ * that git did not answer for, moves its entries from the removal list to `keepPaused`.
  */
 export async function resolveProjectDataPlan(opts: {
   gitRoot: string | null;
   homeDir: string;
   machineDevflowDir: string;
+  /** The tracked-areas check (default: the package's own copy); injected for tests. */
+  probe?: ProjectDataAreaProbe;
 }): Promise<ProjectDataResolution> {
   if (opts.gitRoot === null) return { kind: 'skip', reason: 'no-git-root' };
   if (await isSameLocation(opts.gitRoot, opts.homeDir)) return { kind: 'skip', reason: 'home-root' };
@@ -408,10 +482,10 @@ export async function resolveProjectDataPlan(opts: {
   } catch {
     return { kind: 'skip', reason: 'absent' };
   }
-  const { remove, keep } = partitionProjectData(
-    dirents.map((d) => ({ name: d.name, isDir: d.isDirectory() })),
-  );
-  return { kind: 'plan', plan: { dir, remove, keep } };
+  const entries = dirents.map((d) => ({ name: d.name, isDir: d.isDirectory() }));
+  const paused = await pausedProjectDataAreas(opts.gitRoot, entries, opts.probe ?? probeProjectDataArea);
+  const { remove, keep, keepPaused } = partitionProjectData(entries, paused);
+  return { kind: 'plan', plan: { dir, remove, keep, keepPaused } };
 }
 
 /**
@@ -444,15 +518,23 @@ function entryList(entries: ReadonlyArray<ProjectDataEntry>): string {
   return entries.length === 0 ? '(none)' : entries.map(entryLabel).join(', ');
 }
 
+/** Why the entries of a data area stay, said beside a list of them. */
+const KEEP_PAUSED_REASON = 'git tracks them, or git did not answer';
+
+/** Why one entry of a data area stays, said beside it. */
+const KEEP_PAUSED_REASON_ONE = 'git tracks it, or git did not answer';
+
 /**
  * The lines shown before the project-data confirm: what is removed and what is
- * kept. PURE.
+ * kept, and, only where there are such entries, what is kept because git tracks them
+ * or did not answer. PURE.
  */
 export function formatProjectDataPlan(plan: ProjectDataPlan): string[] {
   return [
     `Project data in ${plan.dir}/:`,
     `  Remove: ${entryList(plan.remove)}`,
     `  Keep (shared via git): ${entryList(plan.keep)}`,
+    ...(plan.keepPaused.length === 0 ? [] : [`  Keep (${KEEP_PAUSED_REASON}): ${entryList(plan.keepPaused)}`]),
   ];
 }
 
@@ -1082,6 +1164,9 @@ export async function runDryRunPhase(opts: {
       for (const entry of projectData.plan.remove) {
         extras.push(`${path.join(projectData.plan.dir, entryLabel(entry))} (if confirmed)`);
       }
+      for (const entry of projectData.plan.keepPaused) {
+        extras.push(`${path.join(projectData.plan.dir, entryLabel(entry))} (kept: ${KEEP_PAUSED_REASON_ONE})`);
+      }
     } else {
       const skipped = formatProjectDataSkip(projectData.reason, projectRoot);
       if (skipped !== null) extras.push(skipped);
@@ -1428,7 +1513,9 @@ async function runProjectDataStep(
 ): Promise<void> {
   const shown = `${plan.dir}/`;
   if (plan.remove.length === 0) {
-    p.log.info(`${shown} preserved (holds only files shared via git)`);
+    p.log.info(plan.keepPaused.length === 0
+      ? `${shown} preserved (holds only files shared via git)`
+      : `${shown} preserved (holds only files shared via git, and ${entryList(plan.keepPaused)}, which stay: ${KEEP_PAUSED_REASON})`);
     return;
   }
   if (gates.keepDocs) {
@@ -1464,7 +1551,7 @@ async function runProjectDataStep(
       failed.push(`${entryLabel(entry)} (${(err as NodeJS.ErrnoException).code ?? (err as Error).message})`);
     }
   }
-  if (plan.keep.length === 0 && failed.length === 0) {
+  if (plan.keep.length === 0 && plan.keepPaused.length === 0 && failed.length === 0) {
     // Nothing tracked was there: drop the now-empty directory. rmdir refuses a
     // directory something wrote into meanwhile, which is then left in place.
     await fs.rmdir(plan.dir).catch(() => undefined);
@@ -1472,6 +1559,7 @@ async function runProjectDataStep(
   if (removed.length > 0) p.log.success(`Removed from ${shown}: ${entryList(removed)}`);
   if (failed.length > 0) p.log.warn(`Could not remove from ${shown}: ${failed.join(', ')}`);
   if (plan.keep.length > 0) p.log.info(`Kept: ${entryList(plan.keep)}`);
+  if (plan.keepPaused.length > 0) p.log.info(`Kept: ${entryList(plan.keepPaused)} (${KEEP_PAUSED_REASON})`);
 }
 
 /**

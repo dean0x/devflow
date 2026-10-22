@@ -3,14 +3,16 @@ dynamic commands share.
 
 D-DECISIONS-LEARNING-GATE: a decisions load is gated on the settings line's
 `CURATION`. Curation can be narrowed by the repository or the machine, and neither
-can turn it back on (D-FEATURES-NARROW-ONLY), so `decisions_gate()` is the one
-sentence every decisions host carries: with `CURATION=off` the step is skipped
-before it locates a ledger or reads an index. An unresolvable settings line keeps
-`CURATION=on`, as the fail-closed line does — decisions are advisory context, not a
-safety control, so a failed resolution loads them exactly as it did before the
-gate. The gate reads the line the host's settings block resolved above; this
-partial imports nothing from `_settings.mds`. In a multi-worktree run the line is the start
-root's: the root the ledger is located from.
+can turn it back on (D-FEATURES-NARROW-ONLY). The settings line also reads
+`CURATION=off` while git tracks the curation folders, or does not answer for them:
+the files there are the repository's own content, and devflow reads nothing in a
+folder it cannot tell is its own. So `decisions_gate()` is the one sentence every
+decisions host carries: with `CURATION=off` the step is skipped before it locates a
+ledger or reads an index. An unresolvable settings line reads `CURATION=off`, as the
+fail-closed line does, because a failed resolution cannot show what git tracks. The
+gate reads the line the host's settings block resolved above; this partial imports
+nothing from `_settings.mds`. In a multi-worktree run the line is the start root's:
+the root the ledger is located from.
 
 D-LEARNING-VARIANTS: the gate guards a repository that narrows curation off on a machine
 where it is on. On a machine with curation off the decisions text is absent altogether: the

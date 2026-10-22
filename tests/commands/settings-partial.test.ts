@@ -341,16 +341,29 @@ describe('the accept rule keeps its four strict clauses', () => {
 describe('the curation gate keeps its rationale out of the expanded prompt', () => {
   const DECISIONS = 'src/assets/commands/_partials/_decisions.mds'
 
-  it('an unresolvable settings line keeps CURATION=on, so a failed resolution loads decisions as before', () => {
-    expect(SETTINGS.SETTINGS_FAIL_CLOSED_LINE.split(' ')).toContain('CURATION=on')
+  it('an unresolvable settings line reads CURATION=off and MEMORY=off, so a failed resolution loads no decisions', () => {
+    const fields = SETTINGS.SETTINGS_FAIL_CLOSED_LINE.split(' ')
+    expect(fields).toContain('CURATION=off')
+    expect(fields).toContain('MEMORY=off')
+  })
+
+  it('the prompt fallback names both switches off', () => {
+    const body = defineBody(source(PARTIAL), 'settings_resolve')
+    expect(body).toContain('MEMORY=off CURATION=off KNOWLEDGE=off GATE_LEVEL=full` instead.')
   })
 
   it('the _decisions.mds header, before its first define, holds the rationale', () => {
     const text = source(DECISIONS)
     const header = text.slice(0, text.indexOf('@define'))
-    for (const phrase of ['D-DECISIONS-LEARNING-GATE', 'D-FEATURES-NARROW-ONLY', '`CURATION=on`', 'advisory context']) {
+    for (const phrase of [
+      'D-DECISIONS-LEARNING-GATE',
+      'D-FEATURES-NARROW-ONLY',
+      'while git tracks the curation folders, or does not answer for them',
+      'An unresolvable settings line reads `CURATION=off`',
+    ]) {
       expect(header, phrase).toContain(phrase)
     }
+    expect(header).not.toContain('`CURATION=on`')
   })
 
   it('the expanded gate is the one sentence: no rationale, no fail-closed wording', () => {

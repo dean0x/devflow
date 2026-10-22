@@ -7,6 +7,7 @@ import { formatMoveNotice, gatherMoveNotice } from '../../core/curation-move-not
 import { isMoveSkipReason } from '../../core/curation-move-skip.js';
 import { getLedgerRoot, LEDGER_ROOT_TIMEOUT_MS, type LedgerRootOptions } from '../../core/ledger-root.js';
 import { isActiveDecisionsStatus } from '../../core/observations.js';
+import { probeTrackedArea } from '../../core/tracked-areas.js';
 
 /**
  * The largest ledger the statusline reads: 8 MiB, far above the roughly 0.5 MB
@@ -112,6 +113,16 @@ export function gatherCurationCounts(cwd: string): CurationCountsData | null {
   return parsedAny ? counts : null;
 }
 
+/** Whether anything stands at `ledgerPath`, a link included: the cheap test that keeps git out of a project with no ledger. */
+async function ledgerPresent(ledgerPath: string): Promise<boolean> {
+  try {
+    await fs.promises.lstat(ledgerPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Count the ledger the hooks write for a session started in `cwd`: the ledger
  * root (getLedgerRoot — the main checkout in a linked worktree, the repository
@@ -120,13 +131,27 @@ export function gatherCurationCounts(cwd: string): CurationCountsData | null {
  * status gather, not after it (D-LEDGER-MAIN-WORKTREE). Where the old ledger folder
  * still stands it adds the move notice (gatherMoveNotice): any notice when both counts
  * are zero, a skip notice only when a count is above zero.
+ *
+ * The ledger is read only where git tracks nothing in the curation folders: when it
+ * stands, the tracked-areas check asks git, and any answer other than `untracked` (git
+ * tracks files there, git did not answer, or the budget ran out) gives no counts and no
+ * notice. A project with no ledger makes no git call here. The root lookup and the check
+ * share one LEDGER_ROOT_TIMEOUT_MS deadline: the check gets what the lookup left, and when
+ * nothing is left it does not run and the answer is no counts.
  */
 export async function gatherLedgerCurationCounts(
   cwd: string,
   options: Pick<LedgerRootOptions, 'home'> = {},
 ): Promise<CurationCountsData | null> {
+  const deadline = Date.now() + LEDGER_ROOT_TIMEOUT_MS;
   const root = await getLedgerRoot(cwd, { ...options, timeoutMs: LEDGER_ROOT_TIMEOUT_MS });
   const ledgerRoot = root ?? cwd;
+  if (await ledgerPresent(getDecisionsLedgerPath(ledgerRoot))) {
+    const timeLeftMs = deadline - Date.now();
+    if (timeLeftMs <= 0) return null;
+    const { answer } = await probeTrackedArea(ledgerRoot, 'curation', { timeoutMs: timeLeftMs });
+    if (answer !== 'untracked') return null;
+  }
   const counts = gatherCurationCounts(ledgerRoot);
   const move = gatherMoveNotice(ledgerRoot, options.home ?? os.homedir());
   if (counts !== null && counts.decisions + counts.pitfalls > 0) {

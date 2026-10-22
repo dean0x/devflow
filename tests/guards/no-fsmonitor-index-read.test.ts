@@ -36,10 +36,10 @@
  *     pinned in tests/hud-git-fsmonitor.test.ts.
  *
  * Words that tell the user which commands to run are not calls. Two phrases of the
- * notice for a skipped ledger move are listed in NOTICE_COMMAND_PHRASES, and a match
- * that stands at exactly one of them is skipped. devflow never runs these commands. The
- * exemption is closed two ways: it is honoured in the two files that hold the notice
- * (NOTICE_FILES) alone, and in the shell file only for a phrase inside a single-quoted
+ * notices for a skipped ledger move and for a paused area are listed in
+ * NOTICE_COMMAND_PHRASES, and a match that stands at exactly one of them is skipped.
+ * devflow never runs these commands. The exemption is closed two ways: it is honoured in
+ * the files that hold a notice (NOTICE_FILES) alone, and in a shell file only for a phrase inside a single-quoted
  * span of its line, because the same words outside single quotes would run as a command
  * substitution.
  *
@@ -130,18 +130,23 @@ const SHELL_COMMENT = /^\s*#/;
 const JS_COMMENT = /^\s*(?:\*|\/\/|\/\*)/;
 
 /**
- * The phrases of the skipped-move notice that name a command for the user to run. The
- * notice is printed, never executed, so a match at one of these is prose.
+ * The phrases of the notices (a skipped move, a paused area) that name a command for the
+ * user to run. A notice is printed, never executed, so a match at one of these is prose.
  */
 const NOTICE_COMMAND_PHRASES: readonly string[] = [
   'run `git ls-files .devflow`',
   'with `git rm --cached <file>`',
 ];
 
-/** The two files that hold the notice: the TypeScript copy and the session start hook's. The only files where the phrases are prose. */
+/**
+ * The files that hold a notice: the TypeScript copies and the two session start hooks'
+ * (curation and memory). The only files where the phrases are prose.
+ */
 const NOTICE_TS_FILE = 'src/core/curation-move-skip.ts';
+const AREA_PAUSE_TS_FILE = 'src/core/area-pause-notice.ts';
 const NOTICE_SHELL_FILE = 'src/assets/scripts/hooks/session-start-context';
-const NOTICE_FILES: readonly string[] = [NOTICE_TS_FILE, NOTICE_SHELL_FILE];
+const NOTICE_MEMORY_SHELL_FILE = 'src/assets/scripts/hooks/session-start-memory';
+const NOTICE_FILES: readonly string[] = [NOTICE_TS_FILE, AREA_PAUSE_TS_FILE, NOTICE_SHELL_FILE, NOTICE_MEMORY_SHELL_FILE];
 
 /**
  * True when `index` stands inside a single-quoted span of its shell line. A scan from the
@@ -272,7 +277,7 @@ describe('every index-reading git call turns core.fsmonitor off (D-NO-FSMONITOR)
     ).toEqual([]);
   });
 
-  it('each file that holds the skipped-move notice holds every phrase the guard skips', () => {
+  it('each file that holds a notice holds every phrase the guard skips', () => {
     for (const file of NOTICE_FILES) {
       const entry = corpus.find(e => e.path === file);
       expect(entry, `${file} is in the corpus`).toBeDefined();
@@ -312,6 +317,7 @@ describe('no-fsmonitor-index-read guard: seeded probes', () => {
     { name: 'a wrapper call across lines', entry: { path: JS, content: "runGit(exec, root,\n  ['add', '--', file], MAX);" } },
     { name: 'a command string', entry: { path: 'src/core/x.ts', content: "execSync('git commit -m x');" } },
     { name: 'a shell call after the words of a notice', entry: { path: NOTICE_SHELL_FILE, content: "N='run `git ls-files .devflow`'; git ls-files -z\n" } },
+    { name: 'a shell call after the words of the memory notice', entry: { path: NOTICE_MEMORY_SHELL_FILE, content: "N='run `git ls-files .devflow`'; git ls-files -z\n" } },
     { name: 'a notice phrase with other arguments', entry: { path: NOTICE_SHELL_FILE, content: "N='run `git ls-files .devflow --others`'\n" } },
     { name: 'a notice phrase in double quotes in a shell file', entry: { path: NOTICE_SHELL_FILE, content: 'N="run `git ls-files .devflow`"\n' } },
     { name: 'a notice phrase outside any quotes in a shell file', entry: { path: NOTICE_SHELL_FILE, content: 'echo run `git ls-files .devflow`\n' } },
@@ -356,8 +362,10 @@ describe('no-fsmonitor-index-read guard: seeded probes', () => {
   it('does not report the words of a notice that name a command for the user to run, in the files that hold the notice', () => {
     const notice = 'To find them, run `git ls-files .devflow`. Untrack them with `git rm --cached <file>`, and delete them.';
     expect(findUnguardedIndexReads([
-      { path: NOTICE_SHELL_FILE, content: `MOVE_SKIP_SECTION='Devflow notice: ${notice}'\n` },
+      { path: NOTICE_SHELL_FILE, content: `AREA_PAUSE_MESSAGE='Devflow curation is paused: ${notice}'\n` },
+      { path: NOTICE_MEMORY_SHELL_FILE, content: `AREA_PAUSE_MESSAGE='Devflow memory is paused: ${notice}'\n` },
       { path: NOTICE_TS_FILE, content: `const T = '${notice}';\nconst U =\n  \`${notice}\`;` },
+      { path: AREA_PAUSE_TS_FILE, content: `const T = '${notice}';\nconst U =\n  \`${notice}\`;` },
     ])).toEqual([]);
   });
 

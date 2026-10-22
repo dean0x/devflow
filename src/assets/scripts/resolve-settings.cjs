@@ -22,7 +22,7 @@
 //                                               `features.gateLevel` default
 //
 // D-SETTINGS-LOCAL-ONLY: local git subprocesses only, and never gh, never the
-// network, never a git command that refreshes the index. At most four, in order:
+// network, never a git command that refreshes the index. At most these, in order:
 //   git rev-parse --show-toplevel                         always
 //   git --no-literal-pathspecs -c core.fsmonitor=false ls-files -z -- <PERSONAL_TRACKING_PATHSPECS>
 //                                                         only when config.json exists;
@@ -32,6 +32,17 @@
 //   git symbolic-ref --quiet refs/remotes/origin/HEAD     in a repository
 //   git cat-file blob refs/remotes/origin/<D>:.devflow/project.json
 //                                                         only when origin/HEAD names D
+//   git rev-parse --path-format=absolute --git-common-dir only when MEMORY or CURATION is
+//                                                         still on and <toplevel>/.git is
+//                                                         not a folder: it names the ledger root
+//   git ... ls-files -z -- <the pathspecs of an area>     only for a switch still on: ONE call
+//                                                         for both areas when their roots are
+//                                                         equal, one more per area only when it
+//                                                         lists something; otherwise one per root
+// MEMORY=off while git tracks the memory folder at the toplevel (or does not answer for it),
+// and CURATION=off while git tracks the curation folders at the ledger root (or does not
+// answer for them). The answer only narrows a switch; the leaf lib hooks/lib/tracked-areas.cjs
+// holds the pathspecs, the scrub of redirecting variables and the mapping of git's answer.
 // The team's evidence FLOOR is the default branch's and is
 // resolve-evidence-policy.cjs's job (it runs over the network, from commands).
 // This script reads the WORKTREE's copy for every other key, so a branch that
@@ -92,6 +103,7 @@ const fs = require('fs');
 const path = require('path');
 const childProcess = require('child_process');
 const projectConfig = require('./lib/project-config.cjs');
+const trackedAreas = require('./hooks/lib/tracked-areas.cjs');
 
 const {
   PUBLICATIONS,
@@ -188,15 +200,14 @@ const SETTINGS_LINE_RE = new RegExp(
  *   REVIEW_PUBLICATION=off   nothing is published (raised to a stub under required)
  *   COMPLIANCE=generic       the review lens still runs
  *   KNOWLEDGE=off            no knowledge write-back commits into the repository
- *   MEMORY/CURATION=on       the machine switch is the one that turns them off;
- *                            hooks never consume this line (their gate folds an
- *                            unreadable file as narrowing nothing)
+ *   MEMORY/CURATION=off      a resolver that cannot say which repository it is in cannot
+ *                            tell whether git tracks their folders, so both stay off
  *   GATE_LEVEL=full          the most checking applies: a resolver that cannot read
  *                            its inputs never lowers the level
  */
 const SETTINGS_FAIL_CLOSED_LINE =
   'TRACKER=github TRACKER_SOURCE=default TRACKER_WARN=invalid SITE=none KEY=none '
-  + 'REVIEW_PUBLICATION=off COMPLIANCE=generic MEMORY=on CURATION=on KNOWLEDGE=off GATE_LEVEL=full';
+  + 'REVIEW_PUBLICATION=off COMPLIANCE=generic MEMORY=off CURATION=off KNOWLEDGE=off GATE_LEVEL=full';
 
 /** Bound on each local git call. */
 const GIT_TIMEOUT_MS = 5000;
@@ -216,15 +227,16 @@ const BLOB_MAX_BUFFER = MAX_CONFIG_BYTES + 1;
 /** The personal file, repository-relative, in git's spelling. */
 const PERSONAL_REL = '.devflow/config.json';
 /**
- * The spellings a case-folding file system opens as `.devflow` and `config.json`
- * beyond ASCII letter case. git's `icase` folds ASCII letters only, but APFS (the
- * macOS default) compares names by full Unicode case folding, so it also opens
- * `.devﬂow` (U+FB02 folds to "fl"), `conﬁg.json` (U+FB01 folds to "fi") and
- * `config.jſon` (U+017F folds to "s") at the personal path. A probe of every code
- * point on APFS finds no other one that folds into these names and none that it
- * ignores. The code is written with escapes, so each code point is named.
+ * The spellings a case-folding file system opens as `config.json` beyond ASCII letter
+ * case (the leaf lib's DEVFLOW_SPELLINGS lists those of `.devflow`). git's `icase` folds
+ * ASCII letters only, but APFS (the macOS default) compares names by full Unicode case
+ * folding, so it also opens `conﬁg.json` (U+FB01 folds to "fi") and `config.jſon`
+ * (U+017F folds to "s") at the personal path, as it opens `.devﬂow` (U+FB02 folds to
+ * "fl"). A probe of every code point on APFS finds no other one that folds into these
+ * names and none that it ignores. The code is written with escapes, so each code point
+ * is named.
  */
-const DEVFLOW_SPELLINGS = Object.freeze(['.devflow', '.dev\u{FB02}ow']);
+const { DEVFLOW_SPELLINGS } = trackedAreas;
 const CONFIG_SPELLINGS = Object.freeze(['config.json', 'con\u{FB01}g.json', 'config.j\u{17F}on', 'con\u{FB01}g.j\u{17F}on']);
 /**
  * The pathspecs of the tracking check (D-PERSONAL-UNTRACKED), each matched
@@ -257,8 +269,10 @@ const PROJECT_REL = '.devflow/project.json';
 
 /**
  * @typedef {{ on: boolean, source: SwitchSource }} SwitchState
- *   `source` is the layer that decided: `machine` when the machine switch is off
- *   or nothing narrowed it, else the repo layer whose literal `false` narrowed it.
+ *   `source` is the layer that decided: `machine` when the machine switch is off,
+ *   when git tracks the area's folder or does not answer for it (a switch narrowed
+ *   that way carries source `machine`, so it has no file to name), or when nothing
+ *   narrowed it; else the repo layer whose literal `false` narrowed it.
  *
  * @typedef {{
  *   ok: boolean,
@@ -340,8 +354,8 @@ const FAIL_CLOSED_SETTINGS = Object.freeze({
   reviewPublication: 'off',
   compliance: Object.freeze({ enabled: true, frameworks: Object.freeze([]) }),
   switches: Object.freeze({
-    memory: Object.freeze({ on: true, source: /** @type {SwitchSource} */ ('machine') }),
-    curation: Object.freeze({ on: true, source: /** @type {SwitchSource} */ ('machine') }),
+    memory: Object.freeze({ on: false, source: /** @type {SwitchSource} */ ('machine') }),
+    curation: Object.freeze({ on: false, source: /** @type {SwitchSource} */ ('machine') }),
     knowledge: Object.freeze({ on: false, source: /** @type {SwitchSource} */ ('machine') }),
   }),
   gateLevel: /** @type {GateLevel} */ ('full'),
@@ -705,7 +719,9 @@ function foldGateLevel(personal, manifest) {
  * The whole-file rule's resolution (D-SETTINGS-LINE): the fail-closed values,
  * naming the layer whose file could not be read, except the compliance lens —
  * a broken file affects only the keys it owns, so the lens stays the fold of
- * every readable layer (D-LENS-UNION). An unreadable project.json declares
+ * every readable layer (D-LENS-UNION) — and the memory and curation switches,
+ * which stay as the machine set them (an unreadable file narrows nothing, and
+ * the area answers narrow them afterwards). An unreadable project.json declares
  * nothing readable of its own (repoCompliance null) but reads as a malformed
  * declaration, so its lens is at least `generic`; an unreadable config.json
  * owns no compliance at all, so the worktree project.json's ids still count.
@@ -717,8 +733,11 @@ function foldGateLevel(personal, manifest) {
 function unreadableSettings(layer, inputs) {
   const defaultBranch = inputs.defaultBranch === undefined ? ABSENT_FIELD : inputs.defaultBranch;
   const lens = foldCompliance(inputs.project, inputs.manifest, defaultBranch);
+  /** @param {FeatureSwitch} feature @returns {SwitchState} */
+  const machine = feature => Object.freeze({ on: machineSwitchOn(inputs.manifest, feature), source: 'machine' });
   return Object.freeze({
     ...FAIL_CLOSED_SETTINGS,
+    switches: Object.freeze({ ...FAIL_CLOSED_SETTINGS.switches, memory: machine('memory'), curation: machine('curation') }),
     // The level stays `full` with no deciding layer, but a readable manifest still shows its own value.
     gateLevelMachine: machineGateLevel(inputs.manifest),
     compliance: lens.compliance,
@@ -758,6 +777,19 @@ function foldSettings(inputs) {
   });
 }
 
+/**
+ * The settings for the layers as read: the whole-file rule's resolution for the first layer
+ * that could not be read (project before personal), else the fold of the layers.
+ *
+ * @param {SettingsInputs} inputs
+ * @returns {Settings}
+ */
+function settingsOfLayers(inputs) {
+  if (inputs.project.kind === 'invalid') return unreadableSettings('project', inputs);
+  if (inputs.personal.kind === 'invalid') return unreadableSettings('personal', inputs);
+  return foldSettings(inputs);
+}
+
 // ---------------------------------------------------------------------------
 // Gathering the layers (the imperative shell — D-SETTINGS-LOCAL-ONLY)
 // ---------------------------------------------------------------------------
@@ -773,18 +805,20 @@ function defaultExec(file, args, opts) {
 
 /**
  * One bounded local git call, normalized. The argv is a fresh copy, so an exec
- * cannot mutate a caller's constant.
+ * cannot mutate a caller's constant. `baseEnv` (default: the process environment)
+ * is the environment the call's own derives from.
  *
  * @param {ExecFn} exec
  * @param {string} cwd
  * @param {readonly string[]} args
  * @param {number} maxBuffer
+ * @param {NodeJS.ProcessEnv} [baseEnv]
  * @returns {GitAnswer}
  */
-function runGit(exec, cwd, args, maxBuffer) {
+function runGit(exec, cwd, args, maxBuffer, baseEnv) {
   const res = exec('git', [...args], {
     cwd,
-    env: Object.assign({}, process.env, { GIT_TERMINAL_PROMPT: '0' }),
+    env: Object.assign({}, baseEnv === undefined ? process.env : baseEnv, { GIT_TERMINAL_PROMPT: '0' }),
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: GIT_TIMEOUT_MS,
     maxBuffer,
@@ -849,7 +883,8 @@ function gitToplevel(exec, dir) {
  *              so it is unreadable and its keys fail closed
  * `--no-literal-pathspecs` leads the argv: an inherited GIT_LITERAL_PATHSPECS=1
  * would read every pathspec as a plain path, magic included, list nothing and
- * read as untracked.
+ * read as untracked. The call runs without the variables that make git read
+ * another repository or index (the leaf lib's scrub), so it reads `root`'s own.
  *
  * @param {ExecFn} exec
  * @param {string} root
@@ -858,7 +893,8 @@ function gitToplevel(exec, dir) {
  */
 function personalTracking(exec, root, rootConfirmed) {
   const res = runGit(exec, root,
-    ['--no-literal-pathspecs', '-c', 'core.fsmonitor=false', 'ls-files', '-z', '--', ...PERSONAL_TRACKING_PATHSPECS], LINE_MAX_BUFFER);
+    ['--no-literal-pathspecs', '-c', 'core.fsmonitor=false', 'ls-files', '-z', '--', ...PERSONAL_TRACKING_PATHSPECS], LINE_MAX_BUFFER,
+    trackedAreas.gitEnvWithoutRedirects(process.env));
   if (!res.answered) return 'unknown';
   if (res.stdout.length > 0) return 'tracked';
   if (res.ok) return 'untracked';
@@ -953,13 +989,180 @@ function defaultBranchCompliance(exec, root) {
   return fieldIn(projectConfig.parseProjectBytes(blob.stdout), 'compliance', 'malformed');
 }
 
+// ---------------------------------------------------------------------------
+// The tracked areas: memory at the toplevel, curation at the ledger root
+// ---------------------------------------------------------------------------
+
+/** What git before 2.31 prints first for `--path-format=absolute`: the flag it does not know, echoed back. */
+const PATH_FORMAT_ECHO = '--path-format=absolute';
+
+/**
+ * How the `.git` entry at `root` stands, never followed: `folder`, `absent` (nothing there)
+ * or `other` (a file, a link, or an entry that could not be probed).
+ *
+ * @param {string} root
+ * @returns {'folder' | 'absent' | 'other'}
+ */
+function gitEntryKind(root) {
+  try {
+    return fs.lstatSync(path.join(root, '.git')).isDirectory() ? 'folder' : 'other';
+  } catch (err) {
+    const code = err && /** @type {{ code?: string }} */ (err).code;
+    return code === 'ENOENT' || code === 'ENOTDIR' ? 'absent' : 'other';
+  }
+}
+
+/**
+ * Whether the main checkout `main` holds the ledger: it has a `.devflow` folder (links
+ * followed), its own `.git` entry, and is not HOME (a repository rooted at HOME is the
+ * machine root). The paths are compared physically, as the hooks' df_is_project_root does;
+ * an unresolvable `main` holds none, and an unset or unresolvable HOME refuses nothing.
+ *
+ * @param {string} main
+ * @returns {boolean}
+ */
+function holdsLedger(main) {
+  try {
+    if (!fs.statSync(path.join(main, '.devflow')).isDirectory()) return false;
+    fs.statSync(path.join(main, '.git'));
+    const mainReal = fs.realpathSync(main);
+    const home = process.env.HOME;
+    if (typeof home !== 'string' || home === '') return true;
+    try {
+      return fs.realpathSync(home) !== mainReal;
+    } catch (_) {
+      return true;
+    }
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
+ * Where the curation ledger lives for the checkout whose toplevel git named: the rule the
+ * hooks apply (DF_LEDGER_ROOT of df_resolve_roots in hooks/resolve-project-root), which the
+ * TypeScript twin getLedgerRoot (src/core/ledger-root.ts) shares.
+ *   - `<toplevel>/.git` is a folder, or there is none: the toplevel, with no git call. (A
+ *     main checkout is its own ledger root; with no entry the leaf lib asks no git call.)
+ *   - `<toplevel>/.git` is a file or a link: one `git rev-parse --path-format=absolute
+ *     --git-common-dir`. A path ending in `/.git` whose parent holds the ledger
+ *     (holdsLedger) names the parent; any other path names the toplevel. A git before 2.31
+ *     echoes the flag back as its first line: the toplevel, as the hooks fall back to it.
+ *   - any other answer, or none: `unknown` (the caller reads curation as unanswered).
+ * Never throws.
+ *
+ * @param {string} toplevel  an absolute path git named as a work tree's top level
+ * @param {{ exec?: ExecFn }} [deps]
+ * @returns {{ kind: 'root', root: string } | { kind: 'unknown' }}
+ */
+function ledgerRootOf(toplevel, deps) {
+  try {
+    const exec = deps && typeof deps.exec === 'function' ? deps.exec : defaultExec;
+    if (gitEntryKind(toplevel) !== 'other') return { kind: 'root', root: toplevel };
+    const res = runGit(exec, toplevel, ['rev-parse', PATH_FORMAT_ECHO, '--git-common-dir'], LINE_MAX_BUFFER);
+    if (!res.ok) return { kind: 'unknown' };
+    const text = res.stdout.toString('utf8').replace(/\r?\n$/, '');
+    if (text.split('\n', 1)[0] === PATH_FORMAT_ECHO) return { kind: 'root', root: toplevel };
+    if (text === '' || /[\r\n\0]/.test(text) || !path.isAbsolute(text)) return { kind: 'unknown' };
+    if (!text.endsWith('/.git')) return { kind: 'root', root: toplevel };
+    const main = text.slice(0, -'/.git'.length);
+    return { kind: 'root', root: main !== '' && holdsLedger(main) ? main : toplevel };
+  } catch (_) {
+    return { kind: 'unknown' };
+  }
+}
+
+/**
+ * @typedef {'tracked' | 'untracked' | 'unknown'} AreaAnswer
+ * @typedef {{ memory: AreaAnswer, curation: AreaAnswer }} AreaAnswers
+ */
+
+/**
+ * One area at one root, asked of the injected exec with the leaf lib's call (its pathspecs,
+ * its scrub of redirecting variables, its bounds) and mapped by its judge. The leaf asks no
+ * call, and answers `untracked`, for a root with no `.git` entry.
+ *
+ * @param {ExecFn} exec
+ * @param {string} root
+ * @param {'curation' | 'memory' | 'both'} area
+ * @returns {AreaAnswer}
+ */
+function askArea(exec, root, area) {
+  const call = trackedAreas.trackedAreaCall(root, area);
+  if (!('argv' in call)) return call.answer;
+  const res = exec('git', [...call.argv], {
+    cwd: call.cwd,
+    env: call.env,
+    stdio: ['ignore', 'pipe', 'ignore'],
+    timeout: trackedAreas.TRACKED_AREAS_GIT_TIMEOUT_MS,
+    maxBuffer: trackedAreas.TRACKED_AREAS_GIT_MAX_BUFFER,
+    windowsHide: true,
+    shell: false,
+  });
+  return trackedAreas.judgeTrackedAreas(res).answer;
+}
+
+/**
+ * The answers for the areas asked about. An area that is not asked about reads `untracked`
+ * (nothing to narrow). Equal roots: ONE call over both areas; nothing listed ends it, git
+ * not answering reads both `unknown`, and only a listing earns one call per area to tell
+ * them apart. Different roots: one call per root. A curation root that is null (the ledger
+ * root could not be named) reads `unknown`.
+ *
+ * @param {ExecFn} exec
+ * @param {string} memoryRoot
+ * @param {string | null} curationRoot
+ * @param {{ memory: boolean, curation: boolean }} asked
+ * @returns {AreaAnswers}
+ */
+function trackedAreaAnswers(exec, memoryRoot, curationRoot, asked) {
+  /** @type {AreaAnswers} */
+  const answers = { memory: 'untracked', curation: 'untracked' };
+  if (asked.memory && asked.curation && curationRoot === memoryRoot) {
+    const union = askArea(exec, memoryRoot, 'both');
+    if (union === 'untracked') return answers;
+    if (union === 'unknown') return { memory: 'unknown', curation: 'unknown' };
+  }
+  if (asked.curation) answers.curation = curationRoot === null ? 'unknown' : askArea(exec, curationRoot, 'curation');
+  if (asked.memory) answers.memory = askArea(exec, memoryRoot, 'memory');
+  return answers;
+}
+
+/**
+ * The settings with each switch whose area is not `untracked` off. Only a switch still on
+ * is narrowed, and it carries source `machine`: no file of the repository turned it off, so
+ * there is none to name. Answers `settings` itself when nothing changes.
+ *
+ * @param {Settings} settings
+ * @param {AreaAnswers} answers
+ * @returns {Settings}
+ */
+function narrowByAreas(settings, answers) {
+  /** @param {'memory' | 'curation'} feature @returns {SwitchState} */
+  const narrowed = feature => (answers[feature] === 'untracked' || !settings.switches[feature].on
+    ? settings.switches[feature]
+    : Object.freeze({ on: false, source: 'machine' }));
+  const memory = narrowed('memory');
+  const curation = narrowed('curation');
+  if (memory === settings.switches.memory && curation === settings.switches.curation) return settings;
+  return Object.freeze({ ...settings, switches: Object.freeze({ ...settings.switches, memory, curation }) });
+}
+
 /**
  * Resolve the settings for `opts.dir`. Never throws: a git that cannot say
  * whether `opts.dir` is in a repository, or any internal failure, is the
  * fail-closed resolution, which main() maps to exit 4. A repository file that
- * exists but is unreadable fails every field closed but the compliance lens,
- * naming its layer in `unreadable` (the whole-file rule, D-SETTINGS-LINE);
- * main() prints that line with exit 0.
+ * exists but is unreadable fails every field closed but the compliance lens and
+ * the memory and curation switches, naming its layer in `unreadable` (the
+ * whole-file rule, D-SETTINGS-LINE); main() prints that line with exit 0.
+ *
+ * Every repository return is then narrowed by the areas: memory at the toplevel,
+ * curation at the ledger root, each off while git tracks its folders or does not
+ * answer for them. When git answers that `opts.dir` is no repository (a lookup
+ * that fails for a reason such as a redirecting variable or a refusal for
+ * ownership), the leaf lib's check still runs at `opts.dir`: with no `.git`
+ * entry there it asks no git call and changes nothing; with one it asks a scrubbed
+ * call, and an unanswered call reads both areas as unknown.
  *
  * @param {ResolveSettingsOptions} opts
  * @param {{ exec?: ExecFn }} [deps]
@@ -973,7 +1176,12 @@ function resolveSettings(opts, deps) {
     if (toplevel.kind === 'unknown') return FAIL_CLOSED_SETTINGS;
     if (toplevel.kind === 'none') {
       const none = projectConfig.parseProjectBytes(null);
-      return foldSettings({ project: none, personal: none, manifest, retiredPolicyFile: false });
+      const folded = foldSettings({ project: none, personal: none, manifest, retiredPolicyFile: false });
+      const start = path.resolve(opts.dir);
+      return narrowByAreas(folded, trackedAreaAnswers(exec, start, start, {
+        memory: folded.switches.memory.on,
+        curation: folded.switches.curation.on,
+      }));
     }
     const layers = readRepoLayers(toplevel.root, { exec, rootConfirmed: true });
     /** @type {SettingsInputs} */
@@ -985,9 +1193,14 @@ function resolveSettings(opts, deps) {
       defaultBranch: defaultBranchCompliance(exec, toplevel.root),
       retiredPolicyFile: existsNoFollow(path.join(toplevel.root, '.devflow', 'policy.json')),
     };
-    if (layers.project.kind === 'invalid') return unreadableSettings('project', inputs);
-    if (layers.personal.kind === 'invalid') return unreadableSettings('personal', inputs);
-    return foldSettings(inputs);
+    const folded = settingsOfLayers(inputs);
+    const asked = { memory: folded.switches.memory.on, curation: folded.switches.curation.on };
+    let curationRoot = null;
+    if (asked.curation) {
+      const ledger = ledgerRootOf(toplevel.root, { exec });
+      curationRoot = ledger.kind === 'root' ? ledger.root : null;
+    }
+    return narrowByAreas(folded, trackedAreaAnswers(exec, toplevel.root, curationRoot, asked));
   } catch (_) {
     return FAIL_CLOSED_SETTINGS;
   }
@@ -1238,6 +1451,7 @@ module.exports = Object.freeze({
   foldSettings,
   readRepoLayers,
   machineSwitchOn,
+  ledgerRootOf,
   resolveSettings,
   formatSettingsLine,
   isCoherentSettingsLine,

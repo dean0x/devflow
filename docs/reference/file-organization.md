@@ -36,7 +36,8 @@ devflow/
 │   │   ├── curation-move.ts          # Typed seam onto hooks/lib/curation-move.cjs, the one-time move of the old ledger folder
 │   │   ├── curation-move-notice.ts   # The pointer, refused and skipped lines for a project still on the old ledger folder, and the shim's marker paths; the HUD and `devflow curation` share it
 │   │   ├── curation-move-skip.ts     # The fixed notice of a skipped move (git tracks files in a data folder, or git did not answer)
-│   │   ├── tracked-areas.ts          # Typed seam onto hooks/lib/tracked-areas.cjs, the check the drains of `devflow curation` and init ask before they delete a queue file
+│   │   ├── tracked-areas.ts          # Typed seam onto hooks/lib/tracked-areas.cjs: the bounded answer (`probeTrackedArea`) that the CLI, the HUD and uninstall read for a data area, curation or memory
+│   │   ├── area-pause-notice.ts      # The fixed notice of a paused data area (git tracks files in its folders, or git did not answer), one text for each area and reason
 │   │   └── ...                       # feature-config.ts, curate-tuning-config.ts, …
 │   ├── hud/                          # HUD module (TypeScript source)
 │   │   ├── index.ts                  # Entry point: stdin → gather → render → stdout
@@ -104,7 +105,7 @@ devflow/
 │               ├── capture-prompt        # UserPromptSubmit hook: appends user turn to memory + curation queues (independently gated)
 │               ├── capture-turn          # Stop hook: appends assistant turn to memory + curation queues; never spawns
 │               ├── capture-question      # PostToolUse hook (matcher: AskUserQuestion): appends answered questions to both queues
-│               ├── queue-append          # Shared helper: queue_append_row / queue_append_both / queue_read_gates
+│               ├── queue-append          # Shared helper: queue_append_row / queue_append_both / queue_read_gates, and queue_tracked_area, the shell twin of the tracked-areas leaf that gates each append
 │               ├── memory-permission     # Sourced helper: the memory worker's staged-path check, allow and deny rule settings JSON, guarded removal at the staged path, result line and one-time notice
 │               ├── memory-worker         # Stop hook (runs in parallel with capture-turn): 120s throttle, spawns background-memory-update
 │               ├── background-memory-update # Detached claude -p worker on agents.memory (default claude-sonnet-5-5, high effort; `devflow agents` overrides it): drains queue → staged write → CAS swap to WORKING-MEMORY.md (spawned by memory-worker)
@@ -136,7 +137,7 @@ devflow/
 │                   ├── project-paths.cjs   # Project slug + path resolution
 │                   ├── render-decisions.cjs # Renders decisions.md, pitfalls.md and index.md from the ledger (render / --check CLI)
 │                   ├── safe-path.cjs       # Path safety validation
-│                   └── tracked-areas.cjs   # Leaf: does git track any entry under the data folders `.devflow/learning/` and `.devflow/curation/`, under a backup folder, or at `.devflow` itself? One bounded `git ls-files` call; the move, the backup sweep and the queue drains ask it first
+│                   └── tracked-areas.cjs   # Leaf: does git track any entry under the data folders of an area (curation: `.devflow/learning/`, `.devflow/curation/` and the backup folders; memory: `.devflow/memory/`) or at `.devflow` itself? One bounded `git ls-files` call for each area; the store ops, the capture gate, the session start hooks, the memory worker, the settings resolver, the CLI, the HUD and uninstall ask it first
 ├── scripts/                          # Dev tooling
 │   ├── build-mds.ts                  # MDS compiler: command hosts → dist/commands/*.md, agent generator hosts → dist/agents/*.md, reference modules → dist/skills/git/references/**
 │   ├── bump-version.ts               # Version bump script
@@ -271,6 +272,8 @@ A capture/spawn split across always-on shell-script hooks. Queue-append (`captur
 
 Hooks auto-create `.devflow/` on first run — no manual setup needed per project.
 
+**Data folders that git tracks.** A folder that git tracks holds the repository's own content, not devflow's data. While git tracks a file in `.devflow/memory/` (the memory area), or in the curation, old ledger or backup folders at the ledger root (the curation area), or a `.git` entry stands and git does not answer, devflow reads and writes no file in that area's folders. `unknown` pauses like `tracked`. Each area is judged on its own, at each event. The settings line reads `MEMORY=off` or `CURATION=off`; the capture hooks append no row to the queue of the area; the curation store ops, the memory hooks and the memory worker leave the folders alone; the session start hooks send one fixed notice; `devflow curation` and `devflow memory` print the same notice and change nothing; the HUD shows no curation counts; and `devflow uninstall` keeps the folders. The notice tells the user to run `git ls-files .devflow` to find the files and `git rm --cached <file>` to untrack them. The pause leaves no marker, so untracking the files ends it at the next event. The rules are in the Tracked data folders paragraph of `docs/reference/architecture.md`.
+
 Before 3.8 the folder was `.devflow/learning/`. A project that still has it moves it to `.devflow/curation/` at the next `devflow init` or session start, and a move that finds both folders keeps the loser as `.devflow/learning.backup-<stamp>-<8 hex>` (see the Curation Pipeline section of `docs/reference/hooks.md`). No devflow command deletes a backup, except `devflow uninstall`. It removes the backup with the project data, after you confirm. `devflow curation --reset` and `devflow curation --clear` leave the backup in place. `devflow curation --status` prints its pending rows, and you delete it by hand when it shows none.
 
 ## Project Knowledge
@@ -295,7 +298,7 @@ The data behind them is gitignored. Apart from the queue, which the capture hook
 | `*.pre-v2.jsonl` | Copies of the log, the ledger and the archive, made once by the first write to a tree that still held v1 rows (D-V1-BACKUP-ONCE) |
 | `.pending-turns.jsonl`, `.pending-turns.processing`, `.pending-turns.owner` | The queue, the claimed batch and its owner's token (D-OWNED-CLAIM) |
 
-The Curate agent writes only through `json-helper.cjs` ops. Each runs from the project root, takes any text it needs as one JSON object on stdin, and never creates `.devflow/curation/`: where it is absent, a writer refuses (D-NO-STRAY-TREE):
+The Curate agent writes only through `json-helper.cjs` ops. Each runs from the project root, takes any text it needs as one JSON object on stdin, and never creates `.devflow/curation/`: where it is absent, a writer refuses (D-NO-STRAY-TREE), and where git tracks a file in the curation folders, or does not answer, every op refuses and reads and writes nothing:
 
 - `put-observation --create|--update|--reinforce` validates and stores an observation. An update carries the whole content and never merges (D-PUT-NOT-MERGE), and the active entries the observation backs are re-projected and re-rendered under the same lock (D-PUT-REPROJECTS).
 - `assign-anchor <decision|pitfall> <obs_id>` promotes an observation the ledger does not carry yet, numbering by the ledger registry and skipping any number a tracked file cites (D-LEDGER-REGISTRY, D-E4-SKIP).

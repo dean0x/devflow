@@ -2,9 +2,11 @@
 //
 // Does git track any entry under one of devflow's data folders at a root? One
 // `git ls-files` call over a fixed set of pathspecs answers `tracked`, `untracked` or
-// `unknown`. The one-time ledger move and the backup sweep ask it before they lock, read
-// or rename anything: a folder that git tracks is the repository's content, so they leave
-// it alone.
+// `unknown`, for one area at a time: `curation` (the curation folder, the old ledger
+// folder and the backup folders), `memory` (the memory folder) or `both` (the union of the
+// two, one call, for a caller that serves both areas at one root). The one-time ledger move
+// and the backup sweep ask it for the curation area before they lock, read or rename
+// anything: a folder that git tracks is the repository's content, so they leave it alone.
 //
 // DESIGN: a leaf. It loads node built-ins and project-paths.cjs (which loads node
 // built-ins only) and requires neither the store nor the move module (the move requires
@@ -13,14 +15,30 @@
 // every failure is the answer `unknown`, with a cause from the closed set UNKNOWN_CAUSES.
 //
 // The folder names come from project-paths.cjs, which owns them: AREA_FOLDERS lists the
-// data folders and the backup prefix names the folders the move leaves behind. To cover
-// another folder, add its name to AREA_FOLDERS.
+// curation area's data folders, the backup prefix names the folders the move leaves
+// behind, and the memory folder is the one getMemoryDir names. To cover another folder of
+// an area, add it to that area's pathspecs.
 //
 // The decision is the repository's index, never the disk. A root with no `.git` entry
 // (a file or a folder) is not a git working tree and gets no git call. A root with one
 // gets exactly one call, and every failure of that call (git missing, a timeout, a
 // non-zero exit with nothing listed) is `unknown`: the caller cannot tell what git
 // tracks and must change nothing. git's error text is never read.
+//
+// trackedAreaCall splits the check in two: it decides whether a call is due and, when it
+// is, describes it (working directory, argv, environment); a caller that runs git in
+// another way (the TypeScript seam's bounded async runner, the settings resolver's
+// injected exec) executes that description and hands the result to judgeTrackedAreas, so
+// every runner gives the answer this leaf gives.
+//
+// COPIES: the leaf is not the only place that holds some of these lists. The shell twin in
+// the capture gate file (hooks/queue-append) keeps its own copy of the pathspecs
+// (`_qta_specs`) and of the list of git variables it removes (the `unset` line of
+// `_qta_probe`), because it runs git without node. Two folder-to-area maps restate which
+// folder belongs to which area: `_qar_area_of` in that file and `projectDataAreaOf` in
+// src/cli/commands/uninstall.ts. Each copy is held equal to the lists here by
+// tests/decisions/tracked-area-parity.test.ts, so a change to a list here fails that test
+// until every copy follows it.
 
 'use strict';
 
@@ -28,10 +46,13 @@ const childProcess = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-const { LEGACY_NAMES, CURATION_DIR_NAME } = require('./project-paths.cjs');
+const { LEGACY_NAMES, CURATION_DIR_NAME, getMemoryDir } = require('./project-paths.cjs');
 
-/** The data folders under `.devflow` that the check covers, by the names the path helpers hold. */
+/** The curation data folders under `.devflow` that the check covers, by the names the path helpers hold. */
 const AREA_FOLDERS = Object.freeze([LEGACY_NAMES.folder, CURATION_DIR_NAME]);
+
+/** The memory folder under `.devflow`, by the name getMemoryDir gives it. */
+const MEMORY_FOLDER = path.basename(getMemoryDir(path.sep));
 
 /**
  * The spellings a case-folding file system opens as `.devflow` beyond ASCII letter case.
@@ -42,8 +63,9 @@ const AREA_FOLDERS = Object.freeze([LEGACY_NAMES.folder, CURATION_DIR_NAME]);
 const DEVFLOW_SPELLINGS = Object.freeze(['.devflow', '.dev\u{FB02}ow']);
 
 /**
- * The pathspecs of the check, each matched without regard to ASCII letter case, whatever
- * the file system or `core.ignorecase`, and each spelled every way DEVFLOW_SPELLINGS lists:
+ * The pathspecs of the curation area, each matched without regard to ASCII letter case,
+ * whatever the file system or `core.ignorecase`, and each spelled every way
+ * DEVFLOW_SPELLINGS lists:
  *   - each folder of AREA_FOLDERS, as a literal path: an index entry at the folder, or
  *     anywhere below it, matches
  *   - an entry named like a backup folder (`<backup prefix>*`), and every entry below one
@@ -54,6 +76,8 @@ const DEVFLOW_SPELLINGS = Object.freeze(['.devflow', '.dev\u{FB02}ow']);
  *     keeps `glob` from matching as a leading directory, so the many files under a
  *     normal `.devflow/` are not listed. Committed content then stands at the path where
  *     the folders are opened.
+ * The ledger move and the backup sweep ask for this set, and its order and spelling stay
+ * as they are.
  */
 const TRACKED_AREA_PATHSPECS = Object.freeze([
   ...DEVFLOW_SPELLINGS.flatMap(dir => [
@@ -63,6 +87,30 @@ const TRACKED_AREA_PATHSPECS = Object.freeze([
   ]),
   ...DEVFLOW_SPELLINGS.map(dir => ':(icase,glob)[.]' + dir.slice(1)),
 ]);
+
+/**
+ * The pathspecs of the memory area, matched and spelled as the curation area's are: the
+ * memory folder as a literal path (an entry at the folder, or anywhere below it), and the
+ * `.devflow` entry itself.
+ */
+const MEMORY_AREA_PATHSPECS = Object.freeze([
+  ...DEVFLOW_SPELLINGS.map(dir => ':(icase,literal)' + dir + '/' + MEMORY_FOLDER),
+  ...DEVFLOW_SPELLINGS.map(dir => ':(icase,glob)[.]' + dir.slice(1)),
+]);
+
+/**
+ * The pathspecs of the two areas together: the curation set, then the memory set, each
+ * pathspec once (the `.devflow` entry forms stand in both sets). One call over this set
+ * answers `tracked` when git tracks anything either area covers.
+ */
+const BOTH_AREAS_PATHSPECS = Object.freeze([...new Set([...TRACKED_AREA_PATHSPECS, ...MEMORY_AREA_PATHSPECS])]);
+
+/** The pathspecs of each area, by the area's name: the closed set of areas the check knows. */
+const AREA_PATHSPECS = Object.freeze({
+  curation: TRACKED_AREA_PATHSPECS,
+  memory: MEMORY_AREA_PATHSPECS,
+  both: BOTH_AREAS_PATHSPECS,
+});
 
 /**
  * Why a check answered `unknown`, as one fixed word. The words come from this list
@@ -109,6 +157,20 @@ const GIT_REDIRECT_VARIABLES = Object.freeze([
 ]);
 
 /**
+ * A copy of `base` without the redirecting variables (GIT_REDIRECT_VARIABLES): git then
+ * reads the repository, index and pathspec rules of the directory it runs in. Nothing else
+ * changes. For a caller that runs git for its own purpose and needs only the scrub.
+ *
+ * @param {NodeJS.ProcessEnv} base
+ * @returns {NodeJS.ProcessEnv}
+ */
+function gitEnvWithoutRedirects(base) {
+  const env = { ...base };
+  for (const name of GIT_REDIRECT_VARIABLES) delete env[name];
+  return env;
+}
+
+/**
  * The environment of the git call: the process environment without the redirecting
  * variables, with a fixed locale, no optional lock and a ceiling directory. Answers a new
  * object. The ceiling is the folder that holds the root: git reads the root's own `.git`
@@ -120,8 +182,7 @@ const GIT_REDIRECT_VARIABLES = Object.freeze([
  * @returns {NodeJS.ProcessEnv}
  */
 function trackedAreasGitEnv(base, ceiling) {
-  const env = { ...base };
-  for (const name of GIT_REDIRECT_VARIABLES) delete env[name];
+  const env = gitEnvWithoutRedirects(base);
   env.LC_ALL = 'C';
   env.GIT_OPTIONAL_LOCKS = '0';
   env.GIT_CEILING_DIRECTORIES = ceiling;
@@ -193,42 +254,108 @@ function entryExists(target) {
 }
 
 /**
- * Whether git tracks any entry under the covered folders at `root`, or an entry named
- * `.devflow` itself (a link, a gitlink or a file). The index decides, not the disk, and
- * a staged entry counts. The answer carries the cause (a value of UNKNOWN_CAUSES) when
- * it is `unknown`, and null otherwise.
+ * The pathspecs of `area`, or null when the leaf does not know the area. Only the own
+ * names of AREA_PATHSPECS count: a name from the object prototype is no area.
  *
- *   untracked  no `.git` entry at the root (no git call is made), or git listed nothing
- *   tracked    git listed an entry
- *   unknown    a `.git` entry stands and git did not answer (see judgeTrackedAreas),
- *              the `.git` entry could not be probed, or the root is not an absolute path
- *              string (no git call is made)
+ * @param {unknown} area
+ * @returns {readonly string[] | null}
+ */
+function pathspecsOf(area) {
+  if (typeof area !== 'string' || !Object.prototype.hasOwnProperty.call(AREA_PATHSPECS, area)) return null;
+  return AREA_PATHSPECS[/** @type {'curation' | 'memory' | 'both'} */ (area)];
+}
+
+/**
+ * Whether a git call is due for `area` at `root`, and the call when it is. Makes no
+ * call and starts no process: it reads only the `.git` entry at the root and the root's
+ * real path. Answers one of:
  *
- * The call is `git --no-literal-pathspecs -c core.fsmonitor=false ls-files -z -- <paths>`
- * with the root as its working directory: an argv with no shell, a time bound and an
- * output bound. `--no-literal-pathspecs` leads the argv, so a forced literal-pathspec
- * setting cannot turn the magic off and hide an entry. Reading the index makes git run
- * the command a repository's config names in `core.fsmonitor`, so the call turns that off
- * for itself and stays a pure read. The folder above the root's real path is a ceiling
- * directory (trackedAreasGitEnv); a parent path that holds the list separator can not be
- * named as one, and answers `unknown`.
+ *   {answer, cause}      no call is due: `untracked` (no `.git` entry at the root), or
+ *                        `unknown` with a cause from UNKNOWN_CAUSES (an area the leaf does
+ *                        not know, a root that is not an absolute path string, a `.git`
+ *                        entry that could not be probed, a folder above the root that
+ *                        holds the list separator, or a failure)
+ *   {cwd, argv, env}     the call: run `git` with `argv` and `env` in `cwd` with no shell,
+ *                        bound its time (TRACKED_AREAS_GIT_TIMEOUT_MS) and its output
+ *                        (TRACKED_AREAS_GIT_MAX_BUFFER), and give the result to
+ *                        judgeTrackedAreas
+ *
+ * The call is `git --no-literal-pathspecs -c core.fsmonitor=false ls-files -z -- <paths>`.
+ * `--no-literal-pathspecs` leads the argv, so a forced literal-pathspec setting cannot
+ * turn the magic off and hide an entry. Reading the index makes git run the command a
+ * repository's config names in `core.fsmonitor`, so the call turns that off for itself and
+ * stays a pure read. The folder above the root's real path is a ceiling directory
+ * (trackedAreasGitEnv); a parent path that holds the list separator can not be named as
+ * one, and answers `unknown`. Each answer is a new object.
  *
  * @param {unknown} root - an absolute path
- * @returns {{ answer: 'tracked' | 'untracked' | 'unknown', cause: string | null }}
+ * @param {unknown} area - 'curation', 'memory' or 'both'
+ * @param {NodeJS.ProcessEnv} [baseEnv] - the environment the call's own derives from (default: the process environment)
+ * @returns {{ answer: 'tracked' | 'untracked' | 'unknown', cause: string | null } | { cwd: string, argv: string[], env: NodeJS.ProcessEnv }}
  */
-function inspectTrackedAreas(root) {
+function trackedAreaCall(root, area, baseEnv = process.env) {
+  const pathspecs = pathspecsOf(area);
   if (typeof root !== 'string' || !path.isAbsolute(root)) return unknownBecause(UNKNOWN_CAUSES.rootNotAbsolute);
+  if (pathspecs === null) return unknownBecause(UNKNOWN_CAUSES.checkFailed);
   try {
     const gitEntry = entryExists(path.join(root, '.git'));
     if (gitEntry === null) return unknownBecause(UNKNOWN_CAUSES.gitEntryUnreadable);
     if (gitEntry === false) return { answer: 'untracked', cause: null };
     const ceiling = path.dirname(fs.realpathSync(root));
     if (ceiling.includes(path.delimiter)) return unknownBecause(UNKNOWN_CAUSES.ceilingUnusable);
-    const result = childProcess.spawnSync('git', ['--no-literal-pathspecs', '-c', 'core.fsmonitor=false', 'ls-files', '-z', '--', ...TRACKED_AREA_PATHSPECS], {
+    return {
       cwd: root,
-      env: trackedAreasGitEnv(process.env, ceiling),
+      argv: ['--no-literal-pathspecs', '-c', 'core.fsmonitor=false', 'ls-files', '-z', '--', ...pathspecs],
+      env: trackedAreasGitEnv(baseEnv, ceiling),
+    };
+  } catch (_) {
+    return unknownBecause(UNKNOWN_CAUSES.checkFailed);
+  }
+}
+
+/**
+ * The time bound of one check: `options.timeoutMs` when it is a positive finite number of
+ * milliseconds, otherwise TRACKED_AREAS_GIT_TIMEOUT_MS. A zero would mean no bound at all
+ * to the spawn call, so it is never passed on.
+ *
+ * @param {unknown} options
+ * @returns {number}
+ */
+function timeoutOf(options) {
+  const timeoutMs = options !== null && typeof options === 'object' ? /** @type {{ timeoutMs?: unknown }} */ (options).timeoutMs : undefined;
+  return typeof timeoutMs === 'number' && Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : TRACKED_AREAS_GIT_TIMEOUT_MS;
+}
+
+/**
+ * Whether git tracks any entry under the folders of `area` ('curation', 'memory' or 'both',
+ * the union of the two) at `root`, or an entry named `.devflow` itself (a link, a gitlink or
+ * a file). The index
+ * decides, not the disk, and a staged entry counts. The answer carries the cause (a value
+ * of UNKNOWN_CAUSES) when it is `unknown`, and null otherwise.
+ *
+ *   untracked  no `.git` entry at the root (no git call is made), or git listed nothing
+ *   tracked    git listed an entry
+ *   unknown    a `.git` entry stands and git did not answer (see judgeTrackedAreas),
+ *              the `.git` entry could not be probed, the root is not an absolute path
+ *              string, or the area is not one the leaf knows (no git call is made)
+ *
+ * The call is the one trackedAreaCall describes, run with a time bound (`options.timeoutMs`,
+ * default TRACKED_AREAS_GIT_TIMEOUT_MS) and an output bound.
+ *
+ * @param {unknown} root - an absolute path
+ * @param {unknown} area - 'curation', 'memory' or 'both'
+ * @param {{ timeoutMs?: number }} [options]
+ * @returns {{ answer: 'tracked' | 'untracked' | 'unknown', cause: string | null }}
+ */
+function inspectTrackedArea(root, area, options) {
+  const call = trackedAreaCall(root, area);
+  if (!('argv' in call)) return call;
+  try {
+    const result = childProcess.spawnSync('git', call.argv, {
+      cwd: call.cwd,
+      env: call.env,
       stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: TRACKED_AREAS_GIT_TIMEOUT_MS,
+      timeout: timeoutOf(options),
       maxBuffer: TRACKED_AREAS_GIT_MAX_BUFFER,
       windowsHide: true,
       shell: false,
@@ -237,6 +364,60 @@ function inspectTrackedAreas(root) {
   } catch (_) {
     return unknownBecause(UNKNOWN_CAUSES.checkFailed);
   }
+}
+
+/**
+ * The answer of {@link inspectTrackedArea}, without its cause.
+ *
+ * @param {unknown} root - an absolute path
+ * @param {unknown} area - 'curation', 'memory' or 'both'
+ * @returns {'tracked' | 'untracked' | 'unknown'}
+ */
+function checkTrackedArea(root, area) {
+  return inspectTrackedArea(root, area).answer;
+}
+
+/** The most answers the per-process memo of inspectTrackedAreaOnce holds. */
+const ANSWER_MEMO_MAX_ENTRIES = 64;
+
+/** The answers inspectTrackedAreaOnce has given in this process, by area and root, oldest first. */
+const answerMemo = new Map();
+
+/**
+ * {@link inspectTrackedArea}, asked once per root and area for the life of the process: a
+ * later ask for the same root and area gets the first answer and makes no git call, even if
+ * the project changed meanwhile. For a one-shot process (json-helper, the render check)
+ * whose steps each ask before they read or write: together they cost one git call. A
+ * long-lived caller, or one that changes what git tracks, asks inspectTrackedArea. The
+ * memo holds at most ANSWER_MEMO_MAX_ENTRIES answers; past that the oldest goes. Each
+ * answer is a new object.
+ *
+ * @param {unknown} root - an absolute path
+ * @param {unknown} area - 'curation', 'memory' or 'both'
+ * @returns {{ answer: 'tracked' | 'untracked' | 'unknown', cause: string | null }}
+ */
+function inspectTrackedAreaOnce(root, area) {
+  const key = typeof root === 'string' && typeof area === 'string' ? area + '\0' + root : null;
+  const known = key === null ? undefined : answerMemo.get(key);
+  if (known !== undefined) return { answer: known.answer, cause: known.cause };
+  const answer = inspectTrackedArea(root, area);
+  if (key !== null) {
+    if (answerMemo.size >= ANSWER_MEMO_MAX_ENTRIES) answerMemo.delete(answerMemo.keys().next().value);
+    answerMemo.set(key, Object.freeze({ answer: answer.answer, cause: answer.cause }));
+  }
+  return answer;
+}
+
+/**
+ * Whether git tracks any entry under the curation area's folders at `root`: the check the
+ * ledger move, the backup sweep and the drains ask. {@link inspectTrackedArea} for the
+ * curation area.
+ *
+ * @param {unknown} root - an absolute path
+ * @returns {{ answer: 'tracked' | 'untracked' | 'unknown', cause: string | null }}
+ */
+function inspectTrackedAreas(root) {
+  return inspectTrackedArea(root, 'curation');
 }
 
 /**
@@ -251,9 +432,21 @@ function checkTrackedAreas(root) {
 
 module.exports = {
   TRACKED_AREA_PATHSPECS,
+  MEMORY_AREA_PATHSPECS,
+  AREA_PATHSPECS,
+  DEVFLOW_SPELLINGS,
+  GIT_REDIRECT_VARIABLES,
+  TRACKED_AREAS_GIT_TIMEOUT_MS,
+  TRACKED_AREAS_GIT_MAX_BUFFER,
+  ANSWER_MEMO_MAX_ENTRIES,
   UNKNOWN_CAUSES,
+  gitEnvWithoutRedirects,
   judgeTrackedAreas,
   classifyTrackedAreas,
+  trackedAreaCall,
+  inspectTrackedArea,
+  inspectTrackedAreaOnce,
+  checkTrackedArea,
   inspectTrackedAreas,
   checkTrackedAreas,
 };

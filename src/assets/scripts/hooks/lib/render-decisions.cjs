@@ -51,6 +51,7 @@ const {
   isV2,
   readJsonl,
   hasCurationDir,
+  trackedCurationArea,
   withDecisionsLock,
   writeFileAtomic,
 } = require('./curation-store.cjs');
@@ -397,12 +398,19 @@ function renderCommand(root) {
  * `--check`: render in memory and compare with the files on disk, naming each
  * file that differs or is missing; exit 1 on any drift. It writes nothing and
  * takes no lock — taking it would create the lock directory — and refuses
- * without the curation directory (D-NO-STRAY-TREE).
+ * without the curation directory (D-NO-STRAY-TREE). Where git tracks files in the
+ * curation data folders, or does not say whether it does, it refuses first, exit 1:
+ * it reads no file there (trackedCurationArea).
  *
  * @param {string} root
  * @returns {number} exit code
  */
 function checkCommand(root) {
+  const paused = trackedCurationArea(CLI_NAME, root);
+  if (paused !== null) {
+    process.stderr.write(`${paused.error.message}\n`);
+    return 1;
+  }
   if (!hasCurationDir(root)) {
     process.stderr.write(`${CLI_NAME}: no .devflow/curation/ under ${root} — run from the project root\n`);
     return 1;

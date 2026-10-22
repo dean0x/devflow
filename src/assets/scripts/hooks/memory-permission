@@ -16,6 +16,11 @@
 #   memory_notice_*         the one-time notice: the worker writes it, a session start reads it
 #   memory_denied_seen      the count of denied runs that raises the `denied` notice
 #
+# The worker writes a notice, or counts a denied run, only while the memory area is known
+# to be free of files that git tracks: DF_TRACKED_AREA_MEMORY (queue_tracked_area, queue-append)
+# must read `untracked` in the calling process. Any other value, an unset one included,
+# is a paused area, and both helpers then write nothing.
+#
 # Source it after resolve-project-root (it needs df_no_symlink_below and df_file_below)
 # and, for memory_result_summary, after json-parse. log() is used when the caller has one.
 #
@@ -241,13 +246,15 @@ memory_result_summary() {
 # start, once per reason: only where neither the notice nor its `.shown` marker stands,
 # and where no link sits on the way down from <root>. The builtin tests come first, since
 # noclobber alone opens a link to a FIFO or a device; noclobber then makes the create
-# itself exclusive. Content: the reason. Best effort: a refusal leaves nothing.
+# itself exclusive. Content: the reason. Best effort: a refusal leaves nothing. Nothing is
+# written unless DF_TRACKED_AREA_MEMORY reads `untracked` in this process.
 memory_notice_write() {
   local _dir="${1:-}" _root="${2:-}" _reason="${3:-}" _file
   case " $MEMORY_NOTICE_REASONS " in
     *" $_reason "*) ;;
     *) return 0 ;;
   esac
+  [ "${DF_TRACKED_AREA_MEMORY:-}" = "untracked" ] || return 0
   [ -d "$_dir" ] || return 0
   _file="$_dir/.worker-notice-$_reason"
   if ! path_occupied "$_file" && ! path_occupied "$_file.shown" \
@@ -285,9 +292,10 @@ memory_notice_clear() {
 # worker's write in. The first leaves a marker; a second, with the marker still there,
 # raises the `denied` notice. A run that swapped the memory in clears both
 # (memory_notice_clear denied), so only two denied runs with no successful update between
-# them count.
+# them count. No marker is left unless DF_TRACKED_AREA_MEMORY reads `untracked` in this process.
 memory_denied_seen() {
   local _dir="${1:-}" _root="${2:-}" _mark
+  [ "${DF_TRACKED_AREA_MEMORY:-}" = "untracked" ] || return 0
   [ -d "$_dir" ] || return 0
   _mark="$_dir/.worker-denied-once"
   if path_occupied "$_mark"; then

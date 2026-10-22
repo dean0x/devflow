@@ -6,7 +6,10 @@
 # which this checkout's project.json / config.json can only narrow
 # (D-FEATURES-NARROW-ONLY) — this hook itself is never disabled. They and the .gitignore carve-out run only in a git project that is
 # not the home directory (D-HOOKS-GIT-ONLY), and they read the curation ledger of
-# the main worktree when this is a linked one (D-LEDGER-MAIN-WORKTREE).
+# the main worktree when this is a linked one (D-LEDGER-MAIN-WORKTREE). They are also
+# paused while git tracks files in a curation data folder of that ledger root, or does
+# not answer: the hook then reads no curation file and makes no curation folder, and one
+# fixed notice goes to the user as a systemMessage (Section 4b).
 #
 # Section 1: Project decisions TL;DR (decisions.md / pitfalls.md header lines),
 # then the path of the decisions index when it lists entries.
@@ -23,11 +26,12 @@
 # Section 4: Legacy install notice — one line when this repository still carries
 # a retired project-local devflow install (its .claude/settings.json registers
 # devflow hooks), pointing at `devflow uninstall --scope local`.
-# Section 4b: Curation move skipped notice — one fixed line when the one-time move of
-# the old ledger folder left the project alone because git tracks files in a curation
-# data folder (`tracked`) or did not answer (`unknown`); the `curation-move` shim sets
-# DF_CURATION_MOVE_SKIPPED, and on a session that starts, resumes or is cleared the line
-# tells the main model to tell the user once.
+# Section 4b: Curation pause notice — one fixed systemMessage when curation is on and
+# git tracks files in a curation data folder (`tracked`) or did not answer (`unknown`).
+# The answer is the skipped move's (the `curation-move` shim sets DF_CURATION_MOVE_SKIPPED)
+# or, when the move was not skipped, the curation area check's own fresh answer; on a
+# session that starts, resumes or is cleared the message tells the user why curation is
+# paused.
 # Section 5: Compaction resume directive — on a `compact` SessionStart, one fixed
 # line telling the model to re-read the devflow command it was running from the
 # phase in progress (D-COMPACT-RESUME-DIRECTIVE).
@@ -53,6 +57,12 @@
 #   - Section 6, changed start: ONE node process (claude-md-audit.cjs), and a
 #     sibling temp file renamed over the stamp. When none of the roots exists there
 #     is nothing to audit: the stamp is written with builtins, and node is not started.
+#
+# Cost of the curation area check (after the move, with curation on in a git project):
+#   - the move already answered `tracked` or `unknown`: its answer is reused, zero forks;
+#   - no `.git` entry at the ledger root: a builtin test, zero forks;
+#   - otherwise ONE node process (json-helper tracked-area), which makes one bounded
+#     `git ls-files` call; without node the shell runs that one call itself, unbounded.
 
 # Safe no-op fallback: must exist before hook-bootstrap is sourced.
 dbg() { :; }
@@ -267,10 +277,40 @@ CURATION_ENABLED="$_QG_CURATION"
 # root is looked at once per session. A held, refused or skipped move leaves the old
 # folder in place. A skipped move (git tracks files in a data folder or a backup folder,
 # or git did not answer) sets DF_CURATION_MOVE_SKIPPED to `tracked` or `unknown`, and
-# Section 4b tells the user.
+# the curation area check below pauses curation on it.
 DF_CURATION_MOVE_SKIPPED=""
 if [ -n "$PROJECT_OK" ]; then
   df_curation_move "$LEDGER_ROOT" retry 2>/dev/null || true
+fi
+
+# --- The curation area check: a pause while git tracks the ledger folders ---
+# A folder that git tracks holds the repository's content, not devflow's data, so while git
+# tracks files in a curation data folder of the LEDGER root (the old ledger folder, the
+# curation folder or a backup folder), or does not answer, curation is off for the rest of
+# this hook: no heal, no Section 1, no Section 2, and no curation folder is made. The
+# move's own answer is reused when it skipped (`tracked` or `unknown`); otherwise
+# queue_tracked_area asks once in node mode, so a git that hangs is cut. The check runs
+# whether or not the folder exists, and on every source, a compaction included. AREA_PAUSE_REASON
+# names why for Section 4b; it stays empty when curation is on.
+AREA_PAUSE_REASON=""
+if [ "$CURATION_ENABLED" = "true" ]; then
+  case "${DF_CURATION_MOVE_SKIPPED:-}" in
+    tracked|unknown)
+      AREA_PAUSE_REASON="$DF_CURATION_MOVE_SKIPPED"
+      ;;
+    *)
+      queue_tracked_area "$LEDGER_ROOT" curation node
+      case "$DF_TRACKED_AREA_CURATION" in
+        untracked) ;;
+        tracked) AREA_PAUSE_REASON="tracked" ;;
+        *) AREA_PAUSE_REASON="unknown" ;;
+      esac
+      ;;
+  esac
+  if [ -n "$AREA_PAUSE_REASON" ]; then
+    CURATION_ENABLED="false"
+    log "Curation paused: git tracks files in a curation data folder, or did not answer (${AREA_PAUSE_REASON}); nothing read or written"
+  fi
 fi
 
 # --- Section 1: Project Decisions TL;DR ---
@@ -305,10 +345,13 @@ if [ "$CURATION_ENABLED" = "true" ]; then
     # as DECISIONS_CONTEXT. It interpolates $LEDGER_ROOT, so it needs that root's
     # shape gate, and it is left out when the index lists no entry: an empty
     # corpus renders `(none)`. It is left out too when a link leads to the index,
-    # since the model would read the file the link names and pass that on.
+    # since the model would read the file the link names and pass that on. The pass rule
+    # tells the model to read the index only while the settings line does not say
+    # CURATION=off; resolve-settings.cjs turns that switch off while git tracks the
+    # curation folder, so a paused project passes nothing on.
     # Builtins only: no fork, save the log line of a refused index.
     _SC_INDEX="$CURATION_DIR/index.md"; DECISIONS_INDEX_LINE=""
-    DECISIONS_PASS_RULE="Decisions (direct delegations only — workflow skills load their own): read this index once, then pass each agent that takes DECISIONS_CONTEXT the index lines that touch its work, verbatim, behind a (slice: N of M entries — full index: this index's path) line and with the footer."
+    DECISIONS_PASS_RULE="Decisions (direct delegations only — workflow skills load their own): when the settings line does not say CURATION=off, read this index once, then pass each agent that takes DECISIONS_CONTEXT the index lines that touch its work, verbatim, behind a (slice: N of M entries — full index: this index's path) line and with the footer."
     if [ -n "$DIRECTIVE_LEDGER_SAFE" ] && df_file_below "$LEDGER_ROOT" "$_SC_INDEX" && [ -s "$_SC_INDEX" ]; then
       _SC_IDX1=""; IFS= read -r _SC_IDX1 < "$_SC_INDEX" || true
       [ "$_SC_IDX1" != "(none)" ] && DECISIONS_INDEX_LINE="Index: $_SC_INDEX"
@@ -873,39 +916,37 @@ ${LEGACY_SECTION}"
   fi
 fi
 
-# --- Section 4b: Curation move skipped notice ---
-# The move of the old curation folder leaves a project alone when git tracks files in
-# a curation data folder, or when git does not answer (curation-move sets
-# DF_CURATION_MOVE_SKIPPED at the call above, and the line before that call empties it).
-# The user cannot see the hook log, so one fixed line goes into the context on a session
-# that starts, resumes or is cleared, and the model tells the user once per such session.
-# Each line is a constant: a single-quoted string that interpolates nothing, so no
-# repository content reaches the model through it. Its words are MOVE_SKIP_NOTICE in
-# src/core/curation-move-skip.ts (tests/shell-hooks.test.ts holds the two equal). A
-# compaction repeats nothing.
-MOVE_SKIP_SECTION=""
-case "${DF_CURATION_MOVE_SKIPPED:-}" in
+# --- Section 4b: Curation pause notice ---
+# While curation is on, curation pauses when git tracks files in a curation data folder,
+# or when git does not answer (the curation area check above sets AREA_PAUSE_REASON). The
+# answer is the skipped move's (curation-move sets DF_CURATION_MOVE_SKIPPED at the call
+# above, and the line before that call empties it) or, when the move was not skipped, the
+# area check's own fresh answer. The user cannot see the hook log, so the pause notice says
+# why curation reads and writes nothing, and what to do. It is not model context. It goes
+# to the user as a systemMessage (AREA_PAUSE_MESSAGE, joined to the envelope at the end),
+# on a session that starts, resumes or is cleared, and a compaction repeats nothing. It is
+# a constant: a single-quoted string that interpolates nothing, so no repository content
+# reaches the user through it. Its words are AREA_PAUSE_NOTICE.curation in src/core/area-pause-notice.ts
+# (tests/shell-hooks.test.ts holds the two equal). With curation switched off, devflow
+# shows no curation text at session start: the move still runs, and its skip is told to
+# the user by `devflow init`, not here.
+AREA_PAUSE_MESSAGE=""
+case "$AREA_PAUSE_REASON" in
   tracked)
-    MOVE_SKIP_SECTION='Devflow notice: tell the user once, in one short message alongside your answer: devflow did not move the curation data of this project from .devflow/learning/ to .devflow/curation/, because git tracks files in a curation data folder. To find them, run `git ls-files .devflow`. Untrack them with `git rm --cached <file>`, and delete them if you did not make them. Run these commands in the checkout that holds these folders.'
+    AREA_PAUSE_MESSAGE='Devflow curation is paused for this project, because git tracks files in a curation data folder. Devflow reads and writes nothing in these folders while git tracks files there. To find the files, run `git ls-files .devflow`. Untrack them with `git rm --cached <file>`, then delete them if you did not make them. Run these commands in the main checkout.'
     ;;
   unknown)
-    MOVE_SKIP_SECTION='Devflow notice: tell the user once, in one short message alongside your answer: devflow did not move the curation data of this project from .devflow/learning/ to .devflow/curation/, because git did not answer. The move runs again at the next session start or the next init. If this notice stays, check that git runs in this project.'
+    AREA_PAUSE_MESSAGE='Devflow curation is paused for this project, because git did not answer whether it tracks files in a curation data folder. Devflow reads and writes nothing in these folders until git answers. The check runs again at the next session start. If this notice stays, check that git runs in this project.'
     ;;
 esac
-if [ -n "$MOVE_SKIP_SECTION" ]; then
-  case "$SESSION_SOURCE" in
-    startup|resume|clear)
-      dbg "curation move skipped notice emitted"
-      if [ -n "$CONTEXT" ]; then
-        CONTEXT="${CONTEXT}
-
-${MOVE_SKIP_SECTION}"
-      else
-        CONTEXT="$MOVE_SKIP_SECTION"
-      fi
-      ;;
-  esac
-fi
+case "$SESSION_SOURCE" in
+  startup|resume|clear)
+    if [ -n "$AREA_PAUSE_MESSAGE" ]; then dbg "curation pause notice emitted"; fi
+    ;;
+  *)
+    AREA_PAUSE_MESSAGE=""
+    ;;
+esac
 
 # --- Section 5: Compaction resume directive ---
 # D-COMPACT-RESUME-DIRECTIVE: after a compaction nothing tells the model to re-read
@@ -1164,6 +1205,17 @@ if [ "$_HAS_NODE" = "true" ] && [ -d "$TRACKER_DEVFLOW_DIR" ]; then
 fi
 
 # --- Output ---
+
+# The pause notice (Section 4b) leads the systemMessage, ahead of the audit text: both are
+# for the user, and neither enters the context.
+if [ -n "$AREA_PAUSE_MESSAGE" ]; then
+  if [ -n "$SYSTEM_MESSAGE" ]; then
+    SYSTEM_MESSAGE="${AREA_PAUSE_MESSAGE}
+${SYSTEM_MESSAGE}"
+  else
+    SYSTEM_MESSAGE="$AREA_PAUSE_MESSAGE"
+  fi
+fi
 
 # Only output if we have something to inject or to tell the user. The stamp is
 # recorded here too: an audit that found nothing to show still ran, and recording it

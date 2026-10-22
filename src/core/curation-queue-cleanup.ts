@@ -21,7 +21,7 @@ import {
   getCurationPendingTurnsProcessingPath,
 } from './project-paths.js';
 import { loadCurationMove, type CurationMoveLoad, type MoveSkipReason } from './curation-move.js';
-import { MOVE_SKIP_NOTICE } from './curation-move-skip.js';
+import { AREA_PAUSE_NOTICE } from './area-pause-notice.js';
 import { formatCurationStoreUnavailable } from './curation-store.js';
 import { drainQueueFiles, formatRefusedDrain, type QueueDrain } from './queue-drain.js';
 import { loadTrackedAreas, type TrackedAreasAnswer, type TrackedAreasLoad } from './tracked-areas.js';
@@ -142,9 +142,10 @@ function trackedSkip(root: string, load: () => TrackedAreasLoad): SkippedQueueDr
 
 /**
  * The line a caller prints for a drain that deleted nothing: the fixed notice of a
- * skipped project (no repository content in it), or the refusal at a link. When the
- * caller has just printed that notice (`shown`, the reason it showed), the line does
- * not repeat it.
+ * paused curation area (no repository content in it), or the refusal at a link. When
+ * the caller has just printed the notice of a skipped move for the same reason (`shown`),
+ * that notice has told the user what the pause notice would, so the line does not
+ * repeat it.
  */
 export function formatCurationNotDrained(
   drain: Exclude<CurationQueueDrain, { readonly drained: true }>,
@@ -152,7 +153,7 @@ export function formatCurationNotDrained(
 ): string {
   if (!('skipped' in drain)) return formatRefusedDrain('curation', drain.linkedFolder);
   const line = 'The curation queue was not drained.';
-  return shown === drain.skipped ? line : `${line} ${MOVE_SKIP_NOTICE[drain.skipped]}`;
+  return shown === drain.skipped ? line : `${line} ${AREA_PAUSE_NOTICE.curation[drain.skipped]}`;
 }
 
 /** The warning for a disable drain that could not list the backups: the live queue is drained, the backups are not. */

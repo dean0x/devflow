@@ -8,7 +8,8 @@
  * non-git directory. The parity case runs the hook helper itself on the same
  * fixtures and compares its DF_LEDGER_ROOT with the TypeScript answer.
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
+import { createRequire } from 'module';
 import { execSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -18,6 +19,10 @@ import { useWarmFakeExecutables } from '../helpers/warm-fake-executable.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..');
 const RESOLVE_HELPER = path.join(ROOT, 'src', 'assets', 'scripts', 'hooks', 'resolve-project-root');
+/** The settings resolver's JavaScript twin of the rule: it reads CURATION at this root. */
+const SETTINGS = createRequire(import.meta.url)(path.join(ROOT, 'src', 'assets', 'scripts', 'resolve-settings.cjs')) as {
+  ledgerRootOf(toplevel: string): { kind: 'root'; root: string } | { kind: 'unknown' };
+};
 
 /** The hooks' DF_LEDGER_ROOT for `cwd` under `home`, straight from the shell helper. */
 function hookLedgerRoot(cwd: string, home: string): string {
@@ -114,6 +119,18 @@ describe('getLedgerRoot — the hooks\' ledger rule on real git (D-LEDGER-MAIN-W
   it('agrees with the hooks\' df_resolve_roots on every fixture', async () => {
     for (const [cwd, h] of [[main, home], [sub, home], [wt, home], [bareWt, home], [wt, main]] as const) {
       expect(await getLedgerRoot(cwd, { home: h }), cwd).toBe(hookLedgerRoot(cwd, h));
+    }
+  });
+
+  it('the settings resolver names the same root on every fixture (it reads CURATION there)', () => {
+    for (const [cwd, h] of [[main, home], [sub, home], [wt, home], [bareWt, home], [wt, main]] as const) {
+      const toplevel = execSync('git rev-parse --show-toplevel', { cwd, encoding: 'utf-8' }).trim();
+      vi.stubEnv('HOME', h);
+      try {
+        expect(SETTINGS.ledgerRootOf(toplevel), cwd).toEqual({ kind: 'root', root: hookLedgerRoot(cwd, h) });
+      } finally {
+        vi.unstubAllEnvs();
+      }
     }
   });
 });

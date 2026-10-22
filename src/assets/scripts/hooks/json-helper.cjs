@@ -45,9 +45,16 @@
 //                                          once; prints none | busy | busy claim |
 //                                          skipped tracked | skipped unknown | moved <mode>
 //                                          and its backup, cause and notes
+//   tracked-area <curation|memory|both> <root>
+//                                          Does git track files in the data folders of the area
+//                                          at the root? Prints tracked | untracked | unknown, and
+//                                          for unknown a second line `cause <word>`
 //
-// Every curation op above except claim-queue, release-claim and move-ledger first
-// refreshes the mtime of an existing queue claim — the heartbeat (D-OWNED-CLAIM).
+// Every curation op above except claim-queue, release-claim, move-ledger and tracked-area
+// first refreshes the mtime of an existing queue claim — the heartbeat (D-OWNED-CLAIM).
+// Where git tracks files in the curation data folders, or does not say whether it does,
+// every curation op refuses with kind `tracked`, exit 1 and an empty stdout, and changes
+// nothing; the answer is asked once per process.
 
 'use strict';
 
@@ -86,6 +93,21 @@ let curationMoveModule = null;
 function curationMove() {
   if (curationMoveModule === null) curationMoveModule = require('./lib/curation-move.cjs');
   return curationMoveModule;
+}
+
+/** The tracked-areas check, once loaded; see trackedAreas(). */
+let trackedAreasModule = null;
+
+/**
+ * The tracked-areas check, loaded on first use and memoized. Only the tracked-area op
+ * loads it from here: a leaf that requires node built-ins and the path helpers, never
+ * the store.
+ *
+ * @returns {object}
+ */
+function trackedAreas() {
+  if (trackedAreasModule === null) trackedAreasModule = require('./lib/tracked-areas.cjs');
+  return trackedAreasModule;
 }
 
 /** The bytes each read of stdin asks for. */
@@ -621,6 +643,26 @@ try {
         ...(moved.state === 'skipped' && moved.cause !== undefined ? [`cause ${moved.cause}`] : []),
         ...moved.notes.map(note => `note ${note}`),
       ].map(line => store.singleLine(line)).join('\n'));
+      break;
+    }
+
+    // -------------------------------------------------------------------------
+    // tracked-area <curation|memory|both> <root>
+    // Does git track files in the data folders of the area at the root
+    // (inspectTrackedAreaOnce, tracked-areas.cjs)? Not a curation op: it sends no
+    // heartbeat and loads only the check. The root is an argument, so the shell gate
+    // names the root it decided on; it stays one argv word, never a shell word. The
+    // answer is asked once per root and area for the life of the process.
+    // stdout: tracked | untracked | unknown, and for unknown a second line
+    // `cause <word>` (one fixed word that says why git did not answer)
+    // -------------------------------------------------------------------------
+    case 'tracked-area': {
+      const { AREA_PATHSPECS, inspectTrackedAreaOnce } = trackedAreas();
+      if (args.length !== 2 || !Object.prototype.hasOwnProperty.call(AREA_PATHSPECS, args[0])) {
+        exitWithUsage('tracked-area <curation|memory|both> <root> (the root is an absolute path)');
+      }
+      const { answer, cause } = inspectTrackedAreaOnce(args[1], args[0]);
+      process.stdout.write(answer === 'unknown' ? `unknown\ncause ${cause}\n` : `${answer}\n`);
       break;
     }
 

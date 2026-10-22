@@ -21,6 +21,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { waitForWorkerToFinish } from './helpers/poll-for-terminal-line.js';
 import { useWarmFakeExecutables } from './helpers/warm-fake-executable.js';
+import { snapshotTree, trackInGit } from './decisions/curation-fixtures.js';
 import { WORKER_AGENTS, validateWorkerValue } from '../src/core/agent-models.js';
 import { MEMORY_MIN_PERMISSION_VERSION } from '../src/cli/commands/memory.js';
 import { FORBIDDEN_ARGV } from './fixtures/forbidden-argv.js';
@@ -5380,4 +5381,234 @@ describe('S35: a batch that ends without a line break loses no turn (#523)', { t
       });
     });
   }
+});
+
+// =============================================================================
+// S36 — the memory worker pauses while git tracks files in the memory folder, or does not answer
+//
+// A folder that git tracks holds the repository's content, not devflow's data. The
+// detached worker asks whether git tracks files in the memory folder of its project root
+// after the switch re-check, and again once the claude run has ended. A paused area
+// ends the run with result=skip: nothing is read, claimed, written, swapped or stamped,
+// no notice and no denied-run marker is left, and a batch already claimed stays in
+// .processing. The ask is bounded, and a bound that is hit reads as "git did not answer".
+// =============================================================================
+describe('S36: the memory worker pauses while git tracks the memory folder, or does not answer', { timeout: LEAN_RUN_TIMEOUT_MS }, () => {
+  let projectDir: string;
+  let homeDir: string;
+  let shimDir: string;
+  let memFile: string;
+
+  makeWorkerFixture('emr-s36', (f) => {
+    ({ projectDir, homeDir, shimDir, memFile } = f);
+  });
+
+  const memoryDir = (): string => path.join(projectDir, '.devflow', 'memory');
+  const memoryFile = (name: string): string => path.join(memoryDir(), name);
+  const workerLog = (): string => fs.readFileSync(workerLogPath(projectDir, homeDir), 'utf-8');
+  const runLines = (): string[] => workerLog().split('\n').filter(line => line.includes('] Run: ')).map(line => line.slice(line.indexOf('Run: ')));
+  const REAL_GIT = spawnSync('bash', ['-c', 'command -v git'], { encoding: 'utf8' }).stdout.trim();
+  const PAUSED_START = 'SKIP: the memory area is paused (git tracks files in the memory folder, or did not answer); nothing read or written; no LLM run';
+  const PAUSED_LATE = 'SKIP: the memory area is paused (git tracks files in the memory folder, or did not answer); nothing swapped or stamped; the batch stays in .processing';
+  const SKIP_RUN_LINE = /^Run: cli=(unknown|2\.1\.293) argv=(none|lean) result=skip denials=(n\/a|unknown|\d+) removed=none$/;
+  const NOTICE_NAMES = ['.worker-notice-path', '.worker-notice-denied', '.worker-denied-once'];
+  const TWO_DENIALS = JSON.stringify({
+    subtype: 'success', is_error: false, num_turns: 2,
+    permission_denials: [{ tool_name: 'Write', tool_input: { content: 'x' } }, { tool_name: 'Write', tool_input: { content: 'x' } }],
+  });
+
+  /** Make git track a file of the memory folder, in the project's index. */
+  const trackMemoryFile = (): void => trackInGit(projectDir, ['.devflow/memory/tracked-note.txt'], { commit: true });
+
+  /**
+   * A `git` first on PATH that runs `onListing` (a bash snippet) when it is called for
+   * `ls-files`, and runs the real git for everything else and when the snippet returns.
+   */
+  function installGit(onListing: string): void {
+    writeFakeExecutable(
+      path.join(shimDir, 'git'),
+      `#!/bin/bash\nfor a in "$@"; do\n  if [ "$a" = ls-files ]; then\n    ${onListing}\n  fi\ndone\nexec "${REAL_GIT}" "$@"\n`,
+    );
+  }
+
+  /** One worker run against a recording fake claude. */
+  function run(options: RecordingOptions = {}, extraEnv: Record<string, string> = {}): RecordingClaude {
+    const rec = createRecordingClaude(shimDir, memoryDir(), HEALTHY_VERSION, options);
+    expect(runWorker(projectDir, homeDir, shimDir, extraEnv).exitCode).toBe(0);
+    return rec;
+  }
+
+  /** No file named as a notice or a marker stands in the memory folder. */
+  const expectNoNoticeFiles = (): void => {
+    for (const name of NOTICE_NAMES) {
+      expect(fs.existsSync(memoryFile(name)) || fs.existsSync(`${memoryFile(name)}.shown`), name).toBe(false);
+    }
+  };
+
+  /** The run claimed and drained its batch and swapped the memory in. */
+  const expectSwapCompleted = (): void => {
+    expect(fs.existsSync(memFile), 'working memory written').toBe(true);
+    expect(fs.existsSync(memoryFile('.pending-turns.processing')), 'batch drained').toBe(false);
+    expect(fs.existsSync(memoryFile('.last-refresh-ok')), 'success stamped').toBe(true);
+  };
+
+  it('control: an untracked project runs, swaps the memory in and leaves one skip-free Run line', () => {
+    run();
+
+    expectSwapCompleted();
+    expect(workerLog()).not.toContain('the memory area is paused');
+    expect(runLines()).toEqual(['Run: cli=2.1.293 argv=lean result=updated denials=unknown removed=none']);
+  });
+
+  describe.each<readonly [string, () => void]>([
+    ['git tracks a file of the memory folder', () => {
+      trackMemoryFile();
+    }],
+    ['git does not answer', () => {
+      installGit('exit 2');
+    }],
+  ])('%s', (_name, arrange) => {
+    it('stops before the binary check: nothing is read, claimed, written or noticed, and no claude runs', () => {
+      arrange();
+      const before = snapshotTree(memoryDir(), { stat: true });
+      const claimed = readQueueBytes(projectDir);
+
+      const rec = run();
+
+      expect(snapshotTree(memoryDir(), { stat: true }), 'the memory folder is as it was').toEqual(before);
+      expect(readQueueBytes(projectDir).equals(claimed), 'the queue is byte-identical').toBe(true);
+      expect(fs.existsSync(memoryFile('.pending-turns.processing')), 'no batch was claimed').toBe(false);
+      expect(fs.existsSync(memoryFile('.working-memory.lock')), 'no lock was taken').toBe(false);
+      expect(fs.existsSync(rec.probePidFile), 'the version probe did not run').toBe(false);
+      expect(fs.existsSync(rec.argvFile), 'no -p call').toBe(false);
+      expectNoNoticeFiles();
+      expect(workerLog().split('\n').filter(line => line.includes(PAUSED_START))).toHaveLength(1);
+      expect(runLines()).toHaveLength(1);
+      expect(runLines()[0]).toBe('Run: cli=unknown argv=none result=skip denials=n/a removed=none');
+    });
+
+    it('a recovery batch left by an earlier run stays in .processing, byte for byte', () => {
+      arrange();
+      const batch = memoryFile('.pending-turns.processing');
+      fs.writeFileSync(batch, '{"role":"assistant","content":"an earlier batch","ts":1}\n');
+      const bytes = fs.readFileSync(batch);
+
+      run();
+
+      expect(fs.readFileSync(batch).equals(bytes)).toBe(true);
+      expect(fs.existsSync(memoryFile('.pending-turns.jsonl')), 'the queue was not merged into the batch or removed').toBe(true);
+    });
+  });
+
+  it('looks again at the next run: once the files are untracked, the worker goes on', () => {
+    trackMemoryFile();
+    run();
+    expect(fs.existsSync(memFile), 'paused: no working memory').toBe(false);
+
+    execSync('git rm -q --cached -- .devflow/memory/tracked-note.txt', { cwd: projectDir, stdio: 'pipe' });
+    run();
+
+    expectSwapCompleted();
+  });
+
+  it('a project with no .git entry runs as before and makes no listing call for the check', () => {
+    fs.rmSync(path.join(projectDir, '.git'), { recursive: true, force: true });
+    const calls = path.join(shimDir, 'listing-calls.txt');
+    installGit(`echo called >> '${calls}'`);
+
+    run();
+
+    expectSwapCompleted();
+    expect(fs.existsSync(calls), 'git was not asked').toBe(false);
+  });
+
+  it('cuts a git that hangs at the probe bound, reads it as "did not answer" and stops the hung process', () => {
+    const pidFile = path.join(shimDir, 'git-pid.txt');
+    installGit(`echo $$ > '${pidFile}'; sleep 60; exit 2`);
+    const started = Date.now();
+
+    const rec = run({}, { DEVFLOW_BG_AREA_PROBE_SECS: '1' });
+
+    expect(Date.now() - started, 'the run ended at the bound, not at the hung git').toBeLessThan(30_000);
+    expect(fs.existsSync(pidFile), 'non-vacuity: the hanging git started').toBe(true);
+    const pid = Number(fs.readFileSync(pidFile, 'utf-8').trim());
+    expect(Number.isInteger(pid) && pid > 1).toBe(true);
+    expect(processExists(pid), 'the hung git is not left running').toBe(false);
+    expect(fs.existsSync(rec.argvFile), 'no -p call').toBe(false);
+    expect(workerLog()).toContain(PAUSED_START);
+    expect(runLines()).toEqual(['Run: cli=unknown argv=none result=skip denials=n/a removed=none']);
+    expectNoNoticeFiles();
+  });
+
+  describe('git starts to track a file of the memory folder during the run', () => {
+    const TRACK_DURING_RUN = "echo 'content of the repository' > .devflow/memory/later-note.txt; git add -f -- .devflow/memory/later-note.txt";
+
+    it('swaps nothing, stamps nothing and leaves the claimed batch in .processing', () => {
+      const claimed = readQueueBytes(projectDir);
+
+      const rec = run({ duringRun: TRACK_DURING_RUN });
+
+      expect(fs.existsSync(rec.argvFile), 'non-vacuity: the -p call ran').toBe(true);
+      expect(fs.existsSync(memFile), 'the working memory was not swapped in').toBe(false);
+      expect(fs.existsSync(memoryFile('.last-refresh-ok')), 'no success stamp').toBe(false);
+      expectClaimedRowsPreserved(projectDir, claimed);
+      expectNoNoticeFiles();
+      expect(fs.existsSync(memoryFile('.working-memory.lock')), 'the lock is released').toBe(false);
+      expect(workerLog()).toContain(PAUSED_LATE);
+      expect(runLines()).toHaveLength(1);
+      expect(runLines()[0]).toMatch(SKIP_RUN_LINE);
+      expect(runLines()[0]).toContain('result=skip');
+    });
+
+    it('control: a run whose write is refused leaves the denied-run marker', () => {
+      run({ resultJson: TWO_DENIALS, exitCode: 1, skipStagedWrite: true });
+
+      expect(fs.existsSync(memoryFile('.worker-denied-once'))).toBe(true);
+    });
+
+    it('a run whose write is refused leaves no denied-run marker and no notice', () => {
+      run({ resultJson: TWO_DENIALS, exitCode: 1, skipStagedWrite: true, duringRun: TRACK_DURING_RUN });
+
+      expectNoNoticeFiles();
+      expect(workerLog()).toContain(PAUSED_LATE);
+      expect(workerLog()).not.toContain('FAIL: Write denied by permission rule');
+    });
+  });
+
+  describe('a project root the worker cannot resolve', () => {
+    // `cd -P -- <root>` is the one call that resolves the root; only that call fails here.
+    const failRootResolution = (): Record<string, string> => {
+      const bashEnv = path.join(shimDir, 'bash-env.sh');
+      fs.writeFileSync(bashEnv, 'cd() { if [ "${1:-}" = -P ] && [ "${2:-}" = -- ]; then return 1; fi; builtin cd "$@"; }\n');
+      return { BASH_ENV: bashEnv };
+    };
+
+    it('control: an untracked project still gets the path notice', () => {
+      run({}, failRootResolution());
+
+      expect(workerLog()).toContain('SKIP: project root could not be resolved; no LLM run');
+      expect(fs.readFileSync(memoryFile('.worker-notice-path'), 'utf-8')).toBe('path\n');
+    });
+
+    it('a project whose memory folder git tracks gets no notice', () => {
+      trackMemoryFile();
+      const before = snapshotTree(memoryDir(), { stat: true });
+
+      run({}, failRootResolution());
+
+      expect(workerLog()).toContain('SKIP: project root could not be resolved; no LLM run');
+      expect(snapshotTree(memoryDir(), { stat: true })).toEqual(before);
+      expectNoNoticeFiles();
+    });
+
+    it('a project where git does not answer gets no notice', () => {
+      installGit('exit 2');
+      const before = snapshotTree(memoryDir(), { stat: true });
+
+      run({}, failRootResolution());
+
+      expect(snapshotTree(memoryDir(), { stat: true })).toEqual(before);
+      expectNoNoticeFiles();
+    });
+  });
 });

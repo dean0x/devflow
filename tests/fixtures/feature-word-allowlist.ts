@@ -123,13 +123,6 @@ export const FEATURE_WORD_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
       'session-start move finds the old folder.',
   },
   {
-    path: `${HOOKS}session-start-context`,
-    pattern: /\.devflow\/learning\/`?(?: or| to) `?\.devflow\/curation\//,
-    reason:
-      'The fixed notice of a skipped move, and the comment above it, name the pre-rename folder ' +
-      'and the current one, so the user sees which folders git tracks.',
-  },
-  {
     path: HOOKS,
     pattern: /\bold learning\/ (?:ledger )?(?:folder|name)/,
     reason:
@@ -158,6 +151,14 @@ export const FEATURE_WORD_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     reason:
       'The jq and node parses read the manifest under both keys, and a false in either one ' +
       'turns the feature off.',
+  },
+  {
+    path: `${HOOKS}queue-append`,
+    pattern: /\$\{_qs_dir\}\/learning(?:\.backup-\*(?:\/\*\*)?)?"|\.devflow\/learning\/\*\|/,
+    reason:
+      'The tracked-area check lists the pre-rename ledger folder and its backup folders beside ' +
+      'the current folder, and the queue gate maps a queue below the pre-rename folder to the ' +
+      'curation area. The lists are the ones the shared check holds.',
   },
   {
     path: `${HOOKS}session-start-context`,

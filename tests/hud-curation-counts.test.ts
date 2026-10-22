@@ -3,7 +3,7 @@
 // Validates active-row counting from decisions-ledger.jsonl, inactive-status
 // exclusion, and graceful fallback when the ledger is missing or unreadable.
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createRequire } from 'node:module';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -18,6 +18,19 @@ import { stripAnsi } from '../src/hud/colors.js';
 import type { CurationCountsData, GatherContext } from '../src/hud/types.js';
 import { curationMoveMarkerKey } from '../src/core/project-paths.js';
 import { getCurationMoveMarkerPath } from '../src/core/curation-move-notice.js';
+import { getLedgerRoot, LEDGER_ROOT_TIMEOUT_MS } from '../src/core/ledger-root.js';
+import { probeTrackedArea } from '../src/core/tracked-areas.js';
+import { pathWithFailingGit } from './decisions/curation-fixtures.js';
+
+vi.mock('../src/core/tracked-areas.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/core/tracked-areas.js')>();
+  return { ...actual, probeTrackedArea: vi.fn(actual.probeTrackedArea) };
+});
+
+vi.mock('../src/core/ledger-root.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/core/ledger-root.js')>();
+  return { ...actual, getLedgerRoot: vi.fn(actual.getLedgerRoot) };
+});
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const require = createRequire(import.meta.url);
@@ -251,6 +264,141 @@ describe('gatherLedgerCurationCounts resolves the ledger root like the hooks', {
 
   it('outside a git repository counts the cwd\'s ledger (the prior behaviour)', async () => {
     expect(await gatherLedgerCurationCounts(outside, { home: main })).toEqual({ decisions: 1, pitfalls: 0 });
+  });
+});
+
+// The ledger is counted only where git tracks nothing in the curation folders. The check asks
+// git once, only when the ledger stands, and shares the HUD's one-second budget with the root lookup.
+describe('gatherLedgerCurationCounts where git tracks files in the curation folders or does not answer (TP-41, TP-42)', { timeout: 30_000 }, () => {
+  let base: string;
+  let root: string;
+  let home: string;
+  const ledgerRel = path.join('.devflow', 'curation', 'decisions-ledger.jsonl');
+
+  const seedLedger = (): void => {
+    fs.mkdirSync(path.join(root, '.devflow', 'curation'), { recursive: true });
+    fs.writeFileSync(path.join(root, ledgerRel), [makeRow('decision'), makeRow('pitfall')].join('\n') + '\n');
+  };
+
+  beforeEach(() => {
+    vi.mocked(probeTrackedArea).mockClear();
+    base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hud-tracked-area-')));
+    root = path.join(base, 'project');
+    home = path.join(base, 'home');
+    fs.mkdirSync(root);
+    fs.mkdirSync(path.join(home, '.devflow', 'logs'), { recursive: true });
+    execSync('git init -q', { cwd: root, stdio: 'pipe' });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+
+  it('counts the ledger of a repository that tracks nothing in the curation folders', async () => {
+    seedLedger();
+
+    expect(await gatherLedgerCurationCounts(root, { home })).toEqual({ decisions: 1, pitfalls: 1 });
+  });
+
+  it.each([
+    ['the curation folder', path.join('.devflow', 'curation', 'decisions-log.jsonl')],
+    ['the old ledger folder', path.join('.devflow', 'learning', 'decisions-ledger.jsonl')],
+    ['a backup folder', path.join('.devflow', 'learning.backup-20261017T020304Z-ab12cd34', '.pending-turns.jsonl')],
+  ])('shows no counts when git tracks a file of %s', async (_name, tracked) => {
+    seedLedger();
+    fs.mkdirSync(path.dirname(path.join(root, tracked)), { recursive: true });
+    fs.writeFileSync(path.join(root, tracked), 'content of the repository\n');
+    execSync(`git add -f -- "${tracked}"`, { cwd: root, stdio: 'pipe' });
+
+    expect(await gatherLedgerCurationCounts(root, { home })).toBeNull();
+  });
+
+  it('shows no counts and no move notice when git tracks the old folder beside the new ledger', async () => {
+    seedLedger();
+    fs.mkdirSync(path.join(root, '.devflow', 'learning'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.devflow', 'learning', 'decisions-ledger.jsonl'), 'content of the repository\n');
+    execSync('git add -f -- .devflow/learning/decisions-ledger.jsonl', { cwd: root, stdio: 'pipe' });
+    fs.writeFileSync(getCurationMoveMarkerPath(home, root, 'tracked'), '');
+
+    expect(await gatherLedgerCurationCounts(root, { home })).toBeNull();
+  });
+
+  it('shows no counts when a .git entry stands and git does not answer', async () => {
+    seedLedger();
+    vi.stubEnv('PATH', pathWithFailingGit(base));
+
+    expect(await gatherLedgerCurationCounts(root, { home })).toBeNull();
+  });
+
+  it('makes no git call about the area when the ledger file is absent', async () => {
+    fs.mkdirSync(path.join(root, '.devflow', 'curation'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.devflow', 'curation', 'curation.json'), '{}\n');
+    execSync('git add -f -- .devflow/curation/curation.json', { cwd: root, stdio: 'pipe' });
+
+    expect(await gatherLedgerCurationCounts(root, { home })).toBeNull();
+    expect(probeTrackedArea).not.toHaveBeenCalled();
+  });
+
+  it('asks the check once, within the HUD budget, when the ledger stands', async () => {
+    seedLedger();
+
+    expect(await gatherLedgerCurationCounts(root, { home })).toEqual({ decisions: 1, pitfalls: 1 });
+    expect(probeTrackedArea).toHaveBeenCalledTimes(1);
+    const [calledRoot, area, options] = vi.mocked(probeTrackedArea).mock.calls[0];
+    expect([calledRoot, area]).toEqual([root, 'curation']);
+    expect(options?.timeoutMs).toBeGreaterThan(0);
+    expect(options?.timeoutMs).toBeLessThanOrEqual(LEDGER_ROOT_TIMEOUT_MS);
+  });
+
+  // The root lookup and the area check share one budget, so a slow lookup never lets the two
+  // waits add up past the HUD's overall limit. A fake clock stands in for the slow lookup.
+  describe('when the root lookup has used part of the budget', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    const slowLookup = (usedMs: number): void => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.mocked(getLedgerRoot).mockImplementationOnce(async (cwd, options) => {
+        const lookedUp = await vi.importActual<typeof import('../src/core/ledger-root.js')>('../src/core/ledger-root.js')
+          .then((actual) => actual.getLedgerRoot(cwd, options));
+        vi.advanceTimersByTime(usedMs);
+        return lookedUp;
+      });
+    };
+
+    it('gives the check only what is left of the budget', async () => {
+      seedLedger();
+      slowLookup(600);
+
+      expect(await gatherLedgerCurationCounts(root, { home })).toEqual({ decisions: 1, pitfalls: 1 });
+      expect(probeTrackedArea).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(probeTrackedArea).mock.calls[0][2]?.timeoutMs).toBeLessThanOrEqual(LEDGER_ROOT_TIMEOUT_MS - 600);
+    });
+
+    it('skips the check and shows no counts once the lookup has used the whole budget', async () => {
+      seedLedger();
+      slowLookup(LEDGER_ROOT_TIMEOUT_MS);
+
+      expect(await gatherLedgerCurationCounts(root, { home })).toBeNull();
+      expect(probeTrackedArea).not.toHaveBeenCalled();
+    });
+  });
+
+  it('cuts a git that hangs at the one-second budget and shows no counts', async () => {
+    seedLedger();
+    // git blocks on opening an index that is a pipe nobody writes to, and answers nothing.
+    execFileSync('mkfifo', [path.join(root, '.git', 'index')]);
+
+    const started = Date.now();
+    const data = await gatherLedgerCurationCounts(root, { home });
+    const elapsed = Date.now() - started;
+
+    expect(data).toBeNull();
+    expect(probeTrackedArea).toHaveBeenCalledTimes(1);
+    expect(elapsed, 'the check waited for git up to its budget').toBeGreaterThanOrEqual(LEDGER_ROOT_TIMEOUT_MS * 0.9);
+    expect(elapsed, 'the check is cut at its budget, not left to hang').toBeLessThan(LEDGER_ROOT_TIMEOUT_MS * 3);
   });
 });
 

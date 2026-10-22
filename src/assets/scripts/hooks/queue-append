@@ -29,6 +29,10 @@
 #   finds the old folder gone (the one-time move ran meanwhile) looks again and goes
 #   on in the new folder, so a capture never drops a row and never waits. Any other
 #   queue's folder is created if absent.
+#   A queue in an area that git tracks, or that git did not answer for, is paused: before
+#   the row is built, queue_tracked_area asks for the area the queue lies in, and a queue
+#   that is not untracked gets no row, no folder and no file. The skip is logged once. The
+#   check runs on every call, whether or not the queue's folder exists.
 #   After appending, truncates from 200 to the newest 100 lines under a lock
 #   (curation_lock_acquire on "<queue_file>.lock", 2s timeout), keeping mode 0600.
 #   The append itself is intentionally lock-free (accepted-class race shared with
@@ -40,7 +44,29 @@
 #   *_enabled flag is "true", with the root that queue lies below. Each queue is gated
 #   independently -- callers compute memory_enabled/curation_enabled themselves (see
 #   queue_read_gates below for the at-most-one-fork read of both). With neither queue
-#   enabled it builds nothing.
+#   enabled it builds nothing. A queue whose area is paused (see queue_tracked_area) reads
+#   as not enabled for the call, and nothing is built for it.
+#
+# queue_tracked_area <root> <curation|memory|both> [git|node]
+#   Does git track files in the data folders of the area at <root>? Sets
+#   DF_TRACKED_AREA_CURATION or DF_TRACKED_AREA_MEMORY (one variable per area) to
+#   `tracked`, `untracked` or `unknown`, and always returns 0. The area `both` is one
+#   call over the union of the two: it sets both variables, and a listing in it is
+#   followed by one call per area, so each variable names its own area. A root is asked
+#   once per area in a process. The shell twin of lib/tracked-areas.cjs, held to its
+#   answers by tests/decisions/tracked-area-parity.test.ts:
+#     - no `.git` entry (a file, a folder or a link) at the root: `untracked`, no call;
+#     - a root that is not an absolute path, whose physical parent holds a colon, or that
+#       can not be entered: `unknown`;
+#     - git mode (the default): one `git ls-files -z` over the area's pathspecs, with the
+#       leaf's environment scrub, a ceiling at the root's parent and the fsmonitor command
+#       off. Only the first byte of the listing is read. A byte read means `tracked`,
+#       whatever git's status (git ends on a closed pipe). With no byte, git status 0
+#       means `untracked`, and any other status `unknown`;
+#     - node mode: the json-helper `tracked-area` op, which bounds the call in time. Without
+#       node it runs as git mode; an answer that is not one of the three words is `unknown`.
+#   The capture hooks ask in git mode, with no process but git. The session start asks in
+#   node mode, so a hung git is cut.
 #
 # queue_read_gates <manifest_path> [<root>]
 #   Reads BOTH switches, `memory` and `curation` (curation is read under both of
@@ -245,7 +271,194 @@ _qar_trim_overflow() {
   return 0
 }
 
+# --- The tracked-area gate: no capture into a folder that git tracks ---
+#
+# A folder that git tracks holds the repository's content, not devflow's data, so a
+# capture writes nothing into it, and also when git did not answer (queue_tracked_area,
+# documented above). The check runs before the row is built and before any folder is
+# made, on every call, whether or not the queue's folder exists.
+
+# _qta_specs <curation|memory|both> -- sets the array _QTA_SPECS to the pathspecs of the
+# area: the shell twin of AREA_PATHSPECS in lib/tracked-areas.cjs, in the leaf's order and
+# spelling (tests/decisions/tracked-area-parity.test.ts holds the two equal, element by
+# element). `.devflow` is spelled twice, the second time with the fl ligature (U+FB02,
+# bytes ef ac 82), which a case-folding file system opens as the same name. The `.devflow`
+# entry itself (a link, a gitlink or a plain file) stands over every folder: the character
+# class keeps `glob` from matching it as a leading directory. Fails for any other word.
+_qta_specs() {
+  local _qs_fl=$'\xef\xac\x82' _qs_dir="" _qs_curation=() _qs_memory=() _qs_entry=()
+  for _qs_dir in ".devflow" ".dev${_qs_fl}ow"; do
+    _qs_curation+=(
+      ":(icase,literal)${_qs_dir}/learning"
+      ":(icase,literal)${_qs_dir}/curation"
+      ":(icase,glob)${_qs_dir}/learning.backup-*"
+      ":(icase,glob)${_qs_dir}/learning.backup-*/**"
+    )
+    _qs_memory+=(":(icase,literal)${_qs_dir}/memory")
+    _qs_entry+=(":(icase,glob)[.]${_qs_dir#.}")
+  done
+  case "${1:-}" in
+    curation) _QTA_SPECS=("${_qs_curation[@]}" "${_qs_entry[@]}") ;;
+    memory) _QTA_SPECS=("${_qs_memory[@]}" "${_qs_entry[@]}") ;;
+    both) _QTA_SPECS=("${_qs_curation[@]}" "${_qs_entry[@]}" "${_qs_memory[@]}") ;;
+    *) _QTA_SPECS=(); return 1 ;;
+  esac
+  return 0
+}
+
+# _qta_probe <root> <curation|memory|both> <git|node> -- sets _QTA_ANSWER to `tracked`,
+# `untracked` or `unknown`, as queue_tracked_area documents. Always returns 0.
+#
+# The git mode reads one byte of the listing and ends. Under bash 3.2 with errexit set the
+# pipeline sits in an `if` condition (an empty listing makes `read` fail, and a failing
+# condition does not end the shell), and PIPESTATUS is copied in both arms before any other
+# command resets it: the second element is the reader's status, the first git's. Nothing
+# follows the pipeline in an `||` list. The `cd -P` runs inside the subshell, so the
+# caller's directory never changes, and git runs there with the variables that redirect it
+# removed (the list is GIT_REDIRECT_VARIABLES of the leaf), a fixed locale, no optional
+# lock, and the root's physical parent as its ceiling.
+_qta_probe() {
+  local _qp_root="${1:-}" _qp_area="${2:-}" _qp_mode="${3:-git}" _qp_out="" _qp_ceiling="" _qp_c="" _qp_st=()
+  _QTA_ANSWER="unknown"
+  case "$_qp_root" in /*) ;; *) return 0 ;; esac
+  if [ ! -e "$_qp_root/.git" ] && [ ! -L "$_qp_root/.git" ]; then
+    _QTA_ANSWER="untracked"
+    return 0
+  fi
+  if [ "$_qp_mode" = "node" ] && [ "${_HAS_NODE:-}" = "true" ] && [ -n "${_JSON_HELPER:-}" ]; then
+    case "$_qp_area" in curation|memory|both) ;; *) return 0 ;; esac
+    _qp_out=$(node "$_JSON_HELPER" tracked-area "$_qp_area" "$_qp_root" 2>/dev/null) || _qp_out=""
+    _qp_out="${_qp_out%%$'\n'*}"
+    case "$_qp_out" in tracked|untracked|unknown) _QTA_ANSWER="$_qp_out" ;; esac
+    return 0
+  fi
+  _qta_specs "$_qp_area" || return 0
+  if (
+      cd -P "$_qp_root" >/dev/null 2>&1 || exit 1
+      _qp_ceiling="${PWD%/*}"
+      [ -n "$_qp_ceiling" ] || _qp_ceiling="/"
+      case "$_qp_ceiling" in *:*) exit 1 ;; esac
+      unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_ICASE_PATHSPECS
+      export LC_ALL=C GIT_OPTIONAL_LOCKS=0 GIT_CEILING_DIRECTORIES="$_qp_ceiling"
+      exec git --no-literal-pathspecs -c core.fsmonitor=false ls-files -z -- "${_QTA_SPECS[@]}"
+    ) </dev/null 2>/dev/null | { IFS= read -r -n 1 _qp_c; }; then
+    _qp_st=("${PIPESTATUS[@]}")
+  else
+    _qp_st=("${PIPESTATUS[@]}")
+  fi
+  if [ "${#_qp_st[@]}" -eq 2 ]; then
+    if [ "${_qp_st[1]}" -eq 0 ]; then
+      _QTA_ANSWER="tracked"
+    elif [ "${_qp_st[0]}" -eq 0 ]; then
+      _QTA_ANSWER="untracked"
+    fi
+  fi
+  return 0
+}
+
+# _qta_ask <root> <curation|memory> <git|node> -- sets the area's variable, unless this
+# process already asked for that root and area. Always returns 0.
+_qta_ask() {
+  case "$2" in
+    curation)
+      if [ "${_QTA_ASKED_CURATION:-}" != "r$1" ]; then
+        _qta_probe "$1" curation "$3"
+        DF_TRACKED_AREA_CURATION="$_QTA_ANSWER"
+        _QTA_ASKED_CURATION="r$1"
+      fi
+      ;;
+    memory)
+      if [ "${_QTA_ASKED_MEMORY:-}" != "r$1" ]; then
+        _qta_probe "$1" memory "$3"
+        DF_TRACKED_AREA_MEMORY="$_QTA_ANSWER"
+        _QTA_ASKED_MEMORY="r$1"
+      fi
+      ;;
+  esac
+  return 0
+}
+
+queue_tracked_area() {
+  local _qa_root="${1:-}" _qa_area="${2:-}" _qa_mode="${3:-git}"
+  case "$_qa_area" in
+    curation|memory)
+      _qta_ask "$_qa_root" "$_qa_area" "$_qa_mode"
+      ;;
+    both)
+      if [ "${_QTA_ASKED_CURATION:-}" != "r$_qa_root" ] || [ "${_QTA_ASKED_MEMORY:-}" != "r$_qa_root" ]; then
+        _qta_probe "$_qa_root" both "$_qa_mode"
+        if [ "$_QTA_ANSWER" = "tracked" ]; then
+          # The union listed something: one call per area says which.
+          _QTA_ASKED_CURATION=""
+          _QTA_ASKED_MEMORY=""
+          _qta_ask "$_qa_root" curation "$_qa_mode"
+          _qta_ask "$_qa_root" memory "$_qa_mode"
+        else
+          DF_TRACKED_AREA_CURATION="$_QTA_ANSWER"
+          DF_TRACKED_AREA_MEMORY="$_QTA_ANSWER"
+          _QTA_ASKED_CURATION="r$_qa_root"
+          _QTA_ASKED_MEMORY="r$_qa_root"
+        fi
+      fi
+      ;;
+  esac
+  return 0
+}
+
+# _qar_gate <memory_root> <memory_on> <curation_root> <curation_on> -- the one gate both
+# append functions use. Sets _QAR_MEMORY_ON and _QAR_CURATION_ON to the flags as given,
+# except that a queue whose area is not `untracked` reads "false" (paused), with one fixed
+# log line. Only an enabled queue is asked about. When both are enabled at one root, one
+# call over the union answers for both (queue_tracked_area `both`). Always returns 0.
+_qar_gate() {
+  local _qg_mroot="$1" _qg_mon="$2" _qg_croot="$3" _qg_con="$4"
+  if [ "$_qg_mon" = "true" ] && [ "$_qg_con" = "true" ] && [ "$_qg_mroot" = "$_qg_croot" ]; then
+    queue_tracked_area "$_qg_mroot" both git
+  else
+    if [ "$_qg_mon" = "true" ]; then queue_tracked_area "$_qg_mroot" memory git; fi
+    if [ "$_qg_con" = "true" ]; then queue_tracked_area "$_qg_croot" curation git; fi
+  fi
+  if [ "$_qg_mon" = "true" ] && [ "${DF_TRACKED_AREA_MEMORY:-unknown}" != "untracked" ]; then
+    _qg_mon="false"
+    log "Queue skipped: the memory area is paused (git tracks files in its data folders, or did not answer); nothing written"
+  fi
+  if [ "$_qg_con" = "true" ] && [ "${DF_TRACKED_AREA_CURATION:-unknown}" != "untracked" ]; then
+    _qg_con="false"
+    log "Queue skipped: the curation area is paused (git tracks files in its data folders, or did not answer); nothing written"
+  fi
+  _QAR_MEMORY_ON="$_qg_mon"
+  _QAR_CURATION_ON="$_qg_con"
+  return 0
+}
+
+# _qar_area_of <root> <queue_file> -- sets _QAR_AREA to the area the queue lies in:
+# `memory` below <root>/.devflow/memory, `curation` below the ledger folder (either name),
+# and `both` for a queue in neither, which is paused when either area is.
+_qar_area_of() {
+  case "$2" in
+    "$1"/.devflow/memory/*) _QAR_AREA="memory" ;;
+    "$1"/.devflow/learning/*|"$1"/.devflow/curation/*) _QAR_AREA="curation" ;;
+    *) _QAR_AREA="both" ;;
+  esac
+  return 0
+}
+
 queue_append_row() {
+  _qar_area_of "$1" "$2"
+  case "$_QAR_AREA" in
+    memory)
+      _qar_gate "$1" true "" false
+      if [ "$_QAR_MEMORY_ON" != "true" ]; then return 0; fi
+      ;;
+    curation)
+      _qar_gate "" false "$1" true
+      if [ "$_QAR_CURATION_ON" != "true" ]; then return 0; fi
+      ;;
+    *)
+      _qar_gate "$1" true "$1" true
+      if [ "$_QAR_MEMORY_ON" != "true" ] || [ "$_QAR_CURATION_ON" != "true" ]; then return 0; fi
+      ;;
+  esac
   _qar_build_row "$3" "$4" "$5" || return 0
   if _qar_append "$1" "$2" "$_QAR_ROW"; then _qar_trim_overflow "$_QAR_FILE"; fi
   return 0
@@ -257,6 +470,10 @@ queue_append_both() {
   local _qab_memory_enabled="$5" _qab_curation_enabled="$6"
   local _qab_role="$7" _qab_content="$8" _qab_ts="$9" _qab_row=""
 
+  # A paused queue reads as not enabled: the gate comes before the row is built.
+  _qar_gate "$_qab_memory_root" "$_qab_memory_enabled" "$_qab_curation_root" "$_qab_curation_enabled"
+  _qab_memory_enabled="$_QAR_MEMORY_ON"
+  _qab_curation_enabled="$_QAR_CURATION_ON"
   if [ "$_qab_memory_enabled" != "true" ] && [ "$_qab_curation_enabled" != "true" ]; then return 0; fi
   # One row for both queues: it is built once, and each enabled queue takes the same line.
   _qar_build_row "$_qab_role" "$_qab_content" "$_qab_ts" || return 0

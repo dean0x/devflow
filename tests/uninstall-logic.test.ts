@@ -10,7 +10,7 @@ import { TRACKER_ATTEMPTS_NAMES, TRACKER_PROVIDER_IDS, TRACKER_STAGED_PREFIX } f
 import { modelCacheDir } from '../src/core/cache.js';
 import { CLAUDE_MD_AUDIT_STAMP_FILE, CLAUDE_MD_AUDIT_STAMP_TMP_PREFIX } from '../src/core/claude-md-audit.js';
 import { createRequire } from 'module';
-import { PROJECT_PATHS } from './decisions/curation-fixtures.js';
+import { PROJECT_PATHS, initGitRepo, pathWithFailingGit, trackInGit } from './decisions/curation-fixtures.js';
 import { LEGACY_SKILL_NAMES } from '../src/targets/claude-code/legacy.js';
 import { DEVFLOW_GITIGNORE_BLOCK, DEVFLOW_TRACKED_PATHS } from '../src/targets/claude-code/post-install.js';
 
@@ -3209,6 +3209,7 @@ describe('formatProjectDataPlan', () => {
       dir: '/repo/.devflow',
       remove: [{ name: 'config.json', isDir: false }, { name: 'memory', isDir: true }],
       keep: [{ name: 'features', isDir: true }, { name: 'policy.json', isDir: false }],
+      keepPaused: [],
     });
     expect(lines).toEqual([
       'Project data in /repo/.devflow/:',
@@ -3218,8 +3219,78 @@ describe('formatProjectDataPlan', () => {
   });
 
   it('says so when nothing tracked is present', () => {
-    const lines = formatProjectDataPlan({ dir: '/repo/.devflow', remove: [{ name: 'memory', isDir: true }], keep: [] });
+    const lines = formatProjectDataPlan({ dir: '/repo/.devflow', remove: [{ name: 'memory', isDir: true }], keep: [], keepPaused: [] });
     expect(lines[2]).toBe('  Keep (shared via git): (none)');
+  });
+
+  it('adds a keep line for the entries of a data area that git tracks or did not answer for', () => {
+    const lines = formatProjectDataPlan({
+      dir: '/repo/.devflow',
+      remove: [{ name: 'config.json', isDir: false }],
+      keep: [{ name: 'features', isDir: true }],
+      keepPaused: [{ name: 'curation', isDir: true }, { name: 'memory', isDir: true }],
+    });
+    expect(lines).toEqual([
+      'Project data in /repo/.devflow/:',
+      '  Remove: config.json',
+      '  Keep (shared via git): features/',
+      '  Keep (git tracks them, or git did not answer): curation/, memory/',
+    ]);
+  });
+
+  it('adds no keep line when no data area is kept', () => {
+    const lines = formatProjectDataPlan({ dir: '/repo/.devflow', remove: [{ name: 'memory', isDir: true }], keep: [], keepPaused: [] });
+    expect(lines).toHaveLength(3);
+  });
+});
+
+describe('partitionProjectData keeps the entries of a paused data area (TP-43)', () => {
+  const ENTRIES = [
+    { name: 'curation', isDir: true },
+    { name: 'learning', isDir: true },
+    { name: 'learning.backup-20261017T020304Z-ab12cd34', isDir: true },
+    { name: 'memory', isDir: true },
+    { name: 'config.json', isDir: false },
+    { name: 'features', isDir: true },
+  ];
+  const names = (entries: ReadonlyArray<{ name: string }>): string[] => entries.map((e) => e.name);
+
+  it('removes the curation and memory entries when no area is paused', () => {
+    const { remove, keep, keepPaused } = partitionProjectData(ENTRIES);
+    expect(names(remove)).toEqual(['config.json', 'curation', 'learning', 'learning.backup-20261017T020304Z-ab12cd34', 'memory']);
+    expect(names(keep)).toEqual(['features']);
+    expect(keepPaused).toEqual([]);
+  });
+
+  it('keeps the curation folder, the old ledger folder and the backup folders when the curation area is paused', () => {
+    const { remove, keep, keepPaused } = partitionProjectData(ENTRIES, new Set(['curation'] as const));
+    expect(names(keepPaused)).toEqual(['curation', 'learning', 'learning.backup-20261017T020304Z-ab12cd34']);
+    expect(names(remove)).toEqual(['config.json', 'memory']);
+    expect(names(keep)).toEqual(['features']);
+  });
+
+  it('keeps the memory folder when the memory area is paused', () => {
+    const { remove, keepPaused } = partitionProjectData(ENTRIES, new Set(['memory'] as const));
+    expect(names(keepPaused)).toEqual(['memory']);
+    expect(names(remove)).toEqual(['config.json', 'curation', 'learning', 'learning.backup-20261017T020304Z-ab12cd34']);
+  });
+
+  it('matches the folder names without regard to ASCII letter case, and whatever the kind of entry', () => {
+    const { remove, keepPaused } = partitionProjectData(
+      [{ name: 'Memory', isDir: true }, { name: 'CURATION', isDir: false }, { name: 'config.json', isDir: false }],
+      new Set(['curation', 'memory'] as const),
+    );
+    expect(names(keepPaused)).toEqual(['CURATION', 'Memory']);
+    expect(names(remove)).toEqual(['config.json']);
+  });
+
+  it('does not take a lookalike name for a data folder', () => {
+    const { remove, keepPaused } = partitionProjectData(
+      [{ name: 'memory-notes', isDir: true }, { name: 'curation.json', isDir: false }, { name: 'learning.json', isDir: false }],
+      new Set(['curation', 'memory'] as const),
+    );
+    expect(keepPaused).toEqual([]);
+    expect(names(remove)).toEqual(['curation.json', 'learning.json', 'memory-notes']);
   });
 });
 
@@ -3565,5 +3636,196 @@ describe('a symlinked <gitRoot>/.devflow is never followed (#391)', () => {
     });
 
     expect(resolution.kind).toBe('plan');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The project-data step keeps the data folders that git tracks, or cannot answer for (TP-43).
+// ---------------------------------------------------------------------------
+
+describe('the project-data step keeps a data area that git tracks files in, or did not answer for', { timeout: 30_000 }, () => {
+  let tmpHome: string;
+  let repo: string;
+  let devflow: string;
+  const BACKUP = 'learning.backup-20261017T020304Z-ab12cd34';
+
+  /** Every data folder the step knows, plus a file and a folder that are no data area. */
+  async function seedDevflow(): Promise<void> {
+    for (const dir of ['curation', 'learning', BACKUP, 'memory', 'docs']) {
+      await fs.mkdir(path.join(devflow, dir), { recursive: true });
+      await fs.writeFile(path.join(devflow, dir, 'note.md'), `content of ${dir}\n`);
+    }
+    await fs.writeFile(path.join(devflow, 'config.json'), '{}\n');
+  }
+
+  beforeEach(async () => {
+    tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-keep-home-'));
+    vi.stubEnv('HOME', tmpHome);
+    repo = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-keep-repo-')));
+    devflow = path.join(repo, '.devflow');
+    await fs.mkdir(devflow);
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await fs.rm(repo, { recursive: true, force: true });
+    await fs.rm(tmpHome, { recursive: true, force: true });
+  });
+
+  const resolve = (probe?: Parameters<typeof resolveProjectDataPlan>[0]['probe']) =>
+    resolveProjectDataPlan({ gitRoot: repo, homeDir: tmpHome, machineDevflowDir: path.join(tmpHome, '.devflow'), probe });
+  const planOf = async (probe?: Parameters<typeof resolveProjectDataPlan>[0]['probe']) => {
+    const resolution = await resolve(probe);
+    if (resolution.kind !== 'plan') throw new Error(`expected a plan, got ${resolution.reason}`);
+    return resolution.plan;
+  };
+  const names = (entries: ReadonlyArray<{ name: string }>): string[] => entries.map((e) => e.name);
+
+  describe('with the check injected', () => {
+    beforeEach(seedDevflow);
+
+    it('removes every data folder where the check answers untracked for both areas', async () => {
+      const plan = await planOf(async () => 'untracked');
+      expect(names(plan.remove)).toEqual(['config.json', 'curation', 'docs', 'learning', BACKUP, 'memory']);
+      expect(plan.keepPaused).toEqual([]);
+    });
+
+    it.each(['tracked', 'unknown'] as const)('keeps the curation, old ledger and backup folders where the curation area answers %s', async (answer) => {
+      const plan = await planOf(async (_root, area) => (area === 'curation' ? answer : 'untracked'));
+      expect(names(plan.keepPaused)).toEqual(['curation', 'learning', BACKUP]);
+      expect(names(plan.remove)).toEqual(['config.json', 'docs', 'memory']);
+    });
+
+    it.each(['tracked', 'unknown'] as const)('keeps the memory folder where the memory area answers %s', async (answer) => {
+      const plan = await planOf(async (_root, area) => (area === 'memory' ? answer : 'untracked'));
+      expect(names(plan.keepPaused)).toEqual(['memory']);
+      expect(names(plan.remove)).toEqual(['config.json', 'curation', 'docs', 'learning', BACKUP]);
+    });
+
+    it('treats a check that fails to answer as unknown', async () => {
+      const plan = await planOf(async () => { throw new Error('the check broke'); });
+      expect(names(plan.keepPaused)).toEqual(['curation', 'learning', BACKUP, 'memory']);
+      expect(names(plan.remove)).toEqual(['config.json', 'docs']);
+    });
+
+    it('asks the git root, once for each area that has an entry, and not for an area with none', async () => {
+      await fs.rm(path.join(devflow, 'memory'), { recursive: true });
+      const asked: string[] = [];
+
+      await planOf(async (root, area) => { asked.push(`${area}@${root}`); return 'untracked'; });
+
+      expect(asked).toEqual([`curation@${repo}`]);
+    });
+  });
+
+  describe('with the real check', () => {
+    beforeEach(async () => {
+      initGitRepo(repo);
+      await seedDevflow();
+    });
+
+    it('keeps the memory folder that git tracks, and removes the curation folders that it does not', async () => {
+      trackInGit(repo, '.devflow/memory/note.md');
+
+      const plan = await planOf();
+
+      expect(names(plan.keepPaused)).toEqual(['memory']);
+      expect(names(plan.remove)).toEqual(['config.json', 'curation', 'docs', 'learning', BACKUP]);
+    });
+
+    it('keeps the curation folders when git tracks a file of the old ledger folder, and removes the memory folder', async () => {
+      trackInGit(repo, '.devflow/learning/note.md');
+
+      const plan = await planOf();
+
+      expect(names(plan.keepPaused)).toEqual(['curation', 'learning', BACKUP]);
+      expect(names(plan.remove)).toEqual(['config.json', 'docs', 'memory']);
+    });
+
+    it('keeps both areas when git does not answer', async () => {
+      vi.stubEnv('PATH', pathWithFailingGit(tmpHome));
+
+      const plan = await planOf();
+
+      expect(names(plan.keepPaused)).toEqual(['curation', 'learning', BACKUP, 'memory']);
+      expect(names(plan.remove)).toEqual(['config.json', 'docs']);
+    });
+
+    it('removes both areas where git tracks nothing in them', async () => {
+      const plan = await planOf();
+
+      expect(plan.keepPaused).toEqual([]);
+      expect(names(plan.remove)).toEqual(['config.json', 'curation', 'docs', 'learning', BACKUP, 'memory']);
+    });
+  });
+
+  it('makes no git call for a project with no .git entry', async () => {
+    await seedDevflow();
+    await fs.rm(path.join(repo, '.git'), { recursive: true, force: true });
+    vi.stubEnv('PATH', pathWithFailingGit(tmpHome));
+
+    const plan = await planOf();
+
+    expect(plan.keepPaused).toEqual([]);
+    expect(names(plan.remove)).toEqual(['config.json', 'curation', 'docs', 'learning', BACKUP, 'memory']);
+  });
+
+  describe('the cleanup phase and the dry run, in a repository that tracks the memory folder', () => {
+    const TRACKED = '.devflow/memory/WORKING-MEMORY.md';
+
+    beforeEach(async () => {
+      initGitRepo(repo);
+      await seedDevflow();
+      await fs.writeFile(path.join(devflow, 'memory', 'WORKING-MEMORY.md'), '## Now\ncommitted notes\n');
+      trackInGit(repo, TRACKED, { commit: true });
+    });
+
+    it('removes what git does not track, keeps the tracked folder byte-identical, and says so', async () => {
+      const before = await projectTree(path.join(devflow, 'memory'));
+      const { messages, confirm } = recordingConfirm(true);
+
+      const out = await captureStdout(() => runCleanupPhase({
+        scopesToUninstall: [], keepDocs: false, verbose: false, cwd: repo, isTTY: true, confirm,
+      }));
+
+      expect(await projectTree(path.join(devflow, 'memory'))).toEqual(before);
+      expect((await fs.readdir(devflow)).sort()).toEqual(['memory']);
+      expect(messages).toEqual([`Remove the project data listed above from ${devflow}/?`]);
+      expect(out).toContain('Keep (git tracks them, or git did not answer): memory/');
+      expect(out).toContain('Kept: memory/ (git tracks them, or git did not answer)');
+    });
+
+    it('leaves everything and says so when the tracked folder is all that stands', async () => {
+      for (const entry of await fs.readdir(devflow)) {
+        if (entry !== 'memory') await fs.rm(path.join(devflow, entry), { recursive: true, force: true });
+      }
+      const before = await projectTree(devflow);
+      const { messages, confirm } = recordingConfirm(true);
+
+      const out = await captureStdout(() => runCleanupPhase({
+        scopesToUninstall: [], keepDocs: false, verbose: false, cwd: repo, isTTY: true, confirm,
+      }));
+
+      expect(messages, 'there is nothing to remove, so nothing is asked').toEqual([]);
+      expect(await projectTree(devflow)).toEqual(before);
+      expect(out).toContain('holds only files shared via git, and memory/, which stay: git tracks them, or git did not answer');
+    });
+
+    it('the dry run lists the tracked folder as kept, never as removed', async () => {
+      const before = await projectTree(devflow);
+      vi.spyOn(process, 'cwd').mockReturnValue(repo);
+      try {
+        const out = await captureStdout(() => runDryRunPhase({
+          scopesToUninstall: [], isSelectiveUninstall: false, selectedPlugins: [], installedPlugins: [],
+        }));
+
+        expect(out).toContain(`${path.join(devflow, 'memory')}/ (kept: git tracks it, or git did not answer)`);
+        expect(out).not.toContain(`${path.join(devflow, 'memory')}/ (if confirmed)`);
+        expect(out).toContain(`${path.join(devflow, 'docs')}/ (if confirmed)`);
+        expect(await projectTree(devflow), 'a dry run writes nothing').toEqual(before);
+      } finally {
+        vi.mocked(process.cwd).mockRestore();
+      }
+    });
   });
 });

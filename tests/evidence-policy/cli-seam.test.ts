@@ -332,6 +332,15 @@ describe('the --status helpers over the settings layer (D-FEATURES-NARROW-ONLY)'
       .toBe('disabled (.devflow/project.json is unreadable)');
     expect(narrowedSwitchLabel(stub(failed), { dir: repo }, 'memory')).toBeNull();
     expect(narrowedSwitchLabel(stub(failed), { dir: repo }, 'curation')).toBeNull();
+
+    // The memory and curation switches of an unreadable resolution are the machine's, narrowed
+    // by what git tracks: no file turned them off, so a closed one carries no label.
+    const closed = { on: false, source: 'machine' as const };
+    const gitNarrowed = { ...failed, switches: { ...failed.switches, memory: closed, curation: closed } };
+    expect(narrowedSwitchLabel(stub(gitNarrowed), { dir: repo }, 'memory')).toBeNull();
+    expect(narrowedSwitchLabel(stub(gitNarrowed), { dir: repo }, 'curation')).toBeNull();
+    expect(narrowedSwitchLabel(stub(gitNarrowed), { dir: repo }, 'knowledge'))
+      .toBe('disabled (.devflow/project.json is unreadable)');
     expect(repoComplianceStatusLines(stub(failed), { dir: repo }))
       .toEqual(['Repository: generic controls only (.devflow/project.json is unreadable)', 'Effective here: generic controls only (this machine + the default branch + this checkout)']);
 
