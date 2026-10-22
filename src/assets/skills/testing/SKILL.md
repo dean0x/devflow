@@ -130,6 +130,7 @@ Quarantine flaky tests immediately — a suite that sometimes passes is worse th
 ## Quality Gates [4][8][17]
 
 - [ ] Setup <10 lines; use fakes over mocks for complex dependencies [1]
+- [ ] Each new assertion would fail, not error, with the change reverted: its RED run counts, else a bad input or a temporary uncommitted revert
 - [ ] All branches covered: happy path + errors + edge cases
 - [ ] Test names describe expected behavior [4]
 - [ ] Tests follow Arrange-Act-Assert structure [17]
