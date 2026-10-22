@@ -24,7 +24,7 @@ export const LEVEL_CMDS: readonly LevelCmd[] = ['implement', 'resolve']
 /** The rows that the reference of each command holds, as the lines of the file. A row joins the list in the change that decides it. */
 export const DECIDED_ROWS: Readonly<Record<LevelCmd, readonly string[]>> = {
   implement: ['| 3 Polish | skip | skip |', '| 4 Self-Review | - | apply: harden-scope |', '| 5 Alignment Check | pass level; apply: single-pass | pass level; apply: single-pass |'],
-  resolve: ['| 6 Polish | skip | skip |'],
+  resolve: ['| 2 Global Triage | pass level | pass level |', '| 6 Polish | skip | skip |'],
 }
 
 /** How a command writes a Polish spawn: the `subagent_type` argument of a prose or block call, or the `agentType` option of a dynamic-build call. */

@@ -86,7 +86,7 @@ Applies to `/code-review` and `/resolve`. On public repositories, Devflow posts 
 Processes all issues from `/code-review` reports through a validation/fix split:
 
 1. **Triage** — A single Triage agent (opus) applies the blast-radius disposition matrix to every issue: FIX_NOW / FALSE_POSITIVE / BY_DESIGN / FIX_SEPARATE / TECH_DEBT / ESCALATED / DUPLICATE
-2. **Fix** — Parallel Code agents (sonnet) fix only FIX_NOW issues using Standard or Careful protocols
+2. **Fix** — Parallel Code agents (sonnet) fix only FIX_NOW issues using the Standard, Careful or prose-only protocol
 3. **Verify** — A Validate agent (haiku) gate runs build/typecheck/lint/test; up to 2 fix-retry cycles; single push fires after this gate (pass or fail)
 4. **CI Gate** — Check PR CI status (conditional — skipped if no fixes or Verification Gate failed)
 5. **Manage Debt** — FIX_SEPARATE and TECH_DEBT items become tracked manage-debt tickets
@@ -96,7 +96,7 @@ Processes all issues from `/code-review` reports through a validation/fix split:
 9. **Merge Readiness** — Under a `required` evidence policy, a report-only check: no unresolved threads, an approving review, passing CI, every TP verified (or a test-plan exception) and a trusted non-author approval
 10. **Report** — Write resolution summary with Verification, By Design, Fix Separately, and Escalations sections; duplicate findings reported by multiple Review agents are collapsed via the DUPLICATE verdict so Statistics counts reflect unique issues
 
-**Gate level.** Each worktree keeps its own [gate level](cli-reference.md#gate-level). When any worktree is at `standard` or `lean`, `/resolve` reads its level reference once per run and applies each row at that worktree's level. Global Triage is one spawn for all worktrees, so it uses the strictest level in the run. At `standard` and `lean`, `/resolve` skips Polish (Phase 6) in that worktree; `full` keeps it. The display and `resolution-summary.md` name the level. If the reference cannot be read, `/resolve` applies no row in any worktree, keeps every level and says `level reference unreadable: no level rows applied`. No level changes the Triage security gate or the ESCALATED route. The Verification Gate, the CI gate and the compliance directive run at every level.
+**Gate level.** Each worktree keeps its own [gate level](cli-reference.md#gate-level). When any worktree is at `standard` or `lean`, `/resolve` reads its level reference once per run and applies each row at that worktree's level. Global Triage is one spawn for all worktrees, so it uses the strictest level in the run. At `standard` and `lean`, `/resolve` skips Polish (Phase 6) in that worktree; `full` keeps it. `/resolve` applies severity tiers at `standard` and `lean`: it fixes the findings that it keeps, fixes a prose-only MEDIUM finding with text edits alone, and sends lower findings to one backlog issue through manage-debt. A security finding is fixed or escalated at every level, and `full` still fixes a pre-existing finding in a touched file. One `full` worktree gives every worktree full triage with no tiers. The display and `resolution-summary.md` name the level. If the reference cannot be read, `/resolve` applies no row in any worktree, keeps every level and says `level reference unreadable: no level rows applied`. No level changes the Triage security gate or the ESCALATED route. The Verification Gate, the CI gate and the compliance directive run at every level.
 
 ```
 /resolve                     # Resolve latest review (or all worktrees)

@@ -729,6 +729,10 @@ const LIVE_REASONS: readonly string[] = [
   // wave PR is composed, asked about or opened. Emitted by the command, never by
   // a provider: no tracker is involved.
   'not a wave branch',
+  // manage-debt's shared contract, expanded by every provider: `resolution-summary.md` is the
+  // operation's only input, and its absence is a broken precondition. The operation reports it and
+  // leaves the backlog alone, so the caller keeps `Tracked` pending instead of backfilling it.
+  'resolution summary missing',
 ];
 
 /**
