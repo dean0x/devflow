@@ -988,6 +988,10 @@ const PR_HOST_REASONS: readonly string[] = [
   // ensure-pr-ready step 5 makes (HOST_COMPOSED_REASONS): a degraded fetch continues, with the
   // resolver's REASON code and its fix in the line.
   'base {REASON}; fix: {fix}',
+  // The two summary ops strip sections marked private before they compose a post. A failed read
+  // or strip, a stripped text that is blank, or a composed body line that still starts a private
+  // section posts nothing and reports this reason, without quoting any text of the file.
+  'no postable summary',
 ];
 
 /**

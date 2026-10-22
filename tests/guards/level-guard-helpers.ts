@@ -7,7 +7,10 @@
 
 import { expect } from 'vitest'
 
-import { escapeRe, readAgentReference, sectionBetween } from '../helpers.js'
+import { countOf, escapeRe, readAgentReference, sectionBetween } from '../helpers.js'
+
+/** The one `countOf` lives in `../helpers.js`; the guards that import it from here keep working. */
+export { countOf }
 
 // ---------------------------------------------------------------------------
 // The decided text, written by hand from the issue and the gate decisions
@@ -39,8 +42,6 @@ export const REFS: Readonly<Record<string, string>> = {
   implement: readAgentReference('commands/implement-levels.md'),
   resolve: readAgentReference('commands/resolve-levels.md'),
 }
-
-export const countOf = (text: string, needle: string): number => text.split(needle).length - 1
 
 /**
  * The section that the line opening with `opening` starts: that line and the lines after it, up to the next line that

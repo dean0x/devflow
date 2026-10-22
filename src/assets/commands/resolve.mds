@@ -283,7 +283,7 @@ Collect from each Code agent:
 **Produces:** RESOLUTION_FILE (early write for compaction safety)
 **Requires:** TRIAGE_RESULTS, CODE_AGENT_RESULTS, TARGET_DIR, TARGET_DIR_REL, BRANCH_INFO, RESOLUTION_TS, GATE_LEVEL
 
-**Immediately write `resolution-summary.md`** to `{TARGET_DIR}` using the Write tool. Do this now — not in Phase 9 — while results are fresh in context.
+**Immediately write `resolution-summary.md`** to `{TARGET_DIR}` using the Write tool.
 
 Set `Tracked` for FIX_SEPARATE and TECH_DEBT items to `(pending)` — to be backfilled after Phase 9 manage-debt (or `TRACEABILITY: DEGRADED ({reason})` if manage-debt degrades).
 
@@ -291,7 +291,7 @@ DUPLICATE issues are listed **only** in `## Duplicates` — never in `## Fixed I
 
 Open each Issue cell with its severity in brackets when it has one, as `[HIGH]`.
 
-Use the template from the Output Artifact section below.
+Use the template from the Output Artifact section below. Put text not for public posting in a final `## Private notes` section.
 
 ### Phase 6: Polish
 

@@ -123,11 +123,11 @@ For each worktree:
 **Produces:** PRIOR_RESOLUTIONS, CYCLE_NUMBER
 **Requires:** BRANCH_INFO
 
-For each worktree, perform a single pass over timestamped directories:
-1. List timestamped directories in `{worktree}/.devflow/docs/reviews/{branch-slug}/` sorted descending: `ls -1d {worktree}/.devflow/docs/reviews/{branch-slug}/20* 2>/dev/null | sort -r`
-2. Iterate once: accumulate CYCLE_NUMBER count for each directory containing `resolution-summary.md`; capture the first (most-recent) such directory as PRIOR_DIR.
+For each worktree:
+1. List the timestamped directories: `ls -1d {worktree}/.devflow/docs/reviews/{branch-slug}/20* 2>/dev/null | sort -r`
+2. Iterate once: count each directory containing `resolution-summary.md` as CYCLE_NUMBER; capture the first (newest) as PRIOR_DIR.
 3. If CYCLE_NUMBER = 0: set PRIOR_RESOLUTIONS=(none), CYCLE_NUMBER=1, proceed.
-4. Otherwise: set CYCLE_NUMBER = count + 1. Read `{PRIOR_DIR}/resolution-summary.md` as PRIOR_RESOLUTIONS.
+4. Otherwise: set CYCLE_NUMBER = count + 1. Read `{PRIOR_DIR}/resolution-summary.md` as PRIOR_RESOLUTIONS minus each section from a heading line (fenced or not) with the word `Private` (any case) not followed by a letter or digit, to the next unfenced heading with as many `#` as its start or fewer, else at end of file. Close any fence it leaves open. When unsure, cut more; if the cut fails, PRIOR_RESOLUTIONS=(none).
 5. If `--full`: still load PRIOR_RESOLUTIONS.
 
 #### Step 0e-ii: Convergence Assessment
@@ -145,7 +145,7 @@ MAX_REVIEW_CYCLES = 10
    - `deferred_count` = the Deferred row value (= FIX_SEPARATE + TECH_DEBT); By Design and Escalated are excluded from the fp_ratio denominator
    - fp_ratio = fp_count / (fp_count + fixed_count + deferred_count)
    - If denominator = 0: fp_ratio = 0, skip warning
-   - If parsing fails: fp_ratio = 0, skip warning; note in output: "Warning: Could not parse Statistics table from prior resolution. FP ratio unavailable — convergence tracking degraded."
+   - If parsing fails: fp_ratio = 0, skip warning; note in output: "Warning: Could not parse Statistics table. Convergence tracking degraded."
 3. If fp_ratio > 0.7 AND CYCLE_NUMBER >= 3:
    Warn in output: "⚠️ Convergence: {ratio}% false positives in cycle {N-1}. Consider merging or manual inspection."
    Continue with review.
@@ -369,7 +369,7 @@ Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE — feature-specifi
 IMPORTANT: Write report to {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/{focus}.md using Write tool"
 ```
 
-In multi-worktree mode, process worktrees **sequentially**: Phases 1-4 for one worktree, then the next.
+In multi-worktree mode, process worktrees **sequentially**: Phases 1-4 for each.
 
 ### Phase 3: Synthesis → Review Comment (Sequential)
 
@@ -404,7 +404,7 @@ CYCLE_NUMBER: {cycle_number}
 REVIEW_TIMESTAMP: {timestamp}
 REVIEW_PUBLICATION: {REVIEW_PUBLICATION}
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
-Posts the consolidated review-summary comment (marker-deduped by the operation on the cycle+timestamp pair)."
+Posts the consolidated review-summary comment (marker-deduped on the cycle+timestamp pair)."
 ```
 
 ### Phase 4: Write Review Head Marker & Report
@@ -452,7 +452,7 @@ Per worktree, after successful completion:
 | Case | Handling |
 |------|----------|
 | `--full` in multi-worktree mode | Applies to all worktrees (global modifier). It sets the diff range, never the gate level |
-| Review comment already posted | Git agent matches its own marker on the `{cycle, timestamp}` pair → skip silently (D7); a re-review in the same cycle (different timestamp) posts its own comment. The marker's format belongs to the operation |
+| Review comment already posted | Git agent matches its own marker on the `{cycle, timestamp}` pair → skip silently (D7) |
 | Docs-only diff | Its Step 1.1 set, narrowed by level |
 | Tests-only diff | Its Step 1.1 set, narrowed by level |
 | Lockfile-only diff | Its Step 1.1 set, narrowed by level |
@@ -461,7 +461,7 @@ Per worktree, after successful completion:
 | A file moved across classes | `--no-renames` lists both paths, so a code path makes the diff `code` |
 | Path listing above about 40 lines | Read in ranges (Step 1.1) |
 | Language files changed, plugin not installed | The focus is absent from the stamped line: not spawned |
-| `reviewPublication: off` | Git agent skips posting the review comment (OFF) — except that, only when `EVIDENCE_POLICY` is `required`, Step 0f passes `stub` and a counts-only STUB comment posts |
+| `reviewPublication: off` | Git agent skips posting the review comment (OFF) — except that, only when `EVIDENCE_POLICY` is `required`, Step 0f passes `stub` and a counts-only STUB comment posts unless no public text remains |
 
 ## Backwards Compatibility
 

@@ -104,15 +104,14 @@ When `.devflow/conventions.md` already exists the operation returns
 
 Applies to **`post-review-summary` and `post-resolution-summary` only.** No other op probes repo visibility.
 
-**Step order inside each summary op:**
-1. Dedup check (D7/D8 marker — unchanged, stays first).
+**Step order:**
+1. Dedup check (D7/D8 marker; stays first).
 2. Resolve `REVIEW_PUBLICATION` input: `off` → report `**Publication**: OFF (publication disabled by config)`, op ends without posting. `full` → mode FULL, skip probe. `auto` or absent/unrecognised → probe.
    - `stub` (never unrecognised) → mode STUB, skip probe; report `STUB (evidence policy)`.
-3. Probe once: `gh repo view --json visibility --jq '.visibility'` — compare case-insensitively. `PRIVATE` or `INTERNAL` → mode FULL. Anything else (including `PUBLIC`, empty output, command error, unauthenticated) → mode STUB. **Fail-closed rule: on any error or unrecognised value, treat as PUBLIC (mode STUB).**
-4. Compose body (full content in FULL mode; stub template in STUB mode — defined per op).
-5. Scrub per D11 (both modes — the stub is also scrubbed).
-6. Re-check 60000-char cap **after** the scrub (redaction tokens may grow the body; truncate at a line boundary below 59,800 chars, keeping the truncation pointer sentence).
-7. Post; 5xx retry-once (unchanged).
+3. Probe once: `gh repo view --json visibility --jq '.visibility'`, case-insensitive. `PRIVATE` or `INTERNAL` → mode FULL; anything else → mode STUB. **Fail-closed rule: on any error or unrecognised value, treat as PUBLIC (mode STUB).**
+4. Compose body (defined per op).
+5. Scrub per D11 (both modes), then re-check the 60000-char cap **after** the scrub.
+6. Post; 5xx retry-once.
 @end
 
 @define trust_rule():
