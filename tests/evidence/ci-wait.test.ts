@@ -490,6 +490,15 @@ describe('AC-9: on the injected clock, nothing waits past 570 s', () => {
     expect(r.world.sleeps).toHaveLength(CW.MAX_POLLS)
   })
 
+  it('a clock that does not move and a merge state that never reads MERGEABLE: every poll is open, and MAX_POLLS ends it as INDETERMINATE (deadline)', async () => {
+    const r = await run(({ kind }) => (kind === 'view' ? viewOk(HEAD, 'UNKNOWN') : checksOk('pass')), { moves: false })
+    expect(statusOf(r.line)).toBe('INDETERMINATE')
+    expect(field(r.line, 'reason')).toBe('deadline')
+    expect(r.world.of('checks')).toHaveLength(CW.MAX_POLLS)
+    expect(r.world.sleeps).toHaveLength(CW.MAX_POLLS)
+    expect(waitedOf(r.line)).toBe(0)
+  })
+
   it('a clock that does not move and a gh that fails is still bounded', async () => {
     const r = await run(() => ({ status: 1, stderr: 'boom\n' }), { moves: false })
     expect(r.world.calls.length).toBeLessThanOrEqual(CW.MAX_POLLS * 2)
