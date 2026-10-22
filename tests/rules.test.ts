@@ -969,3 +969,228 @@ describe('quality rule cleanup bullet', () => {
     ]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// quality rule doc-sweep and owner bullets, testing skill assertion probe
+// ---------------------------------------------------------------------------
+
+/**
+ * Three always-on lines target the review findings that come most often: a doc that still states a
+ * fact the change replaced, a parallel copy of code that already has an owner, and an assertion
+ * that still passes with the change reverted. The two quality bullets are billed in every session
+ * that loads the rules, so they share one byte ceiling that does not rise. The probe line is an
+ * item in the Quality Gates of the testing skill. The guard finds each line by its opening words,
+ * so a reword keeps the shape, and pins the limits that keep each line safe: a security fix is
+ * described by its effect only, a check at a trust boundary is not a copy, and the revert that
+ * proves an assertion is temporary. The sweep bullet must not name an agent instruction file.
+ */
+const TESTING_SKILL_PATH = path.join(import.meta.dirname, '..', 'src', 'assets', 'skills', 'testing', 'SKILL.md');
+const QUALITY_SWEEP_OWNER_BULLETS_CEILING = 324;
+
+interface PinnedLine {
+  /** How a defect names the line. */
+  readonly name: string;
+  readonly file: 'quality' | 'testing';
+  /** The opening words that find the line, exactly once, in its file. */
+  readonly prefix: string;
+  /** Limits that stay in the line. */
+  readonly phrases: readonly string[];
+  /** The line directly before this one opens with these words. */
+  readonly after?: string;
+  /** The heading, without its `## `, of the section that holds the line. */
+  readonly section?: string;
+  /** Text the line must not hold, with the defect that reports it. */
+  readonly forbidden?: readonly { readonly text: string; readonly defect: string }[];
+}
+
+const SWEEP_BULLET: PinnedLine = {
+  name: 'doc-sweep bullet',
+  file: 'quality',
+  prefix: '- When a change alters a name, path or behavior',
+  phrases: [
+    'current tracked docs that state the old fact',
+    'not released changelog entries',
+    'for a security fix, state the effect only',
+  ],
+  after: '- Leave the end-state',
+  forbidden: [{ text: 'CLAUDE.md', defect: 'the doc-sweep bullet names CLAUDE.md' }],
+};
+
+const OWNER_BULLET: PinnedLine = {
+  name: 'owner bullet',
+  file: 'quality',
+  prefix: '- Find the existing owner first',
+  phrases: ['shares its job', 'never add a parallel copy', 'a check at a trust boundary is not a copy'],
+  after: '- Single responsibility',
+};
+
+const PROBE_LINE: PinnedLine = {
+  name: 'probe line',
+  file: 'testing',
+  prefix: '- [ ] Each new assertion',
+  phrases: ['would fail, not error, with the change reverted', 'RED run counts', 'temporary uncommitted revert'],
+  section: 'Quality Gates',
+  forbidden: [{ text: 'known-bad', defect: 'the probe line names "known-bad"' }],
+};
+
+const PINNED_LINES: readonly PinnedLine[] = [SWEEP_BULLET, OWNER_BULLET, PROBE_LINE];
+
+/** True when the line at `index` sits between the `## <section>` heading and the next `## ` heading. */
+function lineIsInSection(lines: readonly string[], index: number, section: string): boolean {
+  const start = lines.findIndex(line => line.startsWith(`## ${section}`));
+  if (start === -1 || index < start) return false;
+  const next = lines.findIndex((line, i) => i > start && line.startsWith('## '));
+  return next === -1 || index < next;
+}
+
+/** Named collector: how the three inception lines depart from their design. */
+export function collectSweepOwnerProbeDefects(quality: string, testing: string): string[] {
+  const texts = { quality, testing };
+  const out: string[] = [];
+  const found = new Map<PinnedLine, string>();
+  for (const pinned of PINNED_LINES) {
+    const lines = texts[pinned.file].split('\n');
+    const matches = lines.filter(line => line.startsWith(pinned.prefix));
+    if (matches.length !== 1) {
+      out.push(`expected one ${pinned.name} that opens "${pinned.prefix}", found ${matches.length}`);
+      continue;
+    }
+    const line = matches[0];
+    const index = lines.indexOf(line);
+    found.set(pinned, line);
+    for (const phrase of pinned.phrases) {
+      if (!line.includes(phrase)) out.push(`the ${pinned.name} lost "${phrase}"`);
+    }
+    if (pinned.after !== undefined && !lines[index - 1]?.startsWith(pinned.after)) {
+      out.push(`the ${pinned.name} does not follow the line that opens "${pinned.after}"`);
+    }
+    if (/[^\x20-\x7e]/.test(line)) out.push(`the ${pinned.name} holds a non-ASCII character`);
+    if (pinned.file === 'quality' && line.endsWith('.')) out.push(`the ${pinned.name} ends with a period`);
+    if (pinned.section !== undefined && !lineIsInSection(lines, index, pinned.section)) {
+      out.push(`the ${pinned.name} is not in the ${pinned.section} section`);
+    }
+    for (const { text, defect } of pinned.forbidden ?? []) {
+      if (line.includes(text)) out.push(defect);
+    }
+  }
+  const sweep = found.get(SWEEP_BULLET);
+  const owner = found.get(OWNER_BULLET);
+  if (sweep !== undefined && owner !== undefined) {
+    const bytes = Buffer.byteLength(sweep, 'utf-8') + Buffer.byteLength(owner, 'utf-8');
+    if (bytes > QUALITY_SWEEP_OWNER_BULLETS_CEILING) {
+      out.push(`the doc-sweep and owner bullets are ${bytes} bytes, over the ${QUALITY_SWEEP_OWNER_BULLETS_CEILING} ceiling`);
+    }
+  }
+  return out;
+}
+
+async function readSweepOwnerProbeTexts(): Promise<{ quality: string; testing: string }> {
+  return {
+    quality: await fs.readFile(QUALITY_PATH, 'utf-8'),
+    testing: await fs.readFile(TESTING_SKILL_PATH, 'utf-8'),
+  };
+}
+
+describe('quality rule doc-sweep and owner bullets, testing skill assertion probe', () => {
+  it('pins the three lines, their limits and their placement, and holds the two bullets under the byte ceiling', async () => {
+    const { quality, testing } = await readSweepOwnerProbeTexts();
+    expect(collectSweepOwnerProbeDefects(quality, testing)).toEqual([]);
+  });
+
+  it('known-bad probe: each departure from the design is reported by the same collector', async () => {
+    const real = await readSweepOwnerProbeTexts();
+    const lineOf = (pinned: PinnedLine): string =>
+      real[pinned.file].split('\n').find(line => line.startsWith(pinned.prefix))!;
+    const replaceLine = (text: string, line: string, replacement: string): string =>
+      text.replace(line, () => replacement);
+    /** The collector's report for the real texts with one pinned line's file edited. */
+    const defectsWith = (pinned: PinnedLine, edit: (text: string, line: string) => string): string[] => {
+      const edited = { ...real, [pinned.file]: edit(real[pinned.file], lineOf(pinned)) };
+      return collectSweepOwnerProbeDefects(edited.quality, edited.testing);
+    };
+    /** The line with a multibyte character in place of the separator after its prefix. The quality bullets keep their byte count. */
+    const withNonAscii = (pinned: PinnedLine, line: string): string =>
+      `${pinned.prefix}é${line.slice(pinned.prefix.length).replace(/^[:, ]+/, '')}`;
+    /** The line with a final period in place of the separator after its prefix. The quality bullets keep their byte count. */
+    const withPeriod = (pinned: PinnedLine, line: string): string =>
+      `${pinned.prefix}${line.slice(pinned.prefix.length + 1)}.`;
+
+    // Non-vacuity: the real texts give no defect and hold every prefix, phrase and anchor the seeds below rely on.
+    expect(collectSweepOwnerProbeDefects(real.quality, real.testing)).toEqual([]);
+    for (const pinned of PINNED_LINES) {
+      expect(real[pinned.file]).toContain(pinned.prefix);
+      for (const phrase of pinned.phrases) expect(lineOf(pinned)).toContain(phrase);
+      if (pinned.after !== undefined) expect(real[pinned.file]).toContain(pinned.after);
+      if (pinned.section !== undefined) expect(real[pinned.file]).toContain(`## ${pinned.section}`);
+    }
+
+    for (const pinned of PINNED_LINES) {
+      expect(defectsWith(pinned, (text, line) => replaceLine(text, line, ''))).toEqual([
+        `expected one ${pinned.name} that opens "${pinned.prefix}", found 0`,
+      ]);
+      expect(defectsWith(pinned, (text, line) => replaceLine(text, line, `${line}\n${line}`))).toEqual([
+        `expected one ${pinned.name} that opens "${pinned.prefix}", found 2`,
+      ]);
+      for (const phrase of pinned.phrases) {
+        expect(defectsWith(pinned, (text, line) => replaceLine(text, line, line.replace(phrase, '')))).toEqual([
+          `the ${pinned.name} lost "${phrase}"`,
+        ]);
+      }
+      expect(defectsWith(pinned, (text, line) => replaceLine(text, line, withNonAscii(pinned, line)))).toEqual([
+        `the ${pinned.name} holds a non-ASCII character`,
+      ]);
+    }
+
+    for (const pinned of PINNED_LINES.filter(candidate => candidate.after !== undefined)) {
+      const atEndOfFile = (text: string, line: string): string => `${replaceLine(text, `${line}\n`, '')}${line}\n`;
+      expect(defectsWith(pinned, atEndOfFile)).toEqual([
+        `the ${pinned.name} does not follow the line that opens "${pinned.after}"`,
+      ]);
+    }
+
+    for (const pinned of PINNED_LINES.filter(candidate => candidate.file === 'quality')) {
+      expect(defectsWith(pinned, (text, line) => replaceLine(text, line, withPeriod(pinned, line)))).toEqual([
+        `the ${pinned.name} ends with a period`,
+      ]);
+    }
+
+    // The two bullets measure exactly the ceiling today, so a seed that only adds a name would also trip the byte
+    // ceiling. This one swaps a shorter word for the name and keeps every pinned phrase.
+    expect(defectsWith(SWEEP_BULLET, (text, line) => replaceLine(text, line, line.replace('update the', 'CLAUDE.md')))).toEqual([
+      'the doc-sweep bullet names CLAUDE.md',
+    ]);
+    expect(defectsWith(PROBE_LINE, (text, line) => replaceLine(text, line, `${line} known-bad`))).toEqual([
+      'the probe line names "known-bad"',
+    ]);
+
+    const aboveHeading = (text: string, line: string): string =>
+      replaceLine(text, `${line}\n`, '').replace('## Quality Gates', () => `${line}\n\n## Quality Gates`);
+    expect(defectsWith(PROBE_LINE, aboveHeading)).toEqual(['the probe line is not in the Quality Gates section']);
+    expect(defectsWith(PROBE_LINE, text => text.replace('## Quality Gates', () => '## Gates'))).toEqual([
+      'the probe line is not in the Quality Gates section',
+    ]);
+
+    // Oversize seeds compute their padding from the shipped size, so they stay valid when a later edit shortens a bullet.
+    const realTotal = Buffer.byteLength(lineOf(SWEEP_BULLET), 'utf-8') + Buffer.byteLength(lineOf(OWNER_BULLET), 'utf-8');
+    const room = QUALITY_SWEEP_OWNER_BULLETS_CEILING - realTotal;
+    expect(room, 'the two bullets must fit under the ceiling').toBeGreaterThanOrEqual(0);
+    const padOwner = (text: string, line: string, pad: string): string =>
+      replaceLine(text, line, line.replace('extend it', `extend it${pad}`));
+    expect(defectsWith(OWNER_BULLET, (text, line) => padOwner(text, line, 'x'.repeat(room)))).toEqual([]);
+    expect(defectsWith(OWNER_BULLET, (text, line) => padOwner(text, line, 'x'.repeat(room + 1)))).toEqual([
+      `the doc-sweep and owner bullets are ${QUALITY_SWEEP_OWNER_BULLETS_CEILING + 1} bytes, over the ${QUALITY_SWEEP_OWNER_BULLETS_CEILING} ceiling`,
+    ]);
+
+    // A multibyte seed: the two bullets total exactly the ceiling in characters and more in bytes, so only a
+    // collector that counts bytes reports it. The multibyte character is also a non-ASCII defect.
+    const multibyteOwner = lineOf(OWNER_BULLET).replace('extend it', `extend—it${'x'.repeat(room)}`);
+    const multibyteChars = lineOf(SWEEP_BULLET).length + multibyteOwner.length;
+    const multibyteBytes = Buffer.byteLength(lineOf(SWEEP_BULLET), 'utf-8') + Buffer.byteLength(multibyteOwner, 'utf-8');
+    expect(multibyteChars).toBe(QUALITY_SWEEP_OWNER_BULLETS_CEILING);
+    expect(multibyteBytes).toBeGreaterThan(QUALITY_SWEEP_OWNER_BULLETS_CEILING);
+    expect(defectsWith(OWNER_BULLET, (text, line) => replaceLine(text, line, multibyteOwner))).toEqual([
+      'the owner bullet holds a non-ASCII character',
+      `the doc-sweep and owner bullets are ${multibyteBytes} bytes, over the ${QUALITY_SWEEP_OWNER_BULLETS_CEILING} ceiling`,
+    ]);
+  });
+});
