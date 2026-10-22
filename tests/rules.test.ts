@@ -982,7 +982,7 @@ describe('quality rule cleanup bullet', () => {
  * item in the Quality Gates of the testing skill. The guard finds each line by its opening words,
  * so a reword keeps the shape, and pins the limits that keep each line safe: a security fix is
  * described by its effect only, a check at a trust boundary is not a copy, and the revert that
- * proves an assertion is temporary. The sweep bullet must not name an agent instruction file.
+ * proves an assertion is temporary. The sweep bullet must not name CLAUDE.md, an agent instruction file.
  */
 const TESTING_SKILL_PATH = path.join(import.meta.dirname, '..', 'src', 'assets', 'skills', 'testing', 'SKILL.md');
 const QUALITY_SWEEP_OWNER_BULLETS_CEILING = 324;
@@ -1154,8 +1154,8 @@ describe('quality rule doc-sweep and owner bullets, testing skill assertion prob
       ]);
     }
 
-    // The two bullets measure exactly the ceiling today, so a seed that only adds a name would also trip the byte
-    // ceiling. This one swaps a shorter word for the name and keeps every pinned phrase.
+    // The two bullets can sit at the byte ceiling, so a seed that only adds the name can also trip it. This seed puts
+    // the name in place of two longer words, and every pinned phrase stays.
     expect(defectsWith(SWEEP_BULLET, (text, line) => replaceLine(text, line, line.replace('update the', 'CLAUDE.md')))).toEqual([
       'the doc-sweep bullet names CLAUDE.md',
     ]);
