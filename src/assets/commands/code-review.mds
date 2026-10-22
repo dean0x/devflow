@@ -124,10 +124,10 @@ For each worktree:
 **Requires:** BRANCH_INFO
 
 For each worktree, perform a single pass over timestamped directories:
-1. List timestamped directories in `{worktree}/.devflow/docs/reviews/{branch-slug}/` sorted descending: `ls -1d {worktree}/.devflow/docs/reviews/{branch-slug}/20* 2>/dev/null | sort -r`
+1. List timestamped directories in `{worktree}/.devflow/docs/reviews/{branch-slug}/`: `ls -1d {worktree}/.devflow/docs/reviews/{branch-slug}/20* 2>/dev/null | sort -r`
 2. Iterate once: accumulate CYCLE_NUMBER count for each directory containing `resolution-summary.md`; capture the first (most-recent) such directory as PRIOR_DIR.
 3. If CYCLE_NUMBER = 0: set PRIOR_RESOLUTIONS=(none), CYCLE_NUMBER=1, proceed.
-4. Otherwise: set CYCLE_NUMBER = count + 1. Read `{PRIOR_DIR}/resolution-summary.md` as PRIOR_RESOLUTIONS.
+4. Otherwise: set CYCLE_NUMBER = count + 1. Read `{PRIOR_DIR}/resolution-summary.md` as PRIOR_RESOLUTIONS minus each section from a heading line (fenced or not, any case) starting `Private` to the next unfenced heading with as many `#` or fewer.
 5. If `--full`: still load PRIOR_RESOLUTIONS.
 
 #### Step 0e-ii: Convergence Assessment
@@ -452,7 +452,7 @@ Per worktree, after successful completion:
 | Case | Handling |
 |------|----------|
 | `--full` in multi-worktree mode | Applies to all worktrees (global modifier). It sets the diff range, never the gate level |
-| Review comment already posted | Git agent matches its own marker on the `{cycle, timestamp}` pair → skip silently (D7); a re-review in the same cycle (different timestamp) posts its own comment. The marker's format belongs to the operation |
+| Review comment already posted | Git agent matches its own marker on the `{cycle, timestamp}` pair → skip silently (D7) |
 | Docs-only diff | Its Step 1.1 set, narrowed by level |
 | Tests-only diff | Its Step 1.1 set, narrowed by level |
 | Lockfile-only diff | Its Step 1.1 set, narrowed by level |
