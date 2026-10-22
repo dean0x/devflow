@@ -14,7 +14,7 @@
 // cannot silently remove safety-critical patterns.
 
 import { describe, it, expect } from 'vitest';
-import { loadFile, extractSection, sectionBetween, parseFences, resolveAgentSource, resolveCurationOffSource, collectFreshBaseDefects, collectSlugCheckDefects, collectStoredHeadDefects, slugSinkLines, EVIDENCE_RENDER_LINE, type DiffRangeShape } from '../helpers';
+import { loadFile, extractSection, sectionBetween, parseFences, resolveAgentSource, resolveCurationOffSource, collectFreshBaseDefects, collectSlugCheckDefects, collectStoredHeadDefects, slugSinkLines, seedOnce, EVIDENCE_RENDER_LINE, type DiffRangeShape } from '../helpers';
 
 const content = loadFile('dist/commands/bug-analysis.md');
 const agentContent = resolveAgentSource('debug').content;
@@ -554,6 +554,17 @@ function collectStaticReportDefects(body: string): string[] {
   return out;
 }
 
+/** `--full` always runs CodeQL: its gate line waits on no scanner's status, and no sentence skips it. */
+function collectFullCodeqlDefects(body: string): string[] {
+  const gates = body.split('\n').filter(line => line.startsWith('**CodeQL**'));
+  if (gates.length !== 1) return [`${gates.length} CodeQL gate lines, expected 1`];
+  const out: string[] = [];
+  if (!gates[0].includes('(`--full` OR ')) out.push('the CodeQL gate line does not run CodeQL whenever --full is set');
+  if (/complet|skip/i.test(gates[0])) out.push('the CodeQL gate line waits on another scanner completing, or skips CodeQL');
+  if (/skip\w*\s+CodeQL|CodeQL:\s*skipped/i.test(body)) out.push('a sentence skips CodeQL');
+  return out;
+}
+
 const SNYK_NAME_LIST = '"$(git diff --name-only -z {DIFF_RANGE} | jq -Rs \'split("\\u0000")\')"';
 
 function collectFileNameHandoffDefects(phase2: string): string[] {
@@ -592,6 +603,25 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
   it.each(builds)('the scanners get file names safely (%s)', (_label, body) => {
     expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
     expect(collectFileNameHandoffDefects(phase2Of(body ?? ''))).toEqual([]);
+  });
+
+  it.each(builds)('--full always runs CodeQL: no sentence skips it or waits on Semgrep or Snyk completing (%s)', (_label, body) => {
+    expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
+    expect(collectFullCodeqlDefects(body ?? '')).toEqual([]);
+  });
+
+  it.each(builds)('known-bad probes: a CodeQL skip, a completion wait or a lost --full gate is reported (%s)', (_label, body) => {
+    expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
+    const text = body ?? '';
+    const defects = (from: string, to: string): string[] => collectFullCodeqlDefects(seedOnce(text, from, to));
+    expect(defects('findings)):', 'findings); if Semgrep or Snyk did not complete, report "CodeQL: skipped" and why):'))
+      .toContain('the CodeQL gate line waits on another scanner completing, or skips CodeQL');
+    expect(defects('if available AND (', 'if available AND Semgrep and Snyk completed AND ('))
+      .toContain('the CodeQL gate line waits on another scanner completing, or skips CodeQL');
+    expect(defects('(`--full` OR ', '(')).toContain('the CodeQL gate line does not run CodeQL whenever --full is set');
+    expect(defects('| A scanner did not run or did not complete | Name the tool and why in `STATIC_FINDINGS`, not `(none)` |', '| CodeQL database creation fails | Skip CodeQL, note in output, continue with other tools |'))
+      .toContain('a sentence skips CodeQL');
+    expect(collectFullCodeqlDefects('')).toContain('0 CodeQL gate lines, expected 1');
   });
 
   it('known-bad probes: a scanner without the bound, or a bound that reaches the Bash timeout, is reported', () => {
