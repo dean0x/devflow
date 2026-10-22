@@ -100,9 +100,6 @@ export type LevelColumn = keyof typeof LEVEL_CELL_INDEX
 /** The level columns, in cell order. */
 export const LEVELS = Object.keys(LEVEL_CELL_INDEX) as readonly LevelColumn[]
 
-/** The cell of the row `row` for `level`; undefined when the line is not a row. */
-export const levelCell = (row: string, level: LevelColumn): string | undefined => rowCells(row)?.[LEVEL_CELL_INDEX[level]]
-
 // ---------------------------------------------------------------------------
 // The /implement Phase 5 re-check loop at `full`
 // ---------------------------------------------------------------------------
