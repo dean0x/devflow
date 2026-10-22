@@ -7,8 +7,9 @@
  *
  * The check proves that a site carries the effect phrase once. It does not prove which command the phrase names: a site
  * that covers both commands and names one satisfies the check for both. It does not prove which level the phrase names
- * at a site that covers every level, so a README line that names only `lean` passes. The init hints are no site: each is one
- * short line that fits an 80-column terminal, so it states no effect of a row. The facet rows of
+ * at a site that covers every level, so a README line that names only `lean` passes. The init hints are no site: each hint
+ * is a short label that fits an 80-column terminal and states only some effects of a level, never the effect of every row.
+ * The full effects live in `GATE_LEVEL_EFFECT`, in `devflow gates` and in the docs. The facet rows of
  * `tests/gate-level-prompts.test.ts` tie the levels whose hint says "no Polish" to the `devflow gates` clause that names them.
  *
  * Two more checks sit beside it. A `ROW_EFFECTS` entry that names no shipped row is reported, so a retired row sends
@@ -20,8 +21,8 @@
  * after that pass are checked on their own: the README, docs/cli-reference.md and the /implement section of docs/commands.md
  * each state "one Fix round" once, and the two docs state the route of a Fix round that does not complete ("anything other
  * than COMPLETE") once. The README leaves that sentence out. This is a known limit, so the check does not hold it to one.
- * The `2 Global Triage` row of the /resolve reference (`pass level`) has the effect "applies severity tiers" (or "severity tiers in
- * /resolve"): each site that covers `/resolve` says it once.
+ * The `2 Global Triage` row of the /resolve reference (`pass level`) has the effect "applies severity tiers": each site that
+ * covers `/resolve` says it once.
  *
  * Each doc is read at import. A missing file, paragraph or section throws, so the guard never skips. The decided rows
  * and the two references come from `level-guard-helpers.ts`. `implement-resolve-levels.test.ts` holds the other arms.
@@ -33,16 +34,16 @@ import * as path from 'path'
 
 import { GATE_LEVEL_EFFECT } from '../../src/cli/commands/gates.js'
 import { ROOT } from '../helpers.js'
-import { DECIDED_ROWS, LEVELS, LEVEL_CMDS, OPEN, REFS, countOf, levelCell, parseRef, referenceRows, rowCells, sectionOf, seed, seedOnce, withRows, type LevelCmd, type LevelColumn } from './level-guard-helpers.js'
+import { DECIDED_ROWS, LEVEL_CMDS, OPEN, REFS, countOf, parseRef, referenceRows, rowCells, sectionOf, seed, seedOnce, withRows, type LevelCmd } from './level-guard-helpers.js'
 
 /** The clauses that say the references hold no rows. No doc site keeps one once any table has a row. */
 const RETIRED_CLAIMS = ['no phase rules yet', 'no rows yet'] as const
 
-/** What a doc site says when it states that Polish is skipped: "skip Polish", "skips Polish" or "no Polish". */
-const POLISH_SKIP = /\b(?:skips?|no) Polish\b/
+/** What a doc site says when it states that Polish is skipped: "skip Polish" or "skips Polish". The init hints say "no Polish", but they are no doc site, so that wording does not count. */
+const POLISH_SKIP = /\bskips? Polish\b/
 
-/** What a doc site says when it states the severity tiers of the `2 Global Triage` row: "applies severity tiers" or "severity tiers in /resolve". Case matters, and a hyphenated file name does not count. A mention that states no effect ("no severity tiers", "severity tiers in /implement") does not count. */
-const SEVERITY_TIERS = /\bapplies severity tiers\b|\bseverity tiers in \/resolve\b/
+/** What a doc site says when it states the severity tiers of the `2 Global Triage` row: "applies severity tiers". Case matters, and a hyphenated file name does not count. A mention that states no effect ("no severity tiers", "severity tiers in /implement") does not count. */
+const SEVERITY_TIERS = /\bapplies severity tiers\b/
 
 /** What a doc site says when it states the lean Harden skip: "skip Harden on a docs-only diff" or "skips Harden on a docs-only diff". */
 const HARDEN_DOCS_SKIP = /\bskips? Harden on a docs-only diff\b/
@@ -74,11 +75,8 @@ const ROW_EFFECTS: ReadonlyMap<string, RegExp> = new Map([
 /** The row with its last cell changed: a row that ends in `skip` ends in `-` instead, and any other row ends in `skip`. */
 const changeLastCell = (row: string): string => (row.endsWith(' skip |') ? row.replace(/ skip \|$/, ' - |') : row.replace(/ [^|]+ \|$/, ' skip |'))
 
-/**
- * One text that states what the levels do, named as a defect names it, with the commands whose rows it covers. A site that
- * describes one level carries `level`, and owes the effect of a row only when its cell for that level is not `-`.
- */
-interface DocSite { readonly label: string; readonly text: string; readonly cmds: ReadonlyArray<LevelCmd>; readonly level?: LevelColumn }
+/** One text that states what the levels do, named as a defect names it, with the commands whose rows it covers. */
+interface DocSite { readonly label: string; readonly text: string; readonly cmds: ReadonlyArray<LevelCmd> }
 
 /** The rows that the reference of one command holds, as the table lists them. */
 interface ShippedRows { readonly cmd: LevelCmd; readonly rows: readonly string[] }
@@ -88,15 +86,6 @@ const matchCount = (text: string, re: RegExp): number => [...text.matchAll(new R
 
 /** The rows that the reference of each command holds. */
 const shippedOf = (refs: Readonly<Record<string, string>>): ShippedRows[] => LEVEL_CMDS.map(cmd => ({ cmd, rows: referenceRows(refs[cmd]) }))
-
-/**
- * Whether `site` is read as one level and the cell of `row` for that level is `-`: the row does not apply there, so the site
- * states nothing of it. A site read as no level, and a row whose cells cannot be read, are barred at no level.
- */
-const barredAt = (site: DocSite, row: string): boolean => site.level !== undefined && levelCell(row, site.level) === '-'
-
-/** Whether `site` owes the effect of `row` of `cmd`: it covers the command, and no level bars the row. The one statement of the rule. */
-const owes = (site: DocSite, cmd: LevelCmd, row: string): boolean => site.cmds.includes(cmd) && !barredAt(site, row)
 
 /** Check 1 of the doc sites: a shipped row with no entry in `effects`. */
 function collectUnregisteredRowDefects(shipped: readonly ShippedRows[], effects: ReadonlyMap<string, RegExp>): string[] {
@@ -111,17 +100,12 @@ function collectRetiredClaimDefects(site: DocSite, withRow: readonly string[]): 
 
 /**
  * Check 3 of the doc sites: `site` states the effect of each shipped row of its own commands exactly once. A row with no entry is check 1's to report.
- * A site read as one level owes nothing for a row whose cell for that level is `-`, and a match there is a defect. A row whose cells cannot be read
- * owes its effect at every level.
  */
 function collectEffectCountDefects(site: DocSite, shipped: readonly ShippedRows[], effects: ReadonlyMap<string, RegExp>): string[] {
   return shipped.filter(({ cmd }) => site.cmds.includes(cmd)).flatMap(({ cmd, rows }) => rows.flatMap(row => {
     const effect = effects.get(`${cmd}:${row}`)
     if (effect === undefined) return []
     const times = matchCount(site.text, effect)
-    if (barredAt(site, row)) {
-      return times === 0 ? [] : [`${site.label} states the effect of the ${cmd} row ${row}, whose ${site.level} cell is -`]
-    }
     if (times === 0) return [`${site.label} does not state the effect of the ${cmd} row ${row}: it must match ${effect}`]
     return times > 1 ? [`${site.label} states the effect of the ${cmd} row ${row} ${times} times, expected once`] : []
   }))
@@ -132,8 +116,7 @@ function collectEffectCountDefects(site: DocSite, shipped: readonly ShippedRows[
  * effect of that row exactly once. Once any table has a row, no site keeps a retired claim. While no table has a row, no
  * site owes an effect and none is barred a retired claim. The match is on a phrase: it does not tell which command the
  * phrase names, so a site that covers both commands and names one satisfies the check for both. It does not tell which
- * level the phrase names either, so a README line that names only `lean` passes. A site read as one level (`level`) states the effect of
- * a row only when its cell for that level is not `-`; no shipped site is read that way.
+ * level the phrase names either, so a README line that names only `lean` passes.
  * The defects come in this order: the unregistered rows, then for each site its retired claims and its effect counts.
  */
 export function collectDocSiteDefects(sites: readonly DocSite[], refs: Readonly<Record<string, string>>, effects: ReadonlyMap<string, RegExp> = ROW_EFFECTS): string[] {
@@ -308,7 +291,6 @@ describe('the doc sites state the effect of each shipped row and keep no retired
       'the docs/commands.md /implement section: implement',
       'the docs/commands.md /resolve section: resolve',
     ])
-    expect(DOC_SITES.map(s => s.level), 'no shipped site is read as one level').toEqual([undefined, undefined, undefined, undefined, undefined])
     for (const { label, text, min } of DOC_SITES) expect(text.length, `${label}: nothing read`).toBeGreaterThan(min)
     expect(collectDocSiteDefects(DOC_SITES, REFS)).toEqual([])
   })
@@ -316,15 +298,13 @@ describe('the doc sites state the effect of each shipped row and keep no retired
   it('the shared cell parser reads the phase, standard and lean cells of a row, and nothing from a line that is not a row', () => {
     expect(rowCells('| 3 Polish | skip | skip |')).toEqual(['3 Polish', 'skip', 'skip'])
     expect(rowCells('|  4 Self-Review |  - |  apply: x  |')).toEqual(['4 Self-Review', '-', 'apply: x'])
-    for (const level of LEVELS) expect(levelCell('| 4 Self-Review | - | skip |', level), level).toBe(level === 'standard' ? '-' : 'skip')
-    expect(levelCell('Not a row', 'lean'), 'a line that is not a row has no cell').toBeUndefined()
     for (const line of ['3 Polish | skip | skip |', '| 3 Polish | skip | skip', 'Not a row']) expect(rowCells(line), line).toBeNull()
   })
 
-  it('every ROW_EFFECTS key is a command and a row line, and POLISH_SKIP reads the three wordings of a skip', () => {
+  it('every ROW_EFFECTS key is a command and a row line, and POLISH_SKIP reads the two wordings of a skip', () => {
     for (const key of ROW_EFFECTS.keys()) expect(key, key).toMatch(/^(?:implement|resolve):\| \d+[a-z]? \S.* \| \S.* \| \S.* \|$/)
-    for (const text of ['they skip Polish', 'it skips Polish', 'and no Polish (the default)']) expect(POLISH_SKIP.test(text), text).toBe(true)
-    for (const text of ['Polish is skipped', 'keeps Polish', 'the full plan shape and Polish', 'noPolish']) expect(POLISH_SKIP.test(text), text).toBe(false)
+    for (const text of ['they skip Polish', 'it skips Polish']) expect(POLISH_SKIP.test(text), text).toBe(true)
+    for (const text of ['Polish is skipped', 'keeps Polish', 'the full plan shape and Polish', 'noPolish', 'no Polish', 'and no Polish (the default)', 'fewer review focuses, no Polish; the default']) expect(POLISH_SKIP.test(text), text).toBe(false)
   })
 
   it('EVALUATE_SINGLE_PASS reads "one Evaluate pass", and nothing less', () => {
@@ -333,8 +313,8 @@ describe('the doc sites state the effect of each shipped row and keep no retired
   })
 
   it('SEVERITY_TIERS reads a statement of the tiers, and nothing less', () => {
-    for (const text of ['applies severity tiers', 'severity tiers in /resolve', '/resolve also applies severity tiers;']) expect(SEVERITY_TIERS.test(text), text).toBe(true)
-    for (const text of ['no severity tiers', 'severity tiers in /implement', 'one severity tier', 'severity-tiers.md', 'Severity tiers', 'severity tiered', 'noseverity tiers', 'applies severity tier', 'severity tiers in /resolved']) expect(SEVERITY_TIERS.test(text), text).toBe(false)
+    for (const text of ['applies severity tiers', '/resolve also applies severity tiers;']) expect(SEVERITY_TIERS.test(text), text).toBe(true)
+    for (const text of ['severity tiers in /resolve', 'no severity tiers', 'severity tiers in /implement', 'one severity tier', 'severity-tiers.md', 'Severity tiers', 'severity tiered', 'noseverity tiers', 'applies severity tier', 'severity tiers in /resolved']) expect(SEVERITY_TIERS.test(text), text).toBe(false)
   })
 
   it('BATCHING reads "in batches" and "in a batch", and nothing less', () => {
@@ -428,37 +408,6 @@ describe('the doc sites state the effect of each shipped row and keep no retired
     expect(collectDocSiteDefects([site(effect, ['resolve'])], onlyResolve)).toEqual([])
   })
 
-  it('known-bad probes (test-only sites): a site read as one level owes the effect of a row only when its cell for that level is not -', () => {
-    const probeEffect = /\bprobe effect\b/
-    const probeRow = '| 4 Self-Review | - | apply: x |'
-    const refs = { implement: withRows(REFS.implement, ['| 3 Polish | skip | skip |', probeRow]), resolve: none.resolve }
-    const effects = new Map<string, RegExp>([...ROW_EFFECTS, [`implement:${probeRow}`, probeEffect]])
-    const at = (text: string, level?: DocSite['level']): DocSite => ({ label: 'the probe site', text, cmds: ['implement'], level })
-    const stated = `${effect} The probe effect.`
-    const cellDefect = `the probe site states the effect of the implement row ${probeRow}, whose standard cell is -`
-    const missingDefect = `the probe site does not state the effect of the implement row ${probeRow}: it must match ${probeEffect}`
-    expect(collectDocSiteDefects([at(stated, 'standard')], refs, effects), 'a standard site with the phrase').toEqual([cellDefect])
-    expect(collectDocSiteDefects([at(`${stated} The probe effect again.`, 'standard')], refs, effects), 'a standard site with the phrase twice').toEqual([cellDefect])
-    expect(collectDocSiteDefects([at(effect, 'standard')], refs, effects), 'a standard site without the phrase').toEqual([])
-    expect(collectDocSiteDefects([at(effect, 'lean')], refs, effects), 'a lean site without the phrase').toEqual([missingDefect])
-    expect(collectDocSiteDefects([at(stated, 'lean')], refs, effects), 'a lean site with the phrase once').toEqual([])
-    expect(collectDocSiteDefects([at(`${stated} The probe effect again.`, 'lean')], refs, effects), 'a lean site with the phrase twice').toEqual([
-      `the probe site states the effect of the implement row ${probeRow} 2 times, expected once`,
-    ])
-    expect(collectDocSiteDefects([at(effect)], refs, effects), 'a level-blind site without the phrase').toEqual([missingDefect])
-    expect(collectDocSiteDefects([at(stated)], refs, effects), 'a level-blind site with the phrase once').toEqual([])
-  })
-
-  it('known-bad probes (test-only sites): a row whose cells cannot be read owes its effect at every level', () => {
-    const unreadable = '| 4 Self-Review | apply: x |'
-    const refs = { implement: withRows(REFS.implement, ['| 3 Polish | skip | skip |', unreadable]), resolve: none.resolve }
-    const effects = new Map<string, RegExp>([...ROW_EFFECTS, [`implement:${unreadable}`, /\bprobe effect\b/]])
-    for (const level of ['standard', 'lean'] as const) {
-      const defects = collectDocSiteDefects([{ label: 'the probe site', text: effect, cmds: ['implement'], level }], refs, effects)
-      expect(defects, level).toEqual([`the probe site does not state the effect of the implement row ${unreadable}: it must match /\\bprobe effect\\b/`])
-    }
-  })
-
   it('known-bad probes (test-only sites): once any table has a row, each retired claim at a site is reported', () => {
     for (const claim of RETIRED_CLAIMS) {
       expect(collectDocSiteDefects([site(`${effect} The references hold ${claim}.`)], both), claim).toEqual([`a table has a row (implement, resolve), but the probe site still says "${claim}"`])
@@ -516,7 +465,7 @@ describe('the doc sites state the effect of each shipped row and keep no retired
   it('known-bad probes (real sites): a real site with an effect phrase that it owes taken out is reported for the rows of that effect only', () => {
     const covered = new Set<string>()
     for (const real of DOC_SITES) {
-      const owed = shippedRows.filter(({ cmd, row }) => owes(real, cmd, row))
+      const owed = shippedRows.filter(({ cmd }) => real.cmds.includes(cmd))
       expect(owed.length, `${real.label}: no shipped row to state`).toBeGreaterThan(0)
       const groups = new Map<RegExp, Array<{ cmd: LevelCmd; row: string }>>()
       for (const entry of owed) {
