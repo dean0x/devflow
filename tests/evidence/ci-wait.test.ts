@@ -45,7 +45,8 @@
  *                        the repository's workflow list finds no active workflow file under
  *                        `.github/workflows/`. An active one ends the window as INDETERMINATE
  *                        (no-workflow-check); a probe that fails or cannot be read never
- *                        gives NO_CI. The probe is made at most once, and only on that path.
+ *                        gives NO_CI. At most one probe is answered per run, and only on that
+ *                        path; a failed probe is a failed poll, and the next poll probes again.
  *   D-CI-NO-EXIT /       The script never calls process.exit, runs gh through one
  *   D-CI-NO-LITERAL-     spawnSync with no shell, and waits inside node: Claude Code
  *   SLEEP                2.1.294 blocks a Bash command that starts with a literal
@@ -1374,7 +1375,7 @@ describe('matchedStep: the outcome of a poll on the named head, as a pure functi
   })
 })
 
-describe('askWorkflows: the one workflow probe, as one discriminated result', () => {
+describe('askWorkflows: the workflow probe, as one discriminated result', () => {
   const reply = (over: Partial<GhAnswer> = {}): GhAnswer => ({ answered: true, status: 0, stdout: '', stderr: '', ...over })
   const list = (rows: unknown[], total = rows.length): string => JSON.stringify({ total_count: total, workflows: rows })
   const ACTIVE = { path: '.github/workflows/ci.yml', state: 'active' }
@@ -1810,7 +1811,7 @@ function collectSettleSites(source: string): { comparisons: number; windows: str
   }
 }
 
-/** Quoted flags that make `gh api` send a body or change its method; the one probe has none. */
+/** Quoted flags that make `gh api` send a body or change its method; the probe has none. */
 function collectApiWriteFlags(source: string): string[] {
   return [...codeLines(source).join('\n').matchAll(/['"`](?:-f|-F|-X|--field|--raw-field|--method|--input)['"`]/g)].map(m => m[0])
 }

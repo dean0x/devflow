@@ -2397,10 +2397,9 @@ function probeWorkflows(io) {
 }
 
 /**
- * An empty check list is NO_CI only on a MERGEABLE PR whose repository has no active
- * workflow file (the shared gate decides): else a workflow run may still be to come.
- * The workflow list is asked only when the gate asks for it, so a PR that cannot be NO_CI
- * costs no call. A gate answer other than keep is INDETERMINATE.
+ * An empty check list: ci-wait's merge gate decides (D-CI-WORKFLOWS). The workflow list
+ * is asked only when the gate asks for it, so a PR that cannot be NO_CI costs no call. A
+ * gate answer other than keep is INDETERMINATE.
  *
  * @param {Io} io
  * @param {string | null} mergeable
@@ -2413,18 +2412,15 @@ function readEmptyCi(io, mergeable) {
 }
 
 /**
- * D-READINESS-CLASSIFIER: the CI status, by check-ci-status's fetch (exit 0 or 8 is a
- * result; any other failure is INDETERMINATE) and ci-wait's classifier and merge gate.
- * A pass needs one GitHub Actions job, so external checks alone read INDETERMINATE. A
- * conflicting PR reads INDETERMINATE before any checks call, since GitHub runs no pull
- * request workflow on it. PASSING and NO_CI also need GitHub to report the PR MERGEABLE,
- * and "no checks reported" or `[]` is NO_CI only when the repository has no active
- * workflow file (readEmptyCi); an unknown merge state, a failed workflow-list call and an
- * unreadable reply are INDETERMINATE, never DEGRADED. FAILING and PENDING do not depend on
- * the merge state. Failing names are sanitized and bounded by ci-wait's own formatter.
- * PASSING proves that at least one GitHub Actions check passed on the head, that none is
- * pending or failing and that the PR does not conflict; it does not prove that the test
- * workflow ran by name.
+ * D-READINESS-CLASSIFIER: the CI status, read once. The checks come from `gh pr checks`
+ * over name,state,bucket,workflow, with check-ci-status's exit rule (exit 0 or 8 is a
+ * result; any other failure is INDETERMINATE). The status comes from ci-wait's classifier
+ * (D-CI-WORKFLOW-RULE) and merge gate (D-CI-MERGE-STATE, D-CI-WORKFLOWS), where the rules
+ * are written, so the two scripts cannot disagree. A conflicting PR reads INDETERMINATE
+ * before any checks call, and "no checks reported" or `[]` goes to readEmptyCi. An unknown
+ * merge state, a failed workflow-list call and an unreadable reply are INDETERMINATE, never
+ * DEGRADED. Failing names are sanitized and bounded by ci-wait's own formatter. PASSING
+ * does not prove that the test workflow ran by name.
  *
  * @param {Io} io
  * @param {number} pr
