@@ -133,7 +133,7 @@ Without `jq` the SARIF is unfiltered: note that.
 
 **CodeQL** (if available AND (`--full` OR Semgrep/Snyk found HIGH/CRITICAL findings)):
 ```bash
-CODEQL_TMP=$(mktemp -d)
+CODEQL_TMP=$(mktemp -d) || exit
 trap 'rm -rf "${CODEQL_TMP}"' EXIT INT TERM
 {bound} -k 10 280 codeql database create "${CODEQL_TMP}/db" --language={detected-language} --source-root=. 2>/dev/null && \
 {bound} -k 10 280 codeql database analyze "${CODEQL_TMP}/db" --format=sarif-latest --output="${CODEQL_TMP}/results.sarif" 2>/dev/null
@@ -143,7 +143,7 @@ printf '\nexit=%s\n' "$CODEQL_EXIT"
 rm -rf "${CODEQL_TMP}"
 trap - EXIT INT TERM
 ```
-Parse each SARIF → extract findings. A tool's status is its last line, `exit={n}`; a tool completed only on Semgrep 0, Snyk 0 or 1 (1 = issues, only with SARIF output), CodeQL 0. Any other status, or no such line, means it did not complete (124: bound fired; 125: bound failed; 126-127: scanner did not start; 137: killed after `-k`); keep the findings its SARIF holds. If a tool's output was clipped, its findings are incomplete: name the tool in `STATIC_FINDINGS`, never `(none)`.
+Parse each SARIF → extract findings. A tool's status is its last line, `exit={n}`; a tool that ran completed only on Semgrep 0, Snyk 0 or 1 (1 = issues, only with SARIF output), CodeQL 0. Any other status, or no such line, means it did not complete (124: bound fired; 125: bound failed; 126-127: scanner did not start; 137: killed after `-k`; else failed. Semgrep via xargs: number only); keep the findings its SARIF holds. If a tool's output was clipped, its findings are incomplete: name the tool in `STATIC_FINDINGS`, never `(none)`.
 
 **Normalize** all findings to unified table, cap at top 50 by severity. Truncate each Description entry to 200 characters maximum:
 
