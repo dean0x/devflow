@@ -542,8 +542,26 @@ function collectStatedTimeoutDefects(phase2: string, scanners: string[]): string
   return out;
 }
 
-function collectStaticReportDefects(body: string): string[] {
+const OUTCOME_VAR = 'STATIC_STATUS';
+
+/** The names a `**Produces:**` or `**Requires:**` line lists, from the first such line in a section. */
+function declaredNames(section: string | null, label: 'Produces' | 'Requires'): string[] {
+  const line = (section ?? '').split('\n').find(text => text.startsWith(`**${label}:**`)) ?? '';
+  return line.slice(`**${label}:**`.length).split(',').map(name => name.trim());
+}
+
+/** The per-tool outcome Phase 7 reports is declared where Step 2d makes it and where Phase 7 reads it. */
+function collectOutcomeDeclarationDefects(body: string): string[] {
   const out: string[] = [];
+  if (!declaredNames(sectionBetween(body, '#### Step 2d:', '### Phase 3:'), 'Produces').includes(OUTCOME_VAR)) out.push(`Step 2d does not produce ${OUTCOME_VAR}`);
+  if (!declaredNames(sectionBetween(body, '### Phase 7:', '## Architecture'), 'Requires').includes(OUTCOME_VAR)) out.push(`Phase 7 does not require ${OUTCOME_VAR}`);
+  const line = body.split('\n').find(text => text.startsWith('**Static analysis**:')) ?? '';
+  if (!line.includes(OUTCOME_VAR)) out.push(`the Static analysis line does not name ${OUTCOME_VAR}`);
+  return out;
+}
+
+function collectStaticReportDefects(body: string): string[] {
+  const out: string[] = collectOutcomeDeclarationDefects(body);
   const analysis = body.indexOf('**Analysis**: {ANALYSIS_DIR}');
   const status = body.indexOf('**Static analysis**:');
   const risk = body.indexOf('### Risk Assessment');
@@ -582,7 +600,27 @@ function collectStatusRuleDefects(phase2: string): string[] {
   return STATUS_RULE_PARTS.filter(part => !phase2.includes(part)).map(part => `Phase 2 does not say: ${part}`);
 }
 
-const SNYK_NAME_LIST = '"$(git diff --name-only -z {DIFF_RANGE} | jq -Rs \'split("\\u0000")\')"';
+const SCANNER_ROOT_CD = 'cd "{worktree}" || exit';
+const CODEQL_ROOT = '--source-root="{worktree}"';
+
+/**
+ * Each scanner fence runs from the worktree root, whatever directory the Bash call starts in. Semgrep and Snyk
+ * open with a `cd` that stops the call when it fails, so no status line prints and the run fails closed.
+ * CodeQL names the root itself, or opens with the same `cd`.
+ */
+function collectScannerRootDefects(phase2: string): string[] {
+  const out: string[] = [];
+  const opensAtRoot = (lines: string[]): boolean => lines.find(line => line.trim() !== '') === SCANNER_ROOT_CD;
+  for (const tool of ['semgrep scan', 'snyk code test']) {
+    if (!opensAtRoot(fenceWith(phase2, tool))) out.push(`the ${tool} fence does not open with ${SCANNER_ROOT_CD}`);
+  }
+  const codeql = fenceWith(phase2, 'codeql database');
+  const create = codeql.find(line => line.includes('codeql database create')) ?? '';
+  if (!opensAtRoot(codeql) && !create.includes(CODEQL_ROOT)) out.push(`the CodeQL fence neither opens with ${SCANNER_ROOT_CD} nor passes ${CODEQL_ROOT}`);
+  return out;
+}
+
+const SNYK_NAME_LIST ='"$(git diff --name-only -z {DIFF_RANGE} | jq -Rs \'split("\\u0000")\')"';
 
 function collectFileNameHandoffDefects(phase2: string): string[] {
   const out: string[] = [];
@@ -734,6 +772,26 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(collectStaticReportDefects('')).toContain('the report has no Static analysis line');
   });
 
+  it.each(builds)('the per-tool outcome Phase 7 reports is declared by Step 2d and required by Phase 7 (%s)', (_label, body) => {
+    expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
+    expect(collectOutcomeDeclarationDefects(body ?? '')).toEqual([]);
+  });
+
+  it.each(builds)('known-bad probes: an outcome that is not declared, not required or not named in the report is reported (%s)', (_label, body) => {
+    expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
+    const text = body ?? '';
+    const defects = (from: string, to: string): string[] => collectStaticReportDefects(seedOnce(text, from, to));
+    expect(defects('**Produces:** STATIC_FINDINGS, STATIC_STATUS', '**Produces:** STATIC_FINDINGS')).toContain(`Step 2d does not produce ${OUTCOME_VAR}`);
+    expect(defects('**Requires:** BRANCH_INFO, ANALYSIS_DIR, STATIC_STATUS', '**Requires:** BRANCH_INFO, ANALYSIS_DIR')).toContain(`Phase 7 does not require ${OUTCOME_VAR}`);
+    expect(defects('**Static analysis**: {STATIC_STATUS ', '**Static analysis**: {')).toContain(`the Static analysis line does not name ${OUTCOME_VAR}`);
+    expect(defects('**Requires:** BRANCH_INFO, ANALYSIS_DIR, STATIC_STATUS', '**Requires:** BRANCH_INFO, ANALYSIS_DIR, STATIC_TOOL_STATUS')).toContain(`Phase 7 does not require ${OUTCOME_VAR}`);
+    expect(collectOutcomeDeclarationDefects('')).toEqual([
+      `Step 2d does not produce ${OUTCOME_VAR}`,
+      `Phase 7 does not require ${OUTCOME_VAR}`,
+      `the Static analysis line does not name ${OUTCOME_VAR}`,
+    ]);
+  });
+
   it('known-bad probes: a change in how file names reach a scanner is reported', () => {
     const defects = (from: string, to: string): string[] => collectFileNameHandoffDefects(phase2Of(seed(from, to)));
     const semgrepLine = 'the Semgrep line does not read names with -z, pass them with xargs -0 and put them after --';
@@ -748,6 +806,28 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(defects(SNYK_NAME_LIST, '"$(git diff --name-only {DIFF_RANGE} | jq -R . | jq -s .)"')).toContain(snykLine);
     expect(defects('File names reach a scanner only through', 'File names reach a scanner through')).toContain('Phase 2 does not say how file names reach a scanner');
     expect(collectFileNameHandoffDefects('')).toContain('0 bash fences, expected at least 5');
+  });
+
+  it.each(builds)('each scanner fence runs from the worktree root, not the Bash call directory (%s)', (_label, body) => {
+    expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
+    expect(collectScannerRootDefects(phase2Of(body ?? ''))).toEqual([]);
+  });
+
+  it.each(builds)('known-bad probes: a scanner fence that can run from another directory is reported (%s)', (_label, body) => {
+    expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
+    const text = body ?? '';
+    const defects = (from: string, to: string): string[] => collectScannerRootDefects(phase2Of(seedOnce(text, from, to)));
+    const semgrep = 'the semgrep scan fence does not open with cd "{worktree}" || exit';
+    expect(defects(`${SCANNER_ROOT_CD}\nset -o pipefail`, 'set -o pipefail')).toContain(semgrep);
+    expect(defects(`${SCANNER_ROOT_CD}\nset -o pipefail`, 'cd "{worktree}"\nset -o pipefail')).toContain(semgrep);
+    expect(defects(`${SCANNER_ROOT_CD}\nset -o pipefail`, 'cd . || exit\nset -o pipefail')).toContain(semgrep);
+    const snyk = 'the snyk code test fence does not open with cd "{worktree}" || exit';
+    expect(defects(`${SCANNER_ROOT_CD}\nS=$(`, 'S=$(')).toContain(snyk);
+    expect(defects(`${SCANNER_ROOT_CD}\nS=$(`, 'cd "{worktree}" || true\nS=$(')).toContain(snyk);
+    const codeql = 'the CodeQL fence neither opens with cd "{worktree}" || exit nor passes --source-root="{worktree}"';
+    expect(defects(CODEQL_ROOT, '--source-root=.')).toContain(codeql);
+    expect(defects(CODEQL_ROOT, '--source-root="$PWD"')).toContain(codeql);
+    expect(collectScannerRootDefects('')).toHaveLength(3);
   });
 });
 

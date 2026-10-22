@@ -109,7 +109,7 @@ If some are available: note which tools will run. `{bound}` is `timeout` or `gti
 
 #### Step 2d: Tiered Static Analysis
 
-**Produces:** STATIC_FINDINGS
+**Produces:** STATIC_FINDINGS, STATIC_STATUS
 **Requires:** STATIC_TOOL_STATUS, DIFF_RANGE, ANALYSIS_DIR
 
 Skip if `--no-static` flag provided, all tools unavailable or no `{bound}`.
@@ -118,11 +118,13 @@ Run each available tool in this order, each in its own foreground Bash call with
 
 **Semgrep** (if available):
 ```bash
+cd "{worktree}" || exit
 set -o pipefail; git diff --name-only -z --diff-filter=d {DIFF_RANGE} | {bound} -k 10 280 xargs -0 -r semgrep scan --config auto --sarif --quiet -- 2>/dev/null; printf '\nexit=%s\n' "$?"
 ```
 
 **Snyk Code** (if available):
 ```bash
+cd "{worktree}" || exit
 S=$({bound} -k 10 280 snyk code test --sarif 2>/dev/null); E=$?
 printf '%s' "$S" | jq --argjson files "$(git diff --name-only -z {DIFF_RANGE} | jq -Rs 'split("\u0000")')" \
   '.runs[].results |= map(select(.locations[].physicalLocation.artifactLocation.uri as $uri | $files | index($uri) != null))' \
@@ -135,7 +137,7 @@ Without `jq` the SARIF is unfiltered: note that.
 ```bash
 CODEQL_TMP=$(mktemp -d) || exit
 trap 'rm -rf "${CODEQL_TMP}"' EXIT INT TERM
-{bound} -k 10 280 codeql database create "${CODEQL_TMP}/db" --language={detected-language} --source-root=. 2>/dev/null && \
+{bound} -k 10 280 codeql database create "${CODEQL_TMP}/db" --language={detected-language} --source-root="{worktree}" 2>/dev/null && \
 {bound} -k 10 280 codeql database analyze "${CODEQL_TMP}/db" --format=sarif-latest --output="${CODEQL_TMP}/results.sarif" 2>/dev/null
 CODEQL_EXIT=$?
 cat "${CODEQL_TMP}/results.sarif"
@@ -252,7 +254,7 @@ Output: {ANALYSIS_DIR}/bug-analysis-summary.md"
 
 ### Phase 7: Finalize
 
-**Requires:** BRANCH_INFO, ANALYSIS_DIR
+**Requires:** BRANCH_INFO, ANALYSIS_DIR, STATIC_STATUS
 
 1. In one Bash call run `M="$(git -C "{worktree}" rev-parse --absolute-git-dir)/devflow/bug-analysis/{branch-slug}" && mkdir -p "$M" && git -C "{worktree}" rev-parse HEAD > "$M/.last-analysis-head"`. A failed or refused write never stops the run and is not retried another way.
 2. Report to user:
@@ -263,7 +265,7 @@ Output: {ANALYSIS_DIR}/bug-analysis-summary.md"
 **Branch**: {branch} -> {base_branch}
 {any base `TRACEABILITY: DEGRADED` line from Phase 1, as returned}
 **Analysis**: {ANALYSIS_DIR}
-**Static analysis**: {per tool: ran, not installed, skipped, did not run/complete, and why}
+**Static analysis**: {STATIC_STATUS per tool: ran, not installed, skipped, did not run/complete, and why}
 
 ### Risk Assessment: {risk_level}
 
