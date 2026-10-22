@@ -479,22 +479,25 @@ function collectStaticBoundDefects(phase2: string): string[] {
   const exitLines = scannerFences.map(fence => fence.split(EXIT_PRINT).length - 1);
   if (exitLines.length !== 3 || exitLines.some(count => count !== 1)) out.push(`the scanner fences carry ${exitLines.join('+') || '0'} exit lines, expected 1 each in 3 fences`);
   if (!phase2.includes('); E=$?')) out.push('the Snyk status is not read right after the scanner');
+  return [...out, ...collectStatedTimeoutDefects(phase2, scanners)];
+}
 
+/** Each scanner's bounds, kill grace included, end before the Bash timeout Phase 2 states for its call. */
+function collectStatedTimeoutDefects(phase2: string, scanners: string[]): string[] {
   const stated = STATED_TIMEOUT.exec(phase2);
-  if (stated === null) out.push('no stated Bash timeout above the scanner bounds');
-  else {
-    const general = Number(stated[1]);
-    const codeql = Number(stated[2]);
-    if (general > BASH_TIMEOUT_CEILING_MS || codeql > BASH_TIMEOUT_CEILING_MS) out.push('a stated Bash timeout is above 600000 ms');
-    for (const tool of ['semgrep scan', 'snyk code test']) {
-      const held = scanners.filter(line => line.includes(tool)).flatMap(boundMs);
-      if (held.length !== 1) out.push(`the ${tool} line holds ${held.length} bounds, expected 1`);
-      if (held.some(ms => ms >= general)) out.push(`the ${tool} bound does not end before its Bash timeout`);
-    }
-    const held = scanners.filter(line => line.includes('codeql database')).flatMap(boundMs);
-    if (held.length !== 2) out.push(`the CodeQL lines hold ${held.length} bounds, expected 2`);
-    if (held.reduce((sum, ms) => sum + ms, 0) >= codeql) out.push('the CodeQL bounds do not end before its Bash timeout');
+  if (stated === null) return ['no stated Bash timeout above the scanner bounds'];
+  const out: string[] = [];
+  const general = Number(stated[1]);
+  const codeql = Number(stated[2]);
+  if (general > BASH_TIMEOUT_CEILING_MS || codeql > BASH_TIMEOUT_CEILING_MS) out.push('a stated Bash timeout is above 600000 ms');
+  for (const tool of ['semgrep scan', 'snyk code test']) {
+    const held = scanners.filter(line => line.includes(tool)).flatMap(boundMs);
+    if (held.length !== 1) out.push(`the ${tool} line holds ${held.length} bounds, expected 1`);
+    if (held.some(ms => ms >= general)) out.push(`the ${tool} bound does not end before its Bash timeout`);
   }
+  const held = scanners.filter(line => line.includes('codeql database')).flatMap(boundMs);
+  if (held.length !== 2) out.push(`the CodeQL lines hold ${held.length} bounds, expected 2`);
+  if (held.reduce((sum, ms) => sum + ms, 0) >= codeql) out.push('the CodeQL bounds do not end before its Bash timeout');
   return out;
 }
 
