@@ -8,6 +8,7 @@ import { createRequire } from 'module';
 import { HANDOFF_TEMPLATE, REMINDER_TEMPLATE } from './fixtures/ambient-templates.js';
 import { useWarmFakeExecutables } from './helpers/warm-fake-executable.js';
 import { buildRoutingConfigJson } from '../src/core/proxy-state.js';
+import { DEVFLOW_PLUGINS } from '../src/core/plugins.js';
 import { CURATION_DIR_NAME, LEGACY_NAMES, curationMoveMarkerKey } from '../src/core/project-paths.js';
 import { getCurationMoveMarkerPath } from '../src/core/curation-move-notice.js';
 import { AREA_PAUSE_NOTICE } from '../src/core/area-pause-notice.js';
@@ -2019,6 +2020,24 @@ describe('session-start-orchestrator', () => {
     expect(ctx).toContain('devflow:implement');
   });
 
+  /**
+   * The routing roster is derived from the devflow-ambient plugin's agents, never listed, so an
+   * ambient agent the charter forgets fails here. `curate` is spawned by a session-start hook and is
+   * never a routing target. An agent is spelled as the charter writes it: its slug, capitalised.
+   */
+  function ambientRosterNames(): string[] {
+    const ambient = DEVFLOW_PLUGINS.find(plugin => plugin.name === 'devflow-ambient');
+    expect(ambient, 'the devflow-ambient plugin is registered').toBeDefined();
+    return (ambient?.agents ?? [])
+      .filter(slug => slug !== 'curate')
+      .map(slug => slug.charAt(0).toUpperCase() + slug.slice(1));
+  }
+
+  /** Whole-word match, so `Codebase` does not name Code and `GitHub` does not name Git. */
+  function namesAgent(text: string, agent: string): boolean {
+    return new RegExp(`\\b${agent}\\b`).test(text);
+  }
+
   it('AC-F1: additionalContext routes by roster agent and pins no model (no haiku/sonnet/opus)', () => {
     const { stdout } = runHook(ORCHESTRATOR_HOOK, { cwd: tmpDir }, homeDir);
     const parsed = JSON.parse(stdout) as { hookSpecificOutput: { additionalContext: string } };
@@ -2026,9 +2045,17 @@ describe('session-start-orchestrator', () => {
     // Each agent's model/effort is user-configured; naming a model would steer the
     // orchestrator into overriding it on the Agent call.
     expect(ctx).not.toMatch(/haiku|sonnet|opus/i);
-    for (const agent of ['Explore', 'Skim', 'Code', 'Validate', 'Git', 'Design', 'Research', 'Review', 'Triage']) {
-      expect(ctx).toContain(agent);
-    }
+    const roster = ambientRosterNames();
+    expect(roster.length, 'no roster derived').toBeGreaterThan(0);
+    const missing = roster.filter(agent => !namesAgent(ctx, agent));
+    expect(missing, `the charter names no routing for: ${missing.join(', ')}`).toEqual([]);
+  });
+
+  it('AC-F1: known-bad probe: the roster match is whole-word, so Codebase is not Code and GitHub is not Git', () => {
+    expect(namesAgent('Codebase orientation: Skim. GitHub work.', 'Code')).toBe(false);
+    expect(namesAgent('Codebase orientation: Skim. GitHub work.', 'Git')).toBe(false);
+    expect(namesAgent('Codebase orientation: Skim. GitHub work.', 'Skim')).toBe(true);
+    expect(namesAgent('Git (git/GitHub)', 'Git')).toBe(true);
   });
 
   it('AC-F1: additionalContext carries no HTML comment (maintainer notes never reach users)', () => {
@@ -2104,6 +2131,18 @@ describe('session-start-orchestrator', () => {
     } finally {
       fs.rmSync(hooksTemp, { recursive: true, force: true });
     }
+  });
+
+  it('AC-F10: LC_ALL=C — the real source charter is injected whole', () => {
+    // Under the C locale bash counts bytes, not characters, so a charter with a multibyte character
+    // could cross the cap in the field while it passes here. The source is read as shipped.
+    const source = fs.readFileSync(CHARTER_FILE, 'utf-8');
+    expect(source.length, 'nothing read').toBeGreaterThan(1000);
+    const { stdout, exitCode } = runHook(ORCHESTRATOR_HOOK, { cwd: tmpDir }, homeDir, { LC_ALL: 'C' });
+    expect(exitCode).toBe(0);
+    const parsed = JSON.parse(stdout) as { hookSpecificOutput: { additionalContext: string } };
+    // The hook reads the charter with $(cat), which drops the trailing newline.
+    expect(parsed.hookSpecificOutput.additionalContext).toBe(source.replace(/\n+$/, ''));
   });
 
   it('AC-P3: repo charter asset exists, is non-empty, and is <4096 chars', () => {
