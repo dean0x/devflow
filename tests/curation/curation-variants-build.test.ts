@@ -958,9 +958,9 @@ function distMarkdown(sub: string): string[] {
   return walkFiles(dir, f => f.endsWith('.md')).map(f => path.relative(dir, f).split(path.sep).join('/')).sort();
 }
 
-/** Named collector: the dist/ Markdown files carrying a curation marker. Driven by the live assertion and its probe. */
+/** Named collector: the dist/ Markdown files carrying a marker of either axis. Driven by the live assertion and its probe. */
 function collectSurvivingMarkers(files: ReadonlyArray<{ readonly name: string; readonly content: string }>): string[] {
-  return files.filter(f => containsCurationMarker(f.content)).map(f => f.name);
+  return files.filter(f => containsVariantMarker(f.content)).map(f => f.name);
 }
 
 describe('the built dist/ tree', () => {
@@ -987,7 +987,7 @@ describe('the built dist/ tree', () => {
     }
   });
 
-  it('no dist Markdown file carries a curation marker (AC-133)', () => {
+  it('no dist Markdown file carries a curation or compliance marker (AC-133)', () => {
     const files = walkFiles(DIST, f => f.endsWith('.md')).map(f => ({
       name: path.relative(ROOT, f).split(path.sep).join('/'),
       content: readFileSync(f, 'utf-8'),
@@ -1010,8 +1010,10 @@ describe('the built dist/ tree', () => {
       { name: 'dist/commands/a.md', content: `text\n${ON}\nmore\n` },
       { name: 'dist/agents/b.md', content: 'text <!--curation:end--> more\n' },
       { name: 'dist/agents/c.md', content: 'curation is on here; <!-- an ordinary comment -->\n' },
+      { name: 'dist/commands/d.md', content: `text\n${CON}\nmore\n` },
+      { name: 'dist/agents/e.md', content: 'compliance:on is a setting here; <!-- an ordinary comment -->\n' },
     ];
-    expect(collectSurvivingMarkers(seeded)).toEqual(['dist/commands/a.md', 'dist/agents/b.md']);
+    expect(collectSurvivingMarkers(seeded)).toEqual(['dist/commands/a.md', 'dist/agents/b.md', 'dist/commands/d.md']);
   });
 
   it('CURATION_VARIANT_HOSTS names each host as <kind>/<name> with a known kind and no duplicate', () => {

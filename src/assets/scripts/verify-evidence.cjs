@@ -387,8 +387,9 @@ function parseArgs(argv) {
     if (needed !== null && needed !== 'true' && needed !== 'false') return USAGE_ARGS;
     const evidence = flagValue(f, '--evidence');
     const out = flagValue(f, '--out');
-    // The out file replaces whatever it names: it must never be the evidence it was read from.
-    if (evidence !== null && evidence === out) return USAGE_ARGS;
+    // The out file replaces whatever it names: it must never be the evidence it was read from,
+    // however the two paths are spelled (`./a.md` and `a.md` are one file).
+    if (evidence !== null && out !== null && path.resolve(evidence) === path.resolve(out)) return USAGE_ARGS;
     // An absent flag is the ladder's "unrecognised": it can never read READY.
     return { kind: 'readiness', pr, requireNonAuthor: needed === null ? 'unrecognised' : needed, evidence, out };
   }
@@ -440,19 +441,30 @@ function readTextFile(filePath) {
 /**
  * Write `text` to `filePath`, refusing anything that already exists and is not a
  * regular file (a directory, a FIFO, a symlink). Returns whether it was written.
+ * The lstat refuses first. The open adds O_NOFOLLOW, so a link put in the file's
+ * place after the lstat is refused, never followed, and O_NONBLOCK, so a FIFO put
+ * there cannot block; the fstat re-checks the opened object.
  *
  * @param {string} filePath
  * @param {string} text
  * @returns {boolean}
  */
 function writeTextFile(filePath, text) {
+  let fd;
   try {
     const st = fs.lstatSync(filePath, { throwIfNoEntry: false });
     if (st !== undefined && !st.isFile()) return false;
-    fs.writeFileSync(filePath, text, { encoding: 'utf8', mode: 0o600 });
+    const c = fs.constants;
+    fd = fs.openSync(filePath, c.O_WRONLY | c.O_CREAT | c.O_TRUNC | (c.O_NOFOLLOW || 0) | (c.O_NONBLOCK || 0), 0o600);
+    if (!fs.fstatSync(fd).isFile()) return false;
+    fs.writeFileSync(fd, text, 'utf8');
     return true;
   } catch (_) {
     return false;
+  } finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch (_) { /* the write already decided */ }
+    }
   }
 }
 

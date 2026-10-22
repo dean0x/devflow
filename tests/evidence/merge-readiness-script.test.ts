@@ -733,6 +733,20 @@ describe('TP-15: readiness --out writes the READINESS line, then the block', () 
     expect(fs.readFileSync(file, 'utf8')).toBe(evidenceText([LOCAL_TP]))
   })
 
+  it('one path spelled two ways is the same usage error: the evidence file is never replaced', () => {
+    const file = writeEvidence(evidenceText([LOCAL_TP]))
+    const twin = greenTwin()
+    const aliases = [path.relative(process.cwd(), file), [path.dirname(file), '.', path.basename(file)].join(path.sep)]
+    for (const alias of aliases) {
+      expect(alias, 'the alias must be spelled differently, or the case is the one above').not.toBe(file)
+      const r = runInProcess(['readiness', '--pr', '7', '--require-non-author-approval', 'false', '--evidence', file, '--out', alias], twin.exec)
+      expect(r.code, alias).toBe(1)
+      expect(r.stdout).toBe('')
+    }
+    expect(twin.calls, 'a usage error makes no call').toEqual([])
+    expect(fs.readFileSync(file, 'utf8')).toBe(evidenceText([LOCAL_TP]))
+  })
+
   it('a flag missing its value, or given twice, is a usage error', SPAWN_BUDGET, () => {
     for (const extra of [['--out'], ['--evidence'], ['--out', 'a.txt', '--out', 'b.txt'], ['--evidence', 'a.md', '--evidence', 'b.md']]) {
       const r = run(green(), 'false', extra)
