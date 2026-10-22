@@ -29,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Each level hint is now one short line, and no line of the step note is longer than 72 characters.
   - The step note names `/resolve` with the other commands that read the level.
   - The full effect of each level stays in `devflow gates` and in the docs.
+- **`/bug-analysis` no longer reports "no findings" when static analysis could not run** ([#649](https://github.com/dean0x/devflow/issues/649)).
+  - Without GNU `timeout` or `gtimeout` (stock macOS), it runs no scanner and says so. Install coreutils to enable it.
+  - A scanner that fails, times out or exits with an error is named in the report with its exit status.
+  - Each scanner's time bound ends before its Bash call does, and file names reach the scanners safely.
+  - Semgrep and Snyk now run one after the other.
 
 ---
 
