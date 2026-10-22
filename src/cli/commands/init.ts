@@ -15,6 +15,7 @@ import { describeMoveText, describeOutcome, runInitCurationMove, shownSkipAt, ty
 import { realGlobalTuningMoveIO, realProjectLedgerMoveIO } from './curation-move-io.js';
 import { describeEchoedValue } from '../../core/echo-value.js';
 import { installViaFileCopy, composeScripts, type InstallReport } from '../../targets/claude-code/installer.js';
+import { installRenderedCharter } from '../../targets/claude-code/charter-render.js';
 import { formatOverlaySummary, formatSkillScopeSummary, formatTrackerAssetSummary, isPluginListUnchanged, type SummaryLine } from './install-report.js';
 import { convergeTrackerArtifacts, type ConvergeTrackerArtifactsResult, type TrackerAgentState } from '../../targets/claude-code/tracker-install.js';
 import {
@@ -854,6 +855,21 @@ export function buildHudOnlyManifest(
 }
 
 /**
+ * The plugin names `init --hud-only` renders the orchestrator charter for. Pure.
+ *
+ * D-CHARTER-INSTALL-RENDER: --hud-only reinstalls no plugin, so the installed charter must keep describing
+ * what the manifest says is installed: the recorded plugins, with a deleted name pruned and a legacy name
+ * mapped as every other partial run does (`resolvePluginList`), and only names this registry has. With no
+ * manifest, or one `readManifest()` refused, nothing is known to be installed, so the set is EMPTY: the
+ * render then names no workflow, and no sentinel is written. The registry fallback that uninstall takes
+ * would hand a machine with no record every workflow's routing line, which is the failure the render exists
+ * to prevent.
+ */
+export function hudOnlyCharterPlugins(manifest: ManifestData | null): string[] {
+  return resolvePluginList([], manifest, true).filter(name => DEVFLOW_PLUGINS.some(plugin => plugin.name === name));
+}
+
+/**
  * The line `init --hud-only` prints when the version the manifest records is not the
  * running version, or null when there is nothing to say. Pure.
  *
@@ -1057,6 +1073,14 @@ export const initCommand = new Command('init')
         process.exit(1);
       }
 
+      // Read the existing manifest: over a prior install, --hud-only touches only
+      // the HUD (D-HUD-ONLY-PRESERVE in buildHudOnlyManifest). Read before the scripts are
+      // copied, so the charter render below works from the record as the run found it.
+      let existingHudManifest: ManifestData | null = null;
+      try {
+        existingHudManifest = await readManifest(devflowDir);
+      } catch { /* absent on fresh install — existingHudManifest stays null */ }
+
       // Install HUD scripts to devflow dir
       const scriptsTarget = path.join(devflowDir, 'scripts');
       try {
@@ -1066,12 +1090,15 @@ export const initCommand = new Command('init')
         process.exit(1);
       }
 
-      // Read the existing manifest: over a prior install, --hud-only touches only
-      // the HUD (D-HUD-ONLY-PRESERVE in buildHudOnlyManifest).
-      let existingHudManifest: ManifestData | null = null;
-      try {
-        existingHudManifest = await readManifest(devflowDir);
-      } catch { /* absent on fresh install — existingHudManifest stays null */ }
+      // The script copy skips the orchestrator charter and the implement sentinel
+      // (D-CHARTER-INSTALL-RENDER), so a --hud-only run renders them itself, for the plugins the
+      // manifest records and the empty set when it records none. A failure is a warning.
+      await installRenderedCharter({
+        scriptsDir: scriptsTarget,
+        plugins: hudOnlyCharterPlugins(existingHudManifest),
+        warn: (msg) => p.log.warn(msg),
+        sentinelMode: 'sync',
+      });
       // A manifest readManifest() refuses reads as none, but its machine gate level is still
       // stored there: --hud-only keeps it and says so, as the full init does. --reset does not
       // apply here, so nothing asks to forget it.
@@ -1632,9 +1659,9 @@ export const initCommand = new Command('init')
       } else {
         p.note(
           'Puts every session (git repos only) in orchestrator posture:\n' +
-          'a ~535-token charter at session start plus a per-prompt reminder\n' +
+          'a charter of up to ~850 tokens at session start plus a per-prompt reminder\n' +
           'steer the main model to delegate work to agents and devflow workflows\n' +
-          'instead of doing it mainline. Plan-mode handoffs auto-run devflow:implement.',
+          'instead of doing it mainline. Plan-mode handoffs run devflow:implement when it is installed.',
           'Ambient Mode',
         );
         const ambientChoice = await p.select({
