@@ -76,8 +76,8 @@ const childProcess = require('child_process');
 
 const PE = require(path.join(__dirname, 'pr-evidence.cjs'));
 // D-READINESS-CLASSIFIER: the CI classifier, the merge gate and the workflow-list probe
-// are ci-wait's own, so the two scripts cannot disagree; only ci-wait has the settle
-// window, since readiness makes one read. Its main is guarded by
+// are ci-wait's own, so the two scripts cannot disagree; only ci-wait polls until its
+// deadline, since readiness makes one read. Its main is guarded by
 // `require.main === module`: requiring it starts nothing.
 const CW = require(path.join(__dirname, 'ci-wait.cjs'));
 

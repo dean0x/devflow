@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - A scanner that fails, times out or exits with an error is named in the report with its exit status.
   - Each scanner's time bound ends before its Bash call does, and file names reach the scanners safely.
   - Semgrep and Snyk now run one after the other.
+- **The CI wait and the Validate re-runs no longer stop too early** ([#664](https://github.com/dean0x/devflow/issues/664)). The CI wait waits for CI to start until its 570 s limit, not only 90 s, so a repository with no CI now waits 570 s before the wait reports no CI. When a pull request has only external checks and the repository has no workflow file, the wait ends at once. Validate waits up to 600 s for each failed test file that it re-runs alone, not 120 s, so the worst case is 200 minutes for each Validate run.
 
 ---
 
