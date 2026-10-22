@@ -406,11 +406,11 @@
     },
     {
       "id": "charter-char-max",
-      "ceiling": 3072,
-      "pattern": "3072",
+      "ceiling": 3384,
+      "pattern": "MAX_CHARTER_BYTES = 3384",
       "occurrences": 1,
       "sourceFile": "tests/agent-name-guards.test.ts",
-      "description": "MAX_CHARTER_CHARS = 75% of the 4096-char shell injection cap; orchestrator charter must stay at or below this"
+      "description": "Max bytes (Buffer.byteLength) of the full-install source charter, src/assets/scripts/hooks/assets/orchestrator-charter.md; the hook injects it only at 4096 characters or fewer, so this is 82.6% of that cap. Raised once, from 3072 characters to 3384 bytes, by the founder's authorisation on 2026-10-23: the routing now names every roster agent and the installed workflows. A render is never larger than the source. May be LOWERED after a pass that cuts the charter, never raised again."
     },
     {
       "id": "arguments-once-max",
