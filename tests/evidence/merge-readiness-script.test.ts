@@ -144,8 +144,11 @@ describe('AC-204: readiness prints the contract block and reads without writing'
   it('4. changes requested, no approving review and an unrecognised decision are each their own arm', SPAWN_BUDGET, () => {
     expect(status(run(green({ reviewDecision: 'CHANGES_REQUESTED' })))).toBe('NOT_READY (changes requested)')
     expect(status(run(green({ reviewDecision: 'REVIEW_REQUIRED' })))).toBe('NOT_READY (no approving review)')
-    expect(status(run(green({ reviewDecision: null })))).toBe('NOT_READY (no approving review)')
-    expect(block(run(green({ reviewDecision: null }))).decision).toBe('none')
+    for (const reviewDecision of [null, '']) {
+      const none = run(green({ reviewDecision }))
+      expect(status(none), `reviewDecision ${JSON.stringify(reviewDecision)}`).toBe('NOT_READY (no approving review)')
+      expect(block(none), `reviewDecision ${JSON.stringify(reviewDecision)}: the decision does not touch CI`).toMatchObject({ decision: 'none', ci: 'PASSING' })
+    }
     const odd = run(green({ reviewDecision: 'SOMETHING_NEW' }))
     expect(status(odd)).toBe('NOT_READY (status unknown)')
     expect(block(odd).decision).toBe('unrecognised')
@@ -267,6 +270,8 @@ const FAILED_ROW = { name: 'e2e', state: 'FAILURE', bucket: 'fail', workflow: 'C
 const PENDING_ROW = { name: 'e2e', state: 'PENDING', bucket: 'pending', workflow: 'CI' }
 const NOT_A_PLAN = { body: '<!-- devflow:test-plan -->\nnot a plan\n', comments: [] }
 const UNKNOWN_CI = { status: 'NOT_READY', reason: 'status unknown', ci: 'INDETERMINATE' } as const
+/** The two ways an empty check list reaches the script: gh's "no checks reported" error, and a reply of `[]`. */
+const EMPTY_LISTS = [['no checks reported', undefined], ['an empty array', []]] as const
 
 const verbs = (r: ScriptRun): string[] => r.calls.map(c => c.args.slice(0, 2).join(' '))
 const callsTo = (r: ScriptRun, argv: readonly string[]): ScriptRun['calls'][number][] =>
@@ -299,22 +304,22 @@ describe('readiness reads CI through the shared merge gate', () => {
     }
   })
 
-  it('15. a merge state that is not MERGEABLE (UNKNOWN, absent, odd) is never PASSING or NO_CI and never DEGRADED', SPAWN_BUDGET, () => {
-    for (const mergeable of ['UNKNOWN', null, 'SOMETHING_NEW']) {
-      const label = String(mergeable ?? 'absent')
-      for (const [rows, over] of [['passing rows', {}], ['an empty list', { checks: undefined }]] as const) {
-        const r = run(green({ ...over, mergeable }))
-        expect(r.code, `${label}, ${rows}: ${r.stderr}`).toBe(0)
-        expect(block(r), `${label}, ${rows}`).toMatchObject({ ...UNKNOWN_CI, decision: 'APPROVED' })
-        expect(callsTo(r, WORKFLOWS_ARGV), `${label}, ${rows}: no probe unless MERGEABLE`).toEqual([])
-      }
+  const NOT_MERGEABLE: ReadonlyArray<readonly [string, string | null]> = [['UNKNOWN', 'UNKNOWN'], ['absent', null], ['odd', 'SOMETHING_NEW']]
+  it.each(NOT_MERGEABLE)('15. a merge state that is not MERGEABLE (%s) is never PASSING or NO_CI and never DEGRADED', SPAWN_BUDGET, (label, mergeable) => {
+    for (const [rows, over] of [['passing rows', {}], ['no checks reported', { checks: undefined }], ['an empty array', { checks: [] }]] as const) {
+      const r = run(green({ ...over, mergeable }))
+      expect(r.code, `${label}, ${rows}: ${r.stderr}`).toBe(0)
+      expect(block(r), `${label}, ${rows}`).toMatchObject({ ...UNKNOWN_CI, decision: 'APPROVED' })
+      expect(callsTo(r, WORKFLOWS_ARGV), `${label}, ${rows}: no probe unless MERGEABLE`).toEqual([])
     }
-    // FAILING and PENDING do not depend on the merge state.
+  })
+
+  it('15. FAILING and PENDING do not depend on the merge state', SPAWN_BUDGET, () => {
     expect(status(run(green({ mergeable: 'UNKNOWN', checks: [...PASSING, FAILED_ROW] })))).toBe('NOT_READY (CI failing: e2e)')
     expect(status(run(green({ mergeable: null, checks: [...PASSING, PENDING_ROW], checksExit: 8 })))).toBe('NOT_READY (CI pending)')
   })
 
-  it('16. a PR that does not conflict makes the same calls as before the merge rules; a conflict drops the checks call', SPAWN_BUDGET, () => {
+  it('16. with check rows, a PR that does not conflict makes the same calls as before the merge rules; a conflict drops the checks call', SPAWN_BUDGET, () => {
     const clean = run(green())
     expect(verbs(clean)).toEqual(['pr view', 'api graphql', 'pr checks', 'pr view'])
     expect(clean.writes).toEqual([])
@@ -324,33 +329,33 @@ describe('readiness reads CI through the shared merge gate', () => {
 })
 
 describe('an empty list asks the workflow list; CI counts for the head the evidence was read at', () => {
-  it('17. an empty list on a MERGEABLE PR is NO_CI and READY only when no workflow file is active', SPAWN_BUDGET, () => {
-    const none = run(green({ checks: undefined }))
+  it.each(EMPTY_LISTS)('17. an empty list (%s) on a MERGEABLE PR is NO_CI and READY only when no workflow file is active', SPAWN_BUDGET, (_form, checks) => {
+    const none = run(green({ checks }))
     expect(block(none).ci).toBe('NO_CI')
     expect(status(none)).toBe('READY')
     expect(callsTo(none, ['api']).filter(c => c.args[1] !== 'graphql').map(c => c.args), 'one fixed read-only call, no PR number or head').toEqual([WORKFLOWS_ARGV])
 
     const notFiles = run(green({
-      checks: undefined,
+      checks,
       workflows: [{ path: 'dynamic/copilot-pull-request-reviewer/x', state: 'active' }, { path: '.github/workflows/old.yml', state: 'disabled_manually' }],
     }))
     expect(block(notFiles).ci, 'a dynamic path and a disabled file are no workflow that could still start').toBe('NO_CI')
     expect(status(notFiles)).toBe('READY')
 
-    const active = run(green({ checks: undefined, workflows: [WORKFLOW_FILE] }))
+    const active = run(green({ checks, workflows: [WORKFLOW_FILE] }))
     expect(active.code, active.stderr).toBe(0)
     expect(block(active)).toMatchObject(UNKNOWN_CI)
   })
 
-  it('18. a probe that fails, cannot be read or is one page of many reads unknown, not DEGRADED', SPAWN_BUDGET, () => {
-    const withoutProbe = run(green({ checks: undefined, mergeable: 'UNKNOWN' }))
-    const failed = run(green({ checks: undefined, failures: [{ match: WORKFLOWS_ARGV, times: 3, stderr: 'gh: Bad Gateway (HTTP 502)\n' }] }))
+  it.each(EMPTY_LISTS)('18. a probe that fails, cannot be read or is one page of many reads unknown, not DEGRADED (%s)', SPAWN_BUDGET, (_form, checks) => {
+    const withoutProbe = run(green({ checks, mergeable: 'UNKNOWN' }))
+    const failed = run(green({ checks, failures: [{ match: WORKFLOWS_ARGV, times: 3, stderr: 'gh: Bad Gateway (HTTP 502)\n' }] }))
     expect(failed.code, failed.stderr).toBe(0)
     expect(block(failed)).toMatchObject(UNKNOWN_CI)
     expect(callsTo(failed, WORKFLOWS_ARGV).map(c => c.failed), 'one call, no retry').toEqual([true])
     expect(failed.calls.length, 'the failed probe adds one call').toBe(withoutProbe.calls.length + 1)
     for (const workflowsReply of ['not json', '{"total_count":150,"workflows":[]}']) {
-      const r = run(green({ checks: undefined, workflowsReply }))
+      const r = run(green({ checks, workflowsReply }))
       expect(r.code, `${workflowsReply}: ${r.stderr}`).toBe(0)
       expect(block(r), workflowsReply).toMatchObject(UNKNOWN_CI)
     }
@@ -492,9 +497,18 @@ describe('known-bad probes: a readiness script that drops one rule reads READY w
       scenario: green({ checks: undefined, workflows: [WORKFLOW_FILE] }),
       mutate: seed("CW.mergeGate('NO_CI', mergeable, probeWorkflows(io))", "CW.mergeGate('NO_CI', mergeable, false)"),
     },
+    {
+      name: 'the empty-array arm',
+      scenario: green({ checks: [], workflows: [WORKFLOW_FILE] }),
+      mutate: seed('if (checks.length === 0) return readEmptyCi(io, mergeable);', "if (checks.length === 0) return { status: 'NO_CI', failing: '-' };"),
+    },
   ]
 
-  expect(probes, 'one probe per rule').toHaveLength(5)
+  it('gives each probe its own name', () => {
+    const names = probes.map(probe => probe.name)
+    expect(new Set(names).size, `a repeated name hides one probe behind another: ${names.join(', ')}`).toBe(names.length)
+  })
+
   for (const { name, scenario, mutate } of probes) {
     it(`${name}: dropped, a PR that is not ready reads READY`, SPAWN_BUDGET, () => {
       expect(status(run(scenario)), `${name} in force`).toBe('NOT_READY (status unknown)')
