@@ -55,12 +55,9 @@ export const GATE_LEVEL_SELECT_MESSAGE = 'Gate level for this machine';
  * clack never wraps a note or a hint, so a hint stays within 60 characters and holds no line
  * break (a guard in `tests/gate-level-prompts.test.ts` holds both). The full effects of each
  * level live in GATE_LEVEL_EFFECT in gates.ts, in `devflow gates` and in the docs.
- * Change a hint when the level it names changes how much it checks. A command that reads the
- * level and has no rule that changes a phase leaves the hints true, so it changes
- * GATE_LEVEL_EFFECT alone. One test pins the exact text of both tables, so a change to
- * either fails it until you check the other table and update the pin; further rows check
- * the clauses the two tables share (the lint pack level, the levels that run fewer review
- * focuses and the levels that skip Polish).
+ * Change a hint when the level it names changes how much it checks; then check
+ * GATE_LEVEL_EFFECT and update the pin. The comment on GATE_LEVEL_EFFECT holds the full
+ * update rule, the pin and the list of clauses that the two tables share.
  */
 export const GATE_LEVEL_HINTS: Readonly<Record<GateLevel, string>> = Object.freeze({
   full: 'the most checking: every review focus, and Polish',
