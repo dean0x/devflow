@@ -430,19 +430,19 @@
     },
     {
       "id": "code-preload-max-bytes",
-      "ceiling": 25496,
-      "pattern": "const CODE_PRELOAD_MAX_BYTES = 25_496",
+      "ceiling": 25489,
+      "pattern": "const CODE_PRELOAD_MAX_BYTES = 25_489",
       "occurrences": 1,
       "sourceFile": "tests/guards/code-preload.test.ts",
-      "description": "Total bytes of the six SKILL.md files in Code's frontmatter preload (git, testing, test-driven-development, worktree-support, apply-feature-knowledge, apply-decisions) (D-CODE-PRELOAD-CAP, D-CODE-PRELOADS). The ten-file preload was 53,450 bytes; the four mode skills left the preload and then left the agent altogether (D-NO-RUNTIME-SKILLS), and the set measures 25,496 today, which is the ceiling. Code keeps test-driven-development and apply-feature-knowledge because only its modes write tests first and only its spawns pass FEATURE_KNOWLEDGE; Fix and Refactor hold their own ceilings below. git, testing and test-driven-development are fixed terms here, so growth in any of the six pays for itself inside the six. May be LOWERED, never raised: a preload ceiling raised to fit what the six grew into is a description of their size, and Code is billed on it at every spawn."
+      "description": "Total bytes of the six SKILL.md files in Code's frontmatter preload (git, testing, test-driven-development, worktree-support, apply-feature-knowledge, apply-decisions) (D-CODE-PRELOAD-CAP, D-CODE-PRELOADS). The ten-file preload was 53,450 bytes; the four mode skills left the preload and then left the agent altogether (D-NO-RUNTIME-SKILLS), and the set measures 25,489 today, which is the ceiling. Code keeps test-driven-development and apply-feature-knowledge because only its modes write tests first and only its spawns pass FEATURE_KNOWLEDGE; Fix and Refactor hold their own ceilings below. git, testing and test-driven-development are fixed terms here, so growth in any of the six pays for itself inside the six. May be LOWERED, never raised: a preload ceiling raised to fit what the six grew into is a description of their size, and Code is billed on it at every spawn."
     },
     {
       "id": "fix-preload-max-bytes",
-      "ceiling": 14857,
-      "pattern": "const FIX_PRELOAD_MAX_BYTES = 14_857",
+      "ceiling": 14850,
+      "pattern": "const FIX_PRELOAD_MAX_BYTES = 14_850",
       "occurrences": 1,
       "sourceFile": "tests/guards/code-preload.test.ts",
-      "description": "D-CODE-PRELOADS: total bytes of the four SKILL.md files in Fix's frontmatter preload (git, testing, worktree-support, apply-decisions). A gate-failure fix compiles and runs the named tests; it is not a test-first build, and no fix spawn passes FEATURE_KNOWLEDGE, so test-driven-development and apply-feature-knowledge stay with Code. The set measures 14,857, which is the ceiling. May be LOWERED, never raised: Fix is billed on it at every spawn."
+      "description": "D-CODE-PRELOADS: total bytes of the four SKILL.md files in Fix's frontmatter preload (git, testing, worktree-support, apply-decisions). A gate-failure fix compiles and runs the named tests; it is not a test-first build, and no fix spawn passes FEATURE_KNOWLEDGE, so test-driven-development and apply-feature-knowledge stay with Code. The set measures 14,850, which is the ceiling. May be LOWERED, never raised: Fix is billed on it at every spawn."
     },
     {
       "id": "refactor-preload-max-bytes",

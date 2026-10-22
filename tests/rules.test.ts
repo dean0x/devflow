@@ -1028,7 +1028,12 @@ const PROBE_LINE: PinnedLine = {
   name: 'probe line',
   file: 'testing',
   prefix: '- [ ] Each new assertion',
-  phrases: ['would fail, not error, with the change reverted', 'RED run counts', 'temporary uncommitted revert'],
+  phrases: [
+    'would fail, not error, with the change reverted',
+    'RED run counts',
+    'temporary uncommitted revert',
+    'of your own edit, never a stash',
+  ],
   section: 'Quality Gates',
   forbidden: [{ text: 'known-bad', defect: 'the probe line names "known-bad"' }],
 };
