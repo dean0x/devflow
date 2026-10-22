@@ -1656,6 +1656,10 @@ describe('git agent — static content guards', () => {
       why: 'the marker spelling; a private section would reach the posted comment',
     },
     {
+      literal: 'of 0-3 spaces, 1-6 `#`,',
+      why: 'the start shape; an indented code line or a level-7 line would start or miss a private section',
+    },
+    {
       literal: 'a space or tab and the word',
       why: 'the start shape; a tab after the heading marks starts a private section too',
     },
@@ -1668,28 +1672,56 @@ describe('git agent — static content guards', () => {
       why: 'the follow-set; a comma, dash or period after the word is still a private heading',
     },
     {
-      literal: 'else at end of file; an unclosed fence inside it runs it to end of file',
+      literal: 'It ends before the next unfenced heading (0-3 spaces) with as many `#` as its start or fewer',
+      why: 'the end rule; text under a nested heading of a private section would reach the post',
+    },
+    {
+      literal: 'else at end of file; an unclosed fence in it runs it to end of file',
       why: 'the end rule; a last or unclosed private section would stay in the post',
     },
     {
-      literal: 'Step 4 strips them before either mode',
+      literal: 'When unsure, strip more.',
+      why: 'the tie-break; an unclear case would stay in the post',
+    },
+    {
+      literal: 'The read strips them before either mode',
       why: 'strip at the read, so STUB never reads private text either',
     },
     {
-      literal: 'never the file, which stays unedited',
+      literal: 'closing at each cut any fence the cut leaves open',
+      why: 'a private heading inside a public fence strips its closing fence; the post would render later text as code',
+    },
+    {
+      literal: 'use only the stripped text; the file stays unedited',
       why: 'compose, cap and re-cap use only the stripped text; the local file is not edited',
     },
     {
-      literal: 'Then close any fence the strip leaves open.',
-      why: 'a private heading inside a public fence strips its closing fence; the post would render later text as code',
+      literal: 'A failed read or strip',
+      why: 'a failed read or strip would let unstripped text reach the compose step',
+    },
+    {
+      literal: 'blank stripped text',
+      why: 'when no public text remains, no comment is posted',
+    },
+    {
+      literal: 'before the scrub, a body line of that start shape',
+      why: 'the backstop scan on the composed body',
+    },
+    {
+      literal: '→ post nothing',
+      why: 'the failure outcome; any other outcome would still comment on the PR',
     },
     {
       literal: '`**Status**: DEGRADED (no postable summary)`',
       why: 'the fail-closed report, with the fixed reason the registry holds',
     },
     {
-      literal: 'before step 6, a body line of that start shape',
-      why: 'the backstop scan on the composed body',
+      literal: 'never quote private text',
+      why: 'the failure report must not repeat the private text it withheld',
+    },
+    {
+      literal: '**Stripped**: {n} private sections',
+      why: 'the op report tells the caller how many sections the strip removed, so a long cut is not silent',
     },
   ];
 
@@ -1847,6 +1879,57 @@ describe('git agent — static content guards', () => {
       D10_SUMMARY_OPS.filter(op => d10Reaches(seeded, op, PRIVATE_MARKER_LITERAL)),
       'the per-op predicate must lose exactly the op whose reference lost the spelling',
     ).toEqual(['post-resolution-summary']);
+  });
+
+  /**
+   * Weaker spellings of the rule. Each one drops an effect the rule exists for, so some row of
+   * PRIVATE_SECTION_ROWS must stop reaching the edited op, or that edit would pass this guard.
+   */
+  const PRIVATE_RULE_WEAKENINGS: readonly { readonly from: string; readonly to: string; readonly effect: string }[] = [
+    {
+      from: 'It ends before the next unfenced heading (0-3 spaces) with as many `#` as its start or fewer, else',
+      to: 'It ends before the next heading, else',
+      effect: 'text under a nested heading of a private section would reach the post',
+    },
+    {
+      from: 'blank stripped text or, ',
+      to: '',
+      effect: 'a summary with no public text would still be posted',
+    },
+    {
+      from: '→ post nothing; report',
+      to: '→ post the stub; report',
+      effect: 'a failed strip would still post a comment',
+    },
+    {
+      from: ' and never quote private text',
+      to: '',
+      effect: 'the failure report could repeat private text',
+    },
+    {
+      from: 'When unsure, strip more.',
+      to: 'When unsure, keep it.',
+      effect: 'an unclear case would stay in the post',
+    },
+    {
+      from: 'of 0-3 spaces, 1-6 `#`, a space',
+      to: 'of any `#`, a space',
+      effect: 'an indented code line or a level-7 line would start or miss a private section',
+    },
+  ];
+
+  it('private sections known-bad probe: each weaker spelling of the rule is reported for that op only', () => {
+    const unreported = PRIVATE_RULE_WEAKENINGS.filter(({ from, to }) => {
+      const seeded = seedPrHostFile('post-review-summary', c => c.split(from).join(to));
+      const reportedOps = D10_SUMMARY_OPS.filter(op =>
+        PRIVATE_SECTION_ROWS.some(({ literal }) => !d10Reaches(seeded, op, literal)),
+      );
+      return reportedOps.join() !== 'post-review-summary';
+    }).map(({ effect }) => effect);
+    expect(
+      unreported,
+      'no row reports these weaker rules for the edited op alone — or the seed missed its anchor',
+    ).toEqual([]);
   });
 
   it('private sections: no summary op keeps the whole-file placeholder, and each FULL template names the stripped file', () => {

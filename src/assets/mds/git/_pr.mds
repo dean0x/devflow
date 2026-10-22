@@ -35,6 +35,9 @@ one file, so they are readable from the operation's section alone:
   (the D9 predicate has one authority, and `references/decision-markers.md` is where
   the reference tree states it).
 
+The two summary operations carry no `PR mechanics held here` line. The review
+operation's cap line holds the 422 reason for both operations.
+
 `ensure-pr-ready` is not here. It is a tracker operation as well, so its one
 reference per provider holds the PR skeleton (`_ops_steps.mds`) and the provider's step 4b
 together; see `tracker/_github.mds`, `_jira.mds` and `_linear.mds`.
