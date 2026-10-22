@@ -6,7 +6,7 @@ paths: []
 **Match existing patterns — consistency beats cleverness.**
 
 - Single responsibility: one reason to change per module
-- Find the existing owner first: extend it when the new code shares its job, never add a parallel copy; a check at a trust boundary is not a copy
+- Find the existing owner: extend it when new code shares its job, never add a parallel copy; a trust-boundary or fail-closed check is not a copy
 - No regressions: every change must pass existing tests
 - Behavior-focused tests: assert outcomes, not implementation details
 - If you can't explain it in 5 minutes, it's too complex — simplify first

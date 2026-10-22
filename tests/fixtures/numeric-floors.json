@@ -810,7 +810,7 @@
       "pattern": "const QUALITY_SWEEP_OWNER_BULLETS_CEILING = 324;",
       "occurrences": 1,
       "sourceFile": "tests/rules.test.ts",
-      "description": "The doc-sweep and existing-owner bullets of the quality rule together, the lines of src/assets/rules/quality.md that open `- When a change alters a name, path or behavior` and `- Find the existing owner first`, in bytes without their newlines. Both are billed in every session that loads the rules; tests/fixtures/agent-config.ts owns which agents load them. They measure 324 today, which is the ceiling. May be LOWERED, never raised: a later addition funds itself with a cut."
+      "description": "The doc-sweep and existing-owner bullets of the quality rule together, the lines of src/assets/rules/quality.md that open `- When a change alters a name, path or behavior` and `- Find the existing owner`, in bytes without their newlines. Both are billed in every session that loads the rules; tests/fixtures/agent-config.ts owns which agents load them. They measure 324 today, which is the ceiling. May be LOWERED, never raised: a later addition funds itself with a cut."
     }
   ]
 }

@@ -981,8 +981,8 @@ describe('quality rule cleanup bullet', () => {
  * that loads the rules, so they share one byte ceiling that does not rise. The probe line is an
  * item in the Quality Gates of the testing skill. The guard finds each line by its opening words,
  * so a reword keeps the shape, and pins the limits that keep each line safe: a security fix is
- * described by its effect only, a check at a trust boundary is not a copy, and the revert that
- * proves an assertion is temporary. The sweep bullet must not name CLAUDE.md, an agent instruction file.
+ * described by its effect only, a trust-boundary or fail-closed check is not a copy, and the revert that
+ * proves an assertion is temporary, covers only the agent's own edit and is never a stash. The sweep bullet must not name CLAUDE.md, an agent instruction file.
  */
 const TESTING_SKILL_PATH = path.join(import.meta.dirname, '..', 'src', 'assets', 'skills', 'testing', 'SKILL.md');
 const QUALITY_SWEEP_OWNER_BULLETS_CEILING = 324;
@@ -1019,8 +1019,8 @@ const SWEEP_BULLET: PinnedLine = {
 const OWNER_BULLET: PinnedLine = {
   name: 'owner bullet',
   file: 'quality',
-  prefix: '- Find the existing owner first',
-  phrases: ['shares its job', 'never add a parallel copy', 'a check at a trust boundary is not a copy'],
+  prefix: '- Find the existing owner',
+  phrases: ['shares its job', 'never add a parallel copy', 'a trust-boundary or fail-closed check is not a copy'],
   after: '- Single responsibility',
 };
 
