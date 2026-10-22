@@ -2064,6 +2064,9 @@ export const SHELL_WRITE_PROBES: ReadonlyArray<readonly [label: string, command:
   ['tee with a flag', 'printf \'%s\' "{value}" | tee -a "$F"'],
 ]
 
+/** How many times `needle` occurs in `text`, counting copies that do not overlap. */
+export const countOf = (text: string, needle: string): number => text.split(needle).length - 1
+
 /** `text` with the one occurrence of `from` replaced by `to`; it throws unless there is exactly one, so no seed is inert. */
 export function seedOnce(text: string, from: string, to: string): string {
   const first = text.indexOf(from)

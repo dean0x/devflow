@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { loadFile, extractSection, computeFpRatio, readAgentReference, resolveAgentSource, requireDistFile, resolveCurationOffSource, sectionBetween, gitOperationReferenceCorpus, isPrHostEntryPath } from '../helpers'
-import { countOf, seedOnce } from '../guards/level-guard-helpers'
+import { loadFile, extractSection, computeFpRatio, readAgentReference, resolveAgentSource, requireDistFile, resolveCurationOffSource, sectionBetween, gitOperationReferenceCorpus, isPrHostEntryPath, countOf, seedOnce } from '../helpers'
 
 // -------------------------------------------------------------------------
 // Group 1: review.md — convergence inputs
@@ -292,52 +291,60 @@ const PRIVATE_MARKER_FILES: readonly PrivateMarkerFile[] = [
   { label: 'post-resolution-summary.md (generated rule)', kind: 'post-rule', body: generatedPostReference('post-resolution-summary') },
 ]
 
-/** Where each file keeps its line: the cut of the file that must hold it. */
-const PRIVATE_MARKER_SCOPES: Readonly<Record<PrivateMarkerKind, { readonly name: string; readonly start: string; readonly end: string }>> = {
-  synthesize: { name: 'Output list', start: '**Output:**', end: 'Report format:' },
-  resolve: { name: 'Phase 5', start: '### Phase 5: Write resolution-summary.md', end: '### Phase 6: Polish' },
-  'code-review': { name: 'Step 0e-i', start: '#### Step 0e-i: Load Prior Resolution and Count Cycles', end: '#### Step 0e-ii: Convergence Assessment' },
-  'post-rule': { name: 'rule line', start: POST_RULE_LABEL, end: '\n' },
+interface KindRule {
+  /** The cut of the file that must hold the line, and the name the defects give it. */
+  readonly scope: { readonly name: string; readonly start: string; readonly end: string }
+  /** The defects of the cut, once it is found: `at` is the file label and `name` the scope name. */
+  readonly check: (part: string, at: string, name: string) => string[]
+}
+
+const defectIf = (defective: boolean, message: string): string[] => (defective ? [message] : [])
+
+/** The cut holds the writer line once, and holds `expected` (that line with the text around it that fixes its place) once. */
+const writerLineCheck = (expected: string): KindRule['check'] => (part, at, name) => [
+  ...defectIf(countOf(part, expected) !== 1, `${at}: the ${name} lacks the writer line in its place`),
+  ...defectIf(countOf(part, WRITER_LINE) !== 1, `${at}: the ${name} holds ${countOf(part, WRITER_LINE)} writer lines, expected 1`),
+]
+
+/** Step 4 of Step 0e-i is one line; each needle is a clause of the cut that it states. */
+const priorSummaryCheck: KindRule['check'] = (part, at, name) => {
+  const step4 = part.split('\n').find(line => line.startsWith(STEP_4_OPENER))
+  if (step4 === undefined) return [`${at}: ${name} has no step 4 line`]
+  return PRIOR_SUMMARY_NEEDLES.filter(needle => !step4.includes(needle)).map(needle => `${at}: ${name} step 4 lacks "${needle}"`)
 }
 
 /**
- * How a file falls short of the private-section lines: the Synthesize Output list holds the writer line as its second
- * item, before the Write step, /resolve Phase 5 holds it once right after the template sentence, /code-review Step 0e-i
- * step 4 states the grammar of the cut (fenced or not, the word boundary and the end rank of the post rule, the tie-break
- * and the failure outcome), and the generated post rule states the two shared phrases that step 4 copies. A file whose
- * cut is absent is one defect, never a skip.
+ * How each kind of file falls short of the private-section lines: the Synthesize Output list holds the writer line as its
+ * second item, before the Write step, /resolve Phase 5 holds it once right after the template sentence, /code-review
+ * Step 0e-i step 4 states the grammar of the cut (fenced or not, the word boundary and the end rank of the post rule, the
+ * tie-break and the failure outcome), and the generated post rule states the two shared phrases that step 4 copies.
  */
+const KIND_RULES: Readonly<Record<PrivateMarkerKind, KindRule>> = {
+  synthesize: {
+    scope: { name: 'Output list', start: '**Output:**', end: 'Report format:' },
+    check: writerLineCheck(`\n2. ${WRITER_LINE}\n`),
+  },
+  resolve: {
+    scope: { name: 'Phase 5', start: '### Phase 5: Write resolution-summary.md', end: '### Phase 6: Polish' },
+    check: writerLineCheck(`${RESOLVE_TEMPLATE_LINE} ${WRITER_LINE}\n`),
+  },
+  'code-review': {
+    scope: { name: 'Step 0e-i', start: '#### Step 0e-i: Load Prior Resolution and Count Cycles', end: '#### Step 0e-ii: Convergence Assessment' },
+    check: priorSummaryCheck,
+  },
+  'post-rule': {
+    scope: { name: 'rule line', start: POST_RULE_LABEL, end: '\n' },
+    check: (part, at, name) => SHARED_RULE_PHRASES.filter(phrase => !part.includes(phrase)).map(phrase => `${at}: the ${name} lacks "${phrase}"`),
+  },
+}
+
+/** Every file against the rule of its kind. A file whose cut is absent is one defect, never a skip. */
 function collectPrivateMarkerDefects(files: readonly PrivateMarkerFile[]): string[] {
-  const out: string[] = []
-  for (const { label, kind, body } of files) {
-    const scope = PRIVATE_MARKER_SCOPES[kind]
+  return files.flatMap(({ label, kind, body }) => {
+    const { scope, check } = KIND_RULES[kind]
     const part = sectionBetween(body, scope.start, scope.end)
-    if (part === null) {
-      out.push(`${label}: the ${scope.name} cut is absent`)
-      continue
-    }
-    if (kind === 'post-rule') {
-      for (const phrase of SHARED_RULE_PHRASES) {
-        if (!part.includes(phrase)) out.push(`${label}: the ${scope.name} lacks "${phrase}"`)
-      }
-      continue
-    }
-    if (kind === 'code-review') {
-      const step4 = part.split('\n').find(line => line.startsWith(STEP_4_OPENER))
-      if (step4 === undefined) {
-        out.push(`${label}: ${scope.name} has no step 4 line`)
-        continue
-      }
-      for (const needle of PRIOR_SUMMARY_NEEDLES) {
-        if (!step4.includes(needle)) out.push(`${label}: ${scope.name} step 4 lacks "${needle}"`)
-      }
-      continue
-    }
-    const expected = kind === 'synthesize' ? `\n2. ${WRITER_LINE}\n` : `${RESOLVE_TEMPLATE_LINE} ${WRITER_LINE}\n`
-    if (countOf(part, expected) !== 1) out.push(`${label}: the ${scope.name} lacks the writer line in its place`)
-    if (countOf(part, WRITER_LINE) !== 1) out.push(`${label}: the ${scope.name} holds ${countOf(part, WRITER_LINE)} writer lines, expected 1`)
-  }
-  return out
+    return part === null ? [`${label}: the ${scope.name} cut is absent`] : check(part, label, scope.name)
+  })
 }
 
 /** Where the high FP ratio note sits: in the template's Convergence Status block, never below the template. */
@@ -389,6 +396,11 @@ describe('private sections stay out of posted summaries — writer lines and the
   it.each(PRIVATE_MARKER_FILES)('known-bad probe, $label: removing its line is reported for that file alone', ({ label, kind }) => {
     const seeded = withEditedFile(label, SEEDED_REMOVALS[kind].remove)
     expect(collectPrivateMarkerDefects(seeded)).toEqual(SEEDED_REMOVALS[kind].defects(label))
+  })
+
+  it.each(PRIVATE_MARKER_FILES.filter(f => f.kind === 'synthesize'))('known-bad probe, $label: a writer line numbered 4 instead of 2 is reported', ({ label }) => {
+    const seeded = withEditedFile(label, body => seedOnce(body, `\n2. ${WRITER_LINE}\n`, `\n4. ${WRITER_LINE}\n`))
+    expect(collectPrivateMarkerDefects(seeded)).toEqual([`${label}: the Output list lacks the writer line in its place`])
   })
 
   it.each(PRIVATE_MARKER_FILES.filter(f => f.kind === 'resolve'))('known-bad probe, $label: a writer line before the template sentence is reported', ({ label }) => {
