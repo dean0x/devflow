@@ -179,7 +179,7 @@ To keep the knowledge bases or conventions local, add `.devflow/features/` or `.
 
 See [docs/commands.md](https://github.com/dean0x/devflow/blob/main/docs/commands.md) for detailed usage.
 
-**PR-comment publication** for `/code-review` and `/resolve` is visibility-gated (counts-only stub on public repos by default) and every posted body is secret-scrubbed before it leaves your machine. Configure via `reviewPublication` (`auto`, `full` or `off`) in your personal `.devflow/config.json`; a team value in [`.devflow/project.json`](#team-settings) is only a ceiling: it can lower yours, never raise it. Under a `required` evidence policy, `off` still posts the counts-only stub, so a record reaches the PR. The [test-plan evidence](#test-plan-evidence) comment is a stub unless `reviewPublication` is `full` — details in [docs/commands.md](https://github.com/dean0x/devflow/blob/main/docs/commands.md).
+**PR-comment publication** for `/code-review` and `/resolve` is visibility-gated (counts-only stub on public repos by default) and every posted body is secret-scrubbed before it leaves your machine. Configure via `reviewPublication` (`auto`, `full` or `off`) in your personal `.devflow/config.json`; a team value in [`.devflow/project.json`](#team-settings) is only a ceiling: it can lower yours, never raise it. Under a `required` evidence policy, `off` still posts the counts-only stub, so a record reaches the PR unless no public text remains. The [test-plan evidence](#test-plan-evidence) comment is a stub unless `reviewPublication` is `full` — details in [docs/commands.md](https://github.com/dean0x/devflow/blob/main/docs/commands.md).
 
 ## Team settings
 
