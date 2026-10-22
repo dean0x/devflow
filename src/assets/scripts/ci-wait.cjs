@@ -628,8 +628,11 @@ async function askWorkflows(gh) {
  * head: they are not read, the merge state is not used, and the poll is PENDING until
  * SETTLE_WINDOW_SECONDS have passed since the first mismatch (GitHub moves the head
  * and creates checks a few seconds after a push), then INDETERMINATE (head-mismatch).
- * A matching head clears the mismatch clock. Nothing here is PASSING unless a poll saw
- * this head, every check a pass, one of them a GitHub Actions job
+ * A matching head clears the mismatch clock. The poll reads `headRefOid` once more after
+ * the checks call: the checks count only when it is still `head`. A head that moved
+ * leaves the poll open (no verdict, no settle clock moved); a second read that fails or
+ * cannot be read is a failed poll. Nothing here is PASSING unless a poll saw this head
+ * before and after its checks, every check a pass, one of them a GitHub Actions job
  * (D-CI-WORKFLOW-RULE), and GitHub reported the PR mergeable (D-CI-MERGE-STATE).
  *
  * D-CI-MERGE-STATE, on a matching head: `mergeable` CONFLICTING is INDETERMINATE
@@ -653,9 +656,10 @@ async function askWorkflows(gh) {
  *
  * Per poll: `gh pr view <n> --json headRefOid,mergeable`, then `gh pr checks <n>
  * --json name,state,bucket,workflow` (exit 0 or 8 are results, as in check-ci-status
- * step 3), then, on that one path, the workflow probe. A PENDING or open poll sleeps
- * min(POLL_INTERVAL_SECONDS, remaining) and polls again; any other result returns. A
- * poll whose gh call fails is not a result: three failed polls in a row are
+ * step 3), then the same view call again (a bounded gh call like the others, not made
+ * when no time is left), then, on that one path, the workflow probe. A PENDING or open
+ * poll sleeps min(POLL_INTERVAL_SECONDS, remaining) and polls again; any other result
+ * returns. A poll whose gh call fails is not a result: three failed polls in a row are
  * INDETERMINATE (gh-failed), fewer are retried. The loop stops at the deadline or after
  * MAX_POLLS with its last state: PENDING stays PENDING, and anything unknown, an open
  * step included, becomes INDETERMINATE (deadline).
@@ -735,14 +739,17 @@ async function waitForCi(input) {
     return next.state === 'probe' ? { state: 'open' } : next;
   };
 
+  const viewArgs = ['pr', 'view', pr, '--json', 'headRefOid,mergeable'];
+
   /**
-   * One poll: the view, then, on a matching head that does not conflict, the checks, then,
-   * on the one path that needs it, the workflow probe. Both settle windows run here.
+   * One poll: the view, then, on a matching head that does not conflict, the checks, then
+   * the view again, then, on the one path that needs it, the workflow probe. Both settle
+   * windows run here, after the second view, so a poll that does not count moves neither.
    *
    * @returns {Promise<PollStep>}
    */
   const readPoll = async () => {
-    const view = await gh(['pr', 'view', pr, '--json', 'headRefOid,mergeable']);
+    const view = await gh(viewArgs);
     if (view === null) return { state: 'deadline' };
     if (view.answered && view.status === 1 && NO_PR_RE.test(view.stderr)) return resultStep('NO_PR', null, [], []);
     if (!view.answered || view.status !== 0) return { state: 'failed' };
@@ -761,6 +768,11 @@ async function waitForCi(input) {
     const isResult = checks.answered && (checks.status === 0 || checks.status === 8);
     const isEmpty = checks.answered && checks.status === 1 && NO_CHECKS_RE.test(checks.stderr);
     if (!isResult && !isEmpty) return { state: 'failed' };
+    const second = await gh(viewArgs);
+    if (second === null) return { state: 'deadline' };
+    const after = second.answered && second.status === 0 ? parseView(second.stdout) : null;
+    if (after === null) return { state: 'failed' };
+    if (after.oid !== head) return { state: 'open' };
     const rows = isResult ? parseChecks(checks.stdout) : [];
     if (rows === null) return resultStep('INDETERMINATE', 'unparseable', [], []);
     const verdict = rows.length > 0 ? classifyChecks(rows) : null;

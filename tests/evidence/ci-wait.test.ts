@@ -23,6 +23,8 @@
  *   D-CI-HEAD-BINDING    AC-12: only the head the caller named is classified. A
  *                        mismatched `headRefOid` is PENDING through the settle window,
  *                        then INDETERMINATE (head-mismatch); its checks are never read.
+ *                        The head is read again after the checks call, and the checks count
+ *                        only when it is still the named head.
  *   D-CI-CLASSIFIER      AC-14: the classifier agrees with check-ci-status step 5 over
  *                        `bucket`. That parity case lives in merge-readiness.test.ts,
  *                        beside the prose interpreter; this suite holds the classifier's
@@ -132,14 +134,24 @@ const MAX_MS = 570_000
 // A virtual world: gh as a function of the call and the time, a clock that moves
 // ---------------------------------------------------------------------------
 
-/** How long a fake gh call takes when its reply names no `took`. */
+/**
+ * How long a fake gh call takes when its reply names no `took`. The second head read of a poll
+ * takes no virtual time unless its reply names one, so the timings the other tests pin stay as
+ * they are.
+ */
 const DEFAULT_CALL_MS = 1000
+const DEFAULT_AGAIN_MS = 0
 
 /** What the fake gh does with one call. `took` is the call's duration; `hang` runs out its timeout. */
 interface Reply { status?: number | null; stdout?: string; stderr?: string; error?: { code: string }; took?: number; hang?: boolean }
 /** A `gh api` call is the workflows probe; it has its own script, so the scripts of the other two stay as they are. */
 type Kind = 'view' | 'checks' | 'workflows'
-type Script = (call: { kind: 'view' | 'checks'; nth: number; elapsed: number }) => Reply
+/**
+ * `again` marks the view call that follows the checks call in the same poll (the head read
+ * once more); it carries the `nth` of the poll's first view call, so a script keyed by `nth`
+ * answers both reads of a poll alike unless it names `again`.
+ */
+type Script = (call: { kind: 'view' | 'checks'; nth: number; elapsed: number; again: boolean }) => Reply
 type WorkflowsScript = (call: { nth: number; elapsed: number }) => Reply
 
 /**
@@ -157,6 +169,8 @@ class World {
   readonly sleeps: number[] = []
   readonly violations: string[] = []
   private readonly counts: Record<Kind, number> = { view: 0, checks: 0, workflows: 0 }
+  private viewsInPoll = 0
+  private pollViewNth = 0
 
   constructor(
     private readonly script: Script,
@@ -178,10 +192,18 @@ class World {
     let kind: Kind = 'checks'
     if (args[0] === 'api') kind = 'workflows'
     else if (args[1] === 'view') kind = 'view'
-    const reply = kind === 'workflows'
-      ? this.workflows({ nth: this.counts.workflows++, elapsed: this.elapsed })
-      : this.script({ kind, nth: this.counts[kind]++, elapsed: this.elapsed })
-    const took = reply.hang === true ? timeout : Math.min(reply.took ?? DEFAULT_CALL_MS, timeout)
+    let reply: Reply
+    let again = false
+    if (kind === 'workflows') {
+      reply = this.workflows({ nth: this.counts.workflows++, elapsed: this.elapsed })
+    } else if (kind === 'view') {
+      again = this.viewsInPoll++ > 0
+      if (!again) this.pollViewNth = this.counts.view++
+      reply = this.script({ kind, nth: this.pollViewNth, elapsed: this.elapsed, again })
+    } else {
+      reply = this.script({ kind, nth: this.counts.checks++, elapsed: this.elapsed, again: false })
+    }
+    const took = reply.hang === true ? timeout : Math.min(reply.took ?? (again ? DEFAULT_AGAIN_MS : DEFAULT_CALL_MS), timeout)
     if (this.moves) this.t += took
     if (reply.hang === true) return { status: null, error: { code: 'ETIMEDOUT' } }
     if (reply.error !== undefined) return { status: null, error: reply.error }
@@ -190,7 +212,7 @@ class World {
 
   readonly clock: Clock = {
     now: () => this.t,
-    sleep: async ms => { this.sleeps.push(ms); if (this.moves) this.t += ms },
+    sleep: async ms => { this.sleeps.push(ms); this.viewsInPoll = 0; if (this.moves) this.t += ms },
   }
 
   of(kind: Kind): Recorded[] { return this.calls.filter(c => (kind === 'workflows' ? c.args[0] === 'api' : c.args[1] === kind)) }
@@ -462,7 +484,8 @@ describe('AC-9: on the injected clock, nothing waits past 570 s', () => {
   it('a clock that does not move is stopped by MAX_POLLS, with the last state', async () => {
     const r = await run(({ kind }) => (kind === 'view' ? viewOk() : checksOk('pending')), { moves: false })
     expect(statusOf(r.line)).toBe('PENDING')
-    expect(r.world.of('view')).toHaveLength(CW.MAX_POLLS)
+    expect(r.world.of('checks')).toHaveLength(CW.MAX_POLLS)
+    expect(r.world.of('view')).toHaveLength(2 * CW.MAX_POLLS)
     expect(r.world.sleeps).toHaveLength(CW.MAX_POLLS)
   })
 
@@ -510,10 +533,85 @@ describe('AC-12: ci-wait classifies only the head it was told about', () => {
     expect(statusOf(r.line)).toBe('PASSING')
   })
 
-  it('the head is read before the checks on every poll', async () => {
+  it('the head is read before the checks and again after them on every poll', async () => {
     const r = await run(({ kind, nth }) => (kind === 'view' ? viewOk() : nth < 3 ? checksOk('pending') : checksOk('pass')))
     const seq = r.world.calls.map(c => c.args[1])
-    expect(seq).toEqual(['view', 'checks', 'view', 'checks', 'view', 'checks', 'view', 'checks'])
+    expect(seq).toEqual(Array.from({ length: 4 }, () => ['view', 'checks', 'view']).flat())
+  })
+})
+
+describe('AC-12: the checks count for the head only when the head is the same after them', () => {
+  const MOVED_BAD_GH: Reply = { status: 1, stderr: 'boom\n' }
+
+  it('a head that moves between the checks call and the second read: that poll does not count, and the moved head never reads PASSING', async () => {
+    const r = await run(({ kind, again }) => (kind === 'view' ? viewOk(again ? OLD_HEAD : HEAD) : checksOk('pass')))
+    expect(statusOf(r.line)).toBe('INDETERMINATE')
+    expect(field(r.line, 'reason')).toBe('deadline')
+  })
+
+  it('a head that moves for good after the first poll is head-mismatch once the settle window runs out, never PASSING', async () => {
+    const r = await run(({ kind, nth, again }) => (kind === 'view' ? viewOk(nth === 0 && !again ? HEAD : OLD_HEAD) : checksOk('pass')))
+    expect(statusOf(r.line)).toBe('INDETERMINATE')
+    expect(field(r.line, 'reason')).toBe('head-mismatch')
+    expect(r.world.of('checks'), 'the checks of the moved head are read once, on the poll that read the old head').toHaveLength(1)
+  })
+
+  it('a head that moves once and comes back: the next poll decides, and the poll that moved counted for nothing', async () => {
+    const r = await run(({ kind, nth, again }) => (kind === 'view' ? viewOk(again && nth === 0 ? OLD_HEAD : HEAD) : checksOk('pass')))
+    expect(statusOf(r.line)).toBe('PASSING')
+    expect(r.world.of('checks')).toHaveLength(2)
+    expect(r.world.sleeps).toEqual([20_000])
+  })
+
+  it('a head that moves after an empty check list never reads NO_CI', async () => {
+    const r = await run(({ kind, again }) => (kind === 'view' ? viewOk(again ? OLD_HEAD : HEAD) : { status: 1, stderr: NO_CHECKS_STDERR }))
+    expect(statusOf(r.line)).toBe('INDETERMINATE')
+    expect(field(r.line, 'reason')).toBe('deadline')
+    expect(r.world.of('workflows'), 'no probe is made for a poll that did not count').toHaveLength(0)
+  })
+
+  for (const bucket of ['fail', 'pending']) {
+    it(`a head that moves after ${bucket} checks does not give ${bucket === 'fail' ? 'FAILING' : 'PENDING'} for the named head`, async () => {
+      const r = await run(({ kind, again }) => (kind === 'view' ? viewOk(again ? OLD_HEAD : HEAD) : checksOk(bucket)))
+      expect(statusOf(r.line)).toBe('INDETERMINATE')
+      expect(field(r.line, 'reason')).toBe('deadline')
+    })
+  }
+
+  const unreadable: ReadonlyArray<readonly [string, Reply]> = [
+    ['exits non-zero', MOVED_BAD_GH],
+    ['hangs', { hang: true }],
+    ['errors', { error: { code: 'ENOENT' } }],
+    ['is not JSON', { stdout: '<html>rate limited</html>' }],
+    ['has no headRefOid', { stdout: '{"mergeable":"MERGEABLE"}' }],
+    ['has a short headRefOid', { stdout: '{"headRefOid":"aaaa","mergeable":"MERGEABLE"}' }],
+  ]
+  for (const [label, reply] of unreadable) {
+    it(`a second head read that ${label} is a failed poll: three in a row are INDETERMINATE (gh-failed), never PASSING`, async () => {
+      const r = await run(({ kind, again }) => (kind === 'view' ? (again ? reply : viewOk()) : checksOk('pass')))
+      expect(statusOf(r.line)).toBe('INDETERMINATE')
+      expect(field(r.line, 'reason')).toBe('gh-failed')
+      expect(r.world.of('checks')).toHaveLength(CW.MAX_CONSECUTIVE_GH_FAILURES)
+    })
+  }
+
+  it('a second head read that fails once and then answers: the next poll decides', async () => {
+    const r = await run(({ kind, nth, again }) => (kind === 'view' ? (again && nth === 0 ? MOVED_BAD_GH : viewOk()) : checksOk('pass')))
+    expect(statusOf(r.line)).toBe('PASSING')
+    expect(r.world.of('checks')).toHaveLength(2)
+  })
+
+  it('the second head read is the bounded gh call: with no time left after the checks it is not made, and the run is INDETERMINATE (deadline), never PASSING', async () => {
+    // The merge state reads UNKNOWN until the last poll, so every poll before it is open. In the last poll the
+    // view ends at 540 s, the checks call is given 30 s and uses them all, and nothing is left for a second head read.
+    const r = await run(({ kind, elapsed }) => {
+      if (kind === 'view') return elapsed >= 510_000 ? { ...viewOk(HEAD, 'MERGEABLE'), took: 540_000 - elapsed } : viewOk(HEAD, 'UNKNOWN')
+      return elapsed >= 540_000 ? { ...checksOk('pass'), took: 30_000 } : checksOk('pass')
+    })
+    expect(statusOf(r.line)).toBe('INDETERMINATE')
+    expect(field(r.line, 'reason')).toBe('deadline')
+    expect(r.world.elapsed).toBe(MAX_MS)
+    expect(r.world.calls.at(-1)?.args[1], 'the checks call was the last call').toBe('checks')
   })
 })
 
@@ -576,8 +674,8 @@ describe('the settle windows: a head mismatch and an empty check list each keep 
       : checksOk('pass'))
     // Empty path: a view and a checks call take 5 s each, so polls fall 30 s apart as well.
     // The head reads MERGEABLE: NO_CI needs it, and the boundary is the window alone.
-    const empty = (lastTook: number): Script => ({ kind, nth }) => (kind === 'view'
-      ? { ...viewOk(HEAD, 'MERGEABLE'), took: 5_000 }
+    const empty = (lastTook: number): Script => ({ kind, nth, again }) => (kind === 'view'
+      ? { ...viewOk(HEAD, 'MERGEABLE'), took: again ? 0 : 5_000 }
       : { stdout: '[]', took: nth === 3 ? lastTook : 5_000 })
 
     it('mismatch path: 90,000 ms settles at the fourth read', async () => {
@@ -894,8 +992,8 @@ describe('D-CI-WORKFLOWS: an empty check list is NO_CI only when the repository 
 
   describe('no active workflow file: NO_CI at 90,000 ms after the first empty result and not at 89,999 ms', () => {
     // A view and a checks call take 5 s each, so polls fall 30 s apart and the fourth read is 90 s after the first result.
-    const slowEmpty = (lastTook: number): Script => ({ kind, nth }) => (kind === 'view'
-      ? { ...viewOk(), took: 5_000 }
+    const slowEmpty = (lastTook: number): Script => ({ kind, nth, again }) => (kind === 'view'
+      ? { ...viewOk(), took: again ? 0 : 5_000 }
       : { stdout: '[]', took: nth === 3 ? lastTook : 5_000 })
     const NONE: ReadonlyArray<readonly [string, Reply]> = [
       ['an empty list of workflows', workflowList([])],
@@ -986,7 +1084,7 @@ describe('D-CI-WORKFLOWS: an empty check list is NO_CI only when the repository 
       const callKeys = (world: World): string[] => world.calls.map(c => (c.args[0] === 'api' ? 'api' : c.args[1]))
       const noActive = await run(emptyList, { workflows: ({ nth }) => (nth === 0 ? BAD_PROBE : workflowList([])) })
       expect(statusOf(noActive.line)).toBe('NO_CI')
-      expect(callKeys(noActive.world).slice(-6)).toEqual(['view', 'checks', 'api', 'view', 'checks', 'api'])
+      expect(callKeys(noActive.world).slice(-8)).toEqual(['view', 'checks', 'view', 'api', 'view', 'checks', 'view', 'api'])
       expect(noActive.world.of('workflows')).toHaveLength(2)
       const active = await run(emptyList, { workflows: ({ nth }) => (nth === 0 ? BAD_PROBE : workflowList([CI_YML])) })
       expect(field(active.line, 'reason')).toBe('no-workflow-check')
@@ -1391,6 +1489,7 @@ describe('AC-11: a bad argv prints one usage line and makes no gh call', () => {
     expect(r.world.calls.map(c => [c.file, ...c.args])).toEqual([
       ['gh', 'pr', 'view', PR, '--json', 'headRefOid,mergeable'],
       ['gh', 'pr', 'checks', PR, '--json', 'name,state,bucket,workflow'],
+      ['gh', 'pr', 'view', PR, '--json', 'headRefOid,mergeable'],
     ])
     expect(r.world.calls.every(c => c.shell === false)).toBe(true)
   })
@@ -1533,6 +1632,7 @@ describe('the script as a process: the usage line, and a scripted gh', () => {
     expect(shim.readLog()).toEqual([
       ['gh', 'pr', 'view', '12', '--json', 'headRefOid,mergeable'],
       ['gh', 'pr', 'checks', '12', '--json', 'name,state,bucket,workflow'],
+      ['gh', 'pr', 'view', '12', '--json', 'headRefOid,mergeable'],
     ])
   })
 
