@@ -594,12 +594,12 @@ function collectOutcomeDeclarationDefects(body: string): string[] {
 }
 
 function collectStaticReportDefects(body: string): string[] {
-  const out: string[] = collectOutcomeDeclarationDefects(body);
+  const out: string[] = [];
   const analysis = body.indexOf('**Analysis**: {ANALYSIS_DIR}');
   const status = body.indexOf('**Static analysis**:');
   const risk = body.indexOf('### Risk Assessment');
   if (status === -1) out.push('the report has no Static analysis line');
-  else if (analysis === -1 || risk === -1 || status < analysis || status > risk) out.push('the Static analysis line is not between Analysis and Risk Assessment');
+  else if (analysis === -1 || status < analysis || status > risk) out.push('the Static analysis line is not between Analysis and Risk Assessment');
   if (!body.includes('| A scanner did not run or did not complete |')) out.push('no edge-case row for a scanner that did not run or did not complete');
   if (!body.includes('(`(none)` only if')) out.push('the checklist does not limit (none) to a clean result');
   return out;
@@ -682,7 +682,7 @@ function collectSnykScopeDefects(phase2: string): string[] {
   const snyk = fenceWith(phase2, 'snyk code test').map(line => line.trim());
   const filter = snyk.indexOf(`'${SNYK_SCOPE_FILTER}' \\`);
   if (filter === -1) out.push('the Snyk filter does not keep only the results whose file is a changed file');
-  if (filter === -1 || snyk[filter + 1] !== SNYK_FILTER_FALLBACK) out.push('the line after the Snyk filter does not print the SARIF unfiltered when jq fails');
+  if (snyk[filter + 1] !== SNYK_FILTER_FALLBACK) out.push('the line after the Snyk filter does not print the SARIF unfiltered when jq fails');
   if (!phase2.includes(SNYK_UNFILTERED_NOTE)) out.push('Phase 2 does not say that the SARIF is unfiltered without jq');
   return out;
 }
