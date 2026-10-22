@@ -23,6 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The Quality Gates of the testing skill have a new item: each new assertion would fail, not error, with the change reverted. The RED run counts; else a bad input or a temporary, uncommitted revert of your own edit shows it, never a stash. Three items that repeated other parts of the skill are cut, and a repeated parenthetical is cut from the flaky-pattern item. The skill is 25 bytes smaller, so the Code and Fix preload totals fall by 25 bytes each (Code 25,514 to 25,489, Fix 14,875 to 14,850). The quality rule is not in the preload and loads in every session: it grows by 326 bytes.
   - A guard pins each new line once, with its limits, and pins a byte ceiling for the two bullets.
 
+### Fixed
+
+- **The gate-level step of `devflow init` fits an 80-column terminal** ([#658](https://github.com/dean0x/devflow/issues/658)).
+  - Each level hint is now one short line, and no line of the step note is longer than 72 characters.
+  - The full effect of each level stays in `devflow gates` and in the docs.
+
 ---
 
 ## [3.9.0] - 2026-10-22
