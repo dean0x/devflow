@@ -34,8 +34,8 @@
 **Output:**
 **CRITICAL**: Write the summary to disk using the Write tool:
 1. Create directory: `mkdir -p ${REVIEW_BASE_DIR}`
-2. Write to `${REVIEW_BASE_DIR}/review-summary.md`
-3. Put text not for public posting in a final `## Private notes` section.
+2. Put text not for public posting in a final `## Private notes` section.
+3. Write to `${REVIEW_BASE_DIR}/review-summary.md`
 
 Report format:
 
@@ -72,6 +72,5 @@ Report format:
 **Prior Resolution**: {available/none}
 **Prior FP Ratio**: {n}% ({fp_count} of {total}) — render as `N/A` when CYCLE_NUMBER=1 (no prior resolution)
 **Assessment**: {First cycle | Converging — most issues resolved | High FP ratio — possible hallucination loop}
+{If CYCLE_NUMBER >= 3 and prior FP ratio > 70%: "Note: High false-positive ratio detected. Consider manual verification of remaining findings."}
 ```
-
-If CYCLE_NUMBER >= 3 and prior FP ratio > 70%: append "Note: High false-positive ratio detected. Consider manual verification of remaining findings."
