@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { loadFile, extractSection, computeFpRatio, readAgentReference, resolveAgentSource } from '../helpers'
+import { loadFile, extractSection, computeFpRatio, readAgentReference, resolveAgentSource, requireDistFile, resolveCurationOffSource, sectionBetween } from '../helpers'
+import { countOf, seedOnce } from '../guards/level-guard-helpers'
 
 // -------------------------------------------------------------------------
 // Group 1: review.md — convergence inputs
@@ -232,4 +233,137 @@ describe('computeFpRatio — pure fp_ratio formula', () => {
     expect(computeFpRatio(7, 3, 0)).toBeCloseTo(0.7)  // boundary: no warning
     expect(computeFpRatio(8, 2, 0)).toBeCloseTo(0.8)  // above boundary: warning
   })
+})
+
+// -------------------------------------------------------------------------
+// Group 8: private sections stay out of posted summaries — the writer lines and the prior-summary clause
+//
+// The Synthesize review template and /resolve Phase 5 tell the writer where text not for public posting
+// goes. /code-review Step 0e-i drops those sections from the prior resolution summary before any agent
+// reads it. One collector reads every file: both builds of /resolve and /code-review plus the template.
+// Each read is loud, so a missing build fails the file instead of skipping it.
+// -------------------------------------------------------------------------
+
+const WRITER_LINE = 'Put text not for public posting in a final `## Private notes` section.'
+const RESOLVE_TEMPLATE_LINE = 'Use the template from the Output Artifact section below.'
+const PRIOR_SUMMARY_NEEDLES = [
+  'fenced or not',
+  'any case',
+  'starting `Private`',
+  'to the next unfenced heading with as many `#` or fewer',
+] as const
+const STEP_4_OPENER = '4. Otherwise: set CYCLE_NUMBER = count + 1.'
+
+type PrivateMarkerKind = 'synthesize' | 'resolve' | 'code-review'
+interface PrivateMarkerFile { readonly label: string; readonly kind: PrivateMarkerKind; readonly body: string }
+
+function curationOffCommand(name: string): string {
+  const body = resolveCurationOffSource('commands', name)
+  if (body === null) throw new Error(`dist/curation-off/commands/${name}.md is absent: run \`npm run build:mds\``)
+  return body
+}
+
+const PRIVATE_MARKER_FILES: readonly PrivateMarkerFile[] = [
+  { label: 'synthesize/review.md', kind: 'synthesize', body: readAgentReference('synthesize/review.md') },
+  { label: 'resolve.md (curation on)', kind: 'resolve', body: requireDistFile('resolve.md') },
+  { label: 'resolve.md (curation off)', kind: 'resolve', body: curationOffCommand('resolve') },
+  { label: 'code-review.md (curation on)', kind: 'code-review', body: requireDistFile('code-review.md') },
+  { label: 'code-review.md (curation off)', kind: 'code-review', body: curationOffCommand('code-review') },
+]
+
+/** Where each file keeps its line: the cut of the file that must hold it. */
+const PRIVATE_MARKER_SCOPES: Readonly<Record<PrivateMarkerKind, { readonly name: string; readonly start: string; readonly end: string }>> = {
+  synthesize: { name: 'Output list', start: '**Output:**', end: 'Report format:' },
+  resolve: { name: 'Phase 5', start: '### Phase 5: Write resolution-summary.md', end: '### Phase 6: Polish' },
+  'code-review': { name: 'Step 0e-i', start: '#### Step 0e-i: Load Prior Resolution and Count Cycles', end: '#### Step 0e-ii: Convergence Assessment' },
+}
+
+/**
+ * How a file falls short of the private-section lines: the Synthesize Output list holds the writer line as its third
+ * item, /resolve Phase 5 holds it once right after the template sentence, and /code-review Step 0e-i step 4 states the
+ * grammar of the cut (fenced or not, any case, a heading starting `Private`, ending at the next unfenced heading with as
+ * many `#` or fewer). A file whose cut is absent is one defect, never a skip.
+ */
+function collectPrivateMarkerDefects(files: readonly PrivateMarkerFile[]): string[] {
+  const out: string[] = []
+  for (const { label, kind, body } of files) {
+    const scope = PRIVATE_MARKER_SCOPES[kind]
+    const part = sectionBetween(body, scope.start, scope.end)
+    if (part === null) {
+      out.push(`${label}: the ${scope.name} cut is absent`)
+      continue
+    }
+    if (kind === 'code-review') {
+      const step4 = part.split('\n').find(line => line.startsWith(STEP_4_OPENER))
+      if (step4 === undefined) {
+        out.push(`${label}: ${scope.name} has no step 4 line`)
+        continue
+      }
+      for (const needle of PRIOR_SUMMARY_NEEDLES) {
+        if (!step4.includes(needle)) out.push(`${label}: ${scope.name} step 4 lacks "${needle}"`)
+      }
+      continue
+    }
+    const expected = kind === 'synthesize' ? `\n3. ${WRITER_LINE}\n` : `${RESOLVE_TEMPLATE_LINE} ${WRITER_LINE}\n`
+    if (countOf(part, expected) !== 1) out.push(`${label}: the ${scope.name} lacks the writer line in its place`)
+    if (countOf(part, WRITER_LINE) !== 1) out.push(`${label}: the ${scope.name} holds ${countOf(part, WRITER_LINE)} writer lines, expected 1`)
+  }
+  return out
+}
+
+/** The corpus with one file's body edited, so a probe runs through the same collector as the shipped files. */
+function withEditedFile(label: string, edit: (body: string) => string): PrivateMarkerFile[] {
+  expect(PRIVATE_MARKER_FILES.map(f => f.label), `${label} must be a corpus file`).toContain(label)
+  return PRIVATE_MARKER_FILES.map(f => (f.label === label ? { ...f, body: edit(f.body) } : f))
+}
+
+describe('private sections stay out of posted summaries — writer lines and the prior-summary clause', () => {
+  it('reads the template, /resolve and /code-review in both builds, and every file holds its line', () => {
+    expect(PRIVATE_MARKER_FILES.map(f => f.label)).toEqual([
+      'synthesize/review.md',
+      'resolve.md (curation on)',
+      'resolve.md (curation off)',
+      'code-review.md (curation on)',
+      'code-review.md (curation off)',
+    ])
+    expect(collectPrivateMarkerDefects(PRIVATE_MARKER_FILES)).toEqual([])
+  })
+
+  const CODE_REVIEW_CLAUSE = ' minus each section from a heading line (fenced or not, any case) starting `Private` to the next unfenced heading with as many `#` or fewer'
+  const SEEDED_REMOVALS: Readonly<Record<PrivateMarkerKind, { readonly remove: (body: string) => string; readonly defects: (label: string) => string[] }>> = {
+    synthesize: {
+      remove: body => seedOnce(body, `3. ${WRITER_LINE}\n`, ''),
+      defects: label => [`${label}: the Output list lacks the writer line in its place`, `${label}: the Output list holds 0 writer lines, expected 1`],
+    },
+    resolve: {
+      remove: body => seedOnce(body, ` ${WRITER_LINE}`, ''),
+      defects: label => [`${label}: the Phase 5 lacks the writer line in its place`, `${label}: the Phase 5 holds 0 writer lines, expected 1`],
+    },
+    'code-review': {
+      remove: body => seedOnce(body, CODE_REVIEW_CLAUSE, ''),
+      defects: label => PRIOR_SUMMARY_NEEDLES.map(needle => `${label}: Step 0e-i step 4 lacks "${needle}"`),
+    },
+  }
+
+  it.each(PRIVATE_MARKER_FILES)('known-bad probe, $label: removing its line is reported for that file alone', ({ label, kind }) => {
+    const seeded = withEditedFile(label, SEEDED_REMOVALS[kind].remove)
+    expect(collectPrivateMarkerDefects(seeded)).toEqual(SEEDED_REMOVALS[kind].defects(label))
+  })
+
+  it.each(PRIVATE_MARKER_FILES.filter(f => f.kind === 'resolve'))('known-bad probe, $label: a writer line before the template sentence is reported', ({ label }) => {
+    const seeded = withEditedFile(label, body => seedOnce(body, `${RESOLVE_TEMPLATE_LINE} ${WRITER_LINE}`, `${WRITER_LINE} ${RESOLVE_TEMPLATE_LINE}`))
+    expect(collectPrivateMarkerDefects(seeded)).toEqual([`${label}: the Phase 5 lacks the writer line in its place`])
+  })
+
+  it.each(PRIVATE_MARKER_FILES.filter(f => f.kind === 'code-review').flatMap(f => PRIOR_SUMMARY_NEEDLES.map(needle => ({ label: f.label, needle }))))(
+    'known-bad probe, $label: step 4 without "$needle" is reported',
+    ({ label, needle }) => {
+      const seeded = withEditedFile(label, body => {
+        const step4 = body.split('\n').find(line => line.startsWith(STEP_4_OPENER))
+        if (step4 === undefined) throw new Error(`${label}: no step 4 line to seed`)
+        return seedOnce(body, step4, step4.replace(needle, 'x'))
+      })
+      expect(collectPrivateMarkerDefects(seeded)).toEqual([`${label}: Step 0e-i step 4 lacks "${needle}"`])
+    },
+  )
 })
