@@ -75,9 +75,10 @@ const crypto = require('crypto');
 const childProcess = require('child_process');
 
 const PE = require(path.join(__dirname, 'pr-evidence.cjs'));
-// D-READINESS-CLASSIFIER: the CI classification is ci-wait's own, so the two scripts
-// cannot disagree. Its main is guarded by `require.main === module`: requiring it
-// starts nothing.
+// D-READINESS-CLASSIFIER: the CI classifier, the merge gate and the workflow-list probe
+// are ci-wait's own, so the two scripts cannot disagree; only ci-wait has the settle
+// window, since readiness makes one read. Its main is guarded by
+// `require.main === module`: requiring it starts nothing.
 const CW = require(path.join(__dirname, 'ci-wait.cjs'));
 
 // ---------------------------------------------------------------------------
@@ -157,7 +158,6 @@ const LINE_MAX_BUFFER = 4096;
 const COMMENT_READ_MAX_BUFFER = 8 * 65536;
 /** `gh pr checks` and the thread-count GraphQL answer: a thousand rows of names fit. */
 const READINESS_MAX_BUFFER = 4 * 1024 * 1024;
-const READINESS_MAX_CHECKS = 1000;
 /** 5,000 paths of 4,096 bytes overflow this; an overflow reads as an unresolved diff. */
 const DIFF_MAX_BUFFER = 16 * 1024 * 1024;
 const FETCH_MAX_BUFFER = 1024 * 1024;
@@ -2319,21 +2319,28 @@ function parseJsonOrNull(text) {
 }
 
 /**
- * The PR's review decision. `gh pr view` answers `""` or null when no rule asks for a
- * review; a string outside the three documented values reads UNRECOGNISED, and the
- * ladder never lets that reach READY.
+ * The PR's review decision, merge state and head, from one `gh pr view` read. The
+ * decision answers `""` or null when no rule asks for a review; a string outside the
+ * three documented values reads UNRECOGNISED, and the ladder never lets that reach READY.
+ * `mergeable` is the string GitHub printed, or null when the key is absent or not a
+ * string; `head` is the PR head when it is 40 lowercase hex, else null. Neither makes the
+ * decision unreadable: the CI read treats them as unknown and never as a pass.
  *
  * @param {Io} io
  * @param {number} pr
- * @returns {Read<string | null>}
+ * @returns {Read<{ decision: string | null, mergeable: string | null, head: string | null }>}
  */
-function readDecision(io, pr) {
-  const r = gh(io, ['pr', 'view', String(pr), '--json', 'reviewDecision'], LINE_MAX_BUFFER);
+function readPrView(io, pr) {
+  const r = gh(io, ['pr', 'view', String(pr), '--json', 'reviewDecision,mergeable,headRefOid'], LINE_MAX_BUFFER);
   if (!r.ok) return { ok: false, reason: readFailure(r) };
-  const value = obj(parseJsonOrNull(r.stdout.toString('utf8'))).reviewDecision;
-  if (value === null || value === '') return { ok: true, value: null };
+  const fields = obj(parseJsonOrNull(r.stdout.toString('utf8')));
+  const value = fields.reviewDecision;
+  const mergeable = typeof fields.mergeable === 'string' ? fields.mergeable : null;
+  const head = typeof fields.headRefOid === 'string' && SHA40_RE.test(fields.headRefOid) ? fields.headRefOid : null;
+  if (value === null || value === '') return { ok: true, value: { decision: null, mergeable, head } };
   if (typeof value !== 'string') return { ok: false, reason: 'review decision unreadable' };
-  return { ok: true, value: ['APPROVED', 'CHANGES_REQUESTED', 'REVIEW_REQUIRED'].includes(value) ? value : 'UNRECOGNISED' };
+  const decision = ['APPROVED', 'CHANGES_REQUESTED', 'REVIEW_REQUIRED'].includes(value) ? value : 'UNRECOGNISED';
+  return { ok: true, value: { decision, mergeable, head } };
 }
 
 /**
@@ -2372,35 +2379,89 @@ function readThreads(io, pr) {
   return { ok: true, value: { unresolved, approximate: total > THREADS_PAGE } };
 }
 
+/** CI that could not be established: the ladder reads it as `status unknown`, never READY. */
+const CI_INDETERMINATE = Object.freeze({ status: 'INDETERMINATE', failing: '-' });
+
 /**
- * D-READINESS-CLASSIFIER: the CI status, by check-ci-status's fetch (exit 0 or 8 is a
- * result; "no checks reported" or `[]` is NO_CI; any other failure is INDETERMINATE)
- * and ci-wait's classifier over `bucket`. Failing names are sanitized and bounded by
- * ci-wait's own formatter.
+ * D-READINESS-WORKFLOWS: whether the repository has an active workflow file, by ci-wait's
+ * one read-only call and parser. A call that fails or is refused, and a reply the parser
+ * cannot read, give null: not knowing, never "no workflow file".
+ *
+ * @param {Io} io
+ * @returns {boolean | null}
+ */
+function probeWorkflows(io) {
+  const r = gh(io, CW.WORKFLOWS_ARGS, READINESS_MAX_BUFFER);
+  return r.ok ? CW.parseActiveWorkflows(r.stdout.toString('utf8')) : null;
+}
+
+/**
+ * An empty check list: ci-wait's merge gate decides (D-CI-WORKFLOWS). The workflow list
+ * is asked only when the gate asks for it, so a PR that cannot be NO_CI costs no call. A
+ * gate answer other than keep is INDETERMINATE.
+ *
+ * @param {Io} io
+ * @param {string | null} mergeable
+ * @returns {{ status: string, failing: string }}
+ */
+function readEmptyCi(io, mergeable) {
+  const first = CW.mergeGate('NO_CI', mergeable);
+  const gate = first === 'probe' ? CW.mergeGate('NO_CI', mergeable, probeWorkflows(io)) : first;
+  return gate === 'keep' ? { status: 'NO_CI', failing: '-' } : CI_INDETERMINATE;
+}
+
+/**
+ * D-READINESS-CLASSIFIER: the CI status, read once. The checks come from `gh pr checks`
+ * over name,state,bucket,workflow, with check-ci-status's exit rule (exit 0 or 8 is a
+ * result; any other failure is INDETERMINATE). The rows come from ci-wait's parser, and the
+ * status from ci-wait's classifier (D-CI-WORKFLOW-RULE) and merge gate (D-CI-MERGE-STATE,
+ * D-CI-WORKFLOWS), where the rules are written, so the two scripts cannot disagree. A
+ * conflicting PR reads INDETERMINATE before any checks call, and "no checks reported" or
+ * `[]` goes to readEmptyCi. An unknown merge state, a failed workflow-list call and an
+ * unreadable reply are INDETERMINATE, never DEGRADED. Failing names are sanitized and
+ * bounded by ci-wait's own formatter. PASSING does not prove that the test workflow ran by
+ * name.
  *
  * @param {Io} io
  * @param {number} pr
+ * @param {string | null} mergeable  GitHub's merge state of the PR, from readPrView
  * @returns {{ status: string, failing: string }}
  */
-function readCi(io, pr) {
-  const r = gh(io, ['pr', 'checks', String(pr), '--json', 'name,state,bucket'], READINESS_MAX_BUFFER);
-  const indeterminate = { status: 'INDETERMINATE', failing: '-' };
-  if (!answered(r)) return indeterminate;
+function readCi(io, pr, mergeable) {
+  if (CW.isConflicting(mergeable)) return CI_INDETERMINATE;
+  const r = gh(io, ['pr', 'checks', String(pr), '--json', 'name,state,bucket,workflow'], READINESS_MAX_BUFFER);
+  if (!answered(r)) return CI_INDETERMINATE;
   if (r.status !== 0 && r.status !== 8) {
     if (/Could not resolve to a PullRequest/.test(r.stderr)) return { status: 'NO_PR', failing: '-' };
-    return /no checks reported/i.test(r.stderr) ? { status: 'NO_CI', failing: '-' } : indeterminate;
+    return /no checks reported/i.test(r.stderr) ? readEmptyCi(io, mergeable) : CI_INDETERMINATE;
   }
-  const rows = parseJsonOrNull(r.stdout.toString('utf8'));
-  if (!Array.isArray(rows) || rows.length > READINESS_MAX_CHECKS) return indeterminate;
-  if (rows.length === 0) return { status: 'NO_CI', failing: '-' };
-  const checks = [];
-  for (const row of rows) {
-    const x = obj(row);
-    if (typeof x.name !== 'string' || typeof x.bucket !== 'string') return indeterminate;
-    checks.push({ name: x.name, bucket: x.bucket });
-  }
+  const checks = CW.parseChecks(r.stdout.toString('utf8'));
+  if (checks === null) return CI_INDETERMINATE;
+  if (checks.length === 0) return readEmptyCi(io, mergeable);
   const c = CW.classifyChecks(checks);
+  if (CW.mergeGate(c.status, mergeable, null) !== 'keep') return CI_INDETERMINATE;
   return { status: c.status, failing: CW.formatNames(c.failing) };
+}
+
+/**
+ * D-READINESS-HEAD: CI counts for one head. `gh pr checks` answers for whatever head the
+ * PR has when it is called, and the evidence is read after it, so a push in between would
+ * pair a CI result with evidence of another head. PASSING and NO_CI stand only when the
+ * head read with the review decision, before the checks call, and the head the evidence
+ * was read at are both 40 lowercase hex and equal; otherwise CI is INDETERMINATE. FAILING,
+ * PENDING and the rest stay: they hold the ladder back on their own.
+ *
+ * @param {{ status: string, failing: string }} ci
+ * @param {unknown} viewHead  the head read before the checks call, or null
+ * @param {unknown} evidenceHead  the head the evidence was read at, or null when it is unknown
+ * @returns {{ status: string, failing: string }}
+ */
+function bindCiHead(ci, viewHead, evidenceHead) {
+  if (ci.status !== 'PASSING' && ci.status !== 'NO_CI') return ci;
+  /** @param {unknown} head */
+  const isHead = head => typeof head === 'string' && SHA40_RE.test(head);
+  const bound = isHead(viewHead) && isHead(evidenceHead) && viewHead === evidenceHead;
+  return bound ? ci : CI_INDETERMINATE;
 }
 
 /**
@@ -2430,6 +2491,15 @@ function readEvidence(io, pr, deps) {
 function approvalText(require, evidence) {
   if (require === 'false') return 'not required';
   return evidence !== null && evidence.approval === 'yes' ? 'yes' : 'no';
+}
+
+/**
+ * @param {string | null} decision  the review decision from readPrView
+ * @returns {string}  the word the Details line prints for it
+ */
+function decisionLabel(decision) {
+  if (decision === null) return 'none';
+  return decision === 'UNRECOGNISED' ? 'unrecognised' : decision;
 }
 
 /**
@@ -2465,15 +2535,17 @@ function readinessDegraded(pr, reason, known) {
  */
 function runReadiness(io, args, deps) {
   const unreadApproval = approvalText(args.requireNonAuthor, null);
-  const decision = readDecision(io, args.pr);
-  if (!decision.ok) return readinessDegraded(args.pr, decision.reason, { approval: unreadApproval });
-  const decisionText = decision.value === null ? 'none' : decision.value === 'UNRECOGNISED' ? 'unrecognised' : decision.value;
+  const view = readPrView(io, args.pr);
+  if (!view.ok) return readinessDegraded(args.pr, view.reason, { approval: unreadApproval });
+  const reviewDecision = view.value.decision;
+  const decisionText = decisionLabel(reviewDecision);
   const threads = readThreads(io, args.pr);
   if (!threads.ok) {
     return readinessDegraded(args.pr, threads.reason, { decision: decisionText, approval: unreadApproval });
   }
-  const ci = readCi(io, args.pr);
+  const ciRead = readCi(io, args.pr, view.value.mergeable);
   const fields = readEvidence(io, args.pr, deps);
+  const ci = bindCiHead(ciRead, view.value.head, fields === null ? null : fields.head);
   /** @type {EvidenceFacts | null} */
   const evidence = fields === null ? null : {
     total: fields.total,
@@ -2485,7 +2557,7 @@ function runReadiness(io, args, deps) {
   const verdict = readinessVerdict({
     unresolved: threads.value.unresolved,
     approximate: threads.value.approximate,
-    decision: decision.value,
+    decision: reviewDecision,
     ci: ci.status,
     failing: ci.failing,
     evidence,
@@ -2689,6 +2761,7 @@ module.exports = Object.freeze({
   BODY_STATUSES,
   COMMENT_STATUSES,
   readinessVerdict,
+  bindCiHead,
   renderPublishBlock,
   parsePublishBlock,
   renderReadinessBlock,

@@ -5,7 +5,7 @@ description: "Use when moving text between git.mds and references, or editing th
 category: architecture
 directories: [tests/git-agent.test.ts, tests/helpers.ts, tests/tracker, tests/guards/capability-hoist.test.ts, tests/guards/provider-scope.test.ts, tests/guards/requires-closure.test.ts, tests/guards/report-cap.test.ts, tests/seams/pr-link-handoff.test.ts, tests/fixtures/agent-config.ts, tests/fixtures/golden, tests/goldens/github-status-lines.test.ts]
 created: 2026-10-10
-updated: 2026-10-13
+updated: 2026-10-22
 ---
 
 # Tracker References: Guards, Corpora and Goldens
@@ -82,7 +82,7 @@ Registered under `floors` in `tests/fixtures/numeric-floors.json` (floors rise; 
 - **KB-INV-6** The scope property is held at both ends: each summary op's D10 naming sentence is in its own `pr/` reference (the exact-set assertion over the operation references), and the agent body is asserted to name the gate nowhere.
 - **KB-INV-7** `KNOWN_GITHUB_API_INLINE_BODIES` (`D-INLINE-BODY-EXCLUSIONS`) is an empty array; the guard mechanics (`joinContinuations`, `INLINE_BODY_SHAPES`, `inlineBodyCorpus`) are owned by the test-harness KB.
 - **KB-INV-10** The `git-agent.md` and install-snapshot goldens are the ones a split regenerates, in a fixture-only commit; the status-lines fixture is not among them.
-- **KB-INV-9** `check-ci-status` stays defined though no command spawns it. `ci-wait.cjs` replaced the Git CI re-spawn, so no command fence names it; it stays for two non-command readers. Its Output `**Status**:` enum is the authority `ci-wait.cjs` is pinned to (`tests/evidence/merge-readiness.test.ts`), and `check-merge-readiness` step 3 names its PR-host reference for the classification (the `readiness` script classifies with `ci-wait.cjs`'s own `classifyChecks`). Removing it would lower `capability-hoist-block-floor` (a floor falls only through an accepted note), break PR-host roster parity and ci-wait enum parity, and force a status-lines fixture re-capture. In the agent's `## Output` exempt list its `**Status**:` is classified as "the enum `ci-wait.cjs` is pinned to", not as a field a command reads (`tests/guards/report-cap.test.ts` asserts the operation is still routed in the agent's tables and that classification). No command spawns `check-merge-readiness` either: `/resolve` runs `verify-evidence.cjs readiness` inline.
+- **KB-INV-9** `check-ci-status` stays defined though no command spawns it. `ci-wait.cjs` replaced the Git CI re-spawn, so no command fence names it; it stays for two non-command readers. Its Output `**Status**:` enum is the authority `ci-wait.cjs` is pinned to (`tests/evidence/merge-readiness.test.ts`), and `check-merge-readiness` step 3 names its PR-host reference for the classification (the `readiness` script reads CI with `ci-wait.cjs`'s own `parseChecks` and `classifyChecks` under its `mergeGate`/`isConflicting`, asks its workflow list through `probeWorkflows`, and ties PASSING/NO_CI to the evidence head with its own `bindCiHead`). Removing it would lower `capability-hoist-block-floor` (a floor falls only through an accepted note), break PR-host roster parity and ci-wait enum parity, and force a status-lines fixture re-capture. In the agent's `## Output` exempt list its `**Status**:` is classified as "the enum `ci-wait.cjs` is pinned to", not as a field a command reads (`tests/guards/report-cap.test.ts` asserts the operation is still routed in the agent's tables and that classification). No command spawns `check-merge-readiness` either: `/resolve` runs `verify-evidence.cjs readiness` inline.
 
 ## Key Files
 
