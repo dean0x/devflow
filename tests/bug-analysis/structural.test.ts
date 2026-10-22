@@ -462,11 +462,12 @@ function collectStaticBoundDefects(phase2: string): string[] {
     if (lines[lines.length - 1] !== BOUND_PROBE) out.push('the last line of the Step 2c fence is not the timeout/gtimeout probe');
     if (!lines.includes(STATUS_LOOP)) out.push('the Step 2c fence does not print one status line per tool');
   }
+  out.push(...collectDidNotRunBranchDefects(step2c ?? ''));
 
   for (const part of [
     'never one unbounded',
     'Static analysis did not run: neither timeout nor gtimeout is installed',
-    'Semgrep 0, Snyk 0 or 1 (1 = issues',
+    'Semgrep 0, Snyk 0 or 1 (1 = issues, only with SARIF output), CodeQL 0. Any other status',
     'or no such line',
     '`STATIC_FINDINGS` is `(none)` only when every tool that was to run completed',
     'Static analysis did not complete: {tool}',
@@ -480,6 +481,19 @@ function collectStaticBoundDefects(phase2: string): string[] {
   if (exitLines.length !== 3 || exitLines.some(count => count !== 1)) out.push(`the scanner fences carry ${exitLines.join('+') || '0'} exit lines, expected 1 each in 3 fences`);
   if (!phase2.includes('); E=$?')) out.push('the Snyk status is not read right after the scanner');
   return [...out, ...collectStatedTimeoutDefects(phase2, scanners)];
+}
+
+/** The did-not-run sentence sits in the "some are available" branch, after the all-`no` branch that sets `(none)`. */
+function collectDidNotRunBranchDefects(step2c: string): string[] {
+  const out: string[] = [];
+  const noneBranch = step2c.indexOf('No static analysis tools found');
+  const someBranch = step2c.indexOf('If some are available');
+  const didNotRun = step2c.indexOf('Static analysis did not run: neither timeout nor gtimeout is installed');
+  if (noneBranch === -1) out.push('Step 2c has no all-no branch warning');
+  if (someBranch === -1) out.push('Step 2c has no "If some are available" branch');
+  if (noneBranch !== -1 && someBranch !== -1 && noneBranch > someBranch) out.push('the all-no branch does not come before the "If some are available" branch');
+  if (didNotRun === -1 || someBranch === -1 || didNotRun < someBranch) out.push('the did-not-run sentence is not in the "If some are available" branch of Step 2c');
+  return out;
 }
 
 /** Each scanner's bounds, kill grace included, end before the Bash timeout Phase 2 states for its call. */
@@ -556,7 +570,8 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(defects(`${BOUND}snyk`, 'snyk')).toContain('the snyk code test line does not run under {bound} -k 10 280');
     expect(defects(`${BOUND}xargs`, 'timeout 300 xargs')).toContain('a scanner runs under a plain timeout with a number, not the probed bound');
     expect(defects('Static analysis did not run: neither timeout nor gtimeout is installed', 'Static analysis did not run')).toContain('Phase 2 does not say: Static analysis did not run: neither timeout nor gtimeout is installed');
-    expect(defects('Snyk 0 or 1', 'Snyk 0, 1 or 2')).toContain('Phase 2 does not say: Semgrep 0, Snyk 0 or 1 (1 = issues');
+    expect(defects('Snyk 0 or 1', 'Snyk 0, 1 or 2')).toContain('Phase 2 does not say: Semgrep 0, Snyk 0 or 1 (1 = issues, only with SARIF output), CodeQL 0. Any other status');
+    expect(defects('CodeQL 0. Any other status', 'CodeQL 0 or 1. Any other status')).toContain('Phase 2 does not say: Semgrep 0, Snyk 0 or 1 (1 = issues, only with SARIF output), CodeQL 0. Any other status');
     expect(defects('Bash `timeout` at 300000', 'Bash `timeout` at 200000')).toContain('the semgrep scan bound does not end before its Bash timeout');
     expect(defects('(CodeQL: 600000)', '(CodeQL: 700000)')).toContain('a stated Bash timeout is above 600000 ms');
     expect(defects('with the Bash `timeout` at', 'with the Bash limit at')).toContain('no stated Bash timeout above the scanner bounds');
@@ -577,6 +592,17 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(collectStaticBoundDefects(phase2Of(moved))).toContain('the last line of the Step 2c fence is not the timeout/gtimeout probe');
     expect(collectStaticBoundDefects(phase2Of(seed(STATUS_LOOP, 'true')))).toContain('the Step 2c fence does not print one status line per tool');
     expect(collectStaticBoundDefects('')).toContain('0 scanner command lines, expected 4');
+  });
+
+  it('known-bad probes: a did-not-run sentence outside the "some are available" branch is reported', () => {
+    const sentence = 'Static analysis did not run: neither timeout nor gtimeout is installed';
+    const inAllNo = content.replace(sentence, () => 'it did not run').replace('Set `STATIC_FINDINGS` to `(none)`.', () => `Set \`STATIC_FINDINGS\` to "${sentence}".`);
+    expect(inAllNo).not.toBe(content);
+    expect(collectStaticBoundDefects(phase2Of(inAllNo))).toContain('the did-not-run sentence is not in the "If some are available" branch of Step 2c');
+    const swapped = seed('If some are available', 'If none are available');
+    expect(collectStaticBoundDefects(phase2Of(swapped))).toContain('Step 2c has no "If some are available" branch');
+    const reordered = seed('No static analysis tools found', 'Static analysis tools found');
+    expect(collectStaticBoundDefects(phase2Of(reordered))).toContain('Step 2c has no all-no branch warning');
   });
 
   it('known-bad probes: a report that hides a scanner that did not run or finish is reported', () => {
