@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`/bug-analysis` no longer reports "no findings" when static analysis could not run** ([#649](https://github.com/dean0x/devflow/issues/649)).
+  - Without GNU `timeout` or `gtimeout` (stock macOS), it runs no scanner and says so. Install coreutils to enable it.
+  - A scanner that fails, times out or exits with an error is named in the report with its exit status.
+  - Each scanner's time bound ends before its Bash call does, and file names reach the scanners safely.
+
 ---
 
 ## [3.9.0] - 2026-10-22
