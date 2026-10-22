@@ -1656,6 +1656,10 @@ describe('git agent — static content guards', () => {
       why: 'the marker spelling; a narrower spelling posts a section the writer marked private',
     },
     {
+      literal: 'a space or tab and the word',
+      why: 'the start shape; CommonMark accepts a tab after the heading marks, so a space-only shape posts a tab-marked private section',
+    },
+    {
       literal: 'fenced or not',
       why: 'a start inside a fence must still strip, or a bad fence makes the strip fail open',
     },
