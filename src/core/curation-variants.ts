@@ -1,6 +1,6 @@
 /**
- * Curation-variant splitter: one compiled prompt body in, its curation-on and
- * curation-off variants out.
+ * Variant splitter: one compiled prompt body in, its variants out, on two marker
+ * axes: curation and compliance.
  *
  * Pure module, zero I/O. Every refusal is a Result; the exiting shell is
  * scripts/build-mds.ts, which renders these errors into the build's single exit.
@@ -11,16 +11,23 @@
  * the curation-on variant at today's path (dist/commands/x.md, dist/agents/x.md)
  * and the curation-off variant at dist/curation-off/{commands,agents}/x.md, only
  * for a host that has an arm. A prompt with no arm has one variant and no
- * curation-off file.
+ * curation-off file. The compliance axis works the same way: a body is split on
+ * both axes into four variants, keyed `on`, `curation-off`, `compliance-off` and
+ * `both-off`, and the build writes a variant only for a host that has an arm on
+ * the axis that variant turns off.
  *
- * The arms are whole-line markers in the host or in a partial it expands:
+ * The arms are whole-line markers in the host or in a partial it expands. Each
+ * axis has the same three:
  *
- *   <!-- curation:on -->     opens an arm that only the curation-on variant keeps
- *   <!-- curation:off -->    opens an arm that only the curation-off variant keeps;
+ *   <!-- curation:on -->     opens an arm that only the curation-on variants keep
+ *   <!-- curation:off -->    opens an arm that only the curation-off variants keep;
  *                            directly after an on arm it is that arm's else
  *   <!-- curation:end -->    closes the arm
  *
- * A marker line matches CURATION_MARKER_RE. It may be indented and may sit inside
+ * and `<!-- compliance:on -->`, `<!-- compliance:off -->` and
+ * `<!-- compliance:end -->` do the same for the compliance variants.
+ *
+ * A marker line matches VARIANT_MARKER_RE. It may be indented and may sit inside
  * a fenced block, a list, a define body or an agent's second frontmatter block,
  * because MDS passes an HTML comment through untouched. The splitter runs on the
  * COMPILED body, after the MDS compile, so it adds no compileFile call, no import
@@ -28,6 +35,13 @@
  * marker line is removed whole, with its newline. Every other line is kept byte
  * for byte, so a blank line is content: put the blank line a paragraph needs
  * inside the arm that owns the paragraph, and the other variant gets none of it.
+ * A line goes into a variant only when every arm open at that line matches the
+ * variant, so a body with no compliance marker splits on the curation axis to the
+ * same bytes it always did, and the compliance state of the variant changes nothing.
+ *
+ * One axis may nest fully inside an arm of the other. Two arms of one axis never
+ * nest, and arms of two axes never overlap: at most one arm per axis is open, and
+ * the arm opened last is the one that closes first.
  *
  * The markers are INTERIM. MDS 0.4.4 emits an `@if` inside a code fence or on an
  * indented line as literal text (its lexer requires column 0), and the arms have
@@ -35,28 +49,34 @@
  * frontmatter. They are replaced by native conditionals once mdscript ships
  * fence- and indent-aware `@if` (dean0x/mdscript#452). That swap, with the
  * @mdscript/mds upgrade it rides on proven byte-identical in dist/ and this module
- * deleted, is dean0x/devflow#439. The mapping is one to one: `on` becomes
- * `@if curation:`, `off` becomes `@else:` and `end` becomes `@end`. A standalone
- * `off` arm, with no on arm before it, becomes an `@if curation:` with an empty
- * body followed by `@else:`.
+ * deleted, is dean0x/devflow#439; the compliance axis rides the same swap
+ * (dean0x/devflow#648). The mapping is one to one, per axis: `<!-- curation:on -->`
+ * becomes `@if curation:` and `<!-- compliance:on -->` becomes `@if compliance:`,
+ * `off` becomes `@else:` and `end` becomes `@end`. A standalone `off` arm, with no
+ * on arm before it, becomes an `@if <axis>:` with an empty body followed by
+ * `@else:`. One axis nested inside the other becomes one `@if` inside the other,
+ * and an interleaving, which no `@if` nesting expresses, is a refusal here.
  *
- * What the splitter refuses, each as a CurationSplitError with the source line:
- *   - nesting: an `on` marker while an arm is open, or a second `off` in one arm;
- *   - an `end` with no open arm;
+ * What the splitter refuses, each as a VariantSplitError with the source line:
+ *   - nesting: an `on` marker while an arm of its axis is open, or a second `off`
+ *     in one arm;
+ *   - an interleaving: an `off` or `end` marker for an arm while an arm of the other
+ *     axis, opened after it, is still open;
+ *   - an `end` with no open arm of its axis;
  *   - an arm still open at the end of the body;
  *   - an empty arm (no line with content between its marker and the next);
  *   - a retired marker: a line that names the pre-rename spelling of the marker, in
  *     any spacing or case, which would otherwise ship as prompt text;
- *   - a stray marker: a line that names `<!-- curation:` but is not a whole-line
- *     marker, which would otherwise ship as prompt text.
+ *   - a stray marker: a line that names `<!-- curation:` or `<!-- compliance:` but
+ *     is not a whole-line marker, which would otherwise ship as prompt text.
  *
  * The retired spelling is never accepted as an alias: the build fails on it, so a
  * host that still carries it cannot ship a prompt with both variants silently equal.
  *
- * Scope guarantee: this module answers one question (what are the two variants of
- * this body?) and one cheap one for the build to ask of a body that must carry no
- * arms (containsCurationMarker). It decides nothing about WHICH text belongs in an
- * arm: that is authoring, and the guards over the built trees hold it.
+ * Scope guarantee: this module answers one question (what are the variants of this
+ * body?) and one cheap one for the build to ask of a body that must carry no
+ * curation arms (containsCurationMarker). It decides nothing about WHICH text
+ * belongs in an arm: that is authoring, and the guards over the built trees hold it.
  */
 
 // ---------------------------------------------------------------------------
@@ -76,7 +96,7 @@ function Err<E>(error: E): Result<never, E> {
 }
 
 // ---------------------------------------------------------------------------
-// Where the curation-off variant lands
+// Where the off variants land
 // ---------------------------------------------------------------------------
 
 /** The host kinds that can carry a curation arm: the ones whose output is a prompt, not a reference. */
@@ -90,6 +110,22 @@ export type CurationVariantKind = 'commands' | 'agents';
  * orphan, so it cannot be derived from the plan.
  */
 export const CURATION_OFF_OUTPUT_DIR = 'dist/curation-off';
+
+/**
+ * Repo-relative root of the compliance-off variants: curation on, compliance off.
+ *
+ * Exported for the same reason as CURATION_OFF_OUTPUT_DIR: the orphan prune names it
+ * even when no host carries a compliance arm.
+ */
+export const COMPLIANCE_OFF_OUTPUT_DIR = 'dist/compliance-off';
+
+/**
+ * Repo-relative root of the both-off variants: curation off and compliance off.
+ *
+ * A sibling of the two single-axis trees, never inside one, so the prune of one
+ * tree cannot reach the files of another.
+ */
+export const BOTH_OFF_OUTPUT_DIR = 'dist/curation-compliance-off';
 
 /**
  * Repo-relative root of the retired off tree, from before the rename.
@@ -114,20 +150,30 @@ export function curationOffRelPath(kind: CurationVariantKind, fileName: string):
 // Markers
 // ---------------------------------------------------------------------------
 
+/** The two marker axes. Curation is listed first: it is the older axis and the first one a stray line is tested against. */
+export const VARIANT_AXES = ['curation', 'compliance'] as const;
+
+export type VariantAxis = (typeof VARIANT_AXES)[number];
+
 /**
- * A whole-line curation marker. The group captures `on`, `off` or `end`.
+ * A whole-line marker of either axis. Group 1 captures the axis; group 2 captures
+ * `on`, `off` or `end`.
  *
  * Anchored at both ends with no nested quantifier, so a match is linear in the
  * line length. Leading and trailing space or tab is allowed; anything else on the
  * line is not a marker.
  */
-export const CURATION_MARKER_RE = /^[ \t]*<!-- curation:(on|off|end) -->[ \t]*$/;
+export const VARIANT_MARKER_RE = /^[ \t]*<!-- (curation|compliance):(on|off|end) -->[ \t]*$/;
 
 /**
- * The fragment that makes a line a marker ATTEMPT: loose on spacing and case so a
- * malformed marker is caught rather than shipped. Every valid marker contains it.
+ * The fragment that makes a line a marker ATTEMPT on one axis: loose on spacing and
+ * case so a malformed marker is caught rather than shipped. Every valid marker of
+ * the axis contains it. None is global, so `test` keeps no state between lines.
  */
-const MARKER_FRAGMENT_RE = /<!--\s*curation\s*:/i;
+const MARKER_FRAGMENT_RES: Readonly<Record<VariantAxis, RegExp>> = {
+  curation: /<!--\s*curation\s*:/i,
+  compliance: /<!--\s*compliance\s*:/i,
+};
 
 /**
  * The same attempt test for the retired spelling of the marker. No spelling of it is
@@ -135,70 +181,118 @@ const MARKER_FRAGMENT_RE = /<!--\s*curation\s*:/i;
  */
 const LEGACY_MARKER_FRAGMENT_RE = /<!--\s*learning\s*:/i;
 
-/** True when the text names a marker anywhere, in the current or the retired spelling, valid or not. */
+/** True when the text names a curation marker anywhere, in the current or the retired spelling, valid or not. */
 export function containsCurationMarker(text: string): boolean {
-  return MARKER_FRAGMENT_RE.test(text) || LEGACY_MARKER_FRAGMENT_RE.test(text);
+  return MARKER_FRAGMENT_RES.curation.test(text) || LEGACY_MARKER_FRAGMENT_RE.test(text);
 }
 
 type MarkerWord = 'on' | 'off' | 'end';
 
-function markerOf(line: string): MarkerWord | null {
+interface Marker {
+  readonly axis: VariantAxis;
+  readonly word: MarkerWord;
+}
+
+function markerOf(line: string): Marker | null {
   // A CRLF body carries the carriage return on the line; it is not part of the marker.
   const bare = line.endsWith('\r') ? line.slice(0, -1) : line;
-  const match = CURATION_MARKER_RE.exec(bare);
-  return match === null ? null : (match[1] as MarkerWord);
+  const match = VARIANT_MARKER_RE.exec(bare);
+  return match === null ? null : { axis: match[1] as VariantAxis, word: match[2] as MarkerWord };
+}
+
+/** The axis whose marker the line attempts, or null when it attempts none. */
+function attemptedAxisOf(line: string): VariantAxis | null {
+  for (const axis of VARIANT_AXES) {
+    if (MARKER_FRAGMENT_RES[axis].test(line)) return axis;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
 // The split
 // ---------------------------------------------------------------------------
 
-export type CurationArm = 'on' | 'off';
+export type VariantArm = 'on' | 'off';
 
-export interface CurationSplit {
-  /** The body with every `on` arm kept and every `off` arm dropped. */
-  readonly on: string;
-  /** The body with every `off` arm kept and every `on` arm dropped. */
-  readonly off: string;
-  /** True when the body carried at least one marker. When false, `on` and `off` are the body. */
-  readonly hasArms: boolean;
+/** The four variants of a body, named by the axes they turn off. */
+export const VARIANT_KEYS = ['on', 'curation-off', 'compliance-off', 'both-off'] as const;
+
+export type VariantKey = (typeof VARIANT_KEYS)[number];
+
+/** The arm each axis keeps in each variant. */
+const VARIANT_STATES: Readonly<Record<VariantKey, Readonly<Record<VariantAxis, VariantArm>>>> = {
+  on: { curation: 'on', compliance: 'on' },
+  'curation-off': { curation: 'off', compliance: 'on' },
+  'compliance-off': { curation: 'on', compliance: 'off' },
+  'both-off': { curation: 'off', compliance: 'off' },
+};
+
+export interface VariantSplit {
+  /**
+   * The body of every variant. A variant keeps an `on` arm of an axis only when that
+   * axis is on in it, and an `off` arm only when that axis is off in it.
+   */
+  readonly bodies: Readonly<Record<VariantKey, string>>;
+  /**
+   * Per axis: true when the body carried at least one marker of that axis. When an
+   * axis has no arms, the variants that differ only on that axis are the same body.
+   */
+  readonly hasArms: Readonly<Record<VariantAxis, boolean>>;
 }
 
 /** Why a body cannot be split. Every line number is 1-based, in the body that was passed. */
-export type CurationSplitError =
-  | { kind: 'nested-arm'; line: number; arm: CurationArm; openedAt: number }
-  | { kind: 'repeated-off'; line: number; openedAt: number }
-  | { kind: 'unopened-end'; line: number }
-  | { kind: 'unclosed-arm'; arm: CurationArm; openedAt: number }
-  | { kind: 'empty-arm'; arm: CurationArm; openedAt: number; closedAt: number }
+export type VariantSplitError =
+  | { kind: 'nested-arm'; axis: VariantAxis; line: number; arm: VariantArm; openedAt: number }
+  | {
+      kind: 'interleaved-arm';
+      /** The axis of the marker at `line`, whose arm was opened at `openedAt`. */
+      axis: VariantAxis;
+      marker: 'off' | 'end';
+      line: number;
+      openedAt: number;
+      /** The arm of the other axis that was opened after it and is still open. */
+      innerAxis: VariantAxis;
+      innerOpenedAt: number;
+    }
+  | { kind: 'repeated-off'; axis: VariantAxis; line: number; openedAt: number }
+  | { kind: 'unopened-end'; axis: VariantAxis; line: number }
+  | { kind: 'unclosed-arm'; axis: VariantAxis; arm: VariantArm; openedAt: number }
+  | { kind: 'empty-arm'; axis: VariantAxis; arm: VariantArm; openedAt: number; closedAt: number }
   | { kind: 'legacy-marker'; line: number; text: string }
-  | { kind: 'stray-marker'; line: number; text: string };
+  | { kind: 'stray-marker'; axis: VariantAxis; line: number; text: string };
 
 /** The longest stretch of a stray line a refusal quotes. */
 const STRAY_QUOTE_MAX = 80;
 
+/** An arm that is open at the current line. Local to one split. */
+interface OpenArm {
+  readonly axis: VariantAxis;
+  readonly arm: VariantArm;
+  /** The line of the marker that opened it. */
+  readonly openedAt: number;
+  /** Whether it has held a line with content yet. */
+  hasContent: boolean;
+}
+
 /**
- * Split a compiled body into its curation-on and curation-off variants.
+ * Split a compiled body into its four variants.
  *
  * Total and pure: the same input gives the same output, and a refusal is a
  * Result. The loop is one pass over the body's lines, so its bound is the body's
- * own length.
+ * own length. The open arms are a stack, outermost first. It holds at most one arm
+ * per axis, because a second `on` of an axis is refused, so it never holds more
+ * arms than there are axes.
  *
- * An arm needs a line with content in it. An arm that holds only blank lines is
- * refused as empty, because it would add blank lines to one variant and nothing to
- * the other, which is a mistake rather than a design.
+ * An arm needs a line with content in it, and a line inside an inner arm is also
+ * inside every arm around it. An arm that holds only blank lines is refused as
+ * empty, because it would add blank lines to one variant and nothing to the
+ * other, which is a mistake rather than a design.
  */
-export function splitCurationVariants(body: string): Result<CurationSplit, CurationSplitError> {
+export function splitVariants(body: string): Result<VariantSplit, VariantSplitError> {
   const lines = body.split('\n');
-  const on: string[] = [];
-  const off: string[] = [];
-  let hasArms = false;
-
-  // The open arm, if any: which one, the line of the marker that opened it, and
-  // whether it has held a line with content yet.
-  let arm: CurationArm | null = null;
-  let armOpenedAt = 0;
-  let armHasContent = false;
+  const kept: Record<VariantKey, string[]> = { on: [], 'curation-off': [], 'compliance-off': [], 'both-off': [] };
+  const seen: Record<VariantAxis, boolean> = { curation: false, compliance: false };
+  const open: OpenArm[] = [];
 
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index];
@@ -209,49 +303,124 @@ export function splitCurationVariants(body: string): Result<CurationSplit, Curat
       if (LEGACY_MARKER_FRAGMENT_RE.test(line)) {
         return Err({ kind: 'legacy-marker', line: lineNo, text: line.trim().slice(0, STRAY_QUOTE_MAX) });
       }
-      if (MARKER_FRAGMENT_RE.test(line)) {
-        return Err({ kind: 'stray-marker', line: lineNo, text: line.trim().slice(0, STRAY_QUOTE_MAX) });
+      const attempted = attemptedAxisOf(line);
+      if (attempted !== null) {
+        return Err({ kind: 'stray-marker', axis: attempted, line: lineNo, text: line.trim().slice(0, STRAY_QUOTE_MAX) });
       }
-      if (arm !== 'off') on.push(line);
-      if (arm !== 'on') off.push(line);
-      if (arm !== null && line.trim() !== '') armHasContent = true;
+      for (const key of VARIANT_KEYS) {
+        if (open.every(arm => arm.arm === VARIANT_STATES[key][arm.axis])) kept[key].push(line);
+      }
+      if (line.trim() !== '') {
+        for (const arm of open) arm.hasContent = true;
+      }
       continue;
     }
 
-    hasArms = true;
-    switch (marker) {
+    const { axis } = marker;
+    seen[axis] = true;
+    const at = open.findIndex(arm => arm.axis === axis);
+    const current = at === -1 ? null : open[at];
+    // The arm of the other axis opened after this axis's arm, if any: the one that must close first.
+    const inner = at !== -1 && at + 1 < open.length ? open[at + 1] : null;
+
+    switch (marker.word) {
       case 'on':
-        if (arm !== null) return Err({ kind: 'nested-arm', line: lineNo, arm, openedAt: armOpenedAt });
-        arm = 'on';
-        armOpenedAt = lineNo;
-        armHasContent = false;
+        if (current !== null) {
+          return Err({ kind: 'nested-arm', axis, line: lineNo, arm: current.arm, openedAt: current.openedAt });
+        }
+        open.push({ axis, arm: 'on', openedAt: lineNo, hasContent: false });
         break;
       case 'off':
-        if (arm === 'off') return Err({ kind: 'repeated-off', line: lineNo, openedAt: armOpenedAt });
-        // Directly after an on arm this is its else: the on arm ends here.
-        if (arm === 'on' && !armHasContent) {
-          return Err({ kind: 'empty-arm', arm, openedAt: armOpenedAt, closedAt: lineNo });
+        if (current === null) {
+          open.push({ axis, arm: 'off', openedAt: lineNo, hasContent: false });
+          break;
         }
-        arm = 'off';
-        armOpenedAt = lineNo;
-        armHasContent = false;
+        if (current.arm === 'off') {
+          return Err({ kind: 'repeated-off', axis, line: lineNo, openedAt: current.openedAt });
+        }
+        if (inner !== null) {
+          return Err({
+            kind: 'interleaved-arm', axis, marker: 'off', line: lineNo, openedAt: current.openedAt,
+            innerAxis: inner.axis, innerOpenedAt: inner.openedAt,
+          });
+        }
+        // Directly after an on arm this is its else: the on arm ends here.
+        if (!current.hasContent) {
+          return Err({ kind: 'empty-arm', axis, arm: current.arm, openedAt: current.openedAt, closedAt: lineNo });
+        }
+        open[at] = { axis, arm: 'off', openedAt: lineNo, hasContent: false };
         break;
       case 'end':
-        if (arm === null) return Err({ kind: 'unopened-end', line: lineNo });
-        if (!armHasContent) {
-          return Err({ kind: 'empty-arm', arm, openedAt: armOpenedAt, closedAt: lineNo });
+        if (current === null) return Err({ kind: 'unopened-end', axis, line: lineNo });
+        if (inner !== null) {
+          return Err({
+            kind: 'interleaved-arm', axis, marker: 'end', line: lineNo, openedAt: current.openedAt,
+            innerAxis: inner.axis, innerOpenedAt: inner.openedAt,
+          });
         }
-        arm = null;
+        if (!current.hasContent) {
+          return Err({ kind: 'empty-arm', axis, arm: current.arm, openedAt: current.openedAt, closedAt: lineNo });
+        }
+        open.pop();
         break;
       default: {
-        const unhandled: never = marker;
-        return Err({ kind: 'stray-marker', line: lineNo, text: String(unhandled) });
+        const unhandled: never = marker.word;
+        return Err({ kind: 'stray-marker', axis, line: lineNo, text: String(unhandled) });
       }
     }
   }
 
-  if (arm !== null) return Err({ kind: 'unclosed-arm', arm, openedAt: armOpenedAt });
-  return Ok({ on: on.join('\n'), off: off.join('\n'), hasArms });
+  // The arm opened last is the one an `end` would close first.
+  const unclosed = open.length > 0 ? open[open.length - 1] : null;
+  if (unclosed !== null) {
+    return Err({ kind: 'unclosed-arm', axis: unclosed.axis, arm: unclosed.arm, openedAt: unclosed.openedAt });
+  }
+  return Ok({
+    bodies: {
+      on: kept.on.join('\n'),
+      'curation-off': kept['curation-off'].join('\n'),
+      'compliance-off': kept['compliance-off'].join('\n'),
+      'both-off': kept['both-off'].join('\n'),
+    },
+    hasArms: seen,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// The curation projection
+// ---------------------------------------------------------------------------
+
+export type CurationArm = VariantArm;
+
+export interface CurationSplit {
+  /** The body with every curation `on` arm kept and every curation `off` arm dropped. */
+  readonly on: string;
+  /** The body with every curation `off` arm kept and every curation `on` arm dropped. */
+  readonly off: string;
+  /** True when the body carried at least one curation marker. When false, `on` and `off` are the body. */
+  readonly hasArms: boolean;
+}
+
+/** The refusals of the curation projection are the refusals of the two-axis split. */
+export type CurationSplitError = VariantSplitError;
+
+/**
+ * Split a compiled body into its curation-on and curation-off variants.
+ *
+ * The curation view of splitVariants, kept for the callers that ask only about
+ * curation: the compliance arms of the body are resolved with compliance ON, so
+ * `on` is the `on` variant and `off` is the `curation-off` variant, and `hasArms`
+ * is the curation flag alone. A body with no compliance marker gets the bytes it
+ * always got.
+ */
+export function splitCurationVariants(body: string): Result<CurationSplit, CurationSplitError> {
+  const split = splitVariants(body);
+  if (!split.ok) return split;
+  return Ok({
+    on: split.value.bodies.on,
+    off: split.value.bodies['curation-off'],
+    hasArms: split.value.hasArms.curation,
+  });
 }
 
 /**
@@ -261,25 +430,32 @@ export function splitCurationVariants(body: string): Result<CurationSplit, Curat
  * fall through into a message that does not describe it. Shared by the build and
  * the tests, so the text asserted is the text shipped.
  */
-export function describeCurationSplitError(error: CurationSplitError): string {
+export function describeVariantSplitError(error: VariantSplitError): string {
   switch (error.kind) {
     case 'nested-arm':
       return (
-        `line ${error.line}: a curation:on marker inside the ${error.arm} arm opened at line ` +
-        `${error.openedAt} — arms do not nest; close it with curation:end first`
+        `line ${error.line}: a ${error.axis}:on marker inside the ${error.arm} arm opened at line ` +
+        `${error.openedAt} — arms do not nest; close it with ${error.axis}:end first`
+      );
+    case 'interleaved-arm':
+      return (
+        `line ${error.line}: a ${error.axis}:${error.marker} marker ends the ${error.axis} arm opened at line ` +
+        `${error.openedAt} while the ${error.innerAxis} arm opened at line ${error.innerOpenedAt} is still ` +
+        `open — arms of two axes may nest but not overlap; close the ${error.innerAxis} arm with ` +
+        `${error.innerAxis}:end first`
       );
     case 'repeated-off':
       return (
-        `line ${error.line}: a second curation:off marker inside the off arm opened at line ` +
+        `line ${error.line}: a second ${error.axis}:off marker inside the off arm opened at line ` +
         `${error.openedAt} — an arm has at most one else`
       );
     case 'unopened-end':
-      return `line ${error.line}: a curation:end marker with no open arm`;
+      return `line ${error.line}: a ${error.axis}:end marker with no open arm`;
     case 'unclosed-arm':
-      return `the ${error.arm} arm opened at line ${error.openedAt} is never closed with curation:end`;
+      return `the ${error.arm} arm opened at line ${error.openedAt} is never closed with ${error.axis}:end`;
     case 'empty-arm':
       return (
-        `lines ${error.openedAt}-${error.closedAt}: the ${error.arm} arm holds no line with content — ` +
+        `lines ${error.openedAt}-${error.closedAt}: the ${error.axis}:${error.arm} arm holds no line with content — ` +
         `delete the arm or put its text inside it`
       );
     case 'legacy-marker':
@@ -289,12 +465,15 @@ export function describeCurationSplitError(error: CurationSplitError): string {
       );
     case 'stray-marker':
       return (
-        `line ${error.line}: "${error.text}" names a curation marker but is not one — a marker ` +
-        `is a whole line, exactly <!-- curation:on -->, <!-- curation:off --> or <!-- curation:end -->`
+        `line ${error.line}: "${error.text}" names a ${error.axis} marker but is not one — a marker ` +
+        `is a whole line, exactly <!-- ${error.axis}:on -->, <!-- ${error.axis}:off --> or <!-- ${error.axis}:end -->`
       );
     default: {
       const unhandled: never = error;
-      return `unhandled curation split error ${JSON.stringify(unhandled)}`;
+      return `unhandled variant split error ${JSON.stringify(unhandled)}`;
     }
   }
 }
+
+/** The curation-named spelling of describeVariantSplitError, for the callers that still use it. */
+export const describeCurationSplitError = describeVariantSplitError;
