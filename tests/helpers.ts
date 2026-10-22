@@ -403,7 +403,7 @@ export interface CorpusEntry {
  */
 export function resolveAgentSource(name: string, root: string = ROOT): AgentSource {
   // Order comes from agentSourceDirs() — the one owner of the dist-first policy.
-  const [compiledDir, sourceDir] = agentSourceDirs(root)
+  const [compiledDir, sourceDir] = agentSourceDirs(root, true, true)
   const distPath = path.join(compiledDir, `${name}.md`)
   if (existsSync(distPath)) {
     return { path: distPath, content: readFileSync(distPath, 'utf-8'), origin: 'dist' }

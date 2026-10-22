@@ -2,8 +2,9 @@
  * Variant splitter: one compiled prompt body in, its variants out, on two marker
  * axes: curation and compliance.
  *
- * Pure module, zero I/O. Every refusal is a Result; the exiting shell is
- * scripts/build-mds.ts, which renders these errors into the build's single exit.
+ * Pure module, zero I/O. Every refusal is a Result; the exiting shells are
+ * scripts/build-mds.ts, which renders the split errors into the build's single exit,
+ * and the installer, which refuses an install on a manifest error.
  *
  * D-LEARNING-VARIANTS: when curation is off on a machine, the decisions text is
  * ABSENT from every prompt it would have reached, not merely gated at run time.
@@ -77,7 +78,8 @@
  * body, and where do they land?) and a cheap one per axis for the build to ask of a
  * body that must carry no arms (containsCurationMarker, containsComplianceMarker). It
  * also renders the variant manifest the build writes beside the trees
- * (renderVariantManifest), so the build and the installer share one layout. It decides
+ * (renderVariantManifest) and parses it for the installer (parseVariantManifest), so the
+ * build and the installer share one layout. It decides
  * nothing about WHICH text belongs in an arm: that is authoring, and the guards over
  * the built trees hold it.
  */
@@ -599,4 +601,135 @@ export function describeVariantManifestError(error: VariantManifestError): strin
       return `unhandled variant manifest error ${String(unhandled)}`;
     }
   }
+}
+
+/** The most hosts a manifest may name. The shipped roster is 26; the bound keeps a corrupt file from driving an unbounded loop. */
+export const MAX_VARIANT_MANIFEST_HOSTS = 1024;
+
+/** A manifest key: a prompt kind, a slash and an output basename, the same charset the build validates names against. */
+const MANIFEST_HOST_KEY_RE = /^(commands|agents)\/([a-z0-9][a-z0-9._-]{0,63})$/;
+
+/** Why a manifest cannot be read. */
+export type VariantManifestParseError =
+  | { kind: 'not-json' }
+  | { kind: 'not-an-object' }
+  | { kind: 'unsupported-version' }
+  | { kind: 'bad-hosts' }
+  | { kind: 'too-many-hosts'; count: number }
+  | { kind: 'bad-host-key'; key: string }
+  | { kind: 'bad-host-axes'; host: string };
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Parse the text of a variant manifest into its hosts, in file order.
+ *
+ * The parse boundary of the file the build wrote: it trusts nothing in the text. The
+ * version must be the one this module renders, the host map must be a plain object
+ * within MAX_VARIANT_MANIFEST_HOSTS, every key must be `<kind>/<name>` with a known kind
+ * and a valid basename (so a key can never name a path outside a variant tree), and both
+ * axes of every host must be booleans. The first fault is the refusal. Pure and total:
+ * the JSON parse is the only call that can throw and it is caught here.
+ */
+export function parseVariantManifest(text: string): Result<readonly VariantManifestHost[], VariantManifestParseError> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return Err({ kind: 'not-json' });
+  }
+  if (!isPlainRecord(parsed)) return Err({ kind: 'not-an-object' });
+  if (parsed.version !== VARIANT_MANIFEST_VERSION) return Err({ kind: 'unsupported-version' });
+  const rawHosts = parsed.hosts;
+  if (!isPlainRecord(rawHosts)) return Err({ kind: 'bad-hosts' });
+
+  const entries = Object.entries(rawHosts);
+  if (entries.length > MAX_VARIANT_MANIFEST_HOSTS) return Err({ kind: 'too-many-hosts', count: entries.length });
+
+  const hosts: VariantManifestHost[] = [];
+  for (const [key, value] of entries) {
+    const match = MANIFEST_HOST_KEY_RE.exec(key);
+    if (match === null) return Err({ kind: 'bad-host-key', key });
+    if (!isPlainRecord(value) || typeof value.curation !== 'boolean' || typeof value.compliance !== 'boolean') {
+      return Err({ kind: 'bad-host-axes', host: key });
+    }
+    hosts.push({
+      kind: match[1] as CurationVariantKind,
+      name: match[2],
+      axes: { curation: value.curation, compliance: value.compliance },
+    });
+  }
+  return Ok(hosts);
+}
+
+/** Render a manifest parse refusal as one line a person can act on. */
+export function describeVariantManifestParseError(error: VariantManifestParseError): string {
+  switch (error.kind) {
+    case 'not-json':
+      return 'the text is not JSON';
+    case 'not-an-object':
+      return 'the top level is not an object';
+    case 'unsupported-version':
+      return `the version is not ${VARIANT_MANIFEST_VERSION}`;
+    case 'bad-hosts':
+      return '"hosts" is missing or is not an object';
+    case 'too-many-hosts':
+      return `${error.count} hosts exceed the bound of ${MAX_VARIANT_MANIFEST_HOSTS}`;
+    case 'bad-host-key':
+      return `the host key "${error.key}" is not <commands|agents>/<name>`;
+    case 'bad-host-axes':
+      return `the host ${error.host} does not carry a boolean "curation" and a boolean "compliance"`;
+    default: {
+      const unhandled: never = error;
+      return `unhandled variant manifest parse error ${JSON.stringify(unhandled)}`;
+    }
+  }
+}
+
+/**
+ * The variant a machine with these switches installs for a host with these arms.
+ *
+ * An axis counts as off for a host only when the machine has it off AND the host carries
+ * an arm on it, because a host with no arm on an axis has one body on that axis. The
+ * result is therefore always a variant the build wrote for the host (see
+ * emittedVariantKeys): a host with both arms on a both-off machine gets `both-off`, a host
+ * with only a compliance arm gets `compliance-off`, never the curation-off file it does not
+ * have and never the on file.
+ */
+export function machineVariantKey(
+  machine: Readonly<Record<VariantAxis, boolean>>,
+  hasArms: Readonly<Record<VariantAxis, boolean>>,
+): VariantKey {
+  const curationOff = !machine.curation && hasArms.curation;
+  const complianceOff = !machine.compliance && hasArms.compliance;
+  if (curationOff && complianceOff) return 'both-off';
+  if (curationOff) return 'curation-off';
+  return complianceOff ? 'compliance-off' : 'on';
+}
+
+/**
+ * The repo-relative off files a machine must find for the hosts that carry a compliance
+ * arm, in manifest order. Empty when compliance is on: that machine reads no off file for
+ * the axis.
+ *
+ * A compliance-armed host has no safe fall-through on a machine with compliance off: the
+ * normal file, and on a both-off machine the curation-off file, both carry the compliance
+ * text the machine has switched off. A host with no compliance arm is not listed: its
+ * normal (or curation-off) file is the right one.
+ */
+export function requiredComplianceVariantFiles(
+  machine: Readonly<Record<VariantAxis, boolean>>,
+  hosts: readonly VariantManifestHost[],
+): readonly string[] {
+  if (machine.compliance) return [];
+  const files: string[] = [];
+  for (const host of hosts) {
+    if (!host.axes.compliance) continue;
+    const key = machineVariantKey(machine, host.axes);
+    if (key === 'on') continue;
+    files.push(variantOffRelPath(key, host.kind, `${host.name}.md`));
+  }
+  return files;
 }

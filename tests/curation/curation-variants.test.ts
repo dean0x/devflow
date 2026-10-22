@@ -24,10 +24,15 @@ import {
   containsVariantMarker,
   describeCurationSplitError,
   describeVariantManifestError,
+  describeVariantManifestParseError,
   describeVariantSplitError,
   curationOffRelPath,
   emittedVariantKeys,
+  machineVariantKey,
+  MAX_VARIANT_MANIFEST_HOSTS,
+  parseVariantManifest,
   renderVariantManifest,
+  requiredComplianceVariantFiles,
   splitCurationVariants,
   splitVariants,
   variantOffRelPath,
@@ -953,6 +958,180 @@ describe('renderVariantManifest (TP-6)', () => {
   it('the same name under two kinds is two hosts, not a duplicate', () => {
     const text = render([host('commands', 'debug', true, false), host('agents', 'debug', true, false)]);
     expect(Object.keys((JSON.parse(text) as { hosts: object }).hosts)).toEqual(['agents/debug', 'commands/debug']);
+  });
+});
+
+describe('parseVariantManifest (TP-9)', () => {
+  const manifest = (hosts: unknown, version: unknown = 1): string => JSON.stringify({ version, hosts });
+  const axes = (curation: boolean, compliance: boolean) => ({ curation, compliance });
+
+  function parse(text: string): readonly VariantManifestHost[] {
+    const result = parseVariantManifest(text);
+    if (!result.ok) throw new Error(`expected a parse, got ${JSON.stringify(result.error)}`);
+    return result.value;
+  }
+
+  function refusal(text: string) {
+    const result = parseVariantManifest(text);
+    if (result.ok) throw new Error('expected a refusal');
+    return result.error;
+  }
+
+  it('reads back what renderVariantManifest wrote, host for host', () => {
+    const hosts: VariantManifestHost[] = [
+      { kind: 'agents', name: 'code', axes: axes(true, true) },
+      { kind: 'agents', name: 'git', axes: axes(false, false) },
+      { kind: 'commands', name: 'implement', axes: axes(true, false) },
+    ];
+    const rendered = renderVariantManifest(hosts);
+    if (!rendered.ok) throw new Error('render failed');
+    expect(parse(rendered.value)).toEqual(hosts);
+  });
+
+  it('an empty host map is a valid manifest with no hosts', () => {
+    expect(parse(manifest({}))).toEqual([]);
+  });
+
+  it.each([
+    ['text that is not JSON', 'not json {', 'not-json'],
+    ['an empty file', '', 'not-json'],
+    ['a JSON array', '[]', 'not-an-object'],
+    ['JSON null', 'null', 'not-an-object'],
+    ['a JSON string', '"x"', 'not-an-object'],
+    ['a version other than 1', manifest({}, 2), 'unsupported-version'],
+    ['a version spelled as text', manifest({}, '1'), 'unsupported-version'],
+    ['no version', JSON.stringify({ hosts: {} }), 'unsupported-version'],
+    ['no host map', JSON.stringify({ version: 1 }), 'bad-hosts'],
+    ['a host list in place of the map', manifest([]), 'bad-hosts'],
+    ['a null host map', manifest(null), 'bad-hosts'],
+  ] as const)('known-bad probe: %s is refused as %s', (_label, text, kind) => {
+    expect(refusal(text).kind).toBe(kind);
+  });
+
+  it.each([
+    ['a key with no kind', 'implement'],
+    ['an unknown kind', 'skills/implement'],
+    ['a path that climbs out of the tree', 'agents/../../x'],
+    ['a name with a slash', 'agents/a/b'],
+    ['an upper-case name', 'agents/Code'],
+    ['an empty name', 'agents/'],
+    ['a name that starts with a dot', 'agents/.hidden'],
+    ['a name over 64 characters', `agents/${'a'.repeat(65)}`],
+    ['the prototype key', '__proto__'],
+  ])('known-bad probe: %s is refused as a bad host key', (_label, key) => {
+    const text = `{"version":1,"hosts":{${JSON.stringify(key)}:{"curation":true,"compliance":true}}}`;
+    expect(refusal(text)).toEqual({ kind: 'bad-host-key', key });
+  });
+
+  it.each([
+    ['axes that are not an object', 'true'],
+    ['an array of axes', '[true,true]'],
+    ['no compliance axis', '{"curation":true}'],
+    ['no curation axis', '{"compliance":true}'],
+    ['an axis that is text', '{"curation":"true","compliance":true}'],
+    ['an axis that is a number', '{"curation":true,"compliance":1}'],
+  ])('known-bad probe: %s is refused as bad host axes', (_label, value) => {
+    const text = `{"version":1,"hosts":{"agents/code":${value}}}`;
+    expect(refusal(text)).toEqual({ kind: 'bad-host-axes', host: 'agents/code' });
+  });
+
+  it('refuses a manifest that names more hosts than the bound, without reading them', () => {
+    const hosts: Record<string, unknown> = {};
+    for (let i = 0; i <= MAX_VARIANT_MANIFEST_HOSTS; i++) hosts[`commands/h${i}`] = axes(false, false);
+    expect(refusal(manifest(hosts))).toEqual({ kind: 'too-many-hosts', count: MAX_VARIANT_MANIFEST_HOSTS + 1 });
+  });
+
+  it('accepts a manifest exactly at the bound', () => {
+    const hosts: Record<string, unknown> = {};
+    for (let i = 0; i < MAX_VARIANT_MANIFEST_HOSTS; i++) hosts[`commands/h${i}`] = axes(false, false);
+    expect(parse(manifest(hosts))).toHaveLength(MAX_VARIANT_MANIFEST_HOSTS);
+  });
+
+  it('describes every refusal in one line that names what to fix', () => {
+    const errors = [
+      refusal('nope'),
+      refusal('[]'),
+      refusal(manifest({}, 9)),
+      refusal(JSON.stringify({ version: 1 })),
+      refusal(manifest({ 'x/y': axes(true, true) })),
+      refusal(manifest({ 'agents/a': 1 })),
+      { kind: 'too-many-hosts', count: 5000 } as const,
+    ];
+    for (const error of errors) {
+      const text = describeVariantManifestParseError(error);
+      expect(text, error.kind).not.toContain('\n');
+      expect(text.length, error.kind).toBeGreaterThan(10);
+    }
+    expect(describeVariantManifestParseError({ kind: 'bad-host-key', key: 'x/y' })).toContain('x/y');
+    expect(describeVariantManifestParseError({ kind: 'bad-host-axes', host: 'agents/a' })).toContain('agents/a');
+  });
+});
+
+describe('machineVariantKey (TP-10)', () => {
+  const on = { curation: true, compliance: true };
+
+  it.each([
+    // [machine curation, machine compliance, host curation arm, host compliance arm, key]
+    [true, true, true, true, 'on'],
+    [false, true, true, true, 'curation-off'],
+    [false, true, false, true, 'on'],
+    [true, false, true, true, 'compliance-off'],
+    [true, false, true, false, 'on'],
+    [false, false, true, true, 'both-off'],
+    [false, false, true, false, 'curation-off'],
+    [false, false, false, true, 'compliance-off'],
+    [false, false, false, false, 'on'],
+  ] as const)('machine curation %s compliance %s, host arms %s/%s: %s', (mc, mp, hc, hp, key) => {
+    expect(machineVariantKey({ curation: mc, compliance: mp }, { curation: hc, compliance: hp })).toBe(key);
+  });
+
+  it('is always a variant the build writes for that host', () => {
+    for (const mc of [false, true]) {
+      for (const mp of [false, true]) {
+        for (const hc of [false, true]) {
+          for (const hp of [false, true]) {
+            const key = machineVariantKey({ curation: mc, compliance: mp }, { curation: hc, compliance: hp });
+            expect(emittedVariantKeys({ curation: hc, compliance: hp })).toContain(key);
+          }
+        }
+      }
+    }
+    expect(machineVariantKey(on, { curation: true, compliance: true })).toBe('on');
+  });
+});
+
+describe('requiredComplianceVariantFiles (TP-9, TP-10)', () => {
+  const hosts: readonly VariantManifestHost[] = [
+    { kind: 'agents', name: 'code', axes: { curation: true, compliance: true } },
+    { kind: 'commands', name: 'implement', axes: { curation: false, compliance: true } },
+    { kind: 'commands', name: 'debug', axes: { curation: true, compliance: false } },
+    { kind: 'agents', name: 'git', axes: { curation: false, compliance: false } },
+  ];
+
+  it('compliance on needs no file', () => {
+    expect(requiredComplianceVariantFiles({ curation: true, compliance: true }, hosts)).toEqual([]);
+    expect(requiredComplianceVariantFiles({ curation: false, compliance: true }, hosts)).toEqual([]);
+  });
+
+  it('curation on, compliance off needs the compliance-off file of each compliance-armed host, and no other', () => {
+    expect(requiredComplianceVariantFiles({ curation: true, compliance: false }, hosts)).toEqual([
+      'dist/compliance-off/agents/code.md',
+      'dist/compliance-off/commands/implement.md',
+    ]);
+  });
+
+  it('both off needs the both-off file where the host carries both arms, and never the curation-off file', () => {
+    const files = requiredComplianceVariantFiles({ curation: false, compliance: false }, hosts);
+    expect(files).toEqual([
+      'dist/curation-compliance-off/agents/code.md',
+      'dist/compliance-off/commands/implement.md',
+    ]);
+    for (const file of files) expect(file).not.toContain('dist/curation-off/');
+  });
+
+  it('a roster with no compliance arm needs nothing on any machine', () => {
+    const none = hosts.filter(h => !h.axes.compliance);
+    expect(requiredComplianceVariantFiles({ curation: false, compliance: false }, none)).toEqual([]);
   });
 });
 

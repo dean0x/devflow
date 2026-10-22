@@ -133,8 +133,8 @@ afterEach(async () => {
 
 describe('source order (assets.ts)', () => {
   it('curation off puts the curation-off directory first for commands and for agents', () => {
-    expect(commandSourceDirs(false, pkg)).toEqual([curationOffDir('commands', pkg), path.join(pkg, 'dist', 'commands')]);
-    expect(agentSourceDirs(pkg, false)).toEqual([
+    expect(commandSourceDirs(false, true, pkg)).toEqual([curationOffDir('commands', pkg), path.join(pkg, 'dist', 'commands')]);
+    expect(agentSourceDirs(pkg, false, true)).toEqual([
       curationOffDir('agents', pkg),
       path.join(pkg, 'dist', 'agents'),
       path.join(pkg, 'src', 'assets', 'agents'),
@@ -142,14 +142,14 @@ describe('source order (assets.ts)', () => {
   });
 
   it('curation on keeps today\'s order exactly, and the default is curation on', () => {
-    expect(commandSourceDirs(true, pkg)).toEqual([path.join(pkg, 'dist', 'commands')]);
-    expect(agentSourceDirs(pkg, true)).toEqual([path.join(pkg, 'dist', 'agents'), path.join(pkg, 'src', 'assets', 'agents')]);
-    expect(agentSourceDirs(pkg)).toEqual(agentSourceDirs(pkg, true));
+    expect(commandSourceDirs(true, true, pkg)).toEqual([path.join(pkg, 'dist', 'commands')]);
+    expect(agentSourceDirs(pkg, true, true)).toEqual([path.join(pkg, 'dist', 'agents'), path.join(pkg, 'src', 'assets', 'agents')]);
+    expect(agentSourceDirs(pkg)).toEqual(agentSourceDirs(pkg, true, true));
   });
 
   it('known-bad probe: the curation-off directory is never consulted when curation is on', () => {
-    expect(commandSourceDirs(true, pkg).some(dir => dir.includes('curation-off'))).toBe(false);
-    expect(agentSourceDirs(pkg, true).some(dir => dir.includes('curation-off'))).toBe(false);
+    expect(commandSourceDirs(true, true, pkg).some(dir => dir.includes('curation-off'))).toBe(false);
+    expect(agentSourceDirs(pkg, true, true).some(dir => dir.includes('curation-off'))).toBe(false);
   });
 });
 
@@ -183,6 +183,7 @@ describe('installViaFileCopy honours the curation switch', () => {
     const plugins = selection();
     return installViaFileCopy({
       curation,
+      compliance: true,
       plugins,
       effectivePlugins: plugins,
       claudeDir,
