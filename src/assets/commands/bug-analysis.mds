@@ -124,7 +124,7 @@ set -o pipefail; git diff --name-only -z --diff-filter=d {DIFF_RANGE} | {bound} 
 **Snyk Code** (if available):
 ```bash
 S=$({bound} -k 10 280 snyk code test --sarif 2>/dev/null); E=$?
-printf '%s' "$S" | jq --argjson files "$(git diff --name-only {DIFF_RANGE} | jq -R . | jq -s .)" \
+printf '%s' "$S" | jq --argjson files "$(git diff --name-only -z {DIFF_RANGE} | jq -Rs 'split("\u0000")')" \
   '.runs[].results |= map(select(.locations[].physicalLocation.artifactLocation.uri as $uri | $files | index($uri) != null))' \
   2>/dev/null || printf '%s' "$S"
 printf '\nexit=%s\n' "$E"

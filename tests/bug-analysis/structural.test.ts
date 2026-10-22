@@ -554,13 +554,15 @@ function collectStaticReportDefects(body: string): string[] {
   return out;
 }
 
+const SNYK_NAME_LIST = '"$(git diff --name-only -z {DIFF_RANGE} | jq -Rs \'split("\\u0000")\')"';
+
 function collectFileNameHandoffDefects(phase2: string): string[] {
   const out: string[] = [];
   const fences = bashFences(phase2).length;
   if (fences < 5) out.push(`${fences} bash fences, expected at least 5`);
   const semgrep = /^set -o pipefail; git diff --name-only -z --diff-filter=d \{DIFF_RANGE\} \| \{bound\} -k 10 280 xargs -0 -r semgrep scan [^;|]* -- 2>\/dev\/null;/m;
   if (!semgrep.test(phase2)) out.push('the Semgrep line does not read names with -z, pass them with xargs -0 and put them after --');
-  if (!phase2.includes('"$(git diff --name-only {DIFF_RANGE} | jq -R . | jq -s .)"')) out.push('the Snyk filter does not read the names from git');
+  if (!phase2.includes(SNYK_NAME_LIST)) out.push('the Snyk filter does not read the names from git as NUL-separated output');
   const reads = bashFenceLines(phase2).filter(line => line.includes('CHANGED_FILES') && line !== 'CHANGED_FILES=$(git diff --name-only {DIFF_RANGE})');
   if (reads.length > 0) out.push(`a scanner line reads CHANGED_FILES: ${reads[0]}`);
   if (!phase2.includes('File names reach a scanner only through')) out.push('Phase 2 does not say how file names reach a scanner');
@@ -668,8 +670,11 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(defects('set -o pipefail; ', '')).toContain(semgrepLine);
     expect(defects('-- 2>/dev/null', ' 2>/dev/null')).toContain(semgrepLine);
     expect(defects('xargs -0 -r semgrep', 'xargs -0 semgrep')).toContain(semgrepLine);
-    expect(defects('"$(git diff --name-only {DIFF_RANGE} | jq -R . | jq -s .)"', '"$(echo "$CHANGED_FILES" | jq -R . | jq -s .)"'))
-      .toEqual(expect.arrayContaining(['the Snyk filter does not read the names from git', expect.stringContaining('a scanner line reads CHANGED_FILES')]));
+    const snykLine = 'the Snyk filter does not read the names from git as NUL-separated output';
+    expect(defects(SNYK_NAME_LIST, '"$(echo "$CHANGED_FILES" | jq -R . | jq -s .)"'))
+      .toEqual(expect.arrayContaining([snykLine, expect.stringContaining('a scanner line reads CHANGED_FILES')]));
+    expect(defects(SNYK_NAME_LIST, '"$(git diff --name-only {DIFF_RANGE} | jq -Rs \'split("\\u0000")\')"')).toContain(snykLine);
+    expect(defects(SNYK_NAME_LIST, '"$(git diff --name-only {DIFF_RANGE} | jq -R . | jq -s .)"')).toContain(snykLine);
     expect(defects('File names reach a scanner only through', 'File names reach a scanner through')).toContain('Phase 2 does not say how file names reach a scanner');
     expect(collectFileNameHandoffDefects('')).toContain('0 bash fences, expected at least 5');
   });
