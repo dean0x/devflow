@@ -565,6 +565,23 @@ function collectFullCodeqlDefects(body: string): string[] {
   return out;
 }
 
+/** CodeQL stops when its temp folder cannot be made, so it never runs with an empty scratch path. */
+function collectCodeqlScratchDefects(phase2: string): string[] {
+  const make = fenceWith(phase2, 'codeql database').find(line => line.startsWith('CODEQL_TMP=$(mktemp -d)'));
+  if (make === undefined) return ['the CodeQL fence does not make its temp folder with mktemp -d'];
+  return make === 'CODEQL_TMP=$(mktemp -d) || exit' ? [] : ['the CodeQL fence does not stop when mktemp -d fails'];
+}
+
+const STATUS_RULE_PARTS = [
+  'a tool that ran completed only on Semgrep 0,',
+  '137: killed after `-k`; else failed. Semgrep via xargs: number only)',
+];
+
+/** The completion rule covers the tools that ran, and the exit meanings end in a catch-all that leaves Semgrep's status a number. */
+function collectStatusRuleDefects(phase2: string): string[] {
+  return STATUS_RULE_PARTS.filter(part => !phase2.includes(part)).map(part => `Phase 2 does not say: ${part}`);
+}
+
 const SNYK_NAME_LIST = '"$(git diff --name-only -z {DIFF_RANGE} | jq -Rs \'split("\\u0000")\')"';
 
 function collectFileNameHandoffDefects(phase2: string): string[] {
@@ -622,6 +639,30 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(defects('| A scanner did not run or did not complete | Name the tool and why in `STATIC_FINDINGS`, not `(none)` |', '| CodeQL database creation fails | Skip CodeQL, note in output, continue with other tools |'))
       .toContain('a sentence skips CodeQL');
     expect(collectFullCodeqlDefects('')).toContain('0 CodeQL gate lines, expected 1');
+  });
+
+  it.each(builds)('CodeQL stops when its temp folder cannot be made (%s)', (_label, body) => {
+    expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
+    expect(collectCodeqlScratchDefects(phase2Of(body ?? ''))).toEqual([]);
+  });
+
+  it.each(builds)('the completion rule covers tools that ran, and the exit meanings end in a catch-all (%s)', (_label, body) => {
+    expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
+    expect(collectStatusRuleDefects(phase2Of(body ?? ''))).toEqual([]);
+  });
+
+  it.each(builds)('known-bad probes: a CodeQL temp folder that can fail unchecked, or a lost status rule part, is reported (%s)', (_label, body) => {
+    expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
+    const text = body ?? '';
+    const scratch = (from: string, to: string): string[] => collectCodeqlScratchDefects(phase2Of(seedOnce(text, from, to)));
+    expect(scratch('CODEQL_TMP=$(mktemp -d) || exit', 'CODEQL_TMP=$(mktemp -d)')).toContain('the CodeQL fence does not stop when mktemp -d fails');
+    expect(scratch('CODEQL_TMP=$(mktemp -d) || exit', 'CODEQL_TMP=$(mktemp -d) || true')).toContain('the CodeQL fence does not stop when mktemp -d fails');
+    expect(scratch('CODEQL_TMP=$(mktemp -d) || exit', 'CODEQL_TMP=$(echo /tmp/codeql)')).toContain('the CodeQL fence does not make its temp folder with mktemp -d');
+    expect(collectCodeqlScratchDefects('')).toContain('the CodeQL fence does not make its temp folder with mktemp -d');
+    const rule = (from: string, to: string): string[] => collectStatusRuleDefects(phase2Of(seedOnce(text, from, to)));
+    expect(rule('a tool that ran completed', 'a tool completed')).toContain(`Phase 2 does not say: ${STATUS_RULE_PARTS[0]}`);
+    expect(rule('; else failed. Semgrep via xargs: number only)', ')')).toContain(`Phase 2 does not say: ${STATUS_RULE_PARTS[1]}`);
+    expect(rule('; else failed.', '.')).toContain(`Phase 2 does not say: ${STATUS_RULE_PARTS[1]}`);
   });
 
   it('known-bad probes: a scanner without the bound, or a bound that reaches the Bash timeout, is reported', () => {
