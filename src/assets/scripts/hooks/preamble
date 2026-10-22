@@ -3,11 +3,16 @@
 # Devflow Preamble: UserPromptSubmit Hook
 # Three behaviors (git repos only — silent outside a git tree):
 #   1. Plan-handoff fast-path: if prompt begins `Implement the following plan:` (Claude Code's
-#      native plan-mode handoff), inject a directive to invoke devflow:implement immediately.
-#      NOTE: the literal prefix is duplicated in orchestrator-charter.md (fallback bullet)
-#      and src/assets/scripts/hooks/preamble — update both together if Claude Code changes the handoff format.
+#      native plan-mode handoff) AND devflow:implement is installed, inject a directive to invoke
+#      devflow:implement immediately. devflow writes the file hooks/assets/implement-installed
+#      while implement is installed and removes it otherwise; the hook only tests that the file
+#      exists. Without it a handoff prompt falls through to the reminder (behavior 3).
+#      NOTE: the literal prefix is duplicated in orchestrator-charter.md (plan-handoff bullet,
+#      which the installed render drops when implement is absent) and in the dispatch below —
+#      update both together if Claude Code changes the handoff format.
 #   2. Slash skip: no reminder for slash commands (/...).
-#   3. Orchestrator reminder (2 lines): all other prompts get a delegation reminder.
+#   3. Orchestrator reminder (2 lines): all other prompts, and a handoff prompt when implement
+#      is not installed, get a generic delegation reminder.
 
 # Safe no-op fallback: must exist before hook-bootstrap is sourced.
 dbg() { :; }
@@ -52,7 +57,12 @@ if ! df_has_git_marker "$CWD" 2>/dev/null; then dbg "EXIT: not a git repo"; exit
 # --- Prompt dispatch (pure bash 3.2; no subprocess in this block) ---
 # The plan-handoff prefix is a Claude Code protocol marker (native "execute plan
 # in new session" handoff), matched literally — plumbing, not semantic detection.
-# Duplicated in orchestrator-charter.md (fallback bullet); update both together.
+# Duplicated in orchestrator-charter.md (plan-handoff bullet); update both together.
+# The handoff branch also needs the implement sentinel file: the directive names
+# devflow:implement, so it fires only while that command is installed. The sentinel
+# check is a builtin file test (no fork) and runs only after the prefix matched.
+# Its path equals HANDOFF_SENTINEL_RELPATH in src/targets/claude-code/charter-render.ts
+# (the hooks directory is SCRIPT_DIR); tests/shell-hooks.test.ts pins the match.
 # Known bound: prefix must appear within the first 256 bytes after whitespace
 # strip (native handoffs have zero leading whitespace).
 HEAD="${PROMPT:0:256}"
@@ -60,7 +70,7 @@ HEAD="${HEAD#"${HEAD%%[![:space:]]*}"}"   # strip leading whitespace/newlines
 
 if [ -z "$HEAD" ]; then
   dbg "EXIT: empty prompt"
-elif [[ "$HEAD" == "Implement the following plan:"* ]]; then
+elif [[ "$HEAD" == "Implement the following plan:"* ]] && [ -f "$SCRIPT_DIR/assets/implement-installed" ]; then
   dbg "PLAN_HANDOFF detected — injecting devflow:implement directive"
   # D-ARGS-ONCE: the directive passes the Skill call NO arguments. The handoff
   # prompt IS the plan, so it is already in the conversation; handing it to the
@@ -75,8 +85,8 @@ elif [[ "$HEAD" == "/"* ]]; then
   dbg "EXIT: slash command — no reminder"
 else
   dbg "ORCHESTRATOR_REMINDER injected"
-  json_prompt_output "Orchestrator reminder: coordinate, don't produce — delegate edits, builds and multi-file reads to the fitting roster agent (Agent tool) or the matching devflow workflow skill. Send debug work to the devflow:debug skill, never to the Debug agent.
-Keep only judgment work mainline: conversation, decisions, routing, synthesis of agent reports."
+  json_prompt_output "Orchestrator reminder: coordinate, don't produce — delegate edits, builds and multi-file reads to the fitting roster agent (Agent tool) or the matching devflow workflow skill.
+Keep only judgment work mainline: conversation, decisions, routing, combining a few agent reports."
 fi
 
 dbg "=== HOOK COMPLETE ==="

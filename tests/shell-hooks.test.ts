@@ -9,6 +9,7 @@ import { HANDOFF_TEMPLATE, REMINDER_TEMPLATE } from './fixtures/ambient-template
 import { useWarmFakeExecutables } from './helpers/warm-fake-executable.js';
 import { buildRoutingConfigJson } from '../src/core/proxy-state.js';
 import { DEVFLOW_PLUGINS } from '../src/core/plugins.js';
+import { HANDOFF_SENTINEL_RELPATH } from '../src/targets/claude-code/charter-render.js';
 import { CURATION_DIR_NAME, LEGACY_NAMES, curationMoveMarkerKey } from '../src/core/project-paths.js';
 import { getCurationMoveMarkerPath } from '../src/core/curation-move-notice.js';
 import { AREA_PAUSE_NOTICE } from '../src/core/area-pause-notice.js';
@@ -1682,6 +1683,95 @@ describe('preamble — orchestrator charter mode', () => {
 
       expect(delta).toBeLessThan(500);
       expect(ratio).toBeLessThan(5);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Suite 5 — Handoff gate on the implement sentinel
+  // -------------------------------------------------------------------------
+  //
+  // The handoff directive tells the model to invoke devflow:implement. devflow
+  // writes hooks/assets/implement-installed while that command is installed and
+  // removes it otherwise. These tests run the preamble from a private copy of
+  // the hooks directory so each case controls the sentinel; HOME points into a
+  // temp dir so no run can reach the real one.
+
+  describe('Suite 5 — Handoff gate on the implement sentinel', () => {
+    const HOOKS_FILES = ['preamble', 'hook-bootstrap', 'debug-trace', 'log-paths', 'json-parse', 'json-helper.cjs', 'git-marker'];
+    const SENTINEL_NAME = 'implement-installed';
+    const HANDOFF_PROMPT = 'Implement the following plan:\n\n# Add caching\n\n1. Add Redis\n2. Write tests';
+
+    let hooksCopy: string;
+    let fakeHome: string;
+
+    beforeEach(() => {
+      hooksCopy = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-preamble-hooks-'));
+      fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-preamble-home-'));
+      for (const name of HOOKS_FILES) {
+        fs.copyFileSync(path.join(HOOKS_DIR, name), path.join(hooksCopy, name));
+      }
+      fs.mkdirSync(path.join(hooksCopy, 'assets'));
+    });
+
+    afterEach(() => {
+      fs.rmSync(hooksCopy, { recursive: true, force: true });
+      fs.rmSync(fakeHome, { recursive: true, force: true });
+    });
+
+    function writeSentinel(): void {
+      fs.writeFileSync(path.join(hooksCopy, 'assets', SENTINEL_NAME), 'sentinel\n');
+    }
+
+    function emitted(prompt: string): string {
+      const out = execSync(`bash "${path.join(hooksCopy, 'preamble')}"`, {
+        input: JSON.stringify({ cwd: tmpDir, prompt }),
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: { ...process.env, HOME: fakeHome },
+      }).toString();
+      if (out.length === 0) return '';
+      return (JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } }).hookSpecificOutput.additionalContext;
+    }
+
+    it('G1: handoff prompt without the sentinel gets the generic reminder', () => {
+      expect(emitted(HANDOFF_PROMPT)).toBe(REMINDER_TEMPLATE);
+    });
+
+    it('G2: same-session handoff flavor without the sentinel gets the generic reminder', () => {
+      expect(emitted('Implement the following plan: add caching')).toBe(REMINDER_TEMPLATE);
+    });
+
+    it('G3: handoff prompt with the sentinel gets the handoff directive', () => {
+      writeSentinel();
+      expect(emitted(HANDOFF_PROMPT)).toBe(HANDOFF_TEMPLATE);
+    });
+
+    it('G4: a directory at the sentinel path does not count as the sentinel', () => {
+      fs.mkdirSync(path.join(hooksCopy, 'assets', SENTINEL_NAME));
+      expect(emitted(HANDOFF_PROMPT)).toBe(REMINDER_TEMPLATE);
+    });
+
+    it('G5: the sentinel never changes a non-handoff prompt or the slash skip', () => {
+      writeSentinel();
+      expect(emitted('fix the auth bug')).toBe(REMINDER_TEMPLATE);
+      expect(emitted('/implement foo')).toBe('');
+      expect(emitted('')).toBe('');
+    });
+
+    it('G6: removing the sentinel returns a handoff prompt to the reminder', () => {
+      writeSentinel();
+      expect(emitted(HANDOFF_PROMPT)).toBe(HANDOFF_TEMPLATE);
+      fs.rmSync(path.join(hooksCopy, 'assets', SENTINEL_NAME));
+      expect(emitted(HANDOFF_PROMPT)).toBe(REMINDER_TEMPLATE);
+    });
+
+    it('G7: the sentinel path in the preamble is the one the installer writes', () => {
+      const src = fs.readFileSync(PREAMBLE_SRC, 'utf-8');
+      const match = /\[ -f "\$SCRIPT_DIR\/([^"]+)" \]/.exec(src);
+      expect(match).not.toBeNull();
+      // SCRIPT_DIR is the hooks directory; HANDOFF_SENTINEL_RELPATH is relative to scripts/.
+      expect(`hooks/${match![1]}`).toBe(HANDOFF_SENTINEL_RELPATH);
+      expect(path.basename(match![1])).toBe(SENTINEL_NAME);
+      expect(fs.statSync(path.join(HOOKS_DIR, '..', HANDOFF_SENTINEL_RELPATH)).isFile()).toBe(true);
     });
   });
 });
