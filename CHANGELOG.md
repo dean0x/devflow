@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - CRITICAL, HIGH and severe MEDIUM findings in the branch's own code stay FIX_NOW.
   - A prose-only MEDIUM finding is fixed with text edits alone. If Code must change logic to fix it, Code leaves it unedited and the item goes to Fix Separately.
   - Lower MEDIUM and LOW findings go to Fix Separately. One backlog issue records them.
-  - A pre-existing finding that is not a security finding goes to Fix Separately, also when the branch touched its file. Until now, `/resolve` fixed such a finding in a touched file.
+  - A pre-existing finding that is not a security finding goes to Fix Separately, also when the branch touched its file.
   - A security finding stays FIX_NOW or ESCALATED at every severity, LOW and pre-existing included.
 - Run `devflow gates --set full` to keep today's `/resolve`: Triage applies no tiers, every FIX_NOW item is fixed, and a pre-existing finding in a touched file is fixed.
 
@@ -79,7 +79,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Known limit: no CI test checks where the level line lands in a spawn prompt at run time.
 - **devflow ignores curation and memory files that git tracks, and says so at session start** ([#626](https://github.com/dean0x/devflow/issues/626)). When git tracks a file in a curation or memory data folder, or does not answer, devflow reads and writes no file in that folder. One fixed notice at session start says what to run to untrack the files. `devflow curation`, `devflow memory`, the HUD and `devflow uninstall` leave such a folder alone.
   - On a paused project, `devflow curation --list`, `--show`, `--clear`, `--reset`, `--restore` and `--configure` (project scope) print the pause notice and exit 1. `devflow curation --status` and `devflow memory --status` print the notice and exit 0.
-  - The settings line that `resolve-settings.cjs` prints when it fails now reads `MEMORY=off CURATION=off`. It read `MEMORY=on CURATION=on` before.
+  - The settings line that `resolve-settings.cjs` prints when it fails now reads `MEMORY=off CURATION=off`.
   - A direct Skim delegation that passes no `CURATION` value now reports `(none)` under "Active Decisions". An absent value now reads as `off`.
   - A checkout where a `.git` entry exists but git does not answer now pauses both features.
 
@@ -107,8 +107,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     A failed edit never falls back to a new post.
 - **CI PASSING needs a passing GitHub Actions check on a mergeable PR** ([#618](https://github.com/dean0x/devflow/issues/618)).
   - The CI wait and the merge-readiness report now read CI as passing only when at least one GitHub Actions check passed on the PR head, no check is pending or failing, and GitHub reports the PR mergeable.
-    Before, a PR with only external checks, for example a scanner, could read CI as passing while its build and tests never ran.
-    A PR with a merge conflict could do the same, because GitHub starts no pull request workflow on it.
   - These cases now read "status unknown" instead of a pass or "no CI":
     a PR with only external checks (`reason=no-workflow-check`), a PR with a merge conflict (`reason=merge-conflict`), and a repository with active workflows but no run on the head (`reason=no-workflow-check`).
     A PR with a merge conflict reads `reason=merge-conflict` even when a check fails or is pending.
