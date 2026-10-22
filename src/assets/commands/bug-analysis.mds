@@ -88,7 +88,7 @@ If `pr_number` is absent, set `PR_DESCRIPTION` to `(none)`.
 CHANGED_FILES=$(git diff --name-only {DIFF_RANGE})
 ```
 
-Store as `CHANGED_FILES`; Steps 2d and Phase 4 read it. A non-zero diff exit stops.
+Store as `CHANGED_FILES`; Phase 4 reads it. A non-zero diff exit stops.
 
 If output is empty → "No changes to analyze." Stop.
 
@@ -99,62 +99,51 @@ If output is empty → "No changes to analyze." Stop.
 Skip if `--no-static` flag provided.
 
 ```bash
-SEMGREP_AVAILABLE=$(which semgrep 2>/dev/null && echo "yes" || echo "no")
-SNYK_AVAILABLE=$(which snyk 2>/dev/null && echo "yes" || echo "no")
-CODEQL_AVAILABLE=$(which codeql 2>/dev/null && echo "yes" || echo "no")
+for t in semgrep snyk codeql; do printf '%s=%s\n' "$t" "$(command -v "$t" || echo no)"; done
+command -v timeout || command -v gtimeout
 ```
 
-If all are `no`: warn user "No static analysis tools found. Proceeding with semantic analysis only. To enable static analysis, install semgrep (`pip install semgrep`) or snyk (`npm install -g snyk`)." Set `STATIC_FINDINGS` to `(none)`.
+If all three print `no`: warn user "No static analysis tools found. Proceeding with semantic analysis only. To enable static analysis, install semgrep (`pip install semgrep`) or snyk (`npm install -g snyk`)." Set `STATIC_FINDINGS` to `(none)`.
 
-If some are available: note which tools will run.
+If some are available: note which tools will run. `{bound}` is `timeout` or `gtimeout`, whichever path the last line printed. If it printed none, run no scanner, never one unbounded: warn the user and set `STATIC_FINDINGS` to "Static analysis did not run: neither timeout nor gtimeout is installed (install coreutils)."
 
 #### Step 2d: Tiered Static Analysis
 
 **Produces:** STATIC_FINDINGS
 **Requires:** STATIC_TOOL_STATUS, DIFF_RANGE, ANALYSIS_DIR
 
-Skip if `--no-static` flag provided or all tools unavailable.
+Skip if `--no-static` flag provided, all tools unavailable or no `{bound}`.
 
-Run available tools on the changed files (from `CHANGED_FILES` computed in Step 2b).
-
-**Semgrep and Snyk run in parallel** — launch both in the background, then wait for both before proceeding to CodeQL. CodeQL is conditional and sequential.
+Run each available tool in this order, each in its own foreground Bash call with the Bash `timeout` at 300000 (CodeQL: 600000). File names reach a scanner only through `-z`, `xargs -0` and after `--`.
 
 **Semgrep** (if available):
 ```bash
-# tr '\n' '\0' + xargs -0 is portable across GNU and BSD xargs (macOS ships BSD xargs, which lacks -d)
-echo "$CHANGED_FILES" | tr '\n' '\0' | xargs -0 timeout 300 semgrep scan --config auto --sarif --quiet 2>/dev/null
+set -o pipefail; git diff --name-only -z --diff-filter=d {DIFF_RANGE} | {bound} -k 10 280 xargs -0 -r semgrep scan --config auto --sarif --quiet -- 2>/dev/null; printf '\nexit=%s\n' "$?"
 ```
-Parse SARIF output → extract findings.
 
 **Snyk Code** (if available):
 ```bash
-# One project-level scan (a per-file xargs run would invoke snyk O(n) times; --file is for dependency scans).
-SNYK_SARIF=$(timeout 300 snyk code test --sarif 2>/dev/null)
-# Programmatic filter: keep only results whose file path is in CHANGED_FILES — defense-in-depth, before the LLM agent sees any output.
-SNYK_FILTERED=$(echo "$SNYK_SARIF" | jq --argjson files "$(echo "$CHANGED_FILES" | jq -R . | jq -s .)" \
+S=$({bound} -k 10 280 snyk code test --sarif 2>/dev/null); E=$?
+printf '%s' "$S" | jq --argjson files "$(git diff --name-only {DIFF_RANGE} | jq -R . | jq -s .)" \
   '.runs[].results |= map(select(.locations[].physicalLocation.artifactLocation.uri as $uri | $files | index($uri) != null))' \
-  2>/dev/null || echo "$SNYK_SARIF")
+  2>/dev/null || printf '%s' "$S"
+printf '\nexit=%s\n' "$E"
 ```
-Parse `SNYK_FILTERED` SARIF → extract findings. If `jq` is unavailable, fall back to the raw `SNYK_SARIF` and note the limitation.
+Without `jq` the SARIF is unfiltered: note that.
 
-**CodeQL** (if available AND (`--full` OR Semgrep/Snyk found HIGH/CRITICAL findings)):
+**CodeQL** (if available AND (`--full` OR Semgrep/Snyk found HIGH/CRITICAL findings); if Semgrep or Snyk did not complete, report "CodeQL: skipped" and why):
 ```bash
-# Use a unique temp directory per run to prevent symlink attacks and concurrent-process clobbering
 CODEQL_TMP=$(mktemp -d)
-# Register cleanup trap immediately after mktemp — ensures rm -rf runs on EXIT, SIGTERM, and SIGINT
-# even if the session is interrupted before reaching the explicit rm -rf below
 trap 'rm -rf "${CODEQL_TMP}"' EXIT INT TERM
-timeout 600 codeql database create "${CODEQL_TMP}/db" --language={detected-language} --source-root=. 2>/dev/null && \
-timeout 600 codeql database analyze "${CODEQL_TMP}/db" --format=sarif-latest --output="${CODEQL_TMP}/results.sarif" 2>/dev/null
-# Capture exit status before cleanup so cleanup doesn't mask failures
+{bound} -k 10 280 codeql database create "${CODEQL_TMP}/db" --language={detected-language} --source-root=. 2>/dev/null && \
+{bound} -k 10 280 codeql database analyze "${CODEQL_TMP}/db" --format=sarif-latest --output="${CODEQL_TMP}/results.sarif" 2>/dev/null
 CODEQL_EXIT=$?
-# Parse SARIF output BEFORE cleanup — rm -rf destroys results.sarif
-CODEQL_SARIF=$(cat "${CODEQL_TMP}/results.sarif" 2>/dev/null || echo "")
-# Explicit cleanup (trap also covers this path; explicit rm is belt-and-suspenders)
+cat "${CODEQL_TMP}/results.sarif"
+printf '\nexit=%s\n' "$CODEQL_EXIT"
 rm -rf "${CODEQL_TMP}"
 trap - EXIT INT TERM
 ```
-Parse `CODEQL_SARIF` → extract findings. If database creation fails, `CODEQL_EXIT` is non-zero — skip CodeQL findings and note it. The `trap` guarantees cleanup on SIGTERM/SIGINT/EXIT so orphaned temp directories do not accumulate across interrupted sessions.
+Parse each SARIF → extract findings. A tool's status is its last line, `exit={n}`; a tool completed only on Semgrep 0, Snyk 0 or 1 (1 = issues, only with SARIF output), CodeQL 0. Any other status, or no such line, means it did not complete (124: bound fired; 125: bound failed; 126-127: scanner did not start; 137: killed after `-k`); keep the findings its SARIF holds. If a tool's output was clipped, its findings are incomplete: name the tool in `STATIC_FINDINGS`, never `(none)`.
 
 **Normalize** all findings to unified table, cap at top 50 by severity. Truncate each Description entry to 200 characters maximum:
 
@@ -164,7 +153,7 @@ Parse `CODEQL_SARIF` → extract findings. If database creation fails, `CODEQL_E
 
 Write ALL raw findings to `{ANALYSIS_DIR}/static-findings.md`. Set `STATIC_FINDINGS` to the top-50 table.
 
-If no tool produced findings: set `STATIC_FINDINGS` to `(none)`.
+`STATIC_FINDINGS` is `(none)` only when every tool that was to run completed and none found anything. For each tool that did not complete, add under any table the line "Static analysis did not complete: {tool}: " plus "exit {n} ({meaning})." or "no exit status."
 
 ### Phase 3: Context Loading
 
@@ -274,6 +263,7 @@ Output: {ANALYSIS_DIR}/bug-analysis-summary.md"
 **Branch**: {branch} -> {base_branch}
 {any base `TRACEABILITY: DEGRADED` line from Phase 1, as returned}
 **Analysis**: {ANALYSIS_DIR}
+**Static analysis**: {per tool: ran, not installed, skipped, did not run/complete, and why}
 
 ### Risk Assessment: {risk_level}
 
@@ -343,6 +333,7 @@ Run `/resolve` to process and fix these findings.
 | `--no-static` flag | Skip Phase 2c and 2d entirely; `STATIC_FINDINGS=(none)` |
 | `--full` flag | Bypass incremental detection (Step 2a), run full diff from base |
 | CodeQL database creation fails | Skip CodeQL, note in output, continue with other tools |
+| A scanner did not run or did not complete | Name the tool and why in `STATIC_FINDINGS`, not `(none)` |
 
 ## Resolve Compatibility
 
@@ -362,7 +353,7 @@ Run `/resolve` after `/bug-analysis` to fix identified bugs. `/resolve` automati
 Before reporting results, verify every phase was executed:
 
 - [ ] Phase 1: Pre-flight → BRANCH_INFO captured, PR_DESCRIPTION fetched (or `(none)`)
-- [ ] Phase 2: Static Analysis → STATIC_FINDINGS captured (or `(none)` if skipped/no tools/no findings); ANALYSIS_DIR created; CHANGED_FILES populated
+- [ ] Phase 2: Static Analysis → STATIC_FINDINGS captured (`(none)` only if skipped, no tools or every tool completed clean); ANALYSIS_DIR created; CHANGED_FILES populated
 <!-- curation:on -->
 - [ ] Phase 3: Context Loading → DECISIONS_CONTEXT captured, FEATURE_KNOWLEDGE loaded (or `(none)`), PLAN_CONTEXT and ACCEPTANCE_RULES captured (or `(none)`)
 <!-- curation:off -->
