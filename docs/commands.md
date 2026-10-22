@@ -180,7 +180,7 @@ Release notes over 60,000 characters drop the commit list first, then cut the ch
 Proactive bug finding with static and semantic analysis. Runs specialized analyzers in parallel to find bugs before code review:
 
 1. **Pre-flight** — The Git agent commits, pushes and opens the PR if none exists (retitled to the learned naming conventions under a `required` evidence policy); no ticket is required
-2. **Static Analysis** — Detect incremental analysis via `.last-analysis-head`, then run the available tools: Semgrep, then Snyk, each under a time bound; without `timeout`/`gtimeout` no scanner runs and the report says so. CodeQL when `--full` is set or they found HIGH/CRITICAL issues
+2. **Static Analysis** — Detect incremental analysis via `.last-analysis-head`, then run the available tools one after the other: Semgrep, then Snyk, each under a time bound; without `timeout`/`gtimeout` no scanner runs and the report says so. CodeQL runs when `--full` is set or when Semgrep or Snyk found HIGH/CRITICAL issues, and CodeQL also runs under a time bound
 3. **Semantic Analysis** — Parallel Debug agents examine the diff: security and functional always, integration when two or more directories changed, usability when UI files changed
 4. **Synthesize** — Combine static and semantic findings into actionable report
 5. **Report** — Write findings to `.devflow/docs/bug-analysis/`

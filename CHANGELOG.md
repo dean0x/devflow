@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Without GNU `timeout` or `gtimeout` (stock macOS), it runs no scanner and says so. Install coreutils to enable it.
   - A scanner that fails, times out or exits with an error is named in the report with its exit status.
   - Each scanner's time bound ends before its Bash call does, and file names reach the scanners safely.
+  - Semgrep and Snyk now run one after the other.
 
 ---
 
