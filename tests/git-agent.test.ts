@@ -1653,6 +1653,9 @@ describe('git agent — static content guards', () => {
    */
   const D10_FAIL_CLOSED_LITERAL = 'treat as PUBLIC';
 
+  /** The rule's marker spelling, named once: the first row below and the probes that seed it away read this string. */
+  const PRIVATE_MARKER_LITERAL = 'the word `Private` (any case)';
+
   /**
    * The private-section rule's load-bearing clauses, each of which a summary op must be
    * able to reach: the rule is one LLM-applied control, so each op's reference must carry
@@ -1660,7 +1663,7 @@ describe('git agent — static content guards', () => {
    */
   const PRIVATE_SECTION_ROWS: readonly { readonly literal: string; readonly why: string }[] = [
     {
-      literal: 'the word `Private` (any case)',
+      literal: PRIVATE_MARKER_LITERAL,
       why: 'the marker spelling; a private section would reach the posted comment',
     },
     {
@@ -1802,7 +1805,6 @@ describe('git agent — static content guards', () => {
 
   const PRIVATE_RULE_LABEL = '**Private sections:**';
   const PRIVATE_RULE_CALL = '{{private_sections_rule()}}';
-  const PRIVATE_MARKER_LITERAL = 'the word `Private` (any case)';
   const PRIVATE_SOURCE_REL = 'src/assets/mds/git/_ops_pr.mds';
 
   /** The rule line of one op's own section ('sole': the file the agent tells a spawn to read). */
@@ -1891,11 +1893,6 @@ describe('git agent — static content guards', () => {
       if (m[1] !== 'private_sections_rule' && m[2].includes(PRIVATE_RULE_CALL)) callers.push(m[1]);
     }
     return callers.sort();
-  }
-
-  /** Read a partial of the Git agent's MDS source; a missing file fails, never skips. */
-  function readGitMdsSource(file: string): string {
-    return readFileSync(path.join(ROOT, 'src', 'assets', 'mds', 'git', file), 'utf-8');
   }
 
   it('private sections: every private-section row is absent without the PR-host tree (union arms are non-vacuous)', () => {
@@ -2003,10 +2000,7 @@ describe('git agent — static content guards', () => {
   });
 
   it('private sections: both ops carry one byte-identical, non-empty rule line', () => {
-    const lines = D10_SUMMARY_OPS.map(op => privateRuleLine(operationReferencesCorpus(), op));
-    expect(lines.every(line => line.length > 0), 'a summary op lacks the rule line').toBe(true);
     expect(collectPrivateRuleDrift(operationReferencesCorpus())).toEqual([]);
-    expect(lines[0]).toBe(lines[1]);
   });
 
   it('private sections known-bad probe: a rule line edited in one op is reported by the drift collector', () => {
@@ -2058,18 +2052,18 @@ describe('git agent — static content guards', () => {
   });
 
   it('private sections: one define at the source, called from exactly the two summary contracts', () => {
-    const ops = readGitMdsSource('_ops_pr.mds');
+    const ops = loadFile(PRIVATE_SOURCE_REL);
     expect(ops, `${PRIVATE_SOURCE_REL} has no private_sections_rule define`).toContain('@define private_sections_rule():');
     expect(collectPrivateRuleCallers(ops)).toEqual(['post_resolution_summary_contract', 'post_review_summary_contract']);
     for (const file of ['_pr.mds', '_references.mds']) {
-      const text = readGitMdsSource(file);
+      const text = loadFile(`src/assets/mds/git/${file}`);
       expect(text, `${file} restates the rule label`).not.toContain(PRIVATE_RULE_LABEL);
       expect(text, `${file} restates the marker spelling`).not.toContain(PRIVATE_MARKER_LITERAL);
     }
   });
 
   it('private sections known-bad probe: a third caller of the rule is reported by the callers collector', () => {
-    const seeded = readGitMdsSource('_ops_pr.mds').replace(
+    const seeded = loadFile(PRIVATE_SOURCE_REL).replace(
       'Check CI/PR check status for a branch\'s pull request.',
       `Check CI/PR check status for a branch's pull request.\n\n${PRIVATE_RULE_CALL}`,
     );
