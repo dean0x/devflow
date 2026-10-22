@@ -64,7 +64,7 @@ export const GATE_LEVEL_SELECT_MESSAGE = 'Gate level for this machine';
  */
 export const GATE_LEVEL_HINTS: Readonly<Record<GateLevel, string>> = Object.freeze({
   full: 'the most checking: every review focus, and Polish',
-  standard: 'fewer review focuses, no Polish (the default)',
+  standard: 'fewer review focuses, no Polish; the default',
   lean: 'the least checking: no Polish, Validate runs the lint pack',
 });
 
@@ -75,7 +75,7 @@ export function gateLevelChoices(): Array<{ value: GateLevel; label: string; hin
 
 /**
  * Format a padded level catalogue suitable for a clack note body.
- * Produces: `  standard  fewer review focuses, no Polish (the default)`
+ * Produces: `  standard  fewer review focuses, no Polish; the default`
  */
 export function formatGateLevelCatalogue(): string {
   const width = Math.max(...GATE_LEVELS.map(level => level.length));
@@ -94,7 +94,7 @@ export function formatGateLevelCatalogue(): string {
  *   unreadable  nowhere: the manifest cannot be read at all, or stores a level that cannot be
  *               written back as JSON, so what it stored is unknown
  */
-export const STORED_GATE_LEVEL_ORIGINS = ['manifest', 'rejected', 'unreadable'] as const;
+export const STORED_GATE_LEVEL_ORIGINS = Object.freeze(['manifest', 'rejected', 'unreadable'] as const);
 export type StoredGateLevelOrigin = (typeof STORED_GATE_LEVEL_ORIGINS)[number];
 
 /** The raw stored level and where it was found. `value` is `undefined` when none is recorded. */

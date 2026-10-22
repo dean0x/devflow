@@ -480,6 +480,10 @@ describe('gateLevelChoices and formatGateLevelCatalogue', () => {
     expect(marked.map(c => c.value)).toEqual([DEFAULT_GATE_LEVEL]);
   });
 
+  it('holds no parenthesis in a hint, because clack shows a select row as `label (hint)`', () => {
+    for (const { value, hint } of gateLevelChoices()) expect(hint, value).not.toMatch(/[()]/);
+  });
+
   it('prints one catalogue line per level', () => {
     const lines = formatGateLevelCatalogue().split('\n');
     expect(lines[0]).toBe('Levels:');
@@ -560,6 +564,7 @@ describe('the gate-level prompt fits an 80-column terminal', () => {
     // Non-vacuity: every origin the source lists was shown, with every stored value, and the
     // text checked is the whole note, catalogue included.
     expect(STORED_GATE_LEVEL_ORIGINS).toHaveLength(3);
+    expect(Object.isFrozen(STORED_GATE_LEVEL_ORIGINS)).toBe(true);
     expect(new Set(notes.map(note => note.origin))).toEqual(new Set(STORED_GATE_LEVEL_ORIGINS));
     expect(notes).toHaveLength(STORED_GATE_LEVEL_ORIGINS.length * NOTE_STORED_VALUES.length);
     expect(Object.keys(GATE_LEVEL_HINTS)).toEqual([...GATE_LEVELS]);
@@ -1106,7 +1111,7 @@ describe('the init prompt and devflow gates describe the same levels', () => {
     it('GATE_LEVEL_HINTS', () => {
       expect({ ...GATE_LEVEL_HINTS }, `GATE_LEVEL_HINTS changed. ${UPDATE_BOTH}`).toEqual({
         full: 'the most checking: every review focus, and Polish',
-        standard: 'fewer review focuses, no Polish (the default)',
+        standard: 'fewer review focuses, no Polish; the default',
         lean: 'the least checking: no Polish, Validate runs the lint pack',
       });
     });
