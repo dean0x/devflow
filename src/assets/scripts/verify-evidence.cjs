@@ -158,7 +158,6 @@ const LINE_MAX_BUFFER = 4096;
 const COMMENT_READ_MAX_BUFFER = 8 * 65536;
 /** `gh pr checks` and the thread-count GraphQL answer: a thousand rows of names fit. */
 const READINESS_MAX_BUFFER = 4 * 1024 * 1024;
-const READINESS_MAX_CHECKS = 1000;
 /** 5,000 paths of 4,096 bytes overflow this; an overflow reads as an unresolved diff. */
 const DIFF_MAX_BUFFER = 16 * 1024 * 1024;
 const FETCH_MAX_BUFFER = 1024 * 1024;
@@ -2331,7 +2330,7 @@ function parseJsonOrNull(text) {
  * @param {number} pr
  * @returns {Read<{ decision: string | null, mergeable: string | null, head: string | null }>}
  */
-function readDecision(io, pr) {
+function readPrView(io, pr) {
   const r = gh(io, ['pr', 'view', String(pr), '--json', 'reviewDecision,mergeable,headRefOid'], LINE_MAX_BUFFER);
   if (!r.ok) return { ok: false, reason: readFailure(r) };
   const fields = obj(parseJsonOrNull(r.stdout.toString('utf8')));
@@ -2414,17 +2413,18 @@ function readEmptyCi(io, mergeable) {
 /**
  * D-READINESS-CLASSIFIER: the CI status, read once. The checks come from `gh pr checks`
  * over name,state,bucket,workflow, with check-ci-status's exit rule (exit 0 or 8 is a
- * result; any other failure is INDETERMINATE). The status comes from ci-wait's classifier
- * (D-CI-WORKFLOW-RULE) and merge gate (D-CI-MERGE-STATE, D-CI-WORKFLOWS), where the rules
- * are written, so the two scripts cannot disagree. A conflicting PR reads INDETERMINATE
- * before any checks call, and "no checks reported" or `[]` goes to readEmptyCi. An unknown
- * merge state, a failed workflow-list call and an unreadable reply are INDETERMINATE, never
- * DEGRADED. Failing names are sanitized and bounded by ci-wait's own formatter. PASSING
- * does not prove that the test workflow ran by name.
+ * result; any other failure is INDETERMINATE). The rows come from ci-wait's parser, and the
+ * status from ci-wait's classifier (D-CI-WORKFLOW-RULE) and merge gate (D-CI-MERGE-STATE,
+ * D-CI-WORKFLOWS), where the rules are written, so the two scripts cannot disagree. A
+ * conflicting PR reads INDETERMINATE before any checks call, and "no checks reported" or
+ * `[]` goes to readEmptyCi. An unknown merge state, a failed workflow-list call and an
+ * unreadable reply are INDETERMINATE, never DEGRADED. Failing names are sanitized and
+ * bounded by ci-wait's own formatter. PASSING does not prove that the test workflow ran by
+ * name.
  *
  * @param {Io} io
  * @param {number} pr
- * @param {string | null} mergeable  GitHub's merge state of the PR, from readDecision
+ * @param {string | null} mergeable  GitHub's merge state of the PR, from readPrView
  * @returns {{ status: string, failing: string }}
  */
 function readCi(io, pr, mergeable) {
@@ -2435,15 +2435,9 @@ function readCi(io, pr, mergeable) {
     if (/Could not resolve to a PullRequest/.test(r.stderr)) return { status: 'NO_PR', failing: '-' };
     return /no checks reported/i.test(r.stderr) ? readEmptyCi(io, mergeable) : CI_INDETERMINATE;
   }
-  const rows = parseJsonOrNull(r.stdout.toString('utf8'));
-  if (!Array.isArray(rows) || rows.length > READINESS_MAX_CHECKS) return CI_INDETERMINATE;
-  if (rows.length === 0) return readEmptyCi(io, mergeable);
-  const checks = [];
-  for (const row of rows) {
-    const x = obj(row);
-    if (typeof x.name !== 'string' || typeof x.bucket !== 'string') return CI_INDETERMINATE;
-    checks.push({ name: x.name, bucket: x.bucket, workflow: typeof x.workflow === 'string' ? x.workflow : '' });
-  }
+  const checks = CW.parseChecks(r.stdout.toString('utf8'));
+  if (checks === null) return CI_INDETERMINATE;
+  if (checks.length === 0) return readEmptyCi(io, mergeable);
   const c = CW.classifyChecks(checks);
   if (CW.mergeGate(c.status, mergeable, null) !== 'keep') return CI_INDETERMINATE;
   return { status: c.status, failing: CW.formatNames(c.failing) };
@@ -2500,6 +2494,15 @@ function approvalText(require, evidence) {
 }
 
 /**
+ * @param {string | null} decision  the review decision from readPrView
+ * @returns {string}  the word the Details line prints for it
+ */
+function decisionLabel(decision) {
+  if (decision === null) return 'none';
+  return decision === 'UNRECOGNISED' ? 'unrecognised' : decision;
+}
+
+/**
  * A readiness answer that could not be reached: a DEGRADED block (exit 2) whose Details
  * say `unavailable` for what was never read.
  *
@@ -2532,17 +2535,17 @@ function readinessDegraded(pr, reason, known) {
  */
 function runReadiness(io, args, deps) {
   const unreadApproval = approvalText(args.requireNonAuthor, null);
-  const decision = readDecision(io, args.pr);
-  if (!decision.ok) return readinessDegraded(args.pr, decision.reason, { approval: unreadApproval });
-  const reviewDecision = decision.value.decision;
-  const decisionText = reviewDecision === null ? 'none' : reviewDecision === 'UNRECOGNISED' ? 'unrecognised' : reviewDecision;
+  const view = readPrView(io, args.pr);
+  if (!view.ok) return readinessDegraded(args.pr, view.reason, { approval: unreadApproval });
+  const reviewDecision = view.value.decision;
+  const decisionText = decisionLabel(reviewDecision);
   const threads = readThreads(io, args.pr);
   if (!threads.ok) {
     return readinessDegraded(args.pr, threads.reason, { decision: decisionText, approval: unreadApproval });
   }
-  const ciRead = readCi(io, args.pr, decision.value.mergeable);
+  const ciRead = readCi(io, args.pr, view.value.mergeable);
   const fields = readEvidence(io, args.pr, deps);
-  const ci = bindCiHead(ciRead, decision.value.head, fields === null ? null : fields.head);
+  const ci = bindCiHead(ciRead, view.value.head, fields === null ? null : fields.head);
   /** @type {EvidenceFacts | null} */
   const evidence = fields === null ? null : {
     total: fields.total,

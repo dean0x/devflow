@@ -389,6 +389,48 @@ describe('an empty list asks the workflow list; CI counts for the head the evide
   })
 })
 
+describe('readiness reads the check rows through ci-wait\'s one parser', () => {
+  /** Rows the typed scenario would not allow: the fake serves them as given. */
+  const rowsOf = (rows: readonly unknown[]) => rows as unknown as NonNullable<ShimScenario['checks']>
+  /** Short rows: the fake writes its reply and exits, which cuts a pipe at 64 KB, and 1001 rows must reach the script whole. */
+  const manyPassing = (n: number) => rowsOf(Array.from({ length: n }, (_, i) => ({ name: `j${i}`, bucket: 'pass', workflow: 'C' })))
+
+  it('22. one unreadable row, or more than 1000 rows, reads unknown and makes no workflow probe', SPAWN_BUDGET, () => {
+    const cases: ReadonlyArray<readonly [string, ShimScenario['checks']]> = [
+      ['a row without a name', rowsOf([...PASSING, { bucket: 'pass', workflow: 'CI' }])],
+      ['a row without a bucket', rowsOf([...PASSING, { name: 'e2e', workflow: 'CI' }])],
+      ['a row that is not an object', rowsOf([...PASSING, 'row'])],
+      ['1001 rows', manyPassing(1001)],
+    ]
+    for (const [label, checks] of cases) {
+      const r = run(green({ checks }))
+      expect(r.code, `${label}: ${r.stderr}`).toBe(0)
+      expect(block(r), label).toMatchObject({ ...UNKNOWN_CI, decision: 'APPROVED' })
+      expect(callsTo(r, WORKFLOWS_ARGV), `${label}: no workflow probe`).toEqual([])
+    }
+  })
+
+  it('23. exactly 1000 passing rows still read PASSING and READY', SPAWN_BUDGET, () => {
+    const r = run(green({ checks: manyPassing(1000) }))
+    expect(r.code, r.stderr).toBe(0)
+    expect(block(r).ci).toBe('PASSING')
+    expect(status(r)).toBe('READY')
+  })
+
+  it('24. a passing row whose workflow is not a string is no workflow job, so it never reads PASSING', SPAWN_BUDGET, () => {
+    const r = run(green({ checks: rowsOf([{ name: 'external', state: 'SUCCESS', bucket: 'pass', workflow: 7 }]) }))
+    expect(r.code, r.stderr).toBe(0)
+    expect(block(r).ci).not.toBe('PASSING')
+    expect(status(r)).not.toBe('READY')
+  })
+
+  it('25. the script holds no row parser of its own: it calls ci-wait\'s parseChecks once', () => {
+    const source = readFileSync(VERIFY_EVIDENCE_SCRIPT, 'utf-8')
+    expect(source.split('CW.parseChecks(')).toHaveLength(2)
+    expect(source, 'the row bound lives in ci-wait only').not.toContain('READINESS_MAX_CHECKS')
+  })
+})
+
 describe('bindCiHead: CI counts only for the head the evidence was read at', () => {
   const A = 'a'.repeat(40)
   const B = 'b'.repeat(40)

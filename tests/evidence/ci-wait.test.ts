@@ -112,6 +112,7 @@ interface CiWait {
   isConflicting(mergeable: unknown): boolean
   mergeGate(status: string | null, mergeable: unknown, workflowsActive?: boolean | null): MergeGateResult
   matchedStep(verdict: Classification | null, mergeable: unknown, windowDone: boolean, workflowsActive?: boolean | null): MatchedStep
+  parseChecks(stdout: string): Required<Check>[] | null
   parseActiveWorkflows(stdout: string): boolean | null
   askWorkflows(gh: (args: string[]) => Promise<GhAnswer | null>): Promise<WorkflowsAsk>
   renderLine(result: CiResult): string
@@ -1049,6 +1050,51 @@ describe('parseActiveWorkflows: the workflow list as a pure function', () => {
 
   it('is null for a value that is not text', () => {
     for (const odd of [undefined, null, 7, {}] as unknown as string[]) expect(CW.parseActiveWorkflows(odd)).toBeNull()
+  })
+})
+
+describe('parseChecks: the checks reply as a pure function', () => {
+  const rows = (n: number) => Array.from({ length: n }, (_, i) => ({ name: `job-${i}`, bucket: 'pass', workflow: 'CI' }))
+
+  it('keeps name, bucket and workflow of each row, in order, and drops every other key', () => {
+    const reply = JSON.stringify([
+      { name: 'unit', state: 'SUCCESS', bucket: 'pass', workflow: 'CI' },
+      { name: 'lint', bucket: 'fail', workflow: 'Lint', link: 'https://example.test/1' },
+    ])
+    expect(CW.parseChecks(reply)).toEqual([
+      { name: 'unit', bucket: 'pass', workflow: 'CI' },
+      { name: 'lint', bucket: 'fail', workflow: 'Lint' },
+    ])
+  })
+
+  it('reads a workflow that is absent or not a string as the empty string, so the row is no workflow job', () => {
+    const reply = JSON.stringify([{ name: 'a', bucket: 'pass' }, { name: 'b', bucket: 'pass', workflow: null }, { name: 'c', bucket: 'pass', workflow: 7 }])
+    expect(CW.parseChecks(reply)).toEqual([
+      { name: 'a', bucket: 'pass', workflow: '' },
+      { name: 'b', bucket: 'pass', workflow: '' },
+      { name: 'c', bucket: 'pass', workflow: '' },
+    ])
+  })
+
+  it('reads an empty list as an empty list, not as unreadable', () => {
+    expect(CW.parseChecks('[]')).toEqual([])
+  })
+
+  it('accepts exactly 1000 rows and reads 1001 as unreadable', () => {
+    expect(CW.parseChecks(JSON.stringify(rows(1000)))).toHaveLength(1000)
+    expect(CW.parseChecks(JSON.stringify(rows(1001)))).toBeNull()
+  })
+
+  it('is null when one row has no string name or no string bucket, even beside good rows', () => {
+    const good = { name: 'unit', bucket: 'pass', workflow: 'CI' }
+    for (const bad of [{ bucket: 'pass' }, { name: 'x' }, { name: 5, bucket: 'pass' }, { name: 'x', bucket: null }, null, 'row', 7, []]) {
+      expect(CW.parseChecks(JSON.stringify([good, bad])), JSON.stringify(bad)).toBeNull()
+    }
+  })
+
+  it('is null for text that is not a JSON list, and for a value that is not text', () => {
+    for (const stdout of ['', 'not json', '{}', '{"checks":[]}', 'null', '"[]"', '7']) expect(CW.parseChecks(stdout), stdout).toBeNull()
+    for (const odd of [undefined, null, 7, {}] as unknown as string[]) expect(CW.parseChecks(odd)).toBeNull()
   })
 })
 

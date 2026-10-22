@@ -941,6 +941,7 @@ module.exports = Object.freeze({
   isConflicting,
   mergeGate,
   matchedStep,
+  parseChecks,
   parseActiveWorkflows,
   askWorkflows,
   renderLine,
