@@ -1298,6 +1298,34 @@ export async function refreshRetainedCommandsAndAgents(opts: {
 }
 
 /**
+ * Re-render the installed orchestrator charter for the plugins that stay after a selective removal, so it
+ * stops routing to a workflow whose skill was just removed, and take the implement sentinel away when
+ * implement is among the removed.
+ *
+ * D-CHARTER-INSTALL-RENDER: the set comes from the MANIFEST record, read without a heal so the file stays
+ * byte-identical, which still lists the removed plugins until the caller drops the record, never from the
+ * registry fallback of {@link resolveInstalledPlugins}: with no record there is nothing to render from, and
+ * the installed files stay as they are. An uninstall only ever removes the sentinel and never creates a
+ * file, so a machine whose charter is not installed gets none. A failure is a warning, never a failure of
+ * the uninstall.
+ */
+async function rerenderCharterAfterRemoval(
+  devflowDir: string,
+  removedPluginNames: readonly string[],
+  mayChange: ChangeGuard,
+): Promise<void> {
+  const retained = charterPluginsAfterRemoval(await readManifestPlugins(devflowDir), removedPluginNames);
+  if (retained === null) return;
+  await installRenderedCharter({
+    scriptsDir: path.join(devflowDir, 'scripts'),
+    plugins: retained,
+    warn: (msg) => p.log.warn(msg),
+    mayChange,
+    mode: 'uninstall',
+  });
+}
+
+/**
  * SELECTIVE PHASE (per scope): revert agent model overrides, remove the
  * selected plugins' assets, and clean up the ambient hook if the ambient
  * plugin is being removed.
@@ -1380,28 +1408,9 @@ export async function runSelectivePhaseForScope(opts: {
     });
   }
 
-  // D-CHARTER-INSTALL-RENDER: re-render the installed orchestrator charter for the plugins that stay, so it
-  // stops routing to a workflow whose skill was just removed, and take the implement sentinel away when
-  // implement is among the removed. The set comes from the MANIFEST record, read without a heal so the file
-  // stays byte-identical, which still lists the removed plugins at this point (the record is dropped below),
-  // never from the registry fallback of resolveInstalledPlugins: with no record there is nothing to render
-  // from, and the installed files stay as they are. An uninstall only ever removes the sentinel and never creates a file, so a machine whose charter
-  // is not installed gets none. A failure is a warning, never a failure of the uninstall.
-  {
-    const retained = charterPluginsAfterRemoval(
-      await readManifestPlugins(devflowDir),
-      selectedPlugins.map(sp => sp.name),
-    );
-    if (retained !== null) {
-      await installRenderedCharter({
-        scriptsDir: path.join(devflowDir, 'scripts'),
-        plugins: retained,
-        warn: (msg) => p.log.warn(msg),
-        mayChange,
-        mode: 'uninstall',
-      });
-    }
-  }
+  // D-CHARTER-INSTALL-RENDER: the charter stops routing to the removed workflows. It reads the manifest
+  // record, so it runs before the record is dropped below.
+  await rerenderCharterAfterRemoval(devflowDir, selectedPlugins.map(sp => sp.name), mayChange);
 
   // D-UNINSTALL-DROPS-PLUGIN: the manifest is the install record `devflow init` seeds its plugin
   // selection from (a re-init keeps the prior selection), so a plugin removed here but still listed
