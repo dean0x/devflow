@@ -35,7 +35,7 @@ import {
   stripUserSecurityDenyList,
   type SecurityMode,
 } from '../../targets/claude-code/post-install.js';
-import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, LEGACY_COMMAND_NAMES, LEGACY_RULE_NAMES, buildAssetMaps, buildScopedSkillsMap, buildRulesMap, partitionSelectablePlugins, WORKFLOW_ORDER, parsePluginSelection, resolveFeatureRedirect, FEATURE_OWNED_SKILLS, prefixSkillName, type PluginDefinition } from '../../core/plugins.js';
+import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, registeredPluginNames, LEGACY_COMMAND_NAMES, LEGACY_RULE_NAMES, buildAssetMaps, buildScopedSkillsMap, buildRulesMap, partitionSelectablePlugins, WORKFLOW_ORDER, parsePluginSelection, resolveFeatureRedirect, FEATURE_OWNED_SKILLS, prefixSkillName, type PluginDefinition } from '../../core/plugins.js';
 import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
 import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafeDelete, type SafeDeleteInfo } from '../../core/safe-delete.js';
 import { generateSafeDeleteBlock, installToProfile, removeFromProfile, getInstalledVersion, SAFE_DELETE_BLOCK_VERSION } from '../../core/safe-delete-install.js';
@@ -859,14 +859,14 @@ export function buildHudOnlyManifest(
  *
  * D-CHARTER-INSTALL-RENDER: --hud-only reinstalls no plugin, so the installed charter must keep describing
  * what the manifest says is installed: the recorded plugins, with a deleted name pruned and a legacy name
- * mapped as every other partial run does (`resolvePluginList`), and only names this registry has. With no
- * manifest, or one `readManifest()` refused, nothing is known to be installed, so the set is EMPTY: the
+ * mapped as every other partial run does (`resolvePluginList`), and only names this registry has kept
+ * ({@link registeredPluginNames}). With no manifest, or one `readManifest()` refused, nothing is known to be installed, so the set is EMPTY: the
  * render then names no workflow, and no sentinel is written. The registry fallback that uninstall takes
  * would hand a machine with no record every workflow's routing line, which is the failure the render exists
  * to prevent.
  */
 export function hudOnlyCharterPlugins(manifest: ManifestData | null): string[] {
-  return resolvePluginList([], manifest, true).filter(name => DEVFLOW_PLUGINS.some(plugin => plugin.name === name));
+  return registeredPluginNames(resolvePluginList([], manifest, true));
 }
 
 /**

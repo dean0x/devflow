@@ -488,6 +488,19 @@ export const LEGACY_PLUGIN_NAMES: Record<string, string> = {
 };
 
 /**
+ * The registered plugins that `names` select: each legacy name mapped to its current plugin, and every name
+ * the registry does not have dropped. Order and repeats are kept.
+ *
+ * `names` is often file content (a manifest record), so only a name that LEGACY_PLUGIN_NAMES owns maps; a
+ * key the table inherits from Object, such as `constructor`, is an unknown name like any other.
+ */
+export function registeredPluginNames(names: readonly string[]): string[] {
+  return names
+    .map(name => (Object.hasOwn(LEGACY_PLUGIN_NAMES, name) ? LEGACY_PLUGIN_NAMES[name] : name))
+    .filter(name => DEVFLOW_PLUGINS.some(plugin => plugin.name === name));
+}
+
+/**
  * Plugin names that have been deleted from the registry.
  * Used during init to prune stale entries from users' manifests on partial
  * reinstalls — the full-reinstall path writes installedPluginNames directly

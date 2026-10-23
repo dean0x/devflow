@@ -37,7 +37,7 @@ import * as path from 'path';
 
 import { scriptsDir as packagedScriptsDir } from '../../core/assets.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
-import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES } from '../../core/plugins.js';
+import { DEVFLOW_PLUGINS, registeredPluginNames } from '../../core/plugins.js';
 
 /** The charter, relative to the scripts directory (packaged and installed alike). */
 export const CHARTER_RELPATH = 'hooks/assets/orchestrator-charter.md';
@@ -140,15 +140,13 @@ export interface CharterInventory {
  * The commands and agents a plugin selection installs.
  *
  * Only names in DEVFLOW_PLUGINS count: a manifest is file content, so an unknown, deleted or hostile name
- * selects nothing, and a name that reaches here from a legacy install maps to its current plugin the way
- * the rest of the codebase maps it ({@link LEGACY_PLUGIN_NAMES}). devflow-ambient's agents are always
- * included. The names are used for presence checks only and never reach the rendered text.
+ * selects nothing, and a name that reaches here from a legacy install maps to its current plugin
+ * ({@link registeredPluginNames}). Every caller reaches this check, so it holds whatever the caller filtered.
+ * devflow-ambient's agents are always included. The names are used for presence checks only and never reach
+ * the rendered text.
  */
 export function charterInventory(pluginNames: readonly string[]): CharterInventory {
-  const selected = new Set<string>();
-  for (const raw of pluginNames) {
-    selected.add(Object.hasOwn(LEGACY_PLUGIN_NAMES, raw) ? LEGACY_PLUGIN_NAMES[raw] : raw);
-  }
+  const selected = new Set(registeredPluginNames(pluginNames));
   const commands = new Set<string>();
   const agents = new Set<string>();
   for (const plugin of DEVFLOW_PLUGINS) {

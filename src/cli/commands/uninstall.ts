@@ -8,7 +8,7 @@ import { getInstallationPaths, getClaudeDirectory, getHomeDirectory, getManagedS
 import { getGitRoot } from '../../core/git.js';
 import type { PausedArea } from '../../core/area-pause-notice.js';
 import { isSameLocation } from '../../core/same-location.js';
-import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, SKILL_NAMESPACE, buildAssetMaps, getAllSkillNames, getAllAgentNames, getAllCommandNames, parsePluginSelection, resolveFeatureRedirect, prefixSkillName, unprefixSkillName, skillsOf, FEATURE_OWNED_SKILLS, type PluginDefinition } from '../../core/plugins.js';
+import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, registeredPluginNames, buildAssetMaps, getAllSkillNames, getAllAgentNames, getAllCommandNames, parsePluginSelection, resolveFeatureRedirect, prefixSkillName, unprefixSkillName, skillsOf, FEATURE_OWNED_SKILLS, type PluginDefinition } from '../../core/plugins.js';
 import { readManifest, readManifestPlugins, removeManifestPlugins } from '../../core/manifest.js';
 import { sweepOrphanedAssets, mdFileName, mdEntryName, type SweepResult } from '../../core/orphan-sweep.js';
 import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
@@ -200,7 +200,7 @@ export async function resolveInstalledPlugins(devflowDir: string): Promise<Plugi
  * is no manifest record to render from. Pure.
  *
  * D-CHARTER-INSTALL-RENDER: the set is the manifest record (`readManifestPlugins`) minus the plugins being
- * removed, with a legacy name mapped as the rest of the codebase maps it and only names this registry has.
+ * removed, with a legacy name mapped and only names this registry has kept ({@link registeredPluginNames}).
  * It is deliberately NOT {@link resolveInstalledPlugins}: that falls back to the whole registry when the
  * manifest is missing or names nothing, which is the safe direction for retaining assets, and the wrong one
  * here. The registry would render a charter that routes to every workflow on a machine that installed none
@@ -213,9 +213,7 @@ export function charterPluginsAfterRemoval(
 ): string[] | null {
   if (recordedPlugins === null) return null;
   const removed = new Set(removedPluginNames);
-  return recordedPlugins
-    .map(name => (Object.hasOwn(LEGACY_PLUGIN_NAMES, name) ? LEGACY_PLUGIN_NAMES[name] : name))
-    .filter(name => !removed.has(name) && DEVFLOW_PLUGINS.some(plugin => plugin.name === name));
+  return registeredPluginNames(recordedPlugins).filter(name => !removed.has(name));
 }
 
 /**
