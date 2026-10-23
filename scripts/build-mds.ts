@@ -55,13 +55,21 @@
  * byte offset 0 verbatim (it is never interpolated), so block 1 survives
  * compilation unchanged and is removed from the compiled bytes.
  *
- * Curation variants (D-LEARNING-VARIANTS, src/core/curation-variants.ts): after the
- * strip, a command or agent body is split on its curation markers. The curation-on
- * variant is written to the host's own path and, when the host carries an arm, the
- * curation-off variant to dist/curation-off/{commands,agents}/{name}.md. The split
- * runs on the compiled text, so it costs no compileFile call and nothing against
- * the per-module compile-time guard. A reference module may carry no marker: its
- * sections ship as written, so a marker there is refused.
+ * Prompt variants (D-LEARNING-VARIANTS, src/core/curation-variants.ts): after the
+ * strip, a command or agent body is split on its curation and compliance markers.
+ * The all-on variant is written to the host's own path. A host with a curation arm
+ * also gets dist/curation-off/{commands,agents}/{name}.md, a host with a compliance
+ * arm dist/compliance-off/..., and a host with both arms dist/curation-compliance-off/...
+ * too. The split runs on the compiled text, so it costs no compileFile call and
+ * nothing against the per-module compile-time guard. A reference module may carry no
+ * marker of either axis: its sections ship as written, so a marker there is refused.
+ * None of the variant trees is an output-dir a host may declare: the allowlist
+ * stays the three shipped directories.
+ *
+ * Variant manifest: after a clean build, dist/variant-axes.json records for every
+ * compiled command and agent whether it carries a curation arm and whether it
+ * carries a compliance arm. It is written on every successful build, even when no
+ * host has a compliance arm, and never by a refused one.
  *
  * Dest safety: `output-dir` must resolve to one of the three allowlisted
  * directories (src/core/mds-variants.ts). A typo, a backslash spelling, a
@@ -87,9 +95,9 @@
  * Prune: after a clean build, every `.md` in dist/commands/ and dist/agents/ that
  * no host emitted is deleted (pruneOrphanCommands, pruneOrphanAgents), and the same
  * sweep runs recursively over dist/skills/git/references/ (pruneOrphanReferences)
- * and dist/curation-off/ (pruneOrphanCurationOff). Every sweep is keyed on the files
- * this build actually wrote. The retired off tree (LEGACY_OFF_OUTPUT_DIR) is removed
- * whole (pruneLegacyOffTree), because no host writes there.
+ * and each of the three variant trees (pruneOrphanVariantTree). Every sweep is keyed
+ * on the files this build actually wrote. The retired off tree (LEGACY_OFF_OUTPUT_DIR)
+ * is removed whole (pruneLegacyOffTree), because no host writes there.
  * dist/agents/ is gitignored and outranks src/assets/agents/ in both the
  * installer's resolve and loadShippedAgentDefaults's merge, so a file left there is
  * installed in preference to the audited source on every `devflow init`; the
@@ -124,13 +132,24 @@ import {
 } from "../src/core/mds-variants.js";
 import { MAX_REFERENCE_SWEEP_DEPTH } from "../src/core/reference-sweep.js";
 import {
+  BOTH_OFF_OUTPUT_DIR,
+  COMPLIANCE_OFF_OUTPUT_DIR,
   CURATION_OFF_OUTPUT_DIR,
   LEGACY_OFF_OUTPUT_DIR,
+  VARIANT_MANIFEST_REL_PATH,
+  containsComplianceMarker,
   containsCurationMarker,
-  describeCurationSplitError,
-  curationOffRelPath,
-  splitCurationVariants,
-  type CurationSplitError,
+  containsVariantMarker,
+  describeVariantManifestError,
+  describeVariantSplitError,
+  emittedVariantKeys,
+  renderVariantManifest,
+  splitVariants,
+  variantOffRelPath,
+  type OffVariantKey,
+  type VariantAxis,
+  type VariantManifestHost,
+  type VariantSplitError,
 } from "../src/core/curation-variants.js";
 
 // DEVFLOW_MDS_ROOT overrides the repo root for tests that need to operate on a
@@ -177,10 +196,10 @@ interface CompileOutcome {
   source: string;
   dest: string;
   warnings: string[];
-  /** Absolute path of every file this host wrote, curation-off variant included. */
+  /** Absolute path of every file this host wrote, every variant included. */
   written: string[];
-  /** 1 when the host wrote a curation-off variant, else 0. */
-  curationOff: number;
+  /** The prompt this host emitted and its axes, for the variant manifest; null for a reference module. */
+  prompt: VariantManifestHost | null;
 }
 
 function formatMdsError(err: unknown, sourcePath: string): string {
@@ -618,13 +637,16 @@ type HostPlan =
       readonly outAbs: string;
       /** The single file this host emits, resolved absolute. */
       readonly dest: string;
+      /** The validated output name, without `.md`: the host's key in the variant manifest. */
+      readonly name: string;
       /**
-       * Where this host's curation-off variant lands if the body carries an arm,
-       * resolved absolute. Planned for every one-file host but NOT claimed in
-       * destsOf: it is written only after the split, and it sits in a tree of its
-       * own, so two hosts can collide on it only by colliding on `dest` first.
+       * Where each off variant of this host lands if the body carries an arm on the
+       * axis it turns off, resolved absolute. Planned for every one-file host but NOT
+       * claimed in destsOf: each is written only after the split, and each sits in a
+       * tree of its own, so two hosts can collide on one only by colliding on `dest`
+       * first.
        */
-      readonly curationOffDest: string;
+      readonly offDests: Readonly<Record<OffVariantKey, string>>;
     }
   | {
       readonly variant: "skill-refs";
@@ -684,11 +706,19 @@ function planSingleFile(
     throw outputNameRefusal(rel, declaredName, nameResult.error);
   }
 
+  const fileName = `${nameResult.value}.md`;
+  const offDest = (key: OffVariantKey): string =>
+    path.resolve(ROOT, ...variantOffRelPath(key, variant, fileName).split("/"));
   return {
     variant,
     outAbs,
-    dest: path.join(outAbs, `${nameResult.value}.md`),
-    curationOffDest: path.resolve(ROOT, ...curationOffRelPath(variant, `${nameResult.value}.md`).split("/")),
+    dest: path.join(outAbs, fileName),
+    name: nameResult.value,
+    offDests: {
+      "curation-off": offDest("curation-off"),
+      "compliance-off": offDest("compliance-off"),
+      "both-off": offDest("both-off"),
+    },
   };
 }
 
@@ -784,37 +814,40 @@ function planHost(host: HostEntry): HostPlan {
 }
 
 /**
- * The text a curation-split refusal can be located by: the nearest content line
+ * The text a variant-split refusal can be located by: the nearest content line
  * above the marker it names.
  *
- * The line numbers in a CurationSplitError count the COMPILED body, because the
+ * The line numbers in a VariantSplitError count the COMPILED body, because the
  * split runs after the compile, and a marker that came from a partial has no line
  * in the host at all. A quoted neighbour is what lets an author find the spot in
- * either. Marker lines and blank lines are skipped, and the scan is bounded by the
- * body's own length.
+ * either. Marker lines of either axis and blank lines are skipped, and the scan is
+ * bounded by the body's own length.
  */
-function curationSplitNeighbour(body: string, error: CurationSplitError): string | null {
+function variantSplitNeighbour(body: string, error: VariantSplitError): string | null {
   const at = "line" in error ? error.line : error.openedAt;
   const lines = body.split("\n");
   for (let i = Math.min(at, lines.length) - 2; i >= 0; i--) {
     const text = lines[i].trim();
-    if (text !== "" && !containsCurationMarker(text)) return text.slice(0, 80);
+    if (text !== "" && !containsVariantMarker(text)) return text.slice(0, 80);
   }
   return null;
 }
 
 /**
- * Render a curation-split refusal as the error the build throws.
+ * Render a variant-split refusal as the error the build throws.
  *
- * The wording lives in describeCurationSplitError so the build and its tests share
- * one text; this adds the host and a quoted neighbour (see curationSplitNeighbour),
- * and returns the Error so main()'s aggregation keeps the single exit.
+ * The wording lives in describeVariantSplitError so the build and its tests share
+ * one text; this adds the host, the axis the refusal is about (the retired spelling
+ * has none and counts as curation) and a quoted neighbour (see
+ * variantSplitNeighbour), and returns the Error so main()'s aggregation keeps the
+ * single exit.
  */
-function curationSplitRefusal(rel: string, error: CurationSplitError, body: string): Error {
-  const neighbour = curationSplitNeighbour(body, error);
+function variantSplitRefusal(rel: string, error: VariantSplitError, body: string): Error {
+  const axis: VariantAxis = "axis" in error ? error.axis : "curation";
+  const neighbour = variantSplitNeighbour(body, error);
   const where = neighbour === null ? "" : ` (below "${neighbour}")`;
   return new Error(
-    `${rel}: curation-variant split refused — ${describeCurationSplitError(error)}${where}. ` +
+    `${rel}: ${axis}-variant split refused — ${describeVariantSplitError(error)}${where}. ` +
     `Line numbers count the compiled output, not the source.`,
   );
 }
@@ -823,6 +856,18 @@ function curationSplitRefusal(rel: string, error: CurationSplitError, body: stri
 interface PlannedOutput {
   dest: string;
   content: string;
+}
+
+/** The axes a compiled body carries an arm on. */
+type HostAxes = Readonly<Record<VariantAxis, boolean>>;
+
+/** The axes of a body that has no arm, which is every reference module's. */
+const NO_ARMS: HostAxes = { curation: false, compliance: false };
+
+/** What a host's compiled body becomes: the files to write, and the axes it carries an arm on. */
+interface MaterializedHost {
+  outputs: PlannedOutput[];
+  axes: HostAxes;
 }
 
 /**
@@ -845,18 +890,20 @@ interface PlannedOutput {
  * a keyed result read back per op — is partial in the type however total it is
  * in fact, and would need a non-null assertion to paper over the gap.
  */
-function materializeOutputs(host: HostEntry, plan: HostPlan, body: string): PlannedOutput[] {
+function materializeOutputs(host: HostEntry, plan: HostPlan, body: string): MaterializedHost {
   const rel = path.relative(ROOT, host.file);
 
   if (plan.variant !== "skill-refs") {
-    // D-LEARNING-VARIANTS: the curation-on variant is the artifact at the host's own
-    // path, so every existing reader of dist/ keeps working; the curation-off variant
-    // exists only for a host that has an arm.
-    const split = splitCurationVariants(body);
-    if (!split.ok) throw curationSplitRefusal(rel, split.error, body);
-    const outputs: PlannedOutput[] = [{ dest: plan.dest, content: split.value.on }];
-    if (split.value.hasArms) outputs.push({ dest: plan.curationOffDest, content: split.value.off });
-    return outputs;
+    // D-LEARNING-VARIANTS: the all-on variant is the artifact at the host's own path,
+    // so every existing reader of dist/ keeps working; an off variant exists only for
+    // a host that has an arm on the axis it turns off (emittedVariantKeys).
+    const split = splitVariants(body);
+    if (!split.ok) throw variantSplitRefusal(rel, split.error, body);
+    const { bodies, hasArms } = split.value;
+    const outputs = emittedVariantKeys(hasArms).map(
+      (key): PlannedOutput => ({ dest: key === "on" ? plan.dest : plan.offDests[key], content: bodies[key] }),
+    );
+    return { outputs, axes: hasArms };
   }
 
   // A reference module fans out into sections that ship as written, with no variant
@@ -865,6 +912,13 @@ function materializeOutputs(host: HostEntry, plan: HostPlan, body: string): Plan
     throw new Error(
       `${rel}: a reference module may not carry curation-variant markers — its sections ship as ` +
       `written, so a marker would reach the installed reference as text. Curation arms belong in a ` +
+      `command or agent host.`,
+    );
+  }
+  if (containsComplianceMarker(body)) {
+    throw new Error(
+      `${rel}: a reference module may not carry compliance-variant markers — its sections ship as ` +
+      `written, so a marker would reach the installed reference as text. Compliance arms belong in a ` +
       `command or agent host.`,
     );
   }
@@ -879,7 +933,25 @@ function materializeOutputs(host: HostEntry, plan: HostPlan, body: string): Plan
     );
   }
 
-  return split.value.map(({ dest, content }) => ({ dest, content }));
+  return { outputs: split.value.map(({ dest, content }) => ({ dest, content })), axes: NO_ARMS };
+}
+
+/**
+ * Write one file atomically: to a PID-scoped temp file, then renamed into place, so a
+ * concurrent reader (e.g. a parallel vitest worker) never observes a missing file
+ * between the old and the new content. The temp file is removed when the rename fails,
+ * so no orphan is left behind.
+ */
+function writeFileAtomic(dest: string, content: string): void {
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  const tmp = tempPathFor(dest);
+  fs.writeFileSync(tmp, content, "utf-8");
+  try {
+    fs.renameSync(tmp, dest);
+  } catch (e) {
+    fs.rmSync(tmp, { force: true });
+    throw e;
+  }
 }
 
 async function compileHost(host: HostEntry, plan: HostPlan): Promise<CompileOutcome> {
@@ -902,25 +974,10 @@ async function compileHost(host: HostEntry, plan: HostPlan): Promise<CompileOutc
   // too and must expose no second block; command hosts shed only the build-owned
   // keys so every other byte of their frontmatter is preserved.
   const cleaned = stripFrontmatterFor(variant, result.output, host.file);
-  const outputs = materializeOutputs(host, plan, cleaned);
+  const { outputs, axes } = materializeOutputs(host, plan, cleaned);
 
-  // Atomic write: write to a temp file then rename into place so concurrent
-  // readers (e.g. ambient.test.ts running in a parallel vitest worker) never
-  // observe a missing file between the old and new content.
-  // Clean up the .tmp on rename failure so no orphan is left behind.
-  for (const { dest, content } of outputs) {
-    fs.mkdirSync(path.dirname(dest), { recursive: true });
-    const tmp = tempPathFor(dest);
-    fs.writeFileSync(tmp, content, "utf-8");
-    try {
-      fs.renameSync(tmp, dest);
-    } catch (e) {
-      fs.rmSync(tmp, { force: true });
-      throw e;
-    }
-  }
+  for (const { dest, content } of outputs) writeFileAtomic(dest, content);
 
-  const curationOff = plan.variant !== "skill-refs" && outputs.length > 1 ? 1 : 0;
   const destLabel = plan.variant === "skill-refs" && outputs.length > 1
     ? `${path.relative(ROOT, outAbs)}/ (${outputs.length} file(s))`
     : outputs.map(o => path.relative(ROOT, o.dest)).join(" + ");
@@ -930,7 +987,7 @@ async function compileHost(host: HostEntry, plan: HostPlan): Promise<CompileOutc
     dest: destLabel,
     warnings: result.warnings,
     written: outputs.map(o => o.dest),
-    curationOff,
+    prompt: plan.variant === "skill-refs" ? null : { kind: plan.variant, name: plan.name, axes },
   };
 }
 
@@ -987,16 +1044,31 @@ function pruneOrphanReferences(claimed: ReadonlySet<string>): string[] {
 }
 
 /**
- * Delete every `.md` under dist/curation-off/ that this build did not write.
+ * The three trees the off variants of a prompt are written under, and the reason
+ * printed beside a file the prune removes from each.
  *
- * The curation-off variant of a host exists only while the host carries an arm, so
- * the set of files that should be here is known only from what the build wrote:
- * a host that loses its last arm leaves its old variant behind, and a variant left
- * there would be installed on a curation-off machine in place of the real prompt.
- * Recursive, so a file parked under any other subdirectory of the tree goes too.
+ * Siblings under dist/, none inside another, so the prune of one tree cannot reach
+ * the files of another.
  */
-function pruneOrphanCurationOff(written: ReadonlySet<string>): string[] {
-  return pruneOrphans(path.resolve(ROOT, CURATION_OFF_OUTPUT_DIR), written, true);
+const VARIANT_TREES: ReadonlyArray<{ readonly dir: string; readonly reason: string }> = [
+  { dir: CURATION_OFF_OUTPUT_DIR, reason: "no curation arm" },
+  { dir: COMPLIANCE_OFF_OUTPUT_DIR, reason: "no compliance arm" },
+  { dir: BOTH_OFF_OUTPUT_DIR, reason: "no curation and compliance arms" },
+];
+
+/**
+ * Delete every `.md` under one variant tree that this build did not write.
+ *
+ * An off variant of a host exists only while the host carries an arm on the axis it
+ * turns off, so the set of files that should be here is known only from what the
+ * build wrote: a host that loses its last arm leaves its old variant behind, and a
+ * variant left there would be installed on a machine with that axis off in place of
+ * the real prompt. Recursive, so a file parked under any other subdirectory of the
+ * tree goes too. A tree no host wrote to is pruned whole, which is also what removes
+ * the variants of a host that lost every arm.
+ */
+function pruneOrphanVariantTree(dir: string, written: ReadonlySet<string>): string[] {
+  return pruneOrphans(path.resolve(ROOT, dir), written, true);
 }
 
 /**
@@ -1186,12 +1258,26 @@ async function main(): Promise<void> {
     }
   }
 
+  // The manifest is rendered here, before the summary, so a refusal of it is counted
+  // with the others and nothing has been pruned yet when it stops the build.
+  const manifest = renderVariantManifest(
+    outcomes.flatMap(o => (o.prompt === null ? [] : [o.prompt])),
+  );
+  if (!manifest.ok) {
+    recordFailure(
+      VARIANT_MANIFEST_REL_PATH,
+      `${VARIANT_MANIFEST_REL_PATH}: ${describeVariantManifestError(manifest.error)}`,
+    );
+  }
+
   const totalWarnings = outcomes.reduce((n, o) => n + o.warnings.length, 0);
   console.log(
     `\nMDS: ${outcomes.length} compiled, ${errors.length} error(s), ${totalWarnings} warning(s)`,
   );
 
-  if (errors.length > 0) {
+  // `!manifest.ok` is already counted in `errors`; testing it here as well is what
+  // narrows `manifest` to its value for the write below.
+  if (errors.length > 0 || !manifest.ok) {
     console.error(
       `\n${errors.length} compile error(s) — build FAILED. Fix the mds::* errors above before shipping.`,
     );
@@ -1212,13 +1298,16 @@ async function main(): Promise<void> {
   for (const rel of pruneOrphanReferences(writtenDests)) {
     console.log(`  pruned:   ${rel} (no reference module)`);
   }
-  for (const rel of pruneOrphanCurationOff(writtenDests)) {
-    console.log(`  pruned:   ${rel} (no curation arm)`);
+  for (const { dir, reason } of VARIANT_TREES) {
+    for (const rel of pruneOrphanVariantTree(dir, writtenDests)) {
+      console.log(`  pruned:   ${rel} (${reason})`);
+    }
   }
   for (const rel of pruneLegacyOffTree()) {
     console.log(`  pruned:   ${rel} (retired off tree)`);
   }
-  const curationOffCount = outcomes.reduce((n, o) => n + o.curationOff, 0);
+  writeFileAtomic(path.resolve(ROOT, ...VARIANT_MANIFEST_REL_PATH.split("/")), manifest.value);
+  const curationOffCount = outcomes.filter(o => o.prompt?.axes.curation === true).length;
   console.log(`  ${curationOffCount} curation-off variant(s) written`);
 
   console.log("\nMDS commands build complete!");

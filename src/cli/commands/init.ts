@@ -2182,6 +2182,10 @@ export const initCommand = new Command('init')
         // their say (D-LEARNING-VARIANT-INSTALL): the files installed here and the
         // manifest written at the end of init cannot disagree about it.
         curation: curationEnabled,
+        // The SETTLED compliance switch, never a raw seed or a repository's narrowing: the
+        // variant follows the machine switch alone, and with it off the install refuses
+        // before it writes a file when the variant files are not all there.
+        compliance: complianceEnabled,
         trackerServers,
         // Non-fatal install notices with no other channel (skipped symlinks in the
         // generated reference tree, mode-normalisation failures) reach the user rather

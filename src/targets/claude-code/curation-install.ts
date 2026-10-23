@@ -161,9 +161,14 @@ function installedFile(claudeDir: string, kind: CurationVariantKind, fileName: s
   return path.join(claudeDir, kind, 'devflow', fileName);
 }
 
-/** The curation-ON source directories for a kind, most-preferred first. */
+/**
+ * The curation-ON source directories for a kind, most-preferred first.
+ *
+ * The converge carries the curation switch only, so it reads the order of a machine with
+ * compliance on: the order it has always read.
+ */
 function onSourceDirs(kind: CurationVariantKind, root: string): readonly string[] {
-  return kind === 'commands' ? commandSourceDirs(true, root) : agentSourceDirs(root, true);
+  return kind === 'commands' ? commandSourceDirs(true, true, root) : agentSourceDirs(root, true, true);
 }
 
 /**

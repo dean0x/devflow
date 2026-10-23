@@ -17,6 +17,7 @@
 //   node verify-evidence.cjs readback --pr <n> --expect <file>
 //   node verify-evidence.cjs publish --pr <n> [--publication auto|full|off|stub] [--evidence <file>]
 //   node verify-evidence.cjs readiness --pr <n> [--require-non-author-approval true|false]
+//        [--evidence <file>] [--out <file>]
 //
 // stdout (D-VERIFY-STDOUT) is empty or exactly one of these shapes, each closed-vocabulary
 // (the render block's TP lines come from the caller's own plan file):
@@ -34,7 +35,11 @@
 //             `TRACEABILITY: DEGRADED (evidence unavailable)` (exit 2)
 //   readiness the `## Merge Readiness` block (exit 0), or the same block with
 //             `**Status**: DEGRADED (<reason>)` and one `TRACEABILITY: DEGRADED
-//             (<reason>)` line after it (exit 2)
+//             (<reason>)` line after it (exit 2). `--evidence <file>` reads the test
+//             plan and the claims from a local evidence file, as `verify --evidence`
+//             does. `--out <file>` also writes the file `READINESS pr:<n>
+//             head:<40hex|none> status:<READY|NOT_READY|DEGRADED>`, then that same
+//             block; stdout does not change, and the command makes no remote write
 // No byte of a PR body, a comment, a review or a gh/git answer is ever printed: the
 // boundary re-checks every stdout line against these shapes before writing it.
 //
@@ -201,6 +206,7 @@ const USAGE = [
   '       node verify-evidence.cjs readback --pr <n> --expect <file>',
   '       node verify-evidence.cjs publish --pr <n> [--publication auto|full|off|stub] [--evidence <file>]',
   '       node verify-evidence.cjs readiness --pr <n> [--require-non-author-approval true|false]',
+  '            [--evidence <file>] [--out <file>]',
 ].join('\n');
 
 // ---------------------------------------------------------------------------
@@ -255,7 +261,8 @@ const USAGE = [
  *   | { kind: 'splice', pr: number, state: string, block: string, out: string }
  *   | { kind: 'readback', pr: number, expect: string }
  *   | { kind: 'publish', pr: number, publication: string, evidence: string | null }
- *   | { kind: 'readiness', pr: number, requireNonAuthor: 'true' | 'false' | 'unrecognised' }} ParsedArgs
+ *   | { kind: 'readiness', pr: number, requireNonAuthor: 'true' | 'false' | 'unrecognised',
+ *       evidence: string | null, out: string | null }} ParsedArgs
  */
 
 /** @type {ParsedArgs} */
@@ -371,13 +378,20 @@ function parseArgs(argv) {
     return { kind: 'publish', pr, publication, evidence };
   }
   if (sub === 'readiness') {
-    const f = parseFlags(tail, { '--pr': 'value', '--require-non-author-approval': 'value' });
+    const f = parseFlags(tail, {
+      '--pr': 'value', '--require-non-author-approval': 'value', '--evidence': 'value', '--out': 'value',
+    });
     const pr = f === null ? null : parsePr(flagValue(f, '--pr'));
     if (f === null || pr === null) return USAGE_ARGS;
     const needed = flagValue(f, '--require-non-author-approval');
     if (needed !== null && needed !== 'true' && needed !== 'false') return USAGE_ARGS;
+    const evidence = flagValue(f, '--evidence');
+    const out = flagValue(f, '--out');
+    // The out file replaces whatever it names: it must never be the evidence it was read from,
+    // however the two paths are spelled (`./a.md` and `a.md` are one file).
+    if (evidence !== null && out !== null && path.resolve(evidence) === path.resolve(out)) return USAGE_ARGS;
     // An absent flag is the ladder's "unrecognised": it can never read READY.
-    return { kind: 'readiness', pr, requireNonAuthor: needed === null ? 'unrecognised' : needed };
+    return { kind: 'readiness', pr, requireNonAuthor: needed === null ? 'unrecognised' : needed, evidence, out };
   }
   return USAGE_ARGS;
 }
@@ -427,19 +441,30 @@ function readTextFile(filePath) {
 /**
  * Write `text` to `filePath`, refusing anything that already exists and is not a
  * regular file (a directory, a FIFO, a symlink). Returns whether it was written.
+ * The lstat refuses first. The open adds O_NOFOLLOW, so a link put in the file's
+ * place after the lstat is refused, never followed, and O_NONBLOCK, so a FIFO put
+ * there cannot block; the fstat re-checks the opened object.
  *
  * @param {string} filePath
  * @param {string} text
  * @returns {boolean}
  */
 function writeTextFile(filePath, text) {
+  let fd;
   try {
     const st = fs.lstatSync(filePath, { throwIfNoEntry: false });
     if (st !== undefined && !st.isFile()) return false;
-    fs.writeFileSync(filePath, text, { encoding: 'utf8', mode: 0o600 });
+    const c = fs.constants;
+    fd = fs.openSync(filePath, c.O_WRONLY | c.O_CREAT | c.O_TRUNC | (c.O_NOFOLLOW || 0) | (c.O_NONBLOCK || 0), 0o600);
+    if (!fs.fstatSync(fd).isFile()) return false;
+    fs.writeFileSync(fd, text, 'utf8');
     return true;
   } catch (_) {
     return false;
+  } finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch (_) { /* the write already decided */ }
+    }
   }
 }
 
@@ -1533,15 +1558,18 @@ function commentUpdate(plan, ev, mode, target) {
 }
 
 /**
- * --stale-out: only STALE TPs whose text hash equals the trusted record's — text a
- * trusted author already published, never unrecorded PR text (containment).
+ * --stale-out: the STALE TPs. A plan from the PR body lists only those whose text hash
+ * equals the trusted record's — text a trusted author already published, never
+ * unrecorded PR text (containment). A plan from the `--evidence` file is the caller's
+ * own local text, so every STALE TP of it is listed.
  *
  * @param {readonly TpInput[]} inputs
  * @param {readonly { state: string }[]} records
+ * @param {boolean} fromFile  whether the plan came from the evidence file
  * @returns {string}
  */
-function staleOutText(inputs, records) {
-  const lines = inputs.filter((x, i) => records[i].state === 'STALE' && x.recorded).map(x => x.tp.line);
+function staleOutText(inputs, records, fromFile) {
+  const lines = inputs.filter((x, i) => records[i].state === 'STALE' && (fromFile || x.recorded)).map(x => x.tp.line);
   return lines.length === 0 ? '' : ['## Test Plan', ...lines].join('\n') + '\n';
 }
 
@@ -1663,7 +1691,7 @@ function verifyPass(io, args, deps) {
   }, plan.tps.length);
   if (line === null) return refusedPass(io, EXIT_CODES.OUTPUT_GATE_REFUSED, 'the EVIDENCE line failed its gate');
 
-  if (!writeOutputs(args, pr.body, body.blockText, comment.text, staleOutText(inputs, records))) {
+  if (!writeOutputs(args, pr.body, body.blockText, comment.text, staleOutText(inputs, records, fromFile))) {
     return refusedPass(io, EXIT_CODES.WRITE_FAILED, 'an output file could not be written');
   }
   return { outcome: { code: EXIT_CODES.OK, stdout: line + '\n' }, target };
@@ -2466,16 +2494,18 @@ function bindCiHead(ci, viewHead, evidenceHead) {
 
 /**
  * The test-plan evidence at the head, by `verify --approval`: known only on exit 0
- * with one EVIDENCE line for this PR (the old step 4's rule).
+ * with one EVIDENCE line for this PR (the old step 4's rule). `evidence` is the local
+ * evidence file `readiness --evidence` names, or null to read the PR's own record.
  *
  * @param {Io} io
  * @param {number} pr
+ * @param {string | null} evidence
  * @param {MainDeps} deps
  * @returns {any | null}  the parsed EVIDENCE fields, or null when the evidence is unknown
  */
-function readEvidence(io, pr, deps) {
+function readEvidence(io, pr, evidence, deps) {
   const verified = runVerify(io, {
-    kind: 'verify', pr, publication: '', evidence: null, state: null,
+    kind: 'verify', pr, publication: '', evidence, state: null,
     blockOut: null, commentOut: null, staleOut: null, approval: true,
   }, deps);
   if (verified.code !== EXIT_CODES.OK) return null;
@@ -2528,23 +2558,27 @@ function readinessDegraded(pr, reason, known) {
  * count it cannot establish, is DEGRADED; an unreadable CI status or unknown evidence
  * is an input to the ladder, which never lets either reach READY.
  *
+ * @typedef {{ outcome: Outcome, head: string | null }} ReadinessPass
+ *   The answer, and the PR head its first read gave (null when that read gave none).
+ *
  * @param {Io} io
  * @param {Extract<ParsedArgs, { kind: 'readiness' }>} args
  * @param {MainDeps} deps
- * @returns {Outcome}
+ * @returns {ReadinessPass}
  */
-function runReadiness(io, args, deps) {
+function readinessPass(io, args, deps) {
   const unreadApproval = approvalText(args.requireNonAuthor, null);
   const view = readPrView(io, args.pr);
-  if (!view.ok) return readinessDegraded(args.pr, view.reason, { approval: unreadApproval });
+  if (!view.ok) return { outcome: readinessDegraded(args.pr, view.reason, { approval: unreadApproval }), head: null };
+  const head = view.value.head;
   const reviewDecision = view.value.decision;
   const decisionText = decisionLabel(reviewDecision);
   const threads = readThreads(io, args.pr);
   if (!threads.ok) {
-    return readinessDegraded(args.pr, threads.reason, { decision: decisionText, approval: unreadApproval });
+    return { outcome: readinessDegraded(args.pr, threads.reason, { decision: decisionText, approval: unreadApproval }), head };
   }
   const ciRead = readCi(io, args.pr, view.value.mergeable);
-  const fields = readEvidence(io, args.pr, deps);
+  const fields = readEvidence(io, args.pr, args.evidence, deps);
   const ci = bindCiHead(ciRead, view.value.head, fields === null ? null : fields.head);
   /** @type {EvidenceFacts | null} */
   const evidence = fields === null ? null : {
@@ -2577,7 +2611,44 @@ function runReadiness(io, args, deps) {
         + ' (VERIFIED-CI ' + evidence.verifiedCi + ', ATTESTED-LOCAL ' + evidence.attestedLocal + ')',
     approval: approvalText(args.requireNonAuthor, evidence),
   };
-  return { code: EXIT_CODES.OK, stdout: renderReadinessBlock(block) };
+  return { outcome: { code: EXIT_CODES.OK, stdout: renderReadinessBlock(block) }, head };
+}
+
+/**
+ * D-READINESS-OUT: `readiness --out <file>`. The file holds the READINESS line, then the
+ * block exactly as it prints. The status in the line is the one the block's own parse
+ * gives, so the line and the block cannot disagree, and a block the output gate would
+ * refuse is never written. The head is the PR head the first read gave, or `none`.
+ * writeTextFile refuses a path that exists and is not a regular file, a symlink included,
+ * so no link is followed. A file that cannot be written is the output gate's refusal:
+ * nothing is printed. The command makes no gh write.
+ *
+ * @param {Io} io
+ * @param {string} file
+ * @param {number} pr
+ * @param {Outcome} outcome  the answer readinessPass or readinessDegraded gave
+ * @param {string | null} head
+ * @returns {Outcome}
+ */
+function writeReadinessOut(io, file, pr, outcome, head) {
+  const block = parseReadinessBlock(outcome.stdout);
+  if (block === null) return outcome;
+  const line = ['READINESS', 'pr:' + pr, 'head:' + (head === null ? 'none' : head), 'status:' + block.status].join(' ');
+  if (!writeTextFile(file, line + '\n' + outcome.stdout)) {
+    return refuse(io, EXIT_CODES.WRITE_FAILED, 'an output file could not be written');
+  }
+  return outcome;
+}
+
+/**
+ * @param {Io} io
+ * @param {Extract<ParsedArgs, { kind: 'readiness' }>} args
+ * @param {MainDeps} deps
+ * @returns {Outcome}
+ */
+function runReadiness(io, args, deps) {
+  const pass = readinessPass(io, args, deps);
+  return args.out === null ? pass.outcome : writeReadinessOut(io, args.out, args.pr, pass.outcome, pass.head);
 }
 
 // ---------------------------------------------------------------------------
@@ -2665,8 +2736,11 @@ function main(argv, deps) {
     // prints whatever they print.
     const label = 'internal error (' + errorLabel(err) + ')';
     if (args.kind === 'publish') outcome = evidenceUnavailable(io, label);
-    else if (args.kind === 'readiness') outcome = readinessDegraded(args.pr, 'internal error', {});
-    else outcome = refuse(io, EXIT_CODES.REMOTE_FAILURE, label);
+    else if (args.kind === 'readiness') {
+      // A file an earlier run left must not outlive this one, so the out file says DEGRADED too.
+      outcome = readinessDegraded(args.pr, 'internal error', {});
+      if (args.out !== null) outcome = writeReadinessOut(io, args.out, args.pr, outcome, null);
+    } else outcome = refuse(io, EXIT_CODES.REMOTE_FAILURE, label);
   }
   if (io.notes.size > 0) io.stderr('verify-evidence: notes: ' + [...io.notes].sort().join(',') + '\n');
   return outcome;

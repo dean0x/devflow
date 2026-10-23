@@ -95,7 +95,7 @@ devflow/
 │           ├── resolve-evidence-policy.cjs # Resolves EVIDENCE_POLICY from .devflow/project.json `evidence` (a retired .devflow/policy.json counts by presence only: required); writes nothing
 │           ├── resolve-settings.cjs  # Local settings resolver: folds project.json, config.json and the machine manifest into one settings line, the gate level included; no network, writes nothing
 │           ├── pr-evidence.cjs       # Pure core of test-plan evidence: grammars, markers, the state ladder
-│           ├── verify-evidence.cjs   # I/O half of test-plan evidence: check, render, verify, splice, readback
+│           ├── verify-evidence.cjs   # I/O half of test-plan evidence: check, render, verify, splice, readback, publish, readiness (`readiness --out` and `verify --stale-out` write local files only)
 │           ├── release-trace.cjs     # Git-only release trace: last release tag + per-commit trace map
 │           ├── claude-md-audit.cjs   # CLAUDE.md @path import audit (read-only): grammar, bounds, display text and stamp format; run by session-start-context and, through the facade, init
 │           ├── ci-wait.cjs           # Bounded CI wait for one pushed head: reads gh only, prints one status line; /implement and /resolve call it inline
@@ -139,7 +139,7 @@ devflow/
 │                   ├── safe-path.cjs       # Path safety validation
 │                   └── tracked-areas.cjs   # Leaf: does git track any entry under the data folders of an area (curation: `.devflow/learning/`, `.devflow/curation/` and the backup folders; memory: `.devflow/memory/`) or at `.devflow` itself? One bounded `git ls-files` call for each area; the store ops, the capture gate, the session start hooks, the memory worker, the settings resolver, the CLI, the HUD and uninstall ask it first
 ├── scripts/                          # Dev tooling
-│   ├── build-mds.ts                  # MDS compiler: command hosts → dist/commands/*.md, agent generator hosts → dist/agents/*.md, reference modules → dist/skills/git/references/**
+│   ├── build-mds.ts                  # MDS compiler: command hosts → dist/commands/*.md, agent generator hosts → dist/agents/*.md, reference modules → dist/skills/git/references/**, the off-variant trees and dist/variant-axes.json (see Variant build)
 │   ├── bump-version.ts               # Version bump script
 │   ├── token-audit/                  # `npm run audit:tokens`: token spend from local transcripts (not shipped)
 │   └── update-golden.ts              # Golden fixture regeneration (git-agent target; github-status-lines refuses without --unfreeze)
@@ -205,16 +205,56 @@ Assets live once in `src/assets/` and install to the user's `~/.claude/` — no 
 | Agents (generator host) | `src/assets/agents/{name}.mds` → `dist/agents/{name}.md` | `~/.claude/agents/devflow/{name}.md` | `npm run build:mds` |
 | Rules | `src/assets/rules/{name}.md` | `~/.claude/rules/devflow/{name}.md` | None — edit → init |
 | Commands | `src/assets/commands/{name}.mds` → `dist/commands/{name}.md` | `~/.claude/commands/devflow/{name}.md` | `npm run build:mds` |
-| Curation-off variants | `dist/curation-off/{commands,agents}/{name}.md`, built only for a host or partial with a curation arm | `~/.claude/{commands,agents}/devflow/{name}.md`, in place of the file above, on a curation-off machine | `npm run build:mds` |
+| Off variants (curation, compliance, both) | `dist/{curation-off,compliance-off,curation-compliance-off}/{commands,agents}/{name}.md`, built only for a host or partial with an arm on the axis that the tree turns off | `~/.claude/{commands,agents}/devflow/{name}.md`, in place of the file above, on a machine with that axis off | `npm run build:mds` |
+| Variant manifest | `dist/variant-axes.json`, written by every build | Not installed; the installer reads it when compliance is off | `npm run build:mds` |
 | Skill references (generated) | `src/assets/mds/**/*.mds` → `dist/skills/git/references/**` | `~/.claude/skills/devflow:git/references/**` | `npm run build:mds` |
 | Scripts (root) | `src/assets/scripts/*.cjs`, `lib/`, `hud.sh` | `~/.devflow/scripts/` | None — edit → init |
 | Scripts (hooks) | `src/assets/scripts/hooks/` | `~/.devflow/scripts/hooks/` | None — edit → init |
 
 `templates/lint-pack/` is not an asset. It ships in the npm package, `devflow init` never installs it, and devflow never runs the template itself. A project copies the folder, owns the copy and wires it as a root `lint-pack` script or `Makefile` target, which Validate runs last at the `lean` gate level and at no other level. The script finds the faults a linter does not in the branch diff. A project clears an accepted match with an allow glob in `.lint-pack.conf`. The template README describes the wiring.
 
+### Variant build
+
+The build splits each compiled prompt on two axes: curation and compliance. A marker sits alone on its line, in the host or in a partial that the host expands. Each axis has three markers:
+
+| Axis | Markers |
+|------|---------|
+| Curation | `<!-- curation:on -->`, `<!-- curation:off -->`, `<!-- curation:end -->` |
+| Compliance | `<!-- compliance:on -->`, `<!-- compliance:off -->`, `<!-- compliance:end -->` |
+
+An `on` arm stays only in the variants that keep its axis on. An `off` arm stays only in the variants that turn its axis off. One axis can nest inside an arm of the other axis. Arms of two axes never overlap. The splitter is `src/core/curation-variants.ts`, and `scripts/build-mds.ts` writes the files.
+
+The build writes up to four outputs for each host:
+
+| Output | Curation | Compliance | Written for |
+|--------|----------|------------|-------------|
+| `dist/commands/`, `dist/agents/` (normal) | on | on | Every host |
+| `dist/curation-off/{commands,agents}/` | off | on | A host with a curation arm |
+| `dist/compliance-off/{commands,agents}/` | on | off | A host with a compliance arm |
+| `dist/curation-compliance-off/{commands,agents}/` | off | off | A host with both arms |
+
+A host with no arm on an axis has no variant for that axis. A machine with that axis off then uses the variant for its other axis, or the normal file. The three off trees are siblings, so the removal of stale files in one tree never reaches another tree.
+
+The build also writes the variant manifest, `dist/variant-axes.json`. It has `{ "version": 1, "hosts": { "<kind>/<name>": { "curation": <bool>, "compliance": <bool> } } }`, with one entry for each compiled host. Each flag says whether the host carries an arm on that axis.
+
+The installer takes the first file it finds in this order:
+
+| Machine | Source order |
+|---------|--------------|
+| Curation off and compliance off | `dist/curation-compliance-off/`, `dist/curation-off/`, `dist/compliance-off/`, then the normal file |
+| Compliance off only | `dist/compliance-off/`, then the normal file |
+| Curation off only | `dist/curation-off/`, then the normal file |
+| Both on | The normal file |
+
+When compliance is off, the installer first reads `dist/variant-axes.json`. For each host that carries a compliance arm, it needs the file that was built for the exact switches of the machine. On a machine with both axes off, a host with both arms needs its `curation-compliance-off` file and never its `curation-off` file. The install stops before it writes any file when the manifest is absent or not valid, or when one of these files is absent. The error names `npm run build:mds`. A host with no compliance arm is not checked. `npm run build:cli` alone does not write the manifest or the trees.
+
+In this release no host carries a compliance arm. The build writes `dist/variant-axes.json`. It writes no file in `dist/compliance-off/` or `dist/curation-compliance-off/`, so a compliance-off install needs only the manifest.
+
+The markers are interim. Native conditionals in the MDS compiler replace them later. The header comment of `src/core/curation-variants.ts` gives the one-to-one mapping.
+
 ### Packaging
 
-`npm pack` ships `dist/` (compiled JS, commands, compiled agents, curation-off variants, and generated skill references), `src/assets/` (skills, agents — hand-authored `.md` and `.mds` generator hosts alike — rules, scripts), `src/targets/claude-code/templates/` (the install templates) and `templates/lint-pack/` (the lint pack template: a script, an example config and a README). No `plugins/` or `shared/` directories are included.
+`npm pack` ships `dist/` (compiled JS, commands, compiled agents, the three off-variant trees, the variant manifest `dist/variant-axes.json`, and generated skill references), `src/assets/` (skills, agents — hand-authored `.md` and `.mds` generator hosts alike — rules, scripts), `src/targets/claude-code/templates/` (the install templates) and `templates/lint-pack/` (the lint pack template: a script, an example config and a README). No `plugins/` or `shared/` directories are included. The `files` field lists `dist/` whole, so a new tree under `dist/` ships with no change to it. `tests/packaging.test.ts` checks that the pack list holds the manifest and the variants that the rosters name. It also packs seeded files, to show that a file under each of the three off trees ships.
 
 ### Adding a Skill to a Plugin
 
@@ -235,7 +275,7 @@ All 20 agents (`git`, `synthesize`, `skim`, `polish`, `code`, `fix`, `refactor`,
 
 The installer resolves each declared agent over `agentSourceDirs()` in `src/core/assets.ts` — `dist/agents/`, then `src/assets/agents/` — and copies the first hit, so a compiled artifact supersedes a hand-authored file of the same name. When neither directory has the agent, the install throws naming both candidate paths and `npm run build:mds` rather than silently skipping it. `npm run build:cli` alone (TypeScript) does not produce installable agents; `npm run build` runs both steps.
 
-The curation switch (`features.curation` in `~/.devflow/manifest.json`) picks the variant. With curation off, the installer reads `dist/curation-off/{commands,agents}/` ahead of the normal order and leaves `devflow:apply-decisions` out. `devflow init` passes its settled value, and `devflow curation --enable/--disable` converges what is already installed: it rewrites only the commands and agents already on disk (a `--plugin` install gains nothing), compares bytes and writes atomically, installs or removes the skill, reapplies the `devflow agents` mapping, and skips with a "run `devflow init`" message when the manifest version differs from the running one. A failure only warns. A repository that narrows curation off changes nothing installed; the curation-on prompts gate that at run time.
+The curation switch (`features.curation` in `~/.devflow/manifest.json`) and the compliance switch together pick the variant; "Variant build" above gives the source order. With curation off, the installer reads the curation-off variants ahead of the normal order and leaves `devflow:apply-decisions` out. `devflow init` passes its settled value, and `devflow curation --enable/--disable` converges what is already installed: it rewrites only the commands and agents already on disk (a `--plugin` install gains nothing), compares bytes and writes atomically, installs or removes the skill, reapplies the `devflow agents` mapping, and skips with a "run `devflow init`" message when the manifest version differs from the running one. A failure only warns. A repository that narrows curation off changes nothing installed; the curation-on prompts gate that at run time.
 
 ## Settings
 

@@ -18,6 +18,10 @@
  *      hosts that carry an arm (the 14 commands and 9 agents); the arms themselves
  *      are held in tests/curation/curation-variants-arms.test.ts.
  *
+ * The compliance axis (TP-6) is held the same way: a fixture with compliance and both-arm
+ * hosts proves the compliance-off and both-off trees, the variant manifest at
+ * dist/variant-axes.json, the prune of each new tree and the refusals that name the axis.
+ *
  * Every build this file spawns is scoped by DEVFLOW_MDS_ROOT, which the
  * scenario-12 self-scan in tests/build-mds-generator-hosts.test.ts also checks for
  * the files that spawn one.
@@ -31,7 +35,7 @@ import { spawnSync } from 'child_process';
 
 import { ROOT, walkFiles, type BuildRun } from '../helpers.js';
 import { CURATION_OFF_FILES, CURATION_VARIANT_HOSTS } from '../fixtures/mds-manifest.js';
-import { LEGACY_OFF_OUTPUT_DIR, containsCurationMarker } from '../../src/core/curation-variants.js';
+import { LEGACY_OFF_OUTPUT_DIR, containsCurationMarker, containsVariantMarker } from '../../src/core/curation-variants.js';
 
 vi.setConfig({ testTimeout: 120_000 });
 
@@ -555,6 +559,394 @@ describe('what the build refuses (AC-134, AC-135)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// The compliance axis in the build (TP-6). A host with a compliance arm gets a
+// compliance-off variant, a host with both arms gets a both-off variant too, and
+// the build records the axes of every compiled prompt in dist/variant-axes.json.
+// ---------------------------------------------------------------------------
+
+const CON = '<!-- compliance:on -->';
+const COFF = '<!-- compliance:off -->';
+const CEND = '<!-- compliance:end -->';
+
+type Axis = 'curation' | 'compliance';
+
+/** An arm of one axis in one of the three forms: kept verbatim between markers, or resolved. */
+function axisArm(axis: Axis, form: Form, onLines: readonly string[], offLines: readonly string[] | null): string[] {
+  if (form === 'on') return [...onLines];
+  if (form === 'off') return offLines === null ? [] : [...offLines];
+  const lines = [`<!-- ${axis}:on -->`, ...onLines];
+  if (offLines !== null) lines.push(`<!-- ${axis}:off -->`, ...offLines);
+  lines.push(`<!-- ${axis}:end -->`);
+  return lines;
+}
+
+/**
+ * A prompt host with a curation arm, a compliance arm, or both, each in a form of its
+ * own: `none` leaves the axis out. The compliance arm nests inside the curation arm,
+ * which is the shape the splitter allows for two axes, and a second one stands alone.
+ */
+function prompt(kind: 'commands' | 'agents', name: string, curation: Form | 'none', compliance: Form | 'none'): string {
+  const head =
+    kind === 'commands'
+      ? ['---', `description: ${name} command`, 'output-dir: dist/commands', '---']
+      : ['---', 'output-dir: dist/agents', '---', '---', `name: ${name}`, 'description: a fixture agent', '---'];
+  const nested = compliance === 'none' ? [] : axisArm('compliance', compliance, ['Nested compliance line.'], null);
+  const standalone = compliance === 'none' ? [] : axisArm('compliance', compliance, ['Compliance gate is on.'], ['Compliance gate is off.']);
+  const decisions =
+    curation === 'none' ? [] : axisArm('curation', curation, ['Decisions line.', ...nested], ['Decisions are not loaded.']);
+  return [...head, '', `# ${name}`, '', 'Intro.', ...decisions, ...standalone, 'Outro.', ''].join('\n');
+}
+
+/** Hosts that carry one axis each, both axes, and none, in the two prompt kinds. */
+async function seedComplianceFixture(fakeRoot: string): Promise<void> {
+  await write(fakeRoot, 'src/assets/commands/kappa.mds', prompt('commands', 'kappa', 'arms', 'none'));
+  await write(fakeRoot, 'src/assets/commands/delta.mds', prompt('commands', 'delta', 'none', 'arms'));
+  await write(fakeRoot, 'src/assets/commands/theta.mds', prompt('commands', 'theta', 'arms', 'arms'));
+  await write(fakeRoot, 'src/assets/agents/iota.mds', prompt('agents', 'iota', 'arms', 'arms'));
+  await write(fakeRoot, 'src/assets/commands/plain.mds', PLAIN_COMMAND);
+}
+
+/** The compiled prompt files under one dist subtree of a fake root, relative to it, sorted. */
+function treeOf(fakeRoot: string, sub: string): string[] {
+  const dir = path.join(fakeRoot, ...sub.split('/'));
+  return walkFiles(dir, f => f.endsWith('.md'))
+    .map(f => path.relative(dir, f).split(path.sep).join('/'))
+    .sort();
+}
+
+interface ManifestShape {
+  version: number;
+  hosts: Record<string, { curation: boolean; compliance: boolean }>;
+}
+
+async function manifestOf(fakeRoot: string): Promise<{ text: string; manifest: ManifestShape }> {
+  const text = await readIfPresent(fakeRoot, 'dist/variant-axes.json');
+  expect(text, 'the build wrote no dist/variant-axes.json').not.toBeNull();
+  return { text: text as string, manifest: JSON.parse(text as string) as ManifestShape };
+}
+
+describe('a host with a compliance arm (TP-6)', () => {
+  it('writes compliance-off for a compliance arm and both-off for both arms, and nothing for a host without them', async () => {
+    await withFakeRoot(async fakeRoot => {
+      await seedComplianceFixture(fakeRoot);
+      const run = runBuild(fakeRoot);
+      expect(run.status, run.combined).toBe(0);
+
+      expect(treeOf(fakeRoot, 'dist/commands')).toEqual(['delta.md', 'kappa.md', 'plain.md', 'theta.md']);
+      expect(treeOf(fakeRoot, 'dist/agents')).toEqual(['iota.md']);
+      expect(treeOf(fakeRoot, 'dist/curation-off')).toEqual(['agents/iota.md', 'commands/kappa.md', 'commands/theta.md']);
+      expect(treeOf(fakeRoot, 'dist/compliance-off')).toEqual(['agents/iota.md', 'commands/delta.md', 'commands/theta.md']);
+      expect(treeOf(fakeRoot, 'dist/curation-compliance-off')).toEqual(['agents/iota.md', 'commands/theta.md']);
+      expect(printedVariantCount(run.combined), 'the curation count is the hosts with a curation arm').toBe(3);
+    });
+  });
+
+  it('each variant keeps the text of the arms its axes select, and no marker reaches a built file', async () => {
+    await withFakeRoot(async fakeRoot => {
+      await seedComplianceFixture(fakeRoot);
+      const run = runBuild(fakeRoot);
+      expect(run.status, run.combined).toBe(0);
+
+      const text = async (rel: string): Promise<string> => (await readIfPresent(fakeRoot, rel)) ?? '';
+      const on = await text('dist/commands/theta.md');
+      const curationOff = await text('dist/curation-off/commands/theta.md');
+      const complianceOff = await text('dist/compliance-off/commands/theta.md');
+      const bothOff = await text('dist/curation-compliance-off/commands/theta.md');
+
+      expect(on).toContain('Decisions line.');
+      expect(on).toContain('Nested compliance line.');
+      expect(on).toContain('Compliance gate is on.');
+      expect(curationOff).toContain('Decisions are not loaded.');
+      expect(curationOff).not.toContain('Decisions line.');
+      expect(curationOff).not.toContain('Nested compliance line.');
+      expect(curationOff).toContain('Compliance gate is on.');
+      expect(complianceOff).toContain('Decisions line.');
+      expect(complianceOff).not.toContain('Nested compliance line.');
+      expect(complianceOff).toContain('Compliance gate is off.');
+      expect(complianceOff).not.toContain('Compliance gate is on.');
+      expect(bothOff).toContain('Decisions are not loaded.');
+      expect(bothOff).toContain('Compliance gate is off.');
+      expect(bothOff).not.toContain('Decisions line.');
+      expect(bothOff).not.toContain('Compliance gate is on.');
+
+      const built = walkFiles(path.join(fakeRoot, 'dist'), f => f.endsWith('.md'));
+      expect(built.length, 'the fixture build wrote nothing').toBeGreaterThanOrEqual(12);
+      expect(built.filter(f => containsVariantMarker(readFileSync(f, 'utf-8')))).toEqual([]);
+    });
+  });
+
+  it('each of the four variants equals the same host compiled with its arms resolved by hand', async () => {
+    await withFakeRoot(async fakeRoot => {
+      await write(fakeRoot, 'src/assets/commands/theta.mds', prompt('commands', 'theta', 'arms', 'arms'));
+      await write(fakeRoot, 'src/assets/commands/delta.mds', prompt('commands', 'delta', 'none', 'arms'));
+      await write(fakeRoot, 'src/assets/agents/iota.mds', prompt('agents', 'iota', 'arms', 'arms'));
+      // The references are plain hosts under other file names, so the build writes them with no split to do.
+      const resolved: ReadonlyArray<readonly [string, Form, Form]> = [
+        ['on-on', 'on', 'on'],
+        ['cur-off', 'off', 'on'],
+        ['comp-off', 'on', 'off'],
+        ['both-off', 'off', 'off'],
+      ];
+      for (const [tag, cur, comp] of resolved) {
+        await write(fakeRoot, `src/assets/commands/theta-${tag}-ref.mds`, prompt('commands', 'theta', cur, comp));
+        await write(fakeRoot, `src/assets/agents/iota-${tag}-ref.mds`, prompt('agents', 'iota', cur, comp));
+      }
+      await write(fakeRoot, 'src/assets/commands/delta-on-ref.mds', prompt('commands', 'delta', 'none', 'on'));
+      await write(fakeRoot, 'src/assets/commands/delta-off-ref.mds', prompt('commands', 'delta', 'none', 'off'));
+      const run = runBuild(fakeRoot);
+      expect(run.status, run.combined).toBe(0);
+
+      const equal = async (built: string, reference: string): Promise<void> => {
+        const a = await readIfPresent(fakeRoot, built);
+        const b = await readIfPresent(fakeRoot, reference);
+        expect(a, built).not.toBeNull();
+        expect(b, reference).not.toBeNull();
+        expect(a, `${built} must equal ${reference}`).toBe(b);
+      };
+      for (const kind of ['commands', 'agents'] as const) {
+        const name = kind === 'commands' ? 'theta' : 'iota';
+        await equal(`dist/${kind}/${name}.md`, `dist/${kind}/${name}-on-on-ref.md`);
+        await equal(`dist/curation-off/${kind}/${name}.md`, `dist/${kind}/${name}-cur-off-ref.md`);
+        await equal(`dist/compliance-off/${kind}/${name}.md`, `dist/${kind}/${name}-comp-off-ref.md`);
+        await equal(`dist/curation-compliance-off/${kind}/${name}.md`, `dist/${kind}/${name}-both-off-ref.md`);
+      }
+      await equal('dist/commands/delta.md', 'dist/commands/delta-on-ref.md');
+      await equal('dist/compliance-off/commands/delta.md', 'dist/commands/delta-off-ref.md');
+      // And the references are not themselves variants.
+      expect(treeOf(fakeRoot, 'dist/compliance-off')).toEqual(['agents/iota.md', 'commands/delta.md', 'commands/theta.md']);
+    });
+  });
+});
+
+describe('the variant manifest (TP-6)', () => {
+  it('records the axes of every compiled command and agent, sorted, with a version', async () => {
+    await withFakeRoot(async fakeRoot => {
+      await seedComplianceFixture(fakeRoot);
+      const run = runBuild(fakeRoot);
+      expect(run.status, run.combined).toBe(0);
+
+      const { text, manifest } = await manifestOf(fakeRoot);
+      expect(manifest.version).toBe(1);
+      expect(manifest.hosts).toEqual({
+        'agents/iota': { curation: true, compliance: true },
+        'commands/delta': { curation: false, compliance: true },
+        'commands/kappa': { curation: true, compliance: false },
+        'commands/plain': { curation: false, compliance: false },
+        'commands/theta': { curation: true, compliance: true },
+      });
+      expect(Object.keys(manifest.hosts), 'the hosts are listed in sorted order').toEqual([
+        'agents/iota',
+        'commands/delta',
+        'commands/kappa',
+        'commands/plain',
+        'commands/theta',
+      ]);
+      expect(text.endsWith('}\n'), 'the file ends in one newline').toBe(true);
+    });
+  });
+
+  it('is written on a build where no host has a compliance arm, and no compliance tree appears', async () => {
+    await withFakeRoot(async fakeRoot => {
+      await seedFixture(fakeRoot);
+      const run = runBuild(fakeRoot);
+      expect(run.status, run.combined).toBe(0);
+
+      const { manifest } = await manifestOf(fakeRoot);
+      expect(manifest.hosts).toEqual({
+        'agents/beta': { curation: true, compliance: false },
+        'agents/gamma': { curation: false, compliance: false },
+        'commands/alpha': { curation: true, compliance: false },
+        'commands/plain': { curation: false, compliance: false },
+      });
+      expect(treeOf(fakeRoot, 'dist/compliance-off')).toEqual([]);
+      expect(treeOf(fakeRoot, 'dist/curation-compliance-off')).toEqual([]);
+    });
+  });
+
+  it('is byte-identical across two builds of the same sources', async () => {
+    await withFakeRoot(async fakeRoot => {
+      await seedComplianceFixture(fakeRoot);
+      expect(runBuild(fakeRoot).status).toBe(0);
+      const first = (await manifestOf(fakeRoot)).text;
+      expect(runBuild(fakeRoot).status).toBe(0);
+      expect((await manifestOf(fakeRoot)).text).toBe(first);
+    });
+  });
+
+  it('lists no reference module: its sections are not prompts', async () => {
+    const mcp = readFileSync(path.join(ROOT, 'src', 'assets', 'mds', 'tracker', '_mcp.mds'), 'utf-8');
+    await withFakeRoot(async fakeRoot => {
+      await write(fakeRoot, 'src/assets/mds/tracker/_mcp.mds', mcp);
+      await write(fakeRoot, 'src/assets/commands/plain.mds', PLAIN_COMMAND);
+      const run = runBuild(fakeRoot);
+      expect(run.status, run.combined).toBe(0);
+      expect(await readIfPresent(fakeRoot, 'dist/skills/git/references/tracker/_mcp.md'), 'the module was built').not.toBeNull();
+      expect(Object.keys((await manifestOf(fakeRoot)).manifest.hosts)).toEqual(['commands/plain']);
+    });
+  });
+
+  it('is left as the build found it when the build refuses', async () => {
+    await withFakeRoot(async fakeRoot => {
+      await seedFixture(fakeRoot);
+      await write(fakeRoot, 'src/assets/commands/bad.mds', `---\ndescription: bad\noutput-dir: dist/commands\n---\n\n${CON}\nx\n${CEND}\n${CEND}\n`);
+      const absent = runBuild(fakeRoot);
+      expect(absent.status, `expected exit 1.\n${absent.combined}`).toBe(1);
+      expect(await readIfPresent(fakeRoot, 'dist/variant-axes.json'), 'a refused build writes no manifest').toBeNull();
+
+      await write(fakeRoot, 'dist/variant-axes.json', 'old\n');
+      const present = runBuild(fakeRoot);
+      expect(present.status, `expected exit 1.\n${present.combined}`).toBe(1);
+      expect(await readIfPresent(fakeRoot, 'dist/variant-axes.json'), 'a refused build leaves the old manifest').toBe('old\n');
+    });
+  });
+});
+
+describe('the orphan prune over the compliance trees is keyed on the files written (TP-6)', () => {
+  it('removes a file nothing wrote from either tree, in any subdirectory, and leaves a non-.md entry alone', async () => {
+    await withFakeRoot(async fakeRoot => {
+      await seedComplianceFixture(fakeRoot);
+      await write(fakeRoot, 'dist/compliance-off/commands/stale.md', 'old\n');
+      await write(fakeRoot, 'dist/compliance-off/agents/deep/stale.md', 'old\n');
+      await write(fakeRoot, 'dist/compliance-off/stale.md', 'old\n');
+      await write(fakeRoot, 'dist/curation-compliance-off/commands/stale.md', 'old\n');
+      await write(fakeRoot, 'dist/curation-compliance-off/skills/stale.md', 'old\n');
+      // A concurrent build's staging file: deleting it would fail that build's rename.
+      await write(fakeRoot, 'dist/compliance-off/commands/theta.md.99999.tmp', 'staged\n');
+      await write(fakeRoot, 'dist/curation-compliance-off/commands/theta.md.99999.tmp', 'staged\n');
+      const run = runBuild(fakeRoot);
+      expect(run.status, run.combined).toBe(0);
+
+      expect(prunedPaths(run.combined).sort()).toEqual([
+        'dist/compliance-off/agents/deep/stale.md',
+        'dist/compliance-off/commands/stale.md',
+        'dist/compliance-off/stale.md',
+        'dist/curation-compliance-off/commands/stale.md',
+        'dist/curation-compliance-off/skills/stale.md',
+      ]);
+      expect(run.combined, 'the compliance-off reason must be stated').toContain('(no compliance arm)');
+      expect(run.combined, 'the both-off reason must be stated').toContain('(no curation and compliance arms)');
+      expect(await readIfPresent(fakeRoot, 'dist/compliance-off/commands/theta.md'), 'a written variant is never pruned').not.toBeNull();
+      expect(await readIfPresent(fakeRoot, 'dist/curation-compliance-off/commands/theta.md'), 'a written variant is never pruned').not.toBeNull();
+      expect(await readIfPresent(fakeRoot, 'dist/compliance-off/commands/theta.md.99999.tmp')).not.toBeNull();
+      expect(await readIfPresent(fakeRoot, 'dist/curation-compliance-off/commands/theta.md.99999.tmp')).not.toBeNull();
+    });
+  });
+
+  it('removes the variants of a host that lost an arm, and keeps the variants it still has', async () => {
+    await withFakeRoot(async fakeRoot => {
+      await seedComplianceFixture(fakeRoot);
+      expect(runBuild(fakeRoot).status).toBe(0);
+      expect(treeOf(fakeRoot, 'dist/curation-compliance-off')).toEqual(['agents/iota.md', 'commands/theta.md']);
+
+      // theta drops its compliance arm, so it keeps curation-off and loses compliance-off and both-off.
+      await write(fakeRoot, 'src/assets/commands/theta.mds', prompt('commands', 'theta', 'arms', 'none'));
+      const run = runBuild(fakeRoot);
+      expect(run.status, run.combined).toBe(0);
+
+      expect(prunedPaths(run.combined).sort()).toEqual([
+        'dist/compliance-off/commands/theta.md',
+        'dist/curation-compliance-off/commands/theta.md',
+      ]);
+      expect(treeOf(fakeRoot, 'dist/curation-off')).toEqual(['agents/iota.md', 'commands/kappa.md', 'commands/theta.md']);
+      expect(treeOf(fakeRoot, 'dist/compliance-off')).toEqual(['agents/iota.md', 'commands/delta.md']);
+      expect(treeOf(fakeRoot, 'dist/curation-compliance-off')).toEqual(['agents/iota.md']);
+      const { manifest } = await manifestOf(fakeRoot);
+      expect(manifest.hosts['commands/theta']).toEqual({ curation: true, compliance: false });
+    });
+  });
+
+  it('prunes a tree when no host carries an arm at all', async () => {
+    await withFakeRoot(async fakeRoot => {
+      await write(fakeRoot, 'src/assets/commands/plain.mds', PLAIN_COMMAND);
+      await write(fakeRoot, 'dist/compliance-off/commands/old.md', 'old\n');
+      await write(fakeRoot, 'dist/curation-compliance-off/agents/old.md', 'old\n');
+      const run = runBuild(fakeRoot);
+      expect(run.status, run.combined).toBe(0);
+      expect(prunedPaths(run.combined).sort()).toEqual(['dist/compliance-off/commands/old.md', 'dist/curation-compliance-off/agents/old.md']);
+    });
+  });
+
+  it('an unchanged rebuild prunes nothing', async () => {
+    await withFakeRoot(async fakeRoot => {
+      await seedComplianceFixture(fakeRoot);
+      expect(runBuild(fakeRoot).status).toBe(0);
+      const second = runBuild(fakeRoot);
+      expect(second.status, second.combined).toBe(0);
+      expect(prunedPaths(second.combined), 'a rebuild must prune nothing').toEqual([]);
+    });
+  });
+
+  it('prunes nothing when the build refuses', async () => {
+    await withFakeRoot(async fakeRoot => {
+      await seedComplianceFixture(fakeRoot);
+      await write(fakeRoot, 'src/assets/commands/bad.mds', `---\ndescription: bad\noutput-dir: dist/commands\n---\n\n${CON}\nx\n${CEND}\n${CEND}\n`);
+      await write(fakeRoot, 'dist/compliance-off/commands/stale.md', 'old\n');
+      await write(fakeRoot, 'dist/curation-compliance-off/commands/stale.md', 'old\n');
+      const run = runBuild(fakeRoot);
+      expect(run.status, `expected exit 1.\n${run.combined}`).toBe(1);
+      expect(await readIfPresent(fakeRoot, 'dist/compliance-off/commands/stale.md'), 'a refused build leaves dist/ as it found it').not.toBeNull();
+      expect(await readIfPresent(fakeRoot, 'dist/curation-compliance-off/commands/stale.md'), 'a refused build leaves dist/ as it found it').not.toBeNull();
+      expect(prunedPaths(run.combined)).toEqual([]);
+    });
+  });
+});
+
+describe('what the build refuses on the compliance axis (TP-6)', () => {
+  it('names the axis of the refusal: a compliance arm that does not nest is a compliance-variant refusal with a neighbour to find it by', async () => {
+    await withFakeRoot(async fakeRoot => {
+      await seedComplianceFixture(fakeRoot);
+      await write(
+        fakeRoot,
+        'src/assets/commands/bad.mds',
+        `---\ndescription: bad\noutput-dir: dist/commands\n---\n\n# bad\n\nThe step.\n${CON}\nfirst\n${CON}\nsecond\n${CEND}\n`,
+      );
+      const run = runBuild(fakeRoot);
+      expect(run.status, `expected exit 1.\n${run.combined}`).toBe(1);
+      expect(run.combined).toContain('src/assets/commands/bad.mds: compliance-variant split refused');
+      expect(run.combined).not.toContain('src/assets/commands/bad.mds: curation-variant split refused');
+      expect(run.combined).toContain('a compliance:on marker inside the on arm');
+      expect(run.combined, 'the quoted neighbour above the second marker').toContain('(below "first")');
+      // The other hosts still compiled: one refusal does not abandon the rest.
+      expect(await readIfPresent(fakeRoot, 'dist/commands/plain.md')).not.toBeNull();
+    });
+  });
+
+  it('the neighbour of a refusal skips a compliance marker line, as it skips a curation one', async () => {
+    await withFakeRoot(async fakeRoot => {
+      await write(
+        fakeRoot,
+        'src/assets/commands/bad.mds',
+        `---\ndescription: bad\noutput-dir: dist/commands\n---\n\n# bad\n\nBefore.\n${CON}\n${CON}\nx\n${CEND}\n`,
+      );
+      const run = runBuild(fakeRoot);
+      expect(run.status, `expected exit 1.\n${run.combined}`).toBe(1);
+      expect(run.combined).toContain('(below "Before.")');
+    });
+  });
+
+  it('refuses a stray compliance marker and an interleaving of the two axes, each naming its axis', async () => {
+    const cases: ReadonlyArray<readonly [string, string, string, string]> = [
+      ['stray', `text ${CON}\n`, 'compliance-variant split refused', 'names a compliance marker but is not one'],
+      ['unopened', `text\n${CEND}\n`, 'compliance-variant split refused', 'a compliance:end marker with no open arm'],
+      ['unclosed', `${CON}\ntext\n`, 'compliance-variant split refused', 'is never closed with compliance:end'],
+      ['overlap', `${ON}\ntext\n${CON}\nmore\n${END}\n${CEND}\n`, 'curation-variant split refused', 'arms of two axes may nest but not overlap'],
+    ];
+    await withFakeRoot(async fakeRoot => {
+      for (const [name, bodyText] of cases) {
+        await write(fakeRoot, `src/assets/commands/${name}.mds`, `---\ndescription: ${name}\noutput-dir: dist/commands\n---\n\n# ${name}\n\n${bodyText}`);
+      }
+      const run = runBuild(fakeRoot);
+      expect(run.status, `expected exit 1.\n${run.combined}`).toBe(1);
+      for (const [name, , label, message] of cases) {
+        expect(run.combined, `${name}: the host and axis are named`).toContain(`src/assets/commands/${name}.mds: ${label}`);
+        expect(run.combined, `${name}: the reason is stated`).toContain(message);
+        expect(await readIfPresent(fakeRoot, `dist/commands/${name}.md`), `${name}: nothing is written`).toBeNull();
+      }
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // The real built tree
 // ---------------------------------------------------------------------------
 
@@ -566,9 +958,9 @@ function distMarkdown(sub: string): string[] {
   return walkFiles(dir, f => f.endsWith('.md')).map(f => path.relative(dir, f).split(path.sep).join('/')).sort();
 }
 
-/** Named collector: the dist/ Markdown files carrying a curation marker. Driven by the live assertion and its probe. */
+/** Named collector: the dist/ Markdown files carrying a marker of either axis. Driven by the live assertion and its probe. */
 function collectSurvivingMarkers(files: ReadonlyArray<{ readonly name: string; readonly content: string }>): string[] {
-  return files.filter(f => containsCurationMarker(f.content)).map(f => f.name);
+  return files.filter(f => containsVariantMarker(f.content)).map(f => f.name);
 }
 
 describe('the built dist/ tree', () => {
@@ -595,7 +987,7 @@ describe('the built dist/ tree', () => {
     }
   });
 
-  it('no dist Markdown file carries a curation marker (AC-133)', () => {
+  it('no dist Markdown file carries a curation or compliance marker (AC-133)', () => {
     const files = walkFiles(DIST, f => f.endsWith('.md')).map(f => ({
       name: path.relative(ROOT, f).split(path.sep).join('/'),
       content: readFileSync(f, 'utf-8'),
@@ -618,8 +1010,10 @@ describe('the built dist/ tree', () => {
       { name: 'dist/commands/a.md', content: `text\n${ON}\nmore\n` },
       { name: 'dist/agents/b.md', content: 'text <!--curation:end--> more\n' },
       { name: 'dist/agents/c.md', content: 'curation is on here; <!-- an ordinary comment -->\n' },
+      { name: 'dist/commands/d.md', content: `text\n${CON}\nmore\n` },
+      { name: 'dist/agents/e.md', content: 'compliance:on is a setting here; <!-- an ordinary comment -->\n' },
     ];
-    expect(collectSurvivingMarkers(seeded)).toEqual(['dist/commands/a.md', 'dist/agents/b.md']);
+    expect(collectSurvivingMarkers(seeded)).toEqual(['dist/commands/a.md', 'dist/agents/b.md', 'dist/commands/d.md']);
   });
 
   it('CURATION_VARIANT_HOSTS names each host as <kind>/<name> with a known kind and no duplicate', () => {

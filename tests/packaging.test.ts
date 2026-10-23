@@ -21,15 +21,25 @@
  * Guard 6e (generated references): the tarball carries every file the installer's
  *   reference overlay converges to. An absent generated reference makes the overlay
  *   throw, so a packing regression would surface on a user's first init, not here.
+ *
+ * Guard 6f (variant trees): the tarball carries the variant manifest
+ *   dist/variant-axes.json, and exactly the files the rosters name under the three off
+ *   trees (dist/curation-off/, dist/compliance-off/, dist/curation-compliance-off/).
+ *   While no host carries a compliance arm the two new trees hold no file, so a scoped
+ *   `npm pack` of seeded files proves the `files` field would carry a file under each.
  */
 
 import { describe, it, expect } from 'vitest';
-import { execSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 import { promises as fs } from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import {
   DIST_COMMAND_FILES,
   CURATION_OFF_FILES,
+  CURATION_VARIANT_HOSTS,
+  COMPLIANCE_OFF_FILES,
+  COMPLIANCE_VARIANT_HOSTS,
   MDS_COMMAND_HOSTS,
   MDS_GENERATOR_HOSTS,
   MDS_REFERENCE_MODULES,
@@ -40,7 +50,13 @@ import {
   GATED_REFERENCE_MODULE_SOURCES,
   generatedReferenceManifest,
 } from '../src/core/mds-variants.js';
-import { LEGACY_OFF_OUTPUT_DIR } from '../src/core/curation-variants.js';
+import {
+  BOTH_OFF_OUTPUT_DIR,
+  COMPLIANCE_OFF_OUTPUT_DIR,
+  CURATION_OFF_OUTPUT_DIR,
+  LEGACY_OFF_OUTPUT_DIR,
+  VARIANT_MANIFEST_REL_PATH,
+} from '../src/core/curation-variants.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 
@@ -442,6 +458,11 @@ describe('Guard 5 (files[] coverage): package.json includes required directories
  *  (e) Carry exactly the curation-off variants named in CURATION_VARIANT_HOSTS
  *      (dist/curation-off/), the files a curation-off machine installs in place of
  *      the dist/commands/ and dist/agents/ prompts.
+ *  (f) Carry the variant manifest (dist/variant-axes.json) and exactly the variants
+ *      the rosters name under the compliance-off tree (dist/compliance-off/) and the
+ *      both-off tree (dist/curation-compliance-off/). A scoped pack of seeded files
+ *      proves the `files` field carries a file under each tree, which the real
+ *      tarball cannot show while no host has a compliance arm.
  *
  * Assert on parsed `npm pack --dry-run --json` output (structured
  * data), not on pipeline tails or partial string matching.
@@ -545,14 +566,15 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
   });
 
   /**
-   * Named collector: the curation-off variants a file list carries, relative to
-   * dist/curation-off/. Used by the live assertion AND its probe, so the probe
-   * cannot pass against a re-implementation of the filter.
+   * Named collector: the variants a file list carries under one off tree, relative
+   * to that tree. Used by the live assertions AND their probe, so the probe cannot
+   * pass against a re-implementation of the filter.
    */
-  function collectCurationOffFiles(files: readonly string[]): string[] {
+  function collectOffTreeFiles(files: readonly string[], treeDir: string): string[] {
+    const prefix = `${treeDir}/`;
     return files
-      .filter(f => /^dist\/curation-off\/.+\.md$/.test(f))
-      .map(f => f.replace(/^dist\/curation-off\//, ''))
+      .filter(f => f.startsWith(prefix) && f.length > prefix.length && f.endsWith('.md'))
+      .map(f => f.slice(prefix.length))
       .sort();
   }
 
@@ -565,7 +587,7 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
     // Set equality against the roster, so it holds at every step: an arm added
     // without a row, or a row left after its arm is gone, moves the tarball off it.
     expect(
-      collectCurationOffFiles(files),
+      collectOffTreeFiles(files, CURATION_OFF_OUTPUT_DIR),
       'Tarball dist/curation-off/*.md set does not match CURATION_VARIANT_HOSTS in ' +
       'tests/fixtures/mds-manifest.ts. A curation-off machine installs these files; one missing ' +
       'ships the curation-on prompt there.',
@@ -615,20 +637,144 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
       'dist/curation-off/agents/notes.txt',
       'dist/commands/x.md',
     ];
-    expect(collectCurationOffFiles(seeded)).toEqual(['agents/y.md', 'commands/x.md']);
+    expect(collectOffTreeFiles(seeded, CURATION_OFF_OUTPUT_DIR)).toEqual(['agents/y.md', 'commands/x.md']);
   });
 
-  it('package.json files[] ships dist/ wholesale and excludes nothing under dist/curation-off/', async () => {
-    // The tarball arm above is a roster comparison and so holds with an empty
-    // roster; this one is the presence arm. It reads the packaging contract itself:
-    // `dist/` ships whole, and no negated pattern can take the variants back out.
+  /**
+   * The both-off roster: a host has a both-off variant when it carries an arm on
+   * each axis, so the roster is the hosts in both rosters, relative to
+   * dist/curation-compliance-off/.
+   */
+  const BOTH_OFF_FILES: readonly string[] = COMPLIANCE_VARIANT_HOSTS
+    .filter(h => CURATION_VARIANT_HOSTS.includes(h))
+    .map(h => `${h}.md`);
+
+  it('tarball carries exactly the roster\'s compliance-off variants (dist/compliance-off/)', () => {
+    const files = getPackFiles();
+    expect(
+      files.length,
+      'npm pack --dry-run produced no files — run `npm run build` first (guard cannot verify)',
+    ).toBeGreaterThan(0);
+    expect(
+      collectOffTreeFiles(files, COMPLIANCE_OFF_OUTPUT_DIR),
+      'Tarball dist/compliance-off/*.md set does not match COMPLIANCE_VARIANT_HOSTS in ' +
+      'tests/fixtures/mds-manifest.ts. A compliance-off machine installs these files; one missing ' +
+      'ships the compliance-on prompt there.',
+    ).toEqual([...COMPLIANCE_OFF_FILES].sort());
+  });
+
+  it('tarball carries exactly the roster\'s both-off variants (dist/curation-compliance-off/)', () => {
+    const files = getPackFiles();
+    expect(
+      files.length,
+      'npm pack --dry-run produced no files — run `npm run build` first (guard cannot verify)',
+    ).toBeGreaterThan(0);
+    expect(
+      collectOffTreeFiles(files, BOTH_OFF_OUTPUT_DIR),
+      'Tarball dist/curation-compliance-off/*.md set does not match the hosts that carry both a ' +
+      'curation arm and a compliance arm. A machine with both axes off installs these files.',
+    ).toEqual([...BOTH_OFF_FILES].sort());
+  });
+
+  it('tarball carries the variant manifest the installer reads (dist/variant-axes.json)', () => {
+    const files = getPackFiles();
+    expect(
+      files.length,
+      'npm pack --dry-run produced no files — run `npm run build` first (guard cannot verify)',
+    ).toBeGreaterThan(0);
+    // The manifest is the only file that is present for every build, even while no
+    // host carries a compliance arm. A compliance-off install refuses without it, so
+    // a tarball that dropped it would fail on a user's first init.
+    expect(
+      files,
+      `The tarball must carry ${VARIANT_MANIFEST_REL_PATH}. Run \`npm run build:mds\` before \`npm pack\`.`,
+    ).toContain(VARIANT_MANIFEST_REL_PATH);
+  });
+
+  it('known-bad probe: the collector keeps each tree apart and ignores a non-prompt file', () => {
+    const seeded = [
+      'dist/compliance-off/commands/x.md',
+      'dist/compliance-off/agents/notes.txt',
+      'dist/curation-compliance-off/agents/y.md',
+      'dist/curation-off/commands/z.md',
+      'dist/commands/x.md',
+    ];
+    expect(collectOffTreeFiles(seeded, COMPLIANCE_OFF_OUTPUT_DIR)).toEqual(['commands/x.md']);
+    expect(collectOffTreeFiles(seeded, BOTH_OFF_OUTPUT_DIR)).toEqual(['agents/y.md']);
+    expect(collectOffTreeFiles(seeded, CURATION_OFF_OUTPUT_DIR)).toEqual(['commands/z.md']);
+  });
+
+  /**
+   * Run `npm pack --dry-run --json` over a scratch package that holds the given
+   * files and the real package.json `files` patterns, and return the packed paths.
+   * The scratch folder is the working directory, HOME and the npm cache, so the run
+   * reads no config of the real machine and writes nothing outside it.
+   */
+  async function packSeededFiles(patterns: readonly string[], seeded: readonly string[]): Promise<string[]> {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-pack-'));
+    try {
+      await fs.writeFile(
+        path.join(dir, 'package.json'),
+        JSON.stringify({ name: 'pack-fixture', version: '0.0.0', files: patterns }),
+      );
+      for (const rel of seeded) {
+        await fs.mkdir(path.dirname(path.join(dir, rel)), { recursive: true });
+        await fs.writeFile(path.join(dir, rel), 'seed\n');
+      }
+      const raw = execFileSync('npm', ['pack', '--dry-run', '--json'], {
+        cwd: dir,
+        timeout: 30_000,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: {
+          ...process.env,
+          HOME: dir,
+          npm_config_cache: path.join(dir, '.npm-cache'),
+          npm_config_userconfig: path.join(dir, '.npmrc'),
+          npm_config_update_notifier: 'false',
+        },
+      }).toString();
+      const parsed = JSON.parse(raw) as Array<{ files: Array<{ path: string }> }>;
+      return parsed[0].files.map(f => f.path).sort();
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('package.json files[] packs a file under each off tree and the manifest, and still drops a map and a stray path', async () => {
+    // The tarball arms above compare against rosters and so hold with an empty
+    // roster: no host carries a compliance arm yet, and the two new trees stay empty.
+    // This is the presence arm. It packs seeded files under the REAL files[] patterns,
+    // so a pattern that stopped covering a tree turns it red before the first arm lands.
     const pkg = JSON.parse(await fs.readFile(path.join(ROOT, 'package.json'), 'utf-8')) as { files?: string[] };
     const patterns = pkg.files ?? [];
     expect(patterns, 'package.json files[] must ship dist/ wholesale').toContain('dist/');
     const excluded = patterns.filter(p => p.startsWith('!') && !/^!dist\/\*\*\/\*\.(map|d\.ts)$/.test(p));
     expect(
       excluded,
-      'a negated files[] pattern other than the map and declaration excludes must be checked against dist/curation-off/',
+      'a negated files[] pattern other than the map and declaration excludes must be checked against the off trees',
+    ).toEqual([]);
+
+    const wanted = [
+      `${CURATION_OFF_OUTPUT_DIR}/commands/x.md`,
+      `${CURATION_OFF_OUTPUT_DIR}/agents/y.md`,
+      `${COMPLIANCE_OFF_OUTPUT_DIR}/commands/x.md`,
+      `${COMPLIANCE_OFF_OUTPUT_DIR}/agents/y.md`,
+      `${BOTH_OFF_OUTPUT_DIR}/commands/x.md`,
+      `${BOTH_OFF_OUTPUT_DIR}/agents/y.md`,
+      VARIANT_MANIFEST_REL_PATH,
+    ];
+    // Controls: the scratch pack must apply the patterns. A map file under a tree and a
+    // path outside every pattern are dropped; if either were packed, "wanted is packed"
+    // would hold for any package at all.
+    const dropped = [`${COMPLIANCE_OFF_OUTPUT_DIR}/commands/x.md.map`, 'plugins/x/x.md'];
+    const packed = await packSeededFiles(patterns, [...wanted, ...dropped]);
+    expect(
+      wanted.filter(f => !packed.includes(f)),
+      'package.json files[] must pack a file under every off tree and the variant manifest',
+    ).toEqual([]);
+    expect(
+      dropped.filter(f => packed.includes(f)),
+      'the scratch pack must honour files[]: a map file and a path outside every pattern stay out',
     ).toEqual([]);
   });
 
