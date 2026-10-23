@@ -1400,8 +1400,7 @@ export async function runSelectivePhaseForScope(opts: {
         plugins: retained,
         warn: (msg) => p.log.warn(msg),
         mayChange,
-        onlyIfInstalled: true,
-        sentinelMode: 'remove-only',
+        mode: 'uninstall',
       });
     }
   }

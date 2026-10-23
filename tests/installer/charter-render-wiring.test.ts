@@ -171,7 +171,7 @@ describe('composeScripts: the verbatim script copy writes neither the charter no
     await composeScripts(scripts);
     const warnings: string[] = [];
     const first = await installRenderedCharter({
-      scriptsDir: scripts, plugins: [CORE, AMBIENT, IMPLEMENT], warn: m => warnings.push(m), sentinelMode: 'sync',
+      scriptsDir: scripts, plugins: [CORE, AMBIENT, IMPLEMENT], warn: m => warnings.push(m), mode: 'install',
     });
     expect(first).toEqual({ charter: 'rewritten', sentinel: 'rewritten' });
     expect(warnings).toEqual([]);
@@ -183,7 +183,7 @@ describe('composeScripts: the verbatim script copy writes neither the charter no
     expect(sentinel.mode).toBe(0o755);
 
     const second = await installRenderedCharter({
-      scriptsDir: scripts, plugins: [CORE, AMBIENT, IMPLEMENT], warn: m => warnings.push(m), sentinelMode: 'sync',
+      scriptsDir: scripts, plugins: [CORE, AMBIENT, IMPLEMENT], warn: m => warnings.push(m), mode: 'install',
     });
     expect(second).toEqual({ charter: 'unchanged', sentinel: 'unchanged' });
     expect(await snapshot(charterAt())).toEqual(charter);
@@ -193,7 +193,7 @@ describe('composeScripts: the verbatim script copy writes neither the charter no
   it('a script copy over a render leaves the render, its mtime and its mode untouched', async () => {
     await composeScripts(scripts);
     await installRenderedCharter({
-      scriptsDir: scripts, plugins: [CORE, AMBIENT, REVIEW], warn: () => {}, sentinelMode: 'sync',
+      scriptsDir: scripts, plugins: [CORE, AMBIENT, REVIEW], warn: () => {}, mode: 'install',
     });
     const charter = await snapshot(charterAt());
     expect(charter.bytes, 'a set without implement renders shorter than the source').not.toBe(SOURCE);
@@ -207,7 +207,7 @@ describe('composeScripts: the verbatim script copy writes neither the charter no
   it('a script copy does not bring a removed sentinel back', async () => {
     await composeScripts(scripts);
     await installRenderedCharter({
-      scriptsDir: scripts, plugins: [CORE, AMBIENT, IMPLEMENT], warn: () => {}, sentinelMode: 'sync',
+      scriptsDir: scripts, plugins: [CORE, AMBIENT, IMPLEMENT], warn: () => {}, mode: 'install',
     });
     await fs.rm(sentinelAt());
 
@@ -346,7 +346,7 @@ describe('hudOnlyCharterPlugins: the record of the machine, or nothing', () => {
     const scripts = path.join(root, 'scripts');
     await composeScripts(scripts);
     const result = await installRenderedCharter({
-      scriptsDir: scripts, plugins: hudOnlyCharterPlugins(null), warn: () => {}, sentinelMode: 'sync',
+      scriptsDir: scripts, plugins: hudOnlyCharterPlugins(null), warn: () => {}, mode: 'install',
     });
     expect(result.charter).toBe('rewritten');
     expect(handoffLines(await fs.readFile(path.join(scripts, CHARTER_RELPATH), 'utf-8'))).toBe(0);
@@ -358,7 +358,7 @@ describe('hudOnlyCharterPlugins: the record of the machine, or nothing', () => {
     await composeScripts(scripts);
     const manifest = makeManifest({ plugins: ['devflow-core-skills', 'devflow-implement'] });
     await installRenderedCharter({
-      scriptsDir: scripts, plugins: hudOnlyCharterPlugins(manifest), warn: () => {}, sentinelMode: 'sync',
+      scriptsDir: scripts, plugins: hudOnlyCharterPlugins(manifest), warn: () => {}, mode: 'install',
     });
     expect(handoffLines(await fs.readFile(path.join(scripts, CHARTER_RELPATH), 'utf-8'))).toBe(1);
     expect(await exists(path.join(scripts, HANDOFF_SENTINEL_RELPATH))).toBe(true);
@@ -460,7 +460,7 @@ describe('runSelectivePhaseForScope renders the charter for the plugins that sta
   /** An installed charter and sentinel for `plugins`, written by the real writer. */
   async function installCharterFor(plugins: PluginDefinition[]): Promise<void> {
     await installRenderedCharter({
-      scriptsDir: path.join(devflowDir, 'scripts'), plugins, warn: () => {}, sentinelMode: 'sync',
+      scriptsDir: path.join(devflowDir, 'scripts'), plugins, warn: () => {}, mode: 'install',
     });
   }
 

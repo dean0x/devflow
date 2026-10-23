@@ -431,7 +431,7 @@ describe('installRenderedCharter', () => {
   const FOUNDER = names('devflow-code-review', 'devflow-implement', 'devflow-plan', 'devflow-release', 'devflow-resolve');
 
   const sync = (plugins: InstallRenderedCharterOptions['plugins'], extra: Partial<InstallRenderedCharterOptions> = {}) =>
-    installRenderedCharter({ scriptsDir: installed, plugins, warn, sentinelMode: 'sync', ...extra });
+    installRenderedCharter({ scriptsDir: installed, plugins, warn, mode: 'install', ...extra });
 
   beforeEach(async () => {
     root = await fs.mkdtemp(path.join(os.tmpdir(), 'charter-render-'));
@@ -519,29 +519,25 @@ describe('installRenderedCharter', () => {
     expect(warnings).toEqual([]);
   });
 
-  it('never creates the sentinel under remove-only, and never touches one while implement stays', async () => {
-    expect(await sync(FOUNDER, { sentinelMode: 'remove-only' })).toEqual({ charter: 'rewritten', sentinel: 'absent' });
-    expect(await exists(sentinelPath())).toBe(false);
-
-    await fs.writeFile(sentinelPath(), 'stale marker\n');
-    expect(await sync(FOUNDER, { sentinelMode: 'remove-only' })).toEqual({ charter: 'unchanged', sentinel: 'unchanged' });
-    expect(await fs.readFile(sentinelPath(), 'utf-8')).toBe('stale marker\n');
-
-    expect(await sync(names('devflow-plan'), { sentinelMode: 'remove-only' })).toMatchObject({ sentinel: 'rewritten' });
+  it('in uninstall mode creates neither file on a machine that has none', async () => {
+    expect(await sync(FOUNDER, { mode: 'uninstall' })).toEqual({ charter: 'absent', sentinel: 'absent' });
+    expect(await exists(charterPath())).toBe(false);
     expect(await exists(sentinelPath())).toBe(false);
     expect(warnings).toEqual([]);
   });
 
-  it('renders only an installed charter under onlyIfInstalled', async () => {
-    const first = await sync(FOUNDER, { onlyIfInstalled: true });
-    expect(first.charter).toBe('absent');
-    expect(await exists(charterPath())).toBe(false);
-
+  it('in uninstall mode renders over an installed charter, leaves the sentinel while implement stays, and removes it when implement goes', async () => {
     await fs.writeFile(charterPath(), SOURCE, { mode: 0o755 });
-    const second = await sync(names('devflow-plan'), { onlyIfInstalled: true, sentinelMode: 'remove-only' });
-    expect(second.charter).toBe('rewritten');
+    await fs.writeFile(sentinelPath(), 'stale marker\n');
+
+    expect(await sync(FOUNDER, { mode: 'uninstall' })).toEqual({ charter: 'rewritten', sentinel: 'unchanged' });
+    expect(await fs.readFile(charterPath(), 'utf-8')).not.toContain('devflow:research');
+    expect(await fs.readFile(sentinelPath(), 'utf-8')).toBe('stale marker\n');
+
+    expect(await sync(names('devflow-plan'), { mode: 'uninstall' })).toMatchObject({ charter: 'rewritten', sentinel: 'rewritten' });
     expect(await fs.readFile(charterPath(), 'utf-8')).not.toContain('devflow:implement');
     expect(await exists(sentinelPath())).toBe(false);
+    expect(warnings).toEqual([]);
   });
 
   it('creates the hooks/assets directory when the copy left none', async () => {
@@ -607,7 +603,7 @@ describe('installRenderedCharter', () => {
   });
 
   it('refuses a relative scripts directory with one warning', async () => {
-    const result = await installRenderedCharter({ scriptsDir: 'scripts', plugins: FOUNDER, warn, sentinelMode: 'sync' });
+    const result = await installRenderedCharter({ scriptsDir: 'scripts', plugins: FOUNDER, warn, mode: 'install' });
     expect(result).toEqual({ charter: 'failed', sentinel: 'failed' });
     expect(warnings.length).toBe(1);
   });
@@ -618,7 +614,7 @@ describe('installRenderedCharter', () => {
       scriptsDir: installed,
       plugins: FOUNDER,
       warn: () => { throw new Error('sink closed'); },
-      sentinelMode: 'sync',
+      mode: 'install',
     });
     expect(result.charter).toBe('failed');
   });

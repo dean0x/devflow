@@ -1097,7 +1097,7 @@ export const initCommand = new Command('init')
         scriptsDir: scriptsTarget,
         plugins: hudOnlyCharterPlugins(existingHudManifest),
         warn: (msg) => p.log.warn(msg),
-        sentinelMode: 'sync',
+        mode: 'install',
       });
       // A manifest readManifest() refuses reads as none, but its machine gate level is still
       // stored there: --hud-only keeps it and says so, as the full init does. --reset does not

@@ -25,8 +25,8 @@
  *     The per-prompt preamble branches on its existence with a shell builtin, so the plan-handoff directive
  *     runs only where the workflow it names exists. This module is the only writer of the charter and the
  *     sentinel at install time; the verbatim script copy skips both.
- *   - `sentinelMode: 'remove-only'` is the uninstall mode. An uninstall re-renders from the manifest
- *     record and may take the sentinel away, but never creates one.
+ *   - `mode: 'uninstall'` is the uninstall mode. An uninstall re-renders a charter that is installed from the
+ *     manifest record and may take the sentinel away, but never creates a file.
  *   - After a package upgrade the installed charter stays as rendered until the next `devflow init`.
  *
  * Never throws: every failure is a warning and a `failed` outcome, because the install must not die on a
@@ -298,10 +298,12 @@ export interface InstallRenderedCharterOptions {
   readonly warn: (msg: string) => void;
   /** A change guard for a legacy local install (D-CLI-NO-SYMLINK); omitted, every target may change. */
   readonly mayChange?: (target: string) => Promise<boolean>;
-  /** Render over a file that is installed; never create one. The uninstall mode. */
-  readonly onlyIfInstalled?: boolean;
-  /** `sync` writes the sentinel while implement is installed; `remove-only` never creates it. */
-  readonly sentinelMode: 'sync' | 'remove-only';
+  /**
+   * `install` writes the charter and keeps the sentinel in step with the selection. `uninstall` only changes
+   * what is already installed: it renders over a charter that is there, takes the sentinel away, and never
+   * creates either file.
+   */
+  readonly mode: 'install' | 'uninstall';
   /** The packaged scripts directory to read the full charter and the sentinel from. Tests only; omitted, the package's own. */
   readonly packagedScriptsDir?: string;
 }
@@ -374,7 +376,7 @@ function describeFailure(result: Extract<CharterRenderResult, { ok: false }>): s
  * changes nothing writes nothing.
  */
 export async function installRenderedCharter(opts: InstallRenderedCharterOptions): Promise<InstallRenderedCharterResult> {
-  const { scriptsDir: target, plugins, mayChange, onlyIfInstalled = false, sentinelMode } = opts;
+  const { scriptsDir: target, plugins, mayChange, mode } = opts;
   const warn = (msg: string): void => {
     try { opts.warn(msg); } catch { /* a closed sink must not fail the install */ }
   };
@@ -401,7 +403,7 @@ export async function installRenderedCharter(opts: InstallRenderedCharterOptions
   const installCharter = async (): Promise<CharterFileOutcome> => {
     try {
       const current = await readIfPresent(charterTarget);
-      if (current === null && onlyIfInstalled) return 'absent';
+      if (current === null && mode === 'uninstall') return 'absent';
       const root = packagedRoot();
       if (root === null) return 'failed';
       const source = await fs.readFile(path.join(root, CHARTER_RELPATH), 'utf-8');
@@ -418,9 +420,7 @@ export async function installRenderedCharter(opts: InstallRenderedCharterOptions
     try {
       const current = await readIfPresent(sentinelTarget);
       if (!inventory.commands.has(HANDOFF_COMMAND)) return await removeFile(sentinelTarget, current, mayChange);
-      if (sentinelMode === 'remove-only' || (current === null && onlyIfInstalled)) {
-        return current === null ? 'absent' : 'unchanged';
-      }
+      if (mode === 'uninstall') return current === null ? 'absent' : 'unchanged';
       const root = packagedRoot();
       if (root === null) return 'failed';
       const text = await fs.readFile(path.join(root, HANDOFF_SENTINEL_RELPATH), 'utf-8');

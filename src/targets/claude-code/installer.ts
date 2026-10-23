@@ -2339,7 +2339,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     scriptsDir: scriptsTarget,
     plugins: options.effectivePlugins ?? plugins,
     warn,
-    sentinelMode: 'sync',
+    mode: 'install',
   });
 
   spinner.stop('Components installed via file copy');
