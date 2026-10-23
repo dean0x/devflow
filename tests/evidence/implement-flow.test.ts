@@ -77,6 +77,7 @@ import {
   type OrderRule,
 } from '../helpers.js'
 import { PROJECT_CONFIG_LIB, SETTINGS_SCRIPT, scopedEnv } from '../evidence-policy/scripted-shim.js'
+import { seedOnce } from '../guards/level-guard-helpers.js'
 import { PR_EVIDENCE_SCRIPT, RESOLVE_BASE_SCRIPT, VERIFY_EVIDENCE_SCRIPT } from './seam.js'
 
 /** Transcribed from the script's JSDoc — only what this suite calls. */
@@ -1676,5 +1677,153 @@ describe('#495: the curation-off build of /implement states the same fresh-base 
     expect(collectBaseBranchGuardDefects(off)).toEqual([])
     expect(collectInlineResolverDefects(off)).toEqual([])
     expect(collectOrchestrationPrincipleDefects(off)).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #544 — the re-validation path follows the review-publication setting, and "Phase 1 ran" means all of Phase 1
+// ---------------------------------------------------------------------------
+//
+// The path skips Phase 1 on a work branch, so the value Phase 11 passes to the evidence script must come from a
+// Phase 1 step that the path runs again. Step 4 of the reference points at the three Phase 1 rules in order: the
+// evidence policy, the publication value of the worktree, and the stub rule. Step 1 says that "Phase 1 ran" means
+// all of Phase 1, so a later "unless Phase 1 ran" never leaves the lens, the level or the base unset.
+
+const EVIDENCE_POLICY_STEP = '**Resolve the evidence policy once per run**'
+const PUBLICATION_STEP = '**Resolve `REVIEW_PUBLICATION` per worktree:**'
+const STUB_RULE = '**Evidence stub:**'
+const PHASE11_PUBLICATION_ARG = '{REVIEW_PUBLICATION resolved in Phase 1, or auto}'
+
+/** The words of the settings step that take the publication value, each exact: [what it must say, the text that says it]. */
+const REVALIDATE_PUBLICATION_PARTS: ReadonlyArray<readonly [string, string]> = [
+  ['the publication value comes from that same settings line', 'take `REVIEW_PUBLICATION` from that same line'],
+  ['the evidence policy is resolved by the Phase 1 step', EVIDENCE_POLICY_STEP],
+  ['the publication value follows the Phase 1 per-worktree rule', PUBLICATION_STEP],
+  ['the Phase 1 stub rule applies', STUB_RULE],
+  ['Phase 11 passes the value resolved in Phase 1', 'Phase 11 passes it as the value resolved in Phase 1'],
+]
+
+/** The settings step as the reference worded it before it took the publication value: a known-bad text for the collector. */
+const PRE_FIX_SETTINGS_STEP =
+  '4. **Take GATE_LEVEL**: unless Phase 1 ran, run the **Resolve the settings line** step of Phase 1 once for this worktree, and take `GATE_LEVEL` from the line it accepts, or from its fail-closed line when it accepts none. Phase 6 passes it to Validate.'
+
+/**
+ * Named collector: how the re-validation path falls short of the review-publication setting. The settings step holds
+ * the three Phase 1 pointers in order, and the reference has no `auto` fallback of its own. Each build of /implement
+ * holds the three Phase 1 labels the step points at, and Phase 11 passes the value that Phase 1 resolved.
+ */
+function collectRevalidatePublicationDefects(revalidate: string, md: string): string[] {
+  const out: string[] = []
+  const step = revalidate.split('\n').find(l => l.startsWith('4. **Take GATE_LEVEL**'))
+  if (step === undefined) return ['no re-validation settings step']
+  for (const [what, text] of REVALIDATE_PUBLICATION_PARTS) {
+    if (!step.includes(text)) out.push(`the settings step does not say: ${what}`)
+  }
+  const [policyAt, publicationAt, stubAt] = [EVIDENCE_POLICY_STEP, PUBLICATION_STEP, STUB_RULE].map(label => step.indexOf(label))
+  if (policyAt >= 0 && publicationAt >= 0 && stubAt >= 0 && !(policyAt < publicationAt && publicationAt < stubAt)) {
+    out.push('the settings step does not point at the evidence policy, the publication value and the stub rule in that order')
+  }
+  if (revalidate.includes('or auto')) out.push('the re-validation reference falls back to auto')
+  const phase1 = phaseSection(md, H.p1) ?? ''
+  for (const label of [EVIDENCE_POLICY_STEP, PUBLICATION_STEP, STUB_RULE]) {
+    if (!phase1.includes(label)) out.push(`Phase 1 does not hold ${label}`)
+  }
+  if (!(phaseSection(md, H.p11) ?? '').includes(PHASE11_PUBLICATION_ARG)) out.push(`Phase 11 does not pass ${PHASE11_PUBLICATION_ARG}`)
+  return out
+}
+
+describe('#544: the re-validation path takes the review-publication value from the same settings line as a full run', () => {
+  it('step 4 points at the evidence policy, the publication value and the stub rule, and both builds hold the Phase 1 source and the Phase 11 pass', () => {
+    expect(REVALIDATE_PUBLICATION_PARTS.length, 'the part table is empty, so this guard proves nothing').toBeGreaterThanOrEqual(5)
+    for (const [label, md] of [['curation on', implementMd()], ['curation off', implementMdOff()]] as const) {
+      expect(phaseSection(md, H.p1)?.length ?? 0, `${label}: Phase 1 is empty, so this guard proves nothing`).toBeGreaterThan(5_000)
+      expect(collectRevalidatePublicationDefects(revalidateReference(), md), label).toEqual([])
+    }
+  })
+
+  it('known-bad probes: the step as it was, each lost pointer, a swapped order and an auto fallback are each reported', () => {
+    const md = implementMd()
+    const reval = revalidateReference()
+    const step = reval.split('\n').find(l => l.startsWith('4. **Take GATE_LEVEL**'))!
+    const said = (what: string): string => `the settings step does not say: ${what}`
+    expect(collectRevalidatePublicationDefects(seedOnce(reval, step, PRE_FIX_SETTINGS_STEP), md), 'the step as it was')
+      .toEqual(REVALIDATE_PUBLICATION_PARTS.map(([what]) => said(what)))
+    for (const [what, text] of REVALIDATE_PUBLICATION_PARTS) {
+      expect(collectRevalidatePublicationDefects(seedOnce(reval, text, ''), md), `dropping "${what}"`).toEqual([said(what)])
+    }
+    const swapped = seedOnce(seedOnce(seedOnce(reval, EVIDENCE_POLICY_STEP, '@@'), STUB_RULE, EVIDENCE_POLICY_STEP), '@@', STUB_RULE)
+    expect(collectRevalidatePublicationDefects(swapped, md), 'the stub rule before the evidence policy')
+      .toEqual(['the settings step does not point at the evidence policy, the publication value and the stub rule in that order'])
+    expect(collectRevalidatePublicationDefects(`${reval}\nPass the value, or auto.\n`, md)).toEqual(['the re-validation reference falls back to auto'])
+    expect(collectRevalidatePublicationDefects(seedOnce(reval, '4. **Take GATE_LEVEL**', '4. **Take the level**'), md)).toEqual(['no re-validation settings step'])
+  })
+
+  it('known-bad probes: a Phase 1 label renamed or the Phase 11 pass lost, in either build, is reported', () => {
+    const reval = revalidateReference()
+    for (const [label, md] of [['curation on', implementMd()], ['curation off', implementMdOff()]] as const) {
+      for (const text of [EVIDENCE_POLICY_STEP, PUBLICATION_STEP, STUB_RULE]) {
+        expect(collectRevalidatePublicationDefects(reval, seedOnce(md, text, '**Renamed rule**')), `${label}: ${text} renamed`).toEqual([`Phase 1 does not hold ${text}`])
+      }
+      expect(collectRevalidatePublicationDefects(reval, seedOnce(md, PHASE11_PUBLICATION_ARG, '{REVIEW_PUBLICATION}')), `${label}: the Phase 11 pass`)
+        .toEqual([`Phase 11 does not pass ${PHASE11_PUBLICATION_ARG}`])
+    }
+  })
+})
+
+/** Step 1 of the reference as it was before it said what "Phase 1 ran" means: a known-bad text for the collector. */
+const PRE_FIX_BRANCH_STEP =
+  '1. **Branch safety check**: If on a protected branch (main, master, develop, etc.), run Phase 1 to create/switch to a work branch. If already on a work branch, skip Phase 1 and resolve `{worktree}` as its docs root does: `git -C "{start}" rev-parse --show-toplevel`, else the start directory.'
+
+/** What step 1 states: [what it must say, the text that says it]. */
+const REVALIDATE_PHASE1_RUN_PARTS: ReadonlyArray<readonly [string, string]> = [
+  ['a protected branch runs all of Phase 1, through its Fresh base step', 'run all of Phase 1, through its **Fresh base** step,'],
+  ['"Phase 1 ran" means all of Phase 1 ran', '"Phase 1 ran" below means all of it ran'],
+]
+
+/** The conditions that read "Phase 1 ran", each at its own anchor: [what it is, the anchor]. */
+const REVALIDATE_PHASE1_CONDITIONS: ReadonlyArray<readonly [string, string]> = [
+  ['the BASE_BRANCH record', '**Record BASE_BRANCH**: unless Phase 1 ran,'],
+  ['the base resolution', 'Unless Phase 1 ran (its `BASE_REF` stands)'],
+  ['the GATE_LEVEL step', 'GATE_LEVEL**: unless Phase 1 ran,'],
+]
+
+/**
+ * Named collector: how the re-validation reference leaves "Phase 1 ran" open to the reading "only the branch part ran".
+ * Step 1 runs all of Phase 1 on a protected branch and says what "Phase 1 ran" means. The three conditions that read it
+ * stay, each at its own anchor, so the lens, the level and the base are set whenever Phase 1 did not run.
+ */
+function collectRevalidatePhase1RunDefects(revalidate: string): string[] {
+  const step = revalidate.split('\n').find(l => /^1\. \*\*Branch safety check\*\*/.test(l))
+  if (step === undefined) return ['no re-validation branch step']
+  const out: string[] = []
+  for (const [what, text] of REVALIDATE_PHASE1_RUN_PARTS) {
+    if (!step.includes(text)) out.push(`step 1 does not say: ${what}`)
+  }
+  for (const [what, anchor] of REVALIDATE_PHASE1_CONDITIONS) {
+    if (!revalidate.includes(anchor)) out.push(`${what} no longer waits for "Phase 1 ran"`)
+  }
+  return out
+}
+
+describe('#544: "Phase 1 ran" on the re-validation path means all of Phase 1', () => {
+  it('step 1 runs all of Phase 1 on a protected branch, and the three conditions that read it stay at their anchors', () => {
+    expect(REVALIDATE_PHASE1_CONDITIONS.length, 'the condition table is empty, so this guard proves nothing').toBeGreaterThanOrEqual(3)
+    expect(collectRevalidatePhase1RunDefects(revalidateReference())).toEqual([])
+  })
+
+  it('known-bad probes: step 1 as it was, a lost pointer, a lost condition and a renamed step are each reported', () => {
+    const reval = revalidateReference()
+    const step = reval.split('\n').find(l => /^1\. \*\*Branch safety check\*\*/.test(l))!
+    const said = (what: string): string => `step 1 does not say: ${what}`
+    expect(collectRevalidatePhase1RunDefects(seedOnce(reval, step, PRE_FIX_BRANCH_STEP)), 'step 1 as it was')
+      .toEqual(REVALIDATE_PHASE1_RUN_PARTS.map(([what]) => said(what)))
+    expect(collectRevalidatePhase1RunDefects(seedOnce(reval, 'run all of Phase 1, through its **Fresh base** step,', 'run Phase 1')), 'the old wording of the run')
+      .toEqual([said(REVALIDATE_PHASE1_RUN_PARTS[0][0])])
+    expect(collectRevalidatePhase1RunDefects(seedOnce(reval, ' "Phase 1 ran" below means all of it ran.', '')), 'the meaning of "Phase 1 ran"')
+      .toEqual([said(REVALIDATE_PHASE1_RUN_PARTS[1][0])])
+    for (const [what, anchor] of REVALIDATE_PHASE1_CONDITIONS) {
+      expect(collectRevalidatePhase1RunDefects(seedOnce(reval, anchor, anchor.replace(/[Uu]nless Phase 1 ran/, 'Always')))).toEqual([`${what} no longer waits for "Phase 1 ran"`])
+    }
+    expect(collectRevalidatePhase1RunDefects(seedOnce(reval, '**Branch safety check**', '**Branch check**'))).toEqual(['no re-validation branch step'])
   })
 })
