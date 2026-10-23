@@ -368,8 +368,8 @@ function describeFailure(result: Extract<CharterRenderResult, { ok: false }>): s
 /**
  * Write the charter rendered for `plugins`, and sync the implement sentinel with it.
  *
- * Called by installViaFileCopy after the script copy, by `init --hud-only`, and by the selective
- * uninstall phase. The two files are independent: each has its own try/catch, so a failure on one never
+ * Called by installScripts after the script copy (which installViaFileCopy and `init --hud-only` both
+ * run), and by the selective uninstall phase. The two files are independent: each has its own try/catch, so a failure on one never
  * costs the other. Bytes are compared with the bytes on disk at the moment of writing, so a rerun that
  * changes nothing writes nothing.
  */

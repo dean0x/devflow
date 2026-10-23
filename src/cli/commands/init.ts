@@ -14,8 +14,7 @@ import { loadCurationMove, type MoveSkipReason } from '../../core/curation-move.
 import { describeMoveText, describeOutcome, runInitCurationMove, shownSkipAt, type InitCurationMoveReport } from './curation-move-step.js';
 import { realGlobalTuningMoveIO, realProjectLedgerMoveIO } from './curation-move-io.js';
 import { describeEchoedValue } from '../../core/echo-value.js';
-import { installViaFileCopy, composeScripts, type InstallReport } from '../../targets/claude-code/installer.js';
-import { installRenderedCharter } from '../../targets/claude-code/charter-render.js';
+import { installViaFileCopy, installScripts, type InstallReport } from '../../targets/claude-code/installer.js';
 import { formatOverlaySummary, formatSkillScopeSummary, formatTrackerAssetSummary, isPluginListUnchanged, type SummaryLine } from './install-report.js';
 import { convergeTrackerArtifacts, type ConvergeTrackerArtifactsResult, type TrackerAgentState } from '../../targets/claude-code/tracker-install.js';
 import {
@@ -1075,30 +1074,26 @@ export const initCommand = new Command('init')
 
       // Read the existing manifest: over a prior install, --hud-only touches only
       // the HUD (D-HUD-ONLY-PRESERVE in buildHudOnlyManifest). Read before the scripts are
-      // copied, so the charter render below works from the record as the run found it.
+      // installed, so the charter render works from the record as the run found it.
       let existingHudManifest: ManifestData | null = null;
       try {
         existingHudManifest = await readManifest(devflowDir);
       } catch { /* absent on fresh install — existingHudManifest stays null */ }
 
-      // Install HUD scripts to devflow dir
-      const scriptsTarget = path.join(devflowDir, 'scripts');
+      // Install HUD scripts to devflow dir. The orchestrator charter and the implement sentinel
+      // render for the plugins the manifest records, and for the empty set when it records none
+      // (D-CHARTER-INSTALL-RENDER). A render failure is a warning.
       try {
-        await composeScripts(scriptsTarget);
+        await installScripts({
+          scriptsTarget: path.join(devflowDir, 'scripts'),
+          plugins: hudOnlyCharterPlugins(existingHudManifest),
+          warn: (msg) => p.log.warn(msg),
+        });
       } catch (error) {
         p.log.error(`Failed to install HUD scripts: ${error instanceof Error ? error.message : error}`);
         process.exit(1);
       }
 
-      // The script copy skips the orchestrator charter and the implement sentinel
-      // (D-CHARTER-INSTALL-RENDER), so a --hud-only run renders them itself, for the plugins the
-      // manifest records and the empty set when it records none. A failure is a warning.
-      await installRenderedCharter({
-        scriptsDir: scriptsTarget,
-        plugins: hudOnlyCharterPlugins(existingHudManifest),
-        warn: (msg) => p.log.warn(msg),
-        mode: 'install',
-      });
       // A manifest readManifest() refuses reads as none, but its machine gate level is still
       // stored there: --hud-only keeps it and says so, as the full init does. --reset does not
       // apply here, so nothing asks to forget it.

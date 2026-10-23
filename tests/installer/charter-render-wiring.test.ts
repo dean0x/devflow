@@ -35,6 +35,7 @@ import { readManifestPlugins, writeManifest } from '../../src/core/manifest.js';
 import {
   composeScripts,
   copyDirectory,
+  installScripts,
   installViaFileCopy,
   type Spinner,
 } from '../../src/targets/claude-code/installer.js';
@@ -214,6 +215,63 @@ describe('composeScripts: the verbatim script copy writes neither the charter no
     await composeScripts(scripts);
 
     expect(await exists(sentinelAt())).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// installScripts: the one owner of the script copy and the render
+// ---------------------------------------------------------------------------
+
+describe('installScripts: the script copy and the charter render are one step', () => {
+  let scripts: string;
+  const charterAt = (): string => path.join(scripts, CHARTER_RELPATH);
+  const sentinelAt = (): string => path.join(scripts, HANDOFF_SENTINEL_RELPATH);
+
+  beforeEach(() => {
+    scripts = path.join(root, 'scripts');
+  });
+
+  it('leaves a whole tree: the copied scripts, the rendered charter and the sentinel', async () => {
+    const warnings: string[] = [];
+    await installScripts({ scriptsTarget: scripts, plugins: [CORE, AMBIENT, IMPLEMENT], warn: m => warnings.push(m) });
+
+    expect(await exists(path.join(scripts, 'hooks', 'run-hook'))).toBe(true);
+    expect(await exists(path.join(scripts, 'hud.sh'))).toBe(true);
+    expect(await fs.readFile(charterAt(), 'utf-8')).toBe(rendered([CORE, AMBIENT, IMPLEMENT]));
+    expect(await fs.readFile(sentinelAt(), 'utf-8')).toBe(SENTINEL_SOURCE);
+    expect(warnings).toEqual([]);
+  });
+
+  it('renders for the plugins it is given: a set without implement gets no sentinel and no handoff line', async () => {
+    await installScripts({ scriptsTarget: scripts, plugins: [CORE, AMBIENT, REVIEW], warn: () => {} });
+
+    expect(await fs.readFile(charterAt(), 'utf-8')).toBe(rendered([CORE, AMBIENT, REVIEW]));
+    expect(handoffLines(await fs.readFile(charterAt(), 'utf-8'))).toBe(0);
+    expect(await exists(sentinelAt())).toBe(false);
+  });
+
+  it('a render that cannot write warns, and the copied scripts are still there', async () => {
+    await fs.mkdir(charterAt(), { recursive: true });
+    const warnings: string[] = [];
+
+    await expect(
+      installScripts({ scriptsTarget: scripts, plugins: [CORE, AMBIENT, IMPLEMENT], warn: m => warnings.push(m) }),
+    ).resolves.toBeUndefined();
+
+    expect(warnings.some(w => w.includes('charter render:'))).toBe(true);
+    expect(await exists(path.join(scripts, 'hooks', 'run-hook'))).toBe(true);
+  });
+
+  it('is the only way to the verbatim copy: no module outside the installer imports composeScripts', async () => {
+    const srcRoot = path.resolve(import.meta.dirname, '../../src');
+    const installerFile = path.join('targets', 'claude-code', 'installer.ts');
+    const importsCopy = /import\s*(?:type\s*)?\{[^}]*\bcomposeScripts\b[^}]*\}\s*from/;
+    const importers: string[] = [];
+    for (const relative of await fs.readdir(srcRoot, { recursive: true })) {
+      if (!relative.endsWith('.ts') || relative === installerFile) continue;
+      if (importsCopy.test(await fs.readFile(path.join(srcRoot, relative), 'utf-8'))) importers.push(relative);
+    }
+    expect(importers, 'a caller that copies the scripts itself skips the charter render: call installScripts').toEqual([]);
   });
 });
 
