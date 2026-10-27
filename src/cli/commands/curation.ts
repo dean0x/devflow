@@ -15,8 +15,9 @@ import { readMachineFeature, writeMachineFeature } from '../../core/feature-swit
 import { loadSettingsModule, narrowedSwitchLabel, personalConfigTrackedWarning } from '../../core/evidence-policy.js';
 import { getClaudeDirectory, getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
 import {
-  applyCurationToggle,
+  applyVariantToggle,
   describeCurationConverge,
+  describePostingLeft,
   installedScriptsSkew,
   readRunningVersion,
 } from '../../targets/claude-code/curation-install.js';
@@ -700,13 +701,15 @@ async function handleClear(): Promise<void> {
 /**
  * Make the installed prompts match the switch just written
  * (D-LEARNING-VARIANT-INSTALL): the curation-on or curation-off commands and
- * agents, and the apply-decisions skill. The same convergence `devflow init` runs,
- * followed by reapplying the saved agent model mapping so `devflow agents`
- * overrides survive.
+ * agents, and the apply-decisions skill. The one converge for both axes that
+ * `devflow init` and `devflow compliance` run, followed by reapplying the saved
+ * agent model mapping so `devflow agents` overrides survive.
  *
  * Warn-not-fail: the switch itself is already recorded, and either mismatch is
  * safe (an on variant is still gated at run time, an off variant loads no
- * decisions), so a problem here never changes the exit code.
+ * decisions), so a problem here never changes the exit code. A compliance-off
+ * machine that still has a prompt that posts is a warning here too: the fail-closed
+ * exit belongs to `devflow compliance`, which changes that axis.
  *
  * Answers whether the converge ran, which means the installed files are the ones
  * this CLI writes. The toggle moves the ledger folder only then: under version skew
@@ -714,12 +717,13 @@ async function handleClear(): Promise<void> {
  */
 async function convergeInstalledVariants(enabled: boolean): Promise<'converged' | 'not-converged'> {
   try {
-    const outcome = await applyCurationToggle({
+    const outcome = await applyVariantToggle({
       claudeDir: getClaudeDirectory(),
       devflowDir: getDevFlowDirectory(),
-      curation: enabled,
+      axis: 'curation',
+      enabled,
       runningVersion: await readRunningVersion(),
-      warn: (msg) => p.log.warn(msg),
+      warn: (msg: string) => p.log.warn(msg),
     });
     if (outcome.kind === 'skipped') {
       p.log.warn(outcome.message);
@@ -727,6 +731,7 @@ async function convergeInstalledVariants(enabled: boolean): Promise<'converged' 
     }
     const changed = describeCurationConverge(outcome.result, enabled);
     if (changed !== null) p.log.info(color.dim(`Installed prompts: ${changed}`));
+    for (const line of describePostingLeft(outcome.result.posting)) p.log.warn(line);
     return 'converged';
   } catch (err) {
     p.log.warn(`Could not update the installed prompts for the new curation setting — run ${color.cyan('devflow init')}: ${String(err)}`);

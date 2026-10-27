@@ -106,8 +106,7 @@ import {
   applyAttributionAnswer,
   attributionSeedFrom,
 } from './attribution-prompts.js';
-import { convergeFromManifest } from '../../targets/claude-code/compliance-install.js';
-import { convergeCurationVariants, installedVersionMatches, readRunningVersion } from '../../targets/claude-code/curation-install.js';
+import { convergeVariantAxes, installedVersionMatches, readRunningVersion } from '../../targets/claude-code/curation-install.js';
 import {
   auditAndRecordClaudeMd,
   formatClaudeMdAuditNote,
@@ -2220,59 +2219,44 @@ export const initCommand = new Command('init')
       process.exit(1);
     }
 
-    // D-LEARNING-VARIANT-INSTALL: converge the curation variants. The file copy above
-    // installed the variant of everything IT installed; on a `--plugin` install the
-    // other plugins' files, already on disk, may still be the other variant (this run
-    // may have flipped the switch), and the apply-decisions skill is removed here when
-    // the copy skipped it on a partial install. Rewrites only what is installed.
-    // Warn-not-abort: either mismatch is safe (an on variant is still gated at run
-    // time, an off variant loads no decisions). The agent mapping is reapplied below.
-    try {
-      const curationConverge = await convergeCurationVariants({
-        claudeDir,
-        devflowDir,
-        curation: curationEnabled,
-        plugins: effectivePlugins,
-        warn: (msg) => installWarnings.push(msg),
-      });
-      if (verbose && curationConverge.converged) {
-        p.log.info(
-          `Curation ${curationEnabled ? 'on' : 'off'} variants: ` +
-          `${curationConverge.commandsRewritten.length} command(s) and ${curationConverge.agentsRewritten.length} agent(s) ` +
-          `rewritten, ${curationConverge.unchanged} already current`,
-        );
-      }
-    } catch (err) {
-      installWarnings.push(`Curation variant convergence failed — ${err instanceof Error ? err.message : String(err)}`);
+    // The one converge for both switches (D-LEARNING-VARIANT-INSTALL, AC-27): the file copy
+    // above installed the variant of everything IT installed; on a `--plugin` install the
+    // other plugins' files, already on disk, may still be another variant (this run may
+    // have flipped a switch), and the apply-decisions skill is removed here when the copy
+    // skipped it on a partial install. It also converges the compliance skill and rule, so
+    // enabling or disabling compliance during init needs no separate devflow compliance run.
+    // Rewrites only what is installed. Warn-not-abort: a failure is a warning here and the
+    // install record below is withheld, so the status line says to run init again. The agent
+    // mapping is reapplied below.
+    const variantConverge = await convergeVariantAxes({
+      claudeDir,
+      devflowDir,
+      manifest: {
+        features: {
+          curation: curationEnabled,
+          compliance: { enabled: complianceEnabled, frameworks: complianceFrameworks },
+          rules: rulesEnabled,
+        },
+      },
+      plugins: effectivePlugins,
+      warn: (msg) => installWarnings.push(msg),
+    });
+    if (verbose && variantConverge.converged) {
+      p.log.info(
+        `Curation ${curationEnabled ? 'on' : 'off'}, compliance ${complianceEnabled ? 'on' : 'off'} variants: ` +
+        `${variantConverge.commandsRewritten.length} command(s) and ${variantConverge.agentsRewritten.length} agent(s) ` +
+        `rewritten, ${variantConverge.unchanged} already current`,
+      );
     }
-
-    // Converge compliance artifacts (always converge, never short-circuit).
-    // Called unconditionally so that enabling/disabling compliance during init
-    // is reflected in the installed artifacts without a separate devflow compliance run.
-    // Wrapped in its own try/catch (warn-not-abort).
-    let convergeResult: Awaited<ReturnType<typeof convergeFromManifest>> | null = null;
-    try {
-      convergeResult = await convergeFromManifest({
-        claudeDir,
-        devflowDir,
-        manifest: { features: { compliance: { enabled: complianceEnabled, frameworks: complianceFrameworks }, rules: rulesEnabled } },
-        warn: (msg) => p.log.warn(msg),
-      });
-      // I41: emit legacy-upgrade notice when compliance is disabled AND a pre-existing rule
-      // was found. The skill is no signal — converge installs it on every machine
-      // (D-COMPLIANCE-INSTALL-ALWAYS) — so removedPreexisting reports the rule alone, on a
-      // partial install; hadComplianceRule covers full installs, where installViaFileCopy
-      // wipes the rules dir before converge probes it.
-      if (!complianceEnabled && (convergeResult.removedPreexisting || hadComplianceRule)) {
-        p.log.info(
-          'Compliance rule removed — if you previously had devflow-compliance installed, ' +
-          'run `devflow compliance --enable` to re-enable with your framework selection.',
-        );
-      }
-    } catch (err) {
-      p.log.warn(
-        `Compliance artifact convergence failed — install succeeded but compliance artifacts may be stale: ` +
-        `${err instanceof Error ? err.message : String(err)}`,
+    // I41: emit legacy-upgrade notice when compliance is disabled AND a pre-existing rule
+    // was found. The skill is no signal — converge installs it on every machine
+    // (D-COMPLIANCE-INSTALL-ALWAYS) — so removedPreexisting reports the rule alone, on a
+    // partial install; hadComplianceRule covers full installs, where installViaFileCopy
+    // wipes the rules dir before converge probes it.
+    if (!complianceEnabled && (variantConverge.compliance.removedPreexisting || hadComplianceRule)) {
+      p.log.info(
+        'Compliance rule removed — if you previously had devflow-compliance installed, ' +
+        'run `devflow compliance --enable` to re-enable with your framework selection.',
       );
     }
 
@@ -2953,6 +2937,11 @@ export const initCommand = new Command('init')
       },
       installedAt: existingManifest?.installedAt ?? now,
       updatedAt: now,
+      // The install record, written only after a converge that finished clean (AC-29): an
+      // unclean one leaves the field out, which reads as unknown and names `devflow init`.
+      ...(variantConverge.converged
+        ? { installedVariants: { curation: curationEnabled, compliance: complianceEnabled } }
+        : {}),
     };
     // ── Manifest write + tracker selection lifecycle (the ONE call site) ──────
     // persistManifestThenConvergeTracker owns the ordering invariant: the

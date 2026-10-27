@@ -2,11 +2,14 @@
  * devflow compliance — Enable, disable, set, and check status of the compliance feature.
  *
  * CLI-layer module; pure helpers in src/core/compliance.ts,
- *   I/O orchestration in src/targets/claude-code/compliance-install.ts.
+ *   I/O orchestration in src/targets/claude-code/curation-install.ts (the one converge
+ *   for both axes) and compliance-install.ts (the compliance artifacts it composes).
  * Compliance is manifest-group (like proxy), not config.json-gated.
  * Per-artifact failures are warn-not-throw, so one failed artifact never aborts the rest.
- * Enable/disable each converge BOTH artifacts unconditionally, so neither is left
- *   half-converged.
+ * Every change of the switch (enable, disable, --set, interactive enable) writes the switch,
+ *   runs the one converge, and only after a clean converge records which variants are installed.
+ * With compliance off the command fails closed (AC-28): it exits non-zero when an installed
+ *   prompt may still post, and prints no success line.
  * The evidence-policy lines (--status, and the --enable/--set suggestion) come
  *   from src/core/evidence-policy.ts, the seam onto the package's own resolvers;
  *   the CLI prints the keys to add to .devflow/project.json and never writes it
@@ -35,8 +38,14 @@ import {
   loadSettingsModule,
   repoComplianceStatusLines,
 } from '../../core/evidence-policy.js';
-import { readManifest, writeManifest } from '../../core/manifest.js';
-import { convergeFromManifest } from '../../targets/claude-code/compliance-install.js';
+import { postingStatus, readInstalledVariants, type PostingStatus } from '../../core/installed-variants.js';
+import { readManifest, writeManifest, type ManifestData } from '../../core/manifest.js';
+import {
+  applyVariantToggle,
+  describePostingLeft,
+  describeVariantConverge,
+  readRunningVersion,
+} from '../../targets/claude-code/curation-install.js';
 import { validateRuleShadow, validateSkillShadow } from '../../targets/claude-code/installer.js';
 import {
   getClaudeDirectory,
@@ -48,7 +57,7 @@ import {
 export type ComplianceCliAction = 'enable' | 'disable' | 'set' | 'status';
 
 export interface ComplianceCliActionMessage {
-  level: 'info' | 'success' | 'warn';
+  level: 'info' | 'success' | 'warn' | 'error';
   text: string;
 }
 
@@ -105,7 +114,7 @@ export function resolveComplianceCliAction(
         messages: [
           {
             level: 'success',
-            text: 'Compliance disabled — rule removed, frameworks remembered for re-enable',
+            text: 'Compliance disabled — the rule and every posting step removed, frameworks remembered for re-enable',
           },
         ],
       };
@@ -207,6 +216,116 @@ async function skillShadowState(
   }
 }
 
+/** The `Posting:` line of `--status`: the install record read against the machine's compliance switch (AC-31). */
+export function postingStatusLine(record: unknown, complianceEnabled: boolean): string {
+  const status: PostingStatus = postingStatus(readInstalledVariants(record), complianceEnabled);
+  const shown = status === 'installed' ? color.green(status) : status === 'not installed' ? color.dim(status) : color.yellow(status);
+  return `Posting:    ${shown}`;
+}
+
+// ── Applying a change ──────────────────────────────────────────────────────────
+
+export interface ApplyComplianceChangeOptions {
+  claudeDir: string;
+  devflowDir: string;
+  /** The manifest as read before the change. It is never mutated. */
+  manifest: ManifestData;
+  action: Exclude<ComplianceCliAction, 'status'>;
+  /** The framework IDs of `--set` or of the interactive choice, already through `parseFrameworkList`. */
+  setFrameworks?: string[];
+  /** The running package's version; null when it cannot be read. */
+  runningVersion: string | null;
+  /** Package root the variants are read from. Injectable for a temp tree; defaults to this package. */
+  packageRoot?: string;
+  /** Receives each per-item warning of the converge as it happens. */
+  warn: (msg: string) => void;
+}
+
+export interface ApplyComplianceChangeResult {
+  /** The state recorded in the manifest. */
+  nextState: ComplianceFeatureState;
+  messages: ComplianceCliActionMessage[];
+  /**
+   * 1 when the change leaves a compliance-off machine with an installed prompt that may still post,
+   * or when the switch could not be recorded; the command prints no success line then (AC-28).
+   * Curation-only failures stay warnings and leave this 0.
+   */
+  exitCode: 0 | 1;
+}
+
+/**
+ * Apply one change of the compliance switch: write the switch, run the one converge for both
+ * axes, and only after a clean converge record which variants are installed (the toggle helper
+ * does that last step). Every change of the enabled value converges, `--set` and interactive enable
+ * included, and a `--set` that only changes the frameworks converges too, so the stamp follows.
+ *
+ * Fail closed on the off side: with compliance off, a converge that cannot prove every installed
+ * compliance-armed prompt holds the compliance-off file is an error that lists the files, and a
+ * toggle that cannot converge at all (a version skew, or no manifest) says that posting steps remain
+ * installed until `devflow init`. Neither prints the success text. On the enable side a skipped
+ * converge is a warning: the installed prompts are then the ones that post, which is what was asked for.
+ *
+ * Returns a result and never throws; the caller prints the messages and sets the exit code.
+ */
+export async function applyComplianceChange(opts: ApplyComplianceChangeOptions): Promise<ApplyComplianceChangeResult> {
+  const { claudeDir, devflowDir, manifest, action, setFrameworks, runningVersion, packageRoot, warn } = opts;
+  const resolved = resolveComplianceCliAction(manifest.features.compliance, action, setFrameworks);
+  // normalizeFrameworks deduplicates (e.g. --set gdpr,GDPR → [gdpr]).
+  const nextState: ComplianceFeatureState = {
+    enabled: resolved.nextState.enabled,
+    frameworks: normalizeFrameworks(resolved.nextState.frameworks),
+  };
+
+  // The switch comes first: whatever the converge does next, the machine's choice is on disk.
+  try {
+    await writeManifest(devflowDir, {
+      ...manifest,
+      features: { ...manifest.features, compliance: nextState },
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    return {
+      nextState: manifest.features.compliance,
+      messages: [{ level: 'error', text: `Could not record the compliance switch, so nothing was changed: ${String(err)}` }],
+      exitCode: 1,
+    };
+  }
+
+  const outcome = await applyVariantToggle({
+    claudeDir,
+    devflowDir,
+    axis: 'compliance',
+    enabled: nextState.enabled,
+    runningVersion,
+    warn,
+    packageRoot,
+  });
+
+  if (outcome.kind === 'skipped') {
+    if (!nextState.enabled) {
+      return { nextState, messages: [{ level: 'error', text: outcome.message }], exitCode: 1 };
+    }
+    return { nextState, messages: [...resolved.messages, { level: 'warn', text: outcome.message }], exitCode: 0 };
+  }
+
+  const { posting } = outcome.result;
+  if (!nextState.enabled && posting.kind !== 'clear') {
+    return {
+      nextState,
+      messages: [
+        { level: 'error', text: 'Compliance is recorded as off, but the install may still post to GitHub or a tracker.' },
+        ...describePostingLeft(posting).map((text): ComplianceCliActionMessage => ({ level: 'error', text })),
+      ],
+      exitCode: 1,
+    };
+  }
+
+  const messages = [...resolved.messages];
+  const changed = describeVariantConverge(outcome.result, 'compliance', nextState.enabled);
+  if (changed !== null) messages.push({ level: 'info', text: `Installed prompts: ${changed}` });
+  return { nextState, messages, exitCode: 0 };
+}
+
 // ── CLI action ─────────────────────────────────────────────────────────────────
 
 interface ComplianceOptions {
@@ -303,6 +422,7 @@ export const complianceCommand = new Command('compliance')
             ? color.yellow(' (withheld — rules disabled)')
             : '') +
           (isRuleShadowed ? color.green(' [shadowed]') : ''),
+        postingStatusLine(manifest.installedVariants, current.enabled),
         '',
         // The repository in cwd, resolved by the package's own resolver with the
         // compliance state already read above (D-POLICY-CJS-SEAM). Bounded: at most
@@ -358,34 +478,32 @@ export const complianceCommand = new Command('compliance')
       action = 'disable';
     }
 
-    const resolved = resolveComplianceCliAction(current, action, setFrameworks);
-
-    // Converge artifacts (always converge, never short-circuit)
-    await convergeFromManifest({
+    // Write the switch, converge both axes, record the installed variants (applyComplianceChange).
+    const applied = await applyComplianceChange({
       claudeDir,
       devflowDir,
-      manifest: { features: { compliance: resolved.nextState, rules: manifest.features.rules } },
-      warn: (msg) => p.log.warn(msg),
+      manifest,
+      action,
+      setFrameworks,
+      runningVersion: await readRunningVersion(),
+      warn: (msg: string) => p.log.warn(msg),
     });
 
-    // Persist to manifest — normalizeFrameworks deduplicates (e.g. --set gdpr,GDPR → [gdpr])
-    manifest.features.compliance = {
-      enabled: resolved.nextState.enabled,
-      frameworks: normalizeFrameworks(resolved.nextState.frameworks),
-    };
-    manifest.updatedAt = new Date().toISOString();
-    await writeManifest(devflowDir, manifest);
-
     // Emit messages
-    for (const msg of resolved.messages) {
+    for (const msg of applied.messages) {
       switch (msg.level) {
         case 'success': p.log.success(msg.text); break;
         case 'warn': p.log.warn(msg.text); break;
+        case 'error': p.log.error(msg.text); break;
         default: p.log.info(msg.text); break;
       }
     }
+    if (applied.exitCode !== 0) {
+      process.exitCode = applied.exitCode;
+      return;
+    }
 
-    if (resolved.nextState.enabled && !manifest.features.rules) {
+    if (applied.nextState.enabled && !manifest.features.rules) {
       p.log.info(
         color.dim('Note: compliance rule withheld (rules disabled) — ' +
           'run `devflow rules --enable` to install the stamped rule'),
@@ -394,7 +512,7 @@ export const complianceCommand = new Command('compliance')
 
     // Suggest the team file compliance now implies. Printed, never written:
     // .devflow/project.json is team-owned (D-POLICY-NO-WRITE).
-    if (resolved.nextState.enabled) {
+    if (applied.nextState.enabled) {
       const policyModule = loadEvidencePolicyModule();
       const settingsModule = loadSettingsModule();
       if (!policyModule.ok) {
@@ -402,7 +520,7 @@ export const complianceCommand = new Command('compliance')
       } else if (!settingsModule.ok) {
         p.log.warn(formatEvidencePolicyUnavailable(settingsModule.error));
       } else {
-        const suggestion = evidencePolicySuggestion(resolved.nextState, policyModule.value, settingsModule.value);
+        const suggestion = evidencePolicySuggestion(applied.nextState, policyModule.value, settingsModule.value);
         if (suggestion !== null) p.note(suggestion, 'Evidence policy');
       }
     }

@@ -1,28 +1,36 @@
 /**
- * Curation-variant installer for the Claude Code target.
+ * Prompt-variant installer for the Claude Code target: the curation and compliance switches.
  *
- * D-LEARNING-VARIANT-INSTALL: the install follows the machine's curation switch
- * (`features.curation` in ~/.devflow/manifest.json) and nothing else. When the
- * switch is off, every command and agent that has a curation-off variant
- * (dist/curation-off/{commands,agents}, built by D-LEARNING-VARIANTS) is installed
- * from it, and the apply-decisions skill is not installed, so the decisions text
- * reaches no prompt and the skill has no reader. When the switch is on, the
- * curation-on files and the skill are installed. Three pieces carry it:
+ * D-LEARNING-VARIANT-INSTALL: the install follows the machine's two switches
+ * (`features.curation` and `features.compliance` in ~/.devflow/manifest.json) and
+ * nothing else. Each command and agent that has an arm for a switch that is off is
+ * installed from the build tree of the machine's exact switch combination
+ * (dist/{curation-off,compliance-off,curation-compliance-off}/{commands,agents}, built by
+ * D-LEARNING-VARIANTS), and the apply-decisions skill is not installed when curation is
+ * off, so the decisions text reaches no prompt and the skill has no reader. With a switch on,
+ * its on files are installed. A compliance-off machine carries no posting step in any prompt
+ * that has a compliance arm. Three pieces carry it:
  *
  *   - the source order (src/core/assets.ts commandSourceDirs / agentSourceDirs):
- *     with curation off the curation-off directory is consulted first, then the
+ *     an off combination takes its own tree, and only the all-on combination takes the
  *     normal order, so a host with no arm installs its one file as before;
  *   - the skill condition (CURATION_GATED_SKILLS in src/core/plugins.ts):
  *     installViaFileCopy leaves the skill out when curation is off;
- *   - {@link convergeCurationVariants}, below: the converge that makes an
- *     ALREADY-installed tree match the switch, run by `devflow init` after the
- *     file copy and by `devflow curation --enable/--disable` after the switch is
- *     written ({@link applyCurationToggle}).
+ *   - {@link convergeVariantAxes}, below: the one converge that makes an
+ *     ALREADY-installed tree match both switches, run by `devflow init` after the
+ *     file copy and by `devflow curation` and `devflow compliance` after the switch is
+ *     written ({@link applyVariantToggle}).
  *
  * The converge, decided in turn:
- *   - Its roster is the files that exist under dist/curation-off, not a list typed
- *     here: the build owns which hosts have an arm, so a new arm is converged with
- *     no edit to this file.
+ *   - Its roster is the files that exist under the off trees, joined with the hosts the build
+ *     manifest (dist/variant-axes.json) says carry an arm, not a list typed here: the build owns
+ *     which hosts have an arm, so a new arm is converged with no edit to this file.
+ *   - It fails closed on the posting question. With compliance off, an installed
+ *     compliance-armed prompt that could not be converged is named in `posting`, and a build
+ *     manifest that cannot name those hosts leaves `posting` unknown. Callers decide the cost:
+ *     `devflow compliance` exits non-zero, init and curation warn.
+ *   - After a clean converge, {@link applyVariantToggle} and init record which variants are
+ *     installed (`installedVariants` in the manifest, see src/core/installed-variants.ts).
  *   - It rewrites only files that are ALREADY installed. A `--plugin` install
  *     carries one plugin's files; a toggle must not add another plugin's. For the
  *     same reason the skill is installed on a switch-on only when the machine's
@@ -47,13 +55,14 @@
  *     applied again the moment curation comes back on.
  *   - Version skew: the variants in this package were built with this version.
  *     When the manifest records another version, the installed files are not the
- *     ones this package would rewrite, so {@link applyCurationToggle} skips the
- *     converge and says to run `devflow init`.
+ *     ones this package would rewrite, so {@link applyVariantToggle} skips the
+ *     converge and says to run `devflow init`. For a compliance-off toggle the message also
+ *     says that posting steps remain installed until then.
  *   - An agent's installed `model:` and `effort:` are carried into the variant before
  *     the byte comparison (D-AGENT-OVERRIDE-CARRY, see {@link withInstalledState}),
  *     so the overrides `devflow agents` and the proxy put there are never written
  *     back to the shipped values and a no-op converge writes no agent.
- *     {@link applyCurationToggle} still runs reapplyAgentMapping straight after a
+ *     {@link applyVariantToggle} still runs reapplyAgentMapping straight after a
  *     converge that rewrote an agent: it reads agent-models.json and is the authority.
  *
  * D-LEARNING-PRELOAD-MACHINE-ONLY (amended): the apply-decisions preload follows
@@ -72,15 +81,29 @@ import * as path from 'path';
 
 import {
   agentSourceDirs,
+  bothOffDir,
   commandSourceDirs,
+  complianceOffDir,
   curationOffDir,
 } from '../../core/assets.js';
 import { carryStampedTools } from '../../core/agent-frontmatter.js';
 import { carryAgentOverrides, reapplyAgentMapping } from '../../core/agent-models.js';
+import type { ComplianceFeatureState } from '../../core/compliance.js';
 import { describeEchoedValue } from '../../core/echo-value.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
-import { ALL_SWITCHES_ON, type VariantKind } from '../../core/curation-variants.js';
-import { readManifest } from '../../core/manifest.js';
+import {
+  ALL_SWITCHES_ON,
+  VARIANT_MANIFEST_REL_PATH,
+  describeVariantManifestParseError,
+  machineVariantKey,
+  parseVariantManifest,
+  variantOffRelPath,
+  type VariantAxis,
+  type VariantKind,
+  type VariantSwitches,
+} from '../../core/curation-variants.js';
+import { readInstalledVariants } from '../../core/installed-variants.js';
+import { readManifest, writeManifest } from '../../core/manifest.js';
 import { getPackageRoot } from '../../core/paths.js';
 import { isProxyEnabled } from '../../core/proxy-state.js';
 import {
@@ -91,6 +114,7 @@ import {
   skillsOf,
   type PluginDefinition,
 } from '../../core/plugins.js';
+import { convergeFromManifest, type ConvergeComplianceArtifactsResult } from './compliance-install.js';
 import { copyDirectory, resolveSkillSource } from './installer.js';
 import { LANGUAGE_STAMPED_COMMANDS, stampForConverge } from './language-stamp.js';
 
@@ -155,6 +179,27 @@ export interface ConvergeCurationVariantsResult {
 
 type FileOutcome = 'rewritten' | 'unchanged' | 'not-installed' | 'failed';
 
+/** One prompt of a kind that has a variant on an axis: its file name and the axes it carries an arm on. */
+interface RosterHost {
+  readonly file: string;
+  readonly axes: Readonly<Record<VariantAxis, boolean>>;
+}
+
+/**
+ * Whether the installed prompts of a compliance-off machine are free of the posting steps.
+ *
+ *   - `clear`: compliance is on, or every installed compliance-armed prompt holds the file built for the machine.
+ *   - `left`: these installed files could not be converged and may still post.
+ *   - `unknown`: the build manifest that names the compliance-armed prompts is unusable, so the files that
+ *     still post cannot be named.
+ */
+export type PostingConverge =
+  | { readonly kind: 'clear' }
+  | { readonly kind: 'left'; readonly files: readonly string[] }
+  | { readonly kind: 'unknown'; readonly reason: string };
+
+const POSTING_CLEAR: PostingConverge = { kind: 'clear' };
+
 // ── Internals ──────────────────────────────────────────────────────────────
 
 function installedFile(claudeDir: string, kind: VariantKind, fileName: string): string {
@@ -162,41 +207,95 @@ function installedFile(claudeDir: string, kind: VariantKind, fileName: string): 
 }
 
 /**
- * The curation-ON source directories for a kind, most-preferred first.
- *
- * The converge carries the curation switch only, so it reads the order of a machine with
- * compliance on: the order it has always read.
+ * The both-axes-ON source directories for a kind, most-preferred first: the files a host
+ * with no off variant for the machine installs.
  */
 function onSourceDirs(kind: VariantKind, root: string): readonly string[] {
   return kind === 'commands' ? commandSourceDirs(ALL_SWITCHES_ON, root) : agentSourceDirs(root, ALL_SWITCHES_ON);
 }
 
+/** The roster-shaped file names directly under `dir`, `'absent'` when it does not exist and `'unreadable'` (warned) when it cannot be read. */
+async function listVariantDir(dir: string, kind: VariantKind, warn: (msg: string) => void): Promise<readonly string[] | 'absent' | 'unreadable'> {
+  try {
+    return (await fs.readdir(dir)).filter(entry => ROSTER_NAME_RE.test(entry));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return 'absent';
+    warn(`prompt variants: cannot read the ${kind} variants under ${dir} — ${String(err)}`);
+    return 'unreadable';
+  }
+}
+
 /**
- * The roster of one kind: the `.md` files under dist/curation-off/<kind>, sorted.
+ * The compiled prompts the build says carry an arm, read from its variant manifest. An error names the
+ * cause in a line a person can act on. Compliance on never reads it: only a compliance-off machine needs
+ * the manifest to know which prompts it must not leave unconverged.
+ */
+async function readVariantHosts(root: string): Promise<{ ok: true; hosts: ReadonlyMap<string, RosterHost> } | { ok: false; reason: string }> {
+  const file = path.join(root, ...VARIANT_MANIFEST_REL_PATH.split('/'));
+  let text: string;
+  try {
+    text = await fs.readFile(file, 'utf-8');
+  } catch (err) {
+    const cause = (err as NodeJS.ErrnoException).code === 'ENOENT' ? 'does not exist' : `cannot be read (${String(err)})`;
+    return { ok: false, reason: `the variant manifest ${cause}: ${file}` };
+  }
+  const parsed = parseVariantManifest(text);
+  if (!parsed.ok) return { ok: false, reason: `the variant manifest is not valid: ${file} (${describeVariantManifestParseError(parsed.error)})` };
+  const hosts = new Map<string, RosterHost>();
+  for (const host of parsed.value) hosts.set(`${host.kind}/${host.name}.md`, { file: `${host.name}.md`, axes: host.axes });
+  return { ok: true, hosts };
+}
+
+/**
+ * The roster of one kind: the prompts that differ on an axis, sorted by file name.
  *
- * `present` is false when the directory does not exist (the build has not run, or
- * only `build:cli` did), so the caller can say so instead of reporting a converge
- * that had nothing to do.
+ * The files under the three off trees name them (the build owns which hosts have an arm), and a host the
+ * build manifest lists is added, so a tree removed from the package still leaves its hosts in the roster.
+ * An arm comes from the manifest entry, or from the trees the file is in when the manifest does not list it
+ * (a curation arm has a file under curation-off or both-off, a compliance arm under compliance-off or
+ * both-off).
+ *
+ * `present` is false when no tree holds this kind and the manifest lists none (the build has not run, or
+ * only `build:cli` did), so the caller can say so instead of reporting a converge that had nothing to do.
  */
 async function readRoster(
   kind: VariantKind,
   root: string,
+  manifestHosts: ReadonlyMap<string, RosterHost> | null,
   warn: (msg: string) => void,
-): Promise<{ names: string[]; present: boolean }> {
-  let entries: string[];
-  try {
-    entries = await fs.readdir(curationOffDir(kind, root));
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { names: [], present: false };
-    warn(`curation variants: cannot read the ${kind} variants — ${String(err)}`);
-    return { names: [], present: false };
+): Promise<{ hosts: RosterHost[]; present: boolean }> {
+  const listings = {
+    curation: await listVariantDir(curationOffDir(kind, root), kind, warn),
+    compliance: await listVariantDir(complianceOffDir(kind, root), kind, warn),
+    both: await listVariantDir(bothOffDir(kind, root), kind, warn),
+  };
+  const inferred = new Map<string, Record<VariantAxis, boolean>>();
+  const note = (names: readonly string[] | 'absent' | 'unreadable', axes: readonly VariantAxis[]): void => {
+    if (typeof names === 'string') return;
+    for (const name of names) {
+      const arms = inferred.get(name) ?? { curation: false, compliance: false };
+      inferred.set(name, {
+        curation: arms.curation || axes.includes('curation'),
+        compliance: arms.compliance || axes.includes('compliance'),
+      });
+    }
+  };
+  note(listings.curation, ['curation']);
+  note(listings.compliance, ['compliance']);
+  note(listings.both, ['curation', 'compliance']);
+
+  const files = new Map<string, RosterHost>();
+  for (const [file, axes] of inferred) files.set(file, { file, axes });
+  for (const [key, host] of manifestHosts ?? []) {
+    if (key.startsWith(`${kind}/`) && ROSTER_NAME_RE.test(host.file) && (host.axes.curation || host.axes.compliance)) files.set(host.file, host);
   }
-  const names = entries.filter(entry => ROSTER_NAME_RE.test(entry)).sort();
-  if (names.length > MAX_CURATION_ROSTER) {
-    warn(`curation variants: ${names.length} ${kind} variants exceed the bound of ${MAX_CURATION_ROSTER}; converging the first ${MAX_CURATION_ROSTER}`);
-    return { names: names.slice(0, MAX_CURATION_ROSTER), present: true };
+  const hosts = [...files.values()].sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
+  const present = hosts.length > 0 || Object.values(listings).some(listing => typeof listing !== 'string');
+  if (hosts.length > MAX_CURATION_ROSTER) {
+    warn(`prompt variants: ${hosts.length} ${kind} variants exceed the bound of ${MAX_CURATION_ROSTER}; converging the first ${MAX_CURATION_ROSTER}`);
+    return { hosts: hosts.slice(0, MAX_CURATION_ROSTER), present: true };
   }
-  return { names, present: true };
+  return { hosts, present };
 }
 
 async function readIfPresent(file: string): Promise<Buffer | 'absent' | 'unreadable'> {
@@ -264,38 +363,46 @@ function withInstalledState(
 }
 
 /**
- * Converge ONE installed prompt onto the variant the switch wants.
+ * Converge ONE installed prompt onto the variant the machine's switches want.
+ *
+ * The file is the one built for the machine's exact switches (`machineVariantKey`): an off
+ * variant is read from its own tree and no other, so a host with a compliance arm on a
+ * compliance-off machine never falls through to a file that carries the posting steps. A host
+ * the machine needs no off variant for comes from the normal source order.
  *
  * Never throws: every failure is a warning and the outcome `failed`, so the next
  * file is still tried.
  */
 async function convergeFile(
   kind: VariantKind,
-  fileName: string,
-  opts: Required<Pick<ConvergeCurationVariantsOptions, 'claudeDir' | 'curation' | 'warn'>> & {
+  host: RosterHost,
+  opts: {
+    claudeDir: string;
+    switches: VariantSwitches;
+    warn: (msg: string) => void;
     root: string;
     /** The effective selection's language list, stamped into a copy that has none to carry. */
     focuses: readonly string[];
   },
 ): Promise<FileOutcome> {
-  const { claudeDir, curation, warn, root, focuses } = opts;
+  const { claudeDir, switches, warn, root, focuses } = opts;
+  const fileName = host.file;
   const target = installedFile(claudeDir, kind, fileName);
 
   const installed = await readIfPresent(target);
   if (installed === 'absent') return 'not-installed';
   if (installed === 'unreadable') {
-    warn(`curation variants: cannot read the installed ${kind}/${fileName} (${target}) — left as it is`);
+    warn(`prompt variants: cannot read the installed ${kind}/${fileName} (${target}) — left as it is`);
     return 'failed';
   }
 
-  // Curation off: the variant is the roster file itself. Curation on: the normal
-  // source order, which is where the curation-on file of that host lives.
-  const candidates = curation
+  const key = machineVariantKey(switches, host.axes);
+  const candidates = key === 'on'
     ? onSourceDirs(kind, root).map(dir => path.join(dir, fileName))
-    : [path.join(curationOffDir(kind, root), fileName)];
+    : [path.join(root, ...variantOffRelPath(key, kind, fileName).split('/'))];
   const source = await firstReadable(candidates);
   if (source === undefined) {
-    warn(`curation variants: no source for ${kind}/${fileName} (searched: ${candidates.join(', ')}) — left as it is`);
+    warn(`prompt variants: no source for ${kind}/${fileName} (searched: ${candidates.join(', ')}) — left as it is`);
     return 'failed';
   }
 
@@ -310,7 +417,7 @@ async function convergeFile(
     // target's permission mode.
     await writeFileAtomicExclusive(target, wanted.toString('utf-8'));
   } catch (err) {
-    warn(`curation variants: could not rewrite ${kind}/${fileName} (${target}) — ${String(err)}`);
+    warn(`prompt variants: could not rewrite ${kind}/${fileName} (${target}) — ${String(err)}`);
     return 'failed';
   }
   return 'rewritten';
@@ -421,9 +528,124 @@ async function convergeSkills(opts: ConvergeCurationVariantsOptions): Promise<Cu
 
 // ── Convergence ────────────────────────────────────────────────────────────
 
+export interface ConvergePromptVariantsOptions {
+  /** Claude Code's config directory (e.g. ~/.claude). Must be absolute. */
+  claudeDir: string;
+  /** The machine's settled curation and compliance switches. */
+  switches: VariantSwitches;
+  /** The effective plugin selection: its language list is stamped into a copy that has none to carry. */
+  plugins: readonly PluginDefinition[];
+  warn: (msg: string) => void;
+  /** Package root the variants are read from. Injectable for a temp tree; defaults to this package. */
+  packageRoot?: string;
+}
+
+export interface ConvergePromptVariantsResult {
+  /** True when nothing failed. False when any warn path was taken. */
+  converged: boolean;
+  /** Installed command files this run rewrote, as `name.md`. */
+  commandsRewritten: readonly string[];
+  /** Installed agent files this run rewrote, as `name.md`. */
+  agentsRewritten: readonly string[];
+  /** Installed files already holding the target bytes. */
+  unchanged: number;
+  /** Roster entries with no installed file (another plugin's, or never installed): left alone. */
+  notInstalled: number;
+  /** Whether the installed prompts of a compliance-off machine are proven free of the posting steps. */
+  posting: PostingConverge;
+}
+
+/** The result of a converge that did not run: nothing changed and, with compliance off, nothing is proven. */
+function notRun(switches: VariantSwitches, reason: string): ConvergePromptVariantsResult {
+  return {
+    converged: false,
+    commandsRewritten: [],
+    agentsRewritten: [],
+    unchanged: 0,
+    notInstalled: 0,
+    posting: switches.compliance ? POSTING_CLEAR : { kind: 'unknown', reason },
+  };
+}
+
+/**
+ * Make the installed commands and agents match the machine's two switches: the per-kind
+ * converge of the prompts.
+ *
+ * Each roster host is rewritten to the file built for the machine's exact switches (see
+ * {@link convergeFile}). With compliance off the converge also answers the fail-closed
+ * question: the build manifest names the hosts that carry a compliance arm, and an installed one
+ * that could not be converged is listed in `posting` as still posting. A compliance-off machine whose
+ * build manifest is unusable answers `unknown`, because it cannot name those hosts.
+ *
+ * Never throws. A caller reads `converged` and `posting`; it does not catch.
+ */
+export async function convergePromptVariants(opts: ConvergePromptVariantsOptions): Promise<ConvergePromptVariantsResult> {
+  const { claudeDir, switches, warn } = opts;
+
+  // Precondition, asserted in production code: a relative claudeDir would resolve
+  // the install targets somewhere unexpected.
+  if (!path.isAbsolute(claudeDir)) {
+    warn(`prompt variants: claudeDir is not an absolute path ("${claudeDir}") — skipping convergence`);
+    return notRun(switches, 'the Claude directory is not an absolute path');
+  }
+  const root = opts.packageRoot ?? getPackageRoot();
+  const focuses = installedLanguageFocuses(opts.plugins);
+
+  let failed = false;
+  let unknownReason: string | null = null;
+  let manifestHosts: ReadonlyMap<string, RosterHost> | null = null;
+  if (!switches.compliance) {
+    const manifest = await readVariantHosts(root);
+    if (manifest.ok) {
+      manifestHosts = manifest.hosts;
+    } else {
+      warn(`prompt variants: ${manifest.reason} — the installed prompts that still post cannot be named. Run \`npm run build:mds\`, then \`devflow init\`.`);
+      unknownReason = manifest.reason;
+      failed = true;
+    }
+  }
+
+  let unchanged = 0;
+  let notInstalled = 0;
+  const stillPosting: string[] = [];
+  const rewritten: Record<VariantKind, string[]> = { commands: [], agents: [] };
+
+  for (const kind of KINDS) {
+    const roster = await readRoster(kind, root, manifestHosts, warn);
+    if (!roster.present) {
+      warn(`prompt variants: no ${kind} variants under ${curationOffDir(kind, root)} — run \`npm run build:mds\`; installed ${kind} left as they are`);
+      failed = true;
+      continue;
+    }
+    for (const host of roster.hosts) {
+      const outcome = await convergeFile(kind, host, { claudeDir, switches, warn, root, focuses });
+      if (outcome === 'rewritten') rewritten[kind].push(host.file);
+      else if (outcome === 'unchanged') unchanged++;
+      else if (outcome === 'not-installed') notInstalled++;
+      else {
+        failed = true;
+        if (!switches.compliance && host.axes.compliance) stillPosting.push(installedFile(claudeDir, kind, host.file));
+      }
+    }
+  }
+
+  let posting: PostingConverge = POSTING_CLEAR;
+  if (unknownReason !== null) posting = { kind: 'unknown', reason: unknownReason };
+  else if (stillPosting.length > 0) posting = { kind: 'left', files: stillPosting };
+
+  return {
+    converged: !failed,
+    commandsRewritten: rewritten.commands,
+    agentsRewritten: rewritten.agents,
+    unchanged,
+    notInstalled,
+    posting,
+  };
+}
+
 /**
  * Make the installed commands, agents and apply-decisions skill match the
- * machine's curation switch.
+ * machine's curation switch: the prompt converge with compliance read as on, and the skill.
  *
  * Never throws. A caller reads `converged`; it does not catch. A claudeDir that is
  * not absolute is reported the same way rather than thrown, because an install
@@ -433,52 +655,130 @@ export async function convergeCurationVariants(
   opts: ConvergeCurationVariantsOptions,
 ): Promise<ConvergeCurationVariantsResult> {
   const { claudeDir, curation, warn } = opts;
-  const empty: ConvergeCurationVariantsResult = {
-    converged: false, commandsRewritten: [], agentsRewritten: [], unchanged: 0, notInstalled: 0, skill: 'unchanged',
-  };
-
-  // Precondition, asserted in production code: a relative claudeDir would resolve
-  // the install targets somewhere unexpected.
   if (!path.isAbsolute(claudeDir)) {
-    warn(`curation variants: claudeDir is not an absolute path ("${claudeDir}") — skipping convergence`);
-    return empty;
+    warn(`prompt variants: claudeDir is not an absolute path ("${claudeDir}") — skipping convergence`);
+    return { converged: false, commandsRewritten: [], agentsRewritten: [], unchanged: 0, notInstalled: 0, skill: 'unchanged' };
   }
-  const root = opts.packageRoot ?? getPackageRoot();
-  const focuses = installedLanguageFocuses(opts.plugins);
 
-  let failed = false;
-  let unchanged = 0;
-  let notInstalled = 0;
-  const rewritten: Record<VariantKind, string[]> = { commands: [], agents: [] };
-
-  for (const kind of KINDS) {
-    const roster = await readRoster(kind, root, warn);
-    if (!roster.present) {
-      warn(`curation variants: no ${kind} variants under ${curationOffDir(kind, root)} — run \`npm run build:mds\`; installed ${kind} left as they are`);
-      failed = true;
-      continue;
-    }
-    for (const fileName of roster.names) {
-      const outcome = await convergeFile(kind, fileName, { claudeDir, curation, warn, root, focuses });
-      if (outcome === 'rewritten') rewritten[kind].push(fileName);
-      else if (outcome === 'unchanged') unchanged++;
-      else if (outcome === 'not-installed') notInstalled++;
-      else failed = true;
-    }
-  }
+  const prompts = await convergePromptVariants({
+    claudeDir,
+    switches: { curation, compliance: true },
+    plugins: opts.plugins,
+    warn,
+    packageRoot: opts.packageRoot,
+  });
 
   // Evaluated unconditionally, after the files: a failed prompt never skips the skill
   // (one failure must not leave the rest of the fan-out half-converged).
   const skill = await convergeSkills(opts);
-  if (skill === 'failed') failed = true;
 
   return {
-    converged: !failed,
-    commandsRewritten: rewritten.commands,
-    agentsRewritten: rewritten.agents,
-    unchanged,
-    notInstalled,
+    converged: prompts.converged && skill !== 'failed',
+    commandsRewritten: prompts.commandsRewritten,
+    agentsRewritten: prompts.agentsRewritten,
+    unchanged: prompts.unchanged,
+    notInstalled: prompts.notInstalled,
     skill,
+  };
+}
+
+// ── The one converge for both axes ─────────────────────────────────────────
+
+/** The slice of the manifest the composed converge reads: the two switches, the frameworks and the rules switch. */
+export interface VariantMachineState {
+  readonly features: {
+    readonly curation: boolean;
+    readonly compliance: ComplianceFeatureState;
+    readonly rules: boolean;
+  };
+}
+
+export interface ConvergeVariantAxesOptions {
+  /** Claude Code's config directory (e.g. ~/.claude). Must be absolute. */
+  claudeDir: string;
+  /** The machine root (~/.devflow), where skill shadows live. */
+  devflowDir: string;
+  /** The machine's settled switches. The compliance part reaches its converge only through {@link convergeFromManifest}. */
+  manifest: VariantMachineState;
+  /** The effective plugin selection. */
+  plugins: readonly PluginDefinition[];
+  warn: (msg: string) => void;
+  /** Package root the variants and sources are read from. Injectable for a temp tree; defaults to this package. */
+  packageRoot?: string;
+}
+
+export interface ConvergeVariantAxesResult extends ConvergeCurationVariantsResult {
+  /** What the compliance-artifact converge (the skill and the rule) did. */
+  compliance: ConvergeComplianceArtifactsResult;
+  /** Whether a compliance-off machine still has installed prompts that post. */
+  posting: PostingConverge;
+}
+
+/**
+ * Run one per-kind converge and fold an unexpected throw into its fallback result, so the
+ * composed converge never throws and a failed kind never skips the next.
+ */
+async function attempt<T>(label: string, warn: (msg: string) => void, fallback: T, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (err) {
+    warn(`${label}: the converge failed — ${err instanceof Error ? err.message : String(err)}`);
+    return fallback;
+  }
+}
+
+/**
+ * The one converge for both switches: it makes the installed tree match the machine's curation
+ * and compliance switches. `devflow init`, `devflow curation` and `devflow compliance` all call it.
+ *
+ * It composes three per-kind converges, each a result and never a throw:
+ *   - {@link convergePromptVariants}: the commands and agents, for both axes;
+ *   - the apply-decisions skill, which follows the curation switch;
+ *   - {@link convergeFromManifest}: the compliance skill and rule, the one place the manifest
+ *     becomes compliance options.
+ * A failed kind is a warning and `converged: false`, and the next kind still runs. A compliance-off
+ * machine that still has a prompt that posts, or cannot name one, is `posting` and never `clear`: the
+ * caller decides what that costs (the compliance command exits non-zero, init and curation warn).
+ *
+ * Never throws.
+ */
+export async function convergeVariantAxes(opts: ConvergeVariantAxesOptions): Promise<ConvergeVariantAxesResult> {
+  const { claudeDir, devflowDir, manifest, plugins, warn, packageRoot } = opts;
+  const switches: VariantSwitches = { curation: manifest.features.curation, compliance: manifest.features.compliance.enabled };
+
+  // Precondition, asserted in production code: a relative claudeDir would resolve
+  // every install target somewhere unexpected, the skill removal included.
+  if (!path.isAbsolute(claudeDir)) {
+    warn(`prompt variants: claudeDir is not an absolute path ("${claudeDir}") — skipping convergence`);
+    return {
+      ...notRun(switches, 'the Claude directory is not an absolute path'),
+      skill: 'unchanged',
+      compliance: { removedPreexisting: false, converged: false },
+    };
+  }
+
+  const prompts = await attempt('prompt variants', warn, notRun(switches, 'the prompt converge failed'), () =>
+    convergePromptVariants({ claudeDir, switches, plugins, warn, packageRoot }),
+  );
+  const skill = await attempt<CurationSkillState>('curation variants', warn, 'failed', () =>
+    convergeSkills({ claudeDir, devflowDir, curation: switches.curation, plugins, warn, packageRoot }),
+  );
+  const compliance = await attempt<ConvergeComplianceArtifactsResult>(
+    'compliance artifacts',
+    warn,
+    { removedPreexisting: false, converged: false },
+    () => convergeFromManifest({ claudeDir, devflowDir, manifest, warn }),
+  );
+
+  return {
+    converged: prompts.converged && skill !== 'failed' && compliance.converged,
+    commandsRewritten: prompts.commandsRewritten,
+    agentsRewritten: prompts.agentsRewritten,
+    unchanged: prompts.unchanged,
+    notInstalled: prompts.notInstalled,
+    skill,
+    compliance,
+    posting: prompts.posting,
   };
 }
 
@@ -500,12 +800,20 @@ export async function readRunningVersion(packageRoot: string = getPackageRoot())
  * The caller prints it only on a toggle: a run that moved nothing says nothing.
  */
 export function describeCurationConverge(result: ConvergeCurationVariantsResult, curation: boolean): string | null {
+  return describeVariantConverge(result, 'curation', curation);
+}
+
+/**
+ * One line for what a converge changed on an axis, or null when it changed nothing: the prompts
+ * rewritten for the variant the axis now holds and, for curation, the skill it installed or removed.
+ */
+export function describeVariantConverge(result: ConvergeCurationVariantsResult, axis: VariantAxis, enabled: boolean): string | null {
   const parts: string[] = [];
   const prompts = result.commandsRewritten.length + result.agentsRewritten.length;
   if (prompts > 0) {
     parts.push(
       `${result.commandsRewritten.length} command(s) and ${result.agentsRewritten.length} agent(s) ` +
-      `rewritten for the curation-${curation ? 'on' : 'off'} variant`,
+      `rewritten for the ${axis}-${enabled ? 'on' : 'off'} variant`,
     );
   }
   if (result.skill === 'installed') parts.push('the apply-decisions skill installed');
@@ -513,21 +821,48 @@ export function describeCurationConverge(result: ConvergeCurationVariantsResult,
   return parts.length === 0 ? null : parts.join('; ');
 }
 
-export interface ApplyCurationToggleOptions {
+/**
+ * The lines that say a compliance-off machine may still hold a prompt that posts, or none when
+ * the converge proved it clear. The files are the installed ones that could not be converged.
+ */
+export function describePostingLeft(posting: PostingConverge): readonly string[] {
+  switch (posting.kind) {
+    case 'clear':
+      return [];
+    case 'left':
+      return [
+        `${posting.files.length} installed prompt(s) still post: ${posting.files.join(', ')}`,
+        'Run `devflow init` to install the compliance-off prompts.',
+      ];
+    case 'unknown':
+      return [
+        `The installed prompts that still post cannot be named: ${posting.reason}`,
+        'Run `devflow init` to install the compliance-off prompts.',
+      ];
+    default: {
+      const unhandled: never = posting;
+      return [`unhandled posting state ${JSON.stringify(unhandled)}`];
+    }
+  }
+}
+
+export interface ApplyVariantToggleOptions {
   claudeDir: string;
   devflowDir: string;
-  /** The value the switch was just set to. */
-  curation: boolean;
+  /** The axis the caller just changed. */
+  axis: VariantAxis;
+  /** The value that axis was just set to. */
+  enabled: boolean;
   /** The running package's version; null when it cannot be read. */
   runningVersion: string | null;
   warn: (msg: string) => void;
   packageRoot?: string;
 }
 
-export type CurationToggleOutcome =
+export type VariantToggleOutcome =
   /** The converge did not run: the installed files are not ones this package would rewrite. */
   | { kind: 'skipped'; reason: 'no-manifest' | 'version-skew'; message: string }
-  | { kind: 'converged'; result: ConvergeCurationVariantsResult; agentMappingReapplied: boolean };
+  | { kind: 'converged'; result: ConvergeVariantAxesResult; agentMappingReapplied: boolean };
 
 /**
  * Whether the version the manifest records is the version of the running package.
@@ -546,11 +881,34 @@ export function installedVersionMatches(installedVersion: string, runningVersion
  * `describeEchoedValue`.
  */
 export function curationToggleSkew(installedVersion: string, runningVersion: string | null, curation: boolean): string | null {
+  return variantToggleSkew(installedVersion, runningVersion, 'curation', curation);
+}
+
+/**
+ * The version-skew check for a toggle of either axis. A compliance-off toggle also says that posting
+ * steps remain installed, because that is the unsafe side of the mismatch: the installed prompts are
+ * the ones that carry them.
+ */
+export function variantToggleSkew(
+  installedVersion: string,
+  runningVersion: string | null,
+  axis: VariantAxis,
+  enabled: boolean,
+): string | null {
   if (installedVersionMatches(installedVersion, runningVersion)) return null;
-  return (
+  const skew =
     `The installed prompts come from devflow ${describeEchoedValue(installedVersion)} and this CLI is ${runningVersion ?? 'of unknown version'}, ` +
-    `so the curation-${curation ? 'on' : 'off'} variants were not applied. Run \`devflow init\` to apply them.`
-  );
+    `so the ${axis}-${enabled ? 'on' : 'off'} variants were not applied`;
+  return axis === 'compliance' && !enabled
+    ? `${skew}, and posting steps remain installed until devflow init. Run \`devflow init\` to apply them.`
+    : `${skew}. Run \`devflow init\` to apply them.`;
+}
+
+/** The line for a toggle that found no readable install manifest. */
+function unreadableManifestMessage(axis: VariantAxis, enabled: boolean): string {
+  return axis === 'compliance' && !enabled
+    ? 'No readable install manifest, so the compliance-off variants were not applied, and posting steps remain installed until devflow init. Run `devflow init`.'
+    : `No readable install manifest, so the ${axis} variants were not applied. Run \`devflow init\`.`;
 }
 
 /**
@@ -576,9 +934,33 @@ export async function installedScriptsSkew(devflowDir: string, packageRoot?: str
 }
 
 /**
- * What `devflow curation --enable/--disable` does after the switch is written:
- * converge the installed tree onto the new value, then reapply the saved agent
- * model and effort mapping.
+ * Record the variants the installed prompts now hold in the manifest, after a converge that
+ * finished clean (AC-29). A record that already says so is left alone, so a toggle to the value
+ * already installed writes nothing. A failed write is a warning: the status line then reads
+ * the record as it stood, which says `mismatch` or `unknown` and names `devflow init`.
+ */
+async function recordInstalledVariants(devflowDir: string, switches: VariantSwitches, warn: (msg: string) => void): Promise<void> {
+  try {
+    const manifest = await readManifest(devflowDir);
+    if (manifest === null) return;
+    const recorded = readInstalledVariants(manifest.installedVariants);
+    if (recorded !== null && recorded.curation === switches.curation && recorded.compliance === switches.compliance) return;
+    await writeManifest(devflowDir, { ...manifest, installedVariants: { curation: switches.curation, compliance: switches.compliance } });
+  } catch (err) {
+    warn(`install record: could not record the installed variants — ${String(err)}`);
+  }
+}
+
+/**
+ * What `devflow curation --enable/--disable` and `devflow compliance` do after the switch is
+ * written: converge the installed tree onto both switches with the one converge, record the
+ * installed variants when it finished clean, then reapply the saved agent model and effort mapping.
+ *
+ * The switch of the toggled axis is the value the caller just set. The other axis and the
+ * compliance frameworks come from the manifest, which the caller has already written.
+ *
+ * A version skew keeps the check this toggle has always had: the installed prompts are not the
+ * ones this package would rewrite, so nothing is converged and the outcome is `skipped`.
  *
  * The converge carries each installed agent's model and effort into the variant it
  * writes (D-AGENT-OVERRIDE-CARRY), so the overrides are already on the file and this
@@ -589,29 +971,35 @@ export async function installedScriptsSkew(devflowDir: string, packageRoot?: str
  *
  * Never throws.
  */
-export async function applyCurationToggle(opts: ApplyCurationToggleOptions): Promise<CurationToggleOutcome> {
-  const { claudeDir, devflowDir, curation, runningVersion, warn } = opts;
+export async function applyVariantToggle(opts: ApplyVariantToggleOptions): Promise<VariantToggleOutcome> {
+  const { claudeDir, devflowDir, axis, enabled, runningVersion, warn } = opts;
 
   const manifest = await readManifest(devflowDir);
   if (manifest === null) {
-    return {
-      kind: 'skipped',
-      reason: 'no-manifest',
-      message: 'No readable install manifest, so the curation variants were not applied. Run `devflow init`.',
-    };
+    return { kind: 'skipped', reason: 'no-manifest', message: unreadableManifestMessage(axis, enabled) };
   }
-  const skew = curationToggleSkew(manifest.version, runningVersion, curation);
+  const skew = variantToggleSkew(manifest.version, runningVersion, axis, enabled);
   if (skew !== null) return { kind: 'skipped', reason: 'version-skew', message: skew };
 
   const selection = new Set(manifest.plugins);
-  const result = await convergeCurationVariants({
+  const state: VariantMachineState = {
+    features: {
+      curation: axis === 'curation' ? enabled : manifest.features.curation,
+      compliance: axis === 'compliance' ? { ...manifest.features.compliance, enabled } : manifest.features.compliance,
+      rules: manifest.features.rules,
+    },
+  };
+  const result = await convergeVariantAxes({
     claudeDir,
     devflowDir,
-    curation,
+    manifest: state,
     plugins: DEVFLOW_PLUGINS.filter(plugin => selection.has(plugin.name)),
     warn,
     packageRoot: opts.packageRoot,
   });
+  if (result.converged) {
+    await recordInstalledVariants(devflowDir, { curation: state.features.curation, compliance: state.features.compliance.enabled }, warn);
+  }
 
   let agentMappingReapplied = false;
   if (result.agentsRewritten.length > 0) {
@@ -624,7 +1012,7 @@ export async function applyCurationToggle(opts: ApplyCurationToggleOptions): Pro
       });
       agentMappingReapplied = true;
     } catch (err) {
-      warn(`curation variants: could not reapply the agent model mapping — ${String(err)}`);
+      warn(`prompt variants: could not reapply the agent model mapping — ${String(err)}`);
     }
   }
   return { kind: 'converged', result, agentMappingReapplied };
