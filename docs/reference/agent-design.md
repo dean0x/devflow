@@ -142,4 +142,6 @@ npx devflow-kit agents --reset --yes                    # Skip confirmation prom
 
 All agents live in `src/assets/agents/` — there is no separate per-plugin agent directory. For an agent used by only one plugin, add it to `src/assets/agents/` and declare it in only that plugin's `agents` array in DEVFLOW_PLUGINS.
 
+**Hook-spawned agents.** `curate` and `tracker` are spawned by session-start directives, never by a command, so neither has a `_roster.mds` row. `tracker` sits in `devflow-core-skills`, whose empty `commands: []` is what makes the registry's reverse spawn check skip it structurally rather than by exemption.
+
 **Note:** `src/assets/agents/` holds the source for every agent, in one of two shapes. A hand-authored `{name}.md` (e.g. `evaluate.md`, `test.md`) installs directly at `node dist/cli.js init` time. An `.mds` generator host (e.g. `git.mds`, `code.mds`) is compiled by `npm run build:mds` to `dist/agents/{name}.md`, and that artifact is what installs — the installer resolves `dist/agents/` ahead of `src/assets/agents/` and takes the first hit, throwing when neither has the agent.

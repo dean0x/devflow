@@ -35,12 +35,12 @@ Invariants:
 17. Skills install for selected plugins and their `requires:`. Never install or delete a dormant shadow.
 18. The compliance lens is the union of all layers. A branch never removes a framework; an unreadable file never lowers it (D-LENS-UNION).
 19. The compliance directive goes into a spawn prompt only when the lens is on. No agent body names the compliance skill (D-COMPLIANCE-INJECT).
-20. Enabled compliance, or a repo `compliance` key (never HEAD), makes `required` the evidence floor. The lens never decides evidence.
+20. Enabled compliance, or a repo `compliance` key (never HEAD), makes `required` the evidence floor. The lens never decides evidence. With compliance off nothing posts; under `required` each command prints one local `TRACEABILITY: DEGRADED` line.
 21. Flag `--enable`/`--disable` are boolean-only. Narrow with `isEnvBooleanFlag`. Never display `'unset'`.
 22. Disable and uninstall remove only devflow's exact value. Init adopts a user's own value as off (D-ADOPT-RESPECTS-USER).
 23. `TRACKER_MODEL` and the memory hook fallbacks equal their shipped rows.
-24. PR-comment publication is visibility-gated and fails closed to a stub (D10). `project.json` only caps it. `required` turns `off` into `stub`.
-25. The test-plan comment makes no visibility probe: STUB under `auto`, FULL under `full`, none under `off`.
+24. Where compliance is on, PR-comment publication is visibility-gated and fails closed to a stub (D10). `project.json` only caps it. `required` turns `off` into `stub`.
+25. Where compliance is on, the test-plan comment makes no visibility probe: STUB under `auto`, FULL under `full`, none under `off`.
 26. Every posted body passes the scrubber (D11). If it fails, post nothing and emit `TRACEABILITY: DEGRADED (redaction unavailable)`.
 27. File sinks chain the scrubber with `&&`. Tool-call sinks use `--emit` and check the byte count [DR-06].
 28. Review-cycle convergence warnings never block.
@@ -60,6 +60,7 @@ Invariants:
 42. The Tracker agent claims first, then writes its conventions file once or not at all, scrub-gated.
 43. The manifest keeps the curation switch in `curation` and `learning`. Every write sets both. False wins.
 44. When git tracks the curation or memory folder, or does not answer, that feature reads and writes no file there.
+45. The machine switch alone picks the posting variant; a repo key never restores it, and the lens stays the run-time union. One converge, `convergeVariantAxes`, serves init, `curation` and `compliance`. With compliance off it fails closed unless the prompts are proved free of posting.
 
 Descriptions of these rules: `docs/reference/architecture.md`. The rules here bind; the doc explains them.
 
@@ -106,7 +107,7 @@ The host and partial rosters are named in `tests/fixtures/mds-manifest.ts` rathe
 - Reference skills via frontmatter, don't duplicate skill content
 - Use `tools` frontmatter to platform-restrict agent tool access (prefer over prompt-level prohibitions)
 - An agent is either a hand-authored `src/assets/agents/{name}.md` or an MDS generator host `{name}.mds` that declares `output-dir: dist/agents` in a leading steering block and compiles to `dist/agents/{name}.md`; an agent never has both
-- Two agents are **hook-spawned, never workflow roster members** — `curate` (the session-start curation directive) and `tracker` (the session-start tracker-setup directive). Neither has a `_roster.mds` row, and no command spawns either; `tracker` sits in `devflow-core-skills`, whose empty `commands: []` is what makes the registry's reverse spawn check skip it structurally rather than by exemption.
+- Two agents are **hook-spawned, never workflow roster members** — `curate` (the session-start curation directive) and `tracker` (the session-start tracker-setup directive). Neither has a `_roster.mds` row, and no command spawns either.
 - An agent with `omitClaudeMd: true` loads neither CLAUDE.md nor `~/.claude/rules/**`, so its body carries a `## Core rules` digest of exactly the lines its `CORE_RULES_DIGEST` row declares (`tests/fixtures/agent-config.ts`); Curate reads CLAUDE.md and the rule files itself
 - `explore` ships `name: Explore` and overrides Claude Code's built-in Explore machine-wide, plan mode included (exact-name match); install skips it when the user already has an `Explore` agent, and uninstall restores the built-in
 - Code ships as three compiled variants from `src/assets/agents/_partials/_code.mds`: `Code` (implement, issue-fix), `Fix` (validation-fix, alignment-fix, qa-fix, ci-fix) and `Refactor` (edit). A mode lives in exactly one variant, each variant has its own preload and its own `devflow agents` slug, and no variant selects a skill at run time
@@ -115,8 +116,7 @@ The host and partial rosters are named in `tests/fixtures/mds-manifest.ts` rathe
 ### Commands
 
 - Commands are orchestration-only — spawn agents, never do agent work in main session. `/code-review` spawns a language focus only when the installer stamped it into the installed command (re-stamped on every install and `uninstall --plugin`).
-- Author as `.mds` sources in `src/assets/commands/`; compiled output lands in `dist/commands/`. A host or partial that carries curation arms also builds a curation-off variant under `dist/curation-off/`, which a curation-off machine installs and `devflow curation --enable/--disable` converges
-- Register new plugins in `DEVFLOW_PLUGINS` in `src/core/plugins.ts`
+- Author as `.mds` sources in `src/assets/commands/`; compiled output lands in `dist/commands/`. A host or partial with curation or compliance arms also builds `dist/curation-off/`, `dist/compliance-off/` and `dist/curation-compliance-off/`; a machine installs the build for its two switches, and `devflow curation` and `devflow compliance` converge to it
 
 ### Commits
 
@@ -130,9 +130,8 @@ Use conventional commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore
 
 ### Build System
 - `src/assets/` is the single source of truth, and **generated files never live in `src/`** — every compiled artifact lands under `dist/`
-- Skill, rule and hand-authored agent edits take effect on the next `node dist/cli.js init` with no rebuild required. An MDS generator host `src/assets/agents/{name}.mds` must be compiled to `dist/agents/{name}.md` first; the compiled artifact wins over the src tree for a generated agent
+- An MDS generator host `src/assets/agents/{name}.mds` must be compiled to `dist/agents/{name}.md` first; the compiled artifact wins over the src tree for a generated agent
 - Run `npm run build:mds` after editing any `.mds` file; reference modules compile to one file per (module, operation) pair, named from the registry in `src/core/mds-variants.ts`, which the installer overlays onto the installed `devflow:git` skill
-- Plugins are registry entries in DEVFLOW_PLUGINS (`src/core/plugins.ts`) — `skills`, `agents`, `rules`, and `commands` arrays declare what each plugin owns
 - Rules are flat `.md` files (no subdirectory nesting) in `src/assets/rules/{name}.md`; the installer validates against the registry
 
 ### Test Ratchets
