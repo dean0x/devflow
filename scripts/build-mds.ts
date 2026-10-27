@@ -133,10 +133,9 @@ import {
 } from "../src/core/mds-variants.js";
 import { MAX_REFERENCE_SWEEP_DEPTH } from "../src/core/reference-sweep.js";
 import {
-  BOTH_OFF_OUTPUT_DIR,
-  COMPLIANCE_OFF_OUTPUT_DIR,
-  CURATION_OFF_OUTPUT_DIR,
   LEGACY_OFF_OUTPUT_DIR,
+  OFF_OUTPUT_DIRS,
+  OFF_VARIANT_KEYS,
   VARIANT_MANIFEST_REL_PATH,
   containsComplianceMarker,
   containsCurationMarker,
@@ -897,7 +896,7 @@ function materializeOutputs(host: HostEntry, plan: HostPlan, body: string): Mate
   if (plan.variant !== "skill-refs") {
     // D-LEARNING-VARIANTS: the all-on variant is the artifact at the host's own path,
     // so every existing reader of dist/ keeps working; an off variant exists only for
-    // a host that has an arm on the axis it turns off (emittedVariantKeys).
+    // a host that has an arm on each axis it turns off (emittedVariantKeys).
     const split = splitVariants(body);
     if (!split.ok) throw variantSplitRefusal(rel, split.error, body);
     const { bodies, hasArms } = split.value;
@@ -1050,22 +1049,29 @@ function pruneOrphanReferences(claimed: ReadonlySet<string>): string[] {
 }
 
 /**
- * The three trees the off variants of a prompt are written under, and the reason
- * printed beside a file the prune removes from each.
+ * The reason printed beside a file the prune removes from the tree of each off
+ * variant. Total over OffVariantKey, so a new key cannot go without a reason.
+ */
+const PRUNE_REASONS: Readonly<Record<OffVariantKey, string>> = {
+  "curation-off": "no curation arm",
+  "compliance-off": "no compliance arm",
+  "both-off": "no host with arms on both axes",
+};
+
+/**
+ * The trees the off variants of a prompt are written under, one per off key, and
+ * the reason printed beside a file the prune removes from each.
  *
  * Siblings under dist/, none inside another, so the prune of one tree cannot reach
  * the files of another.
  */
-const VARIANT_TREES: ReadonlyArray<{ readonly dir: string; readonly reason: string }> = [
-  { dir: CURATION_OFF_OUTPUT_DIR, reason: "no curation arm" },
-  { dir: COMPLIANCE_OFF_OUTPUT_DIR, reason: "no compliance arm" },
-  { dir: BOTH_OFF_OUTPUT_DIR, reason: "no curation and compliance arms" },
-];
+const VARIANT_TREES: ReadonlyArray<{ readonly dir: string; readonly reason: string }> =
+  OFF_VARIANT_KEYS.map(key => ({ dir: OFF_OUTPUT_DIRS[key], reason: PRUNE_REASONS[key] }));
 
 /**
  * Delete every `.md` under one variant tree that this build did not write.
  *
- * An off variant of a host exists only while the host carries an arm on the axis it
+ * An off variant of a host exists only while the host carries an arm on each axis it
  * turns off, so the set of files that should be here is known only from what the
  * build wrote: a host that loses its last arm leaves its old variant behind, and a
  * variant left there would be installed on a machine with that axis off in place of
@@ -1158,6 +1164,30 @@ function pruneOrphans(
     pruned.push(path.relative(ROOT, full));
   }
   return pruned;
+}
+
+/**
+ * Run every sweep over dist/ and print one `pruned:` line per file removed, with the
+ * reason for its tree. A file the build wrote is never removed.
+ */
+function pruneStaleOutputs(writtenDests: ReadonlySet<string>): void {
+  for (const rel of pruneOrphanCommands(writtenDests)) {
+    console.log(`  pruned:   ${rel} (no command host)`);
+  }
+  for (const rel of pruneOrphanAgents(writtenDests)) {
+    console.log(`  pruned:   ${rel} (no generator host)`);
+  }
+  for (const rel of pruneOrphanReferences(writtenDests)) {
+    console.log(`  pruned:   ${rel} (no reference module)`);
+  }
+  for (const { dir, reason } of VARIANT_TREES) {
+    for (const rel of pruneOrphanVariantTree(dir, writtenDests)) {
+      console.log(`  pruned:   ${rel} (${reason})`);
+    }
+  }
+  for (const rel of pruneLegacyOffTree()) {
+    console.log(`  pruned:   ${rel} (retired off tree)`);
+  }
 }
 
 async function main(): Promise<void> {
@@ -1299,24 +1329,7 @@ async function main(): Promise<void> {
   // written set is complete and anything else in these trees is stale. Keyed on
   // what was WRITTEN rather than what was planned: a curation-off variant is
   // planned for every one-file host and written only for one with an arm.
-  const writtenDests = new Set(outcomes.flatMap(o => o.written));
-  for (const rel of pruneOrphanCommands(writtenDests)) {
-    console.log(`  pruned:   ${rel} (no command host)`);
-  }
-  for (const rel of pruneOrphanAgents(writtenDests)) {
-    console.log(`  pruned:   ${rel} (no generator host)`);
-  }
-  for (const rel of pruneOrphanReferences(writtenDests)) {
-    console.log(`  pruned:   ${rel} (no reference module)`);
-  }
-  for (const { dir, reason } of VARIANT_TREES) {
-    for (const rel of pruneOrphanVariantTree(dir, writtenDests)) {
-      console.log(`  pruned:   ${rel} (${reason})`);
-    }
-  }
-  for (const rel of pruneLegacyOffTree()) {
-    console.log(`  pruned:   ${rel} (retired off tree)`);
-  }
+  pruneStaleOutputs(new Set(outcomes.flatMap(o => o.written)));
   writeFileAtomic(variantManifestPath(), manifest.value);
   const curationOffCount = outcomes.filter(o => o.prompt?.axes.curation === true).length;
   console.log(`  ${curationOffCount} curation-off variant(s) written`);

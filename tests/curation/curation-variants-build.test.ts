@@ -35,7 +35,13 @@ import { spawnSync } from 'child_process';
 
 import { ROOT, walkFiles, type BuildRun } from '../helpers.js';
 import { CURATION_OFF_FILES, CURATION_VARIANT_HOSTS } from '../fixtures/mds-manifest.js';
-import { LEGACY_OFF_OUTPUT_DIR, containsCurationMarker, containsVariantMarker } from '../../src/core/curation-variants.js';
+import {
+  LEGACY_OFF_OUTPUT_DIR,
+  OFF_VARIANT_KEYS,
+  containsCurationMarker,
+  containsVariantMarker,
+  variantOffRelPath,
+} from '../../src/core/curation-variants.js';
 
 vi.setConfig({ testTimeout: 120_000 });
 
@@ -829,11 +835,23 @@ describe('the orphan prune over the compliance trees is keyed on the files writt
         'dist/curation-compliance-off/skills/stale.md',
       ]);
       expect(run.combined, 'the compliance-off reason must be stated').toContain('(no compliance arm)');
-      expect(run.combined, 'the both-off reason must be stated').toContain('(no curation and compliance arms)');
+      expect(run.combined, 'the both-off reason must be stated').toContain('(no host with arms on both axes)');
       expect(await readIfPresent(fakeRoot, 'dist/compliance-off/commands/theta.md'), 'a written variant is never pruned').not.toBeNull();
       expect(await readIfPresent(fakeRoot, 'dist/curation-compliance-off/commands/theta.md'), 'a written variant is never pruned').not.toBeNull();
       expect(await readIfPresent(fakeRoot, 'dist/compliance-off/commands/theta.md.99999.tmp')).not.toBeNull();
       expect(await readIfPresent(fakeRoot, 'dist/curation-compliance-off/commands/theta.md.99999.tmp')).not.toBeNull();
+    });
+  });
+
+  it('sweeps the tree of every off variant key', async () => {
+    expect(OFF_VARIANT_KEYS).toEqual(['curation-off', 'compliance-off', 'both-off']);
+    await withFakeRoot(async fakeRoot => {
+      await write(fakeRoot, 'src/assets/commands/plain.mds', PLAIN_COMMAND);
+      const strays = OFF_VARIANT_KEYS.map(key => variantOffRelPath(key, 'commands', 'stray.md'));
+      for (const rel of strays) await write(fakeRoot, rel, 'old\n');
+      const run = runBuild(fakeRoot);
+      expect(run.status, run.combined).toBe(0);
+      expect(prunedPaths(run.combined).sort()).toEqual([...strays].sort());
     });
   });
 

@@ -15,7 +15,7 @@
  * curation-off file. The compliance axis works the same way: a body is split on
  * both axes into four variants, keyed `on`, `curation-off`, `compliance-off` and
  * `both-off`, and the build writes a variant only for a host that has an arm on
- * the axis that variant turns off. The off variants go to dist/curation-off/,
+ * each axis that variant turns off. The off variants go to dist/curation-off/,
  * dist/compliance-off/ and dist/curation-compliance-off/, and the manifest
  * dist/variant-axes.json records which axes each host carries an arm on. The install
  * order of the trees per machine is owned by src/core/assets.ts, and the install refusal
@@ -158,8 +158,12 @@ export function curationOffRelPath(kind: VariantKind, fileName: string): string 
 /** A variant that turns an axis off: every variant key but `on`. */
 export type OffVariantKey = Exclude<VariantKey, 'on'>;
 
-/** The tree each off variant is written under. Total over OffVariantKey, so a new key cannot go without a tree. */
-const OFF_OUTPUT_DIRS: Readonly<Record<OffVariantKey, string>> = {
+/**
+ * The tree each off variant is written under. Total over OffVariantKey, so a new key cannot go without a tree.
+ *
+ * Exported so the build derives its orphan prune from this map: every off key has its tree swept.
+ */
+export const OFF_OUTPUT_DIRS: Readonly<Record<OffVariantKey, string>> = {
   'curation-off': CURATION_OFF_OUTPUT_DIR,
   'compliance-off': COMPLIANCE_OFF_OUTPUT_DIR,
   'both-off': BOTH_OFF_OUTPUT_DIR,
@@ -265,6 +269,11 @@ export const VARIANT_KEYS = ['on', 'curation-off', 'compliance-off', 'both-off']
 
 export type VariantKey = (typeof VARIANT_KEYS)[number];
 
+/** Every variant that turns an axis off, in VARIANT_KEYS order. */
+export const OFF_VARIANT_KEYS: readonly OffVariantKey[] = VARIANT_KEYS.filter(
+  (key): key is OffVariantKey => key !== 'on',
+);
+
 /** The arm each axis keeps in each variant. */
 const VARIANT_STATES: Readonly<Record<VariantKey, Readonly<Record<VariantAxis, VariantArm>>>> = {
   on: { curation: 'on', compliance: 'on' },
@@ -289,7 +298,7 @@ export interface VariantSplit {
 /**
  * The variants the build writes for a body, `on` first.
  *
- * A variant is written only for a host that has an arm on an axis the variant turns
+ * A variant is written only for a host that has an arm on each axis the variant turns
  * off: `curation-off` when the body carries a curation arm, `compliance-off` when it
  * carries a compliance arm, and `both-off` when it carries both. A body with no arm
  * has the one variant, because every key would give the same bytes.

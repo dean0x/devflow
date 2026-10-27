@@ -205,7 +205,7 @@ Assets live once in `src/assets/` and install to the user's `~/.claude/` — no 
 | Agents (generator host) | `src/assets/agents/{name}.mds` → `dist/agents/{name}.md` | `~/.claude/agents/devflow/{name}.md` | `npm run build:mds` |
 | Rules | `src/assets/rules/{name}.md` | `~/.claude/rules/devflow/{name}.md` | None — edit → init |
 | Commands | `src/assets/commands/{name}.mds` → `dist/commands/{name}.md` | `~/.claude/commands/devflow/{name}.md` | `npm run build:mds` |
-| Off variants (curation, compliance, both) | `dist/{curation-off,compliance-off,curation-compliance-off}/{commands,agents}/{name}.md`, built only for a host or partial with an arm on the axis that the tree turns off | `~/.claude/{commands,agents}/devflow/{name}.md`, in place of the file above, on a machine with that axis off | `npm run build:mds` |
+| Off variants (curation, compliance, both) | `dist/{curation-off,compliance-off,curation-compliance-off}/{commands,agents}/{name}.md`, built only for a host or partial with an arm on each axis that the tree turns off | `~/.claude/{commands,agents}/devflow/{name}.md`, in place of the file above, on a machine with that axis off | `npm run build:mds` |
 | Variant manifest | `dist/variant-axes.json`, written by every build | Not installed; the installer reads it when compliance is off | `npm run build:mds` |
 | Skill references (generated) | `src/assets/mds/**/*.mds` → `dist/skills/git/references/**` | `~/.claude/skills/devflow:git/references/**` | `npm run build:mds` |
 | Scripts (root) | `src/assets/scripts/*.cjs`, `lib/`, `hud.sh` | `~/.devflow/scripts/` | None — edit → init |
