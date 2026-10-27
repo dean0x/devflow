@@ -9,8 +9,8 @@
  *   - `installViaFileCopy` renders from the EFFECTIVE selection, reruns write nothing, and a render that
  *     fails warns without aborting the install;
  *   - `init --hud-only` renders from the manifest record, and from the empty set when there is none;
- *   - `uninstall --plugin` renders from the manifest record minus the removed plugins, skips without a
- *     record, and only ever removes the sentinel.
+ *   - `uninstall --plugin` renders from the manifest record minus the removed plugins; without a record it
+ *     leaves the charter and removes the sentinel when implement goes. It only ever removes the sentinel.
  *
  * The renders themselves, over every plugin set, are held by tests/installer/charter-render.test.ts. The
  * built CLI end to end is held by tests/installer/charter-render-e2e.test.ts.
@@ -572,17 +572,47 @@ describe('runSelectivePhaseForScope renders the charter for the plugins that sta
     expect(await fs.readFile(charterAt(), 'utf-8')).toBe(rendered([CORE, AMBIENT, REVIEW]));
   });
 
-  it('with no manifest record it leaves the installed charter and the sentinel as they were', async () => {
+  it('with no manifest record it leaves the installed charter as it was and removes the sentinel when implement goes', async () => {
     await installCharterFor([CORE, AMBIENT, IMPLEMENT]);
     const charter = await snapshot(charterAt());
-    const sentinel = await snapshot(sentinelAt());
 
     await runSelectivePhaseForScope({
       claudeDir, devflowDir, selectedPlugins: [IMPLEMENT], verbose: false, installedPlugins: DEVFLOW_PLUGINS,
     });
 
     expect(await snapshot(charterAt())).toEqual(charter);
+    expect(await exists(sentinelAt())).toBe(false);
+  });
+
+  it('with no manifest record it leaves the charter and the sentinel as they were when implement stays', async () => {
+    await installCharterFor([CORE, AMBIENT, IMPLEMENT, PLAN]);
+    const charter = await snapshot(charterAt());
+    const sentinel = await snapshot(sentinelAt());
+
+    await runSelectivePhaseForScope({
+      claudeDir, devflowDir, selectedPlugins: [PLAN], verbose: false, installedPlugins: DEVFLOW_PLUGINS,
+    });
+
+    expect(await snapshot(charterAt())).toEqual(charter);
     expect(await snapshot(sentinelAt())).toEqual(sentinel);
+  });
+
+  it('in a legacy local install a manifest that is a link is not read: the charter stays and the sentinel still goes', async () => {
+    const installed = [CORE, AMBIENT, IMPLEMENT, REVIEW];
+    await installCharterFor(installed);
+    const elsewhere = path.join(root, 'elsewhere');
+    await fs.mkdir(elsewhere);
+    await writeManifest(elsewhere, makeManifest({ plugins: installed.map(p => p.name) }));
+    await fs.symlink(path.join(elsewhere, 'manifest.json'), path.join(devflowDir, 'manifest.json'));
+    const charter = await snapshot(charterAt());
+
+    await runSelectivePhaseForScope({
+      claudeDir, devflowDir, selectedPlugins: [IMPLEMENT], verbose: false, installedPlugins: installed, scope: 'local',
+    });
+
+    expect(await snapshot(charterAt())).toEqual(charter);
+    expect(await exists(sentinelAt())).toBe(false);
+    expect((await fs.lstat(path.join(devflowDir, 'manifest.json'))).isSymbolicLink()).toBe(true);
   });
 
   it('never creates the charter or the sentinel', async () => {

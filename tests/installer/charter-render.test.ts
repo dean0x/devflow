@@ -34,8 +34,10 @@ import {
   CHARTER_WORKFLOW_LIST,
   HANDOFF_SENTINEL_RELPATH,
   type InstallRenderedCharterOptions,
+  type RemoveHandoffSentinelOptions,
   charterInventory,
   installRenderedCharter,
+  removeHandoffSentinel,
   renderCharter,
 } from '../../src/targets/claude-code/charter-render.js';
 import {
@@ -579,6 +581,36 @@ describe('installRenderedCharter', () => {
     expect(await exists(sentinelPath())).toBe(false);
   });
 
+  it('in uninstall mode keeps an installed sentinel when the change guard refuses its removal', async () => {
+    await sync(FOUNDER);
+    const sentinelBytes = await fs.readFile(sentinelPath(), 'utf-8');
+    const asked: string[] = [];
+    const result = await sync(names('devflow-plan'), {
+      mode: 'uninstall',
+      mayChange: async target => { asked.push(target); return target !== sentinelPath(); },
+    });
+    expect(result).toEqual({ charter: 'rewritten', sentinel: 'failed' });
+    expect(asked).toContain(sentinelPath());
+    expect(await fs.readFile(sentinelPath(), 'utf-8')).toBe(sentinelBytes);
+    expect(warnings).toEqual([]);
+  });
+
+  it.each([
+    ['install', 'implement stays', FOUNDER],
+    ['install', 'implement goes', names('devflow-plan')],
+    ['uninstall', 'implement stays', FOUNDER],
+    ['uninstall', 'implement goes', names('devflow-plan')],
+  ] as const)('in %s mode, when %s, asks the change guard about each file before it reads one', async (mode, _case, plugins) => {
+    // A directory where a file belongs cannot be read as a file, so any read of it would warn.
+    await fs.mkdir(charterPath());
+    await fs.mkdir(sentinelPath());
+    const asked: string[] = [];
+    const result = await sync(plugins, { mode, mayChange: async target => { asked.push(target); return false; } });
+    expect(result).toEqual({ charter: 'failed', sentinel: 'failed' });
+    expect(asked.sort()).toEqual([charterPath(), sentinelPath()].sort());
+    expect(warnings).toEqual([]);
+  });
+
   it('warns once and installs the full source when a span is missing from the packaged charter', async () => {
     const packaged = path.join(root, 'packaged');
     await fs.mkdir(path.join(packaged, 'hooks', 'assets'), { recursive: true });
@@ -617,5 +649,68 @@ describe('installRenderedCharter', () => {
       mode: 'install',
     });
     expect(result.charter).toBe('failed');
+  });
+});
+
+describe('removeHandoffSentinel', () => {
+  let root: string;
+  let installed: string;
+  let warnings: string[];
+
+  const charterPath = (): string => path.join(installed, CHARTER_RELPATH);
+  const sentinelPath = (): string => path.join(installed, HANDOFF_SENTINEL_RELPATH);
+  const warn = (msg: string): void => { warnings.push(msg); };
+  const exists = (file: string): Promise<boolean> => fs.access(file).then(() => true, () => false);
+
+  const remove = (removedPlugins: string[], extra: Partial<RemoveHandoffSentinelOptions> = {}) =>
+    removeHandoffSentinel({ scriptsDir: installed, removedPlugins, warn, ...extra });
+
+  beforeEach(async () => {
+    root = await fs.mkdtemp(path.join(os.tmpdir(), 'charter-sentinel-'));
+    installed = path.join(root, 'scripts');
+    warnings = [];
+    await installRenderedCharter({
+      scriptsDir: installed, plugins: DEVFLOW_PLUGINS.map(p => p.name), warn, mode: 'install',
+    });
+  });
+
+  afterEach(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  it('removes the sentinel when implement is among the removed plugins and leaves the charter as it is', async () => {
+    const charter = await fs.readFile(charterPath());
+    expect(await exists(sentinelPath())).toBe(true);
+    expect(await remove(['devflow-implement'])).toBe('rewritten');
+    expect(await exists(sentinelPath())).toBe(false);
+    expect(await fs.readFile(charterPath())).toEqual(charter);
+    expect(await remove(['devflow-implement'])).toBe('absent');
+    expect(warnings).toEqual([]);
+  });
+
+  it('leaves the sentinel when the removed plugins keep implement installed', async () => {
+    expect(await remove(['devflow-plan', 'devflow-code-review'])).toBe('unchanged');
+    expect(await exists(sentinelPath())).toBe(true);
+  });
+
+  it('keeps the sentinel the change guard refuses to remove, after asking about it', async () => {
+    const asked: string[] = [];
+    const result = await remove(['devflow-implement'], { mayChange: async target => { asked.push(target); return false; } });
+    expect(result).toBe('failed');
+    expect(asked).toEqual([sentinelPath()]);
+    expect(await fs.readFile(sentinelPath(), 'utf-8')).toBe(SENTINEL_SOURCE);
+    expect(warnings).toEqual([]);
+  });
+
+  it('creates nothing on a machine that has no scripts directory', async () => {
+    await fs.rm(installed, { recursive: true });
+    expect(await remove(['devflow-implement'])).toBe('absent');
+    expect(await exists(installed)).toBe(false);
+  });
+
+  it('refuses a relative scripts directory with one warning', async () => {
+    expect(await remove(['devflow-implement'], { scriptsDir: 'scripts' })).toBe('failed');
+    expect(warnings.length).toBe(1);
+    expect(await exists(sentinelPath())).toBe(true);
   });
 });
