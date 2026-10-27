@@ -337,8 +337,8 @@ interface ComplianceOptions {
 
 export const complianceCommand = new Command('compliance')
   .description('Enable, disable, or configure the compliance feature')
-  .option('--enable', 'Enable compliance (restores previously selected frameworks)')
-  .option('--disable', 'Disable compliance (rule removed; frameworks remembered for re-enable)')
+  .option('--enable', 'Enable compliance (restores previously selected frameworks and installs the steps that post evidence and summaries to GitHub or a tracker)')
+  .option('--disable', 'Disable compliance (rule and every step that posts evidence or summaries to GitHub or a tracker removed; frameworks remembered for re-enable)')
   .option('--status', 'Show compliance state: manifest, installed artifacts, shadow presence, and the evidence policy for the current repository')
   .option('--set <list>', 'Set active frameworks (comma-separated IDs); enables compliance. Use --set "" for zero frameworks (generic controls only)')
   .action(async (options: ComplianceOptions) => {
@@ -350,8 +350,8 @@ export const complianceCommand = new Command('compliance')
       p.intro(color.bgCyan(color.white(' Compliance ')));
       const validIds = COMPLIANCE_FRAMEWORKS.map(fw => `${fw.id} — ${fw.hint}`).join('\n  ');
       p.note(
-        `${color.cyan('devflow compliance --enable')}   Enable compliance (restores prior frameworks)\n` +
-        `${color.cyan('devflow compliance --disable')}  Disable compliance (frameworks remembered)\n` +
+        `${color.cyan('devflow compliance --enable')}   Enable compliance (restores prior frameworks; installs the posting steps)\n` +
+        `${color.cyan('devflow compliance --disable')}  Disable compliance (removes the posting steps; frameworks remembered)\n` +
         `${color.cyan('devflow compliance --status')}   Show current state and installed artifacts\n` +
         `${color.cyan('devflow compliance --set <ids>')} Set active frameworks and enable\n\n` +
         `Valid framework IDs:\n  ${validIds}`,

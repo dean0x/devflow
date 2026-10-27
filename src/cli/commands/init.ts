@@ -106,7 +106,8 @@ import {
   applyAttributionAnswer,
   attributionSeedFrom,
 } from './attribution-prompts.js';
-import { convergeVariantAxes, installedVersionMatches, readRunningVersion } from '../../targets/claude-code/curation-install.js';
+import { convergeVariantAxes, describePostingLeft, installedVersionMatches, readRunningVersion } from '../../targets/claude-code/curation-install.js';
+import { POSTING_OFF_NOTICE, postingNoticeDue, readInstalledVariants } from '../../core/installed-variants.js';
 import {
   auditAndRecordClaudeMd,
   formatClaudeMdAuditNote,
@@ -988,8 +989,8 @@ export const initCommand = new Command('init')
   .option('--no-proxy', 'Disable external model routing')
   .option('--behavior', 'Enable the behavior rule (agents reply in ASD-STE100 Simplified Technical English; off by default)')
   .option('--no-behavior', 'Disable the behavior rule')
-  .option('--compliance <list>', 'Enable compliance with comma-separated framework IDs (e.g., gdpr,hipaa)')
-  .option('--no-compliance', 'Disable compliance (removes the rule; the skill and framework references stay installed; frameworks remembered for re-enable)')
+  .option('--compliance <list>', 'Enable compliance with comma-separated framework IDs (e.g., gdpr,hipaa); installs the steps that post evidence and summaries to GitHub or a tracker')
+  .option('--no-compliance', 'Disable compliance (removes the rule and every step that posts evidence or summaries to GitHub or a tracker; the skill and framework references stay installed; frameworks remembered for re-enable)')
   .option('--tracker <id>', 'The machine\'s default issue tracker provider: github, jira, or linear')
   .option('--gate-level <full|standard|lean>', 'The machine\'s default gate level: full, standard, or lean (skips the gate level prompt)')
   .option('--security <mode>', 'Security deny list location: user, managed, or none', /^(user|managed|none)$/i)
@@ -2248,6 +2249,9 @@ export const initCommand = new Command('init')
         `rewritten, ${variantConverge.unchanged} already current`,
       );
     }
+    // A compliance-off converge that cannot prove the installed prompts free of posting steps
+    // warns and names the files; init never exits non-zero for it (AC-28 binds the compliance command).
+    installWarnings.push(...describePostingLeft(variantConverge.posting));
     // I41: emit legacy-upgrade notice when compliance is disabled AND a pre-existing rule
     // was found. The skill is no signal — converge installs it on every machine
     // (D-COMPLIANCE-INSTALL-ALWAYS) — so removedPreexisting reports the rule alone, on a
@@ -2956,6 +2960,17 @@ export const initCommand = new Command('init')
     for (const msg of trackerLifecycle.messages) {
       if (msg.level === 'warn') p.log.warn(msg.text);
       else p.log.info(msg.text);
+    }
+
+    // The posting notice (AC-30): once, when the record moves from posting (compliance on, or no
+    // record before this release) to non-posting. It follows the record write, so a record that
+    // never reached the disk leaves the notice due for the next init.
+    if (
+      trackerLifecycle.manifestWritten &&
+      variantConverge.converged &&
+      postingNoticeDue(readInstalledVariants(existingManifest?.installedVariants), complianceEnabled)
+    ) {
+      p.log.info(POSTING_OFF_NOTICE);
     }
 
     // Only now that the machine-wide switch is on disk (D-INIT-DRAIN-AFTER-SWITCH).

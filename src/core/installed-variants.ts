@@ -44,3 +44,22 @@ export function postingStatus(installed: InstalledVariants | null, complianceEna
   if (installed.compliance !== complianceEnabled) return 'mismatch (run devflow init)';
   return complianceEnabled ? 'installed' : 'not installed';
 }
+
+/** What `devflow init` prints, once, when the installed prompts move from posting steps to none. */
+export const POSTING_OFF_NOTICE =
+  'Compliance is off on this machine, so devflow installed no step that posts test-plan evidence, ' +
+  'review or resolution summaries, backlog entries, review-thread replies, wave reports, plan artifacts ' +
+  'or release back-links to GitHub or a tracker. Results stay in local files under .devflow/docs/. ' +
+  'To install these steps, run `devflow compliance --enable`.';
+
+/**
+ * Whether init owes the posting notice: compliance is off and the record does not already say the
+ * installed prompts carry no posting step. A record that is absent or unreadable is unknown, and
+ * unknown counts as posting, so a machine from before the record existed hears the notice once.
+ * The caller also requires a clean converge and a written record, so the notice and the record
+ * move together and the next init finds the record and stays quiet.
+ */
+export function postingNoticeDue(installed: InstalledVariants | null, complianceEnabled: boolean): boolean {
+  if (complianceEnabled) return false;
+  return installed === null || installed.compliance;
+}
