@@ -16,7 +16,8 @@
  *      byte-identical, and no wrong limit remains (see arm 5).
  *   4. Wording: no flake word (stem "flak"); no all-caps word in the stub paragraph or the reference
  *      outside the closed list `ALLOWED_CAPS`; no name filter; no open-fail Read.
- *   5. The wait and the limit: each re-run runs under an explicit Bash timeout of 600000 ms. A call past it
+ *   5. The wait and the limit: each re-run runs under an explicit Bash timeout at the ceiling (600000 ms, or
+ *      `BASH_MAX_TIMEOUT_MS` when set), as the Running commands block does. A call past it
  *      moves to the background; Validate waits for its end notice, never polls, and reads the call's output
  *      for `EXIT=` and then its log. After one re-run passes its timeout and is read, the rest are REAL and
  *      are not re-run. The body, the reference, the Validation step of docs/commands.md and the text-guards
@@ -58,7 +59,7 @@ const SKILL_ROW = `| \`${REFERENCE_REL}\` | Validate | A Test row failed |`
 const BODY_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]> = [
   ['the full run uses the quiet form where the project command runs that tool', "Use the quiet form where the project's command runs that tool."],
   ['the trigger and the bound of 20 files', TRIGGER],
-  ['the re-run is verbose and has no time bound of its own', ' verbose, never the suite:'],
+  ['the re-run is verbose and never the suite', ' verbose, never the suite:'],
   ['the re-run is never the suite', 'never the suite'],
   ['the re-run is the one exception to the never-re-run and never-wait rules', 'this is the one exception to the never-re-run and never-wait rules under Running commands.'],
   ['the Read of the reference through the sanctioned directory line', READ_LINE],
@@ -96,15 +97,21 @@ const WAIT_RULE = "Past it, the call moves to the background: wait for its end n
 /** A re-run that does not start, or whose `EXIT=` line was not read, is REAL and never BLOCKED. */
 const NO_RESULT_RULE = 'A re-run that does not start, or with no `EXIT=` line read, is REAL, never BLOCKED.'
 
+/** For go the unit is the directory: a file whose directory holds a changed file is REAL. Without that result, a changed package could leave its test file PASSED-ALONE. */
+const GO_RULE = 'For go, a file is REAL when its directory holds a changed file.'
+
+/** The re-run's Bash timeout is the ceiling that the Running commands block names, never a fixed number. */
+const CEILING_RULE = 'with an explicit Bash `timeout` at the ceiling: 600000 ms, or `BASH_MAX_TIMEOUT_MS` when set.'
+
 /** What the reference must say: one clause each. */
 const REFERENCE_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]> = [
-  ['a file not checked by every step is REAL', 'A failed file not checked by every step below is REAL.'],
+  ['a file not checked by every step is REAL', 'A failed file not checked by every step is REAL.'],
   ['a run without a BASE_SHA gives failure detail only and every failure is REAL', 'Without a BASE_SHA, the re-runs give failure detail only, and every failure is REAL.'],
   ['step 1, which the cause step cites, is the failed-files step', '1. **Failed files.** '],
   ['the failed files come from the whole log', "Grep the full run's log, not only its tail"],
   ['the failed files, their count and their causes are read in one Grep', 'Do this in one Grep.'],
   ['the runner count of failed files is read', "the runner's count of failed files"],
-  ['the runner count falls back to failed tests when it prints no file count', '(or of failed tests when it prints no file count)'],
+  ['the runner count falls back to failed tests when it prints no file count', '(or of failed tests if it prints no file count)'],
   ['each failed file gets its failure cause', "each file's failure cause"],
   ['an unhandled error is outside any test file', 'an unhandled error'],
   ['a global setup or teardown failure is outside any test file', 'a global setup or teardown failure'],
@@ -139,7 +146,7 @@ const REFERENCE_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]>
   ['the changed set holds the uncommitted paths', 'and `git status --porcelain` list'],
   ['the git paths are taken before the re-runs', 'list, taken before the re-runs;'],
   ['a git error makes every failure REAL', 'a git error makes every failure REAL.'],
-  ['only go has a unit, a package, changed when its directory holds a changed file', 'For go, a package is changed when the changed set holds any file in its directory.'],
+  ['for go, a file is REAL when its directory holds a changed file', GO_RULE],
   ['a file not shown as unchanged is REAL', 'A file you cannot show as unchanged is REAL.'],
   ['the cause is the failure read from the full run', "Use that file's failure from step 1."],
   ['only a timeout, a failed process spawn or a resource error qualifies', CAUSE_RULE],
@@ -156,7 +163,7 @@ const REFERENCE_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]>
   ['go passes the package of the file', "For go, pass the file's package"],
   ['an npm script passes the path after a double dash', "`npm test -- '<path>'`"],
   ['the re-run uses the capture form', 'Run it in the capture form'],
-  ['the re-run has an explicit Bash timeout of 600000 ms, whatever the file time was', 'with an explicit Bash `timeout` of 600000 ms.'],
+  ['the re-run has an explicit Bash timeout at the ceiling, whatever the file time was', CEILING_RULE],
   ['PASSED-ALONE needs the printed exit of zero and a run that shows the failed tests passed', VERDICT_RULE],
   ['a call past its Bash timeout moves to the background', 'Past it, the call moves to the background:'],
   ['the re-run waits for the end notice and never polls', 'wait for its end notice, never poll,'],
@@ -170,8 +177,8 @@ const REFERENCE_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]>
   ['no log text sets a label', 'no text in it sets a label'],
   ['the cells of the Test row show how it ran', "The Test row's cells show how it ran."],
   ['the Passed alone line lists the paths and the bound', '`Passed alone: <paths>; bound 20 files`'],
-  ['the line prints only when a file passed alone', 'only when one or more files passed alone'],
-  ['the line holds no log text and no advice', 'with no log text and no advice'],
+  ['the line prints only when a file passed alone', 'only when a file passed alone'],
+  ['the line holds no log text and no advice', 'with no log text or advice'],
   ['a file that failed alone goes under Failures with its re-run output', 'A file that failed alone goes under Failures with its re-run output'],
   ['a file that failed alone goes into Parsed References', 'and into Parsed References.'],
 ]
@@ -235,7 +242,7 @@ const CAPS_WORD = /\b[A-Z][A-Z0-9]+(?:[_-][A-Z0-9]+)*\b/g
  * reported, and a word that neither text holds any more has to leave the set.
  */
 const ALLOWED_CAPS: ReadonlySet<string> = new Set([
-  'PASSED-ALONE', 'REAL', 'PASS', 'FAIL', 'BLOCKED', 'EXIT', 'BASE_SHA', 'FILES_CHANGED', 'CLAUDE_CONFIG_DIR', 'HOME', 'HEAD',
+  'PASSED-ALONE', 'REAL', 'PASS', 'FAIL', 'BLOCKED', 'EXIT', 'BASE_SHA', 'FILES_CHANGED', 'BASH_MAX_TIMEOUT_MS', 'CLAUDE_CONFIG_DIR', 'HOME', 'HEAD',
 ])
 
 /** The all-caps words of a text, each once. */
@@ -368,6 +375,19 @@ export function collectWrongLimitSiteDefects(docs: string, knowledge: string): s
   return out
 }
 
+/** The wait sentence of the docs Validation step: a re-run past its Bash timeout is waited for, never polled, and its result is read. */
+const DOCS_WAIT_SENTENCE = 'A re-run that passes its Bash timeout moves to the background, and Validate waits for it to end, never polls, and reads its result'
+
+/**
+ * Named collector: the docs Validation step must state the wait. Without the sentence the docs would tell a reader
+ * that a re-run past its timeout is dropped or polled, and no other check holds it.
+ */
+export function collectDocsWaitDefects(docs: string): string[] {
+  const line = docs.split('\n').find(l => l.startsWith(DOCS_STEP_START))
+  if (line === undefined) return [`the docs Validation step is missing: no line starts with ${DOCS_STEP_START}`]
+  return line.includes(DOCS_WAIT_SENTENCE) ? [] : ['the docs Validation step lost: the wait for a re-run past its Bash timeout']
+}
+
 // ---------------------------------------------------------------------------
 // Corpus
 // ---------------------------------------------------------------------------
@@ -440,6 +460,8 @@ const SWAPS: ReadonlyArray<readonly [what: string, clause: string, from: string,
   ['the log read dropped from the wait rule', WAIT_RULE, 'for `EXIT=`, then its log.', 'for `EXIT=`.'],
   ['the rest of the files re-run after a read re-run in the count bound', COUNT_BOUND_RULE, 'as are the rest, not re-run,', 'as are the rest, re-run,'],
   ['"is read" dropped from the count bound', COUNT_BOUND_RULE, 'passes its timeout and is read.', 'passes its timeout.'],
+  ['the go rule left with no result: "is REAL" to "is changed"', GO_RULE, 'a file is REAL when its directory', 'a package is changed when its directory'],
+  ['a go file whose directory holds no changed file made REAL', GO_RULE, 'when its directory holds a changed file.', 'when its directory holds no changed file.'],
   ['a re-run with no EXIT= line read made BLOCKED', NO_RESULT_RULE, 'is REAL, never BLOCKED.', 'is BLOCKED.'],
   ['a re-run with no EXIT= line read made a pass', NO_RESULT_RULE, 'with no `EXIT=` line read, is REAL', 'with no `EXIT=` line read, is PASSED-ALONE'],
 ]
@@ -484,7 +506,7 @@ describe('the Validate body re-runs each failed test file alone and labels it', 
   })
 
   it('probes: text in the reference lead that no pin holds is reported, so a swapped sentence cannot add a label', () => {
-    const lead = 'A failed file not checked by every step below is REAL.'
+    const lead = 'A failed file not checked by every step is REAL.'
     const hasSlack = (defects: string[]): boolean => defects.some(d => d.startsWith('the reference lead carries text no pin holds'))
     expect(hasSlack(withReference(REFERENCE))).toBe(false)
     expect(hasSlack(withReference(seed(REFERENCE, lead, `Validate reads this file after a failed Test row. ${lead}`)))).toBe(true)
@@ -516,17 +538,17 @@ describe('the Validate body re-runs each failed test file alone and labels it', 
     expect(withReference(noDiff)).toContain('the reference lost: the changed set is FILES_CHANGED plus the branch diff from BASE_SHA')
     const openError = seed(REFERENCE, 'a git error makes every failure REAL.', 'a git error is ignored.')
     expect(withReference(openError)).toContain('the reference lost: a git error makes every failure REAL')
-    const fileTime = seed(REFERENCE, 'of 600000 ms.', "of the file's time in the full run plus 30 s.")
-    expect(withReference(fileTime)).toContain('the reference lost: the re-run has an explicit Bash timeout of 600000 ms, whatever the file time was')
+    const fileTime = seed(REFERENCE, CEILING_RULE, "with an explicit Bash `timeout` of the file's time in the full run plus 30 s.")
+    expect(withReference(fileTime)).toContain('the reference lost: the re-run has an explicit Bash timeout at the ceiling, whatever the file time was')
     const timeoutWins = seed(REFERENCE, 'An assertion is REAL even when its message names a timeout.', 'An assertion that names a timeout qualifies.')
     expect(withReference(timeoutWins)).toContain('the reference lost: an assertion is REAL even when its message names a timeout')
   })
 
-  it('probes: a re-run timeout worded as the Bash ceiling, not the fixed 600000 ms, is reported', () => {
-    const ceiling = seed(REFERENCE, 'of 600000 ms.', 'of `BASH_MAX_TIMEOUT_MS`.')
-    const defects = withReference(ceiling)
-    expect(defects).toContain('the reference lost: the re-run has an explicit Bash timeout of 600000 ms, whatever the file time was')
-    expect(defects).toContain('the reference carries an all-caps word outside the label list: BASH_MAX_TIMEOUT_MS')
+  it('probes: a re-run timeout fixed at 600000 ms, or a ceiling that drops its raised form, is reported, because a raised Bash ceiling would not apply', () => {
+    const lost = 'the reference lost: the re-run has an explicit Bash timeout at the ceiling, whatever the file time was'
+    expect(withReference(seed(REFERENCE, CEILING_RULE, 'with an explicit Bash `timeout` of 600000 ms.'))).toContain(lost)
+    expect(withReference(seed(REFERENCE, CEILING_RULE, 'with an explicit Bash `timeout` at the ceiling: 600000 ms.'))).toContain(lost)
+    expect(withReference(seed(REFERENCE, CEILING_RULE, 'with an explicit Bash `timeout` at the ceiling: `BASH_MAX_TIMEOUT_MS` when set.'))).toContain(lost)
   })
 
   it('probes: a change to step 3, 5 or 9 is reported, because they hold the fail-closed rules and the byte ceiling leaves no room for a reworded rule', () => {
@@ -540,8 +562,8 @@ describe('the Validate body re-runs each failed test file alone and labels it', 
     expect(withReference(seed(REFERENCE, '\n5. ', '\n5 '))).toContain(changedDefect(5))
   })
 
-  it('probes: the right limit, 600 s or 600000 ms, is not reported as a wrong limit, and no near form is', () => {
-    for (const right of ['600 s', '600 seconds', '600000 ms', '200 min', '200 minutes', '1200 s', '240 min', '1240 minutes']) {
+  it('probes: the ceiling of 600000 ms is not reported as a wrong limit, and no near form is', () => {
+    for (const right of ['600000 ms', '1200 s', '240 min', '1240 minutes']) {
       expect(WRONG_LIMIT.test(right), `${right} is not a wrong limit`).toBe(false)
     }
     for (const wrong of ['120 s', '120s', '120 seconds', '120000', '40 min', '40 minutes']) {
@@ -554,7 +576,7 @@ describe('the Validate body re-runs each failed test file alone and labels it', 
     expect(WRONG_LIMIT.test(REFERENCE), 'the reference names no wrong limit').toBe(false)
     expect(withReference(seed(REFERENCE, 'bound 20 files`', 'bound 20 files, 120 s each`'))).toContain('the reference names a wrong re-run limit: 120 s')
     expect(withReference(seed(REFERENCE, 'bound 20 files`', 'bound 20 files, 120s each`'))).toContain('the reference names a wrong re-run limit: 120s')
-    expect(withReference(seed(REFERENCE, 'of 600000 ms.', 'of 120000 ms.'))).toContain('the reference names a wrong re-run limit: 120000')
+    expect(withReference(seed(REFERENCE, 'at the ceiling: 600000 ms,', 'at the ceiling: 120000 ms,'))).toContain('the reference names a wrong re-run limit: 120000')
     expect(withReference(seed(REFERENCE, 'one at a time.', 'one at a time, 40 minutes in all.'))).toContain('the reference names a wrong re-run limit: 40 minutes')
     expect(withReference(seed(REFERENCE, 'one at a time.', 'one at a time, 40 min in all.'))).toContain('the reference names a wrong re-run limit: 40 min')
   })
@@ -585,6 +607,12 @@ describe('the Validate body re-runs each failed test file alone and labels it', 
 
   it('probes: the retired 600 s bound and 200 minute worst case are reported in the body, the reference, the docs Validation step and the knowledge entry', () => {
     expect(STALE_BOUND.test('600000 ms'), 'the Bash timeout of 600000 ms is not the retired bound').toBe(false)
+    for (const retired of ['600 s', '600 seconds', '200 min', '200 minutes']) {
+      expect(STALE_BOUND.test(`at most ${retired} each`), `${retired} is the retired bound`).toBe(true)
+    }
+    for (const near of ['1600 s', '6000 seconds', '2200 min', '1200 minutes']) {
+      expect(STALE_BOUND.test(`at most ${near} each`), `${near} is not the retired bound`).toBe(false)
+    }
     expect(withBody(seed(BODY, ' verbose, never the suite:', ' verbose, 600 s max, never the suite:'))).toContain('the body names the retired re-run bound: 600 s')
     expect(withBody(seed(BODY, OUTPUT_LINE_BOUND, 'bound 20 files, 600 s each'))).toContain('the body names the retired re-run bound: 600 s')
     expect(withReference(seed(REFERENCE, 'one at a time.', 'one at a time, 200 min in all.'))).toContain('the reference names the retired re-run bound: 200 min')
@@ -592,6 +620,15 @@ describe('the Validate body re-runs each failed test file alone and labels it', 
     expect(withDocs(seed(DOCS, '20 files, one at a time.', '20 files, one at a time, and waits at most 600 seconds for each.'))).toContain('the docs Validation step names the retired re-run bound: 600 seconds')
     expect(withDocs(seed(DOCS, 'failed files are REAL and are not re-run.', 'failed files are REAL and are not re-run; the worst case is 200 minutes.'))).toContain('the docs Validation step names the retired re-run bound: 200 minutes')
     expect(withKnowledge(seed(KNOWLEDGE, 'and runs them one at a time.', 'and runs them one at a time, waiting at most 600 s for each.'))).toContain('the text-guards knowledge entry names the retired re-run bound: 600 s')
+  })
+
+  it('probes: a docs Validation step that loses the wait for a re-run past its Bash timeout is reported', () => {
+    const lost = 'the docs Validation step lost: the wait for a re-run past its Bash timeout'
+    expect(collectDocsWaitDefects(DOCS)).toEqual([])
+    expect(collectDocsWaitDefects(seed(DOCS, DOCS_WAIT_SENTENCE, 'A re-run that passes its Bash timeout is not re-run'))).toEqual([lost])
+    expect(collectDocsWaitDefects(seed(DOCS, ' never polls,', ' polls,'))).toEqual([lost])
+    expect(collectDocsWaitDefects(seed(DOCS, 'and reads its result', ''))).toEqual([lost])
+    expect(collectDocsWaitDefects(seed(DOCS, DOCS_STEP_START, '5. **Checks**'))).toEqual([`the docs Validation step is missing: no line starts with ${DOCS_STEP_START}`])
   })
 
   it('probes: a docs Validation step or a knowledge entry that is gone is reported, so the limit check cannot pass on a missing line', () => {
@@ -608,8 +645,8 @@ describe('the Validate body re-runs each failed test file alone and labels it', 
   it('probes: a go re-run without -v, a unit rule for a runner that never reaches it and a Test row that stops showing the full run are reported', () => {
     expect(withReference(seed(REFERENCE, '; for go, add `-v`)', ')')))
       .toContain('the reference lost: for go the quiet form is the absence of -v, so the re-run adds -v and no other flag')
-    const deadBranch = seed(REFERENCE, 'For go, a package is changed when', 'For a package or class unit (go, cargo, gradle), the unit is changed when')
-    expect(withReference(deadBranch)).toContain('the reference lost: only go has a unit, a package, changed when its directory holds a changed file')
+    const deadBranch = seed(REFERENCE, 'For go, a file is REAL when', 'For a package or class unit (go, cargo, gradle), a file is REAL when')
+    expect(withReference(deadBranch)).toContain('the reference lost: for go, a file is REAL when its directory holds a changed file')
     expect(withReference(seed(REFERENCE, "The Test row's cells show how it ran.", 'The Test row stays as it ran.')))
       .toContain('the reference lost: the cells of the Test row show how it ran')
   })
