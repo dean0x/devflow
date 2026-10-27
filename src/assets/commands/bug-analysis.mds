@@ -92,7 +92,7 @@ If output is empty → "No changes to analyze." Stop.
 
 **Produces:** STATIC_TOOL_STATUS
 
-If `--no-static` is set: set `STATIC_FINDINGS` to "Static analysis skipped (--no-static)." and `STATIC_STATUS` to "skipped (--no-static): static analysis did not cover these commits".
+If `--no-static` is set: set `STATIC_FINDINGS` to "Static analysis skipped (--no-static)." and `STATIC_STATUS` to "skipped (--no-static): static analysis did not cover these commits". Skip the rest of Phase 2.
 
 ```bash
 for t in semgrep snyk codeql jq; do printf '%s=%s\n' "$t" "$(command -v "$t" || echo no)"; done
@@ -243,7 +243,6 @@ IMPORTANT: Write report to {ANALYSIS_DIR}/{focus}.md using Write tool"
 Notes:
 - Security analyzer receives full `STATIC_FINDINGS`; all others receive `(none)`
 - Filter `ACCEPTANCE_RULES` by the `Type` column matching each focus: security criteria → security analyzer, functional criteria → functional analyzer, etc. Pass the filtered subset only
-- Spawn all in a single message for true parallel execution
 
 ### Phase 6: Synthesis
 

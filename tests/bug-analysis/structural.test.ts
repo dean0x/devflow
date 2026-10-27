@@ -515,10 +515,14 @@ const STATUS_BRANCHES: Array<[string, string[]]> = [
 ];
 const STATUS_ENTRY = 'Set `STATIC_STATUS` to one `{tool}: {value}` per tool:';
 const STATUS_VALUES = ['`completed`', '`not installed`', '`did not complete ({why})`', '`not needed`', '`no supported language`'];
+/** The `--no-static` branch ends Phase 2, so the tool check and its branches cannot overwrite the skip status. */
+const NO_STATIC_SKIP = 'Skip the rest of Phase 2.';
+const NO_STATIC_OVERWRITE = 'the --no-static branch does not skip the rest of Phase 2, so the tool check can overwrite its status';
 
 /**
  * `STATIC_STATUS` is set in every branch of Step 2c that skips or stops the scan, and Step 2d sets it per tool from a
- * closed list of values. CodeQL never reads as skipped (`collectFullCodeqlDefects` owns that ban).
+ * closed list of values. The `--no-static` branch skips the rest of Phase 2, so no later branch replaces its status.
+ * CodeQL never reads as skipped (`collectFullCodeqlDefects` owns that ban).
  */
 function collectStatusAssignmentDefects(phase2: string): string[] {
   const out: string[] = [];
@@ -528,6 +532,8 @@ function collectStatusAssignmentDefects(phase2: string): string[] {
     if (branch === null) out.push(`Step 2c has no branch "${opener}"`);
     else out.push(...parts.filter(part => !branch.includes(part)).map(part => `the "${opener}" branch does not set ${part}`));
   }
+  const skip = paragraphAt(step2c, NO_STATIC_BRANCH);
+  if (skip !== null && !skip.includes(NO_STATIC_SKIP)) out.push(NO_STATIC_OVERWRITE);
   const entry = paragraphAt(sectionBetween(phase2, 'Step 2d:', null) ?? '', STATUS_ENTRY);
   if (entry === null) out.push('Step 2d does not set STATIC_STATUS per tool');
   else out.push(...STATUS_VALUES.filter(value => !entry.includes(value)).map(value => `the Step 2d STATIC_STATUS entry does not name ${value}`));
@@ -1082,6 +1088,8 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(defects(', else `not installed`', '')).toContain(notSet(2, 1));
     expect(defects('Static analysis did not complete: jq is not installed.', 'Static analysis did not complete.')).toContain(notSet(2, 0));
     expect(defects(NO_STATIC_BRANCH, 'When --no-static is set:')).toContain(`Step 2c has no branch "${NO_STATIC_BRANCH}"`);
+    expect(defects(` ${NO_STATIC_SKIP}`, '')).toEqual([NO_STATIC_OVERWRITE]);
+    expect(defects(NO_STATIC_SKIP, 'Then run the tool check.')).toEqual([NO_STATIC_OVERWRITE]);
     expect(defects(STATUS_ENTRY, '')).toContain('Step 2d does not set STATIC_STATUS per tool');
     expect(defects('`completed`, ', '')).toContain('the Step 2d STATIC_STATUS entry does not name `completed`');
     expect(defects('`not installed` or `did not complete ({why})`', '`did not complete ({why})`')).toContain('the Step 2d STATIC_STATUS entry does not name `not installed`');
