@@ -410,11 +410,13 @@ describe('bug-analysis.md — static analysis safety patterns', () => {
 // ---------------------------------------------------------------------------
 
 const SCANNER_TOOLS = ['semgrep scan', 'snyk code test', 'codeql database create', 'codeql database analyze'];
-const STATUS_LOOP = `for t in semgrep snyk codeql; do printf '%s=%s\\n' "$t" "$(command -v "$t" || echo no)"; done`;
+const STATUS_LOOP = `for t in semgrep snyk codeql jq; do printf '%s=%s\\n' "$t" "$(command -v "$t" || echo no)"; done`;
 const EXIT_PRINT = "printf '\\nexit=%s\\n' ";
 const SNYK_EXIT_LINE = `${EXIT_PRINT}"$E"\n`;
 const CODEQL_SARIF_PRINT = 'cat "${CODEQL_TMP}/results.sarif"';
-const NONE_ASSIGNMENT = 'Set `STATIC_FINDINGS` to `(none)`.';
+const NO_STATIC_BRANCH = 'If `--no-static` is set:';
+const NO_SCANNER_BRANCH = 'If all three scanners print `no`:';
+const NO_JQ_BRANCH = 'If a scanner is installed but `jq` prints `no`:';
 const STATED_TIMEOUT = /Bash `timeout` at (\d+)/g;
 const BASH_TIMEOUT_CEILING_MS = 600000;
 /** What bounds a command in time: the `timeout` or `gtimeout` command, the old `{bound}` placeholder, or a `-k` kill grace. */
@@ -456,12 +458,12 @@ function collectNoBoundDefects(phase2: string): string[] {
 }
 
 const DID_NOT_RUN_PARTS = [
-  'or all tools unavailable', // lost, Step 2d runs on with no scanner installed
+  'Skip if Step 2c set `STATIC_STATUS`.', // lost, Step 2d runs on after Step 2c skipped or stopped the scan
 ];
 
 /**
- * Step 2c prints one status line per tool, with no bound probe in its fence. With no scanner installed Step 2d
- * skips, so it never runs a scanner that is not there.
+ * Step 2c prints one status line per tool, with no bound probe in its fence. With no scanner installed, or with no
+ * `jq` to read the results, Step 2d skips, so it never runs a scanner that is not there or one it cannot read.
  */
 function collectDidNotRunDefects(phase2: string): string[] {
   const step2c = sectionBetween(phase2, 'Step 2c:', 'Step 2d:') ?? '';
@@ -481,18 +483,93 @@ function collectProbeFenceDefects(step2c: string): string[] {
   return lines.length === 1 && lines[0] === STATUS_LOOP ? [] : [STATUS_LOOP_DEFECT];
 }
 
-/** The all-`no` branch comes before the "some are available" branch. */
+/** The branches that stop a run come in one order: no scanner, no `jq`, then the branch that runs. */
 function collectDidNotRunBranchDefects(step2c: string): string[] {
   const out: string[] = [];
-  const noneBranch = step2c.indexOf('No static analysis tools found');
-  const someBranch = step2c.indexOf('If some are available');
-  if (noneBranch === -1) out.push('Step 2c has no all-no branch warning');
-  if (someBranch === -1) out.push('Step 2c has no "If some are available" branch');
-  if (noneBranch === -1 || someBranch === -1) return out;
-  // An absent sentence reads as -1, before the branch.
-  if (noneBranch > someBranch) out.push('the all-no branch does not come before the "If some are available" branch');
-  if (!step2c.slice(noneBranch, someBranch).includes(NONE_ASSIGNMENT)) out.push('the all-no branch does not set STATIC_FINDINGS to (none)');
+  const noScanner = step2c.indexOf(NO_SCANNER_BRANCH);
+  const noJq = step2c.indexOf(NO_JQ_BRANCH);
+  const runs = step2c.indexOf('If some are available');
+  if (!step2c.includes('No static analysis tools found')) out.push('Step 2c has no all-no branch warning');
+  if (noScanner === -1) out.push('Step 2c has no all-no branch');
+  if (noJq === -1) out.push('Step 2c has no missing-jq branch');
+  if (runs === -1) out.push('Step 2c has no "If some are available" branch');
+  if (out.length > 0) return out;
+  return noScanner < noJq && noJq < runs ? [] : ['the Step 2c branches are not in the order all-no, missing jq, some available'];
+}
+
+/** The first paragraph of `text` that starts at `opener`: from there to the next blank line. */
+function paragraphAt(text: string, opener: string): string | null {
+  const at = text.indexOf(opener);
+  if (at === -1) return null;
+  const end = text.indexOf('\n\n', at);
+  return text.slice(at, end === -1 ? undefined : end);
+}
+
+/** Each branch that stops or skips the scan says what `STATIC_FINDINGS` and `STATIC_STATUS` become, and neither is `(none)`. */
+const STATUS_BRANCHES: Array<[string, string[]]> = [
+  [NO_STATIC_BRANCH, ['`STATIC_FINDINGS` to "Static analysis skipped (--no-static)."', '`STATIC_STATUS` to "skipped (--no-static): static analysis did not cover these commits"']],
+  [NO_SCANNER_BRANCH, ['`STATIC_FINDINGS` to "Static analysis did not run: no scanner is installed."', '`STATIC_STATUS` to `not installed` for each tool']],
+  [NO_JQ_BRANCH, ['`STATIC_FINDINGS` to "Static analysis did not complete: jq is not installed."', '`STATIC_STATUS` to `did not complete (jq is not installed)` for an installed tool, else `not installed`']],
+];
+const STATUS_ENTRY = 'Set `STATIC_STATUS` to one `{tool}: {value}` per tool:';
+const STATUS_VALUES = ['`completed`', '`not installed`', '`did not complete ({why})`', '`not needed`', '`no supported language`'];
+
+/**
+ * `STATIC_STATUS` is set in every branch of Step 2c that skips or stops the scan, and Step 2d sets it per tool from a
+ * closed list of values. CodeQL never reads as skipped (`collectFullCodeqlDefects` owns that ban).
+ */
+function collectStatusAssignmentDefects(phase2: string): string[] {
+  const out: string[] = [];
+  const step2c = sectionBetween(phase2, 'Step 2c:', 'Step 2d:') ?? '';
+  for (const [opener, parts] of STATUS_BRANCHES) {
+    const branch = paragraphAt(step2c, opener);
+    if (branch === null) out.push(`Step 2c has no branch "${opener}"`);
+    else out.push(...parts.filter(part => !branch.includes(part)).map(part => `the "${opener}" branch does not set ${part}`));
+  }
+  const entry = paragraphAt(sectionBetween(phase2, 'Step 2d:', null) ?? '', STATUS_ENTRY);
+  if (entry === null) out.push('Step 2d does not set STATIC_STATUS per tool');
+  else out.push(...STATUS_VALUES.filter(value => !entry.includes(value)).map(value => `the Step 2d STATIC_STATUS entry does not name ${value}`));
   return out;
+}
+
+const GATE = 'Run the write below only when every tool that was to run completed, or `--no-static` is set, also with `--full`. Else keep the marker; the report names the way out (fix the tool, or run with `--no-static`). ';
+const GATE_PARTS = [
+  'Run the write below only when every tool that was to run completed',
+  'or `--no-static` is set, also with `--full`',
+  'Else keep the marker',
+  '(fix the tool, or run with `--no-static`)',
+];
+const WRITE_START = 'In one Bash call run';
+const REPORT_WAY_OUT = '"marker kept" and the way out';
+
+/**
+ * The marker write runs only when every tool that was to run completed, or `--no-static` is set (also with `--full`).
+ * The gate is a sentence on the write's own line, before the write itself, so the write line keeps its shape. The
+ * report line shows `STATIC_STATUS` and, when the marker stays, the way out.
+ */
+function collectMarkerGateDefects(body: string): string[] {
+  const writes = body.split('\n').filter(line => line.includes('.last-analysis-head') && line.includes('rev-parse HEAD'));
+  if (writes.length !== 1) return [`${writes.length} marker write lines, expected 1`];
+  const at = writes[0].indexOf(WRITE_START);
+  const gate = at === -1 ? '' : writes[0].slice(0, at);
+  const out = GATE_PARTS.filter(part => !gate.includes(part)).map(part => `no gate before "${WRITE_START}" says: ${part}`);
+  const report = body.split('\n').find(line => line.startsWith('**Static analysis**:')) ?? '';
+  if (!report.includes(REPORT_WAY_OUT)) out.push('the Static analysis report line does not name the kept marker and the way out');
+  return out;
+}
+
+/** The shape of a sentence that sets `STATIC_FINDINGS` to `(none)`: "to", "set to" or "=" before `(none)`. */
+const NONE_ASSIGNMENT_SHAPE = /`?STATIC_FINDINGS`?(?:\s*=\s*|\s+(?:\w+\s+)?to\s+)`?\(none\)/;
+const SKIP_SENTENCES = ['Static analysis skipped (--no-static).', 'Static analysis did not run: no scanner is installed.'];
+
+/**
+ * Only a scan where every tool that was to run completed and found nothing leaves `STATIC_FINDINGS` as `(none)`. The
+ * `--no-static` and no-scanner branches have sentences of their own, and no line of the whole body sets `(none)`.
+ */
+function collectSkipNotNoneDefects(body: string): string[] {
+  const out = SKIP_SENTENCES.filter(sentence => !body.includes(sentence)).map(sentence => `no sentence says: ${sentence}`);
+  const sets = body.split('\n').filter(line => NONE_ASSIGNMENT_SHAPE.test(line));
+  return [...out, ...sets.map(line => `a line sets STATIC_FINDINGS to (none): ${line.trim().slice(0, 90)}`)];
 }
 
 const STATUS_LINE_PARTS = [
@@ -682,6 +759,7 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
   const onPhase2 = (collect: (phase2: string) => string[]): Collector => body => collect(phase2Of(body));
   const noBound = onPhase2(collectNoBoundDefects);
   const didNotRun = onPhase2(collectDidNotRunDefects);
+  const statusAssignment = onPhase2(collectStatusAssignmentDefects);
   const statusLines = onPhase2(collectStatusLineDefects);
   const exitOrder = onPhase2(collectExitLineOrderDefects);
   const scratch = onPhase2(collectCodeqlScratchDefects);
@@ -718,13 +796,13 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(defects('S=$(snyk', 'S=$(gtimeout 280 snyk')).toEqual(expect.arrayContaining([carriesBound, 'Phase 2 names a devflow time bound']));
     expect(defects('codeql database analyze', 'timeout 280 codeql database analyze')).toContainEqual(carriesBound);
     expect(defects(`${STATUS_LOOP}\n`, `${STATUS_LOOP}\ncommand -v timeout || command -v gtimeout\n`)).toContainEqual(carriesBound);
-    expect(defects('If some are available: note which tools will run.', 'If some are available: note which tools will run. `{bound}` is `timeout` or `gtimeout`.')).toContain('Phase 2 names a devflow time bound');
+    expect(defects('note which tools will run.', 'note which tools will run. `{bound}` is `timeout` or `gtimeout`.')).toContain('Phase 2 names a devflow time bound');
     expect(defects('Bash `timeout` at 600000', 'Bash `timeout` at 700000')).toContain('a stated Bash timeout is above 600000 ms');
     expect(defects('with the Bash `timeout` at 600000', 'with the Bash limit at 600000')).toContain('no stated Bash timeout above the scanner calls');
     expect(collectNoBoundDefects('')).toEqual(['0 scanner command lines, expected 4', 'no stated Bash timeout above the scanner calls']);
   });
 
-  it.each(builds)('Step 2c prints one status line per tool and probes no bound, and no scanner installed stops Step 2d (%s)', (_label, body) => {
+  it.each(builds)('Step 2c prints one status line per tool and probes no bound, and no scanner or no jq stops Step 2d (%s)', (_label, body) => {
     expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
     expect(didNotRun(body ?? '')).toEqual([]);
   });
@@ -737,9 +815,81 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(collectDidNotRunDefects('')).toContain('Step 2c has no bash fence');
     expect(defects('If some are available', 'If none are available')).toEqual(['Step 2c has no "If some are available" branch']);
     expect(defects('No static analysis tools found', 'Static analysis tools found')).toEqual(['Step 2c has no all-no branch warning']);
-    expect(defects(/(If all three print[^\n]*\n\n)(If some are available[^\n]*)/, '$2\n\n$1')).toContain('the all-no branch does not come before the "If some are available" branch');
-    expect(defects(NONE_ASSIGNMENT, '')).toContain('the all-no branch does not set STATIC_FINDINGS to (none)');
-    expect(defects('or all tools unavailable', 'or none')).toContain(doesNotSay(DID_NOT_RUN_PARTS[0]));
+    const order = 'the Step 2c branches are not in the order all-no, missing jq, some available';
+    expect(defects(/(If all three scanners print[^\n]*\n\n)(If a scanner is installed but[^\n]*\n\n)(If some are available[^\n]*)/, '$3\n\n$1$2')).toContain(order);
+    expect(defects(/(If all three scanners print[^\n]*\n\n)(If a scanner is installed but[^\n]*\n\n)/, '$2$1')).toContain(order);
+    expect(defects(NO_JQ_BRANCH, 'If jq is missing:')).toEqual(['Step 2c has no missing-jq branch']);
+    expect(defects(NO_SCANNER_BRANCH, 'If no scanner is found:')).toEqual(['Step 2c has no all-no branch']);
+    expect(defects('Skip if Step 2c set `STATIC_STATUS`.', 'Skip if no scanner is installed.')).toContain(doesNotSay(DID_NOT_RUN_PARTS[0]));
+    expect(defects('Skip if Step 2c set `STATIC_STATUS`.', 'Skip if `--no-static` is set.')).toContain(doesNotSay(DID_NOT_RUN_PARTS[0]));
+  });
+
+  it.each(builds)('STATIC_STATUS is set per tool in every Step 2c branch that stops the scan and in Step 2d (%s)', (_label, body) => {
+    expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
+    expect(statusAssignment(body ?? '')).toEqual([]);
+  });
+
+  it.each(builds)('known-bad probes: a branch or a tool value that leaves STATIC_STATUS unset is reported (%s)', (_label, body) => {
+    expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
+    const defects = probe(statusAssignment, body);
+    const notSet = (branch: number, part: number): string => `the "${STATUS_BRANCHES[branch][0]}" branch does not set ${STATUS_BRANCHES[branch][1][part]}`;
+    expect(defects('and `STATIC_STATUS` to "skipped (--no-static): static analysis did not cover these commits"', '')).toContain(notSet(0, 1));
+    expect(defects('`STATIC_STATUS` to "skipped (--no-static)', '`STATIC_STATUS` to "skipped')).toContain(notSet(0, 1));
+    expect(defects('Static analysis skipped (--no-static).', 'Static analysis skipped.')).toContain(notSet(0, 0));
+    expect(defects('`STATIC_STATUS` to `not installed` for each tool', '`STATIC_STATUS` to `not installed`')).toContain(notSet(1, 1));
+    expect(defects('Static analysis did not run: no scanner is installed.', 'Static analysis did not run.')).toContain(notSet(1, 0));
+    expect(defects('`did not complete (jq is not installed)` for an installed tool', '`did not complete` for an installed tool')).toContain(notSet(2, 1));
+    expect(defects(', else `not installed`', '')).toContain(notSet(2, 1));
+    expect(defects('Static analysis did not complete: jq is not installed.', 'Static analysis did not complete.')).toContain(notSet(2, 0));
+    expect(defects(NO_STATIC_BRANCH, 'When --no-static is set:')).toContain(`Step 2c has no branch "${NO_STATIC_BRANCH}"`);
+    expect(defects(STATUS_ENTRY, '')).toContain('Step 2d does not set STATIC_STATUS per tool');
+    expect(defects('`completed`, ', '')).toContain('the Step 2d STATIC_STATUS entry does not name `completed`');
+    expect(defects('`not installed` or `did not complete ({why})`', '`did not complete ({why})`')).toContain('the Step 2d STATIC_STATUS entry does not name `not installed`');
+    expect(defects('`not needed` (not triggered) or ', '')).toContain('the Step 2d STATIC_STATUS entry does not name `not needed`');
+    expect(defects(' or `no supported language`', '')).toContain('the Step 2d STATIC_STATUS entry does not name `no supported language`');
+    expect(collectStatusAssignmentDefects('')).toHaveLength(STATUS_BRANCHES.length + 1);
+  });
+
+  it.each(builds)('the marker write is gated on every tool that was to run completing, and the report names the way out (%s)', (_label, body) => {
+    expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
+    expect(collectMarkerGateDefects(body ?? '')).toEqual([]);
+  });
+
+  it.each(builds)('known-bad probes: a lost, weakened or late marker gate, or a report without the way out, is reported (%s)', (_label, body) => {
+    expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
+    const defects = probe(collectMarkerGateDefects, body);
+    const says = (part: number): string => `no gate before "${WRITE_START}" says: ${GATE_PARTS[part]}`;
+    expect(defects(GATE, '')).toEqual(GATE_PARTS.map((_part, index) => says(index)));
+    expect(defects('write below only when every tool that was to run completed', 'write below when a tool ran')).toContain(says(0));
+    expect(defects(', also with `--full`', '')).toContain(says(1));
+    expect(defects('or `--no-static` is set,', 'or `--no-static` is not set,')).toContain(says(1));
+    expect(defects('keep the marker', 'move the marker')).toContain(says(2));
+    expect(defects('(fix the tool, or run with `--no-static`)', '(see the log)')).toContain(says(3));
+    expect(defects('`--no-static`). In one Bash call run', '`--no-static`). Then in one Bash call run')).toEqual(GATE_PARTS.map((_part, index) => says(index)));
+    const late = ' A failed or refused write never stops the run and is not retried another way.';
+    expect(collectMarkerGateDefects(seed(seed(body ?? '', GATE, ''), late, `${late} ${GATE.trim()}`))).toEqual(GATE_PARTS.map((_part, index) => says(index)));
+    const wayOut = 'the Static analysis report line does not name the kept marker and the way out';
+    expect(defects(REPORT_WAY_OUT, 'the reason')).toContain(wayOut);
+    expect(defects('"marker kept" and ', '')).toContain(wayOut);
+    expect(defects('**Static analysis**:', '**Scanners**:')).toContain(wayOut);
+    expect(collectMarkerGateDefects('')).toEqual(['0 marker write lines, expected 1']);
+  });
+
+  it.each(builds)('--no-static and no scanner have their own sentences, and no line sets STATIC_FINDINGS to (none) (%s)', (_label, body) => {
+    expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
+    expect(collectSkipNotNoneDefects(body ?? '')).toEqual([]);
+  });
+
+  it.each(builds)('known-bad probes: a skip, a no-scanner run or any other line that sets STATIC_FINDINGS to (none) is reported (%s)', (_label, body) => {
+    expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
+    const defects = probe(collectSkipNotNoneDefects, body);
+    const sets = expect.stringContaining('a line sets STATIC_FINDINGS to (none)');
+    expect(defects('`STATIC_FINDINGS` to "Static analysis skipped (--no-static)."', '`STATIC_FINDINGS` to `(none)`')).toEqual([`no sentence says: ${SKIP_SENTENCES[0]}`, sets]);
+    expect(defects('`STATIC_FINDINGS` to "Static analysis did not run: no scanner is installed."', 'STATIC_FINDINGS to (none)')).toEqual([`no sentence says: ${SKIP_SENTENCES[1]}`, sets]);
+    expect(defects('Step 2c sets the skipped text; the marker moves', 'Skip Phase 2c and 2d entirely; `STATIC_FINDINGS=(none)`')).toEqual([sets]);
+    expect(defects('Report to user:', 'Report to user. Set `STATIC_FINDINGS` to `(none)` when no tool ran:')).toEqual([sets]);
+    expect(defects('with STATIC_FINDINGS (`(none)` only if', 'with STATIC_FINDINGS set to `(none)` (only if')).toEqual([sets]);
+    expect(collectSkipNotNoneDefects('')).toEqual(SKIP_SENTENCES.map(sentence => `no sentence says: ${sentence}`));
   });
 
   it.each(builds)('each scanner prints one status line, and only a tool that completed reads as clean (%s)', (_label, body) => {
@@ -878,7 +1028,7 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(defects('if available AND (', 'if available AND Semgrep and Snyk completed AND ('))
       .toContain('the CodeQL gate line waits on another scanner completing, or skips CodeQL');
     expect(defects('(`--full` OR ', '(')).toContain('the CodeQL gate line does not run CodeQL whenever --full is set');
-    expect(defects('| A scanner did not run or did not complete | Name the tool and why in `STATIC_FINDINGS`, not `(none)` |', '| CodeQL database creation fails | Skip CodeQL, note in output, continue with other tools |'))
+    expect(defects('| A scanner did not run or did not complete | Name the tool and why in `STATIC_FINDINGS`, not `(none)`; a tool that did not complete keeps the marker |', '| CodeQL database creation fails | Skip CodeQL, note in output, continue with other tools |'))
       .toContain('a sentence skips CodeQL');
     expect(collectFullCodeqlDefects('')).toContain('0 CodeQL gate lines, expected 1');
   });

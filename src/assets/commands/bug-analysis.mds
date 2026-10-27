@@ -92,13 +92,15 @@ If output is empty → "No changes to analyze." Stop.
 
 **Produces:** STATIC_TOOL_STATUS
 
-Skip if `--no-static` flag provided.
+If `--no-static` is set: set `STATIC_FINDINGS` to "Static analysis skipped (--no-static)." and `STATIC_STATUS` to "skipped (--no-static): static analysis did not cover these commits".
 
 ```bash
-for t in semgrep snyk codeql; do printf '%s=%s\n' "$t" "$(command -v "$t" || echo no)"; done
+for t in semgrep snyk codeql jq; do printf '%s=%s\n' "$t" "$(command -v "$t" || echo no)"; done
 ```
 
-If all three print `no`: warn user "No static analysis tools found. Proceeding with semantic analysis only. To enable static analysis, install semgrep (`pip install semgrep`) or snyk (`npm install -g snyk`)." Set `STATIC_FINDINGS` to `(none)`.
+If all three scanners print `no`: warn user "No static analysis tools found. Proceeding with semantic analysis only. To enable static analysis, install semgrep (`pip install semgrep`) or snyk (`npm install -g snyk`)." Set `STATIC_FINDINGS` to "Static analysis did not run: no scanner is installed." and `STATIC_STATUS` to `not installed` for each tool.
+
+If a scanner is installed but `jq` prints `no`: set `STATIC_FINDINGS` to "Static analysis did not complete: jq is not installed." and `STATIC_STATUS` to `did not complete (jq is not installed)` for an installed tool, else `not installed`.
 
 If some are available: note which tools will run.
 
@@ -107,7 +109,7 @@ If some are available: note which tools will run.
 **Produces:** STATIC_FINDINGS, STATIC_STATUS
 **Requires:** STATIC_TOOL_STATUS, DIFF_RANGE, ANALYSIS_DIR
 
-Skip if `--no-static` flag provided or all tools unavailable.
+Skip if Step 2c set `STATIC_STATUS`.
 
 Run each available tool in this order, each in its own foreground Bash call with the Bash `timeout` at 600000. File names reach a scanner only through `-z`, `xargs -0` and after `--`.
 
@@ -151,6 +153,8 @@ Parse each SARIF → extract findings. A tool's status is its last line, `exit={
 Write ALL raw findings to `{ANALYSIS_DIR}/static-findings.md`. Set `STATIC_FINDINGS` to the top-50 table.
 
 `STATIC_FINDINGS` is `(none)` only when every tool that was to run completed and none found anything. For each tool that did not complete, add under any table the line "Static analysis did not complete: {tool}: " plus "exit {n} ({meaning})." or "no exit status."
+
+Set `STATIC_STATUS` to one `{tool}: {value}` per tool: `completed`, `not installed` or `did not complete ({why})`; CodeQL also `not needed` (not triggered) or `no supported language`.
 
 ### Phase 3: Context Loading
 
@@ -251,7 +255,7 @@ Output: {ANALYSIS_DIR}/bug-analysis-summary.md"
 
 **Requires:** BRANCH_INFO, ANALYSIS_DIR, STATIC_STATUS
 
-1. In one Bash call run `M="$(git -C "{worktree}" rev-parse --absolute-git-dir)/devflow/bug-analysis/{branch-slug}" && mkdir -p "$M" && git -C "{worktree}" rev-parse HEAD > "$M/.last-analysis-head"`. A failed or refused write never stops the run and is not retried another way.
+1. Run the write below only when every tool that was to run completed, or `--no-static` is set, also with `--full`. Else keep the marker; the report names the way out (fix the tool, or run with `--no-static`). In one Bash call run `M="$(git -C "{worktree}" rev-parse --absolute-git-dir)/devflow/bug-analysis/{branch-slug}" && mkdir -p "$M" && git -C "{worktree}" rev-parse HEAD > "$M/.last-analysis-head"`. A failed or refused write never stops the run and is not retried another way.
 2. Report to user:
 
 ```
@@ -260,7 +264,7 @@ Output: {ANALYSIS_DIR}/bug-analysis-summary.md"
 **Branch**: {branch} -> {base_branch}
 {any base `TRACEABILITY: DEGRADED` line from Phase 1, as returned}
 **Analysis**: {ANALYSIS_DIR}
-**Static analysis**: {STATIC_STATUS per tool: ran, not installed, skipped, did not run/complete, and why}
+**Static analysis**: {STATIC_STATUS per tool; if a tool did not complete: "marker kept" and the way out}
 
 ### Risk Assessment: {risk_level}
 
@@ -298,9 +302,9 @@ The orchestrator only spawns agents, in seven phases: Phase 1 pre-flight, then s
 | Rebase invalidates `.last-analysis-head` SHA | `git cat-file -t` check fails → fallback to full diff |
 | Zero changed files in DIFF_RANGE with exit 0 | Stop: "No changes to analyze." |
 | Same-minute analysis collision | `mkdir` with seconds suffix (`YYYY-MM-DD_HHMMSS`) |
-| `--no-static` flag | Skip Phase 2c and 2d entirely; `STATIC_FINDINGS=(none)` |
+| `--no-static` flag | Step 2c sets the skipped text; the marker moves |
 | `--full` flag | Bypass incremental detection (Step 2a), run full diff from base |
-| A scanner did not run or did not complete | Name the tool and why in `STATIC_FINDINGS`, not `(none)` |
+| A scanner did not run or did not complete | Name the tool and why in `STATIC_FINDINGS`, not `(none)`; a tool that did not complete keeps the marker |
 
 ## Resolve Compatibility
 
