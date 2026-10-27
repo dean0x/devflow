@@ -5,7 +5,7 @@ import {
   BOTH_OFF_OUTPUT_DIR,
   COMPLIANCE_OFF_OUTPUT_DIR,
   CURATION_OFF_OUTPUT_DIR,
-  type CurationVariantKind,
+  type VariantKind,
 } from './curation-variants.js';
 
 /**
@@ -74,21 +74,22 @@ export type CommandSourceDirs = readonly [string, ...string[]];
  * @param kind - Which prompt kind's variants.
  * @param root - Package root to resolve against (see agentsDir).
  */
-export function curationOffDir(kind: CurationVariantKind, root: string = getPackageRoot()): string {
+export function curationOffDir(kind: VariantKind, root: string = getPackageRoot()): string {
   return join(root, ...CURATION_OFF_OUTPUT_DIR.split('/'), kind);
 }
 
 /**
  * Compliance-off variant directory: dist/compliance-off/{commands,agents}/
  *
- * Holds the variant of each prompt that carries a compliance arm, for a machine with
- * curation on and compliance off, and only those. Absent until the build has run, so
- * every reader tolerates its absence.
+ * Holds the variant of each prompt that carries a compliance arm, and only those. A
+ * machine with compliance off reads it. On a both-off machine it holds the file of a
+ * host that has a compliance arm and no curation arm. Absent until the build has run,
+ * so every reader tolerates its absence.
  *
  * @param kind - Which prompt kind's variants.
  * @param root - Package root to resolve against (see agentsDir).
  */
-export function complianceOffDir(kind: CurationVariantKind, root: string = getPackageRoot()): string {
+export function complianceOffDir(kind: VariantKind, root: string = getPackageRoot()): string {
   return join(root, ...COMPLIANCE_OFF_OUTPUT_DIR.split('/'), kind);
 }
 
@@ -101,7 +102,7 @@ export function complianceOffDir(kind: CurationVariantKind, root: string = getPa
  * @param kind - Which prompt kind's variants.
  * @param root - Package root to resolve against (see agentsDir).
  */
-export function bothOffDir(kind: CurationVariantKind, root: string = getPackageRoot()): string {
+export function bothOffDir(kind: VariantKind, root: string = getPackageRoot()): string {
   return join(root, ...BOTH_OFF_OUTPUT_DIR.split('/'), kind);
 }
 
@@ -111,12 +112,13 @@ export function bothOffDir(kind: CurationVariantKind, root: string = getPackageR
  *
  * The one place the two-axis order is spelled; commandSourceDirs and agentSourceDirs
  * both take it from here. A both-off machine consults the both-off tree first, then the
- * two single-axis trees, so a host that carries one arm finds its own variant and a host
- * that carries both finds the variant for both. Whether a host with a compliance arm may
- * fall through to a single-axis tree is not decided here: the installer refuses that.
+ * two single-axis trees. This order does not decide which file a compliance-armed host
+ * must have. The installer requires the file built for the machine's exact switches, so
+ * on a both-off machine a host with both arms needs its both-off file and never its
+ * curation-off file.
  */
 function offVariantDirs(
-  kind: CurationVariantKind,
+  kind: VariantKind,
   curation: boolean,
   compliance: boolean,
   root: string,

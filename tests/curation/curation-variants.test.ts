@@ -579,6 +579,49 @@ describe('what the two-axis split refuses (TP-3)', () => {
   });
 });
 
+describe('which refusal a line gets when it breaks more than one rule', () => {
+  it('an end that closes an outer arm while an inner arm is open is an interleaving, not an empty arm', () => {
+    expect(refusalBoth(body(ON, CON, END, CEND))).toEqual({
+      kind: 'interleaved-arm', axis: 'curation', marker: 'end', line: 3, openedAt: 1, innerAxis: 'compliance', innerOpenedAt: 2,
+    });
+  });
+
+  it('an else that turns an outer arm while an inner arm is open is an interleaving, not an empty arm', () => {
+    expect(refusalBoth(body(ON, CON, OFF, 'y', CEND, END))).toEqual({
+      kind: 'interleaved-arm', axis: 'curation', marker: 'off', line: 3, openedAt: 1, innerAxis: 'compliance', innerOpenedAt: 2,
+    });
+  });
+
+  it('a second off in an arm with an inner arm open is a repeated off, not an interleaving', () => {
+    expect(refusalBoth(body(OFF, CON, 'x', OFF, CEND, END))).toEqual({
+      kind: 'repeated-off', axis: 'curation', line: 4, openedAt: 1,
+    });
+  });
+
+  it('a second on is a nesting even when the arm it sits in is still empty', () => {
+    expect(refusalBoth(body(ON, ON, 'x', END))).toEqual({
+      kind: 'nested-arm', axis: 'curation', line: 2, arm: 'on', openedAt: 1,
+    });
+  });
+
+  it('a line with a retired marker and a current marker attempt is refused as the retired marker', () => {
+    const line = '<!-- learning:on --> <!-- curation:on -->';
+    expect(refusalBoth(body('a', line, 'b'))).toEqual({ kind: 'legacy-marker', line: 2, text: line });
+  });
+
+  it('a line that attempts markers of both axes is a stray curation marker', () => {
+    const line = '<!-- compliance:on --> and <!-- curation:on -->';
+    expect(refusalBoth(body('a', line, 'b'))).toEqual({ kind: 'stray-marker', axis: 'curation', line: 2, text: line });
+  });
+
+  it('the first faulty line is the refusal, ahead of an arm the body leaves open', () => {
+    expect(refusalBoth(body(CON, 'x', '<!-- learning:on -->'))).toEqual({
+      kind: 'legacy-marker', line: 3, text: '<!-- learning:on -->',
+    });
+    expect(refusalBoth(body(END, CON))).toEqual({ kind: 'unopened-end', axis: 'curation', line: 1 });
+  });
+});
+
 describe('one axis nested inside the other (TP-4)', () => {
   it('a compliance arm inside a curation arm, in both its on part and its else', () => {
     const text = body(

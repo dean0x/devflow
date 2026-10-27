@@ -108,8 +108,8 @@ function Err<E>(error: E): Result<never, E> {
 // Where the off variants land
 // ---------------------------------------------------------------------------
 
-/** The host kinds that can carry a curation arm: the ones whose output is a prompt, not a reference. */
-export type CurationVariantKind = 'commands' | 'agents';
+/** The host kinds that can carry a curation or compliance arm: the ones whose output is a prompt, not a reference. */
+export type VariantKind = 'commands' | 'agents';
 
 /**
  * Repo-relative root of the curation-off variants.
@@ -151,7 +151,7 @@ export const LEGACY_OFF_OUTPUT_DIR = 'dist/learning-off';
  * `fileName` is the already-validated basename the curation-on variant is written
  * under (`implement.md`), so the two variants of one host always share a name.
  */
-export function curationOffRelPath(kind: CurationVariantKind, fileName: string): string {
+export function curationOffRelPath(kind: VariantKind, fileName: string): string {
   return variantOffRelPath('curation-off', kind, fileName);
 }
 
@@ -172,7 +172,7 @@ const OFF_OUTPUT_DIRS: Readonly<Record<OffVariantKey, string>> = {
  * `fileName` is the already-validated basename the `on` variant is written under,
  * so every variant of one host shares a name.
  */
-export function variantOffRelPath(key: OffVariantKey, kind: CurationVariantKind, fileName: string): string {
+export function variantOffRelPath(key: OffVariantKey, kind: VariantKind, fileName: string): string {
   return `${OFF_OUTPUT_DIRS[key]}/${kind}/${fileName}`;
 }
 
@@ -331,6 +331,110 @@ interface OpenArm {
 }
 
 /**
+ * Handle a line that is not a marker: refuse it when it attempts one (the retired
+ * spelling first, then a current one), else keep it in every variant that agrees with
+ * every open arm and mark each open arm as holding content when the line is not blank.
+ *
+ * Reads no module state. It changes only the `kept` and `open` accumulators of the
+ * split that passed them in.
+ */
+function takeContentLine(
+  line: string,
+  lineNo: number,
+  kept: Record<VariantKey, string[]>,
+  open: readonly OpenArm[],
+): VariantSplitError | null {
+  if (LEGACY_MARKER_FRAGMENT_RE.test(line)) {
+    return { kind: 'legacy-marker', line: lineNo, text: line.trim().slice(0, STRAY_QUOTE_MAX) };
+  }
+  const attempted = attemptedAxisOf(line);
+  if (attempted !== null) {
+    return { kind: 'stray-marker', axis: attempted, line: lineNo, text: line.trim().slice(0, STRAY_QUOTE_MAX) };
+  }
+  for (const key of VARIANT_KEYS) {
+    if (open.every(arm => arm.arm === VARIANT_STATES[key][arm.axis])) kept[key].push(line);
+  }
+  if (line.trim() !== '') {
+    for (const arm of open) arm.hasContent = true;
+  }
+  return null;
+}
+
+/**
+ * The refusal for a marker that would close `current`, the open arm of its axis (an
+ * `off` that ends an on arm, or an `end`), or null when the arm may close. An open
+ * arm of the other axis is checked first, because it must close before this one;
+ * an arm that held no content is checked second.
+ */
+function checkClose(
+  axis: VariantAxis,
+  word: 'off' | 'end',
+  lineNo: number,
+  current: OpenArm,
+  inner: OpenArm | null,
+): VariantSplitError | null {
+  if (inner !== null) {
+    return {
+      kind: 'interleaved-arm', axis, marker: word, line: lineNo, openedAt: current.openedAt,
+      innerAxis: inner.axis, innerOpenedAt: inner.openedAt,
+    };
+  }
+  if (!current.hasContent) {
+    return { kind: 'empty-arm', axis, arm: current.arm, openedAt: current.openedAt, closedAt: lineNo };
+  }
+  return null;
+}
+
+/**
+ * Apply one marker to the open arms: open an arm, turn an on arm to its else, or close
+ * an arm. Returns the refusal when the marker is not allowed there, and null after it
+ * changed `open`.
+ *
+ * Reads no module state. It changes only the `open` stack of the split that passed it in.
+ */
+function applyMarker(marker: Marker, lineNo: number, open: OpenArm[]): VariantSplitError | null {
+  const { axis } = marker;
+  const at = open.findIndex(arm => arm.axis === axis);
+  const current = at === -1 ? null : open[at];
+  // The arm of the other axis opened after this axis's arm, if any: the one that must close first.
+  const inner = at !== -1 && at + 1 < open.length ? open[at + 1] : null;
+
+  switch (marker.word) {
+    case 'on':
+      if (current !== null) {
+        return { kind: 'nested-arm', axis, line: lineNo, arm: current.arm, openedAt: current.openedAt };
+      }
+      open.push({ axis, arm: 'on', openedAt: lineNo, hasContent: false });
+      return null;
+    case 'off': {
+      if (current === null) {
+        open.push({ axis, arm: 'off', openedAt: lineNo, hasContent: false });
+        return null;
+      }
+      if (current.arm === 'off') {
+        return { kind: 'repeated-off', axis, line: lineNo, openedAt: current.openedAt };
+      }
+      // Directly after an on arm this is its else: the on arm ends here.
+      const refused = checkClose(axis, 'off', lineNo, current, inner);
+      if (refused !== null) return refused;
+      open[at] = { axis, arm: 'off', openedAt: lineNo, hasContent: false };
+      return null;
+    }
+    case 'end': {
+      if (current === null) return { kind: 'unopened-end', axis, line: lineNo };
+      const refused = checkClose(axis, 'end', lineNo, current, inner);
+      if (refused !== null) return refused;
+      open.pop();
+      return null;
+    }
+    default: {
+      const unhandled: never = marker.word;
+      return { kind: 'stray-marker', axis, line: lineNo, text: String(unhandled) };
+    }
+  }
+}
+
+/**
  * Split a compiled body into its four variants.
  *
  * Total and pure: the same input gives the same output, and a refusal is a
@@ -354,76 +458,9 @@ export function splitVariants(body: string): Result<VariantSplit, VariantSplitEr
     const line = lines[index];
     const lineNo = index + 1;
     const marker = markerOf(line);
-
-    if (marker === null) {
-      if (LEGACY_MARKER_FRAGMENT_RE.test(line)) {
-        return Err({ kind: 'legacy-marker', line: lineNo, text: line.trim().slice(0, STRAY_QUOTE_MAX) });
-      }
-      const attempted = attemptedAxisOf(line);
-      if (attempted !== null) {
-        return Err({ kind: 'stray-marker', axis: attempted, line: lineNo, text: line.trim().slice(0, STRAY_QUOTE_MAX) });
-      }
-      for (const key of VARIANT_KEYS) {
-        if (open.every(arm => arm.arm === VARIANT_STATES[key][arm.axis])) kept[key].push(line);
-      }
-      if (line.trim() !== '') {
-        for (const arm of open) arm.hasContent = true;
-      }
-      continue;
-    }
-
-    const { axis } = marker;
-    seen[axis] = true;
-    const at = open.findIndex(arm => arm.axis === axis);
-    const current = at === -1 ? null : open[at];
-    // The arm of the other axis opened after this axis's arm, if any: the one that must close first.
-    const inner = at !== -1 && at + 1 < open.length ? open[at + 1] : null;
-
-    switch (marker.word) {
-      case 'on':
-        if (current !== null) {
-          return Err({ kind: 'nested-arm', axis, line: lineNo, arm: current.arm, openedAt: current.openedAt });
-        }
-        open.push({ axis, arm: 'on', openedAt: lineNo, hasContent: false });
-        break;
-      case 'off':
-        if (current === null) {
-          open.push({ axis, arm: 'off', openedAt: lineNo, hasContent: false });
-          break;
-        }
-        if (current.arm === 'off') {
-          return Err({ kind: 'repeated-off', axis, line: lineNo, openedAt: current.openedAt });
-        }
-        if (inner !== null) {
-          return Err({
-            kind: 'interleaved-arm', axis, marker: 'off', line: lineNo, openedAt: current.openedAt,
-            innerAxis: inner.axis, innerOpenedAt: inner.openedAt,
-          });
-        }
-        // Directly after an on arm this is its else: the on arm ends here.
-        if (!current.hasContent) {
-          return Err({ kind: 'empty-arm', axis, arm: current.arm, openedAt: current.openedAt, closedAt: lineNo });
-        }
-        open[at] = { axis, arm: 'off', openedAt: lineNo, hasContent: false };
-        break;
-      case 'end':
-        if (current === null) return Err({ kind: 'unopened-end', axis, line: lineNo });
-        if (inner !== null) {
-          return Err({
-            kind: 'interleaved-arm', axis, marker: 'end', line: lineNo, openedAt: current.openedAt,
-            innerAxis: inner.axis, innerOpenedAt: inner.openedAt,
-          });
-        }
-        if (!current.hasContent) {
-          return Err({ kind: 'empty-arm', axis, arm: current.arm, openedAt: current.openedAt, closedAt: lineNo });
-        }
-        open.pop();
-        break;
-      default: {
-        const unhandled: never = marker.word;
-        return Err({ kind: 'stray-marker', axis, line: lineNo, text: String(unhandled) });
-      }
-    }
+    if (marker !== null) seen[marker.axis] = true;
+    const refused = marker === null ? takeContentLine(line, lineNo, kept, open) : applyMarker(marker, lineNo, open);
+    if (refused !== null) return Err(refused);
   }
 
   // The arm opened last is the one an `end` would close first.
@@ -551,7 +588,7 @@ export const VARIANT_MANIFEST_VERSION = 1;
 
 /** One compiled prompt of the manifest: its kind, its output name and the axes it carries an arm on. */
 export interface VariantManifestHost {
-  readonly kind: CurationVariantKind;
+  readonly kind: VariantKind;
   /** The validated output basename, without `.md`. */
   readonly name: string;
   readonly axes: Readonly<Record<VariantAxis, boolean>>;
@@ -660,7 +697,7 @@ export function parseVariantManifest(text: string): Result<readonly VariantManif
       return Err({ kind: 'bad-host-axes', host: key });
     }
     hosts.push({
-      kind: match[1] as CurationVariantKind,
+      kind: match[1] as VariantKind,
       name: match[2],
       axes: { curation: value.curation, compliance: value.compliance },
     });

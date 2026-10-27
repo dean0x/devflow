@@ -56,6 +56,7 @@ import {
   buildCommittedTree,
   cleanupCommittedTree,
   collectSpawnScoping,
+  runMdsBuild,
   requireDistFiles,
   gitAgentSinkCorpus,
   walkFiles,
@@ -925,15 +926,9 @@ describe('a reference module may carry no variant marker (TP-12)', () => {
     try {
       await fs.mkdir(path.join(fakeRoot, ...path.dirname(MODULE_REL).split('/')), { recursive: true });
       await fs.writeFile(path.join(fakeRoot, ...MODULE_REL.split('/')), source, 'utf-8');
-      const result = spawnSync(TSX_BIN, [path.join(ROOT, 'scripts', 'build-mds.ts')], {
-        cwd: ROOT,
-        encoding: 'utf-8',
-        timeout: 90_000,
-        env: { ...process.env, DEVFLOW_MDS_ROOT: fakeRoot },
-      });
-      if (result.error) throw result.error;
+      const run = runMdsBuild(fakeRoot);
       const written = await fs.access(path.join(fakeRoot, ...BUILT_REL.split('/'))).then(() => true, () => false);
-      return { status: result.status, combined: (result.stdout ?? '') + (result.stderr ?? ''), written };
+      return { ...run, written };
     } finally {
       await fs.rm(fakeRoot, { recursive: true, force: true });
     }

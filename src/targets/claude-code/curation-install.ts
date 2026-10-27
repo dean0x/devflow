@@ -79,7 +79,7 @@ import { carryStampedTools } from '../../core/agent-frontmatter.js';
 import { carryAgentOverrides, reapplyAgentMapping } from '../../core/agent-models.js';
 import { describeEchoedValue } from '../../core/echo-value.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
-import type { CurationVariantKind } from '../../core/curation-variants.js';
+import type { VariantKind } from '../../core/curation-variants.js';
 import { readManifest } from '../../core/manifest.js';
 import { getPackageRoot } from '../../core/paths.js';
 import { isProxyEnabled } from '../../core/proxy-state.js';
@@ -109,7 +109,7 @@ const MAX_SKILL_TREE_DEPTH = 4;
 /** A roster entry is a flat, lowercase, hyphenated markdown basename. */
 const ROSTER_NAME_RE = /^[a-z0-9][a-z0-9-]*\.md$/;
 
-const KINDS: readonly CurationVariantKind[] = ['commands', 'agents'];
+const KINDS: readonly VariantKind[] = ['commands', 'agents'];
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -157,7 +157,7 @@ type FileOutcome = 'rewritten' | 'unchanged' | 'not-installed' | 'failed';
 
 // ── Internals ──────────────────────────────────────────────────────────────
 
-function installedFile(claudeDir: string, kind: CurationVariantKind, fileName: string): string {
+function installedFile(claudeDir: string, kind: VariantKind, fileName: string): string {
   return path.join(claudeDir, kind, 'devflow', fileName);
 }
 
@@ -167,7 +167,7 @@ function installedFile(claudeDir: string, kind: CurationVariantKind, fileName: s
  * The converge carries the curation switch only, so it reads the order of a machine with
  * compliance on: the order it has always read.
  */
-function onSourceDirs(kind: CurationVariantKind, root: string): readonly string[] {
+function onSourceDirs(kind: VariantKind, root: string): readonly string[] {
   return kind === 'commands' ? commandSourceDirs(true, true, root) : agentSourceDirs(root, true, true);
 }
 
@@ -179,7 +179,7 @@ function onSourceDirs(kind: CurationVariantKind, root: string): readonly string[
  * that had nothing to do.
  */
 async function readRoster(
-  kind: CurationVariantKind,
+  kind: VariantKind,
   root: string,
   warn: (msg: string) => void,
 ): Promise<{ names: string[]; present: boolean }> {
@@ -246,7 +246,7 @@ async function firstReadable(candidates: readonly string[]): Promise<{ file: str
  * Pure.
  */
 function withInstalledState(
-  kind: CurationVariantKind,
+  kind: VariantKind,
   fileName: string,
   source: Buffer,
   installed: Buffer,
@@ -270,7 +270,7 @@ function withInstalledState(
  * file is still tried.
  */
 async function convergeFile(
-  kind: CurationVariantKind,
+  kind: VariantKind,
   fileName: string,
   opts: Required<Pick<ConvergeCurationVariantsOptions, 'claudeDir' | 'curation' | 'warn'>> & {
     root: string;
@@ -449,7 +449,7 @@ export async function convergeCurationVariants(
   let failed = false;
   let unchanged = 0;
   let notInstalled = 0;
-  const rewritten: Record<CurationVariantKind, string[]> = { commands: [], agents: [] };
+  const rewritten: Record<VariantKind, string[]> = { commands: [], agents: [] };
 
   for (const kind of KINDS) {
     const roster = await readRoster(kind, root, warn);

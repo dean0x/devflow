@@ -8,7 +8,7 @@ import { getAllAgentNames } from '../src/core/plugins.js'
 import { agentSourceDirs, compiledSkillRefsDir } from '../src/core/assets.js'
 import { MAX_REFERENCE_SWEEP_DEPTH } from '../src/core/reference-sweep.js'
 import { GIT_OPERATIONS, PR_HOST_DESTINATION_ROOT, operationReferenceRel } from '../src/core/mds-variants.js'
-import { curationOffRelPath, type CurationVariantKind } from '../src/core/curation-variants.js'
+import { curationOffRelPath, type VariantKind } from '../src/core/curation-variants.js'
 import { assertTempHome } from './setup/home-isolation.js'
 
 export const ROOT = path.resolve(import.meta.dirname, '..')
@@ -277,11 +277,12 @@ export interface BuildRun {
  * `cwd` stays at the repo root so module resolution is unchanged; the root the
  * build walks and writes comes from DEVFLOW_MDS_ROOT alone.
  *
- * Module-local: `buildCommittedTree` below is the sole caller in this file, and
- * every other test file spawns the build through its own `runBuild` against its
- * own fake root rather than importing this one.
+ * Exported for the callers that build a hand-made fake root: `buildCommittedTree`
+ * below, and the reference-module probes in tests/build-mds.test.ts. Other test
+ * files spawn the build through their own `runBuild` against their own fake root
+ * rather than importing this one.
  */
-function runMdsBuild(fakeRoot: string): BuildRun {
+export function runMdsBuild(fakeRoot: string): BuildRun {
   const result = spawnSync(TSX_BIN, [BUILD_MDS_SCRIPT], {
     cwd: ROOT,
     encoding: 'utf-8',
@@ -426,7 +427,7 @@ export function resolveAgentSource(name: string, root: string = ROOT): AgentSour
  *
  * @param root - Repository root to resolve paths against (default: ROOT).
  */
-export function resolveCurationOffSource(kind: CurationVariantKind, name: string, root: string = ROOT): string | null {
+export function resolveCurationOffSource(kind: VariantKind, name: string, root: string = ROOT): string | null {
   try {
     return readFileSync(path.join(root, curationOffRelPath(kind, `${name}.md`)), 'utf-8')
   } catch {
