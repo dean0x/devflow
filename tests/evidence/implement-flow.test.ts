@@ -1737,7 +1737,7 @@ function collectRevalidatePublicationDefects(md: string, revalidate: string = re
   if (allFound && !inOrder) {
     out.push('the settings step does not point at the evidence policy, the publication value and the stub rule in that order')
   }
-  if (/\bor auto\b/.test(step)) out.push('the settings step falls back to auto')
+  if (/\bor auto\b/.test(revalidate)) out.push('the re-validation reference falls back to auto')
   const phase1 = phaseSection(md, H.p1) ?? ''
   for (const label of PUBLICATION_POINTERS) {
     if (countOf(phase1, label) !== 1) out.push(`Phase 1 does not hold ${label} exactly once`)
@@ -1769,7 +1769,10 @@ describe('#544: the re-validation path takes the review-publication value from t
     expect(collectRevalidatePublicationDefects(md, swapped), 'the stub rule before the evidence policy')
       .toEqual(['the settings step does not point at the evidence policy, the publication value and the stub rule in that order'])
     expect(collectRevalidatePublicationDefects(md, seedOnce(reval, step, `${step} Pass the value, or auto.`)), 'an auto fallback in the settings step')
-      .toEqual(['the settings step falls back to auto'])
+      .toEqual(['the re-validation reference falls back to auto'])
+    const proceed = referenceStep(reval, '6. **Proceed to Phase 9**')
+    expect(collectRevalidatePublicationDefects(md, seedOnce(reval, proceed, `${proceed} Pass the value, or auto.`)), 'an auto fallback outside the settings step')
+      .toEqual(['the re-validation reference falls back to auto'])
     expect(collectRevalidatePublicationDefects(md, seedOnce(reval, step, `${step} Run it for automatic checks, or automatically.`)), 'prose that only starts with "auto"')
       .toEqual([])
     expect(collectRevalidatePublicationDefects(md, seedOnce(reval, '4. **Take GATE_LEVEL**', '4. **Take the level**'))).toEqual(['no re-validation settings step'])
@@ -1811,7 +1814,7 @@ const REVALIDATE_PHASE1_CONDITIONS: ReadonlyArray<readonly [string, string]> = [
  * stay, each at its own anchor, so the lens, the level and the base are set whenever Phase 1 did not run. Each bold
  * label that step 1 names is held, byte for byte, by Phase 1 of the build of /implement it is checked against.
  */
-function collectRevalidatePhase1RunDefects(revalidate: string, md: string): string[] {
+function collectRevalidatePhase1RunDefects(md: string, revalidate: string = revalidateReference()): string[] {
   const step = revalidate.split('\n').find(l => /^1\. \*\*Branch safety check\*\*/.test(l))
   if (step === undefined) return ['no re-validation branch step']
   const out: string[] = []
@@ -1833,7 +1836,7 @@ describe('#544: "Phase 1 ran" on the re-validation path means all of Phase 1', (
     expect(REVALIDATE_PHASE1_CONDITIONS.length, 'the condition table is empty, so this guard proves nothing').toBeGreaterThanOrEqual(3)
     for (const [label, md] of [['curation on', implementMd()], ['curation off', implementMdOff()]] as const) {
       expect(phaseSection(md, H.p1)?.length ?? 0, `${label}: Phase 1 is empty, so this guard proves nothing`).toBeGreaterThan(5_000)
-      expect(collectRevalidatePhase1RunDefects(revalidateReference(), md), label).toEqual([])
+      expect(collectRevalidatePhase1RunDefects(md, revalidateReference()), label).toEqual([])
     }
   })
 
@@ -1842,25 +1845,25 @@ describe('#544: "Phase 1 ran" on the re-validation path means all of Phase 1', (
     const reval = revalidateReference()
     const step = referenceStep(reval, '1. **Branch safety check**')
     const said = (what: string): string => `step 1 does not say: ${what}`
-    expect(collectRevalidatePhase1RunDefects(seedOnce(reval, step, PRE_FIX_BRANCH_STEP), md), 'step 1 as it was')
+    expect(collectRevalidatePhase1RunDefects(md, seedOnce(reval, step, PRE_FIX_BRANCH_STEP)), 'step 1 as it was')
       .toEqual(REVALIDATE_PHASE1_RUN_PARTS.map(([what]) => said(what)))
-    expect(collectRevalidatePhase1RunDefects(seedOnce(reval, 'run all of Phase 1, through its **Fresh base.** step,', 'run Phase 1'), md), 'the old wording of the run')
+    expect(collectRevalidatePhase1RunDefects(md, seedOnce(reval, 'run all of Phase 1, through its **Fresh base.** step,', 'run Phase 1')), 'the old wording of the run')
       .toEqual([said(REVALIDATE_PHASE1_RUN_PARTS[0][0])])
-    expect(collectRevalidatePhase1RunDefects(seedOnce(reval, ' "Phase 1 ran" below means all of it ran.', ''), md), 'the meaning of "Phase 1 ran"')
+    expect(collectRevalidatePhase1RunDefects(md, seedOnce(reval, ' "Phase 1 ran" below means all of it ran.', '')), 'the meaning of "Phase 1 ran"')
       .toEqual([said(REVALIDATE_PHASE1_RUN_PARTS[1][0])])
     for (const [what, anchor] of REVALIDATE_PHASE1_CONDITIONS) {
-      expect(collectRevalidatePhase1RunDefects(seedOnce(reval, anchor, anchor.replace(/[Uu]nless Phase 1 ran/, 'Always')), md)).toEqual([`${what} no longer waits for "Phase 1 ran"`])
+      expect(collectRevalidatePhase1RunDefects(md, seedOnce(reval, anchor, anchor.replace(/[Uu]nless Phase 1 ran/, 'Always')))).toEqual([`${what} no longer waits for "Phase 1 ran"`])
     }
-    expect(collectRevalidatePhase1RunDefects(seedOnce(reval, '**Branch safety check**', '**Branch check**'), md)).toEqual(['no re-validation branch step'])
+    expect(collectRevalidatePhase1RunDefects(md, seedOnce(reval, '**Branch safety check**', '**Branch check**'))).toEqual(['no re-validation branch step'])
   })
 
   it('known-bad probes: a label that step 1 names but Phase 1 does not hold is reported, in either build', () => {
     const reval = revalidateReference()
     const unpunctuated = seedOnce(reval, '**Fresh base.**', '**Fresh base**')
-    expect(collectRevalidatePhase1RunDefects(unpunctuated, implementMd()), 'the label without its period')
+    expect(collectRevalidatePhase1RunDefects(implementMd(), unpunctuated), 'the label without its period')
       .toEqual([`step 1 does not say: ${REVALIDATE_PHASE1_RUN_PARTS[0][0]}`, 'Phase 1 does not hold **Fresh base**, which step 1 names'])
     for (const [label, md] of [['curation on', implementMd()], ['curation off', implementMdOff()]] as const) {
-      expect(collectRevalidatePhase1RunDefects(reval, seedOnce(md, '**Fresh base.**', '**Base.**')), `${label}: the Phase 1 label renamed`)
+      expect(collectRevalidatePhase1RunDefects(seedOnce(md, '**Fresh base.**', '**Base.**'), reval), `${label}: the Phase 1 label renamed`)
         .toEqual(['Phase 1 does not hold **Fresh base.**, which step 1 names'])
     }
   })
