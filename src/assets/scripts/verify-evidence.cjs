@@ -42,8 +42,11 @@
 //             (<reason>)` line after it (exit 2). `--evidence <file>` reads the test
 //             plan and the claims from a local evidence file, as `verify --evidence`
 //             does. `--out <file>` also writes the file `READINESS pr:<n>
-//             head:<40hex|none> status:<READY|NOT_READY|DEGRADED>`, then that same
-//             block; stdout does not change, and the command makes no remote write.
+//             head:<40hex|none> status:<READY|NOT_READY|DEGRADED> source=<local|pr>`
+//             (one line; wrapped here), then that same block. `source=local` names
+//             the `--evidence` file as the plan's source and `source=pr` names the
+//             PR's own record. Stdout does not change, and the command makes no
+//             remote write.
 //             A file an earlier run left at the out path never outlives this run: it
 //             is removed before the first read, and a block that does not parse or a
 //             write that fails leaves no out file
@@ -170,6 +173,8 @@ const LINE_MAX_BUFFER = 4096;
 const COMMENT_READ_MAX_BUFFER = 8 * 65536;
 /** `gh pr checks` and the thread-count GraphQL answer: a thousand rows of names fit. */
 const READINESS_MAX_BUFFER = 4 * 1024 * 1024;
+/** Where line 1 of the readiness out file says the test plan came from: the `--evidence` file, or the PR's own record. */
+const READINESS_SOURCES = Object.freeze(['local', 'pr']);
 /** 5,000 paths of 4,096 bytes overflow this; an overflow reads as an unresolved diff. */
 const DIFF_MAX_BUFFER = 16 * 1024 * 1024;
 const FETCH_MAX_BUFFER = 1024 * 1024;
@@ -2646,7 +2651,10 @@ function readinessPass(io, args, deps) {
  * D-READINESS-OUT: `readiness --out <file>`. The file holds the READINESS line, then the
  * block exactly as it prints. The status in the line is the one the block's own parse
  * gives, so the line and the block cannot disagree. The head is the PR head the first
- * read gave, or `none`. writeTextFile refuses a path that exists and is not a regular
+ * read gave, or `none`. The source is `local` when the plan was asked for from the
+ * `--evidence` file and `pr` when it was asked for from the PR's own record; the line
+ * ends with it as `source=<local|pr>`, and any other value is refused like a block that
+ * does not parse. writeTextFile refuses a path that exists and is not a regular
  * file, a symlink included, so no link is followed. The command makes no gh write.
  *
  * One rule covers every outcome: a file from an earlier run never outlives this run.
@@ -2660,15 +2668,18 @@ function readinessPass(io, args, deps) {
  * @param {number} pr
  * @param {Outcome} outcome  the answer readinessPass or readinessDegraded gave
  * @param {string | null} head
+ * @param {string | undefined} source  one of READINESS_SOURCES
  * @returns {Outcome}
  */
-function writeReadinessOut(io, file, pr, outcome, head) {
+function writeReadinessOut(io, file, pr, outcome, head, source) {
   const block = parseReadinessBlock(outcome.stdout);
-  if (block === null) {
+  if (block === null || !READINESS_SOURCES.includes(/** @type {string} */ (source))) {
     removeOutFile(file);
-    return refuse(io, EXIT_CODES.OUTPUT_GATE_REFUSED, 'the readiness block failed its grammar');
+    return refuse(io, EXIT_CODES.OUTPUT_GATE_REFUSED, 'the readiness out file failed its grammar');
   }
-  const line = ['READINESS', 'pr:' + pr, 'head:' + (head === null ? 'none' : head), 'status:' + block.status].join(' ');
+  const line = [
+    'READINESS', 'pr:' + pr, 'head:' + (head === null ? 'none' : head), 'status:' + block.status, 'source=' + source,
+  ].join(' ');
   if (!writeTextFile(file, line + '\n' + outcome.stdout)) {
     removeOutFile(file);
     return refuse(io, EXIT_CODES.WRITE_FAILED, 'an output file could not be written');
@@ -2696,6 +2707,18 @@ function removeOutFile(file) {
 }
 
 /**
+ * Where the run asked for the test plan: the local evidence file `--evidence` names, or the
+ * PR's own record. It follows the flag alone, so every status of one invocation names the
+ * same source.
+ *
+ * @param {Extract<ParsedArgs, { kind: 'readiness' }>} args
+ * @returns {'local' | 'pr'}
+ */
+function planSource(args) {
+  return args.evidence === null ? 'pr' : 'local';
+}
+
+/**
  * @param {Io} io
  * @param {Extract<ParsedArgs, { kind: 'readiness' }>} args
  * @param {MainDeps} deps
@@ -2708,7 +2731,7 @@ function runReadiness(io, args, deps) {
     return refuse(io, EXIT_CODES.WRITE_FAILED, 'an output file could not be written');
   }
   const pass = readinessPass(io, args, deps);
-  return args.out === null ? pass.outcome : writeReadinessOut(io, args.out, args.pr, pass.outcome, pass.head);
+  return args.out === null ? pass.outcome : writeReadinessOut(io, args.out, args.pr, pass.outcome, pass.head, planSource(args));
 }
 
 // ---------------------------------------------------------------------------
@@ -2799,7 +2822,7 @@ function main(argv, deps) {
     else if (args.kind === 'readiness') {
       // The earlier out file is already gone (runReadiness), so the DEGRADED answer is the one file this run leaves.
       outcome = readinessDegraded(args.pr, 'internal error', {});
-      if (args.out !== null) outcome = writeReadinessOut(io, args.out, args.pr, outcome, null);
+      if (args.out !== null) outcome = writeReadinessOut(io, args.out, args.pr, outcome, null, planSource(args));
     } else outcome = refuse(io, EXIT_CODES.REMOTE_FAILURE, label);
   }
   if (io.notes.size > 0) io.stderr('verify-evidence: notes: ' + [...io.notes].sort().join(',') + '\n');

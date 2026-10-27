@@ -51,6 +51,7 @@ interface VerifyApi {
     pr: number,
     outcome: { code: number; stdout: string },
     head: string | null,
+    source: string | undefined,
   ): { code: number; stdout: string }
 }
 interface CiRead {
@@ -659,9 +660,10 @@ describe('TP-14: readiness --evidence reads the plan and the claims from a local
 })
 
 describe('TP-15: readiness --out writes the READINESS line, then the block', () => {
-  const lineOf = (head: string, state: string): string => `READINESS pr:7 head:${head} status:${state}\n`
+  const lineOf = (head: string, state: string, source: 'local' | 'pr' = 'pr'): string =>
+    `READINESS pr:7 head:${head} status:${state} source=${source}\n`
 
-  it('READY: line 1 names the PR, the 40-hex head and the status, the rest is the block, and stdout and the calls are what they were without --out', SPAWN_BUDGET, () => {
+  it('READY: line 1 names the PR, the 40-hex head, the status and the plan source, the rest is the block, and stdout and the calls are what they were without --out', SPAWN_BUDGET, () => {
     const out = path.join(localDir(), 'readiness.txt')
     const plain = run(green())
     const r = run(green(), 'false', ['--out', out])
@@ -696,8 +698,62 @@ describe('TP-15: readiness --out writes the READINESS line, then the block', () 
     const r = run(green({ heads: ['not-a-head'] }), 'false', ['--out', out])
     expect(r.code, r.stderr).toBe(0)
     const text = fs.readFileSync(out, 'utf8')
-    expect(text.split('\n')[0]).toBe('READINESS pr:7 head:none status:NOT_READY')
+    expect(text.split('\n')[0]).toBe('READINESS pr:7 head:none status:NOT_READY source=pr')
     expect(text.slice(text.indexOf('\n') + 1)).toBe(r.stdout)
+  })
+
+  it('line 1 ends with source=local when the plan comes from the --evidence file', () => {
+    const file = writeEvidence(evidenceText([LOCAL_TP], [LOCAL_CLAIM]))
+    const out = path.join(localDir(), 'readiness.txt')
+    const r = runInProcess(['readiness', '--pr', '7', '--require-non-author-approval', 'false', '--evidence', file, '--out', out], greenTwin().exec)
+    expect(r.code, r.stderr).toBe(0)
+    const text = fs.readFileSync(out, 'utf8')
+    expect(text.split('\n')[0]).toBe(`READINESS pr:7 head:${SHIM_HEAD} status:READY source=local`)
+    expect(text).toBe(lineOf(SHIM_HEAD, 'READY', 'local') + r.stdout)
+  })
+
+  it('line 1 ends with source=pr when no --evidence file is given, whatever the status', () => {
+    const out = path.join(localDir(), 'readiness.txt')
+    const r = runInProcess(['readiness', '--pr', '7', '--require-non-author-approval', 'false', '--out', out], greenTwin().exec)
+    expect(r.code, r.stderr).toBe(0)
+    expect(VE.parseReadinessBlock(r.stdout)).toMatchObject({ status: 'NOT_READY', reason: 'no test-plan evidence' })
+    expect(fs.readFileSync(out, 'utf8').split('\n')[0]).toBe(`READINESS pr:7 head:${SHIM_HEAD} status:NOT_READY source=pr`)
+  })
+
+  it('line 1 names the requested plan source on every status: an unreadable evidence file, an unreadable PR and an internal failure read source=local when --evidence is given', () => {
+    const file = writeEvidence(evidenceText([LOCAL_TP], [LOCAL_CLAIM]))
+    const missing = path.join(localDir(), 'absent.md')
+    const unreadablePr = (): TwinResult => ({ status: 1, stdout: Buffer.alloc(0), stderr: Buffer.from('no such pr\n') })
+    const exploding = (): never => { throw new Error('exec exploded') }
+    const cases = [
+      { label: 'an unreadable evidence file', evidence: missing, exec: greenTwin().exec, state: 'NOT_READY', head: SHIM_HEAD },
+      { label: 'an unreadable PR', evidence: file, exec: unreadablePr, state: 'DEGRADED', head: 'none' },
+      { label: 'an internal failure', evidence: file, exec: exploding, state: 'DEGRADED', head: 'none' },
+    ]
+    for (const c of cases) {
+      const out = path.join(localDir(), 'readiness.txt')
+      runInProcess(['readiness', '--pr', '7', '--require-non-author-approval', 'false', '--evidence', c.evidence, '--out', out], c.exec)
+      expect(fs.readFileSync(out, 'utf8').split('\n')[0], c.label).toBe(`READINESS pr:7 head:${c.head} status:${c.state} source=local`)
+    }
+  })
+
+  it('the writer takes the two sources and no other: any other value is the output-gate refusal and leaves no file', () => {
+    const block = VE.renderReadinessBlock({
+      pr: 7, status: 'READY', reason: null, threads: '0', decision: 'APPROVED', ci: 'PASSING',
+      plan: '0/0 (VERIFIED-CI 0, ATTESTED-LOCAL 0)', approval: 'not required',
+    })
+    const outcome = { code: 0, stdout: block }
+    for (const source of ['local', 'pr']) {
+      const out = path.join(localDir(), 'readiness.txt')
+      expect(VE.writeReadinessOut({ stderr: () => {} }, out, 7, outcome, SHIM_HEAD, source)).toEqual(outcome)
+      expect(fs.readFileSync(out, 'utf8')).toBe(lineOf(SHIM_HEAD, 'READY', source as 'local' | 'pr') + block)
+    }
+    for (const source of ['', 'Local', 'remote', 'pr extra', 'local\nREADY', undefined]) {
+      const out = path.join(localDir(), 'readiness.txt')
+      fs.writeFileSync(out, lineOf(SHIM_HEAD, 'READY'))
+      expect(VE.writeReadinessOut({ stderr: () => {} }, out, 7, outcome, SHIM_HEAD, source), String(source)).toEqual({ code: 5, stdout: '' })
+      expect(fs.existsSync(out), String(source)).toBe(false)
+    }
   })
 
   it('an existing regular file is replaced whole', SPAWN_BUDGET, () => {
@@ -818,7 +874,7 @@ describe('TP-15: readiness --out writes the READINESS line, then the block', () 
     const out = path.join(localDir(), 'readiness.txt')
     fs.writeFileSync(out, lineOf(SHIM_HEAD, 'READY'))
     let stderr = ''
-    const r = VE.writeReadinessOut({ stderr: t => { stderr += t } }, out, 7, { code: 0, stdout: 'not a readiness block\n' }, SHIM_HEAD)
+    const r = VE.writeReadinessOut({ stderr: t => { stderr += t } }, out, 7, { code: 0, stdout: 'not a readiness block\n' }, SHIM_HEAD, 'pr')
     expect(r).toEqual({ code: 5, stdout: '' })
     expect(stderr).toContain('verify-evidence: ')
     expect(fs.existsSync(out)).toBe(false)
@@ -870,10 +926,10 @@ describe('TP-16: an out file that cannot be written prints no block and exits no
     const exploding = (): never => { throw new Error('exec exploded') }
     for (const [label, exec] of [['a decided answer', greenTwin().exec], ['an internal failure', exploding]] as const) {
       const out = path.join(localDir(), 'readiness.txt')
-      fs.writeFileSync(out, 'READINESS pr:7 head:none status:READY\n')
+      fs.writeFileSync(out, 'READINESS pr:7 head:none status:READY source=pr\n')
       const write = nodeFs.writeFileSync
       const spy = vi.spyOn(nodeFs, 'writeFileSync').mockImplementation(((target: number) => {
-        write(target, 'READINESS pr:7 head:none status:READY\n')
+        write(target, 'READINESS pr:7 head:none status:READY source=pr\n')
         throw Object.assign(new Error('disk failure'), { code: 'EIO' })
       }) as typeof nodeFs.writeFileSync)
       let r: ReturnType<typeof runInProcess>
@@ -890,7 +946,7 @@ describe('TP-16: an out file that cannot be written prints no block and exits no
 
   it('an earlier out file that cannot be removed is a write failure before any read', () => {
     const out = path.join(localDir(), 'readiness.txt')
-    fs.writeFileSync(out, 'READINESS pr:7 head:none status:READY\n')
+    fs.writeFileSync(out, 'READINESS pr:7 head:none status:READY source=pr\n')
     const twin = greenTwin()
     const spy = vi.spyOn(nodeFs, 'unlinkSync').mockImplementation(() => { throw Object.assign(new Error('denied'), { code: 'EACCES' }) })
     let r: ReturnType<typeof runInProcess>
