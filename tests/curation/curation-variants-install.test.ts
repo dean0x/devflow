@@ -1,7 +1,7 @@
 /**
  * The curation-variant converge (D-LEARNING-VARIANT-INSTALL), against temp trees.
  *
- * Covers convergeCurationVariants, applyCurationToggle and the install-side source
+ * Covers convergeCurationVariants, convergeVariantAxes, applyVariantToggle and the install-side source
  * order and skill condition in isolation: what the converge reads, what it writes,
  * what it refuses to touch and how it fails. tests/curation/
  * curation-variants-install-e2e.test.ts drives the same behaviour through the real
@@ -21,7 +21,7 @@ import * as path from 'path';
 
 import { installViaFileCopy, type Spinner } from '../../src/targets/claude-code/installer.js';
 import {
-  applyCurationToggle,
+  applyVariantToggle,
   convergeCurationVariants,
   describeCurationConverge,
   curationToggleSkew,
@@ -99,6 +99,14 @@ async function seedPackage(): Promise<void> {
   await write(path.join(pkg, 'dist', 'agents', 'code.md'), 'code ON\n');
   await write(path.join(curationOffDir('agents', pkg), 'code.md'), 'code OFF\n');
   await write(path.join(skillsDir(pkg), SKILL, 'SKILL.md'), PKG_SKILL);
+  // The build manifest a compliance-off machine reads: both hosts carry a curation arm and no compliance arm.
+  await write(path.join(pkg, 'dist', 'variant-axes.json'), JSON.stringify({
+    version: 1,
+    hosts: {
+      'agents/code': { curation: true, compliance: false },
+      'commands/implement': { curation: true, compliance: false },
+    },
+  }));
 }
 
 async function installOn(): Promise<void> {
@@ -661,7 +669,7 @@ describe('curationToggleSkew (AC-145)', () => {
   });
 });
 
-describe('applyCurationToggle', () => {
+describe('applyVariantToggle on the curation axis', () => {
   async function writeManifest(version: string, plugins: readonly string[]): Promise<void> {
     await write(path.join(devflowDir, 'manifest.json'), JSON.stringify({
       version,
@@ -674,7 +682,7 @@ describe('applyCurationToggle', () => {
   }
 
   const toggle = (curation: boolean, runningVersion: string | null) =>
-    applyCurationToggle({ claudeDir, devflowDir, curation, runningVersion, warn, packageRoot: pkg });
+    applyVariantToggle({ claudeDir, devflowDir, axis: 'curation', enabled: curation, runningVersion, warn, packageRoot: pkg });
 
   it('without a readable manifest it skips and says to run init', async () => {
     await installOn();
@@ -730,7 +738,7 @@ describe('applyCurationToggle', () => {
   });
 });
 
-describe('applyCurationToggle with a saved agent override (D-AGENT-OVERRIDE-CARRY)', () => {
+describe('applyVariantToggle with a saved agent override (D-AGENT-OVERRIDE-CARRY)', () => {
   const agent = (variant: 'ON' | 'OFF', model: string, effort: string): string =>
     `---\nname: Code\nmodel: ${model}\neffort: ${effort}\n---\n\nbody ${variant}\n`;
 
@@ -749,7 +757,7 @@ describe('applyCurationToggle with a saved agent override (D-AGENT-OVERRIDE-CARR
   });
 
   const toggle = (curation: boolean) =>
-    applyCurationToggle({ claudeDir, devflowDir, curation, runningVersion: '3.3.0', warn, packageRoot: pkg });
+    applyVariantToggle({ claudeDir, devflowDir, axis: 'curation', enabled: curation, runningVersion: '3.3.0', warn, packageRoot: pkg });
 
   it('a no-op toggle writes no agent file, reports none rewritten and does not reach for the reapply', async () => {
     await write(installedAgent('code'), agent('OFF', 'opus', 'low'));
