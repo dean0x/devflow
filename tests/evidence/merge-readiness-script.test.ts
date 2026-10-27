@@ -17,7 +17,6 @@
  */
 
 import { describe, it, expect, afterAll, beforeAll, vi } from 'vitest'
-import { execFileSync } from 'child_process'
 import { createRequire } from 'module'
 import * as fs from 'fs'
 import { readFileSync } from 'fs'
@@ -25,6 +24,7 @@ import * as os from 'os'
 import * as path from 'path'
 
 import { compiledSkillRefsDir } from '../../src/core/assets.js'
+import { makeFifo } from '../evidence-policy/scripted-shim.js'
 import { extractOpSectionFromCorpus, gitOperationReferenceCorpus, prHostRel } from '../helpers.js'
 import { cleanShimRoots, runScript, SHIM_HEAD, warmGhShim, type ScriptRun, type ShimScenario } from './pr-shim.js'
 import { PR_EVIDENCE_SCRIPT, SUBPROCESS_TIMEOUT_MS, VERIFY_EVIDENCE_SCRIPT } from './seam.js'
@@ -881,9 +881,10 @@ describe('TP-15: readiness --out writes the READINESS line, then the block', () 
   })
 
   it('an out path that is not a regular file is left alone: a FIFO is refused, never opened or removed', () => {
-    const out = path.join(localDir(), 'readiness.fifo')
-    execFileSync('mkfifo', [out])
-    const r = runInProcess(['readiness', '--pr', '7', '--require-non-author-approval', 'false', '--out', out], greenTwin().exec)
+    const dir = localDir()
+    const out = path.join(dir, 'readiness.fifo')
+    if (!makeFifo(out, dir)) return
+    const r =runInProcess(['readiness', '--pr', '7', '--require-non-author-approval', 'false', '--out', out], greenTwin().exec)
     expect(r.code).toBe(3)
     expect(r.stdout).toBe('')
     expect(fs.lstatSync(out).isFIFO()).toBe(true)
