@@ -253,10 +253,12 @@ export const SITE_ROWS: SiteRows = {
   'dist/compliance-off/agents/triage.md': 1,
   'dist/compliance-off/commands/code-review.md': 1,
   'dist/compliance-off/commands/implement.md': 2,
+  'dist/compliance-off/commands/plan.md': 2,
   'dist/compliance-off/commands/resolve.md': 1,
   'dist/curation-compliance-off/agents/triage.md': 1,
   'dist/curation-compliance-off/commands/code-review.md': 1,
   'dist/curation-compliance-off/commands/implement.md': 2,
+  'dist/curation-compliance-off/commands/plan.md': 2,
   'dist/curation-compliance-off/commands/resolve.md': 1,
 }
 

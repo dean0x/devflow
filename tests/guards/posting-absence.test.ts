@@ -220,12 +220,19 @@ interface PlainSpawn {
   readonly host: string
   readonly op: string
   readonly inputs: readonly string[]
+  /** Inputs the off spawn must not pass (AC-14: the plan passes the scope title and statement only). */
+  readonly absent?: readonly string[]
+  /** The text that finds the spawn when the prompt names it in prose and not as an `OPERATION:` line. */
+  readonly anchor?: string
+  /** The lines the spawn spans from its anchor line. The default is `SPAWN_WINDOW_LINES`. */
+  readonly lines?: number
 }
 
 /**
  * The plain writes the compliance-off commands keep (AC-14): the PR-opening spawn with its plain inputs, the
- * task setup and the issue filing. A command joins this list when it joins the roster; the plan and release
- * rows come with those hosts.
+ * task setup and the issue filing. A command joins this list when it joins the roster. The plan passes the
+ * scope title and statement only, and the release passes `COMMIT_LIST` to its notes (its spawn is one prose
+ * line, so it names its own anchor and span).
  */
 const PLAIN_SPAWNS: readonly PlainSpawn[] = [
   { host: 'code-review', op: 'ensure-pr-ready', inputs: ['PR_DESCRIPTION_GUIDANCE:', 'APPLY_CONVENTIONS:'] },
@@ -233,6 +240,13 @@ const PLAIN_SPAWNS: readonly PlainSpawn[] = [
   { host: 'dynamic-build', op: 'setup-task', inputs: ['TASK_DESCRIPTION:', 'ISSUE_REQUIRED:', 'APPLY_CONVENTIONS:'] },
   { host: 'dynamic-build', op: 'ensure-pr-ready', inputs: ['PR_DESCRIPTION_GUIDANCE:', 'APPLY_CONVENTIONS:', 'PR_WAVE_BLOCK:'] },
   { host: 'dynamic-tickets', op: 'ensure-traceable-issue', inputs: ['TASK_DESCRIPTION:', 'REQUIREMENTS:', 'WORKTREE_PATH:'] },
+  {
+    host: 'plan',
+    op: 'ensure-traceable-issue',
+    inputs: ['TASK_DESCRIPTION:', 'INITIAL_REQUEST:', 'WORKTREE_PATH:'],
+    absent: ['REQUIREMENTS:', 'PLAN_ARTIFACT_PATH:'],
+  },
+  { host: 'release', op: 'create-release', inputs: ['COMMIT_LIST'], anchor: 'with `create-release` operation', lines: 1 },
 ]
 
 /** The lines a spawn's inputs sit in: the `OPERATION:` line and the 13 after it. */
@@ -248,13 +262,15 @@ function collectPlainSpawnDefects(files: readonly ScanFile[], table: readonly Pl
     const host = path.basename(file.path, '.md')
     const lines = file.text.split('\n')
     for (const row of table.filter(r => r.host === host)) {
-      const at = lines.findIndex(line => line.includes(`OPERATION: ${row.op}`))
+      const anchor = row.anchor ?? `OPERATION: ${row.op}`
+      const at = lines.findIndex(line => line.includes(anchor))
       if (at === -1) {
         out.push(`${file.path}: no ${row.op} spawn`)
         continue
       }
-      const window = lines.slice(at, at + SPAWN_WINDOW_LINES).join('\n')
+      const window = lines.slice(at, at + (row.lines ?? SPAWN_WINDOW_LINES)).join('\n')
       for (const input of row.inputs.filter(i => !window.includes(i))) out.push(`${file.path}: the ${row.op} spawn drops ${input}`)
+      for (const input of (row.absent ?? []).filter(i => window.includes(i))) out.push(`${file.path}: the ${row.op} spawn passes ${input}`)
     }
   }
   return out
@@ -271,7 +287,30 @@ describe('posting absence: the compliance-off commands keep their plain writes (
 
   it('the on builds carry the same spawns, so the table is not read against a text the host never had', () => {
     const on = complianceOnFiles().commands
-    expect(collectPlainSpawnDefects(on)).toEqual([])
+    const kept = PLAIN_SPAWNS.map((row): PlainSpawn => ({ ...row, absent: [] }))
+    expect(collectPlainSpawnDefects(on, kept)).toEqual([])
+  })
+
+  it('the on plan still passes the inputs the off plan drops, so the absence row is not vacuous', () => {
+    const on = complianceOnFiles().commands.filter(file => file.path.endsWith('/plan.md'))
+    expect(on.length).toBe(1)
+    expect(collectPlainSpawnDefects(on)).toEqual([
+      `${on[0]!.path}: the ensure-traceable-issue spawn passes REQUIREMENTS:`,
+      `${on[0]!.path}: the ensure-traceable-issue spawn passes PLAN_ARTIFACT_PATH:`,
+    ])
+  })
+
+  it('known-bad probes: the plan passing a gap input and the release passing no commit list are each reported', () => {
+    const plan = offCommands.find(file => file.path.endsWith('/plan.md'))!
+    expect(collectPlainSpawnDefects([plan])).toEqual([])
+    const gap: ScanFile = { ...plan, text: plan.text.replace('LABELS: feature', 'REQUIREMENTS: {gap text}\nLABELS: feature') }
+    expect(collectPlainSpawnDefects([gap])).toEqual([`${plan.path}: the ensure-traceable-issue spawn passes REQUIREMENTS:`])
+    const noScope: ScanFile = { ...plan, text: plan.text.replace('INITIAL_REQUEST: {the Gate 0', 'SCOPE: {the Gate 0') }
+    expect(collectPlainSpawnDefects([noScope])).toEqual([`${plan.path}: the ensure-traceable-issue spawn drops INITIAL_REQUEST:`])
+    const release = offCommands.find(file => file.path.endsWith('/release.md'))!
+    expect(collectPlainSpawnDefects([release])).toEqual([])
+    const noList: ScanFile = { ...release, text: release.text.replace('also pass `COMMIT_LIST` from RELEASE_EVIDENCE as an input', 'also pass nothing') }
+    expect(collectPlainSpawnDefects([noList])).toEqual([`${release.path}: the create-release spawn drops COMMIT_LIST`])
   })
 
   it('known-bad probes: a lost spawn and a lost input are each reported', () => {

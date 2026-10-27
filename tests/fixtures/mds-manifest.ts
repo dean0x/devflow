@@ -312,6 +312,8 @@ export const COMPLIANCE_VARIANT_HOSTS: readonly string[] = [
   'commands/bug-analysis',
   'commands/dynamic-build',
   'commands/dynamic-tickets',
+  'commands/plan',
+  'commands/release',
 ];
 
 /** The `dist/compliance-off/`-relative file of every host in COMPLIANCE_VARIANT_HOSTS. */
