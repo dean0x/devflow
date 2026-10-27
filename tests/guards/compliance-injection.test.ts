@@ -83,7 +83,7 @@ const REVALIDATE_LENS_PARTS: ReadonlyArray<readonly [string, string]> = [
   ['the lens comes from that same line, the accepted one or the fail-closed one', 'from that same line, the accepted one or the fail-closed one,'],
   ['COMPLIANCE_FRAMEWORKS is set as Phase 1 defines it', '`COMPLIANCE_FRAMEWORKS` as Phase 1 defines it'],
   ['COMPLIANCE_DIRECTIVE is set by the Phase 1 directive step', '`COMPLIANCE_DIRECTIVE` by the Phase 1 **Set the compliance directive** step'],
-  ['Phases 5-7 pass the directive to their Fix spawns', 'Phases 5-7 pass it to their Fix spawns'],
+  ['Phases 5-7 pass the directive to their Fix spawns', 'Phases 5-7 pass `COMPLIANCE_DIRECTIVE` to their Fix spawns'],
 ]
 
 /** What the reference must not hold: a second home for text that Phase 1 owns. [what it is, the matcher, a sample that the matcher finds]. */

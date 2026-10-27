@@ -1700,7 +1700,7 @@ const REVALIDATE_PUBLICATION_PARTS: ReadonlyArray<readonly [string, string]> = [
   ['the evidence policy is resolved by the Phase 1 step', EVIDENCE_POLICY_STEP],
   ['the publication value follows the Phase 1 per-worktree rule', PUBLICATION_STEP],
   ['the Phase 1 stub rule applies', STUB_RULE],
-  ['Phase 11 passes the value resolved in Phase 1', 'Phase 11 passes it as the value resolved in Phase 1'],
+  ['Phase 11 passes the value resolved in Phase 1', 'Phase 11 passes `REVIEW_PUBLICATION` as the value resolved in Phase 1'],
 ]
 
 /** The settings step as the reference worded it before it took the publication value: a known-bad text for the collector. */
@@ -1776,7 +1776,7 @@ const PRE_FIX_BRANCH_STEP =
 
 /** What step 1 states: [what it must say, the text that says it]. */
 const REVALIDATE_PHASE1_RUN_PARTS: ReadonlyArray<readonly [string, string]> = [
-  ['a protected branch runs all of Phase 1, through its Fresh base step', 'run all of Phase 1, through its **Fresh base** step,'],
+  ['a protected branch runs all of Phase 1, through its Fresh base step', 'run all of Phase 1, through its **Fresh base.** step,'],
   ['"Phase 1 ran" means all of Phase 1 ran', '"Phase 1 ran" below means all of it ran'],
 ]
 
@@ -1790,14 +1790,19 @@ const REVALIDATE_PHASE1_CONDITIONS: ReadonlyArray<readonly [string, string]> = [
 /**
  * Named collector: how the re-validation reference leaves "Phase 1 ran" open to the reading "only the branch part ran".
  * Step 1 runs all of Phase 1 on a protected branch and says what "Phase 1 ran" means. The three conditions that read it
- * stay, each at its own anchor, so the lens, the level and the base are set whenever Phase 1 did not run.
+ * stay, each at its own anchor, so the lens, the level and the base are set whenever Phase 1 did not run. Each bold
+ * label that step 1 names is held, byte for byte, by Phase 1 of the build of /implement it is checked against.
  */
-function collectRevalidatePhase1RunDefects(revalidate: string): string[] {
+function collectRevalidatePhase1RunDefects(revalidate: string, md: string): string[] {
   const step = revalidate.split('\n').find(l => /^1\. \*\*Branch safety check\*\*/.test(l))
   if (step === undefined) return ['no re-validation branch step']
   const out: string[] = []
   for (const [what, text] of REVALIDATE_PHASE1_RUN_PARTS) {
     if (!step.includes(text)) out.push(`step 1 does not say: ${what}`)
+  }
+  const phase1 = phaseSection(md, H.p1) ?? ''
+  for (const [label] of step.replace(/^1\. \*\*Branch safety check\*\*/, '').matchAll(/\*\*[^*]+\*\*/g)) {
+    if (!phase1.includes(label)) out.push(`Phase 1 does not hold ${label}, which step 1 names`)
   }
   for (const [what, anchor] of REVALIDATE_PHASE1_CONDITIONS) {
     if (!revalidate.includes(anchor)) out.push(`${what} no longer waits for "Phase 1 ran"`)
@@ -1806,24 +1811,72 @@ function collectRevalidatePhase1RunDefects(revalidate: string): string[] {
 }
 
 describe('#544: "Phase 1 ran" on the re-validation path means all of Phase 1', () => {
-  it('step 1 runs all of Phase 1 on a protected branch, and the three conditions that read it stay at their anchors', () => {
+  it('step 1 runs all of Phase 1 on a protected branch, the label it names is in Phase 1 of both builds, and the three conditions that read it stay at their anchors', () => {
     expect(REVALIDATE_PHASE1_CONDITIONS.length, 'the condition table is empty, so this guard proves nothing').toBeGreaterThanOrEqual(3)
-    expect(collectRevalidatePhase1RunDefects(revalidateReference())).toEqual([])
+    for (const [label, md] of [['curation on', implementMd()], ['curation off', implementMdOff()]] as const) {
+      expect(phaseSection(md, H.p1)?.length ?? 0, `${label}: Phase 1 is empty, so this guard proves nothing`).toBeGreaterThan(5_000)
+      expect(collectRevalidatePhase1RunDefects(revalidateReference(), md), label).toEqual([])
+    }
   })
 
   it('known-bad probes: step 1 as it was, a lost pointer, a lost condition and a renamed step are each reported', () => {
+    const md = implementMd()
     const reval = revalidateReference()
     const step = reval.split('\n').find(l => /^1\. \*\*Branch safety check\*\*/.test(l))!
     const said = (what: string): string => `step 1 does not say: ${what}`
-    expect(collectRevalidatePhase1RunDefects(seedOnce(reval, step, PRE_FIX_BRANCH_STEP)), 'step 1 as it was')
+    expect(collectRevalidatePhase1RunDefects(seedOnce(reval, step, PRE_FIX_BRANCH_STEP), md), 'step 1 as it was')
       .toEqual(REVALIDATE_PHASE1_RUN_PARTS.map(([what]) => said(what)))
-    expect(collectRevalidatePhase1RunDefects(seedOnce(reval, 'run all of Phase 1, through its **Fresh base** step,', 'run Phase 1')), 'the old wording of the run')
+    expect(collectRevalidatePhase1RunDefects(seedOnce(reval, 'run all of Phase 1, through its **Fresh base.** step,', 'run Phase 1'), md), 'the old wording of the run')
       .toEqual([said(REVALIDATE_PHASE1_RUN_PARTS[0][0])])
-    expect(collectRevalidatePhase1RunDefects(seedOnce(reval, ' "Phase 1 ran" below means all of it ran.', '')), 'the meaning of "Phase 1 ran"')
+    expect(collectRevalidatePhase1RunDefects(seedOnce(reval, ' "Phase 1 ran" below means all of it ran.', ''), md), 'the meaning of "Phase 1 ran"')
       .toEqual([said(REVALIDATE_PHASE1_RUN_PARTS[1][0])])
     for (const [what, anchor] of REVALIDATE_PHASE1_CONDITIONS) {
-      expect(collectRevalidatePhase1RunDefects(seedOnce(reval, anchor, anchor.replace(/[Uu]nless Phase 1 ran/, 'Always')))).toEqual([`${what} no longer waits for "Phase 1 ran"`])
+      expect(collectRevalidatePhase1RunDefects(seedOnce(reval, anchor, anchor.replace(/[Uu]nless Phase 1 ran/, 'Always')), md)).toEqual([`${what} no longer waits for "Phase 1 ran"`])
     }
-    expect(collectRevalidatePhase1RunDefects(seedOnce(reval, '**Branch safety check**', '**Branch check**'))).toEqual(['no re-validation branch step'])
+    expect(collectRevalidatePhase1RunDefects(seedOnce(reval, '**Branch safety check**', '**Branch check**'), md)).toEqual(['no re-validation branch step'])
+  })
+
+  it('known-bad probes: a label that step 1 names but Phase 1 does not hold is reported, in either build', () => {
+    const reval = revalidateReference()
+    const unpunctuated = seedOnce(reval, '**Fresh base.**', '**Fresh base**')
+    expect(collectRevalidatePhase1RunDefects(unpunctuated, implementMd()), 'the label without its period')
+      .toEqual([`step 1 does not say: ${REVALIDATE_PHASE1_RUN_PARTS[0][0]}`, 'Phase 1 does not hold **Fresh base**, which step 1 names'])
+    for (const [label, md] of [['curation on', implementMd()], ['curation off', implementMdOff()]] as const) {
+      expect(collectRevalidatePhase1RunDefects(reval, seedOnce(md, '**Fresh base.**', '**Base.**')), `${label}: the Phase 1 label renamed`)
+        .toEqual(['Phase 1 does not hold **Fresh base.**, which step 1 names'])
+    }
+  })
+})
+
+/** The Phase 1 steps that step 4 of the reference points at, each by its bold label. */
+const REVALIDATE_TARGET_LABELS = ['**Resolve the settings line**', '**Set the compliance directive**', EVIDENCE_POLICY_STEP, PUBLICATION_STEP, STUB_RULE] as const
+
+/**
+ * Named collector: how step 4 of the reference names its Phase 1 targets in more than one form. Every target is
+ * written "the Phase 1 <label> step", so no pronoun stands for Phase 1 and a reader finds each target by one pattern.
+ */
+function collectRevalidateTargetFormDefects(revalidate: string): string[] {
+  const step = revalidate.split('\n').find(l => l.startsWith('4. **Take GATE_LEVEL**'))
+  if (step === undefined) return ['no re-validation settings step']
+  return REVALIDATE_TARGET_LABELS.filter(label => !step.includes(`the Phase 1 ${label} step`)).map(label => `the settings step does not name ${label} as "the Phase 1 <label> step"`)
+}
+
+describe('#544: step 4 of the re-validation reference names every Phase 1 target in one form', () => {
+  it('each of the five Phase 1 targets reads "the Phase 1 <label> step"', () => {
+    expect(REVALIDATE_TARGET_LABELS.length, 'the label table is empty, so this guard proves nothing').toBeGreaterThanOrEqual(5)
+    expect(collectRevalidateTargetFormDefects(revalidateReference())).toEqual([])
+  })
+
+  it('known-bad probes: the step as it was, a target in the "of Phase 1" form and a target behind "its" are each reported', () => {
+    const reval = revalidateReference()
+    const step = reval.split('\n').find(l => l.startsWith('4. **Take GATE_LEVEL**'))!
+    const defect = (label: string): string => `the settings step does not name ${label} as "the Phase 1 <label> step"`
+    expect(collectRevalidateTargetFormDefects(seedOnce(reval, step, PRE_FIX_SETTINGS_STEP)), 'the step as it was')
+      .toEqual(REVALIDATE_TARGET_LABELS.map(defect))
+    expect(collectRevalidateTargetFormDefects(seedOnce(reval, 'the Phase 1 **Resolve the settings line** step', 'the **Resolve the settings line** step of Phase 1')), 'the "of Phase 1" form')
+      .toEqual([defect('**Resolve the settings line**')])
+    expect(collectRevalidateTargetFormDefects(seedOnce(reval, `by the Phase 1 ${PUBLICATION_STEP} step`, `by its ${PUBLICATION_STEP} rule`)), 'the "its" form')
+      .toEqual([defect(PUBLICATION_STEP)])
+    expect(collectRevalidateTargetFormDefects(seedOnce(reval, '4. **Take GATE_LEVEL**', '4. **Take the level**'))).toEqual(['no re-validation settings step'])
   })
 })
