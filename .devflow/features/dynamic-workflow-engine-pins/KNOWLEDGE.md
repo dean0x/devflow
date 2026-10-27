@@ -14,7 +14,7 @@ directories:
   - tests/fixtures/numeric-floors.json
   - tests/guards/code-review-diff-gating.test.ts
 created: 2026-10-10
-updated: 2026-10-13
+updated: 2026-10-27
 ---
 
 # Dynamic Workflow Engine Compiled Output and Pins
@@ -90,7 +90,7 @@ The operation owns its marker format. A caller that restates the literal is a se
 
 - **Flat `_partials/`.** No subdirectories at any depth: a nested partial would be invisible to any flat reader (`tests/build-mds.test.ts` "commands/_partials/ is flat", with a seeded known-bad nested-partial probe). Partials declare no `output-dir:`; hosts declare it as the LAST frontmatter key, and no non-blank line may follow it inside the block.
 - **Braces and templates.** Under `@mdscript/mds` 0.4.4 literal `{...}` is plain text and only `{{name}}` / `{{helper()}}` interpolate. There is no `\{` escape, so a backslash ships verbatim (caught by the backslash-leak guard). `${...}` is literal text in prose and inside a `js` fence alike. Every fence kind (column-0, indented, tilde, blockquote) is passthrough, so nothing in a fence is interpolated.
-- **Which build.** `npm run build:mds` compiles command hosts, agent generator hosts and reference modules, and writes `dist/curation-off/` alongside; `npm run build:cli` produces none of them (KB-AP-5). Rebuild after editing any `.mds`.
+- **Which build.** `npm run build:mds` compiles command hosts, agent generator hosts and reference modules, and writes the off trees (`dist/curation-off/`, `dist/compliance-off/`, `dist/curation-compliance-off/`) and `dist/variant-axes.json` alongside; `npm run build:cli` produces none of them (KB-AP-5). Rebuild after editing any `.mds`.
 
 ## Guard patterns
 

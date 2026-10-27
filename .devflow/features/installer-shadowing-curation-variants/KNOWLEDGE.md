@@ -5,7 +5,7 @@ description: "Use when changing curation-off variants, convergeCurationVariants,
 category: architecture
 directories: [src/targets/claude-code/curation-install.ts, src/targets/claude-code/language-stamp.ts, src/cli/commands/curation.ts, src/targets/claude-code/installer.ts, src/core/assets.ts]
 created: 2026-10-10
-updated: 2026-10-13
+updated: 2026-10-27
 ---
 
 # Curation-aware Install & Language-focus Stamp
@@ -17,7 +17,7 @@ updated: 2026-10-13
 - **KB-AP-3** Never re-stamp the language list after each converge write or derive it from `manifest.plugins` in a toggle: the stamped copy always differs from source (rewritten every `devflow init`), and a selective uninstall leaves `manifest.plugins` stale (resurrects a removed language). The converge CARRIES the installed list; install and uninstall are the only writers.
 - **KB-AP-4** Never put prompt text, an out-of-pattern name, or a duplicated stamp line on the stamp: `applyLanguageStamp` refuses over `MAX_STAMPED_FOCUSES`, any name outside the focus-name pattern, and a file with no stamp line or several.
 - **KB-AP-5** The converge never throws and never stops a run: every failure is a warning and `converged: false`; a damaged stamp line is a warning to run `devflow init`, never a stop rule.
-- **KB-AP-6** Never read a missing `dist/curation-off` as a no-op: after `build:cli` alone the converge warns to run `npm run build:mds` and reports `converged: false`.
+- **KB-AP-6** Never read a missing `dist/curation-off` as a no-op: after `build:cli` alone the converge warns to run `npm run build:mds` and reports `converged: false`, and with compliance off the install itself refuses before any write (remedy `npm run build:mds`).
 - **KB-AP-7** The converge never installs an uninstalled plugin's prompt: a roster entry with no installed copy is left alone (`notInstalled`).
 - **KB-INV-1** The curation switch picks variants machine-wide: a repository that narrows curation in `project.json` never reaches the installer; curation-on files keep their run-time gate.
 - **KB-INV-2** `resolveSkillSource` is the one spelling of the shadow decision, shared by the install loop and the converge; it stat-checks the shipped source FIRST and throws if absent, even under a valid shadow.
@@ -29,12 +29,12 @@ updated: 2026-10-13
 
 ## Overview
 
-The build emits a curation-off variant of every command and agent that carries a curation arm into `dist/curation-off/{commands,agents}/` (the marker splitter, `src/core/curation-variants.ts`, belongs to the `curation-capture-system` KB). The build removes the retired off tree `dist/learning-off` whole (`LEGACY_OFF_OUTPUT_DIR`, `pruneLegacyOffTree`), because no host writes there now. The install follows the machine's curation switch (`features.curation` in `~/.devflow/manifest.json`; the mirror key `features.learning` always holds the same value, see the hub KB) and nothing else: the installed agents are machine-wide, so one repository's narrowing cannot pick them without changing every other repository's prompts (`D-LEARNING-VARIANT-INSTALL`). A separate mechanism stamps the installed `/code-review` with the language focuses on disk (`D-LANGUAGE-FOCUS-STAMP`); both live in `src/targets/claude-code/` and reach installed files after the copy.
+The build emits an off variant of every command and agent that carries an arm into `dist/curation-off`, `dist/compliance-off` or `dist/curation-compliance-off` (both-off) `/{commands,agents}/`, plus the manifest `dist/variant-axes.json` (the marker splitter, `src/core/curation-variants.ts`, belongs to the `curation-capture-system` KB). The build removes the retired off tree `dist/learning-off` whole (`LEGACY_OFF_OUTPUT_DIR`, `pruneLegacyOffTree`), because no host writes there now. The install follows the machine's curation switch (`features.curation` in `~/.devflow/manifest.json`; the mirror key `features.learning` always holds the same value, see the hub KB) and nothing else: the installed agents are machine-wide, so one repository's narrowing cannot pick them without changing every other repository's prompts (`D-LEARNING-VARIANT-INSTALL`). A separate mechanism stamps the installed `/code-review` with the language focuses on disk (`D-LANGUAGE-FOCUS-STAMP`); both live in `src/targets/claude-code/` and reach installed files after the copy.
 
 ## Curation-aware Install and Converge (`curation-install.ts`)
 
 Three pieces carry it:
-- **Source order.** `FileCopyOptions.curation` is REQUIRED with no default, because a caller that forgot it would install the wrong variant with no error. `init` passes the SETTLED `curationEnabled` (after flag, prompt and seed). Commands resolve over `commandSourceDirs(curation)` and agents over `agentSourceDirs(undefined, curation)`: with curation off the off-variant directory is consulted first, and a host with no arm falls through to its one compiled file.
+- **Source order.** `FileCopyOptions.curation` is REQUIRED with no default, because a caller that forgot it would install the wrong variant with no error. `init` passes the SETTLED `curationEnabled` (after flag, prompt and seed). `FileCopyOptions.compliance` is required for the same reason and `init` passes the settled compliance switch. Commands resolve over `commandSourceDirs({curation, compliance}, root)` and agents over `agentSourceDirs(root, {curation, compliance})` (`VariantSwitches`): with an axis off the off-variant directories come first, and a host with no arm falls through to its one compiled file. With compliance off (the default), `requireComplianceVariantFiles` first refuses the install before any write when `dist/variant-axes.json` is absent or invalid, or when a compliance-armed host lacks the file built for the machine's exact switches (a both-off machine needs the both-off file, never the curation-off one), or when the copy's own source list would take another file; it checks the file the copy would take.
 - **Skill condition.** The skill loop runs over `omitCurationGatedSkills(skillsMap, curation)`, so `apply-decisions` is not installed with curation off. The full-install pre-clean walks the UNFILTERED `skillsMap`, so a full install also drops a leftover copy; a partial install leaves removal to the converge. The registry still owns and requires the skill and `resolveSkillInstallPlan` is untouched, so a curation-off machine never reports it as a deselection nor its shadow as inactive. Only skills and rules have shadows; commands and agents have none, so an off variant has nothing to collide with.
 - **`resolveSkillSource(skill, devflowDir, packageRoot?)`** (`installer.ts`, returns `ResolvedSkillSource = { dir, shadow }`) stat-checks the shipped source FIRST and throws when it is absent, even under a valid shadow (a packaging failure a shadow must not mask), then `validateSkillShadow`: a valid shadow wins, an invalid one is reported and the shipped source installs.
 
@@ -62,7 +62,7 @@ Three pieces carry it:
 
 ## Gotchas
 
-- **KB-AP-6** After `npm run build:cli` alone there are no variants: `convergeCurationVariants` warns and leaves prompts as they were, while `installViaFileCopy` on a curation-off machine falls through to the curation-on files, so the install itself still succeeds.
+- **KB-AP-6** After `npm run build:cli` alone there are no variants: `convergeCurationVariants` warns and leaves prompts as they were. `installViaFileCopy` with compliance off (the default) refuses before any write when `dist/variant-axes.json` or the exact-axes off file of a compliance-armed host is absent; only a machine with compliance on can still reach the curation-on files this way. Known open limit: the curation converge carries the curation switch only and reads the compliance-on source order (`onSourceDirs`).
 - **KB-INV-7** `devflow curation --enable/--disable` after a CLI upgrade and before `devflow init` records the switch but converges nothing; the installed prompts stay on the old variant until init. An on variant keeps its run-time gate and an off variant loads no decisions, so neither mismatch is harmful.
 - **KB-INV-6** Under curation off the `apply-decisions` shadow stays in `~/.devflow/skills/` unapplied and undeleted, and a curation-off machine reports the skill neither as a deselection (`removedSkills`) nor its shadow as inactive; both come back on enable.
 - **KB-AP-7** A `--plugin` install carries one plugin's files, so a toggle must rewrite only prompts that are already installed.
@@ -72,10 +72,10 @@ Three pieces carry it:
 - `src/targets/claude-code/curation-install.ts` — `convergeCurationVariants` (+ `ConvergeCurationVariantsOptions` / `Result`, `CurationSkillState`), `applyCurationToggle`, `curationToggleSkew`, `describeCurationConverge`, `readRunningVersion`, `MAX_CURATION_ROSTER`; its header is the design record for `D-LEARNING-VARIANT-INSTALL`
 - `src/targets/claude-code/language-stamp.ts` — `LANGUAGE_STAMP_PREFIX`, `LANGUAGE_STAMP_NONE`, `LANGUAGE_STAMPED_COMMANDS`, `renderLanguageStamp`, `applyLanguageStamp` (Result), `carryLanguageStamp`, `stampForConverge`, `restampInstalledCommands` (called by `installViaFileCopy` and uninstall's selective phase); its header is the design record for `D-LANGUAGE-FOCUS-STAMP`
 - `src/targets/claude-code/installer.ts` — `FileCopyOptions.curation` (REQUIRED), `resolveSkillSource` / `ResolvedSkillSource`, the skill loop over `omitCurationGatedSkills`, the `restampInstalledCommands` call after the command copy and sweep
-- `src/core/assets.ts` — `curationOffDir`, `commandSourceDirs`, `agentSourceDirs(root?, curation)`
+- `src/core/assets.ts` — `curationOffDir`, `complianceOffDir`, `bothOffDir`, `commandSourceDirs(switches, root?)`, `agentSourceDirs(root?, switches = ALL_SWITCHES_ON)`
 - `src/core/plugins.ts` — `CURATION_GATED_SKILLS`, `omitCurationGatedSkills`, `PRESENCE_GATED_SKILLS`, `installedLanguageFocuses`
 - `src/cli/commands/curation.ts` — the install half of the toggle only: `handleToggle` → `convergeInstalledVariants` → `applyCurationToggle`; the rest belongs to the `curation-capture-system` KB
-- `src/core/curation-variants.ts` — the build-side marker splitter (owned by `curation-capture-system`); the installer consumes only `CURATION_OFF_OUTPUT_DIR` and `CurationVariantKind`, through `assets.ts`
+- `src/core/curation-variants.ts` — the build-side marker splitter (owned by `curation-capture-system`); the installer consumes `VariantSwitches`, `VariantKind`, the off-dir constants and `parseVariantManifest`
 - `src/core/agent-models.ts` — `carryAgentOverrides`, `reapplyAgentMapping`
 
 ## Related

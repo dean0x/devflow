@@ -222,7 +222,7 @@ describe('module surface', () => {
     expect(Object.isFrozen(VE)).toBe(true)
     expect(Object.keys(VE).sort()).toEqual([
       'CAPS', 'EXIT_CODES', 'PR_FIELDS', 'main', 'settleOutcome',
-      'BODY_STATUSES', 'COMMENT_STATUSES', 'readinessVerdict', 'bindCiHead', 'renderPublishBlock', 'parsePublishBlock', 'renderReadinessBlock', 'parseReadinessBlock',
+      'BODY_STATUSES', 'COMMENT_STATUSES', 'readinessVerdict', 'bindCiHead', 'renderPublishBlock', 'parsePublishBlock', 'renderReadinessBlock', 'parseReadinessBlock', 'writeReadinessOut',
       'commentIdOf', 'editTarget',
     ].sort())
   })
@@ -253,6 +253,8 @@ describe('usage (exit 1, stdout empty)', () => {
     ['check with an unknown kind', ['check', 'plan', 'x']],
     ['check with a flag', ['check', 'tp', '--x']],
     ['check with a second file', ['check', 'tp', 'a', 'b']],
+    ['check wave --links-only without a file', ['check', 'wave', '--links-only']],
+    ['check tp with --links-only', ['check', 'tp', '--links-only', 'a']],
     ['render without --plan', ['render']],
     ['render with a positional', ['render', 'x']],
     ['verify without --pr', ['verify']],
@@ -1078,6 +1080,21 @@ describe('trusted record — refresh mode reads claims from it (D-VERIFY-RECORD)
     expect(PE.parsePlan(v.stale).ok).toBe(true)
   })
 
+  it('TP-17: without --evidence the output is unchanged: a TP the record never carried is not listed', () => {
+    const third = tpLine(3, 'a check nobody recorded', 'local', ['src/**'])
+    const atOld = recordComment(OLD, [
+      { id: 1, state: 'VERIFIED-CI', sha: OLD, line: CI, run: '101/1' },
+      { id: 2, state: 'ATTESTED-LOCAL', sha: OLD, line: LOCAL, exit: 0 },
+    ])
+    const v = verifyScn({ scn: {
+      body: `Intro text.\n\n${blockOf([CI, LOCAL, third])}\n`, comments: [{ login: 'devbot', body: atOld, viewerDidAuthor: true }],
+      ancestry: { [OLD]: 'in' }, diffs: { [OLD]: ['src/a.ts'] }, runs: { [OLD]: [{ id: 101, headSha: OLD }] },
+    } })
+    expect(v.fields?.stale).toEqual([1, 2])
+    expect(v.states.get(3)).toBe('UNVERIFIED')
+    expect(v.stale).toBe(`## Test Plan\n${CI}\n${LOCAL}\n`)
+  })
+
   it('no test-plan block in the body and no record: total 0, body same, nothing to post', () => {
     const v = verifyScn({ scn: { body: 'just prose\n' } })
     expect(v.code).toBe(0)
@@ -1291,20 +1308,52 @@ describe('evidence mode merges the file over the record', () => {
     expect(next.states.get(2)).toBe('UNVERIFIED')
   })
 
-  it('--stale-out carries only STALE lines whose text a trusted record already published (containment, delta 12)', () => {
+  it('TP-17: --stale-out with --evidence lists the STALE lines of the file plan, recorded or not (the file is local text, not PR text)', () => {
     const FILES = tpLine(3, 'a local check over src', 'local', ['src/**'])
     const file = evidenceFile([CI, LOCAL, FILES], [claimLine(3, 'PASS', OLD, 0)])
     const scn: Scn = { runs, ancestry: { [OLD]: 'in' }, diffs: { [OLD]: ['src/a.ts'] } }
     const unrecorded = verifyScn({ scn: { ...scn, comments }, evidence: file })
     expect(unrecorded.states.get(3)).toBe('STALE')
     expect(unrecorded.fields?.stale).toEqual([3])
-    expect(unrecorded.stale, 'TP-3 is not in the trusted record: its text is never handed on').toBe('')
+    expect(unrecorded.stale, 'TP-3 is not in the trusted record: the file plan still names it').toBe(`## Test Plan\n${FILES}\n`)
+    expect(PE.parsePlan(unrecorded.stale).ok).toBe(true)
     const withRecord = recordComment(HEAD, [
       { id: 1, state: 'VERIFIED-CI', sha: HEAD, line: CI, run: '101/1' },
       { id: 3, state: 'ATTESTED-LOCAL', sha: OLD, line: FILES, exit: 0 },
     ])
     const recorded = verifyScn({ scn: { ...scn, comments: [{ login: 'devbot', body: withRecord, viewerDidAuthor: true }] }, evidence: file })
     expect(recorded.stale).toBe(`## Test Plan\n${FILES}\n`)
+  })
+
+  it('TP-17: only the STALE items are listed, each exactly as the file wrote it and in the file\'s order', () => {
+    const FIRST = tpLine(3, 'a check over src', 'local', ['src/**'])
+    const SECOND = tpLine(4, 'a check over lib', 'local', ['lib/**'])
+    const file = evidenceFile([CI, FIRST, SECOND], [claimLine(3, 'PASS', OLD, 0), claimLine(4, 'PASS', OLD, 0), claimLine(1, 'PASS', HEAD)])
+    const v = verifyScn({
+      scn: { runs, ancestry: { [OLD]: 'in' }, diffs: { [OLD]: ['src/a.ts', 'lib/b.ts'] } },
+      evidence: file,
+    })
+    expect(v.fields?.stale).toEqual([3, 4])
+    expect(v.states.get(1)).toBe('VERIFIED-CI')
+    expect(v.stale).toBe(`## Test Plan\n${FIRST}\n${SECOND}\n`)
+  })
+
+  it('TP-17: a file with no stale item writes nothing', () => {
+    const v = verifyScn({ scn: { comments, runs }, evidence: evidenceFile([CI], [claimLine(1, 'PASS', HEAD)]) })
+    expect(v.states.get(1)).toBe('VERIFIED-CI')
+    expect(v.stale).toBe('')
+  })
+
+  it('TP-17: a file with claims but no plan takes the body\'s plan, so the recorded-text filter stays', () => {
+    const FILES = tpLine(3, 'a local check over src', 'local', ['src/**'])
+    const body = `${blockOf([CI, FILES])}\n`
+    const recordedFirstOnly = recordComment(HEAD, [{ id: 1, state: 'VERIFIED-CI', sha: HEAD, line: CI, run: '101/1' }])
+    const v = verifyScn({
+      scn: { body, runs, comments: [{ login: 'devbot', body: recordedFirstOnly, viewerDidAuthor: true }], ancestry: { [OLD]: 'in' }, diffs: { [OLD]: ['src/a.ts'] } },
+      evidence: `## Claims\n${claimLine(3, 'PASS', OLD, 0)}\n`,
+    })
+    expect(v.states.get(3), 'the body text of TP-3 was never recorded: no claim attaches to it').toBe('UNVERIFIED')
+    expect(v.stale).toBe('')
   })
 
   it('exceptions come from the file when it has the section, else from the record', () => {
@@ -2411,6 +2460,7 @@ describe('source guards (verify-evidence.cjs)', () => {
       'D-VERIFY-VERIFYING-SHA', 'D-VERIFY-PUBLICATION', 'D-VERIFY-CAS',
       'D-OP-SCRIPT-POINTER', 'D-OP-BLOCK-GATE', 'D-PUBLISH-BOUNDS', 'D-PUBLISH-SCRUB-GATE',
       'D-READINESS-LADDER', 'D-READINESS-THREADS', 'D-READINESS-CLASSIFIER', 'D-READINESS-WORKFLOWS', 'D-READINESS-HEAD',
+      'D-READINESS-OUT',
     ]) {
       expect(SOURCE, `${marker} missing`).toContain(marker)
     }

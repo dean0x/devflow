@@ -1,7 +1,14 @@
 import { join } from 'path';
 import { getPackageRoot } from './paths.js';
 import { SKILL_REFS_OUTPUT_DIR } from './mds-variants.js';
-import { CURATION_OFF_OUTPUT_DIR, type CurationVariantKind } from './curation-variants.js';
+import {
+  ALL_SWITCHES_ON,
+  BOTH_OFF_OUTPUT_DIR,
+  COMPLIANCE_OFF_OUTPUT_DIR,
+  CURATION_OFF_OUTPUT_DIR,
+  type VariantKind,
+  type VariantSwitches,
+} from './curation-variants.js';
 
 /**
  * Flat skills source directory: src/assets/skills/{name}/
@@ -69,24 +76,89 @@ export type CommandSourceDirs = readonly [string, ...string[]];
  * @param kind - Which prompt kind's variants.
  * @param root - Package root to resolve against (see agentsDir).
  */
-export function curationOffDir(kind: CurationVariantKind, root: string = getPackageRoot()): string {
+export function curationOffDir(kind: VariantKind, root: string = getPackageRoot()): string {
   return join(root, ...CURATION_OFF_OUTPUT_DIR.split('/'), kind);
+}
+
+/**
+ * Compliance-off variant directory: dist/compliance-off/{commands,agents}/
+ *
+ * Holds the variant of each prompt that carries a compliance arm, and only those. A
+ * machine with compliance off reads it. On a both-off machine it holds the file of a
+ * host that has a compliance arm and no curation arm. Absent until the build has run,
+ * so every reader tolerates its absence.
+ *
+ * @param kind - Which prompt kind's variants.
+ * @param root - Package root to resolve against (see agentsDir).
+ */
+export function complianceOffDir(kind: VariantKind, root: string = getPackageRoot()): string {
+  return join(root, ...COMPLIANCE_OFF_OUTPUT_DIR.split('/'), kind);
+}
+
+/**
+ * Both-off variant directory: dist/curation-compliance-off/{commands,agents}/
+ *
+ * Holds the variant of each prompt that carries both arms, for a machine with curation
+ * off and compliance off, and only those. Absent until the build has run.
+ *
+ * @param kind - Which prompt kind's variants.
+ * @param root - Package root to resolve against (see agentsDir).
+ */
+export function bothOffDir(kind: VariantKind, root: string = getPackageRoot()): string {
+  return join(root, ...BOTH_OFF_OUTPUT_DIR.split('/'), kind);
+}
+
+/**
+ * The off-variant directories of one kind that a machine with these switches consults,
+ * MOST-PREFERRED FIRST. Empty when both switches are on.
+ *
+ * The one place the two-axis order is spelled; commandSourceDirs and agentSourceDirs
+ * both take it from here. A both-off machine consults the both-off tree first, then the
+ * two single-axis trees. This order does not decide which file a compliance-armed host
+ * must have. The installer requires the file built for the machine's exact switches, so
+ * on a both-off machine a host with both arms needs its both-off file and never its
+ * curation-off file.
+ */
+function offVariantDirs(
+  kind: VariantKind,
+  { curation, compliance }: VariantSwitches,
+  root: string,
+): readonly string[] {
+  if (!curation && !compliance) {
+    return [bothOffDir(kind, root), curationOffDir(kind, root), complianceOffDir(kind, root)];
+  }
+  if (!compliance) return [complianceOffDir(kind, root)];
+  if (!curation) return [curationOffDir(kind, root)];
+  return [];
+}
+
+/**
+ * Prepend the off-variant directories to the normal lookup, keeping the list non-empty
+ * in the type.
+ */
+function preferOff(
+  off: readonly string[],
+  normal: readonly [string, ...string[]],
+): readonly [string, ...string[]] {
+  return off.length === 0 ? normal : [off[0], ...off.slice(1), ...normal];
 }
 
 /**
  * Command source directories, MOST-PREFERRED FIRST.
  *
- * D-LEARNING-VARIANT-INSTALL: with curation off the curation-off variant comes
+ * D-LEARNING-VARIANT-INSTALL: with an axis off, the off-variant directories come
  * first, so a host with an arm installs its off variant and a host with none falls
- * through to the one compiled file; with curation on the order is the normal
+ * through to the one compiled file. With both axes on the order is the normal
  * single-directory lookup.
  *
- * @param curation - The machine's settled curation switch.
+ * @param switches - The machine's settled curation and compliance switches.
  * @param root - Package root to resolve against (see agentsDir).
  */
-export function commandSourceDirs(curation: boolean, root: string = getPackageRoot()): CommandSourceDirs {
-  const normal = join(root, 'dist', 'commands');
-  return curation ? [normal] : [curationOffDir('commands', root), normal];
+export function commandSourceDirs(
+  switches: VariantSwitches,
+  root: string = getPackageRoot(),
+): CommandSourceDirs {
+  return preferOff(offVariantDirs('commands', switches, root), [join(root, 'dist', 'commands')]);
 }
 
 /**
@@ -137,18 +209,23 @@ export function compiledSkillRefsDir(root: string = getPackageRoot()): string {
  * The non-empty tuple makes an empty list a compile error at every call site:
  * an empty list would survive a `??` default and resolve to nothing.
  *
- * D-LEARNING-VARIANT-INSTALL: `curation: false` puts dist/curation-off/agents first,
- * for the installer and the converge only. The default (curation on) is the order
- * every other reader wants: the shipped defaults (model, effort) are the same in
- * both variants, so loadShippedAgentDefaults and the test harness keep reading the
- * curation-on tree.
+ * D-LEARNING-VARIANT-INSTALL: an axis that is off puts its off-variant directories
+ * first (see commandSourceDirs), for the installer and the converge only. The default
+ * (both on) is the order every other reader wants: the shipped defaults (model, effort)
+ * are the same in every variant, so loadShippedAgentDefaults and the test harness keep
+ * reading the both-on tree.
  *
  * @param root - Package root to resolve against (see agentsDir).
- * @param curation - The machine's settled curation switch; on by default.
+ * @param switches - The machine's settled curation and compliance switches; every switch on by default.
  */
-export function agentSourceDirs(root: string = getPackageRoot(), curation: boolean = true): AgentSourceDirs {
-  const normal = [compiledAgentsDir(root), agentsDir(root)] as const;
-  return curation ? normal : [curationOffDir('agents', root), ...normal];
+export function agentSourceDirs(
+  root: string = getPackageRoot(),
+  switches: VariantSwitches = ALL_SWITCHES_ON,
+): AgentSourceDirs {
+  return preferOff(
+    offVariantDirs('agents', switches, root),
+    [compiledAgentsDir(root), agentsDir(root)],
+  );
 }
 
 /** Agent source directories, most-preferred first and never empty. */

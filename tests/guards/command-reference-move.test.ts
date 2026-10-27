@@ -50,7 +50,7 @@ interface Moved {
   readonly heading: string
   /** UTF-8 length of the removed text without its trailing newline. */
   readonly bytes: number
-  /** SHA-256 of those bytes in the file that `was` names. The continuation path's hash covers its text, which holds a guarded `BASE_BRANCH` record that Phases 3-7 read for the branch diff, a step that takes `GATE_LEVEL` from the Phase 1 settings step for Phase 6, the base resolution (pr mode for a PR, local mode without one) so Phases 3-7 run the branch diff from a fresh base, a strict branch-name validation, and a checkout root that the path resolves itself when Phase 1 does not run. The path reads the base name into a fresh file and passes it to the resolver on stdin. */
+  /** SHA-256 of those bytes in the file that `was` names. The continuation path's hash covers its text, which holds a guarded `BASE_BRANCH` record that Phases 3-7 read for the branch diff, a step that takes `GATE_LEVEL` from the Phase 1 settings step for Phase 6, the base resolution (pr mode for a PR, local mode without one) so Phases 3-7 run the branch diff from a fresh base, a strict branch-name validation, and a checkout root that the path resolves itself when Phase 1 does not run. The path reads the base name into a fresh file and passes it to the resolver on stdin. The same settings step sets the compliance lens and directive from that line, so the Fix agents of Phases 5-7 get the directive of a full run, and takes the review-publication value with the evidence policy and the stub rule, so Phase 11 passes the value of a full run. The skip step keeps Harden at every level, and the first step says that "Phase 1 ran" means all of Phase 1. */
   readonly sha256: string
   readonly was: string
 }
@@ -60,7 +60,7 @@ const MOVED: readonly Moved[] = [
   { reference: 'commands/implement-evidence-asks.md', heading: 'Exception grammar', bytes: 1451, sha256: 'a9ab21080bbe77f0ea187471bf6d3d241cd69b11748cd37b95d119e5dad1260c', was: '_evidence_policy.mds, the body of evidence_exception()' },
   { reference: 'commands/implement-evidence-asks.md', heading: 'Record the exception', bytes: 566, sha256: '458cf3e415744aab954b2686f16d4c9fb5f1f3b9bfed1790e32a6a429d821ba8', was: 'implement.mds, the record paragraph' },
   { reference: 'commands/implement-evidence-asks.md', heading: 'Missing test plan ask', bytes: 1358, sha256: '032972c8f3a0443a7aed0863ce248e68393f26b666a940da80c1b0284558d59d', was: 'implement.mds, the missing-test-plan ask and its two options' },
-  { reference: 'commands/implement-revalidate.md', heading: 'Continuation path', bytes: 3460, sha256: '1228885df20893e89c5b5dc009a20054051b1b854ceedc28573ec35dbdff5a82', was: 'implement.mds, the re-validation continuation path' },
+  { reference: 'commands/implement-revalidate.md', heading: 'Continuation path', bytes: 4216, sha256: '34a3dce4cbe3be06fdd003772670b95915377c0ee05314694a89f1aa2b04780a', was: 'implement.mds, the re-validation continuation path' },
 ]
 
 const digest = (text: string): string => createHash('sha256').update(Buffer.from(text, 'utf-8')).digest('hex')

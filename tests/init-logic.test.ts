@@ -1997,6 +1997,7 @@ describe('installViaFileCopy cleanup (isPartialInstall)', () => {
   it('full install (isPartialInstall=false) removes stale commands and agents', async () => {
     await installViaFileCopy({
       curation: true,
+      compliance: true,
       plugins: [],
       claudeDir,
       devflowDir,
@@ -2016,6 +2017,7 @@ describe('installViaFileCopy cleanup (isPartialInstall)', () => {
     // registry-diff sweep should remove it on every install shape, not just full installs.
     await installViaFileCopy({
       curation: true,
+      compliance: true,
       plugins: [],
       claudeDir,
       devflowDir,
@@ -2069,6 +2071,7 @@ describe('init LEGACY_SKILL_NAMES cleanup pass (init.ts:1149-1153)', () => {
     const devflowDir = path.join(tmpDir, 'devflow');
     await installViaFileCopy({
       curation: true,
+      compliance: true,
       plugins: [],
       claudeDir,
       devflowDir,
@@ -2094,6 +2097,7 @@ describe('init LEGACY_SKILL_NAMES cleanup pass (init.ts:1149-1153)', () => {
     const devflowDir = path.join(tmpDir, 'devflow');
     await installViaFileCopy({
       curation: true,
+      compliance: true,
       plugins: [],
       claudeDir,
       devflowDir,
@@ -2171,6 +2175,7 @@ describe('partial install registry-diff sweep correctness', () => {
     // --- Act ---
     await installViaFileCopy({
       curation: true,
+      compliance: true,
       plugins: [],          // no plugins selected — pure partial install
       claudeDir,
       devflowDir,

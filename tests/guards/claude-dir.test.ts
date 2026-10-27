@@ -555,7 +555,7 @@ describe('no prompt reaches the Claude directory outside the CLAUDE_CONFIG_DIR r
       const plugins = ['devflow-core-skills', 'devflow-code-review', 'devflow-typescript']
         .map(name => DEVFLOW_PLUGINS.find(p => p.name === name)!)
       await installViaFileCopy({
-        plugins, claudeDir, devflowDir, curation: true,
+        plugins, claudeDir, devflowDir, curation: true, compliance: true,
         skillsMap: buildScopedSkillsMap(plugins), agentsMap: new Map(), isPartialInstall: false,
         spinner: { start() {}, stop() {}, message() {} },
       })

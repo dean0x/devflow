@@ -292,6 +292,7 @@ describe('the installed agents wear the stamp, whichever path wrote them', () =>
     const { skillsMap, agentsMap } = buildAssetMaps(plugins);
     return installViaFileCopy({
       curation: true,
+      compliance: true,
       plugins,
       effectivePlugins: plugins,
       claudeDir,

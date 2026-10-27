@@ -10,6 +10,7 @@
 //
 // Usage:
 //   node verify-evidence.cjs check tp|block|exceptions|wave <file>
+//   node verify-evidence.cjs check wave --links-only <file>
 //   node verify-evidence.cjs render --plan <file>
 //   node verify-evidence.cjs verify --pr <n> [--publication <mode>] [--evidence <file>]
 //        [--state <dir>] [--block-out <file>] [--comment-out <file>] [--stale-out <file>] [--approval]
@@ -17,11 +18,15 @@
 //   node verify-evidence.cjs readback --pr <n> --expect <file>
 //   node verify-evidence.cjs publish --pr <n> [--publication auto|full|off|stub] [--evidence <file>]
 //   node verify-evidence.cjs readiness --pr <n> [--require-non-author-approval true|false]
+//        [--evidence <file>] [--out <file>]
 //
 // stdout (D-VERIFY-STDOUT) is empty or exactly one of these shapes, each closed-vocabulary
 // (the render block's TP lines come from the caller's own plan file):
-//   check     nothing — the exit code is the answer; the diagnostic is on stderr
-//   render    the creation block: markers, `## Test Plan`, every TP unticked
+//   check     nothing — the exit code is the answer; the diagnostic is on stderr.
+//             `check wave --links-only` also admits the links-only wave block (the
+//             `## Related Issues` heading and `Refs #<n>` lines, no evidence section);
+//             plain `check wave` refuses that block as malformed
+//   render   the creation block: markers, `## Test Plan`, every TP unticked
 //   verify    EVIDENCE pr:<n> head:<sha> total:<n> VERIFIED-CI:<n> ATTESTED-LOCAL:<n>
 //             UNVERIFIED:<n> STALE:<n> FAILED:<n> INDETERMINATE:<n> stale:<ids|none>
 //             exceptions:<kinds|none> approval:<yes|no|unchecked> key:<hex>
@@ -34,7 +39,17 @@
 //             `TRACEABILITY: DEGRADED (evidence unavailable)` (exit 2)
 //   readiness the `## Merge Readiness` block (exit 0), or the same block with
 //             `**Status**: DEGRADED (<reason>)` and one `TRACEABILITY: DEGRADED
-//             (<reason>)` line after it (exit 2)
+//             (<reason>)` line after it (exit 2). `--evidence <file>` reads the test
+//             plan and the claims from a local evidence file, as `verify --evidence`
+//             does. `--out <file>` also writes the file `READINESS pr:<n>
+//             head:<40hex|none> status:<READY|NOT_READY|DEGRADED> source=<local|pr>`
+//             (one line; wrapped here), then that same block. `source=local` names
+//             the `--evidence` file as the plan's source and `source=pr` names the
+//             PR's own record. Stdout does not change, and the command makes no
+//             remote write.
+//             A file an earlier run left at the out path never outlives this run: it
+//             is removed before the first read, and a block that does not parse or a
+//             write that fails leaves no out file
 // No byte of a PR body, a comment, a review or a gh/git answer is ever printed: the
 // boundary re-checks every stdout line against these shapes before writing it.
 //
@@ -158,6 +173,8 @@ const LINE_MAX_BUFFER = 4096;
 const COMMENT_READ_MAX_BUFFER = 8 * 65536;
 /** `gh pr checks` and the thread-count GraphQL answer: a thousand rows of names fit. */
 const READINESS_MAX_BUFFER = 4 * 1024 * 1024;
+/** Where line 1 of the readiness out file says the test plan came from: the `--evidence` file, or the PR's own record. */
+const READINESS_SOURCES = Object.freeze(['local', 'pr']);
 /** 5,000 paths of 4,096 bytes overflow this; an overflow reads as an unresolved diff. */
 const DIFF_MAX_BUFFER = 16 * 1024 * 1024;
 const FETCH_MAX_BUFFER = 1024 * 1024;
@@ -194,6 +211,7 @@ const READBACK_LINE_RE = /^READBACK (?<outcome>ok|mismatch)$/;
 
 const USAGE = [
   'Usage: node verify-evidence.cjs check tp|block|exceptions|wave <file>',
+  '       node verify-evidence.cjs check wave --links-only <file>',
   '       node verify-evidence.cjs render --plan <file>',
   '       node verify-evidence.cjs verify --pr <n> [--publication <mode>] [--evidence <file>]',
   '            [--state <dir>] [--block-out <file>] [--comment-out <file>] [--stale-out <file>] [--approval]',
@@ -201,6 +219,7 @@ const USAGE = [
   '       node verify-evidence.cjs readback --pr <n> --expect <file>',
   '       node verify-evidence.cjs publish --pr <n> [--publication auto|full|off|stub] [--evidence <file>]',
   '       node verify-evidence.cjs readiness --pr <n> [--require-non-author-approval true|false]',
+  '            [--evidence <file>] [--out <file>]',
 ].join('\n');
 
 // ---------------------------------------------------------------------------
@@ -248,14 +267,15 @@ const USAGE = [
 
 /**
  * @typedef {{ kind: 'usage' }
- *   | { kind: 'check', what: 'tp' | 'block' | 'exceptions' | 'wave', file: string }
+ *   | { kind: 'check', what: 'tp' | 'block' | 'exceptions' | 'wave', file: string, linksOnly: boolean }
  *   | { kind: 'render', plan: string }
  *   | { kind: 'verify', pr: number, publication: string, evidence: string | null, state: string | null,
  *       blockOut: string | null, commentOut: string | null, staleOut: string | null, approval: boolean }
  *   | { kind: 'splice', pr: number, state: string, block: string, out: string }
  *   | { kind: 'readback', pr: number, expect: string }
  *   | { kind: 'publish', pr: number, publication: string, evidence: string | null }
- *   | { kind: 'readiness', pr: number, requireNonAuthor: 'true' | 'false' | 'unrecognised' }} ParsedArgs
+ *   | { kind: 'readiness', pr: number, requireNonAuthor: 'true' | 'false' | 'unrecognised',
+ *       evidence: string | null, out: string | null }} ParsedArgs
  */
 
 /** @type {ParsedArgs} */
@@ -316,10 +336,12 @@ function parseArgs(argv) {
   const sub = rest[0];
   const tail = rest.slice(1);
   if (sub === 'check') {
-    if (tail.length !== 2 || !['tp', 'block', 'exceptions', 'wave'].includes(tail[0])) return USAGE_ARGS;
-    const file = tail[1];
+    // `check wave --links-only <file>` is the one three-argument form: the links-only wave block is opt-in.
+    const linksOnly = tail.length === 3 && tail[0] === 'wave' && tail[1] === '--links-only';
+    if ((tail.length !== 2 && !linksOnly) || !['tp', 'block', 'exceptions', 'wave'].includes(tail[0])) return USAGE_ARGS;
+    const file = tail[tail.length - 1];
     if (typeof file !== 'string' || file === '' || file.startsWith('-') || file.length > MAX_ARG_CHARS) return USAGE_ARGS;
-    return { kind: 'check', what: /** @type {'tp' | 'block' | 'exceptions' | 'wave'} */ (tail[0]), file };
+    return { kind: 'check', what: /** @type {'tp' | 'block' | 'exceptions' | 'wave'} */ (tail[0]), file, linksOnly };
   }
   if (sub === 'render') {
     const f = parseFlags(tail, { '--plan': 'value' });
@@ -371,13 +393,20 @@ function parseArgs(argv) {
     return { kind: 'publish', pr, publication, evidence };
   }
   if (sub === 'readiness') {
-    const f = parseFlags(tail, { '--pr': 'value', '--require-non-author-approval': 'value' });
+    const f = parseFlags(tail, {
+      '--pr': 'value', '--require-non-author-approval': 'value', '--evidence': 'value', '--out': 'value',
+    });
     const pr = f === null ? null : parsePr(flagValue(f, '--pr'));
     if (f === null || pr === null) return USAGE_ARGS;
     const needed = flagValue(f, '--require-non-author-approval');
     if (needed !== null && needed !== 'true' && needed !== 'false') return USAGE_ARGS;
+    const evidence = flagValue(f, '--evidence');
+    const out = flagValue(f, '--out');
+    // The out file is never the evidence file: two spellings of one path (`./a.md` and `a.md`)
+    // and two names of one file (a hard link or a symlink) are both refused before any read.
+    if (evidence !== null && out !== null && (path.resolve(evidence) === path.resolve(out) || sameFile(evidence, out))) return USAGE_ARGS;
     // An absent flag is the ladder's "unrecognised": it can never read READY.
-    return { kind: 'readiness', pr, requireNonAuthor: needed === null ? 'unrecognised' : needed };
+    return { kind: 'readiness', pr, requireNonAuthor: needed === null ? 'unrecognised' : needed, evidence, out };
   }
   return USAGE_ARGS;
 }
@@ -385,6 +414,24 @@ function parseArgs(argv) {
 // ---------------------------------------------------------------------------
 // Bounded file I/O
 // ---------------------------------------------------------------------------
+
+/**
+ * Whether two paths name one file: the same device and inode, links followed. A path
+ * that does not exist, or cannot be inspected, names no file.
+ *
+ * @param {string} a
+ * @param {string} b
+ * @returns {boolean}
+ */
+function sameFile(a, b) {
+  try {
+    const first = fs.statSync(a, { bigint: true, throwIfNoEntry: false });
+    const second = fs.statSync(b, { bigint: true, throwIfNoEntry: false });
+    return first !== undefined && second !== undefined && first.dev === second.dev && first.ino === second.ino;
+  } catch (_) {
+    return false;
+  }
+}
 
 /**
  * Read a regular file of at most MAX_FILE_BYTES as strict UTF-8, or null. The
@@ -427,19 +474,30 @@ function readTextFile(filePath) {
 /**
  * Write `text` to `filePath`, refusing anything that already exists and is not a
  * regular file (a directory, a FIFO, a symlink). Returns whether it was written.
+ * The lstat refuses first. The open adds O_NOFOLLOW, so a link put in the file's
+ * place after the lstat is refused, never followed, and O_NONBLOCK, so a FIFO put
+ * there cannot block; the fstat re-checks the opened object.
  *
  * @param {string} filePath
  * @param {string} text
  * @returns {boolean}
  */
 function writeTextFile(filePath, text) {
+  let fd;
   try {
     const st = fs.lstatSync(filePath, { throwIfNoEntry: false });
     if (st !== undefined && !st.isFile()) return false;
-    fs.writeFileSync(filePath, text, { encoding: 'utf8', mode: 0o600 });
+    const c = fs.constants;
+    fd = fs.openSync(filePath, c.O_WRONLY | c.O_CREAT | c.O_TRUNC | (c.O_NOFOLLOW || 0) | (c.O_NONBLOCK || 0), 0o600);
+    if (!fs.fstatSync(fd).isFile()) return false;
+    fs.writeFileSync(fd, text, 'utf8');
     return true;
   } catch (_) {
     return false;
+  } finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch (_) { /* the write already decided */ }
+    }
   }
 }
 
@@ -1533,15 +1591,18 @@ function commentUpdate(plan, ev, mode, target) {
 }
 
 /**
- * --stale-out: only STALE TPs whose text hash equals the trusted record's — text a
- * trusted author already published, never unrecorded PR text (containment).
+ * --stale-out: the STALE TPs. A plan from the PR body lists only those whose text hash
+ * equals the trusted record's — text a trusted author already published, never
+ * unrecorded PR text (containment). A plan from the `--evidence` file is the caller's
+ * own local text, so every STALE TP of it is listed.
  *
  * @param {readonly TpInput[]} inputs
  * @param {readonly { state: string }[]} records
+ * @param {boolean} fromFile  whether the plan came from the evidence file
  * @returns {string}
  */
-function staleOutText(inputs, records) {
-  const lines = inputs.filter((x, i) => records[i].state === 'STALE' && x.recorded).map(x => x.tp.line);
+function staleOutText(inputs, records, fromFile) {
+  const lines = inputs.filter((x, i) => records[i].state === 'STALE' && (fromFile || x.recorded)).map(x => x.tp.line);
   return lines.length === 0 ? '' : ['## Test Plan', ...lines].join('\n') + '\n';
 }
 
@@ -1663,7 +1724,7 @@ function verifyPass(io, args, deps) {
   }, plan.tps.length);
   if (line === null) return refusedPass(io, EXIT_CODES.OUTPUT_GATE_REFUSED, 'the EVIDENCE line failed its gate');
 
-  if (!writeOutputs(args, pr.body, body.blockText, comment.text, staleOutText(inputs, records))) {
+  if (!writeOutputs(args, pr.body, body.blockText, comment.text, staleOutText(inputs, records, fromFile))) {
     return refusedPass(io, EXIT_CODES.WRITE_FAILED, 'an output file could not be written');
   }
   return { outcome: { code: EXIT_CODES.OK, stdout: line + '\n' }, target };
@@ -1804,7 +1865,7 @@ function runCheck(io, args) {
   let result;
   if (args.what === 'tp') result = PE.parsePlan(sectionOrWhole(text, 'testPlan'));
   else if (args.what === 'exceptions') result = PE.parseExceptions(sectionOrWhole(text, 'exceptions'));
-  else if (args.what === 'wave') result = PE.parseWaveBlock(text);
+  else if (args.what === 'wave') result = PE.parseWaveBlock(text, { linksOnly: args.linksOnly });
   else {
     const b = PE.parseBlock(text);
     // R7 pastes only the creation form: TP lines, none ticked.
@@ -2466,16 +2527,18 @@ function bindCiHead(ci, viewHead, evidenceHead) {
 
 /**
  * The test-plan evidence at the head, by `verify --approval`: known only on exit 0
- * with one EVIDENCE line for this PR (the old step 4's rule).
+ * with one EVIDENCE line for this PR (the old step 4's rule). `evidence` is the local
+ * evidence file `readiness --evidence` names, or null to read the PR's own record.
  *
  * @param {Io} io
  * @param {number} pr
+ * @param {string | null} evidence
  * @param {MainDeps} deps
  * @returns {any | null}  the parsed EVIDENCE fields, or null when the evidence is unknown
  */
-function readEvidence(io, pr, deps) {
+function readEvidence(io, pr, evidence, deps) {
   const verified = runVerify(io, {
-    kind: 'verify', pr, publication: '', evidence: null, state: null,
+    kind: 'verify', pr, publication: '', evidence, state: null,
     blockOut: null, commentOut: null, staleOut: null, approval: true,
   }, deps);
   if (verified.code !== EXIT_CODES.OK) return null;
@@ -2528,23 +2591,27 @@ function readinessDegraded(pr, reason, known) {
  * count it cannot establish, is DEGRADED; an unreadable CI status or unknown evidence
  * is an input to the ladder, which never lets either reach READY.
  *
+ * @typedef {{ outcome: Outcome, head: string | null }} ReadinessPass
+ *   The answer, and the PR head its first read gave (null when that read gave none).
+ *
  * @param {Io} io
  * @param {Extract<ParsedArgs, { kind: 'readiness' }>} args
  * @param {MainDeps} deps
- * @returns {Outcome}
+ * @returns {ReadinessPass}
  */
-function runReadiness(io, args, deps) {
+function readinessPass(io, args, deps) {
   const unreadApproval = approvalText(args.requireNonAuthor, null);
   const view = readPrView(io, args.pr);
-  if (!view.ok) return readinessDegraded(args.pr, view.reason, { approval: unreadApproval });
+  if (!view.ok) return { outcome: readinessDegraded(args.pr, view.reason, { approval: unreadApproval }), head: null };
+  const head = view.value.head;
   const reviewDecision = view.value.decision;
   const decisionText = decisionLabel(reviewDecision);
   const threads = readThreads(io, args.pr);
   if (!threads.ok) {
-    return readinessDegraded(args.pr, threads.reason, { decision: decisionText, approval: unreadApproval });
+    return { outcome: readinessDegraded(args.pr, threads.reason, { decision: decisionText, approval: unreadApproval }), head };
   }
   const ciRead = readCi(io, args.pr, view.value.mergeable);
-  const fields = readEvidence(io, args.pr, deps);
+  const fields = readEvidence(io, args.pr, args.evidence, deps);
   const ci = bindCiHead(ciRead, view.value.head, fields === null ? null : fields.head);
   /** @type {EvidenceFacts | null} */
   const evidence = fields === null ? null : {
@@ -2577,7 +2644,94 @@ function runReadiness(io, args, deps) {
         + ' (VERIFIED-CI ' + evidence.verifiedCi + ', ATTESTED-LOCAL ' + evidence.attestedLocal + ')',
     approval: approvalText(args.requireNonAuthor, evidence),
   };
-  return { code: EXIT_CODES.OK, stdout: renderReadinessBlock(block) };
+  return { outcome: { code: EXIT_CODES.OK, stdout: renderReadinessBlock(block) }, head };
+}
+
+/**
+ * D-READINESS-OUT: `readiness --out <file>`. The file holds the READINESS line, then the
+ * block exactly as it prints. The status in the line is the one the block's own parse
+ * gives, so the line and the block cannot disagree. The head is the PR head the first
+ * read gave, or `none`. The source is `local` when the plan was asked for from the
+ * `--evidence` file and `pr` when it was asked for from the PR's own record; the line
+ * ends with it as `source=<local|pr>`, and any other value is refused like a block that
+ * does not parse. writeTextFile refuses a path that exists and is not a regular
+ * file, a symlink included, so no link is followed. The command makes no gh write.
+ *
+ * One rule covers every outcome: a file from an earlier run never outlives this run.
+ * runReadiness removes the earlier regular file before the first read; here, a block the
+ * output gate would refuse is never written and is the gate's refusal, and a file that
+ * cannot be written is the write refusal, with the regular file the write left removed.
+ * Either way nothing is printed and no out file remains.
+ *
+ * @param {Io} io
+ * @param {string} file
+ * @param {number} pr
+ * @param {Outcome} outcome  the answer readinessPass or readinessDegraded gave
+ * @param {string | null} head
+ * @param {string | undefined} source  one of READINESS_SOURCES
+ * @returns {Outcome}
+ */
+function writeReadinessOut(io, file, pr, outcome, head, source) {
+  const block = parseReadinessBlock(outcome.stdout);
+  if (block === null || !READINESS_SOURCES.includes(/** @type {string} */ (source))) {
+    removeOutFile(file);
+    return refuse(io, EXIT_CODES.OUTPUT_GATE_REFUSED, 'the readiness out file failed its grammar');
+  }
+  const line = [
+    'READINESS', 'pr:' + pr, 'head:' + (head === null ? 'none' : head), 'status:' + block.status, 'source=' + source,
+  ].join(' ');
+  if (!writeTextFile(file, line + '\n' + outcome.stdout)) {
+    removeOutFile(file);
+    return refuse(io, EXIT_CODES.WRITE_FAILED, 'an output file could not be written');
+  }
+  return outcome;
+}
+
+/**
+ * Remove the regular file an earlier run left at `file`. A path that names nothing, a
+ * link, a FIFO or a directory is left as it is: writeTextFile creates the first and
+ * refuses the rest. The lstat never follows a link. False when a regular file could not
+ * be removed.
+ *
+ * @param {string} file
+ * @returns {boolean}
+ */
+function removeOutFile(file) {
+  try {
+    const st = fs.lstatSync(file, { throwIfNoEntry: false });
+    if (st !== undefined && st.isFile()) fs.unlinkSync(file);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
+ * Where the run asked for the test plan: the local evidence file `--evidence` names, or the
+ * PR's own record. It follows the flag alone, so every status of one invocation names the
+ * same source.
+ *
+ * @param {Extract<ParsedArgs, { kind: 'readiness' }>} args
+ * @returns {'local' | 'pr'}
+ */
+function planSource(args) {
+  return args.evidence === null ? 'pr' : 'local';
+}
+
+/**
+ * @param {Io} io
+ * @param {Extract<ParsedArgs, { kind: 'readiness' }>} args
+ * @param {MainDeps} deps
+ * @returns {Outcome}
+ */
+function runReadiness(io, args, deps) {
+  // A file an earlier run left at the out path goes before the first read, so a run that
+  // stops anywhere after this leaves no earlier answer behind.
+  if (args.out !== null && !removeOutFile(args.out)) {
+    return refuse(io, EXIT_CODES.WRITE_FAILED, 'an output file could not be written');
+  }
+  const pass = readinessPass(io, args, deps);
+  return args.out === null ? pass.outcome : writeReadinessOut(io, args.out, args.pr, pass.outcome, pass.head, planSource(args));
 }
 
 // ---------------------------------------------------------------------------
@@ -2665,8 +2819,11 @@ function main(argv, deps) {
     // prints whatever they print.
     const label = 'internal error (' + errorLabel(err) + ')';
     if (args.kind === 'publish') outcome = evidenceUnavailable(io, label);
-    else if (args.kind === 'readiness') outcome = readinessDegraded(args.pr, 'internal error', {});
-    else outcome = refuse(io, EXIT_CODES.REMOTE_FAILURE, label);
+    else if (args.kind === 'readiness') {
+      // The earlier out file is already gone (runReadiness), so the DEGRADED answer is the one file this run leaves.
+      outcome = readinessDegraded(args.pr, 'internal error', {});
+      if (args.out !== null) outcome = writeReadinessOut(io, args.out, args.pr, outcome, null, planSource(args));
+    } else outcome = refuse(io, EXIT_CODES.REMOTE_FAILURE, label);
   }
   if (io.notes.size > 0) io.stderr('verify-evidence: notes: ' + [...io.notes].sort().join(',') + '\n');
   return outcome;
@@ -2766,6 +2923,7 @@ module.exports = Object.freeze({
   parsePublishBlock,
   renderReadinessBlock,
   parseReadinessBlock,
+  writeReadinessOut,
   commentIdOf,
   editTarget,
 });

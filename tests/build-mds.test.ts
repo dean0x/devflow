@@ -47,13 +47,17 @@ import {
   TRACKER_PARTIAL_ADOPTERS,
   DIST_COMMAND_FILES,
   MDS_GENERATOR_HOSTS,
+  CURATION_VARIANT_HOSTS,
+  COMPLIANCE_VARIANT_HOSTS,
 } from './fixtures/mds-manifest.js';
 import { generatedReferenceManifest } from '../src/core/mds-variants.js';
+import { parseVariantManifest, describeVariantManifestParseError } from '../src/core/curation-variants.js';
 import {
   splitFrontmatter,
   buildCommittedTree,
   cleanupCommittedTree,
   collectSpawnScoping,
+  runMdsBuild,
   requireDistFiles,
   gitAgentSinkCorpus,
   walkFiles,
@@ -832,6 +836,160 @@ describe('expected-command-set guard (C2)', () => {
     // those bytes still match src/ is a separate, byte-level check, owned by
     // tests/build-mds-generator-hosts.test.ts.
     expect([...requireDistFiles()].sort()).toEqual([...DIST_COMMAND_FILES].sort());
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6b. Variant manifest — dist/variant-axes.json reports the hosts with an arm
+// ---------------------------------------------------------------------------
+
+describe('variant manifest', () => {
+  interface Manifest {
+    version: number;
+    hosts: Record<string, { curation: boolean; compliance: boolean }>;
+  }
+
+  /** Named collector: the manifest a build of the committed sources wrote, parsed. */
+  async function builtManifest(): Promise<Manifest> {
+    return JSON.parse(await fs.readFile(path.join(BUILT_ROOT, 'dist', 'variant-axes.json'), 'utf-8')) as Manifest;
+  }
+
+  /** Named collector: the hosts the manifest reports with an arm on one axis, sorted. */
+  function hostsWithArm(manifest: Manifest, axis: 'curation' | 'compliance'): string[] {
+    return Object.entries(manifest.hosts).filter(([, axes]) => axes[axis]).map(([host]) => host).sort();
+  }
+
+  /** Named collector: the compiled prompt files under one tree of the build, as `<kind>/<name>`, sorted. */
+  function builtPrompts(tree: string): string[] {
+    return walkFiles(path.join(BUILT_ROOT, tree), f => f.endsWith('.md'))
+      .map(f => path.relative(path.join(BUILT_ROOT, tree), f).split(path.sep).join('/').replace(/\.md$/, ''))
+      .sort();
+  }
+
+  it('is written with a version, and names every compiled command and agent, both directions', async () => {
+    const manifest = await builtManifest();
+    expect(manifest.version).toBe(1);
+    const compiled = [
+      ...builtPrompts('dist/commands').map(name => `commands/${name}`),
+      ...builtPrompts('dist/agents').map(name => `agents/${name}`),
+    ].sort();
+    expect(compiled.length, 'the build wrote no prompt: the comparison is vacuous').toBeGreaterThan(0);
+    expect(Object.keys(manifest.hosts).sort()).toEqual(compiled);
+    expect(Object.keys(manifest.hosts), 'the hosts are listed in sorted order').toEqual([...Object.keys(manifest.hosts)].sort());
+  });
+
+  it('is read by the installer parser, host for host', async () => {
+    const text = await fs.readFile(path.join(BUILT_ROOT, 'dist', 'variant-axes.json'), 'utf-8');
+    const parsed = parseVariantManifest(text);
+    expect(parsed.ok, parsed.ok ? '' : describeVariantManifestParseError(parsed.error)).toBe(true);
+    if (!parsed.ok) return;
+    const manifest = await builtManifest();
+    expect(parsed.value.length, 'the parse returned no host: the comparison is vacuous').toBeGreaterThan(0);
+    expect(parsed.value.map(host => `${host.kind}/${host.name}`)).toEqual(Object.keys(manifest.hosts));
+  });
+
+  it('reports the hosts with a curation arm exactly as CURATION_VARIANT_HOSTS names them', async () => {
+    const manifest = await builtManifest();
+    expect(CURATION_VARIANT_HOSTS.length, 'the roster is empty: the comparison is vacuous').toBeGreaterThan(0);
+    expect(hostsWithArm(manifest, 'curation')).toEqual([...CURATION_VARIANT_HOSTS].sort());
+  });
+
+  it('reports the hosts with a compliance arm exactly as COMPLIANCE_VARIANT_HOSTS names them', async () => {
+    const manifest = await builtManifest();
+    expect(hostsWithArm(manifest, 'compliance')).toEqual([...COMPLIANCE_VARIANT_HOSTS].sort());
+  });
+
+  it('the compliance trees hold exactly the files its hosts call for, and the both-off tree the hosts with both arms', async () => {
+    const manifest = await builtManifest();
+    const both = Object.entries(manifest.hosts).filter(([, axes]) => axes.curation && axes.compliance).map(([host]) => host).sort();
+    expect(builtPrompts('dist/compliance-off')).toEqual([...COMPLIANCE_VARIANT_HOSTS].sort());
+    expect(builtPrompts('dist/curation-compliance-off')).toEqual(both);
+    expect(builtPrompts('dist/curation-off')).toEqual([...CURATION_VARIANT_HOSTS].sort());
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6c. A reference module may carry no variant marker (TP-12)
+//
+// A reference module fans out into sections that ship as written: an arm in one has
+// nothing to select, so a marker of either axis would reach the installed reference
+// as text. The build refuses it. A marker of the compliance axis is refused the way a
+// marker of the curation axis always was.
+// ---------------------------------------------------------------------------
+
+describe('a reference module may carry no variant marker (TP-12)', () => {
+  const MODULE_REL = 'src/assets/mds/tracker/_mcp.mds';
+  const BUILT_REL = 'dist/skills/git/references/tracker/_mcp.md';
+  const CURATION_REFUSAL = `${MODULE_REL}: a reference module may not carry curation-variant markers`;
+  const COMPLIANCE_REFUSAL = `${MODULE_REL}: a reference module may not carry compliance-variant markers`;
+
+  /** The real `_mcp` module, and the op line a probe line can be put right after. */
+  function mcpSource(): { source: string; opLine: string } {
+    const source = readFileSync(path.join(ROOT, MODULE_REL), 'utf-8');
+    const opLine = /^<!-- op: _mcp -->$/m.exec(source)?.[0];
+    expect(opLine, 'the _mcp module no longer opens with its op marker: the probe is inert').toBeDefined();
+    return { source, opLine: opLine as string };
+  }
+
+  /** Build `source` as the `_mcp` module of a throwaway root, and report the run and what it wrote. */
+  async function buildModule(source: string): Promise<{ status: number | null; combined: string; written: boolean }> {
+    const fakeRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-mds-refmarker-'));
+    try {
+      await fs.mkdir(path.join(fakeRoot, ...path.dirname(MODULE_REL).split('/')), { recursive: true });
+      await fs.writeFile(path.join(fakeRoot, ...MODULE_REL.split('/')), source, 'utf-8');
+      const run = runMdsBuild(fakeRoot);
+      const written = await fs.access(path.join(fakeRoot, ...BUILT_REL.split('/'))).then(() => true, () => false);
+      return { ...run, written };
+    } finally {
+      await fs.rm(fakeRoot, { recursive: true, force: true });
+    }
+  }
+
+  it.each([
+    ['a whole-line compliance arm', '<!-- compliance:on -->\nA gated line.\n<!-- compliance:end -->'],
+    ['a standalone compliance off arm', '<!-- compliance:off -->\nA fallback line.\n<!-- compliance:end -->'],
+    ['a compliance marker with odd spacing and case', '<!--  Compliance : on  -->\nA gated line.'],
+    ['a compliance marker inside prose', 'A line that names <!-- compliance:on --> in the middle.'],
+  ])('refuses a reference module that carries %s, and writes nothing for it', async (_label, probe) => {
+    const { source, opLine } = mcpSource();
+    const marked = source.replace(opLine, `${opLine}\n${probe}`);
+    expect(marked).not.toBe(source);
+    const run = await buildModule(marked);
+    expect(run.status, `expected exit 1.\n${run.combined}`).toBe(1);
+    expect(run.combined).toContain(COMPLIANCE_REFUSAL);
+    expect(run.combined, 'the refusal names where the arm belongs').toContain('Compliance arms belong in a command or agent host');
+    expect(run.written, 'nothing is written for a refused module').toBe(false);
+  });
+
+  // The unmodified-module control, a whole-line curation arm and the retired marker are held
+  // in tests/curation/curation-variants-build.test.ts.
+  it('keeps refusing a reference module that carries a curation marker with odd spacing and case', async () => {
+    const { source, opLine } = mcpSource();
+    const marked = source.replace(opLine, `${opLine}\n<!--  Curation : off  -->\nA fallback line.`);
+    expect(marked).not.toBe(source);
+    const run = await buildModule(marked);
+    expect(run.status, `expected exit 1.\n${run.combined}`).toBe(1);
+    expect(run.combined).toContain(CURATION_REFUSAL);
+    expect(run.combined, 'the curation refusal is not the compliance one').not.toContain(COMPLIANCE_REFUSAL);
+    expect(run.written, 'nothing is written for a refused module').toBe(false);
+  });
+
+  it('refuses a reference module that carries a marker of each axis', async () => {
+    const { source, opLine } = mcpSource();
+    const marked = source.replace(opLine, `${opLine}\n<!-- curation:on -->\nA.\n<!-- curation:end -->\n<!-- compliance:on -->\nB.\n<!-- compliance:end -->`);
+    const run = await buildModule(marked);
+    expect(run.status, `expected exit 1.\n${run.combined}`).toBe(1);
+    expect(run.combined).toContain(`${MODULE_REL}: a reference module may not carry`);
+    expect(run.written, 'nothing is written for a refused module').toBe(false);
+  });
+
+  it('text that only mentions compliance is not a marker', async () => {
+    const { source, opLine } = mcpSource();
+    const mentioned = source.replace(opLine, `${opLine}\nThe compliance:on setting is a switch, not a marker.`);
+    expect(mentioned).not.toBe(source);
+    const run = await buildModule(mentioned);
+    expect(run.status, run.combined).toBe(0);
+    expect(run.written).toBe(true);
   });
 });
 

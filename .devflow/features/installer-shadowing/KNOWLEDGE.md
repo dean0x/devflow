@@ -5,7 +5,7 @@ description: "Use when changing installViaFileCopy, InstallReport, installAllRul
 category: architecture
 directories: [src/targets/claude-code/installer.ts, src/targets/claude-code/legacy.ts, src/cli/commands/rules.ts, src/cli/commands/skills.ts, src/core/plugins.ts, src/core/assets.ts, src/core/paths.ts, src/core/orphan-sweep.ts]
 created: 2026-07-13
-updated: 2026-10-17
+updated: 2026-10-27
 ---
 
 # Installer & Skill/Rule Shadowing
@@ -28,7 +28,7 @@ updated: 2026-10-17
 - **KB-AP-14** Never stamp tracker servers into a shipped agent source, and never write an installed Git or Tracker copy without the stamp: `installViaFileCopy` stamps Git as it writes it, and every converge either stamps or carries the installed stamp (tracker-feature KB).
 - **KB-INV-1** An invalid or missing shadow warns and installs the shipped source; init never exits non-zero for a shadow.
 - **KB-INV-2** Every source path comes from an accessor in `src/core/assets.ts`; `getPackageRoot()` throws when `package.json` is absent at the resolved root.
-- **KB-INV-3** `agentSourceDirs()` and `commandSourceDirs()` return directories most-preferred first and every consumer takes the list as given; `tests/guards/agent-source-precedence.test.ts` pins it.
+- **KB-INV-3** `agentSourceDirs(root?, switches)` and `commandSourceDirs(switches, root?)` return directories most-preferred first and every consumer takes the list as given; `tests/guards/agent-source-precedence.test.ts` pins it.
 - **KB-INV-4** The skill, command and agent registry-diff sweeps run on every install shape, partial installs included.
 - **KB-INV-5** Skills install for the closure `skills ∪ requires` of the effective selection, and the removal set is computed from `effectivePlugins`; `tests/guards/requires-closure.test.ts` guards the closure in both directions.
 - **KB-INV-6** Shadow dirs are unprefixed (`~/.devflow/skills/{name}/`), installed skills are `devflow:`-prefixed, and `~/.devflow/skills|rules` are user-owned.
@@ -78,9 +78,9 @@ Every path to a source asset comes through a named accessor; there are no scatte
 | `rulesDir()` | `{root}/src/assets/rules/` — flat, one `.md` per rule |
 | `scriptsDir()` | `{root}/src/assets/scripts/` — `hooks/` and `hud.sh` |
 | `commandsDir()` | `{root}/dist/commands/` — compiled output of the command hosts (every command is an `.mds` host). The installer reads it through `commandSourceDirs`, not directly |
-| `curationOffDir(kind, root?)` | `{root}/dist/curation-off/{commands,agents}/` — the curation-off variant of each prompt that carries a curation arm, and only those. Absent until the build has run, so every reader tolerates its absence. Spelled from `CURATION_OFF_OUTPUT_DIR` in `curation-variants.ts` |
-| `commandSourceDirs(curation, root?)` | `[dist/commands]` with curation on; `[curationOffDir('commands'), dist/commands]` with curation off — most-preferred first, non-empty tuple `CommandSourceDirs` |
-| `agentSourceDirs(root?, curation = true)` | `[compiledAgentsDir(), agentsDir()]` most-preferred first; with `curation: false`, `curationOffDir('agents')` is prepended. The single owner of the dist-first agent-resolution policy. Returns the non-empty tuple `AgentSourceDirs`, so an empty list is a compile error at every call site |
+| `curationOffDir(kind, root?)` (also `complianceOffDir`, `bothOffDir`) | `{root}/dist/curation-off/{commands,agents}/` (or `compliance-off`, `curation-compliance-off`) — the off variant of each prompt with the matching arm, and only those; absent until the build has run, so readers tolerate it |
+| `commandSourceDirs(switches, root?)` | `[dist/commands]` with both `VariantSwitches` on; the matching off dirs first otherwise — non-empty tuple `CommandSourceDirs` |
+| `agentSourceDirs(root?, switches = ALL_SWITCHES_ON)` | `[compiledAgentsDir(), agentsDir()]` most-preferred first; with an axis off, its off dirs are prepended. The single owner of the dist-first agent-resolution policy. Returns the non-empty tuple `AgentSourceDirs`, so an empty list is a compile error at every call site |
 
 Every accessor resolves against `getPackageRoot()` by default; all but `rulesDir`, `scriptsDir` and `commandsDir` take an injectable `root`, so a caller on a temp tree reads the layout from here instead of spelling it. `commandSourceDirs` and `agentSourceDirs` compose the others rather than spelling a path.
 
@@ -94,14 +94,14 @@ All four asset types **throw** when a declared source is absent; registered asse
 
 | Asset | Source checked | Error trigger |
 |-------|---------------|---------------|
-| Command | `dist/commands/{name}.md`; with curation off, `dist/curation-off/commands/{name}.md` first | `fs.access` fails for every candidate in `commandSourceDirs(curation)` |
+| Command | `dist/commands/{name}.md`; with curation off, `dist/curation-off/commands/{name}.md` first | `fs.access` fails for every candidate in `commandSourceDirs(switches)` |
 | Agent | `dist/agents/{name}.md`, then `src/assets/agents/{name}.md`; with curation off, `dist/curation-off/agents/{name}.md` first | `fs.access` fails for every candidate |
 | Skill | `src/assets/skills/{name}/` | `stat` not a directory |
 | Rule | `src/assets/rules/{name}.md` | `fs.access` fails |
 
-Agents resolve **dist-first with a src fallback**: `installCommandsAndAgents` (the copy `installViaFileCopy` delegates to) walks `options.agentSourceDirs ?? agentSourceDirs(undefined, curation)` through the module-level `firstExisting(candidates)` helper and installs the first `{name}.md` that `fs.access` accepts, so a generator host's compiled artifact wins and hand-authored agents install unchanged. An injected `options.agentSourceDirs` wins as given and is not made curation-aware. Commands resolve the same way over `commandSourceDirs(curation)`. When no candidate exists the install throws, naming the curation-ON compiled path (`options.agentSourceDirs?.[0] ?? agentSourceDirs()[0]` for an agent, `commandSourceDirs(true)[0]` for a command) rather than the first candidate searched: a curation-off file exists only for a host with an arm, so naming it would point at a path that never existed for most hosts. An agent error lists every location searched and leads with `npm run build:mds`; for a generator-host agent the `src` path does not and never will exist.
+Agents resolve **dist-first with a src fallback**: `installCommandsAndAgents` (the copy `installViaFileCopy` delegates to) walks `options.agentSourceDirs ?? agentSourceDirs(undefined, curation)` through the module-level `firstExisting(candidates)` helper and installs the first `{name}.md` that `fs.access` accepts, so a generator host's compiled artifact wins and hand-authored agents install unchanged. An injected `options.agentSourceDirs` wins as given and is not made curation-aware. Commands resolve the same way over `commandSourceDirs(switches)`. When no candidate exists the install throws, naming the curation-ON compiled path (`options.agentSourceDirs?.[0] ?? agentSourceDirs()[0]` for an agent, `commandSourceDirs(true)[0]` for a command) rather than the first candidate searched: a curation-off file exists only for a host with an arm, so naming it would point at a path that never existed for most hosts. An agent error lists every location searched and leads with `npm run build:mds`; for a generator-host agent the `src` path does not and never will exist.
 
-**The ordering convention has one owner.** Both production consumers take `agentSourceDirs()` as-is: the installer resolves first-hit-wins, and `loadShippedAgentDefaults` (`src/core/agent-models.ts`) merges first-wins over the same order; neither re-spells the pair or reverses it. The `curation` argument is the installer's and the converge's alone: `loadShippedAgentDefaults` and the test harness keep the curation-on default, because the shipped model and effort are identical in both variants. Order is invisible to the type system (a least-preferred-first list still typechecks and silently inverts the answer), so `tests/guards/agent-source-precedence.test.ts` pins that both consumers, fed the same list, resolve every registry agent out of the same tree, with a reversed-list known-bad probe.
+**The ordering convention has one owner.** Both production consumers take `agentSourceDirs()` as-is: the installer resolves first-hit-wins, and `loadShippedAgentDefaults` (`src/core/agent-models.ts`) merges first-wins over the same order; neither re-spells the pair or reverses it. The `switches` argument is the installer's and the converge's alone: `loadShippedAgentDefaults` and the test harness keep the all-on default, because the shipped model and effort are identical in both variants. Order is invisible to the type system (a least-preferred-first list still typechecks and silently inverts the answer), so `tests/guards/agent-source-precedence.test.ts` pins that both consumers, fed the same list, resolve every registry agent out of the same tree, with a reversed-list known-bad probe.
 
 Shadow paths stay tolerant (warn and install source). The hard-error policy applies only to declared Devflow sources; the reference overlay has its own narrower throw path (see the reference-overlay KB).
 
@@ -236,7 +236,7 @@ Skills are plugin-scoped, as rules already were. Each `PluginDefinition` carries
 ## Key Files
 
 - `src/core/orphan-sweep.ts` — `sweepOrphanedAssets`, `SweepResult`, `mdFileName` / `mdEntryName`; shared by installer and uninstall; per-item isolation on readdir and rm
-- `src/targets/claude-code/installer.ts` — `installViaFileCopy`, `installCommandsAndAgents` (`CommandsAndAgentsOptions`), `installAllRules`, `installRuleFile`, `composeScripts`, `validateSkillShadow`, `validateRuleShadow`, `InstallReport`, `SweptAssetKind`, `SweepFailure`, `ShadowSkip`, `RuleInstallOutcome`, `SkillShadowState`, `RuleShadowState`, `copyDirectory`, `chmodRecursive`, `firstExisting`, `FileCopyOptions` (`curation` REQUIRED, `effectivePlugins`, `agentSourceDirs`, `warn`), `resolveSkillSource`; the overlay, curation and stamp pieces are covered by their own KBs
+- `src/targets/claude-code/installer.ts` — `installViaFileCopy`, `installCommandsAndAgents` (`CommandsAndAgentsOptions`), `installAllRules`, `installRuleFile`, `composeScripts`, `validateSkillShadow`, `validateRuleShadow`, `InstallReport`, `SweptAssetKind`, `SweepFailure`, `ShadowSkip`, `RuleInstallOutcome`, `SkillShadowState`, `RuleShadowState`, `copyDirectory`, `chmodRecursive`, `firstExisting`, `FileCopyOptions` (`curation` and `compliance` REQUIRED, `effectivePlugins`, `agentSourceDirs`, `warn`), `resolveSkillSource`; the overlay, curation and stamp pieces are covered by their own KBs
 - `src/targets/claude-code/agent-type-owner.ts` — `BUILTIN_OVERRIDE_AGENTS`, `parseAgentType`, `findForeignAgentOwner`, the scan bounds; `src/targets/claude-code/tracker-servers.ts` — `TRACKER_STAMPED_AGENTS`, `isTrackerStampedAgent`, `restampTrackerAgents`; `tests/installer/explore-no-clobber.test.ts`, `tests/explore-agent.test.ts`, `tests/tracker-servers.test.ts` — their pins
 - `src/core/assets.ts` — every accessor in the table above; the dist-first agent order and the curation-aware command/agent source order live here
 - `src/core/paths.ts` — `getPackageRoot()` (hard `package.json` assertion), `isContainedIn`

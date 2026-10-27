@@ -206,7 +206,7 @@ Every loop and read has a bound, each a named constant: in the store those its K
 | D-CLI-NO-SYMLINK | the CLI writes and deletes under `.devflow/`, and uninstall's legacy local removal under `.claude/` too, only past a link check | `firstSymbolicLink`, `drainQueueFiles`, `legacyLocalChangeGuard` | links |
 | D-GITIGNORE-LINK-INSIDE | a linked root `.gitignore` is written only inside the project and outside any `.git` in it, in any letter case | `_erg_resolve_inside` (shell), `resolveGitignoreTarget` (TS) | links |
 | D-HUD-LEDGER-BOUNDED | the statusline reads only a regular ledger of bounded size | `readBoundedLedger` | links |
-| D-LEARNING-VARIANTS | curation off compiles the decisions text out of every prompt; the on variant keeps today's path | `splitCurationVariants` (`curation-variants.ts`), `materializeOutputs` (`scripts/build-mds.ts`) | delivery |
+| D-LEARNING-VARIANTS | curation off compiles the decisions text out of every prompt; the on variant keeps today's path | `splitVariants` (`curation-variants.ts`), `materializeOutputs` (`scripts/build-mds.ts`) | delivery |
 | D-LEARNING-VARIANT-INSTALL, D-LEARNING-PRELOAD-MACHINE-ONLY | the install and the toggle follow the machine switch; the skill preload is met by the variant | `convergeCurationVariants`, `applyCurationToggle`, `commandSourceDirs`/`agentSourceDirs`, `CURATION_GATED_SKILLS` | delivery |
 | D-AGENT-OVERRIDE-CARRY | the converge keeps an installed agent's `model:` and `effort:` | `withInstalledState` (`curation-install.ts`), `carryAgentOverrides` | delivery |
 | D-DECISIONS-LEARNING-GATE | a decisions load skips on `CURATION=off` before it locates or reads | `decisions_gate()` (`_decisions.mds`) | delivery |

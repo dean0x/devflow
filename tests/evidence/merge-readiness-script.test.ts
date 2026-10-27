@@ -16,13 +16,15 @@
  * probe. Every reader reads BUILT artifacts.
  */
 
-import { describe, it, expect, afterAll, beforeAll } from 'vitest'
+import { describe, it, expect, afterAll, beforeAll, vi } from 'vitest'
 import { createRequire } from 'module'
 import * as fs from 'fs'
 import { readFileSync } from 'fs'
+import * as os from 'os'
 import * as path from 'path'
 
 import { compiledSkillRefsDir } from '../../src/core/assets.js'
+import { makeFifo } from '../evidence-policy/scripted-shim.js'
 import { extractOpSectionFromCorpus, gitOperationReferenceCorpus, prHostRel } from '../helpers.js'
 import { cleanShimRoots, runScript, SHIM_HEAD, warmGhShim, type ScriptRun, type ShimScenario } from './pr-shim.js'
 import { PR_EVIDENCE_SCRIPT, SUBPROCESS_TIMEOUT_MS, VERIFY_EVIDENCE_SCRIPT } from './seam.js'
@@ -43,6 +45,14 @@ interface VerifyApi {
   parseReadinessBlock(text: string): ReadinessBlock | null
   renderReadinessBlock(block: ReadinessBlock): string
   bindCiHead(ci: CiRead, viewHead: unknown, evidenceHead: unknown): CiRead
+  writeReadinessOut(
+    io: { stderr(text: string): void },
+    file: string,
+    pr: number,
+    outcome: { code: number; stdout: string },
+    head: string | null,
+    source: string | undefined,
+  ): { code: number; stdout: string }
 }
 interface CiRead {
   status: string
@@ -54,6 +64,8 @@ interface EvidenceApi {
 }
 
 const req = createRequire(import.meta.url)
+/** The module object the scripts load: a spy on it reaches their file calls, which the `import * as fs` namespace cannot give. */
+const nodeFs = req('fs') as typeof fs
 const VE = req(VERIFY_EVIDENCE_SCRIPT) as VerifyApi
 const PE = req(PR_EVIDENCE_SCRIPT) as EvidenceApi
 
@@ -521,6 +533,454 @@ describe('known-bad probes: a readiness script that drops one rule reads READY w
 
 const PE_BLOCK_START = '<!-- devflow:test-plan -->'
 const PE_BLOCK_END = '<!-- /devflow:test-plan -->'
+
+// ---------------------------------------------------------------------------
+// Local evidence and the out file — a machine that keeps merge evidence in files
+// ---------------------------------------------------------------------------
+
+const localDirs: string[] = []
+afterAll(() => {
+  for (const dir of localDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+})
+
+function localDir(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'readiness-local-'))
+  localDirs.push(dir)
+  return dir
+}
+
+const LOCAL_TP = `- [ ] TP-1 (AC-1) Logs in ${EM} method:local`
+const LOCAL_CLAIM = `- TP-1 PASS sha:${SHIM_HEAD} by:test exit:0`
+const LOCAL_EXCEPTION = '- `test-plan` self-attested by @octocat at 2026-09-25T10:00:00Z: docs only'
+
+/** An evidence file's text: the plan lines, the claims and, when given, the exceptions. */
+function evidenceText(plan: readonly string[], claims: readonly string[] = [], exceptions: readonly string[] = []): string {
+  const lines = ['## Test Plan', ...plan, '', '## Claims', ...claims]
+  if (exceptions.length > 0) lines.push('', '## Evidence Exceptions', ...exceptions)
+  return `${lines.join('\n')}\n`
+}
+
+function writeEvidence(text: string): string {
+  const file = path.join(localDir(), 'evidence.md')
+  fs.writeFileSync(file, text)
+  return file
+}
+
+interface TwinResult { readonly status: number; readonly stdout: Buffer; readonly stderr: Buffer }
+const twinAnswer = (stdout: string, status = 0): TwinResult => ({ status, stdout: Buffer.from(stdout), stderr: Buffer.alloc(0) })
+
+/**
+ * An in-process exec for a PR whose every read is green and whose head is `SHIM_HEAD`: the
+ * readiness reads, the evidence read's PR view, and the git calls of a clean full clone. An argv
+ * it does not know answers 97 and is recorded in `misses`.
+ */
+function greenTwin(): { exec: (file: string, args: string[]) => TwinResult; calls: string[][]; misses: string[] } {
+  const calls: string[][] = []
+  const misses: string[] = []
+  const base = 'b'.repeat(40)
+  const exec = (file: string, args: string[]): TwinResult => {
+    calls.push([file, ...args])
+    if (file === 'gh' && args[0] === 'pr' && args[1] === 'view') {
+      const fields = args[args.indexOf('--json') + 1]
+      if (fields === 'reviewDecision,mergeable,headRefOid') {
+        return twinAnswer(JSON.stringify({ reviewDecision: 'APPROVED', mergeable: 'MERGEABLE', headRefOid: SHIM_HEAD }))
+      }
+      return twinAnswer(JSON.stringify({
+        number: 7, headRefOid: SHIM_HEAD, baseRefOid: base, body: '', author: { login: 'alice' },
+        isCrossRepository: false, comments: [], reviews: [],
+      }))
+    }
+    if (file === 'gh' && args[0] === 'api' && args[1] === 'graphql') return twinAnswer(JSON.stringify({ data: { repository: { pullRequest: { reviewThreads: RESOLVED } } } }))
+    if (file === 'gh' && args[0] === 'pr' && args[1] === 'checks') return twinAnswer(JSON.stringify(PASSING))
+    if (file === 'git') {
+      const git = args.slice(2)
+      if (git[0] === 'fetch') return twinAnswer('')
+      if (git[0] === 'rev-parse' && git[1] === '--is-shallow-repository') return twinAnswer('false\n')
+      if (git[0] === 'rev-parse' && git[1] === '--verify') return twinAnswer(`${git[3].replace('^{commit}', '')}\n`)
+      if (git[0] === 'merge-base' && git[1] === '--is-ancestor') return twinAnswer('', git[3] === base ? 1 : 0)
+    }
+    misses.push([file, ...args].join(' '))
+    return { status: 97, stdout: Buffer.alloc(0), stderr: Buffer.from('twin: unscripted\n') }
+  }
+  return { exec, calls, misses }
+}
+
+function runInProcess(args: readonly string[], exec: (file: string, args: string[]) => TwinResult): { code: number; stdout: string; stderr: string } {
+  let stderr = ''
+  const out = VE.main(['node', 'verify-evidence.cjs', ...args], { exec, cwd: localDir(), stderr: (t: string) => { stderr += t } })
+  return { ...out, stderr }
+}
+
+/** An in-process `readiness` run for PR 7 with `extra` flags appended: the shared head of every argv below. */
+function runReadiness(extra: readonly string[], exec: (file: string, args: string[]) => TwinResult): { code: number; stdout: string; stderr: string } {
+  return runInProcess(['readiness', '--pr', '7', '--require-non-author-approval', 'false', ...extra], exec)
+}
+
+/** The gh calls of a twin that change the PR: `pr edit`, `pr comment` and the comment edit (`api --method`). */
+function ghWrites(calls: readonly string[][]): string[][] {
+  return calls.filter(c => c[0] === 'gh' && ((c[1] === 'pr' && (c[2] === 'edit' || c[2] === 'comment')) || (c[1] === 'api' && c[2] === '--method')))
+}
+
+/** An exec for which `gh` cannot find the PR. */
+const unreadablePr = (): TwinResult => ({ status: 1, stdout: Buffer.alloc(0), stderr: Buffer.from('no such pr\n') })
+
+describe('TP-14: readiness --evidence reads the plan and the claims from a local evidence file', () => {
+  it('a file that has no plan and carries a test-plan exception is READY; the same PR without the file has no test-plan evidence', SPAWN_BUDGET, () => {
+    const scenario = green({ comments: [] })
+    expect(status(run(scenario))).toBe('NOT_READY (no test-plan evidence)')
+    const r = run(scenario, 'false', ['--evidence', writeEvidence(evidenceText([], [], [LOCAL_EXCEPTION]))])
+    expect(r.code, r.stderr).toBe(0)
+    expect(status(r)).toBe('READY')
+    expect(block(r).plan).toBe('0/0 (VERIFIED-CI 0, ATTESTED-LOCAL 0)')
+    expect(r.writes).toEqual([])
+  })
+
+  it('a passing local claim in the file reaches READY: the plan and the claim are the file\'s, the PR body has neither', () => {
+    const twin = greenTwin()
+    const file = writeEvidence(evidenceText([LOCAL_TP], [LOCAL_CLAIM]))
+    const r = runInProcess(['readiness', '--pr', '7', '--require-non-author-approval', 'false', '--evidence', file], twin.exec)
+    expect(twin.misses, 'the script made a call the twin did not script').toEqual([])
+    expect(r.code, r.stderr).toBe(0)
+    const parsed = VE.parseReadinessBlock(r.stdout)
+    expect(parsed).toMatchObject({ status: 'READY', plan: '1/1 (VERIFIED-CI 0, ATTESTED-LOCAL 1)', ci: 'PASSING', decision: 'APPROVED' })
+    expect(twin.calls.filter(c => c[0] === 'gh' && ['edit', 'comment'].includes(c[2])), 'no gh write').toEqual([])
+  })
+
+  it('the same plan with no claim is not verified: the claim is what moves it', () => {
+    const twin = greenTwin()
+    const file = writeEvidence(evidenceText([LOCAL_TP]))
+    const r = runInProcess(['readiness', '--pr', '7', '--require-non-author-approval', 'false', '--evidence', file], twin.exec)
+    expect(VE.parseReadinessBlock(r.stdout)).toMatchObject({ status: 'NOT_READY', reason: 'test plan: 0/1 verified', plan: '0/1 (VERIFIED-CI 0, ATTESTED-LOCAL 0)' })
+  })
+
+  it('the plan is the file\'s, whatever the PR body holds', SPAWN_BUDGET, () => {
+    const body = `Adds it.\n\n${PE_BLOCK_START}\n## Test Plan\n- [ ] TP-1 (AC-1) Logs in ${EM} method:manual\n- [ ] TP-2 (AC-1) Logs out ${EM} method:manual\n${PE_BLOCK_END}\n`
+    const scenario = green({ comments: [], body })
+    expect(block(run(scenario, 'false')).plan).toBe('0/2 (VERIFIED-CI 0, ATTESTED-LOCAL 0)')
+    const r = run(scenario, 'false', ['--evidence', writeEvidence(evidenceText([LOCAL_TP]))])
+    expect(r.code, r.stderr).toBe(0)
+    expect(block(r).plan).toBe('0/1 (VERIFIED-CI 0, ATTESTED-LOCAL 0)')
+  })
+
+  it('an evidence file that cannot be read leaves the test-plan evidence unavailable, never READY', SPAWN_BUDGET, () => {
+    const missing = path.join(localDir(), 'absent.md')
+    const r = run(green(), 'false', ['--evidence', missing])
+    expect(r.code, r.stderr).toBe(0)
+    expect(status(r)).toBe('NOT_READY (test-plan evidence unavailable)')
+    expect(block(r).plan).toBe('unavailable')
+    expect(r.writes).toEqual([])
+  })
+})
+
+// The out-file cases that depend only on files run in-process. Two of them spawn the real script to
+// hold its process boundary: the READY run below and the missing-directory run in TP-16.
+describe('TP-15: readiness --out writes the READINESS line, then the block', () => {
+  const lineOf = (head: string, state: string, source: 'local' | 'pr' = 'pr'): string =>
+    `READINESS pr:7 head:${head} status:${state} source=${source}\n`
+
+  it('READY: line 1 names the PR, the 40-hex head, the status and the plan source, the rest is the block, and stdout and the calls are what they were without --out', SPAWN_BUDGET, () => {
+    const out = path.join(localDir(), 'readiness.txt')
+    const plain = run(green())
+    const r = run(green(), 'false', ['--out', out])
+    expect(r.code, r.stderr).toBe(0)
+    expect(r.stdout).toBe(plain.stdout)
+    expect(fs.readFileSync(out, 'utf8')).toBe(lineOf(SHIM_HEAD, 'READY') + r.stdout)
+    expect(r.calls.map(c => c.args)).toEqual(plain.calls.map(c => c.args))
+    expect(r.writes).toEqual([])
+    expect(r.leftovers).toEqual([])
+  })
+
+  it('NOT_READY and DEGRADED carry their own status on line 1, and the block after it is the printed one', SPAWN_BUDGET, () => {
+    const notReady = path.join(localDir(), 'not-ready.txt')
+    const a = run(green({ reviewDecision: 'CHANGES_REQUESTED' }), 'false', ['--out', notReady])
+    expect(a.code, a.stderr).toBe(0)
+    expect(fs.readFileSync(notReady, 'utf8')).toBe(lineOf(SHIM_HEAD, 'NOT_READY') + a.stdout)
+    const degraded = path.join(localDir(), 'degraded.txt')
+    const b = run({ noPr: true }, 'false', ['--out', degraded])
+    expect(b.code).toBe(2)
+    expect(fs.readFileSync(degraded, 'utf8')).toBe(lineOf('none', 'DEGRADED') + b.stdout)
+  })
+
+  it('a threads read that fails is DEGRADED with the head the PR view already gave', SPAWN_BUDGET, () => {
+    const out = path.join(localDir(), 'degraded.txt')
+    const r = run(green({ threads: undefined }), 'false', ['--out', out])
+    expect(r.code).toBe(2)
+    expect(fs.readFileSync(out, 'utf8')).toBe(lineOf(SHIM_HEAD, 'DEGRADED') + r.stdout)
+  })
+
+  it('a head that is not 40 hex reads `none`', SPAWN_BUDGET, () => {
+    const out = path.join(localDir(), 'readiness.txt')
+    const r = run(green({ heads: ['not-a-head'] }), 'false', ['--out', out])
+    expect(r.code, r.stderr).toBe(0)
+    const text = fs.readFileSync(out, 'utf8')
+    expect(text.split('\n')[0]).toBe('READINESS pr:7 head:none status:NOT_READY source=pr')
+    expect(text.slice(text.indexOf('\n') + 1)).toBe(r.stdout)
+  })
+
+  it('line 1 ends with source=local when the plan comes from the --evidence file', () => {
+    const file = writeEvidence(evidenceText([LOCAL_TP], [LOCAL_CLAIM]))
+    const out = path.join(localDir(), 'readiness.txt')
+    const r = runInProcess(['readiness', '--pr', '7', '--require-non-author-approval', 'false', '--evidence', file, '--out', out], greenTwin().exec)
+    expect(r.code, r.stderr).toBe(0)
+    const text = fs.readFileSync(out, 'utf8')
+    expect(text.split('\n')[0]).toBe(`READINESS pr:7 head:${SHIM_HEAD} status:READY source=local`)
+    expect(text).toBe(lineOf(SHIM_HEAD, 'READY', 'local') + r.stdout)
+  })
+
+  it('line 1 ends with source=pr when no --evidence file is given, whatever the status', () => {
+    const out = path.join(localDir(), 'readiness.txt')
+    const r = runInProcess(['readiness', '--pr', '7', '--require-non-author-approval', 'false', '--out', out], greenTwin().exec)
+    expect(r.code, r.stderr).toBe(0)
+    expect(VE.parseReadinessBlock(r.stdout)).toMatchObject({ status: 'NOT_READY', reason: 'no test-plan evidence' })
+    expect(fs.readFileSync(out, 'utf8').split('\n')[0]).toBe(`READINESS pr:7 head:${SHIM_HEAD} status:NOT_READY source=pr`)
+  })
+
+  it('line 1 names the requested plan source on every status: an unreadable evidence file, an unreadable PR and an internal failure read source=local when --evidence is given', () => {
+    const file = writeEvidence(evidenceText([LOCAL_TP], [LOCAL_CLAIM]))
+    const missing = path.join(localDir(), 'absent.md')
+    const exploding = (): never => { throw new Error('exec exploded') }
+    const cases = [
+      { label: 'an unreadable evidence file', evidence: missing, exec: greenTwin().exec, state: 'NOT_READY', head: SHIM_HEAD },
+      { label: 'an unreadable PR', evidence: file, exec: unreadablePr, state: 'DEGRADED', head: 'none' },
+      { label: 'an internal failure', evidence: file, exec: exploding, state: 'DEGRADED', head: 'none' },
+    ]
+    for (const c of cases) {
+      const out = path.join(localDir(), 'readiness.txt')
+      runInProcess(['readiness', '--pr', '7', '--require-non-author-approval', 'false', '--evidence', c.evidence, '--out', out], c.exec)
+      expect(fs.readFileSync(out, 'utf8').split('\n')[0], c.label).toBe(`READINESS pr:7 head:${c.head} status:${c.state} source=local`)
+    }
+  })
+
+  it('the writer takes the two sources and no other: any other value is the output-gate refusal and leaves no file', () => {
+    const block = VE.renderReadinessBlock({
+      pr: 7, status: 'READY', reason: null, threads: '0', decision: 'APPROVED', ci: 'PASSING',
+      plan: '0/0 (VERIFIED-CI 0, ATTESTED-LOCAL 0)', approval: 'not required',
+    })
+    const outcome = { code: 0, stdout: block }
+    for (const source of ['local', 'pr']) {
+      const out = path.join(localDir(), 'readiness.txt')
+      expect(VE.writeReadinessOut({ stderr: () => {} }, out, 7, outcome, SHIM_HEAD, source)).toEqual(outcome)
+      expect(fs.readFileSync(out, 'utf8')).toBe(lineOf(SHIM_HEAD, 'READY', source as 'local' | 'pr') + block)
+    }
+    for (const source of ['', 'Local', 'remote', 'pr extra', 'local\nREADY', undefined]) {
+      const out = path.join(localDir(), 'readiness.txt')
+      fs.writeFileSync(out, lineOf(SHIM_HEAD, 'READY'))
+      expect(VE.writeReadinessOut({ stderr: () => {} }, out, 7, outcome, SHIM_HEAD, source), String(source)).toEqual({ code: 5, stdout: '' })
+      expect(fs.existsSync(out), String(source)).toBe(false)
+    }
+  })
+
+  it('an existing regular file is replaced whole', () => {
+    const out = path.join(localDir(), 'readiness.txt')
+    fs.writeFileSync(out, `${'old line\n'.repeat(400)}`)
+    const file = writeEvidence(evidenceText([LOCAL_TP], [LOCAL_CLAIM]))
+    const r = runReadiness(['--evidence', file, '--out', out], greenTwin().exec)
+    expect(r.code, r.stderr).toBe(0)
+    expect(VE.parseReadinessBlock(r.stdout)).toMatchObject({ status: 'READY' })
+    expect(fs.readFileSync(out, 'utf8')).toBe(lineOf(SHIM_HEAD, 'READY', 'local') + r.stdout)
+  })
+
+  it('a symlinked out path is refused and never followed: exit 3, no block, the target untouched', () => {
+    const dir = localDir()
+    const target = path.join(dir, 'target.txt')
+    fs.writeFileSync(target, 'keep\n')
+    const link = path.join(dir, 'link.txt')
+    fs.symlinkSync(target, link)
+    const twin = greenTwin()
+    const r = runReadiness(['--out', link], twin.exec)
+    expect(r.code).toBe(3)
+    expect(r.stdout).toBe('')
+    expect(r.stderr).toContain('output file could not be written')
+    expect(fs.readFileSync(target, 'utf8')).toBe('keep\n')
+    expect(fs.lstatSync(link).isSymbolicLink()).toBe(true)
+    expect(ghWrites(twin.calls)).toEqual([])
+  })
+
+  it('a dangling symlink is refused too: the file it names is never created', () => {
+    const dir = localDir()
+    const target = path.join(dir, 'never.txt')
+    const link = path.join(dir, 'dangling.txt')
+    fs.symlinkSync(target, link)
+    const r = runReadiness(['--out', link], greenTwin().exec)
+    expect(r.code).toBe(3)
+    expect(r.stdout).toBe('')
+    expect(fs.existsSync(target)).toBe(false)
+  })
+
+  it('--out and --evidence naming one path is a usage error that makes no call', () => {
+    const file = writeEvidence(evidenceText([LOCAL_TP]))
+    const twin = greenTwin()
+    const r = runReadiness(['--evidence', file, '--out', file], twin.exec)
+    expect(r.code).toBe(1)
+    expect(r.stdout).toBe('')
+    expect(twin.calls).toEqual([])
+    expect(fs.readFileSync(file, 'utf8')).toBe(evidenceText([LOCAL_TP]))
+  })
+
+  it('one path spelled two ways is the same usage error: the evidence file is never replaced', () => {
+    const file = writeEvidence(evidenceText([LOCAL_TP]))
+    const twin = greenTwin()
+    const aliases = [path.relative(process.cwd(), file), [path.dirname(file), '.', path.basename(file)].join(path.sep)]
+    for (const alias of aliases) {
+      expect(alias, 'the alias must be spelled differently, or the case is the one above').not.toBe(file)
+      const r = runInProcess(['readiness', '--pr', '7', '--require-non-author-approval', 'false', '--evidence', file, '--out', alias], twin.exec)
+      expect(r.code, alias).toBe(1)
+      expect(r.stdout).toBe('')
+    }
+    expect(twin.calls, 'a usage error makes no call').toEqual([])
+    expect(fs.readFileSync(file, 'utf8')).toBe(evidenceText([LOCAL_TP]))
+  })
+
+  it('a second name of the evidence file, a hard link or a symlink, is the same usage error in either position: the evidence file is never replaced', () => {
+    const file = writeEvidence(evidenceText([LOCAL_TP]))
+    const hard = path.join(path.dirname(file), 'hard.md')
+    const soft = path.join(path.dirname(file), 'soft.md')
+    fs.linkSync(file, hard)
+    fs.symlinkSync(file, soft)
+    const twin = greenTwin()
+    const pairs = [[file, hard], [hard, file], [file, soft], [soft, file]]
+    for (const [evidence, out] of pairs) {
+      const r = runInProcess(['readiness', '--pr', '7', '--require-non-author-approval', 'false', '--evidence', evidence, '--out', out], twin.exec)
+      expect(r.code, `${evidence} ${out}`).toBe(1)
+      expect(r.stdout).toBe('')
+    }
+    expect(twin.calls, 'a usage error makes no call').toEqual([])
+    expect(fs.readFileSync(file, 'utf8')).toBe(evidenceText([LOCAL_TP]))
+  })
+
+  it('an out file that does not exist yet beside an evidence file is not a clash', () => {
+    const file = writeEvidence(evidenceText([LOCAL_TP], [LOCAL_CLAIM]))
+    const out = path.join(path.dirname(file), 'fresh.txt')
+    const r = runInProcess(['readiness', '--pr', '7', '--require-non-author-approval', 'false', '--evidence', file, '--out', out], greenTwin().exec)
+    expect(r.code, r.stderr).toBe(0)
+    expect(fs.existsSync(out)).toBe(true)
+    expect(fs.readFileSync(file, 'utf8')).toBe(evidenceText([LOCAL_TP], [LOCAL_CLAIM]))
+  })
+
+  it('a flag missing its value, or given twice, is a usage error', () => {
+    for (const extra of [['--out'], ['--evidence'], ['--out', 'a.txt', '--out', 'b.txt'], ['--evidence', 'a.md', '--evidence', 'b.md']]) {
+      const twin = greenTwin()
+      const r = runReadiness(extra, twin.exec)
+      expect(r.code, extra.join(' ')).toBe(1)
+      expect(r.stdout).toBe('')
+      expect(twin.calls).toEqual([])
+    }
+  })
+
+  it('an internal failure still leaves a DEGRADED line behind, so an old READY file cannot outlive the run', () => {
+    const out = path.join(localDir(), 'readiness.txt')
+    fs.writeFileSync(out, lineOf(SHIM_HEAD, 'READY'))
+    const r = runInProcess(['readiness', '--pr', '7', '--require-non-author-approval', 'false', '--out', out], () => { throw new Error('exec exploded') })
+    expect(r.code).toBe(2)
+    expect(VE.parseReadinessBlock(r.stdout)).toMatchObject({ status: 'DEGRADED', reason: 'internal error' })
+    expect(fs.readFileSync(out, 'utf8')).toBe(lineOf('none', 'DEGRADED') + r.stdout)
+  })
+
+  it('an out file from an earlier run is removed before the first read, so a run that stops partway leaves none', () => {
+    const out = path.join(localDir(), 'readiness.txt')
+    fs.writeFileSync(out, lineOf(SHIM_HEAD, 'READY'))
+    const twin = greenTwin()
+    const present: boolean[] = []
+    runInProcess(['readiness', '--pr', '7', '--require-non-author-approval', 'false', '--out', out], (file, args) => {
+      present.push(fs.existsSync(out))
+      return twin.exec(file, args)
+    })
+    expect(present.length, 'the run read the PR').toBeGreaterThan(0)
+    expect(present.filter(Boolean), 'the earlier file was still there at a read').toEqual([])
+  })
+
+  it('a block that does not parse is the output-gate refusal and leaves no out file', () => {
+    const out = path.join(localDir(), 'readiness.txt')
+    fs.writeFileSync(out, lineOf(SHIM_HEAD, 'READY'))
+    let stderr = ''
+    const r = VE.writeReadinessOut({ stderr: t => { stderr += t } }, out, 7, { code: 0, stdout: 'not a readiness block\n' }, SHIM_HEAD, 'pr')
+    expect(r).toEqual({ code: 5, stdout: '' })
+    expect(stderr).toContain('verify-evidence: ')
+    expect(fs.existsSync(out)).toBe(false)
+  })
+
+  it('an out path that is not a regular file is left alone: a FIFO is refused, never opened or removed', () => {
+    const dir = localDir()
+    const out = path.join(dir, 'readiness.fifo')
+    if (!makeFifo(out, dir)) return
+    const r =runInProcess(['readiness', '--pr', '7', '--require-non-author-approval', 'false', '--out', out], greenTwin().exec)
+    expect(r.code).toBe(3)
+    expect(r.stdout).toBe('')
+    expect(fs.lstatSync(out).isFIFO()).toBe(true)
+  })
+})
+
+describe('TP-16: an out file that cannot be written prints no block and exits non-zero', () => {
+  it('a missing directory: exit 3, stdout empty, a closed reason on stderr, no file', SPAWN_BUDGET, () => {
+    const out = path.join(localDir(), 'no-such-dir', 'readiness.txt')
+    const r = run(green(), 'false', ['--out', out])
+    expect(r.code).toBe(3)
+    expect(r.stdout).toBe('')
+    expect(r.stderr).toContain('verify-evidence: an output file could not be written')
+    expect(fs.existsSync(out)).toBe(false)
+    expect(r.writes).toEqual([])
+  })
+
+  it('a directory in the out file\'s place: exit 3, stdout empty', () => {
+    const out = localDir()
+    const r = runReadiness(['--out', out], greenTwin().exec)
+    expect(r.code).toBe(3)
+    expect(r.stdout).toBe('')
+  })
+
+  it('a DEGRADED answer is held to the same rule: no block when its out file fails', () => {
+    const out = path.join(localDir(), 'no-such-dir', 'readiness.txt')
+    const r = runReadiness(['--out', out], unreadablePr)
+    expect(r.code).toBe(3)
+    expect(r.stdout).toBe('')
+  })
+
+  it('an internal failure with an unwritable out file prints no block either', () => {
+    const out = path.join(localDir(), 'no-such-dir', 'readiness.txt')
+    const r = runInProcess(['readiness', '--pr', '7', '--out', out], () => { throw new Error('exec exploded') })
+    expect(r.code).toBe(3)
+    expect(r.stdout).toBe('')
+  })
+
+  it('a write that fails partway leaves no out file, on a decided answer and on an internal failure alike', () => {
+    const exploding = (): never => { throw new Error('exec exploded') }
+    for (const [label, exec] of [['a decided answer', greenTwin().exec], ['an internal failure', exploding]] as const) {
+      const out = path.join(localDir(), 'readiness.txt')
+      fs.writeFileSync(out, 'READINESS pr:7 head:none status:READY source=pr\n')
+      const write = nodeFs.writeFileSync
+      const spy = vi.spyOn(nodeFs, 'writeFileSync').mockImplementation(((target: number) => {
+        write(target, 'READINESS pr:7 head:none status:READY source=pr\n')
+        throw Object.assign(new Error('disk failure'), { code: 'EIO' })
+      }) as typeof nodeFs.writeFileSync)
+      let r: ReturnType<typeof runInProcess>
+      try {
+        r = runInProcess(['readiness', '--pr', '7', '--require-non-author-approval', 'false', '--out', out], exec)
+      } finally {
+        spy.mockRestore()
+      }
+      expect(r.code, label).toBe(3)
+      expect(r.stdout, label).toBe('')
+      expect(fs.existsSync(out), `${label}: no file may be left`).toBe(false)
+    }
+  })
+
+  it('an earlier out file that cannot be removed is a write failure before any read', () => {
+    const out = path.join(localDir(), 'readiness.txt')
+    fs.writeFileSync(out, 'READINESS pr:7 head:none status:READY source=pr\n')
+    const twin = greenTwin()
+    const spy = vi.spyOn(nodeFs, 'unlinkSync').mockImplementation(() => { throw Object.assign(new Error('denied'), { code: 'EACCES' }) })
+    let r: ReturnType<typeof runInProcess>
+    try {
+      r = runInProcess(['readiness', '--pr', '7', '--require-non-author-approval', 'false', '--out', out], twin.exec)
+    } finally {
+      spy.mockRestore()
+    }
+    expect(r.code).toBe(3)
+    expect(r.stdout).toBe('')
+    expect(r.stderr).toContain('verify-evidence: an output file could not be written')
+    expect(twin.calls, 'no read was made').toEqual([])
+  })
+})
 
 // ---------------------------------------------------------------------------
 // Contract parity — the Output template and the script print the same block
