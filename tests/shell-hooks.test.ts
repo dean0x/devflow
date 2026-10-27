@@ -8,6 +8,8 @@ import { createRequire } from 'module';
 import { HANDOFF_TEMPLATE, REMINDER_TEMPLATE } from './fixtures/ambient-templates.js';
 import { useWarmFakeExecutables } from './helpers/warm-fake-executable.js';
 import { buildRoutingConfigJson } from '../src/core/proxy-state.js';
+import { DEVFLOW_PLUGINS } from '../src/core/plugins.js';
+import { HANDOFF_SENTINEL_RELPATH } from '../src/targets/claude-code/charter-render.js';
 import { CURATION_DIR_NAME, LEGACY_NAMES, curationMoveMarkerKey } from '../src/core/project-paths.js';
 import { getCurationMoveMarkerPath } from '../src/core/curation-move-notice.js';
 import { AREA_PAUSE_NOTICE } from '../src/core/area-pause-notice.js';
@@ -1252,6 +1254,39 @@ describe('hook-log-init: first invocation for a fresh log dir', () => {
   });
 });
 
+/**
+ * The routing roster is derived from the devflow-ambient plugin's agents, never listed, so an
+ * ambient agent the charter forgets fails here. `curate` is spawned by a session-start hook and is
+ * never a routing target. An agent is spelled as the charter writes it: its slug, capitalised.
+ */
+function ambientRosterNames(): string[] {
+  const ambient = DEVFLOW_PLUGINS.find(plugin => plugin.name === 'devflow-ambient');
+  expect(ambient, 'the devflow-ambient plugin is registered').toBeDefined();
+  return (ambient?.agents ?? [])
+    .filter(slug => slug !== 'curate')
+    .map(slug => slug.charAt(0).toUpperCase() + slug.slice(1));
+}
+
+/** Whole-word match, so `Codebase` does not name Code and `GitHub` does not name Git. */
+function namesAgent(text: string, agent: string): boolean {
+  return new RegExp(`\\b${agent}\\b`).test(text);
+}
+
+/**
+ * Every agent slug any plugin registers, spelled as the charter writes it. The preamble reminder
+ * must name none of them, so this covers Fix and Debug as well as the devflow-ambient roster.
+ */
+function allRosterAgentNames(): string[] {
+  const slugs = new Set(DEVFLOW_PLUGINS.flatMap(plugin => plugin.agents));
+  return [...slugs].map(slug => slug.charAt(0).toUpperCase() + slug.slice(1));
+}
+
+/** The skills and agents a preamble reminder names: any `devflow:` token or whole-word roster agent. */
+function reminderNamings(text: string): string[] {
+  const agents = allRosterAgentNames().filter(agent => namesAgent(text, agent));
+  return /devflow:/.test(text) ? ['devflow:', ...agents] : agents;
+}
+
 // =============================================================================
 // preamble — orchestrator charter mode (Suites 1-4)
 // =============================================================================
@@ -1395,6 +1430,24 @@ describe('preamble — orchestrator charter mode', () => {
       const out = runPreamble('fix the auth bug');
       const parsed = JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } };
       expect(parsed.hookSpecificOutput.additionalContext).toBe(REMINDER_TEMPLATE);
+    });
+
+    it('F2c: reminder names no devflow skill and no roster agent, in the template and in the hook output', () => {
+      const out = runPreamble('fix the auth bug');
+      const parsed = JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } };
+      const emitted = parsed.hookSpecificOutput.additionalContext;
+      expect(emitted).toContain('Orchestrator reminder:');
+      expect(REMINDER_TEMPLATE).toContain('Orchestrator reminder:');
+      expect(allRosterAgentNames().length, 'no roster derived').toBeGreaterThan(0);
+      expect(reminderNamings(REMINDER_TEMPLATE), 'template names a skill or agent').toEqual([]);
+      expect(reminderNamings(emitted), 'hook output names a skill or agent').toEqual([]);
+    });
+
+    it('F2d: known-bad probe: a reminder that names devflow:debug and the Debug agent is flagged', () => {
+      const bad = REMINDER_TEMPLATE +
+        ' Send debug work to the devflow:debug skill, never to the Debug agent.';
+      expect(reminderNamings(bad)).toEqual(['devflow:', 'Debug']);
+      expect(reminderNamings('Orchestrator reminder: coordinate. Fix the Codebase on GitHub.')).toEqual(['Fix']);
     });
 
     it('F2b: reminder names no model (no haiku/sonnet/opus)', () => {
@@ -1681,6 +1734,95 @@ describe('preamble — orchestrator charter mode', () => {
 
       expect(delta).toBeLessThan(500);
       expect(ratio).toBeLessThan(5);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Suite 5 — Handoff gate on the implement sentinel
+  // -------------------------------------------------------------------------
+  //
+  // The handoff directive tells the model to invoke devflow:implement. devflow
+  // writes hooks/assets/implement-installed while that command is installed and
+  // removes it otherwise. These tests run the preamble from a private copy of
+  // the hooks directory so each case controls the sentinel; HOME points into a
+  // temp dir so no run can reach the real one.
+
+  describe('Suite 5 — Handoff gate on the implement sentinel', () => {
+    const HOOKS_FILES = ['preamble', 'hook-bootstrap', 'debug-trace', 'log-paths', 'json-parse', 'json-helper.cjs', 'git-marker'];
+    const SENTINEL_NAME = 'implement-installed';
+    const HANDOFF_PROMPT = 'Implement the following plan:\n\n# Add caching\n\n1. Add Redis\n2. Write tests';
+
+    let hooksCopy: string;
+    let fakeHome: string;
+
+    beforeEach(() => {
+      hooksCopy = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-preamble-hooks-'));
+      fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-preamble-home-'));
+      for (const name of HOOKS_FILES) {
+        fs.copyFileSync(path.join(HOOKS_DIR, name), path.join(hooksCopy, name));
+      }
+      fs.mkdirSync(path.join(hooksCopy, 'assets'));
+    });
+
+    afterEach(() => {
+      fs.rmSync(hooksCopy, { recursive: true, force: true });
+      fs.rmSync(fakeHome, { recursive: true, force: true });
+    });
+
+    function writeSentinel(): void {
+      fs.writeFileSync(path.join(hooksCopy, 'assets', SENTINEL_NAME), 'sentinel\n');
+    }
+
+    function emitted(prompt: string): string {
+      const out = execSync(`bash "${path.join(hooksCopy, 'preamble')}"`, {
+        input: JSON.stringify({ cwd: tmpDir, prompt }),
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: { ...process.env, HOME: fakeHome },
+      }).toString();
+      if (out.length === 0) return '';
+      return (JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } }).hookSpecificOutput.additionalContext;
+    }
+
+    it('G1: handoff prompt without the sentinel gets the generic reminder', () => {
+      expect(emitted(HANDOFF_PROMPT)).toBe(REMINDER_TEMPLATE);
+    });
+
+    it('G2: same-session handoff flavor without the sentinel gets the generic reminder', () => {
+      expect(emitted('Implement the following plan: add caching')).toBe(REMINDER_TEMPLATE);
+    });
+
+    it('G3: handoff prompt with the sentinel gets the handoff directive', () => {
+      writeSentinel();
+      expect(emitted(HANDOFF_PROMPT)).toBe(HANDOFF_TEMPLATE);
+    });
+
+    it('G4: a directory at the sentinel path does not count as the sentinel', () => {
+      fs.mkdirSync(path.join(hooksCopy, 'assets', SENTINEL_NAME));
+      expect(emitted(HANDOFF_PROMPT)).toBe(REMINDER_TEMPLATE);
+    });
+
+    it('G5: the sentinel never changes a non-handoff prompt or the slash skip', () => {
+      writeSentinel();
+      expect(emitted('fix the auth bug')).toBe(REMINDER_TEMPLATE);
+      expect(emitted('/implement foo')).toBe('');
+      expect(emitted('')).toBe('');
+    });
+
+    it('G6: removing the sentinel returns a handoff prompt to the reminder', () => {
+      writeSentinel();
+      expect(emitted(HANDOFF_PROMPT)).toBe(HANDOFF_TEMPLATE);
+      fs.rmSync(path.join(hooksCopy, 'assets', SENTINEL_NAME));
+      expect(emitted(HANDOFF_PROMPT)).toBe(REMINDER_TEMPLATE);
+    });
+
+    it('G7: the sentinel path in the preamble is the one the installer writes', () => {
+      const src = fs.readFileSync(PREAMBLE_SRC, 'utf-8');
+      const match = /\[ -f "\$SCRIPT_DIR\/([^"]+)" \]/.exec(src);
+      expect(match).not.toBeNull();
+      // SCRIPT_DIR is the hooks directory; HANDOFF_SENTINEL_RELPATH is relative to scripts/.
+      expect(`hooks/${match![1]}`).toBe(HANDOFF_SENTINEL_RELPATH);
+      expect(path.basename(match![1])).toBe(SENTINEL_NAME);
+      expect(fs.statSync(path.join(HOOKS_DIR, '..', HANDOFF_SENTINEL_RELPATH)).isFile()).toBe(true);
     });
   });
 });
@@ -2026,9 +2168,17 @@ describe('session-start-orchestrator', () => {
     // Each agent's model/effort is user-configured; naming a model would steer the
     // orchestrator into overriding it on the Agent call.
     expect(ctx).not.toMatch(/haiku|sonnet|opus/i);
-    for (const agent of ['Explore', 'Skim', 'Code', 'Validate', 'Git', 'Design', 'Research', 'Review', 'Triage']) {
-      expect(ctx).toContain(agent);
-    }
+    const roster = ambientRosterNames();
+    expect(roster.length, 'no roster derived').toBeGreaterThan(0);
+    const missing = roster.filter(agent => !namesAgent(ctx, agent));
+    expect(missing, `the charter names no routing for: ${missing.join(', ')}`).toEqual([]);
+  });
+
+  it('AC-F1: known-bad probe: the roster match is whole-word, so Codebase is not Code and GitHub is not Git', () => {
+    expect(namesAgent('Codebase orientation: Skim. GitHub work.', 'Code')).toBe(false);
+    expect(namesAgent('Codebase orientation: Skim. GitHub work.', 'Git')).toBe(false);
+    expect(namesAgent('Codebase orientation: Skim. GitHub work.', 'Skim')).toBe(true);
+    expect(namesAgent('Git (git/GitHub)', 'Git')).toBe(true);
   });
 
   it('AC-F1: additionalContext carries no HTML comment (maintainer notes never reach users)', () => {
@@ -2104,6 +2254,18 @@ describe('session-start-orchestrator', () => {
     } finally {
       fs.rmSync(hooksTemp, { recursive: true, force: true });
     }
+  });
+
+  it('AC-F10: LC_ALL=C — the real source charter is injected whole', () => {
+    // Under the C locale bash counts bytes, not characters, so a charter with a multibyte character
+    // could cross the cap in the field while it passes here. The source is read as shipped.
+    const source = fs.readFileSync(CHARTER_FILE, 'utf-8');
+    expect(source.length, 'nothing read').toBeGreaterThan(1000);
+    const { stdout, exitCode } = runHook(ORCHESTRATOR_HOOK, { cwd: tmpDir }, homeDir, { LC_ALL: 'C' });
+    expect(exitCode).toBe(0);
+    const parsed = JSON.parse(stdout) as { hookSpecificOutput: { additionalContext: string } };
+    // The hook reads the charter with $(cat), which drops the trailing newline.
+    expect(parsed.hookSpecificOutput.additionalContext).toBe(source.replace(/\n+$/, ''));
   });
 
   it('AC-P3: repo charter asset exists, is non-empty, and is <4096 chars', () => {
