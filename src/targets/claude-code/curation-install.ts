@@ -79,7 +79,7 @@ import { carryStampedTools } from '../../core/agent-frontmatter.js';
 import { carryAgentOverrides, reapplyAgentMapping } from '../../core/agent-models.js';
 import { describeEchoedValue } from '../../core/echo-value.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
-import type { VariantKind } from '../../core/curation-variants.js';
+import { ALL_SWITCHES_ON, type VariantKind } from '../../core/curation-variants.js';
 import { readManifest } from '../../core/manifest.js';
 import { getPackageRoot } from '../../core/paths.js';
 import { isProxyEnabled } from '../../core/proxy-state.js';
@@ -168,7 +168,7 @@ function installedFile(claudeDir: string, kind: VariantKind, fileName: string): 
  * compliance on: the order it has always read.
  */
 function onSourceDirs(kind: VariantKind, root: string): readonly string[] {
-  return kind === 'commands' ? commandSourceDirs(true, true, root) : agentSourceDirs(root, true, true);
+  return kind === 'commands' ? commandSourceDirs(ALL_SWITCHES_ON, root) : agentSourceDirs(root, ALL_SWITCHES_ON);
 }
 
 /**

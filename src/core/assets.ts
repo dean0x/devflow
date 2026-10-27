@@ -2,10 +2,12 @@ import { join } from 'path';
 import { getPackageRoot } from './paths.js';
 import { SKILL_REFS_OUTPUT_DIR } from './mds-variants.js';
 import {
+  ALL_SWITCHES_ON,
   BOTH_OFF_OUTPUT_DIR,
   COMPLIANCE_OFF_OUTPUT_DIR,
   CURATION_OFF_OUTPUT_DIR,
   type VariantKind,
+  type VariantSwitches,
 } from './curation-variants.js';
 
 /**
@@ -119,8 +121,7 @@ export function bothOffDir(kind: VariantKind, root: string = getPackageRoot()): 
  */
 function offVariantDirs(
   kind: VariantKind,
-  curation: boolean,
-  compliance: boolean,
+  { curation, compliance }: VariantSwitches,
   root: string,
 ): readonly string[] {
   if (!curation && !compliance) {
@@ -150,16 +151,14 @@ function preferOff(
  * through to the one compiled file. With both axes on the order is the normal
  * single-directory lookup.
  *
- * @param curation - The machine's settled curation switch.
- * @param compliance - The machine's settled compliance switch.
+ * @param switches - The machine's settled curation and compliance switches.
  * @param root - Package root to resolve against (see agentsDir).
  */
 export function commandSourceDirs(
-  curation: boolean,
-  compliance: boolean,
+  switches: VariantSwitches,
   root: string = getPackageRoot(),
 ): CommandSourceDirs {
-  return preferOff(offVariantDirs('commands', curation, compliance, root), [join(root, 'dist', 'commands')]);
+  return preferOff(offVariantDirs('commands', switches, root), [join(root, 'dist', 'commands')]);
 }
 
 /**
@@ -217,16 +216,14 @@ export function compiledSkillRefsDir(root: string = getPackageRoot()): string {
  * reading the both-on tree.
  *
  * @param root - Package root to resolve against (see agentsDir).
- * @param curation - The machine's settled curation switch; on by default.
- * @param compliance - The machine's settled compliance switch; on by default.
+ * @param switches - The machine's settled curation and compliance switches; every switch on by default.
  */
 export function agentSourceDirs(
   root: string = getPackageRoot(),
-  curation: boolean = true,
-  compliance: boolean = true,
+  switches: VariantSwitches = ALL_SWITCHES_ON,
 ): AgentSourceDirs {
   return preferOff(
-    offVariantDirs('agents', curation, compliance, root),
+    offVariantDirs('agents', switches, root),
     [compiledAgentsDir(root), agentsDir(root)],
   );
 }

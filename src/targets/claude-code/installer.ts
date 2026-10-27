@@ -6,6 +6,7 @@ import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, buildAssetMaps, prefixSkillName, unpr
 import { skillsDir, agentSourceDirs, rulesDir, commandSourceDirs, scriptsDir, compiledSkillRefsDir, type AgentSourceDirs, type CommandSourceDirs } from '../../core/assets.js';
 import { getPackageRoot, isContainedIn } from '../../core/paths.js';
 import {
+  ALL_SWITCHES_ON,
   VARIANT_MANIFEST_REL_PATH,
   describeVariantManifestParseError,
   parseVariantManifest,
@@ -1990,8 +1991,8 @@ function copySourceDirs(opts: {
 }): { commands: CommandSourceDirs; agents: AgentSourceDirs } {
   const { curation, compliance, packageRoot } = opts;
   return {
-    commands: commandSourceDirs(curation, compliance, packageRoot),
-    agents: opts.agentSourceDirs ?? agentSourceDirs(packageRoot, curation, compliance),
+    commands: commandSourceDirs({ curation, compliance }, packageRoot),
+    agents: opts.agentSourceDirs ?? agentSourceDirs(packageRoot, { curation, compliance }),
   };
 }
 
@@ -2148,7 +2149,7 @@ export async function installCommandsAndAgents(opts: CommandsAndAgentsOptions): 
         // The error names the curation-ON path: that file exists for every declared
         // command, while a curation-off file exists only for a host with an arm.
         throw new Error(
-          `Command source not found for declared command "${name}": ${path.join(commandSourceDirs(true, true, packageRoot)[0], mdFileName(name))}. ` +
+          `Command source not found for declared command "${name}": ${path.join(commandSourceDirs(ALL_SWITCHES_ON, packageRoot)[0], mdFileName(name))}. ` +
           `Ensure build:mds ran successfully before install.`,
         );
       }

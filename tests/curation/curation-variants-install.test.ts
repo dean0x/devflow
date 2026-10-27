@@ -133,8 +133,8 @@ afterEach(async () => {
 
 describe('source order (assets.ts)', () => {
   it('curation off puts the curation-off directory first for commands and for agents', () => {
-    expect(commandSourceDirs(false, true, pkg)).toEqual([curationOffDir('commands', pkg), path.join(pkg, 'dist', 'commands')]);
-    expect(agentSourceDirs(pkg, false, true)).toEqual([
+    expect(commandSourceDirs({ curation: false, compliance: true }, pkg)).toEqual([curationOffDir('commands', pkg), path.join(pkg, 'dist', 'commands')]);
+    expect(agentSourceDirs(pkg, { curation: false, compliance: true })).toEqual([
       curationOffDir('agents', pkg),
       path.join(pkg, 'dist', 'agents'),
       path.join(pkg, 'src', 'assets', 'agents'),
@@ -142,14 +142,14 @@ describe('source order (assets.ts)', () => {
   });
 
   it('curation on keeps today\'s order exactly, and the default is curation on', () => {
-    expect(commandSourceDirs(true, true, pkg)).toEqual([path.join(pkg, 'dist', 'commands')]);
-    expect(agentSourceDirs(pkg, true, true)).toEqual([path.join(pkg, 'dist', 'agents'), path.join(pkg, 'src', 'assets', 'agents')]);
-    expect(agentSourceDirs(pkg)).toEqual(agentSourceDirs(pkg, true, true));
+    expect(commandSourceDirs({ curation: true, compliance: true }, pkg)).toEqual([path.join(pkg, 'dist', 'commands')]);
+    expect(agentSourceDirs(pkg, { curation: true, compliance: true })).toEqual([path.join(pkg, 'dist', 'agents'), path.join(pkg, 'src', 'assets', 'agents')]);
+    expect(agentSourceDirs(pkg)).toEqual(agentSourceDirs(pkg, { curation: true, compliance: true }));
   });
 
   it('known-bad probe: the curation-off directory is never consulted when curation is on', () => {
-    expect(commandSourceDirs(true, true, pkg).some(dir => dir.includes('curation-off'))).toBe(false);
-    expect(agentSourceDirs(pkg, true, true).some(dir => dir.includes('curation-off'))).toBe(false);
+    expect(commandSourceDirs({ curation: true, compliance: true }, pkg).some(dir => dir.includes('curation-off'))).toBe(false);
+    expect(agentSourceDirs(pkg, { curation: true, compliance: true }).some(dir => dir.includes('curation-off'))).toBe(false);
   });
 });
 

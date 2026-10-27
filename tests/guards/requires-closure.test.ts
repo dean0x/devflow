@@ -430,14 +430,14 @@ async function collectCurationOffInstalledRefs(): Promise<RawRef[]> {
   const files: string[] = [];
   const commandNames = new Set(DEVFLOW_PLUGINS.flatMap(p => p.commands.map(c => c.replace(/^\//, ''))));
   for (const name of commandNames) {
-    for (const dir of commandSourceDirs(false, true, ROOT)) {
+    for (const dir of commandSourceDirs({ curation: false, compliance: true }, ROOT)) {
       const candidate = path.join(dir, `${name}.md`);
       if (await fs.access(candidate).then(() => true, () => false)) { files.push(candidate); break; }
     }
   }
   const agentNames = new Set(DEVFLOW_PLUGINS.flatMap(p => p.agents));
   for (const name of agentNames) {
-    for (const dir of agentSourceDirs(ROOT, false, true)) {
+    for (const dir of agentSourceDirs(ROOT, { curation: false, compliance: true })) {
       const candidate = path.join(dir, `${name}.md`);
       if (await fs.access(candidate).then(() => true, () => false)) { files.push(candidate); break; }
     }

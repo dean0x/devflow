@@ -185,6 +185,12 @@ export const VARIANT_AXES = ['curation', 'compliance'] as const;
 
 export type VariantAxis = (typeof VARIANT_AXES)[number];
 
+/** A machine's settled switch on each axis. A named record, so the two flags cannot be swapped at a call site. */
+export type VariantSwitches = Readonly<Record<VariantAxis, boolean>>;
+
+/** Every switch on: the machine whose prompts come from the normal compiled files. */
+export const ALL_SWITCHES_ON: VariantSwitches = Object.freeze({ curation: true, compliance: true });
+
 /**
  * A whole-line marker of either axis. Group 1 captures the axis; group 2 captures
  * `on`, `off` or `end`.
@@ -740,7 +746,7 @@ export function describeVariantManifestParseError(error: VariantManifestParseErr
  * have and never the on file.
  */
 export function machineVariantKey(
-  machine: Readonly<Record<VariantAxis, boolean>>,
+  machine: VariantSwitches,
   hasArms: Readonly<Record<VariantAxis, boolean>>,
 ): VariantKey {
   const curationOff = !machine.curation && hasArms.curation;
@@ -761,7 +767,7 @@ export function machineVariantKey(
  * normal (or curation-off) file is the right one.
  */
 export function requiredComplianceVariantFiles(
-  machine: Readonly<Record<VariantAxis, boolean>>,
+  machine: VariantSwitches,
   hosts: readonly VariantManifestHost[],
 ): readonly string[] {
   if (machine.compliance) return [];
