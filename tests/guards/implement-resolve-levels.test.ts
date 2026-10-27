@@ -33,19 +33,23 @@
  *      keeps every criterion, plan step and behaviour defect while it drops only the named low-value items.
  *   k. The single Evaluate pass (#483): the `5 Alignment Check` row and the `single-pass` bullet, and the agents that a
  *      `pass level` phase spawns each read the level from prompt line 1 only (`collectPassLevelInputDefects`).
+ *   l. The re-validation path keeps Harden (#544): it skips Phase 2, so no Code report exists and the branch diff
+ *      drops deleted files. Its reference says that Phase 4 keeps Harden at every level and that the `harden-scope`
+ *      skip never applies there (`collectRevalidateHardenDefects`). The lens, publication and step-1 "Phase 1 ran" parts
+ *      of the same path are held in `compliance-injection.test.ts` and `implement-flow.test.ts`.
  * The spawn fences of both commands are pinned in `implement-resolve-full-fences.test.ts`. The doc sites that state the
  * effect of each shipped row are checked in `implement-resolve-level-docs.test.ts`. The three commands that keep Polish
  * and read no level are checked in `implement-resolve-level-keepers.test.ts`. The three guards share
  * `level-guard-helpers.ts`.
  *
- * The reference arms (d, e) read the two references. The command arms (a, b, c, f, g, h, i) read the compiled commands.
+ * The reference arms (d, e, l) read the references. The command arms (a, b, c, f, g, h, i) read the compiled commands.
  */
 
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import * as path from 'path'
 
-import { ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT, isAgentBlock, parseFences, requireDistFile, resolveAgentSource, resolveCurationOffSource, sectionBetween, tableRows } from '../helpers.js'
+import { ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT, isAgentBlock, parseFences, readAgentReference, requireDistFile, resolveAgentSource, resolveCurationOffSource, sectionBetween, tableRows } from '../helpers.js'
 import { DECIDED_ROWS, FULL_LOOP_LINES, LEVELS, LEVEL_CELL_INDEX, OPEN, POLISH_SPAWN, REFS, RULES_INTRO, TABLE_SEPARATOR, countOf, headingSection, parseRef, referenceRows, rowCells, sectionOf, seed, seedOnce, tableLines, tableRowLines, withRows, type LevelCmd, type ParsedRef } from './level-guard-helpers.js'
 
 // ---------------------------------------------------------------------------
@@ -1106,6 +1110,31 @@ export function collectPassLevelInputDefects(ref: string, spec: LevelSpec, body:
     const types = new Set(spawnsOf(phaseSection(body, num)).filter(spawn => !spawn.firstLine.startsWith('OPERATION:')).map(spawn => spawn.type))
     return [...types].flatMap(type => levelInputDefects(`the ${type} agent, spawned in ${spec.cmd} phase ${num} that passes the level,`, agentBodyOf(type)))
   })
+}
+
+// ---------------------------------------------------------------------------
+// l. The re-validation path keeps Harden (#544)
+// ---------------------------------------------------------------------------
+
+/** The step of the re-validation reference that skips Phase 2, and the two clauses that keep Harden on that path. */
+const REVALIDATE_SKIP_STEP = /^\d+\. \*\*Skip Phase 2\*\*/
+const REVALIDATE_HARDEN_KEPT = 'Phase 4 keeps Harden at every level'
+const REVALIDATE_HARDEN_SKIP_NEVER = 'the `harden-scope` skip never applies on this path'
+/** The skip step as the reference worded it before it kept Harden: a known-bad text for the collector. */
+const PRE_FIX_SKIP_STEP = '2. **Skip Phase 2** — no Code agent needed, user already made changes.'
+
+/**
+ * #544: the re-validation path runs no Code agent, so the lean `harden-scope` skip, which reads the Code report and the
+ * branch diff, cannot apply there. The skip step of the reference must say that Phase 4 keeps Harden at every level and
+ * that the skip never applies on this path, whether or not Phase 1 ran.
+ */
+export function collectRevalidateHardenDefects(reference: string): string[] {
+  const step = reference.split('\n').find(line => REVALIDATE_SKIP_STEP.test(line))
+  if (step === undefined) return ['the re-validation reference has no step that skips Phase 2']
+  const out: string[] = []
+  if (!step.includes(REVALIDATE_HARDEN_KEPT)) out.push(`the skip step does not say: ${REVALIDATE_HARDEN_KEPT}`)
+  if (!step.includes(REVALIDATE_HARDEN_SKIP_NEVER)) out.push(`the skip step does not say: ${REVALIDATE_HARDEN_SKIP_NEVER}`)
+  return out
 }
 
 // ---------------------------------------------------------------------------
@@ -2180,5 +2209,36 @@ describe('Phase 5 runs Evaluate once, then one Fix round, under the single-pass 
     expect(defects(REFS.resolve, triageWith(text => seedOnce(text, '## Input Context', '## Inputs'))), 'the bullet outside Input Context').toEqual([`${label('Triage', '2')} holds 0 "${LEVEL_INPUT_OPENER}" Input Context bullets, expected 1`])
     expect(defects(withRows(REFS.resolve, ['| 2 Global Triage | - | - |'])), 'a row that passes no level').toEqual([])
     expect(defects(withRows(REFS.resolve, ['| 2 Global Triage | pass level | pass level |', '| 6 Polish | pass level | - |'])), 'a row on Polish').toEqual([`${label('Polish', '6')} holds 0 "${LEVEL_INPUT_OPENER}" Input Context bullets, expected 1`])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// l. The re-validation path keeps Harden (#544)
+// ---------------------------------------------------------------------------
+
+describe('the re-validation path keeps Harden at every level, whether or not Phase 1 ran (#544)', () => {
+  const reference = (): string => {
+    const text = readAgentReference('commands/implement-revalidate.md')
+    expect(text.length, 'the re-validation reference is empty, so this guard would pass vacuously').toBeGreaterThan(1_000)
+    return text
+  }
+  const skipStep = (text: string): string => {
+    const step = text.split('\n').find(line => REVALIDATE_SKIP_STEP.test(line))
+    expect(step, 'the re-validation reference has no step that skips Phase 2').toBeDefined()
+    return step!
+  }
+
+  it('the skip step says that Phase 4 keeps Harden and that the harden-scope skip never applies on this path', () => {
+    expect(collectRevalidateHardenDefects(reference())).toEqual([])
+  })
+
+  it('known-bad probes: the skip step as it was before, a dropped clause and a renamed step are each reported', () => {
+    const text = reference()
+    const both = [`the skip step does not say: ${REVALIDATE_HARDEN_KEPT}`, `the skip step does not say: ${REVALIDATE_HARDEN_SKIP_NEVER}`]
+    expect(collectRevalidateHardenDefects(seedOnce(text, skipStep(text), PRE_FIX_SKIP_STEP)), 'the step as it was').toEqual(both)
+    expect(collectRevalidateHardenDefects(seedOnce(text, REVALIDATE_HARDEN_KEPT, 'Phase 4 may skip Harden')), 'the kept clause').toEqual([both[0]])
+    expect(collectRevalidateHardenDefects(seedOnce(text, REVALIDATE_HARDEN_SKIP_NEVER, 'the `harden-scope` skip applies on this path')), 'the never clause').toEqual([both[1]])
+    expect(collectRevalidateHardenDefects(seedOnce(text, '**Skip Phase 2**', '**Skip the Code agent**')), 'the renamed step')
+      .toEqual(['the re-validation reference has no step that skips Phase 2'])
   })
 })

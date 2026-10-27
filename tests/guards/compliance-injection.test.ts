@@ -18,6 +18,18 @@
  * the shipped skill sources. Every arm runs through a named collector that the live sweep and its known-bad
  * probe both call, over a corpus whose size is asserted first (a sweep that read nothing proves nothing).
  *
+ * The /implement re-validation path is the one prompt that re-enters past Phase 1, and Phase 1 is where the lens and
+ * the directive are set. Its reference (`implement-revalidate.md`) therefore points at the Phase 1 steps that set them
+ * and copies none of their text. The reference is hand-authored source with no build step, so it is read from `src`
+ * through `readAgentReference`. The Phase 1 steps it points at are read from both compiled builds. This file holds the
+ * pointer (`collectRevalidateLensDefects`) and the Phase 1 source it names (`collectPhase1DirectiveSourceDefects`). It
+ * does not repeat the normal-path guards: the mapping sentence of every host (`tests/compliance-prompts.test.ts`),
+ * the off clause and the directive line of every spawning host in both builds (`collectUngatedHosts`) and the floor
+ * of Code-family spawn sites in `implement.md` (`CODE_SPAWN_FLOORS`). The other halves of the same path are held in
+ * their owners: Phase 4 keeps Harden at every level in `tests/guards/implement-resolve-levels.test.ts`, and both the
+ * review-publication value and the step-1 reading of "Phase 1 ran" (`collectRevalidatePhase1RunDefects`) in
+ * `tests/evidence/implement-flow.test.ts`.
+ *
  * Out of scope by design: Triage. Its compliance paragraph dispositions findings the Review agents already
  * raised; it loads no skill and takes no lens, so the strict rule below does not read it. Harden's
  * "pattern compliance checking" is unrelated to the lens.
@@ -31,9 +43,10 @@ import { existsSync, readFileSync } from 'fs'
 import * as path from 'path'
 
 import {
-  ROOT, collectCodeSpawnSites, requireDistFile, requireDistFiles, resolveAllAgents, resolveCurationOffSource,
+  ROOT, collectCodeSpawnSites, countOf, readAgentReference, requireDistFile, requireDistFiles, resolveAllAgents, resolveCurationOffSource, sectionBetween,
 } from '../helpers.js'
 import type { CodeSpawnSite } from '../helpers.js'
+import { seedOnce } from './level-guard-helpers.js'
 
 // ── Independent oracles: the directive lines as the commands must render them ─────────────────────────
 
@@ -55,6 +68,39 @@ const OFF_CLAUSE = '`COMPLIANCE_DIRECTIVE` is empty when `COMPLIANCE_FRAMEWORKS`
 const JS_OFF_CLAUSE = 'const COMPLIANCE_DIRECTIVE = COMPLIANCE_FRAMEWORKS === "off" ? "" : `'
 
 const ACTIVE_SENTENCE = '`COMPLIANCE_ACTIVE` is `true` unless `COMPLIANCE_FRAMEWORKS` is `off`.'
+
+/** The sentence of Phase 1 that maps the settings line's lens to `COMPLIANCE_FRAMEWORKS`. */
+const FRAMEWORKS_SENTENCE =
+  "`COMPLIANCE_FRAMEWORKS` is the settings line's `COMPLIANCE` with `generic` written `none`: `off`, `none`, or the framework ids the machine and this repository declare."
+
+/** The label of the Phase 1 step that sets the directive, and the one the re-validation reference points at. */
+const DIRECTIVE_STEP = '**Set the compliance directive**'
+
+/** The re-validation reference's step that takes the settings: the one step that points at the Phase 1 lens and directive steps. */
+const REVALIDATE_SETTINGS_STEP = /^\d+\. \*\*Take GATE_LEVEL\*\*/
+
+/** The words of that step that set the lens and the directive, each exact: [what it must say, the text that says it]. */
+const REVALIDATE_LENS_PARTS: ReadonlyArray<readonly [string, string]> = [
+  ['the lens comes from that same line, the accepted one or the fail-closed one', 'from that same line, the accepted one or the fail-closed one,'],
+  ['COMPLIANCE_FRAMEWORKS is set as Phase 1 defines it', '`COMPLIANCE_FRAMEWORKS` as Phase 1 defines it'],
+  ['COMPLIANCE_DIRECTIVE is set by the Phase 1 directive step', '`COMPLIANCE_DIRECTIVE` by the Phase 1 **Set the compliance directive** step'],
+  ['Phases 5-7 pass the directive to their Fix spawns', 'Phases 5-7 pass `COMPLIANCE_DIRECTIVE` to their Fix spawns'],
+]
+
+/** What the reference must not hold: a second home for text that Phase 1 owns. [what it is, the matcher, a sample that the matcher finds]. */
+const REVALIDATE_LENS_BANNED: ReadonlyArray<readonly [string, string | RegExp, string]> = [
+  ['the off clause', OFF_CLAUSE, OFF_CLAUSE],
+  ['the directive Skill call', 'invoke Skill(skill="devflow:compliance")', 'invoke Skill(skill="devflow:compliance")'],
+  ['the compliance skill name', 'devflow:compliance', 'devflow:compliance'],
+  ['the lens gate', 'COMPLIANCE_ACTIVE', 'COMPLIANCE_ACTIVE'],
+  ['the raw lens as an input line', /^\s*"?COMPLIANCE_FRAMEWORKS:/m, 'COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}'],
+  ['the mapping from generic to none', 'with `generic` written `none`', 'with `generic` written `none`'],
+  ['a spawn', 'Agent(subagent_type=', 'Agent(subagent_type="Fix"):'],
+]
+
+/** The settings step as the reference worded it before it set the lens and the directive: a known-bad text for the collector. */
+const PRE_FIX_SETTINGS_STEP =
+  '4. **Take GATE_LEVEL**: unless Phase 1 ran, run the **Resolve the settings line** step of Phase 1 once for this worktree, and take `GATE_LEVEL` from the line it accepts, or from its fail-closed line when it accepts none. Phase 6 passes it to Validate.'
 
 /** A spawn that passes the directive: a fence line, a template line, a prose sentence or the engine's pseudo-form. */
 const DIRECTIVE_REF = /\$?\{COMPLIANCE_DIRECTIVE\}|(?:with|carries) `COMPLIANCE_DIRECTIVE`|\+ COMPLIANCE_DIRECTIVE \+/
@@ -154,6 +200,53 @@ export function collectGapAnalysisDefects(skill: string, reference: string | nul
   if (reference === null) return [...out, 'references/compliance.md is absent']
   if (!reference.includes('**Detection patterns:**')) out.push('the reference lost its detection patterns')
   if (!reference.includes('**Evidence trigger:**')) out.push('the reference lost its evidence trigger')
+  return out
+}
+
+/**
+ * Named collector: how the /implement re-validation reference falls short of AC-308 when Phase 1 does not run. Its
+ * settings step must set the lens and the directive from the same settings line by pointing at the Phase 1 steps, and
+ * the reference must hold no second copy of what those steps own (the off clause, the directive line, the skill name,
+ * the lens gate, the raw lens, the mapping and a spawn).
+ */
+export function collectRevalidateLensDefects(reference: string): string[] {
+  const step = reference.split('\n').find(line => REVALIDATE_SETTINGS_STEP.test(line))
+  if (step === undefined) return ['the re-validation reference has no step that takes GATE_LEVEL']
+  const out: string[] = []
+  for (const [what, text] of REVALIDATE_LENS_PARTS) {
+    if (!step.includes(text)) out.push(`the settings step does not say: ${what}`)
+  }
+  for (const [what, needle] of REVALIDATE_LENS_BANNED) {
+    if (typeof needle === 'string' ? reference.includes(needle) : needle.test(reference)) out.push(`the re-validation reference copies ${what}`)
+  }
+  return out
+}
+
+/**
+ * Named collector: how one build of /implement falls short of the Phase 1 source that the re-validation reference points
+ * at. Phase 1 holds the directive step once, with the off clause in its paragraph, and the mapping sentence. Phases 5-7
+ * hold three Fix spawns, and each passes the directive.
+ */
+export function collectPhase1DirectiveSourceDefects(label: string, md: string): string[] {
+  const out: string[] = []
+  const phase1 = sectionBetween(md, '### Phase 1: Setup', '### Phase 2:')
+  if (phase1 === null) out.push(`${label}: no Phase 1 section`)
+  else {
+    if (countOf(phase1, DIRECTIVE_STEP) !== 1) out.push(`${label}: Phase 1 does not hold ${DIRECTIVE_STEP} exactly once`)
+    else {
+      const fromStep = phase1.slice(phase1.indexOf(DIRECTIVE_STEP))
+      const stepParagraph = fromStep.split('\n\n')[0]
+      if (!stepParagraph.includes(OFF_CLAUSE)) {
+        out.push(`${label}: the ${DIRECTIVE_STEP} paragraph does not state that the directive is empty when the lens is off`)
+      }
+    }
+    if (!phase1.includes(FRAMEWORKS_SENTENCE)) out.push(`${label}: Phase 1 does not hold the COMPLIANCE_FRAMEWORKS mapping sentence`)
+  }
+  const fixPhases = sectionBetween(md, '### Phase 5:', '### Phase 8:')
+  if (fixPhases === null) return [...out, `${label}: no Phases 5-7 section`]
+  const sites = collectCodeSpawnSites(label, fixPhases, 'Fix')
+  if (sites.length !== 3) out.push(`${label}: Phases 5-7 hold ${sites.length} Fix spawn(s), expected 3`)
+  if (collectUndirectedSites(sites).length > 0) out.push(`${label}: a Fix spawn of Phases 5-7 passes no directive`)
   return out
 }
 
@@ -393,5 +486,100 @@ describe('AC-309: no Review or Design body or preload carries compliance-only te
     expect(collectGapAnalysisDefects(skill, '# empty')).toEqual(['the reference lost its detection patterns', 'the reference lost its evidence trigger'])
     expect(collectGapAnalysisDefects(skill.replace('### 3. Security', '### 3. Sec'), reference)).toEqual(['the section "### 3. Security" is gone'])
     expect(collectGapAnalysisDefects(skill.replace('GAPS IN DESIGN BECOME BUGS IN PRODUCTION', 'x'), reference)).toEqual(['the Iron Law is gone'])
+  })
+})
+
+// ── AC-308 on the re-validation path (#544) ──────────────────────────────────────────────────────────
+
+describe('AC-308: the re-validation path sets the lens and the directive by pointing at the Phase 1 steps', () => {
+  const revalidateReference = (): string => {
+    const text = readAgentReference('commands/implement-revalidate.md')
+    expect(text.length, 'the re-validation reference is empty, so this guard would pass vacuously').toBeGreaterThan(1_000)
+    return text
+  }
+  const settingsStep = (reference: string): string => {
+    const step = reference.split('\n').find(line => REVALIDATE_SETTINGS_STEP.test(line))
+    expect(step, 'the re-validation reference has no step that takes GATE_LEVEL').toBeDefined()
+    return step!
+  }
+  const builds = (): Array<readonly [string, string]> => [
+    ['dist/commands/implement.md', requireDistFile('implement.md')],
+    ['dist/curation-off/commands/implement.md', curationOffCommand('implement.md')],
+  ]
+  /** The build with the directive line of its qa-fix fence dropped. The fence is found by its own unique text: the directive line repeats in every Fix fence. */
+  const withoutQaFixDirective = (md: string): string => {
+    const at = md.indexOf('OPERATION: qa-fix')
+    expect(countOf(md, 'OPERATION: qa-fix'), 'the qa-fix fence is unique').toBe(1)
+    const end = md.indexOf('```', at)
+    expect(end, 'the qa-fix fence has a closing line').toBeGreaterThan(at)
+    return md.slice(0, at) + seedOnce(md.slice(at, end), '\n   {COMPLIANCE_DIRECTIVE}"', '"') + md.slice(end)
+  }
+
+  it('the settings step takes the lens and the directive from the same line by pointer, and the reference copies no Phase 1 text', () => {
+    const reference = revalidateReference()
+    expect(REVALIDATE_LENS_PARTS.length, 'the part table is empty, so this guard proves nothing').toBeGreaterThanOrEqual(4)
+    expect(settingsStep(reference), 'the step still takes GATE_LEVEL from the Phase 1 settings step').toContain('**Resolve the settings line**')
+    expect(collectRevalidateLensDefects(reference)).toEqual([])
+  })
+
+  it('both builds keep the Phase 1 directive step with its off clause, the mapping sentence and three Fix spawns in Phases 5-7 that pass the directive', () => {
+    for (const [label, md] of builds()) {
+      expect(md.length, `${label}: empty`).toBeGreaterThan(10_000)
+      expect(collectPhase1DirectiveSourceDefects(label, md), label).toEqual([])
+    }
+  })
+
+  it('known-bad probe: the settings step as it was before it set the lens and the directive reports every lens defect', () => {
+    const reference = revalidateReference()
+    const old = seedOnce(reference, settingsStep(reference), PRE_FIX_SETTINGS_STEP)
+    expect(collectRevalidateLensDefects(old)).toEqual(REVALIDATE_LENS_PARTS.map(([what]) => `the settings step does not say: ${what}`))
+  })
+
+  it.each(REVALIDATE_LENS_PARTS)('known-bad probe: dropping "%s" from the settings step is reported', (what, text) => {
+    const reference = revalidateReference()
+    expect(collectRevalidateLensDefects(seedOnce(reference, text, ''))).toEqual([`the settings step does not say: ${what}`])
+  })
+
+  it('known-bad probe: a clause that keeps only the line it accepts, and not the fail-closed one, is reported', () => {
+    const reference = revalidateReference()
+    const accepted = seedOnce(reference, 'from that same line, the accepted one or the fail-closed one,', 'from the line it accepts,')
+    expect(collectRevalidateLensDefects(accepted)).toEqual([`the settings step does not say: ${REVALIDATE_LENS_PARTS[0][0]}`])
+  })
+
+  it.each(REVALIDATE_LENS_BANNED)('known-bad probe: a reference that copies %s is reported', (what, needle, sample) => {
+    const reference = revalidateReference()
+    expect(typeof needle === 'string' ? reference.includes(needle) : needle.test(reference), `the shipped reference holds ${what}`).toBe(false)
+    expect(collectRevalidateLensDefects(`${reference}\n${sample}\n`)).toContain(`the re-validation reference copies ${what}`)
+  })
+
+  it('known-bad probe: a renamed settings step is reported, not skipped', () => {
+    const reference = revalidateReference()
+    expect(collectRevalidateLensDefects(seedOnce(reference, '**Take GATE_LEVEL**', '**Take the level**')))
+      .toEqual(['the re-validation reference has no step that takes GATE_LEVEL'])
+  })
+
+  it.each([0, 1])('known-bad probe: a build that loses the Phase 1 directive source is reported (build %i)', index => {
+    const [label, md] = builds()[index]
+    expect(collectPhase1DirectiveSourceDefects(label, seedOnce(md, DIRECTIVE_STEP, '**Set the directive**')))
+      .toEqual([`${label}: Phase 1 does not hold ${DIRECTIVE_STEP} exactly once`])
+    expect(collectPhase1DirectiveSourceDefects(label, seedOnce(md, OFF_CLAUSE, '`COMPLIANCE_DIRECTIVE` is always set')))
+      .toEqual([`${label}: the ${DIRECTIVE_STEP} paragraph does not state that the directive is empty when the lens is off`])
+    expect(collectPhase1DirectiveSourceDefects(label, seedOnce(md, FRAMEWORKS_SENTENCE, '')))
+      .toEqual([`${label}: Phase 1 does not hold the COMPLIANCE_FRAMEWORKS mapping sentence`])
+    expect(collectPhase1DirectiveSourceDefects(label, withoutQaFixDirective(md)))
+      .toEqual([`${label}: a Fix spawn of Phases 5-7 passes no directive`])
+    expect(collectPhase1DirectiveSourceDefects(label, seedOnce(md, '### Phase 5:', '### Step 5:')))
+      .toEqual([`${label}: no Phases 5-7 section`])
+    expect(collectPhase1DirectiveSourceDefects(label, seedOnce(md, '### Phase 1: Setup', '### Step 1: Setup')))
+      .toEqual([`${label}: no Phase 1 section`])
+    // The alignment-fix fence is the first Fix spawn of Phases 5-7; typed otherwise it is no Fix spawn.
+    expect(collectPhase1DirectiveSourceDefects(label, seedOnce(md, 'subagent_type="Fix"):\n   "OPERATION: alignment-fix', 'subagent_type="Code"):\n   "OPERATION: alignment-fix')))
+      .toEqual([`${label}: Phases 5-7 hold 2 Fix spawn(s), expected 3`])
+  })
+
+  it('known-bad probe: a qa-fix fence that never closes fails the seed loudly instead of slicing to the wrong place', () => {
+    const [, md] = builds()[0]
+    const unclosed = md.slice(0, md.indexOf('OPERATION: qa-fix') + 'OPERATION: qa-fix'.length)
+    expect(() => withoutQaFixDirective(unclosed)).toThrow('the qa-fix fence has a closing line')
   })
 })
