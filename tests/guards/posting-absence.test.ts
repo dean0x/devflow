@@ -215,6 +215,75 @@ describe('posting absence: each compliance-off command prints the fixed local li
   })
 })
 
+/** One plain Git spawn a compliance-off command keeps: the host, the operation and the inputs its spawn passes (AC-14). */
+interface PlainSpawn {
+  readonly host: string
+  readonly op: string
+  readonly inputs: readonly string[]
+}
+
+/**
+ * The plain writes the compliance-off commands keep (AC-14): the PR-opening spawn with its plain inputs, the
+ * task setup and the issue filing. A command joins this list when it joins the roster; the plan and release
+ * rows come with those hosts.
+ */
+const PLAIN_SPAWNS: readonly PlainSpawn[] = [
+  { host: 'code-review', op: 'ensure-pr-ready', inputs: ['PR_DESCRIPTION_GUIDANCE:', 'APPLY_CONVENTIONS:'] },
+  { host: 'bug-analysis', op: 'ensure-pr-ready', inputs: ['APPLY_CONVENTIONS:'] },
+  { host: 'dynamic-build', op: 'setup-task', inputs: ['TASK_DESCRIPTION:', 'ISSUE_REQUIRED:', 'APPLY_CONVENTIONS:'] },
+  { host: 'dynamic-build', op: 'ensure-pr-ready', inputs: ['PR_DESCRIPTION_GUIDANCE:', 'APPLY_CONVENTIONS:', 'PR_WAVE_BLOCK:'] },
+  { host: 'dynamic-tickets', op: 'ensure-traceable-issue', inputs: ['TASK_DESCRIPTION:', 'REQUIREMENTS:', 'WORKTREE_PATH:'] },
+]
+
+/** The lines a spawn's inputs sit in: the `OPERATION:` line and the 13 after it. */
+const SPAWN_WINDOW_LINES = 14
+
+/**
+ * Named collector: the plain spawns a set of off prompts lose. A prompt of a host in the table must name the
+ * operation, and its spawn window must carry every input the row lists. A prompt of another host is not read.
+ */
+function collectPlainSpawnDefects(files: readonly ScanFile[], table: readonly PlainSpawn[] = PLAIN_SPAWNS): string[] {
+  const out: string[] = []
+  for (const file of files) {
+    const host = path.basename(file.path, '.md')
+    const lines = file.text.split('\n')
+    for (const row of table.filter(r => r.host === host)) {
+      const at = lines.findIndex(line => line.includes(`OPERATION: ${row.op}`))
+      if (at === -1) {
+        out.push(`${file.path}: no ${row.op} spawn`)
+        continue
+      }
+      const window = lines.slice(at, at + SPAWN_WINDOW_LINES).join('\n')
+      for (const input of row.inputs.filter(i => !window.includes(i))) out.push(`${file.path}: the ${row.op} spawn drops ${input}`)
+    }
+  }
+  return out
+}
+
+describe('posting absence: the compliance-off commands keep their plain writes (AC-14)', () => {
+  const offCommands = offRosterFiles('commands')
+
+  it('every plain spawn of the table is in each off build of its host, with its inputs', () => {
+    const hostsRead = PLAIN_SPAWNS.map(row => row.host).filter(host => offCommands.some(file => path.basename(file.path, '.md') === host))
+    expect(hostsRead.length, 'every host of the table is on the roster, so each is read').toBe(PLAIN_SPAWNS.length)
+    expect(collectPlainSpawnDefects(offCommands)).toEqual([])
+  })
+
+  it('the on builds carry the same spawns, so the table is not read against a text the host never had', () => {
+    const on = complianceOnFiles().commands
+    expect(collectPlainSpawnDefects(on)).toEqual([])
+  })
+
+  it('known-bad probes: a lost spawn and a lost input are each reported', () => {
+    const base = offCommands.find(file => file.path.endsWith('/code-review.md'))!
+    expect(collectPlainSpawnDefects([base])).toEqual([])
+    const noSpawn: ScanFile = { ...base, text: base.text.replaceAll('OPERATION: ensure-pr-ready', 'OPERATION: other') }
+    expect(collectPlainSpawnDefects([noSpawn])).toEqual([`${base.path}: no ensure-pr-ready spawn`])
+    const noInput: ScanFile = { ...base, text: base.text.replace('APPLY_CONVENTIONS: {APPLY_CONVENTIONS}\nValidate branch', 'Validate branch') }
+    expect(collectPlainSpawnDefects([noInput])).toEqual([`${base.path}: the ensure-pr-ready spawn drops APPLY_CONVENTIONS:`])
+  })
+})
+
 describe('posting absence: known-bad probes keep the collector live', () => {
   const clean: ScanFile = { path: 'seeded/clean.md', text: 'Spawn the Git agent with ensure-pr-ready.\n' }
 
