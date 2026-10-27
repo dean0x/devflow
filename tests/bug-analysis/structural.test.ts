@@ -14,9 +14,9 @@
 // cannot silently remove safety-critical patterns.
 
 import { spawnSync } from 'child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import { describe, it, expect } from 'vitest';
 import { loadFile, extractSection, sectionBetween, parseFences, resolveAgentSource, resolveCurationOffSource, collectFreshBaseDefects, collectSlugCheckDefects, collectStoredHeadDefects, slugSinkLines, seedOnce, readAgentReference, EVIDENCE_RENDER_LINE, type DiffRangeShape } from '../helpers';
 
@@ -416,7 +416,7 @@ const SCANNER_TOOLS = ['semgrep scan', 'snyk code test', 'codeql database create
 const STATUS_LOOP = `for t in semgrep snyk codeql jq; do printf '%s=%s\\n' "$t" "$(command -v "$t" || echo no)"; done`;
 const EXIT_PRINT = "printf '\\nexit=%s\\n' ";
 /** The Snyk status line, with the last line of the Snyk filter before it: the exit line printed twice also appears in the Semgrep fence. */
-const SNYK_EXIT_AT = /(snyk\.sarif"\n)(printf '\\nexit=%s\\n' "\$E"\n)/;
+const SNYK_EXIT_AT = /(snyk\.sarif"; \}\n)(printf '\\nexit=%s\\n' "\$E"\n)/;
 /** What a Semgrep or Snyk scanner line ends with: the status is read before any other command runs. */
 const STATUS_READ = '2>/dev/null; E=$?';
 const NO_STATIC_BRANCH = 'If `--no-static` is set:';
@@ -781,7 +781,8 @@ function collectScannerRootDefects(phase2: string): string[] {
   return out;
 }
 
-const SNYK_NAME_LIST ='"$(git diff --name-only -z {DIFF_RANGE} | jq -Rs \'split("\\u0000")\')"';
+/** The Snyk fence lists the changed names once, NUL-separated, into a file the filter reads back. */
+const SNYK_NAMES = 'git diff --name-only -z {DIFF_RANGE} >"{ANALYSIS_DIR}/changed.z"';
 
 function collectFileNameHandoffDefects(phase2: string): string[] {
   const out: string[] = [];
@@ -789,39 +790,52 @@ function collectFileNameHandoffDefects(phase2: string): string[] {
   if (fences < 6) out.push(`${fences} bash fences, expected at least 6`);
   const semgrep = /^set -o pipefail; git diff --name-only -z --diff-filter=d \{DIFF_RANGE\} \| xargs -0 -r semgrep scan [^;|]* -- >"\{ANALYSIS_DIR\}\/semgrep\.sarif" 2>\/dev\/null;/m;
   if (!semgrep.test(phase2)) out.push('the Semgrep line does not read names with -z, pass them with xargs -0 and put them after --');
-  if (!phase2.includes(SNYK_NAME_LIST)) out.push('the Snyk filter does not read the names from git as NUL-separated output');
+  if (!phase2.includes(SNYK_NAMES)) out.push('the Snyk filter does not read the names from git as NUL-separated output');
   const reads = bashFenceLines(phase2).filter(line => line.includes('CHANGED_FILES') && line !== 'CHANGED_FILES=$(git diff --name-only {DIFF_RANGE})');
   if (reads.length > 0) out.push(`a scanner line reads CHANGED_FILES: ${reads[0]}`);
   if (!phase2.includes('File names reach a scanner only through')) out.push('Phase 2 does not say how file names reach a scanner');
   return out;
 }
 
-const SNYK_SCOPE_FILTER = '.runs[].results |= map(select(.locations[].physicalLocation.artifactLocation.uri as $uri | $files | index($uri) != null))';
-const SNYK_FILTER_FALLBACK = '"{ANALYSIS_DIR}/snyk-all.json" >"{ANALYSIS_DIR}/snyk.sarif" 2>/dev/null || cp "{ANALYSIS_DIR}/snyk-all.json" "{ANALYSIS_DIR}/snyk.sarif"';
-const SNYK_UNFILTERED_NOTE = 'Without `jq` the SARIF is unfiltered: note that.';
+/** The Snyk fence from the name list to the status print, one pinned line each. */
+const SNYK_FILTER_LINES = [
+  `${SNYK_NAMES} && jq --rawfile n "{ANALYSIS_DIR}/changed.z" \\`,
+  `'($n|split("\\u0000")) as $f|.runs[]?.results|=[.[]?|select([.locations[]?.physicalLocation.artifactLocation.uri//empty] as $u|($u|length)==0 or any($u[];IN($f[])))]' \\`,
+  '"{ANALYSIS_DIR}/snyk-all.json" >"{ANALYSIS_DIR}/snyk.sarif" \\',
+  "&& jq -nr '[inputs|[.runs[]?.results[]?]|length]|\"total=\\(.[0]) kept=\\(.[1])\"' \"{ANALYSIS_DIR}/snyk-all.json\" \"{ANALYSIS_DIR}/snyk.sarif\" \\",
+  '|| { echo "Snyk scope filter failed: unfiltered"; cp "{ANALYSIS_DIR}/snyk-all.json" "{ANALYSIS_DIR}/snyk.sarif"; }',
+];
+const SNYK_FILTER_DEFECTS = [
+  'the Snyk fence does not write the changed names to changed.z (git diff -z) and read them with jq --rawfile',
+  'the Snyk filter does not keep a result with no location, or one with a location in a changed file',
+  'the Snyk filter does not read snyk-all.json and write snyk.sarif',
+  'the Snyk fence does not print total=<n> kept=<m>',
+  'the Snyk fence does not print "Snyk scope filter failed: unfiltered" and copy the unfiltered SARIF to snyk.sarif when the filter fails',
+];
 
 /**
- * Snyk scans the project once, so its SARIF holds results for every file. The filter keeps the results whose file is
- * a changed file. When `jq` fails or is absent, the line right after the filter prints the SARIF unfiltered, and the
- * note says so. Without that fallback a missing `jq` would print nothing, and the run would read as clean.
+ * Snyk scans the project once, so its SARIF holds results for every file. Right after the scan, the filter keeps a
+ * result with no location and a result with a location in a changed file, and the fence prints how many results it
+ * read and kept. The names come from git as NUL-separated output into a file, and reach jq only through --rawfile.
+ * When git or jq fails, the fence says so and uses the unfiltered file, so a failed filter is never silent.
  */
 function collectSnykScopeDefects(phase2: string): string[] {
   const out: string[] = [];
   const snyk = fenceWith(phase2, 'snyk code test').map(line => line.trim());
-  const filter = snyk.indexOf(`'${SNYK_SCOPE_FILTER}' \\`);
-  if (filter === -1) out.push('the Snyk filter does not keep only the results whose file is a changed file');
-  if (snyk[filter + 1] !== SNYK_FILTER_FALLBACK) out.push('the line after the Snyk filter does not write snyk.sarif, or copy the unfiltered SARIF to it when jq fails');
-  if (!phase2.includes(SNYK_UNFILTERED_NOTE)) out.push('Phase 2 does not say that the SARIF is unfiltered without jq');
+  const scan = snyk.findIndex(line => line.includes('snyk code test'));
+  SNYK_FILTER_LINES.forEach((line, index) => {
+    if (scan === -1 || snyk[scan + 1 + index] !== line) out.push(SNYK_FILTER_DEFECTS[index]);
+  });
+  const spliced = snyk.find(line => line.includes('jq') && /\$\(|`/.test(line));
+  if (spliced !== undefined) out.push(`a jq line of the Snyk fence reaches a value in a way other than --arg, --argjson or --rawfile: ${spliced}`);
   return out;
 }
 
-/** The two jq programs the Snyk fence ships: the one that reads the NUL-separated names, and the scope filter. Both throw when the fence changes shape. */
-function shippedSnykPrograms(phase2: string): { names: string; scope: string } {
-  const fence = fenceWith(phase2, 'snyk code test');
-  const names = /jq -Rs '([^']+)'/.exec(fence.join('\n'));
-  const scope = fence.map(line => line.trim()).find(line => line.startsWith("'.runs[]") && line.endsWith("' \\"));
-  if (names === null || scope === undefined) throw new Error('the Snyk fence no longer holds the jq name reader and the scope filter in their shipped shape');
-  return { names: names[1], scope: scope.slice(1, -3) };
+/** The Snyk fence as shipped, to run with bash from a scratch repo: placeholders are filled for it. It throws when the fence changes shape. */
+function shippedSnykFence(phase2: string, repo: string, folder: string, range: string): string {
+  const fence = bashFences(phase2).find(text => fenceLines(text).some(line => line.includes('snyk code test')));
+  if (fence === undefined) throw new Error('the Snyk fence is gone');
+  return fenceLines(fence).join('\n').split('{worktree}').join(repo).split('{ANALYSIS_DIR}').join(folder).split('{DIFF_RANGE}').join(range);
 }
 
 type SarifLevel = 'error' | 'warning' | 'note' | undefined;
@@ -854,6 +868,67 @@ function runCountsFence(phase2: string, folder: string, tools: string, files: Re
 function countsFenceSkipReason(): string | null {
   const missing = ['jq', 'bash'].filter(command => spawnSync(command, ['--version'], { encoding: 'utf8' }).status !== 0);
   return missing.length === 0 ? null : `${missing.join(' and ')} is not installed, so the shipped counts and table programs are not run`;
+}
+
+const SNYK_CHANGED = ['src/café.ts', 'docs/日本語 notes.md', 'src/two words.ts', 'src/plain.ts'];
+const SNYK_UNTOUCHED = ['src/other.ts', 'src/café other.ts'];
+const snykResult = (ruleId: string, uris?: string[]): object => ({
+  ruleId,
+  ...(uris === undefined ? {} : { locations: uris.map(uri => ({ physicalLocation: { artifactLocation: { uri } } })) }),
+});
+/** Results for one Snyk run: one per case the filter must tell apart, in the order the fence keeps them. */
+const SNYK_RESULTS = [
+  snykResult('untouched', [SNYK_UNTOUCHED[0]]),
+  ...SNYK_CHANGED.map((name, index) => snykResult(`changed-${index}`, [name])),
+  snykResult('two-changed', [SNYK_CHANGED[3], SNYK_CHANGED[2]]),
+  snykResult('mixed', [SNYK_UNTOUCHED[0], SNYK_CHANGED[3]]),
+  snykResult('two-untouched', [SNYK_UNTOUCHED[0], SNYK_UNTOUCHED[1]]),
+  snykResult('no-locations'),
+  snykResult('empty-locations', []),
+  snykResult('untouched-last', [SNYK_UNTOUCHED[1]]),
+];
+const SNYK_KEPT = ['changed-0', 'changed-1', 'changed-2', 'changed-3', 'two-changed', 'mixed', 'no-locations', 'empty-locations'];
+/** One run with results, one run whose results are null, one run with no results at all. */
+const SNYK_SARIF = JSON.stringify({ runs: [{ tool: { driver: { name: 'SnykCode' } }, results: SNYK_RESULTS }, { results: null }, { tool: { driver: { name: 'SnykCode' } } }] });
+
+/** The reason the shipped Snyk fence cannot run here, or null. */
+function snykFenceSkipReason(): string | null {
+  const missing = ['jq', 'bash', 'git'].filter(command => spawnSync(command, ['--version'], { encoding: 'utf8' }).status !== 0);
+  return missing.length === 0 ? null : `${missing.join(' and ')} is not installed, so the shipped Snyk fence is not run`;
+}
+
+/** A scratch repo: the first commit holds every file, the second changes the files in SNYK_CHANGED. */
+function makeSnykRepo(folder: string): string {
+  const repo = join(folder, 'repo');
+  mkdirSync(repo);
+  const git = (...args: string[]): void => {
+    const run = spawnSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', ...args], { encoding: 'utf8' });
+    expect(run.status, run.stderr).toBe(0);
+  };
+  const write = (name: string, text: string): void => {
+    mkdirSync(dirname(join(repo, name)), { recursive: true });
+    writeFileSync(join(repo, name), text);
+  };
+  git('init', '-q');
+  for (const name of [...SNYK_CHANGED, ...SNYK_UNTOUCHED]) write(name, 'one\n');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'one');
+  for (const name of SNYK_CHANGED) write(name, 'two\n');
+  git('commit', '-q', '-a', '-m', 'two');
+  return repo;
+}
+
+/** Runs the shipped Snyk fence with a stub scanner that prints `scannerOutput` and exits 1, and reads back what it printed and wrote to snyk.sarif. */
+function runSnykFence(phase2: string, folder: string, scannerOutput: string, range: string): { printed: string[]; sarif: string; status: number | null } {
+  const repo = makeSnykRepo(folder);
+  const analysis = join(folder, 'analysis');
+  const bin = join(folder, 'bin');
+  mkdirSync(analysis);
+  mkdirSync(bin);
+  writeFileSync(join(folder, 'scanner-output.json'), scannerOutput);
+  writeFileSync(join(bin, 'snyk'), `#!/bin/sh\ncat '${join(folder, 'scanner-output.json')}'\nexit 1\n`, { mode: 0o755 });
+  const run = spawnSync('bash', ['-s'], { input: shippedSnykFence(phase2, repo, analysis, range), encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}` } });
+  return { printed: run.stdout.split('\n').filter(line => line !== ''), sarif: readFileSync(join(analysis, 'snyk.sarif'), 'utf8'), status: run.status };
 }
 
 describe('bug-analysis.md — static analysis never reads as clean when it did not run or did not finish (#649)', () => {
@@ -1042,8 +1117,8 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     const snyk = 'the Snyk status is not read on its scanner line (E=$?) and printed after the filter, printing "$E"';
     const withoutSnykExit = probe(exitOrder, seed(body ?? '', SNYK_EXIT_AT, '$1'));
     expect(withoutSnykExit('snyk code test', `${EXIT_PRINT}"$E"\nsnyk code test`)).toContain(snyk);
-    expect(withoutSnykExit('jq --argjson files', `${EXIT_PRINT}"$E"\njq --argjson files`)).toContain(snyk);
-    expect(withoutSnykExit(/(snyk\.sarif"\n)/, `$1${EXIT_PRINT}"$E"\n`)).toEqual([]);
+    expect(withoutSnykExit(SNYK_NAMES, `${EXIT_PRINT}"$E"\n${SNYK_NAMES}`)).toContain(snyk);
+    expect(withoutSnykExit(/(snyk\.sarif"; \}\n)/, `$1${EXIT_PRINT}"$E"\n`)).toEqual([]);
     expect(defects(SNYK_EXIT_AT, `$1${EXIT_PRINT}"$?"\n`)).toContain(snyk);
     expect(defects('snyk-all.json" 2>/dev/null; E=$?', 'snyk-all.json" 2>/dev/null; true')).toContain(snyk);
     const codeql = 'the CodeQL exit line does not follow CODEQL_EXIT=$?, printing "$CODEQL_EXIT"';
@@ -1083,7 +1158,7 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     const printed = expect.stringContaining('a fence prints SARIF to the call output');
     expect(defects('CODEQL_EXIT=$?\n', 'CODEQL_EXIT=$?\ncat "${CODEQL_TMP}/results.sarif"\n')).toContainEqual(printed);
     expect(defects('CODEQL_EXIT=$?\n', 'CODEQL_EXIT=$?\ncat "{ANALYSIS_DIR}/codeql.sarif"\n')).toContainEqual(printed);
-    expect(defects('jq --argjson files', 'printf \'%s\' "$S" | jq --argjson files')).toContainEqual(printed);
+    expect(defects('jq --rawfile n', 'printf \'%s\' "$S" | jq --rawfile n')).toContainEqual(printed);
     expect(defects('snyk code test --sarif >', 'S=$(snyk code test --sarif >')).toContainEqual(printed);
     const counts = (part: string): string => `the counts fence does not say: ${part}`;
     expect(defects('touch findings.tsv\n', '')).toEqual([counts(COUNTS_PARTS[8])]);
@@ -1166,10 +1241,10 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(defects('--quiet -- >', '--quiet >')).toContain(semgrepLine);
     expect(defects('xargs -0 -r semgrep', 'xargs -0 semgrep')).toContain(semgrepLine);
     const snykLine = 'the Snyk filter does not read the names from git as NUL-separated output';
-    expect(defects(SNYK_NAME_LIST, '"$(echo "$CHANGED_FILES" | jq -R . | jq -s .)"'))
+    expect(defects(SNYK_NAMES, 'echo "$CHANGED_FILES" | jq -R . | jq -s . >"{ANALYSIS_DIR}/changed.z"'))
       .toEqual(expect.arrayContaining([snykLine, expect.stringContaining('a scanner line reads CHANGED_FILES')]));
-    expect(defects(SNYK_NAME_LIST, '"$(git diff --name-only {DIFF_RANGE} | jq -Rs \'split("\\u0000")\')"')).toContain(snykLine);
-    expect(defects(SNYK_NAME_LIST, '"$(git diff --name-only {DIFF_RANGE} | jq -R . | jq -s .)"')).toContain(snykLine);
+    expect(defects(SNYK_NAMES, 'git diff --name-only {DIFF_RANGE} >"{ANALYSIS_DIR}/changed.z"')).toContain(snykLine);
+    expect(defects(SNYK_NAMES, 'git diff --name-only {DIFF_RANGE} | jq -R . | jq -s . >"{ANALYSIS_DIR}/changed.z"')).toContain(snykLine);
     expect(defects('File names reach a scanner only through', 'File names reach a scanner through')).toContain('Phase 2 does not say how file names reach a scanner');
     expect(collectFileNameHandoffDefects('')).toContain('0 bash fences, expected at least 6');
   });
@@ -1224,48 +1299,38 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(defects('It stays did not complete for this run: ', '')).toContain(doesNotSay(STATUS_RULE_PARTS[3]));
   });
 
-  it.each(builds)('the Snyk results are cut to the changed files, with an unfiltered fallback and a note (%s)', (_label, body) => {
+  it.each(builds)('the Snyk results are cut to the changed files; a failed filter says so and uses the unfiltered file (%s)', (_label, body) => {
     expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
     expect(snykScope(body ?? '')).toEqual([]);
   });
 
-  it.each(builds)('known-bad probes: a changed Snyk filter, a lost fallback or a lost note is reported (%s)', (_label, body) => {
+  it.each(builds)('known-bad probes: a changed Snyk name list, filter, output, count or fallback is reported (%s)', (_label, body) => {
     expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
     const defects = probe(snykScope, body);
-    const filter = 'the Snyk filter does not keep only the results whose file is a changed file';
-    const fallback = 'the line after the Snyk filter does not write snyk.sarif, or copy the unfiltered SARIF to it when jq fails';
-    expect(defects('.runs[].results |= map(select(', '.runs[].results |= map(select(true or (')).toContain(filter);
-    expect(defects('$files | index($uri) != null', '$files | index($uri) == null')).toContain(filter);
-    expect(defects('.runs[].results |= map(', '.runs[].results |= (')).toContain(filter);
-    const copy = ' || cp "{ANALYSIS_DIR}/snyk-all.json" "{ANALYSIS_DIR}/snyk.sarif"';
-    expect(defects(copy, '')).toContain(fallback);
-    expect(defects(copy, ' || true')).toContain(fallback);
-    expect(defects('2>/dev/null || cp', '2>/dev/null\\\ncp')).toContain(fallback);
-    expect(defects(' >"{ANALYSIS_DIR}/snyk.sarif" 2>/dev/null', ' >"{ANALYSIS_DIR}/snyk.json" 2>/dev/null')).toContain(fallback);
-    expect(defects(SNYK_UNFILTERED_NOTE, 'The SARIF may be unfiltered.')).toContain('Phase 2 does not say that the SARIF is unfiltered without jq');
-    expect(defects('Without `jq`', 'Without it')).toContain('Phase 2 does not say that the SARIF is unfiltered without jq');
-    expect(collectSnykScopeDefects('')).toHaveLength(3);
-  });
-
-  for (const [label, body] of builds) it(`the shipped Snyk filter keeps the findings for changed files, whatever the file name (${label})`, ctx => {
-    expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
-    const { names, scope } = shippedSnykPrograms(phase2Of(body ?? ''));
-    if (spawnSync('jq', ['--version'], { encoding: 'utf8' }).status !== 0) {
-      const reason = 'jq is not installed, so the shipped Snyk filter is not run';
-      console.warn(`[bug-analysis structural] ${reason}`);
-      ctx.skip(reason);
-    }
-    const sarifOf = (uris: string[]): string => JSON.stringify({ runs: [{ tool: { driver: { name: 'SnykCode' } }, results: uris.map(uri => ({ ruleId: 'rule', locations: [{ physicalLocation: { artifactLocation: { uri } } }] })) }] });
-    const changed = ['src/café.ts', 'docs/日本語 notes.md', 'src/two words.ts', 'src/plain.ts'];
-    const untouched = ['src/other.ts', 'src/café other.ts'];
-    const nulSeparated = changed.map(name => `${name}\u0000`).join('');
-    const list = spawnSync('jq', ['-Rs', names], { input: nulSeparated, encoding: 'utf8' });
-    expect(list.status, list.stderr).toBe(0);
-    const filtered = spawnSync('jq', ['--argjson', 'files', list.stdout, scope], { input: sarifOf([untouched[0], ...changed, untouched[1]]), encoding: 'utf8' });
-    expect(filtered.status, filtered.stderr).toBe(0);
-    const kept = (JSON.parse(filtered.stdout) as { runs: Array<{ results: Array<{ locations: Array<{ physicalLocation: { artifactLocation: { uri: string } } }> }> }> }).runs[0].results
-      .map(result => result.locations[0].physicalLocation.artifactLocation.uri);
-    expect(kept).toEqual(changed);
+    const [names, filter, output, count, fallback] = SNYK_FILTER_DEFECTS;
+    expect(defects('-z {DIFF_RANGE} >"{ANALYSIS_DIR}/changed.z"', '{DIFF_RANGE} >"{ANALYSIS_DIR}/changed.z"')).toContain(names);
+    expect(defects('>"{ANALYSIS_DIR}/changed.z" && jq', '>"{ANALYSIS_DIR}/changed.txt" && jq')).toContain(names);
+    expect(defects('jq --rawfile n', 'jq --argjson n')).toContain(names);
+    expect(defects('--rawfile n "{ANALYSIS_DIR}/changed.z"', '--rawfile n "{ANALYSIS_DIR}/snyk-all.json"')).toContain(names);
+    expect(defects('($u|length)==0 or ', '')).toContain(filter);
+    expect(defects('any($u[];IN($f[]))', 'all($u[];IN($f[]))')).toContain(filter);
+    expect(defects('IN($f[])', 'IN($f)')).toContain(filter);
+    expect(defects('.locations[]?.physicalLocation', '.locations[0].physicalLocation')).toContain(filter);
+    expect(defects('.runs[]?.results|=[.[]?|select(', '.runs[].results|=map(select(')).toContain(filter);
+    expect(defects('//empty]', ']')).toContain(filter);
+    expect(defects('snyk-all.json" >"{ANALYSIS_DIR}/snyk.sarif"', 'snyk-all.json" >"{ANALYSIS_DIR}/snyk.json"')).toContain(output);
+    expect(defects('"{ANALYSIS_DIR}/snyk-all.json" >', '"{ANALYSIS_DIR}/snyk.sarif" >')).toContain(output);
+    expect(defects(' kept=\\(.[1])', '')).toContain(count);
+    expect(defects('"total=', '"all=')).toContain(count);
+    expect(defects('[inputs|', '[')).toContain(count);
+    expect(defects(SNYK_FILTER_LINES[3], '&& true \\')).toContain(count);
+    expect(defects(SNYK_FILTER_LINES[4], '|| true')).toContain(fallback);
+    expect(defects('; cp "{ANALYSIS_DIR}/snyk-all.json" "{ANALYSIS_DIR}/snyk.sarif"; }', '; }')).toContain(fallback);
+    expect(defects('Snyk scope filter failed: unfiltered', 'Snyk scope filter failed')).toContain(fallback);
+    expect(defects('|| { echo', '|| true; { echo')).toContain(fallback);
+    expect(defects('jq --rawfile n', 'jq --arg x "$(git diff --name-only -z)" --rawfile n'))
+      .toContainEqual(expect.stringContaining('a jq line of the Snyk fence reaches a value in a way other than --arg, --argjson or --rawfile'));
+    expect(collectSnykScopeDefects('')).toEqual(SNYK_FILTER_DEFECTS);
   });
 
   /** Runs `check` with a scratch folder that is removed afterwards. */
@@ -1277,6 +1342,44 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
       rmSync(folder, { recursive: true, force: true });
     }
   };
+
+  for (const [label, body] of builds) {
+    const phase2 = (): string => phase2Of(body ?? '');
+    const skipUnlessRunnable = (ctx: { skip: (reason: string) => never }): void => {
+      expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
+      const reason = snykFenceSkipReason();
+      if (reason !== null) {
+        console.warn(`[bug-analysis structural] ${reason}`);
+        ctx.skip(reason);
+      }
+    };
+    const resultIds = (sarif: string): string[][] =>
+      (JSON.parse(sarif) as { runs: Array<{ results: Array<{ ruleId: string }> }> }).runs.map(run => run.results.map(result => result.ruleId));
+
+    it(`the shipped Snyk fence keeps every result with a changed file or no location, once, and prints the totals (${label})`, ctx => {
+      skipUnlessRunnable(ctx);
+      inScratch(folder => {
+        const run = runSnykFence(phase2(), folder, SNYK_SARIF, 'HEAD~1..HEAD');
+        expect(run.status).toBe(0);
+        expect(run.printed).toEqual([`total=${SNYK_RESULTS.length} kept=${SNYK_KEPT.length}`, 'exit=1']);
+        expect(resultIds(run.sarif)).toEqual([SNYK_KEPT, [], []]);
+      });
+    });
+
+    it(`the shipped Snyk fence says the filter failed and uses the unfiltered file when jq or git fails (${label})`, ctx => {
+      skipUnlessRunnable(ctx);
+      inScratch(folder => {
+        const invalid = runSnykFence(phase2(), folder, '{"runs": [', 'HEAD~1..HEAD');
+        expect(invalid.printed).toEqual(['Snyk scope filter failed: unfiltered', 'exit=1']);
+        expect(invalid.sarif).toBe('{"runs": [');
+      });
+      inScratch(folder => {
+        const noRange = runSnykFence(phase2(), folder, SNYK_SARIF, 'no-such-ref..HEAD');
+        expect(noRange.printed).toEqual(['Snyk scope filter failed: unfiltered', 'exit=1']);
+        expect(noRange.sarif).toBe(SNYK_SARIF);
+      });
+    });
+  }
 
   for (const [label, body] of builds) {
     const phase2 = (): string => phase2Of(body ?? '');

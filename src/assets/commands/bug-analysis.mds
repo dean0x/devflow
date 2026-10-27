@@ -124,12 +124,13 @@ printf '\nexit=%s\n' "$E"
 ```bash
 cd "{worktree}" || exit
 snyk code test --sarif >"{ANALYSIS_DIR}/snyk-all.json" 2>/dev/null; E=$?
-jq --argjson files "$(git diff --name-only -z {DIFF_RANGE} | jq -Rs 'split("\u0000")')" \
-  '.runs[].results |= map(select(.locations[].physicalLocation.artifactLocation.uri as $uri | $files | index($uri) != null))' \
-  "{ANALYSIS_DIR}/snyk-all.json" >"{ANALYSIS_DIR}/snyk.sarif" 2>/dev/null || cp "{ANALYSIS_DIR}/snyk-all.json" "{ANALYSIS_DIR}/snyk.sarif"
+git diff --name-only -z {DIFF_RANGE} >"{ANALYSIS_DIR}/changed.z" && jq --rawfile n "{ANALYSIS_DIR}/changed.z" \
+  '($n|split("\u0000")) as $f|.runs[]?.results|=[.[]?|select([.locations[]?.physicalLocation.artifactLocation.uri//empty] as $u|($u|length)==0 or any($u[];IN($f[])))]' \
+  "{ANALYSIS_DIR}/snyk-all.json" >"{ANALYSIS_DIR}/snyk.sarif" \
+  && jq -nr '[inputs|[.runs[]?.results[]?]|length]|"total=\(.[0]) kept=\(.[1])"' "{ANALYSIS_DIR}/snyk-all.json" "{ANALYSIS_DIR}/snyk.sarif" \
+  || { echo "Snyk scope filter failed: unfiltered"; cp "{ANALYSIS_DIR}/snyk-all.json" "{ANALYSIS_DIR}/snyk.sarif"; }
 printf '\nexit=%s\n' "$E"
 ```
-Without `jq` the SARIF is unfiltered: note that.
 
 **Counts and table** (after Snyk with `{tools}` = `semgrep snyk`; after CodeQL with `codeql`):
 ```bash
