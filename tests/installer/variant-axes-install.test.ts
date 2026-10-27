@@ -25,6 +25,7 @@ import {
   installViaFileCopy,
   type Spinner,
 } from '../../src/targets/claude-code/installer.js';
+import type { AgentSourceDirs } from '../../src/core/assets.js';
 import { renderVariantManifest, type VariantManifestHost } from '../../src/core/curation-variants.js';
 import { buildAssetMaps, type PluginDefinition } from '../../src/core/plugins.js';
 import { TRACKER_MCP_SERVERS_DEFAULT } from '../../src/core/tracker.js';
@@ -165,6 +166,7 @@ interface Machine {
   curation: boolean;
   compliance: boolean;
   isPartialInstall?: boolean;
+  agentSourceDirs?: AgentSourceDirs;
 }
 
 function install(machine: Machine): Promise<unknown> {
@@ -179,6 +181,7 @@ function install(machine: Machine): Promise<unknown> {
     curation: machine.curation,
     compliance: machine.compliance,
     packageRoot: pkg,
+    agentSourceDirs: machine.agentSourceDirs,
     warn,
   });
 }
@@ -458,6 +461,94 @@ describe('a both-off machine never falls through to the curation-off file (TP-10
     await install({ curation: false, compliance: true });
 
     expect(await fs.readFile(installedAgent('code'), 'utf-8')).toBe(text('code', 'CURATION-OFF'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The file the copy takes is the file the check required
+// ---------------------------------------------------------------------------
+
+describe('a compliance-armed prompt installs the file the check required', () => {
+  beforeEach(async () => {
+    await seedInstalled();
+  });
+
+  /** The same roster with agents/fix made a prompt that carries a compliance arm only. */
+  async function writeComplianceOnlyAgentManifest(): Promise<void> {
+    await writeManifest(ROSTER.map(({ kind, name, axes }) => (
+      kind === 'agents' && name === 'fix' ? host(kind, name, false, true) : host(kind, name, axes.curation, axes.compliance)
+    )));
+    await write(inPkg(`${TREE.complianceOff}/agents/fix.md`), text('fix', 'COMPLIANCE-OFF'));
+  }
+
+  it('a both-off machine refuses a command whose compliance-off file is shadowed by a curation-off file', async () => {
+    await write(inPkg(`${TREE.curationOff}/commands/plan.md`), text('plan', 'CURATION-OFF'));
+
+    const message = await expectRefused(() => install({ curation: false, compliance: false }));
+
+    expect(message).toContain(`${TREE.complianceOff}/commands/plan.md`);
+    expect(message).toContain(`${TREE.curationOff}/commands/plan.md`);
+    expect(message).toContain('npm run build:mds');
+    expect(message).toContain('no file was written');
+    expect(await fs.readFile(installedCommand('implement'), 'utf-8')).toBe('OLD implement\n');
+  });
+
+  it('a both-off machine refuses an agent whose compliance-off file is shadowed by a curation-off file', async () => {
+    await writeComplianceOnlyAgentManifest();
+    await write(inPkg(`${TREE.curationOff}/agents/fix.md`), text('fix', 'CURATION-OFF'));
+
+    const message = await expectRefused(() => install({ curation: false, compliance: false }));
+
+    expect(message).toContain(`${TREE.complianceOff}/agents/fix.md`);
+    expect(message).toContain(`${TREE.curationOff}/agents/fix.md`);
+    expect(message).toContain('npm run build:mds');
+    expect(await fs.readFile(installedAgent('code'), 'utf-8')).toBe('OLD code\n');
+  });
+
+  it('the copy alone refuses a shadowed compliance-off file before it writes', async () => {
+    await write(inPkg(`${TREE.curationOff}/commands/plan.md`), text('plan', 'CURATION-OFF'));
+
+    const message = await expectRefused(() => installCommandsAndAgents({
+      plugins: [PLUGIN],
+      agentsMap: buildAssetMaps([PLUGIN]).agentsMap,
+      claudeDir,
+      curation: false,
+      compliance: false,
+      packageRoot: pkg,
+      trackerServers: TRACKER_MCP_SERVERS_DEFAULT,
+      warn,
+    }));
+
+    expect(message).toContain(`${TREE.curationOff}/commands/plan.md`);
+  });
+
+  it('an injected agent list that reaches another file first is refused', async () => {
+    const injected: AgentSourceDirs = [inPkg('dist/agents'), inPkg('src/assets/agents')];
+
+    const message = await expectRefused(() => install({ curation: true, compliance: false, agentSourceDirs: injected }));
+
+    expect(message).toContain(`${TREE.complianceOff}/agents/code.md`);
+    expect(message).toContain('dist/agents/code.md');
+  });
+
+  it('control: an injected agent list that reaches the required file first installs it', async () => {
+    const injected: AgentSourceDirs = [inPkg(`${TREE.complianceOff}/agents`), inPkg('dist/agents'), inPkg('src/assets/agents')];
+
+    await install({ curation: true, compliance: false, agentSourceDirs: injected });
+
+    expect(await fs.readFile(installedAgent('code'), 'utf-8')).toBe(text('code', 'COMPLIANCE-OFF'));
+    expect(await fs.readFile(installedAgent('evaluate'), 'utf-8')).toBe(text('evaluate', 'SRC'));
+  });
+
+  it('control: a both-off machine installs the compliance-off files of the prompts that carry only that arm', async () => {
+    await writeComplianceOnlyAgentManifest();
+
+    await install({ curation: false, compliance: false });
+
+    expect(await fs.readFile(installedCommand('plan'), 'utf-8')).toBe(text('plan', 'COMPLIANCE-OFF'));
+    expect(await fs.readFile(installedAgent('fix'), 'utf-8')).toBe(text('fix', 'COMPLIANCE-OFF'));
+    expect(await fs.readFile(installedCommand('implement'), 'utf-8')).toBe(text('implement', 'BOTH-OFF'));
+    expect(await fs.readFile(installedAgent('code'), 'utf-8')).toBe(text('code', 'BOTH-OFF'));
   });
 });
 
