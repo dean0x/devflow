@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes — Quality rules
+
+**What you must do:**
+- A quality rule that you keep at `~/.devflow/rules/quality.md` replaces the shipped one, so you do not get its two new bullets. Add them to your copy. Or run `devflow rules unshadow quality`, which deletes your copy, and then run `devflow init`.
+- A testing skill that you keep at `~/.devflow/skills/testing/` replaces the shipped one, so you do not get its new Quality Gates item or its cuts. Add the item to your copy. Or run `devflow skills unshadow testing`, which deletes your copy, and then run `devflow init`.
+
+**Stale-install window:**
+- Until you run `devflow init`, the installed quality rule and testing skill lack the new text.
+
+### Changed
+
+- **The quality rule and the testing skill target doc drift, duplicated code and vacuous tests** ([#476](https://github.com/dean0x/devflow/issues/476)).
+  - The quality rule has two new bullets. When a change alters a name, path or behavior, the agent updates the current tracked docs that state the old fact, and not released changelog entries. It describes a security fix by its effect only. Before it adds new code, the agent finds the existing owner and extends it when the new code shares its job. A trust-boundary or fail-closed check is not a copy.
+  - The Quality Gates of the testing skill have a new item: each new assertion would fail, not error, with the change reverted. The RED run counts; else a bad input or a temporary, uncommitted revert of your own edit shows it, never a stash. Three items that repeated other parts of the skill are cut, and a repeated parenthetical is cut from the flaky-pattern item. The skill is 25 bytes smaller, so the Code and Fix preload totals fall by 25 bytes each (Code 25,514 to 25,489, Fix 14,875 to 14,850). The quality rule is not in the preload and loads in every session: it grows by 326 bytes.
+  - A guard pins each new line once, with its limits, and pins a byte ceiling for the two bullets.
+
+### Fixed
+
+- **The gate-level step of `devflow init` fits an 80-column terminal** ([#658](https://github.com/dean0x/devflow/issues/658)).
+  - Each level hint is now one short line, and no line of the step note is longer than 72 characters.
+  - The step note names `/resolve` with the other commands that read the level.
+  - The full effect of each level stays in `devflow gates` and in the docs.
+- **`/bug-analysis` no longer reports "no findings" when static analysis could not run** ([#649](https://github.com/dean0x/devflow/issues/649)).
+  - Without GNU `timeout` or `gtimeout` (stock macOS), it runs no scanner and says so. Install coreutils to enable it.
+  - A scanner that fails, times out or exits with an error is named in the report with its exit status.
+  - Each scanner's time bound ends before its Bash call does, and file names reach the scanners safely.
+  - Semgrep and Snyk now run one after the other.
+
 ---
 
 ## [3.9.0] - 2026-10-22
