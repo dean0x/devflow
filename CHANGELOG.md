@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **The `/implement` self-review (Harden) states that it never reviews a deleted file or the old path of a rename** ([#571](https://github.com/dean0x/devflow/issues/571)).
-  - The file list that Harden gets leaves out deleted files and the old path of a rename. The command now says so, in every build.
+  - The file list that Harden gets leaves out deleted files and the old path of a rename. The command now says so.
   - When the list is empty, Harden reports `### Status: PASS` with the line `no files reviewed`. An empty list no longer reads as a completed review.
   - The docs describe the same rule.
 - **The `/implement` command states that alignment-fix commits get no self-review** ([#572](https://github.com/dean0x/devflow/issues/572)).
