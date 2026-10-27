@@ -24,8 +24,8 @@
 // (the render block's TP lines come from the caller's own plan file):
 //   check     nothing — the exit code is the answer; the diagnostic is on stderr.
 //             `check wave --links-only` also admits the links-only wave block (the
-//             `## Related Issues` heading and `Refs #<n>` lines, no evidence section);
-//             plain `check wave` refuses that block as malformed
+//             `## Related Issues` heading and `Refs #<n>` or `Refs <KEY-N>` lines, no
+//             evidence section); plain `check wave` refuses that block as malformed
 //   render   the creation block: markers, `## Test Plan`, every TP unticked
 //   verify    EVIDENCE pr:<n> head:<sha> total:<n> VERIFIED-CI:<n> ATTESTED-LOCAL:<n>
 //             UNVERIFIED:<n> STALE:<n> FAILED:<n> INDETERMINATE:<n> stale:<ids|none>

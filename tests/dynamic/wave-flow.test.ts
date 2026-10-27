@@ -2395,8 +2395,9 @@ export function collectWaveOffStepDefects(md: string): string[] {
   const f7 = parseFences(step7)
   need('links-only check: one check wave call, with the links-only flag', f3.filter(f => f.includes('check wave')).length === 1 && step3.includes(LINKS_ONLY_CHECK))
   need('no closing line: the block holds no verdict, so no Closes', step3.includes('No line is `Closes`: the block holds no verdict, so it closes no issue.'))
-  need('related line: a #N reference only, written as Refs', step3.includes('the related line is `Refs ` and that reference') && step3.includes('a `KEY-N` reference included'))
-  need('tracking line: a #N token only', step3.includes('whose token is, as a whole, a `#N` reference: `Refs ` and that token, verbatim'))
+  need('related line: written as Refs, from the entry\'s captured reference', step3.includes('the related line is `Refs ` and that reference'))
+  need('related KEY-N: a #N or a KEY-N reference each gets its line', step3.includes('a `#N` or `KEY-N` reference, the related line'))
+  need('tracking line: a #N or a KEY-N token', step3.includes('whose token is, as a whole, a `#N` or `KEY-N` reference: `Refs ` and that token, verbatim'))
   need('empty block: no line means no block and no check', step3.includes('With no line under the heading, `PR_WAVE_BLOCK` is `(none)` and nothing is checked.'))
   need('refused block: no wave PR', step3.includes('Wave PR: not opened (wave block refused: <the code on stderr>)'))
   need('no verdict table: the block has none', step3.includes('It has no verdict table and no evidence section') && !f3.some(f => f.includes('## Wave Evidence')))
@@ -2429,7 +2430,8 @@ const WAVE_OFF_SEEDS: ReadonlyArray<readonly [site: string, from: string, to: st
   ['links-only check', LINKS_ONLY_CHECK, LINKS_ONLY_CHECK.replace(' --links-only', '')],
   ['no closing line', 'No line is `Closes`: the block holds no verdict, so it closes no issue.', 'A merged ticket closes its issue.'],
   ['related line', 'the related line is `Refs ` and that reference', 'the related line is the link line'],
-  ['tracking line', 'whose token is, as a whole, a `#N` reference: `Refs ` and that token, verbatim', 'whose token is any token: `Refs ` and that token, verbatim'],
+  ['related KEY-N', 'a `#N` or `KEY-N` reference, the related line', 'a `#N` reference, the related line'],
+  ['tracking line', 'whose token is, as a whole, a `#N` or `KEY-N` reference: `Refs ` and that token, verbatim', 'whose token is any token: `Refs ` and that token, verbatim'],
   ['empty block', 'With no line under the heading, `PR_WAVE_BLOCK` is `(none)` and nothing is checked.', 'With no line under the heading, the wave PR is not opened.'],
   ['refused block', 'Wave PR: not opened (wave block refused: <the code on stderr>)', 'Wave PR: opened anyway'],
   ['no verdict table', 'It has no verdict table and no evidence section', 'It has a verdict table'],
@@ -2468,7 +2470,7 @@ describe('#648 AC-13, AC-15, AC-19, AC-24: the compliance-off builds of /dynamic
     expect(collectWaveOffStepDefects('no steps'), 'a missing step set is one defect').toHaveLength(1)
     const clean = collectWaveOffStepDefects(dynamicBuildOff('compliance-off'))
     expect(clean).toEqual([])
-    expect(WAVE_OFF_SEEDS.map(s => s[0])).toHaveLength(17)
+    expect(WAVE_OFF_SEEDS.map(s => s[0])).toHaveLength(18)
   })
 
   for (const [site, from, to] of WAVE_OFF_SEEDS) {
@@ -2478,6 +2480,23 @@ describe('#648 AC-13, AC-15, AC-19, AC-24: the compliance-off builds of /dynamic
       expect(found[0].startsWith(site), found[0]).toBe(true)
     })
   }
+
+  it('known-bad probe: a tracking line that admits a #N token only is reported, and only it', () => {
+    const md = dynamicBuildOff('compliance-off')
+    const found = collectWaveOffStepDefects(seedOnce(md, 'a `#N` or `KEY-N` reference: `Refs ` and that token', 'a `#N` reference: `Refs ` and that token'))
+    expect(found, found.join('\n')).toHaveLength(1)
+    expect(found[0].startsWith('tracking line'), found[0]).toBe(true)
+  })
+
+  it('both off builds admit a KEY-N reference and never write Closes: the block states each rule once', () => {
+    for (const [label, key] of DYNAMIC_OFF_KEYS) {
+      const step3 = section(dynamicBuildOff(key), STEP3, STEP4)!
+      expect(offsetsOf(step3, 'is, as a whole, a `#N` or `KEY-N` reference, the related line is `Refs ` and that reference'), `${label}: the related line`).toHaveLength(1)
+      expect(offsetsOf(step3, 'whose token is, as a whole, a `#N` or `KEY-N` reference: `Refs ` and that token, verbatim'), `${label}: the tracking line`).toHaveLength(1)
+      expect(offsetsOf(step3, 'No line is `Closes`: the block holds no verdict, so it closes no issue.'), `${label}: no Closes`).toHaveLength(1)
+      expect(step3, `${label}: nothing is composed from a bare number or a URL`).toContain('Any other token (a bare number, a URL), or none ⇒ no tracking line: nothing is composed from a number.')
+    }
+  })
 
   it('known-bad probes: a restored publish call and a restored wave-report post are reported by the absence collector', () => {
     const md = dynamicBuildOff('compliance-off')
@@ -2529,20 +2548,21 @@ function requireCurationVariant(key: DynamicOffKey): string {
 // The links-only block, rendered as step 3 states it and checked by the script
 // ---------------------------------------------------------------------------
 
-/** A `#N` reference as a whole: the only reference a links-only block carries. */
-const HASH_REF_RE = /^#[1-9][0-9]{0,8}$/
+/** A `#N` or `KEY-N` reference as a whole: the references a links-only block carries. */
+const WHOLE_REF_RE = /^(?:#[1-9][0-9]{0,8}|[A-Z][A-Z0-9_]{0,9}-[1-9][0-9]{0,8})$/
 
 /**
  * A model of the off step 3's block rules over the workflow's `tickets`: the tracking line first, only from a
- * `#N` token; then one `Refs` line per entry whose captured `issuePrLink` is not `(none)` and names a `#N`
- * reference; never `Closes`. Null when no line is written, which is `PR_WAVE_BLOCK: (none)` and no check.
+ * `#N` or `KEY-N` token; then one `Refs` line per entry whose captured `issuePrLink` is not `(none)` and names
+ * a `#N` or `KEY-N` reference; never `Closes`. Null when no line is written, which is `PR_WAVE_BLOCK: (none)`
+ * and no check.
  */
 export function renderLinksOnlyBlock(rows: readonly WaveRow[], trackingToken?: string): string | null {
-  const refs: string[] = trackingToken !== undefined && HASH_REF_RE.test(trackingToken) ? [trackingToken] : []
+  const refs: string[] = trackingToken !== undefined && WHOLE_REF_RE.test(trackingToken) ? [trackingToken] : []
   for (const r of rows) {
     if (r.issuePrLink === '(none)') continue
     const ref = r.issuePrLink.replace(/^(?:Closes|Refs) /, '')
-    if (HASH_REF_RE.test(ref)) refs.push(ref)
+    if (WHOLE_REF_RE.test(ref)) refs.push(ref)
   }
   return refs.length === 0 ? null : ['## Related Issues', ...refs.map(ref => `Refs ${ref}`), ''].join('\n')
 }
@@ -2584,29 +2604,62 @@ describe('#648 AC-15: the links-only block step 3 renders is admitted by `check 
     expect(lines.filter(l => l.startsWith('Closes'))).toEqual([])
   })
 
-  it('no `#N` line to write is no block: a KEY-N link, a bare number as the tracking token, and no link all give null', () => {
+  it('executed: KEY-N and #N links mixed give Refs lines for both, in entry order, and a KEY-N tracking token comes first', async () => {
+    const keyed: World = {
+      order: ['ENG-12', '#13', 'PROJ-14', 'ENG-15'],
+      tickets: {
+        'ENG-12': { issueId: 'ENG-12', prLinkLine: 'Refs ENG-12' },
+        '#13': { issueId: '13', prLinkLine: 'Closes #13' },
+        'PROJ-14': { issueId: 'PROJ-14', prLinkLine: 'Refs PROJ-14' },
+        'ENG-15': {},
+      },
+    }
+    const run = await runWave(WAVE!, SINGLE!, keyed, {}, 'true')
+    const block = renderLinksOnlyBlock(run.tickets, 'ENG-1')
+    expect(block).toBe(['## Related Issues', 'Refs ENG-1', 'Refs ENG-12', 'Refs #13', 'Refs PROJ-14', ''].join('\n'))
+    expect(checkWaveLinksOnly(block!), 'the links-only form admits it').toBe(0)
+    expect(checkWave(block!), 'the plain check refuses a block with no evidence section (the interim state until the reference arm lands)').not.toBe(0)
+  })
+
+  it('no line to write is no block: a bare number, a URL or a lowercase key as the tracking token, no link, and no ticket all give null', () => {
     const rows: WaveRow[] = [
-      { ticket: 'ENG-5', ran: true, verdict: 'PASS', merged: true, issuePrLink: 'Refs ENG-5' },
+      { ticket: 'ENG-8', ran: true, verdict: 'PASS', merged: true, issuePrLink: '(none)' },
       { ticket: '#7', ran: false, verdict: null, merged: false, issuePrLink: '(none)' },
     ]
     expect(renderLinksOnlyBlock(rows, '99')).toBeNull()
-    expect(renderLinksOnlyBlock(rows, 'ENG-1')).toBeNull()
+    expect(renderLinksOnlyBlock(rows, 'https://tracker.example/ENG-1')).toBeNull()
+    expect(renderLinksOnlyBlock(rows, 'eng-1')).toBeNull()
+    expect(renderLinksOnlyBlock(rows)).toBeNull()
     expect(renderLinksOnlyBlock([])).toBeNull()
   })
 
-  it('known-bad probes: a Closes line, a repeated ref, a KEY-N ref and a heading with no line are each refused', () => {
-    const good = ['## Related Issues', 'Refs #12', 'Refs #13', ''].join('\n')
-    expect(checkWaveLinksOnly(good)).toBe(0)
-    expect(checkWaveLinksOnly(seedOnce(good, 'Refs #12', 'Closes #12')), 'a Closes line').not.toBe(0)
-    expect(checkWaveLinksOnly(seedOnce(good, 'Refs #13', 'Refs #12')), 'a repeated ref').not.toBe(0)
-    expect(checkWaveLinksOnly(seedOnce(good, 'Refs #13', 'Refs ENG-13')), 'a KEY-N ref').not.toBe(0)
+  it('a KEY-N link gets its Refs line, and a link that names no whole reference writes none', () => {
+    const rows: WaveRow[] = [
+      { ticket: 'ENG-5', ran: true, verdict: 'PASS', merged: true, issuePrLink: 'Refs ENG-5' },
+      { ticket: '#7', ran: true, verdict: 'PASS', merged: true, issuePrLink: 'Closes #7' },
+      { ticket: 'eng-9', ran: true, verdict: 'PASS', merged: true, issuePrLink: 'Refs eng-9' },
+      { ticket: 'x', ran: true, verdict: 'PASS', merged: true, issuePrLink: 'Refs 12' },
+    ]
+    expect(renderLinksOnlyBlock(rows, 'PROJ-1')).toBe(['## Related Issues', 'Refs PROJ-1', 'Refs ENG-5', 'Refs #7', ''].join('\n'))
+  })
+
+  it('known-bad probes: a Closes line (#N or KEY-N), a repeated ref, a lowercase key, a bare number and a heading with no line are each refused', () => {
+    const good = ['## Related Issues', 'Refs #12', 'Refs ENG-13', ''].join('\n')
+    expect(checkWaveLinksOnly(good), 'a #N ref and a KEY-N ref').toBe(0)
+    expect(checkWaveLinksOnly(seedOnce(good, 'Refs #12', 'Closes #12')), 'a Closes #N line').not.toBe(0)
+    expect(checkWaveLinksOnly(seedOnce(good, 'Refs ENG-13', 'Closes ENG-13')), 'a Closes KEY-N line').not.toBe(0)
+    expect(checkWaveLinksOnly(seedOnce(good, 'Refs ENG-13', 'Refs #12')), 'a repeated #N ref').not.toBe(0)
+    expect(checkWaveLinksOnly(seedOnce(good, 'Refs #12', 'Refs ENG-13')), 'a repeated KEY-N ref').not.toBe(0)
+    expect(checkWaveLinksOnly(seedOnce(good, 'Refs ENG-13', 'Refs eng-13')), 'a lowercase key').not.toBe(0)
+    expect(checkWaveLinksOnly(seedOnce(good, 'Refs ENG-13', 'Refs 13')), 'a bare number').not.toBe(0)
     expect(checkWaveLinksOnly('## Related Issues\n'), 'a heading with no line').not.toBe(0)
   })
 
   it('the model is the rule the built step states: each clause the model applies is in the off text', () => {
     const step3 = section(dynamicBuildOff('compliance-off'), STEP3, STEP4)!
-    expect(step3).toContain('is, as a whole, a `#N` reference, the related line is `Refs ` and that reference')
-    expect(step3).toContain('Any other entry has no related line, a `KEY-N` reference included.')
+    expect(step3).toContain('is, as a whole, a `#N` or `KEY-N` reference, the related line is `Refs ` and that reference')
+    expect(step3).toContain('whose token is, as a whole, a `#N` or `KEY-N` reference: `Refs ` and that token, verbatim')
     expect(step3).toContain('as the first line under `## Related Issues`')
+    expect(step3).toContain('No line is `Closes`')
   })
 })

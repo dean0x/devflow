@@ -1818,14 +1818,15 @@ function parseWaveRow(line) {
 
 /**
  * D-WAVE-LINKS-ONLY: the links-only block, for related lines that ran to the end of the
- * text. Only `Refs #<n>` lines make a block of their own, and a ref may not repeat. Null
- * when the lines are not all of that shape: the caller refuses the block as before.
+ * text. Only `Refs #<n>` and `Refs <KEY-N>` lines make a block of their own (RELATED_LINE_RE
+ * has already shaped each ref), and a ref may not repeat. Null when the lines are not all
+ * `Refs` lines: the caller refuses the block as before.
  *
  * @param {readonly WaveRelated[]} related
  * @returns {Result<WaveBlock> | null}
  */
 function parseLinksOnlyBlock(related) {
-  if (related.length === 0 || !related.every(rel => rel.keyword === 'Refs' && rel.ref.startsWith('#'))) return null;
+  if (related.length === 0 || !related.every(rel => rel.keyword === 'Refs')) return null;
   /** @type {Set<string>} */
   const seen = new Set();
   for (const rel of related) {
@@ -1859,12 +1860,12 @@ function parseLinksOnlyBlock(related) {
  *
  * D-WAVE-LINKS-ONLY: with `options.linksOnly === true` (the opt-in, spelled
  * `check wave --links-only` on the command line), a block may also be the
- * `## Related Issues` heading and 1–WAVE_ROWS + 1 `Refs #<n>` lines and nothing after
- * them (blank lines aside): no evidence section, no rows. It parses to no tracking line
- * and no rows. A ref may not repeat (`duplicate`). `Closes` is never admitted there: with
- * no row, nothing has merged, so nothing may close an issue. Without the opt-in, and for
- * any other block that stops after its related lines, a lone `Closes #<n>` included, the
- * block is `malformed`, as the grammar stood before the opt-in.
+ * `## Related Issues` heading and 1–WAVE_ROWS + 1 `Refs #<n>` or `Refs <KEY-N>` lines and
+ * nothing after them (blank lines aside): no evidence section, no rows. It parses to no
+ * tracking line and no rows. A ref may not repeat (`duplicate`). `Closes` is never
+ * admitted there: with no row, nothing has merged, so nothing may close an issue.
+ * Without the opt-in, and for any other block that stops after its related lines, a lone
+ * `Closes #<n>` included, the block is `malformed`, as the grammar stood before the opt-in.
  *
  * Structure is checked before the cross rules, so the first failure found is the
  * one reported. An error carries a code and a line number, never input bytes.

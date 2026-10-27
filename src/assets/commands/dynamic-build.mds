@@ -745,9 +745,9 @@ Refs {tracking ref}
 {one related line per entry that has one}
 ```
 
-   **Related line.** An entry's captured `issuePrLink` is the only source of a reference. When it is not `(none)` and the reference it names (its text after `Closes ` or `Refs `) is, as a whole, a `#N` reference, the related line is `Refs ` and that reference. Any other entry has no related line, a `KEY-N` reference included. No line is `Closes`: the block holds no verdict, so it closes no issue.
+   **Related line.** An entry's captured `issuePrLink` is the only source of a reference. When it is not `(none)` and the reference it names (its text after `Closes ` or `Refs `) is, as a whole, a `#N` or `KEY-N` reference, the related line is `Refs ` and that reference. Any other entry has no related line. No line is `Closes`: the block holds no verdict, so it closes no issue.
 
-   **Tracking line** — only when Pre-authoring step 5 resolved a tracking issue whose token is, as a whole, a `#N` reference: `Refs ` and that token, verbatim, as the first line under `## Related Issues`. Any other token (a `KEY-N` reference, a bare number, a URL), or none ⇒ no tracking line: nothing is composed from a number.
+   **Tracking line** — only when Pre-authoring step 5 resolved a tracking issue whose token is, as a whole, a `#N` or `KEY-N` reference: `Refs ` and that token, verbatim, as the first line under `## Related Issues`. Any other token (a bare number, a URL), or none ⇒ no tracking line: nothing is composed from a number.
 
    With no line under the heading, `PR_WAVE_BLOCK` is `(none)` and nothing is checked. Otherwise check the file:
 
