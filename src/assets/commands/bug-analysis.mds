@@ -96,7 +96,10 @@ If `--no-static` is set: set `STATIC_FINDINGS` to "Static analysis skipped (--no
 
 ```bash
 for t in semgrep snyk codeql jq; do printf '%s=%s\n' "$t" "$(command -v "$t" || echo no)"; done
+git -C "{worktree}" diff --name-only -z --diff-filter=d {DIFF_RANGE} | tr '\0\n' '\n?' | sed -n 's/.*\.//p' | sort -u
 ```
+
+Its second line lists the extensions of the changed files. `{lang}` is the first of javascript-typescript (js jsx mjs cjs ts tsx), python (py), ruby (rb) whose extension is listed; no other value reaches the command. With none, CodeQL does not run and its status is `no supported language`.
 
 If all three scanners print `no`: warn user "No static analysis tools found. To enable it, install semgrep (`pip install semgrep`) or snyk (`npm install -g snyk`)." Set `STATIC_FINDINGS` to "Static analysis did not run: no scanner is installed." and `STATIC_STATUS` to `not installed` for each tool.
 
@@ -148,7 +151,7 @@ Read `error` as HIGH, `warning` as MEDIUM, `note` as LOW.
 ```bash
 CODEQL_TMP=$(mktemp -d) || exit
 trap 'rm -rf "${CODEQL_TMP}"' EXIT INT TERM
-codeql database create "${CODEQL_TMP}/db" --language={detected-language} --source-root="{worktree}" 2>/dev/null && \
+codeql database create "${CODEQL_TMP}/db" --language={lang} --source-root="{worktree}" 2>/dev/null && \
 codeql database analyze "${CODEQL_TMP}/db" --format=sarif-latest --output="{ANALYSIS_DIR}/codeql.sarif" 2>/dev/null
 CODEQL_EXIT=$?
 printf '\nexit=%s\n' "$CODEQL_EXIT"

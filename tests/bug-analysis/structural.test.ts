@@ -414,6 +414,8 @@ describe('bug-analysis.md — static analysis safety patterns', () => {
 
 const SCANNER_TOOLS = ['semgrep scan', 'snyk code test', 'codeql database create', 'codeql database analyze'];
 const STATUS_LOOP = `for t in semgrep snyk codeql jq; do printf '%s=%s\\n' "$t" "$(command -v "$t" || echo no)"; done`;
+/** The second line of the Step 2c fence: the extensions of the changed files that still exist, one per line, with a newline in a name made safe. */
+const LANG_LIST = String.raw`git -C "{worktree}" diff --name-only -z --diff-filter=d {DIFF_RANGE} | tr '\0\n' '\n?' | sed -n 's/.*\.//p' | sort -u`;
 const EXIT_PRINT = "printf '\\nexit=%s\\n' ";
 /** The Snyk status line, with the last line of the Snyk filter before it: the exit line printed twice also appears in the Semgrep fence. */
 const SNYK_EXIT_AT = /(snyk\.sarif"; \}\n)(printf '\\nexit=%s\\n' "\$E"\n)/;
@@ -479,13 +481,13 @@ function collectDidNotRunDefects(phase2: string): string[] {
   ];
 }
 
-const STATUS_LOOP_DEFECT = 'the Step 2c fence is not the one status line per tool loop';
+const STATUS_LOOP_DEFECT = 'the Step 2c fence is not the status line per tool loop and the extension list';
 
 function collectProbeFenceDefects(step2c: string): string[] {
   const probeFence = bashFences(step2c)[0];
   if (probeFence === undefined) return ['Step 2c has no bash fence'];
   const lines = fenceLines(probeFence).filter(line => line.trim() !== '');
-  return lines.length === 1 && lines[0] === STATUS_LOOP ? [] : [STATUS_LOOP_DEFECT];
+  return lines.length === 2 && lines[0] === STATUS_LOOP ? [] : [STATUS_LOOP_DEFECT];
 }
 
 /** The branches that stop a run come in one order: no scanner, no `jq`, then the branch that runs. */
@@ -891,14 +893,52 @@ const SNYK_KEPT = ['changed-0', 'changed-1', 'changed-2', 'changed-3', 'two-chan
 /** One run with results, one run whose results are null, one run with no results at all. */
 const SNYK_SARIF = JSON.stringify({ runs: [{ tool: { driver: { name: 'SnykCode' } }, results: SNYK_RESULTS }, { results: null }, { tool: { driver: { name: 'SnykCode' } } }] });
 
+/** The Step 2c prose that gives CodeQL its language: the closed table, the rule that nothing else reaches the command, and the status when no row matches. */
+const LANG_PROSE = [
+  'Its second line lists the extensions of the changed files.',
+  '`{lang}` is the first of javascript-typescript (js jsx mjs cjs ts tsx), python (py), ruby (rb) whose extension is listed',
+  'no other value reaches the command',
+  'With none, CodeQL does not run and its status is `no supported language`.',
+];
+
+/**
+ * CodeQL scans one language, and it gets it from a closed table over the extensions of the changed files, never from
+ * a value the session makes up. The Step 2c fence lists those extensions (names read NUL-separated, deleted files
+ * left out, a newline in a name made safe), the prose maps them to one of three values, and the create line takes
+ * only `{lang}`.
+ */
+function collectCodeqlLanguageDefects(phase2: string): string[] {
+  const out: string[] = [];
+  const step2c = sectionBetween(phase2, 'Step 2c:', 'Step 2d:') ?? '';
+  const list = fenceLines(bashFences(step2c)[0] ?? '\n').filter(line => line.trim() !== '')[1];
+  if (list !== LANG_LIST) out.push('the Step 2c fence does not list the extensions of the changed files that still exist, from NUL-separated names with a newline made safe');
+  const languages = [...phase2.matchAll(/--language=(\S+)/g)].map(match => match[1]);
+  if (languages.length !== 1 || languages[0] !== '{lang}') out.push(`the CodeQL create line does not take its language only from {lang}: ${languages.join(' ') || 'none'}`);
+  return [...out, ...LANG_PROSE.filter(part => !phase2.includes(part)).map(doesNotSay)];
+}
+
+/** The extension list as shipped, to run with bash in a scratch repo: placeholders are filled for it. It throws when the fence changes shape. */
+function shippedExtensionList(phase2: string, repo: string, range: string): string {
+  const step2c = sectionBetween(phase2, 'Step 2c:', 'Step 2d:') ?? '';
+  const line = fenceLines(bashFences(step2c)[0] ?? '\n').filter(text => text.trim() !== '')[1];
+  if (line === undefined) throw new Error('the Step 2c fence no longer lists the extensions of the changed files');
+  return line.split('{worktree}').join(repo).split('{DIFF_RANGE}').join(range);
+}
+
 /** The reason the shipped Snyk fence cannot run here, or null. */
 function snykFenceSkipReason(): string | null {
   const missing = ['jq', 'bash', 'git'].filter(command => spawnSync(command, ['--version'], { encoding: 'utf8' }).status !== 0);
   return missing.length === 0 ? null : `${missing.join(' and ')} is not installed, so the shipped Snyk fence is not run`;
 }
 
-/** A scratch repo: the first commit holds every file, the second changes the files in SNYK_CHANGED. */
-function makeSnykRepo(folder: string): string {
+/** The reason the shipped extension list cannot run here, or null. */
+function extensionListSkipReason(): string | null {
+  const missing = ['bash', 'git'].filter(command => spawnSync(command, ['--version'], { encoding: 'utf8' }).status !== 0);
+  return missing.length === 0 ? null : `${missing.join(' and ')} is not installed, so the shipped extension list is not run`;
+}
+
+/** A scratch repo: the first commit holds every file, the second changes the `changed` files and removes the `removed` ones. */
+function makeScratchRepo(folder: string, files: { unchanged: string[]; changed: string[]; removed: string[] }): string {
   const repo = join(folder, 'repo');
   mkdirSync(repo);
   const git = (...args: string[]): void => {
@@ -910,17 +950,18 @@ function makeSnykRepo(folder: string): string {
     writeFileSync(join(repo, name), text);
   };
   git('init', '-q');
-  for (const name of [...SNYK_CHANGED, ...SNYK_UNTOUCHED]) write(name, 'one\n');
+  for (const name of [...files.unchanged, ...files.changed, ...files.removed]) write(name, 'one\n');
   git('add', '-A');
   git('commit', '-q', '-m', 'one');
-  for (const name of SNYK_CHANGED) write(name, 'two\n');
+  for (const name of files.changed) write(name, 'two\n');
+  for (const name of files.removed) rmSync(join(repo, name));
   git('commit', '-q', '-a', '-m', 'two');
   return repo;
 }
 
 /** Runs the shipped Snyk fence with a stub scanner that prints `scannerOutput` and exits 1, and reads back what it printed and wrote to snyk.sarif. */
 function runSnykFence(phase2: string, folder: string, scannerOutput: string, range: string): { printed: string[]; sarif: string; status: number | null } {
-  const repo = makeSnykRepo(folder);
+  const repo = makeScratchRepo(folder, { unchanged: SNYK_UNTOUCHED, changed: SNYK_CHANGED, removed: [] });
   const analysis = join(folder, 'analysis');
   const bin = join(folder, 'bin');
   mkdirSync(analysis);
@@ -947,6 +988,7 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
   const scannerRoot = onPhase2(collectScannerRootDefects);
   const fileNames = onPhase2(collectFileNameHandoffDefects);
   const snykScope = onPhase2(collectSnykScopeDefects);
+  const codeqlLanguage = onPhase2(collectCodeqlLanguageDefects);
 
   /** `body` with the one `from` replaced by `to`. A string must occur once and a RegExp must match once (`to` may use `$1`), so no seed is inert. */
   const seed = (body: string, from: string | RegExp, to: string): string => {
@@ -1235,7 +1277,7 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
     const defects = probe(fileNames, body);
     const semgrepLine = 'the Semgrep line does not read names with -z, pass them with xargs -0 and put them after --';
-    expect(defects('--name-only -z --diff-filter=d', '--name-only --diff-filter=d')).toContain(semgrepLine);
+    expect(defects('-z --diff-filter=d {DIFF_RANGE} | xargs', '--diff-filter=d {DIFF_RANGE} | xargs')).toContain(semgrepLine);
     expect(defects('set -o pipefail; ', '')).toContain(semgrepLine);
     expect(defects('-- >"{ANALYSIS_DIR}/semgrep.sarif" 2>/dev/null', ' >"{ANALYSIS_DIR}/semgrep.sarif" 2>/dev/null')).toContain(semgrepLine);
     expect(defects('--quiet -- >', '--quiet >')).toContain(semgrepLine);
@@ -1264,6 +1306,8 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(defects('(`--full` OR ', '(')).toContain('the CodeQL gate line does not run CodeQL whenever --full is set');
     expect(defects('| A scanner did not run or did not complete | Name the tool and why in `STATIC_FINDINGS`, not `(none)`; a tool that did not complete keeps the marker |', '| CodeQL database creation fails | Skip CodeQL, note in output, continue with other tools |'))
       .toContain('a sentence skips CodeQL');
+    expect(defects(LANG_PROSE[3], 'With none, CodeQL: skipped (no supported language).')).toContain('a sentence skips CodeQL');
+    expect(defects(LANG_PROSE[3], 'With none, skip CodeQL.')).toContain('a sentence skips CodeQL');
     expect(collectFullCodeqlDefects('')).toContain('0 CodeQL gate lines, expected 1');
   });
 
@@ -1297,6 +1341,37 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(defects('in its own result did not complete', 'in a result did not complete')).toContain(doesNotSay(STATUS_RULE_PARTS[2]));
     expect(defects('ignore a later end notice', 'read a later end notice')).toContain(doesNotSay(STATUS_RULE_PARTS[3]));
     expect(defects('It stays did not complete for this run: ', '')).toContain(doesNotSay(STATUS_RULE_PARTS[3]));
+  });
+
+  it.each(builds)('CodeQL takes its language from a closed table over the extensions of the changed files (%s)', (_label, body) => {
+    expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
+    expect(codeqlLanguage(body ?? '')).toEqual([]);
+  });
+
+  it.each(builds)('known-bad probes: a changed extension list, a language outside the table or a lost table sentence is reported (%s)', (_label, body) => {
+    expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
+    const defects = probe(codeqlLanguage, body);
+    const list = 'the Step 2c fence does not list the extensions of the changed files that still exist, from NUL-separated names with a newline made safe';
+    expect(defects(' --diff-filter=d {DIFF_RANGE} | tr', ' {DIFF_RANGE} | tr')).toContain(list);
+    expect(defects('git -C "{worktree}" diff --name-only -z --diff-filter=d {DIFF_RANGE} | tr', 'git diff --name-only -z --diff-filter=d {DIFF_RANGE} | tr')).toContain(list);
+    expect(defects("diff --name-only -z --diff-filter=d {DIFF_RANGE} | tr", "diff --name-only --diff-filter=d {DIFF_RANGE} | tr")).toContain(list);
+    expect(defects(String.raw`tr '\0\n' '\n?'`, String.raw`tr '\0' '\n'`)).toContain(list);
+    expect(defects("sed -n 's/.*\\.//p'", "sed 's/.*\\.//'")).toContain(list);
+    expect(defects(' | sort -u', ' | sort')).toContain(list);
+    expect(defects(LANG_LIST + '\n', '')).toContain(list);
+    const language = (found: string): string => `the CodeQL create line does not take its language only from {lang}: ${found}`;
+    expect(defects('--language={lang} ', '--language={detected-language} ')).toContain(language('{detected-language}'));
+    expect(defects('--language={lang} ', '--language=java ')).toContain(language('java'));
+    expect(defects('--language={lang} ', '--language=$LANG ')).toContain(language('$LANG'));
+    expect(defects('--language={lang} ', '--language={lang} --language=go ')).toContain(language('{lang} go'));
+    expect(defects('Its second line lists the extensions of the changed files.', 'Its second line lists the changed files.')).toContain(doesNotSay(LANG_PROSE[0]));
+    expect(defects('js jsx mjs cjs ts tsx', 'js jsx ts tsx')).toContain(doesNotSay(LANG_PROSE[1]));
+    expect(defects('python (py)', 'python (py pyi)')).toContain(doesNotSay(LANG_PROSE[1]));
+    expect(defects('ruby (rb)', 'ruby (rb), go (go)')).toContain(doesNotSay(LANG_PROSE[1]));
+    expect(defects('whose extension is listed', 'or any language it finds')).toContain(doesNotSay(LANG_PROSE[1]));
+    expect(defects('no other value reaches the command', 'other values may reach the command')).toContain(doesNotSay(LANG_PROSE[2]));
+    expect(defects(LANG_PROSE[3], 'With none, CodeQL runs on the repository default.')).toContain(doesNotSay(LANG_PROSE[3]));
+    expect(collectCodeqlLanguageDefects('')).toEqual([list, language('none'), ...LANG_PROSE.map(doesNotSay)]);
   });
 
   it.each(builds)('the Snyk results are cut to the changed files; a failed filter says so and uses the unfiltered file (%s)', (_label, body) => {
@@ -1364,6 +1439,28 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
         expect(run.printed).toEqual([`total=${SNYK_RESULTS.length} kept=${SNYK_KEPT.length}`, 'exit=1']);
         expect(resultIds(run.sarif)).toEqual([SNYK_KEPT, [], []]);
       });
+    });
+
+    it(`the shipped extension list names the extensions of the changed files that still exist, whatever the file name (${label})`, ctx => {
+      expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
+      const reason = extensionListSkipReason();
+      if (reason !== null) {
+        console.warn(`[bug-analysis structural] ${reason}`);
+        ctx.skip(reason);
+      }
+      const listed = (files: { unchanged: string[]; changed: string[]; removed: string[] }): string[] => {
+        let out: string[] = [];
+        inScratch(folder => {
+          const run = spawnSync('bash', ['-s'], { input: shippedExtensionList(phase2(), makeScratchRepo(folder, files), 'HEAD~1..HEAD'), encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } });
+          expect(run.status, run.stderr).toBe(0);
+          out = run.stdout.split('\n').filter(line => line !== '');
+        });
+        return out;
+      };
+      // A removed file is left out, a newline in a name never forges a second extension, and text after the last dot is data.
+      expect(listed({ unchanged: ['keep.md', 'old.go'], changed: ['src/app.ts', 'lib/tool.py', 'weird.name.js', 'x.js\nz', 'dir.v2/noext', 'README'], removed: ['old/gone.rb'] }))
+        .toEqual(['js', 'js?z', 'py', 'ts', 'v2/noext']);
+      expect(listed({ unchanged: ['keep.py'], changed: ['README', 'Makefile'], removed: ['gone.rb'] })).toEqual([]);
     });
 
     it(`the shipped Snyk fence says the filter failed and uses the unfiltered file when jq or git fails (${label})`, ctx => {
