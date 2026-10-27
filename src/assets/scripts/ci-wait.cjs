@@ -5,9 +5,11 @@
 // /resolve Phase 8 call it inline, through the Bash tool, instead of re-spawning the
 // Git agent once a minute: a poll costs no model tokens, so the wait happens here.
 // It reads CI with `gh pr view` and `gh pr checks`, plus a read-only `gh api` probe of
-// the repository's workflow list when the check list stays empty (D-CI-WORKFLOWS): at
-// most one answered probe per run; a failed probe is a failed poll, and the next poll
-// probes again. It classifies the head it was told about, and prints exactly one line.
+// the repository's workflow list when the check list is empty or holds external checks
+// only (D-CI-WORKFLOWS): at most one answered probe per run, and its answer is kept for
+// the run; a failed probe is a failed poll, and the next poll probes again. It waits for
+// CI to start until CI_WAIT_MAX_SECONDS, classifies the head it was told about, and
+// prints exactly one line.
 // Installed beside hud.sh and redact-secrets.cjs under ~/.devflow/scripts/.
 //
 // Usage:
@@ -27,7 +29,8 @@
 // unparseable line, an unlisted status or a non-zero exit as INDETERMINATE.
 //
 // Design constraints (binding). The text of each verdict rule is written once, at the
-// marker named below; this list points to it.
+// marker named below; this list points to it. The workflow-probe rule has two readers,
+// mergeGate and matchedStep, and one reading of the probe value, probeAnswer.
 //   - D-CI-WAIT-INLINE: this is plumbing. The only judgment in it is the classifier
 //     (D-CI-CLASSIFIER, D-CI-WORKFLOW-RULE) and the merge gate (D-CI-MERGE-STATE,
 //     D-CI-WORKFLOWS, D-CI-PR-STATE). Every subprocess is `gh`, spawned through exec()
@@ -35,9 +38,10 @@
 //     gh output never reaches stdout raw: a check name passes sanitizeName() first.
 //   - D-CI-WORKFLOW-RULE: see classifyChecks. PASSING does not prove that the test
 //     workflow ran by name.
-//   - D-CI-MERGE-STATE, D-CI-WORKFLOWS: see mergeGate. The workflow files are listed,
-//     never opened: no workflow YAML is parsed, so which events a workflow reacts to is
-//     not judged.
+//   - D-CI-MERGE-STATE, D-CI-WORKFLOWS: see mergeGate (an empty check list) and matchedStep
+//     (rows that are all external checks, which read the probe answer themselves). The
+//     workflow files are listed, never opened: no workflow YAML is parsed, so which events
+//     a workflow reacts to is not judged.
 //   - D-CI-PR-STATE, D-CI-HEAD-BINDING: see waitForCi.
 //   - D-CI-NO-LITERAL-SLEEP: the wait happens inside node, through clock.sleep(),
 //     never through a shell `sleep`. Claude Code 2.1.294 blocks any Bash command
@@ -114,11 +118,6 @@ const BUCKETS = Object.freeze(['pass', 'fail', 'pending', 'skipping', 'cancel'])
  *                                Bash timeout of 600000 ms the callers pass
  *   POLL_INTERVAL_SECONDS        the sleep between polls; polls cost no model tokens,
  *                                so the cadence is set by gh latency and rate limits
- *   SETTLE_WINDOW_SECONDS        how long a head mismatch, an empty check list or a
- *                                list of external checks only may persist before it
- *                                is a verdict (GitHub creates checks and moves the PR
- *                                head a few seconds after a push); the workflow probe
- *                                is no window of its own
  *   WORKFLOWS_PAGE_ROWS          the rows asked of the workflow list in its one page
  *   GH_CALL_CAP_SECONDS          one gh call's timeout is min(this, time remaining),
  *                                so the last call ends before the deadline
@@ -127,7 +126,6 @@ const BUCKETS = Object.freeze(['pass', 'fail', 'pending', 'skipping', 'cancel'])
  */
 const CI_WAIT_MAX_SECONDS = 570;
 const POLL_INTERVAL_SECONDS = 20;
-const SETTLE_WINDOW_SECONDS = 90;
 const GH_CALL_CAP_SECONDS = 30;
 const MAX_POLLS = 40;
 const MAX_CONSECUTIVE_GH_FAILURES = 3;
@@ -207,11 +205,26 @@ const VIEW_FIELDS = 'headRefOid,mergeable,state';
  *   waited: number, reason: string | null }} CiResult
  *   `head` is the first 7 hex characters.
  * @typedef {{ pr: string, head: string, exec: ExecFn, clock: Clock, env?: NodeJS.ProcessEnv }} WaitInput
- * @typedef {{ state: 'deadline' } | { state: 'failed' } | { state: 'pending', pending: string[] } | { state: 'open' }
+ * @typedef {{ state: 'deadline', rowsRead: boolean } | { state: 'failed' } | { state: 'pending', pending: string[] }
+ *   | { state: 'open' }
+ *   | { state: 'stall', status: string, reason: string | null }
  *   | { state: 'done', result: CiResult }} PollStep
+ *   A `stall` keeps the wait going and names the line to give if the deadline comes first. A
+ *   `deadline` is a poll that the deadline cut short, so it is no counted poll; `rowsRead` is
+ *   true when the poll had read check rows, or a reply it could not read, before the cut.
+ * @typedef {{ status: string, reason: string | null, pending: string[] }} Last
+ *   The line the last counted poll gives at the deadline.
  * @typedef {{ exec?: ExecFn, clock?: Clock, env?: NodeJS.ProcessEnv }} MainDeps
  * @typedef {{ code: number, stdout: string }} Outcome
  */
+
+/**
+ * The line of a wait that has no verdict at the deadline: the start of the loop, an open or a
+ * failed poll, and a loop that ran out of MAX_POLLS. It is shared, so it is frozen.
+ *
+ * @type {Readonly<Last>}
+ */
+const DEADLINE_LAST = Object.freeze({ status: 'INDETERMINATE', reason: 'deadline', pending: Object.freeze([]) });
 
 // ---------------------------------------------------------------------------
 // Argument gate
@@ -286,7 +299,7 @@ function formatNames(names) {
  * every multiset of 1 to 3 checks through this and through the prose clauses and
  * requires the statuses to agree, or this to be stricter only by no-workflow-check.
  * (The empty set is not classified here: an empty list is "no checks", which
- * waitForCi settles before it classifies.)
+ * waitForCi reads as no classification at all.)
  *
  * @param {readonly Check[]} checks
  * @returns {Classification}
@@ -401,6 +414,17 @@ function normalize(res) {
   };
 }
 
+/**
+ * Whether a gh call ran out its timeout: spawnSync then reports the error code ETIMEDOUT.
+ * A call that failed in any other way, fast or slow, did not.
+ *
+ * @param {ExecResult | null} res
+ * @returns {boolean}
+ */
+function timedOut(res) {
+  return res !== null && typeof res === 'object' && Boolean(res.error) && res.error.code === 'ETIMEDOUT';
+}
+
 // ---------------------------------------------------------------------------
 // Reply parsers
 // ---------------------------------------------------------------------------
@@ -484,22 +508,6 @@ function parseActiveWorkflows(stdout) {
 // ---------------------------------------------------------------------------
 
 /**
- * One settle window, as a pure step. `firstAt` is when the condition was first seen,
- * or null when the poll before did not see it; the window opens at `now` then. It is
- * done once `settleMs` have passed since it opened. The caller keeps one clock per
- * window and stores the returned `firstAt`.
- *
- * @param {number | null} firstAt
- * @param {number} now
- * @param {number} settleMs
- * @returns {{ firstAt: number, done: boolean }}
- */
-function settle(firstAt, now, settleMs) {
-  const opened = firstAt === null ? now : firstAt;
-  return { firstAt: opened, done: now - opened >= settleMs };
-}
-
-/**
  * D-CI-MERGE-STATE: whether GitHub reports the PR as conflicting. It is the one rule for a
  * conflict. mergeGate answers 'conflict' by it, and a caller that has read only the merge
  * state asks it before it reads any check.
@@ -512,6 +520,19 @@ function isConflicting(mergeable) {
 }
 
 /**
+ * D-CI-WORKFLOWS: what the workflow probe has said, as one answer. It is the one reading
+ * of the probe's value, used by mergeGate and by matchedStep alike. Only the booleans
+ * true and false are answers; null, left out and any other value ask for the probe.
+ *
+ * @param {unknown} workflowsActive
+ * @returns {'active' | 'none' | 'ask'}
+ */
+function probeAnswer(workflowsActive) {
+  if (workflowsActive === true) return 'active';
+  return workflowsActive === false ? 'none' : 'ask';
+}
+
+/**
  * D-CI-MERGE-STATE, D-CI-WORKFLOWS: the one merge rule. GitHub computes `mergeable`
  * lazily, and runs no pull request workflow on a conflicting PR, so the checks of a head
  * say nothing about the PR unless GitHub reports it MERGEABLE. An empty check list says
@@ -520,7 +541,9 @@ function isConflicting(mergeable) {
  * is read; `mergeable` is the `gh pr view` value in any shape; `workflowsActive` is what
  * the workflow probe found: true (an active workflow file), false (none), or null or
  * left out when it was not made or gave no answer. Each case has its own answer, so a
- * caller never reads `mergeable` or `workflowsActive` again:
+ * caller never reads `mergeable` again. The probe value has two readers, both through
+ * probeAnswer: mergeGate, for an empty list, and matchedStep, for rows that are all external
+ * checks:
  *   'conflict'           isConflicting(mergeable), whatever the status.
  *   'await-merge-state'  PASSING or NO_CI while mergeable is anything but MERGEABLE
  *                        (UNKNOWN, absent or odd). It is neither a verdict nor a conflict:
@@ -531,8 +554,10 @@ function isConflicting(mergeable) {
  *   'workflow-active'    NO_CI on MERGEABLE, and the probe found an active workflow file:
  *                        a run may still start.
  *   'keep'               the status stands: PASSING on MERGEABLE, NO_CI on MERGEABLE with a
- *                        probe that found no workflow file, and FAILING, PENDING and
- *                        INDETERMINATE, which do not depend on the merge state or the probe.
+ *                        probe that found no workflow file (waitForCi holds that NO_CI until
+ *                        the deadline, so checks that appear later decide), and FAILING,
+ *                        PENDING and INDETERMINATE, which do not depend on the merge state
+ *                        or the probe.
  *
  * @param {string | null} status
  * @param {unknown} mergeable
@@ -545,8 +570,9 @@ function mergeGate(status, mergeable, workflowsActive) {
   if (status === 'PASSING') return mergeableNow ? 'keep' : 'await-merge-state';
   if (status !== 'NO_CI') return 'keep';
   if (!mergeableNow) return 'await-merge-state';
-  if (workflowsActive === true) return 'workflow-active';
-  return workflowsActive === false ? 'keep' : 'probe';
+  const answer = probeAnswer(workflowsActive);
+  if (answer === 'active') return 'workflow-active';
+  return answer === 'none' ? 'keep' : 'probe';
 }
 
 /**
@@ -561,43 +587,87 @@ function done(status, reason, failing = [], pending = []) {
 }
 
 /**
+ * A step that keeps the wait going and names the line to give if the deadline comes first.
+ *
+ * @param {string} status
+ * @param {string | null} reason
+ * @returns {{ state: 'stall', status: string, reason: string | null }}
+ */
+function stall(status, reason) {
+  return { state: 'stall', status, reason };
+}
+
+/**
  * The outcome of one poll on the named head, as a pure function of what the poll read
  * (the rules are classifyChecks's and mergeGate's). `verdict` is the classification
- * of the rows, or null for an empty list. `windowDone` is whether the settle window has
- * run out; it only matters for an empty list and for rows that are all external
- * (no-workflow-check), the two cases a late GitHub Actions run can still change.
- * `workflowsActive` is the probe's answer (see mergeGate) and matters for an empty list
- * only. This function never reads `mergeable` or `workflowsActive` itself: each answer of
- * mergeGate maps to one step. The outcome is one of:
- *   pending  keep waiting: a pending check, or an unsettled window
+ * of the rows, or null for an empty list. `workflowsActive` is the probe's answer (see
+ * mergeGate). An empty list reads it through mergeGate, and each answer of mergeGate maps
+ * to one step. This function reads it itself (probeAnswer) on the external-only path only:
+ * rows that are all external checks (no-workflow-check), where a workflow run that has not
+ * started yet could still change the verdict. It never reads `mergeable` itself. The
+ * outcome is one of:
+ *   pending  keep waiting: a pending check
  *   open     a pass or an empty list while the gate awaits the merge state
- *   probe    an empty list, window done, and the gate asks for the probe: the caller makes
- *            the workflow probe, then asks again with its answer
+ *   probe    an empty list on MERGEABLE, or external-only rows, and the probe has no
+ *            answer yet: the caller makes the workflow probe, then asks again with its
+ *            answer
+ *   stall    keep waiting, with a line for the deadline: NO_CI for an empty list when the
+ *            repository has no workflow file; INDETERMINATE (no-workflow-check) for an empty
+ *            list or external-only rows when it has an active one, since a run may still
+ *            start. A later poll that reads checks decides instead.
  *   done     a final status and reason, with the failing and pending names
  *
  * @param {Classification | null} verdict
  * @param {unknown} mergeable
- * @param {boolean} windowDone
  * @param {boolean | null} [workflowsActive]
  * @returns {{ state: 'pending', pending: string[] } | { state: 'open' } | { state: 'probe' }
+ *   | { state: 'stall', status: 'INDETERMINATE', reason: 'no-workflow-check' }
+ *   | { state: 'stall', status: 'NO_CI', reason: null }
  *   | ReturnType<typeof done>}
  */
-function matchedStep(verdict, mergeable, windowDone, workflowsActive) {
+function matchedStep(verdict, mergeable, workflowsActive) {
   const gate = mergeGate(verdict === null ? 'NO_CI' : verdict.status, mergeable, workflowsActive);
   if (gate === 'conflict') return done('INDETERMINATE', 'merge-conflict');
   if (verdict === null) {
-    if (!windowDone) return { state: 'pending', pending: [] };
-    if (gate === 'keep') return done('NO_CI', null);
-    if (gate === 'workflow-active') return done('INDETERMINATE', 'no-workflow-check');
-    if (gate === 'probe') return { state: 'probe' };
-    return { state: 'open' };
+    if (gate === 'keep') return stall('NO_CI', null);
+    if (gate === 'workflow-active') return stall('INDETERMINATE', 'no-workflow-check');
+    return gate === 'probe' ? { state: 'probe' } : { state: 'open' };
   }
   if (verdict.reason === 'no-workflow-check') {
-    return windowDone ? done('INDETERMINATE', 'no-workflow-check') : { state: 'pending', pending: [] };
+    const answer = probeAnswer(workflowsActive);
+    if (answer === 'ask') return { state: 'probe' };
+    return answer === 'none' ? done('INDETERMINATE', 'no-workflow-check') : stall('INDETERMINATE', 'no-workflow-check');
   }
   if (verdict.status === 'PENDING') return { state: 'pending', pending: verdict.pending };
   if (gate !== 'keep') return { state: 'open' };
   return done(verdict.status, verdict.reason, verdict.failing, verdict.pending);
+}
+
+/**
+ * The line a counted poll leaves for the deadline: PENDING with its names, a stall with its
+ * status and reason, and INDETERMINATE (deadline) for an open or a failed poll, which
+ * clears an earlier stall. A step that is not a counted poll never gets here.
+ *
+ * @param {PollStep} step
+ * @returns {Last}
+ */
+function lastOf(step) {
+  if (step.state === 'pending') return { status: 'PENDING', reason: null, pending: step.pending };
+  if (step.state === 'stall') return { status: step.status, reason: step.reason, pending: [] };
+  return DEADLINE_LAST;
+}
+
+/**
+ * The line at the end of the loop. NO_CI stands only when the deadline ended the loop:
+ * a loop that ran out of MAX_POLLS before the deadline has not waited out CI, so it reads
+ * INDETERMINATE (deadline).
+ *
+ * @param {Last} last
+ * @param {boolean} reachedDeadline
+ * @returns {Last}
+ */
+function tailOf(last, reachedDeadline) {
+  return last.status === 'NO_CI' && !reachedDeadline ? DEADLINE_LAST : last;
 }
 
 /**
@@ -625,15 +695,14 @@ async function askWorkflows(gh) {
  * D-CI-HEAD-BINDING: wait for the CI verdict of `head`, and of nothing else. `gh pr
  * checks` has no SHA field and reports the PR's current head, so each poll reads
  * `headRefOid` first. A different value means the checks on offer belong to another
- * head: they are not read, the merge state is not used, and the poll is PENDING until
- * SETTLE_WINDOW_SECONDS have passed since the first mismatch (GitHub moves the head
- * and creates checks a few seconds after a push), then INDETERMINATE (head-mismatch).
- * A matching head clears the mismatch clock. The poll reads `headRefOid` once more after
- * the checks call: the checks count only when it is still `head`. A head that moved
- * leaves the poll open (no verdict, no settle clock moved); a second read that fails or
- * cannot be read is a failed poll. A PASSING needs a poll that saw this head before and
- * after its checks and passed the rules of classifyChecks (D-CI-WORKFLOW-RULE) and
- * mergeGate (D-CI-MERGE-STATE).
+ * head: they are not read, the merge state is not used, and the poll is a stall
+ * (INDETERMINATE, head-mismatch) that the wait polls through until the deadline (GitHub
+ * moves the head and creates checks after a push, and CI can start much later). A poll
+ * that sees `head` again is decided by its checks. The poll reads `headRefOid` once more
+ * after the checks call: the checks count only when it is still `head`. A head that moved
+ * leaves the poll open (no verdict); a second read that fails or cannot be read is a failed
+ * poll. A PASSING needs a poll that saw this head before and after its checks and passed
+ * the rules of classifyChecks (D-CI-WORKFLOW-RULE) and mergeGate (D-CI-MERGE-STATE).
  *
  * D-CI-PR-STATE: GitHub reports `mergeable` UNKNOWN for a merged PR for good (gh 2.88.1,
  * probed on 2026-10-22), so a PR that is no longer open would wait to the deadline for a
@@ -641,29 +710,45 @@ async function askWorkflows(gh) {
  * the exact string OPEN ends the run at once as INDETERMINATE (not-open), before the head
  * is compared, and a `state` that is not a string is unparseable. Never PASSING.
  *
- * D-CI-MERGE-STATE, D-CI-WORKFLOWS: the rules are mergeGate's; this loop acts on its
- * answers. On a matching head, `mergeable` CONFLICTING is INDETERMINATE (merge-conflict)
- * at once, before the checks are read. An open step (the gate awaits the merge state) is
- * not PENDING, so a head that never reads MERGEABLE ends INDETERMINATE (deadline). Rows
- * that are all external checks share the empty list's settle window, which a pending or
- * failing row clears, and end INDETERMINATE (no-workflow-check) when it runs out. A step
- * that asks for the probe gets it from askWorkflows, `gh api` over WORKFLOWS_ARGS,
- * through the same bounded gh call (timeout min(GH_CALL_CAP_SECONDS, time left), none
- * when no time is left, which ends the loop as for any call). At most one probe is
- * answered per run: an answered probe ends the run in that poll, so no later poll reads
- * it and no settle() clock runs for it. A probe whose gh call fails is a failed poll, and
- * the next poll probes again; a reply parseActiveWorkflows cannot read is INDETERMINATE
- * (unparseable). No other path makes the probe.
+ * D-CI-MERGE-STATE, D-CI-WORKFLOWS: the rules are mergeGate's and matchedStep's; this loop
+ * acts on their answers. On a matching head, `mergeable` CONFLICTING is INDETERMINATE
+ * (merge-conflict) at once, before the checks are read. An open step (the gate awaits the
+ * merge state) is not PENDING, so a head that never reads MERGEABLE ends INDETERMINATE
+ * (deadline). An empty list on MERGEABLE, and rows that are all external checks, need the
+ * workflow probe. Rows that are all external checks end INDETERMINATE (no-workflow-check) at
+ * once when the repository has no active workflow file. In the other cases a workflow run
+ * may still start, so the step is a stall that keeps the wait going: an empty list with no
+ * workflow file stalls as NO_CI, and an empty list or external-only rows with an active
+ * workflow file stall as INDETERMINATE (no-workflow-check). Checks that appear decide.
+ * A step that asks for the probe gets it from askWorkflows, `gh api` over WORKFLOWS_ARGS,
+ * through the same bounded gh call (timeout min(GH_CALL_CAP_SECONDS, time left), none when
+ * no time is left, which ends the loop as for any call). At most one probe is answered per
+ * run: the first answer is kept and goes to every later poll, so no later poll asks again.
+ * A probe whose gh call fails is a failed poll, and the next poll probes again; a reply
+ * parseActiveWorkflows cannot read is INDETERMINATE (unparseable) at once. No other path
+ * makes the probe.
  *
  * Per poll: `gh pr view <n> --json headRefOid,mergeable,state`, then `gh pr checks <n>
  * --json name,state,bucket,workflow` (exit 0 or 8 are results, as in check-ci-status
  * step 3), then the same view call again (a bounded gh call like the others, not made
- * when no time is left), then, on that one path, the workflow probe. A PENDING or open
- * poll sleeps min(POLL_INTERVAL_SECONDS, remaining) and polls again; any other result
- * returns. A poll whose gh call fails is not a result: three failed polls in a row are
- * INDETERMINATE (gh-failed), fewer are retried. The loop stops at the deadline or after
- * MAX_POLLS with its last state: PENDING stays PENDING, and anything unknown, an open
- * step included, becomes INDETERMINATE (deadline).
+ * when no time is left), then, on the paths that need it and only while the probe has no
+ * answer, the workflow probe. A PENDING, open or stall poll sleeps min(POLL_INTERVAL_SECONDS,
+ * remaining) and polls again; any other result returns. A poll whose gh call fails is not a
+ * result: three failed polls in a row are INDETERMINATE (gh-failed), fewer are retried; a
+ * pending, open or stall poll in between clears the count. A gh call that the time left cut
+ * below GH_CALL_CAP_SECONDS and that ran out that timeout is the deadline, not a failed poll:
+ * that poll does not count. Any other failure of that call is a failed poll.
+ *
+ * The loop stops at the deadline or after MAX_POLLS. The last counted poll gives the line:
+ * PENDING stays PENDING, a stall gives its status and reason, and an open or a failed poll,
+ * which clears an earlier stall, gives INDETERMINATE (deadline). NO_CI stands only when the
+ * deadline ended the loop; a loop that ran out of MAX_POLLS first is INDETERMINATE
+ * (deadline). One cut poll changes the line: when the deadline cuts the second head read or
+ * the workflow probe after the checks call gave rows (or a reply that cannot be read), those
+ * rows contradict an earlier stall, so the stall does not survive and the line is
+ * INDETERMINATE (deadline). An earlier PENDING stands. A cut before any row came back (the
+ * first head read, the checks call, or a later call after an empty list) leaves the line of
+ * the last counted poll.
  *
  * It never throws: an exec that throws is a gh failure.
  *
@@ -675,7 +760,6 @@ async function waitForCi(input) {
   const env = input.env || childEnv();
   const startedAt = clock.now();
   const deadline = startedAt + CI_WAIT_MAX_SECONDS * 1000;
-  const settleMs = SETTLE_WINDOW_SECONDS * 1000;
 
   /** @returns {CiResult} */
   const finish = (status, reason, failing, pending) => ({
@@ -689,8 +773,10 @@ async function waitForCi(input) {
   });
 
   /**
-   * One gh call, its timeout min(GH_CALL_CAP_SECONDS, time left); null when no time
-   * is left, in which case no call is made.
+   * One gh call, its timeout min(GH_CALL_CAP_SECONDS, time left). It is null, with no
+   * call made, when no time is left. It is also null for a call that the time left held
+   * below GH_CALL_CAP_SECONDS and that ran out that timeout: the deadline cut it short, so
+   * it is no failed poll. A call that fails in any other way is a failed poll.
    *
    * @param {string[]} args
    * @returns {Promise<GhAnswer | null>}
@@ -711,11 +797,12 @@ async function waitForCi(input) {
     } catch (_) {
       res = null;
     }
-    return normalize(res);
+    const cutShort = left < GH_CALL_CAP_SECONDS * 1000 && timedOut(res);
+    return cutShort ? null : normalize(res);
   };
 
-  let firstMismatchAt = null;
-  let firstEmptyAt = null;
+  /** The probe's first answer, kept for the run; null until a probe answers. */
+  let workflowsActive = null;
 
   /**
    * A step that ends the run with a result.
@@ -744,90 +831,82 @@ async function waitForCi(input) {
 
   /**
    * One poll: the view, then, on a matching head that does not conflict, the checks, then
-   * the view again, then, on the one path that needs it, the workflow probe. Both settle
-   * windows run here, after the second view, so a poll that does not count moves neither.
+   * the view again, then, on the paths that need it while the probe has no answer, the
+   * workflow probe.
    *
    * @returns {Promise<PollStep>}
    */
   const readPoll = async () => {
     const view = await gh(viewArgs);
-    if (view === null) return { state: 'deadline' };
+    if (view === null) return { state: 'deadline', rowsRead: false };
     if (view.answered && view.status === 1 && NO_PR_RE.test(view.stderr)) return resultStep('NO_PR', null, [], []);
     if (!view.answered || view.status !== 0) return { state: 'failed' };
     const parsed = parseView(view.stdout);
     if (parsed === null) return resultStep('INDETERMINATE', 'unparseable', [], []);
     if (parsed.state !== 'OPEN') return resultStep('INDETERMINATE', 'not-open', [], []);
-    if (parsed.oid !== head) {
-      const mismatch = settle(firstMismatchAt, clock.now(), settleMs);
-      firstMismatchAt = mismatch.firstAt;
-      return mismatch.done ? resultStep('INDETERMINATE', 'head-mismatch', [], []) : { state: 'pending', pending: [] };
-    }
-    firstMismatchAt = null;
+    if (parsed.oid !== head) return stall('INDETERMINATE', 'head-mismatch');
     if (isConflicting(parsed.mergeable)) return resultStep('INDETERMINATE', 'merge-conflict', [], []);
 
     const checks = await gh(['pr', 'checks', pr, '--json', 'name,state,bucket,workflow']);
-    if (checks === null) return { state: 'deadline' };
+    if (checks === null) return { state: 'deadline', rowsRead: false };
     const isResult = checks.answered && (checks.status === 0 || checks.status === 8);
     const isEmpty = checks.answered && checks.status === 1 && NO_CHECKS_RE.test(checks.stderr);
     if (!isResult && !isEmpty) return { state: 'failed' };
+    const rows = isResult ? parseChecks(checks.stdout) : [];
     const second = await gh(viewArgs);
-    if (second === null) return { state: 'deadline' };
+    if (second === null) return { state: 'deadline', rowsRead: rows === null || rows.length > 0 };
     const after = second.answered && second.status === 0 ? parseView(second.stdout) : null;
     if (after === null) return { state: 'failed' };
     if (after.oid !== head) return { state: 'open' };
-    const rows = isResult ? parseChecks(checks.stdout) : [];
     if (rows === null) return resultStep('INDETERMINATE', 'unparseable', [], []);
     const verdict = rows.length > 0 ? classifyChecks(rows) : null;
-    let windowDone = false;
-    if (verdict === null || verdict.reason === 'no-workflow-check') {
-      const empty = settle(firstEmptyAt, clock.now(), settleMs);
-      firstEmptyAt = empty.firstAt;
-      windowDone = empty.done;
-    } else {
-      firstEmptyAt = null;
-    }
 
-    const next = matchedStep(verdict, parsed.mergeable, windowDone, null);
+    const next = matchedStep(verdict, parsed.mergeable, workflowsActive);
     if (next.state !== 'probe') return stepOf(next);
     const asked = await askWorkflows(gh);
-    if (asked.kind === 'deadline') return { state: 'deadline' };
+    if (asked.kind === 'deadline') return { state: 'deadline', rowsRead: verdict !== null };
     if (asked.kind === 'failed') return { state: 'failed' };
     if (asked.kind === 'unparseable') return resultStep('INDETERMINATE', 'unparseable', [], []);
-    return stepOf(matchedStep(verdict, parsed.mergeable, windowDone, asked.active));
+    workflowsActive = asked.active;
+    return stepOf(matchedStep(verdict, parsed.mergeable, workflowsActive));
   };
 
   let failedPolls = 0;
-  /** @type {{ status: string, pending: string[] }} */
-  let last = { status: 'INDETERMINATE', pending: [] };
+  let reachedDeadline = false;
+  /** @type {Readonly<Last>} */
+  let last = DEADLINE_LAST;
 
   for (let poll = 0; poll < MAX_POLLS; poll++) {
-    if (clock.now() >= deadline) break;
+    if (clock.now() >= deadline) {
+      reachedDeadline = true;
+      break;
+    }
 
     const step = await readPoll();
-    if (step.state === 'deadline') break;
+    if (step.state === 'deadline') {
+      reachedDeadline = true;
+      if (step.rowsRead && last.status !== 'PENDING') last = DEADLINE_LAST;
+      break;
+    }
     if (step.state === 'done') return step.result;
     if (step.state === 'failed') {
       failedPolls++;
       if (failedPolls >= MAX_CONSECUTIVE_GH_FAILURES) return finish('INDETERMINATE', 'gh-failed', [], []);
-      last = { status: 'INDETERMINATE', pending: [] };
-    } else if (step.state === 'pending') {
-      failedPolls = 0;
-      last = { status: 'PENDING', pending: step.pending };
     } else {
-      // An open step: no verdict, and the deadline exit after it is INDETERMINATE, never
-      // PENDING.
       failedPolls = 0;
-      last = { status: 'INDETERMINATE', pending: [] };
     }
+    last = lastOf(step);
 
     const left = deadline - clock.now();
-    if (left <= 0) break;
+    if (left <= 0) {
+      reachedDeadline = true;
+      break;
+    }
     await clock.sleep(Math.min(POLL_INTERVAL_SECONDS * 1000, left));
   }
 
-  return last.status === 'PENDING'
-    ? finish('PENDING', null, [], last.pending)
-    : finish('INDETERMINATE', 'deadline', [], []);
+  const tail = tailOf(last, reachedDeadline);
+  return finish(tail.status, tail.reason, [], tail.pending);
 }
 
 // ---------------------------------------------------------------------------
@@ -924,7 +1003,6 @@ module.exports = Object.freeze({
   BUCKETS,
   CI_WAIT_MAX_SECONDS,
   POLL_INTERVAL_SECONDS,
-  SETTLE_WINDOW_SECONDS,
   GH_CALL_CAP_SECONDS,
   MAX_POLLS,
   MAX_CONSECUTIVE_GH_FAILURES,
