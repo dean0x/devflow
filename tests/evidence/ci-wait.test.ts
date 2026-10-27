@@ -133,6 +133,8 @@ const PR = '12'
 const NO_PR_STDERR = 'GraphQL: Could not resolve to a PullRequest with the number of 999999999. (repository.pullRequest)\n'
 const NO_CHECKS_STDERR = "no checks reported on the 'feat/x' branch\n"
 const MAX_MS = 570_000
+/** The line of a run that read an empty check list through the whole 570 s and found no workflow file. */
+const NO_CI_AT_DEADLINE = 'CI NO_CI pr=12 head=aaaaaaa failing=- pending=- waited=570'
 
 // ---------------------------------------------------------------------------
 // A virtual world: gh as a function of the call and the time, a clock that moves
@@ -339,14 +341,14 @@ describe('AC-8: waitForCi gives the expected verdict, in one line, with no real 
 
   it('no checks at all: NO_CI only at the deadline, never before it', async () => {
     const r = await run(({ kind }) => (kind === 'view' ? viewOk() : { stdout: '[]' }))
-    expect(r.line).toBe('CI NO_CI pr=12 head=aaaaaaa failing=- pending=- waited=570')
+    expect(r.line).toBe(NO_CI_AT_DEADLINE)
     const lastCheck = r.world.of('checks').at(-1)
     expect(lastCheck?.elapsedBefore, 'polling went on to the end').toBeGreaterThan(500_000)
   })
 
   it('"no checks reported" on exit 1 is no checks, not a gh failure', async () => {
     const r = await run(({ kind }) => (kind === 'view' ? viewOk() : { status: 1, stderr: NO_CHECKS_STDERR }))
-    expect(r.line).toBe('CI NO_CI pr=12 head=aaaaaaa failing=- pending=- waited=570')
+    expect(r.line).toBe(NO_CI_AT_DEADLINE)
   })
 
   it('a gh failure: three failed polls in a row are INDETERMINATE (gh-failed), never PASSING', async () => {
@@ -577,6 +579,7 @@ describe('AC-12: the checks count for the head only when the head is the same af
     expect(r.line).toBe('CI INDETERMINATE pr=12 head=aaaaaaa failing=- pending=- waited=570 reason=head-mismatch')
     expect(r.world.of('checks'), 'the checks of the moved head are read once, on the poll that read the old head').toHaveLength(1)
   })
+
   it('a head that moves once and comes back: the next poll decides, and the poll that moved counted for nothing', async () => {
     const r = await run(({ kind, nth, again }) => (kind === 'view' ? viewOk(again && nth === 0 ? OLD_HEAD : HEAD) : checksOk('pass')))
     expect(statusOf(r.line)).toBe('PASSING')
@@ -649,7 +652,7 @@ describe('the deadline tail: the line at the deadline comes from the last counte
 
   it('empty, pending, empty: NO_CI only at 570 s, and the pending stretch in between gave no verdict', async () => {
     const r = await run(({ kind, nth }) => (kind === 'view' ? viewOk() : nth >= 5 && nth < 10 ? checksOk('pass', 'pending') : { stdout: '[]' }))
-    expect(r.line).toBe('CI NO_CI pr=12 head=aaaaaaa failing=- pending=- waited=570')
+    expect(r.line).toBe(NO_CI_AT_DEADLINE)
     expect(r.world.of('workflows'), 'one probe for the run').toHaveLength(1)
   })
 
@@ -678,7 +681,7 @@ describe('the deadline tail: the line at the deadline comes from the last counte
   describe('a gh call that the deadline cuts short is no poll at all', () => {
     it('NO_CI stall, then a last checks call that hangs to its capped timeout: the line stays NO_CI at 570 s', async () => {
       const r = await run(({ kind, elapsed }) => (kind === 'view' ? viewOk() : elapsed >= LAST_POLLS_FROM_MS ? { hang: true } : { stdout: '[]' }))
-      expect(r.line).toBe('CI NO_CI pr=12 head=aaaaaaa failing=- pending=- waited=570')
+      expect(r.line).toBe(NO_CI_AT_DEADLINE)
       const lastChecks = r.world.of('checks').at(-1)
       expect(lastChecks?.timeout, 'the last call was given only the time that was left').toBeLessThan(30_000)
       expect(lastChecks?.elapsedBefore).toBeGreaterThanOrEqual(LAST_POLLS_FROM_MS)
@@ -715,12 +718,12 @@ describe('the deadline tail: the line at the deadline comes from the last counte
       expect(full.line).toBe('CI INDETERMINATE pr=12 head=aaaaaaa failing=- pending=- waited=570 reason=deadline')
       const cut = await run(capEdge(1))
       expect(cut.world.of('checks').at(-1)?.timeout, 'the call was given 1 ms less than the cap').toBe(29_999)
-      expect(cut.line).toBe('CI NO_CI pr=12 head=aaaaaaa failing=- pending=- waited=570')
+      expect(cut.line).toBe(NO_CI_AT_DEADLINE)
     })
 
     it('NO_CI stall, then a last first view that hangs to its capped timeout: the line stays NO_CI at 570 s', async () => {
       const r = await run(({ kind, elapsed }) => (kind === 'view' ? (elapsed >= LAST_POLLS_FROM_MS ? { hang: true } : viewOk()) : { stdout: '[]' }))
-      expect(r.line).toBe('CI NO_CI pr=12 head=aaaaaaa failing=- pending=- waited=570')
+      expect(r.line).toBe(NO_CI_AT_DEADLINE)
       expect(r.world.calls.at(-1)?.args[1], 'the cut call was the first view of the last poll').toBe('view')
       expect(r.world.of('view').at(-1)?.timeout).toBeLessThan(30_000)
     })
@@ -739,7 +742,7 @@ describe('the deadline tail: the line at the deadline comes from the last counte
     for (const [label, reply] of EMPTY_LAST) {
       it(`NO_CI stall, then ${label} and a second head read that is cut short: no check row came back, so the line stays NO_CI at 570 s`, async () => {
         const r = await run(cutSecondView(reply))
-        expect(r.line).toBe('CI NO_CI pr=12 head=aaaaaaa failing=- pending=- waited=570')
+        expect(r.line).toBe(NO_CI_AT_DEADLINE)
         expect(r.world.calls.at(-1)?.args[1], 'the cut call was the second head read').toBe('view')
         expect(r.world.of('view').at(-1)?.timeout).toBeLessThan(30_000)
       })
@@ -803,7 +806,7 @@ describe('the deadline tail: the line at the deadline comes from the last counte
     const r = await run(({ kind, elapsed, again }) => (kind === 'view'
       ? (again && elapsed >= LAST_POLLS_FROM_MS ? { ...viewOk(), took: MAX_MS - elapsed } : viewOk())
       : { stdout: '[]' }))
-    expect(r.line).toBe('CI NO_CI pr=12 head=aaaaaaa failing=- pending=- waited=570')
+    expect(r.line).toBe(NO_CI_AT_DEADLINE)
     expect(r.world.elapsed, 'the last call ended exactly at the deadline').toBe(MAX_MS)
     expect(r.world.calls.at(-1)?.args[1], 'it was a result, not a cut call').toBe('view')
     expect(r.world.sleeps, 'the loop did not sleep once more').not.toContain(0)
@@ -945,7 +948,7 @@ describe('the merge state: CONFLICTING ends at once, and anything but MERGEABLE 
 
   it('MERGEABLE on every poll with an empty list is NO_CI at the deadline', async () => {
     const r = await run(({ kind }) => (kind === 'view' ? viewOk(HEAD, 'MERGEABLE') : { stdout: '[]' }))
-    expect(r.line).toBe('CI NO_CI pr=12 head=aaaaaaa failing=- pending=- waited=570')
+    expect(r.line).toBe(NO_CI_AT_DEADLINE)
   })
 
   it('UNKNOWN on every poll with an empty list never prints NO_CI: INDETERMINATE (deadline) inside 570 s', async () => {
@@ -975,7 +978,7 @@ describe('the merge state: CONFLICTING ends at once, and anything but MERGEABLE 
 
   it('UNKNOWN on the early polls, then MERGEABLE with an empty list: the probe waits for MERGEABLE, and NO_CI still waits for the deadline', async () => {
     const r = await run(({ kind, nth }) => (kind === 'view' ? viewOk(HEAD, nth < 6 ? 'UNKNOWN' : 'MERGEABLE') : { stdout: '[]' }))
-    expect(r.line).toBe('CI NO_CI pr=12 head=aaaaaaa failing=- pending=- waited=570')
+    expect(r.line).toBe(NO_CI_AT_DEADLINE)
     const probes = r.world.of('workflows')
     expect(probes, 'one probe, made at the first MERGEABLE poll').toHaveLength(1)
     expect(probes[0].elapsedBefore).toBe(6 * 22_000 + 2_000)
@@ -984,7 +987,7 @@ describe('the merge state: CONFLICTING ends at once, and anything but MERGEABLE 
   it('no NO_CI before the deadline, whatever the merge state does on the way', async () => {
     for (const unknownUntil of [1, 5, 12]) {
       const r = await run(({ kind, nth }) => (kind === 'view' ? viewOk(HEAD, nth < unknownUntil ? 'UNKNOWN' : 'MERGEABLE') : { stdout: '[]' }))
-      expect(r.line, `UNKNOWN for ${unknownUntil} polls`).toBe('CI NO_CI pr=12 head=aaaaaaa failing=- pending=- waited=570')
+      expect(r.line, `UNKNOWN for ${unknownUntil} polls`).toBe(NO_CI_AT_DEADLINE)
     }
   })
 
@@ -1215,7 +1218,6 @@ describe('parseChecks: the checks reply as a pure function', () => {
 })
 
 describe('D-CI-WORKFLOWS: an empty check list is NO_CI only at the deadline, and only when the repository has no active workflow file', () => {
-  const NO_CI_AT_DEADLINE = 'CI NO_CI pr=12 head=aaaaaaa failing=- pending=- waited=570'
   const callKeys = (world: World): string[] => world.calls.map(c => (c.args[0] === 'api' ? 'api' : c.args[1]))
 
   it('an active workflow file: one probe on the first empty poll, then no-workflow-check at 570 s, never NO_CI', async () => {
@@ -1958,7 +1960,9 @@ describe('the script as a process: the usage line, and a scripted gh', () => {
     const runEmpty = (shim: ScriptedShim): { status: number | null; stdout: string; stderr: string } =>
       runScript(['--pr', '12', '--head', HEAD], { PATH: `${shim.dir}${path.delimiter}${process.env.PATH ?? ''}`, ...shim.env }, ['-r', virtualTime])
 
-    // Each of these two runs spawns the fake gh about 85 times, so the default 5 s limit is too short.
+    // Each of these two runs spawns the fake gh about 85 times.
+    // Run alone on 2026-10-27, the slower of the two took 0.71 s (largest of 3 runs).
+    // The 30 s limit is headroom for a loaded machine, where the default 5 s limit is too short.
     it('an active workflow file: the no-workflow-check line at 570 s, and the log shows the one probe with its exact argv', { timeout: 30_000 }, () => {
       const shim = emptyListShim({ total_count: 1, workflows: [CI_YML] })
       const r = runEmpty(shim)
@@ -1973,7 +1977,7 @@ describe('the script as a process: the usage line, and a scripted gh', () => {
     it('no workflow at all: the NO_CI line at 570 s, after the same one probe', { timeout: 30_000 }, () => {
       const shim = emptyListShim({ total_count: 0, workflows: [] })
       const r = runEmpty(shim)
-      expect(r.stdout).toBe('CI NO_CI pr=12 head=aaaaaaa failing=- pending=- waited=570\n')
+      expect(r.stdout).toBe(`${NO_CI_AT_DEADLINE}\n`)
       const log = shim.readLog()
       expect(log.filter(call => call[1] === 'api')).toEqual([['gh', ...WORKFLOWS_ARGV]])
       expect(log.filter(call => call[1] === 'pr' && call[2] === 'checks').length).toBeGreaterThanOrEqual(20)
