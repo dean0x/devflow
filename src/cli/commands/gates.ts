@@ -63,16 +63,14 @@ export const GATE_LEVEL_MEANINGS: Readonly<Record<GateLevel, string>> = Object.f
 /**
  * Which commands read the level today; each later command that reads it updates this text.
  *
- * The init prompt says what each level does in GATE_LEVEL_HINTS (gate-level-prompts.ts).
- * Change the hints too when what a level does changes. A command that reads the level and
- * has no rule that changes a phase leaves the hints true, so it changes this text alone.
+ * The init prompt gives each level one short line in GATE_LEVEL_HINTS (gate-level-prompts.ts);
+ * this text and the docs hold the full effects. Change the hints too when a level changes
+ * how much it checks. A command that reads the level and has no rule that changes a phase
+ * leaves the hints true, so it changes this text alone.
  * One test pins the exact text of both tables, so a change to either fails it until you
  * check the other table and update the pin; further rows check the clauses the two tables
  * share (the lint pack level, the levels that run fewer review focuses and the levels that
- * skip Polish). The clauses that lean skips Harden on a docs-only diff, that standard
- * and lean run one Evaluate pass and that standard and lean apply severity tiers in /resolve
- * have no facet row in `tests/gate-level-prompts.test.ts`: the docs guard checks each at
- * every doc site, against its row in the /implement or /resolve level reference.
+ * skip Polish).
  */
 export const GATE_LEVEL_EFFECT =
   '/code-review and /plan read the level: standard and lean run fewer review focuses and fewer planning agents. At lean, /implement has Validate run the project\'s lint pack. /implement and /resolve also read the level and name it in their report; at standard and lean they skip Polish, and full keeps it. At lean, /implement skips Harden on a docs-only diff. At standard and lean, /implement runs one Evaluate pass and at most one Fix round. At standard and lean, /resolve applies severity tiers: it fixes or escalates every security finding, fixes CRITICAL, HIGH and severe MEDIUM findings in the branch\'s own code, fixes prose-only MEDIUM findings with text edits alone, and sends lower findings and pre-existing non-security findings to one backlog issue.';

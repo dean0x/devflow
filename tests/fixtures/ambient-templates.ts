@@ -15,7 +15,11 @@
  * the full fixed output strings (not substrings used for detection).
  */
 
-/** Fixed string emitted by the preamble hook for a plan-handoff prompt. */
+/**
+ * Fixed string emitted by the preamble hook for a plan-handoff prompt while the
+ * implement sentinel (hooks/assets/implement-installed) exists. Without the
+ * sentinel the same prompt gets REMINDER_TEMPLATE.
+ */
 export const HANDOFF_TEMPLATE =
   "The user's prompt is a plan handoff (it begins with `Implement the following plan:`). " +
   "In one short sentence, tell the user you're invoking `devflow:implement`. " +
@@ -23,9 +27,8 @@ export const HANDOFF_TEMPLATE =
   'the plan is already in this conversation, so the skill needs no input. ' +
   'Do not pause to ask whether to proceed.';
 
-/** Fixed string emitted by the preamble hook for a normal (non-handoff, non-slash) prompt. */
+/** Fixed string emitted by the preamble hook for a normal (non-handoff, non-slash) prompt, and for a handoff prompt when implement is not installed. */
 export const REMINDER_TEMPLATE =
   "Orchestrator reminder: coordinate, don't produce — delegate edits, builds and multi-file reads " +
-  'to the fitting roster agent (Agent tool) or the matching devflow workflow skill. ' +
-  'Send debug work to the devflow:debug skill, never to the Debug agent.\n' +
-  'Keep only judgment work mainline: conversation, decisions, routing, synthesis of agent reports.';
+  'to the fitting roster agent (Agent tool) or the matching devflow workflow skill.\n' +
+  'Keep only judgment work mainline: conversation, decisions, routing, combining a few agent reports.';

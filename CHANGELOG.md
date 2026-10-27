@@ -25,11 +25,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The gate-level step of `devflow init` fits an 80-column terminal** ([#658](https://github.com/dean0x/devflow/issues/658)).
+  - Each level hint is now one short line, and no line of the step note is longer than 72 characters.
+  - The step note names `/resolve` with the other commands that read the level.
+  - The full effect of each level stays in `devflow gates` and in the docs.
 - **`/bug-analysis` no longer reports "no findings" when static analysis could not run** ([#649](https://github.com/dean0x/devflow/issues/649)).
   - Without GNU `timeout` or `gtimeout` (stock macOS), it runs no scanner and says so. Install coreutils to enable it.
   - A scanner that fails, times out or exits with an error is named in the report with its exit status.
   - Each scanner's time bound ends before its Bash call does, and file names reach the scanners safely.
   - Semgrep and Snyk now run one after the other.
+- **The orchestrator charter names only installed workflows and routes to more agents.**
+  - The charter now names only the workflows that you installed, and it names the Fix agent only when it is installed.
+  - It routes to the Test, Evaluate, Harden and Synthesize agents. It routes to the Knowledge agent only when you ask for a new knowledge base. It names the `devflow:bug-analysis` workflow.
+  - For debug work, it names `devflow:debug` when that workflow is installed. Otherwise it sends the work to Explore, then Code. It never routes to the Debug agent.
+  - A plan handoff no longer points to `devflow:implement` when it is not installed. The prompt gets a generic reminder instead.
+  - `devflow ambient --enable` now warns when the ambient agents are not installed. It still registers the hooks.
+  - `devflow uninstall --plugin` removes the plan-handoff marker when it removes implement. It does this also when the manifest has no record of the install.
+  - `devflow uninstall --plugin` also drops a manifest record that holds the old name of the removed plugin.
+  - Run `devflow init` after you update to refresh the charter.
 - **The CI wait and the Validate re-runs no longer stop too early** ([#664](https://github.com/dean0x/devflow/issues/664)). The CI wait waits for CI to start until its 570 s limit, not only 90 s, so a repository with no CI now waits 570 s before the wait reports no CI. When a pull request has only external checks and the repository has no workflow file, the wait ends at once. The CI gates of `/implement` and `/resolve` do not wait again after a full 570 s wait that ends with a head mismatch or no workflow check, so one gate waits at most about 3 x 570 s (28.5 minutes), and only when CI keeps running or its status stays unknown for another cause. Validate waits up to 600 s for each failed test file that it re-runs alone, not 120 s, so the worst case is 200 minutes for each Validate run.
 
 ---

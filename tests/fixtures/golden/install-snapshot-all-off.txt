@@ -324,6 +324,7 @@ d .devflow/scripts/core/
 - .devflow/scripts/core/tracked-areas.js
 d .devflow/scripts/hooks/
 d .devflow/scripts/hooks/assets/
+x .devflow/scripts/hooks/assets/implement-installed
 x .devflow/scripts/hooks/assets/orchestrator-charter.md
 x .devflow/scripts/hooks/background-memory-update
 x .devflow/scripts/hooks/capture-prompt

@@ -17,6 +17,7 @@ import * as os from 'os'
 import * as path from 'path'
 
 import { ROOT, requireBuiltCli } from './helpers.js'
+import { charterInventory, renderCharter } from '../src/targets/claude-code/charter-render.js'
 import { createSandbox, removeSandbox, runCliOk, type Sandbox } from './install-snapshot-helpers.js'
 
 requireBuiltCli()
@@ -73,12 +74,17 @@ describe('the installed build binds the command input once (D-ARGS-ONCE)', () =>
     expect((commands.get('implement')!.match(/\$ARGUMENTS/g) ?? []).length).toBe(1)
   })
 
-  it('the installed charter is the amended source charter', () => {
+  it('the installed charter is the amended source charter, rendered for the installed plugins', () => {
     const installed = readFileSync(
       path.join(sandbox!.home, '.devflow', 'scripts', 'hooks', 'assets', 'orchestrator-charter.md'), 'utf-8')
     const source = readFileSync(
       path.join(ROOT, 'src', 'assets', 'scripts', 'hooks', 'assets', 'orchestrator-charter.md'), 'utf-8')
-    expect(installed).toBe(source)
+    // The install writes the render, not the source: the lines of an uninstalled owner are deleted.
+    const manifest = JSON.parse(readFileSync(path.join(sandbox!.home, '.devflow', 'manifest.json'), 'utf-8')) as { plugins: string[] }
+    const inventory = charterInventory(manifest.plugins)
+    const expected = renderCharter(source, inventory.commands, inventory.agents)
+    expect(expected.ok, 'the packaged charter renders for the installed plugins').toBe(true)
+    expect(installed).toBe(expected.ok ? expected.content : source)
     expect(installed).toContain('single git, gh or script command')
     expect(installed).not.toMatch(/full plan/i)
   })
