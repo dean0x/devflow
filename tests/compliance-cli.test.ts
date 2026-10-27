@@ -29,6 +29,7 @@ import {
 import { bothOffDir, complianceOffDir, curationOffDir, skillsDir } from '../src/core/assets.js';
 import { postingStatus, readInstalledVariants } from '../src/core/installed-variants.js';
 import { readManifest, type ManifestData } from '../src/core/manifest.js';
+import { getManifestLockPath } from '../src/core/manifest-lock.js';
 
 // ── resolveComplianceCliAction ────────────────────────────────────────────────
 
@@ -227,6 +228,7 @@ async function write(file: string, text: string): Promise<void> {
 }
 
 const installedCommand = (name: string): string => path.join(claudeDir, 'commands', 'devflow', `${name}.md`);
+const exists = (file: string): Promise<boolean> => fs.stat(file).then(() => true, () => false);
 
 async function seedPackage(): Promise<void> {
   await write(path.join(pkg, 'dist', 'commands', 'plan.md'), 'plan ON\n');
@@ -458,6 +460,75 @@ describe('applyComplianceChange', () => {
     expect(result.exitCode).toBe(1);
     expect(result.messages[0]?.text).toContain('Could not record the compliance switch');
     expect(await fs.readFile(installedCommand('release'), 'utf-8')).toBe('release ON\n');
+  });
+
+  it.skipIf(process.getuid?.() === 0)('a switch that cannot take the manifest lock writes nothing, exits 1 and prints no success line', async () => {
+    const manifest = await manifestWith({ enabled: true, frameworks: ['gdpr'] }, RUNNING, { installedVariants: { curation: true, compliance: true } });
+    await installOnFiles();
+    // A folder that cannot hold the lock directory: the lock is refused at once.
+    await fs.chmod(devflowDir, 0o555);
+    const result = await change(manifest, 'disable').finally(() => fs.chmod(devflowDir, 0o755));
+
+    expect(result.exitCode).toBe(1);
+    expect(result.nextState).toEqual({ enabled: true, frameworks: ['gdpr'] });
+    const text = result.messages.map(m => m.text).join('\n');
+    expect(text).toContain('Could not record the compliance switch');
+    expect(text).toContain('manifest lock could not be taken');
+    expect(text).not.toContain('Compliance disabled');
+    expect(result.messages.every(m => m.level === 'error')).toBe(true);
+    expect(await complianceOf()).toEqual({ enabled: true, frameworks: ['gdpr'] });
+    expect(await fs.readFile(installedCommand('release'), 'utf-8'), 'no prompt is converged').toBe('release ON\n');
+  });
+
+  it('writes the switch from a manifest read inside the lock, keeps a field another run wrote since the first read, and releases the lock', async () => {
+    const manifest = await manifestWith({ enabled: true, frameworks: ['gdpr'] });
+    await installOnFiles();
+    // Another devflow run turns the HUD on after this command read its manifest.
+    const file = path.join(devflowDir, 'manifest.json');
+    const onDisk = JSON.parse(await fs.readFile(file, 'utf-8')) as { features: Record<string, unknown> };
+    await fs.writeFile(file, JSON.stringify({ ...onDisk, features: { ...onDisk.features, hud: true } }), 'utf-8');
+
+    const result = await change(manifest, 'disable');
+
+    expect(result.exitCode, warnings.join('\n')).toBe(0);
+    const after = await readManifest(devflowDir);
+    expect(after?.features.compliance).toEqual({ enabled: false, frameworks: ['gdpr'] });
+    expect(after?.features.hud, 'the field written after the first read').toBe(true);
+    expect(await exists(getManifestLockPath(devflowDir)), 'the switch write releases the manifest lock').toBe(false);
+  });
+
+  it.skipIf(process.getuid?.() === 0)('a disable whose rule removal fails exits 1, names the rule and prints no removed line', async () => {
+    const manifest = await manifestWith({ enabled: true, frameworks: ['gdpr'] });
+    await installOnFiles();
+    const ruleDir = path.join(claudeDir, 'rules', 'devflow');
+    const ruleFile = path.join(ruleDir, 'compliance.md');
+    await write(ruleFile, 'the stamped compliance rule\n');
+    // A folder that cannot lose a file: the rule removal fails while every posting step is converged.
+    await fs.chmod(ruleDir, 0o555);
+    const result = await change(manifest, 'disable').finally(() => fs.chmod(ruleDir, 0o755));
+
+    expect(result.exitCode).toBe(1);
+    expect(result.messages.every(m => m.level === 'error')).toBe(true);
+    const text = result.messages.map(m => m.text).join('\n');
+    expect(text).toContain('compliance rule could not be removed');
+    expect(text).toContain(ruleFile);
+    expect(text).not.toContain('Compliance disabled');
+    expect(text).not.toContain('every posting step removed');
+    expect(await complianceOf(), 'the switch is on disk whatever the rule removal did').toEqual({ enabled: false, frameworks: ['gdpr'] });
+    expect(await fs.readFile(installedCommand('release'), 'utf-8')).toBe('release COMPLIANCE-OFF\n');
+  });
+
+  it('a disable that removes the rule prints the removed line and exits 0', async () => {
+    const manifest = await manifestWith({ enabled: true, frameworks: ['gdpr'] });
+    await installOnFiles();
+    const ruleFile = path.join(claudeDir, 'rules', 'devflow', 'compliance.md');
+    await write(ruleFile, 'the stamped compliance rule\n');
+
+    const result = await change(manifest, 'disable');
+
+    expect(result.exitCode, warnings.join('\n')).toBe(0);
+    expect(await exists(ruleFile)).toBe(false);
+    expect(result.messages.map(m => m.text).join('\n')).toContain('every posting step removed');
   });
 });
 

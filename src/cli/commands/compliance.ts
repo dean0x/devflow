@@ -39,6 +39,7 @@ import {
   repoComplianceStatusLines,
 } from '../../core/evidence-policy.js';
 import { postingStatus, readInstalledVariants, type PostingStatus } from '../../core/installed-variants.js';
+import { withManifestLock } from '../../core/manifest-lock.js';
 import { readManifest, writeManifest, type ManifestData } from '../../core/manifest.js';
 import {
   applyVariantToggle,
@@ -175,10 +176,13 @@ async function skillInstalled(claudeDir: string): Promise<boolean> {
   }
 }
 
+/** The installed compliance rule file. */
+const complianceRuleFile = (claudeDir: string): string => path.join(claudeDir, 'rules', 'devflow', 'compliance.md');
+
 /** Returns true if the compliance rule file exists at the install target. */
 async function ruleInstalled(claudeDir: string): Promise<boolean> {
   try {
-    await fs.access(path.join(claudeDir, 'rules', 'devflow', 'compliance.md'));
+    await fs.access(complianceRuleFile(claudeDir));
     return true;
   } catch {
     return false;
@@ -246,11 +250,37 @@ export interface ApplyComplianceChangeResult {
   nextState: ComplianceFeatureState;
   messages: ComplianceCliActionMessage[];
   /**
-   * 1 when the change leaves a compliance-off machine with an installed prompt that may still post,
-   * or when the switch could not be recorded; the command prints no success line then (AC-28).
+   * 1 when the change leaves a compliance-off machine with an installed prompt that may still post
+   * or with the compliance rule still installed, or when the switch could not be recorded; the
+   * command prints no success line then (AC-28).
    * Curation-only failures stay warnings and leave this 0.
    */
   exitCode: 0 | 1;
+}
+
+/**
+ * Write the switch under the manifest lock, into the manifest read inside the lock, so a field
+ * that another devflow run wrote since this command first read the manifest is kept. A lock that
+ * cannot be taken, or is lost before the write, writes nothing. Null when the switch is on disk,
+ * otherwise the reason it is not. Never throws.
+ */
+async function recordComplianceSwitch(devflowDir: string, nextState: ComplianceFeatureState): Promise<string | null> {
+  try {
+    const locked = await withManifestLock(devflowDir, {}, async (lock): Promise<string | null> => {
+      const current = await readManifest(devflowDir);
+      if (current === null) return 'no readable install manifest';
+      if (!(await lock.stillHeld())) return 'the install manifest lock was lost';
+      await writeManifest(devflowDir, {
+        ...current,
+        features: { ...current.features, compliance: nextState },
+        updatedAt: new Date().toISOString(),
+      });
+      return null;
+    });
+    return locked.ok ? locked.value : 'the install manifest lock could not be taken';
+  } catch (err) {
+    return String(err);
+  }
 }
 
 /**
@@ -260,9 +290,10 @@ export interface ApplyComplianceChangeResult {
  * included, and a `--set` that only changes the frameworks converges too, so the stamp follows.
  *
  * Fail closed on the off side: with compliance off, a converge that cannot prove every installed
- * compliance-armed prompt holds the compliance-off file is an error that lists the files, and a
+ * compliance-armed prompt holds the compliance-off file is an error that lists the files, a
  * toggle that cannot converge at all (a version skew, or no manifest) says that posting steps remain
- * installed until `devflow init`. Neither prints the success text. On the enable side a skipped
+ * installed until `devflow init`, and a compliance rule that is still installed is an error that
+ * names the file. None of them prints the success text. On the enable side a skipped
  * converge is a warning: the installed prompts are then the ones that post, which is what was asked for.
  *
  * Returns a result and never throws; the caller prints the messages and sets the exit code.
@@ -277,16 +308,11 @@ export async function applyComplianceChange(opts: ApplyComplianceChangeOptions):
   };
 
   // The switch comes first: whatever the converge does next, the machine's choice is on disk.
-  try {
-    await writeManifest(devflowDir, {
-      ...manifest,
-      features: { ...manifest.features, compliance: nextState },
-      updatedAt: new Date().toISOString(),
-    });
-  } catch (err) {
+  const notRecorded = await recordComplianceSwitch(devflowDir, nextState);
+  if (notRecorded !== null) {
     return {
       nextState: manifest.features.compliance,
-      messages: [{ level: 'error', text: `Could not record the compliance switch, so nothing was changed: ${String(err)}` }],
+      messages: [{ level: 'error', text: `Could not record the compliance switch, so nothing was changed: ${notRecorded}` }],
       exitCode: 1,
     };
   }
@@ -316,6 +342,20 @@ export async function applyComplianceChange(opts: ApplyComplianceChangeOptions):
         { level: 'error', text: 'Compliance is recorded as off, but the install may still post to GitHub or a tracker.' },
         ...describePostingLeft(posting).map((text): ComplianceCliActionMessage => ({ level: 'error', text })),
       ],
+      exitCode: 1,
+    };
+  }
+
+  // A failed rule removal is only a warning inside the converge. The line that says the rule is
+  // removed prints only when it is gone.
+  if (!nextState.enabled && (await ruleInstalled(claudeDir))) {
+    return {
+      nextState,
+      messages: [{
+        level: 'error',
+        text: `Compliance is recorded as off, but the compliance rule could not be removed: ${complianceRuleFile(claudeDir)}. ` +
+          'Fix the cause in the warning above, or delete the file. Then run `devflow compliance --disable` again.',
+      }],
       exitCode: 1,
     };
   }
