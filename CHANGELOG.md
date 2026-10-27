@@ -25,10 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **`/implement` re-validation now follows your compliance and review-publication settings** ([#544](https://github.com/dean0x/devflow/issues/544)).
+- **`/implement` re-validation now follows your compliance, review-publication and PR-title settings, and always runs self-review** ([#544](https://github.com/dean0x/devflow/issues/544)).
   - With compliance on, the fix agents in a re-validation get the compliance guidance, as in a full run. With compliance off, re-validation gives them none, as before.
   - Re-validation now follows your review-publication setting, as a full run does.
   - Re-validation now applies your team's PR-title convention, as a full run does.
+  - Re-validation always runs the self-review (Harden) step, at every gate level.
 - **The gate-level step of `devflow init` fits an 80-column terminal** ([#658](https://github.com/dean0x/devflow/issues/658)).
   - Each level hint is now one short line, and no line of the step note is longer than 72 characters.
   - The step note names `/resolve` with the other commands that read the level.
