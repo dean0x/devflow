@@ -3,8 +3,10 @@
 # SessionStart Hook: Orchestrator Charter Injection
 # Presence-gated: registered/removed by `devflow ambient --enable/--disable`.
 # Git repos only: silent outside a git repo (df_has_git_marker bounded walk).
-# Charter includes the plan-handoff fallback bullet — SessionStart provably fires
-# (SessionStart:clear) in plan-handoff sessions even if UserPromptSubmit does not.
+# The installed charter carries the plan-handoff fallback bullet only while
+# devflow:implement is installed (init renders the charter for the installed plugin set) —
+# SessionStart provably fires (SessionStart:clear) in plan-handoff sessions even if
+# UserPromptSubmit does not.
 # NOTE: the literal prefix `Implement the following plan:` is duplicated in
 # src/assets/scripts/hooks/preamble — update both if Claude Code changes the handoff format.
 
