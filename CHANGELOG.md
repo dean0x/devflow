@@ -40,6 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - For debug work, it names `devflow:debug` when that workflow is installed. Otherwise it sends the work to Explore, then Code. It never routes to the Debug agent.
   - A plan handoff no longer points to `devflow:implement` when it is not installed. The prompt gets a generic reminder instead.
   - `devflow ambient --enable` now warns when the ambient agents are not installed. It still registers the hooks.
+  - `devflow uninstall --plugin` removes the plan-handoff marker when it removes implement. It does this also when the manifest has no record of the install.
+  - `devflow uninstall --plugin` also drops a manifest record that holds the old name of the removed plugin.
   - Run `devflow init` after you update to refresh the charter.
 
 ---
