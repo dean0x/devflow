@@ -785,18 +785,23 @@ describe('the variant manifest (TP-6)', () => {
     });
   });
 
-  it('is left as the build found it when the build refuses', async () => {
+  it('a refused build leaves no manifest, and a clean rebuild writes it again', async () => {
     await withFakeRoot(async fakeRoot => {
       await seedFixture(fakeRoot);
-      await write(fakeRoot, 'src/assets/commands/bad.mds', `---\ndescription: bad\noutput-dir: dist/commands\n---\n\n${CON}\nx\n${CEND}\n${CEND}\n`);
-      const absent = runBuild(fakeRoot);
-      expect(absent.status, `expected exit 1.\n${absent.combined}`).toBe(1);
-      expect(await readIfPresent(fakeRoot, 'dist/variant-axes.json'), 'a refused build writes no manifest').toBeNull();
+      const good = runBuild(fakeRoot);
+      expect(good.status, good.combined).toBe(0);
+      const first = (await manifestOf(fakeRoot)).text;
 
-      await write(fakeRoot, 'dist/variant-axes.json', 'old\n');
-      const present = runBuild(fakeRoot);
-      expect(present.status, `expected exit 1.\n${present.combined}`).toBe(1);
-      expect(await readIfPresent(fakeRoot, 'dist/variant-axes.json'), 'a refused build leaves the old manifest').toBe('old\n');
+      const badSource = 'src/assets/commands/bad.mds';
+      await write(fakeRoot, badSource, `---\ndescription: bad\noutput-dir: dist/commands\n---\n\n${CON}\nx\n${CEND}\n${CEND}\n`);
+      const refused = runBuild(fakeRoot);
+      expect(refused.status, `expected exit 1.\n${refused.combined}`).toBe(1);
+      expect(await readIfPresent(fakeRoot, 'dist/variant-axes.json'), 'a refused build leaves no manifest').toBeNull();
+
+      await fs.rm(path.join(fakeRoot, ...badSource.split('/')));
+      const rebuilt = runBuild(fakeRoot);
+      expect(rebuilt.status, rebuilt.combined).toBe(0);
+      expect((await manifestOf(fakeRoot)).text, 'a clean rebuild writes the same manifest').toBe(first);
     });
   });
 });

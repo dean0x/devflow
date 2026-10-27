@@ -69,7 +69,8 @@
  * Variant manifest: after a clean build, dist/variant-axes.json records for every
  * compiled command and agent whether it carries a curation arm and whether it
  * carries a compliance arm. It is written on every successful build, even when no
- * host has a compliance arm, and never by a refused one.
+ * host has a compliance arm. It is removed before the first host is written and
+ * written last, after the prunes, so a refused, crashed or interrupted build leaves none.
  *
  * Dest safety: `output-dir` must resolve to one of the three allowlisted
  * directories (src/core/mds-variants.ts). A typo, a backslash spelling, a
@@ -954,6 +955,11 @@ function writeFileAtomic(dest: string, content: string): void {
   }
 }
 
+/** Absolute path of the variant manifest under ROOT. */
+function variantManifestPath(): string {
+  return path.resolve(ROOT, ...VARIANT_MANIFEST_REL_PATH.split("/"));
+}
+
 async function compileHost(host: HostEntry, plan: HostPlan): Promise<CompileOutcome> {
   const { variant, outAbs } = plan;
 
@@ -1238,6 +1244,11 @@ async function main(): Promise<void> {
     );
   }
 
+  // The manifest describes a finished build. It goes before the first file is written
+  // and returns as the last step of a clean run, so a refused, crashed or interrupted
+  // build leaves none, and a compliance-off install refuses with the build remedy.
+  fs.rmSync(variantManifestPath(), { force: true });
+
   for (const { host, plan } of planned) {
     if (destsOf(plan).some(dest => contested.has(dest))) continue;
     try {
@@ -1306,7 +1317,7 @@ async function main(): Promise<void> {
   for (const rel of pruneLegacyOffTree()) {
     console.log(`  pruned:   ${rel} (retired off tree)`);
   }
-  writeFileAtomic(path.resolve(ROOT, ...VARIANT_MANIFEST_REL_PATH.split("/")), manifest.value);
+  writeFileAtomic(variantManifestPath(), manifest.value);
   const curationOffCount = outcomes.filter(o => o.prompt?.axes.curation === true).length;
   console.log(`  ${curationOffCount} curation-off variant(s) written`);
 
