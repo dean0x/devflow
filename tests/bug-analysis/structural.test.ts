@@ -412,8 +412,10 @@ describe('bug-analysis.md — static analysis safety patterns', () => {
 const SCANNER_TOOLS = ['semgrep scan', 'snyk code test', 'codeql database create', 'codeql database analyze'];
 const STATUS_LOOP = `for t in semgrep snyk codeql jq; do printf '%s=%s\\n' "$t" "$(command -v "$t" || echo no)"; done`;
 const EXIT_PRINT = "printf '\\nexit=%s\\n' ";
-const SNYK_EXIT_LINE = `${EXIT_PRINT}"$E"\n`;
-const CODEQL_SARIF_PRINT = 'cat "${CODEQL_TMP}/results.sarif"';
+/** The Snyk status line, with the last line of the Snyk filter before it: the exit line printed twice also appears in the Semgrep fence. */
+const SNYK_EXIT_AT = /(snyk\.sarif"\n)(printf '\\nexit=%s\\n' "\$E"\n)/;
+/** What a Semgrep or Snyk scanner line ends with: the status is read before any other command runs. */
+const STATUS_READ = '2>/dev/null; E=$?';
 const NO_STATIC_BRANCH = 'If `--no-static` is set:';
 const NO_SCANNER_BRANCH = 'If all three scanners print `no`:';
 const NO_JQ_BRANCH = 'If a scanner is installed but `jq` prints `no`:';
@@ -590,7 +592,7 @@ function collectStatusLineDefects(phase2: string): string[] {
   const scannerFences = bashFences(phase2).filter(fence => fenceLines(fence).some(line => SCANNER_TOOLS.some(tool => line.includes(tool))));
   const exitLines = scannerFences.map(fence => fence.split(EXIT_PRINT).length - 1);
   if (exitLines.length !== 3 || exitLines.some(count => count !== 1)) out.push(`the scanner fences carry ${exitLines.join('+') || '0'} exit lines, expected 1 each in 3 fences`);
-  if (!phase2.includes('); E=$?')) out.push('the Snyk status is not read right after the scanner');
+  if (bashFenceLines(phase2).filter(line => line.endsWith(STATUS_READ)).length !== 2) out.push('the Semgrep and Snyk statuses are not read right after their scanners');
   return [...out, ...STATUS_LINE_PARTS.filter(part => !phase2.includes(part)).map(doesNotSay)];
 }
 
@@ -598,31 +600,55 @@ const fenceWith = (phase2: string, tool: string): string[] => fenceLines(bashFen
 
 /**
  * Each scanner fence prints its own tool's status, on a line that comes after the scanner (and the Snyk filter).
- * The order has three reasons:
- * - The status is read before any other command runs. Semgrep prints it on the pipeline's own line, and
- *   `CODEQL_EXIT=$?` is the line right after `codeql database analyze`, above the `cat` and the cleanup. Any
- *   command between them replaces `$?`, so a CodeQL run that timed out would read as complete.
- * - The CodeQL SARIF is printed with `cat` before the cleanup removes it.
- * - Snyk scans the project once, into `S`. The filter and the status come after that one scan, never once per file.
+ * The order has two reasons:
+ * - The status is read before any other command runs. Semgrep and Snyk read it on their own scanner line (`E=$?`),
+ *   and `CODEQL_EXIT=$?` is the line right after `codeql database analyze`, above the cleanup. Any command between
+ *   them replaces `$?`, so a CodeQL run that timed out would read as complete.
+ * - Snyk scans the project once, into a file. The filter and the status come after that one scan, never once per file.
  */
 function collectExitLineOrderDefects(phase2: string): string[] {
   const out: string[] = [];
-  const semgrep = fenceWith(phase2, 'semgrep scan').find(line => line.includes('semgrep scan')) ?? '';
-  const pipeline = semgrep.indexOf('set -o pipefail; git diff');
-  const semgrepExit = semgrep.indexOf(`${EXIT_PRINT}"$?"`);
-  if (pipeline === -1 || semgrepExit < semgrep.indexOf('semgrep scan') || semgrep.indexOf('semgrep scan') < pipeline) out.push('the Semgrep exit line does not follow its pipeline on the same line, printing "$?"');
+  const semgrep = fenceWith(phase2, 'semgrep scan');
+  const semgrepScan = semgrep.findIndex(line => line.includes('semgrep scan'));
+  const pipeline = semgrep[semgrepScan]?.indexOf('set -o pipefail; git diff') ?? -1;
+  const semgrepExit = semgrep.indexOf(`${EXIT_PRINT}"$E"`);
+  if (pipeline === -1 || pipeline > semgrep[semgrepScan].indexOf('semgrep scan') || !semgrep[semgrepScan].endsWith(STATUS_READ) || semgrepExit <= semgrepScan) out.push('the Semgrep status is not read on the line of its pipeline (E=$?) and printed after it, printing "$E"');
 
   const snyk = fenceWith(phase2, 'snyk code test');
-  const assigned = snyk.findIndex(line => line.startsWith('S=$('));
-  const filtered = Math.max(...snyk.map((line, index) => (line.includes('jq ') ? index : -1)));
+  const snykScan = snyk.findIndex(line => line.includes('snyk code test'));
+  const filtered = Math.max(-1, ...snyk.map((line, index) => (line.includes('jq ') || line.includes('snyk.sarif') ? index : -1)));
   const snykExit = snyk.indexOf(`${EXIT_PRINT}"$E"`);
-  if (assigned === -1 || snykExit <= assigned || snykExit <= filtered) out.push('the Snyk exit line does not follow the scanner and the filter, printing "$E"');
+  if (snykScan === -1 || !snyk[snykScan].endsWith(STATUS_READ) || snykExit <= snykScan || snykExit <= filtered) out.push('the Snyk status is not read on its scanner line (E=$?) and printed after the filter, printing "$E"');
 
   const codeql = fenceWith(phase2, 'codeql database');
   const analyze = codeql.findIndex(line => line.includes('codeql database analyze'));
   const codeqlStatus = codeql.indexOf('CODEQL_EXIT=$?');
   if (analyze === -1 || codeqlStatus !== analyze + 1) out.push('the CodeQL status is not read on the line right after codeql database analyze');
   if (codeqlStatus === -1 || codeql.indexOf(`${EXIT_PRINT}"$CODEQL_EXIT"`) <= codeqlStatus) out.push('the CodeQL exit line does not follow CODEQL_EXIT=$?, printing "$CODEQL_EXIT"');
+  return out;
+}
+
+const SARIF_TARGETS: Array<[string, string]> = [
+  ['semgrep scan', '>"{ANALYSIS_DIR}/semgrep.sarif" 2>/dev/null'],
+  ['snyk code test', '>"{ANALYSIS_DIR}/snyk-all.json" 2>/dev/null'],
+  ['codeql database analyze', '--output="{ANALYSIS_DIR}/codeql.sarif" 2>/dev/null'],
+];
+
+/**
+ * No fence prints a scanner's SARIF to the call output, where a long result is clipped and its findings and exit line
+ * can be lost. Each scanner line writes its SARIF to a file in the analysis folder, and no fence reads one back with
+ * `cat`.
+ */
+function collectSarifFileDefects(phase2: string): string[] {
+  const out: string[] = [];
+  const lines = bashFenceLines(phase2);
+  for (const [tool, target] of SARIF_TARGETS) {
+    const line = lines.find(text => text.includes(tool));
+    if (line === undefined) out.push(`no ${tool} command line`);
+    else if (!line.includes(target)) out.push(`the ${tool} line does not write its SARIF to a file: expected ${target}`);
+  }
+  const printed = lines.find(line => /^\s*cat\b/.test(line) || line.includes('$S"') || line.startsWith('S=$('));
+  if (printed !== undefined) out.push(`a fence prints SARIF to the call output: ${printed.trim()}`);
   return out;
 }
 
@@ -715,7 +741,7 @@ function collectFileNameHandoffDefects(phase2: string): string[] {
   const out: string[] = [];
   const fences = bashFences(phase2).length;
   if (fences < 5) out.push(`${fences} bash fences, expected at least 5`);
-  const semgrep = /^set -o pipefail; git diff --name-only -z --diff-filter=d \{DIFF_RANGE\} \| xargs -0 -r semgrep scan [^;|]* -- 2>\/dev\/null;/m;
+  const semgrep = /^set -o pipefail; git diff --name-only -z --diff-filter=d \{DIFF_RANGE\} \| xargs -0 -r semgrep scan [^;|]* -- >"\{ANALYSIS_DIR\}\/semgrep\.sarif" 2>\/dev\/null;/m;
   if (!semgrep.test(phase2)) out.push('the Semgrep line does not read names with -z, pass them with xargs -0 and put them after --');
   if (!phase2.includes(SNYK_NAME_LIST)) out.push('the Snyk filter does not read the names from git as NUL-separated output');
   const reads = bashFenceLines(phase2).filter(line => line.includes('CHANGED_FILES') && line !== 'CHANGED_FILES=$(git diff --name-only {DIFF_RANGE})');
@@ -725,7 +751,7 @@ function collectFileNameHandoffDefects(phase2: string): string[] {
 }
 
 const SNYK_SCOPE_FILTER = '.runs[].results |= map(select(.locations[].physicalLocation.artifactLocation.uri as $uri | $files | index($uri) != null))';
-const SNYK_FILTER_FALLBACK = `2>/dev/null || printf '%s' "$S"`;
+const SNYK_FILTER_FALLBACK = '"{ANALYSIS_DIR}/snyk-all.json" >"{ANALYSIS_DIR}/snyk.sarif" 2>/dev/null || cp "{ANALYSIS_DIR}/snyk-all.json" "{ANALYSIS_DIR}/snyk.sarif"';
 const SNYK_UNFILTERED_NOTE = 'Without `jq` the SARIF is unfiltered: note that.';
 
 /**
@@ -738,7 +764,7 @@ function collectSnykScopeDefects(phase2: string): string[] {
   const snyk = fenceWith(phase2, 'snyk code test').map(line => line.trim());
   const filter = snyk.indexOf(`'${SNYK_SCOPE_FILTER}' \\`);
   if (filter === -1) out.push('the Snyk filter does not keep only the results whose file is a changed file');
-  if (snyk[filter + 1] !== SNYK_FILTER_FALLBACK) out.push('the line after the Snyk filter does not print the SARIF unfiltered when jq fails');
+  if (snyk[filter + 1] !== SNYK_FILTER_FALLBACK) out.push('the line after the Snyk filter does not write snyk.sarif, or copy the unfiltered SARIF to it when jq fails');
   if (!phase2.includes(SNYK_UNFILTERED_NOTE)) out.push('Phase 2 does not say that the SARIF is unfiltered without jq');
   return out;
 }
@@ -762,6 +788,7 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
   const statusAssignment = onPhase2(collectStatusAssignmentDefects);
   const statusLines = onPhase2(collectStatusLineDefects);
   const exitOrder = onPhase2(collectExitLineOrderDefects);
+  const sarifFiles = onPhase2(collectSarifFileDefects);
   const scratch = onPhase2(collectCodeqlScratchDefects);
   const statusRule = onPhase2(collectStatusRuleDefects);
   const scannerRoot = onPhase2(collectScannerRootDefects);
@@ -793,7 +820,7 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(defects('xargs -0 -r semgrep', '{bound} -k 10 280 xargs -0 -r semgrep')).toEqual(expect.arrayContaining([carriesBound, 'Phase 2 names a devflow time bound']));
     expect(defects('xargs -0 -r semgrep', 'timeout 280 xargs -0 -r semgrep')).toContainEqual(carriesBound);
     expect(defects('xargs -0 -r semgrep', 'xargs -0 -k 10 280 -r semgrep')).toContainEqual(carriesBound);
-    expect(defects('S=$(snyk', 'S=$(gtimeout 280 snyk')).toEqual(expect.arrayContaining([carriesBound, 'Phase 2 names a devflow time bound']));
+    expect(defects('snyk code test', 'gtimeout 280 snyk code test')).toEqual(expect.arrayContaining([carriesBound, 'Phase 2 names a devflow time bound']));
     expect(defects('codeql database analyze', 'timeout 280 codeql database analyze')).toContainEqual(carriesBound);
     expect(defects(`${STATUS_LOOP}\n`, `${STATUS_LOOP}\ncommand -v timeout || command -v gtimeout\n`)).toContainEqual(carriesBound);
     expect(defects('note which tools will run.', 'note which tools will run. `{bound}` is `timeout` or `gtimeout`.')).toContain('Phase 2 names a devflow time bound');
@@ -900,10 +927,12 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
   it.each(builds)('known-bad probes: a lost or repeated exit line, an unread Snyk status or a lost status sentence is reported (%s)', (_label, body) => {
     expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
     const defects = probe(statusLines, body);
-    expect(defects(SNYK_EXIT_LINE, '')).toContain('the scanner fences carry 1+0+1 exit lines, expected 1 each in 3 fences');
-    expect(defects(SNYK_EXIT_LINE, `${SNYK_EXIT_LINE}${SNYK_EXIT_LINE}`)).toContain('the scanner fences carry 1+2+1 exit lines, expected 1 each in 3 fences');
+    expect(defects(SNYK_EXIT_AT, '$1')).toContain('the scanner fences carry 1+0+1 exit lines, expected 1 each in 3 fences');
+    expect(defects(SNYK_EXIT_AT, '$1$2$2')).toContain('the scanner fences carry 1+2+1 exit lines, expected 1 each in 3 fences');
     expect(collectStatusLineDefects('')).toContain('the scanner fences carry 0 exit lines, expected 1 each in 3 fences');
-    expect(defects('); E=$?', '); true')).toContain('the Snyk status is not read right after the scanner');
+    const unread = 'the Semgrep and Snyk statuses are not read right after their scanners';
+    expect(defects('snyk-all.json" 2>/dev/null; E=$?', 'snyk-all.json" 2>/dev/null; true')).toContain(unread);
+    expect(defects('semgrep.sarif" 2>/dev/null; E=$?', 'semgrep.sarif" 2>/dev/null; true')).toContain(unread);
     expect(defects('Snyk 0 or 1', 'Snyk 0, 1 or 2')).toContain(doesNotSay(STATUS_LINE_PARTS[0]));
     expect(defects('CodeQL 0. Any other status', 'CodeQL 0 or 1. Any other status')).toContain(doesNotSay(STATUS_LINE_PARTS[0]));
     expect(defects('or no such line', 'or an empty line')).toContain(doesNotSay(STATUS_LINE_PARTS[1]));
@@ -920,32 +949,31 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
   it.each(builds)('known-bad probes: an exit line that comes early or prints the wrong status is reported (%s)', (_label, body) => {
     expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
     const defects = probe(exitOrder, body);
-    const semgrep = 'the Semgrep exit line does not follow its pipeline on the same line, printing "$?"';
-    const semgrepExit = `; ${EXIT_PRINT}"$?"`;
-    const semgrepStart = 'set -o pipefail; git diff --name-only -z --diff-filter=d';
-    expect(probe(exitOrder, seed(body ?? '', semgrepExit, ''))(semgrepStart, `${EXIT_PRINT}"$?"; ${semgrepStart}`)).toContain(semgrep);
-    expect(defects(semgrepExit, `; ${EXIT_PRINT}"$E"`)).toContain(semgrep);
+    const semgrep = 'the Semgrep status is not read on the line of its pipeline (E=$?) and printed after it, printing "$E"';
+    const semgrepRead = 'semgrep.sarif" 2>/dev/null; E=$?';
+    expect(defects(semgrepRead, 'semgrep.sarif" 2>/dev/null; true')).toContain(semgrep);
+    expect(defects(`${semgrepRead}\n${EXIT_PRINT}"$E"`, `${semgrepRead}\n${EXIT_PRINT}"$?"`)).toContain(semgrep);
+    expect(defects('cd "{worktree}" || exit\nset -o pipefail', `cd "{worktree}" || exit\n${EXIT_PRINT}"$E"\nset -o pipefail`)).toContain(semgrep);
     expect(defects('set -o pipefail; git diff', 'git diff')).toContain(semgrep);
     expect(defects(/(set -o pipefail; git diff[^|]*\| )(xargs[^;]*;)/, '$2 $1')).toContain(semgrep);
-    const snyk = 'the Snyk exit line does not follow the scanner and the filter, printing "$E"';
-    const withoutSnykExit = probe(exitOrder, seed(body ?? '', SNYK_EXIT_LINE, ''));
-    expect(withoutSnykExit('S=$(snyk', `${SNYK_EXIT_LINE}S=$(snyk`)).toContain(snyk);
-    expect(withoutSnykExit(`printf '%s' "$S" | jq`, `${SNYK_EXIT_LINE}printf '%s' "$S" | jq`)).toContain(snyk);
-    expect(defects(SNYK_EXIT_LINE, `${EXIT_PRINT}"$?"\n`)).toContain(snyk);
-    expect(defects('S=$(snyk', 'T=$(snyk')).toContain(snyk);
-    const withoutFilter = probe(exitOrder, seed(seed(body ?? '', SNYK_EXIT_LINE, ''), /printf '%s' "\$S" \| jq[^\n]*\n[^\n]*\n[^\n]*\n/, ''));
-    expect(withoutFilter('S=$(snyk', `${SNYK_EXIT_LINE}S=$(snyk`)).toContain(snyk);
+    const snyk = 'the Snyk status is not read on its scanner line (E=$?) and printed after the filter, printing "$E"';
+    const withoutSnykExit = probe(exitOrder, seed(body ?? '', SNYK_EXIT_AT, '$1'));
+    expect(withoutSnykExit('snyk code test', `${EXIT_PRINT}"$E"\nsnyk code test`)).toContain(snyk);
+    expect(withoutSnykExit('jq --argjson files', `${EXIT_PRINT}"$E"\njq --argjson files`)).toContain(snyk);
+    expect(withoutSnykExit(/(snyk\.sarif"\n)/, `$1${EXIT_PRINT}"$E"\n`)).toEqual([]);
+    expect(defects(SNYK_EXIT_AT, `$1${EXIT_PRINT}"$?"\n`)).toContain(snyk);
+    expect(defects('snyk-all.json" 2>/dev/null; E=$?', 'snyk-all.json" 2>/dev/null; true')).toContain(snyk);
     const codeql = 'the CodeQL exit line does not follow CODEQL_EXIT=$?, printing "$CODEQL_EXIT"';
     const codeqlExit = `${EXIT_PRINT}"$CODEQL_EXIT"`;
     expect(defects(codeqlExit, `${EXIT_PRINT}"$?"`)).toContain(codeql);
-    expect(defects(`CODEQL_EXIT=$?\n${CODEQL_SARIF_PRINT}\n${codeqlExit}`, `${codeqlExit}\nCODEQL_EXIT=$?\n${CODEQL_SARIF_PRINT}`)).toContain(codeql);
+    expect(defects(`CODEQL_EXIT=$?\n${codeqlExit}`, `${codeqlExit}\nCODEQL_EXIT=$?`)).toContain(codeql);
   });
 
   it.each(builds)('known-bad probes: a CodeQL status read after another command is reported (%s)', (_label, body) => {
     expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
     const defects = probe(exitOrder, body);
     const late = 'the CodeQL status is not read on the line right after codeql database analyze';
-    expect(defects(`CODEQL_EXIT=$?\n${CODEQL_SARIF_PRINT}`, `${CODEQL_SARIF_PRINT}\nCODEQL_EXIT=$?`)).toContain(late);
+    expect(defects('CODEQL_EXIT=$?\n', 'echo done\nCODEQL_EXIT=$?\n')).toContain(late);
     expect(defects('CODEQL_EXIT=$?\n', 'rm -rf "${CODEQL_TMP}/db"\nCODEQL_EXIT=$?\n')).toContain(late);
     const unread = defects('CODEQL_EXIT=$?\n', '');
     expect(unread).toContain(late);
@@ -953,6 +981,28 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     const noAnalyze = probe(exitOrder, seed(body ?? '', 'codeql database analyze', 'codeql database scan'));
     expect(noAnalyze('CODEQL_TMP=$(mktemp -d) || exit', 'CODEQL_EXIT=$?\nCODEQL_TMP=$(mktemp -d) || exit')).toContain(late);
     expect(collectExitLineOrderDefects('')).toContain(late);
+  });
+
+  it.each(builds)('each scanner writes its SARIF to a file in the analysis folder, and no fence prints SARIF (%s)', (_label, body) => {
+    expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
+    expect(sarifFiles(body ?? '')).toEqual([]);
+  });
+
+  it.each(builds)('known-bad probes: a scanner that prints its SARIF, or a SARIF read back with cat, is reported (%s)', (_label, body) => {
+    expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
+    const defects = probe(sarifFiles, body);
+    const notFile = (tool: string, target: string): string => `the ${tool} line does not write its SARIF to a file: expected ${target}`;
+    expect(defects(' >"{ANALYSIS_DIR}/semgrep.sarif"', '')).toContain(notFile(...SARIF_TARGETS[0]));
+    expect(defects('semgrep.sarif" 2>/dev/null', 'semgrep.sarif" 2>&1')).toContain(notFile(...SARIF_TARGETS[0]));
+    expect(defects('snyk code test --sarif >"{ANALYSIS_DIR}/snyk-all.json"', 'snyk code test --sarif')).toContain(notFile(...SARIF_TARGETS[1]));
+    expect(defects('snyk-all.json" 2>/dev/null; E=$?', 'snyk-all.json" 2>&1; E=$?')).toContain(notFile(...SARIF_TARGETS[1]));
+    expect(defects('--output="{ANALYSIS_DIR}/codeql.sarif"', '--output="${CODEQL_TMP}/results.sarif"')).toContain(notFile(...SARIF_TARGETS[2]));
+    const printed = expect.stringContaining('a fence prints SARIF to the call output');
+    expect(defects('CODEQL_EXIT=$?\n', 'CODEQL_EXIT=$?\ncat "${CODEQL_TMP}/results.sarif"\n')).toContainEqual(printed);
+    expect(defects('CODEQL_EXIT=$?\n', 'CODEQL_EXIT=$?\ncat "{ANALYSIS_DIR}/codeql.sarif"\n')).toContainEqual(printed);
+    expect(defects('jq --argjson files', 'printf \'%s\' "$S" | jq --argjson files')).toContainEqual(printed);
+    expect(defects('snyk code test --sarif >', 'S=$(snyk code test --sarif >')).toContainEqual(printed);
+    expect(collectSarifFileDefects('')).toHaveLength(SARIF_TARGETS.length);
   });
 
   it.each(builds)('a scanner that did not run or did not finish is named in the findings and the report (%s)', (_label, body) => {
@@ -1004,7 +1054,8 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     const semgrepLine = 'the Semgrep line does not read names with -z, pass them with xargs -0 and put them after --';
     expect(defects('--name-only -z --diff-filter=d', '--name-only --diff-filter=d')).toContain(semgrepLine);
     expect(defects('set -o pipefail; ', '')).toContain(semgrepLine);
-    expect(defects('-- 2>/dev/null', ' 2>/dev/null')).toContain(semgrepLine);
+    expect(defects('-- >"{ANALYSIS_DIR}/semgrep.sarif" 2>/dev/null', ' >"{ANALYSIS_DIR}/semgrep.sarif" 2>/dev/null')).toContain(semgrepLine);
+    expect(defects('--quiet -- >', '--quiet >')).toContain(semgrepLine);
     expect(defects('xargs -0 -r semgrep', 'xargs -0 semgrep')).toContain(semgrepLine);
     const snykLine = 'the Snyk filter does not read the names from git as NUL-separated output';
     expect(defects(SNYK_NAME_LIST, '"$(echo "$CHANGED_FILES" | jq -R . | jq -s .)"'))
@@ -1074,13 +1125,15 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
     const defects = probe(snykScope, body);
     const filter = 'the Snyk filter does not keep only the results whose file is a changed file';
-    const fallback = 'the line after the Snyk filter does not print the SARIF unfiltered when jq fails';
+    const fallback = 'the line after the Snyk filter does not write snyk.sarif, or copy the unfiltered SARIF to it when jq fails';
     expect(defects('.runs[].results |= map(select(', '.runs[].results |= map(select(true or (')).toContain(filter);
     expect(defects('$files | index($uri) != null', '$files | index($uri) == null')).toContain(filter);
     expect(defects('.runs[].results |= map(', '.runs[].results |= (')).toContain(filter);
-    expect(defects(` || printf '%s' "$S"`, '')).toContain(fallback);
-    expect(defects(` || printf '%s' "$S"`, ' || true')).toContain(fallback);
-    expect(defects(`2>/dev/null || printf '%s' "$S"`, `2>/dev/null\\\nprintf '%s' "$S"`)).toContain(fallback);
+    const copy = ' || cp "{ANALYSIS_DIR}/snyk-all.json" "{ANALYSIS_DIR}/snyk.sarif"';
+    expect(defects(copy, '')).toContain(fallback);
+    expect(defects(copy, ' || true')).toContain(fallback);
+    expect(defects('2>/dev/null || cp', '2>/dev/null\\\ncp')).toContain(fallback);
+    expect(defects(' >"{ANALYSIS_DIR}/snyk.sarif" 2>/dev/null', ' >"{ANALYSIS_DIR}/snyk.json" 2>/dev/null')).toContain(fallback);
     expect(defects(SNYK_UNFILTERED_NOTE, 'The SARIF may be unfiltered.')).toContain('Phase 2 does not say that the SARIF is unfiltered without jq');
     expect(defects('Without `jq`', 'Without it')).toContain('Phase 2 does not say that the SARIF is unfiltered without jq');
     expect(collectSnykScopeDefects('')).toHaveLength(3);
@@ -1120,8 +1173,8 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(defects(`${SCANNER_ROOT_CD}\nset -o pipefail`, 'cd "{worktree}"\nset -o pipefail')).toContain(semgrep);
     expect(defects(`${SCANNER_ROOT_CD}\nset -o pipefail`, 'cd . || exit\nset -o pipefail')).toContain(semgrep);
     const snyk = 'the snyk code test fence does not open with cd "{worktree}" || exit';
-    expect(defects(`${SCANNER_ROOT_CD}\nS=$(`, 'S=$(')).toContain(snyk);
-    expect(defects(`${SCANNER_ROOT_CD}\nS=$(`, 'cd "{worktree}" || true\nS=$(')).toContain(snyk);
+    expect(defects(`${SCANNER_ROOT_CD}\nsnyk code test`, 'snyk code test')).toContain(snyk);
+    expect(defects(`${SCANNER_ROOT_CD}\nsnyk code test`, 'cd "{worktree}" || true\nsnyk code test')).toContain(snyk);
     const codeql = 'the CodeQL fence neither opens with cd "{worktree}" || exit nor passes --source-root="{worktree}"';
     expect(defects(CODEQL_ROOT, '--source-root=.')).toContain(codeql);
     expect(defects(CODEQL_ROOT, '--source-root="$PWD"')).toContain(codeql);

@@ -116,16 +116,17 @@ Run each available tool in this order, each in its own foreground Bash call with
 **Semgrep** (if available):
 ```bash
 cd "{worktree}" || exit
-set -o pipefail; git diff --name-only -z --diff-filter=d {DIFF_RANGE} | xargs -0 -r semgrep scan --config auto --sarif --quiet -- 2>/dev/null; printf '\nexit=%s\n' "$?"
+set -o pipefail; git diff --name-only -z --diff-filter=d {DIFF_RANGE} | xargs -0 -r semgrep scan --config auto --sarif --quiet -- >"{ANALYSIS_DIR}/semgrep.sarif" 2>/dev/null; E=$?
+printf '\nexit=%s\n' "$E"
 ```
 
 **Snyk Code** (if available):
 ```bash
 cd "{worktree}" || exit
-S=$(snyk code test --sarif 2>/dev/null); E=$?
-printf '%s' "$S" | jq --argjson files "$(git diff --name-only -z {DIFF_RANGE} | jq -Rs 'split("\u0000")')" \
+snyk code test --sarif >"{ANALYSIS_DIR}/snyk-all.json" 2>/dev/null; E=$?
+jq --argjson files "$(git diff --name-only -z {DIFF_RANGE} | jq -Rs 'split("\u0000")')" \
   '.runs[].results |= map(select(.locations[].physicalLocation.artifactLocation.uri as $uri | $files | index($uri) != null))' \
-  2>/dev/null || printf '%s' "$S"
+  "{ANALYSIS_DIR}/snyk-all.json" >"{ANALYSIS_DIR}/snyk.sarif" 2>/dev/null || cp "{ANALYSIS_DIR}/snyk-all.json" "{ANALYSIS_DIR}/snyk.sarif"
 printf '\nexit=%s\n' "$E"
 ```
 Without `jq` the SARIF is unfiltered: note that.
@@ -135,14 +136,13 @@ Without `jq` the SARIF is unfiltered: note that.
 CODEQL_TMP=$(mktemp -d) || exit
 trap 'rm -rf "${CODEQL_TMP}"' EXIT INT TERM
 codeql database create "${CODEQL_TMP}/db" --language={detected-language} --source-root="{worktree}" 2>/dev/null && \
-codeql database analyze "${CODEQL_TMP}/db" --format=sarif-latest --output="${CODEQL_TMP}/results.sarif" 2>/dev/null
+codeql database analyze "${CODEQL_TMP}/db" --format=sarif-latest --output="{ANALYSIS_DIR}/codeql.sarif" 2>/dev/null
 CODEQL_EXIT=$?
-cat "${CODEQL_TMP}/results.sarif"
 printf '\nexit=%s\n' "$CODEQL_EXIT"
 rm -rf "${CODEQL_TMP}"
 trap - EXIT INT TERM
 ```
-Parse each SARIF → extract findings. A tool's status is its last line, `exit={n}`; a tool that ran completed only on Semgrep 0, Snyk 0 or 1 (1 = issues, only with SARIF output), CodeQL 0. Any other status, or no such line, means it did not complete (126-127: scanner did not start; else failed. Semgrep via xargs: number only); keep the findings its SARIF holds. A call with no `exit=` line in its own result did not complete (it reached the Bash limit, or a `cd` or the call failed). It stays did not complete for this run: ignore a later end notice. If a tool's output was clipped, its findings are incomplete: name the tool in `STATIC_FINDINGS`, never `(none)`.
+Read each SARIF file → extract findings. A tool's status is its last line, `exit={n}`; a tool that ran completed only on Semgrep 0, Snyk 0 or 1 (1 = issues, only with SARIF output), CodeQL 0. Any other status, or no such line, means it did not complete (126-127: scanner did not start; else failed. Semgrep via xargs: number only); keep the findings its SARIF holds. A call with no `exit=` line in its own result did not complete (it reached the Bash limit, or a `cd` or the call failed). It stays did not complete for this run: ignore a later end notice. If a tool's output was clipped, its findings are incomplete: name the tool in `STATIC_FINDINGS`, never `(none)`.
 
 **Normalize** all findings to unified table, cap at top 50 by severity. Truncate each Description entry to 200 characters maximum:
 
