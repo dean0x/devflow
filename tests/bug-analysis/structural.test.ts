@@ -18,7 +18,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { describe, it, expect } from 'vitest';
-import { loadFile, extractSection, sectionBetween, parseFences, resolveAgentSource, resolveCurationOffSource, collectFreshBaseDefects, collectSlugCheckDefects, collectStoredHeadDefects, slugSinkLines, seedOnce, readAgentReference, EVIDENCE_RENDER_LINE, type DiffRangeShape } from '../helpers';
+import { loadFile, extractSection, sectionBetween, parseFences, isAgentBlock, resolveAgentSource, resolveCurationOffSource, collectFreshBaseDefects, collectSlugCheckDefects, collectStoredHeadDefects, slugSinkLines, seedOnce, readAgentReference, EVIDENCE_RENDER_LINE, type DiffRangeShape } from '../helpers';
 
 const content = loadFile('dist/commands/bug-analysis.md');
 const agentContent = resolveAgentSource('debug').content;
@@ -387,11 +387,6 @@ describe('bug-analysis.md — static analysis safety patterns', () => {
     expect(phase2).toContain('mktemp -d');
   });
 
-  it('CodeQL cleanup uses rm -rf regardless of success or failure', () => {
-    const phase2 = extractSection(content, '### Phase 2:', '### Phase 3:');
-    expect(phase2).toMatch(/rm -rf.*CODEQL_TMP|CODEQL_TMP.*rm -rf/s);
-  });
-
   it('static findings descriptions truncated to 200 characters (bounded serialization)', () => {
     const phase2 = extractSection(content, '### Phase 2:', '### Phase 3:');
     expect(phase2).toMatch(/200\s*char/i);
@@ -748,6 +743,28 @@ function collectCodeqlScratchDefects(phase2: string): string[] {
   return make === 'CODEQL_TMP=$(mktemp -d) || exit' ? [] : ['the CodeQL fence does not stop when mktemp -d fails'];
 }
 
+const CODEQL_REMOVE = 'rm -rf "${CODEQL_TMP}"';
+const CODEQL_TRAP = `trap '${CODEQL_REMOVE}' EXIT INT TERM`;
+const CODEQL_NO_TRAP = 'the CodeQL fence sets no trap that removes the scratch folder before the database is created';
+const CODEQL_NO_REMOVE = 'the CodeQL fence does not remove the scratch folder after its exit line';
+
+/**
+ * The CodeQL scratch folder is removed however the call ends: a trap that removes it is set before the database is
+ * created, and a plain removal runs after the exit line, so a clean finish does not wait for the trap. Only the
+ * CodeQL fence counts: the same words in prose or in another fence prove nothing.
+ */
+function collectCodeqlCleanupDefects(phase2: string): string[] {
+  const lines = fenceWith(phase2, 'codeql database');
+  const trap = lines.indexOf(CODEQL_TRAP);
+  const create = lines.findIndex(line => line.includes('codeql database create'));
+  const exit = lines.findIndex(line => line.startsWith(EXIT_PRINT) && line.includes('$CODEQL_EXIT'));
+  const out: string[] = [];
+  if (create === -1) out.push('the CodeQL fence has no database create line');
+  if (trap === -1 || trap > create) out.push(CODEQL_NO_TRAP);
+  if (!lines.some((line, index) => exit !== -1 && index > exit && line === CODEQL_REMOVE)) out.push(CODEQL_NO_REMOVE);
+  return out;
+}
+
 const STATUS_RULE_PARTS = [
   'a tool that ran completed only on Semgrep 0,',
   '(126-127: scanner did not start; else failed. Semgrep via xargs: number only)',
@@ -984,6 +1001,7 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
   const exitOrder = onPhase2(collectExitLineOrderDefects);
   const sarifFiles = onPhase2(collectSarifFileDefects);
   const scratch = onPhase2(collectCodeqlScratchDefects);
+  const cleanup = onPhase2(collectCodeqlCleanupDefects);
   const statusRule = onPhase2(collectStatusRuleDefects);
   const scannerRoot = onPhase2(collectScannerRootDefects);
   const fileNames = onPhase2(collectFileNameHandoffDefects);
@@ -1325,6 +1343,26 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(collectCodeqlScratchDefects('')).toContain('the CodeQL fence does not make its temp folder with mktemp -d');
   });
 
+  it.each(builds)('the CodeQL fence sets a trap before the database is created and removes the folder after its exit line (%s)', (_label, body) => {
+    expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
+    expect(cleanup(body ?? '')).toEqual([]);
+  });
+
+  it.each(builds)('known-bad probes: a lost, late or empty trap, and a removal that is missing, early or outside the fence, are reported (%s)', (_label, body) => {
+    expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
+    const defects = probe(cleanup, body);
+    const exitPrint = `${EXIT_PRINT}"$CODEQL_EXIT"`;
+    const fence = '`'.repeat(3);
+    expect(defects(`${CODEQL_TRAP}\n`, '')).toEqual([CODEQL_NO_TRAP]);
+    expect(defects(CODEQL_TRAP, 'trap : EXIT INT TERM')).toEqual([CODEQL_NO_TRAP]);
+    expect(cleanup(seed(seed(body ?? '', `${CODEQL_TRAP}\n`, ''), 'CODEQL_EXIT=$?\n', `${CODEQL_TRAP}\nCODEQL_EXIT=$?\n`))).toEqual([CODEQL_NO_TRAP]);
+    expect(defects(`${CODEQL_REMOVE}\ntrap - EXIT INT TERM`, 'trap - EXIT INT TERM')).toEqual([CODEQL_NO_REMOVE]);
+    expect(defects(`${exitPrint}\n${CODEQL_REMOVE}\n`, `${CODEQL_REMOVE}\n${exitPrint}\n`)).toEqual([CODEQL_NO_REMOVE]);
+    expect(defects(`${CODEQL_REMOVE}\ntrap - EXIT INT TERM\n${fence}\n`, `trap - EXIT INT TERM\n${fence}\n${CODEQL_REMOVE}\n`)).toEqual([CODEQL_NO_REMOVE]);
+    expect(defects(`${exitPrint}\n`, '')).toEqual([CODEQL_NO_REMOVE]);
+    expect(collectCodeqlCleanupDefects('')).toEqual(['the CodeQL fence has no database create line', CODEQL_NO_TRAP, CODEQL_NO_REMOVE]);
+  });
+
   it.each(builds)('the completion rule covers tools that ran, and the exit meanings end in a catch-all (%s)', (_label, body) => {
     expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
     expect(statusRule(body ?? '')).toEqual([]);
@@ -1580,18 +1618,45 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
 // Group 4: Debug agent spawning
 // ---------------------------------------------------------------------------
 
+/** The one findings line of the Debug spawn: the security analyzer gets the findings, every other focus gets `(none)`. */
+const SECURITY_ONLY_FINDINGS = 'STATIC_FINDINGS: {STATIC_FINDINGS if focus == security, else (none)}';
+
+/** Phase 5 hands the findings to the security analyzer only: the Debug spawn fence has one `STATIC_FINDINGS:` line, and it is the exact line above. */
+function collectSecurityOnlyFindingsDefects(phase5: string): string[] {
+  const spawns = parseFences(phase5).filter(fence => isAgentBlock(fence, 'Debug'));
+  if (spawns.length !== 1) return [`${spawns.length} Debug spawn fences, expected 1`];
+  const passed = spawns[0].split('\n').filter(line => line.startsWith('STATIC_FINDINGS:'));
+  if (passed.length !== 1) return [`${passed.length} STATIC_FINDINGS lines in the Debug spawn, expected 1`];
+  return passed[0] === SECURITY_ONLY_FINDINGS ? [] : [`the Debug spawn passes STATIC_FINDINGS in a line other than: ${SECURITY_ONLY_FINDINGS}`];
+}
+
 describe('bug-analysis.md — Debug agent spawning', () => {
+  const off = resolveCurationOffSource('commands', 'bug-analysis');
+  const builds: Array<[string, string | null]> = [['curation-on', content], ['curation-off', off]];
+  const phase5Of = (body: string | null): string => extractSection(body ?? '', '### Phase 5:', '### Phase 6:');
+
   it('Phase 5 spawns Debug agents in a single message (parallel, not background)', () => {
     const phase5 = extractSection(content, '### Phase 5:', '### Phase 6:');
     expect(phase5).toMatch(/single message/i);
     expect(phase5).toMatch(/run_in_background=false/);
   });
 
-  it('Phase 5 passes STATIC_FINDINGS only to security analyzer', () => {
-    const phase5 = extractSection(content, '### Phase 5:', '### Phase 6:');
-    expect(phase5).toMatch(/[Ss]ecurity.*STATIC_FINDINGS|STATIC_FINDINGS.*[Ss]ecurity/s);
-    // Other analyzers receive (none) for STATIC_FINDINGS
-    expect(phase5).toContain('(none)');
+  it.each(builds)('Phase 5 passes STATIC_FINDINGS only to the security analyzer, in one exact spawn line (%s)', (_label, body) => {
+    expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
+    expect(collectSecurityOnlyFindingsDefects(phase5Of(body))).toEqual([]);
+  });
+
+  it.each(builds)('known-bad probes: findings passed to every focus, to another focus, or on none or two lines are reported (%s)', (_label, body) => {
+    expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
+    const defects = (from: string, to: string): string[] => collectSecurityOnlyFindingsDefects(seedOnce(phase5Of(body), from, to));
+    const other = `the Debug spawn passes STATIC_FINDINGS in a line other than: ${SECURITY_ONLY_FINDINGS}`;
+    expect(defects(SECURITY_ONLY_FINDINGS, 'STATIC_FINDINGS: {STATIC_FINDINGS}')).toEqual([other]);
+    expect(defects(SECURITY_ONLY_FINDINGS, 'STATIC_FINDINGS: {STATIC_FINDINGS if focus == functional, else (none)}')).toEqual([other]);
+    expect(defects(SECURITY_ONLY_FINDINGS, 'STATIC_FINDINGS: {STATIC_FINDINGS if focus == security, else {STATIC_FINDINGS}}')).toEqual([other]);
+    expect(defects(SECURITY_ONLY_FINDINGS, 'STATIC_FINDINGS: (none)')).toEqual([other]);
+    expect(defects(`${SECURITY_ONLY_FINDINGS}\n`, '')).toEqual(['0 STATIC_FINDINGS lines in the Debug spawn, expected 1']);
+    expect(defects(SECURITY_ONLY_FINDINGS, `${SECURITY_ONLY_FINDINGS}\n${SECURITY_ONLY_FINDINGS}`)).toEqual(['2 STATIC_FINDINGS lines in the Debug spawn, expected 1']);
+    expect(collectSecurityOnlyFindingsDefects('')).toEqual(['0 Debug spawn fences, expected 1']);
   });
 
   it('Phase 5 passes DECISIONS_CONTEXT to Debug agents', () => {
@@ -1759,6 +1824,22 @@ describe('bug-analysis.md — resolve compatibility', () => {
 // Group 7: debug.md — output format section headers
 // ---------------------------------------------------------------------------
 
+/** The Debug agent's severity mapping: each severity beside the report section it files under, in this order. */
+const DEBUG_SEVERITY_LINES = [
+  '- CRITICAL / HIGH severity → `## Issues in Your Changes (BLOCKING)` — must fix before merge',
+  '- MEDIUM severity → `## Issues in Code You Touched (Should Fix)` — fix while here',
+  '- LOW severity → `## Pre-existing Issues (Not Blocking)` — lower urgency (not necessarily pre-existing)',
+];
+
+/** The three mapping lines stand together, each exact: a line that names another section, or sits elsewhere, is a defect. */
+function collectDebugSeverityDefects(agent: string): string[] {
+  const lines = agent.split('\n');
+  const start = lines.indexOf(DEBUG_SEVERITY_LINES[0]);
+  return DEBUG_SEVERITY_LINES
+    .filter((line, index) => start === -1 || lines[start + index] !== line)
+    .map(line => `the Debug severity mapping lacks this line, in order: ${line}`);
+}
+
 describe('debug.md — output format section headers', () => {
   it('output template contains "Issues in Your Changes (BLOCKING)" section header', () => {
     expect(agentContent).toContain('## Issues in Your Changes (BLOCKING)');
@@ -1772,16 +1853,20 @@ describe('debug.md — output format section headers', () => {
     expect(agentContent).toContain('## Pre-existing Issues (Not Blocking)');
   });
 
-  it('severity-to-category mapping documents CRITICAL/HIGH → BLOCKING', () => {
-    expect(agentContent).toMatch(/CRITICAL.*BLOCKING|HIGH.*BLOCKING/s);
+  it('severity-to-category mapping is three consecutive lines: CRITICAL/HIGH → BLOCKING, MEDIUM → Should Fix, LOW → Pre-existing', () => {
+    expect(collectDebugSeverityDefects(agentContent)).toEqual([]);
   });
 
-  it('severity-to-category mapping documents MEDIUM → Should Fix', () => {
-    expect(agentContent).toMatch(/MEDIUM.*[Ss]hould [Ff]ix/s);
-  });
-
-  it('severity-to-category mapping documents LOW → Pre-existing', () => {
-    expect(agentContent).toMatch(/LOW.*[Pp]re.existing/s);
+  it('known-bad probes: a mapping line that names the wrong section, is missing, is reordered or is gone is reported', () => {
+    const lacks = (line: string): string => `the Debug severity mapping lacks this line, in order: ${line}`;
+    const [high, medium, low] = DEBUG_SEVERITY_LINES;
+    // The wrong section here still leaves "MEDIUM" and "Should Fix" elsewhere in the agent, which a whole-text match accepted.
+    expect(collectDebugSeverityDefects(seedOnce(agentContent, medium, medium.replace('(Should Fix)', '(Not Blocking)')))).toEqual([lacks(medium)]);
+    expect(collectDebugSeverityDefects(seedOnce(agentContent, `\n${low}`, ''))).toEqual([lacks(low)]);
+    expect(collectDebugSeverityDefects(seedOnce(agentContent, `${medium}\n${low}`, `${low}\n${medium}`))).toEqual([lacks(medium), lacks(low)]);
+    expect(collectDebugSeverityDefects(seedOnce(agentContent, `${high}\n`, ''))).toEqual([lacks(high), lacks(medium), lacks(low)]);
+    expect(collectDebugSeverityDefects(seedOnce(agentContent, `${medium}\n`, `${medium}\n\n`))).toEqual([lacks(low)]);
+    expect(collectDebugSeverityDefects('')).toEqual(DEBUG_SEVERITY_LINES.map(lacks));
   });
 
   it('output template contains summary matrix table with Category × Severity columns', () => {

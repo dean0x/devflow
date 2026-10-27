@@ -574,19 +574,19 @@
     },
     {
       "id": "command-bug-analysis-max",
-      "ceiling": 24644,
-      "pattern": "['bug-analysis', 'on', 24_644],",
+      "ceiling": 24479,
+      "pattern": "['bug-analysis', 'on', 24_479],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/bug-analysis.md, the curation-on build, in bytes. Measured 24,644 after #561, with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/commands/bug-analysis.md, the curation-on build, in bytes. Measured 24,479 at #652, with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-bug-analysis-curation-off-max",
-      "ceiling": 20734,
-      "pattern": "['bug-analysis', 'off', 20_734],",
+      "ceiling": 20661,
+      "pattern": "['bug-analysis', 'off', 20_661],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/curation-off/commands/bug-analysis.md, the curation-off build, in bytes. Measured 20,734 after #561, with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/curation-off/commands/bug-analysis.md, the curation-off build, in bytes. Measured 20,661 at #652, with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-code-review-max",
