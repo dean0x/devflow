@@ -1838,20 +1838,23 @@ function parseWaveRow(line) {
  * like every related line, so it adds no free text to the body. A leading `Refs`
  * that names a row is that row's line, never a tracking line.
  *
- * D-WAVE-LINKS-ONLY: a block may also be the `## Related Issues` heading and 1–WAVE_ROWS + 1
- * `Refs #<n>` lines and nothing after them (blank lines aside): no evidence section, no
- * rows. It parses to no tracking line and no rows. A ref may not repeat (`duplicate`).
- * `Closes` is never admitted there: with no row, nothing has merged, so nothing may close
- * an issue. Any other block that stops after its related lines, a lone `Closes #<n>`
- * included, is `malformed` as before.
+ * D-WAVE-LINKS-ONLY: with `options.linksOnly === true` (the opt-in, spelled
+ * `check wave --links-only` on the command line), a block may also be the
+ * `## Related Issues` heading and 1–WAVE_ROWS + 1 `Refs #<n>` lines and nothing after
+ * them (blank lines aside): no evidence section, no rows. It parses to no tracking line
+ * and no rows. A ref may not repeat (`duplicate`). `Closes` is never admitted there: with
+ * no row, nothing has merged, so nothing may close an issue. Without the opt-in, and for
+ * any other block that stops after its related lines, a lone `Closes #<n>` included, the
+ * block is `malformed`, as the grammar stood before the opt-in.
  *
  * Structure is checked before the cross rules, so the first failure found is the
  * one reported. An error carries a code and a line number, never input bytes.
  *
  * @param {unknown} text
+ * @param {{ linksOnly?: boolean }} [options]
  * @returns {Result<WaveBlock>}
  */
-function parseWaveBlock(text) {
+function parseWaveBlock(text, options) {
   if (typeof text !== 'string') return fail('invalid');
   if (text.length > LIMITS.WAVE_BLOCK_CHARS) return fail('oversize');
   const rows = textLines(text);
@@ -1874,9 +1877,10 @@ function parseWaveBlock(text) {
       line: i + 1,
     }));
   }
-  // D-WAVE-LINKS-ONLY: the related lines ran to the end of the text. Only `Refs #<n>`
-  // lines make a block of their own; every other such block is refused just below.
-  if (i >= end && related.length > 0 && related.every(rel => rel.keyword === 'Refs' && rel.ref.startsWith('#'))) {
+  // D-WAVE-LINKS-ONLY: the opt-in is set and the related lines ran to the end of the text.
+  // Only `Refs #<n>` lines make a block of their own; every other such block is refused just below.
+  const linksOnly = isObject(options) && options.linksOnly === true;
+  if (linksOnly && i >= end && related.length > 0 && related.every(rel => rel.keyword === 'Refs' && rel.ref.startsWith('#'))) {
     /** @type {Set<string>} */
     const seen = new Set();
     for (const rel of related) {

@@ -10,6 +10,7 @@
 //
 // Usage:
 //   node verify-evidence.cjs check tp|block|exceptions|wave <file>
+//   node verify-evidence.cjs check wave --links-only <file>
 //   node verify-evidence.cjs render --plan <file>
 //   node verify-evidence.cjs verify --pr <n> [--publication <mode>] [--evidence <file>]
 //        [--state <dir>] [--block-out <file>] [--comment-out <file>] [--stale-out <file>] [--approval]
@@ -21,8 +22,11 @@
 //
 // stdout (D-VERIFY-STDOUT) is empty or exactly one of these shapes, each closed-vocabulary
 // (the render block's TP lines come from the caller's own plan file):
-//   check     nothing — the exit code is the answer; the diagnostic is on stderr
-//   render    the creation block: markers, `## Test Plan`, every TP unticked
+//   check     nothing — the exit code is the answer; the diagnostic is on stderr.
+//             `check wave --links-only` also admits the links-only wave block (the
+//             `## Related Issues` heading and `Refs #<n>` lines, no evidence section);
+//             plain `check wave` refuses that block as malformed
+//   render   the creation block: markers, `## Test Plan`, every TP unticked
 //   verify    EVIDENCE pr:<n> head:<sha> total:<n> VERIFIED-CI:<n> ATTESTED-LOCAL:<n>
 //             UNVERIFIED:<n> STALE:<n> FAILED:<n> INDETERMINATE:<n> stale:<ids|none>
 //             exceptions:<kinds|none> approval:<yes|no|unchecked> key:<hex>
@@ -202,6 +206,7 @@ const READBACK_LINE_RE = /^READBACK (?<outcome>ok|mismatch)$/;
 
 const USAGE = [
   'Usage: node verify-evidence.cjs check tp|block|exceptions|wave <file>',
+  '       node verify-evidence.cjs check wave --links-only <file>',
   '       node verify-evidence.cjs render --plan <file>',
   '       node verify-evidence.cjs verify --pr <n> [--publication <mode>] [--evidence <file>]',
   '            [--state <dir>] [--block-out <file>] [--comment-out <file>] [--stale-out <file>] [--approval]',
@@ -257,7 +262,7 @@ const USAGE = [
 
 /**
  * @typedef {{ kind: 'usage' }
- *   | { kind: 'check', what: 'tp' | 'block' | 'exceptions' | 'wave', file: string }
+ *   | { kind: 'check', what: 'tp' | 'block' | 'exceptions' | 'wave', file: string, linksOnly: boolean }
  *   | { kind: 'render', plan: string }
  *   | { kind: 'verify', pr: number, publication: string, evidence: string | null, state: string | null,
  *       blockOut: string | null, commentOut: string | null, staleOut: string | null, approval: boolean }
@@ -326,10 +331,12 @@ function parseArgs(argv) {
   const sub = rest[0];
   const tail = rest.slice(1);
   if (sub === 'check') {
-    if (tail.length !== 2 || !['tp', 'block', 'exceptions', 'wave'].includes(tail[0])) return USAGE_ARGS;
-    const file = tail[1];
+    // `check wave --links-only <file>` is the one three-argument form: the links-only wave block is opt-in.
+    const linksOnly = tail.length === 3 && tail[0] === 'wave' && tail[1] === '--links-only';
+    if ((tail.length !== 2 && !linksOnly) || !['tp', 'block', 'exceptions', 'wave'].includes(tail[0])) return USAGE_ARGS;
+    const file = tail[tail.length - 1];
     if (typeof file !== 'string' || file === '' || file.startsWith('-') || file.length > MAX_ARG_CHARS) return USAGE_ARGS;
-    return { kind: 'check', what: /** @type {'tp' | 'block' | 'exceptions' | 'wave'} */ (tail[0]), file };
+    return { kind: 'check', what: /** @type {'tp' | 'block' | 'exceptions' | 'wave'} */ (tail[0]), file, linksOnly };
   }
   if (sub === 'render') {
     const f = parseFlags(tail, { '--plan': 'value' });
@@ -1853,7 +1860,7 @@ function runCheck(io, args) {
   let result;
   if (args.what === 'tp') result = PE.parsePlan(sectionOrWhole(text, 'testPlan'));
   else if (args.what === 'exceptions') result = PE.parseExceptions(sectionOrWhole(text, 'exceptions'));
-  else if (args.what === 'wave') result = PE.parseWaveBlock(text);
+  else if (args.what === 'wave') result = PE.parseWaveBlock(text, { linksOnly: args.linksOnly });
   else {
     const b = PE.parseBlock(text);
     // R7 pastes only the creation form: TP lines, none ticked.

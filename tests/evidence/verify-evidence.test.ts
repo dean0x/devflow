@@ -253,6 +253,8 @@ describe('usage (exit 1, stdout empty)', () => {
     ['check with an unknown kind', ['check', 'plan', 'x']],
     ['check with a flag', ['check', 'tp', '--x']],
     ['check with a second file', ['check', 'tp', 'a', 'b']],
+    ['check wave --links-only without a file', ['check', 'wave', '--links-only']],
+    ['check tp with --links-only', ['check', 'tp', '--links-only', 'a']],
     ['render without --plan', ['render']],
     ['render with a positional', ['render', 'x']],
     ['verify without --pr', ['verify']],

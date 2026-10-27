@@ -27,6 +27,9 @@
  *   W3     (#376) the related lines may open with ONE tracking line — `Refs` and a
  *          ref that names no row, the wave's tracking issue. A `Closes` naming no
  *          row, a second such line and one that is not first are all `orphan`.
+ *   TP-18  the links-only block (the heading and `Refs #<n>` lines, no evidence
+ *          section) is admitted only by `check wave --links-only <file>`; plain
+ *          `check wave` refuses it as `malformed`, as the base grammar did.
  *
  * The parity arms pin the exports to the shipped text that governs them: every
  * line ensure-pr-ready's link paste gate admits (each ticket's captured ISSUE_PR_LINK) is a
@@ -73,6 +76,9 @@ interface WaveRow {
 /** `related` holds the lines that name a row; `tracking` the one leading `Refs` line that names none, or null. */
 interface WaveBlock { readonly tracking: WaveRelated | null; readonly related: readonly WaveRelated[]; readonly rows: readonly WaveRow[] }
 
+/** `linksOnly` admits the Refs-only block; the check's `--links-only` spelling passes it. */
+interface WaveOptions { readonly linksOnly?: boolean }
+
 interface WaveExports {
   readonly LIMITS: Readonly<Record<string, number>>
   readonly WAVE_HEADINGS: readonly string[]
@@ -82,7 +88,7 @@ interface WaveExports {
   readonly WAVE_GATE_VALUES: readonly string[]
   readonly RELATED_LINE_RE: RegExp
   readonly WAVE_TICKET_RE: RegExp
-  parseWaveBlock(text: unknown): Result<WaveBlock>
+  parseWaveBlock(text: unknown, options?: WaveOptions): Result<WaveBlock>
 }
 
 interface Outcome { readonly code: number; readonly stdout: string }
@@ -296,6 +302,8 @@ interface RuleCase {
   /** null ⇒ admitted. */
   readonly code: string | null
   readonly line?: number
+  /** True when the row is decided with the links-only opt-in on. */
+  readonly optIn?: boolean
 }
 
 const tooLong = (): string => {
@@ -373,21 +381,21 @@ const RULES: readonly RuleCase[] = [
   { label: 'the empty string', text: '', code: 'malformed', line: 1 },
 
   // --- a links-only block: the heading and Refs lines, nothing after them ---------
-  { label: 'a links-only block of one Refs line', text: linksOnly(['Refs #1']), code: null },
-  { label: 'a links-only block of several Refs lines in any order', text: linksOnly(['Refs #12', 'Refs #3', 'Refs #44']), code: null },
-  { label: 'a links-only block with CRLF line endings', text: linksOnly(['Refs #1', 'Refs #2'], '\r\n'), code: null },
-  { label: 'a links-only block with no trailing newline', text: linksOnly(['Refs #1'], '\n', ''), code: null },
-  { label: 'a links-only block with trailing blank lines', text: `${linksOnly(['Refs #1'])}\n\n`, code: null },
-  { label: 'a links-only block of 101 Refs lines (the cap)', text: linksOnly(Array.from({ length: 101 }, (_, i) => `Refs #${i + 1}`)), code: null },
-  { label: 'a links-only block with a Closes line (no row has merged, so nothing may close)', text: linksOnly(['Refs #1', 'Closes #2']), code: 'malformed', line: 5 },
-  { label: 'a links-only block of a keyed ref', text: linksOnly(['Refs ABC-1']), code: 'malformed', line: 4 },
-  { label: 'a links-only block of the heading alone', text: '## Related Issues\n', code: 'malformed', line: 3 },
-  { label: 'a links-only block with a repeated ref', text: linksOnly(['Refs #1', 'Refs #2', 'Refs #1']), code: 'duplicate', line: 4 },
-  { label: 'a links-only block with free text after the links', text: linksOnly(['Refs #1', 'please merge']), code: 'malformed', line: 3 },
-  { label: 'a links-only block with text after a blank line', text: `${linksOnly(['Refs #1'])}\nthanks\n`, code: 'malformed', line: 4 },
-  { label: 'a links-only block with a second heading and no table', text: `${linksOnly(['Refs #1'])}\n## Wave Evidence\n`, code: 'malformed', line: 5 },
-  { label: 'a links-only block of 102 Refs lines', text: linksOnly(Array.from({ length: 102 }, (_, i) => `Refs #${i + 1}`)), code: 'oversize', line: 103 },
-  { label: 'a links-only block under a wrong heading', text: linksOnly(['Refs #1']).replace('## Related Issues', '## Related issues'), code: 'malformed', line: 1 },
+  { label: 'a links-only block of one Refs line', text: linksOnly(['Refs #1']), optIn: true, code: null },
+  { label: 'a links-only block of several Refs lines in any order', text: linksOnly(['Refs #12', 'Refs #3', 'Refs #44']), optIn: true, code: null },
+  { label: 'a links-only block with CRLF line endings', text: linksOnly(['Refs #1', 'Refs #2'], '\r\n'), optIn: true, code: null },
+  { label: 'a links-only block with no trailing newline', text: linksOnly(['Refs #1'], '\n', ''), optIn: true, code: null },
+  { label: 'a links-only block with trailing blank lines', text: `${linksOnly(['Refs #1'])}\n\n`, optIn: true, code: null },
+  { label: 'a links-only block of 101 Refs lines (the cap)', text: linksOnly(Array.from({ length: 101 }, (_, i) => `Refs #${i + 1}`)), optIn: true, code: null },
+  { label: 'a links-only block with a Closes line (no row has merged, so nothing may close)', text: linksOnly(['Refs #1', 'Closes #2']), optIn: true, code: 'malformed', line: 5 },
+  { label: 'a links-only block of a keyed ref', text: linksOnly(['Refs ABC-1']), optIn: true, code: 'malformed', line: 4 },
+  { label: 'a links-only block of the heading alone', text: '## Related Issues\n', optIn: true, code: 'malformed', line: 3 },
+  { label: 'a links-only block with a repeated ref', text: linksOnly(['Refs #1', 'Refs #2', 'Refs #1']), optIn: true, code: 'duplicate', line: 4 },
+  { label: 'a links-only block with free text after the links', text: linksOnly(['Refs #1', 'please merge']), optIn: true, code: 'malformed', line: 3 },
+  { label: 'a links-only block with text after a blank line', text: `${linksOnly(['Refs #1'])}\nthanks\n`, optIn: true, code: 'malformed', line: 4 },
+  { label: 'a links-only block with a second heading and no table', text: `${linksOnly(['Refs #1'])}\n## Wave Evidence\n`, optIn: true, code: 'malformed', line: 5 },
+  { label: 'a links-only block of 102 Refs lines', text: linksOnly(Array.from({ length: 102 }, (_, i) => `Refs #${i + 1}`)), optIn: true, code: 'oversize', line: 103 },
+  { label: 'a links-only block under a wrong heading', text: linksOnly(['Refs #1']).replace('## Related Issues', '## Related issues'), optIn: true, code: 'malformed', line: 1 },
 
   // --- rows -----------------------------------------------------------------------
   { label: 'an unknown verdict', text: waveBlock(['Closes #1'], [row(1, { ticket: '#1', verdict: 'MERGED' })]), code: 'malformed', line: 7 },
@@ -422,10 +430,13 @@ const RULES: readonly RuleCase[] = [
   { label: 'a bidi override in a cell', text: waveBlock([], [row(1, { ticket: '(none)\u202e', verdict: 'QUARANTINED' })]), code: 'malformed', line: 6 },
 ]
 
+/** The rows only the links-only opt-in decides in their own way. */
+const LINKS_ONLY_ROWS: readonly RuleCase[] = RULES.filter(c => c.optIn === true)
+
 /** Named collector: the rule rows parseWaveBlock decides differently from the table. */
-function collectRuleViolations(parse: (text: unknown) => Result<WaveBlock>, rules: readonly RuleCase[]): string[] {
+function collectRuleViolations(parse: (text: unknown, options?: WaveOptions) => Result<WaveBlock>, rules: readonly RuleCase[]): string[] {
   return rules.flatMap(c => {
-    const r = parse(c.text)
+    const r = parse(c.text, c.optIn === true ? { linksOnly: true } : undefined)
     if (c.code === null) return r.ok ? [] : [`${c.label}: expected admit, got ${r.error.code} at line ${r.error.line}`]
     if (r.ok) return [`${c.label}: expected ${c.code}, got admitted`]
     const want = `${c.code}${c.line === undefined ? '' : ` at line ${c.line}`}`
@@ -460,8 +471,8 @@ describe('parseWaveBlock — every rule of the wave grammar', () => {
   ]
 
   it('known-bad probe: the pre-tracking grammar is reported on exactly the tracking admits', () => {
-    const noTracking = (text: unknown): Result<WaveBlock> => {
-      const r = PE.parseWaveBlock(text)
+    const noTracking = (text: unknown, options?: WaveOptions): Result<WaveBlock> => {
+      const r = PE.parseWaveBlock(text, options)
       return r.ok && r.value.tracking !== null ? { ok: false, error: { code: 'orphan', line: r.value.tracking.line } } : r
     }
     const found = collectRuleViolations(noTracking, RULES)
@@ -470,8 +481,8 @@ describe('parseWaveBlock — every rule of the wave grammar', () => {
   })
 
   it('known-bad probe: a grammar that admits every line naming no row is reported on exactly the orphan refusals', () => {
-    const anyOrphan = (text: unknown): Result<WaveBlock> => {
-      const r = PE.parseWaveBlock(text)
+    const anyOrphan = (text: unknown, options?: WaveOptions): Result<WaveBlock> => {
+      const r = PE.parseWaveBlock(text, options)
       return !r.ok && r.error.code === 'orphan' ? { ok: true, value: { tracking: null, related: [], rows: [] } } : r
     }
     const orphans = RULES.filter(c => c.code === 'orphan')
@@ -578,19 +589,39 @@ describe('AC-16: a closing line on an unmerged row cannot pass', () => {
 // TP-18 — a links-only Related Issues block
 // ---------------------------------------------------------------------------
 
-describe('TP-18: a links-only Related Issues block is admitted, and nothing refused before is admitted now', () => {
+describe('TP-18: a links-only Related Issues block is admitted only with the opt-in, and nothing refused before is admitted now', () => {
   const LINKS = linksOnly(['Refs #12', 'Refs #3'])
-  const LINKS_ONLY_LABEL = 'a links-only block'
+  const OPT_IN: WaveOptions = { linksOnly: true }
 
-  it('check wave admits it: exit 0, nothing on stdout or stderr', () => {
-    const r = runMain(['check', 'wave', writeScratch('links.md', LINKS)])
+  /** Named collector: the links-only rows that `parse`, called with no options, decides other than the base grammar did. */
+  function collectPlainViolations(parse: (text: unknown) => Result<WaveBlock>): string[] {
+    return LINKS_ONLY_ROWS.flatMap(c => {
+      // The admitted rows and the repeated-ref row were `malformed` at the base; every other refusal is the opt-in's own.
+      const moved = c.code === null || c.code === 'duplicate'
+      const want = moved ? 'malformed' : `${c.code}@${c.line}`
+      const r = parse(c.text)
+      if (r.ok) return [`${c.label}: expected ${want}, got admitted`]
+      const got = moved ? r.error.code : `${r.error.code}@${r.error.line}`
+      return got === want ? [] : [`${c.label}: expected ${want}, got ${got}`]
+    })
+  }
+
+  it('check wave --links-only admits it: exit 0, nothing on stdout or stderr', () => {
+    const r = runMain(['check', 'wave', '--links-only', writeScratch('links.md', LINKS)])
     expect(r.code, r.stderr).toBe(0)
     expect(r.stdout).toBe('')
     expect(r.stderr).toBe('')
   })
 
+  it('plain check wave refuses it as malformed, as it did before the opt-in existed', () => {
+    const r = runMain(['check', 'wave', writeScratch('links.md', LINKS)])
+    expect(r.code).toBe(5)
+    expect(r.stdout).toBe('')
+    expect(r.stderr).toBe('verify-evidence: check wave: malformed at line 5\n')
+  })
+
   it('parses into its Refs lines and no rows or tracking line, frozen', () => {
-    const block = unwrap(PE.parseWaveBlock(LINKS))
+    const block = unwrap(PE.parseWaveBlock(LINKS, OPT_IN))
     expect(Object.isFrozen(block)).toBe(true)
     expect(block.tracking).toBeNull()
     expect(block.rows).toEqual([])
@@ -598,40 +629,67 @@ describe('TP-18: a links-only Related Issues block is admitted, and nothing refu
     for (const r of block.related) expect(Object.isFrozen(r)).toBe(true)
   })
 
-  it('every block the table refused before the links-only rows is still refused', () => {
-    const before = RULES.filter(c => c.code !== null && !c.label.startsWith(LINKS_ONLY_LABEL))
+  it('without the opt-in every links-only row is refused, and each refusal the opt-in does not move is the same one', () => {
+    expect(LINKS_ONLY_ROWS.length, 'the links-only rows are in the table').toBeGreaterThanOrEqual(15)
+    expect(collectPlainViolations(text => PE.parseWaveBlock(text))).toEqual([])
+  })
+
+  it('a second argument that is not the opt-in admits nothing', () => {
+    for (const options of [undefined, null, {}, { linksOnly: false }, { linksOnly: 'true' }, { linksOnly: 1 }, true, 'linksOnly']) {
+      expect(PE.parseWaveBlock(LINKS, options as WaveOptions).ok, JSON.stringify(options)).toBe(false)
+    }
+  })
+
+  it('the opt-in adds one shape: a whole wave block parses the same with it and without it', () => {
+    expect(PE.parseWaveBlock(EXAMPLE, OPT_IN)).toEqual(PE.parseWaveBlock(EXAMPLE))
+  })
+
+  it('every block the table refused before the links-only rows is still refused, with the opt-in too', () => {
+    const before = RULES.filter(c => c.code !== null && c.optIn !== true)
     expect(before.length, 'the pre-existing refusals are in the table').toBeGreaterThanOrEqual(60)
+    expect(before.filter(c => PE.parseWaveBlock(c.text, OPT_IN).ok).map(c => c.label)).toEqual([])
     expect(before.filter(c => PE.parseWaveBlock(c.text).ok).map(c => c.label)).toEqual([])
     for (const c of before) {
-      expect(runMain(['check', 'wave', writeScratch('wave.md', c.text)]).code, c.label).toBe(5)
+      const file = writeScratch('wave.md', c.text)
+      expect(runMain(['check', 'wave', file]).code, c.label).toBe(5)
+      expect(runMain(['check', 'wave', '--links-only', file]).code, c.label).toBe(5)
     }
   })
 
   it('the lone Closes block that was refused stays refused: no merged row can justify a closing line', () => {
     const lone = '## Related Issues\nCloses #1\n'
     expect(RULES.some(c => c.text === lone && c.code === 'malformed'), 'the fixture is in the table').toBe(true)
-    const r = PE.parseWaveBlock(lone)
-    expect(r.ok ? 'ok' : `${r.error.code}@${r.error.line}`).toBe('malformed@4')
+    for (const options of [undefined, OPT_IN]) {
+      const r = PE.parseWaveBlock(lone, options)
+      expect(r.ok ? 'ok' : `${r.error.code}@${r.error.line}`).toBe('malformed@4')
+    }
   })
 
   it('known-bad probe: a grammar that admits Closes lines in a links-only block is reported on the lone-Closes fixture', () => {
-    const closesToo = (text: unknown): Result<WaveBlock> =>
+    const closesToo = (text: unknown, options?: WaveOptions): Result<WaveBlock> =>
       typeof text === 'string' && /^## Related Issues\n(?:(?:Refs|Closes) #[1-9][0-9]*\n)+$/.test(text)
         ? { ok: true, value: { tracking: null, related: [], rows: [] } }
-        : PE.parseWaveBlock(text)
+        : PE.parseWaveBlock(text, options)
     const found = collectRuleViolations(closesToo, RULES)
     expect(found.some(f => f.startsWith('no evidence section at all: expected malformed, got admitted'))).toBe(true)
     expect(found.some(f => f.startsWith('a links-only block with a Closes line'))).toBe(true)
   })
 
   it('known-bad probe: a grammar that admits no links-only block is reported on the admitted links-only rows', () => {
-    const noLinks = (text: unknown): Result<WaveBlock> => {
-      const r = PE.parseWaveBlock(text)
+    const noLinks = (text: unknown, options?: WaveOptions): Result<WaveBlock> => {
+      const r = PE.parseWaveBlock(text, options)
       return r.ok && r.value.rows.length === 0 ? { ok: false, error: { code: 'malformed', line: 1 } } : r
     }
-    const admitted = RULES.filter(c => c.code === null && c.label.startsWith(LINKS_ONLY_LABEL))
+    const admitted = RULES.filter(c => c.code === null && c.optIn === true)
     expect(admitted.length, 'the admitted links-only rows are in the table').toBeGreaterThanOrEqual(6)
     expect(collectRuleViolations(noLinks, RULES)).toHaveLength(admitted.length)
+  })
+
+  it('known-bad probe: a grammar that applies the opt-in without being asked is reported on the rows it moves', () => {
+    const alwaysOn = (text: unknown): Result<WaveBlock> => PE.parseWaveBlock(text, OPT_IN)
+    const moved = LINKS_ONLY_ROWS.filter(c => c.code === null || c.code === 'duplicate')
+    expect(moved.length, 'the moved links-only rows are in the table').toBeGreaterThanOrEqual(7)
+    expect(collectPlainViolations(alwaysOn)).toHaveLength(moved.length)
   })
 })
 
@@ -656,11 +714,26 @@ describe('check wave <file> — stdout empty, exits 0 · 1 · 2 · 5', () => {
 
   for (const c of RULES.filter(x => x.code !== null)) {
     it(`refuses ${c.label}: exit 5, stdout empty, a closed diagnostic`, () => {
-      const r = runMain(['check', 'wave', writeScratch('wave.md', c.text)])
+      const optIn = c.optIn === true ? ['--links-only'] : []
+      const r = runMain(['check', 'wave', ...optIn, writeScratch('wave.md', c.text)])
       expect(r.code).toBe(5)
       expect(r.stdout).toBe('')
       const at = c.line === undefined ? '' : ` at line ${c.line}`
       expect(r.stderr).toBe(`verify-evidence: check wave: ${c.code}${at}\n`)
+    })
+  }
+
+  for (const c of LINKS_ONLY_ROWS.filter(x => x.code === null)) {
+    it(`admits ${c.label} with --links-only and refuses it without: exit 0, then exit 5 malformed`, () => {
+      const file = writeScratch('wave.md', c.text)
+      const on = runMain(['check', 'wave', '--links-only', file])
+      expect(on.code, on.stderr).toBe(0)
+      expect(on.stdout).toBe('')
+      expect(on.stderr).toBe('')
+      const off = runMain(['check', 'wave', file])
+      expect(off.code).toBe(5)
+      expect(off.stdout).toBe('')
+      expect(off.stderr).toMatch(/^verify-evidence: check wave: malformed at line \d+\n$/)
     })
   }
 
@@ -691,12 +764,23 @@ describe('check wave <file> — stdout empty, exits 0 · 1 · 2 · 5', () => {
     ['two files', ['check', 'wave', 'a', 'b']],
     ['a flag for a file', ['check', 'wave', '--x']],
     ['an empty file argument', ['check', 'wave', '']],
+    ['--links-only without a file', ['check', 'wave', '--links-only']],
+    ['--links-only after the file', ['check', 'wave', 'a', '--links-only']],
+    ['--links-only twice', ['check', 'wave', '--links-only', '--links-only', 'a']],
+    ['--links-only with an empty file argument', ['check', 'wave', '--links-only', '']],
+    ['--links-only with a flag for a file', ['check', 'wave', '--links-only', '--x']],
+    ['--links-only with a second file', ['check', 'wave', '--links-only', 'a', 'b']],
+    ['--links-only on check block', ['check', 'block', '--links-only', 'a']],
+    ['--links-only on check tp', ['check', 'tp', '--links-only', 'a']],
+    ['--links-only on check exceptions', ['check', 'exceptions', '--links-only', 'a']],
+    ['--links-only=true', ['check', 'wave', '--links-only=true', 'a']],
   ] as const) {
     it(`usage: ${label} → exit 1, stdout empty, the usage names check wave`, () => {
       const r = runMain(args)
       expect(r.code).toBe(1)
       expect(r.stdout).toBe('')
       expect(r.stderr).toMatch(/check tp\|block\|exceptions\|wave <file>/)
+      expect(r.stderr).toMatch(/check wave --links-only <file>/)
     })
   }
 })
@@ -717,11 +801,15 @@ describe('check wave through the real process (tmp HOME, non-repo cwd)', { timeo
   it('exit 0, 5, 2 and 1 — each with not one byte on stdout', () => {
     const good = writeScratch('wave.md', EXAMPLE)
     const moved = writeScratch('wave.md', EXAMPLE.replace('Refs #13', 'Closes #13'))
+    const links = writeScratch('links.md', linksOnly(['Refs #12', 'Refs #3']))
     const cases: ReadonlyArray<readonly [readonly string[], number]> = [
       [['check', 'wave', good], 0],
       [['check', 'wave', moved], 5],
       [['check', 'wave', path.join(tmp, 'no-such-file.md')], 2],
       [['check', 'wave'], 1],
+      [['check', 'wave', '--links-only', links], 0],
+      [['check', 'wave', links], 5],
+      [['check', 'wave', '--links-only'], 1],
     ]
     for (const [args, status] of cases) {
       const r = runReal(args)
