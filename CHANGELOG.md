@@ -35,10 +35,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The step note names `/resolve` with the other commands that read the level.
   - The full effect of each level stays in `devflow gates` and in the docs.
 - **`/bug-analysis` no longer reports "no findings" when static analysis could not run** ([#649](https://github.com/dean0x/devflow/issues/649)).
-  - Without GNU `timeout` or `gtimeout` (stock macOS), it runs no scanner and says so. Install coreutils to enable it.
-  - A scanner that fails, times out or exits with an error is named in the report with its exit status.
-  - Each scanner's time bound ends before its Bash call does, and file names reach the scanners safely.
+  - When no scanner is installed, it says that static analysis did not run. It no longer reports "no findings" for a run that scanned nothing.
+  - A scanner that fails, does not finish or exits with an error is named in the report with its exit status.
+  - File names reach the scanners safely.
   - Semgrep and Snyk now run one after the other.
+- **`/bug-analysis` keeps its head marker when static analysis did not cover the commits, and a long scanner result no longer hides findings** ([#652](https://github.com/dean0x/devflow/issues/652), [#661](https://github.com/dean0x/devflow/issues/661)).
+  - The marker moves only when every tool that was to run completed, or `--no-static` is set. Otherwise the report keeps the marker and names the way out: fix the tool, or run with `--no-static`. The next run then covers the same commits again.
+  - The report shows a status for each tool: completed, not installed, or did not complete with the reason. The summary takes this status from the command, not from the text of a file.
+  - Each scanner writes its SARIF to a file, and the session reads counts and a table of the top 50 findings. A long result no longer hides a finding or the exit line. Every finding is saved to a table in the run folder.
+  - Snyk keeps each result for a changed file. If its filter fails, the report says so and uses the unfiltered result.
+  - CodeQL scans one language, chosen from the changed files: JavaScript or TypeScript, Python, or Ruby. With none of them, the report says that CodeQL had no supported language.
+  - The Bash timeout of each Semgrep and Snyk call is now 600000 ms, not 300000 ms. Devflow sets no time limit of its own on a scanner. A call that reaches the Bash limit counts as not complete.
 - **The orchestrator charter names only installed workflows and routes to more agents.**
   - The charter now names only the workflows that you installed, and it names the Fix agent only when it is installed.
   - It routes to the Test, Evaluate, Harden and Synthesize agents. It routes to the Knowledge agent only when you ask for a new knowledge base. It names the `devflow:bug-analysis` workflow.

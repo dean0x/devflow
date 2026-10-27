@@ -180,12 +180,12 @@ Release notes over 60,000 characters drop the commit list first, then cut the ch
 Proactive bug finding with static and semantic analysis. Runs specialized analyzers in parallel to find bugs before code review:
 
 1. **Pre-flight** — The Git agent commits, pushes and opens the PR if none exists (retitled to the learned naming conventions under a `required` evidence policy); no ticket is required
-2. **Static Analysis** — Detect incremental analysis via `.last-analysis-head`, then run the available tools one after the other: Semgrep, then Snyk, each under a time bound; without `timeout`/`gtimeout` no scanner runs and the report says so. CodeQL runs when `--full` is set or when Semgrep or Snyk found HIGH/CRITICAL issues, and CodeQL also runs under a time bound
+2. **Static Analysis** — Detect incremental analysis via `.last-analysis-head`, then run the available tools one after the other: Semgrep, then Snyk. CodeQL runs when `--full` is set or when Semgrep or Snyk found HIGH/CRITICAL issues. Devflow sets no time limit on a scanner. The Bash limit of the agent, 600000 ms for each call, is the only limit, and a call that does not finish counts as not complete. Each scanner writes its SARIF to a file in the run folder. The session reads counts and a table of the top 50 findings, not the SARIF itself, and every finding is saved to a table in the run folder. CodeQL scans one language, chosen from a fixed table by the extensions of the changed files: JavaScript or TypeScript, Python, or Ruby. The report shows a status for each tool: completed, not installed, or did not complete with the reason
 3. **Semantic Analysis** — Parallel Debug agents examine the diff: security and functional always, integration when two or more directories changed, usability when UI files changed
 4. **Synthesize** — Combine static and semantic findings into actionable report
 5. **Report** — Write findings to `.devflow/docs/bug-analysis/`
 
-Incremental by default — only analyzes commits since the last run. Findings are compatible with `/resolve` for automatic issue resolution.
+Incremental by default — only analyzes commits since the last run. The marker moves only after static analysis covered those commits: every tool that was to run completed, or `--no-static` is set. If a tool did not complete, the report keeps the marker and names the way out (fix the tool, or run with `--no-static`), so the next run covers the same commits again. Findings are compatible with `/resolve` for automatic issue resolution.
 
 ```
 /bug-analysis                # Analyze current branch (incremental)
