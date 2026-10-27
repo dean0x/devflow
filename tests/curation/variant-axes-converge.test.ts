@@ -15,6 +15,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import {
+  MAX_CURATION_ROSTER,
   applyVariantToggle,
   convergePromptVariants,
   convergeVariantAxes,
@@ -25,6 +26,7 @@ import {
 import { bothOffDir, complianceOffDir, curationOffDir, skillsDir } from '../../src/core/assets.js';
 import { readInstalledVariants } from '../../src/core/installed-variants.js';
 import { readManifest } from '../../src/core/manifest.js';
+import { getManifestLockPath } from '../../src/core/manifest-lock.js';
 import { DEVFLOW_PLUGINS, type PluginDefinition } from '../../src/core/plugins.js';
 import { assertTempHome } from '../setup/home-isolation.js';
 
@@ -307,6 +309,36 @@ describe('convergeVariantAxes: a compliance-off machine fails closed (AC-28)', (
 
     expect(prompts.posting.kind).toBe('left');
   });
+
+  it('a roster past the bound cannot name what still posts: the hosts after it are left out, so the answer is unknown', async () => {
+    await installAs({ curation: true, compliance: true });
+    // These names sort before every seeded host, so the bound cuts off plan and release.
+    for (let i = 0; i <= MAX_CURATION_ROSTER; i++) {
+      const name = `aaa-${String(i).padStart(4, '0')}`;
+      await write(path.join(complianceOffDir('commands', pkg), `${name}.md`), 'OFF\n');
+      await write(installedCommand(name), 'ON\n');
+    }
+
+    const result = await converge(OFF);
+
+    expect(result.converged).toBe(false);
+    expect(result.posting.kind).toBe('unknown');
+    expect(warnings.some(w => w.includes('exceed the bound'))).toBe(true);
+    // Known-bad probe: a compliance-armed host past the bound was never converged and still posts.
+    expect(await read(installedCommand('release'))).toBe('release ON\n');
+  });
+
+  it('a variant tree that cannot be listed is a failed converge, never a clean one', async () => {
+    await installAs({ curation: true, compliance: true });
+    await fs.rm(complianceOffDir('commands', pkg), { recursive: true });
+    await write(complianceOffDir('commands', pkg), 'not a directory\n');
+
+    const result = await converge({ curation: false, compliance: true });
+
+    expect(result.converged).toBe(false);
+    expect(warnings.some(w => w.includes('cannot read the commands variants'))).toBe(true);
+    expect(await read(installedCommand('implement')), 'the readable trees still converge').toBe('implement CURATION-OFF\n');
+  });
 });
 
 describe('describePostingLeft', () => {
@@ -380,6 +412,26 @@ describe('applyVariantToggle on the compliance axis (AC-27, AC-28, AC-29)', () =
     expect(outcome.result.converged, warnings.join('\n')).toBe(true);
     expect(await read(installedCommand('release'))).toBe('release COMPLIANCE-OFF\n');
     expect(readInstalledVariants((await readManifest(devflowDir))?.installedVariants)).toEqual({ curation: true, compliance: false });
+    expect(await exists(getManifestLockPath(devflowDir)), 'the record releases the manifest lock').toBe(false);
+  });
+
+  it.skipIf(process.getuid?.() === 0)('a manifest lock that cannot be taken withholds the record with a warning, and the converge stands', async () => {
+    await writeInstallManifest('3.3.0', { compliance: { enabled: false, frameworks: [] } }, { installedVariants: { curation: true, compliance: true } });
+    await installAs({ curation: true, compliance: true });
+    // A folder that cannot hold the lock directory: the lock is refused at once.
+    await fs.chmod(devflowDir, 0o555);
+    try {
+      const outcome = await toggle(false);
+
+      expect(outcome.kind).toBe('converged');
+      if (outcome.kind !== 'converged') return;
+      expect(outcome.result.converged, warnings.join('\n')).toBe(true);
+    } finally {
+      await fs.chmod(devflowDir, 0o755);
+    }
+    expect(await read(installedCommand('release'))).toBe('release COMPLIANCE-OFF\n');
+    expect(warnings.some(w => w.includes('lock could not be held'))).toBe(true);
+    expect(readInstalledVariants((await readManifest(devflowDir))?.installedVariants)).toEqual({ curation: true, compliance: true });
   });
 
   it('enable restores the on files and records the compliance-on variant', async () => {

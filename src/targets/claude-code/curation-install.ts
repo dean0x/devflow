@@ -104,6 +104,7 @@ import {
 } from '../../core/curation-variants.js';
 import { readInstalledVariants } from '../../core/installed-variants.js';
 import { readManifest, writeManifest } from '../../core/manifest.js';
+import { withManifestLock } from '../../core/manifest-lock.js';
 import { getPackageRoot } from '../../core/paths.js';
 import { isProxyEnabled } from '../../core/proxy-state.js';
 import {
@@ -257,13 +258,16 @@ async function readVariantHosts(root: string): Promise<{ ok: true; hosts: Readon
  *
  * `present` is false when no tree holds this kind and the manifest lists none (the build has not run, or
  * only `build:cli` did), so the caller can say so instead of reporting a converge that had nothing to do.
+ * `incomplete` says the roster was read in part, already warned: a tree could not be listed
+ * (`unreadable`), or the roster passed {@link MAX_CURATION_ROSTER} and the hosts after it were left out
+ * (`truncated`).
  */
 async function readRoster(
   kind: VariantKind,
   root: string,
   manifestHosts: ReadonlyMap<string, RosterHost> | null,
   warn: (msg: string) => void,
-): Promise<{ hosts: RosterHost[]; present: boolean }> {
+): Promise<{ hosts: RosterHost[]; present: boolean; incomplete: 'unreadable' | 'truncated' | null }> {
   const listings = {
     curation: await listVariantDir(curationOffDir(kind, root), kind, warn),
     compliance: await listVariantDir(complianceOffDir(kind, root), kind, warn),
@@ -293,9 +297,10 @@ async function readRoster(
   const present = hosts.length > 0 || Object.values(listings).some(listing => typeof listing !== 'string');
   if (hosts.length > MAX_CURATION_ROSTER) {
     warn(`prompt variants: ${hosts.length} ${kind} variants exceed the bound of ${MAX_CURATION_ROSTER}; converging the first ${MAX_CURATION_ROSTER}`);
-    return { hosts: hosts.slice(0, MAX_CURATION_ROSTER), present: true };
+    return { hosts: hosts.slice(0, MAX_CURATION_ROSTER), present: true, incomplete: 'truncated' };
   }
-  return { hosts, present };
+  const unreadable = Object.values(listings).some(listing => listing === 'unreadable');
+  return { hosts, present, incomplete: unreadable ? 'unreadable' : null };
 }
 
 async function readIfPresent(file: string): Promise<Buffer | 'absent' | 'unreadable'> {
@@ -612,6 +617,12 @@ export async function convergePromptVariants(opts: ConvergePromptVariantsOptions
 
   for (const kind of KINDS) {
     const roster = await readRoster(kind, root, manifestHosts, warn);
+    // A roster read in part is a failed converge. Past the bound, a host left out may carry a
+    // compliance arm, so a compliance-off machine can no longer name every prompt that still posts.
+    if (roster.incomplete !== null) failed = true;
+    if (roster.incomplete === 'truncated' && !switches.compliance && unknownReason === null) {
+      unknownReason = `more than ${MAX_CURATION_ROSTER} ${kind} carry a variant, and the ones past the bound were not converged`;
+    }
     if (!roster.present) {
       warn(`prompt variants: no ${kind} variants under ${curationOffDir(kind, root)} — run \`npm run build:mds\`; installed ${kind} left as they are`);
       failed = true;
@@ -938,14 +949,27 @@ export async function installedScriptsSkew(devflowDir: string, packageRoot?: str
  * finished clean (AC-29). A record that already says so is left alone, so a toggle to the value
  * already installed writes nothing. A failed write is a warning: the status line then reads
  * the record as it stood, which says `mismatch` or `unknown` and names `devflow init`.
+ *
+ * The read and the write run under the manifest lock, as the switch writers do, so a switch that
+ * another devflow run writes in between is never overwritten with the older copy read here. A lock
+ * that cannot be taken, or is lost before the write, withholds the record with a warning.
  */
 async function recordInstalledVariants(devflowDir: string, switches: VariantSwitches, warn: (msg: string) => void): Promise<void> {
   try {
-    const manifest = await readManifest(devflowDir);
-    if (manifest === null) return;
-    const recorded = readInstalledVariants(manifest.installedVariants);
-    if (recorded !== null && recorded.curation === switches.curation && recorded.compliance === switches.compliance) return;
-    await writeManifest(devflowDir, { ...manifest, installedVariants: { curation: switches.curation, compliance: switches.compliance } });
+    const locked = await withManifestLock(devflowDir, {}, async (lock): Promise<'written' | 'current' | 'no-manifest' | 'lock-lost'> => {
+      const manifest = await readManifest(devflowDir);
+      if (manifest === null) return 'no-manifest';
+      const recorded = readInstalledVariants(manifest.installedVariants);
+      if (recorded !== null && recorded.curation === switches.curation && recorded.compliance === switches.compliance) return 'current';
+      if (!(await lock.stillHeld())) return 'lock-lost';
+      await writeManifest(devflowDir, { ...manifest, installedVariants: { curation: switches.curation, compliance: switches.compliance } });
+      return 'written';
+    });
+    if (!locked.ok || locked.value === 'lock-lost') {
+      warn('install record: the install manifest lock could not be held, so the installed variants were not recorded. Run `devflow init`.');
+    } else if (locked.value === 'no-manifest') {
+      warn('install record: no readable install manifest, so the installed variants were not recorded. Run `devflow init`.');
+    }
   } catch (err) {
     warn(`install record: could not record the installed variants — ${String(err)}`);
   }
