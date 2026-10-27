@@ -96,32 +96,31 @@ Skip if `--no-static` flag provided.
 
 ```bash
 for t in semgrep snyk codeql; do printf '%s=%s\n' "$t" "$(command -v "$t" || echo no)"; done
-command -v timeout || command -v gtimeout
 ```
 
 If all three print `no`: warn user "No static analysis tools found. Proceeding with semantic analysis only. To enable static analysis, install semgrep (`pip install semgrep`) or snyk (`npm install -g snyk`)." Set `STATIC_FINDINGS` to `(none)`.
 
-If some are available: note which tools will run. `{bound}` is `timeout` or `gtimeout`, whichever path the last line printed. If it printed none, run no scanner, never one unbounded: warn the user and set `STATIC_FINDINGS` to "Static analysis did not run: neither timeout nor gtimeout is installed (install coreutils)."
+If some are available: note which tools will run.
 
 #### Step 2d: Tiered Static Analysis
 
 **Produces:** STATIC_FINDINGS, STATIC_STATUS
 **Requires:** STATIC_TOOL_STATUS, DIFF_RANGE, ANALYSIS_DIR
 
-Skip if `--no-static` flag provided, all tools unavailable or no `{bound}`.
+Skip if `--no-static` flag provided or all tools unavailable.
 
-Run each available tool in this order, each in its own foreground Bash call with the Bash `timeout` at 300000 (CodeQL: 600000). File names reach a scanner only through `-z`, `xargs -0` and after `--`.
+Run each available tool in this order, each in its own foreground Bash call with the Bash `timeout` at 600000. File names reach a scanner only through `-z`, `xargs -0` and after `--`.
 
 **Semgrep** (if available):
 ```bash
 cd "{worktree}" || exit
-set -o pipefail; git diff --name-only -z --diff-filter=d {DIFF_RANGE} | {bound} -k 10 280 xargs -0 -r semgrep scan --config auto --sarif --quiet -- 2>/dev/null; printf '\nexit=%s\n' "$?"
+set -o pipefail; git diff --name-only -z --diff-filter=d {DIFF_RANGE} | xargs -0 -r semgrep scan --config auto --sarif --quiet -- 2>/dev/null; printf '\nexit=%s\n' "$?"
 ```
 
 **Snyk Code** (if available):
 ```bash
 cd "{worktree}" || exit
-S=$({bound} -k 10 280 snyk code test --sarif 2>/dev/null); E=$?
+S=$(snyk code test --sarif 2>/dev/null); E=$?
 printf '%s' "$S" | jq --argjson files "$(git diff --name-only -z {DIFF_RANGE} | jq -Rs 'split("\u0000")')" \
   '.runs[].results |= map(select(.locations[].physicalLocation.artifactLocation.uri as $uri | $files | index($uri) != null))' \
   2>/dev/null || printf '%s' "$S"
@@ -133,15 +132,15 @@ Without `jq` the SARIF is unfiltered: note that.
 ```bash
 CODEQL_TMP=$(mktemp -d) || exit
 trap 'rm -rf "${CODEQL_TMP}"' EXIT INT TERM
-{bound} -k 10 280 codeql database create "${CODEQL_TMP}/db" --language={detected-language} --source-root="{worktree}" 2>/dev/null && \
-{bound} -k 10 280 codeql database analyze "${CODEQL_TMP}/db" --format=sarif-latest --output="${CODEQL_TMP}/results.sarif" 2>/dev/null
+codeql database create "${CODEQL_TMP}/db" --language={detected-language} --source-root="{worktree}" 2>/dev/null && \
+codeql database analyze "${CODEQL_TMP}/db" --format=sarif-latest --output="${CODEQL_TMP}/results.sarif" 2>/dev/null
 CODEQL_EXIT=$?
 cat "${CODEQL_TMP}/results.sarif"
 printf '\nexit=%s\n' "$CODEQL_EXIT"
 rm -rf "${CODEQL_TMP}"
 trap - EXIT INT TERM
 ```
-Parse each SARIF → extract findings. A tool's status is its last line, `exit={n}`; a tool that ran completed only on Semgrep 0, Snyk 0 or 1 (1 = issues, only with SARIF output), CodeQL 0. Any other status, or no such line, means it did not complete (124: bound fired; 125: bound failed; 126-127: scanner did not start; 137: killed after `-k`; else failed. Semgrep via xargs: number only); keep the findings its SARIF holds. If a tool's output was clipped, its findings are incomplete: name the tool in `STATIC_FINDINGS`, never `(none)`.
+Parse each SARIF → extract findings. A tool's status is its last line, `exit={n}`; a tool that ran completed only on Semgrep 0, Snyk 0 or 1 (1 = issues, only with SARIF output), CodeQL 0. Any other status, or no such line, means it did not complete (126-127: scanner did not start; else failed. Semgrep via xargs: number only); keep the findings its SARIF holds. A call with no `exit=` line in its own result did not complete (it reached the Bash limit, or a `cd` or the call failed). It stays did not complete for this run: ignore a later end notice. If a tool's output was clipped, its findings are incomplete: name the tool in `STATIC_FINDINGS`, never `(none)`.
 
 **Normalize** all findings to unified table, cap at top 50 by severity. Truncate each Description entry to 200 characters maximum:
 

@@ -4,7 +4,7 @@
 // Strategy: parse the markdown command file to verify structural invariants:
 //   1. Phase ordering — all 7 phases present in correct order with Produces/Requires annotations
 //   2. Incremental detection — .last-analysis-head read/write semantics documented
-//   3. Static tool invocation — mktemp, cleanup and output-cap patterns, plus the file-name handoff and time bounds (3b)
+//   3. Static tool invocation — mktemp, cleanup and output-cap patterns, plus the file-name handoff and the Bash timeout (3b)
 //   4. Debug agent spawning — parallel spawn in a single message, required inputs
 //   5. Synthesize agent — mode: bug-analysis output path
 //   6. Resolve compatibility — /resolve suggestion on blocking bugs
@@ -410,17 +410,15 @@ describe('bug-analysis.md — static analysis safety patterns', () => {
 // ---------------------------------------------------------------------------
 
 const SCANNER_TOOLS = ['semgrep scan', 'snyk code test', 'codeql database create', 'codeql database analyze'];
-const BOUND = '{bound} -k 10 280 ';
-const BOUND_PROBE = 'command -v timeout || command -v gtimeout';
 const STATUS_LOOP = `for t in semgrep snyk codeql; do printf '%s=%s\\n' "$t" "$(command -v "$t" || echo no)"; done`;
 const EXIT_PRINT = "printf '\\nexit=%s\\n' ";
 const SNYK_EXIT_LINE = `${EXIT_PRINT}"$E"\n`;
 const CODEQL_SARIF_PRINT = 'cat "${CODEQL_TMP}/results.sarif"';
 const NONE_ASSIGNMENT = 'Set `STATIC_FINDINGS` to `(none)`.';
-const DID_NOT_RUN = 'Static analysis did not run: neither timeout nor gtimeout is installed';
-const DID_NOT_RUN_ASSIGNMENT = 'set `STATIC_FINDINGS` to "Static analysis did not run';
-const STATED_TIMEOUT = /Bash `timeout` at (\d+) \(CodeQL: (\d+)\)/;
+const STATED_TIMEOUT = /Bash `timeout` at (\d+)/g;
 const BASH_TIMEOUT_CEILING_MS = 600000;
+/** What bounds a command in time: the `timeout` or `gtimeout` command, the old `{bound}` placeholder, or a `-k` kill grace. */
+const BOUND_TEXT = /\bg?timeout\b|\{bound\}|-k \d+ \d+/;
 
 function bashFences(text: string): string[] {
   return parseFences(text).filter(fence => fence.startsWith('```bash'));
@@ -434,38 +432,36 @@ function bashFenceLines(text: string): string[] {
   return bashFences(text).flatMap(fenceLines);
 }
 
-/** The time each `-k k n` pair holds a scanner, in ms: the kill grace plus the bound. */
-function boundMs(line: string): number[] {
-  return [...line.matchAll(/-k (\d+) (\d+) /g)].map(pair => (Number(pair[1]) + Number(pair[2])) * 1000);
-}
-
 type Collector = (body: string) => string[];
 
 const doesNotSay = (part: string): string => `Phase 2 does not say: ${part}`;
 
-/** Each scanner line runs under the probed bound, and each bound ends before the Bash timeout Phase 2 states for its call. */
-function collectStaticBoundDefects(phase2: string): string[] {
+/**
+ * devflow puts no time bound on a scanner: no command line of Phase 2 carries one, and no sentence names one. The
+ * Bash `timeout` the agent sets for each call is the only limit, stated at most 600000 ms. A call that reaches it
+ * prints no `exit=` line, which the status rule reads as did not complete.
+ */
+function collectNoBoundDefects(phase2: string): string[] {
   const out: string[] = [];
-  const scanners = bashFenceLines(phase2).filter(line => SCANNER_TOOLS.some(tool => line.includes(tool)));
+  const lines = bashFenceLines(phase2);
+  const scanners = lines.filter(line => SCANNER_TOOLS.some(tool => line.includes(tool)));
   if (scanners.length !== SCANNER_TOOLS.length) out.push(`${scanners.length} scanner command lines, expected ${SCANNER_TOOLS.length}`);
-  for (const line of scanners) {
-    const tool = SCANNER_TOOLS.find(name => line.includes(name)) ?? '';
-    const bound = line.indexOf(BOUND);
-    if (bound === -1 || bound > line.indexOf(tool)) out.push(`the ${tool} line does not run under ${BOUND.trim()}`);
-  }
-  if (/\btimeout \d/.test(phase2)) out.push('a scanner runs under a plain timeout with a number, not the probed bound');
-  return [...out, ...collectStatedTimeoutDefects(phase2, scanners)];
+  const bounded = lines.find(line => BOUND_TEXT.test(line));
+  if (bounded !== undefined) out.push(`a Phase 2 command line carries a time bound: ${bounded.trim()}`);
+  if (/\{bound\}|gtimeout/.test(phase2)) out.push('Phase 2 names a devflow time bound');
+  const stated = [...phase2.matchAll(STATED_TIMEOUT)].map(match => Number(match[1]));
+  if (stated.length === 0) out.push('no stated Bash timeout above the scanner calls');
+  if (stated.some(ms => ms > BASH_TIMEOUT_CEILING_MS)) out.push('a stated Bash timeout is above 600000 ms');
+  return out;
 }
 
 const DID_NOT_RUN_PARTS = [
-  'never one unbounded',
-  DID_NOT_RUN,
-  'all tools unavailable or no `{bound}`', // lost, Step 2d runs on and overwrites the did-not-run message of Step 2c with `(none)`
+  'or all tools unavailable', // lost, Step 2d runs on with no scanner installed
 ];
 
 /**
- * Step 2c probes the bound on its last line and prints one status line per tool. With no bound no scanner runs: the
- * did-not-run sentence goes to `STATIC_FINDINGS` and Step 2d skips, so `(none)` never replaces it.
+ * Step 2c prints one status line per tool, with no bound probe in its fence. With no scanner installed Step 2d
+ * skips, so it never runs a scanner that is not there.
  */
 function collectDidNotRunDefects(phase2: string): string[] {
   const step2c = sectionBetween(phase2, 'Step 2c:', 'Step 2d:') ?? '';
@@ -476,17 +472,16 @@ function collectDidNotRunDefects(phase2: string): string[] {
   ];
 }
 
+const STATUS_LOOP_DEFECT = 'the Step 2c fence is not the one status line per tool loop';
+
 function collectProbeFenceDefects(step2c: string): string[] {
   const probeFence = bashFences(step2c)[0];
   if (probeFence === undefined) return ['Step 2c has no bash fence'];
-  const out: string[] = [];
   const lines = fenceLines(probeFence).filter(line => line.trim() !== '');
-  if (lines[lines.length - 1] !== BOUND_PROBE) out.push('the last line of the Step 2c fence is not the timeout/gtimeout probe');
-  if (!lines.includes(STATUS_LOOP)) out.push('the Step 2c fence does not print one status line per tool');
-  return out;
+  return lines.length === 1 && lines[0] === STATUS_LOOP ? [] : [STATUS_LOOP_DEFECT];
 }
 
-/** The did-not-run sentence sits in the "some are available" branch, after the all-`no` branch that sets `(none)`. */
+/** The all-`no` branch comes before the "some are available" branch. */
 function collectDidNotRunBranchDefects(step2c: string): string[] {
   const out: string[] = [];
   const noneBranch = step2c.indexOf('No static analysis tools found');
@@ -496,9 +491,7 @@ function collectDidNotRunBranchDefects(step2c: string): string[] {
   if (noneBranch === -1 || someBranch === -1) return out;
   // An absent sentence reads as -1, before the branch.
   if (noneBranch > someBranch) out.push('the all-no branch does not come before the "If some are available" branch');
-  if (step2c.indexOf(DID_NOT_RUN) < someBranch) out.push('the did-not-run sentence is not in the "If some are available" branch of Step 2c');
   if (!step2c.slice(noneBranch, someBranch).includes(NONE_ASSIGNMENT)) out.push('the all-no branch does not set STATIC_FINDINGS to (none)');
-  if (!step2c.slice(someBranch).includes(DID_NOT_RUN_ASSIGNMENT)) out.push('the did-not-run sentence is not assigned to STATIC_FINDINGS');
   return out;
 }
 
@@ -556,25 +549,6 @@ function collectExitLineOrderDefects(phase2: string): string[] {
   return out;
 }
 
-/** Each scanner's bounds, kill grace included, end before the Bash timeout Phase 2 states for its call. */
-function collectStatedTimeoutDefects(phase2: string, scanners: string[]): string[] {
-  const stated = STATED_TIMEOUT.exec(phase2);
-  if (stated === null) return ['no stated Bash timeout above the scanner bounds'];
-  const out: string[] = [];
-  const general = Number(stated[1]);
-  const codeql = Number(stated[2]);
-  if (general > BASH_TIMEOUT_CEILING_MS || codeql > BASH_TIMEOUT_CEILING_MS) out.push('a stated Bash timeout is above 600000 ms');
-  for (const tool of ['semgrep scan', 'snyk code test']) {
-    const held = scanners.filter(line => line.includes(tool)).flatMap(boundMs);
-    if (held.length !== 1) out.push(`the ${tool} line holds ${held.length} bounds, expected 1`);
-    if (held.some(ms => ms >= general)) out.push(`the ${tool} bound does not end before its Bash timeout`);
-  }
-  const held = scanners.filter(line => line.includes('codeql database')).flatMap(boundMs);
-  if (held.length !== 2) out.push(`the CodeQL lines hold ${held.length} bounds, expected 2`);
-  if (held.reduce((sum, ms) => sum + ms, 0) >= codeql) out.push('the CodeQL bounds do not end before its Bash timeout');
-  return out;
-}
-
 const OUTCOME_VAR = 'STATIC_STATUS';
 
 /** The names a `**Produces:**` or `**Requires:**` line lists, from the first such line in a section. */
@@ -625,10 +599,15 @@ function collectCodeqlScratchDefects(phase2: string): string[] {
 
 const STATUS_RULE_PARTS = [
   'a tool that ran completed only on Semgrep 0,',
-  '137: killed after `-k`; else failed. Semgrep via xargs: number only)',
+  '(126-127: scanner did not start; else failed. Semgrep via xargs: number only)',
+  'A call with no `exit=` line in its own result did not complete',
+  'It stays did not complete for this run: ignore a later end notice.',
 ];
 
-/** The completion rule covers the tools that ran, and the exit meanings end in a catch-all that leaves Semgrep's status a number. */
+/**
+ * The completion rule covers the tools that ran, and the exit meanings end in a catch-all that leaves Semgrep's status
+ * a number. A call with no `exit=` line did not complete and stays so: a later end notice changes nothing.
+ */
 function collectStatusRuleDefects(phase2: string): string[] {
   return STATUS_RULE_PARTS.filter(part => !phase2.includes(part)).map(doesNotSay);
 }
@@ -659,7 +638,7 @@ function collectFileNameHandoffDefects(phase2: string): string[] {
   const out: string[] = [];
   const fences = bashFences(phase2).length;
   if (fences < 5) out.push(`${fences} bash fences, expected at least 5`);
-  const semgrep = /^set -o pipefail; git diff --name-only -z --diff-filter=d \{DIFF_RANGE\} \| \{bound\} -k 10 280 xargs -0 -r semgrep scan [^;|]* -- 2>\/dev\/null;/m;
+  const semgrep = /^set -o pipefail; git diff --name-only -z --diff-filter=d \{DIFF_RANGE\} \| xargs -0 -r semgrep scan [^;|]* -- 2>\/dev\/null;/m;
   if (!semgrep.test(phase2)) out.push('the Semgrep line does not read names with -z, pass them with xargs -0 and put them after --');
   if (!phase2.includes(SNYK_NAME_LIST)) out.push('the Snyk filter does not read the names from git as NUL-separated output');
   const reads = bashFenceLines(phase2).filter(line => line.includes('CHANGED_FILES') && line !== 'CHANGED_FILES=$(git diff --name-only {DIFF_RANGE})');
@@ -701,7 +680,7 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
   const builds: Array<[string, string | null]> = [['curation-on', content], ['curation-off', off]];
   const phase2Of = (body: string): string => extractSection(body, '### Phase 2:', '### Phase 3:');
   const onPhase2 = (collect: (phase2: string) => string[]): Collector => body => collect(phase2Of(body));
-  const bounds = onPhase2(collectStaticBoundDefects);
+  const noBound = onPhase2(collectNoBoundDefects);
   const didNotRun = onPhase2(collectDidNotRunDefects);
   const statusLines = onPhase2(collectStatusLineDefects);
   const exitOrder = onPhase2(collectExitLineOrderDefects);
@@ -724,55 +703,43 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
   /** The defects `collect` reports for a copy of `body` seeded once; a known-bad probe never touches the committed tree. */
   const probe = (collect: Collector, body: string | null) => (from: string | RegExp, to: string): string[] => collect(seed(body ?? '', from, to));
 
-  it.each(builds)('each scanner runs under a time bound that ends before its Bash timeout (%s)', (_label, body) => {
+  it.each(builds)('no scanner runs under a devflow time bound, and each stated Bash timeout is at most 600000 ms (%s)', (_label, body) => {
     expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
-    expect(bounds(body ?? '')).toEqual([]);
+    expect(noBound(body ?? '')).toEqual([]);
   });
 
-  it.each(builds)('known-bad probes: a scanner without the probed bound, or a bound that reaches the Bash timeout, is reported (%s)', (_label, body) => {
+  it.each(builds)('known-bad probes: a bound added back to a scanner or to Step 2c, or a lost or raised Bash timeout, is reported (%s)', (_label, body) => {
     expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
-    const defects = probe(bounds, body);
-    const unbound = defects(`${BOUND}snyk`, 'snyk');
-    expect(unbound).toContain('the snyk code test line does not run under {bound} -k 10 280');
-    expect(unbound).toContain('the snyk code test line holds 0 bounds, expected 1');
-    expect(defects(`${BOUND}snyk code test --sarif`, `snyk code test ${BOUND}--sarif`)).toContain('the snyk code test line does not run under {bound} -k 10 280');
-    expect(defects(`${BOUND}xargs`, 'xargs')).toContain('the semgrep scan line holds 0 bounds, expected 1');
-    expect(defects('xargs -0 -r semgrep', `xargs -0 -r ${BOUND}semgrep`)).toContain('the semgrep scan line holds 2 bounds, expected 1');
-    expect(defects(`${BOUND}xargs`, 'timeout 300 xargs')).toContain('a scanner runs under a plain timeout with a number, not the probed bound');
-    const short = defects('Bash `timeout` at 300000', 'Bash `timeout` at 200000');
-    expect(short).toContain('the semgrep scan bound does not end before its Bash timeout');
-    expect(short).toContain('the snyk code test bound does not end before its Bash timeout');
-    expect(defects('Bash `timeout` at 300000', 'Bash `timeout` at 700000')).toContain('a stated Bash timeout is above 600000 ms');
-    expect(defects('(CodeQL: 600000)', '(CodeQL: 700000)')).toContain('a stated Bash timeout is above 600000 ms');
-    expect(defects('with the Bash `timeout` at', 'with the Bash limit at')).toContain('no stated Bash timeout above the scanner bounds');
-    expect(defects(`${BOUND}codeql database analyze`, 'codeql database analyze')).toContain('the CodeQL lines hold 1 bounds, expected 2');
-    expect(defects('(CodeQL: 600000)', '(CodeQL: 500000)')).toContain('the CodeQL bounds do not end before its Bash timeout');
-    expect(collectStaticBoundDefects('')).toContain('0 scanner command lines, expected 4');
+    const defects = probe(noBound, body);
+    const carriesBound = expect.stringContaining('a Phase 2 command line carries a time bound');
+    expect(defects('xargs -0 -r semgrep', '{bound} -k 10 280 xargs -0 -r semgrep')).toEqual(expect.arrayContaining([carriesBound, 'Phase 2 names a devflow time bound']));
+    expect(defects('xargs -0 -r semgrep', 'timeout 280 xargs -0 -r semgrep')).toContainEqual(carriesBound);
+    expect(defects('xargs -0 -r semgrep', 'xargs -0 -k 10 280 -r semgrep')).toContainEqual(carriesBound);
+    expect(defects('S=$(snyk', 'S=$(gtimeout 280 snyk')).toEqual(expect.arrayContaining([carriesBound, 'Phase 2 names a devflow time bound']));
+    expect(defects('codeql database analyze', 'timeout 280 codeql database analyze')).toContainEqual(carriesBound);
+    expect(defects(`${STATUS_LOOP}\n`, `${STATUS_LOOP}\ncommand -v timeout || command -v gtimeout\n`)).toContainEqual(carriesBound);
+    expect(defects('If some are available: note which tools will run.', 'If some are available: note which tools will run. `{bound}` is `timeout` or `gtimeout`.')).toContain('Phase 2 names a devflow time bound');
+    expect(defects('Bash `timeout` at 600000', 'Bash `timeout` at 700000')).toContain('a stated Bash timeout is above 600000 ms');
+    expect(defects('with the Bash `timeout` at 600000', 'with the Bash limit at 600000')).toContain('no stated Bash timeout above the scanner calls');
+    expect(collectNoBoundDefects('')).toEqual(['0 scanner command lines, expected 4', 'no stated Bash timeout above the scanner calls']);
   });
 
-  it.each(builds)('Step 2c probes the bound last, and no bound reads as did not run, never as clean (%s)', (_label, body) => {
+  it.each(builds)('Step 2c prints one status line per tool and probes no bound, and no scanner installed stops Step 2d (%s)', (_label, body) => {
     expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
     expect(didNotRun(body ?? '')).toEqual([]);
   });
 
-  it.each(builds)('known-bad probes: a Step 2c probe that is not last, or a did-not-run sentence that is lost or misplaced, is reported (%s)', (_label, body) => {
+  it.each(builds)('known-bad probes: a Step 2c fence that is not the status loop, or a lost or misplaced branch, is reported (%s)', (_label, body) => {
     expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
     const defects = probe(didNotRun, body);
-    const notInBranch = 'the did-not-run sentence is not in the "If some are available" branch of Step 2c';
-    expect(defects(`${STATUS_LOOP}\n${BOUND_PROBE}`, `${BOUND_PROBE}\n${STATUS_LOOP}`)).toContain('the last line of the Step 2c fence is not the timeout/gtimeout probe');
-    expect(defects(STATUS_LOOP, 'true')).toContain('the Step 2c fence does not print one status line per tool');
+    expect(defects(STATUS_LOOP, 'true')).toContain(STATUS_LOOP_DEFECT);
+    expect(defects(`${STATUS_LOOP}\n`, `${STATUS_LOOP}\ncommand -v timeout || command -v gtimeout\n`)).toContain(STATUS_LOOP_DEFECT);
     expect(collectDidNotRunDefects('')).toContain('Step 2c has no bash fence');
-    const lost = defects(DID_NOT_RUN, 'Static analysis did not run');
-    expect(lost).toContain(doesNotSay(DID_NOT_RUN));
-    expect(lost).toContain(notInBranch);
-    expect(probe(didNotRun, seed(body ?? '', DID_NOT_RUN, 'it did not run'))(NONE_ASSIGNMENT, `Set \`STATIC_FINDINGS\` to "${DID_NOT_RUN}".`)).toContain(notInBranch);
     expect(defects('If some are available', 'If none are available')).toEqual(['Step 2c has no "If some are available" branch']);
     expect(defects('No static analysis tools found', 'Static analysis tools found')).toEqual(['Step 2c has no all-no branch warning']);
     expect(defects(/(If all three print[^\n]*\n\n)(If some are available[^\n]*)/, '$2\n\n$1')).toContain('the all-no branch does not come before the "If some are available" branch');
     expect(defects(NONE_ASSIGNMENT, '')).toContain('the all-no branch does not set STATIC_FINDINGS to (none)');
-    expect(defects(DID_NOT_RUN_ASSIGNMENT, DID_NOT_RUN_ASSIGNMENT.replace('set `STATIC_FINDINGS` to', 'note'))).toContain('the did-not-run sentence is not assigned to STATIC_FINDINGS');
-    expect(defects('never one unbounded', 'one unbounded')).toContain(doesNotSay(DID_NOT_RUN_PARTS[0]));
-    expect(defects('all tools unavailable or no `{bound}`', 'all tools unavailable')).toContain(doesNotSay(DID_NOT_RUN_PARTS[2]));
+    expect(defects('or all tools unavailable', 'or none')).toContain(doesNotSay(DID_NOT_RUN_PARTS[0]));
   });
 
   it.each(builds)('each scanner prints one status line, and only a tool that completed reads as clean (%s)', (_label, body) => {
@@ -809,15 +776,15 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(probe(exitOrder, seed(body ?? '', semgrepExit, ''))(semgrepStart, `${EXIT_PRINT}"$?"; ${semgrepStart}`)).toContain(semgrep);
     expect(defects(semgrepExit, `; ${EXIT_PRINT}"$E"`)).toContain(semgrep);
     expect(defects('set -o pipefail; git diff', 'git diff')).toContain(semgrep);
-    expect(defects(/(set -o pipefail; git diff[^|]*\| )(\{bound\} -k 10 280 xargs[^;]*;)/, '$2 $1')).toContain(semgrep);
+    expect(defects(/(set -o pipefail; git diff[^|]*\| )(xargs[^;]*;)/, '$2 $1')).toContain(semgrep);
     const snyk = 'the Snyk exit line does not follow the scanner and the filter, printing "$E"';
     const withoutSnykExit = probe(exitOrder, seed(body ?? '', SNYK_EXIT_LINE, ''));
-    expect(withoutSnykExit('S=$({bound}', `${SNYK_EXIT_LINE}S=$({bound}`)).toContain(snyk);
+    expect(withoutSnykExit('S=$(snyk', `${SNYK_EXIT_LINE}S=$(snyk`)).toContain(snyk);
     expect(withoutSnykExit(`printf '%s' "$S" | jq`, `${SNYK_EXIT_LINE}printf '%s' "$S" | jq`)).toContain(snyk);
     expect(defects(SNYK_EXIT_LINE, `${EXIT_PRINT}"$?"\n`)).toContain(snyk);
-    expect(defects('S=$({bound}', 'T=$({bound}')).toContain(snyk);
+    expect(defects('S=$(snyk', 'T=$(snyk')).toContain(snyk);
     const withoutFilter = probe(exitOrder, seed(seed(body ?? '', SNYK_EXIT_LINE, ''), /printf '%s' "\$S" \| jq[^\n]*\n[^\n]*\n[^\n]*\n/, ''));
-    expect(withoutFilter('S=$({bound}', `${SNYK_EXIT_LINE}S=$({bound}`)).toContain(snyk);
+    expect(withoutFilter('S=$(snyk', `${SNYK_EXIT_LINE}S=$(snyk`)).toContain(snyk);
     const codeql = 'the CodeQL exit line does not follow CODEQL_EXIT=$?, printing "$CODEQL_EXIT"';
     const codeqlExit = `${EXIT_PRINT}"$CODEQL_EXIT"`;
     expect(defects(codeqlExit, `${EXIT_PRINT}"$?"`)).toContain(codeql);
@@ -941,6 +908,11 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(defects('a tool that ran completed', 'a tool completed')).toContain(doesNotSay(STATUS_RULE_PARTS[0]));
     expect(defects('; else failed. Semgrep via xargs: number only)', ')')).toContain(doesNotSay(STATUS_RULE_PARTS[1]));
     expect(defects('; else failed.', '.')).toContain(doesNotSay(STATUS_RULE_PARTS[1]));
+    expect(defects('(126-127: scanner did not start', '(124: bound fired; 126-127: scanner did not start')).toContain(doesNotSay(STATUS_RULE_PARTS[1]));
+    expect(defects('A call with no `exit=` line in its own result', 'A call with no `exit=` line')).toContain(doesNotSay(STATUS_RULE_PARTS[2]));
+    expect(defects('in its own result did not complete', 'in a result did not complete')).toContain(doesNotSay(STATUS_RULE_PARTS[2]));
+    expect(defects('ignore a later end notice', 'read a later end notice')).toContain(doesNotSay(STATUS_RULE_PARTS[3]));
+    expect(defects('It stays did not complete for this run: ', '')).toContain(doesNotSay(STATUS_RULE_PARTS[3]));
   });
 
   it.each(builds)('the Snyk results are cut to the changed files, with an unfiltered fallback and a note (%s)', (_label, body) => {
