@@ -325,4 +325,4 @@ Run `/resolve` after `/bug-analysis` to fix identified bugs. `/resolve` automati
 
 ## Phase Completion Checklist
 
-Before reporting results, verify that every phase ran and that each variable it produces is captured, with STATIC_FINDINGS (`(none)` only if every tool that was to run completed clean), the report files in ANALYSIS_DIR and `.last-analysis-head` all present; run any missing phase first.
+Before reporting results, verify that every phase ran and that each variable it produces is captured, with STATIC_FINDINGS (`(none)` only if every tool that was to run completed clean), the report files in ANALYSIS_DIR present and `.last-analysis-head` written only if Phase 7's gate allows; run any missing phase first.

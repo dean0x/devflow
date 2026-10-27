@@ -72,7 +72,7 @@ Each fence prints its status in its own shape, and the order is load-bearing:
 - **KB-INV-3**: Snyk exits 1 when it finds issues, so 1 counts as completed only when SARIF was requested; any other nonzero (2, 3, 126 ...) did not complete.
 - **KB-INV-4**: the saved `static-findings.md` holds the table and the status lines, and `STATIC_FINDINGS` ends with a line for each tool that did not complete. Only the security analyzer gets `STATIC_FINDINGS`. Synthesize takes the status only from `STATIC_STATUS`; file text sets no status. Umbrella: 652.
 - **KB-INV-5**: the Snyk scope filter exists because `snyk code test` scans the whole project; without it, findings in untouched files reach the analyzer.
-- **KB-INV-6**: a run that keeps the marker is analyzed again from the same commits next time; `--no-static` is the one way to move the marker without the tools.
+- **KB-INV-6**: a run that keeps the marker is analyzed again from the same commits next time; `--no-static` is the one way to move the marker without the tools. The completion checklist asks for the marker only when the Phase 7 gate allows it, so it never sends the session back to write past the gate.
 
 ## Guard architecture (tests/bug-analysis/structural.test.ts, Group 3b)
 

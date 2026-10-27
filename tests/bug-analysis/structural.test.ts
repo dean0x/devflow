@@ -549,11 +549,15 @@ const GATE_PARTS = [
 ];
 const WRITE_START = 'In one Bash call run';
 const REPORT_WAY_OUT = '"marker kept" and the way out';
+/** The completion checklist asks for the marker only through the gate, so it never sends the session back to write past it. */
+const CHECKLIST_MARKER = "`.last-analysis-head` written only if Phase 7's gate allows";
+const CHECKLIST_UNGATED = 'the completion checklist asks for the marker without the Phase 7 gate';
 
 /**
  * The marker write runs only when every tool that was to run completed, or `--no-static` is set (also with `--full`).
  * The gate is a sentence on the write's own line, before the write itself, so the write line keeps its shape. The
- * report line shows `STATIC_STATUS` and, when the marker stays, the way out.
+ * report line shows `STATIC_STATUS` and, when the marker stays, the way out. The completion checklist asks for the
+ * marker only when the gate allows it.
  */
 function collectMarkerGateDefects(body: string): string[] {
   const writes = body.split('\n').filter(line => line.includes('.last-analysis-head') && line.includes('rev-parse HEAD'));
@@ -563,6 +567,8 @@ function collectMarkerGateDefects(body: string): string[] {
   const out = GATE_PARTS.filter(part => !gate.includes(part)).map(part => `no gate before "${WRITE_START}" says: ${part}`);
   const report = body.split('\n').find(line => line.startsWith('**Static analysis**:')) ?? '';
   if (!report.includes(REPORT_WAY_OUT)) out.push('the Static analysis report line does not name the kept marker and the way out');
+  const checklist = sectionBetween(body, '## Phase Completion Checklist', null) ?? '';
+  if (!checklist.includes(CHECKLIST_MARKER)) out.push(CHECKLIST_UNGATED);
   return out;
 }
 
@@ -1120,6 +1126,9 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(defects(REPORT_WAY_OUT, 'the reason')).toContain(wayOut);
     expect(defects('"marker kept" and ', '')).toContain(wayOut);
     expect(defects('**Static analysis**:', '**Scanners**:')).toContain(wayOut);
+    expect(defects(CHECKLIST_MARKER, '`.last-analysis-head` all present')).toEqual([CHECKLIST_UNGATED]);
+    expect(defects(" only if Phase 7's gate allows", '')).toEqual([CHECKLIST_UNGATED]);
+    expect(defects('## Phase Completion Checklist', '## Checklist')).toEqual([CHECKLIST_UNGATED]);
     expect(collectMarkerGateDefects('')).toEqual(['0 marker write lines, expected 1']);
   });
 
