@@ -237,7 +237,7 @@ const RESOLVE: LevelSpec = {
 const SPECS: readonly LevelSpec[] = [IMPLEMENT, RESOLVE]
 
 /** The pinned report lines (arm g) and cut routes (arm h). */
-const IMPLEMENT_REPORT = "Display completion summary with phase status, `Gate level: {GATE_LEVEL}` with any level note, Validate's `Lint pack:` line if any, PR info, and next steps."
+const IMPLEMENT_REPORT = "Display completion summary with phase status, `Gate level: {GATE_LEVEL}` with any level note, Harden's `no files reviewed` line if any, Validate's `Lint pack:` line if any, PR info, and next steps."
 const RESOLVE_DISPLAY = '**Total Issues**: {n}\n**Gate level**: {GATE_LEVEL, with any level note}\n\n### Results'
 const RESOLVE_HEADER = '**Command**: /resolve\n**Gate level**: {GATE_LEVEL, with any level note}\n\n'
 const ROUTE_EMPTY = 'If FIX_NOW list is empty: skip to Phase 5, then run Phases 9, 9b, 9c and 10.'
@@ -1902,6 +1902,8 @@ describe('the report names the level (AC-4)', () => {
     expect(collectReportDefects(body, IMPLEMENT), 'the unmodified Phase 12 line has no defect').toEqual([])
     expect(collectReportDefects(seed(body, '`Gate level: {GATE_LEVEL}` with any level note, ', ''), IMPLEMENT)).toEqual([`the Phase 12 report line is not the pinned sentence: ${IMPLEMENT_REPORT}`])
     expect(collectReportDefects(seed(body, 'with any level note, ', ''), IMPLEMENT)).toHaveLength(1)
+    // An empty branch diff makes Harden review nothing, so its line must reach the report at every level.
+    expect(collectReportDefects(seed(body, "Harden's `no files reviewed` line if any, ", ''), IMPLEMENT)).toEqual([`the Phase 12 report line is not the pinned sentence: ${IMPLEMENT_REPORT}`])
   })
 
   it('known-bad probes (/resolve): the display line and the summary header line are each required', () => {
