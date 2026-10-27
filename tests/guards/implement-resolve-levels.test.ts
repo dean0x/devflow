@@ -42,7 +42,7 @@
  * and read no level are checked in `implement-resolve-level-keepers.test.ts`. The three guards share
  * `level-guard-helpers.ts`.
  *
- * The reference arms (d, e) read the two references. The command arms (a, b, c, f, g, h, i) read the compiled commands.
+ * The reference arms (d, e, l) read the references. The command arms (a, b, c, f, g, h, i) read the compiled commands.
  */
 
 import { describe, it, expect } from 'vitest'
