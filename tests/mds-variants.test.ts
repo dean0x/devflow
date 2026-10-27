@@ -13,6 +13,9 @@
  *      separators, charset violations, over-length names.
  *   2. resolveOutputDir (containment) — resolved-path allowlist, escape guard,
  *      canonical-declaration requirement.
+ *   2c. The variant trees (dist/curation-off, dist/compliance-off,
+ *      dist/curation-compliance-off) are never an output dir: the allowlist stays the
+ *      three shipped directories and no host declares another.
  *   3. Result error-union completeness — every declared error kind is reachable
  *      from a test input, and no input produces a kind outside the union.
  *   4. expandVariants — the flat (module, op) pair list, its minimum length, and
@@ -58,6 +61,13 @@ import {
   type VariantModule,
 } from '../src/core/mds-variants.js';
 import { ALL_MDS_HOSTS } from './fixtures/mds-manifest.js';
+import { walkFiles } from './helpers.js';
+import {
+  BOTH_OFF_OUTPUT_DIR,
+  COMPLIANCE_OFF_OUTPUT_DIR,
+  CURATION_OFF_OUTPUT_DIR,
+  LEGACY_OFF_OUTPUT_DIR,
+} from '../src/core/curation-variants.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 
@@ -311,6 +321,79 @@ describe('resolveOutputDir (host variant)', () => {
     const rejected = resolveOutputDir(ROOT, 'dist/wrong-dir');
     expect(rejected.ok).toBe(false);
     expect(!rejected.ok && 'value' in rejected).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2c. The variant trees are never an output dir (TP-7)
+// ---------------------------------------------------------------------------
+//
+// The off variants of a prompt (dist/curation-off, dist/compliance-off,
+// dist/curation-compliance-off) are written by the build next to the prompt they
+// vary, never declared by a host. The allowlist stays the three shipped
+// directories, so resolveOutputDir remains the one gate on where a host may write,
+// and no source can name a variant tree as its destination.
+
+describe('the variant trees are not output dirs (TP-7)', () => {
+  const VARIANT_TREES = [
+    CURATION_OFF_OUTPUT_DIR,
+    COMPLIANCE_OFF_OUTPUT_DIR,
+    BOTH_OFF_OUTPUT_DIR,
+    LEGACY_OFF_OUTPUT_DIR,
+  ] as const;
+
+  /** Named collector: the `.mds` files under src/assets, with their text. */
+  function collectMdsSources(): Array<{ name: string; content: string }> {
+    const base = path.join(ROOT, 'src', 'assets');
+    return walkFiles(base, f => f.endsWith('.mds')).map(f => ({
+      name: path.relative(ROOT, f).split(path.sep).join('/'),
+      content: readFileSync(f, 'utf-8'),
+    }));
+  }
+
+  /** Named collector: every `output-dir:` a source declares, as the directory it names. */
+  function collectDeclaredDirs(sources: ReadonlyArray<{ name: string; content: string }>): Array<{ name: string; dir: string }> {
+    const found: Array<{ name: string; dir: string }> = [];
+    for (const { name, content } of sources) {
+      const match = /^output-dir:[ \t]*(\S.*?)[ \t]*$/m.exec(content);
+      if (match) found.push({ name, dir: match[1] });
+    }
+    return found;
+  }
+
+  it('the allowlist is the three shipped directories, in order, and nothing else', () => {
+    expect([...ALLOWED_OUTPUT_DIR_NAMES]).toEqual(['dist/commands', 'dist/agents', 'dist/skills/git/references']);
+  });
+
+  it('no variant tree, and no kind folder inside one, is on the allowlist', () => {
+    for (const tree of VARIANT_TREES) {
+      expect(ALLOWED_OUTPUT_DIR_NAMES, `${tree} must not be an allowlisted directory`).not.toContain(tree);
+      for (const declared of [tree, `${tree}/commands`, `${tree}/agents`]) {
+        expect(errorOf(resolveOutputDir(ROOT, declared)).kind, `${declared} must be refused`).toBe('not-allowlisted');
+      }
+    }
+  });
+
+  it('every output-dir a host declares is on the allowlist, and every allowlisted directory has a host', () => {
+    const declared = collectDeclaredDirs(collectMdsSources());
+    expect(declared.length, 'the scan found no host: it is not reading src/assets').toBeGreaterThan(0);
+    const outside = declared.filter(d => !ALLOWED_OUTPUT_DIR_NAMES.includes(d.dir));
+    expect(outside, 'a host declares an output-dir the allowlist does not name').toEqual([]);
+    for (const dir of ALLOWED_OUTPUT_DIR_NAMES) {
+      expect(declared.some(d => d.dir === dir), `no host declares ${dir}`).toBe(true);
+    }
+  });
+
+  it('known-bad probe: a host that declares a variant tree is reported, a host that declares a shipped one is not', () => {
+    const seeded = [
+      { name: 'a.mds', content: '---\ndescription: a\noutput-dir: dist/compliance-off\n---\n' },
+      { name: 'b.mds', content: '---\noutput-dir: dist/curation-compliance-off/commands\n---\n' },
+      { name: 'c.mds', content: '---\noutput-dir: dist/commands\n---\n' },
+      { name: 'd.mds', content: 'a partial with no output-dir\n' },
+    ];
+    const declared = collectDeclaredDirs(seeded);
+    expect(declared.map(d => d.name)).toEqual(['a.mds', 'b.mds', 'c.mds']);
+    expect(declared.filter(d => !ALLOWED_OUTPUT_DIR_NAMES.includes(d.dir)).map(d => d.name)).toEqual(['a.mds', 'b.mds']);
   });
 });
 

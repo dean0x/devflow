@@ -74,6 +74,7 @@ async function install(opts: {
   const effective = opts.effectivePlugins ?? opts.plugins;
   await installViaFileCopy({
     curation: opts.curation ?? true,
+    compliance: true,
     plugins: opts.plugins,
     effectivePlugins: effective,
     claudeDir,

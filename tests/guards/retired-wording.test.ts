@@ -48,6 +48,7 @@ import {
 } from '../fixtures/feature-word-allowlist.js';
 import { LEGACY_NAMES } from '../../src/core/project-paths.js';
 import { MCP_CONTRACT_MODULE, VARIANT_MODULES } from '../../src/core/mds-variants.js';
+import { VARIANT_MANIFEST_REL_PATH } from '../../src/core/curation-variants.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 
@@ -1103,7 +1104,9 @@ const trackedTestSources = (): ScannedFile[] =>
 //
 // The build maps source to output in three ways:
 //   tsc            src/<x>.ts                        -> dist/<x>.js, <x>.d.ts and their .map files
-//   command/agent  src/assets/{commands,agents}/<n>.mds -> dist/{,curation-off/}{commands,agents}/<n>.md
+//   command/agent  src/assets/{commands,agents}/<n>.mds -> dist/{,<variant>/}{commands,agents}/<n>.md
+//                  (variant: curation-off, compliance-off or curation-compliance-off)
+//   manifest       scripts/build-mds.ts                -> dist/variant-axes.json
 //   references     the module of VARIANT_MODULES / MCP_CONTRACT_MODULE -> dist/skills/git/references/**
 // ---------------------------------------------------------------------------
 
@@ -1113,7 +1116,8 @@ const MAX_DIST_DEPTH = 12;
 const MAX_DIST_FILES = 5000;
 
 const COMPILED_TS = /^dist\/(.+?)(?:\.d\.ts\.map|\.d\.ts|\.js\.map|\.js)$/;
-const BUILT_HOST = /^dist\/(?:curation-off\/)?(commands|agents)\/([^/]+)\.md$/;
+const BUILT_HOST = /^dist\/(?:(?:curation-|compliance-|curation-compliance-)off\/)?(commands|agents)\/([^/]+)\.md$/;
+const VARIANT_MANIFEST_SOURCE = 'scripts/build-mds.ts';
 
 /** The source file that the build makes `distRel` from, or null when none is known. */
 function distSourceOf(distRel: string): string | null {
@@ -1122,6 +1126,8 @@ function distSourceOf(distRel: string): string | null {
     const source = `src/${compiled[1]}.ts`;
     return existsSync(path.join(ROOT, source)) ? source : null;
   }
+
+  if (distRel === VARIANT_MANIFEST_REL_PATH) return VARIANT_MANIFEST_SOURCE;
 
   const host = BUILT_HOST.exec(distRel);
   if (host !== null) {
@@ -1369,6 +1375,9 @@ describe('feature-word guard — dist mapping and probes (the same collector as 
     expect(distSourceOf('dist/cli/commands/init.js')).toBe('src/cli/commands/init.ts');
     expect(distSourceOf('dist/commands/implement.md')).toBe('src/assets/commands/implement.mds');
     expect(distSourceOf('dist/curation-off/agents/code.md')).toBe('src/assets/agents/code.mds');
+    expect(distSourceOf('dist/compliance-off/agents/code.md')).toBe('src/assets/agents/code.mds');
+    expect(distSourceOf('dist/curation-compliance-off/commands/implement.md')).toBe('src/assets/commands/implement.mds');
+    expect(distSourceOf('dist/variant-axes.json')).toBe('scripts/build-mds.ts');
     expect(distSourceOf('dist/skills/git/references/decision-markers.md')).toBe('src/assets/mds/git/_references.mds');
     expect(distSourceOf('dist/skills/git/references/pr/create.md')).toBe('src/assets/mds/git/_pr.mds');
     expect(distSourceOf('dist/skills/git/references/tracker/_mcp.md')).toBe('src/assets/mds/tracker/_mcp.mds');

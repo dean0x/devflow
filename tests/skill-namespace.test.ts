@@ -228,6 +228,7 @@ describe('installViaFileCopy skill lifecycle', () => {
   async function runInstall(opts?: { isPartialInstall?: boolean }): Promise<InstallReport> {
     return installViaFileCopy({
       curation: true,
+      compliance: true,
       plugins: [],
       claudeDir,
       devflowDir,

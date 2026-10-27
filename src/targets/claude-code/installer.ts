@@ -3,8 +3,15 @@ import { existsSync } from 'fs';
 import * as path from 'path';
 import type { PluginDefinition } from '../../core/plugins.js';
 import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, buildAssetMaps, prefixSkillName, unprefixSkillName, getAllSkillNames, getAllAgentNames, getAllCommandNames, FEATURE_OWNED_SKILLS, resolveSkillInstallPlan, omitCurationGatedSkills } from '../../core/plugins.js';
-import { skillsDir, agentSourceDirs, rulesDir, commandSourceDirs, scriptsDir, compiledSkillRefsDir, type AgentSourceDirs } from '../../core/assets.js';
+import { skillsDir, agentSourceDirs, rulesDir, commandSourceDirs, scriptsDir, compiledSkillRefsDir, type AgentSourceDirs, type CommandSourceDirs } from '../../core/assets.js';
 import { getPackageRoot, isContainedIn } from '../../core/paths.js';
+import {
+  ALL_SWITCHES_ON,
+  VARIANT_MANIFEST_REL_PATH,
+  describeVariantManifestParseError,
+  parseVariantManifest,
+  requiredComplianceVariantFiles,
+} from '../../core/curation-variants.js';
 import { sweepOrphanedAssets, mdFileName, mdEntryName, type SweepResult } from '../../core/orphan-sweep.js';
 import { generatedReferenceManifest, installedReferenceManifest, PR_HOST_DESTINATION_ROOT, SKILL_REFS_SKILL_NAME, TRACKER_DESTINATION_ROOT } from '../../core/mds-variants.js';
 import { sweepOrphanedReferences, MAX_REFERENCE_SWEEP_DEPTH } from '../../core/reference-sweep.js';
@@ -1751,6 +1758,28 @@ export interface FileCopyOptions {
    */
   curation: boolean;
   /**
+   * The machine's SETTLED compliance switch — required, with no default, for the same
+   * reason as {@link FileCopyOptions.curation}: a caller that forgot it would install the
+   * wrong variant without any error.
+   *
+   * false installs the compliance-off variant of every command and agent that carries a
+   * compliance arm (dist/compliance-off, or dist/curation-compliance-off with curation
+   * off too), and REFUSES the install, before any file is written, when the variant
+   * manifest (dist/variant-axes.json) is absent or invalid or when a compliance-armed
+   * prompt has no file for the machine's exact switches. true reads no manifest and
+   * installs as before. `devflow init` passes the value it has already settled from its
+   * flag, prompt and seed, never a raw seed or a repository's narrowing: the variant
+   * follows the machine switch alone, and the files and the manifest must agree.
+   */
+  compliance: boolean;
+  /**
+   * Package root the commands, agents and the variant manifest are read from. Injectable
+   * so a test installs from a temp tree instead of the live build state; omitted, it is
+   * the running package. An injected {@link FileCopyOptions.agentSourceDirs} still wins
+   * for the agent lookup.
+   */
+  packageRoot?: string;
+  /**
    * Agent source directories, most-preferred first — see agentSourceDirs(),
    * which owns the ordering convention and supplies the default. Injectable so
    * tests can prove the preference order against a temp tree instead of the
@@ -1978,11 +2007,139 @@ export interface CommandsAndAgentsOptions {
   claudeDir: string;
   /** The machine's settled curation switch — picks the command and agent variant (D-LEARNING-VARIANT-INSTALL). */
   curation: boolean;
+  /** The machine's settled compliance switch — picks the variant too, and false refuses an install whose variant files are missing; see {@link FileCopyOptions.compliance}. */
+  compliance: boolean;
+  /** Package root to read from; see {@link FileCopyOptions.packageRoot}. */
+  packageRoot?: string;
   /** The tracker tool servers stamped onto the Git agent's `tools:` line (D-TRACKER-SERVER-ALLOWLIST). */
   trackerServers: readonly string[];
   /** Agent source directories, most-preferred first; see {@link FileCopyOptions.agentSourceDirs}. */
   agentSourceDirs?: AgentSourceDirs;
   warn: (msg: string) => void;
+}
+
+/** The most variant files a refusal names; the count says how many more there are. */
+const MAX_REPORTED_MISSING_VARIANTS = 5;
+
+/** The names a refusal lists: at most {@link MAX_REPORTED_MISSING_VARIANTS}, then a count of the rest. */
+function namedVariantFiles(items: readonly string[]): string {
+  const named = items.slice(0, MAX_REPORTED_MISSING_VARIANTS).join(', ');
+  const more = items.length > MAX_REPORTED_MISSING_VARIANTS ? ` and ${items.length - MAX_REPORTED_MISSING_VARIANTS} more` : '';
+  return `${named}${more}`;
+}
+
+/**
+ * The source lists the copy reads, most-preferred first. The check in
+ * {@link requireComplianceVariantFiles} and the copy in {@link installCommandsAndAgents}
+ * both take their lists from here, so the check looks at the files the copy takes.
+ * An injected agent list wins as given.
+ */
+function copySourceDirs(opts: {
+  curation: boolean;
+  compliance: boolean;
+  packageRoot: string;
+  agentSourceDirs?: AgentSourceDirs;
+}): { commands: CommandSourceDirs; agents: AgentSourceDirs } {
+  const { curation, compliance, packageRoot } = opts;
+  return {
+    commands: commandSourceDirs({ curation, compliance }, packageRoot),
+    agents: opts.agentSourceDirs ?? agentSourceDirs(packageRoot, { curation, compliance }),
+  };
+}
+
+/**
+ * Refuse a compliance-off install that cannot be trusted to carry the right text, before
+ * any file is written. Compliance on reads nothing and returns.
+ *
+ * With compliance off, the installer must know which compiled prompts carry a compliance
+ * arm: the build records that in dist/variant-axes.json, and the installer reads it here
+ * rather than guess from the files it finds. A prompt with a compliance arm has no safe
+ * fall-through, because its normal file, and on a both-off machine its curation-off file,
+ * carry the compliance text the machine has switched off. So the install is refused when
+ *   - the manifest is absent, unreadable or not valid (the build has not run, or only
+ *     `build:cli` did); or
+ *   - a compliance-armed prompt has no file for the machine's EXACT switches
+ *     (requiredComplianceVariantFiles names the file: a both-off machine needs the file
+ *     built for both axes, never the curation-off one); or
+ *   - the copy would take another file for that prompt: the first existing file of its
+ *     kind and name over the copy's own source list (copySourceDirs) is not the required
+ *     file. A prompt whose list holds no file at all is left to the copy's own refusal.
+ * A prompt with no compliance arm is not checked: it falls through to its normal file.
+ *
+ * The same refusal shape as {@link requireGeneratedTree}: one throw, before the unit loop,
+ * naming the build step. Only the file reads, so it leaves no partial install behind.
+ */
+async function requireComplianceVariantFiles(opts: {
+  curation: boolean;
+  compliance: boolean;
+  packageRoot: string;
+  agentSourceDirs?: AgentSourceDirs;
+}): Promise<void> {
+  const { curation, compliance, packageRoot } = opts;
+  if (compliance) return;
+
+  const manifestFile = path.join(packageRoot, ...VARIANT_MANIFEST_REL_PATH.split('/'));
+  const remedy =
+    `Run \`npm run build:mds\` to regenerate ${VARIANT_MANIFEST_REL_PATH} and the variant trees before install ` +
+    `(\`npm run build:cli\` alone does not produce them).`;
+
+  let text: string;
+  try {
+    text = await fs.readFile(manifestFile, 'utf-8');
+  } catch (err) {
+    const reason = (err as NodeJS.ErrnoException).code === 'ENOENT' ? 'does not exist' : `cannot be read (${String(err)})`;
+    throw new Error(
+      `Variant manifest ${reason}: ${manifestFile}. ` +
+      `With compliance off the installer needs it to find the prompts that carry a compliance arm, so no file was written. ${remedy}`,
+    );
+  }
+
+  const parsed = parseVariantManifest(text);
+  if (!parsed.ok) {
+    throw new Error(
+      `Variant manifest is not valid: ${manifestFile} (${describeVariantManifestParseError(parsed.error)}). ` +
+      `No file was written. ${remedy}`,
+    );
+  }
+
+  const sourceDirs = copySourceDirs({ curation, compliance, packageRoot, agentSourceDirs: opts.agentSourceDirs });
+  const machine = `curation ${curation ? 'on' : 'off'} and compliance off`;
+  const missing: string[] = [];
+  const shadowed: string[] = [];
+  for (const host of parsed.value) {
+    const [rel] = requiredComplianceVariantFiles({ curation, compliance }, [host]);
+    if (rel === undefined) continue;
+
+    const required = path.join(packageRoot, ...rel.split('/'));
+    let present = false;
+    try {
+      present = (await fs.stat(required)).isFile();
+    } catch { /* absent — reported below */ }
+    if (!present) {
+      missing.push(rel);
+      continue;
+    }
+
+    const dirs = host.kind === 'commands' ? sourceDirs.commands : sourceDirs.agents;
+    const taken = await firstExisting(dirs.map(dir => path.join(dir, mdFileName(host.name))));
+    if (taken !== undefined && path.resolve(taken) !== path.resolve(required)) {
+      shadowed.push(`${rel} (the copy would take ${path.relative(packageRoot, taken).split(path.sep).join('/')})`);
+    }
+  }
+  if (missing.length > 0) {
+    throw new Error(
+      `Variant file not found for ${missing.length} prompt(s) that carry a compliance arm, on a machine with ` +
+      `${machine}: ${namedVariantFiles(missing)}. ` +
+      `Another variant of the same prompt would carry the wrong text, so no file was written. ${remedy}`,
+    );
+  }
+  if (shadowed.length > 0) {
+    throw new Error(
+      `Another file comes first for ${shadowed.length} prompt(s) that carry a compliance arm, on a machine with ` +
+      `${machine}: ${namedVariantFiles(shadowed)}. ` +
+      `The install would carry the wrong text, so no file was written. ${remedy}`,
+    );
+  }
 }
 
 /**
@@ -1991,10 +2148,13 @@ export interface CommandsAndAgentsOptions {
  * the selective uninstall, which rewrites the files of the plugins that stay installed
  * after it removed a retired agent.
  *
- * Commands come from dist/commands/{name}.md, or — with curation off — the curation-off
- * variant dist/curation-off/commands/{name}.md when the host has one
+ * Commands come from dist/commands/{name}.md, or — with an axis off — the off variant of
+ * the host when it has one, such as dist/curation-off/commands/{name}.md
  * (D-LEARNING-VARIANT-INSTALL; commandSourceDirs owns the order). A declared command
- * with no compiled source file is a hard error, not a skip.
+ * with no compiled source file is a hard error, not a skip. With compliance off the copy
+ * first checks that every compliance-armed prompt has its file for the machine's exact
+ * switches and that the copy takes that file, and refuses before it writes anything
+ * otherwise ({@link requireComplianceVariantFiles}).
  *
  * Agents resolve dist-first with a src fallback: dist/agents/{name}.md (compiled from an
  * .mds generator host) wins over src/assets/agents/{name}.md. A declared agent absent from
@@ -2011,10 +2171,20 @@ export interface CommandsAndAgentsOptions {
  * known and leaves it alone.
  */
 export async function installCommandsAndAgents(opts: CommandsAndAgentsOptions): Promise<void> {
-  const { plugins, agentsMap, claudeDir, curation, trackerServers, warn } = opts;
+  const { plugins, agentsMap, claudeDir, curation, compliance, trackerServers, warn } = opts;
+  const packageRoot = opts.packageRoot ?? getPackageRoot();
 
+  // Before the first write. installViaFileCopy checks earlier still, ahead of its pre-clean;
+  // this call covers the caller that reaches the copy alone (the selective uninstall).
+  await requireComplianceVariantFiles({ curation, compliance, packageRoot, agentSourceDirs: opts.agentSourceDirs });
+
+  const { commands: commandDirs, agents: agentDirs } = copySourceDirs({
+    curation,
+    compliance,
+    packageRoot,
+    agentSourceDirs: opts.agentSourceDirs,
+  });
   const commandsTarget = path.join(claudeDir, 'commands', 'devflow');
-  const commandDirs = commandSourceDirs(curation);
   const commandsSourceNames = new Set<string>();
   for (const plugin of plugins) {
     for (const cmd of plugin.commands) {
@@ -2030,7 +2200,7 @@ export async function installCommandsAndAgents(opts: CommandsAndAgentsOptions): 
         // The error names the curation-ON path: that file exists for every declared
         // command, while a curation-off file exists only for a host with an arm.
         throw new Error(
-          `Command source not found for declared command "${name}": ${path.join(commandSourceDirs(true)[0], mdFileName(name))}. ` +
+          `Command source not found for declared command "${name}": ${path.join(commandSourceDirs(ALL_SWITCHES_ON, packageRoot)[0], mdFileName(name))}. ` +
           `Ensure build:mds ran successfully before install.`,
         );
       }
@@ -2039,8 +2209,6 @@ export async function installCommandsAndAgents(opts: CommandsAndAgentsOptions): 
   }
 
   const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
-  // Curation-aware (D-LEARNING-VARIANT-INSTALL). An injected list wins as given.
-  const agentDirs = opts.agentSourceDirs ?? agentSourceDirs(undefined, curation);
   const allAgentNames = new Set<string>();
   for (const plugin of plugins) {
     for (const agent of plugin.agents) {
@@ -2058,7 +2226,7 @@ export async function installCommandsAndAgents(opts: CommandsAndAgentsOptions): 
       const srcFile = await firstExisting(candidates);
       if (srcFile === undefined) {
         throw new Error(
-          `Agent source not found for declared agent "${agentName}": ${path.join(opts.agentSourceDirs?.[0] ?? agentSourceDirs()[0], mdFileName(agentName))}. ` +
+          `Agent source not found for declared agent "${agentName}": ${path.join(opts.agentSourceDirs?.[0] ?? agentSourceDirs(packageRoot)[0], mdFileName(agentName))}. ` +
           `Run \`npm run build:mds\` if it is compiled from an .mds generator host, otherwise ` +
           `ensure the agent file exists in src/assets/agents/ (searched: ${candidates.join(', ')}).`,
         );
@@ -2091,9 +2259,15 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     isPartialInstall,
     spinner,
     curation,
+    compliance,
     trackerServers = TRACKER_MCP_SERVERS_DEFAULT,
     warn = () => { /* no-op: callers without a logger still get the full InstallReport */ },
   } = options;
+  const packageRoot = options.packageRoot ?? getPackageRoot();
+
+  // The compliance-off refusal comes first, ahead of the pre-clean below: a refused install
+  // must leave the installed tree as it found it.
+  await requireComplianceVariantFiles({ curation, compliance, packageRoot, agentSourceDirs: options.agentSourceDirs });
 
   const report: InstallReport = {
     shadowedSkills: [],
@@ -2274,6 +2448,8 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     agentsMap: commandAgentMap,
     claudeDir,
     curation,
+    compliance,
+    packageRoot,
     trackerServers,
     agentSourceDirs: options.agentSourceDirs,
     warn,

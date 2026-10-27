@@ -69,6 +69,7 @@ async function run(opts: {
   const effective = opts.effectivePlugins ?? opts.plugins;
   return installViaFileCopy({
     curation: true,
+    compliance: true,
     plugins: opts.plugins,
     effectivePlugins: effective,
     claudeDir,
@@ -628,6 +629,7 @@ describe('the agent copy loop leaves the Tracker agent to convergeTrackerArtifac
   async function installAll() {
     return installViaFileCopy({
       curation: true,
+      compliance: true,
       plugins: everyPlugin(),
       effectivePlugins: everyPlugin(),
       claudeDir,
