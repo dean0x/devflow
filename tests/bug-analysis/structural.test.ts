@@ -887,6 +887,9 @@ function shippedCountsFence(phase2: string, folder: string, tools: string): stri
   return fenceLines(fence).join('\n').split('{ANALYSIS_DIR}').join(folder).split('{tools}').join(tools);
 }
 
+/** Each test below spawns bash, git and jq; the 5000 ms default is too short on a loaded machine or CI. */
+const SPAWN_TEST_TIMEOUT_MS = 30_000;
+
 /** Runs the shipped fence with bash over the SARIF files in `files`, and reads back what it printed and wrote. */
 function runCountsFence(phase2: string, folder: string, tools: string, files: Record<string, string>): { printed: string[]; rows: string[]; top: string[]; status: number | null } {
   for (const [name, text] of Object.entries(files)) writeFileSync(join(folder, name), text);
@@ -1494,7 +1497,7 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
         expect(run.printed).toEqual([`total=${SNYK_RESULTS.length} kept=${SNYK_KEPT.length}`, 'exit=1']);
         expect(resultIds(run.sarif)).toEqual([SNYK_KEPT, [], []]);
       });
-    });
+    }, SPAWN_TEST_TIMEOUT_MS);
 
     it(`the shipped extension list names the extensions of the changed files that still exist, whatever the file name (${label})`, ctx => {
       expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
@@ -1516,7 +1519,7 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
       expect(listed({ unchanged: ['keep.md', 'old.go'], changed: ['src/app.ts', 'lib/tool.py', 'weird.name.js', 'x.js\nz', 'dir.v2/noext', 'README'], removed: ['old/gone.rb'] }))
         .toEqual(['js', 'js?z', 'py', 'ts', 'v2/noext']);
       expect(listed({ unchanged: ['keep.py'], changed: ['README', 'Makefile'], removed: ['gone.rb'] })).toEqual([]);
-    });
+    }, SPAWN_TEST_TIMEOUT_MS);
 
     it(`the shipped Snyk fence says the filter failed and uses the unfiltered file when jq or git fails (${label})`, ctx => {
       skipUnlessRunnable(ctx);
@@ -1530,7 +1533,7 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
         expect(noRange.printed).toEqual(['Snyk scope filter failed: unfiltered', 'exit=1']);
         expect(noRange.sarif).toBe(SNYK_SARIF);
       });
-    });
+    }, SPAWN_TEST_TIMEOUT_MS);
   }
 
   for (const [label, body] of builds) {
@@ -1568,7 +1571,7 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
         expect(run.top.map(row => row.split('\t')[3])).toEqual(['error', 'warning', 'note']);
         expect(run.status).toBe(0);
       });
-    });
+    }, SPAWN_TEST_TIMEOUT_MS);
 
     it(`the shipped table keeps the 50 highest findings in a second file, and a second run adds a tool once (${label})`, ctx => {
       skipUnlessRunnable(ctx);
@@ -1589,7 +1592,7 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
         expect(second.top).toHaveLength(50);
         expect(second.top.map(row => row.split('\t')[3])).toEqual([...Array(10).fill('error'), ...Array(25).fill('warning'), ...Array(15).fill('note')]);
       });
-    });
+    }, SPAWN_TEST_TIMEOUT_MS);
 
     it(`the shipped counts show an empty SARIF file as docs=0, and no file as no line and an empty top file (${label})`, ctx => {
       skipUnlessRunnable(ctx);
@@ -1606,7 +1609,7 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
         expect(none.top).toEqual([]);
         expect(none.status).toBe(0);
       });
-    });
+    }, SPAWN_TEST_TIMEOUT_MS);
   }
 
   it.each(builds)('each scanner fence runs from the worktree root, not the Bash call directory (%s)', (_label, body) => {
