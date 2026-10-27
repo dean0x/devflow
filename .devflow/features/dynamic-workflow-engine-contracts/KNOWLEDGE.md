@@ -20,7 +20,7 @@ directories:
   - tests/dynamic
   - tests/seams
 created: 2026-10-10
-updated: 2026-10-21
+updated: 2026-10-27
 ---
 
 # Dynamic Workflow Engine Shared Contracts
@@ -31,7 +31,7 @@ updated: 2026-10-21
 - **KB-INV-2** The decisions step is its own define (`authoring_decisions()`), wholly a curation-on arm; its gate sentence (`CURATION=off` means `DECISIONS_CONTEXT` is `(none)`, no ledger located, no index read) precedes the ledger-locate call and the index read, and `decisions_slice()` follows the read.
 - **KB-INV-3** The decisions index goes only to agent types whose contract declares `DECISIONS_CONTEXT` among the valid `agentType`s: the Code family (Code, Fix), Design, Knowledge, Review, Harden. Evaluate, Synthesize, Validate, Polish, Test and Git get none.
 - **KB-INV-4** Every Code-family spawn in a dynamic host passes `DECISIONS_CONTEXT` in the curation-on build (Fix spawns, the conflict resolver and the engine pseudo-line included), since no Code variant has a fallback that reads the index. No operation is exempt: no Code variant opens a PR, so no Code spawn is keyless.
-- **KB-INV-5** Decisions text lives only inside `<!-- curation:on -->` arms; the curation-off build holds none. Arms are whole-line marker triples, cannot nest, and an arm owns the blank line after its content.
+- **KB-INV-5** Decisions text lives only inside `<!-- curation:on -->` arms; the curation-off build holds none. Arms are whole-line marker triples, cannot nest inside an arm of their own axis, and an arm owns the blank line after its content.
 - **KB-INV-6** Bind the command input once: one `$ARGUMENTS` per host, alone on its line between `<command-input>` lines; every later step and partial says `COMMAND_INPUT` (`arguments-once-max` only lowers).
 - **KB-INV-7** `_tracker.mds` declares exactly two defines, `issue_ref_grammar` and `issue_capture_contract`, both exported; the adopters are the named set `TRACKER_PARTIAL_ADOPTERS`, and `dynamic-tickets` is not one.
 - **KB-INV-8** The command layer forwards issue tokens to the Git agent verbatim as `ISSUE_REFS`: it never renders, normalises, pads, strips, coerces or rules out a token. Whether a bare digit run is a reference is the Git agent's provider adjudication.
