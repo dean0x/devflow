@@ -707,11 +707,45 @@ describe('parity over generated two-axis bodies', () => {
     return { lines: [off, offText, end], kept: s => (s[axis] === 'off' ? [offText] : []) };
   }
 
+  /**
+   * Where an outer arm holds its inner arm of the other axis: in the on part alone, in the on part
+   * beside an else, in the else beside an on part, or in the only part of an arm that has no on part.
+   */
+  const NESTED_SHAPES = ['on', 'on-with-else', 'else', 'off-only'] as const;
+  type NestedShape = (typeof NESTED_SHAPES)[number];
+
+  /** An outer arm of `axis` that holds an inner arm of the other axis, placed as `shape` says. */
+  function nestedArm(axis: Axis, id: string, shape: NestedShape, next: () => number): Piece {
+    const other: Axis = axis === 'curation' ? 'compliance' : 'curation';
+    const [on, off, end] = MARKERS[axis];
+    const head = `head ${id}`;
+    const tail = `tail ${id}`;
+    const side = `side ${id}`;
+    const inner = arm(other, `${id}.in`, next() < 0.5, next() < 0.7);
+    const holder = [head, ...inner.lines, tail];
+    const holderKept = (st: State): readonly string[] => [head, ...inner.kept(st), tail];
+    switch (shape) {
+      case 'on':
+        return { lines: [on, ...holder, end], kept: st => (st[axis] === 'on' ? holderKept(st) : []) };
+      case 'on-with-else':
+        return { lines: [on, ...holder, off, side, end], kept: st => (st[axis] === 'on' ? holderKept(st) : [side]) };
+      case 'else':
+        return { lines: [on, side, off, ...holder, end], kept: st => (st[axis] === 'on' ? [side] : holderKept(st)) };
+      case 'off-only':
+        return { lines: [off, ...holder, end], kept: st => (st[axis] === 'off' ? holderKept(st) : []) };
+      default: {
+        const unreachable: never = shape;
+        throw new Error(`unknown nested shape ${String(unreachable)}`);
+      }
+    }
+  }
+
   const MAX_CASES = 200;
   const MAX_SEGMENTS = 8;
 
   it('every variant is the body with the arms it matches kept, nested or not', () => {
     let nested = 0;
+    const reached: Record<NestedShape, number> = { on: 0, 'on-with-else': 0, else: 0, 'off-only': 0 };
     for (let seed = 1; seed <= MAX_CASES; seed++) {
       const next = lcg(seed);
       const pieces: Piece[] = [];
@@ -719,7 +753,6 @@ describe('parity over generated two-axis bodies', () => {
       for (let s = 0; s < segments; s++) {
         const id = `${seed}.${s}`;
         const axis: Axis = next() < 0.5 ? 'curation' : 'compliance';
-        const other: Axis = axis === 'curation' ? 'compliance' : 'curation';
         const kind = next();
         if (kind < 0.3) {
           const plain = `plain ${id}`;
@@ -727,16 +760,10 @@ describe('parity over generated two-axis bodies', () => {
         } else if (kind < 0.7) {
           pieces.push(arm(axis, id, next() < 0.5, next() < 0.7));
         } else {
-          // An outer arm that holds a line, an inner arm of the other axis, and a line.
+          const shape = NESTED_SHAPES[Math.floor(next() * NESTED_SHAPES.length)];
           nested++;
-          const [on, , end] = MARKERS[axis];
-          const inner = arm(other, `${id}.in`, next() < 0.5, next() < 0.7);
-          const head = `head ${id}`;
-          const tail = `tail ${id}`;
-          pieces.push({
-            lines: [on, head, ...inner.lines, tail, end],
-            kept: st => (st[axis] === 'on' ? [head, ...inner.kept(st), tail] : []),
-          });
+          reached[shape]++;
+          pieces.push(nestedArm(axis, id, shape, next));
         }
       }
       const got = splitBoth(`${pieces.flatMap(p => p.lines).join('\n')}\n`);
@@ -746,6 +773,9 @@ describe('parity over generated two-axis bodies', () => {
       }
     }
     expect(nested, 'no generated body nested one axis in the other').toBeGreaterThan(MAX_CASES / 4);
+    for (const shape of NESTED_SHAPES) {
+      expect(reached[shape], `no generated body nested an inner arm in the ${shape} shape`).toBeGreaterThan(0);
+    }
   });
 });
 
