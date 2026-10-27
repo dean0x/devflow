@@ -1,5 +1,5 @@
 /**
- * Posting-absence guard (#648, AC-13, AC-16 and the on-build half of AC-18).
+ * Posting-absence guard (#648, AC-13, AC-16 and AC-18: no on build prints the local line, each off command prints it once).
  *
  * With compliance off, a machine installs no step that posts to GitHub or a tracker.
  * The text is absent from the prompt, not gated at run time (a gate is text the model
@@ -179,6 +179,39 @@ describe('posting absence: the scan is not empty by design (AC-13)', () => {
 
   it('no compliance-on prompt prints the compliance-off notice (AC-18)', () => {
     expect(on.all.filter(file => file.text.includes(OFF_DEGRADED_LINE)).map(file => file.path)).toEqual([])
+  })
+})
+
+/**
+ * Named collector: the off command prompts that do not carry the fixed local line exactly once, recorded only
+ * under the `required` policy (AC-18).
+ */
+function collectOffLineDefects(files: readonly ScanFile[]): string[] {
+  const out: string[] = []
+  const gate = `When \`EVIDENCE_POLICY\` is \`required\`, record \`${OFF_DEGRADED_LINE}\``
+  for (const file of files) {
+    const count = file.text.split(OFF_DEGRADED_LINE).length - 1
+    if (count !== 1) out.push(`${file.path}: the fixed line appears ${count} times, expected 1`)
+    else if (!file.text.includes(gate)) out.push(`${file.path}: the fixed line is not recorded only under the required policy`)
+  }
+  return out
+}
+
+describe('posting absence: each compliance-off command prints the fixed local line under `required` (AC-18)', () => {
+  const offCommands = offRosterFiles('commands')
+
+  it('every compliance-off command prompt on the roster holds the line once, behind the required-policy condition', () => {
+    expect(offCommands.length, 'the roster names commands, so the scan reads at least one off command').toBeGreaterThan(0)
+    expect(collectOffLineDefects(offCommands)).toEqual([])
+  })
+
+  it('known-bad probes: a missing, a doubled and an unconditional line are each reported', () => {
+    const gate = `When \`EVIDENCE_POLICY\` is \`required\`, record \`${OFF_DEGRADED_LINE}\``
+    const good: ScanFile = { path: 'seeded/good.md', text: `${gate} once.\n` }
+    expect(collectOffLineDefects([good])).toEqual([])
+    expect(collectOffLineDefects([{ path: 'seeded/none.md', text: 'No line.\n' }])).toEqual(['seeded/none.md: the fixed line appears 0 times, expected 1'])
+    expect(collectOffLineDefects([{ path: 'seeded/twice.md', text: `${good.text}${good.text}` }])).toEqual(['seeded/twice.md: the fixed line appears 2 times, expected 1'])
+    expect(collectOffLineDefects([{ path: 'seeded/bare.md', text: `Record \`${OFF_DEGRADED_LINE}\`.\n` }])).toEqual(['seeded/bare.md: the fixed line is not recorded only under the required policy'])
   })
 })
 
