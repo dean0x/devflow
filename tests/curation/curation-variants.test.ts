@@ -22,21 +22,17 @@ import {
   containsComplianceMarker,
   containsCurationMarker,
   containsVariantMarker,
-  describeCurationSplitError,
   describeVariantManifestError,
   describeVariantManifestParseError,
   describeVariantSplitError,
-  curationOffRelPath,
   emittedVariantKeys,
   machineVariantKey,
   MAX_VARIANT_MANIFEST_HOSTS,
   parseVariantManifest,
   renderVariantManifest,
   requiredComplianceVariantFiles,
-  splitCurationVariants,
   splitVariants,
   variantOffRelPath,
-  type CurationSplit,
   type OffVariantKey,
   type VariantManifestHost,
   type VariantSplit,
@@ -55,18 +51,11 @@ function body(...lines: string[]): string {
   return `${lines.join('\n')}\n`;
 }
 
-/** Split and unwrap, failing the test (not throwing in the module) on a refusal. */
-function split(text: string): CurationSplit {
-  const result = splitCurationVariants(text);
-  if (!result.ok) throw new Error(`expected a split, got ${JSON.stringify(result.error)}`);
-  return result.value;
-}
-
-/** Split and unwrap the refusal. */
-function refusal(text: string): VariantSplitError {
-  const result = splitCurationVariants(text);
-  if (result.ok) throw new Error(`expected a refusal, got a split with hasArms=${result.value.hasArms}`);
-  return result.error;
+/** The curation axis of a split with compliance on: the two curation bodies and the curation flag. */
+interface CurationView {
+  readonly on: string;
+  readonly off: string;
+  readonly hasArms: boolean;
 }
 
 /** Split on both axes and unwrap, failing the test (not throwing in the module) on a refusal. */
@@ -76,8 +65,14 @@ function splitBoth(text: string): VariantSplit {
   return result.value;
 }
 
+/** Split and read the curation axis alone: the `on` body, the `curation-off` body and the curation flag. */
+function split(text: string): CurationView {
+  const { bodies, hasArms } = splitBoth(text);
+  return { on: bodies.on, off: bodies['curation-off'], hasArms: hasArms.curation };
+}
+
 /** Split on both axes and unwrap the refusal. */
-function refusalBoth(text: string): VariantSplitError {
+function refusal(text: string): VariantSplitError {
   const result = splitVariants(text);
   if (result.ok) throw new Error(`expected a refusal, got a split with hasArms=${JSON.stringify(result.value.hasArms)}`);
   return result.error;
@@ -355,7 +350,7 @@ describe('what the splitter refuses (known-bad probes, AC-134)', () => {
   });
 
   it('a refusal returns no partial split', () => {
-    const result = splitCurationVariants(body(ON, 'x'));
+    const result = splitVariants(body(ON, 'x'));
     expect(result.ok).toBe(false);
     expect(result).not.toHaveProperty('value');
   });
@@ -412,14 +407,13 @@ describe('the two-axis split (TP-1)', () => {
     expect(splitBoth(crlf).bodies['both-off']).toBe('Before.\r\noff\r\nAfter.\r\n');
   });
 
-  it('the curation projection keeps the compliance-on side and ignores compliance in its flag', () => {
+  it('both curation bodies keep the compliance-on side, and a compliance arm alone leaves the curation flag false', () => {
     const text = body('Head.', ON, 'c-on', OFF, 'c-off', END, CON, 'p-on', COFF, 'p-off', CEND, 'Tail.');
-    expect(split(text)).toEqual({
-      on: body('Head.', 'c-on', 'p-on', 'Tail.'),
-      off: body('Head.', 'c-off', 'p-on', 'Tail.'),
-      hasArms: true,
-    });
-    expect(split(body('Head.', CON, 'p-on', COFF, 'p-off', CEND)).hasArms).toBe(false);
+    const { bodies, hasArms } = splitBoth(text);
+    expect(bodies.on).toBe(body('Head.', 'c-on', 'p-on', 'Tail.'));
+    expect(bodies['curation-off']).toBe(body('Head.', 'c-off', 'p-on', 'Tail.'));
+    expect(hasArms.curation).toBe(true);
+    expect(splitBoth(body('Head.', CON, 'p-on', COFF, 'p-off', CEND)).hasArms.curation).toBe(false);
   });
 });
 
@@ -459,115 +453,108 @@ describe('a body with no compliance marker (TP-2)', () => {
     expect(bodies['curation-off']).toBe(wantOff);
     expect(bodies['both-off']).toBe(wantOff);
     expect(hasArms.compliance).toBe(false);
-    expect(split(text)).toEqual({ on: wantOn, off: wantOff, hasArms: hasArms.curation });
-  });
-
-  it('a refusal is the same refusal from the two-axis split and from the curation projection', () => {
-    for (const text of [body(ON, ON), body(END), body(ON, 'x'), body(ON, END), body(`x ${ON}`), body('<!-- learning:on -->')]) {
-      expect(splitVariants(text)).toEqual(splitCurationVariants(text));
-    }
   });
 });
 
 describe('what the two-axis split refuses (TP-3)', () => {
   it('nesting within one axis: a compliance on arm inside a compliance arm', () => {
-    expect(refusalBoth(body('a', CON, 'x', CON, 'y', CEND, CEND))).toEqual({
+    expect(refusal(body('a', CON, 'x', CON, 'y', CEND, CEND))).toEqual({
       kind: 'nested-arm', axis: 'compliance', line: 4, arm: 'on', openedAt: 2,
     });
-    expect(refusalBoth(body(COFF, 'x', CON, 'y', CEND, CEND))).toEqual({
+    expect(refusal(body(COFF, 'x', CON, 'y', CEND, CEND))).toEqual({
       kind: 'nested-arm', axis: 'compliance', line: 3, arm: 'off', openedAt: 1,
     });
   });
 
   it('nesting within one axis is refused even when an arm of the other axis sits between', () => {
-    expect(refusalBoth(body(CON, ON, 'x', CON, 'y', CEND, END, CEND))).toEqual({
+    expect(refusal(body(CON, ON, 'x', CON, 'y', CEND, END, CEND))).toEqual({
       kind: 'nested-arm', axis: 'compliance', line: 4, arm: 'on', openedAt: 1,
     });
-    expect(refusalBoth(body(ON, CON, 'x', ON, 'y', END, CEND, END))).toEqual({
+    expect(refusal(body(ON, CON, 'x', ON, 'y', END, CEND, END))).toEqual({
       kind: 'nested-arm', axis: 'curation', line: 4, arm: 'on', openedAt: 1,
     });
   });
 
   it('a second compliance off in one arm', () => {
-    expect(refusalBoth(body(CON, 'x', COFF, 'y', COFF, 'z', CEND))).toEqual({
+    expect(refusal(body(CON, 'x', COFF, 'y', COFF, 'z', CEND))).toEqual({
       kind: 'repeated-off', axis: 'compliance', line: 5, openedAt: 3,
     });
   });
 
   it('interleaved arms: the outer arm closes before the inner one', () => {
-    expect(refusalBoth(body(ON, 'x', CON, 'y', END, 'z', CEND))).toEqual({
+    expect(refusal(body(ON, 'x', CON, 'y', END, 'z', CEND))).toEqual({
       kind: 'interleaved-arm', axis: 'curation', marker: 'end', line: 5, openedAt: 1, innerAxis: 'compliance', innerOpenedAt: 3,
     });
-    expect(refusalBoth(body(CON, 'x', ON, 'y', CEND, 'z', END))).toEqual({
+    expect(refusal(body(CON, 'x', ON, 'y', CEND, 'z', END))).toEqual({
       kind: 'interleaved-arm', axis: 'compliance', marker: 'end', line: 5, openedAt: 1, innerAxis: 'curation', innerOpenedAt: 3,
     });
   });
 
   it('interleaved arms: the outer arm turns to its else while the inner one is open', () => {
-    expect(refusalBoth(body(ON, 'x', CON, 'y', OFF, 'z', END, 'w', CEND))).toEqual({
+    expect(refusal(body(ON, 'x', CON, 'y', OFF, 'z', END, 'w', CEND))).toEqual({
       kind: 'interleaved-arm', axis: 'curation', marker: 'off', line: 5, openedAt: 1, innerAxis: 'compliance', innerOpenedAt: 3,
     });
   });
 
   it('an empty compliance arm: no line, or only blank lines, between the markers', () => {
-    expect(refusalBoth(body(CON, CEND))).toEqual({
+    expect(refusal(body(CON, CEND))).toEqual({
       kind: 'empty-arm', axis: 'compliance', arm: 'on', openedAt: 1, closedAt: 2,
     });
-    expect(refusalBoth(body('a', COFF, '', '  ', CEND))).toEqual({
+    expect(refusal(body('a', COFF, '', '  ', CEND))).toEqual({
       kind: 'empty-arm', axis: 'compliance', arm: 'off', openedAt: 2, closedAt: 5,
     });
-    expect(refusalBoth(body(CON, COFF, 'y', CEND))).toEqual({
+    expect(refusal(body(CON, COFF, 'y', CEND))).toEqual({
       kind: 'empty-arm', axis: 'compliance', arm: 'on', openedAt: 1, closedAt: 2,
     });
-    expect(refusalBoth(body(CON, 'x', COFF, CEND))).toEqual({
+    expect(refusal(body(CON, 'x', COFF, CEND))).toEqual({
       kind: 'empty-arm', axis: 'compliance', arm: 'off', openedAt: 3, closedAt: 4,
     });
   });
 
   it('an empty arm inside an arm of the other axis is still empty', () => {
-    expect(refusalBoth(body(ON, 'x', CON, CEND, END))).toEqual({
+    expect(refusal(body(ON, 'x', CON, CEND, END))).toEqual({
       kind: 'empty-arm', axis: 'compliance', arm: 'on', openedAt: 3, closedAt: 4,
     });
   });
 
   it('an unclosed compliance arm, and the innermost one when two are open', () => {
-    expect(refusalBoth(body('a', CON, 'x', 'b'))).toEqual({
+    expect(refusal(body('a', CON, 'x', 'b'))).toEqual({
       kind: 'unclosed-arm', axis: 'compliance', arm: 'on', openedAt: 2,
     });
-    expect(refusalBoth(body('a', CON, 'x', COFF, 'y'))).toEqual({
+    expect(refusal(body('a', CON, 'x', COFF, 'y'))).toEqual({
       kind: 'unclosed-arm', axis: 'compliance', arm: 'off', openedAt: 4,
     });
-    expect(refusalBoth(body(ON, 'x', CON, 'y'))).toEqual({
+    expect(refusal(body(ON, 'x', CON, 'y'))).toEqual({
       kind: 'unclosed-arm', axis: 'compliance', arm: 'on', openedAt: 3,
     });
-    expect(refusalBoth(body(ON, 'x', CON, 'y', CEND))).toEqual({
+    expect(refusal(body(ON, 'x', CON, 'y', CEND))).toEqual({
       kind: 'unclosed-arm', axis: 'curation', arm: 'on', openedAt: 1,
     });
   });
 
   it('a compliance end with no open compliance arm, whatever the other axis has open', () => {
-    expect(refusalBoth(body('a', CEND, 'b'))).toEqual({ kind: 'unopened-end', axis: 'compliance', line: 2 });
-    expect(refusalBoth(body(CON, 'x', CEND, CEND))).toEqual({ kind: 'unopened-end', axis: 'compliance', line: 4 });
-    expect(refusalBoth(body(ON, 'x', CEND, END))).toEqual({ kind: 'unopened-end', axis: 'compliance', line: 3 });
+    expect(refusal(body('a', CEND, 'b'))).toEqual({ kind: 'unopened-end', axis: 'compliance', line: 2 });
+    expect(refusal(body(CON, 'x', CEND, CEND))).toEqual({ kind: 'unopened-end', axis: 'compliance', line: 4 });
+    expect(refusal(body(ON, 'x', CEND, END))).toEqual({ kind: 'unopened-end', axis: 'compliance', line: 3 });
   });
 
   it('a stray compliance marker: an attempt that is not a whole line', () => {
     for (const stray of [`text ${CON}`, '<!--compliance:on-->', '<!-- Compliance:End -->', '<!-- compliance:ON -->']) {
-      expect(refusalBoth(body('a', stray, 'b')), JSON.stringify(stray)).toEqual({
+      expect(refusal(body('a', stray, 'b')), JSON.stringify(stray)).toEqual({
         kind: 'stray-marker', axis: 'compliance', line: 2, text: stray,
       });
     }
   });
 
   it('a stray compliance marker inside an open arm of the other axis, quoted short when long', () => {
-    const error = refusalBoth(body(ON, 'content', `${'x'.repeat(200)} ${CEND}`, END));
+    const error = refusal(body(ON, 'content', `${'x'.repeat(200)} ${CEND}`, END));
     expect(error.kind).toBe('stray-marker');
     expect(error.kind === 'stray-marker' && error.axis).toBe('compliance');
     expect(error.kind === 'stray-marker' && error.text.length).toBe(80);
   });
 
   it('a retired marker is refused beside compliance markers too', () => {
-    expect(refusalBoth(body(CON, 'content', '<!-- learning:off -->', CEND))).toEqual({
+    expect(refusal(body(CON, 'content', '<!-- learning:off -->', CEND))).toEqual({
       kind: 'legacy-marker', line: 3, text: '<!-- learning:off -->',
     });
   });
@@ -581,44 +568,44 @@ describe('what the two-axis split refuses (TP-3)', () => {
 
 describe('which refusal a line gets when it breaks more than one rule', () => {
   it('an end that closes an outer arm while an inner arm is open is an interleaving, not an empty arm', () => {
-    expect(refusalBoth(body(ON, CON, END, CEND))).toEqual({
+    expect(refusal(body(ON, CON, END, CEND))).toEqual({
       kind: 'interleaved-arm', axis: 'curation', marker: 'end', line: 3, openedAt: 1, innerAxis: 'compliance', innerOpenedAt: 2,
     });
   });
 
   it('an else that turns an outer arm while an inner arm is open is an interleaving, not an empty arm', () => {
-    expect(refusalBoth(body(ON, CON, OFF, 'y', CEND, END))).toEqual({
+    expect(refusal(body(ON, CON, OFF, 'y', CEND, END))).toEqual({
       kind: 'interleaved-arm', axis: 'curation', marker: 'off', line: 3, openedAt: 1, innerAxis: 'compliance', innerOpenedAt: 2,
     });
   });
 
   it('a second off in an arm with an inner arm open is a repeated off, not an interleaving', () => {
-    expect(refusalBoth(body(OFF, CON, 'x', OFF, CEND, END))).toEqual({
+    expect(refusal(body(OFF, CON, 'x', OFF, CEND, END))).toEqual({
       kind: 'repeated-off', axis: 'curation', line: 4, openedAt: 1,
     });
   });
 
   it('a second on is a nesting even when the arm it sits in is still empty', () => {
-    expect(refusalBoth(body(ON, ON, 'x', END))).toEqual({
+    expect(refusal(body(ON, ON, 'x', END))).toEqual({
       kind: 'nested-arm', axis: 'curation', line: 2, arm: 'on', openedAt: 1,
     });
   });
 
   it('a line with a retired marker and a current marker attempt is refused as the retired marker', () => {
     const line = '<!-- learning:on --> <!-- curation:on -->';
-    expect(refusalBoth(body('a', line, 'b'))).toEqual({ kind: 'legacy-marker', line: 2, text: line });
+    expect(refusal(body('a', line, 'b'))).toEqual({ kind: 'legacy-marker', line: 2, text: line });
   });
 
   it('a line that attempts markers of both axes is a stray curation marker', () => {
     const line = '<!-- compliance:on --> and <!-- curation:on -->';
-    expect(refusalBoth(body('a', line, 'b'))).toEqual({ kind: 'stray-marker', axis: 'curation', line: 2, text: line });
+    expect(refusal(body('a', line, 'b'))).toEqual({ kind: 'stray-marker', axis: 'curation', line: 2, text: line });
   });
 
   it('the first faulty line is the refusal, ahead of an arm the body leaves open', () => {
-    expect(refusalBoth(body(CON, 'x', '<!-- learning:on -->'))).toEqual({
+    expect(refusal(body(CON, 'x', '<!-- learning:on -->'))).toEqual({
       kind: 'legacy-marker', line: 3, text: '<!-- learning:on -->',
     });
-    expect(refusalBoth(body(END, CON))).toEqual({ kind: 'unopened-end', axis: 'curation', line: 1 });
+    expect(refusal(body(END, CON))).toEqual({ kind: 'unopened-end', axis: 'curation', line: 1 });
   });
 });
 
@@ -803,14 +790,10 @@ describe('describeVariantSplitError', () => {
     expect(text).toContain('compliance');
   });
 
-  it('the curation-named describer is the same function, kept for the build as it stands', () => {
-    expect(describeCurationSplitError).toBe(describeVariantSplitError);
-  });
-
   it('every kind the splitter can return has a row above (the table is the union)', () => {
     const produced = new Set<string>([
       refusal(body(ON, ON)).kind,
-      refusalBoth(body(ON, 'x', CON, 'y', END, 'z', CEND)).kind,
+      refusal(body(ON, 'x', CON, 'y', END, 'z', CEND)).kind,
       refusal(body(ON, 'x', OFF, 'y', OFF, END)).kind,
       refusal(body(END)).kind,
       refusal(body(ON, 'x')).kind,
@@ -890,10 +873,6 @@ describe('where each off variant lands (TP-6)', () => {
     for (const key of OFF_KEYS) expect(variantOffRelPath(key, 'agents', 'x.md')).toBe(`${DIR_OF[key]}/agents/x.md`);
   });
 
-  it('curationOffRelPath is the curation-off case of variantOffRelPath', () => {
-    expect(curationOffRelPath('commands', 'a.md')).toBe(variantOffRelPath('curation-off', 'commands', 'a.md'));
-    expect(curationOffRelPath('agents', 'b.md')).toBe(variantOffRelPath('curation-off', 'agents', 'b.md'));
-  });
 });
 
 describe('emittedVariantKeys (TP-6)', () => {
@@ -1179,10 +1158,10 @@ describe('requiredComplianceVariantFiles (TP-9, TP-10)', () => {
 });
 
 describe('where the curation-off variant lands', () => {
-  it('curationOffRelPath puts a variant beside its kind under dist/curation-off', () => {
+  it('the curation-off variant lands beside its kind under dist/curation-off', () => {
     expect(CURATION_OFF_OUTPUT_DIR).toBe('dist/curation-off');
-    expect(curationOffRelPath('commands', 'implement.md')).toBe('dist/curation-off/commands/implement.md');
-    expect(curationOffRelPath('agents', 'code.md')).toBe('dist/curation-off/agents/code.md');
+    expect(variantOffRelPath('curation-off', 'commands', 'implement.md')).toBe('dist/curation-off/commands/implement.md');
+    expect(variantOffRelPath('curation-off', 'agents', 'code.md')).toBe('dist/curation-off/agents/code.md');
   });
 
   it('the retired off tree is a different folder under dist, so the prune never touches the live one', () => {

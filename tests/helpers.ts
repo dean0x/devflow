@@ -8,7 +8,7 @@ import { getAllAgentNames } from '../src/core/plugins.js'
 import { agentSourceDirs, compiledSkillRefsDir } from '../src/core/assets.js'
 import { MAX_REFERENCE_SWEEP_DEPTH } from '../src/core/reference-sweep.js'
 import { GIT_OPERATIONS, PR_HOST_DESTINATION_ROOT, operationReferenceRel } from '../src/core/mds-variants.js'
-import { curationOffRelPath, type VariantKind } from '../src/core/curation-variants.js'
+import { variantOffRelPath, type VariantKind } from '../src/core/curation-variants.js'
 import { assertTempHome } from './setup/home-isolation.js'
 
 export const ROOT = path.resolve(import.meta.dirname, '..')
@@ -429,7 +429,7 @@ export function resolveAgentSource(name: string, root: string = ROOT): AgentSour
  */
 export function resolveCurationOffSource(kind: VariantKind, name: string, root: string = ROOT): string | null {
   try {
-    return readFileSync(path.join(root, curationOffRelPath(kind, `${name}.md`)), 'utf-8')
+    return readFileSync(path.join(root, variantOffRelPath('curation-off', kind, `${name}.md`)), 'utf-8')
   } catch {
     return null
   }

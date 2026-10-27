@@ -145,16 +145,6 @@ export const BOTH_OFF_OUTPUT_DIR = 'dist/curation-compliance-off';
  */
 export const LEGACY_OFF_OUTPUT_DIR = 'dist/learning-off';
 
-/**
- * POSIX repo-relative path of the curation-off variant of an output file.
- *
- * `fileName` is the already-validated basename the curation-on variant is written
- * under (`implement.md`), so the two variants of one host always share a name.
- */
-export function curationOffRelPath(kind: VariantKind, fileName: string): string {
-  return variantOffRelPath('curation-off', kind, fileName);
-}
-
 /** A variant that turns an axis off: every variant key but `on`. */
 export type OffVariantKey = Exclude<VariantKey, 'on'>;
 
@@ -494,43 +484,6 @@ export function splitVariants(body: string): Result<VariantSplit, VariantSplitEr
   });
 }
 
-// ---------------------------------------------------------------------------
-// The curation projection
-// ---------------------------------------------------------------------------
-
-export type CurationArm = VariantArm;
-
-export interface CurationSplit {
-  /** The body with every curation `on` arm kept and every curation `off` arm dropped. */
-  readonly on: string;
-  /** The body with every curation `off` arm kept and every curation `on` arm dropped. */
-  readonly off: string;
-  /** True when the body carried at least one curation marker. When false, `on` and `off` are the body. */
-  readonly hasArms: boolean;
-}
-
-/** The refusals of the curation projection are the refusals of the two-axis split. */
-export type CurationSplitError = VariantSplitError;
-
-/**
- * Split a compiled body into its curation-on and curation-off variants.
- *
- * The curation view of splitVariants, kept for the callers that ask only about
- * curation: the compliance arms of the body are resolved with compliance ON, so
- * `on` is the `on` variant and `off` is the `curation-off` variant, and `hasArms`
- * is the curation flag alone. A body with no compliance marker gets the bytes it
- * always got.
- */
-export function splitCurationVariants(body: string): Result<CurationSplit, CurationSplitError> {
-  const split = splitVariants(body);
-  if (!split.ok) return split;
-  return Ok({
-    on: split.value.bodies.on,
-    off: split.value.bodies['curation-off'],
-    hasArms: split.value.hasArms.curation,
-  });
-}
-
 /**
  * Render a refusal as one line a person can act on.
  *
@@ -582,9 +535,6 @@ export function describeVariantSplitError(error: VariantSplitError): string {
     }
   }
 }
-
-/** The curation-named spelling of describeVariantSplitError, for the callers that still use it. */
-export const describeCurationSplitError = describeVariantSplitError;
 
 // ---------------------------------------------------------------------------
 // The variant manifest
@@ -659,7 +609,7 @@ export function describeVariantManifestError(error: VariantManifestError): strin
   }
 }
 
-/** The most hosts a manifest may name. The shipped roster is 26; the bound keeps a corrupt file from driving an unbounded loop. */
+/** The most hosts a manifest may name. The shipped roster is named in tests/fixtures/mds-manifest.ts; the bound keeps a corrupt file from driving an unbounded loop. */
 export const MAX_VARIANT_MANIFEST_HOSTS = 1024;
 
 /** A manifest key: a prompt kind, a slash and an output basename, the same charset the build validates names against. */
