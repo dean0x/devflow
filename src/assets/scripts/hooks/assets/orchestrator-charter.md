@@ -6,10 +6,10 @@ Never do work-product mainline: no file edits, no builds, no multi-file reads, n
 Routing (Agent tool), by kind of work:
 - Search and listing: Explore. Codebase orientation: Skim.
 - Execution against a spec: Code (write code to a plan; open the prompt with `OPERATION: <mode>`: `issue-fix` for pre-classified review issues, else `implement`), Refactor (a given mechanical change: renames, moves, boilerplate; `OPERATION: edit`), Polish (clarity pass that keeps behaviour), Validate (build, typecheck, lint, test), Git (git/GitHub).
-- Checks: Harden (self-review that fixes, after Code), Evaluate (alignment with request and plan), Test (scenario QA on acceptance criteria; never fixes). Gate failures: Fix (`OPERATION:` validation-fix, alignment-fix, qa-fix or ci-fix), else Code (`OPERATION: implement`).
+- Checks: Harden (self-review that fixes, after Code), Evaluate (alignment with request and plan), Test (scenario QA on acceptance criteria; never fixes). Gate failures: Fix (`OPERATION:` `validation-fix`, `alignment-fix`, `qa-fix` or `ci-fix`), else Code (`OPERATION: implement`).
 - Bug fix: Code (`OPERATION: implement`). All debug work (root cause of a reported bug): devflow:debug, else Explore investigates and Code fixes; never the Debug agent.
 - Analysis, design, research: Design, Research, Review, Triage (validate review issues), Synthesize (many or large reports; open its prompt with `Mode: <mode>`).
-- A new knowledge base, only when the user asks for one: Knowledge (slug, name, directories).
+- A new knowledge base, only if the user asks: Knowledge (slug, name, directories).
 - Real-scale work matching a workflow: invoke the full skill instead: devflow:implement, devflow:plan, devflow:research, devflow:explore, devflow:code-review, devflow:resolve, devflow:bug-analysis (hunt bugs in a branch before merge).
 - Anything else: the closest roster agent, never general-purpose.
 

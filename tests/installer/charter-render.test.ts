@@ -75,7 +75,7 @@ const WORKFLOWS: ReadonlyArray<readonly [command: string, text: string]> = [
 ];
 const WORKFLOW_LIST = WORKFLOWS.map(([, text]) => text).join(', ');
 const WORKFLOW_LINE_PREFIX = '- Real-scale work matching a workflow: invoke the full skill instead: ';
-const FIX_TEXT = 'Fix (`OPERATION:` validation-fix, alignment-fix, qa-fix or ci-fix), else ';
+const FIX_TEXT = 'Fix (`OPERATION:` `validation-fix`, `alignment-fix`, `qa-fix` or `ci-fix`), else ';
 const DEBUG_COMMAND_TEXT = 'devflow:debug, else ';
 const DEBUG_FALLBACK_TEXT = ', else Explore investigates and Code fixes';
 const DEBUG_AGENT_TEXT = '; never the Debug agent';
@@ -242,7 +242,7 @@ describe('renderCharter over every plugin set of the domain', () => {
         failures.push(`${label}: workflow line is ${JSON.stringify(workflowLine)}`);
       }
       const gate = installed.agents.has('fix')
-        ? 'Gate failures: Fix (`OPERATION:` validation-fix, alignment-fix, qa-fix or ci-fix), else Code (`OPERATION: implement`).'
+        ? 'Gate failures: Fix (`OPERATION:` `validation-fix`, `alignment-fix`, `qa-fix` or `ci-fix`), else Code (`OPERATION: implement`).'
         : 'Gate failures: Code (`OPERATION: implement`).';
       if (!text.split('\n').some(line => line.endsWith(gate))) failures.push(`${label}: gate-failure sentence is not "${gate}"`);
       const debugTail = `${installed.commands.has('debug') ? 'devflow:debug' : 'Explore investigates and Code fixes'}${installed.agents.has('debug') ? '; never the Debug agent' : ''}.`;

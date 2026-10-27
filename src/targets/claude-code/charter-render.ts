@@ -101,7 +101,7 @@ export const CHARTER_WORKFLOW_LIST: string = CHARTER_WORKFLOW_ITEMS.map(item => 
 export const CHARTER_SPANS: readonly CharterSpan[] = [
   {
     shape: 'text',
-    text: 'Fix (`OPERATION:` validation-fix, alignment-fix, qa-fix or ci-fix), else ',
+    text: 'Fix (`OPERATION:` `validation-fix`, `alignment-fix`, `qa-fix` or `ci-fix`), else ',
     owner: { kind: 'agent', name: 'fix' },
     removedWhen: 'absent',
   },
