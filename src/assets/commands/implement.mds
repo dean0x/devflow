@@ -189,7 +189,7 @@ DECISIONS_CONTEXT: {decisions_context}
 
 **SEQUENTIAL_CODE_AGENTS**:
 
-Spawn Code agents one at a time. Each appends its own phase section to the handoff file, and the next reads only the section before it:
+Spawn Code agents one at a time:
 
 **Phase 1 Code agent:**
 ```
