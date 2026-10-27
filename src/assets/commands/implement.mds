@@ -544,7 +544,7 @@ Drop the `--evidence` pair when that file does not exist or its path does not ma
 
 **Requires:** VALIDATION_RESULT, ALIGNMENT_RESULT, QA_RESULT, PR_NUMBER, EVIDENCE_RESULT, GATE_LEVEL
 
-Display completion summary with phase status, `Gate level: {GATE_LEVEL}` with any level note, Validate's `Lint pack:` line if any, PR info, and next steps.
+Display completion summary with phase status, `Gate level: {GATE_LEVEL}` with any level note, Harden's `no files reviewed` line if any, Validate's `Lint pack:` line if any, PR info, and next steps.
 
 Show the test plan's evidence from Phase 11: `Test plan: {VERIFIED-CI + ATTESTED-LOCAL}/{total} verified (VERIFIED-CI {n}, ATTESTED-LOCAL {n})`, read from the `EVIDENCE` line and never inferred, then its `**Body**:` / `**Comment**:` line verbatim. Without an `EVIDENCE` line, show `Test plan: evidence unavailable`; with no test plan, `Test plan: missing`.
 
