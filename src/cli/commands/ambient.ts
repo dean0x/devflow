@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
-import { syncManifestFeature } from '../../core/manifest.js';
+import { readManifestPlugins, syncManifestFeature } from '../../core/manifest.js';
 import { writeSettingsFileAtomic } from '../../core/fs-atomic.js';
 import {
   HOOKS_DIR_SUFFIX,
@@ -263,6 +263,14 @@ export function createAmbientCommand(): Command {
     const devflowDir = getDevFlowDirectory();
 
     if (options.enable) {
+      // The hooks route to the ambient agents and the rendered charter that `devflow init` installs.
+      // The manifest is the record of that install. readManifestPlugins is read-only: unlike
+      // readManifest it never heals or rewrites the file. The check runs before the already-enabled
+      // return so a repeat run still reports it, and it never blocks the registration below.
+      const recordedPlugins = await readManifestPlugins(devflowDir);
+      if (recordedPlugins === null || !recordedPlugins.includes('devflow-ambient')) {
+        p.log.warn('Ambient agents are not installed. Run `devflow init` to install them.');
+      }
       const updated = await addAmbientHook(settingsContent, devflowDir);
       if (updated === settingsContent) {
         // Both hooks already present — addAmbientHook purges any legacy rule anyway
@@ -272,7 +280,7 @@ export function createAmbientCommand(): Command {
       await writeSettingsFileAtomic(settingsPath, updated);
       await syncManifestFeature(devflowDir, 'ambient', true);
       p.log.success('Ambient mode enabled — orchestrator hooks registered');
-      p.log.info(color.dim('Charter at session start, reminder per prompt, plan handoffs auto-run devflow:implement (git repos only)'));
+      p.log.info(color.dim('Charter at session start, reminder per prompt, plan handoffs run devflow:implement when it is installed (git repos only)'));
     }
 
     if (options.disable) {

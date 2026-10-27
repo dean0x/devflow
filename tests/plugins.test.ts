@@ -20,6 +20,7 @@ import {
   skillOwners,
   buildScopedSkillsMap,
   resolveSkillInstallPlan,
+  registeredPluginNames,
   type PluginDefinition,
 } from '../src/core/plugins.js';
 import { LEGACY_SKILL_NAMES } from '../src/targets/claude-code/legacy.js';
@@ -792,5 +793,35 @@ describe('resolveFeatureRedirect', () => {
   it('preserves order of remaining plugins', () => {
     const result = resolveFeatureRedirect(['devflow-plan', 'devflow-compliance', 'devflow-implement', 'devflow-resolve']);
     expect(result.remaining).toEqual(['devflow-plan', 'devflow-implement', 'devflow-resolve']);
+  });
+});
+
+describe('registeredPluginNames', () => {
+  it('keeps the names the registry has, in the order given', () => {
+    expect(registeredPluginNames(['devflow-plan', 'devflow-implement', 'devflow-core-skills']))
+      .toEqual(['devflow-plan', 'devflow-implement', 'devflow-core-skills']);
+  });
+
+  it('maps a legacy name to the plugin that replaced it', () => {
+    const mapped = Object.entries(LEGACY_PLUGIN_NAMES).filter(([, current]) => DEVFLOW_PLUGINS.some(p => p.name === current));
+    expect(mapped.length, 'the legacy table maps at least one name to a plugin the registry has').toBeGreaterThan(0);
+    for (const [legacy, current] of mapped) {
+      expect(registeredPluginNames([legacy])).toEqual([current]);
+      expect(registeredPluginNames([current])).toEqual([current]);
+    }
+  });
+
+  it('drops a name the registry does not have, a deleted name included', () => {
+    expect(DELETED_PLUGIN_NAMES.length).toBeGreaterThan(0);
+    expect(registeredPluginNames(['devflow-not-a-plugin', '', 'evil; rm -rf /', ...DELETED_PLUGIN_NAMES])).toEqual([]);
+  });
+
+  it('never reads a key the legacy table inherits from Object as a mapping', () => {
+    expect(registeredPluginNames(['constructor', '__proto__', 'toString', 'hasOwnProperty', 'devflow-plan']))
+      .toEqual(['devflow-plan']);
+  });
+
+  it('returns the empty list for the empty list', () => {
+    expect(registeredPluginNames([])).toEqual([]);
   });
 });

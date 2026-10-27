@@ -45,7 +45,7 @@ devflow/
 │   │   ├── config.ts                 # PRESETS, loadConfig, saveConfig
 │   │   └── components/               # 15 individual component renderers
 │   ├── targets/claude-code/          # Claude Code install target
-│   │   ├── installer.ts              # installViaFileCopy, composeScripts
+│   │   ├── installer.ts              # installViaFileCopy, composeScripts, installScripts
 │   │   ├── claude-paths.ts           # getInstallationPaths
 │   │   ├── hooks.ts                  # Hook registration helpers
 │   │   ├── post-install.ts           # Post-install setup
@@ -89,7 +89,7 @@ devflow/
 │       │   ├── git/_ops_pr.mds         # Partial: the contracts of the PR-host operations (no output-dir:, never compiled directly)
 │       │   ├── git/_ops_steps.mds      # Partial: the steps the tracker operations run under every provider (no output-dir:, never compiled directly)
 │       │   └── .mdsroot                # Pins the MDS project root to src/assets/mds/, so the tracker and git modules can import each other's partials
-│       └── scripts/                  # Installed verbatim to ~/.devflow/scripts/
+│       └── scripts/                  # Installed verbatim to ~/.devflow/scripts/, except hooks/assets/orchestrator-charter.md and hooks/assets/implement-installed, which devflow init writes
 │           ├── hud.sh                # HUD status-line entry script
 │           ├── redact-secrets.cjs    # D11 secret scrubber for every posted body and notes file
 │           ├── resolve-evidence-policy.cjs # Resolves EVIDENCE_POLICY from .devflow/project.json `evidence` (a retired .devflow/policy.json counts by presence only: required); writes nothing
@@ -115,7 +115,7 @@ devflow/
 │               ├── session-start-context # SessionStart hook: injects the decisions TL;DR counts and index path + the Curate agent spawn directive when the queue is pending
 │               ├── session-start-orchestrator # SessionStart hook (ambient, presence-gated): injects orchestrator charter (git repos only)
 │               ├── pre-compact-memory    # PreCompact hook: saves git state + WORKING-MEMORY.md snapshot; bootstraps WORKING-MEMORY.md with HEAD-SHA stamp when absent (requires non-empty branch + 40-hex sha)
-│               ├── preamble              # UserPromptSubmit hook (ambient, presence-gated): plan-handoff fast-path + slash skip + orchestrator reminder (git repos only)
+│               ├── preamble              # UserPromptSubmit hook (ambient, presence-gated): plan-handoff fast-path (while implement is installed) + slash skip + orchestrator reminder (git repos only)
 │               ├── git-marker            # Sourced helper: df_has_git_marker — bounded upward walk to detect git repos (no subprocess)
 │               ├── get-mtime             # Shared helper: portable mtime (BSD/GNU stat)
 │               ├── hook-bootstrap        # Shared helper: sources debug-trace + common setup
@@ -128,7 +128,8 @@ devflow/
 │               ├── json-helper.cjs       # Node.js jq-equivalent operations
 │               ├── json-parse            # Shell wrapper: jq with node fallback
 │               ├── assets/               # Static prose assets shipped with hooks
-│               │   └── orchestrator-charter.md  # Static charter asset: injected by session-start-orchestrator
+│               │   ├── implement-installed  # Sentinel: devflow init writes it while devflow-implement is installed; preamble runs the plan handoff only while it exists
+│               │   └── orchestrator-charter.md  # Charter source (the full text): devflow init installs a copy rendered for the installed plugins; session-start-orchestrator injects that copy
 │               └── lib/                  # Node.js helper modules
 │                   ├── decisions-format.cjs # Entry body, Inactive table and index line formatters
 │                   ├── curation-store.cjs  # The curation store: validation, projection, history, the lock; every curation read and write
@@ -303,8 +304,8 @@ A capture/spawn split across always-on shell-script hooks. Queue-append (`captur
 | `session-start-memory` | SessionStart | Reads the already-fresh `WORKING-MEMORY.md` and injects it as `additionalContext` with a git-reconciled 3-state header (A in-sync / B drifted / C refresh-failing banner); also recovers an orphaned `.pending-turns.processing` itself (self-contained cold path). When the worker left a notice (`path` or `denied`), `session-start-memory` also returns that notice once as `systemMessage`, beside the context and never in it. It shows even when no working memory exists |
 | `session-start-context` | SessionStart | Injects the decisions TL;DR counts and the path of `index.md` and, when the curation queue is non-empty (or a crashed run left a stale `.processing` batch), a `--- CURATION MAINTENANCE ---` directive instructing the main model to **silently** spawn the background Curate agent with the resolved model (a valid project `.devflow/curation/curation.json` → the `devflow agents` Curate mapping in `~/.devflow/agent-models.json`, which sends no model so the installed frontmatter decides → a valid global `~/.devflow/curation.json` → none; the first layer that supplies a model decides) |
 | `pre-compact-memory` | PreCompact | Saves git state + WORKING-MEMORY.md snapshot; bootstraps a minimal WORKING-MEMORY.md (with `<!-- memory-head: <40-hex sha> branch: <name> -->` stamp on line 1 and 5 canonical sections) when absent — requires both a non-empty branch name and a 40-hex HEAD sha (detached HEAD and unborn branch skip bootstrap) |
-| `session-start-orchestrator` | SessionStart (ambient, presence-gated) | Injects the orchestrator charter as `additionalContext`; silent outside git repos |
-| `preamble` | UserPromptSubmit (ambient, presence-gated) | Plan-handoff fast-path (`Implement the following plan:` → `devflow:implement`), slash skip, and orchestrator reminder; silent outside git repos |
+| `session-start-orchestrator` | SessionStart (ambient, presence-gated) | Injects the installed orchestrator charter (rendered for the installed plugins by `devflow init`) as `additionalContext`; silent outside git repos |
+| `preamble` | UserPromptSubmit (ambient, presence-gated) | Plan-handoff fast-path (`Implement the following plan:` → `devflow:implement`, only while the sentinel `hooks/assets/implement-installed` exists), slash skip, and orchestrator reminder (a handoff prompt without the sentinel gets the reminder); silent outside git repos |
 
 **Flow**: User sends prompt → `capture-prompt` appends the user turn to both queues → session ends → `capture-turn` appends the assistant turn to both queues, then `memory-worker` spawns `background-memory-update` (if the 120s throttle has expired) which drains the queue, calls `claude -p` with the prompt on stdin, and writes the result via staged CAS to `WORKING-MEMORY.md`. On `/clear` or new session → `session-start-memory` injects the already-written `WORKING-MEMORY.md` as `additionalContext` (3-state git-reconciled header); `session-start-context` injects the decisions TL;DR counts and the index path and, when the curation queue has pending turns, the Curation maintenance directive — the main model silently spawns the Curate agent in the background, which claims the queue with the `claim-queue` op, detects decisions and pitfalls and maintains the entries through the curation ops, releases the claim as its final act, and reports a 1–3 line summary.
 
@@ -415,8 +416,9 @@ Skills are removed individually rather than by namespace directory, because `~/.
 3. Remove individual files for each asset (agents, commands, skills, rules) belonging to the selected plugins.
 4. Run `sweepDevflowNamespaces` for a registry-diff sweep across all three namespaces — catches any orphaned files whose names left the registry regardless of this uninstall run.
 5. Re-stamp the installed `/code-review` command's language-focus line from the plugins that remain (`restampInstalledCommands`), so a removed language plugin's focus leaves the line with its skill.
-6. Drop the selected plugins from `manifest.plugins` via `removeManifestPlugins`, so the next `devflow init` does not reinstall them — `knownPlugins` and every other key stay.
-7. If `devflow-ambient` was selected, remove its hook from `settings.json`.
+6. Re-render the installed orchestrator charter from the manifest record minus the removed plugins (skipped with no record), and remove the `implement-installed` sentinel when implement was removed (with or without a record); an uninstall never creates either file.
+7. Drop the selected plugins from `manifest.plugins` via `removeManifestPlugins`, so the next `devflow init` does not reinstall them — `knownPlugins` and every other key stay.
+8. If `devflow-ambient` was selected, remove its hook from `settings.json`.
 
 ### Install Artifacts Removed on Uninstall
 

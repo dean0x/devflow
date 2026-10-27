@@ -8,8 +8,8 @@ import { getInstallationPaths, getClaudeDirectory, getHomeDirectory, getManagedS
 import { getGitRoot } from '../../core/git.js';
 import type { PausedArea } from '../../core/area-pause-notice.js';
 import { isSameLocation } from '../../core/same-location.js';
-import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, buildAssetMaps, getAllSkillNames, getAllAgentNames, getAllCommandNames, parsePluginSelection, resolveFeatureRedirect, prefixSkillName, unprefixSkillName, skillsOf, FEATURE_OWNED_SKILLS, type PluginDefinition } from '../../core/plugins.js';
-import { readManifest, removeManifestPlugins } from '../../core/manifest.js';
+import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, registeredPluginNames, buildAssetMaps, getAllSkillNames, getAllAgentNames, getAllCommandNames, parsePluginSelection, resolveFeatureRedirect, prefixSkillName, unprefixSkillName, skillsOf, FEATURE_OWNED_SKILLS, type PluginDefinition } from '../../core/plugins.js';
+import { readManifest, readManifestPlugins, removeManifestPlugins } from '../../core/manifest.js';
 import { sweepOrphanedAssets, mdFileName, mdEntryName, type SweepResult } from '../../core/orphan-sweep.js';
 import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
 import { removeAmbientHook } from './ambient.js';
@@ -47,6 +47,7 @@ import { MANIFEST_LOCK_NAME, MANIFEST_LOCK_STALE_MARK } from '../../core/manifes
 import { CURATION_DIR_NAME, CURATION_TUNING_FILE_NAME, LEGACY_NAMES, MOVE_JOURNAL_SUFFIX, MOVE_LOCK_PREFIX, MOVE_LOCK_SUFFIX, getMemoryDir } from '../../core/project-paths.js';
 import { probeTrackedArea, type TrackedAreasAnswer } from '../../core/tracked-areas.js';
 import { restampInstalledCommands } from '../../targets/claude-code/language-stamp.js';
+import { installRenderedCharter, removeHandoffSentinel } from '../../targets/claude-code/charter-render.js';
 import { installCommandsAndAgents } from '../../targets/claude-code/installer.js';
 
 /**
@@ -192,6 +193,27 @@ export async function resolveInstalledPlugins(devflowDir: string): Promise<Plugi
   if (names.size === 0) return DEVFLOW_PLUGINS;
   const resolved = DEVFLOW_PLUGINS.filter(plugin => names.has(plugin.name));
   return resolved.length === 0 ? DEVFLOW_PLUGINS : resolved;
+}
+
+/**
+ * The plugin names the orchestrator charter is re-rendered for after `uninstall --plugin`, or null when there
+ * is no manifest record to render from. Pure.
+ *
+ * D-CHARTER-INSTALL-RENDER: the set is the manifest record (`readManifestPlugins`) minus the plugins being
+ * removed, with a legacy name mapped and only names this registry has kept ({@link registeredPluginNames}).
+ * It is deliberately NOT {@link resolveInstalledPlugins}: that falls back to the whole registry when the
+ * manifest is missing or names nothing, which is the safe direction for retaining assets, and the wrong one
+ * here. The registry would render a charter that routes to every workflow on a machine that installed none
+ * of them. With no record the caller leaves the installed charter as it is and takes only the sentinel away.
+ * A record that lists no plugin is a record of nothing installed, so it yields the empty set rather than null.
+ */
+export function charterPluginsAfterRemoval(
+  recordedPlugins: readonly string[] | null,
+  removedPluginNames: readonly string[],
+): string[] | null {
+  if (recordedPlugins === null) return null;
+  const removed = new Set(removedPluginNames);
+  return registeredPluginNames(recordedPlugins).filter(name => !removed.has(name));
 }
 
 /**
@@ -1277,6 +1299,35 @@ export async function refreshRetainedCommandsAndAgents(opts: {
 }
 
 /**
+ * Re-render the installed orchestrator charter for the plugins that stay after a selective removal, so it
+ * stops routing to a workflow whose skill was just removed, and take the implement sentinel away when
+ * implement is among the removed.
+ *
+ * D-CHARTER-INSTALL-RENDER: the set comes from the MANIFEST record, read without a heal so the file stays
+ * byte-identical, which still lists the removed plugins until the caller drops the record, never from the
+ * registry fallback of {@link resolveInstalledPlugins}. The record is read only where the change guard lets
+ * a change through. With no usable record there is nothing to render from and the installed charter stays
+ * as it is, but the sentinel needs no record and goes when implement is among the removed. An uninstall
+ * never creates a file, so a machine whose charter is not installed gets none. A failure is a warning,
+ * never a failure of the uninstall.
+ */
+async function rerenderCharterAfterRemoval(
+  devflowDir: string,
+  removedPluginNames: readonly string[],
+  mayChange: ChangeGuard,
+): Promise<void> {
+  const scriptsDir = path.join(devflowDir, 'scripts');
+  const warn = (msg: string): void => p.log.warn(msg);
+  const recorded = (await mayChange(path.join(devflowDir, 'manifest.json'))) ? await readManifestPlugins(devflowDir) : null;
+  const retained = charterPluginsAfterRemoval(recorded, removedPluginNames);
+  if (retained === null) {
+    await removeHandoffSentinel({ scriptsDir, removedPlugins: removedPluginNames, warn, mayChange });
+    return;
+  }
+  await installRenderedCharter({ scriptsDir, plugins: retained, warn, mayChange, mode: 'uninstall' });
+}
+
+/**
  * SELECTIVE PHASE (per scope): revert agent model overrides, remove the
  * selected plugins' assets, and clean up the ambient hook if the ambient
  * plugin is being removed.
@@ -1358,6 +1409,10 @@ export async function runSelectivePhaseForScope(opts: {
       mayChange,
     });
   }
+
+  // D-CHARTER-INSTALL-RENDER: the charter stops routing to the removed workflows. It reads the manifest
+  // record, so it runs before the record is dropped below.
+  await rerenderCharterAfterRemoval(devflowDir, selectedPlugins.map(sp => sp.name), mayChange);
 
   // D-UNINSTALL-DROPS-PLUGIN: the manifest is the install record `devflow init` seeds its plugin
   // selection from (a re-init keeps the prior selection), so a plugin removed here but still listed

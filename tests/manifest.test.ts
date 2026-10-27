@@ -850,6 +850,32 @@ describe('withoutManifestPlugins (pure, D-UNINSTALL-DROPS-PLUGIN)', () => {
     expect(withoutManifestPlugins(raw, [], NOW)).toBeNull();
   });
 
+  it('drops a record that holds a legacy name when its current plugin is named', () => {
+    const legacy = { ...raw, plugins: ['devflow-core-skills', 'devflow-specify', 'devflow-explore'] };
+    expect(withoutManifestPlugins(legacy, ['devflow-plan'], NOW)).toEqual({
+      ...legacy,
+      plugins: ['devflow-core-skills', 'devflow-explore'],
+      updatedAt: NOW,
+    });
+  });
+
+  it('drops a record that holds the current name when a legacy name is named', () => {
+    const next = withoutManifestPlugins(raw, ['devflow-specify'], NOW) as { plugins: string[] };
+    expect(next.plugins).toEqual(['devflow-core-skills', 'devflow-explore']);
+  });
+
+  it('keeps a record that is neither named nor the legacy name of a named plugin', () => {
+    const odd = { ...raw, plugins: ['devflow-specify', 'devflow-frontend-design', 'devflow-not-a-plugin', 'constructor'] };
+    const next = withoutManifestPlugins(odd, ['devflow-plan'], NOW) as { plugins: string[] };
+    expect(next.plugins).toEqual(['devflow-frontend-design', 'devflow-not-a-plugin', 'constructor']);
+  });
+
+  it('still drops a name the registry does not know when the record holds it exactly', () => {
+    const odd = { ...raw, plugins: ['devflow-core-skills', 'devflow-not-a-plugin'] };
+    const next = withoutManifestPlugins(odd, ['devflow-not-a-plugin'], NOW) as { plugins: string[] };
+    expect(next.plugins).toEqual(['devflow-core-skills']);
+  });
+
   it('is null for anything that is not a manifest-shaped object', () => {
     for (const bad of [undefined, null, 42, 'x', [], {}, { plugins: 'devflow-explore' }, { plugins: null }]) {
       expect(withoutManifestPlugins(bad, ['devflow-explore'], NOW)).toBeNull();
@@ -905,6 +931,16 @@ describe('removeManifestPlugins (I/O, D-UNINSTALL-DROPS-PLUGIN)', () => {
     expect(onDisk.updatedAt).not.toBe('then');
     expect((await fs.readFile(manifestPath(), 'utf-8')).endsWith('}\n'), 'the manifest writer\'s own format').toBe(true);
     expect(await fs.readdir(tmpDir), 'no temp file is left behind').toEqual(['manifest.json']);
+  });
+
+  it('removes the record of a legacy name when the current plugin is removed', async () => {
+    await fs.writeFile(manifestPath(), seed({ plugins: ['devflow-core-skills', 'devflow-specify'] }), 'utf-8');
+
+    const result = await removeManifestPlugins(tmpDir, ['devflow-plan']);
+
+    expect(result).toEqual({ ok: true, removed: ['devflow-specify'] });
+    const onDisk = JSON.parse(await fs.readFile(manifestPath(), 'utf-8')) as Record<string, unknown>;
+    expect(onDisk.plugins).toEqual(['devflow-core-skills']);
   });
 
   it('writes nothing when the plugin is not listed: the bytes are identical', async () => {
