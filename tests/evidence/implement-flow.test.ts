@@ -903,10 +903,11 @@ describe('AC-11: Phase 11 runs the evidence script once, after Phase 10, for eve
 // D-VALIDATE-ONCE   Validate takes the one full-suite slot, after every commit it must
 //                   cover (Code, Polish, Harden, the alignment fixes): the order
 //                   is Code, Polish, Harden, Evaluate, Validate (full), Test, the
-//                   conditional changed-only Validate, push, CI gate. A qa-fix is the
-//                   only commit after the full run, so only it earns Phase 8. No loop
-//                   spawns a Validate of its own and nothing re-validates on a
-//                   Harden FIXED status.
+//                   conditional changed-only Validate, push, CI gate. An alignment-fix
+//                   commit gets no self-review: Phase 6 Validate and `/code-review`
+//                   check it. A qa-fix is the only commit after the full run, so only
+//                   it earns Phase 8. No loop spawns a Validate of its own and nothing
+//                   re-validates on a Harden FIXED status.
 // D-CI-WAIT-INLINE  Phase 10 pushes first, with its own command outside the gate block,
 //                   then waits through ci-wait.cjs. A failed push records
 //                   `TRACEABILITY: DEGRADED (ci push failed)` and waits for nothing.
@@ -1075,6 +1076,136 @@ describe('#421 AC-3: no Validate inside the alignment loop, the QA loop or on a 
   })
 })
 
+/** The Phase 4 line that names what Harden never reviews (#571), and the opening that finds it. */
+const HARDEN_SCOPE_OPENING = 'Harden never reviews a deleted file'
+const HARDEN_SCOPE_LINE = 'Harden never reviews a deleted file or the old path of a rename; an empty list is no review, and Harden reports `no files reviewed`.'
+/** The Phase 6 line that says an alignment-fix commit gets no self-review (#572), and the opening that finds it. */
+const ALIGNMENT_NO_REVIEW_OPENING = 'Alignment-fix commits get no self-review'
+const ALIGNMENT_NO_REVIEW_LINE = 'Alignment-fix commits get no self-review: Phase 6 Validate and `/code-review` check them.'
+/**
+ * The Harden agent line for an empty `FILES_CHANGED` (#571), and the opening that finds it. The exit applies to a prompt
+ * that has the line and lists no file. A prompt with no such line, as `/dynamic-build` sends, gets a review of the branch.
+ */
+const HARDEN_EMPTY_OPENING = '**Empty FILES_CHANGED**:'
+const HARDEN_EMPTY_LINE = '**Empty FILES_CHANGED**: If the prompt has a `FILES_CHANGED` line that lists no file, report `### Status: PASS` with the line `no files reviewed`, and review nothing; with no `FILES_CHANGED` line, find the branch changes and review them.'
+/** The Harden agent input bullet for `FILES_CHANGED`: optional, and the branch diff list that `/implement` sends. */
+const HARDEN_INPUT_LINE = "- **FILES_CHANGED** (optional): The branch diff's file list, with no deleted file or old rename path"
+
+/** What a one-sentence line must be: it starts its own line, and no second sentence follows on it. */
+function collectOwnLineDefects(tag: string, text: string, opening: string, mustSay: readonly string[]): string[] {
+  const found = text.split(opening).length - 1
+  if (found !== 1) return [`${tag}: expected one line, found ${found}`]
+  const line = text.split('\n').find(l => l.includes(opening)) ?? ''
+  if (!line.startsWith(opening)) return [`${tag}: does not start its own line`]
+  if (/\.\s/.test(line)) return [`${tag}: shares its line with another sentence`]
+  return mustSay.filter(piece => !line.includes(piece)).map(piece => `${tag}: does not say ${piece}`)
+}
+
+/**
+ * Named collector (#571, #572): what /implement and the Harden agent lack of the self-review scope.
+ * Phase 4 says Harden never reviews a deleted file or the old path of a rename and that an empty
+ * list is no review; the Harden agent reports `no files reviewed` for a `FILES_CHANGED` line with no file,
+ * reviews the branch when the prompt has no such line, and takes the branch diff list as its optional input;
+ * Phase 6 says an alignment-fix commit gets no self-review and names who checks it. Each line
+ * stands alone, because the Phase 4 status line is read line by line: the FIXED check in
+ * `collectLoopValidateDefects` would fire on a status word, a spawn or a Validate word added to it.
+ */
+function collectSelfReviewScopeDefects(md: string, harden: string): string[] {
+  const out: string[] = []
+  const four = phaseSection(md, H.p4)
+  const six = phaseSection(md, H.p6)
+  if (four === null) out.push(`${H.p4}: the section is absent`)
+  else {
+    out.push(...collectOwnLineDefects('the #571 line', four, HARDEN_SCOPE_OPENING, ['the old path of a rename', 'an empty list is no review', '`no files reviewed`']))
+    if (four.split('\n').filter(l => l.startsWith('Harden agent reports')).length !== 1) out.push('Phase 4 does not hold one status line that starts `Harden agent reports`')
+    const hardenFences = parseFences(four).filter(f => isAgentBlock(f, 'Harden')).length
+    if (hardenFences !== 1) out.push(`Phase 4 holds ${hardenFences} Harden fences, expected 1`)
+    if (four.split('\n').some(l => (l.startsWith(HARDEN_SCOPE_OPENING) || l.includes('`no files reviewed`')) && /skip/i.test(l))) out.push('the #571 line holds the word skip')
+  }
+  if (six === null) out.push(`${H.p6}: the section is absent`)
+  else out.push(...collectOwnLineDefects('the #572 line', six, ALIGNMENT_NO_REVIEW_OPENING, ['Phase 6 Validate', '`/code-review`']))
+  out.push(...collectOwnLineDefects('the Harden empty-list line', harden, HARDEN_EMPTY_OPENING, [
+    'a `FILES_CHANGED` line that lists no file', '`### Status: PASS`', '`no files reviewed`', 'review nothing',
+    'with no `FILES_CHANGED` line', 'find the branch changes and review them',
+  ]))
+  if (!harden.split('\n').includes(HARDEN_INPUT_LINE)) out.push('the Harden input bullet for `FILES_CHANGED` is not the pinned line')
+  return out
+}
+
+/** The two builds of /implement, each with the Harden agent built beside it. */
+function selfReviewBuilds(): ReadonlyArray<{ readonly label: string; readonly md: string; readonly harden: string }> {
+  const hardenOff = resolveCurationOffSource('agents', 'harden')
+  if (hardenOff === null) throw new Error('dist/curation-off/agents/harden.md is absent: run `npm run build:mds`')
+  return [
+    { label: 'curation on', md: implementMd(), harden: resolveAgentSource('harden').content },
+    { label: 'curation off', md: implementMdOff(), harden: hardenOff },
+  ]
+}
+
+describe('#571, #572: /implement and Harden state the self-review scope, in both builds', () => {
+  it.each(['curation on', 'curation off'])('%s: the three lines stand alone and the Phase 4 status line is unchanged', label => {
+    const build = selfReviewBuilds().find(b => b.label === label)
+    if (build === undefined) throw new Error(`no build named ${label}`)
+    expect(phaseSection(build.md, H.p4) ?? '', 'no Phase 4 read').toContain('Harden agent reports')
+    expect(phaseSection(build.md, H.p6) ?? '', 'no Phase 6 read').toContain('spawn Validate agent:')
+    expect(build.harden, 'no Harden agent read').toContain('# Harden Agent')
+    expect(collectSelfReviewScopeDefects(build.md, build.harden)).toEqual([])
+    const lines = build.md.split('\n')
+    expect(lines.filter(l => l === HARDEN_SCOPE_LINE), 'the #571 text, whole').toHaveLength(1)
+    expect(lines.filter(l => l === ALIGNMENT_NO_REVIEW_LINE), 'the #572 text, whole').toHaveLength(1)
+    expect(build.harden.split('\n').filter(l => l === HARDEN_EMPTY_LINE), 'the Harden text, whole').toHaveLength(1)
+    expect(build.harden.split('\n').filter(l => l === HARDEN_INPUT_LINE), 'the Harden input bullet, whole').toHaveLength(1)
+    expect(lines.some(l => l.startsWith('After Evaluate agent passes, spawn Validate agent:')), 'the Phase 6 spawn lead').toBe(true)
+  })
+
+  it('known-bad probes: each line removed, each line moved onto a neighbour, a skip rewording and a lost name are reported', () => {
+    for (const { label, md, harden } of selfReviewBuilds()) {
+      const seed = (text: string, from: string, to: string): string => {
+        expect(text.includes(from), `${label}: the seed must land (${from.slice(0, 40)})`).toBe(true)
+        return text.replace(from, to)
+      }
+      const statusLine = (text: string): string => text.split('\n').find(l => l.startsWith('Harden agent reports')) ?? ''
+      expect(statusLine(md), `${label}: no Phase 4 status line read`).not.toBe('')
+      // Removed.
+      expect(collectSelfReviewScopeDefects(seed(md, `${HARDEN_SCOPE_LINE}\n\n`, ''), harden), label).toEqual(['the #571 line: expected one line, found 0'])
+      expect(collectSelfReviewScopeDefects(seed(md, `${ALIGNMENT_NO_REVIEW_LINE}\n\n`, ''), harden), label).toEqual(['the #572 line: expected one line, found 0'])
+      expect(collectSelfReviewScopeDefects(md, seed(harden, `${HARDEN_EMPTY_LINE}\n\n`, '')), label).toEqual(['the Harden empty-list line: expected one line, found 0'])
+      // Appended to the status line, or joined to the next sentence.
+      expect(collectSelfReviewScopeDefects(seed(md, `\n\n${HARDEN_SCOPE_LINE}`, ` ${HARDEN_SCOPE_LINE}`), harden), label).toEqual(['the #571 line: does not start its own line'])
+      expect(collectSelfReviewScopeDefects(seed(md, `${ALIGNMENT_NO_REVIEW_LINE}\n\n`, `${ALIGNMENT_NO_REVIEW_LINE} `), harden), label).toEqual(['the #572 line: shares its line with another sentence'])
+      const moved = seed(seed(md, `${ALIGNMENT_NO_REVIEW_LINE}\n\n`, ''), statusLine(md), `${statusLine(md)} ${ALIGNMENT_NO_REVIEW_LINE}`)
+      expect(collectSelfReviewScopeDefects(moved, harden), label).toEqual(['the #572 line: expected one line, found 0'])
+      // A skip rewording, with the opening kept and with it lost.
+      expect(collectSelfReviewScopeDefects(seed(md, 'is no review, and', 'is no review, it skips the rest, and'), harden), label).toEqual(['the #571 line holds the word skip'])
+      expect(collectSelfReviewScopeDefects(seed(md, HARDEN_SCOPE_OPENING, 'Harden skips a deleted file'), harden), label).toEqual([
+        'the #571 line: expected one line, found 0',
+        'the #571 line holds the word skip',
+      ])
+      // A lost name.
+      expect(collectSelfReviewScopeDefects(seed(md, 'Phase 6 Validate and `/code-review`', 'a later run and `/code-review`'), harden), label).toEqual(['the #572 line: does not say Phase 6 Validate'])
+      expect(collectSelfReviewScopeDefects(seed(md, 'Phase 6 Validate and `/code-review`', 'Phase 6 Validate and a later check'), harden), label).toEqual(['the #572 line: does not say `/code-review`'])
+      // The `no files reviewed` text, lost at either site.
+      expect(collectSelfReviewScopeDefects(seed(md, 'Harden reports `no files reviewed`', 'Harden reports nothing'), harden), label).toEqual(['the #571 line: does not say `no files reviewed`'])
+      expect(collectSelfReviewScopeDefects(md, seed(harden, 'with the line `no files reviewed`', 'with no line')), label).toEqual(['the Harden empty-list line: does not say `no files reviewed`'])
+      // The absent-line case dropped or turned into an early exit, the exit left unscoped, and the input bullet back to the Code list.
+      const absentCase = '; with no `FILES_CHANGED` line, find the branch changes and review them'
+      expect(collectSelfReviewScopeDefects(md, seed(harden, absentCase, '')), label).toEqual([
+        'the Harden empty-list line: does not say with no `FILES_CHANGED` line',
+        'the Harden empty-list line: does not say find the branch changes and review them',
+      ])
+      expect(collectSelfReviewScopeDefects(md, seed(harden, absentCase, '; with no `FILES_CHANGED` line, review nothing')), label)
+        .toEqual(['the Harden empty-list line: does not say find the branch changes and review them'])
+      expect(collectSelfReviewScopeDefects(md, seed(harden, 'If the prompt has a `FILES_CHANGED` line that lists no file', 'If `FILES_CHANGED` is empty')), label)
+        .toEqual(['the Harden empty-list line: does not say a `FILES_CHANGED` line that lists no file'])
+      expect(collectSelfReviewScopeDefects(md, seed(harden, HARDEN_INPUT_LINE, '- **FILES_CHANGED**: List of modified files from Code agent output')), label)
+        .toEqual(['the Harden input bullet for `FILES_CHANGED` is not the pinned line'])
+      // A second Harden fence in Phase 4, and a status line that lost its opening.
+      expect(collectSelfReviewScopeDefects(seed(md, '**If PASS or FIXED:** continue to Phase 5.', '```\nAgent(subagent_type="Harden"):\n"again"\n```\n\n**If PASS or FIXED:** continue to Phase 5.'), harden), label).toEqual(['Phase 4 holds 2 Harden fences, expected 1'])
+      expect(collectSelfReviewScopeDefects(seed(md, statusLine(md), statusLine(md).replace('Harden agent reports', 'The Harden agent reports')), harden), label).toEqual(['Phase 4 does not hold one status line that starts `Harden agent reports`'])
+    }
+  })
+})
+
 /** Named collector: what Phase 8 fails to state in its own text. */
 function collectPhase8Defects(md: string): string[] {
   const text = phaseSection(md, H.p8)
@@ -1212,9 +1343,9 @@ describe('#421, #452: every spawn after Phase 2 gets the branch diff, not the Co
 
   it('known-bad probe: a phase outside the five that names the branch diff without requiring BASE_REF is reported', () => {
     const md = implementMd()
-    const seeded = md.replace(H.p8, `${H.p8}\n\nFILES_CHANGED: {branch_diff}`)
+    const seeded = md.replace(H.p12, `${H.p12}\n\nFILES_CHANGED: {branch_diff}`)
     expect(seeded, 'the seed must land').not.toBe(md)
-    expect(collectFilesChangedDefects(seeded)).toEqual(['Phase 8 names {branch_diff} but its Requires does not name BASE_REF'])
+    expect(collectFilesChangedDefects(seeded)).toEqual(['Phase 12 names {branch_diff} but its Requires does not name BASE_REF'])
   })
 
   it('known-bad probe: a lost site is reported', () => {
