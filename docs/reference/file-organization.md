@@ -376,7 +376,7 @@ Skills are removed individually rather than by namespace directory, because `~/.
 3. Remove individual files for each asset (agents, commands, skills, rules) belonging to the selected plugins.
 4. Run `sweepDevflowNamespaces` for a registry-diff sweep across all three namespaces — catches any orphaned files whose names left the registry regardless of this uninstall run.
 5. Re-stamp the installed `/code-review` command's language-focus line from the plugins that remain (`restampInstalledCommands`), so a removed language plugin's focus leaves the line with its skill.
-6. Re-render the installed orchestrator charter from the manifest record minus the removed plugins (skipped with no record), and remove the `implement-installed` sentinel when implement was removed; an uninstall never creates either file.
+6. Re-render the installed orchestrator charter from the manifest record minus the removed plugins (skipped with no record), and remove the `implement-installed` sentinel when implement was removed (with or without a record); an uninstall never creates either file.
 7. Drop the selected plugins from `manifest.plugins` via `removeManifestPlugins`, so the next `devflow init` does not reinstall them — `knownPlugins` and every other key stay.
 8. If `devflow-ambient` was selected, remove its hook from `settings.json`.
 
