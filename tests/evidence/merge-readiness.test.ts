@@ -68,7 +68,10 @@ const PE = createRequire(import.meta.url)(PR_EVIDENCE_SCRIPT) as EvidenceGrammar
 /** Transcribed from ci-wait.cjs's JSDoc — only what the gate guards read. */
 interface CiWaitApi {
   readonly STATUSES: readonly string[]
+  readonly REASONS: readonly string[]
+  readonly LINE_RE: RegExp
   readonly CI_WAIT_MAX_SECONDS: number
+  renderLine(result: { status: string; pr: string; head: string; failing: string[]; pending: string[]; waited: number; reason: string | null }): string
   classifyChecks(checks: ReadonlyArray<{ name: string; bucket: string; workflow?: string }>): { status: string; reason: string | null }
   isConflicting(mergeable: unknown): boolean
   mergeGate(status: string | null, mergeable: unknown, workflowsActive?: boolean | null): 'keep' | 'conflict' | 'await-merge-state' | 'probe' | 'workflow-active'
@@ -431,6 +434,140 @@ describe('#421 AC-6/7: the gate blocks wait through ci-wait, spawn Code only on 
       'the block spawns Code, which runs no CI fix',
     ]))
     expect(collectGateBlockDefects(block.replace('fewer than 2 fixes have run', 'any number of fixes'))).toEqual(['the FAILING arm does not state its fix budget at its step'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #664: the INDETERMINATE arm does not wait again after a full-deadline wait that ends
+// head-mismatch or no-workflow-check
+// ---------------------------------------------------------------------------
+
+/** The reasons for which a wait that ran the whole deadline is the final answer. */
+const FULL_WAIT_FINAL_REASONS: readonly string[] = ['head-mismatch', 'no-workflow-check']
+
+/** The step-5 arm of a gate block. */
+function indeterminateArm(block: string): string {
+  return block.split('\n').find(l => l.includes('**If INDETERMINATE**')) ?? ''
+}
+
+/** One INDETERMINATE line as ci-wait prints it, `reason` null for a line that has none. */
+function indeterminateLine(waited: number, reason: string | null): string {
+  return CW.renderLine({ status: 'INDETERMINATE', pr: '12', head: 'aaaaaaa', failing: [], pending: [], waited, reason })
+}
+
+/**
+ * The gate's decision on one printed line, read from the arm's own words: it waits
+ * again only while fewer waits than the arm's count have run, and not after a line that
+ * its `unless` clause names. A clause without `waited=` is final on the reason alone; a
+ * clause that names no reason is final on nothing.
+ */
+function waitsAgain(arm: string, line: string, waitsRun: number): boolean {
+  const budget = Number(/fewer than (\d+) waits have run/.exec(arm)?.[1])
+  if (!(waitsRun < budget)) return false
+  const unless = /unless ([^.]*)\./.exec(arm)?.[1] ?? ''
+  const clauseWaited = /`waited=(\d+)`/.exec(unless)?.[1]
+  const clauseReasons = CW.REASONS.filter(r => unless.includes(`\`reason=${r}\``) || unless.includes(`\`${r}\``))
+  const lineWaited = /waited=(\d+)/.exec(line)?.[1]
+  const lineReason = /reason=([a-z-]+)/.exec(line)?.[1]
+  const final = lineReason !== undefined && clauseReasons.includes(lineReason) && (clauseWaited === undefined || clauseWaited === lineWaited)
+  return !final
+}
+
+/**
+ * Named collector: the INDETERMINATE lines on which an arm decides other than the doctrine
+ * does. The domain is every reason ci-wait can print, no reason at all (a line the gate
+ * cannot read as one), a full-deadline wait and an early one, after the first, the second
+ * and the third wait. The doctrine: no wait after the third; no wait after a full-deadline
+ * head-mismatch or no-workflow-check; a wait after every other line.
+ */
+function collectIndeterminateArmDefects(arm: string): string[] {
+  const out: string[] = []
+  const reasons: Array<string | null> = [...CW.REASONS, null]
+  for (const waited of [CW.CI_WAIT_MAX_SECONDS, 2]) {
+    for (const reason of reasons) {
+      const line = indeterminateLine(waited, reason)
+      const final = waited === CW.CI_WAIT_MAX_SECONDS && reason !== null && FULL_WAIT_FINAL_REASONS.includes(reason)
+      for (const waitsRun of [1, 2, 3]) {
+        const want = waitsRun < 3 && !final
+        if (waitsAgain(arm, line, waitsRun) !== want) {
+          out.push(`${line.replace(/^.* waited=/, 'waited=')} after ${waitsRun} wait(s): the arm ${want ? 'reports' : 'waits again'}, the doctrine ${want ? 'waits again' : 'reports'}`)
+        }
+      }
+    }
+  }
+  return out
+}
+
+describe('#664: the INDETERMINATE arm ends after a full-deadline head-mismatch or no-workflow-check and keeps the re-wait otherwise', () => {
+  const hosts = ['implement.md', 'resolve.md'] as const
+  const armsOf = () => hosts.map(host => [host, indeterminateArm(gateBlock(requireDistFile(host)))] as const)
+
+  it('the lines under test are lines ci-wait prints: its grammar accepts each', () => {
+    for (const reason of FULL_WAIT_FINAL_REASONS) expect(CW.REASONS).toContain(reason)
+    for (const reason of [...CW.REASONS, null]) {
+      expect(CW.LINE_RE.test(indeterminateLine(CW.CI_WAIT_MAX_SECONDS, reason)), String(reason)).toBe(true)
+    }
+  })
+
+  it('the stop arm: after a full-deadline head-mismatch or no-workflow-check the gate reports at once and does not wait again', () => {
+    for (const [host, arm] of armsOf()) {
+      expect(arm.length, `${host}: no INDETERMINATE arm`).toBeGreaterThan(50)
+      for (const reason of FULL_WAIT_FINAL_REASONS) {
+        for (const waitsRun of [1, 2]) {
+          expect(waitsAgain(arm, indeterminateLine(CW.CI_WAIT_MAX_SECONDS, reason), waitsRun), `${host} ${reason} after ${waitsRun}`).toBe(false)
+        }
+      }
+    }
+  })
+
+  it('the kept re-wait: every other INDETERMINATE line waits again until the third wait, which reports', () => {
+    for (const [host, arm] of armsOf()) {
+      const others = [
+        ...CW.REASONS.filter(r => !FULL_WAIT_FINAL_REASONS.includes(r)).map(r => indeterminateLine(CW.CI_WAIT_MAX_SECONDS, r)),
+        indeterminateLine(CW.CI_WAIT_MAX_SECONDS, null),
+        ...FULL_WAIT_FINAL_REASONS.map(r => indeterminateLine(2, r)),
+      ]
+      for (const line of others) {
+        expect(waitsAgain(arm, line, 1), `${host}: ${line}`).toBe(true)
+        expect(waitsAgain(arm, line, 2), `${host}: ${line}`).toBe(true)
+        expect(waitsAgain(arm, line, 3), `${host}: ${line}`).toBe(false)
+      }
+    }
+  })
+
+  it('both arms agree with the doctrine on the whole domain', () => {
+    for (const [host, arm] of armsOf()) expect(collectIndeterminateArmDefects(arm), host).toEqual([])
+  })
+
+  it('known-bad probes: an arm that waits again after a full-deadline head-mismatch, stops on an early line, stops on another reason or waits a fourth time is reported', () => {
+    const live = armsOf()[0][1]
+    const clause = /, unless [^.]*\./.exec(live)?.[0] ?? ''
+    expect(clause, 'the seed must land').not.toBe('')
+
+    const rewaits = live.replace(clause, '.')
+    expect(collectIndeterminateArmDefects(rewaits)).toEqual(expect.arrayContaining([
+      `waited=${CW.CI_WAIT_MAX_SECONDS} reason=head-mismatch after 1 wait(s): the arm waits again, the doctrine reports`,
+      `waited=${CW.CI_WAIT_MAX_SECONDS} reason=no-workflow-check after 2 wait(s): the arm waits again, the doctrine reports`,
+    ]))
+
+    const early = live.replace(`\`waited=${CW.CI_WAIT_MAX_SECONDS}\` with `, '')
+    expect(early, 'the seed must land').not.toBe(live)
+    expect(collectIndeterminateArmDefects(early)).toEqual(expect.arrayContaining([
+      'waited=2 reason=no-workflow-check after 1 wait(s): the arm reports, the doctrine waits again',
+    ]))
+
+    const other = live.replace('or `no-workflow-check`', 'or `no-workflow-check` or `deadline`')
+    expect(other, 'the seed must land').not.toBe(live)
+    expect(collectIndeterminateArmDefects(other)).toEqual([
+      `waited=${CW.CI_WAIT_MAX_SECONDS} reason=deadline after 1 wait(s): the arm reports, the doctrine waits again`,
+      `waited=${CW.CI_WAIT_MAX_SECONDS} reason=deadline after 2 wait(s): the arm reports, the doctrine waits again`,
+    ])
+
+    const fourth = live.replace('fewer than 3 waits have run', 'fewer than 4 waits have run')
+    expect(fourth, 'the seed must land').not.toBe(live)
+    expect(collectIndeterminateArmDefects(fourth)).toContain(
+      `waited=${CW.CI_WAIT_MAX_SECONDS} reason=deadline after 3 wait(s): the arm waits again, the doctrine reports`,
+    )
   })
 })
 
