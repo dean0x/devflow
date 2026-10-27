@@ -51,6 +51,7 @@ import * as path from 'path'
 import {
   CODE_AGENT_TYPES,
   collectOrderViolations,
+  countOf,
   DEFAULT_BRANCH_FILL,
   ensurePrReadyReference,
   GH_FAILED_RULE,
@@ -1694,6 +1695,16 @@ const PUBLICATION_STEP = '**Resolve `REVIEW_PUBLICATION` per worktree:**'
 const STUB_RULE = '**Evidence stub:**'
 const PHASE11_PUBLICATION_ARG = '{REVIEW_PUBLICATION resolved in Phase 1, or auto}'
 
+/** The three Phase 1 steps that the settings step points at for the publication value, in the order it points at them. */
+const PUBLICATION_POINTERS = [EVIDENCE_POLICY_STEP, PUBLICATION_STEP, STUB_RULE] as const
+
+/** The line of the reference that opens with `lead`. A missing step fails with a report, so a probe never meets a TypeError. */
+const referenceStep = (reference: string, lead: string): string => {
+  const step = reference.split('\n').find(l => l.startsWith(lead))
+  expect(step, `the re-validation reference has no step that opens with ${lead}`).toBeDefined()
+  return step!
+}
+
 /** The words of the settings step that take the publication value, each exact: [what it must say, the text that says it]. */
 const REVALIDATE_PUBLICATION_PARTS: ReadonlyArray<readonly [string, string]> = [
   ['the publication value comes from that same settings line', 'take `REVIEW_PUBLICATION` from that same line'],
@@ -1710,23 +1721,26 @@ const PRE_FIX_SETTINGS_STEP =
 /**
  * Named collector: how the re-validation path falls short of the review-publication setting. The settings step holds
  * the three Phase 1 pointers in order, and the reference has no `auto` fallback of its own. Each build of /implement
- * holds the three Phase 1 labels the step points at, and Phase 11 passes the value that Phase 1 resolved.
+ * holds each of the three Phase 1 labels the step points at exactly once, and Phase 11 passes the value that Phase 1
+ * resolved.
  */
-function collectRevalidatePublicationDefects(revalidate: string, md: string): string[] {
+function collectRevalidatePublicationDefects(md: string, revalidate: string = revalidateReference()): string[] {
   const out: string[] = []
   const step = revalidate.split('\n').find(l => l.startsWith('4. **Take GATE_LEVEL**'))
   if (step === undefined) return ['no re-validation settings step']
   for (const [what, text] of REVALIDATE_PUBLICATION_PARTS) {
     if (!step.includes(text)) out.push(`the settings step does not say: ${what}`)
   }
-  const [policyAt, publicationAt, stubAt] = [EVIDENCE_POLICY_STEP, PUBLICATION_STEP, STUB_RULE].map(label => step.indexOf(label))
-  if (policyAt >= 0 && publicationAt >= 0 && stubAt >= 0 && !(policyAt < publicationAt && publicationAt < stubAt)) {
+  const positions = PUBLICATION_POINTERS.map(label => step.indexOf(label))
+  const allFound = positions.every(at => at >= 0)
+  const inOrder = positions.every((at, i) => i === 0 || positions[i - 1] < at)
+  if (allFound && !inOrder) {
     out.push('the settings step does not point at the evidence policy, the publication value and the stub rule in that order')
   }
-  if (revalidate.includes('or auto')) out.push('the re-validation reference falls back to auto')
+  if (/\bor auto\b/.test(step)) out.push('the settings step falls back to auto')
   const phase1 = phaseSection(md, H.p1) ?? ''
-  for (const label of [EVIDENCE_POLICY_STEP, PUBLICATION_STEP, STUB_RULE]) {
-    if (!phase1.includes(label)) out.push(`Phase 1 does not hold ${label}`)
+  for (const label of PUBLICATION_POINTERS) {
+    if (countOf(phase1, label) !== 1) out.push(`Phase 1 does not hold ${label} exactly once`)
   }
   if (!(phaseSection(md, H.p11) ?? '').includes(PHASE11_PUBLICATION_ARG)) out.push(`Phase 11 does not pass ${PHASE11_PUBLICATION_ARG}`)
   return out
@@ -1737,34 +1751,38 @@ describe('#544: the re-validation path takes the review-publication value from t
     expect(REVALIDATE_PUBLICATION_PARTS.length, 'the part table is empty, so this guard proves nothing').toBeGreaterThanOrEqual(5)
     for (const [label, md] of [['curation on', implementMd()], ['curation off', implementMdOff()]] as const) {
       expect(phaseSection(md, H.p1)?.length ?? 0, `${label}: Phase 1 is empty, so this guard proves nothing`).toBeGreaterThan(5_000)
-      expect(collectRevalidatePublicationDefects(revalidateReference(), md), label).toEqual([])
+      expect(collectRevalidatePublicationDefects(md, revalidateReference()), label).toEqual([])
     }
   })
 
   it('known-bad probes: the step as it was, each lost pointer, a swapped order and an auto fallback are each reported', () => {
     const md = implementMd()
     const reval = revalidateReference()
-    const step = reval.split('\n').find(l => l.startsWith('4. **Take GATE_LEVEL**'))!
+    const step = referenceStep(reval, '4. **Take GATE_LEVEL**')
     const said = (what: string): string => `the settings step does not say: ${what}`
-    expect(collectRevalidatePublicationDefects(seedOnce(reval, step, PRE_FIX_SETTINGS_STEP), md), 'the step as it was')
+    expect(collectRevalidatePublicationDefects(md, seedOnce(reval, step, PRE_FIX_SETTINGS_STEP)), 'the step as it was')
       .toEqual(REVALIDATE_PUBLICATION_PARTS.map(([what]) => said(what)))
     for (const [what, text] of REVALIDATE_PUBLICATION_PARTS) {
-      expect(collectRevalidatePublicationDefects(seedOnce(reval, text, ''), md), `dropping "${what}"`).toEqual([said(what)])
+      expect(collectRevalidatePublicationDefects(md, seedOnce(reval, text, '')), `dropping "${what}"`).toEqual([said(what)])
     }
     const swapped = seedOnce(seedOnce(seedOnce(reval, EVIDENCE_POLICY_STEP, '@@'), STUB_RULE, EVIDENCE_POLICY_STEP), '@@', STUB_RULE)
-    expect(collectRevalidatePublicationDefects(swapped, md), 'the stub rule before the evidence policy')
+    expect(collectRevalidatePublicationDefects(md, swapped), 'the stub rule before the evidence policy')
       .toEqual(['the settings step does not point at the evidence policy, the publication value and the stub rule in that order'])
-    expect(collectRevalidatePublicationDefects(`${reval}\nPass the value, or auto.\n`, md)).toEqual(['the re-validation reference falls back to auto'])
-    expect(collectRevalidatePublicationDefects(seedOnce(reval, '4. **Take GATE_LEVEL**', '4. **Take the level**'), md)).toEqual(['no re-validation settings step'])
+    expect(collectRevalidatePublicationDefects(md, seedOnce(reval, step, `${step} Pass the value, or auto.`)), 'an auto fallback in the settings step')
+      .toEqual(['the settings step falls back to auto'])
+    expect(collectRevalidatePublicationDefects(md, seedOnce(reval, step, `${step} Run it for automatic checks, or automatically.`)), 'prose that only starts with "auto"')
+      .toEqual([])
+    expect(collectRevalidatePublicationDefects(md, seedOnce(reval, '4. **Take GATE_LEVEL**', '4. **Take the level**'))).toEqual(['no re-validation settings step'])
   })
 
-  it('known-bad probes: a Phase 1 label renamed or the Phase 11 pass lost, in either build, is reported', () => {
+  it('known-bad probes: a Phase 1 label renamed or doubled, or the Phase 11 pass lost, in either build, is reported', () => {
     const reval = revalidateReference()
     for (const [label, md] of [['curation on', implementMd()], ['curation off', implementMdOff()]] as const) {
-      for (const text of [EVIDENCE_POLICY_STEP, PUBLICATION_STEP, STUB_RULE]) {
-        expect(collectRevalidatePublicationDefects(reval, seedOnce(md, text, '**Renamed rule**')), `${label}: ${text} renamed`).toEqual([`Phase 1 does not hold ${text}`])
+      for (const text of PUBLICATION_POINTERS) {
+        expect(collectRevalidatePublicationDefects(seedOnce(md, text, '**Renamed rule**'), reval), `${label}: ${text} renamed`).toEqual([`Phase 1 does not hold ${text} exactly once`])
+        expect(collectRevalidatePublicationDefects(seedOnce(md, text, `${text} ${text}`), reval), `${label}: ${text} twice`).toEqual([`Phase 1 does not hold ${text} exactly once`])
       }
-      expect(collectRevalidatePublicationDefects(reval, seedOnce(md, PHASE11_PUBLICATION_ARG, '{REVIEW_PUBLICATION}')), `${label}: the Phase 11 pass`)
+      expect(collectRevalidatePublicationDefects(seedOnce(md, PHASE11_PUBLICATION_ARG, '{REVIEW_PUBLICATION}'), reval), `${label}: the Phase 11 pass`)
         .toEqual([`Phase 11 does not pass ${PHASE11_PUBLICATION_ARG}`])
     }
   })
@@ -1822,7 +1840,7 @@ describe('#544: "Phase 1 ran" on the re-validation path means all of Phase 1', (
   it('known-bad probes: step 1 as it was, a lost pointer, a lost condition and a renamed step are each reported', () => {
     const md = implementMd()
     const reval = revalidateReference()
-    const step = reval.split('\n').find(l => /^1\. \*\*Branch safety check\*\*/.test(l))!
+    const step = referenceStep(reval, '1. **Branch safety check**')
     const said = (what: string): string => `step 1 does not say: ${what}`
     expect(collectRevalidatePhase1RunDefects(seedOnce(reval, step, PRE_FIX_BRANCH_STEP), md), 'step 1 as it was')
       .toEqual(REVALIDATE_PHASE1_RUN_PARTS.map(([what]) => said(what)))
@@ -1869,8 +1887,8 @@ describe('#544: step 4 of the re-validation reference names every Phase 1 target
 
   it('known-bad probes: the step as it was, a target in the "of Phase 1" form and a target behind "its" are each reported', () => {
     const reval = revalidateReference()
-    const step = reval.split('\n').find(l => l.startsWith('4. **Take GATE_LEVEL**'))!
-    const defect = (label: string): string => `the settings step does not name ${label} as "the Phase 1 <label> step"`
+    const step = referenceStep(reval, '4. **Take GATE_LEVEL**')
+    const defect =(label: string): string => `the settings step does not name ${label} as "the Phase 1 <label> step"`
     expect(collectRevalidateTargetFormDefects(seedOnce(reval, step, PRE_FIX_SETTINGS_STEP)), 'the step as it was')
       .toEqual(REVALIDATE_TARGET_LABELS.map(defect))
     expect(collectRevalidateTargetFormDefects(seedOnce(reval, 'the Phase 1 **Resolve the settings line** step', 'the **Resolve the settings line** step of Phase 1')), 'the "of Phase 1" form')
