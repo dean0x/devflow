@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - When the prompt lists no file, Harden reports `### Status: PASS` with the line `no files reviewed`. An empty list no longer reads as a completed review. When the prompt has no file list at all, Harden finds the branch changes and reviews them, as before.
   - The docs describe the same rule.
 - **The `/implement` command states that alignment-fix commits get no self-review** ([#572](https://github.com/dean0x/devflow/issues/572)).
-  - Phase 4 runs before the alignment fix, so Harden does not review the commits of that fix. The command now says that Phase 6 Validate and the PR review check them.
+  - Phase 4 runs before the alignment fix, so Harden does not review the commits of that fix. The command now says that Phase 6 Validate and `/code-review` check them.
   - The docs describe the same rule.
 - **At `lean`, `/implement` runs the lint pack again after a QA fix** ([#535](https://github.com/dean0x/devflow/issues/535)).
   - The re-validation after a QA fix now gets the gate level and the branch base, as Phase 6 does. A pack match that a QA fix adds is now reported, and the re-validation fails on it, as it does on any other failure.

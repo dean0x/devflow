@@ -355,7 +355,7 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
 **Produces:** VALIDATION_RESULT, VALIDATED_HEAD
 **Requires:** BASE_REF, GATE_LEVEL
 
-Alignment-fix commits get no self-review: Phase 6 Validate and the PR review check them.
+Alignment-fix commits get no self-review: Phase 6 Validate and `/code-review` check them.
 
 After Evaluate agent passes, spawn Validate agent:
 

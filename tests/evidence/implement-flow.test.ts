@@ -904,7 +904,7 @@ describe('AC-11: Phase 11 runs the evidence script once, after Phase 10, for eve
 //                   cover (Code, Polish, Harden, the alignment fixes): the order
 //                   is Code, Polish, Harden, Evaluate, Validate (full), Test, the
 //                   conditional changed-only Validate, push, CI gate. An alignment-fix
-//                   commit gets no self-review: Phase 6 Validate and the PR review
+//                   commit gets no self-review: Phase 6 Validate and `/code-review`
 //                   check it. A qa-fix is the only commit after the full run, so only
 //                   it earns Phase 8. No loop spawns a Validate of its own and nothing
 //                   re-validates on a Harden FIXED status.
@@ -1081,7 +1081,7 @@ const HARDEN_SCOPE_OPENING = 'Harden never reviews a deleted file'
 const HARDEN_SCOPE_LINE = 'Harden never reviews a deleted file or the old path of a rename; an empty list is no review, and Harden reports `no files reviewed`.'
 /** The Phase 6 line that says an alignment-fix commit gets no self-review (#572), and the opening that finds it. */
 const ALIGNMENT_NO_REVIEW_OPENING = 'Alignment-fix commits get no self-review'
-const ALIGNMENT_NO_REVIEW_LINE = 'Alignment-fix commits get no self-review: Phase 6 Validate and the PR review check them.'
+const ALIGNMENT_NO_REVIEW_LINE = 'Alignment-fix commits get no self-review: Phase 6 Validate and `/code-review` check them.'
 /**
  * The Harden agent line for an empty `FILES_CHANGED` (#571), and the opening that finds it. The exit applies to a prompt
  * that has the line and lists no file. A prompt with no such line, as `/dynamic-build` sends, gets a review of the branch.
@@ -1123,7 +1123,7 @@ function collectSelfReviewScopeDefects(md: string, harden: string): string[] {
     if (four.split('\n').some(l => (l.startsWith(HARDEN_SCOPE_OPENING) || l.includes('`no files reviewed`')) && /skip/i.test(l))) out.push('the #571 line holds the word skip')
   }
   if (six === null) out.push(`${H.p6}: the section is absent`)
-  else out.push(...collectOwnLineDefects('the #572 line', six, ALIGNMENT_NO_REVIEW_OPENING, ['Phase 6 Validate', 'the PR review']))
+  else out.push(...collectOwnLineDefects('the #572 line', six, ALIGNMENT_NO_REVIEW_OPENING, ['Phase 6 Validate', '`/code-review`']))
   out.push(...collectOwnLineDefects('the Harden empty-list line', harden, HARDEN_EMPTY_OPENING, [
     'a `FILES_CHANGED` line that lists no file', '`### Status: PASS`', '`no files reviewed`', 'review nothing',
     'with no `FILES_CHANGED` line', 'find the branch changes and review them',
@@ -1182,8 +1182,8 @@ describe('#571, #572: /implement and Harden state the self-review scope, in both
         'the #571 line holds the word skip',
       ])
       // A lost name.
-      expect(collectSelfReviewScopeDefects(seed(md, 'Phase 6 Validate and the PR review', 'a later run and the PR review'), harden), label).toEqual(['the #572 line: does not say Phase 6 Validate'])
-      expect(collectSelfReviewScopeDefects(seed(md, 'Phase 6 Validate and the PR review', 'Phase 6 Validate and a later check'), harden), label).toEqual(['the #572 line: does not say the PR review'])
+      expect(collectSelfReviewScopeDefects(seed(md, 'Phase 6 Validate and `/code-review`', 'a later run and `/code-review`'), harden), label).toEqual(['the #572 line: does not say Phase 6 Validate'])
+      expect(collectSelfReviewScopeDefects(seed(md, 'Phase 6 Validate and `/code-review`', 'Phase 6 Validate and a later check'), harden), label).toEqual(['the #572 line: does not say `/code-review`'])
       // The `no files reviewed` text, lost at either site.
       expect(collectSelfReviewScopeDefects(seed(md, 'Harden reports `no files reviewed`', 'Harden reports nothing'), harden), label).toEqual(['the #571 line: does not say `no files reviewed`'])
       expect(collectSelfReviewScopeDefects(md, seed(harden, 'with the line `no files reviewed`', 'with no line')), label).toEqual(['the Harden empty-list line: does not say `no files reviewed`'])
