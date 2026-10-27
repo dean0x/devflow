@@ -7,9 +7,12 @@
  * probes that drive the same collector over a synthetic violation:
  *   1. The doctrine: the Validate body's Lint pack section, its Input bullet, its lead line and its Output
  *      block, with the four states and both slots above the cap line.
- *   2. One spawn site: of every Validate spawn, only the `/implement` Phase 6 one passes `GATE_LEVEL` and
- *      `BASE_SHA`, as the first two lines of its prompt, in both builds. The re-validation reference skips
- *      Phase 1, so it takes `GATE_LEVEL` from Phase 1's settings step for Phase 6 and never names `BASE_SHA`.
+ *   2. One spawn site: of every Validate spawn, only the `/implement` Phase 6 one carries `GATE_LEVEL` and
+ *      `BASE_SHA`, as the first two lines of its prompt, in both builds. The Phase 8 fence carries neither:
+ *      at `lean`, one prose line after it tells the re-validation to open with Phase 6's two lines, so its
+ *      `Lint pack:` line replaces Phase 6's, and Phase 8 requires `BASE_REF` and `GATE_LEVEL` for them (#535).
+ *      The re-validation reference skips Phase 1, so it takes `GATE_LEVEL` from Phase 1's settings step for
+ *      Phase 6 and never names `BASE_SHA`.
  *   3. The data flow and the report: Phase 1 Produces and Phase 6 Requires list `GATE_LEVEL`; Phase 12 shows
  *      Validate's `Lint pack:` line, if any; Phase 9 passes an UNVERIFIED line to the PR body's Testing part.
  *   4. The Fix rule: validation-fix never edits the pack, its config, its build-file entry or any
@@ -344,7 +347,7 @@ function dropFromArm(text: string, n: number): string {
   return next
 }
 
-describe('only the implement Phase 6 Validate spawn passes the level and the base', () => {
+describe('only the implement Phase 6 Validate fence carries the level and the base lines', () => {
   it('the corpus is real: implement spawns Validate twice per build, resolve and the others at least once', () => {
     for (const label of IMPLEMENT_LABELS) {
       const doc = COMMANDS.find(d => d.label === label)
@@ -458,6 +461,98 @@ describe('only the implement Phase 6 Validate spawn passes the level and the bas
         expect(collectDataFlowDefects({ label: doc.label, text: dropped }, 1), `${doc.label} ${name}`)
           .toContain(`${doc.label}: Phase 6 Requires does not list ${name}`)
       }
+    }
+  })
+})
+
+/** The Phase 8 line (#535): at `lean`, the re-validation after a QA fix opens with Phase 6's two lines. */
+const PHASE8_OPENING = 'At `lean`, open the prompt with'
+const PHASE8_NAMES = "Phase 6's `GATE_LEVEL` and `BASE_SHA` lines"
+const PHASE8_RULE = "its `Lint pack:` line replaces Phase 6's in VALIDATION_RESULT"
+const PHASE8_LINE = `${PHASE8_OPENING} ${PHASE8_NAMES}; ${PHASE8_RULE}.`
+const PHASE8_HEADING = '### Phase 8: Re-Validate'
+const PHASE9_HEADING = '### Phase 9:'
+
+/** Replace `from` with `to` inside the Phase 8 section only, failing the test when the seed did not land. */
+function seedPhase8(text: string, from: string | RegExp, to: string): string {
+  const section = sectionBetween(text, PHASE8_HEADING, PHASE9_HEADING)
+  if (section === null) throw new Error('the Phase 8 section must be in the text')
+  return text.replace(section, () => seed(section, from, to))
+}
+
+/**
+ * Named collector (#535): how a copy of `/implement` fails to run the lean lint pack again after a QA fix.
+ * The Phase 8 fence stays plain, so `full` and `standard` prompts do not change. One prose line after it
+ * tells the re-validation to open with Phase 6's `GATE_LEVEL` and `BASE_SHA` lines at `lean` and says its
+ * `Lint pack:` line replaces Phase 6's. The base is Phase 6's, the fork point: a base of `VALIDATED_HEAD`
+ * would scan only the QA-fix diff, and the replacing line could turn a Phase 6 pack error into `clean`.
+ */
+export function collectPhase8LineDefects(doc: Doc): string[] {
+  const section = sectionBetween(doc.text, PHASE8_HEADING, PHASE9_HEADING)
+  if (section === null) return [`${doc.label}: no Phase 8 section`]
+  const out: string[] = []
+  const lines = section.replace(/```[^\n]*\n[\s\S]*?```/g, '').split('\n').filter(l => /open the prompt with/i.test(l))
+  if (lines.length !== 1) out.push(`${doc.label}: the Phase 8 line occurs ${lines.length} times, expected 1`)
+  const line = lines[0]
+  if (line !== undefined) {
+    if (!line.startsWith('At `lean`,')) out.push(`${doc.label}: the Phase 8 line does not open with At \`lean\``)
+    if (/\.\s/.test(line)) out.push(`${doc.label}: the Phase 8 line shares its line with another sentence`)
+    if (!line.includes(PHASE8_NAMES)) out.push(`${doc.label}: the Phase 8 line does not name ${PHASE8_NAMES}`)
+    if (!line.includes(PHASE8_RULE)) out.push(`${doc.label}: the Phase 8 line does not say ${PHASE8_RULE}`)
+    if (line.includes('VALIDATED_HEAD')) out.push(`${doc.label}: the Phase 8 line takes its base from VALIDATED_HEAD, not from Phase 6's line`)
+  }
+  if (/^"?(GATE_LEVEL|BASE_SHA):/m.test(section)) out.push(`${doc.label}: the Phase 8 prompt carries a GATE_LEVEL or BASE_SHA line of its own`)
+  const requires = dataFlowLines(section, 'Requires')
+  if (requires.length !== 1) out.push(`${doc.label}: Phase 8 has ${requires.length} Requires lines, expected 1`)
+  for (const name of ['BASE_REF', 'GATE_LEVEL']) {
+    if (!requires.some(names => names.includes(name))) out.push(`${doc.label}: Phase 8 Requires does not list ${name}`)
+  }
+  return out
+}
+
+describe('at lean, the Phase 8 re-validation runs the lint pack again with the Phase 6 base (#535)', () => {
+  it('holds in both builds: one line, the Phase 6 base, BASE_REF and GATE_LEVEL required, the fence plain', () => {
+    for (const doc of BUILDS) {
+      expect(doc.text.split('\n').filter(l => l === PHASE8_LINE), `${doc.label}: the Phase 8 text, whole`).toHaveLength(1)
+      expect(collectPhase8LineDefects(doc), doc.label).toEqual([])
+    }
+  })
+
+  it('probes: a lost line, opening, name, base or rule, a second sentence and a dropped Requires entry are reported, in both builds', () => {
+    for (const { label, text } of BUILDS) {
+      const defects = (change: (t: string) => string): string[] => collectPhase8LineDefects({ label, text: change(text) })
+      expect(defects(t => seedPhase8(t, `${PHASE8_LINE}\n\n`, '')), label)
+        .toEqual([`${label}: the Phase 8 line occurs 0 times, expected 1`])
+      expect(defects(t => seedPhase8(t, PHASE8_LINE, `${PHASE8_LINE}\n\n${PHASE8_LINE}`)), label)
+        .toEqual([`${label}: the Phase 8 line occurs 2 times, expected 1`])
+      expect(defects(t => seedPhase8(t, 'At `lean`, open', 'Open')), label)
+        .toEqual([`${label}: the Phase 8 line does not open with At \`lean\``])
+      expect(defects(t => seedPhase8(t, `${PHASE8_LINE}\n\n`, `${PHASE8_LINE} `)), label)
+        .toEqual([`${label}: the Phase 8 line shares its line with another sentence`])
+      expect(defects(t => seedPhase8(t, "Phase 6's `GATE_LEVEL` and", 'the `GATE_LEVEL` and')), label)
+        .toEqual([`${label}: the Phase 8 line does not name ${PHASE8_NAMES}`])
+      expect(defects(t => seedPhase8(t, '`BASE_SHA` lines', '`BASE_SHA: VALIDATED_HEAD` lines')), label).toEqual([
+        `${label}: the Phase 8 line does not name ${PHASE8_NAMES}`,
+        `${label}: the Phase 8 line takes its base from VALIDATED_HEAD, not from Phase 6's line`,
+      ])
+      expect(defects(t => seedPhase8(t, `; ${PHASE8_RULE}`, '')), label)
+        .toEqual([`${label}: the Phase 8 line does not say ${PHASE8_RULE}`])
+      expect(defects(t => seedPhase8(t, 'VALIDATION_SCOPE: changed-only\n', 'VALIDATION_SCOPE: changed-only\nBASE_SHA: VALIDATED_HEAD\n')), label)
+        .toEqual([`${label}: the Phase 8 prompt carries a GATE_LEVEL or BASE_SHA line of its own`])
+      expect(defects(t => seedPhase8(t, 'VALIDATION_SCOPE: changed-only\n', `VALIDATION_SCOPE: changed-only\n${PHASE6_LEVEL}\n`)), label)
+        .toEqual([`${label}: the Phase 8 prompt carries a GATE_LEVEL or BASE_SHA line of its own`])
+      for (const name of ['BASE_REF', 'GATE_LEVEL']) {
+        const requires = '**Requires:** QA_RESULT, VALIDATED_HEAD, BASE_REF, GATE_LEVEL\n'
+        const kept = requires.replace(new RegExp(`, ${name}\\b`), '')
+        expect(defects(t => seedPhase8(t, requires, kept)), `${label} ${name}`)
+          .toEqual([`${label}: Phase 8 Requires does not list ${name}`])
+      }
+      expect(defects(t => seedPhase8(t, '**Requires:** QA_RESULT, VALIDATED_HEAD, BASE_REF, GATE_LEVEL\n', '')), label)
+        .toEqual([
+          `${label}: Phase 8 has 0 Requires lines, expected 1`,
+          `${label}: Phase 8 Requires does not list BASE_REF`,
+          `${label}: Phase 8 Requires does not list GATE_LEVEL`,
+        ])
     }
   })
 })

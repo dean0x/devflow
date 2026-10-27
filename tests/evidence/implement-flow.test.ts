@@ -1320,9 +1320,9 @@ describe('#421, #452: every spawn after Phase 2 gets the branch diff, not the Co
 
   it('known-bad probe: a phase outside the five that names the branch diff without requiring BASE_REF is reported', () => {
     const md = implementMd()
-    const seeded = md.replace(H.p8, `${H.p8}\n\nFILES_CHANGED: {branch_diff}`)
+    const seeded = md.replace(H.p12, `${H.p12}\n\nFILES_CHANGED: {branch_diff}`)
     expect(seeded, 'the seed must land').not.toBe(md)
-    expect(collectFilesChangedDefects(seeded)).toEqual(['Phase 8 names {branch_diff} but its Requires does not name BASE_REF'])
+    expect(collectFilesChangedDefects(seeded)).toEqual(['Phase 12 names {branch_diff} but its Requires does not name BASE_REF'])
   })
 
   it('known-bad probe: a lost site is reported', () => {
