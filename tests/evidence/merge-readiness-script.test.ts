@@ -611,6 +611,19 @@ function runInProcess(args: readonly string[], exec: (file: string, args: string
   return { ...out, stderr }
 }
 
+/** An in-process `readiness` run for PR 7 with `extra` flags appended: the shared head of every argv below. */
+function runReadiness(extra: readonly string[], exec: (file: string, args: string[]) => TwinResult): { code: number; stdout: string; stderr: string } {
+  return runInProcess(['readiness', '--pr', '7', '--require-non-author-approval', 'false', ...extra], exec)
+}
+
+/** The gh calls of a twin that change the PR: `pr edit`, `pr comment` and the comment edit (`api --method`). */
+function ghWrites(calls: readonly string[][]): string[][] {
+  return calls.filter(c => c[0] === 'gh' && ((c[1] === 'pr' && (c[2] === 'edit' || c[2] === 'comment')) || (c[1] === 'api' && c[2] === '--method')))
+}
+
+/** An exec for which `gh` cannot find the PR. */
+const unreadablePr = (): TwinResult => ({ status: 1, stdout: Buffer.alloc(0), stderr: Buffer.from('no such pr\n') })
+
 describe('TP-14: readiness --evidence reads the plan and the claims from a local evidence file', () => {
   it('a file that has no plan and carries a test-plan exception is READY; the same PR without the file has no test-plan evidence', SPAWN_BUDGET, () => {
     const scenario = green({ comments: [] })
@@ -659,6 +672,8 @@ describe('TP-14: readiness --evidence reads the plan and the claims from a local
   })
 })
 
+// The out-file cases that depend only on files run in-process. Two of them spawn the real script to
+// hold its process boundary: the READY run below and the missing-directory run in TP-16.
 describe('TP-15: readiness --out writes the READINESS line, then the block', () => {
   const lineOf = (head: string, state: string, source: 'local' | 'pr' = 'pr'): string =>
     `READINESS pr:7 head:${head} status:${state} source=${source}\n`
@@ -723,7 +738,6 @@ describe('TP-15: readiness --out writes the READINESS line, then the block', () 
   it('line 1 names the requested plan source on every status: an unreadable evidence file, an unreadable PR and an internal failure read source=local when --evidence is given', () => {
     const file = writeEvidence(evidenceText([LOCAL_TP], [LOCAL_CLAIM]))
     const missing = path.join(localDir(), 'absent.md')
-    const unreadablePr = (): TwinResult => ({ status: 1, stdout: Buffer.alloc(0), stderr: Buffer.from('no such pr\n') })
     const exploding = (): never => { throw new Error('exec exploded') }
     const cases = [
       { label: 'an unreadable evidence file', evidence: missing, exec: greenTwin().exec, state: 'NOT_READY', head: SHIM_HEAD },
@@ -756,46 +770,50 @@ describe('TP-15: readiness --out writes the READINESS line, then the block', () 
     }
   })
 
-  it('an existing regular file is replaced whole', SPAWN_BUDGET, () => {
+  it('an existing regular file is replaced whole', () => {
     const out = path.join(localDir(), 'readiness.txt')
     fs.writeFileSync(out, `${'old line\n'.repeat(400)}`)
-    const r = run(green(), 'false', ['--out', out])
+    const file = writeEvidence(evidenceText([LOCAL_TP], [LOCAL_CLAIM]))
+    const r = runReadiness(['--evidence', file, '--out', out], greenTwin().exec)
     expect(r.code, r.stderr).toBe(0)
-    expect(fs.readFileSync(out, 'utf8')).toBe(lineOf(SHIM_HEAD, 'READY') + r.stdout)
+    expect(VE.parseReadinessBlock(r.stdout)).toMatchObject({ status: 'READY' })
+    expect(fs.readFileSync(out, 'utf8')).toBe(lineOf(SHIM_HEAD, 'READY', 'local') + r.stdout)
   })
 
-  it('a symlinked out path is refused and never followed: exit 3, no block, the target untouched', SPAWN_BUDGET, () => {
+  it('a symlinked out path is refused and never followed: exit 3, no block, the target untouched', () => {
     const dir = localDir()
     const target = path.join(dir, 'target.txt')
     fs.writeFileSync(target, 'keep\n')
     const link = path.join(dir, 'link.txt')
     fs.symlinkSync(target, link)
-    const r = run(green(), 'false', ['--out', link])
+    const twin = greenTwin()
+    const r = runReadiness(['--out', link], twin.exec)
     expect(r.code).toBe(3)
     expect(r.stdout).toBe('')
     expect(r.stderr).toContain('output file could not be written')
     expect(fs.readFileSync(target, 'utf8')).toBe('keep\n')
     expect(fs.lstatSync(link).isSymbolicLink()).toBe(true)
-    expect(r.writes).toEqual([])
+    expect(ghWrites(twin.calls)).toEqual([])
   })
 
-  it('a dangling symlink is refused too: the file it names is never created', SPAWN_BUDGET, () => {
+  it('a dangling symlink is refused too: the file it names is never created', () => {
     const dir = localDir()
     const target = path.join(dir, 'never.txt')
     const link = path.join(dir, 'dangling.txt')
     fs.symlinkSync(target, link)
-    const r = run(green(), 'false', ['--out', link])
+    const r = runReadiness(['--out', link], greenTwin().exec)
     expect(r.code).toBe(3)
     expect(r.stdout).toBe('')
     expect(fs.existsSync(target)).toBe(false)
   })
 
-  it('--out and --evidence naming one path is a usage error that makes no call', SPAWN_BUDGET, () => {
+  it('--out and --evidence naming one path is a usage error that makes no call', () => {
     const file = writeEvidence(evidenceText([LOCAL_TP]))
-    const r = run(green(), 'false', ['--evidence', file, '--out', file])
+    const twin = greenTwin()
+    const r = runReadiness(['--evidence', file, '--out', file], twin.exec)
     expect(r.code).toBe(1)
     expect(r.stdout).toBe('')
-    expect(r.calls).toEqual([])
+    expect(twin.calls).toEqual([])
     expect(fs.readFileSync(file, 'utf8')).toBe(evidenceText([LOCAL_TP]))
   })
 
@@ -839,12 +857,13 @@ describe('TP-15: readiness --out writes the READINESS line, then the block', () 
     expect(fs.readFileSync(file, 'utf8')).toBe(evidenceText([LOCAL_TP], [LOCAL_CLAIM]))
   })
 
-  it('a flag missing its value, or given twice, is a usage error', SPAWN_BUDGET, () => {
+  it('a flag missing its value, or given twice, is a usage error', () => {
     for (const extra of [['--out'], ['--evidence'], ['--out', 'a.txt', '--out', 'b.txt'], ['--evidence', 'a.md', '--evidence', 'b.md']]) {
-      const r = run(green(), 'false', extra)
+      const twin = greenTwin()
+      const r = runReadiness(extra, twin.exec)
       expect(r.code, extra.join(' ')).toBe(1)
       expect(r.stdout).toBe('')
-      expect(r.calls).toEqual([])
+      expect(twin.calls).toEqual([])
     }
   })
 
@@ -902,16 +921,16 @@ describe('TP-16: an out file that cannot be written prints no block and exits no
     expect(r.writes).toEqual([])
   })
 
-  it('a directory in the out file\'s place: exit 3, stdout empty', SPAWN_BUDGET, () => {
+  it('a directory in the out file\'s place: exit 3, stdout empty', () => {
     const out = localDir()
-    const r = run(green(), 'false', ['--out', out])
+    const r = runReadiness(['--out', out], greenTwin().exec)
     expect(r.code).toBe(3)
     expect(r.stdout).toBe('')
   })
 
-  it('a DEGRADED answer is held to the same rule: no block when its out file fails', SPAWN_BUDGET, () => {
+  it('a DEGRADED answer is held to the same rule: no block when its out file fails', () => {
     const out = path.join(localDir(), 'no-such-dir', 'readiness.txt')
-    const r = run({ noPr: true }, 'false', ['--out', out])
+    const r = runReadiness(['--out', out], unreadablePr)
     expect(r.code).toBe(3)
     expect(r.stdout).toBe('')
   })
