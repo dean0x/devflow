@@ -1817,6 +1817,25 @@ function parseWaveRow(line) {
 }
 
 /**
+ * D-WAVE-LINKS-ONLY: the links-only block, for related lines that ran to the end of the
+ * text. Only `Refs #<n>` lines make a block of their own, and a ref may not repeat. Null
+ * when the lines are not all of that shape: the caller refuses the block as before.
+ *
+ * @param {readonly WaveRelated[]} related
+ * @returns {Result<WaveBlock> | null}
+ */
+function parseLinksOnlyBlock(related) {
+  if (related.length === 0 || !related.every(rel => rel.keyword === 'Refs' && rel.ref.startsWith('#'))) return null;
+  /** @type {Set<string>} */
+  const seen = new Set();
+  for (const rel of related) {
+    if (seen.has(rel.ref)) return fail('duplicate', rel.line);
+    seen.add(rel.ref);
+  }
+  return ok(Object.freeze({ tracking: null, related: Object.freeze(related), rows: Object.freeze([]) }));
+}
+
+/**
  * D-WAVE: parse a wave block (LF or CRLF, at most WAVE_BLOCK_CHARS). It holds
  * exactly, in order: `## Related Issues`; 0–WAVE_ROWS + 1 related lines; one
  * blank line; `## Wave Evidence`; the header and separator verbatim; 1–WAVE_ROWS
@@ -1878,16 +1897,9 @@ function parseWaveBlock(text, options) {
     }));
   }
   // D-WAVE-LINKS-ONLY: the opt-in is set and the related lines ran to the end of the text.
-  // Only `Refs #<n>` lines make a block of their own; every other such block is refused just below.
-  const linksOnly = isObject(options) && options.linksOnly === true;
-  if (linksOnly && i >= end && related.length > 0 && related.every(rel => rel.keyword === 'Refs' && rel.ref.startsWith('#'))) {
-    /** @type {Set<string>} */
-    const seen = new Set();
-    for (const rel of related) {
-      if (seen.has(rel.ref)) return fail('duplicate', rel.line);
-      seen.add(rel.ref);
-    }
-    return ok(Object.freeze({ tracking: null, related: Object.freeze(related), rows: Object.freeze([]) }));
+  if (isObject(options) && options.linksOnly === true && i >= end) {
+    const linksOnly = parseLinksOnlyBlock(related);
+    if (linksOnly !== null) return linksOnly;
   }
   // rows[i] is the one blank line; indices past `end` hold only blanks, so a
   // missing section fails the first comparison that expects a non-blank line.
