@@ -1146,7 +1146,7 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     const sets = expect.stringContaining('a line sets STATIC_FINDINGS to (none)');
     expect(defects('`STATIC_FINDINGS` to "Static analysis skipped (--no-static)."', '`STATIC_FINDINGS` to `(none)`')).toEqual([`no sentence says: ${SKIP_SENTENCES[0]}`, sets]);
     expect(defects('`STATIC_FINDINGS` to "Static analysis did not run: no scanner is installed."', 'STATIC_FINDINGS to (none)')).toEqual([`no sentence says: ${SKIP_SENTENCES[1]}`, sets]);
-    expect(defects('Step 2c sets the skipped text; the marker moves', 'Skip Phase 2c and 2d entirely; `STATIC_FINDINGS=(none)`')).toEqual([sets]);
+    expect(defects('## Principles\n', 'Skip Phase 2c and 2d entirely; `STATIC_FINDINGS=(none)`')).toEqual([sets]);
     expect(defects('Report to user:', 'Report to user. Set `STATIC_FINDINGS` to `(none)` when no tool ran:')).toEqual([sets]);
     expect(defects('with STATIC_FINDINGS (`(none)` only if', 'with STATIC_FINDINGS set to `(none)` (only if')).toEqual([sets]);
     expect(collectSkipNotNoneDefects('')).toEqual(SKIP_SENTENCES.map(sentence => `no sentence says: ${sentence}`));

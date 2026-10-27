@@ -9,11 +9,11 @@ output-dir: dist/commands
 @import "./_partials/_settings.mds" as settings
 # Bug Analysis Command
 
-Run a proactive bug analysis on the current branch by combining static analysis tools with parallel semantic analyzers, then synthesizing results into an actionable bug report.
+Run a proactive bug analysis on the current branch: static analysis tools and parallel semantic analyzers, synthesized into one bug report.
 
 ## Usage
 
-`/bug-analysis [--full] [--no-static]`: `--full` ignores incremental state; `--no-static` skips the static analysis track.
+`/bug-analysis [--full] [--no-static]`: `--full` ignores incremental state; `--no-static` skips static analysis.
 
 ## Phases
 
@@ -101,7 +101,7 @@ git -C "{worktree}" diff --name-only -z --diff-filter=d {DIFF_RANGE} | tr '\0\n'
 
 Its second line lists the extensions of the changed files. `{lang}` is the first of javascript-typescript (js jsx mjs cjs ts tsx), python (py), ruby (rb) whose extension is listed; no other value reaches the command. With none, CodeQL does not run and its status is `no supported language`.
 
-If all three scanners print `no`: warn user "No static analysis tools found. To enable it, install semgrep (`pip install semgrep`) or snyk (`npm install -g snyk`)." Set `STATIC_FINDINGS` to "Static analysis did not run: no scanner is installed." and `STATIC_STATUS` to `not installed` for each tool.
+If all three scanners print `no`: warn user "No static analysis tools found. Install semgrep (`pip install semgrep`) or snyk (`npm install -g snyk`)." Set `STATIC_FINDINGS` to "Static analysis did not run: no scanner is installed." and `STATIC_STATUS` to `not installed` for each tool.
 
 If a scanner is installed but `jq` prints `no`: set `STATIC_FINDINGS` to "Static analysis did not complete: jq is not installed." and `STATIC_STATUS` to `did not complete (jq is not installed)` for an installed tool, else `not installed`.
 
@@ -158,7 +158,7 @@ printf '\nexit=%s\n' "$CODEQL_EXIT"
 rm -rf "${CODEQL_TMP}"
 trap - EXIT INT TERM
 ```
-A tool's status is its last line, `exit={n}`; a tool that ran completed only on Semgrep 0, Snyk 0 or 1 (1 = issues, only with SARIF output), CodeQL 0. Any other status, or no such line, means it did not complete (126-127: scanner did not start; else failed. Semgrep via xargs: number only). A call with no `exit=` line in its own result did not complete (it reached the Bash limit, or a `cd` or the call failed). It stays did not complete for this run: ignore a later end notice. A tool also did not complete when the counts fence prints `sarif=unreadable` or `findings table incomplete` for it, or `docs=0` (Semgrep exit 0 with `docs=0`: no file to scan, completed).
+A tool's status is its last line, `exit={n}`; a tool that ran completed only on Semgrep 0, Snyk 0 or 1 (1 = issues, only with SARIF output), CodeQL 0. Any other status, or no such line, means it did not complete (126-127: scanner did not start; else failed. Semgrep via xargs: number only). A call with no `exit=` line in its own result did not complete. It stays did not complete for this run: ignore a later end notice. A tool also did not complete when the counts fence prints `sarif=unreadable` or `findings table incomplete` for it, or `docs=0` (Semgrep exit 0 with `docs=0`: no file to scan, completed).
 
 `findings.tsv` keeps every finding. Read only `findings-top.tsv` (top 50 by level: tool, file, line, level, rule, message cut to 200 chars), set `STATIC_FINDINGS` to the column names and its rows, and write them with the status lines to `{ANALYSIS_DIR}/static-findings.md`.
 
@@ -188,23 +188,22 @@ Set `STATIC_STATUS` to one `{tool}: {value}` per tool: `completed`, `not install
 #### Plan Artifact
 
 1. List the design plans: `{worktree}/.devflow/docs/design/*.md` (a `/plan` artifact) and `{worktree}/.devflow/docs/design/*/*/*-plan.md` (a `/dynamic-plan` per-ticket plan). Sort by timestamp, newest first, and scan the 10 most recent. A `/plan` artifact's timestamp is the `YYYY-MM-DD_HHMM` before its `.md`; a per-ticket plan's is the name of its parent directory. Never sort by file name, which starts with an issue ID or a ticket slug. A per-ticket plan counts only when its `{ticket-slug}` (its file name without `-plan.md`) appears in the worktree's branch name
-2. Read the most recent file that carries an `## Acceptance Criteria` section
-3. Extract `## Acceptance Criteria` section → parse into table: `| ID | Criterion | Type | Testable Condition |`
-4. Set `PLAN_CONTEXT` to plan summary; `ACCEPTANCE_RULES` to the table
-5. If no plan files exist or section not found: `PLAN_CONTEXT=(none)`, `ACCEPTANCE_RULES=(none)`
+2. Read the most recent file that carries an `## Acceptance Criteria` section; parse it into the table `| ID | Criterion | Type | Testable Condition |`
+3. Set `PLAN_CONTEXT` to plan summary; `ACCEPTANCE_RULES` to the table
+4. If no plan files exist or section not found: `PLAN_CONTEXT=(none)`, `ACCEPTANCE_RULES=(none)`
 
 ### Phase 4: File Analysis
 
 **Produces:** ACTIVE_FOCUSES
 **Requires:** DIFF_RANGE
 
-Determine which focus analyzers to run using `CHANGED_FILES` (already computed in Step 2b — do not re-run `git diff`):
+Pick the focus analyzers from `CHANGED_FILES` (Step 2b; do not re-run `git diff`):
 
 | Focus | Condition |
 |-------|-----------|
 | `security` | Always |
 | `functional` | Always |
-| `integration` | 2+ distinct directories changed (`dirname` unique count ≥ 2) |
+| `integration` | 2+ distinct directories changed |
 | `usability` | Any `.tsx`, `.jsx`, `.html`, or `.css` file changed |
 
 ### Phase 5: Parallel Bug Analysis
@@ -237,11 +236,8 @@ OUTPUT_PATH: {ANALYSIS_DIR}/{focus}.md
 Follow devflow:apply-decisions to Read full ADR/PF bodies on demand.
 <!-- curation:end -->
 Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE.
-IMPORTANT: Write report to {ANALYSIS_DIR}/{focus}.md using Write tool"
+IMPORTANT: Write the report to OUTPUT_PATH using the Write tool"
 ```
-
-Notes:
-- Filter `ACCEPTANCE_RULES` by the `Type` column matching each focus: security criteria → security analyzer, functional criteria → functional analyzer, etc. Pass the filtered subset only
 
 ### Phase 6: Synthesis
 
@@ -280,20 +276,15 @@ Output: {ANALYSIS_DIR}/bug-analysis-summary.md"
 {brief_reasoning}
 
 ### Bug Counts
-| Category | CRITICAL | HIGH | MEDIUM | LOW | Total |
-|----------|----------|------|--------|-----|-------|
-| Security | {n} | {n} | {n} | {n} | {n} |
-| Functional | {n} | {n} | {n} | {n} | {n} |
-| Integration | {n} | {n} | {n} | {n} | {n} |
-| Usability | {n} | {n} | {n} | {n} | {n} |
+{The summary's Bug Summary table: Security, Functional, Integration and Usability rows by CRITICAL, HIGH, MEDIUM, LOW and Total}
 
 ### Top Findings
-{List top 3-5 bugs by severity and confidence}
+{Top 3-5 bugs by severity and confidence}
 
 ### Artifacts
 - Bug report: {ANALYSIS_DIR}/bug-analysis-summary.md
-- Per-focus reports: {ANALYSIS_DIR}/{security|functional|integration|usability}.md
-- Static findings: {ANALYSIS_DIR}/static-findings.md (if static analysis ran)
+- Per-focus reports: {ANALYSIS_DIR}/{focus}.md
+- Static findings: {ANALYSIS_DIR}/static-findings.md (if it ran)
 
 {if any CRITICAL or HIGH bugs found:}
 Run `/resolve` to process and fix these findings.
@@ -301,7 +292,7 @@ Run `/resolve` to process and fix these findings.
 
 ## Architecture
 
-The orchestrator only spawns agents, in seven phases: Phase 1 pre-flight, then static analysis, context loading, file analysis, parallel bug analysis and synthesis, and Phase 7 finalize.
+The command only spawns agents, in seven phases: Phase 1 pre-flight to Phase 7 finalize.
 
 ## Edge Cases
 
@@ -309,18 +300,17 @@ The orchestrator only spawns agents, in seven phases: Phase 1 pre-flight, then s
 |------|----------|
 | Rebase invalidates `.last-analysis-head` SHA | `git cat-file -t` check fails → fallback to full diff |
 | Zero changed files in DIFF_RANGE with exit 0 | Stop: "No changes to analyze." |
-| `--no-static` flag | Step 2c sets the skipped text; the marker moves |
 | `--full` flag | Bypass incremental detection (Step 2a), run full diff from base |
 | A scanner did not run or did not complete | Name the tool and why in `STATIC_FINDINGS`, not `(none)`; a tool that did not complete keeps the marker |
 
 ## Resolve Compatibility
 
-Run `/resolve` after `/bug-analysis` to fix identified bugs. `/resolve` automatically detects and uses bug analysis reports when no code review report exists.
+`/resolve` detects and uses bug analysis reports when no code review report exists.
 
 ## Principles
 
-1. **Orchestration only** — Command spawns agents, doesn't do analysis work itself
-2. **Incremental by default** — Only analyze new changes unless `--full` specified
+1. **Orchestration only** — the command spawns agents and does no analysis itself
+2. **Incremental by default** — only new changes, unless `--full`
 
 ## Phase Completion Checklist
 
