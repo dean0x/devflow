@@ -51,6 +51,7 @@ import {
   COMPLIANCE_VARIANT_HOSTS,
 } from './fixtures/mds-manifest.js';
 import { generatedReferenceManifest } from '../src/core/mds-variants.js';
+import { parseVariantManifest, describeVariantManifestParseError } from '../src/core/curation-variants.js';
 import {
   splitFrontmatter,
   buildCommittedTree,
@@ -875,6 +876,16 @@ describe('variant manifest', () => {
     expect(compiled.length, 'the build wrote no prompt: the comparison is vacuous').toBeGreaterThan(0);
     expect(Object.keys(manifest.hosts).sort()).toEqual(compiled);
     expect(Object.keys(manifest.hosts), 'the hosts are listed in sorted order').toEqual([...Object.keys(manifest.hosts)].sort());
+  });
+
+  it('is read by the installer parser, host for host', async () => {
+    const text = await fs.readFile(path.join(BUILT_ROOT, 'dist', 'variant-axes.json'), 'utf-8');
+    const parsed = parseVariantManifest(text);
+    expect(parsed.ok, parsed.ok ? '' : describeVariantManifestParseError(parsed.error)).toBe(true);
+    if (!parsed.ok) return;
+    const manifest = await builtManifest();
+    expect(parsed.value.length, 'the parse returned no host: the comparison is vacuous').toBeGreaterThan(0);
+    expect(parsed.value.map(host => `${host.kind}/${host.name}`)).toEqual(Object.keys(manifest.hosts));
   });
 
   it('reports the hosts with a curation arm exactly as CURATION_VARIANT_HOSTS names them', async () => {
