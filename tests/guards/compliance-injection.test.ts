@@ -26,8 +26,9 @@
  * does not repeat the normal-path guards: the mapping sentence of every host (`tests/compliance-prompts.test.ts`),
  * the off clause and the directive line of every spawning host in both builds (`collectUngatedHosts`) and the floor
  * of Code-family spawn sites in `implement.md` (`CODE_SPAWN_FLOORS`). The other halves of the same path are held in
- * their owners: Phase 4 keeps Harden at every level in `tests/guards/implement-resolve-levels.test.ts`, and the
- * review-publication value in `tests/evidence/implement-flow.test.ts`.
+ * their owners: Phase 4 keeps Harden at every level in `tests/guards/implement-resolve-levels.test.ts`, and both the
+ * review-publication value and the step-1 reading of "Phase 1 ran" (`collectRevalidatePhase1RunDefects`) in
+ * `tests/evidence/implement-flow.test.ts`.
  *
  * Out of scope by design: Triage. Its compliance paragraph dispositions findings the Review agents already
  * raised; it loads no skill and takes no lens, so the strict rule below does not read it. Harden's
@@ -232,8 +233,12 @@ export function collectPhase1DirectiveSourceDefects(label: string, md: string): 
   if (phase1 === null) out.push(`${label}: no Phase 1 section`)
   else {
     if (countOf(phase1, DIRECTIVE_STEP) !== 1) out.push(`${label}: Phase 1 does not hold ${DIRECTIVE_STEP} exactly once`)
-    else if (!phase1.slice(phase1.indexOf(DIRECTIVE_STEP)).split('\n\n')[0].includes(OFF_CLAUSE)) {
-      out.push(`${label}: the ${DIRECTIVE_STEP} paragraph does not state that the directive is empty when the lens is off`)
+    else {
+      const fromStep = phase1.slice(phase1.indexOf(DIRECTIVE_STEP))
+      const stepParagraph = fromStep.split('\n\n')[0]
+      if (!stepParagraph.includes(OFF_CLAUSE)) {
+        out.push(`${label}: the ${DIRECTIVE_STEP} paragraph does not state that the directive is empty when the lens is off`)
+      }
     }
     if (!phase1.includes(FRAMEWORKS_SENTENCE)) out.push(`${label}: Phase 1 does not hold the COMPLIANCE_FRAMEWORKS mapping sentence`)
   }
@@ -506,6 +511,7 @@ describe('AC-308: the re-validation path sets the lens and the directive by poin
     const at = md.indexOf('OPERATION: qa-fix')
     expect(countOf(md, 'OPERATION: qa-fix'), 'the qa-fix fence is unique').toBe(1)
     const end = md.indexOf('```', at)
+    expect(end, 'the qa-fix fence has a closing line').toBeGreaterThan(at)
     return md.slice(0, at) + seedOnce(md.slice(at, end), '\n   {COMPLIANCE_DIRECTIVE}"', '"') + md.slice(end)
   }
 
@@ -564,5 +570,16 @@ describe('AC-308: the re-validation path sets the lens and the directive by poin
       .toEqual([`${label}: a Fix spawn of Phases 5-7 passes no directive`])
     expect(collectPhase1DirectiveSourceDefects(label, seedOnce(md, '### Phase 5:', '### Step 5:')))
       .toEqual([`${label}: no Phases 5-7 section`])
+    expect(collectPhase1DirectiveSourceDefects(label, seedOnce(md, '### Phase 1: Setup', '### Step 1: Setup')))
+      .toEqual([`${label}: no Phase 1 section`])
+    // The alignment-fix fence is the first Fix spawn of Phases 5-7; typed otherwise it is no Fix spawn.
+    expect(collectPhase1DirectiveSourceDefects(label, seedOnce(md, 'subagent_type="Fix"):\n   "OPERATION: alignment-fix', 'subagent_type="Code"):\n   "OPERATION: alignment-fix')))
+      .toEqual([`${label}: Phases 5-7 hold 2 Fix spawn(s), expected 3`])
+  })
+
+  it('known-bad probe: a qa-fix fence that never closes fails the seed loudly instead of slicing to the wrong place', () => {
+    const [, md] = builds()[0]
+    const unclosed = md.slice(0, md.indexOf('OPERATION: qa-fix') + 'OPERATION: qa-fix'.length)
+    expect(() => withoutQaFixDirective(unclosed)).toThrow('the qa-fix fence has a closing line')
   })
 })
