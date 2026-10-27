@@ -96,10 +96,10 @@ If `--no-static` is set: set `STATIC_FINDINGS` to "Static analysis skipped (--no
 
 ```bash
 for t in semgrep snyk codeql jq; do printf '%s=%s\n' "$t" "$(command -v "$t" || echo no)"; done
-git -C "{worktree}" diff --name-only -z --diff-filter=d {DIFF_RANGE} | tr '\0\n' '\n?' | sed -n 's/.*\.//p' | sort -u
+set -o pipefail; export LC_ALL=C; git -C "{worktree}" diff --name-only -z --diff-filter=d {DIFF_RANGE} | tr '\0\n' '\n?' | sed -n 's/.*\.\([^./]*\)$/\1/p' | sort -u || echo "extension list failed"
 ```
 
-Its second line lists the extensions of the changed files. `{lang}` is the first of javascript-typescript (js jsx mjs cjs ts tsx), python (py), ruby (rb) whose extension is listed; no other value reaches the command. With none, CodeQL does not run and its status is `no supported language`.
+Its second line lists the extensions of the changed files. `{lang}` is the first of javascript-typescript (js jsx mjs cjs ts tsx), python (py), ruby (rb) whose extension is listed; no other value reaches the command. With none, CodeQL does not run and its status is `no supported language`; `extension list failed` means it did not complete.
 
 If all three scanners print `no`: warn user "No static analysis tools found. Install semgrep (`pip install semgrep`) or snyk (`npm install -g snyk`)." Set `STATIC_FINDINGS` to "Static analysis did not run: no scanner is installed." and `STATIC_STATUS` to `not installed` for each tool.
 
@@ -114,7 +114,7 @@ If some are available: note which tools will run.
 
 Skip if Step 2c set `STATIC_STATUS`.
 
-Run each available tool in this order, each in its own foreground Bash call with the Bash `timeout` at 600000. File names reach a scanner only through `-z`, `xargs -0` and after `--`.
+Run each available tool in this order, each in its own foreground Bash call with the Bash `timeout` at the ceiling: 600000 ms, or `BASH_MAX_TIMEOUT_MS` when set. File names reach a scanner only through `-z`, `xargs -0` and after `--`.
 
 **Semgrep** (if available):
 ```bash
@@ -138,12 +138,13 @@ printf '\nexit=%s\n' "$E"
 **Counts and table** (after Snyk with `{tools}` = `semgrep snyk`; after CodeQL with `codeql`):
 ```bash
 cd "{ANALYSIS_DIR}" || exit
-touch findings.tsv
+L='def L($r):.ruleId as $i|.level//([$r.tool|.driver,.extensions[]?|.rules[]?|select(.id==$i)]|.[0].defaultConfiguration.level)//"warning";'
 for t in {tools}; do [ -f $t.sarif ] || continue
-  jq -rs --arg t $t '[.[].runs[]?.results[]?|.level//"warning"] as $l|def c(k):[$l[]|select(.==k)]|length;"\($t) docs=\(length) results=\($l|length) error=\(c("error")) warning=\(c("warning")) note=\(c("note"))"' $t.sarif || echo "$t sarif=unreadable"
-  jq -r --arg t $t '.runs[]?.results[]?|[$t,(.locations[0].physicalLocation|.artifactLocation.uri,.region.startLine),(.level//"warning"),(.ruleId//"—"),((.message.text//"")[:200])]|@tsv' $t.sarif >>findings.tsv || echo "findings table incomplete: $t"
+  jq -rs --arg t $t "$L"'[.[].runs[]?|. as $r|.results[]?|L($r)] as $l|def c(k):[$l[]|select(.==k)]|length;"\($t) docs=\(length) results=\($l|length) error=\(c("error")) warning=\(c("warning")) note=\(c("note"))"' $t.sarif || echo "$t sarif=unreadable"
+  jq -r --arg t $t "$L"'.runs[]?|. as $r|.results[]?|[$t,(.locations[0].physicalLocation|.artifactLocation.uri,.region.startLine),L($r),(.ruleId//"—"),((.message.text//"")[:200])]|@tsv' $t.sarif >findings-$t.tsv || echo "findings table incomplete: $t"
 done
-jq -Rrs 'split("\n")|map(select(.!=""))|sort_by(split("\t")[3]|{error:0,warning:1}[.]//2)|.[:50][]' findings.tsv >findings-top.tsv
+cat findings-{semgrep,snyk,codeql}.tsv >findings.tsv 2>/dev/null
+jq -Rrs 'split("\n")|map(select(.!=""))|sort_by(split("\t")[3]|{error:0,warning:1}[.]//2)|.[:50][]' findings.tsv >findings-top.tsv || echo "findings table incomplete: top"
 ```
 Read `error` as HIGH, `warning` as MEDIUM, `note` as LOW.
 
@@ -151,20 +152,20 @@ Read `error` as HIGH, `warning` as MEDIUM, `note` as LOW.
 ```bash
 CODEQL_TMP=$(mktemp -d) || exit
 trap 'rm -rf "${CODEQL_TMP}"' EXIT INT TERM
-codeql database create "${CODEQL_TMP}/db" --language={lang} --source-root="{worktree}" 2>/dev/null && \
-codeql database analyze "${CODEQL_TMP}/db" --format=sarif-latest --output="{ANALYSIS_DIR}/codeql.sarif" 2>/dev/null
+{ codeql database create "${CODEQL_TMP}/db" --language={lang} --source-root="{worktree}" && \
+codeql database analyze "${CODEQL_TMP}/db" --format=sarif-latest --output="{ANALYSIS_DIR}/codeql.sarif"; } >"{ANALYSIS_DIR}/codeql.log" 2>&1
 CODEQL_EXIT=$?
 printf '\nexit=%s\n' "$CODEQL_EXIT"
 rm -rf "${CODEQL_TMP}"
 trap - EXIT INT TERM
 ```
-A tool's status is its last line, `exit={n}`; a tool that ran completed only on Semgrep 0, Snyk 0 or 1 (1 = issues, only with SARIF output), CodeQL 0. Any other status, or no such line, means it did not complete (126-127: scanner did not start; else failed. Semgrep via xargs: number only). A call with no `exit=` line in its own result did not complete. It stays did not complete for this run: ignore a later end notice. A tool also did not complete when the counts fence prints `sarif=unreadable` or `findings table incomplete` for it, or `docs=0` (Semgrep exit 0 with `docs=0`: no file to scan, completed).
+A tool's status is its last line, `exit={n}`; a tool that ran completed only on Semgrep 0, Snyk 0 or 1 (1 = issues, only with SARIF output), CodeQL 0. Snyk 3 (no supported file) is `no supported language`: its counts are not checked. Any other status, or no such line, means it did not complete (126-127: scanner did not start; else failed. Semgrep via xargs: number only). A call with no `exit=` line in its own result did not complete. It stays did not complete for this run: ignore a later end notice. A tool that ran also did not complete when the counts fence prints no `{tool} docs=` line for it, `sarif=unreadable` or `findings table incomplete` for it (`: top` counts for every tool), or `docs=0` (Semgrep exit 0 with `docs=0`: no file to scan, completed).
 
 `findings.tsv` keeps every finding. Read only `findings-top.tsv` (top 50 by level: tool, file, line, level, rule, message cut to 200 chars), set `STATIC_FINDINGS` to the column names and its rows, and write them with the status lines to `{ANALYSIS_DIR}/static-findings.md`.
 
-`STATIC_FINDINGS` is `(none)` only when every tool that was to run completed and none found anything. For each tool that did not complete, add under any rows the line "Static analysis did not complete: {tool}: " plus "exit {n} ({meaning}).", "no exit status." or "SARIF not read."
+`STATIC_FINDINGS` is `(none)` only when every tool that was to run completed, at least one did, and none found anything; when no tool was to run, it is "Static analysis did not run: no tool ran." For each tool that did not complete, add under any rows the line "Static analysis did not complete: {tool}: " plus "exit {n} ({meaning}).", "no exit status.", "no counts line." or "SARIF not read." A Snyk call (not Snyk 3) that printed "Snyk scope filter failed: unfiltered" adds that line too.
 
-Set `STATIC_STATUS` to one `{tool}: {value}` per tool: `completed`, `not installed` or `did not complete ({why})`; CodeQL also `not needed` (not triggered) or `no supported language`.
+Set `STATIC_STATUS` to one `{tool}: {value}` per tool: `completed`, `not installed`, `not needed` (CodeQL, not triggered) or `no supported language` (CodeQL with no table row, or Snyk 3), all covered, or `did not complete ({why})`, not covered. A covered tool other than `completed` was not to run.
 
 ### Phase 3: Context Loading
 
@@ -269,7 +270,7 @@ Output: {ANALYSIS_DIR}/bug-analysis-summary.md"
 **Branch**: {branch} -> {base_branch}
 {any base `TRACEABILITY: DEGRADED` line from Phase 1, as returned}
 **Analysis**: {ANALYSIS_DIR}
-**Static analysis**: {STATIC_STATUS per tool; if a tool did not complete: "marker kept" and the way out}
+**Static analysis**: {STATIC_STATUS per tool; if a tool did not complete: "marker kept" and the way out; any Snyk filter note}
 
 ### Risk Assessment: {risk_level}
 

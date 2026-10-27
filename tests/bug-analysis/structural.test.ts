@@ -14,7 +14,7 @@
 // cannot silently remove safety-critical patterns.
 
 import { spawnSync } from 'child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { describe, it, expect } from 'vitest';
@@ -409,8 +409,12 @@ describe('bug-analysis.md — static analysis safety patterns', () => {
 
 const SCANNER_TOOLS = ['semgrep scan', 'snyk code test', 'codeql database create', 'codeql database analyze'];
 const STATUS_LOOP = `for t in semgrep snyk codeql jq; do printf '%s=%s\\n' "$t" "$(command -v "$t" || echo no)"; done`;
-/** The second line of the Step 2c fence: the extensions of the changed files that still exist, one per line, with a newline in a name made safe. */
-const LANG_LIST = String.raw`git -C "{worktree}" diff --name-only -z --diff-filter=d {DIFF_RANGE} | tr '\0\n' '\n?' | sed -n 's/.*\.//p' | sort -u`;
+/**
+ * The second line of the Step 2c fence: the extensions of the changed files that still exist, one per line, with a
+ * newline in a name made safe. The byte locale and the pipe status are set on the line itself, so a name that is not
+ * valid text cannot cut the list short and a failed `git diff` prints a marker instead of an empty list.
+ */
+const LANG_LIST = String.raw`set -o pipefail; export LC_ALL=C; git -C "{worktree}" diff --name-only -z --diff-filter=d {DIFF_RANGE} | tr '\0\n' '\n?' | sed -n 's/.*\.\([^./]*\)$/\1/p' | sort -u || echo "extension list failed"`;
 const EXIT_PRINT = "printf '\\nexit=%s\\n' ";
 /** The Snyk status line, with the last line of the Snyk filter before it: the exit line printed twice also appears in the Semgrep fence. */
 const SNYK_EXIT_AT = /(snyk\.sarif"; \}\n)(printf '\\nexit=%s\\n' "\$E"\n)/;
@@ -419,10 +423,14 @@ const STATUS_READ = '2>/dev/null; E=$?';
 const NO_STATIC_BRANCH = 'If `--no-static` is set:';
 const NO_SCANNER_BRANCH = 'If all three scanners print `no`:';
 const NO_JQ_BRANCH = 'If a scanner is installed but `jq` prints `no`:';
-const STATED_TIMEOUT = /Bash `timeout` at (\d+)/g;
-const BASH_TIMEOUT_CEILING_MS = 600000;
+/** The one stated Bash `timeout`: the agent's ceiling, 600000 ms unless `BASH_MAX_TIMEOUT_MS` raises it. */
+const CEILING_TIMEOUT = 'with the Bash `timeout` at the ceiling: 600000 ms, or `BASH_MAX_TIMEOUT_MS` when set.';
+/** A Bash `timeout` stated as a fixed number: it would cap the call below a ceiling the agent raised. */
+const FIXED_TIMEOUT = /Bash `timeout` at \d/;
 /** What bounds a command in time: the `timeout` or `gtimeout` command, the old `{bound}` placeholder, or a `-k` kill grace. */
 const BOUND_TEXT = /\bg?timeout\b|\{bound\}|-k \d+ \d+/;
+/** A number with a time unit in prose, such as "at most 280 s" or "after 5 minutes". */
+const PROSE_BOUND = /\b\d[\d,._]*\s*(?:ms|s|secs?|seconds?|mins?|minutes?|h|hrs?|hours?)\b/i;
 
 function bashFences(text: string): string[] {
   return parseFences(text).filter(fence => fence.startsWith('```bash'));
@@ -441,9 +449,10 @@ type Collector = (body: string) => string[];
 const doesNotSay = (part: string): string => `Phase 2 does not say: ${part}`;
 
 /**
- * devflow puts no time bound on a scanner: no command line of Phase 2 carries one, and no sentence names one. The
- * Bash `timeout` the agent sets for each call is the only limit, stated at most 600000 ms. A call that reaches it
- * prints no `exit=` line, which the status rule reads as did not complete.
+ * devflow puts no time bound on a scanner: no command line of Phase 2 carries one, and no sentence names one, whether
+ * as the `timeout` command or as a number with a time unit. The Bash `timeout` the agent sets for each call is the only
+ * limit, and it is the agent's ceiling, not a fixed number. A call that reaches it prints no `exit=` line, which the
+ * status rule reads as did not complete.
  */
 function collectNoBoundDefects(phase2: string): string[] {
   const out: string[] = [];
@@ -453,9 +462,11 @@ function collectNoBoundDefects(phase2: string): string[] {
   const bounded = lines.find(line => BOUND_TEXT.test(line));
   if (bounded !== undefined) out.push(`a Phase 2 command line carries a time bound: ${bounded.trim()}`);
   if (/\{bound\}|gtimeout/.test(phase2)) out.push('Phase 2 names a devflow time bound');
-  const stated = [...phase2.matchAll(STATED_TIMEOUT)].map(match => Number(match[1]));
-  if (stated.length === 0) out.push('no stated Bash timeout above the scanner calls');
-  if (stated.some(ms => ms > BASH_TIMEOUT_CEILING_MS)) out.push('a stated Bash timeout is above 600000 ms');
+  if (!phase2.includes(CEILING_TIMEOUT)) out.push('Phase 2 does not state the Bash timeout as the ceiling');
+  if (FIXED_TIMEOUT.test(phase2)) out.push('a stated Bash timeout is a fixed number, not the ceiling');
+  const prose = phase2.replace(/```[\s\S]*?```/g, '').split(CEILING_TIMEOUT).join('');
+  const bound = PROSE_BOUND.exec(prose);
+  if (bound !== null) out.push(`Phase 2 prose names a time bound: ${bound[0]}`);
   return out;
 }
 
@@ -573,28 +584,34 @@ function collectMarkerGateDefects(body: string): string[] {
   return out;
 }
 
-/** The shape of a sentence that sets `STATIC_FINDINGS` to `(none)`: "to", "set to" or "=" before `(none)`. */
-const NONE_ASSIGNMENT_SHAPE = /`?STATIC_FINDINGS`?(?:\s*=\s*|\s+(?:\w+\s+)?to\s+)`?\(none\)/;
+/** The shape of a sentence that makes `STATIC_FINDINGS` `(none)`: "to", "set to", "=", "is", "stays", "remains" or "as" before `(none)`. */
+const NONE_ASSIGNMENT_SHAPE = /`?STATIC_FINDINGS`?(?:\s*=\s*|\s+(?:(?:\w+\s+)?to|is|stays|remains|as)\s+)`?\(none\)/;
 const SKIP_SENTENCES = ['Static analysis skipped (--no-static).', 'Static analysis did not run: no scanner is installed.'];
+/** The one sentence that allows `(none)`: every tool that was to run completed, at least one did, and none found anything; with no tool to run it names that. */
+const NONE_RULE = '`STATIC_FINDINGS` is `(none)` only when every tool that was to run completed, at least one did, and none found anything; when no tool was to run, it is "Static analysis did not run: no tool ran."';
 
 /**
- * Only a scan where every tool that was to run completed and found nothing leaves `STATIC_FINDINGS` as `(none)`. The
- * `--no-static` and no-scanner branches have sentences of their own, and no line of the whole body sets `(none)`.
+ * Only a scan where every tool that was to run completed, at least one did, and none found anything leaves
+ * `STATIC_FINDINGS` as `(none)`. The `--no-static` and no-scanner branches have sentences of their own, and no line of
+ * the whole body makes it `(none)` in any other way: the one pinned rule sentence is the only exemption.
  */
 function collectSkipNotNoneDefects(body: string): string[] {
   const out = SKIP_SENTENCES.filter(sentence => !body.includes(sentence)).map(sentence => `no sentence says: ${sentence}`);
-  const sets = body.split('\n').filter(line => NONE_ASSIGNMENT_SHAPE.test(line));
+  const sets = body.split('\n').map(line => line.split(NONE_RULE).join('')).filter(line => NONE_ASSIGNMENT_SHAPE.test(line));
   return [...out, ...sets.map(line => `a line sets STATIC_FINDINGS to (none): ${line.trim().slice(0, 90)}`)];
 }
 
 const STATUS_LINE_PARTS = [
-  'Semgrep 0, Snyk 0 or 1 (1 = issues, only with SARIF output), CodeQL 0. Any other status',
+  'Semgrep 0, Snyk 0 or 1 (1 = issues, only with SARIF output), CodeQL 0.',
   'or no such line',
-  '`STATIC_FINDINGS` is `(none)` only when every tool that was to run completed',
+  NONE_RULE,
   'Static analysis did not complete: {tool}',
-  'A tool also did not complete when the counts fence prints `sarif=unreadable` or `findings table incomplete` for it, or `docs=0`',
+  'A tool that ran also did not complete when the counts fence prints no `{tool} docs=` line for it, `sarif=unreadable` or `findings table incomplete` for it (`: top` counts for every tool), or `docs=0`',
   '(Semgrep exit 0 with `docs=0`: no file to scan, completed)',
-  '"exit {n} ({meaning}).", "no exit status." or "SARIF not read."',
+  '"exit {n} ({meaning}).", "no exit status.", "no counts line." or "SARIF not read."',
+  'Snyk 3 (no supported file) is `no supported language`: its counts are not checked.',
+  'A Snyk call (not Snyk 3) that printed "Snyk scope filter failed: unfiltered" adds that line too.',
+  'all covered, or `did not complete ({why})`, not covered. A covered tool other than `completed` was not to run.',
 ];
 
 /**
@@ -646,10 +663,15 @@ function collectExitLineOrderDefects(phase2: string): string[] {
 const SARIF_TARGETS: Array<[string, string]> = [
   ['semgrep scan', '>"{ANALYSIS_DIR}/semgrep.sarif" 2>/dev/null'],
   ['snyk code test', '>"{ANALYSIS_DIR}/snyk-all.json" 2>/dev/null'],
-  ['codeql database analyze', '--output="{ANALYSIS_DIR}/codeql.sarif" 2>/dev/null'],
+  ['codeql database analyze', '--output="{ANALYSIS_DIR}/codeql.sarif"; } >"{ANALYSIS_DIR}/codeql.log" 2>&1'],
 ];
 
 const COUNTS_OPENER = 'cd "{ANALYSIS_DIR}" || exit';
+/**
+ * The level of a result: its own `level`, else the default level of its rule (looked up by `ruleId` in the rules of the
+ * run's `tool.driver` and of each `tool.extensions` entry), else "warning". Both jq programs of the counts fence call it.
+ */
+const COUNTS_LEVEL_DEF = String.raw`L='def L($r):.ruleId as $i|.level//([$r.tool|.driver,.extensions[]?|.rules[]?|select(.id==$i)]|.[0].defaultConfiguration.level)//"warning";'`;
 /** What the counts and table fence ships, one pin per program: the loop over the tool list, the counts line, the table, the top 50 file. */
 const COUNTS_PARTS = [
   'for t in {tools}; do [ -f $t.sarif ] || continue',
@@ -657,24 +679,39 @@ const COUNTS_PARTS = [
   '$t.sarif || echo "$t sarif=unreadable"',
   '|@tsv',
   '[:200]',
-  '$t.sarif >>findings.tsv || echo "findings table incomplete: $t"',
+  '$t.sarif >findings-$t.tsv || echo "findings table incomplete: $t"',
   '|.[:50][]',
-  "' findings.tsv >findings-top.tsv",
-  'touch findings.tsv',
+  `' findings.tsv >findings-top.tsv || echo "findings table incomplete: top"`,
+  'cat findings-{semgrep,snyk,codeql}.tsv >findings.tsv 2>/dev/null',
+  COUNTS_LEVEL_DEF,
+  '.results[]?|L($r)] as $l|def c(k)',
+  '|[$t,(.locations[0].physicalLocation|.artifactLocation.uri,.region.startLine),L($r),',
 ];
 const COUNTS_PROSE = [
   '(after Snyk with `{tools}` = `semgrep snyk`; after CodeQL with `codeql`)',
   'Read `error` as HIGH, `warning` as MEDIUM, `note` as LOW.',
   '`findings.tsv` keeps every finding. Read only `findings-top.tsv`',
 ];
-/** A jq program in the counts fence is one single-quoted argument, and the tool name reaches it only through `--arg`. */
-const COUNTS_JQ_SHAPE = /\bjq -\w+ (?:--arg t \$t )?'[^']*'/;
+/** A jq program in the counts fence is one single-quoted argument (after the level function, when it uses it), and the tool name reaches it only through `--arg`. */
+const COUNTS_JQ_SHAPE = /\bjq -\w+ (?:--arg t \$t )?(?:"\$L")?'[^']*'/;
+/** A line that names a scanner's SARIF file or the unfiltered Snyk file. */
+const NAMES_SARIF = /\.sarif\b|snyk-all\.json/;
+const COUNTS_SARIF_LOOP = 'for t in {tools}; do [ -f $t.sarif ] || continue';
+/** A counts or table jq line: one program, the SARIF file as its input, the table one written to its own tsv, a marker on failure. */
+const COUNTS_SARIF_JQ = /^jq -rs? --arg t \$t "\$L"'[^']*' \$t\.sarif(?: >findings-\$t\.tsv)? \|\| echo "[^"]*"$/;
+
+/** A line that names a SARIF file and is one of the pinned lines: a scanner line, a Snyk filter line, the counts loop or a counts jq line. */
+function isPinnedSarifLine(line: string): boolean {
+  const text = line.trim();
+  return SCANNER_TOOLS.some(tool => text.includes(tool)) || SNYK_FILTER_LINES.includes(text) || text === COUNTS_SARIF_LOOP || COUNTS_SARIF_JQ.test(text);
+}
 
 /**
  * No fence prints a scanner's SARIF to the call output, where a long result is clipped and its findings and exit line
- * can be lost. Each scanner line writes its SARIF to a file in the analysis folder, and no fence reads one back with
- * `cat`. One counts and table fence sits after Snyk and before CodeQL (the CodeQL trigger needs the counts), runs once
- * per SARIF file that exists, and is the only writer of `findings.tsv` and `findings-top.tsv`.
+ * can be lost. Each scanner line writes its SARIF to a file in the analysis folder, and no other line of any fence names
+ * a SARIF file: a read back with `cat`, `head` or `jq .` is not one of the pinned lines. One counts and table fence sits
+ * after Snyk and before CodeQL (the CodeQL trigger needs the counts), runs once per SARIF file that exists, writes one
+ * table file per tool, and is the only writer of `findings.tsv` and `findings-top.tsv`.
  */
 function collectSarifFileDefects(phase2: string): string[] {
   const out: string[] = [];
@@ -684,7 +721,7 @@ function collectSarifFileDefects(phase2: string): string[] {
     if (line === undefined) out.push(`no ${tool} command line`);
     else if (!line.includes(target)) out.push(`the ${tool} line does not write its SARIF to a file: expected ${target}`);
   }
-  const printed = lines.find(line => /^\s*cat\b/.test(line) || line.includes('$S"') || line.startsWith('S=$('));
+  const printed = lines.find(line => line.includes('$S"') || line.startsWith('S=$(') || (NAMES_SARIF.test(line) && !isPinnedSarifLine(line)));
   if (printed !== undefined) out.push(`a fence prints SARIF to the call output: ${printed.trim()}`);
 
   const fences = bashFences(phase2);
@@ -701,7 +738,7 @@ function collectSarifFileDefects(phase2: string): string[] {
     const before = fences.findIndex(fence => fence.includes('codeql database'));
     if (after === -1 || before === -1 || at < after || at > before) out.push('the counts fence does not sit after the Snyk fence and before the CodeQL fence');
   }
-  for (const sink of ['>>findings.tsv', '>findings-top.tsv']) {
+  for (const sink of ['>findings-$t.tsv', '>findings.tsv', '>findings-top.tsv']) {
     const writers = lines.filter(line => line.includes(sink)).length;
     if (writers !== 1) out.push(`${writers} lines write ${sink.replace(/^>+/, '')}, expected 1`);
   }
@@ -733,6 +770,8 @@ function collectStaticReportDefects(body: string): string[] {
   const risk = body.indexOf('### Risk Assessment');
   if (status === -1) out.push('the report has no Static analysis line');
   else if (analysis === -1 || status < analysis || status > risk) out.push('the Static analysis line is not between Analysis and Risk Assessment');
+  const line = body.split('\n').find(text => text.startsWith('**Static analysis**:')) ?? '';
+  if (line !== '' && !line.endsWith('; any Snyk filter note}')) out.push('the Static analysis report line does not carry a Snyk filter note');
   if (!body.includes('| A scanner did not run or did not complete |')) out.push('no edge-case row for a scanner that did not run or did not complete');
   if (!body.includes('(`(none)` only if')) out.push('the checklist does not limit (none) to a clean result');
   return out;
@@ -931,7 +970,8 @@ const LANG_PROSE = [
   'Its second line lists the extensions of the changed files.',
   '`{lang}` is the first of javascript-typescript (js jsx mjs cjs ts tsx), python (py), ruby (rb) whose extension is listed',
   'no other value reaches the command',
-  'With none, CodeQL does not run and its status is `no supported language`.',
+  'With none, CodeQL does not run and its status is `no supported language`',
+  '`extension list failed` means it did not complete.',
 ];
 
 /**
@@ -1037,12 +1077,12 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
   /** The defects `collect` reports for a copy of `body` seeded once; a known-bad probe never touches the committed tree. */
   const probe = (collect: Collector, body: string | null) => (from: string | RegExp, to: string): string[] => collect(seed(body ?? '', from, to));
 
-  it.each(builds)('no scanner runs under a devflow time bound, and each stated Bash timeout is at most 600000 ms (%s)', (_label, body) => {
+  it.each(builds)('no scanner runs under a devflow time bound, and the stated Bash timeout is the ceiling, not a fixed number (%s)', (_label, body) => {
     expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
     expect(noBound(body ?? '')).toEqual([]);
   });
 
-  it.each(builds)('known-bad probes: a bound added back to a scanner or to Step 2c, or a lost or raised Bash timeout, is reported (%s)', (_label, body) => {
+  it.each(builds)('known-bad probes: a bound added back to a scanner or to Step 2c, a prose bound, or a lost or fixed Bash timeout, is reported (%s)', (_label, body) => {
     expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
     const defects = probe(noBound, body);
     const carriesBound = expect.stringContaining('a Phase 2 command line carries a time bound');
@@ -1053,9 +1093,19 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(defects('codeql database analyze', 'timeout 280 codeql database analyze')).toContainEqual(carriesBound);
     expect(defects(`${STATUS_LOOP}\n`, `${STATUS_LOOP}\ncommand -v timeout || command -v gtimeout\n`)).toContainEqual(carriesBound);
     expect(defects('note which tools will run.', 'note which tools will run. `{bound}` is `timeout` or `gtimeout`.')).toContain('Phase 2 names a devflow time bound');
-    expect(defects('Bash `timeout` at 600000', 'Bash `timeout` at 700000')).toContain('a stated Bash timeout is above 600000 ms');
-    expect(defects('with the Bash `timeout` at 600000', 'with the Bash limit at 600000')).toContain('no stated Bash timeout above the scanner calls');
-    expect(collectNoBoundDefects('')).toEqual(['0 scanner command lines, expected 4', 'no stated Bash timeout above the scanner calls']);
+    const fixed = 'a stated Bash timeout is a fixed number, not the ceiling';
+    const notCeiling = 'Phase 2 does not state the Bash timeout as the ceiling';
+    expect(defects('at the ceiling: 600000 ms, or `BASH_MAX_TIMEOUT_MS` when set.', 'at 600000.')).toEqual(expect.arrayContaining([fixed, notCeiling]));
+    expect(defects('at the ceiling: 600000 ms, or `BASH_MAX_TIMEOUT_MS` when set.', 'at 1800000.')).toContain(fixed);
+    expect(defects('at the ceiling: 600000 ms, or `BASH_MAX_TIMEOUT_MS` when set.', 'at the ceiling.')).toContain(notCeiling);
+    expect(defects('with the Bash `timeout` at the ceiling', 'with the Bash limit at the ceiling')).toContain(notCeiling);
+    expect(defects(', or `BASH_MAX_TIMEOUT_MS` when set', '')).toContain(notCeiling);
+    const prose = (found: string): string => `Phase 2 prose names a time bound: ${found}`;
+    expect(defects('Run each available tool in this order,', 'Each scanner gets at most 280 s. Run each available tool in this order,')).toContain(prose('280 s'));
+    expect(defects('Run each available tool in this order,', 'A scanner stops after 300 seconds. Run each available tool in this order,')).toContain(prose('300 seconds'));
+    expect(defects('Run each available tool in this order,', 'Wait 10 min for a scanner. Run each available tool in this order,')).toContain(prose('10 min'));
+    expect(defects('Run each available tool in this order,', 'A scan lasts up to 2 hours. Run each available tool in this order,')).toContain(prose('2 hours'));
+    expect(collectNoBoundDefects('')).toEqual(['0 scanner command lines, expected 4', notCeiling]);
   });
 
   it.each(builds)('Step 2c prints one status line per tool and probes no bound, and no scanner or no jq stops Step 2d (%s)', (_label, body) => {
@@ -1101,10 +1151,12 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(defects(` ${NO_STATIC_SKIP}`, '')).toEqual([NO_STATIC_OVERWRITE]);
     expect(defects(NO_STATIC_SKIP, 'Then run the tool check.')).toEqual([NO_STATIC_OVERWRITE]);
     expect(defects(STATUS_ENTRY, '')).toContain('Step 2d does not set STATIC_STATUS per tool');
-    expect(defects('`completed`, ', '')).toContain('the Step 2d STATIC_STATUS entry does not name `completed`');
-    expect(defects('`not installed` or `did not complete ({why})`', '`did not complete ({why})`')).toContain('the Step 2d STATIC_STATUS entry does not name `not installed`');
-    expect(defects('`not needed` (not triggered) or ', '')).toContain('the Step 2d STATIC_STATUS entry does not name `not needed`');
-    expect(defects(' or `no supported language`', '')).toContain('the Step 2d STATIC_STATUS entry does not name `no supported language`');
+    const withoutCovered = ' A covered tool other than `completed` was not to run.';
+    expect(collectStatusAssignmentDefects(phase2Of(seed(seed(body ?? '', '`completed`, ', ''), withoutCovered, '')))).toContain('the Step 2d STATIC_STATUS entry does not name `completed`');
+    expect(defects('`not installed`, `not needed` (CodeQL, not triggered)', '`not needed` (CodeQL, not triggered)')).toContain('the Step 2d STATIC_STATUS entry does not name `not installed`');
+    expect(defects('`not needed` (CodeQL, not triggered) or ', '')).toContain('the Step 2d STATIC_STATUS entry does not name `not needed`');
+    expect(defects('`no supported language` (CodeQL with no table row, or Snyk 3)', '`unsupported`')).toContain('the Step 2d STATIC_STATUS entry does not name `no supported language`');
+    expect(defects('`did not complete ({why})`, not covered', 'a failure, not covered')).toContain('the Step 2d STATIC_STATUS entry does not name `did not complete ({why})`');
     expect(collectStatusAssignmentDefects('')).toHaveLength(STATUS_BRANCHES.length + 1);
   });
 
@@ -1151,9 +1203,14 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     const sets = expect.stringContaining('a line sets STATIC_FINDINGS to (none)');
     expect(defects('`STATIC_FINDINGS` to "Static analysis skipped (--no-static)."', '`STATIC_FINDINGS` to `(none)`')).toEqual([`no sentence says: ${SKIP_SENTENCES[0]}`, sets]);
     expect(defects('`STATIC_FINDINGS` to "Static analysis did not run: no scanner is installed."', 'STATIC_FINDINGS to (none)')).toEqual([`no sentence says: ${SKIP_SENTENCES[1]}`, sets]);
-    expect(defects('## Principles\n', 'Skip Phase 2c and 2d entirely; `STATIC_FINDINGS=(none)`')).toEqual([sets]);
+    expect(defects('## Principles\n', '## Principles\nSkip Phase 2c and 2d entirely; `STATIC_FINDINGS=(none)`\n')).toEqual([sets]);
     expect(defects('Report to user:', 'Report to user. Set `STATIC_FINDINGS` to `(none)` when no tool ran:')).toEqual([sets]);
+    expect(defects('Report to user:', 'Report to user. `STATIC_FINDINGS` is `(none)` when no tool ran:')).toEqual([sets]);
+    expect(defects('Report to user:', 'Report to user. `STATIC_FINDINGS` stays (none) when a tool did not complete:')).toEqual([sets]);
+    expect(defects('Report to user:', 'Report to user. Read STATIC_FINDINGS as `(none)` when no tool ran:')).toEqual([sets]);
+    expect(defects('| A scanner did not run or did not complete | Name the tool and why in `STATIC_FINDINGS`, not `(none)`;', '| A scanner did not run or did not complete | `STATIC_FINDINGS` is `(none)`;')).toEqual([sets]);
     expect(defects('with STATIC_FINDINGS (`(none)` only if', 'with STATIC_FINDINGS set to `(none)` (only if')).toEqual([sets]);
+    expect(defects(', at least one did, and none found anything;', ', and none found anything;')).toEqual([sets]);
     expect(collectSkipNotNoneDefects('')).toEqual(SKIP_SENTENCES.map(sentence => `no sentence says: ${sentence}`));
   });
 
@@ -1172,16 +1229,28 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(defects('snyk-all.json" 2>/dev/null; E=$?', 'snyk-all.json" 2>/dev/null; true')).toContain(unread);
     expect(defects('semgrep.sarif" 2>/dev/null; E=$?', 'semgrep.sarif" 2>/dev/null; true')).toContain(unread);
     expect(defects('Snyk 0 or 1', 'Snyk 0, 1 or 2')).toContain(doesNotSay(STATUS_LINE_PARTS[0]));
-    expect(defects('CodeQL 0. Any other status', 'CodeQL 0 or 1. Any other status')).toContain(doesNotSay(STATUS_LINE_PARTS[0]));
+    expect(defects('CodeQL 0.', 'CodeQL 0 or 1.')).toContain(doesNotSay(STATUS_LINE_PARTS[0]));
     expect(defects('or no such line', 'or an empty line')).toContain(doesNotSay(STATUS_LINE_PARTS[1]));
-    expect(defects('only when every tool that was to run completed and none found anything', 'when none found anything')).toContain(doesNotSay(STATUS_LINE_PARTS[2]));
+    expect(defects(', at least one did, and none found anything;', ' and none found anything;')).toContain(doesNotSay(STATUS_LINE_PARTS[2]));
+    expect(defects('`STATIC_FINDINGS` is `(none)` only when every tool that was to run completed', '`STATIC_FINDINGS` is `(none)` when a tool ran')).toContain(doesNotSay(STATUS_LINE_PARTS[2]));
+    expect(defects('when no tool was to run, it is "Static analysis did not run: no tool ran."', 'when no tool was to run, it is `(none)`.')).toContain(doesNotSay(STATUS_LINE_PARTS[2]));
     expect(defects('Static analysis did not complete: {tool}', 'Static analysis failed: {tool}')).toContain(doesNotSay(STATUS_LINE_PARTS[3]));
-    expect(defects('A tool also did not complete when the counts fence prints', 'A tool did not complete when a fence prints')).toContain(doesNotSay(STATUS_LINE_PARTS[4]));
-    expect(defects('`sarif=unreadable` or `findings table incomplete` for it, or `docs=0`', '`sarif=unreadable` for it')).toContain(doesNotSay(STATUS_LINE_PARTS[4]));
+    expect(defects('A tool that ran also did not complete when the counts fence prints', 'A tool did not complete when a fence prints')).toContain(doesNotSay(STATUS_LINE_PARTS[4]));
+    expect(defects('prints no `{tool} docs=` line for it, ', 'prints ')).toContain(doesNotSay(STATUS_LINE_PARTS[4]));
+    expect(defects(' (`: top` counts for every tool)', '')).toContain(doesNotSay(STATUS_LINE_PARTS[4]));
+    expect(defects('`sarif=unreadable` or `findings table incomplete` for it (`: top` counts for every tool), or `docs=0`', '`sarif=unreadable` for it')).toContain(doesNotSay(STATUS_LINE_PARTS[4]));
     expect(defects('Semgrep exit 0 with `docs=0`: no file to scan, completed', 'Semgrep exit 0 with `docs=0`: not completed')).toContain(doesNotSay(STATUS_LINE_PARTS[5]));
     expect(defects('(Semgrep exit 0 with ', '(Semgrep with ')).toContain(doesNotSay(STATUS_LINE_PARTS[5]));
     expect(defects('or "SARIF not read."', 'or "no SARIF."')).toContain(doesNotSay(STATUS_LINE_PARTS[6]));
-    expect(defects('"no exit status." or', '"no exit status." and')).toContain(doesNotSay(STATUS_LINE_PARTS[6]));
+    expect(defects('"no exit status.",', '"no exit status." and')).toContain(doesNotSay(STATUS_LINE_PARTS[6]));
+    expect(defects(', "no counts line."', '')).toContain(doesNotSay(STATUS_LINE_PARTS[6]));
+    expect(defects('Snyk 3 (no supported file) is `no supported language`: its counts are not checked.', 'Snyk 3 reads as a failure.')).toContain(doesNotSay(STATUS_LINE_PARTS[7]));
+    expect(defects('`no supported language`: its counts are not checked.', '`no supported language`.')).toContain(doesNotSay(STATUS_LINE_PARTS[7]));
+    expect(defects('A Snyk call (not Snyk 3) that printed', 'A Snyk call that printed')).toContain(doesNotSay(STATUS_LINE_PARTS[8]));
+    expect(defects('"Snyk scope filter failed: unfiltered" adds that line too.', '"Snyk scope filter failed: unfiltered" is shown.')).toContain(doesNotSay(STATUS_LINE_PARTS[8]));
+    expect(defects(' adds that line too.', '')).toContain(doesNotSay(STATUS_LINE_PARTS[8]));
+    expect(defects('all covered, or `did not complete ({why})`, not covered.', 'or `did not complete ({why})`.')).toContain(doesNotSay(STATUS_LINE_PARTS[9]));
+    expect(defects(' A covered tool other than `completed` was not to run.', '')).toContain(doesNotSay(STATUS_LINE_PARTS[9]));
   });
 
   it.each(builds)('each scanner prints its own status after its scanner line (%s)', (_label, body) => {
@@ -1240,13 +1309,22 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(defects('snyk code test --sarif >"{ANALYSIS_DIR}/snyk-all.json"', 'snyk code test --sarif')).toContain(notFile(...SARIF_TARGETS[1]));
     expect(defects('snyk-all.json" 2>/dev/null; E=$?', 'snyk-all.json" 2>&1; E=$?')).toContain(notFile(...SARIF_TARGETS[1]));
     expect(defects('--output="{ANALYSIS_DIR}/codeql.sarif"', '--output="${CODEQL_TMP}/results.sarif"')).toContain(notFile(...SARIF_TARGETS[2]));
+    expect(defects('; } >"{ANALYSIS_DIR}/codeql.log" 2>&1', '; } 2>/dev/null')).toContain(notFile(...SARIF_TARGETS[2]));
+    expect(defects('>"{ANALYSIS_DIR}/codeql.log" 2>&1', '>"{ANALYSIS_DIR}/codeql.log"')).toContain(notFile(...SARIF_TARGETS[2]));
+    expect(defects('>"{ANALYSIS_DIR}/codeql.log" 2>&1', '2>&1')).toContain(notFile(...SARIF_TARGETS[2]));
     const printed = expect.stringContaining('a fence prints SARIF to the call output');
     expect(defects('CODEQL_EXIT=$?\n', 'CODEQL_EXIT=$?\ncat "${CODEQL_TMP}/results.sarif"\n')).toContainEqual(printed);
     expect(defects('CODEQL_EXIT=$?\n', 'CODEQL_EXIT=$?\ncat "{ANALYSIS_DIR}/codeql.sarif"\n')).toContainEqual(printed);
+    expect(defects('CODEQL_EXIT=$?\n', 'CODEQL_EXIT=$?\njq . "{ANALYSIS_DIR}/codeql.sarif"\n')).toContainEqual(printed);
+    expect(defects('semgrep.sarif" 2>/dev/null; E=$?\n', 'semgrep.sarif" 2>/dev/null; E=$?\nhead "{ANALYSIS_DIR}/semgrep.sarif"\n')).toContainEqual(printed);
+    expect(defects('snyk.sarif"; }\nprintf', 'snyk.sarif"; }\njq . "{ANALYSIS_DIR}/snyk.sarif"\nprintf')).toContainEqual(printed);
+    expect(defects('snyk.sarif"; }\nprintf', 'snyk.sarif"; }\ncat "{ANALYSIS_DIR}/snyk-all.json"\nprintf')).toContainEqual(printed);
+    expect(defects('done\ncat findings-{semgrep', "done\njq -r '.' semgrep.sarif\ncat findings-{semgrep")).toContainEqual(printed);
+    expect(defects('>findings-$t.tsv || echo "findings table incomplete: $t"\ndone', ">findings-$t.tsv || echo \"findings table incomplete: $t\"\n  jq -r '.' $t.sarif\ndone")).toContainEqual(printed);
     expect(defects('jq --rawfile n', 'printf \'%s\' "$S" | jq --rawfile n')).toContainEqual(printed);
     expect(defects('snyk code test --sarif >', 'S=$(snyk code test --sarif >')).toContainEqual(printed);
     const counts = (part: string): string => `the counts fence does not say: ${part}`;
-    expect(defects('touch findings.tsv\n', '')).toEqual([counts(COUNTS_PARTS[8])]);
+    expect(defects('cat findings-{semgrep,snyk,codeql}.tsv >findings.tsv 2>/dev/null\n', '')).toEqual(expect.arrayContaining([counts(COUNTS_PARTS[8]), '0 lines write findings.tsv, expected 1']));
     expect(defects(COUNTS_OPENER, 'cd "{worktree}" || exit')).toContain(`the counts fence does not open with ${COUNTS_OPENER}`);
     expect(defects('for t in {tools}; do', 'for t in semgrep snyk codeql; do')).toContain('0 counts and table fences, expected 1');
     expect(defects('[ -f $t.sarif ] || continue', 'true')).toContain(counts(COUNTS_PARTS[0]));
@@ -1255,14 +1333,21 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(defects('$t.sarif || echo "$t sarif=unreadable"', '$t.sarif')).toContain(counts(COUNTS_PARTS[2]));
     expect(defects('|@tsv', '|@csv')).toContain(counts(COUNTS_PARTS[3]));
     expect(defects('[:200]', '')).toContain(counts(COUNTS_PARTS[4]));
-    expect(defects('>>findings.tsv || echo "findings table incomplete: $t"', '>>findings.tsv')).toContain(counts(COUNTS_PARTS[5]));
+    expect(defects('>findings-$t.tsv || echo "findings table incomplete: $t"', '>findings-$t.tsv')).toContain(counts(COUNTS_PARTS[5]));
+    expect(defects('$t.sarif >findings-$t.tsv', '$t.sarif >>findings-$t.tsv')).toContain(counts(COUNTS_PARTS[5]));
     expect(defects('|.[:50][]', '|.[]')).toContain(counts(COUNTS_PARTS[6]));
     expect(defects("' findings.tsv >findings-top.tsv", "' findings.tsv")).toEqual(expect.arrayContaining([counts(COUNTS_PARTS[7]), '0 lines write findings-top.tsv, expected 1']));
+    expect(defects(' || echo "findings table incomplete: top"', '')).toContain(counts(COUNTS_PARTS[7]));
+    expect(defects('.extensions[]?|', '')).toContain(counts(COUNTS_PARTS[9]));
+    expect(defects('//"warning";', '//"warning"')).toContain(counts(COUNTS_PARTS[9]));
+    expect(defects('.results[]?|L($r)] as $l|def c(k)', '.results[]?|.level//"warning"] as $l|def c(k)')).toContain(counts(COUNTS_PARTS[10]));
+    expect(defects(',L($r),(.ruleId', ',(.level//"warning"),(.ruleId')).toContain(counts(COUNTS_PARTS[11]));
     const loose = expect.stringContaining('a jq line of the counts fence is not one single-quoted program');
-    expect(defects("jq -rs --arg t $t '[.[]", 'jq -rs "[.[]')).toContainEqual(loose);
-    expect(defects("jq -r --arg t $t '.runs[]?", 'jq -r --arg t $t ".runs[]?')).toContainEqual(loose);
+    expect(defects('"$L"\'[.[].runs[]?', '"$L""[.[].runs[]?')).toContainEqual(loose);
+    expect(defects('"$L"\'.runs[]?', '"$L"".runs[]?')).toContainEqual(loose);
+    expect(defects('jq -rs --arg t $t "$L"\'', "jq -rs --arg t $t $L'")).toContainEqual(loose);
     expect(defects("jq -Rrs 'split(", 'jq -Rrs "split(')).toContainEqual(loose);
-    expect(defects('>>findings.tsv || echo', '>>findings.tsv\n  jq -r --arg t $t \'.\' $t.sarif >>findings.tsv || echo')).toContain('2 lines write findings.tsv, expected 1');
+    expect(defects('>findings-$t.tsv || echo', '>findings-$t.tsv\n  jq -r --arg t $t "$L"\'.\' $t.sarif >findings-$t.tsv || echo')).toContain('2 lines write findings-$t.tsv, expected 1');
     const place = 'the counts fence does not sit after the Snyk fence and before the CodeQL fence';
     expect(defects(/(\*\*Counts and table\*\*[^\n]*\n)(```bash\n[\s\S]*?```\n)([^\n]*\n\n)(\*\*CodeQL\*\*[^\n]*\n)(```bash\n[\s\S]*?```\n)/, '$4$5$3$1$2')).toContain(place);
     const prose = (part: string): string => doesNotSay(part);
@@ -1287,6 +1372,8 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(defects('### Risk Assessment', '### Risks')).toContain(placed);
     expect(defects(/(\*\*Analysis\*\*: \{ANALYSIS_DIR\}\n)(\*\*Static analysis\*\*:[^\n]*\n)/, '$2$1')).toContain(placed);
     expect(defects(/(\*\*Static analysis\*\*:[^\n]*\n)(\n### Risk Assessment[^\n]*\n)/, '$2$1')).toContain(placed);
+    expect(defects('; any Snyk filter note}', '}')).toContain('the Static analysis report line does not carry a Snyk filter note');
+    expect(defects('; any Snyk filter note}', '; any note}')).toContain('the Static analysis report line does not carry a Snyk filter note');
     expect(defects('| A scanner did not run or did not complete |', '| A scanner fails |')).toContain('no edge-case row for a scanner that did not run or did not complete');
     expect(defects('(`(none)` only if', '(or `(none)` if')).toContain('the checklist does not limit (none) to a clean result');
     expect(collectStaticReportDefects('')).toContain('the report has no Static analysis line');
@@ -1321,7 +1408,7 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     const defects = probe(fileNames, body);
     const semgrepLine = 'the Semgrep line does not read names with -z, pass them with xargs -0 and put them after --';
     expect(defects('-z --diff-filter=d {DIFF_RANGE} | xargs', '--diff-filter=d {DIFF_RANGE} | xargs')).toContain(semgrepLine);
-    expect(defects('set -o pipefail; ', '')).toContain(semgrepLine);
+    expect(defects('set -o pipefail; git diff', 'git diff')).toContain(semgrepLine);
     expect(defects('-- >"{ANALYSIS_DIR}/semgrep.sarif" 2>/dev/null', ' >"{ANALYSIS_DIR}/semgrep.sarif" 2>/dev/null')).toContain(semgrepLine);
     expect(defects('--quiet -- >', '--quiet >')).toContain(semgrepLine);
     expect(defects('xargs -0 -r semgrep', 'xargs -0 semgrep')).toContain(semgrepLine);
@@ -1419,8 +1506,13 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(defects('git -C "{worktree}" diff --name-only -z --diff-filter=d {DIFF_RANGE} | tr', 'git diff --name-only -z --diff-filter=d {DIFF_RANGE} | tr')).toContain(list);
     expect(defects("diff --name-only -z --diff-filter=d {DIFF_RANGE} | tr", "diff --name-only --diff-filter=d {DIFF_RANGE} | tr")).toContain(list);
     expect(defects(String.raw`tr '\0\n' '\n?'`, String.raw`tr '\0' '\n'`)).toContain(list);
-    expect(defects("sed -n 's/.*\\.//p'", "sed 's/.*\\.//'")).toContain(list);
+    expect(defects("sed -n 's/.*\\.\\([^./]*\\)$/\\1/p'", "sed 's/.*\\.\\([^./]*\\)$/\\1/'")).toContain(list);
+    expect(defects("sed -n 's/.*\\.\\([^./]*\\)$/\\1/p'", "sed -n 's/.*\\.//p'")).toContain(list);
     expect(defects(' | sort -u', ' | sort')).toContain(list);
+    expect(defects('set -o pipefail; export LC_ALL=C; git -C', 'git -C')).toContain(list);
+    expect(defects('set -o pipefail; export', 'export')).toContain(list);
+    expect(defects('export LC_ALL=C; ', '')).toContain(list);
+    expect(defects(' || echo "extension list failed"', '')).toContain(list);
     expect(defects(LANG_LIST + '\n', '')).toContain(list);
     const language = (found: string): string => `the CodeQL create line does not take its language only from {lang}: ${found}`;
     expect(defects('--language={lang} ', '--language={detected-language} ')).toContain(language('{detected-language}'));
@@ -1434,6 +1526,8 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(defects('whose extension is listed', 'or any language it finds')).toContain(doesNotSay(LANG_PROSE[1]));
     expect(defects('no other value reaches the command', 'other values may reach the command')).toContain(doesNotSay(LANG_PROSE[2]));
     expect(defects(LANG_PROSE[3], 'With none, CodeQL runs on the repository default.')).toContain(doesNotSay(LANG_PROSE[3]));
+    expect(defects(LANG_PROSE[4], 'A failed list reads as no language.')).toContain(doesNotSay(LANG_PROSE[4]));
+    expect(defects('`extension list failed` means it', '`extension list failed` means CodeQL does not run and it')).toContain(doesNotSay(LANG_PROSE[4]));
     expect(collectCodeqlLanguageDefects('')).toEqual([list, language('none'), ...LANG_PROSE.map(doesNotSay)]);
   });
 
@@ -1464,7 +1558,7 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(defects(SNYK_FILTER_LINES[3], '&& true \\')).toContain(count);
     expect(defects(SNYK_FILTER_LINES[4], '|| true')).toContain(fallback);
     expect(defects('; cp "{ANALYSIS_DIR}/snyk-all.json" "{ANALYSIS_DIR}/snyk.sarif"; }', '; }')).toContain(fallback);
-    expect(defects('Snyk scope filter failed: unfiltered', 'Snyk scope filter failed')).toContain(fallback);
+    expect(defects('echo "Snyk scope filter failed: unfiltered"', 'echo "Snyk scope filter failed"')).toContain(fallback);
     expect(defects('|| { echo', '|| true; { echo')).toContain(fallback);
     expect(defects('jq --rawfile n', 'jq --arg x "$(git diff --name-only -z)" --rawfile n'))
       .toContainEqual(expect.stringContaining('a jq line of the Snyk fence reaches a value in a way other than --arg, --argjson or --rawfile'));
@@ -1514,15 +1608,16 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
       const listed = (files: { unchanged: string[]; changed: string[]; removed: string[] }): string[] => {
         let out: string[] = [];
         inScratch(folder => {
-          const run = spawnSync('bash', ['-s'], { input: shippedExtensionList(phase2(), makeScratchRepo(folder, files), 'HEAD~1..HEAD'), encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } });
+          const run = spawnSync('bash', ['-s'], { input: shippedExtensionList(phase2(), makeScratchRepo(folder, files), 'HEAD~1..HEAD'), encoding: 'utf8' });
           expect(run.status, run.stderr).toBe(0);
           out = run.stdout.split('\n').filter(line => line !== '');
         });
         return out;
       };
-      // A removed file is left out, a newline in a name never forges a second extension, and text after the last dot is data.
-      expect(listed({ unchanged: ['keep.md', 'old.go'], changed: ['src/app.ts', 'lib/tool.py', 'weird.name.js', 'x.js\nz', 'dir.v2/noext', 'README'], removed: ['old/gone.rb'] }))
-        .toEqual(['js', 'js?z', 'py', 'ts', 'v2/noext']);
+      // The shipped line sets its own locale. A removed file is left out, a newline in a name never forges a second extension,
+      // text after the last dot is data, and a file with no extension under a dotted folder gives no line.
+      expect(listed({ unchanged: ['keep.md', 'old.go'], changed: ['src/app.ts', 'lib/tool.py', 'weird.name.js', 'x.js\nz', 'dir.v2/noext', '.github/CODEOWNERS', 'README'], removed: ['old/gone.rb'] }))
+        .toEqual(['js', 'js?z', 'py', 'ts']);
       expect(listed({ unchanged: ['keep.py'], changed: ['README', 'Makefile'], removed: ['gone.rb'] })).toEqual([]);
     }, SPAWN_TEST_TIMEOUT_MS);
 
@@ -1590,6 +1685,12 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
         expect(first.top).toHaveLength(50);
         expect(first.top.map(row => row.split('\t')[3])).toEqual([...Array(25).fill('warning'), ...Array(25).fill('note')]);
 
+        // The same tools again: each tool's rows are written to its own file, so none repeats.
+        const again = runCountsFence(phase2(), folder, 'semgrep snyk', {});
+        expect(again.printed).toEqual(first.printed);
+        expect(again.rows).toEqual(first.rows);
+        expect(again.top).toEqual(first.top);
+
         const second = runCountsFence(phase2(), folder, 'codeql', { 'codeql.sarif': sarifDoc(sarifRange('error', 200, 10)) });
         expect(second.printed).toEqual(['codeql docs=1 results=10 error=10 warning=0 note=0']);
         expect(second.rows).toHaveLength(65);
@@ -1613,6 +1714,89 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
         expect(none.printed).toEqual([]);
         expect(none.top).toEqual([]);
         expect(none.status).toBe(0);
+      });
+    }, SPAWN_TEST_TIMEOUT_MS);
+
+    it(`the shipped counts and table give a result with no level the default level of its rule, from the run's own rules, else warning (${label})`, ctx => {
+      skipUnlessRunnable(ctx);
+      inScratch(folder => {
+        const result = (ruleId: string, n: number, level?: string): object => ({
+          ...(level === undefined ? {} : { level }),
+          ruleId,
+          message: { text: `message ${n}` },
+          locations: [{ physicalLocation: { artifactLocation: { uri: `src/r${n}.ts` }, region: { startLine: n } } }],
+        });
+        const rule = (id: string, level: string): object => ({ id, defaultConfiguration: { level } });
+        const codeql = JSON.stringify({
+          version: '2.1.0',
+          runs: [
+            {
+              tool: { driver: { name: 'CodeQL', rules: [rule('in-driver', 'error'), rule('both', 'note')] }, extensions: [{ name: 'pack', rules: [rule('in-extension', 'note'), rule('extension-error', 'error')] }] },
+              results: [result('in-driver', 1), result('in-extension', 2), result('no-rule', 3), result('in-driver', 4, 'note'), result('extension-error', 5)],
+            },
+            { tool: { driver: { name: 'CodeQL', rules: [rule('in-driver', 'warning')] } }, results: [result('in-driver', 6)] },
+          ],
+        });
+        const run = runCountsFence(phase2(), folder, 'codeql', { 'codeql.sarif': codeql });
+        // Result 1: the rule in the driver. 2: the rule in an extension. 3: no rule, so warning. 4: its own level wins. 5: an extension rule. 6: the second run's own rule table.
+        expect(run.printed).toEqual(['codeql docs=1 results=6 error=2 warning=2 note=2']);
+        const cells = run.rows.map(row => row.split('\t'));
+        expect(cells.map(row => row[1])).toEqual(['src/r1.ts', 'src/r2.ts', 'src/r3.ts', 'src/r4.ts', 'src/r5.ts', 'src/r6.ts']);
+        expect(cells.map(row => row[3])).toEqual(['error', 'note', 'warning', 'note', 'error', 'warning']);
+        expect(run.top.map(row => row.split('\t')[3])).toEqual(['error', 'error', 'warning', 'warning', 'note', 'note']);
+      });
+    }, SPAWN_TEST_TIMEOUT_MS);
+
+    it(`the shipped table step prints a marker when the top 50 file cannot be written (${label})`, ctx => {
+      skipUnlessRunnable(ctx);
+      inScratch(folder => {
+        writeFileSync(join(folder, 'semgrep.sarif'), sarifDoc(sarifRange('note', 0, 3)));
+        mkdirSync(join(folder, 'findings-top.tsv'));
+        const run = spawnSync('bash', ['-s'], { input: shippedCountsFence(phase2(), folder, 'semgrep'), encoding: 'utf8' });
+        expect(run.stdout.split('\n').filter(line => line !== '')).toEqual(['semgrep docs=1 results=3 error=0 warning=0 note=3', 'findings table incomplete: top']);
+      });
+    }, SPAWN_TEST_TIMEOUT_MS);
+  }
+
+  for (const [label, body] of builds) {
+    const bashReason = (): string | null => (spawnSync('bash', ['--version'], { encoding: 'utf8' }).status === 0 ? null : 'bash is not installed, so the shipped CodeQL fence is not run');
+
+    /** Runs the shipped CodeQL fence with a stub `codeql` that prints a line to stdout and one to stderr, and fails on the call named in `fails`. */
+    const runCodeqlFence = (folder: string, fails: string): { printed: string[]; stderr: string; log: string; sarif: boolean } => {
+      const fence = bashFences(phase2Of(body ?? '')).find(text => fenceLines(text).some(line => line.includes('codeql database')));
+      if (fence === undefined) throw new Error('the CodeQL fence is gone');
+      const analysis = join(folder, 'analysis');
+      const bin = join(folder, 'bin');
+      mkdirSync(analysis);
+      mkdirSync(bin);
+      const stub = ['#!/bin/sh', 'echo "out $2"', 'echo "err $2" >&2', '[ "$2" = "$STUB_FAILS" ] && exit 3', 'for a in "$@"; do case "$a" in --output=*) : > "${a#--output=}";; esac; done', 'exit 0', ''];
+      writeFileSync(join(bin, 'codeql'), stub.join('\n'), { mode: 0o755 });
+      const input = fenceLines(fence).join('\n').split('{ANALYSIS_DIR}').join(analysis).split('{worktree}').join(folder).split('{lang}').join('python');
+      const run = spawnSync('bash', ['-s'], { input, encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}`, STUB_FAILS: fails } });
+      const log = existsSync(join(analysis, 'codeql.log')) ? readFileSync(join(analysis, 'codeql.log'), 'utf8') : '';
+      return { printed: run.stdout.split('\n').filter(line => line !== ''), stderr: run.stderr, log, sarif: existsSync(join(analysis, 'codeql.sarif')) };
+    };
+
+    it(`the shipped CodeQL fence keeps its own output in codeql.log, so only the exit line reaches the call output (${label})`, ctx => {
+      expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
+      const reason = bashReason();
+      if (reason !== null) {
+        console.warn(`[bug-analysis structural] ${reason}`);
+        ctx.skip(reason);
+      }
+      inScratch(folder => {
+        const done = runCodeqlFence(folder, '');
+        expect(done.printed).toEqual(['exit=0']);
+        expect(done.stderr).toBe('');
+        expect(done.log).toBe('out create\nerr create\nout analyze\nerr analyze\n');
+        expect(done.sarif).toBe(true);
+      });
+      inScratch(folder => {
+        const failed = runCodeqlFence(folder, 'create');
+        expect(failed.printed).toEqual(['exit=3']);
+        expect(failed.stderr).toBe('');
+        expect(failed.log).toBe('out create\nerr create\n');
+        expect(failed.sarif).toBe(false);
       });
     }, SPAWN_TEST_TIMEOUT_MS);
   }
