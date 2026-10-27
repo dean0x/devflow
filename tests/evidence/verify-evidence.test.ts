@@ -222,7 +222,7 @@ describe('module surface', () => {
     expect(Object.isFrozen(VE)).toBe(true)
     expect(Object.keys(VE).sort()).toEqual([
       'CAPS', 'EXIT_CODES', 'PR_FIELDS', 'main', 'settleOutcome',
-      'BODY_STATUSES', 'COMMENT_STATUSES', 'readinessVerdict', 'bindCiHead', 'renderPublishBlock', 'parsePublishBlock', 'renderReadinessBlock', 'parseReadinessBlock',
+      'BODY_STATUSES', 'COMMENT_STATUSES', 'readinessVerdict', 'bindCiHead', 'renderPublishBlock', 'parsePublishBlock', 'renderReadinessBlock', 'parseReadinessBlock', 'writeReadinessOut',
       'commentIdOf', 'editTarget',
     ].sort())
   })

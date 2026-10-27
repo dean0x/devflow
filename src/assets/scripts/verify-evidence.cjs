@@ -39,7 +39,10 @@
 //             plan and the claims from a local evidence file, as `verify --evidence`
 //             does. `--out <file>` also writes the file `READINESS pr:<n>
 //             head:<40hex|none> status:<READY|NOT_READY|DEGRADED>`, then that same
-//             block; stdout does not change, and the command makes no remote write
+//             block; stdout does not change, and the command makes no remote write.
+//             A file an earlier run left at the out path never outlives this run: it
+//             is removed before the first read, and a block that does not parse or a
+//             write that fails leaves no out file
 // No byte of a PR body, a comment, a review or a gh/git answer is ever printed: the
 // boundary re-checks every stdout line against these shapes before writing it.
 //
@@ -2635,11 +2638,15 @@ function readinessPass(io, args, deps) {
 /**
  * D-READINESS-OUT: `readiness --out <file>`. The file holds the READINESS line, then the
  * block exactly as it prints. The status in the line is the one the block's own parse
- * gives, so the line and the block cannot disagree, and a block the output gate would
- * refuse is never written. The head is the PR head the first read gave, or `none`.
- * writeTextFile refuses a path that exists and is not a regular file, a symlink included,
- * so no link is followed. A file that cannot be written is the output gate's refusal:
- * nothing is printed. The command makes no gh write.
+ * gives, so the line and the block cannot disagree. The head is the PR head the first
+ * read gave, or `none`. writeTextFile refuses a path that exists and is not a regular
+ * file, a symlink included, so no link is followed. The command makes no gh write.
+ *
+ * One rule covers every outcome: a file from an earlier run never outlives this run.
+ * runReadiness removes the earlier regular file before the first read; here, a block the
+ * output gate would refuse is never written and is the gate's refusal, and a file that
+ * cannot be written is the write refusal, with the regular file the write left removed.
+ * Either way nothing is printed and no out file remains.
  *
  * @param {Io} io
  * @param {string} file
@@ -2650,12 +2657,35 @@ function readinessPass(io, args, deps) {
  */
 function writeReadinessOut(io, file, pr, outcome, head) {
   const block = parseReadinessBlock(outcome.stdout);
-  if (block === null) return outcome;
+  if (block === null) {
+    removeOutFile(file);
+    return refuse(io, EXIT_CODES.OUTPUT_GATE_REFUSED, 'the readiness block failed its grammar');
+  }
   const line = ['READINESS', 'pr:' + pr, 'head:' + (head === null ? 'none' : head), 'status:' + block.status].join(' ');
   if (!writeTextFile(file, line + '\n' + outcome.stdout)) {
+    removeOutFile(file);
     return refuse(io, EXIT_CODES.WRITE_FAILED, 'an output file could not be written');
   }
   return outcome;
+}
+
+/**
+ * Remove the regular file an earlier run left at `file`. A path that names nothing, a
+ * link, a FIFO or a directory is left as it is: writeTextFile creates the first and
+ * refuses the rest. The lstat never follows a link. False when a regular file could not
+ * be removed.
+ *
+ * @param {string} file
+ * @returns {boolean}
+ */
+function removeOutFile(file) {
+  try {
+    const st = fs.lstatSync(file, { throwIfNoEntry: false });
+    if (st !== undefined && st.isFile()) fs.unlinkSync(file);
+    return true;
+  } catch (_) {
+    return false;
+  }
 }
 
 /**
@@ -2665,6 +2695,11 @@ function writeReadinessOut(io, file, pr, outcome, head) {
  * @returns {Outcome}
  */
 function runReadiness(io, args, deps) {
+  // A file an earlier run left at the out path goes before the first read, so a run that
+  // stops anywhere after this leaves no earlier answer behind.
+  if (args.out !== null && !removeOutFile(args.out)) {
+    return refuse(io, EXIT_CODES.WRITE_FAILED, 'an output file could not be written');
+  }
   const pass = readinessPass(io, args, deps);
   return args.out === null ? pass.outcome : writeReadinessOut(io, args.out, args.pr, pass.outcome, pass.head);
 }
@@ -2755,7 +2790,7 @@ function main(argv, deps) {
     const label = 'internal error (' + errorLabel(err) + ')';
     if (args.kind === 'publish') outcome = evidenceUnavailable(io, label);
     else if (args.kind === 'readiness') {
-      // A file an earlier run left must not outlive this one, so the out file says DEGRADED too.
+      // The earlier out file is already gone (runReadiness), so the DEGRADED answer is the one file this run leaves.
       outcome = readinessDegraded(args.pr, 'internal error', {});
       if (args.out !== null) outcome = writeReadinessOut(io, args.out, args.pr, outcome, null);
     } else outcome = refuse(io, EXIT_CODES.REMOTE_FAILURE, label);
@@ -2858,6 +2893,7 @@ module.exports = Object.freeze({
   parsePublishBlock,
   renderReadinessBlock,
   parseReadinessBlock,
+  writeReadinessOut,
   commentIdOf,
   editTarget,
 });

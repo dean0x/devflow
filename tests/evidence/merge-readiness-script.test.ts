@@ -16,7 +16,8 @@
  * probe. Every reader reads BUILT artifacts.
  */
 
-import { describe, it, expect, afterAll, beforeAll } from 'vitest'
+import { describe, it, expect, afterAll, beforeAll, vi } from 'vitest'
+import { execFileSync } from 'child_process'
 import { createRequire } from 'module'
 import * as fs from 'fs'
 import { readFileSync } from 'fs'
@@ -44,6 +45,13 @@ interface VerifyApi {
   parseReadinessBlock(text: string): ReadinessBlock | null
   renderReadinessBlock(block: ReadinessBlock): string
   bindCiHead(ci: CiRead, viewHead: unknown, evidenceHead: unknown): CiRead
+  writeReadinessOut(
+    io: { stderr(text: string): void },
+    file: string,
+    pr: number,
+    outcome: { code: number; stdout: string },
+    head: string | null,
+  ): { code: number; stdout: string }
 }
 interface CiRead {
   status: string
@@ -55,6 +63,8 @@ interface EvidenceApi {
 }
 
 const req = createRequire(import.meta.url)
+/** The module object the scripts load: a spy on it reaches their file calls, which the `import * as fs` namespace cannot give. */
+const nodeFs = req('fs') as typeof fs
 const VE = req(VERIFY_EVIDENCE_SCRIPT) as VerifyApi
 const PE = req(PR_EVIDENCE_SCRIPT) as EvidenceApi
 
@@ -790,6 +800,38 @@ describe('TP-15: readiness --out writes the READINESS line, then the block', () 
     expect(VE.parseReadinessBlock(r.stdout)).toMatchObject({ status: 'DEGRADED', reason: 'internal error' })
     expect(fs.readFileSync(out, 'utf8')).toBe(lineOf('none', 'DEGRADED') + r.stdout)
   })
+
+  it('an out file from an earlier run is removed before the first read, so a run that stops partway leaves none', () => {
+    const out = path.join(localDir(), 'readiness.txt')
+    fs.writeFileSync(out, lineOf(SHIM_HEAD, 'READY'))
+    const twin = greenTwin()
+    const present: boolean[] = []
+    runInProcess(['readiness', '--pr', '7', '--require-non-author-approval', 'false', '--out', out], (file, args) => {
+      present.push(fs.existsSync(out))
+      return twin.exec(file, args)
+    })
+    expect(present.length, 'the run read the PR').toBeGreaterThan(0)
+    expect(present.filter(Boolean), 'the earlier file was still there at a read').toEqual([])
+  })
+
+  it('a block that does not parse is the output-gate refusal and leaves no out file', () => {
+    const out = path.join(localDir(), 'readiness.txt')
+    fs.writeFileSync(out, lineOf(SHIM_HEAD, 'READY'))
+    let stderr = ''
+    const r = VE.writeReadinessOut({ stderr: t => { stderr += t } }, out, 7, { code: 0, stdout: 'not a readiness block\n' }, SHIM_HEAD)
+    expect(r).toEqual({ code: 5, stdout: '' })
+    expect(stderr).toContain('verify-evidence: ')
+    expect(fs.existsSync(out)).toBe(false)
+  })
+
+  it('an out path that is not a regular file is left alone: a FIFO is refused, never opened or removed', () => {
+    const out = path.join(localDir(), 'readiness.fifo')
+    execFileSync('mkfifo', [out])
+    const r = runInProcess(['readiness', '--pr', '7', '--require-non-author-approval', 'false', '--out', out], greenTwin().exec)
+    expect(r.code).toBe(3)
+    expect(r.stdout).toBe('')
+    expect(fs.lstatSync(out).isFIFO()).toBe(true)
+  })
 })
 
 describe('TP-16: an out file that cannot be written prints no block and exits non-zero', () => {
@@ -822,6 +864,45 @@ describe('TP-16: an out file that cannot be written prints no block and exits no
     const r = runInProcess(['readiness', '--pr', '7', '--out', out], () => { throw new Error('exec exploded') })
     expect(r.code).toBe(3)
     expect(r.stdout).toBe('')
+  })
+
+  it('a write that fails partway leaves no out file, on a decided answer and on an internal failure alike', () => {
+    const exploding = (): never => { throw new Error('exec exploded') }
+    for (const [label, exec] of [['a decided answer', greenTwin().exec], ['an internal failure', exploding]] as const) {
+      const out = path.join(localDir(), 'readiness.txt')
+      fs.writeFileSync(out, 'READINESS pr:7 head:none status:READY\n')
+      const write = nodeFs.writeFileSync
+      const spy = vi.spyOn(nodeFs, 'writeFileSync').mockImplementation(((target: number) => {
+        write(target, 'READINESS pr:7 head:none status:READY\n')
+        throw Object.assign(new Error('disk failure'), { code: 'EIO' })
+      }) as typeof nodeFs.writeFileSync)
+      let r: ReturnType<typeof runInProcess>
+      try {
+        r = runInProcess(['readiness', '--pr', '7', '--require-non-author-approval', 'false', '--out', out], exec)
+      } finally {
+        spy.mockRestore()
+      }
+      expect(r.code, label).toBe(3)
+      expect(r.stdout, label).toBe('')
+      expect(fs.existsSync(out), `${label}: no file may be left`).toBe(false)
+    }
+  })
+
+  it('an earlier out file that cannot be removed is a write failure before any read', () => {
+    const out = path.join(localDir(), 'readiness.txt')
+    fs.writeFileSync(out, 'READINESS pr:7 head:none status:READY\n')
+    const twin = greenTwin()
+    const spy = vi.spyOn(nodeFs, 'unlinkSync').mockImplementation(() => { throw Object.assign(new Error('denied'), { code: 'EACCES' }) })
+    let r: ReturnType<typeof runInProcess>
+    try {
+      r = runInProcess(['readiness', '--pr', '7', '--require-non-author-approval', 'false', '--out', out], twin.exec)
+    } finally {
+      spy.mockRestore()
+    }
+    expect(r.code).toBe(3)
+    expect(r.stdout).toBe('')
+    expect(r.stderr).toContain('verify-evidence: an output file could not be written')
+    expect(twin.calls, 'no read was made').toEqual([])
   })
 })
 
