@@ -387,9 +387,9 @@ function parseArgs(argv) {
     if (needed !== null && needed !== 'true' && needed !== 'false') return USAGE_ARGS;
     const evidence = flagValue(f, '--evidence');
     const out = flagValue(f, '--out');
-    // The out file replaces whatever it names: it must never be the evidence it was read from,
-    // however the two paths are spelled (`./a.md` and `a.md` are one file).
-    if (evidence !== null && out !== null && path.resolve(evidence) === path.resolve(out)) return USAGE_ARGS;
+    // The out file is never the evidence file: two spellings of one path (`./a.md` and `a.md`)
+    // and two names of one file (a hard link or a symlink) are both refused before any read.
+    if (evidence !== null && out !== null && (path.resolve(evidence) === path.resolve(out) || sameFile(evidence, out))) return USAGE_ARGS;
     // An absent flag is the ladder's "unrecognised": it can never read READY.
     return { kind: 'readiness', pr, requireNonAuthor: needed === null ? 'unrecognised' : needed, evidence, out };
   }
@@ -399,6 +399,24 @@ function parseArgs(argv) {
 // ---------------------------------------------------------------------------
 // Bounded file I/O
 // ---------------------------------------------------------------------------
+
+/**
+ * Whether two paths name one file: the same device and inode, links followed. A path
+ * that does not exist, or cannot be inspected, names no file.
+ *
+ * @param {string} a
+ * @param {string} b
+ * @returns {boolean}
+ */
+function sameFile(a, b) {
+  try {
+    const first = fs.statSync(a, { bigint: true, throwIfNoEntry: false });
+    const second = fs.statSync(b, { bigint: true, throwIfNoEntry: false });
+    return first !== undefined && second !== undefined && first.dev === second.dev && first.ino === second.ino;
+  } catch (_) {
+    return false;
+  }
+}
 
 /**
  * Read a regular file of at most MAX_FILE_BYTES as strict UTF-8, or null. The

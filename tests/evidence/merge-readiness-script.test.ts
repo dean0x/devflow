@@ -747,6 +747,32 @@ describe('TP-15: readiness --out writes the READINESS line, then the block', () 
     expect(fs.readFileSync(file, 'utf8')).toBe(evidenceText([LOCAL_TP]))
   })
 
+  it('a second name of the evidence file, a hard link or a symlink, is the same usage error in either position: the evidence file is never replaced', () => {
+    const file = writeEvidence(evidenceText([LOCAL_TP]))
+    const hard = path.join(path.dirname(file), 'hard.md')
+    const soft = path.join(path.dirname(file), 'soft.md')
+    fs.linkSync(file, hard)
+    fs.symlinkSync(file, soft)
+    const twin = greenTwin()
+    const pairs = [[file, hard], [hard, file], [file, soft], [soft, file]]
+    for (const [evidence, out] of pairs) {
+      const r = runInProcess(['readiness', '--pr', '7', '--require-non-author-approval', 'false', '--evidence', evidence, '--out', out], twin.exec)
+      expect(r.code, `${evidence} ${out}`).toBe(1)
+      expect(r.stdout).toBe('')
+    }
+    expect(twin.calls, 'a usage error makes no call').toEqual([])
+    expect(fs.readFileSync(file, 'utf8')).toBe(evidenceText([LOCAL_TP]))
+  })
+
+  it('an out file that does not exist yet beside an evidence file is not a clash', () => {
+    const file = writeEvidence(evidenceText([LOCAL_TP], [LOCAL_CLAIM]))
+    const out = path.join(path.dirname(file), 'fresh.txt')
+    const r = runInProcess(['readiness', '--pr', '7', '--require-non-author-approval', 'false', '--evidence', file, '--out', out], greenTwin().exec)
+    expect(r.code, r.stderr).toBe(0)
+    expect(fs.existsSync(out)).toBe(true)
+    expect(fs.readFileSync(file, 'utf8')).toBe(evidenceText([LOCAL_TP], [LOCAL_CLAIM]))
+  })
+
   it('a flag missing its value, or given twice, is a usage error', SPAWN_BUDGET, () => {
     for (const extra of [['--out'], ['--evidence'], ['--out', 'a.txt', '--out', 'b.txt'], ['--evidence', 'a.md', '--evidence', 'b.md']]) {
       const r = run(green(), 'false', extra)
