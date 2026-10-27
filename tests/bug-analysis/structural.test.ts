@@ -1638,8 +1638,8 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
 // Group 4: Debug agent spawning
 // ---------------------------------------------------------------------------
 
-/** The one findings line of the Debug spawn: the security analyzer gets the findings, every other focus gets `(none)`. */
-const SECURITY_ONLY_FINDINGS = 'STATIC_FINDINGS: {STATIC_FINDINGS if focus == security, else (none)}';
+/** The one findings line of the Debug spawn: the security analyzer gets the findings, every other focus gets `(none)`, inside a tag pair like the PR description. */
+const SECURITY_ONLY_FINDINGS = 'STATIC_FINDINGS: <static-findings>{STATIC_FINDINGS if focus == security, else (none)}</static-findings>';
 
 /** Phase 5 hands the findings to the security analyzer only: the Debug spawn fence has one `STATIC_FINDINGS:` line, and it is the exact line above. */
 function collectSecurityOnlyFindingsDefects(phase5: string): string[] {
@@ -1674,6 +1674,9 @@ describe('bug-analysis.md — Debug agent spawning', () => {
     expect(defects(SECURITY_ONLY_FINDINGS, 'STATIC_FINDINGS: {STATIC_FINDINGS if focus == functional, else (none)}')).toEqual([other]);
     expect(defects(SECURITY_ONLY_FINDINGS, 'STATIC_FINDINGS: {STATIC_FINDINGS if focus == security, else {STATIC_FINDINGS}}')).toEqual([other]);
     expect(defects(SECURITY_ONLY_FINDINGS, 'STATIC_FINDINGS: (none)')).toEqual([other]);
+    expect(defects(SECURITY_ONLY_FINDINGS, 'STATIC_FINDINGS: {STATIC_FINDINGS if focus == security, else (none)}')).toEqual([other]);
+    expect(defects('(none)}</static-findings>', '(none)}')).toEqual([other]);
+    expect(defects('<static-findings>', '<findings>')).toEqual([other]);
     expect(defects(`${SECURITY_ONLY_FINDINGS}\n`, '')).toEqual(['0 STATIC_FINDINGS lines in the Debug spawn, expected 1']);
     expect(defects(SECURITY_ONLY_FINDINGS, `${SECURITY_ONLY_FINDINGS}\n${SECURITY_ONLY_FINDINGS}`)).toEqual(['2 STATIC_FINDINGS lines in the Debug spawn, expected 1']);
     expect(collectSecurityOnlyFindingsDefects('')).toEqual(['0 Debug spawn fences, expected 1']);

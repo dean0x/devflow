@@ -226,7 +226,7 @@ FOCUS: {focus}
 DIFF_COMMAND: git diff {DIFF_RANGE}
 ACCEPTANCE_RULES: {ACCEPTANCE_RULES filtered to this focus type, or (none)}
 PLAN_CONTEXT: {PLAN_CONTEXT}
-STATIC_FINDINGS: {STATIC_FINDINGS if focus == security, else (none)}
+STATIC_FINDINGS: <static-findings>{STATIC_FINDINGS if focus == security, else (none)}</static-findings>
 <!-- curation:on -->
 DECISIONS_CONTEXT: {DECISIONS_CONTEXT}
 <!-- curation:end -->
@@ -241,7 +241,6 @@ IMPORTANT: Write report to {ANALYSIS_DIR}/{focus}.md using Write tool"
 ```
 
 Notes:
-- Security analyzer receives full `STATIC_FINDINGS`; all others receive `(none)`
 - Filter `ACCEPTANCE_RULES` by the `Type` column matching each focus: security criteria → security analyzer, functional criteria → functional analyzer, etc. Pass the filtered subset only
 
 ### Phase 6: Synthesis
