@@ -710,6 +710,10 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
    * The scratch folder is the working directory, HOME and the npm cache, so the run
    * reads no config of the real machine and writes nothing outside it.
    */
+  const PACK_SPAWN_TIMEOUT_MS = 30_000;
+  // The test budget covers the scratch spawn at its full limit plus the file seeding around it.
+  const PACK_TEST_BUDGET_MS = 2 * PACK_SPAWN_TIMEOUT_MS;
+
   async function packSeededFiles(patterns: readonly string[], seeded: readonly string[]): Promise<string[]> {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-pack-'));
     try {
@@ -723,7 +727,7 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
       }
       const raw = execFileSync('npm', ['pack', '--dry-run', '--json'], {
         cwd: dir,
-        timeout: 30_000,
+        timeout: PACK_SPAWN_TIMEOUT_MS,
         stdio: ['pipe', 'pipe', 'pipe'],
         env: {
           ...process.env,
@@ -776,7 +780,7 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
       dropped.filter(f => packed.includes(f)),
       'the scratch pack must honour files[]: a map file and a path outside every pattern stay out',
     ).toEqual([]);
-  });
+  }, PACK_TEST_BUDGET_MS);
 
   /**
    * Tarball decision D-A(a), ACCEPTED at Gate 2: the .mds generator sources ship.
