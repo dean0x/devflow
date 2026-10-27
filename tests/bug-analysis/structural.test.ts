@@ -14,6 +14,9 @@
 // cannot silently remove safety-critical patterns.
 
 import { spawnSync } from 'child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { describe, it, expect } from 'vitest';
 import { loadFile, extractSection, sectionBetween, parseFences, resolveAgentSource, resolveCurationOffSource, collectFreshBaseDefects, collectSlugCheckDefects, collectStoredHeadDefects, slugSinkLines, seedOnce, readAgentReference, EVIDENCE_RENDER_LINE, type DiffRangeShape } from '../helpers';
 
@@ -579,7 +582,9 @@ const STATUS_LINE_PARTS = [
   'or no such line',
   '`STATIC_FINDINGS` is `(none)` only when every tool that was to run completed',
   'Static analysis did not complete: {tool}',
-  "If a tool's output was clipped, its findings are incomplete: name the tool in `STATIC_FINDINGS`, never `(none)`",
+  'A tool also did not complete when the counts fence prints `sarif=unreadable` or `findings table incomplete` for it, or `docs=0`',
+  '(Semgrep exit 0 with `docs=0`: no file to scan, completed)',
+  '"exit {n} ({meaning}).", "no exit status." or "SARIF not read."',
 ];
 
 /**
@@ -634,10 +639,32 @@ const SARIF_TARGETS: Array<[string, string]> = [
   ['codeql database analyze', '--output="{ANALYSIS_DIR}/codeql.sarif" 2>/dev/null'],
 ];
 
+const COUNTS_OPENER = 'cd "{ANALYSIS_DIR}" || exit';
+/** What the counts and table fence ships, one pin per program: the loop over the tool list, the counts line, the table, the top 50 file. */
+const COUNTS_PARTS = [
+  'for t in {tools}; do [ -f $t.sarif ] || continue',
+  ' docs=\\(length) results=\\($l|length) error=\\(c("error")) warning=\\(c("warning")) note=\\(c("note"))',
+  '$t.sarif || echo "$t sarif=unreadable"',
+  '|@tsv',
+  '[:200]',
+  '$t.sarif >>findings.tsv || echo "findings table incomplete: $t"',
+  '|.[:50][]',
+  "' findings.tsv >findings-top.tsv",
+  'touch findings.tsv',
+];
+const COUNTS_PROSE = [
+  '(after Snyk with `{tools}` = `semgrep snyk`; after CodeQL with `codeql`)',
+  'Read `error` as HIGH, `warning` as MEDIUM, `note` as LOW.',
+  '`findings.tsv` keeps every finding. Read only `findings-top.tsv`',
+];
+/** A jq program in the counts fence is one single-quoted argument, and the tool name reaches it only through `--arg`. */
+const COUNTS_JQ_SHAPE = /\bjq -\w+ (?:--arg t \$t )?'[^']*'/;
+
 /**
  * No fence prints a scanner's SARIF to the call output, where a long result is clipped and its findings and exit line
  * can be lost. Each scanner line writes its SARIF to a file in the analysis folder, and no fence reads one back with
- * `cat`.
+ * `cat`. One counts and table fence sits after Snyk and before CodeQL (the CodeQL trigger needs the counts), runs once
+ * per SARIF file that exists, and is the only writer of `findings.tsv` and `findings-top.tsv`.
  */
 function collectSarifFileDefects(phase2: string): string[] {
   const out: string[] = [];
@@ -649,7 +676,26 @@ function collectSarifFileDefects(phase2: string): string[] {
   }
   const printed = lines.find(line => /^\s*cat\b/.test(line) || line.includes('$S"') || line.startsWith('S=$('));
   if (printed !== undefined) out.push(`a fence prints SARIF to the call output: ${printed.trim()}`);
-  return out;
+
+  const fences = bashFences(phase2);
+  const counts = fences.filter(fence => fenceLines(fence).some(line => line.startsWith('for t in {tools}')));
+  if (counts.length !== 1) out.push(`${counts.length} counts and table fences, expected 1`);
+  else {
+    const body = fenceLines(counts[0]);
+    if (body[0] !== COUNTS_OPENER) out.push(`the counts fence does not open with ${COUNTS_OPENER}`);
+    out.push(...COUNTS_PARTS.filter(part => !body.join('\n').includes(part)).map(part => `the counts fence does not say: ${part}`));
+    const loose = body.find(line => /\bjq\b/.test(line) && !COUNTS_JQ_SHAPE.test(line));
+    if (loose !== undefined) out.push(`a jq line of the counts fence is not one single-quoted program: ${loose.trim().slice(0, 60)}`);
+    const at = fences.indexOf(counts[0]);
+    const after = fences.findIndex(fence => fence.includes('snyk code test'));
+    const before = fences.findIndex(fence => fence.includes('codeql database'));
+    if (after === -1 || before === -1 || at < after || at > before) out.push('the counts fence does not sit after the Snyk fence and before the CodeQL fence');
+  }
+  for (const sink of ['>>findings.tsv', '>findings-top.tsv']) {
+    const writers = lines.filter(line => line.includes(sink)).length;
+    if (writers !== 1) out.push(`${writers} lines write ${sink.replace(/^>+/, '')}, expected 1`);
+  }
+  return [...out, ...COUNTS_PROSE.filter(part => !phase2.includes(part)).map(doesNotSay)];
 }
 
 const OUTCOME_VAR = 'STATIC_STATUS';
@@ -740,7 +786,7 @@ const SNYK_NAME_LIST ='"$(git diff --name-only -z {DIFF_RANGE} | jq -Rs \'split(
 function collectFileNameHandoffDefects(phase2: string): string[] {
   const out: string[] = [];
   const fences = bashFences(phase2).length;
-  if (fences < 5) out.push(`${fences} bash fences, expected at least 5`);
+  if (fences < 6) out.push(`${fences} bash fences, expected at least 6`);
   const semgrep = /^set -o pipefail; git diff --name-only -z --diff-filter=d \{DIFF_RANGE\} \| xargs -0 -r semgrep scan [^;|]* -- >"\{ANALYSIS_DIR\}\/semgrep\.sarif" 2>\/dev\/null;/m;
   if (!semgrep.test(phase2)) out.push('the Semgrep line does not read names with -z, pass them with xargs -0 and put them after --');
   if (!phase2.includes(SNYK_NAME_LIST)) out.push('the Snyk filter does not read the names from git as NUL-separated output');
@@ -776,6 +822,38 @@ function shippedSnykPrograms(phase2: string): { names: string; scope: string } {
   const scope = fence.map(line => line.trim()).find(line => line.startsWith("'.runs[]") && line.endsWith("' \\"));
   if (names === null || scope === undefined) throw new Error('the Snyk fence no longer holds the jq name reader and the scope filter in their shipped shape');
   return { names: names[1], scope: scope.slice(1, -3) };
+}
+
+type SarifLevel = 'error' | 'warning' | 'note' | undefined;
+/** One SARIF result for finding `n`; a result with no level is read as a warning. */
+const sarifResult = (level: SarifLevel, n: number, message = `finding ${n}`): object => ({
+  ...(level === undefined ? {} : { level }),
+  ruleId: `rule-${n}`,
+  message: { text: message },
+  locations: [{ physicalLocation: { artifactLocation: { uri: `src/file ${n}.ts` }, region: { startLine: n + 1 } } }],
+});
+const sarifDoc = (results: object[]): string => JSON.stringify({ version: '2.1.0', runs: [{ tool: { driver: { name: 'scanner' } }, results }] });
+const sarifRange = (level: SarifLevel, from: number, count: number): object[] => Array.from({ length: count }, (_unused, index) => sarifResult(level, from + index));
+
+/** The counts and table fence as shipped, to run in a scratch folder for the tools named. It throws when the fence changes shape. */
+function shippedCountsFence(phase2: string, folder: string, tools: string): string {
+  const fence = bashFences(phase2).find(text => fenceLines(text).some(line => line.startsWith('for t in {tools}')));
+  if (fence === undefined) throw new Error('the counts and table fence is gone');
+  return fenceLines(fence).join('\n').split('{ANALYSIS_DIR}').join(folder).split('{tools}').join(tools);
+}
+
+/** Runs the shipped fence with bash over the SARIF files in `files`, and reads back what it printed and wrote. */
+function runCountsFence(phase2: string, folder: string, tools: string, files: Record<string, string>): { printed: string[]; rows: string[]; top: string[]; status: number | null } {
+  for (const [name, text] of Object.entries(files)) writeFileSync(join(folder, name), text);
+  const run = spawnSync('bash', ['-s'], { input: shippedCountsFence(phase2, folder, tools), encoding: 'utf8' });
+  const lines = (name: string): string[] => readFileSync(join(folder, name), 'utf8').split('\n').filter(line => line !== '');
+  return { printed: run.stdout.split('\n').filter(line => line !== ''), rows: lines('findings.tsv'), top: lines('findings-top.tsv'), status: run.status };
+}
+
+/** The reason the shipped programs cannot run here, or null. */
+function countsFenceSkipReason(): string | null {
+  const missing = ['jq', 'bash'].filter(command => spawnSync(command, ['--version'], { encoding: 'utf8' }).status !== 0);
+  return missing.length === 0 ? null : `${missing.join(' and ')} is not installed, so the shipped counts and table programs are not run`;
 }
 
 describe('bug-analysis.md — static analysis never reads as clean when it did not run or did not finish (#649)', () => {
@@ -938,7 +1016,12 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(defects('or no such line', 'or an empty line')).toContain(doesNotSay(STATUS_LINE_PARTS[1]));
     expect(defects('only when every tool that was to run completed and none found anything', 'when none found anything')).toContain(doesNotSay(STATUS_LINE_PARTS[2]));
     expect(defects('Static analysis did not complete: {tool}', 'Static analysis failed: {tool}')).toContain(doesNotSay(STATUS_LINE_PARTS[3]));
-    expect(defects("If a tool's output was clipped", 'If a tool output is long')).toContain(doesNotSay(STATUS_LINE_PARTS[4]));
+    expect(defects('A tool also did not complete when the counts fence prints', 'A tool did not complete when a fence prints')).toContain(doesNotSay(STATUS_LINE_PARTS[4]));
+    expect(defects('`sarif=unreadable` or `findings table incomplete` for it, or `docs=0`', '`sarif=unreadable` for it')).toContain(doesNotSay(STATUS_LINE_PARTS[4]));
+    expect(defects('Semgrep exit 0 with `docs=0`: no file to scan, completed', 'Semgrep exit 0 with `docs=0`: not completed')).toContain(doesNotSay(STATUS_LINE_PARTS[5]));
+    expect(defects('(Semgrep exit 0 with ', '(Semgrep with ')).toContain(doesNotSay(STATUS_LINE_PARTS[5]));
+    expect(defects('or "SARIF not read."', 'or "no SARIF."')).toContain(doesNotSay(STATUS_LINE_PARTS[6]));
+    expect(defects('"no exit status." or', '"no exit status." and')).toContain(doesNotSay(STATUS_LINE_PARTS[6]));
   });
 
   it.each(builds)('each scanner prints its own status after its scanner line (%s)', (_label, body) => {
@@ -1002,7 +1085,32 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(defects('CODEQL_EXIT=$?\n', 'CODEQL_EXIT=$?\ncat "{ANALYSIS_DIR}/codeql.sarif"\n')).toContainEqual(printed);
     expect(defects('jq --argjson files', 'printf \'%s\' "$S" | jq --argjson files')).toContainEqual(printed);
     expect(defects('snyk code test --sarif >', 'S=$(snyk code test --sarif >')).toContainEqual(printed);
-    expect(collectSarifFileDefects('')).toHaveLength(SARIF_TARGETS.length);
+    const counts = (part: string): string => `the counts fence does not say: ${part}`;
+    expect(defects('touch findings.tsv\n', '')).toEqual([counts(COUNTS_PARTS[8])]);
+    expect(defects(COUNTS_OPENER, 'cd "{worktree}" || exit')).toContain(`the counts fence does not open with ${COUNTS_OPENER}`);
+    expect(defects('for t in {tools}; do', 'for t in semgrep snyk codeql; do')).toContain('0 counts and table fences, expected 1');
+    expect(defects('[ -f $t.sarif ] || continue', 'true')).toContain(counts(COUNTS_PARTS[0]));
+    expect(defects(' note=\\(c("note"))', '')).toContain(counts(COUNTS_PARTS[1]));
+    expect(defects(' results=\\($l|length)', '')).toContain(counts(COUNTS_PARTS[1]));
+    expect(defects('$t.sarif || echo "$t sarif=unreadable"', '$t.sarif')).toContain(counts(COUNTS_PARTS[2]));
+    expect(defects('|@tsv', '|@csv')).toContain(counts(COUNTS_PARTS[3]));
+    expect(defects('[:200]', '')).toContain(counts(COUNTS_PARTS[4]));
+    expect(defects('>>findings.tsv || echo "findings table incomplete: $t"', '>>findings.tsv')).toContain(counts(COUNTS_PARTS[5]));
+    expect(defects('|.[:50][]', '|.[]')).toContain(counts(COUNTS_PARTS[6]));
+    expect(defects("' findings.tsv >findings-top.tsv", "' findings.tsv")).toEqual(expect.arrayContaining([counts(COUNTS_PARTS[7]), '0 lines write findings-top.tsv, expected 1']));
+    const loose = expect.stringContaining('a jq line of the counts fence is not one single-quoted program');
+    expect(defects("jq -rs --arg t $t '[.[]", 'jq -rs "[.[]')).toContainEqual(loose);
+    expect(defects("jq -r --arg t $t '.runs[]?", 'jq -r --arg t $t ".runs[]?')).toContainEqual(loose);
+    expect(defects("jq -Rrs 'split(", 'jq -Rrs "split(')).toContainEqual(loose);
+    expect(defects('>>findings.tsv || echo', '>>findings.tsv\n  jq -r --arg t $t \'.\' $t.sarif >>findings.tsv || echo')).toContain('2 lines write findings.tsv, expected 1');
+    const place = 'the counts fence does not sit after the Snyk fence and before the CodeQL fence';
+    expect(defects(/(\*\*Counts and table\*\*[^\n]*\n)(```bash\n[\s\S]*?```\n)([^\n]*\n\n)(\*\*CodeQL\*\*[^\n]*\n)(```bash\n[\s\S]*?```\n)/, '$4$5$3$1$2')).toContain(place);
+    const prose = (part: string): string => doesNotSay(part);
+    expect(defects('Read `error` as HIGH, `warning` as MEDIUM, `note` as LOW.', 'Read `error` as HIGH.')).toContain(prose(COUNTS_PROSE[1]));
+    expect(defects('Read only `findings-top.tsv`', 'Read `findings-top.tsv`')).toContain(prose(COUNTS_PROSE[2]));
+    expect(defects('`findings.tsv` keeps every finding.', '')).toContain(prose(COUNTS_PROSE[2]));
+    expect(defects('after CodeQL with `codeql`', 'after CodeQL')).toContain(prose(COUNTS_PROSE[0]));
+    expect(collectSarifFileDefects('')).toEqual(expect.arrayContaining(['0 counts and table fences, expected 1', ...COUNTS_PROSE.map(prose)]));
   });
 
   it.each(builds)('a scanner that did not run or did not finish is named in the findings and the report (%s)', (_label, body) => {
@@ -1063,7 +1171,7 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(defects(SNYK_NAME_LIST, '"$(git diff --name-only {DIFF_RANGE} | jq -Rs \'split("\\u0000")\')"')).toContain(snykLine);
     expect(defects(SNYK_NAME_LIST, '"$(git diff --name-only {DIFF_RANGE} | jq -R . | jq -s .)"')).toContain(snykLine);
     expect(defects('File names reach a scanner only through', 'File names reach a scanner through')).toContain('Phase 2 does not say how file names reach a scanner');
-    expect(collectFileNameHandoffDefects('')).toContain('0 bash fences, expected at least 5');
+    expect(collectFileNameHandoffDefects('')).toContain('0 bash fences, expected at least 6');
   });
 
   it.each(builds)('--full always runs CodeQL: no sentence skips it or waits on Semgrep or Snyk completing (%s)', (_label, body) => {
@@ -1159,6 +1267,92 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
       .map(result => result.locations[0].physicalLocation.artifactLocation.uri);
     expect(kept).toEqual(changed);
   });
+
+  /** Runs `check` with a scratch folder that is removed afterwards. */
+  const inScratch = (check: (folder: string) => void): void => {
+    const folder = mkdtempSync(join(tmpdir(), 'bug-analysis-sarif-'));
+    try {
+      check(folder);
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  };
+
+  for (const [label, body] of builds) {
+    const phase2 = (): string => phase2Of(body ?? '');
+    const skipUnlessRunnable = (ctx: { skip: (reason: string) => never }): void => {
+      expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
+      const reason = countsFenceSkipReason();
+      if (reason !== null) {
+        console.warn(`[bug-analysis structural] ${reason}`);
+        ctx.skip(reason);
+      }
+    };
+
+    it(`the shipped counts read every concatenated SARIF document and mark an invalid file, and its table keeps every finding (${label})`, ctx => {
+      skipUnlessRunnable(ctx);
+      inScratch(folder => {
+        const long = 'x'.repeat(300);
+        const semgrep = `${sarifDoc([sarifResult('error', 1, `tab\there\nnew line ${long}`), sarifResult(undefined, 2, '$(touch pwned) "quoted" \\ back')])}\n${sarifDoc([sarifResult('note', 3)])}\n`;
+        const run = runCountsFence(phase2(), folder, 'semgrep snyk codeql', { 'semgrep.sarif': semgrep, 'snyk.sarif': '{"runs": [' });
+        expect(run.printed).toEqual([
+          'semgrep docs=2 results=3 error=1 warning=1 note=1',
+          'snyk sarif=unreadable',
+          'findings table incomplete: snyk',
+        ]);
+        expect(run.rows).toHaveLength(3);
+        const cells = run.rows.map(row => row.split('\t'));
+        expect(cells.map(row => row.slice(0, 5))).toEqual([
+          ['semgrep', 'src/file 1.ts', '2', 'error', 'rule-1'],
+          ['semgrep', 'src/file 2.ts', '3', 'warning', 'rule-2'],
+          ['semgrep', 'src/file 3.ts', '4', 'note', 'rule-3'],
+        ]);
+        const cut = `tab\there\nnew line ${long}`.slice(0, 200);
+        expect(cells[0][5]).toBe(cut.split('\t').join('\\t').split('\n').join('\\n'));
+        expect(cells[1][5]).toBe('$(touch pwned) "quoted" \\\\ back');
+        expect(run.top.map(row => row.split('\t')[3])).toEqual(['error', 'warning', 'note']);
+        expect(run.status).toBe(0);
+      });
+    });
+
+    it(`the shipped table keeps the 50 highest findings in a second file, and a second run adds a tool once (${label})`, ctx => {
+      skipUnlessRunnable(ctx);
+      inScratch(folder => {
+        const first = runCountsFence(phase2(), folder, 'semgrep snyk', {
+          'semgrep.sarif': sarifDoc(sarifRange('note', 0, 30)),
+          'snyk.sarif': sarifDoc(sarifRange('warning', 100, 25)),
+        });
+        expect(first.printed).toEqual(['semgrep docs=1 results=30 error=0 warning=0 note=30', 'snyk docs=1 results=25 error=0 warning=25 note=0']);
+        expect(first.rows).toHaveLength(55);
+        expect(first.top).toHaveLength(50);
+        expect(first.top.map(row => row.split('\t')[3])).toEqual([...Array(25).fill('warning'), ...Array(25).fill('note')]);
+
+        const second = runCountsFence(phase2(), folder, 'codeql', { 'codeql.sarif': sarifDoc(sarifRange('error', 200, 10)) });
+        expect(second.printed).toEqual(['codeql docs=1 results=10 error=10 warning=0 note=0']);
+        expect(second.rows).toHaveLength(65);
+        expect(second.rows.filter(row => row.startsWith('semgrep\t'))).toHaveLength(30);
+        expect(second.top).toHaveLength(50);
+        expect(second.top.map(row => row.split('\t')[3])).toEqual([...Array(10).fill('error'), ...Array(25).fill('warning'), ...Array(15).fill('note')]);
+      });
+    });
+
+    it(`the shipped counts show an empty SARIF file as docs=0, and no file as no line and an empty top file (${label})`, ctx => {
+      skipUnlessRunnable(ctx);
+      inScratch(folder => {
+        const empty = runCountsFence(phase2(), folder, 'semgrep', { 'semgrep.sarif': '' });
+        expect(empty.printed).toEqual(['semgrep docs=0 results=0 error=0 warning=0 note=0']);
+        expect(empty.rows).toEqual([]);
+        expect(empty.top).toEqual([]);
+        expect(empty.status).toBe(0);
+      });
+      inScratch(folder => {
+        const none = runCountsFence(phase2(), folder, 'codeql', {});
+        expect(none.printed).toEqual([]);
+        expect(none.top).toEqual([]);
+        expect(none.status).toBe(0);
+      });
+    });
+  }
 
   it.each(builds)('each scanner fence runs from the worktree root, not the Bash call directory (%s)', (_label, body) => {
     expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();

@@ -98,7 +98,7 @@ If `--no-static` is set: set `STATIC_FINDINGS` to "Static analysis skipped (--no
 for t in semgrep snyk codeql jq; do printf '%s=%s\n' "$t" "$(command -v "$t" || echo no)"; done
 ```
 
-If all three scanners print `no`: warn user "No static analysis tools found. Proceeding with semantic analysis only. To enable static analysis, install semgrep (`pip install semgrep`) or snyk (`npm install -g snyk`)." Set `STATIC_FINDINGS` to "Static analysis did not run: no scanner is installed." and `STATIC_STATUS` to `not installed` for each tool.
+If all three scanners print `no`: warn user "No static analysis tools found. To enable it, install semgrep (`pip install semgrep`) or snyk (`npm install -g snyk`)." Set `STATIC_FINDINGS` to "Static analysis did not run: no scanner is installed." and `STATIC_STATUS` to `not installed` for each tool.
 
 If a scanner is installed but `jq` prints `no`: set `STATIC_FINDINGS` to "Static analysis did not complete: jq is not installed." and `STATIC_STATUS` to `did not complete (jq is not installed)` for an installed tool, else `not installed`.
 
@@ -131,6 +131,18 @@ printf '\nexit=%s\n' "$E"
 ```
 Without `jq` the SARIF is unfiltered: note that.
 
+**Counts and table** (after Snyk with `{tools}` = `semgrep snyk`; after CodeQL with `codeql`):
+```bash
+cd "{ANALYSIS_DIR}" || exit
+touch findings.tsv
+for t in {tools}; do [ -f $t.sarif ] || continue
+  jq -rs --arg t $t '[.[].runs[]?.results[]?|.level//"warning"] as $l|def c(k):[$l[]|select(.==k)]|length;"\($t) docs=\(length) results=\($l|length) error=\(c("error")) warning=\(c("warning")) note=\(c("note"))"' $t.sarif || echo "$t sarif=unreadable"
+  jq -r --arg t $t '.runs[]?.results[]?|[$t,(.locations[0].physicalLocation|.artifactLocation.uri,.region.startLine),(.level//"warning"),(.ruleId//"—"),((.message.text//"")[:200])]|@tsv' $t.sarif >>findings.tsv || echo "findings table incomplete: $t"
+done
+jq -Rrs 'split("\n")|map(select(.!=""))|sort_by(split("\t")[3]|{error:0,warning:1}[.]//2)|.[:50][]' findings.tsv >findings-top.tsv
+```
+Read `error` as HIGH, `warning` as MEDIUM, `note` as LOW.
+
 **CodeQL** (if available AND (`--full` OR Semgrep/Snyk found HIGH/CRITICAL findings)):
 ```bash
 CODEQL_TMP=$(mktemp -d) || exit
@@ -142,17 +154,11 @@ printf '\nexit=%s\n' "$CODEQL_EXIT"
 rm -rf "${CODEQL_TMP}"
 trap - EXIT INT TERM
 ```
-Read each SARIF file → extract findings. A tool's status is its last line, `exit={n}`; a tool that ran completed only on Semgrep 0, Snyk 0 or 1 (1 = issues, only with SARIF output), CodeQL 0. Any other status, or no such line, means it did not complete (126-127: scanner did not start; else failed. Semgrep via xargs: number only); keep the findings its SARIF holds. A call with no `exit=` line in its own result did not complete (it reached the Bash limit, or a `cd` or the call failed). It stays did not complete for this run: ignore a later end notice. If a tool's output was clipped, its findings are incomplete: name the tool in `STATIC_FINDINGS`, never `(none)`.
+A tool's status is its last line, `exit={n}`; a tool that ran completed only on Semgrep 0, Snyk 0 or 1 (1 = issues, only with SARIF output), CodeQL 0. Any other status, or no such line, means it did not complete (126-127: scanner did not start; else failed. Semgrep via xargs: number only). A call with no `exit=` line in its own result did not complete (it reached the Bash limit, or a `cd` or the call failed). It stays did not complete for this run: ignore a later end notice. A tool also did not complete when the counts fence prints `sarif=unreadable` or `findings table incomplete` for it, or `docs=0` (Semgrep exit 0 with `docs=0`: no file to scan, completed).
 
-**Normalize** all findings to unified table, cap at top 50 by severity. Truncate each Description entry to 200 characters maximum:
+`findings.tsv` keeps every finding. Read only `findings-top.tsv` (top 50 by level: tool, file, line, level, rule, message cut to 200 chars), set `STATIC_FINDINGS` to the column names and its rows, and write them with the status lines to `{ANALYSIS_DIR}/static-findings.md`.
 
-| Tool | File:Line | CWE | Severity | Title | Description |
-|------|-----------|-----|----------|-------|-------------|
-| {tool} | {file}:{line} | {CWE or —} | {CRITICAL/HIGH/MEDIUM/LOW} | {title} | {description truncated to 200 chars} |
-
-Write ALL raw findings to `{ANALYSIS_DIR}/static-findings.md`. Set `STATIC_FINDINGS` to the top-50 table.
-
-`STATIC_FINDINGS` is `(none)` only when every tool that was to run completed and none found anything. For each tool that did not complete, add under any table the line "Static analysis did not complete: {tool}: " plus "exit {n} ({meaning})." or "no exit status."
+`STATIC_FINDINGS` is `(none)` only when every tool that was to run completed and none found anything. For each tool that did not complete, add under any rows the line "Static analysis did not complete: {tool}: " plus "exit {n} ({meaning}).", "no exit status." or "SARIF not read."
 
 Set `STATIC_STATUS` to one `{tool}: {value}` per tool: `completed`, `not installed` or `did not complete ({why})`; CodeQL also `not needed` (not triggered) or `no supported language`.
 
@@ -299,10 +305,8 @@ The orchestrator only spawns agents, in seven phases: Phase 1 pre-flight, then s
 
 | Case | Handling |
 |------|----------|
-| No new commits since last analysis | Stop: "No new commits since last analysis. Use --full for a full re-analysis." |
 | Rebase invalidates `.last-analysis-head` SHA | `git cat-file -t` check fails → fallback to full diff |
 | Zero changed files in DIFF_RANGE with exit 0 | Stop: "No changes to analyze." |
-| Same-minute analysis collision | `mkdir` with seconds suffix (`YYYY-MM-DD_HHMMSS`) |
 | `--no-static` flag | Step 2c sets the skipped text; the marker moves |
 | `--full` flag | Bypass incremental detection (Step 2a), run full diff from base |
 | A scanner did not run or did not complete | Name the tool and why in `STATIC_FINDINGS`, not `(none)`; a tool that did not complete keeps the marker |
