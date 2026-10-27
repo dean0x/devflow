@@ -13,11 +13,7 @@ Run a proactive bug analysis on the current branch by combining static analysis 
 
 ## Usage
 
-```
-/bug-analysis              (analyze current branch — incremental if prior analysis exists)
-/bug-analysis --full       (force full analysis, ignore incremental state)
-/bug-analysis --no-static  (skip static analysis track, semantic-only)
-```
+`/bug-analysis [--full] [--no-static]`: `--full` ignores incremental state; `--no-static` skips the static analysis track.
 
 ## Phases
 
@@ -293,35 +289,7 @@ Run `/resolve` to process and fix these findings.
 
 ## Architecture
 
-```
-/bug-analysis (orchestrator — spawns agents only)
-│
-├─ Phase 1: Pre-flight
-│  └─ Git agent (ensure-pr-ready)
-│
-├─ Phase 2: Static Analysis
-│  └─ 2a incremental range, 2b changed files (stop if none), 2c tools, 2d semgrep → snyk → codeql
-│
-├─ Phase 3: Context Loading
-<!-- curation:on -->
-│  ├─ index.md (pre-rendered) → DECISIONS_CONTEXT
-<!-- curation:end -->
-│  ├─ Feature knowledge load → FEATURE_KNOWLEDGE
-│  └─ {worktree}/.devflow/docs/design/*.md → PLAN_CONTEXT + ACCEPTANCE_RULES
-│
-├─ Phase 4: File Analysis
-│  └─ Detect active focuses (security + functional always; integration + usability conditional)
-│
-├─ Phase 5: Bug Analysis (PARALLEL)
-│  └─ Debug agent per active focus (security also reads STATIC_FINDINGS)
-│
-├─ Phase 6: Synthesis
-│  └─ Synthesize agent (mode: bug-analysis)
-│
-└─ Phase 7: Finalize
-   ├─ Write .last-analysis-head
-   └─ Display results + suggest /resolve if blocking bugs found
-```
+The orchestrator only spawns agents, in seven phases: Phase 1 pre-flight, then static analysis, context loading, file analysis, parallel bug analysis and synthesis, and Phase 7 finalize.
 
 ## Edge Cases
 
@@ -331,7 +299,6 @@ Run `/resolve` to process and fix these findings.
 | Rebase invalidates `.last-analysis-head` SHA | `git cat-file -t` check fails → fallback to full diff |
 | Zero changed files in DIFF_RANGE with exit 0 | Stop: "No changes to analyze." |
 | Same-minute analysis collision | `mkdir` with seconds suffix (`YYYY-MM-DD_HHMMSS`) |
-| All static tools unavailable | Warn, proceed with semantic-only analysis |
 | `--no-static` flag | Skip Phase 2c and 2d entirely; `STATIC_FINDINGS=(none)` |
 | `--full` flag | Bypass incremental detection (Step 2a), run full diff from base |
 | A scanner did not run or did not complete | Name the tool and why in `STATIC_FINDINGS`, not `(none)` |
@@ -343,26 +310,8 @@ Run `/resolve` after `/bug-analysis` to fix identified bugs. `/resolve` automati
 ## Principles
 
 1. **Orchestration only** — Command spawns agents, doesn't do analysis work itself
-2. **Parallel, not background** — Analyzers spawn in one message with `run_in_background=false`
-3. **Static + semantic** — Two complementary tracks, each validates the other
-4. **Incremental by default** — Only analyze new changes unless `--full` specified
-5. **Verify before reporting** — Debug agents self-verify every finding
-6. **Honest reporting** — Display risk level and counts directly from synthesis
+2. **Incremental by default** — Only analyze new changes unless `--full` specified
 
 ## Phase Completion Checklist
 
-Before reporting results, verify every phase was executed:
-
-- [ ] Phase 1: Pre-flight → BRANCH_INFO captured, PR_DESCRIPTION fetched (or `(none)`)
-- [ ] Phase 2: Static Analysis → STATIC_FINDINGS captured (`(none)` only if skipped, no tools or every tool completed clean); ANALYSIS_DIR created; CHANGED_FILES populated
-<!-- curation:on -->
-- [ ] Phase 3: Context Loading → DECISIONS_CONTEXT captured, FEATURE_KNOWLEDGE loaded (or `(none)`), PLAN_CONTEXT and ACCEPTANCE_RULES captured (or `(none)`)
-<!-- curation:off -->
-- [ ] Phase 3: Context Loading → FEATURE_KNOWLEDGE loaded (or `(none)`), PLAN_CONTEXT and ACCEPTANCE_RULES captured (or `(none)`)
-<!-- curation:end -->
-- [ ] Phase 4: File Analysis → ACTIVE_FOCUSES determined (security + functional always present)
-- [ ] Phase 5: Parallel Bug Analysis → ANALYZER_OUTPUTS captured per active focus; all reports written to ANALYSIS_DIR
-- [ ] Phase 6: Synthesis → BUG_ANALYSIS_SUMMARY written to `{ANALYSIS_DIR}/bug-analysis-summary.md`
-- [ ] Phase 7: Finalize → `.last-analysis-head` updated; results displayed to user
-
-If any phase is unchecked, execute it before proceeding.
+Before reporting results, verify that every phase ran and that each variable it produces is captured, with STATIC_FINDINGS (`(none)` only if every tool that was to run completed clean), the report files in ANALYSIS_DIR and `.last-analysis-head` all present; run any missing phase first.

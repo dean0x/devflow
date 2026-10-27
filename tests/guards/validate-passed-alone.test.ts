@@ -123,7 +123,7 @@ const REFERENCE_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]>
   ['the repo-relative names the check prints are checked again and single-quoted from then on', 'Use the repo-relative names it prints from here on, each checked as above and single-quoted.'],
   ['log text never enters a command', 'No other log text goes in a command.'],
   ['the BASE_SHA is a first BASE_SHA line', 'A BASE_SHA is a first `BASE_SHA:` line'],
-  ['the BASE_SHA shape and the unlabelled default', 'matching `^[0-9a-f]{40}$`; without one, label nothing: every failure is REAL.'],
+  ['the BASE_SHA shape', 'matching `^[0-9a-f]{40}$`.'],
   ['the changed set is FILES_CHANGED plus the branch diff from BASE_SHA', 'The changed set is FILES_CHANGED plus the paths that `git diff --name-only <BASE_SHA>...HEAD`'],
   ['the changed set holds the uncommitted paths', 'and `git status --porcelain` list'],
   ['the git paths are taken before the re-runs', 'list, taken before the re-runs;'],
