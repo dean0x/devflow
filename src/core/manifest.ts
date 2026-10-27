@@ -438,7 +438,8 @@ export async function syncManifestFeature<K extends keyof ManifestData['features
  * re-init install it again. Going through readManifest()/writeManifest() instead
  * would drop every key ManifestData does not model (one a newer devflow wrote,
  * say) and persist that reader's unrelated heals as a side effect of a removal.
- * Entries that are not strings are neither matched nor dropped.
+ * Entries that are not strings are neither matched nor dropped. A legacy name matches its current plugin
+ * ({@link doomedEntryTest}).
  */
 export function withoutManifestPlugins(
   rawManifest: unknown,
@@ -448,10 +449,24 @@ export function withoutManifestPlugins(
   if (typeof rawManifest !== 'object' || rawManifest === null || Array.isArray(rawManifest)) return null;
   const record = rawManifest as Record<string, unknown>;
   if (!Array.isArray(record.plugins)) return null;
-  const doomed = new Set(names);
-  const kept = record.plugins.filter(entry => !(typeof entry === 'string' && doomed.has(entry)));
+  const isDoomed = doomedEntryTest(names);
+  const kept = record.plugins.filter(entry => !(typeof entry === 'string' && isDoomed(entry)));
   if (kept.length === record.plugins.length) return null;
   return { ...record, plugins: kept, updatedAt: now };
+}
+
+/**
+ * Whether a recorded plugin name is one of `names`, a legacy name counting as its current plugin on both sides.
+ * Removing `devflow-plan` therefore also drops a record that still holds `devflow-specify`. Any other name,
+ * a name the registry does not know included, matches only itself.
+ *
+ * The record is file content, so only a key LEGACY_PLUGIN_NAMES owns maps; one it inherits from Object,
+ * such as `constructor`, is an ordinary name.
+ */
+function doomedEntryTest(names: readonly string[]): (entry: string) => boolean {
+  const current = (name: string): string => (Object.hasOwn(LEGACY_PLUGIN_NAMES, name) ? LEGACY_PLUGIN_NAMES[name] : name);
+  const doomed = new Set(names.map(current));
+  return entry => doomed.has(current(entry));
 }
 
 /** What {@link removeManifestPlugins} did: the names it dropped (empty when it wrote nothing), or why it could not write. */
@@ -491,9 +506,9 @@ export async function removeManifestPlugins(
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
-  const doomed = new Set(names);
+  const isDoomed = doomedEntryTest(names);
   const before = (raw as { plugins: unknown[] }).plugins;
-  return { ok: true, removed: before.filter((entry): entry is string => typeof entry === 'string' && doomed.has(entry)) };
+  return { ok: true, removed: before.filter((entry): entry is string => typeof entry === 'string' && isDoomed(entry)) };
 }
 
 /**
