@@ -1,10 +1,11 @@
 /**
  * The install-time render of the ambient orchestrator charter (src/targets/claude-code/charter-render.ts).
  *
- * The packaged charter is the FULL text and also the fallback. The render only deletes spans whose owner
- * (a workflow command or a roster agent) is not installed, so the charter never names a skill or agent
- * the machine lacks. This file holds the pure render over every plugin set of the registry-derived
- * domain, the span table's own integrity, the inventory, and the writer on temp directories.
+ * The packaged charter is the FULL text and also the fallback. The render only deletes spans: those of a
+ * workflow command or a roster agent that is not installed, and the debug fallback clause when the debug
+ * command is installed. So the charter never names a skill or agent the machine lacks. This file holds the
+ * pure render over every plugin set of the registry-derived domain, the span table's own integrity, the
+ * inventory, and the writer on temp directories.
  *
  * The domain is derived from the registry and the source charter, never from the span table: a plugin
  * enters it when it declares a command the charter names (`devflow:<command>`) or an agent that
