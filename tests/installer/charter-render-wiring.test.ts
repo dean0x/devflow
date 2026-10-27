@@ -18,10 +18,11 @@
  * HOME safety: every directory below is an mkdtemp; nothing reads or writes the real ~/.claude or
  * ~/.devflow, and no test runs the CLI.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync, promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as p from '@clack/prompts';
 
 import { scriptsDir as packagedScriptsDir } from '../../src/core/assets.js';
 import {
@@ -67,7 +68,7 @@ const AMBIENT = plugin('devflow-ambient');
 const IMPLEMENT = plugin('devflow-implement');
 const REVIEW = plugin('devflow-code-review');
 const PLAN = plugin('devflow-plan');
-const DEBUG = plugin('devflow-bug-analysis');
+const BUG_ANALYSIS = plugin('devflow-bug-analysis');
 
 /** The charter as the installer renders it for a plugin set (the render is tested over every set elsewhere). */
 function rendered(plugins: ReadonlyArray<PluginDefinition>): string {
@@ -250,7 +251,7 @@ describe('installScripts: the script copy and the charter render are one step', 
     expect(await exists(sentinelAt())).toBe(false);
   });
 
-  it('a render that cannot write warns, and the copied scripts are still there', async () => {
+  it('a charter the render cannot read warns, and the copied scripts are still there', async () => {
     await fs.mkdir(charterAt(), { recursive: true });
     const warnings: string[] = [];
 
@@ -335,12 +336,12 @@ describe('installViaFileCopy: the render is its own step after the script copy',
     await install({ plugins: [CORE, AMBIENT, IMPLEMENT, REVIEW], isPartialInstall: false });
     // `init --plugin=devflow-bug-analysis`: only that plugin is copied, the prior selection stays installed.
     await install({
-      plugins: [DEBUG],
-      effectivePlugins: [CORE, AMBIENT, IMPLEMENT, REVIEW, DEBUG],
+      plugins: [BUG_ANALYSIS],
+      effectivePlugins: [CORE, AMBIENT, IMPLEMENT, REVIEW, BUG_ANALYSIS],
       isPartialInstall: true,
     });
 
-    expect(await fs.readFile(charterAt(), 'utf-8')).toBe(rendered([CORE, AMBIENT, IMPLEMENT, REVIEW, DEBUG]));
+    expect(await fs.readFile(charterAt(), 'utf-8')).toBe(rendered([CORE, AMBIENT, IMPLEMENT, REVIEW, BUG_ANALYSIS]));
     expect(await exists(sentinelAt()), 'implement stays installed').toBe(true);
   });
 
@@ -356,8 +357,8 @@ describe('installViaFileCopy: the render is its own step after the script copy',
     expect(await snapshot(sentinelAt())).toEqual(sentinel);
   });
 
-  it('a render that cannot write warns and the install still completes', async () => {
-    // A directory where the charter file belongs: the script copy skips that path, the writer cannot replace it.
+  it('a charter the render cannot read warns and the install still completes', async () => {
+    // A directory where the charter file belongs: the script copy skips that path, the writer cannot read it.
     await fs.mkdir(charterAt(), { recursive: true });
 
     await expect(install({ plugins: [CORE, AMBIENT, IMPLEMENT], isPartialInstall: false })).resolves.toBeUndefined();
@@ -534,7 +535,7 @@ describe('runSelectivePhaseForScope renders the charter for the plugins that sta
   });
 
   it('removing implement drops the handoff line and the sentinel and keeps the rest of the render', async () => {
-    const installed = [CORE, AMBIENT, IMPLEMENT, REVIEW, DEBUG];
+    const installed = [CORE, AMBIENT, IMPLEMENT, REVIEW, BUG_ANALYSIS];
     await installCharterFor(installed);
     await recordManifest(installed.map(p => p.name));
     expect(handoffLines(await fs.readFile(charterAt(), 'utf-8'))).toBe(1);
@@ -543,7 +544,7 @@ describe('runSelectivePhaseForScope renders the charter for the plugins that sta
       claudeDir, devflowDir, selectedPlugins: [IMPLEMENT], verbose: false, installedPlugins: installed,
     });
 
-    expect(await fs.readFile(charterAt(), 'utf-8')).toBe(rendered([CORE, AMBIENT, REVIEW, DEBUG]));
+    expect(await fs.readFile(charterAt(), 'utf-8')).toBe(rendered([CORE, AMBIENT, REVIEW, BUG_ANALYSIS]));
     expect(await exists(sentinelAt())).toBe(false);
   });
 
@@ -551,13 +552,18 @@ describe('runSelectivePhaseForScope renders the charter for the plugins that sta
     const installed = [CORE, AMBIENT, IMPLEMENT, REVIEW];
     await installCharterFor(installed);
     await recordManifest(installed.map(p => p.name));
+    // An old mtime, so a rewrite of the same bytes shows even on a coarse file clock.
+    const longAgo = new Date('2020-01-01T00:00:00Z');
+    await fs.utimes(sentinelAt(), longAgo, longAgo);
+    const sentinel = await snapshot(sentinelAt());
 
     await runSelectivePhaseForScope({
       claudeDir, devflowDir, selectedPlugins: [REVIEW], verbose: false, installedPlugins: installed,
     });
 
     expect(await fs.readFile(charterAt(), 'utf-8')).toBe(rendered([CORE, AMBIENT, IMPLEMENT]));
-    expect(await fs.readFile(sentinelAt(), 'utf-8')).toBe(SENTINEL_SOURCE);
+    expect(sentinel.bytes).toBe(SENTINEL_SOURCE);
+    expect(await snapshot(sentinelAt())).toEqual(sentinel);
   });
 
   it('renders from the manifest record, not from the installedPlugins the caller passes', async () => {
@@ -644,11 +650,14 @@ describe('runSelectivePhaseForScope renders the charter for the plugins that sta
     await recordManifest(['devflow-core-skills', 'devflow-ambient', 'devflow-implement']);
     await fs.rm(charterAt());
     await fs.mkdir(charterAt()); // a directory where the file belongs: neither read nor replaceable
+    const warn = vi.spyOn(p.log, 'warn').mockImplementation(() => undefined);
 
     await expect(runSelectivePhaseForScope({
       claudeDir, devflowDir, selectedPlugins: [IMPLEMENT], verbose: false, installedPlugins: [CORE, AMBIENT, IMPLEMENT],
     })).resolves.toBeUndefined();
 
+    const charterWarnings = warn.mock.calls.filter(([message]) => message.includes('charter render:'));
+    expect(charterWarnings, 'the unreadable charter is reported once').toHaveLength(1);
     const after = JSON.parse(await fs.readFile(path.join(devflowDir, 'manifest.json'), 'utf-8')) as { plugins: string[] };
     expect(after.plugins, 'the rest of the phase ran: the manifest dropped the plugin').not.toContain('devflow-implement');
   });
