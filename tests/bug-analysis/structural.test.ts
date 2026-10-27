@@ -565,6 +565,7 @@ function collectMarkerGateDefects(body: string): string[] {
   const at = writes[0].indexOf(WRITE_START);
   const gate = at === -1 ? '' : writes[0].slice(0, at);
   const out = GATE_PARTS.filter(part => !gate.includes(part)).map(part => `no gate before "${WRITE_START}" says: ${part}`);
+  if (out.length === 0 && !gate.includes(GATE)) out.push(`the gate before "${WRITE_START}" has text between its parts: it is not the whole sentence ${GATE.trim()}`);
   const report = body.split('\n').find(line => line.startsWith('**Static analysis**:')) ?? '';
   if (!report.includes(REPORT_WAY_OUT)) out.push('the Static analysis report line does not name the kept marker and the way out');
   const checklist = sectionBetween(body, '## Phase Completion Checklist', null) ?? '';
@@ -1123,6 +1124,10 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(defects('keep the marker', 'move the marker')).toContain(says(2));
     expect(defects('(fix the tool, or run with `--no-static`)', '(see the log)')).toContain(says(3));
     expect(defects('`--no-static`). In one Bash call run', '`--no-static`). Then in one Bash call run')).toEqual(GATE_PARTS.map((_part, index) => says(index)));
+    const between = [expect.stringContaining('has text between its parts')];
+    expect(defects('completed, or `--no-static` is set', 'completed, or a tool ran, or `--no-static` is set')).toEqual(between);
+    expect(defects('Else keep the marker;', 'Else keep the marker, and move it when a tool ran;')).toEqual(between);
+    expect(defects('(fix the tool, or run with `--no-static`). ', '(fix the tool, or run with `--no-static`), also with `--full`. ')).toEqual(between);
     const late = ' A failed or refused write never stops the run and is not retried another way.';
     expect(collectMarkerGateDefects(seed(seed(body ?? '', GATE, ''), late, `${late} ${GATE.trim()}`))).toEqual(GATE_PARTS.map((_part, index) => says(index)));
     const wayOut = 'the Static analysis report line does not name the kept marker and the way out';
@@ -1753,6 +1758,9 @@ const SYNTHESIZE_REFERENCE_PARTS: Array<[string, string]> = [
   ['name the --no-static skip, never as clean scanning', 'Name that skip in the summary: it is never clean scanning.'],
   ['read UNKNOWN without the input or after a tool that did not complete', `With no STATIC_STATUS, or a tool that \`did not complete\`, the risk reads "${UNKNOWN_RISK}"`],
   ['put the Static analysis line in the template', '**Static analysis**: {STATIC_STATUS, or unknown}'],
+  ['say which tools were not to run: not installed, not needed or with no supported language', '(a tool `not installed`, `not needed` or with `no supported language` was not to run)'],
+  ['count the --no-static skip text as a clean result', 'or is the `--no-static` skip text.'],
+  ['let CRITICAL or HIGH findings show when a tool did not complete', 'or CRITICAL or HIGH when the findings give it.'],
 ];
 
 /**
@@ -1819,6 +1827,12 @@ describe('bug-analysis.md — Synthesize takes the static analysis status only f
     expect(inReference(`the risk reads "${UNKNOWN_RISK}"`, 'the risk reads CLEAN')).toEqual([lacks(6)]);
     expect(inReference(` | ${UNKNOWN_RISK}}`, '}')).toEqual([`the Synthesize Risk Assessment template does not offer ${UNKNOWN_RISK}`]);
     expect(inReference('\n**Static analysis**: {STATIC_STATUS, or unknown}', '')).toEqual([lacks(7)]);
+    expect(inReference(' (a tool `not installed`, `not needed` or with `no supported language` was not to run)', '')).toEqual([lacks(8)]);
+    expect(inReference('`not needed` or with `no supported language` was not to run)', '`not needed` was not to run)')).toEqual([lacks(8)]);
+    expect(inReference(', or is the `--no-static` skip text.', '.')).toEqual([lacks(9)]);
+    expect(inReference('or is the `--no-static` skip text.', 'or is a skip.')).toEqual([lacks(9)]);
+    expect(inReference(', or CRITICAL or HIGH when the findings give it.', '.')).toEqual([lacks(10)]);
+    expect(inReference('or CRITICAL or HIGH when the findings give it.', 'or CRITICAL when the findings give it.')).toEqual([lacks(10)]);
     expect(inReference('**Date**: {timestamp}\n**Static analysis**: {STATIC_STATUS, or unknown}', '**Static analysis**: {STATIC_STATUS, or unknown}\n**Date**: {timestamp}'))
       .toEqual(['the Synthesize template Static analysis line is not between Date and Risk Assessment']);
     expect(inReference('(scanner findings and status lines)', `(${RAW_OUTPUT_TEXT})`)).toEqual([`the Synthesize reference still says static-findings.md ${RAW_OUTPUT_TEXT}`]);
