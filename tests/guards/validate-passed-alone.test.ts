@@ -195,6 +195,13 @@ const stepOf = (reference: string, n: number): string => reference.split('\n').f
  */
 const WRONG_LIMIT = /\b120 ?s\b|\b120 seconds\b|120000|\b40 min(?:utes)?\b/
 
+/**
+ * The retired re-run bound: a wait of 600 s for each re-run, or a worst case of 200 min. A re-run now runs under
+ * an explicit Bash timeout and is waited for past it, so no text names a per-re-run time or a worst case. The
+ * Bash timeout of 600000 ms does not match.
+ */
+const STALE_BOUND = /\b600 ?(?:s|seconds)\b|\b200 min(?:utes)?\b/
+
 /** The lead of the reference: from the end of its heading line to the first numbered step. */
 function leadOf(reference: string): string {
   const from = reference.indexOf('\n\n')
@@ -257,6 +264,8 @@ function collectBodyDefects(body: string, region: string): string[] {
   if (/flak/i.test(body)) out.push('the body carries a flake word (stem "flak")')
   const wrong = WRONG_LIMIT.exec(body)?.[0]
   if (wrong !== undefined) out.push(`the body names a wrong re-run limit: ${wrong}`)
+  const stale = STALE_BOUND.exec(body)?.[0]
+  if (stale !== undefined) out.push(`the body names the retired re-run bound: ${stale}`)
   for (const word of capsWords(paragraph)) {
     if (!ALLOWED_CAPS.has(word)) out.push(`the body carries an all-caps word outside the label list: ${word}`)
   }
@@ -302,6 +311,8 @@ function collectReferenceDefects(region: string, readReference: ReadReference, s
     }
     const wrong = WRONG_LIMIT.exec(reference)?.[0]
     if (wrong !== undefined) out.push(`the reference names a wrong re-run limit: ${wrong}`)
+    const stale = STALE_BOUND.exec(reference)?.[0]
+    if (stale !== undefined) out.push(`the reference names the retired re-run bound: ${stale}`)
     const slack = leadSlack(reference)
     if (slack !== '') out.push(`the reference lead carries text no pin holds: ${slack}`)
     if (/flak/i.test(reference)) out.push('the reference carries a flake word (stem "flak")')
@@ -333,7 +344,7 @@ const DOCS_STEP_START = '5. **Validation**'
 const KB_ENTRY_START = "- **Validate's passed-alone re-runs.**"
 
 /**
- * Named collector: a wrong re-run limit in the two texts that restate the bound outside the agent. `docs` is
+ * Named collector: a wrong re-run limit, or the retired 600 s bound, in the two texts that restate the re-run outside the agent. `docs` is
  * docs/commands.md, `knowledge` is the text-guards KNOWLEDGE.md. A site whose line is gone is reported too, so
  * a reworded or moved line cannot pass for a clean one. CHANGELOG.md and the test files are not checked: they
  * may name other limits in words on purpose.
@@ -350,6 +361,8 @@ export function collectWrongLimitSiteDefects(docs: string, knowledge: string): s
     else {
       const wrong = WRONG_LIMIT.exec(line)?.[0]
       if (wrong !== undefined) out.push(`${label} names a wrong re-run limit: ${wrong}`)
+      const stale = STALE_BOUND.exec(line)?.[0]
+      if (stale !== undefined) out.push(`${label} names the retired re-run bound: ${stale}`)
     }
   }
   return out
@@ -559,15 +572,26 @@ describe('the Validate body re-runs each failed test file alone and labels it', 
 
   it('probes: a wrong re-run limit is reported in the docs Validation step and the text-guards knowledge entry', () => {
     expect(collectWrongLimitSiteDefects(DOCS, KNOWLEDGE)).toEqual([])
-    expect(withDocs(seed(DOCS, 'waits at most 600 seconds', 'waits at most 120 seconds'))).toContain('the docs Validation step names a wrong re-run limit: 120 seconds')
-    expect(withDocs(seed(DOCS, 'waits at most 600 seconds', 'waits at most 120 s'))).toContain('the docs Validation step names a wrong re-run limit: 120 s')
-    expect(withDocs(seed(DOCS, 'waits at most 600 seconds', 'waits at most 120s'))).toContain('the docs Validation step names a wrong re-run limit: 120s')
-    expect(withDocs(seed(DOCS, 'worst case is 200 minutes', 'worst case is 40 minutes'))).toContain('the docs Validation step names a wrong re-run limit: 40 minutes')
-    expect(withDocs(seed(DOCS, 'worst case is 200 minutes', 'worst case is 40 min'))).toContain('the docs Validation step names a wrong re-run limit: 40 min')
-    expect(withKnowledge(seed(KNOWLEDGE, 'waits at most 600 s', 'waits at most 120 s'))).toContain('the text-guards knowledge entry names a wrong re-run limit: 120 s')
-    expect(withKnowledge(seed(KNOWLEDGE, 'waits at most 600 s', 'waits at most 120s'))).toContain('the text-guards knowledge entry names a wrong re-run limit: 120s')
-    expect(withKnowledge(seed(KNOWLEDGE, 'worst case 200 minutes', 'worst case 40 minutes'))).toContain('the text-guards knowledge entry names a wrong re-run limit: 40 minutes')
-    expect(withKnowledge(seed(KNOWLEDGE, 'worst case 200 minutes', 'worst case 40 min'))).toContain('the text-guards knowledge entry names a wrong re-run limit: 40 min')
+    expect(withDocs(seed(DOCS, '20 files, one at a time.', '20 files, one at a time, and waits at most 120 seconds for each.'))).toContain('the docs Validation step names a wrong re-run limit: 120 seconds')
+    expect(withDocs(seed(DOCS, '20 files, one at a time.', '20 files, one at a time, and waits at most 120 s for each.'))).toContain('the docs Validation step names a wrong re-run limit: 120 s')
+    expect(withDocs(seed(DOCS, '20 files, one at a time.', '20 files, one at a time, and waits at most 120s for each.'))).toContain('the docs Validation step names a wrong re-run limit: 120s')
+    expect(withDocs(seed(DOCS, 'failed files are REAL and are not re-run.', 'failed files are REAL and are not re-run; the worst case is 40 minutes.'))).toContain('the docs Validation step names a wrong re-run limit: 40 minutes')
+    expect(withDocs(seed(DOCS, 'failed files are REAL and are not re-run.', 'failed files are REAL and are not re-run; the worst case is 40 min.'))).toContain('the docs Validation step names a wrong re-run limit: 40 min')
+    expect(withKnowledge(seed(KNOWLEDGE, 'and runs them one at a time.', 'and runs them one at a time, waiting at most 120 s for each.'))).toContain('the text-guards knowledge entry names a wrong re-run limit: 120 s')
+    expect(withKnowledge(seed(KNOWLEDGE, 'and runs them one at a time.', 'and runs them one at a time, waiting at most 120s for each.'))).toContain('the text-guards knowledge entry names a wrong re-run limit: 120s')
+    expect(withKnowledge(seed(KNOWLEDGE, 'the rest are REAL and are not re-run;', 'the rest are REAL and are not re-run (worst case 40 minutes);'))).toContain('the text-guards knowledge entry names a wrong re-run limit: 40 minutes')
+    expect(withKnowledge(seed(KNOWLEDGE, 'the rest are REAL and are not re-run;', 'the rest are REAL and are not re-run (worst case 40 min);'))).toContain('the text-guards knowledge entry names a wrong re-run limit: 40 min')
+  })
+
+  it('probes: the retired 600 s bound and 200 minute worst case are reported in the body, the reference, the docs Validation step and the knowledge entry', () => {
+    expect(STALE_BOUND.test('600000 ms'), 'the Bash timeout of 600000 ms is not the retired bound').toBe(false)
+    expect(withBody(seed(BODY, ' verbose, never the suite:', ' verbose, 600 s max, never the suite:'))).toContain('the body names the retired re-run bound: 600 s')
+    expect(withBody(seed(BODY, OUTPUT_LINE_BOUND, 'bound 20 files, 600 s each'))).toContain('the body names the retired re-run bound: 600 s')
+    expect(withReference(seed(REFERENCE, 'one at a time.', 'one at a time, 200 min in all.'))).toContain('the reference names the retired re-run bound: 200 min')
+    expect(withReference(seed(REFERENCE, 'bound 20 files`', 'bound 20 files, 600 s each`'))).toContain('the reference names the retired re-run bound: 600 s')
+    expect(withDocs(seed(DOCS, '20 files, one at a time.', '20 files, one at a time, and waits at most 600 seconds for each.'))).toContain('the docs Validation step names the retired re-run bound: 600 seconds')
+    expect(withDocs(seed(DOCS, 'failed files are REAL and are not re-run.', 'failed files are REAL and are not re-run; the worst case is 200 minutes.'))).toContain('the docs Validation step names the retired re-run bound: 200 minutes')
+    expect(withKnowledge(seed(KNOWLEDGE, 'and runs them one at a time.', 'and runs them one at a time, waiting at most 600 s for each.'))).toContain('the text-guards knowledge entry names the retired re-run bound: 600 s')
   })
 
   it('probes: a docs Validation step or a knowledge entry that is gone is reported, so the limit check cannot pass on a missing line', () => {
