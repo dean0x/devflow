@@ -945,13 +945,6 @@ describe('a reference module may carry no variant marker (TP-12)', () => {
     }
   }
 
-  it('control: the unmodified module builds, so each refusal below is the marker\'s doing', async () => {
-    const { source } = mcpSource();
-    const run = await buildModule(source);
-    expect(run.status, run.combined).toBe(0);
-    expect(run.written, 'the module was not built').toBe(true);
-  });
-
   it.each([
     ['a whole-line compliance arm', '<!-- compliance:on -->\nA gated line.\n<!-- compliance:end -->'],
     ['a standalone compliance off arm', '<!-- compliance:off -->\nA fallback line.\n<!-- compliance:end -->'],
@@ -968,13 +961,11 @@ describe('a reference module may carry no variant marker (TP-12)', () => {
     expect(run.written, 'nothing is written for a refused module').toBe(false);
   });
 
-  it.each([
-    ['a whole-line curation arm', '<!-- curation:on -->\nA decisions line.\n<!-- curation:end -->'],
-    ['a curation marker with odd spacing and case', '<!--  Curation : off  -->\nA fallback line.'],
-    ['the retired marker', '<!-- learning:on -->\nA decisions line.\n<!-- learning:end -->'],
-  ])('keeps refusing a reference module that carries %s', async (_label, probe) => {
+  // The unmodified-module control, a whole-line curation arm and the retired marker are held
+  // in tests/curation/curation-variants-build.test.ts.
+  it('keeps refusing a reference module that carries a curation marker with odd spacing and case', async () => {
     const { source, opLine } = mcpSource();
-    const marked = source.replace(opLine, `${opLine}\n${probe}`);
+    const marked = source.replace(opLine, `${opLine}\n<!--  Curation : off  -->\nA fallback line.`);
     expect(marked).not.toBe(source);
     const run = await buildModule(marked);
     expect(run.status, `expected exit 1.\n${run.combined}`).toBe(1);
