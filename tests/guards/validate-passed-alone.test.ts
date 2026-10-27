@@ -45,7 +45,7 @@ const READ_LINE = `${READ_LEAD}\`${SANCTIONED_RESOLUTION} printf '%s\\n' "$d/ski
 const NAMED_PATH = /"\$d\/skills\/devflow:agent-references\/references\/([^"]+)"/
 
 const OUTPUT_LINE_START = 'Passed alone: {'
-const OUTPUT_LINE_BOUND = 'bound 20 files, 600 s each'
+const OUTPUT_LINE_BOUND = 'bound 20 files'
 
 /** The slot of the `Passed alone:` line in the body template. The reference names the same slot, `<paths>`, in its own pin. */
 const OUTPUT_LINE_SLOT = 'Passed alone: {paths, if any}'
@@ -58,9 +58,9 @@ const SKILL_ROW = `| \`${REFERENCE_REL}\` | Validate | A Test row failed |`
 const BODY_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]> = [
   ['the full run uses the quiet form where the project command runs that tool', "Use the quiet form where the project's command runs that tool."],
   ['the trigger and the bound of 20 files', TRIGGER],
-  ['the re-run is verbose and limited to 600 s', ' verbose, 600 s max'],
+  ['the re-run is verbose and has no time bound of its own', ' verbose, never the suite:'],
   ['the re-run is never the suite', 'never the suite'],
-  ['the re-run is the one exception to the never-re-run rule', 'this is the one exception to the never-re-run rule under Running commands.'],
+  ['the re-run is the one exception to the never-re-run and never-wait rules', 'this is the one exception to the never-re-run and never-wait rules under Running commands.'],
   ['the Read of the reference through the sanctioned directory line', READ_LINE],
   ['the Read is followed by re-running only an accepted path', 'and Read it; re-run only a path it accepts'],
   ['an unread reference accepts no path', 'accepts (none if unread).'],
@@ -276,7 +276,7 @@ function collectBlockDefects(body: string): string[] {
   if (line === '') out.push('the Output block has no `Passed alone:` line')
   else {
     if (!line.startsWith(OUTPUT_LINE_SLOT)) out.push('the `Passed alone:` line lost: its `{paths, if any}` slot')
-    if (!line.includes(OUTPUT_LINE_BOUND)) out.push('the `Passed alone:` line lost: its bound of 20 files and 600 s')
+    if (!line.includes(OUTPUT_LINE_BOUND)) out.push('the `Passed alone:` line lost: its bound of 20 files')
   }
   const lineAt = output.indexOf(`\n${OUTPUT_LINE_START}`)
   if (lineAt !== -1 && !ascending([output.indexOf(TABLE_HEADER), lineAt, output.indexOf('### Failures')])) {
@@ -548,8 +548,8 @@ describe('the Validate body re-runs each failed test file alone and labels it', 
 
   it('probes: a wrong re-run limit is reported in the body: 120 s, 120s, 120 seconds, 120000 ms, 40 min and 40 minutes', () => {
     expect(WRONG_LIMIT.test(BODY), 'the body names no wrong limit').toBe(false)
-    expect(withBody(seed(BODY, ' verbose, 600 s max', ' verbose, 120 s max'))).toContain('the body names a wrong re-run limit: 120 s')
-    expect(withBody(seed(BODY, ' verbose, 600 s max', ' verbose, 120s max'))).toContain('the body names a wrong re-run limit: 120s')
+    expect(withBody(seed(BODY, ' verbose, never the suite:', ' verbose, 120 s max, never the suite:'))).toContain('the body names a wrong re-run limit: 120 s')
+    expect(withBody(seed(BODY, ' verbose, never the suite:', ' verbose, 120s max, never the suite:'))).toContain('the body names a wrong re-run limit: 120s')
     expect(withBody(seed(BODY, OUTPUT_LINE_BOUND, 'bound 20 files, 120 s each'))).toContain('the body names a wrong re-run limit: 120 s')
     expect(withBody(`${BODY}\nEach re-run waits at most 120 seconds.\n`)).toContain('the body names a wrong re-run limit: 120 seconds')
     expect(withBody(`${BODY}\nEach re-run has a timeout of 120000 ms.\n`)).toContain('the body names a wrong re-run limit: 120000')
@@ -596,7 +596,7 @@ describe('the Validate body re-runs each failed test file alone and labels it', 
     const lateLine = seed(seed(BODY, `${line}\n\n`, ''), '### Failures (if FAIL)\n', `### Failures (if FAIL)\n${line}\n\n`)
     expect(withBody(lateLine)).toContain('the `Passed alone:` line is not between the commands table and `### Failures`')
 
-    expect(withBody(seed(BODY, `; ${OUTPUT_LINE_BOUND}`, ''))).toContain('the `Passed alone:` line lost: its bound of 20 files and 600 s')
+    expect(withBody(seed(BODY, `; ${OUTPUT_LINE_BOUND}`, ''))).toContain('the `Passed alone:` line lost: its bound of 20 files')
     expect(withBody(seed(BODY, `${line}\n\n`, ''))).toContain('the Output block has no `Passed alone:` line')
   })
 
@@ -623,6 +623,13 @@ describe('the Validate body re-runs each failed test file alone and labels it', 
     const defects = withBody(open)
     expect(defects).toContain('the Read fails open: it re-runs every path it does not reject')
     expect(defects).toContain('the body lost: the Read is followed by re-running only an accepted path')
+  })
+
+  it('probes: an exception that stops covering the never-wait rule, or that is no exception, is reported', () => {
+    const lostLabel = 'the body lost: the re-run is the one exception to the never-re-run and never-wait rules'
+    expect(withBody(seed(BODY, 'never-re-run and never-wait rules', 'never-re-run rule'))).toContain(lostLabel)
+    expect(withBody(seed(BODY, 'this is the one exception to', 'this is no exception to'))).toContain(lostLabel)
+    expect(withBody(seed(BODY, 'never-wait rules', 'never-wait rules, and every call waits'))).toContain(lostLabel)
   })
 
   it('probes: a lost BASE_SHA condition, a missing reference file and a dropped SKILL.md row are reported', () => {

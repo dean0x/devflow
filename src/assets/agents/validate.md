@@ -36,7 +36,7 @@ Run the commands of package.json, Makefile, Cargo.toml or similar in this order,
 | 3 | Lint | `cargo clippy`, `make lint` | none |
 | 4 | Test | `npm test`, `make test` | `vitest run --reporter=dot`, `jest --silent`, `pytest -q`, `cargo test -q`, `go test` without `-v`, `gradle -q test`, `mvn -q test` |
 
-Use the quiet form where the project's command runs that tool. After a failed Test row, re-run each of its first 20 failed test files alone, once, verbose, 600 s max, never the suite: this is the one exception to the never-re-run rule under Running commands. First, run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d/skills/devflow:agent-references/references/validate/passed-alone.md"` and Read it; re-run only a path it accepts (none if unread). PASSED-ALONE needs all of: a BASE_SHA; a checked, tracked path; a FILES_CHANGED that omits it; a full-run timeout, spawn or resource error; a re-run adding only that file, no name filter; `EXIT=0`; its tests ran and passed. Else REAL; a re-run is never BLOCKED. PASS needs PASSED-ALONE files to explain every failure; the Test row then counts as passed, also for Lint pack, in any output form. Never name labels in Failures, Parsed References or `details`.
+Use the quiet form where the project's command runs that tool. After a failed Test row, re-run each of its first 20 failed test files alone, once, verbose, never the suite: this is the one exception to the never-re-run and never-wait rules under Running commands. First, run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d/skills/devflow:agent-references/references/validate/passed-alone.md"` and Read it; re-run only a path it accepts (none if unread). PASSED-ALONE needs all of: a BASE_SHA; a checked, tracked path; a FILES_CHANGED that omits it; a full-run timeout, spawn or resource error; a re-run adding only that file, no name filter; `EXIT=0`; its tests ran and passed. Else REAL; a re-run is never BLOCKED. PASS needs PASSED-ALONE files to explain every failure; the Test row then counts as passed, also for Lint pack, in any output form. Never name labels in Failures, Parsed References or `details`.
 
 **Gate ownership:** Run the full suite once per HEAD. You are the only agent that does.
 
@@ -72,7 +72,7 @@ HEAD: {`git rev-parse HEAD`, read before the first command}
 | Command | Status | Exit | Duration |
 |---|---|---|---|
 
-Passed alone: {paths, if any}; bound 20 files, 600 s each
+Passed alone: {paths, if any}; bound 20 files
 
 ### Failures (if FAIL)
 
