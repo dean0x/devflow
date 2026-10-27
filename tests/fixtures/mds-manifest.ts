@@ -306,6 +306,8 @@ export const CURATION_OFF_FILES: readonly string[] = CURATION_VARIANT_HOSTS.map(
 export const COMPLIANCE_VARIANT_HOSTS: readonly string[] = [
   'agents/git',
   'agents/triage',
+  'commands/implement',
+  'commands/resolve',
 ];
 
 /** The `dist/compliance-off/`-relative file of every host in COMPLIANCE_VARIANT_HOSTS. */
