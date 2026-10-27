@@ -54,7 +54,7 @@ const FOUNDER_INIT = ['init', '--plugin=code-review,implement,plan,release,resol
 const NO_WORKFLOW_INIT = ['init', '--plugin=core-skills', '--no-ambient', '--security', 'user'] as const;
 const BUG_ANALYSIS_INIT = ['init', '--plugin=bug-analysis', '--no-ambient', '--security', 'user'] as const;
 
-/** The debug fallback the render drops while devflow:debug is installed (decision A6). It occurs once in the source. */
+/** The debug fallback clause. A full install removes it because the debug command is installed. It occurs once in the source. */
 const DEBUG_FALLBACK = ', else Explore investigates and Code fixes';
 /**
  * What the debug sentence says once the debug command is absent. The span `devflow:debug, else ` overlaps the

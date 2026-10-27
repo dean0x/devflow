@@ -1498,8 +1498,6 @@ describe('GAP-6: shipped LEGACY_AGENT_KEYS integrity', () => {
 // D-KB-DELIVERY-TIERS (#427): the charter's Feature knowledge bullet
 // ---------------------------------------------------------------------------
 
-// The collector, collectCharterKnowledgeDefects, lives in tests/helpers/charter-guards.ts.
-
 describe('charter Feature knowledge bullet (D-KB-DELIVERY-TIERS)', () => {
   it('passes Rules bullets with IDs, the path and the heading index, and keeps its three limits', () => {
     const charter = readFileSync(CHARTER_PATH, 'utf-8')
