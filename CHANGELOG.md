@@ -35,7 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **At `lean`, `/implement` runs the lint pack again after a QA fix** ([#535](https://github.com/dean0x/devflow/issues/535)).
   - The re-validation after a QA fix now gets the gate level and the branch base, as Phase 6 does. A pack match that a QA fix adds is now reported, and the re-validation fails on it, as it does on any other failure.
   - At `lean`, the re-validation labels passed-alone files, and its `Lint pack:` line replaces the one from Phase 6. The pack scans the branch a second time, so a run with QA fixes does that work twice.
-  - A pack error after a QA fix reads `UNVERIFIED`, never a pass.
+  - A pack error after a QA fix reads `UNVERIFIED`, never a pass. So does a re-validation that prints no `Lint pack:` line: it never reads clean, and it never drops an `UNVERIFIED` result from the first validation.
   - At `full` and `standard`, the re-validation prompt does not change.
 - **`/implement` re-validation now follows your compliance, review-publication and PR-title settings, and always runs self-review** ([#544](https://github.com/dean0x/devflow/issues/544)).
   - With compliance on, the fix agents in a re-validation get the compliance guidance, as in a full run. With compliance off, re-validation gives them none, as before.

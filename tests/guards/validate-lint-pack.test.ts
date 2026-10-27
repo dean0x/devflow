@@ -10,7 +10,7 @@
  *   2. One spawn site: of every Validate spawn, only the `/implement` Phase 6 one carries `GATE_LEVEL` and
  *      `BASE_SHA`, as the first two lines of its prompt, in both builds. The Phase 8 fence carries neither:
  *      at `lean`, one prose line after it tells the re-validation to open with Phase 6's two lines, so its
- *      `Lint pack:` line replaces Phase 6's, and Phase 8 requires `BASE_REF` and `GATE_LEVEL` for them (#535).
+ *      `Lint pack:` line replaces Phase 6's (`Lint pack: UNVERIFIED` when it prints none), and Phase 8 requires `BASE_REF` and `GATE_LEVEL` for them (#535).
  *      The re-validation reference skips Phase 1, so it takes `GATE_LEVEL` from Phase 1's settings step for
  *      Phase 6 and never names `BASE_SHA`.
  *   3. The data flow and the report: Phase 1 Produces and Phase 6 Requires list `GATE_LEVEL`; Phase 12 shows
@@ -468,7 +468,8 @@ describe('only the implement Phase 6 Validate fence carries the level and the ba
 /** The Phase 8 line (#535): at `lean`, the re-validation after a QA fix opens with Phase 6's two lines. */
 const PHASE8_OPENING = 'At `lean`, open the prompt with'
 const PHASE8_NAMES = "Phase 6's `GATE_LEVEL` and `BASE_SHA` lines"
-const PHASE8_RULE = "its `Lint pack:` line replaces Phase 6's in VALIDATION_RESULT"
+const PHASE8_DEFAULT = 'or `Lint pack: UNVERIFIED` if it prints none'
+const PHASE8_RULE = `its \`Lint pack:\` line, ${PHASE8_DEFAULT}, replaces Phase 6's in VALIDATION_RESULT`
 const PHASE8_LINE = `${PHASE8_OPENING} ${PHASE8_NAMES}; ${PHASE8_RULE}.`
 const PHASE8_HEADING = '### Phase 8: Re-Validate'
 const PHASE9_HEADING = '### Phase 9:'
@@ -484,7 +485,7 @@ function seedPhase8(text: string, from: string | RegExp, to: string): string {
  * Named collector (#535): how a copy of `/implement` fails to run the lean lint pack again after a QA fix.
  * The Phase 8 fence stays plain, so `full` and `standard` prompts do not change. One prose line after it
  * tells the re-validation to open with Phase 6's `GATE_LEVEL` and `BASE_SHA` lines at `lean` and says its
- * `Lint pack:` line replaces Phase 6's. The base is Phase 6's, the fork point: a base of `VALIDATED_HEAD`
+ * `Lint pack:` line replaces Phase 6's, or `Lint pack: UNVERIFIED` when it prints none. The base is Phase 6's, the fork point: a base of `VALIDATED_HEAD`
  * would scan only the QA-fix diff, and the replacing line could turn a Phase 6 pack error into `clean`.
  */
 export function collectPhase8LineDefects(doc: Doc): string[] {
@@ -499,6 +500,8 @@ export function collectPhase8LineDefects(doc: Doc): string[] {
     if (/\.\s/.test(line)) out.push(`${doc.label}: the Phase 8 line shares its line with another sentence`)
     if (!line.includes(PHASE8_NAMES)) out.push(`${doc.label}: the Phase 8 line does not name ${PHASE8_NAMES}`)
     if (!line.includes(PHASE8_RULE)) out.push(`${doc.label}: the Phase 8 line does not say ${PHASE8_RULE}`)
+    if (!line.includes(PHASE8_DEFAULT)) out.push(`${doc.label}: the Phase 8 line gives a missing pack line no UNVERIFIED default`)
+    if (/\bclean\b/i.test(line)) out.push(`${doc.label}: the Phase 8 line names a clean result, and a missing pack line must never read clean`)
     if (line.includes('VALIDATED_HEAD')) out.push(`${doc.label}: the Phase 8 line takes its base from VALIDATED_HEAD, not from Phase 6's line`)
   }
   if (/^"?(GATE_LEVEL|BASE_SHA):/m.test(section)) out.push(`${doc.label}: the Phase 8 prompt carries a GATE_LEVEL or BASE_SHA line of its own`)
@@ -535,8 +538,20 @@ describe('at lean, the Phase 8 re-validation runs the lint pack again with the P
         `${label}: the Phase 8 line does not name ${PHASE8_NAMES}`,
         `${label}: the Phase 8 line takes its base from VALIDATED_HEAD, not from Phase 6's line`,
       ])
-      expect(defects(t => seedPhase8(t, `; ${PHASE8_RULE}`, '')), label)
-        .toEqual([`${label}: the Phase 8 line does not say ${PHASE8_RULE}`])
+      expect(defects(t => seedPhase8(t, `; ${PHASE8_RULE}`, '')), label).toEqual([
+        `${label}: the Phase 8 line does not say ${PHASE8_RULE}`,
+        `${label}: the Phase 8 line gives a missing pack line no UNVERIFIED default`,
+      ])
+      // The default for a missing pack line: dropped (the line still replaces Phase 6's), or turned into a clean result.
+      expect(defects(t => seedPhase8(t, `, ${PHASE8_DEFAULT},`, '')), label).toEqual([
+        `${label}: the Phase 8 line does not say ${PHASE8_RULE}`,
+        `${label}: the Phase 8 line gives a missing pack line no UNVERIFIED default`,
+      ])
+      expect(defects(t => seedPhase8(t, '`Lint pack: UNVERIFIED` if', '`Lint pack: clean` if')), label).toEqual([
+        `${label}: the Phase 8 line does not say ${PHASE8_RULE}`,
+        `${label}: the Phase 8 line gives a missing pack line no UNVERIFIED default`,
+        `${label}: the Phase 8 line names a clean result, and a missing pack line must never read clean`,
+      ])
       expect(defects(t => seedPhase8(t, 'VALIDATION_SCOPE: changed-only\n', 'VALIDATION_SCOPE: changed-only\nBASE_SHA: VALIDATED_HEAD\n')), label)
         .toEqual([`${label}: the Phase 8 prompt carries a GATE_LEVEL or BASE_SHA line of its own`])
       expect(defects(t => seedPhase8(t, 'VALIDATION_SCOPE: changed-only\n', `VALIDATION_SCOPE: changed-only\n${PHASE6_LEVEL}\n`)), label)

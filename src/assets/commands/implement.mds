@@ -456,7 +456,7 @@ VALIDATION_SCOPE: changed-only
 Verify the qa-fix commits did not break anything."
 ```
 
-At `lean`, open the prompt with Phase 6's `GATE_LEVEL` and `BASE_SHA` lines; its `Lint pack:` line replaces Phase 6's in VALIDATION_RESULT.
+At `lean`, open the prompt with Phase 6's `GATE_LEVEL` and `BASE_SHA` lines; its `Lint pack:` line, or `Lint pack: UNVERIFIED` if it prints none, replaces Phase 6's in VALIDATION_RESULT.
 
 **If FAIL:** Report the failures to user and halt.
 
