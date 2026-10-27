@@ -23,6 +23,9 @@
  * than COMPLETE") once. The README leaves that sentence out. This is a known limit, so the check does not hold it to one.
  * The `2 Global Triage` row of the /resolve reference (`pass level`) has the effect "applies severity tiers": each site that
  * covers `/resolve` says it once.
+ * Three claims of the self-review and re-validation fixes are checked once per site: each Harden block of the two docs says Harden
+ * never reviews a deleted file or the old path of a rename, the Lint pack paragraph of docs/cli-reference.md says the lean
+ * re-validation line (or `UNVERIFIED`, when it prints none) replaces the first validation's, and step 7 of docs/commands.md says the same.
  *
  * Each doc is read at import. A missing file, paragraph or section throws, so the guard never skips. The decided rows
  * and the two references come from `level-guard-helpers.ts`. `implement-resolve-levels.test.ts` holds the other arms.
@@ -273,6 +276,28 @@ const FIX_ROUTE_SITES: readonly ReadSite[] = [CLI_REFERENCE_SITE, COMMANDS_IMPLE
 const EVALUATE_ROUTE_CHECKS: readonly RouteCheck[] = [
   { what: 'the one Fix round after the single Evaluate pass', re: EVALUATE_ONE_FIX_ROUND, sites: FIX_ROUND_SITES },
   { what: 'the route of a Fix round that does not complete', re: EVALUATE_FIX_ROUTE, sites: FIX_ROUTE_SITES },
+]
+
+/** What the Harden block of a doc says of the files Harden skips over (#571). */
+const HARDEN_NEVER_REVIEWS = /\bnever reviews a deleted file or the old path of a rename\b/
+/** What the lean re-validation sentence of docs/cli-reference.md says (#535): the pack runs over the branch, and its line, or `UNVERIFIED` when it prints none, replaces the first validation's. */
+const REVALIDATE_CLI = /At `lean`, the re-validation after QA fixes also runs the pack over the branch, and its `Lint pack:` line, or `UNVERIFIED` when it prints none, replaces the one from the first validation\./
+/** What step 7 of docs/commands.md says (#535): the same, in the words of the step. */
+const REVALIDATE_COMMANDS = /At `lean`, it also gets the branch base, so it labels passed-alone files and runs the lint pack over the branch; its `Lint pack:` line, or `UNVERIFIED` when it prints none, replaces the one from step 5/
+
+/** The Lint pack paragraph of docs/cli-reference.md: the site of the lean re-validation sentence. It covers no level row, so it is no DOC_SITES entry. */
+const CLI_LINT_PACK_SITE: ReadSite = { label: 'the docs/cli-reference.md Lint pack paragraph', text: paragraphOf('docs/cli-reference.md', CLI_REFERENCE_TEXT, '**Lint pack.**'), cmds: ['implement'], min: 500 }
+/** The Harden block of each doc that holds one, as a site: the sentence about deleted files is counted inside the block, because docs/commands.md says it again in its Refinement step. A missing block throws at import, so the guard never skips. */
+const HARDEN_BLOCK_SITES: readonly ReadSite[] = HARDEN_SHARED_SITES.map(real => {
+  const block = hardenBlockOf(real.text, HARDEN_NOTES)
+  if (block === null) throw new Error(`${real.label} holds no Harden block`)
+  return { ...real, label: `${real.label}, Harden block`, text: block }
+})
+/** The checks of the #571 and #535 doc claims, over the real sites. Each phrase is stated once per site. */
+const GATE_CLAIM_CHECKS: readonly RouteCheck[] = [
+  { what: 'that Harden never reviews a deleted file or the old path of a rename', re: HARDEN_NEVER_REVIEWS, sites: HARDEN_BLOCK_SITES },
+  { what: 'the lean re-validation pack line, with its UNVERIFIED default', re: REVALIDATE_CLI, sites: [CLI_LINT_PACK_SITE] },
+  { what: 'the step 7 pack line, with its UNVERIFIED default', re: REVALIDATE_COMMANDS, sites: [COMMANDS_IMPLEMENT_SITE] },
 ]
 
 describe('the doc sites state the effect of each shipped row and keep no retired claim (TP-6)', () => {
@@ -606,6 +631,46 @@ describe('the doc sites state the effect of each shipped row and keep no retired
           expect(phrase, `${real.label}: the phrase is there`).not.toBeNull()
           const repeated: DocSite = { ...real, text: `${real.text} ${phrase?.[0] ?? ''}` }
           expect(collectEvaluateRouteDefects([{ ...check, sites: [repeated] }]), `${real.label}: ${check.what} repeated`).toEqual([`${real.label} states ${check.what} 2 times, expected once`])
+        }
+      }
+    })
+  })
+
+  describe('the docs state the Harden scope and the lean re-validation pack line, once per site (#571, #535)', () => {
+    it('HARDEN_NEVER_REVIEWS, REVALIDATE_CLI and REVALIDATE_COMMANDS read their wording, and nothing less', () => {
+      for (const text of ['so Harden never reviews a deleted file or the old path of a rename, even one', 'Harden never reviews a deleted file or the old path of a rename;']) expect(HARDEN_NEVER_REVIEWS.test(text), text).toBe(true)
+      for (const text of ['Harden does not review a deleted file or the old path of a rename', 'never reviews a deleted file or the old path of a renamed', 'never reviews a deleted file', 'nevers reviews a deleted file or the old path of a rename']) expect(HARDEN_NEVER_REVIEWS.test(text), text).toBe(false)
+    })
+
+    it('the sites are the registered ones, each read from the product, and the real texts leave no defect', () => {
+      expect(HARDEN_BLOCK_SITES.map(s => s.label)).toEqual([
+        'the docs/cli-reference.md What reads it paragraph, Harden block',
+        'the docs/commands.md /implement section, Harden block',
+      ])
+      expect(GATE_CLAIM_CHECKS.map(check => check.re)).toEqual([HARDEN_NEVER_REVIEWS, REVALIDATE_CLI, REVALIDATE_COMMANDS])
+      expect(GATE_CLAIM_CHECKS.map(check => check.sites.map(s => s.label))).toEqual([
+        ['the docs/cli-reference.md What reads it paragraph, Harden block', 'the docs/commands.md /implement section, Harden block'],
+        ['the docs/cli-reference.md Lint pack paragraph'],
+        ['the docs/commands.md /implement section'],
+      ])
+      for (const { label, text } of [...HARDEN_BLOCK_SITES, CLI_LINT_PACK_SITE, COMMANDS_IMPLEMENT_SITE]) expect(text.length, `${label}: nothing read`).toBeGreaterThan(200)
+      expect(collectEvaluateRouteDefects(GATE_CLAIM_CHECKS)).toEqual([])
+    })
+
+    it('known-bad probes (real sites): each claim replaced by its older wording, and each claim stated twice, is reported', () => {
+      const older: ReadonlyMap<RegExp, string> = new Map([
+        [HARDEN_NEVER_REVIEWS, 'does not review a deleted file or the old path of a rename'],
+        [REVALIDATE_CLI, 'At `lean`, the re-validation after QA fixes also runs the pack over the branch, and its `Lint pack:` line replaces the one from the first validation.'],
+        [REVALIDATE_COMMANDS, 'At `lean`, it also gets the branch base, so it labels passed-alone files and runs the lint pack over the branch; its `Lint pack:` line replaces the one from step 5'],
+      ])
+      for (const check of GATE_CLAIM_CHECKS) {
+        const wording = older.get(check.re)
+        expect(wording, `${check.what}: an older wording is registered`).toBeDefined()
+        for (const real of check.sites) {
+          const reverted: DocSite = { ...real, text: seed(real.text, check.re, wording ?? '') }
+          expect(collectEvaluateRouteDefects([{ ...check, sites: [reverted] }]), `${real.label}: ${check.what} reverted`).toEqual([`${real.label} does not state ${check.what}`])
+          const doubled: DocSite = { ...real, text: seed(real.text, check.re, '$& $&') }
+          expect(collectEvaluateRouteDefects([{ ...check, sites: [doubled] }]), `${real.label}: ${check.what} doubled`).toEqual([`${real.label} states ${check.what} 2 times, expected once`])
         }
       }
     })
