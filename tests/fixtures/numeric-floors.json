@@ -486,11 +486,11 @@
     },
     {
       "id": "synthesize-mode-ref-max",
-      "ceiling": 3805,
-      "pattern": "const SYNTHESIZE_MODE_REF_MAX_BYTES = 3_805",
+      "ceiling": 3797,
+      "pattern": "const SYNTHESIZE_MODE_REF_MAX_BYTES = 3_797",
       "occurrences": 1,
       "sourceFile": "tests/guards/agent-references.test.ts",
-      "description": "D-MODE-BY-PATH: the largest single Synthesize mode reference, references/synthesize/{mode}.md of the agent-references skill, in bytes. Review is the largest at 3,805 (its template, its merge rules and the review-only inputs). A spawn loads the body plus exactly one of these. May be LOWERED, never raised."
+      "description": "D-MODE-BY-PATH: the largest single Synthesize mode reference, references/synthesize/{mode}.md of the agent-references skill, in bytes. Review is the largest at 3,797 (its template, its merge rules and the review-only inputs); Bug Analysis follows at 3,643 with the STATIC_STATUS input and its rules. A spawn loads the body plus exactly one of these. May be LOWERED, never raised."
     },
     {
       "id": "code-review-levels-ref-max",

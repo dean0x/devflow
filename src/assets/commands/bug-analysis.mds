@@ -238,7 +238,7 @@ Notes:
 ### Phase 6: Synthesis
 
 **Produces:** BUG_ANALYSIS_SUMMARY
-**Requires:** ANALYZER_OUTPUTS, ANALYSIS_DIR, BRANCH_INFO
+**Requires:** ANALYZER_OUTPUTS, ANALYSIS_DIR, BRANCH_INFO, STATIC_STATUS
 
 Spawn Synthesize agent:
 
@@ -248,6 +248,7 @@ Agent(subagent_type="Synthesize", run_in_background=false):
 ANALYSIS_BASE_DIR: {ANALYSIS_DIR}
 BRANCH: {branch} -> {base_branch}
 TIMESTAMP: {timestamp}
+STATIC_STATUS: {STATIC_STATUS}
 Output: {ANALYSIS_DIR}/bug-analysis-summary.md"
 ```
 

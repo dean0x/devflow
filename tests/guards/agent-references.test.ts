@@ -28,7 +28,7 @@ import {
 const SYNTHESIZE_BODY_MAX_BYTES = 4_070
 
 /** The largest single Synthesize mode reference, in bytes. Registered as `synthesize-mode-ref-max`; lowered, never raised. */
-const SYNTHESIZE_MODE_REF_MAX_BYTES = 3_805
+const SYNTHESIZE_MODE_REF_MAX_BYTES = 3_797
 
 /** The `/code-review` gate-level reference, in bytes. Registered as `code-review-levels-ref-max`; lowered, never raised. */
 const CODE_REVIEW_LEVELS_REF_MAX_BYTES = 1_349
