@@ -45,7 +45,7 @@ devflow/
 │   │   ├── config.ts                 # PRESETS, loadConfig, saveConfig
 │   │   └── components/               # 15 individual component renderers
 │   ├── targets/claude-code/          # Claude Code install target
-│   │   ├── installer.ts              # installViaFileCopy, composeScripts
+│   │   ├── installer.ts              # installViaFileCopy, composeScripts, installScripts
 │   │   ├── claude-paths.ts           # getInstallationPaths
 │   │   ├── hooks.ts                  # Hook registration helpers
 │   │   ├── post-install.ts           # Post-install setup
