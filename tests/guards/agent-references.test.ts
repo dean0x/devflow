@@ -21,8 +21,9 @@ import { readdirSync } from 'fs'
 
 import {
   RETIRED_INLINE_EXPANSION, SANCTIONED_RESOLUTION, SYNTHESIZE_MODES, agentReferencePath, isAgentBlock, parseFences,
-  readAgentReference, requireDistFile, requireDistFiles, resolveAgentSource, resolveCurationOffSource,
+  readAgentReference, requireDistFile, requireDistFiles, resolveAgentSource, resolveVariantOffSource,
 } from '../helpers.js'
+import { variantOffRelPath, type OffVariantKey } from '../../src/core/curation-variants.js'
 
 /** The Synthesize agent body, in bytes. Registered as `synthesize-body-max`; lowered, never raised. */
 const SYNTHESIZE_BODY_MAX_BYTES = 4_070
@@ -50,6 +51,12 @@ const TRIAGE_BODY_MAX_BYTES = 11_813
 
 /** The Triage agent body of the curation-off build, dist/curation-off/agents/triage.md, in bytes. Registered as `triage-body-curation-off-max`; lowered, never raised. */
 const TRIAGE_BODY_CURATION_OFF_MAX_BYTES = 11_029
+
+/** The Triage agent body of the compliance-off build, dist/compliance-off/agents/triage.md, in bytes. Registered as `triage-body-compliance-off-max`; lowered, never raised. */
+const TRIAGE_BODY_COMPLIANCE_OFF_MAX_BYTES = 11_752
+
+/** The Triage agent body of the build with both axes off, dist/curation-compliance-off/agents/triage.md, in bytes. Registered as `triage-body-both-off-max`; lowered, never raised. */
+const TRIAGE_BODY_BOTH_OFF_MAX_BYTES = 10_968
 
 /** The Validate passed-alone re-run reference, in bytes. Registered as `validate-passed-alone-ref-max`; lowered, never raised. */
 const VALIDATE_PASSED_ALONE_REF_MAX_BYTES = 3_424
@@ -220,12 +227,17 @@ export function collectSizeDefects(label: string, text: string, ceiling: number)
   return bytes > ceiling ? [`${label} is ${bytes} bytes, ceiling ${ceiling}`] : []
 }
 
-describe('the Triage body sits under its ceiling in both builds (#484)', () => {
-  const off = resolveCurationOffSource('agents', 'triage')
-  if (off === null) throw new Error('dist/curation-off/agents/triage.md is absent: run `npm run build:mds`')
+describe('the Triage body sits under its ceiling in every build (#484, #648)', () => {
+  const triageBuild = (key: OffVariantKey): string => {
+    const text = resolveVariantOffSource(key, 'agents', 'triage')
+    if (text === null) throw new Error(`${variantOffRelPath(key, 'agents', 'triage.md')} is absent: run \`npm run build:mds\``)
+    return text
+  }
   const builds: ReadonlyArray<readonly [string, string, number]> = [
-    ['curation on', resolveAgentSource('triage').content, TRIAGE_BODY_MAX_BYTES],
-    ['curation off', off, TRIAGE_BODY_CURATION_OFF_MAX_BYTES],
+    ['all on', resolveAgentSource('triage').content, TRIAGE_BODY_MAX_BYTES],
+    ['curation off', triageBuild('curation-off'), TRIAGE_BODY_CURATION_OFF_MAX_BYTES],
+    ['compliance off', triageBuild('compliance-off'), TRIAGE_BODY_COMPLIANCE_OFF_MAX_BYTES],
+    ['curation and compliance off', triageBuild('both-off'), TRIAGE_BODY_BOTH_OFF_MAX_BYTES],
   ]
 
   it.each(builds)('%s: the Triage body fits its ceiling, and a probe one byte under its size is reported', (label, body, ceiling) => {

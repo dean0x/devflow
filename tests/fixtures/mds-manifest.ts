@@ -298,14 +298,35 @@ export const CURATION_OFF_FILES: readonly string[] = CURATION_VARIANT_HOSTS.map(
  * as a set for the same reason as the curation roster: a count stays green when one
  * host loses its arm and another gains one in the same commit.
  *
- * Empty while no host carries a compliance arm. The build's variant manifest is
- * asserted against it in both directions (tests/build-mds.test.ts), so an arm added
- * without a row, or a row left after its arm goes, turns that assertion red.
+ * The build's variant manifest is asserted against it in both directions
+ * (tests/build-mds.test.ts), so an arm added without a row, or a row left after its
+ * arm goes, turns that assertion red. A host joins the roster in the commit that adds
+ * its first compliance arm.
  */
-export const COMPLIANCE_VARIANT_HOSTS: readonly string[] = [];
+export const COMPLIANCE_VARIANT_HOSTS: readonly string[] = [
+  'agents/git',
+  'agents/triage',
+];
 
 /** The `dist/compliance-off/`-relative file of every host in COMPLIANCE_VARIANT_HOSTS. */
 export const COMPLIANCE_OFF_FILES: readonly string[] = COMPLIANCE_VARIANT_HOSTS.map(h => `${h}.md`);
+
+/**
+ * The eight Git operations that post to GitHub or a tracker: a compliance-off install
+ * carries no row, loading line or text that names one of them, in the Git agent or in
+ * any command. A named set, never a count, so an op that moves in or out is a visible
+ * edit here.
+ */
+export const POSTING_OPERATIONS: readonly string[] = [
+  'post-review-summary',
+  'resolve-review-threads',
+  'post-resolution-summary',
+  'update-pr-evidence',
+  'manage-debt',
+  'post-wave-report',
+  'backlink-shipped-issues',
+  'associate-release',
+];
 
 /**
  * Reference modules: .mds sources under src/assets/mds/ that the build COMPILES,

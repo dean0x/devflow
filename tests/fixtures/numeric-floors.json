@@ -549,6 +549,22 @@
       "description": "The Triage agent body of the curation-off build, dist/curation-off/agents/triage.md, in bytes. It was 9,732 bytes before #484 added the GATE_LEVEL bullet and the Gate Level section. Measured 11,029 after the review fixes of #484, with no headroom. May be LOWERED, never raised: text that only standard and lean need goes to references/triage/severity-tiers.md, which loads only then."
     },
     {
+      "id": "triage-body-compliance-off-max",
+      "ceiling": 11752,
+      "pattern": "const TRIAGE_BODY_COMPLIANCE_OFF_MAX_BYTES = 11_752",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/agent-references.test.ts",
+      "description": "The Triage agent body of the compliance-off build, dist/compliance-off/agents/triage.md, in bytes. It is the all-on body less the line that sends a FIX_SEPARATE issue to the backlog step, which that build does not install. Measured 11,752 at its first build, with no headroom. May be LOWERED, never raised. The rule sets no comparison with the all-on build."
+    },
+    {
+      "id": "triage-body-both-off-max",
+      "ceiling": 10968,
+      "pattern": "const TRIAGE_BODY_BOTH_OFF_MAX_BYTES = 10_968",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/agent-references.test.ts",
+      "description": "The Triage agent body of the build with curation and compliance both off, dist/curation-compliance-off/agents/triage.md, in bytes. Measured 10,968 at its first build, with no headroom. May be LOWERED, never raised. The rule sets no comparison with the other builds."
+    },
+    {
       "id": "curate-body-max",
       "ceiling": 16710,
       "pattern": "const CURATE_BODY_MAX_BYTES = 16_710",
