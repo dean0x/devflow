@@ -704,6 +704,91 @@ describe('the deadline tail: the line at the deadline comes from the last counte
       expect(r.line).toMatch(/^CI INDETERMINATE pr=12 head=aaaaaaa failing=- pending=- waited=\d+ reason=gh-failed$/)
       expect(r.world.of('checks').filter(c => c.elapsedBefore >= 400_000 && c.timeout === 30_000)).toHaveLength(CW.MAX_CONSECUTIVE_GH_FAILURES)
     })
+
+    it('a hang given exactly the 30 s cap is a failed poll; one given 29,999 ms is cut short by the deadline', async () => {
+      // Every call but the first view takes 0 ms, so the polls start 20 s apart from `offsetMs`; the poll at 540 s (+ offset) hangs its checks call.
+      const capEdge = (offsetMs: number): Script => ({ kind, nth, again, elapsed }) => (kind === 'view'
+        ? { ...viewOk(), took: nth === 0 && !again ? offsetMs : 0 }
+        : elapsed >= 540_000 ? { hang: true } : { stdout: '[]', took: 0 })
+      const full = await run(capEdge(0))
+      expect(full.world.of('checks').at(-1)?.timeout, 'the call was given the whole cap').toBe(30_000)
+      expect(full.line).toBe('CI INDETERMINATE pr=12 head=aaaaaaa failing=- pending=- waited=570 reason=deadline')
+      const cut = await run(capEdge(1))
+      expect(cut.world.of('checks').at(-1)?.timeout, 'the call was given 1 ms less than the cap').toBe(29_999)
+      expect(cut.line).toBe('CI NO_CI pr=12 head=aaaaaaa failing=- pending=- waited=570')
+    })
+
+    it('NO_CI stall, then a last first view that hangs to its capped timeout: the line stays NO_CI at 570 s', async () => {
+      const r = await run(({ kind, elapsed }) => (kind === 'view' ? (elapsed >= LAST_POLLS_FROM_MS ? { hang: true } : viewOk()) : { stdout: '[]' }))
+      expect(r.line).toBe('CI NO_CI pr=12 head=aaaaaaa failing=- pending=- waited=570')
+      expect(r.world.calls.at(-1)?.args[1], 'the cut call was the first view of the last poll').toBe('view')
+      expect(r.world.of('view').at(-1)?.timeout).toBeLessThan(30_000)
+    })
+
+    // The last poll starts at 550 s: its first view ends at 551 s, its checks call at 552 s, and the second head read has 18 s.
+    const cutSecondView = (lateChecks: Reply): Script => ({ kind, elapsed, again }) => {
+      if (kind === 'checks') return elapsed >= LAST_POLLS_FROM_MS ? lateChecks : { stdout: '[]' }
+      return again && elapsed >= LAST_POLLS_FROM_MS ? { hang: true } : viewOk()
+    }
+    const DEADLINE_LINE = 'CI INDETERMINATE pr=12 head=aaaaaaa failing=- pending=- waited=570 reason=deadline'
+
+    const EMPTY_LAST: ReadonlyArray<readonly [string, Reply]> = [
+      ['an empty list', { stdout: '[]' }],
+      ['"no checks reported" on exit 1', { status: 1, stderr: NO_CHECKS_STDERR }],
+    ]
+    for (const [label, reply] of EMPTY_LAST) {
+      it(`NO_CI stall, then ${label} and a second head read that is cut short: no check row came back, so the line stays NO_CI at 570 s`, async () => {
+        const r = await run(cutSecondView(reply))
+        expect(r.line).toBe('CI NO_CI pr=12 head=aaaaaaa failing=- pending=- waited=570')
+        expect(r.world.calls.at(-1)?.args[1], 'the cut call was the second head read').toBe('view')
+        expect(r.world.of('view').at(-1)?.timeout).toBeLessThan(30_000)
+      })
+    }
+
+    const ROWS_LAST: ReadonlyArray<readonly [string, Reply]> = [
+      ['a late failing Actions check', checksOk('fail')],
+      ['a late pending Actions check', checksOk('pending')],
+      ['a late failing external check', externalOk('fail')],
+      ['a late passing external check', externalOk('pass')],
+      ['a checks reply that cannot be read', { stdout: '<html>rate limited</html>' }],
+    ]
+    for (const [label, reply] of ROWS_LAST) {
+      it(`NO_CI stall, then ${label} and a second head read that is cut short: reason=deadline, the NO_CI stall does not survive`, async () => {
+        const r = await run(cutSecondView(reply))
+        expect(r.line).toBe(DEADLINE_LINE)
+        expect(r.world.calls.at(-1)?.args[1], 'the cut call was the second head read').toBe('view')
+        expect(r.world.of('view').at(-1)?.timeout).toBeLessThan(30_000)
+      })
+    }
+
+    it('a pending poll, then rows and a second head read that is cut short: PENDING stands, it names real checks', async () => {
+      const r = await run(({ kind, elapsed, again }) => (kind === 'checks'
+        ? checksOk('pass', 'pending')
+        : again && elapsed >= LAST_POLLS_FROM_MS ? { hang: true } : viewOk()))
+      expect(r.line).toBe('CI PENDING pr=12 head=aaaaaaa failing=- pending=check-2 waited=570')
+    })
+
+    describe('the workflow probe is cut short', () => {
+      // Every call takes 0 ms, so the polls start 20 s apart (0 ... 560 s). The head is the old one until the last poll, so the earlier
+      // polls are head-mismatch stalls; the last poll reads the named head, and the probe has the 10 s that are left.
+      const probeCut = (lastChecks: Reply): Script => ({ kind, elapsed }) => (kind === 'view'
+        ? { ...viewOk(elapsed >= 560_000 ? HEAD : OLD_HEAD), took: 0 }
+        : { ...lastChecks, took: 0 })
+
+      it('external-only rows came back, then the probe is cut: reason=deadline, the head-mismatch stall does not survive', async () => {
+        const r = await run(probeCut(externalOk('pass')), { workflows: () => ({ hang: true }) })
+        expect(r.line).toBe(DEADLINE_LINE)
+        const probes = r.world.of('workflows')
+        expect(probes).toHaveLength(1)
+        expect(probes[0].timeout).toBe(10_000)
+      })
+
+      it('an empty list came back, then the probe is cut: no row came back, so the head-mismatch stall stands', async () => {
+        const r = await run(probeCut({ stdout: '[]' }), { workflows: () => ({ hang: true }) })
+        expect(r.line).toBe('CI INDETERMINATE pr=12 head=aaaaaaa failing=- pending=- waited=570 reason=head-mismatch')
+        expect(r.world.of('workflows')).toHaveLength(1)
+      })
+    })
   })
 
   it('a clock that does not move, an empty list and no workflow file: MAX_POLLS ends it as INDETERMINATE (deadline), never NO_CI', async () => {
@@ -711,6 +796,17 @@ describe('the deadline tail: the line at the deadline comes from the last counte
     expect(r.line).toBe('CI INDETERMINATE pr=12 head=aaaaaaa failing=- pending=- waited=0 reason=deadline')
     expect(r.world.of('checks')).toHaveLength(CW.MAX_POLLS)
     expect(r.world.of('workflows'), 'one probe for the run').toHaveLength(1)
+  })
+
+  it('a counted poll whose last call ends exactly at the deadline ends the loop there: no sleep of 0 ms, and its NO_CI stall stands', async () => {
+    // Polls of an empty list start 22 s apart (0 ... 550 s). The second head read of the last one takes the 18 s that are left.
+    const r = await run(({ kind, elapsed, again }) => (kind === 'view'
+      ? (again && elapsed >= LAST_POLLS_FROM_MS ? { ...viewOk(), took: MAX_MS - elapsed } : viewOk())
+      : { stdout: '[]' }))
+    expect(r.line).toBe('CI NO_CI pr=12 head=aaaaaaa failing=- pending=- waited=570')
+    expect(r.world.elapsed, 'the last call ended exactly at the deadline').toBe(MAX_MS)
+    expect(r.world.calls.at(-1)?.args[1], 'it was a result, not a cut call').toBe('view')
+    expect(r.world.sleeps, 'the loop did not sleep once more').not.toContain(0)
   })
 
   it('a stall resets the failed-poll count, as an open or a pending poll does', async () => {
@@ -1407,7 +1503,7 @@ describe('matchedStep: the outcome of a poll on the named head, as a pure functi
     }
   })
 
-  it('maps each gate answer to exactly one step, and reads neither the merge state nor the probe itself', () => {
+  it('maps each mergeGate answer to exactly one step, for an empty list and for a workflow pass', () => {
     // The independent table: gate answer -> the step an empty list takes.
     const emptyByGate: Record<MergeGateResult, MatchedStep> = {
       'conflict': done('INDETERMINATE', 'merge-conflict'),

@@ -29,7 +29,8 @@
 // unparseable line, an unlisted status or a non-zero exit as INDETERMINATE.
 //
 // Design constraints (binding). The text of each verdict rule is written once, at the
-// marker named below; this list points to it.
+// marker named below; this list points to it. The workflow-probe rule has two readers,
+// mergeGate and matchedStep, and one reading of the probe value, probeAnswer.
 //   - D-CI-WAIT-INLINE: this is plumbing. The only judgment in it is the classifier
 //     (D-CI-CLASSIFIER, D-CI-WORKFLOW-RULE) and the merge gate (D-CI-MERGE-STATE,
 //     D-CI-WORKFLOWS, D-CI-PR-STATE). Every subprocess is `gh`, spawned through exec()
@@ -37,9 +38,10 @@
 //     gh output never reaches stdout raw: a check name passes sanitizeName() first.
 //   - D-CI-WORKFLOW-RULE: see classifyChecks. PASSING does not prove that the test
 //     workflow ran by name.
-//   - D-CI-MERGE-STATE, D-CI-WORKFLOWS: see mergeGate. The workflow files are listed,
-//     never opened: no workflow YAML is parsed, so which events a workflow reacts to is
-//     not judged.
+//   - D-CI-MERGE-STATE, D-CI-WORKFLOWS: see mergeGate (an empty check list) and matchedStep
+//     (rows that are all external checks, which read the probe answer themselves). The
+//     workflow files are listed, never opened: no workflow YAML is parsed, so which events
+//     a workflow reacts to is not judged.
 //   - D-CI-PR-STATE, D-CI-HEAD-BINDING: see waitForCi.
 //   - D-CI-NO-LITERAL-SLEEP: the wait happens inside node, through clock.sleep(),
 //     never through a shell `sleep`. Claude Code 2.1.294 blocks any Bash command
@@ -203,15 +205,26 @@ const VIEW_FIELDS = 'headRefOid,mergeable,state';
  *   waited: number, reason: string | null }} CiResult
  *   `head` is the first 7 hex characters.
  * @typedef {{ pr: string, head: string, exec: ExecFn, clock: Clock, env?: NodeJS.ProcessEnv }} WaitInput
- * @typedef {{ state: 'deadline' } | { state: 'failed' } | { state: 'pending', pending: string[] } | { state: 'open' }
+ * @typedef {{ state: 'deadline', rowsRead: boolean } | { state: 'failed' } | { state: 'pending', pending: string[] }
+ *   | { state: 'open' }
  *   | { state: 'stall', status: string, reason: string | null }
  *   | { state: 'done', result: CiResult }} PollStep
- *   A `stall` keeps the wait going and names the line to give if the deadline comes first.
+ *   A `stall` keeps the wait going and names the line to give if the deadline comes first. A
+ *   `deadline` is a poll that the deadline cut short, so it is no counted poll; `rowsRead` is
+ *   true when the poll had read check rows, or a reply it could not read, before the cut.
  * @typedef {{ status: string, reason: string | null, pending: string[] }} Last
  *   The line the last counted poll gives at the deadline.
  * @typedef {{ exec?: ExecFn, clock?: Clock, env?: NodeJS.ProcessEnv }} MainDeps
  * @typedef {{ code: number, stdout: string }} Outcome
  */
+
+/**
+ * The line of a wait that has no verdict at the deadline: the start of the loop, an open or a
+ * failed poll, and a loop that ran out of MAX_POLLS. It is shared, so it is frozen.
+ *
+ * @type {Readonly<Last>}
+ */
+const DEADLINE_LAST = Object.freeze({ status: 'INDETERMINATE', reason: 'deadline', pending: Object.freeze([]) });
 
 // ---------------------------------------------------------------------------
 // Argument gate
@@ -528,7 +541,9 @@ function probeAnswer(workflowsActive) {
  * is read; `mergeable` is the `gh pr view` value in any shape; `workflowsActive` is what
  * the workflow probe found: true (an active workflow file), false (none), or null or
  * left out when it was not made or gave no answer. Each case has its own answer, so a
- * caller never reads `mergeable` or `workflowsActive` again:
+ * caller never reads `mergeable` again. The probe value has two readers, both through
+ * probeAnswer: mergeGate, for an empty list, and matchedStep, for rows that are all external
+ * checks:
  *   'conflict'           isConflicting(mergeable), whatever the status.
  *   'await-merge-state'  PASSING or NO_CI while mergeable is anything but MERGEABLE
  *                        (UNKNOWN, absent or odd). It is neither a verdict nor a conflict:
@@ -639,7 +654,7 @@ function matchedStep(verdict, mergeable, workflowsActive) {
 function lastOf(step) {
   if (step.state === 'pending') return { status: 'PENDING', reason: null, pending: step.pending };
   if (step.state === 'stall') return { status: step.status, reason: step.reason, pending: [] };
-  return { status: 'INDETERMINATE', reason: 'deadline', pending: [] };
+  return DEADLINE_LAST;
 }
 
 /**
@@ -652,7 +667,7 @@ function lastOf(step) {
  * @returns {Last}
  */
 function tailOf(last, reachedDeadline) {
-  return last.status === 'NO_CI' && !reachedDeadline ? { status: 'INDETERMINATE', reason: 'deadline', pending: [] } : last;
+  return last.status === 'NO_CI' && !reachedDeadline ? DEADLINE_LAST : last;
 }
 
 /**
@@ -728,7 +743,12 @@ async function askWorkflows(gh) {
  * PENDING stays PENDING, a stall gives its status and reason, and an open or a failed poll,
  * which clears an earlier stall, gives INDETERMINATE (deadline). NO_CI stands only when the
  * deadline ended the loop; a loop that ran out of MAX_POLLS first is INDETERMINATE
- * (deadline).
+ * (deadline). One cut poll changes the line: when the deadline cuts the second head read or
+ * the workflow probe after the checks call gave rows (or a reply that cannot be read), those
+ * rows contradict an earlier stall, so the stall does not survive and the line is
+ * INDETERMINATE (deadline). An earlier PENDING stands. A cut before any row came back (the
+ * first head read, the checks call, or a later call after an empty list) leaves the line of
+ * the last counted poll.
  *
  * It never throws: an exec that throws is a gh failure.
  *
@@ -818,7 +838,7 @@ async function waitForCi(input) {
    */
   const readPoll = async () => {
     const view = await gh(viewArgs);
-    if (view === null) return { state: 'deadline' };
+    if (view === null) return { state: 'deadline', rowsRead: false };
     if (view.answered && view.status === 1 && NO_PR_RE.test(view.stderr)) return resultStep('NO_PR', null, [], []);
     if (!view.answered || view.status !== 0) return { state: 'failed' };
     const parsed = parseView(view.stdout);
@@ -828,23 +848,23 @@ async function waitForCi(input) {
     if (isConflicting(parsed.mergeable)) return resultStep('INDETERMINATE', 'merge-conflict', [], []);
 
     const checks = await gh(['pr', 'checks', pr, '--json', 'name,state,bucket,workflow']);
-    if (checks === null) return { state: 'deadline' };
+    if (checks === null) return { state: 'deadline', rowsRead: false };
     const isResult = checks.answered && (checks.status === 0 || checks.status === 8);
     const isEmpty = checks.answered && checks.status === 1 && NO_CHECKS_RE.test(checks.stderr);
     if (!isResult && !isEmpty) return { state: 'failed' };
+    const rows = isResult ? parseChecks(checks.stdout) : [];
     const second = await gh(viewArgs);
-    if (second === null) return { state: 'deadline' };
+    if (second === null) return { state: 'deadline', rowsRead: rows === null || rows.length > 0 };
     const after = second.answered && second.status === 0 ? parseView(second.stdout) : null;
     if (after === null) return { state: 'failed' };
     if (after.oid !== head) return { state: 'open' };
-    const rows = isResult ? parseChecks(checks.stdout) : [];
     if (rows === null) return resultStep('INDETERMINATE', 'unparseable', [], []);
     const verdict = rows.length > 0 ? classifyChecks(rows) : null;
 
     const next = matchedStep(verdict, parsed.mergeable, workflowsActive);
     if (next.state !== 'probe') return stepOf(next);
     const asked = await askWorkflows(gh);
-    if (asked.kind === 'deadline') return { state: 'deadline' };
+    if (asked.kind === 'deadline') return { state: 'deadline', rowsRead: verdict !== null };
     if (asked.kind === 'failed') return { state: 'failed' };
     if (asked.kind === 'unparseable') return resultStep('INDETERMINATE', 'unparseable', [], []);
     workflowsActive = asked.active;
@@ -853,8 +873,8 @@ async function waitForCi(input) {
 
   let failedPolls = 0;
   let reachedDeadline = false;
-  /** @type {Last} */
-  let last = { status: 'INDETERMINATE', reason: 'deadline', pending: [] };
+  /** @type {Readonly<Last>} */
+  let last = DEADLINE_LAST;
 
   for (let poll = 0; poll < MAX_POLLS; poll++) {
     if (clock.now() >= deadline) {
@@ -865,6 +885,7 @@ async function waitForCi(input) {
     const step = await readPoll();
     if (step.state === 'deadline') {
       reachedDeadline = true;
+      if (step.rowsRead && last.status !== 'PENDING') last = DEADLINE_LAST;
       break;
     }
     if (step.state === 'done') return step.result;
