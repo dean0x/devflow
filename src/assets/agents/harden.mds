@@ -50,6 +50,8 @@ You receive from orchestrator:
 <!-- curation:end -->
 - **FEATURE_KNOWLEDGE** (optional): Per KB, the Rules bullets and the KB path, with no heading index, for pattern compliance checking. Check implementation against each bullet's anti-pattern, gotcha or invariant; Read a KB section from its path for more. Follow `devflow:apply-feature-knowledge`.
 
+**Empty FILES_CHANGED**: If `FILES_CHANGED` is empty, report `### Status: PASS` with the line `no files reviewed`, and review nothing.
+
 **Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
 
 <!-- curation:on -->

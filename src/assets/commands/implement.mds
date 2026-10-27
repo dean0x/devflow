@@ -309,6 +309,8 @@ Evaluate 9 pillars, fix P0/P1 issues, report status"
 
 Harden agent reports `### Status: PASS | FIXED | BLOCKED`. **If BLOCKED:** report to user and halt. **If PASS or FIXED:** continue to Phase 5. A FIXED status commits fixes and starts no Validate of its own: the Phase 6 run covers them.
 
+Harden never reviews a deleted file or the old path of a rename; an empty list is no review, and Harden reports `no files reviewed`.
+
 ### Phase 5: Alignment Check
 
 **Produces:** ALIGNMENT_RESULT
@@ -353,7 +355,9 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
 **Produces:** VALIDATION_RESULT, VALIDATED_HEAD
 **Requires:** BASE_REF, GATE_LEVEL
 
-Validate takes the one full-suite slot, after every commit it must cover: Code, Polish, Harden and the alignment fixes. After Evaluate agent passes, spawn Validate agent:
+Alignment-fix commits get no self-review: Phase 6 Validate and the PR review check them.
+
+After Evaluate agent passes, spawn Validate agent:
 
 ```
 Agent(subagent_type="Validate"):
