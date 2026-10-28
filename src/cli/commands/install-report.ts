@@ -67,6 +67,24 @@ export function formatOverlaySummary(
 }
 
 /**
+ * Turn the replaced-link half of an InstallReport into summary lines, one per link.
+ *
+ * A full install removes a link it finds where it keeps one of its own folders and writes a real
+ * folder there. The folder the link pointed to is not touched, which looks the same from the
+ * filesystem as an install that never met the link, so the line says both.
+ *
+ * Pure function — returns lines, logs nothing.
+ */
+export function formatReplacedLinksSummary(report: Pick<InstallReport, 'replacedLinks'>): SummaryLine[] {
+  return report.replacedLinks.map(linkPath => ({
+    level: 'warn',
+    message:
+      `${linkPath} was a link. It was replaced with a real folder, and the folder it pointed to ` +
+      `was left as it was.`,
+  }));
+}
+
+/**
  * The half of an overlay warning that describes what is actually on disk.
  *
  * One sentence per state, each true of that state and of no other. A single shared

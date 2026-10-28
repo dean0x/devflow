@@ -8,11 +8,12 @@
  * real HOME. The toggle tests compare the converged tree with a FRESH install of the same state:
  * the converge is right only when it ends where an install would have started.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
+import { formatReplacedLinksSummary } from '../../src/cli/commands/install-report.js';
 import { removeAllDevFlow } from '../../src/cli/commands/uninstall.js';
 import { installViaFileCopy, planOverlayUnits, type Spinner } from '../../src/targets/claude-code/installer.js';
 import { applyVariantToggle, convergeVariantAxes, describePostingLeft, type VariantMachineState } from '../../src/targets/claude-code/curation-install.js';
@@ -303,29 +304,29 @@ describe('the references converge fails closed on the off side', () => {
   });
 });
 
+const GENERATED = 'trust-rule.md';
+const HAND_AUTHORED = 'detection.md';
+const STRAY = path.join('pr', 'not-in-the-manifest.md');
+const MODE_FILE = 'sources.md';
+
+/** Move an installed folder aside, link its place to it, and make every write an install would do show as a change. */
+async function linkAway(installed: string, outside: string, refs: string): Promise<void> {
+  await fs.rename(installed, outside);
+  await fs.symlink(outside, installed, 'dir');
+  await fs.writeFile(path.join(refs, GENERATED), 'a generated reference the overlay would rewrite\n', 'utf-8');
+  await fs.writeFile(path.join(refs, HAND_AUTHORED), 'a skill reference the copy would overwrite\n', 'utf-8');
+  await fs.writeFile(path.join(refs, STRAY), 'a file the prune would remove\n', 'utf-8');
+  await fs.chmod(path.join(refs, MODE_FILE), 0o600);
+}
+
+async function expectUntouched(outside: string, refs: string, before: { files: Record<string, string>; tree: string[] }): Promise<void> {
+  expect(await fileMap(outside), 'no byte below the link changed').toEqual(before.files);
+  expect(await walk(outside), 'nothing was added below the link, staging residue included').toEqual(before.tree);
+  expect(await exists(path.join(refs, STRAY)), 'the stray file is still there').toBe(true);
+  expect((await fs.stat(path.join(refs, MODE_FILE))).mode & 0o777, 'no mode was set through the link').toBe(0o600);
+}
+
 describe('a partial install refuses a linked devflow:git folder and writes nothing through it', () => {
-  const GENERATED = 'trust-rule.md';
-  const HAND_AUTHORED = 'detection.md';
-  const STRAY = path.join('pr', 'not-in-the-manifest.md');
-  const MODE_FILE = 'sources.md';
-
-  /** Move an installed folder aside, link its place to it, and make every write an install would do show as a change. */
-  async function linkAway(installed: string, outside: string, refs: string): Promise<void> {
-    await fs.rename(installed, outside);
-    await fs.symlink(outside, installed, 'dir');
-    await fs.writeFile(path.join(refs, GENERATED), 'a generated reference the overlay would rewrite\n', 'utf-8');
-    await fs.writeFile(path.join(refs, HAND_AUTHORED), 'a skill reference the copy would overwrite\n', 'utf-8');
-    await fs.writeFile(path.join(refs, STRAY), 'a file the prune would remove\n', 'utf-8');
-    await fs.chmod(path.join(refs, MODE_FILE), 0o600);
-  }
-
-  async function expectUntouched(outside: string, refs: string, before: { files: Record<string, string>; tree: string[] }): Promise<void> {
-    expect(await fileMap(outside), 'no byte below the link changed').toEqual(before.files);
-    expect(await walk(outside), 'nothing was added below the link, staging residue included').toEqual(before.tree);
-    expect(await exists(path.join(refs, STRAY)), 'the stray file is still there').toBe(true);
-    expect((await fs.stat(path.join(refs, MODE_FILE))).mode & 0o777, 'no mode was set through the link').toBe(0o600);
-  }
-
   it('a references folder that is a link: every overlay unit is reported refused, and the link and its target are left alone', async () => {
     await installInto(claudeDir, devflowDir, true);
     const outside = path.join(tmp, 'outside-refs');
@@ -369,6 +370,141 @@ describe('a partial install refuses a linked devflow:git folder and writes nothi
 
     expect(report.overlayFailures).toEqual([]);
     expect(await fs.readFile(generated)).toEqual(installed);
+  });
+});
+
+describe('a full install replaces a linked folder and leaves the linked folder as it is', () => {
+  /** The skill a fresh full install writes, to compare the replacement with. */
+  async function freshSkill(name: string): Promise<Record<string, string>> {
+    const home = path.join(tmp, 'fresh');
+    await fs.mkdir(home, { recursive: true });
+    await installInto(path.join(home, 'claude'), path.join(home, 'devflow'), true);
+    return fileMap(path.join(skillsRoot(path.join(home, 'claude')), name));
+  }
+
+  it('a skill folder that is a link: it is replaced by a real folder with the whole skill, and reported', async () => {
+    await installInto(claudeDir, devflowDir, true);
+    const installed = path.join(skillsRoot(), 'devflow:git');
+    const outside = path.join(tmp, 'outside-skill');
+    await linkAway(installed, outside, path.join(outside, 'references'));
+    const before = { files: await fileMap(outside), tree: await walk(outside) };
+
+    const report = await installInto(claudeDir, devflowDir, true);
+
+    await expectUntouched(outside, path.join(outside, 'references'), before);
+    const stat = await fs.lstat(installed);
+    expect(stat.isSymbolicLink(), 'the link is gone').toBe(false);
+    expect(stat.isDirectory(), 'a real folder stands in its place').toBe(true);
+    expect(await fileMap(installed), 'the folder holds the whole installed skill, references included').toEqual(await freshSkill('devflow:git'));
+    expect(report.replacedLinks).toEqual([installed]);
+    expect(report.overlayFailures).toEqual([]);
+    expect(report.overlaidRefs.length, 'the references were installed').toBeGreaterThan(0);
+  });
+
+  it('a references folder that is a link: it is replaced by a real folder with every reference, and reported', async () => {
+    await installInto(claudeDir, devflowDir, true);
+    const outside = path.join(tmp, 'outside-refs');
+    await linkAway(installedRefs(), outside, outside);
+    const before = { files: await fileMap(outside), tree: await walk(outside) };
+
+    const report = await installInto(claudeDir, devflowDir, true);
+
+    await expectUntouched(outside, outside, before);
+    expect((await fs.lstat(installedRefs())).isDirectory(), 'a real folder stands in its place').toBe(true);
+    expect(await fileMap(path.join(skillsRoot(), 'devflow:git')), 'the skill is complete').toEqual(await freshSkill('devflow:git'));
+    expect(report.replacedLinks).toEqual([installedRefs()]);
+    expect(report.overlayFailures).toEqual([]);
+  });
+
+  it('a folder of another skill that is a link: it is replaced, reported, and the linked folder is untouched', async () => {
+    await installInto(claudeDir, devflowDir, true);
+    const installed = path.join(skillsRoot(), 'devflow:agent-references');
+    const outside = path.join(tmp, 'outside-other-skill');
+    await fs.rename(installed, outside);
+    await fs.symlink(outside, installed, 'dir');
+    await fs.writeFile(path.join(outside, 'stray.md'), 'a file only the user keeps\n', 'utf-8');
+    await fs.chmod(path.join(outside, 'stray.md'), 0o600);
+    const before = { files: await fileMap(outside), tree: await walk(outside) };
+
+    const report = await installInto(claudeDir, devflowDir, true);
+
+    expect(await fileMap(outside)).toEqual(before.files);
+    expect(await walk(outside)).toEqual(before.tree);
+    expect((await fs.stat(path.join(outside, 'stray.md'))).mode & 0o777).toBe(0o600);
+    expect((await fs.lstat(installed)).isDirectory(), 'a real folder stands in its place').toBe(true);
+    expect(await fileMap(installed)).toEqual(await freshSkill('devflow:agent-references'));
+    expect(report.replacedLinks).toEqual([installed]);
+  });
+
+  it('the agents folder that is a link: it is unlinked and reported, and the linked folder is untouched', async () => {
+    await installInto(claudeDir, devflowDir, true);
+    const agents = path.join(claudeDir, 'agents', 'devflow');
+    const outside = path.join(tmp, 'outside-agents');
+    await fs.mkdir(outside, { recursive: true });
+    await fs.writeFile(path.join(outside, 'mine.md'), 'an agent only the user keeps\n', 'utf-8');
+    await fs.chmod(path.join(outside, 'mine.md'), 0o600);
+    await fs.rm(agents, { recursive: true, force: true });
+    await fs.mkdir(path.dirname(agents), { recursive: true });
+    await fs.symlink(outside, agents, 'dir');
+    const before = { files: await fileMap(outside), tree: await walk(outside) };
+
+    const report = await installInto(claudeDir, devflowDir, true);
+
+    expect(await fileMap(outside)).toEqual(before.files);
+    expect(await walk(outside)).toEqual(before.tree);
+    expect((await fs.stat(path.join(outside, 'mine.md'))).mode & 0o777).toBe(0o600);
+    const after = await fs.lstat(agents).catch(() => null);
+    expect(after?.isSymbolicLink() ?? false, 'the link is gone').toBe(false);
+    expect(report.replacedLinks).toEqual([agents]);
+  });
+
+  it('over real folders a full install reports no replaced link', async () => {
+    await installInto(claudeDir, devflowDir, true);
+
+    const report = await installInto(claudeDir, devflowDir, true);
+
+    expect(report.replacedLinks).toEqual([]);
+  });
+
+  it('a link that cannot be removed is refused like a partial install refuses it: nothing is written through it', async () => {
+    await installInto(claudeDir, devflowDir, true);
+    const installed = path.join(skillsRoot(), 'devflow:git');
+    const outside = path.join(tmp, 'outside-stuck');
+    await linkAway(installed, outside, path.join(outside, 'references'));
+    const before = { files: await fileMap(outside), tree: await walk(outside) };
+    const realUnlink = fs.unlink.bind(fs);
+    const unlink = vi.spyOn(fs, 'unlink').mockImplementation(async (target) => {
+      if (target === installed) throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' });
+      return realUnlink(target);
+    });
+
+    let report;
+    try {
+      report = await installInto(claudeDir, devflowDir, true);
+    } finally {
+      unlink.mockRestore();
+    }
+
+    await expectUntouched(outside, path.join(outside, 'references'), before);
+    expect(report.replacedLinks).toEqual([]);
+    expect(report.overlayFailures.length, 'the overlay is refused').toBeGreaterThan(0);
+    expect(report.overlaidRefs).toEqual([]);
+    expect((await fs.lstat(installed)).isSymbolicLink(), 'the link is left in place').toBe(true);
+  });
+
+  it('the summary names each replaced link and says the linked folder was left as it was', async () => {
+    await installInto(claudeDir, devflowDir, true);
+    const installed = path.join(skillsRoot(), 'devflow:git');
+    await linkAway(installed, path.join(tmp, 'outside-summary'), path.join(tmp, 'outside-summary', 'references'));
+
+    const report = await installInto(claudeDir, devflowDir, true);
+    const lines = formatReplacedLinksSummary(report);
+
+    expect(lines).toHaveLength(1);
+    expect(lines[0].level).toBe('warn');
+    expect(lines[0].message).toContain(installed);
+    expect(lines[0].message).toContain('left as it was');
+    expect(formatReplacedLinksSummary({ replacedLinks: [] })).toEqual([]);
   });
 });
 

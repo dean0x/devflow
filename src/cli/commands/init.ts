@@ -15,7 +15,7 @@ import { describeMoveText, describeOutcome, runInitCurationMove, shownSkipAt, ty
 import { realGlobalTuningMoveIO, realProjectLedgerMoveIO } from './curation-move-io.js';
 import { describeEchoedValue } from '../../core/echo-value.js';
 import { installViaFileCopy, installScripts, type InstallReport } from '../../targets/claude-code/installer.js';
-import { formatOverlaySummary, formatSkillScopeSummary, formatTrackerAssetSummary, isPluginListUnchanged, type SummaryLine } from './install-report.js';
+import { formatOverlaySummary, formatReplacedLinksSummary, formatSkillScopeSummary, formatTrackerAssetSummary, isPluginListUnchanged, type SummaryLine } from './install-report.js';
 import { convergeTrackerArtifacts, type ConvergeTrackerArtifactsResult, type TrackerAgentState } from '../../targets/claude-code/tracker-install.js';
 import {
   installSettings,
@@ -2846,6 +2846,9 @@ export const initCommand = new Command('init')
     // Reference-overlay reporting: the overlay rewrites files inside an installed skill
     // the user may have shadowed, and reports any unit it had to leave alone.
     logSummaryLines(formatOverlaySummary(installReport));
+
+    // A link the full install replaced is a change to a path the user made.
+    logSummaryLines(formatReplacedLinksSummary(installReport));
 
     // Skill-scoping reporting: a deselected skill is deleted and a dormant shadow
     // is inert, and neither is distinguishable from "never installed" on disk.

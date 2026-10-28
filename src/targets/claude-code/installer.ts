@@ -103,6 +103,14 @@ export interface InstallReport {
    */
   overlayFailures: OverlayFailure[];
   /**
+   * Paths of links a full install's pre-clean found where it expects one of its own folders and
+   * replaced: a command, rule, agent or skill folder, or a folder inside the references skill.
+   * The link was unlinked; the folder it pointed to was left as it was, and the install then
+   * wrote a real folder in its place. Reported because a replaced link and an untouched one look
+   * the same from the filesystem. Empty on a partial install, which has no pre-clean.
+   */
+  replacedLinks: string[];
+  /**
    * Skill names removed because no plugin in the effective selection owns or
    * requires them — the visible cost of a deselection. Only skills that were on
    * disk and are now gone: a deselected skill that was never installed is absent.
@@ -1484,13 +1492,54 @@ export async function overlayGeneratedReferences(opts: {
 /** The directory inside an installed skill that the reference overlay converges. */
 const SKILL_REFERENCES_DIRNAME = 'references';
 
-/** What stands at `dir`: nothing, a real directory, or anything else (a link, a file, an entry that cannot be inspected). */
-async function directoryState(dir: string): Promise<'absent' | 'real' | 'unusable'> {
+/** What stands at `dir`: nothing, a real directory, a link, or anything else (a file, an entry that cannot be inspected). */
+type DirectoryState = 'absent' | 'real' | 'link' | 'unusable';
+
+/** Classify `dir` with `lstat`, so a link is seen as a link and never as the directory it points to. */
+async function directoryState(dir: string): Promise<DirectoryState> {
   try {
-    return (await fs.lstat(dir)).isDirectory() ? 'real' : 'unusable';
+    const stat = await fs.lstat(dir);
+    if (stat.isSymbolicLink()) return 'link';
+    return stat.isDirectory() ? 'real' : 'unusable';
   } catch (err) {
     return (err as NodeJS.ErrnoException).code === 'ENOENT' ? 'absent' : 'unusable';
   }
+}
+
+/** What {@link unlinkLinkAt} did at a path. */
+type LinkUnlinkOutcome =
+  /** A link stood there and is gone. Its target was not touched. */
+  | 'unlinked'
+  /** No link stands there (absent, a real directory, a file). Nothing was changed. */
+  | 'no-link'
+  /** A link stands there and could not be removed. It is still in place. */
+  | 'stuck';
+
+/**
+ * Remove the link at `entry` with `unlink`: the link, never what it points to.
+ *
+ * The one place the pre-clean replaces a link. `readdir` and `mkdir` follow a link, so a pre-clean
+ * that emptied through one would empty another directory. Never throws; a link that cannot be
+ * removed is `stuck`, and the caller leaves the path alone.
+ */
+async function unlinkLinkAt(entry: string): Promise<LinkUnlinkOutcome> {
+  if ((await directoryState(entry)) !== 'link') return 'no-link';
+  try {
+    await fs.unlink(entry);
+    return 'unlinked';
+  } catch {
+    return 'stuck';
+  }
+}
+
+/**
+ * Remove `target` whole. A link there is unlinked instead and returned, so the caller can report it;
+ * the folder it points to is left as it is.
+ */
+async function removeReportingLink(target: string): Promise<string[]> {
+  const outcome = await unlinkLinkAt(target);
+  if (outcome === 'no-link') await fs.rm(target, { recursive: true, force: true });
+  return outcome === 'unlinked' ? [target] : [];
 }
 
 /** Whether the reference overlay may run below an installed `devflow:git` skill directory. */
@@ -1511,18 +1560,20 @@ export type ReferencesHostState =
  * Fail closed: an entry that cannot be inspected is refused, and a link is never repaired,
  * because the installer did not create it.
  *
- * One answer for every caller that has no pre-clean to replace such a link: the converge, and
- * a partial install. `lstat` runs on `references` only below a real skill directory, since
- * through a linked one it would follow the link. Never throws.
+ * One answer for every caller that has no pre-clean to replace such a link: the converge, a
+ * partial install, and a full install whose pre-clean could not remove one. `lstat` runs on
+ * `references` only below a real skill directory, since through a linked one it would follow the
+ * link. Never throws.
  */
 export async function referencesHostState(gitSkillDir: string): Promise<ReferencesHostState> {
   const skill = await directoryState(gitSkillDir);
   if (skill === 'absent') return { kind: 'absent' };
-  if (skill === 'unusable') return { kind: 'refused', path: gitSkillDir };
+  if (skill !== 'real') return { kind: 'refused', path: gitSkillDir };
   const referencesDir = path.join(gitSkillDir, SKILL_REFERENCES_DIRNAME);
-  return (await directoryState(referencesDir)) === 'unusable'
-    ? { kind: 'refused', path: referencesDir }
-    : { kind: 'ready' };
+  const references = await directoryState(referencesDir);
+  return references === 'absent' || references === 'real'
+    ? { kind: 'ready' }
+    : { kind: 'refused', path: referencesDir };
 }
 
 /**
@@ -1612,10 +1663,23 @@ export function overlayOwnedSkillPaths(manifest: readonly string[]): ReadonlySet
  * An unreadable directory is left alone rather than reported: the caller already
  * swallows the errors of the `fs.rm` this stands in for, and a pre-clean that cannot
  * read its target has nothing to remove from it.
+ *
+ * The walk never goes through a link. `readdir` follows one, so a link at `dir` itself is
+ * unlinked and nothing is read from it, and below `dir` only a `Dirent` that is a real
+ * directory is entered. The folder a link points to is left as it is. A link that stands where
+ * the pre-clean expects its own folder or file (`dir`, or a path in `keep` or above one) is
+ * returned, so the caller reports it; any other link is removed like the file it stands for.
+ * A link at `dir` that cannot be removed is left in place and nothing is emptied.
+ *
+ * @returns The paths of the links this replaced.
  */
-async function emptyDirectoryExcept(dir: string, keep: ReadonlySet<string>): Promise<void> {
+async function emptyDirectoryExcept(dir: string, keep: ReadonlySet<string>): Promise<string[]> {
+  const rootLink = await unlinkLinkAt(dir);
+  if (rootLink !== 'no-link') return rootLink === 'unlinked' ? [dir] : [];
+
   const kept = [...keep];
   const maxDepth = Math.max(0, ...kept.map(relPath => relPath.split('/').length));
+  const replacedLinks: string[] = [];
 
   const walk = async (current: string, rel: string, depth: number): Promise<void> => {
     let entries: Dirent[];
@@ -1627,19 +1691,20 @@ async function emptyDirectoryExcept(dir: string, keep: ReadonlySet<string>): Pro
       const entryRel = rel === '' ? entry.name : `${rel}/${entry.name}`;
       if (keep.has(entryRel) && !entry.isSymbolicLink()) continue;
 
-      const holdsSomethingKept = entry.isDirectory()
-        && depth < maxDepth
-        && kept.some(relPath => relPath.startsWith(`${entryRel}/`));
-      if (holdsSomethingKept) {
-        await walk(path.join(current, entry.name), entryRel, depth + 1);
+      const entryPath = path.join(current, entry.name);
+      const holdsSomethingKept = kept.some(relPath => relPath.startsWith(`${entryRel}/`));
+      if (entry.isDirectory() && depth < maxDepth && holdsSomethingKept) {
+        await walk(entryPath, entryRel, depth + 1);
         continue;
       }
 
-      await fs.rm(path.join(current, entry.name), { recursive: true, force: true });
+      await fs.rm(entryPath, { recursive: true, force: true });
+      if (entry.isSymbolicLink() && (holdsSomethingKept || keep.has(entryRel))) replacedLinks.push(entryPath);
     }
   };
 
   await walk(dir, '', 1);
+  return replacedLinks;
 }
 
 // ---------------------------------------------------------------------------
@@ -2356,6 +2421,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     overlaidRefs: [],
     unchangedRefs: [],
     overlayFailures: [],
+    replacedLinks: [],
     removedSkills: [],
     dormantShadows: [],
   };
@@ -2390,7 +2456,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     ];
     for (const dir of oldDirs) {
       try {
-        await fs.rm(dir, { recursive: true, force: true });
+        report.replacedLinks.push(...await removeReportingLink(dir));
       } catch { /* ignore */ }
     }
 
@@ -2404,10 +2470,10 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     // converged on this run — drift in it is restored, so preserving it strands
     // nothing.
     try {
-      await emptyDirectoryExcept(
+      report.replacedLinks.push(...await emptyDirectoryExcept(
         path.join(claudeDir, 'agents', 'devflow'),
         new Set([mdFileName(TRACKER_AGENT_NAME)]),
-      );
+      ));
     } catch { /* ignore */ }
   }
 
@@ -2464,6 +2530,10 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // Everything else in the directory is still emptied, so a stale hand-authored skill
   // file — including a reference at the references ROOT, which the overlay may replace
   // but never delete (D-OVERLAY-FLAT-UNIT) — does not survive a full install.
+  //
+  // A target that is a link is unlinked and reported in `replacedLinks`, never emptied
+  // through: the folder it points to is not Devflow's, and the install below writes a real
+  // folder in its place.
   if (!isPartialInstall) {
     const overlayOwned = overlayOwnedSkillPaths(refsManifest);
     for (const skill of skillsMap.keys()) {
@@ -2471,11 +2541,9 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
       // phase), minus whatever another converger owns inside it.
       const target = path.join(claudeDir, 'skills', prefixSkillName(skill));
       try {
-        if (skill === SKILL_REFS_SKILL_NAME) {
-          await emptyDirectoryExcept(target, overlayOwned);
-        } else {
-          await fs.rm(target, { recursive: true, force: true });
-        }
+        report.replacedLinks.push(...(skill === SKILL_REFS_SKILL_NAME
+          ? await emptyDirectoryExcept(target, overlayOwned)
+          : await removeReportingLink(target)));
       } catch { /* ignore */ }
     }
   }
@@ -2569,9 +2637,10 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     const skillTarget = path.join(claudeDir, 'skills', prefixSkillName(skillName));
 
     // A full install's pre-clean replaced a link at the skill or its references entry. A partial
-    // install has no pre-clean, so the copy and the overlay below would write through such a link
-    // into another directory: the whole skill is refused instead, and reported like a refused overlay.
-    if (isPartialInstall && skillName === SKILL_REFS_SKILL_NAME) {
+    // install has no pre-clean, and a link the pre-clean could not remove is still standing, so the
+    // copy and the overlay below would write through such a link into another directory: the whole
+    // skill is refused instead, and reported like a refused overlay.
+    if (skillName === SKILL_REFS_SKILL_NAME) {
       const host = await referencesHostState(skillTarget);
       if (host.kind === 'refused') {
         report.overlayFailures.push(
