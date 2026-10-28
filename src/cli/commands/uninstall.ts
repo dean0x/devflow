@@ -49,6 +49,8 @@ import { probeTrackedArea, type TrackedAreasAnswer } from '../../core/tracked-ar
 import { restampInstalledCommands } from '../../targets/claude-code/language-stamp.js';
 import { installRenderedCharter, removeHandoffSentinel } from '../../targets/claude-code/charter-render.js';
 import { installCommandsAndAgents } from '../../targets/claude-code/installer.js';
+import { isUnrealFolder, refuseUnrealFolder, type LinkReport } from '../../targets/claude-code/linked-folder.js';
+import { formatReplacedLinksSummary, type SummaryLine } from './install-report.js';
 
 /**
  * Which install `uninstall` acts on: the machine-wide install (`user`), or a
@@ -107,10 +109,91 @@ async function scopeInstallPaths(scope: UninstallScope, gitRoot: string | null):
 export type ChangeGuard = (target: string) => Promise<boolean>;
 
 /**
- * The user scope's guard, which passes everything: `~/.claude` and `~/.devflow` are
- * the user's own, so a symbolic link there is the user's choice.
+ * The user scope's guard for a path that is not inside a Devflow install folder, and for the removal
+ * of a whole entry. It passes everything: `~/.claude` and `~/.devflow` and their other folders, the
+ * manifest and `settings.json` are the user's own, so a symbolic link there is followed. `fs.rm` of an
+ * entry that is a link removes the link and never what it points to, so a full uninstall removes a
+ * linked Devflow folder as it removes a real one.
+ *
+ * A read, write or removal inside a Devflow install folder never uses this guard: it uses
+ * {@link devflowFolderGuard}, which refuses a link.
  */
-const changeAnything: ChangeGuard = async () => true;
+const changeUserOwned: ChangeGuard = async () => true;
+
+/** The folders directly under `~/.claude` that hold a `devflow` folder of Devflow's own. */
+const DEVFLOW_FILE_FOLDERS: readonly string[] = ['commands', 'agents', 'rules'];
+
+/**
+ * The Devflow install folder that holds `target` and every folder below it down to the parent of
+ * `target`, outermost first; null for a target outside every Devflow install folder. A target that is
+ * itself a Devflow install folder (a `skills/devflow:*` folder) gives that folder alone. PURE.
+ *
+ * The Devflow install folders are `commands/devflow`, `agents/devflow`, `rules/devflow` and each
+ * `skills/devflow:*` folder. `~/.claude`, `~/.claude/skills` and the other folders above them are
+ * not among them.
+ */
+function devflowFolderChain(claudeDir: string, target: string): string[] | null {
+  const rel = path.relative(claudeDir, target);
+  if (rel === '' || rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) return null;
+  const parts = rel.split(path.sep);
+  const inFileFolder = DEVFLOW_FILE_FOLDERS.includes(parts[0]) && parts[1] === 'devflow';
+  const inSkillFolder = parts[0] === 'skills' && parts[1] !== undefined && parts[1].startsWith(SKILL_NAMESPACE);
+  if (!inFileFolder && !inSkillFolder) return null;
+  const chain = [path.join(claudeDir, parts[0], parts[1])];
+  for (let depth = 2; depth < parts.length - 1; depth++) {
+    chain.push(path.join(chain[chain.length - 1], parts[depth]));
+  }
+  return chain;
+}
+
+/**
+ * The guard for a change inside the Devflow install folders of `claudeDir`.
+ *
+ * Devflow never reads, writes or removes through a link at or below its own install folders. A
+ * target is let through only when each Devflow folder on the way to it is a real folder or absent;
+ * a folder that is a link, or not a folder, refuses the target. The refusal is recorded once in
+ * `report.refusedFolders` and the link is left as it was. A target outside every Devflow install
+ * folder passes, and a link to a file that is the target itself is not followed (`fs.rm` removes
+ * the link). Never throws.
+ */
+function devflowFolderGuard(claudeDir: string, report: Pick<LinkReport, 'refusedFolders'>): ChangeGuard {
+  return async (target) => {
+    const chain = devflowFolderChain(claudeDir, target);
+    if (chain === null) return true;
+    for (const folder of chain) {
+      if (report.refusedFolders.includes(folder)) return false;
+      if (await refuseUnrealFolder(report, folder)) return false;
+    }
+    return true;
+  };
+}
+
+/**
+ * Turn the refused-folder half of an uninstall into summary lines, one per folder.
+ *
+ * An uninstall removes and changes nothing at a path that is a link, or not a folder where it needs
+ * one, and leaves the entry as it was. That looks the same on disk as an uninstall that found nothing
+ * to remove, so the line says what was skipped and what to do about it.
+ *
+ * Pure function — returns lines, logs nothing.
+ */
+export function formatUninstallRefusedSummary(report: Pick<LinkReport, 'refusedFolders'>): SummaryLine[] {
+  return report.refusedFolders.map(folder => ({
+    level: 'warn',
+    message:
+      `${folder} is a link or not a folder. Devflow removed and changed nothing there. ` +
+      `Remove the link or replace it with a real folder, then run the uninstall again.`,
+  }));
+}
+
+/** Print the links an uninstall replaced or refused, one line each, once per path. */
+function logLinkReport(report: LinkReport): void {
+  const lines = [
+    ...formatReplacedLinksSummary({ replacedLinks: [...new Set(report.replacedLinks)] }),
+    ...formatUninstallRefusedSummary({ refusedFolders: [...new Set(report.refusedFolders)] }),
+  ];
+  for (const line of lines) p.log[line.level](line.message);
+}
 
 /**
  * `folder` and every path below it down to `target`, the target included, outermost
@@ -170,11 +253,16 @@ function legacyLocalChangeGuard(folders: ScopeInstallPaths, skipped: string): Ch
   };
 }
 
-/** The guard for one scope's full or selective phase: checked for a legacy local install, open for the user's. */
-function scopeChangeGuard(scope: UninstallScope, folders: ScopeInstallPaths): ChangeGuard {
-  return scope === 'local'
-    ? legacyLocalChangeGuard(folders, 'Legacy local install not fully removed')
-    : changeAnything;
+/**
+ * The guard for one scope's full or selective phase.
+ *
+ * A legacy local install is checked for a link anywhere on the way to a target. In the user scope the
+ * full phase removes whole entries and passes ({@link changeUserOwned}). The selective phase gives
+ * its `links` report and gets {@link devflowFolderGuard}, which refuses a linked Devflow folder.
+ */
+function scopeChangeGuard(scope: UninstallScope, folders: ScopeInstallPaths, links?: LinkReport): ChangeGuard {
+  if (scope === 'local') return legacyLocalChangeGuard(folders, 'Legacy local install not fully removed');
+  return links === undefined ? changeUserOwned : devflowFolderGuard(folders.claudeDir, links);
 }
 
 /**
@@ -969,7 +1057,7 @@ export function installArtifactPaths(devflowDir: string): ReadonlyArray<InstallA
 export async function removeDevFlowInstallArtifacts(
   devflowDir: string,
   verbose: boolean,
-  mayChange: ChangeGuard = changeAnything,
+  mayChange: ChangeGuard = changeUserOwned,
 ): Promise<void> {
   const manifestPath = path.join(devflowDir, 'manifest.json');
   if (await mayChange(manifestPath)) {
@@ -1215,13 +1303,17 @@ export async function runDryRunPhase(opts: {
  * settings.json, so the notice tells the user to run `devflow init` for those.
  *
  * Never runs in a legacy local scope (D-CLI-NO-SYMLINK): a repository can commit a command
- * file as a symbolic link, and the copy writes through it. The folder guard below does not
- * check files. `devflow init` can not update a legacy local install either, so the warning
- * tells the user to remove it in full.
+ * file as a symbolic link, and the copy writes through it. `devflow init` can not update a
+ * legacy local install either, so the warning tells the user to remove it in full.
+ *
+ * In the user scope the copy writes into neither folder when either is a link or not a folder,
+ * whatever the caller's guard says: writing only one folder would pair old commands with new
+ * agents. The refused folder is recorded in `links`. A command or agent file that is a link is
+ * replaced by a real file and recorded in `links` too; what it pointed to is left as it was.
  *
  * Skipped, with a warning, when there is no readable manifest or it lists no known plugin (the
- * retained set would be a guess), or when a folder is behind a link the caller's guard
- * refuses. Those warnings name `devflow init` as the remedy. When the copy fails, it stops
+ * retained set would be a guess), or when a folder is a link, not a folder, or behind a link the
+ * caller's guard refuses. Those warnings name `devflow init` as the remedy. When the copy fails, it stops
  * at the first failure: files it wrote before then stay, and the warning names the same
  * remedy. Never throws: an uninstall must finish.
  * Agent model lines are reverted again after the copy, as the selective phase does before
@@ -1238,11 +1330,14 @@ export async function refreshRetainedCommandsAndAgents(opts: {
   /** Whether to print the warnings of the agent model revert, as the selective phase does. */
   verbose?: boolean;
   mayChange?: ChangeGuard;
+  /** Where the folders refused and the file links replaced are recorded, for the caller's summary. */
+  links?: LinkReport;
 }): Promise<void> {
   const { claudeDir, devflowDir, retained, retiredAgents } = opts;
   const scope = opts.scope ?? 'user';
   const verbose = opts.verbose ?? false;
-  const mayChange = opts.mayChange ?? changeAnything;
+  const mayChange = opts.mayChange ?? changeUserOwned;
+  const links = opts.links ?? { replacedLinks: [], refusedFolders: [] };
   const agentsDir = path.join(claudeDir, 'agents', 'devflow');
   const commandsDir = path.join(claudeDir, 'commands', 'devflow');
   const retired = `Removed the agent file(s) of an older Devflow release: ${retiredAgents.join(', ')}.`;
@@ -1271,7 +1366,14 @@ export async function refreshRetainedCommandsAndAgents(opts: {
     p.log.warn(`${retired} The manifest lists no known plugin, so Devflow did not rewrite the remaining files. ${remedy}`);
     return;
   }
-  if (!(await mayChange(agentsDir)) || !(await mayChange(commandsDir))) {
+  let blocked = !(await mayChange(agentsDir)) || !(await mayChange(commandsDir));
+  if (!blocked) {
+    // The caller's guard may pass everything. Neither folder is written when it is a link or not a folder.
+    const agentsRefused = await refuseUnrealFolder(links, agentsDir);
+    const commandsRefused = await refuseUnrealFolder(links, commandsDir);
+    blocked = agentsRefused || commandsRefused;
+  }
+  if (blocked) {
     p.log.warn(`${retired} A linked folder blocks the rewrite. ${remedy}`);
     return;
   }
@@ -1284,6 +1386,7 @@ export async function refreshRetainedCommandsAndAgents(opts: {
       curation: manifest.features.curation,
       compliance: manifest.features.compliance.enabled,
       trackerServers: effectiveTrackerServers(manifest.features.tracker),
+      links,
       warn: (msg) => p.log.warn(msg),
     });
   } catch (err) {
@@ -1336,6 +1439,10 @@ async function rerenderCharterAfterRemoval(
  * @param opts.devflowDir  - Devflow data directory for this scope.
  * @param opts.selectedPlugins - Plugin subset to remove.
  * @param opts.verbose     - Whether to emit verbose log lines.
+ *
+ * Nothing is read, written or removed through a link at or below a Devflow install folder. A
+ * Devflow folder that is a link, or not a folder, is left as it was; the phase prints one line for
+ * each and returns them, with the file links it replaced, in the {@link LinkReport}.
  */
 export async function runSelectivePhaseForScope(opts: {
   claudeDir: string;
@@ -1350,12 +1457,14 @@ export async function runSelectivePhaseForScope(opts: {
    * (D-LEGACY-LOCAL-CLEANUP).
    */
   scope?: UninstallScope;
-}): Promise<void> {
+}): Promise<LinkReport> {
   const { claudeDir, devflowDir, selectedPlugins, verbose } = opts;
   const scope = opts.scope ?? 'user';
   const installedPlugins = opts.installedPlugins ?? DEVFLOW_PLUGINS;
-  // D-CLI-NO-SYMLINK: a legacy local install's removals and rewrites pass this first.
-  const mayChange = scopeChangeGuard(scope, { claudeDir, devflowDir });
+  const links: LinkReport = { replacedLinks: [], refusedFolders: [] };
+  // D-CLI-NO-SYMLINK: a legacy local install's removals and rewrites pass this first. In the user
+  // scope the guard refuses a linked Devflow folder and records it in `links`.
+  const mayChange = scopeChangeGuard(scope, { claudeDir, devflowDir }, links);
 
   // Revert GPT agent frontmatter BEFORE removing agent files — strips GPT model
   // lines from installed agent frontmatter while the files are still present.
@@ -1374,7 +1483,16 @@ export async function runSelectivePhaseForScope(opts: {
     } catch { /* agents dir absent or revert failed — non-fatal */ }
   }
 
-  const sweeps = await removeSelectedPlugins(claudeDir, selectedPlugins, verbose, installedPlugins, mayChange);
+  // In the user scope the removal builds its own guard over the same report, which also checks each
+  // orphan it sweeps; a legacy local install keeps the guard above.
+  const sweeps = await removeSelectedPlugins(
+    claudeDir,
+    selectedPlugins,
+    verbose,
+    installedPlugins,
+    scope === 'local' ? mayChange : undefined,
+    links,
+  );
 
   // A retired agent file means the install is from an older release, and the commands of the
   // plugins that stay installed still spawn the name that was just removed. Write their
@@ -1390,6 +1508,7 @@ export async function runSelectivePhaseForScope(opts: {
       scope,
       verbose,
       mayChange,
+      links,
     });
   }
 
@@ -1445,6 +1564,9 @@ export async function runSelectivePhaseForScope(opts: {
       }
     } catch { /* settings.json may not exist */ }
   }
+
+  logLinkReport(links);
+  return links;
 }
 
 /**
@@ -1482,11 +1604,13 @@ export async function runFullPhaseForScope(opts: {
   // Revert GPT agent frontmatter before removing agents — ensures no orphaned
   // GPT model lines remain if agents dir is preserved by a later partial flow.
   // Non-fatal: tolerate missing agents dir or revert errors.
+  // The revert rewrites the files in the folder, so a folder that is a link is not reverted: the
+  // removal below takes the link away whole and the files it led to stay as they are.
   {
     const agentsInstallDir = path.join(claudeDir, 'agents', 'devflow');
     try {
       await fs.access(agentsInstallDir);
-      if (await mayChange(agentsInstallDir)) {
+      if (await mayChange(agentsInstallDir) && !(await isUnrealFolder(agentsInstallDir))) {
         await revertExternalAgents({
           installDir: agentsInstallDir,
           devflowDir,
@@ -1750,7 +1874,7 @@ export async function runCleanupPhase(opts: {
       // where no symbolic link leads it out of `<gitRoot>/.claude`.
       const mayChange = scope === 'local'
         ? legacyLocalChangeGuard(paths, 'settings.json not edited')
-        : changeAnything;
+        : changeUserOwned;
       if (settingsContent !== originalContent && await mayChange(settingsPath)) {
         await writeSettingsFileAtomic(settingsPath, settingsContent);
         if (verbose) {
@@ -2065,7 +2189,7 @@ export async function removeAllDevFlow(
   claudeDir: string,
   devflowScriptsDir: string,
   verbose: boolean,
-  mayChange: ChangeGuard = changeAnything,
+  mayChange: ChangeGuard = changeUserOwned,
 ): Promise<void> {
   const devflowDirectories = [
     { path: path.join(claudeDir, 'commands', 'devflow'), name: 'commands' },
@@ -2170,8 +2294,14 @@ export interface NamespaceSweeps {
  * and the user has no other signal that it is still there.
  *
  * A folder `mayChange` refuses is not swept at all (D-CLI-NO-SYMLINK,
- * legacyLocalChangeGuard). An entry in a swept folder that is itself a link is
- * only unlinked: `fs.rm` never follows the link it is given.
+ * legacyLocalChangeGuard). The agents and commands folders are swept only when each is a real folder
+ * or absent, whatever `mayChange` says, because the sweep reads and removes inside whatever the
+ * folder names; a folder that is a link or not a folder is recorded in `links` and left as it was.
+ *
+ * With no `mayChange`, the sweep uses the Devflow folder guard, which also refuses each orphan that
+ * is a link (a linked `skills/devflow:*` folder): the orphan stays and is recorded in `links`. With a
+ * `mayChange` given, an orphan that is itself a link is only unlinked: `fs.rm` never follows the
+ * link it is given.
  *
  * Returns what each sweep removed and failed to remove, so a caller can tell that
  * a retired agent was removed (see {@link refreshRetainedCommandsAndAgents}).
@@ -2179,21 +2309,28 @@ export interface NamespaceSweeps {
 export async function sweepDevflowNamespaces(
   claudeDir: string,
   verbose: boolean,
-  mayChange: ChangeGuard = changeAnything,
+  mayChange?: ChangeGuard,
+  links: Pick<LinkReport, 'refusedFolders'> = { refusedFolders: [] },
 ): Promise<NamespaceSweeps> {
   const agentsDir = path.join(claudeDir, 'agents', 'devflow');
   const commandsDir = path.join(claudeDir, 'commands', 'devflow');
   const skillsDir = path.join(claudeDir, 'skills');
   const noSweep: SweepResult = { scanned: 0, removed: [], failed: [] };
+  const guard = mayChange ?? devflowFolderGuard(claudeDir, links);
+  const mayRemove = mayChange === undefined ? guard : undefined;
   const sweep = async (...args: Parameters<typeof sweepOrphanedAssets>): Promise<SweepResult> =>
-    (await mayChange(args[0])) ? sweepOrphanedAssets(...args) : noSweep;
+    (await guard(args[0])) ? sweepOrphanedAssets(args[0], args[1], args[2], mayRemove) : noSweep;
+  const sweepDevflowFolder = async (...args: Parameters<typeof sweepOrphanedAssets>): Promise<SweepResult> =>
+    (await guard(args[0])) && !(await refuseUnrealFolder(links, args[0]))
+      ? sweepOrphanedAssets(args[0], args[1], args[2], mayRemove)
+      : noSweep;
 
-  const agentsSweep = await sweep(
+  const agentsSweep = await sweepDevflowFolder(
     agentsDir,
     new Set(getAllAgentNames()),
     mdEntryName,
   );
-  const commandsSweep = await sweep(
+  const commandsSweep = await sweepDevflowFolder(
     commandsDir,
     new Set(getAllCommandNames()),
     mdEntryName,
@@ -2233,8 +2370,10 @@ export async function sweepDevflowNamespaces(
  * sweep the install directory for any orphaned assets whose names left the
  * registry (retired agents/commands survive indefinitely without the sweep).
  * For skills: only remove skills that are NOT used by any remaining plugin.
- * Each removal passes `mayChange` first, which skips one a symbolic link would
- * redirect in a legacy local install (D-CLI-NO-SYMLINK, legacyLocalChangeGuard).
+ * Each removal passes the guard first. A legacy local install passes `mayChange`
+ * (D-CLI-NO-SYMLINK, legacyLocalChangeGuard). With none given, the removal uses the
+ * Devflow folder guard: nothing is removed in or from a Devflow folder that is a link or
+ * not a folder, and each such folder is recorded in `links` and left as it was.
  *
  * Returns what the closing registry-diff sweep removed.
  */
@@ -2243,14 +2382,16 @@ export async function removeSelectedPlugins(
   plugins: typeof DEVFLOW_PLUGINS,
   verbose: boolean,
   installedPlugins: PluginDefinition[] = DEVFLOW_PLUGINS,
-  mayChange: ChangeGuard = changeAnything,
+  mayChange?: ChangeGuard,
+  links: Pick<LinkReport, 'refusedFolders'> = { refusedFolders: [] },
 ): Promise<NamespaceSweeps> {
   const { skills, agents, commands, rules } = computeAssetsToRemove(plugins, installedPlugins);
+  const guard = mayChange ?? devflowFolderGuard(claudeDir, links);
 
   const commandsDir = path.join(claudeDir, 'commands', 'devflow');
   for (const cmd of commands) {
     const cmdPath = path.join(commandsDir, mdFileName(cmd.replace(/^\//, '')));
-    if (!(await mayChange(cmdPath))) continue;
+    if (!(await guard(cmdPath))) continue;
     try {
       await fs.rm(cmdPath, { force: true });
       if (verbose) {
@@ -2264,7 +2405,7 @@ export async function removeSelectedPlugins(
   const agentsDir = path.join(claudeDir, 'agents', 'devflow');
   for (const agent of agents) {
     const agentPath = path.join(agentsDir, mdFileName(agent));
-    if (!(await mayChange(agentPath))) continue;
+    if (!(await guard(agentPath))) continue;
     try {
       await fs.rm(agentPath, { force: true });
       if (verbose) {
@@ -2284,7 +2425,7 @@ export async function removeSelectedPlugins(
     // namespace shipped in dcecda3, 2026-03-30), so a bare dir for a current
     // registry name is by construction foreign.
     const skillPath = path.join(skillsDir, prefixSkillName(skill));
-    if (!(await mayChange(skillPath))) continue;
+    if (!(await guard(skillPath))) continue;
     try {
       await fs.rm(skillPath, { recursive: true, force: true });
     } catch { /* Skill might not exist */ }
@@ -2296,7 +2437,7 @@ export async function removeSelectedPlugins(
   const rulesDir = path.join(claudeDir, 'rules', 'devflow');
   for (const rule of rules) {
     const rulePath = path.join(rulesDir, mdFileName(rule));
-    if (!(await mayChange(rulePath))) continue;
+    if (!(await guard(rulePath))) continue;
     try {
       await fs.rm(rulePath, { force: true });
       if (verbose) {
@@ -2309,5 +2450,5 @@ export async function removeSelectedPlugins(
   // Removes any orphaned files whose names left the registry (retired, renamed,
   // or deleted from all plugins). Spans ALL plugins so assets belonging to
   // non-selected plugins are never swept.
-  return sweepDevflowNamespaces(claudeDir, verbose, mayChange);
+  return sweepDevflowNamespaces(claudeDir, verbose, mayChange, links);
 }
