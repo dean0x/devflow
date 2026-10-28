@@ -301,30 +301,41 @@ describe('Clause (ii) file-residue: tarball install into scratch HOME → devflo
     expect(SCRATCH_HOME).not.toBe(os.homedir());
   });
 
-  // ── Step 9: the installed Git agent came from dist/agents/ (AC-1.9) ────────
+  // ── Step 9: the installed Git agent came from dist/compliance-off/agents/ (AC-1.9) ──
 
-  it('the installed Git agent is dist/agents/git.md plus the tracker-server stamp and nothing else (AC-1.9)', async () => {
-    // The Git agent ships only as a compiled artifact now. The installer resolves
+  it('the installed Git agent is dist/compliance-off/agents/git.md plus the tracker-server stamp and nothing else (AC-1.9)', async () => {
+    // The Git agent ships only as compiled artifacts now. The installer resolves
     // agents dist-first, but nothing observed that end to end: this compares the
     // file `devflow init` wrote under the scratch HOME against the compiled
     // artifact inside the installed tarball. A src-first installer, or a publish
     // built with `npm run build:cli` alone, fails here.
     //
+    // The scratch HOME is a fresh machine, where the compliance switch is off. The
+    // Git agent has no both-off build, so the compliance-off file is its variant
+    // whatever the curation switch is, and that file is the one to compare with.
+    //
     // The install appends the default tracker servers to the installed `tools:` line
     // of the Git agent, so the two files differ by that stamp alone: removing it from
     // the installed copy gives the compiled artifact back, byte for byte.
-    const compiled = path.join(
-      INSTALL_DIR, 'node_modules', 'devflow-kit', 'dist', 'agents', 'git.md',
-    );
+    const installedDist = path.join(INSTALL_DIR, 'node_modules', 'devflow-kit', 'dist');
+    const compiled = path.join(installedDist, 'compliance-off', 'agents', 'git.md');
+    const allOn = path.join(installedDist, 'agents', 'git.md');
     const installed = path.join(SCRATCH_HOME, '.claude', 'agents', 'devflow', 'git.md');
 
     const compiledContent = await fs.readFile(compiled, 'utf-8');
+    const allOnContent = await fs.readFile(allOn, 'utf-8');
     const installedContent = await fs.readFile(installed, 'utf-8');
 
     expect(
       compiledContent.length,
       'compiled agent is empty — the guard would compare nothing',
     ).toBeGreaterThan(0);
+    // Non-vacuity: the two builds differ, so a match with the compliance-off file
+    // proves which variant the installer chose.
+    expect(
+      compiledContent,
+      'the compliance-off Git agent equals the all-on build — the guard cannot tell the variants apart',
+    ).not.toBe(allOnContent);
     // Non-vacuity: the installed copy wears the default stamp, so the comparison
     // below is between two files that really did differ before the stamp came off.
     const stampedTools = trackerServerTools(TRACKER_MCP_SERVERS_DEFAULT).map(t => `"${t}"`).join(', ');
