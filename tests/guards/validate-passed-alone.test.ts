@@ -18,8 +18,8 @@
  *      outside the closed list `ALLOWED_CAPS`; no name filter; no open-fail Read.
  *   5. The wait and the limit: each re-run runs under an explicit Bash timeout at the ceiling (600000 ms, or
  *      `BASH_MAX_TIMEOUT_MS` when set), as the Running commands block does. A call past it
- *      moves to the background; Validate waits for its end notice, never polls, and reads the call's own
- *      last `EXIT=` and then its log. After one re-run passes its timeout and is read, the rest are REAL and
+ *      moves to the background; Validate waits and reads its `EXIT=` line as the Running commands block says,
+ *      and then its log. After one re-run passes its timeout and is read, the rest are REAL and
  *      are not re-run. The body, the reference, the Validation step of docs/commands.md and the text-guards
  *      knowledge entry name no wrong limit (120 s, 120s, 120 seconds, 120000, 40 min or 40 minutes);
  *      `collectWrongLimitSiteDefects` checks the last two, and each form at each site has a known-bad probe.
@@ -91,8 +91,8 @@ const BOUND_RULE = "Re-run at most the first 20 failed files, in the runner's or
 /** The count bound after a wait: once one re-run has passed its timeout and been read, the rest are REAL and are not re-run. */
 const COUNT_BOUND_RULE = 'Files past 20 are REAL, as are the rest, not re-run, once a re-run passes its timeout and is read.'
 
-/** The wait: a call past its Bash timeout moves to the background; wait for the end notice, never poll, read the output and then the log. */
-const WAIT_RULE = "Past it, the call moves to the background: wait for its end notice, never poll, then Read the call's own last `EXIT=`, then its log."
+/** The wait: a call past its Bash timeout moves to the background; wait and read its `EXIT=` line as the Running commands block says, then the log. */
+const WAIT_RULE = "Past it, the call moves to the background: wait and Read its `EXIT=` line as Running commands says, then its log."
 
 /** A re-run that does not start, or whose `EXIT=` line was not read, is REAL and never BLOCKED. */
 const NO_RESULT_RULE = 'A re-run that does not start, or with no `EXIT=` line read, is REAL, never BLOCKED.'
@@ -166,9 +166,9 @@ const REFERENCE_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]>
   ['the re-run has an explicit Bash timeout at the ceiling, whatever the file time was', CEILING_RULE],
   ['PASSED-ALONE needs the printed exit of zero and a run that shows the failed tests passed', VERDICT_RULE],
   ['a call past its Bash timeout moves to the background', 'Past it, the call moves to the background:'],
-  ['the re-run waits for the end notice and never polls', 'wait for its end notice, never poll,'],
-  ['the call\'s own last EXIT= is read, then the log', "then Read the call's own last `EXIT=`, then its log."],
-  ['a call past its Bash timeout is waited for, never polled, and read for its own last EXIT= and then the log', WAIT_RULE],
+  ['the re-run waits and reads its EXIT= line as the Running commands block says', 'wait and Read its `EXIT=` line as Running commands says'],
+  ['the EXIT= line is read, then the log', 'line as Running commands says, then its log.'],
+  ['a call past its Bash timeout is waited for and read as the Running commands block says, then the log', WAIT_RULE],
   ['a re-run that does not start, or with no EXIT= line read, is REAL, never BLOCKED', NO_RESULT_RULE],
   ['the tests that failed must have run and passed', 'the tests that failed in the full run ran and passed'],
   ['no test may have failed in the re-run', 'and none failed'],
@@ -476,11 +476,10 @@ const SWAPS: ReadonlyArray<readonly [what: string, clause: string, from: string,
   ['"and" to "or" after EXIT=0', VERDICT_RULE, '`EXIT=0` and a log', '`EXIT=0` or a log'],
   ['"and" to "or" before "none failed"', VERDICT_RULE, 'ran and passed, and none failed.', 'ran and passed, or none failed.'],
   ['"one at a time" negated', BOUND_RULE, 'one at a time.', 'not one at a time.'],
-  ['"wait" negated in the wait rule', WAIT_RULE, 'background: wait for', 'background: never wait for'],
-  ['"never poll" negated in the wait rule', WAIT_RULE, 'end notice, never poll,', 'end notice, poll,'],
-  ['the own last EXIT= read dropped from the wait rule', WAIT_RULE, 'then Read the call\'s own last `EXIT=`, then its log.', 'then its log.'],
-  ['the call\'s own last EXIT= read turned into a read of its output', WAIT_RULE, 'the call\'s own last `EXIT=`', 'the call\'s output for `EXIT=`'],
-  ['the log read dropped from the wait rule', WAIT_RULE, 'last `EXIT=`, then its log.', 'last `EXIT=`.'],
+  ['"wait" negated in the wait rule', WAIT_RULE, 'background: wait and', 'background: never wait and'],
+  ['the Running commands wait dropped from the wait rule', WAIT_RULE, ' as Running commands says', ''],
+  ['the EXIT= read turned into a read of the log', WAIT_RULE, 'Read its `EXIT=` line as', 'Read the log for `EXIT=` as'],
+  ['the log read dropped from the wait rule', WAIT_RULE, 'Running commands says, then its log.', 'Running commands says.'],
   ['the rest of the files re-run after a read re-run in the count bound', COUNT_BOUND_RULE, 'as are the rest, not re-run,', 'as are the rest, re-run,'],
   ['"is read" dropped from the count bound', COUNT_BOUND_RULE, 'passes its timeout and is read.', 'passes its timeout.'],
   ['the go rule left with no result: "is REAL" to "is changed"', GO_RULE, 'a file is REAL when its directory', 'a package is changed when its directory'],
