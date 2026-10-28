@@ -636,7 +636,11 @@ d sub/
     }
   },
   "installedAt": "<TIMESTAMP>",
-  "updatedAt": "<TIMESTAMP>"
+  "updatedAt": "<TIMESTAMP>",
+  "installedVariants": {
+    "curation": true,
+    "compliance": true
+  }
 }
 
 ## install: repo .devflow/config.json

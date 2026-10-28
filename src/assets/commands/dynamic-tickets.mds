@@ -56,6 +56,9 @@ Before you write the workflow script:
 **Produces:** EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL
 
 {{evidence_policy()}}
+<!-- compliance:off -->
+When `EVIDENCE_POLICY` is `required`, record `TRACEABILITY: DEGRADED (compliance off on this machine; the repository requires evidence)` once, for the filing report.
+<!-- compliance:end -->
 
 {{docs_root()}}
 
@@ -223,7 +226,9 @@ Agent(subagent_type="Git"):
 "OPERATION: ensure-traceable-issue
 TASK_DESCRIPTION: {the ticket's title, or the tracking issue's H1}
 REQUIREMENTS: {the ticket's **Wave:** and **Depends on:** lines, then its ## Summary paragraph; or the tracking issue's ## Context}
+<!-- compliance:on -->
 PLAN_ARTIFACT_PATH: {the ticket or tracking-issue file path, relative to {worktree}}
+<!-- compliance:end -->
 WORKTREE_PATH: {worktree}"
 ```
 
@@ -231,9 +236,17 @@ WORKTREE_PATH: {worktree}"
    - `CREATED` or `ENRICHED`, with a reference that matches `^(#[1-9][0-9]{0,8}|[A-Z][A-Z0-9_]{0,9}-[1-9][0-9]{0,8})$` as a whole ⇒ insert `**Issue:** {ISSUE_REF}` with the Edit tool: in a ticket file as the line directly after its `**Depends on:**` line, in `tracking-issue.md` as the line directly after its H1. Change nothing else in the file.
    - A reference of any other shape ⇒ `TRACEABILITY: DEGRADED (issue reference "{ref}" does not match any tracker reference grammar)`, and no line.
    - `DEGRADED (rate limited)` ⇒ stop filing: this file and every file after it are reported `not filed`. Any other DEGRADED ⇒ that file gets no line; report it and go on to the next.
+<!-- compliance:on -->
 4. **Report** each file's `**Issue:**` reference, or `not filed` and why, with every `TRACEABILITY: DEGRADED` line step 2 and the spawns produced.
+<!-- compliance:off -->
+4. **Report** each file's `**Issue:**` reference, or `not filed` and why, with the compliance-off line of Pre-authoring step 0 and every `TRACEABILITY: DEGRADED` line step 2 and the spawns produced.
+<!-- compliance:end -->
 
+<!-- compliance:on -->
 `/devflow:dynamic-build` reads these lines: the tracking issue's for its wave report, and each ticket's as that ticket's own reference.
+<!-- compliance:off -->
+`/devflow:dynamic-build` reads these lines: the tracking issue's for its wave block's tracking line, and each ticket's as that ticket's own reference.
+<!-- compliance:end -->
 
 ---
 

@@ -456,7 +456,11 @@ Required sections:
 9. **Integration Points** — entry points, services, models to connect
 10. **Design Review Results** — anti-pattern findings with mitigations
 11. **Risk Assessment** — context risk level, unresolved risks
+<!-- compliance:on -->
 12. **PR Description Guidance** — problem being solved, key changes, breaking changes, Reviewer Focus Areas
+<!-- compliance:off -->
+12. **PR Description Guidance** — problem being solved, key changes, breaking changes
+<!-- compliance:end -->
 13. **Test Plan** — the TP lines Gate 2 confirmed, under a `## Test Plan` heading: at least one per acceptance criterion, each citing the criterion it covers
 
 ### 12. PR Description Guidance
@@ -473,9 +477,11 @@ Required sections:
 ### Breaking Changes
 {from gap analysis, or "None expected"}
 
+<!-- compliance:on -->
 ### Reviewer Focus Areas
 {areas needing careful review, with reasons}
 
+<!-- compliance:end -->
 ### Related Issues
 Closes {ISSUE_REF}
 ```
@@ -493,6 +499,9 @@ node "$HOME/.devflow/scripts/verify-evidence.cjs" check tp <that file>; echo "ex
 **Write the artifact now** — frontmatter `issue: {ISSUE_ID}` if an issue is already known, else `issue: pending`.
 
 {{evidence_policy()}}
+<!-- compliance:off -->
+When `EVIDENCE_POLICY` is `required`, record `TRACEABILITY: DEGRADED (compliance off on this machine; the repository requires evidence)` once, for the report below.
+<!-- compliance:end -->
 
 **Create or enrich tracker issue:**
 
@@ -508,12 +517,18 @@ Agent(subagent_type="Git"):
 ISSUE_INPUT: {the raw candidate token from COMMAND_INPUT if /plan was invoked with an issue reference, else omit}
 TASK_DESCRIPTION: {Gate 0 confirmed scope — one-line title}
 INITIAL_REQUEST: {the Gate 0 confirmed scope statement}
+<!-- compliance:on -->
 REQUIREMENTS: {discovered requirements summary from Phase 6 gap synthesis}
 PLAN_ARTIFACT_PATH: {the design artifact path written above, relative to {worktree} — never absolute}
+<!-- compliance:end -->
 WORKTREE_PATH: {worktree}
 LABELS: feature
+<!-- compliance:on -->
 The Git agent will create a tracker issue (or enrich an existing one) using the D3 template,
 post the design artifact as a collapsed details comment, and link it from the Implementation Plan section.
+<!-- compliance:off -->
+The Git agent will create a tracker issue (or enrich an existing one) using the D3 template.
+<!-- compliance:end -->
 Return the issue number."
 ```
 
@@ -527,7 +542,11 @@ Surface any `TRACEABILITY: DEGRADED ({reason})` lines from the Git agent output 
 
 Display completion summary:
 - Design artifact path
+<!-- compliance:on -->
 - Issue URL (if created or enriched) — and any `TRACEABILITY: DEGRADED ({reason})` lines from the Git agent
+<!-- compliance:off -->
+- Issue URL (if created or enriched) — the fixed line recorded above when it applies, and any `TRACEABILITY: DEGRADED ({reason})` lines from the Git agent
+<!-- compliance:end -->
 - Gap analysis summary (N blocking, M should-address)
 - Design review summary (N anti-patterns found, M mitigated in plan)
 - Gate level: {GATE_LEVEL}, with any level note

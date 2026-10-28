@@ -100,7 +100,9 @@ Annotate risk tier: **Standard** (isolated, low blast radius) or **Careful** (pu
 - Unrelated files not in DIFF_FILES that require wide refactor
 - Public API changes unrelated to branch purpose
 - Branch is purpose-constrained (move-only refactor, release branch)
+<!-- compliance:on -->
 MUST become a tracked manage-debt ticket. Never report-only.
+<!-- compliance:end -->
 
 **5. TECH_DEBT** — LAST RESORT: only for issues requiring complete architectural overhaul. "Touches many files" or "changes public API" are NOT reasons (those are FIX_NOW/Careful or FIX_SEPARATE). Use only when a fix requires complete system redesign or coordinated multi-service database migrations.
 

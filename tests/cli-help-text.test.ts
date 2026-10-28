@@ -10,6 +10,7 @@
 import { describe, it, expect } from 'vitest';
 import type { Command } from 'commander';
 import { initCommand } from '../src/cli/commands/init.js';
+import { complianceCommand } from '../src/cli/commands/compliance.js';
 import { memoryCommand } from '../src/cli/commands/memory.js';
 import { curationCommand } from '../src/cli/commands/curation.js';
 import { knowledgeCommand } from '../src/cli/commands/knowledge/index.js';
@@ -34,6 +35,51 @@ describe('option help text', () => {
     ['knowledge', knowledgeCommand],
   ])('%s --enable notes that a repository can opt out', (_name, command) => {
     expect(optionHelp(command, '--enable')).toMatch(/every project \(a repository can opt out\)$/);
+  });
+});
+
+/**
+ * AC-32 (#648): the text of every switch that moves the posting steps names that effect. With
+ * compliance off devflow installs no step that posts evidence or summaries to GitHub or a tracker;
+ * with it on, those steps are installed.
+ */
+describe('compliance option help names the posting effect (AC-32)', () => {
+  const POSTS = /steps? that posts?/;
+
+  it('init --no-compliance says the posting steps are removed and the skill stays', () => {
+    const help = optionHelp(initCommand, '--no-compliance');
+    expect(help).toMatch(POSTS);
+    expect(help).toContain('GitHub or a tracker');
+    expect(help).toContain('the skill and framework references stay installed');
+  });
+
+  it('init --compliance says the posting steps are installed', () => {
+    const help = optionHelp(initCommand, '--compliance');
+    expect(help).toMatch(POSTS);
+    expect(help).toContain('GitHub or a tracker');
+  });
+
+  it('compliance --enable says the posting steps are installed', () => {
+    const help = optionHelp(complianceCommand, '--enable');
+    expect(help).toMatch(POSTS);
+    expect(help).toContain('GitHub or a tracker');
+  });
+
+  it('compliance --disable says every posting step is removed', () => {
+    const help = optionHelp(complianceCommand, '--disable');
+    expect(help).toMatch(POSTS);
+    expect(help).toContain('GitHub or a tracker');
+    expect(help).toContain('frameworks remembered for re-enable');
+  });
+
+  it('names no ledger identifier and no advisory in any of the four', () => {
+    const text = [
+      optionHelp(initCommand, '--no-compliance'),
+      optionHelp(initCommand, '--compliance'),
+      optionHelp(complianceCommand, '--enable'),
+      optionHelp(complianceCommand, '--disable'),
+    ].join('\n');
+    expect(text).not.toMatch(/\b(?:ADR|PF)-\d+\b|GHSA/);
   });
 });
 

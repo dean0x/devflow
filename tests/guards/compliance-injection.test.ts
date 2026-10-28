@@ -43,10 +43,12 @@ import { existsSync, readFileSync } from 'fs'
 import * as path from 'path'
 
 import {
-  ROOT, collectCodeSpawnSites, countOf, readAgentReference, requireDistFile, requireDistFiles, resolveAllAgents, resolveCurationOffSource, sectionBetween,
+  ROOT, collectCodeSpawnSites, countOf, readAgentReference, requireDistFile, requireDistFiles, resolveAllAgents, resolveCurationOffSource, resolveVariantOffSource, sectionBetween,
 } from '../helpers.js'
 import type { CodeSpawnSite } from '../helpers.js'
 import { seedOnce } from './level-guard-helpers.js'
+import { variantOffRelPath, type OffVariantKey } from '../../src/core/curation-variants.js'
+import { COMPLIANCE_VARIANT_HOSTS, CURATION_VARIANT_HOSTS } from '../fixtures/mds-manifest.js'
 
 // ── Independent oracles: the directive lines as the commands must render them ─────────────────────────
 
@@ -273,6 +275,51 @@ const curationOffCommand = (file: string): string => {
 const offSpawnHosts = (): Array<readonly [string, string]> =>
   Object.keys(CODE_SPAWN_FLOORS).map(f => [f, curationOffCommand(f)] as const)
 
+/** The two variants a compliance-off machine can install: curation on (compliance-off) and curation off (both-off). */
+const COMPLIANCE_OFF_KEYS: readonly OffVariantKey[] = ['compliance-off', 'both-off']
+
+/**
+ * One compiled variant of a command on the compliance roster (#648). A host on the roster has this file, so an absent
+ * one is an error that names the build step, never a skip: a host could otherwise gain an arm and leave the sweep.
+ */
+const complianceOffCommand = (key: OffVariantKey, name: string): string => {
+  const text = resolveVariantOffSource(key, 'commands', name)
+  if (text === null) throw new Error(`${variantOffRelPath(key, 'commands', `${name}.md`)} is absent — run \`npm run build\` first`)
+  return text
+}
+
+/** The commands on the compliance roster, by name. */
+const complianceCommandNames = (): string[] =>
+  COMPLIANCE_VARIANT_HOSTS.filter(h => h.startsWith('commands/')).map(h => h.slice('commands/'.length))
+
+/**
+ * The Code-spawning hosts of the roster, in one compliance-off variant, keyed by the file name the floors use. A host
+ * with a curation arm has both variants; one without has the compliance-off file only.
+ */
+const complianceOffSpawnHosts = (key: OffVariantKey): Array<readonly [string, string]> =>
+  complianceCommandNames()
+    .filter(name => `${name}.md` in CODE_SPAWN_FLOORS)
+    .filter(name => key === 'compliance-off' || CURATION_VARIANT_HOSTS.includes(`commands/${name}`))
+    .map(name => [`${name}.md`, complianceOffCommand(key, name)] as const)
+
+/**
+ * The compliance lens text blocks of one compiled command (AC-17): the mapping sentence, the lens step, the directive
+ * step with its rendered line, the focus-directive step with its line and the active sentence. Taken by anchor and not
+ * by line, because one line may carry a lens block next to text that a compliance-off variant drops.
+ */
+const LENS_BLOCKS: readonly RegExp[] = [
+  /\*\*Resolve the compliance lens\*\*[^\n]*/g,
+  /\*\*Set the compliance directive\*\*[^\n]*\n\n> [^\n]*/g,
+  /\*\*Set the compliance focus directive\*\*[^\n]*\n\n> [^\n]*/g,
+]
+
+/** Named collector: every lens text block of a command, in order, each as the text it prints. */
+export function collectLensBlocks(text: string): string[] {
+  const blocks = LENS_BLOCKS.flatMap(re => text.match(re) ?? [])
+  const sentences = [FRAMEWORKS_SENTENCE, ACTIVE_SENTENCE].flatMap(sentence => Array.from({ length: countOf(text, sentence) }, () => sentence))
+  return [...blocks, ...sentences]
+}
+
 // ── AC-308 ───────────────────────────────────────────────────────────────────────────────────────────
 
 describe('AC-308: no Code-family body carries the compliance skill; each spawn site injects the directive behind the lens', () => {
@@ -409,6 +456,65 @@ describe('AC-308: no Code-family body carries the compliance skill; each spawn s
   })
 })
 
+// ── AC-308 and AC-17 on the compliance-off builds ────────────────────────────────────────────────────
+
+describe('AC-308 and AC-17: the compliance-off command builds keep the injection and the lens text', () => {
+  it('reads the compliance-off spawn hosts it claims to read (non-vacuity)', () => {
+    for (const key of COMPLIANCE_OFF_KEYS) {
+      const hosts = complianceOffSpawnHosts(key)
+      expect(hosts.map(([file]) => file), `${key}: the roster names implement and resolve`).toEqual(expect.arrayContaining(['implement.md', 'resolve.md']))
+      for (const [file, text] of hosts) expect(text.length, `${key} ${file}: empty`).toBeGreaterThan(10_000)
+    }
+  })
+
+  it.each(COMPLIANCE_OFF_KEYS)('every Code and Fix spawn site of the %s builds passes the directive and never the raw lens, and each host empties it when the lens is off', key => {
+    const hosts = complianceOffSpawnHosts(key)
+    const sites = hosts.flatMap(([file, text]) => collectCodeSpawnSites(file, text))
+    for (const [file] of hosts) {
+      const n = sites.filter(s => s.file === file).length
+      expect(n, `${file} (${key}): ${n} Code-family spawn site(s), floor ${CODE_SPAWN_FLOORS[file]}`).toBeGreaterThanOrEqual(CODE_SPAWN_FLOORS[file])
+    }
+    expect(collectUndirectedSites(sites)).toEqual([])
+    expect(collectRawLensSites(sites)).toEqual([])
+    expect(collectUngatedHosts(hosts)).toEqual([])
+    for (const [file, text] of hosts) expect(text, `${file} (${key}): a pass-through host never gates on COMPLIANCE_ACTIVE`).not.toContain('COMPLIANCE_ACTIVE')
+  })
+
+  it('known-bad probe: a compliance-off site that drops the directive or hands over the raw lens is reported', () => {
+    const [file, text] = complianceOffSpawnHosts('compliance-off').find(([f]) => f === 'implement.md')!
+    const anchor = '`COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES`, `DECISIONS_CONTEXT` and `PUSH: false`'
+    expect(text, 'implement.md (compliance off) keeps its curation-on CI-fix line').toContain(anchor)
+    const seeded = collectCodeSpawnSites(file, text.replace(anchor, '`COMPLIANCE_FRAMEWORKS`, `CI_FAILURES`, `DECISIONS_CONTEXT` and `PUSH: false`'))
+    expect(collectUndirectedSites(seeded)).toHaveLength(1)
+    expect(collectRawLensSites(seeded)).toHaveLength(1)
+  })
+
+  it('every lens text block of a rostered command is byte-identical across its four variants (AC-17)', () => {
+    let total = 0
+    for (const name of complianceCommandNames()) {
+      const on = collectLensBlocks(requireDistFile(`${name}.md`))
+      total += on.length
+      const variants: Array<readonly [string, string]> = [
+        ['curation-off', curationOffCommand(`${name}.md`)],
+        ...COMPLIANCE_OFF_KEYS.map(key => [key, complianceOffCommand(key, name)] as const),
+      ]
+      for (const [label, text] of variants) expect(collectLensBlocks(text), `${name}: the ${label} variant`).toEqual(on)
+    }
+    expect(total, 'the roster commands carry lens blocks, so the comparison is not empty').toBeGreaterThanOrEqual(4)
+  })
+
+  it('known-bad probe: a lens block that one variant words differently is reported, and text beside a block is not', () => {
+    const on = collectLensBlocks(requireDistFile('implement.md'))
+    const off = complianceOffCommand('compliance-off', 'implement')
+    expect(collectLensBlocks(off)).toEqual(on)
+    const sibling = 'Phase 11 passes no publication value: the local verify posts nothing. '
+    expect(collectLensBlocks(seedOnce(off, sibling, ''))).toEqual(on)
+    const changed = seedOnce(off, '(none: generic controls only)', '(none: no controls)')
+    expect(collectLensBlocks(changed)).not.toEqual(on)
+    expect(collectLensBlocks(seedOnce(off, FRAMEWORKS_SENTENCE, 'The lens.'))).not.toEqual(on)
+  })
+})
+
 // ── AC-309 ───────────────────────────────────────────────────────────────────────────────────────────
 
 describe('AC-309: no Review or Design body or preload carries compliance-only text; the compliance-focus spawns inject it', () => {
@@ -505,6 +611,7 @@ describe('AC-308: the re-validation path sets the lens and the directive by poin
   const builds = (): Array<readonly [string, string]> => [
     ['dist/commands/implement.md', requireDistFile('implement.md')],
     ['dist/curation-off/commands/implement.md', curationOffCommand('implement.md')],
+    ...COMPLIANCE_OFF_KEYS.map(key => [variantOffRelPath(key, 'commands', 'implement.md'), complianceOffCommand(key, 'implement')] as const),
   ]
   /** The build with the directive line of its qa-fix fence dropped. The fence is found by its own unique text: the directive line repeats in every Fix fence. */
   const withoutQaFixDirective = (md: string): string => {

@@ -494,6 +494,77 @@ describe('curation-gated skills (AC-148)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Compliance-off prompts: the forward closure reads the files a compliance-off machine installs
+// ---------------------------------------------------------------------------
+
+/**
+ * #648: a compliance-off machine installs the compliance-off file of each host that carries a
+ * compliance arm (and the both-off file when it also carries a curation arm), in the installer's
+ * own source order. Every arm above reads the all-on variant, so a reference that an off arm adds
+ * would escape them. The forward arm runs here over the files each variant installs.
+ *
+ * The reverse arm needs no off twin: an off prompt only ever drops text from the on variant, so
+ * a `requires` entry the on corpus references stays referenced.
+ */
+const COMPLIANCE_OFF_SWITCHES: ReadonlyArray<readonly [string, { curation: boolean; compliance: boolean }]> = [
+  ['compliance off', { curation: true, compliance: false }],
+  ['both off', { curation: false, compliance: false }],
+];
+
+/** The command and agent files one plugin installs under the given switches, each from the first directory that holds it. */
+async function installedPromptFiles(plugin: PluginDefinition, switches: { curation: boolean; compliance: boolean }): Promise<string[]> {
+  const files: string[] = [];
+  const pick = async (dirs: readonly string[], name: string): Promise<void> => {
+    for (const dir of dirs) {
+      const candidate = path.join(dir, `${name}.md`);
+      if (await fs.access(candidate).then(() => true, () => false)) { files.push(candidate); return; }
+    }
+  };
+  for (const command of plugin.commands) await pick(commandSourceDirs(switches, ROOT), command.replace(/^\//, ''));
+  for (const agent of plugin.agents) await pick(agentSourceDirs(ROOT, switches), agent);
+  return files;
+}
+
+/** Named collector: references in the prompts of every plugin that no scope of its own covers, under the given switches. */
+async function collectOutOfScopeRefs(switches: { curation: boolean; compliance: boolean }): Promise<{ read: RawRef[]; dangling: string[] }> {
+  const read: RawRef[] = [];
+  const dangling: string[] = [];
+  for (const plugin of DEVFLOW_PLUGINS) {
+    const scope = skillsOf([plugin]);
+    const refs = await readRefs(await installedPromptFiles(plugin, switches));
+    read.push(...refs);
+    for (const ref of refs) {
+      if (resolveRef(ref, scope) === 'out-of-scope') dangling.push(`${plugin.name}: ${ref.raw} referenced by ${ref.file}`);
+    }
+  }
+  return { read, dangling };
+}
+
+describe('compliance-off prompts: every skill reference resolves in its plugin scope (#648)', () => {
+  it.each(COMPLIANCE_OFF_SWITCHES)('the prompts a %s machine installs reference only in-scope skills', async (_label, switches) => {
+    const { read, dangling } = await collectOutOfScopeRefs(switches);
+    expect(read.length, 'the off corpus was read (non-vacuity)').toBeGreaterThan(50);
+    expect(dangling).toEqual([]);
+  });
+
+  it('the corpus reads the compliance-off files of the rostered commands, and the both-off files too', async () => {
+    const implement = DEVFLOW_PLUGINS.find(p => p.commands.includes('/implement'));
+    expect(implement, 'a plugin owns /implement').toBeDefined();
+    const [off, both] = await Promise.all(COMPLIANCE_OFF_SWITCHES.map(([, switches]) => installedPromptFiles(implement!, switches)));
+    const rel = (files: readonly string[]): string[] => files.map(f => path.relative(ROOT, f));
+    expect(rel(off), 'compliance off installs the compliance-off file').toContain('dist/compliance-off/commands/implement.md');
+    expect(rel(both), 'both off installs the both-off file').toContain('dist/curation-compliance-off/commands/implement.md');
+  });
+
+  it('known-bad probe: a reference an off arm adds without a requires entry is reported', () => {
+    const plugin = DEVFLOW_PLUGINS.find(p => p.commands.includes('/implement'))!;
+    const scope = skillsOf([plugin]);
+    const refs = collectSkillRefs(`Load via Skill(skill="${NS}undeclared").`, 'synthetic-off.md');
+    expect(refs.map(r => resolveRef(r, scope))).toEqual(['out-of-scope']);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // The classified exception, and the non-vacuity floor
 // ---------------------------------------------------------------------------
 

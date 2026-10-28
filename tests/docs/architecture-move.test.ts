@@ -47,7 +47,7 @@ const MOVED_PARAGRAPHS: readonly MovedParagraph[] = [
   { lead: 'Feature Knowledge Bases', bytes: 890, sha256: 'dd42a02a5a0163e7e471b3d1610e415b4a0633d1d083e447aaf1362b0ee8512f' },
   { lead: 'Rules', bytes: 319, sha256: 'd6826dc4b431132b12df032831419dd384630b6a9b62244122fcbf6bb15963e9' },
   { lead: 'Selection-scoped Skill Installation', bytes: 532, sha256: '6fb4e7f9edd3e3fadfa766384dfcedffaddb178beff86543823dfe0aa8aec9fb' },
-  { lead: 'Compliance', bytes: 1528, sha256: '246b5c7d82448d2cbc46cf846e2b8e185b229336ae6417839db8e52569ac9891' },
+  { lead: 'Compliance', bytes: 1678, sha256: 'a018b44dc934f6b7fad19152a393247ba6197799fc476f369b5408e517106284' },
   { lead: 'Claude Code Flags', bytes: 782, sha256: '7843e9825d330ea42971a6b3d61ceec28477d788ec60c792d42557005e8b38b7' },
   { lead: 'Model Strategy', bytes: 648, sha256: '1fb14555419880ae686c7ef37fcb6e8d97b08825cb6939aa138c014e167f523c' },
   { lead: 'Review publication', bytes: 1420, sha256: '494c9c9fbbc36dd1d93610630d34f58aa474922a189540432a959801d84fe775' },

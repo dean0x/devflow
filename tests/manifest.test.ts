@@ -1833,6 +1833,96 @@ describe('gate level feature field', () => {
   });
 });
 
+// ── installedVariants: the install record of the prompt variants, carried raw ──
+//
+// The reader carries the key as stored when it is present and leaves it out when it is
+// absent. It never narrows the value and never heals it, so a hand-edited or newer-version
+// value stays on disk and an install made before the field stays without it.
+
+describe('installedVariants field (raw carry)', () => {
+  let tmpDir: string;
+
+  const withVariants = (extra: Record<string, unknown>) => ({
+    version: '2.0.0',
+    plugins: ['devflow-core-skills'],
+    scope: 'user',
+    features: {
+      ambient: true, memory: true, hud: false, knowledge: false,
+      learning: false, rules: true, flags: [], proxy: false,
+    },
+    installedAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    ...extra,
+  });
+
+  const writeRaw = (body: unknown) =>
+    fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(body), 'utf-8');
+
+  const stored = async (): Promise<Record<string, unknown>> =>
+    JSON.parse(await fs.readFile(path.join(tmpDir, 'manifest.json'), 'utf-8')) as Record<string, unknown>;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-manifest-variants-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns a malformed or hand-edited stored value unchanged', async () => {
+    const PRESENT: Array<[label: string, value: unknown]> = [
+      ['a string', 'x'],
+      ['an object with a number', { curation: 1 }],
+      ['an object with a missing axis', { curation: true }],
+      ['an object with an extra key', { curation: true, compliance: false, future: 'y' }],
+      ['null', null],
+      ['an array', [true, false]],
+      ['zero', 0],
+    ];
+    for (const [label, value] of PRESENT) {
+      await writeRaw(withVariants({ installedVariants: value }));
+      const result = await readManifest(tmpDir);
+      expect(result, `expected ${label} to parse non-null`).not.toBeNull();
+      expect(Object.hasOwn(result!, 'installedVariants'), `expected ${label} to be present`).toBe(true);
+      expect(result!.installedVariants, `expected ${label} to be carried`).toEqual(value);
+    }
+  });
+
+  it('keeps a malformed stored value on disk when another defect owes a heal write', async () => {
+    // features.kb is a legacy key, so this read heal-writes the file.
+    await writeRaw(withVariants({
+      installedVariants: 'x',
+      features: {
+        ambient: true, memory: true, hud: false, knowledge: false,
+        learning: false, rules: true, flags: [], proxy: false, kb: true,
+      },
+    }));
+    const result = await readManifest(tmpDir);
+    expect(result!.installedVariants).toBe('x');
+    const after = await stored();
+    expect((after.features as Record<string, unknown>).kb).toBeUndefined();
+    expect(after.installedVariants).toBe('x');
+  });
+
+  it('a manifest without the key still lacks it after a heal write', async () => {
+    await writeRaw(withVariants({
+      features: {
+        ambient: true, memory: true, hud: false, knowledge: false,
+        learning: false, rules: true, flags: [], proxy: false, kb: true,
+      },
+    }));
+    const result = await readManifest(tmpDir);
+    expect(Object.hasOwn(result!, 'installedVariants')).toBe(false);
+    const after = await stored();
+    // The heal ran: the legacy key is gone from the stored file.
+    expect((after.features as Record<string, unknown>).kb).toBeUndefined();
+    expect(Object.hasOwn(after, 'installedVariants')).toBe(false);
+    // A write of what the reader returned adds no key either.
+    await writeManifest(tmpDir, result!);
+    expect(Object.hasOwn(await stored(), 'installedVariants')).toBe(false);
+  });
+});
+
 // ── Phase 2: FlagsRecord heal round-trip guards ───────────────────────────────
 
 describe('FlagsRecord heal round-trip (Phase 2)', () => {

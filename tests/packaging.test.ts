@@ -25,8 +25,8 @@
  * Guard 6f (variant trees): the tarball carries the variant manifest
  *   dist/variant-axes.json, and exactly the files the rosters name under the three off
  *   trees (dist/curation-off/, dist/compliance-off/, dist/curation-compliance-off/).
- *   While no host carries a compliance arm the two new trees hold no file, so a scoped
- *   `npm pack` of seeded files proves the `files` field would carry a file under each.
+ *   A scoped `npm pack` of seeded files proves the `files` field would carry a file under
+ *   each off tree, whatever the rosters hold.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -461,8 +461,8 @@ describe('Guard 5 (files[] coverage): package.json includes required directories
  *  (f) Carry the variant manifest (dist/variant-axes.json) and exactly the variants
  *      the rosters name under the compliance-off tree (dist/compliance-off/) and the
  *      both-off tree (dist/curation-compliance-off/). A scoped pack of seeded files
- *      proves the `files` field carries a file under each tree, which the real
- *      tarball cannot show while no host has a compliance arm.
+ *      proves the `files` field carries a file under each tree, whatever the
+ *      rosters hold.
  *
  * Assert on parsed `npm pack --dry-run --json` output (structured
  * data), not on pipeline tails or partial string matching.
@@ -682,9 +682,9 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
       files.length,
       'npm pack --dry-run produced no files — run `npm run build` first (guard cannot verify)',
     ).toBeGreaterThan(0);
-    // The manifest is the only file that is present for every build, even while no
-    // host carries a compliance arm. A compliance-off install refuses without it, so
-    // a tarball that dropped it would fail on a user's first init.
+    // The manifest is present for every build, whichever hosts carry a compliance arm.
+    // A compliance-off install refuses without it, so a tarball that dropped it would
+    // fail on a user's first init.
     expect(
       files,
       `The tarball must carry ${VARIANT_MANIFEST_REL_PATH}. Run \`npm run build:mds\` before \`npm pack\`.`,
@@ -745,10 +745,10 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
   }
 
   it('package.json files[] packs a file under each off tree and the manifest, and still drops a map and a stray path', async () => {
-    // The tarball arms above compare against rosters and so hold with an empty
-    // roster: no host carries a compliance arm yet, and the two new trees stay empty.
-    // This is the presence arm. It packs seeded files under the REAL files[] patterns,
-    // so a pattern that stopped covering a tree turns it red before the first arm lands.
+    // The tarball arms above compare against rosters, so they hold for any roster, an
+    // empty one included. This is the presence arm. It packs seeded files under the REAL
+    // files[] patterns, so a pattern that stopped covering a tree turns it red even when
+    // the rosters are small.
     const pkg = JSON.parse(await fs.readFile(path.join(ROOT, 'package.json'), 'utf-8')) as { files?: string[] };
     const patterns = pkg.files ?? [];
     expect(patterns, 'package.json files[] must ship dist/ wholesale').toContain('dist/');

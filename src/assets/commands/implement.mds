@@ -49,9 +49,17 @@ When the user explicitly asks to re-validate, re-check, or re-run quality gates 
 ### Phase 1: Setup
 
 <!-- curation:on -->
+<!-- compliance:on -->
 **Produces:** TASK_ID, BASE_BRANCH, BASE_REF, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, ISSUE_PR_LINK, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, PR_TEST_PLAN_BLOCK, REVIEW_PUBLICATION, GATE_LEVEL
+<!-- compliance:off -->
+**Produces:** TASK_ID, BASE_BRANCH, BASE_REF, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, ISSUE_PR_LINK, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, EVIDENCE_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, REVIEW_PUBLICATION, GATE_LEVEL
+<!-- compliance:end -->
 <!-- curation:off -->
+<!-- compliance:on -->
 **Produces:** TASK_ID, BASE_BRANCH, BASE_REF, EXECUTION_PLAN, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, ISSUE_PR_LINK, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, PR_TEST_PLAN_BLOCK, REVIEW_PUBLICATION, GATE_LEVEL
+<!-- compliance:off -->
+**Produces:** TASK_ID, BASE_BRANCH, BASE_REF, EXECUTION_PLAN, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, ISSUE_PR_LINK, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, EVIDENCE_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, REVIEW_PUBLICATION, GATE_LEVEL
+<!-- compliance:end -->
 <!-- curation:end -->
 
 Record the current branch name as `BASE_BRANCH`. Stop the run unless it matches `^(?![-#]|origin\/|(?:@|(?:FETCH_|ORIG_|MERGE_)?HEAD)$)(?!.*\.\.)[A-Za-z0-9._\/+@,#-]{1,200}$` (judge the match by reading; never pass the value to a command), telling the user it allows only ASCII letters, digits and `._/+@,#-`, at most 200; no leading `-` or `#`, no `origin/` prefix, no `..`, not `@` or a HEAD name.
@@ -59,6 +67,9 @@ Record the current branch name as `BASE_BRANCH`. Stop the run unless it matches 
 {{docs_root()}}
 
 {{evidence_policy()}}
+<!-- compliance:off -->
+When `EVIDENCE_POLICY` is `required`, record `TRACEABILITY: DEGRADED (compliance off on this machine; the repository requires evidence)` once, for the Phase 12 report.
+<!-- compliance:end -->
 
 **Plan Document Handling** (when `COMMAND_INPUT` is a path ending in `.md`):
 1. Read the plan document from the path provided
@@ -83,14 +94,20 @@ ISSUE_INPUT: {COMMAND_INPUT verbatim, when it is a single whitespace-delimited t
 TASK_DESCRIPTION: {COMMAND_INPUT verbatim, when it is two or more whitespace-delimited tokens; when COMMAND_INPUT is empty, the one-line description you wrote above — otherwise omit}
 ISSUE_REQUIRED: {ISSUE_REQUIRED}
 APPLY_CONVENTIONS: {APPLY_CONVENTIONS}
+<!-- compliance:on -->
 PLAN_ARTIFACT_PATH: {path to plan document if COMMAND_INPUT ends in .md, otherwise (none)}
+<!-- compliance:end -->
 Derive branch name from issue or description, create feature branch, and fetch issue if specified.
 Return the branch setup summary."
 ```
 
 The issue token is forwarded **unclassified**; routing is by SHAPE alone (the token count of `COMMAND_INPUT` and a `.md` ending). Only `setup-task` has resolved a provider, so a `starts with #` test would be a github test that reclassifies `PROJ-12` and `ENG-12` as task descriptions: the branch comes from prose, no issue is fetched and nothing reports it. Token COUNT is provider-neutral: every issue spelling is one token and no free-text description is.
 
+<!-- compliance:on -->
 - **Extension.** A path ending in `.md` is a plan document, never an issue reference: it goes to `PLAN_ARTIFACT_PATH` only, and `ISSUE_INPUT` carries the plan's frontmatter `issue`, never the path (Plan Document Handling step 4).
+<!-- compliance:off -->
+- **Extension.** A path ending in `.md` is a plan document, never an issue reference: `ISSUE_INPUT` carries the plan's frontmatter `issue`, never the path (Plan Document Handling step 4).
+<!-- compliance:end -->
 - **Token count.** One token is an issue reference; two or more is prose. Forwarding the FIRST token alone would send `/implement fix the login bug` as `ISSUE_INPUT: fix` with no description, so the request is dropped.
 
 **Capture from Git agent output** (used throughout flow):
@@ -101,11 +118,39 @@ The issue token is forwarded **unclassified**; routing is by SHAPE alone (the to
 
 {{issue_capture_contract()}}
 
+<!-- compliance:on -->
 **Ticket link, only when `ISSUE_REQUIRED` is `true`:** when the capture above holds no `ISSUE_PR_LINK` (absent, or `(none)`), run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"` in Bash, Read `<that directory>/skills/devflow:agent-references/references/commands/implement-evidence-asks.md` with the Read tool (once per run), then run its ticket link ask and **Record the exception at once** as it directs, before any Code spawn. `PR_EXCEPTIONS` is `(none)` until an exception is recorded.
+<!-- compliance:off -->
+**Ticket link, only when `ISSUE_REQUIRED` is `true`:** when the capture above holds no `ISSUE_PR_LINK` (absent, or `(none)`), ask with AskUserQuestion before any Code spawn — "No tracker issue is linked to this task. Record a self-attested exception, or stop?" — offering exactly these two options:
+- **Record an exception** — the user gives the reason as free text. Render it with the exception grammar below, as kind `ticket-link`; when the rendered reason is empty, ask for it once more, and stop as below if it is empty again.
+- **Stop** — report `BLOCKED (no ticket link)`, name the branch setup-task created (`TASK_ID`) and `BASE_BRANCH` so it can be reused or removed, and give the remedy: create or link the tracker issue and re-run `/implement` with its reference, or — for a team that does not want ticket links — commit `.devflow/project.json` as `{"version":1,"evidence":"standard"}` on the default branch. Spawn nothing further.
 
+**Exception grammar.** Render each evidence exception as one line under a `## Evidence Exceptions` heading, in exactly this shape:
+
+```markdown
+## Evidence Exceptions
+- `<kind>` self-attested by @<login> at <utc>: <reason>
+```
+
+- `<kind>` is `ticket-link` or `test-plan` — a closed set; the section holds each kind at most once.
+- `@<login>` is `@` followed by the output of `gh api user --jq .login` when that output matches `^[A-Za-z0-9][A-Za-z0-9-]{0,38}$`. On any other output, or a failed call, it is `(login unavailable)` instead, with no `@`.
+- `<utc>` is the output of `date -u +%Y-%m-%dT%H:%M:%SZ`.
+- `<reason>` is the user's own words, made inert: replace every character outside printable ASCII (newlines and tabs included) with a space, remove every `<`, `>`, `` ` ``, `[`, `]`, `\`, `/`, `#`, `@`, `&` and `$`, collapse runs of spaces, trim, keep the first 200 characters, and trim again. A reason that is empty after this is no reason.
+
+**Record the exception at once**, before any Code spawn: set `EVIDENCE_EXCEPTIONS` to the rendered section. The test plan step below writes it into `EVIDENCE_FILE`, its one home. `EVIDENCE_EXCEPTIONS` is `(none)` until an exception is recorded.
+<!-- compliance:end -->
+
+<!-- compliance:on -->
 **Test plan.** Before any Code spawn, give the task a test plan in the evidence file `{worktree}/.devflow/docs/evidence-{branch_slug}.md` (`EVIDENCE_FILE`) — unlike the handoff file, it stays after the PR exists. It holds up to three sections, in this order and nothing else: `## Test Plan`; `## Evidence Exceptions`, a byte copy of `PR_EXCEPTIONS` present only while that is not `(none)`; and `## Claims`, always last, so every claim is appended at the end of the file. Create the file if absent; if it exists, replace its `## Test Plan` and `## Evidence Exceptions` sections and keep `## Claims` byte-identical.
+<!-- compliance:off -->
+**Test plan.** Before any Code spawn, give the task a test plan in the evidence file `{worktree}/.devflow/docs/evidence-{branch_slug}.md` (`EVIDENCE_FILE`) — unlike the handoff file, it stays after the PR exists. It holds up to three sections, in this order and nothing else: `## Test Plan`; `## Evidence Exceptions`, a byte copy of `EVIDENCE_EXCEPTIONS` present only while that is not `(none)`; and `## Claims`, always last, so every claim is appended at the end of the file. Create the file if absent; if it exists, replace its `## Test Plan` and `## Evidence Exceptions` sections and keep `## Claims` byte-identical.
+<!-- compliance:end -->
 
+<!-- compliance:on -->
 Write the `## Test Plan` section: when `COMMAND_INPUT` is a plan document with a `## Test Plan` section, copy that section's lines verbatim; otherwise write one TP line per acceptance criterion the plan, the issue or the task text states, numbered from `TP-1`. Never invent a criterion, and word every scenario yourself in plain words: the lines reach the PR body, so a scenario holds no `#`, `@` or `/` — no issue reference, mention, closing keyword target or URL — and the files a TP covers go in its `files:` field. Each line follows the TP-line contract:
+<!-- compliance:off -->
+Write the `## Test Plan` section: when `COMMAND_INPUT` is a plan document with a `## Test Plan` section, copy that section's lines verbatim; otherwise write one TP line per acceptance criterion the plan, the issue or the task text states, numbered from `TP-1`. Never invent a criterion, and word every scenario yourself in plain words: a scenario holds no `#`, `@` or `/` — no issue reference, mention, closing keyword target or URL — and the files a TP covers go in its `files:` field. Each line follows the TP-line contract:
+<!-- compliance:end -->
 
 {{test_plan_line()}}
 
@@ -117,12 +162,19 @@ node "$HOME/.devflow/scripts/verify-evidence.cjs" check tp "{worktree}/.devflow/
 
 `exit=0` passes. On any other result, rewrite the section once — the script names the failing line and its code on stderr — and check again. Still failing, or no line to write, means the test plan is **missing**: drop the `## Test Plan` section from the file.
 
+<!-- compliance:on -->
 **Missing test plan, only when `EVIDENCE_POLICY` is `required`:** when the check above leaves the test plan missing, Read the evidence-asks reference as in the ticket link step (when this run has not) and run its missing test plan ask before any Code spawn.
+<!-- compliance:off -->
+**Missing test plan, only when `EVIDENCE_POLICY` is `required`:** when the check above leaves the test plan missing, ask with AskUserQuestion before any Code spawn — "No test plan could be written for this task. Record a self-attested exception, or stop?" — offering exactly these two options:
+- **Record an exception** — the user gives the reason as free text. Render it with the exception grammar above, as kind `test-plan`; when the rendered reason is empty, ask for it once more, and stop as below if it is empty again. Add the rendered line to the `## Evidence Exceptions` section of `EVIDENCE_FILE` — after any `ticket-link` line, creating the section when absent — and set `EVIDENCE_EXCEPTIONS` to that section.
+- **Stop** — report `BLOCKED (no test plan)`, name `TASK_ID` and `BASE_BRANCH` so the branch can be reused or removed, and give the remedy: state the acceptance criteria in the task, the issue or a `/plan` document (its `## Test Plan` section is copied) and re-run `/implement`, or — for a team that does not want test plans enforced — commit `.devflow/project.json` as `{"version":1,"evidence":"standard"}` on the default branch. Spawn nothing further.
+<!-- compliance:end -->
 
 When `EVIDENCE_POLICY` is `standard`, a missing test plan is never asked about: carry `Test plan: missing` to the Phase 12 report.
 
 **Test-plan outputs**, set once before any Code spawn:
 - `TEST_PLAN` — the TP lines of the evidence file's `## Test Plan` section, or `(none)` when the test plan is missing.
+<!-- compliance:on -->
 - `PR_TEST_PLAN_BLOCK` — when the test plan is present and this render ends in `exit=0`, its stdout byte for byte without that `exit=` line; `(none)` otherwise:
 
 ```bash
@@ -130,11 +182,18 @@ node "$HOME/.devflow/scripts/verify-evidence.cjs" render --plan "{worktree}/.dev
 ```
 
 - `EVIDENCE_FILE` — `{worktree}/.devflow/docs/evidence-{branch_slug}.md`, its `## Evidence Exceptions` section now a byte copy of `PR_EXCEPTIONS` (absent when that is `(none)`).
+<!-- compliance:off -->
+- `EVIDENCE_FILE` — `{worktree}/.devflow/docs/evidence-{branch_slug}.md`, its `## Evidence Exceptions` section now a byte copy of `EVIDENCE_EXCEPTIONS` (absent when that is `(none)`).
+<!-- compliance:end -->
 
 {{settings.settings_resolve()}}
 
 {{publication_gate()}}
+<!-- compliance:on -->
 Phase 11 passes the resolved value to the evidence script (`publish`), which decides what each value means for the evidence comment. From the same line: {{compliance.compliance_frameworks()}}
+<!-- compliance:off -->
+Phase 11 passes no publication value: the local verify posts nothing. From the same line: {{compliance.compliance_frameworks()}}
+<!-- compliance:end -->
 
 {{compliance.compliance_inject()}}
 
@@ -465,9 +524,17 @@ At `lean`, open the prompt with Phase 6's `GATE_LEVEL` and `BASE_SHA` lines; its
 ### Phase 9: Open PR
 
 **Produces:** PR_NUMBER
+<!-- compliance:on -->
 **Requires:** BASE_BRANCH, BASE_REF, TASK_ID, ISSUE_NUMBER, ISSUE_PR_LINK, PR_EXCEPTIONS, PR_TEST_PLAN_BLOCK, PR_DESCRIPTION_GUIDANCE, APPLY_CONVENTIONS, CODE_AGENT_OUTPUT
+<!-- compliance:off -->
+**Requires:** BASE_BRANCH, BASE_REF, TASK_ID, ISSUE_NUMBER, ISSUE_PR_LINK, PR_DESCRIPTION_GUIDANCE, APPLY_CONVENTIONS
+<!-- compliance:end -->
 
+<!-- compliance:on -->
 Run once, after the gates, under every strategy. No Code agent opens a PR: the Git agent does, and it pastes `ISSUE_PR_LINK`, `PR_EXCEPTIONS` and `PR_TEST_PLAN_BLOCK` through their paste gates and scrubs the body (D11) before `gh pr create`. This command renders no link line and creates no PR itself: the Git agent's Phase-1 rendering is the only one, forwarded verbatim.
+<!-- compliance:off -->
+Run once, after the gates, under every strategy. No Code agent opens a PR: the Git agent does, and it pastes `ISSUE_PR_LINK` through its paste gate and scrubs the body (D11) before `gh pr create`. This command renders no link line and creates no PR itself: the Git agent's Phase-1 rendering is the only one, forwarded verbatim.
+<!-- compliance:end -->
 
 ```
 Agent(subagent_type="Git"):
@@ -478,9 +545,13 @@ BASE_REF: {BASE_REF}
 TASK_ID: {task-id}
 ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
 ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}
+<!-- compliance:on -->
 PR_EXCEPTIONS: {the ## Evidence Exceptions section of {worktree}/.devflow/docs/handoff-{branch_slug}.md verbatim, or (none)}
 PR_TEST_PLAN_BLOCK: {PR_TEST_PLAN_BLOCK verbatim, or (none)}
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance from Phase 1 unless it is (none), then the Code agents' reports from CODE_AGENT_OUTPUT in spawn order — Implementation, Commits and Key Decisions, and a sequential agent's ## Phase {N} Implementation Summary, then Validate's `Lint pack:` line if UNVERIFIED, for Testing}
+<!-- compliance:off -->
+PR_DESCRIPTION_GUIDANCE: {pr_description_guidance from Phase 1, or (none)}
+<!-- compliance:end -->
 APPLY_CONVENTIONS: {APPLY_CONVENTIONS}
 COMMIT_UNCOMMITTED: false
 Open the pull request for this branch and return the pre-flight summary."
@@ -520,7 +591,11 @@ git push origin HEAD; echo "exit=$?"
 ### Phase 11: Evidence
 
 **Produces:** EVIDENCE_RESULT
+<!-- compliance:on -->
 **Requires:** PR_NUMBER, EVIDENCE_FILE, REVIEW_PUBLICATION
+<!-- compliance:off -->
+**Requires:** PR_NUMBER, EVIDENCE_FILE
+<!-- compliance:end -->
 
 Run once, after Phase 10, under every strategy. Skip it only when Phase 9 stopped the run. A `ci` TP reads `INDETERMINATE` only when the CI gate could not tell or did not run.
 
@@ -532,6 +607,7 @@ git push origin HEAD; echo "exit=$?"
 
 `exit=0` continues to the script. Any other result, a rejected non-fast-forward push included, does not block: record `TRACEABILITY: DEGRADED (evidence push failed)` for the Phase 12 report and run the script anyway.
 
+<!-- compliance:on -->
 **Then refresh, inline.** The refresh is plumbing, so no Git agent runs it: `verify-evidence.cjs publish` is the whole `update-pr-evidence` operation — verify, the scrubbed block edit with its read-back, the scrubbed evidence comment — in one call. Use the Bash tool with `timeout: 180000`:
 
 ```bash
@@ -539,6 +615,15 @@ cd "{worktree}" && node "$HOME/.devflow/scripts/verify-evidence.cjs" publish --p
 ```
 
 Drop the `--evidence` pair when that file does not exist or its path does not match `^[A-Za-z0-9._/-]{1,255}$`. `{PR_NUMBER}` is digits only, and the publication value is `auto`, `full`, `off` or `stub`. Capture its stdout as `EVIDENCE_RESULT`: the `## PR Evidence` block — its `EVIDENCE` line and its `**Body**:` / `**Comment**:` line — and any `TRACEABILITY: DEGRADED ({reason})` lines after it (exit 0), or the one line `TRACEABILITY: DEGRADED (evidence unavailable)` (exit 2). Empty stdout or any other exit is `TRACEABILITY: DEGRADED (evidence unavailable)`. It never blocks: whatever it returns, continue to Phase 12.
+<!-- compliance:off -->
+**Then verify, inline.** The verify is plumbing, so no Git agent runs it: `verify-evidence.cjs verify` reads the PR and the local evidence file, and writes the local result file. It writes nothing to GitHub:
+
+```bash
+cd "{worktree}" && node "$HOME/.devflow/scripts/verify-evidence.cjs" verify --pr {PR_NUMBER} --evidence ".devflow/docs/evidence-{branch_slug}.md" --comment-out ".devflow/docs/evidence-result-{branch_slug}.md"; echo "exit=$?"
+```
+
+Drop the `--evidence` pair when that file does not exist or its path does not match `^[A-Za-z0-9._/-]{1,255}$`. `{PR_NUMBER}` is digits only. Capture its stdout as `EVIDENCE_RESULT`: its one `EVIDENCE` line (exit 0), or the one line `TRACEABILITY: DEGRADED (evidence unavailable)` (exit 2). Empty stdout or any other exit is `TRACEABILITY: DEGRADED (evidence unavailable)`. It never blocks: whatever it returns, continue to Phase 12.
+<!-- compliance:end -->
 
 ### Phase 12: Report
 
@@ -546,9 +631,17 @@ Drop the `--evidence` pair when that file does not exist or its path does not ma
 
 Display completion summary with phase status, `Gate level: {GATE_LEVEL}` with any level note, Harden's `no files reviewed` line if any, Validate's `Lint pack:` line if any, PR info, and next steps.
 
+<!-- compliance:on -->
 Show the test plan's evidence from Phase 11: `Test plan: {VERIFIED-CI + ATTESTED-LOCAL}/{total} verified (VERIFIED-CI {n}, ATTESTED-LOCAL {n})`, read from the `EVIDENCE` line and never inferred, then its `**Body**:` / `**Comment**:` line verbatim. Without an `EVIDENCE` line, show `Test plan: evidence unavailable`; with no test plan, `Test plan: missing`.
+<!-- compliance:off -->
+Show the test plan's evidence from Phase 11: `Test plan: {VERIFIED-CI + ATTESTED-LOCAL}/{total} verified (VERIFIED-CI {n}, ATTESTED-LOCAL {n})`, read from the `EVIDENCE` line and never inferred, then `Evidence result: .devflow/docs/evidence-result-{branch_slug}.md (local; not posted)`. Without an `EVIDENCE` line, show `Test plan: evidence unavailable`; with no test plan, `Test plan: missing`.
+<!-- compliance:end -->
 
+<!-- compliance:on -->
 If any Git agent output emitted `TRACEABILITY: DEGRADED ({reason})` lines during the run, or the fresh base step, Phase 10's push, Phase 11's push or Phase 11's script output carried one, surface them verbatim in the report under a `### Traceability` subsection so the user can act on them.
+<!-- compliance:off -->
+If any Git agent output emitted `TRACEABILITY: DEGRADED ({reason})` lines during the run, or the compliance-off line of Phase 1, the fresh base step, Phase 10's push, Phase 11's push or Phase 11's script output carried one, surface them verbatim in the report under a `### Traceability` subsection so the user can act on them.
+<!-- compliance:end -->
 
 If Phase 9 listed uncommitted files, show them as a `### Uncommitted files` subsection: the user commits them or discards them.
 
@@ -579,7 +672,11 @@ If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lin
 
 ## Principles
 
+<!-- compliance:on -->
 1. **Orchestration only** - Command spawns agents, never does work itself (no tests, builds or fixes); "Spawn X" means call the Agent tool; the inline calls are the bounded plumbing the charter allows: the fresh base step's resolver calls (Phase 1, re-validation), the Phase 10 and 11 pushes, the Phase 10 ci-wait call, the Phase 11 evidence publish call and the evidence script checks
+<!-- compliance:off -->
+1. **Orchestration only** - Command spawns agents, never does work itself (no tests, builds or fixes); "Spawn X" means call the Agent tool; the inline calls are the bounded plumbing the charter allows: the fresh base step's resolver calls (Phase 1, re-validation), the Phase 10 and 11 pushes, the Phase 10 ci-wait call, the Phase 11 evidence verify call and the evidence script checks
+<!-- compliance:end -->
 2. **Honest reporting** - Display agent outputs directly
 3. **Loop limits** - Max 2 validation retries, max 2 alignment fix iterations, max 2 QA retries before escalating to user; the CI gate allows at most 3 waits and 2 fixes
 4. **CI awareness** - CI status is checked before merge; test-plan evidence (Phase 11) is recorded under every strategy

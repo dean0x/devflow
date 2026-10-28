@@ -561,7 +561,7 @@ export const FEATURE_OWNED_RULES = ['compliance', 'behavior'] as const satisfies
  * stays OWNED and REQUIRED by its plugins in the registry — the closure guard
  * reasons over the curation-on variant, the superset — and the install drops it
  * on top of the selection: `installViaFileCopy` skips it when `curation` is false
- * and `convergeCurationVariants` installs or removes it when the switch flips.
+ * and `convergeVariantAxes` installs or removes it when the switch flips.
  *
  * This is a machine-switch condition, not a deselection: the plan
  * ({@link resolveSkillInstallPlan}) is untouched, so a curation-off machine never
@@ -570,7 +570,7 @@ export const FEATURE_OWNED_RULES = ['compliance', 'behavior'] as const satisfies
  *
  * Used by:
  *   - installer.ts installViaFileCopy: omits these from the install loop when curation is off
- *   - curation-install.ts convergeCurationVariants: installs or removes the directory
+ *   - curation-install.ts convergeVariantAxes: installs or removes the directory
  *   - tests: independent literal ['apply-decisions'] (avoids the EXCLUDED-as-oracle trap)
  */
 export const CURATION_GATED_SKILLS = ['apply-decisions'] as const satisfies readonly string[];
