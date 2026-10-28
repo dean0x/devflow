@@ -49,7 +49,7 @@ import { probeTrackedArea, type TrackedAreasAnswer } from '../../core/tracked-ar
 import { restampInstalledCommands } from '../../targets/claude-code/language-stamp.js';
 import { installRenderedCharter, removeHandoffSentinel } from '../../targets/claude-code/charter-render.js';
 import { installCommandsAndAgents } from '../../targets/claude-code/installer.js';
-import { isUnrealFolder, refuseUnrealFolder, type LinkReport } from '../../targets/claude-code/linked-folder.js';
+import { isUnrealFolder, newLinkReport, refuseUnrealFolder, refusedFolderStatement, type LinkReport } from '../../targets/claude-code/linked-folder.js';
 import { formatReplacedLinksSummary, type SummaryLine } from './install-report.js';
 
 /**
@@ -181,9 +181,41 @@ export function formatUninstallRefusedSummary(report: Pick<LinkReport, 'refusedF
   return report.refusedFolders.map(folder => ({
     level: 'warn',
     message:
-      `${folder} is a link or not a folder. Devflow removed and changed nothing there. ` +
+      `${refusedFolderStatement(folder)} Devflow removed and changed nothing there. ` +
       `Remove the link or replace it with a real folder, then run the uninstall again.`,
   }));
+}
+
+/** How many folders an uninstall left as they are, in a sentence that agrees with the count. */
+function leftAsTheyAre(count: number): string {
+  return count === 1 ? '1 folder was left as it is' : `${count} folders were left as they are`;
+}
+
+/**
+ * The line for one scope's removal. With no refused folder the plugin is removed. With any, the
+ * removal is partial: the line says so and counts the folders left as they are, because a refused
+ * folder looks the same on disk as a folder that had nothing to remove.
+ *
+ * @param pluginLabel - Empty, or the selected plugin names as ` (a, b)`.
+ *
+ * Pure function — returns the line, logs nothing.
+ */
+export function formatPluginRemovedLine(pluginLabel: string, refusedCount: number): SummaryLine {
+  if (refusedCount === 0) return { level: 'success', message: `Plugin removed${pluginLabel}` };
+  return { level: 'warn', message: `Plugin removed in part${pluginLabel}: ${leftAsTheyAre(refusedCount)}.` };
+}
+
+/**
+ * The last line of an uninstall. It says success only when no folder was refused in any scope;
+ * otherwise it says the uninstall was done in part and counts the folders left as they are.
+ *
+ * Pure function — returns the line, logs nothing.
+ */
+export function formatUninstallOutro(refusedCount: number): string {
+  if (refusedCount === 0) {
+    return `${color.green('Devflow uninstalled successfully')}${color.dim('  Reinstall: npx devflow-kit init')}`;
+  }
+  return color.yellow(`Devflow uninstalled in part: ${leftAsTheyAre(refusedCount)}.`);
 }
 
 /** Print the links an uninstall replaced or refused, one line each, once per path. */
@@ -1337,7 +1369,7 @@ export async function refreshRetainedCommandsAndAgents(opts: {
   const scope = opts.scope ?? 'user';
   const verbose = opts.verbose ?? false;
   const mayChange = opts.mayChange ?? changeUserOwned;
-  const links = opts.links ?? { replacedLinks: [], refusedFolders: [] };
+  const links = opts.links ?? newLinkReport();
   const agentsDir = path.join(claudeDir, 'agents', 'devflow');
   const commandsDir = path.join(claudeDir, 'commands', 'devflow');
   const retired = `Removed the agent file(s) of an older Devflow release: ${retiredAgents.join(', ')}.`;
@@ -1461,7 +1493,7 @@ export async function runSelectivePhaseForScope(opts: {
   const { claudeDir, devflowDir, selectedPlugins, verbose } = opts;
   const scope = opts.scope ?? 'user';
   const installedPlugins = opts.installedPlugins ?? DEVFLOW_PLUGINS;
-  const links: LinkReport = { replacedLinks: [], refusedFolders: [] };
+  const links = newLinkReport();
   // D-CLI-NO-SYMLINK: a legacy local install's removals and rewrites pass this first. In the user
   // scope the guard refuses a linked Devflow folder and records it in `links`.
   const mayChange = scopeChangeGuard(scope, { claudeDir, devflowDir }, links);
@@ -2135,7 +2167,10 @@ export const uninstallCommand = new Command('uninstall')
       }
     }
 
-    // Uninstall from each scope
+    // Uninstall from each scope. The folders a selective uninstall refused are counted across the
+    // scopes, so the last line can say the removal was done in part. A refusal is reported, not a
+    // failure: the exit status stays 0, as it does for a legacy install whose links were skipped.
+    const refusedFolders = new Set<string>();
     for (const scope of scopesToUninstall) {
       const paths = await scopeInstallPaths(scope, gitRoot);
       if (paths === null) {
@@ -2151,8 +2186,9 @@ export const uninstallCommand = new Command('uninstall')
         p.log.step('Uninstalling legacy local scope (git-root/.claude/)');
       }
 
+      const scopeRefused = new Set<string>();
       if (isSelectiveUninstall) {
-        await runSelectivePhaseForScope({
+        const links = await runSelectivePhaseForScope({
           claudeDir,
           devflowDir,
           selectedPlugins,
@@ -2160,6 +2196,10 @@ export const uninstallCommand = new Command('uninstall')
           installedPlugins: await resolveInstalledPlugins(devflowDir),
           scope,
         });
+        for (const folder of links.refusedFolders) {
+          scopeRefused.add(folder);
+          refusedFolders.add(folder);
+        }
       } else {
         await runFullPhaseForScope({ scope, claudeDir, devflowDir, devflowScriptsDir, verbose, keepDocs: !!options.keepDocs, isTTY: !!process.stdin.isTTY });
       }
@@ -2167,7 +2207,8 @@ export const uninstallCommand = new Command('uninstall')
       const pluginLabel = isSelectiveUninstall
         ? ` (${selectedPluginNames.join(', ')})`
         : '';
-      p.log.success(`Plugin removed${pluginLabel}`);
+      const removed = formatPluginRemovedLine(pluginLabel, scopeRefused.size);
+      p.log[removed.level](removed.message);
     }
 
     // === CLEANUP EXTRAS (only for full uninstall) ===
@@ -2175,8 +2216,7 @@ export const uninstallCommand = new Command('uninstall')
       await runCleanupPhase({ scopesToUninstall, keepDocs: !!options.keepDocs, verbose, cwd: process.cwd(), isTTY: !!process.stdin.isTTY, managedProxyPorts });
     }
 
-    const status = color.green('Devflow uninstalled successfully');
-    p.outro(`${status}${color.dim('  Reinstall: npx devflow-kit init')}`);
+    p.outro(formatUninstallOutro(refusedFolders.size));
   });
 
 /**

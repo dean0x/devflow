@@ -13,16 +13,28 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+
+// The intro and outro frame the command's output. They are replaced so a row can read the last line.
+vi.mock('@clack/prompts', async importOriginal => {
+  const actual = await importOriginal<typeof import('@clack/prompts')>();
+  return { ...actual, intro: vi.fn(), outro: vi.fn() };
+});
+
 import * as p from '@clack/prompts';
 
 import {
+  formatPluginRemovedLine,
+  formatUninstallOutro,
   formatUninstallRefusedSummary,
   refreshRetainedCommandsAndAgents,
   removeSelectedPlugins,
   runFullPhaseForScope,
   runSelectivePhaseForScope,
   sweepDevflowNamespaces,
+  uninstallCommand,
 } from '../../src/cli/commands/uninstall.js';
+import { formatRefusedFoldersSummary } from '../../src/cli/commands/install-report.js';
+import { stripAnsi } from '../../src/core/ansi.js';
 import { restampInstalledCommands } from '../../src/targets/claude-code/language-stamp.js';
 import { DEVFLOW_PLUGINS, type PluginDefinition } from '../../src/core/plugins.js';
 import { assertTempHome } from '../setup/home-isolation.js';
@@ -437,5 +449,100 @@ describe('the uninstall report for a refused folder', () => {
 
   it('prints nothing when no folder was refused', () => {
     expect(formatUninstallRefusedSummary({ refusedFolders: [] })).toEqual([]);
+  });
+
+  it('opens with the sentence that the install summary uses for the same folder', () => {
+    const folder = '/a/commands/devflow';
+    const [install] = formatRefusedFoldersSummary({ refusedFolders: [folder] });
+    const [uninstall] = formatUninstallRefusedSummary({ refusedFolders: [folder] });
+
+    const sentence = `${folder} is a link or not a folder.`;
+    expect(install.message.startsWith(sentence)).toBe(true);
+    expect(uninstall.message.startsWith(sentence)).toBe(true);
+    expect(uninstall.message).toBe(
+      `${sentence} Devflow removed and changed nothing there. ` +
+      'Remove the link or replace it with a real folder, then run the uninstall again.',
+    );
+  });
+});
+
+describe('the outcome lines of an uninstall that refused a folder', () => {
+  it('say success when no folder was refused', () => {
+    expect(formatPluginRemovedLine(' (devflow-typescript)', 0)).toEqual({ level: 'success', message: 'Plugin removed (devflow-typescript)' });
+    expect(stripAnsi(formatUninstallOutro(0))).toBe('Devflow uninstalled successfully  Reinstall: npx devflow-kit init');
+  });
+
+  it('say the plugin was removed in part and count the folders left as they are', () => {
+    expect(formatPluginRemovedLine(' (devflow-typescript)', 1)).toEqual({
+      level: 'warn',
+      message: 'Plugin removed in part (devflow-typescript): 1 folder was left as it is.',
+    });
+    expect(formatPluginRemovedLine('', 3)).toEqual({
+      level: 'warn',
+      message: 'Plugin removed in part: 3 folders were left as they are.',
+    });
+    expect(stripAnsi(formatUninstallOutro(2))).toBe('Devflow uninstalled in part: 2 folders were left as they are.');
+  });
+});
+
+describe('uninstall --plugin states the outcome of a refusal in its last lines', () => {
+  const PLUGIN = 'devflow-bug-analysis';
+  let savedConfigDir: string | undefined;
+  let outros: string[];
+  let successes: string[];
+
+  beforeEach(() => {
+    savedConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = claudeDir;
+    expect(() => assertTempHome(os.homedir())).not.toThrow();
+    outros = [];
+    successes = [];
+    process.exitCode = 0;
+    vi.mocked(p.outro).mockImplementation((msg?: string) => { outros.push(stripAnsi(String(msg))); });
+    spies.push(
+      vi.spyOn(p.log, 'success').mockImplementation((msg: string) => { successes.push(String(msg)); }),
+    );
+  });
+
+  afterEach(() => {
+    vi.mocked(p.outro).mockReset();
+    if (savedConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = savedConfigDir;
+    process.exitCode = 0;
+  });
+
+  /** Run the real command, with its option state cleared first. */
+  async function runUninstall(): Promise<void> {
+    (uninstallCommand as unknown as { _optionValues: Record<string, unknown> })._optionValues = {};
+    await uninstallCommand.parseAsync(['--plugin', PLUGIN, '--scope', 'user'], { from: 'user' });
+  }
+
+  it('a refused folder: the plugin is removed in part, the count is named, and the exit status stays 0', async () => {
+    const row = FOLDER_ROWS[0];
+    const before = await linkFolder(row);
+
+    await runUninstall();
+
+    expect(await snapshot(outside), 'the target keeps every byte, file and mode').toEqual(before);
+    expect(await isLink(folderPath(row))).toBe(true);
+    expect(warned, 'the plugin line is a warning that names the count').toContain(
+      `Plugin removed in part (${PLUGIN}): 1 folder was left as it is.`,
+    );
+    expect(successes.filter(line => line.startsWith('Plugin removed')), 'no success line for the plugin').toEqual([]);
+    expect(outros).toEqual(['Devflow uninstalled in part: 1 folder was left as it is.']);
+    expect(process.exitCode ?? 0, 'a refusal is not a failure: the exit status is 0').toBe(0);
+  });
+
+  it('real folders: the plugin line and the last line say success', async () => {
+    await fs.mkdir(path.join(claudeDir, 'commands', 'devflow'), { recursive: true });
+    await fs.writeFile(path.join(claudeDir, 'commands', 'devflow', 'bug-analysis.md'), OWNED_BYTES, 'utf-8');
+
+    await runUninstall();
+
+    expect(await exists(path.join(claudeDir, 'commands', 'devflow', 'bug-analysis.md'))).toBe(false);
+    expect(successes).toContain(`Plugin removed (${PLUGIN})`);
+    expect(warned.filter(line => line.includes('in part'))).toEqual([]);
+    expect(outros).toEqual(['Devflow uninstalled successfully  Reinstall: npx devflow-kit init']);
+    expect(process.exitCode ?? 0).toBe(0);
   });
 });

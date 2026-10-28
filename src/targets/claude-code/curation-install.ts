@@ -117,7 +117,7 @@ import {
 import { convergeFromManifest, type ConvergeComplianceArtifactsResult } from './compliance-install.js';
 import { copyDirectory, resolveSkillSource } from './installer.js';
 import { LANGUAGE_STAMPED_COMMANDS, stampForConverge } from './language-stamp.js';
-import { newLinkReport, refuseUnrealFolder, warnLinkReport, writeFileReplacingLink, type LinkReport } from './linked-folder.js';
+import { entryIsLink, newLinkReport, refuseUnrealFolder, warnLinkReport, writeFileReplacingLink, type LinkReport } from './linked-folder.js';
 import { convergeReferences, type ConvergeReferencesResult } from './reference-converge.js';
 
 // ── Bounds ─────────────────────────────────────────────────────────────────
@@ -495,14 +495,18 @@ async function pathExists(p: string): Promise<boolean> {
  *
  * Staged under `claudeDir` itself, not under `skills/`: a staging directory a
  * crash leaves behind must not look like a second skill to Claude Code.
+ *
+ * A target that is a link is moved aside as the link itself, never followed, so what it points to is
+ * left as it was; the link is recorded in `links` once the real folder stands in its place.
  */
-async function swapInSkillDirectory(claudeDir: string, sourceDir: string, target: string): Promise<void> {
+async function swapInSkillDirectory(claudeDir: string, sourceDir: string, target: string, links: LinkReport): Promise<void> {
   const staging = path.join(claudeDir, `.devflow-curation-${process.pid}-${Date.now().toString(36)}.tmp`);
   const backup = `${staging}.old`;
   try {
     await copyDirectory(sourceDir, staging);
     await fs.mkdir(path.dirname(target), { recursive: true });
-    const hadTarget = await pathExists(target);
+    const wasLink = await entryIsLink(target);
+    const hadTarget = wasLink || await pathExists(target);
     if (hadTarget) await fs.rename(target, backup);
     try {
       await fs.rename(staging, target);
@@ -510,14 +514,15 @@ async function swapInSkillDirectory(claudeDir: string, sourceDir: string, target
       if (hadTarget) await fs.rename(backup, target);
       throw err;
     }
+    if (wasLink) links.replacedLinks.push(target);
   } finally {
     await fs.rm(staging, { recursive: true, force: true }).catch(() => undefined);
     await fs.rm(backup, { recursive: true, force: true }).catch(() => undefined);
   }
 }
 
-/** Converge the curation-gated skill directories. Never throws. */
-async function convergeSkills(opts: ConvergeCurationVariantsOptions): Promise<CurationSkillState> {
+/** Converge the curation-gated skill directories. A skill folder that was a link and was swapped is recorded in `links`. Never throws. */
+async function convergeSkills(opts: ConvergeCurationVariantsOptions, links: LinkReport): Promise<CurationSkillState> {
   const { claudeDir, devflowDir, curation, plugins, warn } = opts;
   const selected = skillsOf(plugins);
   let state: CurationSkillState = 'unchanged';
@@ -539,7 +544,7 @@ async function convergeSkills(opts: ConvergeCurationVariantsOptions): Promise<Cu
       }
       const resolved = await resolveSkillSource(skill, devflowDir, opts.packageRoot);
       if ((await pathExists(target)) && (await treesIdentical(resolved.dir, target))) continue;
-      await swapInSkillDirectory(claudeDir, resolved.dir, target);
+      await swapInSkillDirectory(claudeDir, resolved.dir, target, links);
       state = 'installed';
     } catch (err) {
       warn(`curation variants: could not converge the ${prefixSkillName(skill)} skill (${target}) — ${String(err)}`);
@@ -792,9 +797,11 @@ export async function convergeVariantAxes(opts: ConvergeVariantAxesOptions): Pro
   const prompts = await attempt('prompt variants', warn, notRun(switches, 'the prompt converge failed'), () =>
     convergePromptVariants({ claudeDir, switches, plugins, warn, packageRoot }),
   );
+  const skillLinks = newLinkReport();
   const skill = await attempt<CurationSkillState>('curation variants', warn, 'failed', () =>
-    convergeSkills({ claudeDir, devflowDir, curation: switches.curation, plugins, warn, packageRoot }),
+    convergeSkills({ claudeDir, devflowDir, curation: switches.curation, plugins, warn, packageRoot }, skillLinks),
   );
+  warnLinkReport(skillLinks, warn);
   const compliance = await attempt<ConvergeComplianceArtifactsResult>(
     'compliance artifacts',
     warn,
@@ -826,7 +833,7 @@ export async function convergeVariantAxes(opts: ConvergeVariantAxesOptions): Pro
     compliance,
     references,
     posting: mergePosting(prompts.posting, referencesPosting(references)),
-    replacedLinks: [...prompts.replacedLinks, ...compliance.replacedLinks],
+    replacedLinks: [...prompts.replacedLinks, ...skillLinks.replacedLinks, ...compliance.replacedLinks],
     refusedFolders: [...prompts.refusedFolders, ...compliance.refusedFolders],
   };
 }

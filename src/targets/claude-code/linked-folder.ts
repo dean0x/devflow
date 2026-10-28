@@ -155,6 +155,18 @@ export function newLinkReport(): LinkReport {
 }
 
 /**
+ * One report from several: the paths of every report in order, each path once. A command that gets
+ * the links of more than one step prints this, so a folder that two steps met is named once.
+ * Returns a new report; the inputs are not changed.
+ */
+export function mergeLinkReports(...reports: readonly LinkReport[]): LinkReport {
+  return {
+    replacedLinks: [...new Set(reports.flatMap(report => report.replacedLinks))],
+    refusedFolders: [...new Set(reports.flatMap(report => report.refusedFolders))],
+  };
+}
+
+/**
  * The line for a link a step replaced. One wording for the install summary and for every converge
  * that reports through a `warn` callback.
  */
@@ -163,12 +175,20 @@ export function replacedLinkMessage(linkPath: string): string {
 }
 
 /**
+ * The first sentence of every refused-folder line: what the folder is. The install and the uninstall
+ * both open with it and then say what they did and what to do.
+ */
+export function refusedFolderStatement(folder: string): string {
+  return `${folder} is a link or not a folder.`;
+}
+
+/**
  * The line for a folder a step wrote nothing at, because it is a link it could not remove or not a
  * folder. One wording for the install summary and for every converge that reports through a `warn`
  * callback.
  */
 export function refusedFolderMessage(folder: string): string {
-  return `${folder} is a link or not a folder. Nothing was written there. Replace it with a real file or folder and run the install again.`;
+  return `${refusedFolderStatement(folder)} Nothing was written there. Replace it with a real file or folder and run the install again.`;
 }
 
 /** Send one line per link in `report` to `warn`: the replaced links first, then the refused folders. */

@@ -26,7 +26,7 @@ import { skillsDir, rulesDir } from '../../core/assets.js';
 import { ALWAYS_PRESENT_REFS, COMPLIANCE_FRAMEWORKS, normalizeFrameworks, type ComplianceFeatureState } from '../../core/compliance.js';
 import { parseComplianceFragment, composeComplianceSkill, composeComplianceRule, type ComplianceFragment } from '../../core/compliance-compose.js';
 import { validateSkillShadow, validateRuleShadow } from './installer.js';
-import { newLinkReport, refuseUnrealFolder, warnLinkReport, writeFileReplacingLink, type LinkReport } from './linked-folder.js';
+import { newLinkReport, refuseUnrealFolder, removeReportingLink, warnLinkReport, writeFileReplacingLink, type LinkReport } from './linked-folder.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -152,7 +152,8 @@ async function loadComplianceFragments(
  * `fragments` is loaded once by convergeComplianceArtifacts and shared with the rule
  * installer — the SKILL.md and the rule compose from the same parsed set.
  *
- * Build under a .tmp sibling, remove old target, rename.
+ * Build under a .tmp sibling, remove old target, rename. An old target that is a link is unlinked,
+ * never followed, so what it points to is left as it was; the link is recorded in `links`.
  * Unexpected I/O failures are reported via warn; never thrown.
  */
 async function installSkillDir(
@@ -161,6 +162,7 @@ async function installSkillDir(
   stampFrameworks: readonly string[],
   fragments: ReadonlyMap<string, ComplianceFragment>,
   warn: (msg: string) => void,
+  links: LinkReport,
 ): Promise<void> {
   const canonicalSrc = path.join(skillsDir(), 'compliance');
   const target = skillTarget(claudeDir);
@@ -223,9 +225,11 @@ async function installSkillDir(
       }
     }
 
-    // Swap: remove old target, rename tmp into place (two calls, not atomic).
-    await fs.rm(target, { recursive: true, force: true });
+    // Swap: remove old target, rename tmp into place (two calls, not atomic). The link is recorded
+    // once the real folder stands in its place, so the report matches its wording.
+    const unlinked = await removeReportingLink(target);
     await fs.rename(tmpTarget, target);
+    links.replacedLinks.push(...unlinked);
   } catch (err) {
     // Clean up tmp on failure (best-effort) so no orphan is left behind.
     await fs.rm(tmpTarget, { recursive: true, force: true }).catch(() => undefined);
@@ -344,11 +348,11 @@ export async function convergeComplianceArtifacts(
   // The skill and the rule are independent operations. An error in
   // installSkillDir is caught internally and reported via trackingWarn, so
   // execution always continues to the rule step.
-  await installSkillDir(claudeDir, devflowDir, stampFrameworks, fragments, trackingWarn);
+  const links = newLinkReport();
+  await installSkillDir(claudeDir, devflowDir, stampFrameworks, fragments, trackingWarn, links);
 
   // The rule folder is proven before the rule is written or removed: a link there sends both into
   // another place. The skill folder is swapped whole above, and a swap never follows a link.
-  const links = newLinkReport();
   const finish = (removedPreexisting: boolean): ConvergeComplianceArtifactsResult => {
     warnLinkReport(links, warn);
     return {

@@ -21,7 +21,8 @@ import * as os from 'os';
 import * as path from 'path';
 import * as p from '@clack/prompts';
 
-import { formatRefusedFoldersSummary, formatReplacedLinksSummary } from '../../src/cli/commands/install-report.js';
+import { reapplyAgentMappingForInit } from '../../src/cli/commands/init.js';
+import { formatLinksSummary, formatRefusedFoldersSummary, formatReplacedLinksSummary } from '../../src/cli/commands/install-report.js';
 import { runRulesEnable } from '../../src/cli/commands/rules.js';
 import { reapplyAgentMapping, saveAgentMapping } from '../../src/core/agent-models.js';
 import { curationOffDir, skillsDir } from '../../src/core/assets.js';
@@ -30,6 +31,7 @@ import { DEVFLOW_PLUGINS } from '../../src/core/plugins.js';
 import { convergeBehaviorRule } from '../../src/targets/claude-code/behavior-install.js';
 import { convergeComplianceArtifacts } from '../../src/targets/claude-code/compliance-install.js';
 import { convergePromptVariants, convergeVariantAxes } from '../../src/targets/claude-code/curation-install.js';
+import { mergeLinkReports } from '../../src/targets/claude-code/linked-folder.js';
 import { convergeTrackerArtifacts } from '../../src/targets/claude-code/tracker-install.js';
 import { restampTrackerAgents } from '../../src/targets/claude-code/tracker-servers.js';
 import { assertTempHome } from '../setup/home-isolation.js';
@@ -388,7 +390,7 @@ describe('a skill folder that is a link is swapped whole and what it points to i
   interface SkillRow {
     readonly name: string;
     readonly folder: () => string;
-    readonly run: () => Promise<unknown>;
+    readonly run: () => Promise<Links>;
     readonly after: 'real folder' | 'nothing';
   }
 
@@ -397,6 +399,8 @@ describe('a skill folder that is a link is swapped whole and what it points to i
     { name: 'the apply-decisions skill, curation on', folder: () => skillFolder(SKILL_DIR), run: () => axes(true), after: 'real folder' },
     { name: 'the apply-decisions skill, curation off', folder: () => skillFolder(SKILL_DIR), run: () => axes(false), after: 'nothing' },
   ];
+
+  const SWAP_ROWS = SKILL_ROWS.filter(row => row.after === 'real folder');
 
   it.each(SKILL_ROWS)('$name', async row => {
     const folder = row.folder();
@@ -413,6 +417,128 @@ describe('a skill folder that is a link is swapped whole and what it points to i
     const stat = await fs.lstat(folder);
     expect(stat.isSymbolicLink()).toBe(false);
     expect(stat.isDirectory()).toBe(true);
+  });
+
+  it.each(SWAP_ROWS)('$name: the replaced link is named in the report and in a warning', async row => {
+    const folder = row.folder();
+    await linkFolder(folder, { 'SKILL.md': 'a skill the user keeps\n' });
+
+    const report = await row.run();
+
+    expect(report.replacedLinks).toEqual([folder]);
+    expect(report.refusedFolders).toEqual([]);
+    const [line] = formatReplacedLinksSummary({ replacedLinks: [folder] });
+    expect(warnings.filter(message => message === line.message), 'the converge names the link once').toHaveLength(1);
+  });
+
+  it.each(SWAP_ROWS)('$name: a real skill folder is swapped and reports no link', async row => {
+    const folder = row.folder();
+    await seedFolder(folder, { 'SKILL.md': 'an older skill\n' });
+
+    const report = await row.run();
+
+    expect((await fs.lstat(folder)).isDirectory()).toBe(true);
+    expect(report.replacedLinks).toEqual([]);
+    expect(warnings.filter(message => message.includes('was a link'))).toEqual([]);
+  });
+
+  it('the apply-decisions skill as a link to nothing is replaced by a real folder and named in the report', async () => {
+    const folder = skillFolder(SKILL_DIR);
+    await fs.mkdir(path.dirname(folder), { recursive: true });
+    await fs.symlink(path.join(tmp, 'gone'), folder, 'dir');
+
+    const report = await axes(true);
+
+    const stat = await fs.lstat(folder);
+    expect(stat.isSymbolicLink(), 'the dangling link is gone').toBe(false);
+    expect(stat.isDirectory(), 'a real folder stands in its place').toBe(true);
+    expect(report.replacedLinks).toEqual([folder]);
+    expect(await exists(path.join(tmp, 'gone')), 'what the link named was not created').toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `devflow init` prints the links of its agent model reapply through the install summary
+// ---------------------------------------------------------------------------
+
+describe('init reapplies the agent model mapping and reports its links without --verbose', () => {
+  let printed: string[];
+
+  beforeEach(() => {
+    printed = [];
+    vi.spyOn(p.log, 'warn').mockImplementation(message => { printed.push(String(message)); });
+    vi.spyOn(p.log, 'info').mockImplementation(message => { printed.push(String(message)); });
+  });
+
+  const reapplyForInit = (verbose: boolean): Promise<Links> =>
+    reapplyAgentMappingForInit({ proxyEnabled: false, claudeDir, devflowDir, verbose });
+
+  it.each([false, true])('a linked agents/devflow, verbose %s: the folder is returned for the summary and printed by no one else', async verbose => {
+    await linkFolder(installedAgents(), { 'code.md': CODE_AGENT });
+    const before = await snapshot(outside);
+
+    const links = await reapplyForInit(verbose);
+
+    expect(await snapshot(outside), 'the place outside keeps every byte, file and mode').toEqual(before);
+    expect(links.refusedFolders).toEqual([installedAgents()]);
+    expect(links.replacedLinks).toEqual([]);
+    expect(printed.filter(line => line.includes(installedAgents())), 'the summary prints the folder, so the reapply does not').toEqual([]);
+  });
+
+  it('a linked agent file: the replaced link is returned for the summary and printed by no one else', async () => {
+    await seedFolder(installedAgents(), {});
+    await linkFile(path.join(installedAgents(), 'code.md'), CODE_AGENT);
+
+    const links = await reapplyForInit(true);
+
+    expect(links.replacedLinks).toEqual([path.join(installedAgents(), 'code.md')]);
+    expect(links.refusedFolders).toEqual([]);
+    expect(printed.filter(line => line.includes('was a link'))).toEqual([]);
+  });
+
+  it('a real agents/devflow: the mapping is applied and no link is returned', async () => {
+    await seedFolder(installedAgents(), { 'code.md': CODE_AGENT });
+
+    const links = await reapplyForInit(false);
+
+    expect(await fs.readFile(path.join(installedAgents(), 'code.md'), 'utf-8')).toContain('model: opus');
+    expect(links).toEqual({ replacedLinks: [], refusedFolders: [] });
+  });
+
+  it('an empty mapping with the proxy off skips the reapply and returns no link', async () => {
+    await saveAgentMapping(devflowDir, { version: 1, agents: {} });
+    await linkFolder(installedAgents(), { 'code.md': CODE_AGENT });
+
+    const links = await reapplyForInit(false);
+
+    expect(links).toEqual({ replacedLinks: [], refusedFolders: [] });
+  });
+
+  it('the install summary and the reapply name a folder once, and name each different folder', () => {
+    const shared = installedAgents();
+    const other = installedCommands();
+    const install = { replacedLinks: [path.join(shared, 'a.md')], refusedFolders: [shared] };
+    const reapplied = { replacedLinks: [path.join(shared, 'a.md'), path.join(shared, 'b.md')], refusedFolders: [shared, other] };
+
+    const merged = mergeLinkReports(install, reapplied);
+
+    expect(merged.refusedFolders).toEqual([shared, other]);
+    expect(merged.replacedLinks).toEqual([path.join(shared, 'a.md'), path.join(shared, 'b.md')]);
+    expect(formatLinksSummary(merged).map(line => line.message)).toHaveLength(4);
+    expect(install.refusedFolders, 'the inputs are not changed').toEqual([shared]);
+  });
+
+  it('the init summary is built from the install report merged with the reapply links', async () => {
+    const source = await fs.readFile(new URL('../../src/cli/commands/init.ts', import.meta.url), 'utf-8');
+
+    expect(
+      source.includes('logSummaryLines(formatLinksSummary(mergeLinkReports(installReport, agentMappingLinks)));'),
+      'init prints the install links and the reapply links through one summary',
+    ).toBe(true);
+    expect(
+      source.includes('agentMappingLinks = await reapplyAgentMappingForInit('),
+      'init takes the reapply links from the reapply step',
+    ).toBe(true);
   });
 });
 
