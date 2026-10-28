@@ -35,12 +35,12 @@ Invariants:
 17. Skills install for selected plugins and their `requires:`. Never install or delete a dormant shadow.
 18. The compliance lens is the union of all layers. A branch never removes a framework; an unreadable file never lowers it (D-LENS-UNION).
 19. The compliance directive goes into a spawn prompt only when the lens is on. No agent body names the compliance skill (D-COMPLIANCE-INJECT).
-20. Enabled compliance, or a repo `compliance` key (never HEAD), makes `required` the evidence floor. The lens never decides evidence. With compliance off no posting step is installed; under `required` each command prints one local `TRACEABILITY: DEGRADED` line.
+20. Enabled compliance, or a repo `compliance` key (never HEAD), makes `required` the evidence floor. The lens never decides evidence. With compliance off no posting step or reference is installed; under `required` each command prints one local `TRACEABILITY: DEGRADED` line.
 21. Flag `--enable`/`--disable` are boolean-only. Narrow with `isEnvBooleanFlag`. Never display `'unset'`.
 22. Disable and uninstall remove only devflow's exact value. Init adopts a user's own value as off (D-ADOPT-RESPECTS-USER).
 23. `TRACKER_MODEL` and the memory hook fallbacks equal their shipped rows.
 24. Where compliance is on, PR-comment publication is visibility-gated and fails closed to a stub (D10). `project.json` only caps it. `required` turns `off` into `stub`.
-25. Where compliance is on, the test-plan comment makes no visibility probe: STUB under `auto`, FULL under `full`, none under `off`.
+25. Where compliance is on, the test-plan comment makes no visibility probe: STUB under `auto`, FULL under `full`, none under `off`. With compliance off, `publish` refuses.
 26. Every posted body passes the scrubber (D11). If it fails, post nothing and emit `TRACEABILITY: DEGRADED (redaction unavailable)`.
 27. File sinks chain the scrubber with `&&`. Tool-call sinks use `--emit` and check the byte count [DR-06].
 28. Review-cycle convergence warnings never block.
@@ -60,7 +60,7 @@ Invariants:
 42. The Tracker agent claims first, then writes its conventions file once or not at all, scrub-gated.
 43. The manifest keeps the curation switch in `curation` and `learning`. Every write sets both. False wins.
 44. When git tracks the curation or memory folder, or does not answer, that feature reads and writes no file there.
-45. The machine switch alone picks the posting variant; a repo key never restores it, and the lens stays the run-time union. One converge, `convergeVariantAxes`, serves init, `curation` and `compliance`. With compliance off it fails closed unless the prompts are proved free of posting.
+45. The machine switch alone picks the posting variant; a repo key never restores it. One converge, `convergeVariantAxes`, serves init, `curation` and `compliance`. With compliance off it fails closed unless the installed files are proved free of posting.
 
 Descriptions of these rules: `docs/reference/architecture.md`. The rules here bind; the doc explains them.
 
