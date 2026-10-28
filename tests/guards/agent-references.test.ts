@@ -29,7 +29,7 @@ import { variantOffRelPath, type OffVariantKey } from '../../src/core/curation-v
 const SYNTHESIZE_BODY_MAX_BYTES = 4_070
 
 /** The largest single Synthesize mode reference, in bytes. Registered as `synthesize-mode-ref-max`; lowered, never raised. */
-const SYNTHESIZE_MODE_REF_MAX_BYTES = 3_805
+const SYNTHESIZE_MODE_REF_MAX_BYTES = 3_797
 
 /** The `/code-review` gate-level reference, in bytes. Registered as `code-review-levels-ref-max`; lowered, never raised. */
 const CODE_REVIEW_LEVELS_REF_MAX_BYTES = 1_349
@@ -59,7 +59,7 @@ const TRIAGE_BODY_COMPLIANCE_OFF_MAX_BYTES = 11_752
 const TRIAGE_BODY_BOTH_OFF_MAX_BYTES = 10_968
 
 /** The Validate passed-alone re-run reference, in bytes. Registered as `validate-passed-alone-ref-max`; lowered, never raised. */
-const VALIDATE_PASSED_ALONE_REF_MAX_BYTES = 3_424
+const VALIDATE_PASSED_ALONE_REF_MAX_BYTES = 3_421
 
 /** The Curate agent body, in bytes. Registered as `curate-body-max`; lowered, never raised. */
 const CURATE_BODY_MAX_BYTES = 16_710
