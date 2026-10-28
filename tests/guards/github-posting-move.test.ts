@@ -63,8 +63,8 @@ function sliceBlock(text: string, block: Moved): string | null {
  * tests/tracker/byte-budget.test.ts.
  */
 const WHOLE_FILE = {
-  bytes: 4551,
-  remainder: { bytes: 774, sha256: '24edfda60cbc94003ddae957bc870ceab30c2e0dbd9676ca58ab5621d0746f8e' },
+  bytes: 4178,
+  remainder: { bytes: 401, sha256: '388d82e50ceb053c29b679297c9355332b493fd1f20d371af4c7ee00db5909dd' },
 } as const
 
 /** Every line outside the pinned blocks, joined as the file joins them. */

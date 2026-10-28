@@ -499,9 +499,9 @@ const GITHUB_API_MD_CHARS = 17_518;
  * tests/guards/github-posting-move.test.ts.
  *
  * Measured by `.length` of the UTF-8 decoded file, the unit the model counts in; the file
- * is 4_551 bytes because two of its characters take more than one.
+ * is 4_178 bytes because two of its characters take more than one.
  */
-const GITHUB_POSTING_MD_CHARS = 4_549;
+const GITHUB_POSTING_MD_CHARS = 4_176;
 
 // ---------------------------------------------------------------------------
 // 1. The four-shape table — RECORDED, not asserted pass/fail

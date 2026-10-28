@@ -1,8 +1,8 @@
 # GitHub Posting Recipes
 
-The recipes that post a body to GitHub: PR comments, a PR review, and a reply to a review thread or its resolution. A machine with compliance on installs this file. A machine with compliance off does not. `github-api.md` holds the rest and installs in every state.
+A machine with compliance on installs this file. A machine with compliance off does not.
 
-Each recipe follows D11 as `github-api.md` states it: compose the body to the RAW file, scrub it with `redact-secrets.cjs`, and post the SCRUBBED file, chained with `&&`. The temp files these recipes name, and the trap that removes them, are in `github-api.md` under "The D11 temp files, and their removal".
+The temp files these recipes name, and the trap that removes them, are in `github-api.md` under "The D11 temp files, and their removal".
 
 ---
 
@@ -100,7 +100,7 @@ EOF
 
 ## Review Threads (GraphQL)
 
-The fetch recipe is in `github-api.md`. These two are the writes.
+The fetch recipe is in `github-api.md`.
 
 ### Reply to a Review Thread
 
