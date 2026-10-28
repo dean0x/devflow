@@ -8,6 +8,9 @@
  *     length and SHA-256 (a digest, because a guard that shells out to `git show main:` reads nothing on
  *     a shallow clone). A deliberate later edit of a block updates its digest in the same commit.
  *   - One owner. The old file holds no first line of a moved block, so a block is moved and not copied.
+ *   - Nothing else. The new file is excluded from the PR-host byte budget as a verbatim move, so its
+ *     whole length and the text outside the blocks (header and headings) are pinned too: a line added
+ *     anywhere fails here, not silently through the exclusion.
  *
  * Every guard has a named collector, a non-empty-corpus assertion and a known-bad probe run through the
  * same collector.
@@ -50,7 +53,45 @@ function sliceBlock(text: string, block: Moved): string | null {
   return at < 0 ? null : lines.slice(at, at + block.lines).join('\n')
 }
 
+/**
+ * The whole-file pin. `github-posting.md` is excluded from the PR-host byte budget
+ * (LOADED_SET_WRITTEN_EXCLUSIONS) on the ground that it is the verbatim move of text `github-api.md`
+ * held under the same exclusion. That holds only while the file stays that move, so the file is pinned
+ * whole: its UTF-8 length, and the text outside the five blocks (the header and the headings between
+ * blocks) by length and SHA-256. A line added anywhere, in a block, in the header or after the last
+ * block, moves one of these. A deliberate edit re-pins them in the same commit, with the char pin in
+ * tests/tracker/byte-budget.test.ts.
+ */
+const WHOLE_FILE = {
+  bytes: 4551,
+  remainder: { bytes: 774, sha256: '24edfda60cbc94003ddae957bc870ceab30c2e0dbd9676ca58ab5621d0746f8e' },
+} as const
+
+/** Every line outside the pinned blocks, joined as the file joins them. */
+function remainderOf(text: string, blocks: readonly Moved[] = MOVED): string {
+  const lines = text.split('\n')
+  const inBlock = new Set<number>()
+  for (const block of blocks) {
+    const at = lines.indexOf(block.firstLine)
+    if (at < 0) continue
+    for (let i = at; i < Math.min(at + block.lines, lines.length); i++) inBlock.add(i)
+  }
+  return lines.filter((_, i) => !inBlock.has(i)).join('\n')
+}
+
 const sha256 = (text: string): string => createHash('sha256').update(text, 'utf-8').digest('hex')
+
+/** Named collector: ways the file as a whole differs from the header plus the pinned blocks. */
+function collectWholeFileDefects(text: string, blocks: readonly Moved[] = MOVED): string[] {
+  const defects: string[] = []
+  const bytes = Buffer.byteLength(text, 'utf-8')
+  if (bytes !== WHOLE_FILE.bytes) defects.push(`file length ${bytes}, pinned ${WHOLE_FILE.bytes}`)
+  const rest = remainderOf(text, blocks)
+  const restBytes = Buffer.byteLength(rest, 'utf-8')
+  if (restBytes !== WHOLE_FILE.remainder.bytes) defects.push(`text outside the blocks: length ${restBytes}, pinned ${WHOLE_FILE.remainder.bytes}`)
+  else if (sha256(rest) !== WHOLE_FILE.remainder.sha256) defects.push('text outside the blocks: the digest differs')
+  return defects
+}
 
 /** Named collector: moved blocks the new file does not hold byte for byte. */
 function collectMoveDefects(posting: string, blocks: readonly Moved[] = MOVED): string[] {
@@ -84,6 +125,26 @@ describe('github-posting.md holds the moved posting recipes byte for byte (AC-43
 
   it('github-api.md holds no moved block: the recipes have one owner', () => {
     expect(collectCopiedBlocks(api)).toEqual([])
+  })
+
+  it('the file holds nothing but the header and the pinned blocks, by length and SHA-256', () => {
+    expect(collectWholeFileDefects(posting)).toEqual([])
+  })
+
+  it('known-bad probe: a line appended, a line added in the header and a line added in a block are each reported', () => {
+    expect(collectWholeFileDefects(`${posting}One more line.\n`)).toEqual([
+      expect.stringContaining('file length'),
+      expect.stringContaining('text outside the blocks'),
+    ])
+    expect(collectWholeFileDefects(posting.replace('# GitHub Posting Recipes\n', '# GitHub Posting Recipes\nNew line.\n'))).toEqual([
+      expect.stringContaining('file length'),
+      expect.stringContaining('text outside the blocks'),
+    ])
+    expect(collectWholeFileDefects(posting.replace('### PR Review\n', '### PR Review\nNew line.\n'))).toEqual([
+      expect.stringContaining('file length'),
+      expect.stringContaining('text outside the blocks'),
+    ])
+    expect(collectWholeFileDefects(posting)).toEqual([])
   })
 
   it('known-bad probe: an edited block, a lost first line and a copy left behind are each reported', () => {

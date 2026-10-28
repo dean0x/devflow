@@ -99,6 +99,15 @@ export const githubApiMd = measureRequired(
   'references/github-api.md  (excluded from the gate — pinned, not budgeted)',
   path.join(skillsDir(), 'git', 'references', 'github-api.md'),
 );
+/**
+ * The second written exclusion, measured at its source path for the same reason.
+ * It holds the posting recipes that left `github-api.md` verbatim, so the bytes
+ * `resolve-review-threads` loads did not change when they moved.
+ */
+export const githubPostingMd = measureRequired(
+  'references/github-posting.md  (excluded from the gate — pinned, not budgeted)',
+  path.join(skillsDir(), 'git', 'references', 'github-posting.md'),
+);
 
 /** The always-preloaded set: what every Git spawn pays before it does anything. */
 export const PRELOADED = gitMd.chars + skillGit.chars + skillWorktree.chars;
@@ -569,22 +578,33 @@ export function worstCaseNonTrackerLoad(): OpMax {
  * charge, DECLARED as a list rather than filtered inline, so the exclusion is
  * something a reviewer can read and disagree with.
  *
- * `references/github-api.md` is the only member. It is GitHub CLI, GraphQL and
- * rate-limit recipe prose that `fetch-review-threads` and `resolve-review-threads`
- * loaded long before any split existed. #326 moved the step that NAMES it out of
- * the agent and into `references/pr/{op}.md`, which changed which file spells the
- * name and nothing at all about what a spawn pays. Charging it to the PR-host row
- * would make that row a measure of a file this work neither wrote nor edited, and
- * would bury what the row does measure — the `pr/` bodies, none of which reaches
- * 4_500 ch — under a term four times their size.
+ * Two members.
+ *
+ * `references/github-api.md` is GitHub CLI, GraphQL and rate-limit recipe prose
+ * that `fetch-review-threads` and `resolve-review-threads` loaded long before any
+ * split existed. #326 moved the step that NAMES it out of the agent and into
+ * `references/pr/{op}.md`, which changed which file spells the name and nothing at
+ * all about what a spawn pays. Charging it to the PR-host row would make that row a
+ * measure of a file this work neither wrote nor edited, and would bury what the row
+ * does measure — the `pr/` bodies, none of which reaches 4_500 ch — under a term
+ * four times their size.
+ *
+ * `references/github-posting.md` is the verbatim move of text `github-api.md` held
+ * under that same exclusion: the comment, review, thread-reply and resolve recipes.
+ * Moving them out so a compliance-off machine does not install them changed which
+ * file holds the text and nothing about what the one op that loads both
+ * (`resolve-review-threads`) pays. Charging it would turn a move into a budget
+ * breach, so it carries the reason of the file it came from.
  *
  * What the exclusion owes in return: the excluded term is RECORDED, not
  * dropped. Shape `2c-ex` of the four-shape table prints the same maximum with
- * this file charged, and the file's own size is pinned by equality as
- * GITHUB_API_MD_CHARS in tests/tracker/byte-budget.test.ts — so an exclusion can
+ * these files charged, and each file's own size is pinned by equality
+ * (GITHUB_API_MD_CHARS and GITHUB_POSTING_MD_CHARS in
+ * tests/tracker/byte-budget.test.ts; github-posting.md also by block, remainder
+ * and byte count in tests/guards/github-posting-move.test.ts) — so an exclusion can
  * never become a place a reference grows unwatched.
  */
-export const LOADED_SET_WRITTEN_EXCLUSIONS: readonly string[] = ['github-api.md'];
+export const LOADED_SET_WRITTEN_EXCLUSIONS: readonly string[] = ['github-api.md', 'github-posting.md'];
 
 /**
  * `max over every operation, under every provider, of its one-spawn load` — the largest single

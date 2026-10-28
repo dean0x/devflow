@@ -69,6 +69,7 @@ import {
   contractTermRels,
   dispatchRowOp,
   githubApiMd,
+  githubPostingMd,
   gitMd,
   largestProviderReference,
   largestTrackerReference,
@@ -368,15 +369,16 @@ const BUDGET_LOADED_SET_LINEAR = 52_509;
  * (D-LOADED-SET-ONE-SPAWN): an op's PR-host mechanics file is already inside its
  * one-spawn load, so a separate largest-file term would count the same document twice.
  *
- * THE ONE WRITTEN EXCLUSION is `references/github-api.md`, declared as
- * LOADED_SET_WRITTEN_EXCLUSIONS in tests/tracker/budget-model.ts with the reason
- * beside it: it is a file two of these ops loaded long before any split existed,
- * this work moved the line that names it without changing a byte a spawn pays, and
- * charging 17_518 ch of it here would bury the `pr/` bodies this row exists to
- * measure. What the exclusion owes in return is shape `2c-ex` of the
- * four-shape table — the same maximum, RECORDED with the file charged — plus the
- * equality pin GITHUB_API_MD_CHARS, which is what stops an excluded term growing
- * unwatched.
+ * THE WRITTEN EXCLUSIONS are `references/github-api.md` and `references/github-posting.md`,
+ * declared as LOADED_SET_WRITTEN_EXCLUSIONS in tests/tracker/budget-model.ts with the
+ * reason beside them: github-api.md is a file two of these ops loaded long before any
+ * split existed, this work moved the line that names it without changing a byte a spawn
+ * pays, and charging 17_518 ch of it here would bury the `pr/` bodies this row exists to
+ * measure. github-posting.md is the verbatim move of text github-api.md held under that
+ * same exclusion, loaded by `resolve-review-threads` alone. What the exclusion owes in
+ * return is shape `2c-ex` of the four-shape table — the same maximum, RECORDED with the
+ * files charged — plus the equality pins GITHUB_API_MD_CHARS and GITHUB_POSTING_MD_CHARS,
+ * which is what stops an excluded term growing unwatched.
  *
  * Derived from a measured 58_226 (`post-review-summary`: its PR-host body plus
  * references/publication-gate.md, still the worst op at 4_540) plus the 80 ch
@@ -486,6 +488,20 @@ const PREAMBLE_MAX_LINES = 34;
  *   node -e "console.log(require('fs').readFileSync('src/assets/skills/git/references/github-api.md','utf-8').length)"
  */
 const GITHUB_API_MD_CHARS = 17_518;
+
+/**
+ * EQUALITY BASELINE, not a budget — `src/assets/skills/git/references/github-posting.md`,
+ * the second written exclusion. Same rules as GITHUB_API_MD_CHARS above: `toBe`, never
+ * `<=`, and the only commit that may change it is the commit that edits the file's
+ * characters. The file is the verbatim move of text `github-api.md` held, so it starts
+ * with exactly the posting recipes and nothing else may join it unseen. The file's bytes,
+ * its moved blocks and the text between them are pinned in
+ * tests/guards/github-posting-move.test.ts.
+ *
+ * Measured by `.length` of the UTF-8 decoded file, the unit the model counts in; the file
+ * is 4_551 bytes because two of its characters take more than one.
+ */
+const GITHUB_POSTING_MD_CHARS = 4_549;
 
 // ---------------------------------------------------------------------------
 // 1. The four-shape table — RECORDED, not asserted pass/fail
@@ -632,7 +648,9 @@ describe('byte budget: four-shape table (recorded)', () => {
       // whole of the NON-tracker row below, but that row is labelled by OP: the file
       // it costs is named here so the excluded term is attributable to the bytes
       // someone edits, and so its equality pin (GITHUB_API_MD_CHARS) has a visible row.
-      ...[gitMd, skillGit, skillWorktree, learnConventions, publicationGate, decisionMarkers, trustRule, githubApiMd].map(m => ({
+      // githubPostingMd is the second written exclusion and gets its row for the same
+      // reason (GITHUB_POSTING_MD_CHARS).
+      ...[gitMd, skillGit, skillWorktree, learnConventions, publicationGate, decisionMarkers, trustRule, githubApiMd, githubPostingMd].map(m => ({
         row: m.label + (m.present ? '' : '  (absent — recorded as 0)'),
         chars: m.chars,
         bytes: m.bytes,
@@ -912,6 +930,7 @@ describe('byte budget: component and loaded-set pins (AC-2.5)', () => {
     // on the list cannot ride through unexercised.
     const REACHED_BY: Readonly<Record<string, readonly string[]>> = {
       'github-api.md': ['fetch-review-threads', 'resolve-review-threads'],
+      'github-posting.md': ['resolve-review-threads'],
     };
     expect(
       [...LOADED_SET_WRITTEN_EXCLUSIONS].sort(),
@@ -2018,6 +2037,23 @@ describe('byte budget: written exclusions', () => {
       `github-api.md, re-measure and re-pin GITHUB_API_MD_CHARS here; if it does not, the ` +
       `file drifted and the change belongs in the commit that made it.`,
     ).toBe(GITHUB_API_MD_CHARS);
+  });
+
+  it(`references/github-posting.md is exactly ${GITHUB_POSTING_MD_CHARS} ch (the second excluded term's anchor)`, () => {
+    // The file is excluded from the PR-host gate because it is the verbatim move of text
+    // that github-api.md held under the same exclusion. The exclusion is only honest while
+    // the file stays that move: a line added here would ride through the gate unpriced.
+    // EQUALITY, so any growth goes red. Re-pin in the SAME commit that edits the file's
+    // characters, together with the block and remainder pins in
+    // tests/guards/github-posting-move.test.ts.
+    expect(
+      githubPostingMd.chars,
+      `references/github-posting.md is ${githubPostingMd.chars} ch, pinned at ${GITHUB_POSTING_MD_CHARS} ` +
+      `(drift ${githubPostingMd.chars - GITHUB_POSTING_MD_CHARS}). This file is EXCLUDED from ` +
+      `BUDGET_LOADED_SET_PR_HOST, so nothing else notices it growing. If this commit edits ` +
+      `github-posting.md, re-measure and re-pin GITHUB_POSTING_MD_CHARS here; if it does not, ` +
+      `the file drifted and the change belongs in the commit that made it.`,
+    ).toBe(GITHUB_POSTING_MD_CHARS);
   });
 });
 
