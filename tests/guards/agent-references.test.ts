@@ -52,7 +52,7 @@ const TRIAGE_BODY_MAX_BYTES = 11_813
 const TRIAGE_BODY_CURATION_OFF_MAX_BYTES = 11_029
 
 /** The Validate passed-alone re-run reference, in bytes. Registered as `validate-passed-alone-ref-max`; lowered, never raised. */
-const VALIDATE_PASSED_ALONE_REF_MAX_BYTES = 3_421
+const VALIDATE_PASSED_ALONE_REF_MAX_BYTES = 3_419
 
 /** The Curate agent body, in bytes. Registered as `curate-body-max`; lowered, never raised. */
 const CURATE_BODY_MAX_BYTES = 16_710

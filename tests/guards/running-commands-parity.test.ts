@@ -37,7 +37,7 @@ import { ROOT, collectUnfencedH2, requireDistFile, resolveAgentSource } from '..
 const BLOCK_HEADING = '## Running commands'
 
 /** The block's byte target. validate.md's retired section was 1,488 bytes. */
-const BLOCK_MAX_BYTES = 1400
+const BLOCK_MAX_BYTES = 1340
 
 /** The five bodies that carry the block: the three Code variants share it from one partial (D-CODE-VARIANTS). */
 const CARRIERS = ['code', 'fix', 'refactor', 'validate', 'test'] as const
@@ -276,7 +276,7 @@ describe('D-FOREGROUND-RUN: the Running commands block', () => {
       'test: expected exactly one "## Running commands" section, found 2',
     )
     const padded = real.code.replace(code, `${code}\n\n${'x'.repeat(BLOCK_MAX_BYTES)}`)
-    expect(collectParityDefects({ ...real, code: padded }).some(d => d.includes('over the 1400-byte target'))).toBe(true)
+    expect(collectParityDefects({ ...real, code: padded }).some(d => d.includes('over the 1340-byte target'))).toBe(true)
   })
 
   it('known-bad probe: a block with a dropped rule is reported by element', () => {
