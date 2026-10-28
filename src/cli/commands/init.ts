@@ -16,6 +16,7 @@ import { realGlobalTuningMoveIO, realProjectLedgerMoveIO } from './curation-move
 import { describeEchoedValue } from '../../core/echo-value.js';
 import { installViaFileCopy, installScripts, type InstallReport } from '../../targets/claude-code/installer.js';
 import { formatOverlaySummary, formatRefusedFoldersSummary, formatReplacedLinksSummary, formatSkillScopeSummary, formatTrackerAssetSummary, isPluginListUnchanged, type SummaryLine } from './install-report.js';
+import { sweepLegacyDevflowFiles } from './legacy-sweep.js';
 import { convergeTrackerArtifacts, type ConvergeTrackerArtifactsResult, type TrackerAgentState } from '../../targets/claude-code/tracker-install.js';
 import {
   installSettings,
@@ -34,7 +35,7 @@ import {
   stripUserSecurityDenyList,
   type SecurityMode,
 } from '../../targets/claude-code/post-install.js';
-import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, registeredPluginNames, LEGACY_COMMAND_NAMES, LEGACY_RULE_NAMES, buildAssetMaps, buildScopedSkillsMap, buildRulesMap, partitionSelectablePlugins, WORKFLOW_ORDER, parsePluginSelection, resolveFeatureRedirect, FEATURE_OWNED_SKILLS, prefixSkillName, type PluginDefinition } from '../../core/plugins.js';
+import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, registeredPluginNames, buildAssetMaps, buildScopedSkillsMap, buildRulesMap, partitionSelectablePlugins, WORKFLOW_ORDER, parsePluginSelection, resolveFeatureRedirect, FEATURE_OWNED_SKILLS, prefixSkillName, type PluginDefinition } from '../../core/plugins.js';
 import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
 import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafeDelete, type SafeDeleteInfo } from '../../core/safe-delete.js';
 import { generateSafeDeleteBlock, installToProfile, removeFromProfile, getInstalledVersion, SAFE_DELETE_BLOCK_VERSION } from '../../core/safe-delete-install.js';
@@ -2298,46 +2299,11 @@ export const initCommand = new Command('init')
       p.log.info(`Cleaned up ${staleRemoved} legacy skill(s)`);
     }
 
-    // Clean up stale commands from previous installations (e.g., /review → /code-review)
-    const commandsDir = path.join(claudeDir, 'commands', 'devflow');
-    let staleCommandsRemoved = 0;
-    for (const legacy of LEGACY_COMMAND_NAMES) {
-      for (const suffix of ['.md']) {
-        const legacyPath = path.join(commandsDir, `${legacy}${suffix}`);
-        try {
-          await fs.rm(legacyPath);
-          staleCommandsRemoved++;
-        } catch {
-          // Doesn't exist — expected for most entries
-        }
-      }
-    }
-    // Sweep orphaned *-teams.md workflow command variants left by the Agent Teams
-    // refactor. None are ever re-installed, so a blanket sweep is safe on any
-    // install type (the full-install dir wipe only covers full installs).
-    try {
-      for (const f of await fs.readdir(commandsDir)) {
-        if (f.endsWith('-teams.md')) {
-          try { await fs.rm(path.join(commandsDir, f)); staleCommandsRemoved++; }
-          catch { /* already gone */ }
-        }
-      }
-    } catch { /* commands dir absent — nothing to sweep */ }
+    // Clean up stale commands (e.g., /review → /code-review) and rules from previous installations.
+    // A folder the install refused, or that is a link, is not swept: nothing is read or removed through it.
+    const { staleCommandsRemoved, staleRulesRemoved } = await sweepLegacyDevflowFiles({ claudeDir, report: installReport });
     if (staleCommandsRemoved > 0 && verbose) {
       p.log.info(`Cleaned up ${staleCommandsRemoved} legacy command(s)`);
-    }
-
-    // Clean up stale rules from previous installations
-    const rulesDir = path.join(claudeDir, 'rules', 'devflow');
-    let staleRulesRemoved = 0;
-    for (const legacy of LEGACY_RULE_NAMES) {
-      const legacyPath = path.join(rulesDir, `${legacy}.md`);
-      try {
-        await fs.rm(legacyPath);
-        staleRulesRemoved++;
-      } catch {
-        // Doesn't exist — expected for most entries
-      }
     }
     if (staleRulesRemoved > 0 && verbose) {
       p.log.info(`Cleaned up ${staleRulesRemoved} legacy rule(s)`);

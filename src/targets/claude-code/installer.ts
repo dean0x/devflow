@@ -16,6 +16,7 @@ import { sweepOrphanedAssets, mdFileName, mdEntryName, type SweepResult } from '
 import { generatedReferenceManifest, installedReferenceManifest, PR_HOST_DESTINATION_ROOT, SKILL_REFS_SKILL_NAME, TRACKER_DESTINATION_ROOT } from '../../core/mds-variants.js';
 import { sweepOrphanedReferences, MAX_REFERENCE_SWEEP_DEPTH } from '../../core/reference-sweep.js';
 import { removeComplianceOffFiles } from './compliance-off-files.js';
+import { clearLinkForWrite, directoryState, refuseUnrealFolder, removeReportingLink, unlinkLinkAt, type LinkReport } from './linked-folder.js';
 import { TRACKER_AGENT_NAME } from './tracker-install.js';
 import { isTrackerStampedAgent } from './tracker-servers.js';
 import { stampAgentTools } from '../../core/agent-frontmatter.js';
@@ -103,21 +104,23 @@ export interface InstallReport {
    */
   overlayFailures: OverlayFailure[];
   /**
-   * Paths of links a full install's pre-clean found where it expects one of its own folders and
-   * replaced: a command, rule, agent or skill folder, or a folder inside the references skill.
-   * The link was unlinked; the folder it pointed to was left as it was, and the install then
-   * wrote a real folder in its place. Reported because a replaced link and an untouched one look
-   * the same from the filesystem. Empty on a partial install, which has no pre-clean.
+   * Paths of links the install found where it writes one of its own folders or files and replaced:
+   * a command, rule, agent or skill folder, a folder inside the references skill, or a file or folder
+   * below one of them. The link was unlinked; what it pointed to was left as it was, and the install
+   * then wrote a real folder or file in its place. Reported because a replaced link and an untouched
+   * one look the same from the filesystem. A partial install has no pre-clean, so it lists only a
+   * link at a file or folder it writes.
    */
   replacedLinks: string[];
   /**
-   * Paths of folders this run would have written into that are a link or not a folder: the commands,
-   * rules or agents folder, a skill folder, or the references folder of `devflow:git`. `mkdir` and
-   * `readdir` follow a link, so a write there would change another directory. The run wrote nothing
-   * into such a folder and left the entry and its target as they were. A partial install has no
-   * pre-clean to replace a link, so it lists every one it meets. A full install lists only a link its
-   * pre-clean could not remove. Reported because a folder left alone looks the same on disk as a
-   * folder the run refreshed.
+   * Paths this run would have written into or over that are a link it could not remove, or not a
+   * folder: the commands, rules or agents folder, a skill folder, the references folder of
+   * `devflow:git`, or a command, rule, agent or skill file or folder below one of them. `mkdir` and
+   * `readdir` follow a link, so a write there would change another place. The run wrote nothing at
+   * such a path and left the entry and its target as they were. A partial install has no
+   * pre-clean to replace a link at a folder, so it lists every one it meets. A full install lists only a
+   * link its pre-clean could not remove. Reported because a path left alone looks the same on disk as
+   * one the run refreshed.
    */
   refusedFolders: string[];
   /**
@@ -225,19 +228,28 @@ export async function validateRuleShadow(shadowFile: string): Promise<RuleShadow
  * copy failures (EACCES, ENOSPC, etc.) are still isolated
  * (one bad copy does not abort the whole batch).
  * Invalid shadows still warn-and-install-source.
+ *
+ * A link at the target file is unlinked and replaced by a real file, never written through, and
+ * recorded in `links` when given. A link that cannot be removed is recorded as refused and the
+ * outcome is `skipped`.
  */
 export async function installRuleFile(
   ruleName: string,
   devflowDir: string,
   rulesTarget: string,
+  links?: LinkReport,
 ): Promise<RuleInstallOutcome> {
   const shadowFile = path.join(devflowDir, 'rules', mdFileName(ruleName));
   const targetFile = path.join(rulesTarget, mdFileName(ruleName));
   const ruleSource = path.join(rulesDir(), mdFileName(ruleName));
 
+  // Asked once, so a link that cannot be removed is recorded once.
+  let writable: boolean | undefined;
+  const mayWrite = async (): Promise<boolean> => (writable ??= await clearLinkForWrite(targetFile, links));
+
   const shadowState = await validateRuleShadow(shadowFile);
 
-  if (shadowState === 'valid') {
+  if (shadowState === 'valid' && await mayWrite()) {
     try {
       await fs.copyFile(shadowFile, targetFile);
       return 'shadow';
@@ -269,6 +281,7 @@ export async function installRuleFile(
 
   // Copy is isolated: a copy failure degrades to 'skipped' so one
   // bad rule does not abort the entire installAllRules Promise.all batch.
+  if (!(await mayWrite())) return 'skipped';
   try {
     await fs.copyFile(ruleSource, targetFile);
     return invalidShadowOutcome ?? 'source';
@@ -291,10 +304,11 @@ export async function installAllRules(
   rulesMap: Map<string, string>,
   devflowDir: string,
   rulesTarget: string,
+  links?: LinkReport,
 ): Promise<{ ruleName: string; outcome: RuleInstallOutcome }[]> {
   return Promise.all(
     [...rulesMap.keys()].map(async (ruleName) => {
-      const outcome = await installRuleFile(ruleName, devflowDir, rulesTarget);
+      const outcome = await installRuleFile(ruleName, devflowDir, rulesTarget, links);
       return { ruleName, outcome };
     }),
   );
@@ -320,12 +334,21 @@ export interface Spinner {
 /**
  * Recursively copy a directory tree. `exclude` holds absolute SOURCE paths that the copy
  * skips (a file, or a directory with everything below it); omitted, everything is copied.
+ *
+ * `links` is given when `dest` is inside a Devflow install folder. The copy then checks, with
+ * `lstat`, each folder and file it is about to write, and never writes through a link: the link is
+ * unlinked and a real folder or file is written in its place (recorded in `links.replacedLinks`),
+ * and a link that cannot be removed is skipped with everything below it (recorded in
+ * `links.refusedFolders`). Omitted, the copy is the plain one, for a `dest` that is the user's own
+ * content.
  */
 export async function copyDirectory(
   src: string,
   dest: string,
   exclude?: ReadonlySet<string>,
+  links?: LinkReport,
 ): Promise<void> {
+  if (links !== undefined && !(await clearLinkForWrite(dest, links))) return;
   await fs.mkdir(dest, { recursive: true });
   const entries = await fs.readdir(src, { withFileTypes: true });
 
@@ -335,8 +358,9 @@ export async function copyDirectory(
     if (exclude?.has(srcPath)) continue;
 
     if (entry.isDirectory()) {
-      await copyDirectory(srcPath, destPath, exclude);
+      await copyDirectory(srcPath, destPath, exclude, links);
     } else {
+      if (links !== undefined && !(await clearLinkForWrite(destPath, links))) continue;
       await fs.copyFile(srcPath, destPath);
     }
   }
@@ -1502,56 +1526,6 @@ export async function overlayGeneratedReferences(opts: {
 /** The directory inside an installed skill that the reference overlay converges. */
 const SKILL_REFERENCES_DIRNAME = 'references';
 
-/** What stands at `dir`: nothing, a real directory, a link, or anything else (a file, an entry that cannot be inspected). */
-type DirectoryState = 'absent' | 'real' | 'link' | 'unusable';
-
-/** Classify `dir` with `lstat`, so a link is seen as a link and never as the directory it points to. */
-async function directoryState(dir: string): Promise<DirectoryState> {
-  try {
-    const stat = await fs.lstat(dir);
-    if (stat.isSymbolicLink()) return 'link';
-    return stat.isDirectory() ? 'real' : 'unusable';
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === 'ENOENT' ? 'absent' : 'unusable';
-  }
-}
-
-/** What {@link unlinkLinkAt} did at a path. */
-type LinkUnlinkOutcome =
-  /** A link stood there and is gone. Its target was not touched. */
-  | 'unlinked'
-  /** No link stands there (absent, a real directory, a file). Nothing was changed. */
-  | 'no-link'
-  /** A link stands there and could not be removed. It is still in place. */
-  | 'stuck';
-
-/**
- * Remove the link at `entry` with `unlink`: the link, never what it points to.
- *
- * The one place the pre-clean replaces a link. `readdir` and `mkdir` follow a link, so a pre-clean
- * that emptied through one would empty another directory. Never throws; a link that cannot be
- * removed is `stuck`, and the caller leaves the path alone.
- */
-async function unlinkLinkAt(entry: string): Promise<LinkUnlinkOutcome> {
-  if ((await directoryState(entry)) !== 'link') return 'no-link';
-  try {
-    await fs.unlink(entry);
-    return 'unlinked';
-  } catch {
-    return 'stuck';
-  }
-}
-
-/**
- * Remove `target` whole. A link there is unlinked instead and returned, so the caller can report it;
- * the folder it points to is left as it is.
- */
-async function removeReportingLink(target: string): Promise<string[]> {
-  const outcome = await unlinkLinkAt(target);
-  if (outcome === 'no-link') await fs.rm(target, { recursive: true, force: true });
-  return outcome === 'unlinked' ? [target] : [];
-}
-
 /** Whether the reference overlay may run below an installed `devflow:git` skill directory. */
 export type ReferencesHostState =
   /** No skill directory is installed there. */
@@ -1584,24 +1558,6 @@ export async function referencesHostState(gitSkillDir: string): Promise<Referenc
   return references === 'absent' || references === 'real'
     ? { kind: 'ready' }
     : { kind: 'refused', path: referencesDir };
-}
-
-/**
- * Prove, with {@link directoryState}, that the run may write into `dir`, and record the folder in
- * `report.refusedFolders` when it may not. Returns true for a refused folder, so the caller skips
- * every write into it.
- *
- * The answer for each folder a run writes into besides the `devflow:git` references, which
- * {@link referencesHostState} answers: the commands, rules and agents folders and every other skill
- * folder. An absent folder is fine, since the install creates it. A link is refused and never
- * repaired, because the installer did not create it. A full install's pre-clean has already
- * replaced the links it could, so this refuses only what is left. Never throws.
- */
-async function refuseUnrealFolder(report: InstallReport, dir: string): Promise<boolean> {
-  const state = await directoryState(dir);
-  if (state !== 'link' && state !== 'unusable') return false;
-  report.refusedFolders.push(dir);
-  return true;
 }
 
 /**
@@ -2181,6 +2137,11 @@ export interface CommandsAndAgentsOptions {
    * into a skipped folder. Omitted, both folders are written.
    */
   skip?: { readonly commands?: boolean; readonly agents?: boolean };
+  /**
+   * Where the copy records a file link it replaced or could not remove at a command or agent file.
+   * Such a link is never written through, whether or not this is given.
+   */
+  links?: LinkReport;
   warn: (msg: string) => void;
 }
 
@@ -2371,7 +2332,8 @@ export async function installCommandsAndAgents(opts: CommandsAndAgentsOptions): 
           `Ensure build:mds ran successfully before install.`,
         );
       }
-      await fs.copyFile(srcFile, path.join(commandsTarget, mdFileName(name)));
+      const commandTarget = path.join(commandsTarget, mdFileName(name));
+      if (await clearLinkForWrite(commandTarget, opts.links)) await fs.copyFile(srcFile, commandTarget);
     }
   }
 
@@ -2399,6 +2361,7 @@ export async function installCommandsAndAgents(opts: CommandsAndAgentsOptions): 
         );
       }
       const agentTarget = path.join(agentsTarget, mdFileName(agentName));
+      if (!(await clearLinkForWrite(agentTarget, opts.links))) continue;
       if (isTrackerStampedAgent(agentName)) {
         await writeStampedAgent(srcFile, agentTarget, trackerServers, warn);
       } else {
@@ -2644,6 +2607,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     trackerServers,
     agentSourceDirs: options.agentSourceDirs,
     skip: { commands: commandsRefused, agents: agentsRefused },
+    links: report,
     warn,
   });
 
@@ -2706,7 +2670,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     }
 
     const resolved = await resolveSkillSource(skillName, devflowDir);
-    await copyDirectory(resolved.dir, skillTarget);
+    await copyDirectory(resolved.dir, skillTarget, undefined, report);
     if (resolved.shadow === 'valid') {
       report.shadowedSkills.push(skillName);
     } else if (resolved.shadow === 'missing-skill-md') {
@@ -2751,7 +2715,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   spinner.message('Installing rules...');
   if (rulesMap.size > 0 && !rulesRefused) {
     await fs.mkdir(rulesTarget, { recursive: true });
-    const outcomes = await installAllRules(rulesMap, devflowDir, rulesTarget);
+    const outcomes = await installAllRules(rulesMap, devflowDir, rulesTarget, report);
     for (const { ruleName, outcome } of outcomes) {
       if (outcome === 'shadow') {
         report.shadowedRules.push(ruleName);
