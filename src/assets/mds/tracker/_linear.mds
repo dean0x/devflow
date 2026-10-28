@@ -69,6 +69,12 @@ invisible while the bytes stay on disk. The one `## ` heading in this
 file is the module-level section below, which sits above every section marker and
 is therefore emitted nowhere.
 
+A compliance arm (the `compliance:on`, `compliance:off` and `compliance:end` marker lines)
+opens and closes inside one define, so inside one operation's section. The compliance-off
+file keeps the off text: `setup-task` forwards no plan artifact, `create-release` composes
+no shipped-issues list, `ensure-traceable-issue` posts no artifact comment and has no
+`## Implementation Plan` section, and a kept operation never names an omitted reference.
+
 ## Known Unknowns
 
 <!-- twin: docs/cli-reference.md § Known Unknowns — Linear -->
@@ -141,7 +147,11 @@ Load when the resolved tracker provider is `linear` and the operation is `setup-
 {{steps.base_branch_step()}}
 1. **`ISSUE_INPUT` pre-flight**, when provided: it is an existing issue reference. {{common.ref_preflight_single("linear", "**either** anchored form — the team-key form `^[A-Z][A-Z0-9]{0,9}-[1-9][0-9]{0,8}$` or the internal-id form `^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$`", "**ASCII-upper-normalise it first** — a reference copied out of a branch name or a URL arrives lowercased. ", ", never joined into one alternation")}} Step 3 resolves an admitted reference with *fetch by key*.
 {{common.conventions_step()}}
+<!-- compliance:on -->
 1c. Issue-first, only when `ISSUE_REQUIRED` is `true` and `ISSUE_INPUT` is absent: invoke `ensure-traceable-issue` with `TASK_DESCRIPTION` (and `PLAN_ARTIFACT_PATH` if provided) and capture the returned reference for step 3's `{type}/{REF}-{slug}`.
+<!-- compliance:off -->
+1c. Issue-first, only when `ISSUE_REQUIRED` is `true` and `ISSUE_INPUT` is absent: invoke `ensure-traceable-issue` with `TASK_DESCRIPTION` and capture the returned reference for step 3's `{type}/{REF}-{slug}`.
+<!-- compliance:end -->
    - Preconditions: the *create issue* and *fetch by key* capabilities are both available. Either one absent or denied ⇒ `TRACEABILITY: DEGRADED (no tracker tool for {capability})` naming the capability, and continue to step 2. **The branch is still cut and the PR is still opened**, with the traceability field carrying `Tracked (pending)` and the reason. **NEVER create a GitHub issue as a fallback**.
 {{common.branch_detection_step()}}
    - The convention owns the branch **shape**, `## Reference Rendering` only the **token** in it; neither is the other's fallback.
@@ -242,11 +252,16 @@ Over `{{comment_cap()}}` characters the rolling item is closed and a successor i
 
 Load when the resolved tracker provider is `linear` and the operation is `create-release`.
 
+<!-- compliance:on -->
 **Mechanics held here:** the release-host steps 1a–6 — version check, annotated tag, tag push, notes composition, the D11 scrub and the release itself — and this provider's shipped-issues step inside step 5. The release-host steps are release-host mechanics, not tracker mechanics, and are the same under every provider.
+<!-- compliance:off -->
+**Mechanics held here:** the release-host steps 1a–6 — version check, annotated tag, tag push, notes composition, the D11 scrub and the release itself. The release-host steps are release-host mechanics, not tracker mechanics, and are the same under every provider.
+<!-- compliance:end -->
 
 ### Process
 
 {{opsteps.create_release_steps()}}
+<!-- compliance:on -->
 
 Inside step 5 (compose release notes):
 
@@ -257,6 +272,7 @@ Inside step 5 (compose release notes):
 {{mcp.reference_rendering_gate()}}
 
 **This provider's documented default is `{{pr_link_default()}}`.** It is stated here because it is a provider fact, and the gate above is what routes to it: a section that is absent, a file that is absent and a token the gate discarded all render this, and none of them is a degradation.
+<!-- compliance:end -->
 @end
 
 @define gather_release_evidence():
@@ -280,7 +296,11 @@ Load when the resolved tracker provider is `linear` and the operation is `gather
    - {{common.ref_preflight_list("linear", "**either** anchored form — the team-key form `^[A-Z][A-Z0-9]{0,9}-[1-9][0-9]{0,8}$` or the internal-id form `^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$`", "**ASCII-upper-normalise every entry first.** ", ", never joined into one alternation", ".")}}
    - Confirm the survivors exist with **one** call to the *batch fetch* capability over the whole set, bounded `≤50` with `TRUNCATED ({n} not processed)` for the remainder — **one query, never a per-item loop**.
    - **Because the closing-reference step degraded, the enrichment is incomplete by construction: never report the status as `COMPLETE`.** Report `PARTIAL ({n} DEGRADED)` whenever any step above degraded, and `TRUNCATED ({n} not processed)` whenever the bound was reached. A release that reads `COMPLETE` over an unresolvable evidence set is the one report nobody re-checks.
+<!-- compliance:on -->
    - On a tool error for an individual item → DEGRADED for that item, continue. On backpressure → follow `### Provider signals (Linear)` in this operation's `backlink-shipped-issues` reference, which is where this provider's one signal is stated.
+<!-- compliance:off -->
+   - On a tool error for an individual item → DEGRADED for that item, continue. On backpressure — this provider's one signal is an HTTP `400` carrying `RATELIMITED`, which a tool call surfaces as error text, not as a 429 — stop the enrichment and report the remaining items as `THROTTLED`; there is no earlier rung.
+<!-- compliance:end -->
 {{steps.release_evidence_gate_step()}}
 {{common.trace_map_step("--grammar linear --key {KEY}", "`{KEY}` is the resolved team key; with none usable, skip the run and take the arm below. ")}}
 @end
@@ -373,7 +393,11 @@ Load when the resolved tracker provider is `linear` and the operation is `associ
 
 Load when the resolved tracker provider is `linear` and the operation is `ensure-traceable-issue`.
 
+<!-- compliance:on -->
 **Mechanics held here:** the `### Process` body — issue creation, and how the design artifact is attached on a provider whose comment format has no collapsed-block analogue.
+<!-- compliance:off -->
+**Mechanics held here:** the `### Process` body — issue creation.
+<!-- compliance:end -->
 
 {{common.traceable_issue_rules()}}
 
@@ -381,13 +405,16 @@ Load when the resolved tracker provider is `linear` and the operation is `ensure
 
 1. If `ISSUE_INPUT` is provided — an issue reference, or free prose to resolve through the *search* capability with a structured filter:
    - Compose a structured comment using the D3 sections and post it through `### Posting gate` below. **NEVER rewrite the issue description** — an existing description is somebody's work.
+<!-- compliance:on -->
    - If `PLAN_ARTIFACT_PATH` is provided: **the artifact is NOT inlined.** See `### The artifact is posted as content`.
+<!-- compliance:end -->
    - Return the issue reference.
 2. If no `ISSUE_INPUT`: create a new issue through the *create issue* capability.
    - Title: derived from `TASK_DESCRIPTION` (same slug logic as `setup-task`).
    - Fields: only the names `## Required Fields` allows, and the issue type by exact match against the types enumerated this run. The capability absent or denied ⇒ `TRACEABILITY: DEGRADED (no tracker tool for create issue)` and return without a reference; the caller proceeds with `Tracked (pending)` and the reason, and **never creates a GitHub issue instead**.
    - **Description** — composed from the D3 template and posted through `### Posting gate` below. `TASK_DESCRIPTION`, `INITIAL_REQUEST` and `REQUIREMENTS` are caller-supplied and untrusted — they reach the call as values, never as part of a query or a command.
 3. Return the issue reference.
+<!-- compliance:on -->
 
 ### The artifact is posted as content
 
@@ -396,6 +423,10 @@ This provider's comment format has **no HTML-comment node and no collapsed-block
 Measure the composed body against the `{{comment_cap()}}`-character cap **after redaction** — the scrubber's tokens can grow it. Over the cap, post **none of the plan**: post the pointer sentence alone — `Implementation plan: {PLAN_ARTIFACT_PATH} (not committed; ask the author)` — and emit `TRACEABILITY: DEGRADED (plan artifact exceeds comment cap)`. A truncated plan is worse than a pointer, because the reader cannot tell which half is missing.
 
 Over the `{{comment_cap()}}`-character cap after redaction, truncate in **preservation order** — line 1 the marker, then the status and DEGRADED lines, then the pointer sentence; the untrusted middle is what gets cut — and end with `NOTE: body exceeded the {{comment_cap()}}-character cap after redaction — truncated/stub posted`. The pointer sentence is the last thing to go because it is the only line that still leads somewhere.
+<!-- compliance:off -->
+
+Over the `{{comment_cap()}}`-character cap after redaction, truncate any body this operation posts in **preservation order** — the status and DEGRADED lines are kept; the untrusted middle is what gets cut — and end with `NOTE: body exceeded the {{comment_cap()}}-character cap after redaction — truncated/stub posted`.
+<!-- compliance:end -->
 
 {{mcp.query_safety()}}
 
@@ -407,7 +438,11 @@ Over the `{{comment_cap()}}`-character cap after redaction, truncate in **preser
 The D3 section headings are the canonical ones; only the transport differs from the GitHub path. Rules:
 
 - Pre-existing issues: post a structured comment using the D3 sections — NEVER rewrite the issue description.
+<!-- compliance:on -->
 - New issues: create with the D3 description, then post the artifact as its own comment and reference it from the `## Implementation Plan` section.
+<!-- compliance:off -->
+- New issues: create with the D3 description.
+<!-- compliance:end -->
 @end
 
 @define post_wave_report():

@@ -339,14 +339,18 @@ export const COMPLIANCE_ARMED_REFERENCES: readonly string[] = [
   'tracker/github/create-release.md',
   'tracker/github/ensure-pr-ready.md',
   'tracker/github/ensure-traceable-issue.md',
+  'tracker/github/fetch-issue.md',
+  'tracker/github/gather-release-evidence.md',
   'tracker/github/setup-task.md',
   'tracker/jira/create-release.md',
   'tracker/jira/ensure-pr-ready.md',
   'tracker/jira/ensure-traceable-issue.md',
+  'tracker/jira/gather-release-evidence.md',
   'tracker/jira/setup-task.md',
   'tracker/linear/create-release.md',
   'tracker/linear/ensure-pr-ready.md',
   'tracker/linear/ensure-traceable-issue.md',
+  'tracker/linear/gather-release-evidence.md',
   'tracker/linear/setup-task.md',
 ];
 

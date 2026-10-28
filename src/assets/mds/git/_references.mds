@@ -30,7 +30,11 @@ understand a label, and nothing breaks if that read is deferred.
 |--------|---------|
 | D1 | Conventions learning — `learn-conventions` writes `.devflow/conventions.md` once from a bounded git/gh scan |
 | D2 | Review-thread fetch/resolution — GraphQL thread fetch and the reply/resolve cycle |
+<!-- compliance:on -->
 | D3 | Issue template — three-section structure (`## Initial Request`, `## Product Requirements`, `## Implementation Plan`) used by `ensure-traceable-issue` |
+<!-- compliance:off -->
+| D3 | Issue template — two-section structure (`## Initial Request`, `## Product Requirements`) used by `ensure-traceable-issue` |
+<!-- compliance:end -->
 | D5 | Issue creation/enrichment — `ensure-traceable-issue` creates or enriches a GitHub issue and returns the number for downstream use |
 | D6 | Merge-readiness report — `check-merge-readiness` is report-only; it never takes action |
 | D7 | Review-summary dedup — one posted review-summary comment per review run (cycle + timestamp pair), marker-keyed, never edited after posting |
