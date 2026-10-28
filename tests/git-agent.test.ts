@@ -22,6 +22,7 @@ import { TRACKER_PROVIDER_IDS } from '../src/core/tracker.js';
 import {
   COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR,
   SKILL_REFS_OUTPUT_DIR,
+  complianceOffOmittedRelPaths,
   TRACKER_GITHUB_OPS,
   GIT_CROSS_CUTTING_DOCS,
   GIT_OPERATIONS,
@@ -3441,9 +3442,12 @@ describe('git agent: the compliance-off build carries no posting operation (AC-1
 // With compliance off, the tracker operations that stay still run, but four of them
 // lose the text that feeds a posting step: ensure-pr-ready pastes no test-plan block and
 // no exceptions section, create-release appends no exceptions and no shipped-issues
-// list, and setup-task and ensure-traceable-issue take no plan artifact. The guard reads
-// the BUILT trees, because the arms are cut at build time, and reads each provider's file
-// because the three providers share these contracts and steps by construction.
+// list, and setup-task and ensure-traceable-issue take no plan artifact (and the issue
+// template drops its plan section). Two more kept operations stop pointing at the omitted
+// back-link reference: gather-release-evidence and the GitHub fetch-issue state its rule
+// inline. The guard reads the BUILT trees, because the arms are cut at build time, and
+// reads each provider's file because the three providers share these contracts and steps
+// by construction.
 //
 // Every literal is asserted present in the compliance-on file of the same operation and
 // provider first, so a literal that was reworded away from both trees cannot leave the
@@ -3452,21 +3456,46 @@ describe('git agent: the compliance-off build carries no posting operation (AC-1
 
 /**
  * The text a compliance-off reference must not carry, per tracker operation, each literal
- * spelled as the compliance-on file holds it: an input name in its contract line, or the
- * step text that pastes it.
+ * spelled as the compliance-on file holds it: an input name, a heading, or the step text
+ * that pastes or posts it. A bare input name covers its contract line and every step that
+ * names it. In `ensure-traceable-issue`, `artifact` and `collapsed` cover the artifact
+ * comment and the collapsed block it is posted in, which the three providers word
+ * differently.
  */
 const COMPLIANCE_OFF_ABSENT_LITERALS: ReadonlyArray<{ readonly op: string; readonly literals: readonly string[] }> = [
   {
     op: 'ensure-pr-ready',
     literals: ['PR_TEST_PLAN_BLOCK', 'PR_EXCEPTIONS', '`check block`', '## Evidence Exceptions', 'Reviewer Focus Areas'],
   },
-  {
-    op: 'create-release',
-    literals: ['TRACEABILITY_EXCEPTIONS', '`SHIPPED_ISSUES` (optional)', '`COMMIT_LIST`/`SHIPPED_ISSUES`'],
-  },
-  { op: 'setup-task', literals: ['`PLAN_ARTIFACT_PATH` (optional)'] },
-  { op: 'ensure-traceable-issue', literals: ['`PLAN_ARTIFACT_PATH` (optional)'] },
+  { op: 'create-release', literals: ['TRACEABILITY_EXCEPTIONS', 'SHIPPED_ISSUES', '## Shipped Issues'] },
+  { op: 'setup-task', literals: ['PLAN_ARTIFACT_PATH'] },
+  { op: 'ensure-traceable-issue', literals: ['PLAN_ARTIFACT_PATH', '## Implementation Plan', 'artifact', 'collapsed'] },
 ];
+
+/**
+ * What a kept operation states inline in the compliance-off tree, because the omitted
+ * `backlink-shipped-issues` reference states it for the compliance-on tree: the
+ * provider's own rate-limit signal in `gather-release-evidence`, and for GitHub the
+ * reason the reference grammar strips one leading `#` in `fetch-issue`.
+ */
+const COMPLIANCE_OFF_INLINE_RULES: ReadonlyArray<{ readonly op: string; readonly provider: string; readonly literal: string }> = [
+  { op: 'gather-release-evidence', provider: 'github', literal: 'X-RateLimit-Remaining' },
+  { op: 'gather-release-evidence', provider: 'jira', literal: 'Retry-After' },
+  { op: 'gather-release-evidence', provider: 'linear', literal: 'RATELIMITED' },
+  { op: 'fetch-issue', provider: 'github', literal: 'opens a shell comment' },
+];
+
+/**
+ * The names of the reference files a compliance-off install omits: each omitted path's
+ * basename without `.md`, taken from the registry that decides the omission and never
+ * retyped. A kept reference that names one of them points at a file the install does not
+ * hold.
+ */
+function omittedReferenceNames(): string[] {
+  const omitted = complianceOffOmittedRelPaths(VARIANT_MODULES);
+  if (!omitted.ok) throw new Error('the shipped registry must agree with POSTING_OPS');
+  return [...new Set([...omitted.value].map(rel => path.posix.basename(rel, '.md')))].sort();
+}
 
 /** Named collector: the literals of `literals` that `text` holds. */
 function collectHeldLiterals(text: string, literals: readonly string[]): string[] {
@@ -3524,6 +3553,21 @@ describe('git references: the compliance-off build carries no evidence paste, ex
     expect(off).toContain('| D9 | Thread-resolution gate');
   });
 
+  for (const { op, provider, literal } of COMPLIANCE_OFF_INLINE_RULES) {
+    it(`${provider}/${op}: the compliance-off file states the rule inline that the omitted back-link reference states for the compliance-on file`, () => {
+      const rel = operationReferenceRel(op, provider);
+      if (rel === null) throw new Error(`${op} has no reference for ${provider}`);
+      expect(readBuiltReference(SKILL_REFS_OUTPUT_DIR, rel), 'the on file points at the omitted reference, so the inline rule is what replaces it')
+        .toContain('backlink-shipped-issues');
+      expect(readBuiltReference(COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR, rel)).toContain(literal);
+    });
+  }
+
+  it('the inline rules cover every provider of gather-release-evidence', () => {
+    const covered = COMPLIANCE_OFF_INLINE_RULES.filter(rule => rule.op === 'gather-release-evidence').map(rule => rule.provider);
+    expect([...covered].sort()).toEqual([...TRACKER_PROVIDER_IDS].sort());
+  });
+
   it('known-bad probes: the collector reports a seeded literal in each listed operation', () => {
     for (const { op, literals } of COMPLIANCE_OFF_ABSENT_LITERALS) {
       for (const literal of literals) {
@@ -3531,6 +3575,43 @@ describe('git references: the compliance-off build carries no evidence paste, ex
       }
     }
     expect(collectHeldLiterals('kept text', COMPLIANCE_OFF_ABSENT_LITERALS[0].literals)).toEqual([]);
+  });
+});
+
+describe('git references: no compliance-off reference names an omitted reference (AC-42)', () => {
+  const OFF_TREE = path.join(ROOT, ...COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR.split('/'));
+
+  it('derives the omitted names from the registry: every posting op, and at least the publication gate besides', () => {
+    const names = omittedReferenceNames();
+    for (const op of POSTING_OPERATIONS) expect(names, op).toContain(op);
+    expect(names.length, 'no document besides the posting ops is omitted').toBeGreaterThan(POSTING_OPERATIONS.length);
+  });
+
+  it('the compliance-off tree holds reference files to scan', () => {
+    const files = walkFiles(OFF_TREE, file => file.endsWith('.md'));
+    expect(files.length, `${COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR} holds no reference — run \`npm run build:mds\` first`).toBeGreaterThan(0);
+  });
+
+  it('no file of the compliance-off tree names an omitted reference', () => {
+    const names = omittedReferenceNames();
+    const offenders = walkFiles(OFF_TREE, file => file.endsWith('.md'))
+      .flatMap(file => collectHeldLiterals(readFileSync(file, 'utf-8'), names)
+        .map(name => `${path.relative(OFF_TREE, file).split(path.sep).join('/')}: ${name}`));
+    expect(offenders, 'a kept reference must state a rule inline or point at a kept reference, never at an omitted file').toEqual([]);
+  });
+
+  it('non-vacuity: the compliance-on tree does name the omitted back-link reference from the kept operations', () => {
+    for (const rel of ['tracker/github/fetch-issue.md', 'tracker/github/gather-release-evidence.md', 'tracker/jira/gather-release-evidence.md', 'tracker/linear/gather-release-evidence.md']) {
+      expect(collectHeldLiterals(readBuiltReference(SKILL_REFS_OUTPUT_DIR, rel), omittedReferenceNames()), rel).toContain('backlink-shipped-issues');
+    }
+  });
+
+  it('known-bad probe: a seeded line naming each omitted reference is reported', () => {
+    const names = omittedReferenceNames();
+    for (const name of names) {
+      expect(collectHeldLiterals(`kept text\nOn a rate limit, follow the \`${name}\` reference.\n`, names), name).toEqual([name]);
+    }
+    expect(collectHeldLiterals('kept text', names)).toEqual([]);
   });
 });
 
