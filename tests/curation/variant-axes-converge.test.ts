@@ -24,7 +24,7 @@ import {
   type ConvergeVariantAxesResult,
 } from '../../src/targets/claude-code/curation-install.js';
 import { bothOffDir, complianceOffDir, curationOffDir, skillsDir } from '../../src/core/assets.js';
-import { readInstalledVariants } from '../../src/core/installed-variants.js';
+import { postingStatus, readInstalledVariants } from '../../src/core/installed-variants.js';
 import { readManifest } from '../../src/core/manifest.js';
 import { getManifestLockPath } from '../../src/core/manifest-lock.js';
 import { DEVFLOW_PLUGINS, type PluginDefinition } from '../../src/core/plugins.js';
@@ -500,7 +500,7 @@ describe('applyVariantToggle on the compliance axis (AC-27, AC-28, AC-29)', () =
     expect(readInstalledVariants((await readManifest(devflowDir))?.installedVariants)).toEqual({ curation: true, compliance: true });
   });
 
-  it('known-bad probe: switches changed during the run write no record and warn, and the converge stands', async () => {
+  it('known-bad probe: switches changed during the run remove the old record so the status reads unknown, and warn, and the converge stands', async () => {
     await writeInstallManifest('3.3.0', { compliance: { enabled: false, frameworks: [] } }, { installedVariants: { curation: true, compliance: true } });
     await installAs({ curation: true, compliance: true });
     // Another run turns compliance back on after this run converged to compliance off.
@@ -514,7 +514,8 @@ describe('applyVariantToggle on the compliance axis (AC-27, AC-28, AC-29)', () =
     expect(await read(installedCommand('release'))).toBe('release COMPLIANCE-OFF\n');
     const manifest = await readManifest(devflowDir);
     expect(manifest?.features.compliance.enabled, 'the hook ran before the record').toBe(true);
-    expect(readInstalledVariants(manifest?.installedVariants), 'no record of the switches this run converged to').toEqual({ curation: true, compliance: true });
+    expect(Object.hasOwn(manifest ?? {}, 'installedVariants'), 'the old record is removed, not left in place').toBe(false);
+    expect(postingStatus(readInstalledVariants(manifest?.installedVariants), manifest?.features.compliance.enabled ?? false)).toBe('unknown (run devflow init)');
     expect(warnings.some(w => w.includes('install record') && w.includes('switches changed'))).toBe(true);
   });
 

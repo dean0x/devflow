@@ -928,7 +928,8 @@ export async function installedScriptsSkew(devflowDir: string, packageRoot?: str
  * The read and the write run under the manifest lock, as the switch writers do, so a switch that
  * another devflow run writes in between is never overwritten with the older copy read here. The
  * record is written only when the manifest's switches are still the ones the run converged to: if
- * they changed during the run, nothing is recorded and a warning says so. A lock that cannot be
+ * they changed during the run, nothing is recorded, the record that stood is removed in the same
+ * locked write (the status then reads unknown) and a warning says so. A lock that cannot be
  * taken, or is lost before the write, withholds the record with a warning.
  */
 async function recordInstalledVariants(devflowDir: string, switches: VariantSwitches, warn: (msg: string) => void): Promise<void> {
@@ -936,7 +937,14 @@ async function recordInstalledVariants(devflowDir: string, switches: VariantSwit
     const locked = await withManifestLock(devflowDir, {}, async (lock): Promise<'written' | 'current' | 'no-manifest' | 'lock-lost' | 'switches-changed'> => {
       const manifest = await readManifest(devflowDir);
       if (manifest === null) return 'no-manifest';
-      if (manifest.features.curation !== switches.curation || manifest.features.compliance.enabled !== switches.compliance) return 'switches-changed';
+      if (manifest.features.curation !== switches.curation || manifest.features.compliance.enabled !== switches.compliance) {
+        // The record names switches that no longer hold: remove it, so the status reads unknown.
+        if (!Object.hasOwn(manifest, 'installedVariants')) return 'switches-changed';
+        if (!(await lock.stillHeld())) return 'lock-lost';
+        const { installedVariants: _stale, ...unrecorded } = manifest;
+        await writeManifest(devflowDir, unrecorded);
+        return 'switches-changed';
+      }
       const recorded = readInstalledVariants(manifest.installedVariants);
       if (recorded !== null && recorded.curation === switches.curation && recorded.compliance === switches.compliance) return 'current';
       if (!(await lock.stillHeld())) return 'lock-lost';
