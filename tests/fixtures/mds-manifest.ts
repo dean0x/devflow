@@ -332,9 +332,23 @@ export const COMPLIANCE_OFF_FILES: readonly string[] = COMPLIANCE_VARIANT_HOSTS.
  * Named as a set, as the host rosters above are, and asserted in both directions
  * (tests/build-mds.test.ts): an arm added without a row, or a row left after its arm
  * goes, turns that assertion red. A reference joins this roster in the commit that adds
- * its first compliance arm. No reference module carries an arm yet.
+ * its first compliance arm.
  */
-export const COMPLIANCE_ARMED_REFERENCES: readonly string[] = [];
+export const COMPLIANCE_ARMED_REFERENCES: readonly string[] = [
+  'decision-markers.md',
+  'tracker/github/create-release.md',
+  'tracker/github/ensure-pr-ready.md',
+  'tracker/github/ensure-traceable-issue.md',
+  'tracker/github/setup-task.md',
+  'tracker/jira/create-release.md',
+  'tracker/jira/ensure-pr-ready.md',
+  'tracker/jira/ensure-traceable-issue.md',
+  'tracker/jira/setup-task.md',
+  'tracker/linear/create-release.md',
+  'tracker/linear/ensure-pr-ready.md',
+  'tracker/linear/ensure-traceable-issue.md',
+  'tracker/linear/setup-task.md',
+];
 
 /**
  * The eight Git operations that post to GitHub or a tracker: a compliance-off install
