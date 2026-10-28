@@ -3880,7 +3880,7 @@ describe('git references: the scrub and the writes it gates are unchanged by the
     return rel;
   };
   /** The kept operations that hold scrub lines in the compliance-off file of any provider. */
-  const bodyPostingOps = keptOps.filter(op => TRACKER_PROVIDER_IDS.some(provider => scrubLinesOf(readOff(refOf(op, provider))).length > 0));
+  const bodyPostingOps: readonly string[] = keptOps.filter(op => TRACKER_PROVIDER_IDS.some(provider => scrubLinesOf(readOff(refOf(op, provider))).length > 0));
   const relationOf = (op: string): ScrubRelation => (ORDERED_SUBSET_SCRUB_OPS.includes(op) ? 'ordered-subset' : 'identical');
 
   it('finds the kept body-posting operations by their scrub lines, and each one scrubs under every provider', () => {
