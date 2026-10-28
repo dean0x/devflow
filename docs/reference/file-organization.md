@@ -38,6 +38,7 @@ devflow/
 │   │   ├── curation-move-skip.ts     # The fixed notice of a skipped move (git tracks files in a data folder, or git did not answer)
 │   │   ├── tracked-areas.ts          # Typed seam onto hooks/lib/tracked-areas.cjs: the bounded answer (`probeTrackedArea`) that the CLI, the HUD and uninstall read for a data area, curation or memory
 │   │   ├── area-pause-notice.ts      # The fixed notice of a paused data area (git tracks files in its folders, or git did not answer), one text for each area and reason
+│   │   ├── compliance-off-files.ts   # COMPLIANCE_OFF_REMOVED_SKILL_FILES: the one list of skill files a compliance-off install removes by exact name
 │   │   └── ...                       # feature-config.ts, curate-tuning-config.ts, …
 │   ├── hud/                          # HUD module (TypeScript source)
 │   │   ├── index.ts                  # Entry point: stdin → gather → render → stdout
@@ -57,7 +58,7 @@ devflow/
 │       ├── skills/                   # 42 skills
 │       │   ├── git/
 │       │   │   ├── SKILL.md
-│       │   │   └── references/
+│       │   │   └── references/       # Static: github-api.md, github-posting.md (GitHub posting recipes; installed with compliance on only), patterns.md, detection.md, violations.md, sources.md
 │       │   ├── agent-references/     # Reference-only skill: never preloaded; read by explicit path
 │       │   │   └── references/       # synthesize/, curate/, validate/, triage/, commands/ (rare command branches)
 │       │   ├── software-design/
@@ -209,6 +210,8 @@ Assets live once in `src/assets/` and install to the user's `~/.claude/` — no 
 | Off variants (curation, compliance, both) | `dist/{curation-off,compliance-off,curation-compliance-off}/{commands,agents}/{name}.md`, built only for a host or partial with an arm on each axis that the tree turns off | `~/.claude/{commands,agents}/devflow/{name}.md`, in place of the file above, on a machine with that axis off | `npm run build:mds` |
 | Variant manifest | `dist/variant-axes.json`, written by every build | Not installed; the installer reads it when compliance is off | `npm run build:mds` |
 | Skill references (generated) | `src/assets/mds/**/*.mds` → `dist/skills/git/references/**` | `~/.claude/skills/devflow:git/references/**` | `npm run build:mds` |
+| Skill references (generated, compliance off) | The same modules → `dist/compliance-off/skills/git/references/**` | `~/.claude/skills/devflow:git/references/**`, in place of the row above, on a machine with compliance off | `npm run build:mds` |
+| GitHub posting recipes (static) | `src/assets/skills/git/references/github-posting.md` | `~/.claude/skills/devflow:git/references/github-posting.md` with compliance on; removed by exact name with compliance off | None — edit → init |
 | Scripts (root) | `src/assets/scripts/*.cjs`, `lib/`, `hud.sh` | `~/.devflow/scripts/` | None — edit → init |
 | Scripts (hooks) | `src/assets/scripts/hooks/` | `~/.devflow/scripts/hooks/` | None — edit → init |
 
@@ -233,8 +236,11 @@ The build writes up to four outputs for each host:
 | `dist/curation-off/{commands,agents}/` | off | on | A host with a curation arm |
 | `dist/compliance-off/{commands,agents}/` | on | off | A host with a compliance arm |
 | `dist/curation-compliance-off/{commands,agents}/` | off | off | A host with both arms |
+| `dist/compliance-off/skills/git/references/` | n/a | off | Every reference file of the compliance-off manifest |
 
 A host with no arm on an axis has no variant for that axis. A machine with that axis off then uses the variant for its other axis, or the normal file. The three off trees are siblings, so the removal of stale files in one tree never reaches another tree.
+
+The compliance-off references tree is complete, not a patch over `dist/skills/git/references/`. It holds every file of `installedReferenceManifest({ compliance: false })` in `src/core/mds-variants.ts`: the files of the posting operations (`POSTING_OPS`) and the publication-gate document are absent, and a module with no compliance arm is a byte copy of the compliance-on file. It is the one source root of a compliance-off install (`COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR`, chosen by `skillRefsSourceDir` in `src/core/assets.ts`). When that root is absent, the install refuses before it writes a file and never falls back to the compliance-on references. The build records each off reference as written, so the orphan prune of `dist/compliance-off/` keeps it. Three flat files sit outside the pruned `pr/` and `tracker/` subtrees, and a compliance-off install removes them by exact name through `COMPLIANCE_OFF_REMOVED_SKILL_FILES` in `src/core/compliance-off-files.ts`: `publication-gate.md`, `github-posting.md` and `implement-evidence-asks.md`. The removal and the restore are in `src/targets/claude-code/compliance-off-files.ts`.
 
 The build also writes the variant manifest, `dist/variant-axes.json`. It has `{ "version": 1, "hosts": { "<kind>/<name>": { "curation": <bool>, "compliance": <bool> } } }`, with one entry for each compiled host. Each flag says whether the host carries an arm on that axis.
 
@@ -255,7 +261,7 @@ The markers are interim. Native conditionals in the MDS compiler replace them la
 
 ### Packaging
 
-`npm pack` ships `dist/` (compiled JS, commands, compiled agents, the three off-variant trees, the variant manifest `dist/variant-axes.json`, and generated skill references), `src/assets/` (skills, agents — hand-authored `.md` and `.mds` generator hosts alike — rules, scripts), `src/targets/claude-code/templates/` (the install templates) and `templates/lint-pack/` (the lint pack template: a script, an example config and a README). No `plugins/` or `shared/` directories are included. The `files` field lists `dist/` whole, so a new tree under `dist/` ships with no change to it. `tests/packaging.test.ts` checks that the pack list holds the manifest and the variants that the rosters name. It also packs seeded files, to show that a file under each of the three off trees ships.
+`npm pack` ships `dist/` (compiled JS, commands, compiled agents, the three off-variant trees with the compliance-off skill references among them, the variant manifest `dist/variant-axes.json`, and generated skill references), `src/assets/` (skills, agents — hand-authored `.md` and `.mds` generator hosts alike — rules, scripts), `src/targets/claude-code/templates/` (the install templates) and `templates/lint-pack/` (the lint pack template: a script, an example config and a README). No `plugins/` or `shared/` directories are included. The `files` field lists `dist/` whole, so a new tree under `dist/` ships with no change to it. `tests/packaging.test.ts` checks that the pack list holds the manifest and the variants that the rosters name. It also packs seeded files, to show that a file under each of the three off trees ships.
 
 ### Adding a Skill to a Plugin
 
