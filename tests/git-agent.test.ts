@@ -3605,13 +3605,17 @@ describe('git references: the compliance-off build carries no evidence paste, ex
     });
   }
 
-  it('decision-markers: the compliance-off file drops the publication-gate row (D10) and keeps the other markers', () => {
+  it('decision-markers: the compliance-off file drops the thread-resolution (D9) and publication-gate (D10) rows and keeps the other markers', () => {
     const on = readBuiltReference(SKILL_REFS_OUTPUT_DIR, 'decision-markers.md');
     const off = readBuiltReference(COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR, 'decision-markers.md');
+    expect(on).toContain('| D9 | Thread-resolution gate');
+    expect(on).toContain('resolveReviewThread');
     expect(on).toContain('| D10 | Publication gate');
+    expect(off).not.toContain('| D9 |');
+    expect(off).not.toContain('resolveReviewThread');
     expect(off).not.toContain('| D10 |');
     expect(off).not.toContain('post-review-summary');
-    expect(off).toContain('| D9 | Thread-resolution gate');
+    expect(off).toContain('| D6 | Merge-readiness report');
   });
 
   for (const { op, provider, literal } of COMPLIANCE_OFF_INLINE_RULES) {
