@@ -20,9 +20,17 @@ import { skillsDir, rulesDir, commandsDir, compiledSkillRefsDir } from '../src/c
 import { getAllAgentNames } from '../src/core/plugins.js';
 import { TRACKER_PROVIDER_IDS } from '../src/core/tracker.js';
 import {
+  VARIANT_MANIFEST_REL_PATH,
+  machineVariantKey,
+  parseVariantManifest,
+  variantOffRelPath,
+  type VariantSwitches,
+} from '../src/core/curation-variants.js';
+import {
   COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR,
   SKILL_REFS_OUTPUT_DIR,
   complianceOffOmittedRelPaths,
+  installedReferenceManifest,
   TRACKER_GITHUB_OPS,
   GIT_CROSS_CUTTING_DOCS,
   GIT_OPERATIONS,
@@ -33,7 +41,7 @@ import {
 } from '../src/core/mds-variants.js';
 import { ROOT, resolveAgentSource, resolveVariantOffSource, resolveAllAgents, gitAgentSinkCorpus, gitOperationReferenceCorpus, extractOpSectionFromCorpus, collectUnfencedH2, loadFile, requireDistFile, walkFiles, isPrHostEntryPath, NAME_FILE_TRAP, NAME_FILE_REMOVAL, WRITE_FAILURE, JUDGE_BY_READING, SHELL_WRITE_PROBES, countShellWritesIntoF, DEFAULT_BRANCH_PROBE, PRODUCER_STATUS_CAPTURE, PRODUCER_NAME_TAIL, GH_FAILED_RULE, NO_PR_CLAUSE, NO_PR_DEFINITION, OTHER_GH_FAILURE_CLAUSE, ORIGIN_HEAD_READ, MAIN_PROBE, MASTER_FALLBACK, DEFAULT_BRANCH_FILL, type CorpusEntry } from './helpers.js';
 import { RESOLVE_BASE_SCRIPT } from './evidence/seam.js';
-import { POSTING_OPERATIONS } from './fixtures/mds-manifest.js';
+import { COMPLIANCE_ARMED_REFERENCES, POSTING_OPERATIONS } from './fixtures/mds-manifest.js';
 
 /**
  * How many corpus files declare a `## Operation:` section for a TRACKER op: one
@@ -3457,6 +3465,28 @@ describe('git agent: the compliance-off build carries no posting operation (AC-1
     expect(scrubSectionOf(off)).toBe(scrub);
   });
 
+  it('carries that scrub section in every Git agent file a machine installs, whatever its two switches (AC-45)', () => {
+    const manifestText = readFileSync(path.join(ROOT, ...VARIANT_MANIFEST_REL_PATH.split('/')), 'utf-8');
+    const parsed = parseVariantManifest(manifestText);
+    if (!parsed.ok) throw new Error(`${VARIANT_MANIFEST_REL_PATH} does not parse: run \`npm run build:mds\``);
+    const host = parsed.value.find(entry => entry.kind === 'agents' && entry.name === 'git');
+    if (host === undefined) throw new Error('the variant manifest has no Git agent host');
+    const machines: VariantSwitches[] = [true, false].flatMap(curation => [true, false].map(compliance => ({ curation, compliance })));
+    const installed = new Set(
+      machines.map(machine => {
+        const key = machineVariantKey(machine, host.axes);
+        return key === 'on' ? 'dist/agents/git.md' : variantOffRelPath(key, 'agents', 'git.md');
+      }),
+    );
+    expect([...installed].sort(), 'the Git agent has a compliance arm and no curation arm, so a both-off machine reads the compliance-off file')
+      .toEqual(['dist/agents/git.md', 'dist/compliance-off/agents/git.md']);
+    const scrub = scrubSectionOf(on);
+    expect(scrub, 'the scrub section is read').toContain('redact-secrets.cjs');
+    for (const rel of installed) {
+      expect(scrubSectionOf(readFileSync(path.join(ROOT, ...rel.split('/')), 'utf-8')), rel).toBe(scrub);
+    }
+  });
+
   it('known-bad probes: the collectors report a seeded posting row, a seeded loading row and an altered scrub section', () => {
     expect(collectPostingOpNames(`${off}\n| \`manage-debt\` | add |`)).toEqual(['manage-debt']);
     const seeded = off.replace('| `check-ci-status` |', '| `post-review-summary` | `references/pr/post-review-summary.md` |\n| `check-ci-status` |');
@@ -3756,6 +3786,160 @@ describe('git references: the compliance-off ensure-traceable-issue writes nothi
     expect(collectCommentCalls('gh api repos/o/r/issues/1/comments --method POST', 'github')).toEqual(['gh api …/comments']);
     expect(existingIssuePathOf('1. If `ISSUE_INPUT` is provided:\n   - Post.\n2. If no `ISSUE_INPUT`: create\n')).toBe('1. If `ISSUE_INPUT` is provided:\n   - Post.\n');
     expect(existingIssuePathOf('no steps here')).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The scrub and the writes it gates are the same bytes in both reference trees (AC-45)
+//
+// With compliance off, the operations that stay still publish a body: ensure-pr-ready opens and
+// retitles the PR, ensure-traceable-issue creates a new issue, and create-release writes the
+// notes. Each body reaches its sink through the D11 scrub. The compliance arms (AC-42) cut the
+// text that feeds a posting step, and they must not touch the scrub or the write it gates.
+//
+// Those kept body-posting references now carry arms, so they differ as whole files, and "byte
+// identical in both trees" is read in two parts:
+//   - the scrub lines of each kept body-posting reference are the same lines in the same order in
+//     both trees. In ensure-traceable-issue the compliance-off file drops the existing-issue
+//     comment path (AC-42), so its scrub lines are an ordered subset of the compliance-on lines;
+//   - every kept reference with no compliance arm is a byte copy, and the files that do differ
+//     are exactly the armed roster, so the roster is not stale.
+// The Git agent's own scrub section is held in the compliance-off Git agent block above.
+// ---------------------------------------------------------------------------
+
+/** What makes a reference line part of the D11 scrub, or of a write that the scrub gates. */
+const SCRUB_LINE_TOKENS: readonly string[] = [
+  'Comment-sink scrub',
+  'redact-secrets.cjs',
+  'DEVFLOW_BODY',
+  'DEVFLOW_NOTES',
+  'SCRUBBED_BODY',
+  'DO NOT POST',
+  'Posting gate',
+  '--body-file',
+  '--notes-file',
+  '-F body=@',
+];
+
+/**
+ * The kept operations whose compliance-off scrub lines are an ordered subset of the compliance-on
+ * lines, not the same lines: the AC-42 arm drops the existing-issue comment path, and that path
+ * scrubbed and posted. Every other body-posting operation keeps all of its scrub lines.
+ */
+const ORDERED_SUBSET_SCRUB_OPS: readonly string[] = ['ensure-traceable-issue'];
+
+type ScrubRelation = 'identical' | 'ordered-subset';
+
+/** Named extractor: the lines of a reference that carry a scrub token, in order. */
+export function scrubLinesOf(text: string): string[] {
+  return text.split('\n').filter(line => SCRUB_LINE_TOKENS.some(token => line.includes(token)));
+}
+
+/**
+ * Named collector: how the scrub lines of a compliance-off reference differ from those of the
+ * compliance-on reference, one entry per defect. `identical` wants the same lines in the same
+ * order. `ordered-subset` wants every off line in the on lines, in order.
+ */
+export function collectScrubDefects(on: string, off: string, relation: ScrubRelation): string[] {
+  const onLines = scrubLinesOf(on);
+  const offLines = scrubLinesOf(off);
+  const defects: string[] = [];
+  if (relation === 'identical') {
+    if (onLines.length !== offLines.length) defects.push(`${offLines.length} scrub line(s) off, ${onLines.length} on`);
+    const shared = Math.min(onLines.length, offLines.length);
+    for (let i = 0; i < shared; i += 1) {
+      if (onLines[i] !== offLines[i]) defects.push(`scrub line ${i + 1} differs: ${offLines[i].trim().slice(0, 80)}`);
+    }
+    return defects;
+  }
+  let from = 0;
+  for (const line of offLines) {
+    const at = onLines.indexOf(line, from);
+    if (at === -1) defects.push(`an off scrub line is not in the on file, in order: ${line.trim().slice(0, 80)}`);
+    else from = at + 1;
+  }
+  return defects;
+}
+
+/** Named collector: the references of `rels` whose compliance-on and compliance-off text differ, sorted. */
+export function collectDifferingReferences(
+  rels: readonly string[],
+  readOn: (rel: string) => string,
+  readOff: (rel: string) => string,
+): string[] {
+  return rels.filter(rel => readOn(rel) !== readOff(rel)).sort();
+}
+
+describe('git references: the scrub and the writes it gates are unchanged by the compliance arms (AC-45)', () => {
+  const keptOps = TRACKER_GITHUB_OPS.filter(op => !POSTING_OPERATIONS.includes(op));
+  const readOn = (rel: string): string => readBuiltReference(SKILL_REFS_OUTPUT_DIR, rel);
+  const readOff = (rel: string): string => readBuiltReference(COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR, rel);
+  const refOf = (op: string, provider: string): string => {
+    const rel = operationReferenceRel(op, provider);
+    if (rel === null) throw new Error(`${op} has no reference for ${provider}`);
+    return rel;
+  };
+  /** The kept operations that hold scrub lines in the compliance-off file of any provider. */
+  const bodyPostingOps = keptOps.filter(op => TRACKER_PROVIDER_IDS.some(provider => scrubLinesOf(readOff(refOf(op, provider))).length > 0));
+  const relationOf = (op: string): ScrubRelation => (ORDERED_SUBSET_SCRUB_OPS.includes(op) ? 'ordered-subset' : 'identical');
+
+  it('finds the kept body-posting operations by their scrub lines, and each one scrubs under every provider', () => {
+    expect(bodyPostingOps).toEqual(expect.arrayContaining(['create-release', 'ensure-pr-ready', 'ensure-traceable-issue']));
+    for (const op of bodyPostingOps) {
+      for (const provider of TRACKER_PROVIDER_IDS) {
+        expect(scrubLinesOf(readOff(refOf(op, provider))).length, `${provider}/${op} holds no scrub line`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  for (const op of bodyPostingOps) {
+    for (const provider of TRACKER_PROVIDER_IDS) {
+      it(`${provider}/${op}: the compliance-off scrub lines are ${relationOf(op) === 'identical' ? 'the compliance-on lines' : 'an ordered subset of the compliance-on lines'}`, () => {
+        const rel = refOf(op, provider);
+        expect(scrubLinesOf(readOn(rel)).length, 'the on file must hold scrub lines, or the comparison proves nothing').toBeGreaterThan(0);
+        expect(collectScrubDefects(readOn(rel), readOff(rel), relationOf(op))).toEqual([]);
+      });
+    }
+  }
+
+  it('the ordered-subset exception is live: the on file of each such operation holds scrub lines that the off file dropped', () => {
+    expect(ORDERED_SUBSET_SCRUB_OPS.every(op => bodyPostingOps.includes(op)), 'an exception for an operation that no longer scrubs').toBe(true);
+    for (const op of ORDERED_SUBSET_SCRUB_OPS) {
+      for (const provider of TRACKER_PROVIDER_IDS) {
+        const rel = refOf(op, provider);
+        expect(scrubLinesOf(readOn(rel)).length, `${provider}/${op}`).toBeGreaterThan(scrubLinesOf(readOff(rel)).length);
+      }
+    }
+  });
+
+  it('copies every kept reference with no compliance arm byte for byte, and differs exactly where the armed roster says', () => {
+    const kept = installedReferenceManifest({ compliance: false });
+    expect(kept.length, 'the compliance-off manifest is read').toBeGreaterThan(0);
+    expect(collectDifferingReferences(kept, readOn, readOff)).toEqual([...COMPLIANCE_ARMED_REFERENCES].sort());
+  });
+
+  it('known-bad probes: an altered, a dropped and an added scrub line are each reported, and the real pair is not', () => {
+    const rel = refOf('create-release', 'github');
+    const on = readOn(rel);
+    const off = readOff(rel);
+    expect(collectScrubDefects(on, off, 'identical')).toEqual([]);
+    const first = scrubLinesOf(off)[0];
+    expect(collectScrubDefects(on, off.replace(first, `${first} and skip the scrub on failure`), 'identical')).toHaveLength(1);
+    expect(collectScrubDefects(on, off.replace(`${first}\n`, ''), 'identical')).toHaveLength(1);
+    const added = `${off}\ngh release create v1 --notes-file "$DEVFLOW_NOTES_RAW"\n`;
+    expect(collectScrubDefects(on, added, 'identical')).toHaveLength(1);
+    expect(collectScrubDefects(on, added, 'ordered-subset')).toHaveLength(1);
+    const issue = refOf('ensure-traceable-issue', 'github');
+    expect(collectScrubDefects(readOn(issue), readOff(issue), 'ordered-subset')).toEqual([]);
+    expect(collectScrubDefects(readOn(issue), readOff(issue), 'identical').length, 'the identical rule must refuse the dropped path').toBeGreaterThan(0);
+  });
+
+  it('known-bad probe: one byte changed in a reference with no arm is reported against the armed roster', () => {
+    const kept = installedReferenceManifest({ compliance: false });
+    const unarmed = kept.find(rel => !COMPLIANCE_ARMED_REFERENCES.includes(rel));
+    if (unarmed === undefined) throw new Error('every kept reference is armed, so the whole-file rule has no subject');
+    const tampered = (rel: string): string => (rel === unarmed ? `${readOff(rel)} ` : readOff(rel));
+    expect(collectDifferingReferences(kept, readOn, tampered)).toEqual([...COMPLIANCE_ARMED_REFERENCES, unarmed].sort());
   });
 });
 
