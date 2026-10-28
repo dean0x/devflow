@@ -21,17 +21,43 @@
  *   - the hosts outside the roster are the other hosts of the manifest and the agent
  *     registry, each file read and a posting line seeded into each one reported.
  *
- * The reference trees (`dist/skills/git/references/`) are outside this guard: their arms
- * and their scan belong to the reference build.
+ * The reference text a compliance-off machine installs is held to the same rule by the last
+ * section (AC-44): the content of two compliance-off installs (the github install and the all-off
+ * install of tests/install-snapshot.test.ts, made into injected scratch dirs) and both
+ * compliance-off dist trees, including `dist/compliance-off/skills/git/references`. Its patterns
+ * are the AC-44 families, its allowlist carries a reason for every excused line, and it is held
+ * honest the same ways: a seeded line fails it, and every family finds a hit in the compliance-on
+ * text.
  */
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { readdirSync, readFileSync } from 'fs'
+import * as os from 'os'
 import * as path from 'path'
 
-import { variantOffRelPath, type OffVariantKey, type VariantKind } from '../../src/core/curation-variants.js'
+import {
+  BOTH_OFF_OUTPUT_DIR,
+  COMPLIANCE_OFF_OUTPUT_DIR,
+  variantOffRelPath,
+  type OffVariantKey,
+  type VariantKind,
+} from '../../src/core/curation-variants.js'
+import { skillsDir } from '../../src/core/assets.js'
 import { getAllAgentNames } from '../../src/core/plugins.js'
-import { ROOT, resolveAllAgents } from '../helpers.js'
+import { SKILL_REFS_OUTPUT_DIR, installedReferenceManifest } from '../../src/core/mds-variants.js'
+import { ROOT, resolveAllAgents, walkFiles } from '../helpers.js'
+import {
+  INSTALL_CONFIGS,
+  SUBPROCESS_TIMEOUT_MS,
+  captureBaseline,
+  createSandbox,
+  excludeGitAndLogs,
+  readTree,
+  removeSandbox,
+  runCliOk,
+  type Baseline,
+  type Sandbox,
+} from '../install-snapshot-helpers.js'
 import {
   COMPLIANCE_VARIANT_HOSTS,
   CURATION_VARIANT_HOSTS,
@@ -40,10 +66,15 @@ import {
   POSTING_OPERATIONS,
 } from '../fixtures/mds-manifest.js'
 
-/** A text to scan, with the label a defect names it by. */
+/**
+ * A text to scan, with the label a defect names it by. `key` is the name an allowlist entry
+ * excuses it under when that differs from the label: the AC-44 scan reads the same file in four
+ * places (two dist trees, two installs), so an entry names the file once, by its path below the tree.
+ */
 interface ScanFile {
   readonly path: string
   readonly text: string
+  readonly key?: string
 }
 
 /** One thing a compliance-off prompt must not hold. */
@@ -52,13 +83,24 @@ interface PostingPattern {
   readonly re: RegExp
 }
 
+/** The publish call of the evidence script. */
+const PUBLISH_CALL: PostingPattern = { id: 'publish call', re: /verify-evidence\.cjs["`]?\s+publish\b/ }
+
+/** One pattern per posting operation: a spawn, a loading row, a prose pointer and a path all name the op. */
+const OP_NAME_PATTERNS: readonly PostingPattern[] = POSTING_OPERATIONS.map(
+  (op): PostingPattern => ({ id: `op ${op}`, re: new RegExp(`\\b${op}\\b`) }),
+)
+
+/** The heading of the PR-body section that asks a reviewer where to look. */
+const REVIEWER_FOCUS_HEADING: PostingPattern = { id: 'Reviewer Focus Areas heading', re: /Reviewer Focus Areas/ }
+
 /**
  * The items AC-13 lists, as patterns. Each op name is a pattern of its own: a spawn, a
  * loading row, a prose pointer and a path all name the op, and none belongs in an off prompt.
  */
 const POSTING_PATTERNS: readonly PostingPattern[] = [
-  { id: 'publish call', re: /verify-evidence\.cjs["`]?\s+publish\b/ },
-  ...POSTING_OPERATIONS.map((op): PostingPattern => ({ id: `op ${op}`, re: new RegExp(`\\b${op}\\b`) })),
+  PUBLISH_CALL,
+  ...OP_NAME_PATTERNS,
   { id: 'PR_TEST_PLAN_BLOCK input', re: /\bPR_TEST_PLAN_BLOCK\b/ },
   { id: 'PR_EXCEPTIONS input', re: /\bPR_EXCEPTIONS\b/ },
   { id: 'TRACEABILITY_EXCEPTIONS input', re: /\bTRACEABILITY_EXCEPTIONS\b/ },
@@ -68,11 +110,13 @@ const POSTING_PATTERNS: readonly PostingPattern[] = [
   { id: 'Code report text in PR_DESCRIPTION_GUIDANCE', re: /Code agents' reports from `?CODE_AGENT_OUTPUT/ },
   { id: 'Validate report text in PR_DESCRIPTION_GUIDANCE', re: /Validate's `Lint pack:` line if UNVERIFIED/ },
   { id: 'implement evidence asks read', re: /implement-evidence-asks/ },
-  { id: 'Reviewer Focus Areas heading', re: /Reviewer Focus Areas/ },
+  REVIEWER_FOCUS_HEADING,
 ]
 
 /** Why a posting line may stay in an off prompt: it forbids the act, describes it, or names a plain op. */
-type AllowReason = 'prohibition' | 'description' | 'plain-op'
+const ALLOW_REASONS = ['prohibition', 'description', 'plain-op'] as const
+
+type AllowReason = (typeof ALLOW_REASONS)[number]
 
 /** One excused hit: the file it sits in, the pattern id it matches, and the reason it stays. */
 interface AllowEntry {
@@ -81,12 +125,13 @@ interface AllowEntry {
   readonly reason: AllowReason
 }
 
-/** The excused hits. Empty: no off prompt holds a posting line. An entry is added only with its reason. */
+/** The excused hits of the command and agent scan. Empty: no off prompt holds a posting line. An entry is added only with its reason. */
 const ALLOWLIST: readonly AllowEntry[] = []
 
 /**
  * Named collector: the posting items a set of texts hold outside the allowlist, one
- * `<path>: <pattern id>` entry per file and pattern, in scan order.
+ * `<path>: <pattern id>` entry per file and pattern, in scan order. An entry excuses a file by
+ * its `key` when it has one, else by its path.
  */
 export function collectPostingHits(
   files: readonly ScanFile[],
@@ -95,9 +140,10 @@ export function collectPostingHits(
 ): string[] {
   const hits: string[] = []
   for (const file of files) {
+    const name = file.key ?? file.path
     for (const pattern of patterns) {
       if (!pattern.re.test(file.text)) continue
-      if (allowlist.some(entry => entry.file === file.path && entry.pattern === pattern.id)) continue
+      if (allowlist.some(entry => entry.file === name && entry.pattern === pattern.id)) continue
       hits.push(`${file.path}: ${pattern.id}`)
     }
   }
@@ -428,5 +474,336 @@ describe('posting absence: known-bad probes keep the collector live', () => {
       'seeded/other.md: op manage-debt',
       'seeded/other.md: PR_EXCEPTIONS input',
     ])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AC-44: the compliance-off installs and the compliance-off dist trees hold no posting step
+//
+// The command and agent scan above covers the prompts. This one covers everything else a
+// compliance-off machine installs as text: the reference documents of the git skill, the static
+// skills, the rules and the hook text. Four corpora are scanned:
+//   - the content of the github install and of the all-off install of tests/install-snapshot.test.ts,
+//     each made by the built CLI into its own scratch HOME and repo (the snapshot configs that do not
+//     enable a compliance framework), every installed file;
+//   - `dist/compliance-off/` and `dist/curation-compliance-off/`, every file, including
+//     `dist/compliance-off/skills/git/references/`.
+//
+// An installed script (`.js`, `.cjs`) is code, not text a model reads, and is left out: the
+// evidence script keeps its publish code, and what holds it back on a compliance-off machine is the
+// run-time refusal in tests/evidence/update-pr-evidence.test.ts. Everything else is scanned.
+//
+// A hit outside the allowlist fails. An allowlist entry names a file (by its path below the tree, so
+// one entry covers the same file in all four corpora), the pattern id, and one reason:
+//   prohibition  the line forbids the act, or greps for it as a violation;
+//   description  the line says what an operation or a PR-body section is, and instructs nothing;
+//   plain-op     the line is a write the compliance-off machine keeps (the PR body, the PR title).
+// A hit that fits none of the three is a posting step left in an off build. It needs an arm in its
+// source, not an allowlist entry.
+// ---------------------------------------------------------------------------
+
+/** The write flag of a `gh api` comment call, and the route it writes to. */
+const WRITE_FLAG = '(?:-X|--method)\\s+(?:POST|PATCH)\\b'
+const COMMENTS_ROUTE = '\\/comments\\b'
+/** The same line or the next two: a wrapped `gh api` call puts its route on a following line. */
+const WITHIN_TWO_LINES = '(?:[^\\n]*\\n){0,2}?[^\\n]*'
+
+/** The AC-44 families, as patterns, plus the publish call, the eight op names and the Reviewer Focus Areas heading shared with AC-13. */
+const AC44_PATTERNS: readonly PostingPattern[] = [
+  { id: 'gh comment command', re: /\bgh\s+(?:pr|issue)\s+comment\b/ },
+  { id: 'gh pr review command', re: /\bgh\s+pr\s+review\b/ },
+  { id: 'gh pr edit command', re: /\bgh\s+pr\s+edit\b/ },
+  { id: 'gh issue edit command', re: /\bgh\s+issue\s+edit\b/ },
+  {
+    id: 'comment POST or PATCH call',
+    re: new RegExp(`${WRITE_FLAG}${WITHIN_TWO_LINES}${COMMENTS_ROUTE}|${COMMENTS_ROUTE}${WITHIN_TWO_LINES}${WRITE_FLAG}`),
+  },
+  PUBLISH_CALL,
+  ...OP_NAME_PATTERNS,
+  { id: 'MCP add-comment tool', re: /\*add comment\*|\|\s*add comment\s*\|/ },
+  { id: 'MCP edit-comment tool', re: /\*edit comment in place\*|\|\s*edit comment in place\s*\|/ },
+  { id: 'Testing Gaps heading', re: /Testing Gaps/ },
+  REVIEWER_FOCUS_HEADING,
+]
+
+/**
+ * The excused hits of the AC-44 scan. An entry is added only for a hit that exists, with its reason;
+ * a test below fails an entry that no scanned text hits any more. The file is the path below the tree
+ * (the same file is read in the github install, the all-off install and the compliance-off dist tree).
+ */
+const AC44_ALLOWLIST: readonly AllowEntry[] = [
+  // The review methodology tells a reviewer to write findings into the report and never to post them.
+  // `patterns.md` says where publishing happens (the Git agent's post-review-summary operation, with
+  // its visibility gate and scrub): it describes the operation and instructs nothing.
+  { file: 'skills/review-methodology/references/patterns.md', pattern: 'op post-review-summary', reason: 'description' },
+  // `violations.md` lists "Publishing from inside a review" as a violation, and its detection greps
+  // look for `gh pr comment` in review instructions: both forbid the act.
+  { file: 'skills/review-methodology/references/violations.md', pattern: 'op post-review-summary', reason: 'prohibition' },
+  { file: 'skills/review-methodology/references/violations.md', pattern: 'gh comment command', reason: 'prohibition' },
+  // The docs framework lists which agents persist no file; its Git line says what the operation writes
+  // (a consolidated review comment only). It describes the operation and instructs nothing.
+  { file: 'skills/docs-framework/SKILL.md', pattern: 'op post-review-summary', reason: 'description' },
+  // The Git skill's PR description template names the two sections a PR body may carry, and its
+  // checks table says when the Testing Gaps section is warned. It describes the template; the
+  // compliance-off ensure-pr-ready reference carries no step that fills either section.
+  { file: 'skills/git/references/patterns.md', pattern: 'Testing Gaps heading', reason: 'description' },
+  { file: 'skills/git/references/patterns.md', pattern: 'Reviewer Focus Areas heading', reason: 'description' },
+  // The tool-call contract's capability table lists every capability a tracker operation may need and
+  // what it does when no tool offers it. The two comment-write rows describe a capability; no kept
+  // operation names either one as a step (the AC-42 arms cut every such step).
+  { file: 'skills/git/references/tracker/_mcp.md', pattern: 'MCP add-comment tool', reason: 'description' },
+  { file: 'skills/git/references/tracker/_mcp.md', pattern: 'MCP edit-comment tool', reason: 'description' },
+  // ensure-pr-ready keeps two PR writes with compliance off (AC-14): the retitle of step 4c (the title
+  // is validated before use) and the `## Related Issues` body edit of step 4b (through the D11 scrub).
+  // The PR body is kept.
+  { file: 'skills/git/references/tracker/github/ensure-pr-ready.md', pattern: 'gh pr edit command', reason: 'plain-op' },
+  { file: 'skills/git/references/tracker/jira/ensure-pr-ready.md', pattern: 'gh pr edit command', reason: 'plain-op' },
+  { file: 'skills/git/references/tracker/linear/ensure-pr-ready.md', pattern: 'gh pr edit command', reason: 'plain-op' },
+]
+
+/**
+ * The path below the tree of a file read from a HOME: the install-only `devflow` namespace of a skill
+ * or of a command, agent or rule folder is dropped, so an installed file and a built one share a name.
+ */
+export function scanKeyOf(homeRel: string): string {
+  const skill = /^\.claude\/skills\/devflow:([^/]+)\/(.+)$/.exec(homeRel)
+  if (skill !== null) return `skills/${skill[1]}/${skill[2]}`
+  const folder = /^\.claude\/(commands|agents|rules)\/devflow\/(.+)$/.exec(homeRel)
+  return folder === null ? homeRel : `${folder[1]}/${folder[2]}`
+}
+
+/** The compliance-off dist trees the scan reads. */
+const OFF_DIST_TREES: readonly string[] = [COMPLIANCE_OFF_OUTPUT_DIR, BOTH_OFF_OUTPUT_DIR]
+
+/** Every file of one dist tree, read as text. An absent or empty tree is an error that names the build step. */
+function distTreeFiles(treeRel: string): ScanFile[] {
+  const root = path.join(ROOT, ...treeRel.split('/'))
+  const files = walkFiles(root, () => true)
+  if (files.length === 0) throw new Error(`${treeRel}/ is absent or empty: run \`npm run build:mds\` (this guard reads compiled trees and cannot be skipped)`)
+  return files.map(file => {
+    const rel = path.relative(root, file).split(path.sep).join('/')
+    return { path: `${treeRel}/${rel}`, text: readFileSync(file, 'utf-8'), key: rel }
+  })
+}
+
+/** An installed script is code; a model reads none of it as a prompt. */
+const SCRIPT_FILE_RE = /\.(?:c?js|mjs)$/
+
+/** One install made into scratch dirs: its text files, the scripts left out, and the compliance state its manifest records. */
+interface InstallScan {
+  readonly name: string
+  readonly home: string
+  readonly files: ScanFile[]
+  readonly scripts: string[]
+  readonly complianceEnabled: unknown
+  readonly installedCompliance: unknown
+}
+
+/** The value at a key path of parsed JSON, or `undefined` when a step is not an object. */
+function valueAt(value: unknown, keys: readonly string[]): unknown {
+  let current = value
+  for (const key of keys) {
+    if (typeof current !== 'object' || current === null) return undefined
+    current = (current as Record<string, unknown>)[key]
+  }
+  return current
+}
+
+/** Read every file the install added to the sandbox HOME and repo, apart from `.git` and the hook logs. */
+function scanInstall(name: string, sb: Sandbox, baseline: Baseline): InstallScan {
+  const files: ScanFile[] = []
+  const scripts: string[] = []
+  const roots = [
+    { label: 'home', tree: readTree(sb.home, excludeGitAndLogs, true), before: baseline.home, keyOf: scanKeyOf },
+    { label: 'repo', tree: readTree(sb.repo, excludeGitAndLogs, true), before: baseline.repo, keyOf: (rel: string): string => `repo/${rel}` },
+  ]
+  for (const root of roots) {
+    for (const [rel, entry] of root.tree) {
+      if (entry.kind !== 'file' || entry.content === undefined || root.before.has(rel)) continue
+      if (SCRIPT_FILE_RE.test(rel)) {
+        scripts.push(`${root.label}/${rel}`)
+      } else if (!entry.content.includes(0)) {
+        files.push({ path: `install:${name}/${root.label}/${rel}`, text: entry.content.toString('utf-8'), key: root.keyOf(rel) })
+      }
+    }
+  }
+  const manifest: unknown = JSON.parse(readFileSync(path.join(sb.home, '.devflow', 'manifest.json'), 'utf-8'))
+  return {
+    name,
+    home: sb.home,
+    files,
+    scripts,
+    complianceEnabled: valueAt(manifest, ['features', 'compliance', 'enabled']),
+    installedCompliance: valueAt(manifest, ['installedVariants', 'compliance']),
+  }
+}
+
+/** The snapshot configs that make a compliance-off install: those that do not enable a compliance framework. */
+const OFF_INSTALL_CONFIGS = INSTALL_CONFIGS.filter(config => !config.initArgs.includes('--compliance'))
+
+describe('posting absence: the compliance-off installs and dist trees hold no posting step (AC-44)', () => {
+  const distTrees = OFF_DIST_TREES.map(tree => ({ tree, files: distTreeFiles(tree) }))
+  const sandboxes: Sandbox[] = []
+  const installs: InstallScan[] = []
+  const scanned = (): ScanFile[] => [...distTrees.flatMap(entry => entry.files), ...installs.flatMap(install => install.files)]
+
+  beforeAll(() => {
+    for (const config of OFF_INSTALL_CONFIGS) {
+      const sb = createSandbox()
+      sandboxes.push(sb)
+      const baseline = captureBaseline(sb)
+      runCliOk(sb, ['init', ...config.initArgs])
+      installs.push(scanInstall(config.name, sb, baseline))
+    }
+  }, (OFF_INSTALL_CONFIGS.length + 1) * SUBPROCESS_TIMEOUT_MS)
+
+  afterAll(() => {
+    for (const sb of sandboxes) removeSandbox(sb)
+  })
+
+  it('scans the github install and the all-off install, and no install that enables compliance', () => {
+    expect(OFF_INSTALL_CONFIGS.map(config => config.name)).toEqual(['github', 'all-off'])
+    expect(installs.map(install => install.name)).toEqual(OFF_INSTALL_CONFIGS.map(config => config.name))
+  })
+
+  it('each scanned install is a compliance-off install made inside the scratch dirs', () => {
+    for (const install of installs) {
+      expect(install.complianceEnabled, `${install.name}: features.compliance.enabled`).toBe(false)
+      expect(install.installedCompliance, `${install.name}: installedVariants.compliance`).toBe(false)
+      expect(install.home.startsWith(os.tmpdir()), `${install.name}: the install ran in a temp HOME`).toBe(true)
+      expect(install.home, `${install.name}: never the real HOME`).not.toBe(os.homedir())
+    }
+  })
+
+  it('reads every installed file but the scripts, and the scripts it leaves out include the evidence script', () => {
+    for (const install of installs) {
+      expect(install.files.length, `${install.name}: installed text files`).toBeGreaterThan(100)
+      expect(install.files.some(file => file.key === 'skills/git/references/pr/check-ci-status.md'), `${install.name}: a git reference`).toBe(true)
+      expect(install.files.some(file => file.key === 'agents/git.md'), `${install.name}: the Git agent`).toBe(true)
+      expect(install.files.some(file => (file.key ?? '').startsWith('commands/')), `${install.name}: a command`).toBe(true)
+      expect(install.scripts, `${install.name}: scripts left out`).toContain('home/.devflow/scripts/verify-evidence.cjs')
+      expect(install.files.some(file => SCRIPT_FILE_RE.test(file.path)), `${install.name}: no script is scanned`).toBe(false)
+    }
+  })
+
+  it('reads the whole compliance-off references tree of the build, and both trees hold commands', () => {
+    const offRefs = distTrees[0].files.filter(file => (file.key ?? '').startsWith('skills/git/references/'))
+    expect(offRefs.map(file => file.key?.slice('skills/git/references/'.length)).sort()).toEqual([...installedReferenceManifest({ compliance: false })].sort())
+    for (const { tree, files } of distTrees) {
+      expect(files.some(file => (file.key ?? '').startsWith('commands/')), `${tree}: commands`).toBe(true)
+    }
+  })
+
+  it('no compliance-off dist tree holds a posting item outside the allowlist', () => {
+    for (const { tree, files } of distTrees) {
+      expect(collectPostingHits(files, AC44_PATTERNS, AC44_ALLOWLIST), tree).toEqual([])
+    }
+  })
+
+  it('no compliance-off install holds a posting item outside the allowlist', () => {
+    for (const install of installs) {
+      expect(collectPostingHits(install.files, AC44_PATTERNS, AC44_ALLOWLIST), install.name).toEqual([])
+    }
+  })
+
+  it('every allowlist entry has one of the three reasons, names a pattern of the scan, and none repeats', () => {
+    const ids = new Set(AC44_PATTERNS.map(pattern => pattern.id))
+    expect(AC44_ALLOWLIST.length, 'the allowlist is read').toBeGreaterThan(0)
+    for (const entry of AC44_ALLOWLIST) {
+      expect(ALLOW_REASONS as readonly string[], `${entry.file}: ${entry.pattern}`).toContain(entry.reason)
+      expect(ids.has(entry.pattern), `${entry.file}: "${entry.pattern}" is not a pattern of the scan`).toBe(true)
+    }
+    const names = AC44_ALLOWLIST.map(entry => `${entry.file}: ${entry.pattern}`)
+    expect(new Set(names).size, 'an entry is listed twice').toBe(names.length)
+  })
+
+  it('every allowlist entry excuses a hit that a scanned text really holds, in every corpus that holds the file', () => {
+    const files = scanned()
+    const stale = AC44_ALLOWLIST.filter(entry => {
+      const pattern = AC44_PATTERNS.find(candidate => candidate.id === entry.pattern)
+      return !files.some(file => (file.key ?? file.path) === entry.file && pattern?.re.test(file.text) === true)
+    })
+    expect(stale.map(entry => `${entry.file}: ${entry.pattern}`), 'an entry for a hit that is gone').toEqual([])
+    for (const install of installs) {
+      const unseen = AC44_ALLOWLIST.filter(entry => entry.file.startsWith('skills/') && !install.files.some(file => file.key === entry.file))
+      expect(unseen.map(entry => entry.file), `${install.name}: allowlisted files missing from the install`).toEqual([])
+    }
+  })
+
+  it('known-bad probe: a posting line seeded into any scanned text fails the scan, install or dist tree', () => {
+    const files = scanned()
+    expect(files.length, 'the scan reads the installs and both trees').toBeGreaterThan(OFF_DIST_TREES.length)
+    expect(AC44_ALLOWLIST.some(entry => entry.pattern === 'op manage-debt'), 'the probe pattern is not excused anywhere').toBe(false)
+    const seeded = files.map((file): ScanFile => ({ ...file, text: `${file.text}\nOPERATION: manage-debt\n` }))
+    expect(collectPostingHits(files, AC44_PATTERNS, AC44_ALLOWLIST)).toEqual([])
+    expect(collectPostingHits(seeded, AC44_PATTERNS, AC44_ALLOWLIST)).toEqual(files.map(file => `${file.path}: op manage-debt`))
+  })
+
+  it('known-bad probe: an allowlist entry excuses its own file and pattern in every corpus, and nothing else', () => {
+    const entry = AC44_ALLOWLIST.find(candidate => candidate.pattern === 'gh comment command')
+    if (entry === undefined) throw new Error('the allowlist has no gh comment entry to probe')
+    const line = 'grep -rn \'gh pr comment\' --include="*.md"\n'
+    for (const file of scanned().slice(0, 1)) {
+      expect(collectPostingHits([{ ...file, text: line }], AC44_PATTERNS, [entry])).toEqual([`${file.path}: gh comment command`])
+    }
+    const excused: ScanFile = { path: `install:github/home/.claude/${entry.file}`, key: entry.file, text: line }
+    expect(collectPostingHits([excused], AC44_PATTERNS, [entry])).toEqual([])
+    expect(collectPostingHits([{ ...excused, key: 'skills/git/SKILL.md' }], AC44_PATTERNS, [entry])).toEqual([`${excused.path}: gh comment command`])
+    expect(collectPostingHits([{ ...excused, text: 'gh pr review 1\n' }], AC44_PATTERNS, [entry])).toEqual([`${excused.path}: gh pr review command`])
+  })
+})
+
+/** One line per AC-44 pattern id, each of which that pattern must match; the table is held to the pattern list below. */
+const SEED_LINES: Readonly<Record<string, string>> = {
+  'gh comment command': 'gh issue comment 12 --body-file "$DEVFLOW_BODY"',
+  'gh pr review command': 'gh pr review 12 --comment --body-file "$DEVFLOW_BODY"',
+  'gh pr edit command': 'gh pr edit 12 --body-file "$DEVFLOW_BODY"',
+  'gh issue edit command': 'gh issue edit 12 --body-file "$DEVFLOW_BODY"',
+  'comment POST or PATCH call': 'gh api -X PATCH "repos/o/r/issues/comments/9" -F body=@"$DEVFLOW_BODY"',
+  'publish call': 'node "$HOME/.devflow/scripts/verify-evidence.cjs" publish --pr 1',
+  ...Object.fromEntries(POSTING_OPERATIONS.map(op => [`op ${op}`, `OPERATION: ${op}`])),
+  'MCP add-comment tool': 'Post through the *add comment* capability.',
+  'MCP edit-comment tool': 'Update it through the *edit comment in place* capability.',
+  'Testing Gaps heading': '### Testing Gaps',
+  'Reviewer Focus Areas heading': '## Reviewer Focus Areas',
+}
+
+/** Every compliance-on text the AC-44 families are shown against: commands, agents, the git references and the static skills. */
+function complianceOnTextFiles(): ScanFile[] {
+  const refsRoot = path.join(ROOT, ...SKILL_REFS_OUTPUT_DIR.split('/'))
+  const read = (file: string): ScanFile => ({ path: path.relative(ROOT, file).split(path.sep).join('/'), text: readFileSync(file, 'utf-8') })
+  return [
+    ...readTreeDir('dist/commands'),
+    ...readTreeDir('dist/agents'),
+    ...walkFiles(refsRoot, file => file.endsWith('.md')).map(read),
+    ...walkFiles(skillsDir(), file => file.endsWith('.md')).map(read),
+  ]
+}
+
+describe('posting absence: the AC-44 families are live (non-vacuity)', () => {
+  const on = complianceOnTextFiles()
+
+  it('every family finds a hit in the compliance-on commands, agents, references and static skills', () => {
+    expect(on.length, 'the compliance-on text is read').toBeGreaterThan(100)
+    const silent = AC44_PATTERNS.filter(pattern => collectPostingHits(on, [pattern], []).length === 0)
+    expect(silent.map(pattern => pattern.id), 'a pattern that matches no compliance-on text proves nothing about an off one').toEqual([])
+  })
+
+  it('the seed table has a line for every pattern, and each line is reported under its own pattern', () => {
+    expect(Object.keys(SEED_LINES).sort()).toEqual(AC44_PATTERNS.map(pattern => pattern.id).sort())
+    for (const pattern of AC44_PATTERNS) {
+      const seeded: ScanFile = { path: 'seeded/dirty.md', text: `Spawn the Git agent.\n${SEED_LINES[pattern.id]}\n` }
+      expect(collectPostingHits([seeded], AC44_PATTERNS, []), pattern.id).toContain(`seeded/dirty.md: ${pattern.id}`)
+    }
+    expect(collectPostingHits([{ path: 'seeded/clean.md', text: 'Spawn the Git agent with ensure-pr-ready.\n' }], AC44_PATTERNS, [])).toEqual([])
+  })
+
+  it('a comment write is reported when its route wraps onto the next line or comes first, and a milestone write or a comment delete is not', () => {
+    const hit = (text: string): string[] => collectPostingHits([{ path: 'seeded/call.md', text }], AC44_PATTERNS, [])
+    const id = 'seeded/call.md: comment POST or PATCH call'
+    expect(hit('gh api \\\n    -X POST \\\n    "repos/o/r/pulls/1/comments" \\\n    -F body=@"$F"\n')).toEqual([id])
+    expect(hit('gh api repos/o/r/issues/comments/9 \\\n  --method PATCH -F body=@"$F"\n')).toEqual([id])
+    expect(hit('gh api --method POST "repos/o/r/milestones" -f title=v1\n')).toEqual([])
+    expect(hit('Given an admin\nWhen DELETE /comments/{id}\nThen 200\n')).toEqual([])
   })
 })
