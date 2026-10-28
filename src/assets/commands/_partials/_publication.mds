@@ -3,12 +3,21 @@ A partial: the publication-value gate. D-SETTINGS-LINE: it imports nothing from
 its consumers, and this text takes `REVIEW_PUBLICATION` from the line resolved
 there for the worktree's root.
 
-@define publication_gate():
+`publication_resolve` is the two resolution steps alone. `publication_gate` is those steps plus the
+note that names the Git agent's publication gate; a host with compliance off calls only the steps,
+because the gate's reference file is not installed there.
+
+@define publication_resolve():
 **Resolve `REVIEW_PUBLICATION` per worktree:** take `REVIEW_PUBLICATION` from that worktree's settings line — the line resolved above for `{root}`, the worktree's root, by the settings block when this run has not yet resolved that root; multi-worktree repos may resolve different values per worktree. The line already caps the personal choice at the team's (D-PUBLICATION-CEILING), so it is `off`, `auto` or `full`, and `off` when the line was unresolvable.
 
 **Evidence stub:** only when `EVIDENCE_POLICY` is `required`, a resolved `off` becomes `stub`, so a counts-only record still reaches the PR. `stub` is never a config value: the settings line never carries it.
+@end
+
+@define publication_gate():
+{{publication_resolve()}}
 
 Note: `auto` is NOT fail-open — under `auto`, the Git agent probes the repository visibility and treats any error or unrecognised value as PUBLIC (mode STUB). What each value does is decided by the Git agent's publication gate (`references/publication-gate.md` step 2); this partial only resolves the value.
 @end
 
+@export publication_resolve
 @export publication_gate

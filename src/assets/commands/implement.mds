@@ -8,7 +8,7 @@ output-dir: dist/commands
 @import { evidence_policy } from "./_partials/_evidence_policy.mds"
 @import { issue_ref_grammar, issue_capture_contract } from "./_partials/_tracker.mds"
 @import { test_plan_line } from "./_partials/_plan_contract.mds"
-@import { publication_gate } from "./_partials/_publication.mds"
+@import { publication_gate, publication_resolve } from "./_partials/_publication.mds"
 @import "./_partials/_compliance.mds" as compliance
 @import "./_partials/_settings.mds" as settings
 # Implement Command
@@ -188,10 +188,11 @@ node "$HOME/.devflow/scripts/verify-evidence.cjs" render --plan "{worktree}/.dev
 
 {{settings.settings_resolve()}}
 
-{{publication_gate()}}
 <!-- compliance:on -->
+{{publication_gate()}}
 Phase 11 passes the resolved value to the evidence script (`publish`), which decides what each value means for the evidence comment. From the same line: {{compliance.compliance_frameworks()}}
 <!-- compliance:off -->
+{{publication_resolve()}}
 Phase 11 passes no publication value: the local verify posts nothing. From the same line: {{compliance.compliance_frameworks()}}
 <!-- compliance:end -->
 
