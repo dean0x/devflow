@@ -101,7 +101,7 @@ set -o pipefail; export LC_ALL=C; git -C "{worktree}" diff --name-only -z --diff
 
 Its second line lists the extensions of the changed files. `{lang}` is the first of javascript-typescript (js jsx mjs cjs ts tsx), python (py), ruby (rb) whose extension is listed; no other value reaches the command. With none, CodeQL does not run and its status is `no supported language`; `extension list failed` means it did not complete.
 
-If all three scanners print `no`: warn user "No static analysis tools found. Install semgrep (`pip install semgrep`) or snyk (`npm install -g snyk`)." Set `STATIC_FINDINGS` to "Static analysis did not run: no scanner is installed." and `STATIC_STATUS` to `not installed` for each tool.
+If all three scanners print `no`: warn user "No static analysis tools found. Install semgrep or snyk." Set `STATIC_FINDINGS` to "Static analysis did not run: no scanner is installed." and `STATIC_STATUS` to `not installed` for each tool.
 
 If a scanner is installed but `jq` prints `no`: set `STATIC_FINDINGS` to "Static analysis did not complete: jq is not installed." and `STATIC_STATUS` to `did not complete (jq is not installed)` for an installed tool, else `not installed`.
 
@@ -114,12 +114,13 @@ If some are available: note which tools will run.
 
 Skip if Step 2c set `STATIC_STATUS`.
 
-Run each available tool in this order, each in its own foreground Bash call with the Bash `timeout` at the ceiling: 600000 ms, or `BASH_MAX_TIMEOUT_MS` when set. File names reach a scanner only through `-z`, `xargs -0` and after `--`.
+Run each available tool in this order, each in its own foreground Bash call with the Bash `timeout` at the ceiling: 600000 ms, or `BASH_MAX_TIMEOUT_MS` when set. Past it, run nothing else until its end notice and you Read its own last `exit=` line; the notice sets nothing. File names reach a scanner only through `-z`, `xargs -0` and after `--`.
 
 **Semgrep** (if available):
 ```bash
 cd "{worktree}" || exit
-set -o pipefail; git diff --name-only -z --diff-filter=d {DIFF_RANGE} | xargs -0 -r semgrep scan --config auto --sarif --quiet -- >"{ANALYSIS_DIR}/semgrep.sarif" 2>/dev/null; E=$?
+set -o pipefail; git diff --name-only -z --diff-filter=d {DIFF_RANGE} | xargs -0 -r semgrep scan --config auto --sarif --quiet -- >"{ANALYSIS_DIR}/semgrep.part" 2>/dev/null; E=$?
+mv "{ANALYSIS_DIR}"/semgrep.{part,sarif}
 printf '\nexit=%s\n' "$E"
 ```
 
@@ -159,7 +160,7 @@ printf '\nexit=%s\n' "$CODEQL_EXIT"
 rm -rf "${CODEQL_TMP}"
 trap - EXIT INT TERM
 ```
-A tool's status is its last line, `exit={n}`; a tool that ran completed only on Semgrep 0, Snyk 0 or 1 (1 = issues, only with SARIF output), CodeQL 0. Snyk 3 (no supported file) is `no supported language`: its counts are not checked. Any other status, or no such line, means it did not complete (126-127: scanner did not start; else failed. Semgrep via xargs: number only). A call with no `exit=` line in its own result did not complete. It stays did not complete for this run: ignore a later end notice. A tool that ran also did not complete when the counts fence prints no `{tool} docs=` line for it, `sarif=unreadable` or `findings table incomplete` for it (`: top` counts for every tool), or `docs=0` (Semgrep exit 0 with `docs=0`: no file to scan, completed).
+A tool's status is its last line, `exit={n}`; a tool that ran completed only on Semgrep 0, Snyk 0 or 1 (1 = issues, only with SARIF output), CodeQL 0. Snyk 3 (no supported file) is `no supported language`: its counts are not checked. Any other status, or no such line, means it did not complete (126-127: scanner did not start; else failed. Semgrep via xargs: number only). A call with no `exit=` line read did not complete. A tool that ran also did not complete when the counts fence prints no `{tool} docs=` line for it, `sarif=unreadable` or `findings table incomplete` for it (`: top` counts for every tool), or `docs=0` (Semgrep exit 0 with `docs=0`: no file to scan, completed).
 
 `findings.tsv` keeps every finding. Read only `findings-top.tsv` (top 50 by level: tool, file, line, level, rule, message cut to 200 chars), set `STATIC_FINDINGS` to the column names and its rows, and write them with the status lines to `{ANALYSIS_DIR}/static-findings.md`.
 
@@ -293,7 +294,7 @@ Run `/resolve` to process and fix these findings.
 
 ## Architecture
 
-The command only spawns agents, in seven phases: Phase 1 pre-flight to Phase 7 finalize.
+Seven phases: Phase 1 to Phase 7.
 
 ## Edge Cases
 

@@ -14,7 +14,7 @@
 // cannot silently remove safety-critical patterns.
 
 import { spawnSync } from 'child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { describe, it, expect } from 'vitest';
@@ -425,6 +425,8 @@ const NO_SCANNER_BRANCH = 'If all three scanners print `no`:';
 const NO_JQ_BRANCH = 'If a scanner is installed but `jq` prints `no`:';
 /** The one stated Bash `timeout`: the agent's ceiling, 600000 ms unless `BASH_MAX_TIMEOUT_MS` raises it. */
 const CEILING_TIMEOUT = 'with the Bash `timeout` at the ceiling: 600000 ms, or `BASH_MAX_TIMEOUT_MS` when set.';
+/** The sentence after the ceiling: a call past it is not followed by another command until its end notice, and only its own `exit=` line is read. */
+const WAIT_SENTENCE = 'Past it, run nothing else until its end notice and you Read its own last `exit=` line; the notice sets nothing.';
 /** A Bash `timeout` stated as a fixed number: it would cap the call below a ceiling the agent raised. */
 const FIXED_TIMEOUT = /Bash `timeout` at \d/;
 /** What bounds a command in time: the `timeout` or `gtimeout` command, the old `{bound}` placeholder, or a `-k` kill grace. */
@@ -451,8 +453,9 @@ const doesNotSay = (part: string): string => `Phase 2 does not say: ${part}`;
 /**
  * devflow puts no time bound on a scanner: no command line of Phase 2 carries one, and no sentence names one, whether
  * as the `timeout` command or as a number with a time unit. The Bash `timeout` the agent sets for each call is the only
- * limit, and it is the agent's ceiling, not a fixed number. A call that reaches it prints no `exit=` line, which the
- * status rule reads as did not complete.
+ * limit, and it is the agent's ceiling, not a fixed number. A call that reaches it prints no `exit=` line. The agent
+ * runs nothing else until the end notice and reads that call's own last `exit=` line; the status rule reads a call
+ * with no such line as did not complete.
  */
 function collectNoBoundDefects(phase2: string): string[] {
   const out: string[] = [];
@@ -661,7 +664,7 @@ function collectExitLineOrderDefects(phase2: string): string[] {
 }
 
 const SARIF_TARGETS: Array<[string, string]> = [
-  ['semgrep scan', '>"{ANALYSIS_DIR}/semgrep.sarif" 2>/dev/null'],
+  ['semgrep scan', '>"{ANALYSIS_DIR}/semgrep.part" 2>/dev/null'],
   ['snyk code test', '>"{ANALYSIS_DIR}/snyk-all.json" 2>/dev/null'],
   ['codeql database analyze', '--output="{ANALYSIS_DIR}/codeql.sarif"; } >"{ANALYSIS_DIR}/codeql.log" 2>&1'],
 ];
@@ -820,16 +823,44 @@ function collectCodeqlCleanupDefects(phase2: string): string[] {
 const STATUS_RULE_PARTS = [
   'a tool that ran completed only on Semgrep 0,',
   '(126-127: scanner did not start; else failed. Semgrep via xargs: number only)',
-  'A call with no `exit=` line in its own result did not complete',
-  'It stays did not complete for this run: ignore a later end notice.',
+  'A call with no `exit=` line read did not complete',
+  `${CEILING_TIMEOUT} ${WAIT_SENTENCE}`,
 ];
+/** The retired sentence: a call with no `exit=` line stays did not complete, and the end notice sets nothing. */
+const RETIRED_END_NOTICE = 'ignore a later end notice';
+const WAIT_NOT_FIRST = 'the wait sentence does not come before the scanner fences and the counts fence';
 
 /**
  * The completion rule covers the tools that ran, and the exit meanings end in a catch-all that leaves Semgrep's status
- * a number. A call with no `exit=` line did not complete and stays so: a later end notice changes nothing.
+ * a number. A call with no `exit=` line read did not complete. The wait sentence sits after the ceiling sentence, before
+ * every scanner fence and the counts fence: the agent runs nothing else until the end notice, and the notice sets nothing.
  */
 function collectStatusRuleDefects(phase2: string): string[] {
-  return STATUS_RULE_PARTS.filter(part => !phase2.includes(part)).map(doesNotSay);
+  const out = STATUS_RULE_PARTS.filter(part => !phase2.includes(part)).map(doesNotSay);
+  if (phase2.includes(RETIRED_END_NOTICE)) out.push(`Phase 2 still says: ${RETIRED_END_NOTICE}`);
+  const wait = phase2.indexOf(WAIT_SENTENCE);
+  if (wait !== -1 && (wait > phase2.indexOf('semgrep scan') || wait > phase2.indexOf('for t in {tools}'))) out.push(WAIT_NOT_FIRST);
+  return out;
+}
+
+const SEMGREP_RENAME = 'mv "{ANALYSIS_DIR}"/semgrep.{part,sarif}';
+const SEMGREP_RENAME_PLACE = 'the Semgrep fence does not rename semgrep.part to semgrep.sarif on the line right after its status line';
+const SEMGREP_RENAME_EXIT = 'the Semgrep exit line does not follow the rename';
+
+/**
+ * Semgrep writes its SARIF to `semgrep.part`, and the same fence renames it to `semgrep.sarif` on the line right after
+ * the status line (`E=$?`), before the exit line. A counts fence that runs before Semgrep ends finds no `semgrep.sarif`,
+ * so the counts rule reads that scanner as did not complete, never as a clean empty file. The rename comes after the
+ * status is read, so it cannot change the status.
+ */
+function collectSemgrepRenameDefects(phase2: string): string[] {
+  const semgrep = fenceWith(phase2, 'semgrep scan');
+  const scan = semgrep.findIndex(line => line.includes('semgrep scan'));
+  const rename = semgrep.indexOf(SEMGREP_RENAME);
+  const out: string[] = [];
+  if (scan === -1 || !semgrep[scan].endsWith(STATUS_READ) || rename !== scan + 1) out.push(SEMGREP_RENAME_PLACE);
+  if (semgrep.indexOf(`${EXIT_PRINT}"$E"`) <= rename) out.push(SEMGREP_RENAME_EXIT);
+  return out;
 }
 
 const SCANNER_ROOT_CD = 'cd "{worktree}" || exit';
@@ -859,7 +890,7 @@ function collectFileNameHandoffDefects(phase2: string): string[] {
   const out: string[] = [];
   const fences = bashFences(phase2).length;
   if (fences < 6) out.push(`${fences} bash fences, expected at least 6`);
-  const semgrep = /^set -o pipefail; git diff --name-only -z --diff-filter=d \{DIFF_RANGE\} \| xargs -0 -r semgrep scan [^;|]* -- >"\{ANALYSIS_DIR\}\/semgrep\.sarif" 2>\/dev\/null;/m;
+  const semgrep = /^set -o pipefail; git diff --name-only -z --diff-filter=d \{DIFF_RANGE\} \| xargs -0 -r semgrep scan [^;|]* -- >"\{ANALYSIS_DIR\}\/semgrep\.part" 2>\/dev\/null;/m;
   if (!semgrep.test(phase2)) out.push('the Semgrep line does not read names with -z, pass them with xargs -0 and put them after --');
   if (!phase2.includes(SNYK_NAMES)) out.push('the Snyk filter does not read the names from git as NUL-separated output');
   const reads = bashFenceLines(phase2).filter(line => line.includes('CHANGED_FILES') && line !== 'CHANGED_FILES=$(git diff --name-only {DIFF_RANGE})');
@@ -1045,6 +1076,50 @@ function runSnykFence(phase2: string, folder: string, scannerOutput: string, ran
   return { printed: run.stdout.split('\n').filter(line => line !== ''), sarif: readFileSync(join(analysis, 'snyk.sarif'), 'utf8'), status: run.status };
 }
 
+/**
+ * The Semgrep fence as shipped, to run with bash from a scratch repo: placeholders are filled for it, after `rewrite`
+ * has changed the fence text. It throws when the fence changes shape.
+ */
+function shippedSemgrepFence(phase2: string, repo: string, folder: string, rewrite: (text: string) => string = text => text): string {
+  const fence = bashFences(phase2).find(text => fenceLines(text).some(line => line.includes('semgrep scan')));
+  if (fence === undefined) throw new Error('the Semgrep fence is gone');
+  return rewrite(fenceLines(fence).join('\n')).split('{worktree}').join(repo).split('{ANALYSIS_DIR}').join(folder).split('{DIFF_RANGE}').join('HEAD~1..HEAD');
+}
+
+/** The Semgrep fence as it read before its result was renamed: the SARIF goes straight to `semgrep.sarif`, with no rename line. */
+function beforeRename(text: string): string {
+  if (!text.includes(`${SEMGREP_RENAME}\n`)) throw new Error('the Semgrep fence has no rename line');
+  return text.split(`${SEMGREP_RENAME}\n`).join('').split('semgrep.part').join('semgrep.sarif');
+}
+
+/**
+ * Runs the Semgrep fence from a scratch repo whose changed files include names with spaces and non-ASCII text, with a
+ * stub `semgrep` that runs `script` (its standard output goes where the fence sends the SARIF). The analysis folder is
+ * `analysis` under `folder`, and it is left uncreated when `analysis` is false. Reads back what the fence printed and
+ * what it left in the analysis folder.
+ */
+function runSemgrepFence(
+  phase2: string,
+  folder: string,
+  script: string,
+  options: { analysis?: boolean; rewrite?: (text: string) => string } = {},
+): { printed: string[]; files: string[]; sarif: string | null; status: number | null } {
+  const repo = makeScratchRepo(folder, { unchanged: SNYK_UNTOUCHED, changed: SNYK_CHANGED, removed: [] });
+  const analysis = join(folder, 'analysis');
+  const bin = join(folder, 'bin');
+  mkdirSync(bin);
+  if (options.analysis !== false) mkdirSync(analysis, { recursive: true });
+  writeFileSync(join(bin, 'semgrep'), `#!/bin/sh\n${script}\n`, { mode: 0o755 });
+  const run = spawnSync('bash', ['-s'], { input: shippedSemgrepFence(phase2, repo, analysis, options.rewrite), encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}` } });
+  const sarif = join(analysis, 'semgrep.sarif');
+  return {
+    printed: run.stdout.split('\n').filter(line => line !== ''),
+    files: existsSync(analysis) ? readdirSync(analysis).sort() : [],
+    sarif: existsSync(sarif) ? readFileSync(sarif, 'utf8') : null,
+    status: run.status,
+  };
+}
+
 describe('bug-analysis.md — static analysis never reads as clean when it did not run or did not finish (#649)', () => {
   const off = resolveCurationOffSource('commands', 'bug-analysis');
   const builds: Array<[string, string | null]> = [['curation-on', content], ['curation-off', off]];
@@ -1059,6 +1134,7 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
   const scratch = onPhase2(collectCodeqlScratchDefects);
   const cleanup = onPhase2(collectCodeqlCleanupDefects);
   const statusRule = onPhase2(collectStatusRuleDefects);
+  const semgrepRename = onPhase2(collectSemgrepRenameDefects);
   const scannerRoot = onPhase2(collectScannerRootDefects);
   const fileNames = onPhase2(collectFileNameHandoffDefects);
   const snykScope = onPhase2(collectSnykScopeDefects);
@@ -1227,7 +1303,7 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(collectStatusLineDefects('')).toContain('the scanner fences carry 0 exit lines, expected 1 each in 3 fences');
     const unread = 'the Semgrep and Snyk statuses are not read right after their scanners';
     expect(defects('snyk-all.json" 2>/dev/null; E=$?', 'snyk-all.json" 2>/dev/null; true')).toContain(unread);
-    expect(defects('semgrep.sarif" 2>/dev/null; E=$?', 'semgrep.sarif" 2>/dev/null; true')).toContain(unread);
+    expect(defects('semgrep.part" 2>/dev/null; E=$?', 'semgrep.part" 2>/dev/null; true')).toContain(unread);
     expect(defects('Snyk 0 or 1', 'Snyk 0, 1 or 2')).toContain(doesNotSay(STATUS_LINE_PARTS[0]));
     expect(defects('CodeQL 0.', 'CodeQL 0 or 1.')).toContain(doesNotSay(STATUS_LINE_PARTS[0]));
     expect(defects('or no such line', 'or an empty line')).toContain(doesNotSay(STATUS_LINE_PARTS[1]));
@@ -1262,9 +1338,9 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
     const defects = probe(exitOrder, body);
     const semgrep = 'the Semgrep status is not read on the line of its pipeline (E=$?) and printed after it, printing "$E"';
-    const semgrepRead = 'semgrep.sarif" 2>/dev/null; E=$?';
-    expect(defects(semgrepRead, 'semgrep.sarif" 2>/dev/null; true')).toContain(semgrep);
-    expect(defects(`${semgrepRead}\n${EXIT_PRINT}"$E"`, `${semgrepRead}\n${EXIT_PRINT}"$?"`)).toContain(semgrep);
+    const semgrepRead = 'semgrep.part" 2>/dev/null; E=$?';
+    expect(defects(semgrepRead, 'semgrep.part" 2>/dev/null; true')).toContain(semgrep);
+    expect(defects(`${semgrepRead}\n${SEMGREP_RENAME}\n${EXIT_PRINT}"$E"`, `${semgrepRead}\n${SEMGREP_RENAME}\n${EXIT_PRINT}"$?"`)).toContain(semgrep);
     expect(defects('cd "{worktree}" || exit\nset -o pipefail', `cd "{worktree}" || exit\n${EXIT_PRINT}"$E"\nset -o pipefail`)).toContain(semgrep);
     expect(defects('set -o pipefail; git diff', 'git diff')).toContain(semgrep);
     expect(defects(/(set -o pipefail; git diff[^|]*\| )(xargs[^;]*;)/, '$2 $1')).toContain(semgrep);
@@ -1304,8 +1380,9 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
     const defects = probe(sarifFiles, body);
     const notFile = (tool: string, target: string): string => `the ${tool} line does not write its SARIF to a file: expected ${target}`;
-    expect(defects(' >"{ANALYSIS_DIR}/semgrep.sarif"', '')).toContain(notFile(...SARIF_TARGETS[0]));
-    expect(defects('semgrep.sarif" 2>/dev/null', 'semgrep.sarif" 2>&1')).toContain(notFile(...SARIF_TARGETS[0]));
+    expect(defects(' >"{ANALYSIS_DIR}/semgrep.part"', '')).toContain(notFile(...SARIF_TARGETS[0]));
+    expect(defects('semgrep.part" 2>/dev/null', 'semgrep.part" 2>&1')).toContain(notFile(...SARIF_TARGETS[0]));
+    expect(defects('semgrep.part" 2>/dev/null', 'semgrep.sarif" 2>/dev/null')).toContain(notFile(...SARIF_TARGETS[0]));
     expect(defects('snyk code test --sarif >"{ANALYSIS_DIR}/snyk-all.json"', 'snyk code test --sarif')).toContain(notFile(...SARIF_TARGETS[1]));
     expect(defects('snyk-all.json" 2>/dev/null; E=$?', 'snyk-all.json" 2>&1; E=$?')).toContain(notFile(...SARIF_TARGETS[1]));
     expect(defects('--output="{ANALYSIS_DIR}/codeql.sarif"', '--output="${CODEQL_TMP}/results.sarif"')).toContain(notFile(...SARIF_TARGETS[2]));
@@ -1316,7 +1393,7 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(defects('CODEQL_EXIT=$?\n', 'CODEQL_EXIT=$?\ncat "${CODEQL_TMP}/results.sarif"\n')).toContainEqual(printed);
     expect(defects('CODEQL_EXIT=$?\n', 'CODEQL_EXIT=$?\ncat "{ANALYSIS_DIR}/codeql.sarif"\n')).toContainEqual(printed);
     expect(defects('CODEQL_EXIT=$?\n', 'CODEQL_EXIT=$?\njq . "{ANALYSIS_DIR}/codeql.sarif"\n')).toContainEqual(printed);
-    expect(defects('semgrep.sarif" 2>/dev/null; E=$?\n', 'semgrep.sarif" 2>/dev/null; E=$?\nhead "{ANALYSIS_DIR}/semgrep.sarif"\n')).toContainEqual(printed);
+    expect(defects('semgrep.part" 2>/dev/null; E=$?\n', 'semgrep.part" 2>/dev/null; E=$?\nhead "{ANALYSIS_DIR}/semgrep.sarif"\n')).toContainEqual(printed);
     expect(defects('snyk.sarif"; }\nprintf', 'snyk.sarif"; }\njq . "{ANALYSIS_DIR}/snyk.sarif"\nprintf')).toContainEqual(printed);
     expect(defects('snyk.sarif"; }\nprintf', 'snyk.sarif"; }\ncat "{ANALYSIS_DIR}/snyk-all.json"\nprintf')).toContainEqual(printed);
     expect(defects('done\ncat findings-{semgrep', "done\njq -r '.' semgrep.sarif\ncat findings-{semgrep")).toContainEqual(printed);
@@ -1409,7 +1486,7 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     const semgrepLine = 'the Semgrep line does not read names with -z, pass them with xargs -0 and put them after --';
     expect(defects('-z --diff-filter=d {DIFF_RANGE} | xargs', '--diff-filter=d {DIFF_RANGE} | xargs')).toContain(semgrepLine);
     expect(defects('set -o pipefail; git diff', 'git diff')).toContain(semgrepLine);
-    expect(defects('-- >"{ANALYSIS_DIR}/semgrep.sarif" 2>/dev/null', ' >"{ANALYSIS_DIR}/semgrep.sarif" 2>/dev/null')).toContain(semgrepLine);
+    expect(defects('-- >"{ANALYSIS_DIR}/semgrep.part" 2>/dev/null', ' >"{ANALYSIS_DIR}/semgrep.part" 2>/dev/null')).toContain(semgrepLine);
     expect(defects('--quiet -- >', '--quiet >')).toContain(semgrepLine);
     expect(defects('xargs -0 -r semgrep', 'xargs -0 semgrep')).toContain(semgrepLine);
     const snykLine = 'the Snyk filter does not read the names from git as NUL-separated output';
@@ -1487,10 +1564,32 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(defects('; else failed. Semgrep via xargs: number only)', ')')).toContain(doesNotSay(STATUS_RULE_PARTS[1]));
     expect(defects('; else failed.', '.')).toContain(doesNotSay(STATUS_RULE_PARTS[1]));
     expect(defects('(126-127: scanner did not start', '(124: bound fired; 126-127: scanner did not start')).toContain(doesNotSay(STATUS_RULE_PARTS[1]));
-    expect(defects('A call with no `exit=` line in its own result', 'A call with no `exit=` line')).toContain(doesNotSay(STATUS_RULE_PARTS[2]));
-    expect(defects('in its own result did not complete', 'in a result did not complete')).toContain(doesNotSay(STATUS_RULE_PARTS[2]));
-    expect(defects('ignore a later end notice', 'read a later end notice')).toContain(doesNotSay(STATUS_RULE_PARTS[3]));
-    expect(defects('It stays did not complete for this run: ', '')).toContain(doesNotSay(STATUS_RULE_PARTS[3]));
+    expect(defects('A call with no `exit=` line read', 'A call with no `exit=` line')).toContain(doesNotSay(STATUS_RULE_PARTS[2]));
+    expect(defects('line read did not complete', 'line in a result did not complete')).toContain(doesNotSay(STATUS_RULE_PARTS[2]));
+    expect(defects('run nothing else', 'run the counts fence')).toContain(doesNotSay(STATUS_RULE_PARTS[3]));
+    expect(defects('the notice sets nothing', 'the notice sets the status')).toContain(doesNotSay(STATUS_RULE_PARTS[3]));
+    expect(defects('its own last `exit=` line', 'the `exit=` line')).toContain(doesNotSay(STATUS_RULE_PARTS[3]));
+    expect(defects(` ${WAIT_SENTENCE}`, '')).toContain(doesNotSay(STATUS_RULE_PARTS[3]));
+    const retired = 'A call with no `exit=` line read did not complete.';
+    expect(defects(retired, `${retired} It stays did not complete for this run: ${RETIRED_END_NOTICE}.`)).toContain(`Phase 2 still says: ${RETIRED_END_NOTICE}`);
+    expect(statusRule(seed(seed(body ?? '', ` ${WAIT_SENTENCE}`, ''), '**Counts and table** (after Snyk', `${WAIT_SENTENCE} **Counts and table** (after Snyk`))).toContain(WAIT_NOT_FIRST);
+  });
+
+  it.each(builds)('Semgrep writes semgrep.part and the same fence renames it to semgrep.sarif after its status is read (%s)', (_label, body) => {
+    expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
+    expect(semgrepRename(body ?? '')).toEqual([]);
+  });
+
+  it.each(builds)('known-bad probes: a lost, early, copied or misplaced rename of the Semgrep result is reported (%s)', (_label, body) => {
+    expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
+    const defects = probe(semgrepRename, body);
+    expect(defects(`${SEMGREP_RENAME}\n`, '')).toContain(SEMGREP_RENAME_PLACE);
+    expect(defects('semgrep.{part,sarif}', 'semgrep.{sarif,part}')).toContain(SEMGREP_RENAME_PLACE);
+    expect(defects('mv "{ANALYSIS_DIR}"/semgrep', 'cp "{ANALYSIS_DIR}"/semgrep')).toContain(SEMGREP_RENAME_PLACE);
+    expect(defects(`2>/dev/null; E=$?\n${SEMGREP_RENAME}`, `2>/dev/null; E=$?\ntrue\n${SEMGREP_RENAME}`)).toContain(SEMGREP_RENAME_PLACE);
+    expect(defects(`2>/dev/null; E=$?\n${SEMGREP_RENAME}`, `2>/dev/null; true\n${SEMGREP_RENAME}\nE=$?`)).toContain(SEMGREP_RENAME_PLACE);
+    expect(defects(`${SEMGREP_RENAME}\n${EXIT_PRINT}"$E"`, `${EXIT_PRINT}"$E"\n${SEMGREP_RENAME}`)).toContain(SEMGREP_RENAME_EXIT);
+    expect(collectSemgrepRenameDefects('')).toEqual([SEMGREP_RENAME_PLACE, SEMGREP_RENAME_EXIT]);
   });
 
   it.each(builds)('CodeQL takes its language from a closed table over the extensions of the changed files (%s)', (_label, body) => {
@@ -1715,6 +1814,99 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
         expect(none.top).toEqual([]);
         expect(none.status).toBe(0);
       });
+    }, SPAWN_TEST_TIMEOUT_MS);
+
+    it(`the shipped counts read an empty semgrep.sarif as docs=0 and the same folder holding the full SARIF as docs=1 (${label})`, ctx => {
+      skipUnlessRunnable(ctx);
+      inScratch(folder => {
+        // An empty file is what a counts fence sees when it runs before Semgrep has written: it reads as a clean run.
+        const empty = runCountsFence(phase2(), folder, 'semgrep', { 'semgrep.sarif': '' });
+        expect(empty.printed).toEqual(['semgrep docs=0 results=0 error=0 warning=0 note=0']);
+        const full = runCountsFence(phase2(), folder, 'semgrep', { 'semgrep.sarif': sarifDoc([sarifResult('error', 1)]) });
+        expect(full.printed).toEqual(['semgrep docs=1 results=1 error=1 warning=0 note=0']);
+      });
+    }, SPAWN_TEST_TIMEOUT_MS);
+
+    it(`the shipped counts print no semgrep line while only semgrep.part exists, and Phase 2 reads a missing line as did not complete (${label})`, ctx => {
+      skipUnlessRunnable(ctx);
+      inScratch(folder => {
+        const part = runCountsFence(phase2(), folder, 'semgrep', { 'semgrep.part': sarifDoc([sarifResult('error', 1)]) });
+        expect(part.printed).toEqual([]);
+        expect(part.top).toEqual([]);
+        expect(part.status).toBe(0);
+      });
+      expect(phase2()).toContain(STATUS_LINE_PARTS[4]);
+    }, SPAWN_TEST_TIMEOUT_MS);
+
+    const skipUnlessSemgrepFenceRunnable = (ctx: { skip: (reason: string) => never }): void => {
+      expect(body, 'the build is absent: run `npm run build:mds`').not.toBeNull();
+      const reason = snykFenceSkipReason();
+      if (reason !== null) {
+        console.warn(`[bug-analysis structural] ${reason}`);
+        ctx.skip(reason);
+      }
+    };
+
+    it(`the shipped Semgrep fence ends with the SARIF in semgrep.sarif only, and prints the exit line it printed before the rename (${label})`, ctx => {
+      skipUnlessSemgrepFenceRunnable(ctx);
+      const scripts: Array<[string, string]> = [['a complete SARIF and exit 0', `printf '%s' '{"runs":[]}'`], ['a partial file and a failure', 'printf partial; exit 1'], ['no output and exit 2', 'exit 2']];
+      for (const [name, script] of scripts) {
+        inScratch(folder => {
+          const shipped = runSemgrepFence(phase2(), folder, script);
+          expect(shipped.files, name).toEqual(['semgrep.sarif']);
+          expect(shipped.printed, name).toHaveLength(1);
+          inScratch(other => {
+            const before = runSemgrepFence(phase2(), other, script, { rewrite: beforeRename });
+            expect(shipped.printed, name).toEqual(before.printed);
+            expect(shipped.sarif, name).toBe(before.sarif);
+            expect(shipped.status, name).toBe(before.status);
+          });
+        });
+      }
+      inScratch(folder => {
+        const done = runSemgrepFence(phase2(), folder, `printf '%s' '{"runs":[]}'`);
+        expect(done.printed).toEqual(['exit=0']);
+        expect(done.sarif).toBe('{"runs":[]}');
+      });
+    }, SPAWN_TEST_TIMEOUT_MS);
+
+    it(`a Semgrep run that writes no file still prints its exit line, as before the rename (${label})`, ctx => {
+      skipUnlessSemgrepFenceRunnable(ctx);
+      inScratch(folder => {
+        const none = runSemgrepFence(phase2(), folder, 'exit 0', { analysis: false });
+        expect(none.printed).toEqual(['exit=1']);
+        expect(none.files).toEqual([]);
+        expect(none.sarif).toBeNull();
+        inScratch(other => {
+          const before = runSemgrepFence(phase2(), other, 'exit 0', { analysis: false, rewrite: beforeRename });
+          expect(none.printed).toEqual(before.printed);
+        });
+      });
+    }, SPAWN_TEST_TIMEOUT_MS);
+
+    it(`a counts fence that starts while Semgrep still runs finds no semgrep.sarif, and the next counts read the whole file (${label})`, ctx => {
+      skipUnlessSemgrepFenceRunnable(ctx);
+      const doc = sarifDoc([sarifResult('error', 1)]);
+      /** Runs the Semgrep fence with a stub that starts a counts fence before it writes anything; returns what that counts fence printed. */
+      const midRun = (rewrite?: (text: string) => string): { counted: string; printed: string[]; files: string[]; after: string[] } => {
+        let out = { counted: '', printed: [] as string[], files: [] as string[], after: [] as string[] };
+        inScratch(folder => {
+          const analysis = join(folder, 'analysis');
+          const mid = join(folder, 'mid.txt');
+          writeFileSync(join(folder, 'counts.sh'), shippedCountsFence(phase2(), analysis, 'semgrep'));
+          const run = runSemgrepFence(phase2(), folder, `bash '${join(folder, 'counts.sh')}' >'${mid}' 2>&1\nprintf '%s' '${doc}'`, { rewrite });
+          out = { counted: readFileSync(mid, 'utf8'), printed: run.printed, files: run.files, after: runCountsFence(phase2(), analysis, 'semgrep', {}).printed };
+        });
+        return out;
+      };
+      const shipped = midRun();
+      expect(shipped.counted).toBe('');
+      expect(shipped.printed).toEqual(['exit=0']);
+      expect(shipped.files).toContain('semgrep.sarif');
+      expect(shipped.files).not.toContain('semgrep.part');
+      expect(shipped.after).toEqual(['semgrep docs=1 results=1 error=1 warning=0 note=0']);
+      // Before the rename the same early counts read the empty file Semgrep had opened, as a clean run.
+      expect(midRun(beforeRename).counted).toBe('semgrep docs=0 results=0 error=0 warning=0 note=0\n');
     }, SPAWN_TEST_TIMEOUT_MS);
 
     it(`the shipped counts and table give a result with no level the default level of its rule, from the run's own rules, else warning (${label})`, ctx => {
