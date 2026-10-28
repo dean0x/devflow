@@ -25,6 +25,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { requireBuiltCli } from './helpers.js';
 import { ALWAYS_PRESENT_REFS, COMPLIANCE_FRAMEWORKS } from '../src/core/compliance.js';
+import { COMPLIANCE_VARIANT_HOSTS, POSTING_OPERATIONS } from './fixtures/mds-manifest.js';
 
 const CLI = requireBuiltCli();
 
@@ -53,6 +54,20 @@ const EVERY_SKILL_FILE: readonly string[] = [
 
 /** The neutral stamp a compliance-off machine's SKILL.md carries. */
 const NEUTRAL_STAMP = 'The machine declares no framework.';
+
+/** The fixed local line a compliance-off prompt records once under the required evidence policy (AC-18). */
+const OFF_DEGRADED_LINE = 'TRACEABILITY: DEGRADED (compliance off on this machine; the repository requires evidence)';
+
+/**
+ * The posting documents outside the per-operation trees that a compliance-off install
+ * never holds (AC-41), as paths below `~/.claude/skills/`. Spelled out here so that a
+ * name dropped from the production removal list turns this scenario red.
+ */
+const POSTING_DOCUMENTS: readonly string[] = [
+  'devflow:git/references/publication-gate.md',
+  'devflow:git/references/github-posting.md',
+  'devflow:agent-references/references/commands/implement-evidence-asks.md',
+];
 
 // ── Shared helper ─────────────────────────────────────────────────────────────
 
@@ -1297,6 +1312,8 @@ describe('S20: compliance skill lifecycle is managed by converge, not the orphan
 // references/hipaa.md for the reviewer to load, and the MACHINE rule — the one
 // artifact Claude Code loads into every prompt — is untouched: absent on an off
 // machine, byte-identical on an on machine, however often init runs from the repo.
+// On the off machine the lens never brings a posting reference back, and the installed
+// compliance-off prompts carry the fixed local DEGRADED line (AC-46).
 describe('S23 (TP-43, AC-37): a hipaa repository never changes the machine compliance rule', () => {
   let tmpHome: string;
   let claudeDir: string;
@@ -1344,7 +1361,37 @@ describe('S23 (TP-43, AC-37): a hipaa repository never changes the machine compl
 
   afterEach(async () => { await fs.rm(tmpHome, { recursive: true, force: true }); });
 
-  it('S23a: compliance-off machine — lens is hipaa, hipaa.md is installed, and no rule ever appears', async () => {
+  /** Every skill file below `~/.claude/skills/` that is a posting reference, or an empty list when none is installed (AC-41, AC-46). */
+  async function installedPostingReferences(): Promise<string[]> {
+    const skills = path.join(claudeDir, 'skills');
+    const gitRefs = await listDir(path.join(skills, 'devflow:git', 'references'));
+    expect(gitRefs, 'the kept git references install, or the absence check proves nothing').toContain('pr/check-merge-readiness.md');
+    const found = gitRefs
+      .filter(rel => POSTING_OPERATIONS.includes(path.basename(rel, '.md')))
+      .map(rel => `devflow:git/references/${rel}`);
+    for (const rel of POSTING_DOCUMENTS) {
+      const exists = await fs.lstat(path.join(skills, ...rel.split('/'))).then(() => true, () => false);
+      if (exists) found.push(rel);
+    }
+    return found;
+  }
+
+  /**
+   * The compliance-off command prompts that the machine installs: every compliance-armed command
+   * host whose plugin the recommended install selects (the optional dynamic-build and
+   * dynamic-tickets commands are not installed).
+   */
+  async function installedOffCommandNames(): Promise<string[]> {
+    const installed = await listDir(path.join(claudeDir, 'commands', 'devflow'));
+    const names = COMPLIANCE_VARIANT_HOSTS
+      .filter(host => host.startsWith('commands/'))
+      .map(host => host.slice('commands/'.length))
+      .filter(name => installed.includes(`${name}.md`));
+    expect(names, 'the compliance-armed commands of the core plugins install').toEqual(expect.arrayContaining(['implement', 'resolve', 'code-review']));
+    return names;
+  }
+
+  it('S23a: compliance-off machine — lens is hipaa, hipaa.md is installed, no rule and no posting reference ever appear', async () => {
     expect(run('init', '--recommended').status).toBe(0);
     await expect(fs.access(RULE())).rejects.toThrow();
 
@@ -1357,9 +1404,16 @@ describe('S23 (TP-43, AC-37): a hipaa repository never changes the machine compl
     expect(skill).toContain(NEUTRAL_STAMP);
     expect(skill).toContain('Load `references/{id}.md` for each given id and no other');
 
+    expect(await installedPostingReferences(), 'the hipaa lens must not bring a posting reference back').toEqual([]);
+    for (const name of await installedOffCommandNames()) {
+      const prompt = await fs.readFile(path.join(claudeDir, 'commands', 'devflow', `${name}.md`), 'utf-8');
+      expect(prompt.split(OFF_DEGRADED_LINE).length - 1, `${name}: the fixed local line appears once`).toBe(1);
+    }
+
     const reinit = initFromRepo('--recommended');
     expect(reinit.status, `init from the repository failed:\n${reinit.stderr}`).toBe(0);
     await expect(fs.access(RULE()), 'the repository must never install the machine rule').rejects.toThrow();
+    expect(await installedPostingReferences(), 'init from the repository must not bring a posting reference back').toEqual([]);
   });
 
   it('S23b: compliance-on machine (gdpr) — the lens folds hipaa in, and the rule bytes are unchanged', async () => {
@@ -1368,6 +1422,9 @@ describe('S23 (TP-43, AC-37): a hipaa repository never changes the machine compl
     const before = await fs.readFile(RULE());
 
     expect(settingsLine()).toMatch(/ COMPLIANCE=gdpr,hipaa /);
+    expect(await installedPostingReferences(), 'the compliance-on machine holds the posting documents, so the scan in S23a can find one').toEqual(
+      expect.arrayContaining([...POSTING_DOCUMENTS]),
+    );
 
     const reinit = initFromRepo('--recommended');
     expect(reinit.status, `init from the repository failed:\n${reinit.stderr}`).toBe(0);
