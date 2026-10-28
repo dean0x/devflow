@@ -21,6 +21,7 @@ import { readFileSync } from 'fs'
 import * as path from 'path'
 
 import { postingStatus } from '../../src/core/installed-variants.js'
+import { COMPLIANCE_VARIANT_HOSTS } from '../fixtures/mds-manifest.js'
 import { resolveVariantOffSource } from '../helpers.js'
 
 const ROOT = path.resolve(import.meta.dirname, '../..')
@@ -187,16 +188,19 @@ const LOCAL_FILES_BY_COMMAND: Readonly<Record<string, readonly string[]>> = {
   resolve: ['resolution-summary.md', 'evidence-{branch_slug}.md', 'evidence-result-{branch_slug}.md', 'readiness-{branch_slug}.md'],
   implement: ['evidence-{branch_slug}.md', 'evidence-result-{branch_slug}.md'],
   'dynamic-build': ['wave-report.md', 'evidence-wave-{slug}.md', 'evidence-result-wave-{slug}.md', 'readiness-wave-{slug}.md'],
+  'bug-analysis': ['bug-analysis-summary.md', '.last-analysis-head'],
 }
 
-/** Every host with a compliance arm that is a command; its build exists with compliance off. */
-const OFF_COMMANDS = ['implement', 'resolve', 'code-review', 'bug-analysis', 'dynamic-build', 'dynamic-tickets', 'plan', 'release'] as const
+/** Every host with a compliance arm that is a command, read from the variant roster; its build exists with compliance off. */
+const OFF_COMMANDS: readonly string[] = COMPLIANCE_VARIANT_HOSTS
+  .filter(host => host.startsWith('commands/'))
+  .map(host => host.slice('commands/'.length))
 
 /** The names a compliance-off build uses for the files it writes, found by shape. */
 const LOCAL_FILE_SHAPES: readonly RegExp[] = [
   /\b(?:evidence-result|evidence|readiness)(?:-wave)?-\{(?:branch_slug|slug)\}\.md/g,
-  /\b(?:review-summary|resolution-summary|wave-report)\.md/g,
-  /\.last-review-head\b/g,
+  /\b(?:review-summary|resolution-summary|wave-report|bug-analysis-summary)\.md/g,
+  /\.last-(?:review|analysis)-head\b/g,
 ]
 
 /** The distinct local result file names in `text`, found by shape. */
@@ -237,9 +241,15 @@ describe('architecture.md: the local result files of the compliance-off builds',
   it('names every file the table lists, and each command that writes them', () => {
     const text = paragraph ?? ''
     expect(namedIn(text, listed).sort()).toEqual(listed)
-    for (const command of [...Object.keys(LOCAL_FILES_BY_COMMAND), 'bug-analysis', 'plan', 'release']) {
+    for (const command of [...Object.keys(LOCAL_FILES_BY_COMMAND), 'plan', 'release']) {
       expect(text, `the paragraph does not name /${command}`).toContain(`\`/${command}\``)
     }
+  })
+
+  it('has a row for every command whose off build writes a local result file', () => {
+    expect(OFF_COMMANDS, 'the roster gave no command').toContain('bug-analysis')
+    const writers = OFF_COMMANDS.filter(command => offBuilds(command).some(build => collectLocalFiles(build).length > 0))
+    expect(writers.sort()).toEqual(Object.keys(LOCAL_FILES_BY_COMMAND).sort())
   })
 
   it('lists each file under a command whose off build writes it', () => {
@@ -264,6 +274,10 @@ describe('architecture.md: the local result files of the compliance-off builds',
     expect(collectLocalFiles('see `.devflow/docs/readiness-wave-{slug}.md` and review-summary.md')).toEqual([
       'readiness-wave-{slug}.md',
       'review-summary.md',
+    ])
+    expect(collectLocalFiles('writes bug-analysis-summary.md and "$M/.last-analysis-head"')).toEqual([
+      '.last-analysis-head',
+      'bug-analysis-summary.md',
     ])
     expect(collectLocalFiles('nothing here')).toEqual([])
     expect(collectLocalFiles('a new `evidence-extra-{slug}.md` file')).toEqual([])
