@@ -9,7 +9,7 @@
  * or the real `dist/`.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -29,6 +29,26 @@ import { readManifest } from '../../src/core/manifest.js';
 import { getManifestLockPath } from '../../src/core/manifest-lock.js';
 import { DEVFLOW_PLUGINS, type PluginDefinition } from '../../src/core/plugins.js';
 import { assertTempHome } from '../setup/home-isolation.js';
+
+/**
+ * A seam on the manifest lock: the one-shot hook runs just before the next lock is taken, which for a
+ * toggle is the install record's lock, after the converge. It stands in for another devflow run that
+ * changes the switches in between.
+ */
+const beforeNextLock = vi.hoisted(() => ({ hook: null as (() => Promise<void>) | null }));
+
+vi.mock('../../src/core/manifest-lock.js', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../src/core/manifest-lock.js')>();
+  return {
+    ...actual,
+    withManifestLock: (async (...args: Parameters<typeof actual.withManifestLock>) => {
+      const { hook } = beforeNextLock;
+      beforeNextLock.hook = null;
+      await hook?.();
+      return actual.withManifestLock(...args);
+    }) as typeof actual.withManifestLock,
+  };
+});
 
 const SKILL = 'apply-decisions';
 const SKILL_DIR = 'devflow:apply-decisions';
@@ -328,6 +348,52 @@ describe('convergeVariantAxes: a compliance-off machine fails closed (AC-28)', (
     expect(await read(installedCommand('release'))).toBe('release ON\n');
   });
 
+  /** Add a host to the temp package's build manifest, as the build writes it for any name its output pattern accepts. */
+  async function addManifestHost(key: string, axes: { curation: boolean; compliance: boolean }): Promise<void> {
+    const file = path.join(pkg, 'dist', 'variant-axes.json');
+    const manifest = JSON.parse(await read(file)) as { version: number; hosts: Record<string, unknown> };
+    await write(file, JSON.stringify({ ...manifest, hosts: { ...manifest.hosts, [key]: axes } }));
+  }
+
+  it('known-bad probe: a compliance-armed manifest host with a name the roster cannot hold is not dropped, so the answer is unknown', async () => {
+    await installAs({ curation: true, compliance: true });
+    await addManifestHost('commands/post.tool', { curation: false, compliance: true });
+    await write(installedCommand('post.tool'), 'post ON\n');
+
+    const result = await converge(OFF);
+
+    expect(result.converged).toBe(false);
+    expect(result.posting.kind).toBe('unknown');
+    expect(describePostingLeft(result.posting).join('\n')).toContain('post.tool');
+    expect(warnings.some(w => w.includes('post.tool'))).toBe(true);
+    expect(await read(installedCommand('post.tool')), 'a host the roster cannot hold is left as it is').toBe('post ON\n');
+    expect(await read(installedCommand('release')), 'the hosts it can hold still converge').toBe('release COMPLIANCE-OFF\n');
+  });
+
+  it('a curation-only manifest host with a name the roster cannot hold warns and fails the converge, and posting stays clear', async () => {
+    await installAs({ curation: true, compliance: true });
+    await addManifestHost('agents/my_agent', { curation: true, compliance: false });
+
+    const result = await converge(OFF);
+
+    expect(result.converged).toBe(false);
+    expect(result.posting).toEqual({ kind: 'clear' });
+    expect(warnings.some(w => w.includes('my_agent'))).toBe(true);
+  });
+
+  it('a manifest host named in the roster pattern is converged without a warning', async () => {
+    await installAs({ curation: true, compliance: true });
+    await addManifestHost('commands/post-tool', { curation: false, compliance: true });
+    await write(path.join(complianceOffDir('commands', pkg), 'post-tool.md'), 'post COMPLIANCE-OFF\n');
+    await write(installedCommand('post-tool'), 'post ON\n');
+
+    const result = await converge(OFF);
+
+    expect(result.converged, warnings.join('\n')).toBe(true);
+    expect(result.posting).toEqual({ kind: 'clear' });
+    expect(await read(installedCommand('post-tool'))).toBe('post COMPLIANCE-OFF\n');
+  });
+
   it('a variant tree that cannot be listed is a failed converge, never a clean one', async () => {
     await installAs({ curation: true, compliance: true });
     await fs.rm(complianceOffDir('commands', pkg), { recursive: true });
@@ -432,6 +498,24 @@ describe('applyVariantToggle on the compliance axis (AC-27, AC-28, AC-29)', () =
     expect(await read(installedCommand('release'))).toBe('release COMPLIANCE-OFF\n');
     expect(warnings.some(w => w.includes('lock could not be held'))).toBe(true);
     expect(readInstalledVariants((await readManifest(devflowDir))?.installedVariants)).toEqual({ curation: true, compliance: true });
+  });
+
+  it('known-bad probe: switches changed during the run write no record and warn, and the converge stands', async () => {
+    await writeInstallManifest('3.3.0', { compliance: { enabled: false, frameworks: [] } }, { installedVariants: { curation: true, compliance: true } });
+    await installAs({ curation: true, compliance: true });
+    // Another run turns compliance back on after this run converged to compliance off.
+    beforeNextLock.hook = () => writeInstallManifest('3.3.0', { compliance: { enabled: true, frameworks: [] } }, { installedVariants: { curation: true, compliance: true } });
+
+    const outcome = await toggle(false);
+
+    expect(outcome.kind).toBe('converged');
+    if (outcome.kind !== 'converged') return;
+    expect(outcome.result.converged, warnings.join('\n')).toBe(true);
+    expect(await read(installedCommand('release'))).toBe('release COMPLIANCE-OFF\n');
+    const manifest = await readManifest(devflowDir);
+    expect(manifest?.features.compliance.enabled, 'the hook ran before the record').toBe(true);
+    expect(readInstalledVariants(manifest?.installedVariants), 'no record of the switches this run converged to').toEqual({ curation: true, compliance: true });
+    expect(warnings.some(w => w.includes('install record') && w.includes('switches changed'))).toBe(true);
   });
 
   it('enable restores the on files and records the compliance-on variant', async () => {

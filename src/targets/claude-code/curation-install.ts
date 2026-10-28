@@ -260,14 +260,15 @@ async function readVariantHosts(root: string): Promise<{ ok: true; hosts: Readon
  * only `build:cli` did), so the caller can say so instead of reporting a converge that had nothing to do.
  * `incomplete` says the roster was read in part, already warned: a tree could not be listed
  * (`unreadable`), or the roster passed {@link MAX_CURATION_ROSTER} and the hosts after it were left out
- * (`truncated`).
+ * (`truncated`). `refused` lists the manifest hosts whose name {@link ROSTER_NAME_RE} does not hold (the
+ * build accepts a wider name), already warned: they are left out of `hosts` and the caller fails closed.
  */
 async function readRoster(
   kind: VariantKind,
   root: string,
   manifestHosts: ReadonlyMap<string, RosterHost> | null,
   warn: (msg: string) => void,
-): Promise<{ hosts: RosterHost[]; present: boolean; incomplete: 'unreadable' | 'truncated' | null }> {
+): Promise<{ hosts: RosterHost[]; present: boolean; incomplete: 'unreadable' | 'truncated' | null; refused: readonly RosterHost[] }> {
   const listings = {
     curation: await listVariantDir(curationOffDir(kind, root), kind, warn),
     compliance: await listVariantDir(complianceOffDir(kind, root), kind, warn),
@@ -289,18 +290,25 @@ async function readRoster(
   note(listings.both, ['curation', 'compliance']);
 
   const files = new Map<string, RosterHost>();
+  const refused: RosterHost[] = [];
   for (const [file, axes] of inferred) files.set(file, { file, axes });
   for (const [key, host] of manifestHosts ?? []) {
-    if (key.startsWith(`${kind}/`) && ROSTER_NAME_RE.test(host.file) && (host.axes.curation || host.axes.compliance)) files.set(host.file, host);
+    if (!key.startsWith(`${kind}/`) || !(host.axes.curation || host.axes.compliance)) continue;
+    if (ROSTER_NAME_RE.test(host.file)) {
+      files.set(host.file, host);
+    } else {
+      warn(`prompt variants: the build manifest lists ${kind}/${host.file}, a name the converge cannot hold; it was not converged`);
+      refused.push(host);
+    }
   }
   const hosts = [...files.values()].sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
   const present = hosts.length > 0 || Object.values(listings).some(listing => typeof listing !== 'string');
   if (hosts.length > MAX_CURATION_ROSTER) {
     warn(`prompt variants: ${hosts.length} ${kind} variants exceed the bound of ${MAX_CURATION_ROSTER}; converging the first ${MAX_CURATION_ROSTER}`);
-    return { hosts: hosts.slice(0, MAX_CURATION_ROSTER), present: true, incomplete: 'truncated' };
+    return { hosts: hosts.slice(0, MAX_CURATION_ROSTER), present: true, incomplete: 'truncated', refused };
   }
   const unreadable = Object.values(listings).some(listing => listing === 'unreadable');
-  return { hosts, present, incomplete: unreadable ? 'unreadable' : null };
+  return { hosts, present, incomplete: unreadable ? 'unreadable' : null, refused };
 }
 
 async function readIfPresent(file: string): Promise<Buffer | 'absent' | 'unreadable'> {
@@ -623,6 +631,12 @@ export async function convergePromptVariants(opts: ConvergePromptVariantsOptions
     if (roster.incomplete === 'truncated' && !switches.compliance && unknownReason === null) {
       unknownReason = `more than ${MAX_CURATION_ROSTER} ${kind} carry a variant, and the ones past the bound were not converged`;
     }
+    // A manifest host the roster cannot hold was never converged. If it carries a compliance arm, it may still post.
+    if (roster.refused.length > 0) failed = true;
+    const refusedPosting = roster.refused.find(host => host.axes.compliance);
+    if (refusedPosting !== undefined && !switches.compliance && unknownReason === null) {
+      unknownReason = `the build manifest lists ${kind}/${refusedPosting.file}, a name the converge cannot hold, so it was not converged`;
+    }
     if (!roster.present) {
       warn(`prompt variants: no ${kind} variants under ${curationOffDir(kind, root)} — run \`npm run build:mds\`; installed ${kind} left as they are`);
       failed = true;
@@ -651,45 +665,6 @@ export async function convergePromptVariants(opts: ConvergePromptVariantsOptions
     unchanged,
     notInstalled,
     posting,
-  };
-}
-
-/**
- * Make the installed commands, agents and apply-decisions skill match the
- * machine's curation switch: the prompt converge with compliance read as on, and the skill.
- *
- * Never throws. A caller reads `converged`; it does not catch. A claudeDir that is
- * not absolute is reported the same way rather than thrown, because an install
- * must not die on it.
- */
-export async function convergeCurationVariants(
-  opts: ConvergeCurationVariantsOptions,
-): Promise<ConvergeCurationVariantsResult> {
-  const { claudeDir, curation, warn } = opts;
-  if (!path.isAbsolute(claudeDir)) {
-    warn(`prompt variants: claudeDir is not an absolute path ("${claudeDir}") — skipping convergence`);
-    return { converged: false, commandsRewritten: [], agentsRewritten: [], unchanged: 0, notInstalled: 0, skill: 'unchanged' };
-  }
-
-  const prompts = await convergePromptVariants({
-    claudeDir,
-    switches: { curation, compliance: true },
-    plugins: opts.plugins,
-    warn,
-    packageRoot: opts.packageRoot,
-  });
-
-  // Evaluated unconditionally, after the files: a failed prompt never skips the skill
-  // (one failure must not leave the rest of the fan-out half-converged).
-  const skill = await convergeSkills(opts);
-
-  return {
-    converged: prompts.converged && skill !== 'failed',
-    commandsRewritten: prompts.commandsRewritten,
-    agentsRewritten: prompts.agentsRewritten,
-    unchanged: prompts.unchanged,
-    notInstalled: prompts.notInstalled,
-    skill,
   };
 }
 
@@ -951,14 +926,17 @@ export async function installedScriptsSkew(devflowDir: string, packageRoot?: str
  * the record as it stood, which says `mismatch` or `unknown` and names `devflow init`.
  *
  * The read and the write run under the manifest lock, as the switch writers do, so a switch that
- * another devflow run writes in between is never overwritten with the older copy read here. A lock
- * that cannot be taken, or is lost before the write, withholds the record with a warning.
+ * another devflow run writes in between is never overwritten with the older copy read here. The
+ * record is written only when the manifest's switches are still the ones the run converged to: if
+ * they changed during the run, nothing is recorded and a warning says so. A lock that cannot be
+ * taken, or is lost before the write, withholds the record with a warning.
  */
 async function recordInstalledVariants(devflowDir: string, switches: VariantSwitches, warn: (msg: string) => void): Promise<void> {
   try {
-    const locked = await withManifestLock(devflowDir, {}, async (lock): Promise<'written' | 'current' | 'no-manifest' | 'lock-lost'> => {
+    const locked = await withManifestLock(devflowDir, {}, async (lock): Promise<'written' | 'current' | 'no-manifest' | 'lock-lost' | 'switches-changed'> => {
       const manifest = await readManifest(devflowDir);
       if (manifest === null) return 'no-manifest';
+      if (manifest.features.curation !== switches.curation || manifest.features.compliance.enabled !== switches.compliance) return 'switches-changed';
       const recorded = readInstalledVariants(manifest.installedVariants);
       if (recorded !== null && recorded.curation === switches.curation && recorded.compliance === switches.compliance) return 'current';
       if (!(await lock.stillHeld())) return 'lock-lost';
@@ -969,6 +947,8 @@ async function recordInstalledVariants(devflowDir: string, switches: VariantSwit
       warn('install record: the install manifest lock could not be held, so the installed variants were not recorded. Run `devflow init`.');
     } else if (locked.value === 'no-manifest') {
       warn('install record: no readable install manifest, so the installed variants were not recorded. Run `devflow init`.');
+    } else if (locked.value === 'switches-changed') {
+      warn('install record: the switches changed during the run, so the installed variants were not recorded. Run `devflow init`.');
     }
   } catch (err) {
     warn(`install record: could not record the installed variants — ${String(err)}`);

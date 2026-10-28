@@ -1,8 +1,8 @@
 /**
  * The curation-variant converge (D-LEARNING-VARIANT-INSTALL), against temp trees.
  *
- * Covers convergeCurationVariants, convergeVariantAxes, applyVariantToggle and the install-side source
- * order and skill condition in isolation: what the converge reads, what it writes,
+ * Covers convergeVariantAxes (with compliance on, so only the curation switch moves), applyVariantToggle
+ * and the install-side source order and skill condition in isolation: what the converge reads, what it writes,
  * what it refuses to touch and how it fails. tests/curation/
  * curation-variants-install-e2e.test.ts drives the same behaviour through the real
  * CLI under a temp HOME.
@@ -22,7 +22,7 @@ import * as path from 'path';
 import { installViaFileCopy, type Spinner } from '../../src/targets/claude-code/installer.js';
 import {
   applyVariantToggle,
-  convergeCurationVariants,
+  convergeVariantAxes,
   describeCurationConverge,
   curationToggleSkew,
   MAX_CURATION_ROSTER,
@@ -115,8 +115,13 @@ async function installOn(): Promise<void> {
   await write(installedAgent('code'), 'code ON\n');
 }
 
+/** The machine's switches for a converge: curation as given, compliance on (the curation axis alone moves here). */
+const machine = (curation: boolean) => ({
+  features: { curation, compliance: { enabled: true, frameworks: [] as string[] }, rules: false },
+});
+
 function converge(curation: boolean, plugins: readonly PluginDefinition[] = FULL_SELECTION) {
-  return convergeCurationVariants({ claudeDir, devflowDir, curation, plugins, warn, packageRoot: pkg });
+  return convergeVariantAxes({ claudeDir, devflowDir, manifest: machine(curation), plugins, warn, packageRoot: pkg });
 }
 
 beforeEach(async () => {
@@ -247,9 +252,9 @@ describe('installViaFileCopy honours the curation switch', () => {
 
     await install(false, true);
 
-    expect(await exists(installedSkill()), 'removal on a partial install belongs to convergeCurationVariants').toBe(true);
-    const converged = await convergeCurationVariants({
-      claudeDir, devflowDir, curation: false, plugins: selection(), warn,
+    expect(await exists(installedSkill()), 'removal on a partial install belongs to the converge').toBe(true);
+    const converged = await convergeVariantAxes({
+      claudeDir, devflowDir, manifest: machine(false), plugins: selection(), warn,
     });
     expect(converged.skill).toBe('removed');
     expect(await exists(installedSkill())).toBe(false);
@@ -262,10 +267,10 @@ describe('installViaFileCopy honours the curation switch', () => {
 });
 
 // ---------------------------------------------------------------------------
-// convergeCurationVariants: the files
+// The converge with compliance on: the files
 // ---------------------------------------------------------------------------
 
-describe('convergeCurationVariants: installed prompts', () => {
+describe('convergeVariantAxes on the curation axis: installed prompts', () => {
   it('curation off rewrites the installed commands and agents that have a variant (AC-139)', async () => {
     await installOn();
 
@@ -384,10 +389,10 @@ describe('convergeCurationVariants: installed prompts', () => {
 });
 
 // ---------------------------------------------------------------------------
-// convergeCurationVariants: agent overrides (D-AGENT-OVERRIDE-CARRY)
+// The converge with compliance on: agent overrides (D-AGENT-OVERRIDE-CARRY)
 // ---------------------------------------------------------------------------
 
-describe('convergeCurationVariants: agent model and effort overrides', () => {
+describe('convergeVariantAxes on the curation axis: agent model and effort overrides', () => {
   /** An agent file: frontmatter with the given model and effort (null: no effort line), then the variant body. */
   const agentText = (variant: 'ON' | 'OFF', model = 'sonnet', effort: string | null = 'high'): string =>
     `---\nname: Code\nmodel: ${model}\n${effort === null ? '' : `effort: ${effort}\n`}---\n\nbody ${variant}\n`;
@@ -471,10 +476,10 @@ describe('convergeCurationVariants: agent model and effort overrides', () => {
 });
 
 // ---------------------------------------------------------------------------
-// convergeCurationVariants: failure handling (AC-146)
+// The converge with compliance on: failure handling (AC-146)
 // ---------------------------------------------------------------------------
 
-describe('convergeCurationVariants: failures only warn (AC-146)', () => {
+describe('convergeVariantAxes on the curation axis: failures only warn (AC-146)', () => {
   it('one unreadable installed file warns and fails the result, while every other file and the skill still converge', async () => {
     await installOn();
     // A directory where the installed command should be: readFile fails with EISDIR.
@@ -505,8 +510,8 @@ describe('convergeCurationVariants: failures only warn (AC-146)', () => {
   it('a relative claudeDir is refused with a warning and nothing is written', async () => {
     await installOn();
 
-    const result = await convergeCurationVariants({
-      claudeDir: 'relative/claude', devflowDir, curation: false, plugins: FULL_SELECTION, warn, packageRoot: pkg,
+    const result = await convergeVariantAxes({
+      claudeDir: 'relative/claude', devflowDir, manifest: machine(false), plugins: FULL_SELECTION, warn, packageRoot: pkg,
     });
 
     expect(result.converged).toBe(false);
@@ -528,10 +533,10 @@ describe('convergeCurationVariants: failures only warn (AC-146)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// convergeCurationVariants: the apply-decisions skill (AC-148)
+// The converge with compliance on: the apply-decisions skill (AC-148)
 // ---------------------------------------------------------------------------
 
-describe('convergeCurationVariants: the apply-decisions skill', () => {
+describe('convergeVariantAxes on the curation axis: the apply-decisions skill', () => {
   const sourceSkill = (): Promise<string> => read(path.join(skillsDir(pkg), SKILL, 'SKILL.md'));
 
   it('curation on installs the skill when the selection requires it (AC-140)', async () => {
@@ -558,7 +563,7 @@ describe('convergeCurationVariants: the apply-decisions skill', () => {
 
     expect(result.skill).toBe('not-selected');
     expect(await exists(installedSkill())).toBe(false);
-    expect(await exists(path.join(claudeDir, 'skills'))).toBe(false);
+    expect(await fs.readdir(path.join(claudeDir, 'skills')), 'the compliance skill is the only one a converge installs').toEqual(['devflow:compliance']);
   });
 
   it('an identical installed skill is reported unchanged and its files are not touched', async () => {
@@ -670,12 +675,13 @@ describe('curationToggleSkew (AC-145)', () => {
 });
 
 describe('applyVariantToggle on the curation axis', () => {
-  async function writeManifest(version: string, plugins: readonly string[]): Promise<void> {
+  /** The manifest as the toggle's caller leaves it: the curation switch is already written to the value being toggled to. */
+  async function writeManifest(version: string, plugins: readonly string[], curation: boolean): Promise<void> {
     await write(path.join(devflowDir, 'manifest.json'), JSON.stringify({
       version,
       plugins,
       scope: 'user',
-      features: { ambient: false, memory: false, hud: false, knowledge: true, learning: true, rules: false },
+      features: { ambient: false, memory: false, hud: false, knowledge: true, curation, learning: curation, rules: false },
       installedAt: '2026-10-10T00:00:00.000Z',
       updatedAt: '2026-10-10T00:00:00.000Z',
     }));
@@ -697,7 +703,7 @@ describe('applyVariantToggle on the curation axis', () => {
   });
 
   it('a manifest from another version skips the converge and leaves every installed file as it was (AC-145)', async () => {
-    await writeManifest('3.2.0', ['devflow-core-skills']);
+    await writeManifest('3.2.0', ['devflow-core-skills'], false);
     await installOn();
 
     const outcome = await toggle(false, '3.3.0');
@@ -712,7 +718,7 @@ describe('applyVariantToggle on the curation axis', () => {
 
   it('a matching version converges, using the manifest\'s plugin selection for the skill', async () => {
     const withSkill = DEVFLOW_PLUGINS.filter(plugin => skillsOf([plugin]).has(SKILL)).map(plugin => plugin.name);
-    await writeManifest('3.3.0', withSkill);
+    await writeManifest('3.3.0', withSkill, false);
     await installOn();
     await converge(true);
     expect(await exists(installedSkill())).toBe(true);
@@ -727,7 +733,7 @@ describe('applyVariantToggle on the curation axis', () => {
   });
 
   it('a manifest whose plugins do not require the skill never gets it on enable (AC-143)', async () => {
-    await writeManifest('3.3.0', [WITHOUT_SKILL.name]);
+    await writeManifest('3.3.0', [WITHOUT_SKILL.name], true);
     await write(installedCommand('implement'), 'implement OFF\n');
 
     const outcome = await toggle(true, '3.3.0');
@@ -749,7 +755,8 @@ describe('applyVariantToggle with a saved agent override (D-AGENT-OVERRIDE-CARRY
       version: '3.3.0',
       plugins: ['devflow-core-skills'],
       scope: 'user',
-      features: { ambient: false, memory: false, hud: false, knowledge: true, learning: true, rules: false },
+      // Curation is already off: the switch is written before the toggle, and both tests toggle it off.
+      features: { ambient: false, memory: false, hud: false, knowledge: true, curation: false, learning: false, rules: false },
       installedAt: '2026-10-10T00:00:00.000Z',
       updatedAt: '2026-10-10T00:00:00.000Z',
     }));
