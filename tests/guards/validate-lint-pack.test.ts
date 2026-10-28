@@ -323,7 +323,13 @@ function dataFlowLines(section: string | null, kind: 'Produces' | 'Requires'): s
   return lines.map(l => l.slice(`**${kind}:**`.length).replace(/\([^)]*\)/g, '').split(',').map(n => n.trim()).filter(n => n !== ''))
 }
 
-/** Named collector: how a copy of `/implement` fails to list `GATE_LEVEL` in the data flow, once per curation arm it holds. */
+/**
+ * The Phase 1 `Produces` lines the `/implement` source holds: one per curation arm and compliance arm pair, so
+ * two curation arms with a compliance on and a compliance off arm each. A built file holds one.
+ */
+const IMPLEMENT_SOURCE_PRODUCES = 4
+
+/** Named collector: how a copy of `/implement` fails to list `GATE_LEVEL` in the data flow, once per Phase 1 `Produces` line it holds (`arms` of them). */
 export function collectDataFlowDefects(doc: Doc, arms: number): string[] {
   const out: string[] = []
   const phase1 = dataFlowLines(sectionBetween(doc.text, '### Phase 1: Setup', '### Phase 2:'), 'Produces')
@@ -373,7 +379,7 @@ describe('only the implement Phase 6 Validate fence carries the level and the ba
   })
 
   it('the data flow lists GATE_LEVEL in both Phase 1 arms, both builds and Phase 6', () => {
-    expect(collectDataFlowDefects(IMPLEMENT_SOURCE, 2)).toEqual([])
+    expect(collectDataFlowDefects(IMPLEMENT_SOURCE, IMPLEMENT_SOURCE_PRODUCES)).toEqual([])
     for (const doc of BUILDS) expect(collectDataFlowDefects(doc, 1)).toEqual([])
   })
 
@@ -434,7 +440,7 @@ describe('only the implement Phase 6 Validate fence carries the level and the ba
   })
 
   it('probes: an extra or missing Produces or Requires line is counted, in every arm and build', () => {
-    expect(collectDataFlowDefects(IMPLEMENT_SOURCE, 3)).toContain(`${IMPLEMENT_SOURCE.label}: Phase 1 has 2 Produces lines, expected 3`)
+    expect(collectDataFlowDefects(IMPLEMENT_SOURCE, IMPLEMENT_SOURCE_PRODUCES + 1)).toContain(`${IMPLEMENT_SOURCE.label}: Phase 1 has ${IMPLEMENT_SOURCE_PRODUCES} Produces lines, expected ${IMPLEMENT_SOURCE_PRODUCES + 1}`)
     for (const doc of BUILDS) {
       const twice = seed(doc.text, /^(\*\*Produces:\*\* TASK_ID[^\n]*)$/m, '$1\n$1')
       expect(collectDataFlowDefects({ label: doc.label, text: twice }, 1), doc.label)

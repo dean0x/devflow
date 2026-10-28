@@ -10,7 +10,11 @@ output-dir: dist/commands
 @import "./_partials/_settings.mds" as settings
 # Code Review Command
 
+<!-- compliance:on -->
 Run a comprehensive code review of the current branch by spawning parallel review agents, then synthesizing results into PR comments.
+<!-- compliance:off -->
+Run a comprehensive code review of the current branch by spawning parallel review agents, then synthesizing results into a local review summary.
+<!-- compliance:end -->
 
 ## Usage
 
@@ -52,6 +56,9 @@ Keep each worktree's values for every downstream phase.
 **Produces:** EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL
 
 {{evidence_policy()}}
+<!-- compliance:off -->
+When `EVIDENCE_POLICY` is `required`, record `TRACEABILITY: DEGRADED (compliance off on this machine; the repository requires evidence)` once, for the Phase 4 report.
+<!-- compliance:end -->
 
 #### Step 0c: Per-Worktree Pre-Flight (Git Agent)
 
@@ -64,6 +71,7 @@ Discover PR description guidance from plan artifact (per worktree):
 3. Read the most recent file that carries the section, extract `## PR Description Guidance` section
 4. If no plan files exist or section not found, set `PR_DESCRIPTION_GUIDANCE` to `(none)`
 
+<!-- compliance:on -->
 Render the test-plan block (per worktree) from `/implement`'s evidence file, and from nothing else:
 1. `branch_slug` is `git -C "{worktree}" branch --show-current` with every `/` replaced by `-`.
 2. Only when `branch_slug` matches `^[A-Za-z0-9._-]{1,200}$` and the file exists, run (the path double-quoted):
@@ -74,6 +82,7 @@ node "$HOME/.devflow/scripts/verify-evidence.cjs" render --plan "{worktree}/.dev
 
 3. On `exit=0`, `PR_TEST_PLAN_BLOCK` is its stdout byte for byte without that `exit=` line; in every other case it is `(none)`. Nothing here waits on it: the Git agent pastes it only behind its own check, and only into a PR it creates.
 
+<!-- compliance:end -->
 For each reviewable worktree, spawn Git agent:
 
 ```
@@ -81,7 +90,9 @@ Agent(subagent_type="Git", run_in_background=false):
 "OPERATION: ensure-pr-ready
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
+<!-- compliance:on -->
 PR_TEST_PLAN_BLOCK: {PR_TEST_PLAN_BLOCK verbatim, or (none)}
+<!-- compliance:end -->
 APPLY_CONVENTIONS: {APPLY_CONVENTIONS}
 Validate branch, commit if needed, push, create PR if needed.
 Return: branch, base_branch, base_ref, branch-slug, PR#"
@@ -158,6 +169,7 @@ MAX_REVIEW_CYCLES = 10
 | denominator = 0 OR parsing failed | fp_ratio = 0, skip warning (degraded note on parse failure) |
 | fp_ratio > 0.7 AND CYCLE_NUMBER >= 3 | Warn in output, continue |
 
+<!-- compliance:on -->
 #### Step 0f: Resolve Publication Mode (Per Worktree)
 
 **Produces:** REVIEW_PUBLICATION
@@ -167,6 +179,7 @@ For each reviewable worktree, call:
 
 {{publication_gate()}}
 
+<!-- compliance:end -->
 ### Phase 1: Analyze Changed Files
 
 **Produces:** REVIEW_FOCUS_LIST, DIFF_CLASS, DIFF_FILES
@@ -371,12 +384,22 @@ IMPORTANT: Write report to {worktree_path}/.devflow/docs/reviews/{branch-slug}/{
 
 In multi-worktree mode, process worktrees **sequentially**: Phases 1-4 for each.
 
+<!-- compliance:on -->
 ### Phase 3: Synthesis → Review Comment (Sequential)
 
 **Produces:** REVIEW_SUMMARY, PR_COMMENT
+<!-- compliance:off -->
+### Phase 3: Synthesis → Review Summary (Sequential)
+
+**Produces:** REVIEW_SUMMARY
+<!-- compliance:end -->
 **Requires:** REVIEW_FOCUS_OUTPUTS, REVIEW_DIR, PR_INFO, GATE_LEVEL, REVIEW_FOCUS_LIST
 
+<!-- compliance:on -->
 **WAIT** for Phase 2. For each worktree, run steps 3a and 3b in sequence:
+<!-- compliance:off -->
+**WAIT** for Phase 2. For each worktree, run step 3a:
+<!-- compliance:end -->
 
 **Step 3a — Synthesize agent** per worktree:
 ```
@@ -394,6 +417,7 @@ Aggregate findings, determine merge recommendation.
 Output: {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/review-summary.md"
 ```
 
+<!-- compliance:on -->
 **Step 3b — Git agent (post-review-summary)** per worktree (after Step 3a writes review-summary.md):
 ```
 Agent(subagent_type="Git", run_in_background=false):
@@ -407,6 +431,7 @@ WORKTREE_PATH: {worktree_path}  (omit if cwd)
 Posts the consolidated review-summary comment (marker-deduped on the cycle+timestamp pair)."
 ```
 
+<!-- compliance:end -->
 ### Phase 4: Write Review Head Marker & Report
 
 **Requires:** BRANCH_INFO, REVIEW_DIR
@@ -416,9 +441,14 @@ Per worktree, after successful completion:
 2. Display results from all agents:
    - Merge recommendation (from Synthesize agent)
    - Issue counts by category (🔴 blocking / ⚠️ should-fix / ℹ️ pre-existing)
+<!-- compliance:on -->
    - Review comment status: POSTED / POSTED+TRUNCATED (body exceeded 60k after redaction) / SKIPPED (D7 dedup) / DEGRADED (from Git)
    - Publication status: FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config) | STUB (visibility undeterminable) | STUB (evidence policy) (from Git agent)
    - Any base `TRACEABILITY: DEGRADED` line from Step 0c, as returned
+<!-- compliance:off -->
+   - Review summary: `.devflow/docs/reviews/{branch-slug}/{timestamp}/review-summary.md` (local; not posted)
+   - Any base `TRACEABILITY: DEGRADED` line from Step 0c, as returned, and the compliance-off line of Step 0b-ii
+<!-- compliance:end -->
    - Artifact paths
 
 ## Architecture
@@ -426,7 +456,11 @@ Per worktree, after successful completion:
 ```
 /code-review
 │
+<!-- compliance:on -->
 ├─ Phase 0: Worktree Discovery & Pre-flight, Steps 0a-0f (Git agent per worktree, parallel)
+<!-- compliance:off -->
+├─ Phase 0: Worktree Discovery & Pre-flight, Steps 0a-0e (Git agent per worktree, parallel)
+<!-- compliance:end -->
 │  ├─ Step 0b: Resolve the compliance lens and gate level
 │
 ├─ Per worktree (SEQUENTIAL):
@@ -440,9 +474,14 @@ Per worktree, after successful completion:
 │  │  ├─ code: core (diff.patch), language (diff-{focus}.patch), conditional
 │  │  └─ docs-only / tests-only / lockfile-only: the reduced set (diff.patch)
 │  │
+<!-- compliance:on -->
 │  ├─ Phase 3: Synthesis → Review Comment (SEQUENTIAL within worktree)
 │  │  ├─ Step 3a: Synthesize agent (mode: review, writes review-summary.md)
 │  │  └─ Step 3b: Git agent (post-review-summary)
+<!-- compliance:off -->
+│  ├─ Phase 3: Synthesis → Review Summary (SEQUENTIAL within worktree)
+│  │  └─ Step 3a: Synthesize agent (mode: review, writes review-summary.md)
+<!-- compliance:end -->
 │  │
 │  └─ Phase 4: Write .last-review-head + display results
 ```
@@ -452,7 +491,9 @@ Per worktree, after successful completion:
 | Case | Handling |
 |------|----------|
 | `--full` in multi-worktree mode | Applies to all worktrees (global modifier). It sets the diff range, never the gate level |
+<!-- compliance:on -->
 | Review comment already posted | Git agent matches its own marker on the `{cycle, timestamp}` pair → skip silently (D7) |
+<!-- compliance:end -->
 | Docs-only diff | Its Step 1.1 set, narrowed by level |
 | Tests-only diff | Its Step 1.1 set, narrowed by level |
 | Lockfile-only diff | Its Step 1.1 set, narrowed by level |
@@ -461,7 +502,9 @@ Per worktree, after successful completion:
 | A file moved across classes | `--no-renames` lists both paths, so a code path makes the diff `code` |
 | Path listing above about 40 lines | Read in ranges (Step 1.1) |
 | Language files changed, plugin not installed | The focus is absent from the stamped line: not spawned |
+<!-- compliance:on -->
 | `reviewPublication: off` | Git agent skips posting the review comment (OFF) — except that, only when `EVIDENCE_POLICY` is `required`, Step 0f passes `stub` and a counts-only STUB comment posts unless no public text remains |
+<!-- compliance:end -->
 
 ## Backwards Compatibility
 

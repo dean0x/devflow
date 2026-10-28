@@ -26,7 +26,7 @@ import {
   renderLanguageStamp,
   restampInstalledCommands,
 } from '../../src/targets/claude-code/language-stamp.js';
-import { convergeCurationVariants } from '../../src/targets/claude-code/curation-install.js';
+import { convergePromptVariants } from '../../src/targets/claude-code/curation-install.js';
 import { runSelectivePhaseForScope } from '../../src/cli/commands/uninstall.js';
 import {
   DEVFLOW_PLUGINS,
@@ -374,9 +374,9 @@ describe('installViaFileCopy stamps the installed code-review from the effective
 // ---------------------------------------------------------------------------
 
 describe('a curation-variant converge keeps the installed stamp', () => {
-  const converge = (curation: boolean): ReturnType<typeof convergeCurationVariants> =>
-    convergeCurationVariants({
-      claudeDir, devflowDir, curation, plugins: [CORE, REVIEW, TYPESCRIPT, GO], warn: m => warnings.push(m),
+  const converge = (curation: boolean): ReturnType<typeof convergePromptVariants> =>
+    convergePromptVariants({
+      claudeDir, switches: { curation, compliance: true }, plugins: [CORE, REVIEW, TYPESCRIPT, GO], warn: m => warnings.push(m),
     });
 
   it('switching the variant rewrites the file but carries the stamp across', async () => {

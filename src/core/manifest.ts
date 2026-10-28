@@ -121,6 +121,18 @@ export interface ManifestData {
      */
     gateLevel?: unknown;
   };
+  /**
+   * The variant of each axis the installed prompts hold, `{ curation, compliance }`, written
+   * only after a converge that finished clean (AC-29). Typed `unknown` on purpose, like
+   * `features.gateLevel`: this reader carries the key raw when the stored file has it and
+   * never narrows it, so a hand-edited or newer-version value stays on disk. Only
+   * `readInstalledVariants` (src/core/installed-variants.ts) gives it a meaning, and an
+   * absent or unreadable record means the installed variant is unknown. Nothing heals it.
+   *
+   * NEVER add `installedVariants` to the hard-null validation set or the heal set: every
+   * install made before this field lacks it, and a heal would claim a variant nobody checked.
+   */
+  installedVariants?: unknown;
   installedAt: string;
   updatedAt: string;
 }
@@ -350,6 +362,9 @@ export async function readManifest(
       },
       installedAt: data.installedAt as string,
       updatedAt: data.updatedAt as string,
+      // The install record of the prompt variants, raw (see the field's doc comment). Last, where
+      // the writer that records it puts it, so a read and a write never move the key.
+      ...(Object.hasOwn(data, 'installedVariants') ? { installedVariants: data.installedVariants } : {}),
     };
 
     if (needsHeal) {

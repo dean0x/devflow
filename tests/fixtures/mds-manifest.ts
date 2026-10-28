@@ -298,14 +298,46 @@ export const CURATION_OFF_FILES: readonly string[] = CURATION_VARIANT_HOSTS.map(
  * as a set for the same reason as the curation roster: a count stays green when one
  * host loses its arm and another gains one in the same commit.
  *
- * Empty while no host carries a compliance arm. The build's variant manifest is
- * asserted against it in both directions (tests/build-mds.test.ts), so an arm added
- * without a row, or a row left after its arm goes, turns that assertion red.
+ * The build's variant manifest is asserted against it in both directions
+ * (tests/build-mds.test.ts), so an arm added without a row, or a row left after its
+ * arm goes, turns that assertion red. A host joins the roster in the commit that adds
+ * its first compliance arm.
  */
-export const COMPLIANCE_VARIANT_HOSTS: readonly string[] = [];
+export const COMPLIANCE_VARIANT_HOSTS: readonly string[] = [
+  'agents/git',
+  'agents/triage',
+  'commands/implement',
+  'commands/resolve',
+  'commands/code-review',
+  'commands/bug-analysis',
+  'commands/dynamic-build',
+  'commands/dynamic-tickets',
+  'commands/plan',
+  'commands/release',
+];
 
 /** The `dist/compliance-off/`-relative file of every host in COMPLIANCE_VARIANT_HOSTS. */
 export const COMPLIANCE_OFF_FILES: readonly string[] = COMPLIANCE_VARIANT_HOSTS.map(h => `${h}.md`);
+
+/**
+ * The eight Git operations that post to GitHub or a tracker: a compliance-off install
+ * carries no row, loading line or text that names one of them in a command or agent
+ * prompt (tests/guards/posting-absence.test.ts). The scan covers the compliance-off
+ * build of every host in COMPLIANCE_VARIANT_HOSTS, the curation-on and curation-off
+ * build of every command and compiled agent host outside it, and the hand-authored
+ * agents. The reference files under `dist/skills/` are outside that scan. A named set,
+ * never a count, so an op that moves in or out is a visible edit here.
+ */
+export const POSTING_OPERATIONS: readonly string[] = [
+  'post-review-summary',
+  'resolve-review-threads',
+  'post-resolution-summary',
+  'update-pr-evidence',
+  'manage-debt',
+  'post-wave-report',
+  'backlink-shipped-issues',
+  'associate-release',
+];
 
 /**
  * Reference modules: .mds sources under src/assets/mds/ that the build COMPILES,

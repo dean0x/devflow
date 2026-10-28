@@ -8,7 +8,7 @@ import { getAllAgentNames } from '../src/core/plugins.js'
 import { agentSourceDirs, compiledSkillRefsDir } from '../src/core/assets.js'
 import { MAX_REFERENCE_SWEEP_DEPTH } from '../src/core/reference-sweep.js'
 import { GIT_OPERATIONS, PR_HOST_DESTINATION_ROOT, operationReferenceRel } from '../src/core/mds-variants.js'
-import { variantOffRelPath, type VariantKind } from '../src/core/curation-variants.js'
+import { variantOffRelPath, type OffVariantKey, type VariantKind } from '../src/core/curation-variants.js'
 import { assertTempHome } from './setup/home-isolation.js'
 
 export const ROOT = path.resolve(import.meta.dirname, '..')
@@ -428,8 +428,20 @@ export function resolveAgentSource(name: string, root: string = ROOT): AgentSour
  * @param root - Repository root to resolve paths against (default: ROOT).
  */
 export function resolveCurationOffSource(kind: VariantKind, name: string, root: string = ROOT): string | null {
+  return resolveVariantOffSource('curation-off', kind, name, root)
+}
+
+/**
+ * An off variant of a compiled prompt: the file the build writes under the tree of `key`
+ * (`dist/curation-off/`, `dist/compliance-off/` or `dist/curation-compliance-off/`) for a host that has
+ * an arm on each axis the variant turns off, or null when the host has no such variant.
+ *
+ * @param key - the off variant: `curation-off`, `compliance-off` or `both-off`.
+ * @param root - Repository root to resolve paths against (default: ROOT).
+ */
+export function resolveVariantOffSource(key: OffVariantKey, kind: VariantKind, name: string, root: string = ROOT): string | null {
   try {
-    return readFileSync(path.join(root, variantOffRelPath('curation-off', kind, `${name}.md`)), 'utf-8')
+    return readFileSync(path.join(root, variantOffRelPath(key, kind, `${name}.md`)), 'utf-8')
   } catch {
     return null
   }

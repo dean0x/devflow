@@ -7,9 +7,11 @@ D-COMPLIANCE-INJECT: the compliance instruction reaches an agent only through a 
 prompt, and only when the resolved lens is on. No Code, Fix, Review or Design body names
 the compliance skill, so a lens-off spawn pays nothing for it. `compliance_directive()` is the
 one home of the directive text; `compliance_inject()` is how a pass-through host sets it.
-An install-time variant keyed on the machine switch would be wrong: the lens is the union of
-the machine, the default branch and the worktree (D-LENS-UNION), so a repository can turn it
-on when the machine switch is off.
+No install-time variant carries the lens: it is the union of the machine, the default
+branch and the worktree (D-LENS-UNION), so a repository can turn it on when the machine
+switch is off. The posting steps are the opposite case. They are an install-time variant
+keyed on the machine switch alone, as compliance arms in each host, and a repository key
+cannot restore one.
 
 @define compliance_frameworks():
 `COMPLIANCE_FRAMEWORKS` is the settings line's `COMPLIANCE` with `generic` written `none`: `off`, `none`, or the framework ids the machine and this repository declare.

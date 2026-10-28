@@ -70,6 +70,7 @@ import {
   requireDistFile,
   resolveAgentSource,
   resolveCurationOffSource,
+  resolveVariantOffSource,
   ROOT,
   SHELL_WRITE_PROBES,
   WRITE_FAILURE,
@@ -2030,5 +2031,281 @@ describe('#544: step 4 of the re-validation reference names every Phase 1 target
     expect(collectRevalidateTargetFormDefects(seedOnce(reval, `by the Phase 1 ${PUBLICATION_STEP} step`, `by its ${PUBLICATION_STEP} rule`)), 'the "its" form')
       .toEqual([defect(PUBLICATION_STEP)])
     expect(collectRevalidateTargetFormDefects(seedOnce(reval, '4. **Take GATE_LEVEL**', '4. **Take the level**'))).toEqual(['no re-validation settings step'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #648 phase B — the compliance-off builds of /implement (AC-13, AC-18, AC-19, AC-26)
+// ---------------------------------------------------------------------------
+//
+// A machine with compliance off installs no step that posts to GitHub or a tracker. /implement keeps its
+// local evidence flow instead:
+//   AC-18  Under `required`, Phase 1 records the one fixed local DEGRADED line for the Phase 12 report.
+//   AC-19  Phase 11 runs `verify-evidence.cjs verify` against the local evidence file and writes the local
+//          result file. It passes no publication value, makes no publish call and spawns no Git agent.
+//   AC-26  The ticket-link ask and the missing-test-plan ask stay, inline (the off build reads no
+//          `implement-evidence-asks` reference). An exception reaches only the local evidence file,
+//          through `EVIDENCE_EXCEPTIONS`; the PR body inputs PR_EXCEPTIONS and PR_TEST_PLAN_BLOCK are gone.
+//   #669   The re-validation reference points at three Phase 1 steps (the evidence policy, the publication
+//          value per worktree, the stub rule). The off build keeps each of the three exactly once.
+//
+// Both off builds are read: compliance off with curation on, and both off. Every guard has a named
+// collector, a non-empty-corpus assertion and a known-bad probe run through the same collector.
+
+type ComplianceOffImplementKey = 'compliance-off' | 'both-off'
+
+/** The compliance-off builds of /implement, by label. */
+const COMPLIANCE_OFF_IMPLEMENT_BUILDS: ReadonlyArray<readonly [string, ComplianceOffImplementKey]> = [
+  ['compliance off', 'compliance-off'],
+  ['curation and compliance off', 'both-off'],
+]
+
+function implementMdComplianceOff(key: ComplianceOffImplementKey): string {
+  const off = resolveVariantOffSource(key, 'commands', 'implement')
+  if (off === null) throw new Error(`the ${key} build of /implement is absent: run \`npm run build:mds\``)
+  return off
+}
+
+/** The one fixed line a compliance-off build records under `required` (AC-18). */
+const OFF_POLICY_LINE = 'TRACEABILITY: DEGRADED (compliance off on this machine; the repository requires evidence)'
+/** The off Phase 11 call: the local verify, not the publish. */
+const OFF_EVIDENCE_RUN = 'verify-evidence.cjs" verify --pr {PR_NUMBER}'
+
+/** Phase 11's order in an off build: the evidence anchor is the local verify. */
+const PHASE11_ORDER_OFF: readonly OrderRule[] = PHASE11_ORDER.map(rule => ({
+  ...rule,
+  before: rule.before === EVIDENCE_RUN ? OFF_EVIDENCE_RUN : rule.before,
+  after: rule.after === EVIDENCE_RUN ? OFF_EVIDENCE_RUN : rule.after,
+}))
+
+/** What an off build of /implement names nowhere: the PR-body inputs, the reference reads, the publish call and the publication pass. */
+const OFF_ABSENT: ReadonlyArray<readonly [string, string]> = [
+  ['the PR exceptions input', 'PR_EXCEPTIONS'],
+  ['the PR test-plan block input', 'PR_TEST_PLAN_BLOCK'],
+  ['the evidence-asks reference', 'implement-evidence-asks'],
+  ['the plan artifact input', 'PLAN_ARTIFACT_PATH'],
+  ['the publication flag', '--publication'],
+  ['the publish call', 'verify-evidence.cjs" publish'],
+  ['the update-pr-evidence operation', 'update-pr-evidence'],
+  ['the publish timeout', 'timeout: 180000'],
+]
+
+/** Named collector: what an off build of /implement still names that a non-posting machine must not. */
+function collectOffAbsenceDefects(content: string): string[] {
+  return OFF_ABSENT.filter(([, text]) => content.includes(text)).map(([what, text]) => `the off build names ${what}: ${text}`)
+}
+
+/**
+ * Named collector: what Phase 11 of an off build lacks. One inline `verify` call from the worktree reads the
+ * local evidence file and writes the local result file; it passes no publication value, spawns no Git agent
+ * and never blocks.
+ */
+function collectOffEvidenceRunDefects(content: string): string[] {
+  const phase = phaseSection(content, PHASE11)
+  if (phase === null) return ['no Phase 11 section']
+  const runs = parseFences(phase).filter(f => f.includes(OFF_EVIDENCE_RUN))
+  if (runs.length !== 1) return [`expected one local verify call in Phase 11, found ${runs.length}`]
+  const out: string[] = []
+  if (!runs[0].startsWith('```bash\n')) out.push('the call is not a bash fence')
+  if (!runs[0].includes('cd "{worktree}" && node "$HOME/.devflow/scripts/verify-evidence.cjs" verify')) out.push('the call does not run from the worktree')
+  if (!runs[0].includes('--evidence ".devflow/docs/evidence-{branch_slug}.md"')) out.push('--evidence is not the evidence file')
+  if (!runs[0].includes('--comment-out ".devflow/docs/evidence-result-{branch_slug}.md"')) out.push('--comment-out is not the local result file')
+  if (/--publication|\bpublish\b/.test(phase)) out.push('Phase 11 names a publication value or a publish call')
+  if (parseFences(content).some(f => isAgentBlock(f, 'Git') && f.includes(EVIDENCE_SPAWN))) out.push('a Git agent is spawned for update-pr-evidence')
+  if (!phase.includes('under every strategy')) out.push('Phase 11 does not run under every strategy')
+  if (!phase.includes('It never blocks')) out.push('Phase 11 may block')
+  if (!phase.includes('path does not match `^[A-Za-z0-9._/-]{1,255}$`')) out.push('the evidence path reaches the shell ungated')
+  if (!phase.includes('`TRACEABILITY: DEGRADED (evidence unavailable)`')) out.push('a failed run names no DEGRADED reason')
+  if (!phase.includes('`EVIDENCE_RESULT`')) out.push('the result is not captured as EVIDENCE_RESULT')
+  return out
+}
+
+/**
+ * Named collector: how an off build of /implement keeps the two asks and the one home of an exception. Both asks
+ * stay inline with exactly their two options, the exception grammar is stated once in the build, the record step
+ * sets `EVIDENCE_EXCEPTIONS`, and no line that names an exception section names the handoff file or a PR input.
+ */
+function collectOffAskDefects(content: string): string[] {
+  const out: string[] = []
+  const need = (what: string, ok: boolean): void => { if (!ok) out.push(what) }
+  const ticket = content.slice(content.indexOf(TICKET_ASK), content.indexOf(RECORD))
+  need('the ticket-link ask is absent or after the record step', ticket.length > 0 && content.indexOf(TICKET_ASK) !== -1)
+  need('the ticket ask is not an AskUserQuestion before any Code spawn', ticket.includes('ask with AskUserQuestion before any Code spawn'))
+  need('the ticket ask does not offer the two options', ticket.includes('- **Record an exception** —') && ticket.includes('- **Stop** — report `BLOCKED (no ticket link)`'))
+  need('the ticket ask names no project-file remedy', ticket.includes('`.devflow/project.json`'))
+  need('the exception grammar is not stated once', countOf(content, '**Exception grammar.**') === 1)
+  need('the grammar does not render the section the evidence file holds', content.includes('## Evidence Exceptions\n- `<kind>` self-attested by @<login> at <utc>: <reason>'))
+  need('the record step does not set EVIDENCE_EXCEPTIONS', content.includes('**Record the exception at once**, before any Code spawn: set `EVIDENCE_EXCEPTIONS` to the rendered section.'))
+  need('EVIDENCE_EXCEPTIONS has no default', content.includes('`EVIDENCE_EXCEPTIONS` is `(none)` until an exception is recorded.'))
+  const missing = missingAskBlock(content)
+  need('the missing-test-plan ask is absent', missing !== null)
+  if (missing !== null) {
+    need('the missing ask is not keyed on the required policy', missing.startsWith(MISSING_ASK))
+    need('the missing ask does not offer exactly the two options', /- \*\*Record an exception\*\* —[\s\S]*- \*\*Stop\*\* — report `BLOCKED \(no test plan\)`/.test(missing))
+    need('the missing ask records kind test-plan', missing.includes('as kind `test-plan`'))
+    need('the missing ask writes the evidence file, not the handoff file', missing.includes('`## Evidence Exceptions` section of `EVIDENCE_FILE`') && !missing.includes('handoff-'))
+    need('the missing ask does not set EVIDENCE_EXCEPTIONS', missing.includes('set `EVIDENCE_EXCEPTIONS` to that section'))
+    need('the missing ask names no project-file remedy', missing.includes('`.devflow/project.json`'))
+  }
+  // The Handoff Protocol line only forbids a Code agent from rewriting the section the handoff file may hold.
+  for (const line of content.split('\n').filter(l => l.includes('Evidence Exceptions') && !l.startsWith('**Handoff Protocol**'))) {
+    if (/handoff-|PR_EXCEPTIONS/.test(line)) out.push(`an exception section line names the handoff file or a PR input: ${line.slice(0, 80)}`)
+  }
+  return out
+}
+
+/** Named collector: how the AC-18 line is recorded — once, only under `required`, after the policy resolves and before Phase 2. */
+function collectOffPolicyLineDefects(content: string): string[] {
+  const out: string[] = []
+  if (countOf(content, OFF_POLICY_LINE) !== 1) out.push(`the build holds the fixed line ${countOf(content, OFF_POLICY_LINE)} times, expected 1`)
+  if (!content.includes(`When \`EVIDENCE_POLICY\` is \`required\`, record \`${OFF_POLICY_LINE}\``)) {
+    out.push('the line is not recorded only under `required`')
+  }
+  out.push(...collectOrderViolations('implement.md', content, [
+    { label: 'the policy resolves before the line is recorded', before: 'resolve-evidence-policy.cjs', after: OFF_POLICY_LINE },
+    { label: 'the line is recorded before Phase 2', before: OFF_POLICY_LINE, after: H.p2 },
+    { label: 'the report names the line', before: H.p12, after: 'or the compliance-off line of Phase 1' },
+  ]))
+  return out
+}
+
+describe('#648 AC-19: Phase 11 of the compliance-off builds runs the local verify and posts nothing', () => {
+  it('both off builds hold the local verify call in order, the Phase 11 push, and none of the posting text', () => {
+    for (const [label, key] of COMPLIANCE_OFF_IMPLEMENT_BUILDS) {
+      const md = implementMdComplianceOff(key)
+      expect(md, `${label}: the off build is the on build, so this proves nothing`).not.toBe(implementMd())
+      expect(phaseSection(md, PHASE11)?.length ?? 0, `${label}: Phase 11 is empty, so this guard proves nothing`).toBeGreaterThan(1_000)
+      expect(collectOrderViolations('implement.md', md, PHASE11_ORDER_OFF), label).toEqual([])
+      expect(collectOffEvidenceRunDefects(md), label).toEqual([])
+      expect(collectEvidencePushDefects(md), label).toEqual([])
+      expect(collectOffAbsenceDefects(md), label).toEqual([])
+    }
+  })
+
+  it('the on build keeps the publish call, the publication pass and the timeout, so the absence guard is not vacuous', () => {
+    const on = implementMd()
+    expect(OFF_ABSENT.length, 'the absence table is empty, so this guard proves nothing').toBeGreaterThanOrEqual(8)
+    expect(collectOffAbsenceDefects(on)).toEqual(OFF_ABSENT.map(([what, text]) => `the off build names ${what}: ${text}`))
+    expect(collectOffEvidenceRunDefects(on)).toEqual(['expected one local verify call in Phase 11, found 0'])
+  })
+
+  it('the off Phase 11 names the local result file in the report and says nothing was posted', () => {
+    for (const [label, key] of COMPLIANCE_OFF_IMPLEMENT_BUILDS) {
+      const md = implementMdComplianceOff(key)
+      expect(md, label).toContain('Evidence result: .devflow/docs/evidence-result-{branch_slug}.md (local; not posted)')
+      expect(phaseSection(md, PHASE11), label).toContain('It writes nothing to GitHub')
+    }
+  })
+
+  it('known-bad probes: a publication value, a publish call, a Git spawn, a lost flag and a lost run are each reported', () => {
+    const md = implementMdComplianceOff('compliance-off')
+    expect(collectOffEvidenceRunDefects(seedOnce(md, 'verify --pr {PR_NUMBER} --evidence', 'verify --pr {PR_NUMBER} --publication auto --evidence'))).toEqual(['Phase 11 names a publication value or a publish call'])
+    expect(collectOffEvidenceRunDefects(seedOnce(md, 'verify-evidence.cjs" verify --pr {PR_NUMBER}', 'verify-evidence.cjs" publish --pr {PR_NUMBER}'))).toEqual([
+      'expected one local verify call in Phase 11, found 0',
+    ])
+    const back = seedOnce(md, '### Phase 12: Report', '```\nAgent(subagent_type="Git"):\n"OPERATION: update-pr-evidence\nPR_NUMBER: {PR_NUMBER}"\n```\n\n### Phase 12: Report')
+    expect(collectOffEvidenceRunDefects(back)).toEqual(['a Git agent is spawned for update-pr-evidence'])
+    expect(collectOffAbsenceDefects(back)).toEqual(['the off build names the update-pr-evidence operation: update-pr-evidence'])
+    expect(collectOffEvidenceRunDefects(seedOnce(md, ' --comment-out ".devflow/docs/evidence-result-{branch_slug}.md"', ''))).toEqual(['--comment-out is not the local result file'])
+    expect(collectOffEvidenceRunDefects(seedOnce(md, 'cd "{worktree}" && node "$HOME/.devflow/scripts/verify-evidence.cjs" verify', 'node "$HOME/.devflow/scripts/verify-evidence.cjs" verify'))).toEqual(['the call does not run from the worktree'])
+    expect(collectOffAbsenceDefects(`${md}\nPR_TEST_PLAN_BLOCK: x`)).toEqual(['the off build names the PR test-plan block input: PR_TEST_PLAN_BLOCK'])
+    expect(collectOffAbsenceDefects(`${md}\nthrough the Bash tool with \`timeout: 180000\``)).toEqual(['the off build names the publish timeout: timeout: 180000'])
+    expect(collectOrderViolations('implement.md', seedOnce(md, '### Phase 12: Report', '### Phase 12 later').replace('### Phase 11: Evidence', '### Phase 12: Report\n\n### Phase 11: Evidence'), PHASE11_ORDER_OFF).length).toBeGreaterThan(0)
+  })
+})
+
+describe('#648 AC-26: the compliance-off builds keep both asks and record an exception only in the evidence file', () => {
+  it('both off builds hold the Phase 1 order, the two inline asks and no PR input', () => {
+    for (const [label, key] of COMPLIANCE_OFF_IMPLEMENT_BUILDS) {
+      const md = implementMdComplianceOff(key)
+      expect(md.split(CODE_SPAWN).length - 1, `${label}: no Code spawn read`).toBeGreaterThanOrEqual(5)
+      expect(collectOrderViolations('implement.md', md, PHASE1_ORDER), label).toEqual([])
+      expect(collectOrderViolations('implement.md', md, GATE_ORDER), label).toEqual([])
+      expect(collectCodeSpawnsBefore(md, OUTPUTS), label).toEqual([])
+      expect(collectCodeSpawnsBefore(md, RESOLVER), label).toEqual([])
+      expect(collectOffAskDefects(md), label).toEqual([])
+      expect(md, label).toContain(STANDARD_LINE)
+    }
+  })
+
+  it('the Test plan step writes EVIDENCE_EXCEPTIONS into the evidence file and the outputs name the evidence file as its one home', () => {
+    for (const [label, key] of COMPLIANCE_OFF_IMPLEMENT_BUILDS) {
+      const md = implementMdComplianceOff(key)
+      expect(md, label).toContain('`## Evidence Exceptions`, a byte copy of `EVIDENCE_EXCEPTIONS` present only while that is not `(none)`')
+      expect(md, label).toContain('its `## Evidence Exceptions` section now a byte copy of `EVIDENCE_EXCEPTIONS` (absent when that is `(none)`)')
+      expect(md, label).not.toContain('handoff-{branch_slug}.md` exception')
+    }
+  })
+
+  it('the on build keeps the asks in the reference, so the inline arm differs from it', () => {
+    const on = implementMd()
+    expect(collectOffAskDefects(on).length, 'the on build is read by the off ask collector, which reports its reference reads').toBeGreaterThan(0)
+    expect(on).toContain('implement-evidence-asks')
+  })
+
+  it('known-bad probes: a dropped option, a handoff home, a lost record step and a PR input are each reported', () => {
+    const md = implementMdComplianceOff('compliance-off')
+    expect(collectOffAskDefects(md)).toEqual([])
+    expect(collectOffAskDefects(seedOnce(md, '- **Stop** — report `BLOCKED (no ticket link)`', '- **Skip** — report `BLOCKED (no ticket link)`'))).toEqual(['the ticket ask does not offer the two options'])
+    expect(collectOffAskDefects(seedOnce(md, 'set `EVIDENCE_EXCEPTIONS` to the rendered section.', 'set `PR_EXCEPTIONS` to the rendered section.'))).toEqual(['the record step does not set EVIDENCE_EXCEPTIONS'])
+    expect(collectOffAskDefects(seedOnce(md, '`## Evidence Exceptions` section of `EVIDENCE_FILE`', '`## Evidence Exceptions` section of `{worktree}/.devflow/docs/handoff-{branch_slug}.md`')).length).toBeGreaterThan(0)
+    expect(collectOffAskDefects(seedOnce(md, '**Missing test plan, only when', '**Missing plan, only when')).length).toBeGreaterThan(0)
+    expect(collectOffAskDefects(seedOnce(md, 'ask with AskUserQuestion before any Code spawn — "No tracker issue', 'ask before any Code spawn — "No tracker issue'))).toEqual(['the ticket ask is not an AskUserQuestion before any Code spawn'])
+  })
+})
+
+describe('#648 AC-18: the compliance-off builds record the fixed local line once, under `required`', () => {
+  it('both off builds hold it once, after the policy and before Phase 2, and the report names it', () => {
+    for (const [label, key] of COMPLIANCE_OFF_IMPLEMENT_BUILDS) {
+      expect(collectOffPolicyLineDefects(implementMdComplianceOff(key)), label).toEqual([])
+    }
+  })
+
+  it('no compliance-on build of /implement holds the line', () => {
+    expect(implementMd()).not.toContain(OFF_POLICY_LINE)
+    expect(implementMdOff()).not.toContain(OFF_POLICY_LINE)
+  })
+
+  it('known-bad probes: a missing line, a doubled line, an unconditional line and a late line are each reported', () => {
+    const md = implementMdComplianceOff('compliance-off')
+    expect(collectOffPolicyLineDefects(seedOnce(md, `${OFF_POLICY_LINE}\` once`, 'x once'))[0]).toContain('0 times')
+    expect(collectOffPolicyLineDefects(`${md}\n${OFF_POLICY_LINE}`)[0]).toContain('2 times')
+    expect(collectOffPolicyLineDefects(seedOnce(md, 'When `EVIDENCE_POLICY` is `required`, record `TRACEABILITY: DEGRADED (compliance off', 'Record `TRACEABILITY: DEGRADED (compliance off')).some(d => d.includes('only under `required`'))).toBe(true)
+  })
+})
+
+describe('#669 and #648: the re-validation pointers stay valid in the compliance-off builds', () => {
+  it('each off build holds the three Phase 1 pointer targets once and the re-validation reference points at them', () => {
+    for (const [label, key] of COMPLIANCE_OFF_IMPLEMENT_BUILDS) {
+      const md = implementMdComplianceOff(key)
+      expect(phaseSection(md, H.p1)?.length ?? 0, `${label}: Phase 1 is empty, so this guard proves nothing`).toBeGreaterThan(5_000)
+      for (const target of PUBLICATION_POINTERS) expect(countOf(phaseSection(md, H.p1) ?? '', target), `${label}: ${target}`).toBe(1)
+      expect(collectRevalidatePhase1RunDefects(md, revalidateReference()), label).toEqual([])
+      expect(collectRevalidateTargetFormDefects(revalidateReference()), label).toEqual([])
+      expect(collectFilesChangedDefects(md), label).toEqual([])
+      expect(collectBaseBranchGuardDefects(md), label).toEqual([])
+      expect(collectInlineResolverDefects(md), label).toEqual([])
+      expect(collectImplementFreshBaseDefects(md), label).toEqual([])
+      expect(collectOrchestrationPrincipleDefects(md), label).toEqual([])
+    }
+  })
+
+  it('the off Phase 1 says Phase 11 passes no publication value, and the on Phase 11 still passes it', () => {
+    for (const [label, key] of COMPLIANCE_OFF_IMPLEMENT_BUILDS) {
+      expect(implementMdComplianceOff(key), label).toContain('Phase 11 passes no publication value: the local verify posts nothing.')
+      expect(phaseSection(implementMdComplianceOff(key), H.p11) ?? '', label).not.toContain(PHASE11_PUBLICATION_ARG)
+    }
+    expect(phaseSection(implementMd(), H.p11)).toContain(PHASE11_PUBLICATION_ARG)
+    expect(implementMd()).not.toContain('Phase 11 passes no publication value')
+  })
+
+  it('known-bad probes: a renamed or doubled Phase 1 target in an off build is reported', () => {
+    for (const [label, key] of COMPLIANCE_OFF_IMPLEMENT_BUILDS) {
+      const md = implementMdComplianceOff(key)
+      for (const text of PUBLICATION_POINTERS) {
+        expect(countOf(phaseSection(seedOnce(md, text, '**Renamed rule**'), H.p1) ?? '', text), `${label}: ${text} renamed`).toBe(0)
+        expect(countOf(phaseSection(seedOnce(md, text, `${text} ${text}`), H.p1) ?? '', text), `${label}: ${text} twice`).toBe(2)
+      }
+    }
   })
 })

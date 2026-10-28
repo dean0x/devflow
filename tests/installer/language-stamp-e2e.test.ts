@@ -12,7 +12,11 @@
  * exits 0 at Claude Code detection before reaching the code under test. The first assertion of each scenario
  * is on installed bytes, never on an exit code a short-circuit also returns.
  *
- * Requires a build (`npm run build`): the spawned CLI reads dist/ and dist/curation-off.
+ * A machine installs the build variant for its two switches (curation and compliance), and compliance is off
+ * on a fresh machine, so the expected bytes are read from the tree of that pair, never from the all-on build
+ * unless compliance is on.
+ *
+ * Requires a build (`npm run build`): the spawned CLI reads dist/ and its variant trees.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -78,9 +82,27 @@ async function stampCarriers(): Promise<string[]> {
   return out;
 }
 
-/** The curation-off variant of a command when the host has an arm, else null. */
-async function curationOffBytes(name: string): Promise<string | null> {
-  try { return await fs.readFile(path.join(ROOT, 'dist', 'curation-off', 'commands', `${name}.md`), 'utf-8'); } catch { return null; }
+/** The two machine switches a built variant is keyed on. */
+interface Switches { readonly curation: boolean; readonly compliance: boolean }
+
+/** A fresh machine: curation on, compliance off (the compliance switch is off unless set). */
+const DEFAULT_SWITCHES: Switches = { curation: true, compliance: false };
+
+/** The build tree that holds the variant for a pair of switches; the all-on build is `dist/commands`. */
+function variantTree({ curation, compliance }: Switches): string {
+  if (curation && compliance) return 'commands';
+  if (!curation && compliance) return 'curation-off';
+  if (curation && !compliance) return 'compliance-off';
+  return 'curation-compliance-off';
+}
+
+/** The built bytes of a command for a pair of switches. The commands this file reads have an arm on both axes, so a missing file fails the test. */
+async function variantBytes(name: string, switches: Switches): Promise<string> {
+  const tree = variantTree(switches);
+  const file = tree === 'commands'
+    ? path.join(ROOT, 'dist', 'commands', `${name}.md`)
+    : path.join(ROOT, 'dist', tree, 'commands', `${name}.md`);
+  return fs.readFile(file, 'utf-8');
 }
 
 beforeEach(async () => {
@@ -95,12 +117,21 @@ afterEach(async () => {
 });
 
 describe('init stamps the installed /code-review from the selection (AC-309)', () => {
-  it('(b) a default selection stamps (none), and the installed file is the build, byte for byte', async () => {
+  it('(b) a default selection stamps (none), and the installed file is the build for the default switches, byte for byte', async () => {
     init();
 
     expect(await stampOf('code-review')).toBe('(none)');
     expect(await fs.readFile(installedCommand('code-review'), 'utf-8'))
-      .toBe(await fs.readFile(path.join(ROOT, 'dist', 'commands', 'code-review.md'), 'utf-8'));
+      .toBe(await variantBytes('code-review', DEFAULT_SWITCHES));
+  }, SCENARIO_TIMEOUT_MS);
+
+  it('a machine with compliance on installs the all-on build, byte for byte', async () => {
+    init('--compliance', 'gdpr');
+
+    expect(await stampOf('code-review')).toBe('(none)');
+    const installed = await fs.readFile(installedCommand('code-review'), 'utf-8');
+    expect(installed).toBe(await variantBytes('code-review', { curation: true, compliance: true }));
+    expect(installed, 'the on build differs from the default (compliance-off) build').not.toBe(await variantBytes('code-review', DEFAULT_SWITCHES));
   }, SCENARIO_TIMEOUT_MS);
 
   it('(a, c) a full install with devflow-typescript selected stamps typescript, and a later selection change re-stamps', async () => {
@@ -132,7 +163,7 @@ describe('a partial install re-stamps without a full re-init (AC-310)', () => {
     expect((await fs.stat(installedCommand('dynamic-build'))).ino).toBe(before.ino);
     expect(await stampCarriers(), 'dynamic-build carries no stamp').toEqual(['code-review.md']);
     expect(await fs.readFile(installedCommand('dynamic-build'), 'utf-8'))
-      .toBe(await fs.readFile(path.join(ROOT, 'dist', 'commands', 'dynamic-build.md'), 'utf-8'));
+      .toBe(await variantBytes('dynamic-build', DEFAULT_SWITCHES));
   }, SCENARIO_TIMEOUT_MS);
 });
 
@@ -175,7 +206,7 @@ describe('a curation toggle keeps the stamp (the composition with the variant co
     okCli('curation', '--disable');
     const off = await fs.readFile(installedCommand('code-review'), 'utf-8');
     expect(off, 'the curation-off variant of the command').not.toBe(onBytes);
-    expect(off).toBe((await curationOffBytes('code-review') as string).replace(`${STAMP_PREFIX}(none)`, `${STAMP_PREFIX}typescript, go`));
+    expect(off).toBe((await variantBytes('code-review', { curation: false, compliance: false })).replace(`${STAMP_PREFIX}(none)`, `${STAMP_PREFIX}typescript, go`));
     expect(await stampOf('code-review')).toBe('typescript, go');
 
     okCli('curation', '--enable');
@@ -188,7 +219,7 @@ describe('a curation toggle keeps the stamp (the composition with the variant co
     init('--no-curation');
     const content = await fs.readFile(installedCommand('code-review'), 'utf-8');
     expect(content.split('\n')).toContain(`${STAMP_PREFIX}typescript`);
-    expect(content, 'the curation-off variant, stamped').toBe((await curationOffBytes('code-review') as string).replace(`${STAMP_PREFIX}(none)`, `${STAMP_PREFIX}typescript`));
+    expect(content, 'the curation-off variant, stamped').toBe((await variantBytes('code-review', { curation: false, compliance: false })).replace(`${STAMP_PREFIX}(none)`, `${STAMP_PREFIX}typescript`));
 
     init('--no-curation');
 

@@ -58,7 +58,7 @@ import * as os from 'os'
 import * as path from 'path'
 
 import { compiledSkillRefsDir } from '../../src/core/assets.js'
-import { CODE_AGENT_TYPES, ROOT, parseFences, requireDistFile, resolveCurationOffSource } from '../helpers.js'
+import { CODE_AGENT_TYPES, ROOT, parseFences, requireDistFile, resolveCurationOffSource, resolveVariantOffSource } from '../helpers.js'
 import { PR_EVIDENCE_SCRIPT, VERIFY_EVIDENCE_SCRIPT } from '../evidence/seam.js'
 
 const BUILT = requireDistFile('dynamic-build.md')
@@ -2317,5 +2317,355 @@ describe('#421 AC-22: a refused undo halts the wave and names the red integratio
     const ignoring = seedOnce(WAVE!, '    if (waveState.halted !== null) break;  // a red integration HEAD takes no further merge in this round\n', '')
     const run = await runWave(ignoring, SINGLE!, world, {}, 'true')
     expect(run.tickets.find(t => t.ticket === '#33')?.ran, 'the seed lets #33 run').toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #648 phase C — the compliance-off builds of /dynamic-build keep the wave local
+// ---------------------------------------------------------------------------
+//
+//   AC-13  An off build holds no wave-report post, no test-plan block and no publish call.
+//   AC-15  Step 3 composes a links-only block (Refs lines, no verdict table) and checks it with
+//          `check wave --links-only`. The wave test plan is checked, never rendered into a PR block.
+//          Step 6 passes the block and the slug-and-count guidance, and no test-plan block.
+//   AC-18  The fixed local line is recorded once under `required`, for the run summary.
+//   AC-19  Step 7(d) runs the local verify with `evidence-result-wave-<slug>.md`: no publish call,
+//          no publication value, no timeout.
+//   AC-24  Step 7(e) runs readiness with the approval flag, the wave evidence file and the local
+//          readiness file. With no wave test plan or an unusable wave base only (a)-(d) are skipped,
+//          and (e) runs without the evidence file, as the compliance-off /resolve does.
+//
+// The block rules are checked by EXECUTING the shipped wave loop and rendering what step 3 states
+// over its return, then running `check wave --links-only` on it. Every guard has a named collector,
+// a non-empty-corpus assertion and a known-bad probe driven through the same collector.
+
+type DynamicOffKey = 'compliance-off' | 'both-off'
+
+const DYNAMIC_OFF_KEYS: ReadonlyArray<readonly [string, DynamicOffKey]> = [
+  ['compliance off', 'compliance-off'],
+  ['curation and compliance off', 'both-off'],
+]
+
+function dynamicBuildOff(key: DynamicOffKey): string {
+  const off = resolveVariantOffSource(key, 'commands', 'dynamic-build')
+  if (off === null) throw new Error(`the ${key} build of /dynamic-build is absent: run \`npm run build:mds\``)
+  return off
+}
+
+const DYNAMIC_OFF_LINE = 'TRACEABILITY: DEGRADED (compliance off on this machine; the repository requires evidence)'
+const LINKS_ONLY_CHECK = 'node "$HOME/.devflow/scripts/verify-evidence.cjs" check wave --links-only <that file>; echo "exit=$?"'
+const WAVE_EVIDENCE_PATH = '.devflow/docs/evidence-wave-{slug}.md'
+const WAVE_RESULT_PATH = '.devflow/docs/evidence-result-wave-{slug}.md'
+const WAVE_READINESS_PATH = '.devflow/docs/readiness-wave-{slug}.md'
+const WAVE_VERIFY_CALL = `cd "{integration worktree root}" && node "$HOME/.devflow/scripts/verify-evidence.cjs" verify --pr {n} --evidence "${WAVE_EVIDENCE_PATH}" --comment-out "${WAVE_RESULT_PATH}"; echo "exit=$?"`
+const WAVE_READINESS_CALL = `cd "{integration worktree root}" && node "$HOME/.devflow/scripts/verify-evidence.cjs" readiness --pr {n} --require-non-author-approval {REQUIRE_NON_AUTHOR_APPROVAL} --evidence "${WAVE_EVIDENCE_PATH}" --out "${WAVE_READINESS_PATH}"; echo "exit=$?"`
+
+/** The posting text an off build of /dynamic-build names nowhere: [what it is, the text]. */
+const WAVE_OFF_ABSENT: ReadonlyArray<readonly [string, string]> = [
+  ['the post-wave-report operation', 'post-wave-report'],
+  ['the wave-report post step', '2. **Post wave-report'],
+  ['the test-plan block input', 'PR_TEST_PLAN_BLOCK'],
+  ['the test-plan render call', 'verify-evidence.cjs" render'],
+  ['the verdict table heading', '## Wave Evidence'],
+  ['the verdict table header', '| T | Ticket | Verdict'],
+  ['the plain wave check', 'check wave <that file>'],
+  ['the publish call', 'verify-evidence.cjs" publish'],
+  ['the publication flag', '--publication'],
+  ['the publication resolution', '**Resolve `REVIEW_PUBLICATION` per worktree:**'],
+  ['the publish timeout', 'timeout: 180000'],
+]
+
+/** Named collector: what an off build of /dynamic-build still names that a non-posting machine must not. */
+export function collectWaveOffAbsenceDefects(md: string): string[] {
+  return WAVE_OFF_ABSENT.filter(([, text]) => md.includes(text)).map(([what, text]) => `the off build names ${what}: ${text}`)
+}
+
+/**
+ * Named collector: what the post-workflow steps of an off build fail to state, each site labelled. One
+ * requirement per site, so a probe per site drives this collector.
+ */
+export function collectWaveOffStepDefects(md: string): string[] {
+  const step3 = section(md, STEP3, STEP4)
+  const step4 = section(md, STEP4, STEP5)
+  const spawn = waveSpawn(md)
+  const step7 = waveEvidenceStep(md)
+  if (step3 === null || step4 === null || spawn === null || step7 === null) return ['steps: 3, 4, 6 and 7 were not each found once, in order']
+  const out: string[] = []
+  const need = (site: string, ok: boolean): void => { if (!ok) out.push(site) }
+  const f3 = parseFences(step3)
+  const f7 = parseFences(step7)
+  need('links-only check: one check wave call, with the links-only flag', f3.filter(f => f.includes('check wave')).length === 1 && step3.includes(LINKS_ONLY_CHECK))
+  need('no closing line: the block holds no verdict, so no Closes', step3.includes('No line is `Closes`: the block holds no verdict, so it closes no issue.'))
+  need('related line: written as Refs, from the entry\'s captured reference', step3.includes('the related line is `Refs ` and that reference'))
+  need('related KEY-N: a #N or a KEY-N reference each gets its line', step3.includes('a `#N` or `KEY-N` reference, the related line'))
+  need('tracking line: a #N or a KEY-N token', step3.includes('whose token is, as a whole, a `#N` or `KEY-N` reference: `Refs ` and that token, verbatim'))
+  need('empty block: no line means no block and no check', step3.includes('With no line under the heading, `PR_WAVE_BLOCK` is `(none)` and nothing is checked.'))
+  need('refused block: no wave PR', step3.includes('Wave PR: not opened (wave block refused: <the code on stderr>)'))
+  need('no verdict table: the block has none', step3.includes('It has no verdict table and no evidence section') && !f3.some(f => f.includes('## Wave Evidence')))
+  need('test plan check only: check tp, no render', f3.filter(f => f.includes('check tp')).length === 1 && !f3.some(f => f.includes('render')))
+  need('the ask: one question, counting linked tickets', step4.includes('It references {n} linked tickets.') && step4.includes('Only when step 3 set `PR_WAVE_BLOCK`, to its admitted text or to `(none)`'))
+  need('the spawn: the block or (none), slug-and-count guidance, no test-plan block',
+    spawn.includes('PR_WAVE_BLOCK: {PR_WAVE_BLOCK verbatim, or (none)}"') && spawn.includes('the wave slug and the count of linked issues; never an issue title or body')
+    && !spawn.includes('PR_TEST_PLAN_BLOCK') && !spawn.includes('merged, quarantined and blocked'))
+  need('one spawn: the step-6 fence is the only ensure-pr-ready spawn', offsetsOf(md, 'OPERATION: ensure-pr-ready').length === 1)
+  const afterWorkflow = section(md, '### After the workflow returns', STEP4) ?? ''
+  need('step 2 is gone: step 1 is followed by step 3', /\n1\. Read the wave report[^\n]*\n3\. \*\*Compose the wave PR inputs\*\*/.test(afterWorkflow) && !afterWorkflow.includes('\n2. **'))
+  need('no wave test plan: step 7 skips (a)-(d) only, and names it', step7.includes('No wave test plan line ⇒ record `Wave evidence: skipped (no wave test plan)` and skip (a)-(d).'))
+  need('wave base unusable: step 7 skips (a)-(d) only', step7.includes('`TRACEABILITY: DEGRADED (wave base unusable)` and skip (a)-(d).'))
+  need('the readiness without a skipped (a)-(d): the evidence pair is dropped', step7.includes('Drop the `--evidence` pair when (a)-(d) were skipped.'))
+  need('the push: once, never forced, and a failure verifies anyway',
+    step7.includes('push origin HEAD; echo "exit=$?"') && !/--force|\+HEAD|push -f\b/.test(step7) && step7.includes('and verify anyway'))
+  need('the verify: one inline call with the wave evidence file and the local result file',
+    f7.filter(f => f.includes('verify-evidence.cjs" verify --pr {n}')).length === 1 && step7.includes(WAVE_VERIFY_CALL))
+  need('the result path: reported as local and not posted', step7.includes(`Evidence result: ${WAVE_RESULT_PATH} (local; not posted)`))
+  need('the readiness: one inline call with the approval flag, the evidence file and the local readiness file',
+    f7.filter(f => f.includes('verify-evidence.cjs" readiness --pr {n}')).length === 1 && step7.includes(WAVE_READINESS_CALL))
+  need('the readiness path: reported as local and not posted', step7.includes(`Readiness: ${WAVE_READINESS_PATH} (local; not posted)`))
+  need('no Git spawn in step 7: the scripts run inline', !f7.some(f => f.includes('Agent(subagent_type="Git")')))
+  need('no timeout in step 7', !/timeout/i.test(step7))
+  need('the fixed line: recorded once, only under required, for the run summary',
+    offsetsOf(md, DYNAMIC_OFF_LINE).length === 1 && md.includes(`When \`EVIDENCE_POLICY\` is \`required\`, record \`${DYNAMIC_OFF_LINE}\` once, for the run summary.`))
+  return out
+}
+
+/** One seed per site: the shipped off text, and the text that removes that site's requirement. */
+const WAVE_OFF_SEEDS: ReadonlyArray<readonly [site: string, from: string, to: string]> = [
+  ['links-only check', LINKS_ONLY_CHECK, LINKS_ONLY_CHECK.replace(' --links-only', '')],
+  ['no closing line', 'No line is `Closes`: the block holds no verdict, so it closes no issue.', 'A merged ticket closes its issue.'],
+  ['related line', 'the related line is `Refs ` and that reference', 'the related line is the link line'],
+  ['related KEY-N', 'a `#N` or `KEY-N` reference, the related line', 'a `#N` reference, the related line'],
+  ['tracking line', 'whose token is, as a whole, a `#N` or `KEY-N` reference: `Refs ` and that token, verbatim', 'whose token is any token: `Refs ` and that token, verbatim'],
+  ['empty block', 'With no line under the heading, `PR_WAVE_BLOCK` is `(none)` and nothing is checked.', 'With no line under the heading, the wave PR is not opened.'],
+  ['refused block', 'Wave PR: not opened (wave block refused: <the code on stderr>)', 'Wave PR: opened anyway'],
+  ['no verdict table', 'It has no verdict table and no evidence section', 'It has a verdict table'],
+  ['test plan check only', 'check tp "{integration worktree root}/.devflow/docs/evidence-wave-{slug}.md"; echo "exit=$?"', 'check tp "{integration worktree root}/.devflow/docs/evidence-wave-{slug}.md"; echo "exit=$?"\nnode "$HOME/.devflow/scripts/verify-evidence.cjs" render --plan "{integration worktree root}/.devflow/docs/evidence-wave-{slug}.md"; echo "exit=$?"'],
+  ['the ask', 'It references {n} linked tickets.', 'It links {n} merged tickets.'],
+  ['the spawn', 'PR_WAVE_BLOCK: {PR_WAVE_BLOCK verbatim, or (none)}"', 'PR_WAVE_BLOCK: {PR_WAVE_BLOCK verbatim}\n   PR_TEST_PLAN_BLOCK: {PR_TEST_PLAN_BLOCK verbatim, or (none)}"'],
+  ['no wave test plan', 'No wave test plan line ⇒ record `Wave evidence: skipped (no wave test plan)`', 'No wave test plan line ⇒ go on'],
+  ['no wave test plan', '`Wave evidence: skipped (no wave test plan)` and skip (a)-(d).', '`Wave evidence: skipped (no wave test plan)` and skip it.'],
+  ['wave base unusable', '`TRACEABILITY: DEGRADED (wave base unusable)` and skip (a)-(d).', '`TRACEABILITY: DEGRADED (wave base unusable)` and skip this step.'],
+  ['the readiness without a skipped (a)-(d)', ' Drop the `--evidence` pair when (a)-(d) were skipped.', ''],
+  ['the push', 'push origin HEAD; echo', 'push --force origin HEAD; echo'],
+  ['the verify', `--comment-out "${WAVE_RESULT_PATH}"`, '--publication auto'],
+  ['the result path', `Evidence result: ${WAVE_RESULT_PATH} (local; not posted)`, `Evidence result: ${WAVE_RESULT_PATH}`],
+  ['the readiness', `--out "${WAVE_READINESS_PATH}"`, ''],
+  ['the readiness path', `Readiness: ${WAVE_READINESS_PATH} (local; not posted)`, 'Readiness: posted'],
+  ['no timeout in step 7', 'Whatever it returns, the run ends here.', 'Whatever it returns, the run ends here. Use the Bash tool with `timeout: 180000`.'],
+]
+
+describe('#648 AC-13, AC-15, AC-19, AC-24: the compliance-off builds of /dynamic-build keep the wave local', () => {
+  it('both off builds state every site, and none of the posting text', () => {
+    for (const [label, key] of DYNAMIC_OFF_KEYS) {
+      const md = dynamicBuildOff(key)
+      expect(md, `${label}: the off build is the on build, so this proves nothing`).not.toBe(BUILT)
+      expect(waveEvidenceStep(md)?.length ?? 0, `${label}: step 7 is found`).toBeGreaterThan(1000)
+      expect(collectWaveOffStepDefects(md), label).toEqual([])
+      expect(collectWaveOffAbsenceDefects(md), label).toEqual([])
+    }
+  })
+
+  it('the on build keeps each posting text, so the absence guard is not vacuous', () => {
+    expect(WAVE_OFF_ABSENT.length, 'the absence table is empty').toBeGreaterThanOrEqual(10)
+    const silent = WAVE_OFF_ABSENT.filter(([, text]) => !BUILT.includes(text)).map(([what]) => what)
+    expect(silent, 'a text the on build does not name proves nothing about an off one').toEqual([])
+    expect(BUILT, 'the on build never prints the local line').not.toContain(DYNAMIC_OFF_LINE)
+    expect(BUILT, 'the on build runs the plain wave check, never the links-only form').not.toContain('--links-only')
+  })
+
+  it('probe cardinality equals site cardinality', () => {
+    expect(collectWaveOffStepDefects('no steps'), 'a missing step set is one defect').toHaveLength(1)
+    const clean = collectWaveOffStepDefects(dynamicBuildOff('compliance-off'))
+    expect(clean).toEqual([])
+    expect(WAVE_OFF_SEEDS.map(s => s[0])).toHaveLength(21)
+  })
+
+  for (const [site, from, to] of WAVE_OFF_SEEDS) {
+    it(`known-bad probe: ${site} removed is reported, and only it`, () => {
+      const found = collectWaveOffStepDefects(seedOnce(dynamicBuildOff('compliance-off'), from, to))
+      expect(found, found.join('\n')).toHaveLength(1)
+      expect(found[0].startsWith(site), found[0]).toBe(true)
+    })
+  }
+
+  it('known-bad probe: a tracking line that admits a #N token only is reported, and only it', () => {
+    const md = dynamicBuildOff('compliance-off')
+    const found = collectWaveOffStepDefects(seedOnce(md, 'a `#N` or `KEY-N` reference: `Refs ` and that token', 'a `#N` reference: `Refs ` and that token'))
+    expect(found, found.join('\n')).toHaveLength(1)
+    expect(found[0].startsWith('tracking line'), found[0]).toBe(true)
+  })
+
+  it('both off builds admit a KEY-N reference and never write Closes: the block states each rule once', () => {
+    for (const [label, key] of DYNAMIC_OFF_KEYS) {
+      const step3 = section(dynamicBuildOff(key), STEP3, STEP4)!
+      expect(offsetsOf(step3, 'is, as a whole, a `#N` or `KEY-N` reference, the related line is `Refs ` and that reference'), `${label}: the related line`).toHaveLength(1)
+      expect(offsetsOf(step3, 'whose token is, as a whole, a `#N` or `KEY-N` reference: `Refs ` and that token, verbatim'), `${label}: the tracking line`).toHaveLength(1)
+      expect(offsetsOf(step3, 'No line is `Closes`: the block holds no verdict, so it closes no issue.'), `${label}: no Closes`).toHaveLength(1)
+      expect(step3, `${label}: nothing is composed from a bare number or a URL`).toContain('Any other token (a bare number, a URL), or none ⇒ no tracking line: nothing is composed from a number.')
+    }
+  })
+
+  it('known-bad probes: a restored publish call and a restored wave-report post are reported by the absence collector', () => {
+    const md = dynamicBuildOff('compliance-off')
+    expect(collectWaveOffAbsenceDefects(`${md}\nnode "$HOME/.devflow/scripts/verify-evidence.cjs" publish --pr 1`)).toEqual(['the off build names the publish call: verify-evidence.cjs" publish'])
+    expect(collectWaveOffAbsenceDefects(`${md}\n"OPERATION: post-wave-report`)).toEqual(['the off build names the post-wave-report operation: post-wave-report'])
+  })
+
+  it('AC-24: the local merge-check files are the wave report, the wave evidence file, its result file and the readiness file', () => {
+    const files = ['wave-report.md', WAVE_EVIDENCE_PATH, WAVE_RESULT_PATH, WAVE_READINESS_PATH]
+    for (const [label, key] of DYNAMIC_OFF_KEYS) {
+      const md = dynamicBuildOff(key)
+      for (const file of files) expect(md, `${label}: names ${file}`).toContain(file)
+      const written = [...new Set(md.match(/\.devflow\/docs\/(?:evidence|readiness)[A-Za-z0-9._{}-]*\.md/g) ?? [])].sort()
+      expect(written, `${label}: a merge-check file the list does not hold`).toEqual([WAVE_EVIDENCE_PATH, WAVE_RESULT_PATH, WAVE_READINESS_PATH].sort())
+    }
+    expect(BUILT, 'the on build writes no readiness file').not.toContain(WAVE_READINESS_PATH)
+  })
+
+  it('the steps run in order: compose, ask, profile note, the spawn, then the local evidence', () => {
+    for (const [label, key] of DYNAMIC_OFF_KEYS) {
+      const md = dynamicBuildOff(key)
+      const at = [STEP3, STEP4, STEP5, STEP6, STEP7].map(s => offsetsOf(md, s))
+      expect(at.every(a => a.length === 1), `${label}: each step lead occurs once`).toBe(true)
+      const flat = at.map(a => a[0])
+      expect([...flat].sort((x, y) => x - y), label).toEqual(flat)
+    }
+  })
+
+  it('the engine and wave skeletons are the on build\'s, byte for byte: only the post-workflow steps differ', () => {
+    for (const [label, key] of DYNAMIC_OFF_KEYS) {
+      const off = dynamicBuildOff(key)
+      const offFences = parseFences(off).filter(f => f.includes(SINGLE_MARKER) || f.includes(WAVE_ENGINE_CALL))
+      expect(offFences, `${label}: the skeleton fences are found`).toHaveLength(2)
+      const onFences = parseFences(requireCurationVariant(key)).filter(f => f.includes(SINGLE_MARKER) || f.includes(WAVE_ENGINE_CALL))
+      expect(offFences, `${label}: the skeletons differ from the on build's`).toEqual(onFences)
+    }
+  })
+})
+
+/** The compliance-on build of the same curation variant as an off key. */
+function requireCurationVariant(key: DynamicOffKey): string {
+  if (key === 'compliance-off') return BUILT
+  const curationOff = resolveCurationOffSource('commands', 'dynamic-build')
+  if (curationOff === null) throw new Error('the curation-off build of /dynamic-build is absent: run `npm run build:mds`')
+  return curationOff
+}
+
+// ---------------------------------------------------------------------------
+// The links-only block, rendered as step 3 states it and checked by the script
+// ---------------------------------------------------------------------------
+
+/** A `#N` or `KEY-N` reference as a whole: the references a links-only block carries. */
+const WHOLE_REF_RE = /^(?:#[1-9][0-9]{0,8}|[A-Z][A-Z0-9_]{0,9}-[1-9][0-9]{0,8})$/
+
+/**
+ * A model of the off step 3's block rules over the workflow's `tickets`: the tracking line first, only from a
+ * `#N` or `KEY-N` token; then one `Refs` line per entry whose captured `issuePrLink` is not `(none)` and names
+ * a `#N` or `KEY-N` reference; never `Closes`. Null when no line is written, which is `PR_WAVE_BLOCK: (none)`
+ * and no check.
+ */
+export function renderLinksOnlyBlock(rows: readonly WaveRow[], trackingToken?: string): string | null {
+  const refs: string[] = trackingToken !== undefined && WHOLE_REF_RE.test(trackingToken) ? [trackingToken] : []
+  for (const r of rows) {
+    if (r.issuePrLink === '(none)') continue
+    const ref = r.issuePrLink.replace(/^(?:Closes|Refs) /, '')
+    if (WHOLE_REF_RE.test(ref)) refs.push(ref)
+  }
+  return refs.length === 0 ? null : ['## Related Issues', ...refs.map(ref => `Refs ${ref}`), ''].join('\n')
+}
+
+/** `check wave --links-only` over `text`, in-process: its exit code. */
+function checkWaveLinksOnly(text: string): number {
+  const file = path.join(fs.mkdtempSync(path.join(SCRATCH, 'links-')), 'wave.md')
+  fs.writeFileSync(file, text)
+  return VE.main(['node', 'verify-evidence.cjs', 'check', 'wave', '--links-only', file], { stderr: () => undefined }).code
+}
+
+describe('#648 AC-15: the links-only block step 3 renders is admitted by `check wave --links-only`', () => {
+  const world: World = {
+    order: ['#12', '#13', '#14', '#15', '#16'],
+    tickets: {
+      '#12': { issueId: '12', prLinkLine: 'Closes #12' },
+      '#13': { issueId: '13', prLinkLine: 'Closes #13', test: 'FAIL' },
+      '#14': { issueId: '14', prLinkLine: 'Closes #14' },
+      '#15': {},
+      '#16': { issueId: '16', prLinkLine: 'Closes #16' },
+    },
+    deps: { '#16': ['#15'] },
+    failMerge: ['#14'],
+  }
+
+  it('executed: PASS, UNVERIFIED, a red post-merge build, a stopped ticket and its blocked dependent give Refs lines only', async () => {
+    const run = await runWave(WAVE!, SINGLE!, world, { '#13': { criteria: '1. works' } }, 'true')
+    const block = renderLinksOnlyBlock(run.tickets, TRACKING)
+    expect(block).toBe(['## Related Issues', 'Refs #99', 'Refs #12', 'Refs #13', 'Refs #14', ''].join('\n'))
+    expect(checkWaveLinksOnly(block!), 'the links-only form admits it').toBe(0)
+    expect(checkWave(block!), 'the plain check refuses a block with no evidence section (the interim state until the reference arm lands)').not.toBe(0)
+  })
+
+  it('a ticket with no captured link, and a ticket that never ran, write no line', async () => {
+    const run = await runWave(WAVE!, SINGLE!, world, { '#13': { criteria: '1. works' } }, 'true')
+    const lines = renderLinksOnlyBlock(run.tickets)!.split('\n')
+    expect(lines).not.toContain('Refs #15')
+    expect(lines).not.toContain('Refs #16')
+    expect(lines.filter(l => l.startsWith('Closes'))).toEqual([])
+  })
+
+  it('executed: KEY-N and #N links mixed give Refs lines for both, in entry order, and a KEY-N tracking token comes first', async () => {
+    const keyed: World = {
+      order: ['ENG-12', '#13', 'PROJ-14', 'ENG-15'],
+      tickets: {
+        'ENG-12': { issueId: 'ENG-12', prLinkLine: 'Refs ENG-12' },
+        '#13': { issueId: '13', prLinkLine: 'Closes #13' },
+        'PROJ-14': { issueId: 'PROJ-14', prLinkLine: 'Refs PROJ-14' },
+        'ENG-15': {},
+      },
+    }
+    const run = await runWave(WAVE!, SINGLE!, keyed, {}, 'true')
+    const block = renderLinksOnlyBlock(run.tickets, 'ENG-1')
+    expect(block).toBe(['## Related Issues', 'Refs ENG-1', 'Refs ENG-12', 'Refs #13', 'Refs PROJ-14', ''].join('\n'))
+    expect(checkWaveLinksOnly(block!), 'the links-only form admits it').toBe(0)
+    expect(checkWave(block!), 'the plain check refuses a block with no evidence section (the interim state until the reference arm lands)').not.toBe(0)
+  })
+
+  it('no line to write is no block: a bare number, a URL or a lowercase key as the tracking token, no link, and no ticket all give null', () => {
+    const rows: WaveRow[] = [
+      { ticket: 'ENG-8', ran: true, verdict: 'PASS', merged: true, issuePrLink: '(none)' },
+      { ticket: '#7', ran: false, verdict: null, merged: false, issuePrLink: '(none)' },
+    ]
+    expect(renderLinksOnlyBlock(rows, '99')).toBeNull()
+    expect(renderLinksOnlyBlock(rows, 'https://tracker.example/ENG-1')).toBeNull()
+    expect(renderLinksOnlyBlock(rows, 'eng-1')).toBeNull()
+    expect(renderLinksOnlyBlock(rows)).toBeNull()
+    expect(renderLinksOnlyBlock([])).toBeNull()
+  })
+
+  it('a KEY-N link gets its Refs line, and a link that names no whole reference writes none', () => {
+    const rows: WaveRow[] = [
+      { ticket: 'ENG-5', ran: true, verdict: 'PASS', merged: true, issuePrLink: 'Refs ENG-5' },
+      { ticket: '#7', ran: true, verdict: 'PASS', merged: true, issuePrLink: 'Closes #7' },
+      { ticket: 'eng-9', ran: true, verdict: 'PASS', merged: true, issuePrLink: 'Refs eng-9' },
+      { ticket: 'x', ran: true, verdict: 'PASS', merged: true, issuePrLink: 'Refs 12' },
+    ]
+    expect(renderLinksOnlyBlock(rows, 'PROJ-1')).toBe(['## Related Issues', 'Refs PROJ-1', 'Refs ENG-5', 'Refs #7', ''].join('\n'))
+  })
+
+  it('known-bad probes: a Closes line (#N or KEY-N), a repeated ref, a lowercase key, a bare number and a heading with no line are each refused', () => {
+    const good = ['## Related Issues', 'Refs #12', 'Refs ENG-13', ''].join('\n')
+    expect(checkWaveLinksOnly(good), 'a #N ref and a KEY-N ref').toBe(0)
+    expect(checkWaveLinksOnly(seedOnce(good, 'Refs #12', 'Closes #12')), 'a Closes #N line').not.toBe(0)
+    expect(checkWaveLinksOnly(seedOnce(good, 'Refs ENG-13', 'Closes ENG-13')), 'a Closes KEY-N line').not.toBe(0)
+    expect(checkWaveLinksOnly(seedOnce(good, 'Refs ENG-13', 'Refs #12')), 'a repeated #N ref').not.toBe(0)
+    expect(checkWaveLinksOnly(seedOnce(good, 'Refs #12', 'Refs ENG-13')), 'a repeated KEY-N ref').not.toBe(0)
+    expect(checkWaveLinksOnly(seedOnce(good, 'Refs ENG-13', 'Refs eng-13')), 'a lowercase key').not.toBe(0)
+    expect(checkWaveLinksOnly(seedOnce(good, 'Refs ENG-13', 'Refs 13')), 'a bare number').not.toBe(0)
+    expect(checkWaveLinksOnly('## Related Issues\n'), 'a heading with no line').not.toBe(0)
+  })
+
+  it('the model is the rule the built step states: each clause the model applies is in the off text', () => {
+    const step3 = section(dynamicBuildOff('compliance-off'), STEP3, STEP4)!
+    expect(step3).toContain('is, as a whole, a `#N` or `KEY-N` reference, the related line is `Refs ` and that reference')
+    expect(step3).toContain('whose token is, as a whole, a `#N` or `KEY-N` reference: `Refs ` and that token, verbatim')
+    expect(step3).toContain('as the first line under `## Related Issues`')
+    expect(step3).toContain('No line is `Closes`')
   })
 })

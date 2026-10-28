@@ -106,8 +106,8 @@ import {
   applyAttributionAnswer,
   attributionSeedFrom,
 } from './attribution-prompts.js';
-import { convergeFromManifest } from '../../targets/claude-code/compliance-install.js';
-import { convergeCurationVariants, installedVersionMatches, readRunningVersion } from '../../targets/claude-code/curation-install.js';
+import { convergeVariantAxes, describePostingLeft, installedVersionMatches, readRunningVersion } from '../../targets/claude-code/curation-install.js';
+import { POSTING_OFF_NOTICE, installRecordFor, postingNoticeDue, readInstalledVariants } from '../../core/installed-variants.js';
 import {
   auditAndRecordClaudeMd,
   formatClaudeMdAuditNote,
@@ -989,8 +989,8 @@ export const initCommand = new Command('init')
   .option('--no-proxy', 'Disable external model routing')
   .option('--behavior', 'Enable the behavior rule (agents reply in ASD-STE100 Simplified Technical English; off by default)')
   .option('--no-behavior', 'Disable the behavior rule')
-  .option('--compliance <list>', 'Enable compliance with comma-separated framework IDs (e.g., gdpr,hipaa)')
-  .option('--no-compliance', 'Disable compliance (removes the rule; the skill and framework references stay installed; frameworks remembered for re-enable)')
+  .option('--compliance <list>', 'Enable compliance with comma-separated framework IDs (e.g., gdpr,hipaa); installs the steps that post evidence and summaries to GitHub or a tracker')
+  .option('--no-compliance', 'Disable compliance (removes the rule and every step that posts evidence or summaries to GitHub or a tracker; the skill and framework references stay installed; frameworks remembered for re-enable)')
   .option('--tracker <id>', 'The machine\'s default issue tracker provider: github, jira, or linear')
   .option('--gate-level <full|standard|lean>', 'The machine\'s default gate level: full, standard, or lean (skips the gate level prompt)')
   .option('--security <mode>', 'Security deny list location: user, managed, or none', /^(user|managed|none)$/i)
@@ -2220,59 +2220,47 @@ export const initCommand = new Command('init')
       process.exit(1);
     }
 
-    // D-LEARNING-VARIANT-INSTALL: converge the curation variants. The file copy above
-    // installed the variant of everything IT installed; on a `--plugin` install the
-    // other plugins' files, already on disk, may still be the other variant (this run
-    // may have flipped the switch), and the apply-decisions skill is removed here when
-    // the copy skipped it on a partial install. Rewrites only what is installed.
-    // Warn-not-abort: either mismatch is safe (an on variant is still gated at run
-    // time, an off variant loads no decisions). The agent mapping is reapplied below.
-    try {
-      const curationConverge = await convergeCurationVariants({
-        claudeDir,
-        devflowDir,
-        curation: curationEnabled,
-        plugins: effectivePlugins,
-        warn: (msg) => installWarnings.push(msg),
-      });
-      if (verbose && curationConverge.converged) {
-        p.log.info(
-          `Curation ${curationEnabled ? 'on' : 'off'} variants: ` +
-          `${curationConverge.commandsRewritten.length} command(s) and ${curationConverge.agentsRewritten.length} agent(s) ` +
-          `rewritten, ${curationConverge.unchanged} already current`,
-        );
-      }
-    } catch (err) {
-      installWarnings.push(`Curation variant convergence failed — ${err instanceof Error ? err.message : String(err)}`);
+    // The one converge for both switches (D-LEARNING-VARIANT-INSTALL, AC-27): the file copy
+    // above installed the variant of everything IT installed; on a `--plugin` install the
+    // other plugins' files, already on disk, may still be another variant (this run may
+    // have flipped a switch), and the apply-decisions skill is removed here when the copy
+    // skipped it on a partial install. It also converges the compliance skill and rule, so
+    // enabling or disabling compliance during init needs no separate devflow compliance run.
+    // Rewrites only what is installed. Warn-not-abort: a failure is a warning here and the
+    // install record below is withheld, so the status line says to run init again. The agent
+    // mapping is reapplied below.
+    const variantConverge = await convergeVariantAxes({
+      claudeDir,
+      devflowDir,
+      manifest: {
+        features: {
+          curation: curationEnabled,
+          compliance: { enabled: complianceEnabled, frameworks: complianceFrameworks },
+          rules: rulesEnabled,
+        },
+      },
+      plugins: effectivePlugins,
+      warn: (msg) => installWarnings.push(msg),
+    });
+    if (verbose && variantConverge.converged) {
+      p.log.info(
+        `Curation ${curationEnabled ? 'on' : 'off'}, compliance ${complianceEnabled ? 'on' : 'off'} variants: ` +
+        `${variantConverge.commandsRewritten.length} command(s) and ${variantConverge.agentsRewritten.length} agent(s) ` +
+        `rewritten, ${variantConverge.unchanged} already current`,
+      );
     }
-
-    // Converge compliance artifacts (always converge, never short-circuit).
-    // Called unconditionally so that enabling/disabling compliance during init
-    // is reflected in the installed artifacts without a separate devflow compliance run.
-    // Wrapped in its own try/catch (warn-not-abort).
-    let convergeResult: Awaited<ReturnType<typeof convergeFromManifest>> | null = null;
-    try {
-      convergeResult = await convergeFromManifest({
-        claudeDir,
-        devflowDir,
-        manifest: { features: { compliance: { enabled: complianceEnabled, frameworks: complianceFrameworks }, rules: rulesEnabled } },
-        warn: (msg) => p.log.warn(msg),
-      });
-      // I41: emit legacy-upgrade notice when compliance is disabled AND a pre-existing rule
-      // was found. The skill is no signal — converge installs it on every machine
-      // (D-COMPLIANCE-INSTALL-ALWAYS) — so removedPreexisting reports the rule alone, on a
-      // partial install; hadComplianceRule covers full installs, where installViaFileCopy
-      // wipes the rules dir before converge probes it.
-      if (!complianceEnabled && (convergeResult.removedPreexisting || hadComplianceRule)) {
-        p.log.info(
-          'Compliance rule removed — if you previously had devflow-compliance installed, ' +
-          'run `devflow compliance --enable` to re-enable with your framework selection.',
-        );
-      }
-    } catch (err) {
-      p.log.warn(
-        `Compliance artifact convergence failed — install succeeded but compliance artifacts may be stale: ` +
-        `${err instanceof Error ? err.message : String(err)}`,
+    // A compliance-off converge that cannot prove the installed prompts free of posting steps
+    // warns and names the files; init never exits non-zero for it (AC-28 binds the compliance command).
+    installWarnings.push(...describePostingLeft(variantConverge.posting));
+    // I41: emit legacy-upgrade notice when compliance is disabled AND a pre-existing rule
+    // was found. The skill is no signal — converge installs it on every machine
+    // (D-COMPLIANCE-INSTALL-ALWAYS) — so removedPreexisting reports the rule alone, on a
+    // partial install; hadComplianceRule covers full installs, where installViaFileCopy
+    // wipes the rules dir before converge probes it.
+    if (!complianceEnabled && (variantConverge.compliance.removedPreexisting || hadComplianceRule)) {
+      p.log.info(
+        'Compliance rule removed — if you previously had devflow-compliance installed, ' +
+        'run `devflow compliance --enable` to re-enable with your framework selection.',
       );
     }
 
@@ -2912,6 +2900,7 @@ export const initCommand = new Command('init')
 
     // Write installation manifest for upgrade tracking (non-fatal — install already succeeded)
     const now = new Date().toISOString();
+    const installRecord = installRecordFor(variantConverge.converged, { curation: curationEnabled, compliance: complianceEnabled });
     const manifestData = {
       version,
       // Resolved above, before the install, because the skills install set is
@@ -2953,6 +2942,9 @@ export const initCommand = new Command('init')
       },
       installedAt: existingManifest?.installedAt ?? now,
       updatedAt: now,
+      // The install record, written only after a converge that finished clean (AC-29): an
+      // unclean one leaves the field out, which reads as unknown and names `devflow init`.
+      ...(installRecord !== null ? { installedVariants: installRecord } : {}),
     };
     // ── Manifest write + tracker selection lifecycle (the ONE call site) ──────
     // persistManifestThenConvergeTracker owns the ordering invariant: the
@@ -2967,6 +2959,17 @@ export const initCommand = new Command('init')
     for (const msg of trackerLifecycle.messages) {
       if (msg.level === 'warn') p.log.warn(msg.text);
       else p.log.info(msg.text);
+    }
+
+    // The posting notice (AC-30): once, when the record moves from posting (compliance on, or no
+    // record before this release) to non-posting. It follows the record write, so a record that
+    // was withheld or never reached the disk leaves the notice due for the next init.
+    if (
+      trackerLifecycle.manifestWritten &&
+      installRecord !== null &&
+      postingNoticeDue(readInstalledVariants(existingManifest?.installedVariants), complianceEnabled)
+    ) {
+      p.log.info(POSTING_OFF_NOTICE);
     }
 
     // Only now that the machine-wide switch is on disk (D-INIT-DRAIN-AFTER-SWITCH).

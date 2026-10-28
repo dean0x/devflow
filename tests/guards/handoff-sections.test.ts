@@ -20,10 +20,23 @@
 
 import { describe, it, expect } from 'vitest'
 
-import { ensurePrReadyReference, readAgentReference, requireDistFile, resolveAgentSource } from '../helpers.js'
+import { ensurePrReadyReference, readAgentReference, requireDistFile, resolveAgentSource, resolveVariantOffSource } from '../helpers.js'
 
 const SECTION_HEADING = '## Phase {N} Implementation Summary'
 const DYNAMIC_HOSTS = ['dynamic-build', 'dynamic-plan', 'dynamic-profile', 'dynamic-tickets'] as const
+
+/**
+ * The compliance-off builds of /implement (#648): compliance off with curation on, and with curation off. The handoff
+ * protocol is the same text in every build, so each guard on the paragraph runs over these too. An absent file means the
+ * build step did not run, and that is an error, never a skip.
+ */
+export function implementComplianceOffBuilds(): Array<readonly [string, string]> {
+  return (['compliance-off', 'both-off'] as const).map(key => {
+    const text = resolveVariantOffSource(key, 'commands', 'implement')
+    if (text === null) throw new Error(`the ${key} build of /implement is absent: run \`npm run build:mds\``)
+    return [key, text] as const
+  })
+}
 
 /** The `**Handoff Protocol**` paragraph of the compiled implement command. */
 export function handoffProtocol(implement: string): string {
@@ -101,11 +114,16 @@ describe('the Code agent writes its own capped section and reads only the one be
     expect(code.split(SECTION_HEADING).length - 1).toBeGreaterThanOrEqual(3)
   })
 
-  it('the /implement Handoff Protocol paragraph states the same protocol and keeps its pinned clauses', () => {
-    const paragraph = handoffProtocol(requireDistFile('implement.md'))
-    expect(paragraph.length, 'the paragraph moved').toBeGreaterThan(300)
-    expect(collectRuleDefects('implement', paragraph, ORCHESTRATOR_RULES)).toEqual([])
-    expect(collectProtocolDefects(paragraph)).toEqual([])
+  it('the /implement Handoff Protocol paragraph states the same protocol and keeps its pinned clauses, in every build', () => {
+    const builds: Array<readonly [string, string]> = [['on', requireDistFile('implement.md')], ...implementComplianceOffBuilds()]
+    for (const [label, md] of builds) {
+      const paragraph = handoffProtocol(md)
+      expect(paragraph.length, `${label}: the paragraph moved`).toBeGreaterThan(300)
+      expect(collectRuleDefects(`implement (${label})`, paragraph, ORCHESTRATOR_RULES)).toEqual([])
+      expect(collectProtocolDefects(paragraph), label).toEqual([])
+    }
+    const [on, ...off] = builds.map(([, md]) => handoffProtocol(md))
+    for (const paragraph of off) expect(paragraph, 'a compliance-off build words the protocol as the on build does').toBe(on)
   })
 
   it('every dynamic command states the same convention through the shared preamble', () => {
@@ -166,6 +184,16 @@ describe('no rule rewrites an earlier section or the Evidence Exceptions section
     expect(code).not.toContain('PR_EXCEPTIONS')
     const prReadyInput = ensurePrReadyReference().split('\n').find(l => l.startsWith('**Input:**')) ?? ''
     expect(prReadyInput).toContain('`PR_EXCEPTIONS` (optional)')
+  })
+
+  it('a compliance-off /implement records its exception first for the evidence file, and forwards none to the Git spawn', () => {
+    for (const [label, md] of implementComplianceOffBuilds()) {
+      expect(md, label).toContain('**Record the exception at once**, before any Code spawn: set `EVIDENCE_EXCEPTIONS` to the rendered section')
+      expect(md, `${label}: the evidence file is the exception's one home`).toContain('The test plan step below writes it into `EVIDENCE_FILE`, its one home')
+      expect(md, `${label}: no exception is forwarded to the PR-opening spawn`).not.toContain('PR_EXCEPTIONS')
+      expect(md, `${label}: the exception is not kept in the handoff file`).not.toMatch(/Evidence Exceptions section of \{worktree\}\/\.devflow\/docs\/handoff-/)
+      expect(collectRewriteAllowances(label, handoffProtocol(md))).toEqual([])
+    }
   })
 
   it('known-bad probe: a restored orchestrator write, a rewrite allowance and a lost clause are each reported', () => {

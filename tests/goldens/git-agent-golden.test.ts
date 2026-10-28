@@ -16,10 +16,12 @@
  *
  * Update ritual: npm run test:golden:update -- git-agent
  *   (writes the named fixture; github-status-lines.txt is refused without --unfreeze)
+ *   npm run test:golden:update -- git-agent-compliance-off
+ *   (the second block below: the Git agent a compliance-off machine installs)
  */
 
 import { describe, it, expect } from 'vitest'
-import { loadGolden, resolveAgentSource } from '../helpers.js'
+import { loadGolden, resolveAgentSource, resolveVariantOffSource } from '../helpers.js'
 
 /**
  * Exact byte size of the golden fixture. An EQUALITY baseline, not a floor —
@@ -92,5 +94,40 @@ describe('golden: git agent source equality', () => {
       resolveAgentSource('git').origin,
       'git must resolve from dist/agents/ — run `npm run build:mds` if this reports src',
     ).toBe('dist')
+  })
+})
+
+/**
+ * Exact byte size of the compliance-off golden fixture: an EQUALITY baseline, never a
+ * floor, and deliberately NOT registered in tests/fixtures/numeric-floors.json. It pins
+ * `stat -f %z tests/fixtures/golden/git-agent-compliance-off.md`, and the assertion below
+ * re-derives it from that fixture. It moves only in the fixture-only commit that
+ * regenerates the golden, and `GIT_AGENT_BYTES` above does not move with it.
+ */
+const GIT_AGENT_COMPLIANCE_OFF_BYTES = 9_128
+
+describe('golden: compliance-off git agent source equality (AC-16)', () => {
+  const offText = resolveVariantOffSource('compliance-off', 'agents', 'git')
+  if (offText === null) throw new Error('dist/compliance-off/agents/git.md is absent: run `npm run build:mds`')
+
+  it('the compliance-off git agent is byte-equal to its golden fixture', () => {
+    const golden = loadGolden('git-agent-compliance-off.md')
+    expect(
+      offText,
+      'git-agent-compliance-off.md does not match the build. A mismatch means the source changed without ' +
+      'the fixture: npm run test:golden:update -- git-agent-compliance-off',
+    ).toBe(golden)
+  })
+
+  it('the golden fixture is exactly GIT_AGENT_COMPLIANCE_OFF_BYTES bytes (equality baseline)', () => {
+    expect(
+      Buffer.byteLength(loadGolden('git-agent-compliance-off.md'), 'utf-8'),
+      'git-agent-compliance-off.md fixture size changed. Move GIT_AGENT_COMPLIANCE_OFF_BYTES in the SAME ' +
+      'commit as the fixture, or the tree is red at that boundary.',
+    ).toBe(GIT_AGENT_COMPLIANCE_OFF_BYTES)
+  })
+
+  it('the on and off goldens are two different files, so neither pins the other', () => {
+    expect(loadGolden('git-agent-compliance-off.md')).not.toBe(loadGolden('git-agent.md'))
   })
 })

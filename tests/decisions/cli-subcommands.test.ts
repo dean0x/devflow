@@ -57,7 +57,7 @@ vi.mock('@clack/prompts', () => ({
 // Imports AFTER mocks.
 // ---------------------------------------------------------------------------
 import { getLedgerRoot } from '../../src/core/ledger-root.js';
-import { getDevFlowDirectory } from '../../src/targets/claude-code/claude-paths.js';
+import { getClaudeDirectory, getDevFlowDirectory } from '../../src/targets/claude-code/claude-paths.js';
 import { curationCommand } from '../../src/cli/commands/curation.js';
 import * as p from '@clack/prompts';
 import { getCurationMoveMarkerPath } from '../../src/core/curation-move-notice.js';
@@ -256,6 +256,8 @@ function holdMoveLock(machineDir: string, dir: string): string {
 
 let root: string;
 let devflowDir: string;
+/** A scratch Claude directory. A toggle converges the compliance skill and rule under it, so it must never be a path outside the test. */
+let claudeDir: string;
 
 /** Re-install the scratch machine directory with a manifest that records the running version: matching scripts, no skew. */
 function useMatchingInstall(): void {
@@ -267,7 +269,9 @@ function useMatchingInstall(): void {
 beforeEach(() => {
   root = makeTmpDir();
   devflowDir = makeMachineDevflowDir();
+  claudeDir = makeTmpDir();
   vi.mocked(getDevFlowDirectory).mockReturnValue(devflowDir);
+  vi.mocked(getClaudeDirectory).mockReturnValue(claudeDir);
   vi.mocked(getLedgerRoot).mockResolvedValue(root);
   process.exitCode = 0;
 });
@@ -276,7 +280,9 @@ afterEach(() => {
   process.exitCode = 0;
   vi.unstubAllEnvs();
   vi.mocked(getDevFlowDirectory).mockReturnValue('/home/user/.devflow');
+  vi.mocked(getClaudeDirectory).mockReturnValue('/home/user/.claude');
   fs.rmSync(root, { recursive: true, force: true });
+  fs.rmSync(claudeDir, { recursive: true, force: true });
   fs.rmSync(devflowDir, { recursive: true, force: true });
 });
 
@@ -1127,6 +1133,15 @@ describe('curation --enable/--disable: the curation switch and the folder move (
       expect(fs.existsSync(path.join(NEW(), 'decisions-ledger.jsonl'))).toBe(true);
       expect(run.exitCode).toBe(0);
       expect(run.success).toContain('Curation enabled');
+    });
+
+    it('the composed converge writes the compliance skill under the injected Claude directory only, and warns of nothing', async () => {
+      const run = await runCuration(['--enable']);
+
+      expect(run.warn, 'a converge that cannot write its target warns').not.toContain('compliance:');
+      expect(fs.existsSync(path.join(claudeDir, 'skills', 'devflow:compliance')), 'the skill lands in the scratch directory').toBe(true);
+      expect(fs.existsSync('/home/user/.claude'), 'the fake default directory is never written').toBe(false);
+      expect(run.exitCode).toBe(0);
     });
 
     it('--disable moves the folder, then drains the queue in the folder it moved to', async () => {

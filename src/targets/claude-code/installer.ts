@@ -1898,7 +1898,7 @@ export interface ResolvedSkillSource {
  * installed in its place).
  *
  * The ONE spelling of that decision: the install loop and
- * convergeCurationVariants both call it, so a skill the curation toggle installs
+ * convergeVariantAxes both call it, so a skill the curation toggle installs
  * later is shadowed exactly as one the install installed.
  *
  * The shipped source is stat-checked FIRST, even under a valid shadow, so an
@@ -2485,7 +2485,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // D-LEARNING-VARIANT-INSTALL: a curation-off machine skips the curation-gated
   // skills here. The pre-clean above walked the UNFILTERED map, so on a full
   // install a leftover copy is already gone; a partial install leaves removal to
-  // convergeCurationVariants, which init runs straight after this call.
+  // convergeVariantAxes, which init runs straight after this call.
   spinner.message('Installing skills...');
   for (const [skillName] of omitCurationGatedSkills(skillsMap, curation)) {
     const resolved = await resolveSkillSource(skillName, devflowDir);

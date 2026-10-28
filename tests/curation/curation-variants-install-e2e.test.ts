@@ -1,11 +1,15 @@
 /**
- * End to end: the machine's curation switch decides which prompts and which skill
- * the install carries (D-LEARNING-VARIANT-INSTALL, plan section 3.B).
+ * End to end: the machine's curation and compliance switches decide which prompts and
+ * which skill the install carries (D-LEARNING-VARIANT-INSTALL, plan section 3.B, and #648).
  *
  * Drives the REAL compiled CLI (`node dist/cli.js`) against isolated temp HOMEs, because
  * the unit tests in curation-variants-install.test.ts call the converge with hand-built
  * trees and therefore cannot see a wiring mistake between the CLI, the installer and the
  * converge. Every claim here is about what a user's ~/.claude holds afterwards.
+ *
+ * A fresh machine has compliance off, so the file an installed prompt must equal is the one
+ * built for the machine's two recorded switches, not the curation-only tree: `expectedFile`
+ * reads the switches from the manifest and picks the tree with `machineVariantKey`.
  *
  * HOME safety (the near-miss in the pitfalls ledger): every spawn gets its env from the
  * shared `sandboxEnv(tmpHome)`, which pins HOME to a temp directory and refuses a real
@@ -16,13 +20,20 @@
  * Requires a build (`npm run build`): the spawned CLI reads dist/ and dist/curation-off.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import { createHash } from 'crypto';
 import { spawnSync } from 'child_process';
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
+import {
+  machineVariantKey,
+  parseVariantManifest,
+  variantOffRelPath,
+  type VariantManifestHost,
+  type VariantSwitches,
+} from '../../src/core/curation-variants.js';
 import { requireBuiltCli, sandboxEnv } from '../helpers.js';
 import { assertTempHome } from '../setup/home-isolation.js';
 
@@ -73,18 +84,32 @@ async function exists(p: string): Promise<boolean> {
   try { await fs.access(p); return true; } catch { return false; }
 }
 
-async function rosterOf(kind: Kind): Promise<string[]> {
-  return (await fs.readdir(path.join(ROOT, 'dist', 'curation-off', kind))).filter(f => f.endsWith('.md')).sort();
+/** The compiled hosts of the package under test, from the build manifest `dist/variant-axes.json`. */
+async function builtHosts(): Promise<readonly VariantManifestHost[]> {
+  const parsed = parseVariantManifest(await fs.readFile(path.join(ROOT, 'dist', 'variant-axes.json'), 'utf-8'));
+  if (!parsed.ok) throw new Error(`dist/variant-axes.json is unusable: ${parsed.error.kind}`);
+  return parsed.value;
 }
 
-/** Which variant the installed file is, by comparing its bytes with both build outputs. */
+/** The files of one kind that carry a curation arm: the roster the curation switch is asserted on. */
+async function rosterOf(kind: Kind): Promise<string[]> {
+  return (await builtHosts()).filter(h => h.kind === kind && h.axes.curation).map(h => `${h.name}.md`).sort();
+}
+
+/** The built file an installed prompt must equal on a machine with these two switches (AC-27). */
+async function expectedFile(kind: Kind, file: string, machine: VariantSwitches): Promise<Buffer> {
+  const host = (await builtHosts()).find(h => h.kind === kind && `${h.name}.md` === file);
+  const key = machineVariantKey(machine, host?.axes ?? { curation: false, compliance: false });
+  return fs.readFile(path.join(ROOT, key === 'on' ? path.join('dist', kind, file) : variantOffRelPath(key, kind, file)));
+}
+
+/** Which curation variant the installed file is, on the compliance switch the manifest records. */
 async function variantOf(kind: Kind, file: string): Promise<Variant> {
   let installed: Buffer;
   try { installed = await fs.readFile(installedPrompt(kind, file)); } catch { return 'missing'; }
-  const off = await fs.readFile(path.join(ROOT, 'dist', 'curation-off', kind, file));
-  const on = await fs.readFile(path.join(ROOT, 'dist', kind, file));
-  if (installed.equals(off)) return 'off';
-  if (installed.equals(on)) return 'on';
+  const { compliance } = await machineOf();
+  if (installed.equals(await expectedFile(kind, file, { curation: false, compliance }))) return 'off';
+  if (installed.equals(await expectedFile(kind, file, { curation: true, compliance }))) return 'on';
   return 'other';
 }
 
@@ -127,6 +152,17 @@ async function manifestCuration(): Promise<boolean | undefined> {
     features: { learning?: boolean };
   };
   return manifest.features.learning;
+}
+
+/** Both switches as the manifest records them. A fresh machine has compliance off. */
+async function machineOf(): Promise<VariantSwitches> {
+  const manifest = JSON.parse(await fs.readFile(manifestFile(), 'utf-8')) as {
+    features: { learning?: boolean; curation?: boolean; compliance?: { enabled?: boolean } };
+  };
+  return {
+    curation: manifest.features.curation ?? manifest.features.learning ?? true,
+    compliance: manifest.features.compliance?.enabled === true,
+  };
 }
 
 /** Assert every installed roster file is the given variant, and that enough of them exist to mean it. */
@@ -356,5 +392,161 @@ describe('a skill shadow follows the switch', () => {
     okCli(os.tmpdir(), 'curation', '--disable');
     expect(await exists(skillDir())).toBe(false);
     expect(await exists(shadow)).toBe(true);
+  }, SCENARIO_TIMEOUT_MS);
+});
+
+// ---------------------------------------------------------------------------
+// The compliance switch (#648)
+// ---------------------------------------------------------------------------
+
+/** The fixed line every compliance-off command records when the repository requires evidence (AC-18). */
+const DEGRADED_LINE = 'compliance off on this machine; the repository requires evidence';
+
+/** The four machines: both switches, each way. */
+const MACHINES: readonly VariantSwitches[] = [
+  { curation: true, compliance: true },
+  { curation: false, compliance: true },
+  { curation: true, compliance: false },
+  { curation: false, compliance: false },
+];
+
+const labelOf = (m: VariantSwitches): string => `curation ${m.curation ? 'on' : 'off'}, compliance ${m.compliance ? 'on' : 'off'}`;
+
+/** A fresh init of one machine. Compliance on names one framework, so a bare `--compliance` never prompts. */
+function initMachine(m: VariantSwitches): string {
+  return init('--recommended', ...(m.curation ? [] : ['--no-curation']), ...(m.compliance ? ['--compliance', 'gdpr'] : ['--no-compliance']));
+}
+
+/** Toggle an installed machine to another with the real `curation` and `compliance` commands, one axis at a time. */
+function toggleMachine(from: VariantSwitches, to: VariantSwitches): void {
+  if (from.curation !== to.curation) okCli(os.tmpdir(), 'curation', to.curation ? '--enable' : '--disable');
+  if (from.compliance !== to.compliance) {
+    if (to.compliance) okCli(os.tmpdir(), 'compliance', '--set', 'gdpr');
+    else okCli(os.tmpdir(), 'compliance', '--disable');
+  }
+}
+
+/** The folders under ~/.claude that the switches decide, as installed. */
+const DIGEST_ROOTS = ['commands/devflow', 'agents/devflow', 'skills', 'rules'] as const;
+/** The deepest folder the digest walks below a root: skills nest a references folder. */
+const MAX_DIGEST_DEPTH = 6;
+
+async function digestInto(dir: string, rel: string, depth: number, out: Map<string, string>): Promise<void> {
+  expect(depth, `the install tree under ${rel} is deeper than ${MAX_DIGEST_DEPTH}`).toBeLessThanOrEqual(MAX_DIGEST_DEPTH);
+  for (const entry of await fs.readdir(dir, { withFileTypes: true }).catch(() => [])) {
+    const entryRel = `${rel}/${entry.name}`;
+    if (entry.isDirectory()) await digestInto(path.join(dir, entry.name), entryRel, depth + 1, out);
+    else out.set(entryRel, createHash('sha256').update(await fs.readFile(path.join(dir, entry.name))).digest('hex'));
+  }
+}
+
+/** `relative path -> sha256` of every installed command, agent, skill and rule. */
+async function installDigest(): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  for (const root of DIGEST_ROOTS) await digestInto(path.join(claudeDir(), root), root, 0, out);
+  return out;
+}
+
+/** The record of installed variants the manifest carries. */
+async function installedRecord(): Promise<unknown> {
+  return (JSON.parse(await fs.readFile(manifestFile(), 'utf-8')) as { installedVariants?: unknown }).installedVariants;
+}
+
+const stripAnsi = (text: string): string => text.replace(/\u001b\[[0-9;]*m/g, '');
+
+describe('a toggled install equals a fresh init of the same machine (TP-40, AC-27, AC-29)', () => {
+  const freshDigest = new Map<string, Map<string, string>>();
+  const freshRecord = new Map<string, unknown>();
+
+  beforeAll(async () => {
+    for (const machine of MACHINES) {
+      tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-curation-e2e-fresh-'));
+      expect(() => assertTempHome(tmpHome)).not.toThrow();
+      await fs.mkdir(claudeDir(), { recursive: true });
+      try {
+        initMachine(machine);
+        freshDigest.set(labelOf(machine), await installDigest());
+        freshRecord.set(labelOf(machine), await installedRecord());
+      } finally {
+        await fs.rm(tmpHome, { recursive: true, force: true });
+      }
+    }
+  }, 4 * SCENARIO_TIMEOUT_MS);
+
+  it('non-vacuity: the four fresh machines install four different trees', () => {
+    const trees = MACHINES.map(m => JSON.stringify([...(freshDigest.get(labelOf(m)) ?? new Map())]));
+    expect(new Set(trees).size).toBe(MACHINES.length);
+    for (const tree of freshDigest.values()) expect(tree.size).toBeGreaterThan(20);
+  });
+
+  for (const from of MACHINES) {
+    for (const to of MACHINES) {
+      if (from === to) continue;
+      it(`${labelOf(from)} toggled to ${labelOf(to)}`, async () => {
+        initMachine(from);
+        expect(await machineOf(), 'the start machine is the one asked for').toEqual(from);
+
+        toggleMachine(from, to);
+
+        expect(await machineOf()).toEqual(to);
+        expect(await installDigest()).toEqual(freshDigest.get(labelOf(to)));
+        expect(await installedRecord(), 'the record says what the converge installed').toEqual(to);
+      }, SCENARIO_TIMEOUT_MS);
+    }
+  }
+
+  it('a fresh init of each machine records the variants it installed', () => {
+    for (const machine of MACHINES) expect(freshRecord.get(labelOf(machine)), labelOf(machine)).toEqual(machine);
+  });
+});
+
+describe('devflow compliance converges the install (AC-27, AC-28, AC-31)', () => {
+  it('a compliance-off install records the fixed degraded line once in plan and release, and --set takes it away', async () => {
+    init('--recommended', '--no-compliance');
+    const readCommand = (name: string): Promise<string> => fs.readFile(installedPrompt('commands', `${name}.md`), 'utf-8');
+    for (const name of ['plan', 'release']) {
+      const text = await readCommand(name);
+      expect(text.split(DEGRADED_LINE).length - 1, `${name} records the line once`).toBe(1);
+    }
+    expect(await readCommand('plan'), 'the compliance-off plan has no reviewer focus areas').not.toContain('Reviewer Focus Areas');
+
+    okCli(os.tmpdir(), 'compliance', '--set', 'gdpr');
+
+    for (const name of ['plan', 'release']) expect(await readCommand(name), name).not.toContain(DEGRADED_LINE);
+    expect(await readCommand('plan')).toContain('Reviewer Focus Areas');
+  }, SCENARIO_TIMEOUT_MS);
+
+  it('--disable says the posting steps were removed, and --status reads the record', async () => {
+    init('--recommended', '--compliance', 'gdpr');
+    expect(stripAnsi(okCli(os.tmpdir(), 'compliance', '--status'))).toMatch(/Posting: +installed +│/);
+
+    const out = okCli(os.tmpdir(), 'compliance', '--disable');
+
+    expect(out).toContain('every posting step removed');
+    expect(stripAnsi(okCli(os.tmpdir(), 'compliance', '--status'))).toMatch(/Posting: +not installed +│/);
+  }, SCENARIO_TIMEOUT_MS);
+
+  it('--status of an install with no record says unknown and names devflow init', async () => {
+    init('--recommended', '--compliance', 'gdpr');
+    const manifest = JSON.parse(await fs.readFile(manifestFile(), 'utf-8')) as Record<string, unknown>;
+    delete manifest.installedVariants;
+    await fs.writeFile(manifestFile(), JSON.stringify(manifest, null, 2));
+
+    expect(stripAnsi(okCli(os.tmpdir(), 'compliance', '--status'))).toMatch(/Posting: +unknown \(run devflow init\) +│/);
+  }, SCENARIO_TIMEOUT_MS);
+
+  it('a manifest from another version exits non-zero on disable and names the posting steps (TP-42)', async () => {
+    init('--recommended', '--compliance', 'gdpr');
+    const manifest = JSON.parse(await fs.readFile(manifestFile(), 'utf-8')) as { version: string };
+    await fs.writeFile(manifestFile(), JSON.stringify({ ...manifest, version: '0.0.1' }, null, 2));
+
+    const { status, out } = runCli(os.tmpdir(), 'compliance', '--disable');
+
+    expect(status, out).toBe(1);
+    expect(out).toContain('posting steps remain installed until devflow init');
+    expect(out).not.toContain('Compliance disabled');
+    const plan = await fs.readFile(installedPrompt('commands', 'plan.md'));
+    expect(plan.equals(await expectedFile('commands', 'plan.md', { curation: true, compliance: true })), 'nothing was converged: the installed plan is still the compliance-on one').toBe(true);
+    expect(JSON.parse(await fs.readFile(manifestFile(), 'utf-8')).features.compliance.enabled, 'the switch itself is still recorded').toBe(false);
   }, SCENARIO_TIMEOUT_MS);
 });

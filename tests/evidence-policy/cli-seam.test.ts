@@ -1023,7 +1023,11 @@ describe('devflow compliance — the built CLI (AC-9, AC-10)', () => {
     const home = fs.mkdtempSync(path.join(tmp, 'home-'));
     fs.mkdirSync(path.join(home, '.devflow'), { recursive: true });
     fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
-    const manifest = makeManifest({ features: { ...makeManifest().features, compliance } });
+    // The manifest records the running version. A `--disable` against an older record is a fail-closed
+    // exit 1 (the compliance-off variants are not applied across a version skew), which is correct and
+    // not what these tests exercise.
+    const runningVersion = (JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf-8')) as { version: string }).version;
+    const manifest = makeManifest({ version: runningVersion, features: { ...makeManifest().features, compliance } });
     fs.writeFileSync(path.join(home, '.devflow', 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
     return home;
   }

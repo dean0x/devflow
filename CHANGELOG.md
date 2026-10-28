@@ -16,6 +16,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 **Stale-install window:**
 - Until you run `devflow init`, the installed quality rule and testing skill lack the new text.
 
+### Behaviour change
+
+- **With compliance off, devflow installs no step that posts to GitHub or a tracker** ([#648](https://github.com/dean0x/devflow/issues/648)).
+  - With compliance off (the default for new installs and upgrades), devflow installs no step that posts test-plan evidence, review or resolution summaries, backlog entries, review-thread replies, wave reports, plan artifacts, or release back-links to GitHub or a tracker. Results stay in local files under `.devflow/docs/`.
+  - The change covers the `/implement`, `/resolve`, `/code-review`, `/bug-analysis`, `/dynamic-build`, `/dynamic-tickets`, `/plan` and `/release` commands, and the Git and Triage agents. Each command names its local result files and marks them `(local; not posted)`. The commands still open pull requests, link issues and file tickets.
+  - Where the repository requires evidence, each command prints one line: `TRACEABILITY: DEGRADED (compliance off on this machine; the repository requires evidence)`.
+  - Only the machine switch picks the installed build. A repository `compliance` key keeps the review lens on, locally, and never brings a posting step back.
+  - `devflow init`, `devflow curation` and `devflow compliance` use one converge. Every change of the compliance switch converges the installed commands at once, and the result equals a fresh install with the same switches, apart from stamps. If `devflow compliance --disable` cannot show that no installed file still posts, it records the switch as off, lists the files that still post, and exits 1. It also exits 1, with no success line, when it cannot remove the compliance rule. The command writes the switch under the install manifest lock. If it cannot take the lock, it writes nothing and exits 1.
+  - `devflow init` prints a one-time notice that names this effect. `devflow compliance --status` has a new `Posting:` line.
+  - The wave block that `/dynamic-build` writes on such a machine lists links only: `Refs` lines, never `Closes`. It admits `KEY-N` references as well as `#N` references. This corrects the earlier links-only rule, which admitted only `#N` references.
+  - Run `devflow init` after you update to install the new commands.
+
 ### Changed
 
 - **The quality rule and the testing skill target doc drift, duplicated code and vacuous tests** ([#476](https://github.com/dean0x/devflow/issues/476)).

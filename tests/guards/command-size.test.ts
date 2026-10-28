@@ -15,45 +15,77 @@
  *   - A curation-off build never exceeds its curation-on build: it is the same host with its curation
  *     arms removed.
  *
+ * Four builds exist (`Build`): `on`, `off` (curation off, the name its rows and floor ids have always
+ * used), `compliance-off` and `both-off`. A command with a compliance arm has a compliance-off build,
+ * and one that also has a curation arm has a both-off build (#648, AC-33). Those ceilings sit at the
+ * size measured at their first build, with zero headroom, as `command-<name>-compliance-off-max` and
+ * `command-<name>-both-off-max`. The rule sets no comparison between an off build and the on build:
+ * a compliance-off command can carry a local line the on build replaces with a posting step, so it can
+ * be larger (/implement and /dynamic-tickets are).
+ *
  * Every guard has a named collector, a non-empty-corpus assertion and a known-bad probe run through the
  * same collector.
  */
 
 import { describe, it, expect } from 'vitest'
 
-import { MDS_COMMAND_HOSTS } from '../fixtures/mds-manifest.js'
-import { requireDistFile, resolveCurationOffSource } from '../helpers.js'
+import { COMPLIANCE_VARIANT_HOSTS, CURATION_VARIANT_HOSTS, MDS_COMMAND_HOSTS } from '../fixtures/mds-manifest.js'
+import { requireDistFile, resolveVariantOffSource } from '../helpers.js'
+import type { OffVariantKey } from '../../src/core/curation-variants.js'
 
-type Build = 'on' | 'off'
+type Build = 'on' | 'off' | 'compliance-off' | 'both-off'
+
+/** The off tree each non-`on` build is read from. */
+const OFF_VARIANT: Readonly<Record<Exclude<Build, 'on'>, OffVariantKey>> = {
+  'off': 'curation-off',
+  'compliance-off': 'compliance-off',
+  'both-off': 'both-off',
+}
 
 /** [command, build, ceiling in bytes]. Each row's text is the pattern its numeric-floors.json entry pins. */
 const COMMAND_MAX_BYTES: ReadonlyArray<readonly [string, Build, number]> = [
   ['bug-analysis', 'on', 24_452],
   ['bug-analysis', 'off', 20_634],
+  ['bug-analysis', 'compliance-off', 23_921],
+  ['bug-analysis', 'both-off', 20_103],
   ['code-review', 'on', 34_888],
   ['code-review', 'off', 32_143],
+  ['code-review', 'compliance-off', 31_958],
+  ['code-review', 'both-off', 29_213],
   ['debug', 'on', 19_885],
   ['debug', 'off', 16_966],
   ['dynamic-build', 'on', 106_869],
   ['dynamic-build', 'off', 103_482],
+  ['dynamic-build', 'compliance-off', 103_756],
+  ['dynamic-build', 'both-off', 100_369],
   ['dynamic-plan', 'on', 36_880],
   ['dynamic-plan', 'off', 32_530],
   ['dynamic-profile', 'on', 16_389],
   ['dynamic-profile', 'off', 12_673],
   ['dynamic-tickets', 'on', 41_336],
   ['dynamic-tickets', 'off', 37_129],
+  ['dynamic-tickets', 'compliance-off', 41_478],
+  ['dynamic-tickets', 'both-off', 37_277],
   ['explore', 'on', 12_866],
   ['explore', 'off', 9_964],
   ['implement', 'on', 49_365],
   ['implement', 'off', 46_511],
+  ['implement', 'compliance-off', 50_775],
+  ['implement', 'both-off', 47_921],
   ['plan', 'on', 37_997],
   ['plan', 'off', 35_029],
+  ['plan', 'compliance-off', 37_824],
+  ['plan', 'both-off', 34_856],
   ['release', 'on', 22_825],
   ['release', 'off', 19_609],
+  ['release', 'compliance-off', 17_721],
+  ['release', 'both-off', 14_511],
   ['research', 'on', 14_894],
   ['research', 'off', 10_838],
   ['resolve', 'on', 51_543],
   ['resolve', 'off', 48_343],
+  ['resolve', 'compliance-off', 45_076],
+  ['resolve', 'both-off', 41_860],
   ['self-review', 'on', 15_228],
   ['self-review', 'off', 12_156],
 ]
@@ -70,8 +102,25 @@ const key = (command: string, build: Build): string => `${command}/${build}`
 
 /** The compiled size of one command in one build, or null when the build has no such file. */
 function builtBytes(command: string, build: Build): number | null {
-  const text = build === 'on' ? requireDistFile(`${command}.md`) : resolveCurationOffSource('commands', command)
+  const text = build === 'on' ? requireDistFile(`${command}.md`) : resolveVariantOffSource(OFF_VARIANT[build], 'commands', command)
   return text === null ? null : Buffer.byteLength(text, 'utf-8')
+}
+
+/**
+ * The builds a command is held to: `on` and curation-off for every compiled command, compliance-off for
+ * a command with a compliance arm, and both-off for one that also has a curation arm. Named sets from
+ * the host rosters, which the build's own variant manifest is asserted against in both directions.
+ */
+export function buildsOf(command: string): readonly Build[] {
+  const host = `commands/${command}`
+  const compliance = COMPLIANCE_VARIANT_HOSTS.includes(host)
+  const curation = CURATION_VARIANT_HOSTS.includes(host)
+  return [
+    'on',
+    'off',
+    ...(compliance ? (['compliance-off'] as const) : []),
+    ...(compliance && curation ? (['both-off'] as const) : []),
+  ]
 }
 
 /** Named collector: the command/build pairs the table does not cover, and the rows that cover none. */
@@ -80,7 +129,7 @@ export function collectCoverageDefects(
   commands: readonly string[],
 ): string[] {
   const have = rows.map(([command, build]) => key(command, build))
-  const want = commands.flatMap(command => (['on', 'off'] as const).map(build => key(command, build)))
+  const want = commands.flatMap(command => buildsOf(command).map(build => key(command, build)))
   return [
     ...want.filter(k => !have.includes(k)).map(k => `${k}: no ceiling`),
     ...have.filter(k => !want.includes(k)).map(k => `${k}: a ceiling for no compiled command`),
@@ -115,10 +164,32 @@ export function collectOffAboveOn(figure: (command: string, build: Build) => num
 const ceilingOf = (command: string, build: Build): number | null =>
   COMMAND_MAX_BYTES.find(([c, b]) => c === command && b === build)?.[2] ?? null
 
+/** Named collector: the ceilings that sit above the measured size, for the builds that carry no headroom. */
+export function collectHeadroom(
+  rows: ReadonlyArray<readonly [string, Build, number]>,
+  builds: readonly Build[],
+  measure: (command: string, build: Build) => number | null,
+): string[] {
+  return rows
+    .filter(([, build]) => builds.includes(build))
+    .flatMap(([command, build, max]) => {
+      const bytes = measure(command, build)
+      return bytes === null || bytes === max ? [] : [`${key(command, build)}: ${bytes} bytes, ceiling ${max}`]
+    })
+}
+
+/** The builds #648 added: their ceilings are set at the measured size, so the figure and the ceiling are equal. */
+const COMPLIANCE_BUILDS: readonly Build[] = ['compliance-off', 'both-off']
+
+/** The command names among the compliance-armed hosts, in roster order. */
+const COMPLIANCE_COMMANDS: readonly string[] = COMPLIANCE_VARIANT_HOSTS
+  .filter(host => host.startsWith('commands/'))
+  .map(host => host.slice('commands/'.length))
+
 describe('AC-402: all 14 compiled commands have a byte ceiling in each build', () => {
-  it('the table covers exactly the compiled commands, in both builds', () => {
+  it('the table covers exactly the compiled commands, in each build they have', () => {
     expect(MDS_COMMAND_HOSTS.length, 'the roster is empty, so this guard proves nothing').toBeGreaterThanOrEqual(14)
-    expect(COMMAND_MAX_BYTES).toHaveLength(MDS_COMMAND_HOSTS.length * 2)
+    expect(COMMAND_MAX_BYTES).toHaveLength(MDS_COMMAND_HOSTS.reduce((rows, command) => rows + buildsOf(command).length, 0))
     expect(collectCoverageDefects(COMMAND_MAX_BYTES, MDS_COMMAND_HOSTS)).toEqual([])
   })
 
@@ -135,6 +206,39 @@ describe('AC-402: all 14 compiled commands have a byte ceiling in each build', (
       `plan/on: ${ceilingOf('plan', 'on')! + 1} bytes, ceiling ${ceilingOf('plan', 'on')}`,
     ])
     expect(collectOversize(rows, (c, b) => (c === 'plan' && b === 'off' ? null : 0))).toEqual(['plan/off: the build has no file'])
+  })
+})
+
+describe('AC-33: each compliance-off and both-off command build has a ceiling at its measured size', () => {
+  it('the compliance commands are the roster hosts of kind commands, and each is a compiled command', () => {
+    expect(COMPLIANCE_COMMANDS.length, 'the compliance roster holds no command, so this guard proves nothing').toBeGreaterThanOrEqual(8)
+    for (const command of COMPLIANCE_COMMANDS) expect(MDS_COMMAND_HOSTS, command).toContain(command)
+  })
+
+  it('each of them has a compliance-off ceiling, and a both-off ceiling where it also has a curation arm', () => {
+    for (const command of COMPLIANCE_COMMANDS) {
+      expect(ceilingOf(command, 'compliance-off'), `${command}/compliance-off`).not.toBeNull()
+      expect(ceilingOf(command, 'both-off') === null, `${command}/both-off`).toBe(!CURATION_VARIANT_HOSTS.includes(`commands/${command}`))
+    }
+  })
+
+  it('no compliance build is above its ceiling, and none has headroom over it', () => {
+    const rows = COMMAND_MAX_BYTES.filter(([, build]) => COMPLIANCE_BUILDS.includes(build))
+    expect(rows.length, 'the table holds no compliance row, so this guard proves nothing').toBeGreaterThanOrEqual(COMPLIANCE_COMMANDS.length * 2)
+    expect(collectOversize(rows, builtBytes)).toEqual([])
+    expect(collectHeadroom(COMMAND_MAX_BYTES, COMPLIANCE_BUILDS, builtBytes)).toEqual([])
+  })
+
+  it('known-bad probes: a ceiling above the measured size and a missing compliance build are each reported', () => {
+    const above = (c: string, b: Build): number | null => (c === 'plan' && b === 'compliance-off' ? ceilingOf('plan', 'compliance-off')! - 1 : ceilingOf(c, b))
+    expect(collectHeadroom(COMMAND_MAX_BYTES, COMPLIANCE_BUILDS, above)).toEqual([
+      `plan/compliance-off: ${ceilingOf('plan', 'compliance-off')! - 1} bytes, ceiling ${ceilingOf('plan', 'compliance-off')}`,
+    ])
+    expect(collectHeadroom(COMMAND_MAX_BYTES, ['on', 'off'], above), 'a build outside the listed ones is not held to equality').toEqual([])
+    expect(collectCoverageDefects(COMMAND_MAX_BYTES.filter(([c, b]) => !(c === 'release' && b === 'both-off')), MDS_COMMAND_HOSTS)).toEqual(['release/both-off: no ceiling'])
+    expect(collectOversize(COMMAND_MAX_BYTES, (c, b) => (c === 'release' && b === 'compliance-off' ? ceilingOf('release', 'compliance-off')! + 1 : 0))).toEqual([
+      `release/compliance-off: ${ceilingOf('release', 'compliance-off')! + 1} bytes, ceiling ${ceilingOf('release', 'compliance-off')}`,
+    ])
   })
 })
 

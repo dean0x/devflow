@@ -34,7 +34,7 @@ import {
 } from '../src/core/tracker.js';
 import { runTrackerServers, runTrackerSet, type TrackerServersIO } from '../src/cli/commands/tracker.js';
 import { installViaFileCopy, type Spinner } from '../src/targets/claude-code/installer.js';
-import { convergeCurationVariants } from '../src/targets/claude-code/curation-install.js';
+import { convergePromptVariants } from '../src/targets/claude-code/curation-install.js';
 import { convergeTrackerArtifacts } from '../src/targets/claude-code/tracker-install.js';
 import { restampTrackerAgents } from '../src/targets/claude-code/tracker-servers.js';
 import { requireBuiltCli, resolveAgentSource, sandboxEnv } from './helpers.js';
@@ -380,7 +380,7 @@ describe('the installed agents wear the stamp, whichever path wrote them', () =>
     });
   });
 
-  describe('convergeCurationVariants carries the stamp instead of dropping it', () => {
+  describe('the prompt variant converge carries the stamp instead of dropping it', () => {
     // The shipped roster holds neither Git nor Tracker today (neither has a curation arm), so a
     // temp package root gives the converge a Git variant to write: the path a future arm would take.
     let packageRoot: string;
@@ -398,7 +398,7 @@ describe('the installed agents wear the stamp, whichever path wrote them', () =>
     });
 
     const run = (curation: boolean) =>
-      convergeCurationVariants({ claudeDir, devflowDir, curation, plugins: [plugin('devflow-plan')], warn: m => warnings.push(m), packageRoot });
+      convergePromptVariants({ claudeDir, switches: { curation, compliance: true }, plugins: [plugin('devflow-plan')], warn: m => warnings.push(m), packageRoot });
 
     it('keeps the list across an on to off to on switch, and a repeat run writes nothing', async () => {
       await fs.mkdir(path.dirname(installed('git')), { recursive: true });
@@ -417,8 +417,7 @@ describe('the installed agents wear the stamp, whichever path wrote them', () =>
       expect(on.agentsRewritten).toEqual(['git.md']);
       expect(await read('git')).toContain('CURATION-ON');
       expect(readStampedTools(await read('git'))).toEqual({ ok: true, value: stamp });
-      // The temp root ships no skills, so the converge's skill step warns; nothing about the agent does.
-      expect(warnings.filter(w => !w.includes('apply-decisions'))).toEqual([]);
+      expect(warnings).toEqual([]);
     });
   });
 
