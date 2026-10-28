@@ -602,8 +602,8 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
   {
     // D-FOREGROUND-RUN: every agent runs builds and tests in the foreground under an explicit
     // Bash `timeout` whose ceiling is Claude Code's 600000 ms, or this variable when set. A
-    // suite that cannot be split under that ceiling is reported BLOCKED with the remedy
-    // `devflow flags --set bash-max-timeout-ms=<ms>`, so this flag is that remedy.
+    // run that passes its timeout is waited for and read, so raising the ceiling is optional:
+    // it only lets a long run end inside one call.
     // The env name was confirmed against Claude Code 2.1.294 (docs/reference/claude-code-flags-probe.md):
     // the binary reads BASH_MAX_TIMEOUT_MS, ignores a non-positive or NaN value, and takes the
     // larger of it and the default timeout. Neutral by default (undefined → manifest null →
