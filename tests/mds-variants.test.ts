@@ -1076,9 +1076,18 @@ describe('validateContractOutputName — the narrow underscore allowance', () =>
  * github and jira/linear installs are now the same install; registered in
  * tests/fixtures/numeric-floors.json under both of the ids that used to pin them
  * apart (installed-reference-count-github, installed-reference-count-provider),
- * which rose from 24 and 36 to meet here.
+ * which rose from 24 and 36 to meet here. This is the compliance-ON install; the
+ * compliance-off install has its own floor, INSTALLED_REFS_COMPLIANCE_OFF.
  */
 const INSTALLED_REFS = 47;
+
+/**
+ * Files a compliance-OFF install carries: the compliance-on manifest less the sixteen
+ * posting operation files and the publication-gate document (47 - 17). Registered in
+ * tests/fixtures/numeric-floors.json as installed-reference-count-compliance-off.
+ * A floor, not an equality: a new kept reference raises it, and it never lowers.
+ */
+const INSTALLED_REFS_COMPLIANCE_OFF = 30;
 
 describe('installedReferenceManifest — every provider, whatever the machine selected', () => {
   const generated = generatedReferenceManifest();
@@ -1197,6 +1206,7 @@ describe('POSTING_OPS and the compliance-off reference manifest (TP-56)', () => 
     expect(postingOpFiles(on).filter(rel => rel.startsWith('tracker/'))).toHaveLength(12);
     expect(omitted).toContain('publication-gate.md');
     expect(off).toHaveLength(on.length - 17);
+    expect(off.length).toBeGreaterThanOrEqual(INSTALLED_REFS_COMPLIANCE_OFF);
   });
 
   it('keeps check-merge-readiness and every other document the posting steps do not own', () => {

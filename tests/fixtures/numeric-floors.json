@@ -227,6 +227,14 @@
       "description": "Reference files a JIRA- or LINEAR-machine install carries. Since #393 (PR6, D-INSTALL-ALL-PROVIDERS) the install is no longer a function of the machine's selection, so this floor pins the same shared constant as installed-reference-count-github (INSTALLED_REFS) — the two ids are kept, never deleted, and both rose to the build's 47. History: 32 at the PR-host tree (2026-09-22); 34 since #363; 36 since #364; 47 since #393; 48 since #425 (tracker/_contract.md); 47 since #451 (pr/ensure-pr-ready.md folded into the per-provider ensure-pr-ready files, D-OP-ONE-REF). LOWERED 48 -> 47 by #451 (a deliberate exception to \"a floor may only rise\"): the build no longer emits references/pr/ensure-pr-ready.md (ensure-pr-ready is a tracker operation with one reference per provider, D-OP-ONE-REF), so the manifest it counts lost that one file and no operation lost a reference. Old value 48; accepted by the user 2026-10-12 as a retire-and-re-register of the count."
     },
     {
+      "id": "installed-reference-count-compliance-off",
+      "floor": 30,
+      "pattern": "const INSTALLED_REFS_COMPLIANCE_OFF = 30;",
+      "occurrences": 1,
+      "sourceFile": "tests/mds-variants.test.ts",
+      "description": "Reference files a COMPLIANCE-OFF install carries (#648, AC-49). installed-reference-count-github and installed-reference-count-provider stay on the compliance-ON install at 47. The compliance-off install omits the 16 posting operation files (4 pr/ files and 12 tracker files) and the publication-gate document, so 30 = 47 - 17, measured 2026-10-28 from installedReferenceManifest({ compliance: false }). A floor may only rise: a new kept reference raises it."
+    },
+    {
       "id": "git-agent-remote-io-ops",
       "floor": 16,
       "pattern": "toBeGreaterThanOrEqual(16); // floor: git-agent-remote-io-ops",
