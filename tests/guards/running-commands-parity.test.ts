@@ -33,8 +33,10 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'fs'
+import { mkdtempSync, readFileSync, rmSync } from 'fs'
+import * as os from 'os'
 import * as path from 'path'
+import { spawnSync } from 'child_process'
 import { ROOT, collectUnfencedH2, requireDistFile, resolveAgentSource } from '../helpers.js'
 
 const BLOCK_HEADING = '## Running commands'
@@ -71,8 +73,9 @@ const ELEMENTS: ReadonlyArray<{ label: string; marker: string }> = [
   { label: '(a) foreground with an explicit Bash timeout', marker: 'in the foreground, each with an explicit Bash `timeout`' },
   { label: '(a) the ceiling and its override', marker: '`BASH_MAX_TIMEOUT_MS`' },
   { label: '(a) the ceiling is read, not assumed', marker: 'echo ${BASH_MAX_TIMEOUT_MS:-600000}' },
-  { label: '(b) capture, then tail, in one call, printing the log path a BLOCKED report names', marker: 'LOG=$(mktemp); echo "LOG=$LOG"; <command> >"$LOG" 2>&1; rc=$?; tail -n 40 "$LOG"; echo "EXIT=$rc"' },
-  { label: '(b) the printed EXIT value is the result', marker: 'never decide one from a grep count' },
+  { label: '(b) capture, then tail, in one call, printing the log path a BLOCKED report names, and the exit on a line of its own', marker: 'LOG=$(mktemp); echo "LOG=$LOG"; <command> >"$LOG" 2>&1; rc=$?; tail -n 40 "$LOG"; printf \'\\nEXIT=%s\\n\' "$rc"' },
+  { label: '(b) the last EXIT= line is the result', marker: 'The last `EXIT=` line is the result' },
+  { label: '(b) a result is never decided from a grep count', marker: 'never decide one from a grep count' },
   { label: '(c) never background a build or test', marker: 'Never background a build or test' },
   { label: '(c) never poll across turns', marker: 'never poll across turns' },
   { label: '(d) the scoped command', marker: 'Prefer the scoped command for the change' },
@@ -237,6 +240,29 @@ function collectTestAddendumDefects(test: string): string[] {
   return defects
 }
 
+/** The shipped capture form: the code span of the block's capture line, or null when the line is gone. */
+function captureFormOf(block: string): string | null {
+  return /^- Capture, then tail, in one Bash call: `([^`]+)`/m.exec(block)?.[1] ?? null
+}
+
+/** Only these ends of a run's stdout matter to the test, so the child gets a bounded wait. */
+const CAPTURE_RUN_TIMEOUT_MS = 20_000
+
+/**
+ * Run the capture form in bash with `command` in place of its `<command>` slot, and return the lines it prints.
+ * The form's `mktemp` writes to `scratch`, because the child's `TMPDIR` is `scratch`.
+ */
+function runCaptureForm(form: string, command: string, scratch: string): string[] {
+  const script = form.replace('<command>', () => command)
+  const run = spawnSync('bash', ['-c', script], {
+    encoding: 'utf-8',
+    env: { PATH: process.env.PATH, TMPDIR: scratch },
+    timeout: CAPTURE_RUN_TIMEOUT_MS,
+  })
+  expect(run.error, 'the capture form ran to its end').toBeUndefined()
+  return run.stdout.split('\n')
+}
+
 const carriers = (): Record<string, string> =>
   Object.fromEntries(CARRIERS.map(name => [name, resolveAgentSource(name).content]))
 
@@ -282,6 +308,18 @@ describe('D-FOREGROUND-RUN: the Running commands block', () => {
 
   it('test.md puts the dev server in a section of its own after the block, and names Monitor nowhere else', () => {
     expect(collectTestAddendumDefects(carriers().test)).toEqual([])
+  })
+
+  it('the capture form prints the run\'s own exit on a line of its own when the log ends mid-line after an earlier bare EXIT=0 line', () => {
+    const form = captureFormOf(collectBlocks(carriers().code)[0])
+    expect(form, 'the block carries a capture line').not.toBeNull()
+    const scratch = mkdtempSync(path.join(os.tmpdir(), 'running-commands-capture-'))
+    try {
+      const lines = runCaptureForm(form ?? '', "( printf 'EXIT=0\\nstopped mid-line'; exit 3 )", scratch)
+      expect(lines.filter(line => line.startsWith('EXIT=')).at(-1)).toBe('EXIT=3')
+    } finally {
+      rmSync(scratch, { recursive: true, force: true })
+    }
   })
 
   it('known-bad probe: a one-character divergence in a synthetic copy fails the parity check', () => {

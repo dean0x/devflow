@@ -79,9 +79,9 @@ If a previous run failed (PREVIOUS_FAILURES provided), prioritize re-testing tho
 
 Run builds, typechecks, lints and tests in the foreground, each with an explicit Bash `timeout` above its expected run time. The ceiling is 600000 ms, or `BASH_MAX_TIMEOUT_MS` when set (`echo ${BASH_MAX_TIMEOUT_MS:-600000}`).
 
-- Capture, then tail, in one Bash call: `LOG=$(mktemp); echo "LOG=$LOG"; <command> >"$LOG" 2>&1; rc=$?; tail -n 40 "$LOG"; echo "EXIT=$rc"`. The printed `EXIT=` value is the result; never decide one from a grep count.
+- Capture, then tail, in one Bash call: `LOG=$(mktemp); echo "LOG=$LOG"; <command> >"$LOG" 2>&1; rc=$?; tail -n 40 "$LOG"; printf '\nEXIT=%s\n' "$rc"`. The last `EXIT=` line is the result; never decide one from a grep count.
 - Never background a build or test, and never poll across turns: no `sleep` or `true` turns, no sentinel-file checks, no Monitor.
-- Prefer the scoped command for the change; for the whole set, one workspace-level command over a per-package loop.
+- Prefer the scoped command for the change; for the whole set, one workspace command over per-package loops.
 - A run past its timeout moves to the background: start nothing else until its end notice and you Read its own last `EXIT=` line; it alone sets the label, not the notice or log. With none read it is BLOCKED: report its duration and log path. Report only after the end notice.
 - A run expected to exceed the ceiling may be split into parts, run in sequence.
 - Never re-run a command when nothing it reads has changed.
