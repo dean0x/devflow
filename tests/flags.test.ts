@@ -979,8 +979,8 @@ describe('goal-checkin-minutes flag', () => {
 /**
  * D-FOREGROUND-RUN. The "Running commands" block tells every agent to run builds
  * and tests in the foreground under an explicit Bash timeout whose ceiling is
- * 600000 ms, or the value of BASH_MAX_TIMEOUT_MS when set. This flag is the
- * remedy the block names for a suite that cannot be split under the default.
+ * 600000 ms, or the value of BASH_MAX_TIMEOUT_MS when set. A run past it is
+ * waited for and read, so this flag is optional: it lets a long run end in one call.
  */
 describe('bash-max-timeout-ms flag', () => {
   const flag = (): NumberFlagDef =>

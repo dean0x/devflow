@@ -308,13 +308,14 @@ const BLOCKED_DEFINITION = 'BLOCKED: no validation command found, a table comman
 const BLOCKED_DEFINITION_LOST = 'the Boundaries section lost: the BLOCKED definition of a table command that cannot start or with no `EXIT=` line read'
 
 /**
- * The `## Boundaries` section holds the BLOCKED definition. The body clauses read only `## Validation Order`, so
- * this section has its own pin, and a body with no such section is reported too.
+ * The `## Boundaries` section holds the BLOCKED definition as one whole line, so a clause appended to it is reported.
+ * The body clauses read only `## Validation Order`, so this section has its own pin, and a body with no such section
+ * is reported too.
  */
 function collectBoundaryDefects(body: string): string[] {
   const boundaries = sectionBetween(body, '\n## Boundaries\n', null)
   if (boundaries === null) return ['the body has no `## Boundaries` section']
-  return boundaries.includes(BLOCKED_DEFINITION) ? [] : [BLOCKED_DEFINITION_LOST]
+  return boundaries.split('\n').includes(BLOCKED_DEFINITION) ? [] : [BLOCKED_DEFINITION_LOST]
 }
 
 /** The reference the body names, its text, and the SKILL.md row that lists it. */
@@ -720,6 +721,7 @@ describe('the Validate body re-runs each failed test file alone and labels it', 
     expect(withBody(BODY)).toEqual([])
     expect(withBody(seed(BODY, ' or with no `EXIT=` line read', ''))).toEqual([BLOCKED_DEFINITION_LOST])
     expect(withBody(seed(BODY, 'a table command that cannot start or with', 'a table command that cannot start, or with'))).toEqual([BLOCKED_DEFINITION_LOST])
+    expect(withBody(seed(BODY, 'or missing dependencies.', 'or missing dependencies. A run past its timeout is BLOCKED too.'))).toEqual([BLOCKED_DEFINITION_LOST])
     expect(withBody(seed(BODY, '\n## Boundaries\n', '\n## Limits\n'))).toEqual(['the body has no `## Boundaries` section'])
   })
 

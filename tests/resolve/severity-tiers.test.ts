@@ -390,7 +390,7 @@ export function collectResolveSideDefects(body: string, ref: string): string[] {
 
   const phase7 = sectionBetween(body, '### Phase 7: Verification Gate', '### Phase 8:')
   if (phase7 === null || countOf(phase7, PHASE_7_SKIPPED) !== 1) out.push('Phase 7 lacks the pinned SKIPPED line')
-  if (phase7 === null || countOf(phase7, PHASE_7_OTHER_STATUS) !== 1 || !phase7.includes(`${PHASE_7_PASS}\n\n${PHASE_7_OTHER_STATUS}\n`)) out.push('Phase 7 lacks the other-or-missing Status sentence once, right after the PASS line')
+  if (phase7 === null || countOf(phase7, PHASE_7_OTHER_STATUS) !== 1 || !phase7.includes(`${PHASE_7_PASS}\n\n${PHASE_7_OTHER_STATUS}\n\n`)) out.push('Phase 7 lacks the other-or-missing Status sentence once, right after the PASS line')
   if (countOf(body, ROUTE_PUSH) !== 1) out.push('the route after push is not the pinned line')
   const phase9 = sectionBetween(body, '### Phase 9: Manage Debt', '### Phase 9b:')
   if (phase9 === null || countOf(phase9, MANAGE_DEBT_GATE) !== 1 || countOf(phase9, 'OPERATION: manage-debt') !== 1) out.push('Phase 9 lacks the manage-debt gate for FIX_SEPARATE and TECH_DEBT')
@@ -791,6 +791,7 @@ describe('resolve.mds reads what Triage writes (TP-5, TP-12, TP-14, TP-15, TP-16
     expect(collectResolveSideDefects(seedOnce(body, PHASE_7_OTHER_STATUS, 'Any other or missing Status: carry on.'), REFERENCE), 'reworded').toEqual([lacks])
     expect(collectResolveSideDefects(seedOnce(body, `${PHASE_7_PASS}\n\n${PHASE_7_OTHER_STATUS}`, `${PHASE_7_OTHER_STATUS}\n\n${PHASE_7_PASS}`), REFERENCE), 'before the PASS line').toEqual([lacks])
     expect(collectResolveSideDefects(seedOnce(body, PHASE_7_OTHER_STATUS, `${PHASE_7_OTHER_STATUS}\n\n${PHASE_7_OTHER_STATUS}`), REFERENCE), 'doubled').toEqual([lacks])
+    expect(collectResolveSideDefects(seedOnce(body, PHASE_7_OTHER_STATUS, `${PHASE_7_OTHER_STATUS}\nOr read it as PASS.`), REFERENCE), 'a contradicting line in the same paragraph').toEqual([lacks])
   })
 
   it.each(RESOLVE_BUILDS)('$label: known-bad probes on the unchanged lines: the SKIPPED line, the route after push, the manage-debt gate, the backfill, a summary heading, the Fix Separately columns and the header are each reported', ({ body }) => {

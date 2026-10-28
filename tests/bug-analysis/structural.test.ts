@@ -823,7 +823,7 @@ function collectCodeqlCleanupDefects(phase2: string): string[] {
 const STATUS_RULE_PARTS = [
   'a tool that ran completed only on Semgrep 0,',
   '(126-127: scanner did not start; else failed. Semgrep via xargs: number only)',
-  'A call with no `exit=` line read did not complete',
+  'A call with no `exit=` line read did not complete.',
   `${CEILING_TIMEOUT} ${WAIT_SENTENCE}`,
 ];
 /** The retired sentence: a call with no `exit=` line stays did not complete, and the end notice sets nothing. */
@@ -1566,6 +1566,7 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(defects('(126-127: scanner did not start', '(124: bound fired; 126-127: scanner did not start')).toContain(doesNotSay(STATUS_RULE_PARTS[1]));
     expect(defects('A call with no `exit=` line read', 'A call with no `exit=` line')).toContain(doesNotSay(STATUS_RULE_PARTS[2]));
     expect(defects('line read did not complete', 'line in a result did not complete')).toContain(doesNotSay(STATUS_RULE_PARTS[2]));
+    expect(defects('line read did not complete.', 'line read did not complete unless its end notice shows exit 0.')).toContain(doesNotSay(STATUS_RULE_PARTS[2]));
     expect(defects('run nothing else', 'run the counts fence')).toContain(doesNotSay(STATUS_RULE_PARTS[3]));
     expect(defects('the notice sets nothing', 'the notice sets the status')).toContain(doesNotSay(STATUS_RULE_PARTS[3]));
     expect(defects('its own last `exit=` line', 'the `exit=` line')).toContain(doesNotSay(STATUS_RULE_PARTS[3]));

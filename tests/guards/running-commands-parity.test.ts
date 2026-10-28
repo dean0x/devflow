@@ -18,6 +18,9 @@
  *   - a run past its timeout moves to the background and is waited for: only its own last
  *     `EXIT=` line sets the label, and the block names no time bound of devflow's own, apart
  *     from the sentence that states the Bash ceiling;
+ *   - the wait rule is one whole line as written, so a clause added, dropped or negated
+ *     inside it is seen even when every marker stays, and no line keeps the retired
+ *     wording that reported an overrun BLOCKED with no wait;
  *   - the engine's `build_execution_doctrine()` renders the same text, and the
  *     dynamic-build prompt sites name the block instead of copying it;
  *   - test.md's dev-server addendum follows the block as a section of its own and
@@ -46,6 +49,19 @@ const CARRIERS = ['code', 'fix', 'refactor', 'validate', 'test'] as const
 const WAIT_START_MARKER = 'start nothing else until its end notice and you Read its own last `EXIT=` line'
 const WAIT_LABEL_MARKER = 'it alone sets the label, not the notice or log'
 const WAIT_REPORT_MARKER = 'Report only after the end notice.'
+
+/**
+ * The wait rule as one whole line of the block. The markers are substring checks, so a negated, conditioned or
+ * appended clause around them would still pass; this line pin sees it. It also holds the clauses no marker covers:
+ * the move to the background, and BLOCKED only with no `EXIT=` line read.
+ */
+const WAIT_LINE = '- A run past its timeout moves to the background: start nothing else until its end notice and you Read its own last `EXIT=` line; it alone sets the label, not the notice or log. With none read it is BLOCKED: report its duration and log path. Report only after the end notice.'
+
+/** The retired overrun wording: a run past its timeout was BLOCKED with no wait. A line that keeps it contradicts the wait rule. */
+const RETIRED_OVERRUN = ['Do not wait on it', 'exceeds its timeout is BLOCKED', 'background a command and wait on it', 'If it cannot be split, report BLOCKED'] as const
+
+/** The defect for a block whose wait rule is no longer its own whole line as written. */
+const WAIT_LINE_CHANGED = 'the wait rule is not one whole line as written: a clause was added, dropped or changed'
 
 /**
  * The normative elements, one marker each. A marker is a literal the block must
@@ -116,6 +132,12 @@ function collectParityDefects(bodies: Bodies): string[] {
 /** Named collector: normative elements a block no longer states. */
 function collectElementDefects(block: string): string[] {
   return ELEMENTS.filter(e => !block.includes(e.marker)).map(e => `missing ${e.label}`)
+}
+
+/** Named collector: a wait rule that is not its own whole line as written, and each retired overrun phrase a block keeps. */
+function collectWaitLineDefects(block: string): string[] {
+  const defects = block.split('\n').includes(WAIT_LINE) ? [] : [WAIT_LINE_CHANGED]
+  return [...defects, ...RETIRED_OVERRUN.filter(phrase => block.includes(phrase)).map(phrase => `the block still says: ${phrase}`)]
 }
 
 /** The one sentence of the block that names a number with a time unit: the Bash ceiling, which is the call's only limit. */
@@ -235,6 +257,12 @@ describe('D-FOREGROUND-RUN: the Running commands block', () => {
     expect(collectElementDefects(block)).toEqual([])
   })
 
+  it('every carrier holds the wait rule as one whole line, and none keeps the retired overrun wording', () => {
+    const defects = Object.entries(carriers()).flatMap(([name, body]) =>
+      collectBlocks(body).flatMap(block => collectWaitLineDefects(block).map(defect => `${name}: ${defect}`)))
+    expect(defects).toEqual([])
+  })
+
   it('no carrier names a time bound of devflow\'s own, apart from the ceiling sentence', () => {
     const defects = Object.entries(carriers()).flatMap(([name, body]) =>
       collectBlocks(body).flatMap(block => collectBoundDefects(block).map(defect => `${name}: ${defect}`)))
@@ -283,6 +311,29 @@ describe('D-FOREGROUND-RUN: the Running commands block', () => {
     const code = collectBlocks(carriers().code)[0]
     expect(collectElementDefects(code.replace('Never re-run a command when nothing it reads has changed.', ''))).toEqual([
       'missing (g) no re-run without a change',
+    ])
+  })
+
+  it('known-bad probe: a wait line with a negated, conditioned or appended clause, or a retired overrun line, keeps every marker and is still reported', () => {
+    const code = collectBlocks(carriers().code)[0]
+    expect(collectWaitLineDefects(code)).toEqual([])
+    const seeds: ReadonlyArray<readonly [from: string, to: string]> = [
+      ['With none read it is BLOCKED', 'With it read it is BLOCKED'],
+      ['moves to the background:', 'is stopped:'],
+      ['it alone sets the label, not the notice or log.', 'it alone sets the label, not the notice or log, unless the log says otherwise.'],
+      ['Report only after the end notice.', 'Report only after the end notice. Or report BLOCKED at once.'],
+    ]
+    for (const [from, to] of seeds) {
+      const seeded = code.replace(from, to)
+      expect(seeded, `the seed must land: ${from}`).not.toBe(code)
+      expect(collectElementDefects(seeded), to).toEqual([])
+      expect(collectWaitLineDefects(seeded), to).toEqual([WAIT_LINE_CHANGED])
+    }
+    const retired = `${code}\n- A run that exceeds its timeout is BLOCKED: report its duration and log path. Do not wait on it, poll it or re-run it.`
+    expect(collectElementDefects(retired)).toEqual([])
+    expect(collectWaitLineDefects(retired)).toEqual([
+      'the block still says: Do not wait on it',
+      'the block still says: exceeds its timeout is BLOCKED',
     ])
   })
 
