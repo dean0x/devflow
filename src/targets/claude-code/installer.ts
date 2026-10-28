@@ -1484,6 +1484,67 @@ export async function overlayGeneratedReferences(opts: {
 /** The directory inside an installed skill that the reference overlay converges. */
 const SKILL_REFERENCES_DIRNAME = 'references';
 
+/** What stands at `dir`: nothing, a real directory, or anything else (a link, a file, an entry that cannot be inspected). */
+async function directoryState(dir: string): Promise<'absent' | 'real' | 'unusable'> {
+  try {
+    return (await fs.lstat(dir)).isDirectory() ? 'real' : 'unusable';
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'ENOENT' ? 'absent' : 'unusable';
+  }
+}
+
+/** Whether the reference overlay may run below an installed `devflow:git` skill directory. */
+export type ReferencesHostState =
+  /** No skill directory is installed there. */
+  | { readonly kind: 'absent' }
+  /** A real skill directory whose `references` entry is absent or a real directory. */
+  | { readonly kind: 'ready' }
+  /** `path` (the skill directory or its `references` entry) is a link or not a directory. */
+  | { readonly kind: 'refused'; readonly path: string };
+
+/**
+ * Prove, with `lstat`, that the overlay can run below `gitSkillDir`.
+ *
+ * The overlay stages, prunes and sets modes below the `references` entry, and the skill copy
+ * before it writes there too. `mkdir` and `readdir` follow a link, so a link at either level
+ * would send those writes into another directory. An absent entry is fine: the install creates it.
+ * Fail closed: an entry that cannot be inspected is refused, and a link is never repaired,
+ * because the installer did not create it.
+ *
+ * One answer for every caller that has no pre-clean to replace such a link: the converge, and
+ * a partial install. `lstat` runs on `references` only below a real skill directory, since
+ * through a linked one it would follow the link. Never throws.
+ */
+export async function referencesHostState(gitSkillDir: string): Promise<ReferencesHostState> {
+  const skill = await directoryState(gitSkillDir);
+  if (skill === 'absent') return { kind: 'absent' };
+  if (skill === 'unusable') return { kind: 'refused', path: gitSkillDir };
+  const referencesDir = path.join(gitSkillDir, SKILL_REFERENCES_DIRNAME);
+  return (await directoryState(referencesDir)) === 'unusable'
+    ? { kind: 'refused', path: referencesDir }
+    : { kind: 'ready' };
+}
+
+/**
+ * The report of an overlay refused as a whole: one failure per unit, as a refused converged
+ * root reports (D-CONVERGED-ROOT-REAL), each carrying the state the unit was left in.
+ * The classification reads; nothing is written.
+ */
+async function refusedOverlayFailures(
+  refusedPath: string,
+  referencesTarget: string,
+  manifest: readonly string[],
+): Promise<OverlayFailure[]> {
+  const error =
+    `${refusedPath} is not a real directory — nothing is copied, staged, pruned or set through it. ` +
+    `Replace it with a real directory and re-run.`;
+  const failures: OverlayFailure[] = [];
+  for (const unit of planOverlayUnits(manifest)) {
+    failures.push({ unit: unitRef(unit), state: await classifyUntouchedUnit(unit, referencesTarget), error });
+  }
+  return failures;
+}
+
 /**
  * What inside an installed skill directory the reference overlay owns, and the
  * pre-clean must therefore leave standing (D-OVERLAY-OWNERSHIP).
@@ -2505,9 +2566,22 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // convergeVariantAxes, which init runs straight after this call.
   spinner.message('Installing skills...');
   for (const [skillName] of omitCurationGatedSkills(skillsMap, curation)) {
-    const resolved = await resolveSkillSource(skillName, devflowDir);
     const skillTarget = path.join(claudeDir, 'skills', prefixSkillName(skillName));
 
+    // A full install's pre-clean replaced a link at the skill or its references entry. A partial
+    // install has no pre-clean, so the copy and the overlay below would write through such a link
+    // into another directory: the whole skill is refused instead, and reported like a refused overlay.
+    if (isPartialInstall && skillName === SKILL_REFS_SKILL_NAME) {
+      const host = await referencesHostState(skillTarget);
+      if (host.kind === 'refused') {
+        report.overlayFailures.push(
+          ...await refusedOverlayFailures(host.path, path.join(skillTarget, SKILL_REFERENCES_DIRNAME), refsManifest),
+        );
+        continue;
+      }
+    }
+
+    const resolved = await resolveSkillSource(skillName, devflowDir);
     await copyDirectory(resolved.dir, skillTarget);
     if (resolved.shadow === 'valid') {
       report.shadowedSkills.push(skillName);

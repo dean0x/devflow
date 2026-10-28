@@ -14,7 +14,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { removeAllDevFlow } from '../../src/cli/commands/uninstall.js';
-import { installViaFileCopy, type Spinner } from '../../src/targets/claude-code/installer.js';
+import { installViaFileCopy, planOverlayUnits, type Spinner } from '../../src/targets/claude-code/installer.js';
 import { applyVariantToggle, convergeVariantAxes, describePostingLeft, type VariantMachineState } from '../../src/targets/claude-code/curation-install.js';
 import { convergeReferences } from '../../src/targets/claude-code/reference-converge.js';
 import { compiledSkillRefsDir } from '../../src/core/assets.js';
@@ -79,7 +79,7 @@ function machine(compliance: boolean): VariantMachineState {
   return { features: { curation: true, compliance: { enabled: compliance, frameworks: [] }, rules: false } };
 }
 
-function installInto(dir: string, home: string, compliance: boolean) {
+function installInto(dir: string, home: string, compliance: boolean, isPartialInstall = false) {
   return installViaFileCopy({
     curation: true,
     compliance,
@@ -89,7 +89,7 @@ function installInto(dir: string, home: string, compliance: boolean) {
     devflowDir: home,
     skillsMap: SKILLS,
     agentsMap: new Map(),
-    isPartialInstall: false,
+    isPartialInstall,
     spinner: noopSpinner,
     warn,
   });
@@ -300,6 +300,75 @@ describe('the references converge fails closed on the off side', () => {
     expect(await fileMap(elsewhere), 'the linked directory was not converged').toEqual(before);
     expect((await fs.stat(path.join(elsewhere, 'trust-rule.md'))).mode & 0o777, 'no mode was set through the link').toBe(0o600);
     expect((await fs.lstat(installedRefs())).isSymbolicLink(), 'the link itself is left in place').toBe(true);
+  });
+});
+
+describe('a partial install refuses a linked devflow:git folder and writes nothing through it', () => {
+  const GENERATED = 'trust-rule.md';
+  const HAND_AUTHORED = 'detection.md';
+  const STRAY = path.join('pr', 'not-in-the-manifest.md');
+  const MODE_FILE = 'sources.md';
+
+  /** Move an installed folder aside, link its place to it, and make every write an install would do show as a change. */
+  async function linkAway(installed: string, outside: string, refs: string): Promise<void> {
+    await fs.rename(installed, outside);
+    await fs.symlink(outside, installed, 'dir');
+    await fs.writeFile(path.join(refs, GENERATED), 'a generated reference the overlay would rewrite\n', 'utf-8');
+    await fs.writeFile(path.join(refs, HAND_AUTHORED), 'a skill reference the copy would overwrite\n', 'utf-8');
+    await fs.writeFile(path.join(refs, STRAY), 'a file the prune would remove\n', 'utf-8');
+    await fs.chmod(path.join(refs, MODE_FILE), 0o600);
+  }
+
+  async function expectUntouched(outside: string, refs: string, before: { files: Record<string, string>; tree: string[] }): Promise<void> {
+    expect(await fileMap(outside), 'no byte below the link changed').toEqual(before.files);
+    expect(await walk(outside), 'nothing was added below the link, staging residue included').toEqual(before.tree);
+    expect(await exists(path.join(refs, STRAY)), 'the stray file is still there').toBe(true);
+    expect((await fs.stat(path.join(refs, MODE_FILE))).mode & 0o777, 'no mode was set through the link').toBe(0o600);
+  }
+
+  it('a references folder that is a link: every overlay unit is reported refused, and the link and its target are left alone', async () => {
+    await installInto(claudeDir, devflowDir, true);
+    const outside = path.join(tmp, 'outside-refs');
+    await linkAway(installedRefs(), outside, outside);
+    const before = { files: await fileMap(outside), tree: await walk(outside) };
+
+    const report = await installInto(claudeDir, devflowDir, true, true);
+
+    await expectUntouched(outside, outside, before);
+    const units = planOverlayUnits(installedReferenceManifest({ compliance: true }));
+    expect(report.overlayFailures, 'one refusal per overlay unit').toHaveLength(units.length);
+    for (const failure of report.overlayFailures) expect(failure.error).toContain(installedRefs());
+    expect(report.overlaidRefs).toEqual([]);
+    expect(report.unchangedRefs).toEqual([]);
+    expect((await fs.lstat(installedRefs())).isSymbolicLink(), 'the link itself is left in place').toBe(true);
+    expect(await fs.readlink(installedRefs())).toBe(outside);
+  });
+
+  it('a skill folder that is a link: the same refusal, and nothing is copied into the linked folder', async () => {
+    await installInto(claudeDir, devflowDir, true);
+    const outside = path.join(tmp, 'outside-skill');
+    await linkAway(path.join(skillsRoot(), 'devflow:git'), outside, path.join(outside, 'references'));
+    const before = { files: await fileMap(outside), tree: await walk(outside) };
+
+    const report = await installInto(claudeDir, devflowDir, true, true);
+
+    await expectUntouched(outside, path.join(outside, 'references'), before);
+    expect(report.overlayFailures.length).toBeGreaterThan(0);
+    for (const failure of report.overlayFailures) expect(failure.error).toContain(path.join(skillsRoot(), 'devflow:git'));
+    expect(report.overlaidRefs).toEqual([]);
+    expect((await fs.lstat(path.join(skillsRoot(), 'devflow:git'))).isSymbolicLink(), 'the link itself is left in place').toBe(true);
+  });
+
+  it('over real folders a partial install still converges the references and reports no refusal', async () => {
+    await installInto(claudeDir, devflowDir, true);
+    const generated = path.join(installedRefs(), GENERATED);
+    const installed = await fs.readFile(generated);
+    await fs.writeFile(generated, 'a generated reference the overlay rewrites\n', 'utf-8');
+
+    const report = await installInto(claudeDir, devflowDir, true, true);
+
+    expect(report.overlayFailures).toEqual([]);
+    expect(await fs.readFile(generated)).toEqual(installed);
   });
 });
 

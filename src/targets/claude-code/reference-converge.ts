@@ -18,13 +18,13 @@
  * It acts on a skill that is ALREADY installed. A machine whose plugin selection holds no
  * `devflow:git` has nothing to converge, and that is a clean result. A skill directory, or a
  * `references` directory inside it, that is a link or not a directory is a failure: the overlay
- * would stage, prune and set modes through it. An install empties the skill directory first and
- * so replaces such a link; this converge has no such step, so it refuses instead.
+ * would stage, prune and set modes through it. A full install empties the skill directory first and
+ * so replaces such a link; this converge and a partial install have no such step, so each refuses
+ * instead, on the same proof ({@link referencesHostState}).
  *
  * Never throws. Every failure is a warning and a `failures` entry, and the next step still
  * runs. With compliance off a caller reads `failures` and `stillPosting` and fails closed.
  */
-import { promises as fs } from 'fs';
 import * as path from 'path';
 
 import { skillRefsSourceDir } from '../../core/assets.js';
@@ -32,7 +32,7 @@ import { installedReferenceManifest, SKILL_REFS_SKILL_NAME } from '../../core/md
 import { getPackageRoot } from '../../core/paths.js';
 import { prefixSkillName } from '../../core/plugins.js';
 import { removeComplianceOffFiles, restoreComplianceOffFiles } from './compliance-off-files.js';
-import { overlayGeneratedReferences, overlayUnitLabel, resolveSkillSource } from './installer.js';
+import { overlayGeneratedReferences, overlayUnitLabel, referencesHostState, resolveSkillSource } from './installer.js';
 
 export interface ConvergeReferencesOptions {
   /** Claude Code's config directory (e.g. ~/.claude). Must be absolute. */
@@ -69,16 +69,6 @@ export interface ConvergeReferencesResult {
   unproven: boolean;
 }
 
-/** Whether `dir` is a real directory: `lstat`, so a link to a directory is not one. */
-async function skillDirectoryState(dir: string): Promise<'absent' | 'real' | 'unusable'> {
-  try {
-    const stat = await fs.lstat(dir);
-    return stat.isDirectory() && !stat.isSymbolicLink() ? 'real' : 'unusable';
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === 'ENOENT' ? 'absent' : 'unusable';
-  }
-}
-
 export async function convergeReferences(opts: ConvergeReferencesOptions): Promise<ConvergeReferencesResult> {
   const { claudeDir, devflowDir, compliance, warn } = opts;
   const failures: string[] = [];
@@ -102,20 +92,14 @@ export async function convergeReferences(opts: ConvergeReferencesOptions): Promi
   let rewritten: readonly string[] = [];
   let unproven = false;
 
-  const referencesDir = path.join(gitSkillDir, 'references');
-  const gitSkill = await skillDirectoryState(gitSkillDir);
-  // Checked only below a real skill directory: an lstat through a link would follow it.
-  const referencesState = gitSkill === 'real' ? await skillDirectoryState(referencesDir) : 'absent';
-  if (gitSkill === 'unusable') {
-    fail(`${gitSkillDir} is not a real directory, so the references in it were not converged`);
+  const host = await referencesHostState(gitSkillDir);
+  if (host.kind === 'refused') {
+    fail(`${host.path} is not a real directory, so the references in it were not converged`);
     unproven = true;
-  } else if (referencesState === 'unusable') {
-    fail(`${referencesDir} is not a real directory, so the references in it were not converged`);
-    unproven = true;
-  } else if (gitSkill === 'real') {
+  } else if (host.kind === 'ready') {
     try {
       const overlay = await overlayGeneratedReferences({
-        referencesTarget: referencesDir,
+        referencesTarget: path.join(gitSkillDir, 'references'),
         sourceRoot: skillRefsSourceDir(compliance, root),
         manifest,
         warn,
