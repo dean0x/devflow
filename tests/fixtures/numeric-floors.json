@@ -846,16 +846,16 @@
     },
     {
       "id": "command-dynamic-build-compliance-off-max",
-      "ceiling": 103760,
-      "pattern": "['dynamic-build', 'compliance-off', 103_760],",
+      "ceiling": 103756,
+      "pattern": "['dynamic-build', 'compliance-off', 103_756],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
       "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/dynamic-build.md, the compliance-off build, in bytes. Measured 103,760 at its first build, with no headroom. The rule sets no comparison with the all-on build. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-dynamic-build-both-off-max",
-      "ceiling": 100373,
-      "pattern": "['dynamic-build', 'both-off', 100_373],",
+      "ceiling": 100369,
+      "pattern": "['dynamic-build', 'both-off', 100_369],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
       "description": "D-CMD-SIZE (#648, AC-33): dist/curation-compliance-off/commands/dynamic-build.md, the build with curation and compliance both off, in bytes. Measured 100,373 at its first build, with no headroom. The rule sets no comparison with the other builds. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
@@ -926,16 +926,16 @@
     },
     {
       "id": "command-resolve-compliance-off-max",
-      "ceiling": 45080,
-      "pattern": "['resolve', 'compliance-off', 45_080],",
+      "ceiling": 45076,
+      "pattern": "['resolve', 'compliance-off', 45_076],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
       "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/resolve.md, the compliance-off build, in bytes. Measured 45,080 at its first build, with no headroom. The rule sets no comparison with the all-on build. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-resolve-both-off-max",
-      "ceiling": 41864,
-      "pattern": "['resolve', 'both-off', 41_864],",
+      "ceiling": 41860,
+      "pattern": "['resolve', 'both-off', 41_860],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
       "description": "D-CMD-SIZE (#648, AC-33): dist/curation-compliance-off/commands/resolve.md, the build with curation and compliance both off, in bytes. Measured 41,864 at its first build, with no headroom. The rule sets no comparison with the other builds. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."

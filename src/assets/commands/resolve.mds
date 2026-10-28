@@ -643,7 +643,7 @@ Run the script inline — it is the whole `check-merge-readiness` operation, wit
 cd {worktree} && node "$HOME/.devflow/scripts/verify-evidence.cjs" readiness --pr {pr_number} --require-non-author-approval {REQUIRE_NON_AUTHOR_APPROVAL} --evidence ".devflow/docs/evidence-{branch_slug}.md" --out ".devflow/docs/readiness-{branch_slug}.md"; echo "exit=$?"
 ```
 
-Pass `--require-non-author-approval` the value of `REQUIRE_NON_AUTHOR_APPROVAL`, `true` or `false`. Drop the `--evidence` pair when Phase 9b recorded `SKIPPED (no local evidence file)`: the readiness then takes the plan from the PR's own record. `{pr_number}` is digits only. Its stdout is the `## Merge Readiness` block (exit 0), or the same block with `**Status**: DEGRADED ({reason})` and a `TRACEABILITY: DEGRADED ({reason})` line after it (exit 2); empty stdout or any other exit is `TRACEABILITY: DEGRADED (readiness unavailable)`. The script writes the local file `.devflow/docs/readiness-{branch_slug}.md` and nothing to GitHub.
+Pass `--require-non-author-approval` the value of `REQUIRE_NON_AUTHOR_APPROVAL`, `true` or `false`. Drop the `--evidence` pair when Phase 9b recorded `SKIPPED (no local evidence file)`: the readiness then takes the plan from the PR's own record. `{pr_number}` is digits only. Its stdout is the `## Merge Readiness` block (exit 0), or the same block with `**Status**: DEGRADED ({reason})` and a `TRACEABILITY: DEGRADED ({reason})` line after it (exit 2); empty stdout or any other exit is `TRACEABILITY: DEGRADED (readiness unavailable)`. The script writes the local file (on exit 0 or 2) and nothing to GitHub.
 <!-- compliance:end -->
 
 Include merge readiness verdict (READY / NOT_READY / DEGRADED) and its `- Test plan:` detail line in Phase 10 report. Never block on this result — report-only.
@@ -727,8 +727,8 @@ Final gate: {PASS | FAILED after N attempts}
 
 ### Artifacts
 - Resolution summary: {TARGET_DIR}/resolution-summary.md (local; not posted)
-- Evidence result: .devflow/docs/evidence-result-{branch_slug}.md (local; not posted), when Step 9b-3 ran
-- Readiness file: .devflow/docs/readiness-{branch_slug}.md (local; not posted)
+- Evidence result: {.devflow/docs/evidence-result-{branch_slug}.md (local; not posted) | SKIPPED (reason)}
+- Readiness file: {.devflow/docs/readiness-{branch_slug}.md (local; not posted) | SKIPPED (reason)}
 <!-- compliance:end -->
 ```
 

@@ -2332,7 +2332,8 @@ describe('#421 AC-22: a refused undo halts the wave and names the red integratio
 //   AC-19  Step 7(d) runs the local verify with `evidence-result-wave-<slug>.md`: no publish call,
 //          no publication value, no timeout.
 //   AC-24  Step 7(e) runs readiness with the approval flag, the wave evidence file and the local
-//          readiness file.
+//          readiness file. With no wave test plan or an unusable wave base only (a)-(d) are skipped,
+//          and (e) runs without the evidence file, as the compliance-off /resolve does.
 //
 // The block rules are checked by EXECUTING the shipped wave loop and rendering what step 3 states
 // over its return, then running `check wave --links-only` on it. Every guard has a named collector,
@@ -2409,7 +2410,9 @@ export function collectWaveOffStepDefects(md: string): string[] {
   need('one spawn: the step-6 fence is the only ensure-pr-ready spawn', offsetsOf(md, 'OPERATION: ensure-pr-ready').length === 1)
   const afterWorkflow = section(md, '### After the workflow returns', STEP4) ?? ''
   need('step 2 is gone: step 1 is followed by step 3', /\n1\. Read the wave report[^\n]*\n3\. \*\*Compose the wave PR inputs\*\*/.test(afterWorkflow) && !afterWorkflow.includes('\n2. **'))
-  need('no wave test plan: step 7 skips, and names it', step7.includes('No wave test plan line ⇒ record `Wave evidence: skipped (no wave test plan)`'))
+  need('no wave test plan: step 7 skips (a)-(d) only, and names it', step7.includes('No wave test plan line ⇒ record `Wave evidence: skipped (no wave test plan)` and skip (a)-(d).'))
+  need('wave base unusable: step 7 skips (a)-(d) only', step7.includes('`TRACEABILITY: DEGRADED (wave base unusable)` and skip (a)-(d).'))
+  need('the readiness without a skipped (a)-(d): the evidence pair is dropped', step7.includes('Drop the `--evidence` pair when (a)-(d) were skipped.'))
   need('the push: once, never forced, and a failure verifies anyway',
     step7.includes('push origin HEAD; echo "exit=$?"') && !/--force|\+HEAD|push -f\b/.test(step7) && step7.includes('and verify anyway'))
   need('the verify: one inline call with the wave evidence file and the local result file',
@@ -2439,12 +2442,15 @@ const WAVE_OFF_SEEDS: ReadonlyArray<readonly [site: string, from: string, to: st
   ['the ask', 'It references {n} linked tickets.', 'It links {n} merged tickets.'],
   ['the spawn', 'PR_WAVE_BLOCK: {PR_WAVE_BLOCK verbatim, or (none)}"', 'PR_WAVE_BLOCK: {PR_WAVE_BLOCK verbatim}\n   PR_TEST_PLAN_BLOCK: {PR_TEST_PLAN_BLOCK verbatim, or (none)}"'],
   ['no wave test plan', 'No wave test plan line ⇒ record `Wave evidence: skipped (no wave test plan)`', 'No wave test plan line ⇒ go on'],
+  ['no wave test plan', '`Wave evidence: skipped (no wave test plan)` and skip (a)-(d).', '`Wave evidence: skipped (no wave test plan)` and skip it.'],
+  ['wave base unusable', '`TRACEABILITY: DEGRADED (wave base unusable)` and skip (a)-(d).', '`TRACEABILITY: DEGRADED (wave base unusable)` and skip this step.'],
+  ['the readiness without a skipped (a)-(d)', ' Drop the `--evidence` pair when (a)-(d) were skipped.', ''],
   ['the push', 'push origin HEAD; echo', 'push --force origin HEAD; echo'],
   ['the verify', `--comment-out "${WAVE_RESULT_PATH}"`, '--publication auto'],
   ['the result path', `Evidence result: ${WAVE_RESULT_PATH} (local; not posted)`, `Evidence result: ${WAVE_RESULT_PATH}`],
   ['the readiness', `--out "${WAVE_READINESS_PATH}"`, ''],
   ['the readiness path', `Readiness: ${WAVE_READINESS_PATH} (local; not posted)`, 'Readiness: posted'],
-  ['no timeout in step 7', 'The script writes the local file and nothing to GitHub.', 'The script writes the local file and nothing to GitHub. Use the Bash tool with `timeout: 180000`.'],
+  ['no timeout in step 7', 'Whatever it returns, the run ends here.', 'Whatever it returns, the run ends here. Use the Bash tool with `timeout: 180000`.'],
 ]
 
 describe('#648 AC-13, AC-15, AC-19, AC-24: the compliance-off builds of /dynamic-build keep the wave local', () => {
@@ -2470,7 +2476,7 @@ describe('#648 AC-13, AC-15, AC-19, AC-24: the compliance-off builds of /dynamic
     expect(collectWaveOffStepDefects('no steps'), 'a missing step set is one defect').toHaveLength(1)
     const clean = collectWaveOffStepDefects(dynamicBuildOff('compliance-off'))
     expect(clean).toEqual([])
-    expect(WAVE_OFF_SEEDS.map(s => s[0])).toHaveLength(18)
+    expect(WAVE_OFF_SEEDS.map(s => s[0])).toHaveLength(21)
   })
 
   for (const [site, from, to] of WAVE_OFF_SEEDS) {

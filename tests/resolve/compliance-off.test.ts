@@ -127,6 +127,7 @@ function collectReadinessDefects(md: string): string[] {
   if (/Run this phase only when/.test(phase)) out.push('the phase is still gated on the approval value')
   if (!phase.includes(`Drop the \`--evidence\` pair when Phase 9b recorded \`${NO_FILE}\``)) out.push('the evidence flag is not dropped when no local evidence file exists')
   if (!phase.includes('nothing to GitHub')) out.push('the phase does not say it writes nothing to GitHub')
+  if (!phase.includes('The script writes the local file (on exit 0 or 2)')) out.push('the phase does not say when the local readiness file is written')
   if (parseFences(phase).some(f => isAgentBlock(f, 'Git'))) out.push('a Git agent is spawned')
   return out
 }
@@ -138,8 +139,8 @@ function collectLocalReportDefects(md: string): string[] {
   const out: string[] = []
   for (const [what, line] of [
     ['the resolution summary', '- Resolution summary: {TARGET_DIR}/resolution-summary.md (local; not posted)'],
-    ['the evidence result', `- Evidence result: ${RESULT_FILE} (local; not posted), when Step 9b-3 ran`],
-    ['the readiness file', `- Readiness file: ${READINESS_FILE} (local; not posted)`],
+    ['the evidence result', `- Evidence result: {${RESULT_FILE} (local; not posted) | SKIPPED (reason)}`],
+    ['the readiness file', `- Readiness file: {${READINESS_FILE} (local; not posted) | SKIPPED (reason)}`],
   ] as const) {
     if (!report.includes(line)) out.push(`the report does not name ${what} as local and not posted`)
   }
@@ -305,7 +306,9 @@ describe('#648 AC-23, AC-18: the compliance-off builds report local files as not
 
   it('known-bad probes: a posted path, a lost Tracked value, a doubled line and an unconditional line are each reported', () => {
     const md = resolveMdOff('compliance-off')
-    expect(collectLocalReportDefects(seedOnce(md, `- Readiness file: ${READINESS_FILE} (local; not posted)`, `- Readiness file: ${READINESS_FILE}`))).toEqual(['the report does not name the readiness file as local and not posted'])
+    expect(collectLocalReportDefects(seedOnce(md, `- Readiness file: {${READINESS_FILE} (local; not posted) | SKIPPED (reason)}`, `- Readiness file: ${READINESS_FILE} (local; not posted)`))).toEqual(['the report does not name the readiness file as local and not posted'])
+    expect(collectLocalReportDefects(seedOnce(md, `- Evidence result: {${RESULT_FILE} (local; not posted) | SKIPPED (reason)}`, `- Evidence result: ${RESULT_FILE} (local; not posted), when Step 9b-3 ran`))).toEqual(['the report does not name the evidence result as local and not posted'])
+    expect(collectReadinessDefects(seedOnce(md, 'The script writes the local file (on exit 0 or 2) and', 'The script writes the local file and'))).toEqual(['the phase does not say when the local readiness file is written'])
     expect(collectLocalReportDefects(seedOnce(md, '(Tracked: local)', '(Tracked: ledger)'))).toEqual(['the deferred line does not state Tracked: local'])
     expect(collectLocalReportDefects(seedOnce(md, 'the `Tracked` value `local`: no backlog entry is created.', 'the `Tracked` value `deferred`.'))).toEqual(['Phase 5 does not set Tracked to local'])
     expect(collectPolicyLineDefects(`${md}\n${OFF_POLICY_LINE}`)[0]).toContain('2 times')
