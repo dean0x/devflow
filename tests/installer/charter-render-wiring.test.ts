@@ -303,6 +303,7 @@ describe('installViaFileCopy: the render is its own step after the script copy',
     const effective = opts.effectivePlugins ?? opts.plugins;
     await installViaFileCopy({
       curation: true,
+      compliance: true,
       plugins: opts.plugins,
       effectivePlugins: effective,
       claudeDir,
