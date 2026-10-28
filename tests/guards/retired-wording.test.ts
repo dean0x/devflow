@@ -558,6 +558,20 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
       'The section now says what the files hold: the active entries in full, then an Inactive table, ' +
       'and claim-due, not a file cap, bounds what one maintenance run reads.',
   },
+  {
+    literal: 'coreutils',
+    // Every tree the corpus reaches EXCEPT CHANGELOG.md, enumerated rather than implied,
+    // for the reason the `close milestone` entry gives: a release note that records the
+    // removal has to name the thing it removed.
+    scope: [
+      'src/assets/', 'src/core/', 'src/cli/', 'src/targets/', 'src/hud/',
+      'dist/', 'docs/', 'CLAUDE.md', 'README.md', 'CONTRIBUTING.md',
+    ],
+    removedFrom: 'src/assets/commands/bug-analysis.mds',
+    justification:
+      'devflow puts no time limit on scanner calls, so no text tells the user to install a ' +
+      'time-limit tool.',
+  },
 ];
 
 // ---------------------------------------------------------------------------

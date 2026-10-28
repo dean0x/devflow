@@ -486,11 +486,11 @@
     },
     {
       "id": "synthesize-mode-ref-max",
-      "ceiling": 3805,
-      "pattern": "const SYNTHESIZE_MODE_REF_MAX_BYTES = 3_805",
+      "ceiling": 3797,
+      "pattern": "const SYNTHESIZE_MODE_REF_MAX_BYTES = 3_797",
       "occurrences": 1,
       "sourceFile": "tests/guards/agent-references.test.ts",
-      "description": "D-MODE-BY-PATH: the largest single Synthesize mode reference, references/synthesize/{mode}.md of the agent-references skill, in bytes. Review is the largest at 3,805 (its template, its merge rules and the review-only inputs). A spawn loads the body plus exactly one of these. May be LOWERED, never raised."
+      "description": "D-MODE-BY-PATH: the largest single Synthesize mode reference, references/synthesize/{mode}.md of the agent-references skill, in bytes. Review is the largest at 3,797 (its template, its merge rules and the review-only inputs); Bug Analysis follows at 3,643 with the STATIC_STATUS input and its rules. A spawn loads the body plus exactly one of these. May be LOWERED, never raised."
     },
     {
       "id": "code-review-levels-ref-max",
@@ -574,35 +574,35 @@
     },
     {
       "id": "validate-body-max",
-      "ceiling": 6010,
-      "pattern": "const VALIDATE_BODY_MAX_BYTES = 6_010",
+      "ceiling": 6003,
+      "pattern": "const VALIDATE_BODY_MAX_BYTES = 6_003",
       "occurrences": 1,
       "sourceFile": "tests/guards/validate-lint-pack.test.ts",
-      "description": "The Validate agent body, src/assets/agents/validate.md, in bytes. It is hand-authored. The lean lint-pack wiring and the per-file passed-alone re-run rule (the re-run sentence, the Read line with its conditions, and the Passed alone: line) are funded with named cuts in the same body; it measures 6,010 at #477, with no headroom. May be LOWERED, never raised: a later addition funds itself with a cut."
+      "description": "The Validate agent body, src/assets/agents/validate.md, in bytes. It is hand-authored. The lean lint-pack wiring and the per-file passed-alone re-run rule (the re-run sentence, the Read line with its conditions, and the Passed alone: line) are funded with named cuts in the same body; it measures 6,003 at #666, with no headroom. May be LOWERED, never raised: a later addition funds itself with a cut."
     },
     {
       "id": "validate-passed-alone-ref-max",
-      "ceiling": 3424,
-      "pattern": "const VALIDATE_PASSED_ALONE_REF_MAX_BYTES = 3_424",
+      "ceiling": 3421,
+      "pattern": "const VALIDATE_PASSED_ALONE_REF_MAX_BYTES = 3_421",
       "occurrences": 1,
       "sourceFile": "tests/guards/agent-references.test.ts",
-      "description": "references/validate/passed-alone.md of the agent-references skill, in bytes. Validate reads it once per run, after a failed Test row, so it is standing context on that path only. Measured 3,424 at #664, with no headroom. May be LOWERED, never raised."
+      "description": "references/validate/passed-alone.md of the agent-references skill, in bytes. Validate reads it once per run, after a failed Test row, so it is standing context on that path only. Measured 3,421 at #666, with no headroom. May be LOWERED, never raised."
     },
     {
       "id": "command-bug-analysis-max",
-      "ceiling": 24644,
-      "pattern": "['bug-analysis', 'on', 24_644],",
+      "ceiling": 24452,
+      "pattern": "['bug-analysis', 'on', 24_452],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/bug-analysis.md, the curation-on build, in bytes. Measured 24,644 after #561, with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/commands/bug-analysis.md, the curation-on build, in bytes. Measured 24,452 at #652, with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-bug-analysis-curation-off-max",
-      "ceiling": 20734,
-      "pattern": "['bug-analysis', 'off', 20_734],",
+      "ceiling": 20634,
+      "pattern": "['bug-analysis', 'off', 20_634],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/curation-off/commands/bug-analysis.md, the curation-off build, in bytes. Measured 20,734 after #561, with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/curation-off/commands/bug-analysis.md, the curation-off build, in bytes. Measured 20,634 at #652, with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-code-review-max",
@@ -814,19 +814,19 @@
     },
     {
       "id": "command-bug-analysis-compliance-off-max",
-      "ceiling": 24107,
-      "pattern": "['bug-analysis', 'compliance-off', 24_107],",
+      "ceiling": 23921,
+      "pattern": "['bug-analysis', 'compliance-off', 23_921],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/bug-analysis.md, the compliance-off build, in bytes. Measured 24,107 at its first build, with no headroom. The rule sets no comparison with the all-on build. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/bug-analysis.md, the compliance-off build, in bytes. Measured 23,921 at #652 (24,107 at its first build), with no headroom. The rule sets no comparison with the all-on build. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-bug-analysis-both-off-max",
-      "ceiling": 20203,
-      "pattern": "['bug-analysis', 'both-off', 20_203],",
+      "ceiling": 20103,
+      "pattern": "['bug-analysis', 'both-off', 20_103],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE (#648, AC-33): dist/curation-compliance-off/commands/bug-analysis.md, the build with curation and compliance both off, in bytes. Measured 20,203 at its first build, with no headroom. The rule sets no comparison with the other builds. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE (#648, AC-33): dist/curation-compliance-off/commands/bug-analysis.md, the build with curation and compliance both off, in bytes. Measured 20,103 at #652 (20,203 at its first build), with no headroom. The rule sets no comparison with the other builds. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-code-review-compliance-off-max",

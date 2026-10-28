@@ -59,10 +59,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The step note names `/resolve` with the other commands that read the level.
   - The full effect of each level stays in `devflow gates` and in the docs.
 - **`/bug-analysis` no longer reports "no findings" when static analysis could not run** ([#649](https://github.com/dean0x/devflow/issues/649)).
-  - Without GNU `timeout` or `gtimeout` (stock macOS), it runs no scanner and says so. Install coreutils to enable it.
-  - A scanner that fails, times out or exits with an error is named in the report with its exit status.
-  - Each scanner's time bound ends before its Bash call does, and file names reach the scanners safely.
+  - When no scanner is installed, it says that static analysis did not run. It no longer reports "no findings" for a run that scanned nothing.
+  - A scanner that fails, does not finish or exits with an error is named in the report with its exit status, or says that it had none.
+  - File names with spaces or other unusual characters reach the scanners whole.
   - Semgrep and Snyk now run one after the other.
+- **`/bug-analysis` keeps its head marker when static analysis did not cover the commits, and a long scanner result no longer hides findings** ([#652](https://github.com/dean0x/devflow/issues/652), [#661](https://github.com/dean0x/devflow/issues/661)).
+  - The marker moves only when every tool that was to run completed, or `--no-static` is set. Otherwise the report keeps the marker and names the way out: fix the tool, or run with `--no-static`. The next run then covers the same commits again.
+  - The report shows a status for each tool: completed, not installed, not needed (CodeQL only), no supported language (CodeQL, or Snyk when it finds no supported file), or did not complete with the reason. The summary takes this status from the command, not from the text of a file.
+  - Each scanner writes its SARIF to a file, and the session reads counts and a table of the top 50 findings. A long result no longer hides a finding or the exit line. Every finding is saved to a table in the run folder.
+  - Snyk keeps each result for a changed file. If its filter fails, the report says so and uses the unfiltered result.
+  - CodeQL scans one language, chosen from the changed files: JavaScript or TypeScript, Python, or Ruby. With none of them, the report says that CodeQL had no supported language.
+  - Each Semgrep, Snyk and CodeQL call has its Bash timeout at the ceiling: 600000 ms, or `BASH_MAX_TIMEOUT_MS` when set. Devflow sets no time limit of its own on a scanner. A call that reaches the Bash limit counts as not complete.
 - **The orchestrator charter names only installed workflows and routes to more agents.**
   - The charter now names only the workflows that you installed, and it names the Fix agent only when it is installed.
   - It routes to the Test, Evaluate, Harden and Synthesize agents. It routes to the Knowledge agent only when you ask for a new knowledge base. It names the `devflow:bug-analysis` workflow.
@@ -72,7 +79,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `devflow uninstall --plugin` removes the plan-handoff marker when it removes implement. It does this also when the manifest has no record of the install.
   - `devflow uninstall --plugin` also drops a manifest record that holds the old name of the removed plugin.
   - Run `devflow init` after you update to refresh the charter.
-- **The CI wait and the Validate re-runs no longer stop too early** ([#664](https://github.com/dean0x/devflow/issues/664)). The CI wait waits for CI to start until its 570 s limit, not only 90 s, so a repository with no CI now waits 570 s before the wait reports no CI. When a pull request has only external checks and the repository has no workflow file, the wait ends at once. The CI gates of `/implement` and `/resolve` do not wait again after a full 570 s wait that ends with a head mismatch or no workflow check, so one gate waits at most about 3 x 570 s (28.5 minutes), and only when CI keeps running or its status stays unknown for another cause. Validate waits up to 600 s for each failed test file that it re-runs alone, not 120 s, so the worst case is 200 minutes for each Validate run.
+- **The CI wait and the Validate re-runs no longer stop too early** ([#664](https://github.com/dean0x/devflow/issues/664)). The CI wait waits for CI to start until its 570 s limit, not only 90 s, so a repository with no CI now waits 570 s before the wait reports no CI. When a pull request has only external checks and the repository has no workflow file, the wait ends at once. The CI gates of `/implement` and `/resolve` do not wait again after a full 570 s wait that ends with a head mismatch or no workflow check, so one gate waits at most about 3 x 570 s (28.5 minutes), and only when CI keeps running or its status stays unknown for another cause. Validate no longer stops the re-run of a failed test file alone after 120 s.
+- **Validate waits for a long one-file re-run and reads its result** ([#666](https://github.com/dean0x/devflow/issues/666)). When the re-run of one failed test file runs past its Bash timeout, Validate now waits for it to end and reads its result, so the file gets its label from the real result and no test process stays running with nobody to read it. After one such re-run, Validate re-runs no more files, and the other failed files are REAL.
 
 ---
 

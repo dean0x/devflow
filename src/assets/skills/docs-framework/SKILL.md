@@ -37,7 +37,10 @@ All generated documentation lives under `.devflow/docs/` at the checkout's tople
 ├── bug-analysis/{branch-slug}/         # /bug-analysis, per branch
 │   └── {timestamp}/
 │       ├── {focus}.md                 # Debug agent report
-│       ├── static-findings.md         # Raw static analysis tool output
+│       ├── static-findings.md         # Top 50 static findings and the status of each tool
+│       ├── {tool}.sarif               # Scanner SARIF file (semgrep, snyk, codeql); snyk-all.json is Snyk before its scope filter, changed.z the changed names for that filter
+│       ├── codeql.log                 # CodeQL output, kept out of the call output
+│       ├── findings.tsv               # Every static finding, one row each; findings-{tool}.tsv holds one tool's rows, findings-top.tsv the top 50
 │       ├── bug-analysis-summary.md    # Synthesize agent output
 │       └── resolution-summary.md      # /resolve (evidence.md and stale-plan.md as in reviews)
 ├── research/{topic-slug}/{timestamp}/  # /research
@@ -142,7 +145,7 @@ ensure_docs_dir() { mkdir -p "$(get_docs_root)/.devflow/docs/$1"; }
 ### Who Writes What
 
 - **Reviews**: the Review agents and the Synthesize agent (review mode) write into `reviews/{branch-slug}/{timestamp}/`; `/resolve` adds `resolution-summary.md` (Phase 5); `/code-review` overwrites its `.last-review-head` marker, under the git directory, with the HEAD SHA.
-- **Bug analysis**: the Debug agents and the Synthesize agent (bug-analysis mode) write into `bug-analysis/{branch-slug}/{timestamp}/`; `/bug-analysis` overwrites its `.last-analysis-head` marker, under the git directory, with the HEAD SHA.
+- **Bug analysis**: the Debug agents and the Synthesize agent (bug-analysis mode) write into `bug-analysis/{branch-slug}/{timestamp}/`; the scanner calls write the SARIF files, the changed-name list for the Snyk filter and the CodeQL log, and the counts step writes the findings tables, all into that run folder; `/bug-analysis` overwrites its `.last-analysis-head` marker, under the git directory, with the HEAD SHA only when every tool that was to run completed, or `--no-static` is set.
 - **Research**: the Research agents write `{type}.md`, and the Synthesize agent (research mode) writes `research-summary.md` through `RESEARCH_BASE_DIR`, both into `research/{topic-slug}/{timestamp}/`.
 - **Design**: `/plan` writes the design document; `/dynamic-plan` writes `design/{slug}/{timestamp}/`, `/dynamic-tickets` `tickets/{slug}/{timestamp}/`, `/dynamic-build` `waves/{slug}/{timestamp}/` and `evidence-wave-{slug}.md`.
 - **Handoff and evidence**: `/implement` writes `evidence-{branch-slug}.md`, which stays after the PR, and the handoff file, to which each Code agent appends one phase section and which is deleted once the PR exists.
