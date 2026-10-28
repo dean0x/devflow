@@ -38,7 +38,8 @@ import {
 } from '../../src/targets/claude-code/installer.js';
 import { formatOverlaySummary } from '../../src/cli/commands/install-report.js';
 import { sweepOrphanedReferences, MAX_REFERENCE_SWEEP_DEPTH } from '../../src/core/reference-sweep.js';
-import { compiledSkillRefsDir } from '../../src/core/assets.js';
+import { compiledComplianceOffSkillRefsDir, compiledSkillRefsDir } from '../../src/core/assets.js';
+import { renderVariantManifest } from '../../src/core/curation-variants.js';
 import { DEVFLOW_PLUGINS } from '../../src/core/plugins.js';
 import {
   expandVariants,
@@ -52,6 +53,9 @@ import {
 // ---------------------------------------------------------------------------
 
 const REAL_REFS = compiledSkillRefsDir();
+
+/** The one source root of a compliance-off install (AC-50): a complete tree, never a patch over REAL_REFS. */
+const REAL_OFF_REFS = compiledComplianceOffSkillRefsDir();
 
 const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
 
@@ -1819,5 +1823,276 @@ describe('sweepOrphanedReferences — path-keyed prune collector', () => {
     expect(result.failed[0].name).toBe(tooDeep);
     expect(String(result.failed[0].error)).toContain(tooDeep);
     expect(String(result.failed[0].error)).toContain(String(MAX_REFERENCE_SWEEP_DEPTH));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The compliance-off install (AC-41, AC-50; TP-57, TP-58, TP-68)
+// ---------------------------------------------------------------------------
+
+describe('compliance-off reference install (AC-41, AC-50)', () => {
+  let tmp: string;
+  let claudeDir: string;
+  let devflowDir: string;
+  let warnings: string[];
+
+  const PKG_ROOT_DIRS = ['dist', 'skills', 'git', 'references'] as const;
+  const skillsRoot = (): string => path.join(claudeDir, 'skills');
+  const installedRefs = (): string => path.join(skillsRoot(), 'devflow:git', 'references');
+  const flatFile = (entry: string): string => path.join(skillsRoot(), ...entry.split('/'));
+  const GATE = 'devflow:git/references/publication-gate.md';
+  const POSTING = 'devflow:git/references/github-posting.md';
+  const ASKS = 'devflow:agent-references/references/commands/implement-evidence-asks.md';
+  /** Spelled here, not read from the constant under test: a name the constant loses must fail these tests. */
+  const FLAT_FILES = [GATE, POSTING, ASKS] as const;
+  const CORE = DEVFLOW_PLUGINS.filter(p => p.name === 'devflow-core-skills');
+  const SKILLS = new Map([['git', 'devflow-core-skills'], ['agent-references', 'devflow-core-skills']]);
+
+  /** The generated references the compliance-off manifest drops: the 16 operation files and the publication gate. */
+  const omittedRefs = (): string[] => {
+    const kept = new Set(installedReferenceManifest({ compliance: false }));
+    return generatedReferenceManifest().filter(rel => !kept.has(rel));
+  };
+
+  function install(opts: { compliance: boolean; partial?: boolean; packageRoot?: string }) {
+    return installViaFileCopy({
+      curation: true,
+      compliance: opts.compliance,
+      plugins: [],
+      effectivePlugins: CORE,
+      claudeDir,
+      devflowDir,
+      skillsMap: SKILLS,
+      agentsMap: new Map(),
+      isPartialInstall: opts.partial ?? false,
+      spinner: noopSpinner,
+      packageRoot: opts.packageRoot,
+      warn: (msg) => { warnings.push(msg); },
+    });
+  }
+
+  /** Every file below `dir` as relative path -> base64 bytes, so two trees compare byte for byte. */
+  async function fileMap(dir: string): Promise<Record<string, string>> {
+    const out: Record<string, string> = {};
+    for (const rel of await walkTree(dir)) {
+      if (rel.endsWith('/')) continue;
+      out[rel] = (await fs.readFile(path.join(dir, rel))).toString('base64');
+    }
+    return out;
+  }
+
+  /** The installed references plus the flat file the agent-references skill carries: the surface a compliance switch moves. */
+  async function referenceSurface(): Promise<Record<string, string>> {
+    const surface = await fileMap(installedRefs());
+    const asks = flatFile(ASKS);
+    if (await exists(asks)) surface[`agent-references:${path.basename(asks)}`] = (await fs.readFile(asks)).toString('base64');
+    return surface;
+  }
+
+  async function snapshotDir(dir: string): Promise<Record<string, string>> {
+    return fileMap(dir);
+  }
+
+  beforeEach(async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-off-refs-'));
+    claudeDir = path.join(tmp, 'claude');
+    devflowDir = path.join(tmp, 'devflow');
+    warnings = [];
+    await fs.mkdir(claudeDir, { recursive: true });
+    await fs.mkdir(devflowDir, { recursive: true });
+    await requireBuiltReferences();
+    for (const rel of installedReferenceManifest({ compliance: false })) {
+      await fs.access(abs(REAL_OFF_REFS, rel)).catch(() => {
+        throw new Error(`dist/compliance-off/skills/git/references/${rel} is absent — run \`npm run build\` before this suite.`);
+      });
+    }
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmp, { recursive: true, force: true });
+  });
+
+  it('the omitted references are the 16 operation files and the publication gate', () => {
+    const omitted = omittedRefs();
+    expect(omitted).toHaveLength(17);
+    expect(omitted).toContain('publication-gate.md');
+    expect(omitted.filter(rel => rel !== 'publication-gate.md').every(rel => /^(pr|tracker\/[a-z]+)\//.test(rel))).toBe(true);
+  });
+
+  it('a fresh compliance-off install holds none of the 17 omitted references and none of the 3 flat files (TP-57)', async () => {
+    const report = await install({ compliance: false });
+
+    for (const rel of omittedRefs()) {
+      expect(await exists(abs(installedRefs(), rel)), `${rel} must be absent`).toBe(false);
+    }
+    for (const entry of FLAT_FILES) {
+      expect(await exists(flatFile(entry)), `${entry} must be absent`).toBe(false);
+    }
+    expect(report.overlayFailures).toEqual([]);
+    expect(report.sweepFailures).toEqual([]);
+  });
+
+  it('installs every compliance-off reference byte-equal to the one compliance-off source root, and no other', async () => {
+    const report = await install({ compliance: false });
+
+    const offManifest = installedReferenceManifest({ compliance: false });
+    expect(offManifest).toHaveLength(30);
+    for (const rel of offManifest) {
+      const installed = await fs.readFile(abs(installedRefs(), rel));
+      expect(installed.equals(await fs.readFile(abs(REAL_OFF_REFS, rel))), `${rel} must equal the compliance-off tree`).toBe(true);
+    }
+    expect([...report.overlaidRefs].sort()).toEqual([...offManifest].sort());
+    // A file the two trees spell differently proves the right root was read.
+    const onBytes = await fs.readFile(abs(REAL_REFS, 'decision-markers.md'));
+    expect(onBytes.equals(await fs.readFile(abs(installedRefs(), 'decision-markers.md'))), 'the compliance-on bytes must not be installed').toBe(false);
+    // The hand-authored references of the skill stay.
+    expect(await exists(path.join(installedRefs(), 'github-api.md'))).toBe(true);
+  });
+
+  it('a partial compliance-off install over a compliance-on one removes them: the removal runs after the skill copy', async () => {
+    await install({ compliance: true });
+    expect(await exists(flatFile(ASKS)), 'precondition: the compliance-on install carries the evidence asks').toBe(true);
+    expect(await exists(abs(installedRefs(), 'publication-gate.md')), 'precondition: and the publication gate').toBe(true);
+
+    // Partial: no pre-clean, so only the removal after the skill copy can take them away.
+    const report = await install({ compliance: false, partial: true });
+
+    for (const rel of omittedRefs()) expect(await exists(abs(installedRefs(), rel)), rel).toBe(false);
+    for (const entry of FLAT_FILES) expect(await exists(flatFile(entry)), entry).toBe(false);
+    expect(report.sweepFailures).toEqual([]);
+  });
+
+  it('enabling compliance restores each file byte for byte, equal to a fresh compliance-on install (TP-57)', async () => {
+    await install({ compliance: true });
+    const fresh = await referenceSurface();
+    expect(Object.keys(fresh).length, 'precondition: the compliance-on surface is not empty').toBeGreaterThan(40);
+
+    await install({ compliance: false });
+    expect(Object.keys(await referenceSurface()).length, 'the compliance-off surface is smaller').toBeLessThan(Object.keys(fresh).length);
+    await install({ compliance: true });
+
+    expect(await referenceSurface()).toEqual(fresh);
+    const gate = await fs.readFile(abs(installedRefs(), 'publication-gate.md'));
+    expect(gate.equals(await fs.readFile(abs(REAL_REFS, 'publication-gate.md')))).toBe(true);
+    const asks = await fs.readFile(flatFile(ASKS));
+    expect(asks.equals(await fs.readFile(path.join(compiledSkillRefsDir(), '..', '..', '..', '..', 'src', 'assets', 'skills', 'agent-references', 'references', 'commands', 'implement-evidence-asks.md')))).toBe(true);
+  });
+
+  it('a user file in the references root survives a compliance-off install (TP-58)', async () => {
+    await install({ compliance: true });
+    const mine = path.join(installedRefs(), 'my-own-notes.md');
+    await fs.writeFile(mine, 'a note of mine\n', 'utf-8');
+
+    await install({ compliance: false, partial: true });
+
+    expect(await fs.readFile(mine, 'utf-8')).toBe('a note of mine\n');
+  });
+
+  it('the tracker provider file under the devflow directory is untouched (TP-58)', async () => {
+    const provider = path.join(devflowDir, 'tracker', 'github.md');
+    await fs.mkdir(path.dirname(provider), { recursive: true });
+    await fs.writeFile(provider, '---\nprovider: github\n---\nmy conventions\n', 'utf-8');
+    const before = await snapshotDir(path.join(devflowDir, 'tracker'));
+
+    await install({ compliance: true });
+    await install({ compliance: false });
+    await install({ compliance: false, partial: true });
+
+    expect(await snapshotDir(path.join(devflowDir, 'tracker'))).toEqual(before);
+  });
+
+  it('a link at a removal path is unlinked and its target is untouched (TP-58)', async () => {
+    await install({ compliance: true });
+    const outside = path.join(tmp, 'outside.md');
+    await fs.writeFile(outside, 'foreign bytes\n', 'utf-8');
+    const gate = flatFile(GATE);
+    await fs.rm(gate);
+    await fs.symlink(outside, gate);
+
+    const report = await install({ compliance: false, partial: true });
+
+    expect(await exists(gate), 'the link is gone').toBe(false);
+    expect(await fs.lstat(gate).then(() => true, () => false)).toBe(false);
+    expect(await fs.readFile(outside, 'utf-8'), 'the target is never followed').toBe('foreign bytes\n');
+    expect(report.sweepFailures).toEqual([]);
+  });
+
+  it('a directory at a removal path is refused and reported, and nothing inside it is touched', async () => {
+    await install({ compliance: true });
+    const gate = flatFile(GATE);
+    await fs.rm(gate);
+    await fs.mkdir(gate);
+    await fs.writeFile(path.join(gate, 'inner.md'), 'in the way\n', 'utf-8');
+
+    const report = await install({ compliance: false, partial: true });
+
+    expect(await fs.readFile(path.join(gate, 'inner.md'), 'utf-8')).toBe('in the way\n');
+    expect(report.sweepFailures.map(failure => failure.name)).toEqual([GATE]);
+    expect(report.sweepFailures[0].kind).toBe('reference');
+    expect(String(report.sweepFailures[0].error)).toContain('directory');
+    // The rest of the list is still removed.
+    expect(await exists(flatFile(ASKS))).toBe(false);
+  });
+
+  describe('the one source root (AC-50, TP-68)', () => {
+    let pkg: string;
+    const pkgOffRefs = (): string => path.join(pkg, 'dist', 'compliance-off', 'skills', 'git', 'references');
+
+    /** A package root whose compliance-on tree is complete and carries a sentinel no compliance-off file may hold. */
+    async function seedPackage(): Promise<void> {
+      const onRoot = path.join(pkg, ...PKG_ROOT_DIRS);
+      await stageSource(onRoot, generatedReferenceManifest());
+      await fs.writeFile(abs(onRoot, 'decision-markers.md'), 'ON-TREE-SENTINEL\n', 'utf-8');
+      const rendered = renderVariantManifest([]);
+      if (!rendered.ok) throw new Error('fixture variant manifest refused');
+      await fs.mkdir(path.join(pkg, 'dist'), { recursive: true });
+      await fs.writeFile(path.join(pkg, 'dist', 'variant-axes.json'), rendered.value, 'utf-8');
+    }
+
+    beforeEach(async () => {
+      pkg = path.join(tmp, 'pkg');
+      await seedPackage();
+    });
+
+    it('an absent compliance-off root refuses the install before any reference write, and nothing of the compliance-on tree lands', async () => {
+      await install({ compliance: true });
+      const before = { claude: await fileMap(claudeDir), devflow: await fileMap(devflowDir) };
+
+      const failure = await install({ compliance: false, packageRoot: pkg }).then(() => null, (err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(Error);
+      expect((failure as Error).message).toContain(pkgOffRefs());
+      expect((failure as Error).message).toContain('npm run build:mds');
+      expect({ claude: await fileMap(claudeDir), devflow: await fileMap(devflowDir) }, 'a refused install writes nothing').toEqual(before);
+      expect(await fs.readFile(abs(installedRefs(), 'decision-markers.md'), 'utf-8')).not.toContain('ON-TREE-SENTINEL');
+    });
+
+    it('an absent compliance-off root refuses a first install too: no reference directory is created', async () => {
+      const failure = await install({ compliance: false, packageRoot: pkg }).then(() => null, (err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(Error);
+      expect(await exists(installedRefs())).toBe(false);
+      expect(await walkTree(skillsRoot())).toEqual([]);
+    });
+
+    it('positive control: with the compliance-off root present, the same package installs from it and never reads the compliance-on tree', async () => {
+      for (const rel of installedReferenceManifest({ compliance: false })) {
+        await fs.mkdir(path.dirname(abs(pkgOffRefs(), rel)), { recursive: true });
+        await fs.copyFile(abs(REAL_OFF_REFS, rel), abs(pkgOffRefs(), rel));
+      }
+
+      const report = await install({ compliance: false, packageRoot: pkg });
+
+      expect(report.overlayFailures).toEqual([]);
+      const marker = await fs.readFile(abs(installedRefs(), 'decision-markers.md'));
+      expect(marker.equals(await fs.readFile(abs(REAL_OFF_REFS, 'decision-markers.md')))).toBe(true);
+      expect(marker.toString('utf-8')).not.toContain('ON-TREE-SENTINEL');
+    });
+
+    it('compliance on still reads the compliance-on root of the same package', async () => {
+      await install({ compliance: true, packageRoot: pkg });
+
+      expect(await fs.readFile(abs(installedRefs(), 'decision-markers.md'), 'utf-8')).toBe('ON-TREE-SENTINEL\n');
+    });
   });
 });

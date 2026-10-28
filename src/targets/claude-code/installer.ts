@@ -3,7 +3,7 @@ import { existsSync } from 'fs';
 import * as path from 'path';
 import type { PluginDefinition } from '../../core/plugins.js';
 import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, buildAssetMaps, prefixSkillName, unprefixSkillName, getAllSkillNames, getAllAgentNames, getAllCommandNames, FEATURE_OWNED_SKILLS, resolveSkillInstallPlan, omitCurationGatedSkills } from '../../core/plugins.js';
-import { skillsDir, agentSourceDirs, rulesDir, commandSourceDirs, scriptsDir, compiledSkillRefsDir, type AgentSourceDirs, type CommandSourceDirs } from '../../core/assets.js';
+import { skillsDir, agentSourceDirs, rulesDir, commandSourceDirs, scriptsDir, compiledSkillRefsDir, skillRefsSourceDir, type AgentSourceDirs, type CommandSourceDirs } from '../../core/assets.js';
 import { getPackageRoot, isContainedIn } from '../../core/paths.js';
 import {
   ALL_SWITCHES_ON,
@@ -15,6 +15,7 @@ import {
 import { sweepOrphanedAssets, mdFileName, mdEntryName, type SweepResult } from '../../core/orphan-sweep.js';
 import { generatedReferenceManifest, installedReferenceManifest, PR_HOST_DESTINATION_ROOT, SKILL_REFS_SKILL_NAME, TRACKER_DESTINATION_ROOT } from '../../core/mds-variants.js';
 import { sweepOrphanedReferences, MAX_REFERENCE_SWEEP_DEPTH } from '../../core/reference-sweep.js';
+import { removeComplianceOffFiles } from './compliance-off-files.js';
 import { TRACKER_AGENT_NAME } from './tracker-install.js';
 import { isTrackerStampedAgent } from './tracker-servers.js';
 import { stampAgentTools } from '../../core/agent-frontmatter.js';
@@ -1200,7 +1201,7 @@ async function requireGeneratedTree(sourceRoot: string, manifest: readonly strin
     `Generated skill references not found: ${sourceRoot}. ` +
     `The whole generated tree is absent, so none of the ${manifest.length} references the ` +
     `devflow:git agent is instructed to load would be installed. ` +
-    `Run \`npm run build:mds\` to regenerate dist/skills/git/references/ before install ` +
+    `Run \`npm run build:mds\` to regenerate ${sourceRoot} before install ` +
     `(\`npm run build:cli\` alone does not produce it).`,
   );
 }
@@ -1770,13 +1771,19 @@ export interface FileCopyOptions {
    * installs as before. `devflow init` passes the value it has already settled from its
    * flag, prompt and seed, never a raw seed or a repository's narrowing: the variant
    * follows the machine switch alone, and the files and the manifest must agree.
+   *
+   * It also picks the references. false overlays the `devflow:git` references from the one
+   * compliance-off source root onto the compliance-off manifest, REFUSES the install, before
+   * any file is written, when that root is absent (it never falls through to the
+   * compliance-on references), and removes the files of COMPLIANCE_OFF_REMOVED_SKILL_FILES
+   * after the skill copy.
    */
   compliance: boolean;
   /**
-   * Package root the commands, agents and the variant manifest are read from. Injectable
-   * so a test installs from a temp tree instead of the live build state; omitted, it is
-   * the running package. An injected {@link FileCopyOptions.agentSourceDirs} still wins
-   * for the agent lookup.
+   * Package root the commands, agents, the variant manifest and the generated references
+   * are read from. Injectable so a test installs from a temp tree instead of the live
+   * build state; omitted, it is the running package. An injected
+   * {@link FileCopyOptions.agentSourceDirs} still wins for the agent lookup.
    */
   packageRoot?: string;
   /**
@@ -2269,6 +2276,16 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // must leave the installed tree as it found it.
   await requireComplianceVariantFiles({ curation, compliance, packageRoot, agentSourceDirs: options.agentSourceDirs });
 
+  // The references the machine's compliance switch installs: the manifest, and the ONE source
+  // root they are overlaid from. With compliance off the root is the compliance-off tree, and its
+  // absence refuses the install here, before the pre-clean, so a refused install leaves the
+  // installed tree as it found it and never falls through to the compliance-on references (AC-50).
+  const refsManifest = installedReferenceManifest({ compliance });
+  const refsSourceRoot = skillRefsSourceDir(compliance, packageRoot);
+  if (omitCurationGatedSkills(skillsMap, curation).has(SKILL_REFS_SKILL_NAME)) {
+    await requireGeneratedTree(refsSourceRoot, refsManifest);
+  }
+
   const report: InstallReport = {
     shadowedSkills: [],
     shadowedRules: [],
@@ -2387,7 +2404,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // file — including a reference at the references ROOT, which the overlay may replace
   // but never delete (D-OVERLAY-FLAT-UNIT) — does not survive a full install.
   if (!isPartialInstall) {
-    const overlayOwned = overlayOwnedSkillPaths(installedReferenceManifest());
+    const overlayOwned = overlayOwnedSkillPaths(refsManifest);
     for (const skill of skillsMap.keys()) {
       // Empty the prefixed directory (its contents are re-created during the install
       // phase), minus whatever another converger owns inside it.
@@ -2507,13 +2524,27 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
         referencesTarget: path.join(skillTarget, 'references'),
         // Every provider's mechanics (D-INSTALL-ALL-PROVIDERS). The overlay
         // converges rather than merges, so a retired generated document is pruned.
-        manifest: installedReferenceManifest(),
+        // The manifest and the source root follow the machine compliance switch together.
+        sourceRoot: refsSourceRoot,
+        manifest: refsManifest,
         warn,
       });
       report.overlaidRefs.push(...overlay.overlaidRefs);
       report.unchangedRefs.push(...overlay.unchangedRefs);
       report.overlayFailures.push(...overlay.overlayFailures);
       recordSweep(report, 'reference', overlay.pruned);
+    }
+  }
+
+  // With compliance off, the flat skill files that only the posting steps load are removed by
+  // exact name (COMPLIANCE_OFF_REMOVED_SKILL_FILES). After the copy above, which re-creates
+  // two of them, and on every install shape: a partial install copies the skill over a tree that
+  // an earlier compliance-on install filled. A removal that was refused is a reported failure and
+  // never an abort; the compliance converge that init runs next fails closed on the same files.
+  if (!compliance) {
+    const removal = await removeComplianceOffFiles(path.join(claudeDir, 'skills'));
+    for (const refusal of removal.refused) {
+      report.sweepFailures.push({ kind: 'reference', name: refusal.entry, error: refusal.reason });
     }
   }
 
