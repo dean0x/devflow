@@ -19,7 +19,8 @@
  * and skill where the row writes them, plus one surface and nothing wider: the command
  * and agent files of the variant roster (the files under dist/curation-off,
  * dist/compliance-off and dist/curation-compliance-off, the converge's own roster
- * sources) and the curation-gated skill directories. The roster is read from the
+ * sources), the curation-gated skill directories, and the git references the compliance
+ * switch moves (the generated manifest and the removal list, file by file). The roster is read from the
  * build, not typed here, so a new arm is admitted with no edit; it is matched file by
  * file, never as a `commands/**` or `agents/**` subtree, so a stray write to any other
  * agent, command or skill still fails the fence. In a row the surface is the one entry
@@ -45,6 +46,8 @@ import {
   runCliOk, sandboxChildEnv, type Sandbox,
 } from './install-snapshot-helpers.js'
 import { bothOffDir, complianceOffDir, curationOffDir } from '../src/core/assets.js'
+import { COMPLIANCE_OFF_REMOVED_SKILL_FILES } from '../src/core/compliance-off-files.js'
+import { generatedReferenceManifest, SKILL_REFS_SKILL_NAME } from '../src/core/mds-variants.js'
 import { CURATION_GATED_SKILLS, prefixSkillName } from '../src/core/plugins.js'
 import { initCommand } from '../src/cli/commands/init.js'
 import { uninstallCommand } from '../src/cli/commands/uninstall.js'
@@ -137,7 +140,21 @@ function offTreeFiles(dir: string, kind: (typeof PROMPT_VARIANT_KINDS)[number]):
 function promptVariantAllow(): string[] {
   const prompts = PROMPT_VARIANT_KINDS.flatMap(kind => OFF_TREE_DIRS.flatMap(dirOf => offTreeFiles(dirOf(kind), kind)))
   const skills = CURATION_GATED_SKILLS.map(skill => `<HOME>/.claude/skills/${prefixSkillName(skill)}/**`)
-  return [...new Set([...prompts, ...skills])]
+  return [...new Set([...prompts, ...skills, ...referenceVariantAllow()])]
+}
+
+/**
+ * The installed path of every file the compliance switch moves in the skills: each generated
+ * git reference (the compliance-on manifest is the union of both states, so it names every file
+ * an overlay may write or prune) and each skill file of the removal list. Read from the build and
+ * from the one removal constant, file by file, never as a `references/**` subtree, so a stray
+ * write to any other reference or skill file still fails the fence.
+ */
+function referenceVariantAllow(): string[] {
+  const generated = generatedReferenceManifest()
+    .map(rel => `<HOME>/.claude/skills/${prefixSkillName(SKILL_REFS_SKILL_NAME)}/references/${rel}`)
+  const removable = COMPLIANCE_OFF_REMOVED_SKILL_FILES.map(entry => `<HOME>/.claude/skills/${entry}`)
+  return [...generated, ...removable]
 }
 
 const PROMPT_VARIANT_PATHS: readonly string[] = promptVariantAllow()

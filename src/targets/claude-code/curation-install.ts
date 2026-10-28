@@ -118,6 +118,7 @@ import {
 import { convergeFromManifest, type ConvergeComplianceArtifactsResult } from './compliance-install.js';
 import { copyDirectory, resolveSkillSource } from './installer.js';
 import { LANGUAGE_STAMPED_COMMANDS, stampForConverge } from './language-stamp.js';
+import { convergeReferences, type ConvergeReferencesResult } from './reference-converge.js';
 
 // ── Bounds ─────────────────────────────────────────────────────────────────
 
@@ -187,12 +188,14 @@ interface RosterHost {
 }
 
 /**
- * Whether the installed prompts of a compliance-off machine are free of the posting steps.
+ * Whether the installed prompts and references of a compliance-off machine are free of the posting steps.
  *
- *   - `clear`: compliance is on, or every installed compliance-armed prompt holds the file built for the machine.
- *   - `left`: these installed files could not be converged and may still post.
- *   - `unknown`: the build manifest that names the compliance-armed prompts is unusable, so the files that
- *     still post cannot be named.
+ *   - `clear`: compliance is on, or every installed compliance-armed prompt holds the file built for the machine
+ *     and the installed references hold the compliance-off set.
+ *   - `left`: these installed files (prompts, or reference files that could not be removed) could not be
+ *     converged and may still post.
+ *   - `unknown`: the build manifest that names the compliance-armed prompts is unusable, or the references
+ *     could not be converged, so the files that still post cannot be named.
  */
 export type PostingConverge =
   | { readonly kind: 'clear' }
@@ -696,7 +699,9 @@ export interface ConvergeVariantAxesOptions {
 export interface ConvergeVariantAxesResult extends ConvergeCurationVariantsResult {
   /** What the compliance-artifact converge (the skill and the rule) did. */
   compliance: ConvergeComplianceArtifactsResult;
-  /** Whether a compliance-off machine still has installed prompts that post. */
+  /** What the references converge did: the overlay, then the removal list or the restore. */
+  references: ConvergeReferencesResult;
+  /** Whether a compliance-off machine still has installed prompts or references that post. */
   posting: PostingConverge;
 }
 
@@ -717,14 +722,17 @@ async function attempt<T>(label: string, warn: (msg: string) => void, fallback: 
  * The one converge for both switches: it makes the installed tree match the machine's curation
  * and compliance switches. `devflow init`, `devflow curation` and `devflow compliance` all call it.
  *
- * It composes three per-kind converges, each a result and never a throw:
+ * It composes four per-kind converges, each a result and never a throw:
  *   - {@link convergePromptVariants}: the commands and agents, for both axes;
  *   - the apply-decisions skill, which follows the curation switch;
  *   - {@link convergeFromManifest}: the compliance skill and rule, the one place the manifest
- *     becomes compliance options.
+ *     becomes compliance options;
+ *   - {@link convergeReferences}: the `devflow:git` references, which follow the compliance switch
+ *     (the overlay from the one source root of the switch, then the removal list or the restore).
  * A failed kind is a warning and `converged: false`, and the next kind still runs. A compliance-off
- * machine that still has a prompt that posts, or cannot name one, is `posting` and never `clear`: the
- * caller decides what that costs (the compliance command exits non-zero, init and curation warn).
+ * machine that still has a prompt or a reference file that posts, or cannot name one, is `posting`
+ * and never `clear`: the caller decides what that costs (the compliance command exits non-zero,
+ * init and curation warn).
  *
  * Never throws.
  */
@@ -740,6 +748,15 @@ export async function convergeVariantAxes(opts: ConvergeVariantAxesOptions): Pro
       ...notRun(switches, 'the Claude directory is not an absolute path'),
       skill: 'unchanged',
       compliance: { removedPreexisting: false, converged: false },
+      references: {
+        converged: false,
+        rewritten: [],
+        removed: [],
+        restored: [],
+        failures: ['the Claude directory is not an absolute path'],
+        stillPosting: [],
+        unproven: !switches.compliance,
+      },
     };
   }
 
@@ -755,17 +772,55 @@ export async function convergeVariantAxes(opts: ConvergeVariantAxesOptions): Pro
     { removedPreexisting: false, converged: false },
     () => convergeFromManifest({ claudeDir, devflowDir, manifest, warn }),
   );
+  const references = await attempt<ConvergeReferencesResult>(
+    'reference converge',
+    warn,
+    {
+      converged: false,
+      rewritten: [],
+      removed: [],
+      restored: [],
+      failures: ['the reference converge failed'],
+      stillPosting: [],
+      unproven: !switches.compliance,
+    },
+    () => convergeReferences({ claudeDir, devflowDir, compliance: switches.compliance, warn, packageRoot }),
+  );
 
   return {
-    converged: prompts.converged && skill !== 'failed' && compliance.converged,
+    converged: prompts.converged && skill !== 'failed' && compliance.converged && references.converged,
     commandsRewritten: prompts.commandsRewritten,
     agentsRewritten: prompts.agentsRewritten,
     unchanged: prompts.unchanged,
     notInstalled: prompts.notInstalled,
     skill,
     compliance,
-    posting: prompts.posting,
+    references,
+    posting: mergePosting(prompts.posting, referencesPosting(references)),
   };
+}
+
+/**
+ * The posting answer of the references converge. Compliance on, and a converge that finished, are clear.
+ * A failure that left the overlay unproven cannot name the files that post, so it is `unknown`; a failure
+ * that only left named files in place is `left`.
+ */
+function referencesPosting(references: ConvergeReferencesResult): PostingConverge {
+  if (references.unproven) return { kind: 'unknown', reason: `the installed references: ${references.failures.join('; ')}` };
+  if (references.stillPosting.length > 0) return { kind: 'left', files: references.stillPosting };
+  return POSTING_CLEAR;
+}
+
+/**
+ * Join the posting answers of two kinds. `unknown` wins, because a file list that leaves a kind out
+ * would claim more than was proven; two unknowns keep both reasons; two lists join.
+ */
+function mergePosting(a: PostingConverge, b: PostingConverge): PostingConverge {
+  if (a.kind === 'unknown' && b.kind === 'unknown') return { kind: 'unknown', reason: `${a.reason}; ${b.reason}` };
+  if (a.kind === 'unknown') return a;
+  if (b.kind === 'unknown') return b;
+  if (a.kind === 'left' && b.kind === 'left') return { kind: 'left', files: [...a.files, ...b.files] };
+  return a.kind === 'left' ? a : b;
 }
 
 // ── The toggle ─────────────────────────────────────────────────────────────
@@ -785,7 +840,10 @@ export async function readRunningVersion(packageRoot: string = getPackageRoot())
  *
  * The caller prints it only on a toggle: a run that moved nothing says nothing.
  */
-export function describeCurationConverge(result: ConvergeCurationVariantsResult, curation: boolean): string | null {
+export function describeCurationConverge(
+  result: ConvergeCurationVariantsResult & { readonly references?: ConvergeReferencesResult },
+  curation: boolean,
+): string | null {
   return describeVariantConverge(result, 'curation', curation);
 }
 
@@ -793,7 +851,11 @@ export function describeCurationConverge(result: ConvergeCurationVariantsResult,
  * One line for what a converge changed on an axis, or null when it changed nothing: the prompts
  * rewritten for the variant the axis now holds and, for curation, the skill it installed or removed.
  */
-export function describeVariantConverge(result: ConvergeCurationVariantsResult, axis: VariantAxis, enabled: boolean): string | null {
+export function describeVariantConverge(
+  result: ConvergeCurationVariantsResult & { readonly references?: ConvergeReferencesResult },
+  axis: VariantAxis,
+  enabled: boolean,
+): string | null {
   const parts: string[] = [];
   const prompts = result.commandsRewritten.length + result.agentsRewritten.length;
   if (prompts > 0) {
@@ -804,6 +866,12 @@ export function describeVariantConverge(result: ConvergeCurationVariantsResult, 
   }
   if (result.skill === 'installed') parts.push('the apply-decisions skill installed');
   if (result.skill === 'removed') parts.push('the apply-decisions skill removed');
+  const references = result.references;
+  if (references !== undefined) {
+    const changed = references.rewritten.length + references.restored.length;
+    if (changed > 0) parts.push(`${changed} reference file(s) written`);
+    if (references.removed.length > 0) parts.push(`${references.removed.length} reference file(s) removed`);
+  }
   return parts.length === 0 ? null : parts.join('; ');
 }
 
@@ -817,13 +885,13 @@ export function describePostingLeft(posting: PostingConverge): readonly string[]
       return [];
     case 'left':
       return [
-        `${posting.files.length} installed prompt(s) still post: ${posting.files.join(', ')}`,
-        'Run `devflow init` to install the compliance-off prompts.',
+        `${posting.files.length} installed file(s) still post: ${posting.files.join(', ')}`,
+        'Run `devflow init` to install the compliance-off files. If init cannot remove one, delete it by hand.',
       ];
     case 'unknown':
       return [
-        `The installed prompts that still post cannot be named: ${posting.reason}`,
-        'Run `devflow init` to install the compliance-off prompts.',
+        `The installed files that still post cannot be named: ${posting.reason}`,
+        'Run `devflow init` to install the compliance-off files.',
       ];
     default: {
       const unhandled: never = posting;
