@@ -43,6 +43,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **A partial install no longer writes through a linked references folder** ([#648](https://github.com/dean0x/devflow/issues/648)).
   - If the installed `devflow:git` skill folder or its `references` folder is a link, a partial install now writes nothing there. It reports the folder, and you replace it with a real folder and run the install again.
+- **A full install no longer changes files outside its own folder when a skill folder is a link** ([#648](https://github.com/dean0x/devflow/issues/648)).
+  - If an installed skill folder is a link, a full install now removes the link and leaves the linked folder as it is. It then installs the skill into a real folder and reports the link.
 - **The `/implement` self-review (Harden) states that it never reviews a deleted file or the old path of a rename** ([#571](https://github.com/dean0x/devflow/issues/571)).
   - The file list that Harden gets leaves out deleted files and the old path of a rename. The command now says so.
   - When the prompt lists no file, Harden reports `### Status: PASS` with the line `no files reviewed`. An empty list no longer reads as a completed review, because the final report of `/implement` shows the line, at every gate level. When the prompt has no file list at all, Harden finds the branch changes and reviews them, as before.
