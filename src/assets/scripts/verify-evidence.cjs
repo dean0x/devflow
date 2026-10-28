@@ -49,7 +49,16 @@
 //             remote write.
 //             A file an earlier run left at the out path never outlives this run: it
 //             is removed before the first read, and a block that does not parse or a
-//             write that fails leaves no out file
+//             write that fails leaves no out file. The one exception is a path that
+//             git tracks (below), which is left as it is
+// A git-tracked file counts as absent, like a tracked `.devflow/config.json`
+// (D-TRACKED-RESULT). `verify`, `publish` and `readiness` ask git about an `--evidence`
+// file before they read it, and about `--block-out`, `--comment-out`, `--stale-out` and
+// `--out` before they write or remove one. Only a clear "not tracked" answer lets the
+// file be read or written. A tracked `--evidence` file, or one git cannot answer for, is
+// dropped: the run goes on exactly as if `--evidence` was not given, and the stderr
+// summary carries the note `evidence-ignored`. A tracked out path, or one git cannot
+// answer for, is refused as a write failure (exit 3, empty stdout) and left untouched.
 // No byte of a PR body, a comment, a review or a gh/git answer is ever printed: the
 // boundary re-checks every stdout line against these shapes before writing it.
 //
@@ -74,7 +83,8 @@
 //     `require.main === module` boundary is the only stdout write and the only
 //     exitCode assignment
 //   - every subprocess is spawned with an argv array (never a shell), stdin
-//     ignored, a timeout and a maxBuffer; every loop and every API fan-out has a
+//     ignored and a maxBuffer, and every one but the local tracked-file check
+//     (D-TRACKED-RESULT) has a timeout; every loop and every API fan-out has a
 //     fixed bound, and the whole run has a wall-clock deadline
 //   - a revision reaches git only after SHA_RE, so none can start with `-`; `--`
 //     ends the revision list of the one command that takes a pathspec (diff)
@@ -563,12 +573,13 @@ function refusedCall(reason) {
 }
 
 /**
- * One bounded subprocess call, normalized. The argv array is a fresh copy.
+ * One bounded subprocess call, normalized. The argv array is a fresh copy. A null
+ * `timeout` sets no time limit on the call.
  *
  * @param {Io} io
  * @param {string} file
  * @param {readonly string[]} args
- * @param {number} timeout
+ * @param {number | null} timeout
  * @param {number} maxBuffer
  * @returns {CallResult}
  */
@@ -577,7 +588,7 @@ function runCall(io, file, args, timeout, maxBuffer) {
     cwd: io.cwd,
     env: io.env,
     stdio: ['ignore', 'pipe', 'pipe'],
-    timeout,
+    ...(timeout === null ? {} : { timeout }),
     maxBuffer,
     windowsHide: true,
     shell: false,
@@ -656,18 +667,103 @@ function gh(io, args, maxBuffer) {
 
 /**
  * Every git call: `-c core.fsmonitor=false` first, so no repository-configured
- * hook runs (D-NO-FSMONITOR), and bounded by the deadline.
+ * hook runs (D-NO-FSMONITOR), and refused once the deadline has passed. A null
+ * `timeout` sets no time limit on the call itself.
  *
  * @param {Io} io
  * @param {readonly string[]} args
- * @param {number} timeout
+ * @param {number | null} timeout
  * @param {number} maxBuffer
  * @returns {CallResult}
  */
 function git(io, args, timeout, maxBuffer) {
   const left = remaining(io);
   if (left === 0) { io.notes.add('deadline'); return refusedCall('deadline'); }
-  return runCall(io, 'git', ['-c', 'core.fsmonitor=false', ...args], Math.min(timeout, left), maxBuffer);
+  return runCall(io, 'git', ['-c', 'core.fsmonitor=false', ...args], timeout === null ? null : Math.min(timeout, left), maxBuffer);
+}
+
+// ---------------------------------------------------------------------------
+// Tracked files — D-TRACKED-RESULT
+// ---------------------------------------------------------------------------
+
+/** What git says, asked with LC_ALL=C, of a path that sits in no repository. */
+const NOT_A_REPOSITORY_RE = /\bnot a git repository\b/;
+
+/**
+ * D-TRACKED-RESULT: whether git tracks one absolute path, asked of the repository the
+ * path sits in (`-C` its directory, the name taken literally). `untracked` is a clear
+ * answer only: git exits 0 and lists nothing, or says the directory is in no
+ * repository. A listed path is `tracked`. A git that could not run or answered
+ * anything else, and a call refused past the deadline, is `unknown`. The call sets no
+ * time limit.
+ *
+ * @param {Io} io
+ * @param {string} abs
+ * @returns {'untracked' | 'tracked' | 'unknown'}
+ */
+function trackedStateOf(io, abs) {
+  const probe = Object.assign({}, io, { env: Object.assign({}, io.env, { LC_ALL: 'C' }) });
+  const r = git(probe, ['-C', path.dirname(abs), '--literal-pathspecs', 'ls-files', '-z', '--', path.basename(abs)], null, LINE_MAX_BUFFER);
+  if (!answered(r)) return 'unknown';
+  if (r.status === 0) return r.stdout.length === 0 ? 'untracked' : 'tracked';
+  return r.status === 128 && NOT_A_REPOSITORY_RE.test(r.stderr) ? 'untracked' : 'unknown';
+}
+
+/**
+ * D-TRACKED-RESULT: a git-tracked file counts as absent, like a tracked
+ * `.devflow/config.json`. A path is `untracked` only when git says so for the path as
+ * spelled and for the file it resolves to (a link is judged by both names); one tracked
+ * name makes it `tracked`, and one name git could not answer for makes it `unknown`.
+ * It never throws.
+ *
+ * @param {Io} io
+ * @param {string} file
+ * @returns {'untracked' | 'tracked' | 'unknown'}
+ */
+function trackedState(io, file) {
+  try {
+    const abs = path.resolve(file);
+    const names = [abs];
+    try {
+      const real = fs.realpathSync(abs);
+      if (real !== abs) names.push(real);
+    } catch (_) { /* a path that names nothing has no other name */ }
+    /** @type {'untracked' | 'tracked' | 'unknown'} */
+    let state = 'untracked';
+    for (const name of names) {
+      const one = trackedStateOf(io, name);
+      if (one === 'tracked') return 'tracked';
+      if (one === 'unknown') state = 'unknown';
+    }
+    return state;
+  } catch (_) {
+    return 'unknown';
+  }
+}
+
+/**
+ * D-TRACKED-RESULT: the paths a `verify`, `publish` or `readiness` run reads or writes
+ * as a result file. An out path (`--block-out`, `--comment-out`, `--stale-out`,
+ * `--out`) that is not clearly untracked is refused before any read or removal, with
+ * the write failure (exit 3): no file is written. An `--evidence` file that is not
+ * clearly untracked is dropped, so the run goes on exactly as if `--evidence` was not
+ * given; the stderr summary then carries the closed note `evidence-ignored`. Stdout
+ * keeps its grammar.
+ *
+ * @param {Io} io
+ * @param {ParsedArgs} args
+ * @returns {{ args: ParsedArgs } | { outcome: Outcome }}
+ */
+function admitPaths(io, args) {
+  if (args.kind !== 'verify' && args.kind !== 'publish' && args.kind !== 'readiness') return { args };
+  const outs = args.kind === 'verify' ? [args.blockOut, args.commentOut, args.staleOut]
+    : args.kind === 'readiness' ? [args.out] : [];
+  if (outs.some(file => file !== null && trackedState(io, file) !== 'untracked')) {
+    return { outcome: refuse(io, EXIT_CODES.WRITE_FAILED, 'an output file could not be written') };
+  }
+  if (args.evidence === null || trackedState(io, args.evidence) === 'untracked') return { args };
+  io.notes.add('evidence-ignored');
+  return { args: Object.assign({}, args, { evidence: null }) };
 }
 
 /**
@@ -2661,7 +2757,8 @@ function readinessPass(io, args, deps) {
  * runReadiness removes the earlier regular file before the first read; here, a block the
  * output gate would refuse is never written and is the gate's refusal, and a file that
  * cannot be written is the write refusal, with the regular file the write left removed.
- * Either way nothing is printed and no out file remains.
+ * Either way nothing is printed and no out file remains. A path that git tracks never
+ * gets here: admitPaths refuses it first and leaves the file as it is.
  *
  * @param {Io} io
  * @param {string} file
@@ -2798,21 +2895,27 @@ function main(argv, deps) {
     notes: new Set(),
     stderr: typeof d.stderr === 'function' ? d.stderr : (text => { process.stderr.write(text); }),
   };
-  const args = parseArgs(argv);
-  if (args.kind === 'usage') {
+  const parsed = parseArgs(argv);
+  if (parsed.kind === 'usage') {
     io.stderr(USAGE + '\n');
     return { code: EXIT_CODES.USAGE, stdout: '' };
   }
+  let args = parsed;
   /** @type {Outcome} */
   let outcome;
   try {
-    if (args.kind === 'check') outcome = runCheck(io, args);
-    else if (args.kind === 'render') outcome = runRender(io, args);
-    else if (args.kind === 'verify') outcome = runVerify(io, args, d);
-    else if (args.kind === 'splice') outcome = runSplice(io, args);
-    else if (args.kind === 'publish') outcome = runPublish(io, args, d);
-    else if (args.kind === 'readiness') outcome = runReadiness(io, args, d);
-    else outcome = runReadback(io, args);
+    const admitted = admitPaths(io, parsed);
+    if ('outcome' in admitted) outcome = admitted.outcome;
+    else {
+      args = admitted.args;
+      if (args.kind === 'check') outcome = runCheck(io, args);
+      else if (args.kind === 'render') outcome = runRender(io, args);
+      else if (args.kind === 'verify') outcome = runVerify(io, args, d);
+      else if (args.kind === 'splice') outcome = runSplice(io, args);
+      else if (args.kind === 'publish') outcome = runPublish(io, args, d);
+      else if (args.kind === 'readiness') outcome = runReadiness(io, args, d);
+      else outcome = runReadback(io, args);
+    }
   } catch (err) {
     // An injected exec that throws, or a broken invariant (rev): no verdict. The two
     // scripted operations still answer in their own DEGRADED form, since a caller

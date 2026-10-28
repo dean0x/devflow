@@ -24,10 +24,10 @@ import * as os from 'os'
 import * as path from 'path'
 
 import { compiledSkillRefsDir } from '../../src/core/assets.js'
-import { makeFifo } from '../evidence-policy/scripted-shim.js'
+import { makeFifo, realGit } from '../evidence-policy/scripted-shim.js'
 import { extractOpSectionFromCorpus, gitOperationReferenceCorpus, prHostRel } from '../helpers.js'
 import { cleanShimRoots, runScript, SHIM_HEAD, warmGhShim, type ScriptRun, type ShimScenario } from './pr-shim.js'
-import { PR_EVIDENCE_SCRIPT, SUBPROCESS_TIMEOUT_MS, VERIFY_EVIDENCE_SCRIPT } from './seam.js'
+import { PR_EVIDENCE_SCRIPT, SUBPROCESS_TIMEOUT_MS, trackedCheckAnswer, VERIFY_EVIDENCE_SCRIPT } from './seam.js'
 
 interface ReadinessBlock {
   pr: number
@@ -572,13 +572,20 @@ const twinAnswer = (stdout: string, status = 0): TwinResult => ({ status, stdout
 /**
  * An in-process exec for a PR whose every read is green and whose head is `SHIM_HEAD`: the
  * readiness reads, the evidence read's PR view, and the git calls of a clean full clone. An argv
- * it does not know answers 97 and is recorded in `misses`.
+ * it does not know answers 97 and is recorded in `misses`. The tracked-file check on a path is not a
+ * read of the PR: it is recorded in `checks`, and answered "not tracked", or by the real git with `realGit`.
  */
-function greenTwin(): { exec: (file: string, args: string[]) => TwinResult; calls: string[][]; misses: string[] } {
+function greenTwin(realGit = false): { exec: (file: string, args: string[]) => TwinResult; calls: string[][]; misses: string[]; checks: string[][] } {
   const calls: string[][] = []
   const misses: string[] = []
+  const checks: string[][] = []
   const base = 'b'.repeat(40)
   const exec = (file: string, args: string[]): TwinResult => {
+    const tracked = trackedCheckAnswer(file, args, realGit)
+    if (tracked !== null) {
+      checks.push([file, ...args])
+      return { ...tracked, status: tracked.status ?? 97 }
+    }
     calls.push([file, ...args])
     if (file === 'gh' && args[0] === 'pr' && args[1] === 'view') {
       const fields = args[args.indexOf('--json') + 1]
@@ -602,7 +609,7 @@ function greenTwin(): { exec: (file: string, args: string[]) => TwinResult; call
     misses.push([file, ...args].join(' '))
     return { status: 97, stdout: Buffer.alloc(0), stderr: Buffer.from('twin: unscripted\n') }
   }
-  return { exec, calls, misses }
+  return { exec, calls, misses, checks }
 }
 
 function runInProcess(args: readonly string[], exec: (file: string, args: string[]) => TwinResult): { code: number; stdout: string; stderr: string } {
@@ -621,8 +628,19 @@ function ghWrites(calls: readonly string[][]): string[][] {
   return calls.filter(c => c[0] === 'gh' && ((c[1] === 'pr' && (c[2] === 'edit' || c[2] === 'comment')) || (c[1] === 'api' && c[2] === '--method')))
 }
 
+/** The "not tracked" answer to the tracked-file check, for an exec whose every other call fails. */
+function checkOr(file: string, args: string[], otherwise: () => TwinResult): TwinResult {
+  const tracked = trackedCheckAnswer(file, args)
+  return tracked === null ? otherwise() : { ...tracked, status: tracked.status ?? 97 }
+}
+
 /** An exec for which `gh` cannot find the PR. */
-const unreadablePr = (): TwinResult => ({ status: 1, stdout: Buffer.alloc(0), stderr: Buffer.from('no such pr\n') })
+const unreadablePr = (file: string, args: string[]): TwinResult =>
+  checkOr(file, args, () => ({ status: 1, stdout: Buffer.alloc(0), stderr: Buffer.from('no such pr\n') }))
+
+/** An exec that fails after the tracked-file check: the run is an internal failure that the script survives. */
+const explodingExec = (file: string, args: string[]): TwinResult =>
+  checkOr(file, args, () => { throw new Error('exec exploded') })
 
 describe('TP-14: readiness --evidence reads the plan and the claims from a local evidence file', () => {
   it('a file that has no plan and carries a test-plan exception is READY; the same PR without the file has no test-plan evidence', SPAWN_BUDGET, () => {
@@ -669,6 +687,122 @@ describe('TP-14: readiness --evidence reads the plan and the claims from a local
     expect(status(r)).toBe('NOT_READY (test-plan evidence unavailable)')
     expect(block(r).plan).toBe('unavailable')
     expect(r.writes).toEqual([])
+  })
+})
+
+type FileState = 'committed' | 'staged' | 'untracked'
+
+/** A real repository that holds each file in the given state: committed, only staged, or not added at all. */
+function gitRepo(files: Readonly<Record<string, { text: string; state: FileState }>>): string {
+  const dir = localDir()
+  const home = localDir()
+  realGit(dir, home, ['init', '-q'])
+  const names = Object.keys(files)
+  for (const name of names) fs.writeFileSync(path.join(dir, name), files[name].text)
+  const committed = names.filter(n => files[n].state === 'committed')
+  if (committed.length > 0) {
+    realGit(dir, home, ['add', '--', ...committed])
+    realGit(dir, home, ['commit', '-q', '-m', 'seed'])
+  }
+  const staged = names.filter(n => files[n].state === 'staged')
+  if (staged.length > 0) realGit(dir, home, ['add', '--', ...staged])
+  return dir
+}
+
+/** `twin.exec`, except that the tracked-file check gets `answer` instead of the real git's. */
+function withCheckAnswer(twin: ReturnType<typeof greenTwin>, answer: unknown): (file: string, args: string[]) => TwinResult {
+  return (file, args) => (args.includes('ls-files') ? (answer as TwinResult) : twin.exec(file, args))
+}
+
+describe('a git-tracked evidence file counts as absent, like a tracked config.json', () => {
+  // With no plan and a test-plan exception, the file reads READY. Without it the PR has no evidence.
+  const READY_FILE = evidenceText([], [], [LOCAL_EXCEPTION])
+  const lineOne = (out: string): string => fs.readFileSync(out, 'utf8').split('\n')[0]
+
+  it.each(['committed', 'staged'] as const)('a %s evidence file is not read: the plan is the PR\'s and the out file says source=pr', state => {
+    const repo = gitRepo({ 'evidence.md': { text: READY_FILE, state } })
+    const out = path.join(localDir(), 'readiness.txt')
+    const twin = greenTwin(true)
+    const r = runReadiness(['--evidence', path.join(repo, 'evidence.md'), '--out', out], twin.exec)
+    expect(twin.misses, 'the script made a call the twin did not script').toEqual([])
+    expect(r.code, r.stderr).toBe(0)
+    expect(VE.parseReadinessBlock(r.stdout)).toMatchObject({ status: 'NOT_READY', reason: 'no test-plan evidence' })
+    expect(lineOne(out)).toBe(`READINESS pr:7 head:${SHIM_HEAD} status:NOT_READY source=pr`)
+    expect(r.stderr).toContain('verify-evidence: notes: evidence-ignored')
+    expect(twin.checks.length, 'git was asked').toBeGreaterThan(0)
+  })
+
+  it('control: the same file, not added to git, is read', () => {
+    const repo = gitRepo({ 'evidence.md': { text: READY_FILE, state: 'untracked' } })
+    const out = path.join(localDir(), 'readiness.txt')
+    const r = runReadiness(['--evidence', path.join(repo, 'evidence.md'), '--out', out], greenTwin(true).exec)
+    expect(r.code, r.stderr).toBe(0)
+    expect(VE.parseReadinessBlock(r.stdout)).toMatchObject({ status: 'READY' })
+    expect(lineOne(out)).toBe(`READINESS pr:7 head:${SHIM_HEAD} status:READY source=local`)
+    expect(r.stderr).not.toContain('evidence-ignored')
+  })
+
+  it('an untracked link to a tracked evidence file is not read either', () => {
+    const repo = gitRepo({ 'evidence.md': { text: READY_FILE, state: 'committed' } })
+    fs.symlinkSync(path.join(repo, 'evidence.md'), path.join(repo, 'alias.md'))
+    const r = runReadiness(['--evidence', path.join(repo, 'alias.md')], greenTwin(true).exec)
+    expect(VE.parseReadinessBlock(r.stdout)).toMatchObject({ status: 'NOT_READY', reason: 'no test-plan evidence' })
+  })
+
+  const NO_ANSWER: ReadonlyArray<readonly [string, unknown]> = [
+    ['git refuses the repository', { status: 128, stdout: Buffer.alloc(0), stderr: Buffer.from('fatal: detected dubious ownership in repository at x\n') }],
+    ['git exits 1', { status: 1, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }],
+    ['git cannot start', { status: null, error: { code: 'ENOENT' } }],
+    ['git answers with a path (it tracks the file)', { status: 0, stdout: Buffer.from('evidence.md\0'), stderr: Buffer.alloc(0) }],
+  ]
+
+  it.each(NO_ANSWER)('no clear "not tracked" answer reads as absent: %s', (_label, answer) => {
+    const file = writeEvidence(READY_FILE)
+    const twin = greenTwin()
+    const r = runReadiness(['--evidence', file], withCheckAnswer(twin, answer))
+    expect(VE.parseReadinessBlock(r.stdout)).toMatchObject({ status: 'NOT_READY', reason: 'no test-plan evidence' })
+  })
+
+  it.each([
+    ['git answers with nothing', { status: 0, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }],
+    ['the file is outside any repository', { status: 128, stdout: Buffer.alloc(0), stderr: Buffer.from('fatal: not a git repository (or any of the parent directories): .git\n') }],
+  ])('control: a clear "not tracked" answer reads the file: %s', (_label, answer) => {
+    const file = writeEvidence(READY_FILE)
+    const r = runReadiness(['--evidence', file], withCheckAnswer(greenTwin(), answer))
+    expect(VE.parseReadinessBlock(r.stdout)).toMatchObject({ status: 'READY' })
+  })
+})
+
+describe('a git-tracked out path is not written and not removed', () => {
+  const PLANTED = 'READINESS pr:7 head:none status:READY source=pr\nplanted\n'
+
+  it.each(['committed', 'staged'] as const)('a %s out path: exit 3, nothing on stdout, no read, the file keeps its text', state => {
+    const repo = gitRepo({ 'readiness.md': { text: PLANTED, state } })
+    const out = path.join(repo, 'readiness.md')
+    const twin = greenTwin(true)
+    const r = runReadiness(['--out', out], twin.exec)
+    expect(r.code).toBe(3)
+    expect(r.stdout).toBe('')
+    expect(r.stderr).toContain('verify-evidence: an output file could not be written')
+    expect(fs.readFileSync(out, 'utf8')).toBe(PLANTED)
+    expect(twin.calls, 'no read was made').toEqual([])
+  })
+
+  it('control: an out path in the same repository that git does not track is written', () => {
+    const repo = gitRepo({ 'seed.md': { text: 'seed\n', state: 'committed' } })
+    const out = path.join(repo, 'readiness.md')
+    const r = runReadiness(['--out', out], greenTwin(true).exec)
+    expect(r.code, r.stderr).toBe(0)
+    expect(fs.readFileSync(out, 'utf8').split('\n')[0]).toBe(`READINESS pr:7 head:${SHIM_HEAD} status:NOT_READY source=pr`)
+  })
+
+  it('an out path git cannot answer for is not written', () => {
+    const out = path.join(localDir(), 'readiness.txt')
+    const answer = { status: 128, stdout: Buffer.alloc(0), stderr: Buffer.from('fatal: detected dubious ownership in repository at x\n') }
+    const r = runReadiness(['--out', out], withCheckAnswer(greenTwin(), answer))
+    expect(r.code).toBe(3)
+    expect(r.stdout).toBe('')
+    expect(fs.existsSync(out)).toBe(false)
   })
 })
 
@@ -738,7 +872,7 @@ describe('TP-15: readiness --out writes the READINESS line, then the block', () 
   it('line 1 names the requested plan source on every status: an unreadable evidence file, an unreadable PR and an internal failure read source=local when --evidence is given', () => {
     const file = writeEvidence(evidenceText([LOCAL_TP], [LOCAL_CLAIM]))
     const missing = path.join(localDir(), 'absent.md')
-    const exploding = (): never => { throw new Error('exec exploded') }
+    const exploding = explodingExec
     const cases = [
       { label: 'an unreadable evidence file', evidence: missing, exec: greenTwin().exec, state: 'NOT_READY', head: SHIM_HEAD },
       { label: 'an unreadable PR', evidence: file, exec: unreadablePr, state: 'DEGRADED', head: 'none' },
@@ -870,7 +1004,7 @@ describe('TP-15: readiness --out writes the READINESS line, then the block', () 
   it('an internal failure still leaves a DEGRADED line behind, so an old READY file cannot outlive the run', () => {
     const out = path.join(localDir(), 'readiness.txt')
     fs.writeFileSync(out, lineOf(SHIM_HEAD, 'READY'))
-    const r = runInProcess(['readiness', '--pr', '7', '--require-non-author-approval', 'false', '--out', out], () => { throw new Error('exec exploded') })
+    const r = runInProcess(['readiness', '--pr', '7', '--require-non-author-approval', 'false', '--out', out], explodingExec)
     expect(r.code).toBe(2)
     expect(VE.parseReadinessBlock(r.stdout)).toMatchObject({ status: 'DEGRADED', reason: 'internal error' })
     expect(fs.readFileSync(out, 'utf8')).toBe(lineOf('none', 'DEGRADED') + r.stdout)
@@ -882,7 +1016,8 @@ describe('TP-15: readiness --out writes the READINESS line, then the block', () 
     const twin = greenTwin()
     const present: boolean[] = []
     runInProcess(['readiness', '--pr', '7', '--require-non-author-approval', 'false', '--out', out], (file, args) => {
-      present.push(fs.existsSync(out))
+      // The tracked-file check on the out path comes first, by design: it decides whether the file may be removed.
+      if (!args.includes('ls-files')) present.push(fs.existsSync(out))
       return twin.exec(file, args)
     })
     expect(present.length, 'the run read the PR').toBeGreaterThan(0)
@@ -937,14 +1072,13 @@ describe('TP-16: an out file that cannot be written prints no block and exits no
 
   it('an internal failure with an unwritable out file prints no block either', () => {
     const out = path.join(localDir(), 'no-such-dir', 'readiness.txt')
-    const r = runInProcess(['readiness', '--pr', '7', '--out', out], () => { throw new Error('exec exploded') })
+    const r = runInProcess(['readiness', '--pr', '7', '--out', out], explodingExec)
     expect(r.code).toBe(3)
     expect(r.stdout).toBe('')
   })
 
   it('a write that fails partway leaves no out file, on a decided answer and on an internal failure alike', () => {
-    const exploding = (): never => { throw new Error('exec exploded') }
-    for (const [label, exec] of [['a decided answer', greenTwin().exec], ['an internal failure', exploding]] as const) {
+    for (const [label, exec] of [['a decided answer', greenTwin().exec], ['an internal failure', explodingExec]] as const) {
       const out = path.join(localDir(), 'readiness.txt')
       fs.writeFileSync(out, 'READINESS pr:7 head:none status:READY source=pr\n')
       const write = nodeFs.writeFileSync
