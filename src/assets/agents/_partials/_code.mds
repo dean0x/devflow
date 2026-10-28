@@ -47,11 +47,11 @@ inside a define is split by the build like an arm in a host: the markers sit on 
 
 Run builds, typechecks, lints and tests in the foreground, each with an explicit Bash `timeout` above its expected run time. The ceiling is 600000 ms, or `BASH_MAX_TIMEOUT_MS` when set (`echo ${BASH_MAX_TIMEOUT_MS:-600000}`).
 
-- Capture, then tail, in one Bash call (shell state does not persist): `LOG=$(mktemp); echo "LOG=$LOG"; <command> >"$LOG" 2>&1; rc=$?; tail -n 40 "$LOG"; echo "EXIT=$rc"`. The printed `EXIT=` value is the result; never decide one from a grep count.
-- Never background a command and wait on it, and never poll across turns: no `sleep` or `true` turns, no sentinel-file checks, no Monitor.
-- Prefer the scoped command for the change (a package, a path or a test file); for the whole set, one workspace-level command over a per-package loop.
-- A run that exceeds its timeout is BLOCKED: report its duration and log path. Do not wait on it, poll it or re-run it.
-- A run expected to exceed the ceiling is split into parts, each under about 90% of it, run in sequence. If it cannot be split, report BLOCKED with the remedy `devflow flags --set bash-max-timeout-ms=<ms>`.
+- Capture, then tail, in one Bash call: `LOG=$(mktemp); echo "LOG=$LOG"; <command> >"$LOG" 2>&1; rc=$?; tail -n 40 "$LOG"; echo "EXIT=$rc"`. The printed `EXIT=` value is the result; never decide one from a grep count.
+- Never background a build or test, and never poll across turns: no `sleep` or `true` turns, no sentinel-file checks, no Monitor.
+- Prefer the scoped command for the change; for the whole set, one workspace-level command over a per-package loop.
+- A run past its timeout moves to the background: start nothing else until its end notice and you Read its own last `EXIT=` line; it alone sets the label, not the notice or log. With none read it is BLOCKED: report its duration and log path. Report only after the end notice.
+- A run expected to exceed the ceiling may be split into parts, run in sequence.
 - Never re-run a command when nothing it reads has changed.
 - Never wrap a build or test command in `sh -c`, `bash -c`, `python3 -c` or `node -e`: permission rules deny wrapped commands they would allow directly.
 - The same rules hold inside a dynamic Workflow sub-agent.
