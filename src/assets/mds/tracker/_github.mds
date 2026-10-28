@@ -38,8 +38,9 @@ invisible while the bytes stay on disk.
 A compliance arm (the `compliance:on`, `compliance:off` and `compliance:end` marker lines)
 opens and closes inside one define, so inside one operation's section. The compliance-off
 file keeps the off text: `setup-task` forwards no plan artifact, `create-release` composes
-no shipped-issues list, `ensure-traceable-issue` posts no artifact comment and has no
-`## Implementation Plan` section, and a kept operation never names an omitted reference.
+no shipped-issues list, `ensure-traceable-issue` writes nothing to an existing issue, posts
+no artifact comment and has no `## Implementation Plan` section, and a kept operation never
+names an omitted reference.
 
 `_common.mds` and `_steps.mds` are ALIAS imports (`as common`, `as steps`), as in the
 other two provider modules; `_steps.mds` holds the provider-neutral step text of the
@@ -405,14 +406,16 @@ Load when the resolved tracker provider is `github` and the operation is `ensure
 ### Process
 
 1. If `ISSUE_INPUT` is provided (numeric = existing issue; text = search for it):
+<!-- compliance:on -->
    - Compose structured comment to `$DEVFLOW_BODY_RAW` (NEVER rewrite the issue body); apply the Comment-sink scrub (D11) and post via `gh issue comment {number} --body-file "$DEVFLOW_BODY"`. Comment template:
      ```markdown
      ## Devflow Traceability Update
      **Initial Request**: {TASK_DESCRIPTION or "(see issue body)"}
      **Status**: Linked to branch for implementation
      ```
-<!-- compliance:on -->
    - If `PLAN_ARTIFACT_PATH` provided: read the design artifact, cap the body at 60000 characters (if larger, truncate and end with `…truncated — full report in the local plan artifact {PLAN_ARTIFACT_PATH} (not committed; ask the author)`), compose to `$DEVFLOW_BODY_RAW`; apply the Comment-sink scrub (D11) and post as a collapsed `<details>` comment via `gh issue comment {number} --body-file "$DEVFLOW_BODY"`, then reference the comment URL from the `## Implementation Plan` section in a follow-up comment.
+<!-- compliance:off -->
+   - Write nothing to the issue: no comment and no edit. NEVER rewrite the issue body.
 <!-- compliance:end -->
    - Return the issue number.
 2. If no `ISSUE_INPUT`: create a new issue using the D3 template:
@@ -467,10 +470,11 @@ When creating or enriching a GitHub issue via the `ensure-traceable-issue` opera
 ```
 
 **Rules:**
-- Pre-existing issues: post a structured comment using D3 sections — NEVER rewrite the issue body.
 <!-- compliance:on -->
+- Pre-existing issues: post a structured comment using D3 sections — NEVER rewrite the issue body.
 - New issues: create with D3 body; then post the design artifact as a `<details>` collapsed comment; link that comment URL in the `## Implementation Plan` section.
 <!-- compliance:off -->
+- Pre-existing issues: write nothing to them, no comment and no edit — NEVER rewrite the issue body.
 - New issues: create with D3 body.
 <!-- compliance:end -->
 @end

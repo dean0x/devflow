@@ -70,8 +70,9 @@ invisible while the bytes stay on disk.
 A compliance arm (the `compliance:on`, `compliance:off` and `compliance:end` marker lines)
 opens and closes inside one define, so inside one operation's section. The compliance-off
 file keeps the off text: `setup-task` forwards no plan artifact, `create-release` composes
-no shipped-issues list, `ensure-traceable-issue` posts no artifact comment and has no
-`## Implementation Plan` section, and a kept operation never names an omitted reference.
+no shipped-issues list, `ensure-traceable-issue` writes nothing to an existing issue, posts
+no artifact comment and has no `## Implementation Plan` section, and a kept operation never
+names an omitted reference.
 
 The comment-body cap is a PROVIDER FACT and is stated once, as `comment_cap()`
 below; every site that renders it invokes the define. It is not in `_mcp.mds`
@@ -362,9 +363,11 @@ Load when the resolved tracker provider is `jira` and the operation is `ensure-t
 ### Process
 
 1. If `ISSUE_INPUT` is provided — an issue key, or free prose to resolve through the *search* capability with a structured filter:
-   - Compose a structured comment using the D3 sections and post it through `### Posting gate` below. **NEVER rewrite the issue description** — an existing description is somebody's work.
 <!-- compliance:on -->
+   - Compose a structured comment using the D3 sections and post it through `### Posting gate` below. **NEVER rewrite the issue description** — an existing description is somebody's work.
    - If `PLAN_ARTIFACT_PATH` is provided: **the artifact is NOT inlined.** See `### The artifact is posted as content`.
+<!-- compliance:off -->
+   - Write nothing to the issue: no comment and no edit. **NEVER rewrite the issue description** — an existing description is somebody's work.
 <!-- compliance:end -->
    - Return the issue key.
 2. If no `ISSUE_INPUT`: create a new issue through the *create issue* capability.
@@ -389,16 +392,21 @@ Over the `{{comment_cap()}}`-character cap after redaction, truncate any body th
 {{mcp.query_safety()}}
 
 {{mcp.posting_gate_head("every write below")}}
+<!-- compliance:on -->
 4. Post through the *add comment* capability with arguments (issue key, body: {SCRUBBED_BODY}), or on a new issue through the *create issue* capability with the description field carrying the same gated value.
+<!-- compliance:off -->
+4. Create the issue through the *create issue* capability with the description field carrying the gated value.
+<!-- compliance:end -->
 
 ### Traceability Issue Template (D3)
 
 The D3 section headings are the canonical ones; only the transport differs from the GitHub path. Rules:
 
-- Pre-existing issues: post a structured comment using the D3 sections — NEVER rewrite the issue description.
 <!-- compliance:on -->
+- Pre-existing issues: post a structured comment using the D3 sections — NEVER rewrite the issue description.
 - New issues: create with the D3 description, then post the artifact as its own comment and reference it from the `## Implementation Plan` section.
 <!-- compliance:off -->
+- Pre-existing issues: write nothing to them, no comment and no edit — NEVER rewrite the issue description.
 - New issues: create with the D3 description.
 <!-- compliance:end -->
 @end

@@ -3616,6 +3616,119 @@ describe('git references: no compliance-off reference names an omitted reference
 });
 
 // ---------------------------------------------------------------------------
+// With compliance off, ensure-traceable-issue writes nothing to an existing issue
+//
+// On an existing issue (a numeric reference, or a text search that finds one) the
+// compliance-on operation posts a traceability comment. With compliance off the
+// operation resolves the issue, returns its reference and makes no comment call on any
+// provider. Creating a NEW issue stays, so the create call and its scrub stay.
+//
+// The guard reads the BUILT compliance-off references. A comment call is spelled as each
+// provider's compliance-on file spells it: GitHub posts through `gh issue comment`, and
+// Jira and Linear through the *add comment* capability behind the posting gate. Each
+// literal is asserted present in the compliance-on file first, so a literal that was
+// reworded away from both trees cannot leave the absence check passing on nothing.
+// ---------------------------------------------------------------------------
+
+/** The comment calls (and the comment text) each provider's compliance-on file spells. */
+const EXISTING_ISSUE_COMMENT_CALLS: Readonly<Record<string, readonly string[]>> = {
+  github: ['gh issue comment', 'Devflow Traceability Update', 'structured comment'],
+  jira: ['*add comment*', 'structured comment'],
+  linear: ['*add comment*', 'structured comment'],
+};
+
+/** What a tool-call provider's existing-issue path must not route through: the posting gate is for writes. */
+const EXISTING_ISSUE_GATE_REFERENCE = '### Posting gate';
+
+/** What the new-issue path keeps, per provider, with compliance off (AC-14). */
+const NEW_ISSUE_CREATE_CALLS: Readonly<Record<string, string>> = {
+  github: 'gh issue create',
+  jira: '*create issue*',
+  linear: '*create issue*',
+};
+
+/** An API route to a comment that `gh api` could reach; barred in the off file, never required in the on file. */
+const GH_API_COMMENTS_ROUTE = /gh api\b[^\n]*\/comments/;
+
+/**
+ * Named collector: the comment calls `text` holds for `provider`, in the order of
+ * EXISTING_ISSUE_COMMENT_CALLS, with the `gh api` comments route last for GitHub.
+ */
+function collectCommentCalls(text: string, provider: string): string[] {
+  const literals = (EXISTING_ISSUE_COMMENT_CALLS[provider] ?? []).filter(literal => text.includes(literal));
+  return provider === 'github' && GH_API_COMMENTS_ROUTE.test(text) ? [...literals, 'gh api …/comments'] : literals;
+}
+
+/** Named extractor: the existing-issue path of the Process, step 1 up to step 2 ('' when step 1 is absent). */
+function existingIssuePathOf(text: string): string {
+  const start = text.search(/^1\. If `ISSUE_INPUT` is provided/m);
+  if (start === -1) return '';
+  const rest = text.slice(start);
+  const end = rest.search(/^2\. If no `ISSUE_INPUT`/m);
+  return end === -1 ? rest : rest.slice(0, end);
+}
+
+describe('git references: the compliance-off ensure-traceable-issue writes nothing to an existing issue (AC-42)', () => {
+  const OP = 'ensure-traceable-issue';
+  const refOf = (provider: string): string => {
+    const rel = operationReferenceRel(OP, provider);
+    if (rel === null) throw new Error(`${OP} has no reference for ${provider}`);
+    return rel;
+  };
+
+  for (const provider of TRACKER_PROVIDER_IDS) {
+    it(`${provider}: the compliance-on file holds each comment call, and the compliance-off file holds none, on the existing-issue path or anywhere`, () => {
+      const rel = refOf(provider);
+      const on = readBuiltReference(SKILL_REFS_OUTPUT_DIR, rel);
+      const off = readBuiltReference(COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR, rel);
+      expect(collectCommentCalls(on, provider), 'the on file must hold every comment call, or the absence check proves nothing')
+        .toEqual(EXISTING_ISSUE_COMMENT_CALLS[provider]);
+      expect(existingIssuePathOf(on), 'the on file must have an existing-issue path to slice').not.toBe('');
+      expect(collectCommentCalls(existingIssuePathOf(on), provider), 'the on existing-issue path posts the comment').not.toEqual([]);
+      expect(existingIssuePathOf(off), 'the off file must have an existing-issue path to slice').not.toBe('');
+      expect(collectCommentCalls(existingIssuePathOf(off), provider), 'the off existing-issue path').toEqual([]);
+      expect(collectCommentCalls(off, provider), 'the off file').toEqual([]);
+    });
+
+    it(`${provider}: the compliance-off existing-issue path resolves the issue, writes nothing and returns its reference`, () => {
+      const existingPath = existingIssuePathOf(readBuiltReference(COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR, refOf(provider)));
+      expect(existingPath).toContain('Write nothing to the issue');
+      expect(existingPath).toMatch(/Return the issue (number|key|reference)\./);
+    });
+
+    it(`${provider}: the compliance-off file keeps the new-issue create call and its scrub (AC-14)`, () => {
+      const off = readBuiltReference(COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR, refOf(provider));
+      expect(off).toContain(NEW_ISSUE_CREATE_CALLS[provider]);
+      expect(off).toContain('redact-secrets.cjs');
+    });
+  }
+
+  it('the tool-call providers route no part of their off existing-issue path through the posting gate, and their on path does', () => {
+    for (const provider of TRACKER_PROVIDER_IDS.filter(id => id !== 'github')) {
+      const on = readBuiltReference(SKILL_REFS_OUTPUT_DIR, refOf(provider));
+      const off = readBuiltReference(COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR, refOf(provider));
+      expect(existingIssuePathOf(on), `${provider} on`).toContain(EXISTING_ISSUE_GATE_REFERENCE);
+      expect(existingIssuePathOf(off), `${provider} off`).not.toContain(EXISTING_ISSUE_GATE_REFERENCE);
+      expect(off, `${provider} off keeps the gate for the new issue`).toContain(EXISTING_ISSUE_GATE_REFERENCE);
+    }
+  });
+
+  it('known-bad probe: the collectors report the old compliance-on text and a seeded call, and pass the kept text', () => {
+    for (const provider of TRACKER_PROVIDER_IDS) {
+      const on = readBuiltReference(SKILL_REFS_OUTPUT_DIR, refOf(provider));
+      expect(collectCommentCalls(existingIssuePathOf(on), provider), `${provider}: the old text`).not.toEqual([]);
+      for (const literal of EXISTING_ISSUE_COMMENT_CALLS[provider]) {
+        expect(collectCommentCalls(`kept text\n${literal}\n`, provider), `${provider}: ${literal}`).toEqual([literal]);
+      }
+      expect(collectCommentCalls('kept text', provider)).toEqual([]);
+    }
+    expect(collectCommentCalls('gh api repos/o/r/issues/1/comments --method POST', 'github')).toEqual(['gh api …/comments']);
+    expect(existingIssuePathOf('1. If `ISSUE_INPUT` is provided:\n   - Post.\n2. If no `ISSUE_INPUT`: create\n')).toBe('1. If `ISSUE_INPUT` is provided:\n   - Post.\n');
+    expect(existingIssuePathOf('no steps here')).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // The D9 resolve condition has ONE authority in the reference tree
 //
 // `references/github-api.md` carried its own statement of the gate — and it was
