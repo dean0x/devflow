@@ -10,6 +10,8 @@ import { rulesDir } from '../../core/assets.js';
 import { installAllRules, validateRuleShadow, type RuleInstallOutcome, type RuleShadowState } from '../../targets/claude-code/installer.js';
 import { convergeFromManifest } from '../../targets/claude-code/compliance-install.js';
 import { convergeBehaviorFromManifest } from '../../targets/claude-code/behavior-install.js';
+import { newLinkReport, removeReportingLink } from '../../targets/claude-code/linked-folder.js';
+import { formatLinksSummary } from './install-report.js';
 
 interface RulesOptions {
   enable?: boolean;
@@ -263,14 +265,16 @@ export async function runRulesEnable(claudeDir: string, devflowDir: string): Pro
   const installedPlugins = DEVFLOW_PLUGINS.filter(pl => manifest.plugins.includes(pl.name));
   const rulesMap = buildRulesMap(installedPlugins);
 
-  // Wipe stale rules from previously uninstalled plugins before re-installing.
-  await fs.rm(rulesTarget, { recursive: true, force: true });
+  // Wipe stale rules from previously uninstalled plugins before re-installing. A rules folder that is
+  // a link is unlinked and replaced by a real folder, never emptied through, and the link is reported.
+  const links = newLinkReport();
+  links.replacedLinks.push(...await removeReportingLink(rulesTarget));
   await fs.mkdir(rulesTarget, { recursive: true });
 
   let outcomes: { ruleName: string; outcome: RuleInstallOutcome }[] = [];
   let installFailed = false;
   try {
-    outcomes = await installAllRules(rulesMap, devflowDir, rulesTarget);
+    outcomes = await installAllRules(rulesMap, devflowDir, rulesTarget, links);
   } catch (err) {
     p.log.error(
       `Rules installation failed — rules directory has been cleared: ${err instanceof Error ? err.message : String(err)}`,
@@ -296,6 +300,8 @@ export async function runRulesEnable(claudeDir: string, devflowDir: string): Pro
     await writeManifest(devflowDir, manifest);
     p.log.success(`Installed ${rulesMap.size} rule(s) to ${color.dim(rulesTarget)}${shadowSuffix}`);
   }
+
+  for (const { message } of formatLinksSummary(links)) p.log.warn(message);
 
   // Converge compliance artifacts unconditionally — convergeFromManifest handles the
   // disabled case itself (removes stale artifacts). Running this regardless of installFailed

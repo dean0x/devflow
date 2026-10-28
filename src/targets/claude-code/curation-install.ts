@@ -90,7 +90,6 @@ import { carryStampedTools } from '../../core/agent-frontmatter.js';
 import { carryAgentOverrides, reapplyAgentMapping } from '../../core/agent-models.js';
 import type { ComplianceFeatureState } from '../../core/compliance.js';
 import { describeEchoedValue } from '../../core/echo-value.js';
-import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import {
   ALL_SWITCHES_ON,
   VARIANT_MANIFEST_REL_PATH,
@@ -118,6 +117,7 @@ import {
 import { convergeFromManifest, type ConvergeComplianceArtifactsResult } from './compliance-install.js';
 import { copyDirectory, resolveSkillSource } from './installer.js';
 import { LANGUAGE_STAMPED_COMMANDS, stampForConverge } from './language-stamp.js';
+import { newLinkReport, refuseUnrealFolder, warnLinkReport, writeFileReplacingLink, type LinkReport } from './linked-folder.js';
 import { convergeReferences, type ConvergeReferencesResult } from './reference-converge.js';
 
 // ── Bounds ─────────────────────────────────────────────────────────────────
@@ -399,14 +399,21 @@ async function convergeFile(
     root: string;
     /** The effective selection's language list, stamped into a copy that has none to carry. */
     focuses: readonly string[];
+    /** True when the kind's `devflow` folder is a link or not a folder: nothing is written in it. */
+    folderRefused: boolean;
+    /** Where a link replaced by a rewritten file is recorded. */
+    links: LinkReport;
   },
 ): Promise<FileOutcome> {
-  const { claudeDir, switches, warn, root, focuses } = opts;
+  const { claudeDir, switches, warn, root, focuses, folderRefused, links } = opts;
   const fileName = host.file;
   const target = installedFile(claudeDir, kind, fileName);
 
   const installed = await readIfPresent(target);
   if (installed === 'absent') return 'not-installed';
+  // Reading through a link is harmless and tells a prompt that is there from one that is not. It is
+  // left as it is: the folder is reported once, by the caller.
+  if (folderRefused) return 'failed';
   if (installed === 'unreadable') {
     warn(`prompt variants: cannot read the installed ${kind}/${fileName} (${target}) — left as it is`);
     return 'failed';
@@ -430,8 +437,8 @@ async function convergeFile(
 
   try {
     // Prompts are UTF-8 text; the atomic writer takes a string and preserves the
-    // target's permission mode.
-    await writeFileAtomicExclusive(target, wanted.toString('utf-8'));
+    // target's permission mode. A link at the target is replaced by the rename, never followed.
+    await writeFileReplacingLink(target, wanted.toString('utf-8'), links);
   } catch (err) {
     warn(`prompt variants: could not rewrite ${kind}/${fileName} (${target}) — ${String(err)}`);
     return 'failed';
@@ -569,6 +576,10 @@ export interface ConvergePromptVariantsResult {
   notInstalled: number;
   /** Whether the installed prompts of a compliance-off machine are proven free of the posting steps. */
   posting: PostingConverge;
+  /** Installed prompts that were a link and now are a real file. What they pointed to was left as it was. */
+  replacedLinks: readonly string[];
+  /** The `commands/devflow` or `agents/devflow` folder that is a link or not a folder: nothing was written in it. */
+  refusedFolders: readonly string[];
 }
 
 /** The result of a converge that did not run: nothing changed and, with compliance off, nothing is proven. */
@@ -580,6 +591,8 @@ function notRun(switches: VariantSwitches, reason: string): ConvergePromptVarian
     unchanged: 0,
     notInstalled: 0,
     posting: switches.compliance ? POSTING_CLEAR : { kind: 'unknown', reason },
+    replacedLinks: [],
+    refusedFolders: [],
   };
 }
 
@@ -592,6 +605,11 @@ function notRun(switches: VariantSwitches, reason: string): ConvergePromptVarian
  * question: the build manifest names the hosts that carry a compliance arm, and an installed one
  * that could not be converged is listed in `posting` as still posting. A compliance-off machine whose
  * build manifest is unusable answers `unknown`, because it cannot name those hosts.
+ *
+ * A kind's `devflow` folder that is a link, or not a folder, is refused: nothing is written in it, the
+ * installed prompts there count as not converged, and the folder is named in `refusedFolders` and in
+ * a warning. A prompt that is a link in a real folder is replaced by a real file, and named in
+ * `replacedLinks` and in a warning.
  *
  * Never throws. A caller reads `converged` and `posting`; it does not catch.
  */
@@ -625,8 +643,12 @@ export async function convergePromptVariants(opts: ConvergePromptVariantsOptions
   let notInstalled = 0;
   const stillPosting: string[] = [];
   const rewritten: Record<VariantKind, string[]> = { commands: [], agents: [] };
+  const links = newLinkReport();
 
   for (const kind of KINDS) {
+    // A link at the folder sends every write below it into another place, so the folder is proven first.
+    const folderRefused = await refuseUnrealFolder(links, path.join(claudeDir, kind, 'devflow'));
+    if (folderRefused) failed = true;
     const roster = await readRoster(kind, root, manifestHosts, warn);
     // A roster read in part is a failed converge. Past the bound, a host left out may carry a
     // compliance arm, so a compliance-off machine can no longer name every prompt that still posts.
@@ -646,7 +668,7 @@ export async function convergePromptVariants(opts: ConvergePromptVariantsOptions
       continue;
     }
     for (const host of roster.hosts) {
-      const outcome = await convergeFile(kind, host, { claudeDir, switches, warn, root, focuses });
+      const outcome = await convergeFile(kind, host, { claudeDir, switches, warn, root, focuses, folderRefused, links });
       if (outcome === 'rewritten') rewritten[kind].push(host.file);
       else if (outcome === 'unchanged') unchanged++;
       else if (outcome === 'not-installed') notInstalled++;
@@ -661,6 +683,7 @@ export async function convergePromptVariants(opts: ConvergePromptVariantsOptions
   if (unknownReason !== null) posting = { kind: 'unknown', reason: unknownReason };
   else if (stillPosting.length > 0) posting = { kind: 'left', files: stillPosting };
 
+  warnLinkReport(links, warn);
   return {
     converged: !failed,
     commandsRewritten: rewritten.commands,
@@ -668,6 +691,8 @@ export async function convergePromptVariants(opts: ConvergePromptVariantsOptions
     unchanged,
     notInstalled,
     posting,
+    replacedLinks: links.replacedLinks,
+    refusedFolders: links.refusedFolders,
   };
 }
 
@@ -703,6 +728,10 @@ export interface ConvergeVariantAxesResult extends ConvergeCurationVariantsResul
   references: ConvergeReferencesResult;
   /** Whether a compliance-off machine still has installed prompts or references that post. */
   posting: PostingConverge;
+  /** Installed prompts and rule files that were a link and now are a real file. What they pointed to was left as it was. */
+  replacedLinks: readonly string[];
+  /** Devflow folders that are a link or not a folder: nothing was written in them. */
+  refusedFolders: readonly string[];
 }
 
 /**
@@ -747,7 +776,7 @@ export async function convergeVariantAxes(opts: ConvergeVariantAxesOptions): Pro
     return {
       ...notRun(switches, 'the Claude directory is not an absolute path'),
       skill: 'unchanged',
-      compliance: { removedPreexisting: false, converged: false },
+      compliance: { removedPreexisting: false, converged: false, replacedLinks: [], refusedFolders: [] },
       references: {
         converged: false,
         rewritten: [],
@@ -769,7 +798,7 @@ export async function convergeVariantAxes(opts: ConvergeVariantAxesOptions): Pro
   const compliance = await attempt<ConvergeComplianceArtifactsResult>(
     'compliance artifacts',
     warn,
-    { removedPreexisting: false, converged: false },
+    { removedPreexisting: false, converged: false, replacedLinks: [], refusedFolders: [] },
     () => convergeFromManifest({ claudeDir, devflowDir, manifest, warn }),
   );
   const references = await attempt<ConvergeReferencesResult>(
@@ -797,6 +826,8 @@ export async function convergeVariantAxes(opts: ConvergeVariantAxesOptions): Pro
     compliance,
     references,
     posting: mergePosting(prompts.posting, referencesPosting(references)),
+    replacedLinks: [...prompts.replacedLinks, ...compliance.replacedLinks],
+    refusedFolders: [...prompts.refusedFolders, ...compliance.refusedFolders],
   };
 }
 

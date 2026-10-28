@@ -26,6 +26,7 @@ import { skillsDir, rulesDir } from '../../core/assets.js';
 import { ALWAYS_PRESENT_REFS, COMPLIANCE_FRAMEWORKS, normalizeFrameworks, type ComplianceFeatureState } from '../../core/compliance.js';
 import { parseComplianceFragment, composeComplianceSkill, composeComplianceRule, type ComplianceFragment } from '../../core/compliance-compose.js';
 import { validateSkillShadow, validateRuleShadow } from './installer.js';
+import { newLinkReport, refuseUnrealFolder, warnLinkReport, writeFileReplacingLink, type LinkReport } from './linked-folder.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -69,6 +70,10 @@ export interface ConvergeComplianceArtifactsResult {
    * return.
    */
   converged: boolean;
+  /** The rule file, if it was a link, now a real file. What it pointed to was left as it was. */
+  replacedLinks: readonly string[];
+  /** `rules/devflow`, if it is a link or not a folder: the rule was neither written nor removed there. */
+  refusedFolders: readonly string[];
 }
 
 // ── Path helpers ───────────────────────────────────────────────────────────
@@ -245,7 +250,9 @@ async function installSkillDir(
  * source (never the shadow — fragments are registry-owned) and shared with the skill
  * installer.
  *
- * I/O failures are reported via warn; never thrown.
+ * I/O failures are reported via warn; never thrown. The caller has proved that `rules/devflow` is a
+ * real folder or absent. A link at the rule file is replaced by the rename of the atomic write,
+ * never followed, and recorded in `links`.
  */
 async function installRuleFile(
   claudeDir: string,
@@ -253,6 +260,7 @@ async function installRuleFile(
   frameworks: readonly string[],
   fragments: ReadonlyMap<string, ComplianceFragment>,
   warn: (msg: string) => void,
+  links: LinkReport,
 ): Promise<void> {
   const ruleShadowFile = path.join(devflowDir, 'rules', 'compliance.md');
   const canonicalRuleSrc = path.join(rulesDir(), 'compliance.md');
@@ -268,7 +276,7 @@ async function installRuleFile(
     for (const w of warnings) warn(`compliance: ${w}`);
 
     await fs.mkdir(path.dirname(target), { recursive: true });
-    await fs.writeFile(target, composed, 'utf-8');
+    await writeFileReplacingLink(target, composed, links);
   } catch (err) {
     warn(`compliance: rule install failed — ${String(err)}`);
   }
@@ -303,7 +311,7 @@ export async function convergeComplianceArtifacts(
   // locations. Warn and bail rather than running fs.rm with a potentially wrong path.
   if (!path.isAbsolute(claudeDir)) {
     warn(`compliance: claudeDir is not an absolute path ("${claudeDir}") — skipping convergence`);
-    return { removedPreexisting: false, converged: false };
+    return { removedPreexisting: false, converged: false, replacedLinks: [], refusedFolders: [] };
   }
 
   // Trust boundary. `frameworks` reaches here straight from the manifest on every
@@ -338,9 +346,23 @@ export async function convergeComplianceArtifacts(
   // execution always continues to the rule step.
   await installSkillDir(claudeDir, devflowDir, stampFrameworks, fragments, trackingWarn);
 
+  // The rule folder is proven before the rule is written or removed: a link there sends both into
+  // another place. The skill folder is swapped whole above, and a swap never follows a link.
+  const links = newLinkReport();
+  const finish = (removedPreexisting: boolean): ConvergeComplianceArtifactsResult => {
+    warnLinkReport(links, warn);
+    return {
+      removedPreexisting,
+      converged: converged && links.refusedFolders.length === 0,
+      replacedLinks: links.replacedLinks,
+      refusedFolders: links.refusedFolders,
+    };
+  };
+  if (await refuseUnrealFolder(links, path.dirname(ruleTarget(claudeDir)))) return finish(false);
+
   if (enabled && rulesEnabled) {
-    await installRuleFile(claudeDir, devflowDir, safeFrameworks, fragments, trackingWarn);
-    return { removedPreexisting: false, converged };
+    await installRuleFile(claudeDir, devflowDir, safeFrameworks, fragments, trackingWarn, links);
+    return finish(false);
   }
 
   // Compliance off, or rules off: no rule. Probe first so a disable convergence
@@ -353,7 +375,7 @@ export async function convergeComplianceArtifacts(
       trackingWarn(`compliance: failed to remove rule — ${String(err)}`);
     }
   }
-  return { removedPreexisting: !enabled && ruleExisted, converged };
+  return finish(!enabled && ruleExisted);
 }
 
 // ── Manifest-slice wrapper ─────────────────────────────────────────────────

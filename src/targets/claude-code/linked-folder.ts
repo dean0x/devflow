@@ -1,5 +1,7 @@
 import { promises as fs } from 'fs';
 
+import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
+
 /**
  * Link checks for the folders Devflow installs into: `commands/devflow`, `agents/devflow`,
  * `rules/devflow`, the `skills/devflow:*` folders and everything below them.
@@ -8,7 +10,7 @@ import { promises as fs } from 'fs';
  * folders sends the write into another place. Every check here uses `lstat`, which sees the link
  * and never the entry it points to. One rule holds for all of them: a link is unlinked or left
  * alone, and what it points to is never written. Nothing here throws, except the final `rm` in
- * {@link removeReportingLink}, whose callers catch it.
+ * {@link removeReportingLink} and the write in {@link writeFileReplacingLink}, whose callers catch it.
  *
  * This module imports nothing from the installer, so any install or converge step can use it.
  */
@@ -145,4 +147,45 @@ export async function clearLinkForWrite(entry: string, report?: LinkReport): Pro
   if (clearance === 'replaced') report?.replacedLinks.push(entry);
   if (clearance === 'refused') report?.refusedFolders.push(entry);
   return clearance !== 'refused';
+}
+
+/** A report that holds no link yet. */
+export function newLinkReport(): LinkReport {
+  return { replacedLinks: [], refusedFolders: [] };
+}
+
+/**
+ * The line for a link a step replaced. One wording for the install summary and for every converge
+ * that reports through a `warn` callback.
+ */
+export function replacedLinkMessage(linkPath: string): string {
+  return `${linkPath} was a link. It was replaced with a real file or folder, and what it pointed to was left as it was.`;
+}
+
+/**
+ * The line for a folder a step wrote nothing at, because it is a link it could not remove or not a
+ * folder. One wording for the install summary and for every converge that reports through a `warn`
+ * callback.
+ */
+export function refusedFolderMessage(folder: string): string {
+  return `${folder} is a link or not a folder. Nothing was written there. Replace it with a real file or folder and run the install again.`;
+}
+
+/** Send one line per link in `report` to `warn`: the replaced links first, then the refused folders. */
+export function warnLinkReport(report: LinkReport, warn: (message: string) => void): void {
+  for (const linkPath of report.replacedLinks) warn(replacedLinkMessage(linkPath));
+  for (const folder of report.refusedFolders) warn(refusedFolderMessage(folder));
+}
+
+/**
+ * Write `content` at `file` with the atomic writer (a temp file beside it, then one rename). A
+ * rename puts the new file in the place of whatever stands at `file`, so a link there is replaced and
+ * never followed; the link is recorded in `links.replacedLinks` once the write is done. The caller
+ * has proved that the folder holding `file` is a real one. Throws what the writer throws, so the
+ * caller keeps its own catch.
+ */
+export async function writeFileReplacingLink(file: string, content: string, links?: LinkReport): Promise<void> {
+  const wasLink = await entryIsLink(file);
+  await writeFileAtomicExclusive(file, content);
+  if (wasLink) links?.replacedLinks.push(file);
 }

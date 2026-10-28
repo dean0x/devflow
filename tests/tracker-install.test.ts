@@ -43,7 +43,9 @@ let claudeDir: string;
 let warnings: string[];
 
 const warn = (msg: string): void => { warnings.push(msg); };
-const agentFile = (): string => path.join(claudeDir, 'agents', 'devflow', 'tracker.md');
+/** A converge that met no link: both lists are empty. */
+const NO_LINKS = { replacedLinks: [], refusedFolders: [] };
+const agentFile =(): string => path.join(claudeDir, 'agents', 'devflow', 'tracker.md');
 const refsTarget = (): string => path.join(claudeDir, 'skills', 'devflow:git', 'references');
 
 async function exists(p: string): Promise<boolean> {
@@ -70,7 +72,7 @@ afterEach(async () => {
 describe('convergeTrackerArtifacts: the Tracker agent file', () => {
   it('installs the agent — it takes no provider, because every machine needs it', async () => {
     const result = await convergeTrackerArtifacts({ claudeDir, warn });
-    expect(result).toEqual({ converged: true, agent: 'installed' });
+    expect(result).toEqual({ converged: true, agent: 'installed', ...NO_LINKS });
     const body = await fs.readFile(agentFile(), 'utf-8');
     expect(body.length, 'the copy must carry the agent, not an empty file').toBeGreaterThan(100);
     expect(warnings).toEqual([]);
@@ -82,7 +84,7 @@ describe('convergeTrackerArtifacts: the Tracker agent file', () => {
     expect(
       again,
       'the file is byte-identical, so this run wrote nothing and must not claim it did',
-    ).toEqual({ converged: true, agent: 'unchanged' });
+    ).toEqual({ converged: true, agent: 'unchanged', ...NO_LINKS });
     expect(await exists(agentFile())).toBe(true);
   });
 
@@ -99,7 +101,7 @@ describe('convergeTrackerArtifacts: the Tracker agent file', () => {
 
   it('a relative claudeDir is refused, not resolved (precondition)', async () => {
     const result = await convergeTrackerArtifacts({ claudeDir: 'relative/path', warn });
-    expect(result).toEqual({ converged: false, agent: 'unchanged' });
+    expect(result).toEqual({ converged: false, agent: 'unchanged', ...NO_LINKS });
     expect(warnings.join('\n')).toMatch(/absolute/);
   });
 
@@ -119,7 +121,7 @@ describe('convergeTrackerArtifacts: the Tracker agent file', () => {
       warn,
       agentSourceDirs: [path.join(claudeDir, 'no-such-source-dir')],
     });
-    expect(result).toEqual({ converged: false, agent: 'unchanged' });
+    expect(result).toEqual({ converged: false, agent: 'unchanged', ...NO_LINKS });
     expect(warnings.join('\n')).toContain('npm run build:mds');
   });
 

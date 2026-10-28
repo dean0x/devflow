@@ -10,6 +10,7 @@
 import color from 'picocolors';
 
 import { overlayUnitLabel, type InstallReport, type OverlayFailureState } from '../../targets/claude-code/installer.js';
+import { refusedFolderMessage, replacedLinkMessage } from '../../targets/claude-code/linked-folder.js';
 import { SKILL_REFS_SKILL_NAME } from '../../core/mds-variants.js';
 import { prefixSkillName } from '../../core/plugins.js';
 
@@ -76,12 +77,7 @@ export function formatOverlaySummary(
  * Pure function — returns lines, logs nothing.
  */
 export function formatReplacedLinksSummary(report: Pick<InstallReport, 'replacedLinks'>): SummaryLine[] {
-  return report.replacedLinks.map(linkPath => ({
-    level: 'warn',
-    message:
-      `${linkPath} was a link. It was replaced with a real file or folder, and what it pointed to ` +
-      `was left as it was.`,
-  }));
+  return report.replacedLinks.map(linkPath => ({ level: 'warn', message: replacedLinkMessage(linkPath) }));
 }
 
 /**
@@ -94,12 +90,17 @@ export function formatReplacedLinksSummary(report: Pick<InstallReport, 'replaced
  * Pure function — returns lines, logs nothing.
  */
 export function formatRefusedFoldersSummary(report: Pick<InstallReport, 'refusedFolders'>): SummaryLine[] {
-  return report.refusedFolders.map(folder => ({
-    level: 'warn',
-    message:
-      `${folder} is a link or not a folder. Nothing was written there. ` +
-      `Replace it with a real file or folder and run the install again.`,
-  }));
+  return report.refusedFolders.map(folder => ({ level: 'warn', message: refusedFolderMessage(folder) }));
+}
+
+/**
+ * Both halves in one list, the replaced links first: for a command that prints the links one
+ * converge met and has no other summary of its own.
+ *
+ * Pure function — returns lines, logs nothing.
+ */
+export function formatLinksSummary(report: Pick<InstallReport, 'replacedLinks' | 'refusedFolders'>): SummaryLine[] {
+  return [...formatReplacedLinksSummary(report), ...formatRefusedFoldersSummary(report)];
 }
 
 /**
