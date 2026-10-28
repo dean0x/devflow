@@ -32,7 +32,7 @@ import {
 } from '../helpers.js'
 
 /** The Validate agent body, as resolveAgentSource reads it, in bytes. Registered as `validate-body-max`; lowered, never raised. */
-const VALIDATE_BODY_MAX_BYTES = 5_995
+const VALIDATE_BODY_MAX_BYTES = 6_023
 
 // ---------------------------------------------------------------------------
 // Corpus

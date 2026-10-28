@@ -149,10 +149,10 @@ Run builds, typechecks, lints and tests in the foreground, each with an explicit
 - Capture, then tail, in one Bash call: `LOG=$(mktemp); echo "LOG=$LOG"; <command> >"$LOG" 2>&1; rc=$?; tail -n 40 "$LOG"; printf '\nEXIT=%s\n' "$rc"`. The last `EXIT=` line is the result; never decide one from a grep count.
 - Never background a build or test, and never poll across turns: no `sleep` or `true` turns, no sentinel-file checks, no Monitor.
 - Prefer the scoped command for the change; for the whole set, one workspace command over per-package loops.
-- A run past its timeout moves to the background: start nothing else until its end notice and you Read its own last `EXIT=` line; it alone sets the label, not the notice or log. With none read it is BLOCKED: report its duration and log path. Report only after the end notice.
+- A run past its timeout moves to the background: no tool call, even a Read, until its end notice, then Read the last `EXIT=` line of the file the move names, not `$LOG`; it alone sets the label, not the notice. With none read it is BLOCKED: report its duration and log path. Report only after the end notice.
 - A run expected to exceed the ceiling may be split into parts, run in sequence.
 - Never re-run a command when nothing it reads has changed.
-- Never wrap a build or test command in `sh -c`, `bash -c`, `python3 -c` or `node -e`: permission rules deny wrapped commands they would allow directly.
+- Never wrap a build or test command in `sh -c`, `bash -c`, `python3 -c` or `node -e`: permission rules deny wrapped commands they allow directly.
 - The same rules hold inside a dynamic Workflow sub-agent.
 
 **Cheapest-sufficient validation:** iterate with the fastest check that proves the change — `tsc --noEmit`, `cargo check`, `go vet`, a single test file — the ecosystem's cheapest sufficient signal. Reserve expensive full/optimized builds and whole-suite runs for the final gates only.

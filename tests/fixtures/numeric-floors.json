@@ -454,27 +454,27 @@
     },
     {
       "id": "code-body-max",
-      "ceiling": 10690,
-      "pattern": "const CODE_BODY_MAX_BYTES = 10_690",
+      "ceiling": 10718,
+      "pattern": "const CODE_BODY_MAX_BYTES = 10_718",
       "occurrences": 1,
       "sourceFile": "tests/guards/code-operation.test.ts",
-      "description": "D-CODE-VARIANTS and D-PR-BY-GIT: the compiled Code agent body, dist/agents/code.md, in bytes. It was 24,851 while one Code agent held all seven modes and also opened the PR; the Git agent's ensure-pr-ready reference owns the PR text (16,449), and the three variants split the modes, so Code keeps implement and issue-fix and measures 10,690, the ceiling (it was 10,735 before the shared Running commands block was rewritten to wait for a run past its timeout, which cut 45 bytes). It was 11,155 after D-COMPLIANCE-INJECT moved the compliance step and input (525) out of the body into the command's directive; #452 then added the read-once and quiet-output rules and cut duplicate rules (418 net). The commit step then gained the check of the diff for secrets or tokens in logs or debug output, paid by removing the Output lead-in and the commit-only note, which the PUSH input line already states (net 2 lower, from 10,737). A later change widened that check to the staged diff of every file the agent commits and paid for it by removing the TASK_ID example from the shared input line, so the size did not change. The guard also holds the body free of every PR-opening phrase and keeps commit-and-push, the diff check once on the commit line, and the security scan (D-SCAN-IN-CODE). May be lowered, never raised: a later addition funds itself with a cut."
+      "description": "D-CODE-VARIANTS and D-PR-BY-GIT: the compiled Code agent body, dist/agents/code.md, in bytes. It was 24,851 while one Code agent held all seven modes and also opened the PR; the Git agent's ensure-pr-ready reference owns the PR text (16,449), and the three variants split the modes, so Code keeps implement and issue-fix and measures 10,690, the ceiling (it was 10,735 before the shared Running commands block was rewritten to wait for a run past its timeout, which cut 45 bytes). It was 11,155 after D-COMPLIANCE-INJECT moved the compliance step and input (525) out of the body into the command's directive; #452 then added the read-once and quiet-output rules and cut duplicate rules (418 net). The commit step then gained the check of the diff for secrets or tokens in logs or debug output, paid by removing the Output lead-in and the commit-only note, which the PUSH input line already states (net 2 lower, from 10,737). A later change widened that check to the staged diff of every file the agent commits and paid for it by removing the TASK_ID example from the shared input line, so the size did not change. The guard also holds the body free of every PR-opening phrase and keeps commit-and-push, the diff check once on the commit line, and the security scan (D-SCAN-IN-CODE). It rose by 28 bytes to 10,718 at #677, because the wait rule now names the file that sets the result: a run could read the wrong file and report a pass. May be lowered, never raised: a later addition funds itself with a cut."
     },
     {
       "id": "fix-body-max",
-      "ceiling": 8356,
-      "pattern": "const FIX_BODY_MAX_BYTES = 8_356",
+      "ceiling": 8384,
+      "pattern": "const FIX_BODY_MAX_BYTES = 8_384",
       "occurrences": 1,
       "sourceFile": "tests/guards/code-operation.test.ts",
-      "description": "D-CODE-VARIANTS: the compiled Fix agent body, dist/agents/fix.md, in bytes. It carries the four gate-failure fix modes (validation-fix, alignment-fix, qa-fix, ci-fix), the commit step with the security scan and the shared Running commands, Principles, Output and Boundaries text, and measures 8,356, the ceiling (it was 8,401 before the shared Running commands block was rewritten to wait for a run past its timeout, which cut 45 bytes; it was 8,634 after D-COMPLIANCE-INJECT moved the compliance step and input, 525, out of the body into the command's directive, and 8,624 after the agent rename in #467; #452 then added the read-once and quiet-output rules and cut duplicate rules, 120 net, to 8,504; the lint-pack change of #531 then cut 23 net from fix.mds, to 8,481, and left the ceiling at 8,504; the commit step then gained the check of the diff for secrets or tokens in logs or debug output, paid by removing the Output lead-in and the commit-only note, which the PUSH input line already states, net 2 lower, from 8,481; a later change widened that check to the staged diff of every file the agent commits and paid for it by removing the TASK_ID example from the shared input line, so the size did not change; #483 then cut the clause that said the command runs Evaluate again after each alignment-fix attempt, 78 net, from 8,479 to 8,401, and lowered the ceiling to match, with the curation-off build at 7,970 under it). The guard also holds the body free of every PR-opening phrase and keeps the diff check once on the commit line. May be lowered, never raised: a later addition funds itself with a cut."
+      "description": "D-CODE-VARIANTS: the compiled Fix agent body, dist/agents/fix.md, in bytes. It carries the four gate-failure fix modes (validation-fix, alignment-fix, qa-fix, ci-fix), the commit step with the security scan and the shared Running commands, Principles, Output and Boundaries text, and measures 8,356, the ceiling (it was 8,401 before the shared Running commands block was rewritten to wait for a run past its timeout, which cut 45 bytes; it was 8,634 after D-COMPLIANCE-INJECT moved the compliance step and input, 525, out of the body into the command's directive, and 8,624 after the agent rename in #467; #452 then added the read-once and quiet-output rules and cut duplicate rules, 120 net, to 8,504; the lint-pack change of #531 then cut 23 net from fix.mds, to 8,481, and left the ceiling at 8,504; the commit step then gained the check of the diff for secrets or tokens in logs or debug output, paid by removing the Output lead-in and the commit-only note, which the PUSH input line already states, net 2 lower, from 8,481; a later change widened that check to the staged diff of every file the agent commits and paid for it by removing the TASK_ID example from the shared input line, so the size did not change; #483 then cut the clause that said the command runs Evaluate again after each alignment-fix attempt, 78 net, from 8,479 to 8,401, and lowered the ceiling to match, with the curation-off build at 7,970 under it). The guard also holds the body free of every PR-opening phrase and keeps the diff check once on the commit line. It rose by 28 bytes to 8,384 at #677, because the wait rule now names the file that sets the result: a run could read the wrong file and report a pass. May be lowered, never raised: a later addition funds itself with a cut."
     },
     {
       "id": "refactor-body-max",
-      "ceiling": 6365,
-      "pattern": "const REFACTOR_BODY_MAX_BYTES = 6_365",
+      "ceiling": 6393,
+      "pattern": "const REFACTOR_BODY_MAX_BYTES = 6_393",
       "occurrences": 1,
       "sourceFile": "tests/guards/code-operation.test.ts",
-      "description": "D-CODE-VARIANTS: the compiled Refactor agent body, dist/agents/refactor.md, in bytes. It carries the one edit mode, the commit step with the security scan and the shared Running commands, Principles, Output and Boundaries text, and measures 6,365, the ceiling (it was 6,410 before the shared Running commands block was rewritten to wait for a run past its timeout, which cut 45 bytes; it was 6,532 after the rename to Refactor and its routing note added 24 bytes; #452 then added the read-once and quiet-output rules and cut duplicate rules, 120 net; the commit step then gained the check of the diff for secrets or tokens in logs or debug output, paid by removing the Output lead-in and the commit-only note, which the PUSH input line already states, net 2 lower, from 6,412; a later change widened that check to the staged diff of every file the agent commits and paid for it by removing the TASK_ID example from the shared input line, so the size did not change). The guard also holds the body free of every PR-opening phrase and keeps the diff check once on the commit line. May be lowered, never raised: a later addition funds itself with a cut."
+      "description": "D-CODE-VARIANTS: the compiled Refactor agent body, dist/agents/refactor.md, in bytes. It carries the one edit mode, the commit step with the security scan and the shared Running commands, Principles, Output and Boundaries text, and measures 6,365, the ceiling (it was 6,410 before the shared Running commands block was rewritten to wait for a run past its timeout, which cut 45 bytes; it was 6,532 after the rename to Refactor and its routing note added 24 bytes; #452 then added the read-once and quiet-output rules and cut duplicate rules, 120 net; the commit step then gained the check of the diff for secrets or tokens in logs or debug output, paid by removing the Output lead-in and the commit-only note, which the PUSH input line already states, net 2 lower, from 6,412; a later change widened that check to the staged diff of every file the agent commits and paid for it by removing the TASK_ID example from the shared input line, so the size did not change). The guard also holds the body free of every PR-opening phrase and keeps the diff check once on the commit line. It rose by 28 bytes to 6,393 at #677, because the wait rule now names the file that sets the result: a run could read the wrong file and report a pass. May be lowered, never raised: a later addition funds itself with a cut."
     },
     {
       "id": "synthesize-body-max",
@@ -574,11 +574,11 @@
     },
     {
       "id": "validate-body-max",
-      "ceiling": 5995,
-      "pattern": "const VALIDATE_BODY_MAX_BYTES = 5_995",
+      "ceiling": 6023,
+      "pattern": "const VALIDATE_BODY_MAX_BYTES = 6_023",
       "occurrences": 1,
       "sourceFile": "tests/guards/validate-lint-pack.test.ts",
-      "description": "The Validate agent body, src/assets/agents/validate.md, in bytes. It is hand-authored. The lean lint-pack wiring and the per-file passed-alone re-run rule (the re-run sentence, the Read line with its conditions, and the Passed alone: line) are funded with named cuts in the same body; it measures 5,995 at #677 (6,003 at #666), with no headroom. May be LOWERED, never raised: a later addition funds itself with a cut."
+      "description": "The Validate agent body, src/assets/agents/validate.md, in bytes. It is hand-authored. The lean lint-pack wiring and the per-file passed-alone re-run rule (the re-run sentence, the Read line with its conditions, and the Passed alone: line) are funded with named cuts in the same body; it measures 5,995 at #677 (6,003 at #666), with no headroom. It rose by 28 bytes to 6,023 at #677, because the wait rule now names the file that sets the result: a run could read the wrong file and report a pass. May be LOWERED, never raised: a later addition funds itself with a cut."
     },
     {
       "id": "validate-passed-alone-ref-max",
@@ -638,19 +638,19 @@
     },
     {
       "id": "command-dynamic-build-max",
-      "ceiling": 106818,
-      "pattern": "['dynamic-build', 'on', 106_818],",
+      "ceiling": 106846,
+      "pattern": "['dynamic-build', 'on', 106_846],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/dynamic-build.md, the curation-on build, in bytes. Measured 106,818 at #677 (106,869 after #561), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/commands/dynamic-build.md, the curation-on build, in bytes. Measured 106,818 at #677 (106,869 after #561), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. It rose by 28 bytes to 106,846 at #677, because the wait rule now names the file that sets the result: a run could read the wrong file and report a pass. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-dynamic-build-curation-off-max",
-      "ceiling": 103431,
-      "pattern": "['dynamic-build', 'off', 103_431],",
+      "ceiling": 103459,
+      "pattern": "['dynamic-build', 'off', 103_459],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/curation-off/commands/dynamic-build.md, the curation-off build, in bytes. Measured 103,431 at #677 (103,482 after #561), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/curation-off/commands/dynamic-build.md, the curation-off build, in bytes. Measured 103,431 at #677 (103,482 after #561), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. It rose by 28 bytes to 103,459 at #677, because the wait rule now names the file that sets the result: a run could read the wrong file and report a pass. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-dynamic-plan-max",
@@ -846,19 +846,19 @@
     },
     {
       "id": "command-dynamic-build-compliance-off-max",
-      "ceiling": 103711,
-      "pattern": "['dynamic-build', 'compliance-off', 103_711],",
+      "ceiling": 103739,
+      "pattern": "['dynamic-build', 'compliance-off', 103_739],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/dynamic-build.md, the compliance-off build, in bytes. Measured 103,711 at #677 (103,760 at its first build), with no headroom. The rule sets no comparison with the all-on build. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/dynamic-build.md, the compliance-off build, in bytes. Measured 103,711 at #677 (103,760 at its first build), with no headroom. The rule sets no comparison with the all-on build. It rose by 28 bytes to 103,739 at #677, because the wait rule now names the file that sets the result: a run could read the wrong file and report a pass. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-dynamic-build-both-off-max",
-      "ceiling": 100324,
-      "pattern": "['dynamic-build', 'both-off', 100_324],",
+      "ceiling": 100352,
+      "pattern": "['dynamic-build', 'both-off', 100_352],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE (#648, AC-33): dist/curation-compliance-off/commands/dynamic-build.md, the build with curation and compliance both off, in bytes. Measured 100,324 at #677 (100,373 at its first build), with no headroom. The rule sets no comparison with the other builds. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE (#648, AC-33): dist/curation-compliance-off/commands/dynamic-build.md, the build with curation and compliance both off, in bytes. Measured 100,324 at #677 (100,373 at its first build), with no headroom. The rule sets no comparison with the other builds. It rose by 28 bytes to 100,352 at #677, because the wait rule now names the file that sets the result: a run could read the wrong file and report a pass. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-dynamic-tickets-compliance-off-max",
