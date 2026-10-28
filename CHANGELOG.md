@@ -76,7 +76,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The one-file re-run in Validate reads its own last `EXIT=` line in the same way.
   - `/bug-analysis` waits for a scanner call that reaches the Bash limit and reads the call's own last `exit=` line. A scanner call with no `exit=` line read still counts as not complete. Semgrep writes its result to `semgrep.part` and renames it to `semgrep.sarif` when its scan ends, so the SARIF file appears only when the scan ends. The warning for a missing scanner no longer names an install command.
   - `/implement` reports and halts when the Validate report has a Status other than PASS or FAIL, or none. This includes a BLOCKED report, in the validation and in the re-validation. `/resolve` records FAILED and ends its validation loop in the same case. Neither reads it as a pass.
-  - Accepted cost: devflow stops no run, so a run that never ends holds its agent until you stop it (Esc).
+  - Accepted cost: devflow stops no run, so a run that never ends holds its agent until you stop it (Esc). Parallel agents in one wave each wait for their own run.
 
 ---
 
