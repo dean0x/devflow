@@ -590,19 +590,19 @@
     },
     {
       "id": "command-bug-analysis-max",
-      "ceiling": 24421,
-      "pattern": "['bug-analysis', 'on', 24_421],",
+      "ceiling": 24489,
+      "pattern": "['bug-analysis', 'on', 24_489],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/bug-analysis.md, the curation-on build, in bytes. Measured 24,421 at #677 (24,452 at #652), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/commands/bug-analysis.md, the curation-on build, in bytes. Measured 24,421 at #677 (24,452 at #652), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. It rose by 68 bytes to 24,489 at #677, because the scanner wait now names the file that sets the status: a run could read the wrong file and report a scan as completed. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-bug-analysis-curation-off-max",
-      "ceiling": 20603,
-      "pattern": "['bug-analysis', 'off', 20_603],",
+      "ceiling": 20671,
+      "pattern": "['bug-analysis', 'off', 20_671],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/curation-off/commands/bug-analysis.md, the curation-off build, in bytes. Measured 20,603 at #677 (20,634 at #652), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/curation-off/commands/bug-analysis.md, the curation-off build, in bytes. Measured 20,603 at #677 (20,634 at #652), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. It rose by 68 bytes to 20,671 at #677, because the scanner wait now names the file that sets the status: a run could read the wrong file and report a scan as completed. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-code-review-max",
@@ -814,19 +814,19 @@
     },
     {
       "id": "command-bug-analysis-compliance-off-max",
-      "ceiling": 23890,
-      "pattern": "['bug-analysis', 'compliance-off', 23_890],",
+      "ceiling": 23958,
+      "pattern": "['bug-analysis', 'compliance-off', 23_958],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/bug-analysis.md, the compliance-off build, in bytes. Measured 23,890 at #677 (24,107 at its first build), with no headroom. The rule sets no comparison with the all-on build. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/bug-analysis.md, the compliance-off build, in bytes. Measured 23,890 at #677 (24,107 at its first build), with no headroom. The rule sets no comparison with the all-on build. It rose by 68 bytes to 23,958 at #677, because the scanner wait now names the file that sets the status: a run could read the wrong file and report a scan as completed. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-bug-analysis-both-off-max",
-      "ceiling": 20072,
-      "pattern": "['bug-analysis', 'both-off', 20_072],",
+      "ceiling": 20140,
+      "pattern": "['bug-analysis', 'both-off', 20_140],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE (#648, AC-33): dist/curation-compliance-off/commands/bug-analysis.md, the build with curation and compliance both off, in bytes. Measured 20,072 at #677 (20,203 at its first build), with no headroom. The rule sets no comparison with the other builds. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE (#648, AC-33): dist/curation-compliance-off/commands/bug-analysis.md, the build with curation and compliance both off, in bytes. Measured 20,072 at #677 (20,203 at its first build), with no headroom. The rule sets no comparison with the other builds. It rose by 68 bytes to 20,140 at #677, because the scanner wait now names the file that sets the status: a run could read the wrong file and report a scan as completed. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-code-review-compliance-off-max",

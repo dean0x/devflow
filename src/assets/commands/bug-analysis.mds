@@ -121,7 +121,7 @@ If some are available: note which tools will run.
 
 Skip if Step 2c set `STATIC_STATUS`.
 
-Run each available tool in this order, each in its own foreground Bash call with the Bash `timeout` at the ceiling: 600000 ms, or `BASH_MAX_TIMEOUT_MS` when set. Past it, run nothing else until its end notice and you Read its own last `exit=` line; the notice sets nothing. File names reach a scanner only through `-z`, `xargs -0` and after `--`.
+Run each available tool in this order, each in its own foreground Bash call with the Bash `timeout` at the ceiling: 600000 ms, or `BASH_MAX_TIMEOUT_MS` when set. Past it, make no tool call, even a Read, until its end notice, then Read the last `exit=` line of the output file that notice names, never a scanner file; the notice sets nothing. File names reach a scanner only through `-z`, `xargs -0` and after `--`.
 
 **Semgrep** (if available):
 ```bash

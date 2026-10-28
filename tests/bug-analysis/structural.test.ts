@@ -425,8 +425,8 @@ const NO_SCANNER_BRANCH = 'If all three scanners print `no`:';
 const NO_JQ_BRANCH = 'If a scanner is installed but `jq` prints `no`:';
 /** The one stated Bash `timeout`: the agent's ceiling, 600000 ms unless `BASH_MAX_TIMEOUT_MS` raises it. */
 const CEILING_TIMEOUT = 'with the Bash `timeout` at the ceiling: 600000 ms, or `BASH_MAX_TIMEOUT_MS` when set.';
-/** The sentence after the ceiling: a call past it is not followed by another command until its end notice, and only its own `exit=` line is read. */
-const WAIT_SENTENCE = 'Past it, run nothing else until its end notice and you Read its own last `exit=` line; the notice sets nothing.';
+/** The sentence after the ceiling: a call past it is followed by no tool call until its end notice, and only the last `exit=` line of the output file that notice names is read, never a scanner file. */
+const WAIT_SENTENCE = 'Past it, make no tool call, even a Read, until its end notice, then Read the last `exit=` line of the output file that notice names, never a scanner file; the notice sets nothing.';
 /** A Bash `timeout` stated as a fixed number: it would cap the call below a ceiling the agent raised. */
 const FIXED_TIMEOUT = /Bash `timeout` at \d/;
 /** What bounds a command in time: the `timeout` or `gtimeout` command, the old `{bound}` placeholder, or a `-k` kill grace. */
@@ -454,7 +454,7 @@ const doesNotSay = (part: string): string => `Phase 2 does not say: ${part}`;
  * devflow puts no time bound on a scanner: no command line of Phase 2 carries one, and no sentence names one, whether
  * as the `timeout` command or as a number with a time unit. The Bash `timeout` the agent sets for each call is the only
  * limit, and it is the agent's ceiling, not a fixed number. A call that reaches it prints no `exit=` line. The agent
- * runs nothing else until the end notice and reads that call's own last `exit=` line; the status rule reads a call
+ * makes no tool call until the end notice and reads the last `exit=` line of the output file that notice names; the status rule reads a call
  * with no such line as did not complete.
  */
 function collectNoBoundDefects(phase2: string): string[] {
@@ -1567,9 +1567,9 @@ describe('bug-analysis.md — static analysis never reads as clean when it did n
     expect(defects('A call with no `exit=` line read', 'A call with no `exit=` line')).toContain(doesNotSay(STATUS_RULE_PARTS[2]));
     expect(defects('line read did not complete', 'line in a result did not complete')).toContain(doesNotSay(STATUS_RULE_PARTS[2]));
     expect(defects('line read did not complete.', 'line read did not complete unless its end notice shows exit 0.')).toContain(doesNotSay(STATUS_RULE_PARTS[2]));
-    expect(defects('run nothing else', 'run the counts fence')).toContain(doesNotSay(STATUS_RULE_PARTS[3]));
+    expect(defects('make no tool call, even a Read,', 'run the counts fence')).toContain(doesNotSay(STATUS_RULE_PARTS[3]));
     expect(defects('the notice sets nothing', 'the notice sets the status')).toContain(doesNotSay(STATUS_RULE_PARTS[3]));
-    expect(defects('its own last `exit=` line', 'the `exit=` line')).toContain(doesNotSay(STATUS_RULE_PARTS[3]));
+    expect(defects('of the output file that notice names, never a scanner file', 'of semgrep.sarif')).toContain(doesNotSay(STATUS_RULE_PARTS[3]));
     expect(defects(` ${WAIT_SENTENCE}`, '')).toContain(doesNotSay(STATUS_RULE_PARTS[3]));
     const retired = 'A call with no `exit=` line read did not complete.';
     expect(defects(retired, `${retired} It stays did not complete for this run: ${RETIRED_END_NOTICE}.`)).toContain(`Phase 2 still says: ${RETIRED_END_NOTICE}`);
