@@ -5,15 +5,21 @@
  * The text is absent from the prompt, not gated at run time (a gate is text the model
  * can read past). This guard scans the compliance-off builds of every host on the
  * roster, `dist/compliance-off/` and `dist/curation-compliance-off/`, for the items
- * AC-13 lists, and finds none.
+ * AC-13 lists, and finds none. It scans the prompts of every host outside the roster
+ * the same way: a host with no compliance arm installs its compliance-on text, so its
+ * prompt must name no posting item either. That group is the command hosts and the
+ * compiled agent hosts with no arm, in the curation-on and the curation-off build,
+ * and the hand-authored agents.
  *
- * The scan is held honest three ways:
+ * The scan is held honest four ways:
  *   - the same patterns run over the compliance-on prompts and each must find a hit,
  *     so no pattern is empty by design;
  *   - a posting line seeded into a clean text must fail the scan, and an allowlist
  *     entry with a reason must excuse it, so both halves of the collector are live;
  *   - the off hosts come from COMPLIANCE_VARIANT_HOSTS, the roster the build manifest is
- *     held to in both directions, so a host cannot gain an arm and escape the scan.
+ *     held to in both directions, so a host cannot gain an arm and escape the scan;
+ *   - the hosts outside the roster are the other hosts of the manifest and the agent
+ *     registry, each file read and a posting line seeded into each one reported.
  *
  * The reference trees (`dist/skills/git/references/`) are outside this guard: their arms
  * and their scan belong to the reference build.
@@ -24,8 +30,15 @@ import { readdirSync, readFileSync } from 'fs'
 import * as path from 'path'
 
 import { variantOffRelPath, type OffVariantKey, type VariantKind } from '../../src/core/curation-variants.js'
-import { ROOT } from '../helpers.js'
-import { COMPLIANCE_VARIANT_HOSTS, CURATION_VARIANT_HOSTS, POSTING_OPERATIONS } from '../fixtures/mds-manifest.js'
+import { getAllAgentNames } from '../../src/core/plugins.js'
+import { ROOT, resolveAllAgents } from '../helpers.js'
+import {
+  COMPLIANCE_VARIANT_HOSTS,
+  CURATION_VARIANT_HOSTS,
+  MDS_COMMAND_HOSTS,
+  MDS_GENERATOR_HOSTS,
+  POSTING_OPERATIONS,
+} from '../fixtures/mds-manifest.js'
 
 /** A text to scan, with the label a defect names it by. */
 interface ScanFile {
@@ -138,6 +151,42 @@ function complianceOnFiles(): { commands: ScanFile[]; agents: ScanFile[]; all: S
   return { commands, agents, all }
 }
 
+/** True when the host `<kind>/<name>` carries a compliance arm, so a compliance-off machine installs its off file. */
+function isArmed(kind: VariantKind, name: string): boolean {
+  return COMPLIANCE_VARIANT_HOSTS.includes(`${kind}/${name}`)
+}
+
+/**
+ * The prompts a compliance-off machine installs from outside the roster. A host with no compliance
+ * arm has no off file, so the machine installs the same text a compliance-on machine does: the
+ * curation-on build, or the curation-off build when curation is also off. A hand-authored agent has no
+ * build and installs as written. One read per file, so a missing file is an error and never a silent skip.
+ */
+function unarmedFiles(): { commands: ScanFile[]; agents: ScanFile[]; handAuthored: ScanFile[]; all: ScanFile[] } {
+  const compiled = (kind: VariantKind): ScanFile[] =>
+    [...readTreeDir(`dist/${kind}`), ...readTreeDir(`dist/curation-off/${kind}`)].filter(
+      file => !isArmed(kind, path.basename(file.path, '.md')),
+    )
+  const commands = compiled('commands')
+  const agents = compiled('agents')
+  const handAuthored = [...resolveAllAgents().values()]
+    .filter(source => source.origin === 'src')
+    .map((source): ScanFile => ({ path: path.relative(ROOT, source.path).split(path.sep).join('/'), text: source.content }))
+    .sort((a, b) => a.path.localeCompare(b.path))
+  return { commands, agents, handAuthored, all: [...commands, ...agents, ...handAuthored] }
+}
+
+/**
+ * The compiled files the manifest says the unarmed hosts of one kind have: the curation-on file of each, and
+ * the curation-off file of each that also carries a curation arm. Sorted, so it compares to the scan's own list.
+ */
+function expectedUnarmedPaths(kind: VariantKind, hosts: readonly string[]): string[] {
+  return hosts
+    .filter(name => !isArmed(kind, name))
+    .flatMap(name => [`dist/${kind}/${name}.md`, ...(CURATION_VARIANT_HOSTS.includes(`${kind}/${name}`) ? [`dist/curation-off/${kind}/${name}.md`] : [])])
+    .sort()
+}
+
 describe('posting absence: a compliance-off prompt holds no posting item (AC-13, AC-16)', () => {
   const offCommands = offRosterFiles('commands')
   const offAgents = offRosterFiles('agents')
@@ -157,6 +206,40 @@ describe('posting absence: a compliance-off prompt holds no posting item (AC-13,
       0,
     )
     expect(offCommands.length + offAgents.length).toBe(expected)
+  })
+})
+
+describe('posting absence: a prompt outside the roster holds no posting item (AC-13, AC-16)', () => {
+  const unarmed = unarmedFiles()
+  const unarmedCommandPaths = expectedUnarmedPaths('commands', MDS_COMMAND_HOSTS)
+  const unarmedAgentPaths = expectedUnarmedPaths('agents', MDS_GENERATOR_HOSTS)
+  const handAuthoredNames = getAllAgentNames().filter(name => !(MDS_GENERATOR_HOSTS as readonly string[]).includes(name)).sort()
+
+  it('the command prompts with no compliance arm, curation on and off, hold none of the listed posting items', () => {
+    expect(collectPostingHits(unarmed.commands)).toEqual([])
+  })
+
+  it('the compiled agent prompts with no compliance arm, curation on and off, hold none of the listed posting items', () => {
+    expect(collectPostingHits(unarmed.agents)).toEqual([])
+  })
+
+  it('the hand-authored agent prompts hold none of the listed posting items', () => {
+    expect(collectPostingHits(unarmed.handAuthored)).toEqual([])
+  })
+
+  it('the scan reads every file the manifests name for a host outside the roster, and no armed host', () => {
+    expect(unarmedCommandPaths.length, 'the manifest names command hosts with no compliance arm').toBeGreaterThan(0)
+    expect(unarmedAgentPaths.length, 'the manifest names compiled agent hosts with no compliance arm').toBeGreaterThan(0)
+    expect(handAuthoredNames.length, 'the agent registry names hand-authored agents').toBeGreaterThan(0)
+    expect(unarmed.commands.map(file => file.path).sort()).toEqual(unarmedCommandPaths)
+    expect(unarmed.agents.map(file => file.path).sort()).toEqual(unarmedAgentPaths)
+    expect(unarmed.handAuthored.map(file => path.basename(file.path, '.md')).sort()).toEqual(handAuthoredNames)
+  })
+
+  it('known-bad probe: a posting line seeded into any one outside-the-roster prompt is reported, by file and pattern', () => {
+    const seeded = unarmed.all.map((file): ScanFile => ({ ...file, text: `${file.text}\nOPERATION: manage-debt\n` }))
+    expect(collectPostingHits(unarmed.all)).toEqual([])
+    expect(collectPostingHits(seeded)).toEqual(unarmed.all.map(file => `${file.path}: op manage-debt`))
   })
 })
 

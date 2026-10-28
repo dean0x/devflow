@@ -321,9 +321,12 @@ export const COMPLIANCE_OFF_FILES: readonly string[] = COMPLIANCE_VARIANT_HOSTS.
 
 /**
  * The eight Git operations that post to GitHub or a tracker: a compliance-off install
- * carries no row, loading line or text that names one of them, in the Git agent or in
- * any command. A named set, never a count, so an op that moves in or out is a visible
- * edit here.
+ * carries no row, loading line or text that names one of them in a command or agent
+ * prompt (tests/guards/posting-absence.test.ts). The scan covers the compliance-off
+ * build of every host in COMPLIANCE_VARIANT_HOSTS, the curation-on and curation-off
+ * build of every command and compiled agent host outside it, and the hand-authored
+ * agents. The reference files under `dist/skills/` are outside that scan. A named set,
+ * never a count, so an op that moves in or out is a visible edit here.
  */
 export const POSTING_OPERATIONS: readonly string[] = [
   'post-review-summary',
