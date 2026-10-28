@@ -329,6 +329,9 @@ const SEVERITY_SENTENCE = 'Open each Issue cell with its severity in brackets wh
 const DUPLICATE_PARAGRAPH_OPENER = 'DUPLICATE issues are listed **only** in `## Duplicates`'
 const TEMPLATE_LINE = 'Use the template from the Output Artifact section below.'
 const PHASE_7_SKIPPED = 'If no fixes were made (CODE_AGENT_RESULTS contains 0 commits) → set VERIFICATION_STATUS = SKIPPED, skip: "No fixes applied — skipping Verification Gate."'
+const PHASE_7_PASS = '**If PASS:** set VERIFICATION_STATUS = PASS and exit the validation loop.'
+/** The Phase 7 sentence that sends a Validate report with any Status but PASS or FAIL to the FAILED path: its own paragraph after the PASS line. */
+const PHASE_7_OTHER_STATUS = 'Any other or missing Status: FAILED, exit the loop; never PASS.'
 const ROUTE_PUSH = '**Route after push:** VERIFICATION_STATUS = PASS → continue to Phase 8 (CI gate). FAILED or SKIPPED → skip Phase 8 and continue with Phase 9 and the later phases in order.'
 const MANAGE_DEBT_GATE = 'If any issues are FIX_SEPARATE or TECH_DEBT, spawn Git agent.'
 const BACKFILL = 'backfill `Tracked = {ISSUE_REF}` in resolution-summary.md for each FIX_SEPARATE and TECH_DEBT item'
@@ -387,6 +390,7 @@ export function collectResolveSideDefects(body: string, ref: string): string[] {
 
   const phase7 = sectionBetween(body, '### Phase 7: Verification Gate', '### Phase 8:')
   if (phase7 === null || countOf(phase7, PHASE_7_SKIPPED) !== 1) out.push('Phase 7 lacks the pinned SKIPPED line')
+  if (phase7 === null || countOf(phase7, PHASE_7_OTHER_STATUS) !== 1 || !phase7.includes(`${PHASE_7_PASS}\n\n${PHASE_7_OTHER_STATUS}\n`)) out.push('Phase 7 lacks the other-or-missing Status sentence once, right after the PASS line')
   if (countOf(body, ROUTE_PUSH) !== 1) out.push('the route after push is not the pinned line')
   const phase9 = sectionBetween(body, '### Phase 9: Manage Debt', '### Phase 9b:')
   if (phase9 === null || countOf(phase9, MANAGE_DEBT_GATE) !== 1 || countOf(phase9, 'OPERATION: manage-debt') !== 1) out.push('Phase 9 lacks the manage-debt gate for FIX_SEPARATE and TECH_DEBT')
@@ -779,6 +783,14 @@ describe('resolve.mds reads what Triage writes (TP-5, TP-12, TP-14, TP-15, TP-16
     expect(collectResolveSideDefects(seedOnce(body, `${SEVERITY_SENTENCE}\n\n`, ''), REFERENCE), 'dropped').toEqual([lacks])
     expect(collectResolveSideDefects(seedOnce(body, `${SEVERITY_SENTENCE}\n\n${TEMPLATE_LINE}`, `${TEMPLATE_LINE}\n\n${SEVERITY_SENTENCE}`), REFERENCE), 'after the template line').toEqual([lacks])
     expect(collectResolveSideDefects(seedOnce(body, 'severity in brackets', 'severity'), REFERENCE), 'reworded').toEqual([lacks])
+  })
+
+  it.each(RESOLVE_BUILDS)('$label: known-bad probes on Phase 7: a dropped, reworded, moved or doubled other-or-missing Status sentence is reported', ({ body }) => {
+    const lacks = 'Phase 7 lacks the other-or-missing Status sentence once, right after the PASS line'
+    expect(collectResolveSideDefects(seedOnce(body, `\n\n${PHASE_7_OTHER_STATUS}`, ''), REFERENCE), 'dropped').toEqual([lacks])
+    expect(collectResolveSideDefects(seedOnce(body, PHASE_7_OTHER_STATUS, 'Any other or missing Status: carry on.'), REFERENCE), 'reworded').toEqual([lacks])
+    expect(collectResolveSideDefects(seedOnce(body, `${PHASE_7_PASS}\n\n${PHASE_7_OTHER_STATUS}`, `${PHASE_7_OTHER_STATUS}\n\n${PHASE_7_PASS}`), REFERENCE), 'before the PASS line').toEqual([lacks])
+    expect(collectResolveSideDefects(seedOnce(body, PHASE_7_OTHER_STATUS, `${PHASE_7_OTHER_STATUS}\n\n${PHASE_7_OTHER_STATUS}`), REFERENCE), 'doubled').toEqual([lacks])
   })
 
   it.each(RESOLVE_BUILDS)('$label: known-bad probes on the unchanged lines: the SKIPPED line, the route after push, the manage-debt gate, the backfill, a summary heading, the Fix Separately columns and the header are each reported', ({ body }) => {

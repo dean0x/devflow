@@ -328,10 +328,9 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
 `validation_retry_count = 0`
 
 **If FAIL:**
-1. Extract failure details from Validate agent output
-2. Increment `validation_retry_count`
-3. If `validation_retry_count <= 2`:
-   - Spawn Fix agent with fix context:
+1. Increment `validation_retry_count`
+2. If `validation_retry_count <= 2`:
+   - Spawn Fix agent:
    ```
    Agent(subagent_type="Fix"):
    "OPERATION: validation-fix
@@ -346,9 +345,11 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
    {COMPLIANCE_DIRECTIVE}"
    ```
    - Loop back to re-validate
-4. If `validation_retry_count > 2`: set VERIFICATION_STATUS = FAILED and exit the validation loop — record a blocking callout in the `## Verification` section (never a silent pass).
+3. If `validation_retry_count > 2`: set VERIFICATION_STATUS = FAILED and exit the validation loop — record a blocking callout in the `## Verification` section (never a silent pass).
 
 **If PASS:** set VERIFICATION_STATUS = PASS and exit the validation loop.
+
+Any other or missing Status: FAILED, exit the loop; never PASS.
 
 Record `## Verification` outcome in resolution-summary.md (runs unconditionally after the validation loop exits):
 - Rewrite the `## Verification` section with | Command | Result | table + `Final gate: PASS | FAILED after N attempts`
