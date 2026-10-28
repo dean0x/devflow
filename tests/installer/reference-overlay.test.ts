@@ -1978,6 +1978,22 @@ describe('compliance-off reference install (AC-41, AC-50)', () => {
     expect(asks.equals(await fs.readFile(path.join(compiledSkillRefsDir(), '..', '..', '..', '..', 'src', 'assets', 'skills', 'agent-references', 'references', 'commands', 'implement-evidence-asks.md')))).toBe(true);
   });
 
+  it('the posting recipes file installs with compliance on, is gone with compliance off and returns byte for byte (TP-60)', async () => {
+    const source = await fs.readFile(path.resolve(import.meta.dirname, '../../src/assets/skills/git/references/github-posting.md'));
+    expect(source.length, 'precondition: the source file is not empty').toBeGreaterThan(0);
+    const installed = (): string => abs(installedRefs(), 'github-posting.md');
+
+    await install({ compliance: true });
+    expect((await fs.readFile(installed())).equals(source), 'compliance on installs the source bytes').toBe(true);
+
+    await install({ compliance: false });
+    expect(await exists(installed()), 'compliance off removes it').toBe(false);
+    expect(await exists(abs(installedRefs(), 'github-api.md')), 'the file that installs in every state stays').toBe(true);
+
+    await install({ compliance: true });
+    expect((await fs.readFile(installed())).equals(source), 'enabling compliance restores the source bytes').toBe(true);
+  });
+
   it('a user file in the references root survives a compliance-off install (TP-58)', async () => {
     await install({ compliance: true });
     const mine = path.join(installedRefs(), 'my-own-notes.md');
