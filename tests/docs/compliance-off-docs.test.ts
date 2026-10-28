@@ -147,7 +147,7 @@ describe('CHANGELOG: the compliance-off entry', () => {
   it('states the publish refusal with both lines, the exit code and the machine record as the only source', () => {
     const body = ENTRY?.body ?? ''
     expect(body).toContain('The evidence publish script refuses to post unless the machine setting has compliance on.')
-    expect(body).toContain('It reads only the machine install record. A repository file or an environment variable cannot change its answer.')
+    expect(body).toContain('It reads only the machine install record. It ignores the devflow directory setting in the environment, and it reads no repository file.')
     expect(body).toContain('`TRACEABILITY: DEGRADED (compliance off)`')
     expect(body).toContain('`TRACEABILITY: DEGRADED (compliance state unreadable)`')
     expect(body).toContain('it exits with code 2 and makes no GitHub call')
