@@ -18,7 +18,10 @@ import { createRequire } from 'module';
 import * as path from 'path';
 import { skillsDir, rulesDir, commandsDir, compiledSkillRefsDir } from '../src/core/assets.js';
 import { getAllAgentNames } from '../src/core/plugins.js';
+import { TRACKER_PROVIDER_IDS } from '../src/core/tracker.js';
 import {
+  COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR,
+  SKILL_REFS_OUTPUT_DIR,
   TRACKER_GITHUB_OPS,
   GIT_CROSS_CUTTING_DOCS,
   GIT_OPERATIONS,
@@ -3428,6 +3431,106 @@ describe('git agent: the compliance-off build carries no posting operation (AC-1
     expect(collectLoadingRowNames(seeded)).toContain('post-review-summary');
     expect(scrubSectionOf(off.replace('DO NOT POST', 'post anyway'))).not.toBe(scrubSectionOf(on));
     expect(scrubSectionOf('## Output\n')).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The compliance-off reference tree posts no evidence, exceptions, artifact or shipped
+// list (AC-42)
+//
+// With compliance off, the tracker operations that stay still run, but four of them
+// lose the text that feeds a posting step: ensure-pr-ready pastes no test-plan block and
+// no exceptions section, create-release appends no exceptions and no shipped-issues
+// list, and setup-task and ensure-traceable-issue take no plan artifact. The guard reads
+// the BUILT trees, because the arms are cut at build time, and reads each provider's file
+// because the three providers share these contracts and steps by construction.
+//
+// Every literal is asserted present in the compliance-on file of the same operation and
+// provider first, so a literal that was reworded away from both trees cannot leave the
+// absence check passing on nothing.
+// ---------------------------------------------------------------------------
+
+/**
+ * The text a compliance-off reference must not carry, per tracker operation, each literal
+ * spelled as the compliance-on file holds it: an input name in its contract line, or the
+ * step text that pastes it.
+ */
+const COMPLIANCE_OFF_ABSENT_LITERALS: ReadonlyArray<{ readonly op: string; readonly literals: readonly string[] }> = [
+  {
+    op: 'ensure-pr-ready',
+    literals: ['PR_TEST_PLAN_BLOCK', 'PR_EXCEPTIONS', '`check block`', '## Evidence Exceptions', 'Reviewer Focus Areas'],
+  },
+  {
+    op: 'create-release',
+    literals: ['TRACEABILITY_EXCEPTIONS', '`SHIPPED_ISSUES` (optional)', '`COMMIT_LIST`/`SHIPPED_ISSUES`'],
+  },
+  { op: 'setup-task', literals: ['`PLAN_ARTIFACT_PATH` (optional)'] },
+  { op: 'ensure-traceable-issue', literals: ['`PLAN_ARTIFACT_PATH` (optional)'] },
+];
+
+/** Named collector: the literals of `literals` that `text` holds. */
+function collectHeldLiterals(text: string, literals: readonly string[]): string[] {
+  return literals.filter(literal => text.includes(literal));
+}
+
+/** Read one built reference from the compliance-on or the compliance-off tree; a build hint when absent. */
+function readBuiltReference(root: string, rel: string): string {
+  const file = path.join(ROOT, ...root.split('/'), ...rel.split('/'));
+  try {
+    return readFileSync(file, 'utf-8');
+  } catch {
+    throw new Error(`${root}/${rel} is absent — run \`npm run build:mds\` first (this guard reads a built reference)`);
+  }
+}
+
+describe('git references: the compliance-off build carries no evidence paste, exceptions, artifact or shipped list (AC-42)', () => {
+  const PROVIDERS = TRACKER_PROVIDER_IDS;
+
+  it('checks every provider and every listed operation', () => {
+    expect(PROVIDERS.length, 'no provider was checked').toBeGreaterThan(0);
+    for (const { op, literals } of COMPLIANCE_OFF_ABSENT_LITERALS) {
+      expect(literals.length, `${op} lists no literal`).toBeGreaterThan(0);
+    }
+  });
+
+  for (const provider of PROVIDERS) {
+    for (const { op, literals } of COMPLIANCE_OFF_ABSENT_LITERALS) {
+      it(`${provider}/${op}: the compliance-on file holds each literal and the compliance-off file holds none`, () => {
+        const rel = operationReferenceRel(op, provider);
+        if (rel === null) throw new Error(`${op} has no reference for ${provider}`);
+        expect(collectHeldLiterals(readBuiltReference(SKILL_REFS_OUTPUT_DIR, rel), literals), 'the on file must hold every literal, or the absence check proves nothing').toEqual(literals);
+        expect(collectHeldLiterals(readBuiltReference(COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR, rel), literals)).toEqual([]);
+      });
+    }
+
+    it(`${provider}/ensure-pr-ready: the compliance-off file admits the wave block through the links-only check and keeps the wave caller block`, () => {
+      const rel = operationReferenceRel('ensure-pr-ready', provider);
+      if (rel === null) throw new Error(`ensure-pr-ready has no reference for ${provider}`);
+      const on = readBuiltReference(SKILL_REFS_OUTPUT_DIR, rel);
+      const off = readBuiltReference(COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR, rel);
+      expect(on).toContain('`PR_WAVE_BLOCK` (`check wave`)');
+      expect(on, 'the on file keeps the plain wave check').not.toContain('--links-only');
+      expect(off).toContain('check wave --links-only <file>');
+      expect(off).toContain('`PR_WAVE_BLOCK`');
+    });
+  }
+
+  it('decision-markers: the compliance-off file drops the publication-gate row (D10) and keeps the other markers', () => {
+    const on = readBuiltReference(SKILL_REFS_OUTPUT_DIR, 'decision-markers.md');
+    const off = readBuiltReference(COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR, 'decision-markers.md');
+    expect(on).toContain('| D10 | Publication gate');
+    expect(off).not.toContain('| D10 |');
+    expect(off).not.toContain('post-review-summary');
+    expect(off).toContain('| D9 | Thread-resolution gate');
+  });
+
+  it('known-bad probes: the collector reports a seeded literal in each listed operation', () => {
+    for (const { op, literals } of COMPLIANCE_OFF_ABSENT_LITERALS) {
+      for (const literal of literals) {
+        expect(collectHeldLiterals(`kept text\n${literal}\n`, literals), `${op}: ${literal}`).toEqual([literal]);
+      }
+    }
+    expect(collectHeldLiterals('kept text', COMPLIANCE_OFF_ABSENT_LITERALS[0].literals)).toEqual([]);
   });
 });
 
