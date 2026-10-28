@@ -380,10 +380,10 @@ const MODEL_CROSS_CUTTING_REFS: Readonly<Record<string, readonly string[]>> = {
   // one trust rule — so it reaches the op through the same one hop github-api.md does.
   'fetch-review-threads': ['github-api.md', 'trust-rule.md'],
   // resolve-review-threads fans out over the same threads, so it reads the same
-  // rate-limit rungs. The row is what keeps the two directions honest about a
-  // reference the op now names; the worst-case term is unchanged, because the
-  // non-tracker maximum was already github-api.md.
-  'resolve-review-threads': ['github-api.md'],
+  // rate-limit rungs, and it posts the reply and the resolve through the recipes in
+  // github-posting.md. The row is what keeps the two directions honest about the
+  // references the op names.
+  'resolve-review-threads': ['github-api.md', 'github-posting.md'],
   'setup-task': ['learn-conventions.md'],
   'learn-conventions': ['learn-conventions.md'],
   'post-review-summary': ['publication-gate.md'],
@@ -957,26 +957,19 @@ export const INFORMATIONAL_OP_MENTIONS: readonly InformationalOpMention[] = [
     why: 'Explains why the release-notes file pair is named apart from the body pair; the spawns ' +
       'that load this file run the review-thread recipes and never the release steps.',
   },
-  ...['fetch-review-threads', 'resolve-review-threads'].map(target => ({
+  {
     file: 'github-api.md',
-    target,
-    anchor: 'Used by the `fetch-review-threads` and `resolve-review-threads` Git agent operations.',
-    why: 'Section header naming the two operations that use the Review Threads recipes; both ' +
-      'already load this file, and neither loads the other\'s pr/ steps.',
-  })),
+    target: 'fetch-review-threads',
+    anchor: 'Used by the `fetch-review-threads` Git agent operation',
+    why: 'Section header naming the operation that runs the Enumerate recipe; the review-thread ' +
+      'batch that loads this file too never loads that operation\'s pr/ steps.',
+  },
   {
     file: 'github-api.md',
     target: 'fetch-review-threads',
     anchor: 'as `fetch-review-threads` step 2 defines',
     why: 'A citation inside the Enumerate recipe, which only fetch-review-threads runs, with the ' +
       'trust rule loaded; resolve-review-threads consumes THREAD_MAP and never enumerates.',
-  },
-  {
-    file: 'github-api.md',
-    target: 'resolve-review-threads',
-    anchor: 'Maximum threads to process in `resolve-review-threads`: ≤50',
-    why: 'States the resolve bound among the pagination limits; the fetch spawn that also loads ' +
-      'this file reads it as a number, never as steps to run.',
   },
   // Always-loaded text: held to "no hop at all", so its informational mentions are listed too.
   ...['resolve-review-threads', 'backlink-shipped-issues'].map(target => ({

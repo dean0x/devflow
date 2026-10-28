@@ -185,7 +185,7 @@ See `references/detection.md` for full `check_for_secrets()` function.
 
 ## GitHub API
 
-> **RESPECT RATE LIMITS OR FAIL GRACEFULLY** — at `X-RateLimit-Remaining` < 10 STOP the fan-out and report `THROTTLED` (D4); 1-2s between calls. Throttling, PR-comment rules and releases live in `references/github-api.md`.
+> **RESPECT RATE LIMITS OR FAIL GRACEFULLY** — at `X-RateLimit-Remaining` < 10 STOP the fan-out and report `THROTTLED` (D4); 1-2s between calls. Throttling and releases live in `references/github-api.md`; posting recipes, where installed, in `references/github-posting.md`.
 
 Naming conventions: `learn-conventions` writes `.devflow/conventions.md` from a bounded scan (≤50 branches, ≤20 tags, ≤30 PR titles) and is its single authority; delete that file to re-learn.
 
@@ -199,7 +199,7 @@ Naming conventions: `learn-conventions` writes `.devflow/conventions.md` from a 
 | `references/patterns.md` | Safety flows, commit patterns, PR templates |
 | `references/violations.md` | Safety, commit, and PR anti-patterns |
 | `references/detection.md` | Sensitive file regex patterns and check functions |
-| `references/github-api.md` | Rate limiting, CLI commands, GraphQL, releases, review thread GraphQL |
+| `references/github-api.md` | Rate limiting, CLI commands, GraphQL, releases, review thread fetch GraphQL |
 | `references/tracker/{provider}/{op}.md` | Generated per-op tracker mechanics (incl. the D3 template) |
 
 ## Checklist

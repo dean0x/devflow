@@ -309,11 +309,24 @@ const INLINE_BODY_SHAPES: readonly InlineBodyShape[] = [
 ];
 
 /**
- * Declared inline-body exceptions in the hand-authored `references/github-api.md`,
- * each frozen by the exact text an `INLINE_BODY_SHAPES` entry matches. See
- * D-INLINE-BODY-EXCLUSIONS at the guard's call site.
+ * The hand-authored GitHub references a declared inline-body exception may name:
+ * `github-api.md` and `github-posting.md`, which holds the recipes that post.
+ * Any other scanned file is outside the exception list.
+ */
+const GITHUB_HAND_AUTHORED_REFERENCES: readonly string[] = ['github-api.md', 'github-posting.md'];
+
+/** Whether a scanned path is one of `GITHUB_HAND_AUTHORED_REFERENCES`, by file name. */
+function isGithubHandAuthoredReference(file: string): boolean {
+  return GITHUB_HAND_AUTHORED_REFERENCES.includes(path.basename(file));
+}
+
+/**
+ * Declared inline-body exceptions in the hand-authored `references/github-api.md`
+ * and `references/github-posting.md`, each frozen by the exact text an
+ * `INLINE_BODY_SHAPES` entry matches. See D-INLINE-BODY-EXCLUSIONS at the guard's
+ * call site.
  *
- * The list is EMPTY: every recipe in that file composes its body to
+ * The list is EMPTY: every recipe in those files composes its body to
  * `$DEVFLOW_BODY_RAW`, scrubs it, and posts the scrubbed `$DEVFLOW_BODY` through
  * `--body-file` / `-F body=@`. It stays here because it is the only way to declare
  * an exception, and because both arms below are asserted over it — an offender no
@@ -352,7 +365,7 @@ function collectUndeclaredOffenders(
   known: readonly string[],
 ): string[] {
   return offenders
-    .filter(o => !(o.file.endsWith('github-api.md') && known.includes(o.match)))
+    .filter(o => !(isGithubHandAuthoredReference(o.file) && known.includes(o.match)))
     .map(o => `${o.file}: ${o.match}`);
 }
 
@@ -451,11 +464,19 @@ function cachedInlineBodyCorpus(): InlineBodyCorpus {
 const GITHUB_API_MD_PATH = path.join(skillsDir(), 'git', 'references', 'github-api.md');
 
 /**
+ * The hand-authored reference that holds every recipe which posts, spelled the same
+ * way. It is installed only with compliance on, so the scan must read it from the
+ * source tree: a compliance-off install never carries it.
+ */
+const GITHUB_POSTING_MD_PATH = path.join(skillsDir(), 'git', 'references', 'github-posting.md');
+
+/**
  * A sibling reference in the same scanned corpus, spelled through the same accessor.
  *
- * The forward collector excuses a declared exception only inside github-api.md. Seeding
- * an identical match here is what drives that file-scoping half of the predicate — a
- * seed at GITHUB_API_MD_PATH alone can never distinguish it from an unscoped list.
+ * The forward collector excuses a declared exception only inside the two hand-authored
+ * GitHub references. Seeding an identical match here is what drives that file-scoping half
+ * of the predicate — a seed at GITHUB_API_MD_PATH alone can never distinguish it from an
+ * unscoped list.
  */
 const SIBLING_REFERENCE_MD_PATH = path.join(skillsDir(), 'git', 'references', 'patterns.md');
 
@@ -2416,9 +2437,17 @@ describe('git agent — static content guards', () => {
       corpus.length,
       'inline-body scan corpus is empty — the guard would pass by scanning nothing',
     ).toBeGreaterThan(1);
+    // The posting recipes live in github-posting.md. A corpus without it would leave
+    // every recipe that posts a body unread, and the empty offender list below would
+    // certify nothing.
+    expect(
+      corpus.some(entry => entry.path === GITHUB_POSTING_MD_PATH),
+      'github-posting.md is not in the inline-body scan — its posting recipes would be unpoliced',
+    ).toBe(true);
 
-    // D-INLINE-BODY-EXCLUSIONS — an inline-body recipe in references/github-api.md is
-    // allowed only when KNOWN_GITHUB_API_INLINE_BODIES names it by the exact text an
+    // D-INLINE-BODY-EXCLUSIONS — an inline-body recipe in references/github-api.md or
+    // references/github-posting.md is allowed only when KNOWN_GITHUB_API_INLINE_BODIES
+    // names it by the exact text an
     // INLINE_BODY_SHAPES entry matched. The list is empty, so the corpus must hold no
     // inline body at all. Declaring an exception rather than narrowing the scope back is
     // what keeps a named exception from being a weakened guard (§14.6's release.md
@@ -2433,7 +2462,7 @@ describe('git agent — static content guards', () => {
     // silencing a line that no longer exists.
     expect(
       collectStaleExclusions(offenders, KNOWN_GITHUB_API_INLINE_BODIES),
-      'declared github-api.md exclusion(s) no longer match anything — delete them from the list',
+      'declared github-api.md / github-posting.md exclusion(s) no longer match anything — delete them from the list',
     ).toEqual([]);
 
     // Non-vacuous: the pattern must still match BOTH shapes P2-S7 guarded against —
@@ -2581,6 +2610,7 @@ describe('git agent — static content guards', () => {
     // probe red alongside the guard it backs.
     const seeded: InlineBodyOffender[] = [
       { file: GITHUB_API_MD_PATH, shape: 'long-flag', match: 'gh pr create --title "x" --body ' },
+      { file: GITHUB_POSTING_MD_PATH, shape: 'long-flag', match: 'gh pr create --title "x" --body ' },
       { file: SIBLING_REFERENCE_MD_PATH, shape: 'long-flag', match: 'gh pr create --title "x" --body ' },
     ];
     expect(
@@ -2589,16 +2619,17 @@ describe('git agent — static content guards', () => {
       'is green because it filtered everything away, not because the corpus is clean',
     ).toEqual([
       `${GITHUB_API_MD_PATH}: gh pr create --title "x" --body `,
+      `${GITHUB_POSTING_MD_PATH}: gh pr create --title "x" --body `,
       `${SIBLING_REFERENCE_MD_PATH}: gh pr create --title "x" --body `,
     ]);
     // …and a declared one is excused, so the exception mechanism itself still works —
-    // but only in github-api.md. The identical match text in a sibling reference is still
-    // reported, which is the file-scoping half of the predicate.
+    // but only in the two hand-authored GitHub references. The identical match text in a
+    // sibling reference is still reported, which is the file-scoping half of the predicate.
     expect(
       collectUndeclaredOffenders(seeded, [seeded[0].match]),
-      'a declared exception must excuse its match in github-api.md ONLY — the same text in ' +
-      'another scanned reference must still be reported, or the exception list silences files ' +
-      'it was never scoped to',
+      'a declared exception must excuse its match in github-api.md and github-posting.md ONLY — ' +
+      'the same text in another scanned reference must still be reported, or the exception list ' +
+      'silences files it was never scoped to',
     ).toEqual([`${SIBLING_REFERENCE_MD_PATH}: gh pr create --title "x" --body `]);
   });
 
@@ -3805,10 +3836,12 @@ describe('git agent: the D9 resolve condition is stated once in the reference tr
   });
 
   it('the deferring reference names the gate instead of restating it', () => {
-    const githubApi = corpus.find(e => e.path.endsWith('git/references/github-api.md'));
-    expect(githubApi, 'github-api.md is not in the corpus').toBeDefined();
+    // The mutation that applies the gate now lives in github-posting.md, so the sentence that
+    // defers to the gate moved with it.
+    const githubPosting = corpus.find(e => e.path.endsWith('git/references/github-posting.md'));
+    expect(githubPosting, 'github-posting.md is not in the corpus').toBeDefined();
     expect(
-      githubApi!.content,
+      githubPosting!.content,
       'a reference that drops the restatement must say WHERE the rule lives, or the next author ' +
       'writes a third one to fill the hole',
     ).toContain("the Git agent's D9 gate");
@@ -4377,5 +4410,106 @@ describe('git agent: PR ops use a fresh base for branch diffs (#495)', () => {
     expect(collectValidateBranchBaseDefects(`${sectionValidate}\nWhen the base cannot be determined, emit an intentional empty \`### Diff Scope\` block.`)).toContain('step 6 never gives an empty Diff Scope');
     expect(collectEnsurePrReadyBaseDefects(ensure.replace('`REASON=resolver-unavailable`', 'a stop'))).toContain('5b takes the one BASE_REF line only with exit=0 and reads other output as resolver-unavailable');
     expect(collectEnsurePrReadyBaseDefects(ensure.replaceAll(BASE_DEGRADED_LINE, '`x`'))).toContain('5b prints the DEGRADED base line with its fix for degraded and stop');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The posting recipes have one home, github-posting.md (AC-43, TP-60)
+//
+// With compliance off a machine installs no step that posts. The recipes that post a
+// comment, a review or a thread reply used to sit in github-api.md, which installs in
+// every state, so they moved to github-posting.md, which installs only with compliance
+// on. These guards hold the split from both sides: github-api.md carries no posting
+// recipe, github-posting.md carries them, and a pointer to the second file from a file
+// that installs everywhere says where the pointer is true.
+// ---------------------------------------------------------------------------
+
+interface PostingRecipePattern {
+  readonly name: string;
+  readonly re: RegExp;
+}
+
+/**
+ * What marks a posting recipe in a hand-authored GitHub reference: the commands and
+ * calls that write a comment, a review, an edit or a thread reply, and the name of any
+ * posting operation. Continuations are folded first, so a REST call split over
+ * several lines is one command.
+ */
+const POSTING_RECIPE_PATTERNS: readonly PostingRecipePattern[] = [
+  { name: 'gh pr comment', re: /\bgh pr comment\b/ },
+  { name: 'gh issue comment', re: /\bgh issue comment\b/ },
+  { name: 'gh pr review', re: /\bgh pr review\b/ },
+  { name: 'gh edit', re: /\bgh (?:pr|issue) edit\b/ },
+  { name: 'REST comment write', re: /-X\s+(?:POST|PATCH)\b[^\n]*\/comments/ },
+  { name: 'review-thread mutation', re: /\b(?:addPullRequestReviewThreadReply|resolveReviewThread)\b/ },
+  ...POSTING_OPERATIONS.map(op => ({ name: `posting operation ${op}`, re: new RegExp(`(?<![\\w-])${op}(?![\\w-])`) })),
+];
+
+/** Named collector: the posting-recipe patterns a text matches. */
+function collectPostingRecipes(text: string): string[] {
+  const joined = joinContinuations(text);
+  return POSTING_RECIPE_PATTERNS.filter(pattern => pattern.re.test(joined)).map(pattern => pattern.name);
+}
+
+/** Named collector: lines that name github-posting.md without saying it may be absent. */
+function collectUnqualifiedPostingPointers(file: string, text: string): string[] {
+  return text
+    .split('\n')
+    .flatMap((line, index) => (line.includes('github-posting.md') && !line.includes('where installed') ? [`${file}:${index + 1}`] : []));
+}
+
+describe('git references: the posting recipes live in github-posting.md only (AC-43, TP-60)', () => {
+  const githubApi = readFileSync(GITHUB_API_MD_PATH, 'utf-8');
+  const githubPosting = readFileSync(GITHUB_POSTING_MD_PATH, 'utf-8');
+
+  it('github-api.md holds no posting recipe', () => {
+    expect(
+      collectPostingRecipes(githubApi),
+      'github-api.md installs with compliance off, so a posting recipe here reaches a machine that posts nothing',
+    ).toEqual([]);
+  });
+
+  it('github-posting.md holds the comment, review and thread recipes', () => {
+    expect(collectPostingRecipes(githubPosting)).toEqual(
+      expect.arrayContaining(['gh pr review', 'REST comment write', 'review-thread mutation']),
+    );
+  });
+
+  it('github-posting.md says what it holds and that it installs only with compliance on', () => {
+    expect(githubPosting).toContain('A machine with compliance on installs this file. A machine with compliance off does not.');
+    expect(githubPosting, 'the temp files and the trap stay in github-api.md').toContain('"The D11 temp files, and their removal"');
+    expect(githubApi).toContain('## The D11 temp files, and their removal');
+  });
+
+  it('a file that installs in every state names github-posting.md only where it may be absent', () => {
+    const skill = readFileSync(path.join(skillsDir(), 'git', 'SKILL.md'), 'utf-8');
+    expect(collectUnqualifiedPostingPointers('SKILL.md', skill)).toEqual([]);
+    expect(collectUnqualifiedPostingPointers('github-api.md', githubApi)).toEqual([]);
+    expect(skill, 'the pointer exists, or the qualifier check above passes on nothing').toContain('references/github-posting.md');
+    expect(githubApi).toContain('github-posting.md');
+  });
+
+  it('known-bad probe: each pattern fires on its own shape, and the pointer check names an unqualified line', () => {
+    const shapes: readonly (readonly [string, string])[] = [
+      ['gh pr comment', 'gh pr comment 12 --body-file "$DEVFLOW_BODY"'],
+      ['gh issue comment', 'gh issue comment 12 --body-file "$DEVFLOW_BODY"'],
+      ['gh pr review', 'gh pr review 12 --approve --body-file "$DEVFLOW_BODY"'],
+      ['gh edit', 'gh pr edit 12 --body-file "$DEVFLOW_BODY"'],
+      ['REST comment write', 'gh api \\\n  -X POST \\\n  "repos/o/r/pulls/1/comments"'],
+      ['review-thread mutation', 'mutation { resolveReviewThread(input: {}) }'],
+      ...POSTING_OPERATIONS.map(op => [`posting operation ${op}`, `Run ${op} next.`] as const),
+    ];
+    const missed = shapes.filter(([name, text]) => !collectPostingRecipes(text).includes(name)).map(([name]) => name);
+    expect(missed, 'a pattern that fires on nothing guards nothing').toEqual([]);
+    expect(collectPostingRecipes('gh pr diff 12 --name-only')).toEqual([]);
+    expect(collectUnqualifiedPostingPointers('probe.md', 'See `references/github-posting.md`.\nOK, where installed: `github-posting.md`.')).toEqual(['probe.md:1']);
+  });
+
+  it('review-methodology keeps its prohibitions: a review writes findings into its report and posts nothing', () => {
+    const patterns = readFileSync(path.join(skillsDir(), 'review-methodology', 'references', 'patterns.md'), 'utf-8');
+    const violations = readFileSync(path.join(skillsDir(), 'review-methodology', 'references', 'violations.md'), 'utf-8');
+    expect(patterns).toContain('A review writes findings into its report.');
+    expect(violations).toContain('A review that posts its own comments bypasses the repo-visibility gate');
+    expect(patterns, 'the 6-step process no longer has a step that posts').not.toMatch(/Post Comments|Use GitHub API for PR comments/);
   });
 });

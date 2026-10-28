@@ -372,7 +372,7 @@ const BUDGET_LOADED_SET_LINEAR = 52_509;
  * LOADED_SET_WRITTEN_EXCLUSIONS in tests/tracker/budget-model.ts with the reason
  * beside it: it is a file two of these ops loaded long before any split existed,
  * this work moved the line that names it without changing a byte a spawn pays, and
- * charging 21_211 ch of it here would bury the `pr/` bodies this row exists to
+ * charging 17_518 ch of it here would bury the `pr/` bodies this row exists to
  * measure. What the exclusion owes in return is shape `2c-ex` of the
  * four-shape table — the same maximum, RECORDED with the file charged — plus the
  * equality pin GITHUB_API_MD_CHARS, which is what stops an excluded term growing
@@ -485,7 +485,7 @@ const PREAMBLE_MAX_LINES = 34;
  * Measured, never hand-typed:
  *   node -e "console.log(require('fs').readFileSync('src/assets/skills/git/references/github-api.md','utf-8').length)"
  */
-const GITHUB_API_MD_CHARS = 21_211;
+const GITHUB_API_MD_CHARS = 17_518;
 
 // ---------------------------------------------------------------------------
 // 1. The four-shape table — RECORDED, not asserted pass/fail
