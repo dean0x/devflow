@@ -47,6 +47,7 @@ import {
   describeVariantConverge,
   readRunningVersion,
 } from '../../targets/claude-code/curation-install.js';
+import { convergeFromManifest } from '../../targets/claude-code/compliance-install.js';
 import { validateRuleShadow, validateSkillShadow } from '../../targets/claude-code/installer.js';
 import {
   getClaudeDirectory,
@@ -293,8 +294,9 @@ async function recordComplianceSwitch(devflowDir: string, nextState: ComplianceF
  * compliance-armed prompt holds the compliance-off file is an error that lists the files, a
  * toggle that cannot converge at all (a version skew, or no manifest) says that posting steps remain
  * installed until `devflow init`, and a compliance rule that is still installed is an error that
- * names the file. None of them prints the success text. On the enable side a skipped
- * converge is a warning: the installed prompts are then the ones that post, which is what was asked for.
+ * names the file. None of them prints the success text. A skipped prompt converge still converges
+ * the compliance skill and rule, which do not depend on the installed version. On the enable side
+ * the skip is a warning, and a rule that is wanted and still not installed is a second warning.
  *
  * Returns a result and never throws; the caller prints the messages and sets the exit code.
  */
@@ -328,10 +330,21 @@ export async function applyComplianceChange(opts: ApplyComplianceChangeOptions):
   });
 
   if (outcome.kind === 'skipped') {
+    // The compliance skill and rule do not depend on the installed version, so they converge
+    // whatever the prompt converge did. The converge warns per item and never throws.
+    await convergeFromManifest({
+      claudeDir,
+      devflowDir,
+      manifest: { features: { compliance: nextState, rules: manifest.features.rules } },
+      warn,
+    });
     if (!nextState.enabled) {
       return { nextState, messages: [{ level: 'error', text: outcome.message }], exitCode: 1 };
     }
-    return { nextState, messages: [...resolved.messages, { level: 'warn', text: outcome.message }], exitCode: 0 };
+    const ruleNote: ComplianceCliActionMessage[] = manifest.features.rules && !(await ruleInstalled(claudeDir))
+      ? [{ level: 'warn', text: 'The compliance rule was not installed. Run `devflow init`.' }]
+      : [];
+    return { nextState, messages: [...resolved.messages, ...ruleNote, { level: 'warn', text: outcome.message }], exitCode: 0 };
   }
 
   const { posting } = outcome.result;

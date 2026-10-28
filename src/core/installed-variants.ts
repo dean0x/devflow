@@ -24,6 +24,16 @@ export function readInstalledVariants(raw: unknown): InstalledVariants | null {
   return { curation, compliance };
 }
 
+/**
+ * The record to write for a converge, or null when none is owed (AC-29). Only a converge that
+ * finished clean records the switches the prompts were converged onto. Any other converge writes
+ * nothing, so the field is left out and reads as unknown: it names `devflow init`, and the posting
+ * notice stays due. Pure; the result is a fresh object.
+ */
+export function installRecordFor(converged: boolean, switches: InstalledVariants): InstalledVariants | null {
+  return converged ? { curation: switches.curation, compliance: switches.compliance } : null;
+}
+
 /** What `devflow compliance --status` prints after `Posting:`. */
 export type PostingStatus =
   | 'installed'

@@ -107,7 +107,7 @@ import {
   attributionSeedFrom,
 } from './attribution-prompts.js';
 import { convergeVariantAxes, describePostingLeft, installedVersionMatches, readRunningVersion } from '../../targets/claude-code/curation-install.js';
-import { POSTING_OFF_NOTICE, postingNoticeDue, readInstalledVariants } from '../../core/installed-variants.js';
+import { POSTING_OFF_NOTICE, installRecordFor, postingNoticeDue, readInstalledVariants } from '../../core/installed-variants.js';
 import {
   auditAndRecordClaudeMd,
   formatClaudeMdAuditNote,
@@ -2900,6 +2900,7 @@ export const initCommand = new Command('init')
 
     // Write installation manifest for upgrade tracking (non-fatal — install already succeeded)
     const now = new Date().toISOString();
+    const installRecord = installRecordFor(variantConverge.converged, { curation: curationEnabled, compliance: complianceEnabled });
     const manifestData = {
       version,
       // Resolved above, before the install, because the skills install set is
@@ -2943,9 +2944,7 @@ export const initCommand = new Command('init')
       updatedAt: now,
       // The install record, written only after a converge that finished clean (AC-29): an
       // unclean one leaves the field out, which reads as unknown and names `devflow init`.
-      ...(variantConverge.converged
-        ? { installedVariants: { curation: curationEnabled, compliance: complianceEnabled } }
-        : {}),
+      ...(installRecord !== null ? { installedVariants: installRecord } : {}),
     };
     // ── Manifest write + tracker selection lifecycle (the ONE call site) ──────
     // persistManifestThenConvergeTracker owns the ordering invariant: the
@@ -2964,10 +2963,10 @@ export const initCommand = new Command('init')
 
     // The posting notice (AC-30): once, when the record moves from posting (compliance on, or no
     // record before this release) to non-posting. It follows the record write, so a record that
-    // never reached the disk leaves the notice due for the next init.
+    // was withheld or never reached the disk leaves the notice due for the next init.
     if (
       trackerLifecycle.manifestWritten &&
-      variantConverge.converged &&
+      installRecord !== null &&
       postingNoticeDue(readInstalledVariants(existingManifest?.installedVariants), complianceEnabled)
     ) {
       p.log.info(POSTING_OFF_NOTICE);
