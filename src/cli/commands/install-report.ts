@@ -85,6 +85,24 @@ export function formatReplacedLinksSummary(report: Pick<InstallReport, 'replaced
 }
 
 /**
+ * Turn the refused-folder half of an InstallReport into summary lines, one per folder.
+ *
+ * An install writes nothing into a folder that is a link or not a folder, and leaves the entry as it
+ * was. That looks the same on disk as an install that refreshed the folder, so the line says what was
+ * skipped and what to do about it.
+ *
+ * Pure function — returns lines, logs nothing.
+ */
+export function formatRefusedFoldersSummary(report: Pick<InstallReport, 'refusedFolders'>): SummaryLine[] {
+  return report.refusedFolders.map(folder => ({
+    level: 'warn',
+    message:
+      `${folder} is a link or not a folder. Nothing was written there. ` +
+      `Replace it with a real folder and run the install again.`,
+  }));
+}
+
+/**
  * The half of an overlay warning that describes what is actually on disk.
  *
  * One sentence per state, each true of that state and of no other. A single shared

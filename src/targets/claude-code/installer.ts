@@ -111,6 +111,16 @@ export interface InstallReport {
    */
   replacedLinks: string[];
   /**
+   * Paths of folders this run would have written into that are a link or not a folder: the commands,
+   * rules or agents folder, a skill folder, or the references folder of `devflow:git`. `mkdir` and
+   * `readdir` follow a link, so a write there would change another directory. The run wrote nothing
+   * into such a folder and left the entry and its target as they were. A partial install has no
+   * pre-clean to replace a link, so it lists every one it meets. A full install lists only a link its
+   * pre-clean could not remove. Reported because a folder left alone looks the same on disk as a
+   * folder the run refreshed.
+   */
+  refusedFolders: string[];
+  /**
    * Skill names removed because no plugin in the effective selection owns or
    * requires them — the visible cost of a deselection. Only skills that were on
    * disk and are now gone: a deselected skill that was never installed is absent.
@@ -1577,6 +1587,24 @@ export async function referencesHostState(gitSkillDir: string): Promise<Referenc
 }
 
 /**
+ * Prove, with {@link directoryState}, that the run may write into `dir`, and record the folder in
+ * `report.refusedFolders` when it may not. Returns true for a refused folder, so the caller skips
+ * every write into it.
+ *
+ * The answer for each folder a run writes into besides the `devflow:git` references, which
+ * {@link referencesHostState} answers: the commands, rules and agents folders and every other skill
+ * folder. An absent folder is fine, since the install creates it. A link is refused and never
+ * repaired, because the installer did not create it. A full install's pre-clean has already
+ * replaced the links it could, so this refuses only what is left. Never throws.
+ */
+async function refuseUnrealFolder(report: InstallReport, dir: string): Promise<boolean> {
+  const state = await directoryState(dir);
+  if (state !== 'link' && state !== 'unusable') return false;
+  report.refusedFolders.push(dir);
+  return true;
+}
+
+/**
  * The report of an overlay refused as a whole: one failure per unit, as a refused converged
  * root reports (D-CONVERGED-ROOT-REAL), each carrying the state the unit was left in.
  * The classification reads; nothing is written.
@@ -2148,6 +2176,11 @@ export interface CommandsAndAgentsOptions {
   trackerServers: readonly string[];
   /** Agent source directories, most-preferred first; see {@link FileCopyOptions.agentSourceDirs}. */
   agentSourceDirs?: AgentSourceDirs;
+  /**
+   * Folders the caller proved are a link or not a folder (`refuseUnrealFolder`). Nothing is written
+   * into a skipped folder. Omitted, both folders are written.
+   */
+  skip?: { readonly commands?: boolean; readonly agents?: boolean };
   warn: (msg: string) => void;
 }
 
@@ -2305,6 +2338,7 @@ async function requireComplianceVariantFiles(opts: {
  */
 export async function installCommandsAndAgents(opts: CommandsAndAgentsOptions): Promise<void> {
   const { plugins, agentsMap, claudeDir, curation, compliance, trackerServers, warn } = opts;
+  const skip = opts.skip ?? {};
   const packageRoot = opts.packageRoot ?? getPackageRoot();
 
   // Before the first write. installViaFileCopy checks earlier still, ahead of its pre-clean;
@@ -2325,7 +2359,7 @@ export async function installCommandsAndAgents(opts: CommandsAndAgentsOptions): 
       commandsSourceNames.add(name);
     }
   }
-  if (commandsSourceNames.size > 0) {
+  if (commandsSourceNames.size > 0 && skip.commands !== true) {
     await fs.mkdir(commandsTarget, { recursive: true });
     for (const name of commandsSourceNames) {
       const srcFile = await firstExisting(commandDirs.map(dir => path.join(dir, mdFileName(name))));
@@ -2351,7 +2385,7 @@ export async function installCommandsAndAgents(opts: CommandsAndAgentsOptions): 
       }
     }
   }
-  if (allAgentNames.size > 0) {
+  if (allAgentNames.size > 0 && skip.agents !== true) {
     await fs.mkdir(agentsTarget, { recursive: true });
     for (const agentName of allAgentNames) {
       if (await skipsForUserOwnedType(agentName, claudeDir, agentsTarget, warn)) continue;
@@ -2422,6 +2456,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     unchangedRefs: [],
     overlayFailures: [],
     replacedLinks: [],
+    refusedFolders: [],
     removedSkills: [],
     dormantShadows: [],
   };
@@ -2476,6 +2511,19 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
       ));
     } catch { /* ignore */ }
   }
+
+  // The commands, agents and rules folders, each proved a real folder (or absent) before any write
+  // below. A full install's pre-clean replaced a link at each of them. A partial install has no
+  // pre-clean, and a link the pre-clean could not remove is still standing, so every write below
+  // would go through it into another directory: the sweeps, the copies and the restamp. A refused
+  // folder is skipped by all of them and reported in `refusedFolders`. The rules folder is written
+  // only when the selection has a rule, so only then is it proved.
+  const commandsTarget = path.join(claudeDir, 'commands', 'devflow');
+  const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
+  const rulesTarget = path.join(claudeDir, 'rules', 'devflow');
+  const commandsRefused = await refuseUnrealFolder(report, commandsTarget);
+  const agentsRefused = await refuseUnrealFolder(report, agentsTarget);
+  const rulesRefused = rulesMap.size > 0 && await refuseUnrealFolder(report, rulesTarget);
 
   // Sweep stale devflow:* skill dirs — ungated: runs on every install shape,
   // including partial installs, so renamed/deleted skills are pruned promptly.
@@ -2568,12 +2616,9 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // Ungated: runs on every install shape. knownNames spans ALL plugins
   // (getAllAgentNames) so agents from uninstalled plugins survive a partial run. Only
   // names absent from the full registry are removed.
-  const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
-  const agentSweep = await sweepOrphanedAssets(
-    agentsTarget,
-    new Set(getAllAgentNames()),
-    mdEntryName,
-  );
+  const agentSweep: SweepResult = agentsRefused
+    ? { scanned: 0, removed: [], failed: [] }
+    : await sweepOrphanedAssets(agentsTarget, new Set(getAllAgentNames()), mdEntryName);
   recordSweep(report, 'agent', agentSweep);
 
   // A partial install writes the selected plugins' commands and agents and leaves every
@@ -2598,17 +2643,20 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     packageRoot,
     trackerServers,
     agentSourceDirs: options.agentSourceDirs,
+    skip: { commands: commandsRefused, agents: agentsRefused },
     warn,
   });
 
   // Sweep stale command files — ungated: runs on every install shape.
   // knownNames spans ALL plugins (getAllCommandNames) so commands from uninstalled
   // plugins survive a partial run. Only names absent from the full registry are removed.
-  recordSweep(report, 'command', await sweepOrphanedAssets(
-    path.join(claudeDir, 'commands', 'devflow'),
-    new Set(getAllCommandNames()),
-    mdEntryName,
-  ));
+  if (!commandsRefused) {
+    recordSweep(report, 'command', await sweepOrphanedAssets(
+      commandsTarget,
+      new Set(getAllCommandNames()),
+      mdEntryName,
+    ));
+  }
 
   // D-LANGUAGE-FOCUS-STAMP: record the language focuses the EFFECTIVE selection installs on the
   // installed /code-review, on every install shape. This is the language gate the command reads
@@ -2616,12 +2664,15 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // whether or not code-review's own plugin is in this run: `--plugin=devflow-typescript` copies no
   // command, yet must update a code-review an earlier run installed. The copy above wrote the shipped
   // `(none)` line; the rewrite compares against what is on disk now, so neither that copy nor the
-  // pre-clean can defeat it. A failure is a warning, never an abort.
-  await restampInstalledCommands({
-    claudeDir,
-    effectivePlugins: options.effectivePlugins ?? plugins,
-    warn,
-  });
+  // pre-clean can defeat it. A failure is a warning, never an abort. A refused commands folder is not
+  // restamped: the rewrite would go through the link.
+  if (!commandsRefused) {
+    await restampInstalledCommands({
+      claudeDir,
+      effectivePlugins: options.effectivePlugins ?? plugins,
+      warn,
+    });
+  }
 
   // Install skills from ALL plugins (skillsMap covers all plugins, not just selected).
   // Resolved from flat src/assets/skills/{name}/ (no per-plugin subdirectory).
@@ -2639,15 +2690,19 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     // A full install's pre-clean replaced a link at the skill or its references entry. A partial
     // install has no pre-clean, and a link the pre-clean could not remove is still standing, so the
     // copy and the overlay below would write through such a link into another directory: the whole
-    // skill is refused instead, and reported like a refused overlay.
+    // skill is refused instead and listed in `refusedFolders`. The references skill is also reported
+    // like a refused overlay, one failure for each unit.
     if (skillName === SKILL_REFS_SKILL_NAME) {
       const host = await referencesHostState(skillTarget);
       if (host.kind === 'refused') {
+        report.refusedFolders.push(host.path);
         report.overlayFailures.push(
           ...await refusedOverlayFailures(host.path, path.join(skillTarget, SKILL_REFERENCES_DIRNAME), refsManifest),
         );
         continue;
       }
+    } else if (await refuseUnrealFolder(report, skillTarget)) {
+      continue;
     }
 
     const resolved = await resolveSkillSource(skillName, devflowDir);
@@ -2694,8 +2749,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // Install rules from selected plugins (rulesMap covers selected plugins only).
   // Rules are flat .md files resolved from src/assets/rules/{name}.md (no per-plugin subdir).
   spinner.message('Installing rules...');
-  const rulesTarget = path.join(claudeDir, 'rules', 'devflow');
-  if (rulesMap.size > 0) {
+  if (rulesMap.size > 0 && !rulesRefused) {
     await fs.mkdir(rulesTarget, { recursive: true });
     const outcomes = await installAllRules(rulesMap, devflowDir, rulesTarget);
     for (const { ruleName, outcome } of outcomes) {

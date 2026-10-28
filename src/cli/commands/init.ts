@@ -15,7 +15,7 @@ import { describeMoveText, describeOutcome, runInitCurationMove, shownSkipAt, ty
 import { realGlobalTuningMoveIO, realProjectLedgerMoveIO } from './curation-move-io.js';
 import { describeEchoedValue } from '../../core/echo-value.js';
 import { installViaFileCopy, installScripts, type InstallReport } from '../../targets/claude-code/installer.js';
-import { formatOverlaySummary, formatReplacedLinksSummary, formatSkillScopeSummary, formatTrackerAssetSummary, isPluginListUnchanged, type SummaryLine } from './install-report.js';
+import { formatOverlaySummary, formatRefusedFoldersSummary, formatReplacedLinksSummary, formatSkillScopeSummary, formatTrackerAssetSummary, isPluginListUnchanged, type SummaryLine } from './install-report.js';
 import { convergeTrackerArtifacts, type ConvergeTrackerArtifactsResult, type TrackerAgentState } from '../../targets/claude-code/tracker-install.js';
 import {
   installSettings,
@@ -2849,6 +2849,9 @@ export const initCommand = new Command('init')
 
     // A link the full install replaced is a change to a path the user made.
     logSummaryLines(formatReplacedLinksSummary(installReport));
+
+    // A folder the install refused to write is not refreshed, and looks refreshed on disk.
+    logSummaryLines(formatRefusedFoldersSummary(installReport));
 
     // Skill-scoping reporting: a deselected skill is deleted and a dormant shadow
     // is inert, and neither is distinguishable from "never installed" on disk.

@@ -13,7 +13,7 @@ import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { formatReplacedLinksSummary } from '../../src/cli/commands/install-report.js';
+import { formatRefusedFoldersSummary, formatReplacedLinksSummary } from '../../src/cli/commands/install-report.js';
 import { removeAllDevFlow } from '../../src/cli/commands/uninstall.js';
 import { installViaFileCopy, planOverlayUnits, type Spinner } from '../../src/targets/claude-code/installer.js';
 import { applyVariantToggle, convergeVariantAxes, describePostingLeft, type VariantMachineState } from '../../src/targets/claude-code/curation-install.js';
@@ -21,7 +21,7 @@ import { convergeReferences } from '../../src/targets/claude-code/reference-conv
 import { compiledSkillRefsDir } from '../../src/core/assets.js';
 import { renderVariantManifest } from '../../src/core/curation-variants.js';
 import { generatedReferenceManifest, installedReferenceManifest } from '../../src/core/mds-variants.js';
-import { DEVFLOW_PLUGINS } from '../../src/core/plugins.js';
+import { buildAssetMaps, DEVFLOW_PLUGINS } from '../../src/core/plugins.js';
 import { assertTempHome } from '../setup/home-isolation.js';
 
 const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
@@ -326,50 +326,161 @@ async function expectUntouched(outside: string, refs: string, before: { files: R
   expect((await fs.stat(path.join(refs, MODE_FILE))).mode & 0o777, 'no mode was set through the link').toBe(0o600);
 }
 
-describe('a partial install refuses a linked devflow:git folder and writes nothing through it', () => {
-  it('a references folder that is a link: every overlay unit is reported refused, and the link and its target are left alone', async () => {
-    await installInto(claudeDir, devflowDir, true);
-    const outside = path.join(tmp, 'outside-refs');
-    await linkAway(installedRefs(), outside, outside);
-    const before = { files: await fileMap(outside), tree: await walk(outside) };
+/** Every entry below `dir` as relative path -> kind, mode and bytes (a link: its target), so a changed byte, mode, file or folder shows. */
+async function treeSnapshot(dir: string, prefix = ''): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  for (const entry of await fs.readdir(dir)) {
+    const rel = prefix === '' ? entry : `${prefix}/${entry}`;
+    const full = path.join(dir, entry);
+    const stat = await fs.lstat(full);
+    const mode = (stat.mode & 0o777).toString(8);
+    if (stat.isSymbolicLink()) out[rel] = `link:${await fs.readlink(full)}`;
+    else if (stat.isDirectory()) Object.assign(out, { [`${rel}/`]: `dir:${mode}` }, await treeSnapshot(full, rel));
+    else out[rel] = `file:${mode}:${(await fs.readFile(full)).toString('base64')}`;
+  }
+  return out;
+}
 
-    const report = await installInto(claudeDir, devflowDir, true, true);
+/** One folder kind a partial install writes. */
+interface FolderCase {
+  readonly name: string;
+  /** Cases of one unit share a refusal: a linked references folder refuses the whole `devflow:git` skill. */
+  readonly unit: string;
+  readonly folder: () => string;
+  /** A file below the folder that an unguarded install rewrites. */
+  readonly marker: string;
+  /** A file below the folder that an unguarded install removes or leaves, and a guarded one never touches. */
+  readonly stray: string;
+  /** What the user keeps in the marker, from the installed bytes; a text only the user wrote when omitted. */
+  readonly userBytes?: (installed: string) => string;
+  /** Whether the refusal also reaches the overlay report, one failure for each overlay unit. */
+  readonly overlay: boolean;
+}
 
-    await expectUntouched(outside, outside, before);
-    const units = planOverlayUnits(installedReferenceManifest({ compliance: true }));
-    expect(report.overlayFailures, 'one refusal per overlay unit').toHaveLength(units.length);
-    for (const failure of report.overlayFailures) expect(failure.error).toContain(installedRefs());
-    expect(report.overlaidRefs).toEqual([]);
-    expect(report.unchangedRefs).toEqual([]);
-    expect((await fs.lstat(installedRefs())).isSymbolicLink(), 'the link itself is left in place').toBe(true);
-    expect(await fs.readlink(installedRefs())).toBe(outside);
+const STAMP_LINE = 'Installed language focuses: (none)';
+const FOLDER_CASES: readonly FolderCase[] = [
+  {
+    name: 'commands/devflow', unit: 'commands', overlay: false,
+    folder: () => path.join(claudeDir, 'commands', 'devflow'),
+    marker: 'code-review.md', stray: 'stray.md',
+    // A stamp the run restamps and a text the copy rewrites, so each write is its own failure.
+    userBytes: installed => installed.replace(STAMP_LINE, 'Installed language focuses: python'),
+  },
+  {
+    name: 'agents/devflow', unit: 'agents', overlay: false,
+    folder: () => path.join(claudeDir, 'agents', 'devflow'),
+    marker: 'review.md', stray: 'stray.md',
+  },
+  {
+    name: 'rules/devflow', unit: 'rules', overlay: false,
+    folder: () => path.join(claudeDir, 'rules', 'devflow'),
+    marker: 'security.md', stray: 'stray.md',
+  },
+  {
+    name: 'a skill folder other than devflow:git', unit: 'skill', overlay: false,
+    folder: () => path.join(skillsRoot(), 'devflow:agent-references'),
+    marker: 'SKILL.md', stray: 'stray.md',
+  },
+  {
+    name: 'devflow:git', unit: 'git', overlay: true,
+    folder: () => path.join(skillsRoot(), 'devflow:git'),
+    marker: 'SKILL.md', stray: path.join('references', 'pr', 'not-in-the-manifest.md'),
+  },
+  {
+    name: 'devflow:git/references', unit: 'git', overlay: true,
+    folder: () => installedRefs(),
+    marker: GENERATED, stray: STRAY,
+  },
+];
+
+const markerOf = (folderCase: FolderCase): string => path.join(folderCase.folder(), folderCase.marker);
+
+/** Install the folder kinds of FOLDER_CASES together: code-review's command and agents, a core rule, and two skills. */
+function installEveryFolder(isPartialInstall: boolean) {
+  const added = DEVFLOW_PLUGINS.filter(p => p.name === 'devflow-code-review');
+  return installViaFileCopy({
+    curation: true,
+    compliance: true,
+    plugins: added,
+    effectivePlugins: [...CORE, ...added],
+    claudeDir,
+    devflowDir,
+    skillsMap: SKILLS,
+    agentsMap: buildAssetMaps(added).agentsMap,
+    rulesMap: new Map([['security', 'devflow-core-skills']]),
+    isPartialInstall,
+    spinner: noopSpinner,
+    warn,
+  });
+}
+
+describe('a partial install refuses every linked devflow folder and writes nothing through it', () => {
+  const STALE = 'a file the install rewrites\n';
+
+  /** The marker bytes of a first install, and every marker turned stale: only a write puts the installed bytes back. */
+  async function installThenStale(skip: (folderCase: FolderCase) => boolean): Promise<Map<string, Buffer>> {
+    await installEveryFolder(false);
+    const installed = new Map<string, Buffer>();
+    for (const folderCase of FOLDER_CASES) installed.set(folderCase.name, await fs.readFile(markerOf(folderCase)));
+    for (const folderCase of FOLDER_CASES) if (!skip(folderCase)) await fs.writeFile(markerOf(folderCase), STALE, 'utf-8');
+    return installed;
+  }
+
+  it.each(FOLDER_CASES)('$name that is a link: nothing is written through it, and the refusal is reported', async (linked) => {
+    const installed = await installThenStale(folderCase => folderCase.unit === linked.unit);
+    const folder = linked.folder();
+    const outside = path.join(tmp, 'outside');
+    await fs.rename(folder, outside);
+    await fs.symlink(outside, folder, 'dir');
+    const markerFile = path.join(outside, linked.marker);
+    const user = linked.userBytes?.(installed.get(linked.name)!.toString('utf-8')) ?? 'a file only the user keeps\n';
+    await fs.writeFile(markerFile, user, 'utf-8');
+    await fs.chmod(markerFile, 0o600);
+    await fs.mkdir(path.dirname(path.join(outside, linked.stray)), { recursive: true });
+    await fs.writeFile(path.join(outside, linked.stray), 'a stray file only the user keeps\n', 'utf-8');
+    const before = await treeSnapshot(outside);
+    expect(before[linked.marker], 'precondition: the marker is the 0600 file the user keeps').toMatch(/^file:600:/);
+
+    const report = await installEveryFolder(true);
+
+    expect(await treeSnapshot(outside), 'no byte, mode, file or folder below the link changed').toEqual(before);
+    expect((await fs.lstat(folder)).isSymbolicLink(), 'the link itself is left in place').toBe(true);
+    expect(await fs.readlink(folder)).toBe(outside);
+    expect(report.refusedFolders, 'the refusal is reported, once').toEqual([folder]);
+    expect(report.replacedLinks, 'a partial install replaces no link').toEqual([]);
+
+    const lines = formatRefusedFoldersSummary(report);
+    expect(lines).toHaveLength(1);
+    expect(lines[0].level).toBe('warn');
+    expect(lines[0].message).toContain(folder);
+    expect(lines[0].message).toContain('Nothing was written there');
+
+    if (linked.overlay) {
+      const units = planOverlayUnits(installedReferenceManifest({ compliance: true }));
+      expect(report.overlayFailures, 'one refusal per overlay unit').toHaveLength(units.length);
+      for (const failure of report.overlayFailures) expect(failure.error).toContain(folder);
+      expect(report.overlaidRefs).toEqual([]);
+      expect(report.unchangedRefs).toEqual([]);
+    } else {
+      expect(report.overlayFailures).toEqual([]);
+    }
+
+    for (const other of FOLDER_CASES.filter(folderCase => folderCase.unit !== linked.unit)) {
+      expect(await fs.readFile(markerOf(other)), `${other.name} is still written`).toEqual(installed.get(other.name));
+    }
   });
 
-  it('a skill folder that is a link: the same refusal, and nothing is copied into the linked folder', async () => {
-    await installInto(claudeDir, devflowDir, true);
-    const outside = path.join(tmp, 'outside-skill');
-    await linkAway(path.join(skillsRoot(), 'devflow:git'), outside, path.join(outside, 'references'));
-    const before = { files: await fileMap(outside), tree: await walk(outside) };
+  it('over real folders a partial install writes every folder and reports no refusal', async () => {
+    const installed = await installThenStale(() => false);
 
-    const report = await installInto(claudeDir, devflowDir, true, true);
+    const report = await installEveryFolder(true);
 
-    await expectUntouched(outside, path.join(outside, 'references'), before);
-    expect(report.overlayFailures.length).toBeGreaterThan(0);
-    for (const failure of report.overlayFailures) expect(failure.error).toContain(path.join(skillsRoot(), 'devflow:git'));
-    expect(report.overlaidRefs).toEqual([]);
-    expect((await fs.lstat(path.join(skillsRoot(), 'devflow:git'))).isSymbolicLink(), 'the link itself is left in place').toBe(true);
-  });
-
-  it('over real folders a partial install still converges the references and reports no refusal', async () => {
-    await installInto(claudeDir, devflowDir, true);
-    const generated = path.join(installedRefs(), GENERATED);
-    const installed = await fs.readFile(generated);
-    await fs.writeFile(generated, 'a generated reference the overlay rewrites\n', 'utf-8');
-
-    const report = await installInto(claudeDir, devflowDir, true, true);
-
+    expect(report.refusedFolders).toEqual([]);
     expect(report.overlayFailures).toEqual([]);
-    expect(await fs.readFile(generated)).toEqual(installed);
+    expect(formatRefusedFoldersSummary(report)).toEqual([]);
+    for (const folderCase of FOLDER_CASES) {
+      expect(await fs.readFile(markerOf(folderCase)), `${folderCase.name} is written`).toEqual(installed.get(folderCase.name));
+    }
   });
 });
 
