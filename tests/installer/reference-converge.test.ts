@@ -280,6 +280,27 @@ describe('the references converge fails closed on the off side', () => {
     expect(result.posting.kind).toBe('unknown');
     expect(await fileMap(elsewhere), 'the linked directory was not converged').toEqual(before);
   });
+
+  it('a references directory that is a link is a failure: nothing is written, pruned or removed through it', async () => {
+    await installInto(claudeDir, devflowDir, true);
+    const elsewhere = path.join(tmp, 'elsewhere-refs');
+    await fs.rename(installedRefs(), elsewhere);
+    await fs.symlink(elsewhere, installedRefs(), 'dir');
+    await fs.writeFile(path.join(elsewhere, 'pr', 'not-in-the-manifest.md'), 'a file the prune would remove\n', 'utf-8');
+    await fs.chmod(path.join(elsewhere, 'trust-rule.md'), 0o600);
+    const before = await fileMap(elsewhere);
+
+    const result = await convergeReferences({ claudeDir, devflowDir, compliance: false, warn });
+
+    expect(result.converged).toBe(false);
+    expect(result.unproven).toBe(true);
+    expect(result.rewritten).toEqual([]);
+    expect(result.failures.join('\n')).toContain(installedRefs());
+    expect(result.stillPosting, 'the removal refuses the gate below the link and names it').toContain(flatFile(GATE));
+    expect(await fileMap(elsewhere), 'the linked directory was not converged').toEqual(before);
+    expect((await fs.stat(path.join(elsewhere, 'trust-rule.md'))).mode & 0o777, 'no mode was set through the link').toBe(0o600);
+    expect((await fs.lstat(installedRefs())).isSymbolicLink(), 'the link itself is left in place').toBe(true);
+  });
 });
 
 describe('the version-skew check keeps the references where they are', () => {

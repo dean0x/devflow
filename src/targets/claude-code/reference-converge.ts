@@ -16,8 +16,10 @@
  *      ({@link restoreComplianceOffFiles}), from the source the install would copy.
  *
  * It acts on a skill that is ALREADY installed. A machine whose plugin selection holds no
- * `devflow:git` has nothing to converge, and that is a clean result. A skill directory that
- * is a link is a failure: the overlay would write through it.
+ * `devflow:git` has nothing to converge, and that is a clean result. A skill directory, or a
+ * `references` directory inside it, that is a link or not a directory is a failure: the overlay
+ * would stage, prune and set modes through it. An install empties the skill directory first and
+ * so replaces such a link; this converge has no such step, so it refuses instead.
  *
  * Never throws. Every failure is a warning and a `failures` entry, and the next step still
  * runs. With compliance off a caller reads `failures` and `stillPosting` and fails closed.
@@ -100,14 +102,20 @@ export async function convergeReferences(opts: ConvergeReferencesOptions): Promi
   let rewritten: readonly string[] = [];
   let unproven = false;
 
+  const referencesDir = path.join(gitSkillDir, 'references');
   const gitSkill = await skillDirectoryState(gitSkillDir);
+  // Checked only below a real skill directory: an lstat through a link would follow it.
+  const referencesState = gitSkill === 'real' ? await skillDirectoryState(referencesDir) : 'absent';
   if (gitSkill === 'unusable') {
     fail(`${gitSkillDir} is not a real directory, so the references in it were not converged`);
+    unproven = true;
+  } else if (referencesState === 'unusable') {
+    fail(`${referencesDir} is not a real directory, so the references in it were not converged`);
     unproven = true;
   } else if (gitSkill === 'real') {
     try {
       const overlay = await overlayGeneratedReferences({
-        referencesTarget: path.join(gitSkillDir, 'references'),
+        referencesTarget: referencesDir,
         sourceRoot: skillRefsSourceDir(compliance, root),
         manifest,
         warn,

@@ -275,6 +275,21 @@ describe('restoreComplianceOffFiles', () => {
     expect(await fs.readFile(path.join(at(ASKS), 'inner.md'), 'utf-8')).toBe('in the way\n');
   });
 
+  it('a link above the path is refused: nothing is written through someone else\'s directory', async () => {
+    const sourceDirOf = await seedSources([POSTING, ASKS]);
+    await installedSkills();
+    const elsewhere = path.join(tmp, 'elsewhere');
+    await fs.mkdir(elsewhere, { recursive: true });
+    await fs.symlink(elsewhere, at('devflow:agent-references/references'), 'dir');
+
+    const result = await restoreComplianceOffFiles({ skillsDir, sourceDirOf });
+
+    expect(result.refused.map(refusal => refusal.entry)).toEqual([ASKS]);
+    expect(result.refused[0].reason).toContain('link');
+    expect(await fs.readdir(elsewhere), 'nothing was created in the linked directory').toEqual([]);
+    expect(result.restored, 'the next entry is still restored').toEqual([POSTING]);
+  });
+
   it('a source that cannot be resolved refuses that entry and not the next', async () => {
     const good = await seedSources([POSTING]);
     await installedSkills();
