@@ -70,8 +70,8 @@
  * THE CORPUS is the installed prompt surface by class, each with a sentinel and a
  * floor so a class that went missing fails by name: compiled commands, every
  * agent as installed (dist-first), the compiled git references, the hand-authored
- * skills and rules, the curation-off builds of commands and agents, and the
- * compaction directive of the session-start hook.
+ * skills and rules, the curation-off, compliance-off and curation-and-compliance-off
+ * builds of commands and agents, and the compaction directive of the session-start hook.
  *
  * THE COMPILED CLASSES MUST BE CURRENT, WITHIN THE LIMITS OF THE CHECK. The first test
  * fails by name when a compiled prompt is older than the inputs `compiledPrompts`
@@ -250,6 +250,16 @@ export const SITE_ROWS: SiteRows = {
   [VALIDATE_FILE]: 1,
   [TRIAGE_FILE]: 1,
   'dist/curation-off/agents/triage.md': 1,
+  'dist/compliance-off/agents/triage.md': 1,
+  'dist/compliance-off/commands/code-review.md': 1,
+  'dist/compliance-off/commands/implement.md': 2,
+  'dist/compliance-off/commands/plan.md': 2,
+  'dist/compliance-off/commands/resolve.md': 1,
+  'dist/curation-compliance-off/agents/triage.md': 1,
+  'dist/curation-compliance-off/commands/code-review.md': 1,
+  'dist/curation-compliance-off/commands/implement.md': 2,
+  'dist/curation-compliance-off/commands/plan.md': 2,
+  'dist/curation-compliance-off/commands/resolve.md': 1,
 }
 
 /** What a file holds once the sanctioned line is taken out and each prose entry scoped to the file is replaced. */
@@ -410,6 +420,8 @@ function promptSurface(): CorpusClass[] {
     { label: 'skills', files: readTree('src/assets/skills'), sentinel: 'src/assets/skills/worktree-support/SKILL.md', floor: 30 },
     { label: 'rules', files: readTree('src/assets/rules'), sentinel: 'src/assets/rules/security.md', floor: 4 },
     { label: 'curation-off', files: readTree('dist/curation-off'), sentinel: 'dist/curation-off/commands/code-review.md', floor: 25 },
+    { label: 'compliance-off', files: readTree('dist/compliance-off'), sentinel: 'dist/compliance-off/commands/implement.md', floor: 4 },
+    { label: 'curation-compliance-off', files: readTree('dist/curation-compliance-off'), sentinel: 'dist/curation-compliance-off/commands/implement.md', floor: 3 },
     { label: 'compaction directive', files: [{ name: COMPACTION_ENTRY, content: compactDirectiveText() }], sentinel: COMPACTION_ENTRY, floor: 1 },
   ]
 }

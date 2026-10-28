@@ -323,6 +323,64 @@ describe('runComplianceStep', () => {
   });
 });
 
+// ── AC-32 (#648): the wizard names the posting effect ───────────────────────────
+
+describe('runComplianceStep names the posting effect (AC-32)', () => {
+  /** A fake IO that records the note and the enable select options; the select answers `answer`. */
+  function recordingPrompts(answer: boolean) {
+    const seen: { note: string; options: Array<{ value: boolean; label: string; hint: string }> } = { note: '', options: [] };
+    const prompts: CompliancePromptIO = {
+      note: (message) => { seen.note = message; },
+      select: async (opts): Promise<PromptOutcome<boolean>> => {
+        seen.options = opts.options;
+        return { kind: 'value', value: answer };
+      },
+      multiselect: async (): Promise<PromptOutcome<string[]>> => ({ kind: 'value', value: [] }),
+    };
+    return { prompts, seen };
+  }
+
+  it('the note says compliance on installs the steps that post and compliance off installs none', async () => {
+    const { prompts, seen } = recordingPrompts(false);
+    await runComplianceStep({ seed: { enabled: false, frameworks: [] }, prompts });
+
+    expect(seen.note).toContain('installs the steps that post');
+    expect(seen.note).toContain('GitHub or a tracker');
+    expect(seen.note).toContain('installs none of them');
+    expect(seen.note).toContain('.devflow/docs/');
+  });
+
+  it('the Yes hint says the posting steps are installed and the No hint says none is', async () => {
+    const { prompts, seen } = recordingPrompts(false);
+    await runComplianceStep({ seed: { enabled: false, frameworks: [] }, prompts });
+
+    const hint = (value: boolean): string => seen.options.find(o => o.value === value)?.hint ?? '';
+    expect(hint(true), 'non-vacuity: the select has a Yes option').not.toBe('');
+    expect(hint(true)).toContain('installs the steps that post');
+    expect(hint(false)).toContain('no step that posts is installed');
+    expect(hint(false)).toContain('devflow compliance --enable');
+  });
+
+  it('the disabled message says no posting step is installed', async () => {
+    const { prompts } = recordingPrompts(false);
+    const result = await runComplianceStep({ seed: { enabled: true, frameworks: ['gdpr'] }, prompts });
+
+    expect(result.kind).toBe('resolved');
+    if (result.kind !== 'resolved') return;
+    expect(result.messages[0].text).toContain('no step that posts is installed');
+    expect(result.messages[0].text).toContain('devflow compliance --enable');
+  });
+
+  it('the enabled message says the posting steps are installed', async () => {
+    const { prompts } = recordingPrompts(true);
+    const result = await runComplianceStep({ seed: { enabled: false, frameworks: [] }, prompts });
+
+    expect(result.kind).toBe('resolved');
+    if (result.kind !== 'resolved') return;
+    expect(result.messages[0].text).toContain('the steps that post are installed');
+  });
+});
+
 // ── Shared helpers ─────────────────────────────────────────────────────────────
 
 describe('frameworkChoices', () => {

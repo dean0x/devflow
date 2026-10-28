@@ -27,8 +27,9 @@ import {
   VARIANT_MODULES,
   operationReferenceRel,
 } from '../src/core/mds-variants.js';
-import { ROOT, resolveAgentSource, resolveAllAgents, gitAgentSinkCorpus, gitOperationReferenceCorpus, extractOpSectionFromCorpus, collectUnfencedH2, loadFile, requireDistFile, walkFiles, isPrHostEntryPath, NAME_FILE_TRAP, NAME_FILE_REMOVAL, WRITE_FAILURE, JUDGE_BY_READING, SHELL_WRITE_PROBES, countShellWritesIntoF, DEFAULT_BRANCH_PROBE, PRODUCER_STATUS_CAPTURE, PRODUCER_NAME_TAIL, GH_FAILED_RULE, NO_PR_CLAUSE, NO_PR_DEFINITION, OTHER_GH_FAILURE_CLAUSE, ORIGIN_HEAD_READ, MAIN_PROBE, MASTER_FALLBACK, DEFAULT_BRANCH_FILL, type CorpusEntry } from './helpers.js';
+import { ROOT, resolveAgentSource, resolveVariantOffSource, resolveAllAgents, gitAgentSinkCorpus, gitOperationReferenceCorpus, extractOpSectionFromCorpus, collectUnfencedH2, loadFile, requireDistFile, walkFiles, isPrHostEntryPath, NAME_FILE_TRAP, NAME_FILE_REMOVAL, WRITE_FAILURE, JUDGE_BY_READING, SHELL_WRITE_PROBES, countShellWritesIntoF, DEFAULT_BRANCH_PROBE, PRODUCER_STATUS_CAPTURE, PRODUCER_NAME_TAIL, GH_FAILED_RULE, NO_PR_CLAUSE, NO_PR_DEFINITION, OTHER_GH_FAILURE_CLAUSE, ORIGIN_HEAD_READ, MAIN_PROBE, MASTER_FALLBACK, DEFAULT_BRANCH_FILL, type CorpusEntry } from './helpers.js';
 import { RESOLVE_BASE_SCRIPT } from './evidence/seam.js';
+import { POSTING_OPERATIONS } from './fixtures/mds-manifest.js';
 
 /**
  * How many corpus files declare a `## Operation:` section for a TRACKER op: one
@@ -3338,6 +3339,95 @@ describe('git agent: the operation roster is unchanged (registry Guard 6)', () =
     expect(GIT_OPERATION_ROSTER.length, 'the named set is empty').toBe(20);
     const seeded = '## Operations\n\n| Operation | Purpose |\n|---|---|\n| `setup-task` | a |\n| `renamed-op` | b |\n\n## Output\n\n| `later-op` | c |\n';
     expect(collectOperationNames(seeded)).toEqual(['setup-task', 'renamed-op']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The compliance-off Git agent (AC-16)
+//
+// A machine with compliance off installs no step that posts to GitHub or a tracker, so
+// the agent that routes those operations holds no row, no loading line and no name for
+// any of the eight. The comment-sink scrub stays outside every arm: the operations that
+// remain (PR create, issue create, release create) still publish a body through it.
+// ---------------------------------------------------------------------------
+
+/** Named collector: the posting operations a Git agent text names anywhere. */
+export function collectPostingOpNames(content: string): string[] {
+  return POSTING_OPERATIONS.filter(op => content.includes(op));
+}
+
+/** Named collector: the operations the `## Loading the mechanics` table gives a reference, in table order. */
+export function collectLoadingRowNames(content: string): string[] {
+  const start = content.search(/^## Loading the mechanics\s*$/m);
+  if (start === -1) return [];
+  const names: string[] = [];
+  for (const line of content.slice(start).split('\n').slice(1)) {
+    if (/^## /.test(line)) break;
+    const row = /^\|\s*`([a-z][a-z0-9-]*)`\s*\|\s*`references\//.exec(line);
+    if (row !== null) names.push(row[1]);
+  }
+  return names;
+}
+
+/** The `## Comment-sink scrub (D11)` section of a Git agent text, heading included, or `''` when it has none. */
+export function scrubSectionOf(content: string): string {
+  const start = content.indexOf('\n## Comment-sink scrub (D11)\n');
+  if (start === -1) return '';
+  const end = content.indexOf('\n## ', start + 1);
+  return content.slice(start, end === -1 ? undefined : end);
+}
+
+describe('git agent: the compliance-off build carries no posting operation (AC-16)', () => {
+  const on = resolveAgentSource('git').content;
+  const offText = resolveVariantOffSource('compliance-off', 'agents', 'git');
+  if (offText === null) throw new Error('dist/compliance-off/agents/git.md is absent: run `npm run build:mds`');
+  const off = offText;
+
+  it('names no posting operation anywhere, while the compliance-on agent names each of the eight', () => {
+    expect(collectPostingOpNames(off)).toEqual([]);
+    expect([...collectPostingOpNames(on)].sort(), 'the on agent must name all eight, or the scan proves nothing').toEqual([...POSTING_OPERATIONS].sort());
+  });
+
+  it('routes every other operation, in the registered order', () => {
+    const kept = GIT_OPERATION_ROSTER.filter(op => !POSTING_OPERATIONS.includes(op));
+    expect(kept.length, 'the kept roster is empty').toBe(GIT_OPERATION_ROSTER.length - POSTING_OPERATIONS.length);
+    expect(collectOperationNames(off)).toEqual(kept);
+  });
+
+  it('loads a reference for each kept operation that has one and for no posting operation', () => {
+    const onRows = collectLoadingRowNames(on);
+    expect(onRows.length, 'the on agent has loading rows').toBeGreaterThan(0);
+    expect(collectLoadingRowNames(off)).toEqual(onRows.filter(op => !POSTING_OPERATIONS.includes(op)));
+  });
+
+  it('holds no batch backpressure line and no exempt-list entry that only a posting operation fills', () => {
+    for (const absent of ['Rate backpressure for batch ops', '`**Publication**:`', '`## PR Evidence` block']) {
+      expect(on, `the on agent must hold "${absent}", or the check proves nothing`).toContain(absent);
+      expect(off, `the off agent must not hold "${absent}"`).not.toContain(absent);
+    }
+    expect(off, 'check-merge-readiness stays, so its `- Test plan:` line stays exempt').toContain('`- Test plan:`');
+  });
+
+  it('describes itself without PR comments or tech debt, and keeps Principles 5 and 8 whole', () => {
+    expect(on).toMatch(/^description: .*PR comments, tech debt/m);
+    expect(off).toMatch(/^description: Unified agent for all git\/GitHub operations - issues, releases$/m);
+    expect(off).toContain('5. **Attribution** - every comment carries its `<!-- devflow:* -->` marker (dedup and attribution).\n');
+    expect(off).toContain('- **Never reproduced in a posted body**: no body-posting op reproduces verbatim `<external-thread>` or `<untrusted-issue-body>` content');
+    expect(off).toContain('- **Marker neutralisation**');
+  });
+
+  it('keeps the comment-sink scrub section byte-identical to the compliance-on agent (TP-26)', () => {
+    const scrub = scrubSectionOf(on);
+    expect(scrub, 'the scrub section is read').toContain('redact-secrets.cjs');
+    expect(scrubSectionOf(off)).toBe(scrub);
+  });
+
+  it('known-bad probes: the collectors report a seeded posting row, a seeded loading row and an altered scrub section', () => {
+    expect(collectPostingOpNames(`${off}\n| \`manage-debt\` | add |`)).toEqual(['manage-debt']);
+    const seeded = off.replace('| `check-ci-status` |', '| `post-review-summary` | `references/pr/post-review-summary.md` |\n| `check-ci-status` |');
+    expect(collectLoadingRowNames(seeded)).toContain('post-review-summary');
+    expect(scrubSectionOf(off.replace('DO NOT POST', 'post anyway'))).not.toBe(scrubSectionOf(on));
+    expect(scrubSectionOf('## Output\n')).toBe('');
   });
 });
 

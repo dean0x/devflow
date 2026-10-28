@@ -27,9 +27,10 @@
  *   W3     (#376) the related lines may open with ONE tracking line — `Refs` and a
  *          ref that names no row, the wave's tracking issue. A `Closes` naming no
  *          row, a second such line and one that is not first are all `orphan`.
- *   TP-18  the links-only block (the heading and `Refs #<n>` lines, no evidence
- *          section) is admitted only by `check wave --links-only <file>`; plain
- *          `check wave` refuses it as `malformed`, as the base grammar did.
+ *   TP-18  the links-only block (the heading and `Refs #<n>` or `Refs <KEY-N>`
+ *          lines, no evidence section) is admitted only by `check wave --links-only
+ *          <file>`; plain `check wave` refuses it as `malformed`, as the base
+ *          grammar did. It never admits `Closes`, a lowercase key or a bare number.
  *
  * The parity arms pin the exports to the shipped text that governs them: every
  * line ensure-pr-ready's link paste gate admits (each ticket's captured ISSUE_PR_LINK) is a
@@ -388,7 +389,23 @@ const RULES: readonly RuleCase[] = [
   { label: 'a links-only block with trailing blank lines', text: `${linksOnly(['Refs #1'])}\n\n`, optIn: true, code: null },
   { label: 'a links-only block of 101 Refs lines (the cap)', text: linksOnly(Array.from({ length: 101 }, (_, i) => `Refs #${i + 1}`)), optIn: true, code: null },
   { label: 'a links-only block with a Closes line (no row has merged, so nothing may close)', text: linksOnly(['Refs #1', 'Closes #2']), optIn: true, code: 'malformed', line: 5 },
-  { label: 'a links-only block of a keyed ref', text: linksOnly(['Refs ABC-1']), optIn: true, code: 'malformed', line: 4 },
+  { label: 'a links-only block of a Jira-style key', text: linksOnly(['Refs PROJ-12']), optIn: true, code: null },
+  { label: 'a links-only block of a Linear-style key', text: linksOnly(['Refs ENG-7']), optIn: true, code: null },
+  { label: 'a links-only block of keys at the length bounds', text: linksOnly(['Refs A-1', 'Refs ABCDEFGHIJ-999999999', 'Refs A1_B2-30']), optIn: true, code: null },
+  { label: 'a links-only block mixing #N and KEY-N refs in any order', text: linksOnly(['Refs #12', 'Refs PROJ-3', 'Refs #4', 'Refs ENG-44']), optIn: true, code: null },
+  { label: 'a links-only block of keyed refs with CRLF line endings', text: linksOnly(['Refs PROJ-1', 'Refs ENG-2'], '\r\n'), optIn: true, code: null },
+  { label: 'a links-only block of a keyed ref with no trailing newline', text: linksOnly(['Refs PROJ-1'], '\n', ''), optIn: true, code: null },
+  { label: 'a links-only block with a keyed Closes line', text: linksOnly(['Refs PROJ-1', 'Closes PROJ-12']), optIn: true, code: 'malformed', line: 3 },
+  { label: 'a links-only block of a lone keyed Closes line', text: linksOnly(['Closes PROJ-12']), optIn: true, code: 'malformed', line: 2 },
+  { label: 'a links-only block with a Closes #N line after a keyed ref', text: linksOnly(['Refs PROJ-1', 'Closes #2']), optIn: true, code: 'malformed', line: 5 },
+  { label: 'a links-only block of a lowercase key', text: linksOnly(['Refs #1', 'Refs proj-12']), optIn: true, code: 'malformed', line: 3 },
+  { label: 'a links-only block of a mixed-case key', text: linksOnly(['Refs Proj-12']), optIn: true, code: 'malformed', line: 2 },
+  { label: 'a links-only block of a bare number', text: linksOnly(['Refs 12']), optIn: true, code: 'malformed', line: 2 },
+  { label: 'a links-only block of a key with a zero number', text: linksOnly(['Refs PROJ-0']), optIn: true, code: 'malformed', line: 2 },
+  { label: 'a links-only block of a key over ten characters', text: linksOnly(['Refs ABCDEFGHIJK-1']), optIn: true, code: 'malformed', line: 2 },
+  { label: 'a links-only block of a key that starts with a digit', text: linksOnly(['Refs 1ABC-1']), optIn: true, code: 'malformed', line: 2 },
+  { label: 'a links-only block of a keyed ref with a trailing word', text: linksOnly(['Refs PROJ-12 now']), optIn: true, code: 'malformed', line: 2 },
+  { label: 'a links-only block with a repeated keyed ref', text: linksOnly(['Refs PROJ-1', 'Refs ENG-2', 'Refs PROJ-1']), optIn: true, code: 'duplicate', line: 4 },
   { label: 'a links-only block of the heading alone', text: '## Related Issues\n', optIn: true, code: 'malformed', line: 3 },
   { label: 'a links-only block with a repeated ref', text: linksOnly(['Refs #1', 'Refs #2', 'Refs #1']), optIn: true, code: 'duplicate', line: 4 },
   { label: 'a links-only block with free text after the links', text: linksOnly(['Refs #1', 'please merge']), optIn: true, code: 'malformed', line: 3 },
@@ -629,8 +646,22 @@ describe('TP-18: a links-only Related Issues block is admitted only with the opt
     for (const r of block.related) expect(Object.isFrozen(r)).toBe(true)
   })
 
+  it('parses #N and KEY-N refs, mixed, into their Refs lines with no rows or tracking line, frozen', () => {
+    const block = unwrap(PE.parseWaveBlock(linksOnly(['Refs #12', 'Refs PROJ-3', 'Refs ENG-44']), OPT_IN))
+    expect(Object.isFrozen(block)).toBe(true)
+    expect(block.tracking).toBeNull()
+    expect(block.rows).toEqual([])
+    expect(block.related.map(r => `${r.keyword} ${r.ref} @${r.line}`)).toEqual(['Refs #12 @2', 'Refs PROJ-3 @3', 'Refs ENG-44 @4'])
+  })
+
+  it('a keyed ref is the same ref only as a whole: PROJ-1 and ENG-1 are two refs, PROJ-1 twice is one ref twice', () => {
+    expect(PE.parseWaveBlock(linksOnly(['Refs PROJ-1', 'Refs ENG-1']), OPT_IN).ok).toBe(true)
+    const twice = PE.parseWaveBlock(linksOnly(['Refs PROJ-1', 'Refs PROJ-1']), OPT_IN)
+    expect(twice.ok ? 'ok' : `${twice.error.code}@${twice.error.line}`).toBe('duplicate@3')
+  })
+
   it('without the opt-in every links-only row is refused, and each refusal the opt-in does not move is the same one', () => {
-    expect(LINKS_ONLY_ROWS.length, 'the links-only rows are in the table').toBeGreaterThanOrEqual(15)
+    expect(LINKS_ONLY_ROWS.length, 'the links-only rows are in the table').toBeGreaterThanOrEqual(30)
     expect(collectPlainViolations(text => PE.parseWaveBlock(text))).toEqual([])
   })
 
@@ -673,6 +704,28 @@ describe('TP-18: a links-only Related Issues block is admitted only with the opt
     const found = collectRuleViolations(closesToo, RULES)
     expect(found.some(f => f.startsWith('no evidence section at all: expected malformed, got admitted'))).toBe(true)
     expect(found.some(f => f.startsWith('a links-only block with a Closes line'))).toBe(true)
+  })
+
+  it('known-bad probe: a grammar that admits keyed Closes lines is reported on the keyed Closes rows', () => {
+    const keyedCloses = (text: unknown, options?: WaveOptions): Result<WaveBlock> =>
+      typeof text === 'string' && /^## Related Issues\n(?:(?:Refs|Closes) [A-Z][A-Z0-9_]{0,9}-[1-9][0-9]*\n)+$/.test(text)
+        ? { ok: true, value: { tracking: null, related: [], rows: [] } }
+        : PE.parseWaveBlock(text, options)
+    const found = collectRuleViolations(keyedCloses, RULES)
+    expect(found.some(f => f.startsWith('a links-only block with a keyed Closes line: expected malformed, got admitted'))).toBe(true)
+    expect(found.some(f => f.startsWith('a links-only block of a lone keyed Closes line: expected malformed, got admitted'))).toBe(true)
+  })
+
+  it('known-bad probe: a grammar that admits only #N refs is reported on every admitted keyed row', () => {
+    const hashOnly = (text: unknown, options?: WaveOptions): Result<WaveBlock> => {
+      const r = PE.parseWaveBlock(text, options)
+      return r.ok && r.value.rows.length === 0 && r.value.related.some(rel => !rel.ref.startsWith('#'))
+        ? { ok: false, error: { code: 'malformed', line: 1 } }
+        : r
+    }
+    const keyed = RULES.filter(c => c.code === null && c.optIn === true && /^Refs [A-Z]/m.test(c.text))
+    expect(keyed.length, 'the admitted keyed rows are in the table').toBeGreaterThanOrEqual(6)
+    expect(collectRuleViolations(hashOnly, RULES)).toHaveLength(keyed.length)
   })
 
   it('known-bad probe: a grammar that admits no links-only block is reported on the admitted links-only rows', () => {

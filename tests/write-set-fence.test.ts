@@ -13,15 +13,18 @@
  * stopped writing fails too, and the table leaves every toggle flipped
  * back to its installed state, so each row starts from a known one.
  *
- * D-LEARNING-VARIANT-FENCE: `curation --enable` / `--disable` converge the installed
- * curation variants (D-LEARNING-VARIANT-INSTALL), so their allowlist is the manifest
- * plus that surface and nothing wider: the command and agent files of the variant
- * roster (the files under dist/curation-off, the converge's own roster source) and
- * the curation-gated skill directories. The roster is read from the build, not typed
- * here, so a new arm is admitted with no edit; it is matched file by file, never as a
- * `commands/**` or `agents/**` subtree, so a stray write to any other agent, command
- * or skill still fails the fence. In a row the surface is the one entry
- * {@link CURATION_VARIANT_SURFACE}, which the check expands to those paths.
+ * D-LEARNING-VARIANT-FENCE: `curation --enable` / `--disable` and every `compliance`
+ * action that moves the posting steps converge the installed prompt variants
+ * (D-LEARNING-VARIANT-INSTALL), so their allowlist is the manifest, the compliance rule
+ * and skill where the row writes them, plus one surface and nothing wider: the command
+ * and agent files of the variant roster (the files under dist/curation-off,
+ * dist/compliance-off and dist/curation-compliance-off, the converge's own roster
+ * sources) and the curation-gated skill directories. The roster is read from the
+ * build, not typed here, so a new arm is admitted with no edit; it is matched file by
+ * file, never as a `commands/**` or `agents/**` subtree, so a stray write to any other
+ * agent, command or skill still fails the fence. In a row the surface is the one entry
+ * {@link PROMPT_VARIANT_SURFACE}, which the check expands to those paths: both axes
+ * share it, so the footprint ceiling does not move for the posting axis.
  *
  * Coverage is held to the CLI's own definitions, not to this table: every
  * top-level command in `devflow --help` has a row or a reason in UNFENCED_COMMANDS,
@@ -41,7 +44,7 @@ import {
   SUBPROCESS_TIMEOUT_MS, createSandbox, diffTree, excludeGit, readTree, removeSandbox, resolveOnPath, runCli,
   runCliOk, sandboxChildEnv, type Sandbox,
 } from './install-snapshot-helpers.js'
-import { curationOffDir } from '../src/core/assets.js'
+import { bothOffDir, complianceOffDir, curationOffDir } from '../src/core/assets.js'
 import { CURATION_GATED_SKILLS, prefixSkillName } from '../src/core/plugins.js'
 import { initCommand } from '../src/cli/commands/init.js'
 import { uninstallCommand } from '../src/cli/commands/uninstall.js'
@@ -72,7 +75,7 @@ export interface FenceRow {
   /**
    * The paths the command may change, as `<HOME>/…`, `<REPO>/…` or `<SANDBOX>/…`.
    * An entry ending in `/**` admits that path and everything under it.
-   * {@link CURATION_VARIANT_SURFACE} admits the curation-variant roster (see there).
+   * {@link PROMPT_VARIANT_SURFACE} admits the prompt-variant roster (see there).
    * Any other entry admits exactly that path.
    */
   readonly allow: readonly string[]
@@ -100,41 +103,52 @@ const REPO_CURATION = '<REPO>/.devflow/curation/**'
 
 const NONE: readonly string[] = []
 
-/** The prompt kinds the curation converge rewrites, installed at `<HOME>/.claude/<kind>/devflow/<file>`. */
-const CURATION_VARIANT_KINDS = ['commands', 'agents'] as const
+/** The prompt kinds the variant converge rewrites, installed at `<HOME>/.claude/<kind>/devflow/<file>`. */
+const PROMPT_VARIANT_KINDS = ['commands', 'agents'] as const
 
-/**
- * The surfaces a curation toggle's converge may write (D-LEARNING-VARIANT-FENCE):
- * each roster file's installed path, and each curation-gated skill directory.
- *
- * The roster is the `.md` files under dist/curation-off/<kind>, read through the
- * converge's own `curationOffDir`. An absent directory throws rather than yielding an
- * empty roster, which would fence the toggle to the manifest and fail every row for
- * a reason that names no cause.
- */
-function curationVariantAllow(): string[] {
-  const prompts = CURATION_VARIANT_KINDS.flatMap(kind => {
-    const dir = curationOffDir(kind)
-    let names: string[]
-    try {
-      names = readdirSync(dir).filter(name => name.endsWith('.md')).sort()
-    } catch (err) {
-      throw new Error(`the curation-variant roster is unreadable (${dir}) — run \`npm run build:mds\`: ${String(err)}`)
-    }
-    return names.map(name => `<HOME>/.claude/${kind}/devflow/${name}`)
-  })
-  const skills = CURATION_GATED_SKILLS.map(skill => `<HOME>/.claude/skills/${prefixSkillName(skill)}/**`)
-  return [...prompts, ...skills]
+/** The directory of each off tree the converge reads its roster from, by kind. */
+const OFF_TREE_DIRS: ReadonlyArray<(kind: (typeof PROMPT_VARIANT_KINDS)[number]) => string> = [
+  kind => curationOffDir(kind),
+  kind => complianceOffDir(kind),
+  kind => bothOffDir(kind),
+]
+
+/** The installed path of every `.md` file in one off tree directory; an absent directory throws. */
+function offTreeFiles(dir: string, kind: (typeof PROMPT_VARIANT_KINDS)[number]): string[] {
+  let names: string[]
+  try {
+    names = readdirSync(dir).filter(name => name.endsWith('.md')).sort()
+  } catch (err) {
+    throw new Error(`the prompt-variant roster is unreadable (${dir}) — run \`npm run build:mds\`: ${String(err)}`)
+  }
+  return names.map(name => `<HOME>/.claude/${kind}/devflow/${name}`)
 }
 
-const CURATION_VARIANT_PATHS: readonly string[] = curationVariantAllow()
+/**
+ * The surfaces a variant toggle's converge may write (D-LEARNING-VARIANT-FENCE): each
+ * roster file's installed path, and each curation-gated skill directory.
+ *
+ * The roster is the union of the `.md` files under the three off trees of each kind,
+ * read through the converge's own directory helpers: a host that carries a curation
+ * arm only, a compliance arm only (the Git agent), or both, is one installed path.
+ * An absent directory throws rather than yielding an empty roster, which would fence
+ * the toggle to the manifest and fail every row for a reason that names no cause.
+ */
+function promptVariantAllow(): string[] {
+  const prompts = PROMPT_VARIANT_KINDS.flatMap(kind => OFF_TREE_DIRS.flatMap(dirOf => offTreeFiles(dirOf(kind), kind)))
+  const skills = CURATION_GATED_SKILLS.map(skill => `<HOME>/.claude/skills/${prefixSkillName(skill)}/**`)
+  return [...new Set([...prompts, ...skills])]
+}
+
+const PROMPT_VARIANT_PATHS: readonly string[] = promptVariantAllow()
 
 /**
- * The curation-variant surface as ONE allowlist entry. A row names the token; the
- * check expands it to {@link CURATION_VARIANT_PATHS}, so the surface is matched file
- * by file and counts once in {@link allowlistSize} (D-ALLOWLIST-COUNTING).
+ * The prompt-variant surface as ONE allowlist entry. A row names the token; the
+ * check expands it to {@link PROMPT_VARIANT_PATHS}, so the surface is matched file
+ * by file and counts once in {@link allowlistSize} (D-ALLOWLIST-COUNTING), however
+ * many rows and both axes use it.
  */
-export const CURATION_VARIANT_SURFACE = '<CURATION-VARIANT-SURFACE>'
+export const PROMPT_VARIANT_SURFACE = '<PROMPT-VARIANT-SURFACE>'
 
 function seedFile(sb: Sandbox, rel: string, content: string): void {
   const abs = path.join(sb.repo, rel)
@@ -217,8 +231,8 @@ export const FENCE_ROWS: readonly FenceRow[] = [
   { args: ['memory', '--clear'], allow: [REPO_MEMORY], mustWrite: true, seed: seedMemoryQueue },
   { args: ['memory', '--status'], allow: NONE, mustWrite: false },
 
-  { args: ['curation', '--disable'], allow: [MANIFEST, CURATION_VARIANT_SURFACE], mustWrite: true },
-  { args: ['curation', '--enable'], allow: [MANIFEST, CURATION_VARIANT_SURFACE], mustWrite: true },
+  { args: ['curation', '--disable'], allow: [MANIFEST, PROMPT_VARIANT_SURFACE], mustWrite: true },
+  { args: ['curation', '--enable'], allow: [MANIFEST, PROMPT_VARIANT_SURFACE], mustWrite: true },
   { args: ['curation', '--restore', FENCE_ENTRY], allow: [REPO_CURATION], mustWrite: true, seed: seedRetiredEntry },
   { args: ['curation', '--list'], allow: NONE, mustWrite: false },
   { args: ['curation', '--show', FENCE_ENTRY], allow: NONE, mustWrite: false },
@@ -250,11 +264,13 @@ export const FENCE_ROWS: readonly FenceRow[] = [
   { args: ['tracker', '--set', 'github'], allow: [MANIFEST, TRACKER_SENTINEL], mustWrite: true },
   { args: ['tracker', '--status'], allow: NONE, mustWrite: false },
 
-  { args: ['compliance', '--set', 'hipaa'], allow: [MANIFEST, COMPLIANCE_RULE, COMPLIANCE_SKILL], mustWrite: true },
-  { args: ['compliance', '--set', ''], allow: [MANIFEST, COMPLIANCE_RULE, COMPLIANCE_SKILL], mustWrite: true },
-  { args: ['compliance', '--disable'], allow: [MANIFEST, COMPLIANCE_RULE, COMPLIANCE_SKILL], mustWrite: true },
-  { args: ['compliance', '--enable'], allow: [MANIFEST, COMPLIANCE_RULE, COMPLIANCE_SKILL], mustWrite: true },
-  { args: ['compliance', '--disable'], allow: [MANIFEST, COMPLIANCE_RULE, COMPLIANCE_SKILL], mustWrite: true, label: 'after --enable' },
+  // Every compliance action also converges the installed prompts of the compliance-armed hosts (the posting
+  // steps), so it may write them through the shared prompt-variant surface, which counts once.
+  { args: ['compliance', '--set', 'hipaa'], allow: [MANIFEST, COMPLIANCE_RULE, COMPLIANCE_SKILL, PROMPT_VARIANT_SURFACE], mustWrite: true },
+  { args: ['compliance', '--set', ''], allow: [MANIFEST, COMPLIANCE_RULE, COMPLIANCE_SKILL, PROMPT_VARIANT_SURFACE], mustWrite: true },
+  { args: ['compliance', '--disable'], allow: [MANIFEST, COMPLIANCE_RULE, COMPLIANCE_SKILL, PROMPT_VARIANT_SURFACE], mustWrite: true },
+  { args: ['compliance', '--enable'], allow: [MANIFEST, COMPLIANCE_RULE, COMPLIANCE_SKILL, PROMPT_VARIANT_SURFACE], mustWrite: true },
+  { args: ['compliance', '--disable'], allow: [MANIFEST, COMPLIANCE_RULE, COMPLIANCE_SKILL, PROMPT_VARIANT_SURFACE], mustWrite: true, label: 'after --enable' },
   { args: ['compliance', '--status'], allow: NONE, mustWrite: false },
 
   // The one rule file the converge writes (rules/devflow/behavior.md) sits under RULES_DIR; the entry already
@@ -344,9 +360,9 @@ export function fencePath(rel: string): string {
   return `<SANDBOX>/${rel}`
 }
 
-/** The allowlist with {@link CURATION_VARIANT_SURFACE} replaced by the paths it stands for. */
+/** The allowlist with {@link PROMPT_VARIANT_SURFACE} replaced by the paths it stands for. */
 function expandAllow(allow: readonly string[]): string[] {
-  return allow.flatMap(entry => (entry === CURATION_VARIANT_SURFACE ? CURATION_VARIANT_PATHS : [entry]))
+  return allow.flatMap(entry => (entry === PROMPT_VARIANT_SURFACE ? PROMPT_VARIANT_PATHS : [entry]))
 }
 
 function allowed(p: string, allow: readonly string[]): boolean {
@@ -366,7 +382,7 @@ export function fenceViolations(changed: readonly string[], allow: readonly stri
  * The number of distinct allowlist entries across the table — the fence's footprint.
  *
  * D-ALLOWLIST-COUNTING: counted as declared, before expansion. A roster-derived
- * surface ({@link CURATION_VARIANT_SURFACE}) is ONE entry, because its members come
+ * surface ({@link PROMPT_VARIANT_SURFACE}) is ONE entry, because its members come
  * from the build and not from hand edits: a new arm grows the roster with no one
  * touching this file, so the count measures the paths a person has declared. Every
  * hand-written path is one entry each, so a new hand-written path still moves the
@@ -406,24 +422,37 @@ describe('write-set fence check', () => {
   })
 })
 
-describe('write-set fence: the curation-variant allowlist', () => {
-  const ROW_ALLOW = [MANIFEST, CURATION_VARIANT_SURFACE]
+describe('write-set fence: the prompt-variant allowlist', () => {
+  const ROW_ALLOW = [MANIFEST, PROMPT_VARIANT_SURFACE]
   const roster = (kind: 'commands' | 'agents'): string[] =>
-    CURATION_VARIANT_PATHS.filter(entry => entry.startsWith(`<HOME>/.claude/${kind}/devflow/`))
+    PROMPT_VARIANT_PATHS.filter(entry => entry.startsWith(`<HOME>/.claude/${kind}/devflow/`))
+  const treeFiles = (dir: string): string[] => readdirSync(dir).filter(name => name.endsWith('.md'))
 
-  it('is the dist/curation-off roster, file by file, plus the curation-gated skill directory', () => {
+  it('is the union of the curation-off, compliance-off and both-off rosters, file by file, plus the curation-gated skill directory', () => {
     // Non-vacuity: the roster really was read, and carries both kinds.
     expect(roster('commands').length).toBeGreaterThan(0)
     expect(roster('agents').length).toBeGreaterThan(0)
-    for (const kind of CURATION_VARIANT_KINDS) {
-      const files = readdirSync(curationOffDir(kind)).filter(name => name.endsWith('.md'))
-      expect(roster(kind).map(entry => path.posix.basename(entry)).sort()).toEqual(files.sort())
+    for (const kind of PROMPT_VARIANT_KINDS) {
+      const files = OFF_TREE_DIRS.flatMap(dirOf => treeFiles(dirOf(kind)))
+      expect(roster(kind).map(entry => path.posix.basename(entry)).sort()).toEqual([...new Set(files)].sort())
     }
-    expect(CURATION_VARIANT_PATHS).toContain('<HOME>/.claude/skills/devflow:apply-decisions/**')
+    expect(PROMPT_VARIANT_PATHS).toContain('<HOME>/.claude/skills/devflow:apply-decisions/**')
+  })
+
+  it('covers the compliance-armed hosts, including the Git agent that no curation tree holds', () => {
+    expect(treeFiles(curationOffDir('agents')), 'non-vacuity: the Git agent has no curation arm').not.toContain('git.md')
+    expect(treeFiles(complianceOffDir('agents'))).toContain('git.md')
+    expect(roster('agents')).toContain('<HOME>/.claude/agents/devflow/git.md')
+    for (const name of treeFiles(complianceOffDir('commands'))) {
+      expect(roster('commands'), name).toContain(`<HOME>/.claude/commands/devflow/${name}`)
+    }
+    for (const name of treeFiles(bothOffDir('commands'))) {
+      expect(roster('commands'), name).toContain(`<HOME>/.claude/commands/devflow/${name}`)
+    }
   })
 
   it('admits no subtree of the commands, agents or skills directories', () => {
-    const subtrees = CURATION_VARIANT_PATHS.filter(entry => entry.endsWith('/**'))
+    const subtrees = PROMPT_VARIANT_PATHS.filter(entry => entry.endsWith('/**'))
     expect(subtrees).toEqual(['<HOME>/.claude/skills/devflow:apply-decisions/**'])
   })
 
@@ -442,7 +471,7 @@ describe('write-set fence: the curation-variant allowlist', () => {
   // Known-bad probes: a write the converge never makes must still fail the fence.
   it('rejects a write to an agent outside the roster', () => {
     const stray = '<HOME>/.claude/agents/devflow/not-in-the-roster.md'
-    expect(CURATION_VARIANT_PATHS).not.toContain(stray)
+    expect(PROMPT_VARIANT_PATHS).not.toContain(stray)
     expect(fenceViolations([stray], ROW_ALLOW)).toEqual([stray])
   })
 
@@ -515,11 +544,28 @@ describe('write-set fence coverage', () => {
     expect(allowlistSize(FENCE_ROWS)).toBeLessThanOrEqual(12)
   })
 
-  it('counts the curation-variant surface once, and every hand-written entry once each', () => {
-    const curationRows = FENCE_ROWS.filter(row => row.allow.includes(CURATION_VARIANT_SURFACE))
-    // Non-vacuity: the surface really is in the table, in both curation toggles.
+  it('counts the prompt-variant surface once for both axes, and every hand-written entry once each', () => {
+    const surfaceRows = FENCE_ROWS.filter(row => row.allow.includes(PROMPT_VARIANT_SURFACE))
+    const curationRows = surfaceRows.filter(row => row.args[0] === 'curation')
+    const complianceRows = surfaceRows.filter(row => row.args[0] === 'compliance')
+    // Non-vacuity: the surface really is in the table, in both curation toggles and in every compliance action
+    // that converges the prompts.
     expect(curationRows.map(rowName)).toEqual(['devflow curation --disable', 'devflow curation --enable'])
+    expect(complianceRows.map(rowName)).toEqual([
+      'devflow compliance --set hipaa',
+      'devflow compliance --set ""',
+      'devflow compliance --disable',
+      'devflow compliance --enable',
+      'devflow compliance --disable (after --enable)',
+    ])
+    expect(surfaceRows).toHaveLength(curationRows.length + complianceRows.length)
     expect(allowlistSize(curationRows)).toBe(2) // the manifest and the surface
+    // The posting axis adds the compliance rule and skill, and nothing for the prompts: they ride the surface.
+    expect(allowlistSize([...curationRows, ...complianceRows])).toBe(4) // manifest, surface, rule, skill
+    // The compliance rows derive their prompt paths from the surface: none lists a command or an agent by hand.
+    for (const row of complianceRows) {
+      expect(row.allow.filter(entry => /\/(?:commands|agents)\//.test(entry)), rowName(row)).toEqual([])
+    }
     // Red probe: a second hand-written entry takes the footprint to 13, over the ceiling.
     const extra: FenceRow = { args: ['hud', '--status'], allow: ['<HOME>/.claude/hand-written.json'], mustWrite: false }
     expect(allowlistSize([...FENCE_ROWS, extra])).toBe(allowlistSize(FENCE_ROWS) + 1)

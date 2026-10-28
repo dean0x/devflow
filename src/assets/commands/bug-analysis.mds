@@ -24,7 +24,11 @@ Run a proactive bug analysis on the current branch: static analysis tools and pa
 {{evidence_policy()}}
 
 {{docs_root()}}
+<!-- compliance:off -->
+When `EVIDENCE_POLICY` is `required`, record `TRACEABILITY: DEGRADED (compliance off on this machine; the repository requires evidence)` once, for the Phase 7 report.
+<!-- compliance:end -->
 
+<!-- compliance:on -->
 Render the test-plan block from `/implement`'s evidence file, and from nothing else:
 1. `branch_slug` is `git -C "{worktree}" branch --show-current` with every `/` replaced by `-`.
 2. Only when `branch_slug` matches `^[A-Za-z0-9._-]{1,200}$` and the file exists, run (the path double-quoted):
@@ -35,12 +39,15 @@ node "$HOME/.devflow/scripts/verify-evidence.cjs" render --plan "{worktree}/.dev
 
 3. On `exit=0`, `PR_TEST_PLAN_BLOCK` is its stdout byte for byte without that `exit=` line; in every other case it is `(none)`. Nothing here waits on it: the Git agent pastes it only behind its own check, and only into a PR it creates.
 
+<!-- compliance:end -->
 Spawn Git agent:
 
 ```
 Agent(subagent_type="Git", run_in_background=false):
 "OPERATION: ensure-pr-ready
+<!-- compliance:on -->
 PR_TEST_PLAN_BLOCK: {PR_TEST_PLAN_BLOCK verbatim, or (none)}
+<!-- compliance:end -->
 APPLY_CONVENTIONS: {APPLY_CONVENTIONS}
 Validate branch, commit if needed, push, create PR if needed.
 Return: branch, base_branch, base_ref, branch-slug, PR#"
@@ -269,7 +276,11 @@ Output: {ANALYSIS_DIR}/bug-analysis-summary.md"
 ## Bug Analysis Complete
 
 **Branch**: {branch} -> {base_branch}
+<!-- compliance:on -->
 {any base `TRACEABILITY: DEGRADED` line from Phase 1, as returned}
+<!-- compliance:off -->
+{any base `TRACEABILITY: DEGRADED` line from Phase 1, as returned, and the compliance-off line of Phase 1}
+<!-- compliance:end -->
 **Analysis**: {ANALYSIS_DIR}
 **Static analysis**: {STATIC_STATUS per tool; if a tool did not complete: "marker kept" and the way out; any Snyk filter note}
 

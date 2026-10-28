@@ -187,6 +187,11 @@ export async function runComplianceStep(opts: {
     'Stamps the compliance rule with active framework labels and installs\n' +
     'framework reference files into the compliance skill. Only the\n' +
     'frameworks you select are included — zero selection = generic controls.\n\n' +
+    'Compliance on also installs the steps that post test-plan evidence, review\n' +
+    'and resolution summaries, backlog entries, review-thread replies, wave\n' +
+    'reports, plan artifacts and release back-links to GitHub or a tracker.\n' +
+    'Compliance off installs none of them; results stay in local files under\n' +
+    '.devflow/docs/.\n\n' +
     formatFrameworkCatalogue(),
     'Compliance',
   );
@@ -194,8 +199,8 @@ export async function runComplianceStep(opts: {
   const enableOutcome = await prompts.select({
     message: 'Enable compliance?',
     options: [
-      { value: true, label: 'Yes', hint: 'stamps frameworks into the compliance rule and skill' },
-      { value: false, label: 'No', hint: 'enable later with devflow compliance --enable' },
+      { value: true, label: 'Yes', hint: 'stamps frameworks into the rule and skill; installs the steps that post to GitHub or a tracker' },
+      { value: false, label: 'No', hint: 'no step that posts is installed; enable later with devflow compliance --enable' },
     ],
     initialValue: seed.enabled,
   });
@@ -211,7 +216,7 @@ export async function runComplianceStep(opts: {
       state: { enabled: false, frameworks: [...seed.frameworks] },
       messages: [{
         level: 'info',
-        text: 'Compliance: disabled — enable later with devflow compliance --enable',
+        text: 'Compliance: disabled — no step that posts is installed; enable later with devflow compliance --enable',
       }],
     };
   }
@@ -233,6 +238,6 @@ export async function runComplianceStep(opts: {
   return {
     kind: 'resolved',
     state: { enabled: true, frameworks },
-    messages: [{ level: 'success', text: `Compliance: enabled (${fwLabel})` }],
+    messages: [{ level: 'success', text: `Compliance: enabled (${fwLabel}) — the steps that post are installed` }],
   };
 }

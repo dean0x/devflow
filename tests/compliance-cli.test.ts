@@ -5,19 +5,31 @@
  *   - resolveComplianceCliAction pure resolver matrix
  *   - parseFrameworkList "Commander parse pin" (error message names every valid ID)
  *   - unknownFrameworkIds invalid-ID classification
+ *   - applyComplianceChange: the switch, the one converge and the fail-closed exit (#648)
+ *   - the install record and the `--status` Posting line (#648)
  *
  * Init-seed compliance seeding coverage (resolveSeedFeatures, applyCliToggles,
  * resolveResetGatedInputs) lives in tests/init-seed.test.ts — compliance seeding section.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { promises as fs } from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import {
+  applyComplianceChange,
+  postingStatusLine,
   resolveComplianceCliAction,
   unknownFrameworkIds,
+  type ApplyComplianceChangeResult,
 } from '../src/cli/commands/compliance.js';
 import {
   COMPLIANCE_FRAMEWORKS,
   parseFrameworkList,
 } from '../src/core/compliance.js';
+import { bothOffDir, complianceOffDir, curationOffDir, skillsDir } from '../src/core/assets.js';
+import { installRecordFor, postingStatus, readInstalledVariants } from '../src/core/installed-variants.js';
+import { readManifest, type ManifestData } from '../src/core/manifest.js';
+import { getManifestLockPath } from '../src/core/manifest-lock.js';
 
 // ── resolveComplianceCliAction ────────────────────────────────────────────────
 
@@ -189,5 +201,479 @@ describe('unknownFrameworkIds', () => {
 
   it('empty manifest → empty', () => {
     expect(unknownFrameworkIds([], REGISTRY)).toEqual([]);
+  });
+});
+
+// ── applyComplianceChange: the switch, the converge and the fail-closed exit (#648) ──
+//
+// Each test builds a temp Claude dir, a temp devflow dir and a temp package root, so no real
+// HOME and no real dist/ is read or written. The package holds one compliance-armed command
+// (`release`) and one with both arms (`plan`); the installed copies start as the on files.
+
+const RUNNING = '3.3.0';
+
+let tmp: string;
+let claudeDir: string;
+let devflowDir: string;
+let pkg: string;
+let warnings: string[];
+
+const warn = (msg: string): void => { warnings.push(msg); };
+const ANSI = /\u001b\[[0-9;]*m/g;
+const plain = (text: string): string => text.replace(ANSI, '');
+
+async function write(file: string, text: string): Promise<void> {
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, text, 'utf-8');
+}
+
+const installedCommand = (name: string): string => path.join(claudeDir, 'commands', 'devflow', `${name}.md`);
+const installedRule = (): string => path.join(claudeDir, 'rules', 'devflow', 'compliance.md');
+const exists = (file: string): Promise<boolean> => fs.stat(file).then(() => true, () => false);
+
+async function seedPackage(): Promise<void> {
+  await write(path.join(pkg, 'dist', 'commands', 'plan.md'), 'plan ON\n');
+  await write(path.join(curationOffDir('commands', pkg), 'plan.md'), 'plan CURATION-OFF\n');
+  await write(path.join(complianceOffDir('commands', pkg), 'plan.md'), 'plan COMPLIANCE-OFF\n');
+  await write(path.join(bothOffDir('commands', pkg), 'plan.md'), 'plan BOTH-OFF\n');
+  await write(path.join(pkg, 'dist', 'commands', 'release.md'), 'release ON\n');
+  await write(path.join(complianceOffDir('commands', pkg), 'release.md'), 'release COMPLIANCE-OFF\n');
+  await write(path.join(pkg, 'dist', 'agents', 'code.md'), 'code ON\n');
+  await write(path.join(curationOffDir('agents', pkg), 'code.md'), 'code CURATION-OFF\n');
+  await write(path.join(skillsDir(pkg), 'apply-decisions', 'SKILL.md'), 'apply-decisions of the temp package\n');
+  await write(path.join(pkg, 'dist', 'variant-axes.json'), JSON.stringify({
+    version: 1,
+    hosts: {
+      'agents/code': { curation: true, compliance: false },
+      'commands/plan': { curation: true, compliance: true },
+      'commands/release': { curation: false, compliance: true },
+    },
+  }));
+}
+
+async function installOnFiles(): Promise<void> {
+  await write(installedCommand('plan'), 'plan ON\n');
+  await write(installedCommand('release'), 'release ON\n');
+  await write(path.join(claudeDir, 'agents', 'devflow', 'code.md'), 'code ON\n');
+}
+
+async function manifestWith(
+  compliance: { enabled: boolean; frameworks: string[] },
+  version: string = RUNNING,
+  extra: Record<string, unknown> = {},
+  rules: boolean = false,
+): Promise<ManifestData> {
+  await write(path.join(devflowDir, 'manifest.json'), JSON.stringify({
+    version,
+    plugins: ['devflow-core-skills'],
+    scope: 'user',
+    features: { ambient: false, memory: false, hud: false, knowledge: true, curation: true, learning: true, rules, compliance },
+    installedAt: '2026-10-10T00:00:00.000Z',
+    updatedAt: '2026-10-10T00:00:00.000Z',
+    ...extra,
+  }));
+  const read = await readManifest(devflowDir);
+  if (read === null) throw new Error('the seeded manifest did not read');
+  return read;
+}
+
+function change(
+  manifest: ManifestData,
+  action: 'enable' | 'disable' | 'set',
+  opts: { setFrameworks?: string[]; runningVersion?: string | null } = {},
+): Promise<ApplyComplianceChangeResult> {
+  return applyComplianceChange({
+    claudeDir,
+    devflowDir,
+    manifest,
+    action,
+    setFrameworks: opts.setFrameworks,
+    runningVersion: opts.runningVersion === undefined ? RUNNING : opts.runningVersion,
+    packageRoot: pkg,
+    warn,
+  });
+}
+
+const recordOf = async (): Promise<unknown> => (await readManifest(devflowDir))?.installedVariants;
+const complianceOf = async (): Promise<unknown> => (await readManifest(devflowDir))?.features.compliance;
+
+describe('applyComplianceChange', () => {
+  beforeEach(async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-compliance-change-'));
+    claudeDir = path.join(tmp, 'claude');
+    devflowDir = path.join(tmp, 'devflow');
+    pkg = path.join(tmp, 'pkg');
+    warnings = [];
+    await fs.mkdir(claudeDir, { recursive: true });
+    await seedPackage();
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmp, { recursive: true, force: true });
+  });
+
+  it('disable writes the switch, installs the compliance-off prompts and records them (TP-39)', async () => {
+    const manifest = await manifestWith({ enabled: true, frameworks: ['gdpr'] });
+    await installOnFiles();
+
+    const result = await change(manifest, 'disable');
+
+    expect(result.exitCode).toBe(0);
+    expect(result.nextState).toEqual({ enabled: false, frameworks: ['gdpr'] });
+    expect(await complianceOf()).toEqual({ enabled: false, frameworks: ['gdpr'] });
+    expect(await fs.readFile(installedCommand('plan'), 'utf-8')).toBe('plan COMPLIANCE-OFF\n');
+    expect(await fs.readFile(installedCommand('release'), 'utf-8')).toBe('release COMPLIANCE-OFF\n');
+    expect(readInstalledVariants(await recordOf()), warnings.join('\n')).toEqual({ curation: true, compliance: false });
+    expect(result.messages.some(m => m.level === 'error')).toBe(false);
+  });
+
+  it('the disable message says the rule and every posting step were removed, frameworks remembered', async () => {
+    const manifest = await manifestWith({ enabled: true, frameworks: ['gdpr'] });
+    await installOnFiles();
+
+    const result = await change(manifest, 'disable');
+
+    const text = result.messages.map(m => m.text).join('\n');
+    expect(text).toContain('Compliance disabled');
+    expect(text).toContain('every posting step removed');
+    expect(text).toContain('frameworks remembered for re-enable');
+  });
+
+  it('enable restores the on prompts and records the compliance-on variant (TP-39)', async () => {
+    const manifest = await manifestWith({ enabled: false, frameworks: ['hipaa'] }, RUNNING, { installedVariants: { curation: true, compliance: false } });
+    await write(installedCommand('plan'), 'plan COMPLIANCE-OFF\n');
+    await write(installedCommand('release'), 'release COMPLIANCE-OFF\n');
+
+    const result = await change(manifest, 'enable');
+
+    expect(result.exitCode).toBe(0);
+    expect(await fs.readFile(installedCommand('plan'), 'utf-8')).toBe('plan ON\n');
+    expect(await fs.readFile(installedCommand('release'), 'utf-8')).toBe('release ON\n');
+    expect(readInstalledVariants(await recordOf()), warnings.join('\n')).toEqual({ curation: true, compliance: true });
+  });
+
+  it('set converges too: it enables, replaces the frameworks and installs the on prompts (TP-39)', async () => {
+    const manifest = await manifestWith({ enabled: false, frameworks: [] }, RUNNING, { installedVariants: { curation: true, compliance: false } });
+    await write(installedCommand('release'), 'release COMPLIANCE-OFF\n');
+
+    const result = await change(manifest, 'set', { setFrameworks: ['gdpr', 'GDPR', 'soc2'] });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.nextState).toEqual({ enabled: true, frameworks: ['gdpr', 'soc2'] });
+    expect(await fs.readFile(installedCommand('release'), 'utf-8')).toBe('release ON\n');
+    expect(readInstalledVariants(await recordOf()), warnings.join('\n')).toEqual({ curation: true, compliance: true });
+  });
+
+  it('a set that only changes the frameworks still converges, and reaches a missing record', async () => {
+    const manifest = await manifestWith({ enabled: true, frameworks: ['gdpr'] });
+    await installOnFiles();
+
+    const result = await change(manifest, 'set', { setFrameworks: ['hipaa'] });
+
+    expect(result.exitCode).toBe(0);
+    expect(await complianceOf()).toEqual({ enabled: true, frameworks: ['hipaa'] });
+    expect(readInstalledVariants(await recordOf()), warnings.join('\n')).toEqual({ curation: true, compliance: true });
+  });
+
+  it('disable with the compliance-off tree absent exits 1, lists the files and prints no success line (TP-41)', async () => {
+    const manifest = await manifestWith({ enabled: true, frameworks: ['gdpr'] }, RUNNING, { installedVariants: { curation: true, compliance: true } });
+    await installOnFiles();
+    await fs.rm(complianceOffDir('commands', pkg), { recursive: true });
+    await fs.rm(bothOffDir('commands', pkg), { recursive: true });
+
+    const result = await change(manifest, 'disable');
+
+    expect(result.exitCode).toBe(1);
+    const text = result.messages.map(m => m.text).join('\n');
+    expect(text).toContain(installedCommand('plan'));
+    expect(text).toContain(installedCommand('release'));
+    expect(text).toContain('devflow init');
+    expect(text).not.toContain('Compliance disabled');
+    expect(result.messages.every(m => m.level === 'error')).toBe(true);
+    expect(await fs.readFile(installedCommand('release'), 'utf-8')).toBe('release ON\n');
+    expect(await complianceOf(), 'the switch is on disk whatever the converge did').toEqual({ enabled: false, frameworks: ['gdpr'] });
+    expect(readInstalledVariants(await recordOf()), 'an unclean converge leaves the record as it stood').toEqual({ curation: true, compliance: true });
+  });
+
+  it('disable across a version skew exits 1 and says that posting steps remain installed until devflow init (TP-42)', async () => {
+    const manifest = await manifestWith({ enabled: true, frameworks: [] }, '3.2.0');
+    await installOnFiles();
+
+    const result = await change(manifest, 'disable');
+
+    expect(result.exitCode).toBe(1);
+    const text = result.messages.map(m => m.text).join('\n');
+    expect(text).toContain('posting steps remain installed until devflow init');
+    expect(text).not.toContain('Compliance disabled');
+    expect(await fs.readFile(installedCommand('release'), 'utf-8')).toBe('release ON\n');
+  });
+
+  it('disable across a version skew still removes the compliance rule and exits 1', async () => {
+    const manifest = await manifestWith({ enabled: true, frameworks: ['gdpr'] }, '3.2.0', {}, true);
+    await installOnFiles();
+    await write(installedRule(), 'the stamped compliance rule\n');
+
+    const result = await change(manifest, 'disable');
+
+    expect(result.exitCode).toBe(1);
+    expect(await exists(installedRule())).toBe(false);
+    expect(result.messages.map(m => m.text).join('\n')).toContain('posting steps remain installed until devflow init');
+  });
+
+  it('disable with an unknown running version is a skew as well', async () => {
+    const manifest = await manifestWith({ enabled: true, frameworks: [] });
+    await installOnFiles();
+
+    const result = await change(manifest, 'disable', { runningVersion: null });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.messages.map(m => m.text).join('\n')).toContain('posting steps remain installed until devflow init');
+  });
+
+  it('enable across a version skew is a warning with exit 0, and the compliance rule is still installed', async () => {
+    const manifest = await manifestWith({ enabled: false, frameworks: ['gdpr'] }, '3.2.0', {}, true);
+    await installOnFiles();
+
+    const result = await change(manifest, 'enable');
+
+    expect(result.exitCode).toBe(0);
+    expect(result.nextState.enabled).toBe(true);
+    expect(result.messages.some(m => m.level === 'warn' && m.text.includes('devflow init'))).toBe(true);
+    expect(await fs.readFile(installedRule(), 'utf-8')).toContain('Active frameworks: GDPR');
+    expect(result.messages.map(m => m.text).join('\n')).not.toContain('rule was not installed');
+  });
+
+  it('a set across a version skew re-stamps the installed compliance rule', async () => {
+    const manifest = await manifestWith({ enabled: true, frameworks: ['gdpr'] }, '3.2.0', {}, true);
+    await installOnFiles();
+    await write(installedRule(), 'Active frameworks: GDPR — their controls are binding.\n');
+
+    const result = await change(manifest, 'set', { setFrameworks: ['hipaa'] });
+
+    expect(result.exitCode).toBe(0);
+    const stamped = await fs.readFile(installedRule(), 'utf-8');
+    expect(stamped).toContain('Active frameworks: HIPAA');
+    expect(stamped).not.toContain('GDPR');
+  });
+
+  it('enable across a version skew with rules off installs no rule and says nothing about one', async () => {
+    const manifest = await manifestWith({ enabled: false, frameworks: [] }, '3.2.0');
+    await installOnFiles();
+
+    const result = await change(manifest, 'enable');
+
+    expect(result.exitCode).toBe(0);
+    expect(await exists(installedRule())).toBe(false);
+    expect(result.messages.map(m => m.text).join('\n')).not.toContain('rule was not installed');
+  });
+
+  it.skipIf(process.getuid?.() === 0)('enable across a version skew warns when the compliance rule could not be installed', async () => {
+    const manifest = await manifestWith({ enabled: false, frameworks: [] }, '3.2.0', {}, true);
+    await installOnFiles();
+    const ruleDir = path.dirname(installedRule());
+    await fs.mkdir(ruleDir, { recursive: true });
+    // A folder that cannot take a new file: the rule install fails.
+    await fs.chmod(ruleDir, 0o555);
+    const result = await change(manifest, 'enable').finally(() => fs.chmod(ruleDir, 0o755));
+
+    expect(result.exitCode).toBe(0);
+    expect(await exists(installedRule())).toBe(false);
+    expect(result.messages.some(m => m.level === 'warn' && m.text.includes('The compliance rule was not installed'))).toBe(true);
+    expect(result.messages.some(m => m.level === 'error')).toBe(false);
+  });
+
+  it('a compliance-off converge with no build manifest exits 1: the files that post cannot be named', async () => {
+    const manifest = await manifestWith({ enabled: true, frameworks: [] });
+    await installOnFiles();
+    await fs.rm(path.join(pkg, 'dist', 'variant-axes.json'));
+
+    const result = await change(manifest, 'disable');
+
+    expect(result.exitCode).toBe(1);
+    expect(result.messages.map(m => m.text).join('\n')).toContain('cannot be named');
+  });
+
+  it('never mutates the manifest it is given', async () => {
+    const manifest = await manifestWith({ enabled: true, frameworks: ['gdpr'] });
+    const before = JSON.stringify(manifest);
+    await installOnFiles();
+
+    await change(manifest, 'disable');
+
+    expect(JSON.stringify(manifest)).toBe(before);
+  });
+
+  it('known-bad probe: a devflow dir that cannot hold the manifest lock is exit 1 and changes no prompt', async () => {
+    const manifest = await manifestWith({ enabled: true, frameworks: [] });
+    await installOnFiles();
+    await fs.rm(path.join(devflowDir, 'manifest.json'));
+    await fs.rm(devflowDir, { recursive: true });
+    await write(devflowDir, 'a file where the devflow dir should be\n');
+
+    const result = await change(manifest, 'disable');
+
+    expect(result.exitCode).toBe(1);
+    expect(result.messages[0]?.text).toContain('Could not record the compliance switch');
+    expect(result.messages[0]?.text).toContain('manifest lock could not be taken');
+    expect(await fs.readFile(installedCommand('release'), 'utf-8')).toBe('release ON\n');
+  });
+
+  it('a manifest that is gone from a kept devflow dir is exit 1 with no readable install manifest, and nothing is written or converged', async () => {
+    const manifest = await manifestWith({ enabled: true, frameworks: ['gdpr'] });
+    await installOnFiles();
+    await fs.rm(path.join(devflowDir, 'manifest.json'));
+
+    const result = await change(manifest, 'disable');
+
+    expect(result.exitCode).toBe(1);
+    expect(result.nextState).toEqual({ enabled: true, frameworks: ['gdpr'] });
+    const text = result.messages.map(m => m.text).join('\n');
+    expect(text).toContain('Could not record the compliance switch');
+    expect(text).toContain('no readable install manifest');
+    expect(text).not.toContain('Compliance disabled');
+    expect(result.messages.every(m => m.level === 'error')).toBe(true);
+    expect(await exists(path.join(devflowDir, 'manifest.json')), 'no manifest is created').toBe(false);
+    expect(await exists(getManifestLockPath(devflowDir)), 'the lock is released').toBe(false);
+    expect(await fs.readFile(installedCommand('release'), 'utf-8'), 'no prompt is converged').toBe('release ON\n');
+  });
+
+  it('a manifest write that throws is exit 1, keeps the switch as it was, and changes no prompt', async () => {
+    const manifest = await manifestWith({ enabled: true, frameworks: ['gdpr'] });
+    await installOnFiles();
+    const manifestPath = path.join(devflowDir, 'manifest.json');
+    const before = await fs.readFile(manifestPath, 'utf-8');
+    // A directory where the writer's temporary file goes makes the atomic write throw whoever runs the test.
+    await fs.mkdir(`${manifestPath}.tmp.${process.pid}`);
+
+    const result = await change(manifest, 'disable');
+
+    expect(result.exitCode).toBe(1);
+    expect(result.nextState).toEqual({ enabled: true, frameworks: ['gdpr'] });
+    const text = result.messages.map(m => m.text).join('\n');
+    expect(text).toContain('Could not record the compliance switch');
+    expect(text).toContain(`${manifestPath}.tmp.${process.pid}`);
+    expect(text).not.toContain('Compliance disabled');
+    expect(result.messages.every(m => m.level === 'error')).toBe(true);
+    expect(await fs.readFile(manifestPath, 'utf-8'), 'the switch on disk is untouched').toBe(before);
+    expect(await exists(getManifestLockPath(devflowDir)), 'the lock is released').toBe(false);
+    expect(await fs.readFile(installedCommand('release'), 'utf-8'), 'no prompt is converged').toBe('release ON\n');
+  });
+
+  it.skipIf(process.getuid?.() === 0)('a switch that cannot take the manifest lock writes nothing, exits 1 and prints no success line', async () => {
+    const manifest = await manifestWith({ enabled: true, frameworks: ['gdpr'] }, RUNNING, { installedVariants: { curation: true, compliance: true } });
+    await installOnFiles();
+    // A folder that cannot hold the lock directory: the lock is refused at once.
+    await fs.chmod(devflowDir, 0o555);
+    const result = await change(manifest, 'disable').finally(() => fs.chmod(devflowDir, 0o755));
+
+    expect(result.exitCode).toBe(1);
+    expect(result.nextState).toEqual({ enabled: true, frameworks: ['gdpr'] });
+    const text = result.messages.map(m => m.text).join('\n');
+    expect(text).toContain('Could not record the compliance switch');
+    expect(text).toContain('manifest lock could not be taken');
+    expect(text).not.toContain('Compliance disabled');
+    expect(result.messages.every(m => m.level === 'error')).toBe(true);
+    expect(await complianceOf()).toEqual({ enabled: true, frameworks: ['gdpr'] });
+    expect(await fs.readFile(installedCommand('release'), 'utf-8'), 'no prompt is converged').toBe('release ON\n');
+  });
+
+  it('writes the switch from a manifest read inside the lock, keeps a field another run wrote since the first read, and releases the lock', async () => {
+    const manifest = await manifestWith({ enabled: true, frameworks: ['gdpr'] });
+    await installOnFiles();
+    // Another devflow run turns the HUD on after this command read its manifest.
+    const file = path.join(devflowDir, 'manifest.json');
+    const onDisk = JSON.parse(await fs.readFile(file, 'utf-8')) as { features: Record<string, unknown> };
+    await fs.writeFile(file, JSON.stringify({ ...onDisk, features: { ...onDisk.features, hud: true } }), 'utf-8');
+
+    const result = await change(manifest, 'disable');
+
+    expect(result.exitCode, warnings.join('\n')).toBe(0);
+    const after = await readManifest(devflowDir);
+    expect(after?.features.compliance).toEqual({ enabled: false, frameworks: ['gdpr'] });
+    expect(after?.features.hud, 'the field written after the first read').toBe(true);
+    expect(await exists(getManifestLockPath(devflowDir)), 'the switch write releases the manifest lock').toBe(false);
+  });
+
+  it.skipIf(process.getuid?.() === 0)('a disable whose rule removal fails exits 1, names the rule and prints no removed line', async () => {
+    const manifest = await manifestWith({ enabled: true, frameworks: ['gdpr'] }, RUNNING, { installedVariants: { curation: true, compliance: true } });
+    await installOnFiles();
+    const ruleDir = path.join(claudeDir, 'rules', 'devflow');
+    const ruleFile = path.join(ruleDir, 'compliance.md');
+    await write(ruleFile, 'the stamped compliance rule\n');
+    // A folder that cannot lose a file: the rule removal fails while every posting step is converged.
+    await fs.chmod(ruleDir, 0o555);
+    const result = await change(manifest, 'disable').finally(() => fs.chmod(ruleDir, 0o755));
+
+    expect(result.exitCode).toBe(1);
+    expect(result.messages.every(m => m.level === 'error')).toBe(true);
+    const text = result.messages.map(m => m.text).join('\n');
+    expect(text).toContain('compliance rule could not be removed');
+    expect(text).toContain(ruleFile);
+    expect(text).not.toContain('Compliance disabled');
+    expect(text).not.toContain('every posting step removed');
+    expect(await complianceOf(), 'the switch is on disk whatever the rule removal did').toEqual({ enabled: false, frameworks: ['gdpr'] });
+    expect(await fs.readFile(installedCommand('release'), 'utf-8')).toBe('release COMPLIANCE-OFF\n');
+    expect(readInstalledVariants(await recordOf()), 'an unclean converge withholds the record').toEqual({ curation: true, compliance: true });
+  });
+
+  it('a disable that removes the rule prints the removed line and exits 0', async () => {
+    const manifest = await manifestWith({ enabled: true, frameworks: ['gdpr'] });
+    await installOnFiles();
+    const ruleFile = path.join(claudeDir, 'rules', 'devflow', 'compliance.md');
+    await write(ruleFile, 'the stamped compliance rule\n');
+
+    const result = await change(manifest, 'disable');
+
+    expect(result.exitCode, warnings.join('\n')).toBe(0);
+    expect(await exists(ruleFile)).toBe(false);
+    expect(result.messages.map(m => m.text).join('\n')).toContain('every posting step removed');
+  });
+});
+
+// ── The posting record and the --status Posting line (AC-31) ───────────────────
+
+describe('readInstalledVariants, postingStatus and postingStatusLine', () => {
+  const CASES: ReadonlyArray<{ readonly record: unknown; readonly enabled: boolean; readonly status: string }> = [
+    { record: { curation: true, compliance: true }, enabled: true, status: 'installed' },
+    { record: { curation: false, compliance: false }, enabled: false, status: 'not installed' },
+    { record: { curation: true, compliance: true }, enabled: false, status: 'mismatch (run devflow init)' },
+    { record: { curation: true, compliance: false }, enabled: true, status: 'mismatch (run devflow init)' },
+    { record: undefined, enabled: false, status: 'unknown (run devflow init)' },
+    { record: { curation: true }, enabled: true, status: 'unknown (run devflow init)' },
+    { record: { curation: 'yes', compliance: true }, enabled: true, status: 'unknown (run devflow init)' },
+    { record: [true, true], enabled: true, status: 'unknown (run devflow init)' },
+    { record: null, enabled: false, status: 'unknown (run devflow init)' },
+  ];
+
+  for (const { record, enabled, status } of CASES) {
+    it(`${JSON.stringify(record) ?? 'absent'} with compliance ${enabled ? 'on' : 'off'} reads ${status}`, () => {
+      expect(postingStatus(readInstalledVariants(record), enabled)).toBe(status);
+      expect(plain(postingStatusLine(record, enabled))).toBe(`Posting:    ${status}`);
+    });
+  }
+
+  it('readInstalledVariants returns a fresh two-boolean record and ignores extra keys', () => {
+    const raw = { curation: false, compliance: true, future: 'axis' };
+    expect(readInstalledVariants(raw)).toEqual({ curation: false, compliance: true });
+  });
+});
+
+// ── The install record decision (AC-29) ────────────────────────────────────────
+
+describe('installRecordFor', () => {
+  it('records the switches the prompts were converged onto when the converge finished clean', () => {
+    expect(installRecordFor(true, { curation: false, compliance: true })).toEqual({ curation: false, compliance: true });
+    expect(installRecordFor(true, { curation: true, compliance: false })).toEqual({ curation: true, compliance: false });
+  });
+
+  it('withholds the record after a converge that did not finish clean', () => {
+    expect(installRecordFor(false, { curation: true, compliance: false })).toBeNull();
+  });
+
+  it('returns a fresh record, not the switches object it was given', () => {
+    const switches = { curation: true, compliance: true };
+    const record = installRecordFor(true, switches);
+    expect(record).not.toBe(switches);
+    expect(readInstalledVariants(record)).toEqual(switches);
   });
 });

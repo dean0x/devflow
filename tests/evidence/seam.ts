@@ -7,9 +7,12 @@
  * would register the imported file's tests a second time), so shared code lives here.
  */
 
+import { spawnSync } from 'child_process'
 import { createRequire } from 'module'
+import * as os from 'os'
 import * as path from 'path'
 
+import { scopedEnv } from '../evidence-policy/scripted-shim.js'
 import { ROOT } from '../helpers.js'
 
 /** The pure core: grammars, markers, ladder, render, splice, trust. */
@@ -47,4 +50,28 @@ export function functionBodyOf(source: string, name: string): string {
 export function markerLine(head: string, key: string): string {
   const { MARKERS } = createRequire(import.meta.url)(PR_EVIDENCE_SCRIPT) as { readonly MARKERS: { readonly EVIDENCE_OPEN: string } }
   return `${String(MARKERS.EVIDENCE_OPEN)} head:${head} key:${key} -->`
+}
+
+/**
+ * The answer the script's tracked-file check gets in a test whose exec is an in-process twin.
+ * The check is the one `git ... ls-files` call the script makes about a path it was told to
+ * read or to write. By default the twin answers "not tracked" (git exits 0 and lists nothing)
+ * without a spawn: a suite that makes hundreds of runs would otherwise start hundreds of git
+ * processes. With `real` the answer is the real git's over the real path, for a test that holds
+ * a repository; `-C` names the directory, so the spawn's own cwd does not matter. Null for any
+ * other call, which the twin answers itself.
+ */
+export function trackedCheckAnswer(
+  file: string,
+  args: readonly string[],
+  real = false,
+): { status: number | null; stdout: Buffer; stderr: Buffer } | null {
+  if (file !== 'git' || !args.includes('ls-files')) return null
+  if (!real) return { status: 0, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }
+  const r = spawnSync('git', [...args], {
+    cwd: os.tmpdir(),
+    env: scopedEnv(os.tmpdir(), { LC_ALL: 'C' }),
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  return { status: r.status, stdout: Buffer.from(r.stdout ?? ''), stderr: Buffer.from(r.stderr ?? '') }
 }

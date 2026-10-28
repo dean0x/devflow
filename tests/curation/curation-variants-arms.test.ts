@@ -62,6 +62,7 @@ const TOKEN_RE = /DECISIONS_CONTEXT|decisions_context|apply-decisions|curation\/
 /** What an on arm may hold besides a token: the heading, step and tree wording that names decisions. */
 const CURATION_WORD_RE = /\b[Dd]ecisions?\b|\bADR\b|pitfall/
 const MARKER_RE = /^[ \t]*<!-- curation:(on|off|end) -->[ \t]*$/
+const COMPLIANCE_MARKER_RE = /^[ \t]*<!-- compliance:(on|off|end) -->[ \t]*$/
 const SETTINGS_OPENING = '**Resolve the settings line**'
 /** The settings grammar paragraph: one line, naming every field of the resolver's output, CURATION included. */
 const SETTINGS_GRAMMAR_LINE_RE = /TRACKER=<github\|jira\|linear>/
@@ -90,6 +91,21 @@ function resolveArms(body: string, variant: 'on' | 'off'): string {
     const marker = MARKER_RE.exec(line)
     if (marker !== null) { arm = marker[1] === 'end' ? null : (marker[1] as 'on' | 'off'); continue }
     if (arm === null || arm === variant) out.push(line)
+  }
+  return out.join('\n')
+}
+
+/**
+ * The body with every compliance arm resolved on. The curation variants are built with compliance on, so a
+ * compliance marker line, and the text of a compliance off arm, is not in either of them.
+ */
+function resolveComplianceOn(body: string): string {
+  const out: string[] = []
+  let arm: 'on' | 'off' | null = null
+  for (const line of body.split('\n')) {
+    const marker = COMPLIANCE_MARKER_RE.exec(line)
+    if (marker !== null) { arm = marker[1] === 'end' ? null : (marker[1] as 'on' | 'off'); continue }
+    if (arm !== 'off') out.push(line)
   }
   return out.join('\n')
 }
@@ -194,7 +210,7 @@ const onFile = (host: Host): string => readFileSync(path.join(ROOT, 'dist', host
  * whole, so only the raw side loses it. Either way an agent keeps its own frontmatter, which AC-131 holds.
  */
 function expectedVariant(raw: string, variant: 'on' | 'off'): string {
-  return withoutFirstBlock(resolveArms(raw, variant))
+  return withoutFirstBlock(resolveArms(resolveComplianceOn(raw), variant))
 }
 
 /** The variant file as it is compared with `expectedVariant`: a command loses its first block as the raw side did. */

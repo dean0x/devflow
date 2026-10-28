@@ -32,7 +32,7 @@ import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 
-import { PR_EVIDENCE_SCRIPT, VERIFY_EVIDENCE_SCRIPT, functionBodyOf, markerLine } from './seam.js'
+import { PR_EVIDENCE_SCRIPT, VERIFY_EVIDENCE_SCRIPT, functionBodyOf, markerLine, trackedCheckAnswer } from './seam.js'
 import {
   type ExecFn,
   type ExecResult,
@@ -401,12 +401,16 @@ interface Recorded { readonly file: string; readonly args: readonly string[]; re
  * The in-process exec. The first matching entry answers; a `once` entry is spent
  * after one answer, so a sequence is scripted as once-entries followed by the
  * steady answer. An argv no entry matches answers UNSCRIPTED_EXIT and is recorded
- * as a miss — every scenario helper asserts it made none.
+ * as a miss — every scenario helper asserts it made none. The tracked-file check on a path
+ * is not a call the scenario scripts: it is answered "not tracked", or by the real git
+ * over the real path with `realGitCheck`, and it is never recorded.
  */
-function twin(calls: readonly TwinCall[]): { exec: ExecFn; recorded: Recorded[] } {
+function twin(calls: readonly TwinCall[], realGitCheck = false): { exec: ExecFn; recorded: Recorded[] } {
   const spent = new Set<number>()
   const recorded: Recorded[] = []
   const exec: ExecFn = (file, args) => {
+    const tracked = trackedCheckAnswer(file, args, realGitCheck)
+    if (tracked !== null) return tracked
     const i = calls.findIndex((c, k) => !spent.has(k) && c.tool === file
       && c.args.length === args.length && c.args.every((a, j) => a === args[j]))
     recorded.push({ file, args: [...args], hit: i !== -1 })
@@ -1465,6 +1469,76 @@ describe('--approval (D-VERIFY-APPROVAL, D6)', () => {
 // Exit codes 0–5, and the output gate
 // ---------------------------------------------------------------------------
 
+describe('a git-tracked evidence or out file counts as absent, like a tracked config.json', () => {
+  type FileState = 'committed' | 'staged' | 'untracked'
+  const file = evidenceFile([tpLine(1, 'x', 'manual')], [claimLine(1, 'PASS', HEAD)])
+  const PLANTED = 'planted\n'
+
+  /** A real repository that holds each file in the given state: committed, only staged, or not added at all. */
+  function repoWith(files: Readonly<Record<string, { text: string; state: FileState }>>): string {
+    const dir = scratch('tracked')
+    const home = scratch('tracked-home')
+    realGit(dir, home, ['init', '-q'])
+    const names = Object.keys(files)
+    for (const name of names) fs.writeFileSync(path.join(dir, name), files[name].text)
+    const committed = names.filter(n => files[n].state === 'committed')
+    if (committed.length > 0) {
+      realGit(dir, home, ['add', '--', ...committed])
+      realGit(dir, home, ['commit', '-q', '-m', 'seed'])
+    }
+    const staged = names.filter(n => files[n].state === 'staged')
+    if (staged.length > 0) realGit(dir, home, ['add', '--', ...staged])
+    return dir
+  }
+
+  it.each(['committed', 'staged'] as const)('a %s evidence file is not read: verify acts as if --evidence was not given', state => {
+    const repo = repoWith({ 'evidence.md': { text: file, state } })
+    const { exec } = twin(scenarioCalls({}), true)
+    const r = runMain(['verify', '--pr', '7', '--evidence', path.join(repo, 'evidence.md')], { exec })
+    // Without the file the plan can only come from the PR body, which holds none.
+    expect(r.code, r.stderr).toBe(0)
+    const line = PE.parseEvidenceLine(r.stdout.trim())
+    expect(line.ok && line.value.total).toBe(0)
+    expect(r.stderr).toContain('verify-evidence: notes: evidence-ignored')
+  })
+
+  it('control: the same file, not added to git, is read', () => {
+    const repo = repoWith({ 'evidence.md': { text: file, state: 'untracked' } })
+    const { exec } = twin(scenarioCalls({}), true)
+    const r = runMain(['verify', '--pr', '7', '--evidence', path.join(repo, 'evidence.md')], { exec })
+    expect(r.code, r.stderr).toBe(0)
+    const line = PE.parseEvidenceLine(r.stdout.trim())
+    expect(line.ok && line.value.total).toBe(1)
+    expect(r.stderr).not.toContain('evidence-ignored')
+  })
+
+  it.each([
+    ['--comment-out', 'comment.md'],
+    ['--block-out', 'block.md'],
+    ['--stale-out', 'stale.md'],
+  ] as const)('a tracked %s path is not written: exit 3, no stdout, no call, the file keeps its text', (flag, name) => {
+    const repo = repoWith({ [name]: { text: PLANTED, state: 'committed' } })
+    const evidence = writeScratch(scratch('ev'), 'e.md', file)
+    const { exec, recorded } = twin(scenarioCalls({}), true)
+    const r = runMain(['verify', '--pr', '7', '--evidence', evidence, flag, path.join(repo, name)], { exec })
+    expect(r.code).toBe(3)
+    expect(r.stdout).toBe('')
+    expect(r.stderr).toContain('verify-evidence: an output file could not be written')
+    expect(fs.readFileSync(path.join(repo, name), 'utf8')).toBe(PLANTED)
+    expect(recorded, 'nothing was read before the refusal').toEqual([])
+  })
+
+  it('control: an out path in the same repository that git does not track is written', () => {
+    const repo = repoWith({ 'seed.md': { text: PLANTED, state: 'committed' } })
+    const evidence = writeScratch(scratch('ev'), 'e.md', file)
+    const { exec } = twin(scenarioCalls({}), true)
+    const out = path.join(repo, 'comment.md')
+    const r = runMain(['verify', '--pr', '7', '--evidence', evidence, '--comment-out', out], { exec })
+    expect(r.code, r.stderr).toBe(0)
+    expect(fs.existsSync(out)).toBe(true)
+  })
+})
+
 describe('exit codes', () => {
   const file = evidenceFile([tpLine(1, 'x', 'manual')], [claimLine(1, 'PASS', HEAD)])
 
@@ -1489,7 +1563,12 @@ describe('exit codes', () => {
 
   it('2 — an unusable evidence file or state directory decides before any call', () => {
     const dir = scratch('two')
-    const noCall: ExecFn = () => { throw new Error('no call expected') }
+    // Only the tracked-file check on a path, which asks no PR question, may run before the refusal.
+    const noCall: ExecFn = (file, args) => {
+      const tracked = trackedCheckAnswer(file, args)
+      if (tracked !== null) return tracked
+      throw new Error('no call expected')
+    }
     const cases: ReadonlyArray<readonly string[]> = [
       ['--evidence', path.join(dir, 'absent.md')],
       ['--evidence', writeScratch(dir, 'unknown.md', '## Notes\nhello\n')],
@@ -2460,10 +2539,28 @@ describe('source guards (verify-evidence.cjs)', () => {
       'D-VERIFY-VERIFYING-SHA', 'D-VERIFY-PUBLICATION', 'D-VERIFY-CAS',
       'D-OP-SCRIPT-POINTER', 'D-OP-BLOCK-GATE', 'D-PUBLISH-BOUNDS', 'D-PUBLISH-SCRUB-GATE',
       'D-READINESS-LADDER', 'D-READINESS-THREADS', 'D-READINESS-CLASSIFIER', 'D-READINESS-WORKFLOWS', 'D-READINESS-HEAD',
-      'D-READINESS-OUT',
+      'D-READINESS-OUT', 'D-TRACKED-RESULT',
     ]) {
       expect(SOURCE, `${marker} missing`).toContain(marker)
     }
+  })
+
+  it('the tracked-file check sets no time limit, and main asks it before any command runs', () => {
+    const check = functionBodyOf(SOURCE, 'trackedStateOf')
+    expect(check.length, 'trackedStateOf must be in the corpus').toBeGreaterThan(200)
+    expect(check).toContain(', null, LINE_MAX_BUFFER)')
+    expect(check).not.toMatch(/timeout|_MS\b/i)
+    expect(functionBodyOf(SOURCE, 'main').length, 'main must be in the corpus').toBeGreaterThan(500)
+    /** The runs main starts at a point before it asks about the paths, or without asking at all. */
+    const unguarded = (src: string): string[] => {
+      const main = functionBodyOf(src, 'main')
+      const asked = main.indexOf('admitPaths(io, parsed)')
+      return ['runVerify(', 'runPublish(', 'runReadiness('].filter(run => asked === -1 || main.indexOf(run) < asked)
+    }
+    expect(unguarded(SOURCE)).toEqual([])
+    const probe = SOURCE.replace('admitPaths(io, parsed)', '{ args: parsed }')
+    expect(probe, 'the seed must land').not.toBe(SOURCE)
+    expect(unguarded(probe)).toHaveLength(3)
   })
 })
 
