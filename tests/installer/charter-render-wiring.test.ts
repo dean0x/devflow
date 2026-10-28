@@ -655,7 +655,7 @@ describe('runSelectivePhaseForScope renders the charter for the plugins that sta
 
     await expect(runSelectivePhaseForScope({
       claudeDir, devflowDir, selectedPlugins: [IMPLEMENT], verbose: false, installedPlugins: [CORE, AMBIENT, IMPLEMENT],
-    })).resolves.toBeUndefined();
+    })).resolves.toEqual({ replacedLinks: [], refusedFolders: [] });
 
     const charterWarnings = warn.mock.calls.filter(([message]) => message.includes('charter render:'));
     expect(charterWarnings, 'the unreadable charter is reported once').toHaveLength(1);

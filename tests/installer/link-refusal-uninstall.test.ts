@@ -36,7 +36,7 @@ import {
 import { formatRefusedFoldersSummary } from '../../src/cli/commands/install-report.js';
 import { stripAnsi } from '../../src/core/ansi.js';
 import { restampInstalledCommands } from '../../src/targets/claude-code/language-stamp.js';
-import { DEVFLOW_PLUGINS, type PluginDefinition } from '../../src/core/plugins.js';
+import { DEVFLOW_PLUGINS, prefixSkillName, type PluginDefinition } from '../../src/core/plugins.js';
 import { assertTempHome } from '../setup/home-isolation.js';
 
 const USER_BYTES = 'a file only the user keeps\n';
@@ -187,7 +187,7 @@ describe('uninstall --plugin refuses a linked Devflow folder and removes nothing
   );
 
   it('a linked orphan skill folder is left in place, reported, and its target keeps every byte and mode', async () => {
-    const orphan = path.join(claudeDir, 'skills', 'devflow:retired-skill');
+    const orphan = path.join(claudeDir, 'skills', prefixSkillName('retired-skill'));
     await fs.mkdir(outside, { recursive: true });
     await fs.writeFile(path.join(outside, 'SKILL.md'), OWNED_BYTES, 'utf-8');
     await fs.writeFile(path.join(outside, 'private.md'), USER_BYTES, 'utf-8');
