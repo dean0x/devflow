@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach } from 'vitest';
-import { execFileSync, spawnSync } from 'child_process';
+import { execFileSync, execSync, spawnSync } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -1375,7 +1375,7 @@ describe('session-start-context: tracker setup directive (Section 3)', { timeout
     let out = '';
     let code = 0;
     try {
-      out = execFileSync('bash', [CONTEXT_HOOK], {
+      out = execSync(`bash "${CONTEXT_HOOK}"`, {
         input: JSON.stringify(sessionStart(tmpDir)),
         env: Object.fromEntries(
           Object.entries(process.env).filter(([k]) => k !== 'HOME'),
