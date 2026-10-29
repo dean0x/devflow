@@ -21,7 +21,7 @@
  * the absolute managed-settings path a HOME sandbox cannot redirect.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, inject } from 'vitest';
 import { spawnSync } from 'child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'fs';
 import * as os from 'os';
@@ -31,9 +31,11 @@ import integrationConfig from '../../vitest.integration.config.js';
 import { requireBuiltCli, sandboxEnv, walkFiles } from '../helpers.js';
 import { chmodOwnDirs } from './global-setup.js';
 import {
+  GIT_BIN_KEY,
   GIT_BIN_PREFIX,
   ORIGINAL_HOME_VAR,
   REDIRECT_ENV_VARS,
+  RUN_TMP_KEY,
   TEMP_HOME_PREFIX,
   assertTempHome,
   checkGitBinDir,
@@ -438,5 +440,40 @@ describe('TP-21: PATH and the git folder', () => {
   it('does not take another folder with the same start for the git folder', () => {
     const lookalike = [`${bin}x`, '/usr/bin'].join(path.delimiter);
     expect(pathWithGitBin(lookalike, bin)).toBe(`${bin}${path.delimiter}${lookalike}`);
+  });
+});
+
+/** The PATH entries whose folder name starts with the git folder prefix. */
+function gitBinEntries(pathVar: string | undefined): string[] {
+  return (pathVar ?? '')
+    .split(path.delimiter)
+    .filter(entry => path.basename(entry).startsWith(GIT_BIN_PREFIX));
+}
+
+describe('TP-22: what the global setup provided, as this worker applied it', () => {
+  const runTmp = inject(RUN_TMP_KEY);
+  const gitBin = inject(GIT_BIN_KEY);
+
+  it.skipIf(runTmp === undefined)('uses the run root as its temp folder, with its HOME inside', () => {
+    expect(process.env.TMPDIR).toBe(runTmp);
+    expect(os.tmpdir()).toBe(runTmp);
+    expect(process.env.HOME?.startsWith(`${runTmp}${path.sep}`)).toBe(true);
+  });
+
+  it.skipIf(gitBin === undefined)('has the git folder first on PATH, and only once', () => {
+    expect(process.env.PATH?.split(path.delimiter)[0]).toBe(gitBin);
+    expect(gitBinEntries(process.env.PATH)).toEqual([gitBin]);
+  });
+
+  it.skipIf(gitBin !== undefined)('has no git folder on PATH when none was provided', () => {
+    expect((process.env.PATH ?? '').split(path.delimiter).filter(entry => entry !== '').length).toBeGreaterThan(0);
+    expect(gitBinEntries(process.env.PATH)).toEqual([]);
+  });
+
+  it('finds a git folder on a PATH that holds one, and none on a PATH that does not', () => {
+    const bin = '/run/root/git-bin-abc';
+    expect(gitBinEntries(pathWithGitBin('/usr/bin', bin))).toEqual([bin]);
+    expect(gitBinEntries(['/usr/bin', '/bin'].join(path.delimiter))).toEqual([]);
+    expect(gitBinEntries(undefined)).toEqual([]);
   });
 });
