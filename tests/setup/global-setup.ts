@@ -9,10 +9,11 @@
  * process env is never changed. `tests/setup/isolate-env.ts` checks what it receives with
  * the pure checks in `./home-isolation.js` and applies it to the worker's env.
  *
- * Everything fails closed: with no TMPDIR in the main process, on a platform other than
- * macOS, or on any failed check, nothing is provided and the workers run as before. No
- * process started here has a timeout: a lookup that hangs shows as a hung run, never as
- * a silently different PATH.
+ * Everything fails closed. With no usable TMPDIR in the main process, nothing is provided
+ * and the workers run as before. On a platform other than macOS, or on any failed git
+ * check, only the run temp root is provided and PATH stays as before. A new run root that
+ * fails its own check is removed and stops the run. No process started here has a
+ * timeout: a lookup that hangs shows as a hung run, never as a silently different PATH.
  *
  * The run temp root holds `owner.pid`. A later start deletes a run root only when it is
  * an own run root whose recorded owner pid is dead. Nothing else in the temp folder is
@@ -46,6 +47,7 @@ import type { TestProject } from 'vitest/node';
 import {
   GIT_BIN_KEY,
   GIT_BIN_PREFIX,
+  ORIGINAL_HOME_VAR,
   RUN_OWNER_FILE,
   RUN_ROOT_PREFIX,
   RUN_TMP_KEY,
@@ -345,7 +347,8 @@ type Provider = Pick<TestProject, 'provide'>;
  * The run root: swept of dead runs, made, marked with the owner pid and provided as the
  * workers' TMPDIR. Only made when the main process has a TMPDIR to replace, so the setup
  * changes a value and never adds a variable. Returns the root, or `undefined` when nothing
- * is made.
+ * is made. A new root that fails `assertRunRoot`, or whose marker cannot be written, is
+ * removed and the error is thrown.
  */
 function startRunRoot(project: Provider, opts: RunOptions): string | undefined {
   if (opts.env.TMPDIR === undefined || opts.env.TMPDIR === '') return undefined;
@@ -421,10 +424,23 @@ function routeGit(project: Provider, root: string, opts: RunOptions): void {
 }
 
 /**
+ * The env the run checks read. The main process records no original HOME, so its own HOME
+ * is added the way `tests/setup/isolate-env.ts` records it in each worker: a temp root
+ * that a worker would refuse as inside a real home is refused here first. The input is not
+ * changed, and no process started here sees the added key (`gitSpawnEnv` copies only its
+ * own keys).
+ */
+export function withRecordedHome(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  if (env[ORIGINAL_HOME_VAR] !== undefined || !env.HOME) return env;
+  return { ...env, [ORIGINAL_HOME_VAR]: env.HOME };
+}
+
+/**
  * Start one run. Returns the teardown, which never throws: a failed removal is reported on
  * one line and the next start's sweep takes the root.
  */
-export function startRun(project: Provider, opts: RunOptions): () => void {
+export function startRun(project: Provider, options: RunOptions): () => void {
+  const opts: RunOptions = { ...options, env: withRecordedHome(options.env) };
   const root = startRunRoot(project, opts);
   if (root === undefined) return () => undefined;
   routeGit(project, root, opts);

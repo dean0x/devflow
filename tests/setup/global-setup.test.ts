@@ -39,6 +39,7 @@ import {
   resolveRealGit,
   startRun,
   sweepDeadRuns,
+  withRecordedHome,
   type GitRouteDeps,
   type RunOptions,
   type RunResult,
@@ -51,6 +52,7 @@ import {
   RUN_OWNER_FILE,
   RUN_ROOT_PREFIX,
   RUN_TMP_KEY,
+  SAFE_PATH,
   assertRunRoot,
   canonical,
   checkGitBinDir,
@@ -360,14 +362,40 @@ describe('TP-22: the live lookup on this Mac', () => {
   });
 });
 
+/**
+ * What the main process gave the global setup, as far as this worker can still see it: its
+ * temp root is the parent of a provided run root, and its PATH is this PATH without a
+ * provided git folder. Another git first on PATH (Homebrew, for example) or an unusable
+ * TMPDIR is a normal setup that provides nothing, so the arms below skip only when these
+ * inputs call for nothing and nothing was provided.
+ */
+const providedRunTmp = inject(RUN_TMP_KEY);
+const providedGitBin = inject(GIT_BIN_KEY);
+const MAIN_TMP = providedRunTmp === undefined ? os.tmpdir() : path.dirname(providedRunTmp);
+const MAIN_PATH = (process.env.PATH ?? '')
+  .split(path.delimiter)
+  .filter(entry => entry !== providedGitBin)
+  .join(path.delimiter);
+/** The first checks of `startRunRoot`, over the main process's inputs. */
+const SETUP_WANTS_RUN_ROOT =
+  Boolean(process.env.TMPDIR) &&
+  process.getuid !== undefined &&
+  SAFE_PATH.test(MAIN_TMP) &&
+  !refusesTmpRoot(MAIN_TMP);
+/** The checks of `resolveRealGit` that start no process, over the main process's PATH. */
+const SETUP_WANTS_GIT_BIN =
+  SETUP_WANTS_RUN_ROOT &&
+  IS_MAC_WITH_XCRUN &&
+  firstGitOnPath(MAIN_PATH, liveRunOptions().isExecutableFile) === '/usr/bin/git';
+
 describe('TP-22: what the live global setup provided to this worker', () => {
-  it.skipIf(!process.env.TMPDIR)('provides a run root that passes the run root check', () => {
+  it.skipIf(providedRunTmp === undefined && !SETUP_WANTS_RUN_ROOT)('provides a run root that passes the run root check', () => {
     const root = inject(RUN_TMP_KEY);
     expect(root, 'the global setup provided no run root').toBeDefined();
     expect(checkRunTmp(root)).toBe(root);
   });
 
-  it.skipIf(!IS_MAC_WITH_XCRUN)('provides a git folder that passes the git folder check', () => {
+  it.skipIf(providedGitBin === undefined && !SETUP_WANTS_GIT_BIN)('provides a git folder that passes the git folder check', () => {
     const bin = inject(GIT_BIN_KEY);
     expect(bin, 'the global setup provided no git folder').toBeDefined();
     expect(checkGitBinDir(bin, checkRunTmp(inject(RUN_TMP_KEY)))).toBe(bin);
@@ -543,6 +571,11 @@ describe('isOwnerAlive', () => {
     expect(isOwnerAlive(process.pid)).toBe(true);
     expect(isOwnerAlive(DEAD_PID)).toBe(false);
   });
+
+  it('is true for every answer that is not ESRCH: a process of another user, a pid out of range', () => {
+    expect(isOwnerAlive(1)).toBe(true);
+    expect(isOwnerAlive(9_999_999_999)).toBe(true);
+  });
 });
 
 describe('TP-25: the sweep keeps everything that is not a dead own run root', () => {
@@ -655,6 +688,38 @@ describe('TP-34: a root holding folders with no read or write bits is removed', 
     expect(names(sweepDeadRuns(sweepOptions(tmp)))).toEqual([path.basename(root)]);
 
     expect(present(root)).toBe(false);
+  });
+});
+
+describe('TP-34: the permission walk is bounded and fixes only own folders', () => {
+  /** A root with one read-only folder below it; returns that folder. */
+  function rootWithReadonlyChild(): { root: string; child: string } {
+    const root = fixtureDir();
+    const child = path.join(root, 'readonly');
+    mkdirSync(child);
+    chmodSync(child, 0o555);
+    return { root, child };
+  }
+
+  const modeOf = (p: string): number => lstatSync(p).mode & 0o777;
+
+  it('gives every own folder owner rights back when the limit leaves room (accept arm)', () => {
+    const { root, child } = rootWithReadonlyChild();
+    expect(chmodOwnDirs(root, OWN_UID)).toEqual([]);
+    expect(modeOf(child)).toBe(0o700);
+  });
+
+  it('stops at the entry limit, says so, and leaves the rest as it was', () => {
+    const { root, child } = rootWithReadonlyChild();
+    expect(chmodOwnDirs(root, OWN_UID, 1)).toEqual([`stopped walking ${root} after 1 entries`]);
+    expect(modeOf(child)).toBe(0o555);
+  });
+
+  it('changes nothing without a uid or for a folder of another owner', () => {
+    const { root, child } = rootWithReadonlyChild();
+    expect(chmodOwnDirs(root, undefined)).toEqual([]);
+    expect(chmodOwnDirs(root, OWN_UID + 1)).toEqual([]);
+    expect(modeOf(child)).toBe(0o555);
   });
 });
 
@@ -800,6 +865,23 @@ describe('TP-31: without a TMPDIR in the main process no run root is made', () =
     expect(provided.size).toBe(0);
     expect(readdirSync(tmp)).toEqual([]);
     expect(() => teardown()).not.toThrow();
+  });
+
+  it('a temp root inside the main process HOME is refused, as the worker would refuse it', () => {
+    const tmp = fixtureDir();
+    const elsewhere = fixtureDir();
+    const inside = recorder();
+    const outside = recorder();
+
+    const refused = startRun(inside.project, runOptions(tmp, fakeGit(), { env: { TMPDIR: tmp, HOME: tmp } }));
+    const made = startRun(outside.project, runOptions(tmp, fakeGit(), { env: { TMPDIR: tmp, HOME: elsewhere } }));
+
+    expect(inside.provided.size).toBe(0);
+    expect(outside.provided.has(RUN_TMP_KEY)).toBe(true);
+    expect(withRecordedHome({ HOME: tmp })).toEqual({ HOME: tmp, [ORIGINAL_HOME_VAR]: tmp });
+    expect(withRecordedHome({ HOME: tmp, [ORIGINAL_HOME_VAR]: elsewhere })).toEqual({ HOME: tmp, [ORIGINAL_HOME_VAR]: elsewhere });
+    refused();
+    made();
   });
 
   it('with a TMPDIR the run root is made (accept arm)', () => {

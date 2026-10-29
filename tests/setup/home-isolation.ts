@@ -92,7 +92,7 @@ export const RUN_ROOT_PREFIX = 'devflow-test-run-';
 export const GIT_BIN_PREFIX = 'git-bin-';
 /** The file in a run root that records the pid of the process that owns it. */
 export const RUN_OWNER_FILE = 'owner.pid';
-/** The provided-context keys; both stay unset in the integration config and on a failed check. */
+/** The provided-context keys; each stays unset in the integration config and when its own step fails or is skipped. */
 export const RUN_TMP_KEY = 'devflowRunTmp';
 export const GIT_BIN_KEY = 'devflowGitBin';
 /** The only characters a run root, git folder or link target may hold. */
