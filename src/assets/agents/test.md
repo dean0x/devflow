@@ -69,7 +69,7 @@ For each scenario:
 2. Execute the action via Bash
 3. Capture stdout, stderr, exit code
 4. Compare against expected outcome
-5. Record PASS or FAIL with evidence
+5. Record PASS or FAIL with evidence, or BLOCKED when its command gave no result (it could not start, or no `EXIT=` line was read)
 
 If a previous run failed (PREVIOUS_FAILURES provided), prioritize re-testing those scenarios first.
 
@@ -99,7 +99,7 @@ Return structured QA report:
 ```markdown
 ## QA Report
 
-### Status: PASS | FAIL
+### Status: PASS | FAIL | BLOCKED
 
 ### Summary
 - Scenarios designed: {total}
@@ -116,7 +116,7 @@ Return structured QA report:
 
 | ID | TP | Type | Description | Mode | Status | Severity |
 |----|----|------|-------------|------|--------|----------|
-| S1 | TP-1/— | happy | {description} | bash/browser | PASS/FAIL/SKIPPED | — /BLOCKING/WARNING |
+| S1 | TP-1/— | happy | {description} | bash/browser | PASS/FAIL/SKIPPED/BLOCKED | — /BLOCKING/WARNING |
 
 ### Test Plan Evidence (only when TEST_PLAN holds TP lines)
 
@@ -126,7 +126,7 @@ HEAD: {the 40-hex `git rev-parse HEAD`, read before the first scenario and again
 |----|---------|-----------|---------|------|
 | TP-1 | PASS/FAIL/SKIP | S1, S3 | {the command whose exit code decided it, or —} | {its exit code 0-255, or —} |
 
-One row per TP line, in TP order. PASS only when every scenario covering the TP passed; SKIP when none could run here (give the reason under Skipped Scenarios). A `method:local` row always carries its Exit.
+One row per TP line, in TP order, in every report, a BLOCKED one included. PASS only when at least one scenario covers it and every one passed; FAIL when any failed; else SKIP, with the reason under Skipped Scenarios or Blockers. A `method:local` row always carries its Exit.
 
 ### Skipped Scenarios (if any)
 
@@ -144,6 +144,9 @@ One row per TP line, in TP order. PASS only when every scenario covering the TP 
 - **Actual**: {what actually happened}
 - **Evidence**: {stdout/stderr/exit code}
 - **Remediation**: {what the Fix agent should fix}
+
+### Blockers (if BLOCKED)
+- S{n}: {`command could not start` or `no EXIT line read`}; {duration}; log {its `LOG=` path}
 
 ### Evidence Log
 {Each command run's `LOG=` path, for traceability}
@@ -174,6 +177,10 @@ Report cap: final message at most about 1,500 tokens; longer material goes to a 
 
 **Report as FAIL:**
 - Any BLOCKING scenario fails
+
+**Report as BLOCKED:**
+- No BLOCKING scenario failed, and a BLOCKING scenario's command gave no result
+- A scenario skipped for its environment (no browser tools, no local database) never makes the run BLOCKED
 
 **Never:**
 - Modify code or create commits
