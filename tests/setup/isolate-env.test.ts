@@ -36,12 +36,14 @@ import {
   ORIGINAL_HOME_VAR,
   REDIRECT_ENV_VARS,
   RUN_TMP_KEY,
+  SAFE_PATH,
   TEMP_HOME_PREFIX,
   assertTempHome,
   checkGitBinDir,
   isolatedEnv,
   pathWithGitBin,
   realHomes,
+  refusesTmpRoot,
 } from './home-isolation.js';
 
 const CLI = requireBuiltCli();
@@ -50,6 +52,23 @@ const CLI = requireBuiltCli();
 const SUBPROCESS_TIMEOUT_MS = 60_000;
 
 const INIT_ARGS = ['init', '--recommended', '--security', 'user'] as const;
+
+/**
+ * The arms that build a git folder in a fixture run root need a temp root that the git folder
+ * check accepts. A worker `os.tmpdir()` that holds characters outside SAFE_PATH, or lies inside
+ * a real home, is refused by that check, so those arms skip with the one reason below. The arms
+ * whose refusal comes before any run root test run on every temp root.
+ */
+const FIXTURE_TMP = os.tmpdir();
+const FIXTURE_TMP_REFUSAL = !SAFE_PATH.test(FIXTURE_TMP)
+  ? 'holds characters outside the safe set'
+  : refusesTmpRoot(FIXTURE_TMP)
+    ? 'is the filesystem root or inside a real home'
+    : undefined;
+const itAcceptedTmp: typeof it = FIXTURE_TMP_REFUSAL === undefined ? it : it.skip;
+if (FIXTURE_TMP_REFUSAL !== undefined) {
+  it.skip(`skips the git folder arms that need a temp root the check accepts: os.tmpdir() ${FIXTURE_TMP_REFUSAL}`, () => {});
+}
 
 const created: string[] = [];
 function tempDir(prefix: string): string {
@@ -256,25 +275,40 @@ interface GitBinProbe {
   name: string;
   /** What the refusal says; every arm names its own check, so a broken fixture cannot pass for it. */
   message: RegExp;
+  /** True when the refusal comes from the value alone, so the arm needs no accepted temp root. */
+  refusedBeforeRunRoot?: true;
   build(runRoot: string): { value: unknown; runRoot: string | undefined; uid: number | undefined };
 }
 
 /** Each probe differs from the accepted folder in one thing. */
 const GIT_BIN_PROBES: GitBinProbe[] = [
-  { name: 'an empty text', message: /not a non-empty string/, build: r => ({ value: '', runRoot: r, uid: OWN_UID }) },
-  { name: 'a number', message: /not a non-empty string/, build: r => ({ value: 5, runRoot: r, uid: OWN_UID }) },
+  {
+    name: 'an empty text',
+    message: /not a non-empty string/,
+    refusedBeforeRunRoot: true,
+    build: r => ({ value: '', runRoot: r, uid: OWN_UID }),
+  },
+  {
+    name: 'a number',
+    message: /not a non-empty string/,
+    refusedBeforeRunRoot: true,
+    build: r => ({ value: 5, runRoot: r, uid: OWN_UID }),
+  },
   {
     name: 'a relative path',
+    refusedBeforeRunRoot: true,
     message: /git folder git-bin-x — it is not an absolute path of safe characters/,
     build: r => ({ value: 'git-bin-x', runRoot: r, uid: OWN_UID }),
   },
   {
     name: 'a path with a space',
+    refusedBeforeRunRoot: true,
     message: /it is not an absolute path of safe characters/,
     build: r => ({ value: makeGitBin(r, { name: 'git-bin-a b' }), runRoot: r, uid: OWN_UID }),
   },
   {
     name: 'a path with a semicolon',
+    refusedBeforeRunRoot: true,
     message: /it is not an absolute path of safe characters/,
     build: r => ({ value: makeGitBin(r, { name: 'git-bin-a;b' }), runRoot: r, uid: OWN_UID }),
   },
@@ -393,17 +427,21 @@ const GIT_BIN_PROBES: GitBinProbe[] = [
 ];
 
 describe('TP-23: the git folder check', () => {
-  it('accepts a read-only folder in the run root that holds one link to an absolute path', () => {
+  itAcceptedTmp('accepts a read-only folder in the run root that holds one link to an absolute path', () => {
     const runRoot = tempDir('df-gitbin-root-');
     const bin = makeGitBin(runRoot);
     expect(checkGitBinDir(bin, runRoot, { uid: OWN_UID })).toBe(bin);
   });
 
-  it.each(GIT_BIN_PROBES)('refuses $name', probe => {
+  function expectRefusal(probe: GitBinProbe): void {
     const runRoot = tempDir('df-gitbin-root-');
     const { value, runRoot: holder, uid } = probe.build(runRoot);
     expect(() => checkGitBinDir(value, holder, { uid })).toThrow(probe.message);
-  });
+  }
+
+  it.each(GIT_BIN_PROBES.filter(probe => probe.refusedBeforeRunRoot === true))('refuses $name', expectRefusal);
+
+  itAcceptedTmp.each(GIT_BIN_PROBES.filter(probe => probe.refusedBeforeRunRoot !== true))('refuses $name', expectRefusal);
 
   it('runs a refusal arm for each of its probes, each under its own name', () => {
     expect(GIT_BIN_PROBES.length).toBeGreaterThan(0);
