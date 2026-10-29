@@ -295,8 +295,7 @@ Criteria: ${CRITERIA || "see plan"}
 Return: {"verdict": "PASS" | "FAIL", "rationale": "..."} — FAIL if either answer is no, naming the failing criterion or the drift.`, { agentType: "Evaluate" });
     evalVerdict = evaluation?.verdict === "PASS" ? "PASS" : "FAIL";
     if (evalVerdict === "FAIL") {
-      // fix-and-continue — no re-evaluate, no inline Gate 1. The final Gate 1 (#2)
-      // after the review pass is the build gate before the branch is handed back.
+      // fix-and-continue — no re-evaluate, no inline Gate 1.
       await agent(`OPERATION: alignment-fix
 Fix the alignment issues identified by the Evaluate agent on branch ${BRANCH}:
 ${evaluation?.rationale || "see the Evaluate agent's report"}
@@ -475,8 +474,6 @@ Return: {"status": "fixed"|"blocked", "commitShas": ["<sha>"], "unresolved": ["<
 });
 
 // Phase 5.5: Gate 1 #2 — FINAL post-fix gate (Polish agent → Harden agent → full Validate agent, Validate last and unconditional).
-// Runs ONCE, after the review pass. Inside the pass the Code agent self-verified its own fixes;
-// this is the build gate before the branch is handed back. See gate1_postcode() cadence.
 const gate1Final = await phase("gate1-final", async () => {
   await agent(`Polish and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Polish" });
 

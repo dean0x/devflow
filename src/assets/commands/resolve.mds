@@ -236,7 +236,7 @@ Follow devflow:apply-decisions to Read full ADR/PF bodies on demand.
 Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE."
 ```
 
-Wait for Triage agent to complete before proceeding. Parse verdict ledger from Triage agent output:
+When the Triage agent completes, parse its verdict ledger:
 - **ESCALATED**: Security issues requiring human escalation
 - **FIX_NOW**: Valid issues assigned to Code agents (with risk tier: Standard | Careful | `Standard, prose only: edit text alone; agent instructions count as logic; if this issue needs a logic change, leave it unedited and name it`; any other value counts as Careful). SCOPE gives one `{id}: {tier}` line per issue.
 - **FALSE_POSITIVE**: Issues the Review agent got wrong (with cited evidence)
@@ -351,7 +351,7 @@ Use the template from the Output Artifact section below.
 **Produces:** POLISH_RESULT
 **Requires:** CODE_AGENT_RESULTS, GATE_LEVEL
 
-If any fixes were made, spawn Polish agent to refine the changed code:
+If any fixes were made, spawn Polish agent:
 
 ```
 Agent(subagent_type="Polish", run_in_background=false):
@@ -429,9 +429,7 @@ git -C {worktree} push
 **Produces:** CI_STATUS
 **Requires:** CODE_AGENT_RESULTS, VERIFICATION_STATUS, BRANCH_INFO
 
-If no issues were fixed (CODE_AGENT_RESULTS contains 0 fixes) → skip: "No fixes applied — skipping CI validation."
-
-If Verification Gate FAILED → skip CI gate (validation failures already reported).
+If VERIFICATION_STATUS is not PASS → skip CI gate.
 
 If `fork_no_push` is set → skip: "Cannot push to fork — skipping CI validation."
 
@@ -445,7 +443,7 @@ Otherwise, for each worktree with fixes:
 git -C {worktree} push; echo "exit=$?"
 ```
 
-Phase 7 has pushed already, so this is a no-op unless the head moved since. `exit=0` continues to the gate. Any other result records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and skips the wait for this worktree. Pass `WORKTREE_PATH: {worktree_path}` on the fix spawn below.
+`exit=0` continues to the gate. Any other result records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and skips the wait for this worktree. Pass `WORKTREE_PATH: {worktree_path}` on the fix spawn below.
 
 <!-- PATTERN: ci-status-gate -->
 1. Wait: run `cd {worktree} && HEAD_SHA=$(git rev-parse HEAD) && node "$HOME/.devflow/scripts/ci-wait.cjs" --pr {PR_NUMBER} --head "$HEAD_SHA"` through the Bash tool with `timeout: 600000`. Each run waits at most 570 seconds and prints one line, `CI <STATUS> pr=… head=… failing=… pending=… waited=…` (INDETERMINATE adds `reason=…`). A missing or unparseable line, an unknown status or a non-zero exit is INDETERMINATE.
