@@ -84,6 +84,9 @@ if (FIXTURE_TMP_REFUSAL !== undefined) {
   it.skip(`skips the fixture arms that need a temp root the setup accepts: os.tmpdir() ${FIXTURE_TMP_REFUSAL}`, () => {});
 }
 
+// The worker cwd (the repo root) before any arm runs; the last arm proves no arm added to it.
+const CWD_ENTRIES_BEFORE = new Set(readdirSync(process.cwd()));
+
 const created: string[] = [];
 function fixtureDir(prefix = 'df-gs-'): string {
   const dir = mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -1093,5 +1096,29 @@ describe('TP-28: the setup files import only what their allowlist names', () => 
     expect(importViolations("import { x } from '../helpers.js';", isolateEnv)).toHaveLength(1);
     expect(importViolations("import { spawnSync } from 'child_process';", homeIsolation)).toHaveLength(1);
     expect(importViolations("import { afterAll } from 'vitest';", homeIsolation)).toHaveLength(1);
+  });
+});
+
+describe('the working folder gets no entry from a path that was never provided', () => {
+  it('a provided absolute path is returned as it is', () => {
+    const { provided } = recorder();
+    provided.set(RUN_TMP_KEY, '/abs/run');
+    expect(providedPath(provided, RUN_TMP_KEY)).toBe('/abs/run');
+  });
+
+  it.each([
+    ['nothing provided', undefined],
+    ['the text of an unset value', 'undefined'],
+    ['a relative path', 'run/root'],
+  ])('known-bad probe: %s is refused before any arm can use it', (_name, value) => {
+    const { provided } = recorder();
+    if (value !== undefined) provided.set(RUN_TMP_KEY, value);
+    expect(() => providedPath(provided, RUN_TMP_KEY)).toThrow('was not provided as an absolute path');
+  });
+
+  // Last arm of the file: it runs after every other arm.
+  it('has no new entry in the repo root after every arm of this file ran', () => {
+    const added = readdirSync(process.cwd()).filter(name => !CWD_ENTRIES_BEFORE.has(name));
+    expect(added).toEqual([]);
   });
 });
