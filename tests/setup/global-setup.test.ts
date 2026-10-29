@@ -67,6 +67,23 @@ const DEAD_PID = 2_147_483_000;
 const LIVE_PID = 2_147_482_999;
 const REAL_GIT = '/fake/xcode/usr/bin/git';
 
+/**
+ * The arms that run `startRun`, the sweep, the teardown or the run root check over a fixture
+ * root need a temp root that the setup itself accepts. A worker `os.tmpdir()` that holds
+ * characters outside SAFE_PATH, or lies inside a real home, is refused by the setup, so those
+ * arms skip with the one reason below. Every other arm runs on any temp root.
+ */
+const FIXTURE_TMP = os.tmpdir();
+const FIXTURE_TMP_REFUSAL = !SAFE_PATH.test(FIXTURE_TMP)
+  ? 'holds characters outside the safe set'
+  : refusesTmpRoot(FIXTURE_TMP)
+    ? 'is the filesystem root or inside a real home'
+    : undefined;
+const itAcceptedTmp: typeof it = FIXTURE_TMP_REFUSAL === undefined ? it : it.skip;
+if (FIXTURE_TMP_REFUSAL !== undefined) {
+  it.skip(`skips the fixture arms that need a temp root the setup accepts: os.tmpdir() ${FIXTURE_TMP_REFUSAL}`, () => {});
+}
+
 const created: string[] = [];
 function fixtureDir(prefix = 'df-gs-'): string {
   const dir = mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -249,7 +266,7 @@ describe('TP-18: the git lookup starts nothing off macOS', () => {
     expect(fake.calls).toEqual([]);
   });
 
-  it('startRun on linux makes the run root only: no process, no xcrun home, no git folder', () => {
+  itAcceptedTmp('startRun on linux makes the run root only: no process, no xcrun home, no git folder', () => {
     const tmp = fixtureDir();
     const fake = fakeGit();
     const { project, provided } = recorder();
@@ -459,13 +476,18 @@ describe('TP-24: the run root and temp root checks', () => {
   const plainFile = path.join(tmp, `${RUN_ROOT_PREFIX}file`);
   writeFileSync(plainFile, 'x');
 
-  it('accepts a fresh own run root', () => {
+  itAcceptedTmp('accepts a fresh own run root', () => {
     expect(() => assertRunRoot(good, tmp, own)).not.toThrow();
   });
 
   it.each([
     ['a relative path', `${RUN_ROOT_PREFIX}abc`, /absolute path of safe characters/],
     ['unsafe characters', path.join(tmp, `${RUN_ROOT_PREFIX}a b`), /safe characters/],
+  ])('refuses %s', (_name, root, message) => {
+    expect(() => assertRunRoot(root, tmp, own)).toThrow(message);
+  });
+
+  itAcceptedTmp.each([
     ['an unnormalised path', `${good}/`, /normalised/],
     ['a wrong prefix', path.join(tmp, 'other-abc'), /does not start with/],
     ['the bare prefix', path.join(tmp, RUN_ROOT_PREFIX), /does not start with/],
@@ -477,18 +499,18 @@ describe('TP-24: the run root and temp root checks', () => {
     expect(() => assertRunRoot(root, tmp, own)).toThrow(message);
   });
 
-  it('refuses a foreign owner and a missing uid', () => {
+  itAcceptedTmp('refuses a foreign owner and a missing uid', () => {
     expect(() => assertRunRoot(good, tmp, { uid: OWN_UID + 1, env: {} })).toThrow(/not owned by the current user/);
     expect(() => assertRunRoot(good, tmp, { uid: undefined, env: {} })).toThrow(/not owned by the current user/);
   });
 
-  it('refuses a run root that is a real home', () => {
+  itAcceptedTmp('refuses a run root that is a real home', () => {
     expect(() => assertRunRoot(good, tmp, { uid: OWN_UID, env: { [ORIGINAL_HOME_VAR]: good } })).toThrow(
       /real home/,
     );
   });
 
-  it('refuses every root when the temp root is the filesystem root or inside a real home', () => {
+  itAcceptedTmp('refuses every root when the temp root is the filesystem root or inside a real home', () => {
     expect(() => assertRunRoot(path.join('/', `${RUN_ROOT_PREFIX}x`), '/', own)).toThrow(/filesystem root/);
     expect(() => assertRunRoot(good, tmp, { uid: OWN_UID, env: { [ORIGINAL_HOME_VAR]: tmp } })).toThrow(
       /inside a real home/,
@@ -505,14 +527,14 @@ describe('TP-24: the run root and temp root checks', () => {
     }
   });
 
-  it('refusesTmpRoot: an ordinary temp folder is accepted', () => {
+  itAcceptedTmp('refusesTmpRoot: an ordinary temp folder is accepted', () => {
     expect(refusesTmpRoot(tmp, {})).toBe(false);
     expect(refusesTmpRoot(tmp, { [ORIGINAL_HOME_VAR]: nested })).toBe(false);
   });
 });
 
 describe('TP-9: teardown removes the run root with its read-only git folder', () => {
-  it('removes the root, and the git folder was read-only before', () => {
+  itAcceptedTmp('removes the root, and the git folder was read-only before', () => {
     const tmp = fixtureDir();
     const { root, bin } = makeRootWithBin(tmp);
     expect(lstatSync(bin).mode & 0o222, 'the fixture git folder must start read-only').toBe(0);
@@ -538,25 +560,25 @@ describe('TP-26: teardown refuses a stored path that fails the run root rules', 
     return { folder, file };
   }
 
-  it('deletes a good root (accept arm for the refusals below)', () => {
+  itAcceptedTmp('deletes a good root (accept arm for the refusals below)', () => {
     const root = makeRunRoot(tmp);
     expect(removeRunRoot(root, tmp, own)).toBe(true);
     expect(present(root)).toBe(false);
   });
 
-  it('refuses a wrong name and deletes nothing', () => {
+  itAcceptedTmp('refuses a wrong name and deletes nothing', () => {
     const { folder, file } = folderWithFile(tmp, 'not-a-run-root');
     expect(() => removeRunRoot(folder, tmp, own)).toThrow(/does not start with/);
     expect(present(file)).toBe(true);
   });
 
-  it('refuses a root of another temp folder and deletes nothing', () => {
+  itAcceptedTmp('refuses a root of another temp folder and deletes nothing', () => {
     const { folder, file } = folderWithFile(other, `${RUN_ROOT_PREFIX}elsewhere`);
     expect(() => removeRunRoot(folder, tmp, own)).toThrow(/direct child/);
     expect(present(file)).toBe(true);
   });
 
-  it('refuses a link and deletes neither the link nor its target', () => {
+  itAcceptedTmp('refuses a link and deletes neither the link nor its target', () => {
     const { folder, file } = folderWithFile(other, 'link-target');
     const link = path.join(tmp, `${RUN_ROOT_PREFIX}linked`);
     symlinkSync(folder, link);
@@ -565,7 +587,7 @@ describe('TP-26: teardown refuses a stored path that fails the run root rules', 
     expect(present(file)).toBe(true);
   });
 
-  it('refuses a real home and deletes nothing', () => {
+  itAcceptedTmp('refuses a real home and deletes nothing', () => {
     const { folder, file } = folderWithFile(tmp, `${RUN_ROOT_PREFIX}home`);
     expect(() => removeRunRoot(folder, tmp, { uid: OWN_UID, env: { [ORIGINAL_HOME_VAR]: folder } })).toThrow(
       /real home/,
@@ -615,7 +637,7 @@ describe('TP-25: the sweep keeps everything that is not a dead own run root', ()
   writeFileSync(path.join(unprefixed, RUN_OWNER_FILE), `${DEAD_PID}\n`);
   const removed = sweepDeadRuns(sweepOptions(tmp));
 
-  it('removes the dead own root: the sweep is not a no-op', () => {
+  itAcceptedTmp('removes the dead own root: the sweep is not a no-op', () => {
     expect(names(removed)).toEqual([path.basename(dead)]);
     expect(present(dead)).toBe(false);
   });
@@ -644,14 +666,14 @@ describe('TP-25: the sweep keeps everything that is not a dead own run root', ()
     expect(present(root)).toBe(true);
   });
 
-  it('stops at the removal limit', () => {
+  itAcceptedTmp('stops at the removal limit', () => {
     const limitTmp = fixtureDir();
     const roots = [makeRunRoot(limitTmp), makeRunRoot(limitTmp)];
     expect(sweepDeadRuns(sweepOptions(limitTmp, { removeLimit: 1 }))).toHaveLength(1);
     expect(roots.filter(present)).toHaveLength(1);
   });
 
-  it('stops at the scan limit', () => {
+  itAcceptedTmp('stops at the scan limit', () => {
     const scanTmp = fixtureDir();
     const roots = Array.from({ length: 5 }, () => makeRunRoot(scanTmp));
     expect(sweepDeadRuns(sweepOptions(scanTmp, { scanLimit: 2 }))).toHaveLength(2);
@@ -660,7 +682,7 @@ describe('TP-25: the sweep keeps everything that is not a dead own run root', ()
 });
 
 describe('TP-10: a later start removes a run root whose owner is dead', () => {
-  it('removes the dead root, keeps the one this process owns, and makes its own', () => {
+  itAcceptedTmp('removes the dead root, keeps the one this process owns, and makes its own', () => {
     const tmp = fixtureDir();
     const dead = makeRunRoot(tmp, DEAD_PID);
     const mine = makeRunRoot(tmp, process.pid);
@@ -676,7 +698,7 @@ describe('TP-10: a later start removes a run root whose owner is dead', () => {
 });
 
 describe('TP-34: a root holding folders with no read or write bits is removed', () => {
-  it('teardown removes it', () => {
+  itAcceptedTmp('teardown removes it', () => {
     const tmp = fixtureDir();
     const { project, provided } = recorder();
     const warn = warnSpy();
@@ -691,7 +713,7 @@ describe('TP-34: a root holding folders with no read or write bits is removed', 
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it('the sweep removes it', () => {
+  itAcceptedTmp('the sweep removes it', () => {
     const tmp = fixtureDir();
     const { root } = makeRootWithBin(tmp, DEAD_PID);
     const locked = addLockedTree(root);
@@ -736,7 +758,7 @@ describe('TP-34: the permission walk is bounded and fixes only own folders', () 
 });
 
 describe('TP-33: the returned teardown never throws', () => {
-  it('removes the root and prints nothing when all goes well', () => {
+  itAcceptedTmp('removes the root and prints nothing when all goes well', () => {
     const tmp = fixtureDir();
     const { project, provided } = recorder();
     const warn = warnSpy();
@@ -748,7 +770,7 @@ describe('TP-33: the returned teardown never throws', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it('when the removal fails, it retries once, prints one line and does not throw', () => {
+  itAcceptedTmp('when the removal fails, it retries once, prints one line and does not throw', () => {
     const tmp = fixtureDir();
     const { project, provided } = recorder();
     const warn = warnSpy();
@@ -765,7 +787,7 @@ describe('TP-33: the returned teardown never throws', () => {
     expect(present(providedPath(provided, RUN_TMP_KEY))).toBe(true);
   });
 
-  it('when the stored root fails the run root rules, it prints one line and deletes nothing', () => {
+  itAcceptedTmp('when the stored root fails the run root rules, it prints one line and deletes nothing', () => {
     const tmp = fixtureDir();
     const target = fixtureDir();
     writeFileSync(path.join(target, 'keep.txt'), 'x');
@@ -785,7 +807,7 @@ describe('TP-33: the returned teardown never throws', () => {
 });
 
 describe('TP-29: a started run makes the root and the read-only git folder', () => {
-  it('provides both keys, records the owner and links to the absolute real path', () => {
+  itAcceptedTmp('provides both keys, records the owner and links to the absolute real path', () => {
     const tmp = fixtureDir();
     const fake = fakeGit();
     const options = runOptions(tmp, fake);
@@ -817,7 +839,7 @@ describe('TP-29: a started run makes the root and the read-only git folder', () 
     expect(readdirSync(tmp)).toEqual([]);
   });
 
-  it('starts the lookups with a spawn env that holds only the allowed keys, HOME under the run root', () => {
+  itAcceptedTmp('starts the lookups with a spawn env that holds only the allowed keys, HOME under the run root', () => {
     const tmp = fixtureDir();
     const fake = fakeGit();
     const { project, provided } = recorder();
@@ -879,7 +901,7 @@ describe('TP-31: without a TMPDIR in the main process no run root is made', () =
     expect(() => teardown()).not.toThrow();
   });
 
-  it('a temp root inside the main process HOME is refused, as the worker would refuse it', () => {
+  itAcceptedTmp('a temp root inside the main process HOME is refused, as the worker would refuse it', () => {
     const tmp = fixtureDir();
     const elsewhere = fixtureDir();
     const inside = recorder();
@@ -896,7 +918,7 @@ describe('TP-31: without a TMPDIR in the main process no run root is made', () =
     made();
   });
 
-  it('with a TMPDIR the run root is made (accept arm)', () => {
+  itAcceptedTmp('with a TMPDIR the run root is made (accept arm)', () => {
     const tmp = fixtureDir();
     const { project, provided } = recorder();
     const teardown = startRun(project, runOptions(tmp, fakeGit(), { platform: 'linux' }));
@@ -906,7 +928,7 @@ describe('TP-31: without a TMPDIR in the main process no run root is made', () =
 });
 
 describe('TP-32: a failed git routing step keeps the run root and provides no git folder', () => {
-  it('a failed lookup keeps the root, makes no git folder and prints one line', () => {
+  itAcceptedTmp('a failed lookup keeps the root, makes no git folder and prints one line', () => {
     const tmp = fixtureDir();
     const warn = warnSpy();
     const { project, provided } = recorder();
@@ -922,7 +944,7 @@ describe('TP-32: a failed git routing step keeps the run root and provides no gi
     teardown();
   });
 
-  it('a failure after the git folder exists removes the folder and provides nothing for git', () => {
+  itAcceptedTmp('a failure after the git folder exists removes the folder and provides nothing for git', () => {
     const tmp = fixtureDir();
     const warn = warnSpy();
     let binExistedAtFailure = false;
