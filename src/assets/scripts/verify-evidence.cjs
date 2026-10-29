@@ -2350,9 +2350,9 @@ function machineComplianceState(manifestPath) {
 /**
  * The publish guard: with compliance off, or its state unreadable, `publish` ends here,
  * before a work directory is made and before any gh call. It reads the machine manifest
- * and nothing else, so no repository file and no environment variable can switch it on.
- * It returns its outcome and never throws: the catch in main turns a throw into
- * "evidence unavailable", which would hide the reason.
+ * under the user's home folder and nothing else, so no repository file can switch it on.
+ * It ignores the devflow folder override. It returns its outcome and never throws: the
+ * catch in main turns a throw into "evidence unavailable", which would hide the reason.
  *
  * @param {Io} io
  * @param {MainDeps} deps
