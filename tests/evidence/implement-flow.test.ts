@@ -386,6 +386,7 @@ function collectTestBlockedStatusDefects(test: string): string[] {
   const lines = output.split('\n')
   const statusLines = lines.filter(l => l.startsWith('### Status:'))
   if (statusLines.length !== 1 || statusLines[0] !== TEST_STATUS_LINE) out.push(`the Status line is not exactly "${TEST_STATUS_LINE}"`)
+  if (!lines.includes('- Blocked: {count}')) out.push('the Summary lacks a Blocked count')
   if (!lines.some(l => l.startsWith('| S1 |') && l.includes('| PASS/FAIL/SKIPPED/BLOCKED |'))) out.push('the Scenario Results Status cell lacks BLOCKED')
   if (!test.includes('5. Record PASS or FAIL with evidence, or BLOCKED when its command gave no result')) out.push('the Execution step does not record BLOCKED for a command with no result')
   const rule = lines.find(l => l.startsWith('One row per TP line')) ?? ''
@@ -422,6 +423,7 @@ describe('#679: the Test agent reports BLOCKED for a run whose command gave no r
     const test = resolveAgentSource('test').content
     const block = `${BLOCKED_REPORT_HEADING}\n- No BLOCKING scenario failed, and a BLOCKING scenario's command gave no result\n- A scenario skipped for its environment (no browser tools, no local database) never makes the run BLOCKED\n`
     expect(collectTestBlockedStatusDefects(seedOnce(test, TEST_STATUS_LINE, '### Status: PASS | FAIL'))).toEqual([`the Status line is not exactly "${TEST_STATUS_LINE}"`])
+    expect(collectTestBlockedStatusDefects(seedOnce(test, '- Blocked: {count}\n', ''))).toEqual(['the Summary lacks a Blocked count'])
     expect(collectTestBlockedStatusDefects(seedOnce(test, 'PASS/FAIL/SKIPPED/BLOCKED', 'PASS/FAIL/SKIPPED'))).toEqual(['the Scenario Results Status cell lacks BLOCKED'])
     expect(collectTestBlockedStatusDefects(seedOnce(test, ', or BLOCKED when its command gave no result', ''))).toEqual(['the Execution step does not record BLOCKED for a command with no result'])
     expect(collectTestBlockedStatusDefects(seedOnce(test, 'PASS only when at least one scenario covers it and every one passed', 'PASS only when every scenario covering the TP passed'))).toEqual([

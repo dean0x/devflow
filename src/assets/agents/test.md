@@ -106,6 +106,7 @@ Return structured QA report:
 - Passed: {count}
 - Failed: {count}
 - Skipped: {count}
+- Blocked: {count}
 
 ### Acceptance Criteria Coverage
 | Criterion | Scenarios | Status |
@@ -152,7 +153,7 @@ One row per TP line, in TP order, in every report, a BLOCKED one included. PASS 
 {Each command run's `LOG=` path, for traceability}
 ```
 
-Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file via Bash and the message gives its path. Exempt, inline in full: `### Test Plan Evidence` (HEAD line and TP table), the Scenario Results table (`| ID | TP | Type |`) and `### Failed Scenarios`. `### Evidence Log` lists each run's `LOG=` path, never raw output.
+Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file via Bash and the message gives its path. Exempt, inline in full: `### Test Plan Evidence` (HEAD line and TP table), the Scenario Results table (`| ID | TP | Type |`), `### Failed Scenarios` and `### Blockers`. `### Evidence Log` lists each run's `LOG=` path, never raw output.
 
 ## Principles
 
