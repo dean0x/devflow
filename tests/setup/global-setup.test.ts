@@ -217,6 +217,18 @@ function recorder(failOn?: string) {
   return { provided, project };
 }
 
+/**
+ * A provided path. Throws unless it is an absolute path, so a run that provided nothing
+ * fails here and no later step creates, links or removes a relative path in the cwd.
+ */
+function providedPath(provided: Map<string, unknown>, key: string): string {
+  const value = provided.get(key);
+  if (typeof value !== 'string' || !path.isAbsolute(value)) {
+    throw new Error(`${key} was not provided as an absolute path: ${String(value)}`);
+  }
+  return value;
+}
+
 function warnSpy() {
   return vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 }
@@ -246,7 +258,7 @@ describe('TP-18: the git lookup starts nothing off macOS', () => {
 
     expect([...provided.keys()]).toEqual([RUN_TMP_KEY]);
     expect(fake.calls).toEqual([]);
-    const root = String(provided.get(RUN_TMP_KEY));
+    const root = providedPath(provided, RUN_TMP_KEY);
     expect(readdirSync(root)).toEqual([RUN_OWNER_FILE]);
     expect(warn).not.toHaveBeenCalled();
     teardown();
@@ -658,7 +670,7 @@ describe('TP-10: a later start removes a run root whose owner is dead', () => {
 
     expect(present(dead)).toBe(false);
     expect(present(mine)).toBe(true);
-    expect(present(String(provided.get(RUN_TMP_KEY)))).toBe(true);
+    expect(present(providedPath(provided, RUN_TMP_KEY))).toBe(true);
     teardown();
   });
 });
@@ -669,7 +681,7 @@ describe('TP-34: a root holding folders with no read or write bits is removed', 
     const { project, provided } = recorder();
     const warn = warnSpy();
     const teardown = startRun(project, runOptions(tmp, fakeGit()));
-    const root = String(provided.get(RUN_TMP_KEY));
+    const root = providedPath(provided, RUN_TMP_KEY);
     const locked = addLockedTree(root);
     expect(OWN_UID === 0 || !canList(locked[0] ?? ''), 'the fixture must hide a folder').toBe(true);
 
@@ -732,7 +744,7 @@ describe('TP-33: the returned teardown never throws', () => {
 
     expect(() => teardown()).not.toThrow();
 
-    expect(present(String(provided.get(RUN_TMP_KEY)))).toBe(false);
+    expect(present(providedPath(provided, RUN_TMP_KEY))).toBe(false);
     expect(warn).not.toHaveBeenCalled();
   });
 
@@ -750,7 +762,7 @@ describe('TP-33: the returned teardown never throws', () => {
     expect(rm).toHaveBeenCalledTimes(2);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(String(warn.mock.calls[0]?.[0])).toContain('ENOTEMPTY');
-    expect(present(String(provided.get(RUN_TMP_KEY)))).toBe(true);
+    expect(present(providedPath(provided, RUN_TMP_KEY))).toBe(true);
   });
 
   it('when the stored root fails the run root rules, it prints one line and deletes nothing', () => {
@@ -760,7 +772,7 @@ describe('TP-33: the returned teardown never throws', () => {
     const { project, provided } = recorder();
     const warn = warnSpy();
     const teardown = startRun(project, runOptions(tmp, fakeGit()));
-    const root = String(provided.get(RUN_TMP_KEY));
+    const root = providedPath(provided, RUN_TMP_KEY);
     chmodOwnDirs(root, OWN_UID);
     rmSync(root, { recursive: true, force: true });
     symlinkSync(target, root);
@@ -784,8 +796,8 @@ describe('TP-29: a started run makes the root and the read-only git folder', () 
     const teardown = startRun(project, options);
 
     expect([...provided.keys()]).toEqual([RUN_TMP_KEY, GIT_BIN_KEY]);
-    const root = String(provided.get(RUN_TMP_KEY));
-    const bin = String(provided.get(GIT_BIN_KEY));
+    const root = providedPath(provided, RUN_TMP_KEY);
+    const bin = providedPath(provided, GIT_BIN_KEY);
     expect(() => assertRunRoot(root, tmp, { uid: OWN_UID, env: {} })).not.toThrow();
     expect(readFileSync(path.join(root, RUN_OWNER_FILE), 'utf8')).toBe(`${process.pid}\n`);
     expect(lstatSync(path.join(root, RUN_OWNER_FILE)).mode & 0o777).toBe(0o600);
@@ -816,7 +828,7 @@ describe('TP-29: a started run makes the root and the read-only git folder', () 
       ['/usr/bin/xcrun', ['--find', 'git']],
       [REAL_GIT, ['--version']],
     ]);
-    const root = String(provided.get(RUN_TMP_KEY));
+    const root = providedPath(provided, RUN_TMP_KEY);
     for (const call of fake.calls) {
       expect(Object.keys(call.env ?? {}).sort()).toEqual([
         'GIT_CONFIG_GLOBAL',
@@ -902,7 +914,7 @@ describe('TP-32: a failed git routing step keeps the run root and provides no gi
     const teardown = startRun(project, runOptions(tmp, fakeGit({ throws: true })));
 
     expect([...provided.keys()]).toEqual([RUN_TMP_KEY]);
-    const root = String(provided.get(RUN_TMP_KEY));
+    const root = providedPath(provided, RUN_TMP_KEY);
     expect(present(root)).toBe(true);
     expect(readdirSync(root).filter(n => n.startsWith(GIT_BIN_PREFIX))).toEqual([]);
     expect(warn).toHaveBeenCalledTimes(1);
@@ -929,7 +941,7 @@ describe('TP-32: a failed git routing step keeps the run root and provides no gi
 
     expect(binExistedAtFailure, 'the git folder must exist when the failure happens').toBe(true);
     expect([...provided.keys()]).toEqual([RUN_TMP_KEY]);
-    const root = String(provided.get(RUN_TMP_KEY));
+    const root = providedPath(provided, RUN_TMP_KEY);
     expect(present(root)).toBe(true);
     expect(readdirSync(root).filter(n => n.startsWith(GIT_BIN_PREFIX))).toEqual([]);
     expect(warn).toHaveBeenCalledTimes(1);
