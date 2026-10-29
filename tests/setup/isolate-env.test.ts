@@ -23,18 +23,22 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSync } from 'child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import unitConfig from '../../vitest.config.js';
 import integrationConfig from '../../vitest.integration.config.js';
 import { requireBuiltCli, sandboxEnv, walkFiles } from '../helpers.js';
+import { chmodOwnDirs } from './global-setup.js';
 import {
+  GIT_BIN_PREFIX,
   ORIGINAL_HOME_VAR,
   REDIRECT_ENV_VARS,
   TEMP_HOME_PREFIX,
   assertTempHome,
+  checkGitBinDir,
   isolatedEnv,
+  pathWithGitBin,
   realHomes,
 } from './home-isolation.js';
 
@@ -53,7 +57,11 @@ function tempDir(prefix: string): string {
 }
 
 afterAll(() => {
-  for (const dir of created) rmSync(dir, { recursive: true, force: true });
+  for (const dir of created) {
+    // A git folder fixture is read-only; give its owner write rights back before the removal.
+    chmodOwnDirs(dir, process.getuid?.());
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 /** A temp dir laid out the way init expects Claude Code to exist: an empty `.claude`-style dir. */
@@ -205,4 +213,230 @@ describe('AC-1: an exported CLAUDE_CONFIG_DIR / DEVFLOW_DIR canary stays empty',
     expect(written.filter(f => f.startsWith(`devflow${path.sep}`))).toEqual([]);
     expect(existsSync(path.join(home, '.devflow', 'manifest.json'))).toBe(true);
   }, SUBPROCESS_TIMEOUT_MS);
+});
+
+describe('TP-30: the global setup wiring', () => {
+  it('the unit config names the one global setup file', () => {
+    expect([unitConfig.test?.globalSetup ?? []].flat()).toEqual(['tests/setup/global-setup.ts']);
+  });
+
+  it('the integration config names none', () => {
+    expect([integrationConfig.test?.globalSetup ?? []].flat()).toEqual([]);
+  });
+});
+
+const OWN_UID = process.getuid?.() ?? -1;
+
+interface GitBinShape {
+  /** The folder name inside the run root. Default: made by `mkdtemp` from the git folder prefix. */
+  name?: string;
+  /** The folder this one is made in. Default: the run root. */
+  parent?: string;
+  /** What `git` links to. `null` leaves the folder without it. Default: this node binary. */
+  target?: string | null;
+  /** A second entry beside `git`. */
+  extra?: string;
+  mode?: number;
+}
+
+/** A git folder the way the global setup makes it: a read-only folder with one link named `git`. */
+function makeGitBin(runRoot: string, shape: GitBinShape = {}): string {
+  const parent = shape.parent ?? runRoot;
+  const bin = shape.name === undefined ? mkdtempSync(path.join(parent, GIT_BIN_PREFIX)) : path.join(parent, shape.name);
+  if (shape.name !== undefined) mkdirSync(bin);
+  if (shape.target !== null) symlinkSync(shape.target ?? process.execPath, path.join(bin, 'git'));
+  if (shape.extra !== undefined) writeFileSync(path.join(bin, shape.extra), '');
+  chmodSync(bin, shape.mode ?? 0o555);
+  return bin;
+}
+
+interface GitBinProbe {
+  name: string;
+  /** What the refusal says; every arm names its own check, so a broken fixture cannot pass for it. */
+  message: RegExp;
+  build(runRoot: string): { value: unknown; runRoot: string | undefined; uid: number | undefined };
+}
+
+/** Each probe differs from the accepted folder in one thing. */
+const GIT_BIN_PROBES: GitBinProbe[] = [
+  { name: 'an empty text', message: /not a non-empty string/, build: r => ({ value: '', runRoot: r, uid: OWN_UID }) },
+  { name: 'a number', message: /not a non-empty string/, build: r => ({ value: 5, runRoot: r, uid: OWN_UID }) },
+  {
+    name: 'a relative path',
+    message: /git folder git-bin-x — it is not an absolute path of safe characters/,
+    build: r => ({ value: 'git-bin-x', runRoot: r, uid: OWN_UID }),
+  },
+  {
+    name: 'a path with a space',
+    message: /it is not an absolute path of safe characters/,
+    build: r => ({ value: makeGitBin(r, { name: 'git-bin-a b' }), runRoot: r, uid: OWN_UID }),
+  },
+  {
+    name: 'a path with a semicolon',
+    message: /it is not an absolute path of safe characters/,
+    build: r => ({ value: makeGitBin(r, { name: 'git-bin-a;b' }), runRoot: r, uid: OWN_UID }),
+  },
+  {
+    name: 'a path that is not normalised',
+    message: /not a normalised path/,
+    build: r => ({ value: `${makeGitBin(r)}/`, runRoot: r, uid: OWN_UID }),
+  },
+  {
+    name: 'a run root that is missing',
+    message: /no run root to hold it/,
+    build: r => ({ value: makeGitBin(r), runRoot: undefined, uid: OWN_UID }),
+  },
+  {
+    name: 'a folder outside the run root',
+    message: /not a direct child of the run root/,
+    build: r => ({ value: makeGitBin(r, { parent: tempDir('df-gitbin-other-') }), runRoot: r, uid: OWN_UID }),
+  },
+  {
+    name: 'a folder below another folder of the run root',
+    message: /not a direct child of the run root/,
+    build: r => {
+      const below = path.join(r, 'below');
+      mkdirSync(below);
+      return { value: makeGitBin(r, { parent: below }), runRoot: r, uid: OWN_UID };
+    },
+  },
+  {
+    name: 'a folder with another name',
+    message: /does not start with git-bin-/,
+    build: r => ({ value: makeGitBin(r, { name: 'tool-x' }), runRoot: r, uid: OWN_UID }),
+  },
+  {
+    name: 'a folder named only by the prefix',
+    message: /does not start with git-bin-/,
+    build: r => ({ value: makeGitBin(r, { name: GIT_BIN_PREFIX }), runRoot: r, uid: OWN_UID }),
+  },
+  {
+    name: 'a link to a good git folder',
+    message: /not a real directory/,
+    build: r => {
+      const link = path.join(r, `${GIT_BIN_PREFIX}link`);
+      symlinkSync(makeGitBin(r), link);
+      return { value: link, runRoot: r, uid: OWN_UID };
+    },
+  },
+  {
+    name: 'a file in place of the folder',
+    message: /not a real directory/,
+    build: r => {
+      const file = path.join(r, `${GIT_BIN_PREFIX}file`);
+      writeFileSync(file, '');
+      return { value: file, runRoot: r, uid: OWN_UID };
+    },
+  },
+  {
+    name: 'a folder that does not exist',
+    message: /cannot be inspected/,
+    build: r => ({ value: path.join(r, `${GIT_BIN_PREFIX}missing`), runRoot: r, uid: OWN_UID }),
+  },
+  {
+    name: 'a folder of another owner',
+    message: /not owned by the current user/,
+    build: r => ({ value: makeGitBin(r), runRoot: r, uid: OWN_UID + 1 }),
+  },
+  {
+    name: 'a folder when the user id is unknown',
+    message: /not owned by the current user/,
+    build: r => ({ value: makeGitBin(r), runRoot: r, uid: undefined }),
+  },
+  {
+    name: 'a folder the owner can write',
+    message: /write bits set/,
+    build: r => ({ value: makeGitBin(r, { mode: 0o755 }), runRoot: r, uid: OWN_UID }),
+  },
+  {
+    name: 'a folder the group can write',
+    message: /write bits set/,
+    build: r => ({ value: makeGitBin(r, { mode: 0o575 }), runRoot: r, uid: OWN_UID }),
+  },
+  {
+    name: 'a folder anyone can write',
+    message: /write bits set/,
+    build: r => ({ value: makeGitBin(r, { mode: 0o557 }), runRoot: r, uid: OWN_UID }),
+  },
+  {
+    name: 'a second tool beside git',
+    message: /exactly one entry named git/,
+    build: r => ({ value: makeGitBin(r, { extra: 'tool' }), runRoot: r, uid: OWN_UID }),
+  },
+  {
+    name: 'a folder with no entry',
+    message: /exactly one entry named git/,
+    build: r => ({ value: makeGitBin(r, { target: null }), runRoot: r, uid: OWN_UID }),
+  },
+  {
+    name: 'one entry that is not named git',
+    message: /exactly one entry named git/,
+    build: r => ({ value: makeGitBin(r, { target: null, extra: 'tool' }), runRoot: r, uid: OWN_UID }),
+  },
+  {
+    name: 'a git entry that is a file',
+    message: /git entry is not a link/,
+    build: r => ({ value: makeGitBin(r, { target: null, extra: 'git' }), runRoot: r, uid: OWN_UID }),
+  },
+  {
+    name: 'a link with a relative target',
+    message: /link target is not an absolute path of safe characters/,
+    build: r => ({ value: makeGitBin(r, { target: 'node' }), runRoot: r, uid: OWN_UID }),
+  },
+  {
+    name: 'a link target with unsafe characters',
+    message: /link target is not an absolute path of safe characters/,
+    build: r => ({ value: makeGitBin(r, { target: '/opt/a b/git' }), runRoot: r, uid: OWN_UID }),
+  },
+];
+
+describe('TP-23: the git folder check', () => {
+  it('accepts a read-only folder in the run root that holds one link to an absolute path', () => {
+    const runRoot = tempDir('df-gitbin-root-');
+    const bin = makeGitBin(runRoot);
+    expect(checkGitBinDir(bin, runRoot, { uid: OWN_UID })).toBe(bin);
+  });
+
+  it.each(GIT_BIN_PROBES)('refuses $name', probe => {
+    const runRoot = tempDir('df-gitbin-root-');
+    const { value, runRoot: holder, uid } = probe.build(runRoot);
+    expect(() => checkGitBinDir(value, holder, { uid })).toThrow(probe.message);
+  });
+
+  it('runs a refusal arm for each of its probes, each under its own name', () => {
+    expect(GIT_BIN_PROBES.length).toBeGreaterThan(0);
+    expect(new Set(GIT_BIN_PROBES.map(p => p.name)).size).toBe(GIT_BIN_PROBES.length);
+  });
+});
+
+describe('TP-21: PATH and the git folder', () => {
+  const bin = '/run/root/git-bin-abc';
+
+  it('leaves PATH to the caller when no git folder is given', () => {
+    const runRoot = tempDir('df-gitbin-root-');
+    expect(checkGitBinDir(undefined, runRoot)).toBeUndefined();
+    expect(checkGitBinDir(undefined, undefined)).toBeUndefined();
+  });
+
+  it('puts the git folder first and keeps the rest of PATH as it was', () => {
+    const rest = ['/usr/bin', '/bin'].join(path.delimiter);
+    expect(pathWithGitBin(rest, bin)).toBe(`${bin}${path.delimiter}${rest}`);
+  });
+
+  it('gives the folder alone for an unset or empty PATH, never an empty entry', () => {
+    expect(pathWithGitBin(undefined, bin)).toBe(bin);
+    expect(pathWithGitBin('', bin)).toBe(bin);
+    expect(pathWithGitBin(undefined, bin).split(path.delimiter)).not.toContain('');
+  });
+
+  it('gives the same PATH when the folder is already first', () => {
+    const once = pathWithGitBin('/usr/bin', bin);
+    expect(pathWithGitBin(once, bin)).toBe(once);
+    expect(pathWithGitBin(bin, bin)).toBe(bin);
+  });
+
+  it('does not take another folder with the same start for the git folder', () => {
+    const lookalike = [`${bin}x`, '/usr/bin'].join(path.delimiter);
+    expect(pathWithGitBin(lookalike, bin)).toBe(`${bin}${path.delimiter}${lookalike}`);
+  });
 });
