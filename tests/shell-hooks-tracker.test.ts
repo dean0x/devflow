@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach } from 'vitest';
-import { execFileSync, execSync, spawnSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -78,7 +78,7 @@ describe('session-start-context: tracker setup directive (Section 3)', { timeout
     // one. An empty `.git` folder is no repository: git would not answer the check of
     // the curation folders, and curation would pause. The folder is its own realpath,
     // so PROJECT_ROOT is the cwd, unchanged.
-    execSync('git init -q', { cwd: tmpDir, stdio: 'pipe' });
+    execFileSync('git', ['init', '-q'], { cwd: tmpDir, stdio: 'pipe' });
     homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-tracker-home-'));
     fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
   });
@@ -813,7 +813,7 @@ describe('session-start-context: tracker setup directive (Section 3)', { timeout
 
   /** A real commit in `repo` (identity passed inline — the test HOME has no git config). */
   function commitAll(repo: string, files: readonly string[]): void {
-    const git = (args: string[]) => spawnSync('git', ['-c', 'user.name=devflow-test', '-c', 'user.email=t@example.invalid', ...args], {
+    const git = (args: string[]) => spawnSync('git', ['-c', 'user.name=devflow-test', '-c', 'user.email=t@example.invalid', '-c', 'maintenance.auto=false', ...args], {
       cwd: repo, encoding: 'utf-8',
     });
     const add = git(['add', '-f', ...files]);
@@ -1375,7 +1375,7 @@ describe('session-start-context: tracker setup directive (Section 3)', { timeout
     let out = '';
     let code = 0;
     try {
-      out = execSync(`bash "${CONTEXT_HOOK}"`, {
+      out = execFileSync('bash', [CONTEXT_HOOK], {
         input: JSON.stringify(sessionStart(tmpDir)),
         env: Object.fromEntries(
           Object.entries(process.env).filter(([k]) => k !== 'HOME'),
