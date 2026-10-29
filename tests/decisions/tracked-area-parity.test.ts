@@ -8,7 +8,7 @@
 // scrubbed environment. Every fixture states the answer it expects, so a runner that
 // agrees with the others by being wrong shows.
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import { spawnSync } from 'child_process';
 import { createRequire } from 'module';
 import * as fs from 'fs';
@@ -326,6 +326,11 @@ describe('the shell twin makes the call the leaf describes', () => {
   let shimBin: string;
   let argvLog: string;
   let envLog: string;
+  let real: string;
+
+  beforeAll(() => {
+    real = spawnSync('bash', ['-c', 'command -v git'], { encoding: 'utf8' }).stdout.trim();
+  });
 
   beforeEach(() => {
     tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'tracked-area-call-')));
@@ -336,7 +341,6 @@ describe('the shell twin makes the call the leaf describes', () => {
     fs.mkdirSync(shimBin);
     argvLog = path.join(tmp, 'argv.log');
     envLog = path.join(tmp, 'env.log');
-    const real = spawnSync('bash', ['-c', 'command -v git'], { encoding: 'utf8' }).stdout.trim();
     writeFakeExecutable(
       path.join(shimBin, 'git'),
       `#!/bin/bash\nif [ "$1" = "--no-literal-pathspecs" ]; then\n  printf '%s\\0' "$@" > "${argvLog}"\n  { pwd -P; env; } > "${envLog}"\nfi\nexec "${real}" "$@"\n`,
