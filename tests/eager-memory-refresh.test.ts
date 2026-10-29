@@ -14,8 +14,8 @@
  * from invoking the real claude binary and hanging for 120s.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { execSync, spawnSync } from 'child_process';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach } from 'vitest';
+import { execFileSync, execSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -261,14 +261,59 @@ function expectClaimedRowsPreserved(projectDir: string, claimed: Buffer): void {
   expect(fs.readFileSync(processingFile)).toEqual(claimed);
 }
 
-/** Init scratch git repo */
+/** The committed repo that `initGitRepo` copies; built once per file by the top-level `beforeAll`. */
+let gitTemplateDir = '';
+
+/** A fresh repo holds a few dozen entries; the bound stops a walk that runs away. */
+const GIT_TEMPLATE_ENTRY_LIMIT = 2000;
+
+/** Throws when the template holds what a copy must not carry: a link, a lock file or a worktree entry. */
+function assertTemplateCopyable(root: string): void {
+  const pending = [root];
+  let seen = 0;
+  for (let dir = pending.pop(); dir !== undefined; dir = pending.pop()) {
+    for (const name of fs.readdirSync(dir)) {
+      seen += 1;
+      if (seen > GIT_TEMPLATE_ENTRY_LIMIT) {
+        throw new Error(`git template holds more than ${GIT_TEMPLATE_ENTRY_LIMIT} entries`);
+      }
+      const entry = path.join(dir, name);
+      const info = fs.lstatSync(entry);
+      if (info.isSymbolicLink()) throw new Error(`git template holds a symbolic link: ${entry}`);
+      if (name === 'index.lock') throw new Error(`git template holds a lock file: ${entry}`);
+      if (info.isDirectory()) pending.push(entry);
+    }
+  }
+  if (fs.readFileSync(path.join(root, '.git', 'config'), 'utf8').includes('worktree')) {
+    throw new Error('git template config names a worktree');
+  }
+}
+
+beforeAll(() => {
+  gitTemplateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-git-template-'));
+  const git = (...args: string[]): void => {
+    execFileSync('git', args, { cwd: gitTemplateDir });
+  };
+  git('init', '-q');
+  git('config', 'user.email', 'test@test.com');
+  git('config', 'user.name', 'Test');
+  fs.writeFileSync(path.join(gitTemplateDir, 'README.md'), '# test\n');
+  git('add', 'README.md');
+  git('-c', 'maintenance.auto=false', 'commit', '-qm', 'init');
+  assertTemplateCopyable(gitTemplateDir);
+});
+
+afterAll(() => {
+  if (gitTemplateDir !== '') fs.rmSync(gitTemplateDir, { recursive: true, force: true });
+});
+
+/** Init scratch git repo: a copy of the template's `.git` and README */
 function initGitRepo(dir: string): void {
-  execSync('git init -q', { cwd: dir });
-  execSync('git config user.email "test@test.com"', { cwd: dir });
-  execSync('git config user.name "Test"', { cwd: dir });
-  fs.writeFileSync(path.join(dir, 'README.md'), '# test\n');
-  execSync('git add README.md', { cwd: dir });
-  execSync('git commit -qm "init"', { cwd: dir });
+  fs.cpSync(path.join(gitTemplateDir, '.git'), path.join(dir, '.git'), {
+    recursive: true,
+    verbatimSymlinks: true,
+  });
+  fs.copyFileSync(path.join(gitTemplateDir, 'README.md'), path.join(dir, 'README.md'));
 }
 
 // =============================================================================
