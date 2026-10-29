@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach, afterAll } from 'vitest';
-import { execSync, spawnSync, spawn } from 'child_process';
+import { execFileSync, execSync, spawnSync, spawn } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -697,14 +697,14 @@ describe('hooks anchor .devflow/ to the project root (no stray nested .devflow/)
  * question about it, so the session start hook can tell that git tracks nothing there.
  */
 function initEmptyRepo(dir: string): void {
-  execSync('git init -q', { cwd: dir, stdio: 'pipe' });
+  execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'pipe' });
 }
 
 /** A repository with one commit, so worktrees and detached checkouts are possible. */
 function initCommittedRepo(dir: string): void {
   fs.mkdirSync(dir, { recursive: true });
-  execSync('git init -q', { cwd: dir, stdio: 'pipe' });
-  execSync('git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init', { cwd: dir, stdio: 'pipe' });
+  execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'pipe' });
+  execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'maintenance.auto=false', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: dir, stdio: 'pipe' });
 }
 
 /**
