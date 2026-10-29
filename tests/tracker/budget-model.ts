@@ -101,8 +101,10 @@ export const githubApiMd = measureRequired(
 );
 /**
  * The second written exclusion, measured at its source path for the same reason.
- * It holds the posting recipes that left `github-api.md` verbatim, so the bytes
- * `resolve-review-threads` loads did not change when they moved.
+ * It holds the posting recipes that left `github-api.md`. The split added bytes:
+ * `github-api.md` was 21,211 characters at the base, and now it is 17,518 plus 4,176 in
+ * this file, 21,694 together (+483). `resolve-review-threads` loads both files, and the
+ * gate excludes both.
  */
 export const githubPostingMd = measureRequired(
   'references/github-posting.md  (excluded from the gate — pinned, not budgeted)',

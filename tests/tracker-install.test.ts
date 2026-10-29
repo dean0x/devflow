@@ -45,7 +45,7 @@ let warnings: string[];
 const warn = (msg: string): void => { warnings.push(msg); };
 /** A converge that met no link: both lists are empty. */
 const NO_LINKS = { replacedLinks: [], refusedFolders: [] };
-const agentFile =(): string => path.join(claudeDir, 'agents', 'devflow', 'tracker.md');
+const agentFile = (): string => path.join(claudeDir, 'agents', 'devflow', 'tracker.md');
 const refsTarget = (): string => path.join(claudeDir, 'skills', 'devflow:git', 'references');
 
 async function exists(p: string): Promise<boolean> {

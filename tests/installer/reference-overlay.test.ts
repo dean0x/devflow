@@ -38,7 +38,7 @@ import {
 } from '../../src/targets/claude-code/installer.js';
 import { formatOverlaySummary } from '../../src/cli/commands/install-report.js';
 import { sweepOrphanedReferences, MAX_REFERENCE_SWEEP_DEPTH } from '../../src/core/reference-sweep.js';
-import { compiledComplianceOffSkillRefsDir, compiledSkillRefsDir } from '../../src/core/assets.js';
+import { compiledComplianceOffSkillRefsDir, compiledSkillRefsDir, skillsDir } from '../../src/core/assets.js';
 import { renderVariantManifest } from '../../src/core/curation-variants.js';
 import { DEVFLOW_PLUGINS } from '../../src/core/plugins.js';
 import {
@@ -1975,7 +1975,7 @@ describe('compliance-off reference install (AC-41, AC-50)', () => {
     const gate = await fs.readFile(abs(installedRefs(), 'publication-gate.md'));
     expect(gate.equals(await fs.readFile(abs(REAL_REFS, 'publication-gate.md')))).toBe(true);
     const asks = await fs.readFile(flatFile(ASKS));
-    expect(asks.equals(await fs.readFile(path.join(compiledSkillRefsDir(), '..', '..', '..', '..', 'src', 'assets', 'skills', 'agent-references', 'references', 'commands', 'implement-evidence-asks.md')))).toBe(true);
+    expect(asks.equals(await fs.readFile(path.join(skillsDir(), 'agent-references', 'references', 'commands', 'implement-evidence-asks.md')))).toBe(true);
   });
 
   it('the posting recipes file installs with compliance on, is gone with compliance off and returns byte for byte (TP-60)', async () => {
@@ -2027,8 +2027,7 @@ describe('compliance-off reference install (AC-41, AC-50)', () => {
 
     const report = await install({ compliance: false, partial: true });
 
-    expect(await exists(gate), 'the link is gone').toBe(false);
-    expect(await fs.lstat(gate).then(() => true, () => false)).toBe(false);
+    expect(await fs.lstat(gate).then(() => true, () => false), 'the link is gone').toBe(false);
     expect(await fs.readFile(outside, 'utf-8'), 'the target is never followed').toBe('foreign bytes\n');
     expect(report.sweepFailures).toEqual([]);
   });
