@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Plan and code review list follow-up work, and file fewer tickets by default** ([#690](https://github.com/dean0x/devflow/issues/690)).
-  - At the `standard` and `lean` levels, `/plan` lists a sibling finding on the plan's deferred list, with no proposed ticket title, and files no ticket for it. You file one only if you want it. The `full` level does not change. A security gap that the change introduces or exposes stays in scope and blocking.
+  - At the `standard` and `lean` levels, `/plan` lists a sibling finding on the plan's deferred list, with no proposed ticket title, and files no ticket for it. You file one only if you want it. The `full` level does not change. The rest of the scope rule does not change.
   - The review-methodology skill lists pre-existing problems and does not suggest separate issues for them. Its report template recommends an issue only for data loss, a false pass or a broken install.
   - The plan levels reference is 47 bytes smaller (4,056 to 4,009), and its ceiling falls with it. The review-methodology skill is 24 bytes smaller, and its report template is 26 bytes larger.
 
