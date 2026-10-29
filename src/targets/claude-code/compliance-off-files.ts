@@ -5,8 +5,10 @@
  * The list is {@link COMPLIANCE_OFF_REMOVED_SKILL_FILES}: one constant, read by the install
  * and by the compliance converge. This module does the file work and holds no policy:
  *
- *   - {@link removeComplianceOffFiles} runs with compliance off, AFTER the skill copy that
- *     would otherwise re-create a file;
+ *   - {@link complianceOffCopyExclusions} runs with compliance off, BEFORE the skill copy, and
+ *     names the files the copy leaves out, so a posting file never lands on the machine;
+ *   - {@link removeComplianceOffFiles} runs with compliance off, AFTER the skill copy, and
+ *     removes the files that an earlier install left in a skill the copy only overwrites;
  *   - {@link restoreComplianceOffFiles} runs with compliance on and writes back the files
  *     that a skill copy puts in place, from the same source the install would copy.
  *
@@ -85,6 +87,35 @@ async function inspectAncestors(skillsDir: string, segments: readonly string[]):
     if (!stat.isDirectory()) return { kind: 'refused', reason: `${current} is not a directory` };
   }
   return { kind: 'ok' };
+}
+
+/**
+ * The files of the list that belong to one skill, as absolute paths below the directory the
+ * skill copy reads (the valid shadow, else the shipped source). The install passes the result
+ * as the `exclude` set of `copyDirectory`, so with compliance off a posting file is never
+ * written to the machine and no later step has to remove it.
+ *
+ * A path the source does not hold (the generated gate is built, not shipped) excludes nothing.
+ * An entry that is not a plain relative path is left out here, and {@link removeComplianceOffFiles}
+ * reports it.
+ *
+ * @param skillName - The registry name of the skill, without the `devflow:` prefix.
+ * @param sourceDir - The directory the skill is copied from.
+ * @param entries - Defaults to {@link COMPLIANCE_OFF_REMOVED_SKILL_FILES}.
+ */
+export function complianceOffCopyExclusions(
+  skillName: string,
+  sourceDir: string,
+  entries: readonly string[] = COMPLIANCE_OFF_REMOVED_SKILL_FILES,
+): ReadonlySet<string> {
+  const excluded = new Set<string>();
+  for (const entry of entries) {
+    const parsed = entrySegments(entry);
+    if (!parsed.ok) continue;
+    const [skill, ...below] = parsed.segments;
+    if (unprefixSkillName(skill) === skillName) excluded.add(path.join(sourceDir, ...below));
+  }
+  return excluded;
 }
 
 /**

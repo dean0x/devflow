@@ -16,7 +16,8 @@ import * as path from 'path';
 import { formatRefusedFoldersSummary, formatReplacedLinksSummary } from '../../src/cli/commands/install-report.js';
 import { sweepLegacyDevflowFiles } from '../../src/cli/commands/legacy-sweep.js';
 import { installViaFileCopy, type InstallReport, type Spinner } from '../../src/targets/claude-code/installer.js';
-import { clearLinkedEntry } from '../../src/targets/claude-code/linked-folder.js';
+import { clearLinkedEntry, mergeLinkReports } from '../../src/targets/claude-code/linked-folder.js';
+import { convergeTrackerArtifacts } from '../../src/targets/claude-code/tracker-install.js';
 import { compiledSkillRefsDir } from '../../src/core/assets.js';
 import { generatedReferenceManifest } from '../../src/core/mds-variants.js';
 import { buildAssetMaps, DEVFLOW_PLUGINS } from '../../src/core/plugins.js';
@@ -277,6 +278,110 @@ describe('a link nested under the kept references/tracker and references/pr subt
     expect(await snapshot(outside), 'no byte, mode, file or folder at the target changed').toEqual(before);
     expect(report.overlayFailures).toEqual([]);
     expect((await fs.lstat(entry)).isSymbolicLink(), 'a real entry stands in the place of the link').toBe(false);
+  });
+});
+
+// The full install's pre-clean removes a link at a path that a later step writes: the overlay writes
+// `references/pr`, and the tracker converge that init runs after the install writes the tracker agent.
+// The summary says a real file or folder stands where the link stood, so a link is reported only once
+// that later write has put one there.
+describe('a link at a path that a later step writes is reported only once a real entry stands there', () => {
+  const trackerAgent = (): string => path.join(claudeDir, 'agents', 'devflow', 'tracker.md');
+  const prDir = (): string => path.join(installedRefs(), 'pr');
+
+  /** Replace what a first install wrote at `entry` by a link to a place that holds a 0600 file of the user's. */
+  async function linkToUserPlace(entry: string, kind: 'file' | 'dir'): Promise<string> {
+    const outside = path.join(tmp, 'outside-later');
+    if (kind === 'file') {
+      await fs.writeFile(outside, USER_BYTES, 'utf-8');
+      await fs.chmod(outside, 0o600);
+      await fs.rm(entry, { force: true });
+    } else {
+      await fs.rename(entry, outside);
+      await fs.writeFile(path.join(outside, 'mine.md'), USER_BYTES, 'utf-8');
+      await fs.chmod(path.join(outside, 'mine.md'), 0o600);
+    }
+    await fs.symlink(outside, entry, kind);
+    return outside;
+  }
+
+  /** Refuse every rename onto `entry`, as a write that fails after the install would. */
+  async function withRefusedRename<T>(entry: string, run: () => Promise<T>): Promise<T> {
+    const realRename = fs.rename.bind(fs);
+    const rename = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      if (String(to) === entry) throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' });
+      return realRename(from, to);
+    });
+    try {
+      return await run();
+    } finally {
+      rename.mockRestore();
+    }
+  }
+
+  it('the tracker agent link: the install leaves it for the converge, which replaces it and reports it', async () => {
+    await install(false);
+    const outside = await linkToUserPlace(trackerAgent(), 'file');
+    const before = await snapshot(outside);
+
+    const installed = await install(false);
+
+    expect(installed.replacedLinks, 'the install wrote no real file there, so it reports no replacement').toEqual([]);
+    expect(await snapshot(outside)).toEqual(before);
+
+    const converged = await convergeTrackerArtifacts({ claudeDir, warn });
+
+    expect(converged.converged, warnings.join('\n')).toBe(true);
+    expect(await snapshot(outside), 'no byte or mode at the target changed').toEqual(before);
+    const stat = await fs.lstat(trackerAgent());
+    expect(stat.isSymbolicLink(), 'the link is gone').toBe(false);
+    expect(stat.isFile(), 'a real file stands in its place').toBe(true);
+    const lines = formatReplacedLinksSummary(mergeLinkReports(installed, converged));
+    expect(lines).toHaveLength(1);
+    expect(lines[0].message).toContain(trackerAgent());
+  });
+
+  it('the tracker agent link, with a converge that cannot write: nothing is reported as replaced, and the link is as it was', async () => {
+    await install(false);
+    const outside = await linkToUserPlace(trackerAgent(), 'file');
+    const before = await snapshot(outside);
+
+    const installed = await install(false);
+    const converged = await withRefusedRename(trackerAgent(), () => convergeTrackerArtifacts({ claudeDir, warn }));
+
+    expect(converged.converged, 'precondition: the converge could not write').toBe(false);
+    expect(await snapshot(outside)).toEqual(before);
+    expect((await fs.lstat(trackerAgent())).isSymbolicLink(), 'no real file stands there').toBe(true);
+    expect(formatReplacedLinksSummary(mergeLinkReports(installed, converged)), 'no line says a real file stands there').toEqual([]);
+  });
+
+  it('the pr folder link: the overlay writes a real folder, and the install reports the replacement', async () => {
+    await install(false);
+    const outside = await linkToUserPlace(prDir(), 'dir');
+    const before = await snapshot(outside);
+
+    const report = await install(false);
+
+    expect(await snapshot(outside), 'no byte, mode, file or folder at the target changed').toEqual(before);
+    const stat = await fs.lstat(prDir());
+    expect(stat.isSymbolicLink(), 'the link is gone').toBe(false);
+    expect(stat.isDirectory(), 'a real folder stands in its place').toBe(true);
+    expect(report.overlayFailures).toEqual([]);
+    expect(report.replacedLinks).toEqual([prDir()]);
+  });
+
+  it('the pr folder link, with an overlay that cannot write it: nothing is reported as replaced, and the failure is', async () => {
+    await install(false);
+    const outside = await linkToUserPlace(prDir(), 'dir');
+    const before = await snapshot(outside);
+
+    const report = await withRefusedRename(prDir(), () => install(false));
+
+    expect(report.overlayFailures.map(failure => failure.unit.kind), 'the failed unit is reported').toContain('pr-host');
+    expect(await snapshot(outside)).toEqual(before);
+    expect(await exists(prDir()), 'no real folder stands there').toBe(false);
+    expect(report.replacedLinks, 'no replacement is claimed for a path with nothing written').toEqual([]);
+    expect(formatReplacedLinksSummary(report)).toEqual([]);
   });
 });
 

@@ -15,7 +15,7 @@ import {
 import { sweepOrphanedAssets, mdFileName, mdEntryName, type SweepResult } from '../../core/orphan-sweep.js';
 import { generatedReferenceManifest, installedReferenceManifest, PR_HOST_DESTINATION_ROOT, SKILL_REFS_SKILL_NAME, TRACKER_DESTINATION_ROOT } from '../../core/mds-variants.js';
 import { sweepOrphanedReferences, MAX_REFERENCE_SWEEP_DEPTH } from '../../core/reference-sweep.js';
-import { removeComplianceOffFiles } from './compliance-off-files.js';
+import { complianceOffCopyExclusions, removeComplianceOffFiles } from './compliance-off-files.js';
 import { clearLinkForWrite, directoryState, refuseUnrealFolder, removeReportingLink, unlinkLinkAt, type LinkReport } from './linked-folder.js';
 import { TRACKER_AGENT_NAME } from './tracker-install.js';
 import { isTrackerStampedAgent } from './tracker-servers.js';
@@ -1655,15 +1655,25 @@ export function overlayOwnedSkillPaths(manifest: readonly string[]): ReadonlySet
  * returned, so the caller reports it; any other link is removed like the file it stands for.
  * A link at `dir` that cannot be removed is left in place and nothing is emptied.
  *
- * @returns The paths of the links this replaced.
+ * A link at a kept path or above one is returned as `awaitingWrite`, not as replaced: the
+ * converger that owns the path has not written there yet, and a summary that says a real file or
+ * folder stands where the link stood is true only after it has ({@link reportLinksOnceWritten}).
+ * `leaveKeptLinks` is for a kept path whose converger replaces a link itself and reports it, never
+ * writing through it (the tracker agent file): the link then stays for that converger.
+ *
+ * @returns The links at `dir` that this replaced, and the links it removed that a later write replaces.
  */
-async function emptyDirectoryExcept(dir: string, keep: ReadonlySet<string>): Promise<string[]> {
+async function emptyDirectoryExcept(
+  dir: string,
+  keep: ReadonlySet<string>,
+  options: { readonly leaveKeptLinks?: boolean } = {},
+): Promise<{ replacedLinks: string[]; awaitingWrite: string[] }> {
   const rootLink = await unlinkLinkAt(dir);
-  if (rootLink !== 'no-link') return rootLink === 'unlinked' ? [dir] : [];
+  if (rootLink !== 'no-link') return { replacedLinks: rootLink === 'unlinked' ? [dir] : [], awaitingWrite: [] };
 
   const kept = [...keep];
   const maxDepth = Math.max(0, ...kept.map(relPath => relPath.split('/').length));
-  const replacedLinks: string[] = [];
+  const awaitingWrite: string[] = [];
 
   const walk = async (current: string, rel: string, depth: number): Promise<void> => {
     let entries: Dirent[];
@@ -1673,7 +1683,7 @@ async function emptyDirectoryExcept(dir: string, keep: ReadonlySet<string>): Pro
 
     for (const entry of entries) {
       const entryRel = rel === '' ? entry.name : `${rel}/${entry.name}`;
-      if (keep.has(entryRel) && !entry.isSymbolicLink()) continue;
+      if (keep.has(entryRel) && (!entry.isSymbolicLink() || options.leaveKeptLinks === true)) continue;
 
       const entryPath = path.join(current, entry.name);
       const holdsSomethingKept = kept.some(relPath => relPath.startsWith(`${entryRel}/`));
@@ -1683,12 +1693,25 @@ async function emptyDirectoryExcept(dir: string, keep: ReadonlySet<string>): Pro
       }
 
       await fs.rm(entryPath, { recursive: true, force: true });
-      if (entry.isSymbolicLink() && (holdsSomethingKept || keep.has(entryRel))) replacedLinks.push(entryPath);
+      if (entry.isSymbolicLink() && (holdsSomethingKept || keep.has(entryRel))) awaitingWrite.push(entryPath);
     }
   };
 
   await walk(dir, '', 1);
-  return replacedLinks;
+  return { replacedLinks: [], awaitingWrite };
+}
+
+/**
+ * Add each link in `removed` to `report.replacedLinks` once a real file or folder stands at its
+ * path. A path that is still absent, or a link again, is not a replacement and is not reported: the
+ * step that should have written there failed or was refused, and it reports that failure itself.
+ * Bounded by `removed`, which holds at most the kept paths of one pre-clean.
+ */
+async function reportLinksOnceWritten(report: Pick<LinkReport, 'replacedLinks'>, removed: readonly string[]): Promise<void> {
+  for (const linkPath of removed) {
+    const stat = await fs.lstat(linkPath).catch(() => undefined);
+    if (stat !== undefined && !stat.isSymbolicLink()) report.replacedLinks.push(linkPath);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1885,8 +1908,8 @@ export interface FileCopyOptions {
    * It also picks the references. false overlays the `devflow:git` references from the one
    * compliance-off source root onto the compliance-off manifest, REFUSES the install, before
    * any file is written, when that root is absent (it never falls through to the
-   * compliance-on references), and removes the files of COMPLIANCE_OFF_REMOVED_SKILL_FILES
-   * after the skill copy.
+   * compliance-on references), keeps the files of COMPLIANCE_OFF_REMOVED_SKILL_FILES out of the
+   * skill copy, and removes the ones an earlier install left after it.
    */
   compliance: boolean;
   /**
@@ -2442,6 +2465,10 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   });
   report.dormantShadows = [...skillPlan.dormantShadows];
 
+  // Links the pre-clean removed at a path that a later step of this install writes. Each is reported
+  // as replaced only once a real file or folder stands there (reportLinksOnceWritten).
+  const awaitingWrite: string[] = [];
+
   // Clean old Devflow files before installing
   spinner.message('Cleaning old files...');
   if (!isPartialInstall) {
@@ -2467,11 +2494,17 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     // exactly as the unconditional wipe removed it, and the file is still
     // converged on this run — drift in it is restored, so preserving it strands
     // nothing.
+    //
+    // A link at that file is left standing: the converge replaces it with a real file and reports it
+    // once it has written, so the install does not claim a replacement the converge may not make.
     try {
-      report.replacedLinks.push(...await emptyDirectoryExcept(
+      const emptied = await emptyDirectoryExcept(
         path.join(claudeDir, 'agents', 'devflow'),
         new Set([mdFileName(TRACKER_AGENT_NAME)]),
-      ));
+        { leaveKeptLinks: true },
+      );
+      report.replacedLinks.push(...emptied.replacedLinks);
+      awaitingWrite.push(...emptied.awaitingWrite);
     } catch { /* ignore */ }
   }
 
@@ -2552,9 +2585,13 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
       // phase), minus whatever another converger owns inside it.
       const target = path.join(claudeDir, 'skills', prefixSkillName(skill));
       try {
-        report.replacedLinks.push(...(skill === SKILL_REFS_SKILL_NAME
-          ? await emptyDirectoryExcept(target, overlayOwned)
-          : await removeReportingLink(target)));
+        if (skill === SKILL_REFS_SKILL_NAME) {
+          const emptied = await emptyDirectoryExcept(target, overlayOwned);
+          report.replacedLinks.push(...emptied.replacedLinks);
+          awaitingWrite.push(...emptied.awaitingWrite);
+        } else {
+          report.replacedLinks.push(...await removeReportingLink(target));
+        }
       } catch { /* ignore */ }
     }
   }
@@ -2669,8 +2706,17 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
       continue;
     }
 
+    // With compliance off the copy leaves out the posting files of COMPLIANCE_OFF_REMOVED_SKILL_FILES.
+    // They are named below the source the copy reads, shadow or shipped, so the posting text is never
+    // on the machine, even when the install stops or a removal is refused later. With compliance on
+    // nothing is excluded.
     const resolved = await resolveSkillSource(skillName, devflowDir);
-    await copyDirectory(resolved.dir, skillTarget, undefined, report);
+    await copyDirectory(
+      resolved.dir,
+      skillTarget,
+      compliance ? undefined : complianceOffCopyExclusions(skillName, resolved.dir),
+      report,
+    );
     if (resolved.shadow === 'valid') {
       report.shadowedSkills.push(skillName);
     } else if (resolved.shadow === 'missing-skill-md') {
@@ -2698,10 +2744,14 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     }
   }
 
+  // The skill copy and the overlay have written. A link the pre-clean removed at a path they write is
+  // reported now if a real file or folder stands there, and not at all if a unit failed or was refused.
+  await reportLinksOnceWritten(report, awaitingWrite);
+
   // With compliance off, the flat skill files that only the posting steps load are removed by
-  // exact name (COMPLIANCE_OFF_REMOVED_SKILL_FILES). After the copy above, which re-creates
-  // two of them, and on every install shape: a partial install copies the skill over a tree that
-  // an earlier compliance-on install filled. A removal that was refused is a reported failure and
+  // exact name (COMPLIANCE_OFF_REMOVED_SKILL_FILES), on every install shape. The copy above wrote
+  // none of them; this step removes the ones an earlier compliance-on install left, which a partial
+  // install copies over without clearing. A removal that was refused is a reported failure and
   // never an abort; the compliance converge that init runs next fails closed on the same files.
   if (!compliance) {
     const removal = await removeComplianceOffFiles(path.join(claudeDir, 'skills'));

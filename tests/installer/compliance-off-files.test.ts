@@ -21,7 +21,7 @@ import * as path from 'path';
 import { COMPLIANCE_OFF_REMOVED_SKILL_FILES } from '../../src/core/compliance-off-files.js';
 import { COMPLIANCE_OFF_OMITTED_DOCS, SKILL_REFS_SKILL_NAME } from '../../src/core/mds-variants.js';
 import { prefixSkillName } from '../../src/core/plugins.js';
-import { removeComplianceOffFiles, restoreComplianceOffFiles } from '../../src/targets/claude-code/compliance-off-files.js';
+import { complianceOffCopyExclusions, removeComplianceOffFiles, restoreComplianceOffFiles } from '../../src/targets/claude-code/compliance-off-files.js';
 import { assertTempHome } from '../setup/home-isolation.js';
 
 const GATE = 'devflow:git/references/publication-gate.md';
@@ -78,6 +78,34 @@ describe('COMPLIANCE_OFF_REMOVED_SKILL_FILES', () => {
       expect(entry.startsWith('devflow:'), entry).toBe(true);
       expect(entry.split('/').every(segment => segment !== '' && segment !== '.' && segment !== '..'), entry).toBe(true);
     }
+  });
+});
+
+describe('complianceOffCopyExclusions', () => {
+  it('names the files of a skill below the directory its copy reads, whether shipped or shadowed', () => {
+    expect([...complianceOffCopyExclusions('git', '/source/git')].sort()).toEqual([
+      path.join('/source/git', 'references', 'github-posting.md'),
+      path.join('/source/git', 'references', 'publication-gate.md'),
+    ]);
+    expect([...complianceOffCopyExclusions('agent-references', '/shadow/agent-references')]).toEqual([
+      path.join('/shadow/agent-references', 'references', 'commands', 'implement-evidence-asks.md'),
+    ]);
+  });
+
+  it('names nothing for a skill the list does not mention', () => {
+    expect([...complianceOffCopyExclusions('typescript', '/source/typescript')]).toEqual([]);
+  });
+
+  it('leaves out an entry that is not a plain relative path: the removal reports it', () => {
+    const entries = ['devflow:git/../outside.md', 'devflow:git//empty.md', 'devflow:git'];
+
+    expect([...complianceOffCopyExclusions('git', '/source/git', entries)]).toEqual([]);
+  });
+
+  it('follows an injected list, so a known-bad list is provable', () => {
+    expect([...complianceOffCopyExclusions('git', '/source/git', [POSTING])]).toEqual([
+      path.join('/source/git', 'references', 'github-posting.md'),
+    ]);
   });
 });
 

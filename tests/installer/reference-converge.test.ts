@@ -304,6 +304,66 @@ describe('the references converge fails closed on the off side', () => {
   });
 });
 
+describe('a compliance-off install keeps the posting files out of the skill copy', () => {
+  const POSTING = 'devflow:git/references/github-posting.md';
+  const POSTING_FILES = [POSTING, ASKS];
+
+  /**
+   * A compliance-off full install in which every unlink of a posting file is refused, so the removal
+   * that follows the copy cannot clean up, and in which every copied file is recorded: a posting file
+   * that the copy wrote is still on disk afterwards.
+   */
+  async function installOffWithRefusedRemoval() {
+    const copiedTo: string[] = [];
+    const stuck = new Set(POSTING_FILES.map(entry => flatFile(entry)));
+    const realCopy = fs.copyFile.bind(fs);
+    const realUnlink = fs.unlink.bind(fs);
+    const copy = vi.spyOn(fs, 'copyFile').mockImplementation(async (from, to, mode) => {
+      copiedTo.push(String(to));
+      return realCopy(from, to, mode);
+    });
+    const unlink = vi.spyOn(fs, 'unlink').mockImplementation(async (target) => {
+      if (stuck.has(String(target))) throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' });
+      return realUnlink(target);
+    });
+    try {
+      return { report: await installInto(claudeDir, devflowDir, false), copiedTo };
+    } finally {
+      copy.mockRestore();
+      unlink.mockRestore();
+    }
+  }
+
+  it.each([
+    ['the shipped skill', false],
+    ['a valid shadow of the git skill', true],
+  ] as const)('%s: no posting file is copied, so a refused removal has nothing to leave behind', async (_name, shadowed) => {
+    if (shadowed) {
+      const shadow = path.join(devflowDir, 'skills', 'git');
+      await fs.mkdir(path.join(shadow, 'references'), { recursive: true });
+      await fs.writeFile(path.join(shadow, 'SKILL.md'), 'a shadow of the git skill\n', 'utf-8');
+      await fs.writeFile(path.join(shadow, 'references', 'github-posting.md'), 'posting text the shadow supplies\n', 'utf-8');
+      await fs.writeFile(path.join(shadow, 'references', 'my-notes.md'), 'a note the shadow supplies\n', 'utf-8');
+    }
+
+    const { report, copiedTo } = await installOffWithRefusedRemoval();
+
+    expect(report.shadowedSkills.includes('git'), 'precondition: the shadow is the skill that was copied').toBe(shadowed);
+    for (const entry of POSTING_FILES) {
+      expect(copiedTo, `${entry} is never copied`).not.toContain(flatFile(entry));
+      expect(await exists(flatFile(entry)), `${entry} is not on the machine`).toBe(false);
+    }
+    expect(report.sweepFailures, 'there was nothing for the removal to fail on').toEqual([]);
+    if (shadowed) expect(await exists(path.join(installedRefs(), 'my-notes.md')), 'the rest of the shadow is copied').toBe(true);
+  });
+
+  it('compliance on copies both files, as before', async () => {
+    await installInto(claudeDir, devflowDir, true);
+
+    for (const entry of POSTING_FILES) expect(await exists(flatFile(entry)), `${entry} is installed`).toBe(true);
+  });
+});
+
 const GENERATED = 'trust-rule.md';
 const HAND_AUTHORED = 'detection.md';
 const STRAY = path.join('pr', 'not-in-the-manifest.md');
@@ -567,6 +627,40 @@ describe('a full install replaces a linked folder and leaves the linked folder a
     const after = await fs.lstat(agents).catch(() => null);
     expect(after?.isSymbolicLink() ?? false, 'the link is gone').toBe(false);
     expect(report.replacedLinks).toEqual([agents]);
+  });
+
+  // The commands and rules folders are the two a full install replaces before it writes anything, from
+  // the pre-clean that opens the install; a partial install refuses them instead.
+  const FULL_INSTALL_FOLDERS = FOLDER_CASES.filter(folderCase => folderCase.unit === 'commands' || folderCase.unit === 'rules');
+
+  it.each(FULL_INSTALL_FOLDERS)('$name that is a link: it is replaced by a real folder with every file, reported, and the linked folder keeps every byte', async (linked) => {
+    await installEveryFolder(false);
+    const folder = linked.folder();
+    const installed = await fileMap(folder);
+    const outside = path.join(tmp, 'outside-folder');
+    await fs.rename(folder, outside);
+    await fs.symlink(outside, folder, 'dir');
+    await fs.writeFile(path.join(outside, linked.marker), 'a file only the user keeps\n', 'utf-8');
+    await fs.chmod(path.join(outside, linked.marker), 0o600);
+    await fs.writeFile(path.join(outside, linked.stray), 'a stray file only the user keeps\n', 'utf-8');
+    const before = await treeSnapshot(outside);
+    expect(before[linked.marker], 'precondition: the marker is the 0600 file the user keeps').toMatch(/^file:600:/);
+
+    const report = await installEveryFolder(false);
+
+    expect(await treeSnapshot(outside), 'no byte, mode, file or folder below the link changed').toEqual(before);
+    const stat = await fs.lstat(folder);
+    expect(stat.isSymbolicLink(), 'the link is gone').toBe(false);
+    expect(stat.isDirectory(), 'a real folder stands in its place').toBe(true);
+    expect(await fileMap(folder), 'the folder holds what a first install wrote').toEqual(installed);
+    expect(report.replacedLinks, 'the replaced link is reported').toEqual([folder]);
+    expect(report.refusedFolders).toEqual([]);
+
+    const lines = formatReplacedLinksSummary(report);
+    expect(lines).toHaveLength(1);
+    expect(lines[0].level).toBe('warn');
+    expect(lines[0].message).toContain(folder);
+    expect(lines[0].message).toContain('left as it was');
   });
 
   it('over real folders a full install reports no replaced link', async () => {
