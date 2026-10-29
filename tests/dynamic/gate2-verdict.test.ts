@@ -106,7 +106,8 @@ export function extractVerdictBlock(script: string): string | null {
   return lines.slice(starts[0], ends[0] + 1).join('\n')
 }
 
-type Gate2Verdict = 'PASS' | 'FAIL-FIXED' | 'SKIPPED'
+/** Every Gate 2 value the verdict block may read: the values the skeleton records, a stray `UNVERIFIED` or lowercase `pass`, and a missing one. */
+type Gate2Verdict = 'PASS' | 'FAIL-FIXED' | 'SKIPPED' | 'BLOCKED' | 'UNVERIFIED' | 'pass' | undefined
 type OverallVerdict = 'PASS' | 'UNVERIFIED' | 'PARTIAL'
 
 interface VerdictCase {
@@ -130,8 +131,14 @@ const VERDICT_TABLE: readonly VerdictCase[] = [
   { label: 'Test FAIL-FIXED', evaluateVerdict: 'PASS', testVerdict: 'FAIL-FIXED', ...clean, expected: 'UNVERIFIED' },
   { label: 'both FAIL-FIXED', evaluateVerdict: 'FAIL-FIXED', testVerdict: 'FAIL-FIXED', ...clean, expected: 'UNVERIFIED' },
   { label: 'Evaluate skipped, Test FAIL-FIXED', evaluateVerdict: 'SKIPPED', testVerdict: 'FAIL-FIXED', ...clean, expected: 'UNVERIFIED' },
+  { label: 'Test BLOCKED', evaluateVerdict: 'PASS', testVerdict: 'BLOCKED', ...clean, expected: 'UNVERIFIED' },
+  { label: 'Test missing', evaluateVerdict: 'PASS', testVerdict: undefined, ...clean, expected: 'UNVERIFIED' },
+  { label: 'Test lowercase pass', evaluateVerdict: 'PASS', testVerdict: 'pass', ...clean, expected: 'UNVERIFIED' },
+  { label: 'Test UNVERIFIED', evaluateVerdict: 'PASS', testVerdict: 'UNVERIFIED', ...clean, expected: 'UNVERIFIED' },
+  { label: 'Evaluate skipped, Test BLOCKED', evaluateVerdict: 'SKIPPED', testVerdict: 'BLOCKED', ...clean, expected: 'UNVERIFIED' },
   { label: 'a surviving finding', evaluateVerdict: 'PASS', testVerdict: 'PASS', ...clean, surviving: 1, expected: 'PARTIAL' },
   { label: 'a surviving finding outranks FAIL-FIXED', evaluateVerdict: 'FAIL-FIXED', testVerdict: 'PASS', ...clean, surviving: 1, expected: 'PARTIAL' },
+  { label: 'a surviving finding outranks BLOCKED', evaluateVerdict: 'PASS', testVerdict: 'BLOCKED', ...clean, surviving: 1, expected: 'PARTIAL' },
   { label: 'a review coverage gap', evaluateVerdict: 'PASS', testVerdict: 'PASS', ...clean, coverageGaps: ['security'], expected: 'PARTIAL' },
   { label: 'final Gate 1 escalated', evaluateVerdict: 'PASS', testVerdict: 'PASS', ...clean, gate1Final: 'ESCALATED', expected: 'PARTIAL' },
   { label: 'final Gate 1 escalated outranks FAIL-FIXED', evaluateVerdict: 'PASS', testVerdict: 'FAIL-FIXED', ...clean, gate1Final: 'ESCALATED', expected: 'PARTIAL' },
@@ -175,7 +182,13 @@ const D09DA34_VERDICT_BLOCK = [
   'const overallVerdict = (reviewResult.survivingFindings?.length || 0) === 0 && coverageGaps.length === 0 && gate1Final.verdict !== "ESCALATED" ? "PASS" : "PARTIAL";',
 ].join('\n')
 
-describe('overallVerdict — a FAIL-FIXED Gate 2 verdict reports UNVERIFIED, never PASS', () => {
+/** The 3710434b Gate 2 line, verbatim: only a FAIL-FIXED verdict made the run UNVERIFIED. */
+const OLD_GATE2_UNVERIFIED = 'const gate2Unverified = [gate2.evaluateVerdict, gate2.testVerdict].includes("FAIL-FIXED");'
+
+/** The shipped Gate 2 line: any verdict other than PASS or SKIPPED, a missing one included, makes the run UNVERIFIED. */
+const GATE2_UNVERIFIED = 'const gate2Unverified = ![gate2.evaluateVerdict, gate2.testVerdict].every(v => v === "PASS" || v === "SKIPPED");'
+
+describe('overallVerdict — a Gate 2 verdict other than PASS or SKIPPED reports UNVERIFIED, never PASS', () => {
   const block = SCRIPT === null ? null : extractVerdictBlock(SCRIPT)
 
   it('the verdict block is found and still carries the C2 PASS condition', () => {
@@ -186,7 +199,7 @@ describe('overallVerdict — a FAIL-FIXED Gate 2 verdict reports UNVERIFIED, nev
 
   it('the table covers every verdict the run can report', () => {
     expect(new Set(VERDICT_TABLE.map(c => c.expected))).toEqual(new Set(['PASS', 'UNVERIFIED', 'PARTIAL']))
-    expect(VERDICT_TABLE.filter(c => c.expected === 'UNVERIFIED').length).toBeGreaterThanOrEqual(4)
+    expect(VERDICT_TABLE.filter(c => c.expected === 'UNVERIFIED')).toHaveLength(9)
   })
 
   it('the shipped block computes every row of the table', () => {
@@ -198,6 +211,19 @@ describe('overallVerdict — a FAIL-FIXED Gate 2 verdict reports UNVERIFIED, nev
     expect(collectVerdictTableViolations(D09DA34_VERDICT_BLOCK, VERDICT_TABLE)).toEqual(
       unverifiedRows.map(c => `${c.label}: expected UNVERIFIED, got PASS`),
     )
+  })
+
+  it('known-bad probe: the 3710434b gate2Unverified line reports PASS for the five rows that carry no FAIL-FIXED, and only those', () => {
+    const unverifiedRows = VERDICT_TABLE.filter(c => c.expected === 'UNVERIFIED' && ![c.evaluateVerdict, c.testVerdict].includes('FAIL-FIXED'))
+    expect(unverifiedRows.map(c => c.label)).toEqual([
+      'Test BLOCKED',
+      'Test missing',
+      'Test lowercase pass',
+      'Test UNVERIFIED',
+      'Evaluate skipped, Test BLOCKED',
+    ])
+    const old = seedOnce(block!, GATE2_UNVERIFIED, OLD_GATE2_UNVERIFIED)
+    expect(collectVerdictTableViolations(old, VERDICT_TABLE)).toEqual(unverifiedRows.map(c => `${c.label}: expected UNVERIFIED, got PASS`))
   })
 
   it('known-bad probe: a block the collector cannot find is reported, not passed', () => {
@@ -290,6 +316,8 @@ const REVIEW_OPEN = 'const reviewResult = await phase("review"'
 const TEST_SPAWN_CLOSE = '{ agentType: "Test" })'
 const TEST_PLAN_KEY = 'TEST_PLAN: ${'
 const TEST_PLAN_COVERAGE = 'cover every TEST_PLAN scenario'
+/** The Return line of the Gate 2 Test spawn: one verdict for each Status the Test agent can report. */
+const GATE2_TEST_RETURN = 'Return: {"verdict": "PASS" | "FAIL" | "BLOCKED", "failures": "..."}'
 /** Gate 2's early return: the code the skip guard governs. */
 const GATE2_SKIP_RETURN = 'return { evaluateVerdict: "SKIPPED", testVerdict: "SKIPPED"'
 
@@ -371,7 +399,7 @@ const D09DA34_WIRING_SEEDS: ReadonlyArray<{ readonly site: string; readonly ship
   },
   {
     site: 'test-spawn coverage',
-    shipped: 'Cover: functionality, API contracts, performance, and cover every TEST_PLAN scenario. Report: PASS or FAIL per scenario.',
+    shipped: `Cover: functionality, API contracts, performance, and cover every TEST_PLAN scenario.\n${GATE2_TEST_RETURN}`,
     d09da34: 'Cover: functionality, API contracts, performance. Report: PASS or FAIL per scenario.',
   },
 ]
@@ -452,17 +480,18 @@ const AsyncFunction = Object.getPrototypeOf(async () => undefined).constructor a
 
 /**
  * Run the shipped `phase("gate2")` statement with stub agents. Evaluate agents
- * pass; the Test agent returns `testVerdict`; every spawn is recorded.
+ * pass; the Test agent returns `testReply` as it is, whatever its shape (a run
+ * that gives no result returns null); every spawn is recorded.
  */
 async function runGate2(
   statement: string,
   inputs: Gate2Inputs,
-  testVerdict: 'PASS' | 'FAIL',
+  testReply: unknown,
 ): Promise<{ gate2: Gate2Result; spawns: Spawn[] }> {
   const spawns: Spawn[] = []
-  const agent = async (prompt: string, opts: { agentType: string }): Promise<object> => {
+  const agent = async (prompt: string, opts: { agentType: string }): Promise<unknown> => {
     spawns.push({ agentType: opts.agentType, prompt })
-    if (opts.agentType === 'Test') return { verdict: testVerdict, failures: 'TP-1 failed' }
+    if (opts.agentType === 'Test') return testReply
     return { verdict: 'PASS', status: 'fixed' }
   }
   const phase = async (_name: string, fn: () => Promise<unknown>): Promise<unknown> => fn()
@@ -487,10 +516,13 @@ const TEST_PLAN_FIXTURE = [
   '- [ ] TP-2 (AC-2) a repeated run posts nothing new — method:local [files: src/**]',
 ].join('\n')
 
+/** A Test agent reply that carries a verdict, with the failures a FAIL hands to the Fix agent. */
+const testReplyOf = (verdict: 'PASS' | 'FAIL'): { verdict: string; failures: string } => ({ verdict, failures: 'TP-1 failed' })
+
 interface RoutingCase {
   readonly label: string
   readonly inputs: Gate2Inputs
-  readonly testVerdict: 'PASS' | 'FAIL'
+  readonly testReply: unknown
   readonly check: (r: { gate2: Gate2Result; spawns: Spawn[] }) => string | null
 }
 
@@ -501,7 +533,7 @@ const ROUTING_TABLE: readonly RoutingCase[] = [
   {
     label: 'a test plan alone runs the Test agent with the plan',
     inputs: { plan: null, criteria: null, testPlan: TEST_PLAN_FIXTURE },
-    testVerdict: 'PASS',
+    testReply: testReplyOf('PASS'),
     check: ({ gate2, spawns }) => {
       const tests = testSpawns(spawns)
       if (tests.length !== 1) return `expected one Test spawn, got ${tests.length} (testVerdict ${gate2.testVerdict})`
@@ -512,7 +544,7 @@ const ROUTING_TABLE: readonly RoutingCase[] = [
   {
     label: 'criteria alone run the Test agent and name no test plan',
     inputs: { plan: null, criteria: '1. posts on cycle 2', testPlan: null },
-    testVerdict: 'PASS',
+    testReply: testReplyOf('PASS'),
     check: ({ spawns }) => {
       const tests = testSpawns(spawns)
       if (tests.length !== 1) return `expected one Test spawn, got ${tests.length}`
@@ -523,7 +555,7 @@ const ROUTING_TABLE: readonly RoutingCase[] = [
   {
     label: 'no plan, criteria or test plan skips Gate 2 entirely',
     inputs: { plan: null, criteria: null, testPlan: null },
-    testVerdict: 'PASS',
+    testReply: testReplyOf('PASS'),
     check: ({ gate2, spawns }) =>
       spawns.length === 0 && gate2.evaluateVerdict === 'SKIPPED' && gate2.testVerdict === 'SKIPPED'
         ? null
@@ -532,11 +564,20 @@ const ROUTING_TABLE: readonly RoutingCase[] = [
   {
     label: 'a failing test-plan run is fixed and recorded FAIL-FIXED',
     inputs: { plan: null, criteria: null, testPlan: TEST_PLAN_FIXTURE },
-    testVerdict: 'FAIL',
+    testReply: testReplyOf('FAIL'),
     check: ({ gate2, spawns }) =>
       gate2.testVerdict === 'FAIL-FIXED' && spawns.some(s => s.agentType === 'Fix')
         ? null
         : `expected FAIL-FIXED after a Fix fix, got ${gate2.testVerdict}`,
+  },
+  {
+    label: 'a test-plan run that gives no result is recorded BLOCKED and fixed by no Fix agent',
+    inputs: { plan: null, criteria: null, testPlan: TEST_PLAN_FIXTURE },
+    testReply: null,
+    check: ({ gate2, spawns }) =>
+      gate2.testVerdict === 'BLOCKED' && !spawns.some(s => s.agentType === 'Fix')
+        ? null
+        : `expected BLOCKED and no Fix spawn, got ${gate2.testVerdict} and ${spawns.filter(s => s.agentType === 'Fix').length} Fix spawn(s)`,
   },
 ]
 
@@ -545,10 +586,20 @@ export async function collectGate2RoutingViolations(statement: string | null): P
   if (statement === null) return ['the phase("gate2") statement was not found']
   const out: string[] = []
   for (const row of ROUTING_TABLE) {
-    const problem = row.check(await runGate2(statement, row.inputs, row.testVerdict))
-    if (problem !== null) out.push(`${row.label}: ${problem}`)
+    try {
+      const problem = row.check(await runGate2(statement, row.inputs, row.testReply))
+      if (problem !== null) out.push(`${row.label}: ${problem}`)
+    } catch (err) {
+      out.push(`${row.label}: the statement threw ${err instanceof Error ? err.name : 'a non-error'}`)
+    }
   }
   return out
+}
+
+/** The run's verdict over one Gate 2 result, with no surviving finding, no coverage gap and a passed final Gate 1. */
+function overallVerdictOf(block: string, gate2: Gate2Result): unknown {
+  const run = new Function('reviewResult', 'gate1Final', 'gate2', `${block}\nreturn overallVerdict;`) as (...args: unknown[]) => unknown
+  return run({ survivingFindings: [], fixedFindings: [], coverageGaps: [] }, { verdict: 'PASS' }, gate2)
 }
 
 describe('Gate 2 routing, executed over the shipped statement', () => {
@@ -562,12 +613,8 @@ describe('Gate 2 routing, executed over the shipped statement', () => {
   })
 
   it('end to end: a test plan whose run fails and is fixed makes the run UNVERIFIED, not PASS', async () => {
-    const { gate2 } = await runGate2(gate2Statement(SCRIPT!)!, ROUTING_TABLE[0].inputs, 'FAIL')
-    const block = extractVerdictBlock(SCRIPT!)!
-    const run = new Function('reviewResult', 'gate1Final', 'gate2', `${block}\nreturn overallVerdict;`) as (
-      ...args: unknown[]
-    ) => unknown
-    expect(run({ survivingFindings: [], fixedFindings: [], coverageGaps: [] }, { verdict: 'PASS' }, gate2)).toBe('UNVERIFIED')
+    const { gate2 } = await runGate2(gate2Statement(SCRIPT!)!, ROUTING_TABLE[0].inputs, testReplyOf('FAIL'))
+    expect(overallVerdictOf(extractVerdictBlock(SCRIPT!)!, gate2)).toBe('UNVERIFIED')
   })
 
   it('known-bad probe: the d9d1c8e key JSON-encodes the TP lines instead of passing them', async () => {
@@ -584,7 +631,251 @@ describe('Gate 2 routing, executed over the shipped statement', () => {
       'a test plan alone runs the Test agent with the plan',
       'criteria alone run the Test agent and name no test plan',
       'a failing test-plan run is fixed and recorded FAIL-FIXED',
+      'a test-plan run that gives no result is recorded BLOCKED and fixed by no Fix agent',
     ])
+  })
+
+  it('known-bad probe: the 3710434b read line throws on a Test run that gives no result, and the routing collector reports the throw for that row alone', async () => {
+    const statement = seedOnce(gate2Statement(SCRIPT!)!, TEST_READ, OLD_TEST_READ)
+    expect(await collectGate2RoutingViolations(statement)).toEqual([
+      'a test-plan run that gives no result is recorded BLOCKED and fixed by no Fix agent: the statement threw TypeError',
+    ])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 4b. A Test run that gives no result never reports PASS (D4)
+// ---------------------------------------------------------------------------
+//
+// The Test agent reports PASS, FAIL or BLOCKED. Gate 2 records only those three,
+// and anything else, a missing reply included, as BLOCKED. A BLOCKED verdict
+// spawns no Fix agent and the run reports UNVERIFIED, never PASS. The probes run
+// the 3710434b lines through the same collector: its read line threw on a null
+// reply, and its gate2Unverified line reported PASS for a BLOCKED verdict.
+
+/** The 3710434b read of the Test reply, verbatim: a null reply throws, and any other value is recorded as it came. */
+const OLD_TEST_READ = 'testVerdict = testResult.verdict;'
+
+/** The shipped read: only PASS and FAIL are recorded, every other reply is BLOCKED, and a null reply does not throw. */
+const TEST_READ = 'testVerdict = ["PASS", "FAIL"].includes(testResult?.verdict) ? testResult.verdict : "BLOCKED";'
+
+/** The Fix gate of the Test path: only a FAIL verdict reaches the Fix agent. */
+const TEST_FIX_GATE = 'if (testVerdict === "FAIL") {'
+
+/** Test replies that are no result Gate 2 can act on, each of which must be recorded BLOCKED. */
+const NO_RESULT_REPLIES: ReadonlyArray<{ readonly label: string; readonly reply: unknown }> = [
+  { label: 'BLOCKED', reply: { verdict: 'BLOCKED', failures: '' } },
+  { label: 'null', reply: null },
+  { label: 'no verdict', reply: {} },
+  { label: 'SKIPPED', reply: { verdict: 'SKIPPED' } },
+  { label: 'UNVERIFIED', reply: { verdict: 'UNVERIFIED' } },
+  { label: 'lowercase pass', reply: { verdict: 'pass' } },
+]
+
+/**
+ * Named collector: what Gate 2 and the run's verdict do with each reply in
+ * NO_RESULT_REPLIES. The verdict must be BLOCKED, with no throw and no Fix
+ * spawn, and the run must report UNVERIFIED.
+ */
+export async function collectNoResultVerdictViolations(statement: string | null, block: string | null): Promise<string[]> {
+  if (statement === null) return ['the phase("gate2") statement was not found']
+  if (block === null) return ['verdict block not found (coverageGaps … overallVerdict)']
+  const out: string[] = []
+  for (const { label, reply } of NO_RESULT_REPLIES) {
+    let ran: { gate2: Gate2Result; spawns: Spawn[] }
+    try {
+      ran = await runGate2(statement, { plan: null, criteria: null, testPlan: TEST_PLAN_FIXTURE }, reply)
+    } catch (err) {
+      out.push(`${label}: Gate 2 threw ${err instanceof Error ? err.name : 'a non-error'}`)
+      continue
+    }
+    if (ran.gate2.testVerdict !== 'BLOCKED') out.push(`${label}: testVerdict is ${String(ran.gate2.testVerdict)}, expected BLOCKED`)
+    if (ran.spawns.some(s => s.agentType === 'Fix')) out.push(`${label}: a Fix agent was spawned`)
+    const overall = overallVerdictOf(block, ran.gate2)
+    if (overall !== 'UNVERIFIED') out.push(`${label}: the run reports ${String(overall)}, expected UNVERIFIED`)
+  }
+  return out
+}
+
+describe('a Test run that gives no result is BLOCKED and the run is UNVERIFIED, never PASS', () => {
+  const statement = SCRIPT === null ? null : gate2Statement(SCRIPT)
+  const block = SCRIPT === null ? null : extractVerdictBlock(SCRIPT)
+  const labels = NO_RESULT_REPLIES.map(r => r.label)
+
+  it('every reply that gives no result is recorded BLOCKED, spawns no Fix agent and reports UNVERIFIED', async () => {
+    expect(labels).toEqual(['BLOCKED', 'null', 'no verdict', 'SKIPPED', 'UNVERIFIED', 'lowercase pass'])
+    expect(await collectNoResultVerdictViolations(statement, block)).toEqual([])
+  })
+
+  it('known-bad probe: the 3710434b read line alone throws on a null reply and records any other reply as it came', async () => {
+    const old = seedOnce(statement!, TEST_READ, OLD_TEST_READ)
+    expect(await collectNoResultVerdictViolations(old, block)).toEqual([
+      'null: Gate 2 threw TypeError',
+      'no verdict: testVerdict is undefined, expected BLOCKED',
+      'SKIPPED: testVerdict is SKIPPED, expected BLOCKED',
+      'SKIPPED: the run reports PASS, expected UNVERIFIED',
+      'UNVERIFIED: testVerdict is UNVERIFIED, expected BLOCKED',
+      'lowercase pass: testVerdict is pass, expected BLOCKED',
+    ])
+  })
+
+  it('known-bad probe: the 3710434b gate2Unverified line alone reports PASS for every reply, a BLOCKED one included', async () => {
+    const old = seedOnce(block!, GATE2_UNVERIFIED, OLD_GATE2_UNVERIFIED)
+    expect(await collectNoResultVerdictViolations(statement, old)).toEqual(labels.map(label => `${label}: the run reports PASS, expected UNVERIFIED`))
+  })
+
+  it('known-bad probe: both 3710434b lines together throw on null and report PASS for a BLOCKED verdict', async () => {
+    const oldStatement = seedOnce(statement!, TEST_READ, OLD_TEST_READ)
+    const oldBlock = seedOnce(block!, GATE2_UNVERIFIED, OLD_GATE2_UNVERIFIED)
+    expect(await collectNoResultVerdictViolations(oldStatement, oldBlock)).toEqual([
+      'BLOCKED: the run reports PASS, expected UNVERIFIED',
+      'null: Gate 2 threw TypeError',
+      'no verdict: testVerdict is undefined, expected BLOCKED',
+      'no verdict: the run reports PASS, expected UNVERIFIED',
+      'SKIPPED: testVerdict is SKIPPED, expected BLOCKED',
+      'SKIPPED: the run reports PASS, expected UNVERIFIED',
+      'UNVERIFIED: testVerdict is UNVERIFIED, expected BLOCKED',
+      'UNVERIFIED: the run reports PASS, expected UNVERIFIED',
+      'lowercase pass: testVerdict is pass, expected BLOCKED',
+      'lowercase pass: the run reports PASS, expected UNVERIFIED',
+    ])
+  })
+
+  it('known-bad probe: a Fix gate that also takes a BLOCKED verdict spawns a Fix agent for every reply it can read', async () => {
+    const fixing = seedOnce(statement!, TEST_FIX_GATE, 'if (testVerdict !== "PASS") {')
+    expect(await collectNoResultVerdictViolations(fixing, block)).toEqual([
+      'BLOCKED: testVerdict is FAIL-FIXED, expected BLOCKED',
+      'BLOCKED: a Fix agent was spawned',
+      'null: Gate 2 threw TypeError',
+      'no verdict: testVerdict is FAIL-FIXED, expected BLOCKED',
+      'no verdict: a Fix agent was spawned',
+      'SKIPPED: testVerdict is FAIL-FIXED, expected BLOCKED',
+      'SKIPPED: a Fix agent was spawned',
+      'UNVERIFIED: testVerdict is FAIL-FIXED, expected BLOCKED',
+      'UNVERIFIED: a Fix agent was spawned',
+      'lowercase pass: testVerdict is FAIL-FIXED, expected BLOCKED',
+      'lowercase pass: a Fix agent was spawned',
+    ])
+  })
+
+  it('known-bad probe: a statement or a block the collector cannot find is reported, not passed', async () => {
+    expect(await collectNoResultVerdictViolations(null, block)).toHaveLength(1)
+    expect(await collectNoResultVerdictViolations(statement, null)).toHaveLength(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 4c. The prompts and the doctrine say the Test agent reports a Status
+// ---------------------------------------------------------------------------
+
+/** The wave Test fence opens with this line, and its claims paragraph (b) with the next. */
+const WAVE_TEST_OPEN = 'Agent(subagent_type="Test"):'
+const WAVE_CLAIMS_OPEN = '**(b) Claims.**'
+const WAVE_STATUS_REPORT = 'Report your Status with evidence.'
+const WAVE_NOTHING_FIXED = 'Nothing is fixed here, whatever the Status:'
+const WAVE_CLAIMS_STATUS = 'whatever its Status'
+const OLD_STATUS_WORDING = 'PASS or FAIL'
+
+/** The Gate 2 doctrine's bullet for a Test run that gives no result: one line, and it repeats no FAIL-FIXED sentence. */
+const DOCTRINE_BLOCKED_BULLET = '- BLOCKED (no result), or any other or missing verdict → no fix, and the run reports `UNVERIFIED`, never PASS.'
+
+/** The engine schema's testVerdict enum, one line, with BLOCKED. */
+const SCHEMA_TEST_VERDICT = '"testVerdict": "PASS | FAIL | FAIL-FIXED | SKIPPED | BLOCKED",'
+
+/** The wave Test step: from its fence to the end of the line that opens paragraph (b), or null unless both anchors are unique. */
+function waveTestStep(built: string): string | null {
+  const open = offsetsOf(built, WAVE_TEST_OPEN)
+  if (open.length !== 1) return null
+  const claims = built.indexOf(WAVE_CLAIMS_OPEN, open[0])
+  if (claims === -1) return null
+  const end = built.indexOf('\n', claims)
+  return built.slice(open[0], end === -1 ? built.length : end)
+}
+
+/**
+ * Named collector: where a Test prompt or the Gate 2 doctrine still speaks of
+ * a PASS or FAIL report, or lacks the BLOCKED route. Six sites: the Gate 2 Test
+ * spawn, the wave Test fence and its claims paragraph, the doctrine bullet, the
+ * schema enum, and no "PASS or FAIL" left in either Test text.
+ */
+export function collectTestStatusPromptDefects(built: string): string[] {
+  const out: string[] = []
+  const script = singleModeScript(built)
+  const gate2 = script === null ? null : gate2Statement(script)
+  const spawns = gate2 === null ? [] : testSpawnCalls(gate2)
+  if (spawns.length !== 1) out.push(`gate 2 spawn: expected one Test spawn, found ${spawns.length}`)
+  else {
+    if (!spawns[0].call.includes(GATE2_TEST_RETURN)) out.push('gate 2 spawn: no Return line naming BLOCKED')
+    if (spawns[0].call.includes(OLD_STATUS_WORDING)) out.push(`gate 2 spawn: still says "${OLD_STATUS_WORDING}"`)
+  }
+  const wave = waveTestStep(built)
+  if (wave === null) out.push('wave step: the Test fence and its claims paragraph were not found exactly once')
+  else {
+    if (!wave.includes(WAVE_STATUS_REPORT)) out.push(`wave step: no "${WAVE_STATUS_REPORT}"`)
+    if (!wave.includes(WAVE_CLAIMS_STATUS)) out.push(`wave step: claims do not say "${WAVE_CLAIMS_STATUS}"`)
+    if (wave.includes(OLD_STATUS_WORDING)) out.push(`wave step: still says "${OLD_STATUS_WORDING}"`)
+  }
+  const bullets = gate2Doctrine(built).split('\n').filter(l => l === DOCTRINE_BLOCKED_BULLET).length
+  if (bullets !== 1) out.push(`doctrine: expected one BLOCKED bullet, found ${bullets}`)
+  if (offsetsOf(built, SCHEMA_TEST_VERDICT).length !== 1) out.push('schema: the testVerdict enum does not hold BLOCKED')
+  return out
+}
+
+describe('the Test prompts and the Gate 2 doctrine speak of a Status, with a BLOCKED route', () => {
+  it('the wave Test step is found, and every site holds', () => {
+    expect(waveTestStep(BUILT)?.includes(WAVE_NOTHING_FIXED), 'the wave step keeps its nothing-is-fixed sentence').toBe(true)
+    expect(collectTestStatusPromptDefects(BUILT)).toEqual([])
+  })
+
+  const SEEDS: ReadonlyArray<readonly [label: string, from: string, to: string, expected: readonly string[]]> = [
+    [
+      'the Gate 2 Return line back to PASS or FAIL per scenario',
+      `\n${GATE2_TEST_RETURN}`,
+      ' Report: PASS or FAIL per scenario.',
+      ['gate 2 spawn: no Return line naming BLOCKED', 'gate 2 spawn: still says "PASS or FAIL"'],
+    ],
+    [
+      'the wave fence back to PASS or FAIL',
+      WAVE_STATUS_REPORT,
+      'Report PASS or FAIL with evidence.',
+      [`wave step: no "${WAVE_STATUS_REPORT}"`, 'wave step: still says "PASS or FAIL"'],
+    ],
+    [
+      'the wave claims back to PASS or FAIL alike',
+      WAVE_CLAIMS_STATUS,
+      'PASS or FAIL alike',
+      [`wave step: claims do not say "${WAVE_CLAIMS_STATUS}"`, 'wave step: still says "PASS or FAIL"'],
+    ],
+    [
+      'the nothing-is-fixed sentence back to PASS or FAIL',
+      WAVE_NOTHING_FIXED,
+      'Nothing is fixed here, PASS or FAIL:',
+      ['wave step: still says "PASS or FAIL"'],
+    ],
+    ['the doctrine bullet dropped', `${DOCTRINE_BLOCKED_BULLET}\n`, '', ['doctrine: expected one BLOCKED bullet, found 0']],
+    [
+      'the doctrine bullet doubled',
+      `${DOCTRINE_BLOCKED_BULLET}\n`,
+      `${DOCTRINE_BLOCKED_BULLET}\n${DOCTRINE_BLOCKED_BULLET}\n`,
+      ['doctrine: expected one BLOCKED bullet, found 2'],
+    ],
+    [
+      'the schema enum without BLOCKED',
+      SCHEMA_TEST_VERDICT,
+      '"testVerdict": "PASS | FAIL | FAIL-FIXED | SKIPPED",',
+      ['schema: the testVerdict enum does not hold BLOCKED'],
+    ],
+  ]
+  for (const [label, from, to, expected] of SEEDS) {
+    it(`known-bad probe: ${label} is reported, and only it`, () => {
+      expect(collectTestStatusPromptDefects(seedOnce(BUILT, from, to))).toEqual(expected)
+    })
+  }
+
+  it('known-bad probe: a build with no Test text is reported, not passed', () => {
+    const defects = collectTestStatusPromptDefects('no fences here')
+    expect(defects).toContain('gate 2 spawn: expected one Test spawn, found 0')
+    expect(defects).toContain('wave step: the Test fence and its claims paragraph were not found exactly once')
   })
 })
 

@@ -638,19 +638,19 @@
     },
     {
       "id": "command-dynamic-build-max",
-      "ceiling": 106846,
-      "pattern": "['dynamic-build', 'on', 106_846],",
+      "ceiling": 106803,
+      "pattern": "['dynamic-build', 'on', 106_803],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/dynamic-build.md, the curation-on build, in bytes. Measured 106,818 at #677 (106,869 after #561), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. It rose by 28 bytes to 106,846 at #677, because the wait rule now names the file that sets the result: a run could read the wrong file and report a pass. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/commands/dynamic-build.md, the curation-on build, in bytes. Measured 106,803 at #679 (106,818 at #677, 106,869 after #561), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. It rose by 28 bytes to 106,846 at #677, because the wait rule now names the file that sets the result: a run could read the wrong file and report a pass. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-dynamic-build-curation-off-max",
-      "ceiling": 103459,
-      "pattern": "['dynamic-build', 'off', 103_459],",
+      "ceiling": 103416,
+      "pattern": "['dynamic-build', 'off', 103_416],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/curation-off/commands/dynamic-build.md, the curation-off build, in bytes. Measured 103,431 at #677 (103,482 after #561), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. It rose by 28 bytes to 103,459 at #677, because the wait rule now names the file that sets the result: a run could read the wrong file and report a pass. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/curation-off/commands/dynamic-build.md, the curation-off build, in bytes. Measured 103,416 at #679 (103,431 at #677, 103,482 after #561), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. It rose by 28 bytes to 103,459 at #677, because the wait rule now names the file that sets the result: a run could read the wrong file and report a pass. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-dynamic-plan-max",
@@ -846,19 +846,19 @@
     },
     {
       "id": "command-dynamic-build-compliance-off-max",
-      "ceiling": 103739,
-      "pattern": "['dynamic-build', 'compliance-off', 103_739],",
+      "ceiling": 103696,
+      "pattern": "['dynamic-build', 'compliance-off', 103_696],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/dynamic-build.md, the compliance-off build, in bytes. Measured 103,711 at #677 (103,760 at its first build), with no headroom. The rule sets no comparison with the all-on build. It rose by 28 bytes to 103,739 at #677, because the wait rule now names the file that sets the result: a run could read the wrong file and report a pass. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/dynamic-build.md, the compliance-off build, in bytes. Measured 103,696 at #679 (103,711 at #677, 103,760 at its first build), with no headroom. The rule sets no comparison with the all-on build. It rose by 28 bytes to 103,739 at #677, because the wait rule now names the file that sets the result: a run could read the wrong file and report a pass. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-dynamic-build-both-off-max",
-      "ceiling": 100352,
-      "pattern": "['dynamic-build', 'both-off', 100_352],",
+      "ceiling": 100309,
+      "pattern": "['dynamic-build', 'both-off', 100_309],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE (#648, AC-33): dist/curation-compliance-off/commands/dynamic-build.md, the build with curation and compliance both off, in bytes. Measured 100,324 at #677 (100,373 at its first build), with no headroom. The rule sets no comparison with the other builds. It rose by 28 bytes to 100,352 at #677, because the wait rule now names the file that sets the result: a run could read the wrong file and report a pass. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE (#648, AC-33): dist/curation-compliance-off/commands/dynamic-build.md, the build with curation and compliance both off, in bytes. Measured 100,309 at #679 (100,324 at #677, 100,373 at its first build), with no headroom. The rule sets no comparison with the other builds. It rose by 28 bytes to 100,352 at #677, because the wait rule now names the file that sets the result: a run could read the wrong file and report a pass. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-dynamic-tickets-compliance-off-max",

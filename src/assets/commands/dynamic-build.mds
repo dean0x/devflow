@@ -314,8 +314,9 @@ Self-verify your fix compiles, following your Running commands block. Commit fix
 ${CRITERIA || "(none)"}
 TEST_PLAN: ${TEST_PLAN || "(none)"}
 Follow your Running commands block for every scenario command.
-Cover: functionality, API contracts, performance, and cover every TEST_PLAN scenario. Report: PASS or FAIL per scenario.`, { agentType: "Test" });
-    testVerdict = testResult.verdict;
+Cover: functionality, API contracts, performance, and cover every TEST_PLAN scenario.
+Return: {"verdict": "PASS" | "FAIL" | "BLOCKED", "failures": "..."}`, { agentType: "Test" });
+    testVerdict = ["PASS", "FAIL"].includes(testResult?.verdict) ? testResult.verdict : "BLOCKED";
     if (testVerdict === "FAIL") {
       // fix-and-continue — no re-test, no inline Gate 1.
       await agent(`OPERATION: qa-fix
@@ -510,9 +511,9 @@ Return: {"verdict": "PASS" | "FAIL", "details": "..."}`, { agentType: "Validate"
 });
 
 // PASS requires survivingFindings.length === 0 && coverageGaps.length === 0 && gate1Final.verdict !== "ESCALATED"
-// and no FAIL-FIXED Gate 2 verdict: fixes applied but never re-run report UNVERIFIED, never PASS
+// and every Gate 2 verdict PASS or SKIPPED; any other reports UNVERIFIED, never PASS
 const coverageGaps = reviewResult.coverageGaps || [];
-const gate2Unverified = [gate2.evaluateVerdict, gate2.testVerdict].includes("FAIL-FIXED");
+const gate2Unverified = ![gate2.evaluateVerdict, gate2.testVerdict].every(v => v === "PASS" || v === "SKIPPED");
 const overallVerdict = (reviewResult.survivingFindings?.length || 0) === 0 && coverageGaps.length === 0 && gate1Final.verdict !== "ESCALATED" ? (gate2Unverified ? "UNVERIFIED" : "PASS") : "PARTIAL";
 
 // Phase 6: Report — the phase returns the engine result (engine_output_schema); its verdict is overallVerdict
@@ -840,12 +841,12 @@ Agent(subagent_type="Test"):
 FILES_CHANGED: {the file list that diff printed}
 TEST_PLAN: {the TP lines of the wave evidence file's ## Test Plan section}
 WORKTREE_PATH: {integration worktree root}
-Cover every TEST_PLAN line on the integration branch as it stands. Report PASS or FAIL with evidence."
+Cover every TEST_PLAN line on the integration branch as it stands. Report your Status with evidence."
 ```
 
-   Nothing is fixed here, PASS or FAIL: the wave is done and its PR is open. Report the Test agent's Status.
+   Nothing is fixed here, whatever the Status: the wave is done and its PR is open. Report the Test agent's Status.
 
-   **(b) Claims.** Append its TP claims, PASS or FAIL alike, to the `## Claims` section of `"{integration worktree root}/.devflow/docs/evidence-wave-{slug}.md"` — the file's last section, created when absent. Append only: never edit or remove a claim. Each line is `/implement`'s TP claim, keyed to the 40-hex `HEAD:` the Test agent's report shows:
+   **(b) Claims.** Append its TP claims, whatever its Status, to the `## Claims` section of `"{integration worktree root}/.devflow/docs/evidence-wave-{slug}.md"` — the file's last section, created when absent. Append only: never edit or remove a claim. Each line is `/implement`'s TP claim, keyed to the 40-hex `HEAD:` the Test agent's report shows:
 
 ```
 - TP-<n> <PASS|FAIL|SKIP> sha:<head> by:test exit:<0-255>
