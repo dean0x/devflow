@@ -398,14 +398,16 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
    {COMPLIANCE_DIRECTIVE}"
    ```
    - Loop back to re-validate
-3. If `validation_retry_count > 2`: set VERIFICATION_STATUS = FAILED and exit the validation loop — record a blocking callout in the `## Verification` section (never a silent pass).
+3. If `validation_retry_count > 2`: set VERIFICATION_STATUS = FAILED and exit the validation loop.
+
+**If BLOCKED:** FAILED, exit the loop with no Fix agent; give its cause and log path in the Phase 10 report only, never in resolution-summary.md.
 
 **If PASS:** set VERIFICATION_STATUS = PASS and exit the validation loop.
 
 Any other or missing Status: FAILED, exit the loop; never PASS.
 
 Record `## Verification` outcome in resolution-summary.md (runs unconditionally after the validation loop exits):
-- Rewrite the `## Verification` section with | Command | Result | table + `Final gate: PASS | FAILED after N attempts`
+- Rewrite the `## Verification` section with | Command | Result | table + `Final gate: PASS | FAILED after N attempts | FAILED (Validate blocked)`; a FAILED gate gets a blocking callout (never a silent pass)
 
 <!-- compliance:on -->
 Push all commits to remote once (Code and Fix agents ran with PUSH: false — runs whether the gate PASSED or FAILED, so the branch is always visible before Phase 9 or CI runs):
@@ -543,6 +545,8 @@ The line ends at `by:test` when the row's Exit is not a number from 0 to 255; ap
 <!-- compliance:off -->
 The line ends at `by:test` when the row's Exit is not a number from 0 to 255; append nothing when the report's `HEAD:` is not one 40-hex SHA. Record `Test plan: {n} stale, {m} re-verified` under `## Verification` in resolution-summary.md now, and set `STALE_REVERIFICATION` to that line.
 <!-- compliance:end -->
+
+A Test Status other than PASS or FAIL still gets its claims, but `DEGRADED (Test run blocked)` replaces that line. `{m}` counts PASS rows only.
 
 <!-- compliance:on -->
 **Step 9b-1: Resolve external threads**
@@ -683,7 +687,7 @@ The resolution summary was already written to `{TARGET_DIR}/resolution-summary.m
 | Duplicates Collapsed | {n} |
 
 ### Verification
-Final gate: {PASS | FAILED after N attempts}
+Final gate: {the line Phase 7 recorded}
 
 ### Commits Created
 - {sha} {message}
@@ -852,7 +856,7 @@ _(Note: `Deferred` = `## Fix Separately` count + `## Deferred to Tech Debt` coun
 
 Regression tests added: {n}
 
-Final gate: PASS | FAILED after {n} attempts
+Final gate: {the line Phase 7 recorded}
 
 ## Fixed Issues
 | Issue | File:Line | Commit |
