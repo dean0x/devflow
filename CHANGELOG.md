@@ -7,14 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Upgrade notes — Quality rules
+### Upgrade notes — Shadowed rules and skills
 
 **What you must do:**
 - A quality rule that you keep at `~/.devflow/rules/quality.md` replaces the shipped one, so you do not get its two new bullets. Add them to your copy. Or run `devflow rules unshadow quality`, which deletes your copy, and then run `devflow init`.
 - A testing skill that you keep at `~/.devflow/skills/testing/` replaces the shipped one, so you do not get its new Quality Gates item or its cuts. Add the item to your copy. Or run `devflow skills unshadow testing`, which deletes your copy, and then run `devflow init`.
+- A review-methodology or agent-references skill that you keep under `~/.devflow/skills/` replaces the shipped one, so you do not get the new follow-up text of #690. Add it to your copy. Or run `devflow skills unshadow <name>`, which deletes your copy, and then run `devflow init`.
 
 **Stale-install window:**
-- Until you run `devflow init`, the installed quality rule and testing skill lack the new text.
+- Until you run `devflow init`, the installed quality rule, testing, review-methodology and agent-references skills lack the new text.
 
 ### Behaviour change
 
@@ -31,9 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Plan and code review list follow-up work, and file fewer tickets by default** ([#690](https://github.com/dean0x/devflow/issues/690)).
-  - At the `standard` and `lean` levels, `/plan` puts a sibling finding on the plan's deferred list, with no proposed ticket title. It files a ticket only when the user asks. The `full` level does not change. A security gap that the change introduces or exposes stays in scope and blocking.
-  - The review report lists pre-existing problems. It says to file an issue only when the user asks, or for data loss, a false pass or a broken install.
-  - The plan levels reference is 34 bytes smaller (4,056 to 4,022), and its ceiling falls with it.
+  - At the `standard` and `lean` levels, `/plan` lists a sibling finding on the plan's deferred list, with no proposed ticket title, and files no ticket for it. You file one only if you want it. The `full` level does not change. A security gap that the change introduces or exposes stays in scope and blocking.
+  - The review-methodology skill lists pre-existing problems and does not suggest separate issues for them. Its report template recommends an issue only for data loss, a false pass or a broken install.
+  - The plan levels reference is 47 bytes smaller (4,056 to 4,009), and its ceiling falls with it. The review-methodology skill is 24 bytes smaller, and its report template is 26 bytes larger.
 
 - **The quality rule and the testing skill target doc drift, duplicated code and vacuous tests** ([#476](https://github.com/dean0x/devflow/issues/476)).
   - The quality rule has two new bullets. When a change alters a name, path or behavior, the agent updates the current tracked docs that state the old fact, and not released changelog entries. It describes a security fix by its effect only. Before it adds new code, the agent finds the existing owner and extends it when the new code shares its job. A trust-boundary or fail-closed check is not a copy.
