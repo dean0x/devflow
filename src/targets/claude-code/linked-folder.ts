@@ -197,15 +197,33 @@ export function warnLinkReport(report: LinkReport, warn: (message: string) => vo
   for (const folder of report.refusedFolders) warn(refusedFolderMessage(folder));
 }
 
+/** The mode of a file that replaces a link. The atomic writer would copy the mode of the link's target instead. */
+const REPLACED_LINK_FILE_MODE = 0o644;
+
 /**
- * Write `content` at `file` with the atomic writer (a temp file beside it, then one rename). A
- * rename puts the new file in the place of whatever stands at `file`, so a link there is replaced and
- * never followed; the link is recorded in `links.replacedLinks` once the write is done. The caller
- * has proved that the folder holding `file` is a real one. Throws what the writer throws, so the
- * caller keeps its own catch.
+ * Write `content` at `file` through a temp file beside it and one rename. A rename puts the new file
+ * in the place of whatever stands at `file`, so a link there is replaced and never followed; the link
+ * is recorded in `links.replacedLinks` once the write is done. A file that replaces a link has the
+ * fixed mode 0644, never the mode of what the link pointed to, which the atomic writer would copy
+ * because its `stat` follows the link. Any other file goes through the atomic writer and keeps its
+ * own mode. The caller has proved that the folder holding `file` is a real one. Throws what the
+ * writer throws, so the caller keeps its own catch.
  */
 export async function writeFileReplacingLink(file: string, content: string, links?: LinkReport): Promise<void> {
-  const wasLink = await entryIsLink(file);
-  await writeFileAtomicExclusive(file, content);
-  if (wasLink) links?.replacedLinks.push(file);
+  if (!(await entryIsLink(file))) {
+    await writeFileAtomicExclusive(file, content);
+    return;
+  }
+  const temp = `${file}.tmp.${process.pid}`;
+  try {
+    // A stale temp file is removed first; the exclusive open then refuses anything placed there since.
+    await fs.rm(temp, { force: true });
+    await fs.writeFile(temp, content, { encoding: 'utf-8', flag: 'wx', mode: REPLACED_LINK_FILE_MODE });
+    await fs.chmod(temp, REPLACED_LINK_FILE_MODE);
+    await fs.rename(temp, file);
+  } catch (err) {
+    await fs.rm(temp, { force: true }).catch(() => undefined);
+    throw err;
+  }
+  links?.replacedLinks.push(file);
 }

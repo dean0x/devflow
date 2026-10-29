@@ -26,12 +26,12 @@ import { formatLinksSummary, formatRefusedFoldersSummary, formatReplacedLinksSum
 import { runRulesEnable } from '../../src/cli/commands/rules.js';
 import { reapplyAgentMapping, saveAgentMapping } from '../../src/core/agent-models.js';
 import { curationOffDir, skillsDir } from '../../src/core/assets.js';
-import { writeManifest } from '../../src/core/manifest.js';
+import { readManifest, writeManifest } from '../../src/core/manifest.js';
 import { DEVFLOW_PLUGINS } from '../../src/core/plugins.js';
 import { convergeBehaviorRule } from '../../src/targets/claude-code/behavior-install.js';
 import { convergeComplianceArtifacts } from '../../src/targets/claude-code/compliance-install.js';
 import { convergePromptVariants, convergeVariantAxes } from '../../src/targets/claude-code/curation-install.js';
-import { mergeLinkReports } from '../../src/targets/claude-code/linked-folder.js';
+import { mergeLinkReports, writeFileReplacingLink } from '../../src/targets/claude-code/linked-folder.js';
 import { convergeTrackerArtifacts } from '../../src/targets/claude-code/tracker-install.js';
 import { restampTrackerAgents } from '../../src/targets/claude-code/tracker-servers.js';
 import { assertTempHome } from '../setup/home-isolation.js';
@@ -371,6 +371,43 @@ describe('a converge replaces a linked file in a Devflow folder and never writes
   });
 });
 
+describe('a file written over a link gets the mode of a new file, never the mode of what the link pointed to', () => {
+  it.each([
+    ['0666', 0o666],
+    ['0777', 0o777],
+    ['0600', 0o600],
+  ] as const)('a link to a %s file is replaced by a 0644 file and the file outside keeps its mode', async (_label, targetMode) => {
+    const entry = path.join(installedRules(), 'compliance.md');
+    await linkFile(entry, 'the file the link pointed to\n');
+    await fs.chmod(outside, targetMode);
+    const links = { replacedLinks: [] as string[], refusedFolders: [] as string[] };
+
+    await writeFileReplacingLink(entry, 'new content\n', links);
+
+    const stat = await fs.lstat(entry);
+    expect(stat.isSymbolicLink(), 'the link is gone').toBe(false);
+    expect((stat.mode & 0o777).toString(8), 'the new file has the fixed mode').toBe('644');
+    expect(await fs.readFile(entry, 'utf-8')).toBe('new content\n');
+    expect(await fs.readFile(outside, 'utf-8'), 'the file outside keeps its bytes').toBe('the file the link pointed to\n');
+    expect(((await fs.stat(outside)).mode & 0o777).toString(8), 'the file outside keeps its mode').toBe(targetMode.toString(8));
+    expect(links.replacedLinks).toEqual([entry]);
+    expect(await fs.readdir(installedRules()), 'no temp file stays behind').toEqual(['compliance.md']);
+  });
+
+  it('a real file keeps its own mode', async () => {
+    const entry = path.join(installedRules(), 'compliance.md');
+    await write(entry, 'old content\n');
+    await fs.chmod(entry, 0o600);
+    const links = { replacedLinks: [] as string[], refusedFolders: [] as string[] };
+
+    await writeFileReplacingLink(entry, 'new content\n', links);
+
+    expect(((await fs.lstat(entry)).mode & 0o777).toString(8)).toBe('600');
+    expect(await fs.readFile(entry, 'utf-8')).toBe('new content\n');
+    expect(links.replacedLinks).toEqual([]);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // The skill folders are swapped whole, so a link there is never followed
 // ---------------------------------------------------------------------------
@@ -577,6 +614,31 @@ describe('rules --enable', () => {
     expect((await fs.readdir(installedRules())).length, 'the rules were installed there').toBeGreaterThan(0);
     const [line] = formatReplacedLinksSummary({ replacedLinks: [installedRules()] });
     expect(logged).toContain(line.message);
+  });
+
+  // A folder that holds a link cannot lose it when its owner denies write access, so the unlink fails.
+  // A superuser ignores the mode, so the row proves nothing there.
+  it.skipIf(process.getuid?.() === 0)('refuses a rules folder that is a link it cannot remove, writes nothing through it and says so', async () => {
+    await seedManifest();
+    const logged: string[] = [];
+    vi.spyOn(p.log, 'warn').mockImplementation(message => { logged.push(String(message)); });
+    await linkFolder(installedRules(), { 'old-rule.md': 'an old rule\n' });
+    const before = await snapshot(outside);
+    const manifestBefore = await readManifest(devflowDir);
+    const rulesParent = path.dirname(installedRules());
+
+    await fs.chmod(rulesParent, 0o555);
+    try {
+      await runRulesEnable(claudeDir, devflowDir);
+    } finally {
+      await fs.chmod(rulesParent, 0o755);
+    }
+
+    expect(await snapshot(outside), 'the place outside keeps every byte, file and mode').toEqual(before);
+    expect((await fs.lstat(installedRules())).isSymbolicLink(), 'the link stays').toBe(true);
+    expect(await readManifest(devflowDir), 'the manifest is not written').toEqual(manifestBefore);
+    const [line] = formatRefusedFoldersSummary({ refusedFolders: [installedRules()] });
+    expect(logged.filter(message => message === line.message), 'the folder is named once').toHaveLength(1);
   });
 
   it('reports no link for a real rules folder', async () => {
