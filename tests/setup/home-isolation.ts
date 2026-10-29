@@ -87,7 +87,7 @@ export function isolatedEnv(env: NodeJS.ProcessEnv, home: string): NodeJS.Proces
 }
 
 /** Every per-run temp root is created with this prefix, directly under the real temp root. */
-export const RUN_ROOT_PREFIX = 'devflow-test-run-';
+export const RUN_ROOT_PREFIX = 'devflow-testtmp-';
 /** The run root's git folder: a read-only directory holding one link named `git`. */
 export const GIT_BIN_PREFIX = 'git-bin-';
 /** The file in a run root that records the pid of the process that owns it. */
