@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { execSync, spawnSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import { createRequire } from 'module';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -50,7 +50,7 @@ ${script}
 function runWithQueueAppend(script: string, env?: NodeJS.ProcessEnv): { stdout: string; stderr: string; exitCode: number } {
   const full = withQueueAppend(script);
   try {
-    const result = execSync(`bash -c '${full.replace(/'/g, "'\\''")}'`, { stdio: ['pipe', 'pipe', 'pipe'], env: env ?? process.env });
+    const result = execFileSync('bash', ['-c', full], { stdio: ['pipe', 'pipe', 'pipe'], env: env ?? process.env });
     return { stdout: result.toString(), stderr: '', exitCode: 0 };
   } catch (e: unknown) {
     const err = e as { stdout?: Buffer; stderr?: Buffer; status?: number };
@@ -71,7 +71,7 @@ function readJsonl(file: string): Record<string, unknown>[] {
 describe('shell hook syntax: queue-append passes bash -n', () => {
   it('bash -n succeeds', () => {
     expect(() => {
-      execSync(`bash -n "${QUEUE_APPEND}"`, { stdio: 'pipe' });
+      execFileSync('bash', ['-n', QUEUE_APPEND], { stdio: 'pipe' });
     }).not.toThrow();
   });
 });
@@ -1193,7 +1193,7 @@ describe('queue_read_gates <manifest> <root>: the repository narrows, never wide
 
   it('a directory or FIFO where a file belongs is skipped without blocking', () => {
     fs.mkdirSync(path.join(root, '.devflow', 'project.json'));
-    execSync(`mkfifo "${path.join(root, '.devflow', 'config.json')}"`);
+    execFileSync('mkfifo', [path.join(root, '.devflow', 'config.json')]);
     expect(gatesAt()).toEqual({ memory: 'true', curation: 'true', exitCode: 0 });
   });
 
@@ -1360,7 +1360,7 @@ describe('queue_append_both and queue_append_row: the tracked-area gate', () => 
   let gitLog: string;
 
   const git = (...args: string[]): void => {
-    execSync(`git ${args.map((a) => `'${a}'`).join(' ')}`, { cwd: root, stdio: 'pipe' });
+    execFileSync('git', args, { cwd: root, stdio: 'pipe' });
   };
 
   beforeEach(() => {
@@ -1426,7 +1426,7 @@ describe('queue_append_both and queue_append_row: the tracked-area gate', () => 
   it('roots that differ cost one call each, and one queue on costs one call', () => {
     const other = path.join(tmpDir, 'main-checkout');
     fs.mkdirSync(other);
-    execSync('git init -q', { cwd: other, stdio: 'pipe' });
+    execFileSync('git', ['init', '-q'], { cwd: other, stdio: 'pipe' });
     reset();
 
     expect(both('"true" "true"', root, other).exitCode).toBe(0);
