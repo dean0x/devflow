@@ -317,7 +317,7 @@ On completion:
 
 ## Error Handling
 
-- Validate agent fails (build/test): halt, report failures, do not proceed
+- Validate agent reports no PASS: halt, report failures, do not proceed
 - User declines release plan: halt gracefully
 <!-- compliance:on -->
 - User halts at the traceability question: stop — nothing has been committed, tagged or published
