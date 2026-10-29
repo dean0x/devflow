@@ -30,6 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Plan and code review list follow-up work, and file fewer tickets by default** ([#690](https://github.com/dean0x/devflow/issues/690)).
+  - At the `standard` and `lean` levels, `/plan` puts a sibling finding on the plan's deferred list, with no proposed ticket title. It files a ticket only when the user asks. The `full` level does not change. A security gap that the change introduces or exposes stays in scope and blocking.
+  - The review report lists pre-existing problems. It says to file an issue only when the user asks, or for data loss, a false pass or a broken install.
+  - The plan levels reference is 34 bytes smaller (4,056 to 4,022), and its ceiling falls with it.
+
 - **The quality rule and the testing skill target doc drift, duplicated code and vacuous tests** ([#476](https://github.com/dean0x/devflow/issues/476)).
   - The quality rule has two new bullets. When a change alters a name, path or behavior, the agent updates the current tracked docs that state the old fact, and not released changelog entries. It describes a security fix by its effect only. Before it adds new code, the agent finds the existing owner and extends it when the new code shares its job. A trust-boundary or fail-closed check is not a copy.
   - The Quality Gates of the testing skill have a new item: each new assertion would fail, not error, with the change reverted. The RED run counts; else a bad input or a temporary, uncommitted revert of your own edit shows it, never a stash. Three items that repeated other parts of the skill are cut, and a repeated parenthetical is cut from the flaky-pattern item. The skill is 25 bytes smaller, so the Code and Fix preload totals fall by 25 bytes each (Code 25,514 to 25,489, Fix 14,875 to 14,850). The quality rule is not in the preload and loads in every session: it grows by 326 bytes.

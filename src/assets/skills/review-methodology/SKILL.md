@@ -48,7 +48,7 @@ Apply your specialized lens (security, performance, tests, etc.) to each categor
 
 - **Category 1** - Maximum scrutiny, any issue blocks PR
 - **Category 2** - Should fix together with your changes
-- **Category 3** - Note but don't block, suggest separate issues
+- **Category 3** - List, but don't block
 
 ### Step 4: Prioritize by Severity
 
