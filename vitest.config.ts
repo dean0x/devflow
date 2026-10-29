@@ -8,6 +8,7 @@ export default defineConfig({
     // D-TEST-HOME-ISOLATION: a per-file temp HOME with DEVFLOW_DIR/CLAUDE_* unset, so no
     // test can aim its writes at the developer's real ~/.claude or ~/.devflow.
     setupFiles: ['tests/setup/isolate-env.ts'],
+    globalSetup: ['tests/setup/global-setup.ts'],
     globals: false,
     environment: 'node',
     restoreMocks: true,
