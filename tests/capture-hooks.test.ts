@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { execFileSync, execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -670,7 +670,7 @@ const WORKER_SHELL_BUDGET_MS = 20_000;
  * The longest one synchronous worker run can take: the claude child is killed no
  * later than watchdog + grace, and the rest is WORKER_SHELL_BUDGET_MS. A default 5 s
  * test timeout sat INSIDE that bound, so a loaded machine failed a correct worker.
- * The execSync carries the bound too, so a genuinely hung worker still fails fast
+ * The execFileSync carries the bound too, so a genuinely hung worker still fails fast
  * and names itself instead of hitting the test timeout.
  */
 const WORKER_RUN_BOUND_MS = (TEST_WATCHDOG_SECS + WORKER_KILL_GRACE_SECS) * 1000 + WORKER_SHELL_BUDGET_MS;
@@ -704,7 +704,7 @@ describe('background-memory-update: the memory switch (D-FEATURES-NARROW-ONLY)',
    * The worker got past the machine-wide memory gate and launched claude.
    *
    * Asserted from the worker's OWN log, which it writes synchronously: `runWorker`
-   * is an execSync, and the worker `wait`s on the claude child before it logs the
+   * is an execFileSync, and the worker `wait`s on the claude child before it logs the
    * run's outcome, so every line below is on disk when the call returns — there is
    * nothing to poll and no race to lose. The gate sits before `Spawning claude -p`,
    * so that line proves the gate let the run through; the outcome line proves the
@@ -726,10 +726,9 @@ describe('background-memory-update: the memory switch (D-FEATURES-NARROW-ONLY)',
 
   /** `retiredDevflowDir`, when given, is exported as DEVFLOW_DIR — which the worker must ignore. */
   function runWorker(retiredDevflowDir?: string, manifestArg?: string): void {
-    const args = manifestArg === undefined ? `"${projectDir}"` : `"${projectDir}" "${manifestArg}"`;
     const fakePath = `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}`;
     expect(resolveOnPath('claude', fakePath), 'the fake claude resolves first on PATH').toBe(path.join(shimDir, 'claude'));
-    execSync(`bash "${BG_UPDATER}" ${args}`, {
+    execFileSync('bash', [BG_UPDATER, projectDir, ...(manifestArg === undefined ? [] : [manifestArg])], {
       env: {
         ...process.env,
         HOME: homeDir,
@@ -1100,7 +1099,7 @@ describe('capture hooks honour a repository narrowing (D-FEATURES-NARROW-ONLY)',
     // the toplevel, not the directory Claude Code was launched in.
     const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'cap-narrow-repo-'));
     try {
-      execSync('git init -q', { cwd: repo });
+      execFileSync('git', ['init', '-q'], { cwd: repo });
       const sub = path.join(repo, 'packages', 'app');
       fs.mkdirSync(sub, { recursive: true });
       writeRepoFile(repo, 'project.json', '{"features":{"learning":false}}');
@@ -1279,7 +1278,7 @@ describe('capture hooks never write through a symbolic link under .devflow (D-HO
   // queue checked against the other spelling would be refused as not below its root.
   describe('a real git repository reached through a linked parent', () => {
     const git = (cwd: string, ...args: string[]): void => {
-      execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...args], { cwd, stdio: 'ignore' });
+      execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', '-c', 'maintenance.auto=false', ...args], { cwd, stdio: 'ignore' });
     };
     let realParent: string;
     let linkedParent: string;
