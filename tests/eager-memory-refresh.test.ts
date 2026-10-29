@@ -309,6 +309,8 @@ afterAll(() => {
 
 /** Init scratch git repo: a copy of the template's `.git` and README */
 function initGitRepo(dir: string): void {
+  // An empty template path would make `.git` relative to the cwd: the checkout's own repository.
+  if (gitTemplateDir === '') throw new Error('initGitRepo ran before the top-level beforeAll built the git template');
   fs.cpSync(path.join(gitTemplateDir, '.git'), path.join(dir, '.git'), {
     recursive: true,
     verbatimSymlinks: true,
