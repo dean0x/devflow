@@ -36,7 +36,7 @@ Gate 2 inputs are produced by `/devflow:dynamic-plan`'s plan-challenge step — 
 **Test agent** (only if acceptance criteria or a test plan exist):
 - Scenario-based acceptance tests covering functionality, API contracts, performance
 - FAIL → fix-and-continue — a Fix agent applies the demanded fixes and self-verifies its own build. The recorded verdict becomes `FAIL-FIXED`; Gate 2 then proceeds. In SINGLE mode the run reports it as `UNVERIFIED`, never PASS.
-- BLOCKED (no result), or any other or missing verdict → no fix, and the run reports `UNVERIFIED`, never PASS.
+- BLOCKED (no result), or any other or missing verdict → no fix, and the run never reports PASS.
 
 **When Gate 2 inputs are absent:**
 - No plan → skip the Evaluate agent silently (note in output: "Gate 2 Evaluate agent skipped — no plan available")

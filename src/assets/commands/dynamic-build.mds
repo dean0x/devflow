@@ -43,7 +43,7 @@ This command instructs you to construct and run a Claude Code dynamic Workflow t
 Before authoring, verify:
 
 1. **Workflow tool available:** if the `Workflow` tool is not in your available tools, STOP and tell the user: "The Workflow tool is not available in this session. dynamic-build requires Claude Code's dynamic workflow runtime."
-2. **`agentType` support:** confirmed available (spike F5, 2026-06-11). If spawned agents return no results, check that devflow is installed (`devflow init` has been run).
+2. **`agentType` support:** if spawned agents return no results, check that devflow is installed (`devflow init` has been run).
 3. **Tracker paths:** an issue reference or URL in the input is read through the Git agent, which resolves the configured tracker and its access itself and reports `TRACEABILITY: DEGRADED ({reason})` when it cannot read one — then note it and fall back to the issue text the user provided. No tracker CLI is checked here.
 4. **No-remote path:** if the repo has no remote, skip the remote-dependent steps (the wave PR and its evidence) and proceed with local branch operations only; the Git agent reports DEGRADED for any tracker step it cannot reach.
 
@@ -321,7 +321,7 @@ Return: {"verdict": "PASS" | "FAIL" | "BLOCKED", "failures": "..."}`, { agentTyp
       // fix-and-continue — no re-test, no inline Gate 1.
       await agent(`OPERATION: qa-fix
 Fix the failing acceptance test scenarios on branch ${BRANCH}:
-${testResult.failures}
+${testResult.failures || "see the Test agent's report"}
 <!-- curation:on -->
 DECISIONS_CONTEXT: ${DECISIONS_CONTEXT}
 <!-- curation:end -->

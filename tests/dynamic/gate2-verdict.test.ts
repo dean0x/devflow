@@ -528,6 +528,9 @@ interface RoutingCase {
 
 const testSpawns = (spawns: Spawn[]): Spawn[] => spawns.filter(s => s.agentType === 'Test')
 
+/** What the qa-fix prompt carries when a FAIL reply names no failures. */
+const FAILURES_FALLBACK = "see the Test agent's report"
+
 /** Gate 2's routing over its inputs: which agents run, what the Test agent is told, what Gate 2 records. */
 const ROUTING_TABLE: readonly RoutingCase[] = [
   {
@@ -569,6 +572,17 @@ const ROUTING_TABLE: readonly RoutingCase[] = [
       gate2.testVerdict === 'FAIL-FIXED' && spawns.some(s => s.agentType === 'Fix')
         ? null
         : `expected FAIL-FIXED after a Fix fix, got ${gate2.testVerdict}`,
+  },
+  {
+    label: 'a failing test-plan run with no failures field hands the Fix agent a fallback, never "undefined"',
+    inputs: { plan: null, criteria: null, testPlan: TEST_PLAN_FIXTURE },
+    testReply: { verdict: 'FAIL' },
+    check: ({ gate2, spawns }) => {
+      const fixes = spawns.filter(s => s.agentType === 'Fix')
+      if (gate2.testVerdict !== 'FAIL-FIXED' || fixes.length !== 1) return `expected FAIL-FIXED after one Fix spawn, got ${gate2.testVerdict} and ${fixes.length}`
+      if (fixes[0].prompt.includes('undefined')) return 'the Fix prompt carries "undefined"'
+      return fixes[0].prompt.includes(FAILURES_FALLBACK) ? null : `the Fix prompt lacks "${FAILURES_FALLBACK}"`
+    },
   },
   {
     label: 'a test-plan run that gives no result is recorded BLOCKED and fixed by no Fix agent',
@@ -631,7 +645,15 @@ describe('Gate 2 routing, executed over the shipped statement', () => {
       'a test plan alone runs the Test agent with the plan',
       'criteria alone run the Test agent and name no test plan',
       'a failing test-plan run is fixed and recorded FAIL-FIXED',
+      'a failing test-plan run with no failures field hands the Fix agent a fallback, never "undefined"',
       'a test-plan run that gives no result is recorded BLOCKED and fixed by no Fix agent',
+    ])
+  })
+
+  it('known-bad probe: a qa-fix prompt that reads failures without a fallback carries "undefined" for a FAIL reply with no failures field', async () => {
+    const statement = seedOnce(gate2Statement(SCRIPT!)!, '${testResult.failures || "see the Test agent\'s report"}', '${testResult.failures}')
+    expect(await collectGate2RoutingViolations(statement)).toEqual([
+      'a failing test-plan run with no failures field hands the Fix agent a fallback, never "undefined": the Fix prompt carries "undefined"',
     ])
   })
 
@@ -777,7 +799,7 @@ const WAVE_CLAIMS_STATUS = 'whatever its Status'
 const OLD_STATUS_WORDING = 'PASS or FAIL'
 
 /** The Gate 2 doctrine's bullet for a Test run that gives no result: one line, and it repeats no FAIL-FIXED sentence. */
-const DOCTRINE_BLOCKED_BULLET = '- BLOCKED (no result), or any other or missing verdict → no fix, and the run reports `UNVERIFIED`, never PASS.'
+const DOCTRINE_BLOCKED_BULLET = '- BLOCKED (no result), or any other or missing verdict → no fix, and the run never reports PASS.'
 
 /** The engine schema's testVerdict enum, one line, with BLOCKED. */
 const SCHEMA_TEST_VERDICT = '"testVerdict": "PASS | FAIL | FAIL-FIXED | SKIPPED | BLOCKED",'

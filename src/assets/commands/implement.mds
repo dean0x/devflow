@@ -446,7 +446,7 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
    - Loop back to Phase 6 (re-validate at the new HEAD, full scope)
 3. Else report failures to user and halt
 
-**If BLOCKED:** report its reason and log path, then halt.
+**If BLOCKED:** report its cause and log path, then halt.
 
 **If PASS:** append a `gate:validate` claim, run `git rev-parse HEAD` and record the result as `VALIDATED_HEAD`, then continue to Phase 7.
 
@@ -480,7 +480,7 @@ TEST_PLAN: {the TP lines of the evidence file's ## Test Plan section, or (none)}
 Design and execute scenario-based acceptance tests. Report your Status with evidence."
 ```
 
-After every Test agent run — PASS or FAIL, first run or retry — append its TP claims (Phase 6's **Evidence claims**).
+After every Test agent run — whatever its Status, first run or retry — append its TP claims (Phase 6's **Evidence claims**).
 
 **If PASS:** Continue to Phase 8
 
@@ -503,7 +503,7 @@ After every Test agent run — PASS or FAIL, first run or retry — append its T
    - Loop back to Phase 7.
 3. If `qa_retry_count > 2`: Report QA failures to user for decision. The run stops at the report (Phase 12), so Phases 8 to 11 do not run.
 
-**If BLOCKED, or any other or missing Status:** append its TP claims too, report its reason and log path, and stop as in step 3; no Fix agent.
+**If BLOCKED, or any other or missing Status:** report its cause and log path, and stop as in step 3; no Fix agent.
 
 ### Phase 8: Re-Validate (only if a qa-fix committed)
 

@@ -127,7 +127,7 @@ HEAD: {the 40-hex `git rev-parse HEAD`, read before the first scenario and again
 |----|---------|-----------|---------|------|
 | TP-1 | PASS/FAIL/SKIP | S1, S3 | {the command whose exit code decided it, or —} | {its exit code 0-255, or —} |
 
-One row per TP line, in TP order, in every report, a BLOCKED one included. PASS only when at least one scenario covers it and every one passed; FAIL when any failed; else SKIP, with the reason under Skipped Scenarios or Blockers. A `method:local` row always carries its Exit.
+One row per TP line, in TP order, in every report, a BLOCKED one included. PASS only when at least one scenario covers it and every one passed; FAIL when any failed; else SKIP, with the reason under Skipped Scenarios or Blockers. A `method:local` row carries its Exit, or — when its command gave no result.
 
 ### Skipped Scenarios (if any)
 
@@ -147,7 +147,7 @@ One row per TP line, in TP order, in every report, a BLOCKED one included. PASS 
 - **Remediation**: {what the Fix agent should fix}
 
 ### Blockers (if BLOCKED)
-- S{n}: {`command could not start` or `no EXIT line read`}; {duration}; log {its `LOG=` path}
+- S{n}: {`command could not start` or `no EXIT= line read`}; {duration, or —}; log {its `LOG=` path, or —}
 
 ### Evidence Log
 {Each command run's `LOG=` path, for traceability}

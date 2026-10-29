@@ -40,7 +40,7 @@ Process issues from code review reports: triage every issue through the blast-ra
    - Additional filter: must have unresolved reviews (latest review directory has no `resolution-summary.md`)
 2. **If `--path` flag provided:** use only that worktree, skip discovery
    **`--path` validation**: Before proceeding, verify the path exists as a directory and appears in `git worktree list` output. If not: report error and stop.
-3. **If only 1 resolvable worktree** (the common case): proceed as single-worktree flow — zero behavior change
+3. **If only 1 resolvable worktree:** proceed as single-worktree flow
 4. **If multiple resolvable worktrees:** report "Found N worktrees with unresolved reviews: {list}" and proceed with multi-worktree flow
 
 #### Step 0b: Per-Worktree Pre-Flight (Git Agent)
@@ -70,7 +70,7 @@ PR_DESCRIPTION=$(gh pr view {pr_number} --json body --jq '.body' 2>/dev/null || 
 ```
 If `pr_number` is absent or the command fails, set `PR_DESCRIPTION` to `(none)`.
 
-**DIFF_FILES** is extracted from the `### Diff Scope` block in the Git agent validate-branch output. Set to empty string `""` if the block is absent (bug-analysis mode edge case).
+**DIFF_FILES** is the `### Diff Scope` block of the validate-branch output, or `""` when the block is absent.
 
 #### Step 0c: Target Review Directory
 
@@ -81,13 +81,13 @@ For each worktree:
 
 1. List directories in `{worktree}/.devflow/docs/reviews/{branch-slug}/`
 2. **If `--review {timestamp}` provided:** use that specific directory (not supported in multi-worktree mode)
-3. **Otherwise:** sort directories by name descending (timestamps are naturally sortable), scan the 10 most recent directories only. Select the first that contains `review-summary.md` (complete review)
+3. **Otherwise:** sort directories by name descending, scan the 10 most recent directories only. Select the first that contains `review-summary.md` (complete review)
 4. **If latest directory already has `resolution-summary.md`:** the review is resolved — check bug-analysis fallback (step 5b).
 5. **Legacy fallback:** if no timestamped subdirectories exist but flat `*.md` files do in `{worktree}/.devflow/docs/reviews/{branch-slug}/`, read them directly.
 
 **5b. Bug analysis fallback** — if no qualifying review directory found (no reviews exist, or all resolved):
 - List directories in `{worktree}/.devflow/docs/bug-analysis/{branch-slug}/`
-- Sort by name descending (timestamps are naturally sortable), scan the 10 most recent directories only. Select the latest that:
+- Sort by name descending, scan the 10 most recent directories only. Select the latest that:
   - Contains at least one focus report (`security.md`, `functional.md`, `integration.md`, or `usability.md`)
   - Does NOT contain a `resolution-summary.md`
 - If found: set `TARGET_DIR` to that path. Reviews take priority — bug analysis is only used when no qualifying review exists.
@@ -168,9 +168,9 @@ Read review reports from `{TARGET_DIR}/*.md` and extract:
 
 **Exclude from issue extraction:**
 - `review-summary.md` (Synthesize agent output, not individual findings)
-- `resolution-summary.md` (if it exists from a previous partial run)
+- `resolution-summary.md` (from a previous partial run)
 - `bug-analysis-summary.md` (Synthesize agent output for bug-analysis runs)
-- `static-findings.md` (raw static analysis tool output, not individual findings)
+- `static-findings.md` (raw tool output, not individual findings)
 
 **Include:** ALL issues from all categories and severities, including Suggestions.
 
@@ -328,7 +328,7 @@ Collect from each Code agent:
 **Produces:** RESOLUTION_FILE (early write for compaction safety)
 **Requires:** TRIAGE_RESULTS, CODE_AGENT_RESULTS, TARGET_DIR, TARGET_DIR_REL, BRANCH_INFO, RESOLUTION_TS, GATE_LEVEL
 
-**Immediately write `resolution-summary.md`** to `{TARGET_DIR}` using the Write tool.
+**Immediately write `resolution-summary.md`** to `{TARGET_DIR}`.
 
 <!-- compliance:on -->
 Set `Tracked` for FIX_SEPARATE and TECH_DEBT items to `(pending)` — to be backfilled after Phase 9 manage-debt (or `TRACEABILITY: DEGRADED ({reason})` if manage-debt degrades).
@@ -364,7 +364,7 @@ Commit any improvements with a conventional-commit message."
 
 ### Phase 7: Verification Gate
 
-**Produces:** VERIFICATION_STATUS
+**Produces:** VERIFICATION_STATUS, VERIFICATION_BLOCKER
 **Requires:** CODE_AGENT_RESULTS, BRANCH_INFO
 
 If no fixes were made (CODE_AGENT_RESULTS contains 0 commits) → set VERIFICATION_STATUS = SKIPPED, skip: "No fixes applied — skipping Verification Gate."
@@ -398,16 +398,16 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
    {COMPLIANCE_DIRECTIVE}"
    ```
    - Loop back to re-validate
-3. If `validation_retry_count > 2`: set VERIFICATION_STATUS = FAILED and exit the validation loop.
+3. If `validation_retry_count > 2`: set VERIFICATION_STATUS = FAILED, Final gate `FAILED after N attempts`; exit the validation loop.
 
-**If BLOCKED:** FAILED, exit the loop with no Fix agent; give its cause and log path in the Phase 10 report only, never in resolution-summary.md.
+**If BLOCKED:** FAILED, Final gate `FAILED (Validate blocked)`, no Fix agent, exit the loop; VERIFICATION_BLOCKER = its cause and log path, for the Phase 10 report only, never resolution-summary.md.
 
-**If PASS:** set VERIFICATION_STATUS = PASS and exit the validation loop.
+**If PASS:** set VERIFICATION_STATUS = PASS, Final gate `PASS`; exit the validation loop.
 
-Any other or missing Status: FAILED, exit the loop; never PASS.
+Any other or missing Status: FAILED, Final gate `FAILED (no Validate status)`, exit the loop; never PASS.
 
 Record `## Verification` outcome in resolution-summary.md (runs unconditionally after the validation loop exits):
-- Rewrite the `## Verification` section with | Command | Result | table + `Final gate: PASS | FAILED after N attempts | FAILED (Validate blocked)`; a FAILED gate gets a blocking callout (never a silent pass)
+- Rewrite the `## Verification` section with | Command | Result | table + `Final gate: {value above}`; a FAILED gate gets a blocking callout (never a silent pass)
 
 <!-- compliance:on -->
 Push all commits to remote once (Code and Fix agents ran with PUSH: false — runs whether the gate PASSED or FAILED, so the branch is always visible before Phase 9 or CI runs):
@@ -454,9 +454,9 @@ git -C {worktree} push; echo "exit=$?"
 4. **If PENDING** and fewer than 3 waits have run → wait again. Otherwise → report "CI still running — verify manually before merging" and proceed.
 5. **If INDETERMINATE** and fewer than 3 waits have run → wait again, unless `waited=570` with `reason=head-mismatch` or `no-workflow-check`. Otherwise → report "CI status unknown — verify manually before merging" and proceed.
 <!-- curation:on -->
-6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES`, `DECISIONS_CONTEXT` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Fix agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
+6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES`, `DECISIONS_CONTEXT` and `PUSH: false`; `CI_FAILURES` holds only the failing-check names from the line: the Fix agent fetches the full names and reads the logs itself. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
 <!-- curation:off -->
-6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Fix agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
+6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES` and `PUSH: false`; `CI_FAILURES` holds only the failing-check names from the line: the Fix agent fetches the full names and reads the logs itself. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
 <!-- curation:end -->
 7. **Budget**: at most 3 waits and 2 fixes in all, per worktree. When one is spent, report the status and proceed.
 <!-- /PATTERN: ci-status-gate -->
@@ -546,7 +546,7 @@ The line ends at `by:test` when the row's Exit is not a number from 0 to 255; ap
 The line ends at `by:test` when the row's Exit is not a number from 0 to 255; append nothing when the report's `HEAD:` is not one 40-hex SHA. Record `Test plan: {n} stale, {m} re-verified` under `## Verification` in resolution-summary.md now, and set `STALE_REVERIFICATION` to that line.
 <!-- compliance:end -->
 
-A Test Status other than PASS or FAIL still gets its claims, but `DEGRADED (Test run blocked)` replaces that line. `{m}` counts PASS rows only.
+A Test Status other than PASS or FAIL still gets its claims, but `Test plan: DEGRADED (Test run blocked)` replaces that line. `{m}` counts PASS rows only.
 
 <!-- compliance:on -->
 **Step 9b-1: Resolve external threads**
@@ -656,9 +656,9 @@ If the script prints a `TRACEABILITY: DEGRADED` line: warn, proceed to Phase 10.
 ### Phase 10: Report
 
 <!-- compliance:on -->
-**Requires:** BRANCH_INFO, TARGET_DIR, PR_COMMENT, THREAD_RESOLUTION_RESULT, GATE_LEVEL
+**Requires:** BRANCH_INFO, TARGET_DIR, PR_COMMENT, THREAD_RESOLUTION_RESULT, GATE_LEVEL, VERIFICATION_BLOCKER
 <!-- compliance:off -->
-**Requires:** BRANCH_INFO, TARGET_DIR, GATE_LEVEL
+**Requires:** BRANCH_INFO, TARGET_DIR, GATE_LEVEL, VERIFICATION_BLOCKER
 <!-- compliance:end -->
 
 <!-- compliance:on -->
@@ -687,7 +687,8 @@ The resolution summary was already written to `{TARGET_DIR}/resolution-summary.m
 | Duplicates Collapsed | {n} |
 
 ### Verification
-Final gate: {the line Phase 7 recorded}
+Final gate: {the value Phase 7 recorded}
+{VERIFICATION_BLOCKER, if any}
 
 ### Commits Created
 - {sha} {message}
@@ -816,7 +817,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 
 ## Output Artifact
 
-Written in Phase 5 (Collect Results) to `{TARGET_DIR}/resolution-summary.md`:
+Written in Phase 5 to `{TARGET_DIR}/resolution-summary.md`:
 
 ```markdown
 # Resolution Summary
@@ -856,7 +857,7 @@ _(Note: `Deferred` = `## Fix Separately` count + `## Deferred to Tech Debt` coun
 
 Regression tests added: {n}
 
-Final gate: {the line Phase 7 recorded}
+Final gate: {the value Phase 7 recorded}
 
 ## Fixed Issues
 | Issue | File:Line | Commit |
