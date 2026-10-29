@@ -6,7 +6,7 @@
  * of a build, typecheck or test command saves the output tokens without losing the verdict. The
  * "Validation Order" table in `validate.md` has a Quiet form column. The fallback sentence states the
  * re-run: after a failed Test row, re-run each of its first 20 failed test files alone, once,
- * verbose, never the suite. It is the stated exception to the never-re-run and never-wait rules in the shared
+ * verbose, never the suite. It is the stated exception to the never-re-run rule in the shared
  * `## Running commands` block, so it sits outside the block. The block is byte-identical in the Code,
  * Fix, Refactor, Validate and Test agents (`tests/guards/running-commands-parity.test.ts` owns the
  * bytes; the arm here asserts that neither the quiet form nor the fallback sentence is in it).
@@ -23,7 +23,7 @@ import * as path from 'path'
 import { ROOT, collectUnfencedH2, resolveAgentSource } from '../helpers.js'
 
 const BLOCK_HEADING = '## Running commands'
-const FALLBACK = "After a failed Test row, re-run each of its first 20 failed test files alone, once, verbose, never the suite: this is the one exception to the never-re-run and never-wait rules under Running commands."
+const FALLBACK = "After a failed Test row, re-run each of its first 20 failed test files alone, once, verbose, never the suite: this is the one exception to the never-re-run rule under Running commands."
 
 /** The Validation Order table, row by row, as trimmed cells. */
 export function tableRows(body: string): string[][] {

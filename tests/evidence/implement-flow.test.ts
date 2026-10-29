@@ -927,6 +927,16 @@ function phaseSection(md: string, heading: string): string | null {
   return next === -1 ? md.slice(at) : md.slice(at, at + heading.length + next)
 }
 
+/** The sentence that stops a Validate report with any Status but PASS or FAIL: its own paragraph, right after the `**If PASS:**` paragraph. */
+const OTHER_STATUS_HALT = 'Any other or missing Status: report and halt; never PASS.'
+
+/** True when `text` holds the halt sentence exactly once, as the paragraph that follows the `**If PASS:**` paragraph. */
+function haltFollowsPass(text: string): boolean {
+  const paragraphs = text.split('\n\n').map(p => p.trim())
+  const pass = paragraphs.findIndex(p => p.startsWith('**If PASS:**'))
+  return text.split(OTHER_STATUS_HALT).length - 1 === 1 && pass !== -1 && paragraphs[pass + 1] === OTHER_STATUS_HALT
+}
+
 const H = {
   p1: '### Phase 1: Setup',
   p2: '### Phase 2: Implement',
@@ -1006,6 +1016,7 @@ function collectValidateOnceDefects(md: string): string[] {
   const six = phaseSection(md, H.p6) ?? ''
   if (!six.includes('record the result as `VALIDATED_HEAD`')) out.push('Phase 6 does not record VALIDATED_HEAD')
   if (!six.includes('re-validate at the new HEAD, full scope')) out.push('a Phase 6 retry does not re-run at full scope at its new HEAD')
+  if (!haltFollowsPass(six)) out.push('Phase 6 does not halt on any other or missing Status, once, after its PASS line')
   return out
 }
 
@@ -1024,6 +1035,13 @@ describe('#421 AC-2: one full-scope Validate, and exactly two claim sites', () =
     const third = md.replace('### Phase 9: Open PR', '**If PASS:** append a `gate:validate` claim again.\n\n### Phase 9: Open PR')
     expect(collectValidateOnceDefects(third)).toContain('expected two gate:validate claim lines, found 3')
     expect(collectValidateOnceDefects(md.replace('record the result as `VALIDATED_HEAD`', 'remember it'))).toEqual(['Phase 6 does not record VALIDATED_HEAD'])
+  })
+
+  it('known-bad probe: a Phase 6 that lost its halt on any other or missing Status is reported', () => {
+    const md = implementMd()
+    const lost = md.replace(OTHER_STATUS_HALT, 'Carry on.')
+    expect(lost, 'the seed must land').not.toBe(md)
+    expect(collectValidateOnceDefects(lost)).toEqual(['Phase 6 does not halt on any other or missing Status, once, after its PASS line'])
   })
 })
 
@@ -1217,6 +1235,7 @@ function collectPhase8Defects(md: string): string[] {
   need('the scope (changed files since VALIDATED_HEAD)', text.includes('`git diff --name-only --diff-filter=d VALIDATED_HEAD..HEAD`') && text.includes('VALIDATION_SCOPE: changed-only'))
   need('the FAIL arm (report and halt)', /\*\*If FAIL:\*\* Report the failures to user and halt\./.test(text))
   need('the PASS arm appends the second claim', text.includes('**If PASS:** append a `gate:validate` claim'))
+  need('any other or missing Status halts, once, after the PASS arm', haltFollowsPass(text))
   return out
 }
 
@@ -1231,6 +1250,10 @@ describe('#421 AC-4: Phase 8 states its condition, its scope and its FAIL arm in
     expect(collectPhase8Defects(md.replace('`git diff --name-only --diff-filter=d VALIDATED_HEAD..HEAD`', 'the Code agent\'s list'))).toEqual(['the scope (changed files since VALIDATED_HEAD)'])
     expect(collectPhase8Defects(md.replace('**If FAIL:** Report the failures to user and halt.', '**If FAIL:** carry on.'))).toEqual(['the FAIL arm (report and halt)'])
     expect(collectPhase8Defects(md.replace(H.p8, '### Phase 8 gone'))).toEqual(['no Phase 8 section'])
+    const at = md.lastIndexOf(OTHER_STATUS_HALT)
+    expect(at, 'the Phase 8 sentence must be found').toBeGreaterThan(md.indexOf(H.p8))
+    const lost = md.slice(0, at) + 'Carry on.' + md.slice(at + OTHER_STATUS_HALT.length)
+    expect(collectPhase8Defects(lost)).toEqual(['any other or missing Status halts, once, after the PASS arm'])
   })
 })
 

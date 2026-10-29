@@ -79,18 +79,18 @@ If a previous run failed (PREVIOUS_FAILURES provided), prioritize re-testing tho
 
 Run builds, typechecks, lints and tests in the foreground, each with an explicit Bash `timeout` above its expected run time. The ceiling is 600000 ms, or `BASH_MAX_TIMEOUT_MS` when set (`echo ${BASH_MAX_TIMEOUT_MS:-600000}`).
 
-- Capture, then tail, in one Bash call (shell state does not persist): `LOG=$(mktemp); echo "LOG=$LOG"; <command> >"$LOG" 2>&1; rc=$?; tail -n 40 "$LOG"; echo "EXIT=$rc"`. The printed `EXIT=` value is the result; never decide one from a grep count.
-- Never background a command and wait on it, and never poll across turns: no `sleep` or `true` turns, no sentinel-file checks, no Monitor.
-- Prefer the scoped command for the change (a package, a path or a test file); for the whole set, one workspace-level command over a per-package loop.
-- A run that exceeds its timeout is BLOCKED: report its duration and log path. Do not wait on it, poll it or re-run it.
-- A run expected to exceed the ceiling is split into parts, each under about 90% of it, run in sequence. If it cannot be split, report BLOCKED with the remedy `devflow flags --set bash-max-timeout-ms=<ms>`.
+- Capture, then tail, in one Bash call: `LOG=$(mktemp); echo "LOG=$LOG"; <command> >"$LOG" 2>&1; rc=$?; tail -n 40 "$LOG"; printf '\nEXIT=%s\n' "$rc"`. The last `EXIT=` line is the result; never decide one from a grep count.
+- Never background a build or test, and never poll across turns: no `sleep` or `true` turns, no sentinel-file checks, no Monitor.
+- Prefer the scoped command for the change; for the whole set, one workspace command over per-package loops.
+- A run past its timeout moves to the background: no tool call, even a Read, until its end notice, then Read the last `EXIT=` line of the file the move names, not `$LOG`; it alone sets the label, not the notice. With none read it is BLOCKED: report its duration and log path. Report only after the end notice.
+- A run expected to exceed the ceiling may be split into parts, run in sequence.
 - Never re-run a command when nothing it reads has changed.
-- Never wrap a build or test command in `sh -c`, `bash -c`, `python3 -c` or `node -e`: permission rules deny wrapped commands they would allow directly.
+- Never wrap a build or test command in `sh -c`, `bash -c`, `python3 -c` or `node -e`: permission rules deny wrapped commands they allow directly.
 - The same rules hold inside a dynamic Workflow sub-agent.
 
 ## Dev server (test.md only)
 
-When a scenario needs the dev server, follow the lifecycle in `devflow:qa/references/browser-testing.md`: start the server in the background, check readiness with one bounded loop inside a single Bash call, and kill the server before you finish. Never end the turn while it runs.
+When a scenario needs the dev server, follow the lifecycle in `devflow:qa/references/browser-testing.md`: start the server in the background, check readiness with one bounded loop inside a single Bash call, and kill the server before you finish. Never report while it runs.
 
 ## Output
 

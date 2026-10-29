@@ -429,10 +429,9 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
 ```
 
 **If FAIL:**
-1. Extract failure details from Validate agent output
-2. Increment `validation_retry_count`
-3. If `validation_retry_count <= 2`:
-   - Spawn Fix agent with fix context:
+1. Increment `validation_retry_count`
+2. If `validation_retry_count <= 2`:
+   - Spawn Fix agent:
    ```
    Agent(subagent_type="Fix"):
    "OPERATION: validation-fix
@@ -446,9 +445,11 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
    {COMPLIANCE_DIRECTIVE}"
    ```
    - Loop back to Phase 6 (re-validate at the new HEAD, full scope)
-4. If `validation_retry_count > 2`: Report failures to user and halt
+3. Else report failures to user and halt
 
 **If PASS:** append a `gate:validate` claim, run `git rev-parse HEAD` and record the result as `VALIDATED_HEAD`, then continue to Phase 7.
+
+Any other or missing Status: report and halt; never PASS.
 
 **Evidence claims** are lines appended to the `## Claims` section of `EVIDENCE_FILE` — the file's last section, created when absent. Append only: never edit or remove a claim; the last valid one per target wins. Each line takes exactly one of these shapes, where `<head>` is the 40-hex `HEAD:` the agent's report shows:
 
@@ -507,7 +508,7 @@ After every Test agent run — PASS or FAIL, first run or retry — append its T
 **Produces:** REVALIDATION_RESULT
 **Requires:** QA_RESULT, VALIDATED_HEAD, BASE_REF, GATE_LEVEL
 
-Run this phase only if a qa-fix committed (`git rev-parse HEAD` differs from `VALIDATED_HEAD`); otherwise skip it and continue to Phase 9. Spawn Validate agent over what changed since the Phase 6 run:
+Run this phase only if a qa-fix committed (`git rev-parse HEAD` differs from `VALIDATED_HEAD`); else skip to Phase 9. Spawn Validate agent over what changed since the Phase 6 run:
 
 ```
 Agent(subagent_type="Validate"):
@@ -521,6 +522,8 @@ At `lean`, open the prompt with Phase 6's `GATE_LEVEL` and `BASE_SHA` lines; its
 **If FAIL:** Report the failures to user and halt.
 
 **If PASS:** append a `gate:validate` claim (Phase 6's **Evidence claims**), then continue to Phase 9.
+
+Any other or missing Status: report and halt; never PASS.
 
 ### Phase 9: Open PR
 
