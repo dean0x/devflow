@@ -312,8 +312,6 @@ Harden never reviews a deleted file or the old path of a rename; an empty list i
 **Produces:** ALIGNMENT_RESULT
 **Requires:** BASE_REF, EXECUTION_PLAN
 
-After Harden agent passes, spawn Evaluate agent:
-
 ```
 Agent(subagent_type="Evaluate"):
 "ORIGINAL_REQUEST: {task description or issue content}
@@ -327,7 +325,7 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
 **If ALIGNED:** Continue to Phase 6
 
 **If MISALIGNED:**
-1. Extract misalignment details from Evaluate agent output
+1. Take the misalignments from the Evaluate report.
 2. Increment `alignment_fix_count`
 3. If `alignment_fix_count <= 2`:
    - Spawn Fix agent:
@@ -392,14 +390,12 @@ Any other or missing Status: report and halt; never PASS.
 
 - `gate:validate` — after a Phase 6 or Phase 8 PASS.
 - `TP-<n>` — after every Phase 7 run, one line per `### Test Plan Evidence` row whose TP is in `TEST_PLAN`, with the row's outcome; the line ends at `by:test` when the row's Exit is not a number from 0 to 255.
-- Append nothing from a report whose `HEAD:` is not a single 40-hex SHA — a reported before/after change included — and say so in the Phase 12 report.
+- Append nothing from a report whose `HEAD:` is not a single 40-hex SHA, and say so in the Phase 12 report.
 
 ### Phase 7: QA Testing
 
 **Produces:** QA_RESULT
 **Requires:** BASE_REF, EXECUTION_PLAN, TEST_PLAN, VALIDATED_HEAD
-
-After Phase 6 passes, spawn Test agent:
 
 ```
 Agent(subagent_type="Test"):
@@ -453,7 +449,7 @@ At `lean`, open the prompt with Phase 6's `GATE_LEVEL` and `BASE_SHA` lines; its
 
 **If BLOCKED:** as in Phase 6.
 
-**If PASS:** append a `gate:validate` claim (Phase 6's **Evidence claims**), then continue to Phase 9.
+**If PASS:** append a `gate:validate` claim, then continue to Phase 9.
 
 Any other or missing Status: report and halt; never PASS.
 
