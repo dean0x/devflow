@@ -1456,5 +1456,6 @@ module.exports = Object.freeze({
   formatSettingsLine,
   isCoherentSettingsLine,
   serializeProjectSuggestion,
+  settleOutcome,
   main,
 });

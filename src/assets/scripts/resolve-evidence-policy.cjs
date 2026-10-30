@@ -1141,5 +1141,6 @@ module.exports = Object.freeze({
   complianceDefault,
   resolve,
   formatLine,
+  settleOutcome,
   main,
 });

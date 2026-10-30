@@ -14,11 +14,12 @@
  * carries (`⇒ use `…` instead`). They are never copied into this file, so a change to
  * either side fails here. The literal must also be a line the script's own grammar accepts.
  *
- * Every error path runs as a process, so the line the model reads is the one the
- * boundary writes after `settleOutcome` settled the outcome, and the exit code is the
- * one the boundary sets. The formatter faults (exit 4 and exit 5) cannot come from real
- * input: the formatter only composes lines its own gate accepts. They go through the
- * boundary seam below instead of a direct main() call, which would skip the settle step.
+ * The exits that real input can reach (1, 2 and 4 from a spawn that throws) run as a
+ * process, so the line the model reads is the one the boundary writes and the exit code
+ * is the one the boundary sets. The formatter faults (exit 4 and exit 5) cannot come from
+ * real input: the formatter only composes lines its own gate accepts. They are checked on
+ * `settleOutcome`, the step that turns main()'s outcome into the line and the exit code
+ * the boundary writes.
  *
  * NOT covered: a script that cannot start at all (a missing file, a node that is not
  * installed). Nothing can print a line then. The partial's literal covers that run, and
@@ -75,40 +76,22 @@ function partialLiteral(partialRel: string): string {
 /** The subprocess arms spawn node once each, which can take longer than the default test timeout. */
 const SUBPROCESS_TIMEOUT = { timeout: 20_000 } as const
 
-/**
- * The boundary seam. Each script writes stdout and sets the exit code in one place, after
- * `settleOutcome` has checked what main() returned, and exports neither. A preload rewrites
- * the one `main(process.argv)` call at that boundary so main() takes the `exec` and
- * `formatLine` deps its in-process callers take. Everything after main() runs as shipped:
- * `settleOutcome`, the stdout write and the exit code. `exec` answers every git call as
- * "not a repository", so main() reaches its formatter without a repository.
- */
-const BOUNDARY_CALL = 'outcome = main(process.argv);'
-
-/** A formatter that throws: main() maps it to exit 4. */
-const THROWING_FORMATTER = "() => { throw new Error('seeded'); }"
-
-/** A formatter that composes a hostile two-line output: the gate refuses it and main() returns exit 5. */
-const HOSTILE_FORMATTER = "() => 'hostile\\nsecond line'"
-
-/** Write the preload that seams `script`'s boundary call with `formatter`; returns its path. */
-function boundarySeamPreload(script: string, formatter: string): string {
-  const seamed = `outcome = main(process.argv, { exec: () => ({ status: 128, stdout: Buffer.alloc(0) }), formatLine: ${formatter} });`
-  const preload = path.join(tmp, 'boundary-seam.cjs')
-  fs.writeFileSync(preload, [
-    "const Module = require('module');",
-    'const compile = Module.prototype._compile;',
-    'Module.prototype._compile = function (content, filename) {',
-    `  if (filename === ${JSON.stringify(fs.realpathSync(script))}) {`,
-    `    if (content.split(${JSON.stringify(BOUNDARY_CALL)}).length !== 2) throw new Error('boundary seam: the main() call is not in the script exactly once');`,
-    `    content = content.replace(${JSON.stringify(BOUNDARY_CALL)}, () => ${JSON.stringify(seamed)});`,
-    '  }',
-    '  return compile.call(this, content, filename);',
-    '};',
-    '',
-  ].join('\n'))
-  return preload
+/** What `settleOutcome` returns: the stdout line (before its newline) and the exit code. */
+interface Settled {
+  readonly code: number
+  readonly line: string
 }
+
+/** Run the script's own `settleOutcome` on an outcome main() could return. */
+function settle(script: string, outcome: unknown): Settled {
+  const mod = createRequire(import.meta.url)(script) as ScriptModule
+  const settleOutcome = mod.settleOutcome
+  if (typeof settleOutcome !== 'function') throw new Error(`${script}: settleOutcome is not exported by the script`)
+  return settleOutcome(outcome) as Settled
+}
+
+/** A composed line the output gate refuses: two lines, the second one smuggled in. */
+const HOSTILE_LINE = 'hostile\nsecond line'
 
 let tmp: string
 let home: string
@@ -180,19 +163,21 @@ describe.each(SUBJECTS)('$name prints the partial literal on every error path', 
       expect(run.status, run.stderr).toBe(4)
       expect(run.stdout).toBe(expectedStdout())
     })
+  })
 
-    it('exit 4, internal error (a formatter that throws): the literal on stdout', () => {
-      const run = runResolver({ home, script, args: [tmp], nodeArgs: ['--require', boundarySeamPreload(script, THROWING_FORMATTER)] })
-      expect(run.status, run.stderr).toBe(4)
-      expect(run.stdout).toBe(expectedStdout())
-      expect(run.stderr, 'the formatter arm ran, not another exit-4 arm').toContain('internal error')
+  describe('settleOutcome, the step before the boundary writes', () => {
+    it.each([
+      ['a resolved outcome whose line is hostile', { code: 0, line: HOSTILE_LINE }],
+      ['a refusal outcome from main()', { code: 5, line: HOSTILE_LINE }],
+    ])('exit 5, output gate refused (%s): the literal and code 5', (_label, outcome) => {
+      expect(settle(script, outcome)).toEqual({ code: 5, line: partialLiteral(partial) })
     })
 
-    it('exit 5, output gate refused (a hostile composed line): the literal on stdout', () => {
-      const run = runResolver({ home, script, args: [tmp], nodeArgs: ['--require', boundarySeamPreload(script, HOSTILE_FORMATTER)] })
-      expect(run.status, run.stderr).toBe(5)
-      expect(run.stdout).toBe(expectedStdout())
-      expect(run.stderr, 'the output gate arm ran').toContain('output gate refused')
+    it.each([
+      ['an internal-error outcome from main(), as when the formatter throws', { code: 4, line: HOSTILE_LINE }],
+      ['an outcome that is not an object', null],
+    ])('exit 4, internal error (%s): the literal and code 4', (_label, outcome) => {
+      expect(settle(script, outcome)).toEqual({ code: 4, line: partialLiteral(partial) })
     })
   })
 })
