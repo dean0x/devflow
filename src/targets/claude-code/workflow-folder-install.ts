@@ -19,6 +19,12 @@
  *     it was moved to and the result names that path (`recoveryPath`); nothing deletes a backup
  *     that the result names as the way back. A folder that already holds the exact files is not
  *     touched, so an install that changes nothing writes nothing.
+ *   - NO LOSS of the user's files: before any rename, the backup session moves every file of the
+ *     old folder that devflow did not ship (the files of all four variant keys count as shipped)
+ *     to the backup folder. If one cannot move, the result is `failed` and the folder stays as it
+ *     is. After the swap the displaced folder is scanned again, its shipped files are removed by the
+ *     session's list, and it goes with a plain `rmdir`; no folder is removed with a recursive `rm`
+ *     except the staging folder, which holds only the copies this call wrote.
  *
  * A link at the skills folder or at the folder, or anything there that is not a folder, is refused
  * and recorded in `links.refusedFolders`; a link is never followed and never written through.
@@ -42,7 +48,8 @@ import {
 } from '../../core/mds-variants.js';
 import { isContainedIn } from '../../core/paths.js';
 import { prefixSkillName } from '../../core/plugins.js';
-import type { BackupSession } from './install-backup.js';
+import { discardDisplacedFolder } from './folder-swap.js';
+import { formatCappedList, type BackupSession } from './install-backup.js';
 import { directoryState, refuseUnrealFolder, type LinkReport } from './linked-folder.js';
 
 /** The deepest level of a folder that is read or compared: `references/<file>` is level 1. */
@@ -211,12 +218,13 @@ export interface InstallWorkflowFolderOptions {
   files: readonly WorkflowFolderFile[];
   /** Where a refused folder is recorded. */
   links: Pick<LinkReport, 'refusedFolders'>;
-  /** The backup session of the run, for the files in the folder that the swap would replace. */
+  /** The backup session of the run: it moves the files of the user's out of the folder before the swap. */
   backups: BackupSession;
 }
 
 /**
- * Write `skills/devflow:<name>/` as exactly `files`: stage, then swap in. See the module comment.
+ * Write `skills/devflow:<name>/` as exactly `files`: move the user's files aside, stage, then swap
+ * in. See the module comment.
  *
  * The staging folder sits under `claudeDir`, not under `skills/`, so a folder a crash leaves
  * behind never looks like a second skill to Claude Code. It is made by `mkdtemp`, an exclusive
@@ -226,7 +234,7 @@ export interface InstallWorkflowFolderOptions {
  * Never throws.
  */
 export async function installWorkflowFolder(opts: InstallWorkflowFolderOptions): Promise<WorkflowFolderInstall> {
-  const { claudeDir, name, files, links } = opts;
+  const { claudeDir, name, files, links, backups } = opts;
   if (!path.isAbsolute(claudeDir)) {
     return { name, outcome: 'failed', reason: `claudeDir is not an absolute path ("${claudeDir}")` };
   }
@@ -244,10 +252,19 @@ export async function installWorkflowFolder(opts: InstallWorkflowFolderOptions):
   if (await refuseUnrealFolder(links, target)) return { name, outcome: 'refused' };
 
   let staging: string | null = null;
-  let keepBackup = false;
   try {
-    if ((await directoryState(target)) === 'real' && (await folderHolds(target, files))) {
-      return { name, outcome: 'unchanged' };
+    if ((await directoryState(target)) === 'real') {
+      // Before any rename: what devflow did not ship moves out of the folder, whichever key's files it holds.
+      await backups.prepass([target]);
+      const kept = backups.keptUnder(target);
+      if (kept.length > 0) {
+        return {
+          name,
+          outcome: 'failed',
+          reason: `${kept.length} file(s) in ${target} could not be moved aside, so the folder was left as it is: ${formatCappedList(kept)}`,
+        };
+      }
+      if (await folderHolds(target, files)) return { name, outcome: 'unchanged' };
     }
     await fs.mkdir(claudeDir, { recursive: true });
     staging = await fs.mkdtemp(stagingPrefixOf(claudeDir, name));
@@ -269,7 +286,6 @@ export async function installWorkflowFolder(opts: InstallWorkflowFolderOptions):
       try {
         await fs.rename(backup, target);
       } catch (restoreErr) {
-        keepBackup = true;
         return {
           name,
           outcome: 'failed',
@@ -279,13 +295,12 @@ export async function installWorkflowFolder(opts: InstallWorkflowFolderOptions):
       }
       throw err;
     }
+    // The displaced folder is scanned again, because a file can arrive after the first scan.
+    if (hadTarget) await discardDisplacedFolder(backups, backup, target);
     return { name, outcome: 'installed' };
   } catch (err) {
     return { name, outcome: 'failed', reason: errorMessage(err) };
   } finally {
-    if (staging !== null) {
-      await fs.rm(staging, { recursive: true, force: true }).catch(() => undefined);
-      if (!keepBackup) await fs.rm(backupOf(staging), { recursive: true, force: true }).catch(() => undefined);
-    }
+    if (staging !== null) await fs.rm(staging, { recursive: true, force: true }).catch(() => undefined);
   }
 }

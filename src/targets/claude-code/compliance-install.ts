@@ -25,9 +25,10 @@ import * as path from 'path';
 import { skillsDir, rulesDir } from '../../core/assets.js';
 import { ALWAYS_PRESENT_REFS, COMPLIANCE_FRAMEWORKS, normalizeFrameworks, type ComplianceFeatureState } from '../../core/compliance.js';
 import { parseComplianceFragment, composeComplianceSkill, composeComplianceRule, type ComplianceFragment } from '../../core/compliance-compose.js';
+import { swapFolderIn } from './folder-swap.js';
 import type { BackupSession } from './install-backup.js';
-import { validateSkillShadow, validateRuleShadow } from './installer.js';
-import { newLinkReport, refuseUnrealFolder, removeReportingLink, warnLinkReport, writeFileReplacingLink, type LinkReport } from './linked-folder.js';
+import { copyDirectory, validateSkillShadow, validateRuleShadow } from './installer.js';
+import { newLinkReport, refuseUnrealFolder, warnLinkReport, writeFileReplacingLink, type LinkReport } from './linked-folder.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -92,6 +93,11 @@ function skillTarget(claudeDir: string): string {
 /** The folder the compliance skill is built in before it is renamed into place: {claudeDir}/skills/devflow:compliance.tmp */
 export function complianceSkillTempPath(claudeDir: string): string {
   return `${skillTarget(claudeDir)}.tmp`;
+}
+
+/** Where the compliance skill folder waits while the new one is renamed in: {claudeDir}/skills/devflow:compliance.old */
+export function complianceSkillAsidePath(claudeDir: string): string {
+  return `${skillTarget(claudeDir)}.old`;
 }
 
 /** Installed compliance rule file: {claudeDir}/rules/devflow/compliance.md */
@@ -160,8 +166,11 @@ async function loadComplianceFragments(
  * `fragments` is loaded once by convergeComplianceArtifacts and shared with the rule
  * installer — the SKILL.md and the rule compose from the same parsed set.
  *
- * Build under a .tmp sibling, remove old target, rename. An old target that is a link is unlinked,
- * never followed, so what it points to is left as it was; the link is recorded in `links`.
+ * Build under a .tmp sibling, then swap it in: the old target waits in a .old sibling while the new one
+ * is renamed in. A file in the old target that devflow did not ship moves to the backup folder first;
+ * if one cannot move, nothing is swapped and the shipped files are written into the old target (see
+ * {@link swapFolderIn}). An old target that is a link is moved aside as the link itself, never
+ * followed, so what it points to is left as it was; the link is recorded in `links`.
  * Unexpected I/O failures are reported via warn; never thrown.
  */
 async function installSkillDir(
@@ -234,11 +243,18 @@ async function installSkillDir(
       }
     }
 
-    // Swap: remove old target, rename tmp into place (two calls, not atomic). The link is recorded
+    // Swap: the old target waits aside, the tmp folder is renamed into place. The link is recorded
     // once the real folder stands in its place, so the report matches its wording.
-    const unlinked = await removeReportingLink(target);
-    await fs.rename(tmpTarget, target);
-    links.replacedLinks.push(...unlinked);
+    await swapFolderIn({
+      backups,
+      target,
+      staged: tmpTarget,
+      aside: complianceSkillAsidePath(claudeDir),
+      links,
+      mergeInto: () => copyDirectory(tmpTarget, target, undefined, links),
+    });
+    // The tmp folder is gone after a swap; a merge leaves it behind.
+    await fs.rm(tmpTarget, { recursive: true, force: true });
   } catch (err) {
     // Clean up tmp on failure (best-effort) so no orphan is left behind.
     await fs.rm(tmpTarget, { recursive: true, force: true }).catch(() => undefined);

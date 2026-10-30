@@ -54,7 +54,12 @@ export interface ConvergeReferencesResult {
   converged: boolean;
   /** Manifest-relative generated references this run wrote. */
   rewritten: readonly string[];
-  /** Skill files this run removed (compliance off), spelled as in COMPLIANCE_OFF_REMOVED_SKILL_FILES. */
+  /**
+   * Files and folders this run removed below the skills folder, spelled as in
+   * COMPLIANCE_OFF_REMOVED_SKILL_FILES: what the overlay's prune removed (a reference the manifest no
+   * longer names), then, with compliance off, the files of that list. Retired files that the backup
+   * session removed with its own list are in its record, not here.
+   */
   removed: readonly string[];
   /** Skill files this run wrote back (compliance on), spelled as in COMPLIANCE_OFF_REMOVED_SKILL_FILES. */
   restored: readonly string[];
@@ -94,6 +99,7 @@ export async function convergeReferences(opts: ConvergeReferencesOptions): Promi
 
   let rewritten: readonly string[] = [];
   let unproven = false;
+  const removed: string[] = [];
 
   const host = await referencesHostState(gitSkillDir);
   if (host.kind === 'refused') {
@@ -117,6 +123,9 @@ export async function convergeReferences(opts: ConvergeReferencesOptions): Promi
         fail(`could not prune ${failed.name} (${String(failed.error)})`);
         unproven = true;
       }
+      // What the prune removed is named beside what the compliance-off list removes. The prune names
+      // are relative to the references folder; this list spells them from the skills folder.
+      removed.push(...overlay.pruned.removed.map(name => `${prefixSkillName(SKILL_REFS_SKILL_NAME)}/references/${name}`));
     } catch (err) {
       // The overlay throws for a packaging failure only: an absent source root, or a manifest entry
       // the root lacks. Nothing is written in either case, and nothing falls through to another root.
@@ -125,7 +134,6 @@ export async function convergeReferences(opts: ConvergeReferencesOptions): Promi
     }
   }
 
-  const removed: string[] = [];
   const restored: string[] = [];
   const stillPosting: string[] = [];
 

@@ -57,7 +57,7 @@ import {
   workflowFolderNames,
 } from '../../src/core/plugins.js';
 import { RETIRED_SHIPPED, retiredPathSet } from '../../src/core/retired-shipped-names.js';
-import { convergeComplianceArtifacts, complianceSkillTempPath } from '../../src/targets/claude-code/compliance-install.js';
+import { convergeComplianceArtifacts, complianceSkillAsidePath, complianceSkillTempPath } from '../../src/targets/claude-code/compliance-install.js';
 import { copyTempPath } from '../../src/targets/claude-code/compliance-off-files.js';
 import { curationSwapPaths } from '../../src/targets/claude-code/curation-install.js';
 import { classify, type EntryKind } from '../../src/targets/claude-code/install-backup.js';
@@ -632,6 +632,7 @@ describe('sidecar names', () => {
     ['the link replacement writer', () => rel(linkReplacementTempPath(path.join(CLAUDE, 'agents', 'devflow', 'tracker.md'))), 'file'],
     ['the compliance-off copy', () => rel(copyTempPath(path.join(CLAUDE, 'skills', 'devflow:git', 'references', 'publication-gate.md'))), 'file'],
     ['the compliance skill build', () => rel(complianceSkillTempPath(CLAUDE)), 'directory'],
+    ['the compliance skill aside folder', () => rel(complianceSkillAsidePath(CLAUDE)), 'directory'],
     ['the curation staging folder', () => rel(curationSwapPaths(CLAUDE, 1_730_000_000_000).staging), 'directory'],
     ['the curation backup folder', () => rel(curationSwapPaths(CLAUDE, 1_730_000_000_000).backup), 'directory'],
   ] as const)('%s makes a name that classifies as a sidecar', (_producer, name, kind) => {

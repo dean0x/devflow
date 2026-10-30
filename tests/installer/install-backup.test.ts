@@ -820,3 +820,48 @@ describe('the per-target filter of the pre-pass', () => {
     expect(session.snapshot().moved).toHaveLength(2);
   });
 });
+
+describe('a displaced folder in the pre-pass', () => {
+  async function displace(): Promise<string> {
+    await put('skills/devflow:git/SKILL.md');
+    await put('skills/devflow:git/references/pr/ensure.md');
+    await put('skills/devflow:git/mine-notes.md');
+    const aside = at('.devflow-curation-1-a.tmp.old');
+    await fs.rename(at('skills/devflow:git'), aside);
+    return aside;
+  }
+
+  it('tells its entries apart as if the folder still stood where it was displaced from', async () => {
+    const aside = await displace();
+    const session = open();
+
+    await session.prepass([{ folder: aside, displacedFrom: at('skills/devflow:git') }]);
+    const removal = await session.removeListed(aside);
+
+    expect(session.snapshot().moved.map(unit => unit.original)).toEqual([path.join(aside, 'mine-notes.md')]);
+    expect(await fs.readFile(inRun('.devflow-curation-1-a.tmp.old/mine-notes.md'), 'utf8')).toBe('skills/devflow:git/mine-notes.md');
+    expect(removal.folderRemoved).toBe(true);
+    expect(await exists(aside)).toBe(false);
+  });
+
+  it('moves every entry of the same folder when it is scanned under its own name', async () => {
+    const aside = await displace();
+    const session = open();
+
+    await session.prepass([aside]);
+
+    const moved = session.snapshot().moved.map(unit => path.relative(aside, unit.original)).sort();
+    expect(moved).toEqual(['SKILL.md', 'mine-notes.md', 'references']);
+  });
+
+  it('refuses a displaced-from path outside the Claude dir', async () => {
+    const aside = await displace();
+    const session = open();
+
+    const result = await session.prepass([{ folder: aside, displacedFrom: path.join(home, 'elsewhere') }]);
+
+    expect(result.moved).toEqual([]);
+    expect(result.failures).toEqual([{ path: aside, action: 'scan', reason: 'outside-claude-dir' }]);
+    expect(await exists(path.join(aside, 'mine-notes.md'))).toBe(true);
+  });
+});

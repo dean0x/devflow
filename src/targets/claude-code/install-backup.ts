@@ -213,10 +213,15 @@ export interface PrepassResult {
  * relative to `folder` (`/` separators) and its kind. An entry it refuses is left alone whole: not
  * moved, not entered and not listed for removal, so a later {@link BackupSession.removeListed}
  * keeps it too. Without `include` the scan takes every entry.
+ *
+ * `displacedFrom` is for a folder that was renamed away from the place devflow ships it: the scan
+ * tells its entries apart as if the folder still stood at that path, so the files devflow shipped
+ * there are listed and the rest move. Entries it moves keep the path they have now.
  */
 export interface PrepassTarget {
   readonly folder: string;
   readonly include?: (relative: string, kind: EntryKind) => boolean;
+  readonly displacedFrom?: string;
 }
 
 export interface RemoveResult {
@@ -530,13 +535,14 @@ export function createBackupSession(options: BackupSessionOptions): BackupSessio
     const failuresBefore = failures.length;
     const capsBefore = capHits.length;
     for (const target of targets) {
-      const { folder, include } = typeof target === 'string' ? { folder: target, include: undefined } : target;
+      const { folder, include, displacedFrom } = typeof target === 'string' ? { folder: target, include: undefined, displacedFrom: undefined } : target;
       const absolute = path.resolve(folder);
-      if (!isContainedIn(claudeDir, absolute)) {
+      const stoodAt = displacedFrom === undefined ? absolute : path.resolve(displacedFrom);
+      if (!isContainedIn(claudeDir, absolute) || !isContainedIn(claudeDir, stoodAt)) {
         fail(absolute, 'scan', 'outside-claude-dir');
         continue;
       }
-      const rel = relFromClaude(absolute);
+      const rel = relFromClaude(stoodAt);
       const logical = classify(rel, 'directory', sets) === 'sidecar' ? sidecarBase(rel) ?? rel : rel;
       await scanFolder(absolute, logical, 0, absolute, include);
     }

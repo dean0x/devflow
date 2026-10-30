@@ -118,10 +118,11 @@ import {
   type PluginDefinition,
 } from '../../core/plugins.js';
 import { convergeFromManifest, type ConvergeComplianceArtifactsResult } from './compliance-install.js';
+import { swapFolderIn } from './folder-swap.js';
 import { copyDirectory, resolveSkillSource } from './installer.js';
 import type { BackupSession } from './install-backup.js';
 import { LANGUAGE_STAMPED_COMMANDS, stampForConverge } from './language-stamp.js';
-import { entryIsLink, newLinkReport, refuseUnrealFolder, refusedFolderMessage, warnLinkReport, writeFileReplacingLink, type LinkReport } from './linked-folder.js';
+import { directoryState, newLinkReport, refuseUnrealFolder, refusedFolderMessage, unlinkLinkAt, warnLinkReport, writeFileReplacingLink, type LinkReport } from './linked-folder.js';
 import { convergeReferences, type ConvergeReferencesResult } from './reference-converge.js';
 import { installWorkflowFolder, readWorkflowFolder } from './workflow-folder-install.js';
 
@@ -514,6 +515,10 @@ export function curationSwapPaths(claudeDir: string, now: number): { readonly st
  * Staged under `claudeDir` itself, not under `skills/`: a staging directory a
  * crash leaves behind must not look like a second skill to Claude Code.
  *
+ * A file in the old directory that devflow did not ship moves to the backup folder first. If one
+ * cannot move, nothing is swapped: the shipped files are written into the old directory and the
+ * file stays (see {@link swapFolderIn}).
+ *
  * A target that is a link is moved aside as the link itself, never followed, so what it points to is
  * left as it was; the link is recorded in `links` once the real folder stands in its place.
  */
@@ -528,19 +533,44 @@ async function swapInSkillDirectory(
   try {
     await copyDirectory(sourceDir, staging);
     await fs.mkdir(path.dirname(target), { recursive: true });
-    const wasLink = await entryIsLink(target);
-    const hadTarget = wasLink || await pathExists(target);
-    if (hadTarget) await fs.rename(target, backup);
-    try {
-      await fs.rename(staging, target);
-    } catch (err) {
-      if (hadTarget) await fs.rename(backup, target);
-      throw err;
-    }
-    if (wasLink) links.replacedLinks.push(target);
+    await swapFolderIn({
+      backups,
+      target,
+      staged: staging,
+      aside: backup,
+      links,
+      mergeInto: () => copyDirectory(staging, target, undefined, links),
+    });
   } finally {
     await fs.rm(staging, { recursive: true, force: true }).catch(() => undefined);
-    await fs.rm(backup, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+/**
+ * Remove a curation-gated skill folder. The files devflow shipped go by the session's list, anything
+ * else moves to the backup folder first, and the folder goes with a plain `rmdir`: 'kept' means it
+ * still stands because a file could not move. A link is unlinked and a file in its place moves aside.
+ */
+async function removeSkillFolder(target: string, backups: BackupSession): Promise<'absent' | 'removed' | 'kept'> {
+  const state = await directoryState(target);
+  switch (state) {
+    case 'absent':
+      return 'absent';
+    case 'link':
+      return (await unlinkLinkAt(target)) === 'unlinked' ? 'removed' : 'kept';
+    case 'unusable': {
+      const moved = await backups.moveWhole(target);
+      return moved.status === 'moved' ? 'removed' : moved.status === 'absent' ? 'absent' : 'kept';
+    }
+    case 'real': {
+      await backups.prepass([target]);
+      return (await backups.removeListed(target)).folderRemoved ? 'removed' : 'kept';
+    }
+    default: {
+      const unreachable: never = state;
+      void unreachable;
+      return 'kept';
+    }
   }
 }
 
@@ -555,9 +585,13 @@ async function convergeSkills(opts: ConvergeCurationVariantsOptions, links: Link
     const target = path.join(claudeDir, 'skills', prefixSkillName(skill));
     try {
       if (!curation) {
-        if (!(await pathExists(target))) continue;
-        await fs.rm(target, { recursive: true });
-        state = 'removed';
+        const removal = await removeSkillFolder(target, opts.backups);
+        if (removal === 'removed') {
+          state = 'removed';
+        } else if (removal === 'kept') {
+          warn(`curation variants: the ${prefixSkillName(skill)} skill folder (${target}) still holds a file that could not be moved aside, so it was not removed`);
+          state = 'failed';
+        }
         continue;
       }
 

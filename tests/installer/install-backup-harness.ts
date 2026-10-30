@@ -61,6 +61,9 @@ export interface RunInstallOptions {
   readonly shape: 'full' | 'partial';
   readonly backups?: BackupSession;
   readonly warn?: (message: string) => void;
+  /** The machine switches the install writes for. Both default to on. */
+  readonly curation?: boolean;
+  readonly compliance?: boolean;
 }
 
 /** One `installViaFileCopy` run with the arguments init passes for the shape. */
@@ -71,8 +74,8 @@ export async function runInstall(home: TestHome, options: RunInstallOptions): Pr
   const selectedList = [...selected];
   return installViaFileCopy({
     backups: options.backups ?? (await openSession(home)),
-    curation: true,
-    compliance: true,
+    curation: options.curation ?? true,
+    compliance: options.compliance ?? true,
     plugins: selectedList,
     effectivePlugins: [...effective],
     claudeDir: home.claudeDir,
