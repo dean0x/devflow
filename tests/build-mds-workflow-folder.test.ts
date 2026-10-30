@@ -388,6 +388,10 @@ describe('a variant key that lacks a file of its own list fails the build (TP-18
     expect(run.combined).not.toContain("variant key 'both-off'");
     expect(run.combined).toContain(`${FIXTURE_DIR}/references/evidence-asks.mds`);
     await expect(fs.stat(path.join(root, ...WORKFLOW_FOLDERS_OUTPUT_DIR.split('/')))).rejects.toThrow();
+    // All or nothing: the keys that omit the host are complete and must stay unwritten too.
+    for (const key of VARIANT_KEYS) {
+      expect(readFolder(root, key).size, `variant key '${key}' was left half-written`).toBe(0);
+    }
   });
 
   it('a missing host that every key lists fails all four keys, and writes no file of the folder', async () => {
