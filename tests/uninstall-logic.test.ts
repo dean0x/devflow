@@ -3,6 +3,7 @@ import { promises as fs } from 'fs';
 import { execFileSync } from 'child_process';
 import * as os from 'os';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 import { type ConfirmPrompt, formatProjectDataPlan, partitionProjectData, resolveProjectDataPlan, computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, userContentPaths, resolveDevflowDirCleanup, resolveProjectDataCleanup, removeDevFlowInstallArtifacts, installArtifactPaths, resolveInstallArtifactPaths, enumerateDryRunExtras, removeAllDevFlow, removeSelectedPlugins, sweepDevflowNamespaces, isDevFlowInstalled, runDryRunPhase, runSelectivePhaseForScope, runFullPhaseForScope, runCleanupPhase, resolveInstalledPlugins } from '../src/cli/commands/uninstall.js';
 import { isSameLocation } from '../src/core/same-location.js';
 import { DEVFLOW_PLUGINS, getAllAgentNames, parsePluginSelection, skillsOf, type PluginDefinition } from '../src/core/plugins.js';
@@ -15,6 +16,15 @@ import { LEGACY_SKILL_NAMES } from '../src/targets/claude-code/legacy.js';
 import { DEVFLOW_GITIGNORE_BLOCK, DEVFLOW_TRACKED_PATHS } from '../src/targets/claude-code/post-install.js';
 import { BACKUP_ROOT_NAME } from '../src/targets/claude-code/install-backup.js';
 import { assertTempHome, TEMP_HOME_PREFIX } from './setup/home-isolation.js';
+
+/** Plant `<skillsDir>/python/SKILL.md` with the bytes a release of devflow installed: a bare legacy folder that devflow made. */
+async function plantReleasedPython(skillsDir: string): Promise<void> {
+  await fs.mkdir(path.join(skillsDir, 'python'), { recursive: true });
+  await fs.copyFile(
+    fileURLToPath(new URL('./fixtures/released-legacy-skills/python.SKILL.md', import.meta.url)),
+    path.join(skillsDir, 'python', 'SKILL.md'),
+  );
+}
 
 /** The machine-side path helpers the hooks and the move share (the move lock and journal names). */
 const projectPaths = (): { curationMoveLockKey(root: string): string; curationMoveJournalPath(machineDir: string, realRoot: string): string } =>
@@ -2170,18 +2180,17 @@ describe('enumerateDryRunExtras (A5 regression)', () => {
     ).toBe(false);
   });
 
-  it('(A5) names a bare legacy skill dir that exists on disk', async () => {
-    // Seed a bare legacy skill dir — removeAllDevFlow removes bare variants too.
-    // 'codebase-navigation' is a LEGACY_SKILL_NAME (bare, pre-v1.0.0 era).
+  it('(A5) names a bare legacy skill dir that devflow made and exists on disk', async () => {
+    // Seed a bare legacy skill dir that a release installed — removeAllDevFlow removes it too.
+    // 'python' is a LEGACY_SKILL_NAME (bare, pre-v2 era) with a released SKILL.md.
     const skillsDir = path.join(claudeDir, 'skills');
-    const bareLegacySkillDir = path.join(skillsDir, 'codebase-navigation');
-    await fs.mkdir(bareLegacySkillDir, { recursive: true });
+    await plantReleasedPython(skillsDir);
 
     const entries = await enumerateDryRunExtras(claudeDir, devflowDir);
 
     // The bare legacy skill path must appear — the old code only listed devflow-namespace prefixed dirs.
-    const hasBareSkill = entries.some(e => e.includes('codebase-navigation'));
-    expect(hasBareSkill, 'bare legacy skill dir codebase-navigation must be listed in dry-run extras').toBe(true);
+    const hasBareSkill = entries.some(e => e === path.join(skillsDir, 'python'));
+    expect(hasBareSkill, 'bare legacy skill dir python must be listed in dry-run extras').toBe(true);
   });
 
   // -------------------------------------------------------------------------
@@ -2192,26 +2201,26 @@ describe('enumerateDryRunExtras (A5 regression)', () => {
   // included in the preview list — implying it would be deleted.
   //
   // After fix: bare pass iterates LEGACY_SKILL_NAMES only.
-  //   - bare codebase-navigation/ IS listed (it is in LEGACY_SKILL_NAMES)
+  //   - bare python/ (devflow made it) IS listed (it is in LEGACY_SKILL_NAMES)
   //   - bare security/ is NOT listed (it is NOT in LEGACY_SKILL_NAMES)
   //
   // Discriminating: the "does NOT contain bare security" assertion fails RED
   // before the fix and passes GREEN after.
   // -------------------------------------------------------------------------
-  it('dry-run list CONTAINS bare codebase-navigation but NOT bare security', async () => {
+  it('dry-run list CONTAINS bare python but NOT bare security', async () => {
     const skillsDir = path.join(claudeDir, 'skills');
 
     // Seed both dirs so the existence guard (fs.access) includes them when present.
     await fs.mkdir(path.join(skillsDir, 'security'), { recursive: true });
-    await fs.mkdir(path.join(skillsDir, 'codebase-navigation'), { recursive: true });
+    await plantReleasedPython(skillsDir);
 
     const entries = await enumerateDryRunExtras(claudeDir, devflowDir);
 
-    // codebase-navigation IS in LEGACY_SKILL_NAMES — must appear in the preview.
-    const bareLegacyPath = path.join(skillsDir, 'codebase-navigation');
+    // python IS in LEGACY_SKILL_NAMES and devflow made it — must appear in the preview.
+    const bareLegacyPath = path.join(skillsDir, 'python');
     expect(
       entries.some(e => e === bareLegacyPath),
-      `bare codebase-navigation path (${bareLegacyPath}) must appear in enumerateDryRunExtras`,
+      `bare python path (${bareLegacyPath}) must appear in enumerateDryRunExtras`,
     ).toBe(true);
 
     // security is NOT in LEGACY_SKILL_NAMES — its bare path must NOT appear in the preview.
@@ -3130,11 +3139,12 @@ describe('F11: sweepDevflowNamespaces spares a registry devflow:* skill dir', ()
 //
 // After fix: bare pass iterates LEGACY_SKILL_NAMES only.
 //   - bare security/ survives (not in LEGACY_SKILL_NAMES)
-//   - bare codebase-navigation/ is removed (is in LEGACY_SKILL_NAMES)
+//   - bare python/ is removed (is in LEGACY_SKILL_NAMES and devflow made it)
 //   - devflow:security/ is removed (prefixed pass covers live registry)
 //
 // Discriminating: the sentinel-content assertion on security/ fails RED before
-// the fix (rmdir wipes it) and passes GREEN after.
+// the fix (rmdir wipes it) and passes GREEN after. The folder a user made under
+// a legacy name has its own tests in tests/uninstall-bare-legacy-skills.test.ts.
 // ---------------------------------------------------------------------------
 describe('removeAllDevFlow: bare skill dir safety', () => {
   let claudeDir: string;
@@ -3147,16 +3157,16 @@ describe('removeAllDevFlow: bare skill dir safety', () => {
     await fs.rm(claudeDir, { recursive: true, force: true });
   });
 
-  it('bare security/ survives, bare codebase-navigation/ removed, devflow:security/ removed', async () => {
+  it('bare security/ survives, bare python/ (made by devflow) removed, devflow:security/ removed', async () => {
     const skillsDir = path.join(claudeDir, 'skills');
 
     // Seed three dirs: one foreign bare, one legacy bare, one prefixed.
     const bareForeignPath = path.join(skillsDir, 'security');
-    const bareLegacyPath = path.join(skillsDir, 'codebase-navigation');
+    const bareLegacyPath = path.join(skillsDir, 'python');
     const prefixedPath = path.join(skillsDir, 'devflow:security');
 
     await fs.mkdir(bareForeignPath, { recursive: true });
-    await fs.mkdir(bareLegacyPath, { recursive: true });
+    await plantReleasedPython(skillsDir);
     await fs.mkdir(prefixedPath, { recursive: true });
 
     const sentinel = 'sentinel-content-foreign-security-bare-dir';
@@ -3172,10 +3182,10 @@ describe('removeAllDevFlow: bare skill dir safety', () => {
       'bare security/SKILL.md (foreign dir) must not be deleted by removeAllDevFlow',
     ).toBe(sentinel);
 
-    // Legacy bare codebase-navigation/ must be removed (it IS in LEGACY_SKILL_NAMES).
+    // Legacy bare python/ must be removed (it IS in LEGACY_SKILL_NAMES and devflow made it).
     await expect(
       fs.access(bareLegacyPath),
-      'bare codebase-navigation/ must be removed by removeAllDevFlow',
+      'bare python/ must be removed by removeAllDevFlow',
     ).rejects.toThrow();
 
     // Prefixed devflow:security/ must be removed (live registry coverage).

@@ -115,6 +115,22 @@ async function judgeBareSkillFolder(folder: string, released: readonly string[])
 }
 
 /**
+ * {@link judgeBareSkillFolder} for the bare legacy skill `name`, against the released copies of that
+ * name. A name with no entry in `released` was never installed bare by a release, so a folder of
+ * that name is `other`. The one check that `devflow init` and `devflow uninstall` share.
+ *
+ * @param folder - The folder of the skill, `<skills folder>/<name>`.
+ * @param released - SHA-256 hashes of the released `SKILL.md` copies by bare name; defaults to the frozen table.
+ */
+export function judgeBareLegacySkill(
+  folder: string,
+  name: string,
+  released: Readonly<Record<string, readonly string[]>> = BARE_LEGACY_SKILL_HASHES,
+): Promise<'absent' | 'devflow' | 'other' | 'unknown'> {
+  return judgeBareSkillFolder(folder, Object.hasOwn(released, name) ? released[name] : []);
+}
+
+/**
  * Deal with the skill folders that earlier installs left under the legacy names: every name of the
  * legacy skill list, bare and `devflow:`-prefixed.
  *
@@ -160,7 +176,7 @@ export async function sweepLegacySkillFolders(opts: {
     } else if (name.startsWith(NAMESPACE_PREFIX)) {
       await backups.moveWhole(folder);
     } else {
-      const verdict = await judgeBareSkillFolder(folder, Object.hasOwn(released, name) ? released[name] : []);
+      const verdict = await judgeBareLegacySkill(folder, name, released);
       if (verdict === 'devflow') await backups.moveWhole(folder);
       else if (verdict === 'unknown') kept.push(folder);
     }

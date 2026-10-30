@@ -4,7 +4,8 @@
  * `SKILL.md` that a release installed under that name.
  *
  * `devflow init` moves a bare legacy folder out of the shared skills folder only when its
- * `SKILL.md` has one of these hashes (`sweepLegacySkillFolders`). The folder name alone proves
+ * `SKILL.md` has one of these hashes (`sweepLegacySkillFolders`), and a full `devflow uninstall`
+ * removes one only on the same check (`judgeBareLegacySkill`). The folder name alone proves
  * nothing: a skill of the user, or of another tool, may carry a name such as `python` or `plan`.
  * A name with no entry here was never installed bare by a release, so no folder of that name is
  * moved.
