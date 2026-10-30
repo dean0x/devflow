@@ -160,14 +160,6 @@ Pass `COMPLIANCE_DIRECTIVE` to every Code and Fix spawn, on a line of its own.
 
 ### Load Feature Knowledge
 
-Resolve `{worktree}` as the checkout's toplevel, because feature knowledge bases are committed with the branch (D-PROMPT-ROOT): from the start directory — `WORKTREE_PATH` if provided, otherwise cwd (`devflow:worktree-support`) — run
-
-```bash
-git -C "{start}" rev-parse --show-toplevel
-```
-
-and use its one-line output. If the command fails (outside a git repository), `{worktree}` is the start directory itself. All paths below are relative to `{worktree}`.
-
 **Step 1 — Read the index cache** `{worktree}/.devflow/features/index.md`. Each line has the form `- **{slug}** — {areas} — {Use-when description}`. If `index.md` is absent or has no entry line, glob `{worktree}/.devflow/features/*/KNOWLEDGE.md` and read only the YAML frontmatter of each file.
 
 **Step 2 — Pick relevant KBs:** select the entries whose documented area overlaps the current task (index line, or frontmatter `description` and `directories` on fallback). Prefer specificity over breadth.
@@ -192,8 +184,6 @@ Headings: L5 Rules · L40 Overview · L62 Anti-Patterns · L118 Key Files
 ```
 
 A KB with no Rules section labels its entries `Rules ({section name}):` and gives them no ID. `FEATURE_KNOWLEDGE` is these blocks; `FEATURE_KNOWLEDGE_RULES` is the same blocks without the `Headings:` line. Each spawn names the variable its recipient takes. If no KBs exist, no KBs are relevant, or `.devflow/features/` is absent, set both to `(none)`.
-
-**One git call, then direct reads — no `.cjs` script.**
 
 **Fresh base.** Before Phase 2, write `BASE_BRANCH` with the Write tool to the file that `F="$(mktemp)" && echo "F=$F"` prints, after one Read of it. If the Write tool fails, treat the value as missing; never write it with a shell command. Then run `F="{name file}"; trap 'rm -- "$F"' EXIT; cd "{worktree}" && node "$HOME/.devflow/scripts/resolve-base.cjs" local --name-stdin < "$F"; echo "exit=$?"`. Output other than one `BASE_REF=` line (40 or 64 hex, or `none`) with `exit=0` counts as `NOTE=stop`, `REASON=resolver-unavailable`. Record `BASE_REF`. By `NOTE`: `none` continues; `info` prints one plain line; `degraded` records `TRACEABILITY: DEGRADED (base {REASON}; fix: {fix})`; `stop` (`BASE_REF=none`) stops the run, naming REASON and its fix. Fix by REASON: no-merge-base `git fetch --unshallow`; no-ref or timeout `git fetch origin <base>` (`<base>` stays as written); resolver-unavailable `re-run; if it repeats, run devflow init`; invalid-name the allowed set, never the name; any other REASON none, and `; fix: {fix}` is left out.
 
