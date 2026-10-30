@@ -158,7 +158,7 @@ The accepted line is the only source of these values.
 
 **Evidence stub:** only when `EVIDENCE_POLICY` is `required`, a resolved `off` becomes `stub`, so a counts-only record still reaches the PR. `stub` is never a config value.
 
-Note: `auto` does not fail open. The Git agent probes the repository visibility and treats any error or unrecognised value as PUBLIC (mode STUB). What each value does is decided by the Git agent's publication gate (`references/publication-gate.md` step 2); this partial only resolves the value.
+Note: `auto` does not fail open: the Git agent probes the repository visibility and treats any error or unrecognised value as PUBLIC (mode STUB). What each value does is decided by the Git agent's publication gate (`references/publication-gate.md` step 2); this partial only resolves the value.
 Phase 11 passes the resolved value to the evidence script (`publish`), which decides what each value means for the evidence comment. From the same line: `COMPLIANCE_FRAMEWORKS` is the settings line's `COMPLIANCE` with `generic` written `none`: `off`, `none`, or the framework ids the machine and this repository declare.
 
 **Set the compliance directive** from `COMPLIANCE_FRAMEWORKS`. `COMPLIANCE_DIRECTIVE` is empty when `COMPLIANCE_FRAMEWORKS` is `off`: a spawn line that holds only `{COMPLIANCE_DIRECTIVE}` is then left out, so a lens-off spawn carries nothing about compliance. Otherwise `COMPLIANCE_DIRECTIVE` is this one line, with `<ids>` replaced by the value of `COMPLIANCE_FRAMEWORKS`:
