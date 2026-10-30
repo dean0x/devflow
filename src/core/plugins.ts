@@ -729,11 +729,12 @@ export function parsePluginSelection(
 /**
  * Deprecated command names from old installations.
  * Used during init to clean up stale command files on upgrade.
+ *
+ * Each name is a command file that a release installed. The cleanup removes such a file with no
+ * backup, so a name that no release shipped does not belong here.
  */
 export const LEGACY_COMMAND_NAMES: readonly string[] = [
-  'review',
   'specify',
-  'specify-teams',
 ];
 
 /** A command entry of a plugin without its leading `/`. */

@@ -297,6 +297,78 @@
       "occurrences": 1,
       "sourceFile": "tests/guards/running-commands-parity.test.ts",
       "description": "Dynamic-build prompt sites that name the Running commands block instead of prescribing a procedure (D-FOREGROUND-RUN): the Code implementation prompt, both Gate 1 Validate prompts, the Validate re-run after a Gate 1 fix in each pass, the Fix prompt after Gate 2, the scenario fix prompt, the review-batch fix prompt, the Test prompt and the post-merge Validate. The guard requires each site's quoted text exactly once in the source and in the compiled command; this floor stops the list shrinking behind it. Floors rise, never fall."
+    },
+    {
+      "id": "retired-commands-count",
+      "floor": 15,
+      "pattern": "RETIRED_SHIPPED.commands.length).toBeGreaterThanOrEqual(15)",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/install-backup-sets.test.ts",
+      "description": "Command names on the delete list of src/core/retired-shipped-names.ts: every command a release shipped and the build no longer ships (15 at 3.9.0). The install removes such a file with no backup, so the list only grows; a blanket rename that rewrites a name here drops the count and fails this floor."
+    },
+    {
+      "id": "retired-agents-count",
+      "floor": 35,
+      "pattern": "RETIRED_SHIPPED.agents.length).toBeGreaterThanOrEqual(35)",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/install-backup-sets.test.ts",
+      "description": "Agent names on the delete list of src/core/retired-shipped-names.ts: every agent a release shipped and the build no longer ships (35 at 3.9.0). The list only grows. A name that no release shipped is not counted: it moves to the backup folder like any unknown file."
+    },
+    {
+      "id": "retired-skills-count",
+      "floor": 189,
+      "pattern": "RETIRED_SHIPPED.skills.length).toBeGreaterThanOrEqual(189)",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/install-backup-sets.test.ts",
+      "description": "Skill folder names on the move list of src/core/retired-shipped-names.ts (189 at 3.9.0). A folder of this list moves whole to the backup folder and is never deleted. The list only grows."
+    },
+    {
+      "id": "retired-skill-files-count",
+      "floor": 2,
+      "pattern": "expect(retiredSkillFileCount).toBeGreaterThanOrEqual(2)",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/install-backup-sets.test.ts",
+      "description": "Files on the skillFiles delete list of src/core/retired-shipped-names.ts, summed over the skill folders: two files that a release shipped inside a skill folder that exists today (devflow:git and devflow:agent-references). The list only grows."
+    },
+    {
+      "id": "released-commands-count",
+      "floor": 29,
+      "pattern": "RELEASED_SHIPPED_NAMES.commands.length).toBeGreaterThanOrEqual(29)",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/install-backup-sets.test.ts",
+      "description": "Command names in tests/fixtures/released-shipped-names.ts: the commands that releases 0.1.0 to 3.9.0 installed (29). A release cannot be un-shipped, so the fixture is extended and never cut. It is the reference for the delete-list soundness guard: a shorter fixture would let a never-released name onto a delete list."
+    },
+    {
+      "id": "released-agents-count",
+      "floor": 55,
+      "pattern": "RELEASED_SHIPPED_NAMES.agents.length).toBeGreaterThanOrEqual(55)",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/install-backup-sets.test.ts",
+      "description": "Agent names in tests/fixtures/released-shipped-names.ts: the agents that releases 0.1.0 to 3.9.0 installed (55). Extended, never cut."
+    },
+    {
+      "id": "released-rules-count",
+      "floor": 15,
+      "pattern": "RELEASED_SHIPPED_NAMES.rules.length).toBeGreaterThanOrEqual(15)",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/install-backup-sets.test.ts",
+      "description": "Rule names in tests/fixtures/released-shipped-names.ts: the rules that releases 0.1.0 to 3.9.0 installed (15). Extended, never cut."
+    },
+    {
+      "id": "released-skills-count",
+      "floor": 84,
+      "pattern": "RELEASED_SHIPPED_NAMES.skills.length).toBeGreaterThanOrEqual(84)",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/install-backup-sets.test.ts",
+      "description": "Skill folder names in tests/fixtures/released-shipped-names.ts: the skill folders that releases 0.1.0 to 3.9.0 installed, bare and devflow:-prefixed (84). Extended, never cut."
+    },
+    {
+      "id": "released-skill-file-folders-count",
+      "floor": 84,
+      "pattern": "Object.keys(RELEASED_SHIPPED_NAMES.skillFiles).length).toBeGreaterThanOrEqual(84)",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/install-backup-sets.test.ts",
+      "description": "Skill folders with a file listing in tests/fixtures/released-shipped-names.ts (84, one per released skill folder). The listing is what the soundness guard checks the skillFiles delete list against. Extended, never cut."
     }
   ],
   "ceilings": [

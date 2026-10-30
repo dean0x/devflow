@@ -98,6 +98,28 @@ describe('devflow init over a file of the user', () => {
     expect(out).toContain(`${mine} -> ${kept}`);
     expect(out).toContain(`Backup folder: ${path.join(backupRoot(), runs[0])}`);
   });
+
+  it('moves a file named like a name that no release shipped, with its bytes, and does not call it retired', { timeout: MULTI_RUN_TIMEOUT_MS }, async () => {
+    runInit();
+    const mine = {
+      'agents/devflow/tester.md': 'my tester\n',
+      'commands/devflow/review.md': 'my review command\n',
+    };
+    for (const [rel, text] of Object.entries(mine)) await fs.writeFile(path.join(tmpHome, '.claude', rel), text, 'utf-8');
+
+    const out = runInit();
+
+    const runs = await fs.readdir(backupRoot());
+    expect(runs).toHaveLength(1);
+    for (const [rel, text] of Object.entries(mine)) {
+      const original = path.join(tmpHome, '.claude', rel);
+      const kept = path.join(backupRoot(), runs[0], rel);
+      expect(await exists(original), `${rel} left its folder`).toBe(false);
+      expect(await fs.readFile(kept, 'utf-8'), `${rel} kept its bytes`).toBe(text);
+      expect(out).toContain(`${original} -> ${kept}`);
+    }
+    expect(out).not.toContain('retired devflow file');
+  });
 });
 
 /** The skill files that only a compliance-on machine holds, by the names the install uses. */

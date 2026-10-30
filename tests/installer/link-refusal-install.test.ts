@@ -389,8 +389,8 @@ describe('a link at a path that a later step writes is reported only once a real
 
 describe('the legacy sweep that follows an install skips a devflow folder that is a link', () => {
   const SWEEP_ROWS = [
-    { name: 'a legacy command', folder: ['commands', 'devflow'], file: 'review.md' },
-    { name: 'an orphaned *-teams.md command', folder: ['commands', 'devflow'], file: 'specify-teams.md' },
+    { name: 'a legacy command', folder: ['commands', 'devflow'], file: 'specify.md' },
+    { name: 'a retired command', folder: ['commands', 'devflow'], file: 'pre-pr.md' },
     { name: 'a legacy rule', folder: ['rules', 'devflow'], file: 'old-rule.md' },
   ] as const;
   const LEGACY_RULES = ['old-rule'];

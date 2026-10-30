@@ -330,6 +330,58 @@ describe('a user file beside a listed retired file', () => {
 
 const summaryLines = (session: BackupSession): string[] => formatBackupSummary(session.snapshot()).map(line => line.message);
 
+describe('a file named like a name that no release shipped', () => {
+  const NEVER_RELEASED: Readonly<Record<string, string>> = {
+    'commands/devflow/review.md': 'my review command\n',
+    'commands/devflow/specify-teams.md': 'my teams command\n',
+    'agents/devflow/bug-analyzer.md': 'my bug analyzer\n',
+    'agents/devflow/designer.md': 'my designer\n',
+    'agents/devflow/evaluator.md': 'my evaluator\n',
+    'agents/devflow/researcher.md': 'my researcher\n',
+    'agents/devflow/tester.md': 'my tester\n',
+    'agents/devflow/triager.md': 'my triager\n',
+  };
+
+  it.each(['full', 'partial'] as const)(
+    'moves each of the eight to the backup folder with its bytes and names it, and no later step removes it (%s install)',
+    async shape => {
+      await runInstall(home, { shape: 'full' });
+      for (const [rel, text] of Object.entries(NEVER_RELEASED)) await put(home, rel, text);
+      const session = await openSession(home);
+
+      const report = await runInstall(home, { shape, backups: session });
+      const swept = await sweepLegacyDevflowFiles({ claudeDir: home.claudeDir, report, backups: session });
+
+      const run = await onlyRunFolder(home);
+      for (const [rel, text] of Object.entries(NEVER_RELEASED)) {
+        expect(await exists(at(home, rel)), `${rel} left its folder`).toBe(false);
+        expect(await fs.readFile(inRun(run, rel), 'utf8'), `${rel} kept its bytes in the backup folder`).toBe(text);
+      }
+      expect(swept.removed).toEqual([]);
+      expect(session.snapshot().retiredRemoved, 'nothing was called a retired devflow file').toEqual([]);
+      expect(session.snapshot().moved.map(unit => unit.original).sort()).toEqual(
+        Object.keys(NEVER_RELEASED).map(rel => at(home, rel)).sort(),
+      );
+      expect(summaryLines(session).join('\n')).not.toContain('retired devflow file');
+    },
+  );
+
+  it.each(['full', 'partial'] as const)('names tester.md and review.md, each with its backup path (%s install)', async shape => {
+    await runInstall(home, { shape: 'full' });
+    const named = ['agents/devflow/tester.md', 'commands/devflow/review.md'];
+    for (const rel of named) await put(home, rel, NEVER_RELEASED[rel]);
+    const session = await openSession(home);
+
+    const report = await runInstall(home, { shape, backups: session });
+    await sweepLegacyDevflowFiles({ claudeDir: home.claudeDir, report, backups: session });
+
+    const run = await onlyRunFolder(home);
+    const message = summaryLines(session).join('\n');
+    for (const rel of named) expect(message, `${rel} is named`).toContain(`${at(home, rel)} -> ${inRun(run, rel)}`);
+    expect(message).toContain(`Backup folder: ${run}`);
+  });
+});
+
 describe('the legacy sweep after an install', () => {
   const NO_REFUSED = { refusedFolders: [] as string[] };
 
@@ -357,6 +409,20 @@ describe('the legacy sweep after an install', () => {
 
     expect(swept.removed).toEqual([]);
     expect(await fs.readFile(mine, 'utf8')).toBe('mine, for teams\n');
+  });
+
+  it('removes no file whose name only a legacy list holds: review.md and specify-teams.md stay', async () => {
+    await runInstall(home, { shape: 'full' });
+    const review = await put(home, 'commands/devflow/review.md', 'my review command\n');
+    const teams = await put(home, 'commands/devflow/specify-teams.md', 'my teams command\n');
+    const session = await openSession(home);
+
+    const swept = await sweepLegacyDevflowFiles({ claudeDir: home.claudeDir, report: NO_REFUSED, backups: session });
+
+    expect(swept.removed).toEqual([]);
+    expect(session.snapshot().retiredRemoved).toEqual([]);
+    expect(await fs.readFile(review, 'utf8')).toBe('my review command\n');
+    expect(await fs.readFile(teams, 'utf8')).toBe('my teams command\n');
   });
 
   it('names a retired command once when the install and the sweep share a session, and moves the unknown teams-suffixed file', async () => {

@@ -3,8 +3,11 @@
  *
  * What it asserts
  * ---------------
- * 1. Retired names (`RETIRED_SHIPPED`): the literal is frozen, every name of a legacy list is in
- *    it or is shipped today, and every released name that the registries no longer ship is in it.
+ * 1. Retired names (`RETIRED_SHIPPED`): the literal is frozen, every released name of a legacy
+ *    list is in it or is shipped today, and every released name that the registries no longer
+ *    ship is in it. The other direction holds too: every name on a delete list (commands, agents,
+ *    rules and skill files) is a name a release shipped, since the install removes such a file
+ *    with no backup. Each list has a count floor in `tests/fixtures/numeric-floors.json`.
  * 2. `retiredPathSet()` maps the lists to Claude-dir relative paths: files only, and a skill
  *    folder of `skills` stays out because the install moves it whole.
  * 3. The shipped set: it is built from the full registries and all four variants, it holds the
@@ -103,6 +106,56 @@ function unlisted(kind: string, names: Iterable<string>, retired: readonly strin
     .map(name => `${kind} "${name}" is in a legacy list but is neither in RETIRED_SHIPPED nor shipped today: add it to src/core/retired-shipped-names.ts`);
 }
 
+/**
+ * The problems of a legacy list of files (commands, agents, rules) against what the releases
+ * shipped. A name that a release shipped must be retired or shipped today, so the install removes
+ * or keeps it as devflow's own. A name that no release shipped must be on no delete list: a file of
+ * that name may be the user's, so the install moves it aside and names it like any unknown file.
+ */
+function legacyFileProblems(
+  kind: string,
+  names: Iterable<string>,
+  released: readonly string[],
+  retired: readonly string[],
+  shipped: ReadonlySet<string>,
+): string[] {
+  const wasReleased = new Set(released);
+  const onDeleteList = new Set(retired);
+  const problems: string[] = [];
+  for (const name of names) {
+    if (wasReleased.has(name) && !onDeleteList.has(name) && !shipped.has(name)) {
+      problems.push(`${kind} "${name}" was released but is neither in RETIRED_SHIPPED nor shipped today: add it to src/core/retired-shipped-names.ts`);
+    }
+    if (!wasReleased.has(name) && onDeleteList.has(name)) {
+      problems.push(`${kind} "${name}" is on a delete list but no release shipped it: take it out of src/core/retired-shipped-names.ts`);
+    }
+  }
+  return problems;
+}
+
+/** The names of a delete list that no release shipped. The install removes a listed file with no backup. */
+function unreleasedDeleteNames(kind: string, deleteList: readonly string[], released: readonly string[]): string[] {
+  const wasReleased = new Set(released);
+  return deleteList
+    .filter(name => !wasReleased.has(name))
+    .map(name => `${kind} "${name}" is on a delete list but no release shipped it`);
+}
+
+/** The files of a skill folder's delete list that no release shipped in that folder. */
+function unreleasedSkillFiles(
+  listed: Readonly<Record<string, readonly string[]>>,
+  released: Readonly<Record<string, readonly string[]>>,
+): string[] {
+  const problems: string[] = [];
+  for (const [folder, files] of Object.entries(listed)) {
+    const shippedFiles = new Set(Object.hasOwn(released, folder) ? released[folder] : []);
+    for (const file of files) {
+      if (!shippedFiles.has(file)) problems.push(`skill file "${folder}/${file}" is on a delete list but no release shipped it`);
+    }
+  }
+  return problems;
+}
+
 /** The paths that both sets name: a retired file the build ships, or a retired skill folder it ships. */
 function sharedNames(shipped: ShippedSet, retired: RetiredSet, retiredSkills: readonly string[]): string[] {
   const shared = [...retired.files].filter(file => shipped.files.has(file));
@@ -180,19 +233,25 @@ describe('RETIRED_SHIPPED', () => {
 });
 
 describe('legacy lists are covered', () => {
-  it('every LEGACY_COMMAND_NAMES entry is retired or shipped today', () => {
-    const missing = unlisted('command', LEGACY_COMMAND_NAMES, RETIRED_SHIPPED.commands, shippedToday().commands);
-    expect(missing).toEqual([]);
+  it('every released LEGACY_COMMAND_NAMES entry is retired or shipped today, and no other is on a delete list', () => {
+    const problems = legacyFileProblems(
+      'command', LEGACY_COMMAND_NAMES, RELEASED_SHIPPED_NAMES.commands, RETIRED_SHIPPED.commands, shippedToday().commands,
+    );
+    expect(problems).toEqual([]);
   });
 
-  it('every LEGACY_AGENT_KEYS file name is retired or shipped today', () => {
-    const missing = unlisted('agent', Object.keys(LEGACY_AGENT_KEYS), RETIRED_SHIPPED.agents, shippedToday().agents);
-    expect(missing).toEqual([]);
+  it('every released LEGACY_AGENT_KEYS file name is retired or shipped today, and no other is on a delete list', () => {
+    const problems = legacyFileProblems(
+      'agent', Object.keys(LEGACY_AGENT_KEYS), RELEASED_SHIPPED_NAMES.agents, RETIRED_SHIPPED.agents, shippedToday().agents,
+    );
+    expect(problems).toEqual([]);
   });
 
-  it('every LEGACY_RULE_NAMES entry is retired or shipped today', () => {
-    const missing = unlisted('rule', LEGACY_RULE_NAMES, RETIRED_SHIPPED.rules, shippedToday().rules);
-    expect(missing).toEqual([]);
+  it('every released LEGACY_RULE_NAMES entry is retired or shipped today, and no other is on a delete list', () => {
+    const problems = legacyFileProblems(
+      'rule', LEGACY_RULE_NAMES, RELEASED_SHIPPED_NAMES.rules, RETIRED_SHIPPED.rules, shippedToday().rules,
+    );
+    expect(problems).toEqual([]);
   });
 
   it('every LEGACY_SKILL_NAMES folder is retired or shipped today', () => {
@@ -215,12 +274,85 @@ describe('released names that the registries no longer ship are retired', () => 
   });
 });
 
+/**
+ * The names that sit in a legacy list but that no release installed as a file. The install removes
+ * a file on a delete list with no backup, so each of these is an unknown file: it moves aside and
+ * is named. A user may keep a file of that name.
+ */
+const NEVER_RELEASED = {
+  commands: ['review', 'specify-teams'],
+  agents: ['bug-analyzer', 'designer', 'evaluator', 'researcher', 'tester', 'triager'],
+} as const;
+
+describe('the delete lists name only files that a release shipped', () => {
+  it.each([
+    ['commands', RETIRED_SHIPPED.commands, RELEASED_SHIPPED_NAMES.commands],
+    ['agents', RETIRED_SHIPPED.agents, RELEASED_SHIPPED_NAMES.agents],
+    ['rules', RETIRED_SHIPPED.rules, RELEASED_SHIPPED_NAMES.rules],
+  ] as const)('every RETIRED_SHIPPED %s name is a name a release shipped', (kind, deleteList, released) => {
+    expect(unreleasedDeleteNames(kind, deleteList, released)).toEqual([]);
+  });
+
+  it('every RETIRED_SHIPPED skillFiles entry is a file a release shipped in that folder', () => {
+    expect(unreleasedSkillFiles(RETIRED_SHIPPED.skillFiles, RELEASED_SHIPPED_NAMES.skillFiles)).toEqual([]);
+  });
+
+  it('keeps the eight names that no release shipped off every delete list, and out of the released fixture', () => {
+    const retired = retiredPathSet();
+    for (const [kind, folder] of [['commands', 'commands'], ['agents', 'agents']] as const) {
+      for (const name of NEVER_RELEASED[kind]) {
+        expect(RELEASED_SHIPPED_NAMES[kind], `${kind} "${name}" was never released`).not.toContain(name);
+        expect(RETIRED_SHIPPED[kind], `${kind} "${name}" is not retired`).not.toContain(name);
+        expect(retired.files.has(`${folder}/devflow/${name}.md`), `${folder}/devflow/${name}.md is not a retired path`).toBe(false);
+      }
+    }
+  });
+
+  it('is not vacuous: the guard reports each of the eight names when it is put back on a delete list', () => {
+    const putBack = {
+      commands: [...new Set([...RETIRED_SHIPPED.commands, ...NEVER_RELEASED.commands])],
+      agents: [...new Set([...RETIRED_SHIPPED.agents, ...NEVER_RELEASED.agents])],
+    };
+    expect(unreleasedDeleteNames('command', putBack.commands, RELEASED_SHIPPED_NAMES.commands).sort()).toEqual(
+      NEVER_RELEASED.commands.map(name => `command "${name}" is on a delete list but no release shipped it`).sort(),
+    );
+    expect(unreleasedDeleteNames('agent', putBack.agents, RELEASED_SHIPPED_NAMES.agents).sort()).toEqual(
+      NEVER_RELEASED.agents.map(name => `agent "${name}" is on a delete list but no release shipped it`).sort(),
+    );
+    expect(
+      unreleasedSkillFiles({ 'devflow:git': ['references/pr/never-shipped.md'] }, RELEASED_SHIPPED_NAMES.skillFiles),
+    ).toEqual(['skill file "devflow:git/references/pr/never-shipped.md" is on a delete list but no release shipped it']);
+    expect(
+      legacyFileProblems('agent', ['tester'], RELEASED_SHIPPED_NAMES.agents, [...RETIRED_SHIPPED.agents, 'tester'], new Set()),
+    ).toEqual(['agent "tester" is on a delete list but no release shipped it: take it out of src/core/retired-shipped-names.ts']);
+  });
+});
+
+describe('the name lists only grow', () => {
+  const retiredSkillFileCount = Object.values(RETIRED_SHIPPED.skillFiles).reduce((sum, files) => sum + files.length, 0);
+
+  it('keeps each retired list at or above its floor', () => {
+    expect(RETIRED_SHIPPED.commands.length).toBeGreaterThanOrEqual(15);
+    expect(RETIRED_SHIPPED.agents.length).toBeGreaterThanOrEqual(35);
+    expect(RETIRED_SHIPPED.skills.length).toBeGreaterThanOrEqual(189);
+    expect(retiredSkillFileCount).toBeGreaterThanOrEqual(2);
+  });
+
+  it('keeps each list of the released-name fixture at or above its floor', () => {
+    expect(RELEASED_SHIPPED_NAMES.commands.length).toBeGreaterThanOrEqual(29);
+    expect(RELEASED_SHIPPED_NAMES.agents.length).toBeGreaterThanOrEqual(55);
+    expect(RELEASED_SHIPPED_NAMES.rules.length).toBeGreaterThanOrEqual(15);
+    expect(RELEASED_SHIPPED_NAMES.skills.length).toBeGreaterThanOrEqual(84);
+    expect(Object.keys(RELEASED_SHIPPED_NAMES.skillFiles).length).toBeGreaterThanOrEqual(84);
+  });
+});
+
 describe('retiredPathSet', () => {
   const retired = retiredPathSet();
 
   it('maps commands, agents and rules to their install paths', () => {
     expect(retired.files.has('commands/devflow/specify.md')).toBe(true);
-    expect(retired.files.has('commands/devflow/specify-teams.md')).toBe(true);
+    expect(retired.files.has('commands/devflow/pre-pr.md')).toBe(true);
     expect(retired.files.has('agents/devflow/coder.md')).toBe(true);
     expect(retired.holds('commands/devflow')).toBe(true);
     expect(retired.holds('agents/devflow')).toBe(true);

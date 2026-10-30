@@ -4,15 +4,16 @@ import { createPathSet, type RetiredSet } from './path-set.js';
  * The names that earlier releases of devflow installed and the current release does not.
  *
  * A literal, frozen. It is built from the audit of every published package and every release tag
- * (0.1.0 to 3.9.0), plus the legacy-list names that no release shipped, so each legacy name has an
- * entry here. It imports none of the `LEGACY_*` lists: those lists are cleanup manifests that a PR
- * may prune, while this one only grows.
+ * (0.1.0 to 3.9.0). It imports none of the `LEGACY_*` lists: those lists are cleanup manifests that
+ * a PR may prune, while this one only grows.
  *
  * What the install does with a name depends on the list it is in:
  *   - `skills` holds skill folders. A skill folder in this list is moved whole, as one rename, and
  *     named. It is never deleted and never walked.
  *   - `commands`, `agents`, `rules` and `skillFiles` hold files. A file in these lists is removed
- *     and named, never moved: devflow shipped it, so it is not a user file.
+ *     and named, never moved. Devflow shipped every listed file in some release, so it is not a
+ *     user file. tests/guards/install-backup-sets.test.ts proves it against
+ *     tests/fixtures/released-shipped-names.ts.
  *
  * `commands`, `agents` and `rules` hold names without `.md`, as installed under
  * `commands/devflow/`, `agents/devflow/` and `rules/devflow/`. `skillFiles` maps a skill folder
@@ -48,9 +49,7 @@ export const RETIRED_SHIPPED: RetiredShipped = Object.freeze({
     'pre-pr',
     'pull-request',
     'resolve-comments',
-    'review',
     'specify',
-    'specify-teams',
   ]),
   agents: names([
     'audit-architecture',
@@ -63,7 +62,6 @@ export const RETIRED_SHIPPED: RetiredShipped = Object.freeze({
     'audit-tests',
     'audit-typescript',
     'brainstorm',
-    'bug-analyzer',
     'catch-up',
     'claude-md-auditor',
     'code-edit',
@@ -71,16 +69,13 @@ export const RETIRED_SHIPPED: RetiredShipped = Object.freeze({
     'code-review',
     'coder',
     'commit',
-    'designer',
     'diagnose',
-    'evaluator',
     'get-issue',
     'learning',
     'pr-comments',
     'project-state',
     'pull-request',
     'release',
-    'researcher',
     'resolver',
     'reviewer',
     'scrutinize',
@@ -91,8 +86,6 @@ export const RETIRED_SHIPPED: RetiredShipped = Object.freeze({
     'skimmer',
     'synthesizer',
     'tech-debt',
-    'tester',
-    'triager',
     'validator',
   ]),
   rules: names([]),
