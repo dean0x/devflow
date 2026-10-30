@@ -202,9 +202,7 @@ Setup context is the plan document, issue body or conversation.
 |----------|------|
 | **SINGLE_CODE_AGENT** | Default. Coherent A→Z implementation |
 | **SEQUENTIAL_CODE_AGENTS** | The plan writes >= 10 files or has >= 7 steps |
-| **PARALLEL_CODE_AGENTS** | True artifact independence (rare) |
-
----
+| **PARALLEL_CODE_AGENTS** | All must hold: subtasks share no contract, interface or integration point, and touch different files or modules with no imports between them (rare) |
 
 **SINGLE_CODE_AGENT**:
 
@@ -220,13 +218,8 @@ FEATURE_KNOWLEDGE: {feature_knowledge}
 {COMPLIANCE_DIRECTIVE}"
 ```
 
----
+**SEQUENTIAL_CODE_AGENTS**: spawn one Code agent at a time, each after the one before it completes.
 
-**SEQUENTIAL_CODE_AGENTS**:
-
-Spawn Code agents one at a time:
-
-**Phase 1 Code agent:**
 ```
 Agent(subagent_type="Code"):
 "OPERATION: implement
@@ -241,7 +234,6 @@ HANDOFF_REQUIRED: true
 HANDOFF_FILE: {worktree}/.devflow/docs/handoff-{branch_slug}.md"
 ```
 
-**Phase 2+ Code agents** (after prior phase completes):
 ```
 Agent(subagent_type="Code"):
 "OPERATION: implement
@@ -258,13 +250,9 @@ HANDOFF_REQUIRED: {true if not last phase}
 HANDOFF_FILE: {worktree}/.devflow/docs/handoff-{branch_slug}.md"
 ```
 
-**Handoff Protocol**: Each Code agent with HANDOFF_REQUIRED=true appends its own `## Phase {N} Implementation Summary` section, at most 8,192 bytes, to `{worktree}/.devflow/docs/handoff-{branch_slug}.md`, never rewriting an earlier section and keeping any `## Evidence Exceptions` section byte-identical; the next Code agent reads only the section of the phase immediately before its own through HANDOFF_FILE. The orchestrator writes no phase section. Delete `{worktree}/.devflow/docs/handoff-{branch_slug}.md` once the PR exists — after Phase 9 (cleanup).
+**Handoff Protocol**: Each Code agent with HANDOFF_REQUIRED=true appends its own `## Phase {N} Implementation Summary` section, at most 8,192 bytes, to HANDOFF_FILE, never rewriting an earlier section and keeping any `## Evidence Exceptions` section byte-identical; the next Code agent reads only the section of the phase immediately before its own. The orchestrator writes no phase section. Delete `{worktree}/.devflow/docs/handoff-{branch_slug}.md` once the PR exists — after Phase 9 (cleanup).
 
----
-
-**PARALLEL_CODE_AGENTS**:
-
-Spawn multiple Code agents **in a single message**, each with independent subtask:
+**PARALLEL_CODE_AGENTS**: spawn all Code agents in one message, one subtask each.
 
 ```
 Agent(subagent_type="Code"):  # Code agent 1
@@ -287,8 +275,6 @@ PATTERNS: {patterns}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 {COMPLIANCE_DIRECTIVE}"
 ```
-
-**Independence criteria** (all must be true for PARALLEL_CODE_AGENTS): no shared contracts, interfaces or integration points between subtasks; different files/modules with no imports between them.
 
 ### Phase 3: Polish
 
