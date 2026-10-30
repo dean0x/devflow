@@ -9,7 +9,8 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import { TRACKER_ATTEMPTS_MAX } from '../src/core/tracker.js';
-import { HOOK_RUN_ALLOWANCE_MS, HOOKS_DIR, NODE_EXEC_STALL_MS, runHook } from './shell-hooks-helpers.js';
+import { HOOK_RUN_ALLOWANCE_MS, HOOKS_DIR, NODE_EXEC_STALL_MS, runGitForFarm, runHook } from './shell-hooks-helpers.js';
+import { useWarmFakeExecutables } from './helpers/warm-fake-executable.js';
 
 // =============================================================================
 // session-start-context Section 3: Tracker setup directive
@@ -68,6 +69,9 @@ describe('session-start-context: tracker setup directive (Section 3)', { timeout
    * not a cap.
    */
   const TRACKER_SECTION_MAX_CHARS = 800;
+
+  /** The recording shims and the resolver stub run through one warm dispatcher, never a new executable. */
+  const writeFakeExecutable = useWarmFakeExecutables();
 
   let tmpDir: string;
   let homeDir: string;
@@ -649,12 +653,10 @@ describe('session-start-context: tracker setup directive (Section 3)', { timeout
           .map(p => path.join(p, tool))
           .find(p => fs.existsSync(p));
       if (!real) continue;
-      const wrapper = path.join(dir, tool);
-      fs.writeFileSync(
-        wrapper,
+      writeFakeExecutable(
+        path.join(dir, tool),
         `#!/bin/bash\nprintf '%s\\n' ${tool} >> ${JSON.stringify(logPath)}\nexec ${JSON.stringify(real)} "$@"\n`,
       );
-      fs.chmodSync(wrapper, 0o755);
       shimmed.push(tool);
     }
     return { dir, logPath, shimmed };
@@ -906,8 +908,7 @@ describe('session-start-context: tracker setup directive (Section 3)', { timeout
    */
   function buildResolverStub(base: string, line: string, exit: number): string {
     const dir = fs.mkdtempSync(path.join(base, 'resolver-stub-'));
-    const wrapper = path.join(dir, 'node');
-    fs.writeFileSync(wrapper, [
+    writeFakeExecutable(path.join(dir, 'node'), [
       '#!/bin/bash',
       'case "$1" in',
       `  */resolve-settings.cjs) printf '%s\\n' ${JSON.stringify(line)}; exit ${exit} ;;`,
@@ -915,7 +916,6 @@ describe('session-start-context: tracker setup directive (Section 3)', { timeout
       `exec ${JSON.stringify(process.execPath)} "$@"`,
       '',
     ].join('\n'));
-    fs.chmodSync(wrapper, 0o755);
     return dir;
   }
 
@@ -958,12 +958,10 @@ describe('session-start-context: tracker setup directive (Section 3)', { timeout
           .map(p => path.join(p, tool))
           .find(p => fs.existsSync(p));
       if (!real) continue;
-      const wrapper = path.join(shimDir, tool);
-      fs.writeFileSync(
-        wrapper,
+      writeFakeExecutable(
+        path.join(shimDir, tool),
         `#!/bin/bash\nprintf '%s\\n' ${tool} >> ${JSON.stringify(logPath)}\nexec ${JSON.stringify(real)} "$@"\n`,
       );
-      fs.chmodSync(wrapper, 0o755);
       shimmed.push(tool);
     }
     expect(shimmed, 'the shim must observe git and the realpath tools').toEqual(
@@ -1120,7 +1118,8 @@ describe('session-start-context: tracker setup directive (Section 3)', { timeout
    * An ADDITIVE symlink farm with every tool the hook needs EXCEPT jq, so
    * `command -v jq` fails deterministically on macOS and Linux and json-parse
    * takes the node fallback (_HAS_JQ=false). Mirrors buildToolFarm in
-   * tests/eager-memory-refresh.test.ts — never subtract from PATH.
+   * tests/eager-memory-refresh.test.ts — never subtract from PATH. `git` links to the
+   * run's own git when `runGitForFarm` gives one, else like the other tools.
    */
   function buildNoJqPath(base: string): string {
     const farmDir = fs.mkdtempSync(path.join(base, 'nojq-bin-'));
@@ -1131,9 +1130,14 @@ describe('session-start-context: tracker setup directive (Section 3)', { timeout
       'mkdir', 'mv', 'rm', 'rmdir', 'sleep', 'printf', 'pwd',
       // 'jq' deliberately absent — the node fallback must carry every case
     ];
+    const runGit = runGitForFarm();
     for (const t of tools) {
       const dst = path.join(farmDir, t);
       if (fs.existsSync(dst)) continue;
+      if (t === 'git' && runGit !== undefined) {
+        fs.symlinkSync(runGit, dst);
+        continue;
+      }
       for (const prefix of ['/usr/bin', '/bin']) {
         const src = `${prefix}/${t}`;
         if (fs.existsSync(src)) {

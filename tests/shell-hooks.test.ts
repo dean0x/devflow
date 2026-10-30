@@ -2352,7 +2352,9 @@ describe('ensure-devflow-init behavioral', () => {
   it('a v4-marked project with every directory present is not fast-pathed: it gains the policy and project lines and is stamped v6', () => {
     // The whole installed base sits here: dirs scaffolded, v4 marker stamped, v4 block
     // written. If the fast path still keyed on -v4, this project would never be upgraded.
-    for (const d of ['memory', 'docs', 'learning', 'features']) {
+    // The ledger folder has its current name: an old `learning/` would start the one-time
+    // folder move, a node process this test does not check (curation-move has its own tests).
+    for (const d of ['memory', 'docs', 'curation', 'features']) {
       fs.mkdirSync(path.join(tmpDir, '.devflow', d), { recursive: true });
     }
     fs.writeFileSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v4'), '');
@@ -2379,8 +2381,9 @@ describe('ensure-devflow-init behavioral', () => {
 
   it('a v5-marked project with every directory present is not fast-pathed: it gains the project line and is stamped v6', () => {
     // D-GITIGNORE-V6: the installed base after #400 — dirs scaffolded, v5 marker, v5
-    // block. If the fast path still keyed on -v5, project.json would stay ignored.
-    for (const d of ['memory', 'docs', 'learning', 'features']) {
+    // block. If the fast path still keyed on -v5, project.json would stay ignored. The
+    // ledger folder has its current name, as in the v4 test above.
+    for (const d of ['memory', 'docs', 'curation', 'features']) {
       fs.mkdirSync(path.join(tmpDir, '.devflow', d), { recursive: true });
     }
     fs.writeFileSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v5'), '');

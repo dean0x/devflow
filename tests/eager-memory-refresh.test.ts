@@ -34,6 +34,7 @@ import {
   makeFifo,
   releaseFifo,
   resolveOnPath,
+  runGitForFarm,
   runHook,
   spawnWithStdin,
 } from './shell-hooks-helpers.js';
@@ -159,7 +160,9 @@ const FARM_TOOLS = [
  *
  * `omit` names tools to leave out (`['cksum']` for the startup assert). `extra` maps a tool
  * name to the absolute path it links to (`{ node: process.execPath }` for the node backend).
- * Each tool links from /usr/bin, else /bin. The farm is removed in the afterEach above.
+ * Each tool links from /usr/bin, else /bin. `git` links to the run's own git when
+ * `runGitForFarm` gives one, else like the other tools. The farm is removed in the
+ * afterEach above.
  */
 function buildToolFarm(
   omit: readonly string[] = [],
@@ -167,8 +170,13 @@ function buildToolFarm(
 ): string {
   const farmDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-farm-'));
   toolFarms.push(farmDir);
+  const runGit = runGitForFarm();
   for (const tool of FARM_TOOLS) {
     if (omit.includes(tool)) continue;
+    if (tool === 'git' && runGit !== undefined) {
+      fs.symlinkSync(runGit, path.join(farmDir, tool));
+      continue;
+    }
     for (const prefix of ['/usr/bin', '/bin']) {
       const src = `${prefix}/${tool}`;
       if (fs.existsSync(src)) {
@@ -500,25 +508,32 @@ describe('S2: AC-F4 — session-start-memory injection states', () => {
     expect(ctx).not.toContain('abc..xyz123');
   });
 
-  it('ignores valid or malformed legacy backups without changing current memory context', () => {
+  // One test per backup form. Each test runs the hook twice and each run starts node once,
+  // so its time limit allows two hook runs and one node start stall.
+  const legacySnapshot = JSON.stringify({ timestamp: '2099-01-01T00:00:00Z', memory_snapshot: 'stale snapshot' });
+  it.each([
+    ['valid', legacySnapshot],
+    ['truncated', legacySnapshot.slice(0, 30)],
+    ['trailing-garbage', `${legacySnapshot}\nnot-json{{{`],
+  ])('ignores a %s legacy backup without changing current memory context', (_kind, contents) => {
     const headSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: projectDir, encoding: 'utf-8' }).trim();
     const branch = execFileSync('git', ['branch', '--show-current'], { cwd: projectDir, encoding: 'utf-8' }).trim() || 'main';
     writeMemoryWithStamp(projectDir, headSha, branch);
+    const memoryFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
+    const current = fs.readFileSync(memoryFile, 'utf-8');
     const withoutBackup = getCtx(projectDir, homeDir);
     expect(withoutBackup, 'non-vacuity: the memory is injected with no backup at all').toContain('synced @');
 
     const backup = path.join(projectDir, '.devflow', 'memory', 'backup.json');
-    const snapshot = JSON.stringify({ timestamp: '2099-01-01T00:00:00Z', memory_snapshot: 'stale snapshot' });
-    for (const contents of [snapshot, snapshot.slice(0, 30), `${snapshot}\nnot-json{{{`]) {
-      fs.writeFileSync(backup, contents);
-      const run = runHook(SESSION_START_MEMORY_HOOK, { cwd: projectDir }, homeDir);
-      expect(run.exitCode, run.stderr).toBe(0);
-      const ctx = (JSON.parse(run.stdout.trim()) as { hookSpecificOutput: { additionalContext: string } })
-        .hookSpecificOutput.additionalContext;
-      expect(ctx).toBe(withoutBackup);
-      expect(fs.readFileSync(backup, 'utf-8'), 'legacy backups are not deleted or rewritten on restore').toBe(contents);
-    }
-  });
+    fs.writeFileSync(backup, contents);
+    const run = runHook(SESSION_START_MEMORY_HOOK, { cwd: projectDir }, homeDir);
+    expect(run.exitCode, run.stderr).toBe(0);
+    const ctx = (JSON.parse(run.stdout.trim()) as { hookSpecificOutput: { additionalContext: string } })
+      .hookSpecificOutput.additionalContext;
+    expect(ctx).toBe(withoutBackup);
+    expect(fs.readFileSync(memoryFile, 'utf-8')).toBe(current);
+    expect(fs.readFileSync(backup, 'utf-8'), 'legacy backups are not deleted or rewritten on restore').toBe(contents);
+  }, HOOK_RUN_ALLOWANCE_MS * 2 + NODE_EXEC_STALL_MS);
 
   it.each(['identical', 'divergent', 'oversized'] as const)('ignores a newer %s legacy backup body', (kind) => {
     const headSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: projectDir, encoding: 'utf-8' }).trim();
