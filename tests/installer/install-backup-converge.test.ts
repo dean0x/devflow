@@ -224,8 +224,8 @@ describe('each converge keeps one file of the user and names it', () => {
     await runInstall(home, { shape: 'full' });
     const shippedOp = installedReferenceManifest({ compliance: false }).find(rel => /^tracker\/[^/]+$/.test(rel));
     if (shippedOp === undefined) throw new Error('the manifest holds no tracker reference');
-    const leftover = `${REFERENCES}/${shippedOp}.old`;
-    await put(home, leftover, 'an interrupted swap left this\n');
+    const leftover = `${REFERENCES}/${shippedOp}.tmp.4242`;
+    await put(home, leftover, 'an interrupted write left this\n');
     const backups = await openSession(home);
 
     const result = await convergeReferences({
@@ -233,7 +233,7 @@ describe('each converge keeps one file of the user and names it', () => {
     });
 
     expect(result.converged, warnings.join('\n')).toBe(true);
-    expect(result.removed).toContain(`devflow:git/references/${shippedOp}.old`);
+    expect(result.removed).toContain(`devflow:git/references/${shippedOp}.tmp.4242`);
     expect(await exists(at(home, leftover))).toBe(false);
     expect(backups.snapshot().moved).toEqual([]);
     expect(backupRootOf(home)).toBeNull();

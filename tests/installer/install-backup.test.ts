@@ -103,10 +103,11 @@ describe('classify', () => {
   });
 
   it('knows the exact devflow leftovers as sidecar', () => {
-    expect(classify('commands/devflow/a.md.tmp', 'file', sets)).toBe('sidecar');
-    expect(classify('commands/devflow/a.md.old', 'file', sets)).toBe('sidecar');
     expect(classify('commands/devflow/a.md.tmp.4242', 'file', sets)).toBe('sidecar');
+    expect(classify('commands/devflow/a.md.tmp.4242', 'link', sets)).toBe('sidecar');
     expect(classify('skills/devflow:git.tmp', 'directory', sets)).toBe('sidecar');
+    expect(classify('skills/devflow:git.old', 'directory', sets)).toBe('sidecar');
+    expect(classify('skills/devflow:git.4242-lq3k9x.tmp', 'directory', sets)).toBe('sidecar');
     expect(classify('skills/devflow:compliance.tmp', 'directory', { shipped: createPathSet([]), retired: createPathSet([]) })).toBe('sidecar');
   });
 
@@ -114,6 +115,29 @@ describe('classify', () => {
     expect(classify('commands/devflow/mine.md.tmp', 'file', sets)).toBe('unknown');
     expect(classify('commands/devflow/a.md.bak', 'file', sets)).toBe('unknown');
     expect(classify('commands/devflow/a.md.tmp.x', 'file', sets)).toBe('unknown');
+  });
+
+  it.each(['a.md.old', 'a.md.tmp', 'a.md.4242-lq3k9x.tmp'])('takes a file or a link named %s beside a shipped file for unknown', name => {
+    expect(classify(`commands/devflow/${name}`, 'file', sets)).toBe('unknown');
+    expect(classify(`commands/devflow/${name}`, 'link', sets)).toBe('unknown');
+    expect(classify(`commands/devflow/${name}`, 'special', sets)).toBe('unknown');
+  });
+
+  it('moves a file named like an old copy or a bare temp copy, and unlinks the temp copy that devflow writes', async () => {
+    const old = await put('commands/devflow/a.md.old', 'my old copy');
+    const bare = await put('commands/devflow/a.md.tmp', 'my scratch');
+    const written = await put('commands/devflow/a.md.tmp.4242', 'an interrupted write');
+    const session = open();
+
+    await session.prepass([at('commands/devflow')]);
+    const removal = await session.removeListed(at('commands/devflow'));
+
+    expect(await fs.readFile(inRun('commands/devflow/a.md.old'), 'utf8')).toBe('my old copy');
+    expect(await fs.readFile(inRun('commands/devflow/a.md.tmp'), 'utf8')).toBe('my scratch');
+    expect(await exists(old)).toBe(false);
+    expect(await exists(bare)).toBe(false);
+    expect(await exists(inRun('commands/devflow/a.md.tmp.4242'))).toBe(false);
+    expect(removal.removed).toEqual([written]);
   });
 
   it('calls only a .DS_Store file junk', () => {

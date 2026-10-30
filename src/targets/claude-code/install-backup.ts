@@ -47,8 +47,18 @@ const SHOWN_NAMES = 5;
 const JUNK_FILE_NAME = '.DS_Store';
 const COMPLIANCE_SKILL_SIDECAR = 'skills/devflow:compliance.tmp';
 
-/** What an interrupted write or swap leaves after a name: `.tmp`, `.tmp.<pid>`, `.old` and the overlay's `.<pid>-<time>.tmp`. */
-const SIDECAR_SUFFIX = /(?:\.\d+-[0-9a-z]+\.tmp|\.tmp(?:\.\d+)?|\.old)$/;
+/**
+ * What an interrupted write leaves after a file name: `.tmp.<pid>`, the temp file of the atomic
+ * writers. No devflow code writes a file named `.old`, a bare `.tmp` or `.<pid>-<time>.tmp`, so a
+ * file or a link with such a name is the user's.
+ */
+const FILE_SIDECAR_SUFFIX = /\.tmp\.\d+$/;
+
+/**
+ * What an interrupted swap leaves after a folder name: `.tmp`, `.old` and the reference overlay's
+ * `.<pid>-<time>.tmp`. Every folder swap in the installer makes a folder.
+ */
+const DIRECTORY_SIDECAR_SUFFIX = /(?:\.\d+-[0-9a-z]+\.tmp|\.tmp|\.old)$/;
 
 /**
  * Scratch folders whose base name is no shipped path, matched on the whole path: the curation
@@ -110,9 +120,25 @@ function inSet(set: PathSet, rel: string, kind: EntryKind): boolean {
   }
 }
 
-/** `rel` without its leftover suffix (see {@link SIDECAR_SUFFIX}), or null when it has none. */
-function sidecarBase(rel: string): string | null {
-  const base = rel.replace(SIDECAR_SUFFIX, '');
+/** The leftover suffix that devflow makes for an entry of this kind. */
+function sidecarSuffixFor(kind: EntryKind): RegExp {
+  switch (kind) {
+    case 'directory':
+      return DIRECTORY_SIDECAR_SUFFIX;
+    case 'file':
+    case 'link':
+    case 'special':
+      return FILE_SIDECAR_SUFFIX;
+    default: {
+      const unreachable: never = kind;
+      return unreachable;
+    }
+  }
+}
+
+/** `rel` without the leftover suffix of its kind (see {@link sidecarSuffixFor}), or null when it has none. */
+function sidecarBase(rel: string, kind: EntryKind): string | null {
+  const base = rel.replace(sidecarSuffixFor(kind), '');
   return base === rel || base === '' ? null : base;
 }
 
@@ -120,7 +146,7 @@ function isSidecar(rel: string, kind: EntryKind, sets: ClassifySets): boolean {
   if (kind === 'directory' && (rel === COMPLIANCE_SKILL_SIDECAR || SCRATCH_FOLDER_PATHS.some(re => re.test(rel)))) {
     return true;
   }
-  const base = sidecarBase(rel);
+  const base = sidecarBase(rel, kind);
   if (base === null) return false;
   return inSet(sets.shipped, base, kind) || inSet(sets.retired, base, kind);
 }
@@ -338,8 +364,11 @@ function exhaustive(value: never): void {
 /**
  * Open a backup session for one install run.
  *
- * The backup root and the run folder are made when the first move happens, so a run that moves
- * nothing leaves nothing behind. One session makes at most one run folder.
+ * The backup root and the run folder are made when the first move is ready to rename, after the
+ * checks of its source. A move that fails removes the parent folders it made, and a run folder
+ * that holds no move is removed again with the backup root this session made, each with a
+ * non-recursive `rmdir`, so a run that moves nothing leaves nothing behind. One session holds at
+ * most one run folder.
  */
 export function createBackupSession(options: BackupSessionOptions): BackupSession {
   const claudeDir = path.resolve(options.claudeDir);
@@ -359,6 +388,7 @@ export function createBackupSession(options: BackupSessionOptions): BackupSessio
   const capKeys = new Set<string>();
   let rootRefusal: RootRefusal | null = null;
   let runFolder: string | null = null;
+  let rootMade = false;
   let backup: Promise<ReadyBackup | null> | null = null;
 
   const relFromClaude = (target: string): string => toPosix(path.relative(claudeDir, target));
@@ -376,6 +406,28 @@ export function createBackupSession(options: BackupSessionOptions): BackupSessio
     return null;
   }
 
+  /** `rmdir` without recursion. True when the folder is gone; false when it holds something or could not go. */
+  async function removeEmptyFolder(target: string): Promise<boolean> {
+    try {
+      await fs.rmdir(target);
+      return true;
+    } catch (err) {
+      const code = errnoCode(err);
+      if (code === 'ENOENT') return true;
+      if (code !== 'ENOTEMPTY' && code !== 'EEXIST') fail(target, 'remove', code, false);
+      return false;
+    }
+  }
+
+  async function dropMadeRoot(): Promise<void> {
+    if (rootMade && (await removeEmptyFolder(backupRoot))) rootMade = false;
+  }
+
+  async function refuseOpening(reason: string, at: string): Promise<null> {
+    await dropMadeRoot();
+    return refuse(reason, at);
+  }
+
   async function openBackup(): Promise<ReadyBackup | null> {
     const existing = await lstatBig(backupRoot);
     if (existing.ok) {
@@ -386,6 +438,7 @@ export function createBackupSession(options: BackupSessionOptions): BackupSessio
     } else {
       try {
         await fs.mkdir(backupRoot, { recursive: true, mode: BACKUP_DIR_MODE });
+        rootMade = true;
       } catch (err) {
         return refuse(errnoCode(err), backupRoot);
       }
@@ -398,10 +451,10 @@ export function createBackupSession(options: BackupSessionOptions): BackupSessio
         return { runFolder: candidate };
       } catch (err) {
         const code = errnoCode(err);
-        if (code !== 'EEXIST') return refuse(code, candidate);
+        if (code !== 'EEXIST') return refuseOpening(code, candidate);
       }
     }
-    return refuse('run-folder-collisions', backupRoot);
+    return refuseOpening('run-folder-collisions', backupRoot);
   }
 
   function ensureBackup(): Promise<ReadyBackup | null> {
@@ -409,22 +462,89 @@ export function createBackupSession(options: BackupSessionOptions): BackupSessio
     return backup;
   }
 
+  /**
+   * Remove the run folder, and the backup root this session made, when no move succeeded. A
+   * folder that holds anything stays, and the next move reuses it.
+   */
+  async function releaseEmptyRun(): Promise<void> {
+    if (moved.length > 0 || runFolder === null) return;
+    if (!(await removeEmptyFolder(runFolder))) return;
+    runFolder = null;
+    backup = null;
+    await dropMadeRoot();
+  }
+
+  /**
+   * Make the folders of `parent` that are missing below `runDir`, one `mkdir` each from the top.
+   * `made` lists the folders this call made, top first, also when a later `mkdir` failed.
+   */
+  async function makeMissingParents(parent: string, runDir: string): Promise<{ made: string[]; code: string | null }> {
+    const missing: string[] = [];
+    let current = parent;
+    for (let step = 0; step < MAX_ANCESTOR_STEPS && isContainedIn(runDir, current); step++) {
+      const probe = await lstatBig(current);
+      if (probe.ok) break;
+      if (probe.code !== 'ENOENT') return { made: [], code: probe.code };
+      missing.push(current);
+      current = path.dirname(current);
+    }
+    const made: string[] = [];
+    for (const folder of [...missing].reverse()) {
+      try {
+        await fs.mkdir(folder, { mode: BACKUP_DIR_MODE });
+        made.push(folder);
+      } catch (err) {
+        return { made, code: errnoCode(err) };
+      }
+    }
+    return { made, code: null };
+  }
+
+  /** `rmdir` the folders a failed move made, deepest first, up to the first one that holds something. */
+  async function removeMadeParents(made: readonly string[]): Promise<void> {
+    for (const folder of [...made].reverse()) {
+      if (!(await removeEmptyFolder(folder))) return;
+    }
+  }
+
+  async function placeInRun(source: string, kind: EntryKind, runDir: string): Promise<MoveOutcome> {
+    const destination = path.join(runDir, ...relFromClaude(source).split('/'));
+    if (!isContainedIn(runDir, destination)) {
+      fail(source, 'move', 'outside-run-folder');
+      return { status: 'kept', reason: 'outside-run-folder' };
+    }
+    const occupied = await lstatBig(destination);
+    if (occupied.ok || occupied.code !== 'ENOENT') {
+      const reason = occupied.ok ? 'destination-exists' : occupied.code;
+      fail(source, 'move', reason);
+      return { status: 'kept', reason };
+    }
+
+    const parents = await makeMissingParents(path.dirname(destination), runDir);
+    let failure = parents.code;
+    if (failure === null) {
+      try {
+        await fs.rename(source, destination);
+      } catch (err) {
+        failure = errnoCode(err);
+      }
+    }
+    if (failure !== null) {
+      fail(source, 'move', failure);
+      await removeMadeParents(parents.made);
+      return { status: 'kept', reason: failure };
+    }
+    const unit: MovedUnit = Object.freeze({ original: source, backup: destination, kind });
+    kept.delete(source);
+    moved.push(unit);
+    return { status: 'moved', unit };
+  }
+
   async function moveUnit(source: string, scanRoot: string, atScan: BigIntStats): Promise<MoveOutcome> {
     if (!isContainedIn(scanRoot, source) || !isContainedIn(claudeDir, source)) {
       fail(source, 'move', 'outside-scan-root');
       return { status: 'kept', reason: 'outside-scan-root' };
     }
-    const ready = await ensureBackup();
-    if (ready === null) {
-      kept.add(source);
-      return { status: 'kept', reason: rootRefusal?.reason ?? 'backup-unavailable' };
-    }
-    const destination = path.join(ready.runFolder, ...relFromClaude(source).split('/'));
-    if (!isContainedIn(ready.runFolder, destination)) {
-      fail(source, 'move', 'outside-run-folder');
-      return { status: 'kept', reason: 'outside-run-folder' };
-    }
-
     const current = await lstatBig(source);
     if (!current.ok) {
       if (current.code === 'ENOENT') return { status: 'vanished' };
@@ -436,25 +556,14 @@ export function createBackupSession(options: BackupSessionOptions): BackupSessio
       return { status: 'kept', reason: 'changed-since-scan' };
     }
 
-    const occupied = await lstatBig(destination);
-    if (occupied.ok || occupied.code !== 'ENOENT') {
-      const reason = occupied.ok ? 'destination-exists' : occupied.code;
-      fail(source, 'move', reason);
-      return { status: 'kept', reason };
+    const ready = await ensureBackup();
+    if (ready === null) {
+      kept.add(source);
+      return { status: 'kept', reason: rootRefusal?.reason ?? 'backup-unavailable' };
     }
-
-    try {
-      await fs.mkdir(path.dirname(destination), { recursive: true, mode: BACKUP_DIR_MODE });
-      await fs.rename(source, destination);
-    } catch (err) {
-      const reason = errnoCode(err);
-      fail(source, 'move', reason);
-      return { status: 'kept', reason };
-    }
-    const unit: MovedUnit = Object.freeze({ original: source, backup: destination, kind: kindOf(current.stats) });
-    kept.delete(source);
-    moved.push(unit);
-    return { status: 'moved', unit };
+    const outcome = await placeInRun(source, kindOf(current.stats), ready.runFolder);
+    if (outcome.status !== 'moved') await releaseEmptyRun();
+    return outcome;
   }
 
   async function scanFolder(
@@ -521,7 +630,7 @@ export function createBackupSession(options: BackupSessionOptions): BackupSessio
         }
         case 'sidecar': {
           if (kind === 'directory') {
-            const sub = await scanFolder(childPath, sidecarBase(childLogical) ?? childLogical, depth + 1, scanRoot, include);
+            const sub = await scanFolder(childPath, sidecarBase(childLogical, 'directory') ?? childLogical, depth + 1, scanRoot, include);
             if (sub !== null) folder.dirs.push(sub);
           } else {
             folder.listed.push({ path: childPath, retired: false });
@@ -561,7 +670,7 @@ export function createBackupSession(options: BackupSessionOptions): BackupSessio
         continue;
       }
       const rel = relFromClaude(stoodAt);
-      const logical = classify(rel, 'directory', sets) === 'sidecar' ? sidecarBase(rel) ?? rel : rel;
+      const logical = classify(rel, 'directory', sets) === 'sidecar' ? sidecarBase(rel, 'directory') ?? rel : rel;
       await scanFolder(absolute, logical, 0, absolute, include);
     }
     return Object.freeze({

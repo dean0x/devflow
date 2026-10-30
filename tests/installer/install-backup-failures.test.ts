@@ -546,7 +546,7 @@ describe('a folder over the entry cap', () => {
 
   it('keeps a leftover of devflow in a references subtree, and the prune removes nothing from it', async () => {
     await runInstall(home, { shape: 'full' });
-    const leftover = await put(home, 'skills/devflow:git/references/tracker/_contract.md.old', 'an interrupted write left this\n');
+    const leftover = await put(home, 'skills/devflow:git/references/tracker/_contract.md.tmp.4242', 'an interrupted write left this\n');
     const mine = await put(home, 'skills/devflow:git/references/tracker/mine-flat.md', 'a flat note\n');
 
     const report = await runInstall(home, { shape: 'full', backups: await capped() });
