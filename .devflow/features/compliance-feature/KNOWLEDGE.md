@@ -22,7 +22,7 @@ directories:
   - src/assets/commands/debug.mds
   - src/assets/skills/gap-analysis/references/compliance.md
 created: 2026-08-20
-updated: 2026-10-28
+updated: 2026-10-30
 ---
 
 # Compliance Feature & SDLC Traceability
@@ -54,6 +54,8 @@ updated: 2026-10-28
 - **KB-INV-9** No Code, Fix, Refactor, Review or Design body names the compliance skill or takes a lens input, and the gap-analysis preload carries no compliance text: its compliance section is `references/compliance.md`, which the Design focus spawn Reads by explicit path.
 - **KB-INV-10** In `/code-review` the compliance focus runs on its own trigger (`COMPLIANCE_ACTIVE` and regulated surface, `code` diff only) at every gate level: Step 1.2b only removes focuses, and `code-review-levels.md` never adds `compliance` nor holds its trigger, a framework list, the directive or spawn text (`tests/guards/code-review-levels.test.ts`).
 - **KB-INV-11** The posting steps of the installed prompts (evidence, review, resolution and design comments, release back-links) are a compile-time variant keyed on the machine compliance switch alone: `dist/commands` is all-on, with `dist/curation-off`, `dist/compliance-off` and `dist/curation-compliance-off` beside it, and `COMPLIANCE_VARIANT_HOSTS` (`tests/fixtures/mds-manifest.ts`) rosters the hosts, git having no both-off file; a repository `compliance` key never restores a posting step, while the lens stays the run-time union (KB-INV-3). One `convergeVariantAxes` serves init, `devflow curation` and `devflow compliance`, never throws, and returns posting `clear`, `left` (files) or `unknown` (reason), recorded in the installed-variant record under the manifest lock; `devflow compliance --disable` exits 1 when posting is left, on a version skew, a failed lock or a failed rule removal, and writes the switch under that lock. With compliance off, results stay in local files under `.devflow/docs/`, and under `required` each off command prints one `TRACEABILITY: DEGRADED` line.
+- **KB-INV-12** The same switch decides the installed `devflow:git` references: with compliance off they hold no posting operation file and no `publication-gate.md`, and the flat posting files of `COMPLIANCE_OFF_REMOVED_SKILL_FILES` are never copied (`complianceOffCopyExclusions`); enabling restores each byte for byte. `convergeReferences` is the fourth converge of `convergeVariantAxes`, and a failure there is `posting` `left` or `unknown`. `devflow compliance --enable` exits 1 with an error line when it leaves a failure, and still records compliance as on.
+- **KB-INV-13** `verify-evidence.cjs publish` refuses unless the machine manifest (`~/.devflow/manifest.json`, `features.compliance.enabled`) has compliance on. It reads only that file: the devflow directory override in the environment and every repository file are ignored. Compliance off prints `TRACEABILITY: DEGRADED (compliance off)`, an unreadable record prints `TRACEABILITY: DEGRADED (compliance state unreadable)`; both exit 2 before any gh call.
 
 ## Overview
 
@@ -205,7 +207,7 @@ Two independent things sit on `manifest.features.compliance` and must not be con
 - `src/cli/commands/skills.ts` - `shadowSeedDir`, the `the compliance feature (every install)` provenance
 - `src/cli/commands/rules.ts` - `seedRuleShadow` (Tier 1 skipped for `FEATURE_OWNED_RULES`)
 - `src/core/plugins.ts` - `FEATURE_OWNED_SKILLS`, `FEATURE_OWNED_RULES`, `DELETED_PLUGIN_NAMES`, `resolveFeatureRedirect`
-- `src/targets/claude-code/curation-install.ts` - `convergeVariantAxes` (the one converge for init and both toggles), `applyVariantToggle`; `src/core/installed-variants.ts` - `readInstalledVariants`, `postingStatus`, the init notice
+- `src/targets/claude-code/curation-install.ts` - `convergeVariantAxes` (the one converge for init and both toggles), `applyVariantToggle`; `src/targets/claude-code/reference-converge.ts` - `convergeReferences`; `src/targets/claude-code/compliance-off-files.ts` - the compliance-off copy exclusions, removal and restore; `src/core/installed-variants.ts` - `readInstalledVariants`, `postingStatus`, the init notice
 - `src/assets/commands/_partials/_compliance.mds` - the lens defines (`compliance_frameworks()`, `compliance_lens()`, `compliance_gate()`) and the directive defines (`compliance_directive()`, `compliance_focus_directive()`, `compliance_inject()`, `compliance_focus_inject()`)
 - `src/assets/agents/_partials/_code.mds` with `code.mds`, `fix.mds`, `refactor.mds`, `review.mds` and `design.mds` (all free of compliance text), `src/assets/skills/gap-analysis/references/compliance.md` (the Design focus's patterns, Read by path) and the `src/assets/skills/compliance/SKILL.md` checklist - where the lens is consumed
 - `src/assets/commands/code-review.mds` (Step 0b lens and level, 1.2 regulated-surface gate, 1.2b narrowing, focus directive), `plan.mds` (compliance Design agent and focus directive; issue linking mandatory only under `EVIDENCE_POLICY` `required`), `implement.mds`, `debug.mds` and `dynamic-build.mds` (alias-import, inject the Code directive, no gate), `resolve.mds` (injects the Code directive per worktree; Phase 1b and 9b on `EVIDENCE_POLICY` `required`, Phase 9c on `REQUIRE_NON_AUTHOR_APPROVAL`), `release.mds` (Phase 1c evidence policy; no compliance gate)
