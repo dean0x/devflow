@@ -277,7 +277,7 @@ const VALIDATE_STATUSES: readonly (string | null)[] = ['PASS', 'FAIL', 'BLOCKED'
 function validateStatusRoute(phase3: string, status: string | null): 'continue' | 'halt' | null {
   const arm = (lead: string): string | null => phase3.split('\n').find(l => l.startsWith(lead)) ?? null
   const step = (line: string | null): 'continue' | 'halt' | null =>
-    line === null ? null : /\bhalt\b/.test(line) ? 'halt' : /\bContinue to report\b/.test(line) ? 'continue' : null
+    line === null ? null : /\bContinue to report\b/.test(line) ? 'continue' : /\bhalt\b/.test(line) ? 'halt' : null
   const named = status === null ? null : arm(`**If ${status}:**`)
   if (named !== null) return step(named)
   const other = arm('**Any other or missing Status**')
