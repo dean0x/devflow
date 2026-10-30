@@ -100,6 +100,7 @@ describe('CLAUDE.md: size', () => {
   it('keeps the invariant list and points at the architecture doc by plain path', () => {
     expect(CLAUDE_MD).toContain('Invariants:');
     expect(CLAUDE_MD).toContain('`docs/reference/architecture.md`');
+    expect(CLAUDE_MD).toContain('`docs/reference/lean-prompts.md`');
     expect(CLAUDE_MD).not.toMatch(/(^|\s)@docs\/reference\/architecture\.md/m);
   });
 });
