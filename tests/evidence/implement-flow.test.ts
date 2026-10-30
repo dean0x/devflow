@@ -916,6 +916,74 @@ describe('AC-11: /implement appends claims the evidence script can read', () => 
 })
 
 // ---------------------------------------------------------------------------
+// /implement — the HEAD rule of the claim shapes (AC-11), in every build
+// ---------------------------------------------------------------------------
+//
+// The Test agent writes `HEAD: {before} → {after}` when HEAD moves during its run. That value is not a single
+// SHA, so no claim may be appended from the report. A reader who sees only the condition may take the `after`
+// SHA and append `sha:<after>`, a claim for a HEAD the tests did not all run at: a false pass. So the rule
+// states both the condition and the moved-HEAD example, in all four builds.
+
+type ImplementKey = 'on' | 'curation-off' | 'compliance-off' | 'both-off'
+
+const IMPLEMENT_KEYS: readonly ImplementKey[] = ['on', 'curation-off', 'compliance-off', 'both-off']
+
+function implementMdOfKey(key: ImplementKey): string {
+  if (key === 'on') return implementMd()
+  const text = resolveVariantOffSource(key, 'commands', 'implement')
+  if (text === null) throw new Error(`the ${key} build of /implement is absent: run \`npm run build:mds\``)
+  return text
+}
+
+const HEAD_RULE_LEAD = '- Append nothing from a report whose `HEAD:`'
+const HEAD_RULE_CONDITION = 'is not a single 40-hex SHA'
+const HEAD_RULE_EXAMPLE = 'a reported before/after change included'
+
+/** Named collector: what the HEAD rule bullet of the Evidence claims lacks, one defect per missing clause. */
+function collectHeadRuleDefects(file: string, text: string): string[] {
+  const rules = text.split('\n').filter(line => line.startsWith(HEAD_RULE_LEAD))
+  if (rules.length !== 1) return [`${file}: ${rules.length} HEAD rule bullets, expected 1`]
+  const out: string[] = []
+  if (!rules[0].includes(HEAD_RULE_CONDITION)) out.push(`${file}: the HEAD rule does not state the condition "${HEAD_RULE_CONDITION}"`)
+  if (!rules[0].includes(HEAD_RULE_EXAMPLE)) out.push(`${file}: the HEAD rule does not state the moved-HEAD example "${HEAD_RULE_EXAMPLE}"`)
+  return out
+}
+
+describe('AC-11: the HEAD rule of the claim shapes states the condition and the moved-HEAD example in every build', () => {
+  for (const key of IMPLEMENT_KEYS) {
+    const file = `${key} build of implement.md`
+
+    it(`${key}: the rule states "${HEAD_RULE_CONDITION}" and the before/after example`, () => {
+      expect(collectHeadRuleDefects(file, implementMdOfKey(key))).toEqual([])
+    })
+
+    it(`${key}: known-bad probe: a lost condition is reported as the condition, and no other clause`, () => {
+      const text = implementMdOfKey(key)
+      const broken = text.replace(HEAD_RULE_CONDITION, 'is not a SHA')
+      expect(broken, 'the condition seed must land').not.toBe(text)
+      expect(collectHeadRuleDefects(file, broken)).toEqual([`${file}: the HEAD rule does not state the condition "${HEAD_RULE_CONDITION}"`])
+    })
+
+    it(`${key}: known-bad probe: a lost example is reported as the example, and no other clause`, () => {
+      const text = implementMdOfKey(key)
+      const broken = text.replace(` — ${HEAD_RULE_EXAMPLE} —`, '')
+      expect(broken, 'the example seed must land').not.toBe(text)
+      expect(collectHeadRuleDefects(file, broken)).toEqual([`${file}: the HEAD rule does not state the moved-HEAD example "${HEAD_RULE_EXAMPLE}"`])
+    })
+
+    it(`${key}: known-bad probe: a missing or doubled rule bullet is reported by count`, () => {
+      const text = implementMdOfKey(key)
+      const lost = text.replace(HEAD_RULE_LEAD, '- Skip')
+      expect(lost, 'the loss seed must land').not.toBe(text)
+      expect(collectHeadRuleDefects(file, lost)).toEqual([`${file}: 0 HEAD rule bullets, expected 1`])
+      const rule = text.split('\n').find(line => line.startsWith(HEAD_RULE_LEAD))
+      expect(rule, 'the rule bullet must exist to double').toBeDefined()
+      expect(collectHeadRuleDefects(file, `${text}\n${rule}`)).toEqual([`${file}: 2 HEAD rule bullets, expected 1`])
+    })
+  }
+})
+
+// ---------------------------------------------------------------------------
 // /implement — REVIEW_PUBLICATION and Phase 11 (AC-11)
 // ---------------------------------------------------------------------------
 

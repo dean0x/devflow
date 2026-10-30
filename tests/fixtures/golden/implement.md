@@ -434,7 +434,7 @@ Any other or missing Status: report and halt; never PASS.
 
 - `gate:validate` — after a Phase 6 or Phase 8 PASS.
 - `TP-<n>` — after every Phase 7 run, one line per `### Test Plan Evidence` row whose TP is in `TEST_PLAN`, with the row's outcome; the line ends at `by:test` when the row's Exit is not a number from 0 to 255.
-- Append nothing from a report whose `HEAD:` is not a single 40-hex SHA, and say so in the Phase 12 report.
+- Append nothing from a report whose `HEAD:` is not a single 40-hex SHA — a reported before/after change included — and say so in the Phase 12 report.
 
 ### Phase 7: QA Testing
 
