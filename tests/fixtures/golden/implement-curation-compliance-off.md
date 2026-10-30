@@ -19,7 +19,7 @@ There is no producer-side grammar check: the operation that runs decides each to
 
 Note: under `github`, only the Git agent decides if a bare digit run is a reference. This command holds no provider knowledge.
 
-**Agent references.** A step that reads one gets the config directory once per run: run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"` in Bash. `{ref_dir}` is `<that directory>/skills/devflow:agent-references/references/commands`. Read each reference with the Read tool.
+**Agent references.** Print the config directory once, before the first reference Read: run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"` in Bash. `{ref_dir}` is `<that directory>/skills/devflow:agent-references/references/commands`. Read each reference with the Read tool. When `{ref_dir}` is not in view (for example after a compaction), print the directory again with the same line.
 
 ## Phases
 
@@ -321,6 +321,8 @@ Evaluate 9 pillars, fix P0/P1 issues, report status"
 
 Harden agent reports `### Status: PASS | FIXED | BLOCKED`. **If BLOCKED:** report to user and halt. **If PASS or FIXED:** continue to Phase 5. A FIXED status commits fixes and starts no Validate of its own: the Phase 6 run covers them.
 
+Any other or missing Status from a Harden that ran: report it and its cause, then halt; never PASS.
+
 Harden never reviews a deleted file or the old path of a rename; an empty list is no review, and Harden reports `no files reviewed`.
 
 ### Phase 5: Alignment Check
@@ -502,7 +504,7 @@ Capture the `- **PR**: #{number}` line of its `### Branch` as `PR_NUMBER`, its `
 
 Run under every strategy: Phase 9 opened the PR.
 
-**Push first, outside the gate block.** The gate reads CI for the pushed head, and the Polish, Harden and Fix commits reach the PR only by a push. Push once — never force, and no retry:
+**Push first, outside the gate block.** Push once — never force, and no retry:
 
 ```bash
 git push origin HEAD; echo "exit=$?"
@@ -527,7 +529,7 @@ git push origin HEAD; echo "exit=$?"
 
 Run once, after Phase 10, under every strategy. Skip it only when Phase 9 stopped the run. A `ci` TP reads `INDETERMINATE` only when the CI gate could not tell or did not run.
 
-**Push first.** Every claim is keyed to the HEAD an agent reported, and a Harden or Fix agent may have committed without pushing; a claim whose SHA is not in the PR reads `UNVERIFIED`. So push the branch once before the script — never force, and no retry:
+**Push first.** A claim whose SHA is not in the PR reads `UNVERIFIED`, so push the branch once before the script — never force, and no retry:
 
 ```bash
 git push origin HEAD; echo "exit=$?"

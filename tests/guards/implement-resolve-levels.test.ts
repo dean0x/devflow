@@ -17,7 +17,8 @@
  * What this file holds, each arm through a named collector and a known-bad probe over the same collector:
  *   a. The Gate level block of each command, closed to the read paragraph and the three bullets, in its place,
  *      outside every curation arm of the source. `/implement` reads its file under a placeholder, so it also pins the
- *      one paragraph that binds the placeholder: the sanctioned print, run once per run, and the references folder.
+ *      one paragraph that binds the placeholder: the sanctioned print, run once before the first reference Read and again
+ *      when the placeholder is out of view, and the references folder.
  *   b. The data flow: `GATE_LEVEL` in the Produces and Requires lines that carry it.
  *   c. The fail-closed bullet: no row applied, the level kept, and the Phase 6 Validate prompt still carries it.
  *   d. The reference grammar: title, headings, header, closed phase set, cell grammar (a never-skip phase takes no
@@ -60,7 +61,7 @@ import { DECIDED_ROWS, FULL_LOOP_LINES, LEVELS, LEVEL_CELL_INDEX, OPEN, POLISH_S
 const LEVEL_DIR = 'skills/devflow:agent-references/references/commands'
 /** The placeholder `/implement` reads its references through, and the one paragraph that binds it. */
 const IMPLEMENT_REF_DIR = '{ref_dir}'
-const IMPLEMENT_BINDER = `**Agent references.** A step that reads one gets the config directory once per run: run \`${SANCTIONED_RESOLUTION_PRINT}\` in Bash. \`${IMPLEMENT_REF_DIR}\` is \`<that directory>/${LEVEL_DIR}\`. Read each reference with the Read tool.`
+const IMPLEMENT_BINDER = `**Agent references.** Print the config directory once, before the first reference Read: run \`${SANCTIONED_RESOLUTION_PRINT}\` in Bash. \`${IMPLEMENT_REF_DIR}\` is \`<that directory>/${LEVEL_DIR}\`. Read each reference with the Read tool. When \`${IMPLEMENT_REF_DIR}\` is not in view (for example after a compaction), print the directory again with the same line.`
 const TABLE_HEADER = '| Phase | standard | lean |'
 
 const GRAMMAR_CELL = "- **Cell:** `-` runs the phase as written; `skip`, alone, skips it; `apply: <name>` applies the `## Rules` bullet `<name>`; `pass level` puts the line `GATE_LEVEL: {GATE_LEVEL}` first in every spawn prompt of the phase, right after a leading `OPERATION:` line. A phase with no spawn takes only `-`. Join `apply:` and `pass level` with `; `. Each `apply:` names exactly one bullet. Any other cell is malformed."
@@ -356,7 +357,8 @@ const binderNotPinned = (paragraph: string): string => `the reference-folder par
  * The gate-level read of a command whose read paragraph names its file under a placeholder: the paragraph that binds the placeholder is the
  * pinned one, it occurs once, it comes before the Gate level block, and it holds the only sanctioned print in the command. The read paragraph
  * is pinned by `collectLevelBlockDefects`. The two pins together give the read what the one-paragraph form pinned: the sanctioned print, run
- * once per run, and the exact reference path under the resolved directory. A command with no binder returns no defect.
+ * once before the first reference Read and again when the placeholder is out of view, and the exact reference path under the resolved
+ * directory. A command with no binder returns no defect.
  */
 export function collectReferenceBinderDefects(body: string, spec: LevelSpec): string[] {
   const binder = spec.binder
@@ -1816,7 +1818,7 @@ describe('the command carries one Gate level block, closed and in its place (AC-
     expect(defects(seed(body, binder, loosePrint))).toEqual([binderNotPinned(loosePrint), 'the command holds 0 sanctioned resolution lines, expected 1'])
     const looseFolder = binder.replace(`<that directory>/${LEVEL_DIR}`, '$HOME/.claude/skills')
     expect(defects(seed(body, binder, looseFolder))).toEqual([binderNotPinned(looseFolder)])
-    for (const phrase of ['once per run', 'in Bash', `\`${IMPLEMENT_REF_DIR}\` is`, 'with the Read tool']) {
+    for (const phrase of ['before the first reference Read', 'in Bash', `\`${IMPLEMENT_REF_DIR}\` is`, 'with the Read tool', 'is not in view', 'print the directory again with the same line']) {
       const edited = binder.replace(phrase, 'removed')
       expect(edited, `"${phrase}" is in the reference-folder paragraph`).not.toBe(binder)
       expect(defects(seed(body, binder, edited)), `removing "${phrase}"`).toEqual([binderNotPinned(edited)])

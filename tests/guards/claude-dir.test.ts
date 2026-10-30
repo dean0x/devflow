@@ -171,10 +171,24 @@ const IMPLEMENT_READS_COMPLIANCE_ON: readonly string[] = ['implement-evidence-as
 const IMPLEMENT_READS_COMPLIANCE_OFF: readonly string[] = ['implement-levels.md', 'implement-revalidate.md']
 
 /**
+ * What the paragraph that binds `{ref_dir}` says besides the binding, as the label of the defect and the text that carries
+ * it: the directory is printed once, before the first reference Read, and printed again with the same line when `{ref_dir}`
+ * is not in view (a session resumes from the current phase heading after a compaction, and the paragraph above `## Phases`
+ * is then out of view). The second print is the same line, so the sanctioned-line count stays at one.
+ */
+const IMPLEMENT_BINDER_PARTS: ReadonlyArray<readonly [label: string, text: string]> = [
+  ['say to print the directory once, before the first reference Read', 'Print the config directory once, before the first reference Read'],
+  [`name the case that a re-print answers: ${IMPLEMENT_REF_DIR} is not in view`, `When \`${IMPLEMENT_REF_DIR}\` is not in view`],
+  ['say to print the directory again', 'print the directory again'],
+  ['say to print it again with the same line', 'with the same line'],
+]
+
+/**
  * Named collector: how a compiled /implement reaches the Claude directory. The directory is resolved once: the sanctioned
- * line sits in one paragraph, which binds `{ref_dir}` to the references folder under `<that directory>` and comes before every
- * read. Each read site names its file under `{ref_dir}`, and no site names a root or a skills path of its own, so the site
- * row of the file (one line) stands for every read of the build. `reads` is the files the build reads, by file name.
+ * line sits in one paragraph, which binds `{ref_dir}` to the references folder under `<that directory>`, says to print the
+ * directory again with the same line when `{ref_dir}` is out of view, and comes before every read. Each read site names its
+ * file under `{ref_dir}`, and no site names a root or a skills path of its own, so the site row of the file (one line) stands
+ * for every read of the build. `reads` is the files the build reads, by file name.
  */
 export function collectImplementDirReadDefects(body: string, reads: readonly string[]): string[] {
   const out: string[] = []
@@ -189,7 +203,10 @@ export function collectImplementDirReadDefects(body: string, reads: readonly str
   else if (skillPaths[0] !== IMPLEMENT_REFS_FOLDER) out.push(`the one skills path is ${skillPaths[0]}, expected the references folder`)
   const binder = body.split('\n\n').find(p => p.includes(SANCTIONED_RESOLUTION))
   if (binder === undefined) out.push('no paragraph holds the sanctioned resolution line')
-  else if (!binder.includes(`\`${IMPLEMENT_REF_DIR}\` is \`<that directory>/${IMPLEMENT_REFS_FOLDER}\``)) out.push(`the paragraph with the sanctioned line does not bind ${IMPLEMENT_REF_DIR} to the references folder under <that directory>`)
+  else {
+    if (!binder.includes(`\`${IMPLEMENT_REF_DIR}\` is \`<that directory>/${IMPLEMENT_REFS_FOLDER}\``)) out.push(`the paragraph with the sanctioned line does not bind ${IMPLEMENT_REF_DIR} to the references folder under <that directory>`)
+    for (const [label, text] of IMPLEMENT_BINDER_PARTS) if (!binder.includes(text)) out.push(`the paragraph with the sanctioned line does not ${label}`)
+  }
   const read = [...body.matchAll(/\{ref_dir\}\/([a-z0-9-]+\.md)/g)].map(m => m[1]).sort()
   if (read.join(' ') !== [...reads].sort().join(' ')) out.push(`the files read through ${IMPLEMENT_REF_DIR} are ${read.join(', ')}, expected ${[...reads].sort().join(', ')}`)
   const use = body.indexOf(`${IMPLEMENT_REF_DIR}/`)
@@ -761,6 +778,30 @@ describe('no prompt reaches the Claude directory outside the CLAUDE_CONFIG_DIR r
     const moved = `${seed(implement, `${binder}\n\n`, '')}\n\n${binder}\n`
     expect(defects(moved)).toEqual([`a ${IMPLEMENT_REF_DIR} read comes before the paragraph that binds it`])
     expect(defects(`${implement}\nRead {claude_dir}/x.`)).toEqual(['a {claude_dir} placeholder'])
+  })
+
+  it('red probes: a binder that does not say to print the directory again when {ref_dir} is not in view is reported in /implement', () => {
+    const implement = corpusFile('dist/commands/implement.md').content
+    const seed = (from: string, to: string): string => {
+      const next = implement.replace(from, () => to)
+      expect(next, `the seed ${JSON.stringify(from.slice(0, 40))} must change the text`).not.toBe(implement)
+      return next
+    }
+    const defects = (text: string): string[] => collectImplementDirReadDefects(text, IMPLEMENT_READS_COMPLIANCE_ON)
+    const reprint = ' When `{ref_dir}` is not in view (for example after a compaction), print the directory again with the same line.'
+    const lead = 'the paragraph with the sanctioned line does not'
+    expect(defects(seed(reprint, ''))).toEqual([
+      `${lead} name the case that a re-print answers: ${IMPLEMENT_REF_DIR} is not in view`,
+      `${lead} say to print the directory again`,
+      `${lead} say to print it again with the same line`,
+    ])
+    expect(defects(seed('is not in view', 'is in view'))).toEqual([`${lead} name the case that a re-print answers: ${IMPLEMENT_REF_DIR} is not in view`])
+    expect(defects(seed('print the directory again', 'print it'))).toEqual([`${lead} say to print the directory again`])
+    expect(defects(seed('with the same line', 'with a line of your own'))).toEqual([`${lead} say to print it again with the same line`])
+    // The old wording read as one print for each step that reads a reference.
+    expect(defects(seed('Print the config directory once, before the first reference Read', 'A step that reads one gets the config directory once per run'))).toEqual([
+      `${lead} say to print the directory once, before the first reference Read`,
+    ])
   })
 
   it('red probe: the superseded presence gate, seeded into the real compiled command, is reported', () => {
