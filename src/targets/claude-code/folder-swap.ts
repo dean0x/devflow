@@ -5,7 +5,10 @@
  *
  * Nothing here removes a folder with a recursive `rm`. Before the swap, the backup session moves
  * every file devflow did not ship out of the old folder. If any file could not move, the folder is
- * not swapped: the files devflow ships are written into it one by one, and it stays in place. After
+ * not swapped: the files devflow ships are written into it one by one, and it stays in place. The
+ * same holds when the aside name is taken by a folder that keeps a file. A file at the aside name
+ * moves to the backup folder first; if it cannot move, a rename never replaces it, so a folder
+ * stays in place and a link makes the swap throw. After
  * a swap, the aside folder is scanned again, because a file can arrive between the first scan and the
  * rename. What the session moves out of it is named, what devflow shipped is removed by the list the
  * scan made, and the folder goes with a plain `rmdir`; a folder that still holds a file stays.
@@ -64,7 +67,10 @@ export async function swapFolderIn(options: FolderSwapOptions): Promise<FolderSw
   const { backups, target, staged, aside, links, mergeInto } = options;
 
   // What an earlier, interrupted swap left at the aside name is cleared first, so the rename below has a free name.
+  // A file there is not a displaced folder: it moves to the backup folder, because a rename replaces it without a trace.
   await discardDisplacedFolder(backups, aside, target);
+  if ((await directoryState(aside)) === 'unusable') await backups.moveWhole(aside);
+  const asideTaken = (await directoryState(aside)) !== 'absent';
 
   let state = await directoryState(target);
   if (state === 'unusable') {
@@ -77,12 +83,14 @@ export async function swapFolderIn(options: FolderSwapOptions): Promise<FolderSw
 
   if (state === 'real') {
     await backups.prepass([target]);
-    const leftover = (await directoryState(aside)) !== 'absent';
-    if (leftover || backups.keptUnder(target).length > 0) {
+    if (asideTaken || backups.keptUnder(target).length > 0) {
       await backups.removeListed(target);
       await mergeInto();
       return 'merged';
     }
+  }
+  if (state === 'link' && asideTaken) {
+    throw new Error(`${target} is a link and was not replaced: ${aside} is in the way and could not be moved`);
   }
 
   const displaced = state !== 'absent';

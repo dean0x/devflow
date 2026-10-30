@@ -313,6 +313,27 @@ describe('a file that cannot move', () => {
     expect((await fs.readdir(at(home, 'skills'))).filter(entry => /\.(tmp|old)$/.test(entry))).toEqual([]);
   });
 
+  it('compliance: a file in the aside folder of an earlier run stays, the swap is skipped and the shipped files are current', async () => {
+    await runInstall(home, { shape: 'full' });
+    await converge(true, true, await openSession(home));
+    const skill = at(home, `${SKILL_COMPLIANCE}/SKILL.md`);
+    const shipped = await fs.readFile(skill, 'utf8');
+    await fs.writeFile(skill, 'an old SKILL.md\n');
+    await put(home, `${SKILL_COMPLIANCE}.old/mine.md`, 'my note from an earlier run\n');
+    failRenameOf('mine.md');
+    const backups = await openSession(home);
+
+    const result = await converge(true, true, backups);
+
+    expect(result.compliance.converged, warnings.join('\n')).toBe(true);
+    expect(await fs.readFile(at(home, `${SKILL_COMPLIANCE}.old/mine.md`), 'utf8'), 'the file stays in the aside folder').toBe('my note from an earlier run\n');
+    expect(await fs.readFile(skill, 'utf8'), 'the shipped file is current').toBe(shipped);
+    expect((await fs.lstat(at(home, SKILL_COMPLIANCE))).isDirectory(), 'the target stays a real folder').toBe(true);
+    expect(backups.snapshot().failures).toEqual([
+      { path: at(home, `${SKILL_COMPLIANCE}.old/mine.md`), action: 'move', reason: 'EACCES' },
+    ]);
+  });
+
   it('curation enable: the swap is skipped, the shipped files are written into the folder and the file stays', async () => {
     await runInstall(home, { shape: 'full' });
     const skill = at(home, `${SKILL_APPLY}/SKILL.md`);
