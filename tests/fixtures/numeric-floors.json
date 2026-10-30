@@ -806,19 +806,19 @@
     },
     {
       "id": "command-self-review-max",
-      "ceiling": 15228,
-      "pattern": "['self-review', 'on', 15_228],",
+      "ceiling": 15201,
+      "pattern": "['self-review', 'on', 15_201],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/self-review.md, the curation-on build, in bytes. Measured 15,228 after #495 (15,691 after #472; 15,889 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/commands/self-review.md, the curation-on build, in bytes. Measured 15,201 at #695 (15,228 after #495; 15,691 after #472; 15,889 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-self-review-curation-off-max",
-      "ceiling": 12156,
-      "pattern": "['self-review', 'off', 12_156],",
+      "ceiling": 12129,
+      "pattern": "['self-review', 'off', 12_129],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/curation-off/commands/self-review.md, the curation-off build, in bytes. Measured 12,156 after #495 (12,619 after #472; 12,801 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/curation-off/commands/self-review.md, the curation-off build, in bytes. Measured 12,129 at #695 (12,156 after #495; 12,619 after #472; 12,801 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-bug-analysis-compliance-off-max",

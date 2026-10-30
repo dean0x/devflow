@@ -111,6 +111,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `/resolve` records a BLOCKED validation as `Final gate: FAILED (Validate blocked)`, with a blocking callout, and starts no fix agent. It still pushes, and the later phases still run. The cause and the log path go only to the report that you see, never to the posted summary. A stale test-plan re-check that is BLOCKED records `Test plan: DEGRADED (Test run blocked)`.
   - In `/dynamic-build`, a BLOCKED, missing or unknown Test result in the acceptance gate keeps the ticket from `PASS`: the run reports `UNVERIFIED`, or `PARTIAL` when the review leaves findings. It starts no fix agent and raises no error. In wave mode such a ticket merges as `UNVERIFIED`, never as `PASS`, and the wave table shows `—` in its Test column. This includes a ticket whose Test reply is missing or empty.
   - The build rules of `/dynamic-build` name all five agents that carry the shared rules for running commands: Code, Fix, Refactor, Validate and Test.
+- **`/self-review` stops when its validation does not pass** ([#695](https://github.com/dean0x/devflow/issues/695)). A Validate report with a Status other than PASS or FAIL, or with no Status, stops the command. This includes a BLOCKED report. The command reports the status, or "none", with its cause and, when the report gives one, its log path. It shows no completion summary. Before, it had steps only for PASS and FAIL, so the summary could read as if validation passed.
 
 ---
 
