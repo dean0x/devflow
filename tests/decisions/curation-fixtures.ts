@@ -237,7 +237,7 @@ export function initGitRepo(dir: string, files: Readonly<Record<string, string>>
     fs.writeFileSync(abs, content, 'utf8');
   }
   git(dir, ['add', '-A']);
-  git(dir, ['commit', '-q', '--allow-empty', '-m', 'init']);
+  git(dir, ['-c', 'maintenance.auto=false', 'commit', '-q', '--allow-empty', '-m', 'init']);
   return git(dir, ['rev-parse', 'HEAD']);
 }
 
@@ -265,7 +265,7 @@ export function trackInGit(dir: string, rels: string | readonly string[], { comm
     fs.writeFileSync(abs, 'content of the repository\n');
   }
   git(dir, ['add', '-f', '--', ...list]);
-  if (commit) git(dir, ['commit', '-q', '-m', 'add files']);
+  if (commit) git(dir, ['-c', 'maintenance.auto=false', 'commit', '-q', '-m', 'add files']);
 }
 
 /**

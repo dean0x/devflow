@@ -1100,7 +1100,7 @@ describe('capture hooks honour a repository narrowing (D-FEATURES-NARROW-ONLY)',
     // the toplevel, not the directory Claude Code was launched in.
     const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'cap-narrow-repo-'));
     try {
-      execSync('git init -q', { cwd: repo });
+      execFileSync('git', ['init', '-q'], { cwd: repo });
       const sub = path.join(repo, 'packages', 'app');
       fs.mkdirSync(sub, { recursive: true });
       writeRepoFile(repo, 'project.json', '{"features":{"learning":false}}');
@@ -1279,7 +1279,7 @@ describe('capture hooks never write through a symbolic link under .devflow (D-HO
   // queue checked against the other spelling would be refused as not below its root.
   describe('a real git repository reached through a linked parent', () => {
     const git = (cwd: string, ...args: string[]): void => {
-      execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...args], { cwd, stdio: 'ignore' });
+      execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', '-c', 'maintenance.auto=false', ...args], { cwd, stdio: 'ignore' });
     };
     let realParent: string;
     let linkedParent: string;

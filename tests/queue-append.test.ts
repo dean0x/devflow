@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { execSync, spawnSync } from 'child_process';
+import { execFileSync, execSync, spawnSync } from 'child_process';
 import { createRequire } from 'module';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -1360,7 +1360,7 @@ describe('queue_append_both and queue_append_row: the tracked-area gate', () => 
   let gitLog: string;
 
   const git = (...args: string[]): void => {
-    execSync(`git ${args.map((a) => `'${a}'`).join(' ')}`, { cwd: root, stdio: 'pipe' });
+    execFileSync('git', args, { cwd: root, stdio: 'pipe' });
   };
 
   beforeEach(() => {
@@ -1426,7 +1426,7 @@ describe('queue_append_both and queue_append_row: the tracked-area gate', () => 
   it('roots that differ cost one call each, and one queue on costs one call', () => {
     const other = path.join(tmpDir, 'main-checkout');
     fs.mkdirSync(other);
-    execSync('git init -q', { cwd: other, stdio: 'pipe' });
+    execFileSync('git', ['init', '-q'], { cwd: other, stdio: 'pipe' });
     reset();
 
     expect(both('"true" "true"', root, other).exitCode).toBe(0);

@@ -14,8 +14,8 @@
  * from invoking the real claude binary and hanging for 120s.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { execSync, spawnSync } from 'child_process';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach } from 'vitest';
+import { execFileSync, execSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -261,14 +261,61 @@ function expectClaimedRowsPreserved(projectDir: string, claimed: Buffer): void {
   expect(fs.readFileSync(processingFile)).toEqual(claimed);
 }
 
-/** Init scratch git repo */
+/** The committed repo that `initGitRepo` copies; built once per file by the top-level `beforeAll`. */
+let gitTemplateDir = '';
+
+/** A fresh repo holds a few dozen entries; the bound stops a walk that runs away. */
+const GIT_TEMPLATE_ENTRY_LIMIT = 2000;
+
+/** Throws when the template holds what a copy must not carry: a link, a lock file or a worktree entry. */
+function assertTemplateCopyable(root: string): void {
+  const pending = [root];
+  let seen = 0;
+  for (let dir = pending.pop(); dir !== undefined; dir = pending.pop()) {
+    for (const name of fs.readdirSync(dir)) {
+      seen += 1;
+      if (seen > GIT_TEMPLATE_ENTRY_LIMIT) {
+        throw new Error(`git template holds more than ${GIT_TEMPLATE_ENTRY_LIMIT} entries`);
+      }
+      const entry = path.join(dir, name);
+      const info = fs.lstatSync(entry);
+      if (info.isSymbolicLink()) throw new Error(`git template holds a symbolic link: ${entry}`);
+      if (name === 'index.lock') throw new Error(`git template holds a lock file: ${entry}`);
+      if (info.isDirectory()) pending.push(entry);
+    }
+  }
+  if (fs.readFileSync(path.join(root, '.git', 'config'), 'utf8').includes('worktree')) {
+    throw new Error('git template config names a worktree');
+  }
+}
+
+beforeAll(() => {
+  gitTemplateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-git-template-'));
+  const git = (...args: string[]): void => {
+    execFileSync('git', args, { cwd: gitTemplateDir });
+  };
+  git('init', '-q');
+  git('config', 'user.email', 'test@test.com');
+  git('config', 'user.name', 'Test');
+  fs.writeFileSync(path.join(gitTemplateDir, 'README.md'), '# test\n');
+  git('add', 'README.md');
+  git('-c', 'maintenance.auto=false', 'commit', '-qm', 'init');
+  assertTemplateCopyable(gitTemplateDir);
+});
+
+afterAll(() => {
+  if (gitTemplateDir !== '') fs.rmSync(gitTemplateDir, { recursive: true, force: true });
+});
+
+/** Init scratch git repo: a copy of the template's `.git` and README */
 function initGitRepo(dir: string): void {
-  execSync('git init -q', { cwd: dir });
-  execSync('git config user.email "test@test.com"', { cwd: dir });
-  execSync('git config user.name "Test"', { cwd: dir });
-  fs.writeFileSync(path.join(dir, 'README.md'), '# test\n');
-  execSync('git add README.md', { cwd: dir });
-  execSync('git commit -qm "init"', { cwd: dir });
+  // An empty template path would make `.git` relative to the cwd: the checkout's own repository.
+  if (gitTemplateDir === '') throw new Error('initGitRepo ran before the top-level beforeAll built the git template');
+  fs.cpSync(path.join(gitTemplateDir, '.git'), path.join(dir, '.git'), {
+    recursive: true,
+    verbatimSymlinks: true,
+  });
+  fs.copyFileSync(path.join(gitTemplateDir, 'README.md'), path.join(dir, 'README.md'));
 }
 
 // =============================================================================
@@ -361,8 +408,8 @@ describe('S2: AC-F4 — session-start-memory injection states', () => {
   }
 
   it('State A: stamp sha == HEAD → "synced @" header, no "commit(s) ago"', () => {
-    const headSha = execSync('git rev-parse HEAD', { cwd: projectDir, encoding: 'utf-8' }).trim();
-    const branch = execSync('git branch --show-current', { cwd: projectDir, encoding: 'utf-8' }).trim() || 'main';
+    const headSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: projectDir, encoding: 'utf-8' }).trim();
+    const branch = execFileSync('git', ['branch', '--show-current'], { cwd: projectDir, encoding: 'utf-8' }).trim() || 'main';
     writeMemoryWithStamp(projectDir, headSha, branch);
 
     const ctx = getCtx(projectDir, homeDir);
@@ -372,14 +419,16 @@ describe('S2: AC-F4 — session-start-memory injection states', () => {
   });
 
   it('State B: 2 commits after stamp sha → "2 commit(s) ago" + git log list', () => {
-    const stampSha = execSync('git rev-parse HEAD', { cwd: projectDir, encoding: 'utf-8' }).trim();
-    const branch = execSync('git branch --show-current', { cwd: projectDir, encoding: 'utf-8' }).trim() || 'main';
+    const stampSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: projectDir, encoding: 'utf-8' }).trim();
+    const branch = execFileSync('git', ['branch', '--show-current'], { cwd: projectDir, encoding: 'utf-8' }).trim() || 'main';
     writeMemoryWithStamp(projectDir, stampSha, branch);
 
     fs.writeFileSync(path.join(projectDir, 'file1.txt'), 'a');
-    execSync('git add file1.txt && git commit -qm "second commit"', { cwd: projectDir, shell: '/bin/bash' });
+    execFileSync('git', ['add', 'file1.txt'], { cwd: projectDir });
+    execFileSync('git', ['-c', 'maintenance.auto=false', 'commit', '-qm', 'second commit'], { cwd: projectDir });
     fs.writeFileSync(path.join(projectDir, 'file2.txt'), 'b');
-    execSync('git add file2.txt && git commit -qm "third commit"', { cwd: projectDir, shell: '/bin/bash' });
+    execFileSync('git', ['add', 'file2.txt'], { cwd: projectDir });
+    execFileSync('git', ['-c', 'maintenance.auto=false', 'commit', '-qm', 'third commit'], { cwd: projectDir });
 
     const ctx = getCtx(projectDir, homeDir);
     // Assert exact count — catches off-by-one in rev-walk dedup (the source was fixed in b3b5d6c
@@ -391,8 +440,8 @@ describe('S2: AC-F4 — session-start-memory injection states', () => {
   });
 
   it('State C: queue non-empty + .last-refresh-ok absent → MEMORY REFRESH MAY BE FAILING banner', () => {
-    const headSha = execSync('git rev-parse HEAD', { cwd: projectDir, encoding: 'utf-8' }).trim();
-    const branch = execSync('git branch --show-current', { cwd: projectDir, encoding: 'utf-8' }).trim() || 'main';
+    const headSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: projectDir, encoding: 'utf-8' }).trim();
+    const branch = execFileSync('git', ['branch', '--show-current'], { cwd: projectDir, encoding: 'utf-8' }).trim() || 'main';
     writeMemoryWithStamp(projectDir, headSha, branch);
     seedQueue(projectDir);
     // Do NOT create .last-refresh-ok
@@ -403,8 +452,8 @@ describe('S2: AC-F4 — session-start-memory injection states', () => {
   });
 
   it('State C shown IN ADDITION to State A (both banners coexist)', () => {
-    const headSha = execSync('git rev-parse HEAD', { cwd: projectDir, encoding: 'utf-8' }).trim();
-    const branch = execSync('git branch --show-current', { cwd: projectDir, encoding: 'utf-8' }).trim() || 'main';
+    const headSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: projectDir, encoding: 'utf-8' }).trim();
+    const branch = execFileSync('git', ['branch', '--show-current'], { cwd: projectDir, encoding: 'utf-8' }).trim() || 'main';
     writeMemoryWithStamp(projectDir, headSha, branch);
     seedQueue(projectDir);
 
@@ -414,7 +463,7 @@ describe('S2: AC-F4 — session-start-memory injection states', () => {
   });
 
   it('branch mismatch → ⚠ Memory was written on branch ... line', () => {
-    const headSha = execSync('git rev-parse HEAD', { cwd: projectDir, encoding: 'utf-8' }).trim();
+    const headSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: projectDir, encoding: 'utf-8' }).trim();
     writeMemoryWithStamp(projectDir, headSha, 'feature/old-branch');
 
     const ctx = getCtx(projectDir, homeDir);
@@ -452,8 +501,8 @@ describe('S2: AC-F4 — session-start-memory injection states', () => {
   });
 
   it('ignores valid or malformed legacy backups without changing current memory context', () => {
-    const headSha = execSync('git rev-parse HEAD', { cwd: projectDir, encoding: 'utf-8' }).trim();
-    const branch = execSync('git branch --show-current', { cwd: projectDir, encoding: 'utf-8' }).trim() || 'main';
+    const headSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: projectDir, encoding: 'utf-8' }).trim();
+    const branch = execFileSync('git', ['branch', '--show-current'], { cwd: projectDir, encoding: 'utf-8' }).trim() || 'main';
     writeMemoryWithStamp(projectDir, headSha, branch);
     const withoutBackup = getCtx(projectDir, homeDir);
     expect(withoutBackup, 'non-vacuity: the memory is injected with no backup at all').toContain('synced @');
@@ -472,8 +521,8 @@ describe('S2: AC-F4 — session-start-memory injection states', () => {
   });
 
   it.each(['identical', 'divergent', 'oversized'] as const)('ignores a newer %s legacy backup body', (kind) => {
-    const headSha = execSync('git rev-parse HEAD', { cwd: projectDir, encoding: 'utf-8' }).trim();
-    const branch = execSync('git branch --show-current', { cwd: projectDir, encoding: 'utf-8' }).trim() || 'main';
+    const headSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: projectDir, encoding: 'utf-8' }).trim();
+    const branch = execFileSync('git', ['branch', '--show-current'], { cwd: projectDir, encoding: 'utf-8' }).trim() || 'main';
     writeMemoryWithStamp(projectDir, headSha, branch);
     const memoryFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
     const current = fs.readFileSync(memoryFile, 'utf-8');
@@ -501,8 +550,8 @@ describe('S2: AC-F4 — session-start-memory injection states', () => {
   });
 
   it('raw UNPROCESSED TURNS dump is absent from all output (legacy format gone)', () => {
-    const headSha = execSync('git rev-parse HEAD', { cwd: projectDir, encoding: 'utf-8' }).trim();
-    const branch = execSync('git branch --show-current', { cwd: projectDir, encoding: 'utf-8' }).trim() || 'main';
+    const headSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: projectDir, encoding: 'utf-8' }).trim();
+    const branch = execFileSync('git', ['branch', '--show-current'], { cwd: projectDir, encoding: 'utf-8' }).trim() || 'main';
     writeMemoryWithStamp(projectDir, headSha, branch);
     seedQueue(projectDir);
 
@@ -571,7 +620,7 @@ describe('S3: AC-F6 — capture-turn queue-append is unaffected by trigger/throt
     );
 
     initGitRepo(projectDir);
-    const headSha = execSync('git rev-parse HEAD', { cwd: projectDir, encoding: 'utf-8' }).trim();
+    const headSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: projectDir, encoding: 'utf-8' }).trim();
     const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
     fs.writeFileSync(memFile, `<!-- memory-head: ${headSha} branch: main -->\n## Now\n- old content\n`);
     // No .last-refresh-ok
@@ -2155,7 +2204,7 @@ describe('S22: pre-compact bootstrap stamp and canonical sections (B2)', () => {
   it.each(['available', 'node-only'] as const)('preserves Git backup evidence without copying memory (%s parser)', (backend) => {
     initGitRepo(projectDir);
     fs.appendFileSync(path.join(projectDir, 'README.md'), 'pending change\n');
-    const branch = execSync('git branch --show-current', { cwd: projectDir, encoding: 'utf-8' }).trim();
+    const branch = execFileSync('git', ['branch', '--show-current'], { cwd: projectDir, encoding: 'utf-8' }).trim();
     const memoryFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
     const memory = '## Now\n- current-memory-only-marker\n';
     fs.writeFileSync(memoryFile, memory);
@@ -2198,7 +2247,7 @@ describe('S22: pre-compact bootstrap stamp and canonical sections (B2)', () => {
     // session-start-memory fell through to its no-stamp path).
     // This test pins the EXACT sha so a regression to "synced @ unknown" fails loudly.
     initGitRepo(projectDir);
-    const headSha = execSync('git rev-parse HEAD', { cwd: projectDir, encoding: 'utf-8' }).trim();
+    const headSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: projectDir, encoding: 'utf-8' }).trim();
     const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
 
     // Bootstrap via pre-compact
@@ -2264,7 +2313,7 @@ describe('S22: pre-compact bootstrap stamp and canonical sections (B2)', () => {
     // stamp would recreate the "synced @ unknown" defect; the explicit label keeps the
     // stamp well-formed.
     initGitRepo(projectDir);
-    execSync('git checkout --detach', { cwd: projectDir });
+    execFileSync('git', ['checkout', '--detach'], { cwd: projectDir });
     const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
 
     runHook(PRE_COMPACT_HOOK, { cwd: projectDir }, homeDir);
@@ -2284,9 +2333,9 @@ describe('S22: pre-compact bootstrap stamp and canonical sections (B2)', () => {
     try {
       fs.mkdirSync(path.join(freshDir, '.devflow', 'memory'), { recursive: true });
       fs.mkdirSync(path.join(freshDir, '.devflow', 'dream'), { recursive: true });
-      execSync('git init -q', { cwd: freshDir });
-      execSync('git config user.email "test@test.com"', { cwd: freshDir });
-      execSync('git config user.name "Test"', { cwd: freshDir });
+      execFileSync('git', ['init', '-q'], { cwd: freshDir });
+      execFileSync('git', ['config', 'user.email', 'test@test.com'], { cwd: freshDir });
+      execFileSync('git', ['config', 'user.name', 'Test'], { cwd: freshDir });
       // Deliberately no commit — unborn branch, no HEAD
       const memFile = path.join(freshDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
 
@@ -2332,15 +2381,15 @@ describe('S23: reconciliation-aware worker prompt — COMMITS_SINCE and TODAY (B
 
   it('commits-since-stamp appear in prompt when stamp SHA is a valid ancestor of HEAD', () => {
     // Capture C1 SHA (from initGitRepo), then create C2 on top
-    const c1Sha = execSync('git rev-parse HEAD', { cwd: projectDir }).toString().trim();
+    const c1Sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: projectDir }).toString().trim();
 
     // Pre-write WORKING-MEMORY.md stamped at C1
     fs.writeFileSync(memFile, `<!-- memory-head: ${c1Sha} branch: main -->\n## Now\n- existing\n`);
 
     // Create C2 commit
     fs.writeFileSync(path.join(projectDir, 'file2.txt'), 'second commit content\n');
-    execSync('git add file2.txt', { cwd: projectDir });
-    execSync('git commit -qm "second commit for reconciliation test"', { cwd: projectDir });
+    execFileSync('git', ['add', 'file2.txt'], { cwd: projectDir });
+    execFileSync('git', ['-c', 'maintenance.auto=false', 'commit', '-qm', 'second commit for reconciliation test'], { cwd: projectDir });
 
     const stdinCapture = createPromptCapturingShim(shimDir, stagedFile);
 
@@ -2374,18 +2423,18 @@ describe('S23: reconciliation-aware worker prompt — COMMITS_SINCE and TODAY (B
 
   it('stamp SHA not an ancestor of HEAD → branch-switch note in prompt', () => {
     // Detect the default branch name — may be 'main' or 'master' depending on git config
-    const defaultBranch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: projectDir })
+    const defaultBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: projectDir })
       .toString().trim();
 
     // Create a side branch and commit on it — its HEAD SHA is not an ancestor of defaultBranch
-    execSync('git checkout -qb side', { cwd: projectDir });
+    execFileSync('git', ['checkout', '-qb', 'side'], { cwd: projectDir });
     fs.writeFileSync(path.join(projectDir, 'side.txt'), 'x\n');
-    execSync('git add side.txt', { cwd: projectDir });
-    execSync('git commit -qm "side branch commit"', { cwd: projectDir });
-    const sideSha = execSync('git rev-parse HEAD', { cwd: projectDir }).toString().trim();
+    execFileSync('git', ['add', 'side.txt'], { cwd: projectDir });
+    execFileSync('git', ['-c', 'maintenance.auto=false', 'commit', '-qm', 'side branch commit'], { cwd: projectDir });
+    const sideSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: projectDir }).toString().trim();
 
     // Return to the default branch — sideSha is now NOT an ancestor of HEAD there
-    execSync(`git checkout -q ${defaultBranch}`, { cwd: projectDir });
+    execFileSync('git', ['checkout', '-q', defaultBranch], { cwd: projectDir });
 
     // Stamp WORKING-MEMORY.md with the side-branch SHA
     fs.writeFileSync(memFile, `<!-- memory-head: ${sideSha} branch: side -->\n## Now\n- x\n`);
@@ -2404,7 +2453,7 @@ describe('S23: reconciliation-aware worker prompt — COMMITS_SINCE and TODAY (B
 
   it('HEAD == stamp → memory-is-current note in prompt', () => {
     // Stamp WORKING-MEMORY.md at the current HEAD — zero commits ahead
-    const head = execSync('git rev-parse HEAD', { cwd: projectDir }).toString().trim();
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: projectDir }).toString().trim();
     fs.writeFileSync(memFile, `<!-- memory-head: ${head} branch: main -->\n## Now\n- x\n`);
 
     const stdinCapture = createPromptCapturingShim(shimDir, stagedFile);
@@ -2544,7 +2593,7 @@ describe('S24: State-C counts orphaned .processing toward queue depth (B4)', () 
     initGitRepo(projectDir);
     // Seed a minimal WORKING-MEMORY.md so session-start-memory injects something
     const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
-    const headSha = execSync('git rev-parse HEAD', { cwd: projectDir }).toString().trim();
+    const headSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: projectDir }).toString().trim();
     fs.writeFileSync(memFile, `<!-- memory-head: ${headSha} branch: main -->\n## Now\n- test\n`);
   });
 
@@ -2816,7 +2865,7 @@ describe('S26: pre-compact backup.json is replaced by a rename, never rewritten 
     expect(fs.statSync(backup).ino, 'backup.json is a new inode').not.toBe(fs.statSync(witness).ino);
     const written = JSON.parse(fs.readFileSync(backup, 'utf-8')) as { trigger?: string; git?: { branch?: string } };
     expect(written.trigger).toBe('pre-compact');
-    expect(written.git?.branch).toBe(execSync('git branch --show-current', { cwd: projectDir, encoding: 'utf-8' }).trim());
+    expect(written.git?.branch).toBe(execFileSync('git', ['branch', '--show-current'], { cwd: projectDir, encoding: 'utf-8' }).trim());
     expect((fs.statSync(backup).mode & 0o777).toString(8), 'the Git-state backup remains owner-only').toBe('600');
     expect(leftovers(), 'no copy is left beside the backup').toEqual([]);
   });
@@ -4726,7 +4775,7 @@ describe('S30: a notice from the memory worker is shown once at session start (A
   });
 
   it('the notice rides beside the working memory: the memory is the context, the notice the systemMessage', () => {
-    const head = execSync('git rev-parse HEAD', { cwd: projectDir, encoding: 'utf-8' }).trim();
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: projectDir, encoding: 'utf-8' }).trim();
     fs.writeFileSync(memFile, `<!-- memory-head: ${head} branch: main -->\n## Now\n- some progress\n`);
     holdStagedPath();
     runWorkerOnce(HEALTHY_VERSION);
@@ -5505,7 +5554,7 @@ describe('S36: the memory worker pauses while git tracks the memory folder, or d
     run();
     expect(fs.existsSync(memFile), 'paused: no working memory').toBe(false);
 
-    execSync('git rm -q --cached -- .devflow/memory/tracked-note.txt', { cwd: projectDir, stdio: 'pipe' });
+    execFileSync('git', ['rm', '-q', '--cached', '--', '.devflow/memory/tracked-note.txt'], { cwd: projectDir, stdio: 'pipe' });
     run();
 
     expectSwapCompleted();

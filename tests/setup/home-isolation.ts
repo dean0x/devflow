@@ -7,9 +7,13 @@
  * `tests/helpers.ts` on purpose: a setup file shares the test file's module graph,
  * so any `src/` module it pulled in would be evaluated BEFORE HOME is redirected
  * and could freeze a real-home path into a module-level constant.
+ *
+ * The checks for the run temp root and git folder that `tests/setup/global-setup.ts` hands
+ * to the workers live here for the same reason: a bad value must stop the run, not redirect it.
  */
 
-import { existsSync, realpathSync } from 'fs';
+import { existsSync, lstatSync, readdirSync, readlinkSync, realpathSync } from 'fs';
+import type { Stats } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
@@ -34,9 +38,14 @@ export const TEMP_HOME_PREFIX = 'devflow-test-home-';
 export const ORIGINAL_HOME_VAR = 'DEVFLOW_TEST_ORIGINAL_HOME';
 
 /** Resolve symlinks where the path exists (macOS `/var` → `/private/var`), else normalise. */
-function canonical(p: string): string {
+export function canonical(p: string): string {
   const resolved = path.resolve(p);
   return existsSync(resolved) ? realpathSync(resolved) : resolved;
+}
+
+/** True when `target` is `folder` or lies below it. Both are compared as written. */
+export function isUnder(target: string, folder: string): boolean {
+  return target === folder || target.startsWith(folder + path.sep);
 }
 
 /**
@@ -80,4 +89,229 @@ export function isolatedEnv(env: NodeJS.ProcessEnv, home: string): NodeJS.Proces
   const redirects = new Set<string>(REDIRECT_ENV_VARS);
   const kept = Object.fromEntries(Object.entries(env).filter(([key]) => !redirects.has(key)));
   return { ...kept, HOME: home, USERPROFILE: home };
+}
+
+/**
+ * Every key that starts with this (in any letter case) is dropped from the worker env: `GIT_DIR`,
+ * `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_CONFIG_*`, the pathspec switches and the rest all point
+ * git at another repository or add settings. The whole prefix goes, not a list of names, so a
+ * variable that a later git adds is gone too. The lookup spawn in `global-setup.ts`
+ * (`gitSpawnEnv`) passes no `GIT_*` key either.
+ */
+export const GIT_ENV_PREFIX = 'GIT_';
+
+/**
+ * The variable outside the `GIT_` prefix that moves git's settings: with `XDG_CONFIG_HOME` set,
+ * git reads `$XDG_CONFIG_HOME/git/config` and not `$HOME/.config/git/config`. Dropped, git reads
+ * the one under the temp HOME.
+ */
+export const GIT_SETTINGS_ENV_VARS = ['XDG_CONFIG_HOME'] as const;
+
+/**
+ * A copy of `env` that lets a git call read only the settings the test sets up and act only on
+ * the repositories the test makes: no `GIT_*` key and none of `GIT_SETTINGS_ENV_VARS`, and
+ * `GIT_CONFIG_NOSYSTEM=1` so the system config is not read. The global config stays: with HOME
+ * pinned to the temp HOME (`isolatedEnv`), `~/.gitconfig` is the file a test writes itself. The
+ * input is not touched.
+ */
+export function gitIsolatedEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const settings = new Set<string>(GIT_SETTINGS_ENV_VARS);
+  const kept = Object.fromEntries(
+    Object.entries(env).filter(([key]) => !key.toUpperCase().startsWith(GIT_ENV_PREFIX) && !settings.has(key)),
+  );
+  return { ...kept, GIT_CONFIG_NOSYSTEM: '1' };
+}
+
+/** Every per-run temp root is created with this prefix, directly under the real temp root. */
+export const RUN_ROOT_PREFIX = 'devflow-testtmp-';
+/** The run root's git folder: a read-only directory holding one link named `git`. */
+export const GIT_BIN_PREFIX = 'git-bin-';
+/** The file in a run root that records the pid of the process that owns it. */
+export const RUN_OWNER_FILE = 'owner.pid';
+/** The provided-context keys; each stays unset in the integration config and when its own step fails or is skipped. */
+export const RUN_TMP_KEY = 'devflowRunTmp';
+export const GIT_BIN_KEY = 'devflowGitBin';
+/** The only characters a run root, git folder or link target may hold. */
+export const SAFE_PATH = /^[A-Za-z0-9/._-]+$/;
+
+declare module 'vitest' {
+  interface ProvidedContext {
+    devflowRunTmp?: string;
+    devflowGitBin?: string;
+  }
+}
+
+/** The canonical temp root and the real homes, computed once for many root checks. */
+export interface TmpContext {
+  readonly tmp: string;
+  readonly homes: readonly string[];
+}
+
+export function tmpContext(tmpRoot: string, env: NodeJS.ProcessEnv = process.env): TmpContext {
+  return { tmp: canonical(tmpRoot), homes: realHomes(env) };
+}
+
+/** True when the temp root is the filesystem root, a real home, or inside one. */
+export function contextRefusesTmp(ctx: TmpContext): boolean {
+  return (
+    ctx.tmp === path.parse(ctx.tmp).root ||
+    ctx.homes.some(home => ctx.tmp === home || ctx.tmp.startsWith(home + path.sep))
+  );
+}
+
+export function refusesTmpRoot(tmpRoot: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  return contextRefusesTmp(tmpContext(tmpRoot, env));
+}
+
+export interface RunRootOptions {
+  /** The uid that must own the folder. Undefined (no uid on this platform) refuses. */
+  uid: number | undefined;
+  env?: NodeJS.ProcessEnv;
+  /** Built from the same `tmpRoot`, when the caller checks many roots against one temp root. */
+  context?: TmpContext;
+}
+
+function defaultRunRootOptions(): RunRootOptions {
+  return { uid: process.getuid?.(), env: process.env };
+}
+
+/** `lstat` that names the folder in its error and never follows a link. */
+function lstatOf(target: string, what: string): Stats {
+  try {
+    return lstatSync(target);
+  } catch (err) {
+    throw new Error(`refusing ${what} ${target} — it cannot be inspected: ${(err as Error).message}`);
+  }
+}
+
+/**
+ * Throw unless `root` is a run root: a safe, normalised, absolute path whose name starts
+ * with `RUN_ROOT_PREFIX`, a direct child of `tmpRoot`, a real directory (not a link)
+ * owned by `opts.uid`, not a real home, under a temp root that is itself acceptable.
+ * `root` is inspected with `lstat` and never resolved with `realpath`.
+ */
+export function assertRunRoot(
+  root: string,
+  tmpRoot: string = os.tmpdir(),
+  opts: RunRootOptions = defaultRunRootOptions(),
+): void {
+  if (!path.isAbsolute(root) || !SAFE_PATH.test(root)) {
+    throw new Error(`refusing run root ${root} — it is not an absolute path of safe characters`);
+  }
+  if (path.resolve(root) !== root) {
+    throw new Error(`refusing run root ${root} — it is not a normalised path`);
+  }
+  const name = path.basename(root);
+  if (!name.startsWith(RUN_ROOT_PREFIX) || name === RUN_ROOT_PREFIX) {
+    throw new Error(`refusing run root ${root} — its name does not start with ${RUN_ROOT_PREFIX}`);
+  }
+  const ctx = opts.context ?? tmpContext(tmpRoot, opts.env);
+  if (contextRefusesTmp(ctx)) {
+    throw new Error(`refusing run root ${root} — ${ctx.tmp} is the filesystem root or inside a real home`);
+  }
+  const parent = path.dirname(root);
+  if (parent !== ctx.tmp && canonical(parent) !== ctx.tmp) {
+    throw new Error(`refusing run root ${root} — it is not a direct child of ${ctx.tmp}`);
+  }
+  const st = lstatOf(root, 'run root');
+  if (st.isSymbolicLink() || !st.isDirectory()) {
+    throw new Error(`refusing run root ${root} — it is not a real directory`);
+  }
+  if (opts.uid === undefined || st.uid !== opts.uid) {
+    throw new Error(`refusing run root ${root} — it is not owned by the current user`);
+  }
+  if (ctx.homes.includes(path.join(ctx.tmp, name))) {
+    throw new Error(`refusing to use the real home ${root} as a run root`);
+  }
+}
+
+/**
+ * The worker's check of the provided run root. `undefined` stays `undefined`. A value
+ * that is already this process's temp root (applied by an earlier call) is returned as
+ * it is; any other value must pass `assertRunRoot` against the inherited temp root.
+ */
+export function checkRunTmp(
+  value: unknown,
+  tmpRoot: string = os.tmpdir(),
+  opts: RunRootOptions = defaultRunRootOptions(),
+): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || value === '') {
+    throw new Error(`refusing a run temp root of ${typeof value === 'string' ? 'empty text' : typeof value}`);
+  }
+  if (canonical(value) === canonical(tmpRoot)) return value;
+  assertRunRoot(value, tmpRoot, opts);
+  return value;
+}
+
+/**
+ * The worker's check of the provided git folder. `undefined` stays `undefined`. Each
+ * check throws on its own, with its own message: a non-empty safe absolute path that is a
+ * direct child of the run root, named with `GIT_BIN_PREFIX`; a real directory owned by
+ * `opts.uid` with no write bits; holding exactly one entry, `git`, a link whose target is
+ * an absolute safe path outside the run root, compared as written and as resolved (on macOS
+ * `/var` is `/private/var`), as the global setup requires of the git it finds.
+ */
+export function checkGitBinDir(
+  value: unknown,
+  runRoot: string | undefined,
+  opts: { uid: number | undefined } = { uid: process.getuid?.() },
+): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || value === '') {
+    throw new Error('refusing a git folder that is not a non-empty string');
+  }
+  if (!path.isAbsolute(value) || !SAFE_PATH.test(value)) {
+    throw new Error(`refusing git folder ${value} — it is not an absolute path of safe characters`);
+  }
+  if (path.resolve(value) !== value) {
+    throw new Error(`refusing git folder ${value} — it is not a normalised path`);
+  }
+  if (runRoot === undefined) {
+    throw new Error(`refusing git folder ${value} — there is no run root to hold it`);
+  }
+  if (path.dirname(value) !== runRoot) {
+    throw new Error(`refusing git folder ${value} — it is not a direct child of the run root ${runRoot}`);
+  }
+  const name = path.basename(value);
+  if (!name.startsWith(GIT_BIN_PREFIX) || name === GIT_BIN_PREFIX) {
+    throw new Error(`refusing git folder ${value} — its name does not start with ${GIT_BIN_PREFIX}`);
+  }
+  const st = lstatOf(value, 'git folder');
+  if (st.isSymbolicLink() || !st.isDirectory()) {
+    throw new Error(`refusing git folder ${value} — it is not a real directory`);
+  }
+  if (opts.uid === undefined || st.uid !== opts.uid) {
+    throw new Error(`refusing git folder ${value} — it is not owned by the current user`);
+  }
+  if ((st.mode & 0o222) !== 0) {
+    throw new Error(`refusing git folder ${value} — it has write bits set`);
+  }
+  const entries = readdirSync(value);
+  if (entries.length !== 1 || entries[0] !== 'git') {
+    throw new Error(`refusing git folder ${value} — it must hold exactly one entry named git`);
+  }
+  const link = path.join(value, 'git');
+  if (!lstatOf(link, 'git link').isSymbolicLink()) {
+    throw new Error(`refusing git folder ${value} — its git entry is not a link`);
+  }
+  const target = readlinkSync(link);
+  if (!path.isAbsolute(target) || !SAFE_PATH.test(target)) {
+    throw new Error(`refusing git folder ${value} — its link target is not an absolute path of safe characters`);
+  }
+  if (isUnder(target, runRoot) || isUnder(canonical(target), canonical(runRoot))) {
+    throw new Error(`refusing git folder ${value} — its link target is inside the run root`);
+  }
+  return value;
+}
+
+/**
+ * PATH with the git folder first. An unset or empty PATH gives the folder alone (never
+ * `bin:`, which would add the current directory); a PATH that already starts with the
+ * folder is returned as it is.
+ */
+export function pathWithGitBin(pathVar: string | undefined, bin: string): string {
+  if (pathVar === undefined || pathVar === '') return bin;
+  if (pathVar === bin || pathVar.startsWith(bin + path.delimiter)) return pathVar;
+  return `${bin}${path.delimiter}${pathVar}`;
 }

@@ -375,7 +375,7 @@ function put(dir: string, rel: string, text: string): void {
 function commitFile(dir: string, home: string, rel: string): string {
   put(dir, rel, `${rel}\n`)
   git(dir, home, 'add', '--', rel)
-  git(dir, home, 'commit', '-q', '-m', `add ${rel}`)
+  git(dir, home, '-c', 'maintenance.auto=false', 'commit', '-q', '-m', `add ${rel}`)
   return git(dir, home, 'rev-parse', 'HEAD')
 }
 
@@ -395,7 +395,7 @@ beforeAll(() => {
   put(seed, 'README.md', 'readme\n')
   put(seed, 'base.txt', 'base\n')
   git(seed, home, 'add', '--', 'README.md', 'base.txt')
-  git(seed, home, 'commit', '-q', '-m', 'm0')
+  git(seed, home, '-c', 'maintenance.auto=false', 'commit', '-q', '-m', 'm0')
   git(seed, home, 'remote', 'add', 'origin', baseRemote)
   git(seed, home, 'push', '-q', 'origin', 'main')
   git(seed, home, 'push', '-q', 'origin', 'HEAD:refs/heads/release/1.x')

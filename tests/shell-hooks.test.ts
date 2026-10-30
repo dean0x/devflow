@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach, afterAll } from 'vitest';
-import { execSync, spawnSync, spawn } from 'child_process';
+import { execFileSync, execSync, spawnSync, spawn } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -594,7 +594,7 @@ describe('resolve-project-root: df_resolve_root', () => {
   it('(a) returns the git toplevel for a normal subdir inside a repo', () => {
     const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-rpr-git-'));
     try {
-      execSync(`git init -q "${repo}"`, { stdio: 'pipe' });
+      execFileSync('git', ['init', '-q', repo], { stdio: 'pipe' });
       const real = fs.realpathSync(repo);
       const sub = path.join(real, 'src', 'deep', 'nested');
       fs.mkdirSync(sub, { recursive: true });
@@ -607,7 +607,7 @@ describe('resolve-project-root: df_resolve_root', () => {
   it('(b) returns the repo root for a path inside .devflow/ — git walks up (the stray-nesting fix)', () => {
     const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-rpr-dev-'));
     try {
-      execSync(`git init -q "${repo}"`, { stdio: 'pipe' });
+      execFileSync('git', ['init', '-q', repo], { stdio: 'pipe' });
       const real = fs.realpathSync(repo);
       const nested = path.join(real, '.devflow', 'docs', 'waves', 'x', 'tickets');
       fs.mkdirSync(nested, { recursive: true });
@@ -655,7 +655,7 @@ describe('hooks anchor .devflow/ to the project root (no stray nested .devflow/)
     const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-anchor-home-'));
     fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
     try {
-      execSync(`git init -q "${repo}"`, { stdio: 'pipe' });
+      execFileSync('git', ['init', '-q', repo], { stdio: 'pipe' });
       const real = fs.realpathSync(repo);
 
       // The hook runs with a CWD deep inside .devflow/ — the stray-nesting scenario.
@@ -697,14 +697,14 @@ describe('hooks anchor .devflow/ to the project root (no stray nested .devflow/)
  * question about it, so the session start hook can tell that git tracks nothing there.
  */
 function initEmptyRepo(dir: string): void {
-  execSync('git init -q', { cwd: dir, stdio: 'pipe' });
+  execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'pipe' });
 }
 
 /** A repository with one commit, so worktrees and detached checkouts are possible. */
 function initCommittedRepo(dir: string): void {
   fs.mkdirSync(dir, { recursive: true });
-  execSync('git init -q', { cwd: dir, stdio: 'pipe' });
-  execSync('git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init', { cwd: dir, stdio: 'pipe' });
+  execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'pipe' });
+  execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'maintenance.auto=false', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: dir, stdio: 'pipe' });
 }
 
 /**
@@ -860,7 +860,7 @@ describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19
     main = path.join(base, 'main');
     initCommittedRepo(main);
     wt = path.join(base, 'wt');
-    execSync(`git worktree add -q "${wt}" -b feat`, { cwd: main, stdio: 'pipe' });
+    execFileSync('git', ['worktree', 'add', '-q', wt, '-b', 'feat'], { cwd: main, stdio: 'pipe' });
     main = fs.realpathSync(main);
     wt = fs.realpathSync(wt);
   });
@@ -905,7 +905,7 @@ describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19
     initCommittedRepo(dotHome);
     fs.mkdirSync(path.join(dotHome, '.devflow', 'logs'), { recursive: true });
     const dotWt = path.join(base, 'dotwt');
-    execSync(`git worktree add -q "${dotWt}" -b dots`, { cwd: dotHome, stdio: 'pipe' });
+    execFileSync('git', ['worktree', 'add', '-q', dotWt, '-b', 'dots'], { cwd: dotHome, stdio: 'pipe' });
     const dotWtReal = fs.realpathSync(dotWt);
 
     expect(resolveRoots(dotWt, { ...process.env, HOME: dotHome })).toEqual({ root: dotWtReal, ledger: dotWtReal });
@@ -1159,7 +1159,7 @@ describe('D-DETACHED-HEAD: memory on a detached HEAD (TP-53, TP-54)', { timeout:
     fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
     repo = path.join(base, 'repo');
     initCommittedRepo(repo);
-    sha = execSync('git rev-parse HEAD', { cwd: repo, encoding: 'utf-8' }).trim();
+    sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf-8' }).trim();
   });
 
   afterEach(() => {
@@ -1174,7 +1174,7 @@ describe('D-DETACHED-HEAD: memory on a detached HEAD (TP-53, TP-54)', { timeout:
   }
 
   it('TP-53: a first compaction on a detached HEAD bootstraps memory stamped `(detached)`, keyed on the commit', () => {
-    execSync('git checkout -q --detach', { cwd: repo });
+    execFileSync('git', ['checkout', '-q', '--detach'], { cwd: repo });
 
     runHook(PRE_COMPACT, { cwd: repo }, homeDir);
 
@@ -1188,7 +1188,7 @@ describe('D-DETACHED-HEAD: memory on a detached HEAD (TP-53, TP-54)', { timeout:
   it('TP-53: an unborn branch still bootstraps nothing — there is no commit to key on', () => {
     const unborn = path.join(base, 'unborn');
     fs.mkdirSync(unborn);
-    execSync('git init -q', { cwd: unborn });
+    execFileSync('git', ['init', '-q'], { cwd: unborn });
 
     runHook(PRE_COMPACT, { cwd: unborn }, homeDir);
 
@@ -1198,7 +1198,7 @@ describe('D-DETACHED-HEAD: memory on a detached HEAD (TP-53, TP-54)', { timeout:
   it('TP-54: SessionStart on a detached HEAD labels the header `detached @ <short-sha>`', () => {
     fs.mkdirSync(path.dirname(memoryFile()), { recursive: true });
     fs.writeFileSync(memoryFile(), `<!-- memory-head: ${sha} branch: main -->\n## Now\n- x\n`);
-    execSync('git checkout -q --detach', { cwd: repo });
+    execFileSync('git', ['checkout', '-q', '--detach'], { cwd: repo });
 
     const ctx = sessionContext();
 
@@ -1207,7 +1207,7 @@ describe('D-DETACHED-HEAD: memory on a detached HEAD (TP-53, TP-54)', { timeout:
   });
 
   it('TP-54: on a branch the header keeps `on <branch>`, and a detached stamp is named as a state', () => {
-    const branch = execSync('git branch --show-current', { cwd: repo, encoding: 'utf-8' }).trim();
+    const branch = execFileSync('git', ['branch', '--show-current'], { cwd: repo, encoding: 'utf-8' }).trim();
     fs.mkdirSync(path.dirname(memoryFile()), { recursive: true });
     fs.writeFileSync(memoryFile(), `<!-- memory-head: ${sha} branch: (detached) -->\n## Now\n- x\n`);
 
@@ -2443,7 +2443,7 @@ describe('ensure-devflow-init behavioral', () => {
     // the working directory's repository, so a regression writes HERE — where the
     // assertion looks — instead of into the developer's checkout, where it would pass
     // unseen. tmpDir must be a repository for that resolution to land on it.
-    execSync(`git init -q "${tmpDir}"`, { stdio: 'pipe' });
+    execFileSync('git', ['init', '-q', tmpDir], { stdio: 'pipe' });
     const result = execSync(
       `bash -c 'source "${ENSURE_DEVFLOW}" ""; echo $?'`,
       { stdio: 'pipe', cwd: tmpDir },
@@ -3067,7 +3067,7 @@ describe('ensure-root-gitignore behavioral', () => {
     ].join('\n');
     const probe = (gitignoreContent: string): boolean => {
       const repo = fs.mkdtempSync(path.join(tmpDir, 'repo-'));
-      execSync(`git init -q "${repo}"`, { stdio: 'pipe', env: { ...process.env, HOME: tmpDir } });
+      execFileSync('git', ['init', '-q', repo], { stdio: 'pipe', env: { ...process.env, HOME: tmpDir } });
       fs.writeFileSync(path.join(repo, '.gitignore'), gitignoreContent);
       execSync(`bash -c 'source "${ENSURE_ROOT}" "${repo}"'`, { stdio: 'pipe' });
       expect(fs.readFileSync(path.join(repo, '.gitignore'), 'utf-8').split('\n')).toContain('!.devflow/project.json');
@@ -6683,7 +6683,7 @@ describe('TP-9: the hooks move the old ledger folder before any creator makes th
     fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
     main = path.join(base, 'main');
     initCommittedRepo(main);
-    execSync(`git worktree add -q "${path.join(base, 'wt')}" -b feat`, { cwd: main, stdio: 'pipe' });
+    execFileSync('git', ['worktree', 'add', '-q', path.join(base, 'wt'), '-b', 'feat'], { cwd: main, stdio: 'pipe' });
     main = fs.realpathSync(main);
     wt = fs.realpathSync(path.join(base, 'wt'));
     fs.mkdirSync(path.join(main, 'src', 'deep'), { recursive: true });
@@ -7103,7 +7103,7 @@ describe('session-start-context: the notice of a skipped move', { timeout: GIT_F
   it('a session start looks again after the files are untracked, and moves the folder', () => {
     trackNotes();
     expect(messageOf('startup')).toBe(AREA_PAUSE_NOTICE.curation.tracked);
-    execSync(`git rm -q --cached -- .devflow/${OLD}/notes.txt`, { cwd: main, stdio: 'pipe' });
+    execFileSync('git', ['rm', '-q', '--cached', '--', `.devflow/${OLD}/notes.txt`], { cwd: main, stdio: 'pipe' });
 
     const context = contextOf('startup');
 

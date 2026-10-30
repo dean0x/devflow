@@ -231,7 +231,9 @@ export const SANDBOX_ENV_ALLOWLIST = [
  * `home` (D-TEST-HOME-ISOLATION). Built from `SANDBOX_ENV_ALLOWLIST`, never by
  * spreading `process.env`, so an inherited `DEVFLOW_DIR`, `CLAUDE_CODE_DIR` or
  * `CLAUDE_CONFIG_DIR` cannot reach the child. Throws when `home` is a real home or
- * lies outside `os.tmpdir()` (asserted, not trusted). `extra` is applied
+ * lies outside `os.tmpdir()` (asserted, not trusted). The allowlist holds no `GIT_*` key and no
+ * `XDG_CONFIG_HOME`, and `GIT_CONFIG_NOSYSTEM=1` keeps a git call from reading the system config, so
+ * git reads only the settings the test sets up in `home` and the repository. `extra` is applied
  * last, so a caller that deliberately sets a variable does so in plain sight.
  */
 export function sandboxEnv(home: string, extra: Readonly<Record<string, string>> = {}): NodeJS.ProcessEnv {
@@ -241,7 +243,9 @@ export function sandboxEnv(home: string, extra: Readonly<Record<string, string>>
     const value = process.env[key]
     if (value !== undefined) inherited[key] = value
   }
-  return { ...inherited, HOME: home, USERPROFILE: home, FORCE_COLOR: '0', NO_COLOR: '1', CI: '1', ...extra }
+  return {
+    ...inherited, HOME: home, USERPROFILE: home, FORCE_COLOR: '0', NO_COLOR: '1', CI: '1', GIT_CONFIG_NOSYSTEM: '1', ...extra,
+  }
 }
 
 export function loadFile(relPath: string): string {
