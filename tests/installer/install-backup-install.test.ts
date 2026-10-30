@@ -5,15 +5,17 @@
  * instead. Every test works in a temp home, with the clock and the random bytes injected through
  * the backup session, and nothing here reads or writes the real home.
  */
+import { createHash } from 'crypto';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { sweepLegacyDevflowFiles, sweepLegacySkillFolders } from '../../src/cli/commands/legacy-sweep.js';
-import { formatBackupSummary } from '../../src/cli/commands/install-report.js';
+import { formatBackupSummary, formatKeptLegacySkills } from '../../src/cli/commands/install-report.js';
 import { RETIRED_SHIPPED } from '../../src/core/retired-shipped-names.js';
 import { createBackupSession, createPathSet, type BackupSession } from '../../src/targets/claude-code/install-backup.js';
 import { LEGACY_SKILL_NAMES } from '../../src/targets/claude-code/legacy.js';
+import { BARE_LEGACY_SKILL_HASHES } from '../../src/targets/claude-code/legacy-skill-hashes.js';
 import { FIXTURE_FOLDER } from '../fixtures/workflow-folder.js';
 import { testBackups } from '../helpers.js';
 import { assertTempHome } from '../setup/home-isolation.js';
@@ -27,14 +29,19 @@ import {
   makeHome,
   onlyRunFolder,
   openSession,
+  plantReleasedSkill,
   put,
+  releasedSkillFile,
   removeHome,
   runInstall,
+  treeSnapshot,
   type TestHome,
   USER_SKILL_FOLDER,
 } from './install-backup-harness.js';
 
 let home: TestHome;
+
+const sha256Hex = (text: string): string => createHash('sha256').update(text).digest('hex');
 
 beforeEach(async () => {
   home = await makeHome();
@@ -491,11 +498,11 @@ describe('legacy skill folders', () => {
     bytes: size => new Uint8Array(size).fill(7),
   });
 
-  it('moves a bare legacy folder that holds a user file whole, by one rename, and names it', async () => {
+  it('moves a bare legacy folder that a release made whole, with a user file in it, by one rename, and names it', async () => {
     await runInstall(home, { shape: 'full' });
-    const folder = 'skills/codebase-navigation';
-    expect(LEGACY_SKILL_NAMES).toContain('codebase-navigation');
-    await put(home, `${folder}/SKILL.md`, 'an old skill\n');
+    const folder = 'skills/python';
+    expect(LEGACY_SKILL_NAMES).toContain('python');
+    await plantReleasedSkill(home, 'python');
     await put(home, `${folder}/references/deep/mine.md`, 'my notes\n');
     const session = await openSession(home);
     const realRename = fs.rename.bind(fs);
@@ -505,27 +512,31 @@ describe('legacy skill folders', () => {
       return realRename(from, to);
     });
 
-    await sweepLegacySkillFolders({ claudeDir: home.claudeDir, backups: session, legacySkills: LEGACY_SKILL_NAMES });
+    const result = await sweepLegacySkillFolders({ claudeDir: home.claudeDir, backups: session, legacySkills: LEGACY_SKILL_NAMES });
 
     const run = await onlyRunFolder(home);
     expect(renames, 'one rename for the whole folder, and nothing else').toEqual([at(home, folder)]);
     expect(await exists(at(home, folder))).toBe(false);
-    expect(await fs.readFile(inRun(run, `${folder}/SKILL.md`), 'utf8')).toBe('an old skill\n');
+    expect(await fs.readFile(inRun(run, `${folder}/SKILL.md`))).toEqual(await fs.readFile(releasedSkillFile('python')));
     expect(await fs.readFile(inRun(run, `${folder}/references/deep/mine.md`), 'utf8')).toBe('my notes\n');
     expect(session.snapshot().moved).toEqual([{ original: at(home, folder), backup: inRun(run, folder), kind: 'directory' }]);
     expect(session.snapshot().retiredRemoved).toEqual([]);
+    expect(result.kept).toEqual([]);
     expect(summaryLines(session).join('\n')).toContain(`${at(home, folder)}/ -> ${inRun(run, folder)}/`);
   });
 
-  it('deletes no bare legacy folder: each one moves aside whole with its file', async () => {
+  it('moves every bare legacy folder that a release made, whole, with its file, and deletes none', async () => {
     await runInstall(home, { shape: 'full' });
     const session = await openSession(home);
     const names = [...new Set(LEGACY_SKILL_NAMES)].filter(name =>
       !name.startsWith('devflow:') && session.classifyAt(at(home, `skills/${name}`), 'directory') !== 'shipped');
     expect(names.length).toBeGreaterThan(50);
     for (const name of names) await put(home, `skills/${name}/SKILL.md`, `old ${name}\n`);
+    const released = Object.fromEntries(names.map(name => [name, [sha256Hex(`old ${name}\n`)]]));
 
-    await sweepLegacySkillFolders({ claudeDir: home.claudeDir, backups: session, legacySkills: LEGACY_SKILL_NAMES });
+    const result = await sweepLegacySkillFolders({
+      claudeDir: home.claudeDir, backups: session, legacySkills: LEGACY_SKILL_NAMES, released,
+    });
 
     const run = await onlyRunFolder(home);
     for (const name of names) {
@@ -534,6 +545,168 @@ describe('legacy skill folders', () => {
     }
     expect(session.snapshot().moved).toHaveLength(names.length);
     expect(session.snapshot().failures).toEqual([]);
+    expect(result.kept).toEqual([]);
+  });
+
+  describe('a bare legacy name that a skill of the user may carry', () => {
+    const USER_SKILL = 'my own skill, not devflow\n';
+    const NOTES = 'my notes\n';
+
+    it('leaves the folder and its bytes where they are, and says nothing, when its SKILL.md is not a release copy', async () => {
+      await runInstall(home, { shape: 'full' });
+      const names = ['python', 'go', 'rust', 'java', 'react', 'typescript', 'explore', 'plan', 'review', 'research'];
+      for (const name of names) {
+        expect(LEGACY_SKILL_NAMES, `${name} is a legacy name`).toContain(name);
+        await put(home, `skills/${name}/SKILL.md`, USER_SKILL);
+        await put(home, `skills/${name}/notes.md`, NOTES);
+      }
+      const session = await openSession(home);
+      const before = await Promise.all(names.map(name => treeSnapshot(at(home, `skills/${name}`))));
+
+      const result = await sweepLegacySkillFolders({ claudeDir: home.claudeDir, backups: session, legacySkills: LEGACY_SKILL_NAMES });
+
+      expect(await Promise.all(names.map(name => treeSnapshot(at(home, `skills/${name}`))))).toEqual(before);
+      expect(result.kept, 'a skill that is clearly not devflow\'s is not named').toEqual([]);
+      expect(session.snapshot().moved).toEqual([]);
+      expect(summaryLines(session)).toEqual([]);
+      expect(backupRootOf(home)).toBeNull();
+    });
+
+    it('leaves a folder whose SKILL.md is a release copy of another name where it is', async () => {
+      await runInstall(home, { shape: 'full' });
+      const folder = at(home, 'skills/go');
+      await fs.mkdir(folder, { recursive: true });
+      await fs.copyFile(releasedSkillFile('python'), path.join(folder, 'SKILL.md'));
+      const session = await openSession(home);
+      const before = await treeSnapshot(folder);
+
+      const result = await sweepLegacySkillFolders({ claudeDir: home.claudeDir, backups: session, legacySkills: LEGACY_SKILL_NAMES });
+
+      expect(await treeSnapshot(folder)).toEqual(before);
+      expect(result.kept).toEqual([]);
+      expect(session.snapshot().moved).toEqual([]);
+    });
+
+    it('leaves a folder where it is when its SKILL.md is a release copy with one byte changed', async () => {
+      await runInstall(home, { shape: 'full' });
+      const folder = await plantReleasedSkill(home, 'python');
+      await fs.appendFile(path.join(folder, 'SKILL.md'), '\n');
+      const session = await openSession(home);
+      const before = await treeSnapshot(folder);
+
+      const result = await sweepLegacySkillFolders({ claudeDir: home.claudeDir, backups: session, legacySkills: LEGACY_SKILL_NAMES });
+
+      expect(await treeSnapshot(folder)).toEqual(before);
+      expect(result.kept).toEqual([]);
+      expect(session.snapshot().moved).toEqual([]);
+    });
+
+    it('leaves a folder where it is when its SKILL.md is larger than any release copy', async () => {
+      await runInstall(home, { shape: 'full' });
+      const folder = at(home, 'skills/python');
+      await fs.mkdir(folder, { recursive: true });
+      await fs.writeFile(path.join(folder, 'SKILL.md'), Buffer.alloc(1024 * 1024 + 1, 0x61));
+      const session = await openSession(home);
+
+      const result = await sweepLegacySkillFolders({ claudeDir: home.claudeDir, backups: session, legacySkills: LEGACY_SKILL_NAMES });
+
+      expect(await exists(path.join(folder, 'SKILL.md'))).toBe(true);
+      expect(result.kept).toEqual([]);
+      expect(session.snapshot().moved).toEqual([]);
+    });
+
+    it('leaves a name that no release installed bare where it is, even when its SKILL.md is a release copy', async () => {
+      await runInstall(home, { shape: 'full' });
+      expect(BARE_LEGACY_SKILL_HASHES, 'no release installed skills/explore').not.toHaveProperty('explore');
+      const folder = at(home, 'skills/explore');
+      await fs.mkdir(folder, { recursive: true });
+      await fs.copyFile(releasedSkillFile('typescript'), path.join(folder, 'SKILL.md'));
+      const session = await openSession(home);
+
+      const result = await sweepLegacySkillFolders({ claudeDir: home.claudeDir, backups: session, legacySkills: LEGACY_SKILL_NAMES });
+
+      expect(await exists(path.join(folder, 'SKILL.md'))).toBe(true);
+      expect(result.kept).toEqual([]);
+      expect(session.snapshot().moved).toEqual([]);
+    });
+  });
+
+  describe('a bare legacy folder that the check cannot judge', () => {
+    /** Plant the folder for one case and return the path whose bytes must not change. */
+    type Plant = (home: TestHome) => Promise<string>;
+    const CASES: ReadonlyArray<readonly [string, Plant]> = [
+      ['has no SKILL.md', async h => {
+        await put(h, 'skills/python/notes.md', 'my notes\n');
+        return at(h, 'skills/python');
+      }],
+      ['has a folder named SKILL.md', async h => {
+        await fs.mkdir(at(h, 'skills/python/SKILL.md'), { recursive: true });
+        return at(h, 'skills/python');
+      }],
+      ['has a link as its SKILL.md, to a release copy', async h => {
+        await fs.mkdir(at(h, 'skills/python'), { recursive: true });
+        await fs.symlink(releasedSkillFile('python'), at(h, 'skills/python/SKILL.md'));
+        return at(h, 'skills/python');
+      }],
+      ['is itself a link, to a folder that holds a release copy', async h => {
+        const outside = path.join(h.home, 'outside-python');
+        await fs.mkdir(outside, { recursive: true });
+        await fs.copyFile(releasedSkillFile('python'), path.join(outside, 'SKILL.md'));
+        await fs.mkdir(at(h, 'skills'), { recursive: true });
+        await fs.symlink(outside, at(h, 'skills/python'));
+        return outside;
+      }],
+      ['is a file', async h => {
+        await put(h, 'skills/python', 'a file at the folder name\n');
+        return at(h, 'skills/python');
+      }],
+    ];
+
+    it.each(CASES)('keeps the folder that %s, with its bytes, and names it', async (_label, plant) => {
+      await runInstall(home, { shape: 'full' });
+      const guarded = await plant(home);
+      const before = await treeSnapshot(guarded);
+      const session = await openSession(home);
+
+      const result = await sweepLegacySkillFolders({ claudeDir: home.claudeDir, backups: session, legacySkills: LEGACY_SKILL_NAMES });
+
+      expect(await treeSnapshot(guarded), 'nothing changed in or below the folder').toEqual(before);
+      expect(await exists(at(home, 'skills/python')), 'the folder is still there').toBe(true);
+      expect(result.kept).toEqual([at(home, 'skills/python')]);
+      expect(session.snapshot().moved).toEqual([]);
+      expect(session.snapshot().failures).toEqual([]);
+      expect(backupRootOf(home)).toBeNull();
+      expect(formatKeptLegacySkills(result.kept).map(line => line.message)).toEqual([
+        `Kept ${at(home, 'skills/python')}: devflow could not tell if it made this folder`,
+      ]);
+    });
+
+    it('keeps an unreadable SKILL.md, names the folder, and goes on with the next folder', async () => {
+      await runInstall(home, { shape: 'full' });
+      const unreadable = path.join(await plantReleasedSkill(home, 'python'), 'SKILL.md');
+      await plantReleasedSkill(home, 'typescript');
+      const session = await openSession(home);
+      const realReadFile = fs.readFile.bind(fs);
+      vi.spyOn(fs, 'readFile').mockImplementation((async (file: unknown, options: unknown) => {
+        if (file === unreadable) throw Object.assign(new Error('EACCES: injected'), { code: 'EACCES' });
+        return realReadFile(file as never, options as never);
+      }) as typeof fs.readFile);
+
+      const result = await sweepLegacySkillFolders({ claudeDir: home.claudeDir, backups: session, legacySkills: LEGACY_SKILL_NAMES });
+
+      expect(result.kept).toEqual([at(home, 'skills/python')]);
+      expect(await exists(unreadable)).toBe(true);
+      expect(await exists(at(home, 'skills/typescript')), 'the next release copy still moves').toBe(false);
+      expect(session.snapshot().moved.map(unit => unit.original)).toEqual([at(home, 'skills/typescript')]);
+    });
+
+    it('names no folder when the skills folder holds no legacy folder', async () => {
+      await runInstall(home, { shape: 'full' });
+      const result = await sweepLegacySkillFolders({
+        claudeDir: home.claudeDir, backups: await openSession(home), legacySkills: LEGACY_SKILL_NAMES,
+      });
+      expect(result.kept).toEqual([]);
+    });
   });
 
   it('leaves skills/devflow, error-handling and pattern-check, and a skill of the user, where they are', async () => {

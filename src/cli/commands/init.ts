@@ -16,7 +16,7 @@ import { realGlobalTuningMoveIO, realProjectLedgerMoveIO } from './curation-move
 import { describeEchoedValue } from '../../core/echo-value.js';
 import { installViaFileCopy, installScripts, type InstallReport } from '../../targets/claude-code/installer.js';
 import { logSummaryLines, openBackupSession, runWithLateBackupReport } from './backup-session.js';
-import { formatLinksSummary, formatOverlaySummary, formatSkillScopeSummary, formatTrackerAssetSummary, isPluginListUnchanged, type SummaryLine } from './install-report.js';
+import { formatKeptLegacySkills, formatLinksSummary, formatOverlaySummary, formatSkillScopeSummary, formatTrackerAssetSummary, isPluginListUnchanged, type SummaryLine } from './install-report.js';
 import { mergeLinkReports, newLinkReport, type LinkReport } from '../../targets/claude-code/linked-folder.js';
 import { sweepLegacyDevflowFiles, sweepLegacySkillFolders } from './legacy-sweep.js';
 import { removeRulesFolder, rulesFolderRefusedMessage } from '../../targets/claude-code/rules-folder.js';
@@ -2318,9 +2318,12 @@ export const initCommand = new Command('init')
       p.log.info('Behavior rule is on but rules are disabled, so it is not installed — run `devflow rules --enable`.');
     }
 
-    // Stale skill folders from previous installations move whole to the backup folder and are named.
+    // Stale skill folders from previous installations move whole to the backup folder and are named,
+    // but a bare folder moves only when its SKILL.md is a copy that a release of devflow installed.
+    // A bare folder that the check cannot judge stays where it is, and is named here.
     s.message('Cleaning up');
-    await sweepLegacySkillFolders({ claudeDir, backups, legacySkills: LEGACY_SKILL_NAMES });
+    const legacySkills = await sweepLegacySkillFolders({ claudeDir, backups, legacySkills: LEGACY_SKILL_NAMES });
+    logSummaryLines(formatKeptLegacySkills(legacySkills.kept));
 
     // Clean up stale commands (e.g., /review → /code-review) and rules from previous installations.
     // A folder the install refused, or that is a link, is not swept: nothing is read or removed through it.

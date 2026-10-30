@@ -34,7 +34,7 @@ import {
 } from '../src/core/tracker.js';
 import { parsePluginSelection } from '../src/core/plugins.js';
 import { getManagedSettingsPath } from '../src/targets/claude-code/claude-paths.js';
-import { testBackups } from './helpers.js';
+import { ROOT, testBackups } from './helpers.js';
 import {
   installManagedSettings,
   installClaudeignore,
@@ -2089,11 +2089,16 @@ describe('init LEGACY_SKILL_NAMES cleanup pass', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('LEGACY_SKILL_NAMES cleanup moves bare codebase-navigation/ aside after installViaFileCopy', async () => {
+  it('LEGACY_SKILL_NAMES cleanup moves bare python/ aside after installViaFileCopy when a release made it', async () => {
     // Simulate the full init flow: installViaFileCopy + the legacy skill pass, on one session.
+    // python/ holds the SKILL.md that devflow 1.8.3 installed, so the pass moves the folder whole.
     const skillsDir = path.join(claudeDir, 'skills');
-    await fs.mkdir(path.join(skillsDir, 'codebase-navigation'), { recursive: true });
-    await fs.writeFile(path.join(skillsDir, 'codebase-navigation', 'mine.md'), 'my notes\n');
+    await fs.mkdir(path.join(skillsDir, 'python'), { recursive: true });
+    await fs.copyFile(
+      path.join(ROOT, 'tests', 'fixtures', 'released-legacy-skills', 'python.SKILL.md'),
+      path.join(skillsDir, 'python', 'SKILL.md'),
+    );
+    await fs.writeFile(path.join(skillsDir, 'python', 'mine.md'), 'my notes\n');
 
     const devflowDir = path.join(tmpDir, 'devflow');
     const backups = await testBackups(tmpDir, { claudeDir, devflowDir });
@@ -2113,13 +2118,13 @@ describe('init LEGACY_SKILL_NAMES cleanup pass', () => {
     // Step 2: the legacy skill pass, as init runs it.
     await sweepLegacySkillFolders({ claudeDir, backups, legacySkills: LEGACY_SKILL_NAMES });
 
-    // codebase-navigation/ must be gone from skills/ and kept whole in the backup folder
+    // python/ must be gone from skills/ and kept whole in the backup folder
     await expect(
-      fs.access(path.join(skillsDir, 'codebase-navigation')),
-      'codebase-navigation/ must leave skills/ in the LEGACY_SKILL_NAMES cleanup pass',
+      fs.access(path.join(skillsDir, 'python')),
+      'python/ must leave skills/ in the LEGACY_SKILL_NAMES cleanup pass',
     ).rejects.toThrow();
     const [unit] = backups.snapshot().moved;
-    expect(unit.original).toBe(path.join(skillsDir, 'codebase-navigation'));
+    expect(unit.original).toBe(path.join(skillsDir, 'python'));
     expect(await fs.readFile(path.join(unit.backup, 'mine.md'), 'utf8')).toBe('my notes\n');
   });
 });
@@ -2152,8 +2157,8 @@ describe('partial install registry-diff sweep correctness', () => {
     const retiredAgentPath = path.join(claudeDir, 'agents', 'devflow', 'shepherd.md');
     await fs.writeFile(retiredAgentPath, '# retired agent');
 
-    // (b) A retired command: 'review' is absent from getAllCommandNames().
-    // The sweep must remove it.
+    // (b) A command that is absent from getAllCommandNames(): 'review'. No release shipped it, so
+    // the install moves it out of the folder to the backup folder instead of removing it.
     const retiredCommandPath = path.join(claudeDir, 'commands', 'devflow', 'review.md');
     await fs.writeFile(retiredCommandPath, '# retired command');
 

@@ -48,6 +48,9 @@ const HOMES_LINE =
 
 const BACKUP_PATH = `~/.devflow/${BACKUP_ROOT_NAME}/<UTC stamp>-<8 hex>/`;
 
+/** The condition under which a bare legacy skill folder moves. */
+const BARE_LEGACY_RULE = 'only when its `SKILL.md` is a copy that a release of devflow installed';
+
 /** One fact of the backup behaviour, as a sentence part that a doc must hold. */
 interface Fact {
   readonly name: string;
@@ -63,6 +66,8 @@ const BACKUP_FACTS: readonly Fact[] = [
   { name: 'the broken relative links', text: 'Relative links in a moved folder can break.' },
   { name: 'the unsupported concurrent runs', text: 'Concurrent devflow runs are not supported.' },
   { name: 'the bare legacy skill folders', text: 'A bare legacy skill folder, such as `skills/python`' },
+  { name: 'the bare legacy skill folder rule', text: BARE_LEGACY_RULE },
+  { name: 'the skill of your own that stays', text: 'A skill of your own with such a name stays where it is.' },
   { name: 'the uninstall full-wipe listing', text: 'the full-wipe prompt' },
 ];
 
@@ -128,6 +133,10 @@ describe('install backup docs: the backup facts', () => {
     expect(missingFacts(doc, BACKUP_FACTS)).toEqual([]);
   });
 
+  it('docs/reference/file-organization.md states when a bare legacy skill folder moves', () => {
+    expect(FILE_ORGANIZATION).toContain(`such as \`skills/python\`, moves too, but ${BARE_LEGACY_RULE}`);
+  });
+
   it('docs/reference/file-organization.md lists the backup folder in the install paths', () => {
     expect(FILE_ORGANIZATION).toContain('| Install backups | `~/.devflow/install-backups/<UTC stamp>-<8 hex>/` |');
   });
@@ -180,6 +189,7 @@ describe('install backup docs: the CHANGELOG entries', () => {
   it('the Behaviour change entry states the named removals, the moved legacy folders and the uninstall prompt', () => {
     expect(behaviour).toContain('print each retired devflow file that they remove');
     expect(behaviour).toContain('is now moved whole to the backup folder and named');
+    expect(behaviour).toContain(BARE_LEGACY_RULE);
     expect(behaviour).toContain('now asks before the full wipe');
     expect(behaviour).toContain('a decline keeps the backups');
   });

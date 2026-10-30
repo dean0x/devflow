@@ -26,7 +26,9 @@ import {
   makeHome,
   onlyRunFolder,
   openSession,
+  plantReleasedSkill,
   put,
+  releasedSkillFile,
   removeHome,
   runInstall,
   treeSnapshot,
@@ -325,7 +327,7 @@ describe('a legacy skill folder whose move is refused', () => {
     await runInstall(home, { shape: 'full' });
     const folder = at(home, `skills/${PREFIXED}`);
     const kept = await put(home, `skills/${PREFIXED}/mine.md`, 'mine\n');
-    const other = await put(home, 'skills/typescript/SKILL.md', 'an old bare skill\n');
+    const other = path.join(await plantReleasedSkill(home, 'typescript'), 'SKILL.md');
     denyMoveOf(folder);
     const session = await openSession(home);
 
@@ -369,7 +371,7 @@ describe('a legacy skill folder whose move is refused', () => {
     await runInstall(home, { shape: 'full' });
     const outside = path.join(home.home, 'outside-skills');
     await fs.mkdir(path.join(outside, 'typescript'), { recursive: true });
-    await fs.writeFile(path.join(outside, 'typescript', 'SKILL.md'), 'in another place\n');
+    await fs.copyFile(releasedSkillFile('typescript'), path.join(outside, 'typescript', 'SKILL.md'));
     const slot = at(home, 'skills');
     await fs.rm(slot, { recursive: true });
     await fs.symlink(outside, slot);

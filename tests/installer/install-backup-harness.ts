@@ -17,7 +17,7 @@ import {
 import type { BackupSession } from '../../src/targets/claude-code/install-backup.js';
 import { installViaFileCopy, type InstallReport, type Spinner } from '../../src/targets/claude-code/installer.js';
 import { LEGACY_SKILL_NAMES } from '../../src/targets/claude-code/legacy.js';
-import { testBackups } from '../helpers.js';
+import { ROOT, testBackups } from '../helpers.js';
 import { assertTempHome, TEMP_HOME_PREFIX } from '../setup/home-isolation.js';
 
 export interface TestHome {
@@ -38,6 +38,24 @@ export function pluginNamed(name: string): PluginDefinition {
   const found = DEVFLOW_PLUGINS.find(plugin => plugin.name === name);
   if (found === undefined) throw new Error(`no such plugin: ${name}`);
   return found;
+}
+
+/** The bare legacy skills of which tests/fixtures/released-legacy-skills holds a copy as a release installed it. */
+export type ReleasedSkillName = 'python' | 'typescript';
+
+/** The path of the released copy of a bare legacy skill's `SKILL.md` (devflow-kit 1.8.3, byte for byte). */
+export const releasedSkillFile = (name: ReleasedSkillName): string =>
+  path.join(ROOT, 'tests', 'fixtures', 'released-legacy-skills', `${name}.SKILL.md`);
+
+/**
+ * Plant the folder a release of devflow installed for a bare legacy skill: `skills/<name>/SKILL.md`
+ * with the released bytes. Returns the folder.
+ */
+export async function plantReleasedSkill(home: TestHome, name: ReleasedSkillName): Promise<string> {
+  const folder = at(home, `skills/${name}`);
+  await fs.mkdir(folder, { recursive: true });
+  await fs.copyFile(releasedSkillFile(name), path.join(folder, 'SKILL.md'));
+  return folder;
 }
 
 /** The first `devflow:`-prefixed name of the legacy skill list. No release shipped such a folder. */

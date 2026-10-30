@@ -53,7 +53,7 @@ import { applyComplianceChange } from '../../src/cli/commands/compliance.js';
 import { convergeInstalledVariants } from '../../src/cli/commands/curation.js';
 import { formatSweepSummary, initCommand } from '../../src/cli/commands/init.js';
 import { sweepLegacyDevflowFiles } from '../../src/cli/commands/legacy-sweep.js';
-import { formatBackupSummary, type SummaryLine } from '../../src/cli/commands/install-report.js';
+import { formatBackupSummary, formatKeptLegacySkills, type SummaryLine } from '../../src/cli/commands/install-report.js';
 import { runRulesEnable } from '../../src/cli/commands/rules.js';
 import { readManifest } from '../../src/core/manifest.js';
 import type { BackupSession, BackupSnapshot } from '../../src/targets/claude-code/install-backup.js';
@@ -270,7 +270,7 @@ describe('formatBackupSummary', () => {
   it('prints a name the legacy sweep removed on the retired line only, and names a legacy hook script by default', async () => {
     const session = await open();
     await put('commands/devflow/specify.md');
-    await put('commands/devflow/review.md');
+    await put('commands/devflow/pre-pr.md');
     const hook = path.join(devflowDir, 'scripts', 'hooks', 'ambient-prompt');
     await fs.mkdir(path.dirname(hook), { recursive: true });
     await fs.writeFile(hook, 'an old hook');
@@ -278,16 +278,43 @@ describe('formatBackupSummary', () => {
     const swept = await sweepLegacyDevflowFiles({ claudeDir, report: { refusedFolders: [] }, backups: session });
     await session.removeExact(hook);
 
-    expect(swept.removed.map(file => path.basename(file)).sort()).toEqual(['review.md', 'specify.md']);
+    expect(swept.removed.map(file => path.basename(file)).sort()).toEqual(['pre-pr.md', 'specify.md']);
     const snapshot = session.snapshot();
     const printed = messages(formatBackupSummary(snapshot));
     expect(printed).toHaveLength(1);
     expect(printed[0].startsWith('Removed 3 retired devflow file(s)')).toBe(true);
     expect(printed[0]).toContain(hook);
-    for (const name of ['specify.md', 'review.md', 'ambient-prompt']) {
+    for (const name of ['specify.md', 'pre-pr.md', 'ambient-prompt']) {
       expect(printed.filter(line => line.includes(name)), `${name} prints on one line only`).toHaveLength(1);
     }
     expect(snapshot.moved).toEqual([]);
+  });
+});
+
+describe('formatKeptLegacySkills', () => {
+  const folder = (n: number): string => `/home/u/.claude/skills/legacy-${n}`;
+
+  it('gives no line when no folder was kept', () => {
+    expect(formatKeptLegacySkills([])).toEqual([]);
+  });
+
+  it('names each kept folder on its own line, with the reason', () => {
+    expect(formatKeptLegacySkills([folder(1), folder(2)])).toEqual([
+      { level: 'info', message: `Kept ${folder(1)}: devflow could not tell if it made this folder` },
+      { level: 'info', message: `Kept ${folder(2)}: devflow could not tell if it made this folder` },
+    ]);
+  });
+
+  it('names five folders and counts the rest on a last line', () => {
+    const lines = formatKeptLegacySkills([1, 2, 3, 4, 5, 6, 7].map(folder));
+    expect(lines).toHaveLength(6);
+    expect(lines[4].message).toContain(folder(5));
+    expect(lines[5]).toEqual({ level: 'info', message: 'Kept 2 more folder(s) for the same reason' });
+  });
+
+  it('prints ESC and C1 characters in a path escaped', () => {
+    const [line] = formatKeptLegacySkills(['/home/u/.claude/skills/esc\u001b[31m\u009b']);
+    expect(line.message).toBe('Kept /home/u/.claude/skills/esc\\x1b[31m\\x9b: devflow could not tell if it made this folder');
   });
 });
 

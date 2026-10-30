@@ -310,6 +310,22 @@ function failureLine(failure: FailureRecord): SummaryLine {
 }
 
 /**
+ * The lines for the bare legacy skill folders that init kept because it could not tell if devflow
+ * made them (`sweepLegacySkillFolders`): one line per folder for the first five, then one line that
+ * counts the rest. A run that kept none gives no lines. Every printed path goes through `escapeName`.
+ */
+export function formatKeptLegacySkills(kept: readonly string[]): SummaryLine[] {
+  const lines = kept.slice(0, BACKUP_SHOWN_UNITS).map((folder): SummaryLine => ({
+    level: 'info',
+    message: `Kept ${escapeName(folder)}: devflow could not tell if it made this folder`,
+  }));
+  if (kept.length > BACKUP_SHOWN_UNITS) {
+    lines.push({ level: 'info', message: `Kept ${kept.length - BACKUP_SHOWN_UNITS} more folder(s) for the same reason` });
+  }
+  return lines;
+}
+
+/**
  * Turn the backup session's record into summary lines: what moved aside, what stayed because it
  * could not move, and which retired files were removed. An empty snapshot gives no lines, so a
  * clean run prints nothing.

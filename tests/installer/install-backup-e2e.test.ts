@@ -17,7 +17,7 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { COMPLIANCE_OFF_REMOVED_SKILL_FILES } from '../../src/core/compliance-off-files.js';
-import { requireBuiltCli, sandboxEnv } from '../helpers.js';
+import { ROOT, requireBuiltCli, sandboxEnv } from '../helpers.js';
 import { assertTempHome } from '../setup/home-isolation.js';
 
 const CLI = requireBuiltCli();
@@ -40,6 +40,19 @@ const backupRoot = (): string => path.join(tmpHome, '.devflow', 'install-backups
 const commandsFolder = (): string => path.join(tmpHome, '.claude', 'commands', 'devflow');
 
 const exists = (target: string): Promise<boolean> => fs.lstat(target).then(() => true, () => false);
+
+/** The `SKILL.md` that devflow 1.8.3 installed as `skills/python`, byte for byte. */
+const RELEASED_PYTHON = path.join(ROOT, 'tests', 'fixtures', 'released-legacy-skills', 'python.SKILL.md');
+
+const skillsFolder = (): string => path.join(tmpHome, '.claude', 'skills');
+
+/** Plant the folder that a release of devflow installed as `skills/python`. Returns the folder. */
+async function plantReleasedPython(): Promise<string> {
+  const folder = path.join(skillsFolder(), 'python');
+  await fs.mkdir(folder, { recursive: true });
+  await fs.copyFile(RELEASED_PYTHON, path.join(folder, 'SKILL.md'));
+  return folder;
+}
 
 beforeEach(async () => {
   base = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'df-backup-e2e-')));
@@ -256,9 +269,7 @@ describe('the rules folder over a file of the user', () => {
 describe('devflow init over files of earlier releases', () => {
   it('moves a legacy skill folder whole and a file of the user into one run folder, names both, and names a removed legacy hook script', { timeout: MULTI_RUN_TIMEOUT_MS }, async () => {
     runInit();
-    const legacySkill = path.join(tmpHome, '.claude', 'skills', 'codebase-navigation');
-    await fs.mkdir(legacySkill);
-    await fs.writeFile(path.join(legacySkill, 'SKILL.md'), 'an old skill\n', 'utf-8');
+    const legacySkill = await plantReleasedPython();
     const mine = path.join(commandsFolder(), 'mine.md');
     await fs.writeFile(mine, 'my own command\n', 'utf-8');
     const hook = path.join(tmpHome, '.devflow', 'scripts', 'hooks', 'ambient-prompt');
@@ -272,8 +283,8 @@ describe('devflow init over files of earlier releases', () => {
     expect(await exists(hook), 'the hook script is removed').toBe(false);
     const runs = await fs.readdir(backupRoot());
     expect(runs, 'one init makes one run folder').toHaveLength(1);
-    const kept = path.join(backupRoot(), runs[0], 'skills', 'codebase-navigation');
-    expect(await fs.readFile(path.join(kept, 'SKILL.md'), 'utf-8')).toBe('an old skill\n');
+    const kept = path.join(backupRoot(), runs[0], 'skills', 'python');
+    expect(await fs.readFile(path.join(kept, 'SKILL.md'))).toEqual(await fs.readFile(RELEASED_PYTHON));
     const keptFile = path.join(backupRoot(), runs[0], 'commands', 'devflow', 'mine.md');
     expect(await fs.readFile(keptFile, 'utf-8')).toBe('my own command\n');
     expect(out).toContain('Moved 2 item(s) that devflow does not ship');
@@ -282,5 +293,53 @@ describe('devflow init over files of earlier releases', () => {
     expect(out).toContain(`${legacySkill}/ -> ${kept}/`);
     expect(out).toContain(`Removed 1 retired devflow file(s): ${hook}`);
     expect(await exists(path.join(backupRoot(), runs[0], 'scripts')), 'a removed script is never copied to the backup folder').toBe(false);
+  });
+});
+
+describe('devflow init over a bare skill folder with a legacy name', () => {
+  it('keeps a skill of the user named python, with its bytes, and says nothing about it', { timeout: MULTI_RUN_TIMEOUT_MS }, async () => {
+    const mine = path.join(skillsFolder(), 'python');
+    await fs.mkdir(path.join(mine, 'references'), { recursive: true });
+    await fs.writeFile(path.join(mine, 'SKILL.md'), '---\nname: python\n---\nmy own python skill\n', 'utf-8');
+    await fs.writeFile(path.join(mine, 'references', 'notes.md'), 'my notes\n', 'utf-8');
+
+    const first = runInit();
+    const second = runInit();
+
+    for (const out of [first, second]) {
+      expect(out, 'a skill of the user is not named').not.toContain(mine);
+    }
+    expect(await fs.readFile(path.join(mine, 'SKILL.md'), 'utf-8')).toBe('---\nname: python\n---\nmy own python skill\n');
+    expect(await fs.readFile(path.join(mine, 'references', 'notes.md'), 'utf-8')).toBe('my notes\n');
+    expect(await exists(backupRoot()), 'nothing moved, so no backup folder').toBe(false);
+  });
+
+  it('moves a python folder that a release made whole, with its bytes, and names it', { timeout: MULTI_RUN_TIMEOUT_MS }, async () => {
+    const released = await plantReleasedPython();
+    await fs.writeFile(path.join(released, 'mine.md'), 'my note in the folder\n', 'utf-8');
+
+    const out = runInit();
+
+    expect(await exists(released), 'the folder left skills/').toBe(false);
+    const runs = await fs.readdir(backupRoot());
+    expect(runs).toHaveLength(1);
+    const kept = path.join(backupRoot(), runs[0], 'skills', 'python');
+    expect(await fs.readFile(path.join(kept, 'SKILL.md'))).toEqual(await fs.readFile(RELEASED_PYTHON));
+    expect(await fs.readFile(path.join(kept, 'mine.md'), 'utf-8')).toBe('my note in the folder\n');
+    expect(out).toContain(`${released}/ -> ${kept}/`);
+    expect(out).not.toContain('could not tell if it made this folder');
+  });
+
+  it('keeps a folder with no SKILL.md, with its bytes, and names it on every init', { timeout: MULTI_RUN_TIMEOUT_MS }, async () => {
+    const unjudged = path.join(skillsFolder(), 'java');
+    await fs.mkdir(unjudged, { recursive: true });
+    await fs.writeFile(path.join(unjudged, 'notes.md'), 'no skill file here\n', 'utf-8');
+
+    for (const run of ['first', 'second']) {
+      const out = runInit();
+      expect(out, `the ${run} init names the folder`).toContain(`Kept ${unjudged}: devflow could not tell if it made this folder`);
+      expect(await fs.readFile(path.join(unjudged, 'notes.md'), 'utf-8')).toBe('no skill file here\n');
+      expect(await exists(backupRoot()), `the ${run} init moved nothing`).toBe(false);
+    }
   });
 });

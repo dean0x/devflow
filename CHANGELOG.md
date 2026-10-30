@@ -33,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Devflow now names the retired files that it removes, and it moves bare legacy skill folders instead of deleting them** ([#688](https://github.com/dean0x/devflow/issues/688)).
   - `devflow init` and the toggles print each retired devflow file that they remove. Before, most of these removals printed nothing.
-  - A bare legacy skill folder, such as `skills/python` (a name from releases before v2), is now moved whole to the backup folder and named. Before, `devflow init` deleted it.
+  - A bare legacy skill folder, such as `skills/python` (a name from releases before v2), is now moved whole to the backup folder and named, but only when its `SKILL.md` is a copy that a release of devflow installed. Before, `devflow init` deleted every such folder. A skill of your own with such a name stays where it is. A folder that devflow cannot judge (no `SKILL.md`, or a link) also stays, and the output names it.
   - An interactive `devflow uninstall` where the install backups are the only user content in `~/.devflow` now asks before the full wipe. The prompt lists the backup folder, and a decline keeps the backups.
 
 - **With compliance off, devflow installs no step or reference that posts to GitHub or a tracker** ([#648](https://github.com/dean0x/devflow/issues/648)).

@@ -57,7 +57,7 @@ Devflow's install folders belong to devflow, so keep your own files in their sta
 - A file of yours with the same name as a shipped file is overwritten without a report.
 - Relative links in a moved folder can break.
 - Concurrent devflow runs are not supported.
-- A bare legacy skill folder, such as `skills/python` (a name from releases before v2), moves whole and is named.
+- A bare legacy skill folder, such as `skills/python` (a name from releases before v2), moves whole and is named only when its `SKILL.md` is a copy that a release of devflow installed. A skill of your own with such a name stays where it is. A folder that devflow cannot judge (no `SKILL.md`, or a link) also stays, and the output names it.
 - The output names each retired devflow file that an install removes.
 
 ### Your hooks stay yours

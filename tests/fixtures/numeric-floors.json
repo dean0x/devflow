@@ -363,6 +363,22 @@
       "description": "Skill folder names in tests/fixtures/released-shipped-names.ts: the skill folders that releases 0.1.0 to 3.9.0 installed, bare and devflow:-prefixed (84). Extended, never cut."
     },
     {
+      "id": "legacy-skill-hash-names-count",
+      "floor": 39,
+      "pattern": "expect(names.length).toBeGreaterThanOrEqual(39)",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/legacy-skill-hashes.test.ts",
+      "description": "Bare legacy skill names with an entry in src/targets/claude-code/legacy-skill-hashes.ts (39 at 3.9.0): the bare names of the legacy skill list that releases 0.6.1 to 1.8.3 installed. A name without an entry is never moved by init, so a lost name leaves a devflow-made folder in the shared skills folder. The table only grows."
+    },
+    {
+      "id": "legacy-skill-hash-count",
+      "floor": 64,
+      "pattern": "expect(hashCount).toBeGreaterThanOrEqual(64)",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/legacy-skill-hashes.test.ts",
+      "description": "Released SKILL.md hashes in src/targets/claude-code/legacy-skill-hashes.ts, summed over the bare names (64 at 3.9.0). A lost hash makes init keep a folder that devflow made, with an edit-free SKILL.md of that release. The table only grows."
+    },
+    {
       "id": "released-skill-file-folders-count",
       "floor": 84,
       "pattern": "Object.keys(RELEASED_SHIPPED_NAMES.skillFiles).length).toBeGreaterThanOrEqual(84)",
