@@ -46,6 +46,15 @@ const OWNER: PluginDefinition = {
 };
 const OTHER: PluginDefinition = { ...OWNER, name: 'devflow-other', commands: [] };
 
+/**
+ * A folder workflow whose name is ALSO a registered command (`plan`). A stale `commands/devflow/plan.md`
+ * is then an orphan only when the sweep knows `plan` as a folder workflow: the fixture name `flow` is no
+ * registered command, so a file of that name is an orphan with or without the set.
+ */
+const PLAN_FOLDER: WorkflowFolder = { ...FIXTURE_FOLDER, name: 'plan' };
+const PLAN_SET = workflowFolderNames([PLAN_FOLDER]);
+const PLAN_OWNER: PluginDefinition = { ...OWNER, name: 'devflow-plan-fixture', commands: ['/plan'] };
+
 let tmp: string;
 let claudeDir: string;
 let devflowDir: string;
@@ -55,7 +64,7 @@ let messages: string[];
 
 const spinner: Spinner = { start() {}, stop() {}, message(message) { messages.push(message ?? ''); } };
 const warn = (msg: string): void => { warnings.push(msg); };
-const folderDir = (dir: string = claudeDir): string => path.join(dir, 'skills', `devflow:${NAME}`);
+const folderDir = (dir: string = claudeDir, name: string = NAME): string => path.join(dir, 'skills', `devflow:${name}`);
 const exists = (file: string): Promise<boolean> => fs.lstat(file).then(() => true, () => false);
 
 type Switches = { curation: boolean; compliance: boolean };
@@ -89,15 +98,15 @@ async function fileMap(dir: string): Promise<Record<string, string>> {
   return out;
 }
 
-/** The build tree of one key, as the build would have written it for the fixture folder: the id is the real one. */
-async function writeBuiltTrees(root: string): Promise<void> {
+/** The build tree of one key, as the build would have written it for a folder (the fixture by default): the id is the real one. */
+async function writeBuiltTrees(root: string, folder: WorkflowFolder = FIXTURE_FOLDER): Promise<void> {
   for (const key of VARIANT_KEYS) {
-    const bodies = workflowFolderFiles(FIXTURE_FOLDER, key).map(file => ({ file, body: `# ${file}\n\nbuilt for ${key}\n` }));
+    const bodies = workflowFolderFiles(folder, key).map(file => ({ file, body: `# ${file}\n\nbuilt for ${key}\n` }));
     const id = workflowBuildId(bodies);
     for (const { file, body } of bodies) {
       const stamped = file.startsWith('references/') ? { ok: true as const, value: body } : stampBuildId(body, id);
       if (!stamped.ok) throw new Error(`fixture file ${file} could not be stamped`);
-      const target = path.join(root, ...workflowFolderRelPath(key, NAME, file).split('/'));
+      const target = path.join(root, ...workflowFolderRelPath(key, folder.name, file).split('/'));
       await fs.mkdir(path.dirname(target), { recursive: true });
       await fs.writeFile(target, stamped.value, 'utf-8');
     }
@@ -112,7 +121,14 @@ function builtFolder(switches: Switches): Promise<Record<string, string>> {
 
 function install(
   switches: Switches,
-  opts: { plugins?: PluginDefinition[]; effectivePlugins?: PluginDefinition[]; isPartialInstall?: boolean; claude?: string; home?: string } = {},
+  opts: {
+    plugins?: PluginDefinition[];
+    effectivePlugins?: PluginDefinition[];
+    isPartialInstall?: boolean;
+    claude?: string;
+    home?: string;
+    workflowFolders?: readonly WorkflowFolder[];
+  } = {},
 ): Promise<InstallReport> {
   const plugins = opts.plugins ?? [OWNER];
   return installViaFileCopy({
@@ -126,7 +142,7 @@ function install(
     isPartialInstall: opts.isPartialInstall ?? false,
     spinner,
     warn,
-    workflowFolders: [FIXTURE_FOLDER],
+    workflowFolders: opts.workflowFolders ?? [FIXTURE_FOLDER],
     workflowFoldersRoot: pkg,
   });
 }
@@ -290,15 +306,25 @@ describe('the install takes the folder of the exact key (TP-20)', () => {
 
 describe('the sweeps know the folder (TP-21 install half, TP-25)', () => {
   it('a stale command file of a folder workflow is swept, and the folder is kept', async () => {
-    await install(ON);
-    const stale = path.join(claudeDir, 'commands', 'devflow', 'flow.md');
+    await writeBuiltTrees(pkg, PLAN_FOLDER);
+    const stale = path.join(claudeDir, 'commands', 'devflow', 'plan.md');
     await fs.mkdir(path.dirname(stale), { recursive: true });
     await fs.writeFile(stale, 'the old command\n', 'utf-8');
 
-    const report = await install(ON, { isPartialInstall: true });
+    const report = await install(ON, { plugins: [PLAN_OWNER], workflowFolders: [PLAN_FOLDER], isPartialInstall: true });
     expect(await exists(stale)).toBe(false);
-    expect(report.sweptOrphans).toContainEqual({ kind: 'command', name: NAME });
-    expect(await exists(folderDir())).toBe(true);
+    expect(report.sweptOrphans).toContainEqual({ kind: 'command', name: 'plan' });
+    expect(await exists(folderDir(claudeDir, 'plan'))).toBe(true);
+  });
+
+  it('the same stale file is kept when the registry holds no folder, so the sweep above depends on the folder set', async () => {
+    const stale = path.join(claudeDir, 'commands', 'devflow', 'plan.md');
+    await fs.mkdir(path.dirname(stale), { recursive: true });
+    await fs.writeFile(stale, 'the old command\n', 'utf-8');
+
+    const report = await install(ON, { plugins: [OTHER], workflowFolders: [], isPartialInstall: true });
+    expect(await fs.readFile(stale, 'utf-8')).toBe('the old command\n');
+    expect(report.sweptOrphans).not.toContainEqual({ kind: 'command', name: 'plan' });
   });
 
   it('a partial install with the owning plugin installs the folder', async () => {
@@ -470,14 +496,25 @@ describe('a link at the folder is never followed', () => {
 });
 
 describe('the uninstall knows the folder (TP-21 uninstall half)', () => {
-  it('a full uninstall removes the folder and sweeps a stale command file of a folder workflow', async () => {
+  it('a full uninstall removes the folder', async () => {
     await install(ON);
-    const stale = path.join(claudeDir, 'commands', 'devflow', 'flow.md');
-    await fs.mkdir(path.dirname(stale), { recursive: true });
-    await fs.writeFile(stale, 'the old command\n', 'utf-8');
 
     await removeAllDevFlow(claudeDir, path.join(devflowDir, 'scripts'), false, undefined, FOLDER_SET);
     expect(await exists(folderDir())).toBe(false);
+  });
+
+  it('the namespace sweep removes a stale command file of a folder workflow only when it knows the folder', async () => {
+    // `plan` is a registered command: the file is an orphan only through the folder set.
+    const stale = path.join(claudeDir, 'commands', 'devflow', 'plan.md');
+    await fs.mkdir(path.dirname(stale), { recursive: true });
+    await fs.writeFile(stale, 'the old command\n', 'utf-8');
+
+    const without = await sweepDevflowNamespaces(claudeDir, false, undefined, undefined, new Set());
+    expect(without.commands.removed, 'an empty set leaves the registered command alone').not.toContain('plan');
+    expect(await exists(stale)).toBe(true);
+
+    const withFolder = await sweepDevflowNamespaces(claudeDir, false, undefined, undefined, PLAN_SET);
+    expect(withFolder.commands.removed).toContain('plan');
     expect(await exists(stale)).toBe(false);
   });
 
