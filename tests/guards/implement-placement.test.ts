@@ -25,6 +25,13 @@
  *
  * Rows 17 to 19 of the table need the skill folder and are not in this file.
  *
+ * Rows 20a to 20d extend the table with four sentences of Phases 9 to 11 that carry a fail-closed rule: the capture of
+ * the Git agent's lines (the `TRACEABILITY: DEGRADED` lines among them), the Phase 9 stop arm, and the outcome of the
+ * Phase 10 and Phase 11 pushes. Each is pinned as a WHOLE sentence (`whole`): the anchor is the sentence from its first
+ * word to its full stop, and it must start a sentence and end one. A reworded sentence is no longer found, and a
+ * sentence glued to the text before it is reported as not whole. Two probes feed the same collector: the sentence as
+ * a lean cut once reworded it, and the sentence glued to a word before it.
+ *
  * A second claim, at the end of the file: the independence criteria of PARALLEL_CODE_AGENTS sit in the PARALLEL
  * block, never in the strategy table row. A plan whose frontmatter names the strategy skips the table, so a
  * criterion that lives only in the row is no gate for that plan.
@@ -71,6 +78,8 @@ interface Row {
   readonly anchor: string
   /** The nearest heading line above the anchor. */
   readonly section: string
+  /** Set when the anchor is a whole sentence: it starts a sentence and ends one in the compiled text. */
+  readonly whole?: true
 }
 
 const PRINCIPLES = '## Principles'
@@ -80,7 +89,9 @@ const DECISIONS_LOAD = '### Load DECISIONS_CONTEXT'
 const FEATURE_KNOWLEDGE_LOAD = '### Load Feature Knowledge'
 const PHASE_2 = '### Phase 2: Implement'
 const PHASE_5 = '### Phase 5: Alignment Check'
+const PHASE_9 = '### Phase 9: Open PR'
 const PHASE_10 = '### Phase 10: CI Status Gate'
+const PHASE_11 = '### Phase 11: Evidence'
 
 const ROWS: readonly Row[] = [
   {
@@ -233,7 +244,50 @@ const ROWS: readonly Row[] = [
     anchor: 'Pass `DECISIONS_CONTEXT` to Code agent (Phase 2) and Harden agent (Phase 4).',
     section: DECISIONS_LOAD,
   },
+  {
+    no: '20a',
+    item: 'Phase 9 capture of PR_NUMBER, the uncommitted list and the DEGRADED lines',
+    anchor:
+      'Capture the `- **PR**: #{number}` line of its `### Branch` as `PR_NUMBER`, its `### Uncommitted files` list and its `TRACEABILITY: DEGRADED ({reason})` lines for the Phase 12 report.',
+    section: PHASE_9,
+    whole: true,
+  },
+  {
+    no: '20b',
+    item: 'Phase 9 stop arm',
+    anchor: 'If it returns `### Status: BLOCKED` or no PR number, report its reason to the user and stop at the report (Phase 12); Phases 10 and 11 do not run.',
+    section: PHASE_9,
+    whole: true,
+  },
+  {
+    no: '20c',
+    item: 'Phase 10 push outcome',
+    anchor:
+      'Any other result, a rejected non-fast-forward push included, records `TRACEABILITY: DEGRADED (ci push failed)` for the Phase 12 report, reports "CI status unknown — verify manually before merging" and proceeds to Phase 11 without waiting.',
+    section: PHASE_10,
+    whole: true,
+  },
+  {
+    no: '20d',
+    item: 'Phase 11 push outcome',
+    anchor: 'Any other result, a rejected non-fast-forward push included, does not block: record `TRACEABILITY: DEGRADED (evidence push failed)` for the Phase 12 report and run the script anyway.',
+    section: PHASE_11,
+    whole: true,
+  },
 ]
+
+/**
+ * Each whole-sentence row as the lean cut of Phases 9 to 12 once reworded it. The wording keeps the trigger and the
+ * value of the rule, and still differs from the sentence the row pins, so the row must report it as missing.
+ */
+const REWORDED: Readonly<Record<string, string>> = {
+  '20a':
+    'Capture the `- **PR**: #{number}` line of its `### Branch` as `PR_NUMBER`, and its `### Uncommitted files` list and `TRACEABILITY: DEGRADED ({reason})` lines for the Phase 12 report.',
+  '20b': 'If it returns `### Status: BLOCKED` or no PR number, report its reason and stop at the Phase 12 report; Phases 10 and 11 do not run.',
+  '20c':
+    'Any other result, a rejected non-fast-forward push included, records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and proceeds to Phase 11 without waiting.',
+  '20d': 'Any other result, a rejected non-fast-forward push included, does not block: record `TRACEABILITY: DEGRADED (evidence push failed)` and run the script anyway.',
+}
 
 /**
  * The rows that a build has no arm for. Every other row is expected in the build. Derived from the compiled text:
@@ -270,7 +324,22 @@ export function headingAbove(text: string, index: number): string | null {
   return heading
 }
 
-/** Named collector: the rows whose anchor is not in the text exactly once, under the heading that the row names. */
+/**
+ * True when the `length` characters at `index` start a sentence and end one: the text before them is the start of the
+ * text, a line break, or a full stop and a space; the text after them is the end of the text, a space or a line break.
+ */
+export function isWholeSentence(text: string, index: number, length: number): boolean {
+  const before = text.slice(Math.max(0, index - 2), index)
+  const after = text.charAt(index + length)
+  const startsSentence = index === 0 || before.endsWith('\n') || before === '. '
+  const endsSentence = after === '' || after === ' ' || after === '\n'
+  return startsSentence && endsSentence
+}
+
+/**
+ * Named collector: the rows whose anchor is not in the text exactly once, under the heading that the row names, and
+ * the whole-sentence rows whose anchor is not a whole sentence there.
+ */
 export function collectPlacementDefects(label: string, text: string, rows: readonly Row[]): string[] {
   const defects: string[] = []
   for (const row of rows) {
@@ -280,8 +349,10 @@ export function collectPlacementDefects(label: string, text: string, rows: reado
     } else if (copies > 1) {
       defects.push(`${where(label, row)}: anchor occurs ${copies} times, expected once`)
     } else {
-      const heading = headingAbove(text, text.indexOf(row.anchor))
+      const index = text.indexOf(row.anchor)
+      const heading = headingAbove(text, index)
       if (heading !== row.section) defects.push(`${where(label, row)}: sits under ${heading ?? '(no heading)'}, expected ${row.section}`)
+      if (row.whole === true && !isWholeSentence(text, index, row.anchor.length)) defects.push(`${where(label, row)}: not a whole sentence`)
     }
   }
   return defects
@@ -296,10 +367,14 @@ export function collectAbsenceDefects(label: string, text: string, rows: readonl
 // Probes
 // ---------------------------------------------------------------------------
 
-/** `text` without the one occurrence of `anchor`; the probe is exact only when the anchor occurs once. */
-function deleteAnchor(text: string, anchor: string): string {
-  expect(countOf(text, anchor), `"${anchor.slice(0, 60)}" must occur once for the deletion to be exact`).toBe(1)
-  return text.replace(anchor, () => '')
+/**
+ * `text` without the one occurrence of the anchor of `row`; the probe is exact only when the anchor occurs once. A
+ * whole sentence goes with the one space that follows it, so the sentence after it still starts a sentence.
+ */
+function deleteAnchor(text: string, row: Row): string {
+  expect(countOf(text, row.anchor), `"${row.anchor.slice(0, 60)}" must occur once for the deletion to be exact`).toBe(1)
+  const withSpace = `${row.anchor} `
+  return text.replace(row.whole === true && text.includes(withSpace) ? withSpace : row.anchor, () => '')
 }
 
 /** `text` with the one heading line `heading` renamed. */
@@ -345,8 +420,32 @@ describe('the never-cut items of /implement are in every compiled build, under t
         const text = readBuild(file)
         const rows = expectedRows(key)
         for (const row of rows) {
-          const broken = deleteAnchor(text, row.anchor)
+          const broken = deleteAnchor(text, row)
           expect(collectPlacementDefects(file, broken, rows), `deleting the anchor of row ${row.no} must be reported`).toEqual([`${where(file, row)}: anchor missing`])
+        }
+      })
+
+      it('known-bad probe: a reworded whole sentence is reported as that item missing, and no other', () => {
+        const text = readBuild(file)
+        const rows = expectedRows(key)
+        const wholeRows = rows.filter(r => r.whole === true)
+        expect(wholeRows.map(r => r.no), `${key} holds the four whole-sentence rows`).toEqual(['20a', '20b', '20c', '20d'])
+        for (const row of wholeRows) {
+          const reworded = REWORDED[row.no]
+          expect(reworded, `row ${row.no} has a reworded probe text`).toBeDefined()
+          expect(countOf(text, row.anchor), `row ${row.no} must occur once for the reword to be exact`).toBe(1)
+          const broken = text.replace(row.anchor, () => reworded as string)
+          expect(collectPlacementDefects(file, broken, rows), `rewording row ${row.no} must be reported`).toEqual([`${where(file, row)}: anchor missing`])
+        }
+      })
+
+      it('known-bad probe: a whole sentence glued to a word before it is reported as not whole, and no other', () => {
+        const text = readBuild(file)
+        const rows = expectedRows(key)
+        for (const row of rows.filter(r => r.whole === true)) {
+          expect(countOf(text, row.anchor), `row ${row.no} must occur once for the gluing to be exact`).toBe(1)
+          const broken = text.replace(row.anchor, () => `and ${row.anchor}`)
+          expect(collectPlacementDefects(file, broken, rows), `gluing row ${row.no} must be reported`).toEqual([`${where(file, row)}: not a whole sentence`])
         }
       })
 

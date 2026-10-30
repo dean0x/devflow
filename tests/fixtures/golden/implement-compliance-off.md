@@ -534,7 +534,7 @@ COMMIT_UNCOMMITTED: false
 Open the pull request for this branch and return the pre-flight summary."
 ```
 
-Capture the `- **PR**: #{number}` line of its `### Branch` as `PR_NUMBER`, and its `### Uncommitted files` list and `TRACEABILITY: DEGRADED ({reason})` lines for the Phase 12 report. If it returns `### Status: BLOCKED` or no PR number, report its reason and stop at the Phase 12 report; Phases 10 and 11 do not run.
+Capture the `- **PR**: #{number}` line of its `### Branch` as `PR_NUMBER`, its `### Uncommitted files` list and its `TRACEABILITY: DEGRADED ({reason})` lines for the Phase 12 report. If it returns `### Status: BLOCKED` or no PR number, report its reason to the user and stop at the report (Phase 12); Phases 10 and 11 do not run.
 
 ### Phase 10: CI Status Gate
 
@@ -549,7 +549,7 @@ Run under every strategy: Phase 9 opened the PR.
 git push origin HEAD; echo "exit=$?"
 ```
 
-`exit=0` continues to the gate. Any other result, a rejected non-fast-forward push included, records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and proceeds to Phase 11 without waiting.
+`exit=0` continues to the gate. Any other result, a rejected non-fast-forward push included, records `TRACEABILITY: DEGRADED (ci push failed)` for the Phase 12 report, reports "CI status unknown — verify manually before merging" and proceeds to Phase 11 without waiting.
 
 <!-- PATTERN: ci-status-gate -->
 1. Wait: run `cd {worktree} && HEAD_SHA=$(git rev-parse HEAD) && node "$HOME/.devflow/scripts/ci-wait.cjs" --pr {PR_NUMBER} --head "$HEAD_SHA"` through the Bash tool with `timeout: 600000`. Each run waits at most 570 seconds and prints one line, `CI <STATUS> pr=… head=… failing=… pending=… waited=…` (INDETERMINATE adds `reason=…`). A missing or unparseable line, an unknown status or a non-zero exit is INDETERMINATE.
@@ -574,7 +574,7 @@ Run once, after Phase 10, under every strategy. Skip it only when Phase 9 stoppe
 git push origin HEAD; echo "exit=$?"
 ```
 
-`exit=0` continues to the script. Any other result, a rejected non-fast-forward push included, does not block: record `TRACEABILITY: DEGRADED (evidence push failed)` and run the script anyway.
+`exit=0` continues to the script. Any other result, a rejected non-fast-forward push included, does not block: record `TRACEABILITY: DEGRADED (evidence push failed)` for the Phase 12 report and run the script anyway.
 
 **Then verify, inline.** The verify is plumbing, so no Git agent runs it: `verify-evidence.cjs verify` reads the PR and the local evidence file, and writes the local result file. It writes nothing to GitHub:
 
@@ -594,7 +594,9 @@ Show the test plan's evidence from Phase 11: `Test plan: {VERIFIED-CI + ATTESTED
 
 If any Git agent output emitted `TRACEABILITY: DEGRADED ({reason})` lines during the run, or the compliance-off line of Phase 1, the fresh base step, Phase 10's push, Phase 11's push or Phase 11's script output carried one, surface them verbatim in the report under a `### Traceability` subsection so the user can act on them.
 
-If Phase 9 listed uncommitted files, show them as a `### Uncommitted files` subsection: the user commits or discards them. If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lines.
+If Phase 9 listed uncommitted files, show them as a `### Uncommitted files` subsection: the user commits them or discards them.
+
+If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lines in the report.
 
 ### Feature Knowledge Write-Back (Conditional)
 
