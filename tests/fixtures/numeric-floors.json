@@ -510,11 +510,11 @@
     },
     {
       "id": "plan-levels-ref-max",
-      "ceiling": 4056,
-      "pattern": "const PLAN_LEVELS_REF_MAX_BYTES = 4_056",
+      "ceiling": 4009,
+      "pattern": "const PLAN_LEVELS_REF_MAX_BYTES = 4_009",
       "occurrences": 1,
       "sourceFile": "tests/guards/agent-references.test.ts",
-      "description": "D-CMD-REF-HAND: references/commands/plan-levels.md of the agent-references skill, in bytes. /plan reads it once per run at the standard level (the default) or lean, so it is standing context on the default path. Measured 4,056 after the review fixes of #473, with no headroom. May be LOWERED, never raised."
+      "description": "D-CMD-REF-HAND: references/commands/plan-levels.md of the agent-references skill, in bytes. /plan reads it once per run at the standard level (the default) or lean, so it is standing context on the default path. Measured 4,009 after #690 listed plan siblings in place of tickets, with no headroom. May be LOWERED, never raised."
     },
     {
       "id": "resolve-levels-ref-max",
