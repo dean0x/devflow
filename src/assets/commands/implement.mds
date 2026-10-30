@@ -507,9 +507,9 @@ Any other or missing Status: report and halt; never PASS.
 <!-- compliance:end -->
 
 <!-- compliance:on -->
-Run once, after the gates, under every strategy. No Code agent opens a PR: the Git agent does, and it pastes `ISSUE_PR_LINK`, `PR_EXCEPTIONS` and `PR_TEST_PLAN_BLOCK` through their paste gates and scrubs the body (D11) before `gh pr create`. This command renders no link line and creates no PR itself: the Git agent's Phase-1 rendering is the only one, forwarded verbatim.
+Run once, after the gates, under every strategy. No Code agent opens a PR: the Git agent does, and it pastes `ISSUE_PR_LINK`, `PR_EXCEPTIONS` and `PR_TEST_PLAN_BLOCK` through their paste gates and scrubs the body (D11) before `gh pr create`.
 <!-- compliance:off -->
-Run once, after the gates, under every strategy. No Code agent opens a PR: the Git agent does, and it pastes `ISSUE_PR_LINK` through its paste gate and scrubs the body (D11) before `gh pr create`. This command renders no link line and creates no PR itself: the Git agent's Phase-1 rendering is the only one, forwarded verbatim.
+Run once, after the gates, under every strategy. No Code agent opens a PR: the Git agent does, and it pastes `ISSUE_PR_LINK` through its paste gate and scrubs the body (D11) before `gh pr create`.
 <!-- compliance:end -->
 
 ```
@@ -533,7 +533,7 @@ COMMIT_UNCOMMITTED: false
 Open the pull request for this branch and return the pre-flight summary."
 ```
 
-`COMMIT_UNCOMMITTED: false` keeps the Git agent from committing a stray file: the Code, Polish, Harden and Fix agents commit their own work. Capture the `- **PR**: #{number}` line of its `### Branch` as `PR_NUMBER`, its `### Uncommitted files` list and its `TRACEABILITY: DEGRADED ({reason})` lines for the Phase 12 report. If it returns `### Status: BLOCKED` or no PR number, report its reason to the user and stop at the report (Phase 12); Phases 10 and 11 do not run.
+`COMMIT_UNCOMMITTED: false` keeps the Git agent from committing a stray file: each agent commits its own work. Capture the `- **PR**: #{number}` line of its `### Branch` as `PR_NUMBER`, and its `### Uncommitted files` list and `TRACEABILITY: DEGRADED ({reason})` lines for the Phase 12 report. If it returns `### Status: BLOCKED` or no PR number, report its reason and stop at the Phase 12 report; Phases 10 and 11 do not run.
 
 ### Phase 10: CI Status Gate
 
@@ -548,7 +548,7 @@ Run under every strategy: Phase 9 opened the PR.
 git push origin HEAD; echo "exit=$?"
 ```
 
-`exit=0` continues to the gate. Any other result, a rejected non-fast-forward push included, records `TRACEABILITY: DEGRADED (ci push failed)` for the Phase 12 report, reports "CI status unknown — verify manually before merging" and proceeds to Phase 11 without waiting.
+`exit=0` continues to the gate. Any other result, a rejected non-fast-forward push included, records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and proceeds to Phase 11 without waiting.
 
 <!-- PATTERN: ci-status-gate -->
 1. Wait: run `cd {worktree} && HEAD_SHA=$(git rev-parse HEAD) && node "$HOME/.devflow/scripts/ci-wait.cjs" --pr {PR_NUMBER} --head "$HEAD_SHA"` through the Bash tool with `timeout: 600000`. Each run waits at most 570 seconds and prints one line, `CI <STATUS> pr=… head=… failing=… pending=… waited=…` (INDETERMINATE adds `reason=…`). A missing or unparseable line, an unknown status or a non-zero exit is INDETERMINATE.
@@ -581,10 +581,10 @@ Run once, after Phase 10, under every strategy. Skip it only when Phase 9 stoppe
 git push origin HEAD; echo "exit=$?"
 ```
 
-`exit=0` continues to the script. Any other result, a rejected non-fast-forward push included, does not block: record `TRACEABILITY: DEGRADED (evidence push failed)` for the Phase 12 report and run the script anyway.
+`exit=0` continues to the script. Any other result, a rejected non-fast-forward push included, does not block: record `TRACEABILITY: DEGRADED (evidence push failed)` and run the script anyway.
 
 <!-- compliance:on -->
-**Then refresh, inline.** The refresh is plumbing, so no Git agent runs it: `verify-evidence.cjs publish` is the whole `update-pr-evidence` operation — verify, the scrubbed block edit with its read-back, the scrubbed evidence comment — in one call. Use the Bash tool with `timeout: 180000`:
+**Then refresh, inline.** The refresh is plumbing, so no Git agent runs it: `verify-evidence.cjs publish` is the whole `update-pr-evidence` operation, scrub included, in one call. Use the Bash tool with `timeout: 180000`:
 
 ```bash
 cd "{worktree}" && node "$HOME/.devflow/scripts/verify-evidence.cjs" publish --pr {PR_NUMBER} --evidence ".devflow/docs/evidence-{branch_slug}.md" --publication {REVIEW_PUBLICATION resolved in Phase 1, or auto}; echo "exit=$?"
@@ -619,9 +619,7 @@ If any Git agent output emitted `TRACEABILITY: DEGRADED ({reason})` lines during
 If any Git agent output emitted `TRACEABILITY: DEGRADED ({reason})` lines during the run, or the compliance-off line of Phase 1, the fresh base step, Phase 10's push, Phase 11's push or Phase 11's script output carried one, surface them verbatim in the report under a `### Traceability` subsection so the user can act on them.
 <!-- compliance:end -->
 
-If Phase 9 listed uncommitted files, show them as a `### Uncommitted files` subsection: the user commits them or discards them.
-
-If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lines in the report.
+If Phase 9 listed uncommitted files, show them as a `### Uncommitted files` subsection: the user commits or discards them. If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lines.
 
 {{knowledge_writeback_after_load()}}
 
