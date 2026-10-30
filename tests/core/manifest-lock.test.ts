@@ -129,29 +129,35 @@ describe('manifest lock', () => {
 
     // Hold every waiter at its first stale break until both have judged the lock
     // stale. The first to go on takes the lock; the second goes on only after that
-    // holder has it, and so renames the holder's fresh lock, not the stale one.
+    // waiter has settled, and so renames the holder's fresh lock, not the stale one.
+    // The roles follow the arrival at the rename, not the start order: two calls
+    // started together reach it in either order (their file system calls finish on
+    // the thread pool). The waiter held second can not settle, so the first to
+    // settle is the one that arrived first.
     const realRename = fs.rename.bind(fs);
     let arrived = 0;
     let bothArrived!: () => void;
     const bothJudgedStale = new Promise<void>((resolve) => { bothArrived = resolve; });
-    let firstHolds!: () => void;
-    const firstHasLock = new Promise<void>((resolve) => { firstHolds = resolve; });
+    let firstSettles!: () => void;
+    const firstHasSettled = new Promise<void>((resolve) => { firstSettles = resolve; });
     vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
       if (String(from) !== lockDir) return realRename(from, to);
       arrived += 1;
       const position = arrived;
       if (arrived === 2) bothArrived();
       await bothJudgedStale;
-      if (position === 2) await firstHasLock;
+      if (position === 2) await firstHasSettled;
       return realRename(from, to);
     });
 
-    const first = acquireManifestLock(devflowDir, { timeoutMs: 400 }).then((result) => {
-      if (result.ok) firstHolds();
+    const settle = (result: Awaited<ReturnType<typeof acquireManifestLock>>) => {
+      firstSettles();
       return result;
-    });
-    const second = acquireManifestLock(devflowDir, { timeoutMs: 400 });
-    const [a, b] = await Promise.all([first, second]);
+    };
+    const [a, b] = await Promise.all([
+      acquireManifestLock(devflowDir, { timeoutMs: 400 }).then(settle),
+      acquireManifestLock(devflowDir, { timeoutMs: 400 }).then(settle),
+    ]);
 
     // Exactly one holds. The other waited out its timeout and did not take the lock.
     expect([a.ok, b.ok].filter(Boolean)).toHaveLength(1);
