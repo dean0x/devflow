@@ -159,7 +159,9 @@ const FARM_TOOLS = [
  *
  * `omit` names tools to leave out (`['cksum']` for the startup assert). `extra` maps a tool
  * name to the absolute path it links to (`{ node: process.execPath }` for the node backend).
- * Each tool links from /usr/bin, else /bin. The farm is removed in the afterEach above.
+ * Each tool links from /usr/bin, else /bin. `git` links to the git the run's PATH finds
+ * first: /usr/bin/git on macOS is a shim that looks git up again on every call. The farm
+ * is removed in the afterEach above.
  */
 function buildToolFarm(
   omit: readonly string[] = [],
@@ -167,8 +169,13 @@ function buildToolFarm(
 ): string {
   const farmDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-farm-'));
   toolFarms.push(farmDir);
+  const runGit = resolveOnPath('git', process.env.PATH ?? '');
   for (const tool of FARM_TOOLS) {
     if (omit.includes(tool)) continue;
+    if (tool === 'git' && runGit !== undefined) {
+      fs.symlinkSync(runGit, path.join(farmDir, tool));
+      continue;
+    }
     for (const prefix of ['/usr/bin', '/bin']) {
       const src = `${prefix}/${tool}`;
       if (fs.existsSync(src)) {
