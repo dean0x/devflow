@@ -1,11 +1,17 @@
 import { join } from 'path';
 import { getPackageRoot } from './paths.js';
-import { COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR, SKILL_REFS_OUTPUT_DIR } from './mds-variants.js';
+import {
+  COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR,
+  SKILL_REFS_OUTPUT_DIR,
+  workflowFolderKey,
+  workflowFoldersRootRelPath,
+} from './mds-variants.js';
 import {
   ALL_SWITCHES_ON,
   BOTH_OFF_OUTPUT_DIR,
   COMPLIANCE_OFF_OUTPUT_DIR,
   CURATION_OFF_OUTPUT_DIR,
+  type VariantKey,
   type VariantKind,
   type VariantSwitches,
 } from './curation-variants.js';
@@ -216,6 +222,40 @@ export function compiledComplianceOffSkillRefsDir(root: string = getPackageRoot(
  */
 export function skillRefsSourceDir(compliance: boolean, root: string = getPackageRoot()): string {
   return compliance ? compiledSkillRefsDir(root) : compiledComplianceOffSkillRefsDir(root);
+}
+
+/**
+ * Compiled workflow skill folders directory of one variant key: dist/workflows/ for the
+ * `on` key, else <variant tree>/workflows/. Each holds one folder per registered
+ * workflow skill, complete for that key.
+ *
+ * The spelling comes from workflowFoldersRootRelPath in src/core/mds-variants.ts, the
+ * build's own destination, rather than being retyped here. Absent until the build has
+ * run, and empty of folders while no folder is registered, so every reader must
+ * tolerate both.
+ *
+ * @param key - The variant key whose folders to read.
+ * @param root - Package root to resolve against (see agentsDir).
+ */
+export function compiledWorkflowFoldersDir(key: VariantKey, root: string = getPackageRoot()): string {
+  return join(root, ...workflowFoldersRootRelPath(key).split('/'));
+}
+
+/**
+ * The workflow folders source root for a machine's switches: the tree built for exactly
+ * those switches. One function, so the install, the converge and the status read cannot
+ * pick different roots for one pair of switches.
+ *
+ * D-WORKFLOW-FOLDER-BUILD: a SINGLE root, never a preference list. A folder is complete
+ * under every key, so no reader merges two trees, and a both-off machine never falls
+ * through to a tree that still carries the text of an axis it switched off (the failure
+ * commandSourceDirs' consumers guard against with an exact-key check).
+ *
+ * @param switches - The machine's settled curation and compliance switches.
+ * @param root - Package root to resolve against (see agentsDir).
+ */
+export function workflowFoldersSourceDir(switches: VariantSwitches, root: string = getPackageRoot()): string {
+  return compiledWorkflowFoldersDir(workflowFolderKey(switches), root);
 }
 
 /**
