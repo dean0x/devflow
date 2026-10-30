@@ -23,13 +23,13 @@ every define, so a selective import's capture cost is paid over the importer's
 scope, and a single define with no imports of its own adds one node to it.
 
 @define docs_root():
-**Docs root (D-DOCS-ROOT).** Every `.devflow/docs/` path this command reads or writes lives at the checkout's toplevel, never under the directory the session started in. Resolve `{worktree}` from the start directory — `WORKTREE_PATH` if provided, otherwise cwd (`devflow:worktree-support`) — by running
+**Docs root (D-DOCS-ROOT).** Every `.devflow/docs/` path of this command lives at the checkout's toplevel, not under the start directory. From the start directory — `WORKTREE_PATH` if provided, otherwise cwd (`devflow:worktree-support`) — run
 
 ```bash
 git -C "{start}" rev-parse --show-toplevel
 ```
 
-and using its one-line output. If the command fails (outside a git repository), `{worktree}` is the start directory itself. Every docs path below is written `{worktree}/.devflow/docs/…`; a repo-relative docs path handed to an agent always travels with a `WORKTREE_PATH` naming the checkout it is relative to.
+Its one-line output is `{worktree}`. If the command fails (outside a git repository), `{worktree}` is the start directory itself. Docs paths below are written `{worktree}/.devflow/docs/…`. A repo-relative docs path handed to an agent always travels with a `WORKTREE_PATH` naming its checkout.
 @end
 
 @export docs_root

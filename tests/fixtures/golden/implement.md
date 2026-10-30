@@ -46,13 +46,13 @@ When the user explicitly asks to re-validate, re-check, or re-run quality gates 
 
 Record the current branch name as `BASE_BRANCH`. Stop the run unless it matches `^(?![-#]|origin\/|(?:@|(?:FETCH_|ORIG_|MERGE_)?HEAD)$)(?!.*\.\.)[A-Za-z0-9._\/+@,#-]{1,200}$` (judge the match by reading; never pass the value to a command), telling the user it allows only ASCII letters, digits and `._/+@,#-`, at most 200; no leading `-` or `#`, no `origin/` prefix, no `..`, not `@` or a HEAD name.
 
-**Docs root (D-DOCS-ROOT).** Every `.devflow/docs/` path this command reads or writes lives at the checkout's toplevel, never under the directory the session started in. Resolve `{worktree}` from the start directory — `WORKTREE_PATH` if provided, otherwise cwd (`devflow:worktree-support`) — by running
+**Docs root (D-DOCS-ROOT).** Every `.devflow/docs/` path of this command lives at the checkout's toplevel, not under the start directory. From the start directory — `WORKTREE_PATH` if provided, otherwise cwd (`devflow:worktree-support`) — run
 
 ```bash
 git -C "{start}" rev-parse --show-toplevel
 ```
 
-and using its one-line output. If the command fails (outside a git repository), `{worktree}` is the start directory itself. Every docs path below is written `{worktree}/.devflow/docs/…`; a repo-relative docs path handed to an agent always travels with a `WORKTREE_PATH` naming the checkout it is relative to.
+Its one-line output is `{worktree}`. If the command fails (outside a git repository), `{worktree}` is the start directory itself. Docs paths below are written `{worktree}/.devflow/docs/…`. A repo-relative docs path handed to an agent always travels with a `WORKTREE_PATH` naming its checkout.
 
 **Resolve the evidence policy once per run**, from the repository root, before any step reads the values:
 
