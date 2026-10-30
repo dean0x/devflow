@@ -25,6 +25,7 @@ import { snapshotTree, trackInGit } from './decisions/curation-fixtures.js';
 import { WORKER_AGENTS, validateWorkerValue } from '../src/core/agent-models.js';
 import { MEMORY_MIN_PERMISSION_VERSION } from '../src/cli/commands/memory.js';
 import { FORBIDDEN_ARGV } from './fixtures/forbidden-argv.js';
+import { GIT_BIN_PREFIX } from './setup/home-isolation.js';
 import {
   FIFO_RUN_BOUND_MS,
   FIFO_TEST_TIMEOUT_MS,
@@ -159,9 +160,11 @@ const FARM_TOOLS = [
  *
  * `omit` names tools to leave out (`['cksum']` for the startup assert). `extra` maps a tool
  * name to the absolute path it links to (`{ node: process.execPath }` for the node backend).
- * Each tool links from /usr/bin, else /bin. `git` links to the git the run's PATH finds
- * first: /usr/bin/git on macOS is a shim that looks git up again on every call. The farm
- * is removed in the afterEach above.
+ * Each tool links from /usr/bin, else /bin. `git` links to the git that the run's PATH finds
+ * first only when that path is absolute and its folder is the run's own git folder (named
+ * with `GIT_BIN_PREFIX`), because /usr/bin/git on macOS is a shim that looks git up again on
+ * every call; in every other case `git` links like the other tools. The farm is removed in
+ * the afterEach above.
  */
 function buildToolFarm(
   omit: readonly string[] = [],
@@ -169,7 +172,11 @@ function buildToolFarm(
 ): string {
   const farmDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-farm-'));
   toolFarms.push(farmDir);
-  const runGit = resolveOnPath('git', process.env.PATH ?? '');
+  const firstGit = resolveOnPath('git', process.env.PATH ?? '');
+  const runGit = firstGit !== undefined && path.isAbsolute(firstGit)
+    && path.basename(path.dirname(firstGit)).startsWith(GIT_BIN_PREFIX)
+    ? firstGit
+    : undefined;
   for (const tool of FARM_TOOLS) {
     if (omit.includes(tool)) continue;
     if (tool === 'git' && runGit !== undefined) {
@@ -507,8 +514,8 @@ describe('S2: AC-F4 — session-start-memory injection states', () => {
     expect(ctx).not.toContain('abc..xyz123');
   });
 
-  // One test per backup form: each hook run starts a process, and four runs in one test
-  // came close to its time limit in a full run.
+  // One test per backup form. Each test runs the hook twice and each run starts node once,
+  // so its time limit allows two hook runs and one node start stall.
   const legacySnapshot = JSON.stringify({ timestamp: '2099-01-01T00:00:00Z', memory_snapshot: 'stale snapshot' });
   it.each([
     ['valid', legacySnapshot],
@@ -518,6 +525,8 @@ describe('S2: AC-F4 — session-start-memory injection states', () => {
     const headSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: projectDir, encoding: 'utf-8' }).trim();
     const branch = execFileSync('git', ['branch', '--show-current'], { cwd: projectDir, encoding: 'utf-8' }).trim() || 'main';
     writeMemoryWithStamp(projectDir, headSha, branch);
+    const memoryFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
+    const current = fs.readFileSync(memoryFile, 'utf-8');
     const withoutBackup = getCtx(projectDir, homeDir);
     expect(withoutBackup, 'non-vacuity: the memory is injected with no backup at all').toContain('synced @');
 
@@ -528,8 +537,9 @@ describe('S2: AC-F4 — session-start-memory injection states', () => {
     const ctx = (JSON.parse(run.stdout.trim()) as { hookSpecificOutput: { additionalContext: string } })
       .hookSpecificOutput.additionalContext;
     expect(ctx).toBe(withoutBackup);
+    expect(fs.readFileSync(memoryFile, 'utf-8')).toBe(current);
     expect(fs.readFileSync(backup, 'utf-8'), 'legacy backups are not deleted or rewritten on restore').toBe(contents);
-  });
+  }, HOOK_RUN_ALLOWANCE_MS * 2 + NODE_EXEC_STALL_MS);
 
   it.each(['identical', 'divergent', 'oversized'] as const)('ignores a newer %s legacy backup body', (kind) => {
     const headSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: projectDir, encoding: 'utf-8' }).trim();
