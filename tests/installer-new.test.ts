@@ -19,6 +19,7 @@ import * as path from 'path';
 import { composeScripts, installViaFileCopy } from '../src/targets/claude-code/installer.js';
 import { buildAssetMaps, DEVFLOW_PLUGINS } from '../src/core/plugins.js';
 import type { PluginDefinition } from '../src/core/plugins.js';
+import { RETIRED_SHIPPED } from '../src/core/retired-shipped-names.js';
 import { agentsDir, compiledAgentsDir, type AgentSourceDirs } from '../src/core/assets.js';
 import { resolveAgentSource, splitFrontmatter, testBackups } from './helpers.js';
 import { RESOLVER_SCRIPT, SETTINGS_SCRIPT, buildScriptedShim, createFakeBin, runResolver } from './evidence-policy/scripted-shim.js';
@@ -771,8 +772,9 @@ describe('installViaFileCopy — sweep results in InstallReport (A2)', () => {
     const devflowDir = path.join(tmpDir, 'devflow');
     const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
 
-    // Plant a stale agent file that is not in the registry (any real agent name would survive).
-    const orphanName = 'devflow-zzz-nonexistent-sweep-sentinel';
+    // Plant an agent file of an earlier release that is not in the registry (any real agent name
+    // would survive; a file devflow never shipped is moved aside, not swept).
+    const orphanName = RETIRED_SHIPPED.agents[0];
     await fs.mkdir(agentsTarget, { recursive: true });
     await fs.writeFile(path.join(agentsTarget, `${orphanName}.md`), '# stale', 'utf-8');
 
@@ -808,7 +810,7 @@ describe('installViaFileCopy — sweep results in InstallReport (A2)', () => {
     const devflowDir = path.join(tmpDir, 'devflow');
     const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
 
-    const orphanName = 'devflow-zzz-f15-kind-sentinel';
+    const orphanName = RETIRED_SHIPPED.agents[1];
     await fs.mkdir(agentsTarget, { recursive: true });
     await fs.writeFile(path.join(agentsTarget, `${orphanName}.md`), '# stale', 'utf-8');
 

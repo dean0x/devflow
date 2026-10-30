@@ -88,16 +88,17 @@ function kindOf(probe: KindProbe): EntryKind {
 }
 
 /**
- * Whether `rel` is named by `set`. A folder is named when the set holds it. Any other entry is
- * named only when it is a listed file path; a link or a special file at a listed path counts, and
- * is removed as the entry it is.
+ * Whether `rel` is named by `set`. A folder is named when the set holds it. A file or a special
+ * file is named only when it is a listed file path. A link is named at a listed file path and at a
+ * folder the set holds: it stands in the place of an entry devflow writes, and is unlinked as the
+ * entry it is, never followed.
  */
 function inSet(set: PathSet, rel: string, kind: EntryKind): boolean {
   switch (kind) {
     case 'directory':
+    case 'link':
       return set.holds(rel);
     case 'file':
-    case 'link':
     case 'special':
       return set.files.has(rel);
     default: {
@@ -205,6 +206,19 @@ export interface PrepassResult {
   readonly capHits: readonly CapHit[];
 }
 
+/**
+ * One folder to scan, and which of its entries the scan may touch.
+ *
+ * `include` is asked about every entry the scan meets below `folder`, with the entry's path
+ * relative to `folder` (`/` separators) and its kind. An entry it refuses is left alone whole: not
+ * moved, not entered and not listed for removal, so a later {@link BackupSession.removeListed}
+ * keeps it too. Without `include` the scan takes every entry.
+ */
+export interface PrepassTarget {
+  readonly folder: string;
+  readonly include?: (relative: string, kind: EntryKind) => boolean;
+}
+
 export interface RemoveResult {
   /** The listed entries this call removed. */
   readonly removed: readonly string[];
@@ -229,7 +243,7 @@ export interface BackupSessionOptions {
 
 export interface BackupSession {
   /** Scan each folder and move the entries devflow did not ship into the run folder. */
-  prepass(targets: readonly string[]): Promise<PrepassResult>;
+  prepass(targets: ReadonlyArray<string | PrepassTarget>): Promise<PrepassResult>;
   /** Remove the entries the scan listed under `folder` and were not kept, then `rmdir` it and its scanned folders. */
   removeListed(folder: string): Promise<RemoveResult>;
   /** Move one entry whole with a single rename and no walk. */
@@ -238,6 +252,8 @@ export interface BackupSession {
   keptUnder(folder: string): readonly string[];
   isKept(entry: string): boolean;
   classify(relPath: string, kind: EntryKind): Classification;
+  /** {@link BackupSession.classify} for the entry at an absolute path; a path outside the Claude dir is unknown. */
+  classifyAt(entry: string, kind: EntryKind): Classification;
   snapshot(): BackupSnapshot;
 }
 
@@ -423,6 +439,7 @@ export function createBackupSession(options: BackupSessionOptions): BackupSessio
     logicalRel: string,
     depth: number,
     scanRoot: string,
+    include: PrepassTarget['include'],
   ): Promise<ScannedFolder | null> {
     if (depth > MAX_WALK_DEPTH) {
       fail(dirPath, 'scan', 'depth-bound');
@@ -466,12 +483,13 @@ export function createBackupSession(options: BackupSessionOptions): BackupSessio
       const childPath = path.join(dirPath, entry.name);
       const childLogical = logicalRel === '' ? entry.name : `${logicalRel}/${entry.name}`;
       const kind = kindOf(entry);
+      if (include !== undefined && !include(toPosix(path.relative(scanRoot, childPath)), kind)) continue;
       const verdict = classify(childLogical, kind, sets);
       switch (verdict) {
         case 'shipped':
         case 'retired': {
           if (kind === 'directory') {
-            const sub = await scanFolder(childPath, childLogical, depth + 1, scanRoot);
+            const sub = await scanFolder(childPath, childLogical, depth + 1, scanRoot, include);
             if (sub !== null) folder.dirs.push(sub);
           } else {
             folder.listed.push({ path: childPath, retired: verdict === 'retired' });
@@ -480,7 +498,7 @@ export function createBackupSession(options: BackupSessionOptions): BackupSessio
         }
         case 'sidecar': {
           if (kind === 'directory') {
-            const sub = await scanFolder(childPath, sidecarBase(childLogical) ?? childLogical, depth + 1, scanRoot);
+            const sub = await scanFolder(childPath, sidecarBase(childLogical) ?? childLogical, depth + 1, scanRoot, include);
             if (sub !== null) folder.dirs.push(sub);
           } else {
             folder.listed.push({ path: childPath, retired: false });
@@ -507,19 +525,20 @@ export function createBackupSession(options: BackupSessionOptions): BackupSessio
     return folder;
   }
 
-  async function prepass(targets: readonly string[]): Promise<PrepassResult> {
+  async function prepass(targets: ReadonlyArray<string | PrepassTarget>): Promise<PrepassResult> {
     const movedBefore = moved.length;
     const failuresBefore = failures.length;
     const capsBefore = capHits.length;
     for (const target of targets) {
-      const absolute = path.resolve(target);
+      const { folder, include } = typeof target === 'string' ? { folder: target, include: undefined } : target;
+      const absolute = path.resolve(folder);
       if (!isContainedIn(claudeDir, absolute)) {
         fail(absolute, 'scan', 'outside-claude-dir');
         continue;
       }
       const rel = relFromClaude(absolute);
       const logical = classify(rel, 'directory', sets) === 'sidecar' ? sidecarBase(rel) ?? rel : rel;
-      await scanFolder(absolute, logical, 0, absolute);
+      await scanFolder(absolute, logical, 0, absolute, include);
     }
     return Object.freeze({
       moved: freezeList(moved.slice(movedBefore)),
@@ -636,6 +655,10 @@ export function createBackupSession(options: BackupSessionOptions): BackupSessio
     keptUnder,
     isKept,
     classify: (relPath: string, kind: EntryKind): Classification => classify(relPath, kind, sets),
+    classifyAt: (entry: string, kind: EntryKind): Classification => {
+      const absolute = path.resolve(entry);
+      return isContainedIn(claudeDir, absolute) ? classify(relFromClaude(absolute), kind, sets) : 'unknown';
+    },
     snapshot,
   });
 }

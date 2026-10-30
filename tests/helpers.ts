@@ -9,7 +9,7 @@ import { agentSourceDirs, compiledSkillRefsDir } from '../src/core/assets.js'
 import { MAX_REFERENCE_SWEEP_DEPTH } from '../src/core/reference-sweep.js'
 import { GIT_OPERATIONS, PR_HOST_DESTINATION_ROOT, WORKFLOW_FOLDERS, operationReferenceRel, type WorkflowFolder } from '../src/core/mds-variants.js'
 import { retiredPathSet } from '../src/core/retired-shipped-names.js'
-import { createBackupSession, type BackupSession } from '../src/targets/claude-code/install-backup.js'
+import { createBackupSession, createPathSet, type BackupSession } from '../src/targets/claude-code/install-backup.js'
 import { variantOffRelPath, type OffVariantKey, type VariantKind } from '../src/core/curation-variants.js'
 import { assertTempHome } from './setup/home-isolation.js'
 
@@ -259,6 +259,8 @@ export interface TestBackupOptions {
   /** The workflow folder registry the shipped set is built from. Defaults to the real one. */
   workflowFolders?: readonly WorkflowFolder[]
   entryCap?: number
+  /** Paths, relative to the Claude dir, that the shipped set names besides the registries. For a test whose Claude dir is not a real layout. */
+  extraShipped?: readonly string[]
   /** Defaults to a fixed clock reading. */
   now?: () => Date
   /** Defaults to bytes that differ at every call, so two sessions of one home never name the same run folder. */
@@ -303,8 +305,11 @@ export async function testBackups(home: string, options: TestBackupOptions = {})
     workflowFolders: options.workflowFolders ?? WORKFLOW_FOLDERS,
   })
   if (!loaded.ok) throw new Error(`testBackups: the shipped set could not be built: ${loaded.reason}`)
+  const shipped = options.extraShipped === undefined
+    ? loaded.shipped
+    : createPathSet([...loaded.shipped.files, ...options.extraShipped])
   return createBackupSession({
-    shipped: loaded.shipped,
+    shipped,
     retired: retiredPathSet(),
     claudeDir,
     devflowDir,

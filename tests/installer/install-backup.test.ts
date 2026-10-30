@@ -765,3 +765,58 @@ describe('the snapshot', () => {
     expect(session.snapshot().moved).toHaveLength(2);
   });
 });
+
+describe('the per-target filter of the pre-pass', () => {
+  it('leaves an entry the filter refuses where it is, and moves the rest', async () => {
+    const note = await put('commands/devflow/note.txt');
+    await put('commands/devflow/mine.md');
+    const session = open();
+    await session.prepass([{ folder: at('commands/devflow'), include: relative => relative.endsWith('.md') }]);
+    expect(await exists(note)).toBe(true);
+    expect(await exists(at('commands/devflow/mine.md'))).toBe(false);
+    expect(await exists(inRun('commands/devflow/mine.md'))).toBe(true);
+    expect(session.snapshot().moved.map(unit => unit.original)).toEqual([at('commands/devflow/mine.md')]);
+  });
+
+  it('asks about each entry with its path relative to the folder and its kind', async () => {
+    await put('skills/devflow:git/SKILL.md');
+    await put('skills/devflow:git/references/pr/extra.md');
+    const asked: string[] = [];
+    const session = open();
+    await session.prepass([{
+      folder: at('skills/devflow:git'),
+      include: (relative, kind) => {
+        asked.push(`${relative}:${kind}`);
+        return true;
+      },
+    }]);
+    expect(asked).toEqual(expect.arrayContaining(['SKILL.md:file', 'references:directory', 'references/pr:directory', 'references/pr/extra.md:file']));
+    expect(await exists(inRun('skills/devflow:git/references/pr/extra.md'))).toBe(true);
+  });
+
+  it('does not enter a folder the filter refuses, and keeps it and its listed files out of a later removal', async () => {
+    await put('skills/devflow:git/SKILL.md');
+    await put('skills/devflow:git/references/pr/ensure.md');
+    const stray = await put('skills/devflow:git/references/pr/stray.md');
+    const session = open();
+    await session.prepass([{
+      folder: at('skills/devflow:git'),
+      include: relative => relative !== 'references' && !relative.startsWith('references/'),
+    }]);
+    const removal = await session.removeListed(at('skills/devflow:git'));
+    expect(await exists(stray)).toBe(true);
+    expect(await exists(at('skills/devflow:git/references/pr/ensure.md'))).toBe(true);
+    expect(await exists(at('skills/devflow:git/SKILL.md'))).toBe(false);
+    expect(removal.folderRemoved).toBe(false);
+    expect(session.snapshot().moved).toEqual([]);
+    expect(session.snapshot().failures).toEqual([]);
+  });
+
+  it('still takes every entry when a target is a plain path', async () => {
+    await put('commands/devflow/mine.md');
+    await put('commands/devflow/note.txt');
+    const session = open();
+    await session.prepass([at('commands/devflow')]);
+    expect(session.snapshot().moved).toHaveLength(2);
+  });
+});

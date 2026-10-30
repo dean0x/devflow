@@ -232,12 +232,12 @@ describe('removal: scoped, gated, and never beyond the registry', () => {
     ).toContain(owned);
   });
 
-  it('a name the registry does not have at all is the SWEEP\'s, never a deselection', async () => {
+  it('a name the registry does not have at all is moved aside, never a deselection', async () => {
     // The removal set is registry arithmetic over declared skills, never a
     // readdir of the install tree. A `devflow:` directory naming nothing in the
-    // registry is an orphan, and it leaves through the orphan sweep — reported
-    // as such, so the summary says "no longer in the registry" rather than
-    // "no selected plugin requires it", which would be a different fact.
+    // registry is not devflow's to delete: the pre-pass moves it to the backup
+    // folder and names it, so the summary says "moved" rather than "no selected
+    // plugin requires it", which would be a different fact.
     // Composed rather than spelled inline: tests/skill-references.test.ts scans
     // every tests/**/*.ts for a `devflow:` name that is not a registry skill,
     // which is exactly what this probe needs on DISK and must not leave in
@@ -248,7 +248,8 @@ describe('removal: scoped, gated, and never beyond the registry', () => {
     const report = await run({ plugins: [plugin('devflow-explore')], isPartialInstall: false });
 
     expect(report.removedSkills, 'the deselection arithmetic never sees it').not.toContain('not-a-registry-skill');
-    expect(report.sweptOrphans.map(o => `${o.kind}:${o.name}`)).toContain('skill:not-a-registry-skill');
+    expect(report.sweptOrphans.map(o => `${o.kind}:${o.name}`)).not.toContain('skill:not-a-registry-skill');
+    expect(report.backups.moved.map(unit => unit.original)).toContain(path.join(claudeDir, 'skills', foreign));
     expect(await installedSkillDirs()).not.toContain(foreign);
   });
 
