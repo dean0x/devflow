@@ -16,6 +16,10 @@
  * lines (it folds with single spaces), a quoted scalar and a `>` / `>-` folded block. Both sets are
  * named exactly, and a new skill directory that is in neither fails the guard until it is classified.
  *
+ * A third class, the WORKFLOW USER-TRIGGER, is held apart from both sets: a workflow skill folder (the
+ * registry WORKFLOW_FOLDERS) whose SKILL.md is `user-invocable: true`. A person types its name, so its
+ * description is a command's and not a library skill's "This skill should be used when…" trigger.
+ *
  * `disable-model-invocation` is absent from every skill but one: it breaks frontmatter preloading, so only
  * a skill nothing preloads may carry it. D-AGENT-REFS names that skill, `agent-references`, which holds the
  * text an agent mode reads by explicit path; a second guard below holds that no agent `skills:` list and no
@@ -27,6 +31,7 @@ import { readFileSync, readdirSync } from 'fs'
 import * as path from 'path'
 import { parseFrontmatterSkills, resolveAgentSource, resolveCurationOffSource } from '../helpers.js'
 import { DEVFLOW_PLUGINS, getAllAgentNames, type PluginDefinition } from '../../src/core/plugins.js'
+import { WORKFLOW_FOLDERS, WORKFLOW_FOLDERS_OUTPUT_DIR, WORKFLOW_SKILL_FILE } from '../../src/core/mds-variants.js'
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..')
 const SKILLS_DIR = path.join(ROOT, 'src', 'assets', 'skills')
@@ -124,6 +129,50 @@ export function collectInvocationFlagDefects(skills: ReadonlyArray<readonly [str
 }
 
 /**
+ * D-WORKFLOW-USER-TRIGGER: the byte cap of each workflow folder's description, by folder name. A folder
+ * takes the byte length of the command description it replaces, so moving a command into a folder grows
+ * the catalog by nothing. The registry WORKFLOW_FOLDERS is empty, so the map is empty and the class has no
+ * real member yet; the first folder adds its row here.
+ */
+export const WORKFLOW_TRIGGER_BYTES: ReadonlyMap<string, number> = new Map()
+
+/**
+ * Named collector: each workflow folder that is not classified user-trigger, or whose description is
+ * missing or over its cap. A folder is user-trigger when its SKILL.md carries `user-invocable: true`; its
+ * description is held to the user-trigger character cap and to its own byte cap, and it does not need the
+ * library "This skill should be used when…" form. A skill that is not a workflow folder is left to the
+ * library collector, so the two classes never both claim one name.
+ */
+export function collectWorkflowTriggerDefects(
+  skills: ReadonlyArray<readonly [string, string]>,
+  folders: readonly string[],
+  byteCaps: ReadonlyMap<string, number>,
+): string[] {
+  const out: string[] = []
+  for (const [name, text] of skills) {
+    if (!folders.includes(name)) continue
+    if (!/^user-invocable: true$/m.test(frontmatterOf(text))) {
+      out.push(`${name}: workflow folder without user-invocable: true — classify it`)
+      continue
+    }
+    const description = parseDescription(text)
+    if (description === null || description === '') {
+      out.push(`${name}: no description`)
+      continue
+    }
+    if (description.length > USER_TRIGGER_CAP) out.push(`${name}: ${description.length} characters, cap ${USER_TRIGGER_CAP}`)
+    const byteCap = byteCaps.get(name)
+    if (byteCap === undefined) {
+      out.push(`${name}: no byte cap registered`)
+      continue
+    }
+    const bytes = Buffer.byteLength(description, 'utf-8')
+    if (bytes > byteCap) out.push(`${name}: ${bytes} bytes, cap ${byteCap}`)
+  }
+  return out
+}
+
+/**
  * Named collector: where a reference-only skill is preloaded or installed as a dependency. An agent's
  * `skills:` list preloads; a plugin's `requires:` list installs a skill for the plugin's corpus, and the
  * skill is owned by `devflow-core-skills` alone, which is always installed.
@@ -161,6 +210,13 @@ const liveSkills = (): Array<readonly [string, string]> =>
   readdirSync(SKILLS_DIR, { withFileTypes: true })
     .filter(entry => entry.isDirectory())
     .map(entry => [entry.name, readFileSync(path.join(SKILLS_DIR, entry.name, 'SKILL.md'), 'utf-8')] as const)
+
+/** Each registered workflow folder's compiled SKILL.md; empty while WORKFLOW_FOLDERS is. */
+const liveWorkflowSkills = (): Array<readonly [string, string]> =>
+  WORKFLOW_FOLDERS.map(folder => [
+    folder.name,
+    readFileSync(path.join(ROOT, WORKFLOW_FOLDERS_OUTPUT_DIR, folder.name, WORKFLOW_SKILL_FILE), 'utf-8'),
+  ] as const)
 
 const skillWith = (descriptionLines: string): string => `---\nname: x\n${descriptionLines}\nuser-invocable: false\n---\n# X\n`
 
@@ -248,5 +304,53 @@ describe('skill descriptions stay within their audience cap (D-SKILL-DESCRIPTION
       'brand-new-skill: in neither the agent-internal nor the user-trigger set — classify it',
     ])
     expect(collectDescriptionDefects([[AGENT_INTERNAL[0], skillWith('')]])).toEqual([`${AGENT_INTERNAL[0]}: no description`])
+  })
+})
+
+describe('a user-invocable workflow folder keeps a command description (D-WORKFLOW-USER-TRIGGER)', () => {
+  const flow = 'fixture-flow'
+  const folders = [flow]
+  const caps = (bytes: number): ReadonlyMap<string, number> => new Map([[flow, bytes]])
+  const flowSkill = (description: string, invocable = 'true'): string =>
+    `---\nname: ${flow}\ndescription: ${description}\nuser-invocable: ${invocable}\n---\n# X\n`
+
+  it('each registered workflow folder has a byte cap and none is a library skill; the registry is empty today, so no real folder is checked yet', () => {
+    const registered = WORKFLOW_FOLDERS.map(folder => folder.name)
+    expect([...WORKFLOW_TRIGGER_BYTES.keys()].sort(), 'a byte cap per registered folder and no other').toEqual([...registered].sort())
+    expect(registered.filter(n => AGENT_INTERNAL.includes(n) || USER_TRIGGER.includes(n)), 'a workflow trigger is not a library skill').toEqual([])
+    expect(collectWorkflowTriggerDefects(liveWorkflowSkills(), registered, WORKFLOW_TRIGGER_BYTES)).toEqual([])
+  })
+
+  it('a folder is classified user-trigger by name and flag, and is never a library skill', () => {
+    // On the fixture entry: within both caps and not in the library form, so it is clean.
+    expect(collectWorkflowTriggerDefects([[flow, flowSkill('Run the whole task end to end')]], folders, caps(200))).toEqual([])
+    // A workflow folder is in neither library set, so the library collector reports it unclassified.
+    expect(collectDescriptionDefects([[flow, flowSkill('Run the whole task end to end')]])).toEqual([
+      `${flow}: in neither the agent-internal nor the user-trigger set — classify it`,
+    ])
+    // A library user-trigger skill is not a workflow folder, so this class leaves it to the library collector.
+    expect(collectWorkflowTriggerDefects([[USER_TRIGGER[0], flowSkill('a'.repeat(300))]], folders, caps(200))).toEqual([])
+    // A folder whose SKILL.md is not user-invocable is not classified, and is reported rather than skipped.
+    expect(collectWorkflowTriggerDefects([[flow, flowSkill('Run it', 'false')]], folders, caps(200))).toEqual([
+      `${flow}: workflow folder without user-invocable: true — classify it`,
+    ])
+  })
+
+  it('known-bad probe: a 201-character value and a value over its byte cap are each reported', () => {
+    expect(collectWorkflowTriggerDefects([[flow, flowSkill('a'.repeat(200))]], folders, caps(200))).toEqual([])
+    expect(collectWorkflowTriggerDefects([[flow, flowSkill('a'.repeat(201))]], folders, caps(1000))).toEqual([`${flow}: 201 characters, cap 200`])
+    expect(collectWorkflowTriggerDefects([[flow, flowSkill('a'.repeat(50))]], folders, caps(50))).toEqual([])
+    expect(collectWorkflowTriggerDefects([[flow, flowSkill('a'.repeat(50))]], folders, caps(49))).toEqual([`${flow}: 50 bytes, cap 49`])
+    // 100 two-byte characters: within the character cap, over a 150-byte cap.
+    expect(collectWorkflowTriggerDefects([[flow, flowSkill('é'.repeat(100))]], folders, caps(150))).toEqual([`${flow}: 200 bytes, cap 150`])
+    expect(collectWorkflowTriggerDefects([[flow, flowSkill('a'.repeat(201))]], folders, caps(200))).toEqual([
+      `${flow}: 201 characters, cap 200`,
+      `${flow}: 201 bytes, cap 200`,
+    ])
+  })
+
+  it('known-bad probe: a folder with no byte cap and a folder with no description are reported', () => {
+    expect(collectWorkflowTriggerDefects([[flow, flowSkill('Run it')]], folders, new Map())).toEqual([`${flow}: no byte cap registered`])
+    expect(collectWorkflowTriggerDefects([[flow, flowSkill('')]], folders, caps(200))).toEqual([`${flow}: no description`])
   })
 })

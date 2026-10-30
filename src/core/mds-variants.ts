@@ -28,15 +28,28 @@
  * the compliance-on ones: which relative paths a compliance-off install omits
  * (complianceOffOmittedRelPaths), and what each compliance arm of one operation's
  * section keeps (splitSectionArms).
+ * A last group serves the workflow skill folders: which hosts make up a folder and
+ * which files each variant key holds (WORKFLOW_FOLDERS, workflowFolderFiles), and the
+ * build id that ties the files of one folder and key together (workflowBuildId,
+ * stampBuildId, unstampBuildId, checkFolderBuildIds, verifyFolderBuildId).
  * It still performs no I/O and no iteration over the filesystem.
  *
  * The `-variants` in the filename names the variant-expansion entry point below
  * (DR-16), which lives next to the validation it depends on.
  */
 
+import { createHash } from 'crypto';
 import * as path from 'path';
 import { isContainedIn } from './paths.js';
-import { COMPLIANCE_OFF_OUTPUT_DIR, splitVariants, type VariantSplitError } from './curation-variants.js';
+import {
+  COMPLIANCE_OFF_OUTPUT_DIR,
+  OFF_OUTPUT_DIRS,
+  machineVariantKey,
+  splitVariants,
+  type VariantKey,
+  type VariantSplitError,
+  type VariantSwitches,
+} from './curation-variants.js';
 
 // ---------------------------------------------------------------------------
 // Result type (local; matches codebase per-module pattern)
@@ -129,6 +142,35 @@ export function validateContractOutputName(name: string): Result<string, OutputN
   return Err(inner.error.kind === 'empty' ? { kind: 'empty' } : { ...inner.error, name });
 }
 
+/**
+ * The one name the core host of a workflow skill folder may emit: the stem of
+ * `SKILL.md`, the file name a skill's entry point has by convention.
+ */
+export const WORKFLOW_SKILL_ENTRY_NAME = 'SKILL';
+
+/**
+ * Validate the emitted basename of a workflow skill folder's CORE host: exactly the
+ * literal {@link WORKFLOW_SKILL_ENTRY_NAME}.
+ *
+ * D-WORKFLOW-SKILL-NAME: a THIRD name rule, beside validateOutputName and
+ * validateContractOutputName, and OUTPUT_NAME_RE stays as it is. The literal is
+ * uppercase, which the ordinary rule refuses on purpose for every command, agent and
+ * reference, so relaxing the shared rule would have admitted `Implement.md` as a
+ * command name too, across all four build destinations, to buy a name only this one
+ * file needs. A closed set of one is a literal comparison, not a pattern.
+ *
+ * Every other name is refused with the ordinary rule's diagnosis where it has one
+ * (empty, traversal, separator), so those refusals cannot drift apart from their
+ * originals; a name the ordinary rule accepts is still refused here, as an
+ * invalid-charset name, because only the literal is allowed. The refusal reports the
+ * name AS WRITTEN.
+ */
+export function validateSkillOutputName(name: string): Result<string, OutputNameError> {
+  if (name === WORKFLOW_SKILL_ENTRY_NAME) return Ok(name);
+  const ordinary = validateOutputName(name);
+  return Err(ordinary.ok ? { kind: 'invalid-charset', name } : ordinary.error);
+}
+
 // ---------------------------------------------------------------------------
 // Output directory allowlist
 // ---------------------------------------------------------------------------
@@ -140,8 +182,10 @@ export function validateContractOutputName(name: string): Result<string, OutputN
  * The directory a host declares is what selects its treatment downstream: a
  * `commands` host keeps its frontmatter minus the build-owned key, an `agents`
  * host sheds its whole steering block, and a `skill-refs` host sheds its whole
- * steering block AND fans its body out into one file per operation. Callers
- * dispatch on this discriminant
+ * steering block AND fans its body out into one file per operation. A
+ * `workflow-skill` host is one file of a skill FOLDER (a core `SKILL.md` beside its
+ * reference files); the registry WORKFLOW_FOLDERS says which folder it belongs to and
+ * which file it becomes. Callers dispatch on this discriminant
  * rather than re-deriving the answer from the resolved path, so the allowlist
  * below stays the single place that knows which directory means what.
  *
@@ -149,7 +193,7 @@ export function validateContractOutputName(name: string): Result<string, OutputN
  * new semantics: every exhaustive dispatch over it stops compiling until the new
  * variant is handled.
  */
-export type HostVariant = 'commands' | 'agents' | 'skill-refs';
+export type HostVariant = 'commands' | 'agents' | 'skill-refs' | 'workflow-skill';
 
 interface AllowedOutputDir {
   readonly dir: string;
@@ -162,7 +206,8 @@ interface AllowedOutputDir {
  *
  * `dist/commands` holds compiled slash commands; `dist/agents` holds agents
  * compiled from generator hosts; `dist/skills/git/references` holds the generated
- * `devflow:git` skill references. Adding an entry here is the single place a new
+ * `devflow:git` skill references; `dist/workflows` holds the compiled workflow skill
+ * folders. Adding an entry here is the single place a new
  * build destination becomes legal — and `satisfies` forces that entry to declare
  * a HostVariant, so no destination can arrive without saying how it is treated.
  */
@@ -235,10 +280,33 @@ export const SKILL_REFS_OUTPUT_DIR = `dist/skills/${SKILL_REFS_SKILL_NAME}/refer
 export const COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR =
   `${COMPLIANCE_OFF_OUTPUT_DIR}/skills/${SKILL_REFS_SKILL_NAME}/references`;
 
+/**
+ * The kind folder the workflow skill folders sit in: `dist/workflows`, and
+ * `<variant tree>/workflows` for every other variant key, as `commands` and `agents`
+ * are the kind folders of the prompts.
+ */
+export const WORKFLOW_FOLDERS_KIND = 'workflows';
+
+/**
+ * Repo-relative destination for `workflow-skill` hosts: the root that holds one folder
+ * per registered workflow skill, `dist/workflows/<folder>/…`.
+ *
+ * D-WORKFLOW-FOLDER-BUILD: a host declares this ROOT, never its folder. The folder and
+ * the file inside it come from the registry WORKFLOW_FOLDERS, for the reason a
+ * reference module's operations do: the names are a typed roster, not frontmatter.
+ * The off variants of a folder sit under the trees of the other variant keys
+ * (workflowFoldersRootRelPath), none of which is a destination a host may declare.
+ *
+ * Exported because the build's orphan prune names this tree even when no folder is
+ * registered, which is exactly the case where every folder in it is an orphan.
+ */
+export const WORKFLOW_FOLDERS_OUTPUT_DIR = `dist/${WORKFLOW_FOLDERS_KIND}`;
+
 const ALLOWED_OUTPUT_DIRS = [
   { dir: COMMANDS_OUTPUT_DIR, variant: 'commands' },
   { dir: AGENTS_OUTPUT_DIR, variant: 'agents' },
   { dir: SKILL_REFS_OUTPUT_DIR, variant: 'skill-refs' },
+  { dir: WORKFLOW_FOLDERS_OUTPUT_DIR, variant: 'workflow-skill' },
 ] as const satisfies readonly AllowedOutputDir[];
 
 /**
@@ -1356,4 +1424,522 @@ export function splitSectionArms(
     return Err({ kind: 'empty-variant', op, variant: 'compliance-off' });
   }
   return Ok({ on, complianceOff });
+}
+
+// ---------------------------------------------------------------------------
+// Workflow skill folders: the registry, the files of each variant key, the build id
+// ---------------------------------------------------------------------------
+
+/** The compiled name of a folder's core host: the skill's entry file. */
+export const WORKFLOW_SKILL_FILE = `${WORKFLOW_SKILL_ENTRY_NAME}.md`;
+
+/**
+ * The subfolder of reference files that sit outside the build id: they are read on
+ * demand by link, not as part of the skill's own text, and they ship byte-equal to
+ * their compiled body.
+ */
+export const WORKFLOW_REFERENCES_DIR = 'references';
+
+/** A reference file of a workflow skill folder: one MDS host, and the file it becomes. */
+export interface WorkflowFolderReference {
+  /** Repo-relative POSIX path of the MDS source. */
+  readonly source: string;
+  /** POSIX path of the compiled file inside the folder: `<name>.md` or `references/<name>.md`. */
+  readonly file: string;
+  /**
+   * True: the folder of a variant key that turns compliance off does not hold this file.
+   * The one owner of that omission, as complianceOffOmittedRelPaths is for the git
+   * references: the build plans the file's destination as absent for those keys, and
+   * the per-key file list (workflowFolderFiles) leaves it out, from this one flag.
+   */
+  readonly omittedWhenComplianceOff?: boolean;
+}
+
+/** One workflow skill folder: its name, its core host, and its reference hosts. */
+export interface WorkflowFolder {
+  /** The folder name under every workflow tree. */
+  readonly name: string;
+  /** Repo-relative POSIX path of the core host's source; it compiles to {@link WORKFLOW_SKILL_FILE}. */
+  readonly core: string;
+  /** The reference hosts, in registry order. */
+  readonly references: readonly WorkflowFolderReference[];
+}
+
+/** One host of a folder, core or reference, in the uniform shape the build plans from. */
+export interface WorkflowFolderHost {
+  readonly source: string;
+  /** POSIX path of the compiled file inside the folder. */
+  readonly file: string;
+  readonly role: 'core' | 'reference';
+  readonly omittedWhenComplianceOff: boolean;
+}
+
+/**
+ * The workflow skill folders this build compiles.
+ *
+ * D-WORKFLOW-FOLDER-BUILD: the set is empty, and the build layer ships with it empty.
+ * No host in src/assets becomes a folder until a folder is registered here, so every
+ * file the build wrote before is byte-identical. A host that declares the workflow
+ * root without a row here is refused, which is what keeps a folder from appearing by
+ * accident. The registry is a typed roster rather than frontmatter for the reason the
+ * git reference modules' roster is: the folder and file names are decided in one
+ * reviewed place.
+ */
+export const WORKFLOW_FOLDERS: readonly WorkflowFolder[] = [];
+
+/** Every host of a folder, the core first, then the references in registry order. */
+export function workflowFolderHosts(folder: WorkflowFolder): readonly WorkflowFolderHost[] {
+  return [
+    { source: folder.core, file: WORKFLOW_SKILL_FILE, role: 'core', omittedWhenComplianceOff: false },
+    ...folder.references.map((ref): WorkflowFolderHost => ({
+      source: ref.source,
+      file: ref.file,
+      role: 'reference',
+      omittedWhenComplianceOff: ref.omittedWhenComplianceOff === true,
+    })),
+  ];
+}
+
+/** The host a repo-relative source path is registered as, and its folder; null when no folder lists it. */
+export function findWorkflowFolderHost(
+  folders: readonly WorkflowFolder[],
+  source: string,
+): { readonly folder: WorkflowFolder; readonly host: WorkflowFolderHost } | null {
+  for (const folder of folders) {
+    const host = workflowFolderHosts(folder).find(h => h.source === source);
+    if (host !== undefined) return { folder, host };
+  }
+  return null;
+}
+
+export type WorkflowFolderError =
+  | { kind: 'malformed'; at: string }
+  | { kind: 'bad-folder-name'; folder: string; error: OutputNameError }
+  | { kind: 'duplicate-folder'; folder: string }
+  | { kind: 'bad-source'; folder: string; source: string }
+  | { kind: 'duplicate-source'; source: string }
+  | { kind: 'bad-file'; folder: string; file: string; error: OutputNameError }
+  | { kind: 'duplicate-file'; folder: string; file: string };
+
+/**
+ * A repo-relative POSIX `.mds` path that stays inside the repo: no backslash, no
+ * leading slash, no dot segment, spelled canonically.
+ */
+function isRepoRelativeMdsSource(source: string): boolean {
+  return source.endsWith('.mds')
+    && !source.includes('\\')
+    && !path.posix.isAbsolute(source)
+    && !source.startsWith('../')
+    && path.posix.normalize(source) === source;
+}
+
+/**
+ * Validate the compiled name of a reference file: `<name>.md` or `references/<name>.md`,
+ * with the ordinary output-name rule on the stem. `SKILL` is refused by that rule (it is
+ * uppercase), so the entry file belongs to the core host alone.
+ */
+function validateWorkflowReferenceFile(file: string): Result<string, OutputNameError> {
+  const prefix = `${WORKFLOW_REFERENCES_DIR}/`;
+  const bare = file.startsWith(prefix) ? file.slice(prefix.length) : file;
+  if (!bare.endsWith('.md')) return Err({ kind: 'invalid-charset', name: file });
+  const stem = validateOutputName(bare.slice(0, -'.md'.length));
+  if (stem.ok) return Ok(file);
+  return Err(stem.error.kind === 'empty' ? { kind: 'empty' } : { ...stem.error, name: file });
+}
+
+/**
+ * Check a registry: every folder and file name is safe to join onto a build
+ * destination, every source is a repo-relative `.mds` path, and no folder, source or
+ * file is listed twice.
+ *
+ * Total and pure. Each loop is bounded by the registry it is given.
+ */
+export function checkWorkflowFolders(
+  folders: readonly WorkflowFolder[],
+): Result<readonly WorkflowFolder[], WorkflowFolderError> {
+  const folderNames = new Set<string>();
+  const sources = new Set<string>();
+  for (const folder of folders) {
+    const named = validateOutputName(folder.name);
+    if (!named.ok) return Err({ kind: 'bad-folder-name', folder: folder.name, error: named.error });
+    if (folderNames.has(folder.name)) return Err({ kind: 'duplicate-folder', folder: folder.name });
+    folderNames.add(folder.name);
+
+    const files = new Set<string>();
+    for (const host of workflowFolderHosts(folder)) {
+      if (!isRepoRelativeMdsSource(host.source)) {
+        return Err({ kind: 'bad-source', folder: folder.name, source: host.source });
+      }
+      if (sources.has(host.source)) return Err({ kind: 'duplicate-source', source: host.source });
+      sources.add(host.source);
+
+      if (host.role === 'reference') {
+        const file = validateWorkflowReferenceFile(host.file);
+        if (!file.ok) return Err({ kind: 'bad-file', folder: folder.name, file: host.file, error: file.error });
+      }
+      if (files.has(host.file)) return Err({ kind: 'duplicate-file', folder: folder.name, file: host.file });
+      files.add(host.file);
+    }
+  }
+  return Ok(folders);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parseWorkflowReference(value: unknown, at: string): Result<WorkflowFolderReference, WorkflowFolderError> {
+  if (!isRecord(value)) return Err({ kind: 'malformed', at });
+  const { source, file, omittedWhenComplianceOff } = value;
+  if (typeof source !== 'string') return Err({ kind: 'malformed', at: `${at}.source` });
+  if (typeof file !== 'string') return Err({ kind: 'malformed', at: `${at}.file` });
+  if (omittedWhenComplianceOff !== undefined && typeof omittedWhenComplianceOff !== 'boolean') {
+    return Err({ kind: 'malformed', at: `${at}.omittedWhenComplianceOff` });
+  }
+  return Ok(omittedWhenComplianceOff === undefined ? { source, file } : { source, file, omittedWhenComplianceOff });
+}
+
+/**
+ * Parse a registry from untrusted data (JSON that crossed a process boundary) and
+ * check it: the shape first, then {@link checkWorkflowFolders}. Pure; a refusal
+ * names the path of the first malformed field.
+ */
+export function parseWorkflowFolders(value: unknown): Result<readonly WorkflowFolder[], WorkflowFolderError> {
+  if (!Array.isArray(value)) return Err({ kind: 'malformed', at: '$' });
+  const folders: WorkflowFolder[] = [];
+  for (const [index, entry] of value.entries()) {
+    const at = `$[${index}]`;
+    if (!isRecord(entry)) return Err({ kind: 'malformed', at });
+    const { name, core, references } = entry;
+    if (typeof name !== 'string') return Err({ kind: 'malformed', at: `${at}.name` });
+    if (typeof core !== 'string') return Err({ kind: 'malformed', at: `${at}.core` });
+    if (!Array.isArray(references)) return Err({ kind: 'malformed', at: `${at}.references` });
+    const parsed: WorkflowFolderReference[] = [];
+    for (const [refIndex, ref] of references.entries()) {
+      const result = parseWorkflowReference(ref, `${at}.references[${refIndex}]`);
+      if (!result.ok) return Err(result.error);
+      parsed.push(result.value);
+    }
+    folders.push({ name, core, references: parsed });
+  }
+  return checkWorkflowFolders(folders);
+}
+
+/** Render a registry refusal as one line a person can act on. */
+export function describeWorkflowFolderError(error: WorkflowFolderError): string {
+  switch (error.kind) {
+    case 'malformed':
+      return `the workflow folder registry is malformed at ${error.at}`;
+    case 'bad-folder-name':
+      return `workflow folder name '${error.folder}' is refused (${error.error.kind})`;
+    case 'duplicate-folder':
+      return `workflow folder '${error.folder}' is registered twice`;
+    case 'bad-source':
+      return `workflow folder '${error.folder}' lists '${error.source}', which is not a repo-relative .mds path`;
+    case 'duplicate-source':
+      return `the source '${error.source}' is listed twice in the workflow folder registry`;
+    case 'bad-file':
+      return `workflow folder '${error.folder}' names the file '${error.file}', which is refused (${error.error.kind})`;
+    case 'duplicate-file':
+      return `workflow folder '${error.folder}' names the file '${error.file}' twice`;
+    default: {
+      const unhandled: never = error;
+      return `unhandled workflow folder refusal ${JSON.stringify(unhandled)}`;
+    }
+  }
+}
+
+/** A folder is complete for every key, so the key a machine reads is the one for its switches alone. */
+const FOLDER_ARMS = { curation: true, compliance: true } as const;
+
+/**
+ * The variant key of the folder a machine with these switches reads.
+ *
+ * Unlike a prompt, a folder is complete under every key (a byte copy of the on text
+ * where no arm applies), so the key follows the switches alone and never depends on
+ * which arms a file carries. The mapping is machineVariantKey's, with every arm assumed
+ * present, so the key table has one owner.
+ */
+export function workflowFolderKey(switches: VariantSwitches): VariantKey {
+  return machineVariantKey(switches, FOLDER_ARMS);
+}
+
+/** The keys whose folder omits the compliance-gated files: the ones that turn compliance off. */
+const COMPLIANCE_OFF_KEYS: ReadonlySet<VariantKey> = new Set(
+  [true, false].map(curation => workflowFolderKey({ curation, compliance: false })),
+);
+
+/**
+ * The files one variant key's folder holds, in registry order, the core first.
+ *
+ * The one owner of "which files does this key hold": the build plans a file's
+ * destination as absent exactly when it is not listed here, and checks each key's
+ * folder against this list. A key that lacks a file of its own list fails the build;
+ * a file the key's list leaves out is never required.
+ */
+export function workflowFolderFiles(folder: WorkflowFolder, key: VariantKey): readonly string[] {
+  const complianceOff = COMPLIANCE_OFF_KEYS.has(key);
+  return workflowFolderHosts(folder)
+    .filter(host => !(complianceOff && host.omittedWhenComplianceOff))
+    .map(host => host.file);
+}
+
+/** Repo-relative POSIX root of the folders of one variant key: `dist/workflows`, or `<variant tree>/workflows`. */
+export function workflowFoldersRootRelPath(key: VariantKey): string {
+  return key === 'on' ? WORKFLOW_FOLDERS_OUTPUT_DIR : `${OFF_OUTPUT_DIRS[key]}/${WORKFLOW_FOLDERS_KIND}`;
+}
+
+/** Repo-relative POSIX path of one file of one folder under one variant key. */
+export function workflowFolderRelPath(key: VariantKey, folder: string, file: string): string {
+  return `${workflowFoldersRootRelPath(key)}/${folder}/${file}`;
+}
+
+/** Whether a file of a folder carries the build id. The reference files are outside it. */
+export function isStampedWorkflowFile(file: string): boolean {
+  return !file.startsWith(`${WORKFLOW_REFERENCES_DIR}/`);
+}
+
+// --- Build id ---------------------------------------------------------------
+
+/** One compiled file of a folder: its path inside the folder, and its text. */
+export interface CompiledFolderFile {
+  readonly file: string;
+  readonly body: string;
+}
+
+/** Length of the build id, in hex digits. */
+export const BUILD_ID_LENGTH = 12;
+
+/** The stamp as a heading carries it: a suffix on the first heading line. */
+const BUILD_STAMP_SUFFIX_RE = new RegExp(` \\[build ([0-9a-f]{${BUILD_ID_LENGTH}})\\]$`);
+
+function byCodeUnit(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
+ * The build id of one folder under one variant key: the first {@link BUILD_ID_LENGTH}
+ * hex digits of the SHA-256 over the folder's compiled bodies as they stand BEFORE the
+ * stamp, sorted by file name.
+ *
+ * D-BUILD-ID: one id per folder and key, and nothing else goes into it: no timestamp,
+ * no per-file hash. The same sources therefore give the same id on every machine and
+ * every run, and any change to any file of the folder moves it. The digest covers
+ * every file of the key's folder, the reference files included, so a changed reference
+ * moves the id of its folder; only the STAMP skips them (isStampedWorkflowFile), which
+ * keeps those files byte-equal to their compiled bodies.
+ *
+ * The id can be recomputed from a stamped folder. The stamp drops the blanks that end
+ * the first heading line, so a stamped file enters the digest in that same form
+ * ({@link stampReadyBody}) and {@link unstampBuildId} gives back the exact text that was
+ * hashed. A body whose heading ends in blanks and one whose heading does not therefore
+ * share an id, as they share their stamped text.
+ *
+ * Each file enters the digest as its name, its length in bytes, then its body, each
+ * on a line of its own. The length makes the framing injective: two different sets of
+ * files cannot produce one byte stream by moving text across a file boundary.
+ */
+export function workflowBuildId(files: readonly CompiledFolderFile[]): string {
+  const hash = createHash('sha256');
+  for (const { file, body } of [...files].sort((a, b) => byCodeUnit(a.file, b.file))) {
+    const hashed = isStampedWorkflowFile(file) ? stampReadyBody(body) : body;
+    hash.update(`${file}\n${Buffer.byteLength(hashed, 'utf8')}\n`);
+    hash.update(hashed, 'utf8');
+    hash.update('\n');
+  }
+  return hash.digest('hex').slice(0, BUILD_ID_LENGTH);
+}
+
+/** The span of the first heading line of a text, as offsets into it (end excludes the line break). */
+interface HeadingSpan {
+  readonly start: number;
+  readonly end: number;
+}
+
+const FENCE_RE = /^ {0,3}(`{3,}|~{3,})/;
+const HEADING_RE = /^#{1,6}[ \t]+\S/;
+
+/**
+ * Find the first ATX heading line, skipping a leading frontmatter block and every
+ * fenced code block, so a `# comment` in either is never mistaken for it. One pass over
+ * the lines, so the bound is the text's own length.
+ */
+function locateFirstHeading(text: string): HeadingSpan | null {
+  const lines = text.split('\n');
+  let inFrontmatter = lines[0]?.replace(/\r$/, '') === '---';
+  let fence: string | null = null;
+  let offset = 0;
+  for (const [index, raw] of lines.entries()) {
+    const line = raw.replace(/\r$/, '');
+    const start = offset;
+    offset += raw.length + 1;
+    if (inFrontmatter) {
+      if (index > 0 && line === '---') inFrontmatter = false;
+      continue;
+    }
+    const opened = FENCE_RE.exec(line);
+    if (opened !== null) {
+      const marker = opened[1];
+      if (fence === null) fence = marker;
+      else if (marker[0] === fence[0] && marker.length >= fence.length) fence = null;
+      continue;
+    }
+    if (fence === null && HEADING_RE.test(line)) return { start, end: start + line.length };
+  }
+  return null;
+}
+
+export type BuildStampError =
+  | { kind: 'no-heading' }
+  | { kind: 'already-stamped'; id: string };
+
+/** The offset where the text of a heading line ends: its end, less the blanks that close it. */
+function headingTextEnd(text: string, heading: HeadingSpan): number {
+  return heading.start + text.slice(heading.start, heading.end).replace(/[ \t]+$/, '').length;
+}
+
+/**
+ * A compiled body in the form the stamp leaves it, before the suffix: the blanks that
+ * end the first heading line dropped. A body with no heading is returned as it is.
+ * {@link stampBuildId} writes the suffix after this text and {@link unstampBuildId}
+ * returns this text, which is what lets the build id be recomputed from a stamped file.
+ */
+function stampReadyBody(body: string): string {
+  const heading = locateFirstHeading(body);
+  if (heading === null) return body;
+  return `${body.slice(0, headingTextEnd(body, heading))}${body.slice(heading.end)}`;
+}
+
+/**
+ * Stamp a build id into the first heading line of a compiled body, as the suffix
+ * ` [build <id>]`.
+ *
+ * D-BUILD-ID: the heading is where a reader of the file sees the id first, and a
+ * suffix leaves the heading text, and every anchor made from it, as written. A body
+ * with no heading has nowhere to carry the id and is refused, and so is a heading that
+ * already carries a stamp, which would otherwise hide a stale one behind the new one.
+ * The blanks that end the heading line are dropped, so the suffix follows the text
+ * directly; {@link unstampBuildId} undoes the stamp up to that one change.
+ */
+export function stampBuildId(body: string, id: string): Result<string, BuildStampError> {
+  const heading = locateFirstHeading(body);
+  if (heading === null) return Err({ kind: 'no-heading' });
+  const existing = BUILD_STAMP_SUFFIX_RE.exec(body.slice(heading.start, heading.end));
+  if (existing !== null) return Err({ kind: 'already-stamped', id: existing[1] });
+  return Ok(`${body.slice(0, headingTextEnd(body, heading))} [build ${id}]${body.slice(heading.end)}`);
+}
+
+export type BuildIdReadError = { kind: 'no-heading' } | { kind: 'no-stamp' };
+
+/** Read the build id out of the first heading line of a stamped file. */
+export function readBuildId(text: string): Result<string, BuildIdReadError> {
+  const heading = locateFirstHeading(text);
+  if (heading === null) return Err({ kind: 'no-heading' });
+  const stamp = BUILD_STAMP_SUFFIX_RE.exec(text.slice(heading.start, heading.end));
+  return stamp === null ? Err({ kind: 'no-stamp' }) : Ok(stamp[1]);
+}
+
+/**
+ * Take the stamp off a stamped file: the text without the suffix on its first heading
+ * line, and the id the suffix carried.
+ *
+ * The inverse of {@link stampBuildId} on a body whose heading does not end in blanks
+ * (a heading that does comes back without them, which is the form the build id is taken
+ * over). Only the first heading is read, so a stamp-like text elsewhere in the file stays.
+ */
+export function unstampBuildId(text: string): Result<{ readonly body: string; readonly id: string }, BuildIdReadError> {
+  const heading = locateFirstHeading(text);
+  if (heading === null) return Err({ kind: 'no-heading' });
+  const stamp = BUILD_STAMP_SUFFIX_RE.exec(text.slice(heading.start, heading.end));
+  if (stamp === null) return Err({ kind: 'no-stamp' });
+  return Ok({ body: `${text.slice(0, heading.end - stamp[0].length)}${text.slice(heading.end)}`, id: stamp[1] });
+}
+
+export type BuildIdCheckError =
+  | { kind: 'no-stamped-file' }
+  | { kind: 'unstamped'; file: string; reason: BuildIdReadError['kind'] }
+  | { kind: 'mixed-ids'; ids: ReadonlyArray<{ readonly file: string; readonly id: string }> }
+  | { kind: 'id-mismatch'; stamped: string; recomputed: string };
+
+/**
+ * The shared-id check of a folder: every stamped file of one folder and key carries the
+ * same build id. Returns that id. It reads the stamps and nothing else; it does not
+ * recompute the id from the files, and {@link verifyFolderBuildId} does.
+ *
+ * The reference files are outside it. A file with no heading or no stamp is refused by
+ * name, and two ids are refused with every file's id listed, so a folder that mixes
+ * files of two builds (an install that stopped half-way, a stale file copied in) stops
+ * the check instead of passing as one skill.
+ */
+export function checkFolderBuildIds(files: readonly CompiledFolderFile[]): Result<string, BuildIdCheckError> {
+  const ids: Array<{ file: string; id: string }> = [];
+  for (const { file, body } of files) {
+    if (!isStampedWorkflowFile(file)) continue;
+    const read = readBuildId(body);
+    if (!read.ok) return Err({ kind: 'unstamped', file, reason: read.error.kind });
+    ids.push({ file, id: read.value });
+  }
+  if (ids.length === 0) return Err({ kind: 'no-stamped-file' });
+  const first = ids[0].id;
+  return ids.every(entry => entry.id === first) ? Ok(first) : Err({ kind: 'mixed-ids', ids });
+}
+
+/**
+ * The check a reader of a folder makes: the shared-id check ({@link checkFolderBuildIds}),
+ * then the id recomputed over the unstamped stamped files and the reference bodies as
+ * they stand, which must be the id the stamps carry. Returns that id.
+ *
+ * Every file of the key's folder must be in `files`, because the id covers them all. A
+ * folder with one stamped file, or a reference file of another build, no longer passes
+ * on the stamps alone: its files hash to another id. The check holds for a folder as
+ * the build wrote it. It does not hold against someone who edits a file and the stamp
+ * together, since the id is a plain digest and not a signature.
+ */
+export function verifyFolderBuildId(files: readonly CompiledFolderFile[]): Result<string, BuildIdCheckError> {
+  const shared = checkFolderBuildIds(files);
+  if (!shared.ok) return shared;
+  const unstamped: CompiledFolderFile[] = [];
+  for (const { file, body } of files) {
+    if (!isStampedWorkflowFile(file)) {
+      unstamped.push({ file, body });
+      continue;
+    }
+    const read = unstampBuildId(body);
+    if (!read.ok) return Err({ kind: 'unstamped', file, reason: read.error.kind });
+    unstamped.push({ file, body: read.value.body });
+  }
+  const recomputed = workflowBuildId(unstamped);
+  return recomputed === shared.value ? Ok(shared.value) : Err({ kind: 'id-mismatch', stamped: shared.value, recomputed });
+}
+
+/** Render a stamp refusal as one line a person can act on. */
+export function describeBuildStampError(error: BuildStampError): string {
+  switch (error.kind) {
+    case 'no-heading':
+      return 'it has no heading line to carry the build id; open the file with a heading';
+    case 'already-stamped':
+      return `its first heading already carries a build stamp (${error.id}); the build writes the stamp itself`;
+    default: {
+      const unhandled: never = error;
+      return `unhandled build stamp refusal ${JSON.stringify(unhandled)}`;
+    }
+  }
+}
+
+/** Render a build id check refusal as one line a person can act on. */
+export function describeBuildIdCheckError(error: BuildIdCheckError): string {
+  switch (error.kind) {
+    case 'no-stamped-file':
+      return 'the folder holds no file that carries a build id';
+    case 'unstamped':
+      return `${error.file} has no build id (${error.reason})`;
+    case 'mixed-ids':
+      return `the folder mixes build ids: ${error.ids.map(entry => `${entry.file} ${entry.id}`).join(', ')}`;
+    case 'id-mismatch':
+      return `the files of the folder hash to build id ${error.recomputed}, but the stamps carry ${error.stamped}; a file is from another build or was changed`;
+    default: {
+      const unhandled: never = error;
+      return `unhandled build id refusal ${JSON.stringify(unhandled)}`;
+    }
+  }
 }

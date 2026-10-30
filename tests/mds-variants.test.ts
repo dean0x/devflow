@@ -15,7 +15,7 @@
  *      canonical-declaration requirement.
  *   2c. The variant trees (dist/curation-off, dist/compliance-off,
  *      dist/curation-compliance-off) are never an output dir: the allowlist stays the
- *      three shipped directories and no host declares another.
+ *      four shipped directories and no host declares another.
  *   3. Result error-union completeness — every declared error kind is reachable
  *      from a test input, and no input produces a kind outside the union.
  *   4. expandVariants — the flat (module, op) pair list, its minimum length, and
@@ -25,6 +25,11 @@
  *   6. The shipped registry — every provider directory it names has a module on
  *      disk and every module on disk has a row, each pointing at a real source
  *      path under src/assets/mds/.
+ *   7. Workflow skill folders (#675 PR A; TP-63) — the `workflow-skill` host variant,
+ *      the third name rule (the literal SKILL), the folder registry and its
+ *      refusals, the files each variant key holds, and the build id (workflowBuildId,
+ *      stampBuildId, readBuildId, checkFolderBuildIds). The build side, on a fixture,
+ *      is tests/build-mds-workflow-folder.test.ts.
  *
  * Hostile inputs pinned here are the same ones scripts/build-mds.ts must reject
  * at build time (see tests/build-mds-generator-hosts.test.ts for the subprocess
@@ -64,11 +69,37 @@ import {
   complianceOffOmittedRelPaths,
   describePostingOpsError,
   splitSectionArms,
+  BUILD_ID_LENGTH,
+  WORKFLOW_FOLDERS,
+  WORKFLOW_FOLDERS_OUTPUT_DIR,
+  WORKFLOW_SKILL_ENTRY_NAME,
+  WORKFLOW_SKILL_FILE,
+  checkFolderBuildIds,
+  checkWorkflowFolders,
+  describeBuildIdCheckError,
+  describeBuildStampError,
+  describeWorkflowFolderError,
+  findWorkflowFolderHost,
+  isStampedWorkflowFile,
+  parseWorkflowFolders,
+  readBuildId,
+  stampBuildId,
+  unstampBuildId,
+  validateSkillOutputName,
+  verifyFolderBuildId,
+  workflowBuildId,
+  workflowFolderFiles,
+  workflowFolderHosts,
+  workflowFolderKey,
+  workflowFolderRelPath,
+  workflowFoldersRootRelPath,
   type OutputNameError,
   type OutputDirError,
   type HostVariant,
   type VariantModule,
+  type WorkflowFolder,
 } from '../src/core/mds-variants.js';
+import { compiledWorkflowFoldersDir, workflowFoldersSourceDir } from '../src/core/assets.js';
 import { ALL_MDS_HOSTS, POSTING_OPERATIONS } from './fixtures/mds-manifest.js';
 import { walkFiles } from './helpers.js';
 import {
@@ -76,6 +107,7 @@ import {
   COMPLIANCE_OFF_OUTPUT_DIR,
   CURATION_OFF_OUTPUT_DIR,
   LEGACY_OFF_OUTPUT_DIR,
+  VARIANT_KEYS,
 } from '../src/core/curation-variants.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
@@ -309,6 +341,7 @@ describe('resolveOutputDir (host variant)', () => {
     expect(variants.get('dist/commands')).toBe('commands');
     expect(variants.get('dist/agents')).toBe('agents');
     expect(variants.get(SKILL_REFS_OUTPUT_DIR)).toBe('skill-refs');
+    expect(variants.get(WORKFLOW_FOLDERS_OUTPUT_DIR)).toBe('workflow-skill');
   });
 
   it('every allowlisted directory carries a distinct variant (no two share a strip)', () => {
@@ -370,8 +403,13 @@ describe('the variant trees are not output dirs (TP-7)', () => {
     return found;
   }
 
-  it('the allowlist is the three shipped directories, in order, and nothing else', () => {
-    expect([...ALLOWED_OUTPUT_DIR_NAMES]).toEqual(['dist/commands', 'dist/agents', 'dist/skills/git/references']);
+  it('the allowlist is the four shipped directories, in order, and nothing else', () => {
+    expect([...ALLOWED_OUTPUT_DIR_NAMES]).toEqual([
+      'dist/commands',
+      'dist/agents',
+      'dist/skills/git/references',
+      'dist/workflows',
+    ]);
   });
 
   it('no variant tree, and no kind folder inside one, is on the allowlist', () => {
@@ -388,9 +426,19 @@ describe('the variant trees are not output dirs (TP-7)', () => {
     expect(declared.length, 'the scan found no host: it is not reading src/assets').toBeGreaterThan(0);
     const outside = declared.filter(d => !ALLOWED_OUTPUT_DIR_NAMES.includes(d.dir));
     expect(outside, 'a host declares an output-dir the allowlist does not name').toEqual([]);
-    for (const dir of ALLOWED_OUTPUT_DIR_NAMES) {
+    // The workflow root has a host only once a folder is registered: PR A ships the build
+    // layer with an empty registry, so no shipped host declares it yet.
+    const needsHost = ALLOWED_OUTPUT_DIR_NAMES.filter(
+      dir => dir !== WORKFLOW_FOLDERS_OUTPUT_DIR || WORKFLOW_FOLDERS.length > 0,
+    );
+    expect(needsHost.length, 'every allowlisted directory but the workflow root needs a host').toBeGreaterThanOrEqual(3);
+    for (const dir of needsHost) {
       expect(declared.some(d => d.dir === dir), `no host declares ${dir}`).toBe(true);
     }
+    expect(
+      declared.some(d => d.dir === WORKFLOW_FOLDERS_OUTPUT_DIR),
+      'a host declares the workflow root while the registry is empty: the build would refuse it',
+    ).toBe(WORKFLOW_FOLDERS.length > 0);
   });
 
   it('known-bad probe: a host that declares a variant tree is reported, a host that declares a shipped one is not', () => {
@@ -1062,6 +1110,536 @@ describe('validateContractOutputName — the narrow underscore allowance', () =>
     for (const hostile of ['_../etc/passwd', '_./x', '_a\\b']) {
       expect(validateContractOutputName(hostile).ok, `"${hostile}" must be refused`).toBe(false);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. Workflow skill folders (#675 PR A; TP-63)
+// ---------------------------------------------------------------------------
+//
+// The build side of these (a fixture folder compiled end to end) is
+// tests/build-mds-workflow-folder.test.ts; this section holds the pure core.
+
+describe('the workflow-skill host variant (TP-63)', () => {
+  it('dist/workflows is allowlisted and selects a variant of its own', () => {
+    expect(ALLOWED_OUTPUT_DIR_NAMES).toContain(WORKFLOW_FOLDERS_OUTPUT_DIR);
+    const resolved = valueOf(resolveOutputDir(ROOT, WORKFLOW_FOLDERS_OUTPUT_DIR));
+    expect(resolved.variant).toBe('workflow-skill');
+    expect(resolved.abs).toBe(path.join(ROOT, 'dist', 'workflows'));
+  });
+
+  it('only the root is a destination: a folder under it, a variant tree and a trailing slash are refused', () => {
+    const REFUSED: ReadonlyArray<readonly [string, OutputDirError['kind']]> = [
+      ['dist/workflows/implement', 'not-allowlisted'],
+      ['dist/curation-off/workflows', 'not-allowlisted'],
+      ['dist/compliance-off/workflows', 'not-allowlisted'],
+      ['dist/curation-compliance-off/workflows', 'not-allowlisted'],
+      ['dist/workflows/', 'non-canonical'],
+    ];
+    for (const [declared, kind] of REFUSED) {
+      expect(errorOf(resolveOutputDir(ROOT, declared)).kind, declared).toBe(kind);
+    }
+  });
+
+  it('OUTPUT_NAME_RE is unchanged: the ordinary rule still refuses the literal SKILL and any uppercase', () => {
+    expect(errorOf(validateOutputName(WORKFLOW_SKILL_ENTRY_NAME))).toEqual({ kind: 'invalid-charset', name: 'SKILL' });
+    expect(errorOf(validateOutputName('Skill')).kind).toBe('invalid-charset');
+    expect(validateOutputName('implement')).toEqual({ ok: true, value: 'implement' });
+    expect(errorOf(validateContractOutputName('_SKILL')).kind).toBe('invalid-charset');
+  });
+});
+
+describe('validateSkillOutputName — the one literal (D-WORKFLOW-SKILL-NAME)', () => {
+  it('accepts exactly SKILL', () => {
+    expect(validateSkillOutputName('SKILL')).toEqual({ ok: true, value: 'SKILL' });
+    expect(WORKFLOW_SKILL_FILE).toBe('SKILL.md');
+  });
+
+  it('refuses every other name, with the ordinary rule diagnosis where it has one and the name as written', () => {
+    const REFUSED: ReadonlyArray<readonly [string, OutputNameError['kind']]> = [
+      ['', 'empty'],
+      ['..', 'dot-segment'],
+      ['../SKILL', 'dot-segment'],
+      ['a/SKILL', 'path-separator'],
+      ['a\\SKILL', 'path-separator'],
+      ['skill', 'invalid-charset'],
+      ['Skill', 'invalid-charset'],
+      ['SKILL.md', 'invalid-charset'],
+      ['SKILL ', 'invalid-charset'],
+      ['SKILLS', 'invalid-charset'],
+      ['implement', 'invalid-charset'],
+    ];
+    expect(REFUSED.length, 'the refusal corpus must be non-empty').toBeGreaterThan(0);
+    for (const [name, kind] of REFUSED) {
+      const error = errorOf(validateSkillOutputName(name));
+      expect(error.kind, `"${name}" must be refused as ${kind}`).toBe(kind);
+      if (error.kind !== 'empty') expect(error.name, 'the refusal names the value as written').toBe(name);
+    }
+  });
+});
+
+describe('the workflow folder registry (D-WORKFLOW-FOLDER-BUILD)', () => {
+  const FOLDER: WorkflowFolder = {
+    name: 'flow',
+    core: 'src/assets/commands/flow/SKILL.mds',
+    references: [
+      { source: 'src/assets/commands/flow/base-note.mds', file: 'base-note.md' },
+      { source: 'src/assets/commands/flow/references/levels.mds', file: 'references/levels.md' },
+      {
+        source: 'src/assets/commands/flow/references/asks.mds',
+        file: 'references/asks.md',
+        omittedWhenComplianceOff: true,
+      },
+    ],
+  };
+
+  it('ships with an empty real set in PR A, and the shipped set is valid', () => {
+    expect(WORKFLOW_FOLDERS).toEqual([]);
+    expect(checkWorkflowFolders(WORKFLOW_FOLDERS).ok).toBe(true);
+  });
+
+  it('lists a folder as a host list: the core first, then the references in registry order', () => {
+    expect(workflowFolderHosts(FOLDER).map(h => [h.role, h.file])).toEqual([
+      ['core', 'SKILL.md'],
+      ['reference', 'base-note.md'],
+      ['reference', 'references/levels.md'],
+      ['reference', 'references/asks.md'],
+    ]);
+    expect(workflowFolderHosts(FOLDER).map(h => h.omittedWhenComplianceOff)).toEqual([false, false, false, true]);
+  });
+
+  it('accepts a well-formed registry, and the empty registry', () => {
+    expect(checkWorkflowFolders([FOLDER])).toEqual({ ok: true, value: [FOLDER] });
+    expect(checkWorkflowFolders([])).toEqual({ ok: true, value: [] });
+  });
+
+  it('finds the folder and host a source is registered as, and nothing for another source', () => {
+    const found = findWorkflowFolderHost([FOLDER], 'src/assets/commands/flow/references/levels.mds');
+    expect(found?.folder.name).toBe('flow');
+    expect(found?.host).toMatchObject({ role: 'reference', file: 'references/levels.md' });
+    expect(findWorkflowFolderHost([FOLDER], 'src/assets/commands/flow/SKILL.mds')?.host.role).toBe('core');
+    expect(findWorkflowFolderHost([FOLDER], 'src/assets/commands/other.mds')).toBeNull();
+  });
+
+  it('refuses a registry that could write outside its tree or two files to one place', () => {
+    const REFUSED: ReadonlyArray<readonly [string, readonly WorkflowFolder[], string]> = [
+      ['an uppercase folder name', [{ ...FOLDER, name: 'Flow' }], 'bad-folder-name'],
+      ['an empty folder name', [{ ...FOLDER, name: '' }], 'bad-folder-name'],
+      ['a nested folder name', [{ ...FOLDER, name: 'a/b' }], 'bad-folder-name'],
+      ['a folder registered twice', [FOLDER, { ...FOLDER, core: 'src/x/SKILL.mds', references: [] }], 'duplicate-folder'],
+      ['a core that is not an .mds file', [{ ...FOLDER, core: 'src/assets/commands/flow/SKILL.md' }], 'bad-source'],
+      ['an absolute source', [{ ...FOLDER, core: '/etc/SKILL.mds' }], 'bad-source'],
+      ['a source that leaves the repo', [{ ...FOLDER, core: '../SKILL.mds' }], 'bad-source'],
+      ['a backslash source', [{ ...FOLDER, core: 'src\\SKILL.mds' }], 'bad-source'],
+      ['a non-canonical source', [{ ...FOLDER, core: 'src/./SKILL.mds' }], 'bad-source'],
+      [
+        'a reference that lists the core source',
+        [{ ...FOLDER, references: [{ source: FOLDER.core, file: 'x.md' }] }],
+        'duplicate-source',
+      ],
+      [
+        'one source in two folders',
+        [FOLDER, { name: 'other', core: FOLDER.references[0].source, references: [] }],
+        'duplicate-source',
+      ],
+      [
+        'a reference named SKILL.md',
+        [{ ...FOLDER, references: [{ source: 'src/a.mds', file: 'SKILL.md' }] }],
+        'bad-file',
+      ],
+      ['a reference that is not .md', [{ ...FOLDER, references: [{ source: 'src/a.mds', file: 'a.txt' }] }], 'bad-file'],
+      ['a reference that climbs', [{ ...FOLDER, references: [{ source: 'src/a.mds', file: '../a.md' }] }], 'bad-file'],
+      [
+        'a reference that climbs inside references/',
+        [{ ...FOLDER, references: [{ source: 'src/a.mds', file: 'references/../a.md' }] }],
+        'bad-file',
+      ],
+      ['a reference nested two deep', [{ ...FOLDER, references: [{ source: 'src/a.mds', file: 'a/b/c.md' }] }], 'bad-file'],
+      [
+        'a reference nested under references/',
+        [{ ...FOLDER, references: [{ source: 'src/a.mds', file: 'references/a/b.md' }] }],
+        'bad-file',
+      ],
+      ['an uppercase reference', [{ ...FOLDER, references: [{ source: 'src/a.mds', file: 'Upper.md' }] }], 'bad-file'],
+      [
+        'one file named twice',
+        [{ ...FOLDER, references: [
+          { source: 'src/a.mds', file: 'same.md' },
+          { source: 'src/b.mds', file: 'same.md' },
+        ] }],
+        'duplicate-file',
+      ],
+    ];
+    expect(REFUSED.length, 'the refusal corpus must be non-empty').toBeGreaterThan(0);
+    for (const [what, folders, kind] of REFUSED) {
+      expect(errorOf(checkWorkflowFolders(folders)).kind, what).toBe(kind);
+    }
+  });
+
+  it('every refusal renders as a line that names what was refused', () => {
+    const lines = [
+      describeWorkflowFolderError({ kind: 'malformed', at: '$[0].name' }),
+      describeWorkflowFolderError({ kind: 'bad-folder-name', folder: 'Flow', error: { kind: 'invalid-charset', name: 'Flow' } }),
+      describeWorkflowFolderError({ kind: 'duplicate-folder', folder: 'flow' }),
+      describeWorkflowFolderError({ kind: 'bad-source', folder: 'flow', source: 'x' }),
+      describeWorkflowFolderError({ kind: 'duplicate-source', source: 'x.mds' }),
+      describeWorkflowFolderError({ kind: 'bad-file', folder: 'flow', file: 'x.txt', error: { kind: 'invalid-charset', name: 'x.txt' } }),
+      describeWorkflowFolderError({ kind: 'duplicate-file', folder: 'flow', file: 'x.md' }),
+    ];
+    expect(new Set(lines).size).toBe(lines.length);
+    expect(lines[0]).toContain('$[0].name');
+    expect(lines[4]).toContain('x.mds');
+  });
+
+  describe('parseWorkflowFolders — the registry as untrusted JSON', () => {
+    it('round-trips a registry through JSON', () => {
+      expect(parseWorkflowFolders(JSON.parse(JSON.stringify([FOLDER])))).toEqual({ ok: true, value: [FOLDER] });
+    });
+
+    it('names the path of the first malformed field', () => {
+      const MALFORMED: ReadonlyArray<readonly [unknown, string]> = [
+        [{}, '$'],
+        ['flow', '$'],
+        [[null], '$[0]'],
+        [[{ core: 'a.mds', references: [] }], '$[0].name'],
+        [[{ name: 'flow', references: [] }], '$[0].core'],
+        [[{ name: 'flow', core: 'a.mds' }], '$[0].references'],
+        [[{ name: 'flow', core: 'a.mds', references: ['x'] }], '$[0].references[0]'],
+        [[{ name: 'flow', core: 'a.mds', references: [{ file: 'x.md' }] }], '$[0].references[0].source'],
+        [[{ name: 'flow', core: 'a.mds', references: [{ source: 'x.mds' }] }], '$[0].references[0].file'],
+        [
+          [{ name: 'flow', core: 'a.mds', references: [{ source: 'x.mds', file: 'x.md', omittedWhenComplianceOff: 'yes' }] }],
+          '$[0].references[0].omittedWhenComplianceOff',
+        ],
+      ];
+      for (const [value, at] of MALFORMED) {
+        expect(errorOf(parseWorkflowFolders(value)), JSON.stringify(value)).toEqual({ kind: 'malformed', at });
+      }
+    });
+
+    it('runs the registry check after the shape check', () => {
+      expect(errorOf(parseWorkflowFolders([{ name: 'Flow', core: 'a.mds', references: [] }])).kind).toBe('bad-folder-name');
+    });
+  });
+});
+
+describe('the files each variant key holds', () => {
+  const FOLDER: WorkflowFolder = {
+    name: 'flow',
+    core: 'src/assets/commands/flow/SKILL.mds',
+    references: [
+      { source: 'src/assets/commands/flow/note.mds', file: 'note.md' },
+      { source: 'src/assets/commands/flow/references/asks.mds', file: 'references/asks.md', omittedWhenComplianceOff: true },
+    ],
+  };
+
+  it('keys follow the machine switches alone', () => {
+    expect(workflowFolderKey({ curation: true, compliance: true })).toBe('on');
+    expect(workflowFolderKey({ curation: false, compliance: true })).toBe('curation-off');
+    expect(workflowFolderKey({ curation: true, compliance: false })).toBe('compliance-off');
+    expect(workflowFolderKey({ curation: false, compliance: false })).toBe('both-off');
+  });
+
+  it('a file flagged for compliance off is held by the keys that keep compliance on, and by no other', () => {
+    expect(workflowFolderFiles(FOLDER, 'on')).toEqual(['SKILL.md', 'note.md', 'references/asks.md']);
+    expect(workflowFolderFiles(FOLDER, 'curation-off')).toEqual(['SKILL.md', 'note.md', 'references/asks.md']);
+    expect(workflowFolderFiles(FOLDER, 'compliance-off')).toEqual(['SKILL.md', 'note.md']);
+    expect(workflowFolderFiles(FOLDER, 'both-off')).toEqual(['SKILL.md', 'note.md']);
+  });
+
+  it('a folder with no flagged file holds the same files under every key', () => {
+    const plain: WorkflowFolder = { ...FOLDER, references: FOLDER.references.map(r => ({ source: r.source, file: r.file })) };
+    for (const key of VARIANT_KEYS) {
+      expect(workflowFolderFiles(plain, key), key).toEqual(['SKILL.md', 'note.md', 'references/asks.md']);
+    }
+  });
+
+  it('places the folders of the on key in dist/workflows and of every other key in its variant tree', () => {
+    expect(workflowFoldersRootRelPath('on')).toBe('dist/workflows');
+    expect(workflowFoldersRootRelPath('curation-off')).toBe(`${CURATION_OFF_OUTPUT_DIR}/workflows`);
+    expect(workflowFoldersRootRelPath('compliance-off')).toBe(`${COMPLIANCE_OFF_OUTPUT_DIR}/workflows`);
+    expect(workflowFoldersRootRelPath('both-off')).toBe(`${BOTH_OFF_OUTPUT_DIR}/workflows`);
+    expect(workflowFolderRelPath('both-off', 'flow', 'references/asks.md'))
+      .toBe('dist/curation-compliance-off/workflows/flow/references/asks.md');
+    expect(new Set(VARIANT_KEYS.map(workflowFoldersRootRelPath)).size, 'two keys share a tree').toBe(VARIANT_KEYS.length);
+  });
+
+  it('only the files outside references/ carry the build id', () => {
+    expect(isStampedWorkflowFile('SKILL.md')).toBe(true);
+    expect(isStampedWorkflowFile('note.md')).toBe(true);
+    expect(isStampedWorkflowFile('references/asks.md')).toBe(false);
+    expect(isStampedWorkflowFile('references-note.md')).toBe(true);
+  });
+});
+
+describe('the source root of the folders a machine reads', () => {
+  const PKG = path.join(path.sep, 'pkg');
+
+  it('is the one tree built for exactly the machine switches, never a list to fall through', () => {
+    expect(workflowFoldersSourceDir({ curation: true, compliance: true }, PKG)).toBe(path.join(PKG, 'dist', 'workflows'));
+    expect(workflowFoldersSourceDir({ curation: false, compliance: true }, PKG))
+      .toBe(path.join(PKG, 'dist', 'curation-off', 'workflows'));
+    expect(workflowFoldersSourceDir({ curation: true, compliance: false }, PKG))
+      .toBe(path.join(PKG, 'dist', 'compliance-off', 'workflows'));
+    expect(workflowFoldersSourceDir({ curation: false, compliance: false }, PKG))
+      .toBe(path.join(PKG, 'dist', 'curation-compliance-off', 'workflows'));
+  });
+
+  it('takes its spelling from the build destination of each key', () => {
+    for (const key of VARIANT_KEYS) {
+      expect(compiledWorkflowFoldersDir(key, PKG), key).toBe(path.join(PKG, ...workflowFoldersRootRelPath(key).split('/')));
+    }
+  });
+});
+
+describe('the build id (D-BUILD-ID)', () => {
+  const FILES = [
+    { file: 'SKILL.md', body: '---\nname: x\n---\n# Flow\n\nText.\n' },
+    { file: 'note.md', body: '# Note\n\nText.\n' },
+    { file: 'references/asks.md', body: '# Asks\n\nText.\n' },
+  ];
+
+  describe('workflowBuildId', () => {
+    it('is twelve hex digits', () => {
+      expect(workflowBuildId(FILES)).toMatch(new RegExp(`^[0-9a-f]{${BUILD_ID_LENGTH}}$`));
+      expect(BUILD_ID_LENGTH).toBe(12);
+    });
+
+    it('depends on the sources alone: the same files give the same id, whatever their order', () => {
+      expect(workflowBuildId([...FILES].reverse())).toBe(workflowBuildId(FILES));
+      expect(workflowBuildId(FILES.map(f => ({ ...f })))).toBe(workflowBuildId(FILES));
+    });
+
+    it('moves when any body, any name, or the set of files changes', () => {
+      const base = workflowBuildId(FILES);
+      const ids = new Set([
+        base,
+        workflowBuildId(FILES.map((f, i) => (i === 0 ? { ...f, body: `${f.body}x` } : f))),
+        workflowBuildId(FILES.map((f, i) => (i === 2 ? { ...f, body: `${f.body}x` } : f))),
+        workflowBuildId(FILES.map((f, i) => (i === 1 ? { ...f, file: 'other.md' } : f))),
+        workflowBuildId(FILES.slice(0, 2)),
+      ]);
+      expect(ids.size, 'a change that left the id alone').toBe(5);
+    });
+
+    it('frames each file, so text moved across a file boundary is a different id', () => {
+      const joined = workflowBuildId([{ file: 'a.md', body: '1\nb.md\n1\n2' }]);
+      const split = workflowBuildId([{ file: 'a.md', body: '1' }, { file: 'b.md', body: '2' }]);
+      expect(joined).not.toBe(split);
+    });
+  });
+
+  describe('stampBuildId and readBuildId', () => {
+    const ID = '0123456789ab';
+
+    it('writes the id as a suffix of the first heading line and changes nothing else', () => {
+      const stamped = valueOf(stampBuildId('# Flow\n\nText.\n\n## Step\n', ID));
+      expect(stamped).toBe(`# Flow [build ${ID}]\n\nText.\n\n## Step\n`);
+      expect(valueOf(readBuildId(stamped))).toBe(ID);
+    });
+
+    it('skips a leading frontmatter block, so a YAML comment is never the heading', () => {
+      const body = '---\nname: x\n# a comment\ndescription: y\n---\n# Flow\n';
+      expect(valueOf(stampBuildId(body, ID))).toBe(`---\nname: x\n# a comment\ndescription: y\n---\n# Flow [build ${ID}]\n`);
+    });
+
+    it('skips fenced code, so a shell comment is never the heading', () => {
+      const body = 'Intro.\n\n```bash\n# not a heading\n```\n\n~~~\n# nor this\n~~~\n\n# Real\n';
+      expect(valueOf(stampBuildId(body, ID))).toContain(`# Real [build ${ID}]`);
+      expect(valueOf(stampBuildId(body, ID))).toContain('# not a heading\n');
+      expect(valueOf(stampBuildId(body, ID))).not.toContain(`# not a heading [build`);
+    });
+
+    it('takes the first heading of any depth, and trims the whitespace the heading ended with', () => {
+      expect(valueOf(stampBuildId('Intro.\n\n### Deep  \n# Later\n', ID))).toBe(`Intro.\n\n### Deep [build ${ID}]\n# Later\n`);
+    });
+
+    it('keeps a CRLF line ending after the stamp', () => {
+      expect(valueOf(stampBuildId('# Flow\r\nText.\r\n', ID))).toBe(`# Flow [build ${ID}]\r\nText.\r\n`);
+      expect(valueOf(readBuildId(`# Flow [build ${ID}]\r\nText.\r\n`))).toBe(ID);
+    });
+
+    it('does not take a hash, a seven-hash line or a heading inside an unclosed fence for a heading', () => {
+      for (const body of ['#hash\n', '####### seven\n', '```\n# open\n', '---\n# only frontmatter\n---\n', '']) {
+        expect(errorOf(stampBuildId(body, ID)), JSON.stringify(body)).toEqual({ kind: 'no-heading' });
+      }
+    });
+
+    it('refuses a heading that already carries a stamp, so a stale id is never hidden behind a new one', () => {
+      expect(errorOf(stampBuildId(`# Flow [build ${ID}]\n`, 'fedcba987654'))).toEqual({ kind: 'already-stamped', id: ID });
+    });
+
+    it('reads no id from an unstamped file or a file with no heading', () => {
+      expect(errorOf(readBuildId('# Flow\n'))).toEqual({ kind: 'no-stamp' });
+      expect(errorOf(readBuildId('Text only.\n'))).toEqual({ kind: 'no-heading' });
+      expect(errorOf(readBuildId('# Flow [build 0123]\n'))).toEqual({ kind: 'no-stamp' });
+      expect(errorOf(readBuildId('# Flow\n\nLater [build 0123456789ab]\n'))).toEqual({ kind: 'no-stamp' });
+    });
+
+    it('renders both refusals', () => {
+      expect(describeBuildStampError({ kind: 'no-heading' })).toContain('no heading');
+      expect(describeBuildStampError({ kind: 'already-stamped', id: ID })).toContain(ID);
+    });
+  });
+
+  describe('checkFolderBuildIds', () => {
+    const stampAll = (id: string, files = FILES): Array<{ file: string; body: string }> =>
+      files.map(f => (isStampedWorkflowFile(f.file) ? { file: f.file, body: valueOf(stampBuildId(f.body, id)) } : f));
+
+    it('returns the one id the stamped files share, and ignores the reference files', () => {
+      expect(valueOf(checkFolderBuildIds(stampAll('0123456789ab')))).toBe('0123456789ab');
+    });
+
+    it('stops on a folder that mixes two builds, and lists every file with its id', () => {
+      const files = stampAll('0123456789ab');
+      files[1] = { file: 'note.md', body: valueOf(stampBuildId(FILES[1].body, 'fedcba987654')) };
+      const refused = errorOf(checkFolderBuildIds(files));
+      expect(refused).toEqual({
+        kind: 'mixed-ids',
+        ids: [{ file: 'SKILL.md', id: '0123456789ab' }, { file: 'note.md', id: 'fedcba987654' }],
+      });
+      expect(describeBuildIdCheckError(refused)).toBe(
+        'the folder mixes build ids: SKILL.md 0123456789ab, note.md fedcba987654',
+      );
+    });
+
+    it('stops on a stamped file with no stamp, by name, and on a folder with nothing to check', () => {
+      const files = stampAll('0123456789ab');
+      files[1] = FILES[1];
+      expect(errorOf(checkFolderBuildIds(files))).toEqual({ kind: 'unstamped', file: 'note.md', reason: 'no-stamp' });
+      expect(errorOf(checkFolderBuildIds([FILES[2]]))).toEqual({ kind: 'no-stamped-file' });
+      expect(errorOf(checkFolderBuildIds([]))).toEqual({ kind: 'no-stamped-file' });
+      expect(describeBuildIdCheckError({ kind: 'no-stamped-file' })).toContain('no file');
+      expect(describeBuildIdCheckError({ kind: 'unstamped', file: 'note.md', reason: 'no-stamp' })).toContain('note.md');
+    });
+
+    it('does not read a stamp in a reference file', () => {
+      const files = stampAll('0123456789ab');
+      files[2] = { file: 'references/asks.md', body: '# Asks [build fedcba987654]\n' };
+      expect(valueOf(checkFolderBuildIds(files))).toBe('0123456789ab');
+    });
+  });
+
+  describe('unstampBuildId', () => {
+    const ID = '0123456789ab';
+
+    it('undoes the stamp: the body as it was, and the id the stamp carried', () => {
+      const bodies = [
+        FILES[0].body,
+        '# Flow\r\nText.\r\n',
+        '---\nname: x\n# a comment\n---\n# Flow\n',
+        '```\n# not a heading\n```\n# Real\n\nText.\n',
+        'Intro.\n\n### Deep\n# Later\n',
+      ];
+      for (const body of bodies) {
+        const unstamped = valueOf(unstampBuildId(valueOf(stampBuildId(body, ID))));
+        expect(unstamped, JSON.stringify(body)).toEqual({ body, id: ID });
+      }
+    });
+
+    it('returns the body without the blanks the stamp dropped from the end of the heading line', () => {
+      const stamped = valueOf(stampBuildId('Intro.\n\n### Deep \t \n# Later\n', ID));
+      expect(valueOf(unstampBuildId(stamped))).toEqual({ body: 'Intro.\n\n### Deep\n# Later\n', id: ID });
+    });
+
+    it('removes the stamp of the first heading only', () => {
+      const text = `# Flow [build ${ID}]\n\n## Step [build fedcba987654]\n`;
+      expect(valueOf(unstampBuildId(text))).toEqual({ body: '# Flow\n\n## Step [build fedcba987654]\n', id: ID });
+    });
+
+    it('refuses a text whose first heading has no stamp, and a text with no heading', () => {
+      expect(errorOf(unstampBuildId('# Flow\n'))).toEqual({ kind: 'no-stamp' });
+      expect(errorOf(unstampBuildId('Text only.\n'))).toEqual({ kind: 'no-heading' });
+      expect(errorOf(unstampBuildId('# Flow\n\nLater [build 0123456789ab]\n'))).toEqual({ kind: 'no-stamp' });
+    });
+  });
+
+  describe('workflowBuildId and the stamp', () => {
+    const stampAll = (id: string, files: ReadonlyArray<{ file: string; body: string }>): Array<{ file: string; body: string }> =>
+      files.map(f => (isStampedWorkflowFile(f.file) ? { file: f.file, body: valueOf(stampBuildId(f.body, id)) } : { ...f }));
+    const unstampAll = (files: ReadonlyArray<{ file: string; body: string }>): Array<{ file: string; body: string }> =>
+      files.map(f => (isStampedWorkflowFile(f.file) ? { file: f.file, body: valueOf(unstampBuildId(f.body)).body } : { ...f }));
+    const withHeading = (index: number, from: string, to: string) =>
+      FILES.map((f, i) => (i === index ? { ...f, body: f.body.replace(from, to) } : f));
+
+    it('does not move when the first heading of a stamped file ends in blanks, because the stamp drops them', () => {
+      expect(workflowBuildId(withHeading(0, '# Flow', '# Flow \t '))).toBe(workflowBuildId(FILES));
+      expect(workflowBuildId(withHeading(1, '# Note', '# Note  '))).toBe(workflowBuildId(FILES));
+    });
+
+    it('moves when a blank changes a reference file, which the stamp does not touch', () => {
+      expect(workflowBuildId(withHeading(2, '# Asks', '# Asks  '))).not.toBe(workflowBuildId(FILES));
+    });
+
+    it('moves when a blank changes anything but the end of the first heading line of a stamped file', () => {
+      expect(workflowBuildId(withHeading(0, 'Text.', 'Text. '))).not.toBe(workflowBuildId(FILES));
+      expect(workflowBuildId(withHeading(0, '# Flow', '#  Flow'))).not.toBe(workflowBuildId(FILES));
+    });
+
+    it('is the id recomputed from the unstamped files of the folder it stamped', () => {
+      for (const files of [FILES, withHeading(0, '# Flow', '# Flow  '), withHeading(1, '# Note', '# Note\t')]) {
+        const id = workflowBuildId(files);
+        expect(workflowBuildId(unstampAll(stampAll(id, files)))).toBe(id);
+      }
+    });
+  });
+
+  describe('verifyFolderBuildId', () => {
+    const stampAll = (id: string, files: ReadonlyArray<{ file: string; body: string }>): Array<{ file: string; body: string }> =>
+      files.map(f => (isStampedWorkflowFile(f.file) ? { file: f.file, body: valueOf(stampBuildId(f.body, id)) } : { ...f }));
+    const stampedBuild = (files: ReadonlyArray<{ file: string; body: string }> = FILES) =>
+      stampAll(workflowBuildId(files), files);
+
+    it('returns the id of a folder whose stamp is the id of its own files', () => {
+      const id = workflowBuildId(FILES);
+      expect(valueOf(verifyFolderBuildId(stampedBuild()))).toBe(id);
+    });
+
+    it('accepts a folder whose only stamped file is the core, with the references of its own build', () => {
+      const files = [FILES[0], FILES[2]];
+      expect(valueOf(verifyFolderBuildId(stampedBuild(files)))).toBe(workflowBuildId(files));
+    });
+
+    it('accepts a folder whose first heading ended in blanks before the stamp', () => {
+      const files = FILES.map((f, i) => (i === 0 ? { ...f, body: f.body.replace('# Flow', '# Flow  ') } : f));
+      expect(valueOf(verifyFolderBuildId(stampedBuild(files)))).toBe(workflowBuildId(files));
+    });
+
+    it('refuses a reference file of another build, and names the stamp and the id of the files', () => {
+      const id = workflowBuildId(FILES);
+      const swapped = stampedBuild().map(f => (f.file === 'references/asks.md' ? { ...f, body: '# Asks\n\nText of another build.\n' } : f));
+      const refused = errorOf(verifyFolderBuildId(swapped));
+      expect(refused.kind).toBe('id-mismatch');
+      if (refused.kind !== 'id-mismatch') throw new Error(JSON.stringify(refused));
+      expect(refused.stamped).toBe(id);
+      expect(refused.recomputed).toMatch(new RegExp(`^[0-9a-f]{${BUILD_ID_LENGTH}}$`));
+      expect(refused.recomputed).not.toBe(id);
+      expect(describeBuildIdCheckError(refused)).toContain(id);
+      expect(describeBuildIdCheckError(refused)).toContain(refused.recomputed);
+    });
+
+    it('refuses the same swap in a folder whose only stamped file is the core', () => {
+      const files = [FILES[0], FILES[2]];
+      const swapped = stampedBuild(files).map(f => (f.file === 'references/asks.md' ? { ...f, body: '# Asks\n\nOther.\n' } : f));
+      expect(errorOf(verifyFolderBuildId(swapped)).kind).toBe('id-mismatch');
+    });
+
+    it('refuses a stamped file edited after the build, a file left out, and a stamp that is the hash of nothing', () => {
+      const edited = stampedBuild().map(f => (f.file === 'note.md' ? { ...f, body: `${f.body}Edited.\n` } : f));
+      expect(errorOf(verifyFolderBuildId(edited)).kind).toBe('id-mismatch');
+      expect(errorOf(verifyFolderBuildId(stampedBuild().slice(0, 2))).kind).toBe('id-mismatch');
+      expect(errorOf(verifyFolderBuildId(stampAll('0123456789ab', FILES))).kind).toBe('id-mismatch');
+    });
+
+    it('keeps the refusals of the shared-id check: mixed ids, an unstamped file, nothing stamped', () => {
+      const mixed = stampedBuild();
+      mixed[1] = { file: 'note.md', body: valueOf(stampBuildId(FILES[1].body, 'fedcba987654')) };
+      expect(errorOf(verifyFolderBuildId(mixed)).kind).toBe('mixed-ids');
+      const unstamped = stampedBuild();
+      unstamped[1] = FILES[1];
+      expect(errorOf(verifyFolderBuildId(unstamped))).toEqual({ kind: 'unstamped', file: 'note.md', reason: 'no-stamp' });
+      expect(errorOf(verifyFolderBuildId([FILES[2]]))).toEqual({ kind: 'no-stamped-file' });
+    });
   });
 });
 

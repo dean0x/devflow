@@ -2,7 +2,7 @@ import { promises as fs, type Dirent } from 'fs';
 import { existsSync } from 'fs';
 import * as path from 'path';
 import type { PluginDefinition } from '../../core/plugins.js';
-import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, buildAssetMaps, prefixSkillName, unprefixSkillName, getAllSkillNames, getAllAgentNames, getAllCommandNames, FEATURE_OWNED_SKILLS, resolveSkillInstallPlan, omitCurationGatedSkills } from '../../core/plugins.js';
+import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, WORKFLOW_FOLDER_NAMES, buildAssetMaps, prefixSkillName, unprefixSkillName, getAllSkillNames, getAllAgentNames, getAllCommandNames, FEATURE_OWNED_SKILLS, resolveSkillInstallPlan, omitCurationGatedSkills, selectedWorkflowFolders, workflowFolderNames } from '../../core/plugins.js';
 import { skillsDir, agentSourceDirs, rulesDir, commandSourceDirs, scriptsDir, compiledSkillRefsDir, skillRefsSourceDir, type AgentSourceDirs, type CommandSourceDirs } from '../../core/assets.js';
 import { getPackageRoot, isContainedIn } from '../../core/paths.js';
 import {
@@ -13,10 +13,11 @@ import {
   requiredComplianceVariantFiles,
 } from '../../core/curation-variants.js';
 import { sweepOrphanedAssets, mdFileName, mdEntryName, type SweepResult } from '../../core/orphan-sweep.js';
-import { generatedReferenceManifest, installedReferenceManifest, PR_HOST_DESTINATION_ROOT, SKILL_REFS_SKILL_NAME, TRACKER_DESTINATION_ROOT } from '../../core/mds-variants.js';
+import { generatedReferenceManifest, installedReferenceManifest, PR_HOST_DESTINATION_ROOT, SKILL_REFS_SKILL_NAME, TRACKER_DESTINATION_ROOT, WORKFLOW_FOLDERS, type WorkflowFolder } from '../../core/mds-variants.js';
 import { sweepOrphanedReferences, MAX_REFERENCE_SWEEP_DEPTH } from '../../core/reference-sweep.js';
 import { complianceOffCopyExclusions, removeComplianceOffFiles } from './compliance-off-files.js';
 import { clearLinkForWrite, directoryState, refuseUnrealFolder, removeReportingLink, unlinkLinkAt, type LinkReport } from './linked-folder.js';
+import { installWorkflowFolder, readWorkflowFolder, type WorkflowFolderFile, type WorkflowFolderRead } from './workflow-folder-install.js';
 import { TRACKER_AGENT_NAME } from './tracker-install.js';
 import { isTrackerStampedAgent } from './tracker-servers.js';
 import { stampAgentTools } from '../../core/agent-frontmatter.js';
@@ -1939,6 +1940,14 @@ export interface FileCopyOptions {
    * no-op so callers with no logger are unaffected; `devflow init` passes its own.
    */
   warn?: (msg: string) => void;
+  /**
+   * The workflow skill folders this install knows (D-WORKFLOW-FOLDER-INSTALL). Defaults to the
+   * real registry, which is empty, so a default install is the install without a folder arm.
+   * A test passes a fixture registry.
+   */
+  workflowFolders?: readonly WorkflowFolder[];
+  /** Package root the folder trees are read from. Defaults to {@link FileCopyOptions.packageRoot}. */
+  workflowFoldersRoot?: string;
 }
 
 /**
@@ -2084,8 +2093,8 @@ export async function resolveSkillSource(
  * validateSkillShadow at install time. This only answers "did the user write
  * one?", which is what dormancy reporting turns on.
  */
-async function listShadowedSkills(devflowDir: string): Promise<string[]> {
-  const registry = new Set(getAllSkillNames());
+async function listShadowedSkills(devflowDir: string, folderWorkflows: ReadonlySet<string>): Promise<string[]> {
+  const registry = new Set(getAllSkillNames(folderWorkflows));
   let entries: string[];
   try {
     entries = await fs.readdir(path.join(devflowDir, 'skills'));
@@ -2165,6 +2174,11 @@ export interface CommandsAndAgentsOptions {
    * Such a link is never written through, whether or not this is given.
    */
   links?: LinkReport;
+  /**
+   * The target-layer set: workflows that ship as skill folders and have no command file, so the
+   * copy skips them. Defaults to the real set, which is empty.
+   */
+  folderWorkflows?: ReadonlySet<string>;
   warn: (msg: string) => void;
 }
 
@@ -2336,11 +2350,13 @@ export async function installCommandsAndAgents(opts: CommandsAndAgentsOptions): 
     agentSourceDirs: opts.agentSourceDirs,
   });
   const commandsTarget = path.join(claudeDir, 'commands', 'devflow');
+  const folderWorkflows = opts.folderWorkflows ?? WORKFLOW_FOLDER_NAMES;
   const commandsSourceNames = new Set<string>();
   for (const plugin of plugins) {
     for (const cmd of plugin.commands) {
       const name = cmd.startsWith('/') ? cmd.slice(1) : cmd;
-      commandsSourceNames.add(name);
+      // D-WORKFLOW-FOLDER-INSTALL: a workflow that ships as a skill folder has no command file.
+      if (!folderWorkflows.has(name)) commandsSourceNames.add(name);
     }
   }
   if (commandsSourceNames.size > 0 && skip.commands !== true) {
@@ -2418,9 +2434,34 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   } = options;
   const packageRoot = options.packageRoot ?? getPackageRoot();
 
+  // D-WORKFLOW-FOLDER-INSTALL: the workflows that ship as skill folders. The default registry is
+  // empty, and with it every folder step below is a no-op over an empty set.
+  const folderRegistry = options.workflowFolders ?? WORKFLOW_FOLDERS;
+  const folderWorkflows = workflowFolderNames(folderRegistry);
+  const folderSwitches = { curation, compliance };
+  const folderFiles = new Map<string, readonly WorkflowFolderFile[]>();
+  /** The files of one registered folder, read once. A failed read is a reason and never a throw. */
+  const readFolder = async (folder: WorkflowFolder): Promise<WorkflowFolderRead> => {
+    const cached = folderFiles.get(folder.name);
+    if (cached !== undefined) return { ok: true, files: cached };
+    const read = await readWorkflowFolder(folder, folderSwitches, options.workflowFoldersRoot ?? packageRoot);
+    if (read.ok) folderFiles.set(folder.name, read.files);
+    return read;
+  };
+  const readFolders = async (names: ReadonlySet<string>): Promise<void> => {
+    for (const folder of folderRegistry) {
+      if (!names.has(folder.name)) continue;
+      const read = await readFolder(folder);
+      if (!read.ok) throw new Error(read.reason);
+    }
+  };
+
   // The compliance-off refusal comes first, ahead of the pre-clean below: a refused install
   // must leave the installed tree as it found it.
   await requireComplianceVariantFiles({ curation, compliance, packageRoot, agentSourceDirs: options.agentSourceDirs });
+  // The folders this run installs are read from the exact-key tree before the pre-clean for the
+  // same reason, so a build that lacks one refuses the install and leaves the installed tree alone.
+  await readFolders(selectedWorkflowFolders(plugins, folderWorkflows));
 
   // The references the machine's compliance switch installs: the manifest, and the ONE source
   // root they are overlaid from. With compliance off the root is the compliance-off tree, and its
@@ -2461,9 +2502,15 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   const skillPlan = resolveSkillInstallPlan({
     effectivePlugins: options.effectivePlugins ?? plugins,
     isPartialInstall,
-    shadowedSkills: await listShadowedSkills(devflowDir),
+    shadowedSkills: await listShadowedSkills(devflowDir, folderWorkflows),
+    folderWorkflows,
   });
   report.dormantShadows = [...skillPlan.dormantShadows];
+  // D-WORKFLOW-SHADOW-REFUSAL, install half: a folder installs from the build and has no source to
+  // overlay, so a shadow of its name is ignored and kept. The warning says so; it is not dormant.
+  for (const name of skillPlan.ignoredFolderShadows) {
+    warn(`The shadow of skill "${name}" is ignored: it ships as a skill folder from the build, which a shadow cannot replace. The shadow was kept.`);
+  }
 
   // Links the pre-clean removed at a path that a later step of this install writes. Each is reported
   // as replaced only once a real file or folder stands there (reportLinksOnceWritten).
@@ -2535,7 +2582,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // then re-materialized by converge, creating a false-orphan report on every install.
   recordSweep(report, 'skill', await sweepOrphanedAssets(
     path.join(claudeDir, 'skills'),
-    new Set([...getAllSkillNames(), ...FEATURE_OWNED_SKILLS]),
+    new Set([...getAllSkillNames(folderWorkflows), ...FEATURE_OWNED_SKILLS]),
     (entry) => entry.startsWith(SKILL_NAMESPACE) ? unprefixSkillName(entry) : null,
   ));
 
@@ -2594,6 +2641,12 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
         }
       } catch { /* ignore */ }
     }
+    // A folder is replaced whole by its install, so the pre-clean only unlinks a link at it, as it does
+    // for a skill. A link it cannot remove is refused by the install below.
+    for (const name of selectedWorkflowFolders(plugins, folderWorkflows)) {
+      const target = path.join(claudeDir, 'skills', prefixSkillName(name));
+      if ((await unlinkLinkAt(target)) === 'unlinked') report.replacedLinks.push(target);
+    }
   }
 
   // Remove the skills no selected plugin owns or requires — the deselection half
@@ -2602,7 +2655,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // (AC-22). Failures are per-item and non-fatal. `removedSkills` lists only what
   // was on disk and is now gone: the plan is registry arithmetic and mostly names
   // skills that were never installed.
-  const deselected = await removeDeselectedSkills(path.join(claudeDir, 'skills'), skillPlan.remove);
+  const deselected = await removeDeselectedSkills(path.join(claudeDir, 'skills'), [...skillPlan.remove, ...skillPlan.removeFolders]);
   report.removedSkills.push(...deselected.removed);
   for (const failure of deselected.failed) {
     warn(`Could not remove deselected skill "${prefixSkillName(failure.name)}" — ${String(failure.error)}`);
@@ -2645,16 +2698,18 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     agentSourceDirs: options.agentSourceDirs,
     skip: { commands: commandsRefused, agents: agentsRefused },
     links: report,
+    folderWorkflows,
     warn,
   });
 
   // Sweep stale command files — ungated: runs on every install shape.
   // knownNames spans ALL plugins (getAllCommandNames) so commands from uninstalled
   // plugins survive a partial run. Only names absent from the full registry are removed.
+  // A workflow that ships as a skill folder is not in the set, so its stale command file is swept.
   if (!commandsRefused) {
     recordSweep(report, 'command', await sweepOrphanedAssets(
       commandsTarget,
-      new Set(getAllCommandNames()),
+      new Set(getAllCommandNames(folderWorkflows)),
       mdEntryName,
     ));
   }
@@ -2757,6 +2812,26 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     const removal = await removeComplianceOffFiles(path.join(claudeDir, 'skills'));
     for (const refusal of removal.refused) {
       report.sweepFailures.push({ kind: 'reference', name: refusal.entry, error: refusal.reason });
+    }
+  }
+
+  // D-WORKFLOW-FOLDER-INSTALL: the workflow skill folders of the plugins whose commands this run
+  // writes, each from the exact-key tree read above. Before the scripts step, so the hand-off
+  // sentinel that step installs never stands without the folder it names. A widened run may add a
+  // folder the early read did not cover. Each folder is read, installed and reported on its own, and
+  // a read failure is a warning, since the pre-clean has run: one broken folder never hides the next.
+  const foldersToInstall = selectedWorkflowFolders(commandAgentPlugins, folderWorkflows);
+  if (foldersToInstall.size > 0) spinner.message('Installing workflow skills...');
+  for (const folder of folderRegistry) {
+    if (!foldersToInstall.has(folder.name)) continue;
+    const read = await readFolder(folder);
+    if (!read.ok) {
+      warn(`workflow skill folder: ${read.reason}`);
+      continue;
+    }
+    const installed = await installWorkflowFolder({ claudeDir, name: folder.name, files: read.files, links: report });
+    if (installed.outcome === 'failed') {
+      warn(`workflow skill folder: could not install ${prefixSkillName(folder.name)} (${installed.reason ?? 'unknown error'})`);
     }
   }
 

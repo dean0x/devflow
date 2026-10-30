@@ -42,7 +42,7 @@ const ROOT = path.resolve(import.meta.dirname, '../..');
  * LOWERED after a pass that cuts the text, never raised — a cap raised to fit
  * whatever the file grew into is not a cap.
  */
-const CLAUDE_MD_MAX_CHARS = 13139;
+const CLAUDE_MD_MAX_CHARS = 13124;
 
 /**
  * Max characters of the Tracker block in docs/reference/architecture.md (all its paragraphs plus the
@@ -100,6 +100,7 @@ describe('CLAUDE.md: size', () => {
   it('keeps the invariant list and points at the architecture doc by plain path', () => {
     expect(CLAUDE_MD).toContain('Invariants:');
     expect(CLAUDE_MD).toContain('`docs/reference/architecture.md`');
+    expect(CLAUDE_MD).toContain('`docs/reference/lean-prompts.md`');
     expect(CLAUDE_MD).not.toMatch(/(^|\s)@docs\/reference\/architecture\.md/m);
   });
 });

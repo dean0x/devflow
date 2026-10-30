@@ -2,6 +2,8 @@
  * Shared plugin registry — single source of truth for all CLI commands.
  */
 
+import { WORKFLOW_FOLDERS } from './mds-variants.js';
+
 /**
  * Namespace prefix for Devflow skills installed to ~/.claude/skills/.
  * Skills are installed as `devflow:{skill-name}` to avoid collisions with
@@ -734,15 +736,64 @@ export const LEGACY_COMMAND_NAMES: readonly string[] = [
   'specify-teams',
 ];
 
+/** A command entry of a plugin without its leading `/`. */
+function commandName(cmd: string): string {
+  return cmd.startsWith('/') ? cmd.slice(1) : cmd;
+}
+
+/**
+ * The names of the workflows that ship as skill folders: the target-layer set.
+ *
+ * D-WORKFLOW-FOLDER-SET: a workflow in this set installs as `skills/devflow:<name>/`
+ * from the build's folder tree and has no command file, so the readers that name
+ * commands and skills take the set as a PARAMETER and their default is the real set.
+ * The set derives from the build registry (WORKFLOW_FOLDERS, empty today), so the
+ * folder the build compiles and the folder the install ships cannot disagree. It is
+ * data for the readers below and is not a skill classification: a folder name is in
+ * no plugin's `skills` or `requires`. Core reads the registry in src/core and imports
+ * nothing from src/targets, which tests/plugins.test.ts proves.
+ */
+export type WorkflowFolderNames = ReadonlySet<string>;
+
+/** The set of the folders in a registry; tests pass a fixture registry to get a fixture set. */
+export function workflowFolderNames(folders: readonly { readonly name: string }[]): WorkflowFolderNames {
+  return new Set(folders.map(folder => folder.name));
+}
+
+/** The real set: empty until a workflow is registered as a folder. */
+export const WORKFLOW_FOLDER_NAMES: WorkflowFolderNames = workflowFolderNames(WORKFLOW_FOLDERS);
+
+/**
+ * The folder workflows that some plugin of `plugins` owns as a command. A plugin that
+ * declares `/name` for a name in the set owns the folder `devflow:name`.
+ */
+export function selectedWorkflowFolders(
+  plugins: readonly PluginDefinition[],
+  folderWorkflows: WorkflowFolderNames = WORKFLOW_FOLDER_NAMES,
+): Set<string> {
+  const selected = new Set<string>();
+  for (const plugin of plugins) {
+    for (const cmd of plugin.commands) {
+      const name = commandName(cmd);
+      if (folderWorkflows.has(name)) selected.add(name);
+    }
+  }
+  return selected;
+}
+
 /**
  * Derive unique command names (without leading /) from all plugins.
  * Returns one entry per distinct command, preserving DEVFLOW_PLUGINS declaration order.
+ *
+ * A workflow in `folderWorkflows` is not a command file, so it is left out: the
+ * command sweeps then treat a stale command file of a folder workflow as an orphan.
  */
-export function getAllCommandNames(): string[] {
+export function getAllCommandNames(folderWorkflows: WorkflowFolderNames = WORKFLOW_FOLDER_NAMES): string[] {
   const commands = new Set<string>();
   for (const plugin of DEVFLOW_PLUGINS) {
     for (const cmd of plugin.commands) {
-      commands.add(cmd.startsWith('/') ? cmd.slice(1) : cmd);
+      const name = commandName(cmd);
+      if (!folderWorkflows.has(name)) commands.add(name);
     }
   }
   return [...commands];
@@ -750,14 +801,18 @@ export function getAllCommandNames(): string[] {
 
 /**
  * Derive unique skill names from all plugins.
+ *
+ * The folders of `folderWorkflows` install as `devflow:<name>`, so they join the names
+ * the skill sweeps treat as known.
  */
-export function getAllSkillNames(): string[] {
+export function getAllSkillNames(folderWorkflows: WorkflowFolderNames = WORKFLOW_FOLDER_NAMES): string[] {
   const skills = new Set<string>();
   for (const plugin of DEVFLOW_PLUGINS) {
     for (const skill of plugin.skills) {
       skills.add(skill);
     }
   }
+  for (const name of folderWorkflows) skills.add(name);
   return [...skills];
 }
 
@@ -902,6 +957,16 @@ export interface SkillInstallPlan {
   readonly remove: ReadonlySet<string>;
   /** Shadowed skills outside the install set: kept on disk, applied to nothing. */
   readonly dormantShadows: readonly string[];
+  /**
+   * Skill folders to remove because no plugin of the selection owns the workflow. Empty on a
+   * partial install, for the same reason `remove` is.
+   */
+  readonly removeFolders: ReadonlySet<string>;
+  /**
+   * Shadowed names that are skill folders. A folder installs from the build and never from a
+   * shadow, so the shadow is applied to nothing, whatever the selection. It is kept on disk.
+   */
+  readonly ignoredFolderShadows: readonly string[];
 }
 
 /**
@@ -926,23 +991,33 @@ export function resolveSkillInstallPlan(input: {
   readonly isPartialInstall: boolean;
   /** Bare skill names with a shadow directory under `~/.devflow/skills/`. */
   readonly shadowedSkills: readonly string[];
+  /** The target-layer set; the default is the real set. */
+  readonly folderWorkflows?: WorkflowFolderNames;
 }): SkillInstallPlan {
+  const folderWorkflows = input.folderWorkflows ?? WORKFLOW_FOLDER_NAMES;
   const install = skillsOf(input.effectivePlugins);
 
   const remove = new Set<string>();
+  const removeFolders = new Set<string>();
   if (!input.isPartialInstall) {
     for (const skill of skillsOf(DEVFLOW_PLUGINS)) {
       if (install.has(skill)) continue;
       if ((FEATURE_OWNED_SKILLS as readonly string[]).includes(skill)) continue;
       remove.add(skill);
     }
+    const ownedFolders = selectedWorkflowFolders(input.effectivePlugins, folderWorkflows);
+    for (const name of folderWorkflows) {
+      if (!ownedFolders.has(name)) removeFolders.add(name);
+    }
   }
 
-  const dormantShadows = [...new Set(input.shadowedSkills)]
-    .filter(skill => !install.has(skill))
+  const shadowed = [...new Set(input.shadowedSkills)];
+  const dormantShadows = shadowed
+    .filter(skill => !install.has(skill) && !folderWorkflows.has(skill))
     .sort();
+  const ignoredFolderShadows = shadowed.filter(skill => folderWorkflows.has(skill)).sort();
 
-  return { install, remove, dormantShadows };
+  return { install, remove, dormantShadows, removeFolders, ignoredFolderShadows };
 }
 
 /**

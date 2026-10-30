@@ -17,6 +17,7 @@ import { getAllSkillNames, getAllCommandNames, getAllAgentNames, installedLangua
 import { renderLanguageStamp } from '../src/targets/claude-code/language-stamp.js';
 import { requireDistFiles, requireDistFile, resolveAllAgents, resolveAgentSource, walkFiles, parseFrontmatterSkills } from './helpers.js';
 import { AGENT_CONFIG } from './fixtures/agent-config.js';
+import { FIXTURE_FOLDER } from './fixtures/workflow-folder.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 
@@ -704,7 +705,9 @@ describe('Test infrastructure skill references', () => {
     // Union 'compliance' — skill is feature-managed after step 1.5 de-registration;
     // test files (e.g. build.test.ts) reference devflow:compliance in test descriptions.
     // Independent literal — not imported from FEATURE_OWNED_SKILLS (avoids oracle trap).
-    const canonicalSkills = new Set([...getAllSkillNames(), 'compliance']);
+    // The fixture workflow folder's name is a test-only skill folder name (devflow:<name>),
+    // so it is accepted here from the fixture itself and nowhere else.
+    const canonicalSkills = new Set([...getAllSkillNames(), 'compliance', FIXTURE_FOLDER.name]);
     const testsDir = path.join(ROOT, 'tests');
     const testFiles = collectTsFiles(testsDir, testsDir).filter(f =>
       // Exclude this file itself — it contains regex patterns and jsdoc that produce false positives

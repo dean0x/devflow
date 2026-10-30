@@ -106,19 +106,23 @@ import { readManifest, writeManifest } from '../../core/manifest.js';
 import { withManifestLock } from '../../core/manifest-lock.js';
 import { getPackageRoot } from '../../core/paths.js';
 import { isProxyEnabled } from '../../core/proxy-state.js';
+import { WORKFLOW_FOLDERS, type WorkflowFolder } from '../../core/mds-variants.js';
 import {
   DEVFLOW_PLUGINS,
   CURATION_GATED_SKILLS,
   installedLanguageFocuses,
   prefixSkillName,
+  selectedWorkflowFolders,
   skillsOf,
+  workflowFolderNames,
   type PluginDefinition,
 } from '../../core/plugins.js';
 import { convergeFromManifest, type ConvergeComplianceArtifactsResult } from './compliance-install.js';
 import { copyDirectory, resolveSkillSource } from './installer.js';
 import { LANGUAGE_STAMPED_COMMANDS, stampForConverge } from './language-stamp.js';
-import { entryIsLink, newLinkReport, refuseUnrealFolder, warnLinkReport, writeFileReplacingLink, type LinkReport } from './linked-folder.js';
+import { entryIsLink, newLinkReport, refuseUnrealFolder, refusedFolderMessage, warnLinkReport, writeFileReplacingLink, type LinkReport } from './linked-folder.js';
 import { convergeReferences, type ConvergeReferencesResult } from './reference-converge.js';
+import { installWorkflowFolder, readWorkflowFolder } from './workflow-folder-install.js';
 
 // ── Bounds ─────────────────────────────────────────────────────────────────
 
@@ -724,6 +728,27 @@ export interface ConvergeVariantAxesOptions {
   warn: (msg: string) => void;
   /** Package root the variants and sources are read from. Injectable for a temp tree; defaults to this package. */
   packageRoot?: string;
+  /**
+   * The workflow skill folders the converge knows (D-WORKFLOW-FOLDER-INSTALL). Defaults to the real
+   * registry, which is empty, so a default converge has no folder step. A test passes a fixture registry.
+   */
+  workflowFolders?: readonly WorkflowFolder[];
+  /** Package root the folder trees are read from. Defaults to {@link ConvergeVariantAxesOptions.packageRoot}. */
+  workflowFoldersRoot?: string;
+}
+
+/** What the workflow-folder converge did. */
+export interface ConvergeWorkflowFoldersResult {
+  /** True when nothing failed and nothing was refused. */
+  converged: boolean;
+  /** Folders this run wrote: new, or different from the exact-key files. */
+  installed: readonly string[];
+  /** Folders that already held the exact-key files. */
+  unchanged: readonly string[];
+  /** Why the converge did not finish, one entry per failure. Empty when `converged`. */
+  failures: readonly string[];
+  /** Installed folders that were not converged (a failure or a refusal), as absolute paths. They keep the text of the previous key. */
+  stalled: readonly string[];
 }
 
 export interface ConvergeVariantAxesResult extends ConvergeCurationVariantsResult {
@@ -731,6 +756,8 @@ export interface ConvergeVariantAxesResult extends ConvergeCurationVariantsResul
   compliance: ConvergeComplianceArtifactsResult;
   /** What the references converge did: the overlay, then the removal list or the restore. */
   references: ConvergeReferencesResult;
+  /** What the workflow-folder converge did: the exact-key folder of each selected folder workflow. */
+  workflowFolders: ConvergeWorkflowFoldersResult;
   /** Whether a compliance-off machine still has installed prompts or references that post. */
   posting: PostingConverge;
   /** Installed prompts and rule files that were a link and now are a real file. What they pointed to was left as it was. */
@@ -753,16 +780,92 @@ async function attempt<T>(label: string, warn: (msg: string) => void, fallback: 
 }
 
 /**
+ * Converge the workflow skill folders of the selected plugins onto the machine's switches.
+ *
+ * D-WORKFLOW-FOLDER-INSTALL: a folder is complete under every variant key, so a switch of either axis
+ * moves it to the folder of the new exact key (the same read and the same swap as the install), and a
+ * folder that already holds that key's files is left alone. A switch to compliance off writes the
+ * compliance-off folder, which leaves out the files its file list omits, so none of them stays. A
+ * workflow whose plugin is not selected is not installed here and is not removed either: a full
+ * install owns the removal. Never throws.
+ */
+async function convergeWorkflowFolders(opts: {
+  claudeDir: string;
+  switches: VariantSwitches;
+  plugins: readonly PluginDefinition[];
+  folders: readonly WorkflowFolder[];
+  root: string;
+  warn: (msg: string) => void;
+}): Promise<ConvergeWorkflowFoldersResult> {
+  const { claudeDir, switches, plugins, folders, root, warn } = opts;
+  const installed: string[] = [];
+  const unchanged: string[] = [];
+  const failures: string[] = [];
+  const stalled: string[] = [];
+  const owned = selectedWorkflowFolders(plugins, workflowFolderNames(folders));
+
+  for (const folder of folders) {
+    if (!owned.has(folder.name)) continue;
+    const target = path.join(claudeDir, 'skills', prefixSkillName(folder.name));
+    const fail = (message: string): void => {
+      warn(`workflow folders: ${message}`);
+      failures.push(message);
+      stalled.push(target);
+    };
+    const read = await readWorkflowFolder(folder, switches, root);
+    if (!read.ok) {
+      fail(read.reason);
+      continue;
+    }
+    const links = newLinkReport();
+    const result = await installWorkflowFolder({ claudeDir, name: folder.name, files: read.files, links });
+    switch (result.outcome) {
+      case 'installed':
+        installed.push(folder.name);
+        break;
+      case 'unchanged':
+        unchanged.push(folder.name);
+        break;
+      case 'refused':
+        fail(refusedFolderMessage(links.refusedFolders[0] ?? target));
+        break;
+      case 'failed':
+        fail(`could not converge ${prefixSkillName(folder.name)} (${result.reason ?? 'unknown error'})`);
+        break;
+      default: {
+        const unhandled: never = result.outcome;
+        fail(`unhandled folder outcome ${String(unhandled)}`);
+      }
+    }
+  }
+  return { converged: failures.length === 0, installed, unchanged, failures, stalled };
+}
+
+/**
+ * The posting answer of the workflow-folder converge. Compliance on is clear. With compliance off, a
+ * folder that was not converged still holds the text of the previous key, which may post, so it is named.
+ * A converge that did not finish and names no folder (it threw) cannot say which folders post, so it is
+ * `unknown` and never `clear`.
+ */
+export function workflowFoldersPosting(folders: ConvergeWorkflowFoldersResult, compliance: boolean): PostingConverge {
+  if (compliance) return POSTING_CLEAR;
+  if (folders.stalled.length > 0) return { kind: 'left', files: folders.stalled };
+  if (!folders.converged) return { kind: 'unknown', reason: `the workflow folders: ${folders.failures.join('; ')}` };
+  return POSTING_CLEAR;
+}
+
+/**
  * The one converge for both switches: it makes the installed tree match the machine's curation
  * and compliance switches. `devflow init`, `devflow curation` and `devflow compliance` all call it.
  *
- * It composes four per-kind converges, each a result and never a throw:
+ * It composes five per-kind converges, each a result and never a throw:
  *   - {@link convergePromptVariants}: the commands and agents, for both axes;
  *   - the apply-decisions skill, which follows the curation switch;
  *   - {@link convergeFromManifest}: the compliance skill and rule, the one place the manifest
  *     becomes compliance options;
  *   - {@link convergeReferences}: the `devflow:git` references, which follow the compliance switch
- *     (the overlay from the one source root of the switch, then the removal list or the restore).
+ *     (the overlay from the one source root of the switch, then the removal list or the restore);
+ *   - the workflow skill folders, which follow both switches (the folder of the exact key).
  * A failed kind is a warning and `converged: false`, and the next kind still runs. A compliance-off
  * machine that still has a prompt or a reference file that posts, or cannot name one, is `posting`
  * and never `clear`: the caller decides what that costs (the compliance command exits non-zero,
@@ -791,6 +894,7 @@ export async function convergeVariantAxes(opts: ConvergeVariantAxesOptions): Pro
         stillPosting: [],
         unproven: !switches.compliance,
       },
+      workflowFolders: { converged: false, installed: [], unchanged: [], failures: ['the Claude directory is not an absolute path'], stalled: [] },
     };
   }
 
@@ -822,9 +926,22 @@ export async function convergeVariantAxes(opts: ConvergeVariantAxesOptions): Pro
     },
     () => convergeReferences({ claudeDir, devflowDir, compliance: switches.compliance, warn, packageRoot }),
   );
+  const workflowFolders = await attempt<ConvergeWorkflowFoldersResult>(
+    'workflow folders',
+    warn,
+    { converged: false, installed: [], unchanged: [], failures: ['the workflow folder converge failed'], stalled: [] },
+    () => convergeWorkflowFolders({
+      claudeDir,
+      switches,
+      plugins,
+      folders: opts.workflowFolders ?? WORKFLOW_FOLDERS,
+      root: opts.workflowFoldersRoot ?? packageRoot ?? getPackageRoot(),
+      warn,
+    }),
+  );
 
   return {
-    converged: prompts.converged && skill !== 'failed' && compliance.converged && references.converged,
+    converged: prompts.converged && skill !== 'failed' && compliance.converged && references.converged && workflowFolders.converged,
     commandsRewritten: prompts.commandsRewritten,
     agentsRewritten: prompts.agentsRewritten,
     unchanged: prompts.unchanged,
@@ -832,7 +949,11 @@ export async function convergeVariantAxes(opts: ConvergeVariantAxesOptions): Pro
     skill,
     compliance,
     references,
-    posting: mergePosting(prompts.posting, referencesPosting(references)),
+    workflowFolders,
+    posting: mergePosting(
+      mergePosting(prompts.posting, referencesPosting(references)),
+      workflowFoldersPosting(workflowFolders, switches.compliance),
+    ),
     replacedLinks: [...prompts.replacedLinks, ...skillLinks.replacedLinks, ...compliance.replacedLinks],
     refusedFolders: [...prompts.refusedFolders, ...compliance.refusedFolders],
   };
