@@ -9,7 +9,6 @@
  * throwaway package root that only the folder arm reads. Every test installs into temp Claude and
  * devflow directories, and nothing reads or writes the real HOME.
  */
-import { createHash } from 'crypto';
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -18,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { VARIANT_KEYS } from '../../src/core/curation-variants.js';
 import {
   stampBuildId,
+  workflowBuildId,
   workflowFolderFiles,
   workflowFolderKey,
   workflowFolderRelPath,
@@ -75,9 +75,9 @@ const exists = (file: string): Promise<boolean> => fs.lstat(file).then(() => tru
 /** The build tree of every key for one fixture folder, as the build would have written it. */
 async function writeBuiltTree(folder: WorkflowFolder): Promise<void> {
   for (const key of VARIANT_KEYS) {
-    const id = createHash('sha256').update(key).digest('hex').slice(0, 12);
-    for (const file of workflowFolderFiles(folder, key)) {
-      const body = `# ${file}\n\nbuilt for ${key}\n`;
+    const bodies = workflowFolderFiles(folder, key).map(file => ({ file, body: `# ${file}\n\nbuilt for ${key}\n` }));
+    const id = workflowBuildId(bodies);
+    for (const { file, body } of bodies) {
       const stamped = file.startsWith('references/') ? { ok: true as const, value: body } : stampBuildId(body, id);
       if (!stamped.ok) throw new Error(`fixture file ${file} could not be stamped`);
       const target = path.join(pkg, ...workflowFolderRelPath(key, folder.name, file).split('/'));
@@ -179,10 +179,11 @@ describe('the posting answer of the workflow-folder converge', () => {
     stalled: [],
   };
   const FINISHED: ConvergeWorkflowFoldersResult = { ...THROW_FALLBACK, converged: true, failures: [] };
+  const STALLED_DIR = `/claude/skills/devflow:${ALPHA.name}`;
   const STALLED: ConvergeWorkflowFoldersResult = {
     ...THROW_FALLBACK,
     failures: ['could not swap the folder'],
-    stalled: ['/claude/skills/devflow:alpha'],
+    stalled: [STALLED_DIR],
   };
 
   it('a converge that threw is unknown with compliance off, and the reason carries the failure', () => {
@@ -196,7 +197,7 @@ describe('the posting answer of the workflow-folder converge', () => {
   });
 
   it('with compliance off, stalled folders are named as left', () => {
-    expect(workflowFoldersPosting(STALLED, false)).toEqual({ kind: 'left', files: ['/claude/skills/devflow:alpha'] });
+    expect(workflowFoldersPosting(STALLED, false)).toEqual({ kind: 'left', files: [STALLED_DIR] });
   });
 
   it('a converge that finished is clear with compliance off, and with it on', () => {
