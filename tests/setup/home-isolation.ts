@@ -91,6 +91,37 @@ export function isolatedEnv(env: NodeJS.ProcessEnv, home: string): NodeJS.Proces
   return { ...kept, HOME: home, USERPROFILE: home };
 }
 
+/**
+ * Every key that starts with this (in any letter case) is dropped from the worker env: `GIT_DIR`,
+ * `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_CONFIG_*`, the pathspec switches and the rest all point
+ * git at another repository or add settings. The whole prefix goes, not a list of names, so a
+ * variable that a later git adds is gone too. The lookup spawn in `global-setup.ts`
+ * (`gitSpawnEnv`) passes no `GIT_*` key either.
+ */
+export const GIT_ENV_PREFIX = 'GIT_';
+
+/**
+ * The variable outside the `GIT_` prefix that moves git's settings: with `XDG_CONFIG_HOME` set,
+ * git reads `$XDG_CONFIG_HOME/git/config` and not `$HOME/.config/git/config`. Dropped, git reads
+ * the one under the temp HOME.
+ */
+export const GIT_SETTINGS_ENV_VARS = ['XDG_CONFIG_HOME'] as const;
+
+/**
+ * A copy of `env` that lets a git call read only the settings the test sets up and act only on
+ * the repositories the test makes: no `GIT_*` key and none of `GIT_SETTINGS_ENV_VARS`, and
+ * `GIT_CONFIG_NOSYSTEM=1` so the system config is not read. The global config stays: with HOME
+ * pinned to the temp HOME (`isolatedEnv`), `~/.gitconfig` is the file a test writes itself. The
+ * input is not touched.
+ */
+export function gitIsolatedEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const settings = new Set<string>(GIT_SETTINGS_ENV_VARS);
+  const kept = Object.fromEntries(
+    Object.entries(env).filter(([key]) => !key.toUpperCase().startsWith(GIT_ENV_PREFIX) && !settings.has(key)),
+  );
+  return { ...kept, GIT_CONFIG_NOSYSTEM: '1' };
+}
+
 /** Every per-run temp root is created with this prefix, directly under the real temp root. */
 export const RUN_ROOT_PREFIX = 'devflow-testtmp-';
 /** The run root's git folder: a read-only directory holding one link named `git`. */

@@ -9,6 +9,11 @@
  * the real install. So the redirect is applied once, here, before the
  * test file is imported, and it fails loudly rather than run against the real home.
  *
+ * The same step makes every git call in a test read only the settings the test sets up and
+ * act only on the repositories the test makes: it drops every `GIT_*` variable and
+ * `XDG_CONFIG_HOME` of the developer's shell and sets `GIT_CONFIG_NOSYSTEM=1`. The global
+ * config stays, as the `.gitconfig` of the temp HOME.
+ *
  * Vitest runs setup files before EACH test file, so each file gets a fresh HOME,
  * removed after the file finishes. The integration config deliberately does not
  * use this file: the two live-`claude` files build their own temp HOME and temp
@@ -35,6 +40,7 @@ import {
   assertTempHome,
   checkGitBinDir,
   checkRunTmp,
+  gitIsolatedEnv,
   isolatedEnv,
   pathWithGitBin,
 } from './home-isolation.js';
@@ -51,7 +57,7 @@ if (gitBin !== undefined) process.env.PATH = pathWithGitBin(process.env.PATH, gi
 const home = mkdtempSync(path.join(os.tmpdir(), TEMP_HOME_PREFIX));
 assertTempHome(home);
 
-const next = isolatedEnv(process.env, home);
+const next = isolatedEnv(gitIsolatedEnv(process.env), home);
 for (const key of Object.keys(process.env)) {
   if (!(key in next)) delete process.env[key];
 }

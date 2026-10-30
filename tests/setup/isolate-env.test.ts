@@ -29,7 +29,7 @@ import * as path from 'path';
 import unitConfig from '../../vitest.config.js';
 import integrationConfig from '../../vitest.integration.config.js';
 import { requireBuiltCli, sandboxEnv, walkFiles } from '../helpers.js';
-import { chmodOwnDirs } from './global-setup.js';
+import { chmodOwnDirs, gitSpawnEnv } from './global-setup.js';
 import {
   GIT_BIN_KEY,
   GIT_BIN_PREFIX,
@@ -39,7 +39,10 @@ import {
   SAFE_PATH,
   TEMP_HOME_PREFIX,
   assertTempHome,
+  canonical,
   checkGitBinDir,
+  gitIsolatedEnv,
+  isUnder,
   isolatedEnv,
   pathWithGitBin,
   realHomes,
@@ -529,5 +532,173 @@ describe('TP-22: what the global setup provided, as this worker applied it', () 
     expect(gitBinEntries(pathWithGitBin('/usr/bin', bin))).toEqual([bin]);
     expect(gitBinEntries(['/usr/bin', '/bin'].join(path.delimiter))).toEqual([]);
     expect(gitBinEntries(undefined)).toEqual([]);
+  });
+});
+
+/**
+ * A git call in a unit test reads only the settings the test sets up and acts only on the
+ * repositories the test makes. The worker env is the channel: a developer shell can export
+ * GIT_DIR, GIT_CONFIG_COUNT and the like, and every test git call inherits the worker env.
+ *
+ * Two parts, each covering what the other cannot:
+ *  1. the pure step (`gitIsolatedEnv`) drops every git variable and XDG_CONFIG_HOME and sets
+ *     GIT_CONFIG_NOSYSTEM=1; a known-bad probe shows the collector sees the leaks that
+ *     `isolatedEnv` alone lets through;
+ *  2. live: real git calls in this worker, in a repository the test makes, report no setting from
+ *     outside the temp HOME and that repository, and a git folder inside that repository. The
+ *     same collectors run on an env that leaks each way, and report it.
+ */
+
+/** What a developer shell can export that points git at another repository or adds settings. */
+const GIT_LEAK_KEYS = [
+  'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_COMMON_DIR', 'GIT_NAMESPACE', 'GIT_CEILING_DIRECTORIES',
+  'GIT_DISCOVERY_ACROSS_FILESYSTEM', 'GIT_CONFIG', 'GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_0',
+  'GIT_CONFIG_VALUE_0', 'GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_SYSTEM', 'GIT_CONFIG_GLOBAL',
+  'GIT_LITERAL_PATHSPECS', 'GIT_GLOB_PATHSPECS', 'GIT_NOGLOB_PATHSPECS', 'GIT_ICASE_PATHSPECS',
+  'GIT_TEMPLATE_DIR', 'GIT_EXEC_PATH', 'GIT_AUTHOR_NAME', 'GIT_TRACE',
+  'XDG_CONFIG_HOME',
+] as const;
+
+const LEAKY_ENV: NodeJS.ProcessEnv = {
+  PATH: '/usr/bin',
+  LANG: 'C',
+  HOME: '/home/someone',
+  ...Object.fromEntries(GIT_LEAK_KEYS.map(key => [key, `/canary/${key}`])),
+  GIT_CONFIG_NOSYSTEM: '0',
+};
+
+/** The keys of `env` that can move git's settings or repository. GIT_CONFIG_NOSYSTEM is the one key the worker sets. */
+function leakedGitKeys(env: NodeJS.ProcessEnv): string[] {
+  return Object.keys(env)
+    .filter(key => key === 'XDG_CONFIG_HOME' || (key.toUpperCase().startsWith('GIT_') && key !== 'GIT_CONFIG_NOSYSTEM'))
+    .sort();
+}
+
+describe('git settings isolation: gitIsolatedEnv', () => {
+  it('has a corpus the collector reads in full: every leak key is found', () => {
+    expect(leakedGitKeys(LEAKY_ENV)).toEqual([...GIT_LEAK_KEYS].sort());
+  });
+
+  it('drops every git variable and XDG_CONFIG_HOME, sets GIT_CONFIG_NOSYSTEM=1, and keeps the rest', () => {
+    const env = gitIsolatedEnv(LEAKY_ENV);
+    expect(leakedGitKeys(env)).toEqual([]);
+    expect(env).toEqual({ PATH: '/usr/bin', LANG: 'C', HOME: '/home/someone', GIT_CONFIG_NOSYSTEM: '1' });
+  });
+
+  it('drops a git variable it has no name for, in any letter case', () => {
+    const env = gitIsolatedEnv({ PATH: '/usr/bin', GIT_SOMETHING_NEW: '1', git_dir: '/canary' });
+    expect(env).toEqual({ PATH: '/usr/bin', GIT_CONFIG_NOSYSTEM: '1' });
+  });
+
+  it('leaves its input untouched', () => {
+    const parent: NodeJS.ProcessEnv = { ...LEAKY_ENV };
+    gitIsolatedEnv(parent);
+    expect(parent).toEqual(LEAKY_ENV);
+  });
+
+  it('RED PROBE: isolatedEnv alone keeps every leak key, so the collector would flag a worker built from it', () => {
+    expect(leakedGitKeys(isolatedEnv(LEAKY_ENV, '/tmp/x'))).toEqual([...GIT_LEAK_KEYS].sort());
+  });
+});
+
+/** Run git in `cwd` under `env` and return its output. A failed call throws. */
+function gitOut(cwd: string, args: readonly string[], env: NodeJS.ProcessEnv): string {
+  const result = spawnSync('git', [...args], { cwd, encoding: 'utf-8', env });
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(`git ${args.join(' ')} failed: ${result.stderr}`);
+  return result.stdout;
+}
+
+/** A fresh repository, made under an env that is not the worker's, so a leaked variable cannot move the init. */
+function freshRepo(): string {
+  const repo = tempDir('df-git-iso-repo-');
+  gitOut(repo, ['init', '-q'], gitSpawnEnv(process.env, tempDir('df-git-iso-home-')));
+  return repo;
+}
+
+/** The origin of every setting git reads in `cwd` under `env`: `file:<path>`, `command line:` and the like. */
+function settingOrigins(cwd: string, env: NodeJS.ProcessEnv): string[] {
+  const lines = gitOut(cwd, ['config', '--list', '--show-origin'], env).split('\n').filter(line => line.includes('\t'));
+  return [...new Set(lines.map(line => line.slice(0, line.indexOf('\t'))))];
+}
+
+/** The absolute path of a `file:` origin, which git prints relative to `cwd` for the repository's own config. Else undefined. */
+function originFile(origin: string, cwd: string): string | undefined {
+  return origin.startsWith('file:') ? canonical(path.resolve(cwd, origin.slice('file:'.length))) : undefined;
+}
+
+/** The origins that are not a file under the repository or the temp HOME, the only places a unit test git call may read settings from. */
+function foreignOrigins(origins: readonly string[], repo: string): string[] {
+  const roots = [canonical(repo), canonical(process.env.HOME ?? '')];
+  return origins.filter(origin => {
+    const file = originFile(origin, repo);
+    return file === undefined || !roots.some(root => isUnder(file, root));
+  });
+}
+
+/** The git folder git resolves in `cwd` under `env`, as an absolute path. */
+function gitFolderOf(cwd: string, env: NodeJS.ProcessEnv): string {
+  return canonical(gitOut(cwd, ['rev-parse', '--absolute-git-dir'], env).trim());
+}
+
+describe('git settings isolation: this worker', () => {
+  it('holds no variable that moves the settings or the repository of git, and skips the system config', () => {
+    expect(leakedGitKeys(process.env)).toEqual([]);
+    expect(process.env.GIT_CONFIG_NOSYSTEM).toBe('1');
+  });
+
+  it('reads settings only from the temp HOME and the repository the test made', () => {
+    const repo = freshRepo();
+    const origins = settingOrigins(repo, process.env);
+    // Non-vacuity: git read the repository's own config, so the check ran over real entries.
+    expect(origins.some(origin => isUnder(originFile(origin, repo) ?? '', canonical(repo)))).toBe(true);
+    expect(foreignOrigins(origins, repo)).toEqual([]);
+  });
+
+  it('resolves the git folder inside the repository the test made', () => {
+    const repo = freshRepo();
+    expect(isUnder(gitFolderOf(repo, process.env), canonical(repo))).toBe(true);
+  });
+});
+
+/**
+ * The env of a probe: PATH and the worker HOME, the system config off, and one leak on top.
+ * It does not start from the worker env, so a probe reports its own leak and nothing else.
+ */
+function probeEnv(leak: Readonly<Record<string, string>>): NodeJS.ProcessEnv {
+  return { PATH: process.env.PATH, HOME: process.env.HOME, GIT_CONFIG_NOSYSTEM: '1', ...leak };
+}
+
+describe('git settings isolation: RED PROBES, the collectors report a leak', () => {
+  it('a setting added through GIT_CONFIG_COUNT is reported', () => {
+    const repo = freshRepo();
+    const env = probeEnv({ GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'devflow.canary', GIT_CONFIG_VALUE_0: '1' });
+    expect(foreignOrigins(settingOrigins(repo, env), repo)).toEqual(['command line:']);
+  });
+
+  it('a global config file outside the temp HOME, named through GIT_CONFIG_GLOBAL, is reported', () => {
+    const repo = freshRepo();
+    const file = path.join(tempDir('df-git-iso-outside-'), 'gitconfig');
+    writeFileSync(file, '[devflow]\n\tcanary = 1\n');
+    const foreign = foreignOrigins(settingOrigins(repo, probeEnv({ GIT_CONFIG_GLOBAL: file })), repo);
+    expect(foreign.map(origin => originFile(origin, repo))).toEqual([canonical(file)]);
+  });
+
+  it('a global config file under XDG_CONFIG_HOME outside the temp HOME is reported', () => {
+    const repo = freshRepo();
+    const xdg = tempDir('df-git-iso-xdg-');
+    mkdirSync(path.join(xdg, 'git'));
+    writeFileSync(path.join(xdg, 'git', 'config'), '[devflow]\n\tcanary = 1\n');
+    const foreign = foreignOrigins(settingOrigins(repo, probeEnv({ XDG_CONFIG_HOME: xdg })), repo);
+    expect(foreign.map(origin => originFile(origin, repo))).toEqual([canonical(path.join(xdg, 'git', 'config'))]);
+  });
+
+  it('a git folder named through GIT_DIR is reported as outside the repository', () => {
+    const repo = freshRepo();
+    const other = freshRepo();
+    const folder = gitFolderOf(repo, probeEnv({ GIT_DIR: path.join(other, '.git') }));
+    expect(isUnder(folder, canonical(repo))).toBe(false);
+    expect(folder).toBe(canonical(path.join(other, '.git')));
   });
 });
