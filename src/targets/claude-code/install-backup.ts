@@ -15,7 +15,9 @@ import { createPathSet, type PathSet, type RetiredSet, type ShippedSet } from '.
  *
  * Nothing here deletes a file the user may own. Removal is limited to the entries the scan
  * listed as shipped, retired, a devflow leftover (sidecar) or `.DS_Store` junk, then a
- * non-recursive `rmdir`; a folder that still holds anything stays. A move is a single `rename`:
+ * non-recursive `rmdir`; a folder that still holds anything stays. The one other removal is a file
+ * the caller names by its exact path from a frozen list of retired names
+ * ({@link BackupSession.removeExact}). A move is a single `rename`:
  * no copy, so a rename that fails (another volume, no permission) leaves the file where it is.
  * Nothing is read through a link, and a special file is renamed, never opened.
  *
@@ -236,6 +238,11 @@ export type MoveWholeResult =
   | { readonly status: 'absent' }
   | { readonly status: 'kept'; readonly reason: string };
 
+export type RemoveExactResult =
+  | { readonly status: 'removed' }
+  | { readonly status: 'absent' }
+  | { readonly status: 'kept'; readonly reason: string };
+
 export interface BackupSessionOptions {
   readonly shipped: ShippedSet;
   readonly retired: RetiredSet;
@@ -253,6 +260,14 @@ export interface BackupSession {
   removeListed(folder: string): Promise<RemoveResult>;
   /** Move one entry whole with a single rename and no walk. */
   moveWhole(entry: string): Promise<MoveWholeResult>;
+  /**
+   * Remove one file by its exact path and name it with the retired files. The caller takes the path
+   * from a frozen list of names an earlier release installed; nothing here matches by pattern. The
+   * path must lie in the Claude dir or the devflow dir, outside the backup root, below a real
+   * folder. A link is unlinked, never followed. A folder, a path kept by an earlier failure and a
+   * failed `unlink` stay as they are, and the failed `unlink` is recorded.
+   */
+  removeExact(file: string): Promise<RemoveExactResult>;
   /** Paths at or below `folder` that stay because their move failed, the folder was capped or could not be scanned. */
   keptUnder(folder: string): readonly string[];
   isKept(entry: string): boolean;
@@ -314,6 +329,8 @@ const freezeList = <T>(items: readonly T[]): readonly T[] => Object.freeze(items
 
 const wholeResult = (result: MoveWholeResult): MoveWholeResult => Object.freeze(result);
 
+const exactResult = (result: RemoveExactResult): RemoveExactResult => Object.freeze(result);
+
 function exhaustive(value: never): void {
   void value;
 }
@@ -326,7 +343,8 @@ function exhaustive(value: never): void {
  */
 export function createBackupSession(options: BackupSessionOptions): BackupSession {
   const claudeDir = path.resolve(options.claudeDir);
-  const backupRoot = path.join(path.resolve(options.devflowDir), BACKUP_ROOT_NAME);
+  const devflowDir = path.resolve(options.devflowDir);
+  const backupRoot = path.join(devflowDir, BACKUP_ROOT_NAME);
   const sets: ClassifySets = { shipped: options.shipped, retired: options.retired };
   const requestedCap = options.entryCap ?? DEFAULT_ENTRY_CAP;
   const entryCap = Number.isInteger(requestedCap) && requestedCap > 0 ? requestedCap : DEFAULT_ENTRY_CAP;
@@ -625,6 +643,45 @@ export function createBackupSession(options: BackupSessionOptions): BackupSessio
     }
   }
 
+  async function removeExact(file: string): Promise<RemoveExactResult> {
+    const target = path.resolve(file);
+    const inInstallDirs = isContainedIn(claudeDir, target) || isContainedIn(devflowDir, target);
+    if (!inInstallDirs || isContainedIn(backupRoot, target)) {
+      fail(target, 'remove', 'outside-install-dirs');
+      return exactResult({ status: 'kept', reason: 'outside-install-dirs' });
+    }
+    if (isKept(target)) return exactResult({ status: 'kept', reason: 'kept-by-earlier-failure' });
+
+    const parent = await lstatBig(path.dirname(target));
+    if (!parent.ok) {
+      if (parent.code === 'ENOENT') return exactResult({ status: 'absent' });
+      fail(target, 'remove', parent.code);
+      return exactResult({ status: 'kept', reason: parent.code });
+    }
+    if (!parent.stats.isDirectory()) {
+      fail(target, 'remove', 'parent-not-a-folder');
+      return exactResult({ status: 'kept', reason: 'parent-not-a-folder' });
+    }
+    const found = await lstatBig(target);
+    if (!found.ok) {
+      if (found.code === 'ENOENT') return exactResult({ status: 'absent' });
+      fail(target, 'remove', found.code);
+      return exactResult({ status: 'kept', reason: found.code });
+    }
+    if (found.stats.isDirectory()) return exactResult({ status: 'kept', reason: 'is-a-folder' });
+
+    try {
+      await fs.unlink(target);
+    } catch (err) {
+      const code = errnoCode(err);
+      if (code === 'ENOENT') return exactResult({ status: 'absent' });
+      fail(target, 'remove', code);
+      return exactResult({ status: 'kept', reason: code });
+    }
+    retiredRemoved.push(target);
+    return exactResult({ status: 'removed' });
+  }
+
   function keptUnder(folder: string): readonly string[] {
     const base = path.resolve(folder);
     const inside = [...kept].filter(entry => entry === base || entry.startsWith(base + path.sep));
@@ -658,6 +715,7 @@ export function createBackupSession(options: BackupSessionOptions): BackupSessio
     prepass,
     removeListed,
     moveWhole,
+    removeExact,
     keptUnder,
     isKept,
     classify: (relPath: string, kind: EntryKind): Classification => classify(relPath, kind, sets),

@@ -41,6 +41,7 @@ import { openBackupSession, openBackupSessionOrFail, runWithBackupReport, runWit
 import { applyComplianceChange } from '../../src/cli/commands/compliance.js';
 import { convergeInstalledVariants } from '../../src/cli/commands/curation.js';
 import { formatSweepSummary } from '../../src/cli/commands/init.js';
+import { sweepLegacyDevflowFiles } from '../../src/cli/commands/legacy-sweep.js';
 import { formatBackupSummary, type SummaryLine } from '../../src/cli/commands/install-report.js';
 import { runRulesEnable } from '../../src/cli/commands/rules.js';
 import { readManifest } from '../../src/core/manifest.js';
@@ -252,6 +253,32 @@ describe('formatBackupSummary', () => {
 
     const printed = [retiredLine?.message ?? '', sweepLine.message];
     for (const name of ['audit-claude', 'ambient', ...sweptNames]) {
+      expect(printed.filter(line => line.includes(name)), `${name} prints on one line only`).toHaveLength(1);
+    }
+    expect(snapshot.moved).toEqual([]);
+  });
+
+  it('prints a name the legacy sweep removed on the retired line only, and names a legacy hook script by default', async () => {
+    const session = await open();
+    await put('commands/devflow/specify.md');
+    await put('commands/devflow/review.md');
+    const hook = path.join(devflowDir, 'scripts', 'hooks', 'ambient-prompt');
+    await fs.mkdir(path.dirname(hook), { recursive: true });
+    await fs.writeFile(hook, 'an old hook');
+
+    const swept = await sweepLegacyDevflowFiles({ claudeDir, report: { refusedFolders: [] }, backups: session });
+    await session.removeExact(hook);
+
+    expect(swept.removed.map(file => path.basename(file)).sort()).toEqual(['review.md', 'specify.md']);
+    const snapshot = session.snapshot();
+    const retiredLine = formatBackupSummary(snapshot).find(l => l.message.startsWith('Removed 3 retired devflow file(s)'));
+    expect(retiredLine?.message).toContain(hook);
+    const sweepLine = formatSweepSummary({
+      sweptOrphans: [{ kind: 'command' as const, name: 'resolver' }],
+      sweepFailures: [],
+    })[0];
+    const printed = [retiredLine?.message ?? '', sweepLine.message];
+    for (const name of ['specify.md', 'review.md', 'ambient-prompt', 'resolver']) {
       expect(printed.filter(line => line.includes(name)), `${name} prints on one line only`).toHaveLength(1);
     }
     expect(snapshot.moved).toEqual([]);

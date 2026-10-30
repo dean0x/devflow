@@ -417,20 +417,24 @@ describe('the legacy sweep that follows an install skips a devflow folder that i
     expect(installReport.refusedFolders, 'precondition: the partial install refused the linked folder').toEqual([folder]);
     const report = { refusedFolders: row.listed ? installReport.refusedFolders : [] };
 
-    const swept = await sweepLegacyDevflowFiles({ claudeDir, report, legacyRules: LEGACY_RULES });
+    const swept = await sweepLegacyDevflowFiles({
+      claudeDir, report, legacyRules: LEGACY_RULES, backups: await testBackups(tmp, { claudeDir, devflowDir }),
+    });
 
     expect(await snapshot(outside), 'no file, folder or mode below the link changed').toEqual(before);
-    expect(swept).toEqual({ staleCommandsRemoved: 0, staleRulesRemoved: 0 });
+    expect(swept).toEqual({ removed: [] });
     expect((await fs.lstat(folder)).isSymbolicLink(), 'the link is left in place').toBe(true);
   });
 
-  it('over real folders the sweep removes the legacy files and counts them', async () => {
+  it('over real folders the sweep removes the legacy files and names them', async () => {
     await install(false);
     for (const row of SWEEP_ROWS) await fs.writeFile(path.join(claudeDir, ...row.folder, row.file), 'stale\n', 'utf-8');
 
-    const swept = await sweepLegacyDevflowFiles({ claudeDir, report: { refusedFolders: [] }, legacyRules: LEGACY_RULES });
+    const swept = await sweepLegacyDevflowFiles({
+      claudeDir, report: { refusedFolders: [] }, legacyRules: LEGACY_RULES, backups: await testBackups(tmp, { claudeDir, devflowDir }),
+    });
 
-    expect(swept).toEqual({ staleCommandsRemoved: 2, staleRulesRemoved: 1 });
+    expect([...swept.removed].sort()).toEqual(SWEEP_ROWS.map(row => path.join(claudeDir, ...row.folder, row.file)).sort());
     for (const row of SWEEP_ROWS) expect(await exists(path.join(claudeDir, ...row.folder, row.file)), row.name).toBe(false);
   });
 });

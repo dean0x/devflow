@@ -9,16 +9,22 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { sweepLegacySkillFolders } from '../../src/cli/commands/legacy-sweep.js';
 import { formatBackupSummary } from '../../src/cli/commands/install-report.js';
 import { RETIRED_SHIPPED } from '../../src/core/retired-shipped-names.js';
+import { createBackupSession, createPathSet, type BackupSession } from '../../src/targets/claude-code/install-backup.js';
+import { LEGACY_SKILL_NAMES } from '../../src/targets/claude-code/legacy.js';
+import { FIXTURE_FOLDER } from '../fixtures/workflow-folder.js';
 import { assertTempHome } from '../setup/home-isolation.js';
 import {
   at,
   backupRootOf,
   exists,
   filesBelow,
+  firstPrefixedLegacyName,
   makeHome,
   onlyRunFolder,
+  openSession,
   put,
   removeHome,
   runInstall,
@@ -253,5 +259,80 @@ describe('a root that is a link or not a folder', () => {
     expect(report.backups.moved).toEqual([]);
     expect(backupRootOf(home)).toBeNull();
     expect(warnings.filter(message => message.includes(slot) && message.includes('moved and removed nothing'))).toHaveLength(1);
+  });
+});
+
+describe('a legacy skill folder whose move is refused', () => {
+  const PREFIXED = firstPrefixedLegacyName();
+  const denyMoveOf = (...stuck: string[]): void => {
+    const realRename = fs.rename.bind(fs);
+    vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      if (stuck.includes(String(from))) throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+      return realRename(from, to);
+    });
+  };
+  const warnings = (session: BackupSession): string[] =>
+    formatBackupSummary(session.snapshot()).filter(line => line.level === 'warn').map(line => line.message);
+
+  it('keeps a prefixed folder and its files after a full install, and warns once (EACCES)', async () => {
+    await runInstall(home, { shape: 'full' });
+    const folder = at(home, `skills/${PREFIXED}`);
+    const kept = await put(home, `skills/${PREFIXED}/mine.md`, 'mine\n');
+    const other = await put(home, 'skills/typescript/SKILL.md', 'an old bare skill\n');
+    denyMoveOf(folder);
+    const session = await openSession(home);
+
+    await runInstall(home, { shape: 'full', backups: session });
+    await sweepLegacySkillFolders({ claudeDir: home.claudeDir, backups: session, legacySkills: LEGACY_SKILL_NAMES });
+
+    expect(await fs.readFile(kept, 'utf8'), 'the file stays in its folder').toBe('mine\n');
+    expect(await exists(folder), 'the folder stays').toBe(true);
+    expect(await exists(other), 'the other legacy folder still moves').toBe(false);
+    expect(session.snapshot().failures).toEqual([{ path: folder, action: 'move', reason: 'EACCES' }]);
+    expect(warnings(session).filter(message => message.includes(folder) && message.includes('EACCES'))).toHaveLength(1);
+  });
+
+  it('keeps the file and the folder of a listed legacy skill when the move of the file fails', async () => {
+    const name = `devflow:${FIXTURE_FOLDER.name}`;
+    const listed = `skills/${name}/SKILL.md`;
+    const session = createBackupSession({
+      shipped: createPathSet([]),
+      retired: createPathSet([listed]),
+      claudeDir: home.claudeDir,
+      devflowDir: home.devflowDir,
+      now: () => new Date(Date.UTC(2026, 9, 30, 12, 0, 0)),
+      bytes: size => new Uint8Array(size).fill(9),
+    });
+    const listedFile = await put(home, listed);
+    const mine = await put(home, `skills/${name}/mine.md`, 'mine\n');
+    denyMoveOf(mine);
+
+    await sweepLegacySkillFolders({
+      claudeDir: home.claudeDir, backups: session, legacySkills: [name], retiredFiles: { [name]: ['SKILL.md'] },
+    });
+
+    expect(await fs.readFile(mine, 'utf8')).toBe('mine\n');
+    expect(await exists(listedFile), 'the listed file is removed').toBe(false);
+    expect(await exists(at(home, `skills/${name}`)), 'the folder stays with the file').toBe(true);
+    expect(session.snapshot().failures).toEqual([{ path: mine, action: 'move', reason: 'EACCES' }]);
+    expect(session.snapshot().retiredRemoved).toEqual([listedFile]);
+  });
+
+  it('moves nothing below a skills folder that is a link', async () => {
+    await runInstall(home, { shape: 'full' });
+    const outside = path.join(home.home, 'outside-skills');
+    await fs.mkdir(path.join(outside, 'typescript'), { recursive: true });
+    await fs.writeFile(path.join(outside, 'typescript', 'SKILL.md'), 'in another place\n');
+    const slot = at(home, 'skills');
+    await fs.rm(slot, { recursive: true });
+    await fs.symlink(outside, slot);
+    const before = await treeSnapshot(outside);
+    const session = await openSession(home);
+
+    await sweepLegacySkillFolders({ claudeDir: home.claudeDir, backups: session, legacySkills: LEGACY_SKILL_NAMES });
+
+    expect(await treeSnapshot(outside)).toEqual(before);
+    expect(session.snapshot().moved).toEqual([]);
+    expect(backupRootOf(home)).toBeNull();
   });
 });

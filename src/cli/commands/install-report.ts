@@ -319,7 +319,9 @@ function failureLine(failure: FailureRecord): SummaryLine {
  * One removed name prints on one line only, by the kind of removal:
  *
  *   - the retired line below lists the retired files the session removed itself, with
- *     `BackupSession.removeListed` (the earlier releases' commands, agents, rules and skill files);
+ *     `BackupSession.removeListed` (the earlier releases' commands, agents, rules and skill files)
+ *     or `BackupSession.removeExact` (the legacy sweep's command and rule names, and the legacy
+ *     hook scripts);
  *   - `formatSweepSummary` lists the names the registry-diff sweeps removed, which the install
  *     report records in `sweptOrphans`. A sweep removes a name only after the session has not,
  *     and the session removes no name that a sweep records.

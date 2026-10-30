@@ -11,7 +11,8 @@ import { installAllRules, validateRuleShadow, type RuleInstallOutcome, type Rule
 import { convergeFromManifest } from '../../targets/claude-code/compliance-install.js';
 import { convergeBehaviorFromManifest } from '../../targets/claude-code/behavior-install.js';
 import type { BackupSession } from '../../targets/claude-code/install-backup.js';
-import { newLinkReport, refuseUnrealFolder, refusedFolderMessage, removeReportingLink } from '../../targets/claude-code/linked-folder.js';
+import { newLinkReport, refuseUnrealFolder, refusedFolderMessage } from '../../targets/claude-code/linked-folder.js';
+import { removeRulesFolder, rulesFolderRefusedMessage } from '../../targets/claude-code/rules-folder.js';
 import { openBackupSessionOrFail, runWithBackupReport } from './backup-session.js';
 import { formatLinksSummary } from './install-report.js';
 
@@ -279,10 +280,12 @@ async function enableRules(
   const installedPlugins = DEVFLOW_PLUGINS.filter(pl => manifest.plugins.includes(pl.name));
   const rulesMap = buildRulesMap(installedPlugins);
 
-  // Wipe stale rules from previously uninstalled plugins before re-installing. A rules folder that is
-  // a link is unlinked and replaced by a real folder, never emptied through, and the link is reported.
+  // Clear stale rules from previously uninstalled plugins before re-installing: the files devflow did
+  // not ship move to the backup folder, and the rest of the folder is removed by the session's list.
+  // A rules folder that is a link is unlinked and replaced by a real folder, never emptied through,
+  // and the link is reported. Something that is not a folder stays and is refused below.
   const links = newLinkReport();
-  links.replacedLinks.push(...await removeReportingLink(rulesTarget));
+  if ((await removeRulesFolder(rulesTarget, backups)) === 'unlinked') links.replacedLinks.push(rulesTarget);
   // A link that could not be removed is still there, and `mkdir` and every rule write would follow it.
   // Prove the folder first; a refused folder gets no rule, no manifest write and one refusal line.
   const rulesFolderRefused = await refuseUnrealFolder(links, rulesTarget);
@@ -411,8 +414,8 @@ export const rulesCommand = new Command('rules')
     } else if (options.disable) {
       const backups = await openBackupSessionOrFail({ claudeDir, devflowDir });
       if (backups === null) return;
-      await runWithBackupReport(backups, async () => {
-        await fs.rm(rulesTarget, { recursive: true, force: true });
+      const removal = await runWithBackupReport(backups, async () => {
+        const outcome = await removeRulesFolder(rulesTarget, backups);
 
         const manifest = await readManifest(devflowDir);
         if (manifest) {
@@ -420,8 +423,25 @@ export const rulesCommand = new Command('rules')
           manifest.updatedAt = new Date().toISOString();
           await writeManifest(devflowDir, manifest);
         }
+        return outcome;
       });
-      p.log.success('Rules disabled — removed rules directory');
+      switch (removal) {
+        case 'kept':
+          p.log.warn(`Rules disabled — ${rulesTarget} stays, because it still holds files that devflow did not remove`);
+          break;
+        case 'refused':
+          p.log.warn(`Rules disabled. ${rulesFolderRefusedMessage(rulesTarget)}`);
+          break;
+        case 'absent':
+        case 'removed':
+        case 'unlinked':
+          p.log.success('Rules disabled — removed rules directory');
+          break;
+        default: {
+          const unreachable: never = removal;
+          void unreachable;
+        }
+      }
 
     } else if (options.status) {
       let installedFiles: string[] = [];

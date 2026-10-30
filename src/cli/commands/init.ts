@@ -18,7 +18,8 @@ import { installViaFileCopy, installScripts, type InstallReport } from '../../ta
 import { logSummaryLines, openBackupSession, runWithLateBackupReport } from './backup-session.js';
 import { formatLinksSummary, formatOverlaySummary, formatSkillScopeSummary, formatTrackerAssetSummary, isPluginListUnchanged, type SummaryLine } from './install-report.js';
 import { mergeLinkReports, newLinkReport, type LinkReport } from '../../targets/claude-code/linked-folder.js';
-import { sweepLegacyDevflowFiles } from './legacy-sweep.js';
+import { sweepLegacyDevflowFiles, sweepLegacySkillFolders } from './legacy-sweep.js';
+import { removeRulesFolder, rulesFolderRefusedMessage } from '../../targets/claude-code/rules-folder.js';
 import { convergeTrackerArtifacts, type ConvergeTrackerArtifactsResult, type TrackerAgentState } from '../../targets/claude-code/tracker-install.js';
 import {
   installSettings,
@@ -2317,34 +2318,21 @@ export const initCommand = new Command('init')
       p.log.info('Behavior rule is on but rules are disabled, so it is not installed — run `devflow rules --enable`.');
     }
 
-    // Clean up stale skills from previous installations
+    // Stale skill folders from previous installations move whole to the backup folder and are named.
     s.message('Cleaning up');
-    const skillsDir = path.join(claudeDir, 'skills');
-    const skillRemoveResults = await Promise.allSettled(
-      LEGACY_SKILL_NAMES.map(legacy =>
-        fs.rm(path.join(skillsDir, legacy), { recursive: true })
-      )
-    );
-    const staleRemoved = skillRemoveResults.filter(r => r.status === 'fulfilled').length;
-    if (staleRemoved > 0 && verbose) {
-      p.log.info(`Cleaned up ${staleRemoved} legacy skill(s)`);
-    }
+    await sweepLegacySkillFolders({ claudeDir, backups, legacySkills: LEGACY_SKILL_NAMES });
 
     // Clean up stale commands (e.g., /review → /code-review) and rules from previous installations.
     // A folder the install refused, or that is a link, is not swept: nothing is read or removed through it.
-    const { staleCommandsRemoved, staleRulesRemoved } = await sweepLegacyDevflowFiles({ claudeDir, report: installReport });
-    if (staleCommandsRemoved > 0 && verbose) {
-      p.log.info(`Cleaned up ${staleCommandsRemoved} legacy command(s)`);
-    }
-    if (staleRulesRemoved > 0 && verbose) {
-      p.log.info(`Cleaned up ${staleRulesRemoved} legacy rule(s)`);
-    }
+    // Each removed file is named on the retired line of the backup record.
+    await sweepLegacyDevflowFiles({ claudeDir, report: installReport, backups });
 
-    // Disable rules directory if rules not enabled
+    // Disable rules directory if rules not enabled: the files devflow did not ship move aside first.
     if (!rulesEnabled) {
-      try {
-        await fs.rm(path.join(claudeDir, 'rules', 'devflow'), { recursive: true, force: true });
-      } catch { /* ignore */ }
+      const rulesFolder = path.join(claudeDir, 'rules', 'devflow');
+      if ((await removeRulesFolder(rulesFolder, backups)) === 'refused') {
+        p.log.warn(rulesFolderRefusedMessage(rulesFolder));
+      }
     }
 
     // Clean up legacy hook scripts and lib files left by prior installs
@@ -2387,8 +2375,7 @@ export const initCommand = new Command('init')
     ];
     const hooksDir = path.join(devflowDir, 'scripts', 'hooks');
     for (const legacy of LEGACY_HOOK_FILES) {
-      const legacyPath = path.join(hooksDir, legacy);
-      try { await fs.rm(legacyPath); } catch { /* doesn't exist */ }
+      await backups.removeExact(path.join(hooksDir, legacy));
     }
 
     // Every step that moves or removes files in devflow's folders has run: name what the session

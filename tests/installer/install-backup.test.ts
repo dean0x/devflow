@@ -865,3 +865,127 @@ describe('a displaced folder in the pre-pass', () => {
     expect(await exists(path.join(aside, 'mine-notes.md'))).toBe(true);
   });
 });
+
+describe('removeExact', () => {
+  it('removes a file by its exact path, names it with the retired files and makes no backup root', async () => {
+    const file = await put('commands/devflow/stale.md');
+    const session = open();
+
+    expect(await session.removeExact(file)).toEqual({ status: 'removed' });
+
+    expect(await exists(file)).toBe(false);
+    expect(session.snapshot().retiredRemoved).toEqual([file]);
+    expect(session.snapshot().failures).toEqual([]);
+    expect(await exists(backupRoot)).toBe(false);
+  });
+
+  it('removes a file in the devflow dir as well', async () => {
+    const hook = path.join(devflowDir, 'scripts', 'hooks', 'ambient-prompt');
+    await fs.mkdir(path.dirname(hook), { recursive: true });
+    await fs.writeFile(hook, 'a stale hook');
+    const session = open();
+
+    expect(await session.removeExact(hook)).toEqual({ status: 'removed' });
+
+    expect(await exists(hook)).toBe(false);
+    expect(session.snapshot().retiredRemoved).toEqual([hook]);
+  });
+
+  it('answers absent for a file that is not there and for a folder that is not there', async () => {
+    await put('commands/devflow/other.md');
+    const session = open();
+
+    expect(await session.removeExact(at('commands/devflow/stale.md'))).toEqual({ status: 'absent' });
+    expect(await session.removeExact(at('rules/devflow/stale.md'))).toEqual({ status: 'absent' });
+
+    expect(session.snapshot().retiredRemoved).toEqual([]);
+    expect(session.snapshot().failures).toEqual([]);
+  });
+
+  it('unlinks a link and leaves the file it points to', async () => {
+    const target = path.join(home, 'outside.md');
+    await fs.writeFile(target, 'the file the link points to');
+    await fs.mkdir(at('commands/devflow'), { recursive: true });
+    const link = at('commands/devflow/stale.md');
+    await fs.symlink(target, link);
+    const session = open();
+
+    expect(await session.removeExact(link)).toEqual({ status: 'removed' });
+
+    expect(await exists(link)).toBe(false);
+    expect(await fs.readFile(target, 'utf8')).toBe('the file the link points to');
+  });
+
+  it('keeps a folder and everything in it, and records no failure', async () => {
+    const inside = await put('commands/devflow/stale.md/mine.md');
+    const session = open();
+
+    expect(await session.removeExact(at('commands/devflow/stale.md'))).toEqual({ status: 'kept', reason: 'is-a-folder' });
+
+    expect(await exists(inside)).toBe(true);
+    expect(session.snapshot().retiredRemoved).toEqual([]);
+    expect(session.snapshot().failures).toEqual([]);
+  });
+
+  it('refuses a path outside the Claude dir and the devflow dir, and a path in the backup root', async () => {
+    const outside = path.join(home, 'outside.md');
+    await fs.writeFile(outside, 'not devflow\'s');
+    await fs.mkdir(runFolder, { recursive: true });
+    const backedUp = path.join(runFolder, 'mine.md');
+    await fs.writeFile(backedUp, 'a backed-up file');
+    const session = open();
+
+    expect(await session.removeExact(outside)).toEqual({ status: 'kept', reason: 'outside-install-dirs' });
+    expect(await session.removeExact(backedUp)).toEqual({ status: 'kept', reason: 'outside-install-dirs' });
+
+    expect(await fs.readFile(outside, 'utf8')).toBe('not devflow\'s');
+    expect(await fs.readFile(backedUp, 'utf8')).toBe('a backed-up file');
+    expect(session.snapshot().failures.map(failure => failure.reason)).toEqual(['outside-install-dirs', 'outside-install-dirs']);
+  });
+
+  it('removes nothing below a folder that is a link', async () => {
+    const elsewhere = path.join(home, 'elsewhere');
+    await fs.mkdir(elsewhere);
+    const file = path.join(elsewhere, 'stale.md');
+    await fs.writeFile(file, 'in another place');
+    await fs.mkdir(at('commands'), { recursive: true });
+    await fs.symlink(elsewhere, at('commands/devflow'));
+    const session = open();
+
+    expect(await session.removeExact(at('commands/devflow/stale.md'))).toEqual({ status: 'kept', reason: 'parent-not-a-folder' });
+
+    expect(await fs.readFile(file, 'utf8')).toBe('in another place');
+    expect(session.snapshot().failures).toEqual([
+      { path: at('commands/devflow/stale.md'), action: 'remove', reason: 'parent-not-a-folder' },
+    ]);
+  });
+
+  it('keeps the file and records the reason when the unlink fails', async () => {
+    const file = await put('commands/devflow/stale.md');
+    const realUnlink = fs.unlink.bind(fs);
+    vi.spyOn(fs, 'unlink').mockImplementation(async target => {
+      if (target === file) throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+      return realUnlink(target);
+    });
+    const session = open();
+
+    expect(await session.removeExact(file)).toEqual({ status: 'kept', reason: 'EACCES' });
+
+    expect(await exists(file)).toBe(true);
+    expect(session.snapshot().retiredRemoved).toEqual([]);
+    expect(session.snapshot().failures).toEqual([{ path: file, action: 'remove', reason: 'EACCES' }]);
+  });
+
+  it('leaves a path that an earlier failure kept, without a second record', async () => {
+    const stuck = await put('commands/devflow/stuck.md');
+    vi.spyOn(fs, 'rename').mockRejectedValue(Object.assign(new Error('permission denied'), { code: 'EACCES' }));
+    const session = open();
+    await session.prepass([at('commands/devflow')]);
+    expect(session.isKept(stuck)).toBe(true);
+
+    expect(await session.removeExact(stuck)).toEqual({ status: 'kept', reason: 'kept-by-earlier-failure' });
+
+    expect(await exists(stuck)).toBe(true);
+    expect(session.snapshot().failures).toEqual([{ path: stuck, action: 'move', reason: 'EACCES' }]);
+  });
+});

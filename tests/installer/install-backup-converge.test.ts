@@ -8,17 +8,22 @@
  * session, and nothing here reads or writes the real home. The converge reads the built references
  * (`npm run build` first).
  */
+import * as p from '@clack/prompts';
 import { createHash } from 'crypto';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { formatBackupSummary } from '../../src/cli/commands/install-report.js';
+import { runRulesEnable } from '../../src/cli/commands/rules.js';
 import { COMPLIANCE_OFF_REMOVED_SKILL_FILES } from '../../src/core/compliance-off-files.js';
+import { writeManifest } from '../../src/core/manifest.js';
 import { installedReferenceManifest } from '../../src/core/mds-variants.js';
+import { getAllRuleNames } from '../../src/core/plugins.js';
 import { convergeVariantAxes, type ConvergeVariantAxesResult, type VariantMachineState } from '../../src/targets/claude-code/curation-install.js';
 import type { BackupSession } from '../../src/targets/claude-code/install-backup.js';
 import { convergeReferences } from '../../src/targets/claude-code/reference-converge.js';
+import { removeRulesFolder } from '../../src/targets/claude-code/rules-folder.js';
 import { assertTempHome } from '../setup/home-isolation.js';
 import {
   DEFAULT_PLUGINS,
@@ -372,5 +377,83 @@ describe('one run folder for the install and the converge', () => {
     expect(await fs.readFile(inRun(run, 'commands/devflow/mine-command.md'), 'utf8')).toBe('my command\n');
     expect(await fs.readFile(inRun(run, `${SKILL_COMPLIANCE}/mine-notes.md`), 'utf8')).toBe('my compliance note\n');
     expect(backups.snapshot().runFolder).toBe(run);
+  });
+});
+
+describe('the rules folder', () => {
+  const RULES = 'rules/devflow';
+  const shippedRule = (): string => `${RULES}/${getAllRuleNames()[0]}.md`;
+
+  async function seedManifest(): Promise<void> {
+    await writeManifest(home.devflowDir, {
+      version: '2.0.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: {
+        ambient: false, memory: false, hud: false, knowledge: false, learning: false, rules: true, proxy: false,
+        flags: [], compliance: { enabled: false, frameworks: [] },
+      },
+      installedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    });
+  }
+
+  it('removeRulesFolder moves a file of the user, removes the shipped rules and the folder, and names the move', async () => {
+    await put(home, shippedRule(), 'a shipped rule\n');
+    await put(home, `${RULES}/mine-rule.md`, 'my rule\n');
+    const backups = await openSession(home);
+
+    expect(await removeRulesFolder(at(home, RULES), backups)).toBe('removed');
+
+    expect(await exists(at(home, RULES)), 'the folder is gone').toBe(false);
+    await expectKept(`${RULES}/mine-rule.md`, 'my rule\n', backups);
+    expect(backups.snapshot().retiredRemoved, 'a shipped rule is removed without a record').toEqual([]);
+  });
+
+  it('removeRulesFolder keeps the folder when the move of a file fails', async () => {
+    await put(home, `${RULES}/mine-rule.md`, 'my rule\n');
+    vi.spyOn(fs, 'rename').mockRejectedValue(Object.assign(new Error('EACCES: injected'), { code: 'EACCES' }));
+    const backups = await openSession(home);
+
+    expect(await removeRulesFolder(at(home, RULES), backups)).toBe('kept');
+
+    expect(await fs.readFile(at(home, `${RULES}/mine-rule.md`), 'utf8')).toBe('my rule\n');
+    expect(backups.snapshot().failures).toEqual([{ path: at(home, `${RULES}/mine-rule.md`), action: 'move', reason: 'EACCES' }]);
+  });
+
+  it('removeRulesFolder unlinks a link, leaves what it points to, and refuses a file in the folder\'s place', async () => {
+    const outside = path.join(home.home, 'outside-rules');
+    await fs.mkdir(outside);
+    await fs.writeFile(path.join(outside, 'mine-rule.md'), 'in another place\n');
+    await fs.mkdir(at(home, 'rules'), { recursive: true });
+    await fs.symlink(outside, at(home, RULES));
+    const backups = await openSession(home);
+
+    expect(await removeRulesFolder(at(home, RULES), backups)).toBe('unlinked');
+    expect(await exists(at(home, RULES))).toBe(false);
+    expect(await fs.readFile(path.join(outside, 'mine-rule.md'), 'utf8')).toBe('in another place\n');
+
+    await fs.writeFile(at(home, RULES), 'a file in the way\n');
+    expect(await removeRulesFolder(at(home, RULES), backups)).toBe('refused');
+    expect(await fs.readFile(at(home, RULES), 'utf8')).toBe('a file in the way\n');
+    expect(await removeRulesFolder(at(home, 'rules/absent'), backups)).toBe('absent');
+  });
+
+  it('rules --enable moves a file of the user out of the rules folder, names it and installs the rules', async () => {
+    await seedManifest();
+    await put(home, `${RULES}/mine-rule.md`, 'my rule\n');
+    const infos: string[] = [];
+    vi.spyOn(p.log, 'info').mockImplementation(message => { infos.push(String(message)); });
+    vi.spyOn(p.log, 'success').mockImplementation(() => undefined);
+    vi.spyOn(p.log, 'warn').mockImplementation(() => undefined);
+    const backups = await openSession(home);
+
+    await runRulesEnable(home.claudeDir, home.devflowDir, backups);
+
+    await expectKept(`${RULES}/mine-rule.md`, 'my rule\n', backups);
+    const run = await onlyRunFolder(home);
+    expect(infos.join('\n')).toContain(`${at(home, `${RULES}/mine-rule.md`)} -> ${inRun(run, `${RULES}/mine-rule.md`)}`);
+    expect((await fs.readdir(at(home, RULES))).length, 'the rules are installed').toBeGreaterThan(0);
+    expect(await exists(at(home, `${RULES}/mine-rule.md`))).toBe(false);
   });
 });

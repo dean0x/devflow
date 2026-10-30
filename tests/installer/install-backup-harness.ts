@@ -16,6 +16,7 @@ import {
 } from '../../src/core/plugins.js';
 import type { BackupSession } from '../../src/targets/claude-code/install-backup.js';
 import { installViaFileCopy, type InstallReport, type Spinner } from '../../src/targets/claude-code/installer.js';
+import { LEGACY_SKILL_NAMES } from '../../src/targets/claude-code/legacy.js';
 import { testBackups } from '../helpers.js';
 import { assertTempHome, TEMP_HOME_PREFIX } from '../setup/home-isolation.js';
 
@@ -33,6 +34,13 @@ export const DEFAULT_PLUGINS: readonly PluginDefinition[] = DEVFLOW_PLUGINS.filt
 export function pluginNamed(name: string): PluginDefinition {
   const found = DEVFLOW_PLUGINS.find(plugin => plugin.name === name);
   if (found === undefined) throw new Error(`no such plugin: ${name}`);
+  return found;
+}
+
+/** The first `devflow:`-prefixed name of the legacy skill list. No release shipped such a folder. */
+export function firstPrefixedLegacyName(): string {
+  const found = LEGACY_SKILL_NAMES.find(name => name.startsWith('devflow:'));
+  if (found === undefined) throw new Error('the legacy skill list holds no prefixed name');
   return found;
 }
 

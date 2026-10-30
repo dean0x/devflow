@@ -7,10 +7,15 @@
  */
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { sweepLegacyDevflowFiles, sweepLegacySkillFolders } from '../../src/cli/commands/legacy-sweep.js';
 import { formatBackupSummary } from '../../src/cli/commands/install-report.js';
 import { RETIRED_SHIPPED } from '../../src/core/retired-shipped-names.js';
+import { createBackupSession, createPathSet, type BackupSession } from '../../src/targets/claude-code/install-backup.js';
+import { LEGACY_SKILL_NAMES } from '../../src/targets/claude-code/legacy.js';
+import { FIXTURE_FOLDER } from '../fixtures/workflow-folder.js';
+import { testBackups } from '../helpers.js';
 import { assertTempHome } from '../setup/home-isolation.js';
 import {
   DEFAULT_PLUGINS,
@@ -18,8 +23,10 @@ import {
   backupRootOf,
   exists,
   filesBelow,
+  firstPrefixedLegacyName,
   makeHome,
   onlyRunFolder,
+  openSession,
   put,
   removeHome,
   runInstall,
@@ -35,6 +42,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await removeHome(home);
 });
 
@@ -316,5 +324,243 @@ describe('a user file beside a listed retired file', () => {
     const message = formatBackupSummary(report.backups).map(line => line.message).join('\n');
     expect(message).toContain('Removed 1 retired devflow file(s)');
     expect(message).toContain('Moved 1 item(s)');
+  });
+});
+
+const summaryLines = (session: BackupSession): string[] => formatBackupSummary(session.snapshot()).map(line => line.message);
+
+describe('the legacy sweep after an install', () => {
+  const NO_REFUSED = { refusedFolders: [] as string[] };
+
+  it('removes every retired command by its exact name, names it, and never moves it', async () => {
+    await runInstall(home, { shape: 'full' });
+    const planted: string[] = [];
+    for (const name of RETIRED_SHIPPED.commands) planted.push(await put(home, `commands/devflow/${name}.md`));
+    const session = await openSession(home);
+
+    const swept = await sweepLegacyDevflowFiles({ claudeDir: home.claudeDir, report: NO_REFUSED, backups: session });
+
+    expect([...swept.removed].sort()).toEqual([...planted].sort());
+    expect([...session.snapshot().retiredRemoved].sort()).toEqual([...planted].sort());
+    expect(session.snapshot().moved).toEqual([]);
+    expect(backupRootOf(home), 'a retired file is removed, never copied to the backup folder').toBeNull();
+    for (const file of planted) expect(await exists(file), file).toBe(false);
+  });
+
+  it('no longer removes a file of the user whose name only ends in -teams.md', async () => {
+    await runInstall(home, { shape: 'full' });
+    const mine = await put(home, 'commands/devflow/mine-teams.md', 'mine, for teams\n');
+    const session = await openSession(home);
+
+    const swept = await sweepLegacyDevflowFiles({ claudeDir: home.claudeDir, report: NO_REFUSED, backups: session });
+
+    expect(swept.removed).toEqual([]);
+    expect(await fs.readFile(mine, 'utf8')).toBe('mine, for teams\n');
+  });
+
+  it('names a retired command once when the install and the sweep share a session, and moves the unknown teams-suffixed file', async () => {
+    await runInstall(home, { shape: 'full' });
+    const retiredCommand = RETIRED_SHIPPED.commands[0];
+    const retired = await put(home, `commands/devflow/${retiredCommand}.md`);
+    const mine = await put(home, 'commands/devflow/mine-teams.md', 'mine, for teams\n');
+    const session = await openSession(home);
+
+    const report = await runInstall(home, { shape: 'full', backups: session });
+    const swept = await sweepLegacyDevflowFiles({ claudeDir: home.claudeDir, report, backups: session });
+
+    expect(swept.removed, 'the install removed it first').toEqual([]);
+    expect(session.snapshot().retiredRemoved).toEqual([retired]);
+    expect(session.snapshot().moved.map(unit => unit.original)).toEqual([mine]);
+    expect(report.sweptOrphans.map(orphan => orphan.name)).not.toContain(retiredCommand);
+    expect(summaryLines(session).filter(line => line.includes(`${retiredCommand}.md`)), 'the name prints on one line').toHaveLength(1);
+  });
+
+  it('names a retired file the install left, and the retired line counts it with the others', async () => {
+    await runInstall(home, { shape: 'full' });
+    const session = await openSession(home);
+    const retired = await put(home, `commands/devflow/${RETIRED_SHIPPED.commands[0]}.md`);
+    const swept = await sweepLegacyDevflowFiles({ claudeDir: home.claudeDir, report: NO_REFUSED, backups: session });
+
+    expect(swept.removed).toEqual([retired]);
+    expect(summaryLines(session)).toEqual([`Removed 1 retired devflow file(s): ${retired}`]);
+  });
+
+  it('skips a folder the session could not scan', async () => {
+    await runInstall(home, { shape: 'full' });
+    const retired = await put(home, `commands/devflow/${RETIRED_SHIPPED.commands[0]}.md`);
+    const session = await testBackups(home.home, { claudeDir: home.claudeDir, devflowDir: home.devflowDir, entryCap: 1 });
+    await session.prepass([at(home, 'commands/devflow')]);
+    expect(session.isKept(at(home, 'commands/devflow')), 'precondition: the folder is over the cap').toBe(true);
+
+    const swept = await sweepLegacyDevflowFiles({ claudeDir: home.claudeDir, report: NO_REFUSED, backups: session });
+
+    expect(swept.removed).toEqual([]);
+    expect(await exists(retired)).toBe(true);
+  });
+
+  it('never removes a name that is shipped today', async () => {
+    await runInstall(home, { shape: 'full' });
+    const shippedName = otherPluginCommand();
+    const shippedFile = at(home, `commands/devflow/${shippedName}.md`);
+    expect(await exists(shippedFile), 'precondition: the install wrote it').toBe(true);
+
+    const swept = await sweepLegacyDevflowFiles({
+      claudeDir: home.claudeDir, report: NO_REFUSED, legacyCommands: [shippedName], backups: await openSession(home),
+    });
+
+    expect(swept.removed).toEqual([]);
+    expect(await exists(shippedFile)).toBe(true);
+  });
+});
+
+describe('legacy skill folders', () => {
+  const PREFIXED = firstPrefixedLegacyName();
+  const sessionWithRetired = (retiredPaths: readonly string[]): BackupSession => createBackupSession({
+    shipped: createPathSet([]),
+    retired: createPathSet(retiredPaths),
+    claudeDir: home.claudeDir,
+    devflowDir: home.devflowDir,
+    now: () => new Date(Date.UTC(2026, 9, 30, 12, 0, 0)),
+    bytes: size => new Uint8Array(size).fill(7),
+  });
+
+  it('moves a bare legacy folder that holds a user file whole, by one rename, and names it', async () => {
+    await runInstall(home, { shape: 'full' });
+    const folder = 'skills/codebase-navigation';
+    expect(LEGACY_SKILL_NAMES).toContain('codebase-navigation');
+    await put(home, `${folder}/SKILL.md`, 'an old skill\n');
+    await put(home, `${folder}/references/deep/mine.md`, 'my notes\n');
+    const session = await openSession(home);
+    const realRename = fs.rename.bind(fs);
+    const renames: string[] = [];
+    vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      renames.push(String(from));
+      return realRename(from, to);
+    });
+
+    await sweepLegacySkillFolders({ claudeDir: home.claudeDir, backups: session, legacySkills: LEGACY_SKILL_NAMES });
+
+    const run = await onlyRunFolder(home);
+    expect(renames, 'one rename for the whole folder, and nothing else').toEqual([at(home, folder)]);
+    expect(await exists(at(home, folder))).toBe(false);
+    expect(await fs.readFile(inRun(run, `${folder}/SKILL.md`), 'utf8')).toBe('an old skill\n');
+    expect(await fs.readFile(inRun(run, `${folder}/references/deep/mine.md`), 'utf8')).toBe('my notes\n');
+    expect(session.snapshot().moved).toEqual([{ original: at(home, folder), backup: inRun(run, folder), kind: 'directory' }]);
+    expect(session.snapshot().retiredRemoved).toEqual([]);
+    expect(summaryLines(session).join('\n')).toContain(`${at(home, folder)}/ -> ${inRun(run, folder)}/`);
+  });
+
+  it('deletes no bare legacy folder: each one moves aside whole with its file', async () => {
+    await runInstall(home, { shape: 'full' });
+    const session = await openSession(home);
+    const names = [...new Set(LEGACY_SKILL_NAMES)].filter(name =>
+      !name.startsWith('devflow:') && session.classifyAt(at(home, `skills/${name}`), 'directory') !== 'shipped');
+    expect(names.length).toBeGreaterThan(50);
+    for (const name of names) await put(home, `skills/${name}/SKILL.md`, `old ${name}\n`);
+
+    await sweepLegacySkillFolders({ claudeDir: home.claudeDir, backups: session, legacySkills: LEGACY_SKILL_NAMES });
+
+    const run = await onlyRunFolder(home);
+    for (const name of names) {
+      expect(await exists(at(home, `skills/${name}`)), `${name} left skills/`).toBe(false);
+      expect(await fs.readFile(inRun(run, `skills/${name}/SKILL.md`), 'utf8'), `${name} kept its file`).toBe(`old ${name}\n`);
+    }
+    expect(session.snapshot().moved).toHaveLength(names.length);
+    expect(session.snapshot().failures).toEqual([]);
+  });
+
+  it('leaves skills/devflow, error-handling and pattern-check, and a skill of the user, where they are', async () => {
+    const untouched = ['skills/devflow/SKILL.md', 'skills/error-handling/SKILL.md', 'skills/pattern-check/SKILL.md', 'skills/my-own-skill/SKILL.md'];
+    for (const name of ['devflow', 'error-handling', 'pattern-check']) {
+      expect(RETIRED_SHIPPED.skills, `${name} is a retired folder name`).toContain(name);
+      expect(LEGACY_SKILL_NAMES, `${name} is in no legacy list`).not.toContain(name);
+    }
+    await runInstall(home, { shape: 'full' });
+    for (const rel of untouched) await put(home, rel, `${rel}\n`);
+    const session = await openSession(home);
+
+    const report = await runInstall(home, { shape: 'full', backups: session });
+    await sweepLegacyDevflowFiles({ claudeDir: home.claudeDir, report, backups: session });
+    await sweepLegacySkillFolders({ claudeDir: home.claudeDir, backups: session, legacySkills: LEGACY_SKILL_NAMES });
+
+    for (const rel of untouched) expect(await fs.readFile(at(home, rel), 'utf8'), rel).toBe(`${rel}\n`);
+    expect(session.snapshot().moved).toEqual([]);
+    expect(backupRootOf(home)).toBeNull();
+  });
+
+  it('moves a prefixed legacy folder that no release listed whole, once, and names it', async () => {
+    await runInstall(home, { shape: 'full' });
+    expect(RETIRED_SHIPPED.skillFiles, 'no release shipped this folder').not.toHaveProperty(PREFIXED);
+    expect(LEGACY_SKILL_NAMES).toContain(PREFIXED);
+    const folder = `skills/${PREFIXED}`;
+    await put(home, `${folder}/SKILL.md`, 'an old prefixed skill\n');
+    await put(home, `${folder}/mine.md`, 'mine\n');
+    const session = await openSession(home);
+
+    await sweepLegacySkillFolders({ claudeDir: home.claudeDir, backups: session, legacySkills: LEGACY_SKILL_NAMES });
+
+    const run = await onlyRunFolder(home);
+    expect(await exists(at(home, folder))).toBe(false);
+    expect(await fs.readFile(inRun(run, `${folder}/mine.md`), 'utf8')).toBe('mine\n');
+    expect(await fs.readFile(inRun(run, `${folder}/SKILL.md`), 'utf8')).toBe('an old prefixed skill\n');
+    expect(session.snapshot().moved.map(unit => [unit.original, unit.kind])).toEqual([[at(home, folder), 'directory']]);
+    expect(session.snapshot().retiredRemoved).toEqual([]);
+  });
+
+  it('names the prefixed folder once when the install moved it first', async () => {
+    await runInstall(home, { shape: 'full' });
+    const folder = `skills/${PREFIXED}`;
+    await put(home, `${folder}/mine.md`, 'mine\n');
+    const session = await openSession(home);
+
+    await runInstall(home, { shape: 'full', backups: session });
+    await sweepLegacySkillFolders({ claudeDir: home.claudeDir, backups: session, legacySkills: LEGACY_SKILL_NAMES });
+
+    expect(session.snapshot().moved.filter(unit => unit.original === at(home, folder))).toHaveLength(1);
+    expect(await fs.readFile(inRun(await onlyRunFolder(home), `${folder}/mine.md`), 'utf8')).toBe('mine\n');
+  });
+
+  it('with a released listing, removes only the listed files, moves the rest and removes the emptied folder', async () => {
+    const name = `devflow:${FIXTURE_FOLDER.name}`;
+    const listed = ['SKILL.md', 'references/guide.md'];
+    const session = sessionWithRetired(listed.map(file => `skills/${name}/${file}`));
+    for (const file of listed) await put(home, `skills/${name}/${file}`);
+    await put(home, `skills/${name}/mine.md`, 'mine\n');
+    await put(home, `skills/${name}/references/mine-ref.md`, 'mine too\n');
+
+    await sweepLegacySkillFolders({
+      claudeDir: home.claudeDir, backups: session, legacySkills: [name], retiredFiles: { [name]: listed },
+    });
+
+    const run = await onlyRunFolder(home);
+    expect([...session.snapshot().retiredRemoved].sort()).toEqual(listed.map(file => at(home, `skills/${name}/${file}`)).sort());
+    expect(session.snapshot().moved.map(unit => unit.original).sort()).toEqual([
+      at(home, `skills/${name}/mine.md`),
+      at(home, `skills/${name}/references/mine-ref.md`),
+    ].sort());
+    expect(await filesBelow(run)).toEqual([`skills/${name}/mine.md`, `skills/${name}/references/mine-ref.md`]);
+    expect(await exists(at(home, `skills/${name}`)), 'the emptied folder is gone').toBe(false);
+  });
+
+  it('skips a name that is shipped today', async () => {
+    await runInstall(home, { shape: 'full' });
+    const note = await put(home, 'skills/devflow:git/mine-notes.md', 'my notes\n');
+    const session = await openSession(home);
+
+    await sweepLegacySkillFolders({ claudeDir: home.claudeDir, backups: session, legacySkills: ['devflow:git'] });
+
+    expect(await fs.readFile(note, 'utf8')).toBe('my notes\n');
+    expect(session.snapshot().moved).toEqual([]);
+    expect(backupRootOf(home)).toBeNull();
+  });
+
+  it('makes no backup folder when no legacy folder stands', async () => {
+    await runInstall(home, { shape: 'full' });
+    const session = await openSession(home);
+
+    await sweepLegacySkillFolders({ claudeDir: home.claudeDir, backups: session, legacySkills: LEGACY_SKILL_NAMES });
+
+    expect(session.snapshot().moved).toEqual([]);
+    expect(backupRootOf(home)).toBeNull();
   });
 });

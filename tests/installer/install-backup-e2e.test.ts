@@ -147,18 +147,19 @@ describe('a compliance-off install', () => {
   });
 });
 
+/** The file left its folder, sits in the run folder the output names with the same bytes, and the output names both paths. */
+async function expectMovedAndNamed(file: string, out: string, text: string): Promise<void> {
+  expect(await exists(file), 'the file left its folder').toBe(false);
+  const run = /Backup folder: (.+)/.exec(out)?.[1];
+  if (run === undefined) throw new Error(`the output names no backup folder:\n${out}`);
+  expect(path.dirname(run), 'the run folder is under the backup root').toBe(backupRoot());
+  const kept = path.join(run, path.relative(path.join(tmpHome, '.claude'), file));
+  expect(await fs.readFile(kept, 'utf-8')).toBe(text);
+  expect(out).toContain(`${file} -> ${kept}`);
+}
+
 describe('the toggles over a file of the user', () => {
   const skillFile = (skill: string): string => path.join(tmpHome, '.claude', 'skills', skill, 'mine.md');
-
-  async function expectMovedAndNamed(file: string, out: string, text: string): Promise<void> {
-    expect(await exists(file), 'the file left its folder').toBe(false);
-    const run = /Backup folder: (.+)/.exec(out)?.[1];
-    if (run === undefined) throw new Error(`the output names no backup folder:\n${out}`);
-    expect(path.dirname(run), 'the run folder is under the backup root').toBe(backupRoot());
-    const kept = path.join(run, path.relative(path.join(tmpHome, '.claude'), file));
-    expect(await fs.readFile(kept, 'utf-8')).toBe(text);
-    expect(out).toContain(`${file} -> ${kept}`);
-  }
 
   it('devflow curation --disable and --enable move the file of the user out of the skill folder', { timeout: MULTI_RUN_TIMEOUT_MS }, async () => {
     runCli(INIT_ARGS);
@@ -186,5 +187,66 @@ describe('the toggles over a file of the user', () => {
     await fs.writeFile(mine, 'my second compliance note\n', 'utf-8');
     const enabled = runCli(['compliance', '--enable']);
     await expectMovedAndNamed(mine, enabled, 'my second compliance note\n');
+  });
+});
+
+describe('the rules folder over a file of the user', () => {
+  const rulesFolder = (): string => path.join(tmpHome, '.claude', 'rules', 'devflow');
+  const mineRule = (): string => path.join(rulesFolder(), 'mine-rule.md');
+
+  it('devflow rules --disable moves the file out, names it and removes the folder', { timeout: MULTI_RUN_TIMEOUT_MS }, async () => {
+    runCli(INIT_ARGS);
+    expect(await exists(rulesFolder()), 'precondition: init installed the rules').toBe(true);
+    await fs.writeFile(mineRule(), 'my rule\n', 'utf-8');
+
+    const out = runCli(['rules', '--disable']);
+
+    await expectMovedAndNamed(mineRule(), out, 'my rule\n');
+    expect(await exists(rulesFolder()), 'the folder is gone').toBe(false);
+    expect(out).toContain('Rules disabled — removed rules directory');
+  });
+
+  it('devflow rules --enable moves the file out, names it and installs the rules', { timeout: MULTI_RUN_TIMEOUT_MS }, async () => {
+    runCli(INIT_ARGS);
+    await fs.writeFile(mineRule(), 'my rule\n', 'utf-8');
+
+    const out = runCli(['rules', '--enable']);
+
+    await expectMovedAndNamed(mineRule(), out, 'my rule\n');
+    expect((await fs.readdir(rulesFolder())).length, 'the rules are installed again').toBeGreaterThan(0);
+  });
+
+  it('devflow init with rules off moves the file out, names it and removes the folder', { timeout: MULTI_RUN_TIMEOUT_MS }, async () => {
+    runCli(INIT_ARGS);
+    await fs.writeFile(mineRule(), 'my rule\n', 'utf-8');
+
+    const out = runCli([...INIT_ARGS, '--plugin=devflow-code-review', '--no-rules']);
+
+    await expectMovedAndNamed(mineRule(), out, 'my rule\n');
+    expect(await exists(rulesFolder()), 'the folder is gone').toBe(false);
+  });
+});
+
+describe('devflow init over files of earlier releases', () => {
+  it('moves a legacy skill folder whole and names it, and names a removed legacy hook script', { timeout: MULTI_RUN_TIMEOUT_MS }, async () => {
+    runInit();
+    const legacySkill = path.join(tmpHome, '.claude', 'skills', 'codebase-navigation');
+    await fs.mkdir(legacySkill);
+    await fs.writeFile(path.join(legacySkill, 'SKILL.md'), 'an old skill\n', 'utf-8');
+    const hook = path.join(tmpHome, '.devflow', 'scripts', 'hooks', 'ambient-prompt');
+    await fs.mkdir(path.dirname(hook), { recursive: true });
+    await fs.writeFile(hook, 'an old hook\n', 'utf-8');
+
+    const out = runInit();
+
+    expect(await exists(legacySkill), 'the folder left skills/').toBe(false);
+    expect(await exists(hook), 'the hook script is removed').toBe(false);
+    const runs = await fs.readdir(backupRoot());
+    expect(runs).toHaveLength(1);
+    const kept = path.join(backupRoot(), runs[0], 'skills', 'codebase-navigation');
+    expect(await fs.readFile(path.join(kept, 'SKILL.md'), 'utf-8')).toBe('an old skill\n');
+    expect(out).toContain(`${legacySkill}/ -> ${kept}/`);
+    expect(out).toContain(`Removed 1 retired devflow file(s): ${hook}`);
+    expect(await exists(path.join(backupRoot(), runs[0], 'scripts')), 'a removed script is never copied to the backup folder').toBe(false);
   });
 });

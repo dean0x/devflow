@@ -57,6 +57,7 @@ import { DEVFLOW_PLUGINS, buildAssetMaps, buildRulesMap, getAllAgentNames, getAl
 import type { RunMigrationsResult } from '../src/core/migrations.js';
 import { LEGACY_SKILL_NAMES } from '../src/targets/claude-code/legacy.js';
 import { convergeAmbientHooks } from '../src/cli/commands/ambient.js';
+import { sweepLegacySkillFolders } from '../src/cli/commands/legacy-sweep.js';
 
 describe('parsePluginSelection', () => {
   it('parses comma-separated plugin names', () => {
@@ -2037,19 +2038,15 @@ describe('installViaFileCopy cleanup (isPartialInstall)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Init-level LEGACY_SKILL_NAMES cleanup pin (init.ts:1149-1153)
+// Init-level LEGACY_SKILL_NAMES cleanup pin
 //
-// After the installer.ts bare-rm fix, installViaFileCopy no longer removes bare
-// skill dirs. Init.ts:1149-1153 (the LEGACY_SKILL_NAMES cleanup pass) is now
-// the SOLE path that removes bare legacy dirs. This describe pins that:
-//   (a) installViaFileCopy does NOT remove bare codebase-navigation/ (ordering dep)
-//   (b) the LEGACY_SKILL_NAMES cleanup DOES remove it
-//
-// Both tests are preservation tests (GREEN before and after the fix); they exist
-// to prevent accidental removal of the init.ts cleanup pass and to document the
-// ordering dependency that installer.ts's bare-rm deletion relies on.
+// installViaFileCopy does not touch bare skill dirs. The legacy skill pass init runs after it
+// (sweepLegacySkillFolders over LEGACY_SKILL_NAMES) is the sole path that deals with bare legacy
+// dirs, and it moves them to the backup folder instead of deleting them. This describe pins that:
+//   (a) installViaFileCopy does NOT touch bare codebase-navigation/ (ordering dep)
+//   (b) the legacy skill pass moves it aside whole and names it, and leaves nothing behind
 // ---------------------------------------------------------------------------
-describe('init LEGACY_SKILL_NAMES cleanup pass (init.ts:1149-1153)', () => {
+describe('init LEGACY_SKILL_NAMES cleanup pass', () => {
   let tmpDir: string;
   let claudeDir: string;
   const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
@@ -2085,20 +2082,21 @@ describe('init LEGACY_SKILL_NAMES cleanup pass (init.ts:1149-1153)', () => {
       backups: await testBackups(tmpDir, { claudeDir, devflowDir }),
     });
 
-    // codebase-navigation/ must survive installViaFileCopy — init.ts:1149 owns its cleanup
+    // codebase-navigation/ must survive installViaFileCopy — the legacy skill pass owns its cleanup
     await expect(
       fs.access(path.join(skillsDir, 'codebase-navigation')),
       'codebase-navigation/ must not be removed by installViaFileCopy',
     ).resolves.toBeUndefined();
   });
 
-  it('LEGACY_SKILL_NAMES cleanup removes bare codebase-navigation/ after installViaFileCopy', async () => {
-    // Simulate the full init flow: installViaFileCopy + LEGACY_SKILL_NAMES cleanup.
-    // This is what init.ts:1130 + 1149-1153 does together.
+  it('LEGACY_SKILL_NAMES cleanup moves bare codebase-navigation/ aside after installViaFileCopy', async () => {
+    // Simulate the full init flow: installViaFileCopy + the legacy skill pass, on one session.
     const skillsDir = path.join(claudeDir, 'skills');
     await fs.mkdir(path.join(skillsDir, 'codebase-navigation'), { recursive: true });
+    await fs.writeFile(path.join(skillsDir, 'codebase-navigation', 'mine.md'), 'my notes\n');
 
     const devflowDir = path.join(tmpDir, 'devflow');
+    const backups = await testBackups(tmpDir, { claudeDir, devflowDir });
     await installViaFileCopy({
       curation: true,
       compliance: true,
@@ -2109,21 +2107,20 @@ describe('init LEGACY_SKILL_NAMES cleanup pass (init.ts:1149-1153)', () => {
       agentsMap: new Map(),
       isPartialInstall: false,
       spinner: noopSpinner,
-      backups: await testBackups(tmpDir, { claudeDir, devflowDir }),
+      backups,
     });
 
-    // Step 2: LEGACY_SKILL_NAMES cleanup — mirrors init.ts:1149-1153 exactly.
-    await Promise.allSettled(
-      LEGACY_SKILL_NAMES.map(legacy =>
-        fs.rm(path.join(skillsDir, legacy), { recursive: true })
-      )
-    );
+    // Step 2: the legacy skill pass, as init runs it.
+    await sweepLegacySkillFolders({ claudeDir, backups, legacySkills: LEGACY_SKILL_NAMES });
 
-    // codebase-navigation/ must be gone after the LEGACY_SKILL_NAMES pass
+    // codebase-navigation/ must be gone from skills/ and kept whole in the backup folder
     await expect(
       fs.access(path.join(skillsDir, 'codebase-navigation')),
-      'codebase-navigation/ must be removed by the LEGACY_SKILL_NAMES cleanup pass',
+      'codebase-navigation/ must leave skills/ in the LEGACY_SKILL_NAMES cleanup pass',
     ).rejects.toThrow();
+    const [unit] = backups.snapshot().moved;
+    expect(unit.original).toBe(path.join(skillsDir, 'codebase-navigation'));
+    expect(await fs.readFile(path.join(unit.backup, 'mine.md'), 'utf8')).toBe('my notes\n');
   });
 });
 
