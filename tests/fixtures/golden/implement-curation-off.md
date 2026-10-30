@@ -5,28 +5,13 @@ description: Execute a single task through implementation, quality gates, and PR
 
 Orchestrate a single task by spawning agents.
 
-## Usage
-
-```
-/implement <task description>
-/implement #42                                     (GitHub issue number)
-/implement .devflow/docs/design/42-jwt-auth.2026-04-07_1430.md  (plan document from /plan)
-/implement                                         (use conversation context)
-```
-
 ## Input
-
-What follows `/implement` is bound once, here. Every later step names it `COMMAND_INPUT` and never restates it:
 
 <command-input>
 $ARGUMENTS
 </command-input>
 
-`COMMAND_INPUT` is one of:
-- Plan document path: `.devflow/docs/design/42-jwt-auth.2026-04-07_1430.md` (path to an existing `.md` file)
-- Issue reference: `#42`
-- Task description: "implement JWT auth"
-- Empty: use conversation context
+`COMMAND_INPUT` is the text above: a plan document path (an existing `.md` file), an issue reference such as `#42`, a task description, or empty (use the conversation).
 
 **Issue-reference grammar.** Scan `COMMAND_INPUT` for candidate issue references: a `#`-prefixed token or a bare digit run. Collect them in source order as `ISSUE_REFS`, and forward the list to the Git agent verbatim. Do not render, normalise, pad, strip or drop a token. Under `github`, a token that matches `^#?[1-9][0-9]{0,8}$` is a reference, and the Git agent renders it as `#{n}`.
 
@@ -65,15 +50,11 @@ Accept the output only when it is exactly two lines: `exit=0` last and, before i
 Set `EVIDENCE_POLICY`, `ISSUE_REQUIRED`, `APPLY_CONVENTIONS` and `REQUIRE_NON_AUTHOR_APPROVAL` from the accepted line. Pass agents only the three mechanism inputs, never `EVIDENCE_POLICY`. Report `Evidence policy: {EVIDENCE_POLICY} (source: {SOURCE})`, plus any `WARN` tokens as advisory, once in the final report.
 
 **Plan Document Handling** (when `COMMAND_INPUT` is a path ending in `.md`):
-1. Read the plan document from the path provided
-2. Extract from YAML frontmatter: `execution-strategy`, `context-risk`, `issue` number
-3. Extract from body: Subtask Breakdown, Implementation Plan, Patterns to Follow, Acceptance Criteria
-4. If the frontmatter `issue` is present and is not `pending`: forward it verbatim as the setup-task `ISSUE_INPUT` (`pending` means /plan's issue step degraded or was declined — treat it as absent)
-5. Use extracted content as EXECUTION_PLAN for the Code agent phase (replaces exploration/planning output)
-6. Captured values override defaults from Git agent where present
-7. Extract `## PR Description Guidance` section (if present) → set `PR_DESCRIPTION_GUIDANCE` to its full content. If section not found, set `PR_DESCRIPTION_GUIDANCE` to `(none)`.
+1. Read the plan document. From its YAML frontmatter, take `execution-strategy` and `issue`.
+2. If the frontmatter `issue` is present and is not `pending`: forward it verbatim as the setup-task `ISSUE_INPUT` (`pending` means /plan's issue step degraded or was declined — treat it as absent)
+3. Use its Subtask Breakdown, Implementation Plan, Patterns to Follow and Acceptance Criteria as `EXECUTION_PLAN` for the Code agent phase.
 
-If `PR_DESCRIPTION_GUIDANCE` was not set above (non-plan paths: issue input or task description), set it to `(none)`.
+`PR_DESCRIPTION_GUIDANCE` is the full `## PR Description Guidance` section of the plan. With no plan, or no such section, it is `(none)`.
 
 **Empty input.** When `COMMAND_INPUT` is empty — a plan handoff arrives this way, with the plan already in the conversation — there is no argument to name the branch from, and the Git agent sees none of this conversation. Write the description yourself: one line, taken from the plan's title or, with no plan, from the conversation. Send it as the setup-task `TASK_DESCRIPTION` below.
 
@@ -92,15 +73,15 @@ Derive branch name from issue or description, create feature branch, and fetch i
 Return the branch setup summary."
 ```
 
-The issue token is forwarded **unclassified**; routing is by SHAPE alone (the token count of `COMMAND_INPUT` and a `.md` ending). Only `setup-task` has resolved a provider, so a `starts with #` test would be a github test that reclassifies `PROJ-12` and `ENG-12` as task descriptions: the branch comes from prose, no issue is fetched and nothing reports it. Token COUNT is provider-neutral: every issue spelling is one token and no free-text description is.
+The issue token is forwarded **unclassified**: routing is by SHAPE alone. Only `setup-task` knows the provider, so a `starts with #` test is a github test: it reads `PROJ-12` and `ENG-12` as task descriptions, the branch comes from prose, no issue is fetched and nothing reports it. Token COUNT is provider-neutral: every issue spelling is one token and no free-text description is.
 
-- **Extension.** A path ending in `.md` is a plan document, never an issue reference: it goes to `PLAN_ARTIFACT_PATH` only, and `ISSUE_INPUT` carries the plan's frontmatter `issue`, never the path (Plan Document Handling step 4).
-- **Token count.** One token is an issue reference; two or more is prose. Forwarding the FIRST token alone would send `/implement fix the login bug` as `ISSUE_INPUT: fix` with no description, so the request is dropped.
+- **Extension.** A path ending in `.md` is a plan document, never an issue reference: it goes to `PLAN_ARTIFACT_PATH` only, and `ISSUE_INPUT` carries the plan's frontmatter `issue`, never the path.
+- **Token count.** Forwarding the FIRST token alone sends `/implement fix the login bug` as `ISSUE_INPUT: fix` with no description, so the request is dropped.
 
-**Capture from Git agent output** (used throughout flow):
-- `TASK_ID`: The branch name created by Git agent (use as TASK_ID for rest of flow)
+**Capture from Git agent output**:
+- `TASK_ID`: The branch name created by Git agent
 - `BASE_BRANCH`: Branch this feature was created from (for PR target); stop unless it passes the setup check
-- `ISSUE_NUMBER`: the provider-canonical issue identifier for this task — the same value the Git agent emits as `ISSUE_ID` (if provided, or created by the Git agent's issue-first step in setup-task)
+- `ISSUE_NUMBER`: the `ISSUE_ID` that the Git agent emits, if any
 - `branch_slug`: `TASK_ID` with every `/` replaced by `-`. It names `handoff-{branch_slug}.md` and `evidence-{branch_slug}.md` only when it matches `^[A-Za-z0-9._-]{1,200}$`; any other branch name stops the run here, telling the user it cannot name those files.
 
 **Capture from the Git agent's Output block, as written:** `ISSUE_REF` (the rendered reference in the `## Issue {ISSUE_REF}:` heading), `ISSUE_ID` (the `- **Issue ID**:` line under `### Handoff Values`), `ISSUE_CONTENT` (the body between the `<untrusted-issue-body>` markers), `ACCEPTANCE_CRITERIA`, `ISSUE_PR_LINK` (the `- **PR link line**:` line) and `ISSUE_BRANCH_TOKEN` (the `- **Branch token**:` line). Read every value from the block that emits it; never re-derive one value from another, and never infer any of them from a `TRACEABILITY: DEGRADED ({reason})` status line — a DEGRADED line is a status, not issue content.
@@ -128,21 +109,19 @@ Check the section:
 node "$HOME/.devflow/scripts/verify-evidence.cjs" check tp "{worktree}/.devflow/docs/evidence-{branch_slug}.md"; echo "exit=$?"
 ```
 
-`exit=0` passes. On any other result, rewrite the section once — the script names the failing line and its code on stderr — and check again. Still failing, or no line to write, means the test plan is **missing**: drop the `## Test Plan` section from the file.
+`exit=0` passes. Otherwise the script names the failing line and its code on stderr: rewrite the section once and check again. If it still fails, or there is no line to write, the test plan is **missing**: drop the `## Test Plan` section from the file.
 
 **Missing test plan, only when `EVIDENCE_POLICY` is `required`:** when the check above leaves the test plan missing, Read the evidence-asks reference as in the ticket link step (when this run has not) and run its missing test plan ask before any Code spawn.
 
 When `EVIDENCE_POLICY` is `standard`, a missing test plan is never asked about: carry `Test plan: missing` to the Phase 12 report.
 
 **Test-plan outputs**, set once before any Code spawn:
-- `TEST_PLAN` — the TP lines of the evidence file's `## Test Plan` section, or `(none)` when the test plan is missing.
-- `PR_TEST_PLAN_BLOCK` — when the test plan is present and this render ends in `exit=0`, its stdout byte for byte without that `exit=` line; `(none)` otherwise:
+- `TEST_PLAN`: the TP lines of the `## Test Plan` section, or `(none)` when the test plan is missing.
+- `PR_TEST_PLAN_BLOCK`: when the test plan is present and this render ends in `exit=0`, its stdout byte for byte without the `exit=` line; `(none)` otherwise:
 
 ```bash
 node "$HOME/.devflow/scripts/verify-evidence.cjs" render --plan "{worktree}/.devflow/docs/evidence-{branch_slug}.md"; echo "exit=$?"
 ```
-
-- `EVIDENCE_FILE` — `{worktree}/.devflow/docs/evidence-{branch_slug}.md`, its `## Evidence Exceptions` section now a byte copy of `PR_EXCEPTIONS` (absent when that is `(none)`).
 
 **Resolve the settings line** once per worktree root, reusing a line this run already resolved for the same root. `{root}` is the worktree the values are for — the repository root in a one-worktree run:
 

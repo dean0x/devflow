@@ -52,16 +52,6 @@ interface Exemption {
 /** Relative docs mentions that are correct as written. */
 const EXEMPTIONS: readonly Exemption[] = [
   {
-    file: 'dist/commands/implement.md',
-    line: '/implement .devflow/docs/design/',
-    reason: 'a usage example of a path the user types; it resolves against the user\'s cwd, as typed',
-  },
-  {
-    file: 'dist/commands/implement.md',
-    line: '- Plan document path: `.devflow/docs/design/',
-    reason: 'describes $ARGUMENTS as the user supplies it, not a path this command composes',
-  },
-  {
     file: 'dist/commands/resolve.md',
     line: '`TARGET_DIR_REL` to the same directory relative to the worktree root',
     reason: 'the repo-relative display form — the only form of the directory that may reach a PR comment',
