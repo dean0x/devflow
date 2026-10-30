@@ -2145,7 +2145,8 @@ describe('the move leaves a project alone when git tracks files in its data fold
     fs.mkdirSync(path.join(site.root, 'shared'));
     fs.symlinkSync('shared', site.devflow);
     commitInRepo('.devflow');
-    fs.unlinkSync(site.devflow); // node 24 rmSync refuses a link to a directory
+    // unlinkSync, not rmSync: rmSync on node 24.8 refuses a link to a directory.
+    fs.unlinkSync(site.devflow);
     seedWhole();
 
     expectSkip('tracked');

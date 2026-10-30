@@ -112,7 +112,7 @@ describe('snapshot normaliser (TP-3)', () => {
       const text = `${link}/a ${resolved}/b logs/${pathSlug(resolved)}-repo logs/${pathSlug(link)}-wt`
       expect(normaliseText(text, n)).toBe('<SANDBOX>/a <SANDBOX>/b logs/<SANDBOX>-repo logs/<SANDBOX>-wt')
     } finally {
-      // unlinkSync, not rmSync: node 24 rmSync refuses a link to a directory.
+      // unlinkSync, not rmSync: rmSync on node 24.8 refuses a link to a directory.
       if (lstatSync(link, { throwIfNoEntry: false })) unlinkSync(link)
       rmSync(real, { recursive: true, force: true })
     }
