@@ -17,6 +17,7 @@
 import { execFileSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+import { GIT_BIN_PREFIX } from './setup/home-isolation.js';
 
 /** The hook scripts as authored (source tree), never as installed. */
 export const HOOKS_DIR = path.resolve(import.meta.dirname, '..', 'src', 'assets', 'scripts', 'hooks');
@@ -89,6 +90,20 @@ export function resolveOnPath(name: string, pathValue: string): string | undefin
     }
   }
   return undefined;
+}
+
+/**
+ * The git that a tool farm links: the git that the run's PATH finds first, only when that
+ * path is absolute and its folder is the run's own git folder (named with `GIT_BIN_PREFIX`),
+ * else undefined, and the farm links git from /usr/bin or /bin like its other tools.
+ * /usr/bin/git on macOS is a shim that looks git up again on every call.
+ */
+export function runGitForFarm(): string | undefined {
+  const firstGit = resolveOnPath('git', process.env.PATH ?? '');
+  return firstGit !== undefined && path.isAbsolute(firstGit)
+    && path.basename(path.dirname(firstGit)).startsWith(GIT_BIN_PREFIX)
+    ? firstGit
+    : undefined;
 }
 
 /** A FIFO at `file`: no regular file, and an open of it for writing waits for a reader. */

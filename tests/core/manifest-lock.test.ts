@@ -129,29 +129,35 @@ describe('manifest lock', () => {
 
     // Hold every waiter at its first stale break until both have judged the lock
     // stale. The first to go on takes the lock; the second goes on only after that
-    // holder has it, and so renames the holder's fresh lock, not the stale one.
+    // waiter has settled, and so renames the holder's fresh lock, not the stale one.
+    // The roles follow the arrival at the rename, not the start order: two calls
+    // started together reach it in either order (their file system calls finish on
+    // the thread pool). The waiter held second can not settle, so the first to
+    // settle is the one that arrived first.
     const realRename = fs.rename.bind(fs);
     let arrived = 0;
     let bothArrived!: () => void;
     const bothJudgedStale = new Promise<void>((resolve) => { bothArrived = resolve; });
-    let firstHolds!: () => void;
-    const firstHasLock = new Promise<void>((resolve) => { firstHolds = resolve; });
+    let firstSettles!: () => void;
+    const firstHasSettled = new Promise<void>((resolve) => { firstSettles = resolve; });
     vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
       if (String(from) !== lockDir) return realRename(from, to);
       arrived += 1;
       const position = arrived;
       if (arrived === 2) bothArrived();
       await bothJudgedStale;
-      if (position === 2) await firstHasLock;
+      if (position === 2) await firstHasSettled;
       return realRename(from, to);
     });
 
-    const first = acquireManifestLock(devflowDir, { timeoutMs: 400 }).then((result) => {
-      if (result.ok) firstHolds();
+    const settle = (result: Awaited<ReturnType<typeof acquireManifestLock>>) => {
+      firstSettles();
       return result;
-    });
-    const second = acquireManifestLock(devflowDir, { timeoutMs: 400 });
-    const [a, b] = await Promise.all([first, second]);
+    };
+    const [a, b] = await Promise.all([
+      acquireManifestLock(devflowDir, { timeoutMs: 400 }).then(settle),
+      acquireManifestLock(devflowDir, { timeoutMs: 400 }).then(settle),
+    ]);
 
     // Exactly one holds. The other waited out its timeout and did not take the lock.
     expect([a.ok, b.ok].filter(Boolean)).toHaveLength(1);
@@ -241,6 +247,8 @@ describe('manifest lock', () => {
       const realRename = fs.rename.bind(fs);
       const realStat = fs.stat.bind(fs);
       let arrived = 0;
+      let aArrived!: () => void;
+      const aAtRename = new Promise<void>((resolve) => { aArrived = resolve; });
       let bothArrived!: () => void;
       const bothJudgedStale = new Promise<void>((resolve) => { bothArrived = resolve; });
       let aHolds!: () => void;
@@ -251,6 +259,7 @@ describe('manifest lock', () => {
         if (String(from) !== lockDir) return realRename(from, to);
         arrived += 1;
         const position = arrived;
+        if (arrived === 1) aArrived();
         if (arrived === 2) bothArrived();
         await bothJudgedStale;
         if (position === 2) await aHasLock;
@@ -269,6 +278,15 @@ describe('manifest lock', () => {
         if (result.ok) { aTookLock = true; aHolds(); }
         return result;
       });
+      // B starts only once A waits at the rename, so A is the first to arrive there. Two
+      // calls started together reach the rename in either order (their file system calls
+      // finish on the thread pool), and a B that came first would wait for A for ever.
+      // The race fails at once, with a name, when A settles without reaching the rename.
+      const first = await Promise.race([
+        aAtRename.then(() => 'rename' as const),
+        callerA.then(() => 'settled' as const),
+      ]);
+      expect(first, 'A reached the rename before it settled').toBe('rename');
       const callerB = acquireManifestLock(devflowDir, { timeoutMs: 0 });
       const [a, b] = await Promise.all([callerA, callerB]);
 
