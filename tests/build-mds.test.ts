@@ -2394,6 +2394,19 @@ describe('publication_gate adoption in compiled host commands (Phase C)', () => 
     'resolve':       DIST_COMMANDS,
   };
 
+  // The Note of publication_gate(). Its first sentence keeps the `auto` condition
+  // with the probe it describes: a colon joins "does not fail open" to the Git
+  // agent's probe, so the probe cannot read as a rule for every value.
+  const AUTO_PROBE_NOTE =
+    '`auto` does not fail open: the Git agent probes the repository visibility and treats any error or unrecognised value as PUBLIC (mode STUB)';
+
+  /** Named collector: what one compiled publication host lacks of the publication_gate() Note. */
+  function collectPublicationNoteProblems(basename: string, content: string): string[] {
+    return content.includes(AUTO_PROBE_NOTE)
+      ? []
+      : [`${basename}.md: the auto-condition probe note is missing — "${AUTO_PROBE_NOTE}" not found`];
+  }
+
   it('code-review.md, dynamic-build.md, implement.md and resolve.md contain REVIEW_PUBLICATION resolution step', async () => {
     let scanned = 0;
     for (const [basename, destRelDir] of Object.entries(PUBLICATION_HOSTS)) {
@@ -2408,8 +2421,37 @@ describe('publication_gate adoption in compiled host commands (Phase C)', () => 
         content,
         `${destRelDir}/${basename}.md must expand the partial itself, not only name the value`,
       ).toContain('**Resolve `REVIEW_PUBLICATION` per worktree:**');
+      expect(
+        collectPublicationNoteProblems(basename, content),
+        `${destRelDir}/${basename}.md must keep the auto condition with the probe note`,
+      ).toEqual([]);
     }
     expect(scanned, 'scanned zero publication hosts — guard is vacuous').toBeGreaterThan(0);
+  });
+
+  it('known-bad probe: a publication host whose probe note lost the auto condition or its colon join is reported', async () => {
+    const implement = await fs.readFile(path.join(BUILT_COMMANDS, 'implement.md'), 'utf-8');
+    expect(collectPublicationNoteProblems('implement', implement), 'the real host is clean').toEqual([]);
+    const reported = [
+      `implement.md: the auto-condition probe note is missing — "${AUTO_PROBE_NOTE}" not found`,
+    ];
+    const without = (instead: string): string => implement.split(AUTO_PROBE_NOTE).join(instead);
+    expect(without('x'), 'the seed must change the text').not.toBe(implement);
+    expect(
+      collectPublicationNoteProblems(
+        'implement',
+        without('`auto` does not fail open. The Git agent probes the repository visibility and treats any error or unrecognised value as PUBLIC (mode STUB)'),
+      ),
+      'the superseded wording, which cut the probe loose from the auto condition, must be reported',
+    ).toEqual(reported);
+    expect(
+      collectPublicationNoteProblems(
+        'implement',
+        without('The Git agent probes the repository visibility and treats any error or unrecognised value as PUBLIC (mode STUB)'),
+      ),
+      'a probe note with no auto condition at all must be reported',
+    ).toEqual(reported);
+    expect(collectPublicationNoteProblems('implement', ''), 'an empty host must be reported').toEqual(reported);
   });
 
   it('every REVIEW_PUBLICATION: line in every compiled command is inside a Git-agent spawn block (spawn-scoped guard)', async () => {
@@ -2599,6 +2641,8 @@ describe('_tracker.mds adoption + per-define non-emptiness (P2-S9)', () => {
   const TRACKER_DEFINES: Array<{
     name: string;
     requiredPhrase: string;
+    /** The sentence of the define's Note that carries a condition, kept with the step it limits. */
+    notePhrase?: string;
     minBytes: number;
     holdsNote: (body: string) => boolean;
     noteForm: string;
@@ -2612,6 +2656,9 @@ describe('_tracker.mds adoption + per-define non-emptiness (P2-S9)', () => {
       // operation's Output block — so a host cannot re-assert a producer-side
       // rejection no operation performs.
       requiredPhrase: 'no producer-side grammar check',
+      // The Note opens on its condition ("under `github`,"). A trailing
+      // parenthesis could attach to "decides" instead, so the condition leads.
+      notePhrase: 'Note: under `github`, only the Git agent decides if a bare digit run is a reference',
       minBytes: 600,
       holdsNote: body => body.includes('\nNote:'),
       noteForm: 'a "Note:" paragraph of its own',
@@ -2710,9 +2757,10 @@ describe('_tracker.mds adoption + per-define non-emptiness (P2-S9)', () => {
       if (!content.includes(phrase)) out.push(`${basename}.md: ${what} missing — "${phrase}" not found`);
     };
     const noteOnly = TRACKER_NOTE_ONLY_HOSTS.includes(basename);
-    for (const { name, requiredPhrase } of TRACKER_DEFINES) {
+    for (const { name, requiredPhrase, notePhrase } of TRACKER_DEFINES) {
       if (noteOnly && name === 'issue_capture_contract') continue;
       need(requiredPhrase, `${name}() body`);
+      if (notePhrase !== undefined) need(notePhrase, `${name}() note`);
     }
     if (noteOnly) {
       for (const phrase of capturePhrases) need(phrase, 'capture list');
@@ -2751,12 +2799,14 @@ describe('_tracker.mds adoption + per-define non-emptiness (P2-S9)', () => {
     }
   });
 
-  it('known-bad probes: a host that calls no define, a lost PR link literal, a lost emit-source table, a deleted content bullet and a renamed producer literal are each reported', async () => {
+  it('known-bad probes: a host that calls no define, a lost PR link literal, a lost emit-source table, a deleted content bullet, a renamed producer literal and a grammar Note without its leading github condition are each reported', async () => {
     // A host that @imports the partial but never calls a define compiles fine and
     // lands here with every phrase missing.
-    expect(collectTrackerAdoptionViolations('plan', '')).toHaveLength(TRACKER_DEFINES.length + 1);
+    const notePhraseCount = TRACKER_DEFINES.filter(d => d.notePhrase !== undefined).length;
+    expect(notePhraseCount, 'the condition-bearing Note is modelled, so the counts below include it').toBeGreaterThan(0);
+    expect(collectTrackerAdoptionViolations('plan', '')).toHaveLength(TRACKER_DEFINES.length + 1 + notePhraseCount);
     expect(collectTrackerAdoptionViolations('implement', '')).toHaveLength(
-      TRACKER_DEFINES.length - 1 + NOTE_ONLY_CAPTURE_PHRASES.length,
+      TRACKER_DEFINES.length - 1 + notePhraseCount + NOTE_ONLY_CAPTURE_PHRASES.length,
     );
 
     const plan = await fs.readFile(path.join(BUILT_COMMANDS, 'plan.md'), 'utf-8');
@@ -2806,6 +2856,21 @@ describe('_tracker.mds adoption + per-define non-emptiness (P2-S9)', () => {
       collectTrackerAdoptionViolations('implement', `${implement}\n${CONTRACT_ONLY_PHRASE}`),
       'a note-only host that grows the full contract back must be reported, so the roster stays true',
     ).toHaveLength(1);
+
+    // The github condition leads the grammar Note. The superseded wording trailed it
+    // as a parenthesis, which could attach to "decides" instead.
+    const grammarNote = TRACKER_DEFINES.find(d => d.name === 'issue_ref_grammar')!.notePhrase!;
+    const trailingCondition = 'Note: only the Git agent decides if a bare digit run is a reference (only under `github`)';
+    const reportedNote = `plan.md: issue_ref_grammar() note missing — "${grammarNote}" not found`;
+    expect(plan, 'the seed deletes the real Note sentence').toContain(grammarNote);
+    expect(
+      collectTrackerAdoptionViolations('plan', without(plan, grammarNote, trailingCondition)),
+      'a Note whose github condition trails as a parenthesis must be reported',
+    ).toEqual([reportedNote]);
+    expect(
+      collectTrackerAdoptionViolations('plan', without(plan, grammarNote, 'Note: only the Git agent decides if a bare digit run is a reference')),
+      'a Note that lost its github condition must be reported',
+    ).toEqual([reportedNote]);
   });
 
   /** Named collector: the `@define <name>():` / `@export <name>` names in a partial source. */
@@ -2891,13 +2956,19 @@ describe('_tracker.mds adoption + per-define non-emptiness (P2-S9)', () => {
       return end === -1 ? '' : source.slice(bodyStart, end);
     }
 
-    for (const { name, requiredPhrase, minBytes, holdsNote, noteForm } of TRACKER_DEFINES) {
+    for (const { name, requiredPhrase, notePhrase, minBytes, holdsNote, noteForm } of TRACKER_DEFINES) {
       const body = defineBody(name);
       expect(body, `${name}() must exist in _tracker.mds`).not.toBe('');
       expect(
         body.includes(requiredPhrase),
         `${name}() body must state "${requiredPhrase}" — a define can be exported with a placeholder body and still compile`,
       ).toBe(true);
+      if (notePhrase !== undefined) {
+        expect(
+          body.includes(notePhrase),
+          `${name}() note must state "${notePhrase}" — the condition leads the sentence it limits`,
+        ).toBe(true);
+      }
       expect(
         body.length,
         `${name}() body is ${body.length} bytes — below the ${minBytes}-byte floor, which is the shape a hollowed-out define takes`,
