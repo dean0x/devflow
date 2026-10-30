@@ -84,7 +84,9 @@ import {
   parseWorkflowFolders,
   readBuildId,
   stampBuildId,
+  unstampBuildId,
   validateSkillOutputName,
+  verifyFolderBuildId,
   workflowBuildId,
   workflowFolderFiles,
   workflowFolderHosts,
@@ -1515,6 +1517,128 @@ describe('the build id (D-BUILD-ID)', () => {
       const files = stampAll('0123456789ab');
       files[2] = { file: 'references/asks.md', body: '# Asks [build fedcba987654]\n' };
       expect(valueOf(checkFolderBuildIds(files))).toBe('0123456789ab');
+    });
+  });
+
+  describe('unstampBuildId', () => {
+    const ID = '0123456789ab';
+
+    it('undoes the stamp: the body as it was, and the id the stamp carried', () => {
+      const bodies = [
+        FILES[0].body,
+        '# Flow\r\nText.\r\n',
+        '---\nname: x\n# a comment\n---\n# Flow\n',
+        '```\n# not a heading\n```\n# Real\n\nText.\n',
+        'Intro.\n\n### Deep\n# Later\n',
+      ];
+      for (const body of bodies) {
+        const unstamped = valueOf(unstampBuildId(valueOf(stampBuildId(body, ID))));
+        expect(unstamped, JSON.stringify(body)).toEqual({ body, id: ID });
+      }
+    });
+
+    it('returns the body without the blanks the stamp dropped from the end of the heading line', () => {
+      const stamped = valueOf(stampBuildId('Intro.\n\n### Deep \t \n# Later\n', ID));
+      expect(valueOf(unstampBuildId(stamped))).toEqual({ body: 'Intro.\n\n### Deep\n# Later\n', id: ID });
+    });
+
+    it('removes the stamp of the first heading only', () => {
+      const text = `# Flow [build ${ID}]\n\n## Step [build fedcba987654]\n`;
+      expect(valueOf(unstampBuildId(text))).toEqual({ body: '# Flow\n\n## Step [build fedcba987654]\n', id: ID });
+    });
+
+    it('refuses a text whose first heading has no stamp, and a text with no heading', () => {
+      expect(errorOf(unstampBuildId('# Flow\n'))).toEqual({ kind: 'no-stamp' });
+      expect(errorOf(unstampBuildId('Text only.\n'))).toEqual({ kind: 'no-heading' });
+      expect(errorOf(unstampBuildId('# Flow\n\nLater [build 0123456789ab]\n'))).toEqual({ kind: 'no-stamp' });
+    });
+  });
+
+  describe('workflowBuildId and the stamp', () => {
+    const stampAll = (id: string, files: ReadonlyArray<{ file: string; body: string }>): Array<{ file: string; body: string }> =>
+      files.map(f => (isStampedWorkflowFile(f.file) ? { file: f.file, body: valueOf(stampBuildId(f.body, id)) } : { ...f }));
+    const unstampAll = (files: ReadonlyArray<{ file: string; body: string }>): Array<{ file: string; body: string }> =>
+      files.map(f => (isStampedWorkflowFile(f.file) ? { file: f.file, body: valueOf(unstampBuildId(f.body)).body } : { ...f }));
+    const withHeading = (index: number, from: string, to: string) =>
+      FILES.map((f, i) => (i === index ? { ...f, body: f.body.replace(from, to) } : f));
+
+    it('does not move when the first heading of a stamped file ends in blanks, because the stamp drops them', () => {
+      expect(workflowBuildId(withHeading(0, '# Flow', '# Flow \t '))).toBe(workflowBuildId(FILES));
+      expect(workflowBuildId(withHeading(1, '# Note', '# Note  '))).toBe(workflowBuildId(FILES));
+    });
+
+    it('moves when a blank changes a reference file, which the stamp does not touch', () => {
+      expect(workflowBuildId(withHeading(2, '# Asks', '# Asks  '))).not.toBe(workflowBuildId(FILES));
+    });
+
+    it('moves when a blank changes anything but the end of the first heading line of a stamped file', () => {
+      expect(workflowBuildId(withHeading(0, 'Text.', 'Text. '))).not.toBe(workflowBuildId(FILES));
+      expect(workflowBuildId(withHeading(0, '# Flow', '#  Flow'))).not.toBe(workflowBuildId(FILES));
+    });
+
+    it('is the id recomputed from the unstamped files of the folder it stamped', () => {
+      for (const files of [FILES, withHeading(0, '# Flow', '# Flow  '), withHeading(1, '# Note', '# Note\t')]) {
+        const id = workflowBuildId(files);
+        expect(workflowBuildId(unstampAll(stampAll(id, files)))).toBe(id);
+      }
+    });
+  });
+
+  describe('verifyFolderBuildId', () => {
+    const stampAll = (id: string, files: ReadonlyArray<{ file: string; body: string }>): Array<{ file: string; body: string }> =>
+      files.map(f => (isStampedWorkflowFile(f.file) ? { file: f.file, body: valueOf(stampBuildId(f.body, id)) } : { ...f }));
+    const stampedBuild = (files: ReadonlyArray<{ file: string; body: string }> = FILES) =>
+      stampAll(workflowBuildId(files), files);
+
+    it('returns the id of a folder whose stamp is the id of its own files', () => {
+      const id = workflowBuildId(FILES);
+      expect(valueOf(verifyFolderBuildId(stampedBuild()))).toBe(id);
+    });
+
+    it('accepts a folder whose only stamped file is the core, with the references of its own build', () => {
+      const files = [FILES[0], FILES[2]];
+      expect(valueOf(verifyFolderBuildId(stampedBuild(files)))).toBe(workflowBuildId(files));
+    });
+
+    it('accepts a folder whose first heading ended in blanks before the stamp', () => {
+      const files = FILES.map((f, i) => (i === 0 ? { ...f, body: f.body.replace('# Flow', '# Flow  ') } : f));
+      expect(valueOf(verifyFolderBuildId(stampedBuild(files)))).toBe(workflowBuildId(files));
+    });
+
+    it('refuses a reference file of another build, and names the stamp and the id of the files', () => {
+      const id = workflowBuildId(FILES);
+      const swapped = stampedBuild().map(f => (f.file === 'references/asks.md' ? { ...f, body: '# Asks\n\nText of another build.\n' } : f));
+      const refused = errorOf(verifyFolderBuildId(swapped));
+      expect(refused.kind).toBe('id-mismatch');
+      if (refused.kind !== 'id-mismatch') throw new Error(JSON.stringify(refused));
+      expect(refused.stamped).toBe(id);
+      expect(refused.recomputed).toMatch(new RegExp(`^[0-9a-f]{${BUILD_ID_LENGTH}}$`));
+      expect(refused.recomputed).not.toBe(id);
+      expect(describeBuildIdCheckError(refused)).toContain(id);
+      expect(describeBuildIdCheckError(refused)).toContain(refused.recomputed);
+    });
+
+    it('refuses the same swap in a folder whose only stamped file is the core', () => {
+      const files = [FILES[0], FILES[2]];
+      const swapped = stampedBuild(files).map(f => (f.file === 'references/asks.md' ? { ...f, body: '# Asks\n\nOther.\n' } : f));
+      expect(errorOf(verifyFolderBuildId(swapped)).kind).toBe('id-mismatch');
+    });
+
+    it('refuses a stamped file edited after the build, a file left out, and a stamp that is the hash of nothing', () => {
+      const edited = stampedBuild().map(f => (f.file === 'note.md' ? { ...f, body: `${f.body}Edited.\n` } : f));
+      expect(errorOf(verifyFolderBuildId(edited)).kind).toBe('id-mismatch');
+      expect(errorOf(verifyFolderBuildId(stampedBuild().slice(0, 2))).kind).toBe('id-mismatch');
+      expect(errorOf(verifyFolderBuildId(stampAll('0123456789ab', FILES))).kind).toBe('id-mismatch');
+    });
+
+    it('keeps the refusals of the shared-id check: mixed ids, an unstamped file, nothing stamped', () => {
+      const mixed = stampedBuild();
+      mixed[1] = { file: 'note.md', body: valueOf(stampBuildId(FILES[1].body, 'fedcba987654')) };
+      expect(errorOf(verifyFolderBuildId(mixed)).kind).toBe('mixed-ids');
+      const unstamped = stampedBuild();
+      unstamped[1] = FILES[1];
+      expect(errorOf(verifyFolderBuildId(unstamped))).toEqual({ kind: 'unstamped', file: 'note.md', reason: 'no-stamp' });
+      expect(errorOf(verifyFolderBuildId([FILES[2]]))).toEqual({ kind: 'no-stamped-file' });
     });
   });
 });

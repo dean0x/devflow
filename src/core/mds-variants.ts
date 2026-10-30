@@ -31,7 +31,7 @@
  * A last group serves the workflow skill folders: which hosts make up a folder and
  * which files each variant key holds (WORKFLOW_FOLDERS, workflowFolderFiles), and the
  * build id that ties the files of one folder and key together (workflowBuildId,
- * stampBuildId, checkFolderBuildIds).
+ * stampBuildId, unstampBuildId, checkFolderBuildIds, verifyFolderBuildId).
  * It still performs no I/O and no iteration over the filesystem.
  *
  * The `-variants` in the filename names the variant-expansion entry point below
@@ -1719,7 +1719,7 @@ function byCodeUnit(a: string, b: string): number {
 
 /**
  * The build id of one folder under one variant key: the first {@link BUILD_ID_LENGTH}
- * hex digits of the SHA-256 over the folder's compiled bodies as they were BEFORE the
+ * hex digits of the SHA-256 over the folder's compiled bodies as they stand BEFORE the
  * stamp, sorted by file name.
  *
  * D-BUILD-ID: one id per folder and key, and nothing else goes into it: no timestamp,
@@ -1729,6 +1729,12 @@ function byCodeUnit(a: string, b: string): number {
  * moves the id of its folder; only the STAMP skips them (isStampedWorkflowFile), which
  * keeps those files byte-equal to their compiled bodies.
  *
+ * The id can be recomputed from a stamped folder. The stamp drops the blanks that end
+ * the first heading line, so a stamped file enters the digest in that same form
+ * ({@link stampReadyBody}) and {@link unstampBuildId} gives back the exact text that was
+ * hashed. A body whose heading ends in blanks and one whose heading does not therefore
+ * share an id, as they share their stamped text.
+ *
  * Each file enters the digest as its name, its length in bytes, then its body, each
  * on a line of its own. The length makes the framing injective: two different sets of
  * files cannot produce one byte stream by moving text across a file boundary.
@@ -1736,8 +1742,9 @@ function byCodeUnit(a: string, b: string): number {
 export function workflowBuildId(files: readonly CompiledFolderFile[]): string {
   const hash = createHash('sha256');
   for (const { file, body } of [...files].sort((a, b) => byCodeUnit(a.file, b.file))) {
-    hash.update(`${file}\n${Buffer.byteLength(body, 'utf8')}\n`);
-    hash.update(body, 'utf8');
+    const hashed = isStampedWorkflowFile(file) ? stampReadyBody(body) : body;
+    hash.update(`${file}\n${Buffer.byteLength(hashed, 'utf8')}\n`);
+    hash.update(hashed, 'utf8');
     hash.update('\n');
   }
   return hash.digest('hex').slice(0, BUILD_ID_LENGTH);
@@ -1786,6 +1793,23 @@ export type BuildStampError =
   | { kind: 'no-heading' }
   | { kind: 'already-stamped'; id: string };
 
+/** The offset where the text of a heading line ends: its end, less the blanks that close it. */
+function headingTextEnd(text: string, heading: HeadingSpan): number {
+  return heading.start + text.slice(heading.start, heading.end).replace(/[ \t]+$/, '').length;
+}
+
+/**
+ * A compiled body in the form the stamp leaves it, before the suffix: the blanks that
+ * end the first heading line dropped. A body with no heading is returned as it is.
+ * {@link stampBuildId} writes the suffix after this text and {@link unstampBuildId}
+ * returns this text, which is what lets the build id be recomputed from a stamped file.
+ */
+function stampReadyBody(body: string): string {
+  const heading = locateFirstHeading(body);
+  if (heading === null) return body;
+  return `${body.slice(0, headingTextEnd(body, heading))}${body.slice(heading.end)}`;
+}
+
 /**
  * Stamp a build id into the first heading line of a compiled body, as the suffix
  * ` [build <id>]`.
@@ -1794,15 +1818,15 @@ export type BuildStampError =
  * suffix leaves the heading text, and every anchor made from it, as written. A body
  * with no heading has nowhere to carry the id and is refused, and so is a heading that
  * already carries a stamp, which would otherwise hide a stale one behind the new one.
+ * The blanks that end the heading line are dropped, so the suffix follows the text
+ * directly; {@link unstampBuildId} undoes the stamp up to that one change.
  */
 export function stampBuildId(body: string, id: string): Result<string, BuildStampError> {
   const heading = locateFirstHeading(body);
   if (heading === null) return Err({ kind: 'no-heading' });
-  const line = body.slice(heading.start, heading.end);
-  const existing = BUILD_STAMP_SUFFIX_RE.exec(line);
+  const existing = BUILD_STAMP_SUFFIX_RE.exec(body.slice(heading.start, heading.end));
   if (existing !== null) return Err({ kind: 'already-stamped', id: existing[1] });
-  const textEnd = heading.start + line.replace(/[ \t]+$/, '').length;
-  return Ok(`${body.slice(0, textEnd)} [build ${id}]${body.slice(heading.end)}`);
+  return Ok(`${body.slice(0, headingTextEnd(body, heading))} [build ${id}]${body.slice(heading.end)}`);
 }
 
 export type BuildIdReadError = { kind: 'no-heading' } | { kind: 'no-stamp' };
@@ -1815,14 +1839,32 @@ export function readBuildId(text: string): Result<string, BuildIdReadError> {
   return stamp === null ? Err({ kind: 'no-stamp' }) : Ok(stamp[1]);
 }
 
+/**
+ * Take the stamp off a stamped file: the text without the suffix on its first heading
+ * line, and the id the suffix carried.
+ *
+ * The inverse of {@link stampBuildId} on a body whose heading does not end in blanks
+ * (a heading that does comes back without them, which is the form the build id is taken
+ * over). Only the first heading is read, so a stamp-like text elsewhere in the file stays.
+ */
+export function unstampBuildId(text: string): Result<{ readonly body: string; readonly id: string }, BuildIdReadError> {
+  const heading = locateFirstHeading(text);
+  if (heading === null) return Err({ kind: 'no-heading' });
+  const stamp = BUILD_STAMP_SUFFIX_RE.exec(text.slice(heading.start, heading.end));
+  if (stamp === null) return Err({ kind: 'no-stamp' });
+  return Ok({ body: `${text.slice(0, heading.end - stamp[0].length)}${text.slice(heading.end)}`, id: stamp[1] });
+}
+
 export type BuildIdCheckError =
   | { kind: 'no-stamped-file' }
   | { kind: 'unstamped'; file: string; reason: BuildIdReadError['kind'] }
-  | { kind: 'mixed-ids'; ids: ReadonlyArray<{ readonly file: string; readonly id: string }> };
+  | { kind: 'mixed-ids'; ids: ReadonlyArray<{ readonly file: string; readonly id: string }> }
+  | { kind: 'id-mismatch'; stamped: string; recomputed: string };
 
 /**
- * The static form of the check a reader of a folder makes: every stamped file of one
- * folder and key carries the same build id. Returns that id.
+ * The shared-id check of a folder: every stamped file of one folder and key carries the
+ * same build id. Returns that id. It reads the stamps and nothing else; it does not
+ * recompute the id from the files, and {@link verifyFolderBuildId} does.
  *
  * The reference files are outside it. A file with no heading or no stamp is refused by
  * name, and two ids are refused with every file's id listed, so a folder that mixes
@@ -1840,6 +1882,34 @@ export function checkFolderBuildIds(files: readonly CompiledFolderFile[]): Resul
   if (ids.length === 0) return Err({ kind: 'no-stamped-file' });
   const first = ids[0].id;
   return ids.every(entry => entry.id === first) ? Ok(first) : Err({ kind: 'mixed-ids', ids });
+}
+
+/**
+ * The check a reader of a folder makes: the shared-id check ({@link checkFolderBuildIds}),
+ * then the id recomputed over the unstamped stamped files and the reference bodies as
+ * they stand, which must be the id the stamps carry. Returns that id.
+ *
+ * Every file of the key's folder must be in `files`, because the id covers them all. A
+ * folder with one stamped file, or a reference file of another build, no longer passes
+ * on the stamps alone: its files hash to another id. The check holds for a folder as
+ * the build wrote it. It does not hold against someone who edits a file and the stamp
+ * together, since the id is a plain digest and not a signature.
+ */
+export function verifyFolderBuildId(files: readonly CompiledFolderFile[]): Result<string, BuildIdCheckError> {
+  const shared = checkFolderBuildIds(files);
+  if (!shared.ok) return shared;
+  const unstamped: CompiledFolderFile[] = [];
+  for (const { file, body } of files) {
+    if (!isStampedWorkflowFile(file)) {
+      unstamped.push({ file, body });
+      continue;
+    }
+    const read = unstampBuildId(body);
+    if (!read.ok) return Err({ kind: 'unstamped', file, reason: read.error.kind });
+    unstamped.push({ file, body: read.value.body });
+  }
+  const recomputed = workflowBuildId(unstamped);
+  return recomputed === shared.value ? Ok(shared.value) : Err({ kind: 'id-mismatch', stamped: shared.value, recomputed });
 }
 
 /** Render a stamp refusal as one line a person can act on. */
@@ -1865,6 +1935,8 @@ export function describeBuildIdCheckError(error: BuildIdCheckError): string {
       return `${error.file} has no build id (${error.reason})`;
     case 'mixed-ids':
       return `the folder mixes build ids: ${error.ids.map(entry => `${entry.file} ${entry.id}`).join(', ')}`;
+    case 'id-mismatch':
+      return `the files of the folder hash to build id ${error.recomputed}, but the stamps carry ${error.stamped}; a file is from another build or was changed`;
     default: {
       const unhandled: never = error;
       return `unhandled build id refusal ${JSON.stringify(unhandled)}`;

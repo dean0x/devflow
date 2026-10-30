@@ -14,16 +14,15 @@
  *
  * TP-20, TP-21 (install and uninstall halves), TP-22, TP-23, TP-25.
  */
-import { createHash } from 'crypto';
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { computeAssetsToRemove, enumerateDryRunExtras, formatDryRunPlan, removeAllDevFlow, removeSelectedPlugins, sweepDevflowNamespaces } from '../../src/cli/commands/uninstall.js';
 import { workflowFolderShadowRefusal } from '../../src/cli/commands/skills.js';
 import { VARIANT_KEYS } from '../../src/core/curation-variants.js';
-import { stampBuildId, workflowFolderFiles, workflowFolderKey, workflowFolderRelPath, workflowFoldersRootRelPath } from '../../src/core/mds-variants.js';
+import { stampBuildId, workflowBuildId, workflowFolderFiles, workflowFolderKey, workflowFolderRelPath, workflowFoldersRootRelPath, type WorkflowFolder } from '../../src/core/mds-variants.js';
 import { workflowFolderNames, type PluginDefinition } from '../../src/core/plugins.js';
 import { installViaFileCopy, type InstallReport, type Spinner } from '../../src/targets/claude-code/installer.js';
 import { convergeVariantAxes, type VariantMachineState } from '../../src/targets/claude-code/curation-install.js';
@@ -90,12 +89,12 @@ async function fileMap(dir: string): Promise<Record<string, string>> {
   return out;
 }
 
-/** The build tree of one key, as the build would have written it for the fixture folder. */
+/** The build tree of one key, as the build would have written it for the fixture folder: the id is the real one. */
 async function writeBuiltTrees(root: string): Promise<void> {
   for (const key of VARIANT_KEYS) {
-    const id = createHash('sha256').update(key).digest('hex').slice(0, 12);
-    for (const file of workflowFolderFiles(FIXTURE_FOLDER, key)) {
-      const body = `# ${file}\n\nbuilt for ${key}\n`;
+    const bodies = workflowFolderFiles(FIXTURE_FOLDER, key).map(file => ({ file, body: `# ${file}\n\nbuilt for ${key}\n` }));
+    const id = workflowBuildId(bodies);
+    for (const { file, body } of bodies) {
       const stamped = file.startsWith('references/') ? { ok: true as const, value: body } : stampBuildId(body, id);
       if (!stamped.ok) throw new Error(`fixture file ${file} could not be stamped`);
       const target = path.join(root, ...workflowFolderRelPath(key, NAME, file).split('/'));
@@ -511,5 +510,219 @@ describe('the uninstall knows the folder (TP-21 uninstall half)', () => {
     const sweeps = await sweepDevflowNamespaces(claudeDir, false, undefined, undefined, FOLDER_SET);
     expect(sweeps.skills.removed).not.toContain(NAME);
     expect(await exists(folderDir())).toBe(true);
+  });
+});
+
+describe('the folder install under a failed swap, a hostile name and a stale tree', () => {
+  const realRename = fs.rename.bind(fs);
+
+  async function builtFiles(switches: Switches, folder: WorkflowFolder = FIXTURE_FOLDER) {
+    const read = await readWorkflowFolder(folder, switches, pkg);
+    if (!read.ok) throw new Error(read.reason);
+    return read.files;
+  }
+
+  /** The staging and backup entries that stand in the Claude directory. */
+  async function leftovers(): Promise<string[]> {
+    return (await fs.readdir(claudeDir)).filter(entry => entry.startsWith('.devflow-workflow-'));
+  }
+
+  /** Make every move onto the installed folder fail, or only the one that comes from the staging folder. */
+  function failMovesOntoTheFolder(opts: { includingTheRestore: boolean }): void {
+    vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      if (String(to) === folderDir()) {
+        if (String(from).endsWith('.old')) {
+          if (opts.includingTheRestore) throw new Error('EIO: injected restore failure');
+        } else {
+          throw new Error('EXDEV: injected move failure');
+        }
+      }
+      return realRename(from, to);
+    });
+  }
+
+  describe('a swap that fails (S3, T3)', () => {
+    it('puts the previous folder back byte for byte, leaves no staging folder, and says nothing is left to recover', async () => {
+      await install(ON);
+      const before = await fileMap(folderDir());
+      const files = await builtFiles(COMPLIANCE_OFF);
+      expect(Object.keys(before).length, 'precondition: a previous folder stands').toBeGreaterThan(0);
+      failMovesOntoTheFolder({ includingTheRestore: false });
+
+      const result = await installWorkflowFolder({ claudeDir, name: NAME, files, links: { refusedFolders: [] } });
+
+      expect(result.outcome).toBe('failed');
+      expect(result.reason).toContain('injected move failure');
+      expect(result.recoveryPath).toBeUndefined();
+      expect(await fileMap(folderDir())).toEqual(before);
+      expect(await leftovers()).toEqual([]);
+    });
+
+    it('leaves nothing behind when a first install fails', async () => {
+      const files = await builtFiles(ON);
+      failMovesOntoTheFolder({ includingTheRestore: false });
+
+      const result = await installWorkflowFolder({ claudeDir, name: NAME, files, links: { refusedFolders: [] } });
+
+      expect(result.outcome).toBe('failed');
+      expect(result.recoveryPath).toBeUndefined();
+      expect(await exists(folderDir())).toBe(false);
+      expect(await leftovers()).toEqual([]);
+    });
+
+    it('keeps the previous folder when the restore fails too, and names it with both errors', async () => {
+      await install(ON);
+      const before = await fileMap(folderDir());
+      const files = await builtFiles(COMPLIANCE_OFF);
+      failMovesOntoTheFolder({ includingTheRestore: true });
+
+      const result = await installWorkflowFolder({ claudeDir, name: NAME, files, links: { refusedFolders: [] } });
+
+      expect(result.outcome).toBe('failed');
+      const recovery = result.recoveryPath;
+      if (recovery === undefined) throw new Error(`the result names no way back: ${result.reason}`);
+      expect(path.dirname(recovery)).toBe(claudeDir);
+      expect(path.basename(recovery)).toMatch(/^\.devflow-workflow-flow-\d+-[A-Za-z0-9]{6}\.old$/);
+      expect(await fileMap(recovery), 'the backup is the previous folder, byte for byte').toEqual(before);
+      expect(result.reason).toMatch(/^EXDEV: injected move failure/);
+      expect(result.reason).toContain('injected restore failure');
+      expect(result.reason).toContain(recovery);
+      expect(await exists(folderDir()), 'nothing stands at the installed path').toBe(false);
+      expect(await leftovers(), 'the staging folder is gone and only the backup is kept').toEqual([path.basename(recovery)]);
+    });
+  });
+
+  describe('the name of a folder, at both sinks (S2)', () => {
+    const BAD_NAMES = ['x/../escape', '..', 'a\\b', 'Bad Name', ''];
+
+    it('readWorkflowFolder reads the folder under its own name, and refuses a name that only resolves to it', async () => {
+      expect((await readWorkflowFolder(FIXTURE_FOLDER, ON, pkg)).ok, 'precondition: the folder reads under its name').toBe(true);
+
+      const read = await readWorkflowFolder({ ...FIXTURE_FOLDER, name: `x/../${NAME}` }, ON, pkg);
+
+      expect(read.ok).toBe(false);
+      if (!read.ok) expect(read.reason).toContain(`x/../${NAME}`);
+    });
+
+    it.each(BAD_NAMES)('readWorkflowFolder refuses the name %j with a reason and does not throw', async name => {
+      const read = await readWorkflowFolder({ ...FIXTURE_FOLDER, name }, ON, pkg);
+      expect(read.ok).toBe(false);
+    });
+
+    it('installWorkflowFolder refuses a name that climbs out of the skills folder, and writes nothing', async () => {
+      const files = await builtFiles(ON);
+      const links = { refusedFolders: [] as string[] };
+
+      const result = await installWorkflowFolder({ claudeDir, name: 'x/../escape', files, links });
+
+      expect(result.outcome).toBe('failed');
+      expect(result.reason).toContain('x/../escape');
+      expect(await exists(path.join(claudeDir, 'skills', 'escape'))).toBe(false);
+      expect(await fs.readdir(claudeDir), 'nothing was staged or created').toEqual([]);
+      expect(links.refusedFolders).toEqual([]);
+    });
+
+    it.each(BAD_NAMES)('installWorkflowFolder refuses the name %j with a reason and does not throw', async name => {
+      const files = await builtFiles(ON);
+      const result = await installWorkflowFolder({ claudeDir, name, files, links: { refusedFolders: [] } });
+      expect(result.outcome).toBe('failed');
+      expect(result.reason).toBeTruthy();
+      expect(await fs.readdir(claudeDir)).toEqual([]);
+    });
+  });
+
+  describe('the staging folder (S1)', () => {
+    it('is not written through a link planted at the name an earlier install used', async () => {
+      const elsewhere = path.join(tmp, 'elsewhere-staging');
+      await fs.mkdir(elsewhere, { recursive: true });
+      const now = 1_800_000_000_000;
+      await fs.symlink(elsewhere, path.join(claudeDir, `.devflow-workflow-${NAME}-${process.pid}-${now.toString(36)}.tmp`));
+      const files = await builtFiles(ON);
+
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+      const result = await installWorkflowFolder({ claudeDir, name: NAME, files, links: { refusedFolders: [] } })
+        .finally(() => clock.mockRestore());
+
+      expect(result.outcome).toBe('installed');
+      expect(await walk(elsewhere), 'what the link points to is untouched').toEqual([]);
+      expect((await fs.lstat(folderDir())).isDirectory()).toBe(true);
+      expect(await fileMap(folderDir())).toEqual(await builtFolder(ON));
+    });
+
+    it('is made by an exclusive create in the Claude directory, named for the folder and the process', async () => {
+      const files = await builtFiles(ON);
+      const made = vi.spyOn(fs, 'mkdtemp');
+
+      const result = await installWorkflowFolder({ claudeDir, name: NAME, files, links: { refusedFolders: [] } });
+
+      expect(result.outcome).toBe('installed');
+      expect(made).toHaveBeenCalledTimes(1);
+      expect(made.mock.calls[0][0]).toBe(path.join(claudeDir, `.devflow-workflow-${NAME}-${process.pid}-`));
+      expect(await leftovers()).toEqual([]);
+    });
+
+    it('lets the installed folder take the default mode of a folder this process makes', async () => {
+      const files = await builtFiles(ON);
+      await installWorkflowFolder({ claudeDir, name: NAME, files, links: { refusedFolders: [] } });
+      const probe = path.join(tmp, 'mode-probe');
+      await fs.mkdir(probe);
+      expect((await fs.stat(folderDir())).mode & 0o777).toBe((await fs.stat(probe)).mode & 0o777);
+    });
+  });
+
+  describe('the build id is recomputed on the read (R2)', () => {
+    const treeFile = (folder: string, file: string, switches: Switches = ON): string =>
+      path.join(pkg, ...workflowFoldersRootRelPath(workflowFolderKey(switches)).split('/'), folder, ...file.split('/'));
+
+    it('refuses a folder where a reference file is the text of another build', async () => {
+      expect((await readWorkflowFolder(FIXTURE_FOLDER, ON, pkg)).ok, 'precondition: the built folder reads').toBe(true);
+      await fs.writeFile(treeFile(NAME, EVIDENCE), `# ${EVIDENCE}\n\nbuilt for another build\n`, 'utf-8');
+
+      const read = await readWorkflowFolder(FIXTURE_FOLDER, ON, pkg);
+
+      expect(read.ok).toBe(false);
+      if (!read.ok) expect(read.reason).toMatch(/build id/i);
+      await expect(install(ON)).rejects.toThrow(/build id/i);
+    });
+
+    it('refuses a folder where a stamped file was edited and kept its stamp', async () => {
+      const edited = treeFile(NAME, 'base-note.md');
+      await fs.writeFile(edited, `${await fs.readFile(edited, 'utf-8')}Edited by hand.\n`, 'utf-8');
+      expect((await readWorkflowFolder(FIXTURE_FOLDER, ON, pkg)).ok).toBe(false);
+    });
+
+    describe('a folder whose only stamped file is SKILL.md', () => {
+      const SOLO: WorkflowFolder = {
+        name: 'solo',
+        core: 'src/solo/SKILL.mds',
+        references: [{ source: 'src/solo/references/asks.mds', file: 'references/asks.md' }],
+      };
+      const CORE_BODY = '# Solo\n\nOne stamped file.\n';
+
+      /** Write the folder with the id of the build that made `asksOfTheBuild`, and `asksOnDisk` as the reference file. */
+      async function writeSolo(asksOfTheBuild: string, asksOnDisk: string): Promise<void> {
+        const id = workflowBuildId([{ file: 'SKILL.md', body: CORE_BODY }, { file: 'references/asks.md', body: asksOfTheBuild }]);
+        const stamped = stampBuildId(CORE_BODY, id);
+        if (!stamped.ok) throw new Error('fixture core could not be stamped');
+        for (const [file, text] of [['SKILL.md', stamped.value], ['references/asks.md', asksOnDisk]] as const) {
+          await fs.mkdir(path.dirname(treeFile('solo', file)), { recursive: true });
+          await fs.writeFile(treeFile('solo', file), text, 'utf-8');
+        }
+      }
+
+      it('passes with the references of its own build', async () => {
+        await writeSolo('# Asks\n\nOwn text.\n', '# Asks\n\nOwn text.\n');
+        const read = await readWorkflowFolder(SOLO, ON, pkg);
+        expect(read.ok).toBe(true);
+        if (read.ok) expect(read.files.map(f => f.file)).toEqual(['SKILL.md', 'references/asks.md']);
+      });
+
+      it('is refused when the reference is the text of another build', async () => {
+        await writeSolo('# Asks\n\nOwn text.\n', '# Asks\n\nText of another build.\n');
+        const read = await readWorkflowFolder(SOLO, ON, pkg);
+        expect(read.ok).toBe(false);
+        if (!read.ok) expect(read.reason).toMatch(/build id/i);
+      });
+    });
   });
 });

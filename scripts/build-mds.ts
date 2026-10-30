@@ -178,7 +178,6 @@ import {
   complianceOffOmittedRelPaths,
   describePostingOpsError,
   splitSectionArms,
-  checkFolderBuildIds,
   checkWorkflowFolders,
   describeBuildIdCheckError,
   describeBuildStampError,
@@ -187,6 +186,7 @@ import {
   isStampedWorkflowFile,
   parseWorkflowFolders,
   stampBuildId,
+  verifyFolderBuildId,
   workflowBuildId,
   workflowFolderFiles,
   workflowFolderHosts,
@@ -1390,8 +1390,9 @@ interface SettledWorkflowHost {
  *  2. The build id (D-BUILD-ID): workflowBuildId over the key's compiled bodies before
  *     the stamp, then the same id stamped into the first heading of every file outside
  *     references/. Same sources, same id; the reference files stay byte-equal.
- *  3. A post-condition: the stamped files of the key read back one id, and it is the
- *     id that was stamped.
+ *  3. A post-condition: verifyFolderBuildId, the check an install makes, passes on the
+ *     written files and gives the id that was stamped. The stamped files read back one
+ *     id, and the id recomputed from the unstamped files is that id.
  */
 function settleWorkflowFolder(
   folder: WorkflowFolder,
@@ -1433,7 +1434,7 @@ function settleWorkflowFolder(
       written.push({ file, body: content });
     }
 
-    const checked = checkFolderBuildIds(written);
+    const checked = verifyFolderBuildId(written);
     if (!checked.ok || checked.value !== id) {
       throw new Error(
         `workflow skill folder '${folder.name}', variant key '${key}': the stamped files do not read back build id ` +
