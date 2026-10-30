@@ -3,6 +3,7 @@ import type { BigIntStats } from 'fs';
 import * as path from 'path';
 
 import { isContainedIn } from '../../core/paths.js';
+import { createPathSet, type PathSet, type RetiredSet, type ShippedSet } from '../../core/path-set.js';
 
 /**
  * @file install-backup.ts
@@ -21,7 +22,8 @@ import { isContainedIn } from '../../core/paths.js';
  * Failures are records in {@link BackupSession.snapshot}, never throws.
  *
  * This module imports only node builtins and `core/`. The installer and the converge steps import
- * it, so the shipped and retired sets reach it as the {@link PathSet} inputs it declares itself.
+ * it, so the shipped and retired sets reach it as {@link PathSet} inputs, a type that `core/path-set`
+ * declares and this module re-exports.
  */
 
 /** Entry cap for one walked known folder. */
@@ -45,36 +47,8 @@ const COMPLIANCE_SKILL_SIDECAR = 'skills/devflow:compliance.tmp';
 const SIDECAR_SUFFIX = /(?:\.tmp(?:\.\d+)?|\.old)$/;
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/g;
 
-/**
- * A set of file paths relative to the Claude dir, with `/` separators, and the question the scan
- * asks of it. `files` holds file paths only. `holds` is true for a path in the set and for every
- * folder that has a path of the set below it.
- */
-export interface PathSet {
-  readonly files: ReadonlySet<string>;
-  holds(folder: string): boolean;
-}
-
-/** What the current release ships. A name in this set is never moved and never counted as retired. */
-export type ShippedSet = PathSet;
-
-/** What an earlier release shipped and the current one does not. A file in this set is removed and named. */
-export type RetiredSet = PathSet;
-
-/** Build a {@link PathSet} from file paths: the folder prefixes are computed once. */
-export function createPathSet(files: Iterable<string>): PathSet {
-  const all = new Set<string>(files);
-  const folders = new Set<string>();
-  for (const file of all) {
-    for (let cut = file.indexOf('/'); cut !== -1; cut = file.indexOf('/', cut + 1)) {
-      folders.add(file.slice(0, cut));
-    }
-  }
-  return Object.freeze({
-    files: all,
-    holds: (folder: string): boolean => all.has(folder) || folders.has(folder),
-  });
-}
+export { createPathSet };
+export type { PathSet, ShippedSet, RetiredSet };
 
 /** What an entry is on disk, taken with `lstat`, so a link is a link. */
 export type EntryKind = 'file' | 'directory' | 'link' | 'special';
