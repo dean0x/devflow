@@ -1,16 +1,17 @@
 /**
  * Running-commands parity guard (D-FOREGROUND-RUN).
  *
- * The Code, Validate and Test agents each run builds and tests, and each carries
- * the same `## Running commands` section: foreground runs under an explicit Bash
- * timeout, capture-then-tail in one call, no backgrounding and no polling across
- * turns. Three agents repeat one doctrine because an agent body is its standing
- * instruction. The section is the single source of that wording, so a copy that
- * drifts would put two different rules in front of two agents doing the same job.
+ * The Code, Fix, Refactor, Validate and Test agents each run builds and tests, and
+ * each carries the same `## Running commands` section: foreground runs under an
+ * explicit Bash timeout, capture-then-tail in one call, no backgrounding and no
+ * polling across turns. Five agents repeat one doctrine because an agent body is
+ * its standing instruction. The section is the single source of that wording, so
+ * a copy that drifts would put two different rules in front of two agents doing
+ * the same job.
  *
  * What this holds, and why each arm exists:
  *
- *   - exactly one block per body, and the three byte-identical;
+ *   - exactly one block per body, and the five byte-identical;
  *   - the block fits its byte target, so validate.md (whose old section was 1,488
  *     bytes) does not grow;
  *   - the block states every normative element, so a rewording cannot quietly
@@ -21,8 +22,9 @@
  *   - the wait rule is one whole line as written, so a clause added, dropped or negated
  *     inside it is seen even when every marker stays, and no line keeps the retired
  *     wording that reported an overrun BLOCKED with no wait;
- *   - the engine's `build_execution_doctrine()` renders the same text, and the
- *     dynamic-build prompt sites name the block instead of copying it;
+ *   - the engine's `build_execution_doctrine()` renders the same text, names all
+ *     five carriers in the sentence that introduces it, and the dynamic-build
+ *     prompt sites name the block instead of copying it;
  *   - test.md's dev-server addendum follows the block as a section of its own and
  *     is where the dev server is started in the background: Monitor, which the
  *     block prohibits, is not named there or anywhere else in the body.
@@ -191,6 +193,24 @@ function collectEngineDefects(engine: string, block: string): string[] {
 }
 
 /**
+ * Named collector: how the engine's sentence that introduces the block departs
+ * from CARRIERS. The sentence reads "The A, B and C agents each carry this
+ * `## Running commands` block": every carrier must be named, and no other agent.
+ */
+function collectCarrierListDefects(engine: string): string[] {
+  const doctrine = engineDoctrine(engine)
+  if (doctrine === null) return ['_engine.mds: no build_execution_doctrine() define']
+  const named = /^The (.+) agents each carry this `## Running commands` block/m.exec(doctrine)?.[1]
+  if (named === undefined) return ['_engine.mds: build_execution_doctrine() names no carrier list']
+  const listed = named.split(/, | and /).map(name => name.toLowerCase())
+  const carriers: readonly string[] = CARRIERS
+  return [
+    ...carriers.filter(name => !listed.includes(name)).map(name => `_engine.mds: the carrier list omits ${name}`),
+    ...listed.filter(name => !carriers.includes(name)).map(name => `_engine.mds: the carrier list names ${name}, which carries no block`),
+  ]
+}
+
+/**
  * The dynamic-build prompt sites that name the block, each anchored by its own
  * quoted text: the Code implementation prompt, both Gate 1 Validate prompts and
  * the Validate re-run after a Gate 1 fix in each pass, both Fix prompts after
@@ -300,6 +320,10 @@ describe('D-FOREGROUND-RUN: the Running commands block', () => {
     expect(collectEngineDefects(engineSource(), block)).toEqual([])
   })
 
+  it('the engine names all five carriers of the block, and no other agent', () => {
+    expect(collectCarrierListDefects(engineSource())).toEqual([])
+  })
+
   it('the dynamic-build prompt sites name the block, in the source and in the compiled command', () => {
     expect(DYNAMIC_BUILD_SITES.length).toBeGreaterThanOrEqual(9)
     expect(collectSiteDefects(dynamicBuildSource())).toEqual([])
@@ -407,6 +431,26 @@ describe('D-FOREGROUND-RUN: the Running commands block', () => {
     expect(collectSiteDefects(reverted)).toEqual([
       '0 occurrences of: Follow your Running commands block for every scenario command.',
     ])
+  })
+
+  it('known-bad probe: a carrier list that omits Fix and Refactor, names an agent with no block, or is gone, is reported', () => {
+    const engine = engineSource()
+    const shipped = 'The Code, Fix, Refactor, Validate and Test agents each carry this'
+    const seed = (to: string): string => {
+      expect(engine.split(shipped).length - 1, 'the seed must land once').toBe(1)
+      return engine.replace(shipped, () => to)
+    }
+    expect(collectCarrierListDefects(seed('The Validate, Code and Test agents each carry this'))).toEqual([
+      '_engine.mds: the carrier list omits fix',
+      '_engine.mds: the carrier list omits refactor',
+    ])
+    expect(collectCarrierListDefects(seed('The Code, Fix, Refactor, Validate, Test and Harden agents each carry this'))).toEqual([
+      '_engine.mds: the carrier list names harden, which carries no block',
+    ])
+    expect(collectCarrierListDefects(seed('These agents each carry this'))).toEqual([
+      '_engine.mds: build_execution_doctrine() names no carrier list',
+    ])
+    expect(collectCarrierListDefects('no engine here')).toEqual(['_engine.mds: no build_execution_doctrine() define'])
   })
 
   it('known-bad probe: an engine that drifts from the block, and a Monitor clause in test.md, are reported', () => {

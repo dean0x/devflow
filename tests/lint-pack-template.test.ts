@@ -118,6 +118,7 @@ function newRepo() {
     git('add', '-A');
     git(
       '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false',
+      '-c', 'maintenance.auto=false',
       'commit', '-q', '--allow-empty', '-m', message,
     );
     return git('rev-parse', 'HEAD').trim();

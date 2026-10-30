@@ -23,6 +23,7 @@ import * as path from 'path';
 import { getAllAgentNames } from '../../src/core/plugins.js';
 import { collectBackslashBraceLeaks } from '../helpers.js';
 import { MDS_GENERATOR_HOSTS } from '../fixtures/mds-manifest.js';
+import { tarballInstallCommand } from './npm-install.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 
@@ -105,7 +106,7 @@ describe('Guard 6 (pack-install): npm pack produces a working installable packag
       JSON.stringify({ name: 'devflow-pack-smoke', version: '0.0.0', private: true }),
     );
 
-    const result = runSync(`npm install --no-save "${tgzPath}"`, { cwd: INSTALL_DIR, timeout: 120_000 });
+    const result = runSync(tarballInstallCommand(tgzPath), { cwd: INSTALL_DIR, timeout: 120_000 });
 
     expect(result.exitCode, `npm install failed (exit ${result.exitCode}):\n${result.stderr}`).toBe(0);
   });
