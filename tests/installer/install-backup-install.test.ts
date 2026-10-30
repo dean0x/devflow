@@ -31,6 +31,7 @@ import {
   removeHome,
   runInstall,
   type TestHome,
+  USER_SKILL_FOLDER,
 } from './install-backup-harness.js';
 
 let home: TestHome;
@@ -119,7 +120,7 @@ describe('a full install moves what devflow did not ship', () => {
 
   it('moves a devflow:* folder outside the registry whole', async () => {
     await runInstall(home, { shape: 'full' });
-    const foreign = 'skills/devflow:mine-own-skill';
+    const foreign = `skills/devflow:${USER_SKILL_FOLDER}`;
     await put(home, `${foreign}/SKILL.md`, 'my skill\n');
     await put(home, `${foreign}/references/deep.md`, 'deep\n');
 
@@ -129,7 +130,7 @@ describe('a full install moves what devflow did not ship', () => {
     expect(await exists(at(home, foreign))).toBe(false);
     expect(await fs.readFile(inRun(run, `${foreign}/references/deep.md`), 'utf8')).toBe('deep\n');
     expect(movedOriginals(report)).toEqual([at(home, foreign)]);
-    expect(report.sweptOrphans.map(orphan => orphan.name)).not.toContain('mine-own-skill');
+    expect(report.sweptOrphans.map(orphan => orphan.name)).not.toContain(USER_SKILL_FOLDER);
   });
 });
 
@@ -139,7 +140,7 @@ describe('a partial install moves only what its sweeps would remove', () => {
     const planted: Record<string, string> = {
       'commands/devflow/mine.md': 'my command\n',
       'agents/devflow/mine.md': 'my agent\n',
-      'skills/devflow:mine-own-skill/SKILL.md': 'my skill\n',
+      [`skills/devflow:${USER_SKILL_FOLDER}/SKILL.md`]: 'my skill\n',
       'skills/devflow:git/references/pr/mine-pr.md': 'my pr note\n',
       'skills/devflow:git/references/tracker/mine/notes.md': 'my tracker notes\n',
     };
@@ -150,10 +151,10 @@ describe('a partial install moves only what its sweeps would remove', () => {
     const run = await onlyRunFolder(home);
     expect(await exists(at(home, 'commands/devflow/mine.md'))).toBe(false);
     expect(await exists(at(home, 'agents/devflow/mine.md'))).toBe(false);
-    expect(await exists(at(home, 'skills/devflow:mine-own-skill'))).toBe(false);
+    expect(await exists(at(home, `skills/devflow:${USER_SKILL_FOLDER}`))).toBe(false);
     expect(await exists(at(home, 'skills/devflow:git/references/pr/mine-pr.md'))).toBe(false);
     expect(await exists(at(home, 'skills/devflow:git/references/tracker/mine'))).toBe(false);
-    for (const rel of ['commands/devflow/mine.md', 'agents/devflow/mine.md', 'skills/devflow:mine-own-skill/SKILL.md', 'skills/devflow:git/references/pr/mine-pr.md', 'skills/devflow:git/references/tracker/mine/notes.md']) {
+    for (const rel of ['commands/devflow/mine.md', 'agents/devflow/mine.md', `skills/devflow:${USER_SKILL_FOLDER}/SKILL.md`, 'skills/devflow:git/references/pr/mine-pr.md', 'skills/devflow:git/references/tracker/mine/notes.md']) {
       expect(await fs.readFile(inRun(run, rel), 'utf8'), rel).toBe(planted[rel]);
     }
     const message = formatBackupSummary(report.backups).map(line => line.message).join('\n');

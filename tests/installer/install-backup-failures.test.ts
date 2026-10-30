@@ -30,6 +30,7 @@ import {
   runInstall,
   treeSnapshot,
   type TestHome,
+  USER_SKILL_FOLDER,
 } from './install-backup-harness.js';
 
 let home: TestHome;
@@ -245,8 +246,8 @@ describe('a root that is a link or not a folder', () => {
   it('gets no move and no removal below a skills root that is a link, and says so', async () => {
     await runInstall(home, { shape: 'full' });
     const outside = path.join(home.home, 'outside-skills');
-    await fs.mkdir(path.join(outside, 'devflow:mine-own-skill'), { recursive: true });
-    await fs.writeFile(path.join(outside, 'devflow:mine-own-skill', 'SKILL.md'), 'my skill\n');
+    await fs.mkdir(path.join(outside, `devflow:${USER_SKILL_FOLDER}`), { recursive: true });
+    await fs.writeFile(path.join(outside, `devflow:${USER_SKILL_FOLDER}`, 'SKILL.md'), 'my skill\n');
     const slot = at(home, 'skills');
     await fs.rm(slot, { recursive: true });
     await fs.symlink(outside, slot);
@@ -254,7 +255,7 @@ describe('a root that is a link or not a folder', () => {
 
     const report = await runInstall(home, { shape: 'full', warn: message => warnings.push(message) });
 
-    expect(await fs.readFile(path.join(outside, 'devflow:mine-own-skill', 'SKILL.md'), 'utf8')).toBe('my skill\n');
+    expect(await fs.readFile(path.join(outside, `devflow:${USER_SKILL_FOLDER}`, 'SKILL.md'), 'utf8')).toBe('my skill\n');
     expect((await fs.lstat(slot)).isSymbolicLink()).toBe(true);
     expect(report.backups.moved).toEqual([]);
     expect(backupRootOf(home)).toBeNull();

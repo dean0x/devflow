@@ -35,7 +35,9 @@ const shipped = createPathSet([
   'skills/devflow:git/references/pr/ensure.md',
   'skills/devflow:compliance/SKILL.md',
 ]);
-const retired = createPathSet(['commands/devflow/old.md', 'skills/devflow:old/SKILL.md']);
+/** A retired skill folder of the seeded sets; no registry ever named it. */
+const OLD_SKILL = 'old';
+const retired = createPathSet(['commands/devflow/old.md', `skills/devflow:${OLD_SKILL}/SKILL.md`]);
 const sets = { shipped, retired };
 
 let home: string;
@@ -96,7 +98,7 @@ describe('classify', () => {
 
   it('answers shipped for a folder that holds a shipped path and unknown for one that does not', () => {
     expect(classify('skills/devflow:git/references', 'directory', sets)).toBe('shipped');
-    expect(classify('skills/devflow:old', 'directory', sets)).toBe('retired');
+    expect(classify(`skills/devflow:${OLD_SKILL}`, 'directory', sets)).toBe('retired');
     expect(classify('skills/python', 'directory', sets)).toBe('unknown');
   });
 
@@ -308,17 +310,17 @@ describe('the pre-pass', () => {
   });
 
   it('removes a retired file and names it, and moves a user file beside it in a folder that holds nothing shipped', async () => {
-    const old = await put('skills/devflow:old/SKILL.md');
-    const mine = await put('skills/devflow:old/notes.md', 'my notes');
+    const old = await put(`skills/devflow:${OLD_SKILL}/SKILL.md`);
+    const mine = await put(`skills/devflow:${OLD_SKILL}/notes.md`, 'my notes');
     const session = open();
-    await session.prepass([at('skills/devflow:old')]);
-    const removal = await session.removeListed(at('skills/devflow:old'));
+    await session.prepass([at(`skills/devflow:${OLD_SKILL}`)]);
+    const removal = await session.removeListed(at(`skills/devflow:${OLD_SKILL}`));
     expect(removal.folderRemoved).toBe(true);
     expect(await exists(old)).toBe(false);
     expect(await exists(mine)).toBe(false);
     expect(session.snapshot().retiredRemoved).toEqual([old]);
     expect(session.snapshot().moved.map(unit => unit.original)).toEqual([mine]);
-    expect(await fs.readFile(inRun('skills/devflow:old/notes.md'), 'utf8')).toBe('my notes');
+    expect(await fs.readFile(inRun(`skills/devflow:${OLD_SKILL}/notes.md`), 'utf8')).toBe('my notes');
   });
 
   it('descends into a known folder and keeps the relative path of what it moves', async () => {

@@ -28,6 +28,9 @@ export interface TestHome {
 
 const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
 
+/** The name of a `devflow:`-prefixed skill folder that devflow never ships: a folder the user made. */
+export const USER_SKILL_FOLDER = 'mine-own-skill';
+
 /** The plugins a default `devflow init` selects. */
 export const DEFAULT_PLUGINS: readonly PluginDefinition[] = DEVFLOW_PLUGINS.filter(plugin => !plugin.optional);
 
