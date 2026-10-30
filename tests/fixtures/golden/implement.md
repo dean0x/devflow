@@ -214,37 +214,19 @@ git -C "{start}" rev-parse --show-toplevel
 
 and use its one-line output. If the command fails (outside a git repository), `{worktree}` is the start directory itself. All paths below are relative to `{worktree}`.
 
-**Step 1 — Read the index cache:**
+**Step 1 — Read the index cache** `{worktree}/.devflow/features/index.md`. Each line has the form `- **{slug}** — {areas} — {Use-when description}`. If it is absent or has no entry line, glob `{worktree}/.devflow/features/*/KNOWLEDGE.md` and read only the YAML frontmatter of each file.
 
-Attempt to read `{worktree}/.devflow/features/index.md`. Each line follows the format:
+**Step 2 — Pick relevant KBs:** select the entries whose documented area overlaps the current task (index line, or frontmatter `description` and `directories` on fallback). Prefer specificity over breadth.
 
-```
-- **{slug}** — {areas} — {Use-when description}
-```
-
-If `index.md` exists and contains at least one entry line, use it for relevance matching.
-
-**Step 2 — Fallback: glob frontmatter (if `index.md` is absent or empty):**
-
-Glob `{worktree}/.devflow/features/*/KNOWLEDGE.md`. For each file found, read only its YAML frontmatter block (between the opening and closing `---` delimiters).
-
-**Step 3 — Pick relevant KBs:**
-
-Match the current task area and description against each index line (or frontmatter `description` + `directories` on fallback). Select entries whose documented area overlaps the current task. This is a relevance judgment — prefer specificity over breadth.
-
-**Step 4 — Read each selected KB's Rules:**
-
-For each selected entry, `{kb}` is `{worktree}/.devflow/features/{slug}/KNOWLEDGE.md`:
+**Step 3 — Read each selected KB's Rules.** `{kb}` is `{worktree}/.devflow/features/{slug}/KNOWLEDGE.md`:
 
 1. List its `##` headings with line numbers through Bash: `command grep -n '^## ' "{kb}"`. This only locates sections; the text of a KB comes from the Read view alone.
-2. Read the `## Rules` range (its line to the next heading) with the Read tool, using `offset` and `limit`, and choose the one to three bullets most relevant to the current task. The choice is yours, made per KB.
+2. Read the `## Rules` range (its line to the next heading) with the Read tool, using `offset` and `limit`, and choose the one to three bullets most relevant to the task.
 3. If the KB has no `## Rules` section, choose one to three entries from its `## Anti-Patterns` or `## Gotchas` range the same way, and label them by that section's name instead of an ID.
 
 When a KB contradicts the code you observe, **trust the code** — the code is the freshness mechanism; the KB may lag behind. A missing Rules section, a missing heading list and `(none)` are legitimate states, not errors.
 
-**Step 5 — Set FEATURE_KNOWLEDGE and FEATURE_KNOWLEDGE_RULES:**
-
-Write one block per selected KB. Paste each bullet verbatim from the Read view, never from a shell view. The path is relative to the checkout root; an agent resolves it under `WORKTREE_PATH` when one is provided.
+**Step 4 — Set FEATURE_KNOWLEDGE and FEATURE_KNOWLEDGE_RULES.** Write one block per selected KB. Paste each bullet verbatim from the Read view, never from a shell view. The path is relative to the checkout root; an agent resolves it under `WORKTREE_PATH` when one is provided.
 
 ```
 --- Feature knowledge: {slug} ---
@@ -255,7 +237,7 @@ Rules:
 Headings: L5 Rules · L40 Overview · L62 Anti-Patterns · L118 Key Files
 ```
 
-A KB with no Rules section labels its entries `Rules ({section name}):` and gives them no ID. `FEATURE_KNOWLEDGE` is these blocks; `FEATURE_KNOWLEDGE_RULES` is the same blocks without the `Headings:` line. Both come from this one selection, and each spawn names the variable its recipient takes. If no KBs exist, no KBs are relevant, or `.devflow/features/` is absent, set both to `(none)`.
+A KB with no Rules section labels its entries `Rules ({section name}):` and gives them no ID. `FEATURE_KNOWLEDGE` is these blocks; `FEATURE_KNOWLEDGE_RULES` is the same blocks without the `Headings:` line. Each spawn names the variable its recipient takes. If no KBs exist, no KBs are relevant, or `.devflow/features/` is absent, set both to `(none)`.
 
 **One git call, then direct reads — no `.cjs` script.**
 
@@ -656,21 +638,18 @@ If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lin
 
 **Step 1 — Check the opt-out gate, with `{root}` = `{worktree}`:** take the settings line resolved above for that root, resolving it with the settings block when this run has not yet.
 
-If the settings line says `KNOWLEDGE=off`, skip write-back entirely. The machine switch (`devflow knowledge --disable`), the repository and the personal settings can each turn knowledge off, and none can turn it back on (D-FEATURES-NARROW-ONLY). The fail-closed line says `KNOWLEDGE=off` too, so an unresolvable line skips write-back.
+If the settings line says `KNOWLEDGE=off`, skip write-back entirely. The machine, the repository and the personal settings can each turn knowledge off, and none can turn it back on (D-FEATURES-NARROW-ONLY). The fail-closed line says `KNOWLEDGE=off` too.
 
-**Step 2 — Evaluate whether write-back is warranted:**
-
-Only proceed if **at least one** of these is true:
+**Step 2 — Write back only if at least one is true:**
 - This workflow changed files in a directory that is documented by an existing feature knowledge base (a documented area changed). Knowledge bases are written through at that point, never on a background schedule.
-- This workflow surfaced durable, cross-cutting knowledge about a codebase area that would help future agents working in the same area — patterns, anti-patterns, integration points, gotchas not visible from a single file read.
+- This workflow found durable, cross-cutting knowledge about an area that a single file read does not show: patterns, anti-patterns, integration points, gotchas.
 
-**Never spawn unconditionally.** If neither condition is met, skip write-back silently.
+Otherwise skip write-back silently.
 
 **Step 3 — Spawn the Knowledge agent:**
 
-Spawn `Agent(subagent_type="Knowledge")` with the following context:
-
 ```
+Agent(subagent_type="Knowledge"):
 "WORKTREE_PATH: {worktree root}
 FEATURE_SLUG: {slug derived from primary changed directory, kebab-case}
 FEATURE_NAME: {human-readable name}
@@ -693,7 +672,7 @@ Then commit the two files as your Commit Protocol directs."
 
 When the Knowledge agent reports `KB_COMMIT: skipped (detached HEAD)`, the files were written but deliberately not committed — a commit on a detached HEAD becomes unreachable once HEAD moves. Tell the user in the workflow's final report, in one line, that the knowledge base was written but not committed, and name the uncommitted paths the agent listed, so they can commit them on a branch before the worktree is removed. Never commit them yourself.
 
-**Failure handling**: Non-blocking. If the Knowledge agent fails, log the failure and continue — the workflow outcome is not affected by write-back success.
+Non-blocking: if the Knowledge agent fails, log it and continue.
 
 ## Architecture
 

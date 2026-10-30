@@ -61,6 +61,7 @@ const PINNED_FENCES: Readonly<Record<string, readonly PinnedFence[]>> = {
     ['Phase 7: QA Testing', 'Fix', 1, 'ba216845d64d63e6090c291de4fc7c7177f5746b19b6a0c8c7080039da6c065c'],
     ['Phase 8: Re-Validate (only if a qa-fix committed)', 'Validate', 1, '9d7f60de6e0cfcf226626d8008ad9176948af3e707ba694fafc6505fec1d218f'],
     ['Phase 9: Open PR', 'Git', 1, 'd9b060ad4ecafcec9f7a4b1f6d132a5c7def17ff761905c5c79f98b263951b41'],
+    ["Feature Knowledge Write-Back (Conditional)", 'Knowledge', 1, 'bed1e6fbe97f0d1ecd213afb7ee577f985531e7651f7aafadb7adfeba4761d37'],
   ],
   'dist/commands/resolve.md': [
     ['Step 0b: Per-Worktree Pre-Flight (Git Agent)', 'Git', 1, '3427a65881118757c983e02f39a1bea9024603a96bc39175640f4fe1dc9811bd'],
@@ -74,6 +75,7 @@ const PINNED_FENCES: Readonly<Record<string, readonly PinnedFence[]>> = {
     ['Phase 9b: Thread Resolution + Resolution Comment', 'Test', 1, '267256e3fc1b92c572e969abaac3275184020f0508c95ffe25bc53fde28d4e2a'],
     ['Phase 9b: Thread Resolution + Resolution Comment', 'Git', 1, '87cc9e0dd74f4a2097179992b522e3f7ce806ab39b73ca5ca9bac8ee3fb95cc5'],
     ['Phase 9b: Thread Resolution + Resolution Comment', 'Git', 2, '5a032e03562856fb39f3d6f0e87621521e4029c39b863cf10b621337f668759d'],
+    ["Feature Knowledge Write-Back (Conditional)", 'Knowledge', 1, 'bed1e6fbe97f0d1ecd213afb7ee577f985531e7651f7aafadb7adfeba4761d37'],
   ],
   'dist/curation-off/commands/implement.md': [
     ['Phase 1: Setup', 'Git', 1, '033d80248ba18ac74cff5a6ced902d0d04ebdf935379ae0ca3af85a89082354d'],
@@ -91,6 +93,7 @@ const PINNED_FENCES: Readonly<Record<string, readonly PinnedFence[]>> = {
     ['Phase 7: QA Testing', 'Fix', 1, 'dcc10ca1774583fd086a8daf5ccf8a10c82fb09af7d1542eaaee85423171940a'],
     ['Phase 8: Re-Validate (only if a qa-fix committed)', 'Validate', 1, '9d7f60de6e0cfcf226626d8008ad9176948af3e707ba694fafc6505fec1d218f'],
     ['Phase 9: Open PR', 'Git', 1, 'd9b060ad4ecafcec9f7a4b1f6d132a5c7def17ff761905c5c79f98b263951b41'],
+    ["Feature Knowledge Write-Back (Conditional)", 'Knowledge', 1, '0796535f4b4dc827c7e9dbe0d75279114cac86e56d6000450e44ae5c881a4101'],
   ],
   'dist/curation-off/commands/resolve.md': [
     ['Step 0b: Per-Worktree Pre-Flight (Git Agent)', 'Git', 1, '3427a65881118757c983e02f39a1bea9024603a96bc39175640f4fe1dc9811bd'],
@@ -104,6 +107,7 @@ const PINNED_FENCES: Readonly<Record<string, readonly PinnedFence[]>> = {
     ['Phase 9b: Thread Resolution + Resolution Comment', 'Test', 1, '267256e3fc1b92c572e969abaac3275184020f0508c95ffe25bc53fde28d4e2a'],
     ['Phase 9b: Thread Resolution + Resolution Comment', 'Git', 1, '87cc9e0dd74f4a2097179992b522e3f7ce806ab39b73ca5ca9bac8ee3fb95cc5'],
     ['Phase 9b: Thread Resolution + Resolution Comment', 'Git', 2, '5a032e03562856fb39f3d6f0e87621521e4029c39b863cf10b621337f668759d'],
+    ["Feature Knowledge Write-Back (Conditional)", 'Knowledge', 1, '0796535f4b4dc827c7e9dbe0d75279114cac86e56d6000450e44ae5c881a4101'],
   ],
 }
 
