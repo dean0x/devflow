@@ -1623,51 +1623,69 @@ describe('#679, #680: the Validate and Test gates each state a BLOCKED arm that 
 /** Phase 9 stops the run at the report when the Git agent opens no PR: its sentence says that Phases 10 and 11 do not run. */
 const PHASE_9_STOP = 'Phases 10 and 11 do not run'
 /** The Phase 11 skip rule, as the command words it. */
-const PHASE_11_SKIP_RULE = 'Skip it only when an earlier phase stopped the run.'
+const PHASE_11_SKIP_RULE = 'Skip it only when the run stopped before Phase 10.'
+/** The rule as it read before the fix: "an earlier phase" also reaches a stop in Phase 10, so a PR that Phase 9 opened got no evidence. */
+const PHASE_11_SKIP_RULE_EARLIER = 'Skip it only when an earlier phase stopped the run.'
+/** The Phase 10 lead sentence for a passing gate, which hands the run to Phase 11. */
+const PHASE_10_PASSING_ARM = '2. **If PASSING** → proceed to Phase 11.'
 
 /**
- * Named collector (#675): the Phase 11 skip rule covers every stop that skips Phase 11. Phase 7 (step 3) and Phase 9
- * each stop the run at the report and say that Phase 11 does not run. The rule either names each of those phases or
- * names none and covers any earlier stop ("an earlier phase"). A rule that names only Phase 9 leaves the Phase 7 stop
- * with no skip rule. The stops are read from the phases, so a stop sentence that goes missing fails here and does not
- * pass for lack of a subject.
+ * Named collector (#675): the Phase 11 skip rule skips Phase 11 for every stop before Phase 10 and for no stop in Phase 10.
+ * Phase 7 (step 3) and Phase 9 each stop the run at the report and say that Phase 11 does not run, so the rule must cover
+ * both: it says "before Phase 10", or it names each of those phases. A Phase 10 stop leaves the PR that Phase 9 opened, and
+ * Phase 11 must still run for it, so a rule that says "earlier" or names Phase 10 or a later phase reaches that stop and is
+ * reported, and so is a Phase 10 that says Phase 11 does not run. A rule that names only Phase 9 leaves the Phase 7 stop with
+ * no skip rule. The stops are read from the phases, so a stop sentence that goes missing fails here and does not pass for
+ * lack of a subject.
  */
 function collectPhase11SkipDefects(md: string): string[] {
   const eleven = phaseSection(md, H.p11)
   if (eleven === null) return [`${H.p11}: the section is absent`]
   const rules = eleven.match(/Skip it only when [^.]*\./g) ?? []
   if (rules.length !== 1) return [`Phase 11 holds ${rules.length} skip rules, expected 1`]
-  if (rules[0].includes('an earlier phase')) return []
+  const rule = rules[0]
+  const bounded = /before Phase 10\b/.test(rule)
+  const unbounded = /\bearlier\b/.test(rule)
   const out: string[] = []
+  if (unbounded || /Phase 1[0-2]/.test(rule.replace(/before Phase 10\b/, ''))) out.push('the Phase 11 skip rule reaches a Phase 10 stop, so the PR that Phase 9 opened gets no evidence')
   for (const [phase, heading, stop] of [['Phase 7', H.p7, PHASE_7_STOP], ['Phase 9', H.p9, PHASE_9_STOP]] as const) {
     if (!(phaseSection(md, heading) ?? '').includes(stop)) out.push(`${phase}: the stop sentence "${stop}" is absent, so the skip rule has no stop to cover`)
-    else if (!rules[0].includes(phase)) out.push(`the Phase 11 skip rule does not cover the ${phase} stop`)
+    else if (!bounded && !unbounded && !rule.includes(phase)) out.push(`the Phase 11 skip rule does not cover the ${phase} stop`)
   }
+  const ten = phaseSection(md, H.p10)
+  if (ten === null) out.push(`${H.p10}: the section is absent`)
+  else if (/\b11 do(es)? not run/.test(ten)) out.push('Phase 10 says that Phase 11 does not run, so the PR that it leaves gets no evidence')
   return out
 }
 
-describe('#675: the Phase 11 skip rule covers every stop that skips Phase 11, in all four builds', () => {
-  it.each(IMPLEMENT_KEYS)('%s: the rule covers the Phase 7 stop and the Phase 9 stop', key => {
+describe('#675: the Phase 11 skip rule skips Phase 11 for every stop before Phase 10 and for no stop in Phase 10, in all four builds', () => {
+  it.each(IMPLEMENT_KEYS)('%s: the rule covers the Phase 7 stop and the Phase 9 stop and leaves the Phase 10 stop to Phase 11', key => {
     const md = implementMdOfKey(key)
     expect(phaseSection(md, H.p7), `${key}: Phase 7 says that Phase 11 does not run`).toContain(PHASE_7_STOP)
     expect(phaseSection(md, H.p9), `${key}: Phase 9 says that Phase 11 does not run`).toContain(PHASE_9_STOP)
-    expect(phaseSection(md, H.p11), `${key}: no skip rule read`).toContain('Skip it only when')
+    expect(phaseSection(md, H.p10), `${key}: Phase 10 hands the run to Phase 11`).toContain(PHASE_10_PASSING_ARM)
     expect(collectPhase11SkipDefects(md), key).toEqual([])
+    expect(phaseSection(md, H.p11), `${key}: the skip rule, whole`).toContain(` ${PHASE_11_SKIP_RULE} `)
   })
 
-  it.each(IMPLEMENT_KEYS)('%s: known-bad probes: a rule that names only Phase 9, only Phase 7, a missing rule and a lost stop sentence are each reported', key => {
+  it.each(IMPLEMENT_KEYS)('%s: known-bad probes: the earlier-phase rule, a rule that names only Phase 9, only Phase 7 or Phase 10, a missing rule, a lost stop sentence and a Phase 10 stop sentence are each reported', key => {
     const md = implementMdOfKey(key)
+    const reachesTen = 'the Phase 11 skip rule reaches a Phase 10 stop, so the PR that Phase 9 opened gets no evidence'
+    expect(collectPhase11SkipDefects(seedOnce(md, PHASE_11_SKIP_RULE, PHASE_11_SKIP_RULE_EARLIER)), 'the rule that skipped Phase 11 after a Phase 10 stop').toEqual([reachesTen])
     const onlyNine = seedOnce(md, PHASE_11_SKIP_RULE, 'Skip it only when Phase 9 stopped the run.')
-    expect(collectPhase11SkipDefects(onlyNine), 'the rule before the fix').toEqual(['the Phase 11 skip rule does not cover the Phase 7 stop'])
+    expect(collectPhase11SkipDefects(onlyNine), 'the rule before the earlier-phase rule: it leaves the Phase 7 stop with no skip rule').toEqual(['the Phase 11 skip rule does not cover the Phase 7 stop'])
     const onlySeven = seedOnce(md, PHASE_11_SKIP_RULE, 'Skip it only when Phase 7 stopped the run.')
     expect(collectPhase11SkipDefects(onlySeven)).toEqual(['the Phase 11 skip rule does not cover the Phase 9 stop'])
     const bothNamed = seedOnce(md, PHASE_11_SKIP_RULE, 'Skip it only when Phase 7 step 3 or Phase 9 stopped the run.')
-    expect(collectPhase11SkipDefects(bothNamed), 'a rule that names both stops covers both').toEqual([])
+    expect(collectPhase11SkipDefects(bothNamed), 'a rule that names both stops covers both and leaves Phase 10 to Phase 11').toEqual([])
+    expect(collectPhase11SkipDefects(seedOnce(md, PHASE_11_SKIP_RULE, 'Skip it only when Phase 7 step 3, Phase 9 or Phase 10 stopped the run.'))).toEqual([reachesTen])
     expect(collectPhase11SkipDefects(seedOnce(md, ` ${PHASE_11_SKIP_RULE}`, ''))).toEqual(['Phase 11 holds 0 skip rules, expected 1'])
     expect(collectPhase11SkipDefects(seedOnce(md, PHASE_11_SKIP_RULE, `${PHASE_11_SKIP_RULE} ${PHASE_11_SKIP_RULE}`))).toEqual(['Phase 11 holds 2 skip rules, expected 1'])
     expect(collectPhase11SkipDefects(seedOnce(onlyNine, PHASE_7_STOP, 'Phase 11 runs.'))).toEqual([
       `Phase 7: the stop sentence "${PHASE_7_STOP}" is absent, so the skip rule has no stop to cover`,
     ])
+    expect(collectPhase11SkipDefects(seedOnce(md, PHASE_10_PASSING_ARM, '2. **If PASSING** → stop at the report; Phase 11 does not run.'))).toEqual(['Phase 10 says that Phase 11 does not run, so the PR that it leaves gets no evidence'])
+    expect(collectPhase11SkipDefects(seedOnce(md, H.p10, '### Phase 10 gone'))).toEqual([`${H.p10}: the section is absent`])
     expect(collectPhase11SkipDefects(seedOnce(md, H.p11, '### Phase 11 gone'))).toEqual([`${H.p11}: the section is absent`])
   })
 })

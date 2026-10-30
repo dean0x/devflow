@@ -517,7 +517,7 @@ git push origin HEAD; echo "exit=$?"
 **Produces:** EVIDENCE_RESULT
 **Requires:** PR_NUMBER, EVIDENCE_FILE, REVIEW_PUBLICATION
 
-Run once, after Phase 10, under every strategy. Skip it only when an earlier phase stopped the run. A `ci` TP reads `INDETERMINATE` only when the CI gate could not tell or did not run.
+Run once, after Phase 10, under every strategy. Skip it only when the run stopped before Phase 10. A `ci` TP reads `INDETERMINATE` only when the CI gate could not tell or did not run.
 
 **Push first.** A claim whose SHA is not in the PR reads `UNVERIFIED`, so push the branch once before the script — never force, and no retry:
 
