@@ -56,9 +56,11 @@ import { sweepLegacyDevflowFiles } from '../../src/cli/commands/legacy-sweep.js'
 import { formatBackupSummary, formatKeptLegacySkills, type SummaryLine } from '../../src/cli/commands/install-report.js';
 import { runRulesEnable } from '../../src/cli/commands/rules.js';
 import { readManifest } from '../../src/core/manifest.js';
+import { RETIRED_SHIPPED } from '../../src/core/retired-shipped-names.js';
 import type { BackupSession, BackupSnapshot } from '../../src/targets/claude-code/install-backup.js';
 import { ROOT, testBackups } from '../helpers.js';
 import { assertTempHome, TEMP_HOME_PREFIX } from '../setup/home-isolation.js';
+import { runInstall } from './install-backup-harness.js';
 
 let home: string;
 let claudeDir: string;
@@ -227,23 +229,29 @@ describe('formatBackupSummary', () => {
     expect(lines[4].message).toContain('Could not use the backup folder /d/install-backups (not-a-directory)');
   });
 
-  it('keeps the moves out of the orphan count of the sweep summary', async () => {
-    const session = await open();
-    await moveOneFile(session, 'mine-1.md');
-    await moveOneFile(session, 'mine-2.md');
-    await moveOneFile(session, 'mine-3.md');
-    const snapshot = session.snapshot();
-    expect(snapshot.moved).toHaveLength(3);
+  it('keeps the moves out of the orphan count of the sweep summary, in a real install', async () => {
+    const retiredCommand = RETIRED_SHIPPED.commands[0];
+    const retiredAgent = RETIRED_SHIPPED.agents[0];
+    const installHome = { home, claudeDir, devflowDir };
+    await runInstall(installHome, { shape: 'full' });
+    await put(`commands/devflow/${retiredCommand}.md`);
+    await put(`agents/devflow/${retiredAgent}.md`);
+    const mine = ['mine-1.md', 'mine-2.md', 'mine-3.md'];
+    for (const name of mine) await put(`commands/devflow/${name}`, 'my file\n');
 
-    const sweep = formatSweepSummary({
-      sweptOrphans: [{ kind: 'agent', name: 'resolver' }, { kind: 'command', name: 'audit-claude' }],
-      sweepFailures: [],
-    });
+    const report = await runInstall(installHome, { shape: 'partial' });
+
+    expect(report.backups.moved.map(unit => path.basename(unit.original)).sort(), 'precondition: the run moved the three files').toEqual(mine);
+    expect(report.sweptOrphans, 'precondition: the sweep removed the two retired names').toEqual(expect.arrayContaining([
+      { kind: 'command', name: retiredCommand },
+      { kind: 'agent', name: retiredAgent },
+    ]));
+    expect(report.sweptOrphans.filter(orphan => orphan.name.startsWith('mine-')), 'a moved file is no orphan').toEqual([]);
+    const sweep = formatSweepSummary(report);
     expect(sweep).toHaveLength(1);
-    expect(sweep[0].message).toContain('Removed 2 orphaned asset(s)');
+    expect(sweep[0].message).toContain(`Removed ${report.sweptOrphans.length} orphaned asset(s)`);
     expect(sweep[0].message).not.toContain('mine-');
-    expect(formatSweepSummary({ sweptOrphans: [], sweepFailures: [] })).toEqual([]);
-    expect(formatBackupSummary(snapshot)[0].message).toContain('Moved 3 item(s)');
+    expect(formatBackupSummary(report.backups)[0].message).toContain('Moved 3 item(s)');
   });
 
   // That a name the registry sweep removed never also reaches this retired line is proven where the
