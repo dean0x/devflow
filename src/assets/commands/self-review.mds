@@ -97,7 +97,7 @@ Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE. Skip if (none)."
 
 If STATUS is BLOCKED, skip this phase: the report (Phase 4) names the blocker.
 
-Run this phase only if HEAD moved — `git rev-parse HEAD` differs from `HEAD_BEFORE`, meaning Polish or Harden committed (Polish alone counts, whatever Harden's STATUS is). Otherwise skip it. Its scope is changed-only over what the two agents changed:
+Run this phase only if HEAD moved — `git rev-parse HEAD` differs from `HEAD_BEFORE`, meaning Polish or Harden committed (Polish alone counts, whatever Harden's STATUS is). Otherwise skip it.
 
 Agent(subagent_type="Validate", run_in_background=false):
 "FILES_CHANGED: {output of `git diff --name-only HEAD_BEFORE..HEAD`}
@@ -106,6 +106,7 @@ Run build, typecheck, lint, test on modified files"
 
 **If FAIL:** Report validation failures to user and halt
 **If PASS:** Continue to report
+**Any other or missing Status** (BLOCKED included): report the status, its cause and log path, then halt. It is never a pass.
 
 ### Phase 4: Report
 
@@ -161,7 +162,7 @@ Display summary:
 │  └─ 9-pillar quality gate (may fix and commit)
 │
 ├─ Phase 3: Validate agent (conditional)
-│  └─ If HEAD moved since HEAD_BEFORE (Polish or Harden committed), changed-only Validate over HEAD_BEFORE..HEAD
+│  └─ If HEAD moved: changed-only over HEAD_BEFORE..HEAD
 │
 └─ Phase 4: Report
    └─ Display summary with pillar status
@@ -173,13 +174,13 @@ Display summary:
 | No changes | Report "No changes to review" and exit |
 | Polish agent finds nothing | Normal, continue to Harden agent |
 | Harden agent BLOCKED | Report blocking issue, halt workflow |
-| Validation fails | Report failures, halt (don't create broken state) |
+| Validation fails | Report failures, halt |
+| Validate BLOCKED or no status | Report status and cause, halt |
 | Not in git repo | Report error, suggest running in git repo |
 
 ## Principles
 
 1. **Orchestration only** - Command spawns agents, doesn't do the work
-2. **Sequential execution** - Polish agent must complete before Harden agent
-3. **Validation gate** - If Polish agent or Harden agent committed, the changes must pass validation
-4. **Honest reporting** - Display actual agent outputs
-5. **Fail fast** - Stop on BLOCKED or validation failure
+2. **Validation gate** - If Polish agent or Harden agent committed, the changes must pass validation
+3. **Honest reporting** - Display actual agent outputs
+4. **Fail fast** - Stop on BLOCKED or any Validate status but PASS

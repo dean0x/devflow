@@ -86,8 +86,8 @@ const COMMAND_MAX_BYTES: ReadonlyArray<readonly [string, Build, number]> = [
   ['resolve', 'off', 48_198],
   ['resolve', 'compliance-off', 44_936],
   ['resolve', 'both-off', 41_720],
-  ['self-review', 'on', 15_228],
-  ['self-review', 'off', 12_156],
+  ['self-review', 'on', 15_203],
+  ['self-review', 'off', 12_131],
 ]
 
 /** The four commands #456 trims, and the sizes main held before wave 4C: [curation-on, curation-off]. */
