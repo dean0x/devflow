@@ -198,9 +198,14 @@ async function sameBytes(a: string, b: string): Promise<boolean> {
   }
 }
 
+/** The temp file beside `target` that {@link copyIntoPlace} writes through: `<target>.tmp.<pid>`. */
+export function copyTempPath(target: string): string {
+  return `${target}.tmp.${process.pid}`;
+}
+
 /** Copy `source` over `target` through a sibling temp file and a rename, so no reader sees a partial file. */
 async function copyIntoPlace(source: string, target: string): Promise<void> {
-  const temp = `${target}.tmp.${process.pid}`;
+  const temp = copyTempPath(target);
   try {
     await fs.unlink(temp).catch((err: unknown) => {
       if (errno(err) !== 'ENOENT') throw err;

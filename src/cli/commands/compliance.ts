@@ -28,6 +28,7 @@ import {
   parseFrameworkList,
   type ComplianceFeatureState,
 } from '../../core/compliance.js';
+import { openBackupSessionOrFail, runWithBackupReport } from './backup-session.js';
 import { frameworkChoices, FRAMEWORK_SELECT_MESSAGE } from './compliance-prompts.js';
 import { COMPLIANCE_SKILL_TOKENS } from '../../core/compliance-compose.js';
 import {
@@ -48,6 +49,7 @@ import {
   readRunningVersion,
 } from '../../targets/claude-code/curation-install.js';
 import { convergeFromManifest } from '../../targets/claude-code/compliance-install.js';
+import type { BackupSession } from '../../targets/claude-code/install-backup.js';
 import { validateRuleShadow, validateSkillShadow } from '../../targets/claude-code/installer.js';
 import {
   getClaudeDirectory,
@@ -244,6 +246,8 @@ export interface ApplyComplianceChangeOptions {
   packageRoot?: string;
   /** Receives each per-item warning of the converge as it happens. */
   warn: (msg: string) => void;
+  /** The backup session of the command, made before any change and shared with every step of it. */
+  backups: BackupSession;
 }
 
 export interface ApplyComplianceChangeResult {
@@ -300,10 +304,16 @@ async function recordComplianceSwitch(devflowDir: string, nextState: ComplianceF
  * A reference that the converge could not refresh, a linked folder for example, is an error that
  * names it, with exit 1, and the switch stays recorded as on.
  *
- * Returns a result and never throws; the caller prints the messages and sets the exit code.
+ * Returns a result and never throws; the caller prints the messages and sets the exit code. The
+ * record of the backup session prints once, as the change returns (an exit-1 result included),
+ * ahead of the messages.
  */
-export async function applyComplianceChange(opts: ApplyComplianceChangeOptions): Promise<ApplyComplianceChangeResult> {
-  const { claudeDir, devflowDir, manifest, action, setFrameworks, runningVersion, packageRoot, warn } = opts;
+export function applyComplianceChange(opts: ApplyComplianceChangeOptions): Promise<ApplyComplianceChangeResult> {
+  return runWithBackupReport(opts.backups, () => applyChange(opts));
+}
+
+async function applyChange(opts: ApplyComplianceChangeOptions): Promise<ApplyComplianceChangeResult> {
+  const { claudeDir, devflowDir, manifest, action, setFrameworks, runningVersion, packageRoot, warn, backups } = opts;
   const resolved = resolveComplianceCliAction(manifest.features.compliance, action, setFrameworks);
   // normalizeFrameworks deduplicates (e.g. --set gdpr,GDPR → [gdpr]).
   const nextState: ComplianceFeatureState = {
@@ -329,6 +339,7 @@ export async function applyComplianceChange(opts: ApplyComplianceChangeOptions):
     runningVersion,
     warn,
     packageRoot,
+    backups,
   });
 
   if (outcome.kind === 'skipped') {
@@ -339,6 +350,7 @@ export async function applyComplianceChange(opts: ApplyComplianceChangeOptions):
       devflowDir,
       manifest: { features: { compliance: nextState, rules: manifest.features.rules } },
       warn,
+      backups,
     });
     if (!nextState.enabled) {
       return { nextState, messages: [{ level: 'error', text: outcome.message }], exitCode: 1 };
@@ -546,6 +558,10 @@ export const complianceCommand = new Command('compliance')
       action = 'disable';
     }
 
+    // The session comes before the first change. Without a shipped set the command changes nothing.
+    const backups = await openBackupSessionOrFail({ claudeDir, devflowDir });
+    if (backups === null) return;
+
     // Write the switch, converge both axes, record the installed variants (applyComplianceChange).
     const applied = await applyComplianceChange({
       claudeDir,
@@ -555,6 +571,7 @@ export const complianceCommand = new Command('compliance')
       setFrameworks,
       runningVersion: await readRunningVersion(),
       warn: (msg: string) => p.log.warn(msg),
+      backups,
     });
 
     // Emit messages

@@ -16,6 +16,7 @@ import * as os from 'os';
 import { runRulesEnable } from '../src/cli/commands/rules.js';
 import { writeManifest } from '../src/core/manifest.js';
 import { COMPLIANCE_RULE_PLACEHOLDER } from '../src/core/compliance.js';
+import { testBackups } from './helpers.js';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -67,7 +68,7 @@ describe('runRulesEnable — compliance rule convergence', () => {
   it('compliance.enabled=true with frameworks → installs stamped compliance rule', async () => {
     await writeTestManifest(true, ['gdpr', 'sox']);
 
-    await runRulesEnable(claudeDir, devflowDir);
+    await runRulesEnable(claudeDir, devflowDir, await testBackups(tmpDir, { claudeDir, devflowDir }));
 
     // Compliance rule should be present
     const ruleContent = await fs.readFile(ruleTarget(), 'utf-8');
@@ -81,7 +82,7 @@ describe('runRulesEnable — compliance rule convergence', () => {
   it('compliance.enabled=false → does NOT install compliance rule', async () => {
     await writeTestManifest(false, ['gdpr']);
 
-    await runRulesEnable(claudeDir, devflowDir);
+    await runRulesEnable(claudeDir, devflowDir, await testBackups(tmpDir, { claudeDir, devflowDir }));
 
     // Compliance rule should NOT be present (compliance is off)
     let ruleExists = false;
@@ -96,7 +97,7 @@ describe('runRulesEnable — compliance rule convergence', () => {
   it('compliance.enabled=true with zero frameworks → installs rule with generic stamp', async () => {
     await writeTestManifest(true, []);
 
-    await runRulesEnable(claudeDir, devflowDir);
+    await runRulesEnable(claudeDir, devflowDir, await testBackups(tmpDir, { claudeDir, devflowDir }));
 
     const ruleContent = await fs.readFile(ruleTarget(), 'utf-8');
     // Should contain the "generic controls only" text for empty frameworks

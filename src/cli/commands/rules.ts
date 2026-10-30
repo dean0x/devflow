@@ -10,7 +10,10 @@ import { rulesDir } from '../../core/assets.js';
 import { installAllRules, validateRuleShadow, type RuleInstallOutcome, type RuleShadowState } from '../../targets/claude-code/installer.js';
 import { convergeFromManifest } from '../../targets/claude-code/compliance-install.js';
 import { convergeBehaviorFromManifest } from '../../targets/claude-code/behavior-install.js';
-import { newLinkReport, refuseUnrealFolder, refusedFolderMessage, removeReportingLink } from '../../targets/claude-code/linked-folder.js';
+import type { BackupSession } from '../../targets/claude-code/install-backup.js';
+import { newLinkReport, refuseUnrealFolder, refusedFolderMessage } from '../../targets/claude-code/linked-folder.js';
+import { removeRulesFolder, rulesFolderRefusedMessage } from '../../targets/claude-code/rules-folder.js';
+import { openBackupSessionOrFail, runWithBackupReport } from './backup-session.js';
 import { formatLinksSummary } from './install-report.js';
 
 interface RulesOptions {
@@ -252,23 +255,37 @@ async function handleRuleUnshadow(
  *
  * Warn-not-throw on per-item compliance convergence failure, so a convergence
  * failure never undoes the rules install.
+ *
+ * The record of `backups` prints once, as the enable returns or throws.
  */
-export async function runRulesEnable(claudeDir: string, devflowDir: string): Promise<void> {
+export function runRulesEnable(claudeDir: string, devflowDir: string, backups: BackupSession): Promise<void> {
+  return runWithBackupReport(backups, printBackups => enableRules(claudeDir, devflowDir, backups, printBackups));
+}
+
+async function enableRules(
+  claudeDir: string,
+  devflowDir: string,
+  backups: BackupSession,
+  printBackups: () => void,
+): Promise<void> {
   const rulesTarget = path.join(claudeDir, 'rules', 'devflow');
 
   const manifest = await readManifest(devflowDir);
   if (!manifest) {
     p.log.error('No manifest found. Run devflow init first.');
+    printBackups();
     process.exit(1);
   }
 
   const installedPlugins = DEVFLOW_PLUGINS.filter(pl => manifest.plugins.includes(pl.name));
   const rulesMap = buildRulesMap(installedPlugins);
 
-  // Wipe stale rules from previously uninstalled plugins before re-installing. A rules folder that is
-  // a link is unlinked and replaced by a real folder, never emptied through, and the link is reported.
+  // Clear stale rules from previously uninstalled plugins before re-installing: the files devflow did
+  // not ship move to the backup folder, and the rest of the folder is removed by the session's list.
+  // A rules folder that is a link is unlinked and replaced by a real folder, never emptied through,
+  // and the link is reported. Something that is not a folder stays and is refused below.
   const links = newLinkReport();
-  links.replacedLinks.push(...await removeReportingLink(rulesTarget));
+  if ((await removeRulesFolder(rulesTarget, backups)) === 'unlinked') links.replacedLinks.push(rulesTarget);
   // A link that could not be removed is still there, and `mkdir` and every rule write would follow it.
   // Prove the folder first; a refused folder gets no rule, no manifest write and one refusal line.
   const rulesFolderRefused = await refuseUnrealFolder(links, rulesTarget);
@@ -326,6 +343,7 @@ export async function runRulesEnable(claudeDir: string, devflowDir: string): Pro
       manifest,
       warn: warnConverge,
       rulesEnabledOverride: !installFailed,
+      backups,
     });
   } catch (err) {
     // Warn-not-abort — compliance convergence failure does not undo rules install
@@ -389,18 +407,41 @@ export const rulesCommand = new Command('rules')
     // No positional action — fall through to flag-based handling
 
     if (options.enable) {
-      await runRulesEnable(claudeDir, devflowDir);
+      const backups = await openBackupSessionOrFail({ claudeDir, devflowDir });
+      if (backups === null) return;
+      await runRulesEnable(claudeDir, devflowDir, backups);
 
     } else if (options.disable) {
-      await fs.rm(rulesTarget, { recursive: true, force: true });
+      const backups = await openBackupSessionOrFail({ claudeDir, devflowDir });
+      if (backups === null) return;
+      const removal = await runWithBackupReport(backups, async () => {
+        const outcome = await removeRulesFolder(rulesTarget, backups);
 
-      const manifest = await readManifest(devflowDir);
-      if (manifest) {
-        manifest.features.rules = false;
-        manifest.updatedAt = new Date().toISOString();
-        await writeManifest(devflowDir, manifest);
+        const manifest = await readManifest(devflowDir);
+        if (manifest) {
+          manifest.features.rules = false;
+          manifest.updatedAt = new Date().toISOString();
+          await writeManifest(devflowDir, manifest);
+        }
+        return outcome;
+      });
+      switch (removal) {
+        case 'kept':
+          p.log.warn(`Rules disabled — ${rulesTarget} stays, because it still holds files that devflow did not remove`);
+          break;
+        case 'refused':
+          p.log.warn(`Rules disabled. ${rulesFolderRefusedMessage(rulesTarget)}`);
+          break;
+        case 'absent':
+        case 'removed':
+        case 'unlinked':
+          p.log.success('Rules disabled — removed rules directory');
+          break;
+        default: {
+          const unreachable: never = removal;
+          void unreachable;
+        }
       }
-      p.log.success('Rules disabled — removed rules directory');
 
     } else if (options.status) {
       let installedFiles: string[] = [];

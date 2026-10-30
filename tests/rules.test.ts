@@ -13,6 +13,7 @@ import {
 import { installRuleFile, installAllRules, installViaFileCopy, validateRuleShadow, type Spinner } from '../src/targets/claude-code/installer.js';
 import { listShadowedRules, hasRuleShadow, seedRuleShadow } from '../src/cli/commands/rules.js';
 import { COMPLIANCE_RULE_PLACEHOLDER } from '../src/core/compliance.js';
+import { testBackups } from './helpers.js';
 
 // ---------------------------------------------------------------------------
 // isValidRuleName
@@ -333,6 +334,7 @@ describe('installViaFileCopy rules report', () => {
         rulesMap: new Map([['security', 'devflow-core-skills']]),
         isPartialInstall: true,
         spinner: noopSpinner,
+        backups: await testBackups(localTmpDir, { claudeDir: localClaudeDir, devflowDir: localDevflowDir }),
       });
 
       expect(report.shadowedRules).toContain('security');
@@ -369,6 +371,7 @@ describe('installViaFileCopy rules report', () => {
         rulesMap: new Map([['security', 'devflow-core-skills']]),
         isPartialInstall: true,
         spinner: noopSpinner,
+        backups: await testBackups(localTmpDir, { claudeDir: localClaudeDir, devflowDir: localDevflowDir }),
       });
 
       expect(report.skippedShadows).toContainEqual({ kind: 'rule', name: 'security', reason: 'empty-shadow-file' });
@@ -402,6 +405,7 @@ describe('installViaFileCopy rules report', () => {
         rulesMap: new Map([['security', 'devflow-core-skills']]),
         isPartialInstall: true,
         spinner: noopSpinner,
+        backups: await testBackups(localTmpDir, { claudeDir: localClaudeDir, devflowDir: localDevflowDir }),
       });
 
       expect(report.skippedShadows).toContainEqual({ kind: 'rule', name: 'security', reason: 'not-a-file' });
@@ -440,6 +444,7 @@ describe('installViaFileCopy rules report', () => {
           rulesMap: new Map([['orphan-rule', 'devflow-core-skills']]),
           isPartialInstall: true,
           spinner: noopSpinner,
+          backups: await testBackups(localTmpDir, { claudeDir: localClaudeDir, devflowDir: localDevflowDir }),
         }),
       ).rejects.toThrow(/Rule source not found for declared rule "orphan-rule"/);
     } finally {

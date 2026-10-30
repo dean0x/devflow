@@ -3,7 +3,8 @@ import { promises as fs } from 'fs';
 import { execFileSync } from 'child_process';
 import * as os from 'os';
 import * as path from 'path';
-import { formatProjectDataPlan, partitionProjectData, resolveProjectDataPlan, computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, userContentPaths, resolveDevflowDirCleanup, resolveProjectDataCleanup, removeDevFlowInstallArtifacts, installArtifactPaths, resolveInstallArtifactPaths, enumerateDryRunExtras, removeAllDevFlow, removeSelectedPlugins, sweepDevflowNamespaces, isDevFlowInstalled, runDryRunPhase, runSelectivePhaseForScope, runFullPhaseForScope, runCleanupPhase, resolveInstalledPlugins } from '../src/cli/commands/uninstall.js';
+import { fileURLToPath } from 'url';
+import { type ConfirmPrompt, formatProjectDataPlan, partitionProjectData, resolveProjectDataPlan, computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, userContentPaths, resolveDevflowDirCleanup, resolveProjectDataCleanup, removeDevFlowInstallArtifacts, installArtifactPaths, resolveInstallArtifactPaths, enumerateDryRunExtras, removeAllDevFlow, removeSelectedPlugins, sweepDevflowNamespaces, isDevFlowInstalled, runDryRunPhase, runSelectivePhaseForScope, runFullPhaseForScope, runCleanupPhase, resolveInstalledPlugins } from '../src/cli/commands/uninstall.js';
 import { isSameLocation } from '../src/core/same-location.js';
 import { DEVFLOW_PLUGINS, getAllAgentNames, parsePluginSelection, skillsOf, type PluginDefinition } from '../src/core/plugins.js';
 import { TRACKER_ATTEMPTS_NAMES, TRACKER_PROVIDER_IDS, TRACKER_STAGED_PREFIX } from '../src/core/tracker.js';
@@ -13,6 +14,17 @@ import { createRequire } from 'module';
 import { PROJECT_PATHS, initGitRepo, pathWithFailingGit, trackInGit } from './decisions/curation-fixtures.js';
 import { LEGACY_SKILL_NAMES } from '../src/targets/claude-code/legacy.js';
 import { DEVFLOW_GITIGNORE_BLOCK, DEVFLOW_TRACKED_PATHS } from '../src/targets/claude-code/post-install.js';
+import { BACKUP_ROOT_NAME } from '../src/targets/claude-code/install-backup.js';
+import { assertTempHome, TEMP_HOME_PREFIX } from './setup/home-isolation.js';
+
+/** Plant `<skillsDir>/python/SKILL.md` with the bytes a release of devflow installed: a bare legacy folder that devflow made. */
+async function plantReleasedPython(skillsDir: string): Promise<void> {
+  await fs.mkdir(path.join(skillsDir, 'python'), { recursive: true });
+  await fs.copyFile(
+    fileURLToPath(new URL('./fixtures/released-legacy-skills/python.SKILL.md', import.meta.url)),
+    path.join(skillsDir, 'python', 'SKILL.md'),
+  );
+}
 
 /** The machine-side path helpers the hooks and the move share (the move lock and journal names). */
 const projectPaths = (): { curationMoveLockKey(root: string): string; curationMoveJournalPath(machineDir: string, realRoot: string): string } =>
@@ -644,6 +656,20 @@ describe('enumerateUserDevFlowContent (WS5)', () => {
     }
   });
 
+  // === install backups: the files init moved aside belong to the user ===
+
+  it('includes the install backups when the backup root holds a run folder', async () => {
+    await fs.mkdir(path.join(tmpDir, BACKUP_ROOT_NAME, '20261030T000000Z-0a1b2c3d'), { recursive: true });
+    const result = await enumerateUserDevFlowContent(tmpDir);
+    expect(result).toEqual([`install backups (${path.join(tmpDir, BACKUP_ROOT_NAME)})`]);
+  });
+
+  it('does not include the install backups when the backup root is empty or absent', async () => {
+    expect(await enumerateUserDevFlowContent(tmpDir)).toEqual([]);
+    await fs.mkdir(path.join(tmpDir, BACKUP_ROOT_NAME), { recursive: true });
+    expect(await enumerateUserDevFlowContent(tmpDir)).toEqual([]);
+  });
+
   // === the enumeration IS the table (what makes the @D8 intersection meaningful) ===
 
   it('reports exactly one item per userContentPaths entry when all are present', async () => {
@@ -716,6 +742,12 @@ describe('@D8: userContentPaths and installArtifactPaths are disjoint', () => {
     expect(userPaths.length).toBeGreaterThan(0);
 
     expect(underPrefix(userPaths, prefixes)).toEqual([]);
+  });
+
+  it('the backup root is user content and is no install artifact', () => {
+    const dir = '/tmp/devflow-d8-disjoint';
+    expect(userContentPaths(dir).map(e => e.relPath)).toContain(BACKUP_ROOT_NAME);
+    expect(installArtifactPaths(dir).map(e => e.relPath)).not.toContain(BACKUP_ROOT_NAME);
   });
 
   it('known-bad probe: both collectors report a real overlap', () => {
@@ -1290,6 +1322,15 @@ describe('resolveDevflowDirCleanup', () => {
     })).toBe('prompt');
   });
 
+  it('returns prompt when the install backups are the only user content', () => {
+    expect(resolveDevflowDirCleanup({
+      isTTY: true,
+      userContent: [`install backups (${VALID_DIR}/${BACKUP_ROOT_NAME})`],
+      devflowDir: VALID_DIR,
+      homeDir: HOME,
+    })).toBe('prompt');
+  });
+
   it('returns prompt with multiple user content items', () => {
     expect(resolveDevflowDirCleanup({
       isTTY: true,
@@ -1739,6 +1780,20 @@ describe('removeDevFlowInstallArtifacts — proxy artifact removal (TEST-4)', ()
   // AND --keep-docs paths. An item on both lists is therefore deleted no matter what
   // the user answers, which makes the prompt a lie and loses user config silently.
 
+  it('keeps the install backups, byte for byte, through an artifact-only removal', async () => {
+    const backup = path.join(devflowDir, BACKUP_ROOT_NAME, '20261030T000000Z-0a1b2c3d', 'rules', 'devflow', 'mine.md');
+    await fs.mkdir(path.dirname(backup), { recursive: true });
+    await fs.writeFile(backup, '# a rule the user wrote\n', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, 'manifest.json'), '{}', 'utf-8');
+
+    await removeDevFlowInstallArtifacts(devflowDir, false);
+
+    expect(await fs.readFile(backup, 'utf-8')).toBe('# a rule the user wrote\n');
+    expect(await enumerateUserDevFlowContent(devflowDir)).toEqual([
+      `install backups (${path.join(devflowDir, BACKUP_ROOT_NAME)})`,
+    ]);
+  });
+
   it('(9f) every item enumerated as user content survives an artifact-only removal', async () => {
     await fs.mkdir(path.join(devflowDir, 'skills', 'my-skill'), { recursive: true });
     await fs.mkdir(path.join(devflowDir, 'rules'), { recursive: true });
@@ -2125,18 +2180,17 @@ describe('enumerateDryRunExtras (A5 regression)', () => {
     ).toBe(false);
   });
 
-  it('(A5) names a bare legacy skill dir that exists on disk', async () => {
-    // Seed a bare legacy skill dir — removeAllDevFlow removes bare variants too.
-    // 'codebase-navigation' is a LEGACY_SKILL_NAME (bare, pre-v1.0.0 era).
+  it('(A5) names a bare legacy skill dir that devflow made and exists on disk', async () => {
+    // Seed a bare legacy skill dir that a release installed — removeAllDevFlow removes it too.
+    // 'python' is a LEGACY_SKILL_NAME (bare, pre-v2 era) with a released SKILL.md.
     const skillsDir = path.join(claudeDir, 'skills');
-    const bareLegacySkillDir = path.join(skillsDir, 'codebase-navigation');
-    await fs.mkdir(bareLegacySkillDir, { recursive: true });
+    await plantReleasedPython(skillsDir);
 
     const entries = await enumerateDryRunExtras(claudeDir, devflowDir);
 
     // The bare legacy skill path must appear — the old code only listed devflow-namespace prefixed dirs.
-    const hasBareSkill = entries.some(e => e.includes('codebase-navigation'));
-    expect(hasBareSkill, 'bare legacy skill dir codebase-navigation must be listed in dry-run extras').toBe(true);
+    const hasBareSkill = entries.some(e => e === path.join(skillsDir, 'python'));
+    expect(hasBareSkill, 'bare legacy skill dir python must be listed in dry-run extras').toBe(true);
   });
 
   // -------------------------------------------------------------------------
@@ -2147,26 +2201,26 @@ describe('enumerateDryRunExtras (A5 regression)', () => {
   // included in the preview list — implying it would be deleted.
   //
   // After fix: bare pass iterates LEGACY_SKILL_NAMES only.
-  //   - bare codebase-navigation/ IS listed (it is in LEGACY_SKILL_NAMES)
+  //   - bare python/ (devflow made it) IS listed (it is in LEGACY_SKILL_NAMES)
   //   - bare security/ is NOT listed (it is NOT in LEGACY_SKILL_NAMES)
   //
   // Discriminating: the "does NOT contain bare security" assertion fails RED
   // before the fix and passes GREEN after.
   // -------------------------------------------------------------------------
-  it('dry-run list CONTAINS bare codebase-navigation but NOT bare security', async () => {
+  it('dry-run list CONTAINS bare python but NOT bare security', async () => {
     const skillsDir = path.join(claudeDir, 'skills');
 
     // Seed both dirs so the existence guard (fs.access) includes them when present.
     await fs.mkdir(path.join(skillsDir, 'security'), { recursive: true });
-    await fs.mkdir(path.join(skillsDir, 'codebase-navigation'), { recursive: true });
+    await plantReleasedPython(skillsDir);
 
     const entries = await enumerateDryRunExtras(claudeDir, devflowDir);
 
-    // codebase-navigation IS in LEGACY_SKILL_NAMES — must appear in the preview.
-    const bareLegacyPath = path.join(skillsDir, 'codebase-navigation');
+    // python IS in LEGACY_SKILL_NAMES and devflow made it — must appear in the preview.
+    const bareLegacyPath = path.join(skillsDir, 'python');
     expect(
       entries.some(e => e === bareLegacyPath),
-      `bare codebase-navigation path (${bareLegacyPath}) must appear in enumerateDryRunExtras`,
+      `bare python path (${bareLegacyPath}) must appear in enumerateDryRunExtras`,
     ).toBe(true);
 
     // security is NOT in LEGACY_SKILL_NAMES — its bare path must NOT appear in the preview.
@@ -2488,6 +2542,205 @@ describe('runFullPhaseForScope (A8)', () => {
     await expect(fs.access(agentsDir)).rejects.toThrow();
     // manifest.json removed (artifacts-only path)
     await expect(fs.access(path.join(devflowDir, 'manifest.json'))).rejects.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The install backups under ~/.devflow (init moves the files it did not ship to
+// ~/.devflow/install-backups/). They are user content: every keep-data pass keeps
+// them, and the full-wipe prompt names them before anything is wiped.
+// ---------------------------------------------------------------------------
+
+describe('uninstall and the install backups', () => {
+  const BACKUP_BYTES = '# a command the user wrote\n';
+  const INSTALLED = [
+    ['commands', 'devflow', 'implement.md'],
+    ['agents', 'devflow', 'code.md'],
+    ['rules', 'devflow', 'typescript.md'],
+    ['skills', 'devflow:typescript', 'SKILL.md'],
+  ];
+  let home: string;
+  let claudeDir: string;
+  let devflowDir: string;
+  let backupRoot: string;
+  let backupFile: string;
+
+  beforeEach(async () => {
+    home = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), TEMP_HOME_PREFIX)));
+    assertTempHome(home);
+    console.log(`uninstall backups test home: ${home}`);
+    // The prompt gate needs a devflow dir named .devflow inside the home os.homedir() reports.
+    vi.stubEnv('HOME', home);
+    claudeDir = path.join(home, 'claude');
+    devflowDir = path.join(home, '.devflow');
+    backupRoot = path.join(devflowDir, BACKUP_ROOT_NAME);
+    backupFile = path.join(backupRoot, '20261030T000000Z-0a1b2c3d', 'commands', 'devflow', 'mine.md');
+    await seedInstall();
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await fs.rm(home, { recursive: true, force: true });
+  });
+
+  /** The four install folders with one devflow file each, plus the manifest and the scripts folder. */
+  async function seedInstall(): Promise<void> {
+    for (const parts of INSTALLED) {
+      const file = path.join(claudeDir, ...parts);
+      await fs.mkdir(path.dirname(file), { recursive: true });
+      await fs.writeFile(file, '# devflow file\n', 'utf-8');
+    }
+    await fs.mkdir(path.join(devflowDir, 'scripts'), { recursive: true });
+    await fs.writeFile(path.join(devflowDir, 'manifest.json'), '{}', 'utf-8');
+  }
+
+  async function seedBackups(): Promise<void> {
+    await fs.mkdir(path.dirname(backupFile), { recursive: true });
+    await fs.writeFile(backupFile, BACKUP_BYTES, 'utf-8');
+  }
+
+  const exists = (file: string): Promise<boolean> => fs.access(file).then(() => true, () => false);
+
+  /** A confirm that records what was on screen and on disk when it was asked, then answers. */
+  function observedConfirm(answer: boolean, printed: () => string): {
+    asked: Array<{ message: string; printed: string; backupsOnDisk: boolean }>;
+    confirm: ConfirmPrompt;
+  } {
+    const asked: Array<{ message: string; printed: string; backupsOnDisk: boolean }> = [];
+    return {
+      asked,
+      confirm: async opts => {
+        asked.push({ message: opts.message, printed: printed(), backupsOnDisk: await exists(backupFile) });
+        return answer;
+      },
+    };
+  }
+
+  /** Run the full phase for the user scope with stdout captured; `confirm` sees the output so far. */
+  async function run(opts: { isTTY: boolean; keepDocs?: boolean; answer?: boolean }): Promise<{
+    out: string;
+    asked: Array<{ message: string; printed: string; backupsOnDisk: boolean }>;
+  }> {
+    const written: string[] = [];
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      written.push(String(chunk));
+      return true;
+    });
+    const { asked, confirm } = observedConfirm(opts.answer ?? false, () => written.join(''));
+    try {
+      await runFullPhaseForScope({
+        scope: 'user',
+        claudeDir,
+        devflowDir,
+        devflowScriptsDir: path.join(devflowDir, 'scripts'),
+        verbose: true,
+        keepDocs: opts.keepDocs ?? false,
+        isTTY: opts.isTTY,
+        confirm,
+      });
+    } finally {
+      spy.mockRestore();
+    }
+    return { out: written.join(''), asked };
+  }
+
+  const removalLines = (out: string): string[] => out.match(/Removed [^\n]*/g) ?? [];
+
+  it('a non-interactive uninstall keeps the backup root and names the devflow folder as preserved', async () => {
+    await seedBackups();
+
+    const { out, asked } = await run({ isTTY: false });
+
+    expect(asked, 'a non-interactive run asks nothing').toEqual([]);
+    expect(await fs.readFile(backupFile, 'utf-8')).toBe(BACKUP_BYTES);
+    expect(await exists(path.join(devflowDir, 'manifest.json'))).toBe(false);
+    expect(out).toContain(`${devflowDir} preserved (non-interactive mode`);
+  });
+
+  it('the output for the four install folders is the same with and without backups', async () => {
+    const without = await run({ isTTY: false });
+    await seedInstall();
+    await seedBackups();
+    const withBackups = await run({ isTTY: false });
+
+    for (const parts of INSTALLED) {
+      expect(await exists(path.join(claudeDir, ...parts.slice(0, 2))), `${parts.slice(0, 2).join('/')} is removed`).toBe(false);
+    }
+    expect(removalLines(without.out)).toEqual(expect.arrayContaining([
+      expect.stringContaining('Removed Devflow commands'),
+      expect.stringContaining('Removed Devflow agents'),
+      expect.stringContaining('Removed Devflow rules'),
+      expect.stringContaining('Removed 1 Devflow skill directories'),
+    ]));
+    expect(removalLines(withBackups.out)).toEqual(removalLines(without.out));
+    expect(withBackups.out).not.toContain(BACKUP_ROOT_NAME);
+  });
+
+  it('an interactive uninstall with --keep-docs asks nothing and keeps the backup root', async () => {
+    await seedBackups();
+
+    const { asked } = await run({ isTTY: true, keepDocs: true });
+
+    expect(asked).toEqual([]);
+    expect(await fs.readFile(backupFile, 'utf-8')).toBe(BACKUP_BYTES);
+  });
+
+  it('the full-wipe prompt lists the backup root before anything is wiped', async () => {
+    await seedBackups();
+    await fs.mkdir(path.join(devflowDir, 'skills', 'my-skill'), { recursive: true });
+    await fs.writeFile(path.join(devflowDir, 'skills', 'my-skill', 'SKILL.md'), '# mine\n', 'utf-8');
+
+    const { asked } = await run({ isTTY: true, answer: false });
+
+    expect(asked).toHaveLength(1);
+    const [first] = asked;
+    expect(first.message).toContain(`Remove entire ${devflowDir}?`);
+    expect(first.printed).toContain(`User-authored content in ${devflowDir}:`);
+    expect(first.printed).toContain(`install backups (${backupRoot})`);
+    expect(first.printed).toContain(`skill shadows (${path.join(devflowDir, 'skills')})`);
+    expect(first.backupsOnDisk, 'the prompt comes before the wipe').toBe(true);
+  });
+
+  it('a decline keeps the backup root and its bytes and the shadows, and removes the manifest', async () => {
+    await seedBackups();
+    await fs.mkdir(path.join(devflowDir, 'skills', 'my-skill'), { recursive: true });
+    await fs.writeFile(path.join(devflowDir, 'skills', 'my-skill', 'SKILL.md'), '# mine\n', 'utf-8');
+
+    const { out } = await run({ isTTY: true, answer: false });
+
+    expect(await fs.readFile(backupFile, 'utf-8')).toBe(BACKUP_BYTES);
+    expect(await exists(path.join(devflowDir, 'skills', 'my-skill', 'SKILL.md'))).toBe(true);
+    expect(await exists(path.join(devflowDir, 'manifest.json'))).toBe(false);
+    expect(out).toContain(`${devflowDir} preserved (removing scripts and install artifacts only)`);
+  });
+
+  it('a confirmed wipe removes the whole devflow folder, backup root included', async () => {
+    await seedBackups();
+
+    const { asked, out } = await run({ isTTY: true, answer: true });
+
+    expect(asked).toHaveLength(1);
+    expect(await exists(devflowDir)).toBe(false);
+    expect(out).toContain(`${devflowDir} removed`);
+  });
+
+  it('shows the full-wipe prompt when the backups are the only user content, and a decline keeps them', async () => {
+    await seedBackups();
+
+    const { asked } = await run({ isTTY: true, answer: false });
+
+    expect(asked).toHaveLength(1);
+    expect(asked[0].printed).toContain(`install backups (${backupRoot})`);
+    expect(await fs.readFile(backupFile, 'utf-8')).toBe(BACKUP_BYTES);
+    expect(await exists(path.join(devflowDir, 'manifest.json'))).toBe(false);
+  });
+
+  it('shows no prompt when there are no backups and no other user content', async () => {
+    const { asked } = await run({ isTTY: true, answer: true });
+
+    expect(asked).toEqual([]);
+    expect(await exists(path.join(devflowDir, 'manifest.json'))).toBe(false);
+    expect(await exists(devflowDir)).toBe(true);
   });
 });
 
@@ -2886,11 +3139,12 @@ describe('F11: sweepDevflowNamespaces spares a registry devflow:* skill dir', ()
 //
 // After fix: bare pass iterates LEGACY_SKILL_NAMES only.
 //   - bare security/ survives (not in LEGACY_SKILL_NAMES)
-//   - bare codebase-navigation/ is removed (is in LEGACY_SKILL_NAMES)
+//   - bare python/ is removed (is in LEGACY_SKILL_NAMES and devflow made it)
 //   - devflow:security/ is removed (prefixed pass covers live registry)
 //
 // Discriminating: the sentinel-content assertion on security/ fails RED before
-// the fix (rmdir wipes it) and passes GREEN after.
+// the fix (rmdir wipes it) and passes GREEN after. The folder a user made under
+// a legacy name has its own tests in tests/uninstall-bare-legacy-skills.test.ts.
 // ---------------------------------------------------------------------------
 describe('removeAllDevFlow: bare skill dir safety', () => {
   let claudeDir: string;
@@ -2903,16 +3157,16 @@ describe('removeAllDevFlow: bare skill dir safety', () => {
     await fs.rm(claudeDir, { recursive: true, force: true });
   });
 
-  it('bare security/ survives, bare codebase-navigation/ removed, devflow:security/ removed', async () => {
+  it('bare security/ survives, bare python/ (made by devflow) removed, devflow:security/ removed', async () => {
     const skillsDir = path.join(claudeDir, 'skills');
 
     // Seed three dirs: one foreign bare, one legacy bare, one prefixed.
     const bareForeignPath = path.join(skillsDir, 'security');
-    const bareLegacyPath = path.join(skillsDir, 'codebase-navigation');
+    const bareLegacyPath = path.join(skillsDir, 'python');
     const prefixedPath = path.join(skillsDir, 'devflow:security');
 
     await fs.mkdir(bareForeignPath, { recursive: true });
-    await fs.mkdir(bareLegacyPath, { recursive: true });
+    await plantReleasedPython(skillsDir);
     await fs.mkdir(prefixedPath, { recursive: true });
 
     const sentinel = 'sentinel-content-foreign-security-bare-dir';
@@ -2928,10 +3182,10 @@ describe('removeAllDevFlow: bare skill dir safety', () => {
       'bare security/SKILL.md (foreign dir) must not be deleted by removeAllDevFlow',
     ).toBe(sentinel);
 
-    // Legacy bare codebase-navigation/ must be removed (it IS in LEGACY_SKILL_NAMES).
+    // Legacy bare python/ must be removed (it IS in LEGACY_SKILL_NAMES and devflow made it).
     await expect(
       fs.access(bareLegacyPath),
-      'bare codebase-navigation/ must be removed by removeAllDevFlow',
+      'bare python/ must be removed by removeAllDevFlow',
     ).rejects.toThrow();
 
     // Prefixed devflow:security/ must be removed (live registry coverage).

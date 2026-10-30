@@ -37,7 +37,12 @@ import {
   type Spinner,
 } from '../../src/targets/claude-code/installer.js';
 import { formatOverlaySummary } from '../../src/cli/commands/install-report.js';
-import { sweepOrphanedReferences, MAX_REFERENCE_SWEEP_DEPTH } from '../../src/core/reference-sweep.js';
+import { testBackups } from '../helpers.js';
+import {
+  sweepOrphanedReferences,
+  MAX_REFERENCE_SWEEP_DEPTH,
+  type ReferenceSweepDelegate,
+} from '../../src/core/reference-sweep.js';
 import { compiledComplianceOffSkillRefsDir, compiledSkillRefsDir, skillsDir } from '../../src/core/assets.js';
 import { renderVariantManifest } from '../../src/core/curation-variants.js';
 import { DEVFLOW_PLUGINS } from '../../src/core/plugins.js';
@@ -58,6 +63,55 @@ const REAL_REFS = compiledSkillRefsDir();
 const REAL_OFF_REFS = compiledComplianceOffSkillRefsDir();
 
 const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
+
+/** A provider directory no real build produces: the stand-in for a provider an earlier build shipped. */
+const FIXTURE_PROVIDER_FILES = ['tracker/probe-provider/comment.md', 'tracker/probe-provider/transition.md'] as const;
+
+/** A delegate for a direct sweep test: it removes every entry the sweep hands it, as if all were devflow's own. */
+const removeEverything: ReferenceSweepDelegate = {
+  async dispose(entry) {
+    try {
+      await fs.rm(entry, { recursive: true, force: true });
+      return { outcome: 'removed' };
+    } catch (error) {
+      return { outcome: 'failed', error };
+    }
+  },
+};
+
+type OverlayOptions = Omit<Parameters<typeof overlayGeneratedReferences>[0], 'backups'>;
+
+/**
+ * The overlay under test, with a backup session over the target folder and a devflow folder beside it.
+ *
+ * The target folder is the session's Claude dir, so the session reads a reference as devflow's own
+ * only when this harness names it. It names the real manifest, the fixture provider and every
+ * manifest the test passes; `alsoOwned` adds the stray names a test plants as leftovers of an
+ * earlier build. A name that none of them holds is a user's file, and the prune moves it aside.
+ */
+async function overlayWithBackups(
+  opts: OverlayOptions,
+  alsoOwned: readonly string[] = [],
+): ReturnType<typeof overlayGeneratedReferences> {
+  return overlayGeneratedReferences({ ...opts, backups: await backupsFor(opts, alsoOwned) });
+}
+
+/** The backup session {@link overlayWithBackups} runs with, for a test that drives a promotion step directly. */
+async function backupsFor(
+  opts: Pick<OverlayOptions, 'referencesTarget' | 'manifest'>,
+  alsoOwned: readonly string[] = [],
+): ReturnType<typeof testBackups> {
+  return testBackups(opts.referencesTarget, {
+    claudeDir: opts.referencesTarget,
+    devflowDir: `${opts.referencesTarget}-devflow`,
+    extraShipped: [
+      ...generatedReferenceManifest(),
+      ...FIXTURE_PROVIDER_FILES,
+      ...(opts.manifest ?? []),
+      ...alsoOwned,
+    ],
+  });
+}
 
 /** POSIX path of a manifest entry under a root, spelled for the host filesystem. */
 function abs(root: string, relPath: string): string {
@@ -263,6 +317,7 @@ describe('reference overlay through installViaFileCopy (AC-2.4a)', () => {
 
   async function runInstall(effectivePlugins?: typeof DEVFLOW_PLUGINS) {
     return installViaFileCopy({
+      backups: await testBackups(claudeDir, { claudeDir, devflowDir }),
       curation: true,
       compliance: true,
       plugins: [],
@@ -489,7 +544,7 @@ describe('converge-not-merge staged swap (GAP-24)', () => {
    * a future provider ever claims the name, this fails with a message saying to
    * pick another instead of quietly testing the opposite property.
    */
-  const EXTRA_PROVIDER_MANIFEST = ['tracker/probe-provider/comment.md', 'tracker/probe-provider/transition.md'] as const;
+  const EXTRA_PROVIDER_MANIFEST = FIXTURE_PROVIDER_FILES;
 
   it('the fixture provider is not a real one — the prune arms have a genuine orphan', () => {
     const real = generatedReferenceManifest();
@@ -523,7 +578,7 @@ describe('converge-not-merge staged swap (GAP-24)', () => {
     const wide = [...manifest, ...EXTRA_PROVIDER_MANIFEST];
     await stageSource(sourceRoot, wide);
 
-    const first = await overlayGeneratedReferences({
+    const first = await overlayWithBackups({
       referencesTarget: target,
       sourceRoot,
       manifest: wide,
@@ -535,7 +590,7 @@ describe('converge-not-merge staged swap (GAP-24)', () => {
       'the wide manifest must actually install the extra provider first',
     ).toBe(true);
 
-    const second = await overlayGeneratedReferences({
+    const second = await overlayWithBackups({
       referencesTarget: target,
       sourceRoot,
       manifest,
@@ -564,7 +619,7 @@ describe('converge-not-merge staged swap (GAP-24)', () => {
     await fs.writeFile(path.join(outside, 'smuggled.md'), '# smuggled\n', 'utf-8');
     await fs.symlink(outside, path.join(sourceRoot, 'tracker', 'github', 'linked'), 'dir');
 
-    const result = await overlayGeneratedReferences({
+    const result = await overlayWithBackups({
       referencesTarget: target,
       sourceRoot,
       manifest,
@@ -582,7 +637,7 @@ describe('converge-not-merge staged swap (GAP-24)', () => {
     await stageSource(sourceRoot, manifest);
     await fs.chmod(abs(sourceRoot, 'tracker/github/setup-task.md'), 0o600);
 
-    await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest });
+    await overlayWithBackups({ referencesTarget: target, sourceRoot, manifest });
 
     const files = (await walkTree(target)).filter(p => !p.endsWith('/'));
     expect(files.length, 'no files installed — the mode assertion would be vacuous').toBeGreaterThanOrEqual(47);
@@ -623,7 +678,7 @@ describe('converge-not-merge staged swap (GAP-24)', () => {
   it('stages every unit under a process-unique name inside the converged subtree', async () => {
     await stageSource(sourceRoot, manifest);
 
-    const staged = await captureStagingPaths(() => overlayGeneratedReferences({
+    const staged = await captureStagingPaths(() => overlayWithBackups({
       referencesTarget: target, sourceRoot, manifest, warn: (m) => warnings.push(m),
     }));
 
@@ -663,7 +718,7 @@ describe('converge-not-merge staged swap (GAP-24)', () => {
   it('a cross-cutting staging tree stranded by a crashed run is pruned by the next overlay', async () => {
     await stageSource(sourceRoot, manifest);
 
-    const staged = await captureStagingPaths(() => overlayGeneratedReferences({
+    const staged = await captureStagingPaths(() => overlayWithBackups({
       referencesTarget: target, sourceRoot, manifest, warn: (m) => warnings.push(m),
     }));
     const flatStaging = staged.find(p => path.basename(p).startsWith('.cross-cutting.'));
@@ -680,9 +735,10 @@ describe('converge-not-merge staged swap (GAP-24)', () => {
     await fs.mkdir(stranded, { recursive: true });
     await fs.writeFile(path.join(stranded, String(someFlatDoc)), '# half-written\n', 'utf-8');
 
-    const next = await overlayGeneratedReferences({
-      referencesTarget: target, sourceRoot, manifest, warn: (m) => warnings.push(m),
-    });
+    const next = await overlayWithBackups(
+      { referencesTarget: target, sourceRoot, manifest, warn: (m) => warnings.push(m) },
+      [`tracker/${path.basename(stranded)}/${String(someFlatDoc)}`],
+    );
 
     // Proof of RED: staged at `references/.cross-cutting.tmp` the stranded copy sits
     // outside every convergence this module performs, so both assertions fail — the
@@ -727,7 +783,7 @@ describe('converge-not-merge staged swap (GAP-24)', () => {
     await stageSource(sourceRoot, manifest);
     const file = await seedDeepReference(MAX_REFERENCE_SWEEP_DEPTH);
 
-    await overlayGeneratedReferences({
+    await overlayWithBackups({
       referencesTarget: target, sourceRoot, manifest, warn: (m) => warnings.push(m),
     });
 
@@ -740,7 +796,7 @@ describe('converge-not-merge staged swap (GAP-24)', () => {
     const tooDeep = abs(target, nestedDir(MAX_REFERENCE_SWEEP_DEPTH + 1));
     const file = await seedDeepReference(MAX_REFERENCE_SWEEP_DEPTH + 1);
 
-    const result = await overlayGeneratedReferences({
+    const result = await overlayWithBackups({
       referencesTarget: target, sourceRoot, manifest, warn: (m) => warnings.push(m),
     });
 
@@ -772,10 +828,7 @@ describe('the PR-host subtree converges like the tracker subtree (D-CONVERGED-SU
   const PR_PREFIX = `${PR_HOST_DESTINATION_ROOT}/`;
 
   /** A provider directory the real manifest does not list — same fixture rationale as above. */
-  const EXTRA_PROVIDER_MANIFEST = [
-    'tracker/probe-provider/comment.md',
-    'tracker/probe-provider/transition.md',
-  ] as const;
+  const EXTRA_PROVIDER_MANIFEST = FIXTURE_PROVIDER_FILES;
 
   let sourceRoot: string;
   let target: string;
@@ -825,7 +878,7 @@ describe('the PR-host subtree converges like the tracker subtree (D-CONVERGED-SU
 
   it('a stale file under pr/ the manifest does not name is removed by the whole-directory swap', async () => {
     await stageSource(sourceRoot, manifest);
-    const first = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest });
+    const first = await overlayWithBackups({ referencesTarget: target, sourceRoot, manifest });
     expect(first.overlayFailures, 'the seeding install must succeed').toEqual([]);
 
     // A document a retired op left behind — or a shadow supplied. The unit's directory
@@ -834,7 +887,10 @@ describe('the PR-host subtree converges like the tracker subtree (D-CONVERGED-SU
     const stale = abs(target, `${PR_PREFIX}retired-op.md`);
     await fs.writeFile(stale, '# left by an older build\n', 'utf-8');
 
-    const second = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest });
+    const second = await overlayWithBackups(
+      { referencesTarget: target, sourceRoot, manifest },
+      [`${PR_PREFIX}retired-op.md`],
+    );
 
     expect(await exists(stale), 'a file the manifest does not name must not survive under pr/').toBe(false);
     expect(second.overlayFailures).toEqual([]);
@@ -848,11 +904,11 @@ describe('the PR-host subtree converges like the tracker subtree (D-CONVERGED-SU
 
   it('a pr/ the manifest stops naming is pruned, each removal named from the root', async () => {
     await stageSource(sourceRoot, manifest);
-    const first = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest });
+    const first = await overlayWithBackups({ referencesTarget: target, sourceRoot, manifest });
     expect(first.overlayFailures, 'the seeding install must succeed').toEqual([]);
 
     const retired = manifest.filter(p => !p.startsWith(PR_PREFIX));
-    const second = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest: retired });
+    const second = await overlayWithBackups({ referencesTarget: target, sourceRoot, manifest: retired });
 
     for (const rel of prEntries()) {
       expect(await exists(abs(target, rel)), `${rel} must not survive its retirement`).toBe(false);
@@ -868,7 +924,7 @@ describe('the PR-host subtree converges like the tracker subtree (D-CONVERGED-SU
 
   it('pr/ is swapped whole: a promotion that fails leaves no document on this run\'s bytes', async () => {
     await stageSource(sourceRoot, manifest);
-    const seeded = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest });
+    const seeded = await overlayWithBackups({ referencesTarget: target, sourceRoot, manifest });
     expect(seeded.overlayFailures, 'the seeding install must succeed').toEqual([]);
 
     const docs = prEntries();
@@ -893,7 +949,7 @@ describe('the PR-host subtree converges like the tracker subtree (D-CONVERGED-SU
 
     let result;
     try {
-      result = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest });
+      result = await overlayWithBackups({ referencesTarget: target, sourceRoot, manifest });
     } finally {
       renameSpy.mockRestore();
     }
@@ -913,13 +969,13 @@ describe('the PR-host subtree converges like the tracker subtree (D-CONVERGED-SU
 
   it('a generated pr/{op}.md deleted from the install is put back by the next overlay', async () => {
     await stageSource(sourceRoot, manifest);
-    await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest });
+    await overlayWithBackups({ referencesTarget: target, sourceRoot, manifest });
 
     const [victim] = prEntries();
     const canonical = await fs.readFile(abs(target, victim));
     await fs.rm(abs(target, victim));
 
-    const second = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest });
+    const second = await overlayWithBackups({ referencesTarget: target, sourceRoot, manifest });
 
     expect(second.overlayFailures).toEqual([]);
     expect((await fs.readFile(abs(target, victim))).equals(canonical), `${victim} must be restored byte-for-byte`).toBe(true);
@@ -932,7 +988,7 @@ describe('the PR-host subtree converges like the tracker subtree (D-CONVERGED-SU
   it('a backup stranded under tracker/ skips THAT subtree only — pr/ still converges', async () => {
     const wide = [...manifest, ...EXTRA_PROVIDER_MANIFEST];
     await stageSource(sourceRoot, wide);
-    const seeded = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest: wide });
+    const seeded = await overlayWithBackups({ referencesTarget: target, sourceRoot, manifest: wide });
     expect(seeded.overlayFailures, 'the seeding install must succeed').toEqual([]);
 
     // One orphan in each converged subtree, both placed where no unit promotion can reach
@@ -958,7 +1014,10 @@ describe('the PR-host subtree converges like the tracker subtree (D-CONVERGED-SU
 
     let result;
     try {
-      result = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest: prRetired });
+      result = await overlayWithBackups(
+        { referencesTarget: target, sourceRoot, manifest: prRetired },
+        ['tracker/retired-op.md', `${PR_PREFIX}retired-op.md`],
+      );
     } finally {
       renameSpy.mockRestore();
     }
@@ -979,7 +1038,7 @@ describe('the PR-host subtree converges like the tracker subtree (D-CONVERGED-SU
 
   it('a per-item prune failure is named from the references root, in either subtree', async () => {
     await stageSource(sourceRoot, manifest);
-    const seeded = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest });
+    const seeded = await overlayWithBackups({ referencesTarget: target, sourceRoot, manifest });
     expect(seeded.overlayFailures, 'the seeding install must succeed').toEqual([]);
 
     // One removal per subtree that the sweep itself fails on. `tracker/retired-op.md`
@@ -990,21 +1049,24 @@ describe('the PR-host subtree converges like the tracker subtree (D-CONVERGED-SU
     const [prVictim, ...prRest] = prEntries();
     const refused = new Set([trackerStale, abs(target, prVictim)]);
 
-    const realRm = fs.rm.bind(fs);
-    const rmSpy = vi.spyOn(fs, 'rm').mockImplementation(async (p, options) => {
+    const realUnlink = fs.unlink.bind(fs);
+    const unlinkSpy = vi.spyOn(fs, 'unlink').mockImplementation(async (p) => {
       if (refused.has(String(p))) throw new Error('EBUSY: simulated removal failure');
-      return realRm(p, options);
+      return realUnlink(p);
     });
 
     let result;
     try {
-      result = await overlayGeneratedReferences({
-        referencesTarget: target,
-        sourceRoot,
-        manifest: manifest.filter(p => !p.startsWith(PR_PREFIX)),
-      });
+      result = await overlayWithBackups(
+        {
+          referencesTarget: target,
+          sourceRoot,
+          manifest: manifest.filter(p => !p.startsWith(PR_PREFIX)),
+        },
+        ['tracker/retired-op.md'],
+      );
     } finally {
-      rmSpy.mockRestore();
+      unlinkSpy.mockRestore();
     }
 
     // Named from the ROOT, like the removals beside them: a bare `retired-op.md` or
@@ -1018,7 +1080,7 @@ describe('the PR-host subtree converges like the tracker subtree (D-CONVERGED-SU
 
   it('a pr/ planted as a symlink is refused and reported — nothing is written or pruned through it', async () => {
     await stageSource(sourceRoot, manifest);
-    const seeded = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest });
+    const seeded = await overlayWithBackups({ referencesTarget: target, sourceRoot, manifest });
     expect(seeded.overlayFailures, 'the seeding install must succeed').toEqual([]);
 
     const elsewhere = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-overlay-elsewhere-'));
@@ -1033,7 +1095,7 @@ describe('the PR-host subtree converges like the tracker subtree (D-CONVERGED-SU
       await fs.symlink(outside, linked, 'dir');
       const before = await walkTree(outside);
 
-      const result = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest });
+      const result = await overlayWithBackups({ referencesTarget: target, sourceRoot, manifest });
 
       expect(await walkTree(outside), 'nothing may be written or removed through the link').toEqual(before);
       expect((await fs.lstat(linked)).isSymbolicLink(), 'a refused root is left as found').toBe(true);
@@ -1051,7 +1113,7 @@ describe('the PR-host subtree converges like the tracker subtree (D-CONVERGED-SU
 
   it('a tracker/ planted as a symlink refuses every unit, because every unit stages under it', async () => {
     await stageSource(sourceRoot, manifest);
-    const seeded = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest });
+    const seeded = await overlayWithBackups({ referencesTarget: target, sourceRoot, manifest });
     expect(seeded.overlayFailures, 'the seeding install must succeed').toEqual([]);
 
     const elsewhere = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-overlay-elsewhere-'));
@@ -1063,7 +1125,7 @@ describe('the PR-host subtree converges like the tracker subtree (D-CONVERGED-SU
       await fs.symlink(outside, linked, 'dir');
       const before = await walkTree(outside);
 
-      const result = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest });
+      const result = await overlayWithBackups({ referencesTarget: target, sourceRoot, manifest });
 
       expect(await walkTree(outside), 'nothing may be written or removed through the link').toEqual(before);
       expect((await fs.lstat(linked)).isSymbolicLink(), 'a refused root is left as found').toBe(true);
@@ -1112,7 +1174,7 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
   });
 
   it('one unreadable file leaves that provider byte-unchanged and installs the others', async (ctx) => {
-    const first = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest: wide });
+    const first = await overlayWithBackups({ referencesTarget: target, sourceRoot, manifest: wide });
     expect(first.overlayFailures, 'the seeding install must succeed').toEqual([]);
 
     const probeBefore = await Promise.all(
@@ -1132,7 +1194,7 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
     // Mutate the github source so a no-op overlay is distinguishable from a real one.
     await fs.appendFile(abs(sourceRoot, 'tracker/github/setup-task.md'), '\n<!-- second pass -->\n');
 
-    const second = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest: wide });
+    const second = await overlayWithBackups({ referencesTarget: target, sourceRoot, manifest: wide });
 
     // 1. the failing unit is named, and the install still succeeds (no throw)
     expect(second.overlayFailures.map(f => f.unit)).toEqual([
@@ -1172,7 +1234,7 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
   });
 
   it('a successful provider swap leaves no .old or .tmp residue behind', async () => {
-    const result = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest: wide });
+    const result = await overlayWithBackups({ referencesTarget: target, sourceRoot, manifest: wide });
     expect(result.overlayFailures, 'the swap must succeed for this assertion to mean anything').toEqual([]);
 
     // The promotion displaces the installed unit to a `.old` sibling before renaming
@@ -1186,7 +1248,7 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
   });
 
   it('a promotion that fails after displacing the unit restores it instead of deleting it', async () => {
-    const first = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest: wide });
+    const first = await overlayWithBackups({ referencesTarget: target, sourceRoot, manifest: wide });
     expect(first.overlayFailures, 'the seeding install must succeed').toEqual([]);
 
     const unit: OverlayUnit = {
@@ -1204,7 +1266,7 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
     const missingStaging = abs(target, 'tracker/probe-provider') + '.tmp';
     expect(await exists(missingStaging), 'the staging tree must be absent for this probe').toBe(false);
 
-    const promoted = await promoteUnitStagingTree(unit, target, missingStaging);
+    const promoted = await promoteUnitStagingTree(unit, target, missingStaging, await backupsFor({ referencesTarget: target, manifest: wide }));
 
     expect(promoted.ok, 'promoting an absent staging tree must be reported, never silently ok').toBe(false);
 
@@ -1240,7 +1302,7 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
 
     let result;
     try {
-      result = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest: wide });
+      result = await overlayWithBackups({ referencesTarget: target, sourceRoot, manifest: wide });
     } finally {
       await fs.chmod(probeSource, 0o755).catch(() => undefined);
     }
@@ -1272,7 +1334,7 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
   });
 
   it('a flat-set promotion caught mid-flight reports which documents are new and which are stale', async () => {
-    const seeded = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest: wide });
+    const seeded = await overlayWithBackups({ referencesTarget: target, sourceRoot, manifest: wide });
     expect(seeded.overlayFailures, 'the seeding install must succeed').toEqual([]);
 
     // The cross-cutting documents — the unit with no directory to swap back.
@@ -1290,7 +1352,7 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
     await fs.writeFile(path.join(staging, flat[0]), '# refreshed by this run\n', 'utf-8');
 
     const unit: OverlayUnit = { kind: 'cross-cutting', dir: '', files: flat };
-    const promoted = await promoteUnitStagingTree(unit, target, staging);
+    const promoted = await promoteUnitStagingTree(unit, target, staging, await backupsFor({ referencesTarget: target }));
 
     expect(promoted.ok, 'a rename over an absent document must be reported').toBe(false);
     if (promoted.ok) return;
@@ -1347,7 +1409,7 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
       'the destination directory must be absent, or this probe drives the path that already works',
     ).toBe(false);
 
-    const promoted = await promoteUnitStagingTree(unit, target, staging);
+    const promoted = await promoteUnitStagingTree(unit, target, staging, await backupsFor({ referencesTarget: target }));
 
     // Proof of RED: without the mkdir the first rename is ENOENT, the promotion is reported
     // as failed, and not one of the unit's documents reaches the installed skill.
@@ -1364,7 +1426,7 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
   });
 
   it('a restore that fails is reported as such, and its recovery copy survives the same run', async () => {
-    const seeded = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest: wide });
+    const seeded = await overlayWithBackups({ referencesTarget: target, sourceRoot, manifest: wide });
     expect(seeded.overlayFailures, 'the seeding install must succeed').toEqual([]);
 
     const live = abs(target, 'tracker/probe-provider');
@@ -1402,7 +1464,7 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
 
     let result;
     try {
-      result = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest: wide });
+      result = await overlayWithBackups({ referencesTarget: target, sourceRoot, manifest: wide });
     } finally {
       renameSpy.mockRestore();
     }
@@ -1450,6 +1512,7 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
     const unguarded = await sweepOrphanedReferences(
       path.join(target, 'tracker'),
       new Set(wide.filter(p => p.startsWith(trackerPrefix)).map(p => p.slice(trackerPrefix.length))),
+      removeEverything,
     );
     expect(unguarded.removed).toContain('probe-provider.old');
     expect(await exists(backup), 'the unguarded prune deletes the only surviving copy').toBe(false);
@@ -1459,17 +1522,17 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
     await fs.rm(abs(sourceRoot, 'tracker/github/setup-task.md'));
 
     await expect(
-      overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest: wide }),
+      overlayWithBackups({ referencesTarget: target, sourceRoot, manifest: wide }),
     ).rejects.toThrow(/tracker\/github\/setup-task\.md/);
     await expect(
-      overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest: wide }),
+      overlayWithBackups({ referencesTarget: target, sourceRoot, manifest: wide }),
     ).rejects.toThrow(/npm run build:mds/);
   });
 
   it('an absent cross-cutting document fails loud the same way', async () => {
     await fs.rm(abs(sourceRoot, 'decision-markers.md'));
     await expect(
-      overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest: wide }),
+      overlayWithBackups({ referencesTarget: target, sourceRoot, manifest: wide }),
     ).rejects.toThrow(/decision-markers\.md[\s\S]*npm run build:mds/);
   });
 
@@ -1485,10 +1548,10 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
     expect(await exists(absentRoot), 'the probe needs a root that really is not there').toBe(false);
 
     await expect(
-      overlayGeneratedReferences({ referencesTarget: target, sourceRoot: absentRoot, manifest: wide }),
+      overlayWithBackups({ referencesTarget: target, sourceRoot: absentRoot, manifest: wide }),
     ).rejects.toThrow(/npm run build:mds/);
     await expect(
-      overlayGeneratedReferences({ referencesTarget: target, sourceRoot: absentRoot, manifest: wide }),
+      overlayWithBackups({ referencesTarget: target, sourceRoot: absentRoot, manifest: wide }),
     ).rejects.toThrow(absentRoot);
 
     // The refusal is the whole outcome: no half-built references directory beside it.
@@ -1499,7 +1562,7 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
 
     // Positive half: the SAME call over the staged tree installs the whole manifest, so
     // the refusal is selected by the absent root and not by the arguments around it.
-    const healthy = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest: wide });
+    const healthy = await overlayWithBackups({ referencesTarget: target, sourceRoot, manifest: wide });
     expect(healthy.overlayFailures).toEqual([]);
     expect([...healthy.overlaidRefs].sort()).toEqual([...wide].sort());
   });
@@ -1512,7 +1575,7 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
     // one unit's directory is not.
     await fs.rm(abs(sourceRoot, 'tracker/probe-provider'), { recursive: true });
 
-    const result = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest: wide });
+    const result = await overlayWithBackups({ referencesTarget: target, sourceRoot, manifest: wide });
 
     expect(result.overlayFailures).toHaveLength(1);
     expect(result.overlayFailures[0].unit).toEqual({ kind: 'provider', subdir: 'tracker/probe-provider' });
@@ -1549,8 +1612,8 @@ describe('unchanged units are reported separately (AC-23)', () => {
     await fs.rm(target, { recursive: true, force: true });
   });
 
-  const overlay = (): ReturnType<typeof overlayGeneratedReferences> =>
-    overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest });
+  const overlay = (alsoOwned: readonly string[] = []): ReturnType<typeof overlayGeneratedReferences> =>
+    overlayWithBackups({ referencesTarget: target, sourceRoot, manifest }, alsoOwned);
 
   /**
    * Inode per manifest entry — what separates "did not write" from "wrote the same bytes".
@@ -1628,7 +1691,7 @@ describe('unchanged units are reported separately (AC-23)', () => {
     const stray = abs(target, 'tracker/github/stray-op.md');
     await fs.writeFile(stray, '# left by an earlier build\n', 'utf-8');
 
-    const result = await overlay();
+    const result = await overlay(['tracker/github/stray-op.md']);
 
     expect(result.overlaidRefs).toContain('tracker/github/setup-task.md');
     expect(result.unchangedRefs).not.toContain('tracker/github/setup-task.md');
@@ -1754,7 +1817,7 @@ describe('sweepOrphanedReferences — path-keyed prune collector', () => {
     await fs.writeFile(path.join(root, 'github', 'setup-task.md'), 'keep\n', 'utf-8');
     await fs.writeFile(path.join(root, 'github', 'smuggled.md'), 'drop\n', 'utf-8');
 
-    const result = await sweepOrphanedReferences(root, new Set(['github/setup-task.md']));
+    const result = await sweepOrphanedReferences(root, new Set(['github/setup-task.md']), removeEverything);
 
     expect(result.removed).toEqual(['github/smuggled.md']);
     expect(result.scanned).toBeGreaterThan(0);
@@ -1768,7 +1831,7 @@ describe('sweepOrphanedReferences — path-keyed prune collector', () => {
     await fs.writeFile(path.join(root, 'github', 'setup-task.md'), 'keep\n', 'utf-8');
     await fs.writeFile(path.join(root, 'acme', 'nested', 'x.md'), 'drop\n', 'utf-8');
 
-    const result = await sweepOrphanedReferences(root, new Set(['github/setup-task.md']));
+    const result = await sweepOrphanedReferences(root, new Set(['github/setup-task.md']), removeEverything);
 
     expect(result.removed).toEqual(['acme']);
     expect(await exists(path.join(root, 'acme'))).toBe(false);
@@ -1777,7 +1840,7 @@ describe('sweepOrphanedReferences — path-keyed prune collector', () => {
   });
 
   it('an absent root is a no-op, not an error', async () => {
-    const result = await sweepOrphanedReferences(path.join(root, 'nope'), new Set(['a.md']));
+    const result = await sweepOrphanedReferences(path.join(root, 'nope'), new Set(['a.md']), removeEverything);
     expect(result).toEqual({ scanned: 0, removed: [], failed: [] });
   });
 
@@ -1800,7 +1863,7 @@ describe('sweepOrphanedReferences — path-keyed prune collector', () => {
   it('sweeps the deepest directory the shared bound permits', async () => {
     const { known, orphan } = await seedNested(MAX_REFERENCE_SWEEP_DEPTH);
 
-    const result = await sweepOrphanedReferences(root, new Set([known]));
+    const result = await sweepOrphanedReferences(root, new Set([known]), removeEverything);
 
     expect(result.removed).toEqual([orphan]);
     expect(result.failed).toEqual([]);
@@ -1812,7 +1875,7 @@ describe('sweepOrphanedReferences — path-keyed prune collector', () => {
     const tooDeep = nested(MAX_REFERENCE_SWEEP_DEPTH + 1);
     const { known, orphan } = await seedNested(MAX_REFERENCE_SWEEP_DEPTH + 1);
 
-    const result = await sweepOrphanedReferences(root, new Set([known]));
+    const result = await sweepOrphanedReferences(root, new Set([known]), removeEverything);
 
     // The subtree genuinely was not swept — the orphan under it survives...
     expect(result.removed).toEqual([]);
@@ -1854,8 +1917,9 @@ describe('compliance-off reference install (AC-41, AC-50)', () => {
     return generatedReferenceManifest().filter(rel => !kept.has(rel));
   };
 
-  function install(opts: { compliance: boolean; partial?: boolean; packageRoot?: string }) {
+  async function install(opts: { compliance: boolean; partial?: boolean; packageRoot?: string }) {
     return installViaFileCopy({
+      backups: await testBackups(tmp, { claudeDir, devflowDir }),
       curation: true,
       compliance: opts.compliance,
       plugins: [],

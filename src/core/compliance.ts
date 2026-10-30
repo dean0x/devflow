@@ -66,6 +66,21 @@ export const COMPLIANCE_RULE_PLACEHOLDER = '${DEVFLOW_COMPLIANCE_FRAMEWORKS}';
  */
 export const ALWAYS_PRESENT_REFS: readonly string[] = ['detection.md', 'sources.md'];
 
+/**
+ * Every file the installed compliance skill folder holds, as POSIX paths below it: `SKILL.md`, the
+ * always-present references, and one `references/{id}.md` per registry framework. The install
+ * writes all of them on every machine whatever the selection (D-COMPLIANCE-INSTALL-ALWAYS), so
+ * this is also the set a scan treats as shipped. The skill source holds more (the framework
+ * fragments), which the install does not copy.
+ */
+export function complianceSkillFiles(): readonly string[] {
+  return [
+    'SKILL.md',
+    ...ALWAYS_PRESENT_REFS.map(ref => `references/${ref}`),
+    ...COMPLIANCE_FRAMEWORKS.map(fw => `references/${fw.id}.md`),
+  ];
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------

@@ -33,7 +33,7 @@ import { TRACKER_MCP_SERVERS_DEFAULT, trackerServerTools } from '../../src/core/
 import { isTrackerStampedAgent } from '../../src/targets/claude-code/tracker-servers.js';
 import { buildAssetMaps, getAllAgentNames } from '../../src/core/plugins.js';
 import type { PluginDefinition } from '../../src/core/plugins.js';
-import { resolveAgentSource, splitFrontmatter } from '../helpers.js';
+import { resolveAgentSource, splitFrontmatter, testBackups } from '../helpers.js';
 
 const spinner = { start: () => {}, stop: () => {}, message: () => {} };
 
@@ -76,16 +76,18 @@ function fixturePlugin(): PluginDefinition {
 async function installAll(root: string, dirs?: AgentSourceDirs): Promise<Map<string, string>> {
   const plugin = fixturePlugin();
   const claudeDir = await fs.mkdtemp(path.join(root, 'claude-'));
+  const devflowDir = path.join(claudeDir, 'devflow');
   await installViaFileCopy({
     curation: true,
     compliance: true,
     plugins: [plugin],
     claudeDir,
-    devflowDir: path.join(claudeDir, 'devflow'),
+    devflowDir,
     skillsMap: new Map(),
     agentsMap: buildAssetMaps([plugin]).agentsMap,
     isPartialInstall: false,
     spinner,
+    backups: await testBackups(claudeDir, { claudeDir, devflowDir }),
     ...(dirs === undefined ? {} : { agentSourceDirs: dirs }),
   });
 

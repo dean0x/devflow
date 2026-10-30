@@ -29,6 +29,7 @@ import { readManifest } from '../../src/core/manifest.js';
 import { getManifestLockPath } from '../../src/core/manifest-lock.js';
 import { DEVFLOW_PLUGINS, type PluginDefinition } from '../../src/core/plugins.js';
 import { assertTempHome } from '../setup/home-isolation.js';
+import { testBackups } from '../helpers.js';
 
 /**
  * A seam on the manifest lock: the one-shot hook runs just before the next lock is taken, which for a
@@ -142,8 +143,12 @@ const stateOf = (m: Machine, rules = false) => ({
   features: { curation: m.curation, compliance: { enabled: m.compliance, frameworks: [] as string[] }, rules },
 });
 
-function converge(m: Machine, plugins: readonly PluginDefinition[] = FULL_SELECTION): Promise<ConvergeVariantAxesResult> {
-  return convergeVariantAxes({ claudeDir, devflowDir, manifest: stateOf(m), plugins, warn, packageRoot: pkg });
+const backupsOf = () => testBackups(tmp, { claudeDir, devflowDir });
+
+async function converge(m: Machine, plugins: readonly PluginDefinition[] = FULL_SELECTION): Promise<ConvergeVariantAxesResult> {
+  return convergeVariantAxes({
+    claudeDir, devflowDir, manifest: stateOf(m), plugins, warn, packageRoot: pkg, backups: await backupsOf(),
+  });
 }
 
 beforeEach(async () => {
@@ -312,6 +317,7 @@ describe('convergeVariantAxes: a compliance-off machine fails closed (AC-28)', (
 
     const result = await convergeVariantAxes({
       claudeDir: 'relative/claude', devflowDir, manifest: stateOf(OFF), plugins: FULL_SELECTION, warn, packageRoot: pkg,
+      backups: await backupsOf(),
     });
 
     expect(result.converged).toBe(false);
@@ -464,8 +470,10 @@ describe('applyVariantToggle on the compliance axis (AC-27, AC-28, AC-29)', () =
     }));
   }
 
-  const toggle = (enabled: boolean, runningVersion: string | null = '3.3.0') =>
-    applyVariantToggle({ claudeDir, devflowDir, axis: 'compliance', enabled, runningVersion, warn, packageRoot: pkg });
+  const toggle = async (enabled: boolean, runningVersion: string | null = '3.3.0') =>
+    applyVariantToggle({
+      claudeDir, devflowDir, axis: 'compliance', enabled, runningVersion, warn, packageRoot: pkg, backups: await backupsOf(),
+    });
 
   it('disable converges the compliance-armed prompts and records the installed variants after the clean converge', async () => {
     await writeInstallManifest('3.3.0', { compliance: { enabled: false, frameworks: [] } });

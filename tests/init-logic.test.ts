@@ -34,6 +34,7 @@ import {
 } from '../src/core/tracker.js';
 import { parsePluginSelection } from '../src/core/plugins.js';
 import { getManagedSettingsPath } from '../src/targets/claude-code/claude-paths.js';
+import { ROOT, testBackups } from './helpers.js';
 import {
   installManagedSettings,
   installClaudeignore,
@@ -56,6 +57,7 @@ import { DEVFLOW_PLUGINS, buildAssetMaps, buildRulesMap, getAllAgentNames, getAl
 import type { RunMigrationsResult } from '../src/core/migrations.js';
 import { LEGACY_SKILL_NAMES } from '../src/targets/claude-code/legacy.js';
 import { convergeAmbientHooks } from '../src/cli/commands/ambient.js';
+import { sweepLegacySkillFolders } from '../src/cli/commands/legacy-sweep.js';
 
 describe('parsePluginSelection', () => {
   it('parses comma-separated plugin names', () => {
@@ -2005,6 +2007,7 @@ describe('installViaFileCopy cleanup (isPartialInstall)', () => {
       agentsMap: new Map(),
       isPartialInstall: false,
       spinner: noopSpinner,
+      backups: await testBackups(tmpDir, { claudeDir, devflowDir }),
     });
 
     // Stale dirs should be removed
@@ -2025,6 +2028,7 @@ describe('installViaFileCopy cleanup (isPartialInstall)', () => {
       agentsMap: new Map(),
       isPartialInstall: true,
       spinner: noopSpinner,
+      backups: await testBackups(tmpDir, { claudeDir, devflowDir }),
     });
 
     // Stale files (names absent from registry) should be removed by the sweep
@@ -2034,19 +2038,15 @@ describe('installViaFileCopy cleanup (isPartialInstall)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Init-level LEGACY_SKILL_NAMES cleanup pin (init.ts:1149-1153)
+// Init-level LEGACY_SKILL_NAMES cleanup pin
 //
-// After the installer.ts bare-rm fix, installViaFileCopy no longer removes bare
-// skill dirs. Init.ts:1149-1153 (the LEGACY_SKILL_NAMES cleanup pass) is now
-// the SOLE path that removes bare legacy dirs. This describe pins that:
-//   (a) installViaFileCopy does NOT remove bare codebase-navigation/ (ordering dep)
-//   (b) the LEGACY_SKILL_NAMES cleanup DOES remove it
-//
-// Both tests are preservation tests (GREEN before and after the fix); they exist
-// to prevent accidental removal of the init.ts cleanup pass and to document the
-// ordering dependency that installer.ts's bare-rm deletion relies on.
+// installViaFileCopy does not touch bare skill dirs. The legacy skill pass init runs after it
+// (sweepLegacySkillFolders over LEGACY_SKILL_NAMES) is the sole path that deals with bare legacy
+// dirs, and it moves them to the backup folder instead of deleting them. This describe pins that:
+//   (a) installViaFileCopy does NOT touch bare codebase-navigation/ (ordering dep)
+//   (b) the legacy skill pass moves it aside whole and names it, and leaves nothing behind
 // ---------------------------------------------------------------------------
-describe('init LEGACY_SKILL_NAMES cleanup pass (init.ts:1149-1153)', () => {
+describe('init LEGACY_SKILL_NAMES cleanup pass', () => {
   let tmpDir: string;
   let claudeDir: string;
   const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
@@ -2079,22 +2079,29 @@ describe('init LEGACY_SKILL_NAMES cleanup pass (init.ts:1149-1153)', () => {
       agentsMap: new Map(),
       isPartialInstall: false,
       spinner: noopSpinner,
+      backups: await testBackups(tmpDir, { claudeDir, devflowDir }),
     });
 
-    // codebase-navigation/ must survive installViaFileCopy — init.ts:1149 owns its cleanup
+    // codebase-navigation/ must survive installViaFileCopy — the legacy skill pass owns its cleanup
     await expect(
       fs.access(path.join(skillsDir, 'codebase-navigation')),
       'codebase-navigation/ must not be removed by installViaFileCopy',
     ).resolves.toBeUndefined();
   });
 
-  it('LEGACY_SKILL_NAMES cleanup removes bare codebase-navigation/ after installViaFileCopy', async () => {
-    // Simulate the full init flow: installViaFileCopy + LEGACY_SKILL_NAMES cleanup.
-    // This is what init.ts:1130 + 1149-1153 does together.
+  it('LEGACY_SKILL_NAMES cleanup moves bare python/ aside after installViaFileCopy when a release made it', async () => {
+    // Simulate the full init flow: installViaFileCopy + the legacy skill pass, on one session.
+    // python/ holds the SKILL.md that devflow 1.8.3 installed, so the pass moves the folder whole.
     const skillsDir = path.join(claudeDir, 'skills');
-    await fs.mkdir(path.join(skillsDir, 'codebase-navigation'), { recursive: true });
+    await fs.mkdir(path.join(skillsDir, 'python'), { recursive: true });
+    await fs.copyFile(
+      path.join(ROOT, 'tests', 'fixtures', 'released-legacy-skills', 'python.SKILL.md'),
+      path.join(skillsDir, 'python', 'SKILL.md'),
+    );
+    await fs.writeFile(path.join(skillsDir, 'python', 'mine.md'), 'my notes\n');
 
     const devflowDir = path.join(tmpDir, 'devflow');
+    const backups = await testBackups(tmpDir, { claudeDir, devflowDir });
     await installViaFileCopy({
       curation: true,
       compliance: true,
@@ -2105,20 +2112,20 @@ describe('init LEGACY_SKILL_NAMES cleanup pass (init.ts:1149-1153)', () => {
       agentsMap: new Map(),
       isPartialInstall: false,
       spinner: noopSpinner,
+      backups,
     });
 
-    // Step 2: LEGACY_SKILL_NAMES cleanup — mirrors init.ts:1149-1153 exactly.
-    await Promise.allSettled(
-      LEGACY_SKILL_NAMES.map(legacy =>
-        fs.rm(path.join(skillsDir, legacy), { recursive: true })
-      )
-    );
+    // Step 2: the legacy skill pass, as init runs it.
+    await sweepLegacySkillFolders({ claudeDir, backups, legacySkills: LEGACY_SKILL_NAMES });
 
-    // codebase-navigation/ must be gone after the LEGACY_SKILL_NAMES pass
+    // python/ must be gone from skills/ and kept whole in the backup folder
     await expect(
-      fs.access(path.join(skillsDir, 'codebase-navigation')),
-      'codebase-navigation/ must be removed by the LEGACY_SKILL_NAMES cleanup pass',
+      fs.access(path.join(skillsDir, 'python')),
+      'python/ must leave skills/ in the LEGACY_SKILL_NAMES cleanup pass',
     ).rejects.toThrow();
+    const [unit] = backups.snapshot().moved;
+    expect(unit.original).toBe(path.join(skillsDir, 'python'));
+    expect(await fs.readFile(path.join(unit.backup, 'mine.md'), 'utf8')).toBe('my notes\n');
   });
 });
 
@@ -2150,8 +2157,8 @@ describe('partial install registry-diff sweep correctness', () => {
     const retiredAgentPath = path.join(claudeDir, 'agents', 'devflow', 'shepherd.md');
     await fs.writeFile(retiredAgentPath, '# retired agent');
 
-    // (b) A retired command: 'review' is absent from getAllCommandNames().
-    // The sweep must remove it.
+    // (b) A command that is absent from getAllCommandNames(): 'review'. No release shipped it, so
+    // the install moves it out of the folder to the backup folder instead of removing it.
     const retiredCommandPath = path.join(claudeDir, 'commands', 'devflow', 'review.md');
     await fs.writeFile(retiredCommandPath, '# retired command');
 
@@ -2183,6 +2190,7 @@ describe('partial install registry-diff sweep correctness', () => {
       agentsMap: new Map(),
       isPartialInstall: true,
       spinner: noopSpinner,
+      backups: await testBackups(tmpDir, { claudeDir, devflowDir }),
     });
 
     // --- Assert ---

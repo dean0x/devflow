@@ -9,8 +9,8 @@ import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
  * A write, `mkdir` or `readdir` follows a symbolic link, so a link at or below one of these
  * folders sends the write into another place. Every check here uses `lstat`, which sees the link
  * and never the entry it points to. One rule holds for all of them: a link is unlinked or left
- * alone, and what it points to is never written. Nothing here throws, except the final `rm` in
- * {@link removeReportingLink} and the write in {@link writeFileReplacingLink}, whose callers catch it.
+ * alone, and what it points to is never written. Nothing here throws, except the write in
+ * {@link writeFileReplacingLink}, whose callers catch it.
  *
  * This module imports nothing from the installer, so any install or converge step can use it.
  */
@@ -64,16 +64,6 @@ export async function unlinkLinkAt(entry: string): Promise<LinkUnlinkOutcome> {
   } catch {
     return 'stuck';
   }
-}
-
-/**
- * Remove `target` whole. A link there is unlinked instead and returned, so the caller can report it;
- * the folder it points to is left as it is. A failure of the final `rm` is thrown.
- */
-export async function removeReportingLink(target: string): Promise<string[]> {
-  const outcome = await unlinkLinkAt(target);
-  if (outcome === 'no-link') await fs.rm(target, { recursive: true, force: true });
-  return outcome === 'unlinked' ? [target] : [];
 }
 
 /**
@@ -200,6 +190,11 @@ export function warnLinkReport(report: LinkReport, warn: (message: string) => vo
 /** The mode of a file that replaces a link. The atomic writer would copy the mode of the link's target instead. */
 const REPLACED_LINK_FILE_MODE = 0o644;
 
+/** The temp file beside `file` that {@link writeFileReplacingLink} writes through: `<file>.tmp.<pid>`. */
+export function linkReplacementTempPath(file: string): string {
+  return `${file}.tmp.${process.pid}`;
+}
+
 /**
  * Write `content` at `file` through a temp file beside it and one rename. A rename puts the new file
  * in the place of whatever stands at `file`, so a link there is replaced and never followed; the link
@@ -214,7 +209,7 @@ export async function writeFileReplacingLink(file: string, content: string, link
     await writeFileAtomicExclusive(file, content);
     return;
   }
-  const temp = `${file}.tmp.${process.pid}`;
+  const temp = linkReplacementTempPath(file);
   try {
     // A stale temp file is removed first; the exclusive open then refuses anything placed there since.
     await fs.rm(temp, { force: true });

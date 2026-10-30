@@ -29,6 +29,14 @@ Update `CHANGELOG.md` `[Unreleased]` section in each PR:
 ---
 ```
 
+## Installed Names
+
+An install moves a file that devflow did not ship out of the devflow install folders. So the list of names that devflow shipped must stay exact. Two rules keep it exact:
+
+- A PR that ships a new installed name adds the name to `tests/fixtures/released-shipped-names.ts`. A guard fails when the build ships a name that the fixture does not hold.
+- A PR that ships a retired name again removes the name from `RETIRED_SHIPPED` in `src/core/retired-shipped-names.ts` and from the legacy list in `src/targets/claude-code/legacy.ts`, in the same PR. A guard fails when one name is in both the shipped set and the retired set.
+- A name goes on a delete list (the commands, agents, rules and skill files of `RETIRED_SHIPPED`) only when a release shipped it. A guard fails when a name on a delete list is not in `tests/fixtures/released-shipped-names.ts`. Any other name, even one that a legacy list holds, is an unknown file: it moves to the backup folder and is named.
+
 ## Creating a Release
 
 1. Go to **GitHub Actions** → **Release** workflow

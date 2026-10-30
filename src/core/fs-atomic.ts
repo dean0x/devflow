@@ -12,6 +12,11 @@ import { promises as fs } from 'fs';
  * system. Any change to the retry logic here MUST be mirrored there.
  */
 
+/** The sibling `filePath` is written to before the rename: `<file>.tmp.<pid>`. */
+export function atomicTempPath(filePath: string): string {
+  return `${filePath}.tmp.${process.pid}`;
+}
+
 /**
  * Atomically write `filePath` by writing to a sibling `.tmp` then renaming.
  *
@@ -40,7 +45,7 @@ export async function writeFileAtomicExclusive(filePath: string, data: string, c
   // (e.g., two Claude Code sessions) never collide on the same .tmp path.
   // mirrors proxy-log.ts rotation at src/core/proxy-log.ts which PID-scopes
   // for the same reason.
-  const tmp = `${filePath}.tmp.${process.pid}`;
+  const tmp = atomicTempPath(filePath);
   const options = { encoding: 'utf-8', flag: 'wx', ...(createMode === undefined ? {} : { mode: createMode }) } as const;
   try {
     await fs.writeFile(tmp, data, options);

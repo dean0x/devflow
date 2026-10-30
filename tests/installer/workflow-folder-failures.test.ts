@@ -15,6 +15,7 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { VARIANT_KEYS } from '../../src/core/curation-variants.js';
+import { RETIRED_SHIPPED } from '../../src/core/retired-shipped-names.js';
 import {
   stampBuildId,
   workflowBuildId,
@@ -28,6 +29,7 @@ import type { PluginDefinition } from '../../src/core/plugins.js';
 import { workflowFoldersPosting, type ConvergeWorkflowFoldersResult } from '../../src/targets/claude-code/curation-install.js';
 import { installViaFileCopy, type InstallReport, type Spinner } from '../../src/targets/claude-code/installer.js';
 import { assertTempHome } from '../setup/home-isolation.js';
+import { testBackups } from '../helpers.js';
 import { FIXTURE_FOLDER } from '../fixtures/workflow-folder.js';
 
 const SWITCHES = { curation: true, compliance: true } as const;
@@ -87,6 +89,9 @@ async function writeBuiltTree(folder: WorkflowFolder): Promise<void> {
   }
 }
 
+/** An agent name an earlier release shipped and the build does not, so the sweep removes it. */
+const RETIRED_AGENT = RETIRED_SHIPPED.agents[0];
+
 /**
  * A partial install that names `NAMED` only and finds a retired agent file, so it widens to the
  * commands, and with them the folders, of every plugin the install record lists.
@@ -94,7 +99,7 @@ async function writeBuiltTree(folder: WorkflowFolder): Promise<void> {
 async function widenedInstall(registry: readonly WorkflowFolder[]): Promise<InstallReport> {
   const agents = path.join(claudeDir, 'agents', 'devflow');
   await fs.mkdir(agents, { recursive: true });
-  await fs.writeFile(path.join(agents, 'retired-agent.md'), '# an agent no plugin ships any more\n', 'utf-8');
+  await fs.writeFile(path.join(agents, `${RETIRED_AGENT}.md`), '# an agent no plugin ships any more\n', 'utf-8');
   const report = await installViaFileCopy({
     ...SWITCHES,
     plugins: [NAMED],
@@ -108,10 +113,11 @@ async function widenedInstall(registry: readonly WorkflowFolder[]): Promise<Inst
     warn,
     workflowFolders: registry,
     workflowFoldersRoot: pkg,
+    backups: await testBackups(tmp, { claudeDir, devflowDir, workflowFolders: registry }),
   });
   expect(report.sweptOrphans, 'precondition: the retired agent was swept, so the run widened').toContainEqual({
     kind: 'agent',
-    name: 'retired-agent',
+    name: RETIRED_AGENT,
   });
   return report;
 }
