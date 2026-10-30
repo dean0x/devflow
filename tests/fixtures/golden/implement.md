@@ -82,7 +82,7 @@ The issue token is forwarded **unclassified**: routing is by SHAPE alone. Only `
 
 **Capture from Git agent output**, each value as written. Never re-derive one issue value from another, and never infer one from a `TRACEABILITY: DEGRADED ({reason})` status line: that line is a status, not issue content.
 - `TASK_ID`: The branch name created by Git agent
-- `BASE_BRANCH`: Branch this feature was created from (for PR target); stop unless it passes the setup check
+- `BASE_BRANCH`: Branch this feature was created from; stop unless it passes the setup check
 - `ISSUE_ID`: the `- **Issue ID**:` line under `### Handoff Values`, if any. `ISSUE_NUMBER` is this value.
 - `ISSUE_PR_LINK`: the `- **PR link line**:` line under `### Handoff Values`
 - `ISSUE_CONTENT` and `ACCEPTANCE_CRITERIA`: the body between the `<untrusted-issue-body>` markers, and its acceptance criteria
@@ -395,7 +395,7 @@ Any other or missing Status: report the status or "none" and its cause, then hal
 
 Alignment-fix commits get no self-review: Phase 6 Validate and `/code-review` check them.
 
-After ALIGNED or a single-pass fix completes, spawn Validate agent:
+After ALIGNED, or a single-pass Fix that reports COMPLETE, spawn Validate agent:
 
 ```
 Agent(subagent_type="Validate"):
