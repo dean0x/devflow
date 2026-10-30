@@ -25,7 +25,6 @@ import { snapshotTree, trackInGit } from './decisions/curation-fixtures.js';
 import { WORKER_AGENTS, validateWorkerValue } from '../src/core/agent-models.js';
 import { MEMORY_MIN_PERMISSION_VERSION } from '../src/cli/commands/memory.js';
 import { FORBIDDEN_ARGV } from './fixtures/forbidden-argv.js';
-import { GIT_BIN_PREFIX } from './setup/home-isolation.js';
 import {
   FIFO_RUN_BOUND_MS,
   FIFO_TEST_TIMEOUT_MS,
@@ -35,6 +34,7 @@ import {
   makeFifo,
   releaseFifo,
   resolveOnPath,
+  runGitForFarm,
   runHook,
   spawnWithStdin,
 } from './shell-hooks-helpers.js';
@@ -160,11 +160,9 @@ const FARM_TOOLS = [
  *
  * `omit` names tools to leave out (`['cksum']` for the startup assert). `extra` maps a tool
  * name to the absolute path it links to (`{ node: process.execPath }` for the node backend).
- * Each tool links from /usr/bin, else /bin. `git` links to the git that the run's PATH finds
- * first only when that path is absolute and its folder is the run's own git folder (named
- * with `GIT_BIN_PREFIX`), because /usr/bin/git on macOS is a shim that looks git up again on
- * every call; in every other case `git` links like the other tools. The farm is removed in
- * the afterEach above.
+ * Each tool links from /usr/bin, else /bin. `git` links to the run's own git when
+ * `runGitForFarm` gives one, else like the other tools. The farm is removed in the
+ * afterEach above.
  */
 function buildToolFarm(
   omit: readonly string[] = [],
@@ -172,11 +170,7 @@ function buildToolFarm(
 ): string {
   const farmDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-farm-'));
   toolFarms.push(farmDir);
-  const firstGit = resolveOnPath('git', process.env.PATH ?? '');
-  const runGit = firstGit !== undefined && path.isAbsolute(firstGit)
-    && path.basename(path.dirname(firstGit)).startsWith(GIT_BIN_PREFIX)
-    ? firstGit
-    : undefined;
+  const runGit = runGitForFarm();
   for (const tool of FARM_TOOLS) {
     if (omit.includes(tool)) continue;
     if (tool === 'git' && runGit !== undefined) {

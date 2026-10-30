@@ -9,7 +9,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import { TRACKER_ATTEMPTS_MAX } from '../src/core/tracker.js';
-import { HOOK_RUN_ALLOWANCE_MS, HOOKS_DIR, NODE_EXEC_STALL_MS, runHook } from './shell-hooks-helpers.js';
+import { HOOK_RUN_ALLOWANCE_MS, HOOKS_DIR, NODE_EXEC_STALL_MS, runGitForFarm, runHook } from './shell-hooks-helpers.js';
 import { useWarmFakeExecutables } from './helpers/warm-fake-executable.js';
 
 // =============================================================================
@@ -1118,7 +1118,8 @@ describe('session-start-context: tracker setup directive (Section 3)', { timeout
    * An ADDITIVE symlink farm with every tool the hook needs EXCEPT jq, so
    * `command -v jq` fails deterministically on macOS and Linux and json-parse
    * takes the node fallback (_HAS_JQ=false). Mirrors buildToolFarm in
-   * tests/eager-memory-refresh.test.ts — never subtract from PATH.
+   * tests/eager-memory-refresh.test.ts — never subtract from PATH. `git` links to the
+   * run's own git when `runGitForFarm` gives one, else like the other tools.
    */
   function buildNoJqPath(base: string): string {
     const farmDir = fs.mkdtempSync(path.join(base, 'nojq-bin-'));
@@ -1129,9 +1130,14 @@ describe('session-start-context: tracker setup directive (Section 3)', { timeout
       'mkdir', 'mv', 'rm', 'rmdir', 'sleep', 'printf', 'pwd',
       // 'jq' deliberately absent — the node fallback must carry every case
     ];
+    const runGit = runGitForFarm();
     for (const t of tools) {
       const dst = path.join(farmDir, t);
       if (fs.existsSync(dst)) continue;
+      if (t === 'git' && runGit !== undefined) {
+        fs.symlinkSync(runGit, dst);
+        continue;
+      }
       for (const prefix of ['/usr/bin', '/bin']) {
         const src = `${prefix}/${t}`;
         if (fs.existsSync(src)) {
