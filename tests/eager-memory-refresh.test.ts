@@ -500,7 +500,14 @@ describe('S2: AC-F4 — session-start-memory injection states', () => {
     expect(ctx).not.toContain('abc..xyz123');
   });
 
-  it('ignores valid or malformed legacy backups without changing current memory context', () => {
+  // One test per backup form: each hook run starts a process, and four runs in one test
+  // came close to its time limit in a full run.
+  const legacySnapshot = JSON.stringify({ timestamp: '2099-01-01T00:00:00Z', memory_snapshot: 'stale snapshot' });
+  it.each([
+    ['valid', legacySnapshot],
+    ['truncated', legacySnapshot.slice(0, 30)],
+    ['trailing-garbage', `${legacySnapshot}\nnot-json{{{`],
+  ])('ignores a %s legacy backup without changing current memory context', (_kind, contents) => {
     const headSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: projectDir, encoding: 'utf-8' }).trim();
     const branch = execFileSync('git', ['branch', '--show-current'], { cwd: projectDir, encoding: 'utf-8' }).trim() || 'main';
     writeMemoryWithStamp(projectDir, headSha, branch);
@@ -508,16 +515,13 @@ describe('S2: AC-F4 — session-start-memory injection states', () => {
     expect(withoutBackup, 'non-vacuity: the memory is injected with no backup at all').toContain('synced @');
 
     const backup = path.join(projectDir, '.devflow', 'memory', 'backup.json');
-    const snapshot = JSON.stringify({ timestamp: '2099-01-01T00:00:00Z', memory_snapshot: 'stale snapshot' });
-    for (const contents of [snapshot, snapshot.slice(0, 30), `${snapshot}\nnot-json{{{`]) {
-      fs.writeFileSync(backup, contents);
-      const run = runHook(SESSION_START_MEMORY_HOOK, { cwd: projectDir }, homeDir);
-      expect(run.exitCode, run.stderr).toBe(0);
-      const ctx = (JSON.parse(run.stdout.trim()) as { hookSpecificOutput: { additionalContext: string } })
-        .hookSpecificOutput.additionalContext;
-      expect(ctx).toBe(withoutBackup);
-      expect(fs.readFileSync(backup, 'utf-8'), 'legacy backups are not deleted or rewritten on restore').toBe(contents);
-    }
+    fs.writeFileSync(backup, contents);
+    const run = runHook(SESSION_START_MEMORY_HOOK, { cwd: projectDir }, homeDir);
+    expect(run.exitCode, run.stderr).toBe(0);
+    const ctx = (JSON.parse(run.stdout.trim()) as { hookSpecificOutput: { additionalContext: string } })
+      .hookSpecificOutput.additionalContext;
+    expect(ctx).toBe(withoutBackup);
+    expect(fs.readFileSync(backup, 'utf-8'), 'legacy backups are not deleted or rewritten on restore').toBe(contents);
   });
 
   it.each(['identical', 'divergent', 'oversized'] as const)('ignores a newer %s legacy backup body', (kind) => {

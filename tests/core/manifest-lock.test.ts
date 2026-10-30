@@ -241,6 +241,8 @@ describe('manifest lock', () => {
       const realRename = fs.rename.bind(fs);
       const realStat = fs.stat.bind(fs);
       let arrived = 0;
+      let aArrived!: () => void;
+      const aAtRename = new Promise<void>((resolve) => { aArrived = resolve; });
       let bothArrived!: () => void;
       const bothJudgedStale = new Promise<void>((resolve) => { bothArrived = resolve; });
       let aHolds!: () => void;
@@ -251,6 +253,7 @@ describe('manifest lock', () => {
         if (String(from) !== lockDir) return realRename(from, to);
         arrived += 1;
         const position = arrived;
+        if (arrived === 1) aArrived();
         if (arrived === 2) bothArrived();
         await bothJudgedStale;
         if (position === 2) await aHasLock;
@@ -269,6 +272,10 @@ describe('manifest lock', () => {
         if (result.ok) { aTookLock = true; aHolds(); }
         return result;
       });
+      // B starts only once A waits at the rename, so A is the first to arrive there. Two
+      // calls started together reach the rename in either order (their file system calls
+      // finish on the thread pool), and a B that came first would wait for A for ever.
+      await aAtRename;
       const callerB = acquireManifestLock(devflowDir, { timeoutMs: 0 });
       const [a, b] = await Promise.all([callerA, callerB]);
 
