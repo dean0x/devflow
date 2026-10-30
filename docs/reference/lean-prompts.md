@@ -30,7 +30,7 @@ The audit lenses:
 3. Halts and skip-forward arms: each halt, report arm, loop bound, skipped arm, note arm, CI-state arm and chooser else arm stays in the step that causes it. No halt depends on a Read.
 4. Conditions: each gated instruction keeps its own condition in its own step.
 5. Output contracts: each line grammar, claim shape, settings line, spawn fence key and TRACEABILITY or DEGRADED line is unchanged.
-6. Security: the branch-name check, the rule that no name value reaches a command, the notes about untrusted input, the scrub step, and the rule that a Code agent opens no pull request are unchanged.
+6. Safety checks: the branch-name check, the rule that no name value reaches a command, the notes about untrusted input, the scrub step, and the rule that a Code agent opens no pull request are unchanged.
 7. Cited names: each bold lead, heading and step number that a reference file or a test cites is unchanged.
 8. Cross-host: a cut in a shared partial lowers the bytes of every importing host, and no sentence changes meaning for any host.
 9. Meaning: a rule, a contract, or text that says it once covers each removed line.
