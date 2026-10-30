@@ -1195,16 +1195,7 @@ describe('exit arms', SUBPROCESS_TIMEOUT, () => {
     expectOneGrammarLine(run.stdout);
   });
 
-  it.each([
-    ['--help', ['--help']],
-    ['two positionals', ['/a', '/b']],
-    ['a bare dash', ['-']],
-  ])('1 (%s) ⇒ FAIL_CLOSED_LINE on stdout, usage on stderr', (_label, args) => {
-    const run = runResolver({ home, args });
-    expect(run.status).toBe(1);
-    expect(run.stdout).toBe(`${RESOLVER.FAIL_CLOSED_LINE}\n`);
-    expect(run.stderr).toContain('Usage');
-  });
+  // Exit 1 (usage) runs in fail-closed-line.test.ts, which holds the printed line to the partial's literal.
 
   it('2 ⇒ a nonexistent <dir> prints FAIL_CLOSED_LINE', () => {
     const run = runResolver({ home, args: [path.join(tmp, 'does-not-exist')] });
