@@ -638,27 +638,6 @@ When the Knowledge agent reports `KB_COMMIT: skipped (detached HEAD)`, the files
 
 Non-blocking: if the Knowledge agent fails, log the failure and continue.
 
-## Architecture
-
-```
-/implement
-│
-├─ Phase 1: Setup
-├─ Phase 2: Implement
-├─ Phase 3: Polish
-├─ Phase 4: Self-Review
-├─ Phase 5: Alignment Check
-├─ Phase 6: Validate (the one full-suite slot)
-├─ Phase 7: QA Testing
-├─ Phase 8: Re-Validate (only if a qa-fix committed)
-├─ Phase 9: Open PR (every strategy)
-├─ Phase 10: CI Status Gate (every strategy)
-├─ Phase 11: Evidence
-├─ Phase 12: Report
-│
-└─ Feature Knowledge Write-Back (Conditional)
-```
-
 ## Principles
 
 1. **Orchestration only** - Command spawns agents, never does work itself (no tests, builds or fixes); "Spawn X" means call the Agent tool; the inline calls are the bounded plumbing the charter allows: the fresh base step's resolver calls (Phase 1, re-validation), the Phase 10 and 11 pushes, the Phase 10 ci-wait call, the Phase 11 evidence verify call and the evidence script checks

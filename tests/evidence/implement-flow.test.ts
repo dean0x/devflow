@@ -1175,12 +1175,12 @@ describe('AC-11: Phase 11 runs the evidence script once, after Phase 10, for eve
 // re-validate on FIXED, no old pointer) pass vacuously when the text they read is
 // missing, so each has a probe that seeds the defect and a corpus assertion.
 
-/** The `### Phase N:` section: from its heading to the next phase heading or the Architecture section. */
+/** The `### Phase N:` section: from its heading to the next phase heading or the Principles section. */
 function phaseSection(md: string, heading: string): string | null {
   const at = md.indexOf(heading)
   if (at === -1) return null
   const rest = md.slice(at + heading.length)
-  const next = rest.search(/\n### Phase |\n## Architecture/)
+  const next = rest.search(/\n### Phase |\n## Principles/)
   return next === -1 ? md.slice(at) : md.slice(at, at + heading.length + next)
 }
 
@@ -2056,8 +2056,6 @@ function collectPointerDefects(md: string, revalidate: string = revalidateRefere
   need('the TP claims are not tied to Phase 7', md.includes('`TP-<n>` — after every Phase 7 run'))
   need('the Test spawn does not point at Phase 6\'s claims', md.includes('append its TP claims (Phase 6\'s **Evidence claims**)'))
   need('the continuation path names no order', revalidate.includes('**Run Phases 3-8** — Polish (at `full`), Self-Review, Alignment, the one full Validate, QA Testing and the conditional Re-Validate'))
-  need('the diagram lacks the Phase 6 Validate', md.includes('├─ Phase 6: Validate (the one full-suite slot)'))
-  need('the diagram lacks the Phase 8 Re-Validate', md.includes('├─ Phase 8: Re-Validate (only if a qa-fix committed)'))
   need('the Orchestration-only principle does not name the Phase 10 push and the ci-wait call', /\*\*Orchestration only\*\*[^\n]*Phase 10[^\n]*push[^\n]*ci-wait call/.test(md))
   out.push(...collectInlineResolverDefects(md))
   need('the Loop-limits principle does not carry the CI gate budget', /\*\*Loop limits\*\*[^\n]*at most 3 waits and 2 fixes/.test(md))
