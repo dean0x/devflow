@@ -5,7 +5,7 @@ description: "Use when changing /resolve triage or severity tiers, DUPLICATE col
 category: architecture
 directories: [src/assets/commands/resolve.mds, src/assets/agents/triage.mds, src/assets/agents/code.mds, src/assets/agents/fix.mds, src/assets/agents/refactor.mds, src/assets/agents/_partials/_code.mds, src/assets/commands/implement.mds, src/core/plugins.ts, src/assets/commands/code-review.mds, src/assets/scripts/resolve-base.cjs, src/assets/mds/git/, src/assets/skills/agent-references/references/triage/, src/assets/skills/agent-references/references/commands/, tests/resolve/]
 created: 2026-07-08
-updated: 2026-10-21
+updated: 2026-10-30
 ---
 
 # Resolve Pipeline (Triage → Fix → Verify)
@@ -34,6 +34,8 @@ updated: 2026-10-21
 - **KB-INV-20** A security finding keeps FIX_NOW or ESCALATED at every severity (LOW, unlabelled, pre-existing, in a duplicate group) and never takes the prose-only value; security is judged by the defect read in the code, not only by its type or severity label.
 - **KB-INV-21** A re-routed item's Reason holds fixed words only (`pre-existing`, `severity tier: DEFER`), never review text, and the prose-only Risk Tier literal is one string, equal in `severity-tiers.md` and the `resolve.mds` parse line (`PROSE_ONLY` in `tests/resolve/severity-tiers.test.ts`).
 - **KB-INV-22** The `full` path is byte-unchanged: the Gate Level section and its Input Context bullet sit outside the curation arms, and with both stripped each Triage build equals its pre-tier bytes and sha256 (`TRIAGE_BUILDS` in the same test).
+- **KB-INV-23** Phase 7 ends in exactly one `Final gate:` value: `PASS`, `FAILED after N attempts`, `FAILED (Validate blocked)` or `FAILED (no Validate status)`; a BLOCKED or unreadable Validate Status spawns no Fix agent and never reads as PASS, and the push and later phases still run. `Final gate:` holds the value only (`tests/resolve/severity-tiers.test.ts`).
+- **KB-INV-24** Step 9b-0 reads the first word of the Test Status: PASS or FAIL keeps `Test plan: {n} stale, {m} re-verified`; any other first word still appends the claims but records `Test plan: DEGRADED (Test run blocked)` (`tests/evidence/resolve-refresh.test.ts`). /implement Phases 6, 7 and 8 halt on a BLOCKED Validate or Test Status with no Fix agent, and read a Test PASS by its first word so a PASS naming skipped BLOCKING scenarios is still PASS (`tests/evidence/implement-flow.test.ts`).
 - **KB-AP-1** Never route ESCALATED security issues to manage-debt: they belong in `## Escalations` with a display callout.
 - **KB-AP-2** Never body-instruct `Skill(...)` in Triage: its skills preload from frontmatter and a re-invocation trips the re-entrancy guard.
 - **KB-AP-3** Never use TECH_DEBT for "touches many files" or "changes public API": that is FIX_NOW/Careful or FIX_SEPARATE.
@@ -51,6 +53,7 @@ updated: 2026-10-21
 - **KB-AP-15** Never grow `resolve.md` past its byte ceilings (`command-resolve-max`, `command-resolve-curation-off-max`), a level or tier reference past `resolve-levels-ref-max`, `implement-levels-ref-max` or `triage-tiers-ref-max`, the Triage body past `triage-body-max` or `triage-body-curation-off-max`, or reword a line the frozen status-lines fixture samples: new text is paid for by condensing.
 - **KB-AP-16** Never add a line to a Code-family body without cutting one: `CODE_BODY_MAX_BYTES`, `FIX_BODY_MAX_BYTES` and `REFACTOR_BODY_MAX_BYTES` have zero headroom, and the cut duplicate rules do not return.
 - **KB-AP-17** Never give a prose-only issue its own spawn or fence in /resolve: Code gets the literal as its tier, and an unresolved one that Code names as needing a logic change, with a type other than `security`, moves to FIX_SEPARATE (`needs a logic change`) instead of Blocked.
+- **KB-AP-18** Never write a blocked Validate's cause or log path into `resolution-summary.md` or the `Final gate:` line: `VERIFICATION_BLOCKER` carries it to the local Phase 10 report only, because the summary is posted to the PR.
 
 ## Overview
 
@@ -89,7 +92,7 @@ Phase 4   Code × N (issue-fix, PUSH: false) → CODE_AGENT_RESULTS
 Phase 5   Write resolution-summary.md, Tracked = "(pending)"  ← compaction safety
 Phase 6   Polish (only if fixes were made, and only at `full`)
 Phase 7   Validate gate + Fix validation-fix loop + push
-Phase 8   CI Status Gate [skipped if no fixes, Phase 7 FAILED or fork_no_push]: push, ci-wait.cjs, Fix
+Phase 8   CI Status Gate [skipped unless VERIFICATION_STATUS is PASS, or on fork_no_push]: push, ci-wait.cjs, Fix
           ci-fix on FAILING (at most 3 waits + 2 fixes per worktree)
 Phase 9   Git manage-debt (FIX_SEPARATE + TECH_DEBT → backfill Tracked = #N)  [SEQUENTIAL]
 Phase 9b  9b-0 verify-evidence.cjs → at most one Test agent on stale TPs  [only after this run's push];
@@ -219,17 +222,17 @@ Triage (opus, tools Read/Grep/Glob/Bash) is the sole judgment agent and spawns n
 
 ## Verification Gate (Phase 7)
 
-Validate (haiku) runs build, typecheck, lint and tests (`VALIDATION_SCOPE: full`) against the Code outputs' `FILES_CHANGED`; with no fixes it is SKIPPED. On FAIL a Fix agent runs `validation-fix` (`PUSH: false`) and the gate re-validates, at most two attempts (`validation_retry_count`); past that VERIFICATION_STATUS is FAILED with a blocking callout in `## Verification`. Route after push, pinned word for word: PASS continues to Phase 8; FAILED or SKIPPED skip it and continue with Phase 9 and the later phases in order.
+Validate (haiku) runs build, typecheck, lint and tests (`VALIDATION_SCOPE: full`) against the Code outputs' `FILES_CHANGED`; with no fixes it is SKIPPED. On FAIL a Fix agent runs `validation-fix` (`PUSH: false`) and the gate re-validates, at most two attempts (`validation_retry_count`); past that VERIFICATION_STATUS is FAILED with a blocking callout in `## Verification`. The gate exits in four forms, each the `Final gate:` value in `resolution-summary.md` and the Phase 10 report (KB-INV-23): `PASS`; `FAILED after N attempts` (retries spent); `FAILED (Validate blocked)` (Status BLOCKED: no Fix agent, loop exits at once, and `VERIFICATION_BLOCKER` holds the cause and log path for the Phase 10 report only, listed in its `**Requires:**` line); `FAILED (no Validate status)` (any other or missing Status). The push still runs on every form. Route after push, pinned word for word: PASS continues to Phase 8; FAILED or SKIPPED skip it and continue with Phase 9 and the later phases in order. Step 9b-0 and the /implement BLOCKED arms are in KB-INV-24.
 
 ## Test Guards
 
 Beyond the pins the Rules name:
 
-- `tests/resolve/severity-tiers.test.ts`: the tier reference, the Gate Level section and Input bullet in both Triage builds, the full-path digest (KB-INV-22), the resolve side. `tests/guards/agent-references.test.ts` holds the three reference ceilings and the two Triage body ceilings (KB-AP-15); `implement-resolve-level-docs.test.ts` requires each doc site that states the `2 Global Triage` row to say severity tiers.
+- `tests/resolve/severity-tiers.test.ts`: the Phase 7 exit forms and `VERIFICATION_BLOCKER` (every build); the tier reference, the Gate Level section and Input bullet in both Triage builds, the full-path digest (KB-INV-22), the resolve side. `tests/guards/agent-references.test.ts` holds the three reference ceilings and the two Triage body ceilings (KB-AP-15); `implement-resolve-level-docs.test.ts` requires each doc site that states the `2 Global Triage` row to say severity tiers.
 - `tests/git-agent.test.ts` (build-gated) reads the Git agent body plus the compiled `devflow:git` references (`gitOperationReferenceCorpus`; `gitAgentSinkCorpus` across providers): the body declares no operation, each operation's reference carries its heading, contract and steps, Guards 3 and 8 hold the D9 sentence (KB-INV-8), Guards 4 and 5 the D4 rate-limit clauses and the dedup marker forms. `tests/registry-integrity.test.ts` Guard 6: every Git-agent `OPERATION: X` in a compiled command has a row in git.md's `## Operations` table, and every row is named in a command or listed in `INTERNAL_OPS`.
 - `tests/build-mds.test.ts` §15, §16 and §16b (resolve.md's traceability ops and KB-INV-9 gating, the DUPLICATE consumer); `tests/resolve/duplicate-verdict.test.ts` is the producer.
 - `tests/guards/code-read-economy.test.ts` (build-gated): Read-once (`READ_ONCE_FRAGMENTS`) and the quiet-output line in the compiled Code, Fix and Refactor bodies (`CODE_AGENT_TYPES`), the split wording (`SPLIT_FRAGMENTS`), and `collectFullSuiteBriefDefects`, which fails a Code-family spawn that asks for the full suite (a Validate spawn may). Green proves wording, not obedience. `core-rules-digest.test.ts` admits only `CODE_FAMILY_SHARED_OUTPUT_LINE` there; `code-operation.test.ts` holds the body ceilings and the commit-line diff check.
-- `tests/evidence/resolve-refresh.test.ts` (Phase 9b order, inline call shape, no Git spawn, and unique the resolve.mds lines the frozen status-lines fixture samples by first match), `update-pr-evidence.test.ts`, `merge-readiness-script.test.ts` with `merge-readiness.test.ts`; `tests/guards/command-size.test.ts` (command byte ceilings), `tests/seams/command-agent-input.test.ts` (spawn-key seam), `tests/goldens/{git-agent-golden,github-status-lines}.test.ts`.
+- `tests/evidence/implement-flow.test.ts` (the /implement Phase 6, 7 and 8 BLOCKED arms, the Test agent's BLOCKED Status and the PASS-with-named-skips Status line); `tests/evidence/resolve-refresh.test.ts` (the 9b-0 first-word read of the Test Status; Phase 9b order, inline call shape, no Git spawn, and unique the resolve.mds lines the frozen status-lines fixture samples by first match), `update-pr-evidence.test.ts`, `merge-readiness-script.test.ts` with `merge-readiness.test.ts`; `tests/guards/command-size.test.ts` (command byte ceilings), `tests/seams/command-agent-input.test.ts` (spawn-key seam), `tests/goldens/{git-agent-golden,github-status-lines}.test.ts`.
 
 ## Anti-Patterns
 

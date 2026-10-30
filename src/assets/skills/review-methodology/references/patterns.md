@@ -11,7 +11,7 @@ Correct patterns for effective code reviews.
 3. **Review by Category** - Security, architecture, performance, etc.
 4. **Classify Issues** - CRITICAL, HIGH, MEDIUM, LOW
 5. **Write Report** - Structured format with file:line references
-6. **Post Comments** - Use GitHub API for PR comments
+6. **Hand Off** - Return the report to the caller, which owns what is published
 
 ---
 

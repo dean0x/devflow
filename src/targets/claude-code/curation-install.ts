@@ -90,7 +90,6 @@ import { carryStampedTools } from '../../core/agent-frontmatter.js';
 import { carryAgentOverrides, reapplyAgentMapping } from '../../core/agent-models.js';
 import type { ComplianceFeatureState } from '../../core/compliance.js';
 import { describeEchoedValue } from '../../core/echo-value.js';
-import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import {
   ALL_SWITCHES_ON,
   VARIANT_MANIFEST_REL_PATH,
@@ -118,6 +117,8 @@ import {
 import { convergeFromManifest, type ConvergeComplianceArtifactsResult } from './compliance-install.js';
 import { copyDirectory, resolveSkillSource } from './installer.js';
 import { LANGUAGE_STAMPED_COMMANDS, stampForConverge } from './language-stamp.js';
+import { entryIsLink, newLinkReport, refuseUnrealFolder, warnLinkReport, writeFileReplacingLink, type LinkReport } from './linked-folder.js';
+import { convergeReferences, type ConvergeReferencesResult } from './reference-converge.js';
 
 // ── Bounds ─────────────────────────────────────────────────────────────────
 
@@ -187,12 +188,14 @@ interface RosterHost {
 }
 
 /**
- * Whether the installed prompts of a compliance-off machine are free of the posting steps.
+ * Whether the installed prompts and references of a compliance-off machine are free of the posting steps.
  *
- *   - `clear`: compliance is on, or every installed compliance-armed prompt holds the file built for the machine.
- *   - `left`: these installed files could not be converged and may still post.
- *   - `unknown`: the build manifest that names the compliance-armed prompts is unusable, so the files that
- *     still post cannot be named.
+ *   - `clear`: compliance is on, or every installed compliance-armed prompt holds the file built for the machine
+ *     and the installed references hold the compliance-off set.
+ *   - `left`: these installed files (prompts, or reference files that could not be removed) could not be
+ *     converged and may still post.
+ *   - `unknown`: the build manifest that names the compliance-armed prompts is unusable, or the references
+ *     could not be converged, so the files that still post cannot be named.
  */
 export type PostingConverge =
   | { readonly kind: 'clear' }
@@ -396,14 +399,21 @@ async function convergeFile(
     root: string;
     /** The effective selection's language list, stamped into a copy that has none to carry. */
     focuses: readonly string[];
+    /** True when the kind's `devflow` folder is a link or not a folder: nothing is written in it. */
+    folderRefused: boolean;
+    /** Where a link replaced by a rewritten file is recorded. */
+    links: LinkReport;
   },
 ): Promise<FileOutcome> {
-  const { claudeDir, switches, warn, root, focuses } = opts;
+  const { claudeDir, switches, warn, root, focuses, folderRefused, links } = opts;
   const fileName = host.file;
   const target = installedFile(claudeDir, kind, fileName);
 
   const installed = await readIfPresent(target);
   if (installed === 'absent') return 'not-installed';
+  // Reading through a link is harmless and tells a prompt that is there from one that is not. It is
+  // left as it is: the folder is reported once, by the caller.
+  if (folderRefused) return 'failed';
   if (installed === 'unreadable') {
     warn(`prompt variants: cannot read the installed ${kind}/${fileName} (${target}) — left as it is`);
     return 'failed';
@@ -427,8 +437,8 @@ async function convergeFile(
 
   try {
     // Prompts are UTF-8 text; the atomic writer takes a string and preserves the
-    // target's permission mode.
-    await writeFileAtomicExclusive(target, wanted.toString('utf-8'));
+    // target's permission mode. A link at the target is replaced by the rename, never followed.
+    await writeFileReplacingLink(target, wanted.toString('utf-8'), links);
   } catch (err) {
     warn(`prompt variants: could not rewrite ${kind}/${fileName} (${target}) — ${String(err)}`);
     return 'failed';
@@ -485,14 +495,18 @@ async function pathExists(p: string): Promise<boolean> {
  *
  * Staged under `claudeDir` itself, not under `skills/`: a staging directory a
  * crash leaves behind must not look like a second skill to Claude Code.
+ *
+ * A target that is a link is moved aside as the link itself, never followed, so what it points to is
+ * left as it was; the link is recorded in `links` once the real folder stands in its place.
  */
-async function swapInSkillDirectory(claudeDir: string, sourceDir: string, target: string): Promise<void> {
+async function swapInSkillDirectory(claudeDir: string, sourceDir: string, target: string, links: LinkReport): Promise<void> {
   const staging = path.join(claudeDir, `.devflow-curation-${process.pid}-${Date.now().toString(36)}.tmp`);
   const backup = `${staging}.old`;
   try {
     await copyDirectory(sourceDir, staging);
     await fs.mkdir(path.dirname(target), { recursive: true });
-    const hadTarget = await pathExists(target);
+    const wasLink = await entryIsLink(target);
+    const hadTarget = wasLink || await pathExists(target);
     if (hadTarget) await fs.rename(target, backup);
     try {
       await fs.rename(staging, target);
@@ -500,14 +514,15 @@ async function swapInSkillDirectory(claudeDir: string, sourceDir: string, target
       if (hadTarget) await fs.rename(backup, target);
       throw err;
     }
+    if (wasLink) links.replacedLinks.push(target);
   } finally {
     await fs.rm(staging, { recursive: true, force: true }).catch(() => undefined);
     await fs.rm(backup, { recursive: true, force: true }).catch(() => undefined);
   }
 }
 
-/** Converge the curation-gated skill directories. Never throws. */
-async function convergeSkills(opts: ConvergeCurationVariantsOptions): Promise<CurationSkillState> {
+/** Converge the curation-gated skill directories. A skill folder that was a link and was swapped is recorded in `links`. Never throws. */
+async function convergeSkills(opts: ConvergeCurationVariantsOptions, links: LinkReport): Promise<CurationSkillState> {
   const { claudeDir, devflowDir, curation, plugins, warn } = opts;
   const selected = skillsOf(plugins);
   let state: CurationSkillState = 'unchanged';
@@ -529,7 +544,7 @@ async function convergeSkills(opts: ConvergeCurationVariantsOptions): Promise<Cu
       }
       const resolved = await resolveSkillSource(skill, devflowDir, opts.packageRoot);
       if ((await pathExists(target)) && (await treesIdentical(resolved.dir, target))) continue;
-      await swapInSkillDirectory(claudeDir, resolved.dir, target);
+      await swapInSkillDirectory(claudeDir, resolved.dir, target, links);
       state = 'installed';
     } catch (err) {
       warn(`curation variants: could not converge the ${prefixSkillName(skill)} skill (${target}) — ${String(err)}`);
@@ -566,6 +581,10 @@ export interface ConvergePromptVariantsResult {
   notInstalled: number;
   /** Whether the installed prompts of a compliance-off machine are proven free of the posting steps. */
   posting: PostingConverge;
+  /** Installed prompts that were a link and now are a real file. What they pointed to was left as it was. */
+  replacedLinks: readonly string[];
+  /** The `commands/devflow` or `agents/devflow` folder that is a link or not a folder: nothing was written in it. */
+  refusedFolders: readonly string[];
 }
 
 /** The result of a converge that did not run: nothing changed and, with compliance off, nothing is proven. */
@@ -577,6 +596,8 @@ function notRun(switches: VariantSwitches, reason: string): ConvergePromptVarian
     unchanged: 0,
     notInstalled: 0,
     posting: switches.compliance ? POSTING_CLEAR : { kind: 'unknown', reason },
+    replacedLinks: [],
+    refusedFolders: [],
   };
 }
 
@@ -589,6 +610,11 @@ function notRun(switches: VariantSwitches, reason: string): ConvergePromptVarian
  * question: the build manifest names the hosts that carry a compliance arm, and an installed one
  * that could not be converged is listed in `posting` as still posting. A compliance-off machine whose
  * build manifest is unusable answers `unknown`, because it cannot name those hosts.
+ *
+ * A kind's `devflow` folder that is a link, or not a folder, is refused: nothing is written in it, the
+ * installed prompts there count as not converged, and the folder is named in `refusedFolders` and in
+ * a warning. A prompt that is a link in a real folder is replaced by a real file, and named in
+ * `replacedLinks` and in a warning.
  *
  * Never throws. A caller reads `converged` and `posting`; it does not catch.
  */
@@ -622,8 +648,12 @@ export async function convergePromptVariants(opts: ConvergePromptVariantsOptions
   let notInstalled = 0;
   const stillPosting: string[] = [];
   const rewritten: Record<VariantKind, string[]> = { commands: [], agents: [] };
+  const links = newLinkReport();
 
   for (const kind of KINDS) {
+    // A link at the folder sends every write below it into another place, so the folder is proven first.
+    const folderRefused = await refuseUnrealFolder(links, path.join(claudeDir, kind, 'devflow'));
+    if (folderRefused) failed = true;
     const roster = await readRoster(kind, root, manifestHosts, warn);
     // A roster read in part is a failed converge. Past the bound, a host left out may carry a
     // compliance arm, so a compliance-off machine can no longer name every prompt that still posts.
@@ -643,7 +673,7 @@ export async function convergePromptVariants(opts: ConvergePromptVariantsOptions
       continue;
     }
     for (const host of roster.hosts) {
-      const outcome = await convergeFile(kind, host, { claudeDir, switches, warn, root, focuses });
+      const outcome = await convergeFile(kind, host, { claudeDir, switches, warn, root, focuses, folderRefused, links });
       if (outcome === 'rewritten') rewritten[kind].push(host.file);
       else if (outcome === 'unchanged') unchanged++;
       else if (outcome === 'not-installed') notInstalled++;
@@ -658,6 +688,7 @@ export async function convergePromptVariants(opts: ConvergePromptVariantsOptions
   if (unknownReason !== null) posting = { kind: 'unknown', reason: unknownReason };
   else if (stillPosting.length > 0) posting = { kind: 'left', files: stillPosting };
 
+  warnLinkReport(links, warn);
   return {
     converged: !failed,
     commandsRewritten: rewritten.commands,
@@ -665,6 +696,8 @@ export async function convergePromptVariants(opts: ConvergePromptVariantsOptions
     unchanged,
     notInstalled,
     posting,
+    replacedLinks: links.replacedLinks,
+    refusedFolders: links.refusedFolders,
   };
 }
 
@@ -696,8 +729,14 @@ export interface ConvergeVariantAxesOptions {
 export interface ConvergeVariantAxesResult extends ConvergeCurationVariantsResult {
   /** What the compliance-artifact converge (the skill and the rule) did. */
   compliance: ConvergeComplianceArtifactsResult;
-  /** Whether a compliance-off machine still has installed prompts that post. */
+  /** What the references converge did: the overlay, then the removal list or the restore. */
+  references: ConvergeReferencesResult;
+  /** Whether a compliance-off machine still has installed prompts or references that post. */
   posting: PostingConverge;
+  /** Installed prompts and rule files that were a link and now are a real file. What they pointed to was left as it was. */
+  replacedLinks: readonly string[];
+  /** Devflow folders that are a link or not a folder: nothing was written in them. */
+  refusedFolders: readonly string[];
 }
 
 /**
@@ -717,14 +756,17 @@ async function attempt<T>(label: string, warn: (msg: string) => void, fallback: 
  * The one converge for both switches: it makes the installed tree match the machine's curation
  * and compliance switches. `devflow init`, `devflow curation` and `devflow compliance` all call it.
  *
- * It composes three per-kind converges, each a result and never a throw:
+ * It composes four per-kind converges, each a result and never a throw:
  *   - {@link convergePromptVariants}: the commands and agents, for both axes;
  *   - the apply-decisions skill, which follows the curation switch;
  *   - {@link convergeFromManifest}: the compliance skill and rule, the one place the manifest
- *     becomes compliance options.
+ *     becomes compliance options;
+ *   - {@link convergeReferences}: the `devflow:git` references, which follow the compliance switch
+ *     (the overlay from the one source root of the switch, then the removal list or the restore).
  * A failed kind is a warning and `converged: false`, and the next kind still runs. A compliance-off
- * machine that still has a prompt that posts, or cannot name one, is `posting` and never `clear`: the
- * caller decides what that costs (the compliance command exits non-zero, init and curation warn).
+ * machine that still has a prompt or a reference file that posts, or cannot name one, is `posting`
+ * and never `clear`: the caller decides what that costs (the compliance command exits non-zero,
+ * init and curation warn).
  *
  * Never throws.
  */
@@ -739,33 +781,84 @@ export async function convergeVariantAxes(opts: ConvergeVariantAxesOptions): Pro
     return {
       ...notRun(switches, 'the Claude directory is not an absolute path'),
       skill: 'unchanged',
-      compliance: { removedPreexisting: false, converged: false },
+      compliance: { removedPreexisting: false, converged: false, replacedLinks: [], refusedFolders: [] },
+      references: {
+        converged: false,
+        rewritten: [],
+        removed: [],
+        restored: [],
+        failures: ['the Claude directory is not an absolute path'],
+        stillPosting: [],
+        unproven: !switches.compliance,
+      },
     };
   }
 
   const prompts = await attempt('prompt variants', warn, notRun(switches, 'the prompt converge failed'), () =>
     convergePromptVariants({ claudeDir, switches, plugins, warn, packageRoot }),
   );
+  const skillLinks = newLinkReport();
   const skill = await attempt<CurationSkillState>('curation variants', warn, 'failed', () =>
-    convergeSkills({ claudeDir, devflowDir, curation: switches.curation, plugins, warn, packageRoot }),
+    convergeSkills({ claudeDir, devflowDir, curation: switches.curation, plugins, warn, packageRoot }, skillLinks),
   );
+  warnLinkReport(skillLinks, warn);
   const compliance = await attempt<ConvergeComplianceArtifactsResult>(
     'compliance artifacts',
     warn,
-    { removedPreexisting: false, converged: false },
+    { removedPreexisting: false, converged: false, replacedLinks: [], refusedFolders: [] },
     () => convergeFromManifest({ claudeDir, devflowDir, manifest, warn }),
+  );
+  const references = await attempt<ConvergeReferencesResult>(
+    'reference converge',
+    warn,
+    {
+      converged: false,
+      rewritten: [],
+      removed: [],
+      restored: [],
+      failures: ['the reference converge failed'],
+      stillPosting: [],
+      unproven: !switches.compliance,
+    },
+    () => convergeReferences({ claudeDir, devflowDir, compliance: switches.compliance, warn, packageRoot }),
   );
 
   return {
-    converged: prompts.converged && skill !== 'failed' && compliance.converged,
+    converged: prompts.converged && skill !== 'failed' && compliance.converged && references.converged,
     commandsRewritten: prompts.commandsRewritten,
     agentsRewritten: prompts.agentsRewritten,
     unchanged: prompts.unchanged,
     notInstalled: prompts.notInstalled,
     skill,
     compliance,
-    posting: prompts.posting,
+    references,
+    posting: mergePosting(prompts.posting, referencesPosting(references)),
+    replacedLinks: [...prompts.replacedLinks, ...skillLinks.replacedLinks, ...compliance.replacedLinks],
+    refusedFolders: [...prompts.refusedFolders, ...compliance.refusedFolders],
   };
+}
+
+/**
+ * The posting answer of the references converge. Compliance on, and a converge that finished, are clear.
+ * A failure that left the overlay unproven cannot name the files that post, so it is `unknown`; a failure
+ * that only left named files in place is `left`.
+ */
+function referencesPosting(references: ConvergeReferencesResult): PostingConverge {
+  if (references.unproven) return { kind: 'unknown', reason: `the installed references: ${references.failures.join('; ')}` };
+  if (references.stillPosting.length > 0) return { kind: 'left', files: references.stillPosting };
+  return POSTING_CLEAR;
+}
+
+/**
+ * Join the posting answers of two kinds. `unknown` wins, because a file list that leaves a kind out
+ * would claim more than was proven; two unknowns keep both reasons; two lists join.
+ */
+function mergePosting(a: PostingConverge, b: PostingConverge): PostingConverge {
+  if (a.kind === 'unknown' && b.kind === 'unknown') return { kind: 'unknown', reason: `${a.reason}; ${b.reason}` };
+  if (a.kind === 'unknown') return a;
+  if (b.kind === 'unknown') return b;
+  if (a.kind === 'left' && b.kind === 'left') return { kind: 'left', files: [...a.files, ...b.files] };
+  return a.kind === 'left' ? a : b;
 }
 
 // ── The toggle ─────────────────────────────────────────────────────────────
@@ -785,7 +878,10 @@ export async function readRunningVersion(packageRoot: string = getPackageRoot())
  *
  * The caller prints it only on a toggle: a run that moved nothing says nothing.
  */
-export function describeCurationConverge(result: ConvergeCurationVariantsResult, curation: boolean): string | null {
+export function describeCurationConverge(
+  result: ConvergeCurationVariantsResult & { readonly references?: ConvergeReferencesResult },
+  curation: boolean,
+): string | null {
   return describeVariantConverge(result, 'curation', curation);
 }
 
@@ -793,7 +889,11 @@ export function describeCurationConverge(result: ConvergeCurationVariantsResult,
  * One line for what a converge changed on an axis, or null when it changed nothing: the prompts
  * rewritten for the variant the axis now holds and, for curation, the skill it installed or removed.
  */
-export function describeVariantConverge(result: ConvergeCurationVariantsResult, axis: VariantAxis, enabled: boolean): string | null {
+export function describeVariantConverge(
+  result: ConvergeCurationVariantsResult & { readonly references?: ConvergeReferencesResult },
+  axis: VariantAxis,
+  enabled: boolean,
+): string | null {
   const parts: string[] = [];
   const prompts = result.commandsRewritten.length + result.agentsRewritten.length;
   if (prompts > 0) {
@@ -804,6 +904,12 @@ export function describeVariantConverge(result: ConvergeCurationVariantsResult, 
   }
   if (result.skill === 'installed') parts.push('the apply-decisions skill installed');
   if (result.skill === 'removed') parts.push('the apply-decisions skill removed');
+  const references = result.references;
+  if (references !== undefined) {
+    const changed = references.rewritten.length + references.restored.length;
+    if (changed > 0) parts.push(`${changed} reference file(s) written`);
+    if (references.removed.length > 0) parts.push(`${references.removed.length} reference file(s) removed`);
+  }
   return parts.length === 0 ? null : parts.join('; ');
 }
 
@@ -817,13 +923,13 @@ export function describePostingLeft(posting: PostingConverge): readonly string[]
       return [];
     case 'left':
       return [
-        `${posting.files.length} installed prompt(s) still post: ${posting.files.join(', ')}`,
-        'Run `devflow init` to install the compliance-off prompts.',
+        `${posting.files.length} installed file(s) still post: ${posting.files.join(', ')}`,
+        'Run `devflow init` to install the compliance-off files. If init cannot remove one, delete it by hand.',
       ];
     case 'unknown':
       return [
-        `The installed prompts that still post cannot be named: ${posting.reason}`,
-        'Run `devflow init` to install the compliance-off prompts.',
+        `The installed files that still post cannot be named: ${posting.reason}`,
+        'Run `devflow init` to install the compliance-off files.',
       ];
     default: {
       const unhandled: never = posting;

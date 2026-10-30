@@ -3,7 +3,7 @@ import { existsSync } from 'fs';
 import * as path from 'path';
 import type { PluginDefinition } from '../../core/plugins.js';
 import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, buildAssetMaps, prefixSkillName, unprefixSkillName, getAllSkillNames, getAllAgentNames, getAllCommandNames, FEATURE_OWNED_SKILLS, resolveSkillInstallPlan, omitCurationGatedSkills } from '../../core/plugins.js';
-import { skillsDir, agentSourceDirs, rulesDir, commandSourceDirs, scriptsDir, compiledSkillRefsDir, type AgentSourceDirs, type CommandSourceDirs } from '../../core/assets.js';
+import { skillsDir, agentSourceDirs, rulesDir, commandSourceDirs, scriptsDir, compiledSkillRefsDir, skillRefsSourceDir, type AgentSourceDirs, type CommandSourceDirs } from '../../core/assets.js';
 import { getPackageRoot, isContainedIn } from '../../core/paths.js';
 import {
   ALL_SWITCHES_ON,
@@ -15,6 +15,8 @@ import {
 import { sweepOrphanedAssets, mdFileName, mdEntryName, type SweepResult } from '../../core/orphan-sweep.js';
 import { generatedReferenceManifest, installedReferenceManifest, PR_HOST_DESTINATION_ROOT, SKILL_REFS_SKILL_NAME, TRACKER_DESTINATION_ROOT } from '../../core/mds-variants.js';
 import { sweepOrphanedReferences, MAX_REFERENCE_SWEEP_DEPTH } from '../../core/reference-sweep.js';
+import { complianceOffCopyExclusions, removeComplianceOffFiles } from './compliance-off-files.js';
+import { clearLinkForWrite, directoryState, refuseUnrealFolder, removeReportingLink, unlinkLinkAt, type LinkReport } from './linked-folder.js';
 import { TRACKER_AGENT_NAME } from './tracker-install.js';
 import { isTrackerStampedAgent } from './tracker-servers.js';
 import { stampAgentTools } from '../../core/agent-frontmatter.js';
@@ -101,6 +103,26 @@ export interface InstallReport {
    * has to say out loud.
    */
   overlayFailures: OverlayFailure[];
+  /**
+   * Paths of links the install found where it writes one of its own folders or files and replaced:
+   * a command, rule, agent or skill folder, a folder inside the references skill, or a file or folder
+   * below one of them. The link was unlinked; what it pointed to was left as it was, and the install
+   * then wrote a real folder or file in its place. Reported because a replaced link and an untouched
+   * one look the same from the filesystem. A partial install has no pre-clean, so it lists only a
+   * link at a file or folder it writes.
+   */
+  replacedLinks: string[];
+  /**
+   * Paths this run would have written into or over that are a link it could not remove, or not a
+   * folder: the commands, rules or agents folder, a skill folder, the references folder of
+   * `devflow:git`, or a command, rule, agent or skill file or folder below one of them. `mkdir` and
+   * `readdir` follow a link, so a write there would change another place. The run wrote nothing at
+   * such a path and left the entry and its target as they were. A partial install has no
+   * pre-clean to replace a link at a folder, so it lists every one it meets. A full install lists only a
+   * link its pre-clean could not remove. Reported because a path left alone looks the same on disk as
+   * one the run refreshed.
+   */
+  refusedFolders: string[];
   /**
    * Skill names removed because no plugin in the effective selection owns or
    * requires them — the visible cost of a deselection. Only skills that were on
@@ -206,19 +228,28 @@ export async function validateRuleShadow(shadowFile: string): Promise<RuleShadow
  * copy failures (EACCES, ENOSPC, etc.) are still isolated
  * (one bad copy does not abort the whole batch).
  * Invalid shadows still warn-and-install-source.
+ *
+ * A link at the target file is unlinked and replaced by a real file, never written through, and
+ * recorded in `links` when given. A link that cannot be removed is recorded as refused and the
+ * outcome is `skipped`.
  */
 export async function installRuleFile(
   ruleName: string,
   devflowDir: string,
   rulesTarget: string,
+  links?: LinkReport,
 ): Promise<RuleInstallOutcome> {
   const shadowFile = path.join(devflowDir, 'rules', mdFileName(ruleName));
   const targetFile = path.join(rulesTarget, mdFileName(ruleName));
   const ruleSource = path.join(rulesDir(), mdFileName(ruleName));
 
+  // Asked once, so a link that cannot be removed is recorded once.
+  let writable: boolean | undefined;
+  const mayWrite = async (): Promise<boolean> => (writable ??= await clearLinkForWrite(targetFile, links));
+
   const shadowState = await validateRuleShadow(shadowFile);
 
-  if (shadowState === 'valid') {
+  if (shadowState === 'valid' && await mayWrite()) {
     try {
       await fs.copyFile(shadowFile, targetFile);
       return 'shadow';
@@ -250,6 +281,7 @@ export async function installRuleFile(
 
   // Copy is isolated: a copy failure degrades to 'skipped' so one
   // bad rule does not abort the entire installAllRules Promise.all batch.
+  if (!(await mayWrite())) return 'skipped';
   try {
     await fs.copyFile(ruleSource, targetFile);
     return invalidShadowOutcome ?? 'source';
@@ -272,10 +304,11 @@ export async function installAllRules(
   rulesMap: Map<string, string>,
   devflowDir: string,
   rulesTarget: string,
+  links?: LinkReport,
 ): Promise<{ ruleName: string; outcome: RuleInstallOutcome }[]> {
   return Promise.all(
     [...rulesMap.keys()].map(async (ruleName) => {
-      const outcome = await installRuleFile(ruleName, devflowDir, rulesTarget);
+      const outcome = await installRuleFile(ruleName, devflowDir, rulesTarget, links);
       return { ruleName, outcome };
     }),
   );
@@ -301,12 +334,21 @@ export interface Spinner {
 /**
  * Recursively copy a directory tree. `exclude` holds absolute SOURCE paths that the copy
  * skips (a file, or a directory with everything below it); omitted, everything is copied.
+ *
+ * `links` is given when `dest` is inside a Devflow install folder. The copy then checks, with
+ * `lstat`, each folder and file it is about to write, and never writes through a link: the link is
+ * unlinked and a real folder or file is written in its place (recorded in `links.replacedLinks`),
+ * and a link that cannot be removed is skipped with everything below it (recorded in
+ * `links.refusedFolders`). Omitted, the copy is the plain one, for a `dest` that is the user's own
+ * content.
  */
 export async function copyDirectory(
   src: string,
   dest: string,
   exclude?: ReadonlySet<string>,
+  links?: LinkReport,
 ): Promise<void> {
+  if (links !== undefined && !(await clearLinkForWrite(dest, links))) return;
   await fs.mkdir(dest, { recursive: true });
   const entries = await fs.readdir(src, { withFileTypes: true });
 
@@ -316,8 +358,9 @@ export async function copyDirectory(
     if (exclude?.has(srcPath)) continue;
 
     if (entry.isDirectory()) {
-      await copyDirectory(srcPath, destPath, exclude);
+      await copyDirectory(srcPath, destPath, exclude, links);
     } else {
+      if (links !== undefined && !(await clearLinkForWrite(destPath, links))) continue;
       await fs.copyFile(srcPath, destPath);
     }
   }
@@ -1200,7 +1243,7 @@ async function requireGeneratedTree(sourceRoot: string, manifest: readonly strin
     `Generated skill references not found: ${sourceRoot}. ` +
     `The whole generated tree is absent, so none of the ${manifest.length} references the ` +
     `devflow:git agent is instructed to load would be installed. ` +
-    `Run \`npm run build:mds\` to regenerate dist/skills/git/references/ before install ` +
+    `Run \`npm run build:mds\` to regenerate ${sourceRoot} before install ` +
     `(\`npm run build:cli\` alone does not produce it).`,
   );
 }
@@ -1483,6 +1526,60 @@ export async function overlayGeneratedReferences(opts: {
 /** The directory inside an installed skill that the reference overlay converges. */
 const SKILL_REFERENCES_DIRNAME = 'references';
 
+/** Whether the reference overlay may run below an installed `devflow:git` skill directory. */
+export type ReferencesHostState =
+  /** No skill directory is installed there. */
+  | { readonly kind: 'absent' }
+  /** A real skill directory whose `references` entry is absent or a real directory. */
+  | { readonly kind: 'ready' }
+  /** `path` (the skill directory or its `references` entry) is a link or not a directory. */
+  | { readonly kind: 'refused'; readonly path: string };
+
+/**
+ * Prove, with `lstat`, that the overlay can run below `gitSkillDir`.
+ *
+ * The overlay stages, prunes and sets modes below the `references` entry, and the skill copy
+ * before it writes there too. `mkdir` and `readdir` follow a link, so a link at either level
+ * would send those writes into another directory. An absent entry is fine: the install creates it.
+ * Fail closed: an entry that cannot be inspected is refused, and a link is never repaired,
+ * because the installer did not create it.
+ *
+ * One answer for every caller that has no pre-clean to replace such a link: the converge, a
+ * partial install, and a full install whose pre-clean could not remove one. `lstat` runs on
+ * `references` only below a real skill directory, since through a linked one it would follow the
+ * link. Never throws.
+ */
+export async function referencesHostState(gitSkillDir: string): Promise<ReferencesHostState> {
+  const skill = await directoryState(gitSkillDir);
+  if (skill === 'absent') return { kind: 'absent' };
+  if (skill !== 'real') return { kind: 'refused', path: gitSkillDir };
+  const referencesDir = path.join(gitSkillDir, SKILL_REFERENCES_DIRNAME);
+  const references = await directoryState(referencesDir);
+  return references === 'absent' || references === 'real'
+    ? { kind: 'ready' }
+    : { kind: 'refused', path: referencesDir };
+}
+
+/**
+ * The report of an overlay refused as a whole: one failure per unit, as a refused converged
+ * root reports (D-CONVERGED-ROOT-REAL), each carrying the state the unit was left in.
+ * The classification reads; nothing is written.
+ */
+async function refusedOverlayFailures(
+  refusedPath: string,
+  referencesTarget: string,
+  manifest: readonly string[],
+): Promise<OverlayFailure[]> {
+  const error =
+    `${refusedPath} is not a real directory — nothing is copied, staged, pruned or set through it. ` +
+    `Replace it with a real directory and re-run.`;
+  const failures: OverlayFailure[] = [];
+  for (const unit of planOverlayUnits(manifest)) {
+    failures.push({ unit: unitRef(unit), state: await classifyUntouchedUnit(unit, referencesTarget), error });
+  }
+  return failures;
+}
+
 /**
  * What inside an installed skill directory the reference overlay owns, and the
  * pre-clean must therefore leave standing (D-OVERLAY-OWNERSHIP).
@@ -1550,10 +1647,33 @@ export function overlayOwnedSkillPaths(manifest: readonly string[]): ReadonlySet
  * An unreadable directory is left alone rather than reported: the caller already
  * swallows the errors of the `fs.rm` this stands in for, and a pre-clean that cannot
  * read its target has nothing to remove from it.
+ *
+ * The walk never goes through a link. `readdir` follows one, so a link at `dir` itself is
+ * unlinked and nothing is read from it, and below `dir` only a `Dirent` that is a real
+ * directory is entered. The folder a link points to is left as it is. A link that stands where
+ * the pre-clean expects its own folder or file (`dir`, or a path in `keep` or above one) is
+ * returned, so the caller reports it; any other link is removed like the file it stands for.
+ * A link at `dir` that cannot be removed is left in place and nothing is emptied.
+ *
+ * A link at a kept path or above one is returned as `awaitingWrite`, not as replaced: the
+ * converger that owns the path has not written there yet, and a summary that says a real file or
+ * folder stands where the link stood is true only after it has ({@link reportLinksOnceWritten}).
+ * `leaveKeptLinks` is for a kept path whose converger replaces a link itself and reports it, never
+ * writing through it (the tracker agent file): the link then stays for that converger.
+ *
+ * @returns The links at `dir` that this replaced, and the links it removed that a later write replaces.
  */
-async function emptyDirectoryExcept(dir: string, keep: ReadonlySet<string>): Promise<void> {
+async function emptyDirectoryExcept(
+  dir: string,
+  keep: ReadonlySet<string>,
+  options: { readonly leaveKeptLinks?: boolean } = {},
+): Promise<{ replacedLinks: string[]; awaitingWrite: string[] }> {
+  const rootLink = await unlinkLinkAt(dir);
+  if (rootLink !== 'no-link') return { replacedLinks: rootLink === 'unlinked' ? [dir] : [], awaitingWrite: [] };
+
   const kept = [...keep];
   const maxDepth = Math.max(0, ...kept.map(relPath => relPath.split('/').length));
+  const awaitingWrite: string[] = [];
 
   const walk = async (current: string, rel: string, depth: number): Promise<void> => {
     let entries: Dirent[];
@@ -1563,21 +1683,35 @@ async function emptyDirectoryExcept(dir: string, keep: ReadonlySet<string>): Pro
 
     for (const entry of entries) {
       const entryRel = rel === '' ? entry.name : `${rel}/${entry.name}`;
-      if (keep.has(entryRel) && !entry.isSymbolicLink()) continue;
+      if (keep.has(entryRel) && (!entry.isSymbolicLink() || options.leaveKeptLinks === true)) continue;
 
-      const holdsSomethingKept = entry.isDirectory()
-        && depth < maxDepth
-        && kept.some(relPath => relPath.startsWith(`${entryRel}/`));
-      if (holdsSomethingKept) {
-        await walk(path.join(current, entry.name), entryRel, depth + 1);
+      const entryPath = path.join(current, entry.name);
+      const holdsSomethingKept = kept.some(relPath => relPath.startsWith(`${entryRel}/`));
+      if (entry.isDirectory() && depth < maxDepth && holdsSomethingKept) {
+        await walk(entryPath, entryRel, depth + 1);
         continue;
       }
 
-      await fs.rm(path.join(current, entry.name), { recursive: true, force: true });
+      await fs.rm(entryPath, { recursive: true, force: true });
+      if (entry.isSymbolicLink() && (holdsSomethingKept || keep.has(entryRel))) awaitingWrite.push(entryPath);
     }
   };
 
   await walk(dir, '', 1);
+  return { replacedLinks: [], awaitingWrite };
+}
+
+/**
+ * Add each link in `removed` to `report.replacedLinks` once a real file or folder stands at its
+ * path. A path that is still absent, or a link again, is not a replacement and is not reported: the
+ * step that should have written there failed or was refused, and it reports that failure itself.
+ * Bounded by `removed`, which holds at most the kept paths of one pre-clean.
+ */
+async function reportLinksOnceWritten(report: Pick<LinkReport, 'replacedLinks'>, removed: readonly string[]): Promise<void> {
+  for (const linkPath of removed) {
+    const stat = await fs.lstat(linkPath).catch(() => undefined);
+    if (stat !== undefined && !stat.isSymbolicLink()) report.replacedLinks.push(linkPath);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1770,13 +1904,19 @@ export interface FileCopyOptions {
    * installs as before. `devflow init` passes the value it has already settled from its
    * flag, prompt and seed, never a raw seed or a repository's narrowing: the variant
    * follows the machine switch alone, and the files and the manifest must agree.
+   *
+   * It also picks the references. false overlays the `devflow:git` references from the one
+   * compliance-off source root onto the compliance-off manifest, REFUSES the install, before
+   * any file is written, when that root is absent (it never falls through to the
+   * compliance-on references), keeps the files of COMPLIANCE_OFF_REMOVED_SKILL_FILES out of the
+   * skill copy, and removes the ones an earlier install left after it.
    */
   compliance: boolean;
   /**
-   * Package root the commands, agents and the variant manifest are read from. Injectable
-   * so a test installs from a temp tree instead of the live build state; omitted, it is
-   * the running package. An injected {@link FileCopyOptions.agentSourceDirs} still wins
-   * for the agent lookup.
+   * Package root the commands, agents, the variant manifest and the generated references
+   * are read from. Injectable so a test installs from a temp tree instead of the live
+   * build state; omitted, it is the running package. An injected
+   * {@link FileCopyOptions.agentSourceDirs} still wins for the agent lookup.
    */
   packageRoot?: string;
   /**
@@ -2015,6 +2155,16 @@ export interface CommandsAndAgentsOptions {
   trackerServers: readonly string[];
   /** Agent source directories, most-preferred first; see {@link FileCopyOptions.agentSourceDirs}. */
   agentSourceDirs?: AgentSourceDirs;
+  /**
+   * Folders the caller proved are a link or not a folder (`refuseUnrealFolder`). Nothing is written
+   * into a skipped folder. Omitted, both folders are written.
+   */
+  skip?: { readonly commands?: boolean; readonly agents?: boolean };
+  /**
+   * Where the copy records a file link it replaced or could not remove at a command or agent file.
+   * Such a link is never written through, whether or not this is given.
+   */
+  links?: LinkReport;
   warn: (msg: string) => void;
 }
 
@@ -2172,6 +2322,7 @@ async function requireComplianceVariantFiles(opts: {
  */
 export async function installCommandsAndAgents(opts: CommandsAndAgentsOptions): Promise<void> {
   const { plugins, agentsMap, claudeDir, curation, compliance, trackerServers, warn } = opts;
+  const skip = opts.skip ?? {};
   const packageRoot = opts.packageRoot ?? getPackageRoot();
 
   // Before the first write. installViaFileCopy checks earlier still, ahead of its pre-clean;
@@ -2192,7 +2343,7 @@ export async function installCommandsAndAgents(opts: CommandsAndAgentsOptions): 
       commandsSourceNames.add(name);
     }
   }
-  if (commandsSourceNames.size > 0) {
+  if (commandsSourceNames.size > 0 && skip.commands !== true) {
     await fs.mkdir(commandsTarget, { recursive: true });
     for (const name of commandsSourceNames) {
       const srcFile = await firstExisting(commandDirs.map(dir => path.join(dir, mdFileName(name))));
@@ -2204,7 +2355,8 @@ export async function installCommandsAndAgents(opts: CommandsAndAgentsOptions): 
           `Ensure build:mds ran successfully before install.`,
         );
       }
-      await fs.copyFile(srcFile, path.join(commandsTarget, mdFileName(name)));
+      const commandTarget = path.join(commandsTarget, mdFileName(name));
+      if (await clearLinkForWrite(commandTarget, opts.links)) await fs.copyFile(srcFile, commandTarget);
     }
   }
 
@@ -2218,7 +2370,7 @@ export async function installCommandsAndAgents(opts: CommandsAndAgentsOptions): 
       }
     }
   }
-  if (allAgentNames.size > 0) {
+  if (allAgentNames.size > 0 && skip.agents !== true) {
     await fs.mkdir(agentsTarget, { recursive: true });
     for (const agentName of allAgentNames) {
       if (await skipsForUserOwnedType(agentName, claudeDir, agentsTarget, warn)) continue;
@@ -2232,6 +2384,7 @@ export async function installCommandsAndAgents(opts: CommandsAndAgentsOptions): 
         );
       }
       const agentTarget = path.join(agentsTarget, mdFileName(agentName));
+      if (!(await clearLinkForWrite(agentTarget, opts.links))) continue;
       if (isTrackerStampedAgent(agentName)) {
         await writeStampedAgent(srcFile, agentTarget, trackerServers, warn);
       } else {
@@ -2269,6 +2422,16 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // must leave the installed tree as it found it.
   await requireComplianceVariantFiles({ curation, compliance, packageRoot, agentSourceDirs: options.agentSourceDirs });
 
+  // The references the machine's compliance switch installs: the manifest, and the ONE source
+  // root they are overlaid from. With compliance off the root is the compliance-off tree, and its
+  // absence refuses the install here, before the pre-clean, so a refused install leaves the
+  // installed tree as it found it and never falls through to the compliance-on references (AC-50).
+  const refsManifest = installedReferenceManifest({ compliance });
+  const refsSourceRoot = skillRefsSourceDir(compliance, packageRoot);
+  if (omitCurationGatedSkills(skillsMap, curation).has(SKILL_REFS_SKILL_NAME)) {
+    await requireGeneratedTree(refsSourceRoot, refsManifest);
+  }
+
   const report: InstallReport = {
     shadowedSkills: [],
     shadowedRules: [],
@@ -2278,6 +2441,8 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     overlaidRefs: [],
     unchangedRefs: [],
     overlayFailures: [],
+    replacedLinks: [],
+    refusedFolders: [],
     removedSkills: [],
     dormantShadows: [],
   };
@@ -2300,6 +2465,10 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   });
   report.dormantShadows = [...skillPlan.dormantShadows];
 
+  // Links the pre-clean removed at a path that a later step of this install writes. Each is reported
+  // as replaced only once a real file or folder stands there (reportLinksOnceWritten).
+  const awaitingWrite: string[] = [];
+
   // Clean old Devflow files before installing
   spinner.message('Cleaning old files...');
   if (!isPartialInstall) {
@@ -2312,7 +2481,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     ];
     for (const dir of oldDirs) {
       try {
-        await fs.rm(dir, { recursive: true, force: true });
+        report.replacedLinks.push(...await removeReportingLink(dir));
       } catch { /* ignore */ }
     }
 
@@ -2325,13 +2494,32 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     // exactly as the unconditional wipe removed it, and the file is still
     // converged on this run — drift in it is restored, so preserving it strands
     // nothing.
+    //
+    // A link at that file is left standing: the converge replaces it with a real file and reports it
+    // once it has written, so the install does not claim a replacement the converge may not make.
     try {
-      await emptyDirectoryExcept(
+      const emptied = await emptyDirectoryExcept(
         path.join(claudeDir, 'agents', 'devflow'),
         new Set([mdFileName(TRACKER_AGENT_NAME)]),
+        { leaveKeptLinks: true },
       );
+      report.replacedLinks.push(...emptied.replacedLinks);
+      awaitingWrite.push(...emptied.awaitingWrite);
     } catch { /* ignore */ }
   }
+
+  // The commands, agents and rules folders, each proved a real folder (or absent) before any write
+  // below. A full install's pre-clean replaced a link at each of them. A partial install has no
+  // pre-clean, and a link the pre-clean could not remove is still standing, so every write below
+  // would go through it into another directory: the sweeps, the copies and the restamp. A refused
+  // folder is skipped by all of them and reported in `refusedFolders`. The rules folder is written
+  // only when the selection has a rule, so only then is it proved.
+  const commandsTarget = path.join(claudeDir, 'commands', 'devflow');
+  const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
+  const rulesTarget = path.join(claudeDir, 'rules', 'devflow');
+  const commandsRefused = await refuseUnrealFolder(report, commandsTarget);
+  const agentsRefused = await refuseUnrealFolder(report, agentsTarget);
+  const rulesRefused = rulesMap.size > 0 && await refuseUnrealFolder(report, rulesTarget);
 
   // Sweep stale devflow:* skill dirs — ungated: runs on every install shape,
   // including partial installs, so renamed/deleted skills are pruned promptly.
@@ -2386,17 +2574,23 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // Everything else in the directory is still emptied, so a stale hand-authored skill
   // file — including a reference at the references ROOT, which the overlay may replace
   // but never delete (D-OVERLAY-FLAT-UNIT) — does not survive a full install.
+  //
+  // A target that is a link is unlinked and reported in `replacedLinks`, never emptied
+  // through: the folder it points to is not Devflow's, and the install below writes a real
+  // folder in its place.
   if (!isPartialInstall) {
-    const overlayOwned = overlayOwnedSkillPaths(installedReferenceManifest());
+    const overlayOwned = overlayOwnedSkillPaths(refsManifest);
     for (const skill of skillsMap.keys()) {
       // Empty the prefixed directory (its contents are re-created during the install
       // phase), minus whatever another converger owns inside it.
       const target = path.join(claudeDir, 'skills', prefixSkillName(skill));
       try {
         if (skill === SKILL_REFS_SKILL_NAME) {
-          await emptyDirectoryExcept(target, overlayOwned);
+          const emptied = await emptyDirectoryExcept(target, overlayOwned);
+          report.replacedLinks.push(...emptied.replacedLinks);
+          awaitingWrite.push(...emptied.awaitingWrite);
         } else {
-          await fs.rm(target, { recursive: true, force: true });
+          report.replacedLinks.push(...await removeReportingLink(target));
         }
       } catch { /* ignore */ }
     }
@@ -2422,12 +2616,9 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // Ungated: runs on every install shape. knownNames spans ALL plugins
   // (getAllAgentNames) so agents from uninstalled plugins survive a partial run. Only
   // names absent from the full registry are removed.
-  const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
-  const agentSweep = await sweepOrphanedAssets(
-    agentsTarget,
-    new Set(getAllAgentNames()),
-    mdEntryName,
-  );
+  const agentSweep: SweepResult = agentsRefused
+    ? { scanned: 0, removed: [], failed: [] }
+    : await sweepOrphanedAssets(agentsTarget, new Set(getAllAgentNames()), mdEntryName);
   recordSweep(report, 'agent', agentSweep);
 
   // A partial install writes the selected plugins' commands and agents and leaves every
@@ -2452,17 +2643,21 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     packageRoot,
     trackerServers,
     agentSourceDirs: options.agentSourceDirs,
+    skip: { commands: commandsRefused, agents: agentsRefused },
+    links: report,
     warn,
   });
 
   // Sweep stale command files — ungated: runs on every install shape.
   // knownNames spans ALL plugins (getAllCommandNames) so commands from uninstalled
   // plugins survive a partial run. Only names absent from the full registry are removed.
-  recordSweep(report, 'command', await sweepOrphanedAssets(
-    path.join(claudeDir, 'commands', 'devflow'),
-    new Set(getAllCommandNames()),
-    mdEntryName,
-  ));
+  if (!commandsRefused) {
+    recordSweep(report, 'command', await sweepOrphanedAssets(
+      commandsTarget,
+      new Set(getAllCommandNames()),
+      mdEntryName,
+    ));
+  }
 
   // D-LANGUAGE-FOCUS-STAMP: record the language focuses the EFFECTIVE selection installs on the
   // installed /code-review, on every install shape. This is the language gate the command reads
@@ -2470,12 +2665,15 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // whether or not code-review's own plugin is in this run: `--plugin=devflow-typescript` copies no
   // command, yet must update a code-review an earlier run installed. The copy above wrote the shipped
   // `(none)` line; the rewrite compares against what is on disk now, so neither that copy nor the
-  // pre-clean can defeat it. A failure is a warning, never an abort.
-  await restampInstalledCommands({
-    claudeDir,
-    effectivePlugins: options.effectivePlugins ?? plugins,
-    warn,
-  });
+  // pre-clean can defeat it. A failure is a warning, never an abort. A refused commands folder is not
+  // restamped: the rewrite would go through the link.
+  if (!commandsRefused) {
+    await restampInstalledCommands({
+      claudeDir,
+      effectivePlugins: options.effectivePlugins ?? plugins,
+      warn,
+    });
+  }
 
   // Install skills from ALL plugins (skillsMap covers all plugins, not just selected).
   // Resolved from flat src/assets/skills/{name}/ (no per-plugin subdirectory).
@@ -2488,10 +2686,37 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // convergeVariantAxes, which init runs straight after this call.
   spinner.message('Installing skills...');
   for (const [skillName] of omitCurationGatedSkills(skillsMap, curation)) {
-    const resolved = await resolveSkillSource(skillName, devflowDir);
     const skillTarget = path.join(claudeDir, 'skills', prefixSkillName(skillName));
 
-    await copyDirectory(resolved.dir, skillTarget);
+    // A full install's pre-clean replaced a link at the skill or its references entry. A partial
+    // install has no pre-clean, and a link the pre-clean could not remove is still standing, so the
+    // copy and the overlay below would write through such a link into another directory: the whole
+    // skill is refused instead and listed in `refusedFolders`. The references skill is also reported
+    // like a refused overlay, one failure for each unit.
+    if (skillName === SKILL_REFS_SKILL_NAME) {
+      const host = await referencesHostState(skillTarget);
+      if (host.kind === 'refused') {
+        report.refusedFolders.push(host.path);
+        report.overlayFailures.push(
+          ...await refusedOverlayFailures(host.path, path.join(skillTarget, SKILL_REFERENCES_DIRNAME), refsManifest),
+        );
+        continue;
+      }
+    } else if (await refuseUnrealFolder(report, skillTarget)) {
+      continue;
+    }
+
+    // With compliance off the copy leaves out the posting files of COMPLIANCE_OFF_REMOVED_SKILL_FILES.
+    // They are named below the source the copy reads, shadow or shipped, so the posting text is never
+    // on the machine, even when the install stops or a removal is refused later. With compliance on
+    // nothing is excluded.
+    const resolved = await resolveSkillSource(skillName, devflowDir);
+    await copyDirectory(
+      resolved.dir,
+      skillTarget,
+      compliance ? undefined : complianceOffCopyExclusions(skillName, resolved.dir),
+      report,
+    );
     if (resolved.shadow === 'valid') {
       report.shadowedSkills.push(skillName);
     } else if (resolved.shadow === 'missing-skill-md') {
@@ -2507,7 +2732,9 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
         referencesTarget: path.join(skillTarget, 'references'),
         // Every provider's mechanics (D-INSTALL-ALL-PROVIDERS). The overlay
         // converges rather than merges, so a retired generated document is pruned.
-        manifest: installedReferenceManifest(),
+        // The manifest and the source root follow the machine compliance switch together.
+        sourceRoot: refsSourceRoot,
+        manifest: refsManifest,
         warn,
       });
       report.overlaidRefs.push(...overlay.overlaidRefs);
@@ -2517,13 +2744,28 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     }
   }
 
+  // The skill copy and the overlay have written. A link the pre-clean removed at a path they write is
+  // reported now if a real file or folder stands there, and not at all if a unit failed or was refused.
+  await reportLinksOnceWritten(report, awaitingWrite);
+
+  // With compliance off, the flat skill files that only the posting steps load are removed by
+  // exact name (COMPLIANCE_OFF_REMOVED_SKILL_FILES), on every install shape. The copy above wrote
+  // none of them; this step removes the ones an earlier compliance-on install left, which a partial
+  // install copies over without clearing. A removal that was refused is a reported failure and
+  // never an abort; the compliance converge that init runs next fails closed on the same files.
+  if (!compliance) {
+    const removal = await removeComplianceOffFiles(path.join(claudeDir, 'skills'));
+    for (const refusal of removal.refused) {
+      report.sweepFailures.push({ kind: 'reference', name: refusal.entry, error: refusal.reason });
+    }
+  }
+
   // Install rules from selected plugins (rulesMap covers selected plugins only).
   // Rules are flat .md files resolved from src/assets/rules/{name}.md (no per-plugin subdir).
   spinner.message('Installing rules...');
-  const rulesTarget = path.join(claudeDir, 'rules', 'devflow');
-  if (rulesMap.size > 0) {
+  if (rulesMap.size > 0 && !rulesRefused) {
     await fs.mkdir(rulesTarget, { recursive: true });
-    const outcomes = await installAllRules(rulesMap, devflowDir, rulesTarget);
+    const outcomes = await installAllRules(rulesMap, devflowDir, rulesTarget, report);
     for (const { ruleName, outcome } of outcomes) {
       if (outcome === 'shadow') {
         report.shadowedRules.push(ruleName);

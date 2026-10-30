@@ -250,7 +250,11 @@ const WAVE_VERDICTS = Object.freeze(/** @type {WaveVerdict[]} */ (['PASS', 'UNVE
 /** The verdicts of a ticket that merged — the only rows a `Closes` line may name. */
 const WAVE_MERGED_VERDICTS = Object.freeze(/** @type {WaveVerdict[]} */ (['PASS', 'UNVERIFIED']));
 
-/** An Evaluate or Test cell: a Gate 2 verdict, or `—` where the gate never ran. */
+/**
+ * An Evaluate or Test cell: a Gate 2 verdict, or `—` where the gate never ran or a Test run gave no result.
+ * `BLOCKED` is never a cell here, and it has two meanings in the table: a row Verdict `BLOCKED` is a ticket that
+ * never ran, and a Test result `BLOCKED` is a run that gave no result, shown as `—`.
+ */
 const WAVE_GATE_VALUES = Object.freeze(['PASS', 'FAIL', 'FAIL-FIXED', 'SKIPPED', EM_DASH]);
 
 /** A Coverage cell: whether the review pass covered every focus. */

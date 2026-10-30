@@ -297,6 +297,8 @@ async function recordComplianceSwitch(devflowDir: string, nextState: ComplianceF
  * names the file. None of them prints the success text. A skipped prompt converge still converges
  * the compliance skill and rule, which do not depend on the installed version. On the enable side
  * the skip is a warning, and a rule that is wanted and still not installed is a second warning.
+ * A reference that the converge could not refresh, a linked folder for example, is an error that
+ * names it, with exit 1, and the switch stays recorded as on.
  *
  * Returns a result and never throws; the caller prints the messages and sets the exit code.
  */
@@ -368,6 +370,19 @@ export async function applyComplianceChange(opts: ApplyComplianceChangeOptions):
         level: 'error',
         text: `Compliance is recorded as off, but the compliance rule could not be removed: ${complianceRuleFile(claudeDir)}. ` +
           'Fix the cause in the warning above, or delete the file. Then run `devflow compliance --disable` again.',
+      }],
+      exitCode: 1,
+    };
+  }
+
+  const referenceFailures = outcome.result.references.failures;
+  if (nextState.enabled && referenceFailures.length > 0) {
+    return {
+      nextState,
+      messages: [{
+        level: 'error',
+        text: 'Compliance is recorded as on, but some installed references were not refreshed: ' +
+          `${referenceFailures.join('; ')}. Replace any link in the cause with a real folder. Then run the command again.`,
       }],
       exitCode: 1,
     };

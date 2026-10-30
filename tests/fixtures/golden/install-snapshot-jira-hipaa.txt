@@ -166,6 +166,7 @@ d .claude/skills/devflow:git/references/
 - .claude/skills/devflow:git/references/decision-markers.md
 - .claude/skills/devflow:git/references/detection.md
 - .claude/skills/devflow:git/references/github-api.md
+- .claude/skills/devflow:git/references/github-posting.md
 - .claude/skills/devflow:git/references/learn-conventions.md
 - .claude/skills/devflow:git/references/patterns.md
 d .claude/skills/devflow:git/references/pr/

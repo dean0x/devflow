@@ -35,7 +35,9 @@ import {
   AGENT_REFERENCES_SKILL, RETIRED_INLINE_EXPANSION, ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT, agentReferencePath, commandReferenceSections, loadGolden, readAgentReference,
   requireDistFile,
 } from '../helpers.js'
+import { COMPLIANCE_OFF_REMOVED_SKILL_FILES } from '../../src/core/compliance-off-files.js'
 import { DEVFLOW_PLUGINS, skillsOf } from '../../src/core/plugins.js'
+import { INSTALL_CONFIGS } from '../install-snapshot-helpers.js'
 import { resolvePluginsToInstall } from '../../src/cli/commands/init-seed.js'
 
 const REFERENCE_DIR = 'commands'
@@ -207,10 +209,20 @@ describe('AC-406: every read path exists, is read, and resolves the config direc
         expect(skillsOf(installed).has(AGENT_REFERENCES_SKILL), `${plugin.name}: the skill is in its install closure`).toBe(true)
       }
     }
+    const installedPrefix = `devflow:${AGENT_REFERENCES_SKILL}/references/${REFERENCE_DIR}/`
+    const removedWithCompliance = new Set<string>(
+      COMPLIANCE_OFF_REMOVED_SKILL_FILES.filter(entry => entry.startsWith(installedPrefix)).map(entry => entry.slice(installedPrefix.length)),
+    )
     for (const config of ['github', 'jira-hipaa']) {
+      const complianceOn = INSTALL_CONFIGS.find(c => c.name === config)?.initArgs.includes('--compliance') ?? false
       const golden = loadGolden(`install-snapshot-${config}.txt`)
       for (const f of referenceFiles()) {
-        expect(golden, `install-snapshot-${config}.txt lists ${f}`).toContain(`- .claude/skills/devflow:agent-references/references/commands/${f}`)
+        const line = `- .claude/skills/devflow:agent-references/references/commands/${f}`
+        if (!complianceOn && removedWithCompliance.has(f)) {
+          expect(golden, `install-snapshot-${config}.txt (compliance off) omits ${f}`).not.toContain(line)
+        } else {
+          expect(golden, `install-snapshot-${config}.txt lists ${f}`).toContain(line)
+        }
       }
     }
   })

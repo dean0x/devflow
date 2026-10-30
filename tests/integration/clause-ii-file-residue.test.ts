@@ -45,6 +45,7 @@ import * as path from 'path';
 import { requireBuiltCli, sandboxEnv } from '../helpers.js';
 import { stampAgentTools } from '../../src/core/agent-frontmatter.js';
 import { TRACKER_MCP_SERVERS_DEFAULT, trackerServerTools } from '../../src/core/tracker.js';
+import { tarballInstallCommand } from './npm-install.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 
@@ -171,7 +172,7 @@ describe('Clause (ii) file-residue: tarball install into scratch HOME → devflo
       JSON.stringify({ name: 'dfpk2-smoke', version: '0.0.0', private: true }),
     );
 
-    const result = runSync(`npm install --no-save "${tgzPath}"`, {
+    const result = runSync(tarballInstallCommand(tgzPath), {
       cwd: INSTALL_DIR,
       timeout: 120_000,
     });

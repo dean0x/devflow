@@ -50,6 +50,7 @@ import {
   type ExternalModelCatalog,
 } from '../../core/model-discovery.js';
 import { modelCacheDir } from '../../core/cache.js';
+import { formatLinksSummary } from './install-report.js';
 import {
   getClaudeDirectory,
   getDevFlowDirectory,
@@ -1725,6 +1726,7 @@ async function runEnable(portOption: string | undefined): Promise<void> {
   await discoverExternalModels(cacheDir, logPath).catch(() => { /* non-fatal */ });
 
   s.stop(color.green('External model routing enabled'));
+  for (const { message } of formatLinksSummary(reapplyResult)) p.log.warn(message);
 
   // D-P4-1: applies-on-restart — env var takes effect only for new sessions
   p.log.info(color.dim('Context-window enforcement disabled for relay-routed models — applies to new Claude Code sessions'));
@@ -1823,7 +1825,8 @@ async function runDisable(): Promise<void> {
   await syncManifestFeature(devflowDir, 'proxy', false);
 
   // Step 4: Revert external agents to shipped defaults
-  await revertExternalAgents({ installDir, devflowDir });
+  const revertResult = await revertExternalAgents({ installDir, devflowDir });
+  for (const { message } of formatLinksSummary(revertResult)) p.log.warn(message);
 
   p.log.success('External model routing disabled');
 

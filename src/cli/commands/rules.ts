@@ -10,6 +10,8 @@ import { rulesDir } from '../../core/assets.js';
 import { installAllRules, validateRuleShadow, type RuleInstallOutcome, type RuleShadowState } from '../../targets/claude-code/installer.js';
 import { convergeFromManifest } from '../../targets/claude-code/compliance-install.js';
 import { convergeBehaviorFromManifest } from '../../targets/claude-code/behavior-install.js';
+import { newLinkReport, refuseUnrealFolder, refusedFolderMessage, removeReportingLink } from '../../targets/claude-code/linked-folder.js';
+import { formatLinksSummary } from './install-report.js';
 
 interface RulesOptions {
   enable?: boolean;
@@ -263,19 +265,26 @@ export async function runRulesEnable(claudeDir: string, devflowDir: string): Pro
   const installedPlugins = DEVFLOW_PLUGINS.filter(pl => manifest.plugins.includes(pl.name));
   const rulesMap = buildRulesMap(installedPlugins);
 
-  // Wipe stale rules from previously uninstalled plugins before re-installing.
-  await fs.rm(rulesTarget, { recursive: true, force: true });
-  await fs.mkdir(rulesTarget, { recursive: true });
+  // Wipe stale rules from previously uninstalled plugins before re-installing. A rules folder that is
+  // a link is unlinked and replaced by a real folder, never emptied through, and the link is reported.
+  const links = newLinkReport();
+  links.replacedLinks.push(...await removeReportingLink(rulesTarget));
+  // A link that could not be removed is still there, and `mkdir` and every rule write would follow it.
+  // Prove the folder first; a refused folder gets no rule, no manifest write and one refusal line.
+  const rulesFolderRefused = await refuseUnrealFolder(links, rulesTarget);
 
   let outcomes: { ruleName: string; outcome: RuleInstallOutcome }[] = [];
-  let installFailed = false;
-  try {
-    outcomes = await installAllRules(rulesMap, devflowDir, rulesTarget);
-  } catch (err) {
-    p.log.error(
-      `Rules installation failed — rules directory has been cleared: ${err instanceof Error ? err.message : String(err)}`,
-    );
-    installFailed = true;
+  let installFailed = rulesFolderRefused;
+  if (!rulesFolderRefused) {
+    await fs.mkdir(rulesTarget, { recursive: true });
+    try {
+      outcomes = await installAllRules(rulesMap, devflowDir, rulesTarget, links);
+    } catch (err) {
+      p.log.error(
+        `Rules installation failed — rules directory has been cleared: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      installFailed = true;
+    }
   }
 
   if (!installFailed) {
@@ -297,6 +306,14 @@ export async function runRulesEnable(claudeDir: string, devflowDir: string): Pro
     p.log.success(`Installed ${rulesMap.size} rule(s) to ${color.dim(rulesTarget)}${shadowSuffix}`);
   }
 
+  for (const { message } of formatLinksSummary(links)) p.log.warn(message);
+
+  // Each converge below proves the rules folder again and names a refused one itself; the line above
+  // has already named it, so the repeat is dropped.
+  const warnConverge = (msg: string): void => {
+    if (!(rulesFolderRefused && msg === refusedFolderMessage(rulesTarget))) p.log.warn(msg);
+  };
+
   // Converge compliance artifacts unconditionally — convergeFromManifest handles the
   // disabled case itself (removes stale artifacts). Running this regardless of installFailed
   // prevents a rules-install failure from leaving the compliance rule in a stale state.
@@ -307,7 +324,7 @@ export async function runRulesEnable(claudeDir: string, devflowDir: string): Pro
       claudeDir,
       devflowDir,
       manifest,
-      warn: (msg) => p.log.warn(msg),
+      warn: warnConverge,
       rulesEnabledOverride: !installFailed,
     });
   } catch (err) {
@@ -325,7 +342,7 @@ export async function runRulesEnable(claudeDir: string, devflowDir: string): Pro
       claudeDir,
       devflowDir,
       manifest,
-      warn: (msg) => p.log.warn(msg),
+      warn: warnConverge,
       rulesEnabledOverride: !installFailed,
     });
   } catch (err) {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { createHash } from 'crypto'
-import { loadFile, readAgentReference, requireDistFile, resolveAgentSource, resolveCurationOffSource, sectionBetween, SANCTIONED_RESOLUTION_PRINT } from '../helpers.js'
+import { loadFile, readAgentReference, requireDistFile, resolveAgentSource, resolveCurationOffSource, resolveVariantOffSource, sectionBetween, SANCTIONED_RESOLUTION_PRINT } from '../helpers.js'
 import { countOf, seed, seedOnce } from '../guards/level-guard-helpers.js'
 
 // -------------------------------------------------------------------------
@@ -329,6 +329,9 @@ const SEVERITY_SENTENCE = 'Open each Issue cell with its severity in brackets wh
 const DUPLICATE_PARAGRAPH_OPENER = 'DUPLICATE issues are listed **only** in `## Duplicates`'
 const TEMPLATE_LINE = 'Use the template from the Output Artifact section below.'
 const PHASE_7_SKIPPED = 'If no fixes were made (CODE_AGENT_RESULTS contains 0 commits) → set VERIFICATION_STATUS = SKIPPED, skip: "No fixes applied — skipping Verification Gate."'
+const PHASE_7_PASS = '**If PASS:** set VERIFICATION_STATUS = PASS, Final gate `PASS`; exit the validation loop.'
+/** The Phase 7 sentence that sends a Validate report with any Status but PASS or FAIL to the FAILED path: its own paragraph after the PASS line. */
+const PHASE_7_OTHER_STATUS = 'Any other or missing Status: FAILED, Final gate `FAILED (no Validate status)`, exit the loop; never PASS.'
 const ROUTE_PUSH = '**Route after push:** VERIFICATION_STATUS = PASS → continue to Phase 8 (CI gate). FAILED or SKIPPED → skip Phase 8 and continue with Phase 9 and the later phases in order.'
 const MANAGE_DEBT_GATE = 'If any issues are FIX_SEPARATE or TECH_DEBT, spawn Git agent.'
 const BACKFILL = 'backfill `Tracked = {ISSUE_REF}` in resolution-summary.md for each FIX_SEPARATE and TECH_DEBT item'
@@ -387,6 +390,7 @@ export function collectResolveSideDefects(body: string, ref: string): string[] {
 
   const phase7 = sectionBetween(body, '### Phase 7: Verification Gate', '### Phase 8:')
   if (phase7 === null || countOf(phase7, PHASE_7_SKIPPED) !== 1) out.push('Phase 7 lacks the pinned SKIPPED line')
+  if (phase7 === null || countOf(phase7, PHASE_7_OTHER_STATUS) !== 1 || !phase7.includes(`${PHASE_7_PASS}\n\n${PHASE_7_OTHER_STATUS}\n\n`)) out.push('Phase 7 lacks the other-or-missing Status sentence once, right after the PASS line')
   if (countOf(body, ROUTE_PUSH) !== 1) out.push('the route after push is not the pinned line')
   const phase9 = sectionBetween(body, '### Phase 9: Manage Debt', '### Phase 9b:')
   if (phase9 === null || countOf(phase9, MANAGE_DEBT_GATE) !== 1 || countOf(phase9, 'OPERATION: manage-debt') !== 1) out.push('Phase 9 lacks the manage-debt gate for FIX_SEPARATE and TECH_DEBT')
@@ -781,6 +785,15 @@ describe('resolve.mds reads what Triage writes (TP-5, TP-12, TP-14, TP-15, TP-16
     expect(collectResolveSideDefects(seedOnce(body, 'severity in brackets', 'severity'), REFERENCE), 'reworded').toEqual([lacks])
   })
 
+  it.each(RESOLVE_BUILDS)('$label: known-bad probes on Phase 7: a dropped, reworded, moved or doubled other-or-missing Status sentence is reported', ({ body }) => {
+    const lacks = 'Phase 7 lacks the other-or-missing Status sentence once, right after the PASS line'
+    expect(collectResolveSideDefects(seedOnce(body, `\n\n${PHASE_7_OTHER_STATUS}`, ''), REFERENCE), 'dropped').toEqual([lacks])
+    expect(collectResolveSideDefects(seedOnce(body, PHASE_7_OTHER_STATUS, 'Any other or missing Status: carry on.'), REFERENCE), 'reworded').toEqual([lacks])
+    expect(collectResolveSideDefects(seedOnce(body, `${PHASE_7_PASS}\n\n${PHASE_7_OTHER_STATUS}`, `${PHASE_7_OTHER_STATUS}\n\n${PHASE_7_PASS}`), REFERENCE), 'before the PASS line').toEqual([lacks])
+    expect(collectResolveSideDefects(seedOnce(body, PHASE_7_OTHER_STATUS, `${PHASE_7_OTHER_STATUS}\n\n${PHASE_7_OTHER_STATUS}`), REFERENCE), 'doubled').toEqual([lacks])
+    expect(collectResolveSideDefects(seedOnce(body, PHASE_7_OTHER_STATUS, `${PHASE_7_OTHER_STATUS}\nOr read it as PASS.`), REFERENCE), 'a contradicting line in the same paragraph').toEqual([lacks])
+  })
+
   it.each(RESOLVE_BUILDS)('$label: known-bad probes on the unchanged lines: the SKIPPED line, the route after push, the manage-debt gate, the backfill, a summary heading, the Fix Separately columns and the header are each reported', ({ body }) => {
     expect(collectResolveSideDefects(seedOnce(body, 'skipping Verification Gate."', 'continuing."'), REFERENCE)).toEqual(['Phase 7 lacks the pinned SKIPPED line'])
     expect(collectResolveSideDefects(seedOnce(body, 'FAILED or SKIPPED → skip Phase 8', 'FAILED → skip Phase 8'), REFERENCE)).toEqual(['the route after push is not the pinned line'])
@@ -791,5 +804,182 @@ describe('resolve.mds reads what Triage writes (TP-5, TP-12, TP-14, TP-15, TP-16
     const headerFault = 'the summary header is not the Command line followed by "**Gate level**: {GATE_LEVEL, with any level note}"'
     expect(collectResolveSideDefects(seedOnce(body, SUMMARY_HEADER, '**Command**: /resolve\n**Gate level**: {GATE_LEVEL}\n\n'), REFERENCE), 'the note dropped').toEqual([headerFault])
     expect(collectResolveSideDefects(seedOnce(body, SUMMARY_HEADER, '**Command**: /resolve\n\n'), REFERENCE), 'the line removed').toEqual([headerFault])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// A blocked validation (#680): /resolve records it as a failed gate with a fixed reason
+//
+// A Validate report with Status BLOCKED is a FAILED gate: no Fix agent runs (nothing failed that a fix
+// could change), the push and the later phases still run, and the Verification record carries the fixed
+// words `FAILED (Validate blocked)` only. The cause and the log path travel in VERIFICATION_BLOCKER to the
+// Phase 10 report, which the user reads, and never to resolution-summary.md, which is posted. Every exit of
+// the validation loop names its own Final gate form, and a missing or other Status records a fixed form that
+// is neither a pass nor a count of attempts. The collector reads all four resolve builds, because the text
+// sits outside the curation and compliance arms.
+// ---------------------------------------------------------------------------
+
+const PHASE_7_BLOCKED_HEAD = '**If BLOCKED:** FAILED, Final gate `FAILED (Validate blocked)`, no Fix agent, exit the loop; '
+const PHASE_7_BLOCKED_TAIL = 'VERIFICATION_BLOCKER = its cause and log path, for the Phase 10 report only, never resolution-summary.md.'
+const PHASE_7_BLOCKED = `${PHASE_7_BLOCKED_HEAD}${PHASE_7_BLOCKED_TAIL}`
+const PHASE_7_RETRIES_EXHAUSTED = '3. If `validation_retry_count > 2`: set VERIFICATION_STATUS = FAILED, Final gate `FAILED after N attempts`; exit the validation loop.'
+const PHASE_7_RECORD_GATE = '`Final gate: {value above}`'
+const FAILED_CALLOUT = '; a FAILED gate gets a blocking callout (never a silent pass)'
+const PHASE_8_SKIP = 'If VERIFICATION_STATUS is not PASS → skip CI gate.'
+const GATE_LINE = 'Final gate: {the value Phase 7 recorded}'
+const PHASE_7_PRODUCES = '**Produces:** VERIFICATION_STATUS, VERIFICATION_BLOCKER'
+const BLOCKER_LINE = '{VERIFICATION_BLOCKER, if any}'
+/** What a fixed-words record must not carry: a log path or a temp path. */
+const LOG_PATH = /log path|LOG=|\/tmp\/|\.log\b/
+
+/**
+ * How a compiled /resolve falls short of the blocked-validation rule: Phase 7 holds one BLOCKED step, right before the PASS
+ * line, that sets FAILED with no Fix agent and keeps the cause and log path in VERIFICATION_BLOCKER, for the Phase 10 report
+ * only; each exit of the validation loop (retries spent, BLOCKED, PASS, any other or missing Status) names its own Final gate
+ * form, and the record takes the value of the exit; the record gives every FAILED gate a blocking callout, with no log path;
+ * Phase 8 skips the CI gate for every status but PASS and no longer says failures were reported; both Final gate templates
+ * take the value Phase 7 recorded, with the label once; Phase 7 produces VERIFICATION_BLOCKER and the Phase 10 Requires line
+ * lists it; the Phase 10 report shows it and the posted `## Verification` block does not.
+ */
+export function collectResolveBlockedDefects(body: string): string[] {
+  const phase7 = sectionBetween(body, '### Phase 7: Verification Gate', '### Phase 8:')
+  if (phase7 === null) return ['no Phase 7']
+  const out: string[] = []
+  const paragraphs = phase7.split('\n\n')
+  const steps = paragraphs.filter(paragraph => paragraph.startsWith('**If BLOCKED:**'))
+  if (steps.length !== 1) out.push(`Phase 7 holds ${steps.length} "**If BLOCKED:**" steps, expected 1`)
+  else {
+    const [step] = steps
+    const routed = step.startsWith(PHASE_7_BLOCKED_HEAD)
+    const reportOnly = step.endsWith(PHASE_7_BLOCKED_TAIL)
+    if (!routed) out.push('the Phase 7 BLOCKED step does not set FAILED, name Final gate `FAILED (Validate blocked)` and exit the loop with no Fix agent')
+    if (!reportOnly) out.push('the Phase 7 BLOCKED step does not keep its cause and log path in VERIFICATION_BLOCKER, for the Phase 10 report only, never resolution-summary.md')
+    if (routed && reportOnly && step !== PHASE_7_BLOCKED) out.push('the Phase 7 BLOCKED step is not the pinned step')
+    if (paragraphs.indexOf(PHASE_7_PASS) !== paragraphs.indexOf(step) + 1) out.push('the Phase 7 BLOCKED step is not the paragraph right before the PASS line')
+  }
+  if (!phase7.includes(`\n${PHASE_7_PRODUCES}\n`)) out.push('Phase 7 does not produce VERIFICATION_BLOCKER')
+  if (!phase7.includes(PHASE_7_RETRIES_EXHAUSTED)) out.push('Phase 7: the retries-spent exit does not name Final gate `FAILED after N attempts`')
+  if (countOf(phase7, PHASE_7_PASS) !== 1) out.push('Phase 7: the PASS exit does not name Final gate `PASS`')
+  if (countOf(phase7, PHASE_7_OTHER_STATUS) !== 1) out.push('Phase 7: the other-or-missing exit does not name Final gate `FAILED (no Validate status)`')
+  if (/after 0 attempts/.test(phase7)) out.push('Phase 7 records `FAILED after 0 attempts`')
+
+  const record = sectionBetween(phase7, 'Record `## Verification` outcome', 'Push all commits to remote once')
+  if (record === null) out.push('Phase 7 has no Verification record before the push')
+  else {
+    if (!record.includes(PHASE_7_RECORD_GATE)) out.push('the Phase 7 record does not write `Final gate: {value above}`')
+    if (!record.includes(FAILED_CALLOUT)) out.push('the Phase 7 record gives no blocking callout to a FAILED gate')
+    if (LOG_PATH.test(record)) out.push('the Phase 7 Verification record carries a log path')
+  }
+
+  const phase8 = sectionBetween(body, '### Phase 8: CI Status Gate', '### Phase 9')
+  if (phase8 === null) out.push('no Phase 8')
+  else {
+    if (countOf(phase8, PHASE_8_SKIP) !== 1) out.push('Phase 8 does not skip the CI gate for every status but PASS')
+    if (phase8.includes('already reported')) out.push('Phase 8 says that validation failures were already reported')
+  }
+
+  const gates = countOf(body, GATE_LINE)
+  if (gates !== 2) out.push(`the Final gate templates hold ${gates} "${GATE_LINE}" lines, expected 2 (the Phase 10 report and the summary template)`)
+  if (/Final gate: \{[^}]*Final gate/.test(body)) out.push('a Final gate placeholder repeats its label')
+
+  const phase10 = sectionBetween(body, '### Phase 10: Report', '## Architecture')
+  const requires = (phase10 ?? '').split('\n').filter(line => line.startsWith('**Requires:**'))
+  if (phase10 === null || requires.length !== 1 || !requires[0].split(', ').includes('VERIFICATION_BLOCKER')) out.push('the Phase 10 Requires line does not list VERIFICATION_BLOCKER')
+  if (phase10 === null || !phase10.includes(`${GATE_LINE}\n${BLOCKER_LINE}\n`)) out.push(`the Phase 10 report does not show ${BLOCKER_LINE} right after its Final gate line`)
+
+  const posted = sectionBetween(body, '\n## Verification\n', '\n## Fixed Issues\n')
+  if (posted === null) out.push('the summary template has no ## Verification block')
+  else {
+    if (LOG_PATH.test(posted)) out.push('the summary template ## Verification block carries a log path')
+    if (posted.includes('VERIFICATION_BLOCKER')) out.push('the summary template ## Verification block carries VERIFICATION_BLOCKER')
+  }
+  return out
+}
+
+/** Replace the last copy of `from`: the summary template follows the Phase 10 report in the body. */
+const seedLast = (body: string, from: string, to: string): string => {
+  const at = body.lastIndexOf(from)
+  expect(at, `"${from.slice(0, 60)}" must occur`).toBeGreaterThan(-1)
+  return `${body.slice(0, at)}${to}${body.slice(at + from.length)}`
+}
+
+/** All four /resolve builds: curation on, curation off, compliance off, and both off. */
+const RESOLVE_ALL_BUILDS: ReadonlyArray<{ readonly label: string; readonly body: string }> = (() => {
+  const compliance = resolveVariantOffSource('compliance-off', 'commands', 'resolve')
+  const both = resolveVariantOffSource('both-off', 'commands', 'resolve')
+  if (compliance === null) throw new Error('dist/compliance-off/commands/resolve.md is absent: run `npm run build:mds`')
+  if (both === null) throw new Error('dist/curation-compliance-off/commands/resolve.md is absent: run `npm run build:mds`')
+  return [...RESOLVE_BUILDS, { label: 'compliance off', body: compliance }, { label: 'both off', body: both }]
+})()
+
+describe('resolve.mds records a blocked validation as a failed gate with a fixed reason (#680)', () => {
+  it('the four builds are the corpus', () => {
+    expect(RESOLVE_ALL_BUILDS.map(build => build.label)).toEqual(['curation on', 'curation off', 'compliance off', 'both off'])
+    for (const { label, body } of RESOLVE_ALL_BUILDS) expect(countOf(body, PHASE_7_BLOCKED), `${label}: the BLOCKED step`).toBe(1)
+  })
+
+  it.each(RESOLVE_ALL_BUILDS)('$label: Phase 7, Phase 8 and both Final gate templates hold the rule', ({ body }) => {
+    expect(collectResolveBlockedDefects(body)).toEqual([])
+  })
+
+  it.each(RESOLVE_ALL_BUILDS)('$label: known-bad probes on the BLOCKED step: dropped, doubled, reworded to spawn Fix, moved behind the PASS line or the halt sentence are each reported', ({ label, body }) => {
+    const order = 'the Phase 7 BLOCKED step is not the paragraph right before the PASS line'
+    expect(collectResolveBlockedDefects(seedOnce(body, `${PHASE_7_BLOCKED}\n\n`, '')), 'dropped').toEqual(['Phase 7 holds 0 "**If BLOCKED:**" steps, expected 1'])
+    expect(collectResolveBlockedDefects(seedOnce(body, PHASE_7_BLOCKED, `${PHASE_7_BLOCKED}\n\n${PHASE_7_BLOCKED}`)), 'doubled').toEqual(['Phase 7 holds 2 "**If BLOCKED:**" steps, expected 1'])
+    const routedFault = 'the Phase 7 BLOCKED step does not set FAILED, name Final gate `FAILED (Validate blocked)` and exit the loop with no Fix agent'
+    expect(collectResolveBlockedDefects(seedOnce(body, 'no Fix agent, exit the loop;', 'a Fix agent, exit the loop;')), 'reworded to spawn Fix').toEqual([routedFault])
+    expect(collectResolveBlockedDefects(seedOnce(body, 'Final gate `FAILED (Validate blocked)`, ', '')), 'the blocked form not named').toEqual([routedFault])
+    expect(collectResolveBlockedDefects(seedOnce(body, 'exit the loop; VERIFICATION_BLOCKER', 'exit the loop; also tell the user; VERIFICATION_BLOCKER')), 'a clause added in the middle').toEqual(['the Phase 7 BLOCKED step is not the pinned step'])
+
+    const betweenPassAndHalt = seedOnce(body, `${PHASE_7_BLOCKED}\n\n${PHASE_7_PASS}`, `${PHASE_7_PASS}\n\n${PHASE_7_BLOCKED}`)
+    expect(collectResolveBlockedDefects(betweenPassAndHalt), 'after the PASS line').toEqual([order])
+    // collectResolveSideDefects reads the two curation builds; the compliance-off builds word Phase 3, the route and Phase 9 apart.
+    if (label.startsWith('curation')) expect(collectResolveSideDefects(betweenPassAndHalt, REFERENCE), 'the other-or-missing pin also reports it').toEqual(['Phase 7 lacks the other-or-missing Status sentence once, right after the PASS line'])
+    expect(collectResolveBlockedDefects(seedOnce(body, `${PHASE_7_BLOCKED}\n\n${PHASE_7_PASS}\n\n${PHASE_7_OTHER_STATUS}`, `${PHASE_7_PASS}\n\n${PHASE_7_OTHER_STATUS}\n\n${PHASE_7_BLOCKED}`)), 'after the halt sentence').toEqual([order])
+  })
+
+  it.each(RESOLVE_ALL_BUILDS)('$label: known-bad probes on the report-only rule: a dropped clause and a cause sent to the summary are each reported', ({ body }) => {
+    const reportOnly = 'the Phase 7 BLOCKED step does not keep its cause and log path in VERIFICATION_BLOCKER, for the Phase 10 report only, never resolution-summary.md'
+    expect(collectResolveBlockedDefects(seedOnce(body, ', never resolution-summary.md', '')), 'the clause dropped').toEqual([reportOnly])
+    expect(collectResolveBlockedDefects(seedOnce(body, 'for the Phase 10 report only, never resolution-summary.md', 'in resolution-summary.md')), 'the summary named as the place').toEqual([reportOnly])
+    expect(collectResolveBlockedDefects(seedOnce(body, ' and log path, for the Phase 10 report only', ', for the Phase 10 report only')), 'the log path dropped').toEqual([reportOnly])
+    expect(collectResolveBlockedDefects(seedOnce(body, 'VERIFICATION_BLOCKER = its cause', 'its cause')), 'the named value dropped').toEqual([reportOnly])
+  })
+
+  it.each(RESOLVE_ALL_BUILDS)('$label: known-bad probes on the Final gate record: a record without the exit value, a dropped callout and a log path seeded into either Verification text are each reported', ({ body }) => {
+    expect(collectResolveBlockedDefects(seedOnce(body, PHASE_7_RECORD_GATE, '`Final gate: PASS | FAILED after N attempts`')), 'the exit value not written').toEqual(['the Phase 7 record does not write `Final gate: {value above}`'])
+    expect(collectResolveBlockedDefects(seedOnce(body, FAILED_CALLOUT, '')), 'the callout dropped').toEqual(['the Phase 7 record gives no blocking callout to a FAILED gate'])
+    expect(collectResolveBlockedDefects(seedOnce(body, FAILED_CALLOUT, `${FAILED_CALLOUT}; add the log path`)), 'a log path asked for in the record').toEqual(['the Phase 7 Verification record carries a log path'])
+    expect(collectResolveBlockedDefects(seedOnce(body, 'Regression tests added: {n}', 'Regression tests added: {n}\nBlocked: log {its LOG= path}')), 'a log path in the posted Verification block').toEqual(['the summary template ## Verification block carries a log path'])
+    expect(collectResolveBlockedDefects(seedOnce(body, 'Regression tests added: {n}', `Regression tests added: {n}\n${BLOCKER_LINE}`)), 'the blocker in the posted Verification block').toEqual(['the summary template ## Verification block carries VERIFICATION_BLOCKER'])
+  })
+
+  it.each(RESOLVE_ALL_BUILDS)('$label: known-bad probes on the Final gate templates and Phase 8: a fixed list or a doubled label in either template and the old CI note are each reported', ({ body }) => {
+    const gates = (n: number): string => `the Final gate templates hold ${n} "${GATE_LINE}" lines, expected 2 (the Phase 10 report and the summary template)`
+    const doubled = 'a Final gate placeholder repeats its label'
+    const blockerLine = `the Phase 10 report does not show ${BLOCKER_LINE} right after its Final gate line`
+    expect(collectResolveBlockedDefects(seed(body, GATE_LINE, 'Final gate: {PASS | FAILED after N attempts}')), 'the Phase 10 report line').toEqual([gates(1), blockerLine])
+    expect(collectResolveBlockedDefects(seedLast(body, GATE_LINE, 'Final gate: PASS | FAILED after {n} attempts')), 'the summary template line').toEqual([gates(1)])
+    expect(collectResolveBlockedDefects(seed(body, GATE_LINE, 'Final gate: {the Final gate line Phase 7 recorded}')), 'the Phase 10 report label doubled').toEqual([gates(1), doubled, blockerLine])
+    expect(collectResolveBlockedDefects(seedLast(body, GATE_LINE, 'Final gate: {the Final gate line Phase 7 recorded}')), 'the summary template label doubled').toEqual([gates(1), doubled])
+    expect(collectResolveBlockedDefects(seedOnce(body, PHASE_8_SKIP, 'If Verification Gate FAILED → skip CI gate (validation failures already reported).')), 'the old CI note').toEqual([
+      'Phase 8 does not skip the CI gate for every status but PASS',
+      'Phase 8 says that validation failures were already reported',
+    ])
+  })
+
+  it.each(RESOLVE_ALL_BUILDS)('$label: known-bad probes on the exits of the validation loop: each exit names its own Final gate form, and a missing Status never records a count of attempts', ({ body }) => {
+    const order = 'the Phase 7 BLOCKED step is not the paragraph right before the PASS line'
+    const noStatus = 'Phase 7: the other-or-missing exit does not name Final gate `FAILED (no Validate status)`'
+    expect(collectResolveBlockedDefects(seedOnce(body, ', Final gate `FAILED after N attempts`', '')), 'retries spent without a form').toEqual(['Phase 7: the retries-spent exit does not name Final gate `FAILED after N attempts`'])
+    expect(collectResolveBlockedDefects(seedOnce(body, ', Final gate `PASS`', '')), 'PASS without a form').toEqual([order, 'Phase 7: the PASS exit does not name Final gate `PASS`'])
+    expect(collectResolveBlockedDefects(seedOnce(body, 'Final gate `FAILED (no Validate status)`, ', '')), 'a missing Status without a form').toEqual([noStatus])
+    expect(collectResolveBlockedDefects(seedOnce(body, PHASE_7_OTHER_STATUS, 'Any other or missing Status: FAILED, Final gate `FAILED after 0 attempts`, exit the loop; never PASS.')), 'a missing Status recorded as zero attempts').toEqual([noStatus, 'Phase 7 records `FAILED after 0 attempts`'])
+  })
+
+  it.each(RESOLVE_ALL_BUILDS)('$label: known-bad probes on VERIFICATION_BLOCKER: a Phase 7 that does not produce it, a Phase 10 that does not require or show it', ({ body }) => {
+    expect(collectResolveBlockedDefects(seedOnce(body, PHASE_7_PRODUCES, '**Produces:** VERIFICATION_STATUS')), 'not produced').toEqual(['Phase 7 does not produce VERIFICATION_BLOCKER'])
+    expect(collectResolveBlockedDefects(seedOnce(body, ', GATE_LEVEL, VERIFICATION_BLOCKER', ', GATE_LEVEL')), 'not required').toEqual(['the Phase 10 Requires line does not list VERIFICATION_BLOCKER'])
+    expect(collectResolveBlockedDefects(seedOnce(body, `\n${BLOCKER_LINE}`, '')), 'not shown').toEqual([`the Phase 10 report does not show ${BLOCKER_LINE} right after its Final gate line`])
   })
 })

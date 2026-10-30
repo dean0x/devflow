@@ -26,7 +26,7 @@ import {
   COMPLIANCE_FRAMEWORKS,
   parseFrameworkList,
 } from '../src/core/compliance.js';
-import { bothOffDir, complianceOffDir, curationOffDir, skillsDir } from '../src/core/assets.js';
+import { bothOffDir, compiledComplianceOffSkillRefsDir, compiledSkillRefsDir, complianceOffDir, curationOffDir, skillsDir } from '../src/core/assets.js';
 import { installRecordFor, postingStatus, readInstalledVariants } from '../src/core/installed-variants.js';
 import { readManifest, type ManifestData } from '../src/core/manifest.js';
 import { getManifestLockPath } from '../src/core/manifest-lock.js';
@@ -352,6 +352,31 @@ describe('applyComplianceChange', () => {
     expect(readInstalledVariants(await recordOf()), warnings.join('\n')).toEqual({ curation: true, compliance: true });
   });
 
+  it('enable with a link at an installed reference folder exits 1 and names the failure; the switch stays on disk', async () => {
+    const manifest = await manifestWith({ enabled: false, frameworks: ['hipaa'] }, RUNNING, { installedVariants: { curation: true, compliance: false } });
+    await write(installedCommand('plan'), 'plan COMPLIANCE-OFF\n');
+    await write(installedCommand('release'), 'release COMPLIANCE-OFF\n');
+    await fs.cp(compiledSkillRefsDir(), compiledSkillRefsDir(pkg), { recursive: true });
+    await fs.cp(path.join(skillsDir(), 'git'), path.join(skillsDir(pkg), 'git'), { recursive: true });
+    const outside = path.join(tmp, 'outside-pr');
+    const linked = path.join(claudeDir, 'skills', 'devflow:git', 'references', 'pr');
+    await write(path.join(outside, 'kept.md'), 'a file the user keeps\n');
+    await fs.mkdir(path.dirname(linked), { recursive: true });
+    await fs.symlink(outside, linked, 'dir');
+
+    const result = await change(manifest, 'enable');
+
+    expect(result.exitCode).toBe(1);
+    const text = result.messages.map(m => m.text).join('\n');
+    expect(text).toContain('references/pr');
+    expect(text).toContain('real folder');
+    expect(text).not.toContain('Compliance enabled');
+    expect(result.messages.every(m => m.level === 'error')).toBe(true);
+    expect(await complianceOf(), 'the switch is on disk whatever the converge did').toEqual({ enabled: true, frameworks: ['hipaa'] });
+    expect((await fs.lstat(linked)).isSymbolicLink(), 'the link is left in place').toBe(true);
+    expect(await fs.readdir(outside), 'nothing was written through the link').toEqual(['kept.md']);
+  });
+
   it('set converges too: it enables, replaces the frameworks and installs the on prompts (TP-39)', async () => {
     const manifest = await manifestWith({ enabled: false, frameworks: [] }, RUNNING, { installedVariants: { curation: true, compliance: false } });
     await write(installedCommand('release'), 'release COMPLIANCE-OFF\n');
@@ -392,6 +417,43 @@ describe('applyComplianceChange', () => {
     expect(result.messages.every(m => m.level === 'error')).toBe(true);
     expect(await fs.readFile(installedCommand('release'), 'utf-8')).toBe('release ON\n');
     expect(await complianceOf(), 'the switch is on disk whatever the converge did').toEqual({ enabled: false, frameworks: ['gdpr'] });
+    expect(readInstalledVariants(await recordOf()), 'an unclean converge leaves the record as it stood').toEqual({ curation: true, compliance: true });
+  });
+
+  it('disable removes the posting-only skill files by name and exits 0 (AC-41)', async () => {
+    const manifest = await manifestWith({ enabled: true, frameworks: ['gdpr'] });
+    await installOnFiles();
+    // The git skill is installed, so the converge overlays its references from the package's one compliance-off root.
+    await fs.cp(compiledComplianceOffSkillRefsDir(), compiledComplianceOffSkillRefsDir(pkg), { recursive: true });
+    const gate = path.join(claudeDir, 'skills', 'devflow:git', 'references', 'publication-gate.md');
+    const asks = path.join(claudeDir, 'skills', 'devflow:agent-references', 'references', 'commands', 'implement-evidence-asks.md');
+    const mine = path.join(claudeDir, 'skills', 'devflow:git', 'references', 'my-own-notes.md');
+    await write(gate, 'gate\n');
+    await write(asks, 'asks\n');
+    await write(mine, 'a note of mine\n');
+
+    const result = await change(manifest, 'disable');
+
+    expect(result.exitCode, result.messages.map(m => m.text).join('\n')).toBe(0);
+    expect(await exists(gate)).toBe(false);
+    expect(await exists(asks)).toBe(false);
+    expect(await fs.readFile(mine, 'utf-8'), 'a file of the user is not on the list').toBe('a note of mine\n');
+  });
+
+  it('disable with a directory at a removal path exits 1 and names the file; the switch stays on disk (AC-41)', async () => {
+    const manifest = await manifestWith({ enabled: true, frameworks: ['gdpr'] }, RUNNING, { installedVariants: { curation: true, compliance: true } });
+    await installOnFiles();
+    const asks = path.join(claudeDir, 'skills', 'devflow:agent-references', 'references', 'commands', 'implement-evidence-asks.md');
+    await write(path.join(asks, 'inner.md'), 'in the way\n');
+
+    const result = await change(manifest, 'disable');
+
+    expect(result.exitCode).toBe(1);
+    const text = result.messages.map(m => m.text).join('\n');
+    expect(text).toContain(asks);
+    expect(text).not.toContain('Compliance disabled');
+    expect(await fs.readFile(path.join(asks, 'inner.md'), 'utf-8'), 'nothing inside the directory was touched').toBe('in the way\n');
+    expect(await complianceOf()).toEqual({ enabled: false, frameworks: ['gdpr'] });
     expect(readInstalledVariants(await recordOf()), 'an unclean converge leaves the record as it stood').toEqual({ curation: true, compliance: true });
   });
 

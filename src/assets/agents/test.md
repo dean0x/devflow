@@ -69,7 +69,7 @@ For each scenario:
 2. Execute the action via Bash
 3. Capture stdout, stderr, exit code
 4. Compare against expected outcome
-5. Record PASS or FAIL with evidence
+5. Record PASS or FAIL with evidence, or BLOCKED when its command gave no result (it could not start, or no `EXIT=` line was read)
 
 If a previous run failed (PREVIOUS_FAILURES provided), prioritize re-testing those scenarios first.
 
@@ -79,18 +79,18 @@ If a previous run failed (PREVIOUS_FAILURES provided), prioritize re-testing tho
 
 Run builds, typechecks, lints and tests in the foreground, each with an explicit Bash `timeout` above its expected run time. The ceiling is 600000 ms, or `BASH_MAX_TIMEOUT_MS` when set (`echo ${BASH_MAX_TIMEOUT_MS:-600000}`).
 
-- Capture, then tail, in one Bash call (shell state does not persist): `LOG=$(mktemp); echo "LOG=$LOG"; <command> >"$LOG" 2>&1; rc=$?; tail -n 40 "$LOG"; echo "EXIT=$rc"`. The printed `EXIT=` value is the result; never decide one from a grep count.
-- Never background a command and wait on it, and never poll across turns: no `sleep` or `true` turns, no sentinel-file checks, no Monitor.
-- Prefer the scoped command for the change (a package, a path or a test file); for the whole set, one workspace-level command over a per-package loop.
-- A run that exceeds its timeout is BLOCKED: report its duration and log path. Do not wait on it, poll it or re-run it.
-- A run expected to exceed the ceiling is split into parts, each under about 90% of it, run in sequence. If it cannot be split, report BLOCKED with the remedy `devflow flags --set bash-max-timeout-ms=<ms>`.
+- Capture, then tail, in one Bash call: `LOG=$(mktemp); echo "LOG=$LOG"; <command> >"$LOG" 2>&1; rc=$?; tail -n 40 "$LOG"; printf '\nEXIT=%s\n' "$rc"`. The last `EXIT=` line is the result; never decide one from a grep count.
+- Never background a build or test, and never poll across turns: no `sleep` or `true` turns, no sentinel-file checks, no Monitor.
+- Prefer the scoped command for the change; for the whole set, one workspace command over per-package loops.
+- A run past its timeout moves to the background: no tool call, even a Read, until its end notice, then Read the last `EXIT=` line of the file the move names, not `$LOG`; it alone sets the label, not the notice. With none read it is BLOCKED: report its duration and log path. Report only after the end notice.
+- A run expected to exceed the ceiling may be split into parts, run in sequence.
 - Never re-run a command when nothing it reads has changed.
-- Never wrap a build or test command in `sh -c`, `bash -c`, `python3 -c` or `node -e`: permission rules deny wrapped commands they would allow directly.
+- Never wrap a build or test command in `sh -c`, `bash -c`, `python3 -c` or `node -e`: permission rules deny wrapped commands they allow directly.
 - The same rules hold inside a dynamic Workflow sub-agent.
 
 ## Dev server (test.md only)
 
-When a scenario needs the dev server, follow the lifecycle in `devflow:qa/references/browser-testing.md`: start the server in the background, check readiness with one bounded loop inside a single Bash call, and kill the server before you finish. Never end the turn while it runs.
+When a scenario needs the dev server, follow the lifecycle in `devflow:qa/references/browser-testing.md`: start the server in the background, check readiness with one bounded loop inside a single Bash call, and kill the server before you finish. Never report while it runs.
 
 ## Output
 
@@ -99,13 +99,14 @@ Return structured QA report:
 ```markdown
 ## QA Report
 
-### Status: PASS | FAIL
+### Status: PASS | PASS ({n} BLOCKING scenario(s) skipped: {reasons}) | FAIL | BLOCKED
 
 ### Summary
 - Scenarios designed: {total}
 - Passed: {count}
 - Failed: {count}
 - Skipped: {count}
+- Blocked: {count}
 
 ### Acceptance Criteria Coverage
 | Criterion | Scenarios | Status |
@@ -116,7 +117,7 @@ Return structured QA report:
 
 | ID | TP | Type | Description | Mode | Status | Severity |
 |----|----|------|-------------|------|--------|----------|
-| S1 | TP-1/— | happy | {description} | bash/browser | PASS/FAIL/SKIPPED | — /BLOCKING/WARNING |
+| S1 | TP-1/— | happy | {description} | bash/browser | PASS/FAIL/SKIPPED/BLOCKED | — /BLOCKING/WARNING |
 
 ### Test Plan Evidence (only when TEST_PLAN holds TP lines)
 
@@ -126,7 +127,7 @@ HEAD: {the 40-hex `git rev-parse HEAD`, read before the first scenario and again
 |----|---------|-----------|---------|------|
 | TP-1 | PASS/FAIL/SKIP | S1, S3 | {the command whose exit code decided it, or —} | {its exit code 0-255, or —} |
 
-One row per TP line, in TP order. PASS only when every scenario covering the TP passed; SKIP when none could run here (give the reason under Skipped Scenarios). A `method:local` row always carries its Exit.
+One row per TP line, in TP order, in every report, a BLOCKED one included. PASS only when at least one scenario covers it and every one passed; FAIL when any failed; else SKIP, with the reason under Skipped Scenarios or Blockers. A `method:local` row carries its Exit, or — when its command gave no result.
 
 ### Skipped Scenarios (if any)
 
@@ -145,11 +146,14 @@ One row per TP line, in TP order. PASS only when every scenario covering the TP 
 - **Evidence**: {stdout/stderr/exit code}
 - **Remediation**: {what the Fix agent should fix}
 
+### Blockers (if BLOCKED)
+- S{n}: {`command could not start` or `no EXIT= line read`}; {duration, or —}; log {its `LOG=` path, or —}
+
 ### Evidence Log
 {Each command run's `LOG=` path, for traceability}
 ```
 
-Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file via Bash and the message gives its path. Exempt, inline in full: `### Test Plan Evidence` (HEAD line and TP table), the Scenario Results table (`| ID | TP | Type |`) and `### Failed Scenarios`. `### Evidence Log` lists each run's `LOG=` path, never raw output.
+Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file via Bash and the message gives its path. Exempt, inline in full: `### Test Plan Evidence` (HEAD line and TP table), the Scenario Results table (`| ID | TP | Type |`), `### Failed Scenarios` and `### Blockers`. `### Evidence Log` lists each run's `LOG=` path, never raw output.
 
 ## Principles
 
@@ -171,9 +175,14 @@ Report cap: final message at most about 1,500 tokens; longer material goes to a 
 **Report as PASS:**
 - All BLOCKING scenarios pass
 - WARNING-only failures are acceptable
+- A BLOCKING scenario skipped for its environment, and every BLOCKING scenario that ran passed: the Status line names every such skip, with PASS first: `### Status: PASS (1 BLOCKING scenario skipped: no browser tools)`. If none ran, it says so: `### Status: PASS (0 of 3 BLOCKING scenarios ran: all skipped, no browser tools)`
 
 **Report as FAIL:**
 - Any BLOCKING scenario fails
+
+**Report as BLOCKED:**
+- No BLOCKING scenario failed, and a BLOCKING scenario's command gave no result
+- A scenario skipped for its environment (no browser tools, no local database) never makes the run BLOCKED
 
 **Never:**
 - Modify code or create commits

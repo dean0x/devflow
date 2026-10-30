@@ -616,6 +616,14 @@ describe('AC-3.18: no HTTP fallback and no credential read in the Git spawn surf
       'grew a second site. Either way the exclusion no longer describes the tree and must be ' +
       're-derived rather than widened',
     ).toEqual(['references/github-api.md']);
+    // github-posting.md holds the recipes moved out of github-api.md: they call `gh api`
+    // and `gh pr` and never a raw HTTP client or a token, so the file stays outside the
+    // exclusion. Asserted as scanned, so the empty finding above reads a real file
+    // rather than a tree that lost it.
+    expect(
+      handAuthored.map(entry => entry.path),
+      'github-posting.md is not in the hand-authored scan, so its freedom from forbidden I/O is unchecked',
+    ).toContain('references/github-posting.md');
   });
 
   it('known-bad probe: every rule fires on its own shape', () => {

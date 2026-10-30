@@ -27,7 +27,7 @@
 
 import { describe, it, expect } from 'vitest'
 
-import { commandReferenceSections, gitOperationReferenceCorpus, readAgentReference, requireDistFile } from '../helpers.js'
+import { commandReferenceSections, countOf, gitOperationReferenceCorpus, readAgentReference, requireDistFile, resolveCurationOffSource, seedOnce } from '../helpers.js'
 
 const release = (): string => requireDistFile('release.md')
 /** The Git operations' text: each operation's one reference (GitHub), joined (D-OP-ONE-REF). */
@@ -544,5 +544,56 @@ describe('S2: oversized release notes are cut at a line boundary, with a note', 
     expect(collectNotesCapDefects(seed(step6, step6.replace(CAP_RECHECK, 'Keep step 5\'s cap'), 're-cap')))
       .toEqual(['step 6 does not re-apply the cap between the scrub and the release create'])
     expect(collectNotesCapDefects('no create-release here')).toEqual(['no cap bullet'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// A Validate report without PASS halts the release
+// ---------------------------------------------------------------------------
+
+/** The Error Handling line that stops /release on a Validate report: any Status but PASS, or none, halts. */
+const VALIDATE_HALT = '- Validate agent reports no PASS: halt, report failures, do not proceed'
+
+/** The old line. It stopped /release only on a failed build or test, so a BLOCKED report, or one with no Status, did not stop it. */
+const VALIDATE_HALT_FAILS_ONLY = '- Validate agent fails (build/test): halt, report failures, do not proceed'
+
+/** The `## Error Handling` section: its heading to the next `## ` heading, or to the end. '' when there is none. */
+function errorHandlingSection(text: string): string {
+  const lines = text.split('\n')
+  const start = lines.indexOf('## Error Handling')
+  if (start === -1) return ''
+  const next = lines.findIndex((line, i) => i > start && line.startsWith('## '))
+  return lines.slice(start, next === -1 ? undefined : next).join('\n')
+}
+
+/** Named collector: how a /release build lets a Validate report without PASS go on. */
+export function collectValidateHaltDefects(text: string): string[] {
+  const section = errorHandlingSection(text)
+  if (section === '') return ['no Error Handling section']
+  const out: string[] = []
+  if (countOf(section, VALIDATE_HALT) !== 1) out.push('Error Handling lacks the Validate no-PASS halt, once')
+  if (section.includes('Validate agent fails')) out.push('Error Handling halts only on a failed Validate')
+  return out
+}
+
+const releaseOff = resolveCurationOffSource('commands', 'release')
+if (releaseOff === null) throw new Error('dist/curation-off/commands/release.md is absent: run `npm run build:mds`')
+
+const RELEASE_BUILDS: ReadonlyArray<{ readonly label: string; readonly text: string }> = [
+  { label: 'curation on', text: release() },
+  { label: 'curation off', text: releaseOff },
+]
+
+describe('A Validate report without PASS halts the release', () => {
+  it.each(RELEASE_BUILDS)('$label: Error Handling halts on any Validate report that is not PASS', ({ text }) => {
+    expect(errorHandlingSection(text), 'the section is read').toContain('Validate')
+    expect(collectValidateHaltDefects(text)).toEqual([])
+  })
+
+  it.each(RELEASE_BUILDS)('$label: known-bad probes: a dropped halt line, and the old halt on a failed Validate only, are reported', ({ text }) => {
+    expect(collectValidateHaltDefects(seedOnce(text, `${VALIDATE_HALT}\n`, ''))).toEqual(['Error Handling lacks the Validate no-PASS halt, once'])
+    expect(collectValidateHaltDefects(seedOnce(text, VALIDATE_HALT, VALIDATE_HALT_FAILS_ONLY)))
+      .toEqual(['Error Handling lacks the Validate no-PASS halt, once', 'Error Handling halts only on a failed Validate'])
+    expect(collectValidateHaltDefects(seedOnce(text, '## Error Handling', '## Failure Handling'))).toEqual(['no Error Handling section'])
   })
 })

@@ -16,6 +16,7 @@ import { stampAgentTools } from '../../core/agent-frontmatter.js';
 import { agentSourceDirs, type AgentSourceDirs } from '../../core/assets.js';
 import { mdFileName } from '../../core/orphan-sweep.js';
 import { TRACKER_MCP_SERVERS_DEFAULT, trackerServerTools } from '../../core/tracker.js';
+import { newLinkReport, refuseUnrealFolder, warnLinkReport, writeFileReplacingLink } from './linked-folder.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -51,6 +52,10 @@ export interface ConvergeTrackerArtifactsResult {
   converged: boolean;
   /** What happened to `{claudeDir}/agents/devflow/tracker.md`. */
   agent: TrackerAgentState;
+  /** `tracker.md`, if it was a link, now a real file. What it pointed to was left as it was. */
+  replacedLinks: readonly string[];
+  /** `agents/devflow`, if it is a link or not a folder: nothing was written there. */
+  refusedFolders: readonly string[];
 }
 
 /**
@@ -135,6 +140,10 @@ async function writeWouldChangeNothing(wanted: string, target: string): Promise<
  * nothing reports `unchanged` and the summary stays quiet
  * (see {@link writeWouldChangeNothing}).
  *
+ * An `agents/devflow` that is a link, or not a folder, is refused: nothing is written there, and the
+ * folder is named in `refusedFolders` and in a warning. A `tracker.md` that is a link is replaced by a
+ * real file, and named in `replacedLinks` and in a warning.
+ *
  * Never throws. A caller reads `converged`; it does not catch. The one refusal
  * that is not an I/O degradation — a claudeDir that is not absolute — is reported
  * the same way rather than thrown, because an install must not die on it.
@@ -144,15 +153,24 @@ export async function convergeTrackerArtifacts(
 ): Promise<ConvergeTrackerArtifactsResult> {
   const { claudeDir, warn } = opts;
 
+  const links = newLinkReport();
+  const finish = (converged: boolean, agent: TrackerAgentState): ConvergeTrackerArtifactsResult => {
+    warnLinkReport(links, warn);
+    return { converged, agent, replacedLinks: links.replacedLinks, refusedFolders: links.refusedFolders };
+  };
+
   // Precondition, asserted in production code rather than only in tests: an
   // empty or relative claudeDir would make the target resolve somewhere
   // unexpected.
   if (!path.isAbsolute(claudeDir)) {
     warn(`tracker: claudeDir is not an absolute path ("${claudeDir}") — skipping convergence`);
-    return { converged: false, agent: 'unchanged' };
+    return finish(false, 'unchanged');
   }
 
   const target = agentTarget(claudeDir);
+  // A link at the folder sends the write into another place, so the folder is proven first.
+  if (await refuseUnrealFolder(links, path.dirname(target))) return finish(false, 'unchanged');
+
   const dirs = opts.agentSourceDirs ?? agentSourceDirs();
   const candidates = dirs.map(dir => path.join(dir, mdFileName(TRACKER_AGENT_NAME)));
   const source = await firstExisting(candidates);
@@ -161,7 +179,7 @@ export async function convergeTrackerArtifacts(
       `tracker: agent source not found for "${TRACKER_AGENT_NAME}" (searched: ${candidates.join(', ')}) — ` +
       `run \`npm run build:mds\` if it is compiled from an .mds generator host`,
     );
-    return { converged: false, agent: 'unchanged' };
+    return finish(false, 'unchanged');
   }
 
   let wanted: string;
@@ -172,28 +190,28 @@ export async function convergeTrackerArtifacts(
     );
     if (!stamped.ok) {
       warn(`tracker: the Tracker agent source could not take the tracker servers (${stamped.error}) — not installed`);
-      return { converged: false, agent: 'unchanged' };
+      return finish(false, 'unchanged');
     }
     wanted = stamped.value.content;
   } catch (err) {
     warn(`tracker: cannot read the Tracker agent source (${source}) — ${String(err)}`);
-    return { converged: false, agent: 'unchanged' };
+    return finish(false, 'unchanged');
   }
 
   // Already converged — nothing to write, and nothing for the summary to announce.
   // The directory is not created either: an identical file at the target means it is
   // already there (see {@link writeWouldChangeNothing}).
   if (await writeWouldChangeNothing(wanted, target)) {
-    return { converged: true, agent: 'unchanged' };
+    return finish(true, 'unchanged');
   }
 
   try {
     await fs.mkdir(path.dirname(target), { recursive: true });
-    await fs.writeFile(target, wanted);
+    await writeFileReplacingLink(target, wanted, links);
   } catch (err) {
     warn(`tracker: failed to install the Tracker agent (${target}) — ${String(err)}`);
-    return { converged: false, agent: 'unchanged' };
+    return finish(false, 'unchanged');
   }
 
-  return { converged: true, agent: 'installed' };
+  return finish(true, 'installed');
 }

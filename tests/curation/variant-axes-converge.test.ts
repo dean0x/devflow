@@ -414,7 +414,7 @@ describe('describePostingLeft', () => {
 
   it('names every file that still posts and the remedy', () => {
     const lines = describePostingLeft({ kind: 'left', files: ['/c/commands/devflow/plan.md', '/c/commands/devflow/release.md'] });
-    expect(lines[0]).toContain('2 installed prompt(s) still post');
+    expect(lines[0]).toContain('2 installed file(s) still post');
     expect(lines[0]).toContain('plan.md');
     expect(lines[0]).toContain('release.md');
     expect(lines.join('\n')).toContain('devflow init');

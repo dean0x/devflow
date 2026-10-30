@@ -1057,6 +1057,18 @@ type AsyncFn = (...args: unknown[]) => Promise<unknown>
 const AsyncFunction = Object.getPrototypeOf(async () => undefined).constructor as new (...params: string[]) => AsyncFn
 
 /**
+ * The Test agent replies the stub gives: a PASS, a FAIL, a BLOCKED, and the two
+ * replies of a run that gave no result (null, and an object with no verdict).
+ */
+const TEST_REPLIES: ReadonlyArray<object | null> = [
+  { verdict: 'PASS', failures: 'TP-1 failed' },
+  { verdict: 'FAIL', failures: 'TP-1 failed' },
+  { verdict: 'BLOCKED', failures: '' },
+  null,
+  {},
+]
+
+/**
  * Every (evaluateVerdict, testVerdict) value the statement can produce: run it with
  * stub agents over every input presence and every agent outcome.
  */
@@ -1069,10 +1081,10 @@ async function gate2Values(statement: string): Promise<Set<string>> {
   ]
   for (const input of inputs) {
     for (const evalOutcome of ['PASS', 'FAIL']) {
-      for (const testOutcome of ['PASS', 'FAIL']) {
-        const agent = async (_prompt: string, opts: { agentType: string }): Promise<object> => {
+      for (const testReply of TEST_REPLIES) {
+        const agent = async (_prompt: string, opts: { agentType: string }): Promise<object | null> => {
           if (opts.agentType === 'Evaluate') return { verdict: evalOutcome, rationale: 'r' }
-          if (opts.agentType === 'Test') return { verdict: testOutcome, failures: 'TP-1 failed' }
+          if (opts.agentType === 'Test') return testReply
           return { verdict: 'PASS' }
         }
         const phase = async (_n: string, fn: () => Promise<unknown>): Promise<unknown> => fn()
@@ -1090,9 +1102,29 @@ async function gate2Values(statement: string): Promise<Set<string>> {
   return values
 }
 
-/** Named collector: the Gate 2 values a wave row could not carry. */
-function collectUnrepresentableGateValues(values: ReadonlySet<string>): string[] {
-  return [...values].filter(v => !PE.WAVE_GATE_VALUES.includes(v)).map(v => `${v}: not in WAVE_GATE_VALUES`)
+/**
+ * The Gate 2 values a wave row carries as the dash, not by name: a Test run that
+ * gives no result records BLOCKED, which is no wave-table value.
+ */
+const GATE_VALUES_RENDERED_AS_DASH: readonly string[] = ['BLOCKED']
+
+/**
+ * The names in GATE_VALUES_RENDERED_AS_DASH that the built wave step 3 really renders as
+ * the dash: it must list the table values and end its gate sentence with "else `—`", and
+ * must not list the name itself. An unreadable step allows none.
+ */
+function dashRenderedGateValues(built: string): readonly string[] {
+  const step = waveStep3(built)
+  const gates = step === null ? null : gateValuesIn(step)
+  if (gates === null || gates.at(-1) !== EM) return []
+  return GATE_VALUES_RENDERED_AS_DASH.filter(v => !gates.includes(v))
+}
+
+/** Named collector: the Gate 2 values a wave row could not carry, by name or as the dash. */
+function collectUnrepresentableGateValues(values: ReadonlySet<string>, dashRendered: readonly string[]): string[] {
+  return [...values]
+    .filter(v => !PE.WAVE_GATE_VALUES.includes(v) && !dashRendered.includes(v))
+    .map(v => `${v}: not in WAVE_GATE_VALUES`)
 }
 
 describe('parity: every Gate 2 value the built SINGLE skeleton produces is a wave-table value', () => {
@@ -1100,15 +1132,29 @@ describe('parity: every Gate 2 value the built SINGLE skeleton produces is a wav
     const statement = gate2Statement(BUILT)
     expect(statement, 'the phase("gate2") statement must be extractable').not.toBeNull()
     const values = await gate2Values(statement!)
-    for (const v of ['PASS', 'FAIL-FIXED', 'SKIPPED']) expect(values, v).toContain(v)
-    expect(collectUnrepresentableGateValues(values)).toEqual([])
+    for (const v of ['PASS', 'FAIL-FIXED', 'SKIPPED', 'BLOCKED']) expect(values, v).toContain(v)
+    expect(collectUnrepresentableGateValues(values, dashRenderedGateValues(BUILT))).toEqual([])
+  })
+
+  it('BLOCKED is allowed by name only because the built step 3 renders a value it does not list as the dash', () => {
+    expect(dashRenderedGateValues(BUILT)).toEqual(['BLOCKED'])
+    expect(PE.WAVE_GATE_VALUES, 'BLOCKED is no wave-table value').not.toContain('BLOCKED')
   })
 
   it('known-bad probe: a statement that records a new Gate 2 value is reported', async () => {
     const statement = gate2Statement(BUILT)!
     const seeded = statement.replace('testVerdict = "FAIL-FIXED";', 'testVerdict = "RETRIED";')
     expect(seeded, 'the seed must land').not.toBe(statement)
-    expect(collectUnrepresentableGateValues(await gate2Values(seeded))).toEqual(['RETRIED: not in WAVE_GATE_VALUES'])
+    expect(collectUnrepresentableGateValues(await gate2Values(seeded), dashRenderedGateValues(BUILT))).toEqual(['RETRIED: not in WAVE_GATE_VALUES'])
+  })
+
+  it('known-bad probe: a step 3 that no longer renders an unlisted gate value as the dash leaves BLOCKED unrepresentable', async () => {
+    const step = waveStep3(BUILT)!
+    const from = '`SKIPPED`, else `—`'
+    expect(step.split(from).length - 1, `the seed "${from}" must occur once in step 3`).toBe(1)
+    const seeded = BUILT.replace(step, step.replace(from, () => '`SKIPPED`, else `RETRIED`'))
+    expect(dashRenderedGateValues(seeded)).toEqual([])
+    expect(collectUnrepresentableGateValues(await gate2Values(gate2Statement(BUILT)!), dashRenderedGateValues(seeded))).toEqual(['BLOCKED: not in WAVE_GATE_VALUES'])
   })
 })
 

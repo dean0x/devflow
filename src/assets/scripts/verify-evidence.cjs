@@ -35,8 +35,12 @@
 //   readback  READBACK ok (exit 0) or READBACK mismatch (exit 5)
 //   publish   the `## PR Evidence` block — the heading, the EVIDENCE line, one
 //             `**Body**: … · **Comment**: …` line — then one `TRACEABILITY: DEGRADED
-//             (<reason>)` line per degraded part (exit 0), or the one line
-//             `TRACEABILITY: DEGRADED (evidence unavailable)` (exit 2)
+//             (<reason>)` line per degraded part (exit 0), or exit 2 with one line:
+//             `TRACEABILITY: DEGRADED (evidence unavailable)` when it could not run,
+//             `TRACEABILITY: DEGRADED (compliance off)` when the machine manifest does not
+//             say compliance is enabled, or `TRACEABILITY: DEGRADED (compliance state
+//             unreadable)` when that manifest cannot be read. The last two come before
+//             any gh call, from the machine manifest alone
 //   readiness the `## Merge Readiness` block (exit 0), or the same block with
 //             `**Status**: DEGRADED (<reason>)` and one `TRACEABILITY: DEGRADED
 //             (<reason>)` line after it (exit 2). `--evidence <file>` reads the test
@@ -265,8 +269,9 @@ const USAGE = [
  *   The one `gh pr view` answer, parsed. Lists are chronological, newest last.
  *
  * @typedef {{ exec?: ExecFn, cwd?: string, now?: () => number, stderr?: (text: string) => void,
- *   formatLine?: (fields: object) => unknown }} MainDeps
- *   Injected by tests only; `formatLine` reaches the output gate.
+ *   formatLine?: (fields: object) => unknown, manifestPath?: string }} MainDeps
+ *   Injected by tests only; `formatLine` reaches the output gate. `manifestPath` replaces
+ *   the machine manifest that `publish` reads; production always reads ~/.devflow/manifest.json.
  *
  * @typedef {{ code: number, stdout: string }} Outcome
  */
@@ -2012,6 +2017,15 @@ const REASON_RE = /^[a-z0-9][a-z0-9 -]{0,59}$/;
 /** What a `publish` result prints when it could not run at all (exit 2). */
 const EVIDENCE_UNAVAILABLE_LINE = 'TRACEABILITY: DEGRADED (evidence unavailable)';
 
+/** What a `publish` result prints when the machine manifest does not say compliance is enabled (exit 2). */
+const COMPLIANCE_OFF_LINE = 'TRACEABILITY: DEGRADED (compliance off)';
+
+/** What a `publish` result prints when the machine manifest cannot be read (exit 2). */
+const COMPLIANCE_UNREADABLE_LINE = 'TRACEABILITY: DEGRADED (compliance state unreadable)';
+
+/** Every line a `publish` that did not run may print. The boundary admits each one with exit 2 only. */
+const PUBLISH_REFUSAL_LINES = Object.freeze([EVIDENCE_UNAVAILABLE_LINE, COMPLIANCE_OFF_LINE, COMPLIANCE_UNREADABLE_LINE]);
+
 /**
  * @typedef {{ status: string, reason: string | null }} Part
  *   One half of the `publish` answer: a closed status, or `DEGRADED` with its reason.
@@ -2278,12 +2292,87 @@ function publishComment(io, pr, fields, files, target) {
 }
 
 /**
+ * The machine manifest, ~/.devflow/manifest.json, or null when the home directory is
+ * not absolute (a relative one would resolve against the repository). No environment
+ * variable relocates it, and no repository file stands in for it.
+ *
+ * @returns {string | null}
+ */
+function machineManifestPath() {
+  let home;
+  try {
+    home = os.homedir();
+  } catch (_) {
+    return null;
+  }
+  return typeof home === 'string' && path.isAbsolute(home) ? path.join(home, '.devflow', 'manifest.json') : null;
+}
+
+/**
+ * @param {unknown} value
+ * @returns {value is Record<string, unknown>}
+ */
+function isRecord(value) {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * The compliance switch of the machine manifest, read with this file's regular-file
+ * rules (a link is followed, as every other reader of the machine manifest does). The
+ * accepted shape is the one the CLI keeps, `features.compliance` as
+ * `{ enabled: boolean, frameworks: string[] }`; a manifest from before compliance
+ * existed has no such key and reads as off. A value in any other shape is `unreadable`,
+ * where the CLI heals it to off: this guard only lets a publish through on a record it
+ * can trust.
+ *
+ * @param {string | null} manifestPath
+ * @returns {'enabled' | 'off' | 'unreadable'}
+ */
+function machineComplianceState(manifestPath) {
+  if (manifestPath === null) return 'unreadable';
+  const text = readTextFile(manifestPath);
+  if (text === null) return 'unreadable';
+  /** @type {unknown} */
+  let manifest;
+  try {
+    manifest = JSON.parse(text);
+  } catch (_) {
+    return 'unreadable';
+  }
+  if (!isRecord(manifest) || !isRecord(manifest.features)) return 'unreadable';
+  const compliance = manifest.features.compliance;
+  if (compliance === undefined) return 'off';
+  if (!isRecord(compliance) || typeof compliance.enabled !== 'boolean') return 'unreadable';
+  if (!Array.isArray(compliance.frameworks) || !compliance.frameworks.every(f => typeof f === 'string')) return 'unreadable';
+  return compliance.enabled ? 'enabled' : 'off';
+}
+
+/**
+ * The publish guard: with compliance off, or its state unreadable, `publish` ends here,
+ * before a work directory is made and before any gh call. It reads the machine manifest
+ * under the user's home folder and nothing else, so no repository file can switch it on.
+ * It ignores the devflow folder override. It returns its outcome and never throws: the
+ * catch in main turns a throw into "evidence unavailable", which would hide the reason.
+ *
+ * @param {Io} io
+ * @param {MainDeps} deps
+ * @returns {Outcome | null}  the refusal, or null when compliance is enabled
+ */
+function publishRefusal(io, deps) {
+  const state = machineComplianceState(typeof deps.manifestPath === 'string' ? deps.manifestPath : machineManifestPath());
+  if (state === 'enabled') return null;
+  io.stderr('verify-evidence: publish: '
+    + (state === 'off' ? 'compliance is off on this machine' : 'the machine compliance state could not be read') + '\n');
+  return { code: EXIT_CODES.INPUT_UNUSABLE, stdout: (state === 'off' ? COMPLIANCE_OFF_LINE : COMPLIANCE_UNREADABLE_LINE) + '\n' };
+}
+
+/**
  * The whole update-pr-evidence operation, in the order the operation always had:
- * verify; only on `body:changed` scrub, splice, `gh pr edit`, read back; only on
- * `posted:no` scrub, then edit the viewer's own evidence comment in place and read it
- * back, or post a new one when there is none to edit or a newer evidence comment from
- * another login follows it. The work files live in one private directory this call
- * makes and removes.
+ * the compliance guard; verify; only on `body:changed` scrub, splice, `gh pr edit`,
+ * read back; only on `posted:no` scrub, then edit the viewer's own evidence comment in
+ * place and read it back, or post a new one when there is none to edit or a newer
+ * evidence comment from another login follows it. The work files live in one private
+ * directory this call makes and removes.
  *
  * @param {Io} io
  * @param {Extract<ParsedArgs, { kind: 'publish' }>} args
@@ -2291,6 +2380,8 @@ function publishComment(io, pr, fields, files, target) {
  * @returns {Outcome}
  */
 function runPublish(io, args, deps) {
+  const refused = publishRefusal(io, deps);
+  if (refused !== null) return refused;
   /** @type {string} */
   let dir;
   try {
@@ -2965,7 +3056,7 @@ function settleOutcome(outcome) {
   if (o.stdout.startsWith('## PR Evidence\n')) {
     return o.code === EXIT_CODES.OK && parsePublishBlock(o.stdout) !== null ? pass : failed;
   }
-  if (o.stdout === EVIDENCE_UNAVAILABLE_LINE + '\n') return o.code === EXIT_CODES.INPUT_UNUSABLE ? pass : failed;
+  if (PUBLISH_REFUSAL_LINES.some(line => o.stdout === line + '\n')) return o.code === EXIT_CODES.INPUT_UNUSABLE ? pass : failed;
   if (o.stdout.startsWith('## Merge Readiness\n')) {
     const block = parseReadinessBlock(o.stdout);
     if (block === null) return failed;

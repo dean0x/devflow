@@ -8,12 +8,12 @@ output-dir: dist/commands
 @import { evidence_policy } from "./_partials/_evidence_policy.mds"
 @import { issue_ref_grammar, issue_capture_contract } from "./_partials/_tracker.mds"
 @import { test_plan_line } from "./_partials/_plan_contract.mds"
-@import { publication_gate } from "./_partials/_publication.mds"
+@import { publication_gate, publication_resolve } from "./_partials/_publication.mds"
 @import "./_partials/_compliance.mds" as compliance
 @import "./_partials/_settings.mds" as settings
 # Implement Command
 
-Orchestrate a single task through implementation by spawning specialized agents.
+Orchestrate a single task by spawning agents.
 
 ## Usage
 
@@ -84,7 +84,7 @@ If `PR_DESCRIPTION_GUIDANCE` was not set above (non-plan paths: issue input or t
 
 **Empty input.** When `COMMAND_INPUT` is empty — a plan handoff arrives this way, with the plan already in the conversation — there is no argument to name the branch from, and the Git agent sees none of this conversation. Write the description yourself: one line, taken from the plan's title or, with no plan, from the conversation. Send it as the setup-task `TASK_DESCRIPTION` below.
 
-Spawn Git agent to set up the task:
+Spawn Git agent:
 
 ```
 Agent(subagent_type="Git"):
@@ -188,10 +188,11 @@ node "$HOME/.devflow/scripts/verify-evidence.cjs" render --plan "{worktree}/.dev
 
 {{settings.settings_resolve()}}
 
-{{publication_gate()}}
 <!-- compliance:on -->
+{{publication_gate()}}
 Phase 11 passes the resolved value to the evidence script (`publish`), which decides what each value means for the evidence comment. From the same line: {{compliance.compliance_frameworks()}}
 <!-- compliance:off -->
+{{publication_resolve()}}
 Phase 11 passes no publication value: the local verify posts nothing. From the same line: {{compliance.compliance_frameworks()}}
 <!-- compliance:end -->
 
@@ -337,7 +338,7 @@ DECISIONS_CONTEXT: {decisions_context}
 - If the Read fails, or the file has no `## Phases` heading with the `| Phase | standard | lean |` header, or a row breaks its grammar, apply no row, keep `GATE_LEVEL` and say `level reference unreadable: no level rows applied`.
 - Validate, the CI gate, the evidence claims and the compliance directive run at every level. An enabled compliance lens keeps Harden.
 
-After the Code agent completes, spawn Polish agent to polish the code. `{branch_diff}` is the output of `git diff --name-only --diff-filter=d {BASE_REF}...HEAD`, run again at each spawn; a non-zero exit stops, and an empty list counts only on exit 0.
+After the Code agent completes, spawn Polish agent. `{branch_diff}` is the output of `git diff --name-only --diff-filter=d {BASE_REF}...HEAD`, run again at each spawn; a non-zero exit stops, and an empty list counts only on exit 0.
 
 ```
 Agent(subagent_type="Polish"):
@@ -353,7 +354,7 @@ Commit any improvements with a conventional-commit message."
 **Produces:** HARDEN_OUTPUT
 **Requires:** BASE_REF
 
-After Phase 3, spawn Harden agent as the quality gate:
+After Phase 3, spawn Harden agent:
 
 ```
 Agent(subagent_type="Harden"):
@@ -393,7 +394,7 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
 1. Extract misalignment details from Evaluate agent output
 2. Increment `alignment_fix_count`
 3. If `alignment_fix_count <= 2`:
-   - Spawn Fix agent to fix misalignments:
+   - Spawn Fix agent:
    ```
    Agent(subagent_type="Fix"):
    "OPERATION: alignment-fix
@@ -428,10 +429,9 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
 ```
 
 **If FAIL:**
-1. Extract failure details from Validate agent output
-2. Increment `validation_retry_count`
-3. If `validation_retry_count <= 2`:
-   - Spawn Fix agent with fix context:
+1. Increment `validation_retry_count`
+2. If `validation_retry_count <= 2`:
+   - Spawn Fix agent:
    ```
    Agent(subagent_type="Fix"):
    "OPERATION: validation-fix
@@ -445,9 +445,13 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
    {COMPLIANCE_DIRECTIVE}"
    ```
    - Loop back to Phase 6 (re-validate at the new HEAD, full scope)
-4. If `validation_retry_count > 2`: Report failures to user and halt
+3. Else report failures to user and halt
+
+**If BLOCKED:** report its cause and log path, then halt.
 
 **If PASS:** append a `gate:validate` claim, run `git rev-parse HEAD` and record the result as `VALIDATED_HEAD`, then continue to Phase 7.
+
+Any other or missing Status: report and halt; never PASS.
 
 **Evidence claims** are lines appended to the `## Claims` section of `EVIDENCE_FILE` — the file's last section, created when absent. Append only: never edit or remove a claim; the last valid one per target wins. Each line takes exactly one of these shapes, where `<head>` is the 40-hex `HEAD:` the agent's report shows:
 
@@ -465,7 +469,7 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
 **Produces:** QA_RESULT
 **Requires:** BASE_REF, EXECUTION_PLAN, TEST_PLAN, VALIDATED_HEAD
 
-After Phase 6 passes, spawn Test agent for scenario-based acceptance testing:
+After Phase 6 passes, spawn Test agent:
 
 ```
 Agent(subagent_type="Test"):
@@ -474,18 +478,17 @@ EXECUTION_PLAN: {execution plan from Phase 1}
 FILES_CHANGED: {branch_diff}
 ACCEPTANCE_CRITERIA: {extracted criteria if available}
 TEST_PLAN: {the TP lines of the evidence file's ## Test Plan section, or (none)}
-Design and execute scenario-based acceptance tests. Report PASS or FAIL with evidence."
+Design and execute scenario-based acceptance tests. Report your Status with evidence."
 ```
 
-After every Test agent run — PASS or FAIL, first run or retry — append its TP claims (Phase 6's **Evidence claims**).
+After every Test agent run — whatever its Status, first run or retry — append its TP claims (Phase 6's **Evidence claims**).
 
-**If PASS:** Continue to Phase 8
+**If PASS** (first word of the Status): Continue to Phase 8
 
 **If FAIL:**
-1. Extract failure details from Test agent output
-2. Increment `qa_retry_count`
-3. If `qa_retry_count <= 2`:
-   - Spawn Fix agent to fix QA failures:
+1. Increment `qa_retry_count`
+2. If `qa_retry_count <= 2`:
+   - Spawn Fix agent:
    ```
    Agent(subagent_type="Fix"):
    "OPERATION: qa-fix
@@ -498,15 +501,17 @@ After every Test agent run — PASS or FAIL, first run or retry — append its T
    <!-- curation:end -->
    {COMPLIANCE_DIRECTIVE}"
    ```
-   - Loop back to Phase 7 (re-run Test agent).
-4. If `qa_retry_count > 2`: Report QA failures to user for decision. The run stops at the report (Phase 12), so Phases 8 to 11 do not run.
+   - Loop back to Phase 7.
+3. If `qa_retry_count > 2`: Report QA failures to user for decision. The run stops at the report (Phase 12), so Phases 8 to 11 do not run.
+
+**If BLOCKED, or any other or missing Status:** report its cause and log path, and stop as in step 3; no Fix agent.
 
 ### Phase 8: Re-Validate (only if a qa-fix committed)
 
 **Produces:** REVALIDATION_RESULT
 **Requires:** QA_RESULT, VALIDATED_HEAD, BASE_REF, GATE_LEVEL
 
-Run this phase only if a qa-fix committed (`git rev-parse HEAD` differs from `VALIDATED_HEAD`); otherwise skip it and continue to Phase 9. Spawn Validate agent over what changed since the Phase 6 run:
+Run this phase only if a qa-fix committed (`git rev-parse HEAD` differs from `VALIDATED_HEAD`); else skip to Phase 9. Spawn Validate agent:
 
 ```
 Agent(subagent_type="Validate"):
@@ -519,7 +524,11 @@ At `lean`, open the prompt with Phase 6's `GATE_LEVEL` and `BASE_SHA` lines; its
 
 **If FAIL:** Report the failures to user and halt.
 
+**If BLOCKED:** as in Phase 6.
+
 **If PASS:** append a `gate:validate` claim (Phase 6's **Evidence claims**), then continue to Phase 9.
+
+Any other or missing Status: report and halt; never PASS.
 
 ### Phase 9: Open PR
 
@@ -662,9 +671,9 @@ If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lin
 ├─ Phase 6: Validate (the one full-suite slot)
 ├─ Phase 7: QA Testing
 ├─ Phase 8: Re-Validate (only if a qa-fix committed)
-├─ Phase 9: Open PR (every strategy, outside the strategy branches)
+├─ Phase 9: Open PR (every strategy)
 ├─ Phase 10: CI Status Gate (every strategy)
-├─ Phase 11: Evidence (every strategy)
+├─ Phase 11: Evidence
 ├─ Phase 12: Report
 │
 └─ Feature Knowledge Write-Back (Conditional)

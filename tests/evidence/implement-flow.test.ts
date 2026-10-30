@@ -15,6 +15,9 @@
  *          and the HEAD it ran at (read before and after); the Validate agent
  *          reports each command's exit and its HEAD. The Test outcome vocabulary is
  *          the claim grammar's (CLAIM_LINE_RE), so every row maps onto a claim.
+ *   #679   The Test agent reports `BLOCKED` when a BLOCKING scenario's command gave no result (a TP
+ *          outcome stays PASS, FAIL or SKIP). #680 /implement Phases 6, 7 and 8 each stop on a BLOCKED
+ *          report with the cause and log path, spawn no Fix agent and never read it as PASS.
  *   AC-9   /implement writes and checks the evidence file's `## Test Plan` in
  *          Phase 1 — after the ticket ask and the exception record, before any
  *          Code spawn — and, only under a `required` policy, asks about a missing
@@ -324,7 +327,7 @@ function collectTestReportDefects(test: string): string[] {
   const row = section[header + 2]?.split('|').map(c => c.trim()) ?? []
   const outcomes = (row[2] ?? '').split('/')
   if (outcomes.join('|') !== claimOutcomes().join('|')) out.push(`Outcome [${outcomes.join(', ')}] is not the claim grammar's [${claimOutcomes().join(', ')}]`)
-  if (!section.some(l => l.includes('`method:local` row always carries its Exit'))) out.push('a local TP may omit its exit')
+  if (!section.some(l => l.includes('`method:local` row carries its Exit, or — when its command gave no result'))) out.push('a local TP row does not carry its exit, or — when its command gave no result')
   return out
 }
 
@@ -364,6 +367,160 @@ describe('AC-11: the Test and Validate agents report what a claim needs', () => 
     expect(collectValidateReportDefects(validate.replace(VALIDATE_HEADER, '| Command | Status | Duration |'))).toEqual([
       `no "${VALIDATE_HEADER}" table`,
     ])
+  })
+})
+
+const TEST_STATUS_LINE = '### Status: PASS | PASS ({n} BLOCKING scenario(s) skipped: {reasons}) | FAIL | BLOCKED'
+const BLOCKED_REPORT_HEADING = '**Report as BLOCKED:**'
+const BLOCKERS_HEADING = '### Blockers (if BLOCKED)'
+
+/**
+ * Named collector (#679): what test.md lacks to report a run whose command gave no result as BLOCKED. The
+ * TP outcome set stays PASS, FAIL and SKIP (`collectTestReportDefects` holds it), so a blocked TP reads SKIP
+ * with its reason under Blockers.
+ */
+function collectTestBlockedStatusDefects(test: string): string[] {
+  const out: string[] = []
+  const output = outputSection(test, '## Principles')
+  if (output === null) return ['no ## Output section']
+  const lines = output.split('\n')
+  const statusLines = lines.filter(l => l.startsWith('### Status:'))
+  if (statusLines.length !== 1 || statusLines[0] !== TEST_STATUS_LINE) out.push(`the Status line is not exactly "${TEST_STATUS_LINE}"`)
+  if (!lines.includes('- Blocked: {count}')) out.push('the Summary lacks a Blocked count')
+  if (!lines.some(l => l.startsWith('| S1 |') && l.includes('| PASS/FAIL/SKIPPED/BLOCKED |'))) out.push('the Scenario Results Status cell lacks BLOCKED')
+  if (!test.includes('5. Record PASS or FAIL with evidence, or BLOCKED when its command gave no result')) out.push('the Execution step does not record BLOCKED for a command with no result')
+  const rule = lines.find(l => l.startsWith('One row per TP line')) ?? ''
+  for (const part of ['in every report, a BLOCKED one included', 'PASS only when at least one scenario covers it and every one passed', 'FAIL when any failed']) {
+    if (!rule.includes(part)) out.push(`the TP row rule lacks "${part}"`)
+  }
+  const blockers = lines.indexOf(BLOCKERS_HEADING)
+  if (blockers === -1) {
+    out.push(`no "${BLOCKERS_HEADING}" section`)
+  } else {
+    const template = lines[blockers + 1] ?? ''
+    for (const part of ['`command could not start`', '`no EXIT= line read`', '{duration, or —}', 'log {its `LOG=` path, or —}']) {
+      if (!template.includes(part)) out.push(`the Blockers line lacks ${part}`)
+    }
+  }
+  const boundaries = test.indexOf('\n## Boundaries\n')
+  const at = test.indexOf(`\n${BLOCKED_REPORT_HEADING}\n`)
+  if (boundaries === -1 || at < boundaries) {
+    out.push(`no "${BLOCKED_REPORT_HEADING}" block in Boundaries`)
+  } else {
+    const block = test.slice(at).split('\n\n')[0]
+    if (!block.includes('No BLOCKING scenario failed')) out.push('the BLOCKED block does not require that no BLOCKING scenario failed')
+    if (!block.includes('skipped for its environment') || !block.includes('never makes the run BLOCKED')) out.push('the BLOCKED block does not exclude a scenario skipped for its environment')
+  }
+  return out
+}
+
+describe('#679: the Test agent reports BLOCKED for a run whose command gave no result', () => {
+  it('test.md names the BLOCKED status, its Blockers section and its Boundaries block', () => {
+    expect(collectTestBlockedStatusDefects(resolveAgentSource('test').content)).toEqual([])
+  })
+
+  it('known-bad probes: each lost statement is reported by name, and a BLOCKED TP outcome stays outside the claim grammar', () => {
+    const test = resolveAgentSource('test').content
+    const block = `${BLOCKED_REPORT_HEADING}\n- No BLOCKING scenario failed, and a BLOCKING scenario's command gave no result\n- A scenario skipped for its environment (no browser tools, no local database) never makes the run BLOCKED\n`
+    expect(collectTestBlockedStatusDefects(seedOnce(test, TEST_STATUS_LINE, '### Status: PASS | FAIL'))).toEqual([`the Status line is not exactly "${TEST_STATUS_LINE}"`])
+    expect(collectTestBlockedStatusDefects(seedOnce(test, '- Blocked: {count}\n', ''))).toEqual(['the Summary lacks a Blocked count'])
+    expect(collectTestBlockedStatusDefects(seedOnce(test, 'PASS/FAIL/SKIPPED/BLOCKED', 'PASS/FAIL/SKIPPED'))).toEqual(['the Scenario Results Status cell lacks BLOCKED'])
+    expect(collectTestBlockedStatusDefects(seedOnce(test, ', or BLOCKED when its command gave no result', ''))).toEqual(['the Execution step does not record BLOCKED for a command with no result'])
+    expect(collectTestBlockedStatusDefects(seedOnce(test, 'PASS only when at least one scenario covers it and every one passed', 'PASS only when every scenario covering the TP passed'))).toEqual([
+      'the TP row rule lacks "PASS only when at least one scenario covers it and every one passed"',
+    ])
+    expect(collectTestBlockedStatusDefects(seedOnce(test, 'in every report, a BLOCKED one included', 'in a PASS or FAIL report'))).toEqual(['the TP row rule lacks "in every report, a BLOCKED one included"'])
+    expect(collectTestBlockedStatusDefects(seedOnce(test, '; {duration, or —}', ''))).toEqual(['the Blockers line lacks {duration, or —}'])
+    expect(collectTestBlockedStatusDefects(seedOnce(test, '; log {its `LOG=` path, or —}', ''))).toEqual(['the Blockers line lacks log {its `LOG=` path, or —}'])
+    expect(collectTestBlockedStatusDefects(seedOnce(test, '`no EXIT= line read`', '`no EXIT line read`'))).toEqual(['the Blockers line lacks `no EXIT= line read`'])
+    expect(collectTestBlockedStatusDefects(seedOnce(test, `${BLOCKERS_HEADING}\n`, ''))).toEqual([`no "${BLOCKERS_HEADING}" section`])
+    expect(collectTestBlockedStatusDefects(seedOnce(test, `\n${block}`, ''))).toEqual([`no "${BLOCKED_REPORT_HEADING}" block in Boundaries`])
+    expect(collectTestBlockedStatusDefects(seedOnce(test, 'No BLOCKING scenario failed, and a', 'A'))).toEqual(['the BLOCKED block does not require that no BLOCKING scenario failed'])
+    expect(collectTestBlockedStatusDefects(seedOnce(test, 'never makes the run BLOCKED', 'makes the run BLOCKED'))).toEqual(['the BLOCKED block does not exclude a scenario skipped for its environment'])
+    expect(collectTestReportDefects(seedOnce(test, 'PASS/FAIL/SKIP | S1, S3', 'PASS/FAIL/SKIP/BLOCKED | S1, S3'))).toEqual([
+      'Outcome [PASS, FAIL, SKIP, BLOCKED] is not the claim grammar\'s [PASS, FAIL, SKIP]',
+    ])
+  })
+})
+
+const REPORT_AS_PASS_HEADING = '**Report as PASS:**'
+const PASS_SKIP_EXAMPLE = '`### Status: PASS (1 BLOCKING scenario skipped: no browser tools)`'
+const PASS_ALL_SKIPPED_EXAMPLE = '`### Status: PASS (0 of 3 BLOCKING scenarios ran: all skipped, no browser tools)`'
+
+/**
+ * Named collector (T3): what test.md lacks to report a run whose BLOCKING scenario was skipped for its environment as
+ * PASS with the skips named. The word PASS stays first on the Status line; the skip never makes the run BLOCKED
+ * (`collectTestBlockedStatusDefects` holds that). The rule covers a run in which every BLOCKING scenario that ran passed,
+ * the run in which none ran included, and that run says so on the Status line. The Status template offers the
+ * `PASS ({n} BLOCKING scenario(s) skipped: {reasons})` form.
+ */
+function collectSkipNoteDefects(test: string): string[] {
+  const boundaries = test.indexOf('\n## Boundaries\n')
+  const at = test.indexOf(`\n${REPORT_AS_PASS_HEADING}\n`)
+  if (boundaries === -1 || at < boundaries) return [`no "${REPORT_AS_PASS_HEADING}" block in Boundaries`]
+  const block = test.slice(at + 1).split('\n\n')[0]
+  const out: string[] = []
+  const parts = ['skipped for its environment', 'every BLOCKING scenario that ran passed', 'names every such skip', 'with PASS first', PASS_SKIP_EXAMPLE, 'If none ran', PASS_ALL_SKIPPED_EXAMPLE]
+  for (const part of parts) {
+    if (!block.includes(part)) out.push(`the PASS block lacks "${part}"`)
+  }
+  if (!test.includes(`\n${TEST_STATUS_LINE}\n`)) out.push('the Status template does not offer the PASS form that names skips')
+  return out
+}
+
+const PHASE_7_PASS_ARM = '**If PASS** (first word of the Status): Continue to Phase 8'
+
+/**
+ * Named collector (T3): the /implement Phase 7 PASS arm reads the Test Status by its first word, so `PASS (…)` is PASS and
+ * never falls to the arm for any other Status. It is the one PASS arm of Phase 7.
+ */
+function collectPassFirstWordDefects(md: string): string[] {
+  const section = phaseSection(md, H.p7)
+  if (section === null) return [`${H.p7}: the section is absent`]
+  const arms = section.split('\n\n').map(p => p.trim()).filter(p => p.startsWith('**If PASS'))
+  return arms.length === 1 && arms[0] === PHASE_7_PASS_ARM ? [] : [`Phase 7 does not hold exactly one PASS arm \`${PHASE_7_PASS_ARM}\``]
+}
+
+describe('T3: a run with a BLOCKING scenario skipped for its environment reports PASS with the skips named', () => {
+  it('test.md states the rule and offers the Status form, and Phase 7 reads the Status by its first word (both curation builds)', () => {
+    expect(collectSkipNoteDefects(resolveAgentSource('test').content)).toEqual([])
+    expect(collectPassFirstWordDefects(implementMd()), 'curation on').toEqual([])
+    expect(collectPassFirstWordDefects(implementMdOff()), 'curation off').toEqual([])
+  })
+
+  it('known-bad probes: each lost statement of the Test rule is reported by name', () => {
+    const test = resolveAgentSource('test').content
+    const bullet = test.split('\n').find(l => l.startsWith('- A BLOCKING scenario skipped for its environment, and every')) ?? ''
+    expect(bullet, 'the PASS bullet must be found').not.toBe('')
+    expect(collectSkipNoteDefects(seedOnce(test, `${bullet}\n`, ''))).toEqual([
+      'the PASS block lacks "skipped for its environment"',
+      'the PASS block lacks "every BLOCKING scenario that ran passed"',
+      'the PASS block lacks "names every such skip"',
+      'the PASS block lacks "with PASS first"',
+      `the PASS block lacks "${PASS_SKIP_EXAMPLE}"`,
+      'the PASS block lacks "If none ran"',
+      `the PASS block lacks "${PASS_ALL_SKIPPED_EXAMPLE}"`,
+    ])
+    expect(collectSkipNoteDefects(seedOnce(test, 'with PASS first', 'with the skips first'))).toEqual(['the PASS block lacks "with PASS first"'])
+    expect(collectSkipNoteDefects(seedOnce(test, 'every BLOCKING scenario that ran passed', 'whatever else ran'))).toEqual(['the PASS block lacks "every BLOCKING scenario that ran passed"'])
+    expect(collectSkipNoteDefects(seedOnce(test, `. If none ran, it says so: ${PASS_ALL_SKIPPED_EXAMPLE}`, ''))).toEqual([
+      'the PASS block lacks "If none ran"',
+      `the PASS block lacks "${PASS_ALL_SKIPPED_EXAMPLE}"`,
+    ])
+    expect(collectSkipNoteDefects(seedOnce(test, PASS_ALL_SKIPPED_EXAMPLE, '`### Status: BLOCKED (all skipped)`'))).toEqual([`the PASS block lacks "${PASS_ALL_SKIPPED_EXAMPLE}"`])
+    expect(collectSkipNoteDefects(seedOnce(test, TEST_STATUS_LINE, '### Status: PASS | FAIL | BLOCKED'))).toEqual(['the Status template does not offer the PASS form that names skips'])
+    expect(collectSkipNoteDefects(seedOnce(test, `\n${REPORT_AS_PASS_HEADING}\n`, '\n**Report as OK:**\n'))).toEqual([`no "${REPORT_AS_PASS_HEADING}" block in Boundaries`])
+    // The skip still never makes the run BLOCKED: the other collector reports a rule that says it does.
+    expect(collectTestBlockedStatusDefects(seedOnce(test, 'never makes the run BLOCKED', 'makes the run BLOCKED'))).toEqual(['the BLOCKED block does not exclude a scenario skipped for its environment'])
+  })
+
+  it('known-bad probes: a Phase 7 PASS arm that does not read the first word, a doubled arm and a lost phase are reported', () => {
+    const md = implementMd()
+    const fault = `Phase 7 does not hold exactly one PASS arm \`${PHASE_7_PASS_ARM}\``
+    expect(collectPassFirstWordDefects(seedOnce(md, PHASE_7_PASS_ARM, '**If PASS:** Continue to Phase 8'))).toEqual([fault])
+    expect(collectPassFirstWordDefects(seedOnce(md, PHASE_7_PASS_ARM, `${PHASE_7_PASS_ARM}\n\n${PHASE_7_PASS_ARM}`))).toEqual([fault])
+    expect(collectPassFirstWordDefects(seedOnce(md, PHASE_7_PASS_ARM, ''))).toEqual([fault])
+    expect(collectPassFirstWordDefects(seedOnce(md, H.p7, '### Phase 7 gone'))).toEqual([`${H.p7}: the section is absent`])
   })
 })
 
@@ -711,7 +868,7 @@ describe('AC-11: /implement appends claims the evidence script can read', () => 
   it('Phase 6 and Phase 8 PASS append the gate claim, and every Phase 7 run its TP claims', () => {
     const lines = implementMd().split('\n')
     expect(lines.filter(l => l.startsWith('**If PASS:** append a `gate:validate` claim'))).toHaveLength(2)
-    expect(lines.filter(l => l.startsWith('After every Test agent run — PASS or FAIL, first run or retry — append its TP claims'))).toHaveLength(1)
+    expect(lines.filter(l => l.startsWith('After every Test agent run — whatever its Status, first run or retry — append its TP claims'))).toHaveLength(1)
   })
 
   it('known-bad probes: an outcome outside the grammar, an unfilled placeholder and a short SHA are refused', () => {
@@ -927,6 +1084,16 @@ function phaseSection(md: string, heading: string): string | null {
   return next === -1 ? md.slice(at) : md.slice(at, at + heading.length + next)
 }
 
+/** The sentence that stops a Validate report with any Status but PASS or FAIL: its own paragraph, right after the `**If PASS:**` paragraph. */
+const OTHER_STATUS_HALT = 'Any other or missing Status: report and halt; never PASS.'
+
+/** True when `text` holds the halt sentence exactly once, as the paragraph that follows the `**If PASS:**` paragraph. */
+function haltFollowsPass(text: string): boolean {
+  const paragraphs = text.split('\n\n').map(p => p.trim())
+  const pass = paragraphs.findIndex(p => p.startsWith('**If PASS:**'))
+  return text.split(OTHER_STATUS_HALT).length - 1 === 1 && pass !== -1 && paragraphs[pass + 1] === OTHER_STATUS_HALT
+}
+
 const H = {
   p1: '### Phase 1: Setup',
   p2: '### Phase 2: Implement',
@@ -1006,6 +1173,7 @@ function collectValidateOnceDefects(md: string): string[] {
   const six = phaseSection(md, H.p6) ?? ''
   if (!six.includes('record the result as `VALIDATED_HEAD`')) out.push('Phase 6 does not record VALIDATED_HEAD')
   if (!six.includes('re-validate at the new HEAD, full scope')) out.push('a Phase 6 retry does not re-run at full scope at its new HEAD')
+  if (!haltFollowsPass(six)) out.push('Phase 6 does not halt on any other or missing Status, once, after its PASS line')
   return out
 }
 
@@ -1024,6 +1192,13 @@ describe('#421 AC-2: one full-scope Validate, and exactly two claim sites', () =
     const third = md.replace('### Phase 9: Open PR', '**If PASS:** append a `gate:validate` claim again.\n\n### Phase 9: Open PR')
     expect(collectValidateOnceDefects(third)).toContain('expected two gate:validate claim lines, found 3')
     expect(collectValidateOnceDefects(md.replace('record the result as `VALIDATED_HEAD`', 'remember it'))).toEqual(['Phase 6 does not record VALIDATED_HEAD'])
+  })
+
+  it('known-bad probe: a Phase 6 that lost its halt on any other or missing Status is reported', () => {
+    const md = implementMd()
+    const lost = md.replace(OTHER_STATUS_HALT, 'Carry on.')
+    expect(lost, 'the seed must land').not.toBe(md)
+    expect(collectValidateOnceDefects(lost)).toEqual(['Phase 6 does not halt on any other or missing Status, once, after its PASS line'])
   })
 })
 
@@ -1217,6 +1392,7 @@ function collectPhase8Defects(md: string): string[] {
   need('the scope (changed files since VALIDATED_HEAD)', text.includes('`git diff --name-only --diff-filter=d VALIDATED_HEAD..HEAD`') && text.includes('VALIDATION_SCOPE: changed-only'))
   need('the FAIL arm (report and halt)', /\*\*If FAIL:\*\* Report the failures to user and halt\./.test(text))
   need('the PASS arm appends the second claim', text.includes('**If PASS:** append a `gate:validate` claim'))
+  need('any other or missing Status halts, once, after the PASS arm', haltFollowsPass(text))
   return out
 }
 
@@ -1231,6 +1407,114 @@ describe('#421 AC-4: Phase 8 states its condition, its scope and its FAIL arm in
     expect(collectPhase8Defects(md.replace('`git diff --name-only --diff-filter=d VALIDATED_HEAD..HEAD`', 'the Code agent\'s list'))).toEqual(['the scope (changed files since VALIDATED_HEAD)'])
     expect(collectPhase8Defects(md.replace('**If FAIL:** Report the failures to user and halt.', '**If FAIL:** carry on.'))).toEqual(['the FAIL arm (report and halt)'])
     expect(collectPhase8Defects(md.replace(H.p8, '### Phase 8 gone'))).toEqual(['no Phase 8 section'])
+    const at = md.lastIndexOf(OTHER_STATUS_HALT)
+    expect(at, 'the Phase 8 sentence must be found').toBeGreaterThan(md.indexOf(H.p8))
+    const lost = md.slice(0, at) + 'Carry on.' + md.slice(at + OTHER_STATUS_HALT.length)
+    expect(collectPhase8Defects(lost)).toEqual(['any other or missing Status halts, once, after the PASS arm'])
+  })
+})
+
+const BLOCKED_ARM = '**If BLOCKED:**'
+const PHASE_8_BLOCKED_ARM = '**If BLOCKED:** as in Phase 6.'
+const PHASE_7_BLOCKED_OPENING = '**If BLOCKED, or any other or missing Status:**'
+const PHASE_7_STEP_3 = '3. If `qa_retry_count > 2`:'
+const PHASE_7_STOP = 'Phases 8 to 11 do not run'
+const TEST_STATUS_SENTENCE = 'Report your Status with evidence.'
+
+/**
+ * Named collector (#679, #680): the BLOCKED arm of the Validate gates (Phases 6 and 8) and of the Test gate
+ * (Phase 7). A Phase 6 or 8 arm is one paragraph before `**If PASS:**`, so the halt sentence that
+ * `haltFollowsPass` pins stays the paragraph right after PASS. The Phase 7 arm follows the renumbered escalation
+ * step, spawns no Fix agent and stops the run; the Test spawn asks for the agent's Status, not PASS or FAIL.
+ */
+function collectBlockedArmDefects(md: string): string[] {
+  const out: string[] = []
+  const paragraphsOf = (heading: string): string[] | null => {
+    const section = phaseSection(md, heading)
+    if (section === null) {
+      out.push(`${heading}: the section is absent`)
+      return null
+    }
+    return section.split('\n\n').map(p => p.trim())
+  }
+  const gateArm = (heading: string, label: string, holds: (arm: string) => boolean, wording: string): void => {
+    const paragraphs = paragraphsOf(heading)
+    if (paragraphs === null) return
+    const arms = paragraphs.flatMap((p, i) => (p.startsWith(BLOCKED_ARM) ? [i] : []))
+    if (arms.length !== 1) {
+      out.push(`${label} holds ${arms.length} \`${BLOCKED_ARM}\` paragraphs, expected 1`)
+      return
+    }
+    const pass = paragraphs.findIndex(p => p.startsWith('**If PASS:**'))
+    if (pass === -1 || arms[0] > pass) out.push(`${label}: the BLOCKED arm does not come before \`**If PASS:**\``)
+    if (!holds(paragraphs[arms[0]])) out.push(`${label}: the BLOCKED arm ${wording}`)
+  }
+  gateArm(H.p6, 'Phase 6', arm => arm.includes('cause and log path') && arm.includes('halt'), 'does not report its cause and log path, then halt')
+  gateArm(H.p8, 'Phase 8', arm => arm === PHASE_8_BLOCKED_ARM, `is not \`${PHASE_8_BLOCKED_ARM}\``)
+
+  const paragraphs = paragraphsOf(H.p7)
+  if (paragraphs === null) return out
+  const arms = paragraphs.flatMap((p, i) => (p.startsWith(PHASE_7_BLOCKED_OPENING) ? [i] : []))
+  if (arms.length !== 1) {
+    out.push(`Phase 7 holds ${arms.length} \`${PHASE_7_BLOCKED_OPENING}\` paragraphs, expected 1`)
+  } else {
+    for (const phrase of ['cause and log path', 'no Fix agent', 'stop as in step 3']) {
+      if (!paragraphs[arms[0]].includes(phrase)) out.push(`Phase 7: the BLOCKED arm lacks "${phrase}"`)
+    }
+    const step3 = (paragraphs[arms[0] - 1] ?? '').split('\n').at(-1) ?? ''
+    if (!step3.startsWith(PHASE_7_STEP_3) || !step3.includes(PHASE_7_STOP)) {
+      out.push(`Phase 7: the BLOCKED arm does not follow \`${PHASE_7_STEP_3}\` that stops the run ("${PHASE_7_STOP}")`)
+    }
+  }
+  const spawns = parseFences(phaseSection(md, H.p7) ?? '').filter(f => isAgentBlock(f, 'Test'))
+  if (spawns.length !== 1) {
+    out.push(`Phase 7 holds ${spawns.length} Test spawns, expected 1`)
+  } else {
+    if (!spawns[0].includes(TEST_STATUS_SENTENCE)) out.push(`the Test spawn lacks "${TEST_STATUS_SENTENCE}"`)
+    if (spawns[0].includes('Report PASS or FAIL')) out.push('the Test spawn still says "Report PASS or FAIL"')
+  }
+  return out
+}
+
+describe('#679, #680: the Validate and Test gates each state a BLOCKED arm that halts and spawns no Fix agent', () => {
+  const builds = (): ReadonlyArray<readonly [string, string]> => [['curation on', implementMd()], ['curation off', implementMdOff()]]
+
+  it('Phases 6, 7 and 8 hold their BLOCKED arm, in both curation builds', () => {
+    for (const [label, md] of builds()) {
+      expect(phaseSection(md, H.p7), `${label}: no Phase 7 read`).not.toBeNull()
+      expect(collectBlockedArmDefects(md), label).toEqual([])
+    }
+  })
+
+  it('known-bad probes: a dropped arm, a duplicated arm, a reverted Test fence and a renumbered step are each reported', () => {
+    const md = implementMd()
+    const p6 = `${BLOCKED_ARM} report its cause and log path, then halt.`
+    const p7 = `${PHASE_7_BLOCKED_OPENING} report its cause and log path, and stop as in step 3; no Fix agent.`
+    expect(collectBlockedArmDefects(seedOnce(md, `${p6}\n\n`, ''))).toEqual(['Phase 6 holds 0 `**If BLOCKED:**` paragraphs, expected 1'])
+    expect(collectBlockedArmDefects(seedOnce(md, `${PHASE_8_BLOCKED_ARM}\n\n`, ''))).toEqual(['Phase 8 holds 0 `**If BLOCKED:**` paragraphs, expected 1'])
+    expect(collectBlockedArmDefects(seedOnce(md, `\n\n${p7}`, ''))).toEqual([`Phase 7 holds 0 \`${PHASE_7_BLOCKED_OPENING}\` paragraphs, expected 1`])
+    expect(collectBlockedArmDefects(seedOnce(md, p6, `${p6}\n\n${p6}`))).toEqual(['Phase 6 holds 2 `**If BLOCKED:**` paragraphs, expected 1'])
+    expect(collectBlockedArmDefects(seedOnce(md, p6, `${BLOCKED_ARM} carry on.`))).toEqual(['Phase 6: the BLOCKED arm does not report its cause and log path, then halt'])
+    expect(collectBlockedArmDefects(seedOnce(md, PHASE_8_BLOCKED_ARM, `${BLOCKED_ARM} carry on.`))).toEqual([`Phase 8: the BLOCKED arm is not \`${PHASE_8_BLOCKED_ARM}\``])
+    expect(collectBlockedArmDefects(seedOnce(md, 'no Fix agent.', 'then a Fix agent.'))).toEqual(['Phase 7: the BLOCKED arm lacks "no Fix agent"'])
+    expect(collectBlockedArmDefects(seedOnce(md, 'stop as in step 3', 'carry on'))).toEqual(['Phase 7: the BLOCKED arm lacks "stop as in step 3"'])
+    expect(collectBlockedArmDefects(seedOnce(md, TEST_STATUS_SENTENCE, 'Report PASS or FAIL with evidence.'))).toEqual([
+      `the Test spawn lacks "${TEST_STATUS_SENTENCE}"`,
+      'the Test spawn still says "Report PASS or FAIL"',
+    ])
+    expect(collectBlockedArmDefects(seedOnce(md, PHASE_7_STEP_3, '4. If `qa_retry_count > 2`:'))).toEqual([
+      `Phase 7: the BLOCKED arm does not follow \`${PHASE_7_STEP_3}\` that stops the run ("${PHASE_7_STOP}")`,
+    ])
+    expect(collectBlockedArmDefects(seedOnce(md, H.p8, '### Phase 8 gone'))).toEqual([`${H.p8}: the section is absent`])
+  })
+
+  it('known-bad probes: a Phase 6 arm placed between the PASS paragraph and the halt sentence is reported by both collectors', () => {
+    const md = implementMd()
+    const p6 = `${BLOCKED_ARM} report its cause and log path, then halt.`
+    const afterPass = `then continue to Phase 7.\n\n${OTHER_STATUS_HALT}`
+    const moved = seedOnce(seedOnce(md, `${p6}\n\n`, ''), afterPass, `then continue to Phase 7.\n\n${p6}\n\n${OTHER_STATUS_HALT}`)
+    expect(collectBlockedArmDefects(moved)).toEqual(['Phase 6: the BLOCKED arm does not come before `**If PASS:**`'])
+    expect(collectValidateOnceDefects(moved)).toEqual(['Phase 6 does not halt on any other or missing Status, once, after its PASS line'])
   })
 })
 
@@ -2088,6 +2372,7 @@ const OFF_ABSENT: ReadonlyArray<readonly [string, string]> = [
   ['the publish call', 'verify-evidence.cjs" publish'],
   ['the update-pr-evidence operation', 'update-pr-evidence'],
   ['the publish timeout', 'timeout: 180000'],
+  ['the publication gate document, which compliance off does not install', 'publication-gate'],
 ]
 
 /** Named collector: what an off build of /implement still names that a non-posting machine must not. */
@@ -2184,7 +2469,7 @@ describe('#648 AC-19: Phase 11 of the compliance-off builds runs the local verif
 
   it('the on build keeps the publish call, the publication pass and the timeout, so the absence guard is not vacuous', () => {
     const on = implementMd()
-    expect(OFF_ABSENT.length, 'the absence table is empty, so this guard proves nothing').toBeGreaterThanOrEqual(8)
+    expect(OFF_ABSENT.length, 'the absence table is empty, so this guard proves nothing').toBeGreaterThanOrEqual(9)
     expect(collectOffAbsenceDefects(on)).toEqual(OFF_ABSENT.map(([what, text]) => `the off build names ${what}: ${text}`))
     expect(collectOffEvidenceRunDefects(on)).toEqual(['expected one local verify call in Phase 11, found 0'])
   })
@@ -2210,6 +2495,8 @@ describe('#648 AC-19: Phase 11 of the compliance-off builds runs the local verif
     expect(collectOffEvidenceRunDefects(seedOnce(md, 'cd "{worktree}" && node "$HOME/.devflow/scripts/verify-evidence.cjs" verify', 'node "$HOME/.devflow/scripts/verify-evidence.cjs" verify'))).toEqual(['the call does not run from the worktree'])
     expect(collectOffAbsenceDefects(`${md}\nPR_TEST_PLAN_BLOCK: x`)).toEqual(['the off build names the PR test-plan block input: PR_TEST_PLAN_BLOCK'])
     expect(collectOffAbsenceDefects(`${md}\nthrough the Bash tool with \`timeout: 180000\``)).toEqual(['the off build names the publish timeout: timeout: 180000'])
+    expect(collectOffAbsenceDefects(`${md}\nthe Git agent's publication gate (\`references/publication-gate.md\` step 2)`))
+      .toEqual(['the off build names the publication gate document, which compliance off does not install: publication-gate'])
     expect(collectOrderViolations('implement.md', seedOnce(md, '### Phase 12: Report', '### Phase 12 later').replace('### Phase 11: Evidence', '### Phase 12: Report\n\n### Phase 11: Evidence'), PHASE11_ORDER_OFF).length).toBeGreaterThan(0)
   })
 })

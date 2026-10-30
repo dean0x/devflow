@@ -17,6 +17,9 @@
  *   D-VALIDATE-ONCE          /self-review records HEAD_BEFORE before Polish and runs
  *                            a changed-only Validate whenever HEAD moved, so a
  *                            Polish-only commit is validated too.
+ *   D-VALIDATE-STATUS-ROUTE  (#695) /self-review Phase 3 continues only on a Validate
+ *                            PASS: FAIL, BLOCKED, any other status and no status halt
+ *                            with the cause, so a blocked run never reads as a pass.
  *   D-CI-WAIT-INLINE         /resolve no longer claims one push path: its CI gate pushes
  *                            with its own command, and its test-plan refresh and its
  *                            Report cover any successful push of the run.
@@ -260,6 +263,70 @@ describe('D-VALIDATE-ONCE (#421 AC-15): /self-review validates whenever HEAD mov
     const late = md.replace('Record `HEAD_BEFORE` (`git rev-parse HEAD`)', 'Note the head (`git rev-parse HEAD`)')
     expect(collectSelfReviewDefects(late)).toContain('HEAD_BEFORE is not recorded before Polish')
     expect(collectSelfReviewDefects(md.replace('If STATUS is BLOCKED, skip this phase', 'If STATUS is BLOCKED, continue'))).toEqual(['BLOCKED does not halt before Phase 3'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// D-VALIDATE-STATUS-ROUTE — /self-review Phase 3 (#695)
+// ---------------------------------------------------------------------------
+
+/** Each Validate report Phase 3 can receive; `null` is a report with no Status line. */
+const VALIDATE_STATUSES: readonly (string | null)[] = ['PASS', 'FAIL', 'BLOCKED', 'UNKNOWN', null]
+
+/** The step Phase 3 states for one Validate status, read from its arms; null when no arm covers it. */
+function validateStatusRoute(phase3: string, status: string | null): 'continue' | 'halt' | null {
+  const arm = (lead: string): string | null => phase3.split('\n').find(l => l.startsWith(lead)) ?? null
+  const step = (line: string | null): 'continue' | 'halt' | null =>
+    line === null ? null : /\bContinue to report\b/.test(line) ? 'continue' : /\bhalt\b/.test(line) ? 'halt' : null
+  const named = status === null ? null : arm(`**If ${status}:**`)
+  if (named !== null) return step(named)
+  const other = arm('**Any other or missing Status**')
+  return other !== null && other.includes('its cause') ? step(other) : null
+}
+
+/** Named collector: Validate statuses Phase 3 lets through as a pass, or routes nowhere. */
+function collectValidateRouteDefects(md: string): string[] {
+  const phase3 = selfReviewPhase3(md)
+  if (phase3 === null) return ['no Phase 3 section']
+  const out: string[] = []
+  for (const status of VALIDATE_STATUSES) {
+    const label = status ?? 'no status'
+    const route = validateStatusRoute(phase3, status)
+    const expected = status === 'PASS' ? 'continue' : 'halt'
+    if (route === null) out.push(`${label}: Phase 3 states no step`)
+    else if (route !== expected) out.push(`${label}: Phase 3 says ${route}, not ${expected}`)
+  }
+  return out
+}
+
+describe('D-VALIDATE-STATUS-ROUTE (#695): /self-review continues only on a Validate PASS', () => {
+  for (const [build, md] of [['curation-on', requireDistFile('self-review.md')], ['curation-off', resolveCurationOffSource('commands', 'self-review') ?? '']] as const) {
+    it(`${build}: every status other than PASS halts with its cause`, () => {
+      expect(selfReviewPhase3(md)?.length, `no Phase 3 read in ${build}`).toBeGreaterThan(200)
+      expect(collectValidateRouteDefects(md)).toEqual([])
+    })
+  }
+
+  it('known-bad probe: the Phase 3 arms before #695 route BLOCKED and no status nowhere', () => {
+    const md = requireDistFile('self-review.md')
+    const other = md.split('\n').find(l => l.startsWith('**Any other or missing Status**'))
+    expect(other, 'the seed must land').toBeDefined()
+    expect(collectValidateRouteDefects(md.replace(`${other}\n`, ''))).toEqual([
+      'BLOCKED: Phase 3 states no step',
+      'UNKNOWN: Phase 3 states no step',
+      'no status: Phase 3 states no step',
+    ])
+  })
+
+  it('known-bad probes: an arm that continues, or one without the cause, is reported', () => {
+    const md = requireDistFile('self-review.md')
+    const other = md.split('\n').find(l => l.startsWith('**Any other or missing Status**'))!
+    expect(collectValidateRouteDefects(md.replace(other, '**If BLOCKED:** Continue to report\n' + other))).toEqual(['BLOCKED: Phase 3 says continue, not halt'])
+    expect(collectValidateRouteDefects(md.replace(other, other.replace('its cause', 'the reason')))).toEqual([
+      'BLOCKED: Phase 3 states no step',
+      'UNKNOWN: Phase 3 states no step',
+      'no status: Phase 3 states no step',
+    ])
   })
 })
 
