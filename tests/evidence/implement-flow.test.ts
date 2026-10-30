@@ -701,6 +701,37 @@ describe('AC-9: /implement writes and checks the test plan before any Code spawn
   })
 })
 
+/**
+ * The compliance-on outputs hold one step that copies `PR_EXCEPTIONS` into the evidence file. It
+ * must sit after the missing-plan ask: the ask can add a `test-plan` exception to `PR_EXCEPTIONS`
+ * without writing the evidence file, and the `Test plan.` paragraph writes that file before the ask.
+ */
+const EVIDENCE_COPY = 'its `## Evidence Exceptions` section now a byte copy of `PR_EXCEPTIONS`'
+const EVIDENCE_COPY_ORDER: readonly OrderRule[] = [
+  { label: 'a step after the missing-plan ask copies PR_EXCEPTIONS into the evidence file', before: MISSING_ASK, after: EVIDENCE_COPY },
+  { label: 'that copy is set before Phase 2', before: EVIDENCE_COPY, after: '### Phase 2: Implement' },
+]
+
+describe('AC-9: the exception the missing-plan ask records reaches the evidence file (compliance-on builds)', () => {
+  it('a step after the missing-plan ask copies PR_EXCEPTIONS into EVIDENCE_FILE, with curation on and off', () => {
+    for (const [label, md] of [['curation on', implementMd()], ['curation off', implementMdOff()]] as const) {
+      expect(collectOrderViolations(`implement.md (${label})`, md, EVIDENCE_COPY_ORDER), label).toEqual([])
+    }
+  })
+
+  it('known-bad probes: a lost copy step and a copy moved above the ask are reported', () => {
+    const md = implementMd()
+    const bullet = md.split('\n').find(l => l.includes(EVIDENCE_COPY))
+    expect(bullet, 'the copy step is read').toBeDefined()
+    const lost = md.replace(`${bullet}\n`, '')
+    expect(lost, 'the seed must land').not.toBe(md)
+    expect(collectOrderViolations('implement.md', lost, EVIDENCE_COPY_ORDER).some(v => v.includes('anchor absent'))).toBe(true)
+    const hoisted = lost.replace(MISSING_ASK, `${bullet}\n\n${MISSING_ASK}`)
+    expect(hoisted, 'the seed must land').not.toBe(lost)
+    expect(collectOrderViolations('implement.md', hoisted, EVIDENCE_COPY_ORDER).some(v => v.includes('does not precede'))).toBe(true)
+  })
+})
+
 /** The missing-plan ask: from its gate to the blank line after its last option. Read from the evidence-asks reference. */
 function missingAskBlock(content: string): string | null {
   const start = content.indexOf(MISSING_ASK)

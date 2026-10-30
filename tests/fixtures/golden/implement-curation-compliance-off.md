@@ -53,9 +53,9 @@ When `EVIDENCE_POLICY` is `required`, record `TRACEABILITY: DEGRADED (compliance
 **Plan Document Handling** (when `COMMAND_INPUT` is a path ending in `.md`):
 1. Read the plan document. From its YAML frontmatter, take `execution-strategy` and `issue`.
 2. If the frontmatter `issue` is present and is not `pending`: forward it verbatim as the setup-task `ISSUE_INPUT` (`pending` means /plan's issue step degraded or was declined — treat it as absent)
-3. Use its Subtask Breakdown, Implementation Plan, Patterns to Follow and Acceptance Criteria as `EXECUTION_PLAN` for the Code agent phase.
+3. Extract from its body the Subtask Breakdown, Implementation Plan, Patterns to Follow and Acceptance Criteria as `EXECUTION_PLAN` for the Code agent phase. Captured values override defaults from Git agent where present.
 
-`PR_DESCRIPTION_GUIDANCE` is the full `## PR Description Guidance` section of the plan. With no plan, or no such section, it is `(none)`.
+`PR_DESCRIPTION_GUIDANCE` is the full `## PR Description Guidance` section of the plan document (an input path ending in `.md`). Any other input, empty input included, or a plan without that section, gives `(none)`.
 
 **Empty input.** When `COMMAND_INPUT` is empty — a plan handoff arrives this way, with the plan already in the conversation — there is no argument to name the branch from, and the Git agent sees none of this conversation. Write the description yourself: one line, taken from the plan's title or, with no plan, from the conversation. Send it as the setup-task `TASK_DESCRIPTION` below.
 
@@ -125,7 +125,7 @@ Check the section:
 node "$HOME/.devflow/scripts/verify-evidence.cjs" check tp "{worktree}/.devflow/docs/evidence-{branch_slug}.md"; echo "exit=$?"
 ```
 
-`exit=0` passes. Otherwise the script names the failing line and its code on stderr: rewrite the section once and check again. If it still fails, or there is no line to write, the test plan is **missing**: drop the `## Test Plan` section from the file.
+`exit=0` passes. On any other result, rewrite the section once — the script names the failing line and its code on stderr — and check again. Still failing, or no line to write, means the test plan is **missing**: drop the `## Test Plan` section from the file.
 
 **Missing test plan, only when `EVIDENCE_POLICY` is `required`:** when the check above leaves the test plan missing, ask with AskUserQuestion before any Code spawn — "No test plan could be written for this task. Record a self-attested exception, or stop?" — offering exactly these two options:
 - **Record an exception** — the user gives the reason as free text. Render it with the exception grammar above, as kind `test-plan`; when the rendered reason is empty, ask for it once more, and stop as below if it is empty again. Add the rendered line to the `## Evidence Exceptions` section of `EVIDENCE_FILE` — after any `ticket-link` line, creating the section when absent — and set `EVIDENCE_EXCEPTIONS` to that section.
@@ -134,7 +134,7 @@ node "$HOME/.devflow/scripts/verify-evidence.cjs" check tp "{worktree}/.devflow/
 When `EVIDENCE_POLICY` is `standard`, a missing test plan is never asked about: carry `Test plan: missing` to the Phase 12 report.
 
 **Test-plan outputs**, set once before any Code spawn:
-- `TEST_PLAN`: the TP lines of the `## Test Plan` section, or `(none)` when the test plan is missing.
+- `TEST_PLAN`: the TP lines of the evidence file's `## Test Plan` section, or `(none)` when the test plan is missing.
 - `EVIDENCE_FILE`: `{worktree}/.devflow/docs/evidence-{branch_slug}.md`, its `## Evidence Exceptions` section now a byte copy of `EVIDENCE_EXCEPTIONS` (absent when that is `(none)`).
 
 **Resolve the settings line** once per worktree root, reusing a line this run already resolved for the same root. `{root}` is the worktree the values are for — the repository root in a one-worktree run:
