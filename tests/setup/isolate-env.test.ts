@@ -21,7 +21,7 @@
  * the absolute managed-settings path a HOME sandbox cannot redirect.
  */
 
-import { describe, it, expect, beforeAll, afterAll, inject } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, inject, vi } from 'vitest';
 import { spawnSync } from 'child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'fs';
 import * as os from 'os';
@@ -628,9 +628,12 @@ function originFile(origin: string, cwd: string): string | undefined {
   return origin.startsWith('file:') ? canonical(path.resolve(cwd, origin.slice('file:'.length))) : undefined;
 }
 
-/** The origins that are not a file under the repository or the temp HOME, the only places a unit test git call may read settings from. */
-function foreignOrigins(origins: readonly string[], repo: string): string[] {
-  const roots = [canonical(repo), canonical(process.env.HOME ?? '')];
+/**
+ * The origins that are not a file under the repository or the temp HOME, the only places a unit test git call may read settings from.
+ * `home` is the worker's temp HOME unless a spawn runs under its own.
+ */
+function foreignOrigins(origins: readonly string[], repo: string, home: string = process.env.HOME ?? ''): string[] {
+  const roots = [canonical(repo), canonical(home)];
   return origins.filter(origin => {
     const file = originFile(origin, repo);
     return file === undefined || !roots.some(root => isUnder(file, root));
@@ -700,5 +703,67 @@ describe('git settings isolation: RED PROBES, the collectors report a leak', () 
     const folder = gitFolderOf(repo, probeEnv({ GIT_DIR: path.join(other, '.git') }));
     expect(isUnder(folder, canonical(repo))).toBe(false);
     expect(folder).toBe(canonical(path.join(other, '.git')));
+  });
+});
+
+describe('git settings isolation: sandboxEnv', () => {
+  /** A temp HOME with a global config of its own: the one file besides the repository that a sandboxed git call may read. */
+  function sandboxHome(): string {
+    const home = tempDir('df-git-iso-sandbox-home-');
+    writeFileSync(path.join(home, '.gitconfig'), '[devflow]\n\tcanary = 1\n');
+    return home;
+  }
+
+  /** A system config in a folder of its own. Git reads it as the system config when GIT_CONFIG_SYSTEM names it and GIT_CONFIG_NOSYSTEM is off. */
+  function decoySystemConfig(): string {
+    const file = path.join(tempDir('df-git-iso-system-'), 'gitconfig');
+    writeFileSync(file, '[devflow]\n\tcanary = 1\n');
+    return file;
+  }
+
+  /** Every file the settings come from, as absolute paths. */
+  function originFiles(origins: readonly string[], repo: string): string[] {
+    return origins.flatMap(origin => originFile(origin, repo) ?? []);
+  }
+
+  it('reads settings only from its temp HOME and the repository the test made', () => {
+    const home = sandboxHome();
+    const repo = freshRepo();
+    const origins = settingOrigins(repo, sandboxEnv(home));
+    // Non-vacuity: both files the call may read were read, so the check ran over real entries.
+    expect(originFiles(origins, repo)).toEqual(
+      expect.arrayContaining([canonical(path.join(home, '.gitconfig')), canonical(path.join(repo, '.git', 'config'))]),
+    );
+    expect(foreignOrigins(origins, repo, home)).toEqual([]);
+  });
+
+  it('does not read a system config, which git is told to find where the machine does not keep it', () => {
+    const home = sandboxHome();
+    const repo = freshRepo();
+    const decoy = decoySystemConfig();
+    const origins = settingOrigins(repo, sandboxEnv(home, { GIT_CONFIG_SYSTEM: decoy }));
+    expect(originFiles(origins, repo)).not.toContain(canonical(decoy));
+    expect(foreignOrigins(origins, repo, home)).toEqual([]);
+  });
+
+  it('inherits no git variable and no XDG_CONFIG_HOME from the parent', () => {
+    try {
+      for (const key of ['GIT_DIR', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM', 'GIT_CONFIG_COUNT', 'XDG_CONFIG_HOME']) {
+        vi.stubEnv(key, `/canary/${key}`);
+      }
+      // Non-vacuity: the parent holds every leak key the collector looks for.
+      expect(leakedGitKeys(process.env)).toEqual(['GIT_CONFIG_COUNT', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM', 'GIT_DIR', 'XDG_CONFIG_HOME']);
+      expect(leakedGitKeys(sandboxEnv(sandboxHome()))).toEqual([]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('RED PROBE: a caller that turns the system config back on has it read, and the collector reports it', () => {
+    const home = sandboxHome();
+    const repo = freshRepo();
+    const decoy = decoySystemConfig();
+    const origins = settingOrigins(repo, sandboxEnv(home, { GIT_CONFIG_SYSTEM: decoy, GIT_CONFIG_NOSYSTEM: '0' }));
+    expect(originFiles(foreignOrigins(origins, repo, home), repo)).toContain(canonical(decoy));
   });
 });
