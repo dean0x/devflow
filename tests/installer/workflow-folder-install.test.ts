@@ -666,6 +666,17 @@ describe('the folder install under a failed swap, a hostile name and a stale tre
       expect(result.reason).toBeTruthy();
       expect(await fs.readdir(claudeDir)).toEqual([]);
     });
+
+    it.each(['../escape.md', 'references/../../escape.md', '/abs/escape.md', ''])(
+      'installWorkflowFolder refuses the file name %j that leaves the folder, and writes nothing',
+      async file => {
+        const files = [...(await builtFiles(ON)), { file, bytes: Buffer.from('x\n') }];
+        const result = await installWorkflowFolder({ claudeDir, name: NAME, files, links: { refusedFolders: [] } });
+        expect(result.outcome).toBe('failed');
+        expect(result.reason).toContain('leaves the folder');
+        expect(await fs.readdir(claudeDir), 'nothing was staged or created').toEqual([]);
+      },
+    );
   });
 
   describe('the staging folder (S1)', () => {

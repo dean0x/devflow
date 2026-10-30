@@ -229,6 +229,10 @@ export async function installWorkflowFolder(opts: InstallWorkflowFolderOptions):
   }
   const skillsDir = path.join(claudeDir, 'skills');
   const target = path.join(skillsDir, prefixSkillName(name));
+  const escaping = files.find(({ file }) => !isContainedIn(target, file));
+  if (escaping !== undefined) {
+    return { name, outcome: 'failed', reason: `workflow folder '${name}' names the file '${escaping.file}', which leaves the folder` };
+  }
   if (await refuseUnrealFolder(links, skillsDir)) return { name, outcome: 'refused' };
   if (await refuseUnrealFolder(links, target)) return { name, outcome: 'refused' };
 
