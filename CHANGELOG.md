@@ -33,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - A file that you keep in `commands/devflow/`, `agents/devflow/`, `rules/devflow/`, a `skills/devflow:*` folder or its `references/` folders is now moved to `~/.devflow/install-backups/<UTC stamp>-<8 hex>/`, and the output names it. Before, these commands deleted it. This holds for a full install, for a partial install (`--plugin`) and for the three toggles.
   - A file that cannot move stays in place with its folder, and the output names it.
 
+---
+
 ## [3.10.0] - 2026-10-30
 
 ### Upgrade notes — Shadowed rules and skills
