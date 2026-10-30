@@ -45,6 +45,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The Quality Gates of the testing skill have a new item: each new assertion would fail, not error, with the change reverted. The RED run counts; else a bad input or a temporary, uncommitted revert of your own edit shows it, never a stash. Three items that repeated other parts of the skill are cut, and a repeated parenthetical is cut from the flaky-pattern item. The skill is 25 bytes smaller, so the Code and Fix preload totals fall by 25 bytes each (Code 25,514 to 25,489, Fix 14,875 to 14,850). The quality rule is not in the preload and loads in every session: it grows by 326 bytes.
   - A guard pins each new line once, with its limits, and pins a byte ceiling for the two bullets.
 
+- **The `/implement` command prompt is about 12 % smaller** ([#675](https://github.com/dean0x/devflow/issues/675)).
+  - With curation and compliance on, the compiled command falls from 49,275 to 43,482 bytes. The other three builds fall by about the same share.
+  - No phase, gate, halt or output contract changes.
+  - Phases 4 and 5 now stop when an agent returns a missing status or a status that no branch routes.
+  - The command resolves the agent-references folder once. It prints the folder again after a compaction.
+  - The settings script and the evidence-policy script print their own fail-closed line on every error exit.
+  - The Architecture section of the prompt is removed.
+  - Two lines now state their rules in full. Phase 6 starts after ALIGNED, and also after the one alignment fix of the single-pass level. Phase 11 is skipped only when an earlier phase stopped the run.
+
 ### Fixed
 
 - **A partial install no longer writes through a linked devflow folder** ([#648](https://github.com/dean0x/devflow/issues/648)).

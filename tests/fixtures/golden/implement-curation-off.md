@@ -11,7 +11,7 @@ Orchestrate a single task by spawning agents.
 $ARGUMENTS
 </command-input>
 
-`COMMAND_INPUT` is the text above: a plan document path (an existing `.md` file), an issue reference such as `#42`, a task description, or empty (use the conversation).
+`COMMAND_INPUT` is the text above: a plan document path (an existing `.md` file), an issue reference, a task description, or empty (use the conversation).
 
 **Issue-reference grammar.** Scan `COMMAND_INPUT` for candidate issue references: a `#`-prefixed token or a bare digit run. Collect them in source order as `ISSUE_REFS`, and forward the list to the Git agent verbatim. Do not render, normalise, pad, strip or drop a token. Under `github`, a token that matches `^#?[1-9][0-9]{0,8}$` is a reference, and the Git agent renders it as `#{n}`.
 
@@ -54,7 +54,7 @@ Set `EVIDENCE_POLICY`, `ISSUE_REQUIRED`, `APPLY_CONVENTIONS` and `REQUIRE_NON_AU
 **Plan Document Handling** (when `COMMAND_INPUT` is a path ending in `.md`):
 1. Read the plan document. From its YAML frontmatter, take `execution-strategy` and `issue`.
 2. If the frontmatter `issue` is present and is not `pending`: forward it verbatim as the setup-task `ISSUE_INPUT` (`pending` means /plan's issue step degraded or was declined — treat it as absent)
-3. Extract from its body the Subtask Breakdown, Implementation Plan, Patterns to Follow and Acceptance Criteria as `EXECUTION_PLAN` for the Code agent phase. Captured values override defaults from Git agent where present.
+3. Extract from its body the Subtask Breakdown, Implementation Plan, Patterns to Follow and Acceptance Criteria as `EXECUTION_PLAN`. Captured values override defaults from Git agent where present.
 
 `PR_DESCRIPTION_GUIDANCE` is the full `## PR Description Guidance` section of the plan document. Any other input, empty input included, or a plan without that section, gives `(none)`.
 
@@ -356,7 +356,7 @@ Any other or missing Status: report the status or "none" and its cause, then hal
 
 Alignment-fix commits get no self-review: Phase 6 Validate and `/code-review` check them.
 
-After Evaluate agent passes, spawn Validate agent:
+After ALIGNED or a single-pass fix completes, spawn Validate agent:
 
 ```
 Agent(subagent_type="Validate"):
@@ -517,7 +517,7 @@ git push origin HEAD; echo "exit=$?"
 **Produces:** EVIDENCE_RESULT
 **Requires:** PR_NUMBER, EVIDENCE_FILE, REVIEW_PUBLICATION
 
-Run once, after Phase 10, under every strategy. Skip it only when Phase 9 stopped the run. A `ci` TP reads `INDETERMINATE` only when the CI gate could not tell or did not run.
+Run once, after Phase 10, under every strategy. Skip it only when an earlier phase stopped the run. A `ci` TP reads `INDETERMINATE` only when the CI gate could not tell or did not run.
 
 **Push first.** A claim whose SHA is not in the PR reads `UNVERIFIED`, so push the branch once before the script — never force, and no retry:
 
