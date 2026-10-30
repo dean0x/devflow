@@ -24,6 +24,10 @@
  *   - the absence probe feeds a build that holds an item to the collector for a build that has none.
  *
  * Rows 17 to 19 of the table need the skill folder and are not in this file.
+ *
+ * A second claim, at the end of the file: the independence criteria of PARALLEL_CODE_AGENTS sit in the PARALLEL
+ * block, never in the strategy table row. A plan whose frontmatter names the strategy skips the table, so a
+ * criterion that lives only in the row is no gate for that plan.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -368,5 +372,96 @@ describe('the never-cut items of /implement are in every compiled build, under t
       expect(rows.length, `${key} has an absent set`).toBeGreaterThan(0)
       expect(collectAbsenceDefects(on.file, text, rows)).toEqual(rows.map(r => `${where(on.file, r)}: anchor present in a build that has no such item`))
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The PARALLEL gate
+// ---------------------------------------------------------------------------
+
+/**
+ * The independence criteria of PARALLEL_CODE_AGENTS. All of them must hold before a run splits into parallel Code
+ * agents. The strategy table applies only when the plan frontmatter has no `execution-strategy`; a plan that names
+ * PARALLEL_CODE_AGENTS skips the table. So the criteria sit in the PARALLEL block, which both paths reach, and
+ * never in the table row. The patterns pin the contract (which criterion), not the wording around it.
+ */
+const INDEPENDENCE_CRITERIA: ReadonlyArray<{ readonly name: string; readonly pattern: RegExp }> = [
+  { name: 'no shared contract', pattern: /no shared contracts\b/ },
+  { name: 'different files or modules with no imports', pattern: /different files(?: or |\/)modules with no imports/ },
+]
+
+/**
+ * Named collector: how a compiled command differs from "the independence criteria sit in the PARALLEL block". The
+ * block opens at the line that starts `**PARALLEL_CODE_AGENTS**:` and ends at the next heading line. The strategy
+ * table lies before the block, so text in a table row is outside it.
+ */
+export function collectParallelGateDefects(file: string, text: string): string[] {
+  const lines = text.split('\n')
+  const opens = lines.flatMap((line, i) => (line.startsWith('**PARALLEL_CODE_AGENTS**:') ? [i] : []))
+  if (opens.length !== 1) return [`${file}: ${opens.length} PARALLEL_CODE_AGENTS blocks, expected 1`]
+  const rest = lines.slice(opens[0] + 1)
+  const end = rest.findIndex(line => /^#{1,6} \S/.test(line))
+  const block = (end === -1 ? rest : rest.slice(0, end)).join('\n')
+  return INDEPENDENCE_CRITERIA.filter(c => !c.pattern.test(block)).map(c => `${file}: the PARALLEL_CODE_AGENTS block does not state "${c.name}"`)
+}
+
+/** A command in miniature: the strategy table, the PARALLEL block, then the next phase. The criteria go where the caller puts them. */
+function miniCommand(tableRow: string, blockTail: string, nextPhase: string): string {
+  return [
+    '| Strategy | When |',
+    '|----------|------|',
+    `| **PARALLEL_CODE_AGENTS** | ${tableRow} |`,
+    '',
+    '**PARALLEL_CODE_AGENTS**: spawn all Code agents in one message, one subtask each.',
+    '',
+    '```',
+    'Agent(subagent_type="Code"):',
+    '```',
+    '',
+    blockTail,
+    '',
+    '### Phase 3: Polish',
+    '',
+    nextPhase,
+  ].join('\n')
+}
+
+const CRITERIA_TEXT = 'no shared contracts or interfaces between subtasks; different files/modules with no imports between them'
+
+describe('the independence criteria of PARALLEL_CODE_AGENTS sit in the PARALLEL block, so a plan that names the strategy keeps the gate', () => {
+  for (const { key, file } of BUILDS) {
+    it(`${key} (${file}): the PARALLEL block states every criterion`, () => {
+      expect(collectParallelGateDefects(file, readBuild(file))).toEqual([])
+    })
+
+    it(`${key} (${file}): known-bad probe: a lost criterion is reported as that criterion, and no other`, () => {
+      const text = readBuild(file)
+      for (const criterion of INDEPENDENCE_CRITERIA) {
+        const broken = text.replace(criterion.pattern, '')
+        expect(broken, `the seed for "${criterion.name}" must land`).not.toBe(text)
+        expect(collectParallelGateDefects(file, broken)).toEqual([`${file}: the PARALLEL_CODE_AGENTS block does not state "${criterion.name}"`])
+      }
+    })
+  }
+
+  it('known-bad probe: criteria that sit only in the strategy table row are reported, both of them', () => {
+    const moved = miniCommand(`All must hold: ${CRITERIA_TEXT} (rare)`, 'Spawn once the criteria hold.', 'Polish.')
+    expect(collectParallelGateDefects('mini', moved)).toEqual([
+      'mini: the PARALLEL_CODE_AGENTS block does not state "no shared contract"',
+      'mini: the PARALLEL_CODE_AGENTS block does not state "different files or modules with no imports"',
+    ])
+  })
+
+  it('known-bad probe: criteria that sit under the next heading are reported, and criteria in the block are not', () => {
+    const late = miniCommand('True artifact independence (rare)', 'Spawn once the criteria hold.', CRITERIA_TEXT)
+    expect(collectParallelGateDefects('mini', late)).toHaveLength(INDEPENDENCE_CRITERIA.length)
+    const inBlock = miniCommand('True artifact independence (rare)', `**Independence criteria**: ${CRITERIA_TEXT}.`, 'Polish.')
+    expect(collectParallelGateDefects('mini', inBlock)).toEqual([])
+  })
+
+  it('known-bad probe: a command with no PARALLEL block, or two, is reported by count', () => {
+    expect(collectParallelGateDefects('mini', 'no block here')).toEqual(['mini: 0 PARALLEL_CODE_AGENTS blocks, expected 1'])
+    const one = miniCommand('True artifact independence (rare)', CRITERIA_TEXT, 'Polish.')
+    expect(collectParallelGateDefects('mini', `${one}\n${one}`)).toEqual(['mini: 2 PARALLEL_CODE_AGENTS blocks, expected 1'])
   })
 })

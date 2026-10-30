@@ -17,10 +17,10 @@ and so does `knowledge_writeback()`, which a host with no load step uses. A host
 `knowledge_load()` earlier in the same command calls `knowledge_writeback_after_load()`, whose
 Step 1 and Step 3 take the `{worktree}` that the load step resolved.
 
-A host that resolves `{worktree}` earlier with `docs_root()` calls `knowledge_load_after_root()`,
-which carries the load steps without a second root block. It then calls
-`knowledge_writeback_after_load()` too, and the `{worktree}` that the docs-root step resolved
-serves the write-back.
+A host that resolves `{worktree}` earlier with `docs_root()` can call `knowledge_load_after_root()`
+(implement does), which carries the load steps without a second root block. A host that calls it
+then calls `knowledge_writeback_after_load()` too, and the `{worktree}` that the docs-root step
+resolved serves the write-back.
 
 @define knowledge_root():
 Resolve `{worktree}` as the checkout's toplevel, because feature knowledge bases are committed with the branch (D-PROMPT-ROOT): from the start directory — `WORKTREE_PATH` if provided, otherwise cwd (`devflow:worktree-support`) — run

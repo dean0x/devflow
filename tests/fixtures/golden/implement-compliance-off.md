@@ -234,7 +234,9 @@ Setup context is the plan document, issue body or conversation.
 |----------|------|
 | **SINGLE_CODE_AGENT** | Default. Coherent A→Z implementation |
 | **SEQUENTIAL_CODE_AGENTS** | The plan writes >= 10 files or has >= 7 steps |
-| **PARALLEL_CODE_AGENTS** | All must hold: subtasks share no contract, interface or integration point, and touch different files or modules with no imports between them (rare) |
+| **PARALLEL_CODE_AGENTS** | True artifact independence (rare) |
+
+---
 
 **SINGLE_CODE_AGENT**:
 
@@ -312,6 +314,8 @@ FEATURE_KNOWLEDGE: {feature_knowledge}
 DECISIONS_CONTEXT: {decisions_context}
 {COMPLIANCE_DIRECTIVE}"
 ```
+
+**Independence criteria** (all must be true for PARALLEL_CODE_AGENTS): no shared contracts, interfaces or integration points between subtasks; different files/modules with no imports between them.
 
 ### Phase 3: Polish
 
