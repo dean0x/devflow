@@ -17,7 +17,7 @@ import { generatedReferenceManifest, installedReferenceManifest, PR_HOST_DESTINA
 import { sweepOrphanedReferences, MAX_REFERENCE_SWEEP_DEPTH } from '../../core/reference-sweep.js';
 import { complianceOffCopyExclusions, removeComplianceOffFiles } from './compliance-off-files.js';
 import { clearLinkForWrite, directoryState, refuseUnrealFolder, removeReportingLink, unlinkLinkAt, type LinkReport } from './linked-folder.js';
-import { installWorkflowFolder, readWorkflowFolder, type WorkflowFolderFile } from './workflow-folder-install.js';
+import { installWorkflowFolder, readWorkflowFolder, type WorkflowFolderFile, type WorkflowFolderRead } from './workflow-folder-install.js';
 import { TRACKER_AGENT_NAME } from './tracker-install.js';
 import { isTrackerStampedAgent } from './tracker-servers.js';
 import { stampAgentTools } from '../../core/agent-frontmatter.js';
@@ -2440,12 +2440,19 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   const folderWorkflows = workflowFolderNames(folderRegistry);
   const folderSwitches = { curation, compliance };
   const folderFiles = new Map<string, readonly WorkflowFolderFile[]>();
+  /** The files of one registered folder, read once. A failed read is a reason and never a throw. */
+  const readFolder = async (folder: WorkflowFolder): Promise<WorkflowFolderRead> => {
+    const cached = folderFiles.get(folder.name);
+    if (cached !== undefined) return { ok: true, files: cached };
+    const read = await readWorkflowFolder(folder, folderSwitches, options.workflowFoldersRoot ?? packageRoot);
+    if (read.ok) folderFiles.set(folder.name, read.files);
+    return read;
+  };
   const readFolders = async (names: ReadonlySet<string>): Promise<void> => {
     for (const folder of folderRegistry) {
-      if (!names.has(folder.name) || folderFiles.has(folder.name)) continue;
-      const read = await readWorkflowFolder(folder, folderSwitches, options.workflowFoldersRoot ?? packageRoot);
+      if (!names.has(folder.name)) continue;
+      const read = await readFolder(folder);
       if (!read.ok) throw new Error(read.reason);
-      folderFiles.set(folder.name, read.files);
     }
   };
 
@@ -2811,20 +2818,20 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // D-WORKFLOW-FOLDER-INSTALL: the workflow skill folders of the plugins whose commands this run
   // writes, each from the exact-key tree read above. Before the scripts step, so the hand-off
   // sentinel that step installs never stands without the folder it names. A widened run may add a
-  // folder the early read did not cover; its read failure is a warning, since the pre-clean has run.
+  // folder the early read did not cover. Each folder is read, installed and reported on its own, and
+  // a read failure is a warning, since the pre-clean has run: one broken folder never hides the next.
   const foldersToInstall = selectedWorkflowFolders(commandAgentPlugins, folderWorkflows);
   if (foldersToInstall.size > 0) spinner.message('Installing workflow skills...');
-  try {
-    await readFolders(foldersToInstall);
-  } catch (err) {
-    warn(`workflow skill folder: ${err instanceof Error ? err.message : String(err)}`);
-  }
-  for (const name of foldersToInstall) {
-    const files = folderFiles.get(name);
-    if (files === undefined) continue;
-    const installed = await installWorkflowFolder({ claudeDir, name, files, links: report });
+  for (const folder of folderRegistry) {
+    if (!foldersToInstall.has(folder.name)) continue;
+    const read = await readFolder(folder);
+    if (!read.ok) {
+      warn(`workflow skill folder: ${read.reason}`);
+      continue;
+    }
+    const installed = await installWorkflowFolder({ claudeDir, name: folder.name, files: read.files, links: report });
     if (installed.outcome === 'failed') {
-      warn(`workflow skill folder: could not install ${prefixSkillName(name)} (${installed.reason ?? 'unknown error'})`);
+      warn(`workflow skill folder: could not install ${prefixSkillName(folder.name)} (${installed.reason ?? 'unknown error'})`);
     }
   }
 

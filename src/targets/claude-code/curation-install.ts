@@ -844,10 +844,14 @@ async function convergeWorkflowFolders(opts: {
 /**
  * The posting answer of the workflow-folder converge. Compliance on is clear. With compliance off, a
  * folder that was not converged still holds the text of the previous key, which may post, so it is named.
+ * A converge that did not finish and names no folder (it threw) cannot say which folders post, so it is
+ * `unknown` and never `clear`.
  */
-function workflowFoldersPosting(folders: ConvergeWorkflowFoldersResult, compliance: boolean): PostingConverge {
-  if (compliance || folders.stalled.length === 0) return POSTING_CLEAR;
-  return { kind: 'left', files: folders.stalled };
+export function workflowFoldersPosting(folders: ConvergeWorkflowFoldersResult, compliance: boolean): PostingConverge {
+  if (compliance) return POSTING_CLEAR;
+  if (folders.stalled.length > 0) return { kind: 'left', files: folders.stalled };
+  if (!folders.converged) return { kind: 'unknown', reason: `the workflow folders: ${folders.failures.join('; ')}` };
+  return POSTING_CLEAR;
 }
 
 /**
