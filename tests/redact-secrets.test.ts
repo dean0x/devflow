@@ -471,12 +471,15 @@ describe('secret-assignment rule', () => {
     const line = '  ' + 'export '.repeat(7_000) + 'password = ';
     expect(line.length, 'corpus is empty — guard is vacuous').toBeGreaterThan(49_000);
 
+    // The work is timed in this process, as in the BEGIN…no-END test: the child run would
+    // add the node start to the 2 s budget, and it only has to exit 0 on the same input.
     const start = Date.now();
-    const r = runWithContent(line, tmpDir, 'assign-adversarial.txt');
+    SCRUBBER.scrub(line);
     const elapsed = Date.now() - start;
-
-    expect(r.exitCode).toBe(0);
     expect(elapsed).toBeLessThan(2000);
+
+    const r = runWithContent(line, tmpDir, 'assign-adversarial.txt');
+    expect(r.exitCode).toBe(0);
   });
 });
 

@@ -10,6 +10,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { TRACKER_ATTEMPTS_MAX } from '../src/core/tracker.js';
 import { HOOK_RUN_ALLOWANCE_MS, HOOKS_DIR, NODE_EXEC_STALL_MS, runHook } from './shell-hooks-helpers.js';
+import { useWarmFakeExecutables } from './helpers/warm-fake-executable.js';
 
 // =============================================================================
 // session-start-context Section 3: Tracker setup directive
@@ -68,6 +69,9 @@ describe('session-start-context: tracker setup directive (Section 3)', { timeout
    * not a cap.
    */
   const TRACKER_SECTION_MAX_CHARS = 800;
+
+  /** The recording shims and the resolver stub run through one warm dispatcher, never a new executable. */
+  const writeFakeExecutable = useWarmFakeExecutables();
 
   let tmpDir: string;
   let homeDir: string;
@@ -649,12 +653,10 @@ describe('session-start-context: tracker setup directive (Section 3)', { timeout
           .map(p => path.join(p, tool))
           .find(p => fs.existsSync(p));
       if (!real) continue;
-      const wrapper = path.join(dir, tool);
-      fs.writeFileSync(
-        wrapper,
+      writeFakeExecutable(
+        path.join(dir, tool),
         `#!/bin/bash\nprintf '%s\\n' ${tool} >> ${JSON.stringify(logPath)}\nexec ${JSON.stringify(real)} "$@"\n`,
       );
-      fs.chmodSync(wrapper, 0o755);
       shimmed.push(tool);
     }
     return { dir, logPath, shimmed };
@@ -906,8 +908,7 @@ describe('session-start-context: tracker setup directive (Section 3)', { timeout
    */
   function buildResolverStub(base: string, line: string, exit: number): string {
     const dir = fs.mkdtempSync(path.join(base, 'resolver-stub-'));
-    const wrapper = path.join(dir, 'node');
-    fs.writeFileSync(wrapper, [
+    writeFakeExecutable(path.join(dir, 'node'), [
       '#!/bin/bash',
       'case "$1" in',
       `  */resolve-settings.cjs) printf '%s\\n' ${JSON.stringify(line)}; exit ${exit} ;;`,
@@ -915,7 +916,6 @@ describe('session-start-context: tracker setup directive (Section 3)', { timeout
       `exec ${JSON.stringify(process.execPath)} "$@"`,
       '',
     ].join('\n'));
-    fs.chmodSync(wrapper, 0o755);
     return dir;
   }
 
@@ -958,12 +958,10 @@ describe('session-start-context: tracker setup directive (Section 3)', { timeout
           .map(p => path.join(p, tool))
           .find(p => fs.existsSync(p));
       if (!real) continue;
-      const wrapper = path.join(shimDir, tool);
-      fs.writeFileSync(
-        wrapper,
+      writeFakeExecutable(
+        path.join(shimDir, tool),
         `#!/bin/bash\nprintf '%s\\n' ${tool} >> ${JSON.stringify(logPath)}\nexec ${JSON.stringify(real)} "$@"\n`,
       );
-      fs.chmodSync(wrapper, 0o755);
       shimmed.push(tool);
     }
     expect(shimmed, 'the shim must observe git and the realpath tools').toEqual(
