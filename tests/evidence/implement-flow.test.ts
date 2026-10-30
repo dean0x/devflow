@@ -1676,7 +1676,7 @@ describe('#675: the Phase 11 skip rule covers every stop that skips Phase 11, in
  * Named collector (#675): the Phase 6 lead-in names both paths into Phase 6 and the status that gates the second one.
  * A single-pass Fix that reports FAILED or BLOCKED reports the misalignments to the user and starts no Phase 6, so a
  * lead-in that says only that the Fix "completes" reads as "returns" and lets a reader start Phase 6 after a stop.
- * The lead-in must say ALIGNED and must say that the Fix reports COMPLETE.
+ * The lead-in must say ALIGNED as a whole word (MISALIGNED is the opposite status) and must say that the Fix reports COMPLETE.
  */
 function collectPhase6LeadDefects(md: string): string[] {
   const six = phaseSection(md, H.p6)
@@ -1684,7 +1684,7 @@ function collectPhase6LeadDefects(md: string): string[] {
   const leads = six.split('\n').filter(l => l.endsWith('spawn Validate agent:'))
   if (leads.length !== 1) return [`Phase 6 holds ${leads.length} Validate spawn leads, expected 1`]
   const out: string[] = []
-  if (!leads[0].includes('ALIGNED')) out.push('the Phase 6 lead-in does not name ALIGNED')
+  if (!/\bALIGNED\b/.test(leads[0])) out.push('the Phase 6 lead-in does not name ALIGNED')
   if (!leads[0].includes('a single-pass Fix that reports COMPLETE')) out.push('the Phase 6 lead-in does not name the COMPLETE status of the single-pass Fix')
   return out
 }
@@ -1696,13 +1696,14 @@ describe('#675: the Phase 6 lead-in names the COMPLETE status of the single-pass
     expect(collectPhase6LeadDefects(md), key).toEqual([])
   })
 
-  it.each(IMPLEMENT_KEYS)('%s: known-bad probes: the word completes, a lost status, a lost ALIGNED, no lead-in, two leads and no section are each reported', key => {
+  it.each(IMPLEMENT_KEYS)('%s: known-bad probes: the word completes, a lost status, a lost ALIGNED, MISALIGNED in its place, no lead-in, two leads and no section are each reported', key => {
     const md = implementMdOfKey(key)
     const noStatus = 'the Phase 6 lead-in does not name the COMPLETE status of the single-pass Fix'
     expect(collectPhase6LeadDefects(seedOnce(md, PHASE_6_LEAD, 'After ALIGNED or a single-pass fix completes, spawn Validate agent:')), 'the lead-in before the fix').toEqual([noStatus])
     expect(collectPhase6LeadDefects(seedOnce(md, PHASE_6_LEAD, 'After ALIGNED, or a single-pass Fix that returns, spawn Validate agent:'))).toEqual([noStatus])
     expect(collectPhase6LeadDefects(seedOnce(md, PHASE_6_LEAD, 'After a single-pass Fix that reports COMPLETE, spawn Validate agent:'))).toEqual(['the Phase 6 lead-in does not name ALIGNED'])
     expect(collectPhase6LeadDefects(seedOnce(md, PHASE_6_LEAD, 'After the gates, spawn Validate agent:'))).toEqual(['the Phase 6 lead-in does not name ALIGNED', noStatus])
+    expect(collectPhase6LeadDefects(seedOnce(md, PHASE_6_LEAD, 'After MISALIGNED, or a single-pass Fix that reports COMPLETE, spawn Validate agent:')), 'MISALIGNED holds the letters of ALIGNED but is not the status').toEqual(['the Phase 6 lead-in does not name ALIGNED'])
     expect(collectPhase6LeadDefects(seedOnce(md, `${PHASE_6_LEAD}\n`, ''))).toEqual(['Phase 6 holds 0 Validate spawn leads, expected 1'])
     expect(collectPhase6LeadDefects(seedOnce(md, PHASE_6_LEAD, `${PHASE_6_LEAD}\n${PHASE_6_LEAD}`))).toEqual(['Phase 6 holds 2 Validate spawn leads, expected 1'])
     expect(collectPhase6LeadDefects(seedOnce(md, H.p6, '### Phase 6 gone'))).toEqual([`${H.p6}: the section is absent`])
@@ -2789,16 +2790,40 @@ describe('#669 and #648: the re-validation pointers stay valid in the compliance
 describe('the compliance-on Phase 1 names the evidence script as the owner of the publication value', () => {
   const OWNER_SENTENCE =
     'Phase 11 passes the resolved value to the evidence script (`publish`), which decides what each value means for the evidence comment.'
+  const COMPLIANCE_ON_BUILDS = [['curation on', implementMd], ['curation off', implementMdOff]] as const
+
+  /** Named collector: the owner sentence sits in Phase 1 exactly once, whole, and has no copy in another phase. */
+  function collectOwnerSentenceDefects(md: string): string[] {
+    const one = phaseSection(md, H.p1)
+    if (one === null) return [`${H.p1}: the section is absent`]
+    const out: string[] = []
+    const inOne = countOf(one, OWNER_SENTENCE)
+    if (inOne !== 1) out.push(`Phase 1 holds the owner sentence ${inOne} times, expected 1`)
+    const elsewhere = countOf(md, OWNER_SENTENCE) - inOne
+    if (elsewhere !== 0) out.push(`the build holds the owner sentence ${elsewhere} times outside Phase 1, expected 0`)
+    return out
+  }
 
   it('both compliance-on builds say that the evidence script, not the publication gate, decides what each value means', () => {
-    for (const [label, md] of [['curation on', implementMd()], ['curation off', implementMdOff()]] as const) {
-      expect(md, `${label}: the sentence that names the owner of the value mapping is missing`).toContain(OWNER_SENTENCE)
+    for (const [label, build] of COMPLIANCE_ON_BUILDS) {
+      expect(collectOwnerSentenceDefects(build()), label).toEqual([])
     }
   })
 
-  it('known-bad probe: the sentence without its clause is not the sentence', () => {
+  it('known-bad probes: a lost clause, a removed sentence, a doubled sentence, a moved sentence and a copy in another phase are each reported', () => {
     const shortened = OWNER_SENTENCE.replace(', which decides what each value means for the evidence comment', '')
     expect(shortened).not.toBe(OWNER_SENTENCE)
-    expect(implementMd(), 'the shortened sentence is present in the compliance-on build').not.toContain(`${shortened} From the same line`)
+    for (const [label, build] of COMPLIANCE_ON_BUILDS) {
+      const md = build()
+      expect(collectOwnerSentenceDefects(seedOnce(md, OWNER_SENTENCE, shortened)), `${label}: the clause is lost`).toEqual(['Phase 1 holds the owner sentence 0 times, expected 1'])
+      expect(collectOwnerSentenceDefects(seedOnce(md, `${OWNER_SENTENCE} `, '')), `${label}: the sentence is removed`).toEqual(['Phase 1 holds the owner sentence 0 times, expected 1'])
+      expect(collectOwnerSentenceDefects(seedOnce(md, OWNER_SENTENCE, `${OWNER_SENTENCE} ${OWNER_SENTENCE}`)), `${label}: the sentence is doubled`).toEqual(['Phase 1 holds the owner sentence 2 times, expected 1'])
+      expect(collectOwnerSentenceDefects(`${seedOnce(md, `${OWNER_SENTENCE} `, '')}\n${OWNER_SENTENCE}\n`), `${label}: the sentence is moved out of Phase 1`).toEqual([
+        'Phase 1 holds the owner sentence 0 times, expected 1',
+        'the build holds the owner sentence 1 times outside Phase 1, expected 0',
+      ])
+      expect(collectOwnerSentenceDefects(`${md}\n${OWNER_SENTENCE}\n`), `${label}: a copy sits in another phase`).toEqual(['the build holds the owner sentence 1 times outside Phase 1, expected 0'])
+      expect(collectOwnerSentenceDefects(seedOnce(md, H.p1, '### Phase 1 gone')), `${label}: no Phase 1 section`).toEqual([`${H.p1}: the section is absent`])
+    }
   })
 })

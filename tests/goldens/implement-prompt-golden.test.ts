@@ -7,7 +7,8 @@
  *
  * A golden mismatch means the source changed without the fixture, never the reverse.
  * The fixture is regenerated only by a change that moves the compiled prompt's bytes,
- * and always in its own fixture-only commit reviewed as a text diff.
+ * and it moves in the same commit as the prompt change that causes it, so that commit's
+ * diff shows the source change and its compiled effect together, reviewed as a text diff.
  * Never call test:golden:update in CI: a golden CI regenerates asserts nothing.
  *
  * Update ritual: npm run test:golden:update -- implement-prompt

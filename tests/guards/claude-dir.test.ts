@@ -90,6 +90,7 @@ import * as os from 'os'
 import * as path from 'path'
 
 import { MIN_COMPILED_PROMPTS, RETIRED_INLINE_EXPANSION, ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT, collectStaleOutputs, compactDirectiveFrom, compactDirectiveText, compiledPrompts, requireDistFile, requireDistFiles, resolveAgentSource, resolveAllAgents, resolveCurationOffSource, sectionBetween, walkFiles } from '../helpers.js'
+import { seedOnce } from './level-guard-helpers.js'
 import { DEVFLOW_PLUGINS, buildScopedSkillsMap, getAllAgentNames } from '../../src/core/plugins.js'
 import { installViaFileCopy } from '../../src/targets/claude-code/installer.js'
 import { getClaudeDirectory } from '../../src/targets/claude-code/claude-paths.js'
@@ -797,11 +798,8 @@ describe('no prompt reaches the Claude directory outside the CLAUDE_CONFIG_DIR r
 
   it('red probes: a binder that does not say to print the directory again when {ref_dir} is not in view is reported in /implement', () => {
     const implement = corpusFile('dist/commands/implement.md').content
-    const seed = (from: string, to: string): string => {
-      const next = implement.replace(from, () => to)
-      expect(next, `the seed ${JSON.stringify(from.slice(0, 40))} must change the text`).not.toBe(implement)
-      return next
-    }
+    // Each seed names text that the command holds once: "is not in view" and "print the directory again" also sit in the Gate level read, so a seed on them would reach the binder by position only.
+    const seed = (from: string, to: string): string => seedOnce(implement, from, to)
     const defects = (text: string): string[] => collectImplementDirReadDefects(text, IMPLEMENT_READS_COMPLIANCE_ON)
     const reprint = ' When `{ref_dir}` is not in view (for example after a compaction), print the directory again with the same line.'
     const lead = 'the paragraph with the sanctioned line does not'
@@ -810,8 +808,8 @@ describe('no prompt reaches the Claude directory outside the CLAUDE_CONFIG_DIR r
       `${lead} say to print the directory again`,
       `${lead} say to print it again with the same line`,
     ])
-    expect(defects(seed('is not in view', 'is in view'))).toEqual([`${lead} name the case that a re-print answers: ${IMPLEMENT_REF_DIR} is not in view`])
-    expect(defects(seed('print the directory again', 'print it'))).toEqual([`${lead} say to print the directory again`])
+    expect(defects(seed(`When \`${IMPLEMENT_REF_DIR}\` is not in view`, `When \`${IMPLEMENT_REF_DIR}\` is in view`))).toEqual([`${lead} name the case that a re-print answers: ${IMPLEMENT_REF_DIR} is not in view`])
+    expect(defects(seed('print the directory again with the same line', 'print it with the same line'))).toEqual([`${lead} say to print the directory again`])
     expect(defects(seed('with the same line', 'with a line of your own'))).toEqual([`${lead} say to print it again with the same line`])
     // The old wording read as one print for each step that reads a reference.
     expect(defects(seed('Print the config directory once, before the first reference Read', 'A step that reads one gets the config directory once per run'))).toEqual([
