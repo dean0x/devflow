@@ -386,6 +386,8 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
    - Loop back to Phase 5 (re-check alignment). The fix is not validated here: the Phase 6 run covers it.
 4. If `alignment_fix_count > 2`: Report misalignments to user for decision
 
+Any other or missing Status: report the status or "none" and its cause, then halt; never ALIGNED.
+
 ### Phase 6: Validate
 
 **Produces:** VALIDATION_RESULT, VALIDATED_HEAD
@@ -524,7 +526,7 @@ COMMIT_UNCOMMITTED: false
 Open the pull request for this branch and return the pre-flight summary."
 ```
 
-`COMMIT_UNCOMMITTED: false` keeps the Git agent from committing a stray file: each agent commits its own work. Capture the `- **PR**: #{number}` line of its `### Branch` as `PR_NUMBER`, and its `### Uncommitted files` list and `TRACEABILITY: DEGRADED ({reason})` lines for the Phase 12 report. If it returns `### Status: BLOCKED` or no PR number, report its reason and stop at the Phase 12 report; Phases 10 and 11 do not run.
+Capture the `- **PR**: #{number}` line of its `### Branch` as `PR_NUMBER`, and its `### Uncommitted files` list and `TRACEABILITY: DEGRADED ({reason})` lines for the Phase 12 report. If it returns `### Status: BLOCKED` or no PR number, report its reason and stop at the Phase 12 report; Phases 10 and 11 do not run.
 
 ### Phase 10: CI Status Gate
 
