@@ -116,12 +116,18 @@ export type TrackerMechanicsState =
  * every install carries them all (D-INSTALL-ALL-PROVIDERS) — rather than listing
  * the directory: the question a user asks `--status` is "can the agent load what
  * it is told to load?", and a stray file in the tree is not an answer to it.
+ *
+ * `compliance` is the machine's compliance switch, read from the install manifest by the
+ * caller and never from a repository file: a compliance-off machine installs the compliance-off
+ * manifest, which holds fewer references, so counting against the compliance-on one would read
+ * every such machine as damaged.
+ *
  * Never throws.
  */
-export async function readTrackerMechanics(claudeDir: string): Promise<TrackerMechanicsState> {
+export async function readTrackerMechanics(claudeDir: string, compliance: boolean): Promise<TrackerMechanicsState> {
   const root = path.join(claudeDir, 'skills', prefixSkillName(SKILL_REFS_SKILL_NAME), 'references');
   let present = 0;
-  for (const rel of installedReferenceManifest()) {
+  for (const rel of installedReferenceManifest({ compliance })) {
     try {
       await fs.access(path.join(root, ...rel.split('/')));
       present++;
@@ -463,7 +469,7 @@ export const trackerCommand = new Command('tracker')
       const selection = repoTrackerSelection(settingsModule, { dir: process.cwd() });
       const effective = selection?.provider ?? current.provider;
       const conventions = await readTrackerStatusConventions(devflowDir, effective);
-      const mechanics = await readTrackerMechanics(getClaudeDirectory());
+      const mechanics = await readTrackerMechanics(getClaudeDirectory(), manifest.features.compliance.enabled);
 
       // [D-F] Inspecting the status re-arms the attempt counters. --status is
       // the command a capped user reaches for to find out why nothing is being

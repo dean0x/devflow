@@ -23,6 +23,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 
 import { installRuleFile } from './installer.js';
+import { newLinkReport, refuseUnrealFolder, warnLinkReport } from './linked-folder.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -50,6 +51,10 @@ export interface ConvergeBehaviorRuleResult {
    * Converge is warn-not-throw, so this is how a caller learns of a partial failure.
    */
   converged: boolean;
+  /** The rule file, if it was a link, now a real file. What it pointed to was left as it was. */
+  replacedLinks: readonly string[];
+  /** `rules/devflow` or the rule file, if a link or not a folder stands there: nothing was written or removed. */
+  refusedFolders: readonly string[];
 }
 
 // ── Path helpers ───────────────────────────────────────────────────────────
@@ -78,6 +83,10 @@ async function pathExists(p: string): Promise<boolean> {
  *   enabled + !rulesEnabled  → rule file removed
  *   !enabled                 → rule file removed
  *
+ * `rules/devflow` that is a link, or not a folder, is refused: the rule is neither written nor
+ * removed there, and the folder is named in `refusedFolders` and in a warning. A rule file that is a
+ * link is replaced by a real file, or unlinked on removal, and never written through.
+ *
  * Never throws. A relative `claudeDir` is refused with a warning rather than resolved
  * against the working directory, because the removal arm deletes a path.
  */
@@ -86,41 +95,52 @@ export async function convergeBehaviorRule(
 ): Promise<ConvergeBehaviorRuleResult> {
   const { claudeDir, devflowDir, enabled, rulesEnabled, warn } = opts;
 
+  const links = newLinkReport();
+  const finish = (state: Pick<ConvergeBehaviorRuleResult, 'installed' | 'removed' | 'converged'>): ConvergeBehaviorRuleResult => {
+    warnLinkReport(links, warn);
+    return { ...state, replacedLinks: links.replacedLinks, refusedFolders: links.refusedFolders };
+  };
+
   if (!path.isAbsolute(claudeDir)) {
     warn(`behavior: claudeDir is not an absolute path ("${claudeDir}") — skipping convergence`);
-    return { installed: false, removed: false, converged: false };
+    return finish({ installed: false, removed: false, converged: false });
   }
 
   const target = behaviorRulePath(claudeDir);
 
+  // A link at the folder sends the write and the removal into another place, so the folder is proven first.
+  if (await refuseUnrealFolder(links, path.dirname(target))) {
+    return finish({ installed: await pathExists(target), removed: false, converged: false });
+  }
+
   if (enabled && rulesEnabled) {
     try {
       await fs.mkdir(path.dirname(target), { recursive: true });
-      const outcome = await installRuleFile(BEHAVIOR_RULE_NAME, devflowDir, path.dirname(target));
+      const outcome = await installRuleFile(BEHAVIOR_RULE_NAME, devflowDir, path.dirname(target), links);
       if (outcome === 'skipped') {
         warn('behavior: rule install failed — the file could not be copied');
-        return { installed: false, removed: false, converged: false };
+        return finish({ installed: false, removed: false, converged: false });
       }
       if (outcome === 'source-invalid-shadow:empty-shadow-file' || outcome === 'source-invalid-shadow:not-a-file') {
         warn("behavior: the shadow is invalid — Devflow's version was installed");
-        return { installed: true, removed: false, converged: false };
+        return finish({ installed: true, removed: false, converged: false });
       }
-      return { installed: true, removed: false, converged: true };
+      return finish({ installed: true, removed: false, converged: true });
     } catch (err) {
       warn(`behavior: rule install failed — ${String(err)}`);
-      return { installed: false, removed: false, converged: false };
+      return finish({ installed: false, removed: false, converged: false });
     }
   }
 
   // Off, or rules off: no rule. Probe first so the caller can report a removal;
   // absence is already the desired end state.
-  if (!(await pathExists(target))) return { installed: false, removed: false, converged: true };
+  if (!(await pathExists(target))) return finish({ installed: false, removed: false, converged: true });
   try {
     await fs.rm(target, { force: true });
-    return { installed: false, removed: true, converged: true };
+    return finish({ installed: false, removed: true, converged: true });
   } catch (err) {
     warn(`behavior: failed to remove rule — ${String(err)}`);
-    return { installed: true, removed: false, converged: false };
+    return finish({ installed: true, removed: false, converged: false });
   }
 }
 

@@ -36,13 +36,15 @@ import {
   type TrackerResult,
 } from '../src/core/tracker.js';
 import { installedReferenceManifest } from '../src/core/mds-variants.js';
-import { compiledSkillRefsDir } from '../src/core/assets.js';
+import { compiledComplianceOffSkillRefsDir, compiledSkillRefsDir } from '../src/core/assets.js';
 import { writeManifest, readManifest } from '../src/core/manifest.js';
 
 let claudeDir: string;
 let warnings: string[];
 
 const warn = (msg: string): void => { warnings.push(msg); };
+/** A converge that met no link: both lists are empty. */
+const NO_LINKS = { replacedLinks: [], refusedFolders: [] };
 const agentFile = (): string => path.join(claudeDir, 'agents', 'devflow', 'tracker.md');
 const refsTarget = (): string => path.join(claudeDir, 'skills', 'devflow:git', 'references');
 
@@ -70,7 +72,7 @@ afterEach(async () => {
 describe('convergeTrackerArtifacts: the Tracker agent file', () => {
   it('installs the agent — it takes no provider, because every machine needs it', async () => {
     const result = await convergeTrackerArtifacts({ claudeDir, warn });
-    expect(result).toEqual({ converged: true, agent: 'installed' });
+    expect(result).toEqual({ converged: true, agent: 'installed', ...NO_LINKS });
     const body = await fs.readFile(agentFile(), 'utf-8');
     expect(body.length, 'the copy must carry the agent, not an empty file').toBeGreaterThan(100);
     expect(warnings).toEqual([]);
@@ -82,7 +84,7 @@ describe('convergeTrackerArtifacts: the Tracker agent file', () => {
     expect(
       again,
       'the file is byte-identical, so this run wrote nothing and must not claim it did',
-    ).toEqual({ converged: true, agent: 'unchanged' });
+    ).toEqual({ converged: true, agent: 'unchanged', ...NO_LINKS });
     expect(await exists(agentFile())).toBe(true);
   });
 
@@ -99,7 +101,7 @@ describe('convergeTrackerArtifacts: the Tracker agent file', () => {
 
   it('a relative claudeDir is refused, not resolved (precondition)', async () => {
     const result = await convergeTrackerArtifacts({ claudeDir: 'relative/path', warn });
-    expect(result).toEqual({ converged: false, agent: 'unchanged' });
+    expect(result).toEqual({ converged: false, agent: 'unchanged', ...NO_LINKS });
     expect(warnings.join('\n')).toMatch(/absolute/);
   });
 
@@ -119,7 +121,7 @@ describe('convergeTrackerArtifacts: the Tracker agent file', () => {
       warn,
       agentSourceDirs: [path.join(claudeDir, 'no-such-source-dir')],
     });
-    expect(result).toEqual({ converged: false, agent: 'unchanged' });
+    expect(result).toEqual({ converged: false, agent: 'unchanged', ...NO_LINKS });
     expect(warnings.join('\n')).toContain('npm run build:mds');
   });
 
@@ -337,14 +339,14 @@ describe('runTrackerSet through buildTrackerSetIO', () => {
 
 describe('readTrackerMechanics / formatTrackerMechanics', () => {
   it('reports MISSING when nothing is installed', async () => {
-    const state = await readTrackerMechanics(claudeDir);
+    const state = await readTrackerMechanics(claudeDir, true);
     expect(state).toEqual({ kind: 'missing' });
     expect(formatTrackerMechanics(state)).toBe('MISSING — run devflow init');
   });
 
   it('counts every installed reference against the one install manifest', async () => {
     await overlayAll();
-    const state = await readTrackerMechanics(claudeDir);
+    const state = await readTrackerMechanics(claudeDir, true);
     expect(state).toEqual({ kind: 'installed', count: installedReferenceManifest().length });
     expect(formatTrackerMechanics(state)).toContain('installed (');
   });
@@ -352,9 +354,33 @@ describe('readTrackerMechanics / formatTrackerMechanics', () => {
   it('counts what is PRESENT, so a damaged tree reads short', async () => {
     await overlayAll();
     await fs.rm(path.join(refsTarget(), 'tracker', 'linear'), { recursive: true });
-    const state = await readTrackerMechanics(claudeDir);
+    const state = await readTrackerMechanics(claudeDir, true);
     expect(state.kind).toBe('installed');
     expect(state.kind === 'installed' && state.count).toBeLessThan(installedReferenceManifest().length);
+  });
+
+  it('a compliance-off machine counts against the compliance-off manifest, so a complete install reads complete', async () => {
+    await overlayGeneratedReferences({
+      referencesTarget: refsTarget(),
+      sourceRoot: compiledComplianceOffSkillRefsDir(),
+      manifest: installedReferenceManifest({ compliance: false }),
+      warn,
+    });
+
+    const state = await readTrackerMechanics(claudeDir, false);
+
+    expect(state).toEqual({ kind: 'installed', count: installedReferenceManifest({ compliance: false }).length });
+    expect(installedReferenceManifest({ compliance: false }).length, 'the two manifests differ').toBeLessThan(installedReferenceManifest().length);
+  });
+
+  it('the switch picks the manifest: a compliance-off read does not count a posting reference a compliance-on install left', async () => {
+    await overlayAll();
+
+    const asOn = await readTrackerMechanics(claudeDir, true);
+    const asOff = await readTrackerMechanics(claudeDir, false);
+
+    expect(asOn).toEqual({ kind: 'installed', count: installedReferenceManifest().length });
+    expect(asOff).toEqual({ kind: 'installed', count: installedReferenceManifest({ compliance: false }).length });
   });
 
   it('distinguishes "could not look" from "nothing there"', async () => {
@@ -363,7 +389,7 @@ describe('readTrackerMechanics / formatTrackerMechanics', () => {
     const blocked = path.join(refsTarget(), 'tracker');
     await fs.chmod(blocked, 0o000);
     try {
-      const state = await readTrackerMechanics(claudeDir);
+      const state = await readTrackerMechanics(claudeDir, true);
       expect(state.kind).toBe('unreadable');
       expect(formatTrackerMechanics(state)).toContain('unreadable (');
       expect(formatTrackerMechanics(state)).not.toContain('run devflow init');

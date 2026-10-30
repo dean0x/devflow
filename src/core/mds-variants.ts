@@ -21,6 +21,13 @@
  *   5. Which files does the shipped registry produce, flattened into the manifest
  *      an installer converges to? (generatedReferenceManifest — the one answer
  *      that asserts instead of returning a Result; see the function for why.)
+ *      The same question for a machine with compliance off is answered by
+ *      installedReferenceManifest({ compliance: false }): the manifest minus the
+ *      references of the posting operations (POSTING_OPS) and the publication gate.
+ * Two more questions serve the compliance-off references the build writes beside
+ * the compliance-on ones: which relative paths a compliance-off install omits
+ * (complianceOffOmittedRelPaths), and what each compliance arm of one operation's
+ * section keeps (splitSectionArms).
  * It still performs no I/O and no iteration over the filesystem.
  *
  * The `-variants` in the filename names the variant-expansion entry point below
@@ -29,6 +36,7 @@
 
 import * as path from 'path';
 import { isContainedIn } from './paths.js';
+import { COMPLIANCE_OFF_OUTPUT_DIR, splitVariants, type VariantSplitError } from './curation-variants.js';
 
 // ---------------------------------------------------------------------------
 // Result type (local; matches codebase per-module pattern)
@@ -209,6 +217,23 @@ export const SKILL_REFS_SKILL_NAME = 'git';
  * no reference module is planned — the same reason AGENTS_OUTPUT_DIR is exported.
  */
 export const SKILL_REFS_OUTPUT_DIR = `dist/skills/${SKILL_REFS_SKILL_NAME}/references`;
+
+/**
+ * Repo-relative root of the compliance-off references: the one source root a
+ * compliance-off install overlays from.
+ *
+ * It sits inside the compliance-off prompt tree (COMPLIANCE_OFF_OUTPUT_DIR), beside
+ * `commands/` and `agents/`, and mirrors SKILL_REFS_OUTPUT_DIR below that tree. It is
+ * deliberately NOT an entry of the allowlist below: the build writes it as a second
+ * output of a reference module, so no host can declare it as its `output-dir:`.
+ *
+ * The tree is complete, not a patch over the compliance-on one: it holds every file of
+ * `installedReferenceManifest({ compliance: false })`, a byte copy of the compliance-on
+ * file where the module has no compliance arm there. An installer that reads this root
+ * therefore never has to fall through to SKILL_REFS_OUTPUT_DIR (AC-50).
+ */
+export const COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR =
+  `${COMPLIANCE_OFF_OUTPUT_DIR}/skills/${SKILL_REFS_SKILL_NAME}/references`;
 
 const ALLOWED_OUTPUT_DIRS = [
   { dir: COMMANDS_OUTPUT_DIR, variant: 'commands' },
@@ -418,6 +443,34 @@ export const PR_HOST_OPS = [
 export const PR_HOST_DESTINATION_ROOT = 'pr';
 
 /**
+ * The eight Git operations that post to GitHub or to a tracker: the one roster of
+ * them. Posting steps are a compile-time variant keyed on the machine compliance
+ * switch alone, and this list says which reference files that variant drops.
+ *
+ * A compliance-off install carries no reference file of any of them: four under
+ * `pr/` and, for each of the three providers, four under `tracker/{provider}/`, which
+ * is 16 files. `check-merge-readiness` is deliberately absent: it reads state and
+ * posts nothing. The names are checked against the registry twice, once at compile
+ * time here (each is a PR-host or a tracker operation) and once at run time by
+ * {@link checkPostingOps}, because the manifest that omits them must fail closed: a
+ * name that matched no file would leave a posting reference in a compliance-off
+ * install without a signal.
+ *
+ * Tests take this list from here and never retype it
+ * (POSTING_OPERATIONS in tests/fixtures/mds-manifest.ts).
+ */
+export const POSTING_OPS = [
+  'post-review-summary',
+  'resolve-review-threads',
+  'post-resolution-summary',
+  'update-pr-evidence',
+  'manage-debt',
+  'post-wave-report',
+  'backlink-shipped-issues',
+  'associate-release',
+] as const satisfies readonly ((typeof PR_HOST_OPS)[number] | (typeof TRACKER_OPS)[number])[];
+
+/**
  * How a module's emitted filenames are decided — and therefore whether the
  * MIN_VARIANT_PAIRS floor applies to it.
  *
@@ -503,6 +556,15 @@ export const GIT_CROSS_CUTTING_DOCS = [
   'publication-gate',
   'trust-rule',
 ] as const;
+
+/**
+ * The cross-cutting documents a compliance-off install omits besides the references
+ * of {@link POSTING_OPS}: `publication-gate` holds the D10 step order and is named
+ * from the two summary operations only, so once those are gone nothing loads it.
+ * A subset of {@link GIT_CROSS_CUTTING_DOCS}, checked at compile time.
+ */
+export const COMPLIANCE_OFF_OMITTED_DOCS =
+  ['publication-gate'] as const satisfies readonly (typeof GIT_CROSS_CUTTING_DOCS)[number][];
 
 /**
  * The Git operations whose one operation reference is a cross-cutting document
@@ -800,6 +862,11 @@ export function deferredReferenceModuleSources(
  */
 export const MIN_VARIANT_PAIRS = 8;
 
+/** POSIX path, relative to SKILL_REFS_OUTPUT_DIR, of the file a module writes for one of its names. */
+function referenceRelPath(mod: VariantModule, op: string): string {
+  return mod.subdir === '' ? `${op}.md` : `${mod.subdir}/${op}.md`;
+}
+
 /** One emitted reference file: which module produced it, for which operation. */
 export interface VariantPair {
   /** The producing module's repo-relative source path. */
@@ -884,7 +951,7 @@ export function expandVariants(
       if (!nameResult.ok) {
         return Err({ kind: 'invalid-op-name', module: mod.source, op, cause: nameResult.error });
       }
-      const relPath = mod.subdir === '' ? `${op}.md` : `${mod.subdir}/${op}.md`;
+      const relPath = referenceRelPath(mod, op);
       const claimants = claimedBy.get(relPath);
       if (claimants === undefined) {
         claimedBy.set(relPath, [mod.source]);
@@ -948,14 +1015,34 @@ export function generatedReferenceManifest(): readonly string[] {
  * its sibling does (design review M3): the registry is a compile-time constant,
  * so a refusal is a programming error rather than an install-time degradation.
  *
+ * `compliance: false` is the install of a machine with compliance off: the same
+ * manifest without the references of the posting operations ({@link POSTING_OPS},
+ * 16 files) and without the publication gate document, which only those operations
+ * load. Any other value, and an absent option, is today's manifest. The omission
+ * fails closed: a posting name the registry does not carry asserts, because a name
+ * that matched no file would leave a posting reference in a compliance-off install.
+ *
  * @param opts.modules - Registry to expand (defaults to the shipped one, with the
  *   gated contract module resolved). Injectable so the refusal arm is provable
  *   without editing the registry.
+ * @param opts.compliance - `false` for the compliance-off install; the default is on.
  */
 export function installedReferenceManifest(opts: {
   readonly modules?: readonly VariantModule[];
+  readonly compliance?: boolean;
 } = {}): readonly string[] {
-  return expandedManifest(opts.modules ?? resolveVariantModules());
+  const modules = opts.modules ?? resolveVariantModules();
+  const manifest = expandedManifest(modules);
+  if (opts.compliance !== false) return manifest;
+
+  const omitted = complianceOffOmittedRelPaths(modules);
+  if (!omitted.ok) {
+    throw new Error(
+      `${describePostingOpsError(omitted.error)}. POSTING_OPS and VARIANT_MODULES in ` +
+      `src/core/mds-variants.ts must agree.`,
+    );
+  }
+  return manifest.filter(rel => !omitted.value.has(rel));
 }
 
 /** Every relPath a registry expands to, or the assertion both manifests share. */
@@ -968,6 +1055,115 @@ function expandedManifest(modules: readonly VariantModule[]): readonly string[] 
     );
   }
   return expanded.value.map(pair => pair.relPath);
+}
+
+// ---------------------------------------------------------------------------
+// The compliance-off reference set — which files a compliance-off install omits
+// ---------------------------------------------------------------------------
+
+export type PostingOpsError =
+  | { kind: 'unregistered-posting-op'; op: string }
+  | { kind: 'duplicate-posting-op'; op: string };
+
+/**
+ * Check a roster of posting operations against the registry: every name must be an
+ * operation of a fan-out module, and none may be listed twice.
+ *
+ * A named document is not an operation, so a document name is refused here: that
+ * keeps the posting roster from growing into a second list of documents to omit
+ * (those are {@link COMPLIANCE_OFF_OMITTED_DOCS}). The loop runs once over the roster
+ * given, so its bound is the roster's own length.
+ *
+ * @param ops - The roster to check (the shipped one is {@link POSTING_OPS}).
+ * @param modules - The registry to check it against.
+ */
+export function checkPostingOps(
+  ops: readonly string[],
+  modules: readonly VariantModule[],
+): Result<readonly string[], PostingOpsError> {
+  const registered = new Set(modules.filter(mod => mod.kind === 'fanout').flatMap(mod => mod.ops));
+  const seen = new Set<string>();
+  for (const op of ops) {
+    if (seen.has(op)) return Err({ kind: 'duplicate-posting-op', op });
+    seen.add(op);
+    if (!registered.has(op)) return Err({ kind: 'unregistered-posting-op', op });
+  }
+  return Ok(ops);
+}
+
+/** Render a posting-roster refusal as one line, with a `never` default so a new kind cannot fall through. */
+export function describePostingOpsError(error: PostingOpsError): string {
+  switch (error.kind) {
+    case 'unregistered-posting-op':
+      return (
+        `posting operation '${error.op}' is not an operation of any fan-out reference module ` +
+        `in VARIANT_MODULES`
+      );
+    case 'duplicate-posting-op':
+      return `posting operation '${error.op}' is listed twice in the posting roster`;
+    default: {
+      const unhandled: never = error;
+      return `unhandled posting roster refusal ${JSON.stringify(unhandled)}`;
+    }
+  }
+}
+
+/**
+ * Does a compliance-off install omit the reference this module writes for `op`?
+ *
+ * A fan-out module's file is omitted when `op` is a posting operation; a named
+ * document is omitted when it is in {@link COMPLIANCE_OFF_OMITTED_DOCS}; the contract
+ * document is never omitted. The `never` default makes a fourth module kind answer
+ * the question here rather than inherit one of these answers.
+ */
+function omittedWhenComplianceOff(
+  kind: VariantModuleKind,
+  op: string,
+  postingOps: readonly string[],
+): boolean {
+  switch (kind) {
+    case 'fanout':
+      return postingOps.includes(op);
+    case 'named':
+      return (COMPLIANCE_OFF_OMITTED_DOCS as readonly string[]).includes(op);
+    case 'contract':
+      return false;
+    default: {
+      // A kind added to VariantModuleKind stops compiling at the next line. If one
+      // reached run time anyway it fails closed: its reference is left out.
+      const unhandled: never = kind;
+      void unhandled;
+      return true;
+    }
+  }
+}
+
+/**
+ * The relative paths (under the references root) a compliance-off install omits, for
+ * a registry: every file of a posting operation, and the omitted documents.
+ *
+ * The one owner of the omission. The compliance-off manifest filters by it, and the
+ * build decides from it which references get a compliance-off copy, so the manifest an
+ * installer converges to and the tree the build writes cannot drift apart.
+ *
+ * @param modules - The registry to read.
+ * @param postingOps - The posting roster (defaults to {@link POSTING_OPS}); injectable
+ *   so the refusal of a bogus roster is provable without editing the shipped one.
+ */
+export function complianceOffOmittedRelPaths(
+  modules: readonly VariantModule[],
+  postingOps: readonly string[] = POSTING_OPS,
+): Result<ReadonlySet<string>, PostingOpsError> {
+  const checked = checkPostingOps(postingOps, modules);
+  if (!checked.ok) return Err(checked.error);
+
+  const omitted = new Set<string>();
+  for (const mod of modules) {
+    for (const op of mod.ops) {
+      if (omittedWhenComplianceOff(mod.kind, op, postingOps)) omitted.add(referenceRelPath(mod, op));
+    }
+  }
+  return Ok(omitted);
 }
 
 // ---------------------------------------------------------------------------
@@ -1100,4 +1296,64 @@ export function splitVariantSections<T extends OperationNamed>(
     out.push({ ...entry, content: `${trimmed}\n` });
   }
   return Ok(out);
+}
+
+// ---------------------------------------------------------------------------
+// Compliance arms inside one operation's section
+// ---------------------------------------------------------------------------
+
+export type SectionArmError =
+  | { kind: 'arm-split'; op: string; error: VariantSplitError }
+  | { kind: 'empty-variant'; op: string; variant: 'on' | 'compliance-off' };
+
+/** What one operation's section becomes in the two reference trees. */
+export interface SectionArmBodies {
+  /** The file of the compliance-on tree: the on arms kept, the off arms dropped. */
+  readonly on: string;
+  /** The file of the compliance-off tree: the off arms kept, the on arms dropped. */
+  readonly complianceOff: string;
+}
+
+/** A variant body as a reference file holds it: trimmed, one trailing newline, or empty when it has no text. */
+function settleSectionBody(body: string): string {
+  const trimmed = body.trim();
+  return trimmed === '' ? '' : `${trimmed}\n`;
+}
+
+/**
+ * Split one operation's section on its compliance arms.
+ *
+ * The caller has already split the module into operation sections
+ * (splitVariantSections), so an arm that runs across two sections is an unclosed arm
+ * in the first and an unopened end in the second, and each is refused here with the
+ * operation it is in. Each variant is settled the way splitVariantSections settles a
+ * section, so a section with no arm gives both variants its own bytes.
+ *
+ * Curation is outside this split: the splitter keeps the curation-on text in both
+ * bodies, and the build refuses a curation marker in a reference module before it
+ * gets here.
+ *
+ * Total and pure: a refusal is a Result.
+ *
+ * @param op - The operation, for the refusal.
+ * @param content - The settled section from splitVariantSections.
+ * @param opts.complianceOffWritten - Whether the build writes a compliance-off file
+ *   for this operation. A variant that is written must have text; an operation the
+ *   compliance-off install omits writes none, and its compliance-off body may be empty.
+ */
+export function splitSectionArms(
+  op: string,
+  content: string,
+  opts: { readonly complianceOffWritten: boolean },
+): Result<SectionArmBodies, SectionArmError> {
+  const split = splitVariants(content);
+  if (!split.ok) return Err({ kind: 'arm-split', op, error: split.error });
+
+  const on = settleSectionBody(split.value.bodies.on);
+  const complianceOff = settleSectionBody(split.value.bodies['compliance-off']);
+  if (on === '') return Err({ kind: 'empty-variant', op, variant: 'on' });
+  if (opts.complianceOffWritten && complianceOff === '') {
+    return Err({ kind: 'empty-variant', op, variant: 'compliance-off' });
+  }
+  return Ok({ on, complianceOff });
 }

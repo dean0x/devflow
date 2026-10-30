@@ -47,8 +47,10 @@ import {
   MDS_REFERENCE_PARTIALS,
 } from './fixtures/mds-manifest.js';
 import {
+  COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR,
   GATED_REFERENCE_MODULE_SOURCES,
   generatedReferenceManifest,
+  installedReferenceManifest,
 } from '../src/core/mds-variants.js';
 import {
   BOTH_OFF_OUTPUT_DIR,
@@ -575,6 +577,8 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
     return files
       .filter(f => f.startsWith(prefix) && f.length > prefix.length && f.endsWith('.md'))
       .map(f => f.slice(prefix.length))
+      // The compliance-off tree also holds the compliance-off references, under skills/.
+      .filter(rel => !rel.startsWith('skills/'))
       .sort();
   }
 
@@ -661,6 +665,20 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
       'tests/fixtures/mds-manifest.ts. A compliance-off machine installs these files; one missing ' +
       'ships the compliance-on prompt there.',
     ).toEqual([...COMPLIANCE_OFF_FILES].sort());
+  });
+
+  it('tarball carries exactly the compliance-off references the compliance-off manifest names', () => {
+    const files = getPackFiles();
+    expect(
+      files.length,
+      'npm pack --dry-run produced no files — run `npm run build` first (guard cannot verify)',
+    ).toBeGreaterThan(0);
+    const prefix = `${COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR}/`;
+    expect(
+      files.filter(f => f.startsWith(prefix) && f.endsWith('.md')).map(f => f.slice(prefix.length)).sort(),
+      `Tarball ${prefix}*.md set does not match installedReferenceManifest({ compliance: false }). A ` +
+      'compliance-off install reads this one root and never falls back to the compliance-on references.',
+    ).toEqual([...installedReferenceManifest({ compliance: false })].sort());
   });
 
   it('tarball carries exactly the roster\'s both-off variants (dist/curation-compliance-off/)', () => {

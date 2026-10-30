@@ -50,6 +50,23 @@
  *     from the registry is refused rather than guessed at. The split is
  *     bidirectional: a section for an unregistered op and a registered op with no
  *     section both fail the build, as does a section with an empty body.
+ *     Each section is then split on its compliance arms (splitSectionArms), so an
+ *     arm must open and close inside one operation's section. The section with the
+ *     on arms kept is the reference at its own path; the one with the off arms kept
+ *     is the compliance-off reference, written under
+ *     dist/compliance-off/skills/git/references/ at the same relative path.
+ *
+ *     The compliance-off references tree is COMPLETE, not a patch: it holds a file
+ *     for every reference a compliance-off install carries
+ *     (installedReferenceManifest({ compliance: false })), and a file of a module or
+ *     operation with no compliance arm is a byte copy of its compliance-on file. The
+ *     installer reads this one root and must never fall through to the compliance-on
+ *     tree (AC-50), and a root that held only the armed files would force it to merge
+ *     two. The price is a second copy of every unarmed reference in dist/, which is
+ *     small text. A reference a compliance-off install omits (the posting operations
+ *     and the publication gate, complianceOffOmittedRelPaths) gets no copy at all.
+ *     Both trees are fixed by the manifest, so no per-file record is kept: the
+ *     variant manifest below lists prompts only.
  *
  * All three strips run AFTER compileFile: the compiler emits a frontmatter block at
  * byte offset 0 verbatim (it is never interpolated), so block 1 survives
@@ -61,10 +78,12 @@
  * also gets dist/curation-off/{commands,agents}/{name}.md, a host with a compliance
  * arm dist/compliance-off/..., and a host with both arms dist/curation-compliance-off/...
  * too. The split runs on the compiled text, so it costs no compileFile call and
- * nothing against the per-module compile-time guard. A reference module may carry no
- * marker of either axis: its sections ship as written, so a marker there is refused.
- * None of the variant trees is an output-dir a host may declare: the allowlist
- * stays the three shipped directories.
+ * nothing against the per-module compile-time guard. A reference module may carry
+ * compliance markers, which select between its compliance-on and compliance-off
+ * references (see the reference modules above), and no curation marker: that axis has
+ * nothing to select there, so a curation marker is refused. None of the variant
+ * trees is an output-dir a host may declare: the allowlist stays the three shipped
+ * directories.
  *
  * Variant manifest: after a clean build, dist/variant-axes.json records for every
  * compiled command and agent whether it carries a curation arm and whether it
@@ -97,7 +116,11 @@
  * no host emitted is deleted (pruneOrphanCommands, pruneOrphanAgents), and the same
  * sweep runs recursively over dist/skills/git/references/ (pruneOrphanReferences)
  * and each of the three variant trees (pruneOrphanVariantTree). Every sweep is keyed
- * on the files this build actually wrote. The retired off tree (LEGACY_OFF_OUTPUT_DIR)
+ * on the files this build actually wrote. The compliance-off references sit inside
+ * the compliance-off tree, so every one the build wrote is recorded as written and
+ * kept, and one the build no longer writes (a reference that became a posting
+ * operation, a retired operation) is pruned like any other stale file there.
+ * The retired off tree (LEGACY_OFF_OUTPUT_DIR)
  * is removed whole (pruneLegacyOffTree), because no host writes there.
  * dist/agents/ is gitignored and outranks src/assets/agents/ in both the
  * installer's resolve and loadShippedAgentDefaults's merge, so a file left there is
@@ -123,11 +146,16 @@ import {
   AGENTS_OUTPUT_DIR,
   COMMANDS_OUTPUT_DIR,
   SKILL_REFS_OUTPUT_DIR,
+  COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR,
   resolveVariantModules,
   deferredReferenceModuleSources,
+  complianceOffOmittedRelPaths,
+  describePostingOpsError,
+  splitSectionArms,
   type HostVariant,
   type OutputDirError,
   type OutputNameError,
+  type SectionArmError,
   type VariantModule,
   type VariantPair,
 } from "../src/core/mds-variants.js";
@@ -137,7 +165,6 @@ import {
   OFF_OUTPUT_DIRS,
   OFF_VARIANT_KEYS,
   VARIANT_MANIFEST_REL_PATH,
-  containsComplianceMarker,
   containsCurationMarker,
   containsVariantMarker,
   describeVariantManifestError,
@@ -611,6 +638,15 @@ interface PlannedReference {
   readonly dest: string;
   /** The (module, op) pair whose section becomes this file's content. */
   readonly pair: VariantPair;
+  /**
+   * Where the compliance-off copy of this reference lands, resolved absolute, or null
+   * for a reference a compliance-off install omits (complianceOffOmittedRelPaths).
+   * Planned for every reference but NOT claimed in destsOf, for the reason a prompt's
+   * offDests are not: it is written only after the split, it sits in a tree of its
+   * own, and it is the path of `dest` under another root, so two modules can collide
+   * on it only by colliding on `dest` first.
+   */
+  readonly offDest: string | null;
 }
 
 /**
@@ -759,16 +795,31 @@ function planReferenceModule(host: HostEntry, rel: string, outAbs: string): Host
     throw new Error(`${rel}: variant expansion refused — ${JSON.stringify(expansion.error)}`);
   }
 
-  const outputs = expansion.value.map(pair => ({
+  // The omission is decided against the WHOLE registry, not this module: a posting
+  // operation is named once and omitted from the files of every module that writes it.
+  const omitted = complianceOffOmittedRelPaths(RESOLVED_MODULES);
+  if (!omitted.ok) {
+    throw new Error(
+      `${rel}: the compliance-off reference set is refused — ${describePostingOpsError(omitted.error)}. ` +
+      `POSTING_OPS and VARIANT_MODULES in src/core/mds-variants.ts must agree.`,
+    );
+  }
+
+  const offAbs = path.resolve(ROOT, ...COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR.split("/"));
+  const outputs = expansion.value.map((pair): PlannedReference => ({
     dest: path.resolve(outAbs, ...pair.relPath.split("/")),
     pair,
+    offDest: omitted.value.has(pair.relPath) ? null : path.resolve(offAbs, ...pair.relPath.split("/")),
   }));
   // Belt-and-braces containment: every segment was validated by
   // validateOutputName, so this cannot fire — which is why it is an assertion
-  // rather than a diagnosis. A path that escapes outAbs must never be written.
-  for (const { dest } of outputs) {
+  // rather than a diagnosis. A path that escapes its root must never be written.
+  for (const { dest, offDest } of outputs) {
     if (!dest.startsWith(outAbs + path.sep)) {
       throw new Error(`${rel}: expanded destination '${dest}' escapes '${outAbs}'`);
+    }
+    if (offDest !== null && !offDest.startsWith(offAbs + path.sep)) {
+      throw new Error(`${rel}: expanded destination '${offDest}' escapes '${offAbs}'`);
     }
   }
 
@@ -861,7 +912,12 @@ interface PlannedOutput {
 /** The axes a compiled body carries an arm on. */
 type HostAxes = Readonly<Record<VariantAxis, boolean>>;
 
-/** The axes of a body that has no arm, which is every reference module's. */
+/**
+ * The axes a reference module reports: none. Its compliance arms are not recorded in
+ * the variant manifest, which lists prompts only; the compliance-off references tree
+ * is complete by construction (see the header), so a reader needs no record of which
+ * file was armed.
+ */
 const NO_ARMS: HostAxes = { curation: false, compliance: false };
 
 /** What a host's compiled body becomes: the files to write, and the axes it carries an arm on. */
@@ -906,8 +962,9 @@ function materializeOutputs(host: HostEntry, plan: HostPlan, body: string): Mate
     return { outputs, axes: hasArms };
   }
 
-  // A reference module fans out into sections that ship as written, with no variant
-  // to select: a marker in one would reach the installed reference as text.
+  // A reference module has one axis to select on, compliance. A curation marker in one
+  // has nothing to select: its sections ship as written on that axis, so the marker
+  // would reach the installed reference as text.
   if (containsCurationMarker(body)) {
     throw new Error(
       `${rel}: a reference module may not carry curation-variant markers — its sections ship as ` +
@@ -915,16 +972,12 @@ function materializeOutputs(host: HostEntry, plan: HostPlan, body: string): Mate
       `command or agent host.`,
     );
   }
-  if (containsComplianceMarker(body)) {
-    throw new Error(
-      `${rel}: a reference module may not carry compliance-variant markers — its sections ship as ` +
-      `written, so a marker would reach the installed reference as text. Compliance arms belong in a ` +
-      `command or agent host.`,
-    );
-  }
+  // Split into operation sections FIRST, then each section on its compliance arms: an
+  // arm that runs across two operations is then a refusal naming the operation it is
+  // in, not a pair of files that quietly share half an arm.
   const split = splitVariantSections(
     body,
-    plan.outputs.map(({ dest, pair }) => ({ dest, op: pair.op })),
+    plan.outputs.map(({ dest, offDest, pair }) => ({ dest, offDest, op: pair.op })),
   );
   if (!split.ok) {
     throw new Error(
@@ -933,7 +986,48 @@ function materializeOutputs(host: HostEntry, plan: HostPlan, body: string): Mate
     );
   }
 
-  return { outputs: split.value.map(({ dest, content }) => ({ dest, content })), axes: NO_ARMS };
+  const outputs: PlannedOutput[] = [];
+  for (const { dest, offDest, op, content } of split.value) {
+    const arms = splitSectionArms(op, content, { complianceOffWritten: offDest !== null });
+    if (!arms.ok) throw sectionArmRefusal(rel, arms.error, content);
+    outputs.push({ dest, content: arms.value.on });
+    if (offDest !== null) outputs.push({ dest: offDest, content: arms.value.complianceOff });
+  }
+  return { outputs, axes: NO_ARMS };
+}
+
+/**
+ * Render a refusal of the compliance arms of one reference section as the error the
+ * build throws.
+ *
+ * A split refusal carries the operation and the section's own line numbers, and the
+ * quoted neighbour is looked up in the section, so the author can find the spot
+ * without counting compiled lines. The wording of the split itself lives in
+ * describeVariantSplitError, shared with the tests.
+ */
+function sectionArmRefusal(rel: string, error: SectionArmError, content: string): Error {
+  switch (error.kind) {
+    case "arm-split": {
+      const axis: VariantAxis = "axis" in error.error ? error.error.axis : "curation";
+      const neighbour = variantSplitNeighbour(content, error.error);
+      const where = neighbour === null ? "" : ` (below "${neighbour}")`;
+      return new Error(
+        `${rel}: ${axis}-variant split refused in the '${error.op}' section — ` +
+        `${describeVariantSplitError(error.error)}${where}. ` +
+        `Line numbers count that section, not the source. An arm must open and close inside one ` +
+        `'<!-- op: NAME -->' section.`,
+      );
+    }
+    case "empty-variant":
+      return new Error(
+        `${rel}: the '${error.op}' section is empty in the ${error.variant} reference — its arms leave ` +
+        `no text for a file the build writes. Keep a line outside the arms, or omit the operation.`,
+      );
+    default: {
+      const unhandled: never = error;
+      return new Error(`${rel}: unhandled section refusal ${JSON.stringify(unhandled)}`);
+    }
+  }
 }
 
 /**
@@ -983,9 +1077,12 @@ async function compileHost(host: HostEntry, plan: HostPlan): Promise<CompileOutc
 
   for (const { dest, content } of outputs) writeFileAtomic(dest, content);
 
-  const destLabel = plan.variant === "skill-refs" && outputs.length > 1
-    ? `${path.relative(ROOT, outAbs)}/ (${outputs.length} file(s))`
-    : outputs.map(o => path.relative(ROOT, o.dest)).join(" + ");
+  // A reference module's label names the files of the compliance-on tree, one per
+  // operation; its compliance-off copies are the same operations under another root.
+  const shown = plan.variant === "skill-refs" ? plan.outputs.map(o => o.dest) : outputs.map(o => o.dest);
+  const destLabel = plan.variant === "skill-refs" && shown.length > 1
+    ? `${path.relative(ROOT, outAbs)}/ (${shown.length} file(s))`
+    : shown.map(dest => path.relative(ROOT, dest)).join(" + ");
 
   return {
     source: path.relative(ROOT, host.file),

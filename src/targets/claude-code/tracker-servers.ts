@@ -35,9 +35,9 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 
 import { stampAgentTools } from '../../core/agent-frontmatter.js';
-import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import { mdFileName } from '../../core/orphan-sweep.js';
 import { trackerServerTools } from '../../core/tracker.js';
+import { newLinkReport, refuseUnrealFolder, warnLinkReport, writeFileReplacingLink } from './linked-folder.js';
 import { TRACKER_AGENT_NAME } from './tracker-install.js';
 
 /** The registry name of the Git agent. */
@@ -56,6 +56,10 @@ export interface RestampTrackerAgentsResult {
   readonly absent: readonly string[];
   /** Agents the stamp could not be applied to or written. */
   readonly failed: readonly string[];
+  /** Installed agent files that were a link and now are a real file. What they pointed to was left as it was. */
+  readonly replacedLinks: readonly string[];
+  /** `agents/devflow`, if it is a link or not a folder: nothing was written there, and both agents are in `failed`. */
+  readonly refusedFolders: readonly string[];
 }
 
 export interface RestampTrackerAgentsOptions {
@@ -76,7 +80,10 @@ export function isTrackerStampedAgent(agentName: string): boolean {
  *
  * Rewrites only an installed copy (an absent one stays absent), compares against the bytes on
  * disk at the moment of writing, and writes atomically only when they differ, so a run that
- * changes nothing writes nothing. Never throws.
+ * changes nothing writes nothing. An `agents/devflow` that is a link, or not a folder, is refused:
+ * nothing is written there, both agents are `failed`, and the folder is named in `refusedFolders` and
+ * in a warning. An agent file that is a link is replaced by a real file, and named in `replacedLinks`
+ * and in a warning. Never throws.
  */
 export async function restampTrackerAgents(opts: RestampTrackerAgentsOptions): Promise<RestampTrackerAgentsResult> {
   const { claudeDir, servers, warn } = opts;
@@ -84,12 +91,24 @@ export async function restampTrackerAgents(opts: RestampTrackerAgentsOptions): P
   const unchanged: string[] = [];
   const absent: string[] = [];
   const failed: string[] = [];
+  const links = newLinkReport();
+  const finish = (): RestampTrackerAgentsResult => {
+    warnLinkReport(links, warn);
+    return { rewritten, unchanged, absent, failed, replacedLinks: links.replacedLinks, refusedFolders: links.refusedFolders };
+  };
 
   // Precondition, asserted in production code: a relative claudeDir would resolve the targets
   // against the working directory.
   if (!path.isAbsolute(claudeDir)) {
     warn(`tracker servers: claudeDir is not an absolute path ("${claudeDir}") — the installed agents were not stamped`);
-    return { rewritten, unchanged, absent, failed: [...TRACKER_STAMPED_AGENTS] };
+    failed.push(...TRACKER_STAMPED_AGENTS);
+    return finish();
+  }
+
+  // A link at the folder sends every write below it into another place, so the folder is proven first.
+  if (await refuseUnrealFolder(links, path.join(claudeDir, 'agents', 'devflow'))) {
+    failed.push(...TRACKER_STAMPED_AGENTS);
+    return finish();
   }
 
   const tools = trackerServerTools(servers);
@@ -122,7 +141,7 @@ export async function restampTrackerAgents(opts: RestampTrackerAgentsOptions): P
       continue;
     }
     try {
-      await writeFileAtomicExclusive(target, stamped.value.content);
+      await writeFileReplacingLink(target, stamped.value.content, links);
       rewritten.push(agent);
     } catch (err) {
       warn(`tracker servers: could not rewrite ${mdFileName(agent)} (${target}) — ${String(err)}`);
@@ -130,5 +149,5 @@ export async function restampTrackerAgents(opts: RestampTrackerAgentsOptions): P
     }
   }
 
-  return { rewritten, unchanged, absent, failed };
+  return finish();
 }

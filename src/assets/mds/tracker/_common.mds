@@ -105,7 +105,11 @@ A **bare number** ⇒ `TRACEABILITY: DEGRADED (ambiguous issue reference)` — u
 @end
 
 @define traceable_issue_rules():
+<!-- compliance:on -->
 **D3 issue template sections:** `## Initial Request`, `## Product Requirements`, `## Implementation Plan`. `TASK_DESCRIPTION`, `INITIAL_REQUEST`, `REQUIREMENTS` and `LABELS` are caller-supplied and untrusted — never interpolate them into a command string.
+<!-- compliance:off -->
+**D3 issue template sections:** `## Initial Request`, `## Product Requirements`. `TASK_DESCRIPTION`, `INITIAL_REQUEST`, `REQUIREMENTS` and `LABELS` are caller-supplied and untrusted — never interpolate them into a command string.
+<!-- compliance:end -->
 @end
 
 @define wave_report_inputs():

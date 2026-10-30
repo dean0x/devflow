@@ -303,6 +303,7 @@ describe('installViaFileCopy: the render is its own step after the script copy',
     const effective = opts.effectivePlugins ?? opts.plugins;
     await installViaFileCopy({
       curation: true,
+      compliance: true,
       plugins: opts.plugins,
       effectivePlugins: effective,
       claudeDir,
@@ -654,7 +655,7 @@ describe('runSelectivePhaseForScope renders the charter for the plugins that sta
 
     await expect(runSelectivePhaseForScope({
       claudeDir, devflowDir, selectedPlugins: [IMPLEMENT], verbose: false, installedPlugins: [CORE, AMBIENT, IMPLEMENT],
-    })).resolves.toBeUndefined();
+    })).resolves.toEqual({ replacedLinks: [], refusedFolders: [] });
 
     const charterWarnings = warn.mock.calls.filter(([message]) => message.includes('charter render:'));
     expect(charterWarnings, 'the unreadable charter is reported once').toHaveLength(1);

@@ -26,10 +26,23 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
 import * as path from 'path';
 
 import { compiledSkillRefsDir } from '../../src/core/assets.js';
+import { COMPLIANCE_OFF_REMOVED_SKILL_FILES } from '../../src/core/compliance-off-files.js';
+import {
+  BOTH_OFF_OUTPUT_DIR,
+  COMPLIANCE_OFF_OUTPUT_DIR,
+  VARIANT_MANIFEST_REL_PATH,
+  machineVariantKey,
+  parseVariantManifest,
+  variantOffRelPath,
+  type VariantKind,
+  type VariantManifestHost,
+  type VariantSwitches,
+} from '../../src/core/curation-variants.js';
 import {
   TRACKER_GITHUB_OPS,
   GIT_CROSS_CUTTING_DOCS,
@@ -40,9 +53,11 @@ import {
   VARIANT_MODULES,
   expandVariants,
   generatedReferenceManifest,
+  installedReferenceManifest,
   operationReferenceRel,
 } from '../../src/core/mds-variants.js';
 import {
+  ROOT,
   collectTrackerNamingLines,
   extractOpSectionFromCorpus,
   gitOperationReferenceCorpus,
@@ -50,6 +65,7 @@ import {
   resolveAgentSource,
   walkFiles,
 } from '../helpers.js';
+import { POSTING_OPERATIONS } from '../fixtures/mds-manifest.js';
 import { MODEL_TRANSITIVE_REFS } from './budget-model.js';
 import { MIN_REFERENCE_CHARS } from './reference-floor.js';
 
@@ -935,5 +951,174 @@ describe('PR-host references: the merged step list is executable from what one s
     const parsed = /^\| `([a-z][a-z0-9-]*)` \| `references\/([A-Za-z0-9._/-]+\.md)` \|$/.exec(misrouted);
     expect(parsed?.[2], 'the extraction reads the seeded path').toBe(`${PR_HOST_DESTINATION_ROOT}/validate-branch.md`);
     expect(parsed?.[2]).not.toBe(operationReferenceRel(op, 'github'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. The compliance-off prompts name only what a compliance-off install carries (AC-48)
+//
+// A compliance-off machine installs the compliance-off Git agent and the compliance-off
+// commands, and it installs `installedReferenceManifest({ compliance: false })` as the
+// references. The prompts and the references are cut by two separate mechanisms (the arms
+// of a host, and the omit set of the install), so each can drift from the other:
+//
+//   - an off prompt that still names a posting operation sends the agent to a reference
+//     the install does not carry;
+//   - an off Git agent that was never built leaves every compliance-off machine with no
+//     Git agent to read, and a scan over the files that exist would pass on nothing.
+//
+// The guard fails on both. The prompts are the files a compliance-off machine installs for
+// each host with a compliance arm, taken from the build's variant manifest and from
+// `machineVariantKey`, the function the installer chooses with. The Git agent has no
+// curation arm, so a machine with curation also off installs the same compliance-off file.
+// ---------------------------------------------------------------------------
+
+/** The two machine states that install compliance-off prompts: curation on and curation off, compliance off in both. */
+const OFF_MACHINES: readonly VariantSwitches[] = [
+  { curation: true, compliance: false },
+  { curation: false, compliance: false },
+];
+
+/** A built compliance-off prompt: its repo-relative path and its text. */
+interface OffPrompt {
+  readonly path: string;
+  readonly text: string;
+}
+
+/** Named reader: the hosts of the build's variant manifest under `root`; a build hint when it is absent or unreadable. */
+function readVariantHosts(root: string = ROOT): readonly VariantManifestHost[] {
+  const parsed = parseVariantManifest(requireFile('variant manifest', path.join(root, ...VARIANT_MANIFEST_REL_PATH.split('/'))));
+  if (!parsed.ok) {
+    throw new Error(`${VARIANT_MANIFEST_REL_PATH} does not parse — run \`npm run build:mds\` first`);
+  }
+  return parsed.value;
+}
+
+/**
+ * Named collector: the repo-relative files a compliance-off machine installs for the hosts of one kind that carry
+ * a compliance arm, sorted and without repeats. A host with no compliance arm installs its compliance-on text and is
+ * not listed. The variant comes from `machineVariantKey`, never from the host roster.
+ */
+export function offPromptPaths(hosts: readonly VariantManifestHost[], kind: VariantKind): string[] {
+  const paths = new Set<string>();
+  for (const host of hosts) {
+    if (host.kind !== kind || !host.axes.compliance) continue;
+    for (const machine of OFF_MACHINES) {
+      const key = machineVariantKey(machine, host.axes);
+      if (key === 'on' || key === 'curation-off') {
+        throw new Error(`${host.kind}/${host.name} has a compliance arm, so a compliance-off machine cannot install its '${key}' file`);
+      }
+      paths.add(variantOffRelPath(key, kind, `${host.name}.md`));
+    }
+  }
+  return [...paths].sort();
+}
+
+/** Named reader: the text of each path under `root`. A missing file throws and names the build step; it is never skipped. */
+export function readOffPrompts(root: string, paths: readonly string[]): OffPrompt[] {
+  return paths.map(rel => ({ path: rel, text: requireFile('compliance-off prompt', path.join(root, ...rel.split('/'))) }));
+}
+
+/** The reference paths a compliance-off install does not carry, as a prompt spells them (`references/...`). */
+function omittedReferencePaths(): string[] {
+  const offManifest = new Set(installedReferenceManifest({ compliance: false }));
+  const generated = generatedReferenceManifest().filter(rel => !offManifest.has(rel)).map(rel => `references/${rel}`);
+  const removed = COMPLIANCE_OFF_REMOVED_SKILL_FILES.map(file => file.slice(file.indexOf('/') + 1));
+  return [...new Set([...generated, ...removed])].sort();
+}
+
+/** True when `text` names the operation `op` as a whole token, so `fetch-issue` does not match `fetch-issues-batch`. */
+function namesOperation(text: string, op: string): boolean {
+  return new RegExp(`(?<![\\w-])${op}(?![\\w-])`).test(text);
+}
+
+/**
+ * Named collector: what a set of compliance-off prompts names that the compliance-off manifest does not carry,
+ * one entry per prompt and item, in scan order. Two kinds of item:
+ *   - an operation (any `GIT_OPERATIONS` entry) whose reference, under any provider, is not in the manifest;
+ *   - a literal `references/...` path of a file the install omits or removes.
+ */
+export function collectOffReachabilityDefects(files: readonly OffPrompt[], offManifest: ReadonlySet<string>): string[] {
+  const providers = VARIANT_MODULES.filter(mod => mod.subdir.startsWith('tracker/')).map(mod => mod.subdir.slice('tracker/'.length));
+  const omittedPaths = omittedReferencePaths();
+  const defects: string[] = [];
+  for (const file of files) {
+    for (const op of GIT_OPERATIONS) {
+      if (!namesOperation(file.text, op)) continue;
+      const rels = [...new Set(providers.map(provider => operationReferenceRel(op, provider)))];
+      for (const rel of rels) {
+        if (rel === null || !offManifest.has(rel)) {
+          defects.push(`${file.path}: names ${op}, whose reference ${rel ?? '(none)'} is not in the compliance-off manifest`);
+        }
+      }
+    }
+    for (const omitted of omittedPaths.filter(candidate => file.text.includes(candidate))) {
+      defects.push(`${file.path}: names ${omitted}, which a compliance-off install does not carry`);
+    }
+  }
+  return defects;
+}
+
+describe('compliance-off prompts: every operation and reference they name is in the compliance-off install (AC-48)', () => {
+  const hosts = readVariantHosts();
+  const offManifest = new Set(installedReferenceManifest({ compliance: false }));
+  const agentPaths = offPromptPaths(hosts, 'agents');
+  const commandPaths = offPromptPaths(hosts, 'commands');
+  const gitAgentPath = variantOffRelPath('compliance-off', 'agents', 'git.md');
+
+  it('reads the compliance-off Git agent, and fails when that file is missing', () => {
+    expect(agentPaths, 'the Git agent is a compliance-armed host, so the off prompts include its file').toContain(gitAgentPath);
+    const agents = readOffPrompts(ROOT, agentPaths);
+    expect(agents.find(file => file.path === gitAgentPath)?.text ?? '', 'the off Git agent is read and is not empty').toContain('## Loading the mechanics');
+    const empty = mkdtempSync(path.join(tmpdir(), 'devflow-off-prompts-'));
+    try {
+      expect(() => readOffPrompts(empty, [gitAgentPath])).toThrow(`${gitAgentPath} is absent`);
+    } finally {
+      rmSync(empty, { recursive: true, force: true });
+    }
+  });
+
+  it('serves a machine with curation also off from the same Git agent file, and lists the both-off command files', () => {
+    expect(agentPaths.filter(rel => rel.endsWith('/git.md')), 'the Git agent has no curation arm, so no both-off Git agent exists').toEqual([gitAgentPath]);
+    expect(commandPaths.some(rel => rel.startsWith(`${BOTH_OFF_OUTPUT_DIR}/commands/`)), 'a command with both arms has a both-off file').toBe(true);
+    expect(commandPaths.some(rel => rel.startsWith(`${COMPLIANCE_OFF_OUTPUT_DIR}/commands/`))).toBe(true);
+  });
+
+  it('the off Git agent and every off command name only operations and references the compliance-off manifest carries', () => {
+    const files = readOffPrompts(ROOT, [...agentPaths, ...commandPaths]);
+    expect(files.length, 'the scan reads the off agents and the off commands').toBeGreaterThan(1);
+    expect(collectOffReachabilityDefects(files, offManifest)).toEqual([]);
+  });
+
+  it('non-vacuity: the compliance-on Git agent names all eight posting operations and the compliance-on commands name an omitted reference, and the same collector reports both', () => {
+    const agent = collectOffReachabilityDefects(readOffPrompts(ROOT, ['dist/agents/git.md']), offManifest);
+    for (const op of POSTING_OPERATIONS) {
+      expect(agent.some(defect => defect.includes(` names ${op},`)), `the on Git agent names ${op}, so the collector must report it`).toBe(true);
+    }
+    const commandsDir = path.join(ROOT, 'dist', 'commands');
+    const commands = readOffPrompts(ROOT, walkFiles(commandsDir, f => f.endsWith('.md')).map(f => path.relative(ROOT, f).split(path.sep).join('/')));
+    expect(commands.length, 'the on commands are read').toBeGreaterThan(0);
+    expect(collectOffReachabilityDefects(commands, offManifest).some(defect => defect.includes('names references/publication-gate.md,')), 'the on commands name the publication gate').toBe(true);
+  });
+
+  it('known-bad probes: a seeded posting operation, in any off prompt, is reported', () => {
+    const files = readOffPrompts(ROOT, [...agentPaths, ...commandPaths]);
+    for (const op of POSTING_OPERATIONS) {
+      const seeded = files.map((file): OffPrompt => ({ ...file, text: `${file.text}\nOPERATION: ${op}\n` }));
+      const defects = collectOffReachabilityDefects(seeded, offManifest);
+      expect(defects.length, `${op} seeded into ${files.length} prompts`).toBeGreaterThanOrEqual(files.length);
+      expect(defects.every(defect => defect.includes(` names ${op},`)), `${op}: only the seeded name is reported`).toBe(true);
+    }
+  });
+
+  it('known-bad probes: a seeded omitted reference path is reported, and a kept operation the manifest lost is reported', () => {
+    const agent = readOffPrompts(ROOT, [gitAgentPath]);
+    for (const omitted of omittedReferencePaths()) {
+      const seeded = agent.map((file): OffPrompt => ({ ...file, text: `${file.text}\nRead \`${omitted}\`.\n` }));
+      expect(collectOffReachabilityDefects(seeded, offManifest), omitted).toContain(`${gitAgentPath}: names ${omitted}, which a compliance-off install does not carry`);
+    }
+    const lost = new Set([...offManifest].filter(rel => !rel.endsWith('/check-merge-readiness.md')));
+    expect(collectOffReachabilityDefects(agent, lost).some(defect => defect.includes('names check-merge-readiness,')), 'the off agent names a kept operation').toBe(true);
+    expect(collectOffReachabilityDefects([{ path: 'seeded.md', text: 'fetch-issues-batch and fetch-issue' }], offManifest)).toEqual([]);
   });
 });

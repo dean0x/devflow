@@ -18,7 +18,19 @@ import { createRequire } from 'module';
 import * as path from 'path';
 import { skillsDir, rulesDir, commandsDir, compiledSkillRefsDir } from '../src/core/assets.js';
 import { getAllAgentNames } from '../src/core/plugins.js';
+import { TRACKER_PROVIDER_IDS } from '../src/core/tracker.js';
 import {
+  VARIANT_MANIFEST_REL_PATH,
+  machineVariantKey,
+  parseVariantManifest,
+  variantOffRelPath,
+  type VariantSwitches,
+} from '../src/core/curation-variants.js';
+import {
+  COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR,
+  SKILL_REFS_OUTPUT_DIR,
+  complianceOffOmittedRelPaths,
+  installedReferenceManifest,
   TRACKER_GITHUB_OPS,
   GIT_CROSS_CUTTING_DOCS,
   GIT_OPERATIONS,
@@ -29,7 +41,7 @@ import {
 } from '../src/core/mds-variants.js';
 import { ROOT, resolveAgentSource, resolveVariantOffSource, resolveAllAgents, gitAgentSinkCorpus, gitOperationReferenceCorpus, extractOpSectionFromCorpus, collectUnfencedH2, loadFile, requireDistFile, walkFiles, isPrHostEntryPath, NAME_FILE_TRAP, NAME_FILE_REMOVAL, WRITE_FAILURE, JUDGE_BY_READING, SHELL_WRITE_PROBES, countShellWritesIntoF, DEFAULT_BRANCH_PROBE, PRODUCER_STATUS_CAPTURE, PRODUCER_NAME_TAIL, GH_FAILED_RULE, NO_PR_CLAUSE, NO_PR_DEFINITION, OTHER_GH_FAILURE_CLAUSE, ORIGIN_HEAD_READ, MAIN_PROBE, MASTER_FALLBACK, DEFAULT_BRANCH_FILL, type CorpusEntry } from './helpers.js';
 import { RESOLVE_BASE_SCRIPT } from './evidence/seam.js';
-import { POSTING_OPERATIONS } from './fixtures/mds-manifest.js';
+import { COMPLIANCE_ARMED_REFERENCES, POSTING_OPERATIONS } from './fixtures/mds-manifest.js';
 
 /**
  * How many corpus files declare a `## Operation:` section for a TRACKER op: one
@@ -305,11 +317,24 @@ const INLINE_BODY_SHAPES: readonly InlineBodyShape[] = [
 ];
 
 /**
- * Declared inline-body exceptions in the hand-authored `references/github-api.md`,
- * each frozen by the exact text an `INLINE_BODY_SHAPES` entry matches. See
- * D-INLINE-BODY-EXCLUSIONS at the guard's call site.
+ * The hand-authored GitHub references a declared inline-body exception may name:
+ * `github-api.md` and `github-posting.md`, which holds the recipes that post.
+ * Any other scanned file is outside the exception list.
+ */
+const GITHUB_HAND_AUTHORED_REFERENCES: readonly string[] = ['github-api.md', 'github-posting.md'];
+
+/** Whether a scanned path is one of `GITHUB_HAND_AUTHORED_REFERENCES`, by file name. */
+function isGithubHandAuthoredReference(file: string): boolean {
+  return GITHUB_HAND_AUTHORED_REFERENCES.includes(path.basename(file));
+}
+
+/**
+ * Declared inline-body exceptions in the hand-authored `references/github-api.md`
+ * and `references/github-posting.md`, each frozen by the exact text an
+ * `INLINE_BODY_SHAPES` entry matches. See D-INLINE-BODY-EXCLUSIONS at the guard's
+ * call site.
  *
- * The list is EMPTY: every recipe in that file composes its body to
+ * The list is EMPTY: every recipe in those files composes its body to
  * `$DEVFLOW_BODY_RAW`, scrubs it, and posts the scrubbed `$DEVFLOW_BODY` through
  * `--body-file` / `-F body=@`. It stays here because it is the only way to declare
  * an exception, and because both arms below are asserted over it — an offender no
@@ -348,7 +373,7 @@ function collectUndeclaredOffenders(
   known: readonly string[],
 ): string[] {
   return offenders
-    .filter(o => !(o.file.endsWith('github-api.md') && known.includes(o.match)))
+    .filter(o => !(isGithubHandAuthoredReference(o.file) && known.includes(o.match)))
     .map(o => `${o.file}: ${o.match}`);
 }
 
@@ -447,11 +472,19 @@ function cachedInlineBodyCorpus(): InlineBodyCorpus {
 const GITHUB_API_MD_PATH = path.join(skillsDir(), 'git', 'references', 'github-api.md');
 
 /**
+ * The hand-authored reference that holds every recipe which posts, spelled the same
+ * way. It is installed only with compliance on, so the scan must read it from the
+ * source tree: a compliance-off install never carries it.
+ */
+const GITHUB_POSTING_MD_PATH = path.join(skillsDir(), 'git', 'references', 'github-posting.md');
+
+/**
  * A sibling reference in the same scanned corpus, spelled through the same accessor.
  *
- * The forward collector excuses a declared exception only inside github-api.md. Seeding
- * an identical match here is what drives that file-scoping half of the predicate — a
- * seed at GITHUB_API_MD_PATH alone can never distinguish it from an unscoped list.
+ * The forward collector excuses a declared exception only inside the two hand-authored
+ * GitHub references. Seeding an identical match here is what drives that file-scoping half
+ * of the predicate — a seed at GITHUB_API_MD_PATH alone can never distinguish it from an
+ * unscoped list.
  */
 const SIBLING_REFERENCE_MD_PATH = path.join(skillsDir(), 'git', 'references', 'patterns.md');
 
@@ -2412,9 +2445,17 @@ describe('git agent — static content guards', () => {
       corpus.length,
       'inline-body scan corpus is empty — the guard would pass by scanning nothing',
     ).toBeGreaterThan(1);
+    // The posting recipes live in github-posting.md. A corpus without it would leave
+    // every recipe that posts a body unread, and the empty offender list below would
+    // certify nothing.
+    expect(
+      corpus.some(entry => entry.path === GITHUB_POSTING_MD_PATH),
+      'github-posting.md is not in the inline-body scan — its posting recipes would be unpoliced',
+    ).toBe(true);
 
-    // D-INLINE-BODY-EXCLUSIONS — an inline-body recipe in references/github-api.md is
-    // allowed only when KNOWN_GITHUB_API_INLINE_BODIES names it by the exact text an
+    // D-INLINE-BODY-EXCLUSIONS — an inline-body recipe in references/github-api.md or
+    // references/github-posting.md is allowed only when KNOWN_GITHUB_API_INLINE_BODIES
+    // names it by the exact text an
     // INLINE_BODY_SHAPES entry matched. The list is empty, so the corpus must hold no
     // inline body at all. Declaring an exception rather than narrowing the scope back is
     // what keeps a named exception from being a weakened guard (§14.6's release.md
@@ -2429,7 +2470,7 @@ describe('git agent — static content guards', () => {
     // silencing a line that no longer exists.
     expect(
       collectStaleExclusions(offenders, KNOWN_GITHUB_API_INLINE_BODIES),
-      'declared github-api.md exclusion(s) no longer match anything — delete them from the list',
+      'declared github-api.md / github-posting.md exclusion(s) no longer match anything — delete them from the list',
     ).toEqual([]);
 
     // Non-vacuous: the pattern must still match BOTH shapes P2-S7 guarded against —
@@ -2577,6 +2618,7 @@ describe('git agent — static content guards', () => {
     // probe red alongside the guard it backs.
     const seeded: InlineBodyOffender[] = [
       { file: GITHUB_API_MD_PATH, shape: 'long-flag', match: 'gh pr create --title "x" --body ' },
+      { file: GITHUB_POSTING_MD_PATH, shape: 'long-flag', match: 'gh pr create --title "x" --body ' },
       { file: SIBLING_REFERENCE_MD_PATH, shape: 'long-flag', match: 'gh pr create --title "x" --body ' },
     ];
     expect(
@@ -2585,16 +2627,17 @@ describe('git agent — static content guards', () => {
       'is green because it filtered everything away, not because the corpus is clean',
     ).toEqual([
       `${GITHUB_API_MD_PATH}: gh pr create --title "x" --body `,
+      `${GITHUB_POSTING_MD_PATH}: gh pr create --title "x" --body `,
       `${SIBLING_REFERENCE_MD_PATH}: gh pr create --title "x" --body `,
     ]);
     // …and a declared one is excused, so the exception mechanism itself still works —
-    // but only in github-api.md. The identical match text in a sibling reference is still
-    // reported, which is the file-scoping half of the predicate.
+    // but only in the two hand-authored GitHub references. The identical match text in a
+    // sibling reference is still reported, which is the file-scoping half of the predicate.
     expect(
       collectUndeclaredOffenders(seeded, [seeded[0].match]),
-      'a declared exception must excuse its match in github-api.md ONLY — the same text in ' +
-      'another scanned reference must still be reported, or the exception list silences files ' +
-      'it was never scoped to',
+      'a declared exception must excuse its match in github-api.md and github-posting.md ONLY — ' +
+      'the same text in another scanned reference must still be reported, or the exception list ' +
+      'silences files it was never scoped to',
     ).toEqual([`${SIBLING_REFERENCE_MD_PATH}: gh pr create --title "x" --body `]);
   });
 
@@ -3422,12 +3465,485 @@ describe('git agent: the compliance-off build carries no posting operation (AC-1
     expect(scrubSectionOf(off)).toBe(scrub);
   });
 
+  it('carries that scrub section in every Git agent file a machine installs, whatever its two switches (AC-45)', () => {
+    const manifestText = readFileSync(path.join(ROOT, ...VARIANT_MANIFEST_REL_PATH.split('/')), 'utf-8');
+    const parsed = parseVariantManifest(manifestText);
+    if (!parsed.ok) throw new Error(`${VARIANT_MANIFEST_REL_PATH} does not parse: run \`npm run build:mds\``);
+    const host = parsed.value.find(entry => entry.kind === 'agents' && entry.name === 'git');
+    if (host === undefined) throw new Error('the variant manifest has no Git agent host');
+    const machines: VariantSwitches[] = [true, false].flatMap(curation => [true, false].map(compliance => ({ curation, compliance })));
+    const installed = new Set(
+      machines.map(machine => {
+        const key = machineVariantKey(machine, host.axes);
+        return key === 'on' ? 'dist/agents/git.md' : variantOffRelPath(key, 'agents', 'git.md');
+      }),
+    );
+    expect([...installed].sort(), 'the Git agent has a compliance arm and no curation arm, so a both-off machine reads the compliance-off file')
+      .toEqual(['dist/agents/git.md', 'dist/compliance-off/agents/git.md']);
+    const scrub = scrubSectionOf(on);
+    expect(scrub, 'the scrub section is read').toContain('redact-secrets.cjs');
+    for (const rel of installed) {
+      expect(scrubSectionOf(readFileSync(path.join(ROOT, ...rel.split('/')), 'utf-8')), rel).toBe(scrub);
+    }
+  });
+
   it('known-bad probes: the collectors report a seeded posting row, a seeded loading row and an altered scrub section', () => {
     expect(collectPostingOpNames(`${off}\n| \`manage-debt\` | add |`)).toEqual(['manage-debt']);
     const seeded = off.replace('| `check-ci-status` |', '| `post-review-summary` | `references/pr/post-review-summary.md` |\n| `check-ci-status` |');
     expect(collectLoadingRowNames(seeded)).toContain('post-review-summary');
     expect(scrubSectionOf(off.replace('DO NOT POST', 'post anyway'))).not.toBe(scrubSectionOf(on));
     expect(scrubSectionOf('## Output\n')).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The compliance-off reference tree posts no evidence, exceptions, artifact or shipped
+// list (AC-42)
+//
+// With compliance off, the tracker operations that stay still run, but four of them
+// lose the text that feeds a posting step: ensure-pr-ready pastes no test-plan block and
+// no exceptions section, create-release appends no exceptions and no shipped-issues
+// list, and setup-task and ensure-traceable-issue take no plan artifact (and the issue
+// template drops its plan section). Two more kept operations stop pointing at the omitted
+// back-link reference: gather-release-evidence and the GitHub fetch-issue state its rule
+// inline. The guard reads the BUILT trees, because the arms are cut at build time, and
+// reads each provider's file because the three providers share these contracts and steps
+// by construction.
+//
+// Every literal is asserted present in the compliance-on file of the same operation and
+// provider first, so a literal that was reworded away from both trees cannot leave the
+// absence check passing on nothing.
+// ---------------------------------------------------------------------------
+
+/**
+ * The text a compliance-off reference must not carry, per tracker operation, each literal
+ * spelled as the compliance-on file holds it: an input name, a heading, or the step text
+ * that pastes or posts it. A bare input name covers its contract line and every step that
+ * names it. In `ensure-traceable-issue`, `artifact` and `collapsed` cover the artifact
+ * comment and the collapsed block it is posted in, which the three providers word
+ * differently.
+ */
+const COMPLIANCE_OFF_ABSENT_LITERALS: ReadonlyArray<{ readonly op: string; readonly literals: readonly string[] }> = [
+  {
+    op: 'ensure-pr-ready',
+    literals: ['PR_TEST_PLAN_BLOCK', 'PR_EXCEPTIONS', '`check block`', '## Evidence Exceptions', 'Reviewer Focus Areas'],
+  },
+  { op: 'create-release', literals: ['TRACEABILITY_EXCEPTIONS', 'SHIPPED_ISSUES', '## Shipped Issues'] },
+  { op: 'setup-task', literals: ['PLAN_ARTIFACT_PATH'] },
+  { op: 'ensure-traceable-issue', literals: ['PLAN_ARTIFACT_PATH', '## Implementation Plan', 'artifact', 'collapsed'] },
+];
+
+/**
+ * What a kept operation states inline in the compliance-off tree, because the omitted
+ * `backlink-shipped-issues` reference states it for the compliance-on tree: the
+ * provider's own rate-limit signal in `gather-release-evidence`, and for GitHub the
+ * reason the reference grammar strips one leading `#` in `fetch-issue`.
+ */
+const COMPLIANCE_OFF_INLINE_RULES: ReadonlyArray<{ readonly op: string; readonly provider: string; readonly literal: string }> = [
+  { op: 'gather-release-evidence', provider: 'github', literal: 'X-RateLimit-Remaining' },
+  { op: 'gather-release-evidence', provider: 'jira', literal: 'Retry-After' },
+  { op: 'gather-release-evidence', provider: 'linear', literal: 'RATELIMITED' },
+  { op: 'fetch-issue', provider: 'github', literal: 'opens a shell comment' },
+];
+
+/**
+ * The names of the reference files a compliance-off install omits: each omitted path's
+ * basename without `.md`, taken from the registry that decides the omission and never
+ * retyped. A kept reference that names one of them points at a file the install does not
+ * hold.
+ */
+function omittedReferenceNames(): string[] {
+  const omitted = complianceOffOmittedRelPaths(VARIANT_MODULES);
+  if (!omitted.ok) throw new Error('the shipped registry must agree with POSTING_OPS');
+  return [...new Set([...omitted.value].map(rel => path.posix.basename(rel, '.md')))].sort();
+}
+
+/** Named collector: the literals of `literals` that `text` holds. */
+function collectHeldLiterals(text: string, literals: readonly string[]): string[] {
+  return literals.filter(literal => text.includes(literal));
+}
+
+/** Read one built reference from the compliance-on or the compliance-off tree; a build hint when absent. */
+function readBuiltReference(root: string, rel: string): string {
+  const file = path.join(ROOT, ...root.split('/'), ...rel.split('/'));
+  try {
+    return readFileSync(file, 'utf-8');
+  } catch {
+    throw new Error(`${root}/${rel} is absent — run \`npm run build:mds\` first (this guard reads a built reference)`);
+  }
+}
+
+describe('git references: the compliance-off build carries no evidence paste, exceptions, artifact or shipped list (AC-42)', () => {
+  const PROVIDERS = TRACKER_PROVIDER_IDS;
+
+  it('checks every provider and every listed operation', () => {
+    expect(PROVIDERS.length, 'no provider was checked').toBeGreaterThan(0);
+    for (const { op, literals } of COMPLIANCE_OFF_ABSENT_LITERALS) {
+      expect(literals.length, `${op} lists no literal`).toBeGreaterThan(0);
+    }
+  });
+
+  for (const provider of PROVIDERS) {
+    for (const { op, literals } of COMPLIANCE_OFF_ABSENT_LITERALS) {
+      it(`${provider}/${op}: the compliance-on file holds each literal and the compliance-off file holds none`, () => {
+        const rel = operationReferenceRel(op, provider);
+        if (rel === null) throw new Error(`${op} has no reference for ${provider}`);
+        expect(collectHeldLiterals(readBuiltReference(SKILL_REFS_OUTPUT_DIR, rel), literals), 'the on file must hold every literal, or the absence check proves nothing').toEqual(literals);
+        expect(collectHeldLiterals(readBuiltReference(COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR, rel), literals)).toEqual([]);
+      });
+    }
+
+    it(`${provider}/ensure-pr-ready: the compliance-off file admits the wave block through the links-only check and keeps the wave caller block`, () => {
+      const rel = operationReferenceRel('ensure-pr-ready', provider);
+      if (rel === null) throw new Error(`ensure-pr-ready has no reference for ${provider}`);
+      const on = readBuiltReference(SKILL_REFS_OUTPUT_DIR, rel);
+      const off = readBuiltReference(COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR, rel);
+      expect(on).toContain('`PR_WAVE_BLOCK` (`check wave`)');
+      expect(on, 'the on file keeps the plain wave check').not.toContain('--links-only');
+      expect(off).toContain('check wave --links-only <file>');
+      expect(off).toContain('`PR_WAVE_BLOCK`');
+    });
+  }
+
+  it('decision-markers: the compliance-off file drops the thread-resolution (D9) and publication-gate (D10) rows and keeps the other markers', () => {
+    const on = readBuiltReference(SKILL_REFS_OUTPUT_DIR, 'decision-markers.md');
+    const off = readBuiltReference(COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR, 'decision-markers.md');
+    expect(on).toContain('| D9 | Thread-resolution gate');
+    expect(on).toContain('resolveReviewThread');
+    expect(on).toContain('| D10 | Publication gate');
+    expect(off).not.toContain('| D9 |');
+    expect(off).not.toContain('resolveReviewThread');
+    expect(off).not.toContain('| D10 |');
+    expect(off).not.toContain('post-review-summary');
+    expect(off).toContain('| D6 | Merge-readiness report');
+  });
+
+  for (const { op, provider, literal } of COMPLIANCE_OFF_INLINE_RULES) {
+    it(`${provider}/${op}: the compliance-off file states the rule inline that the omitted back-link reference states for the compliance-on file`, () => {
+      const rel = operationReferenceRel(op, provider);
+      if (rel === null) throw new Error(`${op} has no reference for ${provider}`);
+      expect(readBuiltReference(SKILL_REFS_OUTPUT_DIR, rel), 'the on file points at the omitted reference, so the inline rule is what replaces it')
+        .toContain('backlink-shipped-issues');
+      expect(readBuiltReference(COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR, rel)).toContain(literal);
+    });
+  }
+
+  it('the inline rules cover every provider of gather-release-evidence', () => {
+    const covered = COMPLIANCE_OFF_INLINE_RULES.filter(rule => rule.op === 'gather-release-evidence').map(rule => rule.provider);
+    expect([...covered].sort()).toEqual([...TRACKER_PROVIDER_IDS].sort());
+  });
+
+  it('known-bad probes: the collector reports a seeded literal in each listed operation', () => {
+    for (const { op, literals } of COMPLIANCE_OFF_ABSENT_LITERALS) {
+      for (const literal of literals) {
+        expect(collectHeldLiterals(`kept text\n${literal}\n`, literals), `${op}: ${literal}`).toEqual([literal]);
+      }
+    }
+    expect(collectHeldLiterals('kept text', COMPLIANCE_OFF_ABSENT_LITERALS[0].literals)).toEqual([]);
+  });
+});
+
+describe('git references: no compliance-off reference names an omitted reference (AC-42)', () => {
+  const OFF_TREE = path.join(ROOT, ...COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR.split('/'));
+
+  it('derives the omitted names from the registry: every posting op, and at least the publication gate besides', () => {
+    const names = omittedReferenceNames();
+    for (const op of POSTING_OPERATIONS) expect(names, op).toContain(op);
+    expect(names.length, 'no document besides the posting ops is omitted').toBeGreaterThan(POSTING_OPERATIONS.length);
+  });
+
+  it('the compliance-off tree holds reference files to scan', () => {
+    const files = walkFiles(OFF_TREE, file => file.endsWith('.md'));
+    expect(files.length, `${COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR} holds no reference — run \`npm run build:mds\` first`).toBeGreaterThan(0);
+  });
+
+  it('no file of the compliance-off tree names an omitted reference', () => {
+    const names = omittedReferenceNames();
+    const offenders = walkFiles(OFF_TREE, file => file.endsWith('.md'))
+      .flatMap(file => collectHeldLiterals(readFileSync(file, 'utf-8'), names)
+        .map(name => `${path.relative(OFF_TREE, file).split(path.sep).join('/')}: ${name}`));
+    expect(offenders, 'a kept reference must state a rule inline or point at a kept reference, never at an omitted file').toEqual([]);
+  });
+
+  it('non-vacuity: the compliance-on tree does name the omitted back-link reference from the kept operations', () => {
+    for (const rel of ['tracker/github/fetch-issue.md', 'tracker/github/gather-release-evidence.md', 'tracker/jira/gather-release-evidence.md', 'tracker/linear/gather-release-evidence.md']) {
+      expect(collectHeldLiterals(readBuiltReference(SKILL_REFS_OUTPUT_DIR, rel), omittedReferenceNames()), rel).toContain('backlink-shipped-issues');
+    }
+  });
+
+  it('known-bad probe: a seeded line naming each omitted reference is reported', () => {
+    const names = omittedReferenceNames();
+    for (const name of names) {
+      expect(collectHeldLiterals(`kept text\nOn a rate limit, follow the \`${name}\` reference.\n`, names), name).toEqual([name]);
+    }
+    expect(collectHeldLiterals('kept text', names)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// With compliance off, ensure-traceable-issue writes nothing to an existing issue
+//
+// On an existing issue (a numeric reference, or a text search that finds one) the
+// compliance-on operation posts a traceability comment. With compliance off the
+// operation resolves the issue, returns its reference and makes no comment call on any
+// provider. Creating a NEW issue stays, so the create call and its scrub stay.
+//
+// The guard reads the BUILT compliance-off references. A comment call is spelled as each
+// provider's compliance-on file spells it: GitHub posts through `gh issue comment`, and
+// Jira and Linear through the *add comment* capability behind the posting gate. Each
+// literal is asserted present in the compliance-on file first, so a literal that was
+// reworded away from both trees cannot leave the absence check passing on nothing.
+// ---------------------------------------------------------------------------
+
+/** The comment calls (and the comment text) each provider's compliance-on file spells. */
+const EXISTING_ISSUE_COMMENT_CALLS: Readonly<Record<string, readonly string[]>> = {
+  github: ['gh issue comment', 'Devflow Traceability Update', 'structured comment'],
+  jira: ['*add comment*', 'structured comment'],
+  linear: ['*add comment*', 'structured comment'],
+};
+
+/** What a tool-call provider's existing-issue path must not route through: the posting gate is for writes. */
+const EXISTING_ISSUE_GATE_REFERENCE = '### Posting gate';
+
+/** What the new-issue path keeps, per provider, with compliance off (AC-14). */
+const NEW_ISSUE_CREATE_CALLS: Readonly<Record<string, string>> = {
+  github: 'gh issue create',
+  jira: '*create issue*',
+  linear: '*create issue*',
+};
+
+/** An API route to a comment that `gh api` could reach; barred in the off file, never required in the on file. */
+const GH_API_COMMENTS_ROUTE = /gh api\b[^\n]*\/comments/;
+
+/**
+ * Named collector: the comment calls `text` holds for `provider`, in the order of
+ * EXISTING_ISSUE_COMMENT_CALLS, with the `gh api` comments route last for GitHub.
+ */
+function collectCommentCalls(text: string, provider: string): string[] {
+  const literals = (EXISTING_ISSUE_COMMENT_CALLS[provider] ?? []).filter(literal => text.includes(literal));
+  return provider === 'github' && GH_API_COMMENTS_ROUTE.test(text) ? [...literals, 'gh api …/comments'] : literals;
+}
+
+/** Named extractor: the existing-issue path of the Process, step 1 up to step 2 ('' when step 1 is absent). */
+function existingIssuePathOf(text: string): string {
+  const start = text.search(/^1\. If `ISSUE_INPUT` is provided/m);
+  if (start === -1) return '';
+  const rest = text.slice(start);
+  const end = rest.search(/^2\. If no `ISSUE_INPUT`/m);
+  return end === -1 ? rest : rest.slice(0, end);
+}
+
+describe('git references: the compliance-off ensure-traceable-issue writes nothing to an existing issue (AC-42)', () => {
+  const OP = 'ensure-traceable-issue';
+  const refOf = (provider: string): string => {
+    const rel = operationReferenceRel(OP, provider);
+    if (rel === null) throw new Error(`${OP} has no reference for ${provider}`);
+    return rel;
+  };
+
+  for (const provider of TRACKER_PROVIDER_IDS) {
+    it(`${provider}: the compliance-on file holds each comment call, and the compliance-off file holds none, on the existing-issue path or anywhere`, () => {
+      const rel = refOf(provider);
+      const on = readBuiltReference(SKILL_REFS_OUTPUT_DIR, rel);
+      const off = readBuiltReference(COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR, rel);
+      expect(collectCommentCalls(on, provider), 'the on file must hold every comment call, or the absence check proves nothing')
+        .toEqual(EXISTING_ISSUE_COMMENT_CALLS[provider]);
+      expect(existingIssuePathOf(on), 'the on file must have an existing-issue path to slice').not.toBe('');
+      expect(collectCommentCalls(existingIssuePathOf(on), provider), 'the on existing-issue path posts the comment').not.toEqual([]);
+      expect(existingIssuePathOf(off), 'the off file must have an existing-issue path to slice').not.toBe('');
+      expect(collectCommentCalls(existingIssuePathOf(off), provider), 'the off existing-issue path').toEqual([]);
+      expect(collectCommentCalls(off, provider), 'the off file').toEqual([]);
+    });
+
+    it(`${provider}: the compliance-off existing-issue path resolves the issue, writes nothing and returns its reference`, () => {
+      const existingPath = existingIssuePathOf(readBuiltReference(COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR, refOf(provider)));
+      expect(existingPath).toContain('Write nothing to the issue');
+      expect(existingPath).toMatch(/Return the issue (number|key|reference)\./);
+    });
+
+    it(`${provider}: the compliance-off file keeps the new-issue create call and its scrub (AC-14)`, () => {
+      const off = readBuiltReference(COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR, refOf(provider));
+      expect(off).toContain(NEW_ISSUE_CREATE_CALLS[provider]);
+      expect(off).toContain('redact-secrets.cjs');
+    });
+  }
+
+  it('the tool-call providers route no part of their off existing-issue path through the posting gate, and their on path does', () => {
+    for (const provider of TRACKER_PROVIDER_IDS.filter(id => id !== 'github')) {
+      const on = readBuiltReference(SKILL_REFS_OUTPUT_DIR, refOf(provider));
+      const off = readBuiltReference(COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR, refOf(provider));
+      expect(existingIssuePathOf(on), `${provider} on`).toContain(EXISTING_ISSUE_GATE_REFERENCE);
+      expect(existingIssuePathOf(off), `${provider} off`).not.toContain(EXISTING_ISSUE_GATE_REFERENCE);
+      expect(off, `${provider} off keeps the gate for the new issue`).toContain(EXISTING_ISSUE_GATE_REFERENCE);
+    }
+  });
+
+  it('known-bad probe: the collectors report the old compliance-on text and a seeded call, and pass the kept text', () => {
+    for (const provider of TRACKER_PROVIDER_IDS) {
+      const on = readBuiltReference(SKILL_REFS_OUTPUT_DIR, refOf(provider));
+      expect(collectCommentCalls(existingIssuePathOf(on), provider), `${provider}: the old text`).not.toEqual([]);
+      for (const literal of EXISTING_ISSUE_COMMENT_CALLS[provider]) {
+        expect(collectCommentCalls(`kept text\n${literal}\n`, provider), `${provider}: ${literal}`).toEqual([literal]);
+      }
+      expect(collectCommentCalls('kept text', provider)).toEqual([]);
+    }
+    expect(collectCommentCalls('gh api repos/o/r/issues/1/comments --method POST', 'github')).toEqual(['gh api …/comments']);
+    expect(existingIssuePathOf('1. If `ISSUE_INPUT` is provided:\n   - Post.\n2. If no `ISSUE_INPUT`: create\n')).toBe('1. If `ISSUE_INPUT` is provided:\n   - Post.\n');
+    expect(existingIssuePathOf('no steps here')).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The scrub and the writes it gates are the same bytes in both reference trees (AC-45)
+//
+// With compliance off, the operations that stay still publish a body: ensure-pr-ready opens and
+// retitles the PR, ensure-traceable-issue creates a new issue, and create-release writes the
+// notes. Each body reaches its sink through the D11 scrub. The compliance arms (AC-42) cut the
+// text that feeds a posting step, and they must not touch the scrub or the write it gates.
+//
+// Those kept body-posting references now carry arms, so they differ as whole files, and "byte
+// identical in both trees" is read in two parts:
+//   - the scrub lines of each kept body-posting reference are the same lines in the same order in
+//     both trees. In ensure-traceable-issue the compliance-off file drops the existing-issue
+//     comment path (AC-42), so its scrub lines are an ordered subset of the compliance-on lines;
+//   - every kept reference with no compliance arm is a byte copy, and the files that do differ
+//     are exactly the armed roster, so the roster is not stale.
+// The Git agent's own scrub section is held in the compliance-off Git agent block above.
+// ---------------------------------------------------------------------------
+
+/** What makes a reference line part of the D11 scrub, or of a write that the scrub gates. */
+const SCRUB_LINE_TOKENS: readonly string[] = [
+  'Comment-sink scrub',
+  'redact-secrets.cjs',
+  'DEVFLOW_BODY',
+  'DEVFLOW_NOTES',
+  'SCRUBBED_BODY',
+  'DO NOT POST',
+  'Posting gate',
+  '--body-file',
+  '--notes-file',
+  '-F body=@',
+];
+
+/**
+ * The kept operations whose compliance-off scrub lines are an ordered subset of the compliance-on
+ * lines, not the same lines: the AC-42 arm drops the existing-issue comment path, and that path
+ * scrubbed and posted. Every other body-posting operation keeps all of its scrub lines.
+ */
+const ORDERED_SUBSET_SCRUB_OPS: readonly string[] = ['ensure-traceable-issue'];
+
+type ScrubRelation = 'identical' | 'ordered-subset';
+
+/** Named extractor: the lines of a reference that carry a scrub token, in order. */
+export function scrubLinesOf(text: string): string[] {
+  return text.split('\n').filter(line => SCRUB_LINE_TOKENS.some(token => line.includes(token)));
+}
+
+/**
+ * Named collector: how the scrub lines of a compliance-off reference differ from those of the
+ * compliance-on reference, one entry per defect. `identical` wants the same lines in the same
+ * order. `ordered-subset` wants every off line in the on lines, in order.
+ */
+export function collectScrubDefects(on: string, off: string, relation: ScrubRelation): string[] {
+  const onLines = scrubLinesOf(on);
+  const offLines = scrubLinesOf(off);
+  const defects: string[] = [];
+  if (relation === 'identical') {
+    if (onLines.length !== offLines.length) defects.push(`${offLines.length} scrub line(s) off, ${onLines.length} on`);
+    const shared = Math.min(onLines.length, offLines.length);
+    for (let i = 0; i < shared; i += 1) {
+      if (onLines[i] !== offLines[i]) defects.push(`scrub line ${i + 1} differs: ${offLines[i].trim().slice(0, 80)}`);
+    }
+    return defects;
+  }
+  let from = 0;
+  for (const line of offLines) {
+    const at = onLines.indexOf(line, from);
+    if (at === -1) defects.push(`an off scrub line is not in the on file, in order: ${line.trim().slice(0, 80)}`);
+    else from = at + 1;
+  }
+  return defects;
+}
+
+/** Named collector: the references of `rels` whose compliance-on and compliance-off text differ, sorted. */
+export function collectDifferingReferences(
+  rels: readonly string[],
+  readOn: (rel: string) => string,
+  readOff: (rel: string) => string,
+): string[] {
+  return rels.filter(rel => readOn(rel) !== readOff(rel)).sort();
+}
+
+describe('git references: the scrub and the writes it gates are unchanged by the compliance arms (AC-45)', () => {
+  const keptOps = TRACKER_GITHUB_OPS.filter(op => !POSTING_OPERATIONS.includes(op));
+  const readOn = (rel: string): string => readBuiltReference(SKILL_REFS_OUTPUT_DIR, rel);
+  const readOff = (rel: string): string => readBuiltReference(COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR, rel);
+  const refOf = (op: string, provider: string): string => {
+    const rel = operationReferenceRel(op, provider);
+    if (rel === null) throw new Error(`${op} has no reference for ${provider}`);
+    return rel;
+  };
+  /** The kept operations that hold scrub lines in the compliance-off file of any provider. */
+  const bodyPostingOps: readonly string[] = keptOps.filter(op => TRACKER_PROVIDER_IDS.some(provider => scrubLinesOf(readOff(refOf(op, provider))).length > 0));
+  const relationOf = (op: string): ScrubRelation => (ORDERED_SUBSET_SCRUB_OPS.includes(op) ? 'ordered-subset' : 'identical');
+
+  it('finds the kept body-posting operations by their scrub lines, and each one scrubs under every provider', () => {
+    expect(bodyPostingOps).toEqual(expect.arrayContaining(['create-release', 'ensure-pr-ready', 'ensure-traceable-issue']));
+    for (const op of bodyPostingOps) {
+      for (const provider of TRACKER_PROVIDER_IDS) {
+        expect(scrubLinesOf(readOff(refOf(op, provider))).length, `${provider}/${op} holds no scrub line`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  for (const op of bodyPostingOps) {
+    for (const provider of TRACKER_PROVIDER_IDS) {
+      it(`${provider}/${op}: the compliance-off scrub lines are ${relationOf(op) === 'identical' ? 'the compliance-on lines' : 'an ordered subset of the compliance-on lines'}`, () => {
+        const rel = refOf(op, provider);
+        expect(scrubLinesOf(readOn(rel)).length, 'the on file must hold scrub lines, or the comparison proves nothing').toBeGreaterThan(0);
+        expect(collectScrubDefects(readOn(rel), readOff(rel), relationOf(op))).toEqual([]);
+      });
+    }
+  }
+
+  it('the ordered-subset exception is live: the on file of each such operation holds scrub lines that the off file dropped', () => {
+    expect(ORDERED_SUBSET_SCRUB_OPS.every(op => bodyPostingOps.includes(op)), 'an exception for an operation that no longer scrubs').toBe(true);
+    for (const op of ORDERED_SUBSET_SCRUB_OPS) {
+      for (const provider of TRACKER_PROVIDER_IDS) {
+        const rel = refOf(op, provider);
+        expect(scrubLinesOf(readOn(rel)).length, `${provider}/${op}`).toBeGreaterThan(scrubLinesOf(readOff(rel)).length);
+      }
+    }
+  });
+
+  it('copies every kept reference with no compliance arm byte for byte, and differs exactly where the armed roster says', () => {
+    const kept = installedReferenceManifest({ compliance: false });
+    expect(kept.length, 'the compliance-off manifest is read').toBeGreaterThan(0);
+    expect(collectDifferingReferences(kept, readOn, readOff)).toEqual([...COMPLIANCE_ARMED_REFERENCES].sort());
+  });
+
+  it('known-bad probes: an altered, a dropped and an added scrub line are each reported, and the real pair is not', () => {
+    const rel = refOf('create-release', 'github');
+    const on = readOn(rel);
+    const off = readOff(rel);
+    expect(collectScrubDefects(on, off, 'identical')).toEqual([]);
+    const first = scrubLinesOf(off)[0];
+    expect(collectScrubDefects(on, off.replace(first, `${first} and skip the scrub on failure`), 'identical')).toHaveLength(1);
+    expect(collectScrubDefects(on, off.replace(`${first}\n`, ''), 'identical')).toHaveLength(1);
+    const added = `${off}\ngh release create v1 --notes-file "$DEVFLOW_NOTES_RAW"\n`;
+    expect(collectScrubDefects(on, added, 'identical')).toHaveLength(1);
+    expect(collectScrubDefects(on, added, 'ordered-subset')).toHaveLength(1);
+    const issue = refOf('ensure-traceable-issue', 'github');
+    expect(collectScrubDefects(readOn(issue), readOff(issue), 'ordered-subset')).toEqual([]);
+    expect(collectScrubDefects(readOn(issue), readOff(issue), 'identical').length, 'the identical rule must refuse the dropped path').toBeGreaterThan(0);
+  });
+
+  it('known-bad probe: one byte changed in a reference with no arm is reported against the armed roster', () => {
+    const kept = installedReferenceManifest({ compliance: false });
+    const unarmed = kept.find(rel => !COMPLIANCE_ARMED_REFERENCES.includes(rel));
+    if (unarmed === undefined) throw new Error('every kept reference is armed, so the whole-file rule has no subject');
+    const tampered = (rel: string): string => (rel === unarmed ? `${readOff(rel)} ` : readOff(rel));
+    expect(collectDifferingReferences(kept, readOn, tampered)).toEqual([...COMPLIANCE_ARMED_REFERENCES, unarmed].sort());
   });
 });
 
@@ -3508,10 +4024,12 @@ describe('git agent: the D9 resolve condition is stated once in the reference tr
   });
 
   it('the deferring reference names the gate instead of restating it', () => {
-    const githubApi = corpus.find(e => e.path.endsWith('git/references/github-api.md'));
-    expect(githubApi, 'github-api.md is not in the corpus').toBeDefined();
+    // The mutation that applies the gate now lives in github-posting.md, so the sentence that
+    // defers to the gate moved with it.
+    const githubPosting = corpus.find(e => e.path.endsWith('git/references/github-posting.md'));
+    expect(githubPosting, 'github-posting.md is not in the corpus').toBeDefined();
     expect(
-      githubApi!.content,
+      githubPosting!.content,
       'a reference that drops the restatement must say WHERE the rule lives, or the next author ' +
       'writes a third one to fill the hole',
     ).toContain("the Git agent's D9 gate");
@@ -4080,5 +4598,106 @@ describe('git agent: PR ops use a fresh base for branch diffs (#495)', () => {
     expect(collectValidateBranchBaseDefects(`${sectionValidate}\nWhen the base cannot be determined, emit an intentional empty \`### Diff Scope\` block.`)).toContain('step 6 never gives an empty Diff Scope');
     expect(collectEnsurePrReadyBaseDefects(ensure.replace('`REASON=resolver-unavailable`', 'a stop'))).toContain('5b takes the one BASE_REF line only with exit=0 and reads other output as resolver-unavailable');
     expect(collectEnsurePrReadyBaseDefects(ensure.replaceAll(BASE_DEGRADED_LINE, '`x`'))).toContain('5b prints the DEGRADED base line with its fix for degraded and stop');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The posting recipes have one home, github-posting.md (AC-43, TP-60)
+//
+// With compliance off a machine installs no step that posts. The recipes that post a
+// comment, a review or a thread reply used to sit in github-api.md, which installs in
+// every state, so they moved to github-posting.md, which installs only with compliance
+// on. These guards hold the split from both sides: github-api.md carries no posting
+// recipe, github-posting.md carries them, and a pointer to the second file from a file
+// that installs everywhere says where the pointer is true.
+// ---------------------------------------------------------------------------
+
+interface PostingRecipePattern {
+  readonly name: string;
+  readonly re: RegExp;
+}
+
+/**
+ * What marks a posting recipe in a hand-authored GitHub reference: the commands and
+ * calls that write a comment, a review, an edit or a thread reply, and the name of any
+ * posting operation. Continuations are folded first, so a REST call split over
+ * several lines is one command.
+ */
+const POSTING_RECIPE_PATTERNS: readonly PostingRecipePattern[] = [
+  { name: 'gh pr comment', re: /\bgh pr comment\b/ },
+  { name: 'gh issue comment', re: /\bgh issue comment\b/ },
+  { name: 'gh pr review', re: /\bgh pr review\b/ },
+  { name: 'gh edit', re: /\bgh (?:pr|issue) edit\b/ },
+  { name: 'REST comment write', re: /-X\s+(?:POST|PATCH)\b[^\n]*\/comments/ },
+  { name: 'review-thread mutation', re: /\b(?:addPullRequestReviewThreadReply|resolveReviewThread)\b/ },
+  ...POSTING_OPERATIONS.map(op => ({ name: `posting operation ${op}`, re: new RegExp(`(?<![\\w-])${op}(?![\\w-])`) })),
+];
+
+/** Named collector: the posting-recipe patterns a text matches. */
+function collectPostingRecipes(text: string): string[] {
+  const joined = joinContinuations(text);
+  return POSTING_RECIPE_PATTERNS.filter(pattern => pattern.re.test(joined)).map(pattern => pattern.name);
+}
+
+/** Named collector: lines that name github-posting.md without saying it may be absent. */
+function collectUnqualifiedPostingPointers(file: string, text: string): string[] {
+  return text
+    .split('\n')
+    .flatMap((line, index) => (line.includes('github-posting.md') && !line.includes('where installed') ? [`${file}:${index + 1}`] : []));
+}
+
+describe('git references: the posting recipes live in github-posting.md only (AC-43, TP-60)', () => {
+  const githubApi = readFileSync(GITHUB_API_MD_PATH, 'utf-8');
+  const githubPosting = readFileSync(GITHUB_POSTING_MD_PATH, 'utf-8');
+
+  it('github-api.md holds no posting recipe', () => {
+    expect(
+      collectPostingRecipes(githubApi),
+      'github-api.md installs with compliance off, so a posting recipe here reaches a machine that posts nothing',
+    ).toEqual([]);
+  });
+
+  it('github-posting.md holds the comment, review and thread recipes', () => {
+    expect(collectPostingRecipes(githubPosting)).toEqual(
+      expect.arrayContaining(['gh pr review', 'REST comment write', 'review-thread mutation']),
+    );
+  });
+
+  it('github-posting.md says what it holds and that it installs only with compliance on', () => {
+    expect(githubPosting).toContain('A machine with compliance on installs this file. A machine with compliance off does not.');
+    expect(githubPosting, 'the temp files and the trap stay in github-api.md').toContain('"The D11 temp files, and their removal"');
+    expect(githubApi).toContain('## The D11 temp files, and their removal');
+  });
+
+  it('a file that installs in every state names github-posting.md only where it may be absent', () => {
+    const skill = readFileSync(path.join(skillsDir(), 'git', 'SKILL.md'), 'utf-8');
+    expect(collectUnqualifiedPostingPointers('SKILL.md', skill)).toEqual([]);
+    expect(collectUnqualifiedPostingPointers('github-api.md', githubApi)).toEqual([]);
+    expect(skill, 'the pointer exists, or the qualifier check above passes on nothing').toContain('references/github-posting.md');
+    expect(githubApi).toContain('github-posting.md');
+  });
+
+  it('known-bad probe: each pattern fires on its own shape, and the pointer check names an unqualified line', () => {
+    const shapes: readonly (readonly [string, string])[] = [
+      ['gh pr comment', 'gh pr comment 12 --body-file "$DEVFLOW_BODY"'],
+      ['gh issue comment', 'gh issue comment 12 --body-file "$DEVFLOW_BODY"'],
+      ['gh pr review', 'gh pr review 12 --approve --body-file "$DEVFLOW_BODY"'],
+      ['gh edit', 'gh pr edit 12 --body-file "$DEVFLOW_BODY"'],
+      ['REST comment write', 'gh api \\\n  -X POST \\\n  "repos/o/r/pulls/1/comments"'],
+      ['review-thread mutation', 'mutation { resolveReviewThread(input: {}) }'],
+      ...POSTING_OPERATIONS.map(op => [`posting operation ${op}`, `Run ${op} next.`] as const),
+    ];
+    const missed = shapes.filter(([name, text]) => !collectPostingRecipes(text).includes(name)).map(([name]) => name);
+    expect(missed, 'a pattern that fires on nothing guards nothing').toEqual([]);
+    expect(collectPostingRecipes('gh pr diff 12 --name-only')).toEqual([]);
+    expect(collectUnqualifiedPostingPointers('probe.md', 'See `references/github-posting.md`.\nOK, where installed: `github-posting.md`.')).toEqual(['probe.md:1']);
+  });
+
+  it('review-methodology keeps its prohibitions: a review writes findings into its report and posts nothing', () => {
+    const patterns = readFileSync(path.join(skillsDir(), 'review-methodology', 'references', 'patterns.md'), 'utf-8');
+    const violations = readFileSync(path.join(skillsDir(), 'review-methodology', 'references', 'violations.md'), 'utf-8');
+    expect(patterns).toContain('A review writes findings into its report.');
+    expect(violations).toContain('A review that posts its own comments bypasses the repo-visibility gate');
+    expect(patterns, 'the 6-step process no longer has a step that posts').not.toMatch(/Post Comments|Use GitHub API for PR comments/);
   });
 });

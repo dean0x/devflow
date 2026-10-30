@@ -49,9 +49,19 @@ import {
   MDS_GENERATOR_HOSTS,
   CURATION_VARIANT_HOSTS,
   COMPLIANCE_VARIANT_HOSTS,
+  COMPLIANCE_ARMED_REFERENCES,
 } from './fixtures/mds-manifest.js';
-import { generatedReferenceManifest } from '../src/core/mds-variants.js';
-import { parseVariantManifest, describeVariantManifestParseError } from '../src/core/curation-variants.js';
+import {
+  COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR,
+  SKILL_REFS_OUTPUT_DIR,
+  generatedReferenceManifest,
+  installedReferenceManifest,
+} from '../src/core/mds-variants.js';
+import {
+  containsVariantMarker,
+  parseVariantManifest,
+  describeVariantManifestParseError,
+} from '../src/core/curation-variants.js';
 import {
   splitFrontmatter,
   buildCommittedTree,
@@ -859,10 +869,15 @@ describe('variant manifest', () => {
     return Object.entries(manifest.hosts).filter(([, axes]) => axes[axis]).map(([host]) => host).sort();
   }
 
-  /** Named collector: the compiled prompt files under one tree of the build, as `<kind>/<name>`, sorted. */
+  /**
+   * Named collector: the compiled prompt files under one tree of the build, as `<kind>/<name>`, sorted.
+   * The compliance-off references sit under the same tree, in `skills/`, and are not prompts.
+   */
   function builtPrompts(tree: string): string[] {
     return walkFiles(path.join(BUILT_ROOT, tree), f => f.endsWith('.md'))
-      .map(f => path.relative(path.join(BUILT_ROOT, tree), f).split(path.sep).join('/').replace(/\.md$/, ''))
+      .map(f => path.relative(path.join(BUILT_ROOT, tree), f).split(path.sep).join('/'))
+      .filter(rel => !rel.startsWith('skills/'))
+      .map(rel => rel.replace(/\.md$/, ''))
       .sort();
   }
 
@@ -909,19 +924,84 @@ describe('variant manifest', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 6c. A reference module may carry no variant marker (TP-12)
+// 6b2. The compliance-off references tree of the committed sources (AC-39, AC-40)
 //
-// A reference module fans out into sections that ship as written: an arm in one has
-// nothing to select, so a marker of either axis would reach the installed reference
-// as text. The build refuses it. A marker of the compliance axis is refused the way a
-// marker of the curation axis always was.
+// The tree equals the compliance-off manifest: every file a compliance-off install
+// carries and none it omits. Where a module has no compliance arm the file is a byte
+// copy of the compliance-on one, so an installer that reads this one root never falls
+// through to the compliance-on tree.
 // ---------------------------------------------------------------------------
 
-describe('a reference module may carry no variant marker (TP-12)', () => {
+describe('the compliance-off references tree (AC-39)', () => {
+  /** Named collector: the `.md` files under one references root of the build, relative to it, sorted. */
+  function builtReferences(rootRel: string): string[] {
+    const root = path.join(BUILT_ROOT, ...rootRel.split('/'));
+    return walkFiles(root, f => f.endsWith('.md'))
+      .map(f => path.relative(root, f).split(path.sep).join('/'))
+      .sort();
+  }
+
+  async function readReference(rootRel: string, rel: string): Promise<string> {
+    return fs.readFile(path.join(BUILT_ROOT, ...rootRel.split('/'), ...rel.split('/')), 'utf-8');
+  }
+
+  it('keeps the compliance-on tree equal to the build manifest', () => {
+    expect(builtReferences(SKILL_REFS_OUTPUT_DIR)).toEqual([...generatedReferenceManifest()].sort());
+  });
+
+  it('holds exactly the files the compliance-off manifest names', () => {
+    const manifest = installedReferenceManifest({ compliance: false });
+    expect(manifest.length, 'an empty manifest makes the comparison vacuous').toBeGreaterThan(0);
+    expect(builtReferences(COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR)).toEqual([...manifest].sort());
+  });
+
+  it('holds none of the 17 references a compliance-off install omits', () => {
+    const omitted = installedReferenceManifest().filter(rel => !installedReferenceManifest({ compliance: false }).includes(rel));
+    expect(omitted).toHaveLength(17);
+    const built = new Set(builtReferences(COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR));
+    for (const rel of omitted) expect(built.has(rel), `${rel} is in the compliance-off tree`).toBe(false);
+  });
+
+  it('copies a file with no arm byte for byte, and differs from the compliance-on file exactly where the roster says', async () => {
+    const files = builtReferences(COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR);
+    const differing: string[] = [];
+    for (const rel of files) {
+      const off = await readReference(COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR, rel);
+      const on = await readReference(SKILL_REFS_OUTPUT_DIR, rel);
+      if (off !== on) differing.push(rel);
+    }
+    expect(files.length, 'no file was compared').toBeGreaterThan(0);
+    expect(differing).toEqual([...COMPLIANCE_ARMED_REFERENCES].sort());
+  });
+
+  it('leaves no variant marker in a file of either tree', async () => {
+    for (const rootRel of [SKILL_REFS_OUTPUT_DIR, COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR]) {
+      const files = builtReferences(rootRel);
+      expect(files.length, `${rootRel} holds no file`).toBeGreaterThan(0);
+      for (const rel of files) {
+        expect(containsVariantMarker(await readReference(rootRel, rel)), `${rootRel}/${rel} carries a marker`).toBe(false);
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6c. A reference module may carry compliance arms and no curation marker (TP-12, AC-39)
+//
+// A reference module fans out into operation sections. Its compliance axis selects
+// between the compliance-on reference and the compliance-off one, so a whole-line
+// compliance arm is split and no marker reaches either. Its curation axis has nothing
+// to select: a curation marker would reach the installed reference as text, so the
+// build refuses it. A compliance marker that is not a whole-line one is refused as a
+// malformed arm, naming the operation.
+// ---------------------------------------------------------------------------
+
+describe('a reference module may carry compliance arms and no curation marker (TP-12)', () => {
   const MODULE_REL = 'src/assets/mds/tracker/_mcp.mds';
   const BUILT_REL = 'dist/skills/git/references/tracker/_mcp.md';
+  const BUILT_OFF_REL = 'dist/compliance-off/skills/git/references/tracker/_mcp.md';
   const CURATION_REFUSAL = `${MODULE_REL}: a reference module may not carry curation-variant markers`;
-  const COMPLIANCE_REFUSAL = `${MODULE_REL}: a reference module may not carry compliance-variant markers`;
+  const COMPLIANCE_SPLIT_REFUSAL = `${MODULE_REL}: compliance-variant split refused in the '_mcp' section`;
 
   /** The real `_mcp` module, and the op line a probe line can be put right after. */
   function mcpSource(): { source: string; opLine: string } {
@@ -931,38 +1011,68 @@ describe('a reference module may carry no variant marker (TP-12)', () => {
     return { source, opLine: opLine as string };
   }
 
-  /** Build `source` as the `_mcp` module of a throwaway root, and report the run and what it wrote. */
-  async function buildModule(source: string): Promise<{ status: number | null; combined: string; written: boolean }> {
+  /**
+   * Build `source` as the `_mcp` module of a throwaway root, and report the run and what it wrote:
+   * the compliance-on reference and the compliance-off one, or null for a file not written.
+   */
+  async function buildModule(source: string): Promise<{
+    status: number | null;
+    combined: string;
+    written: boolean;
+    on: string | null;
+    off: string | null;
+  }> {
     const fakeRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-mds-refmarker-'));
+    const read = (rel: string): Promise<string | null> =>
+      fs.readFile(path.join(fakeRoot, ...rel.split('/')), 'utf-8').then(text => text, () => null);
     try {
       await fs.mkdir(path.join(fakeRoot, ...path.dirname(MODULE_REL).split('/')), { recursive: true });
       await fs.writeFile(path.join(fakeRoot, ...MODULE_REL.split('/')), source, 'utf-8');
       const run = runMdsBuild(fakeRoot);
-      const written = await fs.access(path.join(fakeRoot, ...BUILT_REL.split('/'))).then(() => true, () => false);
-      return { ...run, written };
+      const on = await read(BUILT_REL);
+      return { ...run, written: on !== null, on, off: await read(BUILT_OFF_REL) };
     } finally {
       await fs.rm(fakeRoot, { recursive: true, force: true });
     }
   }
 
   it.each([
-    ['a whole-line compliance arm', '<!-- compliance:on -->\nA gated line.\n<!-- compliance:end -->'],
-    ['a standalone compliance off arm', '<!-- compliance:off -->\nA fallback line.\n<!-- compliance:end -->'],
+    ['a whole-line compliance arm', '<!-- compliance:on -->\nA gated line.\n<!-- compliance:end -->', true],
+    ['a standalone compliance off arm', '<!-- compliance:off -->\nA fallback line.\n<!-- compliance:end -->', false],
+  ])('builds a reference module that carries %s, with no marker in either reference', async (_label, probe, keptOn) => {
+    const { source, opLine } = mcpSource();
+    const marked = source.replace(opLine, `${opLine}\n${probe}`);
+    expect(marked).not.toBe(source);
+    const run = await buildModule(marked);
+    expect(run.status, run.combined).toBe(0);
+    const line = keptOn ? 'A gated line.' : 'A fallback line.';
+    const kept = keptOn ? run.on : run.off;
+    const dropped = keptOn ? run.off : run.on;
+    expect(kept, 'the reference that keeps the arm').toContain(line);
+    expect(dropped, 'the reference that drops the arm must exist to be checked').not.toBeNull();
+    expect(dropped, 'the reference that drops the arm').not.toContain(line);
+    expect(run.on).not.toMatch(/<!--\s*compliance\s*:/i);
+    expect(run.off).not.toMatch(/<!--\s*compliance\s*:/i);
+  });
+
+  it.each([
     ['a compliance marker with odd spacing and case', '<!--  Compliance : on  -->\nA gated line.'],
     ['a compliance marker inside prose', 'A line that names <!-- compliance:on --> in the middle.'],
-  ])('refuses a reference module that carries %s, and writes nothing for it', async (_label, probe) => {
+  ])('refuses a reference module that carries %s, naming the operation, and writes nothing for it', async (_label, probe) => {
     const { source, opLine } = mcpSource();
     const marked = source.replace(opLine, `${opLine}\n${probe}`);
     expect(marked).not.toBe(source);
     const run = await buildModule(marked);
     expect(run.status, `expected exit 1.\n${run.combined}`).toBe(1);
-    expect(run.combined).toContain(COMPLIANCE_REFUSAL);
-    expect(run.combined, 'the refusal names where the arm belongs').toContain('Compliance arms belong in a command or agent host');
+    expect(run.combined).toContain(COMPLIANCE_SPLIT_REFUSAL);
+    expect(run.combined, 'the refusal names where the arm belongs').toContain("An arm must open and close inside one '<!-- op: NAME -->' section");
     expect(run.written, 'nothing is written for a refused module').toBe(false);
+    expect(run.off, 'nothing is written for a refused module').toBeNull();
   });
 
   // The unmodified-module control, a whole-line curation arm and the retired marker are held
-  // in tests/curation/curation-variants-build.test.ts.
+  // in tests/curation/curation-variants-build.test.ts. The split itself, the omitted
+  // references and the prune are held in tests/build-mds-reference-arms.test.ts.
   it('keeps refusing a reference module that carries a curation marker with odd spacing and case', async () => {
     const { source, opLine } = mcpSource();
     const marked = source.replace(opLine, `${opLine}\n<!--  Curation : off  -->\nA fallback line.`);
@@ -970,16 +1080,16 @@ describe('a reference module may carry no variant marker (TP-12)', () => {
     const run = await buildModule(marked);
     expect(run.status, `expected exit 1.\n${run.combined}`).toBe(1);
     expect(run.combined).toContain(CURATION_REFUSAL);
-    expect(run.combined, 'the curation refusal is not the compliance one').not.toContain(COMPLIANCE_REFUSAL);
+    expect(run.combined, 'the curation refusal is not a compliance split refusal').not.toContain('compliance-variant split refused');
     expect(run.written, 'nothing is written for a refused module').toBe(false);
   });
 
-  it('refuses a reference module that carries a marker of each axis', async () => {
+  it('refuses a reference module that carries a marker of each axis, because of the curation one', async () => {
     const { source, opLine } = mcpSource();
     const marked = source.replace(opLine, `${opLine}\n<!-- curation:on -->\nA.\n<!-- curation:end -->\n<!-- compliance:on -->\nB.\n<!-- compliance:end -->`);
     const run = await buildModule(marked);
     expect(run.status, `expected exit 1.\n${run.combined}`).toBe(1);
-    expect(run.combined).toContain(`${MODULE_REL}: a reference module may not carry`);
+    expect(run.combined).toContain(CURATION_REFUSAL);
     expect(run.written, 'nothing is written for a refused module').toBe(false);
   });
 

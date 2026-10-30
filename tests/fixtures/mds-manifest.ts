@@ -42,6 +42,8 @@
  * with the file on disk.
  */
 
+import { POSTING_OPS } from '../../src/core/mds-variants.js';
+
 /** The 9 knowledge-workflow command hosts (src/assets/commands/<name>.mds). */
 export const KNOWLEDGE_COMMAND_HOSTS = [
   'bug-analysis',
@@ -320,24 +322,52 @@ export const COMPLIANCE_VARIANT_HOSTS: readonly string[] = [
 export const COMPLIANCE_OFF_FILES: readonly string[] = COMPLIANCE_VARIANT_HOSTS.map(h => `${h}.md`);
 
 /**
+ * The generated references whose compiled text carries a compliance arm, and therefore
+ * differ between the compliance-on tree (`dist/skills/git/references/`) and the
+ * compliance-off tree (`dist/compliance-off/skills/git/references/`): each is a path
+ * relative to those roots, such as `pr/check-ci-status.md`. Every other reference the
+ * compliance-off install carries is a byte copy of its compliance-on file, because the
+ * compliance-off tree is complete (scripts/build-mds.ts).
+ *
+ * Named as a set, as the host rosters above are, and asserted in both directions
+ * (tests/build-mds.test.ts): an arm added without a row, or a row left after its arm
+ * goes, turns that assertion red. A reference joins this roster in the commit that adds
+ * its first compliance arm.
+ */
+export const COMPLIANCE_ARMED_REFERENCES: readonly string[] = [
+  'decision-markers.md',
+  'tracker/github/create-release.md',
+  'tracker/github/ensure-pr-ready.md',
+  'tracker/github/ensure-traceable-issue.md',
+  'tracker/github/fetch-issue.md',
+  'tracker/github/gather-release-evidence.md',
+  'tracker/github/setup-task.md',
+  'tracker/jira/create-release.md',
+  'tracker/jira/ensure-pr-ready.md',
+  'tracker/jira/ensure-traceable-issue.md',
+  'tracker/jira/gather-release-evidence.md',
+  'tracker/jira/setup-task.md',
+  'tracker/linear/create-release.md',
+  'tracker/linear/ensure-pr-ready.md',
+  'tracker/linear/ensure-traceable-issue.md',
+  'tracker/linear/gather-release-evidence.md',
+  'tracker/linear/setup-task.md',
+];
+
+/**
  * The eight Git operations that post to GitHub or a tracker: a compliance-off install
  * carries no row, loading line or text that names one of them in a command or agent
  * prompt (tests/guards/posting-absence.test.ts). The scan covers the compliance-off
  * build of every host in COMPLIANCE_VARIANT_HOSTS, the curation-on and curation-off
  * build of every command and compiled agent host outside it, and the hand-authored
  * agents. The reference files under `dist/skills/` are outside that scan. A named set,
- * never a count, so an op that moves in or out is a visible edit here.
+ * never a count, so an op that moves in or out is a visible edit in POSTING_OPS.
+ *
+ * The roster has one owner, POSTING_OPS in src/core/mds-variants.ts: it also decides
+ * which reference files a compliance-off install omits, so a second list here could
+ * drift from it. This is the same array, under the name the tests use.
  */
-export const POSTING_OPERATIONS: readonly string[] = [
-  'post-review-summary',
-  'resolve-review-threads',
-  'post-resolution-summary',
-  'update-pr-evidence',
-  'manage-debt',
-  'post-wave-report',
-  'backlink-shipped-issues',
-  'associate-release',
-];
+export const POSTING_OPERATIONS: readonly string[] = POSTING_OPS;
 
 /**
  * Reference modules: .mds sources under src/assets/mds/ that the build COMPILES,

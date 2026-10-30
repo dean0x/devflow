@@ -360,15 +360,41 @@ const SCRIPTS_SOURCE = path.dirname(VERIFY_EVIDENCE_SCRIPT)
  */
 export type Redact = 'real' | 'fails' | 'half' | 'grow' | 'missing'
 
+/** A machine manifest whose compliance switch is on: the only state in which `publish` runs. */
+export const ENABLED_MANIFEST = machineManifest({ enabled: true, frameworks: [] })
+
+/** A machine manifest text holding `compliance` as the `features.compliance` value. */
+export function machineManifest(compliance: unknown): string {
+  return JSON.stringify({ version: '0.0.0', plugins: [], features: { compliance } })
+}
+
+/** The folders of one run, handed to a `setup` hook. */
+export interface ScriptDirs {
+  readonly root: string
+  /** HOME of the run, and so the folder that holds the machine root. */
+  readonly home: string
+  /** The script's working directory, standing for the repository. */
+  readonly work: string
+  /** `<home>/.devflow/manifest.json`: the one file the `publish` guard reads. */
+  readonly manifestPath: string
+}
+
 export interface RunOptions {
   readonly scenario?: ShimScenario
   readonly redact?: Redact
   /** The script's argv after its own path. */
   readonly args: readonly string[]
-  /** Files laid down in the working directory first, by relative path. */
+  /** Files laid down in the working directory first, by relative path; their folders are made. */
   readonly files?: Readonly<Record<string, string>>
   /** Rewrites the script's source before it runs (a known-bad probe). */
   readonly mutate?: (source: string) => string
+  /**
+   * The machine manifest in the run's HOME: its text, or `null` for none. Absent gets
+   * ENABLED_MANIFEST, so a `publish` run is never decided by the developer's own ~/.devflow.
+   */
+  readonly manifest?: string | null
+  /** Runs once the folders exist. It may lay out more files, and returns extra environment for the script. */
+  readonly setup?: (dirs: ScriptDirs) => Readonly<Record<string, string>> | void
 }
 
 export interface ScriptRun {
@@ -415,7 +441,15 @@ export function runScript(options: RunOptions, runs = 1): ScriptRun[] {
   if (redact === 'grow') {
     fs.writeFileSync(scrubber, "const fs = require('fs')\nfs.writeFileSync(process.argv[3], fs.readFileSync(process.argv[2], 'utf8') + 'x'.repeat(70000))\n")
   }
-  for (const [rel, content] of Object.entries(options.files ?? {})) fs.writeFileSync(path.join(work, rel), content)
+  for (const [rel, content] of Object.entries(options.files ?? {})) {
+    fs.mkdirSync(path.dirname(path.join(work, rel)), { recursive: true })
+    fs.writeFileSync(path.join(work, rel), content)
+  }
+  const manifestPath = path.join(home, '.devflow', 'manifest.json')
+  fs.mkdirSync(path.dirname(manifestPath), { recursive: true })
+  const manifest = options.manifest === undefined ? ENABLED_MANIFEST : options.manifest
+  if (manifest !== null) fs.writeFileSync(manifestPath, manifest)
+  const extraEnv = options.setup?.({ root, home, work, manifestPath }) ?? {}
 
   const shim = createGhShim(root, options.scenario)
   const results: ScriptRun[] = []
@@ -423,7 +457,7 @@ export function runScript(options: RunOptions, runs = 1): ScriptRun[] {
     const before = shim.calls().length
     const r = spawnSync(process.execPath, [path.join(scripts, 'verify-evidence.cjs'), ...options.args], {
       cwd: work,
-      env: scopedEnv(home, { PATH: `${shim.dir}${path.delimiter}${process.env.PATH ?? ''}`, TMPDIR: tmp, ...shim.env }),
+      env: scopedEnv(home, { PATH: `${shim.dir}${path.delimiter}${process.env.PATH ?? ''}`, TMPDIR: tmp, ...shim.env, ...extraEnv }),
       encoding: 'utf-8',
       timeout: 60_000,
     })

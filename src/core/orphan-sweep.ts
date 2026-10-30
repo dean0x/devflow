@@ -75,6 +75,12 @@ export interface SweepResult {
  *   For agents and commands: use {@link mdEntryName}.
  *   For skills: strip the devflow: prefix.
  *
+ * @param mayRemove - Optional check made on the full path of each orphan before
+ *   it is removed. An orphan it refuses stays where it is and is neither
+ *   removed nor failed; the check reports the refusal itself. The caller proves
+ *   that `dir` is a real folder before the call, because the sweep reads and
+ *   removes inside whatever `dir` names.
+ *
  * @returns A {@link SweepResult} reporting how many entries were scanned, which
  *   registry names were removed, and which removals failed.
  *   `scanned` is the count matched by the predicate (not the removed count) —
@@ -90,6 +96,7 @@ export async function sweepOrphanedAssets(
   dir: string,
   knownNames: ReadonlySet<string>,
   extractRegistryName: (entry: string) => string | null,
+  mayRemove?: (entryPath: string) => Promise<boolean>,
 ): Promise<SweepResult> {
   const removed: string[] = [];
   const failed: Array<{ name: string; error: unknown }> = [];
@@ -101,8 +108,10 @@ export async function sweepOrphanedAssets(
       if (registryName === null) continue;
       scanned++;
       if (!knownNames.has(registryName)) {
+        const entryPath = path.join(dir, entry);
         try {
-          await fs.rm(path.join(dir, entry), { recursive: true, force: true });
+          if (mayRemove !== undefined && !(await mayRemove(entryPath))) continue;
+          await fs.rm(entryPath, { recursive: true, force: true });
           removed.push(registryName);
         } catch (err) {
           failed.push({ name: registryName, error: err }); /* per-item isolation */
