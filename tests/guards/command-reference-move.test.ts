@@ -15,7 +15,9 @@
  *   - Read paths. Every path a command names exists in the skill sources, every reference is named by a
  *     command, the read resolves the config directory in Bash first, and the compiled command carries it.
  *     A host may read a reference on its default path (`/code-review` at `standard` or `lean`) as well as on
- *     a rare branch; either way the read site passes through one named collector.
+ *     a rare branch; either way the read site passes through one named collector. `/implement` resolves the
+ *     directory once, in one paragraph that binds `{ref_dir}` to the references folder, and each of its read
+ *     sites names its file under `{ref_dir}`; the collector then checks that paragraph in place of the site.
  *   - Installation. The skill belongs to `devflow-core-skills` alone, which every selection installs, so a
  *     selection of any plugin that uses a reference installs it; the install goldens list each file.
  *   - D-10: no plugin lists `agent-references` in `requires:`. A command reads the file by path, which the
@@ -44,7 +46,10 @@ const REFERENCE_DIR = 'commands'
 const COMMANDS_DIR = path.join(ROOT, 'src', 'assets', 'commands')
 /** The root a read site resolves first: the sanctioned resolution line. */
 const READ_ROOTS = [SANCTIONED_RESOLUTION] as const
-const READ_PATH_RE = /skills\/devflow:agent-references\/references\/commands\/([a-z0-9-]+\.md)/g
+/** The placeholder a host may read its references through: one paragraph of the host binds it to the references folder under the resolved directory. */
+const REFS_PLACEHOLDER = '{ref_dir}'
+/** A read path: the full path under the references folder, or a file under the placeholder. */
+const READ_PATH_RE = /(?:skills\/devflow:agent-references\/references\/commands|\{ref_dir\})\/([a-z0-9-]+\.md)/g
 
 /** One section a command lost and a reference now holds, exactly. */
 interface Moved {
@@ -138,14 +143,26 @@ export function namedReferences(text: string): string[] {
   return [...new Set([...text.matchAll(READ_PATH_RE)].map(m => m[1]))].sort()
 }
 
-/** Named collector: what is wrong with one paragraph that names a reference by read path. */
-export function collectReadSiteDefects(name: string, paragraph: string): string[] {
+/**
+ * Named collector: what is wrong with one paragraph that names a reference by read path. A paragraph that reads its file under
+ * the placeholder takes its root and its Read-tool phrase from the one paragraph of the host that binds the placeholder, and that
+ * paragraph comes first. The root, the order and the phrase are the same three checks, run on the binder.
+ */
+export function collectReadSiteDefects(name: string, paragraph: string, host: string = paragraph): string[] {
   const out: string[] = []
-  const at = paragraph.search(/skills\/devflow:agent-references\//)
-  const roots = READ_ROOTS.map(r => paragraph.indexOf(r)).filter(i => i >= 0)
+  let site = paragraph
+  if (paragraph.includes(`${REFS_PLACEHOLDER}/`)) {
+    const binder = host.split('\n\n').find(p => p.includes(`\`${REFS_PLACEHOLDER}\` is \``))
+    if (binder === undefined) return [`${name}.mds: ${REFS_PLACEHOLDER} is read but no paragraph binds it`]
+    if (host.indexOf(binder) > host.indexOf(paragraph)) out.push(`${name}.mds: ${REFS_PLACEHOLDER} is read before the paragraph that binds it`)
+    if (!binder.includes(`\`${REFS_PLACEHOLDER}\` is \`<that directory>/skills/devflow:agent-references/references/commands\``)) out.push(`${name}.mds: ${REFS_PLACEHOLDER} is not bound to the references folder under <that directory>`)
+    site = binder
+  }
+  const at = site.search(/skills\/devflow:agent-references\//)
+  const roots = READ_ROOTS.map(r => site.indexOf(r)).filter(i => i >= 0)
   if (roots.length === 0) out.push(`${name}.mds: the read site must resolve a config-directory root before the path`)
-  else if (Math.min(...roots) > at) out.push(`${name}.mds: the root comes after the path`)
-  if (!paragraph.includes('with the Read tool')) out.push(`${name}.mds: the read goes through the Read tool`)
+  else if (at !== -1 && Math.min(...roots) > at) out.push(`${name}.mds: the root comes after the path`)
+  if (!site.includes('with the Read tool')) out.push(`${name}.mds: the read goes through the Read tool`)
   return out
 }
 
@@ -163,7 +180,7 @@ describe('AC-406: every read path exists, is read, and resolves the config direc
   it('each read site resolves the config directory in Bash first, and the compiled command carries the path', () => {
     for (const { name, content } of commandSources()) {
       const paragraphs = content.split('\n\n').filter(p => namedReferences(p).length > 0)
-      for (const p of paragraphs) expect(collectReadSiteDefects(name, p)).toEqual([])
+      for (const p of paragraphs) expect(collectReadSiteDefects(name, p, content)).toEqual([])
       if (paragraphs.length > 0) {
         const built = requireDistFile(`${name}.md`)
         expect(namedReferences(built), `${name}: the compiled command names the same files`).toEqual(namedReferences(content))
@@ -195,6 +212,23 @@ describe('AC-406: every read path exists, is read, and resolves the config direc
     expect(collectReadSiteDefects('probe', `Resolve ${RETIRED_INLINE_EXPANSION} in Bash and Read \`<d>/${target}\` with the Read tool.`))
       .toEqual(['probe.mds: the read site must resolve a config-directory root before the path'])
     expect(collectReadSiteDefects('probe', `Run \`${SANCTIONED_RESOLUTION_PRINT}\` in Bash and Read \`<d>/${target}\` with the Read tool.`)).toEqual([])
+  })
+
+  it('known-bad probes: a read under the placeholder needs a paragraph that binds it first, with the sanctioned root, the references folder and the Read-tool phrase', () => {
+    const folder = '<that directory>/skills/devflow:agent-references/references/commands'
+    const binder = `Run \`${SANCTIONED_RESOLUTION_PRINT}\` in Bash. \`${REFS_PLACEHOLDER}\` is \`${folder}\`. Read each reference with the Read tool.`
+    const read = `Read \`${REFS_PLACEHOLDER}/x.md\` and follow it.`
+    const defects = (host: string): string[] => collectReadSiteDefects('probe', read, host)
+    expect(namedReferences(read)).toEqual(['x.md'])
+    expect(defects(`${binder}\n\n${read}`)).toEqual([])
+    expect(defects(read)).toEqual([`probe.mds: ${REFS_PLACEHOLDER} is read but no paragraph binds it`])
+    expect(defects(`${read}\n\n${binder}`)).toEqual([`probe.mds: ${REFS_PLACEHOLDER} is read before the paragraph that binds it`])
+    expect(defects(`${binder.replace(SANCTIONED_RESOLUTION_PRINT, 'd="$HOME/.claude"')}\n\n${read}`))
+      .toEqual(['probe.mds: the read site must resolve a config-directory root before the path'])
+    expect(defects(`${binder.replace(' Read each reference with the Read tool.', '')}\n\n${read}`))
+      .toEqual(['probe.mds: the read goes through the Read tool'])
+    expect(defects(`${binder.replace(folder, '<that directory>/skills')}\n\n${read}`))
+      .toEqual([`probe.mds: ${REFS_PLACEHOLDER} is not bound to the references folder under <that directory>`])
   })
 
   it('a selection of any plugin that uses a reference installs the skill, and the install goldens list each file', () => {

@@ -674,7 +674,9 @@ describe('the exception grammar is a reference /implement reads on demand, not a
     expect(sources.length, 'the src/ .mds walk found nothing').toBeGreaterThanOrEqual(20)
     expect(collectExceptionUsers(sources)).toEqual([])
     const implement = sources.find(s => s.name === 'implement')!
-    expect(implement.content).toContain('skills/devflow:agent-references/references/commands/implement-evidence-asks.md')
+    // The source names the file under `{ref_dir}`, which one paragraph binds to the references folder under the resolved directory.
+    expect(implement.content).toContain('{ref_dir}/implement-evidence-asks.md')
+    expect(implement.content).toContain('`{ref_dir}` is `<that directory>/skills/devflow:agent-references/references/commands`')
   })
 
   it('known-bad probes: a caller, an importer and a re-declared define are each reported', () => {

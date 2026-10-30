@@ -25,11 +25,13 @@ $ARGUMENTS
 
 {{issue_ref_grammar()}}
 
+**Agent references.** A step that reads one gets the config directory once per run: run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"` in Bash. `{ref_dir}` is `<that directory>/skills/devflow:agent-references/references/commands`. Read each reference with the Read tool.
+
 ## Phases
 
 ### Re-validation Continuation Path
 
-When the user explicitly asks to re-validate, re-check, or re-run quality gates after making their own changes, run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"` in Bash, Read `<that directory>/skills/devflow:agent-references/references/commands/implement-revalidate.md` with the Read tool and follow it. Otherwise proceed with the full pipeline below.
+When the user explicitly asks to re-validate, re-check, or re-run quality gates after making their own changes, Read `{ref_dir}/implement-revalidate.md` and follow it. Otherwise proceed with the full pipeline below.
 
 ### Phase 1: Setup
 
@@ -100,7 +102,7 @@ The issue token is forwarded **unclassified**: routing is by SHAPE alone. Only `
 {{issue_capture_contract()}}
 
 <!-- compliance:on -->
-**Ticket link, only when `ISSUE_REQUIRED` is `true`:** when the capture above holds no `ISSUE_PR_LINK` (absent, or `(none)`), run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"` in Bash, Read `<that directory>/skills/devflow:agent-references/references/commands/implement-evidence-asks.md` with the Read tool (once per run), then run its ticket link ask and **Record the exception at once** as it directs, before any Code spawn. `PR_EXCEPTIONS` is `(none)` until an exception is recorded.
+**Ticket link, only when `ISSUE_REQUIRED` is `true`:** when the capture above holds no `ISSUE_PR_LINK` (absent, or `(none)`), Read `{ref_dir}/implement-evidence-asks.md` (once per run), then run its ticket link ask and **Record the exception at once** as it directs, before any Code spawn. `PR_EXCEPTIONS` is `(none)` until an exception is recorded.
 <!-- compliance:off -->
 **Ticket link, only when `ISSUE_REQUIRED` is `true`:** when the capture above holds no `ISSUE_PR_LINK` (absent, or `(none)`), ask with AskUserQuestion before any Code spawn — "No tracker issue is linked to this task. Record a self-attested exception, or stop?" — offering exactly these two options:
 - **Record an exception** — the user gives the reason as free text. Render it with the exception grammar below, as kind `ticket-link`; when the rendered reason is empty, ask for it once more, and stop as below if it is empty again.
@@ -303,7 +305,7 @@ DECISIONS_CONTEXT: {decisions_context}
 **Produces:** POLISH_OUTPUT
 **Requires:** BASE_REF, GATE_LEVEL
 
-**Gate level.** At `standard` or `lean`, once per run, run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"` in Bash and Read `<that directory>/skills/devflow:agent-references/references/commands/implement-levels.md` with the Read tool, and apply each row to the phase it names.
+**Gate level.** At `standard` or `lean`, once per run, Read `{ref_dir}/implement-levels.md`, and apply each row to the phase it names.
 
 - No row or rule overrides the next two lines.
 - If the Read fails, or the file has no `## Phases` heading with the `| Phase | standard | lean |` header, or a row breaks its grammar, apply no row, keep `GATE_LEVEL` and say `level reference unreadable: no level rows applied`.

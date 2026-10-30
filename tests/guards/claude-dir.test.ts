@@ -160,6 +160,44 @@ export function collectPlanDirReadDefects(body: string): string[] {
   return out
 }
 
+/** The folder of the agent-references commands that `/implement` reads under: the one skills path of a compiled `/implement`. */
+const IMPLEMENT_REFS_FOLDER = 'skills/devflow:agent-references/references/commands'
+
+/** The placeholder that `/implement` reads every reference through; one paragraph binds it to the folder under the resolved directory. */
+const IMPLEMENT_REF_DIR = '{ref_dir}'
+
+/** The reference files a compiled `/implement` reads: the ticket link ask in the compliance-on builds only, the levels and the re-validation path in all four. */
+const IMPLEMENT_READS_COMPLIANCE_ON: readonly string[] = ['implement-evidence-asks.md', 'implement-levels.md', 'implement-revalidate.md']
+const IMPLEMENT_READS_COMPLIANCE_OFF: readonly string[] = ['implement-levels.md', 'implement-revalidate.md']
+
+/**
+ * Named collector: how a compiled /implement reaches the Claude directory. The directory is resolved once: the sanctioned
+ * line sits in one paragraph, which binds `{ref_dir}` to the references folder under `<that directory>` and comes before every
+ * read. Each read site names its file under `{ref_dir}`, and no site names a root or a skills path of its own, so the site
+ * row of the file (one line) stands for every read of the build. `reads` is the files the build reads, by file name.
+ */
+export function collectImplementDirReadDefects(body: string, reads: readonly string[]): string[] {
+  const out: string[] = []
+  const lines = countOf(body, SANCTIONED_RESOLUTION)
+  if (lines !== 1) out.push(`${lines} sanctioned resolution lines, expected 1`)
+  const names = countOf(body, 'CLAUDE_CONFIG_DIR')
+  if (names !== 1) out.push(`${names} CLAUDE_CONFIG_DIR names, expected 1`)
+  const roots = countOf(body, '<that directory>')
+  if (roots !== 1) out.push(`${roots} <that directory> roots, expected 1`)
+  const skillPaths = body.match(/skills\/devflow:[^\s`'")]*/g) ?? []
+  if (skillPaths.length !== 1) out.push(`${skillPaths.length} skills/devflow: paths, expected 1`)
+  else if (skillPaths[0] !== IMPLEMENT_REFS_FOLDER) out.push(`the one skills path is ${skillPaths[0]}, expected the references folder`)
+  const binder = body.split('\n\n').find(p => p.includes(SANCTIONED_RESOLUTION))
+  if (binder === undefined) out.push('no paragraph holds the sanctioned resolution line')
+  else if (!binder.includes(`\`${IMPLEMENT_REF_DIR}\` is \`<that directory>/${IMPLEMENT_REFS_FOLDER}\``)) out.push(`the paragraph with the sanctioned line does not bind ${IMPLEMENT_REF_DIR} to the references folder under <that directory>`)
+  const read = [...body.matchAll(/\{ref_dir\}\/([a-z0-9-]+\.md)/g)].map(m => m[1]).sort()
+  if (read.join(' ') !== [...reads].sort().join(' ')) out.push(`the files read through ${IMPLEMENT_REF_DIR} are ${read.join(', ')}, expected ${[...reads].sort().join(', ')}`)
+  const use = body.indexOf(`${IMPLEMENT_REF_DIR}/`)
+  if (binder !== undefined && use !== -1 && use < body.indexOf(binder)) out.push(`a ${IMPLEMENT_REF_DIR} read comes before the paragraph that binds it`)
+  if (body.includes('{claude_dir}')) out.push('a {claude_dir} placeholder')
+  return out
+}
+
 /** A path under the home Claude directory: `~/.claude/x`, `$HOME/.claude/x`, `${HOME}/.claude/x`. */
 const PATH_UNDER_HOME_CLAUDE = /(?:~|\$HOME|\$\{HOME\})\/\.claude\/[^\s`'")]/
 
@@ -238,12 +276,12 @@ export const SITE_ROWS: SiteRows = {
   'dist/commands/code-review.md': 1,
   'dist/commands/dynamic-profile.md': 1,
   'dist/commands/plan.md': 2,
-  'dist/commands/implement.md': 3,
+  'dist/commands/implement.md': 1,
   'dist/commands/resolve.md': 1,
   'dist/curation-off/commands/code-review.md': 1,
   'dist/curation-off/commands/dynamic-profile.md': 1,
   'dist/curation-off/commands/plan.md': 2,
-  'dist/curation-off/commands/implement.md': 3,
+  'dist/curation-off/commands/implement.md': 1,
   'dist/curation-off/commands/resolve.md': 1,
   [SYNTHESIZE_FILE]: 1,
   [CURATE_FILE]: 2,
@@ -252,12 +290,12 @@ export const SITE_ROWS: SiteRows = {
   'dist/curation-off/agents/triage.md': 1,
   'dist/compliance-off/agents/triage.md': 1,
   'dist/compliance-off/commands/code-review.md': 1,
-  'dist/compliance-off/commands/implement.md': 2,
+  'dist/compliance-off/commands/implement.md': 1,
   'dist/compliance-off/commands/plan.md': 2,
   'dist/compliance-off/commands/resolve.md': 1,
   'dist/curation-compliance-off/agents/triage.md': 1,
   'dist/curation-compliance-off/commands/code-review.md': 1,
-  'dist/curation-compliance-off/commands/implement.md': 2,
+  'dist/curation-compliance-off/commands/implement.md': 1,
   'dist/curation-compliance-off/commands/plan.md': 2,
   'dist/curation-compliance-off/commands/resolve.md': 1,
 }
@@ -669,6 +707,60 @@ describe('no prompt reaches the Claude directory outside the CLAUDE_CONFIG_DIR r
     const pathFirst = `Read \`<that directory>/${PLAN_LEVEL_REFERENCE_PATH}\` with the Read tool, after you run \`${SANCTIONED_RESOLUTION_PRINT}\` in Bash`
     expect(collectPlanDirReadDefects(seed(plan, readPart, pathFirst))).toEqual(['the levels reference path comes before the sanctioned resolution line'])
     expect(collectPlanDirReadDefects(`${plan}\nRead {claude_dir}/x.`)).toEqual(['a {claude_dir} placeholder'])
+  })
+
+  it('/implement resolves the Claude directory once, in the paragraph that binds {ref_dir}, and every read goes through {ref_dir}, in all four builds', () => {
+    // The site row of each build is one line: the directory is resolved once and the three read sites (two in the compliance-off builds) use the result.
+    const builds: ReadonlyArray<readonly [string, readonly string[]]> = [
+      ['dist/commands/implement.md', IMPLEMENT_READS_COMPLIANCE_ON],
+      ['dist/curation-off/commands/implement.md', IMPLEMENT_READS_COMPLIANCE_ON],
+      ['dist/compliance-off/commands/implement.md', IMPLEMENT_READS_COMPLIANCE_OFF],
+      ['dist/curation-compliance-off/commands/implement.md', IMPLEMENT_READS_COMPLIANCE_OFF],
+    ]
+    for (const [name, reads] of builds) {
+      const body = corpusFile(name).content
+      expect(collectImplementDirReadDefects(body, reads), name).toEqual([])
+      // Non-vacuity: the build holds the one site row and each read the collector expects.
+      expect(SITE_ROWS[name], `${name}: the site row`).toBe(1)
+      for (const file of reads) expect(body, `${name}: ${file}`).toContain(`${IMPLEMENT_REF_DIR}/${file}`)
+    }
+  })
+
+  it('red probes: a second sanctioned line, a skills read of its own, a read through a root of its own, a loosened folder, a lost read, a read before its paragraph and a {claude_dir} placeholder are each reported in /implement', () => {
+    const implement = corpusFile('dist/commands/implement.md').content
+    const seed = (body: string, from: string, to: string): string => {
+      const next = body.replace(from, () => to)
+      expect(next, `the seed ${JSON.stringify(from.slice(0, 40))} must change the text`).not.toBe(body)
+      return next
+    }
+    const defects = (text: string): string[] => collectImplementDirReadDefects(text, IMPLEMENT_READS_COMPLIANCE_ON)
+    const binder = implement.split('\n\n').find(p => p.includes(SANCTIONED_RESOLUTION))
+    expect(binder, 'the paragraph with the sanctioned line is in the compiled command').toBeDefined()
+    const anchor = 'Read each reference with the Read tool.'
+    expect(defects(seed(implement, anchor, `${anchor} Run \`${SANCTIONED_RESOLUTION_PRINT}\` in Bash.`))).toEqual([
+      '2 sanctioned resolution lines, expected 1',
+      '2 CLAUDE_CONFIG_DIR names, expected 1',
+    ])
+    expect(defects(seed(implement, anchor, `${anchor} Read \`<that directory>/skills/devflow:go/SKILL.md\` with the Read tool.`))).toEqual([
+      '2 <that directory> roots, expected 1',
+      '2 skills/devflow: paths, expected 1',
+    ])
+    expect(defects(seed(implement, `${IMPLEMENT_REF_DIR}/implement-levels.md`, `<that directory>/${IMPLEMENT_REFS_FOLDER}/implement-levels.md`))).toEqual([
+      '2 <that directory> roots, expected 1',
+      '2 skills/devflow: paths, expected 1',
+      `the files read through ${IMPLEMENT_REF_DIR} are implement-evidence-asks.md, implement-revalidate.md, expected implement-evidence-asks.md, implement-levels.md, implement-revalidate.md`,
+    ])
+    expect(defects(seed(implement, `<that directory>/${IMPLEMENT_REFS_FOLDER}`, '$HOME/.claude/skills'))).toEqual([
+      '0 <that directory> roots, expected 1',
+      '0 skills/devflow: paths, expected 1',
+      `the paragraph with the sanctioned line does not bind ${IMPLEMENT_REF_DIR} to the references folder under <that directory>`,
+    ])
+    expect(defects(seed(implement, `${IMPLEMENT_REF_DIR}/implement-evidence-asks.md`, 'the evidence-asks reference'))).toEqual([
+      `the files read through ${IMPLEMENT_REF_DIR} are implement-levels.md, implement-revalidate.md, expected implement-evidence-asks.md, implement-levels.md, implement-revalidate.md`,
+    ])
+    const moved = `${seed(implement, `${binder}\n\n`, '')}\n\n${binder}\n`
+    expect(defects(moved)).toEqual([`a ${IMPLEMENT_REF_DIR} read comes before the paragraph that binds it`])
+    expect(defects(`${implement}\nRead {claude_dir}/x.`)).toEqual(['a {claude_dir} placeholder'])
   })
 
   it('red probe: the superseded presence gate, seeded into the real compiled command, is reported', () => {

@@ -774,7 +774,8 @@ describe('AC-9: a missing test plan asks only under `required`, and a stop names
     expect(gates[0]).toContain('evidence-asks reference')
     expect(gates[0]).toContain('before any Code spawn')
     expect(gates[0], 'the ask itself lives in the reference').not.toContain('AskUserQuestion')
-    expect(md.split('skills/devflow:agent-references/references/commands/implement-evidence-asks.md').length - 1, 'one explicit read path').toBe(1)
+    expect(md.split('{ref_dir}/implement-evidence-asks.md').length - 1, 'one explicit read path').toBe(1)
+    expect(md.split('`{ref_dir}` is `<that directory>/skills/devflow:agent-references/references/commands`').length - 1, 'the path root is bound once').toBe(1)
   })
 
   it('the remedy quotes the canonical standard project file, and it parses', () => {

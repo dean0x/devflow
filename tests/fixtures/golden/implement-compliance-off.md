@@ -19,11 +19,13 @@ There is no producer-side grammar check: the operation that runs decides each to
 
 Note: under `github`, only the Git agent decides if a bare digit run is a reference. This command holds no provider knowledge.
 
+**Agent references.** A step that reads one gets the config directory once per run: run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"` in Bash. `{ref_dir}` is `<that directory>/skills/devflow:agent-references/references/commands`. Read each reference with the Read tool.
+
 ## Phases
 
 ### Re-validation Continuation Path
 
-When the user explicitly asks to re-validate, re-check, or re-run quality gates after making their own changes, run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"` in Bash, Read `<that directory>/skills/devflow:agent-references/references/commands/implement-revalidate.md` with the Read tool and follow it. Otherwise proceed with the full pipeline below.
+When the user explicitly asks to re-validate, re-check, or re-run quality gates after making their own changes, Read `{ref_dir}/implement-revalidate.md` and follow it. Otherwise proceed with the full pipeline below.
 
 ### Phase 1: Setup
 
@@ -322,7 +324,7 @@ DECISIONS_CONTEXT: {decisions_context}
 **Produces:** POLISH_OUTPUT
 **Requires:** BASE_REF, GATE_LEVEL
 
-**Gate level.** At `standard` or `lean`, once per run, run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"` in Bash and Read `<that directory>/skills/devflow:agent-references/references/commands/implement-levels.md` with the Read tool, and apply each row to the phase it names.
+**Gate level.** At `standard` or `lean`, once per run, Read `{ref_dir}/implement-levels.md`, and apply each row to the phase it names.
 
 - No row or rule overrides the next two lines.
 - If the Read fails, or the file has no `## Phases` heading with the `| Phase | standard | lean |` header, or a row breaks its grammar, apply no row, keep `GATE_LEVEL` and say `level reference unreadable: no level rows applied`.
