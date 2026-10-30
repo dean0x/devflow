@@ -19,6 +19,11 @@
  * step, and carries no resolver call of its own. Each host carries that block once,
  * before its first consumer, and this file holds the order for the write-back.
  *
+ * Step 2 is the other half of the gate: it decides whether a Knowledge agent runs
+ * at all (a documented area changed, or durable cross-cutting knowledge was found;
+ * otherwise skip silently). Only the /implement goldens held it, so its own named
+ * collector checks it in every compiled write-back host.
+ *
  * The shape an absence-based check needs: a NAMED collector, a non-vacuity
  * assertion over what it read, and known-bad probes driving the same collector
  * over the superseded wordings.
@@ -35,6 +40,35 @@ const { SETTINGS_FAIL_CLOSED_LINE } = createRequire(import.meta.url)(SETTINGS_SC
 const STEP_HEADING = '### Feature Knowledge Write-Back (Conditional)';
 const STEP_1 = '**Step 1';
 const STEP_2 = '**Step 2';
+const STEP_3 = '**Step 3';
+
+/**
+ * The parts a compiled Step 2 must carry. Each part names itself in a miss and holds
+ * the text its known-bad probe puts in its place: nothing for a condition or the skip
+ * line, the superseded gate line for the gate.
+ */
+const REQUIRED_STEP_2: ReadonlyArray<{ readonly label: string; readonly rule: RegExp; readonly seed: string }> = [
+  {
+    label: 'the write-back gate line',
+    rule: /\*\*Step 2 — Write back only if at least one is true:\*\*/,
+    seed: '**Step 2 — Evaluate whether write-back is warranted:**',
+  },
+  {
+    label: 'the documented-area condition',
+    rule: /changed files in a directory that is documented by an existing feature knowledge base \(a documented area changed\)/,
+    seed: '',
+  },
+  {
+    label: 'the durable-knowledge condition',
+    rule: /found durable, cross-cutting knowledge about a codebase area/,
+    seed: '',
+  },
+  {
+    label: 'the silent skip line',
+    rule: /^Otherwise skip write-back silently\.$/m,
+    seed: '',
+  },
+];
 
 /** The gate a compiled Step 1 must carry, each part labelled so a miss names itself. */
 const REQUIRED_GATES: ReadonlyArray<readonly [string, RegExp]> = [
@@ -65,6 +99,18 @@ function collectGateProblems(commandText: string): string[] {
     ...REQUIRED_GATES.filter(([, rule]) => !rule.test(step1)).map(([label]) => `missing: ${label}`),
     ...FORBIDDEN_GATES.filter(([, rule]) => rule.test(step1)).map(([label]) => `present: ${label}`),
   ];
+}
+
+/** Named collector: the problems in a compiled write-back Step 2 (the part from Step 2 up to Step 3). */
+function collectStep2Problems(commandText: string): string[] {
+  const at = commandText.indexOf(STEP_HEADING);
+  if (at === -1) return ['no write-back step'];
+  const section = commandText.slice(at);
+  const s2 = section.indexOf(STEP_2);
+  const s3 = section.indexOf(STEP_3);
+  if (s2 === -1 || s3 === -1 || s3 < s2) return ['Step 2 not found'];
+  const step2 = section.slice(s2, s3);
+  return REQUIRED_STEP_2.filter(({ rule }) => !rule.test(step2)).map(({ label }) => `missing: ${label}`);
 }
 
 /** Every compiled command that carries the write-back step (by its heading). */
@@ -109,6 +155,32 @@ describe('knowledge write-back gate takes KNOWLEDGE from the settings line', () 
     for (const file of writebackCommands()) {
       expect(collectGateProblems(requireDistFile(file)), `${file} write-back gate`).toEqual([]);
     }
+  });
+
+  it('every compiled write-back Step 2 carries the gate line, both conditions and the silent skip', () => {
+    for (const file of writebackCommands()) {
+      expect(collectStep2Problems(requireDistFile(file)), `${file} write-back Step 2`).toEqual([]);
+    }
+  });
+
+  it('known-bad probe: each Step 2 part, taken out of the real text, is reported by the same collector', () => {
+    const real = requireDistFile('implement.md');
+    const section = real.slice(real.indexOf(STEP_HEADING));
+    expect(collectStep2Problems(section), 'the real Step 2 is clean before any seed').toEqual([]);
+    for (const { label, rule, seed } of REQUIRED_STEP_2) {
+      const seeded = section.replace(rule, seed);
+      expect(seeded, `the seed for "${label}" must change the text`).not.toBe(section);
+      expect(collectStep2Problems(seeded), `Step 2 without ${label}`).toEqual([`missing: ${label}`]);
+    }
+  });
+
+  it('known-bad probe: a write-back step with no Step 2 at all, and a text with no step, are reported', () => {
+    const real = requireDistFile('implement.md');
+    const section = real.slice(real.indexOf(STEP_HEADING));
+    const gate = REQUIRED_STEP_2[0].rule;
+    expect(collectStep2Problems(section.replace(gate, ''))).toEqual(['Step 2 not found']);
+    expect(collectStep2Problems(section.replace(STEP_3, '**Step X'))).toEqual(['Step 2 not found']);
+    expect(collectStep2Problems('')).toEqual(['no write-back step']);
   });
 
   it('every host carries one settings block, above its write-back step', () => {
