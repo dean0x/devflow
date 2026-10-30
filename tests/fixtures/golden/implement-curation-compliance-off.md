@@ -32,7 +32,7 @@ $ARGUMENTS
 
 There is no producer-side grammar check: the operation that runs decides each token, and its Output block gives the result. `fetch-issue` uses a non-numeric token as a search term and returns the first open match or nothing. `fetch-issues-batch` drops a token that it cannot resolve and names it in `NOT_FOUND ({refs})`.
 
-Note: only the Git agent decides if a bare digit run is a reference (only under `github`). This command holds no provider knowledge.
+Note: under `github`, only the Git agent decides if a bare digit run is a reference. This command holds no provider knowledge.
 
 ## Phases
 
