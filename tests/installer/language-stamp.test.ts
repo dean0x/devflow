@@ -18,6 +18,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { installViaFileCopy, type Spinner } from '../../src/targets/claude-code/installer.js';
+import { testBackups } from '../helpers.js';
 import {
   LANGUAGE_STAMPED_COMMANDS,
   applyLanguageStamp,
@@ -84,6 +85,7 @@ async function install(opts: {
     isPartialInstall: opts.isPartialInstall,
     spinner: noopSpinner,
     warn: (msg) => { warnings.push(msg); },
+    backups: await testBackups(claudeDir, { claudeDir, devflowDir }),
   });
 }
 

@@ -89,7 +89,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import * as os from 'os'
 import * as path from 'path'
 
-import { MIN_COMPILED_PROMPTS, RETIRED_INLINE_EXPANSION, ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT, collectStaleOutputs, compactDirectiveFrom, compactDirectiveText, compiledPrompts, requireDistFile, requireDistFiles, resolveAgentSource, resolveAllAgents, resolveCurationOffSource, sectionBetween, walkFiles } from '../helpers.js'
+import { MIN_COMPILED_PROMPTS, RETIRED_INLINE_EXPANSION, ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT, collectStaleOutputs, compactDirectiveFrom, compactDirectiveText, compiledPrompts, requireDistFile, requireDistFiles, resolveAgentSource, resolveAllAgents, resolveCurationOffSource, sectionBetween, testBackups, walkFiles } from '../helpers.js'
 import { DEVFLOW_PLUGINS, buildScopedSkillsMap, getAllAgentNames } from '../../src/core/plugins.js'
 import { installViaFileCopy } from '../../src/targets/claude-code/installer.js'
 import { getClaudeDirectory } from '../../src/targets/claude-code/claude-paths.js'
@@ -570,6 +570,7 @@ describe('no prompt reaches the Claude directory outside the CLAUDE_CONFIG_DIR r
         plugins, claudeDir, devflowDir, curation: true, compliance: true,
         skillsMap: buildScopedSkillsMap(plugins), agentsMap: new Map(), isPartialInstall: false,
         spinner: { start() {}, stop() {}, message() {} },
+        backups: await testBackups(claudeDir, { claudeDir, devflowDir }),
       })
       const installed = await readFile(path.join(claudeDir, 'commands', 'devflow', 'code-review.md'), 'utf-8')
       expect(installed.split('\n').filter(line => line.startsWith('Installed language focuses: '))).toEqual(['Installed language focuses: typescript'])

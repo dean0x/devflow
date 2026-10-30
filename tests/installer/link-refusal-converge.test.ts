@@ -35,6 +35,7 @@ import { mergeLinkReports, writeFileReplacingLink } from '../../src/targets/clau
 import { convergeTrackerArtifacts } from '../../src/targets/claude-code/tracker-install.js';
 import { restampTrackerAgents } from '../../src/targets/claude-code/tracker-servers.js';
 import { assertTempHome } from '../setup/home-isolation.js';
+import { testBackups } from '../helpers.js';
 
 const STRAY = 'a stray file the user keeps\n';
 const PRIVATE_BYTES = 'a private file the user keeps\n';
@@ -144,8 +145,11 @@ const reapply = (): Promise<Links> =>
 const restamp = (): Promise<Links> => restampTrackerAgents({ claudeDir, servers: ['linear'], warn });
 const trackerConverge = (): Promise<Links> =>
   convergeTrackerArtifacts({ claudeDir, warn, agentSourceDirs: [agentSrc], servers: ['linear'] });
-const complianceConverge = (enabled: boolean): Promise<Links> =>
-  convergeComplianceArtifacts({ claudeDir, devflowDir, enabled, frameworks: [], rulesEnabled: enabled, warn });
+const backupsOf = () => testBackups(tmp, { claudeDir, devflowDir });
+const complianceConverge = async (enabled: boolean): Promise<Links> =>
+  convergeComplianceArtifacts({
+    claudeDir, devflowDir, enabled, frameworks: [], rulesEnabled: enabled, warn, backups: await backupsOf(),
+  });
 const behaviorConverge = (enabled: boolean): Promise<Links> =>
   convergeBehaviorRule({ claudeDir, devflowDir, enabled, rulesEnabled: true, warn });
 
@@ -415,13 +419,14 @@ describe('a file written over a link gets the mode of a new file, never the mode
 describe('a skill folder that is a link is swapped whole and what it points to is left as it was', () => {
   const skillFolder = (name: string): string => path.join(claudeDir, 'skills', name);
 
-  const axes = (curation: boolean) => convergeVariantAxes({
+  const axes = async (curation: boolean) => convergeVariantAxes({
     claudeDir,
     devflowDir,
     manifest: { features: { curation, compliance: { enabled: true, frameworks: [] }, rules: false } },
     plugins,
     warn,
     packageRoot: pkg,
+    backups: await backupsOf(),
   });
 
   interface SkillRow {
@@ -605,7 +610,7 @@ describe('rules --enable', () => {
     await linkFolder(installedRules(), { 'old-rule.md': 'an old rule\n' });
     const before = await snapshot(outside);
 
-    await runRulesEnable(claudeDir, devflowDir);
+    await runRulesEnable(claudeDir, devflowDir, await backupsOf());
 
     expect(await snapshot(outside), 'the place outside keeps every byte, file and mode').toEqual(before);
     const stat = await fs.lstat(installedRules());
@@ -629,7 +634,7 @@ describe('rules --enable', () => {
 
     await fs.chmod(rulesParent, 0o555);
     try {
-      await runRulesEnable(claudeDir, devflowDir);
+      await runRulesEnable(claudeDir, devflowDir, await backupsOf());
     } finally {
       await fs.chmod(rulesParent, 0o755);
     }
@@ -647,7 +652,7 @@ describe('rules --enable', () => {
     vi.spyOn(p.log, 'warn').mockImplementation(message => { logged.push(String(message)); });
     await fs.mkdir(installedRules(), { recursive: true });
 
-    await runRulesEnable(claudeDir, devflowDir);
+    await runRulesEnable(claudeDir, devflowDir, await backupsOf());
 
     expect(logged.filter(line => line.includes('was a link'))).toEqual([]);
     expect((await fs.readdir(installedRules())).length).toBeGreaterThan(0);

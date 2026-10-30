@@ -30,6 +30,7 @@ import { renderVariantManifest, type VariantManifestHost } from '../../src/core/
 import { buildAssetMaps, type PluginDefinition } from '../../src/core/plugins.js';
 import { TRACKER_MCP_SERVERS_DEFAULT } from '../../src/core/tracker.js';
 import { assertTempHome } from '../setup/home-isolation.js';
+import { testBackups } from '../helpers.js';
 
 const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
 
@@ -169,8 +170,9 @@ interface Machine {
   agentSourceDirs?: AgentSourceDirs;
 }
 
-function install(machine: Machine): Promise<unknown> {
+async function install(machine: Machine): Promise<unknown> {
   return installViaFileCopy({
+    backups: await testBackups(tmp, { claudeDir, devflowDir }),
     plugins: [PLUGIN],
     claudeDir,
     devflowDir,

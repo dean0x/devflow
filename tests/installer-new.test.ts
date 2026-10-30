@@ -19,8 +19,9 @@ import * as path from 'path';
 import { composeScripts, installViaFileCopy } from '../src/targets/claude-code/installer.js';
 import { buildAssetMaps, DEVFLOW_PLUGINS } from '../src/core/plugins.js';
 import type { PluginDefinition } from '../src/core/plugins.js';
+import { RETIRED_SHIPPED } from '../src/core/retired-shipped-names.js';
 import { agentsDir, compiledAgentsDir, type AgentSourceDirs } from '../src/core/assets.js';
-import { resolveAgentSource, splitFrontmatter } from './helpers.js';
+import { resolveAgentSource, splitFrontmatter, testBackups } from './helpers.js';
 import { RESOLVER_SCRIPT, SETTINGS_SCRIPT, buildScriptedShim, createFakeBin, runResolver } from './evidence-policy/scripted-shim.js';
 import { RESOLVE_BASE_SCRIPT, SUBPROCESS_TIMEOUT_MS } from './evidence/seam.js';
 
@@ -37,6 +38,16 @@ beforeEach(async () => {
 afterEach(async () => {
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
+
+/** The install under test, with a backup session of this test's temp dirs. */
+async function installWithBackups(
+  opts: Omit<Parameters<typeof installViaFileCopy>[0], 'backups'>,
+): ReturnType<typeof installViaFileCopy> {
+  return installViaFileCopy({
+    ...opts,
+    backups: await testBackups(tmpDir, { claudeDir: opts.claudeDir, devflowDir: opts.devflowDir }),
+  });
+}
 
 // ---------------------------------------------------------------------------
 // composeScripts
@@ -302,7 +313,7 @@ describe('installViaFileCopy — command-missing hard error', () => {
     const spinner = { start: () => {}, stop: () => {}, message: () => {} };
 
     await expect(
-      installViaFileCopy({
+      installWithBackups({
         curation: true,
         compliance: true,
         plugins: [fakePlugin],
@@ -335,7 +346,7 @@ describe('installViaFileCopy — command-missing hard error', () => {
 
     let caught: Error | undefined;
     try {
-      await installViaFileCopy({ plugins: [fakePlugin], claudeDir, devflowDir, skillsMap, agentsMap, spinner, curation: true, compliance: true });
+      await installWithBackups({ plugins: [fakePlugin], claudeDir, devflowDir, skillsMap, agentsMap, spinner, curation: true, compliance: true });
     } catch (e) {
       caught = e as Error;
     }
@@ -387,7 +398,7 @@ describe('installViaFileCopy — prefix-diff sweep', () => {
 
     const { skillsMap, agentsMap } = buildAssetMaps([noOpPlugin]);
 
-    await installViaFileCopy({
+    await installWithBackups({
       curation: true,
       compliance: true,
       plugins: [noOpPlugin],
@@ -416,7 +427,7 @@ describe('installViaFileCopy — prefix-diff sweep', () => {
 
     const { skillsMap, agentsMap } = buildAssetMaps([noOpPlugin]);
 
-    await installViaFileCopy({
+    await installWithBackups({
       curation: true,
       compliance: true,
       plugins: [noOpPlugin],
@@ -446,7 +457,7 @@ describe('installViaFileCopy — prefix-diff sweep', () => {
 
     const { skillsMap, agentsMap } = buildAssetMaps([noOpPlugin]);
 
-    await installViaFileCopy({
+    await installWithBackups({
       curation: true,
       compliance: true,
       plugins: [noOpPlugin],
@@ -501,7 +512,7 @@ describe('installViaFileCopy — prefix-diff sweep', () => {
     };
     const { skillsMap, agentsMap } = buildAssetMaps([securityPlugin]);
 
-    await installViaFileCopy({
+    await installWithBackups({
       curation: true,
       compliance: true,
       plugins: [securityPlugin],
@@ -561,7 +572,7 @@ describe('installViaFileCopy — hard-error on missing declared source (WS6a)', 
     const { agentsMap } = buildAssetMaps([fakePlugin]);
 
     await expect(
-      installViaFileCopy({
+      installWithBackups({
         curation: true,
         compliance: true,
         plugins: [fakePlugin],
@@ -594,7 +605,7 @@ describe('installViaFileCopy — hard-error on missing declared source (WS6a)', 
 
     let caught: Error | undefined;
     try {
-      await installViaFileCopy({
+      await installWithBackups({
         curation: true,
         compliance: true,
         plugins: [fakePlugin],
@@ -642,7 +653,7 @@ describe('installViaFileCopy — hard-error on missing declared source (WS6a)', 
 
     let caught: Error | undefined;
     try {
-      await installViaFileCopy({
+      await installWithBackups({
         curation: true,
         compliance: true,
         plugins: [fakePlugin],
@@ -690,7 +701,7 @@ describe('installViaFileCopy — hard-error on missing declared source (WS6a)', 
     const skillsMap = new Map([['nonexistent-xyz-ws6a-skill', 'devflow-test-ws6a-noop']]);
 
     await expect(
-      installViaFileCopy({
+      installWithBackups({
         curation: true,
         compliance: true,
         plugins: [noOpPlugin],
@@ -723,7 +734,7 @@ describe('installViaFileCopy — hard-error on missing declared source (WS6a)', 
     const rulesMap = new Map([['nonexistent-xyz-ws6a-rule', 'devflow-test-ws6a-noop']]);
 
     await expect(
-      installViaFileCopy({
+      installWithBackups({
         curation: true,
         compliance: true,
         plugins: [noOpPlugin],
@@ -761,8 +772,9 @@ describe('installViaFileCopy — sweep results in InstallReport (A2)', () => {
     const devflowDir = path.join(tmpDir, 'devflow');
     const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
 
-    // Plant a stale agent file that is not in the registry (any real agent name would survive).
-    const orphanName = 'devflow-zzz-nonexistent-sweep-sentinel';
+    // Plant an agent file of an earlier release that is not in the registry (any real agent name
+    // would survive; a file devflow never shipped is moved aside, not swept).
+    const orphanName = RETIRED_SHIPPED.agents[0];
     await fs.mkdir(agentsTarget, { recursive: true });
     await fs.writeFile(path.join(agentsTarget, `${orphanName}.md`), '# stale', 'utf-8');
 
@@ -771,7 +783,7 @@ describe('installViaFileCopy — sweep results in InstallReport (A2)', () => {
     // Use isPartialInstall:true so the pre-install directory wipe is skipped;
     // on a full install the entire agents/devflow dir is removed before the sweep,
     // making the sweep a no-op for that case.
-    const report = await installViaFileCopy({
+    const report = await installWithBackups({
       curation: true,
       compliance: true,
       plugins: [noOpPlugin],
@@ -798,12 +810,12 @@ describe('installViaFileCopy — sweep results in InstallReport (A2)', () => {
     const devflowDir = path.join(tmpDir, 'devflow');
     const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
 
-    const orphanName = 'devflow-zzz-f15-kind-sentinel';
+    const orphanName = RETIRED_SHIPPED.agents[1];
     await fs.mkdir(agentsTarget, { recursive: true });
     await fs.writeFile(path.join(agentsTarget, `${orphanName}.md`), '# stale', 'utf-8');
 
     const { skillsMap, agentsMap } = buildAssetMaps([noOpPlugin]);
-    const report = await installViaFileCopy({
+    const report = await installWithBackups({
       curation: true,
       compliance: true,
       plugins: [noOpPlugin],
@@ -825,7 +837,7 @@ describe('installViaFileCopy — sweep results in InstallReport (A2)', () => {
     const devflowDir = path.join(tmpDir, 'devflow');
     const { skillsMap, agentsMap } = buildAssetMaps([noOpPlugin]);
 
-    const report = await installViaFileCopy({
+    const report = await installWithBackups({
       curation: true,
       compliance: true,
       plugins: [noOpPlugin],
@@ -873,7 +885,7 @@ describe('compliance skill orphan sweep — FEATURE_OWNED_SKILLS protection', ()
     const { skillsMap, agentsMap } = buildAssetMaps([noOpPlugin]);
     const spinner = { start: () => {}, stop: () => {}, message: () => {} };
 
-    const report = await installViaFileCopy({
+    const report = await installWithBackups({
       curation: true,
       compliance: true,
       plugins: [noOpPlugin],
@@ -946,7 +958,7 @@ describe('installViaFileCopy — dist-preferred agent resolution', () => {
       optional: false,
       rules: [],
     };
-    await installViaFileCopy({
+    await installWithBackups({
       curation: true,
       compliance: true,
       plugins: [fakePlugin],
@@ -1016,7 +1028,7 @@ describe('installViaFileCopy — dist-preferred agent resolution', () => {
       optional: false,
       rules: [],
     };
-    await installViaFileCopy({
+    await installWithBackups({
       curation: true,
       compliance: true,
       plugins: [fakePlugin],
@@ -1065,7 +1077,7 @@ describe('installViaFileCopy — a partial install pairs only matching settings-
     const devflowDir = path.join(tmpDir, 'devflow');
     const { skillsMap, agentsMap } = buildAssetMaps(plugins);
 
-    await installViaFileCopy({
+    await installWithBackups({
       curation: true,
       compliance: true,
       plugins,

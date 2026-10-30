@@ -1,4 +1,4 @@
-import { promises as fs, type Dirent } from 'fs';
+import { promises as fs } from 'fs';
 import { existsSync } from 'fs';
 import * as path from 'path';
 import type { PluginDefinition } from '../../core/plugins.js';
@@ -14,9 +14,11 @@ import {
 } from '../../core/curation-variants.js';
 import { sweepOrphanedAssets, mdFileName, mdEntryName, type SweepResult } from '../../core/orphan-sweep.js';
 import { generatedReferenceManifest, installedReferenceManifest, PR_HOST_DESTINATION_ROOT, SKILL_REFS_SKILL_NAME, TRACKER_DESTINATION_ROOT, WORKFLOW_FOLDERS, type WorkflowFolder } from '../../core/mds-variants.js';
-import { sweepOrphanedReferences, MAX_REFERENCE_SWEEP_DEPTH } from '../../core/reference-sweep.js';
+import { sweepOrphanedReferences, MAX_REFERENCE_SWEEP_DEPTH, type ReferenceSweepDelegate } from '../../core/reference-sweep.js';
 import { complianceOffCopyExclusions, removeComplianceOffFiles } from './compliance-off-files.js';
-import { clearLinkForWrite, directoryState, refuseUnrealFolder, removeReportingLink, unlinkLinkAt, type LinkReport } from './linked-folder.js';
+import { discardDisplacedFolder } from './folder-swap.js';
+import { clearLinkForWrite, directoryState, refuseUnrealFolder, unlinkLinkAt, type LinkReport } from './linked-folder.js';
+import type { BackupSession, BackupSnapshot, EntryKind, PrepassTarget } from './install-backup.js';
 import { installWorkflowFolder, readWorkflowFolder, type WorkflowFolderFile, type WorkflowFolderRead } from './workflow-folder-install.js';
 import { TRACKER_AGENT_NAME } from './tracker-install.js';
 import { isTrackerStampedAgent } from './tracker-servers.js';
@@ -139,6 +141,12 @@ export interface InstallReport {
    * user who wrote a shadow deserves to hear which of the two happened.
    */
   dormantShadows: string[];
+  /**
+   * What the run's backup session had recorded when this install returned: the files it moved
+   * aside, what it could not move and the retired files it removed. A frozen copy, so it does not
+   * follow later steps of the same run; the entry point prints the live session at the end.
+   */
+  backups: BackupSnapshot;
 }
 
 /** Discriminated outcome for a single rule installation. */
@@ -393,8 +401,17 @@ export async function copyDirectory(
  * {@link composeScripts}, swallows it with the rest of its copy-and-chmod step; that tree
  * is three levels of shipped assets, so a breach there means the package itself grew a
  * shape no walk in this repo expects, and neither call site aborts an install over it.
+ *
+ * `skip` names the entries the walk leaves alone: a path it accepts keeps its mode, and a folder
+ * it accepts is not entered. The reference overlay passes the backup session's `isKept`, so a file
+ * of the user that stays because its move failed keeps the mode the user gave it.
  */
-export async function chmodRecursive(dir: string, mode: number, _depth = 0): Promise<void> {
+export async function chmodRecursive(
+  dir: string,
+  mode: number,
+  skip?: (entry: string) => boolean,
+  _depth = 0,
+): Promise<void> {
   if (_depth > MAX_REFERENCE_SWEEP_DEPTH) {
     throw new Error(
       `chmodRecursive: descent into ${dir} exceeds the bound of ` +
@@ -405,8 +422,9 @@ export async function chmodRecursive(dir: string, mode: number, _depth = 0): Pro
   const entries = await fs.readdir(dir, { withFileTypes: true });
   for (const entry of entries) {
     const fullPath = path.join(dir, entry.name);
+    if (skip?.(fullPath) === true) continue;
     if (entry.isDirectory()) {
-      await chmodRecursive(fullPath, mode, _depth + 1);
+      await chmodRecursive(fullPath, mode, skip, _depth + 1);
     } else if (entry.isFile()) {
       await fs.chmod(fullPath, mode);
     }
@@ -628,7 +646,7 @@ export type OverlayUnit = OverlayUnitRef & {
 };
 
 /** The arms of {@link OverlayUnit} that own their directory outright and are swapped whole. */
-type DirectoryOverlayUnit = Extract<OverlayUnit, { kind: 'provider' | 'pr-host' }>;
+export type DirectoryOverlayUnit = Extract<OverlayUnit, { kind: 'provider' | 'pr-host' }>;
 
 /** The flat cross-cutting arm of {@link OverlayUnit}, for the code that renames it document by document. */
 type CrossCuttingOverlayUnit = Extract<OverlayUnit, { kind: 'cross-cutting' }>;
@@ -770,7 +788,7 @@ const STAGING_TOKEN = `${process.pid}-${Date.now().toString(36)}`;
  * arm's basename is `{provider}.{token}.tmp`, which is not dot-prefixed, so a rule keyed
  * on the name would reach the other arms only.
  */
-function stagingDirFor(referencesTarget: string, unit: OverlayUnit): string {
+export function stagingDirFor(referencesTarget: string, unit: OverlayUnit): string {
   return `${sidecarBaseFor(referencesTarget, unit)}.${STAGING_TOKEN}.tmp`;
 }
 
@@ -780,7 +798,7 @@ function stagingDirFor(referencesTarget: string, unit: OverlayUnit): string {
  * Beside the staging tree, and under `tracker/` for the same reason (property 2 of
  * {@link stagingDirFor}): a backup a crash strands is removed by a later run's prune.
  */
-function backupDirFor(referencesTarget: string, unit: DirectoryOverlayUnit): string {
+export function backupDirFor(referencesTarget: string, unit: DirectoryOverlayUnit): string {
   return `${sidecarBaseFor(referencesTarget, unit)}.old`;
 }
 
@@ -952,6 +970,10 @@ async function buildUnitStagingTree(
  *     entries the overlay must never replace or delete (D-OVERLAY-FLAT-UNIT), so its
  *     files are exactly the comparison and the neighbours are none of its business.
  *
+ * A directory unit that {@link unitStaysInPlace} is promoted file by file, like a flat set,
+ * so a file of the user's that stays in its folder is no sign that the unit is stale: its
+ * files are exactly the comparison there too.
+ *
  * What it deliberately does NOT compare is file MODE. D-OVERLAY-MODE-SCOPE normalises the
  * whole references directory on every run regardless of which units promoted, so a unit
  * skipped here still has its modes converged — a skipped promotion can hide byte drift
@@ -965,10 +987,11 @@ async function stagedUnitIsAlreadyInstalled(
   unit: OverlayUnit,
   referencesTarget: string,
   stagingDir: string,
+  backups: BackupSession,
 ): Promise<boolean> {
   const basenameOf = (relPath: string): string => relPath.split('/').slice(-1)[0];
 
-  if (unit.kind !== 'cross-cutting') {
+  if (unit.kind !== 'cross-cutting' && !unitStaysInPlace(backups, underRoot(referencesTarget, unitSubdir(unit)))) {
     const owned = new Set(unit.files.map(basenameOf));
     let installed: string[];
     try {
@@ -1027,6 +1050,57 @@ async function restoreDisplacedUnit(
 type RecordPromotionState = (state: OverlayFailureState) => void;
 
 /**
+ * Does a directory unit's folder hold an entry that must stay where it is?
+ *
+ * True when the backup session kept an entry at or below the folder (a move that failed, a
+ * folder it could not scan), or kept the folder or a folder above it (one over the entry
+ * cap, or a root it refused). Such a folder is never swapped out: a swap sets the whole
+ * folder aside, and what the session kept in it would go with it. The unit is written into
+ * the folder file by file instead, and the prune that follows leaves the kept entries alone.
+ */
+function unitStaysInPlace(backups: BackupSession, unitDir: string): boolean {
+  return backups.isKept(unitDir) || backups.keptUnder(unitDir).length > 0;
+}
+
+/**
+ * Rename the documents a staging tree holds into `destDir`, one `rename` each, and drop the
+ * staging tree. Shared by the two promotions that write into a folder that stays in place.
+ *
+ * The directory is created rather than assumed — {@link promoteDirectoryUnit} does the same
+ * for its target's parent. The two flat directories the registry emits today exist by the time
+ * promotion runs for reasons that have nothing to do with the unit landing in them: the
+ * references root is created by {@link overlayGeneratedReferences}, and `tracker/` as a side
+ * effect of the flat arm's own staging path. A flat set landing anywhere else takes ENOENT on
+ * its first rename — a unit reported as failed for where it was asked to land rather than for
+ * anything wrong with the documents it carries.
+ *
+ * Past the first rename the set is mixed, and there is no directory to swap back
+ * (D-OVERLAY-FLAT-UNIT). The documents renamed so far carry this run's bytes; the rest still
+ * carry the previous install's. The state is recorded after each rename so a failure on the
+ * next one names both halves instead of claiming the set is untouched.
+ *
+ * Throws on the first failing rename; the caller reports the state recorded by then.
+ */
+async function renameDocumentsInto(
+  files: readonly string[],
+  destDir: string,
+  stagingDir: string,
+  record: RecordPromotionState,
+): Promise<void> {
+  await fs.mkdir(destDir, { recursive: true });
+  for (const [index, relPath] of files.entries()) {
+    const basename = relPath.split('/').slice(-1)[0];
+    await fs.rename(path.join(stagingDir, basename), path.join(destDir, basename));
+    record({
+      kind: 'partially-refreshed',
+      refreshed: files.slice(0, index + 1),
+      stale: files.slice(index + 1),
+    });
+  }
+  await fs.rm(stagingDir, { recursive: true, force: true });
+}
+
+/**
  * Promote the flat cross-cutting set — one `rename` per document.
  *
  * There is no directory to swap. These documents land in `references/{unit.dir}` — the
@@ -1045,29 +1119,7 @@ async function promoteCrossCuttingUnit(
   stagingDir: string,
   record: RecordPromotionState,
 ): Promise<void> {
-  const destDir = underRoot(referencesTarget, unit.dir);
-  // The directory this set lands in, created rather than assumed — {@link promoteDirectoryUnit}
-  // does the same for its target's parent. The two flat directories the registry emits today
-  // exist by the time promotion runs for reasons that have nothing to do with the unit landing
-  // in them: the references root is created by {@link overlayGeneratedReferences}, and
-  // `tracker/` as a side effect of this arm's own staging path. A flat set landing anywhere
-  // else takes ENOENT on its first rename — a unit reported as failed for where it was asked
-  // to land rather than for anything wrong with the documents it carries.
-  await fs.mkdir(destDir, { recursive: true });
-  for (const [index, relPath] of unit.files.entries()) {
-    const basename = relPath.split('/').slice(-1)[0];
-    await fs.rename(path.join(stagingDir, basename), path.join(destDir, basename));
-    // Past the first rename the set is mixed, and there is no directory to swap back
-    // (D-OVERLAY-FLAT-UNIT). The documents renamed so far carry this run's bytes; the
-    // rest still carry the previous install's. Recorded after each rename so a failure
-    // on the next one names both halves instead of claiming the set is untouched.
-    record({
-      kind: 'partially-refreshed',
-      refreshed: unit.files.slice(0, index + 1),
-      stale: unit.files.slice(index + 1),
-    });
-  }
-  await fs.rm(stagingDir, { recursive: true, force: true });
+  await renameDocumentsInto(unit.files, underRoot(referencesTarget, unit.dir), stagingDir, record);
 }
 
 /**
@@ -1078,6 +1130,14 @@ async function promoteCrossCuttingUnit(
  * either entirely the previous install or entirely the new one (DR-05, risk P2-g), and a
  * rename that fails half-way restores the previous one rather than leaving it empty.
  *
+ * A folder that holds an entry which must stay where it is ({@link unitStaysInPlace}), or
+ * that cannot be set aside because an earlier `.old` folder still stands beside it, is not
+ * swapped: the unit's files are renamed into it one by one, as a flat set is
+ * ({@link renameDocumentsInto}), and the prune that follows converges the rest. Nothing here
+ * removes a folder with a recursive `rm`: a displaced folder goes through the backup
+ * session, which moves what devflow did not ship, removes what it shipped by the list the
+ * scan made and ends with a plain `rmdir` ({@link discardDisplacedFolder}).
+ *
  * Throws once the state it left has been recorded; the caller reports it.
  */
 async function promoteDirectoryUnit(
@@ -1085,6 +1145,7 @@ async function promoteDirectoryUnit(
   referencesTarget: string,
   stagingDir: string,
   record: RecordPromotionState,
+  backups: BackupSession,
 ): Promise<void> {
   const target = underRoot(referencesTarget, unitSubdir(unit));
   const backup = backupDirFor(referencesTarget, unit);
@@ -1103,8 +1164,16 @@ async function promoteDirectoryUnit(
   // either is converged away by a later run's tracker-subtree prune (both names end
   // in neither `/` nor `.md`, so no manifest entry can collide with them) — but the
   // backup this run is still relying on is exempt from this run's prune, which is
-  // what `restore-failed` carries the recovery path for.
-  await fs.rm(backup, { recursive: true, force: true });
+  // what `restore-failed` carries the recovery path for. A file of the user's in a
+  // stranded `.old` moves to the backup folder first; one that cannot move keeps the
+  // folder standing.
+  await discardDisplacedFolder(backups, backup, target);
+
+  if ((await directoryState(target)) === 'real'
+    && (unitStaysInPlace(backups, target) || (await directoryState(backup)) !== 'absent')) {
+    await renameDocumentsInto(unit.files, target, stagingDir, record);
+    return;
+  }
 
   let displaced = false;
   try {
@@ -1129,7 +1198,7 @@ async function promoteDirectoryUnit(
     throw err;
   }
 
-  await fs.rm(backup, { recursive: true, force: true }).catch(() => undefined);
+  if (displaced) await discardDisplacedFolder(backups, backup, target).catch(() => undefined);
 }
 
 /**
@@ -1157,6 +1226,7 @@ export async function promoteUnitStagingTree(
   unit: OverlayUnit,
   referencesTarget: string,
   stagingDir: string,
+  backups: BackupSession,
 ): Promise<UnitPromotion> {
   let state: OverlayFailureState = { kind: 'installed-unchanged' };
   const record: RecordPromotionState = next => { state = next; };
@@ -1167,7 +1237,7 @@ export async function promoteUnitStagingTree(
         break;
       case 'provider':
       case 'pr-host':
-        await promoteDirectoryUnit(unit, referencesTarget, stagingDir, record);
+        await promoteDirectoryUnit(unit, referencesTarget, stagingDir, record, backups);
         break;
       default: {
         const _exhaustive: never = unit;
@@ -1293,6 +1363,7 @@ async function prunePreservingRecoveryCopies(
   subtree: ConvergedSubtree,
   manifest: readonly string[],
   overlayFailures: readonly OverlayFailure[],
+  backups: BackupSession,
 ): Promise<SweepResult> {
   const subtreeRoot = underRoot(referencesTarget, subtree);
   const prefix = `${subtree}/`;
@@ -1333,6 +1404,7 @@ async function prunePreservingRecoveryCopies(
   const swept = await sweepOrphanedReferences(
     subtreeRoot,
     new Set(manifest.filter(p => p.startsWith(prefix)).map(p => p.slice(prefix.length))),
+    referenceSweepDelegate(backups),
   );
   return {
     scanned: swept.scanned,
@@ -1358,6 +1430,7 @@ async function pruneConvergedSubtrees(
   referencesTarget: string,
   manifest: readonly string[],
   overlayFailures: readonly OverlayFailure[],
+  backups: BackupSession,
 ): Promise<SweepResult> {
   let scanned = 0;
   const removed: SweepResult['removed'] = [];
@@ -1369,6 +1442,7 @@ async function pruneConvergedSubtrees(
       subtree,
       manifest,
       overlayFailures,
+      backups,
     );
     scanned += swept.scanned;
     removed.push(...swept.removed);
@@ -1437,6 +1511,7 @@ export async function overlayGeneratedReferences(opts: {
   sourceRoot?: string;
   manifest?: readonly string[];
   warn?: (msg: string) => void;
+  backups: BackupSession;
 }): Promise<ReferenceOverlayResult> {
   const sourceRoot = opts.sourceRoot ?? compiledSkillRefsDir();
   const manifest = opts.manifest ?? generatedReferenceManifest();
@@ -1460,6 +1535,13 @@ export async function overlayGeneratedReferences(opts: {
     const fault = await convergedRootFault(opts.referencesTarget, subtree);
     if (fault !== null) rootFaults.set(subtree, fault);
   }
+
+  // A unit swap deletes the folder it displaces, and the prune below sweeps what the manifest does
+  // not name. What the user put in a converged subtree therefore moves aside first, before either.
+  // A root that is not a real folder is not scanned; the unit refusal and the prune skip it too.
+  await opts.backups.prepass(
+    CONVERGED_SUBTREES.filter(subtree => !rootFaults.has(subtree)).map(subtree => underRoot(opts.referencesTarget, subtree)),
+  );
 
   for (const unit of planOverlayUnits(manifest)) {
     const fault = subtreesTouchedBy(opts.referencesTarget, unit)
@@ -1486,12 +1568,12 @@ export async function overlayGeneratedReferences(opts: {
     // installed, so `overlaidRefs` names what this run WROTE (AC-23). The discard is the
     // same one both promotion halves perform on their way out; skipping it would leave
     // the `.tmp` residue every other path is asserted not to leave.
-    if (await stagedUnitIsAlreadyInstalled(unit, opts.referencesTarget, built.stagingDir)) {
+    if (await stagedUnitIsAlreadyInstalled(unit, opts.referencesTarget, built.stagingDir, opts.backups)) {
       await fs.rm(built.stagingDir, { recursive: true, force: true }).catch(() => undefined);
       unchangedRefs.push(...unit.files);
       continue;
     }
-    const promoted = await promoteUnitStagingTree(unit, opts.referencesTarget, built.stagingDir);
+    const promoted = await promoteUnitStagingTree(unit, opts.referencesTarget, built.stagingDir, opts.backups);
     if (!promoted.ok) {
       overlayFailures.push({ unit: unitRef(unit), state: promoted.state, error: promoted.error });
       continue;
@@ -1499,7 +1581,7 @@ export async function overlayGeneratedReferences(opts: {
     overlaidRefs.push(...unit.files);
   }
 
-  const pruned = await pruneConvergedSubtrees(opts.referencesTarget, manifest, overlayFailures);
+  const pruned = await pruneConvergedSubtrees(opts.referencesTarget, manifest, overlayFailures, opts.backups);
 
   // D-OVERLAY-MODE-SCOPE: normalise the WHOLE references directory, not only the files
   // this run installed. copyDirectory preserves source modes, so a hand-authored
@@ -1511,12 +1593,13 @@ export async function overlayGeneratedReferences(opts: {
   // boundary is stated as "never replace or delete" rather than "never touch": the MODE of
   // a hand-authored reference — and of whatever a shadowed skill supplied outside
   // `tracker/` — is normalised here. The prove-you-wrote-it rule permits exactly that: the
-  // ownership guard protects deletion, not overwrite.
+  // ownership guard protects deletion, not overwrite. A file of the user that the backup session
+  // kept in place (its move failed) is the exception: its mode stays as the user set it.
   //
   // It is also the one walk that can breach chmodRecursive's descent bound. The catch is
   // that breach's reporting channel, not just an I/O guard (see {@link chmodRecursive}).
   try {
-    await chmodRecursive(opts.referencesTarget, 0o644);
+    await chmodRecursive(opts.referencesTarget, 0o644, entry => opts.backups.isKept(entry));
   } catch (err) {
     warn(`reference overlay: could not normalise reference file modes — ${String(err)}`);
   }
@@ -1624,82 +1707,6 @@ export function overlayOwnedSkillPaths(manifest: readonly string[]): ReadonlySet
     owned.add(`${SKILL_REFERENCES_DIRNAME}/${keptWhole ? segments[0] : relPath}`);
   }
   return owned;
-}
-
-/**
- * Empty a directory of everything but the paths another converger owns.
- *
- * `fs.rm(dir)` with a hole in it. `keep` holds directory-relative paths, each preserved
- * whole — a file as itself, a directory with its entire subtree. Everything else is
- * removed exactly as the unconditional pre-clean would have removed it.
- *
- * A kept path is preserved only as a real file or directory. A symlink planted at one is
- * removed like anything else (the link, never its target): the converger that owns the
- * path writes and prunes through it, so a link left standing here would hand that
- * converger someone else's directory (D-CONVERGED-ROOT-REAL). `Dirent` types are
- * lstat-based, which is what makes the check see the link rather than its target.
- *
- * Descent is bounded, and the bound is the `keep` set's own deepest path rather than a
- * constant: the walk only ever descends INTO a directory that still has a kept
- * descendant below it, so there is nothing to look for past that depth. A `keep` set of
- * depth 2 — which is what {@link overlayOwnedSkillPaths} produces for every manifest the
- * build emits — walks two levels and `fs.rm`s the rest recursively in one call.
- *
- * An unreadable directory is left alone rather than reported: the caller already
- * swallows the errors of the `fs.rm` this stands in for, and a pre-clean that cannot
- * read its target has nothing to remove from it.
- *
- * The walk never goes through a link. `readdir` follows one, so a link at `dir` itself is
- * unlinked and nothing is read from it, and below `dir` only a `Dirent` that is a real
- * directory is entered. The folder a link points to is left as it is. A link that stands where
- * the pre-clean expects its own folder or file (`dir`, or a path in `keep` or above one) is
- * returned, so the caller reports it; any other link is removed like the file it stands for.
- * A link at `dir` that cannot be removed is left in place and nothing is emptied.
- *
- * A link at a kept path or above one is returned as `awaitingWrite`, not as replaced: the
- * converger that owns the path has not written there yet, and a summary that says a real file or
- * folder stands where the link stood is true only after it has ({@link reportLinksOnceWritten}).
- * `leaveKeptLinks` is for a kept path whose converger replaces a link itself and reports it, never
- * writing through it (the tracker agent file): the link then stays for that converger.
- *
- * @returns The links at `dir` that this replaced, and the links it removed that a later write replaces.
- */
-async function emptyDirectoryExcept(
-  dir: string,
-  keep: ReadonlySet<string>,
-  options: { readonly leaveKeptLinks?: boolean } = {},
-): Promise<{ replacedLinks: string[]; awaitingWrite: string[] }> {
-  const rootLink = await unlinkLinkAt(dir);
-  if (rootLink !== 'no-link') return { replacedLinks: rootLink === 'unlinked' ? [dir] : [], awaitingWrite: [] };
-
-  const kept = [...keep];
-  const maxDepth = Math.max(0, ...kept.map(relPath => relPath.split('/').length));
-  const awaitingWrite: string[] = [];
-
-  const walk = async (current: string, rel: string, depth: number): Promise<void> => {
-    let entries: Dirent[];
-    try {
-      entries = await fs.readdir(current, { withFileTypes: true });
-    } catch { return; }
-
-    for (const entry of entries) {
-      const entryRel = rel === '' ? entry.name : `${rel}/${entry.name}`;
-      if (keep.has(entryRel) && (!entry.isSymbolicLink() || options.leaveKeptLinks === true)) continue;
-
-      const entryPath = path.join(current, entry.name);
-      const holdsSomethingKept = kept.some(relPath => relPath.startsWith(`${entryRel}/`));
-      if (entry.isDirectory() && depth < maxDepth && holdsSomethingKept) {
-        await walk(entryPath, entryRel, depth + 1);
-        continue;
-      }
-
-      await fs.rm(entryPath, { recursive: true, force: true });
-      if (entry.isSymbolicLink() && (holdsSomethingKept || keep.has(entryRel))) awaitingWrite.push(entryPath);
-    }
-  };
-
-  await walk(dir, '', 1);
-  return { replacedLinks: [], awaitingWrite };
 }
 
 /**
@@ -1948,6 +1955,12 @@ export interface FileCopyOptions {
   workflowFolders?: readonly WorkflowFolder[];
   /** Package root the folder trees are read from. Defaults to {@link FileCopyOptions.packageRoot}. */
   workflowFoldersRoot?: string;
+  /**
+   * The backup session of this run, required so a removal step cannot run without one. The entry
+   * point makes one session before any change and passes the same one to the converge that follows
+   * the install, so one run makes at most one backup folder.
+   */
+  backups: BackupSession;
 }
 
 /**
@@ -2121,30 +2134,170 @@ function recordSweep(
  * report which of them were actually there to remove.
  *
  * `names` is registry arithmetic (the skills no selected plugin owns), so most of
- * it is routinely absent from disk. Only the deleter can say what it deleted:
- * `fs.rm` is called WITHOUT `force`, so an absent directory rejects with ENOENT —
- * "nothing to remove", neither a removal nor a failure. Reporting the plan instead
- * would tell the user about deletions that never happened.
+ * it is routinely absent from disk. Only the deleter can say what it deleted: an
+ * absent folder is "nothing to remove", neither a removal nor a failure. Reporting
+ * the plan instead would tell the user about deletions that never happened.
  *
- * Per-item failure isolation, never throws: any other rejection is recorded in
- * `failed` and the remaining names are still attempted.
+ * A folder goes by the entries the backup session listed, then a plain `rmdir`. The
+ * pre-pass has moved every file devflow did not ship, so a folder that still holds
+ * an entry (a move that failed) stays whole and is not reported as removed. A link
+ * at the folder is unlinked and its target is left as it is; a path that is not a
+ * folder is a failure and stays.
+ *
+ * Per-item failure isolation, never throws: a failure is recorded in `failed`
+ * and the remaining names are still attempted.
  */
 async function removeDeselectedSkills(
   skillsDir: string,
   names: Iterable<string>,
+  backups: BackupSession,
 ): Promise<{ removed: string[]; failed: Array<{ name: string; error: unknown }> }> {
   const removed: string[] = [];
   const failed: Array<{ name: string; error: unknown }> = [];
   for (const name of names) {
-    try {
-      await fs.rm(path.join(skillsDir, prefixSkillName(name)), { recursive: true });
-      removed.push(name);
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue;
-      failed.push({ name, error: err });
+    const folder = path.join(skillsDir, prefixSkillName(name));
+    const state = await directoryState(folder);
+    switch (state) {
+      case 'absent':
+        break;
+      case 'link':
+        if ((await unlinkLinkAt(folder)) === 'unlinked') removed.push(name);
+        else failed.push({ name, error: new Error('a link that could not be removed') });
+        break;
+      case 'unusable':
+        failed.push({ name, error: new Error('not a folder, so nothing was removed') });
+        break;
+      case 'real': {
+        const result = await backups.removeListed(folder);
+        if (result.folderRemoved) removed.push(name);
+        break;
+      }
+      default: {
+        const unreachable: never = state;
+        void unreachable;
+      }
     }
   }
   return { removed, failed };
+}
+
+/** The kind of the entry at `entryPath`, read with `lstat` so a link is a link; null when it cannot be read. */
+async function entryKindAt(entryPath: string): Promise<EntryKind | null> {
+  try {
+    const stat = await fs.lstat(entryPath);
+    if (stat.isSymbolicLink()) return 'link';
+    if (stat.isDirectory()) return 'directory';
+    return stat.isFile() ? 'file' : 'special';
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The `mayRemove` check of a flat registry-diff sweep. It admits a file or link that the backup
+ * session classifies as devflow's own (a retired or superseded file, a leftover of an interrupted
+ * write) and nothing else. An unknown entry was moved by the pre-pass or stays where it is, and a
+ * folder is never admitted: the sweep removes what this check admits with `unlink`, so an entry
+ * that turns into a folder after the check is not removed. An entry the session kept, or one in a
+ * folder it kept (over the entry cap, or one it could not scan), is not admitted either: the run
+ * said it would leave that folder whole.
+ */
+function removesOnlyDevflowFiles(backups: BackupSession): (entryPath: string) => Promise<boolean> {
+  return async (entryPath) => {
+    if (backups.isKept(entryPath)) return false;
+    const kind = await entryKindAt(entryPath);
+    if (kind === null || kind === 'directory') return false;
+    return backups.classifyAt(entryPath, kind) !== 'unknown';
+  };
+}
+
+/**
+ * The delegate the reference prune acts through: it decides, per entry the manifest does not name,
+ * between keeping a file of the user's and removing one of devflow's own.
+ *
+ * An unknown entry moves whole to the backup folder, with one rename. An entry the session
+ * classifies as devflow's own (a retired or superseded reference, a leftover of an interrupted
+ * write) is removed: a file or link by `unlink`, a folder by the files the session lists and a plain
+ * `rmdir`, after its unknown entries moved. A folder is never removed recursively. A failed move is
+ * in the session's record and the entry stays; a failed unlink reaches the sweep as a failure.
+ *
+ * An entry the session kept stays as it is, with no second attempt: a move that failed earlier in
+ * the run, or a folder over the entry cap or one the scan could not read, and everything in it.
+ */
+export function referenceSweepDelegate(backups: BackupSession): ReferenceSweepDelegate {
+  return {
+    async dispose(entry, isDirectory) {
+      if (backups.isKept(entry)) return { outcome: 'kept' };
+      const kind: EntryKind = isDirectory ? 'directory' : (await entryKindAt(entry)) ?? 'file';
+      if (backups.classifyAt(entry, kind) === 'unknown') {
+        const moved = await backups.moveWhole(entry);
+        return { outcome: moved.status === 'moved' ? 'moved' : 'kept' };
+      }
+      if (kind === 'directory') {
+        await backups.prepass([entry]);
+        const removal = await backups.removeListed(entry);
+        return { outcome: removal.folderRemoved ? 'removed' : 'kept' };
+      }
+      try {
+        await fs.unlink(entry);
+        return { outcome: 'removed' };
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { outcome: 'kept' };
+        return { outcome: 'failed', error: err };
+      }
+    },
+  };
+}
+
+/**
+ * Whether the run may move and remove below `root`: it is a real folder. An absent root has nothing
+ * to scan. A link at a root the pre-clean replaces (`replaceLink`) is unlinked and reported, as the
+ * pre-clean always did, and its target is not walked. A link that stays, or a path that is not a
+ * folder, is a refused root: no move and no removal below it, and `refuseUnrealFolder` names it
+ * later in the run.
+ */
+async function mayChangeBelow(root: string, report: Pick<LinkReport, 'replacedLinks'>, replaceLink: boolean): Promise<boolean> {
+  const state = await directoryState(root);
+  if (state === 'real') return true;
+  if (state === 'link' && replaceLink && (await unlinkLinkAt(root)) === 'unlinked') report.replacedLinks.push(root);
+  return false;
+}
+
+/** Whether `relative` (a path below a skill folder) is an overlay-owned path or lies below one. */
+function isUnderOverlayOwnedPath(relative: string, owned: ReadonlySet<string>): boolean {
+  for (const ownedPath of owned) {
+    if (relative === ownedPath || relative.startsWith(`${ownedPath}/`)) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether the top-level entry that `relative` starts with is a `devflow:*` skill folder outside the
+ * registry: the folders the skill registry-diff sweep would remove.
+ */
+function isUnregisteredSkillFolder(relative: string, registry: ReadonlySet<string>): boolean {
+  const top = relative.split('/', 1)[0];
+  return top.startsWith(SKILL_NAMESPACE) && !registry.has(unprefixSkillName(top));
+}
+
+/**
+ * Unlink a link that stands at an overlay-owned path or above one, inside the references skill
+ * `skillDir`. The overlay writes and prunes through those paths, so a link left there would hand it
+ * another folder. Each unlinked link is returned for {@link reportLinksOnceWritten}, since it is
+ * replaced only once the overlay has written a real entry. Bounded by the owned set.
+ */
+async function unlinkOverlayOwnedLinks(skillDir: string, owned: ReadonlySet<string>): Promise<string[]> {
+  const paths = new Set<string>();
+  for (const rel of owned) {
+    const segments = rel.split('/');
+    for (let depth = 1; depth <= segments.length; depth++) paths.add(segments.slice(0, depth).join('/'));
+  }
+  const unlinked: string[] = [];
+  for (const rel of [...paths].sort((a, b) => a.split('/').length - b.split('/').length || (a < b ? -1 : 1))) {
+    const entry = path.join(skillDir, ...rel.split('/'));
+    if ((await unlinkLinkAt(entry)) === 'unlinked') unlinked.push(entry);
+  }
+  return unlinked;
 }
 
 /** What {@link installCommandsAndAgents} needs. */
@@ -2431,6 +2584,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     compliance,
     trackerServers = TRACKER_MCP_SERVERS_DEFAULT,
     warn = () => { /* no-op: callers without a logger still get the full InstallReport */ },
+    backups,
   } = options;
   const packageRoot = options.packageRoot ?? getPackageRoot();
 
@@ -2486,6 +2640,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     refusedFolders: [],
     removedSkills: [],
     dormantShadows: [],
+    backups: backups.snapshot(),
   };
 
   // The skill decision, made in full before anything is touched — which skills
@@ -2516,20 +2671,40 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // as replaced only once a real file or folder stands there (reportLinksOnceWritten).
   const awaitingWrite: string[] = [];
 
-  // Clean old Devflow files before installing
-  spinner.message('Cleaning old files...');
+  const skillsRoot = path.join(claudeDir, 'skills');
+  const commandsTarget = path.join(claudeDir, 'commands', 'devflow');
+  const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
+  const rulesTarget = path.join(claudeDir, 'rules', 'devflow');
+  const skillFolder = (name: string): string => path.join(skillsRoot, prefixSkillName(name));
+  const registrySkills = new Set([...getAllSkillNames(folderWorkflows), ...FEATURE_OWNED_SKILLS]);
+  const overlayOwned = overlayOwnedSkillPaths(refsManifest);
+  const trackerAgentFile = mdFileName(TRACKER_AGENT_NAME);
+
+  // Every root this run would change is checked first, with the same link checks the install uses
+  // for its writes, and before the first move or removal. A refused root (a link that stays, or a
+  // path that is not a folder) and everything below it get no move and no removal; the other roots
+  // go on. A full install replaces a link at a root, as its pre-clean always did, and does not walk
+  // the folder the link points to.
+  const wipedFolders: string[] = [];
+  const prepassTargets: PrepassTarget[] = [];
+  const skillsRootState = await directoryState(skillsRoot);
+  const mayChangeSkills = skillsRootState === 'real';
+  // A skills root that is a link or not a folder is refused once, for every step below it: the
+  // pre-pass, the sweeps, the skill copies and the overlay, the exact-name removals and the
+  // replacement of a link at a workflow folder. Each of them would move, remove or write inside the
+  // folder the link points to. The refusal is named in `refusedFolders`, and the install summary says
+  // that nothing was written there. An absent root is fine: the skill copies create it.
+  const skillsRefused = skillsRootState === 'link' || skillsRootState === 'unusable';
+  if (skillsRefused) report.refusedFolders.push(skillsRoot);
+
   if (!isPartialInstall) {
     // Commands and agents are plugin-scoped — only wipe on full install.
     // On partial installs the registry-diff sweeps below handle stale entries
     // without discarding assets from plugins not included in this run.
-    const oldDirs = [
-      path.join(claudeDir, 'commands', 'devflow'),
-      path.join(claudeDir, 'rules', 'devflow'),
-    ];
-    for (const dir of oldDirs) {
-      try {
-        report.replacedLinks.push(...await removeReportingLink(dir));
-      } catch { /* ignore */ }
+    for (const dir of [commandsTarget, rulesTarget]) {
+      if (!(await mayChangeBelow(dir, report, true))) continue;
+      prepassTargets.push({ folder: dir });
+      wipedFolders.push(dir);
     }
 
     // D-TRACKER-AGENT-OWNER, pre-clean half — the same split the reference tree
@@ -2537,23 +2712,59 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     // emptied AROUND the one file `convergeTrackerArtifacts` owns: taking it
     // would leave converge with nothing to byte-compare against, so a
     // steady-state re-init would re-copy the agent and announce
-    // `tracker agent installed` on every run. Everything else is removed
-    // exactly as the unconditional wipe removed it, and the file is still
-    // converged on this run — drift in it is restored, so preserving it strands
-    // nothing.
+    // `tracker agent installed` on every run. The scan leaves that file out, and
+    // the file is still converged on this run — drift in it is restored, so
+    // preserving it strands nothing.
     //
     // A link at that file is left standing: the converge replaces it with a real file and reports it
     // once it has written, so the install does not claim a replacement the converge may not make.
-    try {
-      const emptied = await emptyDirectoryExcept(
-        path.join(claudeDir, 'agents', 'devflow'),
-        new Set([mdFileName(TRACKER_AGENT_NAME)]),
-        { leaveKeptLinks: true },
-      );
-      report.replacedLinks.push(...emptied.replacedLinks);
-      awaitingWrite.push(...emptied.awaitingWrite);
-    } catch { /* ignore */ }
+    if (await mayChangeBelow(agentsTarget, report, true)) {
+      prepassTargets.push({ folder: agentsTarget, include: relative => relative !== trackerAgentFile });
+      wipedFolders.push(agentsTarget);
+    }
+
+    // The skill folders this run reinstalls, and the ones it removes. The references skill is
+    // scanned around the paths the overlay owns (D-OVERLAY-OWNERSHIP): the overlay converges them
+    // and moves what the user put in them, so the scan leaves them out.
+    if (mayChangeSkills) {
+      for (const skill of skillsMap.keys()) {
+        const target = skillFolder(skill);
+        if (!(await mayChangeBelow(target, report, true))) continue;
+        if (skill === SKILL_REFS_SKILL_NAME) {
+          awaitingWrite.push(...await unlinkOverlayOwnedLinks(target, overlayOwned));
+          prepassTargets.push({ folder: target, include: relative => !isUnderOverlayOwnedPath(relative, overlayOwned) });
+        } else {
+          prepassTargets.push({ folder: target });
+        }
+        wipedFolders.push(target);
+      }
+      for (const name of [...skillPlan.remove, ...skillPlan.removeFolders]) {
+        const target = skillFolder(name);
+        if ((await directoryState(target)) === 'real') prepassTargets.push({ folder: target });
+      }
+    }
+  } else {
+    // Only what the registry-diff sweeps below would remove: the unknown .md files of the commands
+    // and agents folders. Files of other kinds stay, as they always did on a partial install.
+    for (const dir of [commandsTarget, agentsTarget]) {
+      if (await mayChangeBelow(dir, report, false)) {
+        prepassTargets.push({ folder: dir, include: relative => mdEntryName(relative) !== null });
+      }
+    }
   }
+  // The devflow:* folders outside the registry, on every shape: a retired folder goes by its listed
+  // files and anything else moves whole.
+  if (mayChangeSkills) {
+    prepassTargets.push({ folder: skillsRoot, include: relative => isUnregisteredSkillFolder(relative, registrySkills) });
+  }
+
+  const prepass = await backups.prepass(prepassTargets);
+  const movedFromAgents = prepass.moved.some(unit => isContainedIn(agentsTarget, unit.original));
+
+  // Clean old Devflow files before installing: each folder loses the entries the pre-pass listed as
+  // devflow's own, then a plain rmdir. A folder that still holds a file the pre-pass could not move stays.
+  spinner.message('Cleaning old files...');
+  for (const folder of wipedFolders) await backups.removeListed(folder);
 
   // The commands, agents and rules folders, each proved a real folder (or absent) before any write
   // below. A full install's pre-clean replaced a link at each of them. A partial install has no
@@ -2561,9 +2772,6 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // would go through it into another directory: the sweeps, the copies and the restamp. A refused
   // folder is skipped by all of them and reported in `refusedFolders`. The rules folder is written
   // only when the selection has a rule, so only then is it proved.
-  const commandsTarget = path.join(claudeDir, 'commands', 'devflow');
-  const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
-  const rulesTarget = path.join(claudeDir, 'rules', 'devflow');
   const commandsRefused = await refuseUnrealFolder(report, commandsTarget);
   const agentsRefused = await refuseUnrealFolder(report, agentsTarget);
   const rulesRefused = rulesMap.size > 0 && await refuseUnrealFolder(report, rulesTarget);
@@ -2580,17 +2788,26 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // are never swept here. Their lifecycle is managed by convergeComplianceArtifacts, which
   // runs after installViaFileCopy in init.ts. Before I09 the compliance skill was swept and
   // then re-materialized by converge, creating a false-orphan report on every install.
-  recordSweep(report, 'skill', await sweepOrphanedAssets(
-    path.join(claudeDir, 'skills'),
-    new Set([...getAllSkillNames(folderWorkflows), ...FEATURE_OWNED_SKILLS]),
-    (entry) => entry.startsWith(SKILL_NAMESPACE) ? unprefixSkillName(entry) : null,
-  ));
+  //
+  // The pre-pass has already moved every devflow:* folder outside the registry that holds a file of
+  // the user's, so this sweep removes nothing itself: a retired folder goes by the files the session
+  // listed, and a folder the pre-pass could not move stays where it is.
+  if (mayChangeSkills) {
+    recordSweep(report, 'skill', await sweepOrphanedAssets(
+      skillsRoot,
+      registrySkills,
+      (entry) => entry.startsWith(SKILL_NAMESPACE) ? unprefixSkillName(entry) : null,
+      async (entryPath) => {
+        await backups.removeListed(entryPath);
+        return false;
+      },
+    ));
+  }
 
-  // Pre-clean the prefixed install targets before re-copying so stale content
-  // never bleeds into a fresh install. Bare pre-namespace dirs at
-  // ~/.claude/skills/{name} are owned solely by the frozen LEGACY_SKILL_NAMES
-  // pass in init.ts (runs immediately after this call). A bare dir whose name
-  // matches a current registry skill is by construction foreign to Devflow and
+  // The prefixed install targets were pre-cleaned above, before re-copying, so stale content never
+  // bleeds into a fresh install. Bare pre-namespace dirs at ~/.claude/skills/{name} are owned
+  // solely by the frozen LEGACY_SKILL_NAMES pass in init.ts (runs immediately after this call). A
+  // bare dir whose name matches a current registry skill is by construction foreign to Devflow and
   // must not be touched here.
   //
   // The pre-clean is SCOPED to what this run reinstalls and the orphan sweep
@@ -2625,26 +2842,11 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // A target that is a link is unlinked and reported in `replacedLinks`, never emptied
   // through: the folder it points to is not Devflow's, and the install below writes a real
   // folder in its place.
-  if (!isPartialInstall) {
-    const overlayOwned = overlayOwnedSkillPaths(refsManifest);
-    for (const skill of skillsMap.keys()) {
-      // Empty the prefixed directory (its contents are re-created during the install
-      // phase), minus whatever another converger owns inside it.
-      const target = path.join(claudeDir, 'skills', prefixSkillName(skill));
-      try {
-        if (skill === SKILL_REFS_SKILL_NAME) {
-          const emptied = await emptyDirectoryExcept(target, overlayOwned);
-          report.replacedLinks.push(...emptied.replacedLinks);
-          awaitingWrite.push(...emptied.awaitingWrite);
-        } else {
-          report.replacedLinks.push(...await removeReportingLink(target));
-        }
-      } catch { /* ignore */ }
-    }
+  if (!isPartialInstall && !skillsRefused) {
     // A folder is replaced whole by its install, so the pre-clean only unlinks a link at it, as it does
     // for a skill. A link it cannot remove is refused by the install below.
     for (const name of selectedWorkflowFolders(plugins, folderWorkflows)) {
-      const target = path.join(claudeDir, 'skills', prefixSkillName(name));
+      const target = skillFolder(name);
       if ((await unlinkLinkAt(target)) === 'unlinked') report.replacedLinks.push(target);
     }
   }
@@ -2655,10 +2857,12 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // (AC-22). Failures are per-item and non-fatal. `removedSkills` lists only what
   // was on disk and is now gone: the plan is registry arithmetic and mostly names
   // skills that were never installed.
-  const deselected = await removeDeselectedSkills(path.join(claudeDir, 'skills'), [...skillPlan.remove, ...skillPlan.removeFolders]);
-  report.removedSkills.push(...deselected.removed);
-  for (const failure of deselected.failed) {
-    warn(`Could not remove deselected skill "${prefixSkillName(failure.name)}" — ${String(failure.error)}`);
+  if (mayChangeSkills) {
+    const deselected = await removeDeselectedSkills(skillsRoot, [...skillPlan.remove, ...skillPlan.removeFolders], backups);
+    report.removedSkills.push(...deselected.removed);
+    for (const failure of deselected.failed) {
+      warn(`Could not remove deselected skill "${prefixSkillName(failure.name)}" — ${String(failure.error)}`);
+    }
   }
 
   // Retired agents. The sweep runs BEFORE the copy so the copy can see what it found:
@@ -2669,9 +2873,18 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // Ungated: runs on every install shape. knownNames spans ALL plugins
   // (getAllAgentNames) so agents from uninstalled plugins survive a partial run. Only
   // names absent from the full registry are removed.
+  //
+  // The sweep removes only what the backup session classifies as devflow's own (a retired name, a
+  // leftover of an interrupted write): an unknown file was moved by the pre-pass or stays.
   const agentSweep: SweepResult = agentsRefused
     ? { scanned: 0, removed: [], failed: [] }
-    : await sweepOrphanedAssets(agentsTarget, new Set(getAllAgentNames()), mdEntryName);
+    : await sweepOrphanedAssets(
+      agentsTarget,
+      new Set(getAllAgentNames()),
+      mdEntryName,
+      removesOnlyDevflowFiles(backups),
+      'unlink',
+    );
   recordSweep(report, 'agent', agentSweep);
 
   // A partial install writes the selected plugins' commands and agents and leaves every
@@ -2679,8 +2892,9 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // that exist. After a retired agent was removed they do not, so a partial install
   // writes the commands and agents of every plugin the manifest records instead. The
   // widening is conditional because an ordinary add-one run has nothing to repair and
-  // must not rewrite files the user did not ask about.
-  const widenToInstalled = isPartialInstall && agentSweep.removed.length > 0;
+  // must not rewrite files the user did not ask about. An agent file the pre-pass moved out of the
+  // folder is the same sign: it came from an earlier release, so the commands may still name it.
+  const widenToInstalled = isPartialInstall && (agentSweep.removed.length > 0 || movedFromAgents);
   const commandAgentPlugins = widenToInstalled ? (options.effectivePlugins ?? plugins) : plugins;
   const commandAgentMap = widenToInstalled ? buildAssetMaps(commandAgentPlugins).agentsMap : agentsMap;
 
@@ -2711,6 +2925,8 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
       commandsTarget,
       new Set(getAllCommandNames(folderWorkflows)),
       mdEntryName,
+      removesOnlyDevflowFiles(backups),
+      'unlink',
     ));
   }
 
@@ -2739,8 +2955,12 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // skills here. The pre-clean above walked the UNFILTERED map, so on a full
   // install a leftover copy is already gone; a partial install leaves removal to
   // convergeVariantAxes, which init runs straight after this call.
+  //
+  // A refused skills root (a link or not a folder) gets no skill: every copy, and the overlay
+  // below it, would write into the folder the link points to.
   spinner.message('Installing skills...');
-  for (const [skillName] of omitCurationGatedSkills(skillsMap, curation)) {
+  const skillsToInstall = skillsRefused ? [] : [...omitCurationGatedSkills(skillsMap, curation).keys()];
+  for (const skillName of skillsToInstall) {
     const skillTarget = path.join(claudeDir, 'skills', prefixSkillName(skillName));
 
     // A full install's pre-clean replaced a link at the skill or its references entry. A partial
@@ -2791,6 +3011,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
         sourceRoot: refsSourceRoot,
         manifest: refsManifest,
         warn,
+        backups,
       });
       report.overlaidRefs.push(...overlay.overlaidRefs);
       report.unchangedRefs.push(...overlay.unchangedRefs);
@@ -2808,7 +3029,8 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // none of them; this step removes the ones an earlier compliance-on install left, which a partial
   // install copies over without clearing. A removal that was refused is a reported failure and
   // never an abort; the compliance converge that init runs next fails closed on the same files.
-  if (!compliance) {
+  // A refused skills root is not entered: the removal would reach files in the folder a link points to.
+  if (!compliance && !skillsRefused) {
     const removal = await removeComplianceOffFiles(path.join(claudeDir, 'skills'));
     for (const refusal of removal.refused) {
       report.sweepFailures.push({ kind: 'reference', name: refusal.entry, error: refusal.reason });
@@ -2829,7 +3051,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
       warn(`workflow skill folder: ${read.reason}`);
       continue;
     }
-    const installed = await installWorkflowFolder({ claudeDir, name: folder.name, files: read.files, links: report });
+    const installed = await installWorkflowFolder({ claudeDir, name: folder.name, files: read.files, links: report, backups });
     if (installed.outcome === 'failed') {
       warn(`workflow skill folder: could not install ${prefixSkillName(folder.name)} (${installed.reason ?? 'unknown error'})`);
     }
@@ -2865,5 +3087,6 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   });
 
   spinner.stop('Components installed via file copy');
+  report.backups = backups.snapshot();
   return report;
 }

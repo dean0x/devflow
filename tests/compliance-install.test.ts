@@ -14,6 +14,7 @@ import * as os from 'os';
 import { convergeComplianceArtifacts } from '../src/targets/claude-code/compliance-install.js';
 import { ALWAYS_PRESENT_REFS, COMPLIANCE_FRAMEWORKS, COMPLIANCE_RULE_PLACEHOLDER } from '../src/core/compliance.js';
 import { shadowSeedDir } from '../src/cli/commands/skills.js';
+import { testBackups } from './helpers.js';
 
 // ---------------------------------------------------------------------------
 // Test setup
@@ -22,6 +23,16 @@ import { shadowSeedDir } from '../src/cli/commands/skills.js';
 let tmpDir: string;
 let claudeDir: string;
 let devflowDir: string;
+
+/** The converge under test, with a backup session of this test's temp dirs. */
+async function converge(
+  opts: Omit<Parameters<typeof convergeComplianceArtifacts>[0], 'backups'>,
+): ReturnType<typeof convergeComplianceArtifacts> {
+  return convergeComplianceArtifacts({
+    ...opts,
+    backups: await testBackups(tmpDir, { claudeDir, devflowDir }),
+  });
+}
 
 const SKILL_NAME = 'devflow:compliance';
 const RULE_REL = 'rules/devflow/compliance.md';
@@ -106,7 +117,7 @@ afterEach(async () => {
 describe('install every reference (D-COMPLIANCE-INSTALL-ALWAYS)', () => {
   it('enable+[gdpr,soc2] → every reference installed; SKILL.md stamped GDPR, SOC 2', async () => {
     const warn = vi.fn();
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir,
       devflowDir,
       enabled: true,
@@ -129,7 +140,7 @@ describe('install every reference (D-COMPLIANCE-INSTALL-ALWAYS)', () => {
   });
 
   it('all six frameworks → the same file set', async () => {
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir,
       devflowDir,
       enabled: true,
@@ -142,7 +153,7 @@ describe('install every reference (D-COMPLIANCE-INSTALL-ALWAYS)', () => {
   });
 
   it('zero frameworks → the same file set, neutral stamp (generic controls)', async () => {
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir,
       devflowDir,
       enabled: true,
@@ -156,7 +167,7 @@ describe('install every reference (D-COMPLIANCE-INSTALL-ALWAYS)', () => {
   });
 
   it('every SKILL.md routes reference loading through the ids the caller passes (D-COMPLIANCE-REPO-LENS)', async () => {
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir, devflowDir, enabled: true, frameworks: ['gdpr'], rulesEnabled: false, warn: vi.fn(),
     });
     const skill = await installedSkillMd();
@@ -169,7 +180,7 @@ describe('install every reference (D-COMPLIANCE-INSTALL-ALWAYS)', () => {
   });
 
   it('rule is installed and stamped when enabled+rulesEnabled', async () => {
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir,
       devflowDir,
       enabled: true,
@@ -187,7 +198,7 @@ describe('install every reference (D-COMPLIANCE-INSTALL-ALWAYS)', () => {
   });
 
   it('rule NOT installed when enabled+!rulesEnabled', async () => {
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir,
       devflowDir,
       enabled: true,
@@ -208,10 +219,10 @@ describe('install every reference (D-COMPLIANCE-INSTALL-ALWAYS)', () => {
 describe('recompose exactness (--set semantics)', () => {
   it('re-converge [gdpr,soc2] → [hipaa]: file set unchanged, SKILL.md re-stamped HIPAA', async () => {
     const warn = vi.fn();
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir, devflowDir, enabled: true, frameworks: ['gdpr', 'soc2'], rulesEnabled: false, warn,
     });
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir, devflowDir, enabled: true, frameworks: ['hipaa'], rulesEnabled: false, warn,
     });
 
@@ -225,14 +236,14 @@ describe('recompose exactness (--set semantics)', () => {
 
   it('recompose leaves no stale files and no tmp sibling', async () => {
     const warn = vi.fn();
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir, devflowDir, enabled: true,
       frameworks: COMPLIANCE_FRAMEWORKS.map(fw => fw.id),
       rulesEnabled: false, warn,
     });
     await fs.writeFile(path.join(await skillTargetDir(), 'references', 'stale.md'), 'stale', 'utf-8');
 
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir, devflowDir, enabled: true, frameworks: ['sox'], rulesEnabled: false, warn,
     });
 
@@ -242,12 +253,12 @@ describe('recompose exactness (--set semantics)', () => {
 
   it('rule re-stamped with new frameworks on re-converge', async () => {
     const warn = vi.fn();
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir, devflowDir, enabled: true, frameworks: ['gdpr'], rulesEnabled: true, warn,
     });
 
     // Re-converge with sox
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir, devflowDir, enabled: true, frameworks: ['sox'], rulesEnabled: true, warn,
     });
 
@@ -270,7 +281,7 @@ describe('shadow paths', () => {
     await fs.writeFile(path.join(shadowSkillDir, 'SKILL.md'), '# Custom Shadow Skill\nCustom content.', 'utf-8');
 
     const warn = vi.fn();
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir, devflowDir, enabled: true, frameworks: ['gdpr'], rulesEnabled: false, warn,
     });
 
@@ -287,7 +298,7 @@ describe('shadow paths', () => {
     await fs.writeFile(path.join(devflowDir, 'rules', 'compliance.md'), shadowContent, 'utf-8');
 
     const warn = vi.fn();
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir, devflowDir, enabled: true, frameworks: ['gdpr'], rulesEnabled: true, warn,
     });
 
@@ -306,7 +317,7 @@ describe('shadow paths', () => {
     await fs.writeFile(path.join(devflowDir, 'rules', 'compliance.md'), shadowContent, 'utf-8');
 
     const warn = vi.fn();
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir, devflowDir, enabled: true, frameworks: ['soc2'], rulesEnabled: true, warn,
     });
 
@@ -322,11 +333,11 @@ describe('shadow paths', () => {
 
 describe('disable path', () => {
   it('disabled → skill kept with every reference and the neutral stamp', async () => {
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir, devflowDir, enabled: true, frameworks: ['gdpr'], rulesEnabled: true, warn: vi.fn(),
     });
 
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir, devflowDir, enabled: false, frameworks: ['gdpr'], rulesEnabled: true, warn: vi.fn(),
     });
 
@@ -339,12 +350,12 @@ describe('disable path', () => {
   });
 
   it('disabled → rule removed', async () => {
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir, devflowDir, enabled: true, frameworks: ['gdpr'], rulesEnabled: true, warn: vi.fn(),
     });
     expect(await ruleExists()).toBe(true);
 
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir, devflowDir, enabled: false, frameworks: [], rulesEnabled: true, warn: vi.fn(),
     });
     expect(await ruleExists()).toBe(false);
@@ -353,7 +364,7 @@ describe('disable path', () => {
   it('disabled from nothing → skill installed, no rule, no warning (idempotent)', async () => {
     const warn = vi.fn();
     for (let i = 0; i < 2; i++) {
-      await convergeComplianceArtifacts({
+      await converge({
         claudeDir, devflowDir, enabled: false, frameworks: [], rulesEnabled: true, warn,
       });
     }
@@ -372,7 +383,7 @@ describe('both artifacts converge unconditionally', () => {
     await fs.mkdir(path.join(claudeDir, 'rules', 'devflow'), { recursive: true });
     await fs.writeFile(await ruleTargetPath(), 'rule content', 'utf-8');
 
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir, devflowDir, enabled: false, frameworks: [], rulesEnabled: true, warn: vi.fn(),
     });
 
@@ -381,13 +392,13 @@ describe('both artifacts converge unconditionally', () => {
   });
 
   it('disable: skill re-stamped neutral when the rule was already absent', async () => {
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir, devflowDir, enabled: true, frameworks: ['gdpr'], rulesEnabled: false, warn: vi.fn(),
     });
     expect(await installedSkillMd()).toContain('**Machine frameworks: GDPR.**');
     expect(await ruleExists()).toBe(false);
 
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir, devflowDir, enabled: false, frameworks: [], rulesEnabled: false, warn: vi.fn(),
     });
 
@@ -397,11 +408,11 @@ describe('both artifacts converge unconditionally', () => {
 
   it('enable: rule installed even when skill dir install is a no-op (already matches)', async () => {
     // Install once (creates skill)
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir, devflowDir, enabled: true, frameworks: ['gdpr'], rulesEnabled: false, warn: vi.fn(),
     });
     // Rule is absent; re-converge enabling rules too — rule must be installed
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir, devflowDir, enabled: true, frameworks: ['gdpr'], rulesEnabled: true, warn: vi.fn(),
     });
 
@@ -417,7 +428,7 @@ describe('both artifacts converge unconditionally', () => {
     const warns: string[] = [];
 
     // Seed both artifacts via a normal enabled converge.
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir, devflowDir, enabled: true, frameworks: ['gdpr'], rulesEnabled: true,
       warn: vi.fn(),
     });
@@ -427,7 +438,7 @@ describe('both artifacts converge unconditionally', () => {
     await fs.rm(await ruleTargetPath(), { force: true });
     await fs.mkdir(await ruleTargetPath());
 
-    const result = await convergeComplianceArtifacts({
+    const result = await converge({
       claudeDir, devflowDir, enabled: false, frameworks: [], rulesEnabled: true,
       warn: (m) => warns.push(m),
     });
@@ -447,7 +458,7 @@ describe('both artifacts converge unconditionally', () => {
 
 describe('removedPreexisting', () => {
   it('returns false when no pre-existing compliance artifacts exist', async () => {
-    const result = await convergeComplianceArtifacts({
+    const result = await converge({
       claudeDir, devflowDir, enabled: false, frameworks: [], rulesEnabled: true, warn: vi.fn(),
     });
     expect(result.removedPreexisting).toBe(false);
@@ -461,7 +472,7 @@ describe('removedPreexisting', () => {
     await fs.mkdir(path.join(skillDir, 'references'), { recursive: true });
     await fs.writeFile(path.join(skillDir, 'SKILL.md'), '# old install', 'utf-8');
 
-    const result = await convergeComplianceArtifacts({
+    const result = await converge({
       claudeDir, devflowDir, enabled: false, frameworks: [], rulesEnabled: true, warn: vi.fn(),
     });
 
@@ -472,7 +483,7 @@ describe('removedPreexisting', () => {
   it('returns true and removes pre-existing rule when feature disabled', async () => {
     await fs.writeFile(await ruleTargetPath(), 'old rule content', 'utf-8');
 
-    const result = await convergeComplianceArtifacts({
+    const result = await converge({
       claudeDir, devflowDir, enabled: false, frameworks: [], rulesEnabled: true, warn: vi.fn(),
     });
 
@@ -481,7 +492,7 @@ describe('removedPreexisting', () => {
   });
 
   it('returns false when enabled (not a removal scenario)', async () => {
-    const result = await convergeComplianceArtifacts({
+    const result = await converge({
       claudeDir, devflowDir, enabled: true, frameworks: ['gdpr'], rulesEnabled: true, warn: vi.fn(),
     });
     expect(result.removedPreexisting).toBe(false);
@@ -489,7 +500,7 @@ describe('removedPreexisting', () => {
 
   it('returns false when enabled with rules off removes a stale rule (not a disable)', async () => {
     await fs.writeFile(await ruleTargetPath(), 'stale rule', 'utf-8');
-    const result = await convergeComplianceArtifacts({
+    const result = await converge({
       claudeDir, devflowDir, enabled: true, frameworks: ['gdpr'], rulesEnabled: false, warn: vi.fn(),
     });
     expect(result.removedPreexisting).toBe(false);
@@ -507,7 +518,7 @@ describe('failures warn via injected warn, never throw', () => {
     // We test that converge resolves (doesn't reject) on a normal call.
     const warn = vi.fn();
     await expect(
-      convergeComplianceArtifacts({
+      converge({
         claudeDir, devflowDir, enabled: true, frameworks: ['gdpr'], rulesEnabled: true, warn,
       }),
     ).resolves.not.toThrow();
@@ -517,7 +528,7 @@ describe('failures warn via injected warn, never throw', () => {
     const warn = vi.fn();
     // Nothing installed — disable is a complete no-op
     await expect(
-      convergeComplianceArtifacts({
+      converge({
         claudeDir, devflowDir, enabled: false, frameworks: [], rulesEnabled: false, warn,
       }),
     ).resolves.not.toThrow();
@@ -534,7 +545,7 @@ describe('failures warn via injected warn, never throw', () => {
     await fs.rm(path.join(claudeDir, 'rules', 'devflow'), { recursive: true, force: true });
     await fs.writeFile(path.join(claudeDir, 'rules', 'devflow'), 'not-a-directory', 'utf-8');
 
-    const result = await convergeComplianceArtifacts({
+    const result = await converge({
       claudeDir, devflowDir, enabled: true, frameworks: ['gdpr'], rulesEnabled: true,
       warn: (m) => warns.push(m),
     });
@@ -575,7 +586,7 @@ describe('AC-35: unvalidated framework IDs never reach an fs path', () => {
     const traversalId = '../../../rules/compliance';
     const escapeTarget = path.join(claudeDir, 'rules', 'compliance.md');
 
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir,
       devflowDir,
       enabled: true,
@@ -598,7 +609,7 @@ describe('AC-35: unvalidated framework IDs never reach an fs path', () => {
   it('an unknown ID is dropped and the rule is stamped without it', async () => {
     const warn = vi.fn();
 
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir,
       devflowDir,
       enabled: true,
@@ -617,7 +628,7 @@ describe('AC-35: unvalidated framework IDs never reach an fs path', () => {
   it('an all-unknown selection still installs the skill (generic controls)', async () => {
     const warn = vi.fn();
 
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir,
       devflowDir,
       enabled: true,
@@ -639,7 +650,7 @@ describe('AC-35: unvalidated framework IDs never reach an fs path', () => {
 
 describe('converged: truthful completion flag (I13)', () => {
   it('enable with no errors → converged: true', async () => {
-    const result = await convergeComplianceArtifacts({
+    const result = await converge({
       claudeDir, devflowDir, enabled: true, frameworks: ['gdpr'], rulesEnabled: true, warn: vi.fn(),
     });
     expect(result.converged).toBe(true);
@@ -647,17 +658,17 @@ describe('converged: truthful completion flag (I13)', () => {
 
   it('disable with no errors → converged: true', async () => {
     // First install
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir, devflowDir, enabled: true, frameworks: ['gdpr'], rulesEnabled: true, warn: vi.fn(),
     });
-    const result = await convergeComplianceArtifacts({
+    const result = await converge({
       claudeDir, devflowDir, enabled: false, frameworks: [], rulesEnabled: true, warn: vi.fn(),
     });
     expect(result.converged).toBe(true);
   });
 
   it('enable with zero frameworks and rules (minimal path) → converged: true', async () => {
-    const result = await convergeComplianceArtifacts({
+    const result = await converge({
       claudeDir, devflowDir, enabled: true, frameworks: [], rulesEnabled: false, warn: vi.fn(),
     });
     expect(result.converged).toBe(true);
@@ -668,7 +679,7 @@ describe('converged: truthful completion flag (I13)', () => {
     // We can simulate this by passing a claudeDir path whose intermediate skill
     // target cannot be created. A non-absolute claudeDir triggers the S78 guard.
     const warns: string[] = [];
-    const result = await convergeComplianceArtifacts({
+    const result = await converge({
       claudeDir: 'relative/path',   // non-absolute → S78 guard fires → converged: false
       devflowDir,
       enabled: true,
@@ -689,7 +700,7 @@ describe('converged: truthful completion flag (I13)', () => {
 describe('S78: claudeDir must be an absolute path', () => {
   it('relative claudeDir → warns and returns converged: false without touching the filesystem', async () => {
     const warns: string[] = [];
-    const result = await convergeComplianceArtifacts({
+    const result = await converge({
       claudeDir: 'not/absolute',
       devflowDir,
       enabled: true,
@@ -705,7 +716,7 @@ describe('S78: claudeDir must be an absolute path', () => {
 
   it('empty claudeDir → warns and returns converged: false', async () => {
     const warns: string[] = [];
-    const result = await convergeComplianceArtifacts({
+    const result = await converge({
       claudeDir: '',
       devflowDir,
       enabled: false,
@@ -719,7 +730,7 @@ describe('S78: claudeDir must be an absolute path', () => {
 
   it('absolute claudeDir (happy path) → no claudeDir-guard warn', async () => {
     const warns: string[] = [];
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir,   // absolute path from beforeEach
       devflowDir,
       enabled: false,
@@ -749,7 +760,7 @@ describe('ALWAYS_PRESENT_REFS: exported from src/core/compliance.ts (I11)', () =
   });
 
   it('zero-framework install carries the ALWAYS_PRESENT_REFS alongside every framework reference', async () => {
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir, devflowDir, enabled: true, frameworks: [], rulesEnabled: false, warn: vi.fn(),
     });
     const files = await listSkillFiles();
@@ -771,7 +782,7 @@ describe('TP-44 (AC-38): a shadowed compliance skill is re-stamped by a later co
   }
 
   it('the compliance shadow is seeded from source, never from the stamped installed copy', async () => {
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir, devflowDir, enabled: true, frameworks: ['gdpr'], rulesEnabled: false, warn: vi.fn(),
     });
     const shadowDir = await seedShadow(await skillTargetDir());
@@ -782,13 +793,13 @@ describe('TP-44 (AC-38): a shadowed compliance skill is re-stamped by a later co
   });
 
   it('a later convergence stamps the shadowed skill with the new frameworks', async () => {
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir, devflowDir, enabled: true, frameworks: ['gdpr'], rulesEnabled: false, warn: vi.fn(),
     });
     await seedShadow(await skillTargetDir());
 
     // `devflow compliance --set hipaa` converges with the new selection.
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir, devflowDir, enabled: true, frameworks: ['hipaa'], rulesEnabled: false, warn: vi.fn(),
     });
 
@@ -798,13 +809,13 @@ describe('TP-44 (AC-38): a shadowed compliance skill is re-stamped by a later co
   });
 
   it('known-bad probe: a shadow copied from the installed copy freezes the old stamp', async () => {
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir, devflowDir, enabled: true, frameworks: ['gdpr'], rulesEnabled: false, warn: vi.fn(),
     });
     const shadowDir = path.join(devflowDir, 'skills', 'compliance');
     await fs.cp(await skillTargetDir(), shadowDir, { recursive: true });
 
-    await convergeComplianceArtifacts({
+    await converge({
       claudeDir, devflowDir, enabled: true, frameworks: ['hipaa'], rulesEnabled: false, warn: vi.fn(),
     });
 

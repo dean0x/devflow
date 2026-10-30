@@ -37,7 +37,7 @@ import { installViaFileCopy, type Spinner } from '../src/targets/claude-code/ins
 import { convergePromptVariants } from '../src/targets/claude-code/curation-install.js';
 import { convergeTrackerArtifacts } from '../src/targets/claude-code/tracker-install.js';
 import { restampTrackerAgents } from '../src/targets/claude-code/tracker-servers.js';
-import { requireBuiltCli, resolveAgentSource, sandboxEnv } from './helpers.js';
+import { requireBuiltCli, resolveAgentSource, sandboxEnv, testBackups } from './helpers.js';
 
 const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
 /** A converge that met no link: both lists are empty. */
@@ -289,10 +289,11 @@ describe('the installed agents wear the stamp, whichever path wrote them', () =>
   const installed = (name: string): string => path.join(claudeDir, 'agents', 'devflow', `${name}.md`);
   const read = (name: string): Promise<string> => fs.readFile(installed(name), 'utf-8');
 
-  const install = (names: string[], extra: { trackerServers?: readonly string[]; partial?: boolean } = {}): Promise<unknown> => {
+  const install = async (names: string[], extra: { trackerServers?: readonly string[]; partial?: boolean } = {}): Promise<unknown> => {
     const plugins = names.map(plugin);
     const { skillsMap, agentsMap } = buildAssetMaps(plugins);
     return installViaFileCopy({
+      backups: await testBackups(root, { claudeDir, devflowDir }),
       curation: true,
       compliance: true,
       plugins,

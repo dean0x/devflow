@@ -14,6 +14,8 @@ import { loadShippedAgentDefaults } from '../../core/agent-models.js';
 import { readMachineFeature, writeMachineFeature } from '../../core/feature-switch.js';
 import { loadSettingsModule, narrowedSwitchLabel, personalConfigTrackedWarning } from '../../core/evidence-policy.js';
 import { getClaudeDirectory, getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
+import type { BackupSession } from '../../targets/claude-code/install-backup.js';
+import { openBackupSessionOrFail, runWithBackupReport } from './backup-session.js';
 import {
   applyVariantToggle,
   describeCurationConverge,
@@ -715,16 +717,22 @@ async function handleClear(): Promise<void> {
  * this CLI writes. The toggle moves the ledger folder only then: under version skew
  * (or when that could not be told) it moves nothing.
  */
-async function convergeInstalledVariants(enabled: boolean): Promise<'converged' | 'not-converged'> {
+export async function convergeInstalledVariants(
+  enabled: boolean,
+  backups: BackupSession,
+): Promise<'converged' | 'not-converged'> {
   try {
-    const outcome = await applyVariantToggle({
+    // The record of the session prints when the toggle returns or throws, ahead of the warning
+    // below, so a file moved aside before a failure is still named.
+    const outcome = await runWithBackupReport(backups, async () => applyVariantToggle({
       claudeDir: getClaudeDirectory(),
       devflowDir: getDevFlowDirectory(),
       axis: 'curation',
       enabled,
       runningVersion: await readRunningVersion(),
       warn: (msg: string) => p.log.warn(msg),
-    });
+      backups,
+    }));
     if (outcome.kind === 'skipped') {
       p.log.warn(outcome.message);
       return 'not-converged';
@@ -774,6 +782,10 @@ async function tryMoveForToggle(ledgerRoot: string): Promise<MoveSkipReason | nu
  * tries the shared move with no wait. Only `--disable` drains, skew included.
  */
 async function handleToggle(enabled: boolean): Promise<void> {
+  // The session comes before the first change. Without a shipped set the toggle changes nothing.
+  const backups = await openBackupSessionOrFail({ claudeDir: getClaudeDirectory(), devflowDir: getDevFlowDirectory() });
+  if (backups === null) return;
+
   const recorded = await writeMachineFeature(getDevFlowDirectory(), 'curation', enabled);
   if (!recorded.ok) {
     p.log.error(`Devflow is not installed on this machine — run ${color.cyan('devflow init')} first`);
@@ -781,7 +793,7 @@ async function handleToggle(enabled: boolean): Promise<void> {
     return;
   }
 
-  const converged = await convergeInstalledVariants(enabled);
+  const converged = await convergeInstalledVariants(enabled, backups);
   const ledgerRoot = await getLedgerRoot();
   const shownSkip = converged === 'converged' && ledgerRoot ? await tryMoveForToggle(ledgerRoot) : null;
 

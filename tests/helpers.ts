@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, existsSync, statSync, promises as fsp } from 'fs'
+import { readFileSync, readdirSync, existsSync, realpathSync, statSync, promises as fsp } from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 import { spawnSync } from 'child_process'
@@ -7,7 +7,9 @@ import { DEFAULT_TRACKER_PROVIDER } from '../src/core/tracker.js'
 import { getAllAgentNames } from '../src/core/plugins.js'
 import { agentSourceDirs, compiledSkillRefsDir } from '../src/core/assets.js'
 import { MAX_REFERENCE_SWEEP_DEPTH } from '../src/core/reference-sweep.js'
-import { GIT_OPERATIONS, PR_HOST_DESTINATION_ROOT, operationReferenceRel } from '../src/core/mds-variants.js'
+import { GIT_OPERATIONS, PR_HOST_DESTINATION_ROOT, WORKFLOW_FOLDERS, operationReferenceRel, type WorkflowFolder } from '../src/core/mds-variants.js'
+import { retiredPathSet } from '../src/core/retired-shipped-names.js'
+import { createBackupSession, createPathSet, type BackupSession } from '../src/targets/claude-code/install-backup.js'
 import { variantOffRelPath, type OffVariantKey, type VariantKind } from '../src/core/curation-variants.js'
 import { assertTempHome } from './setup/home-isolation.js'
 
@@ -246,6 +248,75 @@ export function sandboxEnv(home: string, extra: Readonly<Record<string, string>>
   return {
     ...inherited, HOME: home, USERPROFILE: home, FORCE_COLOR: '0', NO_COLOR: '1', CI: '1', GIT_CONFIG_NOSYSTEM: '1', ...extra,
   }
+}
+
+/** What {@link testBackups} lets a test change. Every field defaults to the layout of a temp home. */
+export interface TestBackupOptions {
+  /** Defaults to `<home>/.claude`. */
+  claudeDir?: string
+  /** Defaults to `<home>/.devflow`; the backups are made under it. */
+  devflowDir?: string
+  /** The workflow folder registry the shipped set is built from. Defaults to the real one. */
+  workflowFolders?: readonly WorkflowFolder[]
+  entryCap?: number
+  /** Paths, relative to the Claude dir, that the shipped set names besides the registries. For a test whose Claude dir is not a real layout. */
+  extraShipped?: readonly string[]
+  /** Defaults to a fixed clock reading. */
+  now?: () => Date
+  /** Defaults to bytes that differ at every call, so two sessions of one home never name the same run folder. */
+  bytes?: (size: number) => Uint8Array
+}
+
+/**
+ * `assertTempHome` for a folder that may not exist yet: the part that exists is resolved through
+ * its links (macOS `/var` is `/private/var`), and the part that does not is kept as written.
+ */
+function assertTempFolder(folder: string): void {
+  const resolved = path.resolve(folder)
+  let existing = resolved
+  while (!existsSync(existing)) existing = path.dirname(existing)
+  assertTempHome(path.join(realpathSync(existing), path.relative(existing, resolved)))
+}
+
+const TEST_BACKUP_CLOCK = new Date(Date.UTC(2026, 9, 30, 12, 0, 0))
+let testBackupDraw = 0
+
+function nextTestBackupBytes(size: number): Uint8Array {
+  testBackupDraw = (testBackupDraw % 255) + 1
+  return new Uint8Array(size).fill(testBackupDraw)
+}
+
+/**
+ * A real backup session for a test: the shipped set from `loadShippedSet` over the repository's
+ * package root, the retired set, an injected clock and injected bytes. Refuses a home, a Claude
+ * dir or a devflow dir that is not under the temp root. The shipped set is built from the
+ * shadows that exist when it is called, so a test that adds a shadow first calls this after it.
+ */
+export async function testBackups(home: string, options: TestBackupOptions = {}): Promise<BackupSession> {
+  assertTempHome(home)
+  const claudeDir = options.claudeDir ?? path.join(home, '.claude')
+  const devflowDir = options.devflowDir ?? path.join(home, '.devflow')
+  assertTempFolder(claudeDir)
+  assertTempFolder(devflowDir)
+  const { loadShippedSet } = await import('../src/targets/claude-code/shipped-set.js')
+  const loaded = await loadShippedSet({
+    devflowDir,
+    packageRoot: ROOT,
+    workflowFolders: options.workflowFolders ?? WORKFLOW_FOLDERS,
+  })
+  if (!loaded.ok) throw new Error(`testBackups: the shipped set could not be built: ${loaded.reason}`)
+  const shipped = options.extraShipped === undefined
+    ? loaded.shipped
+    : createPathSet([...loaded.shipped.files, ...options.extraShipped])
+  return createBackupSession({
+    shipped,
+    retired: retiredPathSet(),
+    claudeDir,
+    devflowDir,
+    entryCap: options.entryCap,
+    now: options.now ?? (() => TEST_BACKUP_CLOCK),
+    bytes: options.bytes ?? nextTestBackupBytes,
+  })
 }
 
 export function loadFile(relPath: string): string {

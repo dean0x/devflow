@@ -785,6 +785,8 @@ describe('Test infrastructure skill references', () => {
       // PRE_NAMESPACE_SKILLS is a frozen historical set of pre-namespace skill names
       // used as the source-of-truth for the legacy bare-entry invariant test
       'skill-namespace.test.ts',
+      // Every installed name a released version shipped, the pre-rename skill names included
+      'released-shipped-names.ts',
     ]);
 
     for (const relFile of testFiles) {

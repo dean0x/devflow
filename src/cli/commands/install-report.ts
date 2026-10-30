@@ -10,6 +10,7 @@
 import color from 'picocolors';
 
 import { overlayUnitLabel, type InstallReport, type OverlayFailureState } from '../../targets/claude-code/installer.js';
+import { escapeName, formatCappedList, type BackupSnapshot, type FailureRecord } from '../../targets/claude-code/install-backup.js';
 import { refusedFolderMessage, replacedLinkMessage } from '../../targets/claude-code/linked-folder.js';
 import { SKILL_REFS_SKILL_NAME } from '../../core/mds-variants.js';
 import { prefixSkillName } from '../../core/plugins.js';
@@ -276,6 +277,114 @@ export function formatSkillScopeSummary(
       message:
         `Shadow for ${name} is inactive — the plugin that uses it is not selected ` +
         `(${color.dim('kept in ~/.devflow/skills/')})`,
+    });
+  }
+
+  return lines;
+}
+
+const BACKUP_SHOWN_UNITS = 5;
+
+/** One moved unit as `original -> backup`; a folder carries a trailing slash. */
+function movedUnitLabel(unit: BackupSnapshot['moved'][number]): string {
+  const slash = unit.kind === 'directory' ? '/' : '';
+  return `${unit.original}${slash} -> ${unit.backup}${slash}`;
+}
+
+function failureLine(failure: FailureRecord): SummaryLine {
+  const where = escapeName(failure.path);
+  const reason = escapeName(failure.reason);
+  switch (failure.action) {
+    case 'move':
+      return { level: 'warn', message: `Could not move ${where} to the backup folder (${reason}) — it stays where it is` };
+    case 'scan':
+      return { level: 'warn', message: `Could not scan ${where} (${reason}) — nothing in it was moved or removed` };
+    case 'remove':
+      return { level: 'warn', message: `Could not remove ${where} (${reason}) — it stays where it is` };
+    default: {
+      const _exhaustive: never = failure.action;
+      void _exhaustive;
+      return { level: 'warn', message: `Could not finish a step on ${where} (${reason})` };
+    }
+  }
+}
+
+/**
+ * The lines for the bare legacy skill folders that init kept because it could not tell if devflow
+ * made them (`sweepLegacySkillFolders`): one line per folder for the first five, then one line that
+ * counts the rest. A run that kept none gives no lines. Every printed path goes through `escapeName`.
+ */
+export function formatKeptLegacySkills(kept: readonly string[]): SummaryLine[] {
+  const lines = kept.slice(0, BACKUP_SHOWN_UNITS).map((folder): SummaryLine => ({
+    level: 'info',
+    message: `Kept ${escapeName(folder)}: devflow could not tell if it made this folder`,
+  }));
+  if (kept.length > BACKUP_SHOWN_UNITS) {
+    lines.push({ level: 'info', message: `Kept ${kept.length - BACKUP_SHOWN_UNITS} more folder(s) for the same reason` });
+  }
+  return lines;
+}
+
+/**
+ * Turn the backup session's record into summary lines: what moved aside, what stayed because it
+ * could not move, and which retired files were removed. An empty snapshot gives no lines, so a
+ * clean run prints nothing.
+ *
+ * A move is not a removal. The moved line has its own wording and counts only moved units (a moved
+ * folder is one), and it never feeds the "Removed N orphaned asset(s)" line of `formatSweepSummary`.
+ * One removed name prints on one line only, by the kind of removal:
+ *
+ *   - the retired line below lists the retired files the session removed itself, with
+ *     `BackupSession.removeListed` (the earlier releases' commands, agents, rules and skill files)
+ *     or `BackupSession.removeExact` (the legacy sweep's command and rule names, and the legacy
+ *     hook scripts);
+ *   - `formatSweepSummary` lists the names the registry-diff sweeps removed, which the install
+ *     report records in `sweptOrphans`. A sweep removes a name only after the session has not,
+ *     and the session removes no name that a sweep records.
+ *
+ * Every printed name goes through `escapeName`. Pure function — returns lines, logs nothing.
+ */
+export function formatBackupSummary(snapshot: BackupSnapshot): SummaryLine[] {
+  const lines: SummaryLine[] = [];
+
+  if (snapshot.moved.length > 0) {
+    lines.push({
+      level: 'info',
+      message:
+        `Moved ${snapshot.moved.length} item(s) that devflow does not ship out of its folders: ` +
+        formatCappedList(snapshot.moved.map(movedUnitLabel), BACKUP_SHOWN_UNITS),
+    });
+    if (snapshot.runFolder !== null) {
+      lines.push({ level: 'info', message: `Backup folder: ${escapeName(snapshot.runFolder)}` });
+    }
+  }
+
+  if (snapshot.retiredRemoved.length > 0) {
+    lines.push({
+      level: 'info',
+      message:
+        `Removed ${snapshot.retiredRemoved.length} retired devflow file(s): ` +
+        formatCappedList(snapshot.retiredRemoved, BACKUP_SHOWN_UNITS),
+    });
+  }
+
+  for (const failure of snapshot.failures) lines.push(failureLine(failure));
+
+  for (const hit of snapshot.capHits) {
+    lines.push({
+      level: 'warn',
+      message:
+        `${escapeName(hit.folder)} holds ${hit.entries} entries, more than the limit of ${hit.cap} — ` +
+        'devflow left it whole and moved nothing out of it',
+    });
+  }
+
+  if (snapshot.rootRefusal !== null) {
+    lines.push({
+      level: 'warn',
+      message:
+        `Could not use the backup folder ${escapeName(snapshot.rootRefusal.path)} ` +
+        `(${escapeName(snapshot.rootRefusal.reason)}) — nothing was moved aside in this run`,
     });
   }
 

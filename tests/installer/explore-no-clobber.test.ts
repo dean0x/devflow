@@ -28,7 +28,7 @@ import {
 } from '../../src/targets/claude-code/agent-type-owner.js';
 import { installViaFileCopy, type Spinner } from '../../src/targets/claude-code/installer.js';
 import { DEVFLOW_PLUGINS, buildAssetMaps, type PluginDefinition } from '../../src/core/plugins.js';
-import { resolveAgentSource, splitFrontmatter } from '../helpers.js';
+import { resolveAgentSource, splitFrontmatter, testBackups } from '../helpers.js';
 
 const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
 
@@ -181,7 +181,7 @@ describe('installViaFileCopy: devflow\'s Explore against a user-owned one (AC-30
     return found;
   });
 
-  const install = (): Promise<unknown> => {
+  const install = async (): Promise<unknown> => {
     const { skillsMap, agentsMap } = buildAssetMaps(plugins);
     return installViaFileCopy({
       curation: true,
@@ -195,6 +195,7 @@ describe('installViaFileCopy: devflow\'s Explore against a user-owned one (AC-30
       isPartialInstall: false,
       spinner: noopSpinner,
       warn: msg => { warnings.push(msg); },
+      backups: await testBackups(path.dirname(claudeDir), { claudeDir, devflowDir }),
     });
   };
 

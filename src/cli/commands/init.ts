@@ -15,9 +15,11 @@ import { describeMoveText, describeOutcome, runInitCurationMove, shownSkipAt, ty
 import { realGlobalTuningMoveIO, realProjectLedgerMoveIO } from './curation-move-io.js';
 import { describeEchoedValue } from '../../core/echo-value.js';
 import { installViaFileCopy, installScripts, type InstallReport } from '../../targets/claude-code/installer.js';
-import { formatLinksSummary, formatOverlaySummary, formatSkillScopeSummary, formatTrackerAssetSummary, isPluginListUnchanged, type SummaryLine } from './install-report.js';
+import { logSummaryLines, openBackupSession, runWithLateBackupReport } from './backup-session.js';
+import { formatKeptLegacySkills, formatLinksSummary, formatOverlaySummary, formatSkillScopeSummary, formatTrackerAssetSummary, isPluginListUnchanged, type SummaryLine } from './install-report.js';
 import { mergeLinkReports, newLinkReport, type LinkReport } from '../../targets/claude-code/linked-folder.js';
-import { sweepLegacyDevflowFiles } from './legacy-sweep.js';
+import { sweepLegacyDevflowFiles, sweepLegacySkillFolders } from './legacy-sweep.js';
+import { removeRulesFolder, rulesFolderRefusedMessage } from '../../targets/claude-code/rules-folder.js';
 import { convergeTrackerArtifacts, type ConvergeTrackerArtifactsResult, type TrackerAgentState } from '../../targets/claude-code/tracker-install.js';
 import {
   installSettings,
@@ -207,35 +209,6 @@ export function formatSweepSummary(
   }
 
   return lines;
-}
-
-/**
- * Log each summary line at the severity it carries — the one dispatch every
- * `SummaryLine[]` renderer shares.
- *
- * Exhaustive over `SummaryLine['level']` rather than an `if/else`: a level added
- * to the interface has to be routed here, at compile time, instead of silently
- * degrading to `info` at every call site.
- */
-function logSummaryLines(lines: readonly SummaryLine[]): void {
-  for (const line of lines) {
-    switch (line.level) {
-      case 'success':
-        p.log.success(line.message);
-        break;
-      case 'info':
-        p.log.info(line.message);
-        break;
-      case 'warn':
-        p.log.warn(line.message);
-        break;
-      default: {
-        const _exhaustive: never = line.level;
-        void _exhaustive;
-        break;
-      }
-    }
-  }
 }
 
 /**
@@ -1042,7 +1015,7 @@ export const initCommand = new Command('init')
   .option('--recommended', 'Apply recommended defaults after plugin selection (skip advanced prompts)')
   .option('--advanced', 'Show all configuration prompts')
   .option('--reset', 'Factory reset — restore all defaults, ignoring prior installation state')
-  .action(async (options: InitOptions) => {
+  .action((options: InitOptions) => runWithLateBackupReport(async (backupReport) => {
     // Get package version
     const packageJsonPath = path.join(getPackageRoot(), 'package.json');
     let version = '';
@@ -2190,6 +2163,18 @@ export const initCommand = new Command('init')
     // Rules: install only from selected plugins (plugin-scoped, not universal)
     const rulesMap = rulesEnabled ? buildRulesMap(pluginsToInstall) : new Map<string, string>();
 
+    // The one backup session of this run, made before any change. The install and the converge
+    // after it share it, so the run makes at most one backup folder. When the shipped set cannot
+    // be built, init changes nothing.
+    const openedBackups = await openBackupSession({ claudeDir, devflowDir });
+    if (!openedBackups.ok) {
+      s.stop('Installation failed');
+      p.log.error(openedBackups.message);
+      process.exit(1);
+    }
+    const backups = openedBackups.session;
+    backupReport.begin(backups);
+
     // D32/D35: Apply one-time migrations (global + per-project) tracked at ~/.devflow/migrations.json.
     // Migrations clean up ~/.devflow runtime data and never touch the installer's copy
     // targets, so their position relative to installViaFileCopy carries no dependency.
@@ -2257,10 +2242,13 @@ export const initCommand = new Command('init')
         // generated reference tree, mode-normalisation failures) reach the user rather
         // than the void. Collected now, emitted after the spinner stops.
         warn: (msg) => { installWarnings.push(msg); },
+        backups,
       });
     } catch (error) {
       s.stop('Installation failed');
       p.log.error(`${error}`);
+      // A file the install moved aside before it failed is named now: nothing runs after the exit.
+      backupReport.print();
       process.exit(1);
     }
 
@@ -2285,6 +2273,7 @@ export const initCommand = new Command('init')
       },
       plugins: effectivePlugins,
       warn: (msg) => installWarnings.push(msg),
+      backups,
     });
     if (verbose && variantConverge.converged) {
       p.log.info(
@@ -2329,34 +2318,24 @@ export const initCommand = new Command('init')
       p.log.info('Behavior rule is on but rules are disabled, so it is not installed — run `devflow rules --enable`.');
     }
 
-    // Clean up stale skills from previous installations
+    // Stale skill folders from previous installations move whole to the backup folder and are named,
+    // but a bare folder moves only when its SKILL.md is a copy that a release of devflow installed.
+    // A bare folder that the check cannot judge stays where it is, and is named here.
     s.message('Cleaning up');
-    const skillsDir = path.join(claudeDir, 'skills');
-    const skillRemoveResults = await Promise.allSettled(
-      LEGACY_SKILL_NAMES.map(legacy =>
-        fs.rm(path.join(skillsDir, legacy), { recursive: true })
-      )
-    );
-    const staleRemoved = skillRemoveResults.filter(r => r.status === 'fulfilled').length;
-    if (staleRemoved > 0 && verbose) {
-      p.log.info(`Cleaned up ${staleRemoved} legacy skill(s)`);
-    }
+    const legacySkills = await sweepLegacySkillFolders({ claudeDir, backups, legacySkills: LEGACY_SKILL_NAMES });
+    logSummaryLines(formatKeptLegacySkills(legacySkills.kept));
 
     // Clean up stale commands (e.g., /review → /code-review) and rules from previous installations.
     // A folder the install refused, or that is a link, is not swept: nothing is read or removed through it.
-    const { staleCommandsRemoved, staleRulesRemoved } = await sweepLegacyDevflowFiles({ claudeDir, report: installReport });
-    if (staleCommandsRemoved > 0 && verbose) {
-      p.log.info(`Cleaned up ${staleCommandsRemoved} legacy command(s)`);
-    }
-    if (staleRulesRemoved > 0 && verbose) {
-      p.log.info(`Cleaned up ${staleRulesRemoved} legacy rule(s)`);
-    }
+    // Each removed file is named on the retired line of the backup record.
+    await sweepLegacyDevflowFiles({ claudeDir, report: installReport, backups });
 
-    // Disable rules directory if rules not enabled
+    // Disable rules directory if rules not enabled: the files devflow did not ship move aside first.
     if (!rulesEnabled) {
-      try {
-        await fs.rm(path.join(claudeDir, 'rules', 'devflow'), { recursive: true, force: true });
-      } catch { /* ignore */ }
+      const rulesFolder = path.join(claudeDir, 'rules', 'devflow');
+      if ((await removeRulesFolder(rulesFolder, backups)) === 'refused') {
+        p.log.warn(rulesFolderRefusedMessage(rulesFolder));
+      }
     }
 
     // Clean up legacy hook scripts and lib files left by prior installs
@@ -2399,9 +2378,12 @@ export const initCommand = new Command('init')
     ];
     const hooksDir = path.join(devflowDir, 'scripts', 'hooks');
     for (const legacy of LEGACY_HOOK_FILES) {
-      const legacyPath = path.join(hooksDir, legacy);
-      try { await fs.rm(legacyPath); } catch { /* doesn't exist */ }
+      await backups.removeExact(path.join(hooksDir, legacy));
     }
+
+    // Every step that moves or removes files in devflow's folders has run: name what the session
+    // moved aside, ahead of the summary below. A throw before this point prints it on the way out.
+    backupReport.print();
 
     // The curation move (#529): after the legacy sweep, before the manifest persist and
     // the disabled-feature drain below, so the drain sees the moved folder. Its lines
@@ -3028,4 +3010,4 @@ export const initCommand = new Command('init')
     }
 
     p.outro(color.green('Ready! Run any command in Claude Code to get started.'));
-  });
+  }));

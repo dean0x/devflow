@@ -46,6 +46,7 @@ import {
   type PluginDefinition,
 } from '../../src/core/plugins.js';
 import { assertTempHome } from '../setup/home-isolation.js';
+import { testBackups } from '../helpers.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const SKILL = 'apply-decisions';
@@ -120,8 +121,12 @@ const machine = (curation: boolean) => ({
   features: { curation, compliance: { enabled: true, frameworks: [] as string[] }, rules: false },
 });
 
-function converge(curation: boolean, plugins: readonly PluginDefinition[] = FULL_SELECTION) {
-  return convergeVariantAxes({ claudeDir, devflowDir, manifest: machine(curation), plugins, warn, packageRoot: pkg });
+const backupsOf = () => testBackups(tmp, { claudeDir, devflowDir });
+
+async function converge(curation: boolean, plugins: readonly PluginDefinition[] = FULL_SELECTION) {
+  return convergeVariantAxes({
+    claudeDir, devflowDir, manifest: machine(curation), plugins, warn, packageRoot: pkg, backups: await backupsOf(),
+  });
 }
 
 beforeEach(async () => {
@@ -206,6 +211,7 @@ describe('installViaFileCopy honours the curation switch', () => {
       isPartialInstall,
       spinner: noopSpinner,
       warn,
+      backups: await backupsOf(),
     });
   }
 
@@ -254,7 +260,7 @@ describe('installViaFileCopy honours the curation switch', () => {
 
     expect(await exists(installedSkill()), 'removal on a partial install belongs to the converge').toBe(true);
     const converged = await convergeVariantAxes({
-      claudeDir, devflowDir, manifest: machine(false), plugins: selection(), warn,
+      claudeDir, devflowDir, manifest: machine(false), plugins: selection(), warn, backups: await backupsOf(),
     });
     expect(converged.skill).toBe('removed');
     expect(await exists(installedSkill())).toBe(false);
@@ -512,6 +518,7 @@ describe('convergeVariantAxes on the curation axis: failures only warn (AC-146)'
 
     const result = await convergeVariantAxes({
       claudeDir: 'relative/claude', devflowDir, manifest: machine(false), plugins: FULL_SELECTION, warn, packageRoot: pkg,
+      backups: await backupsOf(),
     });
 
     expect(result.converged).toBe(false);
@@ -687,8 +694,10 @@ describe('applyVariantToggle on the curation axis', () => {
     }));
   }
 
-  const toggle = (curation: boolean, runningVersion: string | null) =>
-    applyVariantToggle({ claudeDir, devflowDir, axis: 'curation', enabled: curation, runningVersion, warn, packageRoot: pkg });
+  const toggle = async (curation: boolean, runningVersion: string | null) =>
+    applyVariantToggle({
+      claudeDir, devflowDir, axis: 'curation', enabled: curation, runningVersion, warn, packageRoot: pkg, backups: await backupsOf(),
+    });
 
   it('without a readable manifest it skips and says to run init', async () => {
     await installOn();
@@ -763,8 +772,10 @@ describe('applyVariantToggle with a saved agent override (D-AGENT-OVERRIDE-CARRY
     await saveAgentMapping(devflowDir, { version: 1, agents: { code: { model: 'opus', effort: 'low' } } });
   });
 
-  const toggle = (curation: boolean) =>
-    applyVariantToggle({ claudeDir, devflowDir, axis: 'curation', enabled: curation, runningVersion: '3.3.0', warn, packageRoot: pkg });
+  const toggle = async (curation: boolean) =>
+    applyVariantToggle({
+      claudeDir, devflowDir, axis: 'curation', enabled: curation, runningVersion: '3.3.0', warn, packageRoot: pkg, backups: await backupsOf(),
+    });
 
   it('a no-op toggle writes no agent file, reports none rewritten and does not reach for the reapply', async () => {
     await write(installedAgent('code'), agent('OFF', 'opus', 'low'));

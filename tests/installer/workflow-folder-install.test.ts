@@ -28,6 +28,7 @@ import { installViaFileCopy, type InstallReport, type Spinner } from '../../src/
 import { convergeVariantAxes, type VariantMachineState } from '../../src/targets/claude-code/curation-install.js';
 import { installWorkflowFolder, readWorkflowFolder } from '../../src/targets/claude-code/workflow-folder-install.js';
 import { assertTempHome } from '../setup/home-isolation.js';
+import { testBackups } from '../helpers.js';
 import { FIXTURE_FOLDER } from '../fixtures/workflow-folder.js';
 
 const NAME = FIXTURE_FOLDER.name;
@@ -119,7 +120,15 @@ function builtFolder(switches: Switches): Promise<Record<string, string>> {
   return fileMap(path.join(pkg, ...workflowFoldersRootRelPath(key).split('/'), NAME));
 }
 
-function install(
+/** A backup session of this test's temp dirs, built from the fixture folder registry. */
+const backupsOf = (opts: { claude?: string; home?: string; workflowFolders?: readonly WorkflowFolder[] } = {}) =>
+  testBackups(tmp, {
+    claudeDir: opts.claude ?? claudeDir,
+    devflowDir: opts.home ?? devflowDir,
+    workflowFolders: opts.workflowFolders ?? [FIXTURE_FOLDER],
+  });
+
+async function install(
   switches: Switches,
   opts: {
     plugins?: PluginDefinition[];
@@ -144,6 +153,7 @@ function install(
     warn,
     workflowFolders: opts.workflowFolders ?? [FIXTURE_FOLDER],
     workflowFoldersRoot: pkg,
+    backups: await backupsOf(opts),
   });
 }
 
@@ -151,7 +161,7 @@ function machine(switches: Switches): VariantMachineState {
   return { features: { curation: switches.curation, compliance: { enabled: switches.compliance, frameworks: [] }, rules: false } };
 }
 
-function converge(switches: Switches, plugins: PluginDefinition[] = [OWNER]) {
+async function converge(switches: Switches, plugins: PluginDefinition[] = [OWNER]) {
   return convergeVariantAxes({
     claudeDir,
     devflowDir,
@@ -160,6 +170,7 @@ function converge(switches: Switches, plugins: PluginDefinition[] = [OWNER]) {
     warn,
     workflowFolders: [FIXTURE_FOLDER],
     workflowFoldersRoot: pkg,
+    backups: await backupsOf(),
   });
 }
 
@@ -294,6 +305,7 @@ describe('the install takes the folder of the exact key (TP-20)', () => {
       spinner,
       warn,
       workflowFolders: [],
+      backups: await backupsOf({ workflowFolders: [] }),
     };
     // `/flow` has no command source, which only an install that still counts it as a command asks for.
     await expect(installViaFileCopy({ ...base, plugins: [OWNER] })).rejects.toThrow(/Command source not found for declared command "flow"/);
@@ -488,7 +500,7 @@ describe('a link at the folder is never followed', () => {
     if (!read.ok) throw new Error(read.reason);
     const links = { refusedFolders: [] as string[] };
 
-    const result = await installWorkflowFolder({ claudeDir, name: NAME, files: read.files, links });
+    const result = await installWorkflowFolder({ claudeDir, name: NAME, files: read.files, links, backups: await backupsOf() });
     expect(result.outcome).toBe('refused');
     expect(links.refusedFolders).toEqual([path.join(claudeDir, 'skills')]);
     expect(await walk(elsewhere)).toEqual([]);
@@ -586,7 +598,7 @@ describe('the folder install under a failed swap, a hostile name and a stale tre
       expect(Object.keys(before).length, 'precondition: a previous folder stands').toBeGreaterThan(0);
       failMovesOntoTheFolder({ includingTheRestore: false });
 
-      const result = await installWorkflowFolder({ claudeDir, name: NAME, files, links: { refusedFolders: [] } });
+      const result = await installWorkflowFolder({ claudeDir, name: NAME, files, links: { refusedFolders: [] }, backups: await backupsOf() });
 
       expect(result.outcome).toBe('failed');
       expect(result.reason).toContain('injected move failure');
@@ -599,7 +611,7 @@ describe('the folder install under a failed swap, a hostile name and a stale tre
       const files = await builtFiles(ON);
       failMovesOntoTheFolder({ includingTheRestore: false });
 
-      const result = await installWorkflowFolder({ claudeDir, name: NAME, files, links: { refusedFolders: [] } });
+      const result = await installWorkflowFolder({ claudeDir, name: NAME, files, links: { refusedFolders: [] }, backups: await backupsOf() });
 
       expect(result.outcome).toBe('failed');
       expect(result.recoveryPath).toBeUndefined();
@@ -613,7 +625,7 @@ describe('the folder install under a failed swap, a hostile name and a stale tre
       const files = await builtFiles(COMPLIANCE_OFF);
       failMovesOntoTheFolder({ includingTheRestore: true });
 
-      const result = await installWorkflowFolder({ claudeDir, name: NAME, files, links: { refusedFolders: [] } });
+      const result = await installWorkflowFolder({ claudeDir, name: NAME, files, links: { refusedFolders: [] }, backups: await backupsOf() });
 
       expect(result.outcome).toBe('failed');
       const recovery = result.recoveryPath;
@@ -650,7 +662,7 @@ describe('the folder install under a failed swap, a hostile name and a stale tre
       const files = await builtFiles(ON);
       const links = { refusedFolders: [] as string[] };
 
-      const result = await installWorkflowFolder({ claudeDir, name: 'x/../escape', files, links });
+      const result = await installWorkflowFolder({ claudeDir, name: 'x/../escape', files, links, backups: await backupsOf() });
 
       expect(result.outcome).toBe('failed');
       expect(result.reason).toContain('x/../escape');
@@ -661,7 +673,7 @@ describe('the folder install under a failed swap, a hostile name and a stale tre
 
     it.each(BAD_NAMES)('installWorkflowFolder refuses the name %j with a reason and does not throw', async name => {
       const files = await builtFiles(ON);
-      const result = await installWorkflowFolder({ claudeDir, name, files, links: { refusedFolders: [] } });
+      const result = await installWorkflowFolder({ claudeDir, name, files, links: { refusedFolders: [] }, backups: await backupsOf() });
       expect(result.outcome).toBe('failed');
       expect(result.reason).toBeTruthy();
       expect(await fs.readdir(claudeDir)).toEqual([]);
@@ -671,7 +683,7 @@ describe('the folder install under a failed swap, a hostile name and a stale tre
       'installWorkflowFolder refuses the file name %j that leaves the folder, and writes nothing',
       async file => {
         const files = [...(await builtFiles(ON)), { file, bytes: Buffer.from('x\n') }];
-        const result = await installWorkflowFolder({ claudeDir, name: NAME, files, links: { refusedFolders: [] } });
+        const result = await installWorkflowFolder({ claudeDir, name: NAME, files, links: { refusedFolders: [] }, backups: await backupsOf() });
         expect(result.outcome).toBe('failed');
         expect(result.reason).toContain('leaves the folder');
         expect(await fs.readdir(claudeDir), 'nothing was staged or created').toEqual([]);
@@ -688,7 +700,7 @@ describe('the folder install under a failed swap, a hostile name and a stale tre
       const files = await builtFiles(ON);
 
       const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
-      const result = await installWorkflowFolder({ claudeDir, name: NAME, files, links: { refusedFolders: [] } })
+      const result = await installWorkflowFolder({ claudeDir, name: NAME, files, links: { refusedFolders: [] }, backups: await backupsOf() })
         .finally(() => clock.mockRestore());
 
       expect(result.outcome).toBe('installed');
@@ -701,7 +713,7 @@ describe('the folder install under a failed swap, a hostile name and a stale tre
       const files = await builtFiles(ON);
       const made = vi.spyOn(fs, 'mkdtemp');
 
-      const result = await installWorkflowFolder({ claudeDir, name: NAME, files, links: { refusedFolders: [] } });
+      const result = await installWorkflowFolder({ claudeDir, name: NAME, files, links: { refusedFolders: [] }, backups: await backupsOf() });
 
       expect(result.outcome).toBe('installed');
       expect(made).toHaveBeenCalledTimes(1);
@@ -711,7 +723,7 @@ describe('the folder install under a failed swap, a hostile name and a stale tre
 
     it('lets the installed folder take the default mode of a folder this process makes', async () => {
       const files = await builtFiles(ON);
-      await installWorkflowFolder({ claudeDir, name: NAME, files, links: { refusedFolders: [] } });
+      await installWorkflowFolder({ claudeDir, name: NAME, files, links: { refusedFolders: [] }, backups: await backupsOf() });
       const probe = path.join(tmp, 'mode-probe');
       await fs.mkdir(probe);
       expect((await fs.stat(folderDir())).mode & 0o777).toBe((await fs.stat(probe)).mode & 0o777);
