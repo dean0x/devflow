@@ -5,6 +5,19 @@ All notable changes to Devflow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **The `/implement` command prompt is about 12 % smaller** ([#675](https://github.com/dean0x/devflow/issues/675)).
+  - With curation and compliance on, the compiled command falls from 49,275 to 43,478 bytes. The other three builds fall by about the same share.
+  - No phase, gate or output contract changes. Phases 4 and 5 gain a halt. They stop when an agent returns a missing status or a status that no branch routes.
+  - The command resolves the agent-references folder once. It prints the folder again after a compaction.
+  - The shared text of the settings, evidence policy, decisions, knowledge, tracker, publication and docs root steps is shorter. This also shortens 13 other command prompts that import it.
+  - The settings script and the evidence-policy script print their own fail-closed line on every error exit, for every command prompt that runs them.
+  - The Architecture section of the prompt is removed.
+  - Phase 6 starts after ALIGNED, or after a single-pass alignment Fix that reports COMPLETE. Phase 11 is skipped only when the run stopped before Phase 10. A stop in Phase 10 does not skip it, so the evidence still reaches the PR.
+
 ## [3.10.0] - 2026-10-30
 
 ### Upgrade notes — Shadowed rules and skills
@@ -44,15 +57,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The quality rule has two new bullets. When a change alters a name, path or behavior, the agent updates the current tracked docs that state the old fact, and not released changelog entries. It describes a security fix by its effect only. Before it adds new code, the agent finds the existing owner and extends it when the new code shares its job. A trust-boundary or fail-closed check is not a copy.
   - The Quality Gates of the testing skill have a new item: each new assertion would fail, not error, with the change reverted. The RED run counts; else a bad input or a temporary, uncommitted revert of your own edit shows it, never a stash. Three items that repeated other parts of the skill are cut, and a repeated parenthetical is cut from the flaky-pattern item. The skill is 25 bytes smaller, so the Code and Fix preload totals fall by 25 bytes each (Code 25,514 to 25,489, Fix 14,875 to 14,850). The quality rule is not in the preload and loads in every session: it grows by 326 bytes.
   - A guard pins each new line once, with its limits, and pins a byte ceiling for the two bullets.
-
-- **The `/implement` command prompt is about 12 % smaller** ([#675](https://github.com/dean0x/devflow/issues/675)).
-  - With curation and compliance on, the compiled command falls from 49,275 to 43,478 bytes. The other three builds fall by about the same share.
-  - No phase, gate or output contract changes. Phases 4 and 5 gain a halt. They stop when an agent returns a missing status or a status that no branch routes.
-  - The command resolves the agent-references folder once. It prints the folder again after a compaction.
-  - The shared text of the settings, evidence policy, decisions, knowledge, tracker, publication and docs root steps is shorter. This also shortens 13 other command prompts that import it.
-  - The settings script and the evidence-policy script print their own fail-closed line on every error exit, for every command prompt that runs them.
-  - The Architecture section of the prompt is removed.
-  - Phase 6 starts after ALIGNED, or after a single-pass alignment Fix that reports COMPLETE. Phase 11 is skipped only when the run stopped before Phase 10. A stop in Phase 10 does not skip it, so the evidence still reaches the PR.
 
 ### Fixed
 
