@@ -1,7 +1,13 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
+import * as path from 'path';
 import {
   DEVFLOW_PLUGINS,
+  WORKFLOW_FOLDER_NAMES,
+  getAllCommandNames,
   getAllSkillNames,
+  selectedWorkflowFolders,
+  workflowFolderNames,
   getAllAgentNames,
   getAllRuleNames,
   buildAssetMaps,
@@ -823,5 +829,124 @@ describe('registeredPluginNames', () => {
 
   it('returns the empty list for the empty list', () => {
     expect(registeredPluginNames([])).toEqual([]);
+  });
+});
+
+// ── The target-layer set (workflows that ship as skill folders) ─────────────
+
+describe('the target-layer set of folder workflows (D-WORKFLOW-FOLDER-SET)', () => {
+  const FLOW = new Set(['flow']);
+  const flowPlugin: PluginDefinition = {
+    name: 'devflow-flow',
+    description: 'fixture owner of the folder workflow',
+    commands: ['/flow', '/plan'],
+    agents: [],
+    skills: [],
+    requires: [],
+    rules: [],
+  };
+  const otherPlugin: PluginDefinition = { ...flowPlugin, name: 'devflow-other', commands: ['/other'] };
+
+  it('the real set is empty, so every default reader answers as before the set existed', () => {
+    expect(WORKFLOW_FOLDER_NAMES.size).toBe(0);
+    expect(getAllCommandNames()).toEqual(getAllCommandNames(new Set()));
+    expect(getAllSkillNames()).toEqual(getAllSkillNames(new Set()));
+    const plan = resolveSkillInstallPlan({ effectivePlugins: DEVFLOW_PLUGINS, isPartialInstall: false, shadowedSkills: ['git'] });
+    expect(plan.removeFolders.size).toBe(0);
+    expect(plan.ignoredFolderShadows).toEqual([]);
+  });
+
+  it('the set derives from a folder registry by name', () => {
+    expect([...workflowFolderNames([{ name: 'flow' }, { name: 'other' }])]).toEqual(['flow', 'other']);
+  });
+
+  it('getAllCommandNames drops a name of the set and keeps every other command', () => {
+    const all = getAllCommandNames();
+    expect(all).toContain('plan');
+    const without = getAllCommandNames(new Set(['plan']));
+    expect(without).not.toContain('plan');
+    expect(without).toEqual(all.filter(name => name !== 'plan'));
+  });
+
+  it('getAllSkillNames gains a name of the set and keeps every other skill', () => {
+    const all = getAllSkillNames();
+    expect(all).not.toContain('flow');
+    expect(getAllSkillNames(FLOW)).toEqual([...all, 'flow']);
+  });
+
+  it('selectedWorkflowFolders names the folders a plugin owns as a command', () => {
+    expect([...selectedWorkflowFolders([flowPlugin], FLOW)]).toEqual(['flow']);
+    expect(selectedWorkflowFolders([otherPlugin], FLOW).size).toBe(0);
+    expect(selectedWorkflowFolders([flowPlugin], new Set()).size).toBe(0);
+  });
+
+  it('a full install removes the folder when its owner is not selected, and keeps it when it is', () => {
+    const without = resolveSkillInstallPlan({ effectivePlugins: [otherPlugin], isPartialInstall: false, shadowedSkills: [], folderWorkflows: FLOW });
+    expect([...without.removeFolders]).toEqual(['flow']);
+    const withOwner = resolveSkillInstallPlan({ effectivePlugins: [flowPlugin], isPartialInstall: false, shadowedSkills: [], folderWorkflows: FLOW });
+    expect(withOwner.removeFolders.size).toBe(0);
+  });
+
+  it('a partial install removes no folder, with or without the owner (TP-25)', () => {
+    for (const effectivePlugins of [[otherPlugin], [flowPlugin]]) {
+      const plan = resolveSkillInstallPlan({ effectivePlugins, isPartialInstall: true, shadowedSkills: [], folderWorkflows: FLOW });
+      expect(plan.removeFolders.size).toBe(0);
+    }
+  });
+
+  it('a shadow of a folder is ignored, never dormant, and a library shadow is unaffected (TP-22)', () => {
+    const plan = resolveSkillInstallPlan({
+      effectivePlugins: [otherPlugin],
+      isPartialInstall: false,
+      shadowedSkills: ['flow', 'git'],
+      folderWorkflows: FLOW,
+    });
+    expect(plan.ignoredFolderShadows).toEqual(['flow']);
+    expect(plan.dormantShadows).toEqual(['git']);
+  });
+
+  it('a folder name is in no plugin skills or requires, so it is not classified as a library skill (TP-24)', () => {
+    expect(skillsOf(DEVFLOW_PLUGINS).has('flow')).toBe(false);
+    const plan = resolveSkillInstallPlan({ effectivePlugins: [flowPlugin], isPartialInstall: false, shadowedSkills: [], folderWorkflows: FLOW });
+    expect(plan.install.has('flow')).toBe(false);
+    expect(plan.remove.has('flow')).toBe(false);
+  });
+});
+
+describe('core imports nothing from the target layer (TP-24)', () => {
+  const ROOT = path.resolve(import.meta.dirname, '..');
+  const IMPORT_RE = /(?:^|\n)\s*(?:import|export)\s[^'"\n;]*?from\s+['"](\.{1,2}\/[^'"]+)['"]|(?:^|\n)\s*import\s+['"](\.{1,2}\/[^'"]+)['"]/g;
+
+  /** The files the static relative imports of `entry` reach, `entry` included. */
+  function importClosure(entry: string): Set<string> {
+    const seen = new Set<string>();
+    const queue = [entry];
+    while (queue.length > 0 && seen.size < 2000) {
+      const file = queue.pop()!;
+      if (seen.has(file)) continue;
+      seen.add(file);
+      const source = readFileSync(file, 'utf-8');
+      for (const match of source.matchAll(IMPORT_RE)) {
+        const spec = match[1] ?? match[2];
+        queue.push(path.resolve(path.dirname(file), spec.replace(/\.js$/, '.ts')));
+      }
+    }
+    return seen;
+  }
+
+  it.each([
+    'src/core/plugins.ts',
+    'src/core/mds-variants.ts',
+    'src/core/assets.ts',
+  ])('%s reaches no file under src/targets', (entry) => {
+    const closure = importClosure(path.join(ROOT, entry));
+    expect(closure.size, 'the scan followed the imports').toBeGreaterThan(1);
+    const reached = [...closure].filter(file => file.startsWith(path.join(ROOT, 'src', 'targets') + path.sep));
+    expect(reached.map(file => path.relative(ROOT, file))).toEqual([]);
+  });
+
+  it('the scan sees a target import where one exists', () => {
+    const closure = importClosure(path.join(ROOT, 'src/core/agent-models.ts'));
+    expect([...closure].some(file => file.includes(`${path.sep}src${path.sep}targets${path.sep}`))).toBe(true);
   });
 });

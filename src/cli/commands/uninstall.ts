@@ -8,7 +8,7 @@ import { getInstallationPaths, getClaudeDirectory, getHomeDirectory, getManagedS
 import { getGitRoot } from '../../core/git.js';
 import type { PausedArea } from '../../core/area-pause-notice.js';
 import { isSameLocation } from '../../core/same-location.js';
-import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, registeredPluginNames, buildAssetMaps, getAllSkillNames, getAllAgentNames, getAllCommandNames, parsePluginSelection, resolveFeatureRedirect, prefixSkillName, unprefixSkillName, skillsOf, FEATURE_OWNED_SKILLS, type PluginDefinition } from '../../core/plugins.js';
+import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, WORKFLOW_FOLDER_NAMES, registeredPluginNames, buildAssetMaps, getAllSkillNames, getAllAgentNames, getAllCommandNames, parsePluginSelection, resolveFeatureRedirect, prefixSkillName, unprefixSkillName, skillsOf, selectedWorkflowFolders, FEATURE_OWNED_SKILLS, type PluginDefinition } from '../../core/plugins.js';
 import { readManifest, readManifestPlugins, removeManifestPlugins } from '../../core/manifest.js';
 import { sweepOrphanedAssets, mdFileName, mdEntryName, type SweepResult } from '../../core/orphan-sweep.js';
 import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
@@ -355,10 +355,14 @@ export function charterPluginsAfterRemoval(
  *   registry only when there is no manifest to read, and the dry-run and the
  *   real removal must always be given the SAME list or they describe different
  *   outcomes.
+ * @param folderWorkflows - The target-layer set (D-WORKFLOW-FOLDER-INSTALL). A folder
+ *   workflow of a selected plugin is a skill to remove, unless a remaining plugin
+ *   owns it too, and never a command: it has no command file.
  */
 export function computeAssetsToRemove(
   selectedPlugins: PluginDefinition[],
   installedPlugins: PluginDefinition[],
+  folderWorkflows: ReadonlySet<string> = WORKFLOW_FOLDER_NAMES,
 ): { skills: string[]; agents: string[]; commands: string[]; rules: string[] } {
   const selectedNames = new Set(selectedPlugins.map(p => p.name));
   const remainingPlugins = installedPlugins.filter(p => !selectedNames.has(p.name));
@@ -379,6 +383,10 @@ export function computeAssetsToRemove(
   for (const skill of skillsOf(selectedPlugins)) {
     if (!retainedSkills.has(skill)) skills.push(skill);
   }
+  const retainedFolders = selectedWorkflowFolders(remainingPlugins, folderWorkflows);
+  for (const name of selectedWorkflowFolders(selectedPlugins, folderWorkflows)) {
+    if (!retainedFolders.has(name)) skills.push(name);
+  }
 
   for (const plugin of selectedPlugins) {
     for (const agent of plugin.agents) {
@@ -387,7 +395,7 @@ export function computeAssetsToRemove(
     for (const rule of plugin.rules) {
       if (!retainedRules.has(rule)) rules.push(rule);
     }
-    commands.push(...plugin.commands);
+    commands.push(...plugin.commands.filter(cmd => !folderWorkflows.has(cmd.replace(/^\//, ''))));
   }
 
   return { skills, agents, commands, rules };
@@ -1198,7 +1206,11 @@ export async function isDevFlowInstalled(claudeDir: string): Promise<boolean> {
  * @param claudeDir  - Target Claude Code directory (e.g. ~/.claude)
  * @param devflowDir - Devflow data directory (e.g. ~/.devflow)
  */
-export async function enumerateDryRunExtras(claudeDir: string, devflowDir: string): Promise<string[]> {
+export async function enumerateDryRunExtras(
+  claudeDir: string,
+  devflowDir: string,
+  folderWorkflows: ReadonlySet<string> = WORKFLOW_FOLDER_NAMES,
+): Promise<string[]> {
   const extras: string[] = [];
 
   // 1. Whole directories removed by removeAllDevFlow
@@ -1218,7 +1230,8 @@ export async function enumerateDryRunExtras(claudeDir: string, devflowDir: strin
   //         dirs are by construction foreign to Devflow.
   // FEATURE_OWNED_SKILLS (compliance) is included so full uninstall removes
   // devflow:compliance even though it left the plugin registry (step 1.5).
-  const prefixedSkillNames = new Set([...getAllSkillNames(), ...LEGACY_SKILL_NAMES, ...FEATURE_OWNED_SKILLS]);
+  // The workflow skill folders (D-WORKFLOW-FOLDER-INSTALL) join through getAllSkillNames.
+  const prefixedSkillNames = new Set([...getAllSkillNames(folderWorkflows), ...LEGACY_SKILL_NAMES, ...FEATURE_OWNED_SKILLS]);
   const skillsDir = path.join(claudeDir, 'skills');
   for (const skillName of prefixedSkillNames) {
     const prefixedPath = path.join(skillsDir, prefixSkillName(skillName));
@@ -2230,6 +2243,7 @@ export async function removeAllDevFlow(
   devflowScriptsDir: string,
   verbose: boolean,
   mayChange: ChangeGuard = changeUserOwned,
+  folderWorkflows: ReadonlySet<string> = WORKFLOW_FOLDER_NAMES,
 ): Promise<void> {
   const devflowDirectories = [
     { path: path.join(claudeDir, 'commands', 'devflow'), name: 'commands' },
@@ -2262,7 +2276,8 @@ export async function removeAllDevFlow(
   //     A bare dir whose name matches a live-registry skill is by construction
   //     foreign to Devflow (the devflow: namespace shipped in dcecda3, 2026-03-30).
   //     A bare 'compliance/' dir is also foreign (not in LEGACY_SKILL_NAMES).
-  const prefixedSkillNames = new Set([...getAllSkillNames(), ...LEGACY_SKILL_NAMES, ...FEATURE_OWNED_SKILLS]);
+  //   The workflow skill folders (D-WORKFLOW-FOLDER-INSTALL) are in getAllSkillNames, so the folder is removed.
+  const prefixedSkillNames = new Set([...getAllSkillNames(folderWorkflows), ...LEGACY_SKILL_NAMES, ...FEATURE_OWNED_SKILLS]);
   const skillsDir = path.join(claudeDir, 'skills');
 
   let skillsRemoved = 0;
@@ -2306,7 +2321,7 @@ export async function removeAllDevFlow(
   // registry (retired, renamed, or deleted). The loop above walks the static
   // registry + LEGACY list; this sweep walks the actual directory, so orphaned
   // dirs from older versions are also cleaned up. (F9)
-  await sweepDevflowNamespaces(claudeDir, verbose, mayChange);
+  await sweepDevflowNamespaces(claudeDir, verbose, mayChange, undefined, folderWorkflows);
 }
 
 /** What {@link sweepDevflowNamespaces} did in each namespace. */
@@ -2351,6 +2366,7 @@ export async function sweepDevflowNamespaces(
   verbose: boolean,
   mayChange?: ChangeGuard,
   links: Pick<LinkReport, 'refusedFolders'> = { refusedFolders: [] },
+  folderWorkflows: ReadonlySet<string> = WORKFLOW_FOLDER_NAMES,
 ): Promise<NamespaceSweeps> {
   const agentsDir = path.join(claudeDir, 'agents', 'devflow');
   const commandsDir = path.join(claudeDir, 'commands', 'devflow');
@@ -2372,16 +2388,18 @@ export async function sweepDevflowNamespaces(
   );
   const commandsSweep = await sweepDevflowFolder(
     commandsDir,
-    new Set(getAllCommandNames()),
+    new Set(getAllCommandNames(folderWorkflows)),
     mdEntryName,
   );
   // FEATURE_OWNED_SKILLS (compliance) unioned into knownNames so a selective
   // uninstall of another plugin does not sweep devflow:compliance — nothing
   // converges after selective uninstall (only installViaFileCopy + convergeComplianceArtifacts
   // on full/partial init re-materialize it). D-FO-1 applies.
+  // D-WORKFLOW-FOLDER-INSTALL: a workflow skill folder is a known skill, so a selective uninstall of
+  // another plugin keeps it, and a stale command file of a folder workflow is an orphan here.
   const skillsSweep = await sweep(
     skillsDir,
-    new Set([...getAllSkillNames(), ...FEATURE_OWNED_SKILLS]),
+    new Set([...getAllSkillNames(folderWorkflows), ...FEATURE_OWNED_SKILLS]),
     (entry) => entry.startsWith(SKILL_NAMESPACE) ? unprefixSkillName(entry) : null,
   );
 
@@ -2424,8 +2442,9 @@ export async function removeSelectedPlugins(
   installedPlugins: PluginDefinition[] = DEVFLOW_PLUGINS,
   mayChange?: ChangeGuard,
   links: Pick<LinkReport, 'refusedFolders'> = { refusedFolders: [] },
+  folderWorkflows: ReadonlySet<string> = WORKFLOW_FOLDER_NAMES,
 ): Promise<NamespaceSweeps> {
-  const { skills, agents, commands, rules } = computeAssetsToRemove(plugins, installedPlugins);
+  const { skills, agents, commands, rules } = computeAssetsToRemove(plugins, installedPlugins, folderWorkflows);
   const guard = mayChange ?? devflowFolderGuard(claudeDir, links);
 
   const commandsDir = path.join(claudeDir, 'commands', 'devflow');
@@ -2490,5 +2509,5 @@ export async function removeSelectedPlugins(
   // Removes any orphaned files whose names left the registry (retired, renamed,
   // or deleted from all plugins). Spans ALL plugins so assets belonging to
   // non-selected plugins are never swept.
-  return sweepDevflowNamespaces(claudeDir, verbose, mayChange, links);
+  return sweepDevflowNamespaces(claudeDir, verbose, mayChange, links, folderWorkflows);
 }

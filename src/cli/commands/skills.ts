@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
-import { getAllSkillNames, prefixSkillName, unprefixSkillName, skillOwners, FEATURE_OWNED_SKILLS } from '../../core/plugins.js';
+import { getAllSkillNames, prefixSkillName, unprefixSkillName, skillOwners, FEATURE_OWNED_SKILLS, WORKFLOW_FOLDER_NAMES } from '../../core/plugins.js';
 import { skillsDir } from '../../core/assets.js';
 import { copyDirectory, validateSkillShadow, type SkillShadowState } from '../../targets/claude-code/installer.js';
 
@@ -42,6 +42,25 @@ export function shadowSeedDir(bareName: string, installedDir: string | null): st
   const sourceDir = path.join(skillsDir(), bareName);
   if ((FEATURE_OWNED_SKILLS as readonly string[]).includes(bareName)) return sourceDir;
   return installedDir ?? sourceDir;
+}
+
+/**
+ * D-WORKFLOW-SHADOW-REFUSAL: why `devflow skills shadow <name>` refuses a workflow that ships as a
+ * skill folder, or null for any other name.
+ *
+ * A folder installs from the build tree of the machine's exact variant key, with no source
+ * directory to copy and no shadow to overlay, so a shadow of its name could never apply. Refusing
+ * at the command says so before the user edits a copy that does nothing; the install ignores a
+ * shadow that is already there, with a warning, and keeps it.
+ *
+ * @param folderWorkflows - The target-layer set; the default is the real set.
+ */
+export function workflowFolderShadowRefusal(
+  bareName: string,
+  folderWorkflows: ReadonlySet<string> = WORKFLOW_FOLDER_NAMES,
+): string | null {
+  if (!folderWorkflows.has(bareName)) return null;
+  return `${bareName} ships as a skill folder built for the machine's variant, so a shadow cannot replace it. Nothing was shadowed.`;
 }
 
 /**
@@ -110,6 +129,12 @@ export const skillsCommand = new Command('skills')
 
       // Accept both bare and prefixed input
       const bareName = unprefixSkillName(name);
+
+      const refusal = workflowFolderShadowRefusal(bareName);
+      if (refusal !== null) {
+        p.log.error(refusal);
+        process.exit(1);
+      }
 
       if (!allSkills.includes(bareName)) {
         p.log.error(`Unknown skill: ${bareName}`);
@@ -204,7 +229,11 @@ export const skillsCommand = new Command('skills')
         const provenance = installed
           ? color.dim(`installed because: ${describeOwners(skill, ownersBySkill.get(skill))}`)
           : color.dim(`not installed — provided by: ${describeOwners(skill, ownersBySkill.get(skill))}`);
-        return `  ${color.cyan(skill.padEnd(28))} ${buildSkillShadowTag(shadowState).padEnd(20)} ${provenance}`;
+        // A shadow of a skill folder is kept but never applied (D-WORKFLOW-SHADOW-REFUSAL).
+        const tag = workflowFolderShadowRefusal(skill) !== null && shadowState !== 'none'
+          ? color.yellow('shadow ignored — skill folder')
+          : buildSkillShadowTag(shadowState);
+        return `  ${color.cyan(skill.padEnd(28))} ${tag.padEnd(20)} ${provenance}`;
       });
 
       // Orphan shadows: in ~/.devflow/skills/ but not a known skill
