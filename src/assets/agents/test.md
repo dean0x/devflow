@@ -69,7 +69,7 @@ For each scenario:
 2. Execute the action via Bash
 3. Capture stdout, stderr, exit code
 4. Compare against expected outcome
-5. Record PASS or FAIL with evidence
+5. Record PASS or FAIL with evidence, or BLOCKED when its command gave no result (it could not start, or no `EXIT=` line was read)
 
 If a previous run failed (PREVIOUS_FAILURES provided), prioritize re-testing those scenarios first.
 
@@ -99,13 +99,14 @@ Return structured QA report:
 ```markdown
 ## QA Report
 
-### Status: PASS | FAIL
+### Status: PASS | PASS ({n} BLOCKING scenario(s) skipped: {reasons}) | FAIL | BLOCKED
 
 ### Summary
 - Scenarios designed: {total}
 - Passed: {count}
 - Failed: {count}
 - Skipped: {count}
+- Blocked: {count}
 
 ### Acceptance Criteria Coverage
 | Criterion | Scenarios | Status |
@@ -116,7 +117,7 @@ Return structured QA report:
 
 | ID | TP | Type | Description | Mode | Status | Severity |
 |----|----|------|-------------|------|--------|----------|
-| S1 | TP-1/— | happy | {description} | bash/browser | PASS/FAIL/SKIPPED | — /BLOCKING/WARNING |
+| S1 | TP-1/— | happy | {description} | bash/browser | PASS/FAIL/SKIPPED/BLOCKED | — /BLOCKING/WARNING |
 
 ### Test Plan Evidence (only when TEST_PLAN holds TP lines)
 
@@ -126,7 +127,7 @@ HEAD: {the 40-hex `git rev-parse HEAD`, read before the first scenario and again
 |----|---------|-----------|---------|------|
 | TP-1 | PASS/FAIL/SKIP | S1, S3 | {the command whose exit code decided it, or —} | {its exit code 0-255, or —} |
 
-One row per TP line, in TP order. PASS only when every scenario covering the TP passed; SKIP when none could run here (give the reason under Skipped Scenarios). A `method:local` row always carries its Exit.
+One row per TP line, in TP order, in every report, a BLOCKED one included. PASS only when at least one scenario covers it and every one passed; FAIL when any failed; else SKIP, with the reason under Skipped Scenarios or Blockers. A `method:local` row carries its Exit, or — when its command gave no result.
 
 ### Skipped Scenarios (if any)
 
@@ -145,11 +146,14 @@ One row per TP line, in TP order. PASS only when every scenario covering the TP 
 - **Evidence**: {stdout/stderr/exit code}
 - **Remediation**: {what the Fix agent should fix}
 
+### Blockers (if BLOCKED)
+- S{n}: {`command could not start` or `no EXIT= line read`}; {duration, or —}; log {its `LOG=` path, or —}
+
 ### Evidence Log
 {Each command run's `LOG=` path, for traceability}
 ```
 
-Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file via Bash and the message gives its path. Exempt, inline in full: `### Test Plan Evidence` (HEAD line and TP table), the Scenario Results table (`| ID | TP | Type |`) and `### Failed Scenarios`. `### Evidence Log` lists each run's `LOG=` path, never raw output.
+Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file via Bash and the message gives its path. Exempt, inline in full: `### Test Plan Evidence` (HEAD line and TP table), the Scenario Results table (`| ID | TP | Type |`), `### Failed Scenarios` and `### Blockers`. `### Evidence Log` lists each run's `LOG=` path, never raw output.
 
 ## Principles
 
@@ -171,9 +175,14 @@ Report cap: final message at most about 1,500 tokens; longer material goes to a 
 **Report as PASS:**
 - All BLOCKING scenarios pass
 - WARNING-only failures are acceptable
+- A BLOCKING scenario skipped for its environment, and every BLOCKING scenario that ran passed: the Status line names every such skip, with PASS first: `### Status: PASS (1 BLOCKING scenario skipped: no browser tools)`. If none ran, it says so: `### Status: PASS (0 of 3 BLOCKING scenarios ran: all skipped, no browser tools)`
 
 **Report as FAIL:**
 - Any BLOCKING scenario fails
+
+**Report as BLOCKED:**
+- No BLOCKING scenario failed, and a BLOCKING scenario's command gave no result
+- A scenario skipped for its environment (no browser tools, no local database) never makes the run BLOCKED
 
 **Never:**
 - Modify code or create commits

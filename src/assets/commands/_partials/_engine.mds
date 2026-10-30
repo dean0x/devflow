@@ -36,6 +36,7 @@ Gate 2 inputs are produced by `/devflow:dynamic-plan`'s plan-challenge step — 
 **Test agent** (only if acceptance criteria or a test plan exist):
 - Scenario-based acceptance tests covering functionality, API contracts, performance
 - FAIL → fix-and-continue — a Fix agent applies the demanded fixes and self-verifies its own build. The recorded verdict becomes `FAIL-FIXED`; Gate 2 then proceeds. In SINGLE mode the run reports it as `UNVERIFIED`, never PASS.
+- BLOCKED (no result), or any other or missing verdict → no fix, and the run never reports PASS.
 
 **When Gate 2 inputs are absent:**
 - No plan → skip the Evaluate agent silently (note in output: "Gate 2 Evaluate agent skipped — no plan available")
@@ -142,7 +143,7 @@ This applies to both: multiple Code agents working on a single ticket AND multi-
 @define build_execution_doctrine():
 ### Build execution doctrine — the Running commands block (LOAD-BEARING)
 
-The Validate, Code and Test agents each carry this `## Running commands` block in their bodies, so each prompt in this engine names the block ("your Running commands block") instead of copying it:
+The Code, Fix, Refactor, Validate and Test agents each carry this `## Running commands` block in their bodies, so each prompt in this engine names the block ("your Running commands block") instead of copying it:
 
 Run builds, typechecks, lints and tests in the foreground, each with an explicit Bash `timeout` above its expected run time. The ceiling is 600000 ms, or `BASH_MAX_TIMEOUT_MS` when set (`echo ${BASH_MAX_TIMEOUT_MS:-600000}`).
 
@@ -205,7 +206,7 @@ Each ticket engine run returns a structured result. The Synthesize agent or the 
   ],
   "gate2": {
     "evaluateVerdict": "PASS | FAIL | FAIL-FIXED | SKIPPED",
-    "testVerdict": "PASS | FAIL | FAIL-FIXED | SKIPPED",
+    "testVerdict": "PASS | FAIL | FAIL-FIXED | SKIPPED | BLOCKED",
     "skipReasons": ["string — why a gate was skipped, if applicable"]
   }
 }

@@ -55,7 +55,8 @@ const EXEMPT_MARKERS: Readonly<Record<string, readonly string[]>> = {
   fix: ['`## Verification` block', '`commitShas`', '`unresolved`'],
   refactor: ['`## Verification` block', '`commitShas`', '`unresolved`'],
   validate: ['`HEAD:` line', '`Passed alone:` line', '| Command | Status | Exit | Duration |', '`Lint pack:` line', '30 lines per failing command'],
-  test: ['### Test Plan Evidence', '| ID | TP | Type |', '### Evidence Log'],
+  // `### Blockers` carries the cause and log path that /implement reports when the Test agent reports BLOCKED.
+  test: ['### Test Plan Evidence', '| ID | TP | Type |', '### Blockers', '### Evidence Log'],
   harden: ['`### Status` line', '`status` return field'],
   polish: ['completion status', 'commits'],
   evaluate: ['`### Status` line', '`### Misalignments Found`'],
@@ -239,6 +240,9 @@ describe('D-REPORT-CAP: the report cap on the roster', () => {
     )
     const pathless = real.replace('gives its path', 'says nothing')
     expect(collectCapDefects('test', pathless)).toContain('test: the cap line lacks "gives its path"')
+    const noBlockers = real.replace(', `### Failed Scenarios` and `### Blockers`.', ' and `### Failed Scenarios`.')
+    expect(noBlockers, 'the Blockers seed must land').not.toBe(real)
+    expect(collectCapDefects('test', noBlockers)).toEqual(['test: the cap line does not name its exempt field "### Blockers"'])
   })
 
   it('known-bad probe: a validate cap line that drops the Passed alone line is reported', () => {

@@ -43,7 +43,7 @@ This command instructs you to construct and run a Claude Code dynamic Workflow t
 Before authoring, verify:
 
 1. **Workflow tool available:** if the `Workflow` tool is not in your available tools, STOP and tell the user: "The Workflow tool is not available in this session. dynamic-build requires Claude Code's dynamic workflow runtime."
-2. **`agentType` support:** confirmed available (spike F5, 2026-06-11). If spawned agents return no results, check that devflow is installed (`devflow init` has been run).
+2. **`agentType` support:** if spawned agents return no results, check that devflow is installed (`devflow init` has been run).
 3. **Tracker paths:** an issue reference or URL in the input is read through the Git agent, which resolves the configured tracker and its access itself and reports `TRACEABILITY: DEGRADED ({reason})` when it cannot read one — then note it and fall back to the issue text the user provided. No tracker CLI is checked here.
 4. **No-remote path:** if the repo has no remote, skip the remote-dependent steps (the wave PR and its evidence) and proceed with local branch operations only; the Git agent reports DEGRADED for any tracker step it cannot reach.
 
@@ -234,7 +234,7 @@ After implementing, commit your changes with a conventional-commit message and r
 );
 
 // Phase 3: Gate 1 #1 — post-code pipeline: Polish agent → Harden agent → Validate agent.
-// Validate runs last and unconditionally, so its one full run covers every commit the pass made (see gate1_postcode()).
+// Validate runs last and unconditionally, so its one full run covers every commit the pass made.
 const gate1 = await phase("gate1", async () => {
   await agent(`Polish and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Polish" });
 
@@ -295,8 +295,7 @@ Criteria: ${CRITERIA || "see plan"}
 Return: {"verdict": "PASS" | "FAIL", "rationale": "..."} — FAIL if either answer is no, naming the failing criterion or the drift.`, { agentType: "Evaluate" });
     evalVerdict = evaluation?.verdict === "PASS" ? "PASS" : "FAIL";
     if (evalVerdict === "FAIL") {
-      // fix-and-continue — no re-evaluate, no inline Gate 1. The final Gate 1 (#2)
-      // after the review pass is the build gate before the branch is handed back.
+      // fix-and-continue — no re-evaluate, no inline Gate 1.
       await agent(`OPERATION: alignment-fix
 Fix the alignment issues identified by the Evaluate agent on branch ${BRANCH}:
 ${evaluation?.rationale || "see the Evaluate agent's report"}
@@ -315,19 +314,21 @@ Self-verify your fix compiles, following your Running commands block. Commit fix
 ${CRITERIA || "(none)"}
 TEST_PLAN: ${TEST_PLAN || "(none)"}
 Follow your Running commands block for every scenario command.
-Cover: functionality, API contracts, performance, and cover every TEST_PLAN scenario. Report: PASS or FAIL per scenario.`, { agentType: "Test" });
-    testVerdict = testResult.verdict;
+Cover: functionality, API contracts, performance, and cover every TEST_PLAN scenario.
+Return: {"verdict": "PASS" | "FAIL" | "BLOCKED", "failures": "..."}`, { agentType: "Test" });
+    const word = testResult?.verdict?.split?.(/[ (]/)[0];
+    testVerdict = ["PASS", "FAIL"].includes(word) ? word : "BLOCKED";
     if (testVerdict === "FAIL") {
       // fix-and-continue — no re-test, no inline Gate 1.
       await agent(`OPERATION: qa-fix
 Fix the failing acceptance test scenarios on branch ${BRANCH}:
-${testResult.failures}
+${testResult.failures || "see the Test agent's report"}
 <!-- curation:on -->
 DECISIONS_CONTEXT: ${DECISIONS_CONTEXT}
 <!-- curation:end -->
 ${COMPLIANCE_DIRECTIVE}
 Self-verify your fix compiles and the scenarios pass, following your Running commands block. Commit fixes.`, { agentType: "Fix" });
-      testVerdict = "FAIL-FIXED";  // issues found, fixes applied, not re-evaluated by design
+      testVerdict = "FAIL-FIXED";
     }
   }
 
@@ -475,8 +476,6 @@ Return: {"status": "fixed"|"blocked", "commitShas": ["<sha>"], "unresolved": ["<
 });
 
 // Phase 5.5: Gate 1 #2 — FINAL post-fix gate (Polish agent → Harden agent → full Validate agent, Validate last and unconditional).
-// Runs ONCE, after the review pass. Inside the pass the Code agent self-verified its own fixes;
-// this is the build gate before the branch is handed back. See gate1_postcode() cadence.
 const gate1Final = await phase("gate1-final", async () => {
   await agent(`Polish and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Polish" });
 
@@ -513,9 +512,9 @@ Return: {"verdict": "PASS" | "FAIL", "details": "..."}`, { agentType: "Validate"
 });
 
 // PASS requires survivingFindings.length === 0 && coverageGaps.length === 0 && gate1Final.verdict !== "ESCALATED"
-// and no FAIL-FIXED Gate 2 verdict: fixes applied but never re-run report UNVERIFIED, never PASS
+// and every Gate 2 verdict PASS or SKIPPED; any other reports UNVERIFIED, never PASS
 const coverageGaps = reviewResult.coverageGaps || [];
-const gate2Unverified = [gate2.evaluateVerdict, gate2.testVerdict].includes("FAIL-FIXED");
+const gate2Unverified = ![gate2.evaluateVerdict, gate2.testVerdict].every(v => v === "PASS" || v === "SKIPPED");
 const overallVerdict = (reviewResult.survivingFindings?.length || 0) === 0 && coverageGaps.length === 0 && gate1Final.verdict !== "ESCALATED" ? (gate2Unverified ? "UNVERIFIED" : "PASS") : "PARTIAL";
 
 // Phase 6: Report — the phase returns the engine result (engine_output_schema); its verdict is overallVerdict
@@ -843,12 +842,12 @@ Agent(subagent_type="Test"):
 FILES_CHANGED: {the file list that diff printed}
 TEST_PLAN: {the TP lines of the wave evidence file's ## Test Plan section}
 WORKTREE_PATH: {integration worktree root}
-Cover every TEST_PLAN line on the integration branch as it stands. Report PASS or FAIL with evidence."
+Cover every TEST_PLAN line on the integration branch as it stands. Report your Status with evidence."
 ```
 
-   Nothing is fixed here, PASS or FAIL: the wave is done and its PR is open. Report the Test agent's Status.
+   Nothing is fixed here, whatever the Status: the wave is done and its PR is open. Report the Test agent's Status.
 
-   **(b) Claims.** Append its TP claims, PASS or FAIL alike, to the `## Claims` section of `"{integration worktree root}/.devflow/docs/evidence-wave-{slug}.md"` — the file's last section, created when absent. Append only: never edit or remove a claim. Each line is `/implement`'s TP claim, keyed to the 40-hex `HEAD:` the Test agent's report shows:
+   **(b) Claims.** Append its TP claims, whatever its Status, to the `## Claims` section of `"{integration worktree root}/.devflow/docs/evidence-wave-{slug}.md"` — the file's last section, created when absent. Append only: never edit or remove a claim. Each line is `/implement`'s TP claim, keyed to the 40-hex `HEAD:` the Test agent's report shows:
 
 ```
 - TP-<n> <PASS|FAIL|SKIP> sha:<head> by:test exit:<0-255>
