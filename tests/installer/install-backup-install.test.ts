@@ -389,6 +389,34 @@ describe('a file named like a name that no release shipped', () => {
   });
 });
 
+describe('the mode of a file of the user that stays in the references tree', () => {
+  const REFERENCES = 'skills/devflow:git/references';
+
+  it.each(['pr', 'tracker/github'] as const)('is not changed by the install when its move fails, while the shipped files get 0644 (references/%s)', async unit => {
+    await runInstall(home, { shape: 'full' });
+    const folder = at(home, `${REFERENCES}/${unit}`);
+    const [shippedName] = await filesBelow(folder);
+    const shipped = path.join(folder, shippedName);
+    await fs.chmod(shipped, 0o600);
+    const mine = await put(home, `${REFERENCES}/${unit}/mine-note.md`, 'my note\n');
+    await fs.chmod(mine, 0o600);
+    const realRename = fs.rename.bind(fs);
+    vi.spyOn(fs, 'rename').mockImplementation(async (source, to) => {
+      if (source === mine) throw Object.assign(new Error('EXDEV: injected'), { code: 'EXDEV' });
+      return realRename(source, to);
+    });
+
+    const report = await runInstall(home, { shape: 'full' });
+
+    expect(report.backups.failures, 'precondition: the file stays because its move failed').toEqual([
+      { path: mine, action: 'move', reason: 'EXDEV' },
+    ]);
+    expect((await fs.stat(mine)).mode & 0o777, 'the file of the user keeps its mode').toBe(0o600);
+    expect(await fs.readFile(mine, 'utf8')).toBe('my note\n');
+    expect((await fs.stat(shipped)).mode & 0o777, 'a shipped file is normalised').toBe(0o644);
+  });
+});
+
 describe('the legacy sweep after an install', () => {
   const NO_REFUSED = { refusedFolders: [] as string[] };
 

@@ -401,8 +401,17 @@ export async function copyDirectory(
  * {@link composeScripts}, swallows it with the rest of its copy-and-chmod step; that tree
  * is three levels of shipped assets, so a breach there means the package itself grew a
  * shape no walk in this repo expects, and neither call site aborts an install over it.
+ *
+ * `skip` names the entries the walk leaves alone: a path it accepts keeps its mode, and a folder
+ * it accepts is not entered. The reference overlay passes the backup session's `isKept`, so a file
+ * of the user that stays because its move failed keeps the mode the user gave it.
  */
-export async function chmodRecursive(dir: string, mode: number, _depth = 0): Promise<void> {
+export async function chmodRecursive(
+  dir: string,
+  mode: number,
+  skip?: (entry: string) => boolean,
+  _depth = 0,
+): Promise<void> {
   if (_depth > MAX_REFERENCE_SWEEP_DEPTH) {
     throw new Error(
       `chmodRecursive: descent into ${dir} exceeds the bound of ` +
@@ -413,8 +422,9 @@ export async function chmodRecursive(dir: string, mode: number, _depth = 0): Pro
   const entries = await fs.readdir(dir, { withFileTypes: true });
   for (const entry of entries) {
     const fullPath = path.join(dir, entry.name);
+    if (skip?.(fullPath) === true) continue;
     if (entry.isDirectory()) {
-      await chmodRecursive(fullPath, mode, _depth + 1);
+      await chmodRecursive(fullPath, mode, skip, _depth + 1);
     } else if (entry.isFile()) {
       await fs.chmod(fullPath, mode);
     }
@@ -1583,12 +1593,13 @@ export async function overlayGeneratedReferences(opts: {
   // boundary is stated as "never replace or delete" rather than "never touch": the MODE of
   // a hand-authored reference — and of whatever a shadowed skill supplied outside
   // `tracker/` — is normalised here. The prove-you-wrote-it rule permits exactly that: the
-  // ownership guard protects deletion, not overwrite.
+  // ownership guard protects deletion, not overwrite. A file of the user that the backup session
+  // kept in place (its move failed) is the exception: its mode stays as the user set it.
   //
   // It is also the one walk that can breach chmodRecursive's descent bound. The catch is
   // that breach's reporting channel, not just an I/O guard (see {@link chmodRecursive}).
   try {
-    await chmodRecursive(opts.referencesTarget, 0o644);
+    await chmodRecursive(opts.referencesTarget, 0o644, entry => opts.backups.isKept(entry));
   } catch (err) {
     warn(`reference overlay: could not normalise reference file modes — ${String(err)}`);
   }
