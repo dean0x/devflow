@@ -315,8 +315,9 @@ ${CRITERIA || "(none)"}
 TEST_PLAN: ${TEST_PLAN || "(none)"}
 Follow your Running commands block for every scenario command.
 Cover: functionality, API contracts, performance, and cover every TEST_PLAN scenario.
-Return: {"verdict": "PASS" | "FAIL" | "BLOCKED" (the bare word), "failures": "..."}`, { agentType: "Test" });
-    testVerdict = ["PASS", "FAIL"].includes(testResult?.verdict) ? testResult.verdict : "BLOCKED";
+Return: {"verdict": "PASS" | "FAIL" | "BLOCKED", "failures": "..."}`, { agentType: "Test" });
+    const word = testResult?.verdict?.split?.(/[ (]/)[0];
+    testVerdict = ["PASS", "FAIL"].includes(word) ? word : "BLOCKED";
     if (testVerdict === "FAIL") {
       // fix-and-continue — no re-test, no inline Gate 1.
       await agent(`OPERATION: qa-fix
@@ -327,7 +328,7 @@ DECISIONS_CONTEXT: ${DECISIONS_CONTEXT}
 <!-- curation:end -->
 ${COMPLIANCE_DIRECTIVE}
 Self-verify your fix compiles and the scenarios pass, following your Running commands block. Commit fixes.`, { agentType: "Fix" });
-      testVerdict = "FAIL-FIXED";  // issues found, fixes applied, not re-evaluated by design
+      testVerdict = "FAIL-FIXED";
     }
   }
 

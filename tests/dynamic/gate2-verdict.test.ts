@@ -317,12 +317,10 @@ const TEST_SPAWN_CLOSE = '{ agentType: "Test" })'
 const TEST_PLAN_KEY = 'TEST_PLAN: ${'
 const TEST_PLAN_COVERAGE = 'cover every TEST_PLAN scenario'
 /**
- * The Return line of the Gate 2 Test spawn: one verdict for each Status the Test agent can report, and the bare word only.
- * A PASS whose skips the Test agent names on its Status line returns the verdict `PASS`; the skip note has no field here.
+ * The Return line of the Gate 2 Test spawn: one verdict for each Status the Test agent can report.
+ * Gate 2 reads the first word of the verdict, so a PASS whose skips the Test agent names on its Status line is still PASS; the skip note has no field here.
  */
-const GATE2_TEST_RETURN = 'Return: {"verdict": "PASS" | "FAIL" | "BLOCKED" (the bare word), "failures": "..."}'
-/** The Return line as it read before the bare-word instruction. */
-const GATE2_TEST_RETURN_NO_BARE_WORD = 'Return: {"verdict": "PASS" | "FAIL" | "BLOCKED", "failures": "..."}'
+const GATE2_TEST_RETURN = 'Return: {"verdict": "PASS" | "FAIL" | "BLOCKED", "failures": "..."}'
 /** Gate 2's early return: the code the skip guard governs. */
 const GATE2_SKIP_RETURN = 'return { evaluateVerdict: "SKIPPED", testVerdict: "SKIPPED"'
 
@@ -674,17 +672,25 @@ describe('Gate 2 routing, executed over the shipped statement', () => {
 // 4b. A Test run that gives no result never reports PASS (D4)
 // ---------------------------------------------------------------------------
 //
-// The Test agent reports PASS, FAIL or BLOCKED. Gate 2 records only those three,
-// and anything else, a missing reply included, as BLOCKED. A BLOCKED verdict
-// spawns no Fix agent and the run reports UNVERIFIED, never PASS. The probes run
-// the 3710434b lines through the same collector: its read line threw on a null
-// reply, and its gate2Unverified line reported PASS for a BLOCKED verdict.
+// The Test agent reports PASS, FAIL or BLOCKED, and a PASS may carry a note on its
+// Status line. Gate 2 reads the first word of the verdict (up to a space or an
+// opening parenthesis) and records it only when it is PASS or FAIL; anything else,
+// a missing reply included, is BLOCKED. A BLOCKED verdict spawns no Fix agent and
+// the run reports UNVERIFIED, never PASS. The probes run the 3710434b lines through
+// the same collector: its read line threw on a null reply, and its gate2Unverified
+// line reported PASS for a BLOCKED verdict.
 
 /** The 3710434b read of the Test reply, verbatim: a null reply throws, and any other value is recorded as it came. */
 const OLD_TEST_READ = 'testVerdict = testResult.verdict;'
 
-/** The shipped read: only PASS and FAIL are recorded, every other reply is BLOCKED, and a null reply does not throw. */
-const TEST_READ = 'testVerdict = ["PASS", "FAIL"].includes(testResult?.verdict) ? testResult.verdict : "BLOCKED";'
+/** The shipped read: the first word of the verdict is recorded when it is PASS or FAIL, every other reply is BLOCKED, and a null reply does not throw. */
+const TEST_READ = [
+  'const word = testResult?.verdict?.split?.(/[ (]/)[0];',
+  'testVerdict = ["PASS", "FAIL"].includes(word) ? word : "BLOCKED";',
+].join('\n    ')
+
+/** The read as it stood before the first word was taken: the verdict must equal PASS or FAIL exactly. */
+const EXACT_MATCH_READ = 'testVerdict = ["PASS", "FAIL"].includes(testResult?.verdict) ? testResult.verdict : "BLOCKED";'
 
 /** The Fix gate of the Test path: only a FAIL verdict reaches the Fix agent. */
 const TEST_FIX_GATE = 'if (testVerdict === "FAIL") {'
@@ -697,7 +703,6 @@ const NO_RESULT_REPLIES: ReadonlyArray<{ readonly label: string; readonly reply:
   { label: 'SKIPPED', reply: { verdict: 'SKIPPED' } },
   { label: 'UNVERIFIED', reply: { verdict: 'UNVERIFIED' } },
   { label: 'lowercase pass', reply: { verdict: 'pass' } },
-  { label: 'PASS with a skip note', reply: { verdict: 'PASS (1 BLOCKING scenario skipped: no browser tools)' } },
 ]
 
 /**
@@ -731,7 +736,7 @@ describe('a Test run that gives no result is BLOCKED and the run is UNVERIFIED, 
   const labels = NO_RESULT_REPLIES.map(r => r.label)
 
   it('every reply that gives no result is recorded BLOCKED, spawns no Fix agent and reports UNVERIFIED', async () => {
-    expect(labels).toEqual(['BLOCKED', 'null', 'no verdict', 'SKIPPED', 'UNVERIFIED', 'lowercase pass', 'PASS with a skip note'])
+    expect(labels).toEqual(['BLOCKED', 'null', 'no verdict', 'SKIPPED', 'UNVERIFIED', 'lowercase pass'])
     expect(await collectNoResultVerdictViolations(statement, block)).toEqual([])
   })
 
@@ -744,7 +749,6 @@ describe('a Test run that gives no result is BLOCKED and the run is UNVERIFIED, 
       'SKIPPED: the run reports PASS, expected UNVERIFIED',
       'UNVERIFIED: testVerdict is UNVERIFIED, expected BLOCKED',
       'lowercase pass: testVerdict is pass, expected BLOCKED',
-      'PASS with a skip note: testVerdict is PASS (1 BLOCKING scenario skipped: no browser tools), expected BLOCKED',
     ])
   })
 
@@ -767,8 +771,6 @@ describe('a Test run that gives no result is BLOCKED and the run is UNVERIFIED, 
       'UNVERIFIED: the run reports PASS, expected UNVERIFIED',
       'lowercase pass: testVerdict is pass, expected BLOCKED',
       'lowercase pass: the run reports PASS, expected UNVERIFIED',
-      'PASS with a skip note: testVerdict is PASS (1 BLOCKING scenario skipped: no browser tools), expected BLOCKED',
-      'PASS with a skip note: the run reports PASS, expected UNVERIFIED',
     ])
   })
 
@@ -786,14 +788,128 @@ describe('a Test run that gives no result is BLOCKED and the run is UNVERIFIED, 
       'UNVERIFIED: a Fix agent was spawned',
       'lowercase pass: testVerdict is FAIL-FIXED, expected BLOCKED',
       'lowercase pass: a Fix agent was spawned',
-      'PASS with a skip note: testVerdict is FAIL-FIXED, expected BLOCKED',
-      'PASS with a skip note: a Fix agent was spawned',
     ])
   })
 
   it('known-bad probe: a statement or a block the collector cannot find is reported, not passed', async () => {
     expect(await collectNoResultVerdictViolations(null, block)).toHaveLength(1)
     expect(await collectNoResultVerdictViolations(statement, null)).toHaveLength(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 4b (continued). Gate 2 reads the first word of the Test verdict
+// ---------------------------------------------------------------------------
+//
+// A Test run that skips a BLOCKING scenario for its environment reports
+// `### Status: PASS (… skipped: …)`, and the Test spawn returns that line's verdict.
+// Gate 2 takes the first word, so the note never turns a PASS into BLOCKED. The
+// rows run the shipped statement and the run's verdict over each reply.
+
+interface VerdictWordRow {
+  readonly label: string
+  readonly reply: unknown
+  /** What Gate 2 records. */
+  readonly testVerdict: 'PASS' | 'FAIL-FIXED' | 'BLOCKED'
+  /** The run's verdict with no finding, no coverage gap and a passed final Gate 1. */
+  readonly overall: 'PASS' | 'UNVERIFIED'
+}
+
+const failureReply = (verdict: unknown): { verdict: unknown; failures: string } => ({ verdict, failures: 'TP-1 failed' })
+
+const VERDICT_WORD_TABLE: readonly VerdictWordRow[] = [
+  { label: 'PASS', reply: failureReply('PASS'), testVerdict: 'PASS', overall: 'PASS' },
+  { label: 'PASS with one skip', reply: failureReply('PASS (1 BLOCKING scenario skipped: no browser tools)'), testVerdict: 'PASS', overall: 'PASS' },
+  {
+    label: 'PASS with every scenario skipped',
+    reply: failureReply('PASS (0 of 3 BLOCKING scenarios ran: all skipped, no browser tools)'),
+    testVerdict: 'PASS',
+    overall: 'PASS',
+  },
+  { label: 'PASS with a note and no space', reply: failureReply('PASS(1 BLOCKING scenario skipped)'), testVerdict: 'PASS', overall: 'PASS' },
+  { label: 'FAIL', reply: failureReply('FAIL'), testVerdict: 'FAIL-FIXED', overall: 'UNVERIFIED' },
+  { label: 'FAIL with a note', reply: failureReply('FAIL (2 scenarios)'), testVerdict: 'FAIL-FIXED', overall: 'UNVERIFIED' },
+  { label: 'lowercase pass with a note', reply: failureReply('pass (x)'), testVerdict: 'BLOCKED', overall: 'UNVERIFIED' },
+  { label: 'PASSED', reply: failureReply('PASSED'), testVerdict: 'BLOCKED', overall: 'UNVERIFIED' },
+  { label: 'PASS after a space', reply: failureReply(' PASS'), testVerdict: 'BLOCKED', overall: 'UNVERIFIED' },
+  { label: 'BLOCKED with a note', reply: failureReply('BLOCKED (no EXIT= line read)'), testVerdict: 'BLOCKED', overall: 'UNVERIFIED' },
+  { label: 'an empty verdict', reply: failureReply(''), testVerdict: 'BLOCKED', overall: 'UNVERIFIED' },
+  { label: 'a verdict that is not a string', reply: failureReply(['PASS']), testVerdict: 'BLOCKED', overall: 'UNVERIFIED' },
+]
+
+/**
+ * Named collector: what Gate 2, the Fix spawn and the run's verdict do with each reply in VERDICT_WORD_TABLE.
+ * A FAIL reply, noted or not, reaches the Fix agent with the failures; every other reply spawns none.
+ */
+export async function collectVerdictWordViolations(statement: string | null, block: string | null): Promise<string[]> {
+  if (statement === null) return ['the phase("gate2") statement was not found']
+  if (block === null) return ['verdict block not found (coverageGaps … overallVerdict)']
+  const out: string[] = []
+  for (const row of VERDICT_WORD_TABLE) {
+    let ran: { gate2: Gate2Result; spawns: Spawn[] }
+    try {
+      ran = await runGate2(statement, { plan: null, criteria: null, testPlan: TEST_PLAN_FIXTURE }, row.reply)
+    } catch (err) {
+      out.push(`${row.label}: Gate 2 threw ${err instanceof Error ? err.name : 'a non-error'}`)
+      continue
+    }
+    if (ran.gate2.testVerdict !== row.testVerdict) out.push(`${row.label}: testVerdict is "${String(ran.gate2.testVerdict)}", expected ${row.testVerdict}`)
+    const fixes = ran.spawns.filter(s => s.agentType === 'Fix')
+    const wantFix = row.testVerdict === 'FAIL-FIXED'
+    if (fixes.length !== (wantFix ? 1 : 0)) out.push(`${row.label}: ${fixes.length} Fix spawn(s), expected ${wantFix ? 1 : 0}`)
+    if (wantFix && fixes.length === 1 && !(fixes[0].prompt.includes('OPERATION: qa-fix') && fixes[0].prompt.includes('TP-1 failed'))) {
+      out.push(`${row.label}: the qa-fix prompt lacks the failures`)
+    }
+    const overall = overallVerdictOf(block, ran.gate2)
+    if (overall !== row.overall) out.push(`${row.label}: the run reports ${String(overall)}, expected ${row.overall}`)
+  }
+  return out
+}
+
+describe('Gate 2 reads the first word of the Test verdict', () => {
+  const statement = SCRIPT === null ? null : gate2Statement(SCRIPT)
+  const block = SCRIPT === null ? null : extractVerdictBlock(SCRIPT)
+
+  it('a PASS or FAIL with a note keeps its verdict, and every other word is BLOCKED', async () => {
+    expect(await collectVerdictWordViolations(statement, block)).toEqual([])
+  })
+
+  it('known-bad probe: the previous exact-match read turns a noted PASS into BLOCKED and a noted FAIL into no fix', async () => {
+    const exact = seedOnce(statement!, TEST_READ, EXACT_MATCH_READ)
+    expect(await collectVerdictWordViolations(exact, block)).toEqual([
+      'PASS with one skip: testVerdict is "BLOCKED", expected PASS',
+      'PASS with one skip: the run reports UNVERIFIED, expected PASS',
+      'PASS with every scenario skipped: testVerdict is "BLOCKED", expected PASS',
+      'PASS with every scenario skipped: the run reports UNVERIFIED, expected PASS',
+      'PASS with a note and no space: testVerdict is "BLOCKED", expected PASS',
+      'PASS with a note and no space: the run reports UNVERIFIED, expected PASS',
+      'FAIL with a note: testVerdict is "BLOCKED", expected FAIL-FIXED',
+      'FAIL with a note: 0 Fix spawn(s), expected 1',
+    ])
+  })
+
+  it('known-bad probe: a split on the space alone reads PASS(note) as BLOCKED, and only it', async () => {
+    const spaceOnly = seedOnce(statement!, '/[ (]/', '/ /')
+    expect(await collectVerdictWordViolations(spaceOnly, block)).toEqual([
+      'PASS with a note and no space: testVerdict is "BLOCKED", expected PASS',
+      'PASS with a note and no space: the run reports UNVERIFIED, expected PASS',
+    ])
+  })
+
+  it('known-bad probe: a read that takes the first word with no allow-list records PASSED, a leading space and a lowercase word as they came', async () => {
+    const anyWord = seedOnce(statement!, 'testVerdict = ["PASS", "FAIL"].includes(word) ? word : "BLOCKED";', 'testVerdict = word;')
+    expect(await collectVerdictWordViolations(anyWord, block)).toEqual([
+      'lowercase pass with a note: testVerdict is "pass", expected BLOCKED',
+      'PASSED: testVerdict is "PASSED", expected BLOCKED',
+      'PASS after a space: testVerdict is "", expected BLOCKED',
+      'an empty verdict: testVerdict is "", expected BLOCKED',
+      'a verdict that is not a string: testVerdict is "undefined", expected BLOCKED',
+    ])
+  })
+
+  it('known-bad probe: a statement or a block the collector cannot find is reported, not passed', async () => {
+    expect(await collectVerdictWordViolations(null, block)).toHaveLength(1)
+    expect(await collectVerdictWordViolations(statement, null)).toHaveLength(1)
   })
 })
 
@@ -838,7 +954,7 @@ export function collectTestStatusPromptDefects(built: string): string[] {
   const spawns = gate2 === null ? [] : testSpawnCalls(gate2)
   if (spawns.length !== 1) out.push(`gate 2 spawn: expected one Test spawn, found ${spawns.length}`)
   else {
-    if (!spawns[0].call.includes(GATE2_TEST_RETURN)) out.push('gate 2 spawn: no Return line naming BLOCKED and the bare verdict word')
+    if (!spawns[0].call.includes(GATE2_TEST_RETURN)) out.push('gate 2 spawn: no Return line naming BLOCKED')
     if (spawns[0].call.includes(OLD_STATUS_WORDING)) out.push(`gate 2 spawn: still says "${OLD_STATUS_WORDING}"`)
   }
   const wave = waveTestStep(built)
@@ -865,13 +981,7 @@ describe('the Test prompts and the Gate 2 doctrine speak of a Status, with a BLO
       'the Gate 2 Return line back to PASS or FAIL per scenario',
       `\n${GATE2_TEST_RETURN}`,
       ' Report: PASS or FAIL per scenario.',
-      ['gate 2 spawn: no Return line naming BLOCKED and the bare verdict word', 'gate 2 spawn: still says "PASS or FAIL"'],
-    ],
-    [
-      'the Gate 2 Return line without the bare-word instruction',
-      GATE2_TEST_RETURN,
-      GATE2_TEST_RETURN_NO_BARE_WORD,
-      ['gate 2 spawn: no Return line naming BLOCKED and the bare verdict word'],
+      ['gate 2 spawn: no Return line naming BLOCKED', 'gate 2 spawn: still says "PASS or FAIL"'],
     ],
     [
       'the wave fence back to PASS or FAIL',

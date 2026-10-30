@@ -445,12 +445,14 @@ describe('#679: the Test agent reports BLOCKED for a run whose command gave no r
 
 const REPORT_AS_PASS_HEADING = '**Report as PASS:**'
 const PASS_SKIP_EXAMPLE = '`### Status: PASS (1 BLOCKING scenario skipped: no browser tools)`'
+const PASS_ALL_SKIPPED_EXAMPLE = '`### Status: PASS (0 of 3 BLOCKING scenarios ran: all skipped, no browser tools)`'
 
 /**
  * Named collector (T3): what test.md lacks to report a run whose BLOCKING scenario was skipped for its environment as
  * PASS with the skips named. The word PASS stays first on the Status line; the skip never makes the run BLOCKED
- * (`collectTestBlockedStatusDefects` holds that), and the rule covers a run in which another BLOCKING scenario ran and
- * passed. The Status template offers the `PASS ({n} BLOCKING scenario(s) skipped: {reasons})` form.
+ * (`collectTestBlockedStatusDefects` holds that). The rule covers a run in which every BLOCKING scenario that ran passed,
+ * the run in which none ran included, and that run says so on the Status line. The Status template offers the
+ * `PASS ({n} BLOCKING scenario(s) skipped: {reasons})` form.
  */
 function collectSkipNoteDefects(test: string): string[] {
   const boundaries = test.indexOf('\n## Boundaries\n')
@@ -458,7 +460,8 @@ function collectSkipNoteDefects(test: string): string[] {
   if (boundaries === -1 || at < boundaries) return [`no "${REPORT_AS_PASS_HEADING}" block in Boundaries`]
   const block = test.slice(at + 1).split('\n\n')[0]
   const out: string[] = []
-  for (const part of ['skipped for its environment', 'while another BLOCKING scenario ran and passed', 'names every such skip', 'with PASS first', PASS_SKIP_EXAMPLE]) {
+  const parts = ['skipped for its environment', 'every BLOCKING scenario that ran passed', 'names every such skip', 'with PASS first', PASS_SKIP_EXAMPLE, 'If none ran', PASS_ALL_SKIPPED_EXAMPLE]
+  for (const part of parts) {
     if (!block.includes(part)) out.push(`the PASS block lacks "${part}"`)
   }
   if (!test.includes(`\n${TEST_STATUS_LINE}\n`)) out.push('the Status template does not offer the PASS form that names skips')
@@ -487,17 +490,24 @@ describe('T3: a run with a BLOCKING scenario skipped for its environment reports
 
   it('known-bad probes: each lost statement of the Test rule is reported by name', () => {
     const test = resolveAgentSource('test').content
-    const bullet = test.split('\n').find(l => l.startsWith('- A BLOCKING scenario skipped for its environment, while another')) ?? ''
+    const bullet = test.split('\n').find(l => l.startsWith('- A BLOCKING scenario skipped for its environment, and every')) ?? ''
     expect(bullet, 'the PASS bullet must be found').not.toBe('')
     expect(collectSkipNoteDefects(seedOnce(test, `${bullet}\n`, ''))).toEqual([
       'the PASS block lacks "skipped for its environment"',
-      'the PASS block lacks "while another BLOCKING scenario ran and passed"',
+      'the PASS block lacks "every BLOCKING scenario that ran passed"',
       'the PASS block lacks "names every such skip"',
       'the PASS block lacks "with PASS first"',
       `the PASS block lacks "${PASS_SKIP_EXAMPLE}"`,
+      'the PASS block lacks "If none ran"',
+      `the PASS block lacks "${PASS_ALL_SKIPPED_EXAMPLE}"`,
     ])
     expect(collectSkipNoteDefects(seedOnce(test, 'with PASS first', 'with the skips first'))).toEqual(['the PASS block lacks "with PASS first"'])
-    expect(collectSkipNoteDefects(seedOnce(test, 'while another BLOCKING scenario ran and passed', 'whatever else ran'))).toEqual(['the PASS block lacks "while another BLOCKING scenario ran and passed"'])
+    expect(collectSkipNoteDefects(seedOnce(test, 'every BLOCKING scenario that ran passed', 'whatever else ran'))).toEqual(['the PASS block lacks "every BLOCKING scenario that ran passed"'])
+    expect(collectSkipNoteDefects(seedOnce(test, `. If none ran, it says so: ${PASS_ALL_SKIPPED_EXAMPLE}`, ''))).toEqual([
+      'the PASS block lacks "If none ran"',
+      `the PASS block lacks "${PASS_ALL_SKIPPED_EXAMPLE}"`,
+    ])
+    expect(collectSkipNoteDefects(seedOnce(test, PASS_ALL_SKIPPED_EXAMPLE, '`### Status: BLOCKED (all skipped)`'))).toEqual([`the PASS block lacks "${PASS_ALL_SKIPPED_EXAMPLE}"`])
     expect(collectSkipNoteDefects(seedOnce(test, TEST_STATUS_LINE, '### Status: PASS | FAIL | BLOCKED'))).toEqual(['the Status template does not offer the PASS form that names skips'])
     expect(collectSkipNoteDefects(seedOnce(test, `\n${REPORT_AS_PASS_HEADING}\n`, '\n**Report as OK:**\n'))).toEqual([`no "${REPORT_AS_PASS_HEADING}" block in Boundaries`])
     // The skip still never makes the run BLOCKED: the other collector reports a rule that says it does.
