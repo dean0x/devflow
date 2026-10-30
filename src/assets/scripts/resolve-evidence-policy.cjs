@@ -15,7 +15,7 @@
 // `.devflow/policy.json` is detected by presence and never parsed
 // (D-POLICY-JSON-RETIRED).
 //
-// stdout is exactly one line plus "\n", or empty (D-POLICY-LINE):
+// stdout is exactly one line plus "\n" (D-POLICY-LINE):
 //   EVIDENCE_POLICY=<required|standard> SOURCE=<file|worktree|default|invalid|error>
 //   REF=<branch|none>[ WARN=<w>[,<w>…]] ISSUE_REQUIRED=<bool> APPLY_CONVENTIONS=<bool>
 //   REQUIRE_NON_AUTHOR_APPROVAL=<bool>
@@ -25,7 +25,7 @@
 //
 // Exit codes (a caller treats EVERY non-zero code as `required`):
 //   0  resolved — the line above
-//   1  usage error — stdout entirely empty, usage on stderr
+//   1  usage error — usage on stderr; prints FAIL_CLOSED_LINE
 //   2  input unusable — <dir> missing or not a directory; prints FAIL_CLOSED_LINE
 //   3  never emitted — this script writes no file, so the write-failure code of
 //      redact-secrets.cjs has no arm here and is absent from EXIT_CODES
@@ -139,8 +139,9 @@ const { SAFE_REF_RE } = projectConfig;
 const OUTPUT_LINE_RE = /^EVIDENCE_POLICY=(?<policy>required|standard) SOURCE=(?<source>file|worktree|default|invalid|error) REF=(?<ref>none|(?![A-Za-z0-9._/-]{0,254}\.\.)[A-Za-z0-9][A-Za-z0-9._/-]{0,254})(?: WARN=(?<warn>(?:remote-unavailable|invalid-file|raised-by-compliance|pr-changes-policy)(?:,(?:remote-unavailable|invalid-file|raised-by-compliance|pr-changes-policy)){0,3}))? ISSUE_REQUIRED=(?<issue>true|false) APPLY_CONVENTIONS=(?<conventions>true|false) REQUIRE_NON_AUTHOR_APPROVAL=(?<approval>true|false)$/;
 
 /**
- * The line every refusal prints (exits 2, 4 and 5). A constant, so the boundary
+ * The line every refusal prints (exits 1, 2, 4 and 5). A constant, so the boundary
  * can never fail to compose it, and `required` in every field a consumer reads.
+ * The literal fallback of the _evidence_policy.mds partial is these bytes.
  */
 const FAIL_CLOSED_LINE =
   'EVIDENCE_POLICY=required SOURCE=error REF=none ISSUE_REQUIRED=true APPLY_CONVENTIONS=true REQUIRE_NON_AUTHOR_APPROVAL=true';
@@ -196,7 +197,7 @@ const LS_REMOTE_SYMREF_RE = /^ref: refs\/heads\/([^\t\n]{1,255})\tHEAD$/;
  *   Injected by tests only, to reach the output gate.
  *
  * @typedef {{ code: number, line: string }} MainOutcome
- *   `line` is '' only for code 1, FAIL_CLOSED_LINE for codes 2, 4 and 5.
+ *   `line` is FAIL_CLOSED_LINE for codes 1, 2, 4 and 5.
  */
 
 /** @type {ParsedPolicy} */
@@ -1008,8 +1009,8 @@ function passesOutputGate(line, resolution) {
 
 /**
  * Settle whatever main() returned into what the boundary may print. The code
- * must be a known exit code and the line must fit it: '' for usage, a coherent
- * line for 0, FAIL_CLOSED_LINE for the refusals. Anything else is refused.
+ * must be a known exit code and the line must fit it: a coherent line for 0,
+ * FAIL_CLOSED_LINE for the refusals. Anything else is refused.
  *
  * @param {unknown} outcome
  * @returns {MainOutcome}
@@ -1019,11 +1020,10 @@ function settleOutcome(outcome) {
   if (o === null || typeof o !== 'object' || typeof o.line !== 'string') {
     return { code: EXIT_CODES.INTERNAL_ERROR, line: FAIL_CLOSED_LINE };
   }
-  if (o.code === EXIT_CODES.USAGE) return { code: EXIT_CODES.USAGE, line: '' };
   if (o.code === EXIT_CODES.RESOLVED) {
     return isCoherentLine(o.line) ? { code: o.code, line: o.line } : { code: EXIT_CODES.OUTPUT_GATE_REFUSED, line: FAIL_CLOSED_LINE };
   }
-  if (o.code === EXIT_CODES.INPUT_UNUSABLE || o.code === EXIT_CODES.OUTPUT_GATE_REFUSED) {
+  if (o.code === EXIT_CODES.USAGE || o.code === EXIT_CODES.INPUT_UNUSABLE || o.code === EXIT_CODES.OUTPUT_GATE_REFUSED) {
     return { code: o.code, line: FAIL_CLOSED_LINE };
   }
   return { code: EXIT_CODES.INTERNAL_ERROR, line: FAIL_CLOSED_LINE };
@@ -1069,7 +1069,7 @@ function main(argv, deps) {
   const args = parseArgs(argv);
   if (args.kind === 'usage') {
     process.stderr.write(args.usage + '\n');
-    return { code: EXIT_CODES.USAGE, line: '' };
+    return { code: EXIT_CODES.USAGE, line: FAIL_CLOSED_LINE };
   }
 
   if (!isUsableDirectory(args.dir)) {
@@ -1106,9 +1106,9 @@ function main(argv, deps) {
 //
 // This is the ONLY place that writes to stdout and sets process.exitCode.
 // It re-checks what main() returned (settleOutcome) before writing, so even a
-// main() that returned something malformed prints either nothing (usage) or a
-// line that passes the gate. Its catch is the fail-closed arm for anything
-// main() did not anticipate.
+// main() that returned something malformed prints a line that passes the gate
+// or FAIL_CLOSED_LINE. Its catch is the fail-closed arm for anything main() did
+// not anticipate.
 // ---------------------------------------------------------------------------
 
 if (require.main === module) {
@@ -1120,7 +1120,7 @@ if (require.main === module) {
     outcome = { code: EXIT_CODES.INTERNAL_ERROR, line: FAIL_CLOSED_LINE };
   }
   const settled = settleOutcome(outcome);
-  if (settled.line !== '') process.stdout.write(settled.line + '\n');
+  process.stdout.write(settled.line + '\n');
   process.exitCode = settled.code;
 }
 

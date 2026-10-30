@@ -251,6 +251,28 @@ describe('the accepted line is SETTINGS_LINE_RE written out', () => {
     expect(SETTINGS.SETTINGS_LINE_RE.test(SETTINGS.SETTINGS_FAIL_CLOSED_LINE)).toBe(true)
   })
 
+  it('the fallback literal appears once in the block, as its final clause (never-cut: the fail-closed settings line)', () => {
+    expect(collectFallbackDefects(body)).toEqual([])
+  })
+
+  it('known-bad probes: a deleted, reworded, repeated or misplaced fallback literal is reported', () => {
+    const literal = SETTINGS.SETTINGS_FAIL_CLOSED_LINE
+    expect(collectFallbackDefects(body.replace(literal, ''))).toEqual([
+      'the literal appears 0 times (expected 1)',
+      'the final clause is not the literal fallback',
+    ])
+    expect(collectFallbackDefects(body.replace(literal, literal.replace('MEMORY=off', 'MEMORY=on')))).toEqual([
+      'the literal appears 0 times (expected 1)',
+      'the final clause is not the literal fallback',
+    ])
+    expect(collectFallbackDefects(`${body}\nIf the line is refused, use \`${literal}\`.`)).toEqual([
+      'the literal appears 2 times (expected 1)',
+    ])
+    expect(collectFallbackDefects(body.replace(' instead.', ' instead. And more.'))).toEqual([
+      'the final clause is not the literal fallback',
+    ])
+  })
+
   it('the level is the last field, with the three levels as its closed set', () => {
     const fields = templateFields(template(body))
     expect(fields.at(-1)).toEqual({ key: 'GATE_LEVEL', values: ['full', 'standard', 'lean'] })
@@ -290,7 +312,7 @@ const ACCEPT_CLAUSES: ReadonlyArray<readonly [string, string]> = [
   ['fields in order, nothing else', 'these fields, in this order, nothing else'],
   [
     'anything else falls back',
-    '**Anything else** (a non-zero exit, no line, extra text, or a missing, reordered or unlisted field or value) ⇒ use',
+    '**Anything else** (including a script that cannot run) ⇒ use',
   ],
 ]
 
@@ -311,6 +333,20 @@ function collectAcceptClauseDefects(paragraph: string): string[] {
     else from = at + text.length
   }
   if (!paragraph.endsWith('instead.')) defects.push('the fallback is not the final clause')
+  return defects
+}
+
+/**
+ * Named collector: the defects of the block's literal fallback. It appears once in the
+ * whole block, and the accept paragraph ends on it. The literal is read from the script,
+ * so the prompt and the script's own printed line cannot drift apart.
+ */
+function collectFallbackDefects(body: string): string[] {
+  const literal = SETTINGS.SETTINGS_FAIL_CLOSED_LINE
+  const defects: string[] = []
+  const count = body.split(literal).length - 1
+  if (count !== 1) defects.push(`the literal appears ${count} times (expected 1)`)
+  if (!acceptParagraph(body).endsWith(`use \`${literal}\` instead.`)) defects.push('the final clause is not the literal fallback')
   return defects
 }
 

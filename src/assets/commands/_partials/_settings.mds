@@ -19,7 +19,10 @@ not runtime calls.
 
 The accepted shape below is `SETTINGS_LINE_RE` written out, and the fallback is
 `SETTINGS_FAIL_CLOSED_LINE`, both exported by `resolve-settings.cjs`;
-`tests/commands/settings-partial.test.ts` pins both to the script.
+`tests/commands/settings-partial.test.ts` pins both to the script. On every error
+path the script prints that same fallback line itself, with a non-zero exit. The
+literal in the block applies when the script output fails the check or the script
+cannot run at all.
 
 @define settings_resolve():
 **Resolve the settings line** once per worktree root, reusing a line this run already resolved for the same root. `{root}` is the worktree the values are for — the repository root in a one-worktree run:
@@ -28,7 +31,7 @@ The accepted shape below is `SETTINGS_LINE_RE` written out, and the fallback is
 node "$HOME/.devflow/scripts/resolve-settings.cjs" "{root}" 2>/dev/null; echo "exit=$?"
 ```
 
-Accept the output only when it is exactly two lines: `exit=0` last and, before it, one line of the form `TRACKER=<github|jira|linear> TRACKER_SOURCE=<project|personal|machine|default> TRACKER_WARN=<none|mismatch|invalid> SITE=<none|https://<host>> KEY=<none|<key>> REVIEW_PUBLICATION=<off|auto|full> COMPLIANCE=<off|generic|<id>[,<id>…]> MEMORY=<on|off> CURATION=<on|off> KNOWLEDGE=<on|off> GATE_LEVEL=<full|standard|lean>` — these fields, in this order, nothing else, where `<host>` is a lowercase dotted host name alone, `<key>` is 2–10 of `A-Z`, `0-9` and `_` starting with a letter, and each `<id>` is one of `gdpr`, `hipaa`, `pci-dss`, `soc2`, `iso-27001`, `sox`. **Anything else** (a non-zero exit, no line, extra text, or a missing, reordered or unlisted field or value) ⇒ use `TRACKER=github TRACKER_SOURCE=default TRACKER_WARN=invalid SITE=none KEY=none REVIEW_PUBLICATION=off COMPLIANCE=generic MEMORY=off CURATION=off KNOWLEDGE=off GATE_LEVEL=full` instead.
+Accept the output only when it is exactly two lines: `exit=0` last and, before it, one line of the form `TRACKER=<github|jira|linear> TRACKER_SOURCE=<project|personal|machine|default> TRACKER_WARN=<none|mismatch|invalid> SITE=<none|https://<host>> KEY=<none|<key>> REVIEW_PUBLICATION=<off|auto|full> COMPLIANCE=<off|generic|<id>[,<id>…]> MEMORY=<on|off> CURATION=<on|off> KNOWLEDGE=<on|off> GATE_LEVEL=<full|standard|lean>` — these fields, in this order, nothing else, where `<host>` is a lowercase dotted host name alone, `<key>` is 2–10 of `A-Z`, `0-9` and `_` starting with a letter, and each `<id>` is one of `gdpr`, `hipaa`, `pci-dss`, `soc2`, `iso-27001`, `sox`. **Anything else** (including a script that cannot run) ⇒ use `TRACKER=github TRACKER_SOURCE=default TRACKER_WARN=invalid SITE=none KEY=none REVIEW_PUBLICATION=off COMPLIANCE=generic MEMORY=off CURATION=off KNOWLEDGE=off GATE_LEVEL=full` instead.
 
 The accepted line is the only source of these values.
 @end

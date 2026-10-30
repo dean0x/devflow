@@ -457,10 +457,10 @@ describe('TP-32 (AC-28): settings mode is local — one grammar line, local git 
       + 'REVIEW_PUBLICATION=auto COMPLIANCE=soc2 MEMORY=off CURATION=on KNOWLEDGE=on GATE_LEVEL=standard\n');
   });
 
-  it('exit arms: usage prints nothing; an unusable dir and an unanswering git print the fail-closed line', () => {
+  it('exit arms: usage, an unusable dir and an unanswering git print the fail-closed line', () => {
     const usage = run([TOPLEVEL(root)], ['--settings']);
     expect(usage.status).toBe(1);
-    expect(usage.stdout).toBe('');
+    expect(usage.stdout).toBe(`${FAIL_CLOSED}\n`);
 
     const missing = run([TOPLEVEL(root)], [path.join(tmp, 'nope')]);
     expect(missing.status).toBe(2);

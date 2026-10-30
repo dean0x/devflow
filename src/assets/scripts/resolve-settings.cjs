@@ -63,7 +63,7 @@
 // value. The level comes from these two keys only — never from a task, a diff or
 // project.json.
 //
-// stdout is exactly one line plus "\n", or empty (D-SETTINGS-LINE):
+// stdout is exactly one line plus "\n" (D-SETTINGS-LINE):
 //   TRACKER=<github|jira|linear> TRACKER_SOURCE=<project|personal|machine|default>
 //   TRACKER_WARN=<none|mismatch|invalid> SITE=<url|none> KEY=<KEY|none>
 //   REVIEW_PUBLICATION=<off|auto|full> COMPLIANCE=<off|generic|id,…>
@@ -79,7 +79,7 @@
 //
 // Exit codes (a caller treats EVERY non-zero code as the fail-closed line):
 //   0  resolved — the line above, including the whole-file rule's line
-//   1  usage error — stdout entirely empty, usage on stderr
+//   1  usage error — usage on stderr; prints SETTINGS_FAIL_CLOSED_LINE
 //   2  input unusable — <dir> missing or not a directory; prints
 //      SETTINGS_FAIL_CLOSED_LINE
 //   3  never emitted — this script writes no file
@@ -192,10 +192,11 @@ const SETTINGS_LINE_RE = new RegExp(
 );
 
 /**
- * The line every refusal prints (exits 2, 4 and 5), what a consumer uses in place
+ * The line every refusal prints (exits 1, 2, 4 and 5), what a consumer uses in place
  * of any line it cannot accept, and the whole-file rule's line on a machine with
  * no compliance lens. A constant, so the boundary can never fail
- * to compose it. Each field is the conservative reading for its consumer:
+ * to compose it. The literal fallback of the _settings.mds partial is these bytes.
+ * Each field is the conservative reading for its consumer:
  *   TRACKER_WARN=invalid     the Git agent degrades rather than guessing a provider
  *   REVIEW_PUBLICATION=off   nothing is published (raised to a stub under required)
  *   COMPLIANCE=generic       the review lens still runs
@@ -1278,13 +1279,12 @@ function settleOutcome(outcome) {
   if (o === null || typeof o !== 'object' || typeof o.line !== 'string') {
     return { code: EXIT_CODES.INTERNAL_ERROR, line: SETTINGS_FAIL_CLOSED_LINE };
   }
-  if (o.code === EXIT_CODES.USAGE) return { code: EXIT_CODES.USAGE, line: '' };
   if (o.code === EXIT_CODES.RESOLVED) {
     return isCoherentSettingsLine(o.line)
       ? { code: o.code, line: o.line }
       : { code: EXIT_CODES.OUTPUT_GATE_REFUSED, line: SETTINGS_FAIL_CLOSED_LINE };
   }
-  if (o.code === EXIT_CODES.INPUT_UNUSABLE || o.code === EXIT_CODES.OUTPUT_GATE_REFUSED) {
+  if (o.code === EXIT_CODES.USAGE || o.code === EXIT_CODES.INPUT_UNUSABLE || o.code === EXIT_CODES.OUTPUT_GATE_REFUSED) {
     return { code: o.code, line: SETTINGS_FAIL_CLOSED_LINE };
   }
   return { code: EXIT_CODES.INTERNAL_ERROR, line: SETTINGS_FAIL_CLOSED_LINE };
@@ -1374,7 +1374,7 @@ function main(argv, deps) {
   const args = parseArgs(argv);
   if (args.kind === 'usage') {
     process.stderr.write(args.usage + '\n');
-    return { code: EXIT_CODES.USAGE, line: '' };
+    return { code: EXIT_CODES.USAGE, line: SETTINGS_FAIL_CLOSED_LINE };
   }
   if (!isUsableDirectory(args.dir)) {
     process.stderr.write('resolve-settings: not a usable directory: '
@@ -1430,7 +1430,7 @@ if (require.main === module) {
     outcome = { code: EXIT_CODES.INTERNAL_ERROR, line: SETTINGS_FAIL_CLOSED_LINE };
   }
   const settled = settleOutcome(outcome);
-  if (settled.line !== '') process.stdout.write(settled.line + '\n');
+  process.stdout.write(settled.line + '\n');
   process.exitCode = settled.code;
 }
 

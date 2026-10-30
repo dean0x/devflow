@@ -1199,10 +1199,10 @@ describe('exit arms', SUBPROCESS_TIMEOUT, () => {
     ['--help', ['--help']],
     ['two positionals', ['/a', '/b']],
     ['a bare dash', ['-']],
-  ])('1 (%s) ⇒ stdout entirely empty, usage on stderr', (_label, args) => {
+  ])('1 (%s) ⇒ FAIL_CLOSED_LINE on stdout, usage on stderr', (_label, args) => {
     const run = runResolver({ home, args });
     expect(run.status).toBe(1);
-    expect(run.stdout).toBe('');
+    expect(run.stdout).toBe(`${RESOLVER.FAIL_CLOSED_LINE}\n`);
     expect(run.stderr).toContain('Usage');
   });
 
