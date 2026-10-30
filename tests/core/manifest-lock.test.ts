@@ -275,7 +275,12 @@ describe('manifest lock', () => {
       // B starts only once A waits at the rename, so A is the first to arrive there. Two
       // calls started together reach the rename in either order (their file system calls
       // finish on the thread pool), and a B that came first would wait for A for ever.
-      await aAtRename;
+      // The race fails at once, with a name, when A settles without reaching the rename.
+      const first = await Promise.race([
+        aAtRename.then(() => 'rename' as const),
+        callerA.then(() => 'settled' as const),
+      ]);
+      expect(first, 'A reached the rename before it settled').toBe('rename');
       const callerB = acquireManifestLock(devflowDir, { timeoutMs: 0 });
       const [a, b] = await Promise.all([callerA, callerB]);
 
