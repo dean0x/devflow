@@ -34,6 +34,7 @@ import { prefixSkillName } from '../../core/plugins.js';
 import { removeComplianceOffFiles, restoreComplianceOffFiles } from './compliance-off-files.js';
 import type { BackupSession } from './install-backup.js';
 import { overlayGeneratedReferences, overlayUnitLabel, referencesHostState, resolveSkillSource } from './installer.js';
+import { isUnrealFolder } from './linked-folder.js';
 
 export interface ConvergeReferencesOptions {
   /** Claude Code's config directory (e.g. ~/.claude). Must be absolute. */
@@ -95,6 +96,16 @@ export async function convergeReferences(opts: ConvergeReferencesOptions): Promi
   const root = opts.packageRoot ?? getPackageRoot();
   const skillsDir = path.join(claudeDir, 'skills');
   const gitSkillDir = path.join(skillsDir, prefixSkillName(SKILL_REFS_SKILL_NAME));
+
+  // Every step below moves, removes or writes inside the skills folder. One that is a link or not a
+  // folder sends all of them into another place, and `referencesHostState` only looks at the entries
+  // below it. It is refused once, here: nothing is converged, the removal list of compliance off
+  // included, so the result is unproven and the caller fails closed.
+  if (await isUnrealFolder(skillsDir)) {
+    fail(`${skillsDir} is a link or not a folder, so nothing in it was converged`);
+    return { converged: false, rewritten: [], removed: [], restored: [], failures, stillPosting: [], unproven: !compliance };
+  }
+
   const manifest = installedReferenceManifest({ compliance });
 
   let rewritten: readonly string[] = [];

@@ -15,6 +15,7 @@ import { RETIRED_SHIPPED } from '../../src/core/retired-shipped-names.js';
 import { createBackupSession, createPathSet, type BackupSession } from '../../src/targets/claude-code/install-backup.js';
 import { LEGACY_SKILL_NAMES } from '../../src/targets/claude-code/legacy.js';
 import { FIXTURE_FOLDER } from '../fixtures/workflow-folder.js';
+import { testBackups } from '../helpers.js';
 import { assertTempHome } from '../setup/home-isolation.js';
 import {
   at,
@@ -251,15 +252,60 @@ describe('a root that is a link or not a folder', () => {
     const slot = at(home, 'skills');
     await fs.rm(slot, { recursive: true });
     await fs.symlink(outside, slot);
-    const warnings: string[] = [];
 
-    const report = await runInstall(home, { shape: 'full', warn: message => warnings.push(message) });
+    const report = await runInstall(home, { shape: 'full' });
 
     expect(await fs.readFile(path.join(outside, `devflow:${USER_SKILL_FOLDER}`, 'SKILL.md'), 'utf8')).toBe('my skill\n');
     expect((await fs.lstat(slot)).isSymbolicLink()).toBe(true);
     expect(report.backups.moved).toEqual([]);
     expect(backupRootOf(home)).toBeNull();
-    expect(warnings.filter(message => message.includes(slot) && message.includes('moved and removed nothing'))).toHaveLength(1);
+    expect(report.refusedFolders.filter(folder => folder === slot), 'the skills root is named once').toHaveLength(1);
+  });
+
+  describe('with an earlier install of devflow below it', () => {
+    /** The skills folder of the install, moved to another place and linked back, with a file of the user in each place devflow looks. */
+    async function linkSkillsRootWithEarlierInstall(): Promise<{ readonly slot: string; readonly outside: string }> {
+      await runInstall(home, { shape: 'full' });
+      const outside = path.join(home.home, 'outside-skills');
+      const slot = at(home, 'skills');
+      await fs.rename(slot, outside);
+      await fs.symlink(outside, slot);
+      for (const rel of [
+        'devflow:git/references/pr/mine-note.md',
+        'devflow:git/references/tracker/github/mine-note.md',
+        'devflow:git/references/mine-root-note.md',
+        'devflow:git/mine-skill-note.md',
+        'devflow:compliance/mine-note.md',
+        `devflow:${USER_SKILL_FOLDER}/SKILL.md`,
+      ]) {
+        const target = path.join(outside, ...rel.split('/'));
+        await fs.mkdir(path.dirname(target), { recursive: true });
+        await fs.writeFile(target, `my file ${rel}\n`);
+      }
+      // A shipped file that differs from this release, so that a write below the link would show.
+      await fs.writeFile(path.join(outside, 'devflow:git', 'references', 'pr', 'check-ci-status.md'), 'a stale copy\n');
+      return { slot, outside };
+    }
+
+    it.each([
+      { shape: 'full', compliance: true },
+      { shape: 'partial', compliance: true },
+      { shape: 'full', compliance: false },
+    ] as const)('moves, removes and writes nothing in the folder the link points to ($shape install, compliance $compliance)', async ({ shape, compliance }) => {
+      const { slot, outside } = await linkSkillsRootWithEarlierInstall();
+      const before = await treeSnapshot(outside);
+
+      const report = await runInstall(home, { shape, compliance });
+
+      expect(await treeSnapshot(outside), 'the folder the link points to is as it was').toEqual(before);
+      expect((await fs.lstat(slot)).isSymbolicLink()).toBe(true);
+      expect(report.refusedFolders.filter(folder => folder === slot), 'the skills root is named once').toHaveLength(1);
+      expect(report.backups.moved).toEqual([]);
+      expect(report.backups.failures).toEqual([]);
+      expect(backupRootOf(home)).toBeNull();
+      expect(report.overlaidRefs).toEqual([]);
+      expect(report.removedSkills).toEqual([]);
+    });
   });
 });
 
@@ -335,5 +381,194 @@ describe('a legacy skill folder whose move is refused', () => {
     expect(await treeSnapshot(outside)).toEqual(before);
     expect(session.snapshot().moved).toEqual([]);
     expect(backupRootOf(home)).toBeNull();
+  });
+});
+
+describe('a file of the user in a references unit folder', () => {
+  const REFERENCES = 'skills/devflow:git/references';
+  /** The two folders the overlay swaps whole: the pr-host unit and one provider unit. */
+  const UNITS = ['pr', 'tracker/github'] as const;
+
+  /** Make the rename of `from` fail with `code`, and let every other rename run. */
+  function refuseMove(from: string, code = 'EXDEV'): void {
+    const realRename = fs.rename.bind(fs);
+    vi.spyOn(fs, 'rename').mockImplementation(async (source, to) => {
+      if (source === from) throw Object.assign(new Error(`${code}: injected`), { code });
+      return realRename(source, to);
+    });
+  }
+
+  /** Overwrite one file devflow ships in `unit`, so that the next install has bytes to refresh there. */
+  async function staleShippedFile(unit: string): Promise<{ readonly file: string; readonly shipped: Buffer }> {
+    const folder = at(home, `${REFERENCES}/${unit}`);
+    const [name] = await filesBelow(folder);
+    const file = path.join(folder, name);
+    const shipped = await fs.readFile(file);
+    await fs.writeFile(file, 'a stale copy\n');
+    return { file, shipped };
+  }
+
+  /** The scratch folders and files a swap leaves beside the live references. */
+  async function scratchBelowReferences(): Promise<string[]> {
+    return Object.keys(await treeSnapshot(at(home, REFERENCES))).filter(entry => /\.(old|tmp)\b/.test(entry));
+  }
+
+  it.each(UNITS)('stays in references/%s with its folder when its move fails (EXDEV)', async unit => {
+    await runInstall(home, { shape: 'full' });
+    const folder = at(home, `${REFERENCES}/${unit}`);
+    const shippedNames = await filesBelow(folder);
+    const stale = await staleShippedFile(unit);
+    const mine = await put(home, `${REFERENCES}/${unit}/mine-note.md`, 'my note\n');
+    refuseMove(mine);
+
+    const report = await runInstall(home, { shape: 'full' });
+
+    expect(await fs.readFile(mine, 'utf8'), 'the file keeps its bytes').toBe('my note\n');
+    expect(await filesBelow(folder), 'the folder keeps its files').toEqual([...shippedNames, 'mine-note.md'].sort());
+    expect((await fs.readFile(stale.file)).equals(stale.shipped), 'the shipped file is current').toBe(true);
+    expect(report.backups.failures).toEqual([{ path: mine, action: 'move', reason: 'EXDEV' }]);
+    expect(report.backups.moved).toEqual([]);
+    expect(report.overlayFailures).toEqual([]);
+    expect(await scratchBelowReferences()).toEqual([]);
+    expect(warnLines(report).filter(message => message.includes(mine) && message.includes('EXDEV'))).toHaveLength(1);
+  });
+
+  it.each(UNITS)('stays in references/%s on the next run too, and the unit counts as unchanged', async unit => {
+    await runInstall(home, { shape: 'full' });
+    const mine = await put(home, `${REFERENCES}/${unit}/mine-note.md`, 'my note\n');
+    refuseMove(mine);
+    await runInstall(home, { shape: 'full' });
+
+    const report = await runInstall(home, { shape: 'full' });
+
+    expect(await fs.readFile(mine, 'utf8')).toBe('my note\n');
+    expect(report.overlayFailures).toEqual([]);
+    expect(report.overlaidRefs.filter(rel => rel.startsWith(`${unit}/`)), 'nothing was written').toEqual([]);
+    expect(report.unchangedRefs.some(rel => rel.startsWith(`${unit}/`))).toBe(true);
+  });
+
+  it('stay in both folders when the backup root is refused, and the shipped files are refreshed', async () => {
+    await runInstall(home, { shape: 'full' });
+    const staleFiles = await Promise.all(UNITS.map(staleShippedFile));
+    const mineFiles = await Promise.all(UNITS.map(unit => put(home, `${REFERENCES}/${unit}/mine-note.md`, `note in ${unit}\n`)));
+    await fs.writeFile(path.join(home.devflowDir, 'install-backups'), 'in the way\n');
+
+    const report = await runInstall(home, { shape: 'full' });
+
+    expect(report.backups.rootRefusal?.reason).toBe('not-a-directory');
+    for (const [index, mine] of mineFiles.entries()) {
+      expect(await fs.readFile(mine, 'utf8')).toBe(`note in ${UNITS[index]}\n`);
+      expect((await fs.readFile(staleFiles[index].file)).equals(staleFiles[index].shipped)).toBe(true);
+    }
+    expect(report.overlayFailures).toEqual([]);
+    expect(await scratchBelowReferences()).toEqual([]);
+  });
+
+  it('stay in both folders when the references subtrees are over the entry cap, and nothing in them moves', async () => {
+    await runInstall(home, { shape: 'full' });
+    const staleFiles = await Promise.all(UNITS.map(staleShippedFile));
+    const mineFiles = await Promise.all(UNITS.map(unit => put(home, `${REFERENCES}/${unit}/mine-note.md`, `note in ${unit}\n`)));
+    const mineFlat = await put(home, `${REFERENCES}/tracker/mine-flat.md`, 'a flat note\n');
+    const capped = await testBackups(home.home, { claudeDir: home.claudeDir, devflowDir: home.devflowDir, entryCap: 1 });
+
+    const report = await runInstall(home, { shape: 'full', backups: capped });
+
+    expect(report.backups.capHits.map(hit => hit.folder)).toContain(at(home, `${REFERENCES}/pr`));
+    for (const [index, mine] of mineFiles.entries()) {
+      expect(await fs.readFile(mine, 'utf8')).toBe(`note in ${UNITS[index]}\n`);
+      expect((await fs.readFile(staleFiles[index].file)).equals(staleFiles[index].shipped)).toBe(true);
+    }
+    expect(await fs.readFile(mineFlat, 'utf8'), 'the prune moved nothing out of a capped folder').toBe('a flat note\n');
+    expect(report.backups.moved.filter(unit => unit.original.startsWith(at(home, REFERENCES)))).toEqual([]);
+    expect(report.overlayFailures).toEqual([]);
+    expect(await scratchBelowReferences()).toEqual([]);
+  });
+
+  it.each(UNITS)('is moved, not deleted, when it appears in references/%s after the scan', async unit => {
+    await runInstall(home, { shape: 'full' });
+    const folder = at(home, `${REFERENCES}/${unit}`);
+    const stale = await staleShippedFile(unit);
+    const realRename = fs.rename.bind(fs);
+    let injected = false;
+    vi.spyOn(fs, 'rename').mockImplementation(async (source, to) => {
+      if (!injected && source === folder) {
+        injected = true;
+        await fs.writeFile(path.join(folder, 'late-note.md'), 'added during the run\n');
+      }
+      return realRename(source, to);
+    });
+
+    const report = await runInstall(home, { shape: 'full' });
+
+    expect(injected, 'the file was written between the scan and the swap').toBe(true);
+    expect((await fs.readFile(stale.file)).equals(stale.shipped)).toBe(true);
+    const run = await onlyRunFolder(home);
+    const kept = (await filesBelow(run)).filter(file => file.endsWith('/late-note.md'));
+    expect(kept, 'the late file is in the backup folder').toHaveLength(1);
+    expect(await fs.readFile(path.join(run, kept[0]), 'utf8')).toBe('added during the run\n');
+    expect(report.backups.moved.map(unit => path.basename(unit.original))).toEqual(['late-note.md']);
+    expect(report.overlayFailures).toEqual([]);
+  });
+
+  it('stays in a stranded .old folder of a provider when its move fails', async () => {
+    await runInstall(home, { shape: 'full' });
+    const stale = await staleShippedFile('tracker/github');
+    const mine = await put(home, `${REFERENCES}/tracker/github.old/mine-note.md`, 'my note\n');
+    refuseMove(mine);
+
+    const report = await runInstall(home, { shape: 'full' });
+
+    expect(await fs.readFile(mine, 'utf8')).toBe('my note\n');
+    expect((await fs.readFile(stale.file)).equals(stale.shipped), 'the shipped file is current').toBe(true);
+    expect(report.backups.failures).toEqual([{ path: mine, action: 'move', reason: 'EXDEV' }]);
+    expect(report.overlayFailures).toEqual([]);
+  });
+});
+
+describe('a folder over the entry cap', () => {
+  const capped = (): Promise<BackupSession> =>
+    testBackups(home.home, { claudeDir: home.claudeDir, devflowDir: home.devflowDir, entryCap: 1 });
+
+  it.each(['agents', 'commands'] as const)('keeps a retired file and a file of the user in %s/devflow, and the sweep removes nothing', async kind => {
+    await runInstall(home, { shape: 'full' });
+    const retiredName = RETIRED_SHIPPED[kind][0];
+    const retired = await put(home, `${kind}/devflow/${retiredName}.md`);
+    const mine = await put(home, `${kind}/devflow/mine.md`, 'mine\n');
+
+    const report = await runInstall(home, { shape: 'partial', backups: await capped() });
+
+    expect(report.backups.capHits.map(hit => hit.folder), 'precondition: the folder is over the cap').toContain(at(home, `${kind}/devflow`));
+    expect(await exists(retired), 'the retired file stays').toBe(true);
+    expect(await fs.readFile(mine, 'utf8')).toBe('mine\n');
+    expect(report.sweptOrphans).not.toContainEqual({ kind: kind === 'agents' ? 'agent' : 'command', name: retiredName });
+    expect(report.backups.moved.filter(unit => unit.original.startsWith(at(home, `${kind}/devflow`)))).toEqual([]);
+  });
+
+  it('keeps a leftover of devflow in a references subtree, and the prune removes nothing from it', async () => {
+    await runInstall(home, { shape: 'full' });
+    const leftover = await put(home, 'skills/devflow:git/references/tracker/_contract.md.old', 'an interrupted write left this\n');
+    const mine = await put(home, 'skills/devflow:git/references/tracker/mine-flat.md', 'a flat note\n');
+
+    const report = await runInstall(home, { shape: 'full', backups: await capped() });
+
+    expect(report.backups.capHits.map(hit => hit.folder)).toContain(at(home, 'skills/devflow:git/references/tracker'));
+    expect(await exists(leftover), 'the leftover stays').toBe(true);
+    expect(await fs.readFile(mine, 'utf8')).toBe('a flat note\n');
+    expect(report.sweptOrphans.filter(orphan => orphan.kind === 'reference')).toEqual([]);
+  });
+});
+
+describe('the sweeps of the commands and agents folders', () => {
+  it.each(['agents', 'commands'] as const)('remove a retired file of %s/devflow with unlink, never with a recursive rm', async kind => {
+    await runInstall(home, { shape: 'full' });
+    const retiredName = RETIRED_SHIPPED[kind][0];
+    const retired = await put(home, `${kind}/devflow/${retiredName}.md`);
+    const rm = vi.spyOn(fs, 'rm');
+
+    const report = await runInstall(home, { shape: 'partial' });
+
+    expect(await exists(retired), 'the retired file is removed').toBe(false);
+    expect(report.sweptOrphans).toContainEqual({ kind: kind === 'agents' ? 'agent' : 'command', name: retiredName });
+    expect(rm.mock.calls.filter(call => String(call[0]) === retired), 'no recursive removal of the file').toEqual([]);
   });
 });

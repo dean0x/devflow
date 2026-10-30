@@ -4,7 +4,8 @@
  *
  * What it asserts
  * ---------------
- * 1. Every call of `installWorkflowFolder`, `swapInSkillDirectory` and `installSkillDir` in `src/`
+ * 1. Every call of `installWorkflowFolder`, `swapInSkillDirectory`, `installSkillDir` and
+ *    `promoteUnitStagingTree` (the swap of a references unit folder) in `src/`
  *    passes `backups`. A call without the session would swap a folder and delete the files of the
  *    user that stand in it. Each name has at least one call, so the scan is not empty by design.
  * 2. Every call of `loadShippedSet` in `src/` passes `workflowFolders`, so a session is never built
@@ -32,7 +33,7 @@ import { ROOT, testBackups } from '../helpers.js';
 import { assertTempHome, TEMP_HOME_PREFIX } from '../setup/home-isolation.js';
 
 const SRC = path.join(ROOT, 'src');
-const SESSION_CALLS = ['installWorkflowFolder', 'swapInSkillDirectory', 'installSkillDir'] as const;
+const SESSION_CALLS = ['installWorkflowFolder', 'swapInSkillDirectory', 'installSkillDir', 'promoteUnitStagingTree'] as const;
 
 /** Every `.ts` file below `dir`, sorted. */
 function sourceFiles(dir: string): string[] {
@@ -101,7 +102,7 @@ describe('callers of the folder swaps', () => {
     expect(found.length).toBeGreaterThan(0);
   });
 
-  it('passes backups in every call of installWorkflowFolder, swapInSkillDirectory and installSkillDir', () => {
+  it('passes backups in every call of installWorkflowFolder, swapInSkillDirectory, installSkillDir and promoteUnitStagingTree', () => {
     const violations = files.flatMap(([file, source]) => callsWithout(source, SESSION_CALLS, 'backups').map(message => `${file}: ${message}`));
     expect(violations).toEqual([]);
   });
@@ -118,6 +119,7 @@ describe('callsWithout', () => {
     'await installWorkflowFolder({ claudeDir, name, files, links, backups });',
     'await swapInSkillDirectory(claudeDir, resolved.dir, target, links, opts.backups);',
     'await installSkillDir(claudeDir, devflowDir, frameworks, fragments, warn, links, backups);',
+    'const promoted = await promoteUnitStagingTree(unit, opts.referencesTarget, built.stagingDir, opts.backups);',
   ].join('\n');
 
   it('passes calls that name the session', () => {
@@ -129,6 +131,8 @@ describe('callsWithout', () => {
     expect(callsWithout(bad, SESSION_CALLS, 'backups')).toEqual(['installWorkflowFolder( call does not pass backups']);
     const positional = 'await swapInSkillDirectory(claudeDir, sourceDir, target, links);';
     expect(callsWithout(positional, SESSION_CALLS, 'backups')).toEqual(['swapInSkillDirectory( call does not pass backups']);
+    const overlayUnit = 'await promoteUnitStagingTree(unit, opts.referencesTarget, built.stagingDir);';
+    expect(callsWithout(overlayUnit, SESSION_CALLS, 'backups')).toEqual(['promoteUnitStagingTree( call does not pass backups']);
   });
 
   it('does not take a declaration or a name in a comment for a call', () => {

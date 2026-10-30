@@ -186,6 +186,11 @@ async function installSkillDir(
   const target = skillTarget(claudeDir);
   const tmpTarget = complianceSkillTempPath(claudeDir);
 
+  // A skills folder that is a link or not a folder is refused before anything is built: the swap
+  // would move and remove below it, in the folder the link points to. The refusal is recorded in
+  // `links`, and the converge is not clean.
+  if (await refuseUnrealFolder(links, path.dirname(target))) return;
+
   // Determine SKILL.md source: prefer a valid shadow, else use canonical.
   const skillShadowDir = path.join(devflowDir, 'skills', 'compliance');
   const shadowState = await validateSkillShadow(skillShadowDir);

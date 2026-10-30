@@ -580,6 +580,11 @@ async function convergeSkills(opts: ConvergeCurationVariantsOptions, links: Link
   const selected = skillsOf(plugins);
   let state: CurationSkillState = 'unchanged';
 
+  // A skills folder that is a link or not a folder is refused once. The removal and the swap below
+  // would reach the folder the link points to: `directoryState` of a skill folder follows the link
+  // above it. The refusal is recorded in `links`, and the converge is not clean.
+  if (await refuseUnrealFolder(links, path.join(claudeDir, 'skills'))) return 'failed';
+
   // Every gated skill is converged: a failure on one must not skip the next.
   for (const skill of CURATION_GATED_SKILLS) {
     const target = path.join(claudeDir, 'skills', prefixSkillName(skill));

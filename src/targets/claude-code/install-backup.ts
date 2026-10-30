@@ -258,7 +258,7 @@ export interface BackupSession {
   prepass(targets: ReadonlyArray<string | PrepassTarget>): Promise<PrepassResult>;
   /** Remove the entries the scan listed under `folder` and were not kept, then `rmdir` it and its scanned folders. */
   removeListed(folder: string): Promise<RemoveResult>;
-  /** Move one entry whole with a single rename and no walk. */
+  /** Move one entry whole with a single rename and no walk. An entry the session kept, or one below a kept folder, stays. */
   moveWhole(entry: string): Promise<MoveWholeResult>;
   /**
    * Remove one file by its exact path and name it with the retired files. The caller takes the path
@@ -626,6 +626,7 @@ export function createBackupSession(options: BackupSessionOptions): BackupSessio
       fail(source, 'move', 'outside-claude-dir');
       return wholeResult({ status: 'kept', reason: 'outside-claude-dir' });
     }
+    if (isKept(source)) return wholeResult({ status: 'kept', reason: 'kept-by-earlier-failure' });
     const found = await lstatBig(source);
     if (!found.ok) {
       if (found.code === 'ENOENT') return wholeResult({ status: 'absent' });

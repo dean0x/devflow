@@ -93,7 +93,15 @@ async function overlayWithBackups(
   opts: OverlayOptions,
   alsoOwned: readonly string[] = [],
 ): ReturnType<typeof overlayGeneratedReferences> {
-  const backups = await testBackups(opts.referencesTarget, {
+  return overlayGeneratedReferences({ ...opts, backups: await backupsFor(opts, alsoOwned) });
+}
+
+/** The backup session {@link overlayWithBackups} runs with, for a test that drives a promotion step directly. */
+async function backupsFor(
+  opts: Pick<OverlayOptions, 'referencesTarget' | 'manifest'>,
+  alsoOwned: readonly string[] = [],
+): ReturnType<typeof testBackups> {
+  return testBackups(opts.referencesTarget, {
     claudeDir: opts.referencesTarget,
     devflowDir: `${opts.referencesTarget}-devflow`,
     extraShipped: [
@@ -103,7 +111,6 @@ async function overlayWithBackups(
       ...alsoOwned,
     ],
   });
-  return overlayGeneratedReferences({ ...opts, backups });
 }
 
 /** POSIX path of a manifest entry under a root, spelled for the host filesystem. */
@@ -1259,7 +1266,7 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
     const missingStaging = abs(target, 'tracker/probe-provider') + '.tmp';
     expect(await exists(missingStaging), 'the staging tree must be absent for this probe').toBe(false);
 
-    const promoted = await promoteUnitStagingTree(unit, target, missingStaging);
+    const promoted = await promoteUnitStagingTree(unit, target, missingStaging, await backupsFor({ referencesTarget: target, manifest: wide }));
 
     expect(promoted.ok, 'promoting an absent staging tree must be reported, never silently ok').toBe(false);
 
@@ -1345,7 +1352,7 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
     await fs.writeFile(path.join(staging, flat[0]), '# refreshed by this run\n', 'utf-8');
 
     const unit: OverlayUnit = { kind: 'cross-cutting', dir: '', files: flat };
-    const promoted = await promoteUnitStagingTree(unit, target, staging);
+    const promoted = await promoteUnitStagingTree(unit, target, staging, await backupsFor({ referencesTarget: target }));
 
     expect(promoted.ok, 'a rename over an absent document must be reported').toBe(false);
     if (promoted.ok) return;
@@ -1402,7 +1409,7 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
       'the destination directory must be absent, or this probe drives the path that already works',
     ).toBe(false);
 
-    const promoted = await promoteUnitStagingTree(unit, target, staging);
+    const promoted = await promoteUnitStagingTree(unit, target, staging, await backupsFor({ referencesTarget: target }));
 
     // Proof of RED: without the mkdir the first rename is ENOENT, the promotion is reported
     // as failed, and not one of the unit's documents reaches the installed skill.

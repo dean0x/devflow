@@ -37,6 +37,7 @@ import {
   put,
   removeHome,
   runInstall,
+  treeSnapshot,
   type TestHome,
 } from './install-backup-harness.js';
 
@@ -356,6 +357,101 @@ describe('a file that cannot move', () => {
     expect(await exists(at(home, `${SKILL_APPLY}/SKILL.md`))).toBe(true);
     const run = await onlyRunFolder(home);
     expect(await fs.readFile(inRun(run, SKILL_APPLY), 'utf8')).toBe('a file where the folder goes\n');
+  });
+});
+
+describe('a file of the user in a references unit folder, when its move fails', () => {
+  const UNITS = ['pr', 'tracker/github'] as const;
+
+  function refuseMove(from: string): void {
+    const realRename = fs.rename.bind(fs);
+    vi.spyOn(fs, 'rename').mockImplementation(async (source, to) => {
+      if (source === from) throw Object.assign(new Error('EXDEV: injected'), { code: 'EXDEV' });
+      return realRename(source, to);
+    });
+  }
+
+  it.each(UNITS)('a reference converge keeps it in references/%s with its folder', async unit => {
+    await runInstall(home, { shape: 'full' });
+    const folder = at(home, `${REFERENCES}/${unit}`);
+    // With compliance off the manifest omits some operation files, which the converge prunes.
+    const shippedNames = installedReferenceManifest({ compliance: false })
+      .filter(rel => rel.startsWith(`${unit}/`))
+      .map(rel => path.basename(rel));
+    const mine = await put(home, `${REFERENCES}/${unit}/mine-note.md`, 'my note\n');
+    refuseMove(mine);
+    const backups = await openSession(home);
+
+    const result = await convergeReferences({
+      claudeDir: home.claudeDir, devflowDir: home.devflowDir, compliance: false, warn, backups,
+    });
+
+    expect(result.converged, warnings.join('\n')).toBe(true);
+    expect(await fs.readFile(mine, 'utf8'), 'the file keeps its bytes').toBe('my note\n');
+    expect(await filesBelow(folder), 'the folder keeps its files').toEqual([...shippedNames, 'mine-note.md'].sort());
+    expect(backups.snapshot().failures).toEqual([{ path: mine, action: 'move', reason: 'EXDEV' }]);
+    expect(backups.snapshot().moved).toEqual([]);
+    expect(summaryOf(backups)).toContain('Could not move');
+  });
+});
+
+describe('a skills folder that is a link, with an earlier install of devflow below it', () => {
+  async function linkSkillsFolder(): Promise<{ readonly slot: string; readonly outside: string }> {
+    await runInstall(home, { shape: 'full' });
+    const outside = path.join(home.home, 'outside-skills');
+    const slot = at(home, 'skills');
+    await fs.rename(slot, outside);
+    await fs.symlink(outside, slot);
+    for (const rel of [
+      'devflow:git/references/pr/mine-note.md',
+      'devflow:git/references/tracker/github/mine-note.md',
+      'devflow:apply-decisions/mine-note.md',
+      'devflow:compliance/mine-note.md',
+    ]) {
+      const target = path.join(outside, ...rel.split('/'));
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await fs.writeFile(target, `my file ${rel}\n`);
+    }
+    await fs.writeFile(path.join(outside, 'devflow:git', 'references', 'pr', 'check-ci-status.md'), 'a stale copy\n');
+    return { slot, outside };
+  }
+
+  it.each([true, false])('a reference converge changes nothing in the folder the link points to (compliance %s)', async compliance => {
+    const { outside } = await linkSkillsFolder();
+    const before = await treeSnapshot(outside);
+    const backups = await openSession(home);
+
+    const result = await convergeReferences({ claudeDir: home.claudeDir, devflowDir: home.devflowDir, compliance, warn, backups });
+
+    expect(await treeSnapshot(outside)).toEqual(before);
+    expect(result.converged).toBe(false);
+    expect(result.rewritten).toEqual([]);
+    expect(result.unproven, 'with compliance off the converge cannot prove the posting files are gone').toBe(!compliance);
+    expect(warnings.join('\n')).toContain(at(home, 'skills'));
+    expect(backups.snapshot().moved).toEqual([]);
+    expect(backupRootOf(home)).toBeNull();
+  });
+
+  it.each([
+    { curation: true, compliance: true },
+    { curation: false, compliance: true },
+    { curation: true, compliance: false },
+    { curation: false, compliance: false },
+  ])('the variant converge changes nothing in the folder the link points to (curation $curation, compliance $compliance)', async ({ curation, compliance }) => {
+    const { slot, outside } = await linkSkillsFolder();
+    const before = await treeSnapshot(outside);
+    const backups = await openSession(home);
+
+    const result = await converge(curation, compliance, backups);
+
+    expect(await treeSnapshot(outside)).toEqual(before);
+    expect(result.converged).toBe(false);
+    expect(result.skill).toBe('failed');
+    expect(result.compliance.refusedFolders).toContain(slot);
+    expect(result.compliance.converged).toBe(false);
+    expect(result.references.converged).toBe(false);
+    expect(backups.snapshot().moved).toEqual([]);
+    expect(backupRootOf(home)).toBeNull();
   });
 });
 
