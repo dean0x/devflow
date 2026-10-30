@@ -5,17 +5,7 @@ All notable changes to Devflow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.10.0] - 2026-10-30
-
-### Upgrade notes — Shadowed rules and skills
-
-**What you must do:**
-- A quality rule that you keep at `~/.devflow/rules/quality.md` replaces the shipped one, so you do not get its two new bullets. Add them to your copy. Or run `devflow rules unshadow quality`, which deletes your copy, and then run `devflow init`.
-- A testing skill that you keep at `~/.devflow/skills/testing/` replaces the shipped one, so you do not get its new Quality Gates item or its cuts. Add the item to your copy. Or run `devflow skills unshadow testing`, which deletes your copy, and then run `devflow init`.
-- A review-methodology or agent-references skill that you keep under `~/.devflow/skills/` replaces the shipped one, so you do not get the new follow-up text of #690. Add it to your copy. Or run `devflow skills unshadow <name>`, which deletes your copy, and then run `devflow init`.
-
-**Stale-install window:**
-- Until you run `devflow init`, the installed quality rule, testing, review-methodology and agent-references skills lack the new text.
+## [Unreleased]
 
 ### Upgrade notes — Files that devflow moves to a backup folder
 
@@ -36,6 +26,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - A bare legacy skill folder, such as `skills/python` (a name from releases before v2), is now moved whole to the backup folder and named, but only when its `SKILL.md` is a copy that a release of devflow installed. Before, `devflow init` deleted every such folder. A skill of your own with such a name stays where it is. A folder that devflow cannot judge (no `SKILL.md`, or a link) also stays, and the output names it.
   - A full `devflow uninstall` now removes a bare legacy skill folder, such as `skills/python`, only when its `SKILL.md` is a copy that a release of devflow installed. Before, it deleted every folder with such a name, without a backup, so a skill of your own with that name was lost. A skill of your own stays where it is. A folder that devflow cannot judge (no `SKILL.md`, or a link) also stays. The output names each folder that stays, and `--dry-run` lists the same folders. A `devflow:`-prefixed skill folder is removed as before.
   - An interactive `devflow uninstall` where the install backups are the only user content in `~/.devflow` now asks before the full wipe. The prompt lists the backup folder, and a decline keeps the backups.
+
+### Fixed
+
+- **`devflow init` and the curation, compliance and rules toggles no longer delete files that devflow did not ship** ([#688](https://github.com/dean0x/devflow/issues/688)).
+  - A file that you keep in `commands/devflow/`, `agents/devflow/`, `rules/devflow/`, a `skills/devflow:*` folder or its `references/` folders is now moved to `~/.devflow/install-backups/<UTC stamp>-<8 hex>/`, and the output names it. Before, these commands deleted it. This holds for a full install, for a partial install (`--plugin`) and for the three toggles.
+  - A file that cannot move stays in place with its folder, and the output names it.
+
+## [3.10.0] - 2026-10-30
+
+### Upgrade notes — Shadowed rules and skills
+
+**What you must do:**
+- A quality rule that you keep at `~/.devflow/rules/quality.md` replaces the shipped one, so you do not get its two new bullets. Add them to your copy. Or run `devflow rules unshadow quality`, which deletes your copy, and then run `devflow init`.
+- A testing skill that you keep at `~/.devflow/skills/testing/` replaces the shipped one, so you do not get its new Quality Gates item or its cuts. Add the item to your copy. Or run `devflow skills unshadow testing`, which deletes your copy, and then run `devflow init`.
+- A review-methodology or agent-references skill that you keep under `~/.devflow/skills/` replaces the shipped one, so you do not get the new follow-up text of #690. Add it to your copy. Or run `devflow skills unshadow <name>`, which deletes your copy, and then run `devflow init`.
+
+**Stale-install window:**
+- Until you run `devflow init`, the installed quality rule, testing, review-methodology and agent-references skills lack the new text.
+
+### Behaviour change
 
 - **With compliance off, devflow installs no step or reference that posts to GitHub or a tracker** ([#648](https://github.com/dean0x/devflow/issues/648)).
   - With compliance off (the default for new installs and upgrades), devflow installs no step and no reference that posts test-plan evidence, review or resolution summaries, backlog entries, review-thread replies, wave reports, plan artifacts, or release back-links to GitHub or a tracker. Results stay in local files under `.devflow/docs/`.
@@ -65,9 +75,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **`devflow init` and the curation, compliance and rules toggles no longer delete files that devflow did not ship** ([#688](https://github.com/dean0x/devflow/issues/688)).
-  - A file that you keep in `commands/devflow/`, `agents/devflow/`, `rules/devflow/`, a `skills/devflow:*` folder or its `references/` folders is now moved to `~/.devflow/install-backups/<UTC stamp>-<8 hex>/`, and the output names it. Before, these commands deleted it. This holds for a full install, for a partial install (`--plugin`) and for the three toggles.
-  - A file that cannot move stays in place with its folder, and the output names it.
 - **A partial install no longer writes through a linked devflow folder** ([#648](https://github.com/dean0x/devflow/issues/648)).
   - If a folder that a partial install writes (commands, rules, agents, a skill folder or its references folder) is a link, the install now writes nothing there. It reports the folder, and you replace it with a real folder and run the install again.
 - **A full install no longer changes files outside its own folder when a skill folder is a link** ([#648](https://github.com/dean0x/devflow/issues/648)).
