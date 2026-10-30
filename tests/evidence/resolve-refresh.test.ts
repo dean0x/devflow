@@ -13,7 +13,8 @@
  *           Test agent re-verifies the stale TPs, which travel wrapped in
  *           `<untrusted-test-plan>` (they came from the PR body), and is never
  *           re-spawned on its result. Its rows become claims whose shape the claim
- *           grammar (CLAIM_LINE_RE) admits. A Test Status other than PASS or FAIL
+ *           grammar (CLAIM_LINE_RE) admits. The Test Status is read by its first word
+ *           (`PASS (…)` is PASS); a Status whose first word is not PASS or FAIL
  *           (BLOCKED) still gets its claims, records `Test plan: DEGRADED (Test run blocked)`
  *           and counts PASS rows only (#679).
  *   9b-3    D2-A: a separate, conditional refresh — never folded into 9b-2 — gated on
@@ -106,7 +107,7 @@ function collectStaleReverifyDefects(md: string): string[] {
   if (!step.includes('Use its `EVIDENCE` line only on `exit=0`')) out.push('a failed script run may still drive a spawn')
   if (!step.includes('Run it only when `TARGET_DIR_REL` matches `^[A-Za-z0-9._/-]+$`')) out.push('the branch-derived TARGET_DIR_REL reaches the shell unchecked')
   if (!step.includes(VERIFICATION_RECORD)) out.push('the re-verification is not recorded under ## Verification')
-  if (!step.includes('A Test Status other than PASS or FAIL still gets its claims, but `Test plan: DEGRADED (Test run blocked)` replaces that line.')) out.push('a blocked re-check does not record Test plan: DEGRADED (Test run blocked)')
+  if (!step.includes('A Test Status whose first word is not PASS or FAIL still gets its claims, but `Test plan: DEGRADED (Test run blocked)` replaces that line.')) out.push('a blocked or odd Status is not told apart by its first word, or does not record Test plan: DEGRADED (Test run blocked)')
   if (!step.includes('`{m}` counts PASS rows only.')) out.push('m does not count PASS rows only')
   return out
 }
@@ -228,8 +229,10 @@ describe('AC-15: /resolve re-verifies STALE TPs once and refreshes the evidence 
     expect(collectStaleReverifyDefects(md.replace(spawn, `${spawn}\n\n${spawn}`))).toContain('expected one Test spawn in 9b-0, found 2')
     expect(collectStaleReverifyDefects(md.replace('TEST_PLAN: <untrusted-test-plan>', 'TEST_PLAN: {stale lines}'))).toContain('the stale TPs travel unwrapped')
     expect(collectStaleReverifyDefects(md.replace('Run it only when `TARGET_DIR_REL` matches', 'Run it when `TARGET_DIR_REL` matches'))).toEqual(['the branch-derived TARGET_DIR_REL reaches the shell unchecked'])
-    expect(collectStaleReverifyDefects(md.replace('but `Test plan: DEGRADED (Test run blocked)` replaces that line.', 'but nothing replaces that line.')), 'a blocked re-check records nothing').toEqual(['a blocked re-check does not record Test plan: DEGRADED (Test run blocked)'])
-    expect(collectStaleReverifyDefects(md.replace('but `Test plan: DEGRADED (Test run blocked)` replaces', 'but `DEGRADED (Test run blocked)` replaces')), 'the Test plan label dropped').toEqual(['a blocked re-check does not record Test plan: DEGRADED (Test run blocked)'])
+    const statusFault = 'a blocked or odd Status is not told apart by its first word, or does not record Test plan: DEGRADED (Test run blocked)'
+    expect(collectStaleReverifyDefects(md.replace('but `Test plan: DEGRADED (Test run blocked)` replaces that line.', 'but nothing replaces that line.')), 'a blocked re-check records nothing').toEqual([statusFault])
+    expect(collectStaleReverifyDefects(md.replace('but `Test plan: DEGRADED (Test run blocked)` replaces', 'but `DEGRADED (Test run blocked)` replaces')), 'the Test plan label dropped').toEqual([statusFault])
+    expect(collectStaleReverifyDefects(md.replace('A Test Status whose first word is not PASS or FAIL', 'A Test Status other than PASS or FAIL')), 'a PASS with a skip note read as any other Status').toEqual([statusFault])
     expect(collectStaleReverifyDefects(md.replace(' `{m}` counts PASS rows only.', '')), 'm counts every row').toEqual(['m does not count PASS rows only'])
     const gitDetect = '```\nAgent(subagent_type="Git"):\n"OPERATION: update-pr-evidence\nPR_NUMBER: {pr_number}"\n```\n'
     expect(collectStaleReverifyDefects(md.replace(STEP1, `${gitDetect}\n${STEP1}`))).toContain('9b-0 spawns a Git agent; STALE detection is the script\'s')

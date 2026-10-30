@@ -13,7 +13,7 @@ output-dir: dist/commands
 @import "./_partials/_settings.mds" as settings
 # Implement Command
 
-Orchestrate a single task through implementation by spawning specialized agents.
+Orchestrate a single task by spawning agents.
 
 ## Usage
 
@@ -84,7 +84,7 @@ If `PR_DESCRIPTION_GUIDANCE` was not set above (non-plan paths: issue input or t
 
 **Empty input.** When `COMMAND_INPUT` is empty — a plan handoff arrives this way, with the plan already in the conversation — there is no argument to name the branch from, and the Git agent sees none of this conversation. Write the description yourself: one line, taken from the plan's title or, with no plan, from the conversation. Send it as the setup-task `TASK_DESCRIPTION` below.
 
-Spawn Git agent to set up the task:
+Spawn Git agent:
 
 ```
 Agent(subagent_type="Git"):
@@ -482,7 +482,7 @@ Design and execute scenario-based acceptance tests. Report your Status with evid
 
 After every Test agent run — whatever its Status, first run or retry — append its TP claims (Phase 6's **Evidence claims**).
 
-**If PASS:** Continue to Phase 8
+**If PASS** (first word of the Status): Continue to Phase 8
 
 **If FAIL:**
 1. Increment `qa_retry_count`

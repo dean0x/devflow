@@ -370,7 +370,7 @@ describe('AC-11: the Test and Validate agents report what a claim needs', () => 
   })
 })
 
-const TEST_STATUS_LINE = '### Status: PASS | FAIL | BLOCKED'
+const TEST_STATUS_LINE = '### Status: PASS | PASS ({n} BLOCKING scenario(s) skipped: {reasons}) | FAIL | BLOCKED'
 const BLOCKED_REPORT_HEADING = '**Report as BLOCKED:**'
 const BLOCKERS_HEADING = '### Blockers (if BLOCKED)'
 
@@ -440,6 +440,77 @@ describe('#679: the Test agent reports BLOCKED for a run whose command gave no r
     expect(collectTestReportDefects(seedOnce(test, 'PASS/FAIL/SKIP | S1, S3', 'PASS/FAIL/SKIP/BLOCKED | S1, S3'))).toEqual([
       'Outcome [PASS, FAIL, SKIP, BLOCKED] is not the claim grammar\'s [PASS, FAIL, SKIP]',
     ])
+  })
+})
+
+const REPORT_AS_PASS_HEADING = '**Report as PASS:**'
+const PASS_SKIP_EXAMPLE = '`### Status: PASS (1 BLOCKING scenario skipped: no browser tools)`'
+
+/**
+ * Named collector (T3): what test.md lacks to report a run whose BLOCKING scenario was skipped for its environment as
+ * PASS with the skips named. The word PASS stays first on the Status line; the skip never makes the run BLOCKED
+ * (`collectTestBlockedStatusDefects` holds that), and the rule covers a run in which another BLOCKING scenario ran and
+ * passed. The Status template offers the `PASS ({n} BLOCKING scenario(s) skipped: {reasons})` form.
+ */
+function collectSkipNoteDefects(test: string): string[] {
+  const boundaries = test.indexOf('\n## Boundaries\n')
+  const at = test.indexOf(`\n${REPORT_AS_PASS_HEADING}\n`)
+  if (boundaries === -1 || at < boundaries) return [`no "${REPORT_AS_PASS_HEADING}" block in Boundaries`]
+  const block = test.slice(at + 1).split('\n\n')[0]
+  const out: string[] = []
+  for (const part of ['skipped for its environment', 'while another BLOCKING scenario ran and passed', 'names every such skip', 'with PASS first', PASS_SKIP_EXAMPLE]) {
+    if (!block.includes(part)) out.push(`the PASS block lacks "${part}"`)
+  }
+  if (!test.includes(`\n${TEST_STATUS_LINE}\n`)) out.push('the Status template does not offer the PASS form that names skips')
+  return out
+}
+
+const PHASE_7_PASS_ARM = '**If PASS** (first word of the Status): Continue to Phase 8'
+
+/**
+ * Named collector (T3): the /implement Phase 7 PASS arm reads the Test Status by its first word, so `PASS (…)` is PASS and
+ * never falls to the arm for any other Status. It is the one PASS arm of Phase 7.
+ */
+function collectPassFirstWordDefects(md: string): string[] {
+  const section = phaseSection(md, H.p7)
+  if (section === null) return [`${H.p7}: the section is absent`]
+  const arms = section.split('\n\n').map(p => p.trim()).filter(p => p.startsWith('**If PASS'))
+  return arms.length === 1 && arms[0] === PHASE_7_PASS_ARM ? [] : [`Phase 7 does not hold exactly one PASS arm \`${PHASE_7_PASS_ARM}\``]
+}
+
+describe('T3: a run with a BLOCKING scenario skipped for its environment reports PASS with the skips named', () => {
+  it('test.md states the rule and offers the Status form, and Phase 7 reads the Status by its first word (both curation builds)', () => {
+    expect(collectSkipNoteDefects(resolveAgentSource('test').content)).toEqual([])
+    expect(collectPassFirstWordDefects(implementMd()), 'curation on').toEqual([])
+    expect(collectPassFirstWordDefects(implementMdOff()), 'curation off').toEqual([])
+  })
+
+  it('known-bad probes: each lost statement of the Test rule is reported by name', () => {
+    const test = resolveAgentSource('test').content
+    const bullet = test.split('\n').find(l => l.startsWith('- A BLOCKING scenario skipped for its environment, while another')) ?? ''
+    expect(bullet, 'the PASS bullet must be found').not.toBe('')
+    expect(collectSkipNoteDefects(seedOnce(test, `${bullet}\n`, ''))).toEqual([
+      'the PASS block lacks "skipped for its environment"',
+      'the PASS block lacks "while another BLOCKING scenario ran and passed"',
+      'the PASS block lacks "names every such skip"',
+      'the PASS block lacks "with PASS first"',
+      `the PASS block lacks "${PASS_SKIP_EXAMPLE}"`,
+    ])
+    expect(collectSkipNoteDefects(seedOnce(test, 'with PASS first', 'with the skips first'))).toEqual(['the PASS block lacks "with PASS first"'])
+    expect(collectSkipNoteDefects(seedOnce(test, 'while another BLOCKING scenario ran and passed', 'whatever else ran'))).toEqual(['the PASS block lacks "while another BLOCKING scenario ran and passed"'])
+    expect(collectSkipNoteDefects(seedOnce(test, TEST_STATUS_LINE, '### Status: PASS | FAIL | BLOCKED'))).toEqual(['the Status template does not offer the PASS form that names skips'])
+    expect(collectSkipNoteDefects(seedOnce(test, `\n${REPORT_AS_PASS_HEADING}\n`, '\n**Report as OK:**\n'))).toEqual([`no "${REPORT_AS_PASS_HEADING}" block in Boundaries`])
+    // The skip still never makes the run BLOCKED: the other collector reports a rule that says it does.
+    expect(collectTestBlockedStatusDefects(seedOnce(test, 'never makes the run BLOCKED', 'makes the run BLOCKED'))).toEqual(['the BLOCKED block does not exclude a scenario skipped for its environment'])
+  })
+
+  it('known-bad probes: a Phase 7 PASS arm that does not read the first word, a doubled arm and a lost phase are reported', () => {
+    const md = implementMd()
+    const fault = `Phase 7 does not hold exactly one PASS arm \`${PHASE_7_PASS_ARM}\``
+    expect(collectPassFirstWordDefects(seedOnce(md, PHASE_7_PASS_ARM, '**If PASS:** Continue to Phase 8'))).toEqual([fault])
+    expect(collectPassFirstWordDefects(seedOnce(md, PHASE_7_PASS_ARM, `${PHASE_7_PASS_ARM}\n\n${PHASE_7_PASS_ARM}`))).toEqual([fault])
+    expect(collectPassFirstWordDefects(seedOnce(md, PHASE_7_PASS_ARM, ''))).toEqual([fault])
+    expect(collectPassFirstWordDefects(seedOnce(md, H.p7, '### Phase 7 gone'))).toEqual([`${H.p7}: the section is absent`])
   })
 })
 

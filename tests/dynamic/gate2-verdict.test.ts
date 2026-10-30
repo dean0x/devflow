@@ -316,8 +316,13 @@ const REVIEW_OPEN = 'const reviewResult = await phase("review"'
 const TEST_SPAWN_CLOSE = '{ agentType: "Test" })'
 const TEST_PLAN_KEY = 'TEST_PLAN: ${'
 const TEST_PLAN_COVERAGE = 'cover every TEST_PLAN scenario'
-/** The Return line of the Gate 2 Test spawn: one verdict for each Status the Test agent can report. */
-const GATE2_TEST_RETURN = 'Return: {"verdict": "PASS" | "FAIL" | "BLOCKED", "failures": "..."}'
+/**
+ * The Return line of the Gate 2 Test spawn: one verdict for each Status the Test agent can report, and the bare word only.
+ * A PASS whose skips the Test agent names on its Status line returns the verdict `PASS`; the skip note has no field here.
+ */
+const GATE2_TEST_RETURN = 'Return: {"verdict": "PASS" | "FAIL" | "BLOCKED" (the bare word), "failures": "..."}'
+/** The Return line as it read before the bare-word instruction. */
+const GATE2_TEST_RETURN_NO_BARE_WORD = 'Return: {"verdict": "PASS" | "FAIL" | "BLOCKED", "failures": "..."}'
 /** Gate 2's early return: the code the skip guard governs. */
 const GATE2_SKIP_RETURN = 'return { evaluateVerdict: "SKIPPED", testVerdict: "SKIPPED"'
 
@@ -692,6 +697,7 @@ const NO_RESULT_REPLIES: ReadonlyArray<{ readonly label: string; readonly reply:
   { label: 'SKIPPED', reply: { verdict: 'SKIPPED' } },
   { label: 'UNVERIFIED', reply: { verdict: 'UNVERIFIED' } },
   { label: 'lowercase pass', reply: { verdict: 'pass' } },
+  { label: 'PASS with a skip note', reply: { verdict: 'PASS (1 BLOCKING scenario skipped: no browser tools)' } },
 ]
 
 /**
@@ -725,7 +731,7 @@ describe('a Test run that gives no result is BLOCKED and the run is UNVERIFIED, 
   const labels = NO_RESULT_REPLIES.map(r => r.label)
 
   it('every reply that gives no result is recorded BLOCKED, spawns no Fix agent and reports UNVERIFIED', async () => {
-    expect(labels).toEqual(['BLOCKED', 'null', 'no verdict', 'SKIPPED', 'UNVERIFIED', 'lowercase pass'])
+    expect(labels).toEqual(['BLOCKED', 'null', 'no verdict', 'SKIPPED', 'UNVERIFIED', 'lowercase pass', 'PASS with a skip note'])
     expect(await collectNoResultVerdictViolations(statement, block)).toEqual([])
   })
 
@@ -738,6 +744,7 @@ describe('a Test run that gives no result is BLOCKED and the run is UNVERIFIED, 
       'SKIPPED: the run reports PASS, expected UNVERIFIED',
       'UNVERIFIED: testVerdict is UNVERIFIED, expected BLOCKED',
       'lowercase pass: testVerdict is pass, expected BLOCKED',
+      'PASS with a skip note: testVerdict is PASS (1 BLOCKING scenario skipped: no browser tools), expected BLOCKED',
     ])
   })
 
@@ -760,6 +767,8 @@ describe('a Test run that gives no result is BLOCKED and the run is UNVERIFIED, 
       'UNVERIFIED: the run reports PASS, expected UNVERIFIED',
       'lowercase pass: testVerdict is pass, expected BLOCKED',
       'lowercase pass: the run reports PASS, expected UNVERIFIED',
+      'PASS with a skip note: testVerdict is PASS (1 BLOCKING scenario skipped: no browser tools), expected BLOCKED',
+      'PASS with a skip note: the run reports PASS, expected UNVERIFIED',
     ])
   })
 
@@ -777,6 +786,8 @@ describe('a Test run that gives no result is BLOCKED and the run is UNVERIFIED, 
       'UNVERIFIED: a Fix agent was spawned',
       'lowercase pass: testVerdict is FAIL-FIXED, expected BLOCKED',
       'lowercase pass: a Fix agent was spawned',
+      'PASS with a skip note: testVerdict is FAIL-FIXED, expected BLOCKED',
+      'PASS with a skip note: a Fix agent was spawned',
     ])
   })
 
@@ -827,7 +838,7 @@ export function collectTestStatusPromptDefects(built: string): string[] {
   const spawns = gate2 === null ? [] : testSpawnCalls(gate2)
   if (spawns.length !== 1) out.push(`gate 2 spawn: expected one Test spawn, found ${spawns.length}`)
   else {
-    if (!spawns[0].call.includes(GATE2_TEST_RETURN)) out.push('gate 2 spawn: no Return line naming BLOCKED')
+    if (!spawns[0].call.includes(GATE2_TEST_RETURN)) out.push('gate 2 spawn: no Return line naming BLOCKED and the bare verdict word')
     if (spawns[0].call.includes(OLD_STATUS_WORDING)) out.push(`gate 2 spawn: still says "${OLD_STATUS_WORDING}"`)
   }
   const wave = waveTestStep(built)
@@ -854,7 +865,13 @@ describe('the Test prompts and the Gate 2 doctrine speak of a Status, with a BLO
       'the Gate 2 Return line back to PASS or FAIL per scenario',
       `\n${GATE2_TEST_RETURN}`,
       ' Report: PASS or FAIL per scenario.',
-      ['gate 2 spawn: no Return line naming BLOCKED', 'gate 2 spawn: still says "PASS or FAIL"'],
+      ['gate 2 spawn: no Return line naming BLOCKED and the bare verdict word', 'gate 2 spawn: still says "PASS or FAIL"'],
+    ],
+    [
+      'the Gate 2 Return line without the bare-word instruction',
+      GATE2_TEST_RETURN,
+      GATE2_TEST_RETURN_NO_BARE_WORD,
+      ['gate 2 spawn: no Return line naming BLOCKED and the bare verdict word'],
     ],
     [
       'the wave fence back to PASS or FAIL',

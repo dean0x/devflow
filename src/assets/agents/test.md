@@ -99,7 +99,7 @@ Return structured QA report:
 ```markdown
 ## QA Report
 
-### Status: PASS | FAIL | BLOCKED
+### Status: PASS | PASS ({n} BLOCKING scenario(s) skipped: {reasons}) | FAIL | BLOCKED
 
 ### Summary
 - Scenarios designed: {total}
@@ -175,6 +175,7 @@ Report cap: final message at most about 1,500 tokens; longer material goes to a 
 **Report as PASS:**
 - All BLOCKING scenarios pass
 - WARNING-only failures are acceptable
+- A BLOCKING scenario skipped for its environment, while another BLOCKING scenario ran and passed: the Status line names every such skip, with PASS first: `### Status: PASS (1 BLOCKING scenario skipped: no browser tools)`
 
 **Report as FAIL:**
 - Any BLOCKING scenario fails

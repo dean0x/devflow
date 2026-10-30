@@ -234,7 +234,7 @@ After implementing, commit your changes with a conventional-commit message and r
 );
 
 // Phase 3: Gate 1 #1 — post-code pipeline: Polish agent → Harden agent → Validate agent.
-// Validate runs last and unconditionally, so its one full run covers every commit the pass made (see gate1_postcode()).
+// Validate runs last and unconditionally, so its one full run covers every commit the pass made.
 const gate1 = await phase("gate1", async () => {
   await agent(`Polish and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Polish" });
 
@@ -315,7 +315,7 @@ ${CRITERIA || "(none)"}
 TEST_PLAN: ${TEST_PLAN || "(none)"}
 Follow your Running commands block for every scenario command.
 Cover: functionality, API contracts, performance, and cover every TEST_PLAN scenario.
-Return: {"verdict": "PASS" | "FAIL" | "BLOCKED", "failures": "..."}`, { agentType: "Test" });
+Return: {"verdict": "PASS" | "FAIL" | "BLOCKED" (the bare word), "failures": "..."}`, { agentType: "Test" });
     testVerdict = ["PASS", "FAIL"].includes(testResult?.verdict) ? testResult.verdict : "BLOCKED";
     if (testVerdict === "FAIL") {
       // fix-and-continue — no re-test, no inline Gate 1.
