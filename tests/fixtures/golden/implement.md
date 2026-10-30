@@ -71,6 +71,7 @@ TASK_DESCRIPTION: {COMMAND_INPUT verbatim, when it is two or more whitespace-del
 ISSUE_REQUIRED: {ISSUE_REQUIRED}
 APPLY_CONVENTIONS: {APPLY_CONVENTIONS}
 PLAN_ARTIFACT_PATH: {path to plan document if COMMAND_INPUT ends in .md, otherwise (none)}
+Derive branch name from issue or description, create feature branch, and fetch issue if specified.
 Return the branch setup summary."
 ```
 
@@ -79,10 +80,10 @@ The issue token is forwarded **unclassified**: routing is by SHAPE alone. Only `
 - **Extension.** A path ending in `.md` is a plan document, never an issue reference: it goes to `PLAN_ARTIFACT_PATH` only, and `ISSUE_INPUT` carries the plan's frontmatter `issue`, never the path.
 - **Token count.** Forwarding the FIRST token alone sends `/implement fix the login bug` as `ISSUE_INPUT: fix` with no description, so the request is dropped.
 
-**Capture from Git agent output**, each value as written. Never re-derive one value from another, and never infer one from a `TRACEABILITY: DEGRADED ({reason})` status line: that line is a status, not issue content.
+**Capture from Git agent output**, each value as written. Never re-derive one issue value from another, and never infer one from a `TRACEABILITY: DEGRADED ({reason})` status line: that line is a status, not issue content.
 - `TASK_ID`: The branch name created by Git agent
 - `BASE_BRANCH`: Branch this feature was created from (for PR target); stop unless it passes the setup check
-- `ISSUE_NUMBER`: the `ISSUE_ID` that the Git agent emits, if any (the `- **Issue ID**:` line under `### Handoff Values`)
+- `ISSUE_ID`: the `- **Issue ID**:` line under `### Handoff Values`, if any. `ISSUE_NUMBER` is this value.
 - `ISSUE_PR_LINK`: the `- **PR link line**:` line under `### Handoff Values`
 - `ISSUE_CONTENT` and `ACCEPTANCE_CRITERIA`: the body between the `<untrusted-issue-body>` markers, and its acceptance criteria
 - `branch_slug`: `TASK_ID` with every `/` replaced by `-`. It names `handoff-{branch_slug}.md` and `evidence-{branch_slug}.md` only when it matches `^[A-Za-z0-9._-]{1,200}$`; any other branch name stops the run here, telling the user it cannot name those files.

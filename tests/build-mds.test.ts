@@ -51,6 +51,7 @@ import {
   COMPLIANCE_VARIANT_HOSTS,
   COMPLIANCE_ARMED_REFERENCES,
 } from './fixtures/mds-manifest.js';
+import { ISSUE_CAPTURE_CONTRACT, type IssueCaptureEntry } from './fixtures/issue-capture-contract.js';
 import {
   COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR,
   SKILL_REFS_OUTPUT_DIR,
@@ -2650,26 +2651,60 @@ describe('_tracker.mds adoption + per-define non-emptiness (P2-S9)', () => {
   const CONTRACT_ONLY_PHRASE = '**Which operation emits which value:**';
 
   /**
-   * What a note-only host's own capture list must say. These are the contract
-   * facts that host reads, kept in its text: the producer literals of the values
-   * it uses (the PR link line is the GAP-15 literal), the content markers, and
-   * the two never-re-derive rules.
+   * The three capture bullets of a note-only host, as phrases only that bullet
+   * carries. Each names the value, the producer literal and where the line sits.
+   * The producer literals come from the rows of the shared contract table that
+   * the seam test checks against the Git operation references
+   * (tests/fixtures/issue-capture-contract.ts), so a renamed literal reaches
+   * this guard and the seam test together. The content phrase holds the whole
+   * bullet lead, "the body between the" included: the bare marker also occurs in
+   * the note, so it would stay satisfied after the bullet is deleted. A row
+   * missing from the table yields a phrase no host carries, so the guard reports
+   * it instead of passing.
    */
-  const NOTE_ONLY_CAPTURE_PHRASES: readonly string[] = [
-    '- **Issue ID**:',
-    '- **PR link line**:',
-    '<untrusted-issue-body>',
-    'Never re-derive one value from another',
-    'never infer one from a `TRACEABILITY: DEGRADED ({reason})` status line',
-  ];
+  function captureBulletPhrases(
+    contract: readonly IssueCaptureEntry[],
+  ): { readonly issueId: string; readonly prLink: string; readonly content: string } {
+    const literal = (label: string): string =>
+      contract.find(entry => entry.label === label)?.producerPattern ?? `(no ${label} row in the contract table)`;
+    return {
+      issueId: `\`ISSUE_ID\`: the \`${literal('ISSUE_ID')}\` line under \`### Handoff Values\``,
+      prLink: `\`ISSUE_PR_LINK\`: the \`${literal('ISSUE_PR_LINK')}\` line under \`### Handoff Values\``,
+      content: `\`ISSUE_CONTENT\` and \`ACCEPTANCE_CRITERIA\`: the body between the \`${literal('ISSUE_CONTENT')}\``,
+    };
+  }
+
+  /**
+   * What a note-only host's own capture list must say. These are the contract
+   * facts that host reads, kept in its text: the three capture bullets with the
+   * producer literals of the values it uses (the PR link line is the GAP-15
+   * literal), and the two never-re-derive rules.
+   */
+  function noteOnlyCapturePhrases(contract: readonly IssueCaptureEntry[]): string[] {
+    const bullets = captureBulletPhrases(contract);
+    return [
+      bullets.issueId,
+      bullets.prLink,
+      bullets.content,
+      'Never re-derive one issue value from another',
+      'never infer one from a `TRACEABILITY: DEGRADED ({reason})` status line',
+    ];
+  }
+
+  const NOTE_ONLY_CAPTURE_PHRASES: readonly string[] = noteOnlyCapturePhrases(ISSUE_CAPTURE_CONTRACT);
 
   /**
    * Named collector: what one compiled adopting host lacks. Every adopter carries
    * the grammar and the note. A full-contract host carries the contract body (its
    * PR link literal and the emit-source table); a note-only host carries
-   * NOTE_ONLY_CAPTURE_PHRASES and not the table, so the roster stays true.
+   * its capture phrases (NOTE_ONLY_CAPTURE_PHRASES unless a probe passes others)
+   * and not the table, so the roster stays true.
    */
-  function collectTrackerAdoptionViolations(basename: string, content: string): string[] {
+  function collectTrackerAdoptionViolations(
+    basename: string,
+    content: string,
+    capturePhrases: readonly string[] = NOTE_ONLY_CAPTURE_PHRASES,
+  ): string[] {
     const out: string[] = [];
     const need = (phrase: string, what: string): void => {
       if (!content.includes(phrase)) out.push(`${basename}.md: ${what} missing — "${phrase}" not found`);
@@ -2680,7 +2715,7 @@ describe('_tracker.mds adoption + per-define non-emptiness (P2-S9)', () => {
       need(requiredPhrase, `${name}() body`);
     }
     if (noteOnly) {
-      for (const phrase of NOTE_ONLY_CAPTURE_PHRASES) need(phrase, 'capture list');
+      for (const phrase of capturePhrases) need(phrase, 'capture list');
       if (content.includes(CONTRACT_ONLY_PHRASE)) {
         out.push(`${basename}.md: listed as note-only but carries the full capture contract — list it with the full-contract hosts`);
       }
@@ -2716,7 +2751,7 @@ describe('_tracker.mds adoption + per-define non-emptiness (P2-S9)', () => {
     }
   });
 
-  it('known-bad probes: a host that calls no define, a lost PR link literal and a lost emit-source table are each reported', async () => {
+  it('known-bad probes: a host that calls no define, a lost PR link literal, a lost emit-source table, a deleted content bullet and a renamed producer literal are each reported', async () => {
     // A host that @imports the partial but never calls a define compiles fine and
     // lands here with every phrase missing.
     expect(collectTrackerAdoptionViolations('plan', '')).toHaveLength(TRACKER_DEFINES.length + 1);
@@ -2728,6 +2763,7 @@ describe('_tracker.mds adoption + per-define non-emptiness (P2-S9)', () => {
     const implement = await fs.readFile(path.join(BUILT_COMMANDS, 'implement.md'), 'utf-8');
     expect(collectTrackerAdoptionViolations('plan', plan), 'the real full-contract host is clean').toEqual([]);
     expect(collectTrackerAdoptionViolations('implement', implement), 'the real note-only host is clean').toEqual([]);
+    const bullets = captureBulletPhrases(ISSUE_CAPTURE_CONTRACT);
 
     const without = (text: string, phrase: string, instead: string): string => text.split(phrase).join(instead);
     expect(
@@ -2741,7 +2777,27 @@ describe('_tracker.mds adoption + per-define non-emptiness (P2-S9)', () => {
     expect(
       collectTrackerAdoptionViolations('implement', without(implement, '- **PR link line**:', '- (removed):')),
       'a note-only host that loses the PR link literal from its capture list must be reported',
-    ).toEqual(['implement.md: capture list missing — "- **PR link line**:" not found']);
+    ).toEqual([`implement.md: capture list missing — "${bullets.prLink}" not found`]);
+    const withoutBullet = implement
+      .split('\n')
+      .filter(line => !line.startsWith('- `ISSUE_CONTENT` and `ACCEPTANCE_CRITERIA`:'))
+      .join('\n');
+    expect(withoutBullet, 'the seed must delete the ISSUE_CONTENT and ACCEPTANCE_CRITERIA bullet').not.toBe(implement);
+    expect(
+      withoutBullet,
+      'the note still carries the marker, so the bullet phrase is the only thing that can tell',
+    ).toContain(ISSUE_CAPTURE_CONTRACT.find(entry => entry.label === 'ISSUE_CONTENT')!.producerPattern);
+    expect(
+      collectTrackerAdoptionViolations('implement', withoutBullet),
+      'a note-only host that loses the ISSUE_CONTENT and ACCEPTANCE_CRITERIA bullet must be reported',
+    ).toEqual([`implement.md: capture list missing — "${bullets.content}" not found`]);
+    const renamedRows = ISSUE_CAPTURE_CONTRACT.map(entry =>
+      entry.label === 'ISSUE_ID' ? { ...entry, producerPattern: '- **Ticket ID**:' } : entry,
+    );
+    expect(
+      collectTrackerAdoptionViolations('implement', implement, noteOnlyCapturePhrases(renamedRows)),
+      'a producer literal renamed in the shared contract table must reach the host guard, so the host and the seam test fail together',
+    ).toEqual([`implement.md: capture list missing — "${captureBulletPhrases(renamedRows).issueId}" not found`]);
     expect(
       collectTrackerAdoptionViolations('implement', without(implement, 'shape-checked again by whoever pastes them', 'x')),
       'a note-only host that loses the note must be reported',
