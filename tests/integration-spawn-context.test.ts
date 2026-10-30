@@ -13,7 +13,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { spawnSync } from 'child_process';
 import { randomUUID } from 'crypto';
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { ROOT, requireBuiltCli, sandboxEnv } from './helpers.js';
@@ -240,10 +240,11 @@ describe('disposeSpawnContext', () => {
   // would then remove nothing real: `rmSync` with `force` does nothing for an absent path.
   const absent = (parent: string): string => path.join(parent, `devflow-dispose-probe-${randomUUID()}`);
 
-  // A link the symlink row makes. The guard refuses it, so nothing removes it: the test does.
+  // A link the symlink row makes. The guard refuses it, so nothing removes it: the test does,
+  // with unlinkSync: node 24 rmSync refuses a link to a directory.
   const links: string[] = [];
   afterEach(() => {
-    for (const link of links.splice(0)) rmSync(link, { force: true });
+    for (const link of links.splice(0)) if (lstatSync(link, { throwIfNoEntry: false })) unlinkSync(link);
   });
 
   /**

@@ -34,7 +34,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { spawnSync } from 'child_process'
 import { createHash } from 'crypto'
-import { existsSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync } from 'fs'
+import { existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, unlinkSync } from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 import { initCommand } from '../src/cli/commands/init.js'
@@ -112,7 +112,8 @@ describe('snapshot normaliser (TP-3)', () => {
       const text = `${link}/a ${resolved}/b logs/${pathSlug(resolved)}-repo logs/${pathSlug(link)}-wt`
       expect(normaliseText(text, n)).toBe('<SANDBOX>/a <SANDBOX>/b logs/<SANDBOX>-repo logs/<SANDBOX>-wt')
     } finally {
-      rmSync(link, { force: true })
+      // unlinkSync, not rmSync: node 24 rmSync refuses a link to a directory.
+      if (lstatSync(link, { throwIfNoEntry: false })) unlinkSync(link)
       rmSync(real, { recursive: true, force: true })
     }
   })

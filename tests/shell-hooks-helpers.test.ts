@@ -804,7 +804,7 @@ describe('memory-permission: the one-time notice', () => {
     run('memory_notice_write "$MEM" "$ROOT" path');
     expect(fs.readdirSync(elsewhere), 'nothing written through the linked folder').toEqual([]);
 
-    fs.rmSync(memory);
+    fs.unlinkSync(memory); // node 24 rmSync refuses a link to a directory
     fs.renameSync(real, memory);
     const target = path.join(root, 'victim.txt');
     fs.writeFileSync(target, 'keep');
