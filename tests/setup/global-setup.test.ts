@@ -20,6 +20,7 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
+  renameSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -39,6 +40,7 @@ import {
   resolveRealGit,
   startRun,
   sweepDeadRuns,
+  tmpRootRefusal,
   withRecordedHome,
   type GitRouteDeps,
   type RunOptions,
@@ -52,7 +54,6 @@ import {
   RUN_OWNER_FILE,
   RUN_ROOT_PREFIX,
   RUN_TMP_KEY,
-  SAFE_PATH,
   assertRunRoot,
   canonical,
   checkGitBinDir,
@@ -69,23 +70,45 @@ const REAL_GIT = '/fake/xcode/usr/bin/git';
 
 /**
  * The arms that run `startRun`, the sweep, the teardown or the run root check over a fixture
- * root need a temp root that the setup itself accepts. A worker `os.tmpdir()` that holds
- * characters outside SAFE_PATH, or lies inside a real home, is refused by the setup, so those
- * arms skip with the one reason below. Every other arm runs on any temp root.
+ * root need a temp root that the setup itself accepts. A worker `os.tmpdir()` that
+ * `tmpRootRefusal` gives a reason for (not absolute, characters outside SAFE_PATH, or a
+ * filesystem root or a place inside a real home) is refused by the setup, so those arms skip
+ * with that one reason. Every other arm runs on any temp root.
  */
 const FIXTURE_TMP = os.tmpdir();
-const FIXTURE_TMP_REFUSAL = !SAFE_PATH.test(FIXTURE_TMP)
-  ? 'holds characters outside the safe set'
-  : refusesTmpRoot(FIXTURE_TMP)
-    ? 'is the filesystem root or inside a real home'
-    : undefined;
+const FIXTURE_TMP_REFUSAL = tmpRootRefusal(FIXTURE_TMP);
 const itAcceptedTmp: typeof it = FIXTURE_TMP_REFUSAL === undefined ? it : it.skip;
 if (FIXTURE_TMP_REFUSAL !== undefined) {
   it.skip(`skips the fixture arms that need a temp root the setup accepts: os.tmpdir() ${FIXTURE_TMP_REFUSAL}`, () => {});
 }
 
+type DirEntries = ReadonlyMap<string, number>;
+
+/**
+ * The collector of the working folder guard: the name and the inode of each entry of `dir`,
+ * read with `lstat` so a link counts as itself. Times are not read, because `.git` and
+ * `node_modules` change theirs while the suite runs. An entry that goes away between the
+ * listing and the `lstat` is left out.
+ */
+function cwdEntries(dir: string): DirEntries {
+  const entries = new Map<string, number>();
+  for (const name of readdirSync(dir)) {
+    try {
+      entries.set(name, lstatSync(path.join(dir, name)).ino);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    }
+  }
+  return entries;
+}
+
+/** The names in `after` that are new, or that were removed and made again (a new inode), sorted. */
+function cwdResidue(before: DirEntries, after: DirEntries): string[] {
+  return [...after].filter(([name, ino]) => before.get(name) !== ino).map(([name]) => name).sort();
+}
+
 // The worker cwd (the repo root) before any arm runs; the last arm proves no arm added to it.
-const CWD_ENTRIES_BEFORE = new Set(readdirSync(process.cwd()));
+const CWD_ENTRIES_BEFORE = cwdEntries(process.cwd());
 
 const created: string[] = [];
 function fixtureDir(prefix = 'df-gs-'): string {
@@ -410,10 +433,7 @@ const MAIN_PATH = (process.env.PATH ?? '')
   .join(path.delimiter);
 /** The first checks of `startRunRoot`, over the main process's inputs. */
 const SETUP_WANTS_RUN_ROOT =
-  Boolean(process.env.TMPDIR) &&
-  process.getuid !== undefined &&
-  SAFE_PATH.test(MAIN_TMP) &&
-  !refusesTmpRoot(MAIN_TMP);
+  Boolean(process.env.TMPDIR) && process.getuid !== undefined && tmpRootRefusal(MAIN_TMP) === undefined;
 /** The checks of `resolveRealGit` that start no process, over the main process's PATH. */
 const SETUP_WANTS_GIT_BIN =
   SETUP_WANTS_RUN_ROOT &&
@@ -536,7 +556,43 @@ describe('TP-24: the run root and temp root checks', () => {
   });
 });
 
-describe('TP-9: teardown removes the run root with its read-only git folder', () => {
+describe('the temp root refusal: one function for the setup and for the skip conditions', () => {
+  const home = '/df-gs-home';
+  const REFUSED_BY_HOME = 'is the filesystem root or inside a real home';
+  /** A refused temp root, its reason, and the env that makes it refused. None of these folders exists. */
+  const REFUSED: Array<[string, string, string, NodeJS.ProcessEnv]> = [
+    ['a relative path', 'df-gs-no-such-folder/tmp', 'is not an absolute path', {}],
+    ['characters outside the safe set', '/df-gs-no-such-folder/a b', 'holds characters outside the safe set', {}],
+    ['the filesystem root', '/', REFUSED_BY_HOME, {}],
+    ['a real home', home, REFUSED_BY_HOME, { [ORIGINAL_HOME_VAR]: home }],
+    ['a folder inside a real home', `${home}/tmp`, REFUSED_BY_HOME, { [ORIGINAL_HOME_VAR]: home }],
+  ];
+
+  it.each(REFUSED)('known-bad probe: %s gets its reason, and startRun makes nothing in it', (_name, tmpRoot, reason, homeEnv) => {
+    expect(tmpRootRefusal(tmpRoot, homeEnv)).toBe(reason);
+    const fake = fakeGit();
+    const { project, provided } = recorder();
+
+    const teardown = startRun(project, runOptions(tmpRoot, fake, { env: { TMPDIR: tmpRoot, ...homeEnv } }));
+
+    expect(provided.size).toBe(0);
+    expect(fake.calls).toEqual([]);
+    expect(() => teardown()).not.toThrow();
+  });
+
+  itAcceptedTmp('accept arm: an ordinary temp folder gets no reason, and startRun makes a run root in it', () => {
+    const tmp = fixtureDir();
+    expect(tmpRootRefusal(tmp, {})).toBeUndefined();
+    const { project, provided } = recorder();
+
+    const teardown = startRun(project, runOptions(tmp, fakeGit(), { platform: 'linux' }));
+
+    expect(provided.has(RUN_TMP_KEY)).toBe(true);
+    teardown();
+  });
+});
+
+describe('TP-9:teardown removes the run root with its read-only git folder', () => {
   itAcceptedTmp('removes the root, and the git folder was read-only before', () => {
     const tmp = fixtureDir();
     const { root, bin } = makeRootWithBin(tmp);
@@ -1116,9 +1172,35 @@ describe('the working folder gets no entry from a path that was never provided',
     expect(() => providedPath(provided, RUN_TMP_KEY)).toThrow('was not provided as an absolute path');
   });
 
+  it('the snapshot of the repo root is not empty and holds an inode for each name', () => {
+    expect(CWD_ENTRIES_BEFORE.size).toBeGreaterThan(0);
+    expect([...CWD_ENTRIES_BEFORE.values()].every(ino => Number.isInteger(ino) && ino > 0)).toBe(true);
+  });
+
+  it('known-bad probe: cwdResidue reports a new name and a name made again under a new inode, not an unchanged or removed one', () => {
+    const before: DirEntries = new Map([['kept', 1], ['again', 2], ['gone', 3]]);
+    const after: DirEntries = new Map([['kept', 1], ['again', 9], ['fresh', 4]]);
+    expect(cwdResidue(before, after)).toEqual(['again', 'fresh']);
+    expect(cwdResidue(before, before)).toEqual([]);
+  });
+
+  it('known-bad probe: a link removed and made again under the same name shows in the residue of a real folder', () => {
+    const dir = fixtureDir();
+    writeFileSync(path.join(dir, 'kept'), 'x');
+    symlinkSync(path.join(dir, 'kept'), path.join(dir, 'undefined'));
+    const before = cwdEntries(dir);
+    expect(cwdResidue(before, cwdEntries(dir))).toEqual([]);
+
+    // The new link exists while the old one does, so the two inodes differ.
+    symlinkSync(path.join(dir, 'kept'), path.join(dir, 'undefined.next'));
+    renameSync(path.join(dir, 'undefined.next'), path.join(dir, 'undefined'));
+
+    expect([...cwdEntries(dir).keys()].sort()).toEqual([...before.keys()].sort());
+    expect(cwdResidue(before, cwdEntries(dir))).toEqual(['undefined']);
+  });
+
   // Last arm of the file: it runs after every other arm.
   it('has no new entry in the repo root after every arm of this file ran', () => {
-    const added = readdirSync(process.cwd()).filter(name => !CWD_ENTRIES_BEFORE.has(name));
-    expect(added).toEqual([]);
+    expect(cwdResidue(CWD_ENTRIES_BEFORE, cwdEntries(process.cwd()))).toEqual([]);
   });
 });

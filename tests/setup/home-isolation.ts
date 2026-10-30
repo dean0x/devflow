@@ -43,6 +43,11 @@ export function canonical(p: string): string {
   return existsSync(resolved) ? realpathSync(resolved) : resolved;
 }
 
+/** True when `target` is `folder` or lies below it. Both are compared as written. */
+export function isUnder(target: string, folder: string): boolean {
+  return target === folder || target.startsWith(folder + path.sep);
+}
+
 /**
  * The account's real home directories: the passwd entry (independent of `$HOME`,
  * which the setup file overrides) and the HOME recorded before the redirect.
@@ -213,7 +218,8 @@ export function checkRunTmp(
  * check throws on its own, with its own message: a non-empty safe absolute path that is a
  * direct child of the run root, named with `GIT_BIN_PREFIX`; a real directory owned by
  * `opts.uid` with no write bits; holding exactly one entry, `git`, a link whose target is
- * an absolute safe path.
+ * an absolute safe path outside the run root, compared as written and as resolved (on macOS
+ * `/var` is `/private/var`), as the global setup requires of the git it finds.
  */
 export function checkGitBinDir(
   value: unknown,
@@ -261,6 +267,9 @@ export function checkGitBinDir(
   const target = readlinkSync(link);
   if (!path.isAbsolute(target) || !SAFE_PATH.test(target)) {
     throw new Error(`refusing git folder ${value} — its link target is not an absolute path of safe characters`);
+  }
+  if (isUnder(target, runRoot) || isUnder(canonical(target), canonical(runRoot))) {
+    throw new Error(`refusing git folder ${value} — its link target is inside the run root`);
   }
   return value;
 }

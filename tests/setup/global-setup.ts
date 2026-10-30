@@ -57,6 +57,7 @@ import {
   canonical,
   checkGitBinDir,
   contextRefusesTmp,
+  isUnder,
   tmpContext,
   type TmpContext,
 } from './home-isolation.js';
@@ -118,10 +119,6 @@ export interface GitRouteDeps {
   realpath(p: string): string | undefined;
   /** Starts one process; `undefined` when it cannot start. */
   run(file: string, args: readonly string[]): RunResult | undefined;
-}
-
-function isUnder(target: string, folder: string): boolean {
-  return target === folder || target.startsWith(folder + path.sep);
 }
 
 /**
@@ -187,8 +184,9 @@ export function isOwnerAlive(pid: number): boolean {
 /**
  * Give every directory of our own tree owner read, write and search rights, so a folder a
  * stopped worker left without them cannot block the removal. The walk uses `lstat` and
- * follows no link; it visits at most `limit` entries. Returns one line per entry it could
- * not fix.
+ * follows no link; it visits at most `limit` entries. After the change it looks at the entry
+ * once more: an entry that is no longer the same directory (device and inode) is not listed
+ * and not entered. Returns one line per entry it could not fix.
  */
 export function chmodOwnDirs(root: string, uid: number | undefined, limit: number = WALK_LIMIT): string[] {
   const failures: string[] = [];
@@ -209,6 +207,17 @@ export function chmodOwnDirs(root: string, uid: number | undefined, limit: numbe
       chmodSync(current, 0o700);
     } catch (err) {
       failures.push(`cannot make ${current} writable: ${describeError(err)}`);
+    }
+    let after;
+    try {
+      after = lstatSync(current);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') failures.push(`cannot inspect ${current}: ${describeError(err)}`);
+      continue;
+    }
+    if (!after.isDirectory() || after.dev !== st.dev || after.ino !== st.ino) {
+      failures.push(`${current} changed while it was made writable, so it is not listed`);
+      continue;
     }
     try {
       for (const name of readdirSync(current)) pending.push(path.join(current, name));
@@ -344,6 +353,19 @@ export interface RunOptions extends Omit<GitRouteDeps, 'run'> {
 type Provider = Pick<TestProject, 'provide'>;
 
 /**
+ * Why the setup refuses `tmpRoot` as the base of a run root, or `undefined` when it accepts
+ * it. The reason reads after "the temp root". The checks run in order: an absolute path, only
+ * `SAFE_PATH` characters, and neither the filesystem root nor a place inside a real home of
+ * `env`. `startRunRoot` and the skip conditions of the setup tests both ask this function.
+ */
+export function tmpRootRefusal(tmpRoot: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
+  if (!path.isAbsolute(tmpRoot)) return 'is not an absolute path';
+  if (!SAFE_PATH.test(tmpRoot)) return 'holds characters outside the safe set';
+  if (contextRefusesTmp(tmpContext(tmpRoot, env))) return 'is the filesystem root or inside a real home';
+  return undefined;
+}
+
+/**
  * The run root: swept of dead runs, made, marked with the owner pid and provided as the
  * workers' TMPDIR. Only made when the main process has a TMPDIR to replace, so the setup
  * changes a value and never adds a variable. Returns the root, or `undefined` when nothing
@@ -353,9 +375,8 @@ type Provider = Pick<TestProject, 'provide'>;
 function startRunRoot(project: Provider, opts: RunOptions): string | undefined {
   if (opts.env.TMPDIR === undefined || opts.env.TMPDIR === '') return undefined;
   if (opts.uid === undefined) return undefined;
-  if (!path.isAbsolute(opts.tmpRoot) || !SAFE_PATH.test(opts.tmpRoot)) return undefined;
+  if (tmpRootRefusal(opts.tmpRoot, opts.env) !== undefined) return undefined;
   const ctx = tmpContext(opts.tmpRoot, opts.env);
-  if (contextRefusesTmp(ctx)) return undefined;
 
   sweepDeadRuns({
     tmpRoot: opts.tmpRoot,

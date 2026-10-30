@@ -43,7 +43,6 @@ import {
   isolatedEnv,
   pathWithGitBin,
   realHomes,
-  refusesTmpRoot,
 } from './home-isolation.js';
 
 const CLI = requireBuiltCli();
@@ -55,16 +54,18 @@ const INIT_ARGS = ['init', '--recommended', '--security', 'user'] as const;
 
 /**
  * The arms that build a git folder in a fixture run root need a temp root that the git folder
- * check accepts. A worker `os.tmpdir()` that holds characters outside SAFE_PATH, or lies inside
- * a real home, is refused by that check, so those arms skip with the one reason below. The arms
- * whose refusal comes before any run root test run on every temp root.
+ * check accepts. That check's first rule is an absolute path of SAFE_PATH characters; it has no
+ * rule about real homes, so a temp root inside a home skips nothing. A worker `os.tmpdir()` that
+ * breaks the first rule is refused by the check, so those arms skip with the one reason below.
+ * The arms whose refusal comes before any run root test run on every temp root.
  */
 const FIXTURE_TMP = os.tmpdir();
-const FIXTURE_TMP_REFUSAL = !SAFE_PATH.test(FIXTURE_TMP)
-  ? 'holds characters outside the safe set'
-  : refusesTmpRoot(FIXTURE_TMP)
-    ? 'is the filesystem root or inside a real home'
-    : undefined;
+function gitBinFixtureRefusal(tmpRoot: string): string | undefined {
+  if (!path.isAbsolute(tmpRoot)) return 'is not an absolute path';
+  if (!SAFE_PATH.test(tmpRoot)) return 'holds characters outside the safe set';
+  return undefined;
+}
+const FIXTURE_TMP_REFUSAL = gitBinFixtureRefusal(FIXTURE_TMP);
 const itAcceptedTmp: typeof it = FIXTURE_TMP_REFUSAL === undefined ? it : it.skip;
 if (FIXTURE_TMP_REFUSAL !== undefined) {
   it.skip(`skips the git folder arms that need a temp root the check accepts: os.tmpdir() ${FIXTURE_TMP_REFUSAL}`, () => {});
@@ -423,6 +424,21 @@ const GIT_BIN_PROBES: GitBinProbe[] = [
     name: 'a link target with unsafe characters',
     message: /link target is not an absolute path of safe characters/,
     build: r => ({ value: makeGitBin(r, { target: '/opt/a b/git' }), runRoot: r, uid: OWN_UID }),
+  },
+  {
+    name: 'a link target inside the run root',
+    message: /link target is inside the run root/,
+    build: r => ({ value: makeGitBin(r, { target: path.join(r, 'tool') }), runRoot: r, uid: OWN_UID }),
+  },
+  {
+    name: 'a link target that reaches the run root through another link',
+    message: /link target is inside the run root/,
+    build: r => {
+      const alias = path.join(tempDir('df-gitbin-alias-'), 'alias');
+      symlinkSync(r, alias);
+      writeFileSync(path.join(r, 'tool'), '');
+      return { value: makeGitBin(r, { target: path.join(alias, 'tool') }), runRoot: r, uid: OWN_UID };
+    },
   },
 ];
 
