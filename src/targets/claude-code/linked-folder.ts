@@ -200,6 +200,11 @@ export function warnLinkReport(report: LinkReport, warn: (message: string) => vo
 /** The mode of a file that replaces a link. The atomic writer would copy the mode of the link's target instead. */
 const REPLACED_LINK_FILE_MODE = 0o644;
 
+/** The temp file beside `file` that {@link writeFileReplacingLink} writes through: `<file>.tmp.<pid>`. */
+export function linkReplacementTempPath(file: string): string {
+  return `${file}.tmp.${process.pid}`;
+}
+
 /**
  * Write `content` at `file` through a temp file beside it and one rename. A rename puts the new file
  * in the place of whatever stands at `file`, so a link there is replaced and never followed; the link
@@ -214,7 +219,7 @@ export async function writeFileReplacingLink(file: string, content: string, link
     await writeFileAtomicExclusive(file, content);
     return;
   }
-  const temp = `${file}.tmp.${process.pid}`;
+  const temp = linkReplacementTempPath(file);
   try {
     // A stale temp file is removed first; the exclusive open then refuses anything placed there since.
     await fs.rm(temp, { force: true });

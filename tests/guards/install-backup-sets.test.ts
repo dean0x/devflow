@@ -7,30 +7,78 @@
  *    it or is shipped today, and every released name that the registries no longer ship is in it.
  * 2. `retiredPathSet()` maps the lists to Claude-dir relative paths: files only, and a skill
  *    folder of `skills` stays out because the install moves it whole.
+ * 3. The shipped set: it is built from the full registries and all four variants, it holds the
+ *    files the install writes (pinned against the compliance converge and the install-snapshot
+ *    goldens), and a valid skill shadow adds its files.
+ * 4. The two sets: they are disjoint, a name in both classifies as shipped, every released name
+ *    is in one of them, and every name the build ships is in the released-name fixture.
+ * 5. Workflow folders: the set holds every file of a registered folder under all four variant
+ *    keys, and the old command file of a folder workflow.
+ * 6. Sidecars: the name each producer of a temp or displaced folder or file makes classifies as a
+ *    sidecar.
  *
  * What a green run does NOT prove
  * -------------------------------
  * The released-name fixture is the audit result at version 3.9.0. A name that a later release
- * shipped is covered only when its PR adds it to `tests/fixtures/released-shipped-names.ts`.
+ * shipped is covered only when its PR adds it to `tests/fixtures/released-shipped-names.ts`. The
+ * install-snapshot goldens cover the three scenarios they record (GitHub, Jira with HIPAA, all
+ * switches off); an install that writes a file in another shape is not seen.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { readFileSync, promises as fs } from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 import { LEGACY_AGENT_KEYS } from '../../src/core/agent-models.js';
-import { RETIRED_SHIPPED, retiredPathSet } from '../../src/core/retired-shipped-names.js';
+import { complianceSkillFiles } from '../../src/core/compliance.js';
+import { COMPLIANCE_OFF_REMOVED_SKILL_FILES } from '../../src/core/compliance-off-files.js';
+import { VARIANT_KEYS } from '../../src/core/curation-variants.js';
+import {
+  SKILL_REFS_SKILL_NAME,
+  WORKFLOW_FOLDERS,
+  installedReferenceManifest,
+  workflowFolderFiles,
+  type WorkflowFolder,
+} from '../../src/core/mds-variants.js';
+import { atomicTempPath } from '../../src/core/fs-atomic.js';
+import { createPathSet, type RetiredSet, type ShippedSet } from '../../src/core/path-set.js';
 import {
   FEATURE_OWNED_RULES,
   FEATURE_OWNED_SKILLS,
   LEGACY_COMMAND_NAMES,
   LEGACY_RULE_NAMES,
+  DEVFLOW_PLUGINS,
   getAllAgentNames,
   getAllCommandNames,
   getAllRuleNames,
   getAllSkillNames,
   prefixSkillName,
+  workflowFolderNames,
 } from '../../src/core/plugins.js';
+import { RETIRED_SHIPPED, retiredPathSet } from '../../src/core/retired-shipped-names.js';
+import { convergeComplianceArtifacts, complianceSkillTempPath } from '../../src/targets/claude-code/compliance-install.js';
+import { copyTempPath } from '../../src/targets/claude-code/compliance-off-files.js';
+import { curationSwapPaths } from '../../src/targets/claude-code/curation-install.js';
+import { classify, type EntryKind } from '../../src/targets/claude-code/install-backup.js';
+import {
+  backupDirFor,
+  overlayOwnedSkillPaths,
+  planOverlayUnits,
+  stagingDirFor,
+} from '../../src/targets/claude-code/installer.js';
 import { LEGACY_SKILL_NAMES } from '../../src/targets/claude-code/legacy.js';
+import { linkReplacementTempPath } from '../../src/targets/claude-code/linked-folder.js';
+import { buildShippedSet, loadShippedSet, type ShippedSetInputs } from '../../src/targets/claude-code/shipped-set.js';
+import { backupOf, stagingPrefixOf } from '../../src/targets/claude-code/workflow-folder-install.js';
+import { FIXTURE_FOLDER } from '../fixtures/workflow-folder.js';
 import { RELEASED_SHIPPED_NAMES } from '../fixtures/released-shipped-names.js';
+import { ROOT } from '../helpers.js';
+import { assertTempHome, TEMP_HOME_PREFIX } from '../setup/home-isolation.js';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 /** The names the registries ship today, by kind. Commands, agents and rules have no `.md`. */
 function shippedToday(): {
@@ -55,10 +103,59 @@ function unlisted(kind: string, names: Iterable<string>, retired: readonly strin
     .map(name => `${kind} "${name}" is in a legacy list but is neither in RETIRED_SHIPPED nor shipped today: add it to src/core/retired-shipped-names.ts`);
 }
 
+/** The paths that both sets name: a retired file the build ships, or a retired skill folder it ships. */
+function sharedNames(shipped: ShippedSet, retired: RetiredSet, retiredSkills: readonly string[]): string[] {
+  const shared = [...retired.files].filter(file => shipped.files.has(file));
+  for (const folder of retiredSkills) {
+    if (shipped.holds(`skills/${folder}`)) shared.push(`skills/${folder}`);
+  }
+  return shared.sort();
+}
+
+const shippedAgain = (name: string): string =>
+  `${name} is shipped again: remove it from RETIRED_SHIPPED and the legacy list in the PR that ships it`;
+
+/** The files of a registered folder that the shipped set lacks, over all four variant keys. */
+function missingFolderFiles(shipped: ShippedSet, folders: readonly WorkflowFolder[]): string[] {
+  const missing: string[] = [];
+  for (const folder of folders) {
+    for (const key of VARIANT_KEYS) {
+      for (const file of workflowFolderFiles(folder, key)) {
+        const rel = `skills/devflow:${folder.name}/${file}`;
+        if (!shipped.files.has(rel)) missing.push(`${rel} (key ${key})`);
+      }
+    }
+  }
+  return missing;
+}
+
 const isFrozenDeep = (value: unknown): boolean => {
   if (typeof value !== 'object' || value === null) return true;
   return Object.isFrozen(value) && Object.values(value).every(isFrozenDeep);
 };
+
+/** A fresh temp home, asserted and logged before any use. */
+async function makeHome(label: string): Promise<string> {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), TEMP_HOME_PREFIX));
+  assertTempHome(home);
+  console.log(`${label} test home: ${await fs.realpath(home)}`);
+  return home;
+}
+
+/** Every file below `dir` as sorted POSIX paths. */
+async function listFilesBelow(dir: string): Promise<string[]> {
+  const found = await fs.readdir(dir, { recursive: true, withFileTypes: true });
+  return found
+    .filter(entry => entry.isFile())
+    .map(entry => path.relative(dir, path.join(entry.parentPath, entry.name)).split(path.sep).join('/'))
+    .sort();
+}
+
+const toPosix = (p: string): string => p.split(path.sep).join('/');
+
+// ---------------------------------------------------------------------------
+// Retired names
+// ---------------------------------------------------------------------------
 
 describe('RETIRED_SHIPPED', () => {
   it('is frozen all the way down', () => {
@@ -149,5 +246,430 @@ describe('retiredPathSet', () => {
       RETIRED_SHIPPED.rules.length +
       listedSkillFiles;
     expect(retired.files.size).toBe(expected);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The compliance skill folder
+// ---------------------------------------------------------------------------
+
+describe('complianceSkillFiles', () => {
+  let home: string;
+
+  beforeEach(async () => {
+    home = await makeHome('install-backup-sets compliance');
+  });
+
+  afterEach(async () => {
+    await fs.rm(home, { recursive: true, force: true });
+  });
+
+  it.each([true, false])('equals the files the compliance converge installs (compliance %s)', async enabled => {
+    const warnings: string[] = [];
+    const claudeDir = path.join(home, '.claude');
+    const result = await convergeComplianceArtifacts({
+      claudeDir,
+      devflowDir: path.join(home, '.devflow'),
+      enabled,
+      frameworks: ['gdpr'],
+      rulesEnabled: false,
+      warn: message => warnings.push(message),
+    });
+
+    expect(warnings).toEqual([]);
+    expect(result.converged).toBe(true);
+    const installed = await listFilesBelow(path.join(claudeDir, 'skills', 'devflow:compliance'));
+    expect(installed).toEqual([...complianceSkillFiles()].sort());
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The shipped set
+// ---------------------------------------------------------------------------
+
+describe('shipped set', () => {
+  let home: string;
+  let devflowDir: string;
+
+  beforeEach(async () => {
+    home = await makeHome('install-backup-sets shipped');
+    devflowDir = path.join(home, '.devflow');
+  });
+
+  afterEach(async () => {
+    await fs.rm(home, { recursive: true, force: true });
+  });
+
+  async function load(extra: { shadowListings?: ReadonlyMap<string, readonly string[]> } = {}): Promise<ShippedSet> {
+    const loaded = await loadShippedSet({ devflowDir, packageRoot: ROOT, workflowFolders: WORKFLOW_FOLDERS, ...extra });
+    if (!loaded.ok) throw new Error(`the shipped set did not load: ${loaded.reason}`);
+    return loaded.shipped;
+  }
+
+  it('holds every command, agent and rule of every plugin, the feature-owned rules and the tracker agent', async () => {
+    const shipped = await load();
+    const commands = DEVFLOW_PLUGINS.flatMap(plugin => plugin.commands.map(cmd => (cmd.startsWith('/') ? cmd.slice(1) : cmd)));
+    const missing = [
+      ...commands.map(name => `commands/devflow/${name}.md`),
+      ...getAllAgentNames().map(name => `agents/devflow/${name}.md`),
+      ...getAllRuleNames().map(name => `rules/devflow/${name}.md`),
+      ...FEATURE_OWNED_RULES.map(name => `rules/devflow/${name}.md`),
+      'agents/devflow/tracker.md',
+    ].filter(file => !shipped.files.has(file));
+    expect(missing).toEqual([]);
+  });
+
+  it('holds the files of every registry skill in the package, curation-gated skills included', async () => {
+    const shipped = await load();
+    const missing: string[] = [];
+    for (const skill of getAllSkillNames(new Set())) {
+      const dir = path.join(ROOT, 'src', 'assets', 'skills', skill);
+      for (const file of await listFilesBelow(dir)) {
+        if (!shipped.files.has(`skills/devflow:${skill}/${file}`)) missing.push(`${skill}/${file}`);
+      }
+    }
+    expect(missing).toEqual([]);
+    expect(shipped.files.has('skills/devflow:apply-decisions/SKILL.md')).toBe(true);
+  });
+
+  it('holds every generated reference of the compliance-on manifest and the files compliance off removes', async () => {
+    const shipped = await load();
+    const manifest = installedReferenceManifest({ compliance: true });
+    const missing = [
+      ...manifest.map(rel => `skills/devflow:${SKILL_REFS_SKILL_NAME}/references/${rel}`),
+      ...COMPLIANCE_OFF_REMOVED_SKILL_FILES.map(entry => `skills/${entry}`),
+    ].filter(file => !shipped.files.has(file));
+    expect(missing).toEqual([]);
+  });
+
+  it('holds every path the reference overlay owns, as a file or as a folder', async () => {
+    const shipped = await load();
+    const owned = [...overlayOwnedSkillPaths(installedReferenceManifest({ compliance: true }))];
+    expect(owned.length).toBeGreaterThan(0);
+    const missing = owned.filter(rel => !shipped.holds(`skills/devflow:${SKILL_REFS_SKILL_NAME}/${rel}`));
+    expect(missing).toEqual([]);
+  });
+
+  it('holds the compliance skill the converge writes and not the framework sources', async () => {
+    const shipped = await load();
+    for (const file of complianceSkillFiles()) {
+      expect(shipped.files.has(`skills/devflow:compliance/${file}`), file).toBe(true);
+    }
+    expect(shipped.holds('skills/devflow:compliance/frameworks')).toBe(false);
+  });
+
+  it('is not built from what is installed: an empty Claude dir and a populated one give the same set', async () => {
+    const first = await load();
+    await fs.mkdir(path.join(home, '.claude', 'commands', 'devflow'), { recursive: true });
+    await fs.writeFile(path.join(home, '.claude', 'commands', 'devflow', 'mine.md'), 'user file');
+    const second = await load();
+    expect([...second.files].sort()).toEqual([...first.files].sort());
+    expect(second.files.has('commands/devflow/mine.md')).toBe(false);
+  });
+
+  it('adds the files of a valid skill shadow beside the shipped ones', async () => {
+    const shadow = path.join(devflowDir, 'skills', 'typescript');
+    await fs.mkdir(path.join(shadow, 'references'), { recursive: true });
+    await fs.writeFile(path.join(shadow, 'SKILL.md'), '# shadow');
+    await fs.writeFile(path.join(shadow, 'references', 'own-notes.md'), 'notes');
+
+    const shipped = await load();
+
+    expect(shipped.files.has('skills/devflow:typescript/references/own-notes.md')).toBe(true);
+    expect(shipped.files.has('skills/devflow:typescript/SKILL.md')).toBe(true);
+    expect(shipped.files.has('skills/devflow:typescript/references/patterns.md')).toBe(true);
+  });
+
+  it('ignores a shadow with no SKILL.md, as the install does', async () => {
+    const shadow = path.join(devflowDir, 'skills', 'typescript');
+    await fs.mkdir(shadow, { recursive: true });
+    await fs.writeFile(path.join(shadow, 'own-notes.md'), 'notes');
+
+    const shipped = await load();
+
+    expect(shipped.files.has('skills/devflow:typescript/own-notes.md')).toBe(false);
+  });
+
+  it('takes the shadow listings of the caller and reads no shadow from disk then', async () => {
+    const shadow = path.join(devflowDir, 'skills', 'typescript');
+    await fs.mkdir(shadow, { recursive: true });
+    await fs.writeFile(path.join(shadow, 'SKILL.md'), '# shadow');
+    await fs.writeFile(path.join(shadow, 'on-disk-only.md'), 'x');
+
+    const shipped = await load({ shadowListings: new Map([['git', ['own-recipe.md']]]) });
+
+    expect(shipped.files.has('skills/devflow:git/own-recipe.md')).toBe(true);
+    expect(shipped.files.has('skills/devflow:typescript/on-disk-only.md')).toBe(false);
+  });
+
+  it('answers with a reason, not a smaller set, when a registry skill has no source in the package', async () => {
+    const emptyRoot = path.join(home, 'package');
+    await fs.mkdir(path.join(emptyRoot, 'src', 'assets', 'skills'), { recursive: true });
+
+    const loaded = await loadShippedSet({ devflowDir, packageRoot: emptyRoot, workflowFolders: [] });
+
+    expect(loaded.ok).toBe(false);
+    if (!loaded.ok) expect(loaded.reason).toMatch(/skill "[a-z-]+": could not read .*ENOENT/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The two sets together
+// ---------------------------------------------------------------------------
+
+describe('shipped and retired sets', () => {
+  let home: string;
+  let shipped: ShippedSet;
+  const retired = retiredPathSet();
+
+  beforeEach(async () => {
+    home = await makeHome('install-backup-sets pair');
+    const loaded = await loadShippedSet({ devflowDir: path.join(home, '.devflow'), packageRoot: ROOT, workflowFolders: WORKFLOW_FOLDERS });
+    if (!loaded.ok) throw new Error(loaded.reason);
+    shipped = loaded.shipped;
+  });
+
+  afterEach(async () => {
+    await fs.rm(home, { recursive: true, force: true });
+  });
+
+  it('are disjoint', () => {
+    expect(sharedNames(shipped, retired, RETIRED_SHIPPED.skills).map(shippedAgain)).toEqual([]);
+  });
+
+  it('reports a name that is in both, with the fix to apply', () => {
+    const seeded = createPathSet(['commands/devflow/specify.md', 'skills/typescript/SKILL.md']);
+
+    const shared = sharedNames(seeded, retired, RETIRED_SHIPPED.skills);
+
+    expect(shared.map(shippedAgain)).toEqual([
+      'commands/devflow/specify.md is shipped again: remove it from RETIRED_SHIPPED and the legacy list in the PR that ships it',
+      'skills/typescript is shipped again: remove it from RETIRED_SHIPPED and the legacy list in the PR that ships it',
+    ]);
+  });
+
+  it('classify a name in both as shipped', () => {
+    const seeded = createPathSet(['commands/devflow/specify.md']);
+
+    expect(classify('commands/devflow/specify.md', 'file', { shipped: seeded, retired })).toBe('shipped');
+    expect(classify('commands/devflow/specify.md', 'file', { shipped: createPathSet([]), retired })).toBe('retired');
+  });
+
+  it('cover every released name', () => {
+    const missing: string[] = [];
+    const named = (file: string): boolean => shipped.files.has(file) || retired.files.has(file);
+    for (const name of RELEASED_SHIPPED_NAMES.commands) {
+      if (!named(`commands/devflow/${name}.md`)) missing.push(`command ${name}`);
+    }
+    for (const name of RELEASED_SHIPPED_NAMES.agents) {
+      if (!named(`agents/devflow/${name}.md`)) missing.push(`agent ${name}`);
+    }
+    for (const name of RELEASED_SHIPPED_NAMES.rules) {
+      if (!named(`rules/devflow/${name}.md`)) missing.push(`rule ${name}`);
+    }
+    for (const folder of RELEASED_SHIPPED_NAMES.skills) {
+      if (!shipped.holds(`skills/${folder}`) && !RETIRED_SHIPPED.skills.includes(folder)) missing.push(`skill folder ${folder}`);
+    }
+    for (const [folder, files] of Object.entries(RELEASED_SHIPPED_NAMES.skillFiles)) {
+      if (RETIRED_SHIPPED.skills.includes(folder)) continue;
+      for (const file of files) {
+        if (!named(`skills/${folder}/${file}`)) missing.push(`skill file ${folder}/${file}`);
+      }
+    }
+    expect(missing, 'released names that are in neither the shipped nor the retired set').toEqual([]);
+  });
+
+  it('ship only names that the released-name fixture holds', () => {
+    const released = RELEASED_SHIPPED_NAMES;
+    const unreleased: string[] = [];
+    for (const file of shipped.files) {
+      const top = /^(commands|agents|rules)\/devflow\/(.+)\.md$/.exec(file);
+      if (top !== null) {
+        const list = top[1] === 'commands' ? released.commands : top[1] === 'agents' ? released.agents : released.rules;
+        if (!list.includes(top[2])) unreleased.push(file);
+        continue;
+      }
+      const skill = /^skills\/([^/]+)\/(.+)$/.exec(file);
+      if (skill === null || !(released.skillFiles[skill[1]] ?? []).includes(skill[2])) unreleased.push(file);
+    }
+    expect(
+      unreleased.map(file => `${file} is not in tests/fixtures/released-shipped-names.ts: add the name there`),
+    ).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Workflow folders
+// ---------------------------------------------------------------------------
+
+describe('workflow folders in the shipped set', () => {
+  const emptyInputs = (workflowFolders: readonly WorkflowFolder[]): ShippedSetInputs => ({
+    packageSkillFiles: new Map(),
+    workflowFolders,
+  });
+
+  it('holds every file of a registered folder under all four variant keys', () => {
+    const shipped = buildShippedSet(emptyInputs([FIXTURE_FOLDER]));
+
+    expect(missingFolderFiles(shipped, [FIXTURE_FOLDER])).toEqual([]);
+    const both = workflowFolderFiles(FIXTURE_FOLDER, 'both-off');
+    const on = workflowFolderFiles(FIXTURE_FOLDER, 'on');
+    expect(both.length).toBeLessThan(on.length);
+    expect(shipped.files.has('skills/devflow:flow/references/evidence-asks.md')).toBe(true);
+  });
+
+  it('reports the files of a folder that a shipped set lacks', () => {
+    const seeded = buildShippedSet(emptyInputs([]));
+
+    const missing = missingFolderFiles(seeded, [FIXTURE_FOLDER]);
+
+    expect(missing).toContain('skills/devflow:flow/SKILL.md (key on)');
+    expect(missing).toContain('skills/devflow:flow/references/evidence-asks.md (key on)');
+    expect(missing.some(entry => entry.endsWith('(key both-off)'))).toBe(true);
+  });
+
+  it('passes for the registry the build ships, whatever it holds', async () => {
+    const home = await makeHome('install-backup-sets registry');
+    try {
+      const loaded = await loadShippedSet({ devflowDir: path.join(home, '.devflow'), packageRoot: ROOT, workflowFolders: WORKFLOW_FOLDERS });
+      if (!loaded.ok) throw new Error(loaded.reason);
+      expect(missingFolderFiles(loaded.shipped, WORKFLOW_FOLDERS)).toEqual([]);
+    } finally {
+      await fs.rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('holds the old command file of a folder workflow, which the command registry would drop', () => {
+    const folder: WorkflowFolder = { ...FIXTURE_FOLDER, name: 'plan' };
+
+    const shipped = buildShippedSet(emptyInputs([folder]));
+
+    expect(getAllCommandNames(workflowFolderNames([folder]))).not.toContain('plan');
+    expect(shipped.files.has('commands/devflow/plan.md')).toBe(true);
+    expect(shipped.files.has('skills/devflow:plan/SKILL.md')).toBe(true);
+    expect(classify('commands/devflow/plan.md', 'file', { shipped, retired: retiredPathSet() })).toBe('shipped');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The install-snapshot goldens
+// ---------------------------------------------------------------------------
+
+describe('install-snapshot goldens', () => {
+  const GOLDEN_DIR = path.join(ROOT, 'tests', 'fixtures', 'golden');
+  const INSTALL_FOLDERS = ['commands/devflow', 'agents/devflow', 'rules/devflow', 'skills/devflow:'];
+
+  /** The entries of the `install: HOME` section that lie in a folder devflow installs into. */
+  function installedEntries(scenario: string): Array<{ readonly rel: string; readonly kind: EntryKind }> {
+    const lines = readFileSync(path.join(GOLDEN_DIR, `install-snapshot-${scenario}.txt`), 'utf-8').split('\n');
+    const start = lines.indexOf('## install: HOME');
+    expect(start, `${scenario}: the install: HOME section`).toBeGreaterThanOrEqual(0);
+    const entries: Array<{ rel: string; kind: EntryKind }> = [];
+    for (const line of lines.slice(start + 1)) {
+      if (line.startsWith('## ')) break;
+      const match = /^([dx\-l]) \.claude\/(.+)$/.exec(line);
+      if (match === null) continue;
+      const rel = match[2].replace(/\/$/, '');
+      if (!INSTALL_FOLDERS.some(folder => rel.startsWith(folder))) continue;
+      entries.push({ rel, kind: match[1] === 'd' ? 'directory' : match[1] === 'l' ? 'link' : 'file' });
+    }
+    return entries;
+  }
+
+  let home: string;
+  let shipped: ShippedSet;
+
+  beforeEach(async () => {
+    home = await makeHome('install-backup-sets goldens');
+    const loaded = await loadShippedSet({ devflowDir: path.join(home, '.devflow'), packageRoot: ROOT, workflowFolders: WORKFLOW_FOLDERS });
+    if (!loaded.ok) throw new Error(loaded.reason);
+    shipped = loaded.shipped;
+  });
+
+  afterEach(async () => {
+    await fs.rm(home, { recursive: true, force: true });
+  });
+
+  it.each(['github', 'jira-hipaa', 'all-off'])('classifies every installed entry of the %s scenario as shipped', scenario => {
+    const entries = installedEntries(scenario);
+    expect(entries.length, `${scenario}: entries read from the golden`).toBeGreaterThan(100);
+
+    const sets = { shipped, retired: retiredPathSet() };
+    const strays = entries
+      .map(({ rel, kind }) => ({ rel, verdict: classify(rel, kind, sets) }))
+      .filter(({ verdict }) => verdict !== 'shipped' && verdict !== 'sidecar')
+      .map(({ rel, verdict }) => `${rel} classifies as ${verdict}`);
+
+    expect(strays).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Sidecars
+// ---------------------------------------------------------------------------
+
+describe('sidecar names', () => {
+  const CLAUDE = path.join(path.sep, 'h', '.claude');
+  const rel = (absolute: string): string => toPosix(path.relative(CLAUDE, absolute));
+
+  let home: string;
+  let sets: { shipped: ShippedSet; retired: RetiredSet };
+
+  beforeEach(async () => {
+    home = await makeHome('install-backup-sets sidecars');
+    const loaded = await loadShippedSet({ devflowDir: path.join(home, '.devflow'), packageRoot: ROOT, workflowFolders: WORKFLOW_FOLDERS });
+    if (!loaded.ok) throw new Error(loaded.reason);
+    sets = { shipped: loaded.shipped, retired: retiredPathSet() };
+  });
+
+  afterEach(async () => {
+    await fs.rm(home, { recursive: true, force: true });
+  });
+
+  it.each([
+    ['the atomic writer', () => rel(atomicTempPath(path.join(CLAUDE, 'commands', 'devflow', 'code-review.md'))), 'file'],
+    ['the link replacement writer', () => rel(linkReplacementTempPath(path.join(CLAUDE, 'agents', 'devflow', 'tracker.md'))), 'file'],
+    ['the compliance-off copy', () => rel(copyTempPath(path.join(CLAUDE, 'skills', 'devflow:git', 'references', 'publication-gate.md'))), 'file'],
+    ['the compliance skill build', () => rel(complianceSkillTempPath(CLAUDE)), 'directory'],
+    ['the curation staging folder', () => rel(curationSwapPaths(CLAUDE, 1_730_000_000_000).staging), 'directory'],
+    ['the curation backup folder', () => rel(curationSwapPaths(CLAUDE, 1_730_000_000_000).backup), 'directory'],
+  ] as const)('%s makes a name that classifies as a sidecar', (_producer, name, kind) => {
+    expect(classify(name(), kind, sets)).toBe('sidecar');
+  });
+
+  it('classifies the staging and backup folders of every kind of reference overlay unit as sidecars', () => {
+    const referencesTarget = path.join(CLAUDE, 'skills', 'devflow:git', 'references');
+    const units = planOverlayUnits(installedReferenceManifest({ compliance: true }));
+    expect(new Set(units.map(unit => unit.kind))).toEqual(new Set(['provider', 'pr-host', 'cross-cutting']));
+
+    const names: string[] = [];
+    for (const unit of units) {
+      names.push(rel(stagingDirFor(referencesTarget, unit)));
+      if (unit.kind !== 'cross-cutting') names.push(rel(backupDirFor(referencesTarget, unit)));
+    }
+
+    const strays = names.filter(name => classify(name, 'directory', sets) !== 'sidecar');
+    expect(strays).toEqual([]);
+    expect(names.length).toBeGreaterThan(units.length);
+  });
+
+  it('classifies the staging folder of a workflow folder install, and its backup, as sidecars', async () => {
+    const claudeDir = path.join(home, '.claude');
+    await fs.mkdir(claudeDir, { recursive: true });
+    const staging = await fs.mkdtemp(stagingPrefixOf(claudeDir, 'flow'));
+
+    const names = [toPosix(path.relative(claudeDir, staging)), toPosix(path.relative(claudeDir, backupOf(staging)))];
+
+    expect(names.map(name => classify(name, 'directory', sets))).toEqual(['sidecar', 'sidecar']);
+  });
+
+  it.each([
+    ['a user file that only looks like a temp file', 'commands/devflow/mine.md.tmp.4242', 'file'],
+    ['a user folder in the Claude dir', '.devflow-notes', 'directory'],
+    ['a user dot folder named like a curation folder', '.devflow-curation-notes', 'directory'],
+    ['a plain dot folder in the references', 'skills/devflow:git/references/tracker/.pr-host.pr', 'directory'],
+    ['a user file beside a staging folder', 'skills/devflow:git/references/tracker/.pr-host.pr.notes', 'file'],
+  ] as const)('does not take %s for a sidecar', (_label, name, kind) => {
+    expect(classify(name, kind, sets)).toBe('unknown');
   });
 });

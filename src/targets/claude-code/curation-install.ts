@@ -494,6 +494,17 @@ async function pathExists(p: string): Promise<boolean> {
 }
 
 /**
+ * The two folders a skill swap uses, both directly under `claudeDir`: the staging copy, and the
+ * backup the old skill folder waits in while the copy is renamed into place.
+ *
+ * @param now - The clock reading that makes the name unique, in milliseconds.
+ */
+export function curationSwapPaths(claudeDir: string, now: number): { readonly staging: string; readonly backup: string } {
+  const staging = path.join(claudeDir, `.devflow-curation-${process.pid}-${now.toString(36)}.tmp`);
+  return { staging, backup: `${staging}.old` };
+}
+
+/**
  * Install one skill directory atomically: stage a copy beside the claude dir's
  * skills, then swap it in, restoring the old directory if the swap fails.
  *
@@ -504,8 +515,7 @@ async function pathExists(p: string): Promise<boolean> {
  * left as it was; the link is recorded in `links` once the real folder stands in its place.
  */
 async function swapInSkillDirectory(claudeDir: string, sourceDir: string, target: string, links: LinkReport): Promise<void> {
-  const staging = path.join(claudeDir, `.devflow-curation-${process.pid}-${Date.now().toString(36)}.tmp`);
-  const backup = `${staging}.old`;
+  const { staging, backup } = curationSwapPaths(claudeDir, Date.now());
   try {
     await copyDirectory(sourceDir, staging);
     await fs.mkdir(path.dirname(target), { recursive: true });

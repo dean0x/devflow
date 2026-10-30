@@ -51,7 +51,11 @@ const MAX_FOLDER_DEPTH = 4;
 const STAGED_FOLDER = 'folder';
 
 /** Where the old folder waits while the new one is moved in: beside its staging folder. */
-const backupOf = (staging: string): string => `${staging}.old`;
+export const backupOf = (staging: string): string => `${staging}.old`;
+
+/** The prefix of the staging folder of one folder install; `mkdtemp` adds six random characters. */
+export const stagingPrefixOf = (claudeDir: string, name: string): string =>
+  path.join(claudeDir, `.devflow-workflow-${name}-${process.pid}-`);
 
 const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
@@ -243,7 +247,7 @@ export async function installWorkflowFolder(opts: InstallWorkflowFolderOptions):
       return { name, outcome: 'unchanged' };
     }
     await fs.mkdir(claudeDir, { recursive: true });
-    staging = await fs.mkdtemp(path.join(claudeDir, `.devflow-workflow-${name}-${process.pid}-`));
+    staging = await fs.mkdtemp(stagingPrefixOf(claudeDir, name));
     const staged = path.join(staging, STAGED_FOLDER);
     await fs.mkdir(staged);
     for (const { file, bytes } of files) {

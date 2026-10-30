@@ -1,7 +1,8 @@
 /**
  * tests/fixtures/released-shipped-names.ts
  *
- * Every installed name that a released version of devflow shipped, from version 0.1.0 to 3.9.0.
+ * Every installed name that a released version of devflow shipped, from version 0.1.0 to 3.9.0,
+ * and the names merged since, each marked with a comment.
  * The install-backup guards read it two ways: each name must be in the shipped set or the retired
  * set (a released file never reaches a user as an unknown file), and each name the current build
  * ships must be here (the ratchet).
@@ -402,6 +403,7 @@ export const RELEASED_SHIPPED_NAMES: ReleasedShippedNames = Object.freeze({
       'references/decision-markers.md',
       'references/detection.md',
       'references/github-api.md',
+      'references/github-posting.md', // merged after 3.9.0; not yet in a release
       'references/learn-conventions.md',
       'references/patterns.md',
       'references/pr/check-ci-status.md',

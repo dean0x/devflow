@@ -628,7 +628,7 @@ export type OverlayUnit = OverlayUnitRef & {
 };
 
 /** The arms of {@link OverlayUnit} that own their directory outright and are swapped whole. */
-type DirectoryOverlayUnit = Extract<OverlayUnit, { kind: 'provider' | 'pr-host' }>;
+export type DirectoryOverlayUnit = Extract<OverlayUnit, { kind: 'provider' | 'pr-host' }>;
 
 /** The flat cross-cutting arm of {@link OverlayUnit}, for the code that renames it document by document. */
 type CrossCuttingOverlayUnit = Extract<OverlayUnit, { kind: 'cross-cutting' }>;
@@ -770,7 +770,7 @@ const STAGING_TOKEN = `${process.pid}-${Date.now().toString(36)}`;
  * arm's basename is `{provider}.{token}.tmp`, which is not dot-prefixed, so a rule keyed
  * on the name would reach the other arms only.
  */
-function stagingDirFor(referencesTarget: string, unit: OverlayUnit): string {
+export function stagingDirFor(referencesTarget: string, unit: OverlayUnit): string {
   return `${sidecarBaseFor(referencesTarget, unit)}.${STAGING_TOKEN}.tmp`;
 }
 
@@ -780,7 +780,7 @@ function stagingDirFor(referencesTarget: string, unit: OverlayUnit): string {
  * Beside the staging tree, and under `tracker/` for the same reason (property 2 of
  * {@link stagingDirFor}): a backup a crash strands is removed by a later run's prune.
  */
-function backupDirFor(referencesTarget: string, unit: DirectoryOverlayUnit): string {
+export function backupDirFor(referencesTarget: string, unit: DirectoryOverlayUnit): string {
   return `${sidecarBaseFor(referencesTarget, unit)}.old`;
 }
 

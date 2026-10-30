@@ -86,6 +86,11 @@ function skillTarget(claudeDir: string): string {
   return path.join(claudeDir, 'skills', 'devflow:compliance');
 }
 
+/** The folder the compliance skill is built in before it is renamed into place: {claudeDir}/skills/devflow:compliance.tmp */
+export function complianceSkillTempPath(claudeDir: string): string {
+  return `${skillTarget(claudeDir)}.tmp`;
+}
+
 /** Installed compliance rule file: {claudeDir}/rules/devflow/compliance.md */
 function ruleTarget(claudeDir: string): string {
   return path.join(claudeDir, 'rules', 'devflow', 'compliance.md');
@@ -166,7 +171,7 @@ async function installSkillDir(
 ): Promise<void> {
   const canonicalSrc = path.join(skillsDir(), 'compliance');
   const target = skillTarget(claudeDir);
-  const tmpTarget = `${target}.tmp`;
+  const tmpTarget = complianceSkillTempPath(claudeDir);
 
   // Determine SKILL.md source: prefer a valid shadow, else use canonical.
   const skillShadowDir = path.join(devflowDir, 'skills', 'compliance');

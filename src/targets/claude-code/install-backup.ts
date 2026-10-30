@@ -44,7 +44,20 @@ const MAX_ANCESTOR_STEPS = 256;
 const SHOWN_NAMES = 5;
 const JUNK_FILE_NAME = '.DS_Store';
 const COMPLIANCE_SKILL_SIDECAR = 'skills/devflow:compliance.tmp';
-const SIDECAR_SUFFIX = /(?:\.tmp(?:\.\d+)?|\.old)$/;
+
+/** What an interrupted write or swap leaves after a name: `.tmp`, `.tmp.<pid>`, `.old` and the overlay's `.<pid>-<time>.tmp`. */
+const SIDECAR_SUFFIX = /(?:\.\d+-[0-9a-z]+\.tmp|\.tmp(?:\.\d+)?|\.old)$/;
+
+/**
+ * Scratch folders whose base name is no shipped path, matched on the whole path: the curation
+ * swap and the workflow folder swap, which sit directly in the Claude dir, and the scratch of the
+ * pr-host and cross-cutting reference overlay units, which sits in the tracker references.
+ */
+const SCRATCH_FOLDER_PATHS: readonly RegExp[] = [
+  /^\.devflow-curation-\d+-[0-9a-z]+\.tmp(?:\.old)?$/,
+  /^\.devflow-workflow-[a-z0-9._-]{1,64}-\d+-[A-Za-z0-9]{6}(?:\.old)?$/,
+  /^skills\/[^/]+\/references\/tracker\/\.(?:pr-host|cross-cutting)\.[a-z0-9-]+\.(?:\d+-[0-9a-z]+\.tmp|old)$/,
+];
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/g;
 
 export { createPathSet };
@@ -94,14 +107,16 @@ function inSet(set: PathSet, rel: string, kind: EntryKind): boolean {
   }
 }
 
-/** `rel` without its leftover suffix (`.tmp`, `.old`, `.tmp.<pid>`), or null when it has none. */
+/** `rel` without its leftover suffix (see {@link SIDECAR_SUFFIX}), or null when it has none. */
 function sidecarBase(rel: string): string | null {
   const base = rel.replace(SIDECAR_SUFFIX, '');
   return base === rel || base === '' ? null : base;
 }
 
 function isSidecar(rel: string, kind: EntryKind, sets: ClassifySets): boolean {
-  if (kind === 'directory' && rel === COMPLIANCE_SKILL_SIDECAR) return true;
+  if (kind === 'directory' && (rel === COMPLIANCE_SKILL_SIDECAR || SCRATCH_FOLDER_PATHS.some(re => re.test(rel)))) {
+    return true;
+  }
   const base = sidecarBase(rel);
   if (base === null) return false;
   return inSet(sets.shipped, base, kind) || inSet(sets.retired, base, kind);
