@@ -48,7 +48,7 @@ const HARDEN_STATUS_SENTENCE =
 
 /** What the Phase 4 arm must say, as the label of the defect and the text that carries it. */
 const HARDEN_ARM_PARTS: ReadonlyArray<readonly [label: string, text: string]> = [
-  ['report the status', 'report it'],
+  ['report the status, or "none" for a missing one', 'report the status or "none"'],
   ['report the cause', 'its cause'],
   ['halt', 'halt'],
   ['rule out PASS', 'never PASS'],

@@ -1080,7 +1080,6 @@ describe('0b: Phase 11 pushes the branch before the evidence call', () => {
   it('the Report surfaces the push\'s DEGRADED line and Phase 11 says the push never forces and never stops the run', () => {
     const md = implementMd()
     expect(md).toContain('or the fresh base step, Phase 10\'s push, Phase 11\'s push or Phase 11\'s script output carried one, surface them verbatim')
-    // The diagram's sub-bullet restated this paragraph and was cut; the Phase 11 body is the one statement.
     const phase = md.slice(md.indexOf(PHASE11), md.indexOf('### Phase 12: Report'))
     expect(phase).toContain('push the branch once before the script — never force, and no retry')
     expect(phase).toContain('does not block: record `TRACEABILITY: DEGRADED (evidence push failed)`')

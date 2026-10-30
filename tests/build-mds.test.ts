@@ -2592,8 +2592,16 @@ describe('DIST_FILES scope (§14.5, P0-S21) + compliance_gate adoption (P0-S22)'
 
 describe('_tracker.mds adoption + per-define non-emptiness (P2-S9)', () => {
   // One required phrase per define. Each is the sentence the define exists to
-  // state, so deleting the rule and keeping the heading fails here.
-  const TRACKER_DEFINES: Array<{ name: string; requiredPhrase: string; minBytes: number }> = [
+  // state, so deleting the rule and keeping the heading fails here. `holdsNote`
+  // tells whether the define body keeps its "Note:" paragraph, by the form that
+  // define takes: its own paragraph, a call to the note define, or the note itself.
+  const TRACKER_DEFINES: Array<{
+    name: string;
+    requiredPhrase: string;
+    minBytes: number;
+    holdsNote: (body: string) => boolean;
+    noteForm: string;
+  }> = [
     {
       name: 'issue_ref_grammar',
       // The second arm of the two-armed GitHub foreign-shape rule (AC-2.9). The
@@ -2604,6 +2612,8 @@ describe('_tracker.mds adoption + per-define non-emptiness (P2-S9)', () => {
       // rejection no operation performs.
       requiredPhrase: 'no producer-side grammar check',
       minBytes: 600,
+      holdsNote: body => body.includes('\nNote:'),
+      noteForm: 'a "Note:" paragraph of its own',
     },
     {
       name: 'issue_capture_contract',
@@ -2612,33 +2622,134 @@ describe('_tracker.mds adoption + per-define non-emptiness (P2-S9)', () => {
       // input and dies silently — the GAP-15 defect P2-S10 exists to close.
       requiredPhrase: '- **PR link line**:',
       minBytes: 600,
+      holdsNote: body => body.includes('\n{{issue_capture_note()}}'),
+      noteForm: 'a call to issue_capture_note()',
+    },
+    {
+      name: 'issue_capture_note',
+      // The containment half of the capture contract: the issue body stays data,
+      // and the two pasted values are shape-checked again at the paste site. The
+      // contract calls this define, and a host that lists its own capture values
+      // calls it directly, so the rule has one source for both forms.
+      requiredPhrase: 'shape-checked again by whoever pastes them',
+      minBytes: 300,
+      holdsNote: body => body.startsWith('Note:'),
+      noteForm: 'the "Note:" paragraph as its whole body',
     },
   ];
 
-  it('every adopting host carries both defines\' expanded bodies (AC-2.9)', async () => {
+  // Hosts that carry the capture note and list the values they read in their own
+  // capture list, in place of the full capture contract. /implement takes one
+  // input (a plan path, one issue token or a task description, never a batch)
+  // and spawns only `setup-task` to capture, a single-issue operation that emits
+  // the whole `### Handoff Values` block. So the emit-source table and the batch
+  // rule govern no case it reaches. Every other adopter keeps the full contract.
+  const TRACKER_NOTE_ONLY_HOSTS: readonly string[] = ['implement'];
+
+  /** A sentence only the full capture contract says: the emit-source table. */
+  const CONTRACT_ONLY_PHRASE = '**Which operation emits which value:**';
+
+  /**
+   * What a note-only host's own capture list must say. These are the contract
+   * facts that host reads, kept in its text: the producer literals of the values
+   * it uses (the PR link line is the GAP-15 literal), the content markers, and
+   * the two never-re-derive rules.
+   */
+  const NOTE_ONLY_CAPTURE_PHRASES: readonly string[] = [
+    '- **Issue ID**:',
+    '- **PR link line**:',
+    '<untrusted-issue-body>',
+    'Never re-derive one value from another',
+    'never infer one from a `TRACEABILITY: DEGRADED ({reason})` status line',
+  ];
+
+  /**
+   * Named collector: what one compiled adopting host lacks. Every adopter carries
+   * the grammar and the note. A full-contract host carries the contract body (its
+   * PR link literal and the emit-source table); a note-only host carries
+   * NOTE_ONLY_CAPTURE_PHRASES and not the table, so the roster stays true.
+   */
+  function collectTrackerAdoptionViolations(basename: string, content: string): string[] {
+    const out: string[] = [];
+    const need = (phrase: string, what: string): void => {
+      if (!content.includes(phrase)) out.push(`${basename}.md: ${what} missing — "${phrase}" not found`);
+    };
+    const noteOnly = TRACKER_NOTE_ONLY_HOSTS.includes(basename);
+    for (const { name, requiredPhrase } of TRACKER_DEFINES) {
+      if (noteOnly && name === 'issue_capture_contract') continue;
+      need(requiredPhrase, `${name}() body`);
+    }
+    if (noteOnly) {
+      for (const phrase of NOTE_ONLY_CAPTURE_PHRASES) need(phrase, 'capture list');
+      if (content.includes(CONTRACT_ONLY_PHRASE)) {
+        out.push(`${basename}.md: listed as note-only but carries the full capture contract — list it with the full-contract hosts`);
+      }
+    } else {
+      need(CONTRACT_ONLY_PHRASE, 'issue_capture_contract() emit-source table');
+    }
+    return out;
+  }
+
+  it('every adopting host carries the grammar, the note and the capture facts its form requires (AC-2.9)', async () => {
     const violations: string[] = [];
     let hostsScanned = 0;
 
     for (const basename of TRACKER_PARTIAL_ADOPTERS) {
       const content = await fs.readFile(path.join(BUILT_COMMANDS, `${basename}.md`), 'utf-8');
       hostsScanned++;
-      for (const { name, requiredPhrase } of TRACKER_DEFINES) {
-        if (!content.includes(requiredPhrase)) {
-          violations.push(`${basename}.md: ${name}() body missing — "${requiredPhrase}" not found`);
-        }
-      }
+      violations.push(...collectTrackerAdoptionViolations(basename, content));
     }
 
     expect(
       violations,
       `_tracker.mds adoption violations:\n${violations.join('\n')}`,
     ).toHaveLength(0);
-    // Known-bad sample: a host that @imports the partial but never calls either
-    // define compiles fine and lands here with both phrases missing.
     expect(
       hostsScanned,
       `_tracker adoption guard is vacuous: expected ${TRACKER_PARTIAL_ADOPTERS.length} hosts, got ${hostsScanned}`,
     ).toBe(5);
+    for (const host of TRACKER_NOTE_ONLY_HOSTS) {
+      expect(
+        (TRACKER_PARTIAL_ADOPTERS as readonly string[]).includes(host),
+        `${host} is listed as note-only but does not adopt _tracker.mds`,
+      ).toBe(true);
+    }
+  });
+
+  it('known-bad probes: a host that calls no define, a lost PR link literal and a lost emit-source table are each reported', async () => {
+    // A host that @imports the partial but never calls a define compiles fine and
+    // lands here with every phrase missing.
+    expect(collectTrackerAdoptionViolations('plan', '')).toHaveLength(TRACKER_DEFINES.length + 1);
+    expect(collectTrackerAdoptionViolations('implement', '')).toHaveLength(
+      TRACKER_DEFINES.length - 1 + NOTE_ONLY_CAPTURE_PHRASES.length,
+    );
+
+    const plan = await fs.readFile(path.join(BUILT_COMMANDS, 'plan.md'), 'utf-8');
+    const implement = await fs.readFile(path.join(BUILT_COMMANDS, 'implement.md'), 'utf-8');
+    expect(collectTrackerAdoptionViolations('plan', plan), 'the real full-contract host is clean').toEqual([]);
+    expect(collectTrackerAdoptionViolations('implement', implement), 'the real note-only host is clean').toEqual([]);
+
+    const without = (text: string, phrase: string, instead: string): string => text.split(phrase).join(instead);
+    expect(
+      collectTrackerAdoptionViolations('plan', without(plan, CONTRACT_ONLY_PHRASE, '**(removed):**')),
+      'a full-contract host that loses the emit-source table must be reported',
+    ).toEqual([`plan.md: issue_capture_contract() emit-source table missing — "${CONTRACT_ONLY_PHRASE}" not found`]);
+    expect(
+      collectTrackerAdoptionViolations('plan', without(plan, '- **PR link line**:', '- (removed):')),
+      'a full-contract host that loses the PR link literal must be reported',
+    ).toEqual(['plan.md: issue_capture_contract() body missing — "- **PR link line**:" not found']);
+    expect(
+      collectTrackerAdoptionViolations('implement', without(implement, '- **PR link line**:', '- (removed):')),
+      'a note-only host that loses the PR link literal from its capture list must be reported',
+    ).toEqual(['implement.md: capture list missing — "- **PR link line**:" not found']);
+    expect(
+      collectTrackerAdoptionViolations('implement', without(implement, 'shape-checked again by whoever pastes them', 'x')),
+      'a note-only host that loses the note must be reported',
+    ).toEqual(['implement.md: issue_capture_note() body missing — "shape-checked again by whoever pastes them" not found']);
+    expect(
+      collectTrackerAdoptionViolations('implement', `${implement}\n${CONTRACT_ONLY_PHRASE}`),
+      'a note-only host that grows the full contract back must be reported, so the roster stays true',
+    ).toHaveLength(1);
   });
 
   /** Named collector: the `@define <name>():` / `@export <name>` names in a partial source. */
@@ -2649,11 +2760,11 @@ describe('_tracker.mds adoption + per-define non-emptiness (P2-S9)', () => {
     };
   }
 
-  it('_tracker.mds declares exactly these two defines and exports both (AC-2.9)', async () => {
+  it('_tracker.mds declares exactly these three defines and exports all three (AC-2.9)', async () => {
     // The per-define guards below range over TRACKER_DEFINES, so they are silent
-    // about a THIRD define: one added to the partial and exported would expand
-    // into all five adopting hosts — 5× its bytes on every spawn of those
-    // commands — with nothing here to notice. The reverse arm matters equally: a
+    // about a FOURTH define: one added to the partial and exported would expand
+    // into every adopting host that calls it — up to 5× its bytes on every spawn
+    // of those commands — with nothing here to notice. The reverse arm matters equally: a
     // define left unexported compiles, and its call site fails only at build time
     // in whichever host happens to call it.
     const source = await fs.readFile(path.join(PARTIALS_DIR, '_tracker.mds'), 'utf-8');
@@ -2671,9 +2782,13 @@ describe('_tracker.mds adoption + per-define non-emptiness (P2-S9)', () => {
     ).toEqual(expected);
   });
 
-  it('known-bad probe: a seeded third define/export is reported by the same collector', () => {
+  it('known-bad probe: a seeded fourth define/export is reported by the same collector', () => {
     const seeded = [
       '@define issue_ref_grammar():',
+      'body',
+      '@end',
+      '',
+      '@define issue_capture_note():',
       'body',
       '@end',
       '',
@@ -2687,6 +2802,7 @@ describe('_tracker.mds adoption + per-define non-emptiness (P2-S9)', () => {
       '',
       '@export issue_ref_grammar',
       '@export issue_capture_contract',
+      '@export issue_capture_note',
       '@export smuggled_partial',
       '',
     ].join('\n');
@@ -2694,13 +2810,13 @@ describe('_tracker.mds adoption + per-define non-emptiness (P2-S9)', () => {
     const { defines, exports } = collectTrackerDeclarations(seeded);
     expect(
       defines,
-      'the collector must see the seeded third define — otherwise the equality above is ' +
+      'the collector must see the seeded fourth define — otherwise the equality above is ' +
       'green because nothing was ever parsed',
-    ).toEqual(['issue_ref_grammar', 'issue_capture_contract', 'smuggled_partial']);
-    expect(exports).toEqual(['issue_ref_grammar', 'issue_capture_contract', 'smuggled_partial']);
+    ).toEqual(['issue_ref_grammar', 'issue_capture_note', 'issue_capture_contract', 'smuggled_partial']);
+    expect(exports).toEqual(['issue_ref_grammar', 'issue_capture_contract', 'issue_capture_note', 'smuggled_partial']);
     expect(
       [...defines].sort(),
-      'and the seeded set must NOT equal the modelled two — the probe would be inert otherwise',
+      'and the seeded set must NOT equal the modelled three — the probe would be inert otherwise',
     ).not.toEqual(TRACKER_DEFINES.map(d => d.name).sort());
   });
 
@@ -2719,7 +2835,7 @@ describe('_tracker.mds adoption + per-define non-emptiness (P2-S9)', () => {
       return end === -1 ? '' : source.slice(bodyStart, end);
     }
 
-    for (const { name, requiredPhrase, minBytes } of TRACKER_DEFINES) {
+    for (const { name, requiredPhrase, minBytes, holdsNote, noteForm } of TRACKER_DEFINES) {
       const body = defineBody(name);
       expect(body, `${name}() must exist in _tracker.mds`).not.toBe('');
       expect(
@@ -2732,10 +2848,12 @@ describe('_tracker.mds adoption + per-define non-emptiness (P2-S9)', () => {
       ).toBeGreaterThanOrEqual(minBytes);
       // The Note: device (the partial's shape, per _publication.mds) pre-empts a
       // misreading; losing it is how a two-armed rule quietly becomes one-armed.
+      // The contract keeps its note by calling the note define, and the adoption
+      // guard above reads the note in the compiled text of every adopting host.
       expect(
-        body,
-        `${name}() must keep its "Note:" paragraph — the shape _publication.mds establishes`,
-      ).toContain('\nNote:');
+        holdsNote(body),
+        `${name}() must keep its "Note:" paragraph as ${noteForm} — the shape _publication.mds establishes`,
+      ).toBe(true);
     }
   });
 

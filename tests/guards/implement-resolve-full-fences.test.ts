@@ -46,7 +46,7 @@ const FILES: ReadonlyArray<{ readonly label: string; readonly text: string }> = 
 /** The fence table of the four compiled files as last pinned, from the parser below. */
 const PINNED_FENCES: Readonly<Record<string, readonly PinnedFence[]>> = {
   'dist/commands/implement.md': [
-    ['Phase 1: Setup', 'Git', 1, '033d80248ba18ac74cff5a6ced902d0d04ebdf935379ae0ca3af85a89082354d'],
+    ['Phase 1: Setup', 'Git', 1, 'c5373deb745a02fe34676bec6048d271c154b1a26d6a7e7cf1facb15b71b983d'],
     ['Phase 2: Implement', 'Code', 1, 'fc704f621c8539988374e5a960bbb4df4f18e3916bc51e9026d9c43e22c307bf'],
     ['Phase 2: Implement', 'Code', 2, 'd0a3e9c10060de74f1fdd4ddb26155e66174f1562db049fc314641874085435d'],
     ['Phase 2: Implement', 'Code', 3, 'ea8f5541eb1425774cfb6e93dddd0d479706a709433baaf55c7bedfa2fe3af6a'],
@@ -78,7 +78,7 @@ const PINNED_FENCES: Readonly<Record<string, readonly PinnedFence[]>> = {
     ["Feature Knowledge Write-Back (Conditional)", 'Knowledge', 1, 'bed1e6fbe97f0d1ecd213afb7ee577f985531e7651f7aafadb7adfeba4761d37'],
   ],
   'dist/curation-off/commands/implement.md': [
-    ['Phase 1: Setup', 'Git', 1, '033d80248ba18ac74cff5a6ced902d0d04ebdf935379ae0ca3af85a89082354d'],
+    ['Phase 1: Setup', 'Git', 1, 'c5373deb745a02fe34676bec6048d271c154b1a26d6a7e7cf1facb15b71b983d'],
     ['Phase 2: Implement', 'Code', 1, 'f6d58a82751a6497a28141aa942a8b0397582566eccacfcc32f01c6274f57f36'],
     ['Phase 2: Implement', 'Code', 2, '4beef149677f73ac9f2de73ece65577b1a790970eff0ebf14b8ec6c069aa194e'],
     ['Phase 2: Implement', 'Code', 3, '379eb9289603fe97c0c9ea13f3822141e93267a00e24b81cf3e5ae57e30fbdbb'],
