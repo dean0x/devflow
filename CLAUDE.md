@@ -72,7 +72,7 @@ Descriptions of these rules: `docs/reference/architecture.md`. The rules here bi
 vim src/assets/commands/code-review.mds     # Commands (MDS sources)
 vim src/assets/agents/evaluate.md          # Agents (hand-authored)
 vim src/assets/agents/git.mds              # Agents (MDS generator host → dist/agents/git.md)
-vim src/assets/mds/tracker/_github.mds      # Reference modules (→ dist/skills/git/references/; also mds/git/_pr.mds; operation contracts live once in mds/git/_ops*.mds)
+vim src/assets/mds/tracker/_github.mds      # Reference modules (→ dist/skills/git/references/; operation contracts live once in mds/git/_ops*.mds)
 vim src/assets/skills/security/SKILL.md     # Skills
 vim src/assets/rules/security.md            # Rules
 
@@ -147,8 +147,9 @@ For detailed specifications beyond this overview:
 - **Adding commands**: `docs/reference/adding-commands.md` — command template, plugin registration
 - **Release process**: `docs/reference/release-process.md` — CI-driven one-click releases via GitHub Actions `workflow_dispatch`
 - **File organization**: `docs/reference/file-organization.md` — source tree, build distribution, install paths, settings
-- **Docs framework skill**: `src/assets/skills/docs-framework/SKILL.md` — documentation naming conventions and templates
-- **Platform assumptions**: `docs/reference/platform-assumptions.md` — Claude Code behavioural assumptions devflow agents and tests rely on, including subagent nesting and concurrency; each entry carries a date stamp and an observable drift symptom
+- **Docs framework skill**: `src/assets/skills/docs-framework/SKILL.md` — doc naming and templates
+- **Platform assumptions**: `docs/reference/platform-assumptions.md` — Claude Code behaviour that devflow agents and tests rely on, each with a date stamp and a drift symptom
+- **Lean prompts**: `docs/reference/lean-prompts.md` — cut rules, never-cut items, skill-folder layout
 - **Hooks & background workers**: `docs/reference/hooks.md` — Working Memory, Ambient Mode, Curation pipeline, Debug Tracing (`devflow debug --enable` or `DEVFLOW_HOOK_DEBUG=1`)
 - **External model routing**: `docs/reference/proxy.md` — Devflow Proxy relay, routing config, enable/disable lifecycle
 - **Init**: `docs/reference/init.md` — Two-Mode Init, wizard-step gating, state-aware re-init and `--reset`

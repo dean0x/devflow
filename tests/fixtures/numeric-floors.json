@@ -398,11 +398,11 @@
     },
     {
       "id": "claude-md-max-chars",
-      "ceiling": 13139,
-      "pattern": "const CLAUDE_MD_MAX_CHARS = 13139;",
+      "ceiling": 13124,
+      "pattern": "const CLAUDE_MD_MAX_CHARS = 13124;",
       "occurrences": 1,
       "sourceFile": "tests/docs/claude-md-tracker-section.test.ts",
-      "description": "Max characters of CLAUDE.md. CLAUDE.md is loaded into every session in this repository, so its length is a recurring per-session cost. The Architecture Overview keeps only its binding invariant lines there; the descriptions live in docs/reference/architecture.md. Measured 13,139 at the pin, headroom 0. May be LOWERED after a pass that cuts the text, never raised: a cap raised to fit whatever the file grew into is not a cap."
+      "description": "Max characters of CLAUDE.md. CLAUDE.md is loaded into every session in this repository, so its length is a recurring per-session cost. The Architecture Overview keeps only its binding invariant lines there; the descriptions live in docs/reference/architecture.md. Measured 13,124 at the pin after the lean-prompts guide line and three shorter lines, headroom 0. May be LOWERED after a pass that cuts the text, never raised: a cap raised to fit whatever the file grew into is not a cap."
     },
     {
       "id": "write-fence-allowlist-size",
