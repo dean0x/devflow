@@ -66,9 +66,20 @@ const BACKUP_FACTS: readonly Fact[] = [
   { name: 'the uninstall full-wipe listing', text: 'the full-wipe prompt' },
 ];
 
+/** Sentence parts that an earlier version of a doc held and that the docs must no longer hold. */
+const STALE_FACTS: readonly Fact[] = [
+  { name: 'hand-authored reference files are never touched', text: 'are never touched by the overlay' },
+  { name: 'an unnamed tracker or pr file is removed', text: 'that the build manifest does not name is removed on the next install' },
+];
+
 /** The facts of `facts` that `doc` does not hold. */
 function missingFacts(doc: string, facts: readonly Fact[]): string[] {
   return facts.filter(fact => !doc.includes(fact.text)).map(fact => fact.name);
+}
+
+/** The facts of `facts` that `doc` holds. */
+function heldFacts(doc: string, facts: readonly Fact[]): string[] {
+  return facts.filter(fact => doc.includes(fact.text)).map(fact => fact.name);
 }
 
 /** The text of the CHANGELOG from a bullet title to the next bullet or heading at the same or a higher level. */
@@ -133,13 +144,12 @@ describe('install backup docs: the skills architecture sentence', () => {
     );
   });
 
-  it('no longer says that hand-authored reference files are never touched', () => {
-    expect(SKILLS_ARCHITECTURE).not.toContain('are never touched by the overlay');
+  it('says that an unnamed tracker or pr file is moved to the install backup folder and named', () => {
+    expect(SKILLS_ARCHITECTURE).toContain('that the build manifest does not name is moved to the install backup folder and named on the next install');
   });
 
-  it('no longer says that an unnamed tracker or pr file is removed', () => {
-    expect(SKILLS_ARCHITECTURE).toContain('that the build manifest does not name is moved to the install backup folder and named on the next install');
-    expect(SKILLS_ARCHITECTURE).not.toContain('that the build manifest does not name is removed on the next install');
+  it.each(STALE_FACTS)('no longer says that $name', fact => {
+    expect(heldFacts(SKILLS_ARCHITECTURE, [fact])).toEqual([]);
   });
 });
 
@@ -198,12 +208,12 @@ describe('install backup docs: the guard is live (seeded known-bad input)', () =
     expect(missingFacts(edited, BACKUP_FACTS)).toEqual(['the unencrypted backup']);
   });
 
-  it('a skills doc that keeps the old sentence fails the check', () => {
-    const old = SKILLS_ARCHITECTURE.replace(
-      'the overlay leaves the hand-authored files that devflow ships',
-      'hand-authored files beside the generated ones are never touched by the overlay',
-    );
-    expect(old).toContain('are never touched by the overlay');
+  it('a skills doc that keeps an old sentence is reported by name, and a doc that dropped them is not', () => {
+    const old =
+      'The hand-authored files beside the generated ones are never touched by the overlay. ' +
+      'A tracker or pr file that the build manifest does not name is removed on the next install.';
+    expect(heldFacts(old, STALE_FACTS)).toEqual(STALE_FACTS.map(fact => fact.name));
+    expect(heldFacts('The overlay leaves the hand-authored files that devflow ships.', STALE_FACTS)).toEqual([]);
   });
 
   it('a changelog with a second entry of the same title finds no entry', () => {

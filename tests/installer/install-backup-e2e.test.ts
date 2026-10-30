@@ -25,8 +25,12 @@ const SUBPROCESS_TIMEOUT_MS = 60_000;
 const MULTI_RUN_TIMEOUT_MS = 4 * SUBPROCESS_TIMEOUT_MS;
 const INIT_ARGS = ['init', '--recommended', '--no-ambient', '--no-memory', '--no-knowledge'];
 
-/** The pieces of a backup report in the output of a run. */
-const BACKUP_LINES = ['that devflow does not ship', 'Backup folder', 'retired devflow file', 'Could not move'];
+/**
+ * The pieces of a backup report in the output of a run: the moved line, the run folder, the retired
+ * line, each warning that starts `Could not ` (move, scan, remove, finish a step, use the backup
+ * folder) and the entry-cap warning. A clean run prints none of them.
+ */
+const BACKUP_LINES = ['that devflow does not ship', 'Backup folder', 'retired devflow file', 'Could not ', 'more than the limit'];
 
 let base: string;
 let tmpHome: string;
@@ -228,11 +232,13 @@ describe('the rules folder over a file of the user', () => {
 });
 
 describe('devflow init over files of earlier releases', () => {
-  it('moves a legacy skill folder whole and names it, and names a removed legacy hook script', { timeout: MULTI_RUN_TIMEOUT_MS }, async () => {
+  it('moves a legacy skill folder whole and a file of the user into one run folder, names both, and names a removed legacy hook script', { timeout: MULTI_RUN_TIMEOUT_MS }, async () => {
     runInit();
     const legacySkill = path.join(tmpHome, '.claude', 'skills', 'codebase-navigation');
     await fs.mkdir(legacySkill);
     await fs.writeFile(path.join(legacySkill, 'SKILL.md'), 'an old skill\n', 'utf-8');
+    const mine = path.join(commandsFolder(), 'mine.md');
+    await fs.writeFile(mine, 'my own command\n', 'utf-8');
     const hook = path.join(tmpHome, '.devflow', 'scripts', 'hooks', 'ambient-prompt');
     await fs.mkdir(path.dirname(hook), { recursive: true });
     await fs.writeFile(hook, 'an old hook\n', 'utf-8');
@@ -240,11 +246,17 @@ describe('devflow init over files of earlier releases', () => {
     const out = runInit();
 
     expect(await exists(legacySkill), 'the folder left skills/').toBe(false);
+    expect(await exists(mine), 'the file left the devflow folder').toBe(false);
     expect(await exists(hook), 'the hook script is removed').toBe(false);
     const runs = await fs.readdir(backupRoot());
-    expect(runs).toHaveLength(1);
+    expect(runs, 'one init makes one run folder').toHaveLength(1);
     const kept = path.join(backupRoot(), runs[0], 'skills', 'codebase-navigation');
     expect(await fs.readFile(path.join(kept, 'SKILL.md'), 'utf-8')).toBe('an old skill\n');
+    const keptFile = path.join(backupRoot(), runs[0], 'commands', 'devflow', 'mine.md');
+    expect(await fs.readFile(keptFile, 'utf-8')).toBe('my own command\n');
+    expect(out).toContain('Moved 2 item(s) that devflow does not ship');
+    expect(out.match(/Backup folder: /g), 'the output names the run folder once').toHaveLength(1);
+    expect(out).toContain(`${mine} -> ${keptFile}`);
     expect(out).toContain(`${legacySkill}/ -> ${kept}/`);
     expect(out).toContain(`Removed 1 retired devflow file(s): ${hook}`);
     expect(await exists(path.join(backupRoot(), runs[0], 'scripts')), 'a removed script is never copied to the backup folder').toBe(false);

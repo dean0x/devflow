@@ -411,13 +411,13 @@ describe('the pre-pass', () => {
     expect(session.snapshot().moved[0].kind).toBe('link');
   });
 
-  it('moves a FIFO by rename and never opens it', async () => {
+  it('moves a FIFO by rename and never opens it', async ctx => {
     const fifo = at('commands/devflow/pipe');
     await fs.mkdir(path.dirname(fifo), { recursive: true });
     try {
       execFileSync('mkfifo', [fifo]);
     } catch {
-      return;
+      ctx.skip('this machine cannot make a FIFO with mkfifo');
     }
     const open_ = vi.spyOn(fs, 'open');
     const readFile = vi.spyOn(fs, 'readFile');

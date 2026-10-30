@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const recorded = vi.hoisted(() => ({
   events: [] as string[],
   toggle: null as null | ((opts: { backups: import('../../src/targets/claude-code/install-backup.js').BackupSession }) => Promise<unknown>),
+  install: null as null | ((opts: { backups?: import('../../src/targets/claude-code/install-backup.js').BackupSession; claudeDir: string }) => Promise<never>),
 }));
 
 vi.mock('@clack/prompts', async importOriginal => {
@@ -37,10 +38,20 @@ vi.mock('../../src/targets/claude-code/curation-install.js', async importOrigina
   };
 });
 
+vi.mock('../../src/targets/claude-code/installer.js', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../src/targets/claude-code/installer.js')>();
+  const { installViaFileCopy: realInstall } = actual;
+  return {
+    ...actual,
+    installViaFileCopy: ((...args: Parameters<typeof realInstall>) =>
+      recorded.install === null ? realInstall(...args) : recorded.install(args[0])) as typeof realInstall,
+  };
+});
+
 import { openBackupSession, openBackupSessionOrFail, runWithBackupReport, runWithLateBackupReport } from '../../src/cli/commands/backup-session.js';
 import { applyComplianceChange } from '../../src/cli/commands/compliance.js';
 import { convergeInstalledVariants } from '../../src/cli/commands/curation.js';
-import { formatSweepSummary } from '../../src/cli/commands/init.js';
+import { formatSweepSummary, initCommand } from '../../src/cli/commands/init.js';
 import { sweepLegacyDevflowFiles } from '../../src/cli/commands/legacy-sweep.js';
 import { formatBackupSummary, type SummaryLine } from '../../src/cli/commands/install-report.js';
 import { runRulesEnable } from '../../src/cli/commands/rules.js';
@@ -63,10 +74,12 @@ beforeEach(async () => {
   await fs.mkdir(devflowDir, { recursive: true });
   recorded.events.length = 0;
   recorded.toggle = null;
+  recorded.install = null;
 });
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   await fs.rm(home, { recursive: true, force: true });
 });
 
@@ -233,7 +246,10 @@ describe('formatBackupSummary', () => {
     expect(formatBackupSummary(snapshot)[0].message).toContain('Moved 3 item(s)');
   });
 
-  it('prints no removed name on both the retired line and the orphan line', async () => {
+  // That a name the registry sweep removed never also reaches this retired line is proven where the
+  // sweep and the session share a real install: install-backup-install.test.ts, the partial install
+  // ("names each removed name once") and the shared-session sweep ("names a retired command once").
+  it('prints a retired file that the listed removal deleted on the retired line, once, and moves nothing', async () => {
     const session = await open();
     await put('commands/devflow/audit-claude.md');
     await put('commands/devflow/ambient.md');
@@ -242,17 +258,10 @@ describe('formatBackupSummary', () => {
     const snapshot = session.snapshot();
     expect(snapshot.retiredRemoved.map(file => path.basename(file)).sort()).toEqual(['ambient.md', 'audit-claude.md']);
 
-    const sweptNames = ['resolver', 'catch-up-old'];
-    const retiredLine = formatBackupSummary(snapshot).find(l => l.message.startsWith('Removed 2 retired devflow file(s)'));
-    const sweepLine = formatSweepSummary({
-      sweptOrphans: sweptNames.map(name => ({ kind: 'command' as const, name })),
-      sweepFailures: [],
-    })[0];
-    expect(retiredLine).toBeDefined();
-    expect(sweepLine).toBeDefined();
-
-    const printed = [retiredLine?.message ?? '', sweepLine.message];
-    for (const name of ['audit-claude', 'ambient', ...sweptNames]) {
+    const printed = messages(formatBackupSummary(snapshot));
+    expect(printed).toHaveLength(1);
+    expect(printed[0].startsWith('Removed 2 retired devflow file(s)')).toBe(true);
+    for (const name of ['audit-claude.md', 'ambient.md']) {
       expect(printed.filter(line => line.includes(name)), `${name} prints on one line only`).toHaveLength(1);
     }
     expect(snapshot.moved).toEqual([]);
@@ -271,14 +280,11 @@ describe('formatBackupSummary', () => {
 
     expect(swept.removed.map(file => path.basename(file)).sort()).toEqual(['review.md', 'specify.md']);
     const snapshot = session.snapshot();
-    const retiredLine = formatBackupSummary(snapshot).find(l => l.message.startsWith('Removed 3 retired devflow file(s)'));
-    expect(retiredLine?.message).toContain(hook);
-    const sweepLine = formatSweepSummary({
-      sweptOrphans: [{ kind: 'command' as const, name: 'resolver' }],
-      sweepFailures: [],
-    })[0];
-    const printed = [retiredLine?.message ?? '', sweepLine.message];
-    for (const name of ['specify.md', 'review.md', 'ambient-prompt', 'resolver']) {
+    const printed = messages(formatBackupSummary(snapshot));
+    expect(printed).toHaveLength(1);
+    expect(printed[0].startsWith('Removed 3 retired devflow file(s)')).toBe(true);
+    expect(printed[0]).toContain(hook);
+    for (const name of ['specify.md', 'review.md', 'ambient-prompt']) {
       expect(printed.filter(line => line.includes(name)), `${name} prints on one line only`).toHaveLength(1);
     }
     expect(snapshot.moved).toEqual([]);
@@ -353,21 +359,55 @@ describe('the backup report wrappers', () => {
   });
 });
 
-describe('init prints the record ahead of its exit and ahead of the sweep summary', () => {
-  const init = readFileSync(path.join(ROOT, 'src', 'cli', 'commands', 'init.ts'), 'utf8');
+describe('init prints the record ahead of its exit', () => {
+  const INIT_ARGS = ['--recommended', '--no-ambient', '--no-memory', '--no-knowledge', '--no-hud'];
 
-  it('prints before process.exit in the install catch', () => {
-    const catchAt = init.indexOf("s.stop('Installation failed');\n      p.log.error(`${error}`);");
-    expect(catchAt).toBeGreaterThan(-1);
-    const block = init.slice(catchAt, init.indexOf('process.exit(1);', catchAt));
-    expect(block).toContain('backupReport.print();');
+  it('names a file that the install moved aside before the exit of a failed install, once', async () => {
+    const initHome = path.join(home, 'init-home');
+    const initClaudeDir = path.join(initHome, '.claude');
+    await fs.mkdir(initClaudeDir, { recursive: true });
+    assertTempHome(initHome);
+    console.log(`install-backup-report init home: ${await fs.realpath(initHome)}`);
+    vi.stubEnv('HOME', initHome);
+    vi.stubEnv('USERPROFILE', initHome);
+    recorded.install = async opts => {
+      if (opts.claudeDir !== initClaudeDir) throw new Error(`init aimed the install at ${opts.claudeDir}`);
+      if (opts.backups === undefined) throw new Error('init passed no backup session to the install');
+      const folder = path.join(initClaudeDir, 'commands', 'devflow');
+      await fs.mkdir(folder, { recursive: true });
+      await fs.writeFile(path.join(folder, 'mine.md'), 'mine');
+      await opts.backups.prepass([folder]);
+      throw new Error('the install failed');
+    };
+    vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      recorded.events.push(`exit ${String(code)}`);
+      throw new Error('process.exit');
+    }) as typeof process.exit);
+
+    const cwd = process.cwd();
+    process.chdir(initHome);
+    try {
+      await expect(initCommand.parseAsync(INIT_ARGS, { from: 'user' })).rejects.toThrow('process.exit');
+    } finally {
+      process.chdir(cwd);
+    }
+
+    expect(recorded.events.some(e => e === 'error: Error: the install failed'), 'the install threw').toBe(true);
+    const moved = movedLines(recorded.events);
+    expect(moved).toHaveLength(1);
+    expect(moved[0]).toContain('mine.md');
+    expect(recorded.events).toContain('exit 1');
+    expect(recorded.events.indexOf(moved[0])).toBeLessThan(recorded.events.indexOf('exit 1'));
+    expect(recorded.events.filter(e => e.startsWith('info: Backup folder:'))).toHaveLength(1);
   });
 
-  it('prints the record before the sweep summary and makes one session for the run', () => {
-    const printed = init.indexOf('backupReport.print();\n\n    // The curation move');
+  it('prints the record before the sweep summary', () => {
+    const init = readFileSync(path.join(ROOT, 'src', 'cli', 'commands', 'init.ts'), 'utf8');
+    const printed = init.lastIndexOf('backupReport.print();');
+    const sweepSummary = init.indexOf('logSummaryLines(formatSweepSummary(');
     expect(printed).toBeGreaterThan(-1);
-    expect(printed).toBeLessThan(init.indexOf('logSummaryLines(formatSweepSummary(installReport));'));
-    expect(init.match(/openBackupSession\(/g)).toHaveLength(1);
+    expect(sweepSummary).toBeGreaterThan(-1);
+    expect(printed).toBeLessThan(sweepSummary);
   });
 });
 

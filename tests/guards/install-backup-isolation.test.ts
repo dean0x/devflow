@@ -4,8 +4,8 @@
  *
  * What it asserts
  * ---------------
- * 1. Every backup test file (`tests/installer/install-backup*.test.ts` and
- *    `tests/installer/workflow-folder-backup.test.ts`, when it exists):
+ * 1. Every backup test file (`tests/installer/install-backup*.test.ts`,
+ *    `tests/installer/folder-swap.test.ts` and `tests/installer/workflow-folder-backup.test.ts`):
  *    a. calls `assertTempHome(` on a home it made, and logs that home with `console.log(` after
  *       that call and before the first use of the code under test;
  *    b. never asks for the real home (`os.homedir(`, `homedir(`, `os.userInfo(`);
@@ -20,11 +20,11 @@
  * -------------------------------
  * The checks read the text of each file. A home reached through a helper in another file, or a
  * clock read through a name this guard does not list, is not seen. The reach arm below fails by
- * name if the files it expects are not found.
+ * name if a file it expects is not found, so a rename that drops a file from the guard fails.
  */
 
 import { describe, it, expect } from 'vitest';
-import { existsSync, readdirSync, readFileSync } from 'fs';
+import { readdirSync, readFileSync } from 'fs';
 import { builtinModules } from 'module';
 import * as path from 'path';
 
@@ -34,8 +34,20 @@ const INSTALLER_TESTS = path.join(ROOT, 'tests', 'installer');
 const MODULE_PATH = path.join(ROOT, 'src', 'targets', 'claude-code', 'install-backup.ts');
 const CORE_DIR = path.join(ROOT, 'src', 'core');
 
-const BACKUP_TEST_NAME = /^install-backup.*\.test\.ts$/;
-const WORKFLOW_BACKUP_TEST = 'workflow-folder-backup.test.ts';
+const BACKUP_TEST_NAME = /^(?:install-backup.*|folder-swap|workflow-folder-backup)\.test\.ts$/;
+
+/** The backup test files that exist today. A file here that the name pattern does not find fails the reach arm. */
+const EXPECTED_BACKUP_TESTS = [
+  'folder-swap.test.ts',
+  'install-backup-converge.test.ts',
+  'install-backup-e2e.test.ts',
+  'install-backup-empty-run.test.ts',
+  'install-backup-failures.test.ts',
+  'install-backup-install.test.ts',
+  'install-backup-report.test.ts',
+  'install-backup.test.ts',
+  'workflow-folder-backup.test.ts',
+];
 
 /** The first use of the code under test: the home must be asserted and logged before any of these. */
 const FIRST_USE_MARKERS = [
@@ -62,8 +74,12 @@ const BARRED_MODULES = [
 
 function backupTestFiles(): string[] {
   const named = readdirSync(INSTALLER_TESTS).filter(name => BACKUP_TEST_NAME.test(name));
-  if (existsSync(path.join(INSTALLER_TESTS, WORKFLOW_BACKUP_TEST))) named.push(WORKFLOW_BACKUP_TEST);
   return named.sort().map(name => path.join(INSTALLER_TESTS, name));
+}
+
+/** The expected backup test files that `found` leaves out. */
+export function missingBackupTests(found: readonly string[]): string[] {
+  return EXPECTED_BACKUP_TESTS.filter(name => !found.includes(name));
 }
 
 /** The text between the parentheses of the call that opens at `from` (just after the open one). */
@@ -135,9 +151,9 @@ export function importViolations(source: string, file: string): string[] {
 }
 
 describe('backup test isolation', () => {
-  it('reaches the backup test files it guards', () => {
+  it('reaches every backup test file it is expected to guard', () => {
     const names = backupTestFiles().map(file => path.basename(file));
-    expect(names).toContain('install-backup.test.ts');
+    expect(missingBackupTests(names)).toEqual([]);
   });
 
   it.each(backupTestFiles().map(file => [path.basename(file), file] as const))(
@@ -146,6 +162,20 @@ describe('backup test isolation', () => {
       expect(isolationViolations(readFileSync(file, 'utf8'))).toEqual([]);
     },
   );
+});
+
+describe('the reach of the guard', () => {
+  it('names each expected file that the search leaves out', () => {
+    expect(missingBackupTests(EXPECTED_BACKUP_TESTS)).toEqual([]);
+    expect(missingBackupTests(EXPECTED_BACKUP_TESTS.filter(name => name !== 'folder-swap.test.ts'))).toEqual(['folder-swap.test.ts']);
+    expect(missingBackupTests([])).toEqual(EXPECTED_BACKUP_TESTS);
+  });
+
+  it('finds every expected file by the name pattern and no helper or other test', () => {
+    for (const name of EXPECTED_BACKUP_TESTS) expect(BACKUP_TEST_NAME.test(name), name).toBe(true);
+    expect(BACKUP_TEST_NAME.test('install-backup-harness.ts')).toBe(false);
+    expect(BACKUP_TEST_NAME.test('folder-swap-other.test.ts')).toBe(false);
+  });
 });
 
 describe('isolationViolations', () => {
