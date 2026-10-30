@@ -22,6 +22,7 @@ import { compiledSkillRefsDir } from '../../src/core/assets.js';
 import { generatedReferenceManifest } from '../../src/core/mds-variants.js';
 import { buildAssetMaps, DEVFLOW_PLUGINS } from '../../src/core/plugins.js';
 import { assertTempHome } from '../setup/home-isolation.js';
+import { testBackups } from '../helpers.js';
 
 const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
 
@@ -41,8 +42,9 @@ const installedRefs = (): string => path.join(skillsRoot(), 'devflow:git', 'refe
 const exists = (file: string): Promise<boolean> => fs.lstat(file).then(() => true, () => false);
 
 /** Install code-review's command and agents, a core rule and two skills, as a full or a partial install. */
-function install(isPartialInstall: boolean): Promise<InstallReport> {
+async function install(isPartialInstall: boolean): Promise<InstallReport> {
   return installViaFileCopy({
+    backups: await testBackups(tmp, { claudeDir, devflowDir }),
     curation: true,
     compliance: true,
     plugins: CODE_REVIEW,

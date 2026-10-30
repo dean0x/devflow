@@ -17,6 +17,7 @@ import { generatedReferenceManifest, installedReferenceManifest, PR_HOST_DESTINA
 import { sweepOrphanedReferences, MAX_REFERENCE_SWEEP_DEPTH } from '../../core/reference-sweep.js';
 import { complianceOffCopyExclusions, removeComplianceOffFiles } from './compliance-off-files.js';
 import { clearLinkForWrite, directoryState, refuseUnrealFolder, removeReportingLink, unlinkLinkAt, type LinkReport } from './linked-folder.js';
+import type { BackupSession, BackupSnapshot } from './install-backup.js';
 import { installWorkflowFolder, readWorkflowFolder, type WorkflowFolderFile, type WorkflowFolderRead } from './workflow-folder-install.js';
 import { TRACKER_AGENT_NAME } from './tracker-install.js';
 import { isTrackerStampedAgent } from './tracker-servers.js';
@@ -139,6 +140,12 @@ export interface InstallReport {
    * user who wrote a shadow deserves to hear which of the two happened.
    */
   dormantShadows: string[];
+  /**
+   * What the run's backup session had recorded when this install returned: the files it moved
+   * aside, what it could not move and the retired files it removed. A frozen copy, so it does not
+   * follow later steps of the same run; the entry point prints the live session at the end.
+   */
+  backups: BackupSnapshot;
 }
 
 /** Discriminated outcome for a single rule installation. */
@@ -1437,6 +1444,7 @@ export async function overlayGeneratedReferences(opts: {
   sourceRoot?: string;
   manifest?: readonly string[];
   warn?: (msg: string) => void;
+  backups: BackupSession;
 }): Promise<ReferenceOverlayResult> {
   const sourceRoot = opts.sourceRoot ?? compiledSkillRefsDir();
   const manifest = opts.manifest ?? generatedReferenceManifest();
@@ -1948,6 +1956,12 @@ export interface FileCopyOptions {
   workflowFolders?: readonly WorkflowFolder[];
   /** Package root the folder trees are read from. Defaults to {@link FileCopyOptions.packageRoot}. */
   workflowFoldersRoot?: string;
+  /**
+   * The backup session of this run, required so a removal step cannot run without one. The entry
+   * point makes one session before any change and passes the same one to the converge that follows
+   * the install, so one run makes at most one backup folder.
+   */
+  backups: BackupSession;
 }
 
 /**
@@ -2431,6 +2445,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     compliance,
     trackerServers = TRACKER_MCP_SERVERS_DEFAULT,
     warn = () => { /* no-op: callers without a logger still get the full InstallReport */ },
+    backups,
   } = options;
   const packageRoot = options.packageRoot ?? getPackageRoot();
 
@@ -2486,6 +2501,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     refusedFolders: [],
     removedSkills: [],
     dormantShadows: [],
+    backups: backups.snapshot(),
   };
 
   // The skill decision, made in full before anything is touched — which skills
@@ -2791,6 +2807,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
         sourceRoot: refsSourceRoot,
         manifest: refsManifest,
         warn,
+        backups,
       });
       report.overlaidRefs.push(...overlay.overlaidRefs);
       report.unchangedRefs.push(...overlay.unchangedRefs);
@@ -2829,7 +2846,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
       warn(`workflow skill folder: ${read.reason}`);
       continue;
     }
-    const installed = await installWorkflowFolder({ claudeDir, name: folder.name, files: read.files, links: report });
+    const installed = await installWorkflowFolder({ claudeDir, name: folder.name, files: read.files, links: report, backups });
     if (installed.outcome === 'failed') {
       warn(`workflow skill folder: could not install ${prefixSkillName(folder.name)} (${installed.reason ?? 'unknown error'})`);
     }
@@ -2865,5 +2882,6 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   });
 
   spinner.stop('Components installed via file copy');
+  report.backups = backups.snapshot();
   return report;
 }

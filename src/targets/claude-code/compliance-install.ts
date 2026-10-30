@@ -25,6 +25,7 @@ import * as path from 'path';
 import { skillsDir, rulesDir } from '../../core/assets.js';
 import { ALWAYS_PRESENT_REFS, COMPLIANCE_FRAMEWORKS, normalizeFrameworks, type ComplianceFeatureState } from '../../core/compliance.js';
 import { parseComplianceFragment, composeComplianceSkill, composeComplianceRule, type ComplianceFragment } from '../../core/compliance-compose.js';
+import type { BackupSession } from './install-backup.js';
 import { validateSkillShadow, validateRuleShadow } from './installer.js';
 import { newLinkReport, refuseUnrealFolder, removeReportingLink, warnLinkReport, writeFileReplacingLink, type LinkReport } from './linked-folder.js';
 
@@ -47,6 +48,8 @@ export interface ConvergeComplianceArtifactsOptions {
   frameworks: string[];
   rulesEnabled: boolean;
   warn: (msg: string) => void;
+  /** The backup session of the run, for the skill folder this converge swaps and the rule it removes. */
+  backups: BackupSession;
 }
 
 export interface ConvergeComplianceArtifactsResult {
@@ -168,6 +171,7 @@ async function installSkillDir(
   fragments: ReadonlyMap<string, ComplianceFragment>,
   warn: (msg: string) => void,
   links: LinkReport,
+  backups: BackupSession,
 ): Promise<void> {
   const canonicalSrc = path.join(skillsDir(), 'compliance');
   const target = skillTarget(claudeDir);
@@ -313,7 +317,7 @@ async function installRuleFile(
 export async function convergeComplianceArtifacts(
   opts: ConvergeComplianceArtifactsOptions,
 ): Promise<ConvergeComplianceArtifactsResult> {
-  const { claudeDir, devflowDir, enabled, frameworks, rulesEnabled, warn } = opts;
+  const { claudeDir, devflowDir, enabled, frameworks, rulesEnabled, warn, backups } = opts;
 
   // S78: claudeDir precondition — reliability rule: assert invariants in production code.
   // An empty or relative claudeDir would make skillTarget/ruleTarget resolve to unexpected
@@ -354,7 +358,7 @@ export async function convergeComplianceArtifacts(
   // installSkillDir is caught internally and reported via trackingWarn, so
   // execution always continues to the rule step.
   const links = newLinkReport();
-  await installSkillDir(claudeDir, devflowDir, stampFrameworks, fragments, trackingWarn, links);
+  await installSkillDir(claudeDir, devflowDir, stampFrameworks, fragments, trackingWarn, links, backups);
 
   // The rule folder is proven before the rule is written or removed: a link there sends both into
   // another place. The skill folder is swapped whole above, and a swap never follows a link.
@@ -409,8 +413,9 @@ export async function convergeFromManifest(opts: {
   manifest: { features: { compliance: ComplianceFeatureState; rules: boolean } };
   warn: (msg: string) => void;
   rulesEnabledOverride?: boolean;
+  backups: BackupSession;
 }): Promise<ConvergeComplianceArtifactsResult> {
-  const { claudeDir, devflowDir, manifest, warn, rulesEnabledOverride } = opts;
+  const { claudeDir, devflowDir, manifest, warn, rulesEnabledOverride, backups } = opts;
   return convergeComplianceArtifacts({
     claudeDir,
     devflowDir,
@@ -418,5 +423,6 @@ export async function convergeFromManifest(opts: {
     frameworks: manifest.features.compliance.frameworks,
     rulesEnabled: rulesEnabledOverride ?? manifest.features.rules,
     warn,
+    backups,
   });
 }

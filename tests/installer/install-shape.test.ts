@@ -19,6 +19,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { installViaFileCopy, type Spinner } from '../../src/targets/claude-code/installer.js';
+import { testBackups } from '../helpers.js';
 import {
   formatSkillScopeSummary,
   formatTrackerAssetSummary,
@@ -79,6 +80,7 @@ async function run(opts: {
     isPartialInstall: opts.isPartialInstall,
     spinner: noopSpinner,
     warn: (msg) => { warnings.push(msg); },
+    backups: await testBackups(claudeDir, { claudeDir, devflowDir }),
   });
 }
 
@@ -639,6 +641,7 @@ describe('the agent copy loop leaves the Tracker agent to convergeTrackerArtifac
       isPartialInstall: false,
       spinner: noopSpinner,
       warn: (msg) => { warnings.push(msg); },
+      backups: await testBackups(claudeDir, { claudeDir, devflowDir }),
     });
   }
 

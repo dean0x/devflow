@@ -50,7 +50,7 @@ import {
 import { hudOnlyCharterPlugins } from '../../src/cli/commands/init.js';
 import { charterPluginsAfterRemoval, runSelectivePhaseForScope } from '../../src/cli/commands/uninstall.js';
 import { HANDOFF_PREFIX } from '../helpers/charter-guards.js';
-import { makeManifest } from '../helpers.js';
+import { makeManifest, testBackups } from '../helpers.js';
 
 const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
 
@@ -313,6 +313,7 @@ describe('installViaFileCopy: the render is its own step after the script copy',
       isPartialInstall: opts.isPartialInstall,
       spinner: noopSpinner,
       warn: (msg) => { warnings.push(msg); },
+      backups: await testBackups(root, { claudeDir, devflowDir }),
     });
   }
 

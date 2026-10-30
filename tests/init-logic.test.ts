@@ -34,6 +34,7 @@ import {
 } from '../src/core/tracker.js';
 import { parsePluginSelection } from '../src/core/plugins.js';
 import { getManagedSettingsPath } from '../src/targets/claude-code/claude-paths.js';
+import { testBackups } from './helpers.js';
 import {
   installManagedSettings,
   installClaudeignore,
@@ -2005,6 +2006,7 @@ describe('installViaFileCopy cleanup (isPartialInstall)', () => {
       agentsMap: new Map(),
       isPartialInstall: false,
       spinner: noopSpinner,
+      backups: await testBackups(tmpDir, { claudeDir, devflowDir }),
     });
 
     // Stale dirs should be removed
@@ -2025,6 +2027,7 @@ describe('installViaFileCopy cleanup (isPartialInstall)', () => {
       agentsMap: new Map(),
       isPartialInstall: true,
       spinner: noopSpinner,
+      backups: await testBackups(tmpDir, { claudeDir, devflowDir }),
     });
 
     // Stale files (names absent from registry) should be removed by the sweep
@@ -2079,6 +2082,7 @@ describe('init LEGACY_SKILL_NAMES cleanup pass (init.ts:1149-1153)', () => {
       agentsMap: new Map(),
       isPartialInstall: false,
       spinner: noopSpinner,
+      backups: await testBackups(tmpDir, { claudeDir, devflowDir }),
     });
 
     // codebase-navigation/ must survive installViaFileCopy — init.ts:1149 owns its cleanup
@@ -2105,6 +2109,7 @@ describe('init LEGACY_SKILL_NAMES cleanup pass (init.ts:1149-1153)', () => {
       agentsMap: new Map(),
       isPartialInstall: false,
       spinner: noopSpinner,
+      backups: await testBackups(tmpDir, { claudeDir, devflowDir }),
     });
 
     // Step 2: LEGACY_SKILL_NAMES cleanup — mirrors init.ts:1149-1153 exactly.
@@ -2183,6 +2188,7 @@ describe('partial install registry-diff sweep correctness', () => {
       agentsMap: new Map(),
       isPartialInstall: true,
       spinner: noopSpinner,
+      backups: await testBackups(tmpDir, { claudeDir, devflowDir }),
     });
 
     // --- Assert ---

@@ -73,7 +73,7 @@ import { buildShippedSet, loadShippedSet, type ShippedSetInputs } from '../../sr
 import { backupOf, stagingPrefixOf } from '../../src/targets/claude-code/workflow-folder-install.js';
 import { FIXTURE_FOLDER } from '../fixtures/workflow-folder.js';
 import { RELEASED_SHIPPED_NAMES } from '../fixtures/released-shipped-names.js';
-import { ROOT } from '../helpers.js';
+import { ROOT, testBackups } from '../helpers.js';
 import { assertTempHome, TEMP_HOME_PREFIX } from '../setup/home-isolation.js';
 
 // ---------------------------------------------------------------------------
@@ -274,6 +274,7 @@ describe('complianceSkillFiles', () => {
       frameworks: ['gdpr'],
       rulesEnabled: false,
       warn: message => warnings.push(message),
+      backups: await testBackups(home),
     });
 
     expect(warnings).toEqual([]);

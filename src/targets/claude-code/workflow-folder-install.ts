@@ -42,6 +42,7 @@ import {
 } from '../../core/mds-variants.js';
 import { isContainedIn } from '../../core/paths.js';
 import { prefixSkillName } from '../../core/plugins.js';
+import type { BackupSession } from './install-backup.js';
 import { directoryState, refuseUnrealFolder, type LinkReport } from './linked-folder.js';
 
 /** The deepest level of a folder that is read or compared: `references/<file>` is level 1. */
@@ -210,6 +211,8 @@ export interface InstallWorkflowFolderOptions {
   files: readonly WorkflowFolderFile[];
   /** Where a refused folder is recorded. */
   links: Pick<LinkReport, 'refusedFolders'>;
+  /** The backup session of the run, for the files in the folder that the swap would replace. */
+  backups: BackupSession;
 }
 
 /**

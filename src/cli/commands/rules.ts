@@ -10,7 +10,9 @@ import { rulesDir } from '../../core/assets.js';
 import { installAllRules, validateRuleShadow, type RuleInstallOutcome, type RuleShadowState } from '../../targets/claude-code/installer.js';
 import { convergeFromManifest } from '../../targets/claude-code/compliance-install.js';
 import { convergeBehaviorFromManifest } from '../../targets/claude-code/behavior-install.js';
+import type { BackupSession } from '../../targets/claude-code/install-backup.js';
 import { newLinkReport, refuseUnrealFolder, refusedFolderMessage, removeReportingLink } from '../../targets/claude-code/linked-folder.js';
+import { openBackupSessionOrFail, runWithBackupReport } from './backup-session.js';
 import { formatLinksSummary } from './install-report.js';
 
 interface RulesOptions {
@@ -252,13 +254,25 @@ async function handleRuleUnshadow(
  *
  * Warn-not-throw on per-item compliance convergence failure, so a convergence
  * failure never undoes the rules install.
+ *
+ * The record of `backups` prints once, as the enable returns or throws.
  */
-export async function runRulesEnable(claudeDir: string, devflowDir: string): Promise<void> {
+export function runRulesEnable(claudeDir: string, devflowDir: string, backups: BackupSession): Promise<void> {
+  return runWithBackupReport(backups, printBackups => enableRules(claudeDir, devflowDir, backups, printBackups));
+}
+
+async function enableRules(
+  claudeDir: string,
+  devflowDir: string,
+  backups: BackupSession,
+  printBackups: () => void,
+): Promise<void> {
   const rulesTarget = path.join(claudeDir, 'rules', 'devflow');
 
   const manifest = await readManifest(devflowDir);
   if (!manifest) {
     p.log.error('No manifest found. Run devflow init first.');
+    printBackups();
     process.exit(1);
   }
 
@@ -326,6 +340,7 @@ export async function runRulesEnable(claudeDir: string, devflowDir: string): Pro
       manifest,
       warn: warnConverge,
       rulesEnabledOverride: !installFailed,
+      backups,
     });
   } catch (err) {
     // Warn-not-abort — compliance convergence failure does not undo rules install
@@ -389,17 +404,23 @@ export const rulesCommand = new Command('rules')
     // No positional action — fall through to flag-based handling
 
     if (options.enable) {
-      await runRulesEnable(claudeDir, devflowDir);
+      const backups = await openBackupSessionOrFail({ claudeDir, devflowDir });
+      if (backups === null) return;
+      await runRulesEnable(claudeDir, devflowDir, backups);
 
     } else if (options.disable) {
-      await fs.rm(rulesTarget, { recursive: true, force: true });
+      const backups = await openBackupSessionOrFail({ claudeDir, devflowDir });
+      if (backups === null) return;
+      await runWithBackupReport(backups, async () => {
+        await fs.rm(rulesTarget, { recursive: true, force: true });
 
-      const manifest = await readManifest(devflowDir);
-      if (manifest) {
-        manifest.features.rules = false;
-        manifest.updatedAt = new Date().toISOString();
-        await writeManifest(devflowDir, manifest);
-      }
+        const manifest = await readManifest(devflowDir);
+        if (manifest) {
+          manifest.features.rules = false;
+          manifest.updatedAt = new Date().toISOString();
+          await writeManifest(devflowDir, manifest);
+        }
+      });
       p.log.success('Rules disabled — removed rules directory');
 
     } else if (options.status) {

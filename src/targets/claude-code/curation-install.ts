@@ -119,6 +119,7 @@ import {
 } from '../../core/plugins.js';
 import { convergeFromManifest, type ConvergeComplianceArtifactsResult } from './compliance-install.js';
 import { copyDirectory, resolveSkillSource } from './installer.js';
+import type { BackupSession } from './install-backup.js';
 import { LANGUAGE_STAMPED_COMMANDS, stampForConverge } from './language-stamp.js';
 import { entryIsLink, newLinkReport, refuseUnrealFolder, refusedFolderMessage, warnLinkReport, writeFileReplacingLink, type LinkReport } from './linked-folder.js';
 import { convergeReferences, type ConvergeReferencesResult } from './reference-converge.js';
@@ -167,6 +168,8 @@ export interface ConvergeCurationVariantsOptions {
   warn: (msg: string) => void;
   /** Package root the variants and sources, the apply-decisions skill included, are read from. Injectable for a temp tree; defaults to this package. */
   packageRoot?: string;
+  /** The backup session of the run, for the skill folders this converge removes or swaps. */
+  backups: BackupSession;
 }
 
 export interface ConvergeCurationVariantsResult {
@@ -514,7 +517,13 @@ export function curationSwapPaths(claudeDir: string, now: number): { readonly st
  * A target that is a link is moved aside as the link itself, never followed, so what it points to is
  * left as it was; the link is recorded in `links` once the real folder stands in its place.
  */
-async function swapInSkillDirectory(claudeDir: string, sourceDir: string, target: string, links: LinkReport): Promise<void> {
+async function swapInSkillDirectory(
+  claudeDir: string,
+  sourceDir: string,
+  target: string,
+  links: LinkReport,
+  backups: BackupSession,
+): Promise<void> {
   const { staging, backup } = curationSwapPaths(claudeDir, Date.now());
   try {
     await copyDirectory(sourceDir, staging);
@@ -558,7 +567,7 @@ async function convergeSkills(opts: ConvergeCurationVariantsOptions, links: Link
       }
       const resolved = await resolveSkillSource(skill, devflowDir, opts.packageRoot);
       if ((await pathExists(target)) && (await treesIdentical(resolved.dir, target))) continue;
-      await swapInSkillDirectory(claudeDir, resolved.dir, target, links);
+      await swapInSkillDirectory(claudeDir, resolved.dir, target, links, opts.backups);
       state = 'installed';
     } catch (err) {
       warn(`curation variants: could not converge the ${prefixSkillName(skill)} skill (${target}) — ${String(err)}`);
@@ -745,6 +754,8 @@ export interface ConvergeVariantAxesOptions {
   workflowFolders?: readonly WorkflowFolder[];
   /** Package root the folder trees are read from. Defaults to {@link ConvergeVariantAxesOptions.packageRoot}. */
   workflowFoldersRoot?: string;
+  /** The backup session of the run: the one the install before this converge used, when there was one. */
+  backups: BackupSession;
 }
 
 /** What the workflow-folder converge did. */
@@ -806,8 +817,9 @@ async function convergeWorkflowFolders(opts: {
   folders: readonly WorkflowFolder[];
   root: string;
   warn: (msg: string) => void;
+  backups: BackupSession;
 }): Promise<ConvergeWorkflowFoldersResult> {
-  const { claudeDir, switches, plugins, folders, root, warn } = opts;
+  const { claudeDir, switches, plugins, folders, root, warn, backups } = opts;
   const installed: string[] = [];
   const unchanged: string[] = [];
   const failures: string[] = [];
@@ -828,7 +840,7 @@ async function convergeWorkflowFolders(opts: {
       continue;
     }
     const links = newLinkReport();
-    const result = await installWorkflowFolder({ claudeDir, name: folder.name, files: read.files, links });
+    const result = await installWorkflowFolder({ claudeDir, name: folder.name, files: read.files, links, backups });
     switch (result.outcome) {
       case 'installed':
         installed.push(folder.name);
@@ -884,7 +896,7 @@ export function workflowFoldersPosting(folders: ConvergeWorkflowFoldersResult, c
  * Never throws.
  */
 export async function convergeVariantAxes(opts: ConvergeVariantAxesOptions): Promise<ConvergeVariantAxesResult> {
-  const { claudeDir, devflowDir, manifest, plugins, warn, packageRoot } = opts;
+  const { claudeDir, devflowDir, manifest, plugins, warn, packageRoot, backups } = opts;
   const switches: VariantSwitches = { curation: manifest.features.curation, compliance: manifest.features.compliance.enabled };
 
   // Precondition, asserted in production code: a relative claudeDir would resolve
@@ -913,14 +925,14 @@ export async function convergeVariantAxes(opts: ConvergeVariantAxesOptions): Pro
   );
   const skillLinks = newLinkReport();
   const skill = await attempt<CurationSkillState>('curation variants', warn, 'failed', () =>
-    convergeSkills({ claudeDir, devflowDir, curation: switches.curation, plugins, warn, packageRoot }, skillLinks),
+    convergeSkills({ claudeDir, devflowDir, curation: switches.curation, plugins, warn, packageRoot, backups }, skillLinks),
   );
   warnLinkReport(skillLinks, warn);
   const compliance = await attempt<ConvergeComplianceArtifactsResult>(
     'compliance artifacts',
     warn,
     { removedPreexisting: false, converged: false, replacedLinks: [], refusedFolders: [] },
-    () => convergeFromManifest({ claudeDir, devflowDir, manifest, warn }),
+    () => convergeFromManifest({ claudeDir, devflowDir, manifest, warn, backups }),
   );
   const references = await attempt<ConvergeReferencesResult>(
     'reference converge',
@@ -934,7 +946,7 @@ export async function convergeVariantAxes(opts: ConvergeVariantAxesOptions): Pro
       stillPosting: [],
       unproven: !switches.compliance,
     },
-    () => convergeReferences({ claudeDir, devflowDir, compliance: switches.compliance, warn, packageRoot }),
+    () => convergeReferences({ claudeDir, devflowDir, compliance: switches.compliance, warn, packageRoot, backups }),
   );
   const workflowFolders = await attempt<ConvergeWorkflowFoldersResult>(
     'workflow folders',
@@ -947,6 +959,7 @@ export async function convergeVariantAxes(opts: ConvergeVariantAxesOptions): Pro
       folders: opts.workflowFolders ?? WORKFLOW_FOLDERS,
       root: opts.workflowFoldersRoot ?? packageRoot ?? getPackageRoot(),
       warn,
+      backups,
     }),
   );
 
@@ -1080,6 +1093,8 @@ export interface ApplyVariantToggleOptions {
   runningVersion: string | null;
   warn: (msg: string) => void;
   packageRoot?: string;
+  /** The backup session of the toggle: made before any change and shared with every step of it. */
+  backups: BackupSession;
 }
 
 export type VariantToggleOutcome =
@@ -1245,6 +1260,7 @@ export async function applyVariantToggle(opts: ApplyVariantToggleOptions): Promi
     plugins: DEVFLOW_PLUGINS.filter(plugin => selection.has(plugin.name)),
     warn,
     packageRoot: opts.packageRoot,
+    backups: opts.backups,
   });
   if (result.converged) {
     await recordInstalledVariants(devflowDir, { curation: state.features.curation, compliance: state.features.compliance.enabled }, warn);

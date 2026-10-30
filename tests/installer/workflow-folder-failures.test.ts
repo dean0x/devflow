@@ -28,6 +28,7 @@ import type { PluginDefinition } from '../../src/core/plugins.js';
 import { workflowFoldersPosting, type ConvergeWorkflowFoldersResult } from '../../src/targets/claude-code/curation-install.js';
 import { installViaFileCopy, type InstallReport, type Spinner } from '../../src/targets/claude-code/installer.js';
 import { assertTempHome } from '../setup/home-isolation.js';
+import { testBackups } from '../helpers.js';
 import { FIXTURE_FOLDER } from '../fixtures/workflow-folder.js';
 
 const SWITCHES = { curation: true, compliance: true } as const;
@@ -108,6 +109,7 @@ async function widenedInstall(registry: readonly WorkflowFolder[]): Promise<Inst
     warn,
     workflowFolders: registry,
     workflowFoldersRoot: pkg,
+    backups: await testBackups(tmp, { claudeDir, devflowDir, workflowFolders: registry }),
   });
   expect(report.sweptOrphans, 'precondition: the retired agent was swept, so the run widened').toContainEqual({
     kind: 'agent',

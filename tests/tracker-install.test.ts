@@ -38,6 +38,7 @@ import {
 import { installedReferenceManifest } from '../src/core/mds-variants.js';
 import { compiledComplianceOffSkillRefsDir, compiledSkillRefsDir } from '../src/core/assets.js';
 import { writeManifest, readManifest } from '../src/core/manifest.js';
+import { testBackups } from './helpers.js';
 
 let claudeDir: string;
 let warnings: string[];
@@ -53,8 +54,13 @@ async function exists(p: string): Promise<boolean> {
 }
 
 /** The one overlay every install runs, onto the full manifest. */
-const overlayAll = () =>
-  overlayGeneratedReferences({ referencesTarget: refsTarget(), manifest: installedReferenceManifest(), warn });
+const overlayAll = async () =>
+  overlayGeneratedReferences({
+    referencesTarget: refsTarget(),
+    manifest: installedReferenceManifest(),
+    warn,
+    backups: await testBackups(claudeDir, { claudeDir }),
+  });
 
 beforeEach(async () => {
   claudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-tracker-install-'));
@@ -365,6 +371,7 @@ describe('readTrackerMechanics / formatTrackerMechanics', () => {
       sourceRoot: compiledComplianceOffSkillRefsDir(),
       manifest: installedReferenceManifest({ compliance: false }),
       warn,
+      backups: await testBackups(claudeDir, { claudeDir }),
     });
 
     const state = await readTrackerMechanics(claudeDir, false);

@@ -10,6 +10,7 @@ import {
 } from '../src/core/plugins.js';
 import { LEGACY_SKILL_NAMES } from '../src/targets/claude-code/legacy.js';
 import { installViaFileCopy, type InstallReport, type Spinner } from '../src/targets/claude-code/installer.js';
+import { testBackups } from './helpers.js';
 import { hasShadow } from '../src/cli/commands/skills.js';
 
 /** No-op spinner for tests */
@@ -236,6 +237,7 @@ describe('installViaFileCopy skill lifecycle', () => {
       agentsMap: new Map(),
       isPartialInstall: opts?.isPartialInstall ?? false,
       spinner: noopSpinner,
+      backups: await testBackups(claudeDir, { claudeDir, devflowDir }),
     });
   }
 

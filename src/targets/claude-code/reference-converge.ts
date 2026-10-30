@@ -32,6 +32,7 @@ import { installedReferenceManifest, SKILL_REFS_SKILL_NAME } from '../../core/md
 import { getPackageRoot } from '../../core/paths.js';
 import { prefixSkillName } from '../../core/plugins.js';
 import { removeComplianceOffFiles, restoreComplianceOffFiles } from './compliance-off-files.js';
+import type { BackupSession } from './install-backup.js';
 import { overlayGeneratedReferences, overlayUnitLabel, referencesHostState, resolveSkillSource } from './installer.js';
 
 export interface ConvergeReferencesOptions {
@@ -44,6 +45,8 @@ export interface ConvergeReferencesOptions {
   warn: (msg: string) => void;
   /** Package root the references and the skill sources are read from. Injectable for a temp tree; defaults to this package. */
   packageRoot?: string;
+  /** The backup session of the run, for the removals the overlay makes in the references tree. */
+  backups: BackupSession;
 }
 
 export interface ConvergeReferencesResult {
@@ -70,7 +73,7 @@ export interface ConvergeReferencesResult {
 }
 
 export async function convergeReferences(opts: ConvergeReferencesOptions): Promise<ConvergeReferencesResult> {
-  const { claudeDir, devflowDir, compliance, warn } = opts;
+  const { claudeDir, devflowDir, compliance, warn, backups } = opts;
   const failures: string[] = [];
   const fail = (message: string): void => {
     warn(`reference converge: ${message}`);
@@ -103,6 +106,7 @@ export async function convergeReferences(opts: ConvergeReferencesOptions): Promi
         sourceRoot: skillRefsSourceDir(compliance, root),
         manifest,
         warn,
+        backups,
       });
       rewritten = overlay.overlaidRefs;
       for (const failure of overlay.overlayFailures) {

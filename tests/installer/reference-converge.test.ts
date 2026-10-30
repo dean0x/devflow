@@ -23,6 +23,7 @@ import { renderVariantManifest } from '../../src/core/curation-variants.js';
 import { generatedReferenceManifest, installedReferenceManifest } from '../../src/core/mds-variants.js';
 import { buildAssetMaps, DEVFLOW_PLUGINS } from '../../src/core/plugins.js';
 import { assertTempHome } from '../setup/home-isolation.js';
+import { testBackups } from '../helpers.js';
 
 const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
 
@@ -80,7 +81,9 @@ function machine(compliance: boolean): VariantMachineState {
   return { features: { curation: true, compliance: { enabled: compliance, frameworks: [] }, rules: false } };
 }
 
-function installInto(dir: string, home: string, compliance: boolean, isPartialInstall = false) {
+const backupsOf = (dir = claudeDir, home = devflowDir) => testBackups(tmp, { claudeDir: dir, devflowDir: home });
+
+async function installInto(dir: string, home: string, compliance: boolean, isPartialInstall = false) {
   return installViaFileCopy({
     curation: true,
     compliance,
@@ -93,11 +96,14 @@ function installInto(dir: string, home: string, compliance: boolean, isPartialIn
     isPartialInstall,
     spinner: noopSpinner,
     warn,
+    backups: await backupsOf(dir, home),
   });
 }
 
-function converge(compliance: boolean, packageRoot?: string) {
-  return convergeVariantAxes({ claudeDir, devflowDir, manifest: machine(compliance), plugins: CORE, warn, packageRoot });
+async function converge(compliance: boolean, packageRoot?: string) {
+  return convergeVariantAxes({
+    claudeDir, devflowDir, manifest: machine(compliance), plugins: CORE, warn, packageRoot, backups: await backupsOf(),
+  });
 }
 
 beforeEach(async () => {
@@ -225,7 +231,7 @@ describe('the references converge fails closed on the off side', () => {
       await fs.writeFile(path.join(onRoot, ...rel.split('/')), 'ON-TREE-SENTINEL\n', 'utf-8');
     }
 
-    const result = await convergeReferences({ claudeDir, devflowDir, compliance: false, warn, packageRoot: pkg });
+    const result = await convergeReferences({ claudeDir, devflowDir, compliance: false, warn, packageRoot: pkg, backups: await backupsOf() });
 
     expect(result.converged).toBe(false);
     expect(result.unproven).toBe(true);
@@ -260,7 +266,7 @@ describe('the references converge fails closed on the off side', () => {
     const pkg = path.join(tmp, 'pkg');
     await fs.mkdir(pkg, { recursive: true });
 
-    const result = await convergeReferences({ claudeDir, devflowDir, compliance: true, warn, packageRoot: pkg });
+    const result = await convergeReferences({ claudeDir, devflowDir, compliance: true, warn, packageRoot: pkg, backups: await backupsOf() });
 
     expect(result.converged).toBe(false);
     expect(result.stillPosting).toEqual([]);
@@ -291,7 +297,7 @@ describe('the references converge fails closed on the off side', () => {
     await fs.chmod(path.join(elsewhere, 'trust-rule.md'), 0o600);
     const before = await fileMap(elsewhere);
 
-    const result = await convergeReferences({ claudeDir, devflowDir, compliance: false, warn });
+    const result = await convergeReferences({ claudeDir, devflowDir, compliance: false, warn, backups: await backupsOf() });
 
     expect(result.converged).toBe(false);
     expect(result.unproven).toBe(true);
@@ -456,9 +462,10 @@ const FOLDER_CASES: readonly FolderCase[] = [
 const markerOf = (folderCase: FolderCase): string => path.join(folderCase.folder(), folderCase.marker);
 
 /** Install the folder kinds of FOLDER_CASES together: code-review's command and agents, a core rule, and two skills. */
-function installEveryFolder(isPartialInstall: boolean) {
+async function installEveryFolder(isPartialInstall: boolean) {
   const added = DEVFLOW_PLUGINS.filter(p => p.name === 'devflow-code-review');
   return installViaFileCopy({
+    backups: await backupsOf(),
     curation: true,
     compliance: true,
     plugins: added,
@@ -730,7 +737,9 @@ describe('the version-skew check keeps the references where they are', () => {
     await seedManifest('3.2.0', true);
     const before = await referenceSurface(claudeDir);
 
-    const outcome = await applyVariantToggle({ claudeDir, devflowDir, axis: 'compliance', enabled: false, runningVersion: RUNNING, warn });
+    const outcome = await applyVariantToggle({
+      claudeDir, devflowDir, axis: 'compliance', enabled: false, runningVersion: RUNNING, warn, backups: await backupsOf(),
+    });
 
     expect(outcome.kind).toBe('skipped');
     expect(outcome.kind === 'skipped' && outcome.message).toContain('posting steps remain installed until devflow init');
@@ -741,7 +750,9 @@ describe('the version-skew check keeps the references where they are', () => {
     await installInto(claudeDir, devflowDir, true);
     await seedManifest(RUNNING, true);
 
-    const outcome = await applyVariantToggle({ claudeDir, devflowDir, axis: 'compliance', enabled: false, runningVersion: RUNNING, warn });
+    const outcome = await applyVariantToggle({
+      claudeDir, devflowDir, axis: 'compliance', enabled: false, runningVersion: RUNNING, warn, backups: await backupsOf(),
+    });
 
     expect(outcome.kind).toBe('converged');
     if (outcome.kind !== 'converged') return;
