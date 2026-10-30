@@ -61,14 +61,24 @@ const FILE_SIDECAR_SUFFIX = /\.tmp\.\d+$/;
 const DIRECTORY_SIDECAR_SUFFIX = /(?:\.\d+-[0-9a-z]+\.tmp|\.tmp|\.old)$/;
 
 /**
+ * The scratch folder of a pr-host or cross-cutting reference overlay unit, which sits in the
+ * tracker references: `.<kind>.<slug>` with `.old` (the displaced copy of a directory unit) or
+ * `.<pid>-<time>.tmp` (the staging tree). The installer makes the slug from the unit's folder with
+ * `/` written as `-`, and `root` for the references folder. Group 1 is the references folder, group
+ * 2 the slug.
+ */
+const OVERLAY_SCRATCH_FOLDER = /^(skills\/[^/]+\/references)\/tracker\/\.(?:pr-host|cross-cutting)\.([a-z0-9-]+)\.(?:\d+-[0-9a-z]+\.tmp|old)$/;
+const OVERLAY_ROOT_SLUG = 'root';
+
+/**
  * Scratch folders whose base name is no shipped path, matched on the whole path: the curation
  * swap and the workflow folder swap, which sit directly in the Claude dir, and the scratch of the
- * pr-host and cross-cutting reference overlay units, which sits in the tracker references.
+ * pr-host and cross-cutting reference overlay units.
  */
 const SCRATCH_FOLDER_PATHS: readonly RegExp[] = [
   /^\.devflow-curation-\d+-[0-9a-z]+\.tmp(?:\.old)?$/,
   /^\.devflow-workflow-[a-z0-9._-]{1,64}-\d+-[A-Za-z0-9]{6}(?:\.old)?$/,
-  /^skills\/[^/]+\/references\/tracker\/\.(?:pr-host|cross-cutting)\.[a-z0-9-]+\.(?:\d+-[0-9a-z]+\.tmp|old)$/,
+  OVERLAY_SCRATCH_FOLDER,
 ];
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/g;
 
@@ -140,6 +150,22 @@ function sidecarSuffixFor(kind: EntryKind): RegExp {
 function sidecarBase(rel: string, kind: EntryKind): string | null {
   const base = rel.replace(sidecarSuffixFor(kind), '');
   return base === rel || base === '' ? null : base;
+}
+
+/**
+ * The path that tells the entries of a leftover folder apart: the shipped path of the folder it was
+ * made from. An overlay scratch folder holds the files of one unit (`.pr-host.pr` the `pr/` folder,
+ * `.cross-cutting.tracker` the documents directly in `tracker/`, `.cross-cutting.root` those
+ * directly in the references folder), so its entries are told apart as entries of that folder.
+ * Another leftover folder is told apart by the name it copies, and any other folder by its own path.
+ */
+function leftoverLogicalPath(rel: string): string {
+  const scratch = OVERLAY_SCRATCH_FOLDER.exec(rel);
+  if (scratch !== null) {
+    const [, references, slug] = scratch;
+    return slug === OVERLAY_ROOT_SLUG ? references : `${references}/${slug.split('-').join('/')}`;
+  }
+  return sidecarBase(rel, 'directory') ?? rel;
 }
 
 function isSidecar(rel: string, kind: EntryKind, sets: ClassifySets): boolean {
@@ -280,17 +306,18 @@ export interface BackupSessionOptions {
 }
 
 export interface BackupSession {
-  /** Scan each folder and move the entries devflow did not ship into the run folder. */
+  /** Scan each folder and move the entries devflow did not ship into the run folder. A folder below a link stays unscanned. */
   prepass(targets: ReadonlyArray<string | PrepassTarget>): Promise<PrepassResult>;
   /** Remove the entries the scan listed under `folder` and were not kept, then `rmdir` it and its scanned folders. */
   removeListed(folder: string): Promise<RemoveResult>;
-  /** Move one entry whole with a single rename and no walk. An entry the session kept, or one below a kept folder, stays. */
+  /** Move one entry whole with a single rename and no walk. An entry the session kept, one below a kept folder and one below a link stay. */
   moveWhole(entry: string): Promise<MoveWholeResult>;
   /**
    * Remove one file by its exact path and name it with the retired files. The caller takes the path
    * from a frozen list of names an earlier release installed; nothing here matches by pattern. The
-   * path must lie in the Claude dir or the devflow dir, outside the backup root, below a real
-   * folder. A link is unlinked, never followed. A folder, a path kept by an earlier failure and a
+   * path must lie in the Claude dir or the devflow dir, outside the backup root, below real
+   * folders: a link at any path part between the install folder and the file refuses it. A link
+   * at the file itself is unlinked, never followed. A folder, a path kept by an earlier failure and a
    * failed `unlink` stay as they are, and the failed `unlink` is recorded.
    */
   removeExact(file: string): Promise<RemoveExactResult>;
@@ -361,6 +388,31 @@ function exhaustive(value: never): void {
   void value;
 }
 
+const shownPath = (value: string): string => (value === '' ? '(empty)' : value);
+
+/**
+ * Why a session over these two folders must change nothing, or null. Both folders must be absolute:
+ * `path.resolve` turns an empty or relative path into the working directory. The backup root must
+ * neither lie inside the Claude dir nor hold it, or a move would put a file inside the folder it
+ * leaves, or sweep the backup folder itself.
+ */
+function sessionPathsFault(claudeDirOption: string, devflowDirOption: string): RootRefusal | null {
+  if (!path.isAbsolute(claudeDirOption)) {
+    return Object.freeze({ path: shownPath(claudeDirOption), reason: 'claude-dir-not-absolute' });
+  }
+  if (!path.isAbsolute(devflowDirOption)) {
+    return Object.freeze({ path: shownPath(devflowDirOption), reason: 'devflow-dir-not-absolute' });
+  }
+  const claude = path.resolve(claudeDirOption);
+  const root = path.join(path.resolve(devflowDirOption), BACKUP_ROOT_NAME);
+  if (root === claude || isContainedIn(claude, root) || isContainedIn(root, claude)) {
+    return Object.freeze({ path: root, reason: 'backup-root-overlaps-claude-dir' });
+  }
+  return null;
+}
+
+type AncestorCheck = { readonly ok: true } | { readonly ok: false; readonly reason: string };
+
 /**
  * Open a backup session for one install run.
  *
@@ -369,11 +421,19 @@ function exhaustive(value: never): void {
  * that holds no move is removed again with the backup root this session made, each with a
  * non-recursive `rmdir`, so a run that moves nothing leaves nothing behind. One session holds at
  * most one run folder.
+ *
+ * A session whose folders fail {@link sessionPathsFault} changes nothing: it reports the fault as
+ * the root refusal, and every step records the fault and keeps its path.
+ *
+ * Every step that changes a path also refuses a target with a link at a path part between the
+ * install folder (the Claude dir or the devflow dir, which may be a link) and the target, with the
+ * reason `linked-ancestor`. The containment checks compare paths as text and do not see such a link.
  */
 export function createBackupSession(options: BackupSessionOptions): BackupSession {
   const claudeDir = path.resolve(options.claudeDir);
   const devflowDir = path.resolve(options.devflowDir);
   const backupRoot = path.join(devflowDir, BACKUP_ROOT_NAME);
+  const pathsFault = sessionPathsFault(options.claudeDir, options.devflowDir);
   const sets: ClassifySets = { shipped: options.shipped, retired: options.retired };
   const requestedCap = options.entryCap ?? DEFAULT_ENTRY_CAP;
   const entryCap = Number.isInteger(requestedCap) && requestedCap > 0 ? requestedCap : DEFAULT_ENTRY_CAP;
@@ -386,7 +446,7 @@ export function createBackupSession(options: BackupSessionOptions): BackupSessio
   const failureKeys = new Set<string>();
   const capHits: CapHit[] = [];
   const capKeys = new Set<string>();
-  let rootRefusal: RootRefusal | null = null;
+  let rootRefusal: RootRefusal | null = pathsFault;
   let runFolder: string | null = null;
   let rootMade = false;
   let backup: Promise<ReadyBackup | null> | null = null;
@@ -458,8 +518,36 @@ export function createBackupSession(options: BackupSessionOptions): BackupSessio
   }
 
   function ensureBackup(): Promise<ReadyBackup | null> {
-    backup ??= openBackup();
+    backup ??= pathsFault === null ? openBackup() : Promise.resolve(null);
     return backup;
+  }
+
+  /** The install folder that holds `target`: the Claude dir first, then the devflow dir. */
+  function installRootOf(target: string): string | null {
+    if (isContainedIn(claudeDir, target)) return claudeDir;
+    return isContainedIn(devflowDir, target) ? devflowDir : null;
+  }
+
+  /**
+   * Walk up from `target` to its install folder, both left out, and refuse a link at any step. An
+   * ancestor that is absent passes, as the target below it is then absent too. One that cannot be
+   * inspected, and a walk that ends at the step bound, refuse.
+   */
+  async function checkAncestors(target: string): Promise<AncestorCheck> {
+    const root = installRootOf(target);
+    if (root === null) return { ok: false, reason: 'outside-install-dirs' };
+    let current = path.dirname(target);
+    for (let step = 0; step < MAX_ANCESTOR_STEPS; step++) {
+      if (!isContainedIn(root, current)) return { ok: true };
+      const probe = await lstatBig(current);
+      if (probe.ok) {
+        if (probe.stats.isSymbolicLink()) return { ok: false, reason: 'linked-ancestor' };
+      } else if (probe.code !== 'ENOENT') {
+        return { ok: false, reason: probe.code };
+      }
+      current = path.dirname(current);
+    }
+    return { ok: false, reason: 'ancestor-depth-bound' };
   }
 
   /**
@@ -630,7 +718,7 @@ export function createBackupSession(options: BackupSessionOptions): BackupSessio
         }
         case 'sidecar': {
           if (kind === 'directory') {
-            const sub = await scanFolder(childPath, sidecarBase(childLogical, 'directory') ?? childLogical, depth + 1, scanRoot, include);
+            const sub = await scanFolder(childPath, leftoverLogicalPath(childLogical), depth + 1, scanRoot, include);
             if (sub !== null) folder.dirs.push(sub);
           } else {
             folder.listed.push({ path: childPath, retired: false });
@@ -665,12 +753,21 @@ export function createBackupSession(options: BackupSessionOptions): BackupSessio
       const { folder, include, displacedFrom } = typeof target === 'string' ? { folder: target, include: undefined, displacedFrom: undefined } : target;
       const absolute = path.resolve(folder);
       const stoodAt = displacedFrom === undefined ? absolute : path.resolve(displacedFrom);
+      if (pathsFault !== null) {
+        fail(absolute, 'scan', pathsFault.reason);
+        continue;
+      }
       if (!isContainedIn(claudeDir, absolute) || !isContainedIn(claudeDir, stoodAt)) {
         fail(absolute, 'scan', 'outside-claude-dir');
         continue;
       }
+      const ancestors = await checkAncestors(absolute);
+      if (!ancestors.ok) {
+        fail(absolute, 'scan', ancestors.reason);
+        continue;
+      }
       const rel = relFromClaude(stoodAt);
-      const logical = classify(rel, 'directory', sets) === 'sidecar' ? sidecarBase(rel, 'directory') ?? rel : rel;
+      const logical = classify(rel, 'directory', sets) === 'sidecar' ? leftoverLogicalPath(rel) : rel;
       await scanFolder(absolute, logical, 0, absolute, include);
     }
     return Object.freeze({
@@ -725,17 +822,31 @@ export function createBackupSession(options: BackupSessionOptions): BackupSessio
       const state = await lstatBig(target);
       return Object.freeze({ removed: freezeList(removed), folderRemoved: !state.ok && state.code === 'ENOENT' });
     }
+    const ancestors = await checkAncestors(target);
+    if (!ancestors.ok) {
+      fail(target, 'remove', ancestors.reason);
+      return Object.freeze({ removed: freezeList(removed), folderRemoved: false });
+    }
     const folderRemoved = await removeFolder(known, removed);
     return Object.freeze({ removed: freezeList(removed), folderRemoved });
   }
 
   async function moveWhole(entry: string): Promise<MoveWholeResult> {
     const source = path.resolve(entry);
+    if (pathsFault !== null) {
+      fail(source, 'move', pathsFault.reason);
+      return wholeResult({ status: 'kept', reason: pathsFault.reason });
+    }
     if (!isContainedIn(claudeDir, source)) {
       fail(source, 'move', 'outside-claude-dir');
       return wholeResult({ status: 'kept', reason: 'outside-claude-dir' });
     }
     if (isKept(source)) return wholeResult({ status: 'kept', reason: 'kept-by-earlier-failure' });
+    const ancestors = await checkAncestors(source);
+    if (!ancestors.ok) {
+      fail(source, 'move', ancestors.reason);
+      return wholeResult({ status: 'kept', reason: ancestors.reason });
+    }
     const found = await lstatBig(source);
     if (!found.ok) {
       if (found.code === 'ENOENT') return wholeResult({ status: 'absent' });
@@ -755,6 +866,10 @@ export function createBackupSession(options: BackupSessionOptions): BackupSessio
 
   async function removeExact(file: string): Promise<RemoveExactResult> {
     const target = path.resolve(file);
+    if (pathsFault !== null) {
+      fail(target, 'remove', pathsFault.reason);
+      return exactResult({ status: 'kept', reason: pathsFault.reason });
+    }
     const inInstallDirs = isContainedIn(claudeDir, target) || isContainedIn(devflowDir, target);
     if (!inInstallDirs || isContainedIn(backupRoot, target)) {
       fail(target, 'remove', 'outside-install-dirs');
@@ -771,6 +886,11 @@ export function createBackupSession(options: BackupSessionOptions): BackupSessio
     if (!parent.stats.isDirectory()) {
       fail(target, 'remove', 'parent-not-a-folder');
       return exactResult({ status: 'kept', reason: 'parent-not-a-folder' });
+    }
+    const ancestors = await checkAncestors(target);
+    if (!ancestors.ok) {
+      fail(target, 'remove', ancestors.reason);
+      return exactResult({ status: 'kept', reason: ancestors.reason });
     }
     const found = await lstatBig(target);
     if (!found.ok) {

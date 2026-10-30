@@ -571,19 +571,19 @@ describe('failures', () => {
   it('refuses a file whose inode changed after the scan, names it, and moves the others', async () => {
     const victim = await put('commands/devflow/victim.md', 'original');
     const other = await put('commands/devflow/other.md', 'other');
-    const realLstat = fs.lstat.bind(fs);
-    let seen = 0;
-    vi.spyOn(fs, 'lstat').mockImplementation(async (target, opts) => {
-      if (target === victim && ++seen === 2) {
+    // The scan moves its entries in name order, so `other.md` goes first. Its rename is the hook
+    // that swaps `victim.md`: after the scan saw the file and before the move checks its identity.
+    const realRename = fs.rename.bind(fs);
+    vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      if (from === other) {
         const swap = `${victim}.swap`;
         await fs.writeFile(swap, 'replacement');
-        await fs.rename(swap, victim);
+        await realRename(swap, victim);
       }
-      return realLstat(target, opts);
+      return realRename(from, to);
     });
     const session = open();
     await session.prepass([at('commands/devflow')]);
-    expect(seen).toBe(2);
     expect(await fs.readFile(victim, 'utf8')).toBe('replacement');
     expect(await exists(other)).toBe(false);
     expect(session.snapshot().failures).toEqual([{ path: victim, action: 'move', reason: 'changed-since-scan' }]);
@@ -1013,5 +1013,206 @@ describe('removeExact', () => {
 
     expect(await exists(stuck)).toBe(true);
     expect(session.snapshot().failures).toEqual([{ path: stuck, action: 'move', reason: 'EACCES' }]);
+  });
+});
+
+describe('a stranded overlay scratch folder', () => {
+  const references = 'skills/devflow:git/references';
+  const overlayShipped = createPathSet([
+    `${references}/pr/ensure.md`,
+    `${references}/glossary.md`,
+    `${references}/tracker/_contract.md`,
+    `${references}/tracker/github/create.md`,
+  ]);
+
+  // What each producer in the installer names its scratch folder, and the shipped file it holds.
+  it.each([
+    ['the backup of the pr-host unit', '.pr-host.pr.old', 'ensure.md'],
+    ['the staging folder of the pr-host unit', '.pr-host.pr.4242-lq3k9x.tmp', 'ensure.md'],
+    ['the staging folder of the references root documents', '.cross-cutting.root.4242-lq3k9x.tmp', 'glossary.md'],
+    ['the staging folder of the tracker documents', '.cross-cutting.tracker.4242-lq3k9x.tmp', '_contract.md'],
+  ])('lists devflow\'s own file in %s for removal and moves a user file', async (_label, scratch, devflowFile) => {
+    const own = await put(`${references}/tracker/${scratch}/${devflowFile}`, 'a stale devflow file');
+    const mine = await put(`${references}/tracker/${scratch}/mine.md`, 'my notes');
+    const session = open({ shipped: overlayShipped });
+
+    await session.prepass([at(references)]);
+    await session.removeListed(at(references));
+
+    expect(await exists(own)).toBe(false);
+    expect(session.snapshot().moved.map(unit => unit.original)).toEqual([mine]);
+    expect(await fs.readFile(inRun(`${references}/tracker/${scratch}/mine.md`), 'utf8')).toBe('my notes');
+    expect(await exists(at(`${references}/tracker/${scratch}`))).toBe(false);
+    expect(session.snapshot().failures).toEqual([]);
+  });
+
+  it('moves a file that no unit of the overlay ships, also from a scratch folder', async () => {
+    const stray = await put(`${references}/tracker/.pr-host.pr.old/not-shipped.md`, 'not shipped by any release');
+    const session = open({ shipped: overlayShipped });
+
+    await session.prepass([at(references)]);
+
+    expect(session.snapshot().moved.map(unit => unit.original)).toEqual([stray]);
+  });
+});
+
+describe('a linked ancestor', () => {
+  let elsewhere: string;
+
+  beforeEach(async () => {
+    elsewhere = path.join(home, 'elsewhere');
+    await fs.mkdir(elsewhere);
+  });
+
+  // `link` is a link to a folder outside the Claude dir. The shipped file and the user file stand
+  // below it, in `folder`.
+  const cases = [
+    { link: 'skills', folder: 'skills/devflow:git', shippedFile: 'skills/devflow:git/SKILL.md', userFile: 'skills/devflow:git/mine.md' },
+    {
+      link: 'skills/devflow:git/references',
+      folder: 'skills/devflow:git/references/pr',
+      shippedFile: 'skills/devflow:git/references/pr/ensure.md',
+      userFile: 'skills/devflow:git/references/pr/mine.md',
+    },
+  ];
+
+  async function linkTo(testCase: (typeof cases)[number]): Promise<string[]> {
+    for (const rel of [testCase.shippedFile, testCase.userFile]) {
+      const inside = path.join(elsewhere, ...path.relative(testCase.link, rel).split('/'));
+      await fs.mkdir(path.dirname(inside), { recursive: true });
+      await fs.writeFile(inside, rel);
+    }
+    await fs.mkdir(path.dirname(at(testCase.link)), { recursive: true });
+    await fs.symlink(elsewhere, at(testCase.link));
+    return tree(elsewhere);
+  }
+
+  describe.each(cases)('with a link at $link', testCase => {
+    it('scans nothing and keeps the folder', async () => {
+      const before = await linkTo(testCase);
+      const session = open();
+
+      const result = await session.prepass([at(testCase.folder)]);
+
+      expect(result.moved).toEqual([]);
+      expect(result.failures).toEqual([{ path: at(testCase.folder), action: 'scan', reason: 'linked-ancestor' }]);
+      expect((await session.removeListed(at(testCase.folder))).removed).toEqual([]);
+      expect(session.keptUnder(at(testCase.folder))).toEqual([at(testCase.folder)]);
+      expect(await tree(elsewhere)).toEqual(before);
+      expect(await exists(backupRoot)).toBe(false);
+    });
+
+    it('moves nothing whole', async () => {
+      const before = await linkTo(testCase);
+      const session = open();
+
+      expect(await session.moveWhole(at(testCase.userFile))).toEqual({ status: 'kept', reason: 'linked-ancestor' });
+
+      expect(await tree(elsewhere)).toEqual(before);
+      expect(await exists(backupRoot)).toBe(false);
+      expect(session.snapshot().failures).toEqual([{ path: at(testCase.userFile), action: 'move', reason: 'linked-ancestor' }]);
+    });
+
+    it('removes no exact file', async () => {
+      const before = await linkTo(testCase);
+      const session = open();
+
+      expect(await session.removeExact(at(testCase.shippedFile))).toEqual({ status: 'kept', reason: 'linked-ancestor' });
+
+      expect(await tree(elsewhere)).toEqual(before);
+      expect(session.snapshot().retiredRemoved).toEqual([]);
+      expect(session.snapshot().failures).toEqual([{ path: at(testCase.shippedFile), action: 'remove', reason: 'linked-ancestor' }]);
+    });
+  });
+
+  it('removes nothing from a scanned folder when a folder above it became a link after the scan', async () => {
+    const own = await put('skills/devflow:git/SKILL.md');
+    const session = open();
+    await session.prepass([at('skills/devflow:git')]);
+    const real = path.join(home, 'skills-real');
+    await fs.rename(at('skills'), real);
+    await fs.symlink(real, at('skills'));
+
+    const removal = await session.removeListed(at('skills/devflow:git'));
+
+    expect(removal).toEqual({ removed: [], folderRemoved: false });
+    expect(await fs.readFile(path.join(real, 'devflow:git', 'SKILL.md'), 'utf8')).toBe('skills/devflow:git/SKILL.md');
+    expect(await exists(own)).toBe(true);
+    expect(session.snapshot().failures).toEqual([{ path: at('skills/devflow:git'), action: 'remove', reason: 'linked-ancestor' }]);
+  });
+
+  it('still moves a link that stands at the target itself, as a link', async () => {
+    await fs.mkdir(at('skills'), { recursive: true });
+    await fs.symlink(elsewhere, at('skills/python'));
+    const session = open();
+
+    const result = await session.moveWhole(at('skills/python'));
+
+    expect(result.status).toBe('moved');
+    expect(await exists(at('skills/python'))).toBe(false);
+    expect((await fs.lstat(inRun('skills/python'))).isSymbolicLink()).toBe(true);
+  });
+
+  it('allows a Claude dir that is itself a link', async () => {
+    const realClaude = path.join(home, 'real-claude');
+    await fs.rename(claudeDir, realClaude);
+    await fs.symlink(realClaude, claudeDir);
+    await put('commands/devflow/mine.md');
+    const session = open();
+
+    const result = await session.prepass([at('commands/devflow')]);
+
+    expect(result.failures).toEqual([]);
+    expect(result.moved.map(unit => unit.original)).toEqual([at('commands/devflow/mine.md')]);
+  });
+});
+
+describe('the paths of a session', () => {
+  // Each row builds its options late: the temp folders exist only inside a test.
+  interface PathCase {
+    readonly overrides: Partial<BackupSessionOptions>;
+    readonly refusedPath: string;
+  }
+  const refusals: ReadonlyArray<readonly [string, () => PathCase, string]> = [
+    ['an empty Claude dir', () => ({ overrides: { claudeDir: '' }, refusedPath: '(empty)' }), 'claude-dir-not-absolute'],
+    ['a relative Claude dir', () => ({ overrides: { claudeDir: 'claude' }, refusedPath: 'claude' }), 'claude-dir-not-absolute'],
+    ['an empty devflow dir', () => ({ overrides: { devflowDir: '' }, refusedPath: '(empty)' }), 'devflow-dir-not-absolute'],
+    ['a relative devflow dir', () => ({ overrides: { devflowDir: 'devflow' }, refusedPath: 'devflow' }), 'devflow-dir-not-absolute'],
+    [
+      'a backup root inside the Claude dir',
+      () => ({ overrides: { devflowDir: path.join(claudeDir, '.devflow') }, refusedPath: path.join(claudeDir, '.devflow', 'install-backups') }),
+      'backup-root-overlaps-claude-dir',
+    ],
+    [
+      'a Claude dir inside the backup root',
+      () => ({ overrides: { claudeDir: path.join(backupRoot, 'claude') }, refusedPath: backupRoot }),
+      'backup-root-overlaps-claude-dir',
+    ],
+    [
+      'a Claude dir that is the backup root',
+      () => ({ overrides: { claudeDir: backupRoot }, refusedPath: backupRoot }),
+      'backup-root-overlaps-claude-dir',
+    ],
+  ];
+
+  it.each(refusals)('refuses %s and changes nothing', async (_label, build, reason) => {
+    const { overrides, refusedPath } = build();
+    const user = await put('commands/devflow/mine.md', 'mine');
+    const session = open(overrides);
+
+    const scan = await session.prepass([at('commands/devflow')]);
+    const whole = await session.moveWhole(user);
+    const exact = await session.removeExact(user);
+    const removal = await session.removeListed(at('commands/devflow'));
+
+    expect(session.snapshot().rootRefusal).toEqual({ path: refusedPath, reason });
+    expect(scan.moved).toEqual([]);
+    expect(scan.failures.map(failure => failure.reason)).toEqual([reason]);
+    expect(whole).toEqual({ status: 'kept', reason });
+    expect(exact).toEqual({ status: 'kept', reason });
+    expect(removal.removed).toEqual([]);
+    expect(await fs.readFile(user, 'utf8')).toBe('mine');
+    expect(await exists(backupRoot)).toBe(false);
+    expect(session.snapshot().runFolder).toBeNull();
   });
 });
