@@ -14,13 +14,19 @@
  * carries (`⇒ use `…` instead`). They are never copied into this file, so a change to
  * either side fails here. The literal must also be a line the script's own grammar accepts.
  *
+ * Every error path runs as a process, so the line the model reads is the one the
+ * boundary writes after `settleOutcome` settled the outcome, and the exit code is the
+ * one the boundary sets. The formatter faults (exit 4 and exit 5) cannot come from real
+ * input: the formatter only composes lines its own gate accepts. They go through the
+ * boundary seam below instead of a direct main() call, which would skip the settle step.
+ *
  * NOT covered: a script that cannot start at all (a missing file, a node that is not
  * installed). Nothing can print a line then. The partial's literal covers that run, and
  * tests/commands/settings-partial.test.ts and tests/evidence-policy/partial-wiring.test.ts
  * hold that literal in the prompt.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { createRequire } from 'module'
 import * as fs from 'fs'
 import * as os from 'os'
@@ -29,12 +35,7 @@ import * as path from 'path'
 import { ROOT } from '../helpers.js'
 import { RESOLVER_SCRIPT, SETTINGS_SCRIPT, runResolver } from './scripted-shim.js'
 
-type ExecFn = (file: string, args: string[], opts: Record<string, unknown>) => { status: number | null; stdout?: Buffer | string }
-
-interface ScriptModule {
-  main(argv: readonly string[], deps?: { exec?: ExecFn; formatLine?: () => unknown }): { code: number; line: string }
-  readonly [exported: string]: unknown
-}
+type ScriptModule = Readonly<Record<string, unknown>>
 
 interface Subject {
   readonly name: string
@@ -74,8 +75,40 @@ function partialLiteral(partialRel: string): string {
 /** The subprocess arms spawn node once each, which can take longer than the default test timeout. */
 const SUBPROCESS_TIMEOUT = { timeout: 20_000 } as const
 
-/** Answers every git call as "not a repository", so main() reaches its formatter without a repository. */
-const NOT_A_REPO: ExecFn = () => ({ status: 128, stdout: Buffer.alloc(0) })
+/**
+ * The boundary seam. Each script writes stdout and sets the exit code in one place, after
+ * `settleOutcome` has checked what main() returned, and exports neither. A preload rewrites
+ * the one `main(process.argv)` call at that boundary so main() takes the `exec` and
+ * `formatLine` deps its in-process callers take. Everything after main() runs as shipped:
+ * `settleOutcome`, the stdout write and the exit code. `exec` answers every git call as
+ * "not a repository", so main() reaches its formatter without a repository.
+ */
+const BOUNDARY_CALL = 'outcome = main(process.argv);'
+
+/** A formatter that throws: main() maps it to exit 4. */
+const THROWING_FORMATTER = "() => { throw new Error('seeded'); }"
+
+/** A formatter that composes a hostile two-line output: the gate refuses it and main() returns exit 5. */
+const HOSTILE_FORMATTER = "() => 'hostile\\nsecond line'"
+
+/** Write the preload that seams `script`'s boundary call with `formatter`; returns its path. */
+function boundarySeamPreload(script: string, formatter: string): string {
+  const seamed = `outcome = main(process.argv, { exec: () => ({ status: 128, stdout: Buffer.alloc(0) }), formatLine: ${formatter} });`
+  const preload = path.join(tmp, 'boundary-seam.cjs')
+  fs.writeFileSync(preload, [
+    "const Module = require('module');",
+    'const compile = Module.prototype._compile;',
+    'Module.prototype._compile = function (content, filename) {',
+    `  if (filename === ${JSON.stringify(fs.realpathSync(script))}) {`,
+    `    if (content.split(${JSON.stringify(BOUNDARY_CALL)}).length !== 2) throw new Error('boundary seam: the main() call is not in the script exactly once');`,
+    `    content = content.replace(${JSON.stringify(BOUNDARY_CALL)}, () => ${JSON.stringify(seamed)});`,
+    '  }',
+    '  return compile.call(this, content, filename);',
+    '};',
+    '',
+  ].join('\n'))
+  return preload
+}
 
 let tmp: string
 let home: string
@@ -87,8 +120,6 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  vi.unstubAllEnvs()
-  vi.restoreAllMocks()
   fs.rmSync(tmp, { recursive: true, force: true })
 })
 
@@ -149,23 +180,19 @@ describe.each(SUBJECTS)('$name prints the partial literal on every error path', 
       expect(run.status, run.stderr).toBe(4)
       expect(run.stdout).toBe(expectedStdout())
     })
-  })
 
-  describe('in process', () => {
-    it('exit 4, internal error (a formatter that throws): the literal as the line', () => {
-      vi.stubEnv('HOME', home)
-      vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
-      const mod = createRequire(import.meta.url)(script) as ScriptModule
-      const out = mod.main(['node', script, tmp], { exec: NOT_A_REPO, formatLine: () => { throw new Error('seeded') } })
-      expect(out).toEqual({ code: 4, line: partialLiteral(partial) })
+    it('exit 4, internal error (a formatter that throws): the literal on stdout', () => {
+      const run = runResolver({ home, script, args: [tmp], nodeArgs: ['--require', boundarySeamPreload(script, THROWING_FORMATTER)] })
+      expect(run.status, run.stderr).toBe(4)
+      expect(run.stdout).toBe(expectedStdout())
+      expect(run.stderr, 'the formatter arm ran, not another exit-4 arm').toContain('internal error')
     })
 
-    it('exit 5, output gate refused (a hostile composed line): the literal as the line', () => {
-      vi.stubEnv('HOME', home)
-      vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
-      const mod = createRequire(import.meta.url)(script) as ScriptModule
-      const out = mod.main(['node', script, tmp], { exec: NOT_A_REPO, formatLine: () => 'hostile\nsecond line' })
-      expect(out).toEqual({ code: 5, line: partialLiteral(partial) })
+    it('exit 5, output gate refused (a hostile composed line): the literal on stdout', () => {
+      const run = runResolver({ home, script, args: [tmp], nodeArgs: ['--require', boundarySeamPreload(script, HOSTILE_FORMATTER)] })
+      expect(run.status, run.stderr).toBe(5)
+      expect(run.stdout).toBe(expectedStdout())
+      expect(run.stderr, 'the output gate arm ran').toContain('output gate refused')
     })
   })
 })
