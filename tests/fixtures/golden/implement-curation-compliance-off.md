@@ -187,7 +187,7 @@ git -C "{start}" rev-parse --show-toplevel
 
 and use its one-line output. If the command fails (outside a git repository), `{worktree}` is the start directory itself. All paths below are relative to `{worktree}`.
 
-**Step 1 — Read the index cache** `{worktree}/.devflow/features/index.md`. Each line has the form `- **{slug}** — {areas} — {Use-when description}`. If it is absent or has no entry line, glob `{worktree}/.devflow/features/*/KNOWLEDGE.md` and read only the YAML frontmatter of each file.
+**Step 1 — Read the index cache** `{worktree}/.devflow/features/index.md`. Each line has the form `- **{slug}** — {areas} — {Use-when description}`. If `index.md` is absent or has no entry line, glob `{worktree}/.devflow/features/*/KNOWLEDGE.md` and read only the YAML frontmatter of each file.
 
 **Step 2 — Pick relevant KBs:** select the entries whose documented area overlaps the current task (index line, or frontmatter `description` and `directories` on fallback). Prefer specificity over breadth.
 
@@ -604,7 +604,7 @@ If the settings line says `KNOWLEDGE=off`, skip write-back entirely. The machine
 
 **Step 2 — Write back only if at least one is true:**
 - This workflow changed files in a directory that is documented by an existing feature knowledge base (a documented area changed). Knowledge bases are written through at that point, never on a background schedule.
-- This workflow found durable, cross-cutting knowledge about an area that a single file read does not show: patterns, anti-patterns, integration points, gotchas.
+- This workflow found durable, cross-cutting knowledge about a codebase area that would help future agents working in the same area: patterns, anti-patterns, integration points, gotchas that a single file read does not show.
 
 Otherwise skip write-back silently.
 
@@ -633,7 +633,7 @@ Then commit the two files as your Commit Protocol directs."
 
 When the Knowledge agent reports `KB_COMMIT: skipped (detached HEAD)`, the files were written but deliberately not committed — a commit on a detached HEAD becomes unreachable once HEAD moves. Tell the user in the workflow's final report, in one line, that the knowledge base was written but not committed, and name the uncommitted paths the agent listed, so they can commit them on a branch before the worktree is removed. Never commit them yourself.
 
-Non-blocking: if the Knowledge agent fails, log it and continue.
+Non-blocking: if the Knowledge agent fails, log the failure and continue.
 
 ## Architecture
 
