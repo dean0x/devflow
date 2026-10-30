@@ -2627,3 +2627,20 @@ describe('#669 and #648: the re-validation pointers stay valid in the compliance
     }
   })
 })
+
+describe('the compliance-on Phase 1 names the evidence script as the owner of the publication value', () => {
+  const OWNER_SENTENCE =
+    'Phase 11 passes the resolved value to the evidence script (`publish`), which decides what each value means for the evidence comment.'
+
+  it('both compliance-on builds say that the evidence script, not the publication gate, decides what each value means', () => {
+    for (const [label, md] of [['curation on', implementMd()], ['curation off', implementMdOff()]] as const) {
+      expect(md, `${label}: the sentence that names the owner of the value mapping is missing`).toContain(OWNER_SENTENCE)
+    }
+  })
+
+  it('known-bad probe: the sentence without its clause is not the sentence', () => {
+    const shortened = OWNER_SENTENCE.replace(', which decides what each value means for the evidence comment', '')
+    expect(shortened).not.toBe(OWNER_SENTENCE)
+    expect(implementMd(), 'the shortened sentence is present in the compliance-on build').not.toContain(`${shortened} From the same line`)
+  })
+})
