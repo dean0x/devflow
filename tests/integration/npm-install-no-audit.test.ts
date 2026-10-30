@@ -12,11 +12,23 @@
  * What it asserts
  * ---------------
  * 1. With TARBALL_INSTALL_ARGS, npm installs a package with a registry dependency,
- *    exits 0 and sends no audit request.
+ *    exits 0 and sends no audit request. No request means that neither a down nor a
+ *    slow audit service can change the result.
  * 2. Known-bad probe: without `--no-audit`, the same install sends an audit request.
  *    So the local registry does see one, and assertion 1 can fail.
- * 3. No other integration test spells its own `npm install` command: each one uses
- *    tarballInstallCommand.
+ * 3. No other file under tests/integration/ spells its own `npm install`, `npm i` or
+ *    `npm ci` command: each tarball install uses tarballInstallCommand.
+ *
+ * What a green run does NOT prove
+ * -------------------------------
+ * - Assertion 3 reads code lines, not comment lines, and matches two forms: a shell
+ *   string where the command starts the string or follows `&&`, `;` or `|`, and then
+ *   ends the string or takes an option, a quoted path or an interpolation; and the
+ *   `'npm', ['install'` argument list on one line. A bare package name
+ *   (`npm install foo`) and an argument list split over lines are not matched, because
+ *   a test name such as 'npm install from tarball exits 0' has the same shape.
+ * - The pack tests still take their real dependencies from the public registry, so an
+ *   outage of the registry itself still fails them.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -34,6 +46,10 @@ const DEP = 'devflow-audit-probe-dep';
 const DEP_TARBALL_PATH = `/${DEP}/-/${DEP}-1.0.0.tgz`;
 const AUDIT_PREFIX = '/-/npm/v1/security/';
 const NPM_TIMEOUT_MS = 60_000;
+/** beforeAll runs two `npm pack` calls; afterAll may wait for one killed child. */
+const HOOK_TIMEOUT_MS = 3 * NPM_TIMEOUT_MS;
+/** Proxy variables npm honors: a proxy would carry the local requests off the machine. */
+const PROXY_ENV = /^(https?|no|all)_proxy$/i;
 
 let WORK: string;
 let server: http.Server | undefined;
@@ -44,15 +60,18 @@ let depTgz: Buffer;
 let requests: string[] = [];
 
 afterAll(async () => {
-  if (server) await new Promise<void>(resolve => server!.close(() => resolve()));
+  if (server) {
+    server.closeAllConnections();
+    await new Promise<void>(resolve => server!.close(() => resolve()));
+  }
   if (WORK) await fs.rm(WORK, { recursive: true, force: true }).catch(() => undefined);
-});
+}, HOOK_TIMEOUT_MS);
 
-/** The environment of one npm run: no inherited npm settings, the local registry, a cache of its own. */
+/** The environment of one npm run: no inherited npm or proxy settings, the local registry, a cache of its own. */
 function npmEnv(cache: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (!key.toLowerCase().startsWith('npm_config_')) env[key] = value;
+    if (!key.toLowerCase().startsWith('npm_config_') && !PROXY_ENV.test(key)) env[key] = value;
   }
   return {
     ...env,
@@ -138,7 +157,7 @@ beforeAll(async () => {
   await fs.mkdir(appDir);
   await fs.writeFile(path.join(appDir, 'package.json'), JSON.stringify({ name: 'devflow-audit-probe-app', version: '1.0.0', dependencies: { [DEP]: '1.0.0' } }));
   appTgz = await pack(appDir);
-});
+}, HOOK_TIMEOUT_MS);
 
 describe('#698: the tarball install of the pack tests sends no audit request', () => {
   it('installs a registry dependency with the audit service down, exits 0 and sends no audit request', async () => {
@@ -159,6 +178,7 @@ describe('#698: the tarball install of the pack tests sends no audit request', (
     requests = [];
     await runNpm([...withAudit, appTgz], dir, cache);
 
+    expect(requests, 'the dependency did not come from the local registry').toContain(`GET /${DEP}`);
     expect(requests.filter(isAudit).length, `requests: ${requests.join(', ')}`).toBeGreaterThan(0);
   });
 });
@@ -167,8 +187,11 @@ describe('#698: the tarball install of the pack tests sends no audit request', (
 // Assertion 3: every integration test installs through tarballInstallCommand
 // ---------------------------------------------------------------------------
 
-/** A shell string that runs an install: the command, then an option, a quoted path or an interpolation. */
-const SHELL_INSTALL = /[`'"]npm (?:install|i|ci) (?:-|"|'|\$\{)/;
+/**
+ * A shell string that runs an install: the command at the start of the string or after
+ * `&&`, `;` or `|`, then the end of the string, an option, a quoted path or an interpolation.
+ */
+const SHELL_INSTALL = /(?:[`'"]|&&|;|\|)\s*npm (?:install|i|ci)(?:[`'"]| (?:-|"|'|\$\{))/;
 /** An argument-list install: `'npm', ['install'`. */
 const ARGV_INSTALL = /['"]npm['"]\s*,\s*\[\s*['"](?:install|i|ci)['"]/;
 
@@ -187,7 +210,7 @@ function collectInlineInstalls(files: readonly { name: string; text: string }[])
 
 describe('#698: no integration test spells its own npm install', () => {
   // This file holds the seeded probes, and its own installs use TARBALL_INSTALL_ARGS.
-  const files = readdirSync(INTEGRATION_DIR)
+  const files = readdirSync(INTEGRATION_DIR, { recursive: true, encoding: 'utf-8' })
     .filter(f => f.endsWith('.ts') && f !== path.basename(import.meta.filename))
     .map(name => ({ name, text: readFileSync(path.join(INTEGRATION_DIR, name), 'utf-8') }));
 
@@ -207,8 +230,10 @@ describe('#698: no integration test spells its own npm install', () => {
         "    spawnSync('npm', ['ci'], { cwd });",
         '    expect(code, `npm install failed (exit ${code})`).toBe(0);',
         '    // npm install "x" in a comment',
+        "    execSync('npm ci', { cwd });",
+        '    execSync(`cd ${dir} && npm install -D x`);',
       ].join('\n'),
     }];
-    expect(collectInlineInstalls(seeded)).toEqual(['seeded.test.ts:2', 'seeded.test.ts:3']);
+    expect(collectInlineInstalls(seeded)).toEqual(['seeded.test.ts:2', 'seeded.test.ts:3', 'seeded.test.ts:6', 'seeded.test.ts:7']);
   });
 });
