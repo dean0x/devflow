@@ -16,7 +16,7 @@
  * command never ships. Errors are reported with the mds::* code, message, and
  * source span for quick diagnosis.
  *
- * Three host kinds. The destination allowlist in src/core/mds-variants.ts tags each
+ * Four host kinds. The destination allowlist in src/core/mds-variants.ts tags each
  * directory with the host variant it selects, and resolveOutputDir hands that tag
  * back with the resolved path — so this script dispatches on a discriminant it
  * was given, never on a destination it re-derived:
@@ -68,7 +68,25 @@
  *     Both trees are fixed by the manifest, so no per-file record is kept: the
  *     variant manifest below lists prompts only.
  *
- * All three strips run AFTER compileFile: the compiler emits a frontmatter block at
+ *   - Workflow skill hosts (`output-dir: dist/workflows`, variant `workflow-skill`) are
+ *     the files of a skill FOLDER: one core host that becomes `SKILL.md`, beside
+ *     reference hosts. D-WORKFLOW-FOLDER-BUILD: the folder registry WORKFLOW_FOLDERS in
+ *     src/core/mds-variants.ts says which folder a host belongs to and which file it
+ *     becomes, so a host declares only the root, `output-name:` is refused, and a host the
+ *     registry does not list is refused. The core host keeps its real frontmatter
+ *     (name and description are required) minus the build keys; a reference host sheds
+ *     its steering block and ships with none. A folder is built as a UNIT, because its
+ *     build id (D-BUILD-ID) is made from all of its files: every host is compiled, then
+ *     each variant key gets a COMPLETE folder for its own file list
+ *     (workflowFolderFiles), and a key that lacks a file of its list fails the build.
+ *     A file a compliance-off key omits has no destination for that key (the same
+ *     absent-destination pattern as a reference module's compliance-off copy). The
+ *     stamp goes into the first heading of every file outside references/. The
+ *     registry is empty in the shipped tree, so no folder is built and every file
+ *     the other host kinds write is unchanged. The variant manifest lists prompts
+ *     only and does not list a folder.
+ *
+ * All four strips run AFTER compileFile: the compiler emits a frontmatter block at
  * byte offset 0 verbatim (it is never interpolated), so block 1 survives
  * compilation unchanged and is removed from the compiled bytes.
  *
@@ -82,7 +100,7 @@
  * compliance markers, which select between its compliance-on and compliance-off
  * references (see the reference modules above), and no curation marker: that axis has
  * nothing to select there, so a curation marker is refused. None of the variant
- * trees is an output-dir a host may declare: the allowlist stays the three shipped
+ * trees is an output-dir a host may declare: the allowlist stays the four shipped
  * directories.
  *
  * Variant manifest: after a clean build, dist/variant-axes.json records for every
@@ -91,7 +109,7 @@
  * host has a compliance arm. It is removed before the first host is written and
  * written last, after the prunes, so a refused, crashed or interrupted build leaves none.
  *
- * Dest safety: `output-dir` must resolve to one of the three allowlisted
+ * Dest safety: `output-dir` must resolve to one of the four allowlisted
  * directories (src/core/mds-variants.ts). A typo, a backslash spelling, a
  * non-canonical spelling, or a path that escapes the repo root is refused rather
  * than silently writing to an unexpected location. The emitted filename is
@@ -115,7 +133,10 @@
  * Prune: after a clean build, every `.md` in dist/commands/ and dist/agents/ that
  * no host emitted is deleted (pruneOrphanCommands, pruneOrphanAgents), and the same
  * sweep runs recursively over dist/skills/git/references/ (pruneOrphanReferences)
- * and each of the three variant trees (pruneOrphanVariantTree). Every sweep is keyed
+ * and each of the three variant trees (pruneOrphanVariantTree). The workflow
+ * trees, one per variant key, lose every folder no registered folder names
+ * (pruneOrphanWorkflowFolders) and every nested `.md` the build did not write
+ * (pruneOrphanWorkflowFiles). Every sweep is keyed
  * on the files this build actually wrote. The compliance-off references sit inside
  * the compliance-off tree, so every one the build wrote is recorded as written and
  * kept, and one the build no longer writes (a reference that became a posting
@@ -140,6 +161,7 @@ import { fileURLToPath } from "url";
 import { init, compileFile, isMdsError } from "@mdscript/mds";
 import {
   validateOutputName,
+  validateSkillOutputName,
   resolveOutputDir,
   expandVariants,
   splitVariantSections,
@@ -147,23 +169,44 @@ import {
   COMMANDS_OUTPUT_DIR,
   SKILL_REFS_OUTPUT_DIR,
   COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR,
+  WORKFLOW_FOLDERS,
+  WORKFLOW_FOLDERS_OUTPUT_DIR,
+  WORKFLOW_SKILL_ENTRY_NAME,
+  WORKFLOW_SKILL_FILE,
   resolveVariantModules,
   deferredReferenceModuleSources,
   complianceOffOmittedRelPaths,
   describePostingOpsError,
   splitSectionArms,
+  checkFolderBuildIds,
+  checkWorkflowFolders,
+  describeBuildIdCheckError,
+  describeBuildStampError,
+  describeWorkflowFolderError,
+  findWorkflowFolderHost,
+  isStampedWorkflowFile,
+  parseWorkflowFolders,
+  stampBuildId,
+  workflowBuildId,
+  workflowFolderFiles,
+  workflowFolderHosts,
+  workflowFolderRelPath,
+  workflowFoldersRootRelPath,
+  type CompiledFolderFile,
   type HostVariant,
   type OutputDirError,
   type OutputNameError,
   type SectionArmError,
   type VariantModule,
   type VariantPair,
+  type WorkflowFolder,
 } from "../src/core/mds-variants.js";
 import { MAX_REFERENCE_SWEEP_DEPTH } from "../src/core/reference-sweep.js";
 import {
   LEGACY_OFF_OUTPUT_DIR,
   OFF_OUTPUT_DIRS,
   OFF_VARIANT_KEYS,
+  VARIANT_KEYS,
   VARIANT_MANIFEST_REL_PATH,
   containsCurationMarker,
   containsVariantMarker,
@@ -175,6 +218,7 @@ import {
   variantOffRelPath,
   type OffVariantKey,
   type VariantAxis,
+  type VariantKey,
   type VariantManifestHost,
   type VariantSplitError,
 } from "../src/core/curation-variants.js";
@@ -453,6 +497,40 @@ function stripReferenceFrontmatter(compiled: string, sourcePath: string): string
   return body;
 }
 
+/**
+ * Strip the build keys from a compiled workflow skill CORE host and verify what is
+ * left is a skill header.
+ *
+ * The core host's frontmatter is the skill's own: `SKILL.md` ships with a real
+ * block, so only the build-owned keys go (stripBuildKeys, the command-host strip), and
+ * every other byte of the block stays. What the strip must leave is checked, because a
+ * skill with no `name:` or `description:` is not found by the loader that reads those
+ * two keys, and nothing downstream of the build would say so:
+ *   - PRE: a leading block must exist, or the compiler moved bytes it emits verbatim.
+ *   - POST: `name:` and `description:` must each carry a value, on the key's line or
+ *     on an indented line after it.
+ */
+function stripWorkflowCoreFrontmatter(compiled: string, sourcePath: string): string {
+  const rel = path.relative(ROOT, sourcePath);
+  if (!LEADING_BLOCK_RE.test(compiled)) {
+    throw new Error(
+      `${rel}: workflow skill core output has no leading frontmatter block — the core host ` +
+      `declares ONE block holding output-dir: and the skill's own name: and description:.`,
+    );
+  }
+  const stripped = stripBuildKeys(compiled);
+  const block = frontmatterBlock(stripped) ?? "";
+  for (const key of ["name", "description"]) {
+    if (!new RegExp(`^${key}:[ \\t]*(\\S|\\r?\\n[ \\t]+\\S)`, "m").test(block)) {
+      throw new Error(
+        `${rel}: workflow skill core has no '${key}:' value in its frontmatter — SKILL.md keeps its ` +
+        `real frontmatter, and a skill without name: and description: is not found by its loader.`,
+      );
+    }
+  }
+  return stripped;
+}
+
 interface DiscoveryResult {
   hosts: HostEntry[];
   /** Total .mds files seen, including partials (files without output-dir:). */
@@ -608,25 +686,30 @@ function tempPathFor(dest: string): string {
 }
 
 /**
- * Apply the frontmatter strip the host's variant calls for.
+ * Apply the frontmatter strip the host's plan calls for.
  *
  * The variant travels with the resolved destination (resolveOutputDir), so the
  * allowlist in src/core/mds-variants.ts remains the only place that knows which
- * directory means which treatment. The `never` default means a third variant
- * cannot silently inherit the command-host strip.
+ * directory means which treatment. The `never` default means a fifth variant
+ * cannot silently inherit the command-host strip. A workflow skill host is stripped
+ * by its role in the folder: the core keeps a real header, a reference sheds its block.
  */
-function stripFrontmatterFor(variant: HostVariant, compiled: string, sourcePath: string): string {
-  switch (variant) {
+function stripFrontmatterFor(plan: HostPlan, compiled: string, sourcePath: string): string {
+  switch (plan.variant) {
     case "agents":
       return stripGeneratorFrontmatter(compiled, sourcePath);
     case "skill-refs":
       return stripReferenceFrontmatter(compiled, sourcePath);
     case "commands":
       return stripBuildKeys(compiled);
+    case "workflow-skill":
+      return plan.role === "core"
+        ? stripWorkflowCoreFrontmatter(compiled, sourcePath)
+        : stripReferenceFrontmatter(compiled, sourcePath);
     default: {
-      const unhandled: never = variant;
+      const unhandled: never = plan;
       throw new Error(
-        `${path.relative(ROOT, sourcePath)}: unhandled host variant '${String(unhandled)}'`,
+        `${path.relative(ROOT, sourcePath)}: unhandled host plan ${JSON.stringify(unhandled)}`,
       );
     }
   }
@@ -665,10 +748,16 @@ interface PlannedReference {
  * and no arm can be read for a field the other arm owns. Callers that want the
  * uniform "every file this host claims" view — the plan pass's claims loop, the
  * contested filter, the prune's claimed set — go through destsOf().
+ *
+ * A `workflow-skill` host is one file of a folder, so its arm is one file too: where
+ * that file lands under each variant key, or null for a key whose folder omits it.
+ * The folder is only complete once every host of it is compiled, so this arm is
+ * built by a separate pipeline (compileWorkflowHost, settleWorkflowFolder), and the
+ * two aliases below say which pipeline takes which arm.
  */
 type HostPlan =
   | {
-      readonly variant: Exclude<HostVariant, "skill-refs">;
+      readonly variant: Exclude<HostVariant, "skill-refs" | "workflow-skill">;
       /** Resolved absolute destination directory. */
       readonly outAbs: string;
       /** The single file this host emits, resolved absolute. */
@@ -690,19 +779,58 @@ type HostPlan =
       readonly outAbs: string;
       /** One entry per registered operation, in registry order. */
       readonly outputs: readonly PlannedReference[];
+    }
+  | {
+      readonly variant: "workflow-skill";
+      /** Resolved absolute root of the workflow folders (dist/workflows). */
+      readonly outAbs: string;
+      /** The registered folder this host belongs to. */
+      readonly folder: string;
+      /** The compiled file inside the folder, POSIX: `SKILL.md`, `<name>.md` or `references/<name>.md`. */
+      readonly file: string;
+      readonly role: "core" | "reference";
+      /**
+       * Where this file lands under each variant key, resolved absolute, or null for a key
+       * whose folder omits it (workflowFolderFiles). Planned for every key, and claimed in
+       * destsOf for every key that holds the file, so two hosts naming one file of one
+       * folder are caught while dist/ is still untouched.
+       */
+      readonly dests: Readonly<Record<VariantKey, string | null>>;
     };
+
+/** The plans a host compiles and writes alone: a prompt (one file) or a reference module (one file per operation). */
+type StandalonePlan = Exclude<HostPlan, { readonly variant: "workflow-skill" }>;
+
+/** The plan of a host that is one file of a folder, written only once its whole folder is compiled. */
+type WorkflowSkillPlan = Extract<HostPlan, { readonly variant: "workflow-skill" }>;
 
 /**
  * Every file a plan claims, whichever arm it is.
  *
  * The plan pass's contested-destination check is the one place that must see all
- * three variants alike: a fanned-out file left outside it is a file two hosts
+ * four variants alike: a fanned-out file left outside it is a file two hosts
  * could claim with nothing to notice. Deriving the uniform view here — rather
- * than storing it on both arms — keeps the fan-out destinations inseparable from
- * the pairs that fill them.
+ * than storing it on every arm — keeps the fan-out destinations inseparable from
+ * the pairs that fill them. A workflow skill host claims the file it becomes under
+ * every variant key that holds it, so the folder's files are covered host by host.
  */
 function destsOf(plan: HostPlan): readonly string[] {
-  return plan.variant === "skill-refs" ? plan.outputs.map(o => o.dest) : [plan.dest];
+  switch (plan.variant) {
+    case "skill-refs":
+      return plan.outputs.map(o => o.dest);
+    case "workflow-skill":
+      return VARIANT_KEYS.flatMap(key => {
+        const dest = plan.dests[key];
+        return dest === null ? [] : [dest];
+      });
+    case "commands":
+    case "agents":
+      return [plan.dest];
+    default: {
+      const unhandled: never = plan;
+      throw new Error(`unhandled host plan ${JSON.stringify(unhandled)}`);
+    }
+  }
 }
 
 /**
@@ -725,13 +853,58 @@ function referenceModuleFor(host: HostEntry): VariantModule | null {
 }
 
 /**
+ * The variable a test sets to hand the build a workflow folder registry, as JSON.
+ *
+ * D-WORKFLOW-FOLDER-FIXTURE-REGISTRY: the shipped registry (WORKFLOW_FOLDERS) is empty
+ * in the PR that adds this layer, so the layer is proved by fixture hosts in a
+ * throwaway root, and the build needs a way to be told which folders those hosts form.
+ * The variable is honoured ONLY when DEVFLOW_MDS_ROOT is also set, the condition under
+ * which the build is already running against a fixture root, so a stray variable can
+ * never change a build of the real tree. The value is untrusted data from outside the
+ * process: it is parsed and checked by the core module (parseWorkflowFolders) before
+ * any host is planned, and a refusal exits before dist/ is touched, as a malformed
+ * build key does.
+ */
+const WORKFLOW_FOLDERS_ENV = "DEVFLOW_MDS_WORKFLOW_FOLDERS";
+
+function refuseWorkflowRegistry(message: string): never {
+  console.error(`ERROR: ${message}`);
+  process.exit(1);
+}
+
+/** The folder registry this build compiles against: the shipped one, or the fixture one a test injected. */
+function resolveWorkflowFolders(): readonly WorkflowFolder[] {
+  const injected = process.env["DEVFLOW_MDS_ROOT"] ? process.env[WORKFLOW_FOLDERS_ENV] : undefined;
+  if (injected === undefined || injected === "") {
+    const shipped = checkWorkflowFolders(WORKFLOW_FOLDERS);
+    if (!shipped.ok) {
+      return refuseWorkflowRegistry(`WORKFLOW_FOLDERS: ${describeWorkflowFolderError(shipped.error)}`);
+    }
+    return shipped.value;
+  }
+  let data: unknown;
+  try {
+    data = JSON.parse(injected);
+  } catch {
+    return refuseWorkflowRegistry(`${WORKFLOW_FOLDERS_ENV} is not valid JSON`);
+  }
+  const parsed = parseWorkflowFolders(data);
+  if (!parsed.ok) {
+    return refuseWorkflowRegistry(`${WORKFLOW_FOLDERS_ENV}: ${describeWorkflowFolderError(parsed.error)}`);
+  }
+  return parsed.value;
+}
+
+const RESOLVED_WORKFLOW_FOLDERS = resolveWorkflowFolders();
+
+/**
  * Plan a one-file host: the `commands` and `agents` variants, which emit exactly
  * one artifact named after the source (or after its `output-name:`).
  */
 function planSingleFile(
   host: HostEntry,
   rel: string,
-  variant: Exclude<HostVariant, "skill-refs">,
+  variant: Exclude<HostVariant, "skill-refs" | "workflow-skill">,
   outAbs: string,
 ): HostPlan {
   // Filename safety: the name that will be emitted is validated before it is
@@ -827,6 +1000,74 @@ function planReferenceModule(host: HostEntry, rel: string, outAbs: string): Host
 }
 
 /**
+ * Plan a workflow skill host: the `workflow-skill` variant, one file of a skill folder.
+ *
+ * D-WORKFLOW-FOLDER-BUILD: a separate strategy, not a branch of planSingleFile, for the
+ * reason planReferenceModule is. The file's name and folder come from the registry, so
+ * `output-name:` has nothing to name and is refused; a host the registry does not list
+ * is refused rather than guessed at. The core host's basename must be the literal
+ * `SKILL` (validateSkillOutputName, the third name rule), the one name the ordinary
+ * rule cannot spell.
+ *
+ * Where the file lands under EACH variant key is decided here, from the one per-key
+ * file list (workflowFolderFiles): a key whose folder omits the file gets no destination,
+ * which is how the build leaves a compliance-gated reference out of the compliance-off
+ * folders without a second list.
+ */
+function planWorkflowFolder(host: HostEntry, rel: string, outAbs: string): HostPlan {
+  if (host.outputName !== null) {
+    throw new Error(
+      `${rel}: output-name: is not valid on a workflow skill host — the file name comes from the ` +
+      `folder registry in src/core/mds-variants.ts. Remove the key.`,
+    );
+  }
+
+  const source = path.relative(ROOT, host.file).split(path.sep).join("/");
+  const found = findWorkflowFolderHost(RESOLVED_WORKFLOW_FOLDERS, source);
+  if (found === null) {
+    throw new Error(
+      `${rel}: declares output-dir '${WORKFLOW_FOLDERS_OUTPUT_DIR}' but is not registered in ` +
+      `WORKFLOW_FOLDERS (src/core/mds-variants.ts). A workflow skill host's folder and file come ` +
+      `from that registry; there is no basename fallback. Add the folder, or change its output-dir.`,
+    );
+  }
+  const { folder, host: entry } = found;
+
+  if (entry.role === "core" && !validateSkillOutputName(host.basename).ok) {
+    throw new Error(
+      `${rel}: the core host of the workflow skill folder '${folder.name}' must be named ` +
+      `${WORKFLOW_SKILL_ENTRY_NAME}.mds — it compiles to ${WORKFLOW_SKILL_FILE}, and that literal is the ` +
+      `only name the core may have.`,
+    );
+  }
+
+  const destFor = (key: VariantKey): string | null => {
+    if (!workflowFolderFiles(folder, key).includes(entry.file)) return null;
+    const dest = path.resolve(ROOT, ...workflowFolderRelPath(key, folder.name, entry.file).split("/"));
+    // Belt-and-braces containment, as planReferenceModule asserts: the names were
+    // validated by the registry check, so this cannot fire.
+    const treeAbs = path.resolve(ROOT, ...workflowFoldersRootRelPath(key).split("/"));
+    if (!dest.startsWith(treeAbs + path.sep)) {
+      throw new Error(`${rel}: workflow destination '${dest}' escapes '${treeAbs}'`);
+    }
+    return dest;
+  };
+  return {
+    variant: "workflow-skill",
+    outAbs,
+    folder: folder.name,
+    file: entry.file,
+    role: entry.role,
+    dests: {
+      on: destFor("on"),
+      "curation-off": destFor("curation-off"),
+      "compliance-off": destFor("compliance-off"),
+      "both-off": destFor("both-off"),
+    },
+  };
+}
+
+/**
  * Resolve where a host will write — without writing anything.
  *
  * Separated from the write so every destination in the build is known before the
@@ -837,7 +1078,7 @@ function planReferenceModule(host: HostEntry, rel: string, outAbs: string): Host
  *
  * Dispatch only: the variant travels with the resolved destination, and each
  * variant's strategy owns its own refusals and its own plan arm. The `never`
- * default is the same friction stripFrontmatterFor imposes — a fourth variant
+ * default is the same friction stripFrontmatterFor imposes — a fifth variant
  * cannot silently inherit a strategy written for another.
  */
 function planHost(host: HostEntry): HostPlan {
@@ -854,6 +1095,8 @@ function planHost(host: HostEntry): HostPlan {
   switch (variant) {
     case "skill-refs":
       return planReferenceModule(host, rel, outAbs);
+    case "workflow-skill":
+      return planWorkflowFolder(host, rel, outAbs);
     case "commands":
     case "agents":
       return planSingleFile(host, rel, variant, outAbs);
@@ -946,7 +1189,7 @@ interface MaterializedHost {
  * a keyed result read back per op — is partial in the type however total it is
  * in fact, and would need a non-null assertion to paper over the gap.
  */
-function materializeOutputs(host: HostEntry, plan: HostPlan, body: string): MaterializedHost {
+function materializeOutputs(host: HostEntry, plan: StandalonePlan, body: string): MaterializedHost {
   const rel = path.relative(ROOT, host.file);
 
   if (plan.variant !== "skill-refs") {
@@ -1053,26 +1296,35 @@ function variantManifestPath(): string {
   return path.resolve(ROOT, ...VARIANT_MANIFEST_REL_PATH.split("/"));
 }
 
-async function compileHost(host: HostEntry, plan: HostPlan): Promise<CompileOutcome> {
-  const { variant, outAbs } = plan;
-
-  // Auto-create only the final destination leaf.
-  fs.mkdirSync(outAbs, { recursive: true });
-
+/**
+ * Compile one host to Markdown, or throw.
+ *
+ * Every devflow asset is Markdown. A `@message` host compiles to a chat-messages
+ * result with no `output` at all, so it is refused by name here and aggregated
+ * with the other failures rather than written, crashed on, or skipped.
+ */
+async function compileMarkdown(host: HostEntry): Promise<{ output: string; warnings: string[] }> {
   const result = await compileFile(host.file);
-  // Every devflow asset is Markdown. A `@message` host compiles to a chat-messages
-  // result with no `output` at all, so it is refused by name here and aggregated
-  // with the other failures rather than written, crashed on, or skipped.
   if (result.kind !== "markdown") {
     throw new Error(
       `${path.relative(ROOT, host.file)}: compiled to a "${result.kind}" result, not Markdown. ` +
       `Devflow assets are Markdown only — remove the @message block(s).`,
     );
   }
+  return { output: result.output, warnings: result.warnings };
+}
+
+async function compileHost(host: HostEntry, plan: StandalonePlan): Promise<CompileOutcome> {
+  const { outAbs } = plan;
+
+  // Auto-create only the final destination leaf.
+  fs.mkdirSync(outAbs, { recursive: true });
+
+  const result = await compileMarkdown(host);
   // Generator hosts shed their whole steering block; reference modules shed it
   // too and must expose no second block; command hosts shed only the build-owned
   // keys so every other byte of their frontmatter is preserved.
-  const cleaned = stripFrontmatterFor(variant, result.output, host.file);
+  const cleaned = stripFrontmatterFor(plan, result.output, host.file);
   const { outputs, axes } = materializeOutputs(host, plan, cleaned);
 
   for (const { dest, content } of outputs) writeFileAtomic(dest, content);
@@ -1090,6 +1342,127 @@ async function compileHost(host: HostEntry, plan: HostPlan): Promise<CompileOutc
     warnings: result.warnings,
     written: outputs.map(o => o.dest),
     prompt: plan.variant === "skill-refs" ? null : { kind: plan.variant, name: plan.name, axes },
+  };
+}
+
+/** One host of a workflow folder, compiled and split on its arms, not yet stamped or written. */
+interface CompiledWorkflowHost {
+  readonly host: HostEntry;
+  readonly plan: WorkflowSkillPlan;
+  /** The compiled body under each variant key, before the build id is stamped into it. */
+  readonly bodies: Readonly<Record<VariantKey, string>>;
+  readonly warnings: string[];
+}
+
+/**
+ * Compile one host of a workflow folder and split it on its arms. Writes nothing.
+ *
+ * D-WORKFLOW-FOLDER-BUILD: the write waits for the whole folder, because the build id is
+ * made from every file of the folder, so no file can be final before the last host is
+ * compiled. The split is the prompts' own (D-LEARNING-VARIANTS): a file carries curation
+ * and compliance arms like a command does, and a file with no arm on an axis has one
+ * body there, which is why every key gets its file.
+ */
+async function compileWorkflowHost(host: HostEntry, plan: WorkflowSkillPlan): Promise<CompiledWorkflowHost> {
+  const result = await compileMarkdown(host);
+  const cleaned = stripFrontmatterFor(plan, result.output, host.file);
+  const split = splitVariants(cleaned);
+  if (!split.ok) throw variantSplitRefusal(path.relative(ROOT, host.file), split.error, cleaned);
+  return { host, plan, bodies: split.value.bodies, warnings: result.warnings };
+}
+
+/** The files of one compiled host, as the folder pass settled them: where each goes and what it holds. */
+interface SettledWorkflowHost {
+  readonly compiled: CompiledWorkflowHost;
+  /** One output per variant key whose folder holds this host's file, in variant-key order. */
+  readonly outputs: PlannedOutput[];
+}
+
+/**
+ * Settle one workflow folder once all of its hosts are compiled: check every variant key
+ * against its own file list, stamp the build id, and return what to write. Writes nothing.
+ *
+ * For each variant key (VARIANT_KEYS):
+ *  1. Completeness. The key's folder must hold every file of its own list
+ *     (workflowFolderFiles), so a registered host that was not found or not compiled
+ *     fails the build, and a file the key's list omits is never required. Every key
+ *     missing a file is reported, in one error, before anything is written.
+ *  2. The build id (D-BUILD-ID): workflowBuildId over the key's compiled bodies before
+ *     the stamp, then the same id stamped into the first heading of every file outside
+ *     references/. Same sources, same id; the reference files stay byte-equal.
+ *  3. A post-condition: the stamped files of the key read back one id, and it is the
+ *     id that was stamped.
+ */
+function settleWorkflowFolder(
+  folder: WorkflowFolder,
+  compiled: readonly CompiledWorkflowHost[],
+): SettledWorkflowHost[] {
+  const settled = compiled.map((c): SettledWorkflowHost => ({ compiled: c, outputs: [] }));
+  const hosts = new Map(compiled.map(c => [c.plan.file, c.host]));
+  const missing: string[] = [];
+  const lackingFiles = new Set<string>();
+
+  for (const key of VARIANT_KEYS) {
+    const members = settled.flatMap(s => {
+      const dest = s.compiled.plan.dests[key];
+      return dest === null ? [] : [{ s, dest, file: s.compiled.plan.file, body: s.compiled.bodies[key] }];
+    });
+    const held = new Set(members.map(m => m.file));
+    const lacking = workflowFolderFiles(folder, key).filter(file => !held.has(file));
+    if (lacking.length > 0) {
+      missing.push(`variant key '${key}' lacks ${lacking.map(file => `'${file}'`).join(", ")}`);
+      for (const file of lacking) lackingFiles.add(file);
+      continue;
+    }
+
+    const id = workflowBuildId(members.map(({ file, body }): CompiledFolderFile => ({ file, body })));
+    const written: CompiledFolderFile[] = [];
+    for (const { s, dest, file, body } of members) {
+      let content = body;
+      if (isStampedWorkflowFile(file)) {
+        const stamped = stampBuildId(body, id);
+        if (!stamped.ok) {
+          const where = path.relative(ROOT, hosts.get(file)?.file ?? file);
+          throw new Error(
+            `${where}: the '${key}' variant of ${file} cannot carry the build id — ${describeBuildStampError(stamped.error)}`,
+          );
+        }
+        content = stamped.value;
+      }
+      s.outputs.push({ dest, content });
+      written.push({ file, body: content });
+    }
+
+    const checked = checkFolderBuildIds(written);
+    if (!checked.ok || checked.value !== id) {
+      throw new Error(
+        `workflow skill folder '${folder.name}', variant key '${key}': the stamped files do not read back build id ` +
+        `${id} (${checked.ok ? checked.value : describeBuildIdCheckError(checked.error)})`,
+      );
+    }
+  }
+
+  if (missing.length > 0) {
+    const sources = workflowFolderHosts(folder)
+      .filter(host => lackingFiles.has(host.file))
+      .map(host => host.source);
+    throw new Error(
+      `workflow skill folder '${folder.name}': ${missing.join("; ")}. A variant key's folder must hold every file ` +
+      `of its own list; check that each registered host exists, declares output-dir '${WORKFLOW_FOLDERS_OUTPUT_DIR}' ` +
+      `and compiles. Not found: ${sources.join(", ")}.`,
+    );
+  }
+  return settled;
+}
+
+/** The outcome of one settled workflow host, for the printed line, the written set and the prune. */
+function workflowOutcome({ compiled, outputs }: SettledWorkflowHost): CompileOutcome {
+  return {
+    source: path.relative(ROOT, compiled.host.file),
+    dest: outputs.map(o => path.relative(ROOT, o.dest)).join(" + "),
+    warnings: compiled.warnings,
+    written: outputs.map(o => o.dest),
+    prompt: null,
   };
 }
 
@@ -1181,6 +1554,60 @@ function pruneOrphanVariantTree(dir: string, written: ReadonlySet<string>): stri
 }
 
 /**
+ * The root of the workflow folders under every variant key, repo-relative: dist/workflows
+ * and the workflows folder of each variant tree. Siblings of the prompts' folders, so the
+ * prune of one cannot reach another.
+ */
+const WORKFLOW_TREES: readonly string[] = VARIANT_KEYS.map(key => workflowFoldersRootRelPath(key));
+
+/**
+ * Delete every folder under a workflow tree that no registered folder names.
+ *
+ * A folder that leaves the registry (renamed, dropped) would otherwise stay in dist/ whole,
+ * and the file prune below removes only files, leaving the empty directories of an orphan
+ * folder behind. Only a real directory is considered: a link in its place is not followed
+ * and not removed. The sweep is keyed on the registry rather than on the written files, so
+ * it also removes a folder whose files the build no longer writes.
+ *
+ * @param registered - The names of the registered folders.
+ * @returns Repo-relative paths removed.
+ */
+function pruneOrphanWorkflowFolders(registered: ReadonlySet<string>): string[] {
+  const pruned: string[] = [];
+  for (const tree of WORKFLOW_TREES) {
+    const treeAbs = path.resolve(ROOT, tree);
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(treeAbs, { withFileTypes: true });
+    } catch (err) {
+      // Absent until the first folder exists, which is always the case while none is registered.
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "ENOTDIR") continue;
+      throw err;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || registered.has(entry.name)) continue;
+      const full = path.join(treeAbs, entry.name);
+      fs.rmSync(full, { recursive: true, force: true });
+      pruned.push(path.relative(ROOT, full));
+    }
+  }
+  return pruned;
+}
+
+/**
+ * Delete every `.md` under a workflow tree that this build did not write, nested files
+ * of a registered folder included (a reference file that left the registry, a file parked
+ * under another subfolder).
+ *
+ * @param written - Absolute paths this build wrote.
+ * @returns Repo-relative paths removed.
+ */
+function pruneOrphanWorkflowFiles(written: ReadonlySet<string>): string[] {
+  return WORKFLOW_TREES.flatMap(tree => pruneOrphans(path.resolve(ROOT, tree), written, true));
+}
+
+/**
  * Remove the retired off tree (LEGACY_OFF_OUTPUT_DIR) whole, when it exists.
  *
  * No build writes there any more and no installer reads it, so every file in it is
@@ -1267,7 +1694,15 @@ function pruneOrphans(
  * Run every sweep over dist/ and print one `pruned:` line per file removed, with the
  * reason for its tree. A file the build wrote is never removed.
  */
-function pruneStaleOutputs(writtenDests: ReadonlySet<string>): void {
+function pruneStaleOutputs(writtenDests: ReadonlySet<string>, workflowFolders: ReadonlySet<string>): void {
+  // The workflow trees go first, so an orphan folder is reported once as a folder and the
+  // variant-tree sweep below finds nothing of it left to report under another reason.
+  for (const rel of pruneOrphanWorkflowFolders(workflowFolders)) {
+    console.log(`  pruned:   ${rel} (no workflow skill folder)`);
+  }
+  for (const rel of pruneOrphanWorkflowFiles(writtenDests)) {
+    console.log(`  pruned:   ${rel} (no workflow skill host)`);
+  }
   for (const rel of pruneOrphanCommands(writtenDests)) {
     console.log(`  pruned:   ${rel} (no command host)`);
   }
@@ -1376,23 +1811,61 @@ async function main(): Promise<void> {
   // build leaves none, and a compliance-off install refuses with the build remedy.
   fs.rmSync(variantManifestPath(), { force: true });
 
+  const reportCompiled = (outcome: CompileOutcome): void => {
+    outcomes.push(outcome);
+
+    const warnNote =
+      outcome.warnings.length > 0
+        ? ` (${outcome.warnings.length} warning(s))`
+        : "";
+    console.log(`  compiled: ${outcome.source} → ${outcome.dest}${warnNote}`);
+
+    for (const w of outcome.warnings) {
+      console.warn(`    WARNING: ${w}`);
+    }
+  };
+
+  // A workflow skill host is compiled here and written later, once its whole folder is
+  // compiled (settleWorkflowFolder). A folder with a host that was refused or failed is
+  // broken: its failure is already recorded, and settling it would only report that
+  // host again as a missing file.
+  const workflowHosts = new Map<string, CompiledWorkflowHost[]>();
+  const brokenFolders = new Set<string>();
+
   for (const { host, plan } of planned) {
-    if (destsOf(plan).some(dest => contested.has(dest))) continue;
+    if (destsOf(plan).some(dest => contested.has(dest))) {
+      if (plan.variant === "workflow-skill") brokenFolders.add(plan.folder);
+      continue;
+    }
     try {
-      const outcome = await compileHost(host, plan);
-      outcomes.push(outcome);
-
-      const warnNote =
-        outcome.warnings.length > 0
-          ? ` (${outcome.warnings.length} warning(s))`
-          : "";
-      console.log(`  compiled: ${outcome.source} → ${outcome.dest}${warnNote}`);
-
-      for (const w of outcome.warnings) {
-        console.warn(`    WARNING: ${w}`);
+      if (plan.variant === "workflow-skill") {
+        const compiled = await compileWorkflowHost(host, plan);
+        workflowHosts.set(plan.folder, [...(workflowHosts.get(plan.folder) ?? []), compiled]);
+      } else {
+        reportCompiled(await compileHost(host, plan));
       }
     } catch (err) {
+      if (plan.variant === "workflow-skill") brokenFolders.add(plan.folder);
       recordFailure(path.relative(ROOT, host.file), formatMdsError(err, host.file));
+    }
+  }
+
+  // Every registered folder is settled, not only the folders that compiled a host: a
+  // registered folder none of whose hosts was found has every file missing, and
+  // that is a build failure rather than a folder that silently does not exist.
+  for (const folder of RESOLVED_WORKFLOW_FOLDERS) {
+    if (brokenFolders.has(folder.name)) continue;
+    try {
+      const settled = settleWorkflowFolder(folder, workflowHosts.get(folder.name) ?? []);
+      for (const { outputs } of settled) {
+        for (const { dest, content } of outputs) writeFileAtomic(dest, content);
+      }
+      for (const host of settled) reportCompiled(workflowOutcome(host));
+    } catch (err) {
+      recordFailure(
+        `${WORKFLOW_FOLDERS_OUTPUT_DIR}/${folder.name}`,
+        formatMdsError(err, path.resolve(ROOT, ...folder.core.split("/"))),
+      );
     }
   }
 
@@ -1426,7 +1899,10 @@ async function main(): Promise<void> {
   // written set is complete and anything else in these trees is stale. Keyed on
   // what was WRITTEN rather than what was planned: a curation-off variant is
   // planned for every one-file host and written only for one with an arm.
-  pruneStaleOutputs(new Set(outcomes.flatMap(o => o.written)));
+  pruneStaleOutputs(
+    new Set(outcomes.flatMap(o => o.written)),
+    new Set(RESOLVED_WORKFLOW_FOLDERS.map(folder => folder.name)),
+  );
   writeFileAtomic(variantManifestPath(), manifest.value);
   const curationOffCount = outcomes.filter(o => o.prompt?.axes.curation === true).length;
   console.log(`  ${curationOffCount} curation-off variant(s) written`);

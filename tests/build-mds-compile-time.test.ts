@@ -36,6 +36,8 @@ import * as path from 'path';
 import * as os from 'os';
 import { init, compileFile, type CompileResult } from '@mdscript/mds';
 import { MDS_REFERENCE_MODULES, MDS_REFERENCE_PARTIALS } from './fixtures/mds-manifest.js';
+import { FIXTURE_HOST_SOURCES, writeFixtureSources } from './fixtures/workflow-folder.js';
+import { WORKFLOW_FOLDERS, workflowFolderHosts } from '../src/core/mds-variants.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 
@@ -68,10 +70,10 @@ function markdownOf(result: CompileResult, label: string): string {
   return result.output;
 }
 
-/** Compile one repo-relative source in-process and return its output and elapsed ms. */
-async function timeCompile(relPath: string): Promise<{ output: string; ms: number }> {
+/** Compile one repo-relative source in-process and return its output and elapsed ms. `base` is the tree the path is relative to. */
+async function timeCompile(relPath: string, base: string = ROOT): Promise<{ output: string; ms: number }> {
   const started = Date.now();
-  const result = await compileFile(path.join(ROOT, relPath), {});
+  const result = await compileFile(path.join(base, relPath), {});
   const ms = Date.now() - started;
   return { output: markdownOf(result, relPath), ms };
 }
@@ -256,4 +258,60 @@ describe('MDS reference modules compile well under the define-capture cliff', ()
       `(${alias.ms} ms) — a probe that is merely a little slower is measuring noise, not the cliff`,
     ).toBeGreaterThan(Math.max(alias.ms, 1) * 10);
   }, 120_000);
+
+  /**
+   * Workflow skill folder hosts (#675 PR A): the roster of the folder layer.
+   *
+   * Each host of a workflow skill folder gets a row here, so the budget above applies to
+   * the new host shape too. PR A ships an EMPTY real registry (WORKFLOW_FOLDERS), so
+   * every row is a FIXTURE host (tests/fixtures/workflow-folder.ts), compiled from a
+   * throwaway directory. The registry's own hosts are spread into the roster, so the
+   * first real folder lands in it without anyone remembering to add a row.
+   */
+  describe('workflow skill folder hosts', () => {
+    const REAL_WORKFLOW_HOSTS: readonly string[] = WORKFLOW_FOLDERS.flatMap(folder =>
+      workflowFolderHosts(folder).map(host => host.source),
+    );
+    let fixtureRoot: string;
+
+    beforeAll(async () => {
+      fixtureRoot = path.join(tmpDir, 'workflow-fixture');
+      await writeFixtureSources(fixtureRoot);
+    }, 120_000);
+
+    /** Every row: where its source is read from, and its repo-relative path. */
+    function workflowRows(): Array<{ readonly base: string; readonly relPath: string }> {
+      return [
+        ...REAL_WORKFLOW_HOSTS.map(relPath => ({ base: ROOT, relPath })),
+        ...FIXTURE_HOST_SOURCES.map(relPath => ({ base: fixtureRoot, relPath })),
+      ];
+    }
+
+    it('the roster this ranges over is real: the five fixture hosts and every host of the shipped registry', () => {
+      const rows = workflowRows();
+      expect(rows.map(row => row.relPath)).toEqual(expect.arrayContaining([...FIXTURE_HOST_SOURCES]));
+      expect(FIXTURE_HOST_SOURCES, 'the fixture folder is one core plus four references').toHaveLength(5);
+      expect(rows).toHaveLength(REAL_WORKFLOW_HOSTS.length + FIXTURE_HOST_SOURCES.length);
+    });
+
+    it('no row uses a selective import', async () => {
+      let aliasImports = 0;
+      for (const { base, relPath } of workflowRows()) {
+        const source = await fs.readFile(path.join(base, relPath), 'utf8');
+        expect(source, `${relPath}: a selective import hits the define-capture cliff`).not.toMatch(/^@import\s*\{/m);
+        aliasImports += (source.match(/^@import\s+"[^"]+"\s+as\s+\w+\s*$/gm) ?? []).length;
+      }
+      expect(aliasImports, 'the rows import their partial by the alias form').toBeGreaterThanOrEqual(FIXTURE_HOST_SOURCES.length);
+    });
+
+    it('every row compiles inside the budget', async () => {
+      const measurements: { label: string; ms: number }[] = [];
+      for (const { base, relPath } of workflowRows()) {
+        const { ms } = await timeCompile(relPath, base);
+        measurements.push({ label: relPath, ms });
+      }
+      expect(measurements.length, 'an empty roster measures nothing').toBeGreaterThan(0);
+      expect(collectOverBudget(measurements, COMPILE_BUDGET_MS)).toEqual([]);
+    }, 120_000);
+  });
 });
