@@ -171,7 +171,7 @@ Pass `COMPLIANCE_DIRECTIVE` to every Code and Fix spawn, on a line of its own.
 
 When the settings line says `CURATION=off`, set `DECISIONS_CONTEXT` to `(none)` and skip this step, locating no ledger and reading no index.
 
-The decisions ledger belongs to the repository, not to one checkout: a linked worktree reads the main worktree's copy, a subdirectory session the repository root's. Locate it with ONE git call, run from the start directory — `WORKTREE_PATH` if provided, otherwise cwd (`devflow:worktree-support`):
+The decisions ledger belongs to the repository, not to one checkout: a linked worktree reads the main worktree's copy, a subdirectory session the repository root's. Locate it with one git call, run from the start directory — `WORKTREE_PATH` if provided, otherwise cwd (`devflow:worktree-support`):
 
 ```bash
 git -C "{start}" rev-parse --path-format=absolute --show-toplevel --git-common-dir
@@ -185,14 +185,9 @@ Line 1 is the checkout's toplevel, line 2 the common git directory. A git older 
 
 This is the rule the curation hooks apply, so you read the index the Curate agent writes.
 
-**Step 1 — Read the pre-rendered index:**
+**Step 1 — Read the pre-rendered index** `{ledger}/.devflow/curation/index.md`. Its content is `DECISIONS_CONTEXT`; if it is absent or empty, `DECISIONS_CONTEXT` is `(none)`.
 
-Attempt to read `{ledger}/.devflow/curation/index.md`.
-
-- If the file exists and contains non-empty content: use that content as `DECISIONS_CONTEXT`.
-- If the file is absent or empty: set `DECISIONS_CONTEXT` to `(none)`.
-
-The index is one direct file read, written at render time by `render-decisions.cjs` — no `.cjs` script runs here.
+The index is one direct file read.
 
 **Step 2 — Slice the index, then hand it on:**
 

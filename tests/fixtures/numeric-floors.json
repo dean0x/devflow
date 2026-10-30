@@ -598,11 +598,11 @@
     },
     {
       "id": "command-bug-analysis-max",
-      "ceiling": 23994,
-      "pattern": "['bug-analysis', 'on', 23_994],",
+      "ceiling": 23824,
+      "pattern": "['bug-analysis', 'on', 23_824],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/bug-analysis.md, the curation-on build, in bytes. Measured 23,994 after the knowledge partial was condensed for #675 (24,413 after the docs root was condensed for #675, 24,421 at #677, 24,452 at #652), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. It rose by 68 bytes to 24,489 at #677, because the scanner wait now names the file that sets the status: a run could read the wrong file and report a scan as completed. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/commands/bug-analysis.md, the curation-on build, in bytes. Measured 23,824 after the decisions partial was condensed for #675 (23,994 after the knowledge partial was condensed for #675,24,413 after the docs root was condensed for #675, 24,421 at #677, 24,452 at #652), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. It rose by 68 bytes to 24,489 at #677, because the scanner wait now names the file that sets the status: a run could read the wrong file and report a scan as completed. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-bug-analysis-curation-off-max",
@@ -614,11 +614,11 @@
     },
     {
       "id": "command-code-review-max",
-      "ceiling": 34332,
-      "pattern": "['code-review', 'on', 34_332],",
+      "ceiling": 34162,
+      "pattern": "['code-review', 'on', 34_162],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/code-review.md, the curation-on build, in bytes. Measured 34,332 after the knowledge partial was condensed for #675 (34,751 after the publication partial was condensed for #675, 34,888 after #561), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/commands/code-review.md, the curation-on build, in bytes. Measured 34,162 after the decisions partial was condensed for #675 (34,332 after the knowledge partial was condensed for #675,34,751 after the publication partial was condensed for #675, 34,888 after #561), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-code-review-curation-off-max",
@@ -630,11 +630,11 @@
     },
     {
       "id": "command-debug-max",
-      "ceiling": 18492,
-      "pattern": "['debug', 'on', 18_492],",
+      "ceiling": 18322,
+      "pattern": "['debug', 'on', 18_322],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/debug.md, the curation-on build, in bytes. Measured 18,492 after the knowledge partial was condensed for #675 (18,875 after the tracker note kept its github condition for #675, 18,881 after the tracker partial was condensed, 19,885 after #472, 19,967 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/commands/debug.md, the curation-on build, in bytes. Measured 18,322 after the decisions partial was condensed for #675 (18,492 after the knowledge partial was condensed for #675,18,875 after the tracker note kept its github condition for #675, 18,881 after the tracker partial was condensed, 19,885 after #472, 19,967 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-debug-curation-off-max",
@@ -710,11 +710,11 @@
     },
     {
       "id": "command-explore-max",
-      "ceiling": 12477,
-      "pattern": "['explore', 'on', 12_477],",
+      "ceiling": 12307,
+      "pattern": "['explore', 'on', 12_307],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/explore.md, the curation-on build, in bytes. Measured 12,477 after the knowledge partial was condensed for #675 (12,866 after #472, 12,944 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/commands/explore.md, the curation-on build, in bytes. Measured 12,307 after the decisions partial was condensed for #675 (12,477 after the knowledge partial was condensed for #675,12,866 after #472, 12,944 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-explore-curation-off-max",
@@ -726,11 +726,11 @@
     },
     {
       "id": "command-implement-max",
-      "ceiling": 47278,
-      "pattern": "['implement', 'on', 47_278],",
+      "ceiling": 47108,
+      "pattern": "['implement', 'on', 47_108],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/implement.md, the curation-on build, in bytes. Measured 47,278 after the knowledge partial was condensed for #675 (48,080 after the tracker note kept its github condition for #675, 48,086 after the docs root was condensed, 48,162 after the tracker partial, 49,160 after the publication partial, 49,275 at #679, 49,363 at #677, 49,365 after the #571 review fixes, 49,378 after #571, 49,402 after #561), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/commands/implement.md, the curation-on build, in bytes. Measured 47,108 after the decisions partial was condensed for #675 (47,278 after the knowledge partial was condensed for #675,48,080 after the tracker note kept its github condition for #675, 48,086 after the docs root was condensed, 48,162 after the tracker partial, 49,160 after the publication partial, 49,275 at #679, 49,363 at #677, 49,365 after the #571 review fixes, 49,378 after #571, 49,402 after #561), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-implement-curation-off-max",
@@ -742,11 +742,11 @@
     },
     {
       "id": "command-plan-max",
-      "ceiling": 36492,
-      "pattern": "['plan', 'on', 36_492],",
+      "ceiling": 36322,
+      "pattern": "['plan', 'on', 36_322],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/plan.md, the curation-on build, in bytes. Measured 36,492 after the knowledge partial was condensed for #675 (36,911 after the tracker note kept its github condition for #675, 36,917 after the docs root was condensed, 36,993 after the tracker partial, 37,997 after #473, 38,018 after #472, 38,096 when #456 closed), with no headroom. Main held 39,153 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/commands/plan.md, the curation-on build, in bytes. Measured 36,322 after the decisions partial was condensed for #675 (36,492 after the knowledge partial was condensed for #675,36,911 after the tracker note kept its github condition for #675, 36,917 after the docs root was condensed, 36,993 after the tracker partial, 37,997 after #473, 38,018 after #472, 38,096 when #456 closed), with no headroom. Main held 39,153 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-plan-curation-off-max",
@@ -774,11 +774,11 @@
     },
     {
       "id": "command-research-max",
-      "ceiling": 14393,
-      "pattern": "['research', 'on', 14_393],",
+      "ceiling": 14223,
+      "pattern": "['research', 'on', 14_223],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/research.md, the curation-on build, in bytes. Measured 14,393 after the knowledge partial was condensed for #675 (14,812 after the docs root was condensed for #675, 14,894 after #472, 14,972 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/commands/research.md, the curation-on build, in bytes. Measured 14,223 after the decisions partial was condensed for #675 (14,393 after the knowledge partial was condensed for #675,14,812 after the docs root was condensed for #675, 14,894 after #472, 14,972 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-research-curation-off-max",
@@ -790,11 +790,11 @@
     },
     {
       "id": "command-resolve-max",
-      "ceiling": 50481,
-      "pattern": "['resolve', 'on', 50_481],",
+      "ceiling": 50311,
+      "pattern": "['resolve', 'on', 50_311],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/resolve.md, the curation-on build, in bytes. Measured 50,481 after the knowledge partial was condensed for #675 (51,283 after the publication partial was condensed for #675, 51,398 at #679, 51,532 at #677); it was 51,543 after #484 added the severity tiers and 51,753 when main's fresh-base step (#495) and the Phase 6 level inputs met in one merge (main measures 51,773 under its 51,824 ceiling; 52,216 on the branch before the merge, paid by a named cut; 52,236 after the gate-level block stopped naming the worktree level; 52,248 after the empty-issues edge row was renamed; 52,252 after the gate-level block; 52,287 after #472; 52,422 when #456 closed), with no headroom. Main held 54,899 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/commands/resolve.md, the curation-on build, in bytes. Measured 50,311 after the decisions partial was condensed for #675 (50,481 after the knowledge partial was condensed for #675,51,283 after the publication partial was condensed for #675, 51,398 at #679, 51,532 at #677); it was 51,543 after #484 added the severity tiers and 51,753 when main's fresh-base step (#495) and the Phase 6 level inputs met in one merge (main measures 51,773 under its 51,824 ceiling; 52,216 on the branch before the merge, paid by a named cut; 52,236 after the gate-level block stopped naming the worktree level; 52,248 after the empty-issues edge row was renamed; 52,252 after the gate-level block; 52,287 after #472; 52,422 when #456 closed), with no headroom. Main held 54,899 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-resolve-curation-off-max",
@@ -806,11 +806,11 @@
     },
     {
       "id": "command-self-review-max",
-      "ceiling": 14399,
-      "pattern": "['self-review', 'on', 14_399],",
+      "ceiling": 14229,
+      "pattern": "['self-review', 'on', 14_229],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/self-review.md, the curation-on build, in bytes. Measured 14,399 after the knowledge partial was condensed for #675 (15,201 at #695, 15,228 after #495; 15,691 after #472; 15,889 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/commands/self-review.md, the curation-on build, in bytes. Measured 14,229 after the decisions partial was condensed for #675 (14,399 after the knowledge partial was condensed for #675,15,201 at #695, 15,228 after #495; 15,691 after #472; 15,889 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-self-review-curation-off-max",
@@ -822,11 +822,11 @@
     },
     {
       "id": "command-bug-analysis-compliance-off-max",
-      "ceiling": 23463,
-      "pattern": "['bug-analysis', 'compliance-off', 23_463],",
+      "ceiling": 23293,
+      "pattern": "['bug-analysis', 'compliance-off', 23_293],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/bug-analysis.md, the compliance-off build, in bytes. Measured 23,463 after the knowledge partial was condensed for #675 (23,882 after the docs root was condensed for #675, 23,890 at #677, 24,107 at its first build), with no headroom. The rule sets no comparison with the all-on build. It rose by 68 bytes to 23,958 at #677, because the scanner wait now names the file that sets the status: a run could read the wrong file and report a scan as completed. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/bug-analysis.md, the compliance-off build, in bytes. Measured 23,293 after the decisions partial was condensed for #675 (23,463 after the knowledge partial was condensed for #675,23,882 after the docs root was condensed for #675, 23,890 at #677, 24,107 at its first build), with no headroom. The rule sets no comparison with the all-on build. It rose by 68 bytes to 23,958 at #677, because the scanner wait now names the file that sets the status: a run could read the wrong file and report a scan as completed. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-bug-analysis-both-off-max",
@@ -838,11 +838,11 @@
     },
     {
       "id": "command-code-review-compliance-off-max",
-      "ceiling": 31539,
-      "pattern": "['code-review', 'compliance-off', 31_539],",
+      "ceiling": 31369,
+      "pattern": "['code-review', 'compliance-off', 31_369],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/code-review.md, the compliance-off build, in bytes. Measured 31,539 after the knowledge partial was condensed for #675 (31,958 at its first build), with no headroom. The rule sets no comparison with the all-on build. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/code-review.md, the compliance-off build, in bytes. Measured 31,369 after the decisions partial was condensed for #675 (31,539 after the knowledge partial was condensed for #675,31,958 at its first build), with no headroom. The rule sets no comparison with the all-on build. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-code-review-both-off-max",
@@ -886,11 +886,11 @@
     },
     {
       "id": "command-implement-compliance-off-max",
-      "ceiling": 48392,
-      "pattern": "['implement', 'compliance-off', 48_392],",
+      "ceiling": 48222,
+      "pattern": "['implement', 'compliance-off', 48_222],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/implement.md, the compliance-off build, in bytes. Measured 48,392 after the knowledge partial was condensed for #675 (49,194 after the tracker note kept its github condition for #675, 49,200 after the docs root was condensed, 49,276 after the tracker partial, 50,274 after the publication partial, 50,374 at #679, 50,462 at #689, which stopped naming the publication gate document that compliance off does not install, 311 bytes cut; 50,773 at #677; 50,775 at its first build), with no headroom; it is larger than the all-on build because its off arms add local text. The rule sets no comparison with the all-on build. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/implement.md, the compliance-off build, in bytes. Measured 48,222 after the decisions partial was condensed for #675 (48,392 after the knowledge partial was condensed for #675,49,194 after the tracker note kept its github condition for #675, 49,200 after the docs root was condensed, 49,276 after the tracker partial, 50,274 after the publication partial, 50,374 at #679, 50,462 at #689, which stopped naming the publication gate document that compliance off does not install, 311 bytes cut; 50,773 at #677; 50,775 at its first build), with no headroom; it is larger than the all-on build because its off arms add local text. The rule sets no comparison with the all-on build. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-implement-both-off-max",
@@ -902,11 +902,11 @@
     },
     {
       "id": "command-plan-compliance-off-max",
-      "ceiling": 36325,
-      "pattern": "['plan', 'compliance-off', 36_325],",
+      "ceiling": 36155,
+      "pattern": "['plan', 'compliance-off', 36_155],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/plan.md, the compliance-off build, in bytes. Measured 36,325 after the knowledge partial was condensed for #675 (36,744 after the tracker note kept its github condition for #675, 36,750 after the docs root was condensed, 36,826 after the tracker partial, 37,824 at its first build), with no headroom. The rule sets no comparison with the all-on build. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/plan.md, the compliance-off build, in bytes. Measured 36,155 after the decisions partial was condensed for #675 (36,325 after the knowledge partial was condensed for #675,36,744 after the tracker note kept its github condition for #675, 36,750 after the docs root was condensed, 36,826 after the tracker partial, 37,824 at its first build), with no headroom. The rule sets no comparison with the all-on build. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-plan-both-off-max",
@@ -934,11 +934,11 @@
     },
     {
       "id": "command-resolve-compliance-off-max",
-      "ceiling": 44134,
-      "pattern": "['resolve', 'compliance-off', 44_134],",
+      "ceiling": 43964,
+      "pattern": "['resolve', 'compliance-off', 43_964],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/resolve.md, the compliance-off build, in bytes. Measured 44,134 after the knowledge partial was condensed for #675 (44,936 at #679, 45,070 at #677, 45,080 at its first build), with no headroom. The rule sets no comparison with the all-on build. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/resolve.md, the compliance-off build, in bytes. Measured 43,964 after the decisions partial was condensed for #675 (44,134 after the knowledge partial was condensed for #675,44,936 at #679, 45,070 at #677, 45,080 at its first build), with no headroom. The rule sets no comparison with the all-on build. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-resolve-both-off-max",
