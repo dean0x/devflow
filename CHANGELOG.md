@@ -17,7 +17,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 **Stale-install window:**
 - Until you run `devflow init`, the installed quality rule, testing, review-methodology and agent-references skills lack the new text.
 
+### Upgrade notes — Files that devflow moves to a backup folder
+
+**What you must do:**
+- Nothing. If `devflow init` moves a file of yours, the output names the file and its new path.
+- To restore a moved file, copy it from the backup folder, `~/.devflow/install-backups/<UTC stamp>-<8 hex>/`, to one of its stable homes. Skills: `~/.devflow/skills/<name>/`. Rules: `~/.devflow/rules/`. Commands and agents: the top-level `commands/` and `agents/` folders of the Claude directory, outside the `devflow/` subfolders. A file that you put back into a devflow folder moves again on the next `devflow init`.
+
+**What to know:**
+- The backup is not encrypted. Devflow never prunes it. It stays until you delete it or run a full uninstall.
+- A file of yours with the same name as a shipped file is overwritten without a report.
+- Relative links in a moved folder can break.
+- Concurrent devflow runs are not supported.
+
 ### Behaviour change
+
+- **Devflow now names the retired files that it removes, and it moves bare legacy skill folders instead of deleting them** ([#688](https://github.com/dean0x/devflow/issues/688)).
+  - `devflow init` and the toggles print each retired devflow file that they remove. Before, most of these removals printed nothing.
+  - A bare legacy skill folder, such as `skills/python` (a name from releases before v2), is now moved whole to the backup folder and named. Before, `devflow init` deleted it.
+  - An interactive `devflow uninstall` where the install backups are the only user content in `~/.devflow` now asks before the full wipe. The prompt lists the backup folder, and a decline keeps the backups.
 
 - **With compliance off, devflow installs no step or reference that posts to GitHub or a tracker** ([#648](https://github.com/dean0x/devflow/issues/648)).
   - With compliance off (the default for new installs and upgrades), devflow installs no step and no reference that posts test-plan evidence, review or resolution summaries, backlog entries, review-thread replies, wave reports, plan artifacts, or release back-links to GitHub or a tracker. Results stay in local files under `.devflow/docs/`.
@@ -47,6 +64,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`devflow init` and the curation, compliance and rules toggles no longer delete files that devflow did not ship** ([#688](https://github.com/dean0x/devflow/issues/688)).
+  - A file that you keep in `commands/devflow/`, `agents/devflow/`, `rules/devflow/`, a `skills/devflow:*` folder or its `references/` folders is now moved to `~/.devflow/install-backups/<UTC stamp>-<8 hex>/`, and the output names it. Before, these commands deleted it. This holds for a full install, for a partial install (`--plugin`) and for the three toggles.
+  - A file that cannot move stays in place with its folder, and the output names it.
 - **A partial install no longer writes through a linked devflow folder** ([#648](https://github.com/dean0x/devflow/issues/648)).
   - If a folder that a partial install writes (commands, rules, agents, a skill folder or its references folder) is a link, the install now writes nothing there. It reports the folder, and you replace it with a real folder and run the install again.
 - **A full install no longer changes files outside its own folder when a skill folder is a link** ([#648](https://github.com/dean0x/devflow/issues/648)).

@@ -43,6 +43,23 @@ Devflow installs machine-wide, into the Claude Code directory and `~/.devflow`:
 - `~/.devflow` is always the machine root. `DEVFLOW_DIR` is ignored.
 - There is no project-local install. `init --scope local` exits 1 and points at `devflow uninstall --scope local`, which removes an old project-local install (`<repo>/.claude` and `<repo>/.devflow` install artifacts) without touching anything under your home directory.
 
+### Files that devflow did not ship
+
+Devflow's install folders belong to devflow, so keep your own files in their stable homes: own skills as shadows in `~/.devflow/skills/<name>/`, own rules in `~/.devflow/rules/`, and own commands and agents in the top-level `commands/` and `agents/` folders of the Claude directory (outside the `devflow/` subfolders).
+
+`init` and the `curation`, `compliance` and `rules` toggles do not delete a file that devflow did not ship. They move it and name it in the output:
+
+- The file moves to `~/.devflow/install-backups/<UTC stamp>-<8 hex>/`, at its relative path. The output names the old path and the new path.
+- The backup folder appears only when a file moves. Two `init` runs on a clean home make none.
+- A file that cannot move stays where it is. The output names it, and the command still finishes.
+- A file that you put back into a devflow folder moves again on the next `init`. To restore a file, copy it from the backup folder to one of its stable homes.
+- The backup is not encrypted. It stays until you delete it or run a full uninstall. A keep-data `devflow uninstall` keeps it, and the full-wipe prompt lists it.
+- A file of yours with the same name as a shipped file is overwritten without a report.
+- Relative links in a moved folder can break.
+- Concurrent devflow runs are not supported.
+- A bare legacy skill folder, such as `skills/python` (a name from releases before v2), moves whole and is named.
+- The output names each retired devflow file that an install removes.
+
 ### Your hooks stay yours
 
 `init`, the `ambient`, `memory` and `proxy` toggles, and `uninstall` add and remove only the hooks devflow wrote in `settings.json`. A hook is devflow's only when its command ends in `/scripts/hooks/run-hook <name>`, or in a form an older release wrote (such as `/scripts/hooks/session-start-memory.sh`). A hook of yours whose command merely mentions a devflow hook's name (`capture-turn`, `memory-worker`, `ensure-proxy`, ...) is never touched, and removing a devflow hook leaves the other hooks in its matcher group in place, in order.
