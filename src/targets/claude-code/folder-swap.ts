@@ -6,7 +6,9 @@
  * Nothing here removes a folder with a recursive `rm`. Before the swap, the backup session moves
  * every file devflow did not ship out of the old folder. If any file could not move, the folder is
  * not swapped: the files devflow ships are written into it one by one, and it stays in place. The
- * same holds when the aside name is taken by a folder that keeps a file. A file at the aside name
+ * write comes before any removal, so a copy that fails leaves the old shipped files in the folder;
+ * then only the listed entries that the new folder lacks are removed. The same holds when the aside
+ * name is taken by a folder that keeps a file. A file at the aside name
  * moves to the backup folder first; if it cannot move, a rename never replaces it, so a folder
  * stays in place and a link makes the swap throw. After
  * a swap, the aside folder is scanned again, because a file can arrive between the first scan and the
@@ -17,8 +19,9 @@
  * A swap that cannot finish throws, and the caller reports it.
  */
 import { promises as fs } from 'fs';
+import * as path from 'path';
 
-import type { BackupSession } from './install-backup.js';
+import { DEFAULT_ENTRY_CAP, MAX_WALK_DEPTH, type BackupSession } from './install-backup.js';
 import { directoryState, unlinkLinkAt, type LinkReport } from './linked-folder.js';
 
 /** How a swap ended: the new folder replaced the old one, or its files were written into the old one. */
@@ -58,6 +61,54 @@ export async function discardDisplacedFolder(backups: BackupSession, aside: stri
 }
 
 /**
+ * The files and links below `staged` as paths relative to it, with `/` separators. Null when the
+ * walk reached its depth or entry bound, because a list that stops early would name too few.
+ */
+async function stagedPaths(staged: string): Promise<ReadonlySet<string> | null> {
+  const found = new Set<string>();
+  async function walk(folder: string, rel: string, depth: number): Promise<boolean> {
+    if (depth > MAX_WALK_DEPTH) return false;
+    const entries = await fs.readdir(folder, { withFileTypes: true });
+    for (const entry of entries) {
+      const childRel = rel === '' ? entry.name : `${rel}/${entry.name}`;
+      if (entry.isDirectory()) {
+        if (!(await walk(path.join(folder, entry.name), childRel, depth + 1))) return false;
+      } else {
+        found.add(childRel);
+        if (found.size > DEFAULT_ENTRY_CAP) return false;
+      }
+    }
+    return true;
+  }
+  return (await walk(staged, '', 0)) ? found : null;
+}
+
+/**
+ * Write the files of `staged` into `target`, then remove what the old folder held and the new one
+ * lacks. The write comes first: if the copy fails, the files devflow shipped are still in the old
+ * folder. The removal scans `target` again with a filter that leaves every staged path, every kept
+ * file and everything below a kept folder alone, so `removeListed` takes only the listed leftovers
+ * (retired and sidecar names, `.DS_Store`) and the shipped files that the new release dropped.
+ * When the staged list is not complete, nothing is removed.
+ */
+async function mergeThenClear(
+  backups: BackupSession,
+  target: string,
+  staged: string,
+  mergeInto: () => Promise<void>,
+): Promise<void> {
+  const written = await stagedPaths(staged);
+  await mergeInto();
+  if (written === null) return;
+  await backups.prepass([{
+    folder: target,
+    include: (relative, kind) =>
+      !(kind !== 'directory' && written.has(relative)) && !backups.isKept(path.join(target, ...relative.split('/'))),
+  }]);
+  await backups.removeListed(target);
+}
+
+/**
  * Put `staged` at `target`. See the module comment for the order of the steps.
  *
  * If the rename of `staged` fails, the old folder is renamed back. If that fails too, the old folder
@@ -84,8 +135,7 @@ export async function swapFolderIn(options: FolderSwapOptions): Promise<FolderSw
   if (state === 'real') {
     await backups.prepass([target]);
     if (asideTaken || backups.keptUnder(target).length > 0) {
-      await backups.removeListed(target);
-      await mergeInto();
+      await mergeThenClear(backups, target, staged, mergeInto);
       return 'merged';
     }
   }

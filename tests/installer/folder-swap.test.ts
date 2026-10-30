@@ -11,6 +11,7 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { swapFolderIn, type FolderSwapOutcome } from '../../src/targets/claude-code/folder-swap.js';
+import { copyDirectory } from '../../src/targets/claude-code/installer.js';
 import { newLinkReport, type LinkReport } from '../../src/targets/claude-code/linked-folder.js';
 import { assertTempHome } from '../setup/home-isolation.js';
 import { at, exists, makeHome, onlyRunFolder, openSession, put, removeHome, type TestHome } from './install-backup-harness.js';
@@ -41,9 +42,17 @@ interface SwapRun {
   readonly swap: () => Promise<FolderSwapOutcome>;
 }
 
-/** One `swapFolderIn` over the compliance paths. The merge writes `SKILL.md` into the target and counts its calls. */
-async function prepareSwap(): Promise<SwapRun> {
-  await put(home, `${STAGED}/SKILL.md`, STAGED_BYTES);
+interface SwapSetup {
+  /** The files of the staged folder, by path below it. Without it the staged folder holds `SKILL.md`. */
+  readonly staged?: Readonly<Record<string, string>>;
+  /** What a merge does. Without it the merge writes `MERGED_BYTES` into `SKILL.md`. */
+  readonly merge?: (target: string, staged: string) => Promise<void>;
+}
+
+/** One `swapFolderIn` over the compliance paths. The merge counts its calls. */
+async function prepareSwap(setup: SwapSetup = {}): Promise<SwapRun> {
+  const stagedFiles = setup.staged ?? { 'SKILL.md': STAGED_BYTES };
+  for (const [rel, text] of Object.entries(stagedFiles)) await put(home, `${STAGED}/${rel}`, text);
   const backups = await openSession(home);
   const links = newLinkReport();
   let mergeCalls = 0;
@@ -58,6 +67,7 @@ async function prepareSwap(): Promise<SwapRun> {
       links,
       mergeInto: async () => {
         mergeCalls += 1;
+        if (setup.merge !== undefined) return setup.merge(at(home, SKILL), at(home, STAGED));
         await fs.mkdir(at(home, SKILL), { recursive: true });
         await fs.writeFile(path.join(at(home, SKILL), 'SKILL.md'), MERGED_BYTES);
       },
@@ -102,6 +112,52 @@ describe('an aside folder left by an earlier run that holds a file which cannot 
     expect(await read(at(home, `${ASIDE}/mine.md`)), 'the file in the aside keeps its bytes').toBe('my note in the aside\n');
     expect(await read(at(home, `${SKILL}/SKILL.md`)), 'the shipped file is current').toBe(MERGED_BYTES);
     expect(await exists(at(home, STAGED)), 'the staged folder was not renamed in').toBe(true);
+  });
+});
+
+describe('a merge into a folder that keeps a file of the user', () => {
+  const REFERENCE = 'references/detection.md';
+
+  it('leaves the old shipped file in place when the copy of the new files fails part-way', async () => {
+    await put(home, `${SKILL}/SKILL.md`, 'an old SKILL.md\n');
+    await put(home, `${SKILL}/mine.md`, 'my note\n');
+    failRename(from => path.basename(from) === 'mine.md');
+    const run = await prepareSwap({
+      merge: async target => {
+        await fs.mkdir(path.join(target, 'references'), { recursive: true });
+        await fs.writeFile(path.join(target, 'references', 'part.md'), 'half of a new file');
+        throw Object.assign(new Error('ENOSPC: injected'), { code: 'ENOSPC' });
+      },
+    });
+
+    const error = await thrownBy(run.swap);
+
+    expect(error?.message).toContain('ENOSPC: injected');
+    expect(run.merged()).toBe(1);
+    expect(await read(at(home, `${SKILL}/SKILL.md`)), 'the old shipped file keeps its bytes').toBe('an old SKILL.md\n');
+    expect(await read(at(home, `${SKILL}/mine.md`)), 'the file of the user stays').toBe('my note\n');
+  });
+
+  it('writes the new files, removes the listed leftovers that the new folder lacks and keeps the file', async () => {
+    await put(home, `${SKILL}/SKILL.md`, 'an old SKILL.md\n');
+    await put(home, `${SKILL}/${REFERENCE}`, 'an old reference\n');
+    await put(home, `${SKILL}/.DS_Store`, 'junk\n');
+    await put(home, `${SKILL}/references/.DS_Store`, 'junk\n');
+    await put(home, `${SKILL}/mine.md`, 'my note\n');
+    failRename(from => path.basename(from) === 'mine.md');
+    const run = await prepareSwap({
+      staged: { 'SKILL.md': STAGED_BYTES, [REFERENCE]: 'a new reference\n' },
+      merge: (target, staged) => copyDirectory(staged, target),
+    });
+
+    const outcome = await run.swap();
+
+    expect(outcome).toBe('merged');
+    expect(await read(at(home, `${SKILL}/SKILL.md`)), 'the shipped file is the new one').toBe(STAGED_BYTES);
+    expect(await read(at(home, `${SKILL}/${REFERENCE}`)), 'the nested shipped file is the new one').toBe('a new reference\n');
+    expect(await exists(at(home, `${SKILL}/.DS_Store`)), 'the junk file goes').toBe(false);
+    expect(await exists(at(home, `${SKILL}/references/.DS_Store`)), 'the nested junk file goes').toBe(false);
+    expect(await read(at(home, `${SKILL}/mine.md`)), 'the file of the user stays').toBe('my note\n');
   });
 });
 

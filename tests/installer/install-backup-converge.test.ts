@@ -366,6 +366,37 @@ describe('a file that cannot move', () => {
     expect(await exists(at(home, `${SKILL_APPLY}/SKILL.md`)), 'the shipped file is removed').toBe(false);
   });
 
+  it('curation enable over the folder that a failed disable left: the shipped files come back and the file is still kept', async () => {
+    await runInstall(home, { shape: 'full' });
+    const skill = at(home, `${SKILL_APPLY}/SKILL.md`);
+    const shipped = await fs.readFile(skill, 'utf8');
+    await put(home, `${SKILL_APPLY}/mine.md`, 'my note\n');
+    failRenameOf('mine.md');
+    const disabled = await converge(false, true, await openSession(home));
+    expect(disabled.skill, 'precondition: the disable failed').toBe('failed');
+    expect(await exists(skill), 'precondition: the folder is half removed').toBe(false);
+    expect(await fs.readFile(at(home, `${SKILL_APPLY}/mine.md`), 'utf8'), 'precondition: the file stays').toBe('my note\n');
+    const backups = await openSession(home);
+
+    const result = await converge(true, true, backups);
+
+    expect(result.skill).toBe('installed');
+    expect(await fs.readFile(skill, 'utf8'), 'the shipped file is back').toBe(shipped);
+    expect(await fs.readFile(at(home, `${SKILL_APPLY}/mine.md`), 'utf8'), 'the file is still kept').toBe('my note\n');
+    expect(backups.snapshot().failures).toEqual([
+      { path: at(home, `${SKILL_APPLY}/mine.md`), action: 'move', reason: 'EACCES' },
+    ]);
+    expect((await fs.readdir(home.claudeDir)).filter(entry => entry.startsWith('.devflow-curation-'))).toEqual([]);
+
+    vi.restoreAllMocks();
+    const later = await openSession(home);
+    const again = await converge(true, true, later);
+
+    expect(again.skill).toBe('installed');
+    await expectKept(`${SKILL_APPLY}/mine.md`, 'my note\n', later);
+    expect(await fs.readFile(skill, 'utf8'), 'the shipped file stays').toBe(shipped);
+  });
+
   it('a file in the place of a skill folder moves whole and the skill is installed', async () => {
     await runInstall(home, { shape: 'full' });
     await fs.rm(at(home, SKILL_APPLY), { recursive: true });
