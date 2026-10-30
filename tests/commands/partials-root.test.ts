@@ -32,7 +32,8 @@ import { execSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { requireDistFile, requireDistFiles, resolveAgentSource } from '../helpers.js';
+import { OFF_VARIANT_KEYS } from '../../src/core/curation-variants.js';
+import { requireDistFile, requireDistFiles, resolveAgentSource, resolveVariantOffSource } from '../helpers.js';
 
 const DECISIONS_HEADING = '### Load DECISIONS_CONTEXT';
 const AUTHORING_DECISIONS_HEADING = '### DECISIONS_CONTEXT — obtain BEFORE authoring';
@@ -263,6 +264,14 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
       const section = sectionOf(requireDistFile(file), KNOWLEDGE_HEADING);
       expect(collectKnowledgeRootDefects(file, requireDistFile(file)), `${file} ${KNOWLEDGE_HEADING}`).toEqual([]);
       expect(section, `${file}: the retired "no git calls" claim`).not.toContain('no git calls');
+    }
+    // The docs-root order holds in every variant key of an after-root host, not only in the on key.
+    for (const file of AFTER_ROOT_LOAD_HOSTS) {
+      for (const key of OFF_VARIANT_KEYS) {
+        const text = resolveVariantOffSource(key, 'commands', file.replace(/\.md$/, ''));
+        expect(text, `${file} has a ${key} variant`).not.toBeNull();
+        expect(collectKnowledgeRootDefects(file, text as string), `${file} ${key} ${KNOWLEDGE_HEADING}`).toEqual([]);
+      }
     }
     // Non-vacuity: each after-root host loads knowledge, and the other hosts still carry the root block.
     const loadHosts = knowledgeHosts(KNOWLEDGE_HEADING);
