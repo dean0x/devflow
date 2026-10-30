@@ -40,6 +40,8 @@ import { restampTrackerAgents } from '../src/targets/claude-code/tracker-servers
 import { requireBuiltCli, resolveAgentSource, sandboxEnv } from './helpers.js';
 
 const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
+/** A converge that met no link: both lists are empty. */
+const NO_LINKS = { replacedLinks: [], refusedFolders: [] };
 
 const GIT_CORE = ['Bash', 'Read', 'Write', 'ToolSearch'];
 const TRACKER_CORE = ['Bash', 'Read', 'ToolSearch'];
@@ -357,25 +359,25 @@ describe('the installed agents wear the stamp, whichever path wrote them', () =>
       convergeTrackerArtifacts({ claudeDir, warn: msg => { warnings.push(msg); }, ...(servers === undefined ? {} : { servers }) });
 
     it('stamps the Tracker agent with the default list, and says so only once', async () => {
-      expect(await converge()).toEqual({ converged: true, agent: 'installed' });
+      expect(await converge()).toEqual({ converged: true, agent: 'installed', ...NO_LINKS });
       expect(toolsOf(await read('tracker'))).toEqual([...TRACKER_CORE, ...DEFAULT_TOOLS]);
       // Idempotence is asserted through the real entry point, run twice: the second run moves nothing.
       const first = await read('tracker');
-      expect(await converge()).toEqual({ converged: true, agent: 'unchanged' });
+      expect(await converge()).toEqual({ converged: true, agent: 'unchanged', ...NO_LINKS });
       expect(await read('tracker')).toBe(first);
     });
 
     it('a changed list is a write, an identical one is not, and the stamp is replaced', async () => {
       await converge(['a', 'b']);
-      expect(await converge(['a', 'b'])).toEqual({ converged: true, agent: 'unchanged' });
-      expect(await converge(['c'])).toEqual({ converged: true, agent: 'installed' });
+      expect(await converge(['a', 'b'])).toEqual({ converged: true, agent: 'unchanged', ...NO_LINKS });
+      expect(await converge(['c'])).toEqual({ converged: true, agent: 'installed', ...NO_LINKS });
       expect(toolsOf(await read('tracker'))).toEqual([...TRACKER_CORE, 'mcp__c']);
     });
 
     it('self-heals a hand-edited or unstamped copy', async () => {
       await converge(['a']);
       await fs.writeFile(installed('tracker'), resolveAgentSource('tracker').content);
-      expect(await converge(['a'])).toEqual({ converged: true, agent: 'installed' });
+      expect(await converge(['a'])).toEqual({ converged: true, agent: 'installed', ...NO_LINKS });
       expect(toolsOf(await read('tracker'))).toEqual([...TRACKER_CORE, 'mcp__a']);
     });
   });
@@ -449,11 +451,11 @@ describe('the installed agents wear the stamp, whichever path wrote them', () =>
       await convergeTrackerArtifacts({ claudeDir, warn: () => {} });
 
       const first = await restamp(['x', 'y']);
-      expect(first).toEqual({ rewritten: ['git', 'tracker'], unchanged: [], absent: [], failed: [] });
+      expect(first).toEqual({ rewritten: ['git', 'tracker'], unchanged: [], absent: [], failed: [], ...NO_LINKS });
       expect(toolsOf(await read('git'))).toEqual([...GIT_CORE, 'mcp__x', 'mcp__y']);
       expect(toolsOf(await read('tracker'))).toEqual([...TRACKER_CORE, 'mcp__x', 'mcp__y']);
 
-      expect(await restamp(['x', 'y'])).toEqual({ rewritten: [], unchanged: ['git', 'tracker'], absent: [], failed: [] });
+      expect(await restamp(['x', 'y'])).toEqual({ rewritten: [], unchanged: ['git', 'tracker'], absent: [], failed: [], ...NO_LINKS });
 
       await restamp([...TRACKER_MCP_SERVERS_DEFAULT]);
       expect(toolsOf(await read('git'))).toEqual([...GIT_CORE, ...DEFAULT_TOOLS]);

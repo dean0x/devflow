@@ -7,28 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Upgrade notes — Quality rules
+### Upgrade notes — Shadowed rules and skills
 
 **What you must do:**
 - A quality rule that you keep at `~/.devflow/rules/quality.md` replaces the shipped one, so you do not get its two new bullets. Add them to your copy. Or run `devflow rules unshadow quality`, which deletes your copy, and then run `devflow init`.
 - A testing skill that you keep at `~/.devflow/skills/testing/` replaces the shipped one, so you do not get its new Quality Gates item or its cuts. Add the item to your copy. Or run `devflow skills unshadow testing`, which deletes your copy, and then run `devflow init`.
+- A review-methodology or agent-references skill that you keep under `~/.devflow/skills/` replaces the shipped one, so you do not get the new follow-up text of #690. Add it to your copy. Or run `devflow skills unshadow <name>`, which deletes your copy, and then run `devflow init`.
 
 **Stale-install window:**
-- Until you run `devflow init`, the installed quality rule and testing skill lack the new text.
+- Until you run `devflow init`, the installed quality rule, testing, review-methodology and agent-references skills lack the new text.
 
 ### Behaviour change
 
-- **With compliance off, devflow installs no step that posts to GitHub or a tracker** ([#648](https://github.com/dean0x/devflow/issues/648)).
-  - With compliance off (the default for new installs and upgrades), devflow installs no step that posts test-plan evidence, review or resolution summaries, backlog entries, review-thread replies, wave reports, plan artifacts, or release back-links to GitHub or a tracker. Results stay in local files under `.devflow/docs/`.
-  - The change covers the `/implement`, `/resolve`, `/code-review`, `/bug-analysis`, `/dynamic-build`, `/dynamic-tickets`, `/plan` and `/release` commands, and the Git and Triage agents. Each command names its local result files and marks them `(local; not posted)`. The commands still open pull requests, link issues and file tickets.
+- **With compliance off, devflow installs no step or reference that posts to GitHub or a tracker** ([#648](https://github.com/dean0x/devflow/issues/648)).
+  - With compliance off (the default for new installs and upgrades), devflow installs no step and no reference that posts test-plan evidence, review or resolution summaries, backlog entries, review-thread replies, wave reports, plan artifacts, or release back-links to GitHub or a tracker. Results stay in local files under `.devflow/docs/`.
+  - The change covers the `/implement`, `/resolve`, `/code-review`, `/bug-analysis`, `/dynamic-build`, `/dynamic-tickets`, `/plan` and `/release` commands, the Git and Triage agents, and the reference files that the Git agent reads. Each command names its local result files and marks them `(local; not posted)`. The commands still open pull requests, link issues and file tickets.
+  - The Git agent reads one reference file for each operation. With compliance off, devflow installs none of the files for the operations that post: the review summary, the resolution summary, the test-plan evidence, the backlog entry, the review-thread reply, the wave report and the two release back-link operations. This holds for the pull-request host and for each tracker. Devflow also installs neither the publication-gate document nor the `/implement` reference for the evidence questions. The other operation files stay.
+  - The GitHub posting recipes moved out of the GitHub API reference into a separate reference, `github-posting.md`. The recipes are the pull-request comments, the review, and the replies to review threads. That reference installs only with compliance on. The GitHub API reference keeps the rate-limit, fetch and release text.
+  - With compliance off, devflow no longer adds a link comment to an existing issue. It still creates a new issue when the task has none.
+  - The evidence publish script refuses to post unless the machine setting has compliance on. It reads only the machine install record. It ignores the devflow directory setting in the environment, and it reads no repository file. When compliance is off, it prints `TRACEABILITY: DEGRADED (compliance off)`. When it cannot read the record, it prints `TRACEABILITY: DEGRADED (compliance state unreadable)`. In both cases it exits with code 2 and makes no GitHub call.
   - Where the repository requires evidence, each command prints one line: `TRACEABILITY: DEGRADED (compliance off on this machine; the repository requires evidence)`.
   - Only the machine switch picks the installed build. A repository `compliance` key keeps the review lens on, locally, and never brings a posting step back.
-  - `devflow init`, `devflow curation` and `devflow compliance` use one converge. Every change of the compliance switch converges the installed commands at once, and the result equals a fresh install with the same switches, apart from stamps. If `devflow compliance --disable` cannot show that no installed file still posts, it records the switch as off, lists the files that still post, and exits 1. It also exits 1, with no success line, when it cannot remove the compliance rule. The command writes the switch under the install manifest lock. If it cannot take the lock, it writes nothing and exits 1.
+  - `devflow init`, `devflow curation` and `devflow compliance` use one converge. Every change of the compliance switch converges the installed commands, agents and references at once. The result equals a fresh install with the same switches, apart from stamps. With compliance off, the converge removes the omitted references. When compliance is on again, it puts each one back with the same bytes. If `devflow compliance --disable` cannot show that no installed file still posts, it records the switch as off, lists the files that still post, and exits 1. A listed file can be a command, an agent or a reference. It also exits 1, with no success line, when it cannot remove the compliance rule. The command writes the switch under the install manifest lock. If it cannot take the lock, it writes nothing and exits 1.
   - `devflow init` prints a one-time notice that names this effect. `devflow compliance --status` has a new `Posting:` line.
   - The wave block that `/dynamic-build` writes on such a machine lists links only: `Refs` lines, never `Closes`. It admits `KEY-N` references as well as `#N` references. This corrects the earlier links-only rule, which admitted only `#N` references.
-  - Run `devflow init` after you update to install the new commands.
+  - Run `devflow init` after you update to install the new commands and references.
 
 ### Changed
+
+- **Plan and code review list follow-up work, and file fewer tickets by default** ([#690](https://github.com/dean0x/devflow/issues/690)).
+  - At the `standard` and `lean` levels, `/plan` lists a sibling finding on the plan's deferred list, with no proposed ticket title, and files no ticket for it. You file one only if you want it. The `full` level does not change. The rest of the scope rule does not change.
+  - The review-methodology skill lists pre-existing problems and does not suggest separate issues for them. Its report template recommends an issue only for data loss, a false pass or a broken install.
+  - The plan levels reference is 47 bytes smaller (4,056 to 4,009), and its ceiling falls with it. The review-methodology skill is 24 bytes smaller, and its report template is 26 bytes larger.
 
 - **The quality rule and the testing skill target doc drift, duplicated code and vacuous tests** ([#476](https://github.com/dean0x/devflow/issues/476)).
   - The quality rule has two new bullets. When a change alters a name, path or behavior, the agent updates the current tracked docs that state the old fact, and not released changelog entries. It describes a security fix by its effect only. Before it adds new code, the agent finds the existing owner and extends it when the new code shares its job. A trust-boundary or fail-closed check is not a copy.
@@ -37,6 +47,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A partial install no longer writes through a linked devflow folder** ([#648](https://github.com/dean0x/devflow/issues/648)).
+  - If a folder that a partial install writes (commands, rules, agents, a skill folder or its references folder) is a link, the install now writes nothing there. It reports the folder, and you replace it with a real folder and run the install again.
+- **A full install no longer changes files outside its own folder when a skill folder is a link** ([#648](https://github.com/dean0x/devflow/issues/648)).
+  - If an installed skill folder is a link, a full install now removes the link and leaves the linked folder as it is. It then installs the skill into a real folder and reports the link.
+- **devflow no longer writes through a linked folder inside its own install folders; it refuses or replaces the link and reports it** ([#648](https://github.com/dean0x/devflow/issues/648)).
+  - This applies to the install, to `uninstall --plugin` and to every converge, for example `devflow curation`, `devflow compliance` and `devflow behavior`.
 - **The `/implement` self-review (Harden) states that it never reviews a deleted file or the old path of a rename** ([#571](https://github.com/dean0x/devflow/issues/571)).
   - The file list that Harden gets leaves out deleted files and the old path of a rename. The command now says so.
   - When the prompt lists no file, Harden reports `### Status: PASS` with the line `no files reviewed`. An empty list no longer reads as a completed review, because the final report of `/implement` shows the line, at every gate level. When the prompt has no file list at all, Harden finds the branch changes and reviews them, as before.

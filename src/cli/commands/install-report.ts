@@ -10,6 +10,7 @@
 import color from 'picocolors';
 
 import { overlayUnitLabel, type InstallReport, type OverlayFailureState } from '../../targets/claude-code/installer.js';
+import { refusedFolderMessage, replacedLinkMessage } from '../../targets/claude-code/linked-folder.js';
 import { SKILL_REFS_SKILL_NAME } from '../../core/mds-variants.js';
 import { prefixSkillName } from '../../core/plugins.js';
 
@@ -64,6 +65,42 @@ export function formatOverlaySummary(
   }
 
   return lines;
+}
+
+/**
+ * Turn the replaced-link half of an InstallReport into summary lines, one per link.
+ *
+ * An install removes a link it finds where it keeps one of its own files or folders and writes a
+ * real file or folder there. What the link pointed to is not touched, which looks the same from the
+ * filesystem as an install that never met the link, so the line says both.
+ *
+ * Pure function — returns lines, logs nothing.
+ */
+export function formatReplacedLinksSummary(report: Pick<InstallReport, 'replacedLinks'>): SummaryLine[] {
+  return report.replacedLinks.map(linkPath => ({ level: 'warn', message: replacedLinkMessage(linkPath) }));
+}
+
+/**
+ * Turn the refused-folder half of an InstallReport into summary lines, one per folder.
+ *
+ * An install writes nothing at a path that is a link it could not remove, or not a folder where it
+ * needs one, and leaves the entry as it was. That looks the same on disk as an install that refreshed
+ * the path, so the line says what was skipped and what to do about it.
+ *
+ * Pure function — returns lines, logs nothing.
+ */
+export function formatRefusedFoldersSummary(report: Pick<InstallReport, 'refusedFolders'>): SummaryLine[] {
+  return report.refusedFolders.map(folder => ({ level: 'warn', message: refusedFolderMessage(folder) }));
+}
+
+/**
+ * Both halves in one list, the replaced links first: for a command that prints the links one
+ * converge met and has no other summary of its own.
+ *
+ * Pure function — returns lines, logs nothing.
+ */
+export function formatLinksSummary(report: Pick<InstallReport, 'replacedLinks' | 'refusedFolders'>): SummaryLine[] {
+  return [...formatReplacedLinksSummary(report), ...formatRefusedFoldersSummary(report)];
 }
 
 /**

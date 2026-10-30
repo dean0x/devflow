@@ -15,7 +15,9 @@ import { describeMoveText, describeOutcome, runInitCurationMove, shownSkipAt, ty
 import { realGlobalTuningMoveIO, realProjectLedgerMoveIO } from './curation-move-io.js';
 import { describeEchoedValue } from '../../core/echo-value.js';
 import { installViaFileCopy, installScripts, type InstallReport } from '../../targets/claude-code/installer.js';
-import { formatOverlaySummary, formatSkillScopeSummary, formatTrackerAssetSummary, isPluginListUnchanged, type SummaryLine } from './install-report.js';
+import { formatLinksSummary, formatOverlaySummary, formatSkillScopeSummary, formatTrackerAssetSummary, isPluginListUnchanged, type SummaryLine } from './install-report.js';
+import { mergeLinkReports, newLinkReport, type LinkReport } from '../../targets/claude-code/linked-folder.js';
+import { sweepLegacyDevflowFiles } from './legacy-sweep.js';
 import { convergeTrackerArtifacts, type ConvergeTrackerArtifactsResult, type TrackerAgentState } from '../../targets/claude-code/tracker-install.js';
 import {
   installSettings,
@@ -34,7 +36,7 @@ import {
   stripUserSecurityDenyList,
   type SecurityMode,
 } from '../../targets/claude-code/post-install.js';
-import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, registeredPluginNames, LEGACY_COMMAND_NAMES, LEGACY_RULE_NAMES, buildAssetMaps, buildScopedSkillsMap, buildRulesMap, partitionSelectablePlugins, WORKFLOW_ORDER, parsePluginSelection, resolveFeatureRedirect, FEATURE_OWNED_SKILLS, prefixSkillName, type PluginDefinition } from '../../core/plugins.js';
+import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, registeredPluginNames, buildAssetMaps, buildScopedSkillsMap, buildRulesMap, partitionSelectablePlugins, WORKFLOW_ORDER, parsePluginSelection, resolveFeatureRedirect, FEATURE_OWNED_SKILLS, prefixSkillName, type PluginDefinition } from '../../core/plugins.js';
 import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
 import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafeDelete, type SafeDeleteInfo } from '../../core/safe-delete.js';
 import { generateSafeDeleteBlock, installToProfile, removeFromProfile, getInstalledVersion, SAFE_DELETE_BLOCK_VERSION } from '../../core/safe-delete-install.js';
@@ -234,6 +236,48 @@ function logSummaryLines(lines: readonly SummaryLine[]): void {
       }
     }
   }
+}
+
+/**
+ * Converge the installed agents onto the saved model and effort assignments, after the file copy
+ * wrote the shipped defaults. Per-item failures are non-fatal.
+ *
+ * Init-only optimization: with an empty mapping and the proxy off, every agent already holds its
+ * shipped default, so the walk would read the agent files and write none; it is skipped. The
+ * disable and revert paths call `reapplyAgentMapping` directly and always need the full walk.
+ * `hasAgentMappingEntries` counts agent entries only: an `agents.memory`-only mapping names no
+ * installed file, so it keeps this gate closed (D-WORKER-AGENTS).
+ *
+ * The links this walk met are returned, not printed: the caller prints them once, through the same
+ * summary as the install step. `verbose` prints the other warnings of the walk.
+ */
+export async function reapplyAgentMappingForInit(opts: {
+  proxyEnabled: boolean;
+  claudeDir: string;
+  devflowDir: string;
+  verbose: boolean;
+}): Promise<LinkReport> {
+  const { proxyEnabled, claudeDir, devflowDir, verbose } = opts;
+  const preCheckMapping = await readAgentMapping(devflowDir);
+  const hasMappingEntries = preCheckMapping.ok && hasAgentMappingEntries(preCheckMapping.value);
+  if (!hasMappingEntries && !proxyEnabled) return newLinkReport();
+
+  const result = await reapplyAgentMapping({
+    proxyEnabled,
+    installDir: path.join(claudeDir, 'agents', 'devflow'),
+    devflowDir,
+  });
+  const links: LinkReport = { replacedLinks: result.replacedLinks, refusedFolders: result.refusedFolders };
+  if (verbose) {
+    const linkLines = new Set(formatLinksSummary(links).map(line => line.message));
+    for (const warning of result.warnings) {
+      if (!linkLines.has(warning)) p.log.warn(warning);
+    }
+    if (result.updated.length > 0) {
+      p.log.info(`Agent model mapping reapplied: ${result.updated.length} agent(s) updated`);
+    }
+  }
+  return links;
 }
 
 /** The safe-delete block in the user's shell profile, compared with the one this CLI writes. */
@@ -2298,46 +2342,11 @@ export const initCommand = new Command('init')
       p.log.info(`Cleaned up ${staleRemoved} legacy skill(s)`);
     }
 
-    // Clean up stale commands from previous installations (e.g., /review → /code-review)
-    const commandsDir = path.join(claudeDir, 'commands', 'devflow');
-    let staleCommandsRemoved = 0;
-    for (const legacy of LEGACY_COMMAND_NAMES) {
-      for (const suffix of ['.md']) {
-        const legacyPath = path.join(commandsDir, `${legacy}${suffix}`);
-        try {
-          await fs.rm(legacyPath);
-          staleCommandsRemoved++;
-        } catch {
-          // Doesn't exist — expected for most entries
-        }
-      }
-    }
-    // Sweep orphaned *-teams.md workflow command variants left by the Agent Teams
-    // refactor. None are ever re-installed, so a blanket sweep is safe on any
-    // install type (the full-install dir wipe only covers full installs).
-    try {
-      for (const f of await fs.readdir(commandsDir)) {
-        if (f.endsWith('-teams.md')) {
-          try { await fs.rm(path.join(commandsDir, f)); staleCommandsRemoved++; }
-          catch { /* already gone */ }
-        }
-      }
-    } catch { /* commands dir absent — nothing to sweep */ }
+    // Clean up stale commands (e.g., /review → /code-review) and rules from previous installations.
+    // A folder the install refused, or that is a link, is not swept: nothing is read or removed through it.
+    const { staleCommandsRemoved, staleRulesRemoved } = await sweepLegacyDevflowFiles({ claudeDir, report: installReport });
     if (staleCommandsRemoved > 0 && verbose) {
       p.log.info(`Cleaned up ${staleCommandsRemoved} legacy command(s)`);
-    }
-
-    // Clean up stale rules from previous installations
-    const rulesDir = path.join(claudeDir, 'rules', 'devflow');
-    let staleRulesRemoved = 0;
-    for (const legacy of LEGACY_RULE_NAMES) {
-      const legacyPath = path.join(rulesDir, `${legacy}.md`);
-      try {
-        await fs.rm(legacyPath);
-        staleRulesRemoved++;
-      } catch {
-        // Doesn't exist — expected for most entries
-      }
     }
     if (staleRulesRemoved > 0 && verbose) {
       p.log.info(`Cleaned up ${staleRulesRemoved} legacy rule(s)`);
@@ -2520,32 +2529,9 @@ export const initCommand = new Command('init')
     // MUST run AFTER the proxy preflight block above: preflight can force proxyEnabled=false
     // on failure, and reapply's dormancy (GPT models materialize only while proxy enabled)
     // depends on the FINAL proxyEnabled value — running earlier would leave GPT model lines
-    // in agent frontmatter after a preflight failure. Per-item failures are non-fatal.
-    //
-    // Init-only optimization: skip reapply when mapping is empty AND proxy is off.
-    // An empty mapping means every agent uses its shipped default; the file copy already
-    // wrote those defaults, so reapply would read ~34 files and write zero. The
-    // disable/revert paths call reapplyAgentMapping directly and always need the full walk.
-    {
-      const agentInstallDir = path.join(claudeDir, 'agents', 'devflow');
-      const preCheckMapping = await readAgentMapping(devflowDir);
-      // hasAgentMappingEntries counts agent entries only: an agents.memory-only
-      // mapping names no installed file, so it keeps this gate closed (D-WORKER-AGENTS).
-      const hasMappingEntries = preCheckMapping.ok && hasAgentMappingEntries(preCheckMapping.value);
-      if (hasMappingEntries || proxyEnabled) {
-        const reapplyResult = await reapplyAgentMapping({
-          proxyEnabled,
-          installDir: agentInstallDir,
-          devflowDir,
-          onWarning: (msg) => { if (verbose) p.log.warn(msg); },
-        });
-        if (reapplyResult.updated.length > 0) {
-          if (verbose) {
-            p.log.info(`Agent model mapping reapplied: ${reapplyResult.updated.length} agent(s) updated`);
-          }
-        }
-      }
-    }
+    // in agent frontmatter after a preflight failure. Per-item failures are non-fatal. The links
+    // the walk met are printed below, through the install summary.
+    const agentMappingLinks = await reapplyAgentMappingForInit({ proxyEnabled, claudeDir, devflowDir, verbose });
 
     // Configure ambient hook, memory hooks, and HUD statusLine in a single read-modify-write pass
     try {
@@ -2846,6 +2832,11 @@ export const initCommand = new Command('init')
     // Reference-overlay reporting: the overlay rewrites files inside an installed skill
     // the user may have shadowed, and reports any unit it had to leave alone.
     logSummaryLines(formatOverlaySummary(installReport));
+
+    // A link the install or the agent model reapply replaced is a change to a path the user made.
+    // A folder either refused is not refreshed, and looks refreshed on disk. A path the two steps
+    // both met is named once.
+    logSummaryLines(formatLinksSummary(mergeLinkReports(installReport, agentMappingLinks)));
 
     // Skill-scoping reporting: a deselected skill is deleted and a dormant shadow
     // is inert, and neither is distinguishable from "never installed" on disk.

@@ -2372,6 +2372,7 @@ const OFF_ABSENT: ReadonlyArray<readonly [string, string]> = [
   ['the publish call', 'verify-evidence.cjs" publish'],
   ['the update-pr-evidence operation', 'update-pr-evidence'],
   ['the publish timeout', 'timeout: 180000'],
+  ['the publication gate document, which compliance off does not install', 'publication-gate'],
 ]
 
 /** Named collector: what an off build of /implement still names that a non-posting machine must not. */
@@ -2468,7 +2469,7 @@ describe('#648 AC-19: Phase 11 of the compliance-off builds runs the local verif
 
   it('the on build keeps the publish call, the publication pass and the timeout, so the absence guard is not vacuous', () => {
     const on = implementMd()
-    expect(OFF_ABSENT.length, 'the absence table is empty, so this guard proves nothing').toBeGreaterThanOrEqual(8)
+    expect(OFF_ABSENT.length, 'the absence table is empty, so this guard proves nothing').toBeGreaterThanOrEqual(9)
     expect(collectOffAbsenceDefects(on)).toEqual(OFF_ABSENT.map(([what, text]) => `the off build names ${what}: ${text}`))
     expect(collectOffEvidenceRunDefects(on)).toEqual(['expected one local verify call in Phase 11, found 0'])
   })
@@ -2494,6 +2495,8 @@ describe('#648 AC-19: Phase 11 of the compliance-off builds runs the local verif
     expect(collectOffEvidenceRunDefects(seedOnce(md, 'cd "{worktree}" && node "$HOME/.devflow/scripts/verify-evidence.cjs" verify', 'node "$HOME/.devflow/scripts/verify-evidence.cjs" verify'))).toEqual(['the call does not run from the worktree'])
     expect(collectOffAbsenceDefects(`${md}\nPR_TEST_PLAN_BLOCK: x`)).toEqual(['the off build names the PR test-plan block input: PR_TEST_PLAN_BLOCK'])
     expect(collectOffAbsenceDefects(`${md}\nthrough the Bash tool with \`timeout: 180000\``)).toEqual(['the off build names the publish timeout: timeout: 180000'])
+    expect(collectOffAbsenceDefects(`${md}\nthe Git agent's publication gate (\`references/publication-gate.md\` step 2)`))
+      .toEqual(['the off build names the publication gate document, which compliance off does not install: publication-gate'])
     expect(collectOrderViolations('implement.md', seedOnce(md, '### Phase 12: Report', '### Phase 12 later').replace('### Phase 11: Evidence', '### Phase 12: Report\n\n### Phase 11: Evidence'), PHASE11_ORDER_OFF).length).toBeGreaterThan(0)
   })
 })

@@ -227,6 +227,14 @@
       "description": "Reference files a JIRA- or LINEAR-machine install carries. Since #393 (PR6, D-INSTALL-ALL-PROVIDERS) the install is no longer a function of the machine's selection, so this floor pins the same shared constant as installed-reference-count-github (INSTALLED_REFS) — the two ids are kept, never deleted, and both rose to the build's 47. History: 32 at the PR-host tree (2026-09-22); 34 since #363; 36 since #364; 47 since #393; 48 since #425 (tracker/_contract.md); 47 since #451 (pr/ensure-pr-ready.md folded into the per-provider ensure-pr-ready files, D-OP-ONE-REF). LOWERED 48 -> 47 by #451 (a deliberate exception to \"a floor may only rise\"): the build no longer emits references/pr/ensure-pr-ready.md (ensure-pr-ready is a tracker operation with one reference per provider, D-OP-ONE-REF), so the manifest it counts lost that one file and no operation lost a reference. Old value 48; accepted by the user 2026-10-12 as a retire-and-re-register of the count."
     },
     {
+      "id": "installed-reference-count-compliance-off",
+      "floor": 30,
+      "pattern": "const INSTALLED_REFS_COMPLIANCE_OFF = 30;",
+      "occurrences": 1,
+      "sourceFile": "tests/mds-variants.test.ts",
+      "description": "Reference files a COMPLIANCE-OFF install carries (#648, AC-49). installed-reference-count-github and installed-reference-count-provider stay on the compliance-ON install at 47. The compliance-off install omits the 16 posting operation files (4 pr/ files and 12 tracker files) and the publication-gate document, so 30 = 47 - 17, measured 2026-10-28 from installedReferenceManifest({ compliance: false }). A floor may only rise: a new kept reference raises it."
+    },
+    {
       "id": "git-agent-remote-io-ops",
       "floor": 16,
       "pattern": "toBeGreaterThanOrEqual(16); // floor: git-agent-remote-io-ops",
@@ -338,7 +346,7 @@
       "pattern": "const BUDGET_LOADED_SET_PR_HOST = 24_786;",
       "occurrences": 1,
       "sourceFile": "tests/tracker/byte-budget.test.ts",
-      "description": "Max characters of the worst-case spawn that runs one of the nine operations whose mechanics live under references/pr/ — its own row, for the reason each provider has one (D-LOADED-SET-PER-PROVIDER). references/pr/ is installed under EVERY tracker, because pull requests, PR reviews and PR checks stay on GitHub whatever issues the project files elsewhere, so a PR operation costs the same bytes on all three paths: folding it into the per-provider rows would price one cost three times while answering nowhere the question a reader asks (what does a PR spawn load?), and it cannot ride the GitHub row, which is scoped to TRACKER ops by D-LOADED-SET-SCOPE. The formula is the preloaded set plus max over PR_HOST_OPS of ( chars(references/pr/{op}.md) + every reference that op's own section names ); no max_op term of its own, because an op's PR-host file is already inside its one-spawn load and a separate largest-file term would count it twice. ONE WRITTEN EXCLUSION, references/github-api.md, declared as LOADED_SET_WRITTEN_EXCLUSIONS in tests/tracker/budget-model.ts: two of these ops loaded it long before any split existed, #326 moved the line that names it without changing a byte a spawn pays, and charging 21_211 ch of it here would bury the pr/ bodies this row exists to measure. What the exclusion owes in return is shape '2c-ex' of the printed table — the same maximum RECORDED with the file charged — plus the equality pin GITHUB_API_MD_CHARS, and an arm asserting the unexcluded figure would NOT fit under this ceiling, so the exclusion is load-bearing rather than a rounding convenience. Re-derived by #376 as a measured 58_226 (shape '2c. PR-host spawn', post-review-summary: its PR-host body plus references/publication-gate.md) plus the 80 ch general headroom; the row moved by exactly the close-out's net -94 ch git.md cut, its worst op unchanged. #365 (PR6), the last PR of the SDLC-evidence series #357, had closed the reservation ledger (its git.md delta was -70 ch) and set every git.md-carrying row to min(previous ceiling, measured + 80), 80 being the headroom the rows carried before the series began (82/77/73/90 ch at 5020e06). The headroom is not a reservation: any addition funds itself with a cut. git.md growth lands in this row too, so it carries the same headroom. Re-measure rather than trust a figure restated here: npm run build && npx vitest run tests/tracker/byte-budget.test.ts prints every row. May be LOWERED, never raised: condense the pr/ mechanics instead. #393 re-derived it to min(58_306, 57_943 + 80) = 58_023, the same worst op moved by exactly the git.md delta (-315 ch). #423 (the skills diet) re-derived it downward to min(58_023, 56_221 + 80) = 56_301, the same two preloaded-skill cuts as the GitHub row. #425 (the Git agent split) re-derived it downward to min(56_301, 47_881 + 80) = 47_961: the same worst op (post-review-summary, 4_540) moved by exactly the git.md cut (-8_340 ch). tracker/_contract.md is billed to no PR-host row, and pr-host-max-op-load stays 4_540. #445 (part 2, the Git and Tracker tool allowlists) lowered it by exactly the 251 ch the frontmatter cut took out of git.md (a 17-name denylist became a one-line allowlist): 47_961 to 47_710, the digest commit's net +2 ch on git.md leaving the headroom at 78, from 80. Re-derived by #451 from a measured 24_706 ch over the eight operations that keep a references/pr/ file (ensure-pr-ready is a tracker operation with one reference per provider), then by #448 as that measurement plus the 80 ch general headroom: 24_786 (the ensure-pr-ready paste gates landed in a tracker reference, so this row did not move). It is never raised."
+      "description": "Max characters of the worst-case spawn that runs one of the nine operations whose mechanics live under references/pr/ — its own row, for the reason each provider has one (D-LOADED-SET-PER-PROVIDER). references/pr/ is installed under EVERY tracker, because pull requests, PR reviews and PR checks stay on GitHub whatever issues the project files elsewhere, so a PR operation costs the same bytes on all three paths: folding it into the per-provider rows would price one cost three times while answering nowhere the question a reader asks (what does a PR spawn load?), and it cannot ride the GitHub row, which is scoped to TRACKER ops by D-LOADED-SET-SCOPE. The formula is the preloaded set plus max over PR_HOST_OPS of ( chars(references/pr/{op}.md) + every reference that op's own section names ); no max_op term of its own, because an op's PR-host file is already inside its one-spawn load and a separate largest-file term would count it twice. TWO WRITTEN EXCLUSIONS, references/github-api.md and references/github-posting.md (the verbatim move of posting recipes github-api.md held, loaded by resolve-review-threads alone and pinned by GITHUB_POSTING_MD_CHARS), declared as LOADED_SET_WRITTEN_EXCLUSIONS in tests/tracker/budget-model.ts: for github-api.md, two of these ops loaded it long before any split existed, #326 moved the line that names it without changing a byte a spawn pays, and charging 21_211 ch of it here would bury the pr/ bodies this row exists to measure. What the exclusion owes in return is shape '2c-ex' of the printed table — the same maximum RECORDED with the file charged — plus the equality pin GITHUB_API_MD_CHARS, and an arm asserting the unexcluded figure would NOT fit under this ceiling, so the exclusion is load-bearing rather than a rounding convenience. Re-derived by #376 as a measured 58_226 (shape '2c. PR-host spawn', post-review-summary: its PR-host body plus references/publication-gate.md) plus the 80 ch general headroom; the row moved by exactly the close-out's net -94 ch git.md cut, its worst op unchanged. #365 (PR6), the last PR of the SDLC-evidence series #357, had closed the reservation ledger (its git.md delta was -70 ch) and set every git.md-carrying row to min(previous ceiling, measured + 80), 80 being the headroom the rows carried before the series began (82/77/73/90 ch at 5020e06). The headroom is not a reservation: any addition funds itself with a cut. git.md growth lands in this row too, so it carries the same headroom. Re-measure rather than trust a figure restated here: npm run build && npx vitest run tests/tracker/byte-budget.test.ts prints every row. May be LOWERED, never raised: condense the pr/ mechanics instead. #393 re-derived it to min(58_306, 57_943 + 80) = 58_023, the same worst op moved by exactly the git.md delta (-315 ch). #423 (the skills diet) re-derived it downward to min(58_023, 56_221 + 80) = 56_301, the same two preloaded-skill cuts as the GitHub row. #425 (the Git agent split) re-derived it downward to min(56_301, 47_881 + 80) = 47_961: the same worst op (post-review-summary, 4_540) moved by exactly the git.md cut (-8_340 ch). tracker/_contract.md is billed to no PR-host row, and pr-host-max-op-load stays 4_540. #445 (part 2, the Git and Tracker tool allowlists) lowered it by exactly the 251 ch the frontmatter cut took out of git.md (a 17-name denylist became a one-line allowlist): 47_961 to 47_710, the digest commit's net +2 ch on git.md leaving the headroom at 78, from 80. Re-derived by #451 from a measured 24_706 ch over the eight operations that keep a references/pr/ file (ensure-pr-ready is a tracker operation with one reference per provider), then by #448 as that measurement plus the 80 ch general headroom: 24_786 (the ensure-pr-ready paste gates landed in a tracker reference, so this row did not move). It is never raised."
     },
     {
       "id": "git-op-load-max",
@@ -346,7 +354,7 @@
       "pattern": "const GIT_OP_LOAD_MAX = 19_987;",
       "occurrences": 1,
       "sourceFile": "tests/tracker/byte-budget.test.ts",
-      "description": "D-OP-LOAD-CAP (#451): no single Git operation may load more than 19,987 ch — its one reference (contract and mechanics are one file since D-OP-ONE-REF) plus every reference that reference can name in the same spawn, every in-spawn hop priced, less the written github-api.md exclusion, measured under every registered provider. It replaces pr-host-max-op-load (4,540), which priced one PR-host operation's mechanics while its contract still sat in the always-loaded agent. Derived from the measured worst operation, linear/setup-task at 19,907 ch (step 1c hops into ensure-traceable-issue under ISSUE_REQUIRED, and the operation names learn-conventions.md), plus the 80 ch general headroom. #448 moved PR creation into the Git agent's ensure-pr-ready reference (14,106 ch under Linear, its worst provider), which stays under the worst operation. May be lowered, never raised."
+      "description": "D-OP-LOAD-CAP (#451): no single Git operation may load more than 19,987 ch — its one reference (contract and mechanics are one file since D-OP-ONE-REF) plus every reference that reference can name in the same spawn, every in-spawn hop priced, less the written github-api.md and github-posting.md exclusions, measured under every registered provider. It replaces pr-host-max-op-load (4,540), which priced one PR-host operation's mechanics while its contract still sat in the always-loaded agent. Derived from the measured worst operation, linear/setup-task at 19,907 ch (step 1c hops into ensure-traceable-issue under ISSUE_REQUIRED, and the operation names learn-conventions.md), plus the 80 ch general headroom. #448 moved PR creation into the Git agent's ensure-pr-ready reference (14,106 ch under Linear, its worst provider), which stays under the worst operation. May be lowered, never raised."
     },
     {
       "id": "mcp-contract-max-chars",
@@ -390,11 +398,11 @@
     },
     {
       "id": "claude-md-max-chars",
-      "ceiling": 13150,
-      "pattern": "const CLAUDE_MD_MAX_CHARS = 13150;",
+      "ceiling": 13139,
+      "pattern": "const CLAUDE_MD_MAX_CHARS = 13139;",
       "occurrences": 1,
       "sourceFile": "tests/docs/claude-md-tracker-section.test.ts",
-      "description": "Max characters of CLAUDE.md. CLAUDE.md is loaded into every session in this repository, so its length is a recurring per-session cost. The Architecture Overview keeps only its binding invariant lines there; the descriptions live in docs/reference/architecture.md. Measured 13,150 at the pin, headroom 0. May be LOWERED after a pass that cuts the text, never raised: a cap raised to fit whatever the file grew into is not a cap."
+      "description": "Max characters of CLAUDE.md. CLAUDE.md is loaded into every session in this repository, so its length is a recurring per-session cost. The Architecture Overview keeps only its binding invariant lines there; the descriptions live in docs/reference/architecture.md. Measured 13,139 at the pin, headroom 0. May be LOWERED after a pass that cuts the text, never raised: a cap raised to fit whatever the file grew into is not a cap."
     },
     {
       "id": "write-fence-allowlist-size",
@@ -502,11 +510,11 @@
     },
     {
       "id": "plan-levels-ref-max",
-      "ceiling": 4056,
-      "pattern": "const PLAN_LEVELS_REF_MAX_BYTES = 4_056",
+      "ceiling": 4009,
+      "pattern": "const PLAN_LEVELS_REF_MAX_BYTES = 4_009",
       "occurrences": 1,
       "sourceFile": "tests/guards/agent-references.test.ts",
-      "description": "D-CMD-REF-HAND: references/commands/plan-levels.md of the agent-references skill, in bytes. /plan reads it once per run at the standard level (the default) or lean, so it is standing context on the default path. Measured 4,056 after the review fixes of #473, with no headroom. May be LOWERED, never raised."
+      "description": "D-CMD-REF-HAND: references/commands/plan-levels.md of the agent-references skill, in bytes. /plan reads it once per run at the standard level (the default) or lean, so it is standing context on the default path. Measured 4,009 after #690 listed plan siblings in place of tickets, with no headroom. May be LOWERED, never raised."
     },
     {
       "id": "resolve-levels-ref-max",
@@ -878,19 +886,19 @@
     },
     {
       "id": "command-implement-compliance-off-max",
-      "ceiling": 50685,
-      "pattern": "['implement', 'compliance-off', 50_685],",
+      "ceiling": 50374,
+      "pattern": "['implement', 'compliance-off', 50_374],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/implement.md, the compliance-off build, in bytes. Measured 50,685 at #679 (50,773 at #677, 50,775 at its first build), with no headroom; it is larger than the all-on build because its off arms add local text. The rule sets no comparison with the all-on build. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/implement.md, the compliance-off build, in bytes. Measured 50,374 at #679 (50,462 at #689, which stopped naming the publication gate document that compliance off does not install, 311 bytes cut; 50,773 at #677; 50,775 at its first build), with no headroom; it is larger than the all-on build because its off arms add local text. The rule sets no comparison with the all-on build. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-implement-both-off-max",
-      "ceiling": 47831,
-      "pattern": "['implement', 'both-off', 47_831],",
+      "ceiling": 47520,
+      "pattern": "['implement', 'both-off', 47_520],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE (#648, AC-33): dist/curation-compliance-off/commands/implement.md, the build with curation and compliance both off, in bytes. Measured 47,831 at #679 (47,919 at #677, 47,921 at its first build), with no headroom. The rule sets no comparison with the other builds. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE (#648, AC-33): dist/curation-compliance-off/commands/implement.md, the build with curation and compliance both off, in bytes. Measured 47,520 at #679 (47,608 at #689, which stopped naming the publication gate document that compliance off does not install, 311 bytes cut; 47,919 at #677; 47,921 at its first build), with no headroom. The rule sets no comparison with the other builds. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-plan-compliance-off-max",

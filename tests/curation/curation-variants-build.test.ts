@@ -483,7 +483,12 @@ describe('the retired off tree is removed by the build (TP-4)', () => {
   });
 });
 
-const MODULE_COMPLIANCE_REFUSAL = 'src/assets/mds/tracker/_mcp.mds: a reference module may not carry compliance-variant markers';
+/**
+ * A reference module may carry compliance arms (AC-39), so a compliance marker there is
+ * split, not refused wholesale; only a malformed one is refused, as a compliance split.
+ * The curation refusals below are never this text.
+ */
+const MODULE_COMPLIANCE_SPLIT_REFUSAL = 'compliance-variant split refused';
 
 describe('what the build refuses (AC-134, AC-135)', () => {
   it('a host with a bad arm fails the build, naming the host, the problem and a neighbour to find it by', async () => {
@@ -558,12 +563,12 @@ describe('what the build refuses (AC-134, AC-135)', () => {
       const run = runBuild(fakeRoot);
       expect(run.status, `expected exit 1.\n${run.combined}`).toBe(1);
       expect(run.combined).toContain('src/assets/mds/tracker/_mcp.mds: a reference module may not carry curation-variant markers');
-      expect(run.combined, 'the curation refusal is not the compliance one').not.toContain(MODULE_COMPLIANCE_REFUSAL);
+      expect(run.combined, 'the curation refusal is not a compliance split refusal').not.toContain(MODULE_COMPLIANCE_SPLIT_REFUSAL);
       expect(await readIfPresent(fakeRoot, 'dist/skills/git/references/tracker/_mcp.md'), 'nothing is written for a refused module').toBeNull();
     });
   });
 
-  it('refuses a reference module that carries a marker, and builds the same module without one (AC-135)', async () => {
+  it('refuses a reference module that carries a curation marker, and builds the same module without one (AC-135)', async () => {
     const source = readFileSync(path.join(ROOT, 'src', 'assets', 'mds', 'tracker', '_mcp.mds'), 'utf-8');
     const opLine = /^<!-- op: _mcp -->$/m.exec(source)?.[0];
     expect(opLine, 'the _mcp module no longer opens with its op marker — the probe is inert').toBeDefined();
@@ -581,7 +586,7 @@ describe('what the build refuses (AC-134, AC-135)', () => {
       const run = runBuild(fakeRoot);
       expect(run.status, `expected exit 1.\n${run.combined}`).toBe(1);
       expect(run.combined).toContain('src/assets/mds/tracker/_mcp.mds: a reference module may not carry curation-variant markers');
-      expect(run.combined, 'the curation refusal is not the compliance one').not.toContain(MODULE_COMPLIANCE_REFUSAL);
+      expect(run.combined, 'the curation refusal is not a compliance split refusal').not.toContain(MODULE_COMPLIANCE_SPLIT_REFUSAL);
       expect(await readIfPresent(fakeRoot, 'dist/skills/git/references/tracker/_mcp.md'), 'nothing is written for a refused module').toBeNull();
     });
   });

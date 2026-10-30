@@ -33,7 +33,7 @@ const CLI_REFERENCE = read('docs/cli-reference.md')
 
 // ── The CHANGELOG entry ───────────────────────────────────────────────────────────────────────────────
 
-const ENTRY_TITLE = '- **With compliance off, devflow installs no step that posts to GitHub or a tracker**'
+const ENTRY_TITLE = '- **With compliance off, devflow installs no step or reference that posts to GitHub or a tracker**'
 const SECTION_HEADING = '### Behaviour change'
 /** The newest released version when the entry was written. The entry never sits under it or an older one. */
 const LAST_RELEASED_BEFORE_ENTRY: readonly [number, number, number] = [3, 9, 0]
@@ -127,11 +127,30 @@ describe('CHANGELOG: the compliance-off entry', () => {
     else expect(ENTRY?.sectionLabel).toBe('Unreleased')
   })
 
-  it('states the new property: no posting step is installed, and results stay local', () => {
+  it('states the new property: no posting step and no posting reference is installed, and results stay local', () => {
     const body = ENTRY?.body ?? ''
     expect(body).toContain(
-      'devflow installs no step that posts test-plan evidence, review or resolution summaries, backlog entries, review-thread replies, wave reports, plan artifacts, or release back-links to GitHub or a tracker. Results stay in local files under `.devflow/docs/`.',
+      'devflow installs no step and no reference that posts test-plan evidence, review or resolution summaries, backlog entries, review-thread replies, wave reports, plan artifacts, or release back-links to GitHub or a tracker. Results stay in local files under `.devflow/docs/`.',
     )
+  })
+
+  it('states the reference effects: the omitted operation files, the moved recipes, the untouched existing issue', () => {
+    const body = ENTRY?.body ?? ''
+    expect(body).toContain('devflow installs none of the files for the operations that post')
+    expect(body).toContain('Devflow also installs neither the publication-gate document nor the `/implement` reference for the evidence questions.')
+    expect(body).toContain('The GitHub posting recipes moved out of the GitHub API reference into a separate reference, `github-posting.md`.')
+    expect(body).toContain('That reference installs only with compliance on.')
+    expect(body).toContain('With compliance off, devflow no longer adds a link comment to an existing issue.')
+    expect(body).toContain('Every change of the compliance switch converges the installed commands, agents and references at once.')
+  })
+
+  it('states the publish refusal with both lines, the exit code and the machine record as the only source', () => {
+    const body = ENTRY?.body ?? ''
+    expect(body).toContain('The evidence publish script refuses to post unless the machine setting has compliance on.')
+    expect(body).toContain('It reads only the machine install record. It ignores the devflow directory setting in the environment, and it reads no repository file.')
+    expect(body).toContain('`TRACEABILITY: DEGRADED (compliance off)`')
+    expect(body).toContain('`TRACEABILITY: DEGRADED (compliance state unreadable)`')
+    expect(body).toContain('it exits with code 2 and makes no GitHub call')
   })
 
   it('states the rule in words: only the machine switch picks the build, and a repository key never restores a step', () => {

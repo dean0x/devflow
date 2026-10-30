@@ -37,6 +37,7 @@ import { agentSourceDirs, type AgentSourceDirs } from './assets.js';
 import { getAllAgentNames } from './plugins.js';
 import { mdEntryName, mdFileName } from './orphan-sweep.js';
 import { isContainedIn } from './paths.js';
+import { newLinkReport, refuseUnrealFolder, warnLinkReport, writeFileReplacingLink } from '../targets/claude-code/linked-folder.js';
 
 // ---------------------------------------------------------------------------
 // Result type (local; matches codebase per-module pattern)
@@ -882,6 +883,10 @@ export interface ReapplyResult {
   invalidMapping: string[];
   /** Warning messages emitted during processing. */
   warnings: string[];
+  /** Installed agent files that were a link and now are a real file. What they pointed to was left as it was. */
+  replacedLinks: string[];
+  /** The install directory, if it is a link or not a folder: no agent was read or written. */
+  refusedFolders: string[];
 }
 
 /**
@@ -897,6 +902,10 @@ export interface ReapplyResult {
  *   any mapping entries for agents not in the registry.
  * - Missing installed files → skip silently (recorded in skippedMissing).
  * - Malformed frontmatter → warn and leave file untouched.
+ * - An install directory that is a link, or not a folder, is refused: nothing in it is read or
+ *   written, and it is named in `refusedFolders` and in a warning. An agent file that is a link is
+ *   replaced by a real file (a rename, never a write through the link), and named in `replacedLinks`
+ *   and in a warning.
  * - DOES NOT store previousModel anywhere (plan D4): computes from shipped defaults.
  */
 export async function reapplyAgentMapping(opts: ReapplyOptions): Promise<ReapplyResult> {
@@ -906,10 +915,17 @@ export async function reapplyAgentMapping(opts: ReapplyOptions): Promise<Reapply
     opts.onWarning?.(msg);
   };
 
+  // A link at the folder sends every write below it into another place, so the folder is proven first.
+  const folderLinks = newLinkReport();
+  if (await refuseUnrealFolder(folderLinks, opts.installDir)) {
+    warnLinkReport(folderLinks, warn);
+    return { updated: [], unchanged: [], skippedMissing: [], invalidMapping: [], warnings, replacedLinks: [], refusedFolders: folderLinks.refusedFolders };
+  }
+
   const mappingResult = await readAgentMapping(opts.devflowDir, { onWarning: warn });
   if (!mappingResult.ok) {
     warn(`reapplyAgentMapping: failed to read mapping — ${mappingResult.error}`);
-    return { updated: [], unchanged: [], skippedMissing: [], invalidMapping: [], warnings };
+    return { updated: [], unchanged: [], skippedMissing: [], invalidMapping: [], warnings, replacedLinks: [], refusedFolders: [] };
   }
   const mapping = mappingResult.value;
 
@@ -924,7 +940,7 @@ export async function reapplyAgentMapping(opts: ReapplyOptions): Promise<Reapply
   // 'write-error' = warning emitted but agent placed in no bucket (original semantics).
   // 'invalid-mapping' = model name in agent-models.json was invalid.
   type AgentBucket = 'updated' | 'unchanged' | 'skipped' | 'write-error' | 'invalid-mapping';
-  type AgentOutcome = { bucket: AgentBucket; localWarnings: string[] };
+  type AgentOutcome = { bucket: AgentBucket; localWarnings: string[]; replacedLinks?: string[] };
 
   // Stable iteration order — Set preserves insertion order, array fixes it for the map.
   const allNamesList = [...allNames];
@@ -996,8 +1012,9 @@ export async function reapplyAgentMapping(opts: ReapplyOptions): Promise<Reapply
       }
 
       try {
-        await writeFileAtomicExclusive(installPath, rewriteResult.value.content);
-        return { bucket: 'updated', localWarnings };
+        const links = newLinkReport();
+        await writeFileReplacingLink(installPath, rewriteResult.value.content, links);
+        return { bucket: 'updated', localWarnings, replacedLinks: links.replacedLinks };
       } catch (err: unknown) {
         localWarn(`reapplyAgentMapping: failed to write ${agentName}.md — ${(err as Error).message}`);
         return { bucket: 'write-error', localWarnings };
@@ -1010,11 +1027,13 @@ export async function reapplyAgentMapping(opts: ReapplyOptions): Promise<Reapply
   const unchanged: string[] = [];
   const skippedMissing: string[] = [];
   const invalidMapping: string[] = [];
+  const replacedLinks: string[] = [];
 
   for (let i = 0; i < allNamesList.length; i++) {
     const agentName = allNamesList[i];
     const { bucket, localWarnings } = perResults[i];
     warnings.push(...localWarnings);
+    replacedLinks.push(...(perResults[i].replacedLinks ?? []));
     switch (bucket) {
       case 'updated':         updated.push(agentName); break;
       case 'unchanged':       unchanged.push(agentName); break;
@@ -1024,7 +1043,8 @@ export async function reapplyAgentMapping(opts: ReapplyOptions): Promise<Reapply
     }
   }
 
-  return { updated, unchanged, skippedMissing, invalidMapping, warnings };
+  warnLinkReport({ replacedLinks, refusedFolders: [] }, warn);
+  return { updated, unchanged, skippedMissing, invalidMapping, warnings, replacedLinks, refusedFolders: [] };
 }
 
 // ---------------------------------------------------------------------------

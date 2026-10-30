@@ -72,6 +72,13 @@ function init(extraArgs: string[] = []) {
   ]);
 }
 
+/**
+ * The generated references a compliance-off install carries. `init()` passes no
+ * `--compliance`, so every run here is compliance-off: the posting ops and the
+ * publication gate are not installed.
+ */
+const installedRefs = (): readonly string[] => installedReferenceManifest({ compliance: false });
+
 const claudeDir = (): string => path.join(tmpHome, '.claude');
 const devflowDir = (): string => path.join(tmpHome, '.devflow');
 const refsRoot = (): string => path.join(claudeDir(), 'skills', 'devflow:git', 'references');
@@ -183,7 +190,7 @@ describe('devflow init installs every provider (D-INSTALL-ALL-PROVIDERS)', () =>
     // The whole generated manifest — every provider tree, the PR-host tree, the
     // cross-cutting documents and the tool-call contract.
     const refs = await listFiles(refsRoot());
-    for (const rel of installedReferenceManifest()) {
+    for (const rel of installedRefs()) {
       expect(refs, `${rel} is generated and must be installed under github`).toContain(rel);
     }
     const installed = githubTree.map(line => line.slice(0, line.lastIndexOf(' ')));
@@ -242,7 +249,7 @@ describe('devflow init installs every provider (D-INSTALL-ALL-PROVIDERS)', () =>
     // Derived from the registry, not typed: the install-set size moves whenever a
     // module joins, and a literal here would report that as an e2e regression in a
     // file whose subject is the STEADY-STATE re-init, not the count.
-    const refs = installedReferenceManifest().length;
+    const refs = installedRefs().length;
     expect(first.stdout).toContain(`Installed ${refs} generated skill reference(s)`);
     expect(first.stdout).toContain(`+${refs} reference(s)`);
 
@@ -295,7 +302,7 @@ describe('devflow tracker --set moves the machine default and no installed file 
     const status = run(['tracker', '--status']);
     expect(status.status).toBe(0);
     expect(status.stdout).toContain('Mechanics:');
-    expect(status.stdout).toContain(`installed (${installedReferenceManifest().length} file(s))`);
+    expect(status.stdout).toContain(`installed (${installedRefs().length} file(s))`);
     expect(status.stdout).not.toContain('MISSING');
   }, SUBPROCESS_TIMEOUT_MS * 2);
 });

@@ -55,12 +55,21 @@ import {
   validateContractOutputName,
   GATED_REFERENCE_MODULES,
   GATED_REFERENCE_MODULE_SOURCES,
+  POSTING_OPS,
+  PR_HOST_OPS,
+  TRACKER_OPS,
+  COMPLIANCE_OFF_OMITTED_DOCS,
+  COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR,
+  checkPostingOps,
+  complianceOffOmittedRelPaths,
+  describePostingOpsError,
+  splitSectionArms,
   type OutputNameError,
   type OutputDirError,
   type HostVariant,
   type VariantModule,
 } from '../src/core/mds-variants.js';
-import { ALL_MDS_HOSTS } from './fixtures/mds-manifest.js';
+import { ALL_MDS_HOSTS, POSTING_OPERATIONS } from './fixtures/mds-manifest.js';
 import { walkFiles } from './helpers.js';
 import {
   BOTH_OFF_OUTPUT_DIR,
@@ -1067,9 +1076,18 @@ describe('validateContractOutputName — the narrow underscore allowance', () =>
  * github and jira/linear installs are now the same install; registered in
  * tests/fixtures/numeric-floors.json under both of the ids that used to pin them
  * apart (installed-reference-count-github, installed-reference-count-provider),
- * which rose from 24 and 36 to meet here.
+ * which rose from 24 and 36 to meet here. This is the compliance-ON install; the
+ * compliance-off install has its own floor, INSTALLED_REFS_COMPLIANCE_OFF.
  */
 const INSTALLED_REFS = 47;
+
+/**
+ * Files a compliance-OFF install carries: the compliance-on manifest less the sixteen
+ * posting operation files and the publication-gate document (47 - 17). Registered in
+ * tests/fixtures/numeric-floors.json as installed-reference-count-compliance-off.
+ * A floor, not an equality: a new kept reference raises it, and it never lowers.
+ */
+const INSTALLED_REFS_COMPLIANCE_OFF = 30;
 
 describe('installedReferenceManifest — every provider, whatever the machine selected', () => {
   const generated = generatedReferenceManifest();
@@ -1110,5 +1128,193 @@ describe('installedReferenceManifest — every provider, whatever the machine se
     // compile-time constant, so a refusal is a programming error no caller could
     // sensibly continue past.
     expect(() => installedReferenceManifest({ modules: [] })).toThrow(/does not expand/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The compliance-off reference set (AC-39, AC-40; TP-56)
+// ---------------------------------------------------------------------------
+//
+// A compliance-off install carries no reference that describes a posting step. The
+// set it omits is POSTING_OPS (the eight posting operations, whichever directory a
+// file of one sits in) plus the publication-gate document. The oracle below finds
+// the same files by PATH, not by calling the function under test, so a registry
+// that moved an op would turn the comparison red rather than agree with itself.
+
+describe('POSTING_OPS and the compliance-off reference manifest (TP-56)', () => {
+  const on = installedReferenceManifest();
+  const off = installedReferenceManifest({ compliance: false });
+  const posting: readonly string[] = POSTING_OPS;
+
+  /** The reference files of the posting operations, found by path: `pr/{op}.md` and `tracker/{provider}/{op}.md`. */
+  function postingOpFiles(manifest: readonly string[]): string[] {
+    return manifest.filter(rel => {
+      const segments = rel.split('/');
+      const name = (segments[segments.length - 1] ?? '').replace(/\.md$/, '');
+      return (segments[0] === 'pr' || segments[0] === 'tracker') && posting.includes(name);
+    });
+  }
+
+  /** A fan-out module with eight operations and none of them a posting operation. */
+  const NO_POSTING_MODULES: readonly VariantModule[] = [
+    {
+      source: 'src/assets/mds/git/_pr.mds',
+      subdir: 'pr',
+      kind: 'fanout',
+      ops: ['op-a', 'op-b', 'op-c', 'op-d', 'op-e', 'op-f', 'op-g', 'op-h'],
+    },
+  ];
+
+  it('is the one roster: the test fixture takes it from production and does not retype it', () => {
+    expect(POSTING_OPERATIONS).toBe(POSTING_OPS);
+  });
+
+  it('holds eight distinct operations, each one a PR-host or a tracker operation', () => {
+    expect(POSTING_OPS).toHaveLength(8);
+    expect(new Set(POSTING_OPS).size).toBe(8);
+    const registered: readonly string[] = [...PR_HOST_OPS, ...TRACKER_OPS];
+    for (const op of POSTING_OPS) expect(registered, `${op} is not a registered operation`).toContain(op);
+  });
+
+  it('checks every name against the registry and accepts the shipped roster', () => {
+    const checked = checkPostingOps(POSTING_OPS, resolveVariantModules());
+    expect(checked.ok).toBe(true);
+  });
+
+  it('refuses a name that no fan-out module registers', () => {
+    const refused = errorOf(checkPostingOps([...POSTING_OPS, 'not-an-op'], resolveVariantModules()));
+    expect(refused).toEqual({ kind: 'unregistered-posting-op', op: 'not-an-op' });
+    expect(describePostingOpsError(refused)).toContain('not-an-op');
+  });
+
+  it('refuses a document name: a named document is not an operation', () => {
+    const refused = errorOf(checkPostingOps(['publication-gate'], resolveVariantModules()));
+    expect(refused).toEqual({ kind: 'unregistered-posting-op', op: 'publication-gate' });
+  });
+
+  it('refuses a name listed twice', () => {
+    const refused = errorOf(checkPostingOps(['manage-debt', 'manage-debt'], resolveVariantModules()));
+    expect(refused).toEqual({ kind: 'duplicate-posting-op', op: 'manage-debt' });
+    expect(describePostingOpsError(refused)).toContain('manage-debt');
+  });
+
+  it('omits the 16 operation files and the publication-gate document, and nothing else', () => {
+    const omitted = on.filter(rel => !off.includes(rel)).sort();
+    const expected = [...postingOpFiles(on), ...COMPLIANCE_OFF_OMITTED_DOCS.map(doc => `${doc}.md`)].sort();
+    expect(omitted).toEqual(expected);
+    expect(postingOpFiles(on).filter(rel => rel.startsWith('pr/'))).toHaveLength(4);
+    expect(postingOpFiles(on).filter(rel => rel.startsWith('tracker/'))).toHaveLength(12);
+    expect(omitted).toContain('publication-gate.md');
+    expect(off).toHaveLength(on.length - 17);
+    expect(off.length).toBeGreaterThanOrEqual(INSTALLED_REFS_COMPLIANCE_OFF);
+  });
+
+  it('keeps check-merge-readiness and every other document the posting steps do not own', () => {
+    expect(off).toContain('pr/check-merge-readiness.md');
+    for (const keep of ['trust-rule.md', 'decision-markers.md', 'learn-conventions.md', 'tracker/_mcp.md']) {
+      expect(off, `${keep} is not a posting reference`).toContain(keep);
+    }
+    expect(off).not.toContain('publication-gate.md');
+    for (const provider of ['github', 'jira', 'linear']) {
+      expect(off).toContain(`tracker/${provider}/ensure-pr-ready.md`);
+      expect(off).not.toContain(`tracker/${provider}/manage-debt.md`);
+    }
+  });
+
+  it('is the on manifest minus the omitted files, in the on order', () => {
+    expect(off).toEqual(on.filter(rel => off.includes(rel)));
+    expect(new Set(off).size, 'a duplicate entry').toBe(off.length);
+  });
+
+  it('returns exactly today\'s manifest by default and with compliance true', () => {
+    expect(installedReferenceManifest()).toEqual(generatedReferenceManifest());
+    expect(installedReferenceManifest({ compliance: true })).toEqual(generatedReferenceManifest());
+  });
+
+  it('asserts rather than degrades when the registry does not register a posting operation', () => {
+    expect(() => installedReferenceManifest({ modules: NO_POSTING_MODULES, compliance: false }))
+      .toThrow(/posting operation/);
+  });
+
+  it('returns the omitted set as paths, and the error for a bogus roster', () => {
+    const omitted = complianceOffOmittedRelPaths(resolveVariantModules());
+    expect([...valueOf(omitted)].sort()).toEqual(on.filter(rel => !off.includes(rel)).sort());
+    expect(errorOf(complianceOffOmittedRelPaths(resolveVariantModules(), ['not-an-op'])))
+      .toEqual({ kind: 'unregistered-posting-op', op: 'not-an-op' });
+  });
+
+  it('names a tree inside the compliance-off tree that no host may declare as its output dir', () => {
+    expect(COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR).toBe('dist/compliance-off/skills/git/references');
+    expect(COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR.startsWith(`${COMPLIANCE_OFF_OUTPUT_DIR}/`)).toBe(true);
+    expect(ALLOWED_OUTPUT_DIR_NAMES).not.toContain(COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// splitSectionArms — one operation section, then its compliance arms (AC-39; TP-54)
+// ---------------------------------------------------------------------------
+
+describe('splitSectionArms', () => {
+  const CON = '<!-- compliance:on -->';
+  const COFF = '<!-- compliance:off -->';
+  const CEND = '<!-- compliance:end -->';
+  const WRITES_OFF = { complianceOffWritten: true } as const;
+
+  it('gives a section with no arm to both variants unchanged', () => {
+    const content = 'Step one.\n\nStep two.\n';
+    const bodies = valueOf(splitSectionArms('op', content, WRITES_OFF));
+    expect(bodies.on).toBe(content);
+    expect(bodies.complianceOff).toBe(content);
+  });
+
+  it('keeps an on arm for the on variant and its off arm for the compliance-off variant', () => {
+    const content = `Intro.\n${CON}\nPost the comment.\n${COFF}\nKeep the result local.\n${CEND}\nOutro.\n`;
+    const bodies = valueOf(splitSectionArms('op', content, WRITES_OFF));
+    expect(bodies.on).toBe('Intro.\nPost the comment.\nOutro.\n');
+    expect(bodies.complianceOff).toBe('Intro.\nKeep the result local.\nOutro.\n');
+  });
+
+  it('drops an on-only arm from the compliance-off variant and leaves the text around it', () => {
+    const content = `Intro.\n${CON}\nPost the comment.\n${CEND}\nOutro.\n`;
+    const bodies = valueOf(splitSectionArms('op', content, WRITES_OFF));
+    expect(bodies.on).toBe('Intro.\nPost the comment.\nOutro.\n');
+    expect(bodies.complianceOff).toBe('Intro.\nOutro.\n');
+  });
+
+  it('ends each variant with one newline when an arm opens or closes the section', () => {
+    const content = `${CON}\nPost the comment.\n${CEND}\nKept line.\n`;
+    const bodies = valueOf(splitSectionArms('op', content, WRITES_OFF));
+    expect(bodies.on).toBe('Post the comment.\nKept line.\n');
+    expect(bodies.complianceOff).toBe('Kept line.\n');
+  });
+
+  it('refuses a section whose written compliance-off variant would be empty, and names the variant', () => {
+    const content = `${CON}\nPost the comment.\n${CEND}\n`;
+    expect(errorOf(splitSectionArms('post-it', content, WRITES_OFF)))
+      .toEqual({ kind: 'empty-variant', op: 'post-it', variant: 'compliance-off' });
+  });
+
+  it('accepts the same section when the compliance-off variant is not written', () => {
+    const content = `${CON}\nPost the comment.\n${CEND}\n`;
+    const bodies = valueOf(splitSectionArms('post-it', content, { complianceOffWritten: false }));
+    expect(bodies.on).toBe('Post the comment.\n');
+  });
+
+  it('refuses a section whose on variant would be empty, whether or not the compliance-off one is written', () => {
+    const content = `${COFF}\nKeep it local.\n${CEND}\n`;
+    for (const complianceOffWritten of [true, false]) {
+      expect(errorOf(splitSectionArms('local-only', content, { complianceOffWritten })))
+        .toEqual({ kind: 'empty-variant', op: 'local-only', variant: 'on' });
+    }
+  });
+
+  it('reports an arm left open at the end of the section as a split refusal of that operation', () => {
+    const refused = errorOf(splitSectionArms('op', `${CON}\nPost the comment.\n`, WRITES_OFF));
+    expect(refused).toMatchObject({ kind: 'arm-split', op: 'op', error: { kind: 'unclosed-arm', axis: 'compliance' } });
+  });
+
+  it('reports a marker spelled inside a line as a stray marker', () => {
+    const refused = errorOf(splitSectionArms('op', `Text ${CON} more.\n`, WRITES_OFF));
+    expect(refused).toMatchObject({ kind: 'arm-split', error: { kind: 'stray-marker', axis: 'compliance' } });
   });
 });

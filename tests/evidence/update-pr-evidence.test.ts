@@ -26,11 +26,12 @@ import { describe, it, expect, afterAll, beforeAll } from 'vitest'
 import { createRequire } from 'module'
 import * as fs from 'fs'
 import { readFileSync } from 'fs'
+import * as os from 'os'
 import * as path from 'path'
 
 import { compiledSkillRefsDir } from '../../src/core/assets.js'
 import { extractOpSectionFromCorpus, gitOperationReferenceCorpus, prHostRel } from '../helpers.js'
-import { cleanShimRoots, COMMENT_URL, runScript, SHIM_HEAD, SHIM_PR, warmGhShim, type Redact, type ScriptRun, type ShimCall, type ShimComment, type ShimScenario } from './pr-shim.js'
+import { cleanShimRoots, COMMENT_URL, ENABLED_MANIFEST, machineManifest, runScript, SHIM_HEAD, SHIM_PR, warmGhShim, type Redact, type ScriptDirs, type ScriptRun, type ShimCall, type ShimComment, type ShimScenario } from './pr-shim.js'
 import { PR_EVIDENCE_SCRIPT, VERIFY_EVIDENCE_SCRIPT, CI_WAIT_SCRIPT, SUBPROCESS_TIMEOUT_MS, TOP_LEVEL_FUNCTION_RE, functionBodyOf, markerLine } from './seam.js'
 
 interface EvidenceFields {
@@ -482,6 +483,11 @@ interface RunOptions {
   readonly args?: readonly string[]
   /** Rewrites the script's source before it runs (a known-bad probe). */
   readonly mutate?: (source: string) => string
+  /** More files in the working directory, beside `evidence.md`. */
+  readonly files?: Readonly<Record<string, string>>
+  /** The machine manifest of the run: its text, `null` for none; absent holds compliance enabled. */
+  readonly manifest?: string | null
+  readonly setup?: (dirs: ScriptDirs) => Readonly<Record<string, string>> | void
 }
 
 beforeAll(warmGhShim, SUBPROCESS_TIMEOUT_MS)
@@ -493,8 +499,13 @@ function runPublish(options: RunOptions = {}, runs = 1): ScriptRun[] {
     scenario: options.scenario,
     redact: options.redact,
     mutate: options.mutate,
+    manifest: options.manifest,
+    setup: options.setup,
     args: options.args ?? ['publish', '--pr', String(SHIM_PR), '--evidence', 'evidence.md'],
-    files: { 'evidence.md': evidenceFile(options.tps ?? [tpLine(1, 'Logs in with a valid password'), tpLine(2, 'Rejects a wrong password')]) },
+    files: {
+      ...options.files,
+      'evidence.md': evidenceFile(options.tps ?? [tpLine(1, 'Logs in with a valid password'), tpLine(2, 'Rejects a wrong password')]),
+    },
   }, runs)
 }
 
@@ -1008,6 +1019,185 @@ describe('the viewer\'s own evidence comment is edited in place, never doubled',
   })
 })
 
+// ---------------------------------------------------------------------------
+// 5. The publish guard: the machine manifest decides, before any gh call
+// ---------------------------------------------------------------------------
+
+const OFF_LINE = 'TRACEABILITY: DEGRADED (compliance off)'
+const UNREADABLE_LINE = 'TRACEABILITY: DEGRADED (compliance state unreadable)'
+const COMPLIANCE_OFF_MANIFEST = machineManifest({ enabled: false, frameworks: [] })
+/** The environment variables that could name another devflow directory for the guard to read. */
+const ELSEWHERE_ENV_NAMES = ['DEVFLOW_DIR', 'DEVFLOW_HOME', 'CLAUDE_CONFIG_DIR', 'XDG_CONFIG_HOME'] as const
+
+/** The run ended at the guard: the one line, exit 2, and no gh call, no gh write, no work directory. */
+function expectRefused(r: ScriptRun, line: string): void {
+  expect(r.stdout).toBe(`${line}\n`)
+  expect(r.code, r.stderr).toBe(2)
+  expect(r.calls, 'no gh call').toEqual([])
+  expect(r.writes).toEqual([])
+  expect(r.leftovers, 'no work directory made').toEqual([])
+}
+
+/** The run went on as it always did: the block, and the gh calls behind it. */
+function expectPublished(r: ScriptRun): void {
+  expect(r.code, r.stderr).toBe(0)
+  expect(r.stdout.startsWith('## PR Evidence\n'), r.stdout).toBe(true)
+  expect(verbs(r.calls), 'the PR was read').toContain('pr view')
+}
+
+describe('publish refuses before any gh call unless the machine manifest says compliance is enabled (AC-51..AC-53)', () => {
+  it('TP-69. a manifest with compliance off prints the off line, exits 2 and makes no gh call', SPAWN_BUDGET, () => {
+    expectRefused(runOnce({ manifest: COMPLIANCE_OFF_MANIFEST }), OFF_LINE)
+  })
+
+  it('TP-69. a manifest that records no compliance state at all reads as off', SPAWN_BUDGET, () => {
+    expectRefused(runOnce({ manifest: JSON.stringify({ version: '0.0.0', plugins: [], features: { memory: true } }) }), OFF_LINE)
+  })
+
+  it('TP-69. the off answer names its reason on stderr, and the same run with compliance on does not', SPAWN_BUDGET, () => {
+    expect(runOnce({ manifest: COMPLIANCE_OFF_MANIFEST }).stderr).toContain('compliance is off')
+    expect(runOnce().stderr).not.toContain('compliance is off')
+  })
+
+  it('TP-70. a repository that claims compliance does not turn a machine with compliance off into one that publishes', SPAWN_BUDGET, () => {
+    const on = { features: { compliance: { enabled: true, frameworks: ['gdpr'] } } }
+    const r = runOnce({
+      manifest: COMPLIANCE_OFF_MANIFEST,
+      files: {
+        '.devflow/project.json': JSON.stringify({ version: 1, compliance: ['gdpr'], ...on }),
+        '.devflow/config.json': JSON.stringify(on),
+        '.devflow/policy.json': JSON.stringify({ compliance: true }),
+        '.devflow/manifest.json': ENABLED_MANIFEST,
+        'manifest.json': ENABLED_MANIFEST,
+      },
+    })
+    expectRefused(r, OFF_LINE)
+  })
+
+  it('TP-70. a repository that claims compliance is off does not stop a machine with compliance on', SPAWN_BUDGET, () => {
+    const off = { features: { compliance: { enabled: false, frameworks: [] } } }
+    expectPublished(runOnce({
+      files: {
+        '.devflow/project.json': JSON.stringify({ version: 1, ...off }),
+        '.devflow/config.json': JSON.stringify(off),
+        '.devflow/manifest.json': COMPLIANCE_OFF_MANIFEST,
+      },
+    }))
+  })
+
+  /** A folder beside the run's HOME that holds `manifestText` at every path a devflow-directory override could mean. */
+  const elsewhere = (manifestText: string) => (dirs: ScriptDirs): Record<string, string> => {
+    const dir = path.join(dirs.root, 'elsewhere')
+    fs.mkdirSync(path.join(dir, '.devflow'), { recursive: true })
+    fs.writeFileSync(path.join(dir, 'manifest.json'), manifestText)
+    fs.writeFileSync(path.join(dir, '.devflow', 'manifest.json'), manifestText)
+    return Object.fromEntries(ELSEWHERE_ENV_NAMES.map(name => [name, dir]))
+  }
+
+  it('TP-70. a devflow-directory override in the environment that holds an enabled manifest is ignored', SPAWN_BUDGET, () => {
+    expectRefused(runOnce({ manifest: COMPLIANCE_OFF_MANIFEST, setup: elsewhere(ENABLED_MANIFEST) }), OFF_LINE)
+  })
+
+  it('TP-70. a devflow-directory override in the environment that holds a manifest with compliance off is ignored', SPAWN_BUDGET, () => {
+    expectPublished(runOnce({ setup: elsewhere(COMPLIANCE_OFF_MANIFEST) }))
+  })
+
+  const unreadable: ReadonlyArray<readonly [string, string | null]> = [
+    ['no manifest', null],
+    ['an empty file', ''],
+    ['text that is not JSON', '{"features":'],
+    ['a JSON array', '[]'],
+    ['JSON null', 'null'],
+    ['an object with no features', '{}'],
+    ['features as an array', '{"features":[]}'],
+    ['compliance as a string', machineManifest('yes')],
+    ['compliance as an array', machineManifest([])],
+    ['compliance as null', machineManifest(null)],
+    ['enabled as a string', machineManifest({ enabled: 'true', frameworks: [] })],
+    ['no enabled key', machineManifest({ frameworks: [] })],
+    ['enabled true and no frameworks', machineManifest({ enabled: true })],
+    ['enabled true and frameworks that are not strings', machineManifest({ enabled: true, frameworks: [1] })],
+    ['a file over the size bound', JSON.stringify({ pad: 'x'.repeat(4 * 1024 * 1024 + 1) })],
+  ]
+
+  it.each(unreadable)('TP-71. %s prints the unreadable line, exits 2 and writes nothing', SPAWN_BUDGET, (_label, manifest) => {
+    expectRefused(runOnce({ manifest }), UNREADABLE_LINE)
+  })
+
+  it('TP-71. a manifest that is not UTF-8 is unreadable', SPAWN_BUDGET, () => {
+    expectRefused(runOnce({ manifest: null, setup: dirs => { fs.writeFileSync(dirs.manifestPath, Buffer.from([0x7b, 0xff, 0xfe, 0x7d])) } }), UNREADABLE_LINE)
+  })
+
+  it('TP-71. a directory, a link to a directory and a dangling link in the manifest\'s place are unreadable', SPAWN_BUDGET, () => {
+    const inPlace: ReadonlyArray<(dirs: ScriptDirs) => void> = [
+      dirs => { fs.mkdirSync(dirs.manifestPath) },
+      dirs => { fs.symlinkSync(dirs.home, dirs.manifestPath) },
+      dirs => { fs.symlinkSync(path.join(dirs.home, 'absent.json'), dirs.manifestPath) },
+    ]
+    for (const place of inPlace) expectRefused(runOnce({ manifest: null, setup: dirs => { place(dirs) } }), UNREADABLE_LINE)
+  })
+
+  it('TP-71. a HOME that is not absolute reads no manifest, not even one the working directory holds at that path', SPAWN_BUDGET, () => {
+    const r = runOnce({
+      manifest: null,
+      files: { 'relative-home/.devflow/manifest.json': ENABLED_MANIFEST },
+      setup: () => ({ HOME: 'relative-home' }),
+    })
+    expectRefused(r, UNREADABLE_LINE)
+  })
+
+  it('TP-72. a manifest with compliance enabled leaves publish as it was', SPAWN_BUDGET, () => {
+    expectPublished(runOnce({ manifest: machineManifest({ enabled: true, frameworks: ['gdpr', 'hipaa'] }) }))
+  })
+
+  it('TP-72. the manifest is followed through a link, as the machine manifest is everywhere else', SPAWN_BUDGET, () => {
+    expectPublished(runOnce({
+      manifest: null,
+      setup: dirs => {
+        const real = path.join(dirs.home, 'real-manifest.json')
+        fs.writeFileSync(real, ENABLED_MANIFEST)
+        fs.symlinkSync(real, dirs.manifestPath)
+      },
+    }))
+  })
+
+  describe('main takes the manifest path as a dependency (MainDeps)', () => {
+    const made: string[] = []
+    afterAll(() => { for (const dir of made.splice(0)) fs.rmSync(dir, { recursive: true, force: true }) })
+
+    /** Run `publish` in this process with an exec that throws, and count how often it was reached. */
+    function publishWith(manifestText: string | null): { code: number; stdout: string; execCalls: number; stderr: string } {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'publish-guard-'))
+      made.push(dir)
+      const manifestPath = path.join(dir, 'manifest.json')
+      if (manifestText !== null) fs.writeFileSync(manifestPath, manifestText)
+      let execCalls = 0
+      let stderr = ''
+      const out = VE.main(['node', 'verify-evidence.cjs', 'publish', '--pr', '7'], {
+        manifestPath,
+        cwd: dir,
+        exec: () => { execCalls++; throw new Error('exec must not run') },
+        stderr: (text: string) => { stderr += text },
+      })
+      return { ...out, execCalls, stderr }
+    }
+
+    it('answers off, and runs nothing, for a manifest with compliance off', () => {
+      expect(publishWith(COMPLIANCE_OFF_MANIFEST)).toMatchObject({ code: 2, stdout: `${OFF_LINE}\n`, execCalls: 0 })
+    })
+
+    it('answers unreadable, and runs nothing, for a missing manifest', () => {
+      expect(publishWith(null)).toMatchObject({ code: 2, stdout: `${UNREADABLE_LINE}\n`, execCalls: 0 })
+    })
+
+    it('goes on to the exec for an enabled manifest at the injected path, whatever HOME holds', () => {
+      const r = publishWith(ENABLED_MANIFEST)
+      expect(r.execCalls, 'the exec that throws was reached').toBeGreaterThan(0)
+      expect(r).toMatchObject({ code: 2, stdout: 'TRACEABILITY: DEGRADED (evidence unavailable)\n' })
+    })
+  })
+})
+
 describe('the boundary prints a publish block only when it parses back to itself (D-OP-BLOCK-GATE)', () => {
   const evidenceLine = PE.formatEvidenceLine({
     pr: 7, head: SHIM_HEAD, total: 1,
@@ -1038,6 +1228,16 @@ describe('the boundary prints a publish block only when it parses back to itself
     expect(VE.settleOutcome({ code: 2, stdout: good }), 'a block with exit 2').toEqual(refused)
     expect(VE.settleOutcome({ code: 0, stdout: 'TRACEABILITY: DEGRADED (evidence unavailable)\n' }), 'the degraded line with exit 0').toEqual(refused)
     expect(VE.settleOutcome({ code: 2, stdout: 'TRACEABILITY: DEGRADED (evidence unavailable)\n' })).toEqual({ code: 2, stdout: 'TRACEABILITY: DEGRADED (evidence unavailable)\n' })
+  })
+
+  it.each([OFF_LINE, UNREADABLE_LINE])('TP-73. the gate admits "%s" only with exit 2', line => {
+    const stdout = `${line}\n`
+    expect(VE.settleOutcome({ code: 2, stdout })).toEqual({ code: 2, stdout })
+    expect(VE.settleOutcome({ code: 1, stdout }), 'a usage exit prints nothing').toEqual({ code: 1, stdout: '' })
+    for (const code of [0, 3, 4, 5, 9]) expect(VE.settleOutcome({ code, stdout }), `exit ${code}`).toEqual({ code: 4, stdout: '' })
+    expect(VE.settleOutcome({ code: 2, stdout: line }), 'without its newline').toEqual({ code: 4, stdout: '' })
+    expect(VE.settleOutcome({ code: 2, stdout: `${line} \n` }), 'a changed line').toEqual({ code: 4, stdout: '' })
+    expect(VE.settleOutcome({ code: 2, stdout: `${stdout}${stdout}` }), 'the line twice').toEqual({ code: 4, stdout: '' })
   })
 
   it('accepts EDITED and each comment DEGRADED reason the edit path prints', () => {

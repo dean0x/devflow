@@ -12,6 +12,7 @@ import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { convergeBehaviorRule, convergeBehaviorFromManifest } from '../src/targets/claude-code/behavior-install.js';
+import { refusedFolderMessage } from '../src/targets/claude-code/linked-folder.js';
 
 let tmp: string;
 let claudeDir: string;
@@ -21,6 +22,8 @@ let warnings: string[];
 const SOURCE = path.join(import.meta.dirname, '..', 'src', 'assets', 'rules', 'behavior.md');
 const ruleFile = (): string => path.join(claudeDir, 'rules', 'devflow', 'behavior.md');
 const warn = (msg: string): void => { warnings.push(msg); };
+/** A converge that met no link: both lists are empty. */
+const NO_LINKS = { replacedLinks: [], refusedFolders: [] };
 
 async function exists(file: string): Promise<boolean> {
   try {
@@ -47,14 +50,14 @@ afterEach(async () => {
 describe('convergeBehaviorRule', () => {
   it('on and rules on: installs the rule, byte for byte from the source', async () => {
     const result = await convergeBehaviorRule({ claudeDir, devflowDir, enabled: true, rulesEnabled: true, warn });
-    expect(result).toEqual({ installed: true, removed: false, converged: true });
+    expect(result).toEqual({ installed: true, removed: false, converged: true, ...NO_LINKS });
     expect(await fs.readFile(ruleFile(), 'utf-8')).toBe(await fs.readFile(SOURCE, 'utf-8'));
     expect(warnings).toEqual([]);
   });
 
   it('on and rules off: installs nothing', async () => {
     const result = await convergeBehaviorRule({ claudeDir, devflowDir, enabled: true, rulesEnabled: false, warn });
-    expect(result).toEqual({ installed: false, removed: false, converged: true });
+    expect(result).toEqual({ installed: false, removed: false, converged: true, ...NO_LINKS });
     expect(await exists(ruleFile())).toBe(false);
   });
 
@@ -62,13 +65,13 @@ describe('convergeBehaviorRule', () => {
     await fs.mkdir(path.dirname(ruleFile()), { recursive: true });
     await fs.writeFile(ruleFile(), 'stale', 'utf-8');
     const result = await convergeBehaviorRule({ claudeDir, devflowDir, enabled: true, rulesEnabled: false, warn });
-    expect(result).toEqual({ installed: false, removed: true, converged: true });
+    expect(result).toEqual({ installed: false, removed: true, converged: true, ...NO_LINKS });
     expect(await exists(ruleFile())).toBe(false);
   });
 
   it('off: leaves the file absent on a fresh machine and reports nothing removed', async () => {
     const result = await convergeBehaviorRule({ claudeDir, devflowDir, enabled: false, rulesEnabled: true, warn });
-    expect(result).toEqual({ installed: false, removed: false, converged: true });
+    expect(result).toEqual({ installed: false, removed: false, converged: true, ...NO_LINKS });
     expect(await exists(ruleFile())).toBe(false);
   });
 
@@ -78,7 +81,7 @@ describe('convergeBehaviorRule', () => {
     const other = path.join(path.dirname(ruleFile()), 'security.md');
     await fs.writeFile(other, 'keep me', 'utf-8');
     const result = await convergeBehaviorRule({ claudeDir, devflowDir, enabled: false, rulesEnabled: true, warn });
-    expect(result).toEqual({ installed: false, removed: true, converged: true });
+    expect(result).toEqual({ installed: false, removed: true, converged: true, ...NO_LINKS });
     expect(await exists(ruleFile())).toBe(false);
     expect(await fs.readFile(other, 'utf-8')).toBe('keep me');
   });
@@ -94,7 +97,7 @@ describe('convergeBehaviorRule', () => {
     await convergeBehaviorRule({ claudeDir, devflowDir, enabled: true, rulesEnabled: true, warn });
     const first = await fs.readFile(ruleFile(), 'utf-8');
     const again = await convergeBehaviorRule({ claudeDir, devflowDir, enabled: true, rulesEnabled: true, warn });
-    expect(again).toEqual({ installed: true, removed: false, converged: true });
+    expect(again).toEqual({ installed: true, removed: false, converged: true, ...NO_LINKS });
     expect(await fs.readFile(ruleFile(), 'utf-8')).toBe(first);
   });
 
@@ -121,7 +124,7 @@ describe('convergeBehaviorRule', () => {
 
   it('warns and reports not converged for a relative claudeDir, and writes nothing', async () => {
     const result = await convergeBehaviorRule({ claudeDir: 'relative/dir', devflowDir, enabled: true, rulesEnabled: true, warn });
-    expect(result).toEqual({ installed: false, removed: false, converged: false });
+    expect(result).toEqual({ installed: false, removed: false, converged: false, ...NO_LINKS });
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toMatch(/not an absolute path/);
   });
@@ -130,10 +133,11 @@ describe('convergeBehaviorRule', () => {
     // A file where the rules directory belongs makes the install fail.
     await fs.writeFile(path.join(claudeDir, 'rules'), 'not a directory', 'utf-8');
     const result = await convergeBehaviorRule({ claudeDir, devflowDir, enabled: true, rulesEnabled: true, warn });
+    const folder = path.join(claudeDir, 'rules', 'devflow');
     expect(result.installed).toBe(false);
     expect(result.converged).toBe(false);
-    expect(warnings.length).toBeGreaterThan(0);
-    expect(warnings[0]).toMatch(/^behavior:/);
+    expect(result.refusedFolders, 'the folder that is not a folder is refused and named').toEqual([folder]);
+    expect(warnings).toEqual([refusedFolderMessage(folder)]);
   });
 });
 

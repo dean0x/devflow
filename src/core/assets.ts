@@ -1,6 +1,6 @@
 import { join } from 'path';
 import { getPackageRoot } from './paths.js';
-import { SKILL_REFS_OUTPUT_DIR } from './mds-variants.js';
+import { COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR, SKILL_REFS_OUTPUT_DIR } from './mds-variants.js';
 import {
   ALL_SWITCHES_ON,
   BOTH_OFF_OUTPUT_DIR,
@@ -189,6 +189,33 @@ export function compiledAgentsDir(root: string = getPackageRoot()): string {
  */
 export function compiledSkillRefsDir(root: string = getPackageRoot()): string {
   return join(root, ...SKILL_REFS_OUTPUT_DIR.split('/'));
+}
+
+/**
+ * Compiled compliance-off skill-reference directory:
+ * dist/compliance-off/skills/git/references/
+ *
+ * The ONE source root a compliance-off install and the compliance converge overlay the
+ * references from (AC-50). The tree is complete: it holds every file of the compliance-off
+ * manifest, so the reader never falls back to {@link compiledSkillRefsDir}. Absent until
+ * the build has run, so every reader must tolerate its absence.
+ *
+ * @param root - Package root to resolve against (see agentsDir).
+ */
+export function compiledComplianceOffSkillRefsDir(root: string = getPackageRoot()): string {
+  return join(root, ...COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR.split('/'));
+}
+
+/**
+ * The reference source root for a machine's compliance switch: the compliance-off tree with
+ * compliance off, else the compliance-on one. One function, so the install, the converge and
+ * the status read cannot pick different roots for one switch.
+ *
+ * @param compliance - The machine's settled compliance switch.
+ * @param root - Package root to resolve against (see agentsDir).
+ */
+export function skillRefsSourceDir(compliance: boolean, root: string = getPackageRoot()): string {
+  return compliance ? compiledSkillRefsDir(root) : compiledComplianceOffSkillRefsDir(root);
 }
 
 /**

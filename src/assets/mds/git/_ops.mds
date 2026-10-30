@@ -40,6 +40,13 @@ importer so that no module pulls in text it does not emit. A define that wants a
 here belongs in whichever partial its importer already reads, never in a fourth define
 count past a dozen.
 
+A contract line a compliance-off install must not carry has a compliance arm (the
+`compliance:on`, `compliance:off` and `compliance:end` marker lines), written as two whole
+lines because an arm selects lines, never words. The arm opens and closes inside one define.
+The off contracts drop `PR_EXCEPTIONS`, `PR_TEST_PLAN_BLOCK` (`ensure-pr-ready`),
+`PLAN_ARTIFACT_PATH` (`setup-task`, `ensure-traceable-issue`), `SHIPPED_ISSUES` and
+`TRACEABILITY_EXCEPTIONS` (`create-release`).
+
 Every partial is imported by ALIAS (`as ops`, `as props`, `as opsteps`), never
 selectively: a selective import deep-copies every named function into every `@define` of
 the importer, and that is the cliff `tests/build-mds-compile-time.test.ts` holds shut.
@@ -48,7 +55,11 @@ These defines call nothing, so they capture nothing.
 @define ensure_pr_ready_contract():
 Pre-flight: make the branch ready for review and open its PR.
 
+<!-- compliance:on -->
 **Input:** `WORKTREE_PATH` (optional), `BASE_BRANCH` (optional), `BASE_REF` (optional), `TASK_ID` (optional), `ISSUE_NUMBER` (optional), `ISSUE_PR_LINK` (optional), `PR_EXCEPTIONS` (optional), `COMMIT_UNCOMMITTED` (optional), `PR_DESCRIPTION_GUIDANCE` (optional), `PR_TEST_PLAN_BLOCK` (optional), `PR_WAVE_BLOCK` (optional), `APPLY_CONVENTIONS`
+<!-- compliance:off -->
+**Input:** `WORKTREE_PATH` (optional), `BASE_BRANCH` (optional), `BASE_REF` (optional), `TASK_ID` (optional), `ISSUE_NUMBER` (optional), `ISSUE_PR_LINK` (optional), `COMMIT_UNCOMMITTED` (optional), `PR_DESCRIPTION_GUIDANCE` (optional), `PR_WAVE_BLOCK` (optional), `APPLY_CONVENTIONS`
+<!-- compliance:end -->
 
 **Output:**
 ```markdown
@@ -87,7 +98,9 @@ Set up task environment: derive branch name, create feature branch, and optional
 - `ISSUE_INPUT` (optional): Issue number to fetch
 - `TASK_DESCRIPTION` (optional): Free-text task description (when no issue)
 - `ISSUE_REQUIRED`, `APPLY_CONVENTIONS`: `true`/`false` from the caller's evidence policy
+<!-- compliance:on -->
 - `PLAN_ARTIFACT_PATH` (optional): Path to plan document; forwarded to `ensure-traceable-issue` in step 1c so the plan is attached to the traceability issue as a collapsed `<details>` comment
+<!-- compliance:end -->
 
 When step 1b finds `.devflow/conventions.md` absent it invokes `learn-conventions`, which loads the `devflow:git` skill's `references/learn-conventions.md` in this same spawn.
 
@@ -233,9 +246,15 @@ Update tech debt backlog from `{REVIEW_DIR}/resolution-summary.md`:
 @define create_release_contract():
 Create a GitHub release with version tag.
 
+<!-- compliance:on -->
 **Input:** `VERSION` (semver), `CHANGELOG_CONTENT`, `RELEASE_TITLE` (optional), `COMMIT_LIST` (optional), `SHIPPED_ISSUES` (optional), `TRACEABILITY_EXCEPTIONS` (optional)
 
 **Degradation carve-out:** D4's "never abort" does NOT cover steps 1–6's primary effects — a failed tag push or release create is a hard failure: report it and stop. Only the `COMMIT_LIST`/`SHIPPED_ISSUES` enrichment degrades per D4 (`TRACEABILITY: DEGRADED ({reason})`, warn, continue).
+<!-- compliance:off -->
+**Input:** `VERSION` (semver), `CHANGELOG_CONTENT`, `RELEASE_TITLE` (optional), `COMMIT_LIST` (optional)
+
+**Degradation carve-out:** D4's "never abort" does NOT cover steps 1–6's primary effects — a failed tag push or release create is a hard failure: report it and stop. Only the `COMMIT_LIST` enrichment degrades per D4 (`TRACEABILITY: DEGRADED ({reason})`, warn, continue).
+<!-- compliance:end -->
 
 **Output:**
 ```markdown
@@ -346,7 +365,11 @@ Add shipped issues to the release's tracker marker; never replace one.
 @define ensure_traceable_issue_contract():
 Create or enrich a tracker issue using the D3 issue template.
 
+<!-- compliance:on -->
 **Input:** `TASK_DESCRIPTION` (optional), `ISSUE_INPUT` (optional), `INITIAL_REQUEST` (optional), `REQUIREMENTS` (optional), `LABELS` (optional), `PLAN_ARTIFACT_PATH` (optional), `WORKTREE_PATH` (optional)
+<!-- compliance:off -->
+**Input:** `TASK_DESCRIPTION` (optional), `ISSUE_INPUT` (optional), `INITIAL_REQUEST` (optional), `REQUIREMENTS` (optional), `LABELS` (optional), `WORKTREE_PATH` (optional)
+<!-- compliance:end -->
 
 **Degradation (D4):** No remote / `gh` unauthenticated → `TRACEABILITY: DEGRADED ({reason})`, return status DEGRADED — caller continues without an issue number.
 

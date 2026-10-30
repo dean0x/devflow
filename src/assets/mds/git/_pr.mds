@@ -191,7 +191,7 @@ Each `THREAD_MAP` entry carries one verdict:
 
 ### Process
 
-Rate limits: this op fans out, so read the remaining-budget rungs in `references/github-api.md` before the first iteration.
+Rate limits: this op fans out, so read the remaining-budget rungs in `references/github-api.md` before the first iteration. The thread-reply and `resolveReviewThread` recipes are in `references/github-posting.md`.
 
 For each `ext-{N}` in THREAD_MAP (sequentially, ≤50, 1s between operations). `fetch-review-threads`
 returns up to 100 threads, so a busy PR can exceed this bound: process the first 50 in THREAD_MAP

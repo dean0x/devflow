@@ -47,7 +47,13 @@ import {
   type SectionExemption,
 } from '../fixtures/feature-word-allowlist.js';
 import { LEGACY_NAMES } from '../../src/core/project-paths.js';
-import { MCP_CONTRACT_MODULE, VARIANT_MODULES } from '../../src/core/mds-variants.js';
+import {
+  COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR,
+  MCP_CONTRACT_MODULE,
+  SKILL_REFS_OUTPUT_DIR,
+  VARIANT_MODULES,
+  installedReferenceManifest,
+} from '../../src/core/mds-variants.js';
 import { VARIANT_MANIFEST_REL_PATH } from '../../src/core/curation-variants.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
@@ -1122,10 +1128,14 @@ const trackedTestSources = (): ScannedFile[] =>
 //                  (variant: curation-off, compliance-off or curation-compliance-off)
 //   manifest       scripts/build-mds.ts                -> dist/variant-axes.json
 //   references     the module of VARIANT_MODULES / MCP_CONTRACT_MODULE -> dist/skills/git/references/**
+//                  and, as a second output of the same module, dist/compliance-off/skills/git/references/**
 // ---------------------------------------------------------------------------
 
 const DIST_DIR = 'dist';
-const REFERENCES_PREFIX = 'dist/skills/git/references/';
+const REFERENCES_PREFIX = `${SKILL_REFS_OUTPUT_DIR}/`;
+const OFF_REFERENCES_PREFIX = `${COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR}/`;
+/** The two trees one reference module writes: the compliance-on tree and the compliance-off tree. */
+const REFERENCES_PREFIXES: readonly string[] = [REFERENCES_PREFIX, OFF_REFERENCES_PREFIX];
 const MAX_DIST_DEPTH = 12;
 const MAX_DIST_FILES = 5000;
 
@@ -1149,8 +1159,9 @@ function distSourceOf(distRel: string): string | null {
     return existsSync(path.join(ROOT, source)) ? source : null;
   }
 
-  if (distRel.startsWith(REFERENCES_PREFIX) && distRel.endsWith('.md')) {
-    const rel = distRel.slice(REFERENCES_PREFIX.length);
+  const prefix = REFERENCES_PREFIXES.find(candidate => distRel.startsWith(candidate));
+  if (prefix !== undefined && distRel.endsWith('.md')) {
+    const rel = distRel.slice(prefix.length);
     for (const module of [...VARIANT_MODULES, MCP_CONTRACT_MODULE]) {
       const dir = module.subdir === '' ? '' : `${module.subdir}/`;
       const covers = module.kind === 'fanout'
@@ -1359,7 +1370,7 @@ describe.skipIf(builtFiles === null)('feature-word guard — the built output in
 
   it('reads the compiled code, the built commands and agents, and the built references (non-vacuity)', () => {
     expect(built.length, 'the dist scan reached almost no files').toBeGreaterThan(100);
-    for (const prefix of ['dist/core/', 'dist/cli/', 'dist/commands/', 'dist/agents/', 'dist/curation-off/', REFERENCES_PREFIX]) {
+    for (const prefix of ['dist/core/', 'dist/cli/', 'dist/commands/', 'dist/agents/', 'dist/curation-off/', ...REFERENCES_PREFIXES]) {
       expect(built.some(file => file.relPath.startsWith(prefix)), `${prefix} is not in the dist scan`).toBe(true);
     }
   });
@@ -1397,6 +1408,25 @@ describe('feature-word guard — dist mapping and probes (the same collector as 
     expect(distSourceOf('dist/skills/git/references/tracker/_mcp.md')).toBe('src/assets/mds/tracker/_mcp.mds');
     expect(distSourceOf('dist/core/not-a-real-module.js')).toBeNull();
     expect(distSourceOf('dist/stray.txt')).toBeNull();
+  });
+
+  it('maps each compliance-off reference to the module that writes its compliance-on twin (derived from the manifest)', () => {
+    const rels = installedReferenceManifest({ compliance: false });
+    expect(rels.length, 'the compliance-off manifest is read').toBeGreaterThan(0);
+    const unmapped = rels.filter(rel => {
+      const on = distSourceOf(`${REFERENCES_PREFIX}${rel}`);
+      return on === null || distSourceOf(`${OFF_REFERENCES_PREFIX}${rel}`) !== on;
+    });
+    expect(unmapped, 'a compliance-off reference must map to the same source as its compliance-on twin').toEqual([]);
+    expect(distSourceOf(`${OFF_REFERENCES_PREFIX}pr/check-ci-status.md`)).toBe('src/assets/mds/git/_pr.mds');
+    expect(distSourceOf(`${OFF_REFERENCES_PREFIX}decision-markers.md`)).toBe('src/assets/mds/git/_references.mds');
+    expect(distSourceOf(`${OFF_REFERENCES_PREFIX}tracker/_mcp.md`)).toBe('src/assets/mds/tracker/_mcp.mds');
+  });
+
+  it('known-bad probes: a file outside every module, or outside the two reference trees, has no source', () => {
+    expect(distSourceOf(`${OFF_REFERENCES_PREFIX}stray.md`)).toBeNull();
+    expect(distSourceOf('dist/curation-off/skills/git/references/pr/check-ci-status.md')).toBeNull();
+    expect(scanDist(`${OFF_REFERENCES_PREFIX}stray.md`, 'The learning step.\n')).toHaveLength(1);
   });
 
   it('a built copy of an allowed source line passes, in the form the compiler emits', () => {

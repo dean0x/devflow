@@ -104,8 +104,7 @@ These issues exist in files you reviewed but are unrelated to your changes:
 1. {Issue in code you touched}
 
 **Future work:**
-- Create issues for pre-existing problems
-- Track technical debt separately
+- List pre-existing problems; recommend an issue only for data loss, a false pass or a broken install
 ```
 
 ## PR Line Comment Format

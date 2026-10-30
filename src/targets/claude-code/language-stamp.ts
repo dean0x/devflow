@@ -45,6 +45,7 @@ import * as path from 'path';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import { mdFileName } from '../../core/orphan-sweep.js';
 import { installedLanguageFocuses, type PluginDefinition } from '../../core/plugins.js';
+import { isUnrealFolder } from './linked-folder.js';
 
 /** The fixed prefix of the stamp line; the prompt and the anchored match share it. */
 export const LANGUAGE_STAMP_PREFIX = 'Installed language focuses: ';
@@ -137,7 +138,10 @@ export interface RestampOptions {
   /** The plugins whose skill closure is, or stays, installed: the effective selection. */
   readonly effectivePlugins: readonly PluginDefinition[];
   readonly warn: (msg: string) => void;
-  /** A change guard for a legacy local install (D-CLI-NO-SYMLINK); omitted, every target may change. */
+  /**
+   * A change guard for a legacy local install (D-CLI-NO-SYMLINK); omitted, every target may change.
+   * It adds to the folder check below and never replaces it.
+   */
   readonly mayChange?: (target: string) => Promise<boolean>;
 }
 
@@ -150,7 +154,7 @@ export interface RestampResult {
   readonly unchanged: readonly string[];
   /** Commands that are not installed: nothing to stamp. */
   readonly absent: readonly string[];
-  /** Commands left as they were because the copy was damaged, unreadable, guarded or unwritable. */
+  /** Commands left as they were because the copy was damaged, unreadable, guarded or unwritable, or because the commands folder is a link or not a folder. */
   readonly failed: readonly string[];
 }
 
@@ -173,6 +177,12 @@ export async function restampInstalledCommands(opts: RestampOptions): Promise<Re
   // against the working directory.
   if (!path.isAbsolute(claudeDir)) {
     warn(`language stamp: claudeDir is not an absolute path ("${claudeDir}") — the installed commands were not stamped`);
+    return { focuses, rewritten, unchanged, absent, failed: [...LANGUAGE_STAMPED_COMMANDS] };
+  }
+
+  // Whatever the caller's guard says, nothing is read or written through a commands folder that is a
+  // link or not a folder; every stamped command is then left as it is, and `failed` says so.
+  if (await isUnrealFolder(path.join(claudeDir, 'commands', 'devflow'))) {
     return { focuses, rewritten, unchanged, absent, failed: [...LANGUAGE_STAMPED_COMMANDS] };
   }
 
