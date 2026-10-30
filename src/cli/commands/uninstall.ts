@@ -49,6 +49,7 @@ import { probeTrackedArea, type TrackedAreasAnswer } from '../../core/tracked-ar
 import { restampInstalledCommands } from '../../targets/claude-code/language-stamp.js';
 import { installRenderedCharter, removeHandoffSentinel } from '../../targets/claude-code/charter-render.js';
 import { installCommandsAndAgents } from '../../targets/claude-code/installer.js';
+import { BACKUP_ROOT_NAME } from '../../targets/claude-code/install-backup.js';
 import { isUnrealFolder, newLinkReport, refuseUnrealFolder, refusedFolderStatement, type LinkReport } from '../../targets/claude-code/linked-folder.js';
 import { formatReplacedLinksSummary, type SummaryLine } from './install-report.js';
 
@@ -779,6 +780,9 @@ export function userContentPaths(devflowDir: string): ReadonlyArray<UserContentE
     { relPath: 'skills', isDir: true, label: `skill shadows (${path.join(devflowDir, 'skills')})` },
     // Rule shadow overrides (~/.devflow/rules/{name}.md)
     { relPath: 'rules', isDir: true, label: `rule shadows (${path.join(devflowDir, 'rules')})` },
+    // The files an install moved out of the devflow folders because devflow did not ship them.
+    // They are the user's own files, so only a confirmed full wipe removes them.
+    { relPath: BACKUP_ROOT_NAME, isDir: true, label: `install backups (${path.join(devflowDir, BACKUP_ROOT_NAME)})` },
     // preference-profile.md — user-curated decision-preference profile
     { relPath: 'preference-profile.md', label: 'preference-profile.md' },
     // tracker/ — the inferred, hand-editable issue-tracker conventions, one file
@@ -1084,7 +1088,7 @@ export function installArtifactPaths(devflowDir: string): ReadonlyArray<InstallA
  * This function runs on the decline, cancel, non-interactive AND --keep-docs paths,
  * so an entry here is deleted even when the user answers "no" to the full wipe.
  * User-authored state (everything in `userContentPaths`: skill/rule shadows,
- * preference-profile.md, the tracker conventions with the legacy tracker.md and
+ * the install backups, preference-profile.md, the tracker conventions with the legacy tracker.md and
  * its backups, the global tuning file under both names, hud.json) is removed only by
  * the confirmed full-dir rm.
  * agent-models.json is an INSTALL ARTIFACT (stale per-agent overrides silently
@@ -1632,6 +1636,7 @@ export async function runSelectivePhaseForScope(opts: {
  * @param opts.isTTY            - Whether the session is interactive. Injected rather than
  *   read from process.stdin so the prompt gate is an explicit input (matching
  *   resolveDevflowDirCleanup) instead of an ambient global a test cannot control.
+ * @param opts.confirm          - The prompt for the full-dir wipe (default `p.confirm`).
  */
 export async function runFullPhaseForScope(opts: {
   scope: UninstallScope;
@@ -1641,8 +1646,10 @@ export async function runFullPhaseForScope(opts: {
   verbose: boolean;
   keepDocs: boolean;
   isTTY: boolean;
+  confirm?: ConfirmPrompt;
 }): Promise<void> {
   const { scope, claudeDir, devflowDir, devflowScriptsDir, verbose, keepDocs, isTTY } = opts;
+  const confirm: ConfirmPrompt = opts.confirm ?? p.confirm;
   // D-CLI-NO-SYMLINK: a legacy local install's removals and rewrites pass this first.
   const mayChange = scopeChangeGuard(scope, { claudeDir, devflowDir });
 
@@ -1701,7 +1708,7 @@ export async function runFullPhaseForScope(opts: {
         p.log.info(`  ${item}`);
       }
 
-      const confirmFullCleanup = await p.confirm({
+      const confirmFullCleanup = await confirm({
         message: `Remove entire ${devflowDir}? (includes the items listed above, plus logs and install metadata)`,
         initialValue: false,
       });
