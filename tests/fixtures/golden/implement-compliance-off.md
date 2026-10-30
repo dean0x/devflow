@@ -166,9 +166,9 @@ Accept the output only when it is exactly two lines: `exit=0` last and, before i
 
 The accepted line is the only source of these values.
 
-**Resolve `REVIEW_PUBLICATION` per worktree:** take `REVIEW_PUBLICATION` from that worktree's settings line — the line resolved above for `{root}`, the worktree's root, by the settings block when this run has not yet resolved that root; multi-worktree repos may resolve different values per worktree. The line already caps the personal choice at the team's (D-PUBLICATION-CEILING), so it is `off`, `auto` or `full`, and `off` when the line was unresolvable.
+**Resolve `REVIEW_PUBLICATION` per worktree:** take `REVIEW_PUBLICATION` from that worktree's settings line — the line resolved above for `{root}`, the worktree's root, by the settings block when this run has not yet resolved that root. The line already caps the personal choice at the team's (D-PUBLICATION-CEILING), so it is `off`, `auto` or `full`, and `off` when the line was unresolvable.
 
-**Evidence stub:** only when `EVIDENCE_POLICY` is `required`, a resolved `off` becomes `stub`, so a counts-only record still reaches the PR. `stub` is never a config value: the settings line never carries it.
+**Evidence stub:** only when `EVIDENCE_POLICY` is `required`, a resolved `off` becomes `stub`, so a counts-only record still reaches the PR. `stub` is never a config value.
 Phase 11 passes no publication value: the local verify posts nothing. From the same line: `COMPLIANCE_FRAMEWORKS` is the settings line's `COMPLIANCE` with `generic` written `none`: `off`, `none`, or the framework ids the machine and this repository declare.
 
 **Set the compliance directive** from `COMPLIANCE_FRAMEWORKS`. `COMPLIANCE_DIRECTIVE` is empty when `COMPLIANCE_FRAMEWORKS` is `off`: a spawn line that holds only `{COMPLIANCE_DIRECTIVE}` is then left out, so a lens-off spawn carries nothing about compliance. Otherwise `COMPLIANCE_DIRECTIVE` is this one line, with `<ids>` replaced by the value of `COMPLIANCE_FRAMEWORKS`:
