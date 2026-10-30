@@ -62,6 +62,10 @@ const LEVEL_DIR = 'skills/devflow:agent-references/references/commands'
 /** The placeholder `/implement` reads its references through, and the one paragraph that binds it. */
 const IMPLEMENT_REF_DIR = '{ref_dir}'
 const IMPLEMENT_BINDER = `**Agent references.** Print the config directory once, before the first reference Read: run \`${SANCTIONED_RESOLUTION_PRINT}\` in Bash. \`${IMPLEMENT_REF_DIR}\` is \`<that directory>/${LEVEL_DIR}\`. Read each reference with the Read tool. When \`${IMPLEMENT_REF_DIR}\` is not in view (for example after a compaction), print the directory again with the same line.`
+/** The back-pointer inside the `/implement` read sentence: a session resumes from the phase heading after a compaction, so the one read that runs after Phase 1 names the binder and says to print the directory again with its line. */
+const IMPLEMENT_BACK_POINTER_SET = `\`${IMPLEMENT_REF_DIR}\` is set in **Agent references.**`
+const IMPLEMENT_BACK_POINTER_REPRINT = 'if it is not in view, print the directory again with that line'
+const IMPLEMENT_BACK_POINTER = `(${IMPLEMENT_BACK_POINTER_SET}; ${IMPLEMENT_BACK_POINTER_REPRINT})`
 const TABLE_HEADER = '| Phase | standard | lean |'
 
 const GRAMMAR_CELL = "- **Cell:** `-` runs the phase as written; `skip`, alone, skips it; `apply: <name>` applies the `## Rules` bullet `<name>`; `pass level` puts the line `GATE_LEVEL: {GATE_LEVEL}` first in every spawn prompt of the phase, right after a leading `OPERATION:` line. A phase with no spawn takes only `-`. Join `apply:` and `pass level` with `; `. Each `apply:` names exactly one bullet. Any other cell is malformed."
@@ -178,8 +182,8 @@ const IMPLEMENT: LevelSpec = {
     "- **Scope:** a row changes only its own phase's spawns and prompts. It adds no shell command, file write, push or GitHub action. It removes no security check, except that a `4 Self-Review` row may skip Harden, only through the Rules bullet `harden-scope`. It keeps Validate, the CI gate, the evidence claims and the compliance directive. An enabled compliance lens keeps Harden.",
     '- **Malformed:** no `## Phases` heading, no `| Phase | standard | lean |` header, or a row that breaks this grammar. Then the command applies no row.',
   ],
-  readParagraph: `${OPEN} ${IMPLEMENT_CONDITION}, Read \`${IMPLEMENT_REF_DIR}/implement-levels.md\`, and apply each row to the phase it names.`,
-  readPhrases: [IMPLEMENT_CONDITION.split(',')[0], 'once per run', `${IMPLEMENT_REF_DIR}/implement-levels.md`, 'apply each row to the phase it names'],
+  readParagraph: `${OPEN} ${IMPLEMENT_CONDITION}, Read \`${IMPLEMENT_REF_DIR}/implement-levels.md\` ${IMPLEMENT_BACK_POINTER}, and apply each row to the phase it names.`,
+  readPhrases: [IMPLEMENT_CONDITION.split(',')[0], 'once per run', `${IMPLEMENT_REF_DIR}/implement-levels.md`, IMPLEMENT_BACK_POINTER_SET, IMPLEMENT_BACK_POINTER_REPRINT, 'apply each row to the phase it names'],
   binder: IMPLEMENT_BINDER,
   items: [
     FLOOR_FIRST,

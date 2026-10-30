@@ -184,9 +184,21 @@ const IMPLEMENT_BINDER_PARTS: ReadonlyArray<readonly [label: string, text: strin
 ]
 
 /**
+ * What the Gate level read says besides the file it reads. It is the one reference read that runs after Phase 1, so it is the read a session
+ * reaches after a compaction, when the paragraph that binds `{ref_dir}` is out of view. The read names that paragraph by its bold lead and
+ * says to print the directory again with its line. It copies no print line, so the sanctioned-line count stays at one.
+ */
+const IMPLEMENT_GATE_READ_OPEN = '**Gate level.**'
+const IMPLEMENT_GATE_READ_PARTS: ReadonlyArray<readonly [label: string, text: string]> = [
+  [`name the paragraph that binds ${IMPLEMENT_REF_DIR}`, `\`${IMPLEMENT_REF_DIR}\` is set in **Agent references.**`],
+  [`say to print the directory again when ${IMPLEMENT_REF_DIR} is not in view`, 'if it is not in view, print the directory again with that line'],
+]
+
+/**
  * Named collector: how a compiled /implement reaches the Claude directory. The directory is resolved once: the sanctioned
  * line sits in one paragraph, which binds `{ref_dir}` to the references folder under `<that directory>`, says to print the
- * directory again with the same line when `{ref_dir}` is out of view, and comes before every read. Each read site names its
+ * directory again with the same line when `{ref_dir}` is out of view, and comes before every read. The Gate level read, which runs
+ * after Phase 1, points back to that paragraph and says to print the directory again with its line. Each read site names its
  * file under `{ref_dir}`, and no site names a root or a skills path of its own, so the site row of the file (one line) stands
  * for every read of the build. `reads` is the files the build reads, by file name.
  */
@@ -207,6 +219,9 @@ export function collectImplementDirReadDefects(body: string, reads: readonly str
     if (!binder.includes(`\`${IMPLEMENT_REF_DIR}\` is \`<that directory>/${IMPLEMENT_REFS_FOLDER}\``)) out.push(`the paragraph with the sanctioned line does not bind ${IMPLEMENT_REF_DIR} to the references folder under <that directory>`)
     for (const [label, text] of IMPLEMENT_BINDER_PARTS) if (!binder.includes(text)) out.push(`the paragraph with the sanctioned line does not ${label}`)
   }
+  const gateRead = body.split('\n\n').find(p => p.startsWith(IMPLEMENT_GATE_READ_OPEN))
+  if (gateRead === undefined) out.push('no Gate level read paragraph')
+  else for (const [label, text] of IMPLEMENT_GATE_READ_PARTS) if (!gateRead.includes(text)) out.push(`the Gate level read does not ${label}`)
   const read = [...body.matchAll(/\{ref_dir\}\/([a-z0-9-]+\.md)/g)].map(m => m[1]).sort()
   if (read.join(' ') !== [...reads].sort().join(' ')) out.push(`the files read through ${IMPLEMENT_REF_DIR} are ${read.join(', ')}, expected ${[...reads].sort().join(', ')}`)
   const use = body.indexOf(`${IMPLEMENT_REF_DIR}/`)
@@ -802,6 +817,27 @@ describe('no prompt reaches the Claude directory outside the CLAUDE_CONFIG_DIR r
     expect(defects(seed('Print the config directory once, before the first reference Read', 'A step that reads one gets the config directory once per run'))).toEqual([
       `${lead} say to print the directory once, before the first reference Read`,
     ])
+  })
+
+  it('red probes: a Gate level read that does not point back to the binder is reported in /implement', () => {
+    const implement = corpusFile('dist/commands/implement.md').content
+    const seed = (from: string, to: string): string => {
+      const next = implement.replace(from, () => to)
+      expect(next, `the seed ${JSON.stringify(from.slice(0, 40))} must change the text`).not.toBe(implement)
+      return next
+    }
+    const defects = (text: string): string[] => collectImplementDirReadDefects(text, IMPLEMENT_READS_COMPLIANCE_ON)
+    const lead = 'the Gate level read does not'
+    const names = `${lead} name the paragraph that binds ${IMPLEMENT_REF_DIR}`
+    const reprints = `${lead} say to print the directory again when ${IMPLEMENT_REF_DIR} is not in view`
+    // The clause names the binder and copies no print line, so the real command stays clean and holds one sanctioned line.
+    expect(defects(implement)).toEqual([])
+    const pointer = ' (`{ref_dir}` is set in **Agent references.**; if it is not in view, print the directory again with that line)'
+    expect(defects(seed(pointer, ''))).toEqual([names, reprints])
+    expect(defects(seed('is set in **Agent references.**', 'is set in the paragraph above'))).toEqual([names])
+    expect(defects(seed('print the directory again with that line', 'print it'))).toEqual([reprints])
+    expect(defects(seed('if it is not in view, print', 'print'))).toEqual([reprints])
+    expect(defects(seed('**Gate level.**', '**Level.**'))).toEqual(['no Gate level read paragraph'])
   })
 
   it('red probe: the superseded presence gate, seeded into the real compiled command, is reported', () => {
