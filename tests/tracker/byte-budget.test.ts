@@ -221,8 +221,11 @@ const BUDGET_GIT_MD = 10_823;
  * characters (D-SKILL-DESCRIPTION-CAP), a measured 6_365 plus the 80 ch general
  * headroom: 6_445. The body, which is what the derivation above prices, is
  * unchanged.
+ *
+ * Lowered by #708 (lean Code-path skills): the body was cut to a measured 6_074,
+ * plus the same 80 ch headroom: 6_154.
  */
-const BUDGET_SKILL_MD = 6_445;
+const BUDGET_SKILL_MD = 6_154;
 
 /**
  * THE GITHUB-PATH loaded-set ceiling — the worst-case cost of a tracker spawn

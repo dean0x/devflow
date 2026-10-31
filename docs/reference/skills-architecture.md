@@ -203,7 +203,7 @@ src/assets/skills/skill-name/
 **What stays in SKILL.md** (always loaded):
 - Frontmatter (name, description, allowed-tools, activation)
 - Iron Law (non-negotiable principle)
-- When This Activates (trigger conditions)
+- Trigger conditions in the description; a When This Skill Activates section only where the description cannot hold them
 - Core categories with brief descriptions
 - 1-2 representative examples per category
 - Severity guidelines table

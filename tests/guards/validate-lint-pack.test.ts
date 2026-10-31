@@ -671,7 +671,7 @@ describe('Fix never edits the lint pack to clear a match', () => {
 
   it('the rule sits in validation-fix only, and no Code or Refactor body carries it', () => {
     expect(Buffer.byteLength(FIX_BODY), 'the Fix body is read').toBeGreaterThan(5_000)
-    expect(FIX_BODY).toContain('OPERATION: qa-fix')
+    expect(FIX_BODY).toContain('## Mode: qa-fix')
     for (const doc of others) expect(doc.text.length, doc.label).toBeGreaterThan(5_000)
     expect(collectFixRuleDefects(FIX_BODY, others)).toEqual([])
   })

@@ -535,7 +535,7 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     contexts: ['Simplify code structure by:'],
   },
   {
-    path: 'src/assets/skills/test-driven-development/SKILL.md',
+    path: 'src/assets/skills/test-driven-development/references/rationalization-prevention.md',
     name: 'Simplify',
     reason:
       'CONCEPT: the verb opening a rationalization-table row; no agent reference',
