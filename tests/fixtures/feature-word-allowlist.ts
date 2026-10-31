@@ -227,6 +227,13 @@ export const FEATURE_WORD_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
       'the same answer. The heal and the mirror write and read that key.',
   },
   {
+    path: 'src/core/retired-shipped-names.ts',
+    pattern: /^\s+'learning',$|'references\/learning\/maintain\.md',/,
+    reason:
+      'RETIRED_SHIPPED freezes the names that earlier releases installed: the retired agent ' +
+      'learning and the retired reference learning/maintain.md, so init removes them by name.',
+  },
+  {
     path: 'src/assets/scripts/lib/project-config.cjs',
     pattern:
       /"learning":false|and `learning` its pre-rename|'curation', 'learning', 'knowledge'|learning: Field<boolean>|and `learning` are two keys|learning: fieldOf\(value, duplicates, base, 'learning', asBoolean\)|^ \* `learning`, `knowledge`, `decisions`\)|stale `learning: false`/,

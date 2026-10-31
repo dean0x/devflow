@@ -17,7 +17,9 @@ import type { SweepResult } from './orphan-sweep.js';
  * two providers may legitimately both carry a `comment.md`, so the registry name has to
  * be the relative PATH, and the walk has to descend.
  *
- * Never writes, only removes — no delete-then-write window.
+ * Never writes. The sweep names what stays and what goes; a {@link ReferenceSweepDelegate}
+ * acts on every entry the manifest does not name, and the sweep itself never removes a
+ * folder recursively. No delete-then-write window.
  */
 
 /**
@@ -41,6 +43,33 @@ import type { SweepResult } from './orphan-sweep.js';
  */
 export const MAX_REFERENCE_SWEEP_DEPTH = 8;
 
+/**
+ * What became of one entry the manifest does not name.
+ *
+ *   - `removed`: the entry is gone and was devflow's own (a retired or superseded reference).
+ *     The sweep reports it by its relative path.
+ *   - `moved`: the entry was the user's and was moved aside. It is not a removal, so the sweep
+ *     does not report it; the delegate's owner records the move.
+ *   - `kept`: the entry stays, and the delegate's owner has recorded why.
+ *   - `failed`: the delegate could not act and has nowhere else to record it. The sweep reports
+ *     it in `failed`.
+ */
+export type ReferenceDisposition =
+  | { readonly outcome: 'removed' }
+  | { readonly outcome: 'moved' }
+  | { readonly outcome: 'kept' }
+  | { readonly outcome: 'failed'; readonly error: unknown };
+
+/**
+ * Who decides what happens to an entry the manifest does not name. The sweep calls it once per
+ * such entry and removes none itself, so a file the user put in the tree is the delegate's to
+ * keep, move or remove. `entry` is the absolute path; `isDirectory` is true only for a real
+ * folder (a link is not one).
+ */
+export interface ReferenceSweepDelegate {
+  dispose(entry: string, isDirectory: boolean): Promise<ReferenceDisposition>;
+}
+
 interface SweepAccumulator {
   scanned: number;
   removed: string[];
@@ -53,12 +82,15 @@ interface SweepAccumulator {
  * @param root - Directory to converge (the installed `references/tracker/` tree).
  * @param knownRelPaths - POSIX paths relative to `root` that must survive. Derived from
  *   the build's own module registries by the caller — never hand-listed.
+ * @param delegate - Acts on every entry the manifest does not name. Required: a sweep with
+ *   no delegate would have to delete what it cannot name.
  *
  * @returns A {@link SweepResult} whose `removed` entries are POSIX relative paths. A
- *   directory into which no manifest path descends is removed WHOLE and reported by its
- *   own relative path — leaving it empty would be a convergence that stops one step
- *   short, and an empty provider directory is indistinguishable from a provider whose
- *   references failed to install. A subtree left unswept because it breached
+ *   directory into which no manifest path descends is handed to the delegate WHOLE and
+ *   reported by its own relative path once the delegate removed it — leaving it empty
+ *   would be a convergence that stops one step short, and an empty provider directory is
+ *   indistinguishable from a provider whose references failed to install. A subtree left
+ *   unswept because it breached
  *   {@link MAX_REFERENCE_SWEEP_DEPTH} is reported in `failed` under its own relative
  *   path, for the same reason: everything this sweep did not converge is named.
  *
@@ -68,9 +100,10 @@ interface SweepAccumulator {
 export async function sweepOrphanedReferences(
   root: string,
   knownRelPaths: ReadonlySet<string>,
+  delegate: ReferenceSweepDelegate,
 ): Promise<SweepResult> {
   const acc: SweepAccumulator = { scanned: 0, removed: [], failed: [] };
-  await sweepDirectory(root, '', 0, knownRelPaths, directoryPrefixes(knownRelPaths), acc);
+  await sweepDirectory(root, '', 0, knownRelPaths, directoryPrefixes(knownRelPaths), delegate, acc);
   return { scanned: acc.scanned, removed: acc.removed, failed: acc.failed };
 }
 
@@ -80,6 +113,7 @@ async function sweepDirectory(
   depth: number,
   known: ReadonlySet<string>,
   knownDirPrefixes: ReadonlySet<string>,
+  delegate: ReferenceSweepDelegate,
   acc: SweepAccumulator,
 ): Promise<void> {
   if (depth > MAX_REFERENCE_SWEEP_DEPTH) {
@@ -108,32 +142,52 @@ async function sweepDirectory(
     const fullPath = path.join(dir, entry.name);
 
     // A real subdirectory is either an ancestor of something the manifest names — in
-    // which case descend — or dead weight, in which case take the whole subtree.
-    // isDirectory() is false for a symlink-to-dir, so a planted link is treated as a
-    // leaf and removed rather than followed.
+    // which case descend — or dead weight, in which case the delegate takes the whole
+    // subtree. isDirectory() is false for a symlink-to-dir, so a planted link is treated
+    // as a leaf and handed over rather than followed.
     if (entry.isDirectory()) {
       if (knownDirPrefixes.has(`${relPath}/`)) {
-        await sweepDirectory(fullPath, relPath, depth + 1, known, knownDirPrefixes, acc);
+        await sweepDirectory(fullPath, relPath, depth + 1, known, knownDirPrefixes, delegate, acc);
         continue;
       }
       acc.scanned++;
-      try {
-        await fs.rm(fullPath, { recursive: true, force: true });
-        acc.removed.push(relPath);
-      } catch (err) {
-        acc.failed.push({ name: relPath, error: err }); /* per-item isolation */
-      }
+      await dispose(fullPath, relPath, true, delegate, acc);
       continue;
     }
 
     acc.scanned++;
     if (known.has(relPath)) continue;
-    try {
-      await fs.rm(fullPath, { force: true });
-      acc.removed.push(relPath);
-    } catch (err) {
-      acc.failed.push({ name: relPath, error: err }); /* per-item isolation */
+    await dispose(fullPath, relPath, false, delegate, acc);
+  }
+}
+
+/** Hand one entry to the delegate and record the outcome; a throw from the delegate is a per-item failure. */
+async function dispose(
+  fullPath: string,
+  relPath: string,
+  isDirectory: boolean,
+  delegate: ReferenceSweepDelegate,
+  acc: SweepAccumulator,
+): Promise<void> {
+  try {
+    const disposition = await delegate.dispose(fullPath, isDirectory);
+    switch (disposition.outcome) {
+      case 'removed':
+        acc.removed.push(relPath);
+        break;
+      case 'failed':
+        acc.failed.push({ name: relPath, error: disposition.error });
+        break;
+      case 'moved':
+      case 'kept':
+        break;
+      default: {
+        const _exhaustive: never = disposition;
+        void _exhaustive;
+      }
     }
+  } catch (err) {
+    acc.failed.push({ name: relPath, error: err }); /* per-item isolation */
   }
 }
 

@@ -32,7 +32,9 @@ import { installedReferenceManifest, SKILL_REFS_SKILL_NAME } from '../../core/md
 import { getPackageRoot } from '../../core/paths.js';
 import { prefixSkillName } from '../../core/plugins.js';
 import { removeComplianceOffFiles, restoreComplianceOffFiles } from './compliance-off-files.js';
+import type { BackupSession } from './install-backup.js';
 import { overlayGeneratedReferences, overlayUnitLabel, referencesHostState, resolveSkillSource } from './installer.js';
+import { isUnrealFolder } from './linked-folder.js';
 
 export interface ConvergeReferencesOptions {
   /** Claude Code's config directory (e.g. ~/.claude). Must be absolute. */
@@ -44,6 +46,8 @@ export interface ConvergeReferencesOptions {
   warn: (msg: string) => void;
   /** Package root the references and the skill sources are read from. Injectable for a temp tree; defaults to this package. */
   packageRoot?: string;
+  /** The backup session of the run, for the removals the overlay makes in the references tree. */
+  backups: BackupSession;
 }
 
 export interface ConvergeReferencesResult {
@@ -51,7 +55,12 @@ export interface ConvergeReferencesResult {
   converged: boolean;
   /** Manifest-relative generated references this run wrote. */
   rewritten: readonly string[];
-  /** Skill files this run removed (compliance off), spelled as in COMPLIANCE_OFF_REMOVED_SKILL_FILES. */
+  /**
+   * Files and folders this run removed below the skills folder, spelled as in
+   * COMPLIANCE_OFF_REMOVED_SKILL_FILES: what the overlay's prune removed (a reference the manifest no
+   * longer names), then, with compliance off, the files of that list. Retired files that the backup
+   * session removed with its own list are in its record, not here.
+   */
   removed: readonly string[];
   /** Skill files this run wrote back (compliance on), spelled as in COMPLIANCE_OFF_REMOVED_SKILL_FILES. */
   restored: readonly string[];
@@ -70,7 +79,7 @@ export interface ConvergeReferencesResult {
 }
 
 export async function convergeReferences(opts: ConvergeReferencesOptions): Promise<ConvergeReferencesResult> {
-  const { claudeDir, devflowDir, compliance, warn } = opts;
+  const { claudeDir, devflowDir, compliance, warn, backups } = opts;
   const failures: string[] = [];
   const fail = (message: string): void => {
     warn(`reference converge: ${message}`);
@@ -87,10 +96,21 @@ export async function convergeReferences(opts: ConvergeReferencesOptions): Promi
   const root = opts.packageRoot ?? getPackageRoot();
   const skillsDir = path.join(claudeDir, 'skills');
   const gitSkillDir = path.join(skillsDir, prefixSkillName(SKILL_REFS_SKILL_NAME));
+
+  // Every step below moves, removes or writes inside the skills folder. One that is a link or not a
+  // folder sends all of them into another place, and `referencesHostState` only looks at the entries
+  // below it. It is refused once, here: nothing is converged, the removal list of compliance off
+  // included, so the result is unproven and the caller fails closed.
+  if (await isUnrealFolder(skillsDir)) {
+    fail(`${skillsDir} is a link or not a folder, so nothing in it was converged`);
+    return { converged: false, rewritten: [], removed: [], restored: [], failures, stillPosting: [], unproven: !compliance };
+  }
+
   const manifest = installedReferenceManifest({ compliance });
 
   let rewritten: readonly string[] = [];
   let unproven = false;
+  const removed: string[] = [];
 
   const host = await referencesHostState(gitSkillDir);
   if (host.kind === 'refused') {
@@ -103,6 +123,7 @@ export async function convergeReferences(opts: ConvergeReferencesOptions): Promi
         sourceRoot: skillRefsSourceDir(compliance, root),
         manifest,
         warn,
+        backups,
       });
       rewritten = overlay.overlaidRefs;
       for (const failure of overlay.overlayFailures) {
@@ -113,6 +134,9 @@ export async function convergeReferences(opts: ConvergeReferencesOptions): Promi
         fail(`could not prune ${failed.name} (${String(failed.error)})`);
         unproven = true;
       }
+      // What the prune removed is named beside what the compliance-off list removes. The prune names
+      // are relative to the references folder; this list spells them from the skills folder.
+      removed.push(...overlay.pruned.removed.map(name => `${prefixSkillName(SKILL_REFS_SKILL_NAME)}/references/${name}`));
     } catch (err) {
       // The overlay throws for a packaging failure only: an absent source root, or a manifest entry
       // the root lacks. Nothing is written in either case, and nothing falls through to another root.
@@ -121,7 +145,6 @@ export async function convergeReferences(opts: ConvergeReferencesOptions): Promi
     }
   }
 
-  const removed: string[] = [];
   const restored: string[] = [];
   const stillPosting: string[] = [];
 

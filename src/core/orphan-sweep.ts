@@ -56,6 +56,17 @@ export interface SweepResult {
   failed: ReadonlyArray<{ name: string; error: unknown }>;
 }
 
+/**
+ * How the sweep removes an orphan it may remove.
+ *
+ * `recursive` removes a file, a link or a whole folder (`fs.rm` with `recursive`), as the uninstall
+ * needs for the skill folders it owns. `unlink` removes a file or a link only: an entry that is a
+ * folder at the time of the removal is not removed and is recorded in `failed`. A caller whose
+ * `mayRemove` admits files after one `lstat` uses `unlink`, so an entry that turns into a folder
+ * between the check and the removal is never deleted with what it holds.
+ */
+export type SweepRemoval = 'recursive' | 'unlink';
+
 // ---------------------------------------------------------------------------
 // sweepOrphanedAssets
 // ---------------------------------------------------------------------------
@@ -81,6 +92,10 @@ export interface SweepResult {
  *   that `dir` is a real folder before the call, because the sweep reads and
  *   removes inside whatever `dir` names.
  *
+ * @param removal - How an admitted orphan is removed ({@link SweepRemoval}). Defaults to
+ *   `recursive`. With `unlink`, an entry that has become a folder since the check stays and is
+ *   recorded in `failed`; an entry that has vanished since the check counts as removed.
+ *
  * @returns A {@link SweepResult} reporting how many entries were scanned, which
  *   registry names were removed, and which removals failed.
  *   `scanned` is the count matched by the predicate (not the removed count) —
@@ -97,6 +112,7 @@ export async function sweepOrphanedAssets(
   knownNames: ReadonlySet<string>,
   extractRegistryName: (entry: string) => string | null,
   mayRemove?: (entryPath: string) => Promise<boolean>,
+  removal: SweepRemoval = 'recursive',
 ): Promise<SweepResult> {
   const removed: string[] = [];
   const failed: Array<{ name: string; error: unknown }> = [];
@@ -111,7 +127,7 @@ export async function sweepOrphanedAssets(
         const entryPath = path.join(dir, entry);
         try {
           if (mayRemove !== undefined && !(await mayRemove(entryPath))) continue;
-          await fs.rm(entryPath, { recursive: true, force: true });
+          await removeEntry(entryPath, removal);
           removed.push(registryName);
         } catch (err) {
           failed.push({ name: registryName, error: err }); /* per-item isolation */
@@ -120,4 +136,17 @@ export async function sweepOrphanedAssets(
     }
   } catch { /* directory absent or unreadable — not an error */ }
   return { scanned, removed, failed };
+}
+
+/** Remove one orphan as `removal` says. An absent entry is already removed, as `fs.rm` with `force` treats it. */
+async function removeEntry(entryPath: string, removal: SweepRemoval): Promise<void> {
+  if (removal === 'recursive') {
+    await fs.rm(entryPath, { recursive: true, force: true });
+    return;
+  }
+  try {
+    await fs.unlink(entryPath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  }
 }

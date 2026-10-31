@@ -804,7 +804,8 @@ describe('memory-permission: the one-time notice', () => {
     run('memory_notice_write "$MEM" "$ROOT" path');
     expect(fs.readdirSync(elsewhere), 'nothing written through the linked folder').toEqual([]);
 
-    fs.rmSync(memory);
+    // unlinkSync, not rmSync: rmSync on node 24.8 refuses a link to a directory.
+    fs.unlinkSync(memory);
     fs.renameSync(real, memory);
     const target = path.join(root, 'victim.txt');
     fs.writeFileSync(target, 'keep');
@@ -826,7 +827,8 @@ describe('memory-permission: the one-time notice', () => {
       expect(fs.existsSync(target), 'nothing is created through the link').toBe(false);
       expect(fs.lstatSync(pending('path')).isSymbolicLink(), 'the link is left in place').toBe(true);
 
-      fs.rmSync(pending('path'));
+      // unlinkSync, not rmSync: rmSync on node 24.8 leaves a dangling link in place.
+      fs.unlinkSync(pending('path'));
       const shownTarget = dangling(shown('path'));
       run('memory_notice_write "$MEM" "$ROOT" path');
       expect(fs.existsSync(pending('path')), 'a shown marker, even a dangling link, keeps the reason quiet').toBe(false);

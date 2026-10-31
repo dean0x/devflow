@@ -38,7 +38,9 @@ import {
 import { installedReferenceManifest } from '../src/core/mds-variants.js';
 import { compiledComplianceOffSkillRefsDir, compiledSkillRefsDir } from '../src/core/assets.js';
 import { writeManifest, readManifest } from '../src/core/manifest.js';
+import { testBackups } from './helpers.js';
 
+let tempHome: string;
 let claudeDir: string;
 let warnings: string[];
 
@@ -53,16 +55,24 @@ async function exists(p: string): Promise<boolean> {
 }
 
 /** The one overlay every install runs, onto the full manifest. */
-const overlayAll = () =>
-  overlayGeneratedReferences({ referencesTarget: refsTarget(), manifest: installedReferenceManifest(), warn });
+const overlayAll = async () =>
+  overlayGeneratedReferences({
+    referencesTarget: refsTarget(),
+    manifest: installedReferenceManifest(),
+    warn,
+    backups: await testBackups(tempHome, { claudeDir }),
+  });
 
 beforeEach(async () => {
-  claudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-tracker-install-'));
+  // The Claude dir sits beside the devflow dir, not around it: a backup root inside the Claude dir is refused.
+  tempHome = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-tracker-install-'));
+  claudeDir = path.join(tempHome, '.claude');
+  await fs.mkdir(claudeDir);
   warnings = [];
 });
 
 afterEach(async () => {
-  await fs.rm(claudeDir, { recursive: true, force: true });
+  await fs.rm(tempHome, { recursive: true, force: true });
 });
 
 // ---------------------------------------------------------------------------
@@ -365,6 +375,7 @@ describe('readTrackerMechanics / formatTrackerMechanics', () => {
       sourceRoot: compiledComplianceOffSkillRefsDir(),
       manifest: installedReferenceManifest({ compliance: false }),
       warn,
+      backups: await testBackups(tempHome, { claudeDir }),
     });
 
     const state = await readTrackerMechanics(claudeDir, false);

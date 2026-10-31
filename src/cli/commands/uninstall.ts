@@ -49,8 +49,10 @@ import { probeTrackedArea, type TrackedAreasAnswer } from '../../core/tracked-ar
 import { restampInstalledCommands } from '../../targets/claude-code/language-stamp.js';
 import { installRenderedCharter, removeHandoffSentinel } from '../../targets/claude-code/charter-render.js';
 import { installCommandsAndAgents } from '../../targets/claude-code/installer.js';
+import { BACKUP_ROOT_NAME, escapeName } from '../../targets/claude-code/install-backup.js';
 import { isUnrealFolder, newLinkReport, refuseUnrealFolder, refusedFolderStatement, type LinkReport } from '../../targets/claude-code/linked-folder.js';
 import { formatReplacedLinksSummary, type SummaryLine } from './install-report.js';
+import { judgeBareLegacySkill } from './legacy-sweep.js';
 
 /**
  * Which install `uninstall` acts on: the machine-wide install (`user`), or a
@@ -779,6 +781,9 @@ export function userContentPaths(devflowDir: string): ReadonlyArray<UserContentE
     { relPath: 'skills', isDir: true, label: `skill shadows (${path.join(devflowDir, 'skills')})` },
     // Rule shadow overrides (~/.devflow/rules/{name}.md)
     { relPath: 'rules', isDir: true, label: `rule shadows (${path.join(devflowDir, 'rules')})` },
+    // The files an install moved out of the devflow folders because devflow did not ship them.
+    // They are the user's own files, so only a confirmed full wipe removes them.
+    { relPath: BACKUP_ROOT_NAME, isDir: true, label: `install backups (${path.join(devflowDir, BACKUP_ROOT_NAME)})` },
     // preference-profile.md — user-curated decision-preference profile
     { relPath: 'preference-profile.md', label: 'preference-profile.md' },
     // tracker/ — the inferred, hand-editable issue-tracker conventions, one file
@@ -1084,7 +1089,7 @@ export function installArtifactPaths(devflowDir: string): ReadonlyArray<InstallA
  * This function runs on the decline, cancel, non-interactive AND --keep-docs paths,
  * so an entry here is deleted even when the user answers "no" to the full wipe.
  * User-authored state (everything in `userContentPaths`: skill/rule shadows,
- * preference-profile.md, the tracker conventions with the legacy tracker.md and
+ * the install backups, preference-profile.md, the tracker conventions with the legacy tracker.md and
  * its backups, the global tuning file under both names, hud.json) is removed only by
  * the confirmed full-dir rm.
  * agent-models.json is an INSTALL ARTIFACT (stale per-agent overrides silently
@@ -1178,6 +1183,41 @@ export async function isDevFlowInstalled(claudeDir: string): Promise<boolean> {
   return false;
 }
 
+/** Why a bare legacy skill folder stays: its `SKILL.md` is a file that no release of devflow installed. */
+const KEPT_NOT_MADE = 'devflow did not make this folder';
+/** Why a bare legacy skill folder stays: there is no regular `SKILL.md`, the folder or file is a link, or a read failed. */
+const KEPT_UNDECIDED = 'devflow could not tell if it made this folder';
+
+/** The bare legacy skill folders in the skills folder, split by who made them. */
+interface BareLegacySkillPlan {
+  /** Folders whose `SKILL.md` is a copy that a release of devflow installed: a full uninstall removes them. */
+  readonly remove: readonly string[];
+  /** Folders that stay, each with the reason the output gives. */
+  readonly keep: ReadonlyArray<{ readonly folder: string; readonly reason: string }>;
+}
+
+/**
+ * Sort the bare legacy skill folders that exist in `skillsDir` into those a full uninstall removes
+ * and those it keeps. The skills folder is shared with Claude Code and other tools, so a bare name
+ * (`python`, `plan`) does not prove that devflow made the folder. It is removed only when the check
+ * `devflow init` uses finds a `SKILL.md` that a release installed (`judgeBareLegacySkill`). The dry
+ * run and the removal both take this one list. A `devflow:` name is in the namespace of devflow, and
+ * the prefixed pass removes it. Reads one file per folder at most. Never throws.
+ */
+async function planBareLegacySkills(skillsDir: string): Promise<BareLegacySkillPlan> {
+  const remove: string[] = [];
+  const keep: Array<{ folder: string; reason: string }> = [];
+  for (const name of new Set(LEGACY_SKILL_NAMES)) {
+    if (name.startsWith(SKILL_NAMESPACE)) continue;
+    const folder = path.join(skillsDir, name);
+    const verdict = await judgeBareLegacySkill(folder, name);
+    if (verdict === 'devflow') remove.push(folder);
+    else if (verdict === 'other') keep.push({ folder, reason: KEPT_NOT_MADE });
+    else if (verdict === 'unknown') keep.push({ folder, reason: KEPT_UNDECIDED });
+  }
+  return { remove, keep };
+}
+
 // ---------------------------------------------------------------------------
 // Phase runners — extracted from the action function for readability and
 // independent testability.  Each covers one logical stage of the uninstall.
@@ -1196,9 +1236,10 @@ export async function isDevFlowInstalled(claudeDir: string): Promise<boolean> {
  *      and the scripts directory inside devflowDir.
  *   2. ALL skill removal candidates (existence-filtered):
  *      - Prefixed (devflow:name): live registry ∪ LEGACY_SKILL_NAMES.
- *      - Bare (name or devflow-name legacy): LEGACY_SKILL_NAMES ONLY.
- *        ~/.claude/skills/ is shared; bare dirs for live-registry skill names
- *        are by construction foreign to Devflow.
+ *      - Bare (name or devflow-name legacy): LEGACY_SKILL_NAMES ONLY, and only a
+ *        folder that devflow made (planBareLegacySkills). ~/.claude/skills/ is
+ *        shared; bare dirs for live-registry skill names are by construction
+ *        foreign to Devflow. A bare folder that stays is listed as `(kept: <reason>)`.
  *   3. manifest.json (removed separately in removeDevFlowInstallArtifacts).
  *   4. Every artifact path from installArtifactPaths(devflowDir) — the single
  *      source of truth shared with the real removal loop.
@@ -1226,8 +1267,8 @@ export async function enumerateDryRunExtras(
   // 2. Skills: enumerate ALL removal candidates that exist on disk.
   // Mirrors removeAllDevFlow's split-pass approach:
   //   Prefixed: live registry ∪ LEGACY_SKILL_NAMES ∪ FEATURE_OWNED_SKILLS
-  //   Bare: LEGACY_SKILL_NAMES only — shared skills/ dir; live-registry bare
-  //         dirs are by construction foreign to Devflow.
+  //   Bare: LEGACY_SKILL_NAMES only, and only a folder that devflow made — shared
+  //         skills/ dir; live-registry bare dirs are by construction foreign to Devflow.
   // FEATURE_OWNED_SKILLS (compliance) is included so full uninstall removes
   // devflow:compliance even though it left the plugin registry (step 1.5).
   // The workflow skill folders (D-WORKFLOW-FOLDER-INSTALL) join through getAllSkillNames.
@@ -1237,10 +1278,9 @@ export async function enumerateDryRunExtras(
     const prefixedPath = path.join(skillsDir, prefixSkillName(skillName));
     try { await fs.access(prefixedPath); extras.push(prefixedPath); } catch { /* absent */ }
   }
-  for (const skillName of LEGACY_SKILL_NAMES) {
-    const barePath = path.join(skillsDir, skillName);
-    try { await fs.access(barePath); extras.push(barePath); } catch { /* absent */ }
-  }
+  const bareSkills = await planBareLegacySkills(skillsDir);
+  extras.push(...bareSkills.remove);
+  for (const { folder, reason } of bareSkills.keep) extras.push(`${escapeName(folder)} (kept: ${reason})`);
 
   // 3. manifest.json — removed separately by removeDevFlowInstallArtifacts
   //    (NOT in installArtifactPaths). List it here so the preview is complete.
@@ -1632,6 +1672,7 @@ export async function runSelectivePhaseForScope(opts: {
  * @param opts.isTTY            - Whether the session is interactive. Injected rather than
  *   read from process.stdin so the prompt gate is an explicit input (matching
  *   resolveDevflowDirCleanup) instead of an ambient global a test cannot control.
+ * @param opts.confirm          - The prompt for the full-dir wipe (default `p.confirm`).
  */
 export async function runFullPhaseForScope(opts: {
   scope: UninstallScope;
@@ -1641,8 +1682,10 @@ export async function runFullPhaseForScope(opts: {
   verbose: boolean;
   keepDocs: boolean;
   isTTY: boolean;
+  confirm?: ConfirmPrompt;
 }): Promise<void> {
   const { scope, claudeDir, devflowDir, devflowScriptsDir, verbose, keepDocs, isTTY } = opts;
+  const confirm: ConfirmPrompt = opts.confirm ?? p.confirm;
   // D-CLI-NO-SYMLINK: a legacy local install's removals and rewrites pass this first.
   const mayChange = scopeChangeGuard(scope, { claudeDir, devflowDir });
 
@@ -1701,7 +1744,7 @@ export async function runFullPhaseForScope(opts: {
         p.log.info(`  ${item}`);
       }
 
-      const confirmFullCleanup = await p.confirm({
+      const confirmFullCleanup = await confirm({
         message: `Remove entire ${devflowDir}? (includes the items listed above, plus logs and install metadata)`,
         initialValue: false,
       });
@@ -2272,10 +2315,11 @@ export async function removeAllDevFlow(
   //     prefixSkillName() is idempotent for already-prefixed legacy entries.
   //     FEATURE_OWNED_SKILLS (compliance) is included so full uninstall removes
   //     devflow:compliance even though it left the plugin registry (step 1.5).
-  //   Bare pass (name or devflow-name legacy): LEGACY_SKILL_NAMES ONLY.
-  //     A bare dir whose name matches a live-registry skill is by construction
-  //     foreign to Devflow (the devflow: namespace shipped in dcecda3, 2026-03-30).
-  //     A bare 'compliance/' dir is also foreign (not in LEGACY_SKILL_NAMES).
+  //   Bare pass (name or devflow-name legacy): LEGACY_SKILL_NAMES ONLY, and only a folder
+  //     whose SKILL.md is a copy that a release of devflow installed (planBareLegacySkills).
+  //     Any other bare folder stays and is named. A bare dir whose name matches a
+  //     live-registry skill is by construction foreign to Devflow (the devflow: namespace
+  //     shipped in dcecda3, 2026-03-30). A bare 'compliance/' dir is also foreign (not in LEGACY_SKILL_NAMES).
   //   The workflow skill folders (D-WORKFLOW-FOLDER-INSTALL) are in getAllSkillNames, so the folder is removed.
   const prefixedSkillNames = new Set([...getAllSkillNames(folderWorkflows), ...LEGACY_SKILL_NAMES, ...FEATURE_OWNED_SKILLS]);
   const skillsDir = path.join(claudeDir, 'skills');
@@ -2291,15 +2335,19 @@ export async function removeAllDevFlow(
       skillsRemoved++;
     } catch { /* Skill doesn't exist */ }
   }
-  for (const skillName of LEGACY_SKILL_NAMES) {
-    // Remove bare variant — frozen legacy list only, never the live registry
-    const barePath = path.join(skillsDir, skillName);
+  // Bare variant: frozen legacy list only, never the live registry, and only a folder that devflow made.
+  const bareSkills = await planBareLegacySkills(skillsDir);
+  for (const barePath of bareSkills.remove) {
     try {
-      await fs.stat(barePath);
       if (!(await mayChange(barePath))) continue;
       await fs.rm(barePath, { recursive: true, force: true });
       skillsRemoved++;
-    } catch { /* Skill doesn't exist */ }
+    } catch (error) {
+      p.log.warn(`Could not remove ${escapeName(barePath)}: ${error}`);
+    }
+  }
+  for (const { folder, reason } of bareSkills.keep) {
+    p.log.info(`Kept ${escapeName(folder)}: ${reason}`);
   }
 
   if (skillsRemoved > 0 && verbose) {

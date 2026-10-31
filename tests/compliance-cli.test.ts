@@ -30,6 +30,7 @@ import { bothOffDir, compiledComplianceOffSkillRefsDir, compiledSkillRefsDir, co
 import { installRecordFor, postingStatus, readInstalledVariants } from '../src/core/installed-variants.js';
 import { readManifest, type ManifestData } from '../src/core/manifest.js';
 import { getManifestLockPath } from '../src/core/manifest-lock.js';
+import { testBackups } from './helpers.js';
 
 // ── resolveComplianceCliAction ────────────────────────────────────────────────
 
@@ -277,7 +278,7 @@ async function manifestWith(
   return read;
 }
 
-function change(
+async function change(
   manifest: ManifestData,
   action: 'enable' | 'disable' | 'set',
   opts: { setFrameworks?: string[]; runningVersion?: string | null } = {},
@@ -291,6 +292,7 @@ function change(
     runningVersion: opts.runningVersion === undefined ? RUNNING : opts.runningVersion,
     packageRoot: pkg,
     warn,
+    backups: await testBackups(tmp, { claudeDir, devflowDir }),
   });
 }
 

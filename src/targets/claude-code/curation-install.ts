@@ -118,9 +118,11 @@ import {
   type PluginDefinition,
 } from '../../core/plugins.js';
 import { convergeFromManifest, type ConvergeComplianceArtifactsResult } from './compliance-install.js';
+import { swapFolderIn } from './folder-swap.js';
 import { copyDirectory, resolveSkillSource } from './installer.js';
+import type { BackupSession } from './install-backup.js';
 import { LANGUAGE_STAMPED_COMMANDS, stampForConverge } from './language-stamp.js';
-import { entryIsLink, newLinkReport, refuseUnrealFolder, refusedFolderMessage, warnLinkReport, writeFileReplacingLink, type LinkReport } from './linked-folder.js';
+import { directoryState, newLinkReport, refuseUnrealFolder, refusedFolderMessage, unlinkLinkAt, warnLinkReport, writeFileReplacingLink, type LinkReport } from './linked-folder.js';
 import { convergeReferences, type ConvergeReferencesResult } from './reference-converge.js';
 import { installWorkflowFolder, readWorkflowFolder } from './workflow-folder-install.js';
 
@@ -167,6 +169,8 @@ export interface ConvergeCurationVariantsOptions {
   warn: (msg: string) => void;
   /** Package root the variants and sources, the apply-decisions skill included, are read from. Injectable for a temp tree; defaults to this package. */
   packageRoot?: string;
+  /** The backup session of the run, for the skill folders this converge removes or swaps. */
+  backups: BackupSession;
 }
 
 export interface ConvergeCurationVariantsResult {
@@ -494,34 +498,79 @@ async function pathExists(p: string): Promise<boolean> {
 }
 
 /**
+ * The two folders a skill swap uses, both directly under `claudeDir`: the staging copy, and the
+ * backup the old skill folder waits in while the copy is renamed into place.
+ *
+ * @param now - The clock reading that makes the name unique, in milliseconds.
+ */
+export function curationSwapPaths(claudeDir: string, now: number): { readonly staging: string; readonly backup: string } {
+  const staging = path.join(claudeDir, `.devflow-curation-${process.pid}-${now.toString(36)}.tmp`);
+  return { staging, backup: `${staging}.old` };
+}
+
+/**
  * Install one skill directory atomically: stage a copy beside the claude dir's
  * skills, then swap it in, restoring the old directory if the swap fails.
  *
  * Staged under `claudeDir` itself, not under `skills/`: a staging directory a
  * crash leaves behind must not look like a second skill to Claude Code.
  *
+ * A file in the old directory that devflow did not ship moves to the backup folder first. If one
+ * cannot move, nothing is swapped: the shipped files are written into the old directory and the
+ * file stays (see {@link swapFolderIn}).
+ *
  * A target that is a link is moved aside as the link itself, never followed, so what it points to is
  * left as it was; the link is recorded in `links` once the real folder stands in its place.
  */
-async function swapInSkillDirectory(claudeDir: string, sourceDir: string, target: string, links: LinkReport): Promise<void> {
-  const staging = path.join(claudeDir, `.devflow-curation-${process.pid}-${Date.now().toString(36)}.tmp`);
-  const backup = `${staging}.old`;
+async function swapInSkillDirectory(
+  claudeDir: string,
+  sourceDir: string,
+  target: string,
+  links: LinkReport,
+  backups: BackupSession,
+): Promise<void> {
+  const { staging, backup } = curationSwapPaths(claudeDir, Date.now());
   try {
     await copyDirectory(sourceDir, staging);
     await fs.mkdir(path.dirname(target), { recursive: true });
-    const wasLink = await entryIsLink(target);
-    const hadTarget = wasLink || await pathExists(target);
-    if (hadTarget) await fs.rename(target, backup);
-    try {
-      await fs.rename(staging, target);
-    } catch (err) {
-      if (hadTarget) await fs.rename(backup, target);
-      throw err;
-    }
-    if (wasLink) links.replacedLinks.push(target);
+    await swapFolderIn({
+      backups,
+      target,
+      staged: staging,
+      aside: backup,
+      links,
+      mergeInto: () => copyDirectory(staging, target, undefined, links),
+    });
   } finally {
     await fs.rm(staging, { recursive: true, force: true }).catch(() => undefined);
-    await fs.rm(backup, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+/**
+ * Remove a curation-gated skill folder. The files devflow shipped go by the session's list, anything
+ * else moves to the backup folder first, and the folder goes with a plain `rmdir`: 'kept' means it
+ * still stands because a file could not move. A link is unlinked and a file in its place moves aside.
+ */
+async function removeSkillFolder(target: string, backups: BackupSession): Promise<'absent' | 'removed' | 'kept'> {
+  const state = await directoryState(target);
+  switch (state) {
+    case 'absent':
+      return 'absent';
+    case 'link':
+      return (await unlinkLinkAt(target)) === 'unlinked' ? 'removed' : 'kept';
+    case 'unusable': {
+      const moved = await backups.moveWhole(target);
+      return moved.status === 'moved' ? 'removed' : moved.status === 'absent' ? 'absent' : 'kept';
+    }
+    case 'real': {
+      await backups.prepass([target]);
+      return (await backups.removeListed(target)).folderRemoved ? 'removed' : 'kept';
+    }
+    default: {
+      const unreachable: never = state;
+      void unreachable;
+      return 'kept';
+    }
   }
 }
 
@@ -531,14 +580,23 @@ async function convergeSkills(opts: ConvergeCurationVariantsOptions, links: Link
   const selected = skillsOf(plugins);
   let state: CurationSkillState = 'unchanged';
 
+  // A skills folder that is a link or not a folder is refused once. The removal and the swap below
+  // would reach the folder the link points to: `directoryState` of a skill folder follows the link
+  // above it. The refusal is recorded in `links`, and the converge is not clean.
+  if (await refuseUnrealFolder(links, path.join(claudeDir, 'skills'))) return 'failed';
+
   // Every gated skill is converged: a failure on one must not skip the next.
   for (const skill of CURATION_GATED_SKILLS) {
     const target = path.join(claudeDir, 'skills', prefixSkillName(skill));
     try {
       if (!curation) {
-        if (!(await pathExists(target))) continue;
-        await fs.rm(target, { recursive: true });
-        state = 'removed';
+        const removal = await removeSkillFolder(target, opts.backups);
+        if (removal === 'removed') {
+          state = 'removed';
+        } else if (removal === 'kept') {
+          warn(`curation variants: the ${prefixSkillName(skill)} skill folder (${target}) still holds a file that could not be moved aside, so it was not removed`);
+          state = 'failed';
+        }
         continue;
       }
 
@@ -548,7 +606,7 @@ async function convergeSkills(opts: ConvergeCurationVariantsOptions, links: Link
       }
       const resolved = await resolveSkillSource(skill, devflowDir, opts.packageRoot);
       if ((await pathExists(target)) && (await treesIdentical(resolved.dir, target))) continue;
-      await swapInSkillDirectory(claudeDir, resolved.dir, target, links);
+      await swapInSkillDirectory(claudeDir, resolved.dir, target, links, opts.backups);
       state = 'installed';
     } catch (err) {
       warn(`curation variants: could not converge the ${prefixSkillName(skill)} skill (${target}) — ${String(err)}`);
@@ -735,6 +793,8 @@ export interface ConvergeVariantAxesOptions {
   workflowFolders?: readonly WorkflowFolder[];
   /** Package root the folder trees are read from. Defaults to {@link ConvergeVariantAxesOptions.packageRoot}. */
   workflowFoldersRoot?: string;
+  /** The backup session of the run: the one the install before this converge used, when there was one. */
+  backups: BackupSession;
 }
 
 /** What the workflow-folder converge did. */
@@ -796,8 +856,9 @@ async function convergeWorkflowFolders(opts: {
   folders: readonly WorkflowFolder[];
   root: string;
   warn: (msg: string) => void;
+  backups: BackupSession;
 }): Promise<ConvergeWorkflowFoldersResult> {
-  const { claudeDir, switches, plugins, folders, root, warn } = opts;
+  const { claudeDir, switches, plugins, folders, root, warn, backups } = opts;
   const installed: string[] = [];
   const unchanged: string[] = [];
   const failures: string[] = [];
@@ -818,7 +879,7 @@ async function convergeWorkflowFolders(opts: {
       continue;
     }
     const links = newLinkReport();
-    const result = await installWorkflowFolder({ claudeDir, name: folder.name, files: read.files, links });
+    const result = await installWorkflowFolder({ claudeDir, name: folder.name, files: read.files, links, backups });
     switch (result.outcome) {
       case 'installed':
         installed.push(folder.name);
@@ -874,7 +935,7 @@ export function workflowFoldersPosting(folders: ConvergeWorkflowFoldersResult, c
  * Never throws.
  */
 export async function convergeVariantAxes(opts: ConvergeVariantAxesOptions): Promise<ConvergeVariantAxesResult> {
-  const { claudeDir, devflowDir, manifest, plugins, warn, packageRoot } = opts;
+  const { claudeDir, devflowDir, manifest, plugins, warn, packageRoot, backups } = opts;
   const switches: VariantSwitches = { curation: manifest.features.curation, compliance: manifest.features.compliance.enabled };
 
   // Precondition, asserted in production code: a relative claudeDir would resolve
@@ -903,14 +964,14 @@ export async function convergeVariantAxes(opts: ConvergeVariantAxesOptions): Pro
   );
   const skillLinks = newLinkReport();
   const skill = await attempt<CurationSkillState>('curation variants', warn, 'failed', () =>
-    convergeSkills({ claudeDir, devflowDir, curation: switches.curation, plugins, warn, packageRoot }, skillLinks),
+    convergeSkills({ claudeDir, devflowDir, curation: switches.curation, plugins, warn, packageRoot, backups }, skillLinks),
   );
   warnLinkReport(skillLinks, warn);
   const compliance = await attempt<ConvergeComplianceArtifactsResult>(
     'compliance artifacts',
     warn,
     { removedPreexisting: false, converged: false, replacedLinks: [], refusedFolders: [] },
-    () => convergeFromManifest({ claudeDir, devflowDir, manifest, warn }),
+    () => convergeFromManifest({ claudeDir, devflowDir, manifest, warn, backups }),
   );
   const references = await attempt<ConvergeReferencesResult>(
     'reference converge',
@@ -924,7 +985,7 @@ export async function convergeVariantAxes(opts: ConvergeVariantAxesOptions): Pro
       stillPosting: [],
       unproven: !switches.compliance,
     },
-    () => convergeReferences({ claudeDir, devflowDir, compliance: switches.compliance, warn, packageRoot }),
+    () => convergeReferences({ claudeDir, devflowDir, compliance: switches.compliance, warn, packageRoot, backups }),
   );
   const workflowFolders = await attempt<ConvergeWorkflowFoldersResult>(
     'workflow folders',
@@ -937,6 +998,7 @@ export async function convergeVariantAxes(opts: ConvergeVariantAxesOptions): Pro
       folders: opts.workflowFolders ?? WORKFLOW_FOLDERS,
       root: opts.workflowFoldersRoot ?? packageRoot ?? getPackageRoot(),
       warn,
+      backups,
     }),
   );
 
@@ -1070,6 +1132,8 @@ export interface ApplyVariantToggleOptions {
   runningVersion: string | null;
   warn: (msg: string) => void;
   packageRoot?: string;
+  /** The backup session of the toggle: made before any change and shared with every step of it. */
+  backups: BackupSession;
 }
 
 export type VariantToggleOutcome =
@@ -1235,6 +1299,7 @@ export async function applyVariantToggle(opts: ApplyVariantToggleOptions): Promi
     plugins: DEVFLOW_PLUGINS.filter(plugin => selection.has(plugin.name)),
     warn,
     packageRoot: opts.packageRoot,
+    backups: opts.backups,
   });
   if (result.converged) {
     await recordInstalledVariants(devflowDir, { curation: state.features.curation, compliance: state.features.compliance.enabled }, warn);

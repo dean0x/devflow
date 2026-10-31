@@ -97,6 +97,49 @@ describe('sweepOrphanedAssets', () => {
     await expect(fs.access(missing)).rejects.toThrow();
   });
 
+  it('removes an admitted file with unlink only, so an entry that became a folder is not deleted', async () => {
+    // The check and the removal are two steps. An entry that the check admitted as a file and
+    // that is a folder by the time of the removal must stay, with what it holds.
+    await fs.writeFile(path.join(dir, 'retired.md'), 'x', 'utf-8');
+    const swapForFolder = async (entryPath: string): Promise<boolean> => {
+      await fs.rm(entryPath);
+      await fs.mkdir(entryPath);
+      await fs.writeFile(path.join(entryPath, 'mine.md'), 'my note\n', 'utf-8');
+      return true;
+    };
+
+    const result = await sweepOrphanedAssets(dir, new Set<string>(), stripMd, swapForFolder, 'unlink');
+
+    expect(result.removed).toEqual([]);
+    expect(result.failed.map(item => item.name)).toEqual(['retired']);
+    expect(await fs.readFile(path.join(dir, 'retired.md', 'mine.md'), 'utf-8')).toBe('my note\n');
+  });
+
+  it('removes an admitted file or link with unlink, and a link only as the link', async () => {
+    const target = path.join(dir, 'pointed-to.txt');
+    await fs.writeFile(target, 'keep me', 'utf-8');
+    await fs.writeFile(path.join(dir, 'retired-file.md'), 'x', 'utf-8');
+    await fs.symlink(target, path.join(dir, 'retired-link.md'));
+
+    const result = await sweepOrphanedAssets(dir, new Set<string>(), stripMd, async () => true, 'unlink');
+
+    expect([...result.removed].sort()).toEqual(['retired-file', 'retired-link']);
+    expect(result.failed).toEqual([]);
+    expect(await fs.readFile(target, 'utf-8')).toBe('keep me');
+  });
+
+  it('counts an entry that vanished after the check as removed, as the recursive removal does', async () => {
+    await fs.writeFile(path.join(dir, 'gone.md'), 'x', 'utf-8');
+
+    const result = await sweepOrphanedAssets(dir, new Set<string>(), stripMd, async entryPath => {
+      await fs.rm(entryPath);
+      return true;
+    }, 'unlink');
+
+    expect(result.removed).toEqual(['gone']);
+    expect(result.failed).toEqual([]);
+  });
+
   // A failing rm must degrade silently rather than propagate — one unguarded throw
   // out of this helper would abort the entire install fan-out.
   // Enforced by making the sweep directory unwritable, so readdir succeeds and every

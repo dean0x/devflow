@@ -193,6 +193,7 @@ Devflow has one install location per machine. `~/.claude` below is the Claude Co
 | Skills | `~/.claude/skills/devflow:*/` | Namespaced (`devflow:` prefix); installed from `src/assets/skills/`, scoped to the selected plugins and their declared `requires:` |
 | Rules | `~/.claude/rules/devflow/` | Flat `.md`; installed from `src/assets/rules/` (plugin-scoped) |
 | Scripts | `~/.devflow/scripts/` | Helper scripts |
+| Install backups | `~/.devflow/install-backups/<UTC stamp>-<8 hex>/` | Files that devflow did not ship, moved out of its install folders by an install, at their relative paths; made only when a file moves; kept until you delete it or run a full uninstall |
 | Hooks | `~/.devflow/scripts/hooks/` | Installed from `src/assets/scripts/hooks/`; Working Memory hooks |
 | Settings | `~/.claude/settings.json` | Devflow configuration |
 
@@ -381,6 +382,8 @@ Devflow claims four namespaces inside `~/.claude/`:
 
 These four namespaces hold the installed asset files. `devflow init` also writes `~/.claude/settings.json` (hook registrations, flags — including the `view-mode` enum flag, whose `viewMode` settings key is written only when non-default; `neutralValue: 'default'` suppresses the key when view-mode is left at its default value) and `~/.devflow/` state files (manifest, migrations tracking, proxy config). The `devflow:` prefix on skills prevents collisions with other tool ecosystems.
 
+Devflow's install folders belong to devflow, so keep your own files in their stable homes: own skills as shadows in `~/.devflow/skills/<name>/`, own rules in `~/.devflow/rules/`, and own commands and agents in the top-level `commands/` and `agents/` folders of the Claude directory (outside the `devflow/` subfolders). An install moves any other file in these namespaces to `~/.devflow/install-backups/`. A bare legacy skill folder in the shared `skills/` folder, such as `skills/python`, moves too, but only when its `SKILL.md` is a copy that a release of devflow installed (`src/targets/claude-code/legacy-skill-hashes.ts`). The Install backups paragraph of `docs/reference/architecture.md` states the rules.
+
 ### Orphan Sweep (install and selective uninstall)
 
 An orphan is an installed asset whose name is no longer in the plugin registry — typically a retired or renamed agent/command/skill. Without active cleanup, orphans accumulate on disk indefinitely.
@@ -389,7 +392,7 @@ An orphan is an installed asset whose name is no longer in the plugin registry �
 
 1. Read the directory listing for the target namespace.
 2. Apply a name extractor (strips `.md` for agents/commands; strips `devflow:` prefix for skills).
-3. Delete every entry whose extracted name is **not** in the `knownNames` set.
+3. Delete every entry whose extracted name is **not** in the `knownNames` set and that the caller's `mayRemove` check allows. An install allows only a name that an earlier release shipped, or a leftover of an interrupted install. It moves every other entry to the install backup folder first.
 4. Return a `SweepResult` with counts and per-item errors — failures are non-fatal.
 
 **When it runs** (`src/targets/claude-code/installer.ts: installViaFileCopy` and `src/cli/commands/uninstall.ts: sweepDevflowNamespaces`):
@@ -410,6 +413,8 @@ rm -rf ~/.claude/agents/devflow/
 rm -rf ~/.claude/rules/devflow/
 rm -rf ~/.devflow/scripts/
 ```
+
+This removal takes each of these folders whole, with any file in it that devflow did not ship. `~/.devflow/install-backups/` is user content: a keep-data uninstall keeps it, and the full-wipe prompt of an interactive uninstall lists it before the wipe.
 
 Skills are removed individually rather than by namespace directory, because `~/.claude/skills/` is shared with other tools. Two separate passes run to avoid deleting foreign dirs:
 - **Prefixed** (`devflow:name`): removed for every skill in the live registry ∪ `LEGACY_SKILL_NAMES`.

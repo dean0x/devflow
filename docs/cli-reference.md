@@ -43,6 +43,23 @@ Devflow installs machine-wide, into the Claude Code directory and `~/.devflow`:
 - `~/.devflow` is always the machine root. `DEVFLOW_DIR` is ignored.
 - There is no project-local install. `init --scope local` exits 1 and points at `devflow uninstall --scope local`, which removes an old project-local install (`<repo>/.claude` and `<repo>/.devflow` install artifacts) without touching anything under your home directory.
 
+### Files that devflow did not ship
+
+Devflow's install folders belong to devflow, so keep your own files in their stable homes: own skills as shadows in `~/.devflow/skills/<name>/`, own rules in `~/.devflow/rules/`, and own commands and agents in the top-level `commands/` and `agents/` folders of the Claude directory (outside the `devflow/` subfolders).
+
+`init` and the `curation`, `compliance` and `rules` toggles do not delete a file that devflow did not ship. They move it and name it in the output:
+
+- The file moves to `~/.devflow/install-backups/<UTC stamp>-<8 hex>/`, at its relative path. The output names the old path and the new path.
+- The backup folder appears only when a file moves. Two `init` runs on a clean home make none.
+- A file that cannot move stays where it is. The output names it, and the command still finishes.
+- A file that you put back into a devflow folder moves again on the next `init`. To restore a file, copy it from the backup folder to one of its stable homes.
+- The backup is not encrypted. It stays until you delete it or run a full uninstall. A keep-data `devflow uninstall` keeps it, and the full-wipe prompt lists it.
+- A file of yours with the same name as a shipped file is overwritten without a report.
+- Relative links in a moved folder can break.
+- Concurrent devflow runs are not supported.
+- A bare legacy skill folder, such as `skills/python` (a name from releases before v2), moves whole and is named only when its `SKILL.md` is a copy that a release of devflow installed. A skill of your own with such a name stays where it is. A folder that devflow cannot judge (no `SKILL.md`, or a link) also stays, and the output names it.
+- The output names each retired devflow file that an install removes.
+
 ### Your hooks stay yours
 
 `init`, the `ambient`, `memory` and `proxy` toggles, and `uninstall` add and remove only the hooks devflow wrote in `settings.json`. A hook is devflow's only when its command ends in `/scripts/hooks/run-hook <name>`, or in a form an older release wrote (such as `/scripts/hooks/session-start-memory.sh`). A hook of yours whose command merely mentions a devflow hook's name (`capture-turn`, `memory-worker`, `ensure-proxy`, ...) is never touched, and removing a devflow hook leaves the other hooks in its matcher group in place, in order.
@@ -553,5 +570,7 @@ npx devflow-kit uninstall
 | `--keep-docs` | Leave the repository's `.devflow/` project data untouched |
 | `--dry-run` | Show what would be removed |
 | `--verbose` | Show detailed output |
+
+**Bare legacy skill folders.** A full uninstall removes a bare legacy skill folder in the skills folder of the Claude directory, such as `skills/python` (a name from releases before v2), only when its `SKILL.md` is a copy that a release of devflow installed. The check is the one `devflow init` uses. A skill of your own with such a name stays where it is, byte for byte. A folder that devflow cannot judge (no `SKILL.md`, or a link) also stays. The output names each folder that stays (`Kept <path>: devflow did not make this folder`, or `...: devflow could not tell if it made this folder`), and `--dry-run` lists the same folders with `(kept: <reason>)`. A `devflow:`-prefixed skill folder is removed as before.
 
 **Project data.** A full uninstall run interactively inside a git repository offers to remove that repository's `.devflow/` at the git root, wherever in the repository you run it. Before asking, it lists what it would remove and what it keeps: `features/`, `conventions.md`, `policy.json` and `project.json` are shared through git and are always kept, so an uncommitted edit to one of them survives. Outside a git repository, or in a repository rooted at your home directory (whose `.devflow/` is the machine-wide install), the step is skipped. If the repository's `.devflow` is a symbolic link, the step is skipped too and says so: devflow does not follow the link, so neither the link nor what it points to is touched, and `--dry-run` reports the same. `--keep-docs`, a non-interactive run, and answering no all leave `.devflow/` as it was. A data area that git tracks files in, or that git did not answer for, is kept whatever you answer: the curation area is the curation folder, the old ledger folder and the backup folders, and the memory area is `memory/`. The list names them on a `Keep (git tracks them, or git did not answer):` line, `--dry-run` marks each one `kept`, and the final `Kept:` line names them. The line and the marks are absent when nothing is kept for this reason. When nothing else would be removed, devflow prints no list and no `Kept:` line, and the `preserved` line names the kept entries instead.

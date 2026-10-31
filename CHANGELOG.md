@@ -18,6 +18,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The Architecture section of the prompt is removed.
   - Phase 6 starts after ALIGNED, or after a single-pass alignment Fix that reports COMPLETE. Phase 11 is skipped only when the run stopped before Phase 10. A stop in Phase 10 does not skip it, so the evidence still reaches the PR.
 
+---
+
+## [3.11.0] - 2026-10-31
+
+### Upgrade notes — Files that devflow moves to a backup folder
+
+**What you must do:**
+- Nothing. If `devflow init` moves a file of yours, the output names the file and its new path.
+- To restore a moved file, copy it from the backup folder, `~/.devflow/install-backups/<UTC stamp>-<8 hex>/`, to one of its stable homes. Skills: `~/.devflow/skills/<name>/`. Rules: `~/.devflow/rules/`. Commands and agents: the top-level `commands/` and `agents/` folders of the Claude directory, outside the `devflow/` subfolders. A file that you put back into a devflow folder moves again on the next `devflow init`.
+
+**What to know:**
+- The backup is not encrypted. Devflow never prunes it. It stays until you delete it or run a full uninstall.
+- A file of yours with the same name as a shipped file is overwritten without a report.
+- Relative links in a moved folder can break.
+- Concurrent devflow runs are not supported.
+
+### Behaviour change
+
+- **Devflow now names the retired files that it removes, and it moves bare legacy skill folders instead of deleting them** ([#688](https://github.com/dean0x/devflow/issues/688)).
+  - `devflow init` and the toggles print each retired devflow file that they remove. Before, most of these removals printed nothing.
+  - A bare legacy skill folder, such as `skills/python` (a name from releases before v2), is now moved whole to the backup folder and named, but only when its `SKILL.md` is a copy that a release of devflow installed. Before, `devflow init` deleted every such folder. A skill of your own with such a name stays where it is. A folder that devflow cannot judge (no `SKILL.md`, or a link) also stays, and the output names it.
+  - A full `devflow uninstall` now removes a bare legacy skill folder, such as `skills/python`, only when its `SKILL.md` is a copy that a release of devflow installed. Before, it deleted every folder with such a name, without a backup, so a skill of your own with that name was lost. A skill of your own stays where it is. A folder that devflow cannot judge (no `SKILL.md`, or a link) also stays. The output names each folder that stays, and `--dry-run` lists the same folders. A `devflow:`-prefixed skill folder is removed as before.
+  - An interactive `devflow uninstall` where the install backups are the only user content in `~/.devflow` now asks before the full wipe. The prompt lists the backup folder, and a decline keeps the backups.
+
+### Fixed
+
+- **`devflow init` and the curation, compliance and rules toggles no longer delete files that devflow did not ship** ([#688](https://github.com/dean0x/devflow/issues/688)).
+  - A file that you keep in `commands/devflow/`, `agents/devflow/`, `rules/devflow/`, a `skills/devflow:*` folder or its `references/` folders is now moved to `~/.devflow/install-backups/<UTC stamp>-<8 hex>/`, and the output names it. Before, these commands deleted it. This holds for a full install, for a partial install (`--plugin`) and for the three toggles.
+  - A file that cannot move stays in place with its folder, and the output names it.
+
+---
+
 ## [3.10.0] - 2026-10-30
 
 ### Upgrade notes — Shadowed rules and skills
@@ -2351,6 +2383,7 @@ devflow init
 ---
 
 [Unreleased]: https://github.com/dean0x/devflow/compare/v3.8.0...HEAD
+[3.11.0]: https://github.com/dean0x/devflow/compare/v3.10.0...v3.11.0
 [3.10.0]: https://github.com/dean0x/devflow/compare/v3.9.0...v3.10.0
 [3.9.0]: https://github.com/dean0x/devflow/compare/v3.8.0...v3.9.0
 [3.8.0]: https://github.com/dean0x/devflow/compare/v3.7.0...v3.8.0
