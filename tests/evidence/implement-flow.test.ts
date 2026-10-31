@@ -1643,7 +1643,7 @@ const PHASE_11_SKIP_RULE = 'Skip it only when the run stopped before Phase 10.'
 /** The rule as it read before the fix: "an earlier phase" also reaches a stop in Phase 10, so a PR that Phase 9 opened got no evidence. */
 const PHASE_11_SKIP_RULE_EARLIER = 'Skip it only when an earlier phase stopped the run.'
 /** The Phase 10 arm that ends the gate and hands the run to Phase 11: the `proceed` answer of the CI wait. */
-const PHASE_10_PASSING_ARM = '4. **If `NEXT=proceed`** → report SAY unless it is `none`, then proceed to Phase 11.'
+const PHASE_10_PASSING_ARM = '4. **If `NEXT=proceed`** → report SAY unless it is `none`, and the failing checks of a FAILING line, then proceed to Phase 11.'
 
 /**
  * Named collector (#675): the Phase 11 skip rule skips Phase 11 for every stop before Phase 10 and for no stop in Phase 10.
