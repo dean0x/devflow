@@ -12,7 +12,7 @@
  *
  * Three places state the protocol and must agree: the Code agent (its HANDOFF_FILE input, orientation
  * read, handoff step and Output template), the `**Handoff Protocol**` paragraph of `/implement`, and
- * the handoff convention that the four dynamic commands share through `authoring_preamble()`. The
+ * the handoff convention that the three Workflow hosts share through `authoring_preamble()`. The
  * persistence clauses `tests/evidence-policy/ticket-gate.test.ts` pins stay byte-identical.
  *
  * Each arm runs through a named collector, and the known-bad probes feed the same collectors.
@@ -23,7 +23,7 @@ import { describe, it, expect } from 'vitest'
 import { ensurePrReadyReference, readAgentReference, requireDistFile, resolveAgentSource, resolveVariantOffSource } from '../helpers.js'
 
 const SECTION_HEADING = '## Phase {N} Implementation Summary'
-const DYNAMIC_HOSTS = ['dynamic-build', 'dynamic-plan', 'dynamic-profile', 'dynamic-tickets'] as const
+const DYNAMIC_HOSTS = ['dynamic-build', 'dynamic-plan', 'dynamic-tickets'] as const
 
 /**
  * The compliance-off builds of /implement (#648): compliance off with curation on, and with curation off. The handoff

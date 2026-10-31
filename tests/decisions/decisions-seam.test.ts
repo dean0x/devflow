@@ -51,8 +51,8 @@ const CONTEXT_TOKEN = 'DECISIONS_CONTEXT'
  */
 const CODE_SITE_FLOOR = 21
 
-/** Decisions-loading hosts: all 14 command hosts load the index behind the gate. */
-const DECISIONS_HOST_COUNT = 14
+/** Decisions-loading hosts: every command host but dynamic-profile (13) loads the index behind the gate. */
+const DECISIONS_HOST_COUNT = 13
 
 /** The preamble's illustrative usage example: text, not a spawn. */
 const PREAMBLE_EXAMPLE = 'agent("your prompt here", { agentType: "Code" })'
@@ -305,7 +305,7 @@ describe('rule 1: every Code spawn site passes the key', () => {
   })
 
   it('the preamble usage example is text, not a spawn, so it needs no key', () => {
-    for (const host of ['dynamic-plan.md', 'dynamic-profile.md', 'dynamic-tickets.md']) {
+    for (const host of ['dynamic-plan.md', 'dynamic-tickets.md']) {
       const text = requireDistFile(host)
       expect(text, `${host} carries the example`).toContain(PREAMBLE_EXAMPLE)
       expect(collectCodeSpawnSites(host, text, 'Code'), `${host}: the example is not a spawn`).toEqual([])
@@ -439,7 +439,7 @@ describe('the authoring step names declared receivers only (AC-125)', () => {
       expect(at, `${host}: the authoring decisions step`).toBeGreaterThan(-1)
       return text.slice(at, text.indexOf('\n### ', at + 10) === -1 ? undefined : text.indexOf('\n### ', at + 10))
     }
-    for (const host of ['dynamic-build.md', 'dynamic-plan.md', 'dynamic-profile.md', 'dynamic-tickets.md']) {
+    for (const host of ['dynamic-build.md', 'dynamic-plan.md', 'dynamic-tickets.md']) {
       const inject = step(host).split('\n').find(l => /inject the relevant DECISIONS_CONTEXT/.test(l)) ?? ''
       const named = namedTypes(receiverPhrase(inject.slice(inject.indexOf('Then inject'))), collectKnownTypes(compiled()))
       expect(named.length, `${host}: receivers named`).toBeGreaterThanOrEqual(2)
@@ -452,7 +452,7 @@ describe('the authoring step names declared receivers only (AC-125)', () => {
 
   it('the inject sentence names every valid agent type that declares the key, the Fix variant included', () => {
     const declared = collectDeclaredTypes()
-    const hosts = ['dynamic-build.md', 'dynamic-plan.md', 'dynamic-profile.md', 'dynamic-tickets.md']
+    const hosts = ['dynamic-build.md', 'dynamic-plan.md', 'dynamic-tickets.md']
     // Non-vacuity: the valid-and-declared types are read, and the Code-family variant a workflow spawns is among them.
     const reachable = (collectValidAgentTypes(requireDistFile(hosts[0])) ?? []).filter(t => declared.has(t))
     expect(reachable.length, 'valid agent types that declare the key').toBeGreaterThanOrEqual(2)

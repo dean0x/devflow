@@ -1,11 +1,11 @@
 @import "./_decisions.mds" as decisions
 
-A partial: the Workflow-authoring preamble the dynamic commands share, and the
-decisions step that precedes authoring.
+A partial: the Workflow-authoring preamble that the three Workflow hosts
+(dynamic-build, dynamic-plan and dynamic-tickets) share, and the decisions step
+that precedes authoring.
 
 D-DECISIONS-AUTHORING-STEP: the "DECISIONS_CONTEXT — obtain BEFORE authoring" step
-is its own define, `authoring_decisions()`, expanded by the hosts that load
-decisions (dynamic-build, dynamic-plan, dynamic-tickets and dynamic-profile) right
+is its own define, `authoring_decisions()`, expanded by the same three hosts right
 after their settings block, so the gate in it reads a line already resolved.
 `authoring_preamble()` carries no decisions text. D-LEARNING-VARIANTS: the whole of
 `authoring_decisions()` is a curation-on arm, so a curation-off build carries no decisions

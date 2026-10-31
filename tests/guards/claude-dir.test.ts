@@ -278,7 +278,6 @@ export const ALLOWED_RULE_PROSE: readonly AllowedRuleProse[] = [
     binds: CLAUDE_DIR_PLACEHOLDER,
     files: [
       'dist/commands/dynamic-profile.md',
-      'dist/curation-off/commands/dynamic-profile.md',
       'src/assets/skills/agent-references/SKILL.md',
     ],
   },
@@ -312,7 +311,6 @@ export const SITE_ROWS: SiteRows = {
   'dist/commands/implement.md': 1,
   'dist/commands/resolve.md': 1,
   'dist/curation-off/commands/code-review.md': 1,
-  'dist/curation-off/commands/dynamic-profile.md': 1,
   'dist/curation-off/commands/plan.md': 2,
   'dist/curation-off/commands/implement.md': 1,
   'dist/curation-off/commands/resolve.md': 1,
