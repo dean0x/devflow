@@ -15,9 +15,9 @@ import { ROOT } from '../helpers.js'
 
 /** [skill, ceiling of its SKILL.md in bytes]. Each row's text is the pattern its numeric-floors.json entry pins. */
 const SKILL_MAX_BYTES: ReadonlyArray<readonly [string, number]> = [
-  ['docs-framework', 10_453],
+  ['docs-framework', 10_431],
   ['agent-references', 2_825],
-  ['compliance', 3_548],
+  ['compliance', 3_526],
   ['dependency-research', 3_765],
   ['boundary-validation', 3_081],
   ['patterns', 2_981],
@@ -29,11 +29,11 @@ const SKILL_MAX_BYTES: ReadonlyArray<readonly [string, number]> = [
   ['react', 3_631],
   ['accessibility', 3_455],
   ['ui-design', 4_096],
-  ['research-codebase', 2_641],
-  ['research-competitor', 3_418],
-  ['research-external', 3_456],
-  ['research-market', 3_304],
-  ['research-technology', 4_258],
+  ['research-codebase', 2_636],
+  ['research-competitor', 3_400],
+  ['research-external', 3_451],
+  ['research-market', 3_287],
+  ['research-technology', 4_245],
 ]
 
 /** Named collector: the file is over its ceiling. */

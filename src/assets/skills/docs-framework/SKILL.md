@@ -1,6 +1,6 @@
 ---
 name: docs-framework
-description: This skill should be used when creating files in the .devflow/docs/ directory.
+description: Use when creating files in the .devflow/docs/ directory.
 user-invocable: false
 allowed-tools: Read, Bash, Glob
 ---

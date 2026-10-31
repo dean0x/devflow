@@ -1,6 +1,6 @@
 ---
 name: research-market
-description: Market landscape research — analyze market positioning, user needs, and industry trends
+description: Use when researching a market: positioning, user needs, industry trends.
 user-invocable: false
 allowed-tools: WebSearch, WebFetch
 ---

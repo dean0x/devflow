@@ -1,6 +1,6 @@
 ---
 name: research-codebase
-description: Local codebase research — find patterns, trace flows, map dependencies
+description: Use when tracing the local codebase: patterns, flows, dependencies.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---

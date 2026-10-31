@@ -1246,11 +1246,11 @@
     },
     {
       "id": "skill-docs-framework-max",
-      "ceiling": 10453,
-      "pattern": "['docs-framework', 10_453],",
+      "ceiling": 10431,
+      "pattern": "['docs-framework', 10_431],",
       "occurrences": 1,
       "sourceFile": "tests/guards/on-demand-skill-sizes.test.ts",
-      "description": "src/assets/skills/docs-framework/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 10,453, after the cut from 12,642."
+      "description": "src/assets/skills/docs-framework/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 10,431, after the cut from 12,642."
     },
     {
       "id": "skill-agent-references-max",
@@ -1262,11 +1262,11 @@
     },
     {
       "id": "skill-compliance-max",
-      "ceiling": 3548,
-      "pattern": "['compliance', 3_548],",
+      "ceiling": 3526,
+      "pattern": "['compliance', 3_526],",
       "occurrences": 1,
       "sourceFile": "tests/guards/on-demand-skill-sizes.test.ts",
-      "description": "src/assets/skills/compliance/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 3,548, after the cut from 5,331."
+      "description": "src/assets/skills/compliance/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 3,526, after the cut from 5,331."
     },
     {
       "id": "skill-dependency-research-max",
@@ -1358,43 +1358,43 @@
     },
     {
       "id": "skill-research-codebase-max",
-      "ceiling": 2641,
-      "pattern": "['research-codebase', 2_641],",
+      "ceiling": 2636,
+      "pattern": "['research-codebase', 2_636],",
       "occurrences": 1,
       "sourceFile": "tests/guards/on-demand-skill-sizes.test.ts",
-      "description": "src/assets/skills/research-codebase/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 2,641, after the cut from 3,725."
+      "description": "src/assets/skills/research-codebase/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 2,636, after the cut from 3,725."
     },
     {
       "id": "skill-research-competitor-max",
-      "ceiling": 3418,
-      "pattern": "['research-competitor', 3_418],",
+      "ceiling": 3400,
+      "pattern": "['research-competitor', 3_400],",
       "occurrences": 1,
       "sourceFile": "tests/guards/on-demand-skill-sizes.test.ts",
-      "description": "src/assets/skills/research-competitor/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 3,418, after the cut from 4,525."
+      "description": "src/assets/skills/research-competitor/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 3,400, after the cut from 4,525."
     },
     {
       "id": "skill-research-external-max",
-      "ceiling": 3456,
-      "pattern": "['research-external', 3_456],",
+      "ceiling": 3451,
+      "pattern": "['research-external', 3_451],",
       "occurrences": 1,
       "sourceFile": "tests/guards/on-demand-skill-sizes.test.ts",
-      "description": "src/assets/skills/research-external/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 3,456, after the cut from 4,363."
+      "description": "src/assets/skills/research-external/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 3,451, after the cut from 4,363."
     },
     {
       "id": "skill-research-market-max",
-      "ceiling": 3304,
-      "pattern": "['research-market', 3_304],",
+      "ceiling": 3287,
+      "pattern": "['research-market', 3_287],",
       "occurrences": 1,
       "sourceFile": "tests/guards/on-demand-skill-sizes.test.ts",
-      "description": "src/assets/skills/research-market/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 3,304, after the cut from 4,317."
+      "description": "src/assets/skills/research-market/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 3,287, after the cut from 4,317."
     },
     {
       "id": "skill-research-technology-max",
-      "ceiling": 4258,
-      "pattern": "['research-technology', 4_258],",
+      "ceiling": 4245,
+      "pattern": "['research-technology', 4_245],",
       "occurrences": 1,
       "sourceFile": "tests/guards/on-demand-skill-sizes.test.ts",
-      "description": "src/assets/skills/research-technology/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 4,258, after the cut from 5,526."
+      "description": "src/assets/skills/research-technology/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 4,245, after the cut from 5,526."
     }
   ]
 }

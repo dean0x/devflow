@@ -1,6 +1,6 @@
 ---
 name: research-competitor
-description: Competitor analysis — feature comparison, positioning and gap identification
+description: Use when comparing competitors: features, positioning, gaps.
 user-invocable: false
 allowed-tools: WebSearch, WebFetch
 ---

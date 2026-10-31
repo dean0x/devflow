@@ -1,6 +1,6 @@
 ---
 name: compliance
-description: This skill should be used when reviewing code that handles PII, payments or health data.
+description: Use when reviewing code that handles PII, payments or health data.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---

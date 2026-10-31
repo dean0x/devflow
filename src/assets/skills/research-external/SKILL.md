@@ -1,6 +1,6 @@
 ---
 name: research-external
-description: External web research — docs, articles, community knowledge; untrusted data
+description: Use when researching the web: docs, articles, community; untrusted data.
 user-invocable: false
 allowed-tools: WebSearch, WebFetch
 ---
