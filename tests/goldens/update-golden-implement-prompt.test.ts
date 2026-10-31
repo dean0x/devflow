@@ -21,8 +21,8 @@
 import { describe, it, expect } from 'vitest'
 import { spawnSync, type SpawnSyncReturns } from 'child_process'
 import {
-  copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync,
-  writeFileSync,
+  copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync,
+  unlinkSync, writeFileSync,
 } from 'fs'
 import { tmpdir } from 'os'
 import * as path from 'path'
@@ -89,8 +89,12 @@ function withStandInRoot<T>(omitted: string | null, fn: (root: string, outDir: s
     for (const name of STAND_IN_LINKS) symlinkSync(path.join(ROOT, name), path.join(root, name))
     return fn(root, path.join(root, 'scratch-out'))
   } finally {
-    // A plain remove on each link drops the link and never reaches the tree it points to.
-    for (const name of STAND_IN_LINKS) rmSync(path.join(root, name), { force: true })
+    // An unlink on each link drops the link and never reaches the tree it points to.
+    // unlinkSync, not rmSync: rmSync on node 24.8 refuses a link to a directory.
+    for (const name of STAND_IN_LINKS) {
+      const link = path.join(root, name)
+      if (lstatSync(link, { throwIfNoEntry: false })) unlinkSync(link)
+    }
     rmSync(root, { recursive: true, force: true })
   }
 }
