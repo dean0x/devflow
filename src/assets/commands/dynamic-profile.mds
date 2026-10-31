@@ -20,7 +20,7 @@ output-dir: dist/commands
 
 This command spawns one Knowledge agent that reads past session history across all projects on this machine, finds the `AskUserQuestion` moments and the user's chosen answers, and writes a plain-prose preference profile to `~/.devflow/preference-profile.md`. `/devflow:dynamic-plan` reads the profile to pre-resolve design decisions that match established taste, so only new decisions reach the user.
 
-**This is a plain Agent spawn — not a Workflow.** The agent does the reading and writing directly.
+**This is a plain Agent spawn — not a Workflow.** No `Workflow` tool required. The agent does the reading and writing directly.
 
 ---
 
@@ -97,7 +97,7 @@ If a section has low confidence, say so. The user will review and edit this file
 After writing, return: { path: "~/.devflow/preference-profile.md", patternCount: N, lowConfidenceCount: N }.
 ```
 
-Invoke it as:
+Invoke the agent directly with the Agent tool (not via a Workflow):
 
 ```js
 const result = await agent(

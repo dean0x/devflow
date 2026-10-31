@@ -1,7 +1,7 @@
 @define agent_roster():
 ### Confirmed agent roster
 
-Model tiers are for reference only.
+Model tiers are for reference only; never pass `opts.model`.
 
 | agentType | Model tier | Role |
 |-----------|-----------|------|

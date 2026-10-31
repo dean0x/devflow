@@ -62,7 +62,7 @@ Valid `agentType` values: Code, Fix, Validate, Polish, Harden, Evaluate, Test, R
 
 Do not write logic that depends on an agent listing its own skills. Agents do not report them reliably.
 
-### Pre-flight self-check — before the first live `Workflow` call
+### Pre-flight self-check — required before the first live `Workflow` call
 
 Before you invoke the `Workflow` tool, audit the script you authored against this checklist:
 

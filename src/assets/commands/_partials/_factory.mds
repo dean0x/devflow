@@ -124,6 +124,7 @@ One Synthesize agent writes the tracking-issue document from the final ticket se
 
 #### Usage notes
 
+- Each schema is its stage's return shape, passed as `schema:`: `{ agentType: "Design", schema: DRAFT_SCHEMA }`, `{ agentType: "Review", schema: REVIEW_SCHEMA }`, `{ agentType: "Synthesize", schema: REVISE_SCHEMA }`, `{ agentType: "Design", schema: CRITIC_SCHEMA }`. A field that the host script's `Return:` line adds joins the schema.
 - The `candidates` array is **what the model proposed + user confirmed** — never hardcoded.
 - The `initiative` variable is the raw user input (a description, a spec doc path, or inline text) — read it and distill before passing to agents.
 - The `constraints` variable is optional: any cross-cutting rules (naming discipline, scope filters, authority order) the user supplied.

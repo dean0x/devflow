@@ -16,6 +16,8 @@ output-dir: dist/commands
 
 {{settings.settings_resolve()}}
 
+Run this call with the start directory as `{root}` in the same turn as the `resolve-root.cjs` call and the profile read: none needs the output of another.
+
 <!-- curation:end -->
 {{authoring_decisions()}}
 ---
@@ -59,7 +61,7 @@ Apply the `devflow:apply-decisions` algorithm to the DECISIONS_CONTEXT loaded by
 <!-- curation:end -->
 **2. Read the preference profile**
 
-Run this in the same turn as the root step's command:
+Run this in the same turn as the `resolve-root.cjs` call:
 ```bash
 cat ~/.devflow/preference-profile.md 2>/dev/null || echo "(no preference profile)"
 ```
@@ -92,7 +94,7 @@ Note the tickets and their key constraints; the agents read them in full.
 A workflow cannot pause mid-run. It only writes `DECISIONS-NEEDED.md`; you read the file and ask after the workflow returns.
 
 After the workflow completes:
-1. **Check each plan's test plan.** For every path in `planPaths`, copy that plan's `## Test Plan` section — the heading and its TP lines, up to the next `## ` heading — byte for byte into a fresh `mktemp` file with the Write tool, never through an interpolated shell string, and run the check below on it. Batch the plans: one Bash call makes every `mktemp` file, one turn of parallel Write calls fills them, and one Bash call runs every check:
+1. **Check each plan's test plan.** For every path in `planPaths`, copy that plan's `## Test Plan` section — the heading and its TP lines, up to the next `## ` heading — byte for byte into a fresh `mktemp` file with the Write tool, never through an interpolated shell string, and run the check below on it. Batch the plans: one Bash call makes every `mktemp` file, one turn of parallel Write calls fills them, and one Bash call runs every check, each behind an `echo "file=<that file>"` line:
 
 ```bash
 node "$HOME/.devflow/scripts/verify-evidence.cjs" check tp <that file>; echo "exit=$?"

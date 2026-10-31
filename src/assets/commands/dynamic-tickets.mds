@@ -17,6 +17,8 @@ output-dir: dist/commands
 
 {{settings.settings_resolve()}}
 
+Run this call with the start directory as `{root}`, the step 0 evidence-policy call and the `resolve-root.cjs` call in one turn: none needs the output of another.
+
 <!-- curation:end -->
 {{authoring_decisions()}}
 ---
@@ -229,7 +231,7 @@ WORKTREE_PATH: {worktree}"
 ```
 
 3. **Capture** `**Issue**: {ISSUE_REF}` and `**Status**:` from the spawn's `## Issue Traced` Output.
-   - `CREATED` or `ENRICHED`, with a reference that matches `^(#[1-9][0-9]{0,8}|[A-Z][A-Z0-9_]{0,9}-[1-9][0-9]{0,8})$` as a whole ⇒ insert `**Issue:** {ISSUE_REF}` with the Edit tool: in a ticket file as the line directly after its `**Depends on:**` line, in `tracking-issue.md` as the line directly after its H1. Change nothing else in the file. Send the insert in the same turn as the next spawn.
+   - `CREATED` or `ENRICHED`, with a reference that matches `^(#[1-9][0-9]{0,8}|[A-Z][A-Z0-9_]{0,9}-[1-9][0-9]{0,8})$` as a whole ⇒ insert `**Issue:** {ISSUE_REF}` with the Edit tool: in a ticket file as the line directly after its `**Depends on:**` line, in `tracking-issue.md` as the line directly after its H1. Change nothing else in the file. Send the insert in the same turn as the next spawn, or alone when no spawn follows.
    - A reference of any other shape ⇒ `TRACEABILITY: DEGRADED (issue reference "{ref}" does not match any tracker reference grammar)`, and no line.
    - `DEGRADED (rate limited)` ⇒ stop filing: this file and every file after it are reported `not filed`. Any other DEGRADED ⇒ that file gets no line; report it and go on to the next.
 <!-- compliance:on -->

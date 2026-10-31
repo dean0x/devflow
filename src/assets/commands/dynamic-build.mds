@@ -20,7 +20,7 @@ output-dir: dist/commands
 
 {{settings.settings_resolve()}}
 
-Run this call, the root call below and the step 0 evidence-policy call in one turn: none needs the output of another.
+Run this call with the start directory as `{root}`, the step 0c root call and the step 0 evidence-policy call in one turn: none needs the output of another.
 
 {{authoring_decisions()}}
 ---
@@ -125,7 +125,7 @@ node "$HOME/.devflow/scripts/verify-evidence.cjs" check tp <that file>; echo "ex
 
   Only `exit=0` passes it: pass the section's TP lines, as one string, as `testPlan` when invoking the workflow — a test plan alone still runs the Test agent. Any other result, or a plan with no `## Test Plan` section: omit `testPlan` and note `Test plan: missing or malformed` in the run summary. Nothing is repaired, and a test plan in any other shape — an older JSON one included — is never passed.
 
-In WAVE mode, run this step once per ticket and author the results as `plans`, keyed by the ticket's reference: each ticket gets its own `plan`, `criteria` and checked `testPlan` — never one test plan for the whole wave. Keep each ticket's checked TP lines: step 3 after the workflow builds the wave test plan from them.
+In WAVE mode, run this step for every ticket (one `mktemp` call for all files, one turn of writes, one call that runs every check, each behind an `echo "file=<that file>"` line) and author the results as `plans`, keyed by the ticket's reference: each ticket gets its own `plan`, `criteria` and checked `testPlan` — never one test plan for the whole wave. Keep each ticket's checked TP lines: step 3 after the workflow builds the wave test plan from them.
 
 If none found: build proceeds Gate-1-only (Gate 2 skipped with a note). Never refuse to build; never fabricate criteria.
 
@@ -172,6 +172,7 @@ const ISSUE_INPUT = args.issueInput || args.issueNumber || "(none)";  // this ti
 const ISSUE_REQUIRED = String(args.issueRequired) === "false" ? "false" : "true";  // only an explicit false turns it off; anything else fails closed
 const APPLY_CONVENTIONS = String(args.applyConventions) === "false" ? "false" : "true";
 const COMPLIANCE_FRAMEWORKS = /^(?:off|none|[a-z][a-z0-9-]{0,15}(?:,[a-z][a-z0-9-]{0,15}){0,7})$/.test(String(args.complianceFrameworks)) ? String(args.complianceFrameworks) : "off";  // Pre-authoring step 0b; any other shape is no lens
+// the one line compliance_directive() renders, with the validated ids
 const COMPLIANCE_DIRECTIVE = COMPLIANCE_FRAMEWORKS === "off" ? "" : `When the task touches regulated surface (data models, auth flows, logging/observability, payments, IaC, retention), invoke Skill(skill="devflow:compliance") and load references/{id}.md only for the ids in ${COMPLIANCE_FRAMEWORKS} (none: generic controls only); never fabricate guidance for a framework you were not given.`;
 
 // Phase 1: Git setup — the agent owns the process, the branch name included
@@ -673,7 +674,7 @@ return { tickets: WAVE_TICKETS.map(t => results[t] || { ticket: t, ran: false, v
 
 ---
 
-### After the workflow returns — batch decisions at the command boundary (F4)
+### After the workflow returns — batch decisions at the command boundary
 
 A workflow cannot pause mid-run. After the build/wave workflow returns, you (the main model) surface anything that needs a human decision — all at once:
 
@@ -892,4 +893,4 @@ cd "{integration worktree root}" && node "$HOME/.devflow/scripts/verify-evidence
 
 ### Maintenance note
 
-This recipe mirrors the `/implement` + `/code-review` + `/resolve` orchestration.
+This recipe mirrors the `/implement` + `/code-review` + `/resolve` orchestration. When those commands change, update it.
