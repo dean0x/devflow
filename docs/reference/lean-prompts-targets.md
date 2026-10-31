@@ -1,15 +1,15 @@
 # Lean Prompt Targets
 
 The targets of the [lean prompts guide](lean-prompts.md), ranked by token spend.
-The numbers are a snapshot of version 3.11.0 with the first part of the `/implement` cut. Measure again before you start a target.
+The numbers are a snapshot of commit `3bdc4d50`, after version 3.11.0. Measure again before you start a target.
 
 ## How the numbers were measured
 
 - **Bytes**: `wc -c` of the file that an install takes for each build variant key. The keys are `on` (both switches on), `co` (curation off), `cmo` (compliance off) and `both` (both off). The file for a key follows the lookup order in `src/core/assets.ts`. A compiled host is measured in `dist/`. A hand-authored agent or skill is measured in `src/assets/`.
 - **Load per spawn**: the agent body plus the `SKILL.md` of each skill in its `skills:` preload list. The spawn prompt and, for an agent that keeps CLAUDE.md, the CLAUDE.md of the project come on top. Neither is in the number.
-- **Spawns and turns**: real runs of one maintainer over 31 days, from before the agent renames. The old names map to the new ones: Scrutinize to Harden, Simplify to Polish, Learning to Curate, Diagnose to Debug. Turns are medians per spawn. The sample has no turn counts for Fix or Refactor.
+- **Spawns and turns**: the Claude Code session transcripts of one maintainer over 31 days. This data is not public. To collect it again, count the spawns of each agent type and the model calls of each spawn in your own transcripts. Turns are medians per spawn. The sample uses older agent names: Scrutinize is Harden, Simplify is Polish, Learning is Curate, and Diagnose is Debug. The sample has too few turn counts for Fix and Refactor: two spawns each.
 - **Re-read**: load per spawn, times spawns, times median turns, in MB over the sample. It is an index of the spend, not a price.
-- **Always-loaded text**: the listing rows of a default install, built from the shipped frontmatter. A default install has the twelve core plugins, compliance off, and no language plugin. A skill row is `- devflow:<name>: <description>`, and an agent row is `- <Name>: <description> (Tools: <tools>)`. The rows that Claude Code prints can differ by a few bytes.
+- **Always-loaded text**: the rows that list skills and agents in a default install, built from the shipped frontmatter. A default install has the twelve core plugins, compliance off, and no language plugin. A skill row is `- devflow:<name>: <description>`, and an agent row is `- <Name>: <description> (Tools: <tools>)`. The rows that Claude Code prints can differ by a few bytes.
 
 ## Always-loaded text
 
@@ -20,15 +20,15 @@ The numbers are a snapshot of version 3.11.0 with the first part of the `/implem
 | Agent descriptions and tool lists | 20 | 5,619 | Every main turn |
 | Core rules: `security`, `engineering`, `quality`, `reliability`, `context-economy` | 5 | 3,207 | Every main turn, and every turn of each agent that keeps CLAUDE.md |
 | **Total of the fixed text** | | **13,853** | |
-| Ambient session charter, the charter file of the session-start hook | 1 | 3,382 | Every turn after the session start, when ambient mode is on |
-| Per-prompt reminder of the `preamble` hook | 1 | about 280 | Added to each prompt that is not a slash command, so it adds up in a long session |
+| Ambient session charter, the charter file of the session-start hook. The install renders it for the installed plugins, so the installed copy can be smaller. | 1 | at most 3,382 | Every turn after the session start, when ambient mode is on |
+| Per-prompt reminder of the `preamble` hook | 1 | about 280 | Added to each prompt that is not a slash command, when ambient mode is on. It adds up in a long session. |
 
 With compliance on, the `compliance` rule (1,006 bytes) and the `compliance` skill row join the fixed text.
 The fixed text is about 3,500 tokens. A main turn of `/implement` reads about 190,000 cached tokens, so the fixed text is about 2% of a main turn.
 
 Notes for a cut:
 
-- About 1.9 KB of the agent rows is tool text. Code, Fix, Refactor, Harden, Polish and Research each list the tools that they deny. A change to an allow list changes the tool policy, so it needs a plan.
+- The tool text of the agent rows is 2,033 bytes. Code, Fix, Refactor, Harden, Polish and Research each list the tools that they deny, and these six lists are 1,554 bytes of it. A change to an allow list changes the tool policy, so it needs a plan.
 - The longest agent rows are Polish (509 bytes), Explore (457), Harden (420), Refactor (413) and Research (403). The longest skill rows are `patterns` (219), `software-design` (200), `dependency-research` (198), `boundary-validation` (184) and `testing` (176).
 - A description is what makes a skill or an agent load. Keep the cases where it applies, and cut what repeats the body.
 
@@ -61,17 +61,17 @@ The Code agent carries more re-read volume than all other agents together. Its p
 
 ## Commands
 
-The main session re-reads a command on each of its turns. The sample counts main turns for `/implement` only: 27 on the typical path.
+The main session re-reads a command on each of its turns. Main turns are known for `/implement` only. A static count of its typical path gives 27 main turns. The main cache reads of the sample suggest about 40 to 46. Thus its re-read is 61 to 104 MB.
 
 | Command | on | co | cmo | both | Runs in the sample | Re-read MB |
 |---|---|---|---|---|---|---|
 | dynamic-build | 105,421 | 102,034 | 102,429 | 99,042 | not counted | not measured |
 | resolve | 50,283 | 47,253 | 43,936 | 40,890 | 10 | not measured |
-| implement | 43,478 | 40,794 | 44,856 | 42,172 | 52 | 61 |
+| implement | 43,478 | 40,794 | 44,856 | 42,172 | 52 | 61 to 104 |
 | dynamic-tickets | 41,146 | 36,999 | 41,294 | 37,147 | not counted | not measured |
 | plan | 36,222 | 33,424 | 36,055 | 33,257 | 5 | not measured |
 | dynamic-plan | 35,740 | 31,450 | 35,740 | 31,450 | not counted | not measured |
-| code-review | 34,062 | 31,487 | 31,269 | 28,694 | 24 | not measured |
+| code-review | 34,062 | 31,487 | 31,269 | 28,694 | 10 full reviews; 14 more runs with 1 to 3 Review agents | not measured |
 | bug-analysis | 23,724 | 20,130 | 23,193 | 19,599 | not counted | not measured |
 | release | 22,297 | 19,141 | 17,199 | 14,043 | not counted | not measured |
 | debug | 18,340 | 15,591 | 18,340 | 15,591 | not counted | not measured |
@@ -134,17 +134,17 @@ Rank by re-read volume. A target with a blank turn count ranks by its load and i
 | 4 | `testing` skill | at least 210 | Preloaded by Code and Fix. |
 | 5 | Core rules | at least 206 | In every turn of Code, Fix, Refactor, Harden, Polish, Design, Debug and Review, and in every main turn on top. |
 | 6 | `apply-decisions` skill | at least 155 | Preloaded by ten agents. |
-| 7 | Harden agent, `quality-gates` and `software-design` | about 132 | The most turns per spawn (96), on opus. `software-design` is shared with Polish. |
+| 7 | Harden agent, `quality-gates` and `software-design` | about 133 | The most turns per spawn (96), on opus. `software-design` is shared with Polish. |
 | 8 | `worktree-support` skill | at least 131 | Preloaded by seventeen agents. |
 | 9 | Review agent, its methodology and focus skills | about 122 | Eleven spawns for each full review run, on opus at high effort. |
-| 10 | `apply-feature-knowledge` skill | 104 | Preloaded by eight agents. |
-| 11 | Knowledge agent and `feature-knowledge` skill | 103 | A 17,282-byte preload, the largest `SKILL.md`. |
-| 12 | `/implement` command, second part | 61 | Already in progress. The main session holds it for 27 turns. |
-| 13 | Curate agent | 54 | Runs on opus once for each session that has a curation queue. |
-| 14 | Git agent body | 46 | Many short spawns, on Haiku: keep its "finish and verify" text. |
-| 15 | Fix agent | not measured | 23,232 bytes per spawn. It shares the `_code` partial and most of the Code preloads. |
+| 10 | `/implement` command | 61 to 104 | The main session holds it for 27 to 46 turns of each run. |
+| 11 | `apply-feature-knowledge` skill | 104 | Preloaded by eight agents. |
+| 12 | Knowledge agent and `feature-knowledge` skill | 103 | A 17,282-byte preload, the largest `SKILL.md`. |
+| 13 | Test agent and `qa` skill | 70 | 88 spawns of 46 turns. |
+| 14 | Curate agent | 54 | Runs on opus once for each session that has a curation queue. |
+| 15 | Git agent body | 46 | Many short spawns, on Haiku: keep its "finish and verify" text. |
 
-After these: Test and `qa` (70), Design with its skills (46), Validate (40), Polish (33), the always-loaded descriptions, the command partials, and the large commands. The large commands rank low only because the sample has no turn counts for them. Count their main turns before you rank them.
+The table ranks a range by its top value. After these: Design with its skills (46), Validate (40), Polish (33), the always-loaded descriptions, the command partials, and the large commands. The Fix agent has no turn count. Its load per spawn is 23,232 bytes, and it shares the `_code` partial and most of the Code preloads. The large commands rank low only because the sample has no turn counts for them. Count their main turns before you rank them.
 
 ## Target groups
 
@@ -152,10 +152,11 @@ Each group is one pull request. No two groups cut the same file. A group that ch
 
 | Group | Files | Cuts that fit |
 |---|---|---|
+| Implement | the `implement` host text and its reference files in the `agent-references` skill | Rare branches to references only with run counts. Scripts that print the next action. Turn audit. |
 | Code family | agents `_partials/_code.mds`, `code.mds`, `fix.mds`, `refactor.mds` | Subtract repeats and text that judgment covers. Cut spawn text that the body repeats. Turn audit. |
-| Code-path skills | skills `test-driven-development`, `testing`, `git` (the `SKILL.md` only) | Subtract. Move rare detail to the existing reference files. Check that each preload is one that the agent reads. Git runs on Haiku, so keep its "finish and verify" text. |
+| Code-path skills | skills `test-driven-development`, `testing`, `git` (the `SKILL.md` only) | Subtract. Move rare detail to the reference files that exist. Check that each preload is one that the agent reads. The Git agent runs on Haiku and preloads `git`, so keep its "finish and verify" text. |
 | Spawn-wide skills | skills `worktree-support`, `apply-decisions`, `apply-feature-knowledge` | Say it once. Small files with the largest spread: every byte loads in nearly every spawn. |
-| Core rules | rules `security`, `engineering`, `quality`, `reliability`, `context-economy` | Subtract. A rule line that an agent's core-rules digest quotes changes only with that digest, so keep those lines or change the digest in the same pull request. |
+| Core rules | rules `security`, `engineering`, `quality`, `reliability`, `context-economy` | Subtract. Some agents quote a rule line in their core-rules digest. Keep those lines, or change the digest in the same pull request. |
 | Review | agent `review.mds`, skill `review-methodology`, the ten focus skills, the `code-review` host text | Subtract. No severity filter in the review report: filter in a second pass. Capital emphasis: 7 hits in the agent. |
 | Harden and Polish | agents `harden.mds`, `polish.md`, skills `quality-gates`, `software-design` | Subtract. Turn audit: Harden runs the most turns per spawn. |
 | Knowledge | agent `knowledge.mds`, skill `feature-knowledge` | Subtract. Move rare detail of the skill to reference files. |
@@ -163,9 +164,9 @@ Each group is one pull request. No two groups cut the same file. A group that ch
 | Git agent | agent `git.mds` | Subtract. Keep "finish and verify" text on Haiku. |
 | Curate | agent `curate.md` | Subtract. Rare branches to references only if their read rate is low. |
 | Plan path | agents `design.mds`, `explore.md`, skills `gap-analysis`, `design-review`, the `plan` host text | Subtract. Turn audit. |
-| Command partials | the command partials shared by more than one family: `_settings`, `_knowledge`, `_decisions`, `_evidence_policy`, `_docs_root`, `_compliance`, `_tracker`, `_plan_contract`, `_publication` | Cut each partial once, after the `/implement` second part merges. Scripts that print the next action or their own fail-closed line. |
+| Command partials | the command partials shared by more than one family: `_settings`, `_knowledge`, `_decisions`, `_evidence_policy`, `_docs_root`, `_compliance`, `_tracker`, `_plan_contract`, `_publication` | Cut each partial once, in this group only. Scripts that print the next action or their own fail-closed line. |
 | Resolve | the `resolve` host text, agent `triage.mds` | Subtract. Rare escalation arms to references. Scripts that print the next action. |
 | Dynamic family | the four dynamic commands and `_engine`, `_wave`, `_factory`, `_preamble`, `_roster`, `_ticket_template` | Subtract. Capital emphasis: 19 hits in `dynamic-build`. Count main turns first. |
 | Other targets | agents Validate, Evaluate, Synthesize, Skim, Research, Debug, Tracker; the other command hosts; the skills that no agent preloads; the hook text | One target at a time, by measured spend. Debug has 11 capital-emphasis hits. |
 
-The `/implement` second part owns the `implement` host text and its reference files. The Code family and the Code-path skills can share one pull request when the review stays in one round, because one number, the Code load per spawn, measures both.
+The Code family and the Code-path skills can share one pull request when the review stays in one round. One number, the Code load per spawn, measures both.

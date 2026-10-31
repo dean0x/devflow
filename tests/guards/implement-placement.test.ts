@@ -23,7 +23,7 @@
  *   - the section probe renames one heading and asserts that the collector reports each row under it as misplaced;
  *   - the absence probe feeds a build that holds an item to the collector for a build that has none.
  *
- * Rows 17 to 19 of the table need the skill folder and are not in this file.
+ * Row 17 of the table, the settings line, is pinned in tests/commands/settings-partial.test.ts.
  *
  * Rows 18a to 18d extend the table with four sentences of Phases 9 to 11 that carry a fail-closed rule: the capture of
  * the Git agent's lines (the `TRACEABILITY: DEGRADED` lines among them), the Phase 9 stop arm, and the outcome of the

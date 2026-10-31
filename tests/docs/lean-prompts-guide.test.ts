@@ -79,7 +79,7 @@ const LIVE_CHECK_HEADING = 'Skill folders and compaction re-attach';
 
 /** The rows of each table when it was written. A deleted row lowers the count and fails the guard. */
 const MIN_NEVER_CUT_ROWS = 18;
-const MIN_CORE_RULES = 6;
+const MIN_CORE_RULES = 5;
 
 // ── Parsing ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -292,7 +292,13 @@ function targetsDefects(targets: string): string[] {
   if (table === undefined) return [...defects, 'the ranked table is missing'];
   defects.push(...table.shapeDefects, ...numberingDefects(table));
   if (table.rows.length < MIN_RANKED_TARGETS) defects.push(`the ranked table holds ${table.rows.length} targets, expected at least ${MIN_RANKED_TARGETS}`);
-  if (parseTable(sectionBody(targets, 'Target groups') ?? '') === undefined) defects.push('the target groups table is missing');
+  // A range ranks by its top value, so each row's volume is the largest number in its cell.
+  const volumes = table.rows.map(row => Math.max(...[...(row[2] ?? '').matchAll(/\d[\d,]*/g)].map(match => Number(match[0].replace(/,/g, '')))));
+  volumes.forEach((volume, index) => {
+    if (index > 0 && volume > (volumes[index - 1] ?? 0)) defects.push(`rank ${index + 1} has a larger volume than rank ${index}`);
+  });
+  const groups = parseTable(sectionBody(targets, 'Target groups') ?? '');
+  if (groups === undefined || !sameCells(groups.header, ['Group', 'Files', 'Cuts that fit'])) defects.push('the target groups table is missing');
   return defects;
 }
 
@@ -380,6 +386,11 @@ describe('the target inventory', () => {
     const ranked = sectionBody(TARGETS, 'Ranked targets') ?? '';
     const lastRow = ranked.split('\n').filter(line => line.startsWith('| 15 |'))[0] ?? '';
     expect(targetsDefects(seedOnce(TARGETS, `${lastRow}\n`, ''))).not.toEqual([]);
+    expect(targetsDefects(seedOnce(TARGETS, '| Group | Files | Cuts that fit |', 'Group, Files, Cuts that fit'))).toContain('the target groups table is missing');
+  });
+
+  it('shows a rank out of order as a defect', () => {
+    expect(targetsDefects(seedOnce(TARGETS, '| 15 | Git agent body | 46 |', '| 15 | Git agent body | 99 |'))).toContain('rank 15 has a larger volume than rank 14');
   });
 });
 
@@ -434,7 +445,7 @@ describe('the other parts show a loss as a defect', () => {
   it('a missing section, a lost architecture part, a lost bound and a lost cut-record clause', () => {
     expect(sectionDefects(seedOnce(GUIDE, '## Turns\n', '## Turn list\n'))).toContain('missing section "Turns"');
     expect(architectureDefects(seedOnce(GUIDE, '### Skill folders\n', '### Folders\n'))).toContain('the architecture part lacks "Skill folders"');
-    expect(architectureDefects(seedOnce(GUIDE, 'the prefix must be at most 16,660 bytes', 'the prefix must be short'))).not.toEqual([]);
+    expect(architectureDefects(seedOnce(GUIDE, 'The prefix must be at most 16,660 bytes', 'The prefix must be short'))).not.toEqual([]);
     expect(tokensDefects(seedOnce(GUIDE, '| Agent prompt |', '| Spawn |'))).toContain('the load table lacks "Agent prompt"');
     expect(tokensDefects(seedOnce(GUIDE, '](lean-prompts-targets.md)', '](targets.md)'))).toContain('the guide does not link to the target inventory');
     expect(targetRuleDefects(seedOnce(GUIDE, 'All other ceilings only fall.', 'Other ceilings may move.'))).not.toEqual([]);

@@ -1,6 +1,6 @@
 # Lean Prompts
 
-How to cut a prompt without losing what it guarantees.
+How to cut a prompt and keep what it guarantees.
 A prompt is a command, an agent or a skill that devflow ships.
 A lean prompt holds the rules that its run needs, in the fewest bytes and the fewest turns.
 A person who edits a prompt by hand can follow this guide with the repository build and test commands alone.
@@ -8,7 +8,7 @@ The ranked list of targets is in [Lean prompt targets](lean-prompts-targets.md).
 
 ## What to cut and where the tokens go
 
-Most of the spend is cache reads. Each turn sends the whole context again, so the cost of a text is its bytes times the turns that hold it, times the number of times that it loads.
+Most of the spend is cache reads. Each turn sends the whole context again. Thus the cost of a text is its bytes, times the turns that hold it, times its loads.
 
 | Load | What it holds | Who re-reads it |
 |---|---|---|
@@ -29,11 +29,11 @@ Choose targets in this order:
 ## Rules for every target
 
 1. No fixed size target. The measure is the bytes that a typical run reads in each build variant key, plus the turns per run. The typical-run read is the prompt plus the files that the run reads on its typical path. Neither may grow in any key.
-   - The compiled ceiling of one file may rise only when the typical-run read of that key falls by more. The pull request body gives the numbers for each key and the reason, and the ceiling's manifest row records the exception.
+   - The compiled ceiling of one file may rise only when the typical-run read of that key falls by more. The pull request body gives the numbers for each key and the reason. The description of the ceiling in `tests/fixtures/numeric-floors.json` records the same numbers.
    - All other ceilings only fall.
 2. No new structure, such as step maps, state tables, step graphs or step files, unless its measured gain is larger than its bytes and turns.
 3. A rule that must always hold moves into a script or a hook, not into stronger words.
-4. Keep "finish and verify" text for an agent that runs on a smaller model, such as Haiku, or Sonnet at low or medium effort. Its `model` and `effort` frontmatter say which.
+4. Keep "finish and verify" text for an agent on a smaller model: Haiku, or Sonnet at low or medium effort. Its `model` and `effort` frontmatter say which.
 5. A text-only cut uses the cut rules below and one independent audit for each pull request. A change of structure or of a contract needs a plan first.
 
 ## Cut rules
@@ -52,7 +52,7 @@ Follow these steps for each cut commit.
    - A change of wording only: move the check to a snapshot, or delete it and record the reason.
    - A failure that does not come from this diff.
    - A size limit.
-7. Audit the pull request. One independent reader checks the diff against every lens below. The reader gets the diff, the never-cut items, the cut-log rows and the lenses. The author of the cut is not the reader. The author decides each finding. A high finding restores the text before the merge.
+7. Audit the pull request. One independent reader checks the diff against every lens below. The reader gets the diff, the never-cut items, the cut-log rows and the lenses. The author of the cut is not the reader. The author decides each result of the audit. A high result restores the text before the merge.
 
 The audit lenses:
 
@@ -90,15 +90,15 @@ The table lists the never-cut items of the `/implement` command. A never-cut ite
 | 1 | Principle 1, orchestration only. The main session runs no tests, builds or fixes. "Spawn X" means call the Agent tool. The text names the inline calls. | Principles, item 1. Byte-equal. | Pinned in `tests/evidence/implement-flow.test.ts`. Seed: delete "never does work itself (no tests, builds or fixes)". The collector must report a defect. `tests/guards/implement-resolve-levels.test.ts` also pins the title "1. **Orchestration only**". |
 | 2 | Principle 1, inline calls. The text names the fresh-base resolver calls, the Phase 10 and Phase 11 pushes, the Phase 10 ci-wait call and the Phase 11 publish call. | Same item as row 1. | Pinned in `tests/evidence/implement-flow.test.ts`, in the resolver clause and in the push and ci-wait clause. Seed: delete the resolver clause. The collector must report a defect. |
 | 3 | Principle 2, honest reporting. Display agent outputs directly. | Principles, item 2. Byte-equal. | Pinned in `tests/guards/implement-placement.test.ts`. Seed: delete "Display agent outputs directly". The probe must fail. |
-| 4 | Principle 3, loop limits. Max 2 validation retries, max 2 alignment fix iterations and max 2 QA retries before the run escalates to the user. The CI gate allows at most 3 waits and 2 fixes. | Principles, item 3. Byte-equal. | Pinned in `tests/evidence/implement-flow.test.ts`. Seed: delete "at most 3 waits and 2 fixes". The probe must fail. |
+| 4 | Principle 3, loop limits. Max 2 validation retries, max 2 alignment fix iterations and max 2 QA retries before the run escalates to the user. The CI gate allows at most 3 waits and 2 fixes. | Principles, item 3. Byte-equal. | Pinned in `tests/evidence/implement-flow.test.ts`. Seed: delete "the CI gate allows at most 3 waits and 2 fixes". The probe must fail. |
 | 5 | Principle 4, CI awareness. Test-plan evidence is recorded under every strategy. | Principles, item 4. Byte-equal. | Pinned in `tests/evidence/implement-flow.test.ts`. Seed: delete "is recorded under every strategy". The probe must fail. |
 | 6 | Error Handling rule. Report the phase, the agent type and the error. Offer retry, investigate or escalate. | Error Handling. Byte-equal. | Pinned in `tests/guards/implement-placement.test.ts`. Seed: delete "report the phase, agent type and error". The probe must fail. |
 | 7 | Empty-input rule. With empty input, write a one-line description and send it as the setup-task description. The rule stays unchanged. | Phase 1 intake. | Pinned in `tests/guards/implement-placement.test.ts`. Seed: delete "Write the description yourself". The probe must fail. |
 | 8 | Base-branch check. The captured branch must pass the setup check before the base resolves. | Phase 1 intake, in the same order. | Pinned in `tests/evidence/implement-flow.test.ts`, in the setup-check clause. Seed: delete "stop unless it passes the setup check". The probe must fail. |
-| 9 | Handoff file. Delete it once the PR exists. | The Handoff Protocol paragraph, and the cleanup step that runs after Phase 9. | Pinned in `tests/guards/handoff-sections.test.ts` and `tests/evidence-policy/ticket-gate.test.ts`. Seed: delete "once the PR exists". The probe must fail. |
+| 9 | Handoff file. Delete it once the PR exists. | Phase 2, the Handoff Protocol paragraph. The deletion runs after Phase 9. | Pinned in `tests/guards/handoff-sections.test.ts`, `tests/evidence-policy/ticket-gate.test.ts` and `tests/guards/implement-placement.test.ts`. Seed: delete "once the PR exists". The probe must fail. |
 | 10 | Phase 5 alignment-fix counter, limit and loop-back (numbered steps 2 to 4). | Phase 5. | Pinned in `tests/guards/implement-resolve-full-fences.test.ts`: the counter, the two-attempt test, the loop-back line and the report step, each once. Seed: delete the step "Increment `alignment_fix_count`". The probe must fail. |
 | 11 | DECISIONS_CONTEXT on the ci-fix spawn, curation-on arm. | Phase 10, ci-fix spawn. | Pinned in `tests/guards/implement-placement.test.ts`, in the builds that hold a decisions load. Seed: delete the field from the on arm. The probe must fail. |
-| 12 | Fresh-base fail-closed rules. Output other than one BASE_REF line with exit=0 counts as `NOTE=stop` with REASON=resolver-unavailable. The stop line stops the run. The run removes the temp file on exit. | Phase 1 fresh base. | Pinned in `tests/guards/implement-placement.test.ts`, in the clause "counts as `NOTE=stop`", the stop line and the temp-file trap. `tests/guards/base-ref-guard.test.ts` pins the resolver-unavailable fix row. `tests/evidence/implement-flow.test.ts` pins the re-validation reading. Seed: delete the clause "counts as `NOTE=stop`". The probe must fail. |
+| 12 | Fresh-base fail-closed rules. Output other than one BASE_REF line with exit=0 counts as `NOTE=stop` with REASON=resolver-unavailable. The stop line stops the run. The run removes the temp file on exit. | The **Fresh base** paragraph under Load Feature Knowledge, before Phase 2. | Pinned in `tests/guards/implement-placement.test.ts`, in the clause "counts as `NOTE=stop`", the stop line and the temp-file trap. `tests/guards/base-ref-guard.test.ts` pins the resolver-unavailable fix row. `tests/evidence/implement-flow.test.ts` pins the re-validation reading. Seed: delete the clause "counts as `NOTE=stop`". The probe must fail. |
 | 13 | Test-plan check. Exit 0 passes. Otherwise rewrite the section once, check again, and drop the section if it still fails. A required policy asks. A standard policy does not ask. | Phase 1 intake. | Pinned in `tests/guards/implement-placement.test.ts`, in the four clauses: rewrite once, drop the section, a required policy asks and a standard policy does not ask. Seed: delete "rewrite the section once". The probe must fail. |
 | 14 | Test-plan scenario text. A scenario holds no `#`, `@` or `/` (no issue reference, mention, closing keyword or URL), because the lines reach the PR body. | Phase 1 test plan. | Pinned in `tests/guards/implement-placement.test.ts`. Seed: delete "holds no `#`, `@` or `/`". The probe must fail. |
 | 15 | Compliance directive. Pass it to every Code and Fix spawn. | Phase 1, the settings and policy step. | Pinned in `tests/guards/implement-placement.test.ts`, in the pass sentence. `tests/guards/compliance-injection.test.ts` pins the directive clause. Seed: delete the pass sentence. The probe must fail. |
@@ -108,7 +108,7 @@ The table lists the never-cut items of the `/implement` command. A never-cut ite
 
 ## Core global rules
 
-The global rules of `/implement` bind the whole run. They are the Principles, the Error Handling rule, and the rule for a failed reference read. Each rule has a mark. A rule marked **Yes** is never cut, and its text moves byte-equal. A new global rule joins this list with its mark, and with its guard probe, in the commit that adds it.
+The global rules of `/implement` bind the whole run. They are the Principles and the Error Handling rule. Each rule has a mark. A rule marked **Yes** is never cut, and its text moves byte-equal. A new global rule joins this list with its mark, and with its guard probe, in the commit that adds it.
 
 | No. | Rule | Never-cut | Reason |
 |---|---|---|---|
@@ -117,7 +117,6 @@ The global rules of `/implement` bind the whole run. They are the Principles, th
 | 3 | Principle 3, loop limits | Yes | Each loop and each wait has a bound. See row 4 of the never-cut table. |
 | 4 | Principle 4, CI awareness | Yes | The test-plan evidence exists under every strategy. See row 5 of the never-cut table. |
 | 5 | Error Handling | Yes | An error report names the phase, the agent type and the error, and offers retry, investigate or escalate. See row 6 of the never-cut table. |
-| 6 | Failed-read rule: when a read of a reference fails, apply no part of it and stop or fall back as the step says. | Yes | A silent failed read would skip a branch. |
 
 ## Architecture
 
@@ -131,7 +130,7 @@ Each serial file read adds one turn, and each turn sends the full cached context
 
 A rare branch is a path that most runs never take. A branch is rare when fewer than half of real runs enter it. Only a rare branch moves to a reference file. A candidate with no run data stays in the core file, and the cut log records the reason.
 
-A run reads a reference file only when it takes that branch, and reads it once. After the read, it returns to the core step. The halt and the counter check of a fix arm stay in the core step. A relative path resolves against the working directory, not against the skill folder, so a step that enters a reference names its full path line.
+A run reads a reference file only when it takes that branch, and reads it once. After the read, it returns to the core step. The halt and the counter check of a fix arm stay in the core step. When a read of a reference fails, the step applies no part of it, and stops or falls back as the step says. A relative path resolves against the working directory, not against the skill folder. Thus a step that enters a reference names its full path line.
 
 ### Skill folders
 
@@ -140,7 +139,7 @@ The build can carry a command as a skill folder: a core `SKILL.md` and its refer
 - The registry `WORKFLOW_FOLDERS` in `src/core/mds-variants.ts` lists each folder. It is empty until a command converts.
 - A folder host declares `output-dir: dist/workflows`. The build treats it as the `workflow-skill` host variant, and writes one complete folder for each variant key.
 - The build id is the first 12 hex digits of a SHA-256 hash over the compiled files of the folder. The build writes it as ` [build <id>]` at the end of the first heading of each stamped file. A run that reads a reference with another id stops.
-- After a compaction, Claude Code re-attaches an invoked skill and keeps its first 20,000 characters. For this reason, the prefix must be at most 16,660 bytes: 20,000 characters, less 400 for the notice and the header path, times 0.85. The settings text and the argument binding stay in the prefix.
+- After an in-process compaction, Claude Code re-attaches an invoked skill as exactly 20,000 characters: a header with the skill path, the start of the body, and a 100-character notice. The prefix is the start of `SKILL.md` that must come back after that cut. The prefix must be at most 16,660 bytes: 20,000 characters, less 400 for the notice and the header, times 0.85. The settings text and the argument binding stay in the prefix.
 
 The [live-check results](platform-assumptions.md#skill-folders-and-compaction-re-attach) record the platform facts.
 
