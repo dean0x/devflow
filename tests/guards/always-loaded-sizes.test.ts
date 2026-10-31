@@ -16,11 +16,17 @@ import { DEVFLOW_PLUGINS, type PluginDefinition } from '../../src/core/plugins.j
 /** Sum of the description bytes of the default-install catalog rows. */
 const CATALOG_DESCRIPTION_MAX_BYTES = 6_267
 
-/** The single-line `description` value of a frontmatter block, unquoted, or null when it has none. */
+/**
+ * The single-line `description` value of a frontmatter block, unquoted, or null when it has none. A block
+ * scalar (`>` or `|`) or a value wrapped onto the next line is null too, so the guard reports it and no
+ * row escapes the count.
+ */
 function description(text: string): string | null {
   const frontmatter = /^---\n([\s\S]*?)\n---/.exec(text)?.[1] ?? ''
-  const value = /^description:[ \t]*(.+)$/m.exec(frontmatter)?.[1]
-  if (value === undefined) return null
+  const match = /^description:[ \t]*(.+)\n?(.*)$/m.exec(frontmatter)
+  if (match === null) return null
+  const [, value, next] = match
+  if (/^[>|]/.test(value) || /^[ \t]/.test(next)) return null
   if (value.startsWith('"') && value.endsWith('"')) return JSON.parse(value) as string
   if (value.startsWith("'") && value.endsWith("'")) return value.slice(1, -1).replace(/''/g, "'")
   return value
@@ -80,5 +86,9 @@ describe('the always-loaded catalog text sits under its ceiling (#706)', () => {
     const [label] = rows[0]
     const bare: ReadonlyArray<readonly [string, string]> = [[label, '---\nname: x\n---\nbody'], ...rows.slice(1)]
     expect(collectCatalogDefects(bare, Number.MAX_SAFE_INTEGER)).toEqual([`${label} has no single-line description`])
+    for (const form of ['description: >-\n  folded\n  text', 'description: |\n  literal', 'description: wrapped\n  onto two lines']) {
+      const block: ReadonlyArray<readonly [string, string]> = [[label, `---\nname: x\n${form}\n---\nbody`], ...rows.slice(1)]
+      expect(collectCatalogDefects(block, Number.MAX_SAFE_INTEGER), form).toEqual([`${label} has no single-line description`])
+    }
   })
 })

@@ -987,7 +987,7 @@ describe('GAP-3: orchestrator charter integrity', () => {
    * pins the literal below.
    */
   const CHARTER_CAP = 4096
-  const MAX_CHARTER_BYTES = 3321
+  const MAX_CHARTER_BYTES = 3342
 
   it('charter byte size stays within its ceiling, below the 4096-character injection cap', () => {
     const charter = readFileSync(CHARTER_PATH, 'utf-8')

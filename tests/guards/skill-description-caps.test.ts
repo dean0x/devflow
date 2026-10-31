@@ -123,6 +123,9 @@ export const FORM_PENDING: readonly string[] = [
 /** Named collector: each classified skill whose description does not open with the form of its set. */
 export function collectDescriptionFormDefects(skills: ReadonlyArray<readonly [string, string]>, pending: readonly string[]): string[] {
   const out: string[] = []
+  for (const name of pending) {
+    if (!AGENT_INTERNAL.includes(name)) out.push(`${name}: in FORM_PENDING but not agent-internal — only an agent-internal skill may wait`)
+  }
   for (const [name, text] of skills) {
     const form = AGENT_INTERNAL.includes(name) ? AGENT_INTERNAL_FORM : USER_TRIGGER.includes(name) ? USER_TRIGGER_FORM : null
     const description = parseDescription(text)
@@ -346,6 +349,9 @@ describe('skill descriptions stay within their audience cap (D-SKILL-DESCRIPTION
     expect(collectDescriptionFormDefects([[internal, skillWith('description: Use when x.')]], [])).toEqual([])
     expect(collectDescriptionFormDefects([[trigger, skillWith('description: Use when x.')]], [])).toEqual([`${trigger}: does not open with "This skill should be used when "`])
     expect(collectDescriptionFormDefects([[internal, skillWith('description: Use when x.')]], [internal])).toEqual([`${internal}: opens with "Use when " — remove it from FORM_PENDING`])
+    expect(collectDescriptionFormDefects([[trigger, skillWith('description: Use when x.')]], [trigger])).toEqual([
+      `${trigger}: in FORM_PENDING but not agent-internal — only an agent-internal skill may wait`,
+    ])
   })
 })
 
