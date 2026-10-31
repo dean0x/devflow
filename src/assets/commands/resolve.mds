@@ -29,7 +29,7 @@ Triage every review issue through the blast-radius disposition matrix, fix FIX_N
 
 ### Phase 0: Worktree Discovery & Pre-Flight
 
-**Fewest turns.** Send calls that need no output of each other in one message: the Step 0b PR body fetch and the Step 0c listing with the Step 0d settings, `resolve-root.cjs` and evidence-policy scripts and the `RESOLUTION_TS` mint; then the index Reads, with the gate-level directory print at `standard` or `lean`; then the levels reference Read with the KB heading lists. Step 0d runs `resolve-root.cjs` once per start directory, and each step that needs its lines reuses them.
+**Fewest turns.** Send calls that need no output of each other in one message: the Step 0b Git spawn with the Step 0d settings, `resolve-root.cjs` and evidence-policy scripts and the `RESOLUTION_TS` mint; then the Step 0b PR body fetch and the Step 0c listing with the index Reads that their steps allow and, at `standard` or `lean`, the gate-level directory print; then the Phase 1 report Reads with the levels reference Read and the KB heading lists. Step 0d runs `resolve-root.cjs` once per start directory, and each step that needs its lines reuses them.
 
 #### Step 0a: Discover Worktrees
 
@@ -799,6 +799,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 <!-- compliance:off -->
 3. **Local evidence** - Nothing is posted: test-plan evidence is re-verified (≤1 Test agent) and verified into a local result file only when this run moved the head (Steps 9b-0, 9b-3); merge readiness is written to a local file on every cycle (Phase 9c)
 <!-- compliance:end -->
+
 ## Output Artifact
 
 Written in Phase 5 to `{TARGET_DIR}/resolution-summary.md`:

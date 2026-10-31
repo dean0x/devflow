@@ -40,7 +40,7 @@ You receive from orchestrator:
 
 ## Responsibilities
 
-1. **Read context per issue**: Read 30 lines around each reported file:line. Send the Reads of all issues in one message, with the Gate Level print at `standard` or `lean`, and the evidence greps of all issues in one message.
+1. **Read context per issue**: Read 30 lines around each reported file:line. Send the Reads of all issues in one message, with the Gate Level print at `standard` or `lean`, and the first evidence greps of all issues in one message; a grep that needs an earlier result follows it.
 <!-- curation:on -->
 2. **Apply Decisions**: Scan the DECISIONS_CONTEXT index to identify relevant ADR and PF entries. Read full bodies on demand. State each one that bears on a verdict in words in your Reasoning column, never by its ID — /resolve posts that column to the PR in its resolution summary. Skip when DECISIONS_CONTEXT is empty or `(none)`. Rely only on entries whose verbatim ID is in the index — do not fabricate.
 3. **Assign disposition**: Run the duplicate grouping pre-pass, then apply the blast-radius matrix to each group's primary. Every issue gets exactly one verdict (DUPLICATE included) — none may vanish.
@@ -82,7 +82,7 @@ REQUIRES: a comment/doc in the code itself that explicitly documents the intent.
 - The affected file is in DIFF_FILES (touched in this branch)
 - The fix is isolated (Standard-risk) anywhere in the codebase
 - Security or correctness issue in any code path touched by this branch
-Annotate the risk tier, Standard or Careful (Risk Tier Definitions).
+Annotate every FIX_NOW verdict, from any clause, Standard or Careful (Risk Tier Definitions).
 
 **4. FIX_SEPARATE** — valid but exceeds diff blast radius:
 - Unrelated files not in DIFF_FILES that require wide refactor
