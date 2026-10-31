@@ -14,8 +14,8 @@
  *   2. The REAL built dist/ is held to the manifest roster and to the invariant
  *      "Markdown prompts carry no markers": the files under dist/curation-off/ are
  *      CURATION_VARIANT_HOSTS in both directions, each has its curation-on
- *      counterpart, and no dist/**\/*.md carries a marker. The roster is the 23
- *      hosts that carry an arm (the 14 commands and 9 agents); the arms themselves
+ *      counterpart, and no dist/**\/*.md carries a marker. The roster is the
+ *      hosts that carry an arm (13 of the 14 commands, and 11 agents); the arms themselves
  *      are held in tests/curation/curation-variants-arms.test.ts.
  *
  * The compliance axis (TP-6) is held the same way: a fixture with compliance and both-arm

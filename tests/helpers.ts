@@ -670,7 +670,7 @@ export function collectCodeSpawnSites(file: string, text: string, agentType?: st
 
 /**
  * Named collector: the agent types the workflow preamble lists as valid for `agent()` calls — the one
- * sentence "Valid `agentType` values: A, B, C." that every dynamic host carries. Returns null when the
+ * sentence "Valid `agentType` values: A, B, C." that every Workflow host carries. Returns null when the
  * text holds no such sentence, so a caller can tell a missing list from an empty one. The hyphen of a Code
  * variant joins its two words.
  */

@@ -12,7 +12,7 @@
  *
  * Three places state the protocol and must agree: the Code agent (its HANDOFF_FILE input, orientation
  * read, handoff step and Output template), the `**Handoff Protocol**` paragraph of `/implement`, and
- * the handoff convention that the four dynamic commands share through `authoring_preamble()`. The
+ * the handoff convention that the three Workflow hosts share through `authoring_preamble()`. The
  * persistence clauses `tests/evidence-policy/ticket-gate.test.ts` pins stay byte-identical.
  *
  * Each arm runs through a named collector, and the known-bad probes feed the same collectors.
@@ -23,7 +23,7 @@ import { describe, it, expect } from 'vitest'
 import { ensurePrReadyReference, readAgentReference, requireDistFile, resolveAgentSource, resolveVariantOffSource } from '../helpers.js'
 
 const SECTION_HEADING = '## Phase {N} Implementation Summary'
-const DYNAMIC_HOSTS = ['dynamic-build', 'dynamic-plan', 'dynamic-profile', 'dynamic-tickets'] as const
+const DYNAMIC_HOSTS = ['dynamic-build', 'dynamic-plan', 'dynamic-tickets'] as const
 
 /**
  * The compliance-off builds of /implement (#648): compliance off with curation on, and with curation off. The handoff
@@ -126,7 +126,7 @@ describe('the Code agent writes its own capped section and reads only the one be
     for (const paragraph of off) expect(paragraph, 'a compliance-off build words the protocol as the on build does').toBe(on)
   })
 
-  it('every dynamic command states the same convention through the shared preamble', () => {
+  it('every Workflow host states the same convention through the shared preamble', () => {
     for (const host of DYNAMIC_HOSTS) {
       const convention = handoffConvention(requireDistFile(`${host}.md`))
       expect(convention.length, `${host}: the convention moved`).toBeGreaterThan(300)

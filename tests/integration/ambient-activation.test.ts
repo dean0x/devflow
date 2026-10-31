@@ -76,7 +76,7 @@ describe.skipIf(skipReason !== null)('devflow ambient plan handoff', () => {
   it('normal prompt — orchestrator reminder does not trigger a skill invocation', async () => {
     const result = await runClaudeStreaming(ctx, 'what does the config module do?', {
       timeout: 20000,
-      // A normal prompt gets the 2-line orchestrator reminder — it must steer toward
+      // A normal prompt gets the one-line orchestrator reminder — it must steer toward
       // delegation without auto-invoking any devflow workflow skill.
       systemPrompt: REMINDER_TEMPLATE,
     });
