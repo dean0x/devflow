@@ -878,7 +878,7 @@ git -C "{integration worktree root}" push origin HEAD; echo "exit=$?"
 cd "{integration worktree root}" && node "$HOME/.devflow/scripts/verify-evidence.cjs" publish --pr {n} --evidence ".devflow/docs/evidence-wave-{slug}.md" --publication {REVIEW_PUBLICATION resolved above, or auto}; echo "exit=$?"
 ```
 
-   `{n}` is the number admitted above, and the publication value is `auto`, `full`, `off` or `stub`. `publish` decides what each publication value means for the evidence comment. Report its `## PR Evidence` block — its `EVIDENCE` line and its `**Body**:` / `**Comment**:` line — with any `TRACEABILITY: DEGRADED ({reason})` lines after it, or its `TRACEABILITY: DEGRADED (evidence unavailable)` line; empty stdout or any other exit ⇒ `TRACEABILITY: DEGRADED (evidence refresh failed)`. Whatever it returns, the run ends here.
+   `{n}` is the number admitted above, and the publication value is `auto`, `full`, `off` or `stub`. `publish` decides what each publication value means for the evidence comment. Report its stdout; empty stdout ⇒ `TRACEABILITY: DEGRADED (evidence unavailable)`. Whatever it returns, the run ends here.
 <!-- compliance:off -->
    **(d) Verify locally.** Run the script inline, with no Git agent spawn. It reads the PR and the wave evidence file and writes the local result file; it writes nothing to GitHub:
 

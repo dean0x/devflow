@@ -405,7 +405,7 @@ describe('the curation gate keeps its rationale out of the expanded prompt', () 
   it('the expanded gate is the one sentence: no rationale, no fail-closed wording', () => {
     const gate = defineBody(source(DECISIONS), 'decisions_gate')
     expect(gate).toBe(
-      'When the settings line says `CURATION=off`, set `DECISIONS_CONTEXT` to `(none)` and skip this step, locating no ledger and reading no index.',
+      'When the settings line says `CURATION=off`, set `DECISIONS_CONTEXT` to `(none)` and skip this step, reading no index.',
     )
     expect(gate).not.toMatch(/fail-closed|advisory|NARROW/)
   })

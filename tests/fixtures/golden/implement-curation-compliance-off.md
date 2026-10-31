@@ -33,13 +33,15 @@ When the user explicitly asks to re-validate, re-check, or re-run quality gates 
 
 Record the current branch name as `BASE_BRANCH`. Stop the run unless it matches `^(?![-#]|origin\/|(?:@|(?:FETCH_|ORIG_|MERGE_)?HEAD)$)(?!.*\.\.)[A-Za-z0-9._\/+@,#-]{1,200}$` (judge the match by reading; never pass the value to a command), telling the user it allows only ASCII letters, digits and `._/+@,#-`, at most 200; no leading `-` or `#`, no `origin/` prefix, no `..`, not `@` or a HEAD name.
 
-**Docs root (D-DOCS-ROOT).** Every `.devflow/docs/` path of this command lives at the checkout's toplevel, not under the start directory. From the start directory — `WORKTREE_PATH` if provided, otherwise cwd (`devflow:worktree-support`) — run
+**Docs root (D-DOCS-ROOT).** Every `.devflow/docs/` path is `{worktree}/.devflow/docs/…`. A repo-relative docs path handed to an agent travels with a `WORKTREE_PATH` naming its checkout.
+
+Once per start directory (`WORKTREE_PATH` if provided, otherwise cwd), run from it:
 
 ```bash
-git -C "{start}" rev-parse --show-toplevel
+node "$HOME/.devflow/scripts/resolve-root.cjs" "{start}"; echo "exit=$?"
 ```
 
-Its one-line output is `{worktree}`. If the command fails (outside a git repository), `{worktree}` is the start directory itself. Docs paths below are written `{worktree}/.devflow/docs/…`. A repo-relative docs path handed to an agent always travels with a `WORKTREE_PATH` naming its checkout.
+Accept only the three lines `WORKTREE=<absolute path>`, `LEDGER=<absolute path>` and `exit=0`, which set `{worktree}` and `{ledger}`. Otherwise both are the start directory.
 
 **Resolve the evidence policy once per run**, from the repository root, before any step reads the values:
 

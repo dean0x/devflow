@@ -7,14 +7,14 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # Review Methodology
 
-The canonical review process for all Devflow review agents. Ensures consistent, fair, and actionable code reviews.
+The review process for Devflow review agents: consistent, fair and actionable reviews.
 
 ## Iron Law
 
-> **NEVER BLOCK FOR PRE-EXISTING ISSUES**
+> **Never block for pre-existing issues**
 >
-> Only issues in YOUR CHANGES can block a PR. Pre-existing issues are informational only.
-> If you didn't add it, you don't own it. Fair reviews focus on the diff, not the codebase.
+> Only issues in your changes can block a PR. Pre-existing issues are informational only.
+> If you did not add it, you do not own it. Fair reviews focus on the diff, not the codebase.
 
 ## Core Philosophy
 
@@ -23,8 +23,6 @@ The canonical review process for all Devflow review agents. Ensures consistent, 
 3. **Be fair** - Don't block PRs for legacy code
 4. **Be specific** - Exact file:line with examples
 5. **Be actionable** - Clear fixes, not vague complaints
-
----
 
 ## 6-Step Review Process
 
@@ -44,11 +42,7 @@ Get the diff to understand what changed. Identify base branch and extract change
 
 ### Step 3: Analyze with Domain Expertise
 
-Apply your specialized lens (security, performance, tests, etc.) to each category:
-
-- **Category 1** - Maximum scrutiny, any issue blocks PR
-- **Category 2** - Should fix together with your changes
-- **Category 3** - List, but don't block
+Apply your focus lens to each category. Category 1 gets the most scrutiny.
 
 ### Step 4: Prioritize by Severity
 
@@ -72,50 +66,10 @@ For each issue, provide:
 
 Create report with all three issue sections, summary counts, and merge recommendation.
 
----
-
-## Key Principles Summary
-
-| Principle | Description |
-|-----------|-------------|
-| **Diff-Aware** | Focus on actual changes, not pre-existing issues |
-| **Fair** | Don't block PRs for legacy problems |
-| **Specific** | Exact file:line, not vague complaints |
-| **Actionable** | Show the fix, not just the problem |
-| **Categorized** | Clear distinction between blocking and informational |
-| **Prioritized** | Critical > High > Medium > Low |
-| **Documented** | Reports saved for future reference |
-
----
-
 ## Extended References
 
-For detailed implementation:
+- `references/report-template.md`: full report template with all sections
+- `references/patterns.md`: diff commands, report file naming, and where PR publication happens
+- `references/violations.md`: review process anti-patterns and violations
 
-| Reference | Content |
-|-----------|---------|
-| `references/report-template.md` | Full report template with all sections |
-| `references/patterns.md` | Diff commands, report file naming, and where PR publication happens |
-| `references/violations.md` | Review process anti-patterns and violations |
-
----
-
-## Integration
-
-This methodology is used by the **Review** agent with different focus areas:
-
-| Focus | Pattern Skill |
-|-------|---------------|
-| `security` | devflow:security |
-| `performance` | devflow:performance |
-| `architecture` | devflow:architecture |
-| `testing` | devflow:testing |
-| `consistency` | devflow:consistency |
-| `complexity` | devflow:complexity |
-| `regression` | devflow:regression |
-| `dependencies` | devflow:dependencies |
-| `documentation` | devflow:documentation |
-| `typescript` | devflow:typescript |
-| `database` | devflow:database |
-
-The Review agent loads all pattern skills and applies the relevant one based on the focus area specified in its invocation prompt.
+The Review agent loads one focus skill for each spawn, for example `devflow:security`, `devflow:performance`, `devflow:architecture`, `devflow:testing`, `devflow:consistency`, `devflow:complexity`, `devflow:regression`, `devflow:dependencies`, `devflow:documentation`, `devflow:typescript` or `devflow:database`.
