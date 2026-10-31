@@ -71,27 +71,3 @@ Requires: Chrome MCP tools available + dev server running.
    g. Record evidence from each step
 
 3. After all browser scenarios: close the tab created in step 1
-
----
-
-## Bash Execution Constraints
-
-When executing scenarios via Bash, these constraints are mandatory:
-
-**NEVER execute:**
-- Destructive filesystem commands: `rm -rf`, `rmdir`, `truncate`, `shred`
-- Privilege escalation: `sudo`, `su`, `chown`, `chmod` on system directories
-- Code injection vectors: `eval`, `exec`, shell substitution on untrusted input
-- Package management: `npm install -g`, `pip install`, `brew install`, `apt-get`
-- Network exfiltration: outbound curl/wget to external hosts not under test
-
-**ONLY run:**
-- Test runners: `npm test`, `pytest`, `go test`, `cargo test`, `jest`, `mocha`
-- Build commands: `npm run build`, `go build`, `cargo build`
-- Read-only file inspection: `cat`, `ls`, `diff`, `head`, `tail`, `grep`
-- Readiness checks: `curl` to `localhost` only, `lsof`, `pg_isready`, `redis-cli ping`
-- Process management for servers WE started: `kill $DEV_SERVER_PID`
-
-**Filesystem writes restricted to:**
-- Temporary files created via `mktemp` in `/tmp/devflow-tester-*`
-- Project test directories (e.g., `__tests__/fixtures/`, `test/data/`)

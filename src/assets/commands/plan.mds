@@ -89,7 +89,7 @@ Explore the user's intent through focused Socratic questioning before spawning a
 
 {{issue_capture_contract()}}
 
-Seed the discovery below with `ISSUE_CONTENT` and `ACCEPTANCE_CRITERIA` (every issue's, on the batch path); skip Gate 0 questions they already answer (applies the **Skip discovery when** rule above).
+Seed the discovery below with `ISSUE_CONTENT` and `ACCEPTANCE_CRITERIA` (every issue's, on the batch path); skip Gate 0 questions they already answer.
 
 If the Git agent returns only a `TRACEABILITY: DEGRADED ({reason})` line and no issue content, warn the user, carry that exact line verbatim into the report's traceability section, and proceed to Gate 0 discovery using the raw candidate token as the sole context. Never treat the `TRACEABILITY: DEGRADED` status line as issue content — no title, body, or acceptance criteria may be inferred from it.
 
@@ -139,7 +139,7 @@ Return codebase context for requirements analysis."
 
 {{decisions_load()}}
 <!-- curation:on -->
-This produces a compact index of active ADR/PF entries. Pass the Skim agent context to all subsequent agents. Pass `DECISIONS_CONTEXT` to the Design agents of the gap-analysis phase as one shared slice — prior decisions constrain design, known pitfalls inform gap analysis. Design agents use `devflow:apply-decisions` to Read full entry bodies on demand.
+Pass the Skim agent context to all subsequent agents. Pass `DECISIONS_CONTEXT` to the Design agents of the gap-analysis phase as one shared slice.
 
 <!-- curation:end -->
 {{knowledge_load()}}
@@ -215,17 +215,6 @@ Combine into: user needs, similar features, constraints, failure modes"
 | consistency | Cross-issue contradictions, duplicate requirements, conflicting scope |
 | dependencies | Inter-issue ordering, shared resources, breaking change propagation |
 
-Each Design agent receives:
-- Mode: `gap-analysis`
-- Focus: (their assigned focus from table)
-- Exploration synthesis from Phase 4
-- Skim agent context from Phase 2
-<!-- curation:on -->
-- `DECISIONS_CONTEXT` (index from Phase 2)
-<!-- curation:end -->
-- `COMPLIANCE_FOCUS_DIRECTIVE` (compliance focus only)
-- Multi-issue: all issue bodies
-
 {{compliance_focus_inject()}}
 
 ```
@@ -241,13 +230,7 @@ Run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esa
 Artifacts:
   Feature/Issues: {feature description or issue bodies}
   Exploration synthesis: {Phase 4 output}
-  Codebase context: {Phase 2 output}
-<!-- curation:on -->
-Analyze only your assigned focus area. Follow devflow:apply-decisions for DECISIONS_CONTEXT.
-<!-- curation:off -->
-Analyze only your assigned focus area.
-<!-- curation:end -->
-Cite evidence from provided artifacts."
+  Codebase context: {Phase 2 output}"
 ```
 
 #### Phase 6: Synthesize Gap Analysis
@@ -368,8 +351,7 @@ Agent(subagent_type="Design"):
 Artifacts:
   Implementation plan: {Phase 11 planning synthesis}
   Implementation exploration: {Phase 9 exploration synthesis}
-  Codebase context: {Phase 2 output}
-Review the full plan for all 6 anti-patterns. Report all findings with evidence."
+  Codebase context: {Phase 2 output}"
 ```
 
 #### Phase 13: Gate 2 — Confirm Plan + Design Review
@@ -417,7 +399,7 @@ User can:
 
 **Store design artifact:**
 
-**Load `devflow:docs-framework`** — Load via Skill tool: `devflow:docs-framework`, here and not earlier, so a run that stops before this phase never pays for it. If it fails to load, continue with the paths below.
+**Load `devflow:docs-framework`** — Load via Skill tool: `devflow:docs-framework`, here and not earlier. If it fails to load, continue with the paths below.
 
 **Pre-compute the artifact path** (it never changes after this) by the skill's rules: `{topic-slug}` is its topic slug of the feature title, the same value as the artifact's `slug:` frontmatter, and `{YYYY-MM-DD_HHMM}` is the local time, computed once:
 - If one issue: `{worktree}/.devflow/docs/design/{ISSUE_ID}-{topic-slug}.{YYYY-MM-DD_HHMM}.md` (e.g. `42-jwt-auth.2026-04-07_1430.md`)
@@ -605,4 +587,3 @@ Display completion summary:
 - If any agent fails, report the phase, agent type, and error
 - If user selects "Revise" at Gate 2 and fewer than 2 revisions have run, loop back to Phase 10 with user's constraints; after the second revision Gate 2 offers Accept, Cancel or "Restart /plan with these constraints" only
 - If user selects "Cancel" at any gate, stop gracefully without writing artifact
-- If `{worktree}/.devflow/docs/design/` does not exist, create it in Phase 14

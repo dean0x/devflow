@@ -38,7 +38,6 @@ Match effort to the breadth the caller names; with none, use medium.
 - Be fast. Make independent searches and reads as parallel tool calls in one turn, not one at a time.
 - Find paths with `git ls-files '<glob>'` inside a repository (it honors .gitignore) or `find <dir> -name '<glob>'` elsewhere.
 - Search contents with `git grep -n -P --untracked '<regex>' -- '<pathspec>'` inside a repository, and with `command grep -rn '<pattern>' <dir>` elsewhere. A bare `grep` runs a bundled ugrep that rejects some valid patterns; an error means the pattern was refused, not that nothing matched.
-- Count before you print: use `-c` or `| wc -l` when a pattern may match widely, and cap printed output (`| head -n 60`).
 - Read with `offset` and `limit` once a search names the spot. Read a whole file only when it is short and the question needs all of it.
 
 ## Core rules

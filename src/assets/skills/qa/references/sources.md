@@ -25,6 +25,6 @@ Canonical references for scenario-based acceptance testing methodology.
 |---------|----------------|-------------------|
 | Scenario Types | [1] Myers, [2] Kaner, [6] Copeland | [5] Crispin Q2/Q3 quadrants |
 | Scenario Design from Criteria | [4] Adzic, [8] Freeman, [9] Smart | [5] Crispin acceptance testing |
-| Equivalence Partitioning | [1] Myers, [6] Copeland, [7] Beizer | [10] Ammann ISP |
+| Partitions and boundaries | [1] Myers, [6] Copeland, [7] Beizer | [10] Ammann ISP |
 | Exploratory Heuristics | [2] Kaner, [3] Hendrickson, [11] Whittaker | [5] Crispin session-based |
-| Evidence Collection | [8] Freeman (observable behavior), [12] Google | [4] Adzic (living docs) |
+| Evidence | [8] Freeman (observable behavior), [12] Google | [4] Adzic (living docs) |
