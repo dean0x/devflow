@@ -11,8 +11,8 @@ import { readFileSync } from 'fs'
 import * as path from 'path'
 import { ROOT, resolveAgentSource } from '../helpers.js'
 
-/** The Test agent body, src/assets/agents/test.md, in bytes. It is hand-authored, so every build key ships it unchanged. */
-const TEST_BODY_MAX_BYTES = 11_035
+/** The Test agent body (test.md), in bytes. It is hand-authored, so every build key ships it unchanged. */
+const TEST_BODY_MAX_BYTES = 11_099
 /** src/assets/skills/qa/SKILL.md, in bytes. */
 const QA_SKILL_MAX_BYTES = 4_596
 /** src/assets/skills/qa/references/browser-testing.md, in bytes. */

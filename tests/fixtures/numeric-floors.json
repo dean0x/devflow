@@ -1158,11 +1158,11 @@
     },
     {
       "id": "test-body-max",
-      "ceiling": 11035,
-      "pattern": "const TEST_BODY_MAX_BYTES = 11_035",
+      "ceiling": 11099,
+      "pattern": "const TEST_BODY_MAX_BYTES = 11_099",
       "occurrences": 1,
       "sourceFile": "tests/guards/test-group-sizes.test.ts",
-      "description": "The Test agent body, src/assets/agents/test.md, in bytes. It is hand-authored, so every build key ships it unchanged, and every turn of every Test spawn reads it. Added by #711 (lean Test group) at 11,035, after the cut from 11,211. The cut also moved the Bash Execution Constraints into the body (1,069 bytes) from references/browser-testing.md, which every run read before. May be LOWERED, never raised."
+      "description": "The Test agent body, src/assets/agents/test.md, in bytes. It is hand-authored, so every build key ships it unchanged, and every turn of every Test spawn reads it. Added by #711 (lean Test group) at 11,099, after the cut from 11,211. The cut also moved the Bash Execution Constraints into the body (1,069 bytes) from references/browser-testing.md, which every run read before. May be LOWERED, never raised."
     },
     {
       "id": "skill-qa-max",

@@ -33,6 +33,7 @@ You receive from orchestrator:
    - File extensions: `.tsx`, `.jsx`, `.html`, `.css`, `.scss`
    - Path patterns: `routes/`, `pages/`, `components/`, `views/`, `app/`
    If web files detected → execute browser scenarios alongside standard scenarios (follow Dev Server Lifecycle and Browser Execution procedures in `devflow:qa/references/browser-testing.md`).
+   If only backend/CLI files → standard Bash execution only.
 3. **Assess local testability**: Before designing scenarios, find the project type and the infrastructure it needs (database, Redis, external APIs, OAuth), and check what is available (e.g., `docker ps`, `pg_isready`, env vars for API keys). Mark a scenario that needs unavailable infrastructure SKIPPED with its reason, and report it in the QA report.
 4. **Extract criteria**: Derive acceptance criteria from ORIGINAL_REQUEST and EXECUTION_PLAN. If ACCEPTANCE_CRITERIA is provided, use it as the primary source. When TEST_PLAN holds TP lines — each names its `TP-<n>`, the `AC-<m>` it covers and a `method:` — every TP needs at least one scenario: `local` — a command whose exit code you read; `ci` — the CI tests that cover it, run here where they can be; `manual` — steps you perform and observe.
 5. **Design scenarios**: Create 5-8 concrete test scenarios across the five `devflow:qa` scenario types (regression if applicable).
@@ -54,7 +55,7 @@ A scenario must produce the same result on each run.
 
 ## Execution
 
-For each scenario, set up its preconditions, run its action, capture stdout, stderr and exit code, and compare with the expected outcome. Record PASS or FAIL with evidence, or BLOCKED when its command gave no result (it could not start, or no `EXIT=` line was read)
+For each scenario, set up its preconditions, run its action, capture stdout, stderr and exit code, and compare with the expected outcome. Record PASS or FAIL with evidence, or BLOCKED when its command gave no result (it could not start, or no `EXIT=` line was read).
 
 If a previous run failed (PREVIOUS_FAILURES provided), prioritize re-testing those scenarios first.
 
