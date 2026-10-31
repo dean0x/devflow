@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The `/implement` command prompt is about 12 % smaller** ([#675](https://github.com/dean0x/devflow/issues/675)).
+  - With curation and compliance on, the compiled command falls from 49,275 to 43,478 bytes. The other three builds fall by about the same share.
+  - No phase, gate or output contract changes. Phases 4 and 5 gain a halt. They stop when an agent returns a missing status or a status that no branch routes.
+  - The command resolves the agent-references folder once. It prints the folder again after a compaction.
+  - The shared text of the settings, evidence policy, decisions, knowledge, tracker, publication and docs root steps is shorter. This also shortens 13 other command prompts that import it.
+  - The settings script and the evidence-policy script print their own fail-closed line on every error exit, for every command prompt that runs them.
+  - The Architecture section of the prompt is removed.
+  - Phase 6 starts after ALIGNED, or after a single-pass alignment Fix that reports COMPLETE. Phase 11 is skipped only when the run stopped before Phase 10. A stop in Phase 10 does not skip it, so the evidence still reaches the PR.
+
 ---
 
 ## [3.11.0] - 2026-10-31

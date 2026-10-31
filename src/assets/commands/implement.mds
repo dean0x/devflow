@@ -2,11 +2,11 @@
 description: Execute a single task through implementation, quality gates, and PR creation - accepts plan documents, issues, or task descriptions
 output-dir: dist/commands
 ---
-@import { knowledge_load, knowledge_writeback_after_load } from "./_partials/_knowledge.mds"
+@import { knowledge_load_after_root, knowledge_writeback_after_load } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
 @import { docs_root } from "./_partials/_docs_root.mds"
 @import { evidence_policy } from "./_partials/_evidence_policy.mds"
-@import { issue_ref_grammar, issue_capture_contract } from "./_partials/_tracker.mds"
+@import { issue_ref_grammar, issue_capture_note } from "./_partials/_tracker.mds"
 @import { test_plan_line } from "./_partials/_plan_contract.mds"
 @import { publication_gate, publication_resolve } from "./_partials/_publication.mds"
 @import "./_partials/_compliance.mds" as compliance
@@ -15,36 +15,23 @@ output-dir: dist/commands
 
 Orchestrate a single task by spawning agents.
 
-## Usage
-
-```
-/implement <task description>
-/implement #42                                     (GitHub issue number)
-/implement .devflow/docs/design/42-jwt-auth.2026-04-07_1430.md  (plan document from /plan)
-/implement                                         (use conversation context)
-```
-
 ## Input
-
-What follows `/implement` is bound once, here. Every later step names it `COMMAND_INPUT` and never restates it:
 
 <command-input>
 $ARGUMENTS
 </command-input>
 
-`COMMAND_INPUT` is one of:
-- Plan document path: `.devflow/docs/design/42-jwt-auth.2026-04-07_1430.md` (path to an existing `.md` file)
-- Issue reference: `#42`
-- Task description: "implement JWT auth"
-- Empty: use conversation context
+`COMMAND_INPUT` is the text above: a plan document path (an existing `.md` file), an issue reference, a task description, or empty (use the conversation).
 
 {{issue_ref_grammar()}}
+
+**Agent references.** Print the config directory once, before the first reference Read: run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"` in Bash. `{ref_dir}` is `<that directory>/skills/devflow:agent-references/references/commands`. Read each reference with the Read tool. When `{ref_dir}` is not in view (for example after a compaction), print the directory again with the same line.
 
 ## Phases
 
 ### Re-validation Continuation Path
 
-When the user explicitly asks to re-validate, re-check, or re-run quality gates after making their own changes, run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"` in Bash, Read `<that directory>/skills/devflow:agent-references/references/commands/implement-revalidate.md` with the Read tool and follow it. Otherwise proceed with the full pipeline below.
+When the user explicitly asks to re-validate, re-check, or re-run quality gates after making their own changes, Read `{ref_dir}/implement-revalidate.md` and follow it. Otherwise proceed with the full pipeline below.
 
 ### Phase 1: Setup
 
@@ -72,15 +59,11 @@ When `EVIDENCE_POLICY` is `required`, record `TRACEABILITY: DEGRADED (compliance
 <!-- compliance:end -->
 
 **Plan Document Handling** (when `COMMAND_INPUT` is a path ending in `.md`):
-1. Read the plan document from the path provided
-2. Extract from YAML frontmatter: `execution-strategy`, `context-risk`, `issue` number
-3. Extract from body: Subtask Breakdown, Implementation Plan, Patterns to Follow, Acceptance Criteria
-4. If the frontmatter `issue` is present and is not `pending`: forward it verbatim as the setup-task `ISSUE_INPUT` (`pending` means /plan's issue step degraded or was declined — treat it as absent)
-5. Use extracted content as EXECUTION_PLAN for the Code agent phase (replaces exploration/planning output)
-6. Captured values override defaults from Git agent where present
-7. Extract `## PR Description Guidance` section (if present) → set `PR_DESCRIPTION_GUIDANCE` to its full content. If section not found, set `PR_DESCRIPTION_GUIDANCE` to `(none)`.
+1. Read the plan document. From its YAML frontmatter, take `execution-strategy` and `issue`.
+2. If the frontmatter `issue` is present and is not `pending`: forward it verbatim as the setup-task `ISSUE_INPUT` (`pending` means /plan's issue step degraded or was declined — treat it as absent)
+3. Extract from its body the Subtask Breakdown, Implementation Plan, Patterns to Follow and Acceptance Criteria as `EXECUTION_PLAN`. Captured values override defaults from Git agent where present.
 
-If `PR_DESCRIPTION_GUIDANCE` was not set above (non-plan paths: issue input or task description), set it to `(none)`.
+`PR_DESCRIPTION_GUIDANCE` is the full `## PR Description Guidance` section of the plan document. Any other input, empty input included, or a plan without that section, gives `(none)`.
 
 **Empty input.** When `COMMAND_INPUT` is empty — a plan handoff arrives this way, with the plan already in the conversation — there is no argument to name the branch from, and the Git agent sees none of this conversation. Write the description yourself: one line, taken from the plan's title or, with no plan, from the conversation. Send it as the setup-task `TASK_DESCRIPTION` below.
 
@@ -101,25 +84,27 @@ Derive branch name from issue or description, create feature branch, and fetch i
 Return the branch setup summary."
 ```
 
-The issue token is forwarded **unclassified**; routing is by SHAPE alone (the token count of `COMMAND_INPUT` and a `.md` ending). Only `setup-task` has resolved a provider, so a `starts with #` test would be a github test that reclassifies `PROJ-12` and `ENG-12` as task descriptions: the branch comes from prose, no issue is fetched and nothing reports it. Token COUNT is provider-neutral: every issue spelling is one token and no free-text description is.
+The issue token is forwarded **unclassified**: routing is by SHAPE alone. Only `setup-task` knows the provider, so a `starts with #` test is a github test: it reads `PROJ-12` and `ENG-12` as task descriptions, the branch comes from prose, no issue is fetched and nothing reports it. Token COUNT is provider-neutral: every issue spelling is one token and no free-text description is.
 
 <!-- compliance:on -->
-- **Extension.** A path ending in `.md` is a plan document, never an issue reference: it goes to `PLAN_ARTIFACT_PATH` only, and `ISSUE_INPUT` carries the plan's frontmatter `issue`, never the path (Plan Document Handling step 4).
+- **Extension.** A path ending in `.md` is a plan document, never an issue reference: it goes to `PLAN_ARTIFACT_PATH` only, and `ISSUE_INPUT` carries the plan's frontmatter `issue`, never the path.
 <!-- compliance:off -->
-- **Extension.** A path ending in `.md` is a plan document, never an issue reference: `ISSUE_INPUT` carries the plan's frontmatter `issue`, never the path (Plan Document Handling step 4).
+- **Extension.** A path ending in `.md` is a plan document, never an issue reference: `ISSUE_INPUT` carries the plan's frontmatter `issue`, never the path.
 <!-- compliance:end -->
-- **Token count.** One token is an issue reference; two or more is prose. Forwarding the FIRST token alone would send `/implement fix the login bug` as `ISSUE_INPUT: fix` with no description, so the request is dropped.
+- **Token count.** Forwarding the FIRST token alone sends `/implement fix the login bug` as `ISSUE_INPUT: fix` with no description, so the request is dropped.
 
-**Capture from Git agent output** (used throughout flow):
-- `TASK_ID`: The branch name created by Git agent (use as TASK_ID for rest of flow)
-- `BASE_BRANCH`: Branch this feature was created from (for PR target); stop unless it passes the setup check
-- `ISSUE_NUMBER`: the provider-canonical issue identifier for this task — the same value the Git agent emits as `ISSUE_ID` (if provided, or created by the Git agent's issue-first step in setup-task)
+**Capture from Git agent output**, each value as written. Never re-derive one issue value from another, and never infer one from a `TRACEABILITY: DEGRADED ({reason})` status line: that line is a status, not issue content.
+- `TASK_ID`: The branch name created by Git agent
+- `BASE_BRANCH`: Branch this feature was created from; stop unless it passes the setup check
+- `ISSUE_ID`: the `- **Issue ID**:` line under `### Handoff Values`, if any. `ISSUE_NUMBER` is this value.
+- `ISSUE_PR_LINK`: the `- **PR link line**:` line under `### Handoff Values`
+- `ISSUE_CONTENT` and `ACCEPTANCE_CRITERIA`: the body between the `<untrusted-issue-body>` markers, and its acceptance criteria
 - `branch_slug`: `TASK_ID` with every `/` replaced by `-`. It names `handoff-{branch_slug}.md` and `evidence-{branch_slug}.md` only when it matches `^[A-Za-z0-9._-]{1,200}$`; any other branch name stops the run here, telling the user it cannot name those files.
 
-{{issue_capture_contract()}}
+{{issue_capture_note()}}
 
 <!-- compliance:on -->
-**Ticket link, only when `ISSUE_REQUIRED` is `true`:** when the capture above holds no `ISSUE_PR_LINK` (absent, or `(none)`), run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"` in Bash, Read `<that directory>/skills/devflow:agent-references/references/commands/implement-evidence-asks.md` with the Read tool (once per run), then run its ticket link ask and **Record the exception at once** as it directs, before any Code spawn. `PR_EXCEPTIONS` is `(none)` until an exception is recorded.
+**Ticket link, only when `ISSUE_REQUIRED` is `true`:** when the capture above holds no `ISSUE_PR_LINK` (absent, or `(none)`), Read `{ref_dir}/implement-evidence-asks.md` (once per run), then run its ticket link ask and **Record the exception at once** as it directs, before any Code spawn. `PR_EXCEPTIONS` is `(none)` until an exception is recorded.
 <!-- compliance:off -->
 **Ticket link, only when `ISSUE_REQUIRED` is `true`:** when the capture above holds no `ISSUE_PR_LINK` (absent, or `(none)`), ask with AskUserQuestion before any Code spawn — "No tracker issue is linked to this task. Record a self-attested exception, or stop?" — offering exactly these two options:
 - **Record an exception** — the user gives the reason as free text. Render it with the exception grammar below, as kind `ticket-link`; when the rendered reason is empty, ask for it once more, and stop as below if it is empty again.
@@ -141,9 +126,9 @@ The issue token is forwarded **unclassified**; routing is by SHAPE alone (the to
 <!-- compliance:end -->
 
 <!-- compliance:on -->
-**Test plan.** Before any Code spawn, give the task a test plan in the evidence file `{worktree}/.devflow/docs/evidence-{branch_slug}.md` (`EVIDENCE_FILE`) — unlike the handoff file, it stays after the PR exists. It holds up to three sections, in this order and nothing else: `## Test Plan`; `## Evidence Exceptions`, a byte copy of `PR_EXCEPTIONS` present only while that is not `(none)`; and `## Claims`, always last, so every claim is appended at the end of the file. Create the file if absent; if it exists, replace its `## Test Plan` and `## Evidence Exceptions` sections and keep `## Claims` byte-identical.
+**Test plan.** Before any Code spawn, give the task a test plan in the evidence file `{worktree}/.devflow/docs/evidence-{branch_slug}.md` (`EVIDENCE_FILE`) — unlike the handoff file, it stays after the PR exists. It holds up to three sections, in this order and nothing else: `## Test Plan`; `## Evidence Exceptions`, a byte copy of `PR_EXCEPTIONS` present only while that is not `(none)`; and `## Claims`, always last. Create the file if absent; if it exists, replace its `## Test Plan` and `## Evidence Exceptions` sections and keep `## Claims` byte-identical.
 <!-- compliance:off -->
-**Test plan.** Before any Code spawn, give the task a test plan in the evidence file `{worktree}/.devflow/docs/evidence-{branch_slug}.md` (`EVIDENCE_FILE`) — unlike the handoff file, it stays after the PR exists. It holds up to three sections, in this order and nothing else: `## Test Plan`; `## Evidence Exceptions`, a byte copy of `EVIDENCE_EXCEPTIONS` present only while that is not `(none)`; and `## Claims`, always last, so every claim is appended at the end of the file. Create the file if absent; if it exists, replace its `## Test Plan` and `## Evidence Exceptions` sections and keep `## Claims` byte-identical.
+**Test plan.** Before any Code spawn, give the task a test plan in the evidence file `{worktree}/.devflow/docs/evidence-{branch_slug}.md` (`EVIDENCE_FILE`) — unlike the handoff file, it stays after the PR exists. It holds up to three sections, in this order and nothing else: `## Test Plan`; `## Evidence Exceptions`, a byte copy of `EVIDENCE_EXCEPTIONS` present only while that is not `(none)`; and `## Claims`, always last. Create the file if absent; if it exists, replace its `## Test Plan` and `## Evidence Exceptions` sections and keep `## Claims` byte-identical.
 <!-- compliance:end -->
 
 <!-- compliance:on -->
@@ -173,9 +158,9 @@ node "$HOME/.devflow/scripts/verify-evidence.cjs" check tp "{worktree}/.devflow/
 When `EVIDENCE_POLICY` is `standard`, a missing test plan is never asked about: carry `Test plan: missing` to the Phase 12 report.
 
 **Test-plan outputs**, set once before any Code spawn:
-- `TEST_PLAN` — the TP lines of the evidence file's `## Test Plan` section, or `(none)` when the test plan is missing.
+- `TEST_PLAN`: the TP lines of the evidence file's `## Test Plan` section, or `(none)` when the test plan is missing.
 <!-- compliance:on -->
-- `PR_TEST_PLAN_BLOCK` — when the test plan is present and this render ends in `exit=0`, its stdout byte for byte without that `exit=` line; `(none)` otherwise:
+- `PR_TEST_PLAN_BLOCK`: when the test plan is present and this render ends in `exit=0`, its stdout byte for byte without the `exit=` line; `(none)` otherwise:
 
 ```bash
 node "$HOME/.devflow/scripts/verify-evidence.cjs" render --plan "{worktree}/.devflow/docs/evidence-{branch_slug}.md"; echo "exit=$?"
@@ -183,7 +168,7 @@ node "$HOME/.devflow/scripts/verify-evidence.cjs" render --plan "{worktree}/.dev
 
 - `EVIDENCE_FILE` — `{worktree}/.devflow/docs/evidence-{branch_slug}.md`, its `## Evidence Exceptions` section now a byte copy of `PR_EXCEPTIONS` (absent when that is `(none)`).
 <!-- compliance:off -->
-- `EVIDENCE_FILE` — `{worktree}/.devflow/docs/evidence-{branch_slug}.md`, its `## Evidence Exceptions` section now a byte copy of `EVIDENCE_EXCEPTIONS` (absent when that is `(none)`).
+- `EVIDENCE_FILE`: `{worktree}/.devflow/docs/evidence-{branch_slug}.md`, its `## Evidence Exceptions` section now a byte copy of `EVIDENCE_EXCEPTIONS` (absent when that is `(none)`).
 <!-- compliance:end -->
 
 {{settings.settings_resolve()}}
@@ -205,7 +190,7 @@ Pass `COMPLIANCE_DIRECTIVE` to every Code and Fix spawn, on a line of its own.
 Pass `DECISIONS_CONTEXT` to Code agent (Phase 2) and Harden agent (Phase 4).
 
 <!-- curation:end -->
-{{knowledge_load()}}
+{{knowledge_load_after_root()}}
 
 **Fresh base.** Before Phase 2, write `BASE_BRANCH` with the Write tool to the file that `F="$(mktemp)" && echo "F=$F"` prints, after one Read of it. If the Write tool fails, treat the value as missing; never write it with a shell command. Then run `F="{name file}"; trap 'rm -- "$F"' EXIT; cd "{worktree}" && node "$HOME/.devflow/scripts/resolve-base.cjs" local --name-stdin < "$F"; echo "exit=$?"`. Output other than one `BASE_REF=` line (40 or 64 hex, or `none`) with `exit=0` counts as `NOTE=stop`, `REASON=resolver-unavailable`. Record `BASE_REF`. By `NOTE`: `none` continues; `info` prints one plain line; `degraded` records `TRACEABILITY: DEGRADED (base {REASON}; fix: {fix})`; `stop` (`BASE_REF=none`) stops the run, naming REASON and its fix. Fix by REASON: no-merge-base `git fetch --unshallow`; no-ref or timeout `git fetch origin <base>` (`<base>` stays as written); resolver-unavailable `re-run; if it repeats, run devflow init`; invalid-name the allowed set, never the name; any other REASON none, and `; fix: {fix}` is left out.
 
@@ -245,13 +230,8 @@ DECISIONS_CONTEXT: {decisions_context}
 {COMPLIANCE_DIRECTIVE}"
 ```
 
----
+**SEQUENTIAL_CODE_AGENTS**: spawn one Code agent at a time, each after the one before it completes.
 
-**SEQUENTIAL_CODE_AGENTS**:
-
-Spawn Code agents one at a time:
-
-**Phase 1 Code agent:**
 ```
 Agent(subagent_type="Code"):
 "OPERATION: implement
@@ -269,7 +249,6 @@ HANDOFF_REQUIRED: true
 HANDOFF_FILE: {worktree}/.devflow/docs/handoff-{branch_slug}.md"
 ```
 
-**Phase 2+ Code agents** (after prior phase completes):
 ```
 Agent(subagent_type="Code"):
 "OPERATION: implement
@@ -289,13 +268,9 @@ HANDOFF_REQUIRED: {true if not last phase}
 HANDOFF_FILE: {worktree}/.devflow/docs/handoff-{branch_slug}.md"
 ```
 
-**Handoff Protocol**: Each Code agent with HANDOFF_REQUIRED=true appends its own `## Phase {N} Implementation Summary` section, at most 8,192 bytes, to `{worktree}/.devflow/docs/handoff-{branch_slug}.md`, never rewriting an earlier section and keeping any `## Evidence Exceptions` section byte-identical; the next Code agent reads only the section of the phase immediately before its own through HANDOFF_FILE. The orchestrator writes no phase section. Delete `{worktree}/.devflow/docs/handoff-{branch_slug}.md` once the PR exists — after Phase 9 (cleanup).
+**Handoff Protocol**: Each Code agent with HANDOFF_REQUIRED=true appends its own `## Phase {N} Implementation Summary` section, at most 8,192 bytes, to HANDOFF_FILE, never rewriting an earlier section and keeping any `## Evidence Exceptions` section byte-identical; the next Code agent reads only the section of the phase immediately before its own. The orchestrator writes no phase section. Delete `{worktree}/.devflow/docs/handoff-{branch_slug}.md` once the PR exists — after Phase 9 (cleanup).
 
----
-
-**PARALLEL_CODE_AGENTS**:
-
-Spawn multiple Code agents **in a single message**, each with independent subtask:
+**PARALLEL_CODE_AGENTS**: spawn all Code agents in one message, one subtask each.
 
 ```
 Agent(subagent_type="Code"):  # Code agent 1
@@ -332,7 +307,7 @@ DECISIONS_CONTEXT: {decisions_context}
 **Produces:** POLISH_OUTPUT
 **Requires:** BASE_REF, GATE_LEVEL
 
-**Gate level.** At `standard` or `lean`, once per run, run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"` in Bash and Read `<that directory>/skills/devflow:agent-references/references/commands/implement-levels.md` with the Read tool, and apply each row to the phase it names.
+**Gate level.** At `standard` or `lean`, once per run, Read `{ref_dir}/implement-levels.md` (`{ref_dir}` is set in **Agent references.**; if it is not in view, print the directory again with that line), and apply each row to the phase it names.
 
 - No row or rule overrides the next two lines.
 - If the Read fails, or the file has no `## Phases` heading with the `| Phase | standard | lean |` header, or a row breaks its grammar, apply no row, keep `GATE_LEVEL` and say `level reference unreadable: no level rows applied`.
@@ -369,14 +344,14 @@ Evaluate 9 pillars, fix P0/P1 issues, report status"
 
 Harden agent reports `### Status: PASS | FIXED | BLOCKED`. **If BLOCKED:** report to user and halt. **If PASS or FIXED:** continue to Phase 5. A FIXED status commits fixes and starts no Validate of its own: the Phase 6 run covers them.
 
+Any other or missing Status from a Harden that ran: report the status or "none" and its cause, then halt; never PASS.
+
 Harden never reviews a deleted file or the old path of a rename; an empty list is no review, and Harden reports `no files reviewed`.
 
 ### Phase 5: Alignment Check
 
 **Produces:** ALIGNMENT_RESULT
 **Requires:** BASE_REF, EXECUTION_PLAN
-
-After Harden agent passes, spawn Evaluate agent:
 
 ```
 Agent(subagent_type="Evaluate"):
@@ -391,7 +366,7 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
 **If ALIGNED:** Continue to Phase 6
 
 **If MISALIGNED:**
-1. Extract misalignment details from Evaluate agent output
+1. Take the misalignments from the Evaluate report.
 2. Increment `alignment_fix_count`
 3. If `alignment_fix_count <= 2`:
    - Spawn Fix agent:
@@ -410,6 +385,8 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
    - Loop back to Phase 5 (re-check alignment). The fix is not validated here: the Phase 6 run covers it.
 4. If `alignment_fix_count > 2`: Report misalignments to user for decision
 
+Any other or missing Status: report the status or "none" and its cause, then halt; never ALIGNED.
+
 ### Phase 6: Validate
 
 **Produces:** VALIDATION_RESULT, VALIDATED_HEAD
@@ -417,7 +394,7 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
 
 Alignment-fix commits get no self-review: Phase 6 Validate and `/code-review` check them.
 
-After Evaluate agent passes, spawn Validate agent:
+After ALIGNED, or a single-pass Fix that reports COMPLETE, spawn Validate agent:
 
 ```
 Agent(subagent_type="Validate"):
@@ -468,8 +445,6 @@ Any other or missing Status: report and halt; never PASS.
 
 **Produces:** QA_RESULT
 **Requires:** BASE_REF, EXECUTION_PLAN, TEST_PLAN, VALIDATED_HEAD
-
-After Phase 6 passes, spawn Test agent:
 
 ```
 Agent(subagent_type="Test"):
@@ -526,7 +501,7 @@ At `lean`, open the prompt with Phase 6's `GATE_LEVEL` and `BASE_SHA` lines; its
 
 **If BLOCKED:** as in Phase 6.
 
-**If PASS:** append a `gate:validate` claim (Phase 6's **Evidence claims**), then continue to Phase 9.
+**If PASS:** append a `gate:validate` claim, then continue to Phase 9.
 
 Any other or missing Status: report and halt; never PASS.
 
@@ -540,9 +515,9 @@ Any other or missing Status: report and halt; never PASS.
 <!-- compliance:end -->
 
 <!-- compliance:on -->
-Run once, after the gates, under every strategy. No Code agent opens a PR: the Git agent does, and it pastes `ISSUE_PR_LINK`, `PR_EXCEPTIONS` and `PR_TEST_PLAN_BLOCK` through their paste gates and scrubs the body (D11) before `gh pr create`. This command renders no link line and creates no PR itself: the Git agent's Phase-1 rendering is the only one, forwarded verbatim.
+Run once, after the gates, under every strategy. No Code agent opens a PR: the Git agent does, and it pastes `ISSUE_PR_LINK`, `PR_EXCEPTIONS` and `PR_TEST_PLAN_BLOCK` through their paste gates and scrubs the body (D11) before `gh pr create`.
 <!-- compliance:off -->
-Run once, after the gates, under every strategy. No Code agent opens a PR: the Git agent does, and it pastes `ISSUE_PR_LINK` through its paste gate and scrubs the body (D11) before `gh pr create`. This command renders no link line and creates no PR itself: the Git agent's Phase-1 rendering is the only one, forwarded verbatim.
+Run once, after the gates, under every strategy. No Code agent opens a PR: the Git agent does, and it pastes `ISSUE_PR_LINK` through its paste gate and scrubs the body (D11) before `gh pr create`.
 <!-- compliance:end -->
 
 ```
@@ -566,7 +541,7 @@ COMMIT_UNCOMMITTED: false
 Open the pull request for this branch and return the pre-flight summary."
 ```
 
-`COMMIT_UNCOMMITTED: false` keeps the Git agent from committing a stray file: the Code, Polish, Harden and Fix agents commit their own work. Capture the `- **PR**: #{number}` line of its `### Branch` as `PR_NUMBER`, its `### Uncommitted files` list and its `TRACEABILITY: DEGRADED ({reason})` lines for the Phase 12 report. If it returns `### Status: BLOCKED` or no PR number, report its reason to the user and stop at the report (Phase 12); Phases 10 and 11 do not run.
+Capture the `- **PR**: #{number}` line of its `### Branch` as `PR_NUMBER`, its `### Uncommitted files` list and its `TRACEABILITY: DEGRADED ({reason})` lines for the Phase 12 report. If it returns `### Status: BLOCKED` or no PR number, report its reason to the user and stop at the report (Phase 12); Phases 10 and 11 do not run.
 
 ### Phase 10: CI Status Gate
 
@@ -575,7 +550,7 @@ Open the pull request for this branch and return the pre-flight summary."
 
 Run under every strategy: Phase 9 opened the PR.
 
-**Push first, outside the gate block.** The gate reads CI for the pushed head, and the Polish, Harden and Fix commits reach the PR only by a push. Push once — never force, and no retry:
+**Push first, outside the gate block.** Push once — never force, and no retry:
 
 ```bash
 git push origin HEAD; echo "exit=$?"
@@ -606,9 +581,9 @@ git push origin HEAD; echo "exit=$?"
 **Requires:** PR_NUMBER, EVIDENCE_FILE
 <!-- compliance:end -->
 
-Run once, after Phase 10, under every strategy. Skip it only when Phase 9 stopped the run. A `ci` TP reads `INDETERMINATE` only when the CI gate could not tell or did not run.
+Run once, after Phase 10, under every strategy. Skip it only when the run stopped before Phase 10. A `ci` TP reads `INDETERMINATE` only when the CI gate could not tell or did not run.
 
-**Push first.** Every claim is keyed to the HEAD an agent reported, and a Harden or Fix agent may have committed without pushing; a claim whose SHA is not in the PR reads `UNVERIFIED`. So push the branch once before the script — never force, and no retry:
+**Push first.** A claim whose SHA is not in the PR reads `UNVERIFIED`, so push the branch once before the script — never force, and no retry:
 
 ```bash
 git push origin HEAD; echo "exit=$?"
@@ -617,7 +592,7 @@ git push origin HEAD; echo "exit=$?"
 `exit=0` continues to the script. Any other result, a rejected non-fast-forward push included, does not block: record `TRACEABILITY: DEGRADED (evidence push failed)` for the Phase 12 report and run the script anyway.
 
 <!-- compliance:on -->
-**Then refresh, inline.** The refresh is plumbing, so no Git agent runs it: `verify-evidence.cjs publish` is the whole `update-pr-evidence` operation — verify, the scrubbed block edit with its read-back, the scrubbed evidence comment — in one call. Use the Bash tool with `timeout: 180000`:
+**Then refresh, inline.** The refresh is plumbing, so no Git agent runs it: `verify-evidence.cjs publish` is the whole `update-pr-evidence` operation, scrub included, in one call. Use the Bash tool with `timeout: 180000`:
 
 ```bash
 cd "{worktree}" && node "$HOME/.devflow/scripts/verify-evidence.cjs" publish --pr {PR_NUMBER} --evidence ".devflow/docs/evidence-{branch_slug}.md" --publication {REVIEW_PUBLICATION resolved in Phase 1, or auto}; echo "exit=$?"
@@ -647,9 +622,9 @@ Show the test plan's evidence from Phase 11: `Test plan: {VERIFIED-CI + ATTESTED
 <!-- compliance:end -->
 
 <!-- compliance:on -->
-If any Git agent output emitted `TRACEABILITY: DEGRADED ({reason})` lines during the run, or the fresh base step, Phase 10's push, Phase 11's push or Phase 11's script output carried one, surface them verbatim in the report under a `### Traceability` subsection so the user can act on them.
+If any Git agent output emitted `TRACEABILITY: DEGRADED ({reason})` lines during the run, or the fresh base step, Phase 10's push, Phase 11's push or Phase 11's script output carried one, surface them verbatim in the report under a `### Traceability` subsection.
 <!-- compliance:off -->
-If any Git agent output emitted `TRACEABILITY: DEGRADED ({reason})` lines during the run, or the compliance-off line of Phase 1, the fresh base step, Phase 10's push, Phase 11's push or Phase 11's script output carried one, surface them verbatim in the report under a `### Traceability` subsection so the user can act on them.
+If any Git agent output emitted `TRACEABILITY: DEGRADED ({reason})` lines during the run, or the compliance-off line of Phase 1, the fresh base step, Phase 10's push, Phase 11's push or Phase 11's script output carried one, surface them verbatim in the report under a `### Traceability` subsection.
 <!-- compliance:end -->
 
 If Phase 9 listed uncommitted files, show them as a `### Uncommitted files` subsection: the user commits them or discards them.
@@ -657,27 +632,6 @@ If Phase 9 listed uncommitted files, show them as a `### Uncommitted files` subs
 If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lines in the report.
 
 {{knowledge_writeback_after_load()}}
-
-## Architecture
-
-```
-/implement
-│
-├─ Phase 1: Setup
-├─ Phase 2: Implement
-├─ Phase 3: Polish
-├─ Phase 4: Self-Review
-├─ Phase 5: Alignment Check
-├─ Phase 6: Validate (the one full-suite slot)
-├─ Phase 7: QA Testing
-├─ Phase 8: Re-Validate (only if a qa-fix committed)
-├─ Phase 9: Open PR (every strategy)
-├─ Phase 10: CI Status Gate (every strategy)
-├─ Phase 11: Evidence
-├─ Phase 12: Report
-│
-└─ Feature Knowledge Write-Back (Conditional)
-```
 
 ## Principles
 

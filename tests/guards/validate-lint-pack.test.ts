@@ -585,7 +585,7 @@ describe('at lean, the Phase 8 re-validation runs the lint pack again with the P
 /** Named collector: how a copy of `/implement` fails to show Validate's `Lint pack:` line. */
 export function collectReportDefects(doc: Doc): string[] {
   const out: string[] = []
-  const phase12 = sectionBetween(doc.text, '### Phase 12: Report', '## Architecture')
+  const phase12 = sectionBetween(doc.text, '### Phase 12: Report', '## Principles')
   if (phase12 === null) out.push(`${doc.label}: no Phase 12 section`)
   else if (!phase12.includes("Validate's `Lint pack:` line if any")) out.push(`${doc.label}: Phase 12 does not show Validate's Lint pack line, if any`)
   const phase9 = sectionBetween(doc.text, '### Phase 9: Open PR', '### Phase 10:')

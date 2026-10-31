@@ -23,6 +23,10 @@
  * AND a fresh explicit authorisation. Ten have been granted and all ten are
  * spent — see the authorisation log in tests/goldens/github-status-lines.test.ts.
  *
+ * `implement-prompt` writes the compiled /implement prompt for the four variant keys
+ * (`implement.md`, `implement-curation-off.md`, `implement-compliance-off.md`,
+ * `implement-curation-compliance-off.md`) from the built `dist/` (run `npm run build:mds` first).
+ *
  * `install-snapshot` (#388) writes `install-snapshot-{config}.txt` for every config
  * in INSTALL_CONFIGS plus `hook-matrix.txt`, by installing the BUILT CLI into temp
  * sandboxes (run `npm run build` first). `--only` narrows it to named configs; the
@@ -30,7 +34,7 @@
  * only in fixture-only `test(snapshot):` commits.
  */
 
-import { writeFileSync, mkdirSync } from 'fs'
+import { readFileSync, writeFileSync, mkdirSync } from 'fs'
 import * as path from 'path'
 import { fileURLToPath } from 'url'
 import { variantOffRelPath } from '../src/core/curation-variants.js'
@@ -73,16 +77,28 @@ const targetArg = positional[0]
 // Resolved against ROOT so a relative --out-dir cannot depend on the caller's cwd.
 const destDir = outDirArg ? path.resolve(ROOT, outDirArg) : GOLDENS_DIR
 
+/** The compiled command `dist/commands/<name>`, or null when the build has not written it. */
+function readDistCommand(name: string): string | null {
+  try {
+    return readFileSync(path.join(ROOT, 'dist', 'commands', name), 'utf-8')
+  } catch {
+    return null
+  }
+}
+
 if (!targetArg) {
   console.error('Error: a named target is required.')
   console.error('')
   console.error('Usage: npm run test:golden:update -- <target>')
   console.error('       npm run test:golden:update -- git-agent')
   console.error('       npm run test:golden:update -- git-agent-compliance-off')
+  console.error('       npm run test:golden:update -- implement-prompt')
   console.error('       npm run test:golden:update -- github-status-lines --unfreeze')
   console.error('       npm run test:golden:update -- install-snapshot [--only <config>[,<config>]]')
   console.error('')
-  console.error('Available targets: git-agent, git-agent-compliance-off, github-status-lines, install-snapshot')
+  console.error(
+    'Available targets: git-agent, git-agent-compliance-off, implement-prompt, github-status-lines, install-snapshot',
+  )
   process.exit(1)
 }
 
@@ -123,6 +139,31 @@ if (targetArg === 'git-agent') {
   console.log(`Using ${variantOffRelPath('compliance-off', 'agents', 'git.md')}`)
   writeFileSync(dst, content, 'utf-8')
   console.log(`Written: ${dst} (${content.length} chars)`)
+} else if (targetArg === 'implement-prompt') {
+  // The four variant keys of the compiled /implement prompt, each with the golden it writes.
+  // All four sources are read before any file is written, so an absent one leaves no partial set.
+  const candidates = [
+    { golden: 'implement.md', label: 'dist/commands/implement.md', content: readDistCommand('implement.md') },
+    ...(['curation-off', 'compliance-off', 'both-off'] as const).map(key => ({
+      golden: `implement-${key === 'both-off' ? 'curation-compliance-off' : key}.md`,
+      label: variantOffRelPath(key, 'commands', 'implement.md'),
+      content: resolveVariantOffSource(key, 'commands', 'implement'),
+    })),
+  ]
+  const variants: { golden: string; label: string; content: string }[] = []
+  for (const { golden, label, content } of candidates) {
+    if (content === null) {
+      console.error(`Error: ${label} is absent. Run \`npm run build:mds\` first.`)
+      process.exit(1)
+    }
+    variants.push({ golden, label, content })
+  }
+  for (const { golden, label, content } of variants) {
+    const dst = path.join(destDir, golden)
+    console.log(`Using ${label}`)
+    writeFileSync(dst, content, 'utf-8')
+    console.log(`Written: ${dst} (${content.length} chars)`)
+  }
 } else if (targetArg === 'github-status-lines') {
   const content = extractStatusLines()
   const dst = path.join(destDir, 'github-status-lines.txt')
@@ -133,6 +174,8 @@ if (targetArg === 'git-agent') {
   for (const dst of writeInstallSnapshotGoldens(destDir, configs)) console.log(`Written: ${dst}`)
 } else {
   console.error(`Unknown target: '${targetArg}'`)
-  console.error('Available targets: git-agent, git-agent-compliance-off, github-status-lines, install-snapshot')
+  console.error(
+    'Available targets: git-agent, git-agent-compliance-off, implement-prompt, github-status-lines, install-snapshot',
+  )
   process.exit(1)
 }

@@ -701,6 +701,37 @@ describe('AC-9: /implement writes and checks the test plan before any Code spawn
   })
 })
 
+/**
+ * The compliance-on outputs hold one step that copies `PR_EXCEPTIONS` into the evidence file. It
+ * must sit after the missing-plan ask: the ask can add a `test-plan` exception to `PR_EXCEPTIONS`
+ * without writing the evidence file, and the `Test plan.` paragraph writes that file before the ask.
+ */
+const EVIDENCE_COPY = 'its `## Evidence Exceptions` section now a byte copy of `PR_EXCEPTIONS`'
+const EVIDENCE_COPY_ORDER: readonly OrderRule[] = [
+  { label: 'a step after the missing-plan ask copies PR_EXCEPTIONS into the evidence file', before: MISSING_ASK, after: EVIDENCE_COPY },
+  { label: 'that copy is set before Phase 2', before: EVIDENCE_COPY, after: '### Phase 2: Implement' },
+]
+
+describe('AC-9: the exception the missing-plan ask records reaches the evidence file (compliance-on builds)', () => {
+  it('a step after the missing-plan ask copies PR_EXCEPTIONS into EVIDENCE_FILE, with curation on and off', () => {
+    for (const [label, md] of [['curation on', implementMd()], ['curation off', implementMdOff()]] as const) {
+      expect(collectOrderViolations(`implement.md (${label})`, md, EVIDENCE_COPY_ORDER), label).toEqual([])
+    }
+  })
+
+  it('known-bad probes: a lost copy step and a copy moved above the ask are reported', () => {
+    const md = implementMd()
+    const bullet = md.split('\n').find(l => l.includes(EVIDENCE_COPY))
+    expect(bullet, 'the copy step is read').toBeDefined()
+    const lost = md.replace(`${bullet}\n`, '')
+    expect(lost, 'the seed must land').not.toBe(md)
+    expect(collectOrderViolations('implement.md', lost, EVIDENCE_COPY_ORDER).some(v => v.includes('anchor absent'))).toBe(true)
+    const hoisted = lost.replace(MISSING_ASK, `${bullet}\n\n${MISSING_ASK}`)
+    expect(hoisted, 'the seed must land').not.toBe(lost)
+    expect(collectOrderViolations('implement.md', hoisted, EVIDENCE_COPY_ORDER).some(v => v.includes('does not precede'))).toBe(true)
+  })
+})
+
 /** The missing-plan ask: from its gate to the blank line after its last option. Read from the evidence-asks reference. */
 function missingAskBlock(content: string): string | null {
   const start = content.indexOf(MISSING_ASK)
@@ -743,7 +774,8 @@ describe('AC-9: a missing test plan asks only under `required`, and a stop names
     expect(gates[0]).toContain('evidence-asks reference')
     expect(gates[0]).toContain('before any Code spawn')
     expect(gates[0], 'the ask itself lives in the reference').not.toContain('AskUserQuestion')
-    expect(md.split('skills/devflow:agent-references/references/commands/implement-evidence-asks.md').length - 1, 'one explicit read path').toBe(1)
+    expect(md.split('{ref_dir}/implement-evidence-asks.md').length - 1, 'one explicit read path').toBe(1)
+    expect(md.split('`{ref_dir}` is `<that directory>/skills/devflow:agent-references/references/commands`').length - 1, 'the path root is bound once').toBe(1)
   })
 
   it('the remedy quotes the canonical standard project file, and it parses', () => {
@@ -885,6 +917,74 @@ describe('AC-11: /implement appends claims the evidence script can read', () => 
 })
 
 // ---------------------------------------------------------------------------
+// /implement — the HEAD rule of the claim shapes (AC-11), in every build
+// ---------------------------------------------------------------------------
+//
+// The Test agent writes `HEAD: {before} → {after}` when HEAD moves during its run. That value is not a single
+// SHA, so no claim may be appended from the report. A reader who sees only the condition may take the `after`
+// SHA and append `sha:<after>`, a claim for a HEAD the tests did not all run at: a false pass. So the rule
+// states both the condition and the moved-HEAD example, in all four builds.
+
+type ImplementKey = 'on' | 'curation-off' | 'compliance-off' | 'both-off'
+
+const IMPLEMENT_KEYS: readonly ImplementKey[] = ['on', 'curation-off', 'compliance-off', 'both-off']
+
+function implementMdOfKey(key: ImplementKey): string {
+  if (key === 'on') return implementMd()
+  const text = resolveVariantOffSource(key, 'commands', 'implement')
+  if (text === null) throw new Error(`the ${key} build of /implement is absent: run \`npm run build:mds\``)
+  return text
+}
+
+const HEAD_RULE_LEAD = '- Append nothing from a report whose `HEAD:`'
+const HEAD_RULE_CONDITION = 'is not a single 40-hex SHA'
+const HEAD_RULE_EXAMPLE = 'a reported before/after change included'
+
+/** Named collector: what the HEAD rule bullet of the Evidence claims lacks, one defect per missing clause. */
+function collectHeadRuleDefects(file: string, text: string): string[] {
+  const rules = text.split('\n').filter(line => line.startsWith(HEAD_RULE_LEAD))
+  if (rules.length !== 1) return [`${file}: ${rules.length} HEAD rule bullets, expected 1`]
+  const out: string[] = []
+  if (!rules[0].includes(HEAD_RULE_CONDITION)) out.push(`${file}: the HEAD rule does not state the condition "${HEAD_RULE_CONDITION}"`)
+  if (!rules[0].includes(HEAD_RULE_EXAMPLE)) out.push(`${file}: the HEAD rule does not state the moved-HEAD example "${HEAD_RULE_EXAMPLE}"`)
+  return out
+}
+
+describe('AC-11: the HEAD rule of the claim shapes states the condition and the moved-HEAD example in every build', () => {
+  for (const key of IMPLEMENT_KEYS) {
+    const file = `${key} build of implement.md`
+
+    it(`${key}: the rule states "${HEAD_RULE_CONDITION}" and the before/after example`, () => {
+      expect(collectHeadRuleDefects(file, implementMdOfKey(key))).toEqual([])
+    })
+
+    it(`${key}: known-bad probe: a lost condition is reported as the condition, and no other clause`, () => {
+      const text = implementMdOfKey(key)
+      const broken = text.replace(HEAD_RULE_CONDITION, 'is not a SHA')
+      expect(broken, 'the condition seed must land').not.toBe(text)
+      expect(collectHeadRuleDefects(file, broken)).toEqual([`${file}: the HEAD rule does not state the condition "${HEAD_RULE_CONDITION}"`])
+    })
+
+    it(`${key}: known-bad probe: a lost example is reported as the example, and no other clause`, () => {
+      const text = implementMdOfKey(key)
+      const broken = text.replace(` — ${HEAD_RULE_EXAMPLE} —`, '')
+      expect(broken, 'the example seed must land').not.toBe(text)
+      expect(collectHeadRuleDefects(file, broken)).toEqual([`${file}: the HEAD rule does not state the moved-HEAD example "${HEAD_RULE_EXAMPLE}"`])
+    })
+
+    it(`${key}: known-bad probe: a missing or doubled rule bullet is reported by count`, () => {
+      const text = implementMdOfKey(key)
+      const lost = text.replace(HEAD_RULE_LEAD, '- Skip')
+      expect(lost, 'the loss seed must land').not.toBe(text)
+      expect(collectHeadRuleDefects(file, lost)).toEqual([`${file}: 0 HEAD rule bullets, expected 1`])
+      const rule = text.split('\n').find(line => line.startsWith(HEAD_RULE_LEAD))
+      expect(rule, 'the rule bullet must exist to double').toBeDefined()
+      expect(collectHeadRuleDefects(file, `${text}\n${rule}`)).toEqual([`${file}: 2 HEAD rule bullets, expected 1`])
+    })
+  }
+})
+
+// ---------------------------------------------------------------------------
 // /implement — REVIEW_PUBLICATION and Phase 11 (AC-11)
 // ---------------------------------------------------------------------------
 
@@ -980,7 +1080,6 @@ describe('0b: Phase 11 pushes the branch before the evidence call', () => {
   it('the Report surfaces the push\'s DEGRADED line and Phase 11 says the push never forces and never stops the run', () => {
     const md = implementMd()
     expect(md).toContain('or the fresh base step, Phase 10\'s push, Phase 11\'s push or Phase 11\'s script output carried one, surface them verbatim')
-    // The diagram's sub-bullet restated this paragraph and was cut; the Phase 11 body is the one statement.
     const phase = md.slice(md.indexOf(PHASE11), md.indexOf('### Phase 12: Report'))
     expect(phase).toContain('push the branch once before the script — never force, and no retry')
     expect(phase).toContain('does not block: record `TRACEABILITY: DEGRADED (evidence push failed)`')
@@ -1075,12 +1174,12 @@ describe('AC-11: Phase 11 runs the evidence script once, after Phase 10, for eve
 // re-validate on FIXED, no old pointer) pass vacuously when the text they read is
 // missing, so each has a probe that seeds the defect and a corpus assertion.
 
-/** The `### Phase N:` section: from its heading to the next phase heading or the Architecture section. */
+/** The `### Phase N:` section: from its heading to the next phase heading or the Principles section. */
 function phaseSection(md: string, heading: string): string | null {
   const at = md.indexOf(heading)
   if (at === -1) return null
   const rest = md.slice(at + heading.length)
-  const next = rest.search(/\n### Phase |\n## Architecture/)
+  const next = rest.search(/\n### Phase |\n## Principles/)
   return next === -1 ? md.slice(at) : md.slice(at, at + heading.length + next)
 }
 
@@ -1318,6 +1417,9 @@ function selfReviewBuilds(): ReadonlyArray<{ readonly label: string; readonly md
   ]
 }
 
+/** The line that opens the Phase 6 Validate spawn: ALIGNED, or a single-pass Fix that reports COMPLETE. */
+const PHASE_6_LEAD = 'After ALIGNED, or a single-pass Fix that reports COMPLETE, spawn Validate agent:'
+
 describe('#571, #572: /implement and Harden state the self-review scope, in both builds', () => {
   it.each(['curation on', 'curation off'])('%s: the three lines stand alone and the Phase 4 status line is unchanged', label => {
     const build = selfReviewBuilds().find(b => b.label === label)
@@ -1331,7 +1433,7 @@ describe('#571, #572: /implement and Harden state the self-review scope, in both
     expect(lines.filter(l => l === ALIGNMENT_NO_REVIEW_LINE), 'the #572 text, whole').toHaveLength(1)
     expect(build.harden.split('\n').filter(l => l === HARDEN_EMPTY_LINE), 'the Harden text, whole').toHaveLength(1)
     expect(build.harden.split('\n').filter(l => l === HARDEN_INPUT_LINE), 'the Harden input bullet, whole').toHaveLength(1)
-    expect(lines.some(l => l.startsWith('After Evaluate agent passes, spawn Validate agent:')), 'the Phase 6 spawn lead').toBe(true)
+    expect(lines.filter(l => l === PHASE_6_LEAD), 'the Phase 6 spawn lead, whole').toHaveLength(1)
   })
 
   it('known-bad probes: each line removed, each line moved onto a neighbour, a skip rewording and a lost name are reported', () => {
@@ -1515,6 +1617,114 @@ describe('#679, #680: the Validate and Test gates each state a BLOCKED arm that 
     const moved = seedOnce(seedOnce(md, `${p6}\n\n`, ''), afterPass, `then continue to Phase 7.\n\n${p6}\n\n${OTHER_STATUS_HALT}`)
     expect(collectBlockedArmDefects(moved)).toEqual(['Phase 6: the BLOCKED arm does not come before `**If PASS:**`'])
     expect(collectValidateOnceDefects(moved)).toEqual(['Phase 6 does not halt on any other or missing Status, once, after its PASS line'])
+  })
+})
+
+/** Phase 9 stops the run at the report when the Git agent opens no PR: its sentence says that Phases 10 and 11 do not run. */
+const PHASE_9_STOP = 'Phases 10 and 11 do not run'
+/** The Phase 11 skip rule, as the command words it. */
+const PHASE_11_SKIP_RULE = 'Skip it only when the run stopped before Phase 10.'
+/** The rule as it read before the fix: "an earlier phase" also reaches a stop in Phase 10, so a PR that Phase 9 opened got no evidence. */
+const PHASE_11_SKIP_RULE_EARLIER = 'Skip it only when an earlier phase stopped the run.'
+/** The Phase 10 lead sentence for a passing gate, which hands the run to Phase 11. */
+const PHASE_10_PASSING_ARM = '2. **If PASSING** → proceed to Phase 11.'
+
+/**
+ * Named collector (#675): the Phase 11 skip rule skips Phase 11 for every stop before Phase 10 and for no stop in Phase 10.
+ * Phase 7 (step 3) and Phase 9 each stop the run at the report and say that Phase 11 does not run, so the rule must cover
+ * both: it says "before Phase 10", or it names each of those phases. A Phase 10 stop leaves the PR that Phase 9 opened, and
+ * Phase 11 must still run for it, so a rule that says "earlier" or names Phase 10 or a later phase reaches that stop and is
+ * reported, and so is a Phase 10 that says Phase 11 does not run. A rule that names only Phase 9 leaves the Phase 7 stop with
+ * no skip rule. The stops are read from the phases, so a stop sentence that goes missing fails here and does not pass for
+ * lack of a subject.
+ */
+function collectPhase11SkipDefects(md: string): string[] {
+  const eleven = phaseSection(md, H.p11)
+  if (eleven === null) return [`${H.p11}: the section is absent`]
+  const rules = eleven.match(/Skip it only when [^.]*\./g) ?? []
+  if (rules.length !== 1) return [`Phase 11 holds ${rules.length} skip rules, expected 1`]
+  const rule = rules[0]
+  const bounded = /before Phase 10\b/.test(rule)
+  const unbounded = /\bearlier\b/.test(rule)
+  const out: string[] = []
+  if (unbounded || /Phase 1[0-2]/.test(rule.replace(/before Phase 10\b/, ''))) out.push('the Phase 11 skip rule reaches a Phase 10 stop, so the PR that Phase 9 opened gets no evidence')
+  for (const [phase, heading, stop] of [['Phase 7', H.p7, PHASE_7_STOP], ['Phase 9', H.p9, PHASE_9_STOP]] as const) {
+    if (!(phaseSection(md, heading) ?? '').includes(stop)) out.push(`${phase}: the stop sentence "${stop}" is absent, so the skip rule has no stop to cover`)
+    else if (!bounded && !unbounded && !rule.includes(phase)) out.push(`the Phase 11 skip rule does not cover the ${phase} stop`)
+  }
+  const ten = phaseSection(md, H.p10)
+  if (ten === null) out.push(`${H.p10}: the section is absent`)
+  else if (/\b11 do(es)? not run/.test(ten)) out.push('Phase 10 says that Phase 11 does not run, so the PR that it leaves gets no evidence')
+  return out
+}
+
+describe('#675: the Phase 11 skip rule skips Phase 11 for every stop before Phase 10 and for no stop in Phase 10, in all four builds', () => {
+  it.each(IMPLEMENT_KEYS)('%s: the rule covers the Phase 7 stop and the Phase 9 stop and leaves the Phase 10 stop to Phase 11', key => {
+    const md = implementMdOfKey(key)
+    expect(phaseSection(md, H.p7), `${key}: Phase 7 says that Phase 11 does not run`).toContain(PHASE_7_STOP)
+    expect(phaseSection(md, H.p9), `${key}: Phase 9 says that Phase 11 does not run`).toContain(PHASE_9_STOP)
+    expect(phaseSection(md, H.p10), `${key}: Phase 10 hands the run to Phase 11`).toContain(PHASE_10_PASSING_ARM)
+    expect(collectPhase11SkipDefects(md), key).toEqual([])
+    expect(phaseSection(md, H.p11), `${key}: the skip rule, whole`).toContain(` ${PHASE_11_SKIP_RULE} `)
+  })
+
+  it.each(IMPLEMENT_KEYS)('%s: known-bad probes: the earlier-phase rule, a rule that names only Phase 9, only Phase 7 or Phase 10, a missing rule, a lost stop sentence and a Phase 10 stop sentence are each reported', key => {
+    const md = implementMdOfKey(key)
+    const reachesTen = 'the Phase 11 skip rule reaches a Phase 10 stop, so the PR that Phase 9 opened gets no evidence'
+    expect(collectPhase11SkipDefects(seedOnce(md, PHASE_11_SKIP_RULE, PHASE_11_SKIP_RULE_EARLIER)), 'the rule that skipped Phase 11 after a Phase 10 stop').toEqual([reachesTen])
+    const onlyNine = seedOnce(md, PHASE_11_SKIP_RULE, 'Skip it only when Phase 9 stopped the run.')
+    expect(collectPhase11SkipDefects(onlyNine), 'the rule before the earlier-phase rule: it leaves the Phase 7 stop with no skip rule').toEqual(['the Phase 11 skip rule does not cover the Phase 7 stop'])
+    const onlySeven = seedOnce(md, PHASE_11_SKIP_RULE, 'Skip it only when Phase 7 stopped the run.')
+    expect(collectPhase11SkipDefects(onlySeven)).toEqual(['the Phase 11 skip rule does not cover the Phase 9 stop'])
+    const bothNamed = seedOnce(md, PHASE_11_SKIP_RULE, 'Skip it only when Phase 7 step 3 or Phase 9 stopped the run.')
+    expect(collectPhase11SkipDefects(bothNamed), 'a rule that names both stops covers both and leaves Phase 10 to Phase 11').toEqual([])
+    expect(collectPhase11SkipDefects(seedOnce(md, PHASE_11_SKIP_RULE, 'Skip it only when Phase 7 step 3, Phase 9 or Phase 10 stopped the run.'))).toEqual([reachesTen])
+    expect(collectPhase11SkipDefects(seedOnce(md, ` ${PHASE_11_SKIP_RULE}`, ''))).toEqual(['Phase 11 holds 0 skip rules, expected 1'])
+    expect(collectPhase11SkipDefects(seedOnce(md, PHASE_11_SKIP_RULE, `${PHASE_11_SKIP_RULE} ${PHASE_11_SKIP_RULE}`))).toEqual(['Phase 11 holds 2 skip rules, expected 1'])
+    expect(collectPhase11SkipDefects(seedOnce(onlyNine, PHASE_7_STOP, 'Phase 11 runs.'))).toEqual([
+      `Phase 7: the stop sentence "${PHASE_7_STOP}" is absent, so the skip rule has no stop to cover`,
+    ])
+    expect(collectPhase11SkipDefects(seedOnce(md, PHASE_10_PASSING_ARM, '2. **If PASSING** → stop at the report; Phase 11 does not run.'))).toEqual(['Phase 10 says that Phase 11 does not run, so the PR that it leaves gets no evidence'])
+    expect(collectPhase11SkipDefects(seedOnce(md, H.p10, '### Phase 10 gone'))).toEqual([`${H.p10}: the section is absent`])
+    expect(collectPhase11SkipDefects(seedOnce(md, H.p11, '### Phase 11 gone'))).toEqual([`${H.p11}: the section is absent`])
+  })
+})
+
+/**
+ * Named collector (#675): the Phase 6 lead-in names both paths into Phase 6 and the status that gates the second one.
+ * A single-pass Fix that reports FAILED or BLOCKED reports the misalignments to the user and starts no Phase 6, so a
+ * lead-in that says only that the Fix "completes" reads as "returns" and lets a reader start Phase 6 after a stop.
+ * The lead-in must say ALIGNED as a whole word (MISALIGNED is the opposite status) and must say that the Fix reports COMPLETE.
+ */
+function collectPhase6LeadDefects(md: string): string[] {
+  const six = phaseSection(md, H.p6)
+  if (six === null) return [`${H.p6}: the section is absent`]
+  const leads = six.split('\n').filter(l => l.endsWith('spawn Validate agent:'))
+  if (leads.length !== 1) return [`Phase 6 holds ${leads.length} Validate spawn leads, expected 1`]
+  const out: string[] = []
+  if (!/\bALIGNED\b/.test(leads[0])) out.push('the Phase 6 lead-in does not name ALIGNED')
+  if (!leads[0].includes('a single-pass Fix that reports COMPLETE')) out.push('the Phase 6 lead-in does not name the COMPLETE status of the single-pass Fix')
+  return out
+}
+
+describe('#675: the Phase 6 lead-in names the COMPLETE status of the single-pass Fix, in all four builds', () => {
+  it.each(IMPLEMENT_KEYS)('%s: the lead-in names ALIGNED and the COMPLETE status', key => {
+    const md = implementMdOfKey(key)
+    expect(md.split('\n').filter(l => l === PHASE_6_LEAD), `${key}: the lead-in, whole`).toHaveLength(1)
+    expect(collectPhase6LeadDefects(md), key).toEqual([])
+  })
+
+  it.each(IMPLEMENT_KEYS)('%s: known-bad probes: the word completes, a lost status, a lost ALIGNED, MISALIGNED in its place, no lead-in, two leads and no section are each reported', key => {
+    const md = implementMdOfKey(key)
+    const noStatus = 'the Phase 6 lead-in does not name the COMPLETE status of the single-pass Fix'
+    expect(collectPhase6LeadDefects(seedOnce(md, PHASE_6_LEAD, 'After ALIGNED or a single-pass fix completes, spawn Validate agent:')), 'the lead-in before the fix').toEqual([noStatus])
+    expect(collectPhase6LeadDefects(seedOnce(md, PHASE_6_LEAD, 'After ALIGNED, or a single-pass Fix that returns, spawn Validate agent:'))).toEqual([noStatus])
+    expect(collectPhase6LeadDefects(seedOnce(md, PHASE_6_LEAD, 'After a single-pass Fix that reports COMPLETE, spawn Validate agent:'))).toEqual(['the Phase 6 lead-in does not name ALIGNED'])
+    expect(collectPhase6LeadDefects(seedOnce(md, PHASE_6_LEAD, 'After the gates, spawn Validate agent:'))).toEqual(['the Phase 6 lead-in does not name ALIGNED', noStatus])
+    expect(collectPhase6LeadDefects(seedOnce(md, PHASE_6_LEAD, 'After MISALIGNED, or a single-pass Fix that reports COMPLETE, spawn Validate agent:')), 'MISALIGNED holds the letters of ALIGNED but is not the status').toEqual(['the Phase 6 lead-in does not name ALIGNED'])
+    expect(collectPhase6LeadDefects(seedOnce(md, `${PHASE_6_LEAD}\n`, ''))).toEqual(['Phase 6 holds 0 Validate spawn leads, expected 1'])
+    expect(collectPhase6LeadDefects(seedOnce(md, PHASE_6_LEAD, `${PHASE_6_LEAD}\n${PHASE_6_LEAD}`))).toEqual(['Phase 6 holds 2 Validate spawn leads, expected 1'])
+    expect(collectPhase6LeadDefects(seedOnce(md, H.p6, '### Phase 6 gone'))).toEqual([`${H.p6}: the section is absent`])
   })
 })
 
@@ -1956,8 +2166,6 @@ function collectPointerDefects(md: string, revalidate: string = revalidateRefere
   need('the TP claims are not tied to Phase 7', md.includes('`TP-<n>` — after every Phase 7 run'))
   need('the Test spawn does not point at Phase 6\'s claims', md.includes('append its TP claims (Phase 6\'s **Evidence claims**)'))
   need('the continuation path names no order', revalidate.includes('**Run Phases 3-8** — Polish (at `full`), Self-Review, Alignment, the one full Validate, QA Testing and the conditional Re-Validate'))
-  need('the diagram lacks the Phase 6 Validate', md.includes('├─ Phase 6: Validate (the one full-suite slot)'))
-  need('the diagram lacks the Phase 8 Re-Validate', md.includes('├─ Phase 8: Re-Validate (only if a qa-fix committed)'))
   need('the Orchestration-only principle does not name the Phase 10 push and the ci-wait call', /\*\*Orchestration only\*\*[^\n]*Phase 10[^\n]*push[^\n]*ci-wait call/.test(md))
   out.push(...collectInlineResolverDefects(md))
   need('the Loop-limits principle does not carry the CI gate budget', /\*\*Loop limits\*\*[^\n]*at most 3 waits and 2 fixes/.test(md))
@@ -2593,6 +2801,47 @@ describe('#669 and #648: the re-validation pointers stay valid in the compliance
         expect(countOf(phaseSection(seedOnce(md, text, '**Renamed rule**'), H.p1) ?? '', text), `${label}: ${text} renamed`).toBe(0)
         expect(countOf(phaseSection(seedOnce(md, text, `${text} ${text}`), H.p1) ?? '', text), `${label}: ${text} twice`).toBe(2)
       }
+    }
+  })
+})
+
+describe('the compliance-on Phase 1 names the evidence script as the owner of the publication value', () => {
+  const OWNER_SENTENCE =
+    'Phase 11 passes the resolved value to the evidence script (`publish`), which decides what each value means for the evidence comment.'
+  const COMPLIANCE_ON_BUILDS = [['curation on', implementMd], ['curation off', implementMdOff]] as const
+
+  /** Named collector: the owner sentence sits in Phase 1 exactly once, whole, and has no copy in another phase. */
+  function collectOwnerSentenceDefects(md: string): string[] {
+    const one = phaseSection(md, H.p1)
+    if (one === null) return [`${H.p1}: the section is absent`]
+    const out: string[] = []
+    const inOne = countOf(one, OWNER_SENTENCE)
+    if (inOne !== 1) out.push(`Phase 1 holds the owner sentence ${inOne} times, expected 1`)
+    const elsewhere = countOf(md, OWNER_SENTENCE) - inOne
+    if (elsewhere !== 0) out.push(`the build holds the owner sentence ${elsewhere} times outside Phase 1, expected 0`)
+    return out
+  }
+
+  it('both compliance-on builds say that the evidence script, not the publication gate, decides what each value means', () => {
+    for (const [label, build] of COMPLIANCE_ON_BUILDS) {
+      expect(collectOwnerSentenceDefects(build()), label).toEqual([])
+    }
+  })
+
+  it('known-bad probes: a lost clause, a removed sentence, a doubled sentence, a moved sentence and a copy in another phase are each reported', () => {
+    const shortened = OWNER_SENTENCE.replace(', which decides what each value means for the evidence comment', '')
+    expect(shortened).not.toBe(OWNER_SENTENCE)
+    for (const [label, build] of COMPLIANCE_ON_BUILDS) {
+      const md = build()
+      expect(collectOwnerSentenceDefects(seedOnce(md, OWNER_SENTENCE, shortened)), `${label}: the clause is lost`).toEqual(['Phase 1 holds the owner sentence 0 times, expected 1'])
+      expect(collectOwnerSentenceDefects(seedOnce(md, `${OWNER_SENTENCE} `, '')), `${label}: the sentence is removed`).toEqual(['Phase 1 holds the owner sentence 0 times, expected 1'])
+      expect(collectOwnerSentenceDefects(seedOnce(md, OWNER_SENTENCE, `${OWNER_SENTENCE} ${OWNER_SENTENCE}`)), `${label}: the sentence is doubled`).toEqual(['Phase 1 holds the owner sentence 2 times, expected 1'])
+      expect(collectOwnerSentenceDefects(`${seedOnce(md, `${OWNER_SENTENCE} `, '')}\n${OWNER_SENTENCE}\n`), `${label}: the sentence is moved out of Phase 1`).toEqual([
+        'Phase 1 holds the owner sentence 0 times, expected 1',
+        'the build holds the owner sentence 1 times outside Phase 1, expected 0',
+      ])
+      expect(collectOwnerSentenceDefects(`${md}\n${OWNER_SENTENCE}\n`), `${label}: a copy sits in another phase`).toEqual(['the build holds the owner sentence 1 times outside Phase 1, expected 0'])
+      expect(collectOwnerSentenceDefects(seedOnce(md, H.p1, '### Phase 1 gone')), `${label}: no Phase 1 section`).toEqual([`${H.p1}: the section is absent`])
     }
   })
 })

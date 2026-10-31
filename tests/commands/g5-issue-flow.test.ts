@@ -380,8 +380,6 @@ const TIMING_SITES: readonly TimingSite[] = [
     label: 'Phase 10 sentence',
     find: md => soleLine(sliceBetween(md, '### Phase 10: CI Status Gate', '\n### '), l => l.startsWith('Run under every strategy')),
   },
-  { label: 'Architecture Phase 9', find: md => soleLine(md, l => l.includes('├─ Phase 9:')) },
-  { label: 'Architecture Phase 10', find: md => soleLine(md, l => l.includes('├─ Phase 10:')) },
   { label: 'CI-awareness principle', find: md => soleLine(md, l => /^\d+\. \*\*CI awareness\*\*/.test(l)) },
 ]
 
@@ -426,8 +424,6 @@ const PRE_PR_BY_GIT_TIMING: Readonly<Record<string, string>> = {
   'Phase 10 sentence':
     'Strategy-conditional: run when the PR already exists — **SINGLE_CODE_AGENT** and **SEQUENTIAL_CODE_AGENTS** ' +
     '(the Phase 2 Code agent creates it); skip for **PARALLEL_CODE_AGENTS** (its unified PR is created in Phase 10).',
-  'Architecture Phase 9': '├─ Phase 9: Open PR (PARALLEL_CODE_AGENTS only)',
-  'Architecture Phase 10': '├─ Phase 10: CI Status Gate (SINGLE_CODE_AGENT + SEQUENTIAL_CODE_AGENTS; skipped for PARALLEL_CODE_AGENTS)',
   'CI-awareness principle':
     '12. **CI awareness** - CI status is checked before merge for SINGLE_CODE_AGENT and SEQUENTIAL_CODE_AGENTS, whose PR exists from ' +
     'Phase 2; skipped for PARALLEL_CODE_AGENTS, whose PR is created in Phase 10',

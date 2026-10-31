@@ -20,7 +20,8 @@
  *
  * Arms, each through a named collector with a known-bad probe and a non-empty corpus:
  *
- *   - the eight load hosts (the seven that call `knowledge_load()` and `release`) carry the block
+ *   - the eight load hosts (six call `knowledge_load()`, implement calls `knowledge_load_after_root()`,
+ *     and `release`) carry the block
  *     format, the Bash heading listing and the legacy label, and never the Grep tool;
  *   - no shipped prompt tells an agent to read a KB in full or to concatenate whole KBs;
  *   - every spawn site that passes the input names the variable of its tier;
@@ -40,7 +41,7 @@ import { ROOT, collectCodeSpawnSites, requireDistFile, requireDistFiles, resolve
 
 const LOAD_HEADING = '### Load Feature Knowledge'
 
-/** The commands that call `knowledge_load()`, plus release, which loads by the same delivery. */
+/** The commands that call `knowledge_load()` or `knowledge_load_after_root()`, plus release, which loads by the same delivery. */
 export const LOAD_HOSTS: readonly string[] = [
   'bug-analysis', 'code-review', 'implement', 'plan', 'release', 'research', 'resolve', 'self-review',
 ]
@@ -67,12 +68,24 @@ const LOAD_ELEMENTS: ReadonlyArray<{ readonly label: string; readonly literal: s
   { label: 'the none state', literal: 'set both to `(none)`' },
 ]
 
-/** The section of a compiled command that `knowledge_load()` expands to. */
+/**
+ * The opening of the load steps' last paragraph (the legacy-KB note after Step 4's example block).
+ * `knowledge_load()` closes with one more line after it; `knowledge_load_after_root()`, which implement
+ * calls after its docs-root step, does not. The section ends with this paragraph in both forms.
+ */
+const LOAD_STEPS_LAST = 'A KB with no Rules section labels'
+
+/** The section of a compiled command that `knowledge_load()` or `knowledge_load_after_root()` expands to. */
 export function loadSection(text: string): string | null {
   const start = text.indexOf(LOAD_HEADING)
   if (start === -1) return null
-  const end = text.indexOf('**One git call, then direct reads', start)
-  return end === -1 ? text.slice(start) : text.slice(start, text.indexOf('\n', end) + 1)
+  const last = text.indexOf(LOAD_STEPS_LAST, start)
+  if (last !== -1) {
+    const lineEnd = text.indexOf('\n', last)
+    return lineEnd === -1 ? text.slice(start) : text.slice(start, lineEnd + 1)
+  }
+  const next = text.indexOf('\n### ', start + LOAD_HEADING.length)
+  return next === -1 ? text.slice(start) : text.slice(start, next + 1)
 }
 
 /** Named collector: how a compiled command's load text falls short of the block delivery. */
@@ -121,6 +134,30 @@ describe('the load text delivers a block per KB (D-KB-DELIVERY-TIERS, D-KB-LEGAC
     const grep = real.replace("command grep -n '^## '", "the Grep tool with pattern '^## '")
     expect(collectLoadDefects('implement', grep).some(d => d.includes('names the Grep tool'))).toBe(true)
     expect(collectLoadDefects('x', 'no load here')).toEqual(['x: no "### Load Feature Knowledge" section'])
+  })
+
+  it('the load section ends with the load steps in both forms, so text after it is not read as load text', () => {
+    expect(read('src/assets/commands/_partials/_knowledge.mds'), 'the end marker must stay in the partial').toContain(LOAD_STEPS_LAST)
+    let afterRoot = 0
+    for (const name of LOAD_HOSTS) {
+      const text = requireDistFile(`${name}.md`)
+      const section = loadSection(text) as string
+      expect(section.endsWith('set both to `(none)`.\n'), `${name}: the section ends with the none state`).toBe(true)
+      expect(section, `${name}: nothing after the load steps`).not.toContain('**Fresh base.**')
+      if (!section.includes('Resolve `{worktree}` as the checkout')) afterRoot++
+    }
+    expect(afterRoot, 'exactly implement loads through the after-root form').toBe(1)
+    // Known-bad probe: a Grep mention and a doubled element AFTER the section are not load text.
+    const real = requireDistFile('implement.md')
+    const after = real.replace('**Fresh base.**', '**Fresh base.** Use the Grep tool. Headings: L5 Rules · L40 Overview.')
+    expect(after, 'the seed must land').not.toBe(real)
+    expect(collectLoadDefects('implement', after)).toEqual([])
+    // The same seeds inside the steps are reported.
+    const inside = real.replace('A KB with no Rules section labels', 'Use the Grep tool. A KB with no Rules section labels')
+    expect(collectLoadDefects('implement', inside).some(d => d.includes('names the Grep tool'))).toBe(true)
+    // Without the end marker the section stops at the next heading, never at the end of the command.
+    const unmarked = real.replace(LOAD_STEPS_LAST, 'A KB without Rules labels')
+    expect(loadSection(unmarked)).not.toContain('### Phase 2: Implement')
   })
 })
 

@@ -273,6 +273,28 @@ function collectPolicyLines(text: string): { templates: string[]; literals: stri
   }
 }
 
+/** The paragraph of the define body that states which output is accepted. */
+function acceptParagraph(body: string): string {
+  const paragraphs = body.split('\n\n').filter(p => p.startsWith('Accept the output only when'))
+  if (paragraphs.length !== 1) throw new Error(`expected one accept paragraph, found ${paragraphs.length}`)
+  return paragraphs[0]
+}
+
+/**
+ * Named collector: the defects of the define's literal fallback. It appears once in the
+ * whole block, and the accept paragraph ends on it. The literal is read from the script,
+ * so the prompt and the script's own printed line cannot drift apart. It does NOT check
+ * what the rest of the paragraph says; the template guards above hold the grammar.
+ */
+function collectFallbackDefects(body: string): string[] {
+  const literal = RESOLVER.FAIL_CLOSED_LINE
+  const defects: string[] = []
+  const count = body.split(literal).length - 1
+  if (count !== 1) defects.push(`the literal appears ${count} times (expected 1)`)
+  if (!acceptParagraph(body).endsWith(`⇒ use \`${literal}\` instead.`)) defects.push('the final clause is not the literal fallback')
+  return defects
+}
+
 /** Escape a literal for a RegExp source. */
 function escapeRe(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\/-]/g, '\\$&')
@@ -549,6 +571,38 @@ describe('AC-2: the parse is pinned to the script\'s OUTPUT_LINE_RE', () => {
     const { literals } = collectPolicyLines(`use \`${drifted}\` instead`)
     expect(literals).toEqual([drifted])
     expect(literals).not.toEqual([RESOLVER.FAIL_CLOSED_LINE])
+  })
+
+  it('the fallback literal appears once in the block, as the final clause of the accept paragraph', () => {
+    expect(collectFallbackDefects(builtExpansion())).toEqual([])
+  })
+
+  it('known-bad probes: a deleted, reworded, repeated or misplaced fallback literal is reported', () => {
+    const body = builtExpansion()
+    const literal = RESOLVER.FAIL_CLOSED_LINE
+    const seed = (seeded: string): string => {
+      expect(seeded, 'the seed must land').not.toBe(body)
+      return seeded
+    }
+    const bothDefects = [
+      'the literal appears 0 times (expected 1)',
+      'the final clause is not the literal fallback',
+    ]
+
+    expect(collectFallbackDefects(seed(body.replace(literal, '')))).toEqual(bothDefects)
+    expect(collectFallbackDefects(seed(body.replace(literal, literal.replace('ISSUE_REQUIRED=true', 'ISSUE_REQUIRED=false'))))).toEqual(bothDefects)
+    expect(collectFallbackDefects(seed(`${body}\nIf the line is refused, use \`${literal}\`.`))).toEqual([
+      'the literal appears 2 times (expected 1)',
+    ])
+    expect(collectFallbackDefects(seed(body.replace(' instead.', ' instead. And more.')))).toEqual([
+      'the final clause is not the literal fallback',
+    ])
+    const moved = body
+      .replace(` ⇒ use \`${literal}\` instead.`, ' ⇒ stop.')
+      .replace(/(\n\nSet `EVIDENCE_POLICY`[^\n]*)$/, `$1 On refusal use \`${literal}\`.`)
+    expect(collectFallbackDefects(seed(moved))).toEqual([
+      'the final clause is not the literal fallback',
+    ])
   })
 })
 

@@ -16,7 +16,9 @@
  *
  * What this file holds, each arm through a named collector and a known-bad probe over the same collector:
  *   a. The Gate level block of each command, closed to the read paragraph and the three bullets, in its place,
- *      outside every curation arm of the source.
+ *      outside every curation arm of the source. `/implement` reads its file under a placeholder, so it also pins the
+ *      one paragraph that binds the placeholder: the sanctioned print, run once before the first reference Read and again
+ *      when the placeholder is out of view, and the references folder.
  *   b. The data flow: `GATE_LEVEL` in the Produces and Requires lines that carry it.
  *   c. The fail-closed bullet: no row applied, the level kept, and the Phase 6 Validate prompt still carries it.
  *   d. The reference grammar: title, headings, header, closed phase set, cell grammar (a never-skip phase takes no
@@ -57,6 +59,13 @@ import { DECIDED_ROWS, FULL_LOOP_LINES, LEVELS, LEVEL_CELL_INDEX, OPEN, POLISH_S
 // ---------------------------------------------------------------------------
 
 const LEVEL_DIR = 'skills/devflow:agent-references/references/commands'
+/** The placeholder `/implement` reads its references through, and the one paragraph that binds it. */
+const IMPLEMENT_REF_DIR = '{ref_dir}'
+const IMPLEMENT_BINDER = `**Agent references.** Print the config directory once, before the first reference Read: run \`${SANCTIONED_RESOLUTION_PRINT}\` in Bash. \`${IMPLEMENT_REF_DIR}\` is \`<that directory>/${LEVEL_DIR}\`. Read each reference with the Read tool. When \`${IMPLEMENT_REF_DIR}\` is not in view (for example after a compaction), print the directory again with the same line.`
+/** The back-pointer inside the `/implement` read sentence: a session resumes from the phase heading after a compaction, so the one read that runs after Phase 1 names the binder and says to print the directory again with its line. */
+const IMPLEMENT_BACK_POINTER_SET = `\`${IMPLEMENT_REF_DIR}\` is set in **Agent references.**`
+const IMPLEMENT_BACK_POINTER_REPRINT = 'if it is not in view, print the directory again with that line'
+const IMPLEMENT_BACK_POINTER = `(${IMPLEMENT_BACK_POINTER_SET}; ${IMPLEMENT_BACK_POINTER_REPRINT})`
 const TABLE_HEADER = '| Phase | standard | lean |'
 
 const GRAMMAR_CELL = "- **Cell:** `-` runs the phase as written; `skip`, alone, skips it; `apply: <name>` applies the `## Rules` bullet `<name>`; `pass level` puts the line `GATE_LEVEL: {GATE_LEVEL}` first in every spawn prompt of the phase, right after a leading `OPERATION:` line. A phase with no spawn takes only `-`. Join `apply:` and `pass level` with `; `. Each `apply:` names exactly one bullet. Any other cell is malformed."
@@ -112,6 +121,14 @@ interface LevelSpec {
   readonly grammar: readonly string[]
   /** The block: the read paragraph, the three bullets, the condition inside the read and the fail-closed needles. */
   readonly readParagraph: string
+  /** The phrases of the read paragraph that a probe removes one at a time. */
+  readonly readPhrases: readonly string[]
+  /**
+   * The one paragraph that runs the sanctioned print and names the reference folder under the resolved directory, when the read
+   * paragraph reads its file under a placeholder that this paragraph binds. Absent: the read paragraph holds the print and the path.
+   * Joined, the paragraph and the read give the sanctioned print and the exact reference path, as the one-paragraph read did.
+   */
+  readonly binder?: string
   readonly items: readonly string[]
   readonly levelCondition: string
   /** Parts of `items[1]`, in its order. The exact pin of the block already implies them: they name the part that is missing. */
@@ -165,7 +182,9 @@ const IMPLEMENT: LevelSpec = {
     "- **Scope:** a row changes only its own phase's spawns and prompts. It adds no shell command, file write, push or GitHub action. It removes no security check, except that a `4 Self-Review` row may skip Harden, only through the Rules bullet `harden-scope`. It keeps Validate, the CI gate, the evidence claims and the compliance directive. An enabled compliance lens keeps Harden.",
     '- **Malformed:** no `## Phases` heading, no `| Phase | standard | lean |` header, or a row that breaks this grammar. Then the command applies no row.',
   ],
-  readParagraph: `${OPEN} ${IMPLEMENT_CONDITION}, run \`${SANCTIONED_RESOLUTION_PRINT}\` in Bash and Read \`<that directory>/${LEVEL_DIR}/implement-levels.md\` with the Read tool, and apply each row to the phase it names.`,
+  readParagraph: `${OPEN} ${IMPLEMENT_CONDITION}, Read \`${IMPLEMENT_REF_DIR}/implement-levels.md\` ${IMPLEMENT_BACK_POINTER}, and apply each row to the phase it names.`,
+  readPhrases: [IMPLEMENT_CONDITION.split(',')[0], 'once per run', `${IMPLEMENT_REF_DIR}/implement-levels.md`, IMPLEMENT_BACK_POINTER_SET, IMPLEMENT_BACK_POINTER_REPRINT, 'apply each row to the phase it names'],
+  binder: IMPLEMENT_BINDER,
   items: [
     FLOOR_FIRST,
     `${FAIL_CLOSED_HEAD}apply no row, keep \`GATE_LEVEL\` and ${UNREADABLE}`,
@@ -209,6 +228,7 @@ const RESOLVE: LevelSpec = {
     '- **Malformed:** no `## Phases` heading, no `| Phase | standard | lean |` header, or a row that breaks this grammar. Then the command applies no row in any worktree.',
   ],
   readParagraph: `${OPEN} Each worktree keeps its own \`GATE_LEVEL\`. ${RESOLVE_CONDITION}, run \`${SANCTIONED_RESOLUTION_PRINT}\` in Bash and Read \`<that directory>/${LEVEL_DIR}/resolve-levels.md\` with the Read tool, and apply each row to the phase it names, as the reference says.`,
+  readPhrases: [RESOLVE_CONDITION.split(',')[0], SANCTIONED_RESOLUTION, 'with the Read tool', 'once per run', 'apply each row to the phase it names'],
   items: [
     FLOOR_FIRST,
     `${FAIL_CLOSED_HEAD}apply no row in any worktree, keep every \`GATE_LEVEL\` and ${UNREADABLE}`,
@@ -331,6 +351,33 @@ export function collectBlockArmDefects(source: string, spec: LevelSpec): string[
     if (inBlock && arm !== null) { out.push(`the gate-level block sits inside a curation:${arm} arm`); break }
   }
   if (!seen) out.push('the source has no gate-level block')
+  return out
+}
+
+/** The defect for a reference-folder paragraph that is not the pinned one. */
+const binderNotPinned = (paragraph: string): string => `the reference-folder paragraph is not the pinned one: ${paragraph.slice(0, 200)}`
+
+/**
+ * The gate-level read of a command whose read paragraph names its file under a placeholder: the paragraph that binds the placeholder is the
+ * pinned one, it occurs once, it comes before the Gate level block, and it holds the only sanctioned print in the command. The read paragraph
+ * is pinned by `collectLevelBlockDefects`. The two pins together give the read what the one-paragraph form pinned: the sanctioned print, run
+ * once before the first reference Read and again when the placeholder is out of view, and the exact reference path under the resolved
+ * directory. A command with no binder returns no defect.
+ */
+export function collectReferenceBinderDefects(body: string, spec: LevelSpec): string[] {
+  const binder = spec.binder
+  if (binder === undefined) return []
+  const out: string[] = []
+  const paragraphs = body.split('\n\n')
+  const opens = paragraphs.filter(p => p.startsWith('**Agent references.**'))
+  if (opens.length === 0) return ['no reference-folder paragraph']
+  if (opens.length > 1) out.push(`the command holds ${opens.length} reference-folder paragraphs, expected 1`)
+  if (!opens.includes(binder)) out.push(binderNotPinned(opens[0]))
+  const prints = countOf(body, SANCTIONED_RESOLUTION)
+  if (prints !== 1) out.push(`the command holds ${prints} sanctioned resolution lines, expected 1`)
+  const block = body.indexOf(OPEN)
+  const at = body.indexOf(opens[0])
+  if (block !== -1 && at > block) out.push('the reference-folder paragraph comes after the Gate level block')
   return out
 }
 
@@ -1749,6 +1796,43 @@ describe('the command carries one Gate level block, closed and in its place (AC-
     expect(collectLevelBlockDefects(body, spec)).toEqual([])
   })
 
+  it.each(BUILDS)('$label: the reference-folder paragraph is the pinned one, once, before the block, and holds the only sanctioned print', ({ spec, body }) => {
+    expect(collectReferenceBinderDefects(body, spec)).toEqual([])
+  })
+
+  it('implement: the paragraph and the read joined give the sanctioned print and the exact path of implement-levels.md', () => {
+    // The gate-level read once held the print and the path in one sentence. Now the binder holds the print and the folder, and the read holds the file.
+    for (const { spec, body } of BUILDS.filter(b => b.spec.cmd === 'implement')) {
+      const paragraphs = body.split('\n\n')
+      const binder = paragraphs.find(p => p.startsWith('**Agent references.**')) ?? ''
+      const folder = binder.split(`\`${IMPLEMENT_REF_DIR}\` is \``)[1]?.split('`')[0]
+      const file = (paragraphs.find(p => p.startsWith(OPEN)) ?? '').split(`Read \`${IMPLEMENT_REF_DIR}/`)[1]?.split('`')[0]
+      expect(binder, `${spec.cmd}: the binder runs the sanctioned print`).toContain(`run \`${SANCTIONED_RESOLUTION_PRINT}\` in Bash`)
+      expect(`${folder}/${file}`, `${spec.cmd}: the read path`).toBe(`<that directory>/${LEVEL_DIR}/implement-levels.md`)
+    }
+  })
+
+  it('implement: known-bad probes: a loosened print or folder, a lost phrase, a second paragraph, a second print and a paragraph after the block are reported', () => {
+    const body = bodyOf(IMPLEMENT)
+    const binder = IMPLEMENT.binder as string
+    needsBlock(body, IMPLEMENT)
+    expect(body.includes(binder), 'the compiled command carries the pinned reference-folder paragraph').toBe(true)
+    const defects = (text: string): string[] => collectReferenceBinderDefects(text, IMPLEMENT)
+    const loosePrint = binder.replace(SANCTIONED_RESOLUTION, 'd="$HOME/.claude";')
+    expect(defects(seed(body, binder, loosePrint))).toEqual([binderNotPinned(loosePrint), 'the command holds 0 sanctioned resolution lines, expected 1'])
+    const looseFolder = binder.replace(`<that directory>/${LEVEL_DIR}`, '$HOME/.claude/skills')
+    expect(defects(seed(body, binder, looseFolder))).toEqual([binderNotPinned(looseFolder)])
+    for (const phrase of ['before the first reference Read', 'in Bash', `\`${IMPLEMENT_REF_DIR}\` is`, 'with the Read tool', 'is not in view', 'print the directory again with the same line']) {
+      const edited = binder.replace(phrase, 'removed')
+      expect(edited, `"${phrase}" is in the reference-folder paragraph`).not.toBe(binder)
+      expect(defects(seed(body, binder, edited)), `removing "${phrase}"`).toEqual([binderNotPinned(edited)])
+    }
+    expect(defects(`${body.trimEnd()}\n\n${binder}\n`)).toEqual(['the command holds 2 reference-folder paragraphs, expected 1', 'the command holds 2 sanctioned resolution lines, expected 1'])
+    expect(defects(`${body}\nRun \`${SANCTIONED_RESOLUTION_PRINT}\` in Bash.\n`)).toEqual(['the command holds 2 sanctioned resolution lines, expected 1'])
+    expect(defects(`${seed(body, `${binder}\n\n`, '').trimEnd()}\n\n${binder}`)).toEqual(['the reference-folder paragraph comes after the Gate level block'])
+    expect(defects(seed(body, '**Agent references.**', '**Refs.**'))).toEqual(['no reference-folder paragraph'])
+  })
+
   it.each(SPECS)('$cmd: the source holds the block outside every curation arm', spec => {
     expect(collectBlockArmDefects(SOURCES[spec.cmd], spec)).toEqual([])
   })
@@ -1761,13 +1845,16 @@ describe('the command carries one Gate level block, closed and in its place (AC-
     for (const item of spec.items) {
       expect(defects(seed(body, `- ${item}`, `- ${dropWord(item)}`)), `dropping a word of "${item.slice(0, 40)}"`).toContain(`the block lacks: ${item.slice(0, 60)}`)
     }
-    for (const phrase of [spec.levelCondition.split(',')[0], SANCTIONED_RESOLUTION, 'with the Read tool', 'once per run', 'apply each row to the phase it names']) {
+    for (const phrase of spec.readPhrases) {
       const edited = spec.readParagraph.replace(phrase, 'removed')
       expect(edited, `"${phrase.slice(0, 40)}" is in the read paragraph`).not.toBe(spec.readParagraph)
       expect(defects(seed(body, spec.readParagraph, edited)), `removing "${phrase.slice(0, 40)}"`).toEqual([notPinned(edited)])
     }
-    expect(defects(seed(body, spec.readParagraph, spec.readParagraph.replace(`<that directory>/${LEVEL_DIR}`, '$HOME/.claude/skills')))).toEqual([notPinned(spec.readParagraph.replace(`<that directory>/${LEVEL_DIR}`, '$HOME/.claude/skills'))])
-    expect(defects(seed(body, spec.readParagraph, spec.readParagraph.replace(SANCTIONED_RESOLUTION, 'd="$HOME/.claude";')))).toEqual([notPinned(spec.readParagraph.replace(SANCTIONED_RESOLUTION, 'd="$HOME/.claude";'))])
+    if (spec.binder === undefined) {
+      // The read paragraph holds the print and the path itself. A command with a binder holds them in the binder, and the next test probes them there.
+      expect(defects(seed(body, spec.readParagraph, spec.readParagraph.replace(`<that directory>/${LEVEL_DIR}`, '$HOME/.claude/skills')))).toEqual([notPinned(spec.readParagraph.replace(`<that directory>/${LEVEL_DIR}`, '$HOME/.claude/skills'))])
+      expect(defects(seed(body, spec.readParagraph, spec.readParagraph.replace(SANCTIONED_RESOLUTION, 'd="$HOME/.claude";')))).toEqual([notPinned(spec.readParagraph.replace(SANCTIONED_RESOLUTION, 'd="$HOME/.claude";'))])
+    }
     expect(defects(seed(body, OPEN, '**Level.**'))).toEqual(['no "**Gate level.**" block'])
   })
 

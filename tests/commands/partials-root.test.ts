@@ -32,7 +32,8 @@ import { execSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { requireDistFile, requireDistFiles, resolveAgentSource } from '../helpers.js';
+import { OFF_VARIANT_KEYS } from '../../src/core/curation-variants.js';
+import { requireDistFile, requireDistFiles, resolveAgentSource, resolveVariantOffSource } from '../helpers.js';
 
 const DECISIONS_HEADING = '### Load DECISIONS_CONTEXT';
 const AUTHORING_DECISIONS_HEADING = '### DECISIONS_CONTEXT — obtain BEFORE authoring';
@@ -72,6 +73,32 @@ function collectWritebackRootDefects(text: string): string[] {
     return command === null ? [] : ['the write-back repeats the root the load step resolved'];
   }
   return command === KNOWLEDGE_ROOT_COMMAND ? [] : ['a write-back with no load step before it does not resolve the root'];
+}
+
+/**
+ * The commands that resolve `{worktree}` with `docs_root()` first and then call
+ * `knowledge_load_after_root()`, whose load steps carry no root block of their own.
+ */
+const AFTER_ROOT_LOAD_HOSTS: readonly string[] = ['implement.md'];
+
+/**
+ * Named collector: how a compiled command's load step gets the checkout root, and what is wrong with it.
+ * Every host but the after-root ones carries the root block in its load section. An after-root host
+ * carries none, and must resolve the same root with its docs-root step before the load section.
+ */
+function collectKnowledgeRootDefects(file: string, text: string): string[] {
+  const command = collectGitCommand(sectionOf(text, KNOWLEDGE_HEADING));
+  if (!AFTER_ROOT_LOAD_HOSTS.includes(file)) {
+    return command === KNOWLEDGE_ROOT_COMMAND ? [] : [`${file}: the load step does not resolve the root`];
+  }
+  const out: string[] = [];
+  if (command !== null) out.push(`${file}: the load step repeats the root the docs-root step resolved`);
+  const docsAt = text.indexOf(DOCS_ROOT_LEAD);
+  const docsCommand = collectGitCommand(sectionOf(text, DOCS_ROOT_LEAD));
+  if (docsAt === -1 || docsAt > text.indexOf(KNOWLEDGE_HEADING) || docsCommand !== KNOWLEDGE_ROOT_COMMAND) {
+    out.push(`${file}: no docs-root step resolves the root before the load step`);
+  }
+  return out;
 }
 
 /** Run a compiled command line with `{start}` bound to `start`; stdout, or null on failure. */
@@ -235,9 +262,21 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
   it('every compiled knowledge loader resolves the checkout toplevel, and a write-back resolves it once', () => {
     for (const file of knowledgeHosts(KNOWLEDGE_HEADING)) {
       const section = sectionOf(requireDistFile(file), KNOWLEDGE_HEADING);
-      expect(collectGitCommand(section), `${file} ${KNOWLEDGE_HEADING}`).toBe(KNOWLEDGE_ROOT_COMMAND);
+      expect(collectKnowledgeRootDefects(file, requireDistFile(file)), `${file} ${KNOWLEDGE_HEADING}`).toEqual([]);
       expect(section, `${file}: the retired "no git calls" claim`).not.toContain('no git calls');
     }
+    // The docs-root order holds in every variant key of an after-root host, not only in the on key.
+    for (const file of AFTER_ROOT_LOAD_HOSTS) {
+      for (const key of OFF_VARIANT_KEYS) {
+        const text = resolveVariantOffSource(key, 'commands', file.replace(/\.md$/, ''));
+        expect(text, `${file} has a ${key} variant`).not.toBeNull();
+        expect(collectKnowledgeRootDefects(file, text as string), `${file} ${key} ${KNOWLEDGE_HEADING}`).toEqual([]);
+      }
+    }
+    // Non-vacuity: each after-root host loads knowledge, and the other hosts still carry the root block.
+    const loadHosts = knowledgeHosts(KNOWLEDGE_HEADING);
+    for (const file of AFTER_ROOT_LOAD_HOSTS) expect(loadHosts, `${file} loads knowledge`).toContain(file);
+    expect(loadHosts.length - AFTER_ROOT_LOAD_HOSTS.length, 'no host carries the root block in its load section').toBeGreaterThanOrEqual(6);
     const writebackHosts = knowledgeHosts(WRITEBACK_HEADING);
     expect(writebackHosts.length, 'no command carries a write-back, so this guard proves nothing').toBeGreaterThanOrEqual(5);
     for (const file of writebackHosts) {
@@ -249,7 +288,8 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
     const followsLoad = writebackHosts.filter(f => requireDistFile(f).includes(KNOWLEDGE_HEADING));
     expect(followsLoad.length, 'no write-back follows a load').toBeGreaterThanOrEqual(1);
     expect(writebackHosts.length - followsLoad.length, 'no write-back stands alone').toBeGreaterThanOrEqual(1);
-    const command = collectGitCommand(sectionOf(requireDistFile(knowledgeHosts(KNOWLEDGE_HEADING)[0]), KNOWLEDGE_HEADING));
+    const rootHost = knowledgeHosts(KNOWLEDGE_HEADING).find(f => !AFTER_ROOT_LOAD_HOSTS.includes(f));
+    const command = collectGitCommand(sectionOf(requireDistFile(rootHost as string), KNOWLEDGE_HEADING));
     // Knowledge bases are per branch: a worktree reads its OWN toplevel, not main's.
     for (const [label, start, expected] of [['root', main, main], ['subdir', sub, main], ['worktree', wt, wt]] as const) {
       expect(worktreeFrom(runFromStart(command as string, start), start), label).toBe(expected);
@@ -269,6 +309,28 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
     expect(collectWritebackRootDefects(writeback(block))).toEqual([]);
     // A load that comes after the write-back does not resolve the root for it.
     expect(collectWritebackRootDefects(`${writeback('')}\n\n${load}`)).toEqual([missing]);
+  });
+
+  it('known-bad probes: a load step with no root, an after-root load with no docs root before it, and one that repeats the root are reported', () => {
+    const block = `\`\`\`bash\n${KNOWLEDGE_ROOT_COMMAND}\n\`\`\``;
+    const docsRoot = `${DOCS_ROOT_LEAD} Every path lives at the toplevel.\n\n${block}\n`;
+    const steps = 'Step 1 — Read the index cache.\n';
+    const noRoot = 'the load step does not resolve the root';
+    const repeated = 'the load step repeats the root the docs-root step resolved';
+    const noDocsRoot = 'no docs-root step resolves the root before the load step';
+    // A host outside the after-root list needs the root block in its load section.
+    expect(collectKnowledgeRootDefects('plan.md', `${KNOWLEDGE_HEADING}\n\n${block}\n\n${steps}`)).toEqual([]);
+    expect(collectKnowledgeRootDefects('plan.md', `${KNOWLEDGE_HEADING}\n\n${steps}`)).toEqual([`plan.md: ${noRoot}`]);
+    expect(collectKnowledgeRootDefects('plan.md', `${docsRoot}\n${KNOWLEDGE_HEADING}\n\n${steps}`)).toEqual([`plan.md: ${noRoot}`]);
+    // An after-root host needs the docs-root step before the load section, and no second root block.
+    expect(collectKnowledgeRootDefects('implement.md', `${docsRoot}\n${KNOWLEDGE_HEADING}\n\n${steps}`)).toEqual([]);
+    expect(collectKnowledgeRootDefects('implement.md', `${KNOWLEDGE_HEADING}\n\n${steps}`)).toEqual([`implement.md: ${noDocsRoot}`]);
+    expect(collectKnowledgeRootDefects('implement.md', `${KNOWLEDGE_HEADING}\n\n${steps}\n### Next\n\n${docsRoot}`)).toEqual([`implement.md: ${noDocsRoot}`]);
+    expect(collectKnowledgeRootDefects('implement.md', `${docsRoot}\n${KNOWLEDGE_HEADING}\n\n${block}\n\n${steps}`)).toEqual([`implement.md: ${repeated}`]);
+    expect(collectKnowledgeRootDefects('implement.md', `${KNOWLEDGE_HEADING}\n\n${block}\n\n${steps}`)).toEqual([`implement.md: ${repeated}`, `implement.md: ${noDocsRoot}`]);
+    // A docs root that runs another command does not resolve the root.
+    const otherRoot = docsRoot.replace(KNOWLEDGE_ROOT_COMMAND, 'git -C "{start}" rev-parse --git-dir');
+    expect(collectKnowledgeRootDefects('implement.md', `${otherRoot}\n${KNOWLEDGE_HEADING}\n\n${steps}`)).toEqual([`implement.md: ${noDocsRoot}`]);
   });
 
   it('every compiled docs root resolves the checkout toplevel, from a root, a subdirectory and a worktree', () => {
