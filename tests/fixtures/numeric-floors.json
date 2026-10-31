@@ -669,6 +669,30 @@
       "description": "D-MAINTAIN-ON-DUE: the Curate agent body, src/assets/agents/curate.md, in bytes. Part 2's maintenance ladder, the claim-due output format and the close-out batch moved to references/curate/maintain.md, which a run reads only when claim-due hands out an entry; the body keeps the Part 2 heading, the claim heartbeat, rotate-observations, the claim-due call and the due-none line, and measures 16,690 (20,539 before the move). rotate-observations stays in the body so a run with nothing due still rotates. May be LOWERED, never raised."
     },
     {
+      "id": "knowledge-body-max",
+      "ceiling": 7131,
+      "pattern": "const KNOWLEDGE_BODY_MAX_BYTES = 7_131",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/kb-shape.test.ts",
+      "description": "The compiled Knowledge agent body, dist/agents/knowledge.md (curation on), in bytes. Every turn of every Knowledge spawn re-reads it. #722 (lean Knowledge group) cut it from 8,357 to 7,131: the Responsibilities no longer repeat the Direct Write and Commit protocols. May be LOWERED, never raised."
+    },
+    {
+      "id": "knowledge-body-curation-off-max",
+      "ceiling": 6663,
+      "pattern": "const KNOWLEDGE_BODY_CURATION_OFF_MAX_BYTES = 6_663",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/kb-shape.test.ts",
+      "description": "The compiled Knowledge agent body of the curation-off build, dist/curation-off/agents/knowledge.md, in bytes. #722 cut it from 7,891 to 6,663 with the same cuts as the curation-on build. May be LOWERED, never raised."
+    },
+    {
+      "id": "feature-knowledge-skill-max",
+      "ceiling": 8472,
+      "pattern": "const FEATURE_KNOWLEDGE_SKILL_MAX_BYTES = 8_472",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/kb-shape.test.ts",
+      "description": "src/assets/skills/feature-knowledge/SKILL.md, in bytes. The Knowledge agent preloads it, so every turn of every spawn re-reads it. #722 cut it from 17,282 to 8,472: the category table, the category templates and the Worked Example moved to references/new-kb.md, which a run reads only when it creates a KB (49 creates against 399 refreshes in this repository's history); the rest is subtraction. May be LOWERED, never raised."
+    },
+    {
       "id": "validate-body-max",
       "ceiling": 6023,
       "pattern": "const VALIDATE_BODY_MAX_BYTES = 6_023",
