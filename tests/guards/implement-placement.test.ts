@@ -35,6 +35,10 @@
  * A second claim, at the end of the file: the independence criteria of PARALLEL_CODE_AGENTS sit in the PARALLEL
  * block, never in the strategy table row. A plan whose frontmatter names the strategy skips the table, so a
  * criterion that lives only in the row is no gate for that plan.
+ *
+ * A third claim, after it: two whole sentences that close a gap in the run (the Phase 2 stop for a failed Code agent and the
+ * Error Handling line for a run ended after Phase 9). They are not rows of the table above. They use the same collector, the
+ * same deletion probe, the whole-sentence probe and the heading probe.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -563,4 +567,64 @@ describe('the independence criteria of PARALLEL_CODE_AGENTS sit in the PARALLEL 
     const one = miniCommand('True artifact independence (rare)', CRITERIA_TEXT, 'Polish.')
     expect(collectParallelGateDefects('mini', `${one}\n${one}`)).toEqual(['mini: 2 PARALLEL_CODE_AGENTS blocks, expected 1'])
   })
+})
+
+// ---------------------------------------------------------------------------
+// The fault-fix sentences (X1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Two whole sentences that close a gap in the run, found while the Polish skip moved into the command. They are not rows of the
+ * never-cut table, so the table above holds its rows alone. They run through the same collector and the same probes.
+ *   - A Code agent that fails, blocks or reports no Status stops the run before Phase 3.
+ *   - A run that the user ends after Phase 9 opened the PR still records the evidence and writes the report.
+ */
+const FAULT_FIX_ROWS: readonly Row[] = [
+  {
+    no: 'X1a',
+    item: 'Phase 2: a Code agent that fails, blocks or reports no Status stops the run',
+    anchor: 'A Code agent with FAILED, BLOCKED or no Status: report it and its cause, then halt.',
+    section: PHASE_2,
+    whole: true,
+  },
+  {
+    no: 'X1b',
+    item: 'Error Handling: a run ended after Phase 9 still runs Phases 11 and 12',
+    anchor: 'If the user ends the run after Phase 9 opened the PR, run Phases 11 and 12 first.',
+    section: ERROR_HANDLING,
+    whole: true,
+  },
+]
+
+describe('the fault-fix sentences of /implement are in every compiled build, once, whole, under their section', () => {
+  for (const { key, file } of BUILDS) {
+    describe(`${key} (${file})`, () => {
+      it('holds each sentence once, whole, under its section', () => {
+        expect(FAULT_FIX_ROWS.map(r => r.no), 'the rows of the block').toEqual(['X1a', 'X1b'])
+        expect(collectPlacementDefects(file, readBuild(file), FAULT_FIX_ROWS)).toEqual([])
+      })
+
+      it('known-bad probe: deleting a sentence is reported as that sentence missing, and no other', () => {
+        const text = readBuild(file)
+        for (const row of FAULT_FIX_ROWS) {
+          expect(collectPlacementDefects(file, deleteAnchor(text, row), FAULT_FIX_ROWS), `deleting row ${row.no}`).toEqual([`${where(file, row)}: anchor missing`])
+        }
+      })
+
+      it('known-bad probe: a sentence glued to a word before it is reported as not whole, and no other', () => {
+        const text = readBuild(file)
+        for (const row of FAULT_FIX_ROWS) {
+          expect(countOf(text, row.anchor), `row ${row.no} must occur once for the gluing to be exact`).toBe(1)
+          expect(collectPlacementDefects(file, text.replace(row.anchor, () => `and ${row.anchor}`), FAULT_FIX_ROWS), `gluing row ${row.no}`).toEqual([`${where(file, row)}: not a whole sentence`])
+        }
+      })
+
+      it('known-bad probe: renaming a heading is reported for each sentence under it, and no other', () => {
+        const text = readBuild(file)
+        for (const row of FAULT_FIX_ROWS) {
+          expect(collectPlacementDefects(file, renameHeading(text, row.section), FAULT_FIX_ROWS), `renaming "${row.section}"`).toEqual([`${where(file, row)}: sits under ${row.section} (renamed), expected ${row.section}`])
+        }
+      })
+    })
+  }
 })
