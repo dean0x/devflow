@@ -19,7 +19,7 @@ from the agent sources and holds every pass sentence to it.
 @define authoring_preamble():
 ## Your task: author a Claude Code dynamic Workflow and run it
 
-You (the main model) author the Workflow script body inline and pass it to the `Workflow` tool. You do not write a static workflow file.
+You (the main model) author the Workflow script body inline and pass it to the `Workflow` tool.
 
 ### Workflow runtime contract
 
