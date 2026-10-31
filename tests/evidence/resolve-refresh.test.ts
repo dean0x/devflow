@@ -112,6 +112,8 @@ function collectStaleReverifyDefects(md: string): string[] {
   if (!step.includes('A Test Status whose first word is not PASS or FAIL still gets its claims; `Test plan: DEGRADED (Test run blocked)` replaces that line.')) out.push('a blocked or odd Status is not told apart by its first word, or does not record Test plan: DEGRADED (Test run blocked)')
   if (!step.includes('; `{m}` is the `CLAIM appended` line\'s `PASS` count (else 0).')) out.push('m does not count PASS rows only')
   if (!step.includes('--plan {TARGET_DIR_REL}/stale-plan.md --head <head> ')) out.push('the claim call does not pass the stale file as the plan')
+  // The relative --evidence and --plan paths resolve only from the worktree.
+  if (!step.includes('cd {worktree} && node "$HOME/.devflow/scripts/verify-evidence.cjs" claim')) out.push('the claim call does not run from the worktree')
   return out
 }
 

@@ -405,6 +405,10 @@ function collectGateBlockDefects(block: string): string[] {
   need('the call is bound to the head with `--head "$HEAD_SHA"`', (calls[0] ?? '').includes('--head "$HEAD_SHA"') && (calls[0] ?? '').includes('HEAD_SHA=$(git rev-parse HEAD)'))
   need('the call does not pass the counts as `--waits {n} --fixes {m}`', (calls[0] ?? '').includes('--head "$HEAD_SHA" --waits {n} --fixes {m}`'))
   need('the block does not say that the run prints the NEXT line', block.includes('then `NEXT=<wait|fix|proceed> SAY=<message>`'))
+  // The script reads `--waits 0` as a usage error, so `{n}` must count this wait too.
+  need('`{n}` does not count this wait', /where `{n}` is the waits run so far( for this worktree)?, this one included/.test(block))
+  need('`{m}` is not the Fix agents run so far', block.includes('`{m}` is the Fix agents run so far'))
+  need('the last fix does not report that CI was not re-checked', /step 1 again, else report "CI status unknown — verify manually before merging" and proceed/.test(block))
   need(
     'the block names no fallback for a missing or malformed NEXT line or a non-zero exit',
     /A missing or malformed `NEXT=` line or a non-zero exit → report "CI status unknown — verify manually before merging" and proceed/.test(block),
