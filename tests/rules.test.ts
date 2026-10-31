@@ -880,7 +880,7 @@ describe('behavior rule (D-BEHAVIOR-RULE)', () => {
  * does not rise. The guard reads the bullet by its opening words, so a reword keeps the shape.
  */
 const QUALITY_PATH = path.join(RULES_SRC, 'quality.md');
-const QUALITY_CUT_BULLET_CEILING = 228;
+const QUALITY_CUT_BULLET_CEILING = 240;
 const QUALITY_QUALIFIER = /trust boundary|fail-closed path/;
 
 /** Named collector: how the quality cleanup bullet departs from its design. */

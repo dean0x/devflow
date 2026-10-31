@@ -29,7 +29,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'fs';
 import * as path from 'path';
 
-import { getAllAgentNames } from '../../src/core/plugins.js';
+import { DEVFLOW_PLUGINS, getAllAgentNames } from '../../src/core/plugins.js';
 import { CODE_AGENT_TYPES, ROOT, codeSlugOf, resolveAgentSource, splitFrontmatter } from '../helpers.js';
 import {
   AGENT_CONFIG,
@@ -46,13 +46,14 @@ const HEADING = '## Core rules';
 const DIGEST_KEYS = Object.keys(CORE_RULES_DIGEST) as DigestKey[];
 /** One short line: a digest line longer than this is a paragraph, and every spawn pays for it. */
 const MAX_LINE_CHARS = 160;
-/** The Code family's slugs, from the one roster in `tests/helpers.ts`. */
-const CODE_FAMILY_SLUGS: readonly string[] = CODE_AGENT_TYPES.map(codeSlugOf);
 /**
- * D-CODE-QUIET: the Code-family bodies (Code, Fix, Refactor) keep CLAUDE.md and the rules, so their
- * rows declare no digest, and the context-economy rule they load states the output line. A copy of
- * a digest line in those bodies is an undeclared line like any other.
+ * The Code family's slugs, from the one roster in `tests/helpers.ts`. D-CODE-QUIET: these bodies
+ * keep CLAUDE.md and the rules, so their rows declare no digest, and the context-economy rule they
+ * load states the output line. A copy of a digest line in those bodies is an undeclared line like
+ * any other. With rules turned off (`init --no-rules`, `devflow rules --disable`), they carry no
+ * output line, the same as every other agent that keeps the rules.
  */
+const CODE_FAMILY_SLUGS: readonly string[] = CODE_AGENT_TYPES.map(codeSlugOf);
 
 // ---------------------------------------------------------------------------
 // Named collectors
@@ -312,6 +313,9 @@ describe('every body carries exactly its declared digest lines', () => {
     });
 
     it('reports a copy of the context-economy line in a Code-family body, which loads the rule instead', () => {
+      const core = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-core-skills');
+      expect(core?.optional, 'the core plugin installs on every machine').toBeFalsy();
+      expect(core?.rules, 'the core plugin ships the rule').toContain('context-economy');
       const prose = `# Agent\n\n${CORE_RULES_DIGEST['context-economy'].line}\n`;
       for (const name of CODE_FAMILY_SLUGS) {
         expect(AGENT_CONFIG[name]?.omitClaudeMd, `${name} must keep CLAUDE.md and the rules`).toBe(false);

@@ -13,5 +13,5 @@ paths: []
 - Delete dead code — commented-out code is not version control
 - Leave the end-state, not the transition — after removing or renaming, strip the residue: tombstone comments ("no longer does X"), `*_old`/`v2` names, guards for now-impossible states, leftover migration scaffolding
 - When a change alters a name, path or behavior, update the current tracked docs that state the old fact, not released changelog entries; for a security fix, state the effect only
-- Cut leftover debug statements, unused imports, variables used once right after assignment, nested ternaries; cut checks the types enforce and catches around code that cannot throw, never at a trust boundary or fail-closed path
+- Cut leftover debug statements, unused imports, unnecessary variables used once right after assignment, nested ternaries; cut checks the types enforce and catches around code that cannot throw, never at a trust boundary or fail-closed path
 - Zero warnings: treat compiler and linter warnings as errors

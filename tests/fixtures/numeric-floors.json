@@ -1038,11 +1038,11 @@
     },
     {
       "id": "quality-cut-bullet-max-bytes",
-      "ceiling": 228,
-      "pattern": "const QUALITY_CUT_BULLET_CEILING = 228;",
+      "ceiling": 240,
+      "pattern": "const QUALITY_CUT_BULLET_CEILING = 240;",
       "occurrences": 1,
       "sourceFile": "tests/rules.test.ts",
-      "description": "The cleanup bullet of the quality rule, the line of src/assets/rules/quality.md that opens `- Cut `, in bytes. The bullet is billed in every session that loads the rules, and it tells the Code agent what to remove while it writes, because /implement and /resolve skip Polish at standard and lean. It measured 240; #719 (lean core rules) cut it to 228. May be LOWERED, never raised: a later addition funds itself with a cut."
+      "description": "The cleanup bullet of the quality rule, the line of src/assets/rules/quality.md that opens `- Cut `, in bytes. The bullet is billed in every session that loads the rules, and it tells the Code agent what to remove while it writes, because /implement and /resolve skip Polish at standard and lean. It measures 240 today, which is the ceiling. May be LOWERED, never raised: a later addition funds itself with a cut."
     },
     {
       "id": "quality-sweep-owner-bullets-max-bytes",

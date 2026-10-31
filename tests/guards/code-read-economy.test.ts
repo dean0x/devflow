@@ -20,6 +20,8 @@
  *                       and head are 37.8%, a tie for the top class, so one line covers both. The
  *                       context-economy rule states it, and Code, Fix and Refactor keep the rules, so
  *                       their bodies carry no copy; `validate.md` omits the rules and carries the line.
+ *                       With rules turned off, the Code family has no output line, the same as every
+ *                       other agent that keeps the rules.
  *  - D-NO-TURN-END-WAIT No Monitor denial and no new body line. Evidence (R-453a = A): 0 non-TTL
  *                       cache-miss ce in 45.10M subagent ce (0.0%), and no agent type had 2 or more
  *                       events across 1,756 subagent requests.
@@ -202,10 +204,11 @@ export function collectReadOnceDefects(body: string): string[] {
   return out
 }
 
-/** Named collector (D-CODE-QUIET): a body copy of the output line that the loaded context-economy rule states. */
-export function collectOutputLineDefects(body: string, line: string): string[] {
-  const found = bulletOffsets(body, line).length
-  return found === 0 ? [] : [`the body copies the output line ${found} times; the loaded rule states it`]
+/** Named collector (D-CODE-QUIET): each phrase of the output line that a body copies, whole or in part, though its loaded rule states it. */
+export function collectOutputLineDefects(body: string): string[] {
+  return CORE_RULES_DIGEST['context-economy'].phrases
+    .filter(phrase => body.includes(phrase))
+    .map(phrase => `the body copies "${phrase}"; the loaded rule states it`)
 }
 
 /** Named collector (D-SEQ-SPLIT): how the planning reference differs from the one split rule. */
@@ -338,9 +341,8 @@ describe('Code, Fix and Refactor read a file once and cap their output, in both 
   })
 
   it('no body copies the output line, which the context-economy rule states', () => {
-    const line = sharedOutputLine()
     for (const { label, content } of codeFamilyBodies()) {
-      expect(collectOutputLineDefects(content, line), label).toEqual([])
+      expect(collectOutputLineDefects(content), label).toEqual([])
     }
   })
 
@@ -373,17 +375,21 @@ describe('Code, Fix and Refactor read a file once and cap their output, in both 
     expect(collectReadOnceDefects('no block here')).toEqual(['no Running commands block'])
   })
 
-  it('known-bad probe: one or two copies of the output line are each reported', () => {
+  it('known-bad probe: a whole copy and a partial copy of the output line are each reported', () => {
     const body = resolveAgentSource('code').content
-    const shared = sharedOutputLine()
-    expect(collectOutputLineDefects(body, shared)).toEqual([])
+    const [print, search] = CORE_RULES_DIGEST['context-economy'].phrases
+    expect(collectOutputLineDefects(body)).toEqual([])
 
-    const one = body.replace('## Output', `- ${shared}\n\n## Output`)
-    expect(one, 'the seed must land').not.toBe(body)
-    expect(collectOutputLineDefects(one, shared)).toEqual(['the body copies the output line 1 times; the loaded rule states it'])
+    const whole = body.replace('## Output', `- ${sharedOutputLine()}\n\n## Output`)
+    expect(whole, 'the seed must land').not.toBe(body)
+    expect(collectOutputLineDefects(whole)).toEqual([
+      `the body copies "${print}"; the loaded rule states it`,
+      `the body copies "${search}"; the loaded rule states it`,
+    ])
 
-    const two = one.replace('## Output', `- ${shared}\n\n## Output`)
-    expect(collectOutputLineDefects(two, shared)).toEqual(['the body copies the output line 2 times; the loaded rule states it'])
+    const partial = body.replace('## Output', `- Keep it short. ${search}.\n\n## Output`)
+    expect(partial, 'the seed must land').not.toBe(body)
+    expect(collectOutputLineDefects(partial)).toEqual([`the body copies "${search}"; the loaded rule states it`])
   })
 })
 
