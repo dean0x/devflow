@@ -24,7 +24,7 @@ import { ROOT, walkFiles } from '../helpers.js'
 const ASSETS_DIR = path.join(ROOT, 'src', 'assets')
 
 const WRITE_TOOL = /\bWrite\b/
-const PLAIN_MKTEMP = /`mktemp`(?!-)|\$\(mktemp\)/
+const PLAIN_MKTEMP = /`mktemp`(?!-)|\$\(mktemp(?:\s+(?!-d\b)[^)]*)?\)/
 
 /** The sentences of `text` that Write into a file made by `mktemp`. */
 function tempWriteViolations(text: string): string[] {
@@ -48,6 +48,8 @@ describe('temp-write-method', () => {
     expect(tempWriteViolations('Write it byte for byte to a fresh `mktemp` file with the Write tool.')).toHaveLength(1)
     expect(tempWriteViolations('Run `F="$(mktemp)" && echo "F=$F"`, Read that file, and Write the title to it.')).toHaveLength(1)
     expect(tempWriteViolations('longer material goes to a `mktemp` file (via Bash or Write).')).toHaveLength(1)
+    expect(tempWriteViolations('Run `F="$(mktemp -t x)"`, then Write the title to it.')).toHaveLength(1)
+    expect(tempWriteViolations('Run `D="$(mktemp -d)"`, then Write the title to a new file in it.')).toEqual([])
     expect(tempWriteViolations('Write it byte for byte to a new file in a `mktemp -d` folder with the Write tool.')).toEqual([])
     expect(tempWriteViolations('Capture in one Bash call: `LOG=$(mktemp); <command> >"$LOG"`.')).toEqual([])
     expect(tempWriteViolations('longer material goes to a unique `mktemp`-style temp file written with Write.')).toEqual([])
