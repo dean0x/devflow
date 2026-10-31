@@ -29,7 +29,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'fs';
 import * as path from 'path';
 
-import { getAllAgentNames } from '../../src/core/plugins.js';
+import { DEVFLOW_PLUGINS, getAllAgentNames } from '../../src/core/plugins.js';
 import { CODE_AGENT_TYPES, ROOT, codeSlugOf, resolveAgentSource, splitFrontmatter } from '../helpers.js';
 import {
   AGENT_CONFIG,
@@ -46,17 +46,14 @@ const HEADING = '## Core rules';
 const DIGEST_KEYS = Object.keys(CORE_RULES_DIGEST) as DigestKey[];
 /** One short line: a digest line longer than this is a paragraph, and every spawn pays for it. */
 const MAX_LINE_CHARS = 160;
-/** The Code family's slugs, from the one roster in `tests/helpers.ts`. */
-const CODE_FAMILY_SLUGS: readonly string[] = CODE_AGENT_TYPES.map(codeSlugOf);
 /**
- * D-CODE-QUIET (the R-452c outcome): the Code-family bodies (Code, Fix, Refactor) keep CLAUDE.md,
- * so their rows declare no digest. They still carry the context-economy line verbatim as one
- * shared output line, so that one line is allowed in those bodies and no other digest line is.
+ * The Code family's slugs, from the one roster in `tests/helpers.ts`. D-CODE-QUIET: these bodies
+ * keep CLAUDE.md and the rules, so their rows declare no digest, and the context-economy rule they
+ * load states the output line. A copy of a digest line in those bodies is an undeclared line like
+ * any other. With rules turned off (`init --no-rules`, `devflow rules --disable`), they carry no
+ * output line, the same as every other agent that keeps the rules.
  */
-const CODE_FAMILY_SHARED_OUTPUT_LINE: ReadonlyMap<string, readonly DigestKey[]> = new Map(
-  CODE_FAMILY_SLUGS.map((slug): [string, readonly DigestKey[]] => [slug, ['context-economy']]),
-);
-const allowedFor = (name: string): readonly DigestKey[] => CODE_FAMILY_SHARED_OUTPUT_LINE.get(name) ?? [];
+const CODE_FAMILY_SLUGS: readonly string[] = CODE_AGENT_TYPES.map(codeSlugOf);
 
 // ---------------------------------------------------------------------------
 // Named collectors
@@ -70,9 +67,8 @@ function bulletsFor(declared: readonly DigestKey[]): string[] {
 /**
  * Every way a body departs from its declared digest: a missing, reworded, extra, reordered or
  * undeclared line, a heading that is not there once, or a bullet under it that is not a digest line.
- * A line in `allowed` may appear without a declaration (a named, recorded exception); it is never required.
  */
-function collectBodyDefects(body: string, declared: readonly DigestKey[], allowed: readonly DigestKey[] = []): string[] {
+function collectBodyDefects(body: string, declared: readonly DigestKey[]): string[] {
   const out: string[] = [];
   const lines = body.split('\n');
   const headingAt = lines.map((line, i) => (line === HEADING ? i : -1)).filter(i => i !== -1);
@@ -96,7 +92,7 @@ function collectBodyDefects(body: string, declared: readonly DigestKey[], allowe
 
   for (const key of DIGEST_KEYS) {
     const present = body.includes(CORE_RULES_DIGEST[key].line);
-    if (present && !declared.includes(key) && !allowed.includes(key)) out.push(`carries the undeclared digest line "${key}"`);
+    if (present && !declared.includes(key)) out.push(`carries the undeclared digest line "${key}"`);
     if (!present && declared.includes(key)) out.push(`lacks the declared digest line "${key}"`);
   }
   return out;
@@ -273,7 +269,7 @@ describe('every body carries exactly its declared digest lines', () => {
   for (const name of REGISTERED) {
     const declared = OMIT_CLAUDE_MD_DIGESTS.get(name) ?? [];
     it(`${name}.md carries ${declared.length === 0 ? 'no digest line' : declared.join(', ')}`, () => {
-      expect(collectBodyDefects((texts.get(name) as AgentText).body, declared, allowedFor(name))).toEqual([]);
+      expect(collectBodyDefects((texts.get(name) as AgentText).body, declared)).toEqual([]);
     });
   }
 
@@ -316,24 +312,16 @@ describe('every body carries exactly its declared digest lines', () => {
       expect(collectBodyDefects(body, []).join('\n')).toContain('heading it does not declare');
     });
 
-    it('allows the shared output line in the Code-family bodies and only there', () => {
-      const line = CORE_RULES_DIGEST['context-economy'].line;
-      const prose = `# Agent\n\n${line}\n`;
-      for (const name of CODE_FAMILY_SLUGS) {
-        expect(allowedFor(name), name).toEqual(['context-economy']);
-        expect(collectBodyDefects(prose, [], allowedFor(name)), name).toEqual([]);
-      }
-    });
-
-    it('reports the shared output line on an agent that keeps CLAUDE.md and is not in the Code family', () => {
+    it('reports a copy of the context-economy line in a Code-family body, which loads the rule instead', () => {
+      const core = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-core-skills');
+      expect(core?.optional, 'the core plugin installs on every machine').toBeFalsy();
+      expect(core?.rules, 'the core plugin ships the rule').toContain('context-economy');
       const prose = `# Agent\n\n${CORE_RULES_DIGEST['context-economy'].line}\n`;
-      expect(allowedFor('polish')).toEqual([]);
-      expect(collectBodyDefects(prose, [], allowedFor('polish')).join('\n')).toContain('undeclared digest line "context-economy"');
-    });
-
-    it('reports a different undeclared digest line in a Code-family body', () => {
-      const prose = `# Agent\n\n${CORE_RULES_DIGEST['context-economy'].line}\n\n${CORE_RULES_DIGEST['no-secrets'].line}\n`;
-      expect(collectBodyDefects(prose, [], allowedFor('code')).join('\n')).toContain('undeclared digest line "no-secrets"');
+      for (const name of CODE_FAMILY_SLUGS) {
+        expect(AGENT_CONFIG[name]?.omitClaudeMd, `${name} must keep CLAUDE.md and the rules`).toBe(false);
+        expect(collectBodyDefects(prose, OMIT_CLAUDE_MD_DIGESTS.get(name) ?? []).join('\n'), name)
+          .toContain('undeclared digest line "context-economy"');
+      }
     });
 
     it('reports a block with no blank line under the heading', () => {

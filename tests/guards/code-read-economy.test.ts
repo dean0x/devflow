@@ -14,11 +14,14 @@
  *  - D-CODE-READ-ONCE   A Code-family agent never re-reads an unchanged file. For a file over 400 lines,
  *                       or for a second look, it greps with line numbers first and reads only that
  *                       range. Evidence (R-452d): the re-read share is 31.6%, and that share is a floor.
- *  - D-CODE-QUIET       One shared output line covers both top classes of unbounded output: never print
+ *  - D-CODE-QUIET       One output line covers both top classes of unbounded output: never print
  *                       a large file whole, page it, and cap any output; list or count search matches
  *                       before printing them. Evidence (R-452c): grep and find are 37.9% and cat, sed
- *                       and head are 37.8%, a tie for the top class, so one line covers both. The line
- *                       is the text in `validate.md`, so there is one wording across the agents.
+ *                       and head are 37.8%, a tie for the top class, so one line covers both. The
+ *                       context-economy rule states it, and Code, Fix and Refactor keep the rules, so
+ *                       their bodies carry no copy; `validate.md` omits the rules and carries the line.
+ *                       With rules turned off, the Code family has no output line, the same as every
+ *                       other agent that keeps the rules.
  *  - D-NO-TURN-END-WAIT No Monitor denial and no new body line. Evidence (R-453a = A): 0 non-TTL
  *                       cache-miss ce in 45.10M subagent ce (0.0%), and no agent type had 2 or more
  *                       events across 1,756 subagent requests.
@@ -201,13 +204,11 @@ export function collectReadOnceDefects(body: string): string[] {
   return out
 }
 
-/** Named collector (D-CODE-QUIET): how a body's copy of the shared output line differs from "once, as a whole bullet, outside the block". */
-export function collectOutputLineDefects(body: string, line: string): string[] {
-  const block = runningBlock(body)
-  if (block === null) return ['no Running commands block']
-  const found = bulletOffsets(body, line)
-  if (found.length !== 1) return [`${found.length} shared output lines, expected 1`]
-  return found[0] >= block.start && found[0] < block.end ? ['the shared output line sits inside the Running commands block'] : []
+/** Named collector (D-CODE-QUIET): each phrase of the output line that a body copies, whole or in part, though its loaded rule states it. */
+export function collectOutputLineDefects(body: string): string[] {
+  return CORE_RULES_DIGEST['context-economy'].phrases
+    .filter(phrase => body.includes(phrase))
+    .map(phrase => `the body copies "${phrase}"; the loaded rule states it`)
 }
 
 /** Named collector (D-SEQ-SPLIT): how the planning reference differs from the one split rule. */
@@ -339,10 +340,9 @@ describe('Code, Fix and Refactor read a file once and cap their output, in both 
     }
   })
 
-  it('each body carries the shared output line once, outside the block, byte for byte the line in validate.md', () => {
-    const line = sharedOutputLine()
+  it('no body copies the output line, which the context-economy rule states', () => {
     for (const { label, content } of codeFamilyBodies()) {
-      expect(collectOutputLineDefects(content, line), label).toEqual([])
+      expect(collectOutputLineDefects(content), label).toEqual([])
     }
   })
 
@@ -375,36 +375,21 @@ describe('Code, Fix and Refactor read a file once and cap their output, in both 
     expect(collectReadOnceDefects('no block here')).toEqual(['no Running commands block'])
   })
 
-  it('known-bad probe: a missing, duplicate or misplaced shared output line is each reported', () => {
+  it('known-bad probe: a whole copy and a partial copy of the output line are each reported', () => {
     const body = resolveAgentSource('code').content
-    const shared = sharedOutputLine()
-    expect(collectOutputLineDefects(body, shared)).toEqual([])
+    const [print, search] = CORE_RULES_DIGEST['context-economy'].phrases
+    expect(collectOutputLineDefects(body)).toEqual([])
 
-    const missing = body.replace(shared, 'Keep output short.')
-    expect(missing, 'the seed must land').not.toBe(body)
-    expect(collectOutputLineDefects(missing, shared)).toEqual(['0 shared output lines, expected 1'])
+    const whole = body.replace('## Output', `- ${sharedOutputLine()}\n\n## Output`)
+    expect(whole, 'the seed must land').not.toBe(body)
+    expect(collectOutputLineDefects(whole)).toEqual([
+      `the body copies "${print}"; the loaded rule states it`,
+      `the body copies "${search}"; the loaded rule states it`,
+    ])
 
-    const duplicate = body.replace(shared, `${shared}\n- ${shared}`)
-    expect(duplicate, 'the seed must land').not.toBe(body)
-    expect(collectOutputLineDefects(duplicate, shared)).toEqual(['2 shared output lines, expected 1'])
-
-    const inBlock = missing.replace('- The same rules hold', `- ${shared}\n- The same rules hold`)
-    expect(inBlock, 'the seed must land').not.toBe(missing)
-    expect(collectOutputLineDefects(inBlock, shared)).toEqual(['the shared output line sits inside the Running commands block'])
-
-    const reworded = body.replace('cap any output you print', 'cap any output')
-    expect(reworded, 'the seed must land').not.toBe(body)
-    expect(collectOutputLineDefects(reworded, shared)).toEqual(['0 shared output lines, expected 1'])
-
-    const trailing = body.replace(`- ${shared}\n`, `- ${shared} Also read each file twice.\n`)
-    expect(trailing, 'the seed must land').not.toBe(body)
-    expect(collectOutputLineDefects(trailing, shared), 'text after the line is not the whole line').toEqual(['0 shared output lines, expected 1'])
-
-    const leading = body.replace(`- ${shared}\n`, `- Note: ${shared}\n`)
-    expect(leading, 'the seed must land').not.toBe(body)
-    expect(collectOutputLineDefects(leading, shared), 'text before the line is not the whole line').toEqual(['0 shared output lines, expected 1'])
-
-    expect(collectOutputLineDefects('no block here', shared)).toEqual(['no Running commands block'])
+    const partial = body.replace('## Output', `- Keep it short. ${search}.\n\n## Output`)
+    expect(partial, 'the seed must land').not.toBe(body)
+    expect(collectOutputLineDefects(partial)).toEqual([`the body copies "${search}"; the loaded rule states it`])
   })
 })
 
