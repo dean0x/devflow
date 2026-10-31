@@ -140,7 +140,7 @@ If the source is a directory, read all .md files. If the source is tracker issue
 Return: array of ticket objects with all fields.`, { agentType: "Git" })
 );
 
-// Phase 2: Plan all tickets in parallel — one Design agent per ticket
+// Phase 2: Plan all tickets in parallel — one agent per ticket
 const plans = await phase("plan-parallel", () =>
   parallel((tickets || []).map(ticket => () =>
     agent(`Write an implementation plan for this ticket.
@@ -150,7 +150,7 @@ Decisions context (apply devflow:apply-decisions; a plan file can be posted to t
 <!-- curation:end -->
 The plan must cover: approach overview, affected files and modules, key design decisions, implementation sequence (what to build first), risks and mitigations, and any open questions you cannot resolve from the ticket alone.
 Write a thorough but tight plan — every section must earn its place for a Code agent who has no other context.
-Return: { ticketTitle, planMarkdown, openDecisions (array of genuine unknowns requiring user input) }.`, { agentType: "Design" })
+Return: { ticketTitle, planMarkdown, openDecisions (array of genuine unknowns requiring user input) }.`, { agentType: "Architect" })
   ))
 );
 
