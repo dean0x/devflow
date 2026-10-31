@@ -140,7 +140,7 @@ Return: verdict ("ready" or "needs-work") + findings array with severity/issue/s
 Ticket: ${JSON.stringify(draft)}
 Initiative: ${initiative}
 Check: every claim sourced from initiative or spec; no smuggled anti-features; constraints honored; dependency placeholders consistent with candidate slate.
-Severity: critical = invented fact / anti-feature; major = unsourced claim or stance contradiction; minor = polish.
+Severity: critical = invented fact / anti-feature / leak; major = unsourced claim or stance contradiction; minor = polish.
 Return: verdict ("ready" or "needs-work") + findings array with severity/issue/suggestion.`, { agentType: "Review" }),
     ])
   ))

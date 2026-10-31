@@ -60,19 +60,19 @@ Valid `agentType` values: Code, Fix, Validate, Polish, Harden, Evaluate, Test, R
 
 **Omit `opts.model` whenever `agentType` is set.** The agent frontmatter sets its own model tier, and `opts.model` overrides it.
 
-Do not write logic that depends on an agent listing its own skills. Agents do not report them reliably.
+Do not write logic that depends on an agent listing its own skills.
 
 ### Pre-flight self-check — required before the first live `Workflow` call
 
-Before you invoke the `Workflow` tool, audit the script you authored against this checklist:
+Audit the script against this checklist:
 
 - **`meta` is a pure literal** — `name` and `description` present; no variables, function calls, spreads or template interpolation anywhere inside `meta`.
 - **Every `pipeline(x, …)` / `parallel(x)` first argument is a real array** — never a function, object, or possibly-undefined value. If it derives from a prior agent result, coerce it: `parallel((maybeList || []).map(...))`.
-- **No reference to a possibly-undefined field** — guard every cross-result field access with optional chaining (e.g. `result?.findings`, `seal?.num`).
+- **No reference to a possibly-undefined field** — guard every cross-result field access with optional chaining.
 - **`.filter(Boolean)` before mapping over `agent()` / `parallel()` results** — an agent can return `null` (skipped, or died after retries); strip nulls before `.map` or field access. filter(Boolean) is crash-safety only; it must never convert missing required coverage into success.
 - **`phase()` titles match the phases declared in `meta`** — every `phase("…")` call has a matching declared phase, and vice-versa.
 
-Then run a syntax gate: write the authored script to a fresh, run-unique scratch file `/tmp/df-wf-check-<meta.name>-<epoch-seconds>.js` (never a prior run's path), run `node --check` on that file, and only then pass the script text to the `Workflow` tool. `node --check` catches syntax errors only; the checklist covers the runtime errors.
+Then run a syntax gate: write the authored script to a fresh, run-unique scratch file `/tmp/df-wf-check-<meta.name>-<epoch-seconds>.js` (never a prior run's path), run `node --check` on that file, and only then pass the script text to the `Workflow` tool.
 
 ### Budget scaling
 
@@ -80,7 +80,7 @@ Scale the Review roster and the verification votes to the `budget` global: fewer
 
 ### Handoff convention for sequential Code agents within a ticket
 
-When a ticket requires multiple sequential Code agent phases, each Code agent appends its own `## Phase {N} Implementation Summary` section, at most 8,192 bytes, to `{toplevel}/.devflow/docs/handoff-{branch_slug}.md`, `{branch_slug}` being the ticket's branch name with every `/` replaced by `-`, and `{toplevel}` being `git rev-parse --show-toplevel` in the checkout the ticket's branch is in — never a subdirectory. It never rewrites an earlier section. The next Code agent reads, via HANDOFF_FILE input, only the section of the phase immediately before its own, not the whole file. PRIOR_PHASE_SUMMARY is the in-context form; the handoff file survives context compaction. The code is authoritative over the summaries.
+When a ticket requires multiple sequential Code agent phases, each Code agent appends its own `## Phase {N} Implementation Summary` section, at most 8,192 bytes, to `{toplevel}/.devflow/docs/handoff-{branch_slug}.md`, `{branch_slug}` being the ticket's branch name with every `/` replaced by `-`, and `{toplevel}` being `git rev-parse --show-toplevel` in the checkout the ticket's branch is in — never a subdirectory. It never rewrites an earlier section. The next Code agent reads, via HANDOFF_FILE input, only the section of the phase immediately before its own, not the whole file. PRIOR_PHASE_SUMMARY is the in-context form. The code is authoritative over the summaries.
 
 ### IRON RULE (LLM-vs-plumbing)
 
@@ -88,7 +88,7 @@ When a ticket requires multiple sequential Code agent phases, each Code agent ap
 
 ### SAFETY BANNER
 
-**NEVER merge to main or master** — the workflow merges to an integration branch only. The user merges to main themselves after reviewing. This rule must appear as an `engine_invariants()` note in every workflow that touches git.
+**NEVER merge to main or master** — the workflow merges to an integration branch only. This rule must appear as an `engine_invariants()` note in every workflow that touches git.
 @end
 
 @define authoring_decisions():

@@ -15,16 +15,12 @@ Run in this order:
 **Cadence — Gate 1 runs at exactly two points per ticket:**
 1. **Gate 1 #1** — immediately after the initial Code agent implementation (inside `implement_bundle()`). An escalated result — Validate exhausted, or Harden BLOCKED — returns early: the ticket's engine returns `ESCALATED` with one escalation, and Gate 2 and the review pass never run on a broken or unfinished build.
 2. **Gate 1 #2** — the final gate, after all Gate-2 fixes and the entire review pass have completed. Harden BLOCKED here is `ESCALATED` as well.
-
-It does not run inside the review pass, nor after each individual Gate-2 / review / QA fix. At those points the fixing Code agent self-verifies its own build compiles.
 @end
 
 @define gate2_acceptance():
 ### GATE 2 — Acceptance gate (per ticket, plan-scoped)
 
 Gate 2 fires once: after the implement-bundle and before the review pass. It does not re-run after review-fixes (those get Gate 1 only).
-
-Gate 2 inputs are produced by `/devflow:dynamic-plan`'s plan-challenge step — the acceptance criteria and test plan written for the Evaluate agent and Test agent.
 
 **Evaluate agent** (only if a plan exists):
 - Run `evaluator_panel()`
@@ -38,18 +34,12 @@ Gate 2 inputs are produced by `/devflow:dynamic-plan`'s plan-challenge step — 
 **When Gate 2 inputs are absent:**
 - No plan → skip the Evaluate agent silently (note in output: "Gate 2 Evaluate agent skipped — no plan available")
 - No acceptance criteria and no test plan → skip Test agent silently (note in output: "Gate 2 Test agent skipped — no criteria available")
-- Build proceeds Gate-1-only. Never refuse to build; never force-generate fake criteria.
 @end
 
 @define evaluator_panel():
 ### Evaluate agent spawn (one agent, two lenses)
 
-Run one Evaluate agent whose prompt names both lenses:
-
-1. **Acceptance criteria** — "Does the implementation satisfy each numbered acceptance criterion, INCLUDING the negative criteria (what it must NOT do)?"
-2. **Scope / intent drift** — "Did the Code agent smuggle in unplanned changes, deviate from the plan's intent, or introduce anti-features?"
-
-It returns `{"verdict": "PASS" | "FAIL", "rationale": "..."}`: FAIL when either lens fails, the rationale naming the failing criterion or the drift.
+Run one Evaluate agent whose prompt names both lenses, as the SINGLE skeleton's Gate 2 prompt words them: acceptance criteria (negative criteria included) and scope or intent drift. FAIL when either lens fails.
 @end
 
 @define implement_bundle():
@@ -101,14 +91,9 @@ Conditional by file type detected in the diff (add these when relevant):
 
 **Review agent result contract:** every Review agent must return a structured result with fields `focus`, `reviewed: true`, `filesExamined`, and `findings`. Each item in `findings` must carry: `file` (path of the primary file the finding relates to, or `null` if scope is unknown), `description` (one-sentence issue statement), and `severity` (`critical | high | medium | low`). A result is DEAD if: the agent returned null, threw, returned a guard string, or `reviewed !== true`. A DEAD Review agent is never treated as a clean reviewer. Retry once sequentially. If still dead after retry: record the focus in `coverageGaps`. A pass with any coverage gaps can never early-exit as clean, and the run verdict can never be PASS; escalate with message "review coverage incomplete: <focus>".
 
-Each Review agent gets `agentType: "Review"` with its focus baked into the prompt.
-
 **Step 2 — Adversarial finding verification**
 
-Before any fix, verify findings with perspective-diverse lenses. Run 2–3 agents asking:
-- "Does this finding actually reproduce given the current code?"
-- "Is this a real issue or a false positive in context?"
-- "Does the cited rule/principle actually apply here?"
+Before any fix, verify findings with 2–3 agents, one per lens of the skeleton's verification panel.
 
 Majority-survives: a finding needs >50% of verification lenses to confirm it. Strip unconfirmed findings.
 
@@ -159,7 +144,7 @@ Run builds, typechecks, lints and tests in the foreground, each with an explicit
 @define engine_output_schema():
 ### Engine output schema
 
-Each ticket engine run returns a structured result. The Synthesize agent or the wave loop reads this to decide next steps. The engine fills `verdict`: the SINGLE skeleton's `overallVerdict`, or `ESCALATED` from the ticket-link or branch stop. The wave merges `PASS` and `UNVERIFIED` and quarantines every other value, or none.
+Each ticket engine run returns a structured result. The engine fills `verdict`: the SINGLE skeleton's `overallVerdict`, or `ESCALATED` from the ticket-link or branch stop. The wave merges `PASS` and `UNVERIFIED` and quarantines every other value, or none.
 
 ```json
 {

@@ -27,8 +27,6 @@ Run this call with the start directory as `{root}`, the step 0c root call and th
 
 ## dynamic-build — author and run a build workflow
 
-Construct and run a Claude Code dynamic Workflow that implements, reviews and verifies one ticket or a full wave of tickets, with devflow's agents via `agentType`.
-
 {{agent_roster()}}
 
 {{agent_caveats()}}
@@ -52,8 +50,6 @@ Before authoring, verify:
 ---
 
 ### Pre-authoring setup
-
-Before you write the workflow script:
 
 **0. Resolve the evidence policy**
 
@@ -234,7 +230,6 @@ After implementing, commit your changes with a conventional-commit message and r
 );
 
 // Phase 3: Gate 1 #1 — post-code pipeline: Polish agent → Harden agent → Validate agent.
-// Validate runs last and unconditionally, so its one full run covers every commit the pass made.
 const gate1 = await phase("gate1", async () => {
   await agent(`Polish and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Polish" });
 
@@ -252,7 +247,6 @@ Return: {"verdict": "PASS" | "FAIL", "details": "..."}`, { agentType: "Validate"
   // Anything but an explicit PASS is a failure.
   if (validation?.verdict !== "PASS") {
     let failureDetails = validation?.details || "Validate agent returned no PASS verdict";
-    // Up to 2 fix attempts, each followed by a Validate re-run
     for (let attempt = 1; attempt <= 2; attempt++) {
       await agent(`OPERATION: validation-fix
 Fix the validation failures on branch ${BRANCH}:
@@ -336,7 +330,6 @@ Self-verify your fix compiles and the scenarios pass, following your Running com
 
 // Phase 5: Review → verify → fix (single pass)
 const reviewResult = await phase("review", async () => {
-  // Review scope: the entire branch diff, from the commit the ticket branch was forked from to HEAD.
   // The pass runs exactly ONCE.
   const reviewScope = `Review the full branch diff on branch ${BRANCH}.\nDIFF_RANGE: ${BASE_SHA}...HEAD\n`;
 
@@ -363,7 +356,6 @@ Focus discipline: ${focus}. Return: {"focus": "${focus}", "reviewed": true, "fil
     const r = rawReviews[i];
     const focus = reviewFocuses[i];
     if (!r || r.reviewed !== true) {
-      // Dead Review agent: retry once sequentially
       const retry = await agent(`Retry ${focus} review. ${reviewScope} Focus: ${focus} discipline. Return: {"focus": "${focus}", "reviewed": true, "filesExamined": ["<path>"], "findings": [{"file": "<path-or-null>", "line": <number-or-null>, "description": "<one-sentence issue>", "severity": "critical|high|medium|low"}]}`, { agentType: "Review" });
       if (!retry || retry.reviewed !== true) {
         coverageGaps.push(focus);
@@ -377,7 +369,6 @@ Focus discipline: ${focus}. Return: {"focus": "${focus}", "reviewed": true, "fil
   }
 
   const allFindings = liveReviews.flatMap(r => r.findings || []);
-  // Early exit when no findings — coverageGaps carry forward and block PASS downstream
   if (allFindings.length === 0) {
     return { survivingFindings: [], fixedFindings: [], coverageGaps };
   }
@@ -409,8 +400,6 @@ ${JSON.stringify(allFindings.map((f, i) => ({ index: i, description: f.descripti
     return { survivingFindings: [], fixedFindings: [], coverageGaps };
   }
 
-  // Sub-batches (max 5 findings): same file in sequence, distinct files in parallel.
-  // A finding with no file is a singleton group.
   const MAX_BATCH = 5;
   const fileGroups = {};
   for (let fi = 0; fi < confirmedFindings.length; fi++) {
@@ -420,7 +409,6 @@ ${JSON.stringify(allFindings.map((f, i) => ({ index: i, description: f.descripti
     fileGroups[key].push(f);
   }
 
-  // One entry per file; FIX_CHUNK chunks bound concurrent Code agents
   const FIX_CHUNK = 5;
   // issue-fix SCOPE per finding: CRITICAL or HIGH takes the Careful protocol (failing regression test first); anything else is Standard.
   const CAREFUL_SEVERITIES = new Set(["critical", "high"]);
@@ -454,8 +442,6 @@ Return: {"status": "fixed"|"blocked", "commitShas": ["<sha>"], "unresolved": ["<
   const notAddressed = [];
   for (const fileChunkResults of (fixResults || [])) {
     for (const { chunk, result } of (fileChunkResults || [])) {
-      // FIXED requires status "fixed", non-empty commitShas and an empty unresolved list;
-      // a non-empty unresolved list carries the whole chunk into survivingFindings.
       const unresolved = Array.isArray(result?.unresolved) ? result.unresolved : [];
       const claimedFixed = result?.status === "fixed" && (result?.commitShas || []).length > 0;
       if (claimedFixed && unresolved.length === 0) {

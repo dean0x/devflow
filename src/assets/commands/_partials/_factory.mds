@@ -1,8 +1,6 @@
 @define factory_shape():
 ### Ticket-factory pipeline shape (generalized)
 
-This is the standard shape for converting an initiative or spec into a reviewed, amended, self-consistent set of tickets plus a tracking issue.
-
 ---
 
 #### Stage 1 — Draft (one agent per ticket, parallelisable)
@@ -31,11 +29,7 @@ Spawn one Design agent or Synthesize agent per candidate ticket. DRAFT_SCHEMA:
 
 #### Stage 2 — Two-lens review (parallel per ticket)
 
-For each draft, run two independent Review agents **in parallel** — one per lens:
-
-**Lens A — Planner-readiness (cold read):** Could a planner build from this ticket alone, with no other context? Hunt: missing information; untestable or missing negative acceptance criteria; ambiguous constraints; scope holes (things the feature obviously needs that neither In nor Out mentions); undefined terms a cold reader cannot resolve. Severity: critical = planner would be blocked or misled; major = planner would guess; minor = polish.
-
-**Lens B — Accuracy / scope-discipline audit:** Every claim is sourced from the initiative or spec. No smuggled anti-features (scope items the initiative explicitly excludes). Constraints are honored. Dependency placeholders are consistent with the candidate slate. Severity: critical = invented fact / anti-feature / leak; major = unsourced claim or stance contradiction; minor = citation polish.
+For each draft, run two independent Review agents **in parallel**, one per lens, with the checks and severities the skeleton's review prompts state: Lens A, planner-readiness (a cold read), and Lens B, accuracy and scope discipline. A scope hole is a thing the feature obviously needs that neither In nor Out names. A smuggled anti-feature is a scope item the initiative explicitly excludes.
 
 REVIEW_SCHEMA:
 
@@ -80,12 +74,7 @@ For each ticket, spawn one Synthesize agent or Design agent to apply review find
 
 #### Stage 4 — Whole-set cross-critic (single agent, sees all revised tickets)
 
-One Design agent reviews the full revised set for set-level issues — not individual prose quality:
-
-1. **Coverage:** does the union of tickets cover every item the initiative mandates? Anything the initiative mandates that no ticket owns?
-2. **Overlaps / contradictions:** same responsibility claimed by two tickets; contradictory constraints between tickets; inconsistent terminology for the same concept.
-3. **Dependency graph:** placeholders used consistently; wave assignment matches stated dependencies; anything that should be a dependency but isn't declared.
-4. **Acceptance-criteria coherence:** no criterion in one ticket contradicts a criterion in another.
+One Design agent reviews the full revised set for set-level issues, not individual prose quality, on the four axes the skeleton's cross-critic prompt names: coverage, overlaps and contradictions, the dependency graph, and acceptance-criteria coherence. The dependency-graph check also flags a dependency that a ticket needs but does not declare.
 
 CRITIC_SCHEMA:
 
@@ -112,8 +101,6 @@ CRITIC_SCHEMA:
 
 #### Stage 5 — Per-ticket amend (parallel, only tickets with amendments)
 
-Apply cross-set amendments to the tickets that need them.
-
 ---
 
 #### Stage 6 — Assemble tracking issue
@@ -128,7 +115,7 @@ One Synthesize agent writes the tracking-issue document from the final ticket se
 - The `candidates` array is **what the model proposed + user confirmed** — never hardcoded.
 - The `initiative` variable is the raw user input (a description, a spec doc path, or inline text) — read it and distill before passing to agents.
 - The `constraints` variable is optional: any cross-cutting rules (naming discipline, scope filters, authority order) the user supplied.
-- Emit artifact files using the ticket body template above for each ticket — write inside agents, since the script body has no filesystem access.
+- Write each ticket's artifact file inside an agent, with the ticket body template above.
 - For large initiatives (more than ~8 tickets), chunk the `parallel(map())` fan-outs into batches (e.g. `for` loop over slices, `await`-ing each batch) so agent concurrency stays bounded and provider rate limits are respected.
 @end
 

@@ -726,46 +726,20 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 
 ## Architecture
 
+The phase headings above give the full flow.
+
+<!-- compliance:on -->
+Compliance steps:
+
 ```
-/resolve (orchestrator - spawns agents only)
-│
-├─ Phase 0: Worktree Discovery & Pre-flight
-├─ Phase 1: Parse issues from TARGET_DIR
-<!-- compliance:on -->
-├─ Phase 1b: Fetch external threads (evidence policy required)
-<!-- compliance:end -->
-├─ Phase 2: Global Triage [Triage agent, opus, single agent]
-├─ Phase 3: Batch FIX_NOW issues
-├─ Phase 4: Fix [Code agent × N]
-<!-- compliance:on -->
 ├─ Phase 5: Write resolution-summary.md (compaction safety; Tracked = "(pending)" or "(pending — TRACEABILITY: DEGRADED)" if manage-debt degrades)
-<!-- compliance:off -->
-├─ Phase 5: Write the local resolution-summary.md (compaction safety; Tracked = "local")
-<!-- compliance:end -->
-├─ Phase 6: Polish
-├─ Phase 7: Verification Gate [Validate agent, haiku] + push + Fix agent validation-fix loop ≤2
-├─ Phase 8: CI Status Gate (conditional)
-<!-- compliance:on -->
 ├─ Phase 9: Git agent (manage-debt) — FIX_SEPARATE + TECH_DEBT → backfill Tracked={ISSUE_REF} (or TRACEABILITY: DEGRADED on failure)
-<!-- compliance:end -->
-│
-<!-- compliance:on -->
 ├─ Phase 9b: 9b-0 Test agent (stale TPs), 9b-1/9b-2 Git agent (threads, resolution comment)
 │  └─ Step 9b-3: verify-evidence.cjs publish (inline, no Git spawn) — only when the head moved
-<!-- compliance:off -->
-├─ Phase 9b: 9b-0 Test agent (stale TPs, local evidence file)
-│  └─ Step 9b-3: verify-evidence.cjs verify (inline, no Git spawn) — local result file, only when the head moved
-<!-- compliance:end -->
-│
-<!-- compliance:on -->
 ├─ Phase 9c: verify-evidence.cjs readiness (inline, no Git spawn) — non-author approval required, report-only
-<!-- compliance:off -->
-├─ Phase 9c: verify-evidence.cjs readiness (inline, no Git spawn) — every cycle, local readiness file, report-only
-<!-- compliance:end -->
-│
-└─ Phase 10: Display results (resolution-summary.md written in Phase 5)
 ```
 
+<!-- compliance:end -->
 ## Edge Cases
 
 | Case | Handling |
@@ -782,8 +756,6 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 | Fork PR this run cannot push to | `TRACEABILITY: DEGRADED (cannot push to fork)` → `fork_no_push`: no push in Phase 7, Phase 8 skipped, 9b-1 records FIXED threads as DEGRADED, 9b-2 still posts; the head did not move, so 9b-0 and 9b-3 are skipped |
 | The PR has no trusted evidence record | 9b-0 finds no vouched-for stale line, so no Test agent runs; 9b-3 still refreshes the block and comment, every TP without a claim reading `UNVERIFIED` |
 <!-- compliance:off -->
-| `REQUIRE_NON_AUTHOR_APPROVAL` is `false` | Phase 9c still runs, with `--require-non-author-approval false` |
-| Fork PR this run cannot push to | `TRACEABILITY: DEGRADED (cannot push to fork)` → `fork_no_push`: no push in Phase 7, Phase 8 skipped; the head did not move, so 9b-0 and 9b-3 are skipped |
 | No local evidence file exists | `STALE_REVERIFICATION` and `EVIDENCE_REFRESH` are `SKIPPED (no local evidence file)`; Phase 9c runs readiness without `--evidence` |
 <!-- compliance:end -->
 | A CI run behind a claim has expired (~90 days) | The TP reads `INDETERMINATE` — never verified, never failed — until a claim at a newer SHA settles it |
@@ -799,8 +771,6 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 <!-- compliance:end -->
 
 ## Output Artifact
-
-Written in Phase 5 to `{TARGET_DIR}/resolution-summary.md`:
 
 ```markdown
 # Resolution Summary
