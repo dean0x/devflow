@@ -95,12 +95,10 @@ verbatim and **never re-derive, re-map or repair it**.
 ## Step 0 — Claim the run
 
 1. If `$TRACKER_CLAIM` exists, compare its age against the claim-staleness bound
-   of **600 seconds** — the same bound the session-start gate applies, so one
-   claim file is classified identically on both sides:
+   of **600 seconds** — the same bound the session-start gate applies:
    - **Fresh** (age under the bound) — another Tracker agent is live. Report
-     `LOST` and exit 3, exactly as the losing branch of step 2 does: it is the
-     same outcome reached one check earlier, and two spellings of one outcome is
-     the ambiguity the report exists to remove. Change nothing, write nothing.
+     `LOST` and exit 3, the same outcome as the losing branch of step 2. Change
+     nothing, write nothing.
    - **Stale** (age at or over the bound) — a previous run crashed. Re-claim it by
      `touch`ing the claim file.
 2. Otherwise claim it with a **create-exclusive** create, so exactly one winner
@@ -110,49 +108,37 @@ verbatim and **never re-derive, re-map or repair it**.
    if ( set -o noclobber; : > "$TRACKER_CLAIM" ) 2>/dev/null; then echo CLAIMED; else echo LOST; exit 3; fi
    ```
 
-   The contended resource is the claim **path**, so the primitive has to be one
-   that **refuses when that path already exists** — `noclobber` here; `ln` of a
-   marker or `mkdir` of a lock directory refuse on the same terms. A rename does
-   not: `mv src dst` replaces an existing `dst` and exits 0, so both racers would
-   win and the loser branch would never be taken. The redirect failing **is** the
-   loser branch: another agent claimed first. The create is also its own existence
-   check, which leaves no window between step 1 and this line.
+   The primitive must **refuse when the claim path already exists**. Never use a
+   rename: `mv src dst` replaces an existing `dst` and exits 0, so both racers
+   would win. A failed redirect **is** the loser branch: another agent claimed
+   first.
 
-   The branch you took is **the outcome you report to yourself**, so it has to be
-   visible. `CLAIMED` means the run is yours; `LOST` with status 3 means it is
-   not, and 3 rather than 0 or 1 because success and "the create failed" are both
-   readings this branch is not. **Absent output ⇒ LOST; the loser writes
-   nothing** — not `$TRACKER_FILE`, not `$TRACKER_ATTEMPTS_FILE`, not the claim.
-   A run killed between the create and its echo is indistinguishable from a
-   winner that printed nothing, and of the two readings only this one is safe.
+   `CLAIMED` means the run is yours; `LOST` with status 3 means it is not.
+   **Absent output ⇒ LOST; the loser writes nothing** — not `$TRACKER_FILE`, not
+   `$TRACKER_ATTEMPTS_FILE`, not the claim. A run killed between the create and
+   its echo looks like a winner that printed nothing, and only the LOST reading is
+   safe.
 3. **Heartbeat**: `touch` the claim file **once**, at the probe → compose
-   boundary. The probe is network-bound and its duration is not yours to predict;
-   composition is local and short. One refresh there restarts the staleness clock
-   for the only phase that could otherwise outlive it. A cadence repeated per
-   capability probed and per section composed reads as safer and is not: it is an
-   instruction with no observable count, so nothing distinguishes a run that
-   followed it from one that touched once, and every extra touch is a write to
-   the file the next session's gate stats.
+   boundary. The probe is network-bound; composition is local and short, so one
+   refresh there restarts the staleness clock for the only phase that could
+   outlive it. Refresh it at no other point: each extra refresh is a write to the
+   file the next session's gate stats.
 
 **Vanished inputs**: if the claim file or `$TRACKER_DEVFLOW_DIR` disappears
 mid-run — the user disabled or cleared the feature — stop without further writes.
 Never recreate them.
 
 **If `$TRACKER_FILE` already exists**, stop immediately and
-report `ALREADY_EXISTS`. Read the existing file if you want to say what is in it;
-do not modify it.
+report `ALREADY_EXISTS`. Do not modify it.
 
 ## Capability probe
 
 Probe **before** you infer anything, and select every capability **by its
-description, never by tool name** — published tool rosters disagree with one
-another across vendors and versions, so a name-matched probe reports "missing"
-for a capability that is present under another spelling.
+description, never by tool name** — tool names differ across vendors and
+versions, so a name-matched probe misses a capability present under another name.
 
 For each capability below, establish whether it is reachable in this session.
-**denial ≡ absence** — a denied capability is identical to an absent one: both
-mean you cannot use it now and both may resolve later, so they take the same
-branch.
+**denial ≡ absence**: a denied capability takes the same branch as an absent one.
 
 | Capability (by description) | Fills |
 |---|---|
@@ -172,43 +158,37 @@ free prose:
 TRACEABILITY: DEGRADED (no tracker tool for {capability})
 ```
 
-**When NO capability is reachable at all**, the tracker is not usable in this
-session: **write nothing**, follow `## Finishing`, and let the next session
-re-arm. This is the transient case. Do not write a defaults-only file to "make
-progress" — that file would satisfy the existence gate forever.
+**When no capability is reachable at all** (the transient case), **write
+nothing**, follow `## Finishing`, and let the next session re-arm. Never write a
+defaults-only file: it would satisfy the existence gate forever.
 
-**When some are reachable but the evidence is thin**, that is the permanent case:
-**write the file**, marking every section you could not resolve with a sentinel.
+**When some are reachable but the evidence is thin** (the permanent case),
+**write the file**, and mark every section you could not resolve with a sentinel.
 
 ## Bounded inference
 
 Repository conventions come from a **bounded** scan of history. The bounds, the
 UNTRUSTED-strings handling, the post-composition verbatim-match check and the
-`### Substitutions` rule all live in one place: the `devflow:git` skill's
-`references/learn-conventions.md`. **Load it and apply it. Do not restate it
-here** — a second hand-maintained copy of security-relevant bounds is two rules
-that can disagree, and only one of them would be under test.
+`### Substitutions` rule live in the `devflow:git` skill's
+`references/learn-conventions.md`. **Load it and apply it; do not restate it.**
 
-Three rules are this agent's own, and are stated here because that reference does
-not carry them:
+Three rules are this agent's own:
 
 1. **Majority rule.** A scanned value is adopted only with **≥ 3 occurrences AND
    ≥ 60% share** of the sampled evidence. Otherwise it gets a sentinel —
-   **never the first match**, and **never an invented value**. (This is stricter
-   than the reference's own 50% rule, deliberately: a wrong tracker key sends
-   every future issue lookup to a project that does not exist.)
+   **never the first match**, and **never an invented value**. This is stricter
+   than the reference's 50% rule on purpose: a wrong tracker key sends every
+   future issue lookup to a project that does not exist.
 2. **Refuse history inference outside a real project root.** If the resolved root
    is `$HOME`, or carries no git marker, do not infer from history at all — a
-   dotfiles `$HOME` *is* a git repository, and its branch names say nothing about
-   any tracker. Every repo-derived section gets a sentinel instead.
-3. **Record provenance.** Write the root you actually scanned and the timestamp
-   into `inferred-from:`. It is the only place a reader can see where a value
-   came from.
+   dotfiles `$HOME` can be a git repository, and its branch names say nothing
+   about any tracker. Every repo-derived section gets a sentinel instead.
+3. **Record provenance.** Write the root you scanned and the timestamp into
+   `inferred-from:`.
 
-Every value is **shape-gated regardless of provenance** — a value scanned from
-history, read from a tracker response, or typed by a human gets the same
-shape gate from the table below. A discarded value is replaced by the documented
-default and recorded as a `### Substitutions` row.
+Every value is **shape-gated regardless of provenance** — history, a tracker
+response or a human — by the table below. A discarded value takes the documented default
+and a `### Substitutions` row.
 
 ## The file
 
