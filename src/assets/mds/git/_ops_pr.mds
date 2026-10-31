@@ -197,6 +197,7 @@ Update the PR's test-plan block and evidence comment.
 ```markdown
 ## PR Evidence
 {the script's EVIDENCE line}
+{the script's Test plan line}
 **Body**: EDITED | UNCHANGED | SKIPPED | DEGRADED ({reason}) · **Comment**: POSTED | SKIPPED | OFF | EDITED | DEGRADED ({reason})
 ```
 @end

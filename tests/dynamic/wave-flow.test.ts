@@ -1667,6 +1667,9 @@ function waveEvidenceStep(built: string): string | null {
   return section(built, STEP7, MAINTENANCE)
 }
 
+/** What step 7 does with a refresh that prints nothing: the line the script itself prints when it fails. */
+const REFRESH_EMPTY_STDOUT = 'Report its stdout; empty stdout ⇒ `TRACEABILITY: DEGRADED (evidence unavailable)`'
+
 /**
  * Named collector: what step 7 fails to state, each site labelled — one
  * requirement per site, so one probe per site drives this collector.
@@ -1705,7 +1708,7 @@ export function collectWaveEvidenceStepDefects(built: string): string[] {
     && step.includes('through the Bash tool with `timeout: 180000`'))
   need('the publication value: resolved in this step, by the partial',
     step.includes('**Resolve `REVIEW_PUBLICATION` per worktree:**') && step.includes('**Evidence stub:**'))
-  need('never blocks: a refresh that returns nothing degrades', step.includes('`TRACEABILITY: DEGRADED (evidence refresh failed)`'))
+  need('never blocks: a refresh that returns nothing degrades', step.includes(REFRESH_EMPTY_STDOUT))
   need('no policy in a call: the partial reads it command-side', fences.every(f => !f.includes('EVIDENCE_POLICY')))
   return out
 }
@@ -1721,7 +1724,7 @@ const STEP7_SEEDS: ReadonlyArray<readonly [site: string, from: string, to: strin
   ['the push', 'push origin HEAD; echo', 'push --force origin HEAD; echo'],
   ['the refresh', ` --evidence "${WAVE_EVIDENCE_FILE}"`, ''],
   ['the publication value', '**Resolve `REVIEW_PUBLICATION` per worktree:**', 'Resolve it somehow:'],
-  ['never blocks', '`TRACEABILITY: DEGRADED (evidence refresh failed)`', 'the run stops'],
+  ['never blocks', REFRESH_EMPTY_STDOUT, 'the run stops'],
   ['no policy in a call', '--publication {REVIEW_PUBLICATION resolved above, or auto};', '--publication {REVIEW_PUBLICATION resolved above, or auto} --policy {EVIDENCE_POLICY};'],
 ]
 

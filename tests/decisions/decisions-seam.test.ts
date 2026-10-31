@@ -203,21 +203,29 @@ function collectBadSentences(
 // ── Gate order (AC-105) ─────────────────────────────────────────────────────
 
 const GATE = 'When the settings line says `CURATION=off`'
-const LOCATE = 'rev-parse --path-format=absolute --show-toplevel --git-common-dir'
+/** The first sentence of the decisions step's locate text; the shared root step, with its script call, follows it. */
+const LOCATE = 'The decisions ledger belongs to the repository'
+const ROOT_CALL = 'resolve-root.cjs'
 const INDEX_READ = '/.devflow/curation/index.md`'
 
-/** Named collector: how a decisions-loading host orders its gate sentence, its locate call and its index read. */
+/**
+ * Named collector: how a decisions-loading host orders its gate sentence, its locate step and its index read.
+ * A docs or knowledge step earlier in the host can run the root call first, so the call that counts is the
+ * first one after the decisions step's own locate sentence.
+ */
 function collectGateOrderDefects(host: string, text: string): string[] {
   const gate = text.indexOf(GATE)
   const locate = text.indexOf(LOCATE)
+  const call = locate === -1 ? -1 : text.indexOf(ROOT_CALL, locate)
   const read = text.indexOf(INDEX_READ)
   const out: string[] = []
   if (gate === -1) out.push(`${host}: no CURATION=off gate sentence`)
-  if (locate === -1) out.push(`${host}: no ledger-locate call`)
+  if (locate === -1) out.push(`${host}: no ledger-locate step`)
+  if (locate !== -1 && call === -1) out.push(`${host}: the ledger-locate step runs no root call`)
   if (read === -1) out.push(`${host}: no index read`)
   if (gate !== -1 && locate !== -1 && gate > locate) out.push(`${host}: the gate follows the ledger-locate call`)
   if (gate !== -1 && read !== -1 && gate > read) out.push(`${host}: the gate follows the index read`)
-  if (locate !== -1 && read !== -1 && locate > read) out.push(`${host}: the index read precedes the ledger-locate call`)
+  if (call !== -1 && read !== -1 && call > read) out.push(`${host}: the index read precedes the ledger-locate call`)
   return out
 }
 

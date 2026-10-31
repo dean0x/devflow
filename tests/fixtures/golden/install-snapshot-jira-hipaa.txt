@@ -412,6 +412,7 @@ x .devflow/scripts/redact-secrets.cjs
 x .devflow/scripts/release-trace.cjs
 x .devflow/scripts/resolve-base.cjs
 x .devflow/scripts/resolve-evidence-policy.cjs
+x .devflow/scripts/resolve-root.cjs
 x .devflow/scripts/resolve-settings.cjs
 x .devflow/scripts/verify-evidence.cjs
 

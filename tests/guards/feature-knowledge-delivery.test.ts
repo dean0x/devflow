@@ -144,7 +144,7 @@ describe('the load text delivers a block per KB (D-KB-DELIVERY-TIERS, D-KB-LEGAC
       const section = loadSection(text) as string
       expect(section.endsWith('set both to `(none)`.\n'), `${name}: the section ends with the none state`).toBe(true)
       expect(section, `${name}: nothing after the load steps`).not.toContain('**Fresh base.**')
-      if (!section.includes('Resolve `{worktree}` as the checkout')) afterRoot++
+      if (!section.includes('resolve-root.cjs')) afterRoot++
     }
     expect(afterRoot, 'exactly implement loads through the after-root form').toBe(1)
     // Known-bad probe: a Grep mention and a doubled element AFTER the section are not load text.
