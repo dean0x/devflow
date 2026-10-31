@@ -392,6 +392,7 @@ export const RELEASED_SHIPPED_NAMES: ReleasedShippedNames = Object.freeze({
     ]),
     'devflow:feature-knowledge': names([
       'SKILL.md',
+      'references/new-kb.md', // merged after 3.9.0; not yet in a release
     ]),
     'devflow:gap-analysis': names([
       'SKILL.md',

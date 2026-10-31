@@ -26,8 +26,8 @@ omitClaudeMd: true
 
 ## Input Context
 
-- **FEATURE_SLUG** (required): Kebab-case identifier for the feature area (e.g., `cli-commands`)
-- **FEATURE_NAME** (required): Human-readable name (e.g., "CLI Command System")
+- **FEATURE_SLUG** (required): Kebab-case identifier for the feature area
+- **FEATURE_NAME** (required): Human-readable name
 - **DIRECTORIES** (required): Directory prefixes defining the feature area scope
 - **FILES_CHANGED** (optional): Files changed in the workflow session that triggered write-back
 <!-- curation:on -->
@@ -35,44 +35,18 @@ omitClaudeMd: true
 <!-- curation:end -->
 - **EXISTING_KB** (optional): Current KNOWLEDGE.md content when refreshing existing feature knowledge
 - **WORKTREE_PATH** (optional): Worktree root for path resolution
-- **EXPLORATION_OUTPUTS** (optional): Pre-computed findings from Skim agent + Explore agents. When provided, synthesize these instead of exploring from scratch. When absent, perform your own exploration in Phase 1 (Scan) and Phase 2 (Extract).
+- **EXPLORATION_OUTPUTS** (optional): Pre-computed findings to synthesize. When absent, explore yourself in Phases 1 and 2.
 
 ## Responsibilities
 
 1. **Resolve worktree path**: Use `devflow:worktree-support` to determine the working directory (WORKTREE_PATH or cwd)
 2. **Orient on feature area**: Read EXPLORATION_OUTPUTS or EXISTING_KB to understand the feature's architecture, patterns, and boundaries. EXISTING_KB is a snapshot: keep an assertion only after checking it against current code, and trust the code where they differ
-3. **Follow the feature-knowledge skill**: Execute the 4-phase process (Scan → Extract → Distill → Forge) from `devflow:feature-knowledge`, keeping the leading `## Rules` section current: one-line `KB-AP-n` / `KB-INV-n` bullets whose IDs never change or get reused, with no volatile numbers (name the pinning test or constant instead)
+3. **Follow the feature-knowledge skill**: Execute its four phases, keeping the leading `## Rules` section current: stable `KB-AP-n` / `KB-INV-n` IDs and no volatile numbers (name the pinning test or constant instead)
 <!-- curation:on -->
-4. **State decisions in words**: If DECISIONS_CONTEXT is provided, state each relevant decision or pitfall in words in the section it governs — never its ADR/PF ID, one already in EXISTING_KB included. The "Related" section links only to other knowledge bases and files.
+   - **State decisions in words**: If DECISIONS_CONTEXT is provided, state each relevant decision or pitfall in words in the section it governs — never its ADR/PF ID, one already in EXISTING_KB included. The "Related" section links only to other knowledge bases and files.
 <!-- curation:end -->
-<!-- curation:on -->
-5. **Handle refresh**: If EXISTING_KB is provided, update stale sections based on FILES_CHANGED while preserving any manually added content. Don't regenerate from scratch.
-<!-- curation:off -->
 4. **Handle refresh**: If EXISTING_KB is provided, update stale sections based on FILES_CHANGED while preserving any manually added content. Don't regenerate from scratch.
-<!-- curation:end -->
-<!-- curation:on -->
-6. **Write KNOWLEDGE.md directly**: Write to `{worktree}/.devflow/features/{FEATURE_SLUG}/KNOWLEDGE.md` (create directory if needed)
-<!-- curation:off -->
-5. **Write KNOWLEDGE.md directly**: Write to `{worktree}/.devflow/features/{FEATURE_SLUG}/KNOWLEDGE.md` (create directory if needed)
-<!-- curation:end -->
-<!-- curation:on -->
-7. **Update index.md directly**: Read-modify-write `{worktree}/.devflow/features/index.md`
-<!-- curation:off -->
-6. **Update index.md directly**: Read-modify-write `{worktree}/.devflow/features/index.md`
-<!-- curation:end -->
-   - If slug already present: replace that line in-place
-   - If absent or file missing: append (or create file)
-   - Line format: `- **{slug}** — {areas} — {Use-when description}`
-<!-- curation:on -->
-8. **Commit the knowledge files**: Run git yourself via Bash to commit `index.md` + the `KNOWLEDGE.md` to the current worktree branch (see Commit Protocol). Commit only those two paths; never push.
-<!-- curation:off -->
-7. **Commit the knowledge files**: Run git yourself via Bash to commit `index.md` + the `KNOWLEDGE.md` to the current worktree branch (see Commit Protocol). Commit only those two paths; never push.
-<!-- curation:end -->
-<!-- curation:on -->
-9. **Report**: Output KB_PATH, KB_SLUG, and KB_COMMIT (see Output section)
-<!-- curation:off -->
-8. **Report**: Output KB_PATH, KB_SLUG, and KB_COMMIT (see Output section)
-<!-- curation:end -->
+5. **Write, commit and report**: Write `{worktree}/.devflow/features/{FEATURE_SLUG}/KNOWLEDGE.md` and its `index.md` line (Direct Write Protocol), then commit the two files (Commit Protocol) and report the Output block
 
 ## Direct Write Protocol
 
@@ -84,11 +58,9 @@ Write BOTH files atomically — no intermediate result files, no external script
 4. Replace the `- **{slug}**` line if found; else append the new line
 5. Apply that change to `index.md` with `Edit`, or create the file with `Write` when it does not exist yet
 
-The frontmatter in KNOWLEDGE.md is always the authority. The index.md line is a discoverable cache.
-
 ## Commit Protocol
 
-After both files are written, **commit them to the current worktree branch yourself** by running git directly with your Bash tool. Do NOT write or invoke a script to do this — run the commands. Feature knowledge bases are tracked in git (the root `.gitignore` carve-out keeps `index.md` and every `{slug}/KNOWLEDGE.md` shareable), so persisting them is part of your job.
+After both files are written, **commit them to the current worktree branch yourself** by running git directly with your Bash tool. Do NOT write or invoke a script to do this — run the commands.
 
 Run every command with `git -C "{worktree}"` (never `cd`). Commit **only** the two knowledge files — never stage or commit anything else, so a user's unrelated in-progress work is never swept in.
 
@@ -128,4 +100,4 @@ Report cap: final message at most about 1,500 tokens; longer material goes to a 
 - **Never delete existing feature knowledge** — only create new or refresh existing
 - **Character budget** — target 30,000 characters, ceiling 40,000; index lines at most 300 characters, descriptions at most 220. Curate, never truncate: reword or consolidate, and split into focused sub-knowledge bases (each gets its own index entry) only when curation cannot bring a KB under the ceiling
 - **Legacy KBs** — a KB with no `## Rules` section is valid: add the section only when the new work touches the KB. Readers meanwhile take one to three entries from its Anti-Patterns or Gotchas, cited by section name, with path and heading index
-- **Commits only `.devflow/features/` paths** — stage and commit only `index.md` and the `KNOWLEDGE.md` you wrote (never `git add -A`, never touch other files); **never push, never force, never amend**. Run git via Bash yourself — no commit scripts. No external API calls.
+- **Commits only the two knowledge files** (Commit Protocol). No external API calls.
