@@ -1,7 +1,7 @@
 @define wave_loop():
 ### Wave execution loop
 
-There is no scheduler, no parser, no graph code. A wave is the single-ticket engine run once per ready ticket, in an order that agents work out by reading the issues.
+A wave is the single-ticket engine run once per ready ticket, in an order that agents work out by reading the issues.
 
 **Step 1 — Read the wave**
 
@@ -18,15 +18,6 @@ Spawn a `agentType: "Design"` agent (opus) to:
 - Empty `Depends on:` = ready now, regardless of the wave's integration state.
 - "Nothing merged yet" or "integration hasn't started" is never a dependency — those are the wave's own state, not a named blocker.
 - A "blocked" verdict without a NAMED blocking ticket ID is invalid; the reader must name the specific ticket ID blocking this one.
-
-Reader return shape:
-
-```json
-{
-  "ready": ["<ticket-id>"],
-  "blocked": [{"ticket": "<ticket-id>", "namedBlocker": "<ticket-id>", "reason": "<string>"}]
-}
-```
 
 **"Ready" does not mean "parallelizable."** The agent applies `concurrency_doctrine()`: ready tickets run sequentially by default, in parallel only when they pass its three bars.
 

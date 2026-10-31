@@ -862,32 +862,32 @@
     },
     {
       "id": "command-dynamic-build-max",
-      "ceiling": 95637,
-      "pattern": "['dynamic-build', 'on', 95_637],",
+      "ceiling": 93087,
+      "pattern": "['dynamic-build', 'on', 93_087],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
       "description": "D-CMD-SIZE: dist/commands/dynamic-build.md, the curation-on build, in bytes. Measured 95,669 after one temp-file Write method for #743, 95,732 after the Workflow roster dropped Knowledge, which only dynamic-profile spawned, and the test-plan and wave-block copies moved to a `mktemp -d` folder for #717, 95,831 after the Design agent was split into Design and Architect for #733, 95,876 after the dynamic family was cut for #717, 103,841 after the CI gate and the claim lines moved into the scripts for #683, 103,973 after the shared command partials were cut for #715, 104,425 after the shared root step was cut again for #683, 104,560 after the publish block printed its own test-plan line and failure line for #683, and 104,788 after the roots were resolved by one script call for #683, and 105,421 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (105,529 after the tracker note kept its github condition for #675,105,535 after the docs root was condensed, 105,611 after the tracker partial, 106,609 after the publication partial, 106,724 at #679, 106,771 before the Gate 2 verdict took its first word, 106,846 at #677, 106,869 after #561), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. It rose by 28 bytes to 106,846 at #677, because the wait rule now names the file that sets the result: a run could read the wrong file and report a pass. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. Lowered by #706 (lean always-loaded descriptions) to 95637."
     },
     {
       "id": "command-dynamic-build-curation-off-max",
-      "ceiling": 93044,
-      "pattern": "['dynamic-build', 'off', 93_044],",
+      "ceiling": 90494,
+      "pattern": "['dynamic-build', 'off', 90_494],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
       "description": "D-CMD-SIZE: dist/curation-off/commands/dynamic-build.md, the curation-off build, in bytes. Measured 93,076 after one temp-file Write method for #743, 93,139 after the Workflow roster dropped Knowledge, which only dynamic-profile spawned, and the test-plan and wave-block copies moved to a `mktemp -d` folder for #717, 93,227 after the Design agent was split into Design and Architect for #733, 93,283 after the dynamic family was cut for #717, 101,158 after the CI gate and the claim lines moved into the scripts for #683, 101,290 after the shared command partials were cut for #715, 101,742 after the shared root step was cut again for #683, 101,798 after the publish block printed its own test-plan line and failure line for #683, and 102,026 after the roots were resolved by one script call for #683, and 102,034 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (102,142 after the tracker note kept its github condition for #675,102,148 after the docs root was condensed, 102,224 after the tracker partial, 103,222 after the publication partial, 103,337 at #679, 103,384 before the Gate 2 verdict took its first word, 103,459 at #677, 103,482 after #561), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. It rose by 28 bytes to 103,459 at #677, because the wait rule now names the file that sets the result: a run could read the wrong file and report a pass. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. Lowered by #706 (lean always-loaded descriptions) to 93044."
     },
     {
       "id": "command-dynamic-plan-max",
-      "ceiling": 30454,
-      "pattern": "['dynamic-plan', 'on', 30_454],",
+      "ceiling": 30145,
+      "pattern": "['dynamic-plan', 'on', 30_145],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
       "description": "D-CMD-SIZE: dist/commands/dynamic-plan.md, the curation-on build, in bytes. Measured 30,463 after the Workflow roster dropped Knowledge, which only dynamic-profile spawned, and the test-plan and wave-block copies moved to a `mktemp -d` folder for #717, 30,574 after the Design agent was split into Design and Architect for #733, 30,623 after the dynamic family was cut for #717, 34,619 after the shared command partials were cut for #715, 34,972 after the shared root step was cut again for #683, 35,107 after the roots were resolved by one script call for #683, and 35,740 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (35,794 after the tracker note kept its github condition for #675,35,800 after the docs root was condensed, 35,876 after the tracker partial, 36,880 after #472, 36,994 when #456 closed), with no headroom. Main held 36,749. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. Lowered by #706 (lean always-loaded descriptions) to 30454."
     },
     {
       "id": "command-dynamic-plan-curation-off-max",
-      "ceiling": 26848,
-      "pattern": "['dynamic-plan', 'off', 26_848],",
+      "ceiling": 26539,
+      "pattern": "['dynamic-plan', 'off', 26_539],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
       "description": "D-CMD-SIZE: dist/curation-off/commands/dynamic-plan.md, the curation-off build, in bytes. Measured 26,857 after the Workflow roster dropped Knowledge, which only dynamic-profile spawned, and the test-plan and wave-block copies moved to a `mktemp -d` folder for #717, 26,957 after the Design agent was split into Design and Architect for #733, 27,017 after the dynamic family was cut for #717, 31,079 after the shared command partials were cut for #715, 31,386 after the shared root step was cut again for #683, 31,442 after the roots were resolved by one script call for #683, and 31,450 after the tracker note kept its github condition for #675 (31,456 after the docs root was condensed, 31,532 after the tracker partial, 32,530 after #472, 32,557 when #456 closed), with no headroom. Main held 32,557. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. Lowered by #706 (lean always-loaded descriptions) to 26848."
@@ -902,16 +902,16 @@
     },
     {
       "id": "command-dynamic-tickets-max",
-      "ceiling": 32854,
-      "pattern": "['dynamic-tickets', 'on', 32_854],",
+      "ceiling": 31425,
+      "pattern": "['dynamic-tickets', 'on', 31_425],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
       "description": "D-CMD-SIZE: dist/commands/dynamic-tickets.md, the curation-on build, in bytes. Measured 32,866 after the Workflow roster dropped Knowledge, which only dynamic-profile spawned, for #717, 32,974 after the Design agent was split into Design and Architect for #733, 33,019 after the dynamic family was cut for #717, 40,317 after the shared command partials were cut for #715, 40,378 after the shared root step was cut again for #683, 40,513 after the roots were resolved by one script call for #683, and 41,146 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (41,254 after the docs root was condensed for #675,41,336 after #472, 41,450 when #456 closed), with no headroom. Main held 41,205. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. Lowered by #706 (lean always-loaded descriptions) to 32854."
     },
     {
       "id": "command-dynamic-tickets-curation-off-max",
-      "ceiling": 29383,
-      "pattern": "['dynamic-tickets', 'off', 29_383],",
+      "ceiling": 27954,
+      "pattern": "['dynamic-tickets', 'off', 27_954],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
       "description": "D-CMD-SIZE: dist/curation-off/commands/dynamic-tickets.md, the curation-off build, in bytes. Measured 29,395 after the Workflow roster dropped Knowledge, which only dynamic-profile spawned, for #717, 29,492 after the Design agent was split into Design and Architect for #733, 29,548 after the dynamic family was cut for #717, 36,920 after the shared command partials were cut for #715, 36,935 after the shared root step was cut again for #683, 36,991 after the roots were resolved by one script call for #683, and 36,999 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (37,053 after the docs root was condensed for #675,37,129 after #472, 37,156 when #456 closed), with no headroom. Main held 37,156. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. Lowered by #706 (lean always-loaded descriptions) to 29383."
@@ -950,16 +950,16 @@
     },
     {
       "id": "command-plan-max",
-      "ceiling": 33852,
-      "pattern": "['plan', 'on', 33_852],",
+      "ceiling": 33184,
+      "pattern": "['plan', 'on', 33_184],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
       "description": "D-CMD-SIZE: dist/commands/plan.md, the curation-on build, in bytes. Measured 33,881 after the Design agent was split into Design and Architect for #733, 33,929 after the shared command partials were cut for #715, 34,422 after the lean cut of the Plan path for #714, 35,325 after the shared root step was cut again for #683, 35,516 after the roots were resolved by one script call for #683, and 36,222 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (36,330 after the knowledge write-back filter and the index file name were restored for #675,36,322 after the decisions partial was condensed for #675, 36,492 after the knowledge partial was condensed for #675, 36,911 after the tracker note kept its github condition for #675, 36,917 after the docs root was condensed, 36,993 after the tracker partial, 37,997 after #473, 38,018 after #472, 38,096 when #456 closed), with no headroom. Main held 39,153 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. Lowered by #706 (lean always-loaded descriptions) to 33852."
     },
     {
       "id": "command-plan-curation-off-max",
-      "ceiling": 32183,
-      "pattern": "['plan', 'off', 32_183],",
+      "ceiling": 31563,
+      "pattern": "['plan', 'off', 31_563],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
       "description": "D-CMD-SIZE: dist/curation-off/commands/plan.md, the curation-off build, in bytes. Measured 32,212 after the Design agent was split into Design and Architect for #733, 32,260 after the shared command partials were cut for #715, 32,635 after the lean cut of the Plan path for #714, 33,231 after the shared root step was cut again for #683, 33,343 after the roots were resolved by one script call for #683, and 33,424 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (33,532 after the knowledge write-back filter and the index file name were restored for #675,33,524 after the knowledge partial was condensed for #675, 33,943 after the tracker note kept its github condition for #675, 33,949 after the docs root was condensed, 34,025 after the tracker partial, 35,029 after #473, 35,050 after #472, 35,126 when #456 closed), with no headroom. Main held 36,166 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. Lowered by #706 (lean always-loaded descriptions) to 32183."
@@ -998,16 +998,16 @@
     },
     {
       "id": "command-resolve-max",
-      "ceiling": 47579,
-      "pattern": "['resolve', 'on', 47_579],",
+      "ceiling": 46976,
+      "pattern": "['resolve', 'on', 46_976],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
       "description": "D-CMD-SIZE: dist/commands/resolve.md, the curation-on build, in bytes. Measured 47,607 after the lean Resolve group (#716), 48,356 after the CI gate and the claim lines moved into the scripts for #683, 48,605 after the shared command partials were cut for #715, 49,229 after the shared root step was cut again for #683, 49,354 after the publish script printed its own status lines for #683, 49,585 after the roots were resolved by one script call for #683, and 50,283 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (50,391 after the knowledge write-back filter and the index file name were restored for #675,50,311 after the decisions partial was condensed for #675, 50,481 after the knowledge partial was condensed for #675, 51,283 after the publication partial was condensed for #675, 51,398 at #679, 51,532 at #677); it was 51,543 after #484 added the severity tiers and 51,753 when main's fresh-base step (#495) and the Phase 6 level inputs met in one merge (main measures 51,773 under its 51,824 ceiling; 52,216 on the branch before the merge, paid by a named cut; 52,236 after the gate-level block stopped naming the worktree level; 52,248 after the empty-issues edge row was renamed; 52,252 after the gate-level block; 52,287 after #472; 52,422 when #456 closed), with no headroom. Main held 54,899 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. Lowered by #706 (lean always-loaded descriptions) to 47579."
     },
     {
       "id": "command-resolve-curation-off-max",
-      "ceiling": 45505,
-      "pattern": "['resolve', 'off', 45_505],",
+      "ceiling": 44902,
+      "pattern": "['resolve', 'off', 44_902],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
       "description": "D-CMD-SIZE: dist/curation-off/commands/resolve.md, the curation-off build, in bytes. Measured 45,533 after the lean Resolve group (#716), 46,148 after the CI gate and the claim lines moved into the scripts for #683, 46,397 after the shared command partials were cut for #715, 46,903 after the shared root step was cut again for #683, 46,949 after the publish script printed its own status lines for #683, 47,180 after the roots were resolved by one script call for #683, and 47,253 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (47,361 after the knowledge write-back filter and the index file name were restored for #675,47,281 after the knowledge partial was condensed for #675, 48,083 after the publication partial was condensed for #675, 48,198 at #679, 48,332 at #677); it was 48,343 after #484 added the severity tiers and 48,553 when main's fresh-base step (#495) and the Phase 6 level inputs met in one merge (main measures 48,573 under its 48,624 ceiling; 49,016 on the branch before the merge, paid by a named cut; 49,036 after the gate-level block stopped naming the worktree level; 49,048 after the empty-issues edge row was renamed; 49,052 after the gate-level block; 49,087 after #472; 49,220 when #456 closed), with no headroom. Main held 51,692 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. Lowered by #706 (lean always-loaded descriptions) to 45505."
@@ -1062,32 +1062,32 @@
     },
     {
       "id": "command-dynamic-build-compliance-off-max",
-      "ceiling": 92951,
-      "pattern": "['dynamic-build', 'compliance-off', 92_951],",
+      "ceiling": 90401,
+      "pattern": "['dynamic-build', 'compliance-off', 90_401],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
       "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/dynamic-build.md, the compliance-off build, in bytes. Measured 92,983 after one temp-file Write method for #743, 92,992 after the Workflow roster dropped Knowledge, which only dynamic-profile spawned, and the test-plan and wave-block copies moved to a `mktemp -d` folder for #717, 93,091 after the Design agent was split into Design and Architect for #733, 93,136 after the dynamic family was cut for #717, 101,101 after the CI gate and the claim lines moved into the scripts for #683, 101,233 after the shared command partials were cut for #715, 101,661 after the shared root step was cut again for #683, 101,796 after the roots were resolved by one script call for #683, and 102,429 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (102,537 after the tracker note kept its github condition for #675,102,543 after the docs root was condensed, 102,619 after the tracker partial, 103,617 at #679, 103,664 before the Gate 2 verdict took its first word, 103,739 at #677, 103,760 at its first build), with no headroom. The rule sets no comparison with the all-on build. It rose by 28 bytes to 103,739 at #677, because the wait rule now names the file that sets the result: a run could read the wrong file and report a pass. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. Lowered by #706 (lean always-loaded descriptions) to 92951."
     },
     {
       "id": "command-dynamic-build-both-off-max",
-      "ceiling": 90358,
-      "pattern": "['dynamic-build', 'both-off', 90_358],",
+      "ceiling": 87808,
+      "pattern": "['dynamic-build', 'both-off', 87_808],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
       "description": "D-CMD-SIZE (#648, AC-33): dist/curation-compliance-off/commands/dynamic-build.md, the build with curation and compliance both off, in bytes. Measured 90,390 after one temp-file Write method for #743, 90,399 after the Workflow roster dropped Knowledge, which only dynamic-profile spawned, and the test-plan and wave-block copies moved to a `mktemp -d` folder for #717, 90,487 after the Design agent was split into Design and Architect for #733, 90,543 after the dynamic family was cut for #717, 98,418 after the CI gate and the claim lines moved into the scripts for #683, 98,550 after the shared command partials were cut for #715, 98,978 after the shared root step was cut again for #683, 99,034 after the roots were resolved by one script call for #683, and 99,042 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (99,150 after the tracker note kept its github condition for #675,99,156 after the docs root was condensed, 99,232 after the tracker partial, 100,230 at #679, 100,277 before the Gate 2 verdict took its first word, 100,352 at #677, 100,373 at its first build), with no headroom. The rule sets no comparison with the other builds. It rose by 28 bytes to 100,352 at #677, because the wait rule now names the file that sets the result: a run could read the wrong file and report a pass. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. Lowered by #706 (lean always-loaded descriptions) to 90358."
     },
     {
       "id": "command-dynamic-tickets-compliance-off-max",
-      "ceiling": 33002,
-      "pattern": "['dynamic-tickets', 'compliance-off', 33_002],",
+      "ceiling": 31573,
+      "pattern": "['dynamic-tickets', 'compliance-off', 31_573],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
       "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/dynamic-tickets.md, the compliance-off build, in bytes. Measured 33,014 after the Workflow roster dropped Knowledge, which only dynamic-profile spawned, for #717, 33,122 after the Design agent was split into Design and Architect for #733, 33,167 after the dynamic family was cut for #717, 40,465 after the shared command partials were cut for #715, 40,526 after the shared root step was cut again for #683, 40,661 after the roots were resolved by one script call for #683, and 41,294 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (41,402 after the docs root was condensed for #675,41,478 at its first build), with no headroom; it is larger than the all-on build because its off arms add local text. The rule sets no comparison with the all-on build. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. Lowered by #706 (lean always-loaded descriptions) to 33002."
     },
     {
       "id": "command-dynamic-tickets-both-off-max",
-      "ceiling": 29531,
-      "pattern": "['dynamic-tickets', 'both-off', 29_531],",
+      "ceiling": 28102,
+      "pattern": "['dynamic-tickets', 'both-off', 28_102],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
       "description": "D-CMD-SIZE (#648, AC-33): dist/curation-compliance-off/commands/dynamic-tickets.md, the build with curation and compliance both off, in bytes. Measured 29,543 after the Workflow roster dropped Knowledge, which only dynamic-profile spawned, for #717, 29,640 after the Design agent was split into Design and Architect for #733, 29,696 after the dynamic family was cut for #717, 37,068 after the shared command partials were cut for #715, 37,083 after the shared root step was cut again for #683, 37,139 after the roots were resolved by one script call for #683, and 37,147 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (37,201 after the docs root was condensed for #675,37,277 at its first build), with no headroom. The rule sets no comparison with the other builds. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. Lowered by #706 (lean always-loaded descriptions) to 29531."
@@ -1110,16 +1110,16 @@
     },
     {
       "id": "command-plan-compliance-off-max",
-      "ceiling": 33685,
-      "pattern": "['plan', 'compliance-off', 33_685],",
+      "ceiling": 33017,
+      "pattern": "['plan', 'compliance-off', 33_017],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
       "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/plan.md, the compliance-off build, in bytes. Measured 33,714 after the Design agent was split into Design and Architect for #733, 33,762 after the shared command partials were cut for #715, 34,255 after the lean cut of the Plan path for #714, 35,158 after the shared root step was cut again for #683, 35,349 after the roots were resolved by one script call for #683, and 36,055 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (36,163 after the knowledge write-back filter and the index file name were restored for #675,36,155 after the decisions partial was condensed for #675, 36,325 after the knowledge partial was condensed for #675, 36,744 after the tracker note kept its github condition for #675, 36,750 after the docs root was condensed, 36,826 after the tracker partial, 37,824 at its first build), with no headroom. The rule sets no comparison with the all-on build. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. Lowered by #706 (lean always-loaded descriptions) to 33685."
     },
     {
       "id": "command-plan-both-off-max",
-      "ceiling": 32016,
-      "pattern": "['plan', 'both-off', 32_016],",
+      "ceiling": 31396,
+      "pattern": "['plan', 'both-off', 31_396],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
       "description": "D-CMD-SIZE (#648, AC-33): dist/curation-compliance-off/commands/plan.md, the build with curation and compliance both off, in bytes. Measured 32,045 after the Design agent was split into Design and Architect for #733, 32,093 after the shared command partials were cut for #715, 32,468 after the lean cut of the Plan path for #714, 33,064 after the shared root step was cut again for #683, 33,176 after the roots were resolved by one script call for #683, and 33,257 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (33,365 after the knowledge write-back filter and the index file name were restored for #675,33,357 after the knowledge partial was condensed for #675, 33,776 after the tracker note kept its github condition for #675, 33,782 after the docs root was condensed, 33,858 after the tracker partial, 34,856 at its first build), with no headroom. The rule sets no comparison with the other builds. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. Lowered by #706 (lean always-loaded descriptions) to 32016."
@@ -1142,16 +1142,16 @@
     },
     {
       "id": "command-resolve-compliance-off-max",
-      "ceiling": 41600,
-      "pattern": "['resolve', 'compliance-off', 41_600],",
+      "ceiling": 40330,
+      "pattern": "['resolve', 'compliance-off', 40_330],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
       "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/resolve.md, the compliance-off build, in bytes. Measured 41,628 after the lean Resolve group (#716), 42,219 after the CI gate and the claim lines moved into the scripts for #683, 42,503 after the shared command partials were cut for #715, 43,103 after the shared root step was cut again for #683, 43,238 after the roots were resolved by one script call for #683, and 43,936 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (44,044 after the knowledge write-back filter and the index file name were restored for #675,43,964 after the decisions partial was condensed for #675, 44,134 after the knowledge partial was condensed for #675, 44,936 at #679, 45,070 at #677, 45,080 at its first build), with no headroom. The rule sets no comparison with the all-on build. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. Lowered by #706 (lean always-loaded descriptions) to 41600."
     },
     {
       "id": "command-resolve-both-off-max",
-      "ceiling": 39510,
-      "pattern": "['resolve', 'both-off', 39_510],",
+      "ceiling": 38240,
+      "pattern": "['resolve', 'both-off', 38_240],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
       "description": "D-CMD-SIZE (#648, AC-33): dist/curation-compliance-off/commands/resolve.md, the build with curation and compliance both off, in bytes. Measured 39,538 after the lean Resolve group (#716), 39,995 after the CI gate and the claim lines moved into the scripts for #683, 40,279 after the shared command partials were cut for #715, 40,761 after the shared root step was cut again for #683, 40,817 after the roots were resolved by one script call for #683, and 40,890 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (40,998 after the knowledge write-back filter and the index file name were restored for #675,40,918 after the knowledge partial was condensed for #675, 41,720 at #679, 41,854 at #677, 41,864 at its first build), with no headroom. The rule sets no comparison with the other builds. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. Lowered by #706 (lean always-loaded descriptions) to 39510."
