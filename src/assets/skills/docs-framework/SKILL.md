@@ -1,6 +1,6 @@
 ---
 name: docs-framework
-description: This skill should be used when creating files in the .devflow/docs/ directory.
+description: Use when creating files in the .devflow/docs/ directory.
 user-invocable: false
 allowed-tools: Read, Bash, Glob
 ---
@@ -16,10 +16,7 @@ The canonical source for what Devflow names under `.devflow/docs/`. A command th
 > A run directory is `YYYY-MM-DD_HHMM` in local time; a second run in the same minute takes
 > seconds (`YYYY-MM-DD_HHMMSS`). Branch slugs replace `/` with `-`. Topic slugs are lowercase
 > alphanumeric with single dashes, at most 50 characters. The exceptions are the ones listed
-> under Naming Conventions, and no others. Inconsistent naming breaks tooling, searching, and
-> automation. Follow the pattern or fix the pattern for everyone.
-
----
+> under Naming Conventions, and no others. Follow the pattern or fix the pattern for everyone.
 
 ## Directory Structure
 
@@ -74,26 +71,18 @@ All generated documentation lives under `.devflow/docs/` at the checkout's tople
 
 The head markers for incremental runs are not part of this tree. `/code-review` and `/bug-analysis` keep each one under the git directory of the worktree, at `<git dir>/devflow/reviews/{branch-slug}/.last-review-head` and `<git dir>/devflow/bug-analysis/{branch-slug}/.last-analysis-head`. `<git dir>` is the path that `git rev-parse --absolute-git-dir` prints, so each worktree has its own markers.
 
----
-
 ## Naming Conventions
 
 ### Timestamps
 
-`YYYY-MM-DD_HHMM`, local time (sortable, readable), computed once per run and reused for every path of that run:
-```bash
-TIMESTAMP=$(date +%Y-%m-%d_%H%M)  # Example: 2025-12-26_1430
-```
+`YYYY-MM-DD_HHMM`, local time (sortable, readable), computed once per run and reused for every path of that run.
 - **Same-minute collision.** `/code-review`, `/bug-analysis` and `/research` create their run directory themselves: when it already exists, the second run appends seconds (`2025-12-26_143005`). It sorts after its minute, so newest-first listings stay correct.
 - **Workflow runs** (`tickets/`, `design/{slug}/`, `waves/`) are stamped in local time by the workflow that creates them and take no collision suffix: a second run in the same minute writes into the first's directory.
 - A design document's timestamp is the suffix before `.md`, so a listing sorts by that suffix, not by the leading `{ISSUE_ID}`.
 
 ### Branch Slugs
 
-The branch name with every `/` replaced by `-`; case, dots and underscores are kept. A detached HEAD has no name and uses `standalone`:
-```bash
-BRANCH_SLUG=$(b=$(git branch --show-current 2>/dev/null); echo "${b:-standalone}" | sed 's/\//-/g')
-```
+The branch name with every `/` replaced by `-`; case, dots and underscores are kept. A detached HEAD has no name and uses `standalone`.
 A slug builds a path or reaches a shell only when it matches `^[A-Za-z0-9._-]{1,200}$`. Every command derives `{branch_slug}` (the underscore spelling in `handoff-*` and `evidence-*`) this way, from the branch the work is on.
 
 ### Topic Slugs
@@ -114,16 +103,8 @@ TOPIC_SLUG=$(s=$(echo "$TOPIC" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9
 | Type | Pattern | Example |
 |------|---------|---------|
 | Special indexes | `UPPERCASE.md` | `WORKING-MEMORY.md`, `INDEX.md` |
-| Reports and summaries | `{focus}.md`, `review-summary.md`, `bug-analysis-summary.md`, `research-summary.md`, `static-findings.md`, `resolution-summary.md` in the run directory | `2025-12-26_1430/security.md` |
-| Head markers | `<git dir>/devflow/reviews/{branch-slug}/.last-review-head`, `<git dir>/devflow/bug-analysis/{branch-slug}/.last-analysis-head` | Plain text file with SHA |
 | Status logs | `{timestamp}.md` | `2025-12-26_1430.md` |
 | Design documents | `{ISSUE_ID}-{topic-slug}.{timestamp}.md` | `42-jwt-auth.2026-04-07_1430.md` |
-| Design (several issues) | `multi-{topic-slug}.{timestamp}.md` | `multi-jwt-auth.2026-04-07_1430.md` |
-| Design (no issue) | `{topic-slug}.{timestamp}.md` | `jwt-auth.2026-04-07_1430.md` |
-| Per-ticket plan | `{ticket-slug}-plan.md` in `design/{slug}/{timestamp}/` | `design/wave/2026-04-07_1430/add-login-plan.md` |
-| Handoff, evidence | `handoff-{branch-slug}.md`, `evidence-{branch-slug}.md`, `evidence-wave-{slug}.md` | `evidence-feat-jwt-auth.md` |
-
----
 
 ## Helper Functions
 
@@ -137,8 +118,6 @@ get_topic_slug() { local s; s=$(echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 
 get_docs_root() { git rev-parse --show-toplevel 2>/dev/null || pwd; }
 ensure_docs_dir() { mkdir -p "$(get_docs_root)/.devflow/docs/$1"; }
 ```
-
----
 
 ## Agent Persistence Rules
 
@@ -156,36 +135,14 @@ ensure_docs_dir() { mkdir -p "$(get_docs_root)/.devflow/docs/$1"; }
 - Git (fetch-issue: read-only, post-review-summary: consolidated review comment only)
 - Code agent (commits to git; its only file is the handoff section it appends when `HANDOFF_FILE` is given)
 
----
-
 ## Implementation Checklist
 
 When creating or modifying persisting agents or commands:
 
-- [ ] Use the run-directory timestamp (`YYYY-MM-DD_HHMM`, local time, seconds on a same-minute collision)
-- [ ] Derive the branch slug (replace `/` with `-`) and gate it before it builds a path
-- [ ] Derive topic slugs with the one rule (lowercase, single dashes, at most 50)
-- [ ] Create directory with `mkdir -p .devflow/docs/{subdir}`
 - [ ] Document output location in agent's final message
-- [ ] Follow special file naming (UPPERCASE for indexes)
-- [ ] Use helper functions when possible
 - [ ] Update relevant index files
 
----
-
-## Integration
-
-This framework is used by:
-- **`/plan` and `/research`**: load it at the step that names the document, and build the path by its rules
-- **Commands that hand paths to agents** (`/code-review`, `/bug-analysis`, `/implement`, `/resolve`, the `/dynamic-*` commands): follow it, with the exceptions above
-- **Working Memory hooks**: Auto-maintains `.devflow/memory/WORKING-MEMORY.md`
-- **Curate agent**: background LLM agent (spawned via the session-start directive) promotes observations to ADRs/PFs via `assign-anchor`, which renders `decisions.md` / `pitfalls.md`
-
----
-
 ## Extended References
-
-For detailed patterns and violation examples:
 
 - **[patterns.md](./references/patterns.md)** - Full templates, helper functions, naming examples, edge cases
 - **[violations.md](./references/violations.md)** - Common violations with detection patterns and fixes

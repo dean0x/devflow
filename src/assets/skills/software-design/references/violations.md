@@ -1,6 +1,6 @@
 # Extended Violation Examples
 
-Additional code smell patterns and violations beyond the core examples in SKILL.md.
+Additional code smell patterns and violations beyond the anti-patterns in SKILL.md.
 All violations cite `references/sources.md`.
 
 ---

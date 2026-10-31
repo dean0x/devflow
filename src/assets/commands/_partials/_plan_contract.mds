@@ -10,7 +10,7 @@
 @define acceptance_criteria_contract():
 ### Acceptance criteria + test plan contract
 
-This is the shared shape produced by `/devflow:dynamic-plan`'s plan-challenge step (§5.1) and consumed by `/devflow:dynamic-build`'s Gate 2 (§7.2). Single source of truth — no drift between planning and build.
+This is the shared shape produced by `/devflow:dynamic-plan`'s plan-challenge step (§5.1) and consumed by `/devflow:dynamic-build`'s Gate 2 (§7.2).
 
 #### What the plan-challenge step MUST produce (per ticket)
 
@@ -38,7 +38,7 @@ The test plan IS TP lines: at least one per acceptance criterion, numbered from 
 
 A scenario's setup and expected outcome are not part of its line. They go under a `## Test Scenarios` section after `## Test Plan`, one `TP-<n>:` entry per TP. `## Test Plan` holds TP lines only, so `check tp` can parse it.
 
-The test plan must be executable by the Test agent without further clarification — it is a complete specification, not notes.
+The test plan must be executable by the Test agent without further clarification.
 
 Every line of a `## Test Plan` section, or of a PR's test-plan block, follows this contract:
 

@@ -51,8 +51,8 @@ const CONTEXT_TOKEN = 'DECISIONS_CONTEXT'
  */
 const CODE_SITE_FLOOR = 21
 
-/** Decisions-loading hosts: all 14 command hosts load the index behind the gate. */
-const DECISIONS_HOST_COUNT = 14
+/** Decisions-loading hosts: every command host but dynamic-profile (13) loads the index behind the gate. */
+const DECISIONS_HOST_COUNT = 13
 
 /** The preamble's illustrative usage example: text, not a spawn. */
 const PREAMBLE_EXAMPLE = 'agent("your prompt here", { agentType: "Code" })'
@@ -203,31 +203,39 @@ function collectBadSentences(
 // ── Gate order (AC-105) ─────────────────────────────────────────────────────
 
 const GATE = 'When the settings line says `CURATION=off`'
-const LOCATE = 'rev-parse --path-format=absolute --show-toplevel --git-common-dir'
+/** The first sentence of the decisions step's locate text; the shared root step, with its script call, follows it. */
+const LOCATE = 'The decisions ledger belongs to the repository'
+const ROOT_CALL = 'resolve-root.cjs'
 const INDEX_READ = '/.devflow/curation/index.md`'
 
-/** Named collector: how a decisions-loading host orders its gate sentence, its locate call and its index read. */
+/**
+ * Named collector: how a decisions-loading host orders its gate sentence, its locate step and its index read.
+ * A docs or knowledge step earlier in the host can run the root call first, so the call that counts is the
+ * first one after the decisions step's own locate sentence.
+ */
 function collectGateOrderDefects(host: string, text: string): string[] {
   const gate = text.indexOf(GATE)
   const locate = text.indexOf(LOCATE)
+  const call = locate === -1 ? -1 : text.indexOf(ROOT_CALL, locate)
   const read = text.indexOf(INDEX_READ)
   const out: string[] = []
   if (gate === -1) out.push(`${host}: no CURATION=off gate sentence`)
-  if (locate === -1) out.push(`${host}: no ledger-locate call`)
+  if (locate === -1) out.push(`${host}: no ledger-locate step`)
+  if (locate !== -1 && call === -1) out.push(`${host}: the ledger-locate step runs no root call`)
   if (read === -1) out.push(`${host}: no index read`)
   if (gate !== -1 && locate !== -1 && gate > locate) out.push(`${host}: the gate follows the ledger-locate call`)
   if (gate !== -1 && read !== -1 && gate > read) out.push(`${host}: the gate follows the index read`)
-  if (locate !== -1 && read !== -1 && locate > read) out.push(`${host}: the index read precedes the ledger-locate call`)
+  if (call !== -1 && read !== -1 && call > read) out.push(`${host}: the index read precedes the ledger-locate call`)
   return out
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('the declared set is computed from the agent sources', () => {
-  it('is the ten agents that list DECISIONS_CONTEXT among their inputs, the three Code variants among them', () => {
+  it('is the eleven agents that list DECISIONS_CONTEXT among their inputs, the three Code variants and the two Design variants among them', () => {
     const declared = collectDeclaredTypes()
     expect([...declared].sort()).toEqual(
-      ['Code', 'Debug', 'Design', 'Fix', 'Harden', 'Knowledge', 'Refactor', 'Research', 'Review', 'Triage'],
+      ['Architect', 'Code', 'Debug', 'Design', 'Fix', 'Harden', 'Knowledge', 'Refactor', 'Research', 'Review', 'Triage'],
     )
   })
 
@@ -297,7 +305,7 @@ describe('rule 1: every Code spawn site passes the key', () => {
   })
 
   it('the preamble usage example is text, not a spawn, so it needs no key', () => {
-    for (const host of ['dynamic-plan.md', 'dynamic-profile.md', 'dynamic-tickets.md']) {
+    for (const host of ['dynamic-plan.md', 'dynamic-tickets.md']) {
       const text = requireDistFile(host)
       expect(text, `${host} carries the example`).toContain(PREAMBLE_EXAMPLE)
       expect(collectCodeSpawnSites(host, text, 'Code'), `${host}: the example is not a spawn`).toEqual([])
@@ -431,7 +439,7 @@ describe('the authoring step names declared receivers only (AC-125)', () => {
       expect(at, `${host}: the authoring decisions step`).toBeGreaterThan(-1)
       return text.slice(at, text.indexOf('\n### ', at + 10) === -1 ? undefined : text.indexOf('\n### ', at + 10))
     }
-    for (const host of ['dynamic-build.md', 'dynamic-plan.md', 'dynamic-profile.md', 'dynamic-tickets.md']) {
+    for (const host of ['dynamic-build.md', 'dynamic-plan.md', 'dynamic-tickets.md']) {
       const inject = step(host).split('\n').find(l => /inject the relevant DECISIONS_CONTEXT/.test(l)) ?? ''
       const named = namedTypes(receiverPhrase(inject.slice(inject.indexOf('Then inject'))), collectKnownTypes(compiled()))
       expect(named.length, `${host}: receivers named`).toBeGreaterThanOrEqual(2)
@@ -444,7 +452,7 @@ describe('the authoring step names declared receivers only (AC-125)', () => {
 
   it('the inject sentence names every valid agent type that declares the key, the Fix variant included', () => {
     const declared = collectDeclaredTypes()
-    const hosts = ['dynamic-build.md', 'dynamic-plan.md', 'dynamic-profile.md', 'dynamic-tickets.md']
+    const hosts = ['dynamic-build.md', 'dynamic-plan.md', 'dynamic-tickets.md']
     // Non-vacuity: the valid-and-declared types are read, and the Code-family variant a workflow spawns is among them.
     const reachable = (collectValidAgentTypes(requireDistFile(hosts[0])) ?? []).filter(t => declared.has(t))
     expect(reachable.length, 'valid agent types that declare the key').toBeGreaterThanOrEqual(2)

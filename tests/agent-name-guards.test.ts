@@ -377,14 +377,6 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     contexts: ['clean reviewer'],
   },
   {
-    path: 'src/assets/skills/quality-gates/SKILL.md',
-    name: 'Reviewer',
-    reason:
-      'URL_LINK: "reviewer/" — URL path segment in Google Engineering Practices link; ' +
-      'not an agent spawn',
-    contexts: ['review/reviewer/'],
-  },
-  {
     path: 'src/assets/skills/compliance/frameworks/sox/reference.md',
     name: 'Reviewer',
     reason:
@@ -440,6 +432,14 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     reason:
       'CONCEPT: "devflow-tester-" — temp file path pattern in browser test scaffolding ' +
       '(mktemp /tmp/devflow-tester-XXXXXX.log); not an agent spawn',
+    contexts: ['devflow-tester-'],
+  },
+  {
+    path: 'src/assets/agents/test.md',
+    name: 'Tester',
+    reason:
+      'CONCEPT: "devflow-tester-" — the scenario write path in the Bash Execution Constraints ' +
+      '(mktemp in /tmp/devflow-tester-*), moved from references/browser-testing.md by #711; not an agent spawn',
     contexts: ['devflow-tester-'],
   },
 
@@ -528,14 +528,7 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
   // the lowercase verb needs no row)
   // -----------------------------------------------------------------------
   {
-    path: 'src/assets/agents/polish.md',
-    name: 'Simplify',
-    reason:
-      'CONCEPT: the verb in the Polish agent\'s own instruction list; not an agent spawn reference',
-    contexts: ['Simplify code structure by:'],
-  },
-  {
-    path: 'src/assets/skills/test-driven-development/SKILL.md',
+    path: 'src/assets/skills/test-driven-development/references/rationalization-prevention.md',
     name: 'Simplify',
     reason:
       'CONCEPT: the verb opening a rationalization-table row; no agent reference',
@@ -859,12 +852,12 @@ describe('GAP-2: agentType: values in dist ↔ declared roster', () => {
     ).toHaveLength(0)
   })
 
-  /** The four dynamic hosts (build, plan, profile, tickets): each carries the preamble's valid-agentType sentence. */
-  const DYNAMIC_HOST_COUNT = 4
+  /** The three Workflow hosts (build, plan, tickets): each carries the preamble's valid-agentType sentence. dynamic-profile authors no Workflow. */
+  const DYNAMIC_HOST_COUNT = 3
 
   it("each dynamic host's valid-agentType sentence lists the roster and every type the host spawns", () => {
-    const hosts = requireDistFiles().filter(f => f.startsWith('dynamic-'))
-    expect(hosts, 'dynamic hosts in dist/commands').toHaveLength(DYNAMIC_HOST_COUNT)
+    const hosts = requireDistFiles().filter(f => f.startsWith('dynamic-') && f !== 'dynamic-profile.md')
+    expect(hosts, 'Workflow hosts in dist/commands').toHaveLength(DYNAMIC_HOST_COUNT)
     const roster = new Set(parseRosterFromSource().keys())
     expect(roster.size, '_roster.mds table is empty — parse failure?').toBeGreaterThan(0)
 
@@ -986,14 +979,15 @@ describe('GAP-3: orchestrator charter integrity', () => {
    * The hook cap is 4,096 characters (shell ${#CHARTER}).
    * session-start-orchestrator fails OPEN AND SILENT past that cap —
    * the charter is simply not injected, with no error (hook line ~49).
-   * The ceiling is the byte size of the full-install source charter: 3,384 bytes, which is
-   * 82.6% of the cap. A rendered charter is never larger than the source. The founder
-   * authorised this ceiling on 2026-10-23, up from 3,072: the routing now names every roster
-   * agent and the installed workflows. The ceiling row in tests/fixtures/numeric-floors.json
+   * The ceiling is the byte size of the full-install source charter: 3,376 bytes, which is
+   * 82.4% of the cap. A rendered charter is never larger than the source. The founder
+   * authorised a ceiling of 3,384 on 2026-10-23, up from 3,072: the routing now names every
+   * roster agent and the installed workflows. #733 lowered it to 3,376 when the routing named
+   * Architect. The ceiling row in tests/fixtures/numeric-floors.json
    * pins the literal below.
    */
   const CHARTER_CAP = 4096
-  const MAX_CHARTER_BYTES = 3384
+  const MAX_CHARTER_BYTES = 3342
 
   it('charter byte size stays within its ceiling, below the 4096-character injection cap', () => {
     const charter = readFileSync(CHARTER_PATH, 'utf-8')

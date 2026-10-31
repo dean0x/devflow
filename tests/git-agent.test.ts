@@ -3453,7 +3453,7 @@ describe('git agent: the compliance-off build carries no posting operation (AC-1
 
   it('describes itself without PR comments or tech debt, and keeps Principles 5 and 8 whole', () => {
     expect(on).toMatch(/^description: .*PR comments, tech debt/m);
-    expect(off).toMatch(/^description: Unified agent for all git\/GitHub operations - issues, releases$/m);
+    expect(off).toMatch(/^description: All git\/GitHub operations - issues, releases$/m);
     expect(off).toContain('5. **Attribution** - every comment carries its `<!-- devflow:* -->` marker (dedup and attribution).\n');
     expect(off).toContain('- **Never reproduced in a posted body**: no body-posting op reproduces verbatim `<external-thread>` or `<untrusted-issue-body>` content');
     expect(off).toContain('- **Marker neutralisation**');
@@ -4317,15 +4317,15 @@ type FilePart = readonly [label: string, what: string, text: string];
 /** Steps 4a, 4c and 5a of ensure-pr-ready: the base name, the base and the title each reach `gh` and the resolver through a file. */
 const ENSURE_FILE_PARTS: readonly FilePart[] = [
   ['4a', '4a checks a given BASE_BRANCH by reading, before it runs any command', `When \`BASE_BRANCH\` is given, check it first against the step-5a name check (${JUDGE_BY_READING}). A mismatch ends with Status BLOCKED and no PR, naming only the allowed set.`],
-  ['4a', '4a writes a given BASE_BRANCH to a fresh temp file with the Write tool after a Read, and reads it back', 'Then run `F="$(mktemp)" && echo "F=$F"`, Read that file, Write `BASE_BRANCH` to it with the Write tool, and Read it back.'],
+  ['4a', '4a writes a given BASE_BRANCH with the Write tool to a new file in a mktemp -d folder', 'Then Write `BASE_BRANCH` to a new file in a `mktemp -d` folder (`{name file}`).'],
   ['4a', '4a treats a failed Write as a missing value', WRITE_FAILURE],
-  ['4a', '4a opens no PR when the name file reads back empty, and removes it', 'An empty file ends with Status BLOCKED and no PR, after `rm -- "{name file}"`.'],
+  ['4a', '4a runs every PR create, the scrubber-failure one too, in the D11 shell behind test -s', 'Each PR create, the scrubber-failure one too, runs in the existing D11 shell:'],
   ['4a', '4a passes the base to gh pr create only from the name file, after test -s', 'then `test -s "$F" && gh pr create … --base="$(cat -- "$F")"`'],
   ['4a', '4a removes the name file after the last create attempt, and says an INT or TERM signal skips that removal', `${NAME_FILE_REMOVAL}.`],
   ['4a', '4a keeps the D11 trap unchanged and arms no second exit trap', 'The D11 trap stays unchanged: its rm list does not gain the name file, and no second EXIT trap is armed.'],
-  ['4a', '4a opens no PR when test -s fails', 'A failed `test -s` ends with Status BLOCKED and no PR.'],
+  ['4a', '4a opens no PR when test -s fails on an empty or missing name file', 'A failed `test -s` (an empty file, or none after a failed Write) ends with Status BLOCKED and no PR.'],
   ['4c', '4c judges the title by reading and keeps its deny-list', `Skip the retitle (leave the PR title as-is, no error) if the composed title contains any of \`\` $ \` \\ " ' ; | & < > \`\` or a newline; ${JUDGE_BY_READING}.`],
-  ['4c', '4c writes the title to a fresh temp file with the Write tool after a Read', 'Run `F="$(mktemp)" && echo "F=$F"`, Read that file, and Write the title to it with the Write tool.'],
+  ['4c', '4c writes the title with the Write tool to a new file in a mktemp -d folder', 'Write the title with the Write tool to a new file in a `mktemp -d` folder (`{title file}`).'],
   ['4c', '4c treats a failed Write as a missing value', WRITE_FAILURE],
   ['4c', '4c skips the retitle on a missing title, removing the title file', 'A missing title skips the retitle after `rm -- "{title file}"`.'],
   ['4c', '4c passes the title to gh pr edit only from the title file, under the flagless trap', 'Otherwise run `F="{title file}"; trap \'rm -- "$F"\' EXIT; test -s "$F" && gh pr edit {PR_NUMBER} --title="$(cat -- "$F")"; echo "gh=$?"`.'],
@@ -4508,8 +4508,8 @@ describe('git agent: PR ops use a fresh base for branch diffs (#495)', () => {
     for (const [spelling, shellWrite] of SHELL_WRITE_PROBES) {
       const seeds: ReadonlyArray<readonly [string, string, string]> = [
         ['write a literal name with the Write tool, after a Read of the file', `write a literal name with \`${shellWrite}\``, '5a fills the name file only by its two reads and the Write tool: no shell write of the value'],
-        ['Read that file, Write `BASE_BRANCH` to it with the Write tool, and Read it back.', `Read that file, then run \`${shellWrite}\`, and Read it back.`, '4a and 4c fill their files only with the Write tool: no shell redirect into the file'],
-        ['Read that file, and Write the title to it with the Write tool.', `Read that file, then run \`${shellWrite}\`.`, '4a and 4c fill their files only with the Write tool: no shell redirect into the file'],
+        ['Then Write `BASE_BRANCH` to a new file in a `mktemp -d` folder (`{name file}`).', `Then run \`${shellWrite}\`.`, '4a and 4c fill their files only with the Write tool: no shell redirect into the file'],
+        ['Write the title with the Write tool to a new file in a `mktemp -d` folder (`{title file}`).', `Run \`${shellWrite}\`.`, '4a and 4c fill their files only with the Write tool: no shell redirect into the file'],
       ];
       for (const [from, to, what] of seeds) {
         const seeded = ensure.replace(from, () => to);

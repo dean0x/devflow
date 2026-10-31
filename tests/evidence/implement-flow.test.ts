@@ -83,7 +83,7 @@ import {
 } from '../helpers.js'
 import { PROJECT_CONFIG_LIB, SETTINGS_SCRIPT, scopedEnv } from '../evidence-policy/scripted-shim.js'
 import { seedOnce } from '../guards/level-guard-helpers.js'
-import { PR_EVIDENCE_SCRIPT, RESOLVE_BASE_SCRIPT, VERIFY_EVIDENCE_SCRIPT } from './seam.js'
+import { PR_EVIDENCE_SCRIPT, RESOLVE_BASE_SCRIPT, VERIFY_EVIDENCE_SCRIPT, claimCallLines, runClaimCall } from './seam.js'
 
 /** Transcribed from the script's JSDoc — only what this suite calls. */
 interface VerifyEvidenceApi {
@@ -311,7 +311,7 @@ function collectTestReportDefects(test: string): string[] {
   const input = test.split('\n').find(l => l.startsWith('- **TEST_PLAN**:')) ?? ''
   if (!input.includes('never run TP text verbatim')) out.push('TEST_PLAN: TP text may be run verbatim')
   if (!input.includes('`<untrusted-test-plan>`')) out.push('TEST_PLAN: third-party lines are not marked')
-  const output = outputSection(test, '## Principles')
+  const output = outputSection(test, '## Core rules')
   if (output === null) return [...out, 'no ## Output section']
   const lines = output.split('\n')
   if (!lines.some(l => l.startsWith('| ID | TP | Type |'))) out.push('Scenario Results: no TP column after ID')
@@ -381,14 +381,14 @@ const BLOCKERS_HEADING = '### Blockers (if BLOCKED)'
  */
 function collectTestBlockedStatusDefects(test: string): string[] {
   const out: string[] = []
-  const output = outputSection(test, '## Principles')
+  const output = outputSection(test, '## Core rules')
   if (output === null) return ['no ## Output section']
   const lines = output.split('\n')
   const statusLines = lines.filter(l => l.startsWith('### Status:'))
   if (statusLines.length !== 1 || statusLines[0] !== TEST_STATUS_LINE) out.push(`the Status line is not exactly "${TEST_STATUS_LINE}"`)
   if (!lines.includes('- Blocked: {count}')) out.push('the Summary lacks a Blocked count')
   if (!lines.some(l => l.startsWith('| S1 |') && l.includes('| PASS/FAIL/SKIPPED/BLOCKED |'))) out.push('the Scenario Results Status cell lacks BLOCKED')
-  if (!test.includes('5. Record PASS or FAIL with evidence, or BLOCKED when its command gave no result')) out.push('the Execution step does not record BLOCKED for a command with no result')
+  if (!test.includes('Record PASS or FAIL with evidence, or BLOCKED when its command gave no result')) out.push('the Execution step does not record BLOCKED for a command with no result')
   const rule = lines.find(l => l.startsWith('One row per TP line')) ?? ''
   for (const part of ['in every report, a BLOCKED one included', 'PASS only when at least one scenario covers it and every one passed', 'FAIL when any failed']) {
     if (!rule.includes(part)) out.push(`the TP row rule lacks "${part}"`)
@@ -856,45 +856,48 @@ describe('AC-10/AC-11: the spawns carry the test plan', () => {
 // /implement — claims (AC-11)
 // ---------------------------------------------------------------------------
 
-/** The claim shapes the Evidence claims paragraph states: the lines of the fence under it. */
-function claimTemplates(content: string): string[] {
-  const at = content.indexOf('**Evidence claims** are lines appended')
+/** The `claim` call of the Evidence claims paragraph: the line of the fence under it. */
+function claimCalls(content: string): string[] {
+  const at = content.indexOf('**Evidence claims** come from')
   if (at === -1) return []
-  const fence = /```\n([\s\S]*?)```/.exec(content.slice(at))
-  return fence === null ? [] : fence[1].split('\n').filter(l => l !== '')
+  const fence = /```bash\n([\s\S]*?)```/.exec(content.slice(at))
+  return fence === null ? [] : claimCallLines(fence[1])
 }
 
 /**
- * Named collector: every concrete claim a template can produce that CLAIM_LINE_RE
- * refuses, plus template placeholders it cannot fill. `<a|b>` alternations are
- * expanded; `exit:<0-255>` is filled at both bounds and also dropped (the line may
- * end at `by:test`).
+ * Named collector: every way a claim call fails to run against the real script. Each call
+ * runs twice over an evidence file with a three-TP plan, once for the gate claim and once
+ * for TP claims; each line the script wrote must be a claim CLAIM_LINE_RE admits. A
+ * placeholder the test cannot fill is a defect too.
  */
-function collectInadmissibleClaims(templates: readonly string[]): string[] {
+function collectInadmissibleClaims(calls: readonly string[]): string[] {
   const head = 'a'.repeat(40)
+  const plan = [1, 2, 3].map(n => `- [ ] TP-${n} (AC-1) Scenario ${n} — method:manual`)
   const out: string[] = []
-  for (const template of templates) {
-    const alternation = /<([A-Z]+(?:\|[A-Z]+)+)>/.exec(template)
-    const outcomes = alternation === null ? [''] : alternation[1].split('|')
-    for (const outcome of outcomes) {
-      for (const exit of ['0', '255', null]) {
-        let line = template.replace('<head>', head).replace('<n>', '7')
-        if (alternation !== null) line = line.replace(alternation[0], outcome)
-        line = exit === null ? line.replace(/ exit:<0-255>$/, '') : line.replace('<0-255>', exit)
-        if (/<[^>]*>/.test(line)) out.push(`unfilled placeholder: ${template}`)
-        else if (!PE.CLAIM_LINE_RE.test(line)) out.push(`refused: ${line}`)
+  for (const call of calls) {
+    for (const [claims, appended] of [['gate', 1], ['TP-1=PASS:0 TP-2=FAIL:1 TP-3=SKIP:—', 3]] as const) {
+      const file = path.join(mkdtempSync(path.join(SCRATCH, 'claim-')), 'evidence.md')
+      writeFileSync(file, `## Test Plan\n${plan.join('\n')}\n\n## Claims\n`)
+      try {
+        const r = runClaimCall(call, { claims, head, fill: [['.devflow/docs/evidence-{branch_slug}.md', file]] })
+        if (r.code !== 0 || !r.stdout.startsWith(`CLAIM appended:${appended} `)) out.push(`refused: ${claims} → exit ${r.code} ${r.stdout.trim()}`)
+        for (const line of readFileSync(file, 'utf-8').split('\n').filter(l => l.startsWith('- ') && !l.startsWith('- [ ]'))) {
+          if (!PE.CLAIM_LINE_RE.test(line)) out.push(`inadmissible: ${line}`)
+        }
+      } catch (err) {
+        out.push((err as Error).message)
       }
     }
   }
   return [...new Set(out)]
 }
 
-describe('AC-11: /implement appends claims the evidence script can read', () => {
-  it('the gate and TP claim shapes fill to lines CLAIM_LINE_RE admits, with the claim outcome vocabulary', () => {
-    const templates = claimTemplates(implementMd())
-    expect(templates).toHaveLength(2)
-    expect(templates[1]).toContain(`<${claimOutcomes().join('|')}>`)
-    expect(collectInadmissibleClaims(templates)).toEqual([])
+describe('AC-11: /implement writes claims through the evidence script', () => {
+  it('the call is stated once, with the claim outcome vocabulary, and runs: a gate claim and TP claims land as lines CLAIM_LINE_RE admits', () => {
+    const calls = claimCalls(implementMd())
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toContain(`<${claimOutcomes().join('|')}>`)
+    expect(collectInadmissibleClaims(calls)).toEqual([])
   })
 
   it('Phase 6 and Phase 8 PASS append the gate claim, and every Phase 7 run its TP claims', () => {
@@ -903,16 +906,17 @@ describe('AC-11: /implement appends claims the evidence script can read', () => 
     expect(lines.filter(l => l.startsWith('After every Test agent run — whatever its Status, first run or retry — append its TP claims'))).toHaveLength(1)
   })
 
-  it('known-bad probes: an outcome outside the grammar, an unfilled placeholder and a short SHA are refused', () => {
-    expect(collectInadmissibleClaims(['- TP-<n> <PASS|PASSED> sha:<head> by:test exit:<0-255>'])).toContain(
-      `refused: - TP-7 PASSED sha:${'a'.repeat(40)} by:test exit:0`,
-    )
-    expect(collectInadmissibleClaims(['- TP-<n> <outcome> sha:<head> by:test'])).toEqual([
-      'unfilled placeholder: - TP-<n> <outcome> sha:<head> by:test',
-    ])
-    expect(collectInadmissibleClaims(['- gate:validate PASS sha:abc123 by:validate'])).toEqual([
-      'refused: - gate:validate PASS sha:abc123 by:validate',
-    ])
+  it('known-bad probes: a call without --head, a misspelled flag, an outcome outside the grammar and an unfilled placeholder are each reported', () => {
+    const [call] = claimCalls(implementMd())
+    expect(collectInadmissibleClaims([call])).toEqual([])
+    const probe = (seeded: string): string[] => {
+      expect(seeded, 'the seed must land').not.toBe(call)
+      return collectInadmissibleClaims([seeded])
+    }
+    expect(probe(call.replace(' --head <head>', ''))).toEqual(expect.arrayContaining([expect.stringMatching(/^refused: gate → exit 1/)]))
+    expect(probe(call.replace('--evidence', '--evidance'))).toEqual(expect.arrayContaining([expect.stringMatching(/^refused: gate → exit 1/)]))
+    expect(probe(call.replace('<PASS|FAIL|SKIP>', '<PASS|PASSED>'))).toEqual(expect.arrayContaining([expect.stringContaining('a placeholder is unfilled')]))
+    expect(probe(call.replace('{branch_slug}', '{branch_name}'))).toEqual(expect.arrayContaining([expect.stringContaining('a placeholder is unfilled')]))
   })
 })
 
@@ -921,9 +925,9 @@ describe('AC-11: /implement appends claims the evidence script can read', () => 
 // ---------------------------------------------------------------------------
 //
 // The Test agent writes `HEAD: {before} → {after}` when HEAD moves during its run. That value is not a single
-// SHA, so no claim may be appended from the report. A reader who sees only the condition may take the `after`
-// SHA and append `sha:<after>`, a claim for a HEAD the tests did not all run at: a false pass. So the rule
-// states both the condition and the moved-HEAD example, in all four builds.
+// SHA, so no claim may be written from the report. A reader who sees only the condition may take the `after`
+// SHA and pass it, a claim for a HEAD the tests did not all run at: a false pass. So the paragraph states both
+// the condition (pass `none`, which the script refuses) and the moved-HEAD example, in all four builds.
 
 type ImplementKey = 'on' | 'curation-off' | 'compliance-off' | 'both-off'
 
@@ -936,11 +940,11 @@ function implementMdOfKey(key: ImplementKey): string {
   return text
 }
 
-const HEAD_RULE_LEAD = '- Append nothing from a report whose `HEAD:`'
-const HEAD_RULE_CONDITION = 'is not a single 40-hex SHA'
-const HEAD_RULE_EXAMPLE = 'a reported before/after change included'
+const HEAD_RULE_LEAD = '**Evidence claims** come from the evidence script'
+const HEAD_RULE_CONDITION = 'or `none` if it holds anything but letters and digits'
+const HEAD_RULE_EXAMPLE = 'a before/after change too'
 
-/** Named collector: what the HEAD rule bullet of the Evidence claims lacks, one defect per missing clause. */
+/** Named collector: what the HEAD rule of the Evidence claims paragraph lacks, one defect per missing clause. */
 function collectHeadRuleDefects(file: string, text: string): string[] {
   const rules = text.split('\n').filter(line => line.startsWith(HEAD_RULE_LEAD))
   if (rules.length !== 1) return [`${file}: ${rules.length} HEAD rule bullets, expected 1`]
@@ -960,14 +964,14 @@ describe('AC-11: the HEAD rule of the claim shapes states the condition and the 
 
     it(`${key}: known-bad probe: a lost condition is reported as the condition, and no other clause`, () => {
       const text = implementMdOfKey(key)
-      const broken = text.replace(HEAD_RULE_CONDITION, 'is not a SHA')
+      const broken = text.replace(HEAD_RULE_CONDITION, 'or `none` if it is odd')
       expect(broken, 'the condition seed must land').not.toBe(text)
       expect(collectHeadRuleDefects(file, broken)).toEqual([`${file}: the HEAD rule does not state the condition "${HEAD_RULE_CONDITION}"`])
     })
 
     it(`${key}: known-bad probe: a lost example is reported as the example, and no other clause`, () => {
       const text = implementMdOfKey(key)
-      const broken = text.replace(` — ${HEAD_RULE_EXAMPLE} —`, '')
+      const broken = text.replace(` (${HEAD_RULE_EXAMPLE})`, '')
       expect(broken, 'the example seed must land').not.toBe(text)
       expect(collectHeadRuleDefects(file, broken)).toEqual([`${file}: the HEAD rule does not state the moved-HEAD example "${HEAD_RULE_EXAMPLE}"`])
     })
@@ -1040,7 +1044,10 @@ function collectEvidenceRunDefects(content: string): string[] {
   if (!phase.includes('It never blocks')) out.push('Phase 11 may block')
   if (!phase.includes('Use the Bash tool with `timeout: 180000`')) out.push('the call carries no Bash timeout above the script\'s two deadlines')
   if (!phase.includes('path does not match `^[A-Za-z0-9._/-]{1,255}$`')) out.push('the evidence path reaches the shell ungated')
-  if (!phase.includes('`TRACEABILITY: DEGRADED (evidence unavailable)`')) out.push('a failed run names no DEGRADED reason')
+  if (!phase.includes('Capture its stdout as `EVIDENCE_RESULT`; empty stdout, or an exit other than 0 or 2, is `TRACEABILITY: DEGRADED (evidence unavailable)`')) {
+    out.push('a failed run names no DEGRADED reason')
+  }
+  if (/`EVIDENCE` line|`\*\*Body\*\*:`/.test(phase)) out.push('Phase 11 restates what the script prints')
   return out
 }
 
@@ -1125,7 +1132,10 @@ describe('AC-11: Phase 11 runs the evidence script once, after Phase 10, for eve
   it('the re-validation path, the Report and the CI-awareness principle name the evidence step', () => {
     const lines = implementMd().split('\n')
     expect(revalidateReference().split('\n').find(l => l.startsWith('6. **Proceed to Phase 9**'))).toContain('**Phase 11** (Evidence)')
-    expect(lines.find(l => l.startsWith('Show the test plan\'s evidence from Phase 11'))).toContain('never inferred')
+    const show = lines.find(l => l.startsWith('Show the `Test plan:` line and the `**Body**:`'))
+    expect(show).toContain('of `EVIDENCE_RESULT` verbatim')
+    expect(show).toContain('Without a `Test plan:` line, show `Test plan: evidence unavailable`; with no test plan, `Test plan: missing`.')
+    expect(show, 'the model computes no count').not.toMatch(/VERIFIED-CI|ATTESTED-LOCAL|inferred/)
     expect(lines.find(l => /^\d+\. \*\*CI awareness\*\*/.test(l))).toContain('test-plan evidence (Phase 11) is recorded under every strategy')
   })
 
@@ -1142,6 +1152,12 @@ describe('AC-11: Phase 11 runs the evidence script once, after Phase 10, for eve
     expect(collectEvidenceRunDefects(back)).toEqual(['a Git agent is still spawned for update-pr-evidence (1)'])
     expect(collectEvidenceRunDefects(md.replace('Use the Bash tool with `timeout: 180000`', 'Use the Bash tool'))).toEqual([
       'the call carries no Bash timeout above the script\'s two deadlines',
+    ])
+    const restated = md.replace('Capture its stdout as `EVIDENCE_RESULT`; empty stdout, or an exit other than 0 or 2, is', 'Capture its stdout as `EVIDENCE_RESULT`: its `EVIDENCE` line and its `**Body**:` line; empty stdout is')
+    expect(restated, 'the seed must land').not.toBe(md)
+    expect(collectEvidenceRunDefects(restated)).toEqual([
+      'a failed run names no DEGRADED reason',
+      'Phase 11 restates what the script prints',
     ])
     const early = md.replace('### Phase 10: CI Status Gate', '### Phase 10 later').replace('### Phase 12: Report', '### Phase 10: CI Status Gate\n\n### Phase 12: Report')
     expect(collectOrderViolations('implement.md', early, PHASE11_ORDER).some(v => v.includes('Phase 11 follows the CI gate'))).toBe(true)
@@ -1628,8 +1644,8 @@ const PHASE_11_SKIP_RULE = 'Skip it only when the run stopped before Phase 10 st
 const PHASE_11_RUN_LEAD = "Run once, after Phase 10 or the re-validation path's Phase 9, under every strategy."
 /** The rule as it read before the fix: "an earlier phase" also reaches a stop in Phase 10, so a PR that Phase 9 opened got no evidence. */
 const PHASE_11_SKIP_RULE_EARLIER = 'Skip it only when an earlier phase stopped the run.'
-/** The Phase 10 lead sentence for a passing gate, which hands the run to Phase 11. */
-const PHASE_10_PASSING_ARM = '2. **If PASSING** → proceed to Phase 11.'
+/** The Phase 10 arm that ends the gate and hands the run to Phase 11: the `proceed` answer of the CI wait. */
+const PHASE_10_PASSING_ARM = '4. **If `NEXT=proceed`** → report SAY unless it is `none`, and the failing checks of a FAILING line, then proceed to Phase 11.'
 
 /**
  * Named collector (#675): the Phase 11 skip rule skips Phase 11 for every stop before Phase 10 and for no stop in Phase 10.
@@ -1696,7 +1712,7 @@ describe('#675: the Phase 11 skip rule skips Phase 11 for every stop before Phas
     expect(collectPhase11SkipDefects(seedOnce(onlyNine, PHASE_7_STOP, 'Phase 11 runs.'))).toEqual([
       `Phase 7: the stop sentence "${PHASE_7_STOP}" is absent, so the skip rule has no stop to cover`,
     ])
-    expect(collectPhase11SkipDefects(seedOnce(md, PHASE_10_PASSING_ARM, '2. **If PASSING** → stop at the report; Phase 11 does not run.'))).toEqual(['Phase 10 says that Phase 11 does not run, so the PR that it leaves gets no evidence'])
+    expect(collectPhase11SkipDefects(seedOnce(md, PHASE_10_PASSING_ARM, '4. **If `NEXT=proceed`** → stop at the report; Phase 11 does not run.'))).toEqual(['Phase 10 says that Phase 11 does not run, so the PR that it leaves gets no evidence'])
     expect(collectPhase11SkipDefects(seedOnce(md, H.p10, '### Phase 10 gone'))).toEqual([`${H.p10}: the section is absent`])
     expect(collectPhase11SkipDefects(seedOnce(md, H.p11, '### Phase 11 gone'))).toEqual([`${H.p11}: the section is absent`])
   })
@@ -2136,7 +2152,7 @@ describe('#561: the re-validation base step passes the name through a file', () 
 })
 
 /** The checkout-root command Phase 1's docs root runs; the re-validation path runs the same one when Phase 1 does not. */
-const REVALIDATE_ROOT_COMMAND = 'git -C "{start}" rev-parse --show-toplevel'
+const REVALIDATE_ROOT_COMMAND = 'node "$HOME/.devflow/scripts/resolve-root.cjs" "{start}"; echo "exit=$?"'
 
 /** Named collector: whether the re-validation path resolves `{worktree}` before its first use, as Phase 1 does, when Phase 1 does not run. */
 function collectRevalidateRootDefects(revalidate: string): string[] {
@@ -2183,7 +2199,7 @@ function collectPointerDefects(md: string, revalidate: string = revalidateRefere
   const out = RETIRED_POINTERS.filter(p => md.includes(p)).map(p => `a retired pointer remains: "${p}"`)
   const need = (what: string, ok: boolean): void => { if (!ok) out.push(what) }
   need('Phase 1 does not point Harden at Phase 4', md.includes('Harden agent (Phase 4)'))
-  need('the Evidence-claims definition does not name Phase 6 and Phase 8', md.includes('`gate:validate` — after a Phase 6 or Phase 8 PASS.'))
+  need('the Evidence-claims definition does not name Phase 6 and Phase 8', md.includes('`gate` — after a Phase 6 or Phase 8 PASS.'))
   need('the TP claims are not tied to Phase 7', md.includes('`TP-<n>` — after every Phase 7 run'))
   need('the Test spawn does not point at Phase 6\'s claims', md.includes('append its TP claims (Phase 6\'s **Evidence claims**)'))
   need('the continuation path names no order', revalidate.includes('**Run Phases 3-8** — Polish (at `full`), Self-Review, Alignment, the one full Validate, QA Testing and the conditional Re-Validate'))
@@ -2222,7 +2238,7 @@ const FRESH_BASE_CALL = `${NAME_FILE_TRAP} cd "{worktree}" && node "$HOME/.devfl
 
 /** What the fresh-base step states: [what it must say, the text that says it]. */
 const FRESH_BASE_PARTS: ReadonlyArray<readonly [string, string]> = [
-  ['the name written with the Write tool to a fresh temp file, after one Read of it', 'write `BASE_BRANCH` with the Write tool to the file that `F="$(mktemp)" && echo "F=$F"` prints, after one Read of it'],
+  ['the name written with the Write tool to a new file in a mktemp -d folder', 'write `BASE_BRANCH` with the Write tool to a new file in a `mktemp -d` folder (`{name file}`).'],
   ['a failed Write counts as a missing value and is never done by a shell command', WRITE_FAILURE],
   ['the local-rule call over the name file on stdin, in the worktree, with the trap and the exit status echoed', `run \`${FRESH_BASE_CALL}\``],
   ['the accepted-line test (40 or 64 hex, or none) with exit=0', 'Output other than one `BASE_REF=` line (40 or 64 hex, or `none`) with `exit=0`'],

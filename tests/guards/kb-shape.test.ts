@@ -7,7 +7,7 @@
  * guard holds the wording in the two files that write KBs (the `feature-knowledge` skill and the
  * Knowledge agent) and in the write-back prompt that registers the index line:
  *
- *   - the template and the Worked Example put `## Rules` first, after the title, and the skill states
+ *   - the template and the Worked Example (in the new-KB reference) put `## Rules` first, and the skill states
  *     the 3-5K size, the `KB-AP-n` / `KB-INV-n` IDs, ID stability, retirement and the citation form;
  *   - the skill and the agent state no volatile numbers (naming the pinning test), a 30,000-character
  *     target, a 40,000-character ceiling, index lines of at most 300 characters, descriptions of at
@@ -25,10 +25,17 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import * as path from 'path'
 
-import { ROOT, collectUnfencedH2, requireDistFile, resolveAgentSource } from '../helpers.js'
+import { ROOT, collectUnfencedH2, requireDistFile, resolveAgentSource, resolveCurationOffSource } from '../helpers.js'
 
 const SKILL = readFileSync(path.join(ROOT, 'src', 'assets', 'skills', 'feature-knowledge', 'SKILL.md'), 'utf-8')
+/** The new-KB reference: a run reads it only when it creates a KB, and it holds the Worked Example. */
+const NEW_KB = readFileSync(path.join(ROOT, 'src', 'assets', 'skills', 'feature-knowledge', 'references', 'new-kb.md'), 'utf-8')
 const agentBody = (): string => resolveAgentSource('knowledge').content
+
+/** Byte ceilings (numeric-floors.json): every Knowledge spawn loads the body and the skill, on every turn. */
+const KNOWLEDGE_BODY_MAX_BYTES = 7_113
+const KNOWLEDGE_BODY_CURATION_OFF_MAX_BYTES = 6_645
+const FEATURE_KNOWLEDGE_SKILL_MAX_BYTES = 8_454
 
 /** The `knowledge_writeback` prompt as the implement command compiles it. */
 function writebackPrompt(): string {
@@ -47,11 +54,11 @@ function fenceHeadings(body: string): string[] {
   return body.split('\n').filter(l => l.startsWith('## ')).map(l => l.slice(3).trim())
 }
 
-/** Named collector: the template and the Worked Example, and what each puts first after the title. */
-export function collectRulesFirstDefects(skill: string): string[] {
+/** Named collector: the template (skill) and the Worked Example (new-KB reference), and what each puts first after the title. */
+export function collectRulesFirstDefects(skill: string, newKb: string): string[] {
   const out: string[] = []
   const template = /### KNOWLEDGE\.md Structure\n\n```markdown\n([\s\S]*?)\n```/.exec(skill)?.[1]
-  const example = /````markdown\n([\s\S]*?)\n````/.exec(skill)?.[1]
+  const example = /````markdown\n([\s\S]*?)\n````/.exec(newKb)?.[1]
   if (template === undefined) out.push('no KNOWLEDGE.md template fence')
   else if (fenceHeadings(template)[0] !== 'Rules') out.push(`the template opens with "${fenceHeadings(template)[0]}", not Rules`)
   if (example === undefined) out.push('no Worked Example fence')
@@ -71,18 +78,19 @@ export function collectRulesFirstDefects(skill: string): string[] {
 describe('Rules come first and their IDs are stable (D-KB-RULES-SHAPE)', () => {
   it('the template and the Worked Example open with Rules, and the skill states size, IDs, stability and citation', () => {
     expect(SKILL.length, 'nothing read').toBeGreaterThan(5000)
-    expect(collectRulesFirstDefects(SKILL)).toEqual([])
+    expect(NEW_KB.length, 'reference: nothing read').toBeGreaterThan(3000)
+    expect(collectRulesFirstDefects(SKILL, NEW_KB)).toEqual([])
   })
 
   it('known-bad probe: Rules moved down, in either fence, and each lost rule are reported', () => {
     const movedTemplate = SKILL.replace('## Rules\n- **KB-AP-1** [one-line', '## Overview\n- **KB-AP-1** [one-line')
     expect(movedTemplate, 'the seed must land').not.toBe(SKILL)
-    expect(collectRulesFirstDefects(movedTemplate)).toEqual(['the template opens with "Overview", not Rules'])
-    const movedExample = SKILL.replace('## Rules\n\n- **KB-AP-1** Fetch logic', '## Overview\n\n- **KB-AP-1** Fetch logic')
-    expect(movedExample, 'the seed must land').not.toBe(SKILL)
-    expect(collectRulesFirstDefects(movedExample)).toEqual(['the Worked Example opens with "Overview", not Rules'])
-    expect(collectRulesFirstDefects(SKILL.replace('never reused', 'reused freely'))).toEqual(['does not state ID retirement'])
-    expect(collectRulesFirstDefects(SKILL.replaceAll('`KB-INV-n`', 'an ID'))).toEqual(['does not state the invariant ID'])
+    expect(collectRulesFirstDefects(movedTemplate, NEW_KB)).toEqual(['the template opens with "Overview", not Rules'])
+    const movedExample = NEW_KB.replace('## Rules\n\n- **KB-AP-1** Fetch logic', '## Overview\n\n- **KB-AP-1** Fetch logic')
+    expect(movedExample, 'the seed must land').not.toBe(NEW_KB)
+    expect(collectRulesFirstDefects(SKILL, movedExample)).toEqual(['the Worked Example opens with "Overview", not Rules'])
+    expect(collectRulesFirstDefects(SKILL.replace('never reused', 'reused freely'), NEW_KB)).toEqual(['does not state ID retirement'])
+    expect(collectRulesFirstDefects(SKILL.replaceAll('`KB-INV-n`', 'an ID'), NEW_KB)).toEqual(['does not state the invariant ID'])
   })
 })
 
@@ -231,5 +239,54 @@ describe('the legacy fallback and the refresh rule are stated once each (D-KB-LE
     const lost = agent.replace('never renumber, ', '')
     expect(collectRefreshRuleDefects(SKILL, lost)).toContain('the agent states "never renumber" 0 times, expected once')
     expect(collectRefreshRuleDefects(SKILL.replace('Never renumber', 'Renumber freely'), agent)).toEqual(['the skill does not state "Never renumber"'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Size ceilings and the new-KB branch (#722)
+// ---------------------------------------------------------------------------
+
+/** Named collector: a text over its byte ceiling. */
+export function collectSizeDefects(label: string, text: string, ceiling: number): string[] {
+  const bytes = Buffer.byteLength(text)
+  return bytes > ceiling ? [`${label} is ${bytes} bytes, ceiling ${ceiling}`] : []
+}
+
+/** Named collector: how the skill's create branch fails to reach the new-KB reference. */
+export function collectNewKbBranchDefects(skill: string, newKb: string): string[] {
+  const out: string[] = []
+  const branch = skill.split('\n').find(l => l.startsWith('**New KB only**')) ?? ''
+  if (!branch) return ['no new-KB branch line']
+  if (!branch.includes('Read `<that directory>/skills/devflow:feature-knowledge/references/new-kb.md` once')) out.push('the branch does not name the full reference path')
+  if (!branch.includes('If the Read fails')) out.push('the branch has no failed-Read fallback')
+  for (const heading of ['## Category', '## Category Templates', '## Worked Example']) {
+    if (!newKb.split('\n').includes(heading)) out.push(`the reference has no "${heading}" heading`)
+  }
+  return out
+}
+
+describe('the Knowledge body and skill sit under their ceilings, and the create branch reads its reference (#722)', () => {
+  const builds = [
+    ['curation on', agentBody(), KNOWLEDGE_BODY_MAX_BYTES],
+    ['curation off', resolveCurationOffSource('agents', 'knowledge') ?? '', KNOWLEDGE_BODY_CURATION_OFF_MAX_BYTES],
+    ['feature-knowledge SKILL.md', SKILL, FEATURE_KNOWLEDGE_SKILL_MAX_BYTES],
+  ] as const
+
+  it.each(builds)('%s fits its ceiling, and a probe one byte under its size is reported', (label, text, ceiling) => {
+    expect(Buffer.byteLength(text), `${label}: nothing read`).toBeGreaterThan(5000)
+    expect(collectSizeDefects(label, text, ceiling)).toEqual([])
+    const bytes = Buffer.byteLength(text)
+    expect(collectSizeDefects(label, text, bytes - 1)).toEqual([`${label} is ${bytes} bytes, ceiling ${bytes - 1}`])
+  })
+
+  it('the skill reads the new-KB reference by its full path, once, with a fallback', () => {
+    expect(collectNewKbBranchDefects(SKILL, NEW_KB)).toEqual([])
+  })
+
+  it('known-bad probe: a relative path, a lost fallback and a lost heading are each reported', () => {
+    expect(collectNewKbBranchDefects(SKILL.replace('<that directory>/skills/devflow:feature-knowledge/references/new-kb.md', 'references/new-kb.md'), NEW_KB))
+      .toEqual(['the branch does not name the full reference path'])
+    expect(collectNewKbBranchDefects(SKILL.replace('If the Read fails', 'Then'), NEW_KB)).toEqual(['the branch has no failed-Read fallback'])
+    expect(collectNewKbBranchDefects(SKILL, NEW_KB.replace('## Worked Example', '## Example'))).toEqual(['the reference has no "## Worked Example" heading'])
   })
 })

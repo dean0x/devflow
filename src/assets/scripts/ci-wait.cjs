@@ -9,24 +9,36 @@
 // only (D-CI-WORKFLOWS): at most one answered probe per run, and its answer is kept for
 // the run; a failed probe is a failed poll, and the next poll probes again. It waits for
 // CI to start until CI_WAIT_MAX_SECONDS, classifies the head it was told about, and
-// prints exactly one line.
+// prints one CI line. With --waits and --fixes it prints one more line, the next
+// action of the CI gate (D-CI-NEXT).
 // Installed beside hud.sh and redact-secrets.cjs under ~/.devflow/scripts/.
 //
 // Usage:
-//   node ci-wait.cjs --pr <n> --head <sha>
+//   node ci-wait.cjs --pr <n> --head <sha> [--waits <w> --fixes <f>]
 //     <n>    the pull request number: digits, no leading zero, at most 9
 //     <sha>  the pushed head: 40 lowercase hex
+//     <w>    the waits run so far, this one included: 1 to 3
+//     <f>    the Fix agents run so far: 0 to 2
+//   Give --waits and --fixes together or not at all.
 //
 // Run it from the worktree, so gh finds the repository from the working directory.
 //
-// stdout (D-CI-LINE) is exactly one line, ending in a newline:
+// stdout (D-CI-LINE) is one line, ending in a newline:
 //   CI <STATUS> pr=<n> head=<first 7 hex> failing=<names|-> pending=<names|-> waited=<seconds>
 // with ` reason=<code>` appended to INDETERMINATE only. STATUS is one of STATUSES,
-// the check-ci-status Output enum. An argv that fails its gate prints the short form
+// the check-ci-status Output enum. With --waits and --fixes (D-CI-NEXT) a second line
+// follows the CI line, ending in a newline:
+//   NEXT=<wait|fix|proceed> SAY=<message>
+// where the message is one fixed phrase of this file, or `none`. The line is the gate
+// table of /implement and /resolve as a pure function of the status, the reason, the
+// seconds waited and the two counts, so a prompt only acts on the answer. An argv that
+// fails its gate prints the short form
 // `CI INDETERMINATE pr=- head=- waited=0 reason=usage` and makes no gh call. The
-// boundary re-checks the line against LINE_RE and the 400-character bound before it
-// writes it. Exit 0 whenever a line was printed; a reader treats a missing or
-// unparseable line, an unlisted status or a non-zero exit as INDETERMINATE.
+// boundary re-checks the CI line against LINE_RE and the 400-character bound, and the
+// NEXT line against the fixed set NEXT_LINES, before it writes them. A failed check
+// prints the one failure line and no NEXT line, as it does without the two flags.
+// Exit 0 whenever a line was printed; a reader treats a missing or unparseable line, an
+// unlisted status or a non-zero exit as INDETERMINATE.
 //
 // Design constraints (binding). The text of each verdict rule is written once, at the
 // marker named below; this list points to it. The workflow-probe rule has two readers,
@@ -49,8 +61,11 @@
 //     way. A silent foreground node call of about 570 s under a Bash timeout of
 //     600000 ms completed in a main-thread `claude -p` probe on 2026-10-09.
 //   - D-CI-NO-EXIT: nothing here calls process.exit(). An explicit exit can
-//     truncate stdout when it is a pipe, and the one line is the whole result. The
+//     truncate stdout when it is a pipe, and the printed lines are the whole result. The
 //     boundary sets process.exitCode and lets the event loop drain.
+//   - D-CI-NEXT: see nextAction. The gate table is plumbing, not judgment: it maps a
+//     classified status and two counts to one action and one fixed phrase. The phrases
+//     carry no gh output, so no check name reaches the NEXT line.
 //   - D-CI-WAIT-BOUNDS: every loop has a fixed bound (MAX_POLLS, the deadline, the
 //     name lists), and every wait is capped at CI_WAIT_MAX_SECONDS.
 //
@@ -160,6 +175,9 @@ const NAME_TOKEN_RE = /^(?:-|\+[0-9]+)$/;
 
 const PR_RE = /^[1-9][0-9]{0,8}$/;
 const HEAD_RE = /^[0-9a-f]{40}$/;
+/** D-CI-NEXT: the waits run so far, this one included (1 to MAX_WAITS), and the fixes (0 to MAX_FIXES). */
+const WAITS_RE = /^[1-3]$/;
+const FIXES_RE = /^[0-2]$/;
 const NO_PR_RE = /Could not resolve to a PullRequest/;
 const NO_CHECKS_RE = /no checks reported/i;
 
@@ -172,6 +190,35 @@ const LINE_RE = new RegExp(
 );
 
 const USAGE_LINE = 'CI INDETERMINATE pr=- head=- waited=0 reason=usage';
+
+/**
+ * D-CI-NEXT: the budget of one CI gate (3 waits and 2 fixes in all), the actions it
+ * answers with and the phrases it says. A phrase is fixed text of this file; none holds
+ * gh output. `none` says nothing. After a full-deadline wait that ends in one of
+ * FINAL_AFTER_FULL_WAIT, another wait cannot change the answer, so the gate stops.
+ * WAITS_RE and FIXES_RE spell the same two bounds.
+ */
+const MAX_WAITS = 3;
+const MAX_FIXES = 2;
+const NEXTS = Object.freeze(['wait', 'fix', 'proceed']);
+const FINAL_AFTER_FULL_WAIT = Object.freeze(['head-mismatch', 'no-workflow-check']);
+const SAY_NONE = 'none';
+const SAY_NO_CI = 'No PR/CI configured, skipping CI validation.';
+const SAY_RUNNING = 'CI still running — verify manually before merging';
+const SAY_UNKNOWN = 'CI status unknown — verify manually before merging';
+const SAY_FIX = 'CI failed — a fix runs for the failing checks';
+const SAY_STILL_FAILS = 'CI still fails after ' + MAX_FIXES + ' fixes — verify manually before merging';
+
+/** The only NEXT lines this script prints: an action and a phrase that go together. */
+const NEXT_LINES = Object.freeze([
+  'NEXT=wait SAY=' + SAY_NONE,
+  'NEXT=fix SAY=' + SAY_FIX,
+  'NEXT=proceed SAY=' + SAY_NONE,
+  'NEXT=proceed SAY=' + SAY_NO_CI,
+  'NEXT=proceed SAY=' + SAY_RUNNING,
+  'NEXT=proceed SAY=' + SAY_UNKNOWN,
+  'NEXT=proceed SAY=' + SAY_STILL_FAILS,
+]);
 
 /**
  * D-CI-WORKFLOWS: the probe, a GET of the repository's workflow list. It is a fixed
@@ -204,6 +251,8 @@ const VIEW_FIELDS = 'headRefOid,mergeable,state';
  * @typedef {{ status: string, pr: string, head: string, failing: string[], pending: string[],
  *   waited: number, reason: string | null }} CiResult
  *   `head` is the first 7 hex characters.
+ * @typedef {{ next: string, say: string }} NextAction
+ *   `next` is one of NEXTS; `say` is one fixed phrase or SAY_NONE (D-CI-NEXT).
  * @typedef {{ pr: string, head: string, exec: ExecFn, clock: Clock, env?: NodeJS.ProcessEnv }} WaitInput
  * @typedef {{ state: 'deadline', rowsRead: boolean } | { state: 'failed' } | { state: 'pending', pending: string[] }
  *   | { state: 'open' }
@@ -231,26 +280,34 @@ const DEADLINE_LAST = Object.freeze({ status: 'INDETERMINATE', reason: 'deadline
 // ---------------------------------------------------------------------------
 
 /**
- * D-CI-ARGV: exactly `--pr <digits> --head <40 lowercase hex>`, each once, in either
- * order, and nothing else. Anything that fails is refused before any gh call, so a
- * value never reaches gh's argv unless it is a plain number or a plain SHA.
+ * D-CI-ARGV: exactly `--pr <digits> --head <40 lowercase hex>`, each once, in any
+ * order, and nothing else. D-CI-NEXT adds an opt-in pair, `--waits <1 to 3>` and
+ * `--fixes <0 to 2>`: both or neither, each once, a single digit in its range. Anything
+ * that fails is refused before any gh call, so a value never reaches gh's argv unless it
+ * is a plain number or a plain SHA. The result holds `waits` and `fixes` only when the
+ * pair was given.
  *
  * @param {readonly string[]} args  the arguments after the script path
- * @returns {{ pr: string, head: string } | null}
+ * @returns {{ pr: string, head: string, waits?: number, fixes?: number } | null}
  */
 function parseArgs(args) {
-  if (!Array.isArray(args) || args.length !== 4) return null;
+  if (!Array.isArray(args) || (args.length !== 4 && args.length !== 8)) return null;
   let pr = null;
   let head = null;
-  for (let i = 0; i < 4; i += 2) {
+  let waits = null;
+  let fixes = null;
+  for (let i = 0; i < args.length; i += 2) {
     const flag = args[i];
     const value = args[i + 1];
     if (typeof value !== 'string') return null;
     if (flag === '--pr' && pr === null && PR_RE.test(value)) pr = value;
     else if (flag === '--head' && head === null && HEAD_RE.test(value)) head = value;
+    else if (flag === '--waits' && waits === null && WAITS_RE.test(value)) waits = Number(value);
+    else if (flag === '--fixes' && fixes === null && FIXES_RE.test(value)) fixes = Number(value);
     else return null;
   }
-  return pr !== null && head !== null ? { pr, head } : null;
+  if (pr === null || head === null) return null;
+  return waits === null || fixes === null ? { pr, head } : { pr, head, waits, fixes };
 }
 
 // ---------------------------------------------------------------------------
@@ -362,6 +419,63 @@ function checkLine(line) {
   if (typeof line !== 'string' || line.length > LINE_MAX) return false;
   const m = LINE_RE.exec(line);
   return m !== null && (m[1] === 'INDETERMINATE') === (m[4] !== undefined);
+}
+
+/**
+ * D-CI-NEXT: what the CI gate does with one printed result. The table is the one the
+ * /implement and /resolve prompts used to carry:
+ *   PASSING                 proceed, saying nothing
+ *   NO_PR, NO_CI            proceed, saying that no CI is configured
+ *   PENDING                 wait while fewer than MAX_WAITS waits have run, else proceed
+ *   INDETERMINATE           wait while fewer than MAX_WAITS waits have run, unless the
+ *                           wait ran the whole deadline and the reason is one of
+ *                           FINAL_AFTER_FULL_WAIT; else proceed, saying the status is unknown
+ *   FAILING                 fix while fewer than MAX_FIXES fixes have run, else proceed
+ * A status outside STATUSES is unknown, which fails closed to the same proceed.
+ * `waited` and `reason` are the result's own values, never read back from text.
+ *
+ * @param {{ status: string, reason: string | null, waited: number }} result
+ * @param {number} waits  the waits run so far, this one included
+ * @param {number} fixes  the Fix agents run so far
+ * @returns {NextAction}
+ */
+function nextAction(result, waits, fixes) {
+  const proceed = say => ({ next: 'proceed', say });
+  switch (result.status) {
+    case 'PASSING':
+      return proceed(SAY_NONE);
+    case 'NO_PR':
+    case 'NO_CI':
+      return proceed(SAY_NO_CI);
+    case 'PENDING':
+      return waits < MAX_WAITS ? { next: 'wait', say: SAY_NONE } : proceed(SAY_RUNNING);
+    case 'INDETERMINATE': {
+      const final = result.waited === CI_WAIT_MAX_SECONDS && FINAL_AFTER_FULL_WAIT.includes(result.reason);
+      return waits < MAX_WAITS && !final ? { next: 'wait', say: SAY_NONE } : proceed(SAY_UNKNOWN);
+    }
+    case 'FAILING':
+      return fixes < MAX_FIXES ? { next: 'fix', say: SAY_FIX } : proceed(SAY_STILL_FAILS);
+    default:
+      return proceed(SAY_UNKNOWN);
+  }
+}
+
+/**
+ * @param {NextAction} action
+ * @returns {string}  `NEXT=<action> SAY=<message>`
+ */
+function renderNext(action) {
+  return 'NEXT=' + action.next + ' SAY=' + action.say;
+}
+
+/**
+ * Whether a line is one this script may print as the NEXT line: one of NEXT_LINES, whole.
+ *
+ * @param {string} line
+ * @returns {boolean}
+ */
+function checkNext(line) {
+  return typeof line === 'string' && NEXT_LINES.includes(line);
 }
 
 // ---------------------------------------------------------------------------
@@ -947,9 +1061,10 @@ async function main(argv, deps) {
   /** @param {string} reason */
   const indeterminate = reason =>
     'CI INDETERMINATE pr=' + parsed.pr + ' head=' + parsed.head.slice(0, 7) + ' waited=0 reason=' + reason;
+  let result = null;
   let line;
   try {
-    const result = await waitForCi({
+    result = await waitForCi({
       pr: parsed.pr,
       head: parsed.head,
       exec: injected.exec || defaultExec,
@@ -958,10 +1073,19 @@ async function main(argv, deps) {
     });
     line = renderLine(result);
   } catch (_) {
+    result = null;
     line = indeterminate('gh-failed');
   }
-  if (!checkLine(line)) line = indeterminate('unparseable');
-  return { code: 0, stdout: line + '\n' };
+  if (!checkLine(line)) {
+    result = null;
+    line = indeterminate('unparseable');
+  }
+  if (result === null || parsed.waits === undefined || parsed.fixes === undefined) {
+    return { code: 0, stdout: line + '\n' };
+  }
+  const next = renderNext(nextAction(result, parsed.waits, parsed.fixes));
+  if (!checkNext(next)) return { code: 0, stdout: indeterminate('unparseable') + '\n' };
+  return { code: 0, stdout: line + '\n' + next + '\n' };
 }
 
 // ---------------------------------------------------------------------------
@@ -1011,6 +1135,11 @@ module.exports = Object.freeze({
   NAMES_LISTED,
   LINE_RE,
   USAGE_LINE,
+  MAX_WAITS,
+  MAX_FIXES,
+  NEXTS,
+  FINAL_AFTER_FULL_WAIT,
+  NEXT_LINES,
   WORKFLOWS_ARGS,
   parseArgs,
   sanitizeName,
@@ -1024,6 +1153,9 @@ module.exports = Object.freeze({
   askWorkflows,
   renderLine,
   checkLine,
+  nextAction,
+  renderNext,
+  checkNext,
   waitForCi,
   main,
 });

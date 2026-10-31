@@ -27,7 +27,7 @@ const SKILL_DIR = path.join(ROOT, 'src', 'assets', 'skills', 'worktree-support')
 const read = (rel: string): string => readFileSync(path.join(SKILL_DIR, rel), 'utf-8')
 
 /** The preload is billed on every agent spawn, so the skill file has a byte cap. */
-const SKILL_MAX_BYTES = 1_900
+const SKILL_MAX_BYTES = 1_172
 
 const CANONICAL_HEADING = '## Protected Branches (Canonical List)'
 

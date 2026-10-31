@@ -19,6 +19,8 @@
 //   node verify-evidence.cjs publish --pr <n> [--publication auto|full|off|stub] [--evidence <file>]
 //   node verify-evidence.cjs readiness --pr <n> [--require-non-author-approval true|false]
 //        [--evidence <file>] [--out <file>]
+//   node verify-evidence.cjs claim --evidence <file> --head <sha> [--plan <file>]
+//        gate | TP-<n>=<PASS|FAIL|SKIP>[:<exit>] ...
 //
 // stdout (D-VERIFY-STDOUT) is empty or exactly one of these shapes, each closed-vocabulary
 // (the render block's TP lines come from the caller's own plan file):
@@ -33,10 +35,14 @@
 //             posted:<yes|no|n/a> body:<same|changed>          (one line; wrapped here)
 //   splice    SPLICE ok|resplice (exit 0) or SPLICE conflict|malformed|oversize (exit 5)
 //   readback  READBACK ok (exit 0) or READBACK mismatch (exit 5)
-//   publish   the `## PR Evidence` block — the heading, the EVIDENCE line, one
+//   publish   the `## PR Evidence` block — the heading, the EVIDENCE line, the line
+//             `Test plan: <v>/<total> verified (VERIFIED-CI <a>, ATTESTED-LOCAL <b>)`
+//             (v is a + b, all three read from the EVIDENCE line), one
 //             `**Body**: … · **Comment**: …` line — then one `TRACEABILITY: DEGRADED
 //             (<reason>)` line per degraded part (exit 0), or exit 2 with one line:
-//             `TRACEABILITY: DEGRADED (evidence unavailable)` when it could not run,
+//             `TRACEABILITY: DEGRADED (evidence unavailable)` when it could not run (a
+//             usage error, an internal error, a failed read and a block the output gate
+//             refuses all end this way, so a `publish` never ends with empty stdout),
 //             `TRACEABILITY: DEGRADED (compliance off)` when the machine manifest does not
 //             say compliance is enabled, or `TRACEABILITY: DEGRADED (compliance state
 //             unreadable)` when that manifest cannot be read. The last two come before
@@ -55,10 +61,27 @@
 //             is removed before the first read, and a block that does not parse or a
 //             write that fails leaves no out file. The one exception is a path that
 //             git tracks (below), which is left as it is
+//   claim     D-CLAIM-APPEND: appends claim lines to the `## Claims` section of the
+//             `--evidence` file. `gate` writes `- gate:validate PASS sha:<head>
+//             by:validate`. Each `TP-<n>=<outcome>[:<exit>]` writes `- TP-<n> <outcome>
+//             sha:<head> by:test[ exit:<exit>]`. `--head` is one 40-hex SHA, else
+//             nothing is written. The `exit:` part is written only for a number from 0
+//             to 255. A TP that the plan does not list gets no line. The plan is the
+//             `## Test Plan` of the `--plan` file, or of the evidence file when `--plan`
+//             is absent. The `## Claims` section is the file's last section and is
+//             created when absent, and so is the file when its folder exists. The
+//             write is one append of every line, and the parser of pr-evidence.cjs
+//             accepts each line before it. It prints one line, exit 0:
+//             `CLAIM appended:<n> PASS:<n> FAIL:<n> SKIP:<n> skipped:<n>`
+//             (`skipped` counts the TPs that got no line), or exit 2 with
+//             `CLAIM refused (<reason>)`, the reason being `head not one sha`,
+//             `evidence file tracked` (git tracks it, or cannot say it does not),
+//             `evidence file unusable` or `plan file unusable`. A refusal writes nothing
 // A git-tracked file counts as absent, like a tracked `.devflow/config.json`
 // (D-TRACKED-RESULT). `verify`, `publish` and `readiness` ask git about an `--evidence`
 // file before they read it, and about `--block-out`, `--comment-out`, `--stale-out` and
-// `--out` before they write or remove one. Only a clear "not tracked" answer lets the
+// `--out` before they write or remove one. `claim` asks about its `--evidence` and
+// `--plan` files, and refuses both when either is not clearly untracked. Only a clear "not tracked" answer lets the
 // file be read or written. A tracked `--evidence` file, or one git cannot answer for, is
 // dropped: the run goes on exactly as if `--evidence` was not given, and the stderr
 // summary carries the note `evidence-ignored`. A tracked out path, or one git cannot
@@ -68,14 +91,16 @@
 //
 // Exit codes:
 //   0  ok
-//   1  usage error — stdout entirely empty, usage on stderr
+//   1  usage error — stdout entirely empty, usage on stderr (a `publish` usage error is
+//      exit 2 with the evidence unavailable line instead)
 //   2  input unusable — a file could not be read (missing, not a regular file,
 //      oversize, not UTF-8), the evidence file or the state directory is
 //      malformed, or the PR body's test-plan block cannot serve as the plan.
 //      For `publish` and `readiness` (D-OP-SCRIPT-POINTER) it is the DEGRADED
 //      result: the operation could not read what it needs, and the stdout above
-//      says so
-//   3  output write failed — no stdout line is printed
+//      says so. For `claim` it is the refusal line above
+//   3  output write failed — no stdout line is printed (a `claim` write leaves the
+//      evidence file as it was)
 //   4  remote or internal failure before any verdict — `gh pr view` failed or
 //      answered something unusable, or an unexpected internal error
 //   5  output gate refused — `check` found the file invalid, the EVIDENCE line
@@ -223,6 +248,12 @@ const DECISIVE_REVIEW_STATES = new Set(['APPROVED', 'CHANGES_REQUESTED', 'DISMIS
 const SPLICE_LINE_RE = /^SPLICE (?<outcome>ok|resplice|conflict|malformed|oversize)$/;
 const READBACK_LINE_RE = /^READBACK (?<outcome>ok|mismatch)$/;
 
+/** D-CLAIM-APPEND: the stdout shapes of `claim`, and the closed set of its refusal reasons. */
+const CLAIM_APPENDED_RE = /^CLAIM appended:(?<n>[0-9]{1,3}) PASS:(?<pass>[0-9]{1,3}) FAIL:(?<fail>[0-9]{1,3}) SKIP:(?<skip>[0-9]{1,3}) skipped:(?<skipped>[0-9]{1,3})$/;
+const CLAIM_REFUSAL_RE = /^CLAIM refused \((?<reason>head not one sha|evidence file tracked|evidence file unusable|plan file unusable)\)$/;
+/** One `claim` argument: the TP, its outcome, and an exit the script keeps only as a number from 0 to 255. */
+const CLAIM_ARG_RE = /^TP-(?<n>[1-9][0-9]{0,2})=(?<outcome>PASS|FAIL|SKIP)(?::(?<exit>[^\s]{1,12}))?$/;
+
 const USAGE = [
   'Usage: node verify-evidence.cjs check tp|block|exceptions|wave <file>',
   '       node verify-evidence.cjs check wave --links-only <file>',
@@ -234,6 +265,8 @@ const USAGE = [
   '       node verify-evidence.cjs publish --pr <n> [--publication auto|full|off|stub] [--evidence <file>]',
   '       node verify-evidence.cjs readiness --pr <n> [--require-non-author-approval true|false]',
   '            [--evidence <file>] [--out <file>]',
+  '       node verify-evidence.cjs claim --evidence <file> --head <sha> [--plan <file>]',
+  '            gate | TP-<n>=<PASS|FAIL|SKIP>[:<exit>] ...',
 ].join('\n');
 
 // ---------------------------------------------------------------------------
@@ -290,7 +323,9 @@ const USAGE = [
  *   | { kind: 'readback', pr: number, expect: string }
  *   | { kind: 'publish', pr: number, publication: string, evidence: string | null }
  *   | { kind: 'readiness', pr: number, requireNonAuthor: 'true' | 'false' | 'unrecognised',
- *       evidence: string | null, out: string | null }} ParsedArgs
+ *       evidence: string | null, out: string | null }
+ *   | { kind: 'claim', evidence: string, head: string, plan: string | null, gate: boolean,
+ *       tps: readonly { id: number, outcome: 'PASS' | 'FAIL' | 'SKIP', exit: string | null }[] }} ParsedArgs
  */
 
 /** @type {ParsedArgs} */
@@ -423,7 +458,43 @@ function parseArgs(argv) {
     // An absent flag is the ladder's "unrecognised": it can never read READY.
     return { kind: 'readiness', pr, requireNonAuthor: needed === null ? 'unrecognised' : needed, evidence, out };
   }
+  if (sub === 'claim') return parseClaimArgs(tail);
   return USAGE_ARGS;
+}
+
+/**
+ * D-CLAIM-APPEND: `claim` takes its flags first, then either the one word `gate` or
+ * one to CAPS.TPS `TP-<n>=<outcome>[:<exit>]` arguments, each TP at most once. A bad
+ * flag or argument is a usage error. `--head` is not checked here: a value that is not
+ * one SHA is a refusal with a line, since the caller passes what its report shows.
+ *
+ * @param {readonly string[]} tail
+ * @returns {ParsedArgs}
+ */
+function parseClaimArgs(tail) {
+  let flagCount = 0;
+  while (flagCount < tail.length && tail[flagCount].startsWith('--')) flagCount += 2;
+  const f = parseFlags(tail.slice(0, flagCount), { '--evidence': 'value', '--head': 'value', '--plan': 'value' });
+  const evidence = f === null ? null : flagValue(f, '--evidence');
+  const head = f === null ? null : flagValue(f, '--head');
+  const plan = f === null ? null : flagValue(f, '--plan');
+  const items = tail.slice(flagCount);
+  if (evidence === null || head === null || items.length === 0 || items.length > CAPS.TPS) return USAGE_ARGS;
+  if (items.length === 1 && items[0] === 'gate') {
+    return plan === null ? { kind: 'claim', evidence, head, plan, gate: true, tps: [] } : USAGE_ARGS;
+  }
+  const tps = [];
+  for (const item of items) {
+    const m = CLAIM_ARG_RE.exec(item);
+    if (m === null || m.groups === undefined) return USAGE_ARGS;
+    tps.push({
+      id: Number(m.groups.n),
+      outcome: /** @type {'PASS' | 'FAIL' | 'SKIP'} */ (m.groups.outcome),
+      exit: m.groups.exit === undefined ? null : m.groups.exit,
+    });
+  }
+  if (new Set(tps.map(tp => tp.id)).size !== tps.length) return USAGE_ARGS;
+  return { kind: 'claim', evidence, head, plan, gate: false, tps };
 }
 
 // ---------------------------------------------------------------------------
@@ -507,6 +578,44 @@ function writeTextFile(filePath, text) {
     if (!fs.fstatSync(fd).isFile()) return false;
     fs.writeFileSync(fd, text, 'utf8');
     return true;
+  } catch (_) {
+    return false;
+  } finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch (_) { /* the write already decided */ }
+    }
+  }
+}
+
+/**
+ * Append `text` to `filePath` in one write, creating the file when it is absent. The same
+ * refusals as writeTextFile apply: a path that exists and is not a regular file, a link
+ * put in its place (O_NOFOLLOW), a FIFO (O_NONBLOCK). A write that does not complete
+ * cuts the file back to its length before the append, or removes the file when this call
+ * created it, so a failed append leaves no part of `text`. Returns whether it was written.
+ *
+ * @param {string} filePath
+ * @param {string} text
+ * @returns {boolean}
+ */
+function appendTextFile(filePath, text) {
+  let fd;
+  let created = false;
+  try {
+    const st = fs.lstatSync(filePath, { throwIfNoEntry: false });
+    if (st !== undefined && !st.isFile()) return false;
+    created = st === undefined;
+    const c = fs.constants;
+    fd = fs.openSync(filePath, c.O_WRONLY | c.O_APPEND | c.O_CREAT | (c.O_NOFOLLOW || 0) | (c.O_NONBLOCK || 0), 0o600);
+    const before = fs.fstatSync(fd);
+    if (!before.isFile()) return false;
+    const bytes = Buffer.from(text, 'utf8');
+    try {
+      if (fs.writeSync(fd, bytes) === bytes.length) return true;
+    } catch (_) { /* cut back below */ }
+    try { fs.ftruncateSync(fd, before.size); } catch (_) { /* the write already failed */ }
+    if (created) fs.unlinkSync(filePath);
+    return false;
   } catch (_) {
     return false;
   } finally {
@@ -753,13 +862,18 @@ function trackedState(io, file) {
  * the write failure (exit 3): no file is written. An `--evidence` file that is not
  * clearly untracked is dropped, so the run goes on exactly as if `--evidence` was not
  * given; the stderr summary then carries the closed note `evidence-ignored`. Stdout
- * keeps its grammar.
+ * keeps its grammar. A `claim` run has its own refusal line for each of these cases
+ * (claimRefusalReason).
  *
  * @param {Io} io
  * @param {ParsedArgs} args
  * @returns {{ args: ParsedArgs } | { outcome: Outcome }}
  */
 function admitPaths(io, args) {
+  if (args.kind === 'claim') {
+    const reason = claimRefusalReason(io, args);
+    return reason === null ? { args } : { outcome: claimRefusal(reason) };
+  }
   if (args.kind !== 'verify' && args.kind !== 'publish' && args.kind !== 'readiness') return { args };
   const outs = args.kind === 'verify' ? [args.blockOut, args.commentOut, args.staleOut]
     : args.kind === 'readiness' ? [args.out] : [];
@@ -1424,7 +1538,16 @@ function runsAt(io, memo, sha) {
  */
 function loadEvidence(file) {
   const text = readTextFile(file);
-  if (text === null) return null;
+  return text === null ? null : parseEvidenceText(text);
+}
+
+/**
+ * The sections of an evidence file's text, parsed (see loadEvidence).
+ *
+ * @param {string} text
+ * @returns {EvidenceInput | null}  null when unusable
+ */
+function parseEvidenceText(text) {
   const sections = PE.evidenceSections(text);
   if (!sections.ok) return null;
   let plan = null;
@@ -2026,6 +2149,21 @@ const COMPLIANCE_UNREADABLE_LINE = 'TRACEABILITY: DEGRADED (compliance state unr
 /** Every line a `publish` that did not run may print. The boundary admits each one with exit 2 only. */
 const PUBLISH_REFUSAL_LINES = Object.freeze([EVIDENCE_UNAVAILABLE_LINE, COMPLIANCE_OFF_LINE, COMPLIANCE_UNREADABLE_LINE]);
 
+/** The answer of every `publish` that could not give its block: the one line, exit 2. */
+const PUBLISH_UNAVAILABLE = Object.freeze({ code: EXIT_CODES.INPUT_UNUSABLE, stdout: EVIDENCE_UNAVAILABLE_LINE + '\n' });
+
+/**
+ * Whether argv asks for `publish`. The boundary reads it after any failure, a usage
+ * error and a throw included, so settleOutcome can answer a failed `publish` with
+ * PUBLISH_UNAVAILABLE.
+ *
+ * @param {readonly string[]} argv  process.argv
+ * @returns {boolean}
+ */
+function isPublishRun(argv) {
+  return Array.isArray(argv) && argv[2] === 'publish';
+}
+
 /**
  * @typedef {{ status: string, reason: string | null }} Part
  *   One half of the `publish` answer: a closed status, or `DEGRADED` with its reason.
@@ -2077,8 +2215,26 @@ function traceReasons(body, comment) {
 }
 
 /**
- * The `## PR Evidence` block of the update-pr-evidence contract, then its TRACEABILITY
- * lines.
+ * The test-plan tally that both scripted blocks print: `<verified>/<total>`, the given
+ * word, then the two counts that make up `verified`. The readiness block prints it with
+ * no word and the publish block with ` verified`.
+ *
+ * @param {{ total: number, counts: Readonly<Record<string, number>> }} fields  the parsed EVIDENCE line
+ * @param {'' | ' verified'} word
+ * @returns {string}
+ */
+function planTally(fields, word) {
+  const verifiedCi = fields.counts['VERIFIED-CI'];
+  const attestedLocal = fields.counts['ATTESTED-LOCAL'];
+  return (verifiedCi + attestedLocal) + '/' + fields.total + word
+    + ' (VERIFIED-CI ' + verifiedCi + ', ATTESTED-LOCAL ' + attestedLocal + ')';
+}
+
+/**
+ * The `## PR Evidence` block of the update-pr-evidence contract: the EVIDENCE line, the
+ * `Test plan:` line read from it, the Body and Comment line, then its TRACEABILITY lines.
+ * The caller holds the precondition that `evidenceLine` parses; a line that does not is a
+ * broken invariant, which the catch in main turns into "evidence unavailable".
  *
  * @param {string} evidenceLine
  * @param {Part} body
@@ -2086,9 +2242,12 @@ function traceReasons(body, comment) {
  * @returns {string}
  */
 function renderPublishBlock(evidenceLine, body, comment) {
+  const evidence = PE.parseEvidenceLine(evidenceLine);
+  if (!evidence.ok) throw new Error('verify-evidence: unchecked evidence line');
   const lines = [
     '## PR Evidence',
     evidenceLine,
+    'Test plan: ' + planTally(evidence.value, ' verified'),
     '**Body**: ' + partText(body) + ' · **Comment**: ' + partText(comment),
     ...traceReasons(body, comment).map(r => 'TRACEABILITY: DEGRADED (' + r + ')'),
   ];
@@ -2110,8 +2269,8 @@ function parsePart(text, statuses) {
 
 /**
  * D-OP-BLOCK-GATE: read a `publish` block back into its parts, or null when it is not
- * exactly what renderPublishBlock prints. The boundary prints a block only when this
- * accepts it.
+ * exactly what renderPublishBlock prints, so a `Test plan:` line that disagrees with the
+ * EVIDENCE line is refused. The boundary prints a block only when this accepts it.
  *
  * @param {string} text  the whole stdout, its final newline included
  * @returns {{ evidenceLine: string, body: Part, comment: Part } | null}
@@ -2119,9 +2278,9 @@ function parsePart(text, statuses) {
 function parsePublishBlock(text) {
   if (typeof text !== 'string' || !text.endsWith('\n') || text.length > 8192) return null;
   const lines = text.slice(0, -1).split('\n');
-  if (lines.length < 3 || lines.length > 5 || lines[0] !== '## PR Evidence') return null;
+  if (lines.length < 4 || lines.length > 6 || lines[0] !== '## PR Evidence') return null;
   if (!PE.parseEvidenceLine(lines[1]).ok) return null;
-  const m = PUBLISH_PARTS_RE.exec(lines[2]);
+  const m = PUBLISH_PARTS_RE.exec(lines[3]);
   if (m === null || m.groups === undefined) return null;
   const body = parsePart(m.groups.body, BODY_STATUSES);
   const comment = parsePart(m.groups.comment, COMMENT_STATUSES);
@@ -2138,7 +2297,7 @@ function parsePublishBlock(text) {
  */
 function evidenceUnavailable(io, reason) {
   io.stderr('verify-evidence: publish: ' + reason + '\n');
-  return { code: EXIT_CODES.INPUT_UNUSABLE, stdout: EVIDENCE_UNAVAILABLE_LINE + '\n' };
+  return PUBLISH_UNAVAILABLE;
 }
 
 /**
@@ -2826,9 +2985,7 @@ function readinessPass(io, args, deps) {
       : String(threads.value.unresolved),
     decision: decisionText,
     ci: ci.status,
-    plan: evidence === null ? 'unavailable'
-      : (evidence.verifiedCi + evidence.attestedLocal) + '/' + evidence.total
-        + ' (VERIFIED-CI ' + evidence.verifiedCi + ', ATTESTED-LOCAL ' + evidence.attestedLocal + ')',
+    plan: fields === null ? 'unavailable' : planTally(fields, ''),
     approval: approvalText(args.requireNonAuthor, evidence),
   };
   return { outcome: { code: EXIT_CODES.OK, stdout: renderReadinessBlock(block) }, head };
@@ -2923,6 +3080,159 @@ function runReadiness(io, args, deps) {
 }
 
 // ---------------------------------------------------------------------------
+// claim — D-CLAIM-APPEND
+// ---------------------------------------------------------------------------
+//
+// A Test or Validate report becomes claim lines in the evidence file. The caller passes
+// only the facts of its report (the HEAD, the gate, one outcome per TP). This script owns
+// the rest: the line shapes (the claim parser of pr-evidence.cjs accepts each one before
+// it is written), the HEAD rule, the exit range, the `## Claims` section and the append.
+// A claim is an input to `verify`, never a state: only pr-evidence.cjs and `verify`
+// assign states.
+
+/**
+ * @param {string} reason  one of the CLAIM_REFUSAL_RE reasons
+ * @returns {Outcome}
+ */
+function claimRefusal(reason) {
+  return { code: EXIT_CODES.INPUT_UNUSABLE, stdout: 'CLAIM refused (' + reason + ')\n' };
+}
+
+/**
+ * The reason a `claim` run must not start, or null. Nothing is read or written before
+ * this: the HEAD is one 40-hex SHA, each path is a path the commands build, the evidence
+ * file sits in a folder that exists, and git says clearly that neither file is tracked
+ * (D-TRACKED-RESULT).
+ *
+ * @param {Io} io
+ * @param {Extract<ParsedArgs, { kind: 'claim' }>} args
+ * @returns {string | null}
+ */
+function claimRefusalReason(io, args) {
+  if (!SHA40_RE.test(args.head)) return 'head not one sha';
+  if (!EVIDENCE_PATH_RE.test(args.evidence) || !isRealDirectory(path.dirname(path.resolve(args.evidence)))) return 'evidence file unusable';
+  if (args.plan !== null && !EVIDENCE_PATH_RE.test(args.plan)) return 'plan file unusable';
+  if (trackedState(io, args.evidence) !== 'untracked') return 'evidence file tracked';
+  if (args.plan !== null && trackedState(io, args.plan) !== 'untracked') return 'plan file unusable';
+  return null;
+}
+
+/**
+ * Whether one line is exactly one claim to the claim parser of pr-evidence.cjs.
+ *
+ * @param {string} line
+ * @returns {boolean}
+ */
+function claimLineOk(line) {
+  const r = PE.parseClaims(line);
+  if (!r.ok) return false;
+  const gates = r.value.gates;
+  return r.value.malformed === 0 && r.value.tp.size + (gates.validate === null ? 0 : 1) + (gates.qa === null ? 0 : 1) === 1;
+}
+
+/**
+ * Assert a line before it is written: one claim to the claim parser. Every caller builds
+ * the line from parts that are already checked; this is that precondition held at the sink.
+ *
+ * @param {string} line
+ * @returns {string}
+ */
+function claimLine(line) {
+  if (!claimLineOk(line)) throw new Error('verify-evidence: unchecked claim line');
+  return line;
+}
+
+/**
+ * The text to append: the lines, behind the `## Claims` heading when the file has no such
+ * section (a blank line first, when the file holds anything). The section is the last of
+ * the file, so the lines go at its end.
+ *
+ * @param {string} text  the evidence file as it is, '' when it is absent
+ * @param {boolean} hasSection
+ * @param {readonly string[]} lines
+ * @returns {string}
+ */
+function claimAppendText(text, hasSection, lines) {
+  const body = lines.join('\n') + '\n';
+  if (text === '') return PE.CLAIMS_HEADING + '\n' + body;
+  const lead = text.endsWith('\n') ? '' : '\n';
+  return hasSection ? lead + body : lead + '\n' + PE.CLAIMS_HEADING + '\n' + body;
+}
+
+/**
+ * The TP numbers the plan lists: the `## Test Plan` of the `--plan` file, else of the
+ * evidence file. A plan with no TP line, or no plan section, lists none. Null when the
+ * `--plan` file cannot serve as a plan.
+ *
+ * @param {Extract<ParsedArgs, { kind: 'claim' }>} args
+ * @param {EvidenceInput} evidence
+ * @returns {Set<number> | null}
+ */
+function claimPlanIds(args, evidence) {
+  let plan = evidence.plan;
+  if (args.plan !== null) {
+    const text = readTextFile(args.plan);
+    const parsed = text === null ? null : PE.parsePlan(sectionOrWhole(text, 'testPlan'));
+    if (parsed === null || (!parsed.ok && parsed.error.code !== 'empty')) return null;
+    plan = parsed.ok ? parsed.value : { tps: [] };
+  }
+  return new Set((plan === null ? [] : plan.tps).map(tp => tp.id));
+}
+
+/**
+ * D-CLAIM-APPEND: `claim`. The checks of claimRefusalReason have passed (admitPaths).
+ * The evidence file is read as `verify` reads it, and its `## Claims` section, when it
+ * has one, must be its last section. Then every line is built and checked, and one append
+ * writes them all. A run that writes no line (every TP off the plan) changes no file.
+ *
+ * @param {Io} io
+ * @param {Extract<ParsedArgs, { kind: 'claim' }>} args
+ * @returns {Outcome}
+ */
+function runClaim(io, args) {
+  const file = path.resolve(args.evidence);
+  /** @type {fs.Stats | undefined} */
+  let st;
+  try {
+    st = fs.lstatSync(file, { throwIfNoEntry: false });
+  } catch (_) {
+    return claimRefusal('evidence file unusable');
+  }
+  if (st !== undefined && !st.isFile()) return claimRefusal('evidence file unusable');
+  const text = st === undefined ? '' : readTextFile(file);
+  const evidence = text === null ? null : parseEvidenceText(text);
+  if (text === null || evidence === null) return claimRefusal('evidence file unusable');
+  const headings = text.split('\n').map(row => row.replace(/\r$/, '')).filter(row => row === '##' || row.startsWith('## '));
+  const hasSection = headings.includes(PE.CLAIMS_HEADING);
+  if (hasSection && headings[headings.length - 1] !== PE.CLAIMS_HEADING) return claimRefusal('evidence file unusable');
+  const listed = args.gate ? new Set() : claimPlanIds(args, evidence);
+  if (listed === null) return claimRefusal('plan file unusable');
+
+  /** @type {string[]} */
+  const lines = [];
+  const tally = { PASS: 0, FAIL: 0, SKIP: 0 };
+  if (args.gate) {
+    lines.push(claimLine('- gate:validate PASS sha:' + args.head + ' by:validate'));
+    tally.PASS++;
+  }
+  for (const tp of args.tps) {
+    if (!listed.has(tp.id)) continue;
+    const bare = '- TP-' + tp.id + ' ' + tp.outcome + ' sha:' + args.head + ' by:test';
+    const withExit = tp.exit === null ? bare : bare + ' exit:' + tp.exit;
+    lines.push(claimLine(claimLineOk(withExit) ? withExit : bare));
+    tally[tp.outcome]++;
+  }
+  if (lines.length > 0 && !appendTextFile(file, claimAppendText(text, hasSection, lines))) {
+    return refuse(io, EXIT_CODES.WRITE_FAILED, 'an output file could not be written');
+  }
+  const skipped = args.gate ? 0 : args.tps.length - lines.length;
+  return {
+    code: EXIT_CODES.OK,
+    stdout: 'CLAIM appended:' + lines.length + ' PASS:' + tally.PASS + ' FAIL:' + tally.FAIL + ' SKIP:' + tally.SKIP + ' skipped:' + skipped + '\n',
+  };
+}
+
+// ---------------------------------------------------------------------------
 // main — returns {code, stdout}; never calls process.exit
 // ---------------------------------------------------------------------------
 
@@ -3005,6 +3315,7 @@ function main(argv, deps) {
       else if (args.kind === 'splice') outcome = runSplice(io, args);
       else if (args.kind === 'publish') outcome = runPublish(io, args, d);
       else if (args.kind === 'readiness') outcome = runReadiness(io, args, d);
+      else if (args.kind === 'claim') outcome = runClaim(io, args);
       else outcome = runReadback(io, args);
     }
   } catch (err) {
@@ -3038,12 +3349,26 @@ function errorLabel(err) {
 /**
  * D-VERIFY-STDOUT: settle whatever main() returned into what the boundary may
  * print. The code must be a known exit code and stdout must be empty or one of
- * the closed shapes for that code; anything else prints nothing and exits 4.
+ * the closed shapes for that code; anything else prints nothing and exits 4. A
+ * `publish` run is the exception: it never settles to empty stdout, so what would
+ * print nothing prints the evidence unavailable line with exit 2.
+ *
+ * @param {unknown} outcome
+ * @param {boolean} [publish]  true when the run is a `publish`
+ * @returns {Outcome}
+ */
+function settleOutcome(outcome, publish) {
+  const settled = settleShape(outcome);
+  return publish === true && settled.stdout === '' ? PUBLISH_UNAVAILABLE : settled;
+}
+
+/**
+ * The shape check of settleOutcome, for every subcommand.
  *
  * @param {unknown} outcome
  * @returns {Outcome}
  */
-function settleOutcome(outcome) {
+function settleShape(outcome) {
   const o = /** @type {any} */ (outcome);
   const failed = { code: EXIT_CODES.REMOTE_FAILURE, stdout: '' };
   if (o === null || typeof o !== 'object' || typeof o.stdout !== 'string') return failed;
@@ -3073,6 +3398,14 @@ function settleOutcome(outcome) {
     const passing = readback.groups.outcome === 'ok';
     return o.code === (passing ? EXIT_CODES.OK : EXIT_CODES.OUTPUT_GATE_REFUSED) ? { code: o.code, stdout: o.stdout } : failed;
   }
+  const claimRefused = CLAIM_REFUSAL_RE.exec(text);
+  if (claimRefused !== null) return o.code === EXIT_CODES.INPUT_UNUSABLE ? pass : failed;
+  const claimed = CLAIM_APPENDED_RE.exec(text);
+  if (claimed !== null && claimed.groups !== undefined) {
+    const g = claimed.groups;
+    const sums = Number(g.n) === Number(g.pass) + Number(g.fail) + Number(g.skip);
+    return o.code === EXIT_CODES.OK && sums && Number(g.n) <= CAPS.TPS && Number(g.skipped) <= CAPS.TPS ? pass : failed;
+  }
   if (o.code !== EXIT_CODES.OK) return failed;
   if (PE.parseEvidenceLine(text).ok) return { code: o.code, stdout: o.stdout };
   const block = PE.parseBlock(text);
@@ -3094,7 +3427,7 @@ if (require.main === module) {
     process.stderr.write('verify-evidence: internal error (' + errorLabel(err) + ')\n');
     outcome = { code: EXIT_CODES.REMOTE_FAILURE, stdout: '' };
   }
-  const settled = settleOutcome(outcome);
+  const settled = settleOutcome(outcome, isPublishRun(process.argv));
   if (settled.stdout !== '') process.stdout.write(settled.stdout);
   process.exitCode = settled.code;
 }

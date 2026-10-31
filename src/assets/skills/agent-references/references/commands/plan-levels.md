@@ -5,7 +5,7 @@
 At `standard` and `lean`, each row sets one phase's spawns. A phase with no row runs as written. A row only removes or merges agents.
 
 | Phase | standard, lean |
-|-------|----------------|
+|---|---|
 | 3 | Explore 2, multi-issue 3 |
 | 4 | skip |
 | 5 | Design 2 |
@@ -14,7 +14,7 @@ At `standard` and `lean`, each row sets one phase's spawns. A phase with no row 
 | 9 | skip |
 | 10 | Plan 1 |
 | 11 | skip |
-| 12 | Design 1 |
+| 12 | Architect 1 |
 
 ## Inputs
 

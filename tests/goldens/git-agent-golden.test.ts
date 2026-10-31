@@ -36,7 +36,7 @@ import { loadGolden, resolveAgentSource, resolveVariantOffSource } from '../help
  * never on its own to clear a red assertion: a baseline edited to match what the
  * artifact happens to be today pins nothing.
  */
-const GIT_AGENT_BYTES = 10_773
+const GIT_AGENT_BYTES = 10_174
 
 describe('golden: git agent source equality', () => {
   it('the resolved git agent is byte-equal to the golden fixture (AC-0.2)', () => {
@@ -104,7 +104,7 @@ describe('golden: git agent source equality', () => {
  * re-derives it from that fixture. It moves only in the fixture-only commit that
  * regenerates the golden, and `GIT_AGENT_BYTES` above does not move with it.
  */
-const GIT_AGENT_COMPLIANCE_OFF_BYTES = 9_128
+const GIT_AGENT_COMPLIANCE_OFF_BYTES = 8_589
 
 describe('golden: compliance-off git agent source equality (AC-16)', () => {
   const offText = resolveVariantOffSource('compliance-off', 'agents', 'git')

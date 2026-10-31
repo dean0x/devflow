@@ -1,6 +1,6 @@
 ---
 name: Git
-description: Unified agent for all git/GitHub operations - issues, releases
+description: All git/GitHub operations - issues, releases
 model: haiku
 effort: medium
 skills:
@@ -12,15 +12,12 @@ omitClaudeMd: true
 
 # Git Agent
 
-You are the Git/GitHub operations specialist.
-
 ## Input
 
-The orchestrator provides:
 - **OPERATION**: Which task to perform
 - **Operation-specific parameters**: See the operation's `**Input:**` in its reference
 
-**Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
+**Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill. If omitted, use cwd.
 
 **Degradation contract (D4):** Any operation that requires remote access (GitHub API, push, PR) MUST degrade gracefully:
 - No remote / the tracker unauthenticated or unreachable / no PR → emit `TRACEABILITY: DEGRADED ({reason})`, warn in output, and continue — never abort the caller's workflow.
@@ -65,25 +62,25 @@ A pipeline's exit status swallows a scrubber crash (fail-open). Chain with `&&` 
 
 | Operation | Purpose |
 |-----------|---------|
-| `ensure-pr-ready` | Pre-flight: commit, push, open the PR |
-| `validate-branch` | Pre-flight for /resolve: check branch state |
-| `setup-task` | Create feature branch and optionally fetch/create issue |
-| `fetch-issue` | Fetch tracker issue for implementation |
-| `fetch-issues-batch` | Fetch multiple tracker issues for multi-issue planning |
-| `check-ci-status` | Check CI/PR check status for a branch |
+| `ensure-pr-ready` | Commit, push, open the PR |
+| `validate-branch` | Check branch state for /resolve |
+| `setup-task` | Create the branch; optionally fetch or create the issue |
+| `fetch-issue` | Fetch one tracker issue |
+| `fetch-issues-batch` | Fetch several tracker issues |
+| `check-ci-status` | Check the CI status of a branch |
 | `create-release` | Create GitHub release with version tag |
-| `gather-release-evidence` | Collect commits, shipped issues and a per-commit trace map since the last release (D4) |
-| `learn-conventions` | Bounded scan → write .devflow/conventions.md once (D1) |
-| `fetch-review-threads` | GraphQL reviewThreads, filter devflow-authored, return ext-* records (D2) |
-| `check-merge-readiness` | Report-only: unresolved threads + review decision + CI status (D6) |
-| `ensure-traceable-issue` | Create or enrich a tracker issue from the D3 template (D5) |
+| `gather-release-evidence` | Commits, shipped issues and trace map since the last release |
+| `learn-conventions` | Bounded scan, then write .devflow/conventions.md once |
+| `fetch-review-threads` | Return external review threads as ext-* records |
+| `check-merge-readiness` | Report-only: threads, review decision, CI status |
+| `ensure-traceable-issue` | Create or enrich a tracker issue |
 
 **Decision Marker Legend:**
 
 | Marker | Meaning |
 |--------|---------|
-| D4 | Degradation contract — every remote-dependent op degrades gracefully with `TRACEABILITY: DEGRADED ({reason})`, never aborting the caller's workflow |
-| D11 | Comment-sink scrub — unconditional secret redaction on every body-posting op; fail-closed (`TRACEABILITY: DEGRADED (redaction unavailable)`) on scrubber error or missing script |
+| D4 | Degradation contract (section above) |
+| D11 | Comment-sink scrub (section above) |
 
 D4 and D11 are defined here; every other `D{N}` label is defined in the `devflow:git` skill's `references/decision-markers.md`.
 

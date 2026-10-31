@@ -1,31 +1,30 @@
 @define agent_roster():
 ### Confirmed agent roster
 
-The following agentType values are valid. Model tiers are shown for reference — OMIT `opts.model` in all `agent()` calls; each agent's frontmatter carries its own tier.
+Model tiers are for reference only; never pass `opts.model`.
 
 | agentType | Model tier | Role |
-|-----------|-----------|------|
-| Code | sonnet | Implements the plan and fixes review findings — the Code family is the ONLY one that writes code |
-| Fix | sonnet | Fixes the listed validation, alignment and QA failures — part of the Code family |
+|---|---|---|
+| Code | sonnet | Implements the plan and fixes review findings |
+| Fix | sonnet | Fixes the listed validation, alignment and QA failures |
 | Validate | haiku | Build / typecheck / lint / test — fast correctness gate |
 | Polish | sonnet | Reduces complexity, removes duplication, improves readability |
 | Harden | opus | 9-pillar self-review — deep structural analysis |
 | Evaluate | sonnet | Plan-fidelity / alignment — "was the plan implemented correctly?" |
 | Test | sonnet | Scenario-based acceptance tests against acceptance criteria |
-| Review | opus | Focus-parameterized code review — spawn ONE agent() per focus area |
-| Git | haiku | Git operations — branches, commits, merges, worktree management |
-| Synthesize | haiku | Summarizes and aggregates multi-agent outputs |
-| Knowledge | sonnet | Codebase exploration — feature knowledge base creation/update |
-| Design | opus | Architecture and design — plans, gap analysis, design review |
+| Review | opus | Focus-parameterized code review |
+| Git | haiku | Branches, commits, merges, worktree management |
+| Synthesize | haiku | Aggregates multi-agent outputs |
+| Design | opus | Gap analysis: tickets, critics, wave reads |
+| Architect | opus | Plans, anti-pattern review |
 @end
 
 @define agent_caveats():
 ### Agent caveats
 
-- **The Code family writes every fix** — Code for review findings, Fix for gate failures; no other agent type writes code. Finding-verification uses adversarial Review agent-style passes (§6.3 of design doc). Risk-assessment and tech-debt routing live in the post-code pipeline + escalation doctrine.
-- **Always omit `opts.model` with `agentType`.** Each agent honors its own frontmatter model tier; overriding it defeats the per-agent specialization.
-- **Review agents are focus-parameterized.** Each focus is a SEPARATE `agent()` call with `agentType: "Review"` and the focus baked into the prompt. Do NOT batch multiple focuses into one Review agent call — that defeats parallel specialization.
-- **Do not depend on agents enumerating their own skills.** Skills are loaded (spike F5 confirmed) but self-reporting is imperfect. Write agent prompts that give the agent full context directly.
+- **The Code family writes every fix** — Code for review findings, Fix for gate failures; no other agent type writes code. Finding verification uses adversarial Review passes.
+- **Review agents are focus-parameterized.** Make one `agent()` call with `agentType: "Review"` per focus, with the focus in the prompt. Never batch focuses into one Review call.
+- Give each agent its full context in its prompt.
 @end
 
 @export agent_roster

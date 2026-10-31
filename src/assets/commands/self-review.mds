@@ -1,13 +1,11 @@
 ---
-description: Self-review workflow - Polish agent (code clarity) then Harden agent (9-pillar quality gate)
+description: Polish (code clarity), then Harden (9-pillar quality gate)
 output-dir: dist/commands
 ---
 @import { knowledge_load, knowledge_writeback_after_load } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
 @import "./_partials/_settings.mds" as settings
 # Self-Review Command
-
-Run Polish agent and Harden agent sequentially on changed files for post-implementation quality refinement.
 
 ## Usage
 
@@ -36,18 +34,12 @@ Detect changed files and build context:
 
 {{decisions_load()}}
 <!-- curation:on -->
-Pass `DECISIONS_CONTEXT` to Harden agent — the compact index lists active ADR/PF entries; Harden agent uses `devflow:apply-decisions` to Read full entry bodies on demand. Known pitfalls help identify reintroduced issues, prior decisions help validate architectural consistency. (Polish agent does not consume decisions — it operates at code-shape level and Harden agent runs after to catch any architectural drift.)
+Pass `DECISIONS_CONTEXT` to the Harden agent only. The Polish agent takes no decisions.
 
 <!-- curation:end -->
 {{knowledge_load()}}
 
 Pass `FEATURE_KNOWLEDGE_RULES` to Harden agent.
-
-<!-- curation:on -->
-**Extract:** FILES_CHANGED (list), TASK_DESCRIPTION (string), DECISIONS_CONTEXT (string, optional), FEATURE_KNOWLEDGE (string, optional), FEATURE_KNOWLEDGE_RULES (string, optional), HEAD_BEFORE (40-hex SHA)
-<!-- curation:off -->
-**Extract:** FILES_CHANGED (list), TASK_DESCRIPTION (string), FEATURE_KNOWLEDGE (string, optional), FEATURE_KNOWLEDGE_RULES (string, optional), HEAD_BEFORE (40-hex SHA)
-<!-- curation:end -->
 
 ### Phase 1: Polish agent (Code Refinement)
 
@@ -61,8 +53,6 @@ Agent(subagent_type="Polish", run_in_background=false):
 FILES_CHANGED: {files_changed}
 Polish and refine the code for clarity and consistency while preserving functionality.
 Commit any improvements with a conventional-commit message."
-
-**Wait for completion.** Polish agent commits changes directly.
 
 ### Phase 2: Harden agent (9-Pillar Quality Gate)
 
@@ -88,7 +78,7 @@ Follow devflow:apply-decisions to scan DECISIONS_CONTEXT and Read full ADR/PF bo
 <!-- curation:end -->
 Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE. Skip if (none)."
 
-**Wait for completion.** Extract: STATUS (PASS|FIXED|BLOCKED) from the `### Status` line
+Extract: STATUS (PASS|FIXED|BLOCKED) from the `### Status` line
 
 ### Phase 3: Conditional Validation
 
@@ -142,45 +132,15 @@ Display summary:
 
 {{knowledge_writeback_after_load()}}
 
-## Architecture
-
-/self-review (orchestrator)
-│
-├─ Phase 0: Context gathering
-│  ├─ Git diff for changed files
-<!-- curation:on -->
-│  ├─ Record HEAD_BEFORE
-│  └─ Read index.md → DECISIONS_CONTEXT
-<!-- curation:off -->
-│  └─ Record HEAD_BEFORE
-<!-- curation:end -->
-│
-├─ Phase 1: Polish agent
-│  └─ Code refinement (commits directly)
-│
-├─ Phase 2: Harden agent
-│  └─ 9-pillar quality gate (may fix and commit)
-│
-├─ Phase 3: Validate agent (conditional)
-│  └─ If HEAD moved: changed-only over HEAD_BEFORE..HEAD
-│
-└─ Phase 4: Report
-   └─ Display summary with pillar status
-
 ## Edge Cases
 
 | Case | Handling |
 |------|----------|
-| No changes | Report "No changes to review" and exit |
-| Polish agent finds nothing | Normal, continue to Harden agent |
 | Harden agent BLOCKED | Report blocking issue, halt workflow |
-| Validation fails | Report failures, halt |
-| Validate not PASS or FAIL | Report status and cause, halt |
 | Not in git repo | Report error, suggest running in git repo |
 
 ## Principles
 
 1. **Orchestration only** - Command spawns agents, doesn't do the work
-2. **Validation gate** - If Polish agent or Harden agent committed, the changes must pass validation
-3. **Honest reporting** - Display actual agent outputs
-4. **Fail fast** - Stop on BLOCKED or a Validate status other than PASS
+2. **Honest reporting** - Display actual agent outputs
+3. **Fail fast** - Stop on BLOCKED or a Validate status other than PASS

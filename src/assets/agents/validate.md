@@ -1,6 +1,6 @@
 ---
 name: Validate
-description: Runs build, typecheck, lint and test; reports pass or fail with failure details; never fixes.
+description: Runs build, typecheck, lint and test; reports pass or fail with details; never fixes.
 model: haiku
 effort: medium
 skills:
@@ -22,8 +22,6 @@ You run the project's validation commands and report the results; never fix code
 - **FILES_CHANGED**: List of modified files
 - **VALIDATION_SCOPE**: `full` | `changed-only` (a test-filter hint)
 - **GATE_LEVEL**, **BASE_SHA** (optional): see Lint pack.
-
-**Worktree Support**: with `WORKTREE_PATH`, follow the `devflow:worktree-support` skill.
 
 ## Validation Order
 

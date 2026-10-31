@@ -46,7 +46,7 @@ Listed in Claude Code's skill catalog. May auto-invoke based on description matc
 |-------|---------|------------|
 | `boundary-validation` | Boundary validation enforcement | None; a model may invoke it by description |
 | `gap-analysis` | Gap analysis for design plans — missing flows, edge cases, failure modes | Design |
-| `design-review` | Design review patterns — architectural feasibility, tradeoffs, alternatives | Design |
+| `design-review` | Design review patterns — architectural feasibility, tradeoffs, alternatives | Architect |
 | `dependency-research` | Research-before-building enforcement | None; a model may invoke it by description |
 | `test-driven-development` | RED-GREEN-REFACTOR cycle enforcement | Code |
 
@@ -119,7 +119,7 @@ Create in `src/assets/skills/skill-name/SKILL.md` (~120-150 lines):
 ```markdown
 ---
 name: skill-name
-description: "This skill should be used when..." with concrete trigger words (≤200 chars for a user-trigger skill, ≤90 for an agent-internal one)
+description: "This skill should be used when..." (user-trigger, ≤200 chars) or "Use when..." (agent-internal, ≤90 chars), with concrete trigger words
 user-invocable: false
 allowed-tools: Read, Grep, Glob, AskUserQuestion
 activation:
@@ -172,7 +172,7 @@ For additional examples and detection patterns:
 
 Skill descriptions appear in Claude Code's skill catalog and influence when Claude auto-invokes skills. Poorly written descriptions can cause Claude to treat the description itself as instructions, bypassing the actual SKILL.md flowchart.
 
-**Format**: Descriptions MUST start with `"This skill should be used when..."`.
+**Format**: A user-trigger skill description MUST start with `"This skill should be used when..."`. An agent-internal skill description MUST start with `"Use when..."`: the model loads it by name, so the short form keeps the trigger shape in fewer bytes. The reference-only skill is exempt, because the catalog never lists it.
 
 **Include**: Concrete trigger words -- tool names, error types, user phrases, file types, or review focus areas that signal when the skill is relevant.
 
@@ -184,8 +184,8 @@ Skill descriptions appear in Claude Code's skill catalog and influence when Clau
 
 | Bad (process summary) | Good (trigger-only) |
 |---|---|
-| "Standard review methodology providing the 6-step process and 3-category issue classification used by all review agents." | "This skill should be used when performing a code review (the 6-step process)." |
-| "Security vulnerability analysis patterns for code review. Detects injection flaws, authentication bypasses, insecure cryptography." | "This skill should be used when reviewing code for injection, auth or secrets flaws." |
+| "Standard review methodology providing the 6-step process and 3-category issue classification used by all review agents." | "Use when performing a code review (the 6-step process)." |
+| "Security vulnerability analysis patterns for code review. Detects injection flaws, authentication bypasses, insecure cryptography." | "Use when reviewing code for injection, auth or secrets flaws." |
 | "Enforce RED-GREEN-REFACTOR cycle during implementation. Write failing tests before production code." | "This skill should be used when implementing new features, fixing bugs, or writing new code. Enforces RED-GREEN-REFACTOR." |
 
 ## Progressive Disclosure Structure
@@ -203,20 +203,20 @@ src/assets/skills/skill-name/
 **What stays in SKILL.md** (always loaded):
 - Frontmatter (name, description, allowed-tools, activation)
 - Iron Law (non-negotiable principle)
-- When This Activates (trigger conditions)
+- Trigger conditions in the description; a When This Skill Activates section only where the description cannot hold them
 - Core categories with brief descriptions
-- 1-2 representative examples per category
+- One rule line per case; a short example only where a rule line cannot name the case
 - Severity guidelines table
 - Pointer to references/
 
 **What goes in references/** (loaded on demand):
-- Extended code violations beyond first 1-2 per category
+- Code examples of violations
 - Extended correct patterns
 - Language-specific variations
 - Detection grep/regex patterns
 - Full report templates, checklists, edge cases
 
-**Target metrics**: SKILL.md ~120-150 lines, code examples 15-25% of content, ~5KB token cost per activation.
+**Target metrics**: no fixed size. Cut by the rules of [Lean Prompts](lean-prompts.md): a skill that an agent preloads, or loads for each spawn, holds rules, not examples.
 
 **Generated references.** A skill's `references/` directory can also receive files the build emits. `devflow:git` is the one skill that does: `npm run build:mds` compiles the `.mds` reference modules in `src/assets/mds/` into `dist/skills/git/references/**`, and `devflow init` overlays that tree onto the installed skill directory. Generated files are never written into `src/`, and the overlay converges rather than merges — a file under `references/tracker/**` or `references/pr/**` that the build manifest does not name is moved to the install backup folder and named on the next install, so a shadowed skill cannot substitute its own mechanics. `references/pr/` (the eight PR-host operation bodies) converges the same way `references/tracker/` does. A Git spawn loads exactly one operation reference: `tracker/{provider}/{op}.md`, `pr/{op}.md` or, for `learn-conventions`, the named document in the references root. Each holds the operation's contract and its mechanics. Every install carries the whole manifest of its compliance switch — every provider's `references/tracker/**` and `references/pr/**` — whatever the machine's provider, because a repository can select any provider. With compliance off, the manifest omits the 16 operation files of the posting operations, and the overlay prunes them from `pr/` and `tracker/`. Four cross-cutting documents — `decision-markers.md`, `learn-conventions.md`, `publication-gate.md` and `trust-rule.md` — are generated into the references root under every provider too. With compliance off, `publication-gate.md` is not among them. That root is overlaid but never pruned: the overlay leaves the hand-authored files that devflow ships beside the generated ones (`github-api.md`, `patterns.md`, …) as they are, and a retired cross-cutting document keeps its installed copy until the skill directory is replaced. A file that devflow did not ship is not left in place. An install moves it to `~/.devflow/install-backups/` and names it in the output. Three files are the exception: a compliance-off install removes `publication-gate.md`, `github-posting.md` (hand-authored, the GitHub posting recipes, installed with compliance on only) and `implement-evidence-asks.md` (in `devflow:agent-references`) by exact name.
 

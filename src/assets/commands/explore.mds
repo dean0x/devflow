@@ -1,13 +1,11 @@
 ---
-description: Explore codebase with structured analysis and optional feature knowledge creation
+description: Explore codebase with structured analysis; optionally build feature knowledge
 output-dir: dist/commands
 ---
 @import { knowledge_writeback } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
 @import "./_partials/_settings.mds" as settings
 # Explore Command
-
-Explore a codebase area by spawning parallel agents for flow tracing, dependency mapping, and pattern analysis. Findings are synthesized into structured output with file:line references, with optional feature knowledge created as a byproduct.
 
 ## Usage
 
@@ -25,10 +23,7 @@ What follows `/explore` is bound once, here. Every later step names it `COMMAND_
 $ARGUMENTS
 </command-input>
 
-`COMMAND_INPUT` is one of:
-- Area description: "how does the auth system work"
-- Flow question: "trace the request lifecycle"
-- Empty: use conversation context
+An empty `COMMAND_INPUT` means: use the conversation context.
 
 ## Phases
 
@@ -46,10 +41,10 @@ $ARGUMENTS
 
 {{decisions_load()}}
 <!-- curation:on -->
-The orchestrator uses `DECISIONS_CONTEXT` locally when framing exploration — prior decisions and pitfalls suggest specific areas to investigate. Follow `devflow:apply-decisions` to Read full entry bodies on demand. **Do NOT pass `DECISIONS_CONTEXT` to Explore sub-agents** — decisions context stays in the orchestrator, not in the investigation workers.
+Use `DECISIONS_CONTEXT` locally to frame the exploration. Follow `devflow:apply-decisions` to Read full entry bodies on demand. **Do NOT pass `DECISIONS_CONTEXT` to Explore sub-agents** — decisions context stays in the orchestrator, not in the investigation workers.
 
 <!-- curation:end -->
-**No up-front feature knowledge load** — explore investigation workers read code directly to avoid confirmation bias. Feature knowledge is only created as a write-back at the end, after exploration is complete.
+**No up-front feature knowledge load** — explore investigation workers read code directly to avoid confirmation bias.
 
 ### Phase 2: Orient
 
@@ -125,7 +120,7 @@ Set FEATURE_KNOWLEDGE_STATUS = created (if agent spawned) or skipped.
 
 ## Worktree Support
 
-If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktree workflows), pass it through to all spawned agents. Each agent's "Worktree Support" section handles path resolution.
+If the orchestrator receives a `WORKTREE_PATH` context, pass it through to all spawned agents.
 
 ## Output
 
@@ -138,46 +133,12 @@ Structured exploration findings with concrete code references:
 - Patterns (recurring conventions, design decisions observed)
 - Key Insights (non-obvious findings, surprises, potential concerns)
 
-## Architecture
-
-```
-/explore (orchestrator)
-│
-<!-- curation:on -->
-├─ Phase 1: Load Decisions (Orchestrator-Local)
-<!-- curation:off -->
-├─ Phase 1: Resolve Settings
-<!-- curation:end -->
-│
-├─ Phase 2: Orient
-│  └─ Skim agent (codebase overview)
-│
-├─ Phase 3: Parallel exploration
-│  └─ 2-3 Explore agents (flow, dependency, pattern) in single message
-│
-├─ Phase 4: Synthesize
-│  └─ Synthesize agent aggregates findings in exploration mode
-│
-├─ Phase 5: Present findings with drill-down offer
-│
-└─ Phase 6: Suggest feature knowledge creation (conditional)
-   └─ Knowledge agent write-back (if user accepts and no existing feature knowledge)
-```
-
 ## Principles
 
 1. **Structure over browsing** - Every claim must cite file:line references
-2. **Parallel execution** - All explorers run simultaneously for speed
-<!-- curation:on -->
-3. **Knowledge-informed** - Prior decisions guide where to look; NO pre-loaded feature knowledge in sub-agents (avoids confirmation bias)
-<!-- curation:off -->
-3. **Knowledge-informed** - NO pre-loaded feature knowledge in sub-agents (avoids confirmation bias)
-<!-- curation:end -->
-4. **User-driven depth** - Present findings, then offer drill-down into specific areas
 
 ## Error Handling
 
 - If Skim agent returns no relevant files: report "No files found matching exploration scope"
 - If all explorers error: report partial findings from any that succeeded, note gaps
 - If an explorer errors: continue with remaining results, note the gap
-- If feature knowledge creation fails: log failure, report exploration results normally

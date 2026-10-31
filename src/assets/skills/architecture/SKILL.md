@@ -1,138 +1,62 @@
 ---
 name: architecture
-description: This skill should be used when reviewing code for SOLID or layering issues.
+description: Use when reviewing code for SOLID or layering issues.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---
 
 # Architecture Patterns
 
-Domain expertise for software architecture and design pattern analysis. Full bibliography: `references/sources.md`.
+Detection patterns for architecture and design review.
 
 ## Iron Law
 
-> **SEPARATION OF CONCERNS IS NON-NEGOTIABLE** [1][2]
+> **Separation of concerns is non-negotiable.**
 >
 > Every module has one reason to change. Every layer has clear boundaries. Every dependency
-> points in one direction. Parnas (1972): decompose by information hiding, not by task.
-> Violations compound into unmaintainable systems. [1][19]
+> points in one direction. Decompose by information hiding, not by task (Parnas, 1972).
+> Violations compound into unmaintainable systems.
 
----
+## SOLID Violations
 
-## SOLID Violations [2]
+- **SRP**: one class, one reason to change. Violation: UserController handles HTTP, validation, DB and email. Fix: inject UserService and UserValidator.
+- **OCP**: extend without modifying. Violation: `if (type === 'credit') ... else if (type === 'paypal')`. Fix: strategy pattern, a new payment is a new class.
+- **LSP**: subtypes must be substitutable and cannot strengthen preconditions. A subclass that throws where the parent does not (`ReadOnlyStorage.write()` throws) is a violation. Fix: segregated interfaces (Readable, Writable).
+- **ISP**: no forced unused implementations (`interface Worker { work(); eat(); sleep(); }` forces a Robot to implement `eat()`). Fix: split the interface.
+- **DIP**: depend on abstractions. Violation: `private db = new PostgresDatabase()` in a service. Fix: constructor injection of a repository interface.
 
-**SRP** — One class, one reason to change. [1][2][8]
-```
-VIOLATION: UserController handles HTTP + validation + DB + email
-CORRECT:   Inject UserService, UserValidator — each class has one reason to change
-```
+## Coupling Issues
 
-**OCP** — Extend without modifying. [2]
-```
-VIOLATION: if (type === 'credit') ... else if (type === 'paypal') ...
-CORRECT:   Strategy pattern — new payment = new class, existing code unchanged
-```
+- **Tight coupling**: direct instantiation (`new DatabaseService()` inside a method), the tightest coupling form. It cannot be mocked or swapped. Inject through the constructor.
+- **Circular dependencies**: A imports B, B imports A. Extract the shared concern or use events.
+- **Feature envy / Law of Demeter**: `order.customer.profile.contact.email` knows too much. Behavior belongs to the data owner (`order.getTotal()`).
 
-**LSP** — Subtypes must be substitutable. [3] Liskov & Wing (1994): subtype cannot strengthen preconditions. Throwing where parent doesn't throw is a violation.
-```
-VIOLATION: ReadOnlyStorage extends FileStorage { write() { throw new Error(...) } }
-CORRECT:   Segregated interfaces (Readable, Writable) — compile-time, not runtime
-```
+## Layering Violations
 
-**ISP** — No forced unused implementations. [2]
-```
-VIOLATION: interface Worker { work(); eat(); sleep(); }  // Robot forced to implement eat()
-CORRECT:   interface Workable { work(): void; }  — implement only what you support
-```
+Dependency Rule (Clean Architecture): source dependencies point inward only.
 
-**DIP** — Depend on abstractions, not concretions. [2][18] Fowler (2004): constructor injection is the cleanest form. [18]
-```typescript
-// VIOLATION: class OrderService { private db = new PostgresDatabase(); }
-// CORRECT:   class OrderService { constructor(private repo: OrderRepository) {} }
-```
+- **Skipping layers**: a controller queries the database directly. Go Controller → Service → Repository.
+- **Leaky abstractions**: infrastructure details in the domain (`_mongoId`, `__v` on a domain `User`). Map them in the repository.
+- **Wrong direction**: the domain imports infrastructure. Ports (Hexagonal Architecture) define what the core needs; adapters implement them.
 
----
+## Modularity Issues
 
-## Coupling Issues [8][17]
-
-Stevens, Myers & Constantine (1974): content coupling (direct instantiation) is the tightest and worst form. [8]
-
-**Tight Coupling** [8][18]: Direct instantiation — can't mock, can't swap.
-```
-VIOLATION: class ReportGenerator { generate() { new DatabaseService().query(...) } }
-CORRECT:   Inject dependencies via constructor
-```
-
-**Circular Dependencies** [19]: A imports B, B imports A. Extract shared concern or use events.
-
-**Feature Envy** [21] / **Law of Demeter** [17]: `order.customer.profile.contact.email` — knows too much.
-```
-VIOLATION: OrderProcessor computes order.customer.profile.total
-CORRECT:   order.getTotal() — behavior belongs to the data owner
-```
-
----
-
-## Layering Violations [5][7][10]
-
-Clean Architecture (Martin, 2017) Dependency Rule: source code dependencies can only point inward. [5]
-
-**Skipping Layers**: Controller directly accessing database. [5][7]
-```typescript
-// VIOLATION: Controller → DB (skips service)
-const user = await db.query('SELECT...', [req.params.id]);
-// CORRECT: Controller → Service → Repository [5][7]
-const user = await this.userService.findById(req.params.id);
-```
-
-**Leaky Abstractions**: Infrastructure details in domain. [9]
-```
-VIOLATION: interface User { id: string; _mongoId: ObjectId; __v: number; }
-CORRECT:   interface User { id: string; name: string; }  — map in repository [7]
-```
-
-**Wrong Direction**: Domain must not import infrastructure. [5][10] Hexagonal Architecture (Cockburn, 2005): ports define what core needs; adapters implement them. [10]
-
----
-
-## Modularity Issues [1][9]
-
-**Deep vs Shallow Modules** (Ousterhout, 2018): deep module = simple interface, rich implementation. Shallow = more complexity exposed than hidden. [9]
-
-**God Class** [1][6]: Splits into bounded contexts. Warning signs: 500+ lines, `*Manager`, `*Processor`, 7+ constructor parameters.
-
-**Inappropriate Intimacy** [17][21]: `a.b().c()` chains — use "tell, don't ask."
-
----
+- **Deep vs shallow modules**: a deep module has a simple interface over a rich implementation. A shallow module exposes more complexity than it hides.
+- **God class**: split into bounded contexts. Signs: 500+ lines, `*Manager`, `*Processor`, 7+ constructor parameters.
+- **Inappropriate intimacy**: `a.b().c()` chains. Tell, don't ask.
 
 ## Severity Guidelines
 
 | Severity | Examples |
 |----------|----------|
-| **CRITICAL** | Circular dependencies, domain depends on infrastructure, god class 1000+ lines [5][19] |
-| **HIGH** | SOLID violations in core logic, tight coupling between services, leaky abstractions [2][8] |
-| **MEDIUM** | Dependencies not injected, minor layering violations, missing interfaces [18] |
+| **CRITICAL** | Circular dependencies, domain depends on infrastructure, god class 1000+ lines |
+| **HIGH** | SOLID violations in core logic, tight coupling between services, leaky abstractions |
+| **MEDIUM** | Dependencies not injected, minor layering violations, missing interfaces |
 | **LOW** | Naming issues, minor organization, missing architecture docs |
-
----
-
-## Architecture Principles Reference
-
-| Principle | Violation Sign | Source | Fix |
-|-----------|----------------|--------|-----|
-| SRP | Multiple reasons to change | [1][2] | Extract classes |
-| OCP | Modifying to add features | [2] | Strategy pattern |
-| LSP | Subclass throws "not supported" | [3] | Composition + segregated interfaces |
-| ISP | Unused interface methods | [2] | Split interfaces |
-| DIP | `new ConcreteClass()` in business | [2][18] | Inject via constructor |
-| Law of Demeter | `a.b().c()` chains | [17] | Tell, don't ask |
-| Deep Modules | Shallow abstractions | [9] | Encapsulate complexity |
-
----
 
 ## Extended References
 
 - `references/sources.md` — Full bibliography (25 sources)
-- `references/patterns.md` — Extended correct patterns with citations [2][3][5][7][10][18]
-- `references/violations.md` — Extended violations with citations [1][2][3][8][17][19][21]
+- `references/patterns.md` — Extended correct patterns
+- `references/violations.md` — Extended violations
 - `references/detection.md` — Grep patterns and bash commands for automated detection

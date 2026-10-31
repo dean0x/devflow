@@ -7,23 +7,15 @@ allowed-tools: Bash, Read, Grep, Glob
 
 # Git & GitHub Patterns
 
-Unified skill for safe git operations, atomic commits, honest PR descriptions, and GitHub API interactions. Used by the Code agent and Git agent.
+Safe git operations, atomic commits, honest PR descriptions, and GitHub API calls.
 
 ## Iron Law
 
-> **EVERY COMMIT TELLS AN HONEST, ATOMIC STORY** [1][3]
+> **Every commit tells an honest, atomic story.**
 >
 > Each commit captures one logical change with a message that explains *what* changed
 > and *why*, not just *how*. Atomic commits make history reviewable, bisectable, and
 > revertable. Never bundle unrelated changes. Never write vague messages.
-
----
-
-## When This Skill Activates
-
-Any `git` or `gh` operation: staging, commits, branches, pull requests, rebases, issues, releases.
-
----
 
 ## Safety
 
@@ -79,11 +71,7 @@ git reset HEAD~1         # Undo commit, keep unstaged
 
 See `references/patterns.md` for extended recovery and stash workflows.
 
----
-
 ## Commits
-
-> **ONE LOGICAL CHANGE PER COMMIT, HONESTLY DESCRIBED**
 
 ### Message Format
 
@@ -131,8 +119,6 @@ EOF
 2. **By Type**: Source code, tests, docs, config separately
 3. **By Relationship**: Files that change together for single logical purpose
 
----
-
 ## Pull Requests
 
 ### Title Format
@@ -158,8 +144,6 @@ EOF
 | Large | 500-1000 | Recommend splitting |
 | Very Large | > 1000 | **WARN**: Split into smaller PRs |
 
----
-
 ## Sensitive File Detection
 
 ### Never Commit These Patterns
@@ -181,15 +165,11 @@ Block commits containing:
 
 See `references/detection.md` for full `check_for_secrets()` function.
 
----
-
 ## GitHub API
 
 > **RESPECT RATE LIMITS OR FAIL GRACEFULLY** — at `X-RateLimit-Remaining` < 10 STOP the fan-out and report `THROTTLED` (D4); 1-2s between calls. Throttling and releases: `references/github-api.md`; posting steps, where installed: `references/github-posting.md`.
 
 Naming conventions: `learn-conventions` writes `.devflow/conventions.md` from a bounded scan (≤50 branches, ≤20 tags, ≤30 PR titles) and is its single authority; delete that file to re-learn.
-
----
 
 ## Extended References
 

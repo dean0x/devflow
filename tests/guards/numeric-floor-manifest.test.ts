@@ -14,7 +14,10 @@
  * to whatever dist/agents/git.md grew into, and each guard would stay green while
  * asserting nothing but "the current size is the current size". A ceiling may be
  * LOWERED as the artifact shrinks — that is the ratchet tightening — and may never
- * be raised.
+ * be raised, with one exception: the compiled-size ceiling of one prompt file may rise
+ * when the bytes that a typical run reads in that build variant key fall by more, and the
+ * entry's description records the numbers for each key and the reason
+ * (docs/reference/lean-prompts.md, Rules for every target).
  *
  * This guard verifies, for both arrays:
  *   1. Each pattern still exists in the designated source file, at the recorded
