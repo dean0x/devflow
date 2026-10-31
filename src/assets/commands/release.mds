@@ -9,8 +9,6 @@ output-dir: dist/commands
 
 # Release Command
 
-Release the project using adaptive learned configuration. On first run, scans the codebase to detect the release process and stores it in `.release/RELEASE-FLOW.md`. Subsequent releases use the stored config, skipping discovery.
-
 ## Usage
 
 ```
@@ -27,12 +25,6 @@ What follows `/release` is bound once, here. Every later step names it `COMMAND_
 <command-input>
 $ARGUMENTS
 </command-input>
-
-`COMMAND_INPUT` is one of:
-- Explicit version: `v1.2.3` or `1.2.3`
-- Bump type: `patch`, `minor`, `major`
-- Flag: `--dry-run`
-- Empty: interactive mode (will ask for version)
 
 Parse from `COMMAND_INPUT`:
 - `VERSION`: explicit version string if present (strip leading `v`)
@@ -116,7 +108,7 @@ Skip credential files (`.env*`, `*credentials*`, `*secret*`, `*.key`). Max 20 fi
 
 Map RELEASE_SIGNALS to `.release/RELEASE-FLOW.md` with sections: Packages, Pre-release Checks, Changelog, Build & Test, Publish, Post-release.
 
-**Conventions naming:** Consult `.devflow/conventions.md` (the naming authority written by the Git `learn-conventions` operation) for version/tag/version-PR title conventions. When the branching model uses version PRs, follow the Version PR Titles convention recorded there; compliance defaults when the file is absent. When the repo uses a main+integration branching model, ship via a version PR per the recorded convention. Re-learn by deleting `.devflow/conventions.md` — the next Git `learn-conventions` call rewrites it.
+**Conventions naming:** Consult `.devflow/conventions.md` (the naming authority written by the Git `learn-conventions` operation) for version/tag/version-PR title conventions. When the branching model uses version PRs, follow the Version PR Titles convention recorded there; compliance defaults when the file is absent. When the repo uses a main+integration branching model, ship via a version PR per the recorded convention.
 
 Use AskUserQuestion for any gaps that cannot be inferred.
 
@@ -245,7 +237,7 @@ Post-release analysis for improvement opportunities. Present as suggested diffs 
 
 ## Worktree Support
 
-If the orchestrator receives a `WORKTREE_PATH` context, pass it through to all spawned agents. Each agent's "Worktree Support" section handles path resolution.
+If the orchestrator receives a `WORKTREE_PATH` context, pass it through to all spawned agents.
 
 ## Output
 
@@ -260,60 +252,10 @@ On completion:
 - Version files bumped
 - `.release/RELEASE-FLOW.md` created (first run only)
 
-## Architecture
-
-```
-/release (orchestrator)
-│
-├─ Phase 1: Load Config
-│  └─ Read .release/RELEASE-FLOW.md (learned) or proceed to detect (fresh)
-│
-├─ Phase 1b: Load Context
-<!-- curation:on -->
-│  └─ Load DECISIONS_CONTEXT and FEATURE_KNOWLEDGE for the agents that declare them
-<!-- curation:off -->
-│  └─ Load FEATURE_KNOWLEDGE for the agents that declare it
-<!-- curation:end -->
-│
-├─ Phase 2: Detect Release Process (first run only)
-│  └─ Tiered scan: package.json, CI workflows, git history
-│
-├─ Phase 3: Build Config (first run only)
-│  └─ Write .release/RELEASE-FLOW.md
-│
-├─ Phase 4: Pre-release Checks
-│  ├─ Validate agent (build + test)
-<!-- compliance:on -->
-│  ├─ Git agent: gather release evidence + trace map (dry run, or evidence policy required)
-<!-- compliance:off -->
-│  ├─ Git agent: gather the commit list (dry run, or evidence policy required)
-<!-- compliance:end -->
-│  └─ Write progress checkpoint
-│
-├─ Phase 5: Build Release Plan
-<!-- compliance:on -->
-│  ├─ Traceability: classify the trace map; record exceptions or halt (evidence policy required)
-<!-- compliance:end -->
-│  └─ Confirm with user before executing
-│
-├─ Phase 6: Execute Release
-<!-- compliance:on -->
-│  ├─ Version bumps → Changelog → Commit → Git agent (tag + release) → Back-link → Associate → Publish → Post-release
-<!-- compliance:off -->
-│  ├─ Version bumps → Changelog → Commit → Git agent (tag + release) → Publish → Post-release
-<!-- compliance:end -->
-│  └─ Progress checkpoints between each step
-│
-└─ Phase 7: Suggest Improvements
-   └─ Suggested diffs to RELEASE-FLOW.md (never auto-applied)
-```
-
 ## Principles
 
-1. **Learn once, reuse always** — discovery happens on first run; subsequent releases skip it
-2. **Config is data, not code** — structured config fields map to pre-defined operations, never raw shell commands
-3. **Checkpoint-resume** — progress file enables safe resume of interrupted releases
-4. **User confirms before execution** — release plan is presented for approval before any tags or commits
+1. **Config is data, not code** — structured config fields map to pre-defined operations, never raw shell commands
+2. **User confirms before execution** — release plan is presented for approval before any tags or commits
 
 ## Error Handling
 
