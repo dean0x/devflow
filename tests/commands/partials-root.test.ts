@@ -2,11 +2,16 @@
  * D-PROMPT-ROOT (#390, TP-21) — the compiled loaders read the repository's data
  * from the right root, whatever directory the session started in.
  *
+ * One step resolves both roots: `root_paths` (src/assets/commands/_partials/_docs_root.mds)
+ * runs `resolve-root.cjs` once per run and takes `{worktree}` and `{ledger}` from its
+ * answer. `docs_root`, `knowledge_root` and `decisions_locate` each expand it and add the
+ * fact their host needs.
+ *
  * `decisions_load` (src/assets/commands/_partials/_decisions.mds) reads the
- * curation index from the MAIN worktree's ledger, else the checkout's toplevel,
+ * curation index from `{ledger}`: the MAIN worktree's copy, else the checkout's toplevel,
  * else the start directory — the rule the curation hooks apply
  * (D-LEDGER-MAIN-WORKTREE), so a command reads the index the Curate agent
- * writes. `knowledge_load`/`knowledge_writeback` (_knowledge.mds) resolve the
+ * writes. `knowledge_load`/`knowledge_writeback` (_knowledge.mds) use `{worktree}`, the
  * checkout's toplevel, else the start directory: knowledge bases are committed
  * per branch. A write-back that follows a load in the same command
  * (`knowledge_writeback_after_load`) takes the `{worktree}` the load resolved.
@@ -20,12 +25,11 @@
  * index for itself any more (the Code agent's fallback is gone, #426), and
  * every expansion sits behind the `decisions_gate` sentence.
  *
- * The rule is prose an LLM follows around ONE git command. The test extracts that
- * command from every compiled command that carries the loader, runs it verbatim
- * from the root, a subdirectory and a linked worktree, and applies the rule the
- * prose states — so the command and the rule are proven to agree on real git
- * output. A known-bad probe runs the superseded cwd reading through the same
- * resolver and shows it misses.
+ * The rule is prose an LLM follows around ONE script command. The test extracts that
+ * command from every compiled command that carries a root step, runs it verbatim
+ * from the root, a subdirectory and a linked worktree, and applies the acceptance rule
+ * the prose states — so the command and the rule are proven to agree on real output.
+ * A known-bad probe runs the superseded cwd reading through the same rule and shows it misses.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execSync, spawnSync } from 'child_process';
@@ -42,6 +46,19 @@ const KNOWLEDGE_HEADING = '### Load Feature Knowledge';
 const WRITEBACK_HEADING = '### Feature Knowledge Write-Back (Conditional)';
 const DOCS_ROOT_LEAD = '**Docs root (D-DOCS-ROOT).**';
 
+/** The one command every root step runs. */
+const ROOT_COMMAND = 'node "$HOME/.devflow/scripts/resolve-root.cjs" "{start}"; echo "exit=$?"';
+
+/** The sentence that makes the step run once per run. */
+const ONCE_PER_RUN = 'Once per run: if this run already resolved the roots, reuse them.';
+
+/** What the prose says to do with any answer but the three accepted lines. */
+const FALLBACK_SENTENCE = 'Otherwise both are the start directory.';
+
+const SOURCE_DIR = path.resolve(import.meta.dirname, '..', '..', 'src', 'assets');
+const SCRIPTS_DIR = path.join(SOURCE_DIR, 'scripts');
+const PARTIALS_DIR = path.join(SOURCE_DIR, 'commands', '_partials');
+
 /** The section of `text` that starts at `heading`, up to the next `### ` heading. */
 function sectionOf(text: string, heading: string): string {
   const at = text.indexOf(heading);
@@ -51,14 +68,11 @@ function sectionOf(text: string, heading: string): string {
   return heading + (next === -1 ? rest : rest.slice(0, next));
 }
 
-/** Named collector: the one `git -C "{start}" ...` line inside a section's bash fence. */
-function collectGitCommand(section: string): string | null {
-  const fence = /```bash\n(git -C "\{start\}" [^\n]+)\n```/.exec(section);
+/** Named collector: the one root command line inside a section's bash fence. */
+function collectRootCommand(section: string): string | null {
+  const fence = /```bash\n(node "\$HOME\/\.devflow\/scripts\/resolve-root\.cjs" [^\n]+)\n```/.exec(section);
   return fence?.[1] ?? null;
 }
-
-/** The one command every knowledge root block runs. */
-const KNOWLEDGE_ROOT_COMMAND = 'git -C "{start}" rev-parse --show-toplevel';
 
 /**
  * Named collector: how a command's write-back gets the checkout root, and what is wrong with it.
@@ -68,11 +82,11 @@ const KNOWLEDGE_ROOT_COMMAND = 'git -C "{start}" rev-parse --show-toplevel';
 function collectWritebackRootDefects(text: string): string[] {
   const writebackAt = text.indexOf(WRITEBACK_HEADING);
   const loadAt = text.indexOf(KNOWLEDGE_HEADING);
-  const command = collectGitCommand(sectionOf(text, WRITEBACK_HEADING));
+  const command = collectRootCommand(sectionOf(text, WRITEBACK_HEADING));
   if (loadAt !== -1 && loadAt < writebackAt) {
     return command === null ? [] : ['the write-back repeats the root the load step resolved'];
   }
-  return command === KNOWLEDGE_ROOT_COMMAND ? [] : ['a write-back with no load step before it does not resolve the root'];
+  return command === ROOT_COMMAND ? [] : ['a write-back with no load step before it does not resolve the root'];
 }
 
 /**
@@ -87,32 +101,41 @@ const AFTER_ROOT_LOAD_HOSTS: readonly string[] = ['implement.md'];
  * carries none, and must resolve the same root with its docs-root step before the load section.
  */
 function collectKnowledgeRootDefects(file: string, text: string): string[] {
-  const command = collectGitCommand(sectionOf(text, KNOWLEDGE_HEADING));
+  const command = collectRootCommand(sectionOf(text, KNOWLEDGE_HEADING));
   if (!AFTER_ROOT_LOAD_HOSTS.includes(file)) {
-    return command === KNOWLEDGE_ROOT_COMMAND ? [] : [`${file}: the load step does not resolve the root`];
+    return command === ROOT_COMMAND ? [] : [`${file}: the load step does not resolve the root`];
   }
   const out: string[] = [];
   if (command !== null) out.push(`${file}: the load step repeats the root the docs-root step resolved`);
   const docsAt = text.indexOf(DOCS_ROOT_LEAD);
-  const docsCommand = collectGitCommand(sectionOf(text, DOCS_ROOT_LEAD));
-  if (docsAt === -1 || docsAt > text.indexOf(KNOWLEDGE_HEADING) || docsCommand !== KNOWLEDGE_ROOT_COMMAND) {
+  const docsCommand = collectRootCommand(sectionOf(text, DOCS_ROOT_LEAD));
+  if (docsAt === -1 || docsAt > text.indexOf(KNOWLEDGE_HEADING) || docsCommand !== ROOT_COMMAND) {
     out.push(`${file}: no docs-root step resolves the root before the load step`);
   }
   return out;
 }
 
-/** Run a compiled command line with `{start}` bound to `start`; stdout, or null on failure. */
-function runFromStart(commandLine: string, start: string, env: NodeJS.ProcessEnv = process.env): string | null {
-  const out = spawnSync('bash', ['-c', commandLine.replace('{start}', '$1'), '_', start], { encoding: 'utf-8', env });
-  return out.status === 0 ? out.stdout.replace(/\n$/, '') : null;
+/** The scratch home whose `.devflow/scripts` is the source scripts folder: the path a prompt's command names. */
+function homeWithScripts(home: string): string {
+  const devflow = path.join(home, '.devflow');
+  fs.mkdirSync(devflow, { recursive: true });
+  const link = path.join(devflow, 'scripts');
+  if (!fs.existsSync(link)) fs.symlinkSync(SCRIPTS_DIR, link, 'dir');
+  return home;
 }
 
-/** What git before 2.31 prints first for the loader's call: the unknown flag, echoed back. */
+/** Run a compiled command line with `{start}` bound to `start`; its stdout without the last newline. */
+function runFromStart(commandLine: string, start: string, env: NodeJS.ProcessEnv): string {
+  const out = spawnSync('bash', ['-c', commandLine.replace('{start}', '$1'), '_', start], { encoding: 'utf-8', env });
+  return out.stdout.replace(/\n$/, '');
+}
+
+/** What git before 2.31 prints first for the ledger call: the unknown flag, echoed back. */
 const PATH_FORMAT_ECHO = '--path-format=absolute';
 
 /** The hooks' DF_LEDGER_ROOT for `cwd`, from resolve-project-root itself. */
 function hookLedgerRoot(cwd: string, env: NodeJS.ProcessEnv): string {
-  const helper = path.resolve(import.meta.dirname, '..', '..', 'src', 'assets', 'scripts', 'hooks', 'resolve-project-root');
+  const helper = path.join(SCRIPTS_DIR, 'hooks', 'resolve-project-root');
   const out = spawnSync(
     'bash',
     ['-c', 'source "$1"; df_resolve_roots "$2"; printf %s "$DF_LEDGER_ROOT"', '_', helper, cwd],
@@ -122,40 +145,33 @@ function hookLedgerRoot(cwd: string, env: NodeJS.ProcessEnv): string {
 }
 
 /**
- * The decisions rule, exactly as the compiled prose states it. `home` is the
- * reader's home directory: a main worktree AT home (a dotfiles repository) is
- * refused, because its `.devflow/` is devflow's machine root, which always
- * exists — the hooks' df_is_project_root refuses it the same way.
+ * The roots, exactly as the compiled prose states the accepted answer: the three lines
+ * `WORKTREE=<absolute path>`, `LEDGER=<absolute path>` and `exit=0` set `{worktree}` and `{ledger}`;
+ * any other output makes both the start directory.
  */
-function ledgerFrom(output: string | null, start: string, home: string = os.homedir()): string {
-  const lines = output === null ? [] : output.split('\n');
-  // A git before 2.31 echoes the flag back first: the toplevel is the line after it.
-  if (lines.length === 3 && lines[0] === PATH_FORMAT_ECHO && lines[1].startsWith('/')) return lines[1];
-  if (lines.length !== 2 || !lines.every(l => l.startsWith('/'))) return start;
-  const [top, common] = lines;
-  if (common.endsWith('/.git')) {
-    const main = common.slice(0, -'/.git'.length);
-    const atHome = fs.existsSync(home) && fs.realpathSync(main) === fs.realpathSync(home);
-    if (fs.existsSync(path.join(main, '.devflow')) && !atHome) return main;
-  }
-  return top;
+function rootsFrom(output: string, start: string): { worktree: string; ledger: string } {
+  const lines = output.split('\n');
+  const accepted = lines.length === 3
+    && /^WORKTREE=\/./.test(lines[0])
+    && /^LEDGER=\/./.test(lines[1])
+    && lines[2] === 'exit=0';
+  if (!accepted) return { worktree: start, ledger: start };
+  return { worktree: lines[0].slice('WORKTREE='.length), ledger: lines[1].slice('LEDGER='.length) };
 }
 
-/** The knowledge rule: the toplevel, else the start directory. */
-function worktreeFrom(output: string | null, start: string): string {
-  return output === null || output.includes('\n') || !output.startsWith('/') ? start : output;
-}
-
-// Real git fixtures and ~12 git spawns in all: budgeted past vitest's 5 s default.
+// Real git fixtures and ~14 script spawns in all: budgeted past vitest's 5 s default.
 describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, TP-21)', { timeout: 30_000 }, () => {
   let base: string;
+  let home: string;
   let main: string;
   let sub: string;
   let wt: string;
   let outside: string;
+  let env: NodeJS.ProcessEnv;
 
   beforeAll(() => {
     base = fs.mkdtempSync(path.join(os.tmpdir(), 'partials-root-'));
+    home = homeWithScripts(path.join(base, 'home'));
     main = path.join(base, 'main');
     fs.mkdirSync(main);
     execSync('git init -q', { cwd: main, stdio: 'pipe' });
@@ -168,6 +184,7 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
     outside = fs.mkdtempSync(path.join(os.tmpdir(), 'partials-root-nongit-'));
     main = fs.realpathSync(main);
     wt = fs.realpathSync(wt);
+    env = { ...process.env, HOME: home };
   });
 
   afterAll(() => {
@@ -188,75 +205,83 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
     );
   });
 
-  it('every compiled decisions loader makes ONE git call and reads index.md from the main ledger', () => {
+  it('the root step lives once, in _docs_root.mds, and the three root defines expand it', () => {
+    const read = (file: string) => fs.readFileSync(path.join(PARTIALS_DIR, file), 'utf-8');
+    const docsRoot = read('_docs_root.mds');
+    expect(docsRoot.split('resolve-root.cjs" "{start}"').length - 1, 'the one step carries the command').toBe(1);
+    expect(docsRoot).toContain(ONCE_PER_RUN);
+    for (const [file, define] of [
+      ['_docs_root.mds', 'docs_root'],
+      ['_knowledge.mds', 'knowledge_root'],
+      ['_decisions.mds', 'decisions_locate'],
+    ] as const) {
+      const source = read(file);
+      const at = source.indexOf(`@define ${define}():`);
+      expect(at, `${file} defines ${define}`).toBeGreaterThan(-1);
+      expect(source.slice(at, source.indexOf('\n@end', at)), `${define} expands the shared step`).toContain('{{root_paths()}}');
+    }
+    for (const file of ['_knowledge.mds', '_decisions.mds']) {
+      const source = read(file);
+      expect(source, `${file} copies none of the step`).not.toContain('resolve-root.cjs" "{start}"');
+      expect(source, `${file} imports the one define it needs`).toContain('@import { root_paths } from "./_docs_root.mds"');
+    }
+  });
+
+  it('every compiled decisions loader runs the root command and reads index.md from the ledger it names', () => {
     for (const file of decisionsHosts()) {
       const section = sectionOf(requireDistFile(file), DECISIONS_HEADING);
-      const command = collectGitCommand(section);
-      expect(command, `${file}: the resolution command`).toBe(
-        'git -C "{start}" rev-parse --path-format=absolute --show-toplevel --git-common-dir',
-      );
+      expect(collectRootCommand(section), `${file}: the resolution command`).toBe(ROOT_COMMAND);
       expect(section, `${file}: the index path`).toContain('`{ledger}/.devflow/curation/index.md`');
       expect(section, `${file}: the retired "no subprocess" claim`).not.toContain('No subprocess');
-      // The rule's three arms, in order.
-      const order = ['**The main worktree**', '**The toplevel**', '**The start directory itself**']
-        .map(arm => section.indexOf(arm));
-      expect(order.every(i => i > -1), `${file}: every arm stated`).toBe(true);
-      expect([...order].sort((a, b) => a - b), `${file}: arms in order`).toEqual(order);
-      // The main-worktree arm carries the hooks' HOME refusal (df_is_project_root).
-      const mainArm = section.slice(order[0], order[1]);
-      expect(mainArm, `${file}: the main arm refuses a main worktree at HOME`)
-        .toContain('once it is removed is not your home directory');
-      // A git before 2.31 falls back to the toplevel, as the hooks do (AC-15) —
-      // never to the start directory.
-      const topArm = section.slice(order[1], order[2]);
-      expect(topArm, `${file}: old git reads the toplevel after the echoed flag`)
-        .toContain('the line after the echoed flag');
-      const startArm = section.slice(order[2], section.indexOf('This is the rule'));
-      expect(startArm, `${file}: old git is not a start-directory case`).not.toContain('2.31');
+      expect(section, `${file}: the once-per-run sentence`).toContain(ONCE_PER_RUN);
+      expect(section, `${file}: the repository owns the ledger`)
+        .toContain("The decisions ledger belongs to the repository, not to one checkout: a linked worktree reads the main worktree's copy.");
+      expect(section, `${file}: the superseded git call`).not.toContain('--git-common-dir');
+      expect(section, `${file}: the fallback`).toContain(FALLBACK_SENTENCE);
     }
   });
 
   it('a git before 2.31 — the flag echoed back — reads the toplevel, as the hooks do', () => {
-    const command = collectGitCommand(sectionOf(requireDistFile(decisionsHosts()[0]), DECISIONS_HEADING));
+    const command = collectRootCommand(sectionOf(requireDistFile(decisionsHosts()[0]), DECISIONS_HEADING));
     expect(command).not.toBeNull();
     // Old git prints the unknown flag back as a line of its own, then the answers.
     const shim = fs.mkdtempSync(path.join(base, 'old-git-'));
     fs.writeFileSync(path.join(shim, 'git'), [
       '#!/bin/bash',
       'case "$*" in',
-      `  *--path-format=absolute*) printf '%s\\n' '${PATH_FORMAT_ECHO}' ${JSON.stringify(main)} '.git' ;;`,
-      `  *--show-toplevel*) printf '%s\\n' ${JSON.stringify(main)} ;;`,
+      `  *--path-format=absolute*) printf '%s\\n' '${PATH_FORMAT_ECHO}' ${JSON.stringify(wt)} '.git' ;;`,
+      `  *--show-toplevel*) printf '%s\\n' ${JSON.stringify(wt)} ;;`,
       '  *) exit 1 ;;',
       'esac',
     ].join('\n') + '\n');
     fs.chmodSync(path.join(shim, 'git'), 0o755);
-    const env = { ...process.env, PATH: `${shim}:${process.env.PATH ?? ''}` };
+    const shimmed = { ...env, PATH: `${shim}:${process.env.PATH ?? ''}` };
 
-    const output = runFromStart(command as string, sub, env);
-    expect(output?.split('\n')[0], 'the shim echoes the flag').toBe(PATH_FORMAT_ECHO);
-    expect(ledgerFrom(output, sub)).toBe(main);
-    expect(ledgerFrom(output, sub)).toBe(hookLedgerRoot(sub, env));
+    const output = runFromStart(command as string, sub, shimmed);
+    expect(rootsFrom(output, sub)).toEqual({ worktree: wt, ledger: wt });
+    expect(rootsFrom(output, sub).ledger).toBe(hookLedgerRoot(sub, shimmed));
   });
 
   it('the decisions command resolves the main ledger from the root, a subdirectory and a linked worktree', () => {
-    const command = collectGitCommand(sectionOf(requireDistFile(decisionsHosts()[0]), DECISIONS_HEADING));
+    const command = collectRootCommand(sectionOf(requireDistFile(decisionsHosts()[0]), DECISIONS_HEADING));
     expect(command).not.toBeNull();
     for (const [label, start] of [['root', main], ['subdir', sub], ['worktree', wt]] as const) {
-      expect(ledgerFrom(runFromStart(command as string, start), start), label).toBe(main);
+      expect(rootsFrom(runFromStart(command as string, start, env), start).ledger, label).toBe(main);
     }
-    // Outside a repository the command fails and the start directory stands.
-    expect(ledgerFrom(runFromStart(command as string, outside), outside)).toBe(outside);
+    // Outside a repository the start directory stands.
+    expect(rootsFrom(runFromStart(command as string, outside, env), outside).ledger).toBe(outside);
   });
 
   it('a dotfiles repository — main worktree at HOME — keeps the ledger in the linked worktree', () => {
     // HOME's `.devflow/` is the machine root and always exists, so the existence
-    // test alone would name HOME as the ledger. The hooks refuse it; so does the prose.
-    const command = collectGitCommand(sectionOf(requireDistFile(decisionsHosts()[0]), DECISIONS_HEADING));
+    // test alone would name HOME as the ledger. The hooks refuse it; so does the script.
+    const command = collectRootCommand(sectionOf(requireDistFile(decisionsHosts()[0]), DECISIONS_HEADING));
     expect(command).not.toBeNull();
-    expect(ledgerFrom(runFromStart(command as string, wt), wt, main), 'worktree').toBe(wt);
-    expect(ledgerFrom(runFromStart(command as string, main), main, main), 'root').toBe(main);
+    const dotfiles = { ...env, HOME: homeWithScripts(main) };
+    expect(rootsFrom(runFromStart(command as string, wt, dotfiles), wt).ledger, 'worktree').toBe(wt);
+    expect(rootsFrom(runFromStart(command as string, main, dotfiles), main).ledger, 'root').toBe(main);
     // Non-vacuity: the same worktree with a home elsewhere still resolves to main.
-    expect(ledgerFrom(runFromStart(command as string, wt), wt, outside)).toBe(main);
+    expect(rootsFrom(runFromStart(command as string, wt, env), wt).ledger).toBe(main);
   });
 
   it('every compiled knowledge loader resolves the checkout toplevel, and a write-back resolves it once', () => {
@@ -264,6 +289,7 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
       const section = sectionOf(requireDistFile(file), KNOWLEDGE_HEADING);
       expect(collectKnowledgeRootDefects(file, requireDistFile(file)), `${file} ${KNOWLEDGE_HEADING}`).toEqual([]);
       expect(section, `${file}: the retired "no git calls" claim`).not.toContain('no git calls');
+      expect(section, `${file}: the retired "one git call" claim`).not.toContain('One git call');
     }
     // The docs-root order holds in every variant key of an after-root host, not only in the on key.
     for (const file of AFTER_ROOT_LOAD_HOSTS) {
@@ -289,16 +315,16 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
     expect(followsLoad.length, 'no write-back follows a load').toBeGreaterThanOrEqual(1);
     expect(writebackHosts.length - followsLoad.length, 'no write-back stands alone').toBeGreaterThanOrEqual(1);
     const rootHost = knowledgeHosts(KNOWLEDGE_HEADING).find(f => !AFTER_ROOT_LOAD_HOSTS.includes(f));
-    const command = collectGitCommand(sectionOf(requireDistFile(rootHost as string), KNOWLEDGE_HEADING));
+    const command = collectRootCommand(sectionOf(requireDistFile(rootHost as string), KNOWLEDGE_HEADING));
     // Knowledge bases are per branch: a worktree reads its OWN toplevel, not main's.
     for (const [label, start, expected] of [['root', main, main], ['subdir', sub, main], ['worktree', wt, wt]] as const) {
-      expect(worktreeFrom(runFromStart(command as string, start), start), label).toBe(expected);
+      expect(rootsFrom(runFromStart(command as string, start, env), start).worktree, label).toBe(expected);
     }
-    expect(worktreeFrom(runFromStart(command as string, outside), outside)).toBe(outside);
+    expect(rootsFrom(runFromStart(command as string, outside, env), outside).worktree).toBe(outside);
   });
 
   it('known-bad probes: a write-back that repeats the load step root, and one with no root at all, are reported', () => {
-    const block = `\`\`\`bash\n${KNOWLEDGE_ROOT_COMMAND}\n\`\`\``;
+    const block = `\`\`\`bash\n${ROOT_COMMAND}\n\`\`\``;
     const load = `${KNOWLEDGE_HEADING}\n\n${block}\n\n`;
     const writeback = (body: string) => `${WRITEBACK_HEADING}\n\n${body}\n\n**Step 1**`;
     const repeated = 'the write-back repeats the root the load step resolved';
@@ -312,7 +338,7 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
   });
 
   it('known-bad probes: a load step with no root, an after-root load with no docs root before it, and one that repeats the root are reported', () => {
-    const block = `\`\`\`bash\n${KNOWLEDGE_ROOT_COMMAND}\n\`\`\``;
+    const block = `\`\`\`bash\n${ROOT_COMMAND}\n\`\`\``;
     const docsRoot = `${DOCS_ROOT_LEAD} Every path lives at the toplevel.\n\n${block}\n`;
     const steps = 'Step 1 — Read the index cache.\n';
     const noRoot = 'the load step does not resolve the root';
@@ -329,7 +355,7 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
     expect(collectKnowledgeRootDefects('implement.md', `${docsRoot}\n${KNOWLEDGE_HEADING}\n\n${block}\n\n${steps}`)).toEqual([`implement.md: ${repeated}`]);
     expect(collectKnowledgeRootDefects('implement.md', `${KNOWLEDGE_HEADING}\n\n${block}\n\n${steps}`)).toEqual([`implement.md: ${repeated}`, `implement.md: ${noDocsRoot}`]);
     // A docs root that runs another command does not resolve the root.
-    const otherRoot = docsRoot.replace(KNOWLEDGE_ROOT_COMMAND, 'git -C "{start}" rev-parse --git-dir');
+    const otherRoot = docsRoot.replace(ROOT_COMMAND, 'git -C "{start}" rev-parse --git-dir');
     expect(collectKnowledgeRootDefects('implement.md', `${otherRoot}\n${KNOWLEDGE_HEADING}\n\n${steps}`)).toEqual([`implement.md: ${noDocsRoot}`]);
   });
 
@@ -339,16 +365,17 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
     expect(hosts.length).toBeGreaterThanOrEqual(7);
     for (const file of hosts) {
       const section = sectionOf(requireDistFile(file), DOCS_ROOT_LEAD);
-      expect(collectGitCommand(section), `${file}: the docs-root command`).toBe('git -C "{start}" rev-parse --show-toplevel');
-      expect(section, `${file}: outside git the start directory stands`)
-        .toContain('If the command fails (outside a git repository), `{worktree}` is the start directory itself.');
+      expect(collectRootCommand(section), `${file}: the docs-root command`).toBe(ROOT_COMMAND);
+      expect(section, `${file}: outside git the start directory stands`).toContain(FALLBACK_SENTENCE);
+      expect(section, `${file}: a repo-relative path travels with its checkout`)
+        .toContain('A repo-relative docs path handed to an agent travels with a `WORKTREE_PATH` naming its checkout.');
     }
-    const command = collectGitCommand(sectionOf(requireDistFile(hosts[0]), DOCS_ROOT_LEAD));
+    const command = collectRootCommand(sectionOf(requireDistFile(hosts[0]), DOCS_ROOT_LEAD));
     // Docs artifacts are per checkout, like knowledge bases: a worktree writes its OWN.
     for (const [label, start, expected] of [['root', main, main], ['subdir', sub, main], ['worktree', wt, wt]] as const) {
-      expect(worktreeFrom(runFromStart(command as string, start), start), label).toBe(expected);
+      expect(rootsFrom(runFromStart(command as string, start, env), start).worktree, label).toBe(expected);
     }
-    expect(worktreeFrom(runFromStart(command as string, outside), outside)).toBe(outside);
+    expect(rootsFrom(runFromStart(command as string, outside, env), outside).worktree).toBe(outside);
   });
 
   it('the dynamic commands locate the main ledger by the same rule before authoring', () => {
@@ -357,46 +384,37 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
     expect(hosts.sort()).toEqual(['dynamic-build.md', 'dynamic-plan.md', 'dynamic-profile.md', 'dynamic-tickets.md'])
     for (const file of hosts) {
       const section = sectionOf(requireDistFile(file), AUTHORING_DECISIONS_HEADING)
-      expect(collectGitCommand(section), `${file}: the resolution command`).toBe(
-        'git -C "{start}" rev-parse --path-format=absolute --show-toplevel --git-common-dir',
-      )
+      expect(collectRootCommand(section), `${file}: the resolution command`).toBe(ROOT_COMMAND)
       expect(section, `${file}: the index path`).toContain('`{ledger}/.devflow/curation/index.md`')
       expect(section, `${file}: the retired checkout-relative read`).not.toContain('for the current worktree')
-      for (const arm of ['**The main worktree**', '**The toplevel**', '**The start directory itself**']) {
-        expect(section, `${file}: ${arm}`).toContain(arm)
-      }
+      expect(section, `${file}: the repository owns the ledger`).toContain("a linked worktree reads the main worktree's copy")
     }
-    const command = collectGitCommand(sectionOf(requireDistFile(hosts[0]), AUTHORING_DECISIONS_HEADING))
-    expect(ledgerFrom(runFromStart(command as string, wt), wt)).toBe(main)
+    const command = collectRootCommand(sectionOf(requireDistFile(hosts[0]), AUTHORING_DECISIONS_HEADING))
+    expect(rootsFrom(runFromStart(command as string, wt, env), wt).ledger).toBe(main)
   })
 
   it('release.md expands the decisions locate rule behind the curation gate and reads the index from the ledger it names', () => {
     // release.mds imports the two defines, so the compiled section is the define bodies.
-    const partial = fs.readFileSync(
-      path.resolve(import.meta.dirname, '..', '..', 'src', 'assets', 'commands', '_partials', '_decisions.mds'),
-      'utf-8',
-    )
-    const locate = /^@define decisions_locate\(\):\n([\s\S]*?)\n@end$/m.exec(partial)?.[1] ?? ''
-    expect(locate, 'the locate define body').toContain('**The main worktree**')
+    const partial = fs.readFileSync(path.join(PARTIALS_DIR, '_decisions.mds'), 'utf-8')
+    const locateSentence = /^@define decisions_locate\(\):\n(.*)\n/m.exec(partial)?.[1] ?? ''
+    expect(locateSentence, 'the locate define opens with the ownership sentence').toContain('The decisions ledger belongs to the repository')
     const gate = /^@define decisions_gate\(\):\n([\s\S]*?)\n@end$/m.exec(partial)?.[1] ?? ''
     expect(gate, 'the gate define body').toContain('`CURATION=off`')
     const release = sectionOf(requireDistFile('release.md'), RELEASE_CONTEXT_HEADING)
-    expect(release).toContain(locate)
+    expect(release).toContain(locateSentence)
     expect(release.indexOf(gate), 'the gate sentence comes first').toBeGreaterThan(-1)
-    expect(release.indexOf(gate), 'the gate precedes the locate call').toBeLessThan(release.indexOf(locate))
-    expect(release.indexOf(locate), 'the locate call precedes the index read')
+    expect(release.indexOf(gate), 'the gate precedes the locate step').toBeLessThan(release.indexOf(locateSentence))
+    expect(release.indexOf(locateSentence), 'the locate step precedes the index read')
       .toBeLessThan(release.indexOf('Read `{ledger}/.devflow/curation/index.md`.'))
-    expect(ledgerFrom(runFromStart(collectGitCommand(release) as string, wt), wt)).toBe(main)
+    expect(collectRootCommand(release.slice(release.indexOf(locateSentence)))).toBe(ROOT_COMMAND)
+    expect(rootsFrom(runFromStart(ROOT_COMMAND, wt, env), wt).ledger).toBe(main)
   })
 
   it('release.mds copies none of the locate text: it expands the define', () => {
-    const source = fs.readFileSync(
-      path.resolve(import.meta.dirname, '..', '..', 'src', 'assets', 'commands', 'release.mds'),
-      'utf-8',
-    )
+    const source = fs.readFileSync(path.join(SOURCE_DIR, 'commands', 'release.mds'), 'utf-8')
     expect(source).toContain('{{decisions_locate()}}')
     expect(source).not.toContain('The decisions ledger belongs to the repository')
-    expect(source).not.toContain('--path-format=absolute')
+    expect(source).not.toContain('resolve-root.cjs')
   })
 
   it('no agent source tells its agent to resolve the main-worktree ledger for itself, except Skim\'s TL;DR read', () => {
@@ -410,10 +428,25 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
 
   it('known-bad probe: reading from cwd misses the ledger from a subdirectory and a worktree', () => {
     // The superseded loaders used the start directory as the root. The same
-    // resolver, handed no command output, reproduces that reading — and it lands
+    // acceptance rule, handed no answer, reproduces that reading — and it lands
     // on neither the main ledger nor the toplevel.
-    expect(ledgerFrom(null, sub)).not.toBe(main);
-    expect(ledgerFrom(null, wt)).not.toBe(main);
-    expect(worktreeFrom(null, sub)).not.toBe(main);
+    expect(rootsFrom('', sub).ledger).not.toBe(main);
+    expect(rootsFrom('', wt).ledger).not.toBe(main);
+    expect(rootsFrom('', sub).worktree).not.toBe(main);
+  });
+
+  it('known-bad probes: any answer but the three accepted lines makes both roots the start directory', () => {
+    const answer = `WORKTREE=${main}\nLEDGER=${main}\nexit=0`;
+    expect(rootsFrom(answer, sub)).toEqual({ worktree: main, ledger: main });
+    for (const bad of [
+      `WORKTREE=${main}\nLEDGER=${main}\nexit=4`,
+      `WORKTREE=${main}\nexit=0`,
+      `WORKTREE=${main}\nLEDGER=${main}\nextra\nexit=0`,
+      `WORKTREE=main\nLEDGER=${main}\nexit=0`,
+      `LEDGER=${main}\nWORKTREE=${main}\nexit=0`,
+      'node: command not found\nexit=127',
+    ]) {
+      expect(rootsFrom(bad, sub), bad).toEqual({ worktree: sub, ledger: sub });
+    }
   });
 });

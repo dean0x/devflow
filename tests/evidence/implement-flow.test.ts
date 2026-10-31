@@ -2115,7 +2115,7 @@ describe('#561: the re-validation base step passes the name through a file', () 
 })
 
 /** The checkout-root command Phase 1's docs root runs; the re-validation path runs the same one when Phase 1 does not. */
-const REVALIDATE_ROOT_COMMAND = 'git -C "{start}" rev-parse --show-toplevel'
+const REVALIDATE_ROOT_COMMAND = 'node "$HOME/.devflow/scripts/resolve-root.cjs" "{start}"; echo "exit=$?"'
 
 /** Named collector: whether the re-validation path resolves `{worktree}` before its first use, as Phase 1 does, when Phase 1 does not run. */
 function collectRevalidateRootDefects(revalidate: string): string[] {

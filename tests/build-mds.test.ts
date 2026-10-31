@@ -688,12 +688,16 @@ describe('decisions_load adoption in compiled knowledge command outputs', () => 
   // ledger and reads no index. Every one of the 14 hosts loads decisions behind it.
   // Named collector, shared by the live scan and the known-bad probe below.
   const GATE_SENTENCE = 'When the settings line says `CURATION=off`';
-  const LOCATE_CALL = 'rev-parse --path-format=absolute --show-toplevel --git-common-dir';
+  // The decisions step's own locate sentence, then the first root call after it: a docs or knowledge
+  // step earlier in the host can run the shared root call before the gate, which locates no ledger.
+  const LOCATE_STEP = 'The decisions ledger belongs to the repository';
+  const ROOT_CALL = 'resolve-root.cjs';
   const INDEX_READ = '/.devflow/curation/index.md`';
 
   function collectGateOrderProblems(basename: string, content: string): string[] {
     const gate = content.indexOf(GATE_SENTENCE);
-    const locate = content.indexOf(LOCATE_CALL);
+    const step = content.indexOf(LOCATE_STEP);
+    const locate = step === -1 ? -1 : content.indexOf(ROOT_CALL, step);
     const read = content.indexOf(INDEX_READ);
     if (gate === -1 || locate === -1 || read === -1) {
       return [`${basename}: missing ${[gate, locate, read].map((at, i) => (at === -1 ? ['gate', 'locate', 'read'][i] : null)).filter(Boolean).join(', ')}`];
