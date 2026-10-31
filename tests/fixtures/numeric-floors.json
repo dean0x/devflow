@@ -814,19 +814,19 @@
     },
     {
       "id": "command-bug-analysis-max",
-      "ceiling": 22591,
-      "pattern": "['bug-analysis', 'on', 22_591],",
+      "ceiling": 22404,
+      "pattern": "['bug-analysis', 'on', 22_404],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/bug-analysis.md, the curation-on build, in bytes. Measured 22,591 after the shared command partials were cut for #715, 22,827 after the shared root step was cut again for #683, 23,018 after the roots were resolved by one script call for #683, and 23,724 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (23,832 after the knowledge write-back filter and the index file name were restored for #675,23,824 after the decisions partial was condensed for #675, 23,994 after the knowledge partial was condensed for #675, 24,413 after the docs root was condensed for #675, 24,421 at #677, 24,452 at #652), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. It rose by 68 bytes to 24,489 at #677, because the scanner wait now names the file that sets the status: a run could read the wrong file and report a scan as completed. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/commands/bug-analysis.md, the curation-on build, in bytes. Measured 22,404 after the host text was cut for #718, 22,591 after the shared command partials were cut for #715, 22,827 after the shared root step was cut again for #683, 23,018 after the roots were resolved by one script call for #683, and 23,724 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (23,832 after the knowledge write-back filter and the index file name were restored for #675,23,824 after the decisions partial was condensed for #675, 23,994 after the knowledge partial was condensed for #675, 24,413 after the docs root was condensed for #675, 24,421 at #677, 24,452 at #652), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. It rose by 68 bytes to 24,489 at #677, because the scanner wait now names the file that sets the status: a run could read the wrong file and report a scan as completed. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-bug-analysis-curation-off-max",
-      "ceiling": 19865,
-      "pattern": "['bug-analysis', 'off', 19_865],",
+      "ceiling": 19678,
+      "pattern": "['bug-analysis', 'off', 19_678],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/curation-off/commands/bug-analysis.md, the curation-off build, in bytes. Measured 19,865 after the shared command partials were cut for #715, 19,937 after the shared root step was cut again for #683, 20,049 after the roots were resolved by one script call for #683, and 20,130 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (20,184 after the knowledge write-back filter and the index file name were restored for #675,20,176 after the knowledge partial was condensed for #675, 20,595 after the docs root was condensed for #675, 20,603 at #677, 20,634 at #652), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. It rose by 68 bytes to 20,671 at #677, because the scanner wait now names the file that sets the status: a run could read the wrong file and report a scan as completed. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/curation-off/commands/bug-analysis.md, the curation-off build, in bytes. Measured 19,678 after the host text was cut for #718, 19,865 after the shared command partials were cut for #715, 19,937 after the shared root step was cut again for #683, 20,049 after the roots were resolved by one script call for #683, and 20,130 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (20,184 after the knowledge write-back filter and the index file name were restored for #675,20,176 after the knowledge partial was condensed for #675, 20,595 after the docs root was condensed for #675, 20,603 at #677, 20,634 at #652), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. It rose by 68 bytes to 20,671 at #677, because the scanner wait now names the file that sets the status: a run could read the wrong file and report a scan as completed. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-code-review-max",
@@ -846,19 +846,19 @@
     },
     {
       "id": "command-debug-max",
-      "ceiling": 16841,
-      "pattern": "['debug', 'on', 16_841],",
+      "ceiling": 15238,
+      "pattern": "['debug', 'on', 15_238],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/debug.md, the curation-on build, in bytes. Measured 16,841 after the shared command partials were cut for #715, 17,566 after the shared root step was cut again for #683, 17,701 after the roots were resolved by one script call for #683, and 18,340 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (18,394 after the knowledge write-back filter and the index file name were restored for #675,18,322 after the decisions partial was condensed for #675, 18,492 after the knowledge partial was condensed for #675, 18,875 after the tracker note kept its github condition for #675, 18,881 after the tracker partial was condensed, 19,885 after #472, 19,967 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/commands/debug.md, the curation-on build, in bytes. Measured 15,238 after the host text was cut for #718, 16,841 after the shared command partials were cut for #715, 17,566 after the shared root step was cut again for #683, 17,701 after the roots were resolved by one script call for #683, and 18,340 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (18,394 after the knowledge write-back filter and the index file name were restored for #675,18,322 after the decisions partial was condensed for #675, 18,492 after the knowledge partial was condensed for #675, 18,875 after the tracker note kept its github condition for #675, 18,881 after the tracker partial was condensed, 19,885 after #472, 19,967 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-debug-curation-off-max",
-      "ceiling": 14914,
-      "pattern": "['debug', 'off', 14_914],",
+      "ceiling": 13336,
+      "pattern": "['debug', 'off', 13_336],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/curation-off/commands/debug.md, the curation-off build, in bytes. Measured 14,914 after the shared command partials were cut for #715, 15,521 after the shared root step was cut again for #683, 15,577 after the roots were resolved by one script call for #683, and 15,591 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (15,645 after the knowledge write-back filter and the index file name were restored for #675,15,573 after the knowledge partial was condensed for #675, 15,956 after the tracker note kept its github condition for #675, 15,962 after the tracker partial was condensed, 16,966 after #472, 17,046 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/curation-off/commands/debug.md, the curation-off build, in bytes. Measured 13,336 after the host text was cut for #718, 14,914 after the shared command partials were cut for #715, 15,521 after the shared root step was cut again for #683, 15,577 after the roots were resolved by one script call for #683, and 15,591 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (15,645 after the knowledge write-back filter and the index file name were restored for #675,15,573 after the knowledge partial was condensed for #675, 15,956 after the tracker note kept its github condition for #675, 15,962 after the tracker partial was condensed, 16,966 after #472, 17,046 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-dynamic-build-max",
@@ -918,19 +918,19 @@
     },
     {
       "id": "command-explore-max",
-      "ceiling": 11077,
-      "pattern": "['explore', 'on', 11_077],",
+      "ceiling": 9455,
+      "pattern": "['explore', 'on', 9_455],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/explore.md, the curation-on build, in bytes. Measured 11,077 after the shared command partials were cut for #715, 11,551 after the shared root step was cut again for #683, 11,686 after the roots were resolved by one script call for #683, and 12,325 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (12,379 after the knowledge write-back filter and the index file name were restored for #675,12,307 after the decisions partial was condensed for #675, 12,477 after the knowledge partial was condensed for #675, 12,866 after #472, 12,944 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/commands/explore.md, the curation-on build, in bytes. Measured 9,455 after the host text was cut for #718, 11,077 after the shared command partials were cut for #715, 11,551 after the shared root step was cut again for #683, 11,686 after the roots were resolved by one script call for #683, and 12,325 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (12,379 after the knowledge write-back filter and the index file name were restored for #675,12,307 after the decisions partial was condensed for #675, 12,477 after the knowledge partial was condensed for #675, 12,866 after #472, 12,944 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-explore-curation-off-max",
-      "ceiling": 9167,
-      "pattern": "['explore', 'off', 9_167],",
+      "ceiling": 7690,
+      "pattern": "['explore', 'off', 7_690],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/curation-off/commands/explore.md, the curation-off build, in bytes. Measured 9,167 after the shared command partials were cut for #715, 9,523 after the shared root step was cut again for #683, 9,579 after the roots were resolved by one script call for #683, and 9,593 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (9,647 after the knowledge write-back filter and the index file name were restored for #675,9,575 after the knowledge partial was condensed for #675, 9,964 after #472, 10,040 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/curation-off/commands/explore.md, the curation-off build, in bytes. Measured 7,690 after the host text was cut for #718, 9,167 after the shared command partials were cut for #715, 9,523 after the shared root step was cut again for #683, 9,579 after the roots were resolved by one script call for #683, and 9,593 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (9,647 after the knowledge write-back filter and the index file name were restored for #675,9,575 after the knowledge partial was condensed for #675, 9,964 after #472, 10,040 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-implement-max",
@@ -966,35 +966,35 @@
     },
     {
       "id": "command-release-max",
-      "ceiling": 21346,
-      "pattern": "['release', 'on', 21_346],",
+      "ceiling": 19347,
+      "pattern": "['release', 'on', 19_347],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/release.md, the curation-on build, in bytes. Measured 21,346 after the shared command partials were cut for #715, 21,464 after the shared root step was cut again for #683, 21,599 after the roots were resolved by one script call for #683, and 22,297 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (22,405 after the knowledge write-back filter and the index file name were restored for #675,22,397 after the knowledge partial was condensed for #675, 22,816 after #677, 22,825 after #472, 22,903 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/commands/release.md, the curation-on build, in bytes. Measured 19,347 after the host text was cut for #718, 21,346 after the shared command partials were cut for #715, 21,464 after the shared root step was cut again for #683, 21,599 after the roots were resolved by one script call for #683, and 22,297 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (22,405 after the knowledge write-back filter and the index file name were restored for #675,22,397 after the knowledge partial was condensed for #675, 22,816 after #677, 22,825 after #472, 22,903 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-release-curation-off-max",
-      "ceiling": 18940,
-      "pattern": "['release', 'off', 18_940],",
+      "ceiling": 16965,
+      "pattern": "['release', 'off', 16_965],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/curation-off/commands/release.md, the curation-off build, in bytes. Measured 18,940 after the shared command partials were cut for #715, 19,012 after the shared root step was cut again for #683, 19,068 after the roots were resolved by one script call for #683, and 19,141 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (19,195 after the knowledge write-back filter and the index file name were restored for #675,19,187 after the knowledge partial was condensed for #675, 19,606 after #677, 19,609 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/curation-off/commands/release.md, the curation-off build, in bytes. Measured 16,965 after the host text was cut for #718, 18,940 after the shared command partials were cut for #715, 19,012 after the shared root step was cut again for #683, 19,068 after the roots were resolved by one script call for #683, and 19,141 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (19,195 after the knowledge write-back filter and the index file name were restored for #675,19,187 after the knowledge partial was condensed for #675, 19,606 after #677, 19,609 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-research-max",
-      "ceiling": 13059,
-      "pattern": "['research', 'on', 13_059],",
+      "ceiling": 11074,
+      "pattern": "['research', 'on', 11_074],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/research.md, the curation-on build, in bytes. Measured 13,059 after the shared command partials were cut for #715, 13,280 after the shared root step was cut again for #683, 13,471 after the roots were resolved by one script call for #683, and 14,177 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (14,231 after the knowledge write-back filter and the index file name were restored for #675,14,223 after the decisions partial was condensed for #675, 14,393 after the knowledge partial was condensed for #675, 14,812 after the docs root was condensed for #675, 14,894 after #472, 14,972 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/commands/research.md, the curation-on build, in bytes. Measured 11,074 after the host text was cut for #718, 13,059 after the shared command partials were cut for #715, 13,280 after the shared root step was cut again for #683, 13,471 after the roots were resolved by one script call for #683, and 14,177 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (14,231 after the knowledge write-back filter and the index file name were restored for #675,14,223 after the decisions partial was condensed for #675, 14,393 after the knowledge partial was condensed for #675, 14,812 after the docs root was condensed for #675, 14,894 after #472, 14,972 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-research-curation-off-max",
-      "ceiling": 10101,
-      "pattern": "['research', 'off', 10_101],",
+      "ceiling": 8233,
+      "pattern": "['research', 'off', 8_233],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/curation-off/commands/research.md, the curation-off build, in bytes. Measured 10,101 after the shared command partials were cut for #715, 10,158 after the shared root step was cut again for #683, 10,270 after the roots were resolved by one script call for #683, and 10,351 after the knowledge write-back filter and the index file name were restored for #675 (10,343 after the knowledge partial was condensed for #675, 10,762 after the docs root was condensed for #675, 10,838 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/curation-off/commands/research.md, the curation-off build, in bytes. Measured 8,233 after the host text was cut for #718, 10,101 after the shared command partials were cut for #715, 10,158 after the shared root step was cut again for #683, 10,270 after the roots were resolved by one script call for #683, and 10,351 after the knowledge write-back filter and the index file name were restored for #675 (10,343 after the knowledge partial was condensed for #675, 10,762 after the docs root was condensed for #675, 10,838 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-resolve-max",
@@ -1014,35 +1014,35 @@
     },
     {
       "id": "command-self-review-max",
-      "ceiling": 12891,
-      "pattern": "['self-review', 'on', 12_891],",
+      "ceiling": 11268,
+      "pattern": "['self-review', 'on', 11_268],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/self-review.md, the curation-on build, in bytes. Measured 12,891 after the shared command partials were cut for #715, 13,422 after the shared root step was cut again for #683, 13,557 after the roots were resolved by one script call for #683, and 14,255 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (14,309 after the knowledge write-back filter and the index file name were restored for #675,14,229 after the decisions partial was condensed for #675, 14,399 after the knowledge partial was condensed for #675, 15,201 at #695, 15,228 after #495; 15,691 after #472; 15,889 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/commands/self-review.md, the curation-on build, in bytes. Measured 11,268 after the host text was cut for #718, 12,891 after the shared command partials were cut for #715, 13,422 after the shared root step was cut again for #683, 13,557 after the roots were resolved by one script call for #683, and 14,255 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (14,309 after the knowledge write-back filter and the index file name were restored for #675,14,229 after the decisions partial was condensed for #675, 14,399 after the knowledge partial was condensed for #675, 15,201 at #695, 15,228 after #495; 15,691 after #472; 15,889 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-self-review-curation-off-max",
-      "ceiling": 10811,
-      "pattern": "['self-review', 'off', 10_811],",
+      "ceiling": 9606,
+      "pattern": "['self-review', 'off', 9_606],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/curation-off/commands/self-review.md, the curation-off build, in bytes. Measured 10,811 after the shared command partials were cut for #715, 11,224 after the shared root step was cut again for #683, 11,280 after the roots were resolved by one script call for #683, and 11,353 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (11,407 after the knowledge write-back filter and the index file name were restored for #675,11,327 after the knowledge partial was condensed for #675, 12,129 at #695, 12,156 after #495; 12,619 after #472; 12,801 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/curation-off/commands/self-review.md, the curation-off build, in bytes. Measured 9,606 after the host text was cut for #718, 10,811 after the shared command partials were cut for #715, 11,224 after the shared root step was cut again for #683, 11,280 after the roots were resolved by one script call for #683, and 11,353 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (11,407 after the knowledge write-back filter and the index file name were restored for #675,11,327 after the knowledge partial was condensed for #675, 12,129 at #695, 12,156 after #495; 12,619 after #472; 12,801 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-bug-analysis-compliance-off-max",
-      "ceiling": 22060,
-      "pattern": "['bug-analysis', 'compliance-off', 22_060],",
+      "ceiling": 21873,
+      "pattern": "['bug-analysis', 'compliance-off', 21_873],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/bug-analysis.md, the compliance-off build, in bytes. Measured 22,060 after the shared command partials were cut for #715, 22,296 after the shared root step was cut again for #683, 22,487 after the roots were resolved by one script call for #683, and 23,193 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (23,301 after the knowledge write-back filter and the index file name were restored for #675,23,293 after the decisions partial was condensed for #675, 23,463 after the knowledge partial was condensed for #675, 23,882 after the docs root was condensed for #675, 23,890 at #677, 24,107 at its first build), with no headroom. The rule sets no comparison with the all-on build. It rose by 68 bytes to 23,958 at #677, because the scanner wait now names the file that sets the status: a run could read the wrong file and report a scan as completed. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/bug-analysis.md, the compliance-off build, in bytes. Measured 21,873 after the host text was cut for #718, 22,060 after the shared command partials were cut for #715, 22,296 after the shared root step was cut again for #683, 22,487 after the roots were resolved by one script call for #683, and 23,193 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (23,301 after the knowledge write-back filter and the index file name were restored for #675,23,293 after the decisions partial was condensed for #675, 23,463 after the knowledge partial was condensed for #675, 23,882 after the docs root was condensed for #675, 23,890 at #677, 24,107 at its first build), with no headroom. The rule sets no comparison with the all-on build. It rose by 68 bytes to 23,958 at #677, because the scanner wait now names the file that sets the status: a run could read the wrong file and report a scan as completed. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-bug-analysis-both-off-max",
-      "ceiling": 19334,
-      "pattern": "['bug-analysis', 'both-off', 19_334],",
+      "ceiling": 19147,
+      "pattern": "['bug-analysis', 'both-off', 19_147],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE (#648, AC-33): dist/curation-compliance-off/commands/bug-analysis.md, the build with curation and compliance both off, in bytes. Measured 19,334 after the shared command partials were cut for #715, 19,406 after the shared root step was cut again for #683, 19,518 after the roots were resolved by one script call for #683, and 19,599 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (19,653 after the knowledge write-back filter and the index file name were restored for #675,19,645 after the knowledge partial was condensed for #675, 20,064 after the docs root was condensed for #675, 20,072 at #677, 20,203 at its first build), with no headroom. The rule sets no comparison with the other builds. It rose by 68 bytes to 20,140 at #677, because the scanner wait now names the file that sets the status: a run could read the wrong file and report a scan as completed. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE (#648, AC-33): dist/curation-compliance-off/commands/bug-analysis.md, the build with curation and compliance both off, in bytes. Measured 19,147 after the host text was cut for #718, 19,334 after the shared command partials were cut for #715, 19,406 after the shared root step was cut again for #683, 19,518 after the roots were resolved by one script call for #683, and 19,599 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (19,653 after the knowledge write-back filter and the index file name were restored for #675,19,645 after the knowledge partial was condensed for #675, 20,064 after the docs root was condensed for #675, 20,072 at #677, 20,203 at its first build), with no headroom. The rule sets no comparison with the other builds. It rose by 68 bytes to 20,140 at #677, because the scanner wait now names the file that sets the status: a run could read the wrong file and report a scan as completed. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-code-review-compliance-off-max",
@@ -1126,19 +1126,19 @@
     },
     {
       "id": "command-release-compliance-off-max",
-      "ceiling": 16248,
-      "pattern": "['release', 'compliance-off', 16_248],",
+      "ceiling": 14393,
+      "pattern": "['release', 'compliance-off', 14_393],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/release.md, the compliance-off build, in bytes. Measured 16,248 after the shared command partials were cut for #715, 16,366 after the shared root step was cut again for #683, 16,501 after the roots were resolved by one script call for #683, and 17,199 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (17,307 after the knowledge write-back filter and the index file name were restored for #675,17,299 after the knowledge partial was condensed for #675, 17,718 at #677, 17,721 at its first build), with no headroom. The rule sets no comparison with the all-on build. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/release.md, the compliance-off build, in bytes. Measured 14,393 after the host text was cut for #718, 16,248 after the shared command partials were cut for #715, 16,366 after the shared root step was cut again for #683, 16,501 after the roots were resolved by one script call for #683, and 17,199 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (17,307 after the knowledge write-back filter and the index file name were restored for #675,17,299 after the knowledge partial was condensed for #675, 17,718 at #677, 17,721 at its first build), with no headroom. The rule sets no comparison with the all-on build. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-release-both-off-max",
-      "ceiling": 13842,
-      "pattern": "['release', 'both-off', 13_842],",
+      "ceiling": 12011,
+      "pattern": "['release', 'both-off', 12_011],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE (#648, AC-33): dist/curation-compliance-off/commands/release.md, the build with curation and compliance both off, in bytes. Measured 13,842 after the shared command partials were cut for #715, 13,914 after the shared root step was cut again for #683, 13,970 after the roots were resolved by one script call for #683, and 14,043 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (14,097 after the knowledge write-back filter and the index file name were restored for #675,14,089 after the knowledge partial was condensed for #675, 14,508 at #677, 14,511 at its first build), with no headroom. The rule sets no comparison with the other builds. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE (#648, AC-33): dist/curation-compliance-off/commands/release.md, the build with curation and compliance both off, in bytes. Measured 12,011 after the host text was cut for #718, 13,842 after the shared command partials were cut for #715, 13,914 after the shared root step was cut again for #683, 13,970 after the roots were resolved by one script call for #683, and 14,043 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (14,097 after the knowledge write-back filter and the index file name were restored for #675,14,089 after the knowledge partial was condensed for #675, 14,508 at #677, 14,511 at its first build), with no headroom. The rule sets no comparison with the other builds. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-resolve-compliance-off-max",
