@@ -1267,6 +1267,22 @@
       "occurrences": 1,
       "sourceFile": "tests/guards/other-agents-sizes.test.ts",
       "description": "The Evaluate agent body, src/assets/agents/evaluate.md, in bytes. It is hand-authored, with one build. Every turn of every Evaluate spawn reads it (sonnet, one spawn per /implement alignment pass). Added by #718 (lean other targets) at 4,234, after the cut from 4,672."
+    },
+    {
+      "id": "debug-agent-body-max",
+      "ceiling": 9411,
+      "pattern": "['debug', 'on', 9_411],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/other-agents-sizes.test.ts",
+      "description": "The Debug agent body of the curation-on build, dist/agents/debug.md, in bytes. Every turn of every Debug spawn reads it (opus, four spawns per /bug-analysis run, one per focus). Added by #718 (lean other targets) at 9,411, after the cut from 11,206."
+    },
+    {
+      "id": "debug-agent-body-curation-off-max",
+      "ceiling": 9051,
+      "pattern": "['debug', 'off', 9_051],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/other-agents-sizes.test.ts",
+      "description": "The Debug agent body of the curation-off build, dist/curation-off/agents/debug.md, in bytes. Added by #718 (lean other targets) at 9,051, after the cut from 10,686."
     }
   ]
 }
