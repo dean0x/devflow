@@ -1283,6 +1283,22 @@
       "occurrences": 1,
       "sourceFile": "tests/guards/other-agents-sizes.test.ts",
       "description": "The Debug agent body of the curation-off build, dist/curation-off/agents/debug.md, in bytes. Added by #718 (lean other targets) at 9,051, after the cut from 10,686."
+    },
+    {
+      "id": "skim-body-max",
+      "ceiling": 6617,
+      "pattern": "['skim', 'on', 6_617],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/other-agents-sizes.test.ts",
+      "description": "The Skim agent body of the curation-on build, dist/agents/skim.md, in bytes. Every turn of every Skim spawn reads it (haiku; /explore, /plan and /research each spawn it). Added by #718 (lean other targets) at 6,617, after the cut from 7,708."
+    },
+    {
+      "id": "skim-body-curation-off-max",
+      "ceiling": 5495,
+      "pattern": "['skim', 'off', 5_495],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/other-agents-sizes.test.ts",
+      "description": "The Skim agent body of the curation-off build, dist/curation-off/agents/skim.md, in bytes. Added by #718 (lean other targets) at 5,495, after the cut from 6,586."
     }
   ]
 }
