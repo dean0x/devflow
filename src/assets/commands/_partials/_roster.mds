@@ -15,7 +15,6 @@ Model tiers are for reference only; never pass `opts.model`.
 | Review | opus | Focus-parameterized code review |
 | Git | haiku | Branches, commits, merges, worktree management |
 | Synthesize | haiku | Aggregates multi-agent outputs |
-| Knowledge | sonnet | Codebase exploration: feature knowledge base creation/update |
 | Design | opus | Gap analysis: tickets, critics, wave reads |
 | Architect | opus | Plans, anti-pattern review |
 @end
