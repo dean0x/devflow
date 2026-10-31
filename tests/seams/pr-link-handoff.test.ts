@@ -1021,7 +1021,7 @@ describe('ensure-pr-ready opens the PR (D-LINK-VERBATIM, D-COMMIT-EXPLICIT, D-PR
     need('a given base is checked by reading, written to a new file in a mktemp -d folder with the Write tool, and an empty or missing file opens no PR',
       ref.includes(`When \`BASE_BRANCH\` is given, check it first against the step-5a name check (${JUDGE_BY_READING}).`) &&
       ref.includes('Then Write `BASE_BRANCH` to a new file in a `mktemp -d` folder (`{name file}`).') &&
-      ref.includes('A failed `test -s` (an empty or missing file) ends with Status BLOCKED and no PR.'))
+      ref.includes('A failed `test -s` (an empty file, or none after a failed Write) ends with Status BLOCKED and no PR.'))
     // The 4a base, the 4c title and the 5a name each have a Write step.
     need('a failed Write is a missing value, never a shell write', ref.split(WRITE_FAILURE).length - 1 >= 3)
     need('the base reaches gh pr create only from the name file', ref.includes('`test -s "$F" && gh pr create … --base="$(cat -- "$F")"`') && (ref.match(/gh pr create[^\n`]*--base\S*/g) ?? []).every(call => call.endsWith('--base="$(cat')))
