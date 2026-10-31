@@ -20,7 +20,7 @@ Research before building. Check if a battle-tested solution exists before writin
 
 ## When This Skill Activates
 
-**Triggers** — creating or modifying code that:
+**Triggers** — creating or modifying utility or infrastructure code that:
 - Parses, formats, or validates data (dates, URLs, emails, UUIDs, etc.)
 - Implements common algorithms (sorting, diffing, hashing, encoding)
 - Wraps HTTP clients, retries, rate limiting, caching
@@ -28,51 +28,21 @@ Research before building. Check if a battle-tested solution exists before writin
 - Implements CLI argument parsing, logging, or configuration
 - Creates test utilities (mocking, fixtures, assertions)
 
-**Does NOT trigger** for:
-- Domain-specific business logic unique to this project
+**Does not trigger** for:
+- Domain-specific business logic unique to this project, where no generic solution could exist
 - Glue code connecting existing components
 - Trivial operations (< 5 lines, single-use)
 - Code that intentionally avoids external dependencies (e.g., zero-dep libraries)
-
----
 
 ## Research Process
 
 ### Phase 1: Need Analysis
 
-Before searching, define what you actually need:
-
-```
-Need: {one-sentence description of the capability}
-Constraints: {runtime, bundle size, license, zero-dep requirement}
-Must-haves: {non-negotiable requirements}
-Nice-to-haves: {optional features}
-```
+Before searching, write the need in one sentence, with its constraints (runtime, bundle size, license, zero-dep requirement), its must-haves and its nice-to-haves.
 
 ### Phase 2: Search
 
-Spawn an Explore subagent when you can spawn agents, to keep main session context clean; otherwise search directly, using the template's questions as your checklist.
-
-**Prompt template** for the Explore agent:
-
-```
-Agent(subagent_type="Explore"):
-"Research existing solutions for: {need description}
-
-Search for:
-1. npm/PyPI/crates packages that solve this (check package.json/requirements.txt for ecosystem)
-2. Existing utilities in this codebase (grep for related function names)
-3. Framework built-ins that already handle this
-
-For each candidate, find:
-- Package name and weekly downloads (if applicable)
-- Last publish date and maintenance status
-- Bundle size / dependency count
-- API surface relevant to our need
-- License compatibility
-
-Return top 3 candidates with pros/cons, or confirm nothing suitable exists."
-```
+Spawn an Explore subagent when you can spawn agents, to keep main session context clean; otherwise search directly. Search for packages in the project's ecosystem (npm/PyPI/crates; check package.json/requirements.txt), existing utilities in this codebase, and framework built-ins. For each candidate, find weekly downloads, last publish date and maintenance status, bundle size and dependency count, the API surface relevant to the need, and license. Return the top 3 candidates with pros and cons, or confirm nothing suitable exists.
 
 ### Phase 3: Evaluate
 
@@ -97,34 +67,10 @@ Choose one of four outcomes:
 | **Compose** | No single package fits, but 2-3 small ones combine well | Install multiple, write glue code |
 | **Build** | Nothing fits, or dependency cost exceeds value | Write custom, document why |
 
-**Document the decision** in a code comment at the usage site:
-
-```typescript
-// research: Adopted date-fns for date formatting (2M weekly downloads, 30KB)
-// research: Built custom — no package handles our specific wire format
-```
-
----
+**Document the decision** in a code comment at the usage site, for example `// research: Adopted date-fns for date formatting (2M weekly downloads, 30KB)` or `// research: Built custom — no package handles our specific wire format`.
 
 ## Anti-Patterns
 
-| Anti-Pattern | Correct Approach |
-|-------------|-----------------|
-| Adding a dependency for 5 lines of trivial code | Build — dependency overhead exceeds value |
-| Choosing the most popular package without checking fit | Evaluate API fit, not just popularity |
-| Wrapping a package so heavily it obscures the original | If wrapping > 50% of original API, reconsider |
-| Skipping research because "I know how to build this" | Research anyway — maintenance cost matters more than initial build |
-| Installing a massive framework for one utility function | Look for focused, single-purpose packages |
-
-## Scope Limiter
-
-This skill concerns **utility and infrastructure code** only:
-- Data transformation, validation, formatting
-- Network operations, retries, caching
-- CLI tooling, logging, configuration
-- Test utilities and helpers
-
-It does NOT apply to **domain-specific business logic** where:
-- The logic encodes unique business rules
-- No generic solution could exist
-- The code is inherently project-specific
+- Choosing the most popular package without checking fit: evaluate API fit, not just popularity.
+- Wrapping a package so heavily it obscures the original: if wrapping > 50% of the original API, reconsider.
+- Installing a massive framework for one utility function: look for focused, single-purpose packages.
