@@ -44,10 +44,10 @@ const OFF_VARIANT: Readonly<Record<Exclude<Build, 'on'>, OffVariantKey>> = {
 
 /** [command, build, ceiling in bytes]. Each row's text is the pattern its numeric-floors.json entry pins. */
 const COMMAND_MAX_BYTES: ReadonlyArray<readonly [string, Build, number]> = [
-  ['bug-analysis', 'on', 22_591],
-  ['bug-analysis', 'off', 19_865],
-  ['bug-analysis', 'compliance-off', 22_060],
-  ['bug-analysis', 'both-off', 19_334],
+  ['bug-analysis', 'on', 22_404],
+  ['bug-analysis', 'off', 19_678],
+  ['bug-analysis', 'compliance-off', 21_873],
+  ['bug-analysis', 'both-off', 19_147],
   ['code-review', 'on', 32_225],
   ['code-review', 'off', 30_609],
   ['code-review', 'compliance-off', 29_568],
