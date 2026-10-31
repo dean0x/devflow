@@ -3,24 +3,11 @@ description: Decision-preference profile distiller — mine past session transcr
 argument-hint: "[--dry-run]"
 output-dir: dist/commands
 ---
-@import { authoring_preamble, authoring_decisions } from "./_partials/_preamble.mds"
-@import "./_partials/_settings.mds" as settings
-{{authoring_preamble()}}
-
-<!-- curation:on -->
-### Settings line
-
-{{settings.settings_resolve()}}
-
-<!-- curation:end -->
-{{authoring_decisions()}}
----
-
 ## dynamic-profile — distill a decision-preference profile from past sessions
 
 This command spawns one Knowledge agent that reads past session history across all projects on this machine, finds the `AskUserQuestion` moments and the user's chosen answers, and writes a plain-prose preference profile to `~/.devflow/preference-profile.md`. `/devflow:dynamic-plan` reads the profile to pre-resolve design decisions that match established taste, so only new decisions reach the user.
 
-**This is a plain Agent spawn — not a Workflow.** No `Workflow` tool required. The agent does the reading and writing directly.
+**This is one plain Agent spawn, not a Workflow.** The agent does the reading and writing directly.
 
 ---
 
@@ -37,7 +24,7 @@ This command spawns one Knowledge agent that reads past session history across a
 d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"
 ```
 
-and use its one-line output. It depends on no other step, so run it in the same batch as the first command of this run. Pass it to the agent below as `CLAUDE_DIR`.
+and use its one-line output. Pass it to the agent below as `CLAUDE_DIR`.
 
 ---
 
@@ -55,7 +42,7 @@ Print what the agent would do (a summary of which paths under the resolved `{cla
 
 ### Agent task
 
-Spawn a single Knowledge agent with this task:
+The task for the one Knowledge agent:
 
 ```
 You are distilling a decision-preference profile from past session history.
@@ -97,14 +84,7 @@ If a section has low confidence, say so. The user will review and edit this file
 After writing, return: { path: "~/.devflow/preference-profile.md", patternCount: N, lowConfidenceCount: N }.
 ```
 
-Invoke the agent directly with the Agent tool (not via a Workflow):
-
-```js
-const result = await agent(
-  `<the task above>`,
-  { agentType: "Knowledge" }
-);
-```
+Spawn it with the Agent tool: `Agent(subagent_type="Knowledge")`, with the task above as the prompt.
 
 ---
 

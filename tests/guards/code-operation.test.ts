@@ -212,7 +212,7 @@ describe('every compiled Code-family spawn opens with its OPERATION (D-CODE-OPER
 
   it('the _preamble.mds usage example is unchanged and is not counted as a site', () => {
     expect(readFileSync(PREAMBLE_PATH, 'utf-8')).toContain('agent("your prompt here", { agentType: "Code" })')
-    for (const host of ['dynamic-plan.md', 'dynamic-profile.md', 'dynamic-tickets.md']) {
+    for (const host of ['dynamic-plan.md', 'dynamic-tickets.md']) {
       const text = requireDistFile(host)
       expect(text, `${host} carries the example`).toContain('agent("your prompt here", { agentType: "Code" })')
       expect(collectCodeSpawnSites(host, text), `${host}: the example is not a spawn`).toEqual([])

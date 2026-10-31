@@ -57,13 +57,23 @@ export const KNOWLEDGE_COMMAND_HOSTS = [
   'self-review',
 ] as const;
 
-/** The 4 dynamic-workflow command hosts (src/assets/commands/<name>.mds). */
+/** The 4 dynamic command hosts (src/assets/commands/<name>.mds); three author a Workflow, dynamic-profile does not. */
 export const DYNAMIC_COMMAND_HOSTS = [
   'dynamic-build',
   'dynamic-plan',
   'dynamic-profile',
   'dynamic-tickets',
 ] as const;
+
+/**
+ * The command hosts that load decisions behind the CURATION gate: every one but dynamic-profile,
+ * one plain Knowledge spawn that passes no DECISIONS_CONTEXT. Each carries a curation arm.
+ */
+export const DECISIONS_COMMAND_HOSTS: readonly string[] = [
+  ...KNOWLEDGE_COMMAND_HOSTS,
+  ...DYNAMIC_COMMAND_HOSTS.filter(h => h !== 'dynamic-profile'),
+  'release',
+];
 
 /** The release command host (src/assets/commands/release.mds). */
 export const RELEASE_COMMAND_HOSTS = ['release'] as const;
@@ -188,13 +198,13 @@ export const EVIDENCE_POLICY_PARTIAL_ADOPTERS = [
 
 /**
  * The hosts whose compiled text carries the `_partials/_settings.mds` block (#392,
- * D-SETTINGS-LINE): all 14 command hosts, each expanding `settings_resolve()` exactly
- * once, before the earliest of its consumers. The hosts import the partial themselves,
+ * D-SETTINGS-LINE): every command host but dynamic-profile (13), each expanding
+ * `settings_resolve()` exactly once, before the earliest of its consumers. The hosts import the partial themselves,
  * as alias imports; no partial does. Named as a set for the same reason as the rosters
  * above: the provider-scope guard allowlists the block's closed provider set in exactly
  * these files, and tests/commands/settings-partial.test.ts holds the set to the build.
  *
- * The block count (14) and the curation-off count (8) are test-local constants beside
+ * The block count (13) and the curation-off count (8) are test-local constants beside
  * their assertions, not manifest rows: a count held here would be a second place to
  * keep in step with this set.
  */
@@ -204,7 +214,6 @@ export const SETTINGS_BLOCK_HOSTS = [
   'debug',
   'dynamic-build',
   'dynamic-plan',
-  'dynamic-profile',
   'dynamic-tickets',
   'explore',
   'implement',
@@ -218,8 +227,8 @@ export const SETTINGS_BLOCK_HOSTS = [
 /**
  * The hosts whose curation-OFF build still carries the settings block: the ones with
  * a consumer other than curation (a compliance lens, a publication gate or a knowledge
- * write-back). The other six of SETTINGS_BLOCK_HOSTS (bug-analysis, dynamic-plan,
- * dynamic-profile, dynamic-tickets, release, research) only read the line for the
+ * write-back). The other five of SETTINGS_BLOCK_HOSTS (bug-analysis, dynamic-plan,
+ * dynamic-tickets, release, research) only read the line for the
  * decisions gate or a Skim spawn, so the block sits inside their curation-on arm.
  * Named as a set; the curation-off count (8) is a test-local constant beside its
  * assertion.
@@ -269,7 +278,7 @@ export const MDS_GENERATOR_HOSTS = [
  * same reason as every other roster here: a count stays green when one host
  * loses its arm and another gains one in the same commit.
  *
- * All 14 command hosts (each loads decisions, or hands them on, behind an arm)
+ * Every command host but dynamic-profile (13; each loads decisions, or hands them on, behind an arm)
  * and the twelve agent hosts that declare `DECISIONS_CONTEXT` (eleven, the three Code
  * variants and the two Design variants among them) or take the `CURATION` input (Skim). The Curate agent, `curate.md`, is hand-authored
  * and runs only when curation is on, so it has no variant. The assertions over
@@ -279,7 +288,7 @@ export const MDS_GENERATOR_HOSTS = [
  * after its arm goes) turns one of them red.
  */
 export const CURATION_VARIANT_HOSTS: readonly string[] = [
-  ...MDS_COMMAND_HOSTS.map(h => `commands/${h}`),
+  ...DECISIONS_COMMAND_HOSTS.map(h => `commands/${h}`),
   ...[
     'architect',
     'code',
