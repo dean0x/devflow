@@ -25,7 +25,7 @@
  *
  * Rows 17 to 19 of the table need the skill folder and are not in this file.
  *
- * Rows 20a to 20d extend the table with four sentences of Phases 9 to 11 that carry a fail-closed rule: the capture of
+ * Rows 18a to 18d extend the table with four sentences of Phases 9 to 11 that carry a fail-closed rule: the capture of
  * the Git agent's lines (the `TRACEABILITY: DEGRADED` lines among them), the Phase 9 stop arm, and the outcome of the
  * Phase 10 and Phase 11 pushes. Each is pinned as a WHOLE sentence (`whole`): the anchor is the sentence from its first
  * word to its full stop, and it must start a sentence and end one. A reworded sentence is no longer found, and a
@@ -245,7 +245,7 @@ const ROWS: readonly Row[] = [
     section: DECISIONS_LOAD,
   },
   {
-    no: '20a',
+    no: '18a',
     item: 'Phase 9 capture of PR_NUMBER, the uncommitted list and the DEGRADED lines',
     anchor:
       'Capture the `- **PR**: #{number}` line of its `### Branch` as `PR_NUMBER`, its `### Uncommitted files` list and its `TRACEABILITY: DEGRADED ({reason})` lines for the Phase 12 report.',
@@ -253,14 +253,14 @@ const ROWS: readonly Row[] = [
     whole: true,
   },
   {
-    no: '20b',
+    no: '18b',
     item: 'Phase 9 stop arm',
     anchor: 'If it returns `### Status: BLOCKED` or no PR number, report its reason to the user and stop at the report (Phase 12); Phases 10 and 11 do not run.',
     section: PHASE_9,
     whole: true,
   },
   {
-    no: '20c',
+    no: '18c',
     item: 'Phase 10 push outcome',
     anchor:
       'Any other result, a rejected non-fast-forward push included, records `TRACEABILITY: DEGRADED (ci push failed)` for the Phase 12 report, reports "CI status unknown — verify manually before merging" and proceeds to Phase 11 without waiting.',
@@ -268,7 +268,7 @@ const ROWS: readonly Row[] = [
     whole: true,
   },
   {
-    no: '20d',
+    no: '18d',
     item: 'Phase 11 push outcome',
     anchor: 'Any other result, a rejected non-fast-forward push included, does not block: record `TRACEABILITY: DEGRADED (evidence push failed)` for the Phase 12 report and run the script anyway.',
     section: PHASE_11,
@@ -281,12 +281,12 @@ const ROWS: readonly Row[] = [
  * value of the rule, and still differs from the sentence the row pins, so the row must report it as missing.
  */
 const REWORDED: Readonly<Record<string, string>> = {
-  '20a':
+  '18a':
     'Capture the `- **PR**: #{number}` line of its `### Branch` as `PR_NUMBER`, and its `### Uncommitted files` list and `TRACEABILITY: DEGRADED ({reason})` lines for the Phase 12 report.',
-  '20b': 'If it returns `### Status: BLOCKED` or no PR number, report its reason and stop at the Phase 12 report; Phases 10 and 11 do not run.',
-  '20c':
+  '18b': 'If it returns `### Status: BLOCKED` or no PR number, report its reason and stop at the Phase 12 report; Phases 10 and 11 do not run.',
+  '18c':
     'Any other result, a rejected non-fast-forward push included, records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and proceeds to Phase 11 without waiting.',
-  '20d': 'Any other result, a rejected non-fast-forward push included, does not block: record `TRACEABILITY: DEGRADED (evidence push failed)` and run the script anyway.',
+  '18d': 'Any other result, a rejected non-fast-forward push included, does not block: record `TRACEABILITY: DEGRADED (evidence push failed)` and run the script anyway.',
 }
 
 /**
@@ -429,7 +429,7 @@ describe('the never-cut items of /implement are in every compiled build, under t
         const text = readBuild(file)
         const rows = expectedRows(key)
         const wholeRows = rows.filter(r => r.whole === true)
-        expect(wholeRows.map(r => r.no), `${key} holds the four whole-sentence rows`).toEqual(['20a', '20b', '20c', '20d'])
+        expect(wholeRows.map(r => r.no), `${key} holds the four whole-sentence rows`).toEqual(['18a', '18b', '18c', '18d'])
         for (const row of wholeRows) {
           const reworded = REWORDED[row.no]
           expect(reworded, `row ${row.no} has a reworded probe text`).toBeDefined()
