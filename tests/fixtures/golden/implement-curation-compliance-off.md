@@ -35,7 +35,7 @@ Record the current branch name as `BASE_BRANCH`. Stop the run unless it matches 
 
 **Docs root (D-DOCS-ROOT).** Every `.devflow/docs/` path is `{worktree}/.devflow/docs/…`. A repo-relative docs path handed to an agent travels with a `WORKTREE_PATH` naming its checkout.
 
-Once per run: if this run already resolved the roots, reuse them. From the start directory (`WORKTREE_PATH` if provided, otherwise cwd) run
+Once per start directory (`WORKTREE_PATH` if provided, otherwise cwd), run from it:
 
 ```bash
 node "$HOME/.devflow/scripts/resolve-root.cjs" "{start}"; echo "exit=$?"

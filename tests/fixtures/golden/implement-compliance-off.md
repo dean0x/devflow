@@ -35,7 +35,7 @@ Record the current branch name as `BASE_BRANCH`. Stop the run unless it matches 
 
 **Docs root (D-DOCS-ROOT).** Every `.devflow/docs/` path is `{worktree}/.devflow/docs/…`. A repo-relative docs path handed to an agent travels with a `WORKTREE_PATH` naming its checkout.
 
-Once per run: if this run already resolved the roots, reuse them. From the start directory (`WORKTREE_PATH` if provided, otherwise cwd) run
+Once per start directory (`WORKTREE_PATH` if provided, otherwise cwd), run from it:
 
 ```bash
 node "$HOME/.devflow/scripts/resolve-root.cjs" "{start}"; echo "exit=$?"
@@ -162,11 +162,11 @@ Pass `COMPLIANCE_DIRECTIVE` to every Code and Fix spawn, on a line of its own.
 
 ### Load DECISIONS_CONTEXT
 
-When the settings line says `CURATION=off`, set `DECISIONS_CONTEXT` to `(none)` and skip this step, locating no ledger and reading no index.
+When the settings line says `CURATION=off`, set `DECISIONS_CONTEXT` to `(none)` and skip this step, reading no index.
 
 The decisions ledger belongs to the repository, not to one checkout: a linked worktree reads the main worktree's copy.
 
-Once per run: if this run already resolved the roots, reuse them. From the start directory (`WORKTREE_PATH` if provided, otherwise cwd) run
+Once per start directory (`WORKTREE_PATH` if provided, otherwise cwd), run from it:
 
 ```bash
 node "$HOME/.devflow/scripts/resolve-root.cjs" "{start}"; echo "exit=$?"
