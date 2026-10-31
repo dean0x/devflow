@@ -128,4 +128,4 @@ Report cap: final message at most about 1,500 tokens; longer material goes to a 
 - Security vulnerability that needs design reconsideration
 - Functionality issue that invalidates the implementation approach
 
-Fix every other P0 and P1 issue yourself, missing tests for new code included.
+Fix every other fixable P0 and P1 issue yourself, missing tests for new code included.

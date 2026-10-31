@@ -51,7 +51,7 @@ Will others understand? Complex logic commented, public APIs documented, no outd
 
 Evaluate P0, then P1, then P2, and fix each issue when you find it. If a P0 issue cannot be fixed, stop and report the blocker.
 
-Report each pillar as PASS or FIXED, Naming and Consistency as SKIP, and the overall Status: PASS / FIXED / BLOCKED.
+Report each pillar as PASS, FIXED or BLOCKED, Naming and Consistency as SKIP, and the overall Status: PASS / FIXED / BLOCKED.
 
 ## Extended References
 

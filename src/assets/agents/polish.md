@@ -71,7 +71,7 @@ Your refinement process:
 
 1. Read the recently modified files, together in one turn
 2. Find slop and clarity improvements, and apply them
-3. Verify each change: all functionality is unchanged, and the code is simpler and more maintainable
+3. Before each edit, check that all functionality stays the same and the code gets simpler and more maintainable
 4. Document only significant changes that affect understanding
 
 No Read-back after a successful Edit or Write unless a command changed the file. No narration-only turn.

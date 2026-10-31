@@ -21,9 +21,9 @@ The canonical source of architectural patterns and principles for consistent, hi
 
 1. **Functional Core, Imperative Shell** — Pure business logic, side effects at boundary
 2. **Explicit Error Handling** — Result types, no exceptions in business logic
-3. **Immutability by Default** — Return new objects, never mutate
+3. **Immutability by Default** — Return new objects, never mutate (copy before `.sort()`)
 4. **Dependency Injection** — All deps injected, nothing instantiated internally
-5. **Make Illegal States Unrepresentable** — Types enforce invariants at compile time; discriminated unions with exhaustive switches
+5. **Make Illegal States Unrepresentable** — Types enforce invariants at compile time; discriminated unions with exhaustive switches; each error variant carries its full context
 6. **Parse, Don't Validate** — Schema transforms at boundaries
 7. **Compose with pipes**, and clean up resources in `finally`
 
