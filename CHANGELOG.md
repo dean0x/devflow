@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `publish` never ends with empty stdout. A usage error, an internal error or a block the output gate refuses prints `TRACEABILITY: DEGRADED (evidence unavailable)` and exits 2.
   - `/implement`, `/resolve`, `/dynamic-build` and the `update-pr-evidence` Git operation use the script output and no longer restate the block layout.
   - `/dynamic-build` now reports a failed refresh as `TRACEABILITY: DEGRADED (evidence unavailable)`, the line the script prints. It was `(evidence refresh failed)`.
+- **The CI wait script tells `/implement` and `/resolve` what to do next** ([#683](https://github.com/dean0x/devflow/issues/683)).
+  - `ci-wait.cjs` takes two new options, `--waits` and `--fixes`: the waits and the Fix agents run so far. Give both or neither. Without them the output does not change.
+  - With them the script prints one more line, `NEXT=<wait|fix|proceed> SAY=<message>`. The script now holds the rules that the two prompts carried: the budget of 3 waits and 2 fixes, and the stop after a full wait that ends in a head mismatch or a missing workflow check. The prompt acts on the answer.
+  - The Fix agent spawn does not change. If the `NEXT=` line is missing or malformed, or the script exits with an error, the command reports "CI status unknown — verify manually before merging" and goes on.
+  - `/implement` and `/resolve` are smaller in every build. With curation and compliance on, `/implement` falls from 42,336 to 41,960 bytes and `/resolve` from 49,229 to 48,877 bytes.
 - **The `/implement` command prompt is about 12 % smaller** ([#675](https://github.com/dean0x/devflow/issues/675)).
   - With curation and compliance on, the compiled command falls from 49,275 to 43,478 bytes. The other three builds fall by about the same share.
   - No phase, gate or output contract changes. Phases 4 and 5 gain a halt. They stop when an agent returns a missing status or a status that no branch routes.
