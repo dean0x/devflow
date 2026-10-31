@@ -1,15 +1,11 @@
 ---
 name: compliance
-description: This skill should be used when reviewing code that handles PII, payments or health data.
+description: Use when reviewing code that handles PII, payments or health data.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---
 
 # Compliance Patterns
-
-<!-- Composition tokens (5): DEVFLOW_COMPLIANCE_SCOPE, DEVFLOW_COMPLIANCE_ACTIVE,
-     DEVFLOW_COMPLIANCE_MAPPING, DEVFLOW_COMPLIANCE_CHECKLIST, DEVFLOW_COMPLIANCE_REFERENCES.
-     Dynamic sections compose from frameworks/{id}/fragment.md at install time (C1: token-free shadows pass through). -->
 
 Regulatory compliance review for code that touches regulated data ${DEVFLOW_COMPLIANCE_SCOPE}. Use alongside `devflow:security` for complete coverage.
 
@@ -26,7 +22,7 @@ ${DEVFLOW_COMPLIANCE_ACTIVE}
 
 ## Scope Boundary
 
-Compliance covers regulatory-specific gaps: retention, erasure/data-subject rights, audit-trail completeness (actor/purpose fields), segregation of duties, framework mapping, IaC exposure. Do NOT re-raise security lens findings (injection, secret handling, authN/Z) — reference those via framework mapping only.
+Compliance covers regulatory-specific gaps: retention, erasure/data-subject rights, audit-trail completeness (actor/purpose fields), segregation of duties, framework mapping, IaC exposure. Do not re-raise security lens findings (injection, secret handling, authN/Z) — reference those via framework mapping only.
 
 **Lens only.** This skill shapes what a compliance review looks for in the diff or design. It does not decide how much evidence a change must carry: tracker links, test plans, approvals and release traces follow the repository's evidence policy. Never report a missing ticket, test plan or approval as a compliance finding.
 
@@ -36,61 +32,12 @@ If the diff/design has no regulated-data surface (no PII/PHI/payment fields, no 
 
 ## Control Categories
 
-### 1. Data Classification & Minimization
-```typescript
-// VULNERABLE: full SSN stored when only last-4 needed
-user.ssn = req.body.ssn;
-// COMPLIANT: store minimum; annotate purpose + retention
-user.ssnLast4 = req.body.ssn.slice(-4); // retention: 90d for verification
-```
-
-### 2. Sensitive Data in Logs & Errors
-```typescript
-// VULNERABLE: PII in structured log
-logger.info('login', { email, password, creditCard });
-// COMPLIANT: omit or mask regulated fields
-logger.info('login', { userId, ip });
-```
-
-### 3. Encryption In Transit & At Rest
-```typescript
-// VULNERABLE: plaintext PHI written to disk
-fs.writeFileSync('/data/patients.json', JSON.stringify(records));
-// COMPLIANT: encrypt before write; TLS enforced at transport
-await vault.encrypt(records, { key: 'phi-key', algo: 'AES-256-GCM' });
-```
-
-### 4. Audit Trails & Change Traceability
-```typescript
-// VULNERABLE: mutation with no audit entry; no segregation of duties
-await db.update('orders', { status: 'refunded' }, { id });
-// COMPLIANT: append-only audit before state change; actor ≠ approver
-await audit.append({ actor, action: 'refund', target: id, purpose, ts: Date.now() });
-await db.update('orders', { status: 'refunded' }, { id });
-```
-
-### 5. Retention & Erasure
-```typescript
-// VULNERABLE: PII stored with no deletion path
-await db.insert('user_pii', { userId, ssn, email });
-// COMPLIANT: TTL field + erasure handler registered at write time
-await db.insert('user_pii', { userId, ssn, email, retainUntil: addDays(90) });
-await erasure.register(userId, ['user_pii']);
-```
-
-### 6. Environments & IaC
-```hcl
-# VULNERABLE: public bucket, no encryption, no access logging
-resource "aws_s3_bucket" "data" { acl = "public-read" }
-# COMPLIANT: private, encrypted, logging enabled
-resource "aws_s3_bucket_acl" "data" { acl = "private" }
-resource "aws_s3_bucket_server_side_encryption_configuration" "data" {
-  rule { apply_server_side_encryption_by_default { sse_algorithm = "AES256" } }
-}
-resource "aws_s3_bucket_logging" "data" { target_bucket = var.audit_bucket_id }
-```
-
----
+1. **Data Classification & Minimization**: store the minimum the purpose needs (the last 4 digits, not the full SSN). Every stored field has a declared purpose and retention period.
+2. **Sensitive Data in Logs & Errors**: no PII/PHI/payment data in logs, errors or analytics events. Omit or mask regulated fields.
+3. **Encryption In Transit & At Rest**: encrypt regulated data before it is written, and enforce TLS 1.2+ in transit.
+4. **Audit Trails & Change Traceability**: every regulated mutation writes an append-only audit entry (actor, action, target, purpose, timestamp) before the state change. Segregation of duties: the actor is not the approver, and no one self-approves a regulated state change.
+5. **Retention & Erasure**: every stored regulated field has a retention limit and a deletion path, registered at write time.
+6. **Environments & IaC**: no public buckets or security groups, no unencrypted volumes or stores, no wildcard IAM, and access logging on.
 
 ## Severity
 
@@ -106,12 +53,7 @@ ${DEVFLOW_COMPLIANCE_MAPPING}
 ## Checklist
 
 - [ ] Frameworks in force are the ids your prompt names; their controls applied
-- [ ] No PII/PHI/payment data in logs, errors, or analytics events
-- [ ] Regulated data encrypted in transit (TLS 1.2+) and at rest
-- [ ] Every regulated mutation has an append-only audit entry (actor, purpose, timestamp)
-- [ ] All stored fields have a declared purpose, retention period, and deletion path
-- [ ] Segregation of duties enforced — no self-approval of regulated state changes
-- [ ] IaC scanned: no public buckets/SGs, no unencrypted volumes, no wildcard IAM
+- [ ] Each control category above checked against the diff or design
 ${DEVFLOW_COMPLIANCE_CHECKLIST}
 
 ## Extended References

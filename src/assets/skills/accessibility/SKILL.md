@@ -27,119 +27,52 @@ Reference for web accessibility (WCAG 2.2 AA compliance), keyboard navigation, s
 > Tab order, focus management, and keyboard shortcuts are not optional enhancements.
 > — WCAG 2.1 Principle 2 (Operable) [1]
 
-**Activates for**: interactive UI components · forms · React/JSX or CSS · focus/ARIA/contrast reviews
+## Keyboard Navigation
 
----
+- Make every interactive element reachable via Tab.
+- Focus management: on modal open (`role="dialog"`, `aria-modal="true"`), move focus to the first focusable element and trap focus inside. Escape closes modals and dropdowns; on close, return focus to the trigger.
+- Skip links: the first focusable element, visible on focus, links to `#main-content`.
+- Roving tabIndex: active item `tabIndex={0}`, others `tabIndex={-1}` — radio groups, toolbars, tabs.
 
-## Keyboard Navigation [1][3]
+## ARIA and Semantic HTML
 
-**Focus management**: On modal open, move focus to the first focusable element; on close, return to the trigger. Trap focus inside. [3]
+- First rule of ARIA: use native HTML before adding ARIA roles — no ARIA is better than bad ARIA. `<button>Submit</button>`, not `<div role="button">`; `<nav aria-label="Main">`, not `<div role="navigation">`.
+- Top violations: missing form labels · low contrast · missing alt text · missing button names.
+- Live regions: `aria-live="polite"` for status updates; `role="alert"` for errors.
 
-```tsx
-// CORRECT: Focus trap — APG dialog pattern [3]
-function Modal({ isOpen, onClose, children }) {
-  const first = useRef<HTMLButtonElement>(null);
-  useEffect(() => { if (isOpen) first.current?.focus(); }, [isOpen]);
-  return (
-    <div role="dialog" aria-modal="true"
-      onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}>
-      <button ref={first}>First action</button>{children}
-    </div>
-  );
-}
-```
-
-**Skip links**: First focusable element — visible on focus, links to `#main-content`. [1][4]
-**Roving tabIndex**: Active item `tabIndex={0}`, others `tabIndex={-1}` — radio groups, toolbars, tabs. [3]
-
----
-
-## ARIA and Semantic HTML [2][15][18]
-
-**First rule of ARIA**: Use native HTML before adding ARIA roles — no ARIA is better than bad ARIA. [15][18]
-
-| CORRECT [18] | VIOLATION [15] |
-|---|---|
-| `<button>Submit</button>` | `<div role="button">Submit</div>` |
-| `<nav aria-label="Main">` | `<div role="navigation">` |
-
-Top WebAIM Million 2024 violations [5]: missing form labels (#1) · low contrast (#2) · missing alt text (#3) · missing button names (#4).
-
-**Live regions**: `aria-live="polite"` for status updates; `role="alert"` for errors. [2]
-
----
-
-## Color and Contrast [1][16][19]
+## Color and Contrast
 
 | Element | Ratio | Level | SC |
 |---------|-------|-------|----|
-| Normal text (<18px) | 4.5:1 | AA | [1] §1.4.3 |
-| Large text (≥18px bold, ≥24px) | 3:1 | AA | [1] §1.4.3 |
-| UI components & focus indicators | 3:1 | AA | [1] §1.4.11 |
-| Focus appearance (WCAG 2.2 new) | 3:1 + ≥2px perimeter | AA | [16] §2.4.11 |
+| Normal text (<18px) | 4.5:1 | AA | 1.4.3 |
+| Large text (≥18px bold, ≥24px) | 3:1 | AA | 1.4.3 |
+| UI components & focus indicators | 3:1 | AA | 1.4.11 |
+| Focus appearance (WCAG 2.2 new) | 3:1 + ≥2px perimeter | AA | 2.4.11 |
 
-Never convey meaning through color alone — pair with icon, text, or pattern. [1] §1.4.1
+Never convey meaning through color alone — pair with icon, text, or pattern (SC 1.4.1).
 
-**WCAG 2.2 new AA** [16]: `2.4.11` Focus Appearance (≥2px, 3:1 contrast) · `2.5.8` Target Size (≥24×24px) · `3.3.8` Accessible Auth (paste must work)
+WCAG 2.2 new AA: `2.4.11` Focus Appearance (≥2px, 3:1 contrast) · `2.5.8` Target Size (≥24×24px) · `3.3.8` Accessible Auth (paste must work)
 
----
+## Forms and Errors
 
-## Forms and Errors [1][3][9]
+- Give every input an associated `<label htmlFor>`. A placeholder is not a label: it disappears on input.
+- Mark an error with `aria-invalid`, link it with `aria-describedby`, and announce it with `role="alert"`.
 
-```tsx
-// CORRECT: Label + error announcement [1][3]
-<label htmlFor="email">Email</label>
-<input id="email" type="email" aria-invalid={!!error}
-  aria-describedby={error ? 'email-error' : undefined} />
-{error && <span id="email-error" role="alert">{error}</span>}
-// VIOLATION: Placeholder as label — disappears on input [5]
-<input placeholder="Enter email" />
-```
+## Motion and Cognitive
 
----
-
-## Motion and Cognitive [1][17]
-
-```css
-@media (prefers-reduced-motion: reduce) { /* WCAG 2.3.3 [1] */
-  *, *::before, *::after { animation-duration: 0.01ms !important; }
-}
-```
-
-Auto-advancing content (carousels, video) must have pause/stop controls. [1] §2.2.2
-Cognitive (COGA [17]): plain language · clear error recovery · no time limits · copy-paste in auth (SC 3.3.8) [16]
-
----
+- Respect `@media (prefers-reduced-motion: reduce)` (SC 2.3.3): cut animation durations to near zero.
+- Auto-advancing content (carousels, video) must have pause/stop controls (SC 2.2.2).
+- Cognitive: plain language · clear error recovery · no time limits · copy-paste in auth (SC 3.3.8).
 
 ## Extended References
 
 See `references/`: `sources.md` (20 sources) · `patterns.md` (correct patterns) · `violations.md` (violation examples) · `detection.md` (grep patterns)
 
----
-
-## Severity [1][5]
+## Severity
 
 | Severity | Criteria |
 |----------|----------|
-| CRITICAL | No keyboard access · missing form labels · zero contrast [1][5] |
-| HIGH | Missing focus indicators · no skip links · color-only meaning [1][16] |
-| MEDIUM | Missing ARIA labels · poor focus order · small touch targets [1][3] |
-| LOW | Missing optional enhancements [2] |
-
----
-
-## Checklist
-
-- [ ] All interactive elements reachable via Tab [1]
-- [ ] Focus indicators visible — ≥2px, 3:1 contrast (SC 2.4.11) [16]
-- [ ] Escape closes modals/dropdowns; focus returns to trigger [3]
-- [ ] Skip link to main content [1]
-- [ ] All form inputs have associated `<label>` [1][5]
-- [ ] Errors linked via `aria-describedby` and announced via `role="alert"` [1]
-- [ ] Color contrast: 4.5:1 (text) / 3:1 (UI) [1]
-- [ ] No color-only meaning [1]
-- [ ] `prefers-reduced-motion` respected [1]
-- [ ] Touch targets ≥24×24px (SC 2.5.8) [16]
-- [ ] `aria-live` for dynamic content [2]
-- [ ] Semantic HTML preferred over ARIA roles [15][18]
-- [ ] Copy-paste works in authentication fields (SC 3.3.8) [16]
+| CRITICAL | No keyboard access · missing form labels · zero contrast |
+| HIGH | Missing focus indicators · no skip links · color-only meaning |
+| MEDIUM | Missing ARIA labels · poor focus order · small touch targets |
+| LOW | Missing optional enhancements |
