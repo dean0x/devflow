@@ -50,6 +50,7 @@ import {
   CURATION_VARIANT_HOSTS,
   COMPLIANCE_VARIANT_HOSTS,
   COMPLIANCE_ARMED_REFERENCES,
+  DECISIONS_COMMAND_HOSTS,
 } from './fixtures/mds-manifest.js';
 import { ISSUE_CAPTURE_CONTRACT, type IssueCaptureEntry } from './fixtures/issue-capture-contract.js';
 import {
@@ -685,7 +686,7 @@ describe('decisions_load adoption in compiled knowledge command outputs', () => 
 
   // D-DECISIONS-LEARNING-GATE: the CURATION=off sentence must come before the
   // ledger-locate git call and before the index read, so curation off locates no
-  // ledger and reads no index. Every one of the 14 hosts loads decisions behind it.
+  // ledger and reads no index. Every host but dynamic-profile loads decisions behind it.
   // Named collector, shared by the live scan and the known-bad probe below.
   const GATE_SENTENCE = 'When the settings line says `CURATION=off`';
   // The decisions step's own locate sentence, then the first root call after it: a docs or knowledge
@@ -705,14 +706,14 @@ describe('decisions_load adoption in compiled knowledge command outputs', () => 
     return gate < locate && locate < read ? [] : [`${basename}: gate@${gate} locate@${locate} read@${read} are not in that order`];
   }
 
-  it('the CURATION=off gate precedes the ledger-locate call and the index read in all 14 hosts', async () => {
+  it('the CURATION=off gate precedes the ledger-locate call and the index read in all 13 decisions hosts', async () => {
     let scanned = 0;
-    for (const basename of COMMAND_HOSTS) {
+    for (const basename of DECISIONS_COMMAND_HOSTS) {
       const content = await fs.readFile(path.join(BUILT_COMMANDS, `${basename}.md`), 'utf-8');
       scanned++;
       expect(collectGateOrderProblems(basename, content), basename).toEqual([]);
     }
-    expect(scanned, 'the gate-order scan is vacuous').toEqual(COMMAND_HOSTS.length);
+    expect(scanned, 'the gate-order scan is vacuous').toEqual(13);
   });
 
   it('known-bad probe: moving the gate sentence after the index read is reported', async () => {

@@ -129,8 +129,8 @@ import { installWorkflowFolder, readWorkflowFolder } from './workflow-folder-ins
 // ── Bounds ─────────────────────────────────────────────────────────────────
 
 /**
- * The most variant files one kind may carry. The shipped roster is 14 commands and
- * 9 agents; the bound exists so a directory that grew without limit cannot turn the
+ * The most variant files one kind may carry. The shipped roster is 13 commands and
+ * 11 agents; the bound exists so a directory that grew without limit cannot turn the
  * converge into an unbounded loop (every loop has an explicit bound).
  */
 export const MAX_CURATION_ROSTER = 256;
