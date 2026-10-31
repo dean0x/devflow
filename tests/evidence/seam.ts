@@ -52,6 +52,48 @@ export function markerLine(head: string, key: string): string {
   return `${String(MARKERS.EVIDENCE_OPEN)} head:${head} key:${key} -->`
 }
 
+/** The TP arguments of a prompt's `claim` call, as the prompts spell them. */
+export const CLAIM_TP_ARGS = 'TP-<n>=<PASS|FAIL|SKIP>[:<exit>] ...'
+
+/** The lines of a compiled prompt that run the evidence script's `claim` subcommand. */
+export function claimCallLines(text: string): string[] {
+  return text.split('\n').filter(line => line.includes('verify-evidence.cjs" claim '))
+}
+
+/**
+ * Run a prompt's `claim` call line against the real script, in-process. `claims` replaces the
+ * gate-or-TP slot of the call (`gate|` + CLAIM_TP_ARGS in /implement, CLAIM_TP_ARGS elsewhere),
+ * `head` replaces `<head>`, and each `fill` pair replaces one placeholder of the prompt (a path).
+ * A placeholder left in the call throws. The tracked-file check is answered "not tracked", and
+ * any other subprocess call fails the run: `claim` makes none.
+ */
+export function runClaimCall(
+  line: string,
+  o: { readonly claims: string; readonly head: string; readonly fill: ReadonlyArray<readonly [string, string]> },
+): { code: number; stdout: string; stderr: string } {
+  const slot = line.includes(`gate|${CLAIM_TP_ARGS}`) ? `gate|${CLAIM_TP_ARGS}` : CLAIM_TP_ARGS
+  let rest = line.slice(line.indexOf(' claim ') + ' claim '.length).replace(slot, o.claims).replace('<head>', o.head)
+  for (const [from, to] of o.fill) rest = rest.split(from).join(to)
+  if (/[<>{}]/.test(rest)) throw new Error(`a placeholder is unfilled in: ${rest}`)
+  const argv = [...rest.matchAll(/"([^"]*)"|(\S+)/g)].map(m => m[1] ?? m[2])
+  const { main } = createRequire(import.meta.url)(VERIFY_EVIDENCE_SCRIPT) as {
+    readonly main: (
+      argv: readonly string[],
+      deps: { readonly stderr: (text: string) => void; readonly exec: (file: string, args: string[]) => unknown },
+    ) => { code: number; stdout: string }
+  }
+  let stderr = ''
+  const out = main(['node', 'verify-evidence.cjs', 'claim', ...argv], {
+    stderr: text => { stderr += text },
+    exec: (file, args) => {
+      const tracked = trackedCheckAnswer(file, args)
+      if (tracked === null) throw new Error(`claim made a call: ${file} ${args.join(' ')}`)
+      return tracked
+    },
+  })
+  return { ...out, stderr }
+}
+
 /**
  * The answer the script's tracked-file check gets in a test whose exec is an in-process twin.
  * The check is the one `git ... ls-files` call the script makes about a path it was told to

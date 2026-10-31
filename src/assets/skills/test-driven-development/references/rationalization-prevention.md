@@ -1,6 +1,38 @@
 # TDD Rationalization Prevention — Extended Examples
 
-Detailed code examples showing how each rationalization leads to worse outcomes.
+The excuses table, the mid-work red flags, a test-first example, and detailed code examples that show how each rationalization leads to worse outcomes.
+
+## Excuses and corrections
+
+| Excuse | Why It Feels Right | Why It's Wrong | Correct Action |
+|--------|-------------------|----------------|----------------|
+| "I'll write tests after" | Need to see the shape first | Tests ARE the shape — they define the interface before implementation exists | Write the test first |
+| "Too simple to test" | It's just a getter/setter | Getters break, defaults change, edge cases hide in "simple" code | Write it — takes 30 seconds |
+| "I'll refactor later" | Just get it working now | "Later" never comes; technical debt compounds silently | Refactor now in Step 3 |
+| "Test is too hard to write" or "the test setup is too complex" | Mocking is painful | Hard-to-test code = bad design, and complex setup = too much coupling; the test is telling you the interface is wrong | Simplify the interface first |
+| "Need to see the whole picture" or "the architecture first" | Can't test what I haven't designed or structured yet | TDD IS design; each test reveals the next piece of the interface, and tests DEFINE the architecture | Let the tests drive the design and structure |
+| "Tests slow me down" | Faster to just write the code | Faster until the first regression; TDD is faster for anything > 50 lines | Trust the cycle |
+| "Framework is hard to set up" | Setup is complex | One-time cost vs recurring regression cost; untested code compounds debt | Set up the framework first — that IS the work |
+| "This is infrastructure, not logic" | Plumbing doesn't need tests | Infrastructure carries data; broken plumbing floods everything downstream | Test the contract, not the internals |
+| "Deadline is tight, no time for tests" | Ship now, test later | Untested code ships bugs; fixing bugs under deadline is slower than TDD | TDD is faster under pressure, not slower |
+
+## Red flags mid-work
+
+| Thought | Correction |
+|---------|------------|
+| "Let me write the implementation first, tests after" | Delete the code. Write the test. Watch it fail. Then rewrite. |
+| "I'll just spike this and add tests later" | Unless the user said "spike" — you're rationalizing, not prototyping. |
+| "Let me get it working, then lock it with tests" | Those tests verify your implementation, not the requirement. Backwards. |
+| "I know this works, I've written it before" | Past code passed past tests. This code needs its own failing test. |
+| "One more function, then I'll write the test" | STOP. Write the test for what you have now. Increments, not batches. |
+
+## Test-first vs code-first
+
+**Code-first** (wrong): write `parseConfig()`, then a test that mirrors it (`parseConfig("key=val")` passes). Empty input, malformed lines, multi-value keys and whitespace stay hidden until production.
+
+**Test-first** (correct): "ignores comment lines", then "handles empty input", then "rejects malformed lines", each failing first and each driving the next slice of `parseConfig()`, so it handles the edges from the start.
+
+Code-first tests verify what you *happened to build*. Test-first tests specify what *should exist*.
 
 ## "I'll write tests after"
 

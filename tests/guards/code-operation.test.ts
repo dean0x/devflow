@@ -212,7 +212,7 @@ describe('every compiled Code-family spawn opens with its OPERATION (D-CODE-OPER
 
   it('the _preamble.mds usage example is unchanged and is not counted as a site', () => {
     expect(readFileSync(PREAMBLE_PATH, 'utf-8')).toContain('agent("your prompt here", { agentType: "Code" })')
-    for (const host of ['dynamic-plan.md', 'dynamic-profile.md', 'dynamic-tickets.md']) {
+    for (const host of ['dynamic-plan.md', 'dynamic-tickets.md']) {
       const text = requireDistFile(host)
       expect(text, `${host} carries the example`).toContain('agent("your prompt here", { agentType: "Code" })')
       expect(collectCodeSpawnSites(host, text), `${host}: the example is not a spawn`).toEqual([])
@@ -433,13 +433,13 @@ describe('the alignment-fix Protocol is its two lines, with no re-run of Evaluat
 // `fix-body-max` and `refactor-body-max`: lowered by a pass that cut the artifact, never raised to fit one that grew.
 
 /** The compiled Code agent body, in bytes. Registered as `code-body-max`; lowered, never raised. */
-const CODE_BODY_MAX_BYTES = 10_718
+const CODE_BODY_MAX_BYTES = 9_914
 
 /** The compiled Fix agent body, in bytes. Registered as `fix-body-max`; lowered, never raised. */
-const FIX_BODY_MAX_BYTES = 8_384
+const FIX_BODY_MAX_BYTES = 7_407
 
 /** The compiled Refactor agent body, in bytes. Registered as `refactor-body-max`; lowered, never raised. */
-const REFACTOR_BODY_MAX_BYTES = 6_393
+const REFACTOR_BODY_MAX_BYTES = 6_093
 
 const BODY_CEILINGS: Readonly<Record<string, number>> = {
   'Code': CODE_BODY_MAX_BYTES,

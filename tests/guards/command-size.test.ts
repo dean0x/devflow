@@ -10,13 +10,14 @@
  * that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a
  * line of the same command already states.
  *
- *   - AC-402. All 14 compiled commands have a ceiling in each build, and nothing else does.
+ *   - AC-402. All 14 compiled commands have a ceiling in each build they have, and nothing else does.
  *   - AC-401. /implement, /resolve, /plan and /code-review end below the size main held, in both builds.
  *   - A curation-off build never exceeds its curation-on build: it is the same host with its curation
  *     arms removed.
  *
  * Four builds exist (`Build`): `on`, `off` (curation off, the name its rows and floor ids have always
- * used), `compliance-off` and `both-off`. A command with a compliance arm has a compliance-off build,
+ * used), `compliance-off` and `both-off`. A command with a curation arm has a curation-off build (all but
+ * /dynamic-profile, which has no arm), a command with a compliance arm has a compliance-off build,
  * and one that also has a curation arm has a both-off build (#648, AC-33). Those ceilings sit at the
  * size measured at their first build, with zero headroom, as `command-<name>-compliance-off-max` and
  * `command-<name>-both-off-max`. The rule sets no comparison between an off build and the on build:
@@ -44,50 +45,49 @@ const OFF_VARIANT: Readonly<Record<Exclude<Build, 'on'>, OffVariantKey>> = {
 
 /** [command, build, ceiling in bytes]. Each row's text is the pattern its numeric-floors.json entry pins. */
 const COMMAND_MAX_BYTES: ReadonlyArray<readonly [string, Build, number]> = [
-  ['bug-analysis', 'on', 23_724],
-  ['bug-analysis', 'off', 20_130],
-  ['bug-analysis', 'compliance-off', 23_193],
-  ['bug-analysis', 'both-off', 19_599],
-  ['code-review', 'on', 34_062],
-  ['code-review', 'off', 31_487],
-  ['code-review', 'compliance-off', 31_269],
-  ['code-review', 'both-off', 28_694],
-  ['debug', 'on', 18_340],
-  ['debug', 'off', 15_591],
-  ['dynamic-build', 'on', 105_421],
-  ['dynamic-build', 'off', 102_034],
-  ['dynamic-build', 'compliance-off', 102_429],
-  ['dynamic-build', 'both-off', 99_042],
-  ['dynamic-plan', 'on', 35_740],
-  ['dynamic-plan', 'off', 31_450],
-  ['dynamic-profile', 'on', 16_329],
-  ['dynamic-profile', 'off', 12_673],
-  ['dynamic-tickets', 'on', 41_146],
-  ['dynamic-tickets', 'off', 36_999],
-  ['dynamic-tickets', 'compliance-off', 41_294],
-  ['dynamic-tickets', 'both-off', 37_147],
-  ['explore', 'on', 12_325],
-  ['explore', 'off', 9_593],
-  ['implement', 'on', 43_478],
-  ['implement', 'off', 40_794],
-  ['implement', 'compliance-off', 44_856],
-  ['implement', 'both-off', 42_172],
-  ['plan', 'on', 36_222],
-  ['plan', 'off', 33_424],
-  ['plan', 'compliance-off', 36_055],
-  ['plan', 'both-off', 33_257],
-  ['release', 'on', 22_297],
-  ['release', 'off', 19_141],
-  ['release', 'compliance-off', 17_199],
-  ['release', 'both-off', 14_043],
-  ['research', 'on', 14_177],
-  ['research', 'off', 10_351],
-  ['resolve', 'on', 50_283],
-  ['resolve', 'off', 47_253],
-  ['resolve', 'compliance-off', 43_936],
-  ['resolve', 'both-off', 40_890],
-  ['self-review', 'on', 14_255],
-  ['self-review', 'off', 11_353],
+  ['bug-analysis', 'on', 22_385],
+  ['bug-analysis', 'off', 19_659],
+  ['bug-analysis', 'compliance-off', 21_854],
+  ['bug-analysis', 'both-off', 19_128],
+  ['code-review', 'on', 32_204],
+  ['code-review', 'off', 30_588],
+  ['code-review', 'compliance-off', 29_547],
+  ['code-review', 'both-off', 27_931],
+  ['debug', 'on', 15_221],
+  ['debug', 'off', 13_319],
+  ['dynamic-build', 'on', 93_087],
+  ['dynamic-build', 'off', 90_494],
+  ['dynamic-build', 'compliance-off', 90_401],
+  ['dynamic-build', 'both-off', 87_808],
+  ['dynamic-plan', 'on', 30_145],
+  ['dynamic-plan', 'off', 26_539],
+  ['dynamic-profile', 'on', 4_657],
+  ['dynamic-tickets', 'on', 31_425],
+  ['dynamic-tickets', 'off', 27_954],
+  ['dynamic-tickets', 'compliance-off', 31_573],
+  ['dynamic-tickets', 'both-off', 28_102],
+  ['explore', 'on', 9_451],
+  ['explore', 'off', 7_686],
+  ['implement', 'on', 41_098],
+  ['implement', 'off', 39_236],
+  ['implement', 'compliance-off', 42_850],
+  ['implement', 'both-off', 40_988],
+  ['plan', 'on', 33_184],
+  ['plan', 'off', 31_563],
+  ['plan', 'compliance-off', 33_017],
+  ['plan', 'both-off', 31_396],
+  ['release', 'on', 19_347],
+  ['release', 'off', 16_965],
+  ['release', 'compliance-off', 14_393],
+  ['release', 'both-off', 12_011],
+  ['research', 'on', 11_072],
+  ['research', 'off', 8_231],
+  ['resolve', 'on', 46_976],
+  ['resolve', 'off', 44_902],
+  ['resolve', 'compliance-off', 40_330],
+  ['resolve', 'both-off', 38_240],
+  ['self-review', 'on', 11_234],
+  ['self-review', 'off', 9_572],
 ]
 
 /** The four commands #456 trims, and the sizes main held before wave 4C: [curation-on, curation-off]. */
@@ -107,8 +107,8 @@ function builtBytes(command: string, build: Build): number | null {
 }
 
 /**
- * The builds a command is held to: `on` and curation-off for every compiled command, compliance-off for
- * a command with a compliance arm, and both-off for one that also has a curation arm. Named sets from
+ * The builds a command is held to: `on` for every compiled command, curation-off for a command with a
+ * curation arm, compliance-off for one with a compliance arm, and both-off for one with both. Named sets from
  * the host rosters, which the build's own variant manifest is asserted against in both directions.
  */
 export function buildsOf(command: string): readonly Build[] {
@@ -117,7 +117,7 @@ export function buildsOf(command: string): readonly Build[] {
   const curation = CURATION_VARIANT_HOSTS.includes(host)
   return [
     'on',
-    'off',
+    ...(curation ? (['off'] as const) : []),
     ...(compliance ? (['compliance-off'] as const) : []),
     ...(compliance && curation ? (['both-off'] as const) : []),
   ]
@@ -186,7 +186,7 @@ const COMPLIANCE_COMMANDS: readonly string[] = COMPLIANCE_VARIANT_HOSTS
   .filter(host => host.startsWith('commands/'))
   .map(host => host.slice('commands/'.length))
 
-describe('AC-402: all 14 compiled commands have a byte ceiling in each build', () => {
+describe('AC-402: all 14 compiled commands have a byte ceiling in each build they have', () => {
   it('the table covers exactly the compiled commands, in each build they have', () => {
     expect(MDS_COMMAND_HOSTS.length, 'the roster is empty, so this guard proves nothing').toBeGreaterThanOrEqual(14)
     expect(COMMAND_MAX_BYTES).toHaveLength(MDS_COMMAND_HOSTS.reduce((rows, command) => rows + buildsOf(command).length, 0))
@@ -201,6 +201,7 @@ describe('AC-402: all 14 compiled commands have a byte ceiling in each build', (
     const rows = COMMAND_MAX_BYTES
     expect(collectCoverageDefects(rows.filter(([c, b]) => !(c === 'plan' && b === 'off')), MDS_COMMAND_HOSTS)).toEqual(['plan/off: no ceiling'])
     expect(collectCoverageDefects([...rows, ['gone', 'on', 1]], MDS_COMMAND_HOSTS)).toEqual(['gone/on: a ceiling for no compiled command'])
+    expect(collectCoverageDefects([...rows, ['dynamic-profile', 'off', 1]], MDS_COMMAND_HOSTS), 'a host with no curation arm has no curation-off build').toEqual(['dynamic-profile/off: a ceiling for no compiled command'])
     expect(collectCoverageDefects([...rows, ['plan', 'on', 1]], MDS_COMMAND_HOSTS)).toEqual(['plan/on: two ceilings'])
     expect(collectOversize(rows, (c, b) => (c === 'plan' && b === 'on' ? ceilingOf('plan', 'on')! + 1 : 0))).toEqual([
       `plan/on: ${ceilingOf('plan', 'on')! + 1} bytes, ceiling ${ceilingOf('plan', 'on')}`,
@@ -261,8 +262,10 @@ describe('AC-401: the four trimmed commands end below main in both builds', () =
 
 describe('a curation-off build never exceeds its curation-on build', () => {
   it('holds for the built commands and for their ceilings', () => {
-    expect(collectOffAboveOn(builtBytes, MDS_COMMAND_HOSTS)).toEqual([])
-    expect(collectOffAboveOn(ceilingOf, MDS_COMMAND_HOSTS)).toEqual([])
+    const armed = MDS_COMMAND_HOSTS.filter(command => buildsOf(command).includes('off'))
+    expect(armed.length, 'no command has a curation-off build, so this guard proves nothing').toBeGreaterThanOrEqual(13)
+    expect(collectOffAboveOn(builtBytes, armed)).toEqual([])
+    expect(collectOffAboveOn(ceilingOf, armed)).toEqual([])
   })
 
   it('known-bad probe: an off build above its on build is reported', () => {

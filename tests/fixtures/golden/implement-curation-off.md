@@ -15,7 +15,7 @@ $ARGUMENTS
 
 **Issue-reference grammar.** Scan `COMMAND_INPUT` for candidate issue references: a `#`-prefixed token or a bare digit run. Collect them in source order as `ISSUE_REFS`, and forward the list to the Git agent verbatim. Do not render, normalise, pad, strip or drop a token. Under `github`, a token that matches `^#?[1-9][0-9]{0,8}$` is a reference, and the Git agent renders it as `#{n}`.
 
-There is no producer-side grammar check: the operation that runs decides each token, and its Output block gives the result. `fetch-issue` uses a non-numeric token as a search term and returns the first open match or nothing. `fetch-issues-batch` drops a token that it cannot resolve and names it in `NOT_FOUND ({refs})`.
+There is no producer-side grammar check: the operation that runs decides each token, and its Output block gives the result.
 
 Note: under `github`, only the Git agent decides if a bare digit run is a reference. This command holds no provider knowledge.
 
@@ -33,13 +33,15 @@ When the user explicitly asks to re-validate, re-check, or re-run quality gates 
 
 Record the current branch name as `BASE_BRANCH`. Stop the run unless it matches `^(?![-#]|origin\/|(?:@|(?:FETCH_|ORIG_|MERGE_)?HEAD)$)(?!.*\.\.)[A-Za-z0-9._\/+@,#-]{1,200}$` (judge the match by reading; never pass the value to a command), telling the user it allows only ASCII letters, digits and `._/+@,#-`, at most 200; no leading `-` or `#`, no `origin/` prefix, no `..`, not `@` or a HEAD name.
 
-**Docs root (D-DOCS-ROOT).** Every `.devflow/docs/` path of this command lives at the checkout's toplevel, not under the start directory. From the start directory — `WORKTREE_PATH` if provided, otherwise cwd (`devflow:worktree-support`) — run
+**Docs root (D-DOCS-ROOT).** Every `.devflow/docs/` path is `{worktree}/.devflow/docs/…`. A repo-relative docs path handed to an agent travels with a `WORKTREE_PATH` naming its checkout.
+
+Once per start directory (`WORKTREE_PATH` if provided, otherwise cwd), run from it:
 
 ```bash
-git -C "{start}" rev-parse --show-toplevel
+node "$HOME/.devflow/scripts/resolve-root.cjs" "{start}"; echo "exit=$?"
 ```
 
-Its one-line output is `{worktree}`. If the command fails (outside a git repository), `{worktree}` is the start directory itself. Docs paths below are written `{worktree}/.devflow/docs/…`. A repo-relative docs path handed to an agent always travels with a `WORKTREE_PATH` naming its checkout.
+Accept only the three lines `WORKTREE=<absolute path>`, `LEDGER=<absolute path>` and `exit=0`, which set `{worktree}` and `{ledger}`. Otherwise both are the start directory.
 
 **Resolve the evidence policy once per run**, from the repository root, before any step reads the values:
 
@@ -47,7 +49,7 @@ Its one-line output is `{worktree}`. If the command fails (outside a git reposit
 node "$HOME/.devflow/scripts/resolve-evidence-policy.cjs" 2>/dev/null; echo "exit=$?"
 ```
 
-Accept the output only when it is exactly two lines: `exit=0` last and, before it, one line of the form `EVIDENCE_POLICY=<required|standard> SOURCE=<file|worktree|default|invalid|error> REF=<branch|none>[ WARN=<remote-unavailable|invalid-file|raised-by-compliance|pr-changes-policy>[,…]] ISSUE_REQUIRED=<true|false> APPLY_CONVENTIONS=<true|false> REQUIRE_NON_AUTHOR_APPROVAL=<true|false>` — these fields, in this order, nothing else, where `<branch>` is a branch name such as `main`. **Anything else** (including a script that cannot run) ⇒ use `EVIDENCE_POLICY=required SOURCE=error REF=none ISSUE_REQUIRED=true APPLY_CONVENTIONS=true REQUIRE_NON_AUTHOR_APPROVAL=true` instead.
+Accept the output only when it is exactly two lines: `exit=0` last and, before it, one line of the form `EVIDENCE_POLICY=<required|standard> SOURCE=<file|worktree|default|invalid|error> REF=<branch|none>[ WARN=<remote-unavailable|invalid-file|raised-by-compliance|pr-changes-policy>[,…]] ISSUE_REQUIRED=<true|false> APPLY_CONVENTIONS=<true|false> REQUIRE_NON_AUTHOR_APPROVAL=<true|false>` — these fields, in this order, nothing else, where `<branch>` is a branch name. **Anything else** (including a script that cannot run) ⇒ use `EVIDENCE_POLICY=required SOURCE=error REF=none ISSUE_REQUIRED=true APPLY_CONVENTIONS=true REQUIRE_NON_AUTHOR_APPROVAL=true` instead.
 
 Set `EVIDENCE_POLICY`, `ISSUE_REQUIRED`, `APPLY_CONVENTIONS` and `REQUIRE_NON_AUTHOR_APPROVAL` from the accepted line. Pass agents only the three mechanism inputs, never `EVIDENCE_POLICY`. Report `Evidence policy: {EVIDENCE_POLICY} (source: {SOURCE})`, plus any `WARN` tokens as advisory, once in the final report.
 
@@ -125,7 +127,7 @@ node "$HOME/.devflow/scripts/verify-evidence.cjs" render --plan "{worktree}/.dev
 
 - `EVIDENCE_FILE` — `{worktree}/.devflow/docs/evidence-{branch_slug}.md`, its `## Evidence Exceptions` section now a byte copy of `PR_EXCEPTIONS` (absent when that is `(none)`).
 
-**Resolve the settings line** once per worktree root, reusing a line this run already resolved for the same root. `{root}` is the worktree the values are for — the repository root in a one-worktree run:
+**Resolve the settings line** once per worktree root, reusing a line this run already resolved for the same root. `{root}` is the worktree the values are for:
 
 ```bash
 node "$HOME/.devflow/scripts/resolve-settings.cjs" "{root}" 2>/dev/null; echo "exit=$?"
@@ -135,14 +137,14 @@ Accept the output only when it is exactly two lines: `exit=0` last and, before i
 
 The accepted line is the only source of these values.
 
-**Resolve `REVIEW_PUBLICATION` per worktree:** take `REVIEW_PUBLICATION` from that worktree's settings line — the line resolved above for `{root}`, the worktree's root, by the settings block when this run has not yet resolved that root. The line already caps the personal choice at the team's (D-PUBLICATION-CEILING), so it is `off`, `auto` or `full`, and `off` when the line was unresolvable.
+**Resolve `REVIEW_PUBLICATION` per worktree:** take `REVIEW_PUBLICATION` from that worktree's settings line — the line resolved above for `{root}`, the worktree's root, by the settings block when this run has not yet resolved that root. The line already caps the personal choice at the team's, so it is `off`, `auto` or `full`, and `off` when the line was unresolvable.
 
 **Evidence stub:** only when `EVIDENCE_POLICY` is `required`, a resolved `off` becomes `stub`, so a counts-only record still reaches the PR. `stub` is never a config value.
 
 Note: `auto` does not fail open: the Git agent probes the repository visibility and treats any error or unrecognised value as PUBLIC (mode STUB). What each value does is decided by the Git agent's publication gate (`references/publication-gate.md` step 2); this partial only resolves the value.
 Phase 11 passes the resolved value to the evidence script (`publish`), which decides what each value means for the evidence comment. From the same line: `COMPLIANCE_FRAMEWORKS` is the settings line's `COMPLIANCE` with `generic` written `none`: `off`, `none`, or the framework ids the machine and this repository declare.
 
-**Set the compliance directive** from `COMPLIANCE_FRAMEWORKS`. `COMPLIANCE_DIRECTIVE` is empty when `COMPLIANCE_FRAMEWORKS` is `off`: a spawn line that holds only `{COMPLIANCE_DIRECTIVE}` is then left out, so a lens-off spawn carries nothing about compliance. Otherwise `COMPLIANCE_DIRECTIVE` is this one line, with `<ids>` replaced by the value of `COMPLIANCE_FRAMEWORKS`:
+**Set the compliance directive** from `COMPLIANCE_FRAMEWORKS`. `COMPLIANCE_DIRECTIVE` is empty when `COMPLIANCE_FRAMEWORKS` is `off`: a spawn line that holds only `{COMPLIANCE_DIRECTIVE}` is then left out. Otherwise `COMPLIANCE_DIRECTIVE` is this one line, with `<ids>` replaced by the value of `COMPLIANCE_FRAMEWORKS`:
 
 > When the task touches regulated surface (data models, auth flows, logging/observability, payments, IaC, retention), invoke Skill(skill="devflow:compliance") and load references/{id}.md only for the ids in <ids> (none: generic controls only); never fabricate guidance for a framework you were not given.
 
@@ -150,17 +152,17 @@ Pass `COMPLIANCE_DIRECTIVE` to every Code and Fix spawn, on a line of its own.
 
 ### Load Feature Knowledge
 
-**Step 1 — Read the index cache** `{worktree}/.devflow/features/index.md`. Each line has the form `- **{slug}** — {areas} — {Use-when description}`. If `index.md` is absent or has no entry line, glob `{worktree}/.devflow/features/*/KNOWLEDGE.md` and read only the YAML frontmatter of each file.
+**Step 1 — Read the index cache** `{worktree}/.devflow/features/index.md`. Each line has the form `- **{slug}** — {areas} — {Use-when description}`. If `index.md` is absent or has no entry line, glob `{worktree}/.devflow/features/*/KNOWLEDGE.md` and read only the YAML frontmatter of each file, in one turn.
 
-**Step 2 — Pick relevant KBs:** select the entries whose documented area overlaps the current task (index line, or frontmatter `description` and `directories` on fallback). Prefer specificity over breadth.
+**Step 2 — Pick relevant KBs:** select the entries whose documented area overlaps the current task (index line, or frontmatter `description` and `directories` on fallback).
 
 **Step 3 — Read each selected KB's Rules.** `{kb}` is `{worktree}/.devflow/features/{slug}/KNOWLEDGE.md`:
 
-1. List its `##` headings with line numbers through Bash: `command grep -n '^## ' "{kb}"`. This only locates sections; the text of a KB comes from the Read view alone.
-2. Read the `## Rules` range (its line to the next heading) with the Read tool, using `offset` and `limit`, and choose the one to three bullets most relevant to the task.
+1. List the `##` headings with line numbers of all selected KBs in one Bash call: `command grep -n '^## ' "{kb}" …`. With two or more paths, each line starts with its `{kb}:` path. This only locates sections; the text of a KB comes from the Read view alone.
+2. Read the `## Rules` range (its line to the next heading) with the Read tool, using `offset` and `limit`, all selected KBs in one turn, and choose the one to three bullets most relevant to the task.
 3. If the KB has no `## Rules` section, choose one to three entries from its `## Anti-Patterns` or `## Gotchas` range the same way, and label them by that section's name instead of an ID.
 
-When a KB contradicts the code you observe, **trust the code** — the code is the freshness mechanism; the KB may lag behind. A missing Rules section, a missing heading list and `(none)` are legitimate states, not errors.
+When a KB contradicts the code you observe, **trust the code**.
 
 **Step 4 — Set FEATURE_KNOWLEDGE and FEATURE_KNOWLEDGE_RULES.** Write one block per selected KB. Paste each bullet verbatim from the Read view, never from a shell view. The path is relative to the checkout root; an agent resolves it under `WORKTREE_PATH` when one is provided.
 
@@ -175,7 +177,7 @@ Headings: L5 Rules · L40 Overview · L62 Anti-Patterns · L118 Key Files
 
 A KB with no Rules section labels its entries `Rules ({section name}):` and gives them no ID. `FEATURE_KNOWLEDGE` is these blocks; `FEATURE_KNOWLEDGE_RULES` is the same blocks without the `Headings:` line. Each spawn names the variable its recipient takes. If no KBs exist, no KBs are relevant, or `.devflow/features/` is absent, set both to `(none)`.
 
-**Fresh base.** Before Phase 2, write `BASE_BRANCH` with the Write tool to the file that `F="$(mktemp)" && echo "F=$F"` prints, after one Read of it. If the Write tool fails, treat the value as missing; never write it with a shell command. Then run `F="{name file}"; trap 'rm -- "$F"' EXIT; cd "{worktree}" && node "$HOME/.devflow/scripts/resolve-base.cjs" local --name-stdin < "$F"; echo "exit=$?"`. Output other than one `BASE_REF=` line (40 or 64 hex, or `none`) with `exit=0` counts as `NOTE=stop`, `REASON=resolver-unavailable`. Record `BASE_REF`. By `NOTE`: `none` continues; `info` prints one plain line; `degraded` records `TRACEABILITY: DEGRADED (base {REASON}; fix: {fix})`; `stop` (`BASE_REF=none`) stops the run, naming REASON and its fix. Fix by REASON: no-merge-base `git fetch --unshallow`; no-ref or timeout `git fetch origin <base>` (`<base>` stays as written); resolver-unavailable `re-run; if it repeats, run devflow init`; invalid-name the allowed set, never the name; any other REASON none, and `; fix: {fix}` is left out.
+**Fresh base.** Before Phase 2, write `BASE_BRANCH` with the Write tool to a new file in a `mktemp -d` folder (`{name file}`). If the Write tool fails, treat the value as missing; never write it with a shell command. Then run `F="{name file}"; trap 'rm -- "$F"' EXIT; cd "{worktree}" && node "$HOME/.devflow/scripts/resolve-base.cjs" local --name-stdin < "$F"; echo "exit=$?"`. Output other than one `BASE_REF=` line (40 or 64 hex, or `none`) with `exit=0` counts as `NOTE=stop`, `REASON=resolver-unavailable`. Record `BASE_REF`. By `NOTE`: `none` continues; `info` prints one plain line; `degraded` records `TRACEABILITY: DEGRADED (base {REASON}; fix: {fix})`; `stop` (`BASE_REF=none`) stops the run, naming REASON and its fix. Fix by REASON: no-merge-base `git fetch --unshallow`; no-ref or timeout `git fetch origin <base>` (`<base>` stays as written); resolver-unavailable `re-run; if it repeats, run devflow init`; invalid-name the allowed set, never the name; any other REASON none, and `; fix: {fix}` is left out.
 
 ### Phase 2: Implement
 
@@ -389,16 +391,15 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
 
 Any other or missing Status: report and halt; never PASS.
 
-**Evidence claims** are lines appended to the `## Claims` section of `EVIDENCE_FILE` — the file's last section, created when absent. Append only: never edit or remove a claim; the last valid one per target wins. Each line takes exactly one of these shapes, where `<head>` is the 40-hex `HEAD:` the agent's report shows:
+**Evidence claims** come from the evidence script, which owns the claim lines and the `## Claims` section. `<head>` is the report's `HEAD:` value, or `none` if it holds anything but letters and digits (a before/after change too).
 
-```
-- gate:validate PASS sha:<head> by:validate
-- TP-<n> <PASS|FAIL|SKIP> sha:<head> by:test exit:<0-255>
+```bash
+cd "{worktree}" && node "$HOME/.devflow/scripts/verify-evidence.cjs" claim --evidence ".devflow/docs/evidence-{branch_slug}.md" --head <head> gate|TP-<n>=<PASS|FAIL|SKIP>[:<exit>] ...
 ```
 
-- `gate:validate` — after a Phase 6 or Phase 8 PASS.
-- `TP-<n>` — after every Phase 7 run, one line per `### Test Plan Evidence` row whose TP is in `TEST_PLAN`, with the row's outcome; the line ends at `by:test` when the row's Exit is not a number from 0 to 255.
-- Append nothing from a report whose `HEAD:` is not a single 40-hex SHA — a reported before/after change included — and say so in the Phase 12 report.
+- `gate` — after a Phase 6 or Phase 8 PASS.
+- `TP-<n>` — after every Phase 7 run, one argument per `### Test Plan Evidence` row; add `:<exit>` when the row's Exit is a number.
+- No `CLAIM appended` line means no claim was written: say so in the Phase 12 report.
 
 ### Phase 7: QA Testing
 
@@ -503,13 +504,10 @@ git push origin HEAD; echo "exit=$?"
 `exit=0` continues to the gate. Any other result, a rejected non-fast-forward push included, records `TRACEABILITY: DEGRADED (ci push failed)` for the Phase 12 report, reports "CI status unknown — verify manually before merging" and proceeds to Phase 11 without waiting.
 
 <!-- PATTERN: ci-status-gate -->
-1. Wait: run `cd {worktree} && HEAD_SHA=$(git rev-parse HEAD) && node "$HOME/.devflow/scripts/ci-wait.cjs" --pr {PR_NUMBER} --head "$HEAD_SHA"` through the Bash tool with `timeout: 600000`. Each run waits at most 570 seconds and prints one line, `CI <STATUS> pr=… head=… failing=… pending=… waited=…` (INDETERMINATE adds `reason=…`). A missing or unparseable line, an unknown status or a non-zero exit is INDETERMINATE.
-2. **If PASSING** → proceed to Phase 11.
-3. **If NO_PR or NO_CI** → skip: "No PR/CI configured, skipping CI validation." Proceed to Phase 11.
-4. **If PENDING** and fewer than 3 waits have run → wait again. Otherwise → report "CI still running — verify manually before merging" and proceed.
-5. **If INDETERMINATE** and fewer than 3 waits have run → wait again, unless `waited=570` with `reason=head-mismatch` or `no-workflow-check`. Otherwise → report "CI status unknown — verify manually before merging" and proceed.
-6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Fix agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
-7. **Budget**: at most 3 waits and 2 fixes in all. When one is spent, report the status and proceed.
+1. Wait: run `cd {worktree} && HEAD_SHA=$(git rev-parse HEAD) && node "$HOME/.devflow/scripts/ci-wait.cjs" --pr {PR_NUMBER} --head "$HEAD_SHA" --waits {n} --fixes {m}` through the Bash tool with `timeout: 600000`, where `{n}` is the waits run so far, this one included, and `{m}` is the Fix agents run so far. Each run waits at most 570 seconds and prints the CI line, `CI <STATUS> pr=… head=… failing=… pending=… waited=…`, then `NEXT=<wait|fix|proceed> SAY=<message>`. A missing or malformed `NEXT=` line or a non-zero exit → report "CI status unknown — verify manually before merging" and proceed to Phase 11.
+2. **If `NEXT=wait`** → step 1 again.
+3. **If `NEXT=fix`** → report SAY and the failing checks from the CI line. Spawn `Agent(subagent_type="Fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Fix agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if fewer than 3 waits have run, step 1 again, else report "CI status unknown — verify manually before merging" and proceed to Phase 11; a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting.
+4. **If `NEXT=proceed`** → report SAY unless it is `none`, and the failing checks of a FAILING line, then proceed to Phase 11.
 <!-- /PATTERN: ci-status-gate -->
 
 ### Phase 11: Evidence
@@ -533,7 +531,7 @@ git push origin HEAD; echo "exit=$?"
 cd "{worktree}" && node "$HOME/.devflow/scripts/verify-evidence.cjs" publish --pr {PR_NUMBER} --evidence ".devflow/docs/evidence-{branch_slug}.md" --publication {REVIEW_PUBLICATION resolved in Phase 1, or auto}; echo "exit=$?"
 ```
 
-Drop the `--evidence` pair when that file does not exist or its path does not match `^[A-Za-z0-9._/-]{1,255}$`. `{PR_NUMBER}` is digits only, and the publication value is `auto`, `full`, `off` or `stub`. Capture its stdout as `EVIDENCE_RESULT`: the `## PR Evidence` block — its `EVIDENCE` line and its `**Body**:` / `**Comment**:` line — and any `TRACEABILITY: DEGRADED ({reason})` lines after it (exit 0), or the one line `TRACEABILITY: DEGRADED (evidence unavailable)` (exit 2). Empty stdout or any other exit is `TRACEABILITY: DEGRADED (evidence unavailable)`. It never blocks: whatever it returns, continue to Phase 12.
+Drop the `--evidence` pair when that file does not exist or its path does not match `^[A-Za-z0-9._/-]{1,255}$`. `{PR_NUMBER}` is digits only, and the publication value is `auto`, `full`, `off` or `stub`. Capture its stdout as `EVIDENCE_RESULT`; empty stdout, or an exit other than 0 or 2, is `TRACEABILITY: DEGRADED (evidence unavailable)`. It never blocks: whatever it returns, continue to Phase 12.
 
 ### Phase 12: Report
 
@@ -541,7 +539,7 @@ Drop the `--evidence` pair when that file does not exist or its path does not ma
 
 Display completion summary with phase status, `Gate level: {GATE_LEVEL}` with any level note, Harden's `no files reviewed` line if any, Validate's `Lint pack:` line if any, PR info, and next steps.
 
-Show the test plan's evidence from Phase 11: `Test plan: {VERIFIED-CI + ATTESTED-LOCAL}/{total} verified (VERIFIED-CI {n}, ATTESTED-LOCAL {n})`, read from the `EVIDENCE` line and never inferred, then its `**Body**:` / `**Comment**:` line verbatim. Without an `EVIDENCE` line, show `Test plan: evidence unavailable`; with no test plan, `Test plan: missing`.
+Show the `Test plan:` line and the `**Body**:` / `**Comment**:` line of `EVIDENCE_RESULT` verbatim. Without a `Test plan:` line, show `Test plan: evidence unavailable`; with no test plan, `Test plan: missing`.
 
 If any Git agent output emitted `TRACEABILITY: DEGRADED ({reason})` lines during the run, or the fresh base step, Phase 10's push, Phase 11's push or Phase 11's script output carried one, surface them verbatim in the report under a `### Traceability` subsection.
 
@@ -553,11 +551,11 @@ If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lin
 
 **Step 1 — Check the opt-out gate, with `{root}` = `{worktree}`:** take the settings line resolved above for that root, resolving it with the settings block when this run has not yet.
 
-If the settings line says `KNOWLEDGE=off`, skip write-back entirely. The machine, the repository and the personal settings can each turn knowledge off, and none can turn it back on (D-FEATURES-NARROW-ONLY). The fail-closed line says `KNOWLEDGE=off` too.
+If the settings line says `KNOWLEDGE=off`, skip write-back entirely. The fail-closed line says `KNOWLEDGE=off` too.
 
 **Step 2 — Write back only if at least one is true:**
 - This workflow changed files in a directory that is documented by an existing feature knowledge base (a documented area changed). Knowledge bases are written through at that point, never on a background schedule.
-- This workflow found durable, cross-cutting knowledge about a codebase area that would help future agents working in the same area: patterns, anti-patterns, integration points, gotchas that a single file read does not show.
+- This workflow found durable, cross-cutting knowledge about a codebase area that future agents in that area need: patterns, anti-patterns, integration points, gotchas that a single file read does not show.
 
 Otherwise skip write-back silently.
 
@@ -584,13 +582,13 @@ Then commit the two files as your Commit Protocol directs."
 
 **Step 4 — Surface an uncommitted knowledge base:**
 
-When the Knowledge agent reports `KB_COMMIT: skipped (detached HEAD)`, the files were written but deliberately not committed — a commit on a detached HEAD becomes unreachable once HEAD moves. Tell the user in the workflow's final report, in one line, that the knowledge base was written but not committed, and name the uncommitted paths the agent listed, so they can commit them on a branch before the worktree is removed. Never commit them yourself.
+When the Knowledge agent reports `KB_COMMIT: skipped (detached HEAD)`, tell the user in the workflow's final report, in one line, that the knowledge base was written but not committed, and name the uncommitted paths the agent listed, so they can commit them on a branch. Never commit them yourself.
 
 Non-blocking: if the Knowledge agent fails, log the failure and continue.
 
 ## Principles
 
-1. **Orchestration only** - Command spawns agents, never does work itself (no tests, builds or fixes); "Spawn X" means call the Agent tool; the inline calls are the bounded plumbing the charter allows: the fresh base step's resolver calls (Phase 1, re-validation), the Phase 10 and 11 pushes, the Phase 10 ci-wait call, the Phase 11 evidence publish call and the evidence script checks
+1. **Orchestration only** - Command spawns agents, never does work itself (no tests, builds or fixes); "Spawn X" means call the Agent tool; the inline calls are the bounded plumbing the charter allows: the fresh base step's resolver calls (Phase 1, re-validation), the Phase 10 and 11 pushes, the Phase 10 ci-wait call, the Phase 6-8 evidence claim calls, the Phase 11 evidence publish call and the evidence script checks
 2. **Honest reporting** - Display agent outputs directly
 3. **Loop limits** - Max 2 validation retries, max 2 alignment fix iterations, max 2 QA retries before escalating to user; the CI gate allows at most 3 waits and 2 fixes
 4. **CI awareness** - CI status is checked before merge; test-plan evidence (Phase 11) is recorded under every strategy

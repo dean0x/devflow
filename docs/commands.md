@@ -209,7 +209,7 @@ The command boundary is the human gate: each stage returns to you before the nex
 
 ## /dynamic-tickets
 
-Generalized ticket-factory — turn an initiative or spec into a reviewed, wave-structured ticket slate with a tracking issue.
+Ticket factory — turn an initiative or spec into a reviewed, wave-structured ticket slate with a tracking issue.
 
 Breaks an initiative or feature spec into discrete, dependency-ordered implementation tickets. Each ticket gets an acceptance-criteria block and a wave assignment. Produces the ticket files and a tracking-issue document, written by the Synthesize agent, under `.devflow/docs/tickets/{slug}/{timestamp}/`.
 
@@ -223,7 +223,7 @@ Typical flow: write a spec (`spec.md`), run `/dynamic-tickets` over it, then del
 
 ## /dynamic-plan
 
-Parallel wave planning — plan-challenge every ticket, produce acceptance criteria + test plans, auto-resolve decisions against the preference profile, output DECISIONS-NEEDED.md.
+Parallel wave planning — challenge each ticket plan, write acceptance criteria and test plans, resolve decisions from the preference profile, output `DECISIONS-NEEDED.md`.
 
 Takes a ticket directory (from `/dynamic-tickets`) or a list of tracker issues and runs a parallel planning pass: for each ticket, challenges the design, writes detailed acceptance criteria and a test plan of TP lines, and resolves known decisions against `~/.devflow/preference-profile.md`. After the workflow, each plan's test plan is checked with `verify-evidence.cjs check tp`, and a malformed one is named in the report. Plans and `DECISIONS-NEEDED.md` land under `.devflow/docs/design/{slug}/{timestamp}/`; unresolved decisions go to the user for review.
 
@@ -233,7 +233,7 @@ Takes a ticket directory (from `/dynamic-tickets`) or a list of tracker issues a
 
 ## /dynamic-build
 
-Dependency-aware build engine — implement, review, and verify a single ticket or a full wave of tickets using devflow agents.
+Dependency-aware build engine — implement, review and verify one ticket or a wave of tickets.
 
 Executes the devflow implement→review→verify pipeline for one ticket or all tickets in a wave, respecting dependency order. Each ticket runs as a separate Code agent on the branch the Git agent's setup-task created for it — the engine never names a branch itself, and a ticket whose setup reports no branch stops; cross-ticket dependencies block until their prerequisites are merged into the integration branch.
 
@@ -248,7 +248,7 @@ Executes the devflow implement→review→verify pipeline for one ticket or all 
 
 ## /dynamic-profile
 
-Decision-preference profile distiller — mine past session transcripts across all projects to write `~/.devflow/preference-profile.md`.
+Decision-preference profile distiller — mine past session transcripts of all projects into `~/.devflow/preference-profile.md`.
 
 Scans Claude Code session transcripts from all known projects (under `$CLAUDE_CONFIG_DIR` when it is an absolute path, else `~/.claude`), extracts repeated design and implementation preferences (style choices, library selections, architectural patterns), and writes a structured preference profile. Consumed by `/dynamic-plan` to auto-resolve common decisions without human intervention.
 
@@ -262,4 +262,4 @@ Not a command — a two-hook orchestrator system (git repos only):
 
 **Orchestrator charter** — A `SessionStart` hook (`session-start-orchestrator`) injects a charter of up to ~850 tokens that establishes the main session as an orchestrator, routing each delegation to the roster agent that fits the kind of work — never pinning a model, so each agent runs on its configured model — and naming the installed devflow workflows for real-scale work; work that fits no row goes to the closest roster agent, never general-purpose. Judgment work stays mainline, plus one bounded inline exception: a single git, gh or script command whose output stays under about 40 lines, never a diff, log or test run. `devflow init` renders the charter for the plugins that are installed: it names only the installed workflows, and it routes gate failures and debug work by what is installed (Fix when a plugin ships it, else Code; `devflow:debug` when installed, else Explore investigates and Code fixes). After you update the package, run `devflow init` to refresh the charter.
 
-**Per-prompt dispatch** — A `UserPromptSubmit` hook (`preamble`) handles three cases: (1) prompts beginning `Implement the following plan:` invoke `devflow:implement`, but only while it is installed — otherwise the prompt gets the reminder of case 3; (2) slash commands are silenced; (3) all other prompts get a 2-line orchestrator reminder that names no specific skill or agent. Both hooks are silent outside git repos.
+**Per-prompt dispatch** — A `UserPromptSubmit` hook (`preamble`) handles three cases: (1) prompts beginning `Implement the following plan:` invoke `devflow:implement`, but only while it is installed — otherwise the prompt gets the reminder of case 3; (2) slash commands are silenced; (3) all other prompts get a one-line orchestrator reminder that names no specific skill or agent. Both hooks are silent outside git repos.

@@ -9,7 +9,7 @@
  *
  * What this file holds:
  *   - every compiled curation-on command that loads decisions states the rule and the pointer to the
- *     full index (fourteen hosts, counted where they are read);
+ *     full index (thirteen hosts, counted where they are read; dynamic-profile loads no decisions);
  *   - the fan-out notes name ONE shared slice, and the Knowledge spawn block takes the slice for its
  *     directories;
  *   - no curation-off variant carries any of it;
@@ -25,7 +25,7 @@ import { readFileSync } from 'fs'
 import * as path from 'path'
 
 import { requireDistFile, resolveCurationOffSource } from '../helpers.js'
-import { MDS_COMMAND_HOSTS } from '../fixtures/mds-manifest.js'
+import { DECISIONS_COMMAND_HOSTS } from '../fixtures/mds-manifest.js'
 
 const ROOT = path.resolve(import.meta.dirname, '../..')
 
@@ -61,20 +61,25 @@ function collectHostsCarrying(texts: ReadonlyMap<string, string>, literals: read
 }
 
 const onTexts = (): Map<string, string> =>
-  new Map(MDS_COMMAND_HOSTS.map(h => [h, requireDistFile(`${h}.md`)] as const))
+  new Map(DECISIONS_COMMAND_HOSTS.map(h => [h, requireDistFile(`${h}.md`)] as const))
 
 const offTexts = (): Map<string, string> =>
-  new Map(MDS_COMMAND_HOSTS.map(h => [h, resolveCurationOffSource('commands', h) ?? ''] as const))
+  new Map(DECISIONS_COMMAND_HOSTS.map(h => [h, resolveCurationOffSource('commands', h) ?? ''] as const))
 
 // ---------------------------------------------------------------------------
 // Curation-on hosts
 // ---------------------------------------------------------------------------
 
 describe('decisions slice — every compiled curation-on host states the rule and the full-index pointer', () => {
-  it('reads all fourteen command hosts', () => {
+  it('reads all thirteen decisions hosts', () => {
     const texts = onTexts()
-    expect(texts.size).toBe(14)
+    expect(texts.size).toBe(13)
     for (const [host, text] of texts) expect(text.length, `${host} compiled empty`).toBeGreaterThan(1000)
+  })
+
+  it('dynamic-profile loads no decisions, so it carries none of the rule', () => {
+    const profile = new Map([['dynamic-profile', requireDistFile('dynamic-profile.md')]])
+    expect(collectHostsCarrying(profile, [...RULE_LITERALS, 'full index'])).toEqual([])
   })
 
   it('each host carries the marker, the shared-slice rule and the include-when-unsure rule', () => {
@@ -163,9 +168,9 @@ describe('decisions slice — the Knowledge spawn block takes the slice for its 
 // ---------------------------------------------------------------------------
 
 describe('decisions slice — a curation-off build carries none of it', () => {
-  it('reads all fourteen curation-off hosts', () => {
+  it('reads all thirteen curation-off hosts', () => {
     const texts = offTexts()
-    expect(texts.size).toBe(14)
+    expect(texts.size).toBe(13)
     for (const [host, text] of texts) expect(text.length, `${host}: curation-off variant missing`).toBeGreaterThan(1000)
   })
 
@@ -174,13 +179,13 @@ describe('decisions slice — a curation-off build carries none of it', () => {
   })
 
   it('known-bad probe: the curation-on text run through the same collector is reported for every host', () => {
-    expect(collectHostsCarrying(onTexts(), [MARKER]).length).toBe(14)
+    expect(collectHostsCarrying(onTexts(), [MARKER]).length).toBe(13)
   })
 
   it('the curation-on text of each host differs from its curation-off text by the rule (the pair is not one file twice)', () => {
     const on = onTexts()
     const off = offTexts()
-    for (const host of MDS_COMMAND_HOSTS) {
+    for (const host of DECISIONS_COMMAND_HOSTS) {
       expect(on.get(host), `${host}: on/off identical`).not.toBe(off.get(host))
     }
   })

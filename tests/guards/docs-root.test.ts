@@ -66,6 +66,16 @@ const EXEMPTIONS: readonly Exemption[] = [
     line: 'verify-evidence.cjs" publish --pr {n} --evidence ".devflow/docs/evidence-wave-{slug}.md"',
     reason: 'the wave PR refresh runs inline after `cd "{integration worktree root}"` on the same line, so the repo-relative --evidence path resolves under the integration worktree root',
   },
+  {
+    file: 'dist/commands/implement.md',
+    line: 'verify-evidence.cjs" claim --evidence ".devflow/docs/evidence-{branch_slug}.md"',
+    reason: 'the claim call runs after `cd "{worktree}"` on the same line, so the repo-relative --evidence path resolves under the worktree root; the script gates the value to ^[A-Za-z0-9._/-]{1,255}$, which an absolute path with a space would fail',
+  },
+  {
+    file: 'dist/commands/dynamic-build.md',
+    line: 'verify-evidence.cjs" claim --evidence ".devflow/docs/evidence-wave-{slug}.md"',
+    reason: 'the wave claim call runs after `cd "{integration worktree root}"` on the same line, so the repo-relative --evidence path resolves under the integration worktree root',
+  },
 ]
 
 interface RelativeDocsUse {

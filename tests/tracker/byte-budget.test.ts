@@ -203,8 +203,10 @@ import type {
  * tests/fixtures/numeric-floors.json. Lowering re-pins that entry's value AND its
  * pattern in the same commit; that is the permitted direction for a ceiling, and the
  * manifest guard's probe still proves an INCREMENT would go red.
+ *
+ * Re-derived by #712 (lean Git agent) from a measured 10_144 plus the 80 ch headroom: 10_224.
  */
-const BUDGET_GIT_MD = 10_823;
+const BUDGET_GIT_MD = 10_206;
 
 /**
  * Design-time derivation: the PRE-SPLIT capture of skills/git/SKILL.md, less the
@@ -221,8 +223,11 @@ const BUDGET_GIT_MD = 10_823;
  * characters (D-SKILL-DESCRIPTION-CAP), a measured 6_365 plus the 80 ch general
  * headroom: 6_445. The body, which is what the derivation above prices, is
  * unchanged.
+ *
+ * Lowered by #708 (lean Code-path skills): the body was cut to a measured 6_074,
+ * plus the same 80 ch headroom: 6_154.
  */
-const BUDGET_SKILL_MD = 6_445;
+const BUDGET_SKILL_MD = 6_154;
 
 /**
  * THE GITHUB-PATH loaded-set ceiling — the worst-case cost of a tracker spawn
@@ -261,11 +266,17 @@ const BUDGET_SKILL_MD = 6_445;
  * moved from the Code agent into the Git agent's ensure-pr-ready reference (D-PR-BY-GIT), which
  * grew by its paste gates (about 6 KB) but stays under the worst op, so the row did not move.
  *
+ * Re-derived by #710 (lean spawn-wide skills) from a measured 40_720 plus the 80 ch headroom: 40_800.
+ * The preloaded worktree-support skill fell by 334 ch, and #708 had cut the git skill by 291 ch.
+ *
+ * Re-derived by #712 (lean Git agent) from a measured 40_145 plus the 80 ch headroom: 40_225.
+ * dist/agents/git.md fell by 575 ch (10_719 to 10_144).
+ *
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set` in
  * tests/fixtures/numeric-floors.json; lowering re-pins the value AND the pattern
  * in the same commit.
  */
-const BUDGET_LOADED_SET = 41_529;
+const BUDGET_LOADED_SET = 40_174;
 
 /**
  * THE JIRA-SCOPED loaded-set ceiling — a spawn under the Jira provider.
@@ -299,6 +310,8 @@ const BUDGET_LOADED_SET = 41_529;
  * worst op's contract now inside its own reference). Re-derived by #448 from a measured 51_833
  * plus the 80 ch general headroom: 51_913. The PR-opening paste gates grew ensure-pr-ready, which
  * stays under the worst op.
+ * Re-derived by #710 from a measured 51_104 plus the 80 ch headroom: 51_184 (the same preload cuts).
+ * Re-derived by #712 from a measured 50_529 plus the 80 ch headroom: 50_609 (the git.md cut).
  * The row measures 72_488 today, 56 ch under the 72_544 ceiling #445 left it. Trimming
  * `references/tracker/_mcp.md` is the honest first move: it is contract prose, it
  * is the single largest term this row adds over the GitHub one, and a pass over it
@@ -307,7 +320,7 @@ const BUDGET_LOADED_SET = 41_529;
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-jira` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_JIRA = 51_913;
+const BUDGET_LOADED_SET_JIRA = 50_558;
 
 /**
  * THE LINEAR-SCOPED loaded-set ceiling — a spawn under the Linear provider.
@@ -342,10 +355,13 @@ const BUDGET_LOADED_SET_JIRA = 51_913;
  * post-wave-report's hop, which on this provider alone is priced: its marker's second
  * discriminator is stated only there.
  *
+ * Re-derived by #710 from a measured 51_700 plus the 80 ch headroom: 51_780 (the same preload cuts).
+ * Re-derived by #712 from a measured 51_125 plus the 80 ch headroom: 51_205 (the git.md cut).
+ *
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-linear` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_LINEAR = 52_509;
+const BUDGET_LOADED_SET_LINEAR = 51_154;
 
 /**
  * THE PR-HOST loaded-set ceiling — the worst-case cost of a spawn that runs one of
@@ -395,10 +411,13 @@ const BUDGET_LOADED_SET_LINEAR = 52_509;
  * the row ranges over eight operations and #448's paste gates, which landed in ensure-pr-ready, do
  * not reach it. Re-derived by #448 as that measurement plus the 80 ch general headroom: 24_786.
  *
+ * Re-derived by #710 from a measured 23_895 plus the 80 ch headroom: 23_975 (the same preload cuts).
+ * Re-derived by #712 from a measured 23_320 plus the 80 ch headroom: 23_400 (the git.md cut).
+ *
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-pr-host` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_PR_HOST = 24_786;
+const BUDGET_LOADED_SET_PR_HOST = 23_349;
 
 /**
  * THE PER-OPERATION LOAD CAP (D-OP-LOAD-CAP) — no single Git operation may load more

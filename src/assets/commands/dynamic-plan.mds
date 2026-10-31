@@ -1,5 +1,5 @@
 ---
-description: Parallel wave planning — plan-challenge every ticket, produce acceptance criteria + test plans, auto-resolve decisions against the preference profile, output DECISIONS-NEEDED.md
+description: Parallel wave planning — challenge each ticket plan, write acceptance criteria and test plans, resolve decisions from the preference profile, output DECISIONS-NEEDED.md
 argument-hint: "[tickets-dir | issue-list]"
 output-dir: dist/commands
 ---
@@ -16,13 +16,15 @@ output-dir: dist/commands
 
 {{settings.settings_resolve()}}
 
+Run this call with the start directory as `{root}` in the same turn as the `resolve-root.cjs` call and the profile read: none needs the output of another.
+
 <!-- curation:end -->
 {{authoring_decisions()}}
 ---
 
 ## dynamic-plan — author and run a parallel planning + plan-challenge workflow
 
-This command instructs you to construct and run a Claude Code dynamic Workflow that plans all tickets in parallel, challenges each plan (gaps, edge cases, side-effects), produces well-structured acceptance criteria and a test plan for each ticket (consumed by `/devflow:dynamic-build`'s Gate 2), runs a cross-plan conflict critic, auto-resolves decisions matching the user's preference profile, and writes per-ticket plan files + one `DECISIONS-NEEDED.md`.
+Author and run a dynamic Workflow that plans and challenges every ticket in parallel, audits the plans against each other, and auto-resolves the decisions the preference profile settles.
 
 {{agent_roster()}}
 
@@ -40,9 +42,8 @@ This command instructs you to construct and run a Claude Code dynamic Workflow t
 Before authoring, verify:
 
 1. **Workflow tool available:** if the `Workflow` tool is not in your available tools, STOP and tell the user: "The Workflow tool is not available in this session. dynamic-plan requires Claude Code's dynamic workflow runtime."
-2. **`agentType` support:** confirmed available (spike F5, 2026-06-11).
-3. **Tracker paths:** a list of issue references or URLs is read through the Git agent, which resolves the configured tracker and its access itself and reports `TRACEABILITY: DEGRADED ({reason})` when it cannot read an issue — then fall back to reading ticket `.md` files from a local path. No tracker CLI is checked here.
-4. **No-remote path:** if the repo has no remote, read ticket files from the provided local path; the Git agent reports DEGRADED for any issue it cannot reach.
+2. **Tracker paths:** a list of issue references or URLs is read through the Git agent, which resolves the configured tracker and its access itself and reports `TRACEABILITY: DEGRADED ({reason})` when it cannot read an issue — then fall back to reading ticket `.md` files from a local path. No tracker CLI is checked here.
+3. **No-remote path:** if the repo has no remote, read ticket files from the provided local path; the Git agent reports DEGRADED for any issue it cannot reach.
 
 ---
 
@@ -60,12 +61,12 @@ Apply the `devflow:apply-decisions` algorithm to the DECISIONS_CONTEXT loaded by
 <!-- curation:end -->
 **2. Read the preference profile**
 
-Check whether `~/.devflow/preference-profile.md` exists:
+Run this in the same turn as the `resolve-root.cjs` call:
 ```bash
 cat ~/.devflow/preference-profile.md 2>/dev/null || echo "(no preference profile)"
 ```
 
-If present, note its contents as `PREFERENCE_PROFILE`. This will be used to auto-resolve decisions that match established taste. If absent, proceed with a one-line note in the output: "No preference profile found — run `/devflow:dynamic-profile` to generate one."
+If present, note its contents as `PREFERENCE_PROFILE`. If absent, proceed with a one-line note in the output: "No preference profile found — run `/devflow:dynamic-profile` to generate one."
 
 **3. Resolve ticket input**
 
@@ -82,29 +83,27 @@ Determine the ticket source from `COMMAND_INPUT` (in priority order):
 
 {{issue_ref_grammar()}}
 
-Read or note the tickets. The agents will read them in full; you need the list and any key constraints.
+Note the tickets and their key constraints; the agents read them in full.
 
 {{issue_capture_contract()}}
 
 ---
 
-### CRITICAL (F4) — AskUserQuestion at the command boundary, NOT inside the workflow
+### AskUserQuestion at the command boundary, never inside the workflow
 
-A workflow cannot pause mid-run. Open design decisions collected in `DECISIONS-NEEDED.md` are surfaced to the user via **AskUserQuestion AFTER the workflow returns** — at the command boundary. The workflow only WRITES the file; the command (you, the main model) reads it and asks.
+A workflow cannot pause mid-run. It only writes `DECISIONS-NEEDED.md`; you read the file and ask after the workflow returns.
 
 After the workflow completes:
-1. **Check each plan's test plan.** For every path in `planPaths`, copy that plan's `## Test Plan` section — the heading and its TP lines, up to the next `## ` heading — byte for byte into a fresh `mktemp` file with the Write tool, never through an interpolated shell string, and run:
+1. **Check each plan's test plan.** For every path in `planPaths`, copy that plan's `## Test Plan` section — the heading and its TP lines, up to the next `## ` heading — byte for byte into a new file in a `mktemp -d` folder with the Write tool, never through an interpolated shell string, and run the check below on it. Batch the plans: one `mktemp -d` call, one turn of parallel Writes, one file per plan, and one Bash call runs every check, each behind an `echo "file=<that file>"` line:
 
 ```bash
 node "$HOME/.devflow/scripts/verify-evidence.cjs" check tp <that file>; echo "exit=$?"
 ```
 
-   Check the section, never the whole plan file: the plan's other `## ` headings are not evidence-file sections, so the script would parse the whole document as the plan. `exit=0` passes. Any other result names that plan `test plan malformed (<code>)` in your summary, `<code>` being the code the script printed on stderr; a plan with no `## Test Plan` section copies as an empty file, which the script refuses. Nothing is repaired: `/devflow:dynamic-build` passes no test plan from that plan.
-2. Read the `decisionsNeededPath` returned by the workflow (e.g. `{worktree}/.devflow/docs/design/<slug>/<ts>/DECISIONS-NEEDED.md`). Always use the OUTDIR-scoped path the workflow wrote — never the flat `{worktree}/.devflow/docs/design/DECISIONS-NEEDED.md`.
-3. First surface the **Auto-Resolved Decisions** section (decision → resolution → source) for audit, then surface ALL open **Decisions Needed** to the user in ONE batched `AskUserQuestion` (never one-at-a-time).
+   Check the section, never the whole plan file. `exit=0` passes. Any other result names that plan `test plan malformed (<code>)` in your summary, `<code>` being the code the script printed on stderr; a plan with no `## Test Plan` section copies as an empty file, which the script refuses. Nothing is repaired: `/devflow:dynamic-build` passes no test plan from that plan.
+2. Read the `decisionsNeededPath` the workflow returned, in the same turn as the checks — never the flat `{worktree}/.devflow/docs/design/DECISIONS-NEEDED.md`.
+3. First surface the **Auto-Resolved Decisions** section (decision → resolution → source) for audit, then ask all open **Decisions Needed** in one batched `AskUserQuestion`, never one at a time.
 4. The user's answers feed into their own plan edits or a follow-up `/devflow:dynamic-plan` run.
-
-State this explicitly in the workflow script as a comment: `// AskUserQuestion happens at the command boundary after this workflow returns — NOT here.`
 
 ---
 
@@ -141,7 +140,7 @@ If the source is a directory, read all .md files. If the source is tracker issue
 Return: array of ticket objects with all fields.`, { agentType: "Git" })
 );
 
-// Phase 2: Plan all tickets in parallel — one Design agent per ticket
+// Phase 2: Plan all tickets in parallel — one agent per ticket
 const plans = await phase("plan-parallel", () =>
   parallel((tickets || []).map(ticket => () =>
     agent(`Write an implementation plan for this ticket.
@@ -151,12 +150,12 @@ Decisions context (apply devflow:apply-decisions; a plan file can be posted to t
 <!-- curation:end -->
 The plan must cover: approach overview, affected files and modules, key design decisions, implementation sequence (what to build first), risks and mitigations, and any open questions you cannot resolve from the ticket alone.
 Write a thorough but tight plan — every section must earn its place for a Code agent who has no other context.
-Return: { ticketTitle, planMarkdown, openDecisions (array of genuine unknowns requiring user input) }.`, { agentType: "Design" })
+Return: { ticketTitle, planMarkdown, openDecisions (array of genuine unknowns requiring user input) }.`, { agentType: "Architect" })
   ))
 );
 
 // Phase 3: Plan-challenge — one adversarial challenger per ticket (parallel)
-// Challenge verbatim intent (§5.1): hunt improvements, gaps, edge cases, side-effects, and produce acceptance criteria + test plan.
+// Keep the challenge intent below verbatim; never paraphrase it.
 const challenged = await phase("plan-challenge", () =>
   parallel((plans || []).map((plan, i) => () =>
     agent(`Challenge this implementation plan. Verbatim challenge intent:
@@ -180,9 +179,9 @@ Test-plan line contract:
 ${TP_CONTRACT}
 
 Acceptance criteria quality bar (apply strictly):
-- Vague criteria ("the feature should work correctly") are NOT acceptable — reject and rewrite.
-- Implementation-coupled criteria ("the function must call X") are NOT acceptable — test behavior, not implementation.
-- Untestable criteria are NOT acceptable.
+- Vague criteria ("the feature should work correctly") are not acceptable — reject and rewrite.
+- Implementation-coupled criteria ("the function must call X") are not acceptable — test behavior, not implementation.
+- Untestable criteria are not acceptable.
 
 Return: { ticketTitle, improvements (array), acceptanceCriteria (array of numbered strings), testPlan (array of TP-line strings, TP-1 first), testScenarios (array of {tp, setup, outcome}), openDecisions (array) }.`, { agentType: "Evaluate" })
   ))
@@ -212,8 +211,6 @@ Return: { conflicts (array of {tickets, conflictDescription, proposedResolution}
 );
 
 // Phase 5: Preference-profile auto-resolution
-// Read the profile and auto-resolve any open decisions that match established taste.
-// Decisions NOT settled by the profile accumulate in DECISIONS-NEEDED.md.
 const resolved = await phase("preference-resolve", () =>
   agent(`Apply the preference profile to auto-resolve open design decisions.
 Preference profile: ${PREFERENCE_PROFILE || "(none — no profile found)"}
@@ -270,19 +267,9 @@ Return: { planPaths (array), decisionsNeededPath (string), decisionsNeededCount 
 
 ---
 
-The plan-challenge step (Phase 3 above) MUST produce the acceptance criteria and test plan shape that `/devflow:dynamic-build`'s Gate 2 consumes:
+Phase 3 must produce the acceptance criteria and test plan shape that `/devflow:dynamic-build`'s Gate 2 consumes:
 
 {{acceptance_criteria_contract()}}
-
----
-
-### Artifact paths
-
-Per-ticket plans → `{worktree}/.devflow/docs/design/{slug}/{ts}/{ticket-slug}-plan.md`
-
-Decisions needed → `{worktree}/.devflow/docs/design/{slug}/{ts}/DECISIONS-NEEDED.md`
-
-`{worktree}` is the docs root resolved in Pre-authoring setup (it honours `WORKTREE_PATH` when provided).
 
 ---
 
@@ -299,10 +286,4 @@ The workflow returns:
 }
 ```
 
-After the workflow returns: check each plan's test plan (step 1 of the F4 list above), then read `DECISIONS-NEEDED.md`. First briefly surface the **Auto-Resolved Decisions** section (decision → resolution → source) so silently-settled calls are visible and reversible, then surface ALL open **Decisions Needed** in ONE batched `AskUserQuestion` (never one-at-a-time). Do not ask questions mid-workflow — this is F4. If no preference profile was found, note in your summary: "no preference profile found — N decisions were surfaced that a profile might have auto-resolved; consider `/devflow:dynamic-profile`."
-
----
-
-### Maintenance note
-
-This recipe encodes the planning pipeline as of the authoring date (2026-06-12). The plan-challenge verbatim intent (§5.1) is load-bearing — do not paraphrase it when authoring the challenger agent prompt. The "Acceptance criteria + test plan contract" section above is the shared shape with `/devflow:dynamic-build` Gate 2; any change must be kept in sync. No tooling detects drift — by design (the LLM-vs-plumbing Iron Rule).
+After the workflow returns: check each plan's test plan, then read `DECISIONS-NEEDED.md` and ask, as the list above says. If no preference profile was found, note in your summary: "no preference profile found — N decisions were surfaced that a profile might have auto-resolved; consider `/devflow:dynamic-profile`."

@@ -1,6 +1,6 @@
 ---
 name: Explore
-description: "Read-only search agent for broad fan-out searches, when answering means sweeping many files, directories or naming conventions and you only need the conclusion, not the file dumps. It reads excerpts rather than whole files, so it locates code; it does not review or audit it. Specify search breadth: quick for one targeted lookup, medium for moderate exploration, very thorough for multiple locations and naming conventions."
+description: "Read-only search agent for broad fan-out searches across many files, directories or naming conventions, when you need only the conclusion, not the file dumps. It reads excerpts, so it locates code; it does not review or audit it. Specify breadth: quick for one targeted lookup, medium, or very thorough for many locations and naming conventions."
 model: sonnet
 effort: high
 tools:
@@ -38,7 +38,6 @@ Match effort to the breadth the caller names; with none, use medium.
 - Be fast. Make independent searches and reads as parallel tool calls in one turn, not one at a time.
 - Find paths with `git ls-files '<glob>'` inside a repository (it honors .gitignore) or `find <dir> -name '<glob>'` elsewhere.
 - Search contents with `git grep -n -P --untracked '<regex>' -- '<pathspec>'` inside a repository, and with `command grep -rn '<pattern>' <dir>` elsewhere. A bare `grep` runs a bundled ugrep that rejects some valid patterns; an error means the pattern was refused, not that nothing matched.
-- Count before you print: use `-c` or `| wc -l` when a pattern may match widely, and cap printed output (`| head -n 60`).
 - Read with `offset` and `limit` once a search names the spot. Read a whole file only when it is short and the question needs all of it.
 
 ## Core rules

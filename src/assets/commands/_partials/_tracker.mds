@@ -1,7 +1,7 @@
 @define issue_ref_grammar():
 **Issue-reference grammar.** Scan `COMMAND_INPUT` for candidate issue references: a `#`-prefixed token or a bare digit run. Collect them in source order as `ISSUE_REFS`, and forward the list to the Git agent verbatim. Do not render, normalise, pad, strip or drop a token. Under `github`, a token that matches `^#?[1-9][0-9]{0,8}$` is a reference, and the Git agent renders it as `#{n}`.
 
-There is no producer-side grammar check: the operation that runs decides each token, and its Output block gives the result. `fetch-issue` uses a non-numeric token as a search term and returns the first open match or nothing. `fetch-issues-batch` drops a token that it cannot resolve and names it in `NOT_FOUND ({refs})`.
+There is no producer-side grammar check: the operation that runs decides each token, and its Output block gives the result.
 
 Note: under `github`, only the Git agent decides if a bare digit run is a reference. This command holds no provider knowledge.
 @end

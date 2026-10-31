@@ -255,6 +255,29 @@ describe('composeScripts', () => {
     expect(lines[0]).toMatch(SETTINGS_LINE_RE);
   }, SUBPROCESS_TIMEOUT_MS);
 
+  it('copies resolve-root.cjs beside resolve-settings.cjs, and the INSTALLED root resolver loads it (install path pin)', async () => {
+    // resolve-root.cjs requires ./resolve-settings.cjs through __dirname, so the pair only
+    // works when both land side by side at the top of the scripts dir.
+    const target = path.join(tmpDir, 'scripts');
+    await composeScripts(target);
+
+    for (const rel of ['resolve-root.cjs', 'resolve-settings.cjs']) {
+      const installed = path.join(target, rel);
+      await expect(fs.access(installed), `${rel} not found in the scripts dir`).resolves.toBeUndefined();
+      expect((await fs.readFile(installed, 'utf-8')).length, `${rel} must be non-empty`).toBeGreaterThan(0);
+    }
+
+    // Outside a repository both roots are the directory itself.
+    const home = path.join(tmpDir, 'home');
+    await fs.mkdir(home, { recursive: true });
+    const shim = buildScriptedShim(createFakeBin(tmpDir), tmpDir, [
+      { tool: 'git', args: ['rev-parse', '--show-toplevel'], exit: 128, stderr: 'fatal: not a git repository\n' },
+    ]);
+    const run = runResolver({ home, args: [home], script: path.join(target, 'resolve-root.cjs'), shim });
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.stdout).toBe(`WORKTREE=${home}\nLEDGER=${home}\n`);
+  }, SUBPROCESS_TIMEOUT_MS);
+
   it('copies pr-evidence.cjs and verify-evidence.cjs to the top level, and the INSTALLED verify-evidence.cjs loads its sibling under the composed {"type":"module"} package (install path pin)', async () => {
     // verify-evidence.cjs requires pr-evidence.cjs through __dirname, so the pair
     // only works when both land side by side at the top of the scripts dir. Running

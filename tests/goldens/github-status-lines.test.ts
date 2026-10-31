@@ -4,10 +4,10 @@
  * Measurements pinned to the current git-agent.md golden (lines are NEWLINE
  * counts, the unit every `*_LINES` baseline below is measured in):
  *
- *   tests/fixtures/golden/git-agent.md          35,225 ch / 783 L   (== dist/agents/git.md)
- *   src/assets/skills/git/SKILL.md               6,365 ch / 213 L
- *   src/assets/skills/worktree-support/SKILL.md  1,502 ch / 40 L
- *   Total (all three)                           43,092 ch / 1,036 L
+ *   tests/fixtures/golden/git-agent.md          10,144 ch / 130 L   (== dist/agents/git.md)
+ *   src/assets/skills/git/SKILL.md               6,074 ch / 193 L
+ *   src/assets/skills/worktree-support/SKILL.md  1,168 ch / 34 L
+ *   Total (all three)                           17,386 ch / 357 L
  *
  * The post-Phase-0 figures the budget is derived FROM — git.md 65,677 ch / 992 L,
  * SKILL.md 9,205 ch / 283 L, total 77,824 ch / 1,367 L — are the pre-split
@@ -156,17 +156,17 @@ export const PRE_PHASE0_GIT_MD_LINES = 938
 // Phase-0 char baselines (JS `.length`, not bytes) — named constants so Phase-2's
 // byte-budget.test.ts can import them without re-deriving (C6). These are equality
 // baselines: they move only in the same commit as the golden fixture.
-export const GIT_MD_CHARS = 10_719
-export const GIT_MD_LINES = 133
+export const GIT_MD_CHARS = 10_126
+export const GIT_MD_LINES = 130
 // SKILL_GIT_CHARS/SKILL_GIT_LINES pin src/assets/skills/git/SKILL.md, the
 // preloaded skill file the git-agent golden above cross-references. Like
 // GIT_MD_CHARS/GIT_MD_LINES, this is an equality baseline: it moves only in
 // the same commit that edits SKILL.md's bytes — never afterwards, and never
 // to make a red test green on its own.
-export const SKILL_GIT_CHARS = 6_365
-export const SKILL_GIT_LINES = 213
-export const SKILL_WORKTREE_CHARS = 1_502
-export const SKILL_WORKTREE_LINES = 40
+export const SKILL_GIT_CHARS = 6_074
+export const SKILL_GIT_LINES = 193
+export const SKILL_WORKTREE_CHARS = 1_135
+export const SKILL_WORKTREE_LINES = 34
 /**
  * The preloaded set's total size across the three files above — pinned literals,
  * not a sum of the constants.
@@ -179,8 +179,8 @@ export const SKILL_WORKTREE_LINES = 40
  * golden-regeneration commit that moves the parts, never on their own to clear a
  * red assertion.
  */
-export const TOTAL_CHARS = 18_586
-export const TOTAL_LINES = 386
+export const TOTAL_CHARS = 17_335
+export const TOTAL_LINES = 357
 
 // Fixture invariants — these ARE bytes (Buffer.byteLength), not JS .length
 export const FIXTURE_BYTES = 18_167

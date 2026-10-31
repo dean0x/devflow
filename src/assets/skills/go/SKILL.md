@@ -12,7 +12,7 @@ activation:
 
 # Go Patterns
 
-Reference for Go-specific patterns, idioms, and best practices. Full bibliography: `references/sources.md`.
+Full bibliography: `references/sources.md`.
 
 ## Iron Law
 
@@ -22,126 +22,37 @@ Reference for Go-specific patterns, idioms, and best practices. Full bibliograph
 > return must be checked, wrapped with context, or explicitly documented as intentionally
 > ignored with `_ = fn()`. "Errors are values. Values can be programmed." — Rob Pike [5]
 
-## When This Skill Activates
+## Error Handling
 
-Working with Go codebases — error handling, interfaces, goroutines, channels, packages.
+- Wrap with context, `return fmt.Errorf("finding user %s: %w", id, err)`, not a bare `return err`: the caller loses context.
+- Declare sentinel errors (`var ErrNotFound = errors.New("not found")`) and match them with `errors.Is`.
+- Never discard an error with `val, _ := fn()`: check it, wrap it, or ignore it on purpose with `_ = fn()`.
+- No `panic` or `log.Fatal` in library code.
 
----
+## Interface Design
 
-## Error Handling [5][6]
+- Accept interfaces: `NewService(repo Repository)`, not `NewService(repo *PostgresRepo)`.
+- Define an interface at the consumer when it is used, not at the producer before use.
+- Keep interfaces small (1-3 methods) and compose them (`ReadWriter` embeds `Reader` and `Writer`).
 
-```go
-// BAD: return err  — caller loses context
-// GOOD: return fmt.Errorf("reading config %s: %w", path, err)
+## Concurrency
 
-var ErrNotFound = errors.New("not found")
+- Do not communicate by sharing memory; share memory by communicating.
+- Pass `context.Context` as the first parameter.
+- Give every goroutine a clear lifecycle and cancellation, for example `errgroup.WithContext`. A bare `go fn()` leaks.
+- Specify channel direction in signatures: `chan<- int`, `<-chan int`.
 
-func FindUser(id string) (*User, error) {
-    u, err := db.Get(id)
-    if err != nil {
-        return nil, fmt.Errorf("finding user %s: %w", id, err)
-    }
-    if u == nil { return nil, ErrNotFound }
-    return u, nil
-}
-// Caller: if errors.Is(err, ErrNotFound) { ... }
-```
+## Package Design and Zero Values
 
----
-
-## Interface Design [7][14]
-
-```go
-// "The bigger the interface, the weaker the abstraction" — Rob Pike [7]
-// BAD: func NewService(repo *PostgresRepo) *Service
-// GOOD: func NewService(repo Repository) *Service — accept interfaces [14]
-
-// Small interfaces compose cleanly [1]
-type Reader interface { Read(p []byte) (n int, err error) }
-type Writer interface { Write(p []byte) (n int, err error) }
-type ReadWriter interface { Reader; Writer }
-```
-
----
-
-## Concurrency [9][10][13]
-
-CSP (Hoare [9]): "Do not communicate by sharing memory; share memory by communicating." [10]
-
-```go
-// Context cancellation with errgroup [16][22]
-func Process(ctx context.Context, items []Item) error {
-    g, ctx := errgroup.WithContext(ctx)
-    for _, item := range items {
-        g.Go(func() error { return processItem(ctx, item) })
-    }
-    return g.Wait()
-}
-
-// Channel direction prevents misuse at compile time [1][8]
-func producer(ch chan<- int) { ch <- 42 }
-func consumer(ch <-chan int) { v := <-ch; _ = v }
-```
-
----
-
-## Package Design [15][17]
-
-```go
-// BAD: models/, controllers/, services/
-// GOOD: user/, order/, payment/  — organize by domain [15]
-
-func (s *Service) validate(u *User) error { ... }   // unexported — internal only
-func (s *Service) CreateUser(ctx context.Context, req CreateUserReq) (*User, error) { ... }
-```
-
----
-
-## Zero Values [1]
-
-```go
-var mu sync.Mutex; var buf bytes.Buffer  // Ready to use — no init needed
-
-type Config struct {
-    Timeout time.Duration // zero = no timeout
-    Retries int           // zero = no retries
-}
-```
-
----
-
-## Anti-Patterns
-
-| Pattern | Violation | Source |
-|---------|-----------|--------|
-| Ignoring error | `val, _ := fn()` | [5][2] |
-| Naked return | `return` in named returns | [2][4] |
-| init() abuse | Complex `init()` with side effects | [1][12] |
-| Interface pollution | Interface defined before use | [14][7] |
-| Goroutine leak | `go fn()` without lifecycle | [13][16] |
-| Panic in library | `panic(err)` in non-main code | [1][4] |
-
----
+- Organize packages by domain (`user/`, `order/`), not by type (`models/`, `controllers/`). Keep internals unexported.
+- Make zero values ready to use (`sync.Mutex`, `bytes.Buffer`; a zero `Timeout` means no timeout).
+- No naked `return` in functions with named returns.
+- No complex `init()` with side effects.
 
 ## Extended References
 
-- `references/sources.md` — Full bibliography (25 sources)
-- `references/violations.md` — Violations with citations [5][6][7][12][13]
-- `references/patterns.md` — Extended patterns with citations [1][3][11][18][19]
+- `references/sources.md` — Full bibliography
+- `references/violations.md` — Violations with citations
+- `references/patterns.md` — Extended patterns with citations
 - `references/detection.md` — Grep patterns for automated detection
-- `references/concurrency.md` — CSP-grounded concurrency patterns [9][10][13][22]
-
----
-
-## Checklist
-
-- [ ] All errors checked or explicitly ignored with `_ =` [5]
-- [ ] Errors wrapped with `fmt.Errorf("context: %w", err)` [6]
-- [ ] Interfaces defined at consumer, not producer [14]
-- [ ] Interfaces kept small (1-3 methods) [7]
-- [ ] Context as first parameter [16]
-- [ ] Goroutines have clear lifecycle/cancellation [13]
-- [ ] Channel direction specified in signatures [8]
-- [ ] Packages organized by domain, not by type [15]
-- [ ] No `init()` with side effects [1]
-- [ ] No `panic` or `log.Fatal` in library code [4]
+- `references/concurrency.md` — CSP-grounded concurrency patterns

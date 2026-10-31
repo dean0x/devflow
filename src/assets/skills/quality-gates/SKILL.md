@@ -1,24 +1,20 @@
 ---
 name: quality-gates
-description: This skill should be used when evaluating implementation quality before submission.
+description: Use when evaluating implementation quality before submission.
 user-invocable: false
 allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 
 # Self-Review Framework
 
-Systematic self-review for the Harden agent. Evaluate implementation against 9 pillars. **Fix issues, don't just report them.**
-
-Based on [Google Engineering Practices](https://google.github.io/eng-practices/review/reviewer/looking-for.html).
+Self-review for the Harden agent: evaluate the implementation against 9 pillars, and fix the issues you find.
 
 ## Iron Law
 
-> **FIX BEFORE RETURNING**
+> **Fix before returning**
 >
-> Self-review is not a report generator. It's a quality gate. If you find a P0 or P1 issue,
-> you fix it. You only return when all critical issues are resolved. Pride in craftsmanship.
-
----
+> Self-review is a quality gate, not a report. If you find a P0 or P1 issue, fix it.
+> Return only when every critical issue is resolved, or a P0 issue is BLOCKED.
 
 ## The 9 Pillars
 
@@ -48,102 +44,19 @@ Errors handled explicitly? No swallowed exceptions, helpful messages, resources 
 ### P1 - Tests
 New code tested? Covers happy path, errors, edges. Tests behavior, not implementation.
 
-### P2 - Naming and Consistency
-Owned by the Polish agent, which applies the project's naming and style standards. Report both as SKIP; do not judge or fix them here.
-
 ### P2 - Documentation
 Will others understand? Complex logic commented, public APIs documented, no outdated comments.
 
----
+## Process
 
-## Quick Examples
+Evaluate P0, then P1, then P2, and fix each issue when you find it. If a P0 issue cannot be fixed, stop and report the blocker.
 
-### Design Red Flag
-```typescript
-// BAD: Direct DB in controller (violates layers)
-class UserController {
-  async getUser(req, res) {
-    const user = await db.query('SELECT * FROM users WHERE id = ?', [req.params.id]);
-  }
-}
-```
-
-### Security Red Flag
-```typescript
-// BAD: SQL injection
-const query = `SELECT * FROM users WHERE email = '${email}'`;
-
-// BAD: Missing auth
-app.delete('/api/users/:id', async (req, res) => {
-  await deleteUser(req.params.id);  // No auth check!
-});
-```
-
----
-
-## Self-Review Process
-
-### Step 1: Gather Changes
-```bash
-git diff --name-only HEAD~1
-git diff HEAD~1
-```
-
-### Step 2: Evaluate P0 Pillars
-Check Design, Functionality, Security. If issues found and fixable, fix immediately. If unfixable, STOP and report blocker.
-
-### Step 3: Evaluate P1 Pillars
-Check Complexity, Error Handling, Tests. Fix issues found.
-
-### Step 4: Evaluate P2 Pillars
-Check Documentation and fix it if straightforward. Naming and Consistency are the Polish agent's: SKIP.
-
-### Step 5: Generate Report
-Document status of each pillar, fixes applied, and overall readiness.
-
----
-
-## Output Format
-
-```markdown
-## Self-Review Report
-
-### P0 Pillars
-- Design: PASS/FIXED
-- Functionality: PASS/FIXED
-- Security: PASS/FIXED
-
-### P1 Pillars
-- Complexity: PASS/FIXED
-- Error Handling: PASS/FIXED
-- Tests: PASS/FIXED
-
-### P2 Pillars
-- Naming: SKIP (Polish agent)
-- Consistency: SKIP (Polish agent)
-- Documentation: PASS/FIXED
-
-### Summary
-Issues Found: {n}, Fixed: {n}
-Status: PASS / FIXED / BLOCKED
-```
-
----
+Report each pillar as PASS, FIXED or BLOCKED, Naming and Consistency as SKIP, and the overall Status: PASS / FIXED / BLOCKED.
 
 ## Extended References
 
-For detailed checklists, examples, and red flags for each pillar:
-- See `references/patterns.md` (9-pillar evaluation patterns and issue classification)
-- See `references/violations.md` (pillar-organized anti-patterns and P0/P1 red flags)
-
-For complete report templates and examples:
-- See `references/report-template.md`
-
----
-
-## Integration
-
-Used by:
-- **Harden agent**: Dedicated self-review in fresh context after the Code agent completes
-
-The self-review ensures implementations meet quality standards before external review, catching issues early.
+Read one only when a pillar judgment needs more detail:
+- `references/patterns.md`: 9-pillar evaluation patterns and issue classification
+- `references/violations.md`: pillar-organized anti-patterns and P0/P1 red flags
+- `references/stub-detection.md`: stub and wiring-gap patterns
+- `references/report-template.md`: complete report templates and examples

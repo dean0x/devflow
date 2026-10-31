@@ -57,13 +57,23 @@ export const KNOWLEDGE_COMMAND_HOSTS = [
   'self-review',
 ] as const;
 
-/** The 4 dynamic-workflow command hosts (src/assets/commands/<name>.mds). */
+/** The 4 dynamic command hosts (src/assets/commands/<name>.mds); three author a Workflow, dynamic-profile does not. */
 export const DYNAMIC_COMMAND_HOSTS = [
   'dynamic-build',
   'dynamic-plan',
   'dynamic-profile',
   'dynamic-tickets',
 ] as const;
+
+/**
+ * The command hosts that load decisions behind the CURATION gate: every one but dynamic-profile,
+ * one plain Knowledge spawn that passes no DECISIONS_CONTEXT. Each carries a curation arm.
+ */
+export const DECISIONS_COMMAND_HOSTS: readonly string[] = [
+  ...KNOWLEDGE_COMMAND_HOSTS,
+  ...DYNAMIC_COMMAND_HOSTS.filter(h => h !== 'dynamic-profile'),
+  'release',
+];
 
 /** The release command host (src/assets/commands/release.mds). */
 export const RELEASE_COMMAND_HOSTS = ['release'] as const;
@@ -108,7 +118,7 @@ export const MDS_PARTIALS = [
  * source path — the same addressing as MDS_REFERENCE_MODULES, and for the same
  * reason: a basename is only unique inside one directory.
  *
- * Six today. `_common.mds` holds the lines every tracker module writes
+ * Seven today. `_common.mds` holds the lines every tracker module writes
  * identically, including the CLI provider's — the counterpart to `_mcp.mds`,
  * which owns what is shared only by the TOOL-CALL providers. `_steps.mds` holds the
  * provider-neutral step text of the tracker operations that left the Git agent
@@ -118,7 +128,9 @@ export const MDS_PARTIALS = [
  * and inline steps, written once (D-OP-CONTRACT-ONCE) and split three ways by
  * importer for the same compile-cost reason. `agents/_partials/_code.mds` holds the text the
  * three Code variants share (D-CODE-VARIANTS), imported by the `code`, `fix` and
- * `refactor` agent hosts. Each is a partial because it declares no
+ * `refactor` agent hosts. `agents/_partials/_design.mds` holds the text the two Design
+ * variants share (D-DESIGN-VARIANTS), imported by the `design` and `architect` agent
+ * hosts. Each is a partial because it declares no
  * `output-dir:`: the build skips it and it reaches the artifact only through the
  * modules that import it.
  *
@@ -134,6 +146,7 @@ export const MDS_REFERENCE_PARTIALS = [
   'src/assets/mds/git/_ops_pr.mds',
   'src/assets/mds/git/_ops_steps.mds',
   'src/assets/agents/_partials/_code.mds',
+  'src/assets/agents/_partials/_design.mds',
 ] as const;
 
 /**
@@ -185,13 +198,13 @@ export const EVIDENCE_POLICY_PARTIAL_ADOPTERS = [
 
 /**
  * The hosts whose compiled text carries the `_partials/_settings.mds` block (#392,
- * D-SETTINGS-LINE): all 14 command hosts, each expanding `settings_resolve()` exactly
- * once, before the earliest of its consumers. The hosts import the partial themselves,
+ * D-SETTINGS-LINE): every command host but dynamic-profile (13), each expanding
+ * `settings_resolve()` exactly once, before the earliest of its consumers. The hosts import the partial themselves,
  * as alias imports; no partial does. Named as a set for the same reason as the rosters
  * above: the provider-scope guard allowlists the block's closed provider set in exactly
  * these files, and tests/commands/settings-partial.test.ts holds the set to the build.
  *
- * The block count (14) and the curation-off count (8) are test-local constants beside
+ * The block count (13) and the curation-off count (8) are test-local constants beside
  * their assertions, not manifest rows: a count held here would be a second place to
  * keep in step with this set.
  */
@@ -201,7 +214,6 @@ export const SETTINGS_BLOCK_HOSTS = [
   'debug',
   'dynamic-build',
   'dynamic-plan',
-  'dynamic-profile',
   'dynamic-tickets',
   'explore',
   'implement',
@@ -215,8 +227,8 @@ export const SETTINGS_BLOCK_HOSTS = [
 /**
  * The hosts whose curation-OFF build still carries the settings block: the ones with
  * a consumer other than curation (a compliance lens, a publication gate or a knowledge
- * write-back). The other six of SETTINGS_BLOCK_HOSTS (bug-analysis, dynamic-plan,
- * dynamic-profile, dynamic-tickets, release, research) only read the line for the
+ * write-back). The other five of SETTINGS_BLOCK_HOSTS (bug-analysis, dynamic-plan,
+ * dynamic-tickets, release, research) only read the line for the
  * decisions gate or a Skim spawn, so the block sits inside their curation-on arm.
  * Named as a set; the curation-off count (8) is a test-local constant beside its
  * assertion.
@@ -234,15 +246,17 @@ export const SETTINGS_BLOCK_HOSTS_CURATION_OFF = [
 
 /**
  * Generator hosts: .mds sources outside src/assets/commands/ that compile to a
- * destination other than dist/commands. Twelve today, all agents:
+ * destination other than dist/commands. Thirteen today, all agents:
  * src/assets/agents/{name}.mds → dist/agents/{name}.md. Git is the first; the other
- * eleven (the agents that declare curation input, plus Skim) are hosts so their
+ * twelve (the agents that declare curation input, plus Skim) are hosts so their
  * curation arms can be built into the curation-off variant. Code is three hosts
  * (D-CODE-VARIANTS): `code`, `fix` and `refactor`, which share
- * `src/assets/agents/_partials/_code.mds`. The rest of the agents stay hand-authored,
+ * `src/assets/agents/_partials/_code.mds`. Design is two hosts (D-DESIGN-VARIANTS):
+ * `design` and `architect`, which share `src/assets/agents/_partials/_design.mds`. The rest of the agents stay hand-authored,
  * and an agent never has both an .md and an .mds source.
  */
 export const MDS_GENERATOR_HOSTS = [
+  'architect',
   'code',
   'debug',
   'design',
@@ -264,9 +278,9 @@ export const MDS_GENERATOR_HOSTS = [
  * same reason as every other roster here: a count stays green when one host
  * loses its arm and another gains one in the same commit.
  *
- * All 14 command hosts (each loads decisions, or hands them on, behind an arm)
- * and the eleven agent hosts that declare `DECISIONS_CONTEXT` (ten, the three Code
- * variants among them) or take the `CURATION` input (Skim). The Curate agent, `curate.md`, is hand-authored
+ * Every command host but dynamic-profile (13; each loads decisions, or hands them on, behind an arm)
+ * and the twelve agent hosts that declare `DECISIONS_CONTEXT` (eleven, the three Code
+ * variants and the two Design variants among them) or take the `CURATION` input (Skim). The Curate agent, `curate.md`, is hand-authored
  * and runs only when curation is on, so it has no variant. The assertions over
  * this set hold at every step: the printed variant count and the files under
  * `dist/curation-off/` both equal it in both directions, the packed tarball
@@ -274,8 +288,9 @@ export const MDS_GENERATOR_HOSTS = [
  * after its arm goes) turns one of them red.
  */
 export const CURATION_VARIANT_HOSTS: readonly string[] = [
-  ...MDS_COMMAND_HOSTS.map(h => `commands/${h}`),
+  ...DECISIONS_COMMAND_HOSTS.map(h => `commands/${h}`),
   ...[
+    'architect',
     'code',
     'debug',
     'design',

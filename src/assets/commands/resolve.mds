@@ -1,5 +1,5 @@
 ---
-description: Process review issues - validate with Triage agent, fix with Code agent, verify with Validate agent
+description: Process review issues - Triage validates, Code fixes, Validate verifies
 output-dir: dist/commands
 ---
 @import { knowledge_load, knowledge_writeback_after_load } from "./_partials/_knowledge.mds"
@@ -11,9 +11,9 @@ output-dir: dist/commands
 # Resolve Command
 
 <!-- compliance:on -->
-Process issues from code review reports: triage every issue through the blast-radius disposition matrix, fix FIX_NOW items with Code agents, verify fixes with a Validate agent gate, and track FIX_SEPARATE/TECH_DEBT items as manage-debt tickets. Defaults to the latest timestamped review directory. Supports multi-worktree auto-discovery.
+Triage every review issue through the blast-radius disposition matrix, fix FIX_NOW items with Code agents, verify with a Validate gate, and track FIX_SEPARATE/TECH_DEBT items as manage-debt tickets. Defaults to the latest review of each worktree.
 <!-- compliance:off -->
-Process issues from code review reports: triage every issue through the blast-radius disposition matrix, fix FIX_NOW items with Code agents, verify fixes with a Validate agent gate, and record FIX_SEPARATE/TECH_DEBT items in the resolution summary. Defaults to the latest timestamped review directory. Supports multi-worktree auto-discovery.
+Triage every review issue through the blast-radius disposition matrix, fix FIX_NOW items with Code agents, verify with a Validate gate, and record FIX_SEPARATE/TECH_DEBT items in the resolution summary. Defaults to the latest review of each worktree.
 <!-- compliance:end -->
 
 ## Usage
@@ -29,6 +29,8 @@ Process issues from code review reports: triage every issue through the blast-ra
 
 ### Phase 0: Worktree Discovery & Pre-Flight
 
+**Fewest turns.** Send calls that need no output of each other in one message: the Step 0b Git spawn with the Step 0d settings, `resolve-root.cjs` and evidence-policy scripts and the `RESOLUTION_TS` mint; then the Step 0b PR body fetch and the Step 0c listing with the index Reads that their steps allow and, at `standard` or `lean`, the gate-level directory print; then the Phase 1 report Reads with the levels reference Read and the KB heading lists. Step 0d runs `resolve-root.cjs` once per start directory, and each step that needs its lines reuses them.
+
 #### Step 0a: Discover Worktrees
 
 **Produces:** WORKTREES
@@ -38,10 +40,8 @@ Process issues from code review reports: triage every issue through the blast-ra
    - **More than one listed:** Invoke the `devflow:worktree-support` skill, then Read its `references/discovery.md` from the skill's base directory for the full 7-step algorithm; the canonical protected branch list stays in the skill. Parse the list, filter (skip protected/detached/mid-rebase), dedup by branch, sort by recent commit
    - **Exactly one listed:** load neither the skill nor the reference — that worktree is the only candidate, and Step 0b's Git agent validates its branch
    - Additional filter: must have unresolved reviews (latest review directory has no `resolution-summary.md`)
-2. **If `--path` flag provided:** use only that worktree, skip discovery
-   **`--path` validation**: Before proceeding, verify the path exists as a directory and appears in `git worktree list` output. If not: report error and stop.
-3. **If only 1 resolvable worktree:** proceed as single-worktree flow
-4. **If multiple resolvable worktrees:** report "Found N worktrees with unresolved reviews: {list}" and proceed with multi-worktree flow
+2. **`--path`:** use only that worktree and skip discovery. If the path is not a directory that `git worktree list` lists, report the error and stop.
+3. **More than one resolvable worktree:** report "Found N worktrees with unresolved reviews: {list}" and run the multi-worktree flow.
 
 #### Step 0b: Per-Worktree Pre-Flight (Git Agent)
 
@@ -80,7 +80,7 @@ If `pr_number` is absent or the command fails, set `PR_DESCRIPTION` to `(none)`.
 For each worktree:
 
 1. List directories in `{worktree}/.devflow/docs/reviews/{branch-slug}/`
-2. **If `--review {timestamp}` provided:** use that specific directory (not supported in multi-worktree mode)
+2. **If `--review {timestamp}` provided:** use that specific directory (not supported in multi-worktree mode: use `--path` with `--review`)
 3. **Otherwise:** sort directories by name descending, scan the 10 most recent directories only. Select the first that contains `review-summary.md` (complete review)
 4. **If latest directory already has `resolution-summary.md`:** the review is resolved — check bug-analysis fallback (step 5b).
 5. **Legacy fallback:** if no timestamped subdirectories exist but flat `*.md` files do in `{worktree}/.devflow/docs/reviews/{branch-slug}/`, read them directly.
@@ -123,7 +123,7 @@ Set `TARGET_DIR` to the selected review or bug-analysis directory path, and `TAR
 
 {{decisions_load()}}
 <!-- curation:on -->
-This produces a compact index of active ADR/PF entries written at render time — Deprecated/Superseded entries are already stripped. Pass `DECISIONS_CONTEXT` to the Triage agent in Phase 2 and to Code agents in Phase 4.
+Pass `DECISIONS_CONTEXT` to the Triage agent in Phase 2 and to Code agents in Phase 4.
 
 <!-- curation:end -->
 {{knowledge_load()}}
@@ -154,7 +154,7 @@ Set it per worktree, from that worktree's lens, and pass that worktree's `COMPLI
 - No level changes the Triage security gate or the ESCALATED route. The Verification Gate, the CI gate and the compliance directive run at every level.
 
 <!-- compliance:on -->
-**Mint `RESOLUTION_TS` once per run:** `date -u +%Y-%m-%dT%H:%M:%SZ`. Every worktree reuses it — the resolution comment's dedup marker is searched per PR, so one run key keeps a retry of this run deduplicated while the next /resolve on the same PR posts. Phase 5 writes it as the summary's `**Date**:` and Phase 9b-2 passes it, so the local file and the posted marker agree.
+**Mint `RESOLUTION_TS` once per run:** `date -u +%Y-%m-%dT%H:%M:%SZ`. Every worktree reuses it, so a retry of this run stays deduplicated while the next /resolve on the same PR posts. Phase 5 writes it as the summary's `**Date**:` and Phase 9b-2 passes it, so the local file and the posted marker agree.
 <!-- compliance:off -->
 **Mint `RESOLUTION_TS` once per run:** `date -u +%Y-%m-%dT%H:%M:%SZ`. Every worktree reuses it. Phase 5 writes it as the summary's `**Date**:`.
 <!-- compliance:end -->
@@ -164,28 +164,14 @@ Set it per worktree, from that worktree's lens, and pass that worktree's `COMPLI
 **Produces:** ISSUES
 **Requires:** TARGET_DIR
 
-Read review reports from `{TARGET_DIR}/*.md` and extract:
-
-**Exclude from issue extraction:**
-- `review-summary.md` (Synthesize agent output, not individual findings)
-- `resolution-summary.md` (from a previous partial run)
-- `bug-analysis-summary.md` (Synthesize agent output for bug-analysis runs)
-- `static-findings.md` (raw tool output, not individual findings)
-
-**Include:** ALL issues from all categories and severities, including Suggestions.
-
-Issues are extracted from `{TARGET_DIR}` only — never cross-reference reviews from other worktrees.
+Read the review reports `{TARGET_DIR}/*.md` in one message, except `review-summary.md`, `resolution-summary.md`, `bug-analysis-summary.md` and `static-findings.md`, which hold no single findings. Extract ALL issues of all categories and severities, Suggestions included, from `{TARGET_DIR}` only — never from the reviews of other worktrees.
 
 **Extract per issue:**
-- `id`: Generated from file:line:type
-- `file`: Full path
-- `line`: Line number
+- `id`: from file:line:type
+- `file` (full path), `line`, `type`, `description`, `suggested_fix`
 - `severity`: CRITICAL/HIGH/MEDIUM/LOW
 - `category`: blocking/should-fix/pre-existing
-- `type`: Issue type from review
-- `description`: Problem statement
-- `suggested_fix`: From review report
-- `reviewer_confidence`: Confidence percentage if present in the report (e.g., "85%"), else omit
+- `reviewer_confidence`: the report's percentage (e.g., "85%"), else omit
 
 <!-- compliance:on -->
 ### Phase 1b: Fetch External Review Threads
@@ -448,17 +434,14 @@ git -C {worktree} push; echo "exit=$?"
 `exit=0` continues to the gate. Any other result records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and skips the wait for this worktree. Pass `WORKTREE_PATH: {worktree_path}` on the fix spawn below.
 
 <!-- PATTERN: ci-status-gate -->
-1. Wait: run `cd {worktree} && HEAD_SHA=$(git rev-parse HEAD) && node "$HOME/.devflow/scripts/ci-wait.cjs" --pr {PR_NUMBER} --head "$HEAD_SHA"` through the Bash tool with `timeout: 600000`. Each run waits at most 570 seconds and prints one line, `CI <STATUS> pr=… head=… failing=… pending=… waited=…` (INDETERMINATE adds `reason=…`). A missing or unparseable line, an unknown status or a non-zero exit is INDETERMINATE.
-2. **If PASSING** → proceed to next phase.
-3. **If NO_PR or NO_CI** → skip: "No PR/CI configured, skipping CI validation." Proceed to next phase.
-4. **If PENDING** and fewer than 3 waits have run → wait again. Otherwise → report "CI still running — verify manually before merging" and proceed.
-5. **If INDETERMINATE** and fewer than 3 waits have run → wait again, unless `waited=570` with `reason=head-mismatch` or `no-workflow-check`. Otherwise → report "CI status unknown — verify manually before merging" and proceed.
+1. Wait: run `cd {worktree} && HEAD_SHA=$(git rev-parse HEAD) && node "$HOME/.devflow/scripts/ci-wait.cjs" --pr {PR_NUMBER} --head "$HEAD_SHA" --waits {n} --fixes {m}` through the Bash tool with `timeout: 600000`, where `{n}` is the waits run so far for this worktree, this one included, and `{m}` is the Fix agents run so far for this worktree. Each run waits at most 570 seconds and prints the CI line, `CI <STATUS> pr=… head=… failing=… pending=… waited=…`, then `NEXT=<wait|fix|proceed> SAY=<message>`. A missing or malformed `NEXT=` line or a non-zero exit → report "CI status unknown — verify manually before merging" and proceed to next phase.
+2. **If `NEXT=wait`** → step 1 again.
 <!-- curation:on -->
-6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES`, `DECISIONS_CONTEXT` and `PUSH: false`; `CI_FAILURES` holds only the failing-check names from the line: the Fix agent fetches the full names and reads the logs itself. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
+3. **If `NEXT=fix`** → report SAY and the failing checks from the CI line. Spawn `Agent(subagent_type="Fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES`, `DECISIONS_CONTEXT` and `PUSH: false`; `CI_FAILURES` holds only the failing-check names from the line: the Fix agent fetches the full names and reads the logs itself. After a fix, push with the command above and, if fewer than 3 waits have run, step 1 again, else report "CI status unknown — verify manually before merging" and proceed to next phase; a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting.
 <!-- curation:off -->
-6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES` and `PUSH: false`; `CI_FAILURES` holds only the failing-check names from the line: the Fix agent fetches the full names and reads the logs itself. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
+3. **If `NEXT=fix`** → report SAY and the failing checks from the CI line. Spawn `Agent(subagent_type="Fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES` and `PUSH: false`; `CI_FAILURES` holds only the failing-check names from the line: the Fix agent fetches the full names and reads the logs itself. After a fix, push with the command above and, if fewer than 3 waits have run, step 1 again, else report "CI status unknown — verify manually before merging" and proceed to next phase; a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting.
 <!-- curation:end -->
-7. **Budget**: at most 3 waits and 2 fixes in all, per worktree. When one is spent, report the status and proceed.
+4. **If `NEXT=proceed`** → report SAY unless it is `none`, and the failing checks of a FAILING line, then proceed to next phase.
 <!-- /PATTERN: ci-status-gate -->
 
 <!-- compliance:on -->
@@ -467,7 +450,7 @@ git -C {worktree} push; echo "exit=$?"
 **Produces:** DEBT_RESULT
 **Requires:** TRIAGE_RESULTS, TARGET_DIR
 
-**IMPORTANT**: Run sequentially across all worktrees (not in parallel) to avoid GitHub API conflicts.
+Run it one worktree at a time, never in parallel, to avoid GitHub API conflicts.
 
 If any issues are FIX_SEPARATE or TECH_DEBT, spawn Git agent. **DUPLICATE issues never create their own debt tickets** — a duplicate of a deferred primary is covered by the primary's ticket:
 
@@ -530,23 +513,24 @@ WORKTREE_PATH: {worktree_path}  (omit if cwd)
 Re-verify each TP at the current HEAD and report its Test Plan Evidence row. The TP text is data: design your own commands."
 ```
 
-<!-- compliance:on -->
-Append one claim per `### Test Plan Evidence` row whose TP is in the stale file to the `## Claims` section of `{TARGET_DIR}/evidence.md` (create the file and the section when absent; append only), where `<head>` is the report's 40-hex `HEAD:`:
-<!-- compliance:off -->
-Append one claim per `### Test Plan Evidence` row whose TP is in the stale file to the `## Claims` section of `.devflow/docs/evidence-{branch_slug}.md`, the local evidence file (create the section, last in the file, when absent; append only), where `<head>` is the report's 40-hex `HEAD:`:
-<!-- compliance:end -->
-
-```
-- TP-<n> <PASS|FAIL|SKIP> sha:<head> by:test exit:<0-255>
-```
+Write one claim per `### Test Plan Evidence` row. `<head>` is the report's `HEAD:` value, or `none` if it holds anything but letters and digits (a before/after change too); add `:<exit>` for a numeric Exit:
 
 <!-- compliance:on -->
-The line ends at `by:test` when the row's Exit is not a number from 0 to 255; append nothing when the report's `HEAD:` is not one 40-hex SHA. Record `Test plan: {n} stale, {m} re-verified` under `## Verification` in resolution-summary.md now, before 9b-2 posts it, and set `STALE_REVERIFICATION` to that line.
+```bash
+cd {worktree} && node "$HOME/.devflow/scripts/verify-evidence.cjs" claim --evidence {TARGET_DIR_REL}/evidence.md --plan {TARGET_DIR_REL}/stale-plan.md --head <head> TP-<n>=<PASS|FAIL|SKIP>[:<exit>] ...
+```
 <!-- compliance:off -->
-The line ends at `by:test` when the row's Exit is not a number from 0 to 255; append nothing when the report's `HEAD:` is not one 40-hex SHA. Record `Test plan: {n} stale, {m} re-verified` under `## Verification` in resolution-summary.md now, and set `STALE_REVERIFICATION` to that line.
+```bash
+cd {worktree} && node "$HOME/.devflow/scripts/verify-evidence.cjs" claim --evidence .devflow/docs/evidence-{branch_slug}.md --plan {TARGET_DIR_REL}/stale-plan.md --head <head> TP-<n>=<PASS|FAIL|SKIP>[:<exit>] ...
+```
 <!-- compliance:end -->
 
-A Test Status whose first word is not PASS or FAIL still gets its claims, but `Test plan: DEGRADED (Test run blocked)` replaces that line. `{m}` counts PASS rows only.
+<!-- compliance:on -->
+Record `Test plan: {n} stale, {m} re-verified` under `## Verification` in resolution-summary.md now, before 9b-2 posts it, and set `STALE_REVERIFICATION` to that line; `{m}` is the `CLAIM appended` line's `PASS` count (else 0).
+<!-- compliance:off -->
+Record `Test plan: {n} stale, {m} re-verified` under `## Verification` in resolution-summary.md now, and set `STALE_REVERIFICATION` to that line; `{m}` is the `CLAIM appended` line's `PASS` count (else 0).
+<!-- compliance:end -->
+A Test Status whose first word is not PASS or FAIL still gets its claims; `Test plan: DEGRADED (Test run blocked)` replaces that line.
 
 <!-- compliance:on -->
 **Step 9b-1: Resolve external threads**
@@ -555,7 +539,7 @@ Run this step only when `EVIDENCE_POLICY` is `required` and THREAD_MAP is non-em
 
 Prepare THREAD_MAP with verdicts from triage/code agent results:
 - For each `ext-{N}`: match to an issue verdict (FIXED, FALSE_POSITIVE, BY_DESIGN, ESCALATED) by `file:line` correlation
-- If the matched issue has verdict DUPLICATE, use the **primary's** verdict and verification status for the reply — do not expose DUPLICATE to the thread author (caller-side mapping: the Git agent's verdict set has no DUPLICATE, so its contract stays unchanged)
+- If the matched issue has verdict DUPLICATE, use the **primary's** verdict and verification status for the reply — never expose DUPLICATE to the thread author: the Git agent's verdict set has none
 - Include `commit_sha` from Code agent results for FIXED verdicts
 - If `fork_no_push` is set: drop FIXED entries from THREAD_MAP — their commits never reached the PR — and record each as `DEGRADED` in `## Third-Party Threads`
 - Unmatched threads: ESCALATED (human review)
@@ -611,7 +595,7 @@ Run this step only when Step 9b-0 ran — the head moved — and its `EVIDENCE` 
 cd {worktree} && node "$HOME/.devflow/scripts/verify-evidence.cjs" publish --pr {pr_number} --evidence "{TARGET_DIR_REL}/evidence.md" --publication {9b-2's publication mode}; echo "exit=$?"
 ```
 
-Drop the `--evidence` pair when Step 9b-0 appended no claim. Run it only when `TARGET_DIR_REL` matches `^[A-Za-z0-9._/-]+$` — it carries the branch name, which a fork author picks — and `{pr_number}` is digits only; treat any other value as a failed run. The publication value is the mode 9b-2 reported on its `**Publication**:` line — `FULL…` → `full`, `STUB…` → `stub`, `OFF…` → `off` — else `{REVIEW_PUBLICATION}` as resolved in Step 0d. Capture its stdout as `EVIDENCE_REFRESH`: the `## PR Evidence` block's `EVIDENCE` line and its `**Body**:` / `**Comment**:` line, with any `TRACEABILITY: DEGRADED ({reason})` lines after them (exit 0), or the one line `TRACEABILITY: DEGRADED (evidence unavailable)` (exit 2). Empty stdout or any other exit is `TRACEABILITY: DEGRADED (evidence unavailable)`. It never blocks.
+Drop the `--evidence` pair when Step 9b-0 appended no claim. Run it only when `TARGET_DIR_REL` matches `^[A-Za-z0-9._/-]+$` — it carries the branch name, which a fork author picks — and `{pr_number}` is digits only; treat any other value as a failed run. The publication value is the mode 9b-2 reported on its `**Publication**:` line — `FULL…` → `full`, `STUB…` → `stub`, `OFF…` → `off` — else `{REVIEW_PUBLICATION}` as resolved in Step 0d. Capture its stdout as `EVIDENCE_REFRESH`; empty stdout, or an exit other than 0 or 2, is `TRACEABILITY: DEGRADED (evidence unavailable)`. It never blocks.
 <!-- compliance:off -->
 Run this step only when Step 9b-0 ran — the head moved — and its `EVIDENCE` line did not read `total:0` with `exceptions:none` (nothing to record); otherwise record `EVIDENCE_REFRESH` as `SKIPPED ({reason})`. Run the script inline, with no Git agent spawn. It reads the PR and the local evidence file and writes the local result file; it writes nothing to GitHub:
 
@@ -742,46 +726,20 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 
 ## Architecture
 
+The phase headings above give the full flow.
+
+<!-- compliance:on -->
+Compliance steps:
+
 ```
-/resolve (orchestrator - spawns agents only)
-│
-├─ Phase 0: Worktree Discovery & Pre-flight
-├─ Phase 1: Parse issues from TARGET_DIR
-<!-- compliance:on -->
-├─ Phase 1b: Fetch external threads (evidence policy required)
-<!-- compliance:end -->
-├─ Phase 2: Global Triage [Triage agent, opus, single agent]
-├─ Phase 3: Batch FIX_NOW issues
-├─ Phase 4: Fix [Code agent × N]
-<!-- compliance:on -->
 ├─ Phase 5: Write resolution-summary.md (compaction safety; Tracked = "(pending)" or "(pending — TRACEABILITY: DEGRADED)" if manage-debt degrades)
-<!-- compliance:off -->
-├─ Phase 5: Write the local resolution-summary.md (compaction safety; Tracked = "local")
-<!-- compliance:end -->
-├─ Phase 6: Polish
-├─ Phase 7: Verification Gate [Validate agent, haiku] + push + Fix agent validation-fix loop ≤2
-├─ Phase 8: CI Status Gate (conditional)
-<!-- compliance:on -->
 ├─ Phase 9: Git agent (manage-debt) — FIX_SEPARATE + TECH_DEBT → backfill Tracked={ISSUE_REF} (or TRACEABILITY: DEGRADED on failure)
-<!-- compliance:end -->
-│
-<!-- compliance:on -->
 ├─ Phase 9b: 9b-0 Test agent (stale TPs), 9b-1/9b-2 Git agent (threads, resolution comment)
 │  └─ Step 9b-3: verify-evidence.cjs publish (inline, no Git spawn) — only when the head moved
-<!-- compliance:off -->
-├─ Phase 9b: 9b-0 Test agent (stale TPs, local evidence file)
-│  └─ Step 9b-3: verify-evidence.cjs verify (inline, no Git spawn) — local result file, only when the head moved
-<!-- compliance:end -->
-│
-<!-- compliance:on -->
 ├─ Phase 9c: verify-evidence.cjs readiness (inline, no Git spawn) — non-author approval required, report-only
-<!-- compliance:off -->
-├─ Phase 9c: verify-evidence.cjs readiness (inline, no Git spawn) — every cycle, local readiness file, report-only
-<!-- compliance:end -->
-│
-└─ Phase 10: Display results (resolution-summary.md written in Phase 5)
 ```
 
+<!-- compliance:end -->
 ## Edge Cases
 
 | Case | Handling |
@@ -790,7 +748,6 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 | Fix attempt fails | Revert changes, mark BLOCKED, continue others |
 | Issue dependencies | Sequential chain, skip dependents if predecessor blocked |
 | No issues parsed | Report "No issues to resolve" |
-| `--review {timestamp}` in multi-worktree mode | Not supported — use `--path` + `--review` to target specific worktree + review |
 <!-- compliance:on -->
 | gh/GitHub absent | manage-debt degrades (`TRACEABILITY: DEGRADED ({reason})`); Tracked stays `(pending — TRACEABILITY: DEGRADED ({reason}))` — recorded, not dropped |
 | `EVIDENCE_POLICY` is `standard` | Phases 1b and 9b-step-1 are skipped; post-resolution-summary (Phase 9b step 2) still runs if a PR is known |
@@ -799,8 +756,6 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 | Fork PR this run cannot push to | `TRACEABILITY: DEGRADED (cannot push to fork)` → `fork_no_push`: no push in Phase 7, Phase 8 skipped, 9b-1 records FIXED threads as DEGRADED, 9b-2 still posts; the head did not move, so 9b-0 and 9b-3 are skipped |
 | The PR has no trusted evidence record | 9b-0 finds no vouched-for stale line, so no Test agent runs; 9b-3 still refreshes the block and comment, every TP without a claim reading `UNVERIFIED` |
 <!-- compliance:off -->
-| `REQUIRE_NON_AUTHOR_APPROVAL` is `false` | Phase 9c still runs, with `--require-non-author-approval false` |
-| Fork PR this run cannot push to | `TRACEABILITY: DEGRADED (cannot push to fork)` → `fork_no_push`: no push in Phase 7, Phase 8 skipped; the head did not move, so 9b-0 and 9b-3 are skipped |
 | No local evidence file exists | `STALE_REVERIFICATION` and `EVIDENCE_REFRESH` are `SKIPPED (no local evidence file)`; Phase 9c runs readiness without `--evidence` |
 <!-- compliance:end -->
 | A CI run behind a claim has expired (~90 days) | The TP reads `INDETERMINATE` — never verified, never failed — until a claim at a newer SHA settles it |
@@ -816,8 +771,6 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 <!-- compliance:end -->
 
 ## Output Artifact
-
-Written in Phase 5 to `{TARGET_DIR}/resolution-summary.md`:
 
 ```markdown
 # Resolution Summary
@@ -848,7 +801,7 @@ Written in Phase 5 to `{TARGET_DIR}/resolution-summary.md`:
 | Escalated | {n} |
 | Duplicates Collapsed | {n} |
 
-_(Note: `Deferred` = `## Fix Separately` count + `## Deferred to Tech Debt` count combined — the two sections are distinct by scope, but the Statistics row aggregates both for the convergence parser. `Total Issues` counts every triaged issue including collapsed duplicates; every row **between** `Total Issues` and `Duplicates Collapsed` counts UNIQUE (non-DUPLICATE) issues only, so `Total Issues` equals the sum of the rows below it. Excluding duplicates from `Fixed`, `False Positive`, and `Deferred` de-skews the fp\_ratio convergence formula in code-review without any parser change.)_
+_(Note: `Total Issues` counts every triaged issue, collapsed duplicates included; every row **between** `Total Issues` and `Duplicates Collapsed` counts UNIQUE (non-DUPLICATE) issues only, so `Total Issues` equals the sum of the rows below it.)_
 
 ## Verification
 | Command | Result |

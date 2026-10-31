@@ -1,6 +1,6 @@
 # Documentation Violation Examples
 
-Extended examples of documentation anti-patterns. See parent `SKILL.md` for brief examples and severity guidelines.
+Extended examples of documentation anti-patterns. See parent `SKILL.md` for the rules and severity guidelines.
 
 ---
 

@@ -1,13 +1,13 @@
 ---
 name: research-codebase
-description: Local codebase research — find patterns, trace flows, map dependencies
+description: Use when tracing the local codebase: patterns, flows, dependencies.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---
 
 # Codebase Research
 
-Local codebase research for finding patterns, tracing call flows, and mapping module dependencies. No external web access — all evidence comes from the local codebase.
+All evidence comes from the local codebase. No web access.
 
 ## Iron Law
 
@@ -21,61 +21,31 @@ Local codebase research for finding patterns, tracing call flows, and mapping mo
 
 **trusted** — Local code is the authoritative source. All findings carry maximum confidence.
 
-## When This Activates
-
-Loaded by Research agent when `RESEARCH_TYPE` is `codebase`. Covers:
-- Finding existing patterns before implementing new features
-- Tracing call chains to understand data flow
-- Mapping module boundaries and dependencies
-- Identifying conventions used across the codebase
-
----
-
 ## Methodology
 
 ### Step 1: Define Scope
 
-Before reading anything, define the scope:
-- Target area (directory, module, or concept)
-- What you are looking for (patterns, functions, conventions, dependencies)
-- What files are likely NOT relevant (test fixtures, generated files)
+Before reading, define the target area (directory, module or concept), what you look for (patterns, functions, conventions, dependencies), and which files are not relevant (test fixtures, generated files).
 
 ### Step 2: Structural Scan
 
-Use Glob and Grep to build a map before reading:
-
-```
-Glob: Find all files matching the area (e.g., src/auth/**/*.ts)
-Grep: Search for key terms, function names, type names
-```
-
-Use this to build a candidate file list. Do not read more than 15 files total.
+Before reading, map the area with Glob (file patterns, e.g. `src/auth/**/*.ts`) and Grep (key terms, function and type names), and build a candidate file list. Run Glob before claiming file structure. Do not read more than 15 files total.
 
 ### Step 3: Deep Read (Targeted)
 
-Read only the files that the structural scan identified as relevant. Read targeted ranges — not entire files — unless the file is under 50 lines.
+Read only the files the scan marked relevant, and only targeted ranges unless the file is under 50 lines.
 
 ### Step 4: Pattern Extraction
 
-For each observed pattern:
-- Record the first 3 occurrences with file:line
-- Describe the pattern in one sentence
-- Note any deviations from the pattern
-
-Only declare a pattern after finding 3+ consistent examples.
+For each pattern, record the first 3 occurrences with file:line, describe it in one sentence, and note deviations. Only declare a pattern after finding 3+ consistent examples.
 
 ### Step 5: Cross-Reference
 
-Before finalizing findings:
-- Check if patterns conflict with each other
-- Identify exceptions to patterns you found
-- Note if something appears in tests vs production code
+Before finalizing, check whether patterns conflict, identify exceptions, and note whether each example comes from tests or production code.
 
 ### Step 6: Structured Output
 
 Produce findings in the Output Format below. Every claim cites file:line.
-
----
 
 ## Output Format
 
@@ -121,15 +91,3 @@ Produce findings in the Output Format below. Every claim cites file:line.
 - {What was not investigated}
 - {Scope boundaries}
 ```
-
----
-
-## Anti-Patterns
-
-| Anti-Pattern | Correct Approach |
-|-------------|-----------------|
-| Reading entire files when only a section is needed | Read targeted line ranges |
-| Claiming a pattern from 1-2 examples | Require 3+ consistent occurrences |
-| Browsing without a defined question | Define scope in Step 1 first |
-| Asserting file structure without Glob verification | Run Glob before claiming structure |
-| Treating test code as production patterns | Note which context examples come from |

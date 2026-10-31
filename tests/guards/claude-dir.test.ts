@@ -278,7 +278,6 @@ export const ALLOWED_RULE_PROSE: readonly AllowedRuleProse[] = [
     binds: CLAUDE_DIR_PLACEHOLDER,
     files: [
       'dist/commands/dynamic-profile.md',
-      'dist/curation-off/commands/dynamic-profile.md',
       'src/assets/skills/agent-references/SKILL.md',
     ],
   },
@@ -312,7 +311,6 @@ export const SITE_ROWS: SiteRows = {
   'dist/commands/implement.md': 1,
   'dist/commands/resolve.md': 1,
   'dist/curation-off/commands/code-review.md': 1,
-  'dist/curation-off/commands/dynamic-profile.md': 1,
   'dist/curation-off/commands/plan.md': 2,
   'dist/curation-off/commands/implement.md': 1,
   'dist/curation-off/commands/resolve.md': 1,
@@ -331,6 +329,7 @@ export const SITE_ROWS: SiteRows = {
   'dist/curation-compliance-off/commands/implement.md': 1,
   'dist/curation-compliance-off/commands/plan.md': 2,
   'dist/curation-compliance-off/commands/resolve.md': 1,
+  'src/assets/skills/feature-knowledge/SKILL.md': 1,
 }
 
 /** What a file holds once the sanctioned line is taken out and each prose entry scoped to the file is replaced. */
@@ -490,7 +489,7 @@ function promptSurface(): CorpusClass[] {
     { label: 'references', files: readTree('dist/skills'), sentinel: 'dist/skills/git/references/publication-gate.md', floor: 20 },
     { label: 'skills', files: readTree('src/assets/skills'), sentinel: 'src/assets/skills/worktree-support/SKILL.md', floor: 30 },
     { label: 'rules', files: readTree('src/assets/rules'), sentinel: 'src/assets/rules/security.md', floor: 4 },
-    { label: 'curation-off', files: readTree('dist/curation-off'), sentinel: 'dist/curation-off/commands/code-review.md', floor: 25 },
+    { label: 'curation-off', files: readTree('dist/curation-off'), sentinel: 'dist/curation-off/commands/code-review.md', floor: 24 },
     { label: 'compliance-off', files: readTree('dist/compliance-off'), sentinel: 'dist/compliance-off/commands/implement.md', floor: 4 },
     { label: 'curation-compliance-off', files: readTree('dist/curation-compliance-off'), sentinel: 'dist/curation-compliance-off/commands/implement.md', floor: 3 },
     { label: 'compaction directive', files: [{ name: COMPACTION_ENTRY, content: compactDirectiveText() }], sentinel: COMPACTION_ENTRY, floor: 1 },

@@ -1,7 +1,89 @@
-# Extended Correct Pattern Examples
+# Correct Pattern Examples
 
-Additional examples of correct implementations beyond the core examples in SKILL.md.
+Correct implementations: the seven core patterns of SKILL.md, then extended examples.
 All patterns cite `references/sources.md`.
+
+---
+
+## Pattern 1: Result Types [1][5][6][18]
+
+```typescript
+type Result<T, E = Error> = { ok: true; value: T } | { ok: false; error: E };
+
+function createUser(data: unknown): Result<User, ValidationError> {
+  if (!valid(data)) return Err({ type: 'ValidationFailed', details: validate(data).errors });
+  return Ok(buildUser(data));
+}
+// Libraries: neverthrow [18], ts-results [19]. Theory: Moggi [5] + Wadler [6].
+```
+
+## Pattern 2: Dependency Injection [3]
+
+```typescript
+class UserService {
+  constructor(private db: Database, private emailer: EmailService) {}
+  // Test: new UserService(mockDb, mockEmailer) — never new Database() inside [3]
+}
+```
+
+## Pattern 3: Immutability [7][14]
+
+```typescript
+// New object, never mutate input; copy before .sort() [7][14]
+function updateUser(user: User, changes: Partial<User>): User {
+  return { ...user, ...changes };
+}
+```
+
+## Pattern 4: Functional Core, Imperative Shell [11]
+
+```typescript
+// PURE CORE: no I/O, deterministic [11]
+function calculateTotal(items: Item[], taxRate: number): number {
+  return items.reduce((sum, i) => sum + i.price, 0) * (1 + taxRate);
+}
+// IMPERATIVE SHELL: I/O at boundary only [11]
+async function processOrder(id: string): Promise<Result<Order, Error>> {
+  const order = await db.getOrder(id);
+  return Ok(await db.save({ ...order, total: calculateTotal(order.items, 0.1) }));
+}
+```
+
+## Pattern 5: Type Safety [4][2][21]
+
+```typescript
+// Discriminated unions — compiler enforces exhaustiveness [4][21]
+type UserError =
+  | { type: 'NotFound'; userId: string }           // carries full context [2]
+  | { type: 'ValidationFailed'; field: string; message: string };
+
+type Status = 'pending' | 'completed' | 'failed';
+function handleStatus(status: Status): string {
+  switch (status) {
+    case 'pending': return 'Waiting';
+    case 'completed': return 'Done';
+    case 'failed': return 'Error';
+  }  // Exhaustive — no default needed [21]
+}
+```
+
+## Pattern 6: Pipe Composition [20][13]
+
+```typescript
+const pipe = <T>(...fns: Array<(x: T) => T>) => (x: T) => fns.reduce((v, f) => f(v), x);
+const process = pipe(validate, normalize, enrich); // Composition as glue [20][13]
+```
+
+## Pattern 7: Resource Cleanup + Documentation [7]
+
+```typescript
+const handle = await fs.open(path);
+try { return Ok(parse(await handle.readFile())); }
+finally { await handle.close(); }
+
+// ARCHITECTURE: Repository returns domain objects only
+// ARCHITECTURE EXCEPTION: Direct DB for health check — must work if service layer down
+```
 
 ---
 

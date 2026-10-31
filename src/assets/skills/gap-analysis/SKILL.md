@@ -1,6 +1,6 @@
 ---
 name: gap-analysis
-description: This skill should be used when analyzing specs or plans for completeness gaps.
+description: Use when analyzing specs or plans for completeness gaps.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---
@@ -17,13 +17,9 @@ Domain expertise for detecting gaps in design documents, specifications, and pla
 > waiting to be written. Catch gaps in the plan so the implementation reflects reality,
 > not assumption. Evidence-required: every gap must cite specific text from the artifact.
 
----
-
 ## Focus Areas
 
 ### 1. Completeness
-
-Detect missing pieces that will block or break implementation.
 
 **Detection patterns:**
 - Missing acceptance criteria — requirements without testable success conditions
@@ -37,8 +33,6 @@ Detect missing pieces that will block or break implementation.
 
 ### 2. Architecture
 
-Detect design decisions that conflict with existing patterns or create structural problems.
-
 **Detection patterns:**
 - Implied patterns violating existing conventions — new module structure that contradicts codebase layout
 - Missing integration points — feature touches shared state but integration method unspecified
@@ -50,8 +44,6 @@ Detect design decisions that conflict with existing patterns or create structura
 **Evidence trigger:** Any design element that references an existing system component without specifying the integration contract.
 
 ### 3. Security
-
-Detect authentication, authorization, and data protection gaps.
 
 **Detection patterns:**
 - Auth gaps — feature creates new endpoints or data access without specifying auth requirements
@@ -65,8 +57,6 @@ Detect authentication, authorization, and data protection gaps.
 
 ### 4. Performance
 
-Detect design decisions that will cause performance problems at scale.
-
 **Detection patterns:**
 - N+1 patterns implied — loop-based data fetching without batch operation specified
 - Missing caching strategy — repeated expensive operations (DB queries, API calls) without cache layer
@@ -79,8 +69,6 @@ Detect design decisions that will cause performance problems at scale.
 
 ### 5. Consistency (multi-issue only)
 
-Detect contradictions and duplications across multiple issue specifications.
-
 **Detection patterns:**
 - Cross-issue contradictions — Issue A says feature X works one way, Issue B implies another
 - Duplicate requirements — same functionality specified in multiple issues without coordination
@@ -92,8 +80,6 @@ Detect contradictions and duplications across multiple issue specifications.
 
 ### 6. Dependencies (multi-issue only)
 
-Detect ordering constraints and shared resource conflicts across issues.
-
 **Detection patterns:**
 - Inter-issue ordering — Issue B depends on data/schema/interface created by Issue A
 - Shared resources — multiple issues modify the same file, table, or API without coordination
@@ -102,8 +88,6 @@ Detect ordering constraints and shared resource conflicts across issues.
 - Implicit sequencing — implementation order not specified but technically required
 
 **Evidence trigger:** Any issue that references state, contracts, or resources that may be in flux due to another issue in the batch.
-
----
 
 ## Extended References
 
@@ -119,17 +103,3 @@ Detect ordering constraints and shared resource conflicts across issues.
 | **HIGH** | Gap that will cause incorrect behavior or significant technical debt | Missing pagination on unbounded list, undefined race condition in concurrent update |
 | **MEDIUM** | Gap that will require rework if unaddressed | Vague acceptance criteria, missing caching strategy for frequently-read data |
 | **LOW** | Gap that is an improvement opportunity | Naming inconsistency, minor UX ambiguity with obvious resolution |
-
-## Confidence Calibration
-
-- **Report at 80%+**: Gap is clearly present, evidence directly cited
-- **Suggest at 60-79%**: Plausible gap, depends on context not visible in artifact
-- **Drop below 60%**: Speculation without textual evidence
-
-Output format per gap:
-```
-**[FOCUS] Gap: {title}** — Severity: {CRITICAL/HIGH/MEDIUM/LOW} | Confidence: {n}%
-Evidence: "{quoted text from artifact}"
-Issue: {what is missing or contradictory}
-Resolution: {concrete action to address the gap}
-```

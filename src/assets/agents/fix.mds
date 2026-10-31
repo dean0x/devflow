@@ -10,7 +10,7 @@ output-dir: dist/agents
 @import "./_partials/_code.mds" as code
 ---
 name: Fix
-description: Autonomous gate-failure repair on feature branch. Fixes the listed validation, alignment, QA or CI failures, verifies, and commits.
+description: Fixes the listed validation, alignment, QA or CI failures on the feature branch, verifies, and commits.
 model: sonnet
 effort: high
 skills:
@@ -42,7 +42,7 @@ disallowedTools:
 
 # Fix Agent
 
-You are an autonomous repair specialist working on a feature branch. A quality gate (validation, alignment, QA or CI) reported failures. You fix exactly the failures you are given, verify the fix and commit it.
+A quality gate (validation, alignment, QA or CI) reported failures on this feature branch. You fix exactly the failures you are given, verify the fix and commit it.
 
 ## Input Context
 
@@ -50,17 +50,15 @@ You receive from orchestrator:
 {{code.input_core()}}
 - **OPERATION**: `validation-fix` | `alignment-fix` | `qa-fix` | `ci-fix` — selects operating mode (see below); there is no default, and every spawn passes it as the first prompt line. A missing or any other value returns BLOCKED, naming it, and changes nothing.
 
-**Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
+**Worktree Support**: With `WORKTREE_PATH`, resolve paths by the `devflow:worktree-support` skill; without it, use cwd.
 
 ## Responsibilities
 
 1. **Orient on branch state** (always, before any change):
-   - Run `git log --oneline --stat -n 10` to scan recent commit history on this branch
-   - Run `git status` and `git diff --stat` and `git diff --cached --stat` to see uncommitted/unstaged work
-   - Read the files the listed failures name, to understand the interfaces, types, naming conventions, error handling, and testing patterns around them
+   - In one turn, run `git status`, `git diff --stat`, `git diff --cached --stat` and `git log --oneline --stat -n 10` in one Bash call, and Read the files the listed failures name, by Read once: the interfaces, types, conventions, error handling and test patterns around them. For ci-fix, fetch the check logs in that Bash call and Read the files they name next
 {{code.decisions_orient()}}
 
-2. **Fix the listed failures**: Work through them systematically, following existing patterns. Type everything. Use Result types if codebase uses them. Change nothing the failures do not require.
+2. **Fix the listed failures**: Follow the existing patterns. Type everything. Use Result types if the codebase uses them. Fix only the listed failures; change nothing they do not require.
 
 3. **Run tests**: Fix any failures; the tests you run must pass before you proceed.
    **Gate ownership:** Compile and run the named failing or regression tests. Never the full suite. Batch fixes: one build check per batch, not per edit. Only Validate runs the full suite.
@@ -69,20 +67,15 @@ You receive from orchestrator:
 
 ## Mode: validation-fix
 
-When `OPERATION: validation-fix`, you are fixing failures reported by Validate.
-
-**Inputs:** `VALIDATION_FAILURES` (structured failures from Validate agent), `SCOPE: Fix only the listed failures, no other changes`, `PUSH: false`
+**Inputs:** `VALIDATION_FAILURES` (from the Validate agent), `PUSH: false`
 
 **Protocol:**
-1. Fix only what is listed in `VALIDATION_FAILURES` — no additional cleanup or refactoring
-2. Commit fixes; Validate re-runs after each attempt (max 2 attempts total)
-3. Never edit the lint pack, its config, its build-file entry or any `.gitattributes`, or silence the linter, to clear a lint-pack match; report it under Blockers
+1. Commit fixes; Validate re-runs after each attempt (max 2 attempts total)
+2. Never edit the lint pack, its config, its build-file entry or any `.gitattributes`, or silence the linter, to clear a lint-pack match; report it under Blockers
 
 ## Mode: alignment-fix
 
-When `OPERATION: alignment-fix`, you are fixing intent/plan misalignments identified by the Evaluate agent. Fix only the listed misalignments — no other changes.
-
-**Inputs:** `MISALIGNMENTS` (structured misalignments from Evaluate agent), `SCOPE: Fix only the listed misalignments, no other changes`
+**Inputs:** `MISALIGNMENTS` (intent or plan misalignments from the Evaluate agent)
 
 **Protocol:**
 1. Fix only what is listed in `MISALIGNMENTS` — no scope expansion
@@ -90,19 +83,14 @@ When `OPERATION: alignment-fix`, you are fixing intent/plan misalignments identi
 
 ## Mode: qa-fix
 
-When `OPERATION: qa-fix`, you are fixing scenario-based acceptance test failures identified by the Test agent. Fix only the listed failures — no other changes.
-
-**Inputs:** `QA_FAILURES` (structured failures from Test agent), `SCOPE: Fix only the listed failures, no other changes`
+**Inputs:** `QA_FAILURES` (acceptance-test failures from the Test agent)
 
 **Protocol:**
-1. Fix only what is listed in `QA_FAILURES` — no scope expansion
-2. Commit and push; orchestrator re-runs Test agent after each attempt (max 2 attempts total)
+1. Commit and push; orchestrator re-runs Test agent after each attempt (max 2 attempts total)
 
 ## Mode: ci-fix
 
-When `OPERATION: ci-fix`, you are fixing the CI checks the ci-status gate reports as failing. Fix only the named checks.
-
-**Inputs:** `CI_FAILURES` (failing-check names from the ci-wait verdict line; fetch the logs yourself), `SCOPE: Fix only the named failing checks`, `PUSH: false`
+**Inputs:** `CI_FAILURES` (failing-check names from the ci-wait verdict line; fetch the logs yourself), `PUSH: false`
 
 **Protocol:**
 1. A behavioural test failure needs a failing-then-passing regression test, written first; a lint, format or type failure is fixed directly

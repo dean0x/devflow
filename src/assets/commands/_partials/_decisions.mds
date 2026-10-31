@@ -1,5 +1,15 @@
+@import { root_paths } from "./_docs_root.mds"
+
 A partial: the decisions-index steps the knowledge-workflow commands and the
 dynamic commands share.
+
+`decisions_locate()` names where the ledger belongs and expands
+the shared `root_paths()` step of `_docs_root.mds`. One `resolve-root.cjs` call, run once per
+run, prints `LEDGER=`: the main worktree when the checkout is a linked worktree whose main
+worktree holds a `.devflow/` folder that is not the home directory, else the toplevel, else
+the start directory. That is the rule the curation hooks apply, so a command reads the index
+the Curate agent writes. The import is selective and takes `root_paths` alone: that define has
+no imports of its own, so it adds one node to the scope of each define here.
 
 D-DECISIONS-LEARNING-GATE: a decisions load is gated on the settings line's
 `CURATION`. Curation can be narrowed by the repository or the machine, and neither
@@ -7,8 +17,8 @@ can turn it back on (D-FEATURES-NARROW-ONLY). The settings line also reads
 `CURATION=off` while git tracks the curation folders, or does not answer for them:
 the files there are the repository's own content, and devflow reads nothing in a
 folder it cannot tell is its own. So `decisions_gate()` is the one sentence every
-decisions host carries: with `CURATION=off` the step is skipped before it locates a
-ledger or reads an index. An unresolvable settings line reads `CURATION=off`, as the
+decisions host carries: with `CURATION=off` the step is skipped before it reads an index (the shared
+root step may already have named the ledger folder, but reads no file in it). An unresolvable settings line reads `CURATION=off`, as the
 fail-closed line does, because a failed resolution cannot show what git tracks. The
 gate reads the line the host's settings block resolved above; this partial imports
 nothing from `_settings.mds`. In a multi-worktree run the line is the start root's:
@@ -33,23 +43,13 @@ the gate and the locator, reached only from inside a curation-on arm, so a curat
 none of the rule (D-LEARNING-VARIANTS).
 
 @define decisions_gate():
-When the settings line says `CURATION=off`, set `DECISIONS_CONTEXT` to `(none)` and skip this step, locating no ledger and reading no index.
+When the settings line says `CURATION=off`, set `DECISIONS_CONTEXT` to `(none)` and skip this step, reading no index.
 @end
 
 @define decisions_locate():
-The decisions ledger belongs to the repository, not to one checkout: a linked worktree reads the main worktree's copy, a subdirectory session the repository root's. Locate it with one git call, run from the start directory — `WORKTREE_PATH` if provided, otherwise cwd (`devflow:worktree-support`):
+The decisions ledger belongs to the repository, not to one checkout: a linked worktree reads the main worktree's copy.
 
-```bash
-git -C "{start}" rev-parse --path-format=absolute --show-toplevel --git-common-dir
-```
-
-Line 1 is the checkout's toplevel, line 2 the common git directory. A git older than 2.31 echoes `--path-format=absolute` back as a line of its own first. `{ledger}` is the first that applies:
-
-1. **The main worktree** — line 2 without its trailing `/.git`, when the output is exactly two lines each beginning with `/`, line 2 ends in `/.git`, and the directory left once it is removed is not your home directory and contains a `.devflow/` directory.
-2. **The toplevel** — line 1, or on an older git the line after the echoed flag.
-3. **The start directory itself** — when the command failed or printed no absolute toplevel (outside a git repository).
-
-This is the rule the curation hooks apply, so you read the index the Curate agent writes.
+{{root_paths()}}
 @end
 
 @define decisions_slice():
@@ -73,8 +73,6 @@ The index is one direct file read.
 When `DECISIONS_CONTEXT` is not `(none)`, hand it only to the agents whose contract declares it.
 
 {{decisions_slice()}}
-
-Those agents follow `devflow:apply-decisions`. A host that uses the index in its own thread says so in its own step.
 
 <!-- curation:end -->
 @end

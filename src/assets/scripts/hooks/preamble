@@ -11,7 +11,7 @@
 #      which the installed render drops when implement is absent) and in the dispatch below —
 #      update both together if Claude Code changes the handoff format.
 #   2. Slash skip: no reminder for slash commands (/...).
-#   3. Orchestrator reminder (2 lines): all other prompts, and a handoff prompt when implement
+#   3. Orchestrator reminder (1 line): all other prompts, and a handoff prompt when implement
 #      is not installed, get a generic delegation reminder.
 
 # Safe no-op fallback: must exist before hook-bootstrap is sourced.
@@ -85,8 +85,7 @@ elif [[ "$HEAD" == "/"* ]]; then
   dbg "EXIT: slash command — no reminder"
 else
   dbg "ORCHESTRATOR_REMINDER injected"
-  json_prompt_output "Orchestrator reminder: coordinate, don't produce — delegate edits, builds and multi-file reads to the fitting roster agent (Agent tool) or the matching devflow workflow skill.
-Keep only judgment work mainline: conversation, decisions, routing, combining a few agent reports."
+  json_prompt_output "Orchestrator reminder: coordinate, don't produce — delegate edits, builds and multi-file reads to a roster agent or a devflow workflow skill; keep only judgment work mainline (conversation, decisions, routing, combining agent reports)."
 fi
 
 dbg "=== HOOK COMPLETE ==="
