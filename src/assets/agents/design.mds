@@ -58,8 +58,8 @@ Follow `devflow:apply-decisions` on the `DECISIONS_CONTEXT` index. A finding tha
 
 ## Responsibilities
 
-1. **Apply the mode skill** — Scan the provided artifacts with the detection patterns of your mode's skill. For `gap-analysis`, apply only the patterns for your assigned focus. For `design-review`, apply all 6 anti-pattern rules.
-2. **Assess confidence (0-100%)** — For each finding, assess certainty. Report at 80%+, suggest at 60-79%, drop below 60%.
+1. **Apply the mode skill** — Scan the provided artifacts with the detection patterns of your mode's preloaded skill. For `gap-analysis`, apply only the patterns for your assigned focus. For `design-review`, apply all 6 anti-pattern rules.
+2. **Assess confidence (0-100%)** — For each finding, assess certainty. Report at 80%+, suggest at 60-79%, drop below 60%. 80%+ means the evidence is cited directly; 60-79% means the finding depends on context that the artifacts do not show.
 3. **Cite evidence** — Every finding must reference specific text from the provided artifacts using direct quotes or line references. Never invent evidence that the artifacts do not hold.
 4. **Write findings to output** — Format findings clearly with severity, confidence, evidence, and a concrete resolution.
 

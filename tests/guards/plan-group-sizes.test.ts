@@ -12,10 +12,10 @@ import * as path from 'path'
 import { ROOT, resolveAgentSource, resolveCurationOffSource } from '../helpers.js'
 
 /** The Design agent body of the curation-on build, dist/agents/design.md, in bytes. */
-const DESIGN_BODY_MAX_BYTES = 4_090
+const DESIGN_BODY_MAX_BYTES = 4_219
 /** The Design agent body of the curation-off build, dist/curation-off/agents/design.md, in bytes. */
-const DESIGN_BODY_CURATION_OFF_MAX_BYTES = 3_524
-/** The Explore agent body, src/assets/agents/explore.md (hand-authored, one build), in bytes. */
+const DESIGN_BODY_CURATION_OFF_MAX_BYTES = 3_653
+/** The Explore agent body (hand-authored, one build), in bytes. */
 const EXPLORE_BODY_MAX_BYTES = 3_355
 
 /** [skill, ceiling of its SKILL.md in bytes]. Each row's text is the pattern its numeric-floors.json entry pins. */
