@@ -694,11 +694,11 @@
     },
     {
       "id": "validate-body-max",
-      "ceiling": 6023,
-      "pattern": "const VALIDATE_BODY_MAX_BYTES = 6_023",
+      "ceiling": 5933,
+      "pattern": "const VALIDATE_BODY_MAX_BYTES = 5_933",
       "occurrences": 1,
       "sourceFile": "tests/guards/validate-lint-pack.test.ts",
-      "description": "The Validate agent body, src/assets/agents/validate.md, in bytes. It is hand-authored. The lean lint-pack wiring and the per-file passed-alone re-run rule (the re-run sentence, the Read line with its conditions, and the Passed alone: line) are funded with named cuts in the same body; it measures 5,995 at #677 (6,003 at #666), with no headroom. It rose by 28 bytes to 6,023 at #677, because the wait rule now names the file that sets the result: a run could read the wrong file and report a pass. May be LOWERED, never raised: a later addition funds itself with a cut."
+      "description": "The Validate agent body, src/assets/agents/validate.md, in bytes. It is hand-authored. The lean lint-pack wiring and the per-file passed-alone re-run rule (the re-run sentence, the Read line with its conditions, and the Passed alone: line) are funded with named cuts in the same body; it measures 5,995 at #677 (6,003 at #666), with no headroom. It rose by 28 bytes to 6,023 at #677, because the wait rule now names the file that sets the result: a run could read the wrong file and report a pass. #718 (lean other agents) cut it to 5,933: the worktree line repeated the preloaded skill. May be LOWERED, never raised: a later addition funds itself with a cut."
     },
     {
       "id": "review-body-max",
