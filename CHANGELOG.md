@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A command now makes one script call to learn its roots, in place of up to three git calls** ([#683](https://github.com/dean0x/devflow/issues/683)).
+  - The new `resolve-root.cjs` script prints the checkout root and the decisions ledger root. A command runs it once per run and reuses the answer.
+  - The docs root, knowledge root and decisions locate steps each ran git and applied a rule to its output. They now share one step.
+  - The ledger rule is the one the curation hooks already apply. If the script fails, both roots are the start directory, as before.
+  - Every compiled command that resolves a root is smaller in every build. With curation and compliance on, `/implement` falls from 43,478 to 42,845 bytes and `/resolve` from 50,283 to 49,585 bytes.
 - **The `/implement` command prompt is about 12 % smaller** ([#675](https://github.com/dean0x/devflow/issues/675)).
   - With curation and compliance on, the compiled command falls from 49,275 to 43,478 bytes. The other three builds fall by about the same share.
   - No phase, gate or output contract changes. Phases 4 and 5 gain a halt. They stop when an agent returns a missing status or a status that no branch routes.
