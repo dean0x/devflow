@@ -163,8 +163,8 @@ export const GIT_MD_LINES = 133
 // GIT_MD_CHARS/GIT_MD_LINES, this is an equality baseline: it moves only in
 // the same commit that edits SKILL.md's bytes — never afterwards, and never
 // to make a red test green on its own.
-export const SKILL_GIT_CHARS = 6_365
-export const SKILL_GIT_LINES = 213
+export const SKILL_GIT_CHARS = 6_074
+export const SKILL_GIT_LINES = 193
 export const SKILL_WORKTREE_CHARS = 1_502
 export const SKILL_WORKTREE_LINES = 40
 /**
@@ -179,8 +179,8 @@ export const SKILL_WORKTREE_LINES = 40
  * golden-regeneration commit that moves the parts, never on their own to clear a
  * red assertion.
  */
-export const TOTAL_CHARS = 18_586
-export const TOTAL_LINES = 386
+export const TOTAL_CHARS = 18_295
+export const TOTAL_LINES = 366
 
 // Fixture invariants — these ARE bytes (Buffer.byteLength), not JS .length
 export const FIXTURE_BYTES = 18_167
