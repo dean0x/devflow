@@ -311,7 +311,7 @@ function collectTestReportDefects(test: string): string[] {
   const input = test.split('\n').find(l => l.startsWith('- **TEST_PLAN**:')) ?? ''
   if (!input.includes('never run TP text verbatim')) out.push('TEST_PLAN: TP text may be run verbatim')
   if (!input.includes('`<untrusted-test-plan>`')) out.push('TEST_PLAN: third-party lines are not marked')
-  const output = outputSection(test, '## Principles')
+  const output = outputSection(test, '## Core rules')
   if (output === null) return [...out, 'no ## Output section']
   const lines = output.split('\n')
   if (!lines.some(l => l.startsWith('| ID | TP | Type |'))) out.push('Scenario Results: no TP column after ID')
@@ -381,14 +381,14 @@ const BLOCKERS_HEADING = '### Blockers (if BLOCKED)'
  */
 function collectTestBlockedStatusDefects(test: string): string[] {
   const out: string[] = []
-  const output = outputSection(test, '## Principles')
+  const output = outputSection(test, '## Core rules')
   if (output === null) return ['no ## Output section']
   const lines = output.split('\n')
   const statusLines = lines.filter(l => l.startsWith('### Status:'))
   if (statusLines.length !== 1 || statusLines[0] !== TEST_STATUS_LINE) out.push(`the Status line is not exactly "${TEST_STATUS_LINE}"`)
   if (!lines.includes('- Blocked: {count}')) out.push('the Summary lacks a Blocked count')
   if (!lines.some(l => l.startsWith('| S1 |') && l.includes('| PASS/FAIL/SKIPPED/BLOCKED |'))) out.push('the Scenario Results Status cell lacks BLOCKED')
-  if (!test.includes('5. Record PASS or FAIL with evidence, or BLOCKED when its command gave no result')) out.push('the Execution step does not record BLOCKED for a command with no result')
+  if (!test.includes('Record PASS or FAIL with evidence, or BLOCKED when its command gave no result')) out.push('the Execution step does not record BLOCKED for a command with no result')
   const rule = lines.find(l => l.startsWith('One row per TP line')) ?? ''
   for (const part of ['in every report, a BLOCKED one included', 'PASS only when at least one scenario covers it and every one passed', 'FAIL when any failed']) {
     if (!rule.includes(part)) out.push(`the TP row rule lacks "${part}"`)
