@@ -430,17 +430,31 @@ function collectForbiddenConstructs(
  * `refactor` carries exactly `CODE_PARTIAL_IMPORT` and nothing else. Every other host, and any
  * other directive in those three, stays forbidden. `@define` stays forbidden in every host: the
  * defines live in the partial.
+ *
+ * D-DESIGN-VARIANTS narrows it in the same way for two more named hosts: `design` and `architect`
+ * share their text through `_partials/_design.mds`, so each carries exactly `DESIGN_PARTIAL_IMPORT`.
+ * A host may carry only the import of its own variant family.
  */
 const LEGALISED_IN_PHASE2: readonly string[] = ['expandVariants(', '(module, op)']
 
-/** D-CODE-VARIANTS: the only agent hosts that import a partial, and the one line each carries. */
+/** D-CODE-VARIANTS: the Code variant hosts, and the one import line each carries. */
 const CODE_VARIANT_HOSTS: readonly string[] = ['code', 'fix', 'refactor']
 const CODE_PARTIAL_IMPORT = '@import "./_partials/_code.mds" as code'
+/** D-DESIGN-VARIANTS: the Design variant hosts, and the one import line each carries. */
+const DESIGN_VARIANT_HOSTS: readonly string[] = ['design', 'architect']
+const DESIGN_PARTIAL_IMPORT = '@import "./_partials/_design.mds" as design'
 
-/** The content the fence scans: a Code variant host loses its one permitted import line, no other line. */
+/** The only agent hosts that import a partial, each with the one line it may carry. */
+const VARIANT_IMPORTS: ReadonlyArray<readonly [readonly string[], string]> = [
+  [CODE_VARIANT_HOSTS, CODE_PARTIAL_IMPORT],
+  [DESIGN_VARIANT_HOSTS, DESIGN_PARTIAL_IMPORT],
+]
+
+/** The content the fence scans: a variant host loses its one permitted import line, no other line. */
 function scannedContent(name: string, content: string): string {
-  const isVariant = CODE_VARIANT_HOSTS.includes(name.replace(/\.mds$/, ''))
-  return isVariant ? content.replace(`${CODE_PARTIAL_IMPORT}\n`, '') : content
+  const host = name.replace(/\.mds$/, '')
+  const family = VARIANT_IMPORTS.find(([hosts]) => hosts.includes(host))
+  return family === undefined ? content : content.replace(`${family[1]}\n`, '')
 }
 
 const FORBIDDEN_CONSTRUCTS: ReadonlyArray<ForbiddenConstruct> = [
@@ -498,6 +512,26 @@ describe('AC-1.2 (Phase-2 scope fence): no conditionals or provider-templated fi
       expect(raw.split('\n').filter(l => l.startsWith('@import')), `${name}.mds imports`).toEqual([CODE_PARTIAL_IMPORT])
       expect(collectForbiddenConstructs([{ name: `${name}.mds`, content: scannedContent(name, raw) }], FORBIDDEN_CONSTRUCTS)).toEqual([])
     }
+  })
+
+  it('each Design variant host carries the one permitted import and no other directive (D-DESIGN-VARIANTS)', () => {
+    for (const name of DESIGN_VARIANT_HOSTS) {
+      const raw = readFileSync(path.join(agentsDir(), `${name}.mds`), 'utf-8')
+      expect(raw.split('\n').filter(l => l.startsWith('@import')), `${name}.mds imports`).toEqual([DESIGN_PARTIAL_IMPORT])
+      expect(collectForbiddenConstructs([{ name: `${name}.mds`, content: scannedContent(name, raw) }], FORBIDDEN_CONSTRUCTS)).toEqual([])
+    }
+  })
+
+  it('known-bad probe: the Design import in a Code host, the Code import in a Design host and a second Design import are each reported', () => {
+    expect(collectForbiddenConstructs([{ name: 'code.mds', content: scannedContent('code', `${DESIGN_PARTIAL_IMPORT}\n`) }], FORBIDDEN_CONSTRUCTS))
+      .toEqual(["code.mds: contains '@import'"])
+    expect(collectForbiddenConstructs([{ name: 'architect.mds', content: scannedContent('architect', `${CODE_PARTIAL_IMPORT}\n`) }], FORBIDDEN_CONSTRUCTS))
+      .toEqual(["architect.mds: contains '@import'"])
+    const raw = readFileSync(path.join(agentsDir(), 'design.mds'), 'utf-8')
+    const second = raw.replace(`${DESIGN_PARTIAL_IMPORT}\n`, `${DESIGN_PARTIAL_IMPORT}\n@import "./_partials/_tracker.mds"\n`)
+    expect(second, 'the seed must land').not.toBe(raw)
+    expect(collectForbiddenConstructs([{ name: 'design.mds', content: scannedContent('design', second) }], FORBIDDEN_CONSTRUCTS))
+      .toEqual(["design.mds: contains '@import'"])
   })
 
   it('known-bad probe: a second import in a Code host and the Code import in another host are each reported', () => {

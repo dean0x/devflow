@@ -14,7 +14,7 @@
  *
  * What this file holds, each arm through a named collector and a known-bad probe over the same collector:
  *   1. Typed spawns: every spawn line and every `Agent(` fence names a roster agent or the built-in `Plan`,
- *      byte-exact, and the reference holds no spawn text. The floor is the set of six types, not a site count.
+ *      byte-exact, and the reference holds no spawn text. The floor is the set of seven types, not a site count.
  *   2. The reference: its phase rows, its input substitutes and its rules, closed to a title, three headings,
  *      table lines, bold-label rules and two pinned intros, with the text left in each rule bounded. The file
  *      the Plan rule sends the one planner to must exist and still hold the two sections the rule names.
@@ -39,7 +39,7 @@ import { BUILT_IN_SPAWN_TYPES, ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTIO
 // ---------------------------------------------------------------------------
 
 /** One phase's spawns: the agent kind and how many run for one issue and for several. */
-interface OracleCell { readonly agent: 'skip' | 'Explore' | 'Design' | 'Plan'; readonly count: number; readonly multi: number | null }
+interface OracleCell { readonly agent: 'skip' | 'Explore' | 'Design' | 'Architect' | 'Plan'; readonly count: number; readonly multi: number | null }
 
 const SKIP: OracleCell = { agent: 'skip', count: 0, multi: null }
 
@@ -53,7 +53,7 @@ const NARROW_ROWS: ReadonlyArray<readonly [number, OracleCell]> = [
   [9, SKIP],
   [10, { agent: 'Plan', count: 1, multi: null }],
   [11, SKIP],
-  [12, { agent: 'Design', count: 1, multi: null }],
+  [12, { agent: 'Architect', count: 1, multi: null }],
 ]
 
 const ROW_PHASES: readonly number[] = NARROW_ROWS.map(([phase]) => phase)
@@ -70,7 +70,7 @@ const FULL_SPAWNS: Readonly<Record<number, FullSpawn>> = {
   9: { agent: 'Synthesize', count: 1, multi: 1 },
   10: { agent: 'Plan', count: 3, multi: 3 },
   11: { agent: 'Synthesize', count: 1, multi: 1 },
-  12: { agent: 'Design', count: 1, multi: 1 },
+  12: { agent: 'Architect', count: 1, multi: 1 },
 }
 
 /** The input substitutes: a name a skipped phase would have produced, and what a running phase reads instead. */
@@ -81,8 +81,8 @@ const INPUT_ROWS: ReadonlyArray<readonly [string, readonly string[]]> = [
   ['PLANNING_SYNTHESIS', ['PLAN_OUTPUTS']],
 ]
 
-/** The six agent types the command spawns, sorted. The floor of the typed-spawn arm: types, never sites. */
-const SPAWN_TYPES: readonly string[] = ['Design', 'Explore', 'Git', 'Plan', 'Skim', 'Synthesize']
+/** The seven agent types the command spawns, sorted. The floor of the typed-spawn arm: types, never sites. */
+const SPAWN_TYPES: readonly string[] = ['Architect', 'Design', 'Explore', 'Git', 'Plan', 'Skim', 'Synthesize']
 
 /** The focus groups at `full`, one spawn each, and what several issues add. */
 const FULL_GAP_FOCUSES = ['completeness', 'architecture', 'security', 'performance'] as const
@@ -225,7 +225,7 @@ interface ParsedPlanRef {
   readonly gapMultiAdds: readonly string[]
 }
 
-const CELL_RE = /^(skip|(Explore|Design|Plan) (\d)(, multi-issue (\d))?)$/
+const CELL_RE = /^(skip|(Explore|Design|Architect|Plan) (\d)(, multi-issue (\d))?)$/
 
 const cellText = (cell: OracleCell): string =>
   cell.agent === 'skip' ? 'skip' : `${cell.agent} ${cell.count}${cell.multi === null ? '' : `, multi-issue ${cell.multi}`}`
@@ -245,7 +245,7 @@ export function parsePlanLevelRef(ref: string): ParsedPlanRef {
     if (!/^\d+$/.test(phaseText) || m === null) { badCells.push(`${phaseText}: ${text}`); continue }
     const phase = Number(phaseText)
     phaseOrder.push(phase)
-    rows.set(phase, m[1] === 'skip' ? SKIP : { agent: m[2] as 'Explore' | 'Design' | 'Plan', count: Number(m[3]), multi: m[5] === undefined ? null : Number(m[5]) })
+    rows.set(phase, m[1] === 'skip' ? SKIP : { agent: m[2] as 'Explore' | 'Design' | 'Architect' | 'Plan', count: Number(m[3]), multi: m[5] === undefined ? null : Number(m[5]) })
   }
   const inputsSection = sectionBetween(ref, '## Inputs', '## Rules') ?? ''
   const inputRows = tableRows(inputsSection)
@@ -778,7 +778,7 @@ const FULL = {
   single: '**Single-issue**: Spawn 4 Design agents **in a single message** (**5 when COMPLIANCE_ACTIVE**):',
   multi: '**Multi-issue**: Spawn 6 Design agents **in a single message** (**7 when COMPLIANCE_ACTIVE**',
   plan: 'Spawn 3 `Agent(subagent_type="Plan")` agents **in a single message**',
-  review: 'Spawn 1 Design agent with mode `design-review`:',
+  review: 'Spawn 1 Architect agent:',
   revise: '- **Revise** — when fewer than 2 revisions have run, re-run phases 10-12 with new constraints. Budget: at most 2 revisions, counted over the whole run',
 } as const
 
@@ -877,14 +877,14 @@ describe('the corpus is real', () => {
     expect(GATE_LEVELS).toContain('full')
     expect(GATE_LEVELS.filter(level => level !== 'full')).toEqual(['standard', 'lean'])
     expect(SCENARIOS.length, 'one or several issues, compliance, research').toBe(8)
-    expect(ROSTER_FORM_B, 'the roster names the agents the command spawns').toEqual(expect.arrayContaining(['Git', 'Skim', 'Explore', 'Synthesize', 'Design']))
+    expect(ROSTER_FORM_B, 'the roster names the agents the command spawns').toEqual(expect.arrayContaining(['Git', 'Skim', 'Explore', 'Synthesize', 'Design', 'Architect']))
     expect(BUILT_IN_SPAWN_TYPES).toEqual(['Plan'])
     expect(ALLOWED).toContain('Plan')
   })
 })
 
 describe('every spawn names its type (AC-1)', () => {
-  it.each(VARIANTS)('$label: each spawn line and agent fence names a roster agent or the built-in Plan, and the types are the six', ({ body }) => {
+  it.each(VARIANTS)('$label: each spawn line and agent fence names a roster agent or the built-in Plan, and the types are the seven', ({ body }) => {
     expect(collectUntypedSpawnDefects(body, ALLOWED)).toEqual([])
     expect(spawnTypesOf(body)).toEqual(SPAWN_TYPES)
   })
@@ -941,7 +941,11 @@ describe('the level reference holds the decided rows, substitutes and rules (AC-
   })
 
   it('known-bad probes: a changed, extra, removed or reordered row and a count above full are each reported', () => {
-    expect(defects(seed(REF, '| 12 | Design 1 |', '| 12 | skip |'))).toContain('Phase 12: "skip", expected "Design 1"')
+    expect(defects(seed(REF, '| 12 | Architect 1 |', '| 12 | skip |'))).toContain('Phase 12: "skip", expected "Architect 1"')
+    expect(defects(seed(REF, '| 12 | Architect 1 |', '| 12 | Design 1 |'))).toEqual(expect.arrayContaining([
+      'Phase 12: "Design 1", expected "Architect 1"',
+      'Phase 12: "Design" is not the Architect the phase spawns',
+    ]))
     expect(defects(seed(REF, '| 10 | Plan 1 |', '| 10 | Plan 2 |'))).toContain('Phase 10: "Plan 2", expected "Plan 1"')
     expect(defects(seed(REF, '| 10 | Plan 1 |', '| 10 | Plan 4 |'))).toContain('Phase 10: count 4 is above the full count 3')
     expect(defects(seed(REF, 'Explore 2, multi-issue 3', 'Explore 2, multi-issue 5'))).toContain('Phase 3: multi-issue count 5 is above the full count 4')
@@ -973,7 +977,7 @@ describe('the level reference holds the decided rows, substitutes and rules (AC-
     expect(defects(seed(REF, INPUTS_INTRO, 'A name whose phase is skipped reads its row.'))).toContain(`the inputs rule is not: ${INPUTS_INTRO}`)
     expect(defects(seed(REF, INPUTS_INTRO, 'A name or a `{Phase N ...}` text whose phase is skipped reads its row.'))).toContain(`the inputs rule is not: ${INPUTS_INTRO}`)
     // With Phase 12 skipped, Gate 2 would lose REVIEW_FINDINGS and PLANNING_SYNTHESIS has no producer left that runs.
-    expect(defects(seed(REF, '| 12 | Design 1 |', '| 12 | skip |')))
+    expect(defects(seed(REF, '| 12 | Architect 1 |', '| 12 | skip |')))
       .toContain('REVIEW_FINDINGS: a running phase requires it, only a skipped phase produces it, and the table has no row')
   })
 
@@ -1079,10 +1083,10 @@ describe('the level reference holds the decided rows, substitutes and rules (AC-
     expect(defects(seed(REF, '| EXPLORATION_SYNTHESIS | EXPLORE_OUTPUTS |', '| EXPLORATION_SYNTHESIS | EXPLORE_OUTPUTS | extra |')).join('\n')).toMatch(/an inputs row is not a name and a substitute/)
     expect(defects(seed(REF, '| EXPLORATION_SYNTHESIS |', '| the exploration |')).join('\n')).toMatch(/an inputs row is not a name and a substitute/)
     // A phases row has two cells. The phase parser reads cells 0 and 1 only, so prose in a third cell is seen by the closed shape alone.
-    const thirdCell = seed(REF, '| 12 | Design 1 |', '| 12 | Design 1 | Gate 2 does not run |')
+    const thirdCell = seed(REF, '| 12 | Architect 1 |', '| 12 | Architect 1 | Gate 2 does not run |')
     expect(collectPlanSimulationDefects(parsePlanLevelRef(thirdCell)), 'the simulator cannot see the third cell').toEqual([])
-    expect(defects(thirdCell)).toEqual(['a phases row is not a phase and a cell: | 12 | Design 1 | Gate 2 does not run |'])
-    expect(defects(seed(REF, '| 12 | Design 1 |', '| 12 |')).join('\n')).toMatch(/a phases row is not a phase and a cell: \| 12 \|/)
+    expect(defects(thirdCell)).toEqual(['a phases row is not a phase and a cell: | 12 | Architect 1 | Gate 2 does not run |'])
+    expect(defects(seed(REF, '| 12 | Architect 1 |', '| 12 |')).join('\n')).toMatch(/a phases row is not a phase and a cell: \| 12 \|/)
   })
 
   it('known-bad probes: a sentence added to a rule, or inside one, is reported for each rule', () => {
@@ -1165,7 +1169,7 @@ describe('the simulator reads its counts from the reference and the oracle decid
     const defects = (text: string): string[] => collectPlanSimulationDefects(parsePlanLevelRef(text))
     const merged = defects(seed(REF, 'Focus `completeness, architecture, performance`', 'Focus `security, completeness, architecture, performance`'))
     expect(merged.some(d => d.startsWith('standard: one issue') && d.includes('gap groups')), 'security in the combined group').toBe(true)
-    const noReview = defects(seed(REF, '| 12 | Design 1 |', '| 12 | skip |'))
+    const noReview = defects(seed(REF, '| 12 | Architect 1 |', '| 12 | skip |'))
     expect(noReview.some(d => d.includes('no design review on the first pass'))).toBe(true)
     expect(noReview.some(d => d.includes('no design review on Revise'))).toBe(true)
     expect(defects(seed(REF, '| 6 | skip |\n', '| 6 | skip |\n| 7 | skip |\n')).some(d => d.includes('gates [0, 2], expected [0, 1, 2]'))).toBe(true)
@@ -1192,7 +1196,7 @@ describe('the simulator reads its counts from the reference and the oracle decid
     expect(found({ ...FULL_SPAWNS, 3: { agent: 'Explore', count: 4, multi: 3 } }).some(d => d.startsWith('full:') && d.includes('several issues') && d.includes('explore 3, expected 4'))).toBe(true)
     expect(found({ ...FULL_SPAWNS, 5: { agent: 'Design', count: 4, multi: 5 } }).some(d => d.startsWith('full:') && d.includes('gapSpawns 5, expected 6'))).toBe(true)
     expect(found({ ...FULL_SPAWNS, 9: { agent: 'Synthesize', count: 0, multi: 0 } }).some(d => d.startsWith('full:') && d.includes('synthesize 3, expected 4'))).toBe(true)
-    expect(found({ ...FULL_SPAWNS, 12: { agent: 'Design', count: 0, multi: 0 } }).some(d => d.startsWith('full:') && d.includes('no design review on the first pass'))).toBe(true)
+    expect(found({ ...FULL_SPAWNS, 12: { agent: 'Architect', count: 0, multi: 0 } }).some(d => d.startsWith('full:') && d.includes('no design review on the first pass'))).toBe(true)
   })
 
   it('a null reference, a missing row or a malformed cell makes the whole run full, as the gate-level block says', () => {
@@ -1202,7 +1206,7 @@ describe('the simulator reads its counts from the reference and the oracle decid
       for (const level of ['standard', 'lean']) {
         expect(simulatePlan(level, sc, null), `a null reference at ${level}, ${describeScenario(sc)}`).toEqual(fullRun)
         expect(simulatePlan(level, sc, parsePlanLevelRef(seed(REF, /^\| 10 \| Plan 1 \|\n/m, ''))), 'a missing Phase 10 row').toEqual(fullRun)
-        expect(simulatePlan(level, sc, parsePlanLevelRef(seed(REF, /^\| 12 \| Design 1 \|\n/m, ''))), 'a missing Phase 12 row').toEqual(fullRun)
+        expect(simulatePlan(level, sc, parsePlanLevelRef(seed(REF, /^\| 12 \| Architect 1 \|\n/m, ''))), 'a missing Phase 12 row').toEqual(fullRun)
         expect(simulatePlan(level, sc, parsePlanLevelRef(seed(REF, '| 5 | Design 2 |', '| 5 | Design two |'))), 'a malformed Phase 5 cell').toEqual(fullRun)
         expect(simulatePlan(level, sc, parsePlanLevelRef('')), 'an empty reference').toEqual(fullRun)
       }
@@ -1300,7 +1304,7 @@ describe('full is today (AC-2)', () => {
     expect(defects(seed(ON, '**Multi-issue**: Spawn 6 Design agents', '**Multi-issue**: Spawn 4 Design agents'))).toContain(found(FULL.multi, 1, 0))
     expect(defects(seed(ON, '(**7 when COMPLIANCE_ACTIVE**', '(**5 when COMPLIANCE_ACTIVE**'))).toContain(found(FULL.multi, 1, 0))
     expect(defects(seed(ON, 'Spawn 3 `Agent(subagent_type="Plan")` agents', 'Spawn 1 `Agent(subagent_type="Plan")` agents'))).toContain(found(FULL.plan, 1, 0))
-    expect(defects(seed(ON, FULL.review, 'Spawn 2 Design agents with mode `design-review`:'))).toContain(found(FULL.review, 1, 0))
+    expect(defects(seed(ON, FULL.review, 'Spawn 2 Architect agents:'))).toContain(found(FULL.review, 1, 0))
     expect(defects(seed(ON, FULL.synthesize, 'Agent(subagent_type="Skim"):'))).toContain(found(FULL.synthesize, 4, 3))
     expect(defects(seed(ON, 're-run phases 10-12 with new constraints', 're-run phases 10-12'))).toContain(found(FULL.revise, 1, 0))
     expect(defects(seed(ON, '| Failure modes | quick | Error states, edge cases, known pitfalls |\n', '')))
@@ -1308,6 +1312,7 @@ describe('full is today (AC-2)', () => {
     expect(defects(seed(ON, '| performance | N+1 patterns', '| speed | N+1 patterns')).join('\n')).toMatch(/Phase 5 focuses are .*speed/)
     expect(defects(seed(ON, '| Execution strategy |', '| Strategy |')).join('\n')).toMatch(/Phase 10 focuses are/)
     expect(defects(seed(ON, FULL.explore + ', each with Skim', FULL.explore.replace('Explore', 'Design') + ', each with Skim'))).toContain('Phase 3 spawns "Design", expected Explore')
+    expect(defects(seed(ON, 'Agent(subagent_type="Architect"):', 'Agent(subagent_type="Design"):'))).toContain('Phase 12 spawns "Design", expected Architect')
     expect(defects(`${ON}\nExplore skipped: research x\n`)).toContain('the command carries "Explore skipped", which only the level reference holds')
     expect(defects(`${ON}\nSkip when research-summary.md exists.\n`)).toContain('the command carries "research-summary.md", which only the level reference holds')
   })

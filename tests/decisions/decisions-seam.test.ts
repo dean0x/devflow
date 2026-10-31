@@ -232,10 +232,10 @@ function collectGateOrderDefects(host: string, text: string): string[] {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('the declared set is computed from the agent sources', () => {
-  it('is the ten agents that list DECISIONS_CONTEXT among their inputs, the three Code variants among them', () => {
+  it('is the eleven agents that list DECISIONS_CONTEXT among their inputs, the three Code variants and the two Design variants among them', () => {
     const declared = collectDeclaredTypes()
     expect([...declared].sort()).toEqual(
-      ['Code', 'Debug', 'Design', 'Fix', 'Harden', 'Knowledge', 'Refactor', 'Research', 'Review', 'Triage'],
+      ['Architect', 'Code', 'Debug', 'Design', 'Fix', 'Harden', 'Knowledge', 'Refactor', 'Research', 'Review', 'Triage'],
     )
   })
 

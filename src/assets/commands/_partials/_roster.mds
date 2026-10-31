@@ -4,7 +4,7 @@
 Model tiers are for reference only; never pass `opts.model`.
 
 | agentType | Model tier | Role |
-|-----------|-----------|------|
+|---|---|---|
 | Code | sonnet | Implements the plan and fixes review findings |
 | Fix | sonnet | Fixes the listed validation, alignment and QA failures |
 | Validate | haiku | Build / typecheck / lint / test — fast correctness gate |
@@ -13,9 +13,10 @@ Model tiers are for reference only; never pass `opts.model`.
 | Evaluate | sonnet | Plan-fidelity / alignment — "was the plan implemented correctly?" |
 | Test | sonnet | Scenario-based acceptance tests against acceptance criteria |
 | Review | opus | Focus-parameterized code review |
-| Git | haiku | Git operations — branches, commits, merges, worktree management |
-| Synthesize | haiku | Summarizes and aggregates multi-agent outputs |
-| Design | opus | Architecture and design — plans, gap analysis, design review |
+| Git | haiku | Branches, commits, merges, worktree management |
+| Synthesize | haiku | Aggregates multi-agent outputs |
+| Design | opus | Gap analysis: tickets, critics, wave reads |
+| Architect | opus | Plans, anti-pattern review |
 @end
 
 @define agent_caveats():

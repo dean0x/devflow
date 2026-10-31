@@ -19,7 +19,7 @@ from the agent sources and holds every pass sentence to it.
 @define authoring_preamble():
 ## Your task: author a Claude Code dynamic Workflow and run it
 
-You (the main model) author the Workflow script body inline and pass it to the `Workflow` tool. You do not write a static workflow file.
+You (the main model) author the Workflow script body inline and pass it to the `Workflow` tool.
 
 ### Workflow runtime contract
 
@@ -56,7 +56,7 @@ Spawn devflow agents with:
 agent("your prompt here", { agentType: "Code" })
 ```
 
-Valid `agentType` values: Code, Fix, Validate, Polish, Harden, Evaluate, Test, Review, Git, Synthesize, Design.
+Valid `agentType` values: Code, Fix, Validate, Polish, Harden, Evaluate, Test, Review, Git, Synthesize, Design, Architect.
 
 **Omit `opts.model` whenever `agentType` is set.** The agent frontmatter sets its own model tier, and `opts.model` overrides it.
 
@@ -101,7 +101,7 @@ When a ticket requires multiple sequential Code agent phases, each Code agent ap
 
 Before you author the workflow script, read `{ledger}/.devflow/curation/index.md`. If the file is absent or empty, set `DECISIONS_CONTEXT` to `(none)`; otherwise use the file content as `DECISIONS_CONTEXT`.
 
-Then inject the relevant DECISIONS_CONTEXT into the prompts of the Code, Fix, Design, Review and Harden agents, which follow `devflow:apply-decisions`. Those are the agent types above whose contract declares it; every other agent type gets no decisions context.
+Then inject the relevant DECISIONS_CONTEXT into the prompts of the Code, Fix, Design, Architect, Review and Harden agents, which follow `devflow:apply-decisions`. Those are the agent types above whose contract declares it; every other agent type gets no decisions context.
 
 {{decisions.decisions_slice()}} The script carries one `DECISIONS_CONTEXT` for every agent, so cut it once, over the whole run.
 

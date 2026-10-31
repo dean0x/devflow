@@ -141,7 +141,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-plan',
     description: 'Unified design planning with gap analysis and design review',
     commands: ['/plan'],
-    agents: ['git', 'skim', 'synthesize', 'design', 'explore'],
+    agents: ['git', 'skim', 'synthesize', 'design', 'architect', 'explore'],
     skills: ['gap-analysis', 'design-review', 'patterns', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
     // D-CHARTER-BOUNDED-INLINE: /plan's main thread orchestrates and loads no
     // companion skills, so `requires:` lists only skills this plugin's command,
@@ -330,7 +330,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-ambient',
     description: 'Orchestrator ambient mode — session charter, per-prompt reminder, plan handoff',
     commands: [],
-    agents: ['code', 'refactor', 'validate', 'polish', 'harden', 'evaluate', 'test', 'skim', 'review', 'git', 'synthesize', 'triage', 'design', 'knowledge', 'research', 'curate', 'explore'],
+    agents: ['code', 'refactor', 'validate', 'polish', 'harden', 'evaluate', 'test', 'skim', 'review', 'git', 'synthesize', 'triage', 'design', 'architect', 'knowledge', 'research', 'curate', 'explore'],
     skills: [
       'review-methodology',
       'security',
@@ -371,7 +371,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Dynamic workflow recipes - dependency-aware tickets→plan→build delivery pipeline',
     // Commands compiled from commands/*.mds at build time (build:mds).
     commands: ['/dynamic-tickets', '/dynamic-plan', '/dynamic-build', '/dynamic-profile'],
-    agents: ['code', 'fix', 'validate', 'polish', 'harden', 'evaluate', 'test', 'review', 'git', 'synthesize', 'knowledge', 'design'],
+    agents: ['code', 'fix', 'validate', 'polish', 'harden', 'evaluate', 'test', 'review', 'git', 'synthesize', 'knowledge', 'design', 'architect'],
     skills: ['apply-decisions', 'apply-feature-knowledge', 'worktree-support', 'docs-framework'],
     requires: [
       'architecture',

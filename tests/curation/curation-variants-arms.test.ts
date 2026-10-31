@@ -309,7 +309,7 @@ describe('nothing under dist/curation-off holds a curation token, and no off age
 
   it('no off agent preloads apply-decisions, and every agent that declared it still does when curation is on', () => {
     const offAgents = offFiles().filter(rel => rel.startsWith('agents/'))
-    expect(offAgents.length, 'off agents').toBe(11)
+    expect(offAgents.length, 'off agents').toBe(12)
     for (const rel of offAgents) {
       const name = path.basename(rel, '.md')
       expect(parseFrontmatterSkills(readFileSync(path.join(OFF_DIR, rel), 'utf-8')), `${rel} preload`).not.toContain('apply-decisions')

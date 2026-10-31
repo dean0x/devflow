@@ -170,13 +170,23 @@ describe.skipIf(skipReason !== null)('subagent skill preload', () => {
     );
   }, 90000);
 
-  it('Design agent preloads worktree-support, apply-decisions, gap-analysis, design-review', async () => {
-    const allPreloads = await spawnAgentAndGetAllPreloads(ctx, 'Design', 'reply with one line only — do not create, modify, or delete any file, do not run git: Add a cache layer.');
-    const expected = ['worktree-support', 'apply-decisions', 'gap-analysis', 'design-review'];
-    expect(
-      allPreloads.some((p) => expected.every((s) => p.includes(s))),
-      `No transcript contains ${expected.join(', ')}. Found: ${JSON.stringify(allPreloads)}`,
-    ).toBe(true);
+  // D-DESIGN-VARIANTS: each Design variant preloads its own mode skill and not the other one.
+  it('Design agent preloads worktree-support, apply-decisions, gap-analysis, and not design-review', async () => {
+    await expectRetainedPreloads(
+      'Design',
+      'reply with one line only — do not create, modify, or delete any file, do not run git: Add a cache layer.',
+      ['worktree-support', 'apply-decisions', 'gap-analysis'],
+      ['design-review'],
+    );
+  }, 90000);
+
+  it('Architect agent preloads worktree-support, apply-decisions, design-review, and not gap-analysis', async () => {
+    await expectRetainedPreloads(
+      'Architect',
+      'reply with one line only — do not create, modify, or delete any file, do not run git: Add a cache layer.',
+      ['worktree-support', 'apply-decisions', 'design-review'],
+      ['gap-analysis'],
+    );
   }, 90000);
 
   it('Git agent preloads git and worktree-support', async () => {
