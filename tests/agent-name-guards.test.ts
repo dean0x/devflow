@@ -434,6 +434,14 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
       '(mktemp /tmp/devflow-tester-XXXXXX.log); not an agent spawn',
     contexts: ['devflow-tester-'],
   },
+  {
+    path: 'src/assets/agents/test.md',
+    name: 'Tester',
+    reason:
+      'CONCEPT: "devflow-tester-" — the scenario write path in the Bash Execution Constraints ' +
+      '(mktemp in /tmp/devflow-tester-*), moved from references/browser-testing.md by #711; not an agent spawn',
+    contexts: ['devflow-tester-'],
+  },
 
   // -----------------------------------------------------------------------
   // Validator — THIRD_PARTY + EXAMPLE_CODE

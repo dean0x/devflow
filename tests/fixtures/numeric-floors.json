@@ -1179,6 +1179,30 @@
       "occurrences": 1,
       "sourceFile": "tests/rules.test.ts",
       "description": "The doc-sweep and existing-owner bullets of the quality rule together, the lines of src/assets/rules/quality.md that open `- When a change alters a name, path or behavior` and `- Find the existing owner`, in bytes without their newlines. Both are billed in every session that loads the rules; tests/fixtures/agent-config.ts owns which agents load them. They measure 324 today, which is the ceiling. May be LOWERED, never raised: a later addition funds itself with a cut."
+    },
+    {
+      "id": "test-body-max",
+      "ceiling": 11099,
+      "pattern": "const TEST_BODY_MAX_BYTES = 11_099",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/test-group-sizes.test.ts",
+      "description": "The Test agent body, src/assets/agents/test.md, in bytes. It is hand-authored, so every build key ships it unchanged, and every turn of every Test spawn reads it. Added by #711 (lean Test group) at 11,099, after the cut from 11,211. The cut also moved the Bash Execution Constraints into the body (1,069 bytes) from references/browser-testing.md, which every run read before. May be LOWERED, never raised."
+    },
+    {
+      "id": "skill-qa-max",
+      "ceiling": 4596,
+      "pattern": "const QA_SKILL_MAX_BYTES = 4_596",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/test-group-sizes.test.ts",
+      "description": "src/assets/skills/qa/SKILL.md, in bytes. The Test agent preloads it, so every turn of every Test spawn reads it. Added by #711 (lean Test group) at 4,596, after the cut from 6,081. May be LOWERED, never raised."
+    },
+    {
+      "id": "qa-browser-ref-max",
+      "ceiling": 3042,
+      "pattern": "const QA_BROWSER_REF_MAX_BYTES = 3_042",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/test-group-sizes.test.ts",
+      "description": "src/assets/skills/qa/references/browser-testing.md, in bytes. A Test run with web-facing changes reads it once. Added by #711 (lean Test group) at 3,042, after the Bash Execution Constraints moved to the Test agent body (4,113 before). May be LOWERED, never raised."
     }
   ]
 }
