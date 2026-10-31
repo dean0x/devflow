@@ -958,19 +958,19 @@
     },
     {
       "id": "command-plan-max",
-      "ceiling": 35325,
-      "pattern": "['plan', 'on', 35_325],",
+      "ceiling": 34422,
+      "pattern": "['plan', 'on', 34_422],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/plan.md, the curation-on build, in bytes. Measured 35,325 after the shared root step was cut again for #683, 35,516 after the roots were resolved by one script call for #683, and 36,222 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (36,330 after the knowledge write-back filter and the index file name were restored for #675,36,322 after the decisions partial was condensed for #675, 36,492 after the knowledge partial was condensed for #675, 36,911 after the tracker note kept its github condition for #675, 36,917 after the docs root was condensed, 36,993 after the tracker partial, 37,997 after #473, 38,018 after #472, 38,096 when #456 closed), with no headroom. Main held 39,153 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/commands/plan.md, the curation-on build, in bytes. Measured 34,422 after the lean cut of the Plan path for #714, 35,325 after the shared root step was cut again for #683, 35,516 after the roots were resolved by one script call for #683, and 36,222 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (36,330 after the knowledge write-back filter and the index file name were restored for #675,36,322 after the decisions partial was condensed for #675, 36,492 after the knowledge partial was condensed for #675, 36,911 after the tracker note kept its github condition for #675, 36,917 after the docs root was condensed, 36,993 after the tracker partial, 37,997 after #473, 38,018 after #472, 38,096 when #456 closed), with no headroom. Main held 39,153 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-plan-curation-off-max",
-      "ceiling": 33231,
-      "pattern": "['plan', 'off', 33_231],",
+      "ceiling": 32635,
+      "pattern": "['plan', 'off', 32_635],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/curation-off/commands/plan.md, the curation-off build, in bytes. Measured 33,231 after the shared root step was cut again for #683, 33,343 after the roots were resolved by one script call for #683, and 33,424 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (33,532 after the knowledge write-back filter and the index file name were restored for #675,33,524 after the knowledge partial was condensed for #675, 33,943 after the tracker note kept its github condition for #675, 33,949 after the docs root was condensed, 34,025 after the tracker partial, 35,029 after #473, 35,050 after #472, 35,126 when #456 closed), with no headroom. Main held 36,166 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/curation-off/commands/plan.md, the curation-off build, in bytes. Measured 32,635 after the lean cut of the Plan path for #714, 33,231 after the shared root step was cut again for #683, 33,343 after the roots were resolved by one script call for #683, and 33,424 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (33,532 after the knowledge write-back filter and the index file name were restored for #675,33,524 after the knowledge partial was condensed for #675, 33,943 after the tracker note kept its github condition for #675, 33,949 after the docs root was condensed, 34,025 after the tracker partial, 35,029 after #473, 35,050 after #472, 35,126 when #456 closed), with no headroom. Main held 36,166 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-release-max",
@@ -1118,19 +1118,19 @@
     },
     {
       "id": "command-plan-compliance-off-max",
-      "ceiling": 35158,
-      "pattern": "['plan', 'compliance-off', 35_158],",
+      "ceiling": 34255,
+      "pattern": "['plan', 'compliance-off', 34_255],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/plan.md, the compliance-off build, in bytes. Measured 35,158 after the shared root step was cut again for #683, 35,349 after the roots were resolved by one script call for #683, and 36,055 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (36,163 after the knowledge write-back filter and the index file name were restored for #675,36,155 after the decisions partial was condensed for #675, 36,325 after the knowledge partial was condensed for #675, 36,744 after the tracker note kept its github condition for #675, 36,750 after the docs root was condensed, 36,826 after the tracker partial, 37,824 at its first build), with no headroom. The rule sets no comparison with the all-on build. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/plan.md, the compliance-off build, in bytes. Measured 34,255 after the lean cut of the Plan path for #714, 35,158 after the shared root step was cut again for #683, 35,349 after the roots were resolved by one script call for #683, and 36,055 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (36,163 after the knowledge write-back filter and the index file name were restored for #675,36,155 after the decisions partial was condensed for #675, 36,325 after the knowledge partial was condensed for #675, 36,744 after the tracker note kept its github condition for #675, 36,750 after the docs root was condensed, 36,826 after the tracker partial, 37,824 at its first build), with no headroom. The rule sets no comparison with the all-on build. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-plan-both-off-max",
-      "ceiling": 33064,
-      "pattern": "['plan', 'both-off', 33_064],",
+      "ceiling": 32468,
+      "pattern": "['plan', 'both-off', 32_468],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE (#648, AC-33): dist/curation-compliance-off/commands/plan.md, the build with curation and compliance both off, in bytes. Measured 33,064 after the shared root step was cut again for #683, 33,176 after the roots were resolved by one script call for #683, and 33,257 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (33,365 after the knowledge write-back filter and the index file name were restored for #675,33,357 after the knowledge partial was condensed for #675, 33,776 after the tracker note kept its github condition for #675, 33,782 after the docs root was condensed, 33,858 after the tracker partial, 34,856 at its first build), with no headroom. The rule sets no comparison with the other builds. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE (#648, AC-33): dist/curation-compliance-off/commands/plan.md, the build with curation and compliance both off, in bytes. Measured 32,468 after the lean cut of the Plan path for #714, 33,064 after the shared root step was cut again for #683, 33,176 after the roots were resolved by one script call for #683, and 33,257 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (33,365 after the knowledge write-back filter and the index file name were restored for #675,33,357 after the knowledge partial was condensed for #675, 33,776 after the tracker note kept its github condition for #675, 33,782 after the docs root was condensed, 33,858 after the tracker partial, 34,856 at its first build), with no headroom. The rule sets no comparison with the other builds. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-release-compliance-off-max",
@@ -1203,6 +1203,46 @@
       "occurrences": 1,
       "sourceFile": "tests/guards/test-group-sizes.test.ts",
       "description": "src/assets/skills/qa/references/browser-testing.md, in bytes. A Test run with web-facing changes reads it once. Added by #711 (lean Test group) at 3,042, after the Bash Execution Constraints moved to the Test agent body (4,113 before). May be LOWERED, never raised."
+    },
+    {
+      "id": "design-body-max",
+      "ceiling": 4219,
+      "pattern": "const DESIGN_BODY_MAX_BYTES = 4_219",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/plan-group-sizes.test.ts",
+      "description": "The Design agent body of the curation-on build, dist/agents/design.md, in bytes. Every turn of every Design spawn reads it (opus, high effort, five to eight spawns per /plan run). Added by #714 (lean Plan path group) at 4,219, after the cut from 5,529."
+    },
+    {
+      "id": "design-body-curation-off-max",
+      "ceiling": 3653,
+      "pattern": "const DESIGN_BODY_CURATION_OFF_MAX_BYTES = 3_653",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/plan-group-sizes.test.ts",
+      "description": "The Design agent body of the curation-off build, dist/curation-off/agents/design.md, in bytes. Added by #714 (lean Plan path group) at 3,653, after the cut from 4,776."
+    },
+    {
+      "id": "explore-body-max",
+      "ceiling": 3355,
+      "pattern": "const EXPLORE_BODY_MAX_BYTES = 3_355",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/plan-group-sizes.test.ts",
+      "description": "The Explore agent body, src/assets/agents/explore.md, in bytes. It overrides the built-in Explore machine-wide, so every turn of every Explore spawn of any session reads it (sonnet, high effort; eight spawns per /plan run). Added by #714 (lean Plan path group) at 3,355, after the cut from 3,477."
+    },
+    {
+      "id": "skill-gap-analysis-max",
+      "ceiling": 5575,
+      "pattern": "['gap-analysis', 5_575],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/plan-group-sizes.test.ts",
+      "description": "src/assets/skills/gap-analysis/SKILL.md, in bytes. The Design agent preloads it, so every turn of every Design spawn reads it. Added by #714 (lean Plan path group) at 5,575, after the cut from 6,519."
+    },
+    {
+      "id": "skill-design-review-max",
+      "ceiling": 4415,
+      "pattern": "['design-review', 4_415],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/plan-group-sizes.test.ts",
+      "description": "src/assets/skills/design-review/SKILL.md, in bytes. The Design agent preloads it, so every turn of every Design spawn reads it. Added by #714 (lean Plan path group) at 4,415, after the cut from 6,006."
     }
   ]
 }
