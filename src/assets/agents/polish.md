@@ -97,7 +97,7 @@ Return structured completion status:
 - {file} ({change description})
 ```
 
-Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file (via Bash or Write) and the message gives its path. Exempt, inline in full: the completion status, `### Files Modified` and your commits.
+Report cap: final message at most about 1,500 tokens; longer material goes to a new file in a `mktemp -d` folder and the message gives its path. Exempt, inline in full: the completion status, `### Files Modified` and your commits.
 
 ## Boundaries
 

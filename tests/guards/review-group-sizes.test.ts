@@ -12,9 +12,9 @@ import * as path from 'path'
 import { ROOT, resolveAgentSource, resolveCurationOffSource } from '../helpers.js'
 
 /** The Review agent body of the curation-on build, dist/agents/review.md, in bytes. */
-const REVIEW_BODY_MAX_BYTES = 10_930
+const REVIEW_BODY_MAX_BYTES = 10_929
 /** The Review agent body of the curation-off build, dist/curation-off/agents/review.md, in bytes. */
-const REVIEW_BODY_CURATION_OFF_MAX_BYTES = 10_334
+const REVIEW_BODY_CURATION_OFF_MAX_BYTES = 10_333
 
 /** [skill, ceiling of its SKILL.md in bytes]. Each row's text is the pattern its numeric-floors.json entry pins. */
 const SKILL_MAX_BYTES: ReadonlyArray<readonly [string, number]> = [
