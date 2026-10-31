@@ -1,6 +1,6 @@
 ---
 name: documentation
-description: This skill should be used when reviewing for documentation drift or stale comments.
+description: Use when reviewing for documentation drift or stale comments.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---

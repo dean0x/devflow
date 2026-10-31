@@ -3453,7 +3453,7 @@ describe('git agent: the compliance-off build carries no posting operation (AC-1
 
   it('describes itself without PR comments or tech debt, and keeps Principles 5 and 8 whole', () => {
     expect(on).toMatch(/^description: .*PR comments, tech debt/m);
-    expect(off).toMatch(/^description: Unified agent for all git\/GitHub operations - issues, releases$/m);
+    expect(off).toMatch(/^description: All git\/GitHub operations - issues, releases$/m);
     expect(off).toContain('5. **Attribution** - every comment carries its `<!-- devflow:* -->` marker (dedup and attribution).\n');
     expect(off).toContain('- **Never reproduced in a posted body**: no body-posting op reproduces verbatim `<external-thread>` or `<untrusted-issue-body>` content');
     expect(off).toContain('- **Marker neutralisation**');

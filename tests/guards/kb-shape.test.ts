@@ -33,9 +33,9 @@ const NEW_KB = readFileSync(path.join(ROOT, 'src', 'assets', 'skills', 'feature-
 const agentBody = (): string => resolveAgentSource('knowledge').content
 
 /** Byte ceilings (numeric-floors.json): every Knowledge spawn loads the body and the skill, on every turn. */
-const KNOWLEDGE_BODY_MAX_BYTES = 7_131
-const KNOWLEDGE_BODY_CURATION_OFF_MAX_BYTES = 6_663
-const FEATURE_KNOWLEDGE_SKILL_MAX_BYTES = 8_472
+const KNOWLEDGE_BODY_MAX_BYTES = 7_114
+const KNOWLEDGE_BODY_CURATION_OFF_MAX_BYTES = 6_646
+const FEATURE_KNOWLEDGE_SKILL_MAX_BYTES = 8_454
 
 /** The `knowledge_writeback` prompt as the implement command compiles it. */
 function writebackPrompt(): string {

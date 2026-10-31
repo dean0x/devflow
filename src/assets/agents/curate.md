@@ -1,6 +1,6 @@
 ---
 name: Curate
-description: Background decisions maintenance agent — processes the pending curation queue into the decisions ledger. Spawned by the session-start directive when the queue is non-empty.
+description: Background agent that processes the pending curation queue into the decisions ledger. Spawned by the session-start directive when the queue is non-empty.
 model: opus
 tools:
   - Read

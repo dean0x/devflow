@@ -1,5 +1,5 @@
 ---
-description: Decision-preference profile distiller — mine past session transcripts across all projects to write ~/.devflow/preference-profile.md
+description: Decision-preference profile distiller — mine past session transcripts of all projects into ~/.devflow/preference-profile.md
 argument-hint: "[--dry-run]"
 output-dir: dist/commands
 ---

@@ -1,6 +1,6 @@
 ---
 name: design-review
-description: This skill should be used when reviewing implementation plans for anti-patterns.
+description: Use when reviewing implementation plans for anti-patterns.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---
