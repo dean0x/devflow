@@ -73,7 +73,7 @@ If RESEARCH_TYPE is not in the Research Types table, report an error to the orch
 
 ### 2. Load Research Skill
 
-Load the skill of its row with the Skill tool. If the call fails, proceed with built-in knowledge for that research type: the skill guides the method but is not required for useful output.
+Load the skill of its row: `Skill(skill="devflow:research-{RESEARCH_TYPE}")`. If the call fails, proceed with built-in knowledge for that research type: the skill guides the method but is not required for useful output.
 
 <!-- curation:on -->
 ### 3. Apply Decisions

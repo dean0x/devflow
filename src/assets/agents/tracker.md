@@ -213,7 +213,8 @@ third-party input — to you when you compose it and to every reader afterwards.
   documented default is a live probe, not a member, so an unresolved rung there
   is a real unknown.
 - Compose every value with **no backtick, no `$`, no `;`** anywhere in the file
-  (the `## Reference Rendering` denylist). The write chain refuses the whole
+  (three of the six `## Reference Rendering` denylist characters; the chain never
+  refuses `"` or `\` file-wide). The write chain refuses the whole
   composition over one of them, so a scanned string carrying one is a discard
   with a `### Substitutions` row, never a value you pass through.
 
@@ -337,8 +338,8 @@ framed stdout mode, which exists for comment sinks.
 
 - **If the scrubber exits non-zero, or is missing**, **write nothing** and report
   `TRACEABILITY: DEGRADED (redaction unavailable)`.
-- **If `ln` fails because the path is taken**, you lost a race: **read the
-  existing file and report `ALREADY_EXISTS`.** The failure is **not a lock wait**
+- **If `ln` fails because the path is taken** (`ln` reports `File exists`), you
+  lost a race: **report `ALREADY_EXISTS`.** The failure is **not a lock wait**
   — do not unlink and retry, because the winner's content is the answer.
 - Never change the mode of the parent directory: `~/.devflow` is 0755 and shared
   by every other feature.
