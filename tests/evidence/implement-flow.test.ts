@@ -1040,7 +1040,10 @@ function collectEvidenceRunDefects(content: string): string[] {
   if (!phase.includes('It never blocks')) out.push('Phase 11 may block')
   if (!phase.includes('Use the Bash tool with `timeout: 180000`')) out.push('the call carries no Bash timeout above the script\'s two deadlines')
   if (!phase.includes('path does not match `^[A-Za-z0-9._/-]{1,255}$`')) out.push('the evidence path reaches the shell ungated')
-  if (!phase.includes('`TRACEABILITY: DEGRADED (evidence unavailable)`')) out.push('a failed run names no DEGRADED reason')
+  if (!phase.includes('Capture its stdout as `EVIDENCE_RESULT`; empty stdout, or an exit other than 0 or 2, is `TRACEABILITY: DEGRADED (evidence unavailable)`')) {
+    out.push('a failed run names no DEGRADED reason')
+  }
+  if (/`EVIDENCE` line|`\*\*Body\*\*:`/.test(phase)) out.push('Phase 11 restates what the script prints')
   return out
 }
 
@@ -1125,7 +1128,10 @@ describe('AC-11: Phase 11 runs the evidence script once, after Phase 10, for eve
   it('the re-validation path, the Report and the CI-awareness principle name the evidence step', () => {
     const lines = implementMd().split('\n')
     expect(revalidateReference().split('\n').find(l => l.startsWith('6. **Proceed to Phase 9**'))).toContain('**Phase 11** (Evidence)')
-    expect(lines.find(l => l.startsWith('Show the test plan\'s evidence from Phase 11'))).toContain('never inferred')
+    const show = lines.find(l => l.startsWith('Show the `Test plan:` line and the `**Body**:`'))
+    expect(show).toContain('of `EVIDENCE_RESULT` verbatim')
+    expect(show).toContain('Without a `Test plan:` line, show `Test plan: evidence unavailable`; with no test plan, `Test plan: missing`.')
+    expect(show, 'the model computes no count').not.toMatch(/VERIFIED-CI|ATTESTED-LOCAL|inferred/)
     expect(lines.find(l => /^\d+\. \*\*CI awareness\*\*/.test(l))).toContain('test-plan evidence (Phase 11) is recorded under every strategy')
   })
 
@@ -1142,6 +1148,12 @@ describe('AC-11: Phase 11 runs the evidence script once, after Phase 10, for eve
     expect(collectEvidenceRunDefects(back)).toEqual(['a Git agent is still spawned for update-pr-evidence (1)'])
     expect(collectEvidenceRunDefects(md.replace('Use the Bash tool with `timeout: 180000`', 'Use the Bash tool'))).toEqual([
       'the call carries no Bash timeout above the script\'s two deadlines',
+    ])
+    const restated = md.replace('Capture its stdout as `EVIDENCE_RESULT`; empty stdout, or an exit other than 0 or 2, is', 'Capture its stdout as `EVIDENCE_RESULT`: its `EVIDENCE` line and its `**Body**:` line; empty stdout is')
+    expect(restated, 'the seed must land').not.toBe(md)
+    expect(collectEvidenceRunDefects(restated)).toEqual([
+      'a failed run names no DEGRADED reason',
+      'Phase 11 restates what the script prints',
     ])
     const early = md.replace('### Phase 10: CI Status Gate', '### Phase 10 later').replace('### Phase 12: Report', '### Phase 10: CI Status Gate\n\n### Phase 12: Report')
     expect(collectOrderViolations('implement.md', early, PHASE11_ORDER).some(v => v.includes('Phase 11 follows the CI gate'))).toBe(true)
@@ -2115,7 +2127,7 @@ describe('#561: the re-validation base step passes the name through a file', () 
 })
 
 /** The checkout-root command Phase 1's docs root runs; the re-validation path runs the same one when Phase 1 does not. */
-const REVALIDATE_ROOT_COMMAND = 'git -C "{start}" rev-parse --show-toplevel'
+const REVALIDATE_ROOT_COMMAND = 'node "$HOME/.devflow/scripts/resolve-root.cjs" "{start}"; echo "exit=$?"'
 
 /** Named collector: whether the re-validation path resolves `{worktree}` before its first use, as Phase 1 does, when Phase 1 does not run. */
 function collectRevalidateRootDefects(revalidate: string): string[] {

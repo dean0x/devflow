@@ -33,10 +33,14 @@
 //             posted:<yes|no|n/a> body:<same|changed>          (one line; wrapped here)
 //   splice    SPLICE ok|resplice (exit 0) or SPLICE conflict|malformed|oversize (exit 5)
 //   readback  READBACK ok (exit 0) or READBACK mismatch (exit 5)
-//   publish   the `## PR Evidence` block — the heading, the EVIDENCE line, one
+//   publish   the `## PR Evidence` block — the heading, the EVIDENCE line, the line
+//             `Test plan: <v>/<total> verified (VERIFIED-CI <a>, ATTESTED-LOCAL <b>)`
+//             (v is a + b, all three read from the EVIDENCE line), one
 //             `**Body**: … · **Comment**: …` line — then one `TRACEABILITY: DEGRADED
 //             (<reason>)` line per degraded part (exit 0), or exit 2 with one line:
-//             `TRACEABILITY: DEGRADED (evidence unavailable)` when it could not run,
+//             `TRACEABILITY: DEGRADED (evidence unavailable)` when it could not run (a
+//             usage error, an internal error, a failed read and a block the output gate
+//             refuses all end this way, so a `publish` never ends with empty stdout),
 //             `TRACEABILITY: DEGRADED (compliance off)` when the machine manifest does not
 //             say compliance is enabled, or `TRACEABILITY: DEGRADED (compliance state
 //             unreadable)` when that manifest cannot be read. The last two come before
@@ -68,7 +72,8 @@
 //
 // Exit codes:
 //   0  ok
-//   1  usage error — stdout entirely empty, usage on stderr
+//   1  usage error — stdout entirely empty, usage on stderr (a `publish` usage error is
+//      exit 2 with the evidence unavailable line instead)
 //   2  input unusable — a file could not be read (missing, not a regular file,
 //      oversize, not UTF-8), the evidence file or the state directory is
 //      malformed, or the PR body's test-plan block cannot serve as the plan.
@@ -2026,6 +2031,21 @@ const COMPLIANCE_UNREADABLE_LINE = 'TRACEABILITY: DEGRADED (compliance state unr
 /** Every line a `publish` that did not run may print. The boundary admits each one with exit 2 only. */
 const PUBLISH_REFUSAL_LINES = Object.freeze([EVIDENCE_UNAVAILABLE_LINE, COMPLIANCE_OFF_LINE, COMPLIANCE_UNREADABLE_LINE]);
 
+/** The answer of every `publish` that could not give its block: the one line, exit 2. */
+const PUBLISH_UNAVAILABLE = Object.freeze({ code: EXIT_CODES.INPUT_UNUSABLE, stdout: EVIDENCE_UNAVAILABLE_LINE + '\n' });
+
+/**
+ * Whether argv asks for `publish`. The boundary reads it after any failure, a usage
+ * error and a throw included, so settleOutcome can answer a failed `publish` with
+ * PUBLISH_UNAVAILABLE.
+ *
+ * @param {readonly string[]} argv  process.argv
+ * @returns {boolean}
+ */
+function isPublishRun(argv) {
+  return Array.isArray(argv) && argv[2] === 'publish';
+}
+
 /**
  * @typedef {{ status: string, reason: string | null }} Part
  *   One half of the `publish` answer: a closed status, or `DEGRADED` with its reason.
@@ -2077,8 +2097,26 @@ function traceReasons(body, comment) {
 }
 
 /**
- * The `## PR Evidence` block of the update-pr-evidence contract, then its TRACEABILITY
- * lines.
+ * The test-plan tally that both scripted blocks print: `<verified>/<total>`, the given
+ * word, then the two counts that make up `verified`. The readiness block prints it with
+ * no word and the publish block with ` verified`.
+ *
+ * @param {{ total: number, counts: Readonly<Record<string, number>> }} fields  the parsed EVIDENCE line
+ * @param {'' | ' verified'} word
+ * @returns {string}
+ */
+function planTally(fields, word) {
+  const verifiedCi = fields.counts['VERIFIED-CI'];
+  const attestedLocal = fields.counts['ATTESTED-LOCAL'];
+  return (verifiedCi + attestedLocal) + '/' + fields.total + word
+    + ' (VERIFIED-CI ' + verifiedCi + ', ATTESTED-LOCAL ' + attestedLocal + ')';
+}
+
+/**
+ * The `## PR Evidence` block of the update-pr-evidence contract: the EVIDENCE line, the
+ * `Test plan:` line read from it, the Body and Comment line, then its TRACEABILITY lines.
+ * The caller holds the precondition that `evidenceLine` parses; a line that does not is a
+ * broken invariant, which the catch in main turns into "evidence unavailable".
  *
  * @param {string} evidenceLine
  * @param {Part} body
@@ -2086,9 +2124,12 @@ function traceReasons(body, comment) {
  * @returns {string}
  */
 function renderPublishBlock(evidenceLine, body, comment) {
+  const evidence = PE.parseEvidenceLine(evidenceLine);
+  if (!evidence.ok) throw new Error('verify-evidence: unchecked evidence line');
   const lines = [
     '## PR Evidence',
     evidenceLine,
+    'Test plan: ' + planTally(evidence.value, ' verified'),
     '**Body**: ' + partText(body) + ' · **Comment**: ' + partText(comment),
     ...traceReasons(body, comment).map(r => 'TRACEABILITY: DEGRADED (' + r + ')'),
   ];
@@ -2110,8 +2151,8 @@ function parsePart(text, statuses) {
 
 /**
  * D-OP-BLOCK-GATE: read a `publish` block back into its parts, or null when it is not
- * exactly what renderPublishBlock prints. The boundary prints a block only when this
- * accepts it.
+ * exactly what renderPublishBlock prints, so a `Test plan:` line that disagrees with the
+ * EVIDENCE line is refused. The boundary prints a block only when this accepts it.
  *
  * @param {string} text  the whole stdout, its final newline included
  * @returns {{ evidenceLine: string, body: Part, comment: Part } | null}
@@ -2119,9 +2160,9 @@ function parsePart(text, statuses) {
 function parsePublishBlock(text) {
   if (typeof text !== 'string' || !text.endsWith('\n') || text.length > 8192) return null;
   const lines = text.slice(0, -1).split('\n');
-  if (lines.length < 3 || lines.length > 5 || lines[0] !== '## PR Evidence') return null;
+  if (lines.length < 4 || lines.length > 6 || lines[0] !== '## PR Evidence') return null;
   if (!PE.parseEvidenceLine(lines[1]).ok) return null;
-  const m = PUBLISH_PARTS_RE.exec(lines[2]);
+  const m = PUBLISH_PARTS_RE.exec(lines[3]);
   if (m === null || m.groups === undefined) return null;
   const body = parsePart(m.groups.body, BODY_STATUSES);
   const comment = parsePart(m.groups.comment, COMMENT_STATUSES);
@@ -2138,7 +2179,7 @@ function parsePublishBlock(text) {
  */
 function evidenceUnavailable(io, reason) {
   io.stderr('verify-evidence: publish: ' + reason + '\n');
-  return { code: EXIT_CODES.INPUT_UNUSABLE, stdout: EVIDENCE_UNAVAILABLE_LINE + '\n' };
+  return PUBLISH_UNAVAILABLE;
 }
 
 /**
@@ -2826,9 +2867,7 @@ function readinessPass(io, args, deps) {
       : String(threads.value.unresolved),
     decision: decisionText,
     ci: ci.status,
-    plan: evidence === null ? 'unavailable'
-      : (evidence.verifiedCi + evidence.attestedLocal) + '/' + evidence.total
-        + ' (VERIFIED-CI ' + evidence.verifiedCi + ', ATTESTED-LOCAL ' + evidence.attestedLocal + ')',
+    plan: fields === null ? 'unavailable' : planTally(fields, ''),
     approval: approvalText(args.requireNonAuthor, evidence),
   };
   return { outcome: { code: EXIT_CODES.OK, stdout: renderReadinessBlock(block) }, head };
@@ -3038,12 +3077,26 @@ function errorLabel(err) {
 /**
  * D-VERIFY-STDOUT: settle whatever main() returned into what the boundary may
  * print. The code must be a known exit code and stdout must be empty or one of
- * the closed shapes for that code; anything else prints nothing and exits 4.
+ * the closed shapes for that code; anything else prints nothing and exits 4. A
+ * `publish` run is the exception: it never settles to empty stdout, so what would
+ * print nothing prints the evidence unavailable line with exit 2.
+ *
+ * @param {unknown} outcome
+ * @param {boolean} [publish]  true when the run is a `publish`
+ * @returns {Outcome}
+ */
+function settleOutcome(outcome, publish) {
+  const settled = settleShape(outcome);
+  return publish === true && settled.stdout === '' ? PUBLISH_UNAVAILABLE : settled;
+}
+
+/**
+ * The shape check of settleOutcome, for every subcommand.
  *
  * @param {unknown} outcome
  * @returns {Outcome}
  */
-function settleOutcome(outcome) {
+function settleShape(outcome) {
   const o = /** @type {any} */ (outcome);
   const failed = { code: EXIT_CODES.REMOTE_FAILURE, stdout: '' };
   if (o === null || typeof o !== 'object' || typeof o.stdout !== 'string') return failed;
@@ -3094,7 +3147,7 @@ if (require.main === module) {
     process.stderr.write('verify-evidence: internal error (' + errorLabel(err) + ')\n');
     outcome = { code: EXIT_CODES.REMOTE_FAILURE, stdout: '' };
   }
-  const settled = settleOutcome(outcome);
+  const settled = settleOutcome(outcome, isPublishRun(process.argv));
   if (settled.stdout !== '') process.stdout.write(settled.stdout);
   process.exitCode = settled.code;
 }

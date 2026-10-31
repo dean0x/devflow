@@ -981,13 +981,12 @@ const PR_HOST_REASONS: readonly string[] = [
   // the caller skips pushes and still posts, instead of failing mid-run and citing
   // commits the PR never got.
   'cannot push to fork',
-  // #363 (PR4): update-pr-evidence's three evidence-specific outcomes. The script
-  // did not return its one gated EVIDENCE line; the compare-and-swap met a body
-  // edited twice under it and made no edit; the body read back after the edit is
-  // not the bytes spliced. Each is the PR host's — no tracker is involved.
+  // #363 (PR4): update-pr-evidence's evidence-specific outcome the reference emits: the
+  // script printed nothing, so the operation reports it. It is the PR host's — no tracker
+  // is involved. The script prints its other reasons itself (a body edited twice under the
+  // compare-and-swap, a body that does not read back as spliced), and the reference does
+  // not spell them.
   'evidence unavailable',
-  'concurrent edit',
-  'body read-back mismatch',
   // #455: check-merge-readiness runs as verify-evidence.cjs readiness. The script prints
   // its own DEGRADED reasons; this one is the operation's own, for a run that returned
   // no block at all (an empty stdout, or an exit the script does not use).
