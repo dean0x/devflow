@@ -7,7 +7,7 @@ allowed-tools: Read, Grep, Glob
 
 # Implementation Patterns
 
-Reference for common implementation patterns. Use these patterns to write consistent, maintainable code.
+Reference for common implementation patterns.
 
 ## Iron Law
 
@@ -17,104 +17,37 @@ Reference for common implementation patterns. Use these patterns to write consis
 > use Result types. If it uses exceptions, use exceptions. Consistency trumps personal
 > preference. The best pattern is the one already in use.
 
-## When This Skill Activates
-
-- Implementing CRUD operations
-- Creating API endpoints
-- Writing event handlers
-- Setting up configuration
-- Adding logging
-- Database operations
-
----
-
 ## Pattern Categories
 
 ### CRUD Operations
 
-Create, Read, Update, Delete with Result types and proper error handling.
-
 **Core pattern**: Validate -> Transform -> Persist -> Return
 
-```typescript
-async function createUser(input: CreateUserInput): Promise<Result<User, CreateError>> {
-  const validated = validateCreateUser(input);
-  if (!validated.ok) return Err({ type: 'validation', details: validated.error });
-
-  const user: User = { id: generateId(), ...validated.value, createdAt: new Date() };
-  const saved = await userRepository.save(user);
-  if (!saved.ok) return Err({ type: 'persistence', details: saved.error });
-
-  return Ok(saved.value);
-}
-```
+Return `Result<T, E>`: a failed validation returns a `validation` error, a failed save a `persistence` error, and success returns the saved value.
 
 ### API Endpoints
 
-REST endpoint structure with auth, validation, and error mapping.
-
 **Core pattern**: Parse request -> Validate auth -> Execute -> Format response
 
-```typescript
-export async function handleGetUser(req: Request): Promise<Response> {
-  const id = parsePathParam(req, 'id');
-  if (!id.ok) return errorResponse(400, 'Invalid user ID');
-
-  const auth = await authenticate(req);
-  if (!auth.ok) return errorResponse(401, 'Unauthorized');
-
-  const result = await getUser(id.value);
-  if (!result.ok) return handleError(result.error);
-
-  return jsonResponse(200, result.value);
-}
-```
+A bad parameter returns 400 and a failed authentication 401 before any work runs. Map a domain error to its status in one handler, and return the success value as JSON.
 
 ### Event Handlers
 
-Async event processing with idempotency and error recovery.
-
 **Core pattern**: Validate event -> Process -> Handle errors -> Acknowledge
 
-```typescript
-async function handleUserCreated(event: UserCreatedEvent): Promise<void> {
-  const validated = validateEvent(event);
-  if (!validated.ok) { logger.warn('Invalid event'); return; }
-
-  await sendWelcomeEmail(event.userId);
-  await createDefaultSettings(event.userId);
-  logger.info('Event processed successfully');
-}
-```
+Make each handler idempotent, so a redelivered event does no harm. Log an invalid event as a warning and drop it; do not throw.
 
 ### Configuration
 
-Environment config with schema validation and feature flags.
-
 **Core pattern**: Define schema -> Load from env -> Validate -> Export frozen
 
-```typescript
-const ConfigSchema = z.object({
-  PORT: z.coerce.number().default(3000),
-  DATABASE_URL: z.string().url(),
-  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-});
-
-export const config = Object.freeze(ConfigSchema.parse(process.env));
-```
+Parse `process.env` once at startup through a schema (coerced types, defaults, required URLs), fail fast on an error, and export the result with `Object.freeze`.
 
 ### Logging
 
-Structured logging with context propagation and operation tracking.
-
 **Core pattern**: Context -> Level -> Message -> Data
 
-```typescript
-const logger = createLogger({ requestId: req.id, userId: user.id });
-logger.info('Processing order', { orderId: order.id, items: order.items.length });
-```
-
----
+Create the logger with request context (`requestId`, `userId`), and log a message with structured data (`{ orderId, items }`).
 
 ## Anti-Patterns to Avoid
 
@@ -125,38 +58,20 @@ logger.info('Processing order', { orderId: order.id, items: order.items.length }
 | Swallowing errors | Empty catch blocks | Handle or propagate with Result types |
 | Magic values | Unexplained numbers/strings | Extract to named constants |
 
----
-
 ## Build Optimization
 
-Production builds must exclude test files, debug artifacts, and sourcemaps.
-
-```json
-// tsconfig.prod.json
-{
-  "exclude": ["**/*.test.ts", "**/*.spec.ts", "**/tests/**"]
-}
-```
-
----
+Production builds must exclude test files, debug artifacts, and sourcemaps (for example `"exclude": ["**/*.test.ts", "**/*.spec.ts", "**/tests/**"]` in `tsconfig.prod.json`).
 
 ## Implementation Checklist
 
 Before implementing, verify:
 
-- [ ] Using Result types for operations that can fail
-- [ ] Validating input at system boundaries
-- [ ] Logging with context (requestId, userId, operation)
 - [ ] Handling all error cases explicitly
-- [ ] Making operations idempotent where possible
 - [ ] Using transactions for multi-step operations
 - [ ] No hardcoded values (use config)
-- [ ] Following existing codebase patterns
-
----
+- [ ] Input validated at system boundaries; operations idempotent where possible
 
 ## Extended References
 
-For full implementation examples:
 - `references/violations.md` - Extended violation examples (CRUD, API, Events, Config, Logging)
 - `references/patterns.md` - Extended correct patterns (CRUD, API, Events, Config, Logging)
