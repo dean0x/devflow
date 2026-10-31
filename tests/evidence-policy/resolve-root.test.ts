@@ -137,6 +137,14 @@ describe('resolve-root.cjs on real git', { timeout: 60_000 }, () => {
     expect(relative.stdout).toBe(answer(outside, outside));
   });
 
+  it('prints a checkout path that holds spaces as it is', () => {
+    const spaced = path.join(base, 'my repo');
+    initRepo(spaced);
+    const r = run(spaced);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe(answer(spaced, spaced));
+  });
+
   it('agrees with the ledger root the hooks apply, from a root, a subdirectory and a linked worktree', () => {
     const hookLedger = (cwd: string): string => spawnSync(
       'bash',
