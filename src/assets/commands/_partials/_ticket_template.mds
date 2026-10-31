@@ -1,8 +1,6 @@
 @define ticket_body_template():
 ### Ticket body template
 
-Each ticket in a wave MUST use this structure. The wave scheduler agents read these fields to reason about dependencies and order. The build engine agents read acceptance criteria to drive Gate 2.
-
 ---
 
 **Wave:** N
@@ -26,7 +24,7 @@ One paragraph: what this ticket implements and why it exists in this wave.
 - Related things that belong to other tickets
 - Future work that must NOT be anticipated
 
-Anti-features are load-bearing: they prevent scope creep and tell the Code agent what NOT to build. At least one is required per ticket.
+At least one anti-feature is required per ticket.
 
 ## Invariants
 
@@ -37,7 +35,7 @@ System properties that MUST remain true after this ticket is merged:
 
 ## Acceptance criteria
 
-Numbered, for the Evaluate and Test agents. See `acceptance_criteria_contract()` for the quality bar.
+Numbered, for the Evaluate and Test agents.
 
 1. POSITIVE: The system MUST...
 2. POSITIVE: The API MUST return...
@@ -50,11 +48,9 @@ Numbered, for the Evaluate and Test agents. See `acceptance_criteria_contract()`
 
 Questions that must be answered before implementation begins. If none, write "None".
 
-When used with `/devflow:dynamic-plan`, open questions are collected into `DECISIONS-NEEDED.md` for user review at the plan→build boundary (the human gate, §11). Preference-profile-settled questions are auto-resolved and do not appear here.
-
 ---
 
-**Note for wave scheduler — `Depends on:` cardinality and grammar:** the field lists **zero or more** provider-canonical issue references this ticket must wait for, comma-separated, or the literal `none`. Each entry is one `{ISSUE_REF}`; under `github` an `{ISSUE_REF}` is `#`-prefixed, so a two-dependency ticket renders `Depends on: #{n}, #{n}`. Write the reference exactly as the tracker renders it — never a bare number, never a URL, never a title. The `Wave: N` label is a human-readable hint; actual ordering is determined by reading the `Depends on` relationships. An agent reads all wave issues and reasons about the ready set — no topological sort algorithm is used.
+**Note for wave scheduler — `Depends on:` cardinality and grammar:** the field lists **zero or more** provider-canonical issue references this ticket must wait for, comma-separated, or the literal `none`. Each entry is one `{ISSUE_REF}`; under `github` an `{ISSUE_REF}` is `#`-prefixed, so a two-dependency ticket renders `Depends on: #{n}, #{n}`. Write the reference exactly as the tracker renders it — never a bare number, never a URL, never a title. The `Wave: N` label is a human-readable hint; actual ordering is determined by reading the `Depends on` relationships.
 @end
 
 @export ticket_body_template
