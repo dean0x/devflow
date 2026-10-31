@@ -10,14 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **A command now makes one script call to learn its roots, in place of up to three git calls** ([#683](https://github.com/dean0x/devflow/issues/683)).
-  - The new `resolve-root.cjs` script prints the checkout root and the decisions ledger root. A command runs it once per run and reuses the answer.
+  - The new `resolve-root.cjs` script prints the checkout root and the decisions ledger root. A command runs it once for each start directory and reuses the answer, so a run over several worktrees resolves each one.
   - The docs root, knowledge root and decisions locate steps each ran git and applied a rule to its output. They now share one step.
   - The ledger rule is the one the curation hooks already apply. If the script fails, both roots are the start directory, as before.
-  - Every compiled command that resolves a root is smaller in every build. With curation and compliance on, `/implement` falls from 43,478 to 42,845 bytes and `/resolve` from 50,283 to 49,585 bytes.
+  - Every compiled command that resolves a root is smaller in every build. With both changes in this entry and the next, and curation and compliance on, `/implement` falls from 43,478 to 42,336 bytes, `/resolve` from 50,283 to 49,229 bytes and `/dynamic-build` from 105,421 to 104,425 bytes.
 - **The evidence publish script prints the test-plan line and its own failure line** ([#683](https://github.com/dean0x/devflow/issues/683)).
   - `verify-evidence.cjs publish` adds one `Test plan: <verified>/<total> verified (VERIFIED-CI <n>, ATTESTED-LOCAL <n>)` line to its `## PR Evidence` block. The sum comes from the `EVIDENCE` line. The model no longer adds it up.
   - `publish` never ends with empty stdout. A usage error, an internal error or a block the output gate refuses prints `TRACEABILITY: DEGRADED (evidence unavailable)` and exits 2.
-  - `/implement`, `/dynamic-build` and the `update-pr-evidence` Git operation print the script output and no longer restate the block layout or the exit codes. With curation and compliance on, `/implement` falls from 42,845 to 42,461 bytes and `/dynamic-build` from 104,788 to 104,560 bytes.
+  - `/implement`, `/resolve`, `/dynamic-build` and the `update-pr-evidence` Git operation use the script output and no longer restate the block layout.
+  - `/dynamic-build` now reports a failed refresh as `TRACEABILITY: DEGRADED (evidence unavailable)`, the line the script prints. It was `(evidence refresh failed)`.
 - **The `/implement` command prompt is about 12 % smaller** ([#675](https://github.com/dean0x/devflow/issues/675)).
   - With curation and compliance on, the compiled command falls from 49,275 to 43,478 bytes. The other three builds fall by about the same share.
   - No phase, gate or output contract changes. Phases 4 and 5 gain a halt. They stop when an agent returns a missing status or a status that no branch routes.
