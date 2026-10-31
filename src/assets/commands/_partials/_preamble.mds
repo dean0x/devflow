@@ -19,11 +19,11 @@ from the agent sources and holds every pass sentence to it.
 @define authoring_preamble():
 ## Your task: author a Claude Code dynamic Workflow and run it
 
-You (the main model) will construct a Claude Code dynamic Workflow script inline and execute it using the `Workflow` tool. You do NOT write a static file — you author the script body right here, then pass it to the Workflow tool.
+You (the main model) author the Workflow script body inline and pass it to the `Workflow` tool. You do not write a static workflow file.
 
 ### Workflow runtime contract
 
-A workflow script MUST begin with a pure-literal export:
+A workflow script must begin with a pure-literal export:
 
 ```js
 export const meta = {
@@ -33,7 +33,7 @@ export const meta = {
 };
 ```
 
-The script body uses ONLY these hooks — nothing else:
+The script body uses only these hooks:
 
 ```js
 agent(prompt, opts)      // spawn a sub-agent; opts.agentType resolves devflow installed agents
@@ -46,7 +46,7 @@ workflow(fn)             // nest one level
 
 Globals available in the script body: `args`, `budget`, `workflow()`.
 
-**The script body has NO filesystem / Node.js / CLI access** — no tracker CLI of any kind, `gh` included. All file reading, issue fetching, git operations, and shell commands happen INSIDE the agents the script spawns — never in the script body itself. There is no `fs`, no `exec`, no `fetch` in scope.
+**The script body has NO filesystem / Node.js / CLI access** — no tracker CLI of any kind, `gh` included. All file reading, issue fetching, git operations and shell commands happen inside the agents the script spawns. There is no `fs`, `exec` or `fetch` in scope.
 
 ### Agent reuse via agentType
 
@@ -58,37 +58,37 @@ agent("your prompt here", { agentType: "Code" })
 
 Valid `agentType` values: Code, Fix, Validate, Polish, Harden, Evaluate, Test, Review, Git, Synthesize, Knowledge, Design.
 
-**OMIT `opts.model` whenever `agentType` is set.** The agent frontmatter carries its own model tier (Code→sonnet, Validate→haiku, Review→opus, etc.) and that tier is honored automatically. Passing `opts.model` overrides it — always a mistake.
+**Omit `opts.model` whenever `agentType` is set.** The agent frontmatter sets its own model tier, and `opts.model` overrides it.
 
-Do not write logic that depends on an agent enumerating its own skills. Skills are loaded (confirmed by spike F5) but agents do not reliably self-report them.
+Do not write logic that depends on an agent listing its own skills. Agents do not report them reliably.
 
-### Pre-flight self-check — MANDATORY before the first live `Workflow` call
+### Pre-flight self-check — before the first live `Workflow` call
 
-Two distinct LLM-authored-script bugs have crashed whole runs in the field: `TypeError: pipeline() expects an array as the first argument` and `undefined is not an object (evaluating 'SEAL.num')`. Before you invoke the `Workflow` tool, audit the script you just authored against this checklist — it targets exactly those crash classes:
+Before you invoke the `Workflow` tool, audit the script you authored against this checklist:
 
-- **`meta` is a pure literal** — `name` and `description` present; NO variables, function calls, spreads, or template interpolation anywhere inside `meta`.
+- **`meta` is a pure literal** — `name` and `description` present; no variables, function calls, spreads or template interpolation anywhere inside `meta`.
 - **Every `pipeline(x, …)` / `parallel(x)` first argument is a real array** — never a function, object, or possibly-undefined value. If it derives from a prior agent result, coerce it: `parallel((maybeList || []).map(...))`.
-- **No reference to a possibly-undefined field** — guard every cross-result field access with optional chaining (e.g. `result?.findings`, `seal?.num`). This is the `SEAL.num` crash class: an agent returned a shape without `num`, so `SEAL.num` threw.
+- **No reference to a possibly-undefined field** — guard every cross-result field access with optional chaining (e.g. `result?.findings`, `seal?.num`).
 - **`.filter(Boolean)` before mapping over `agent()` / `parallel()` results** — an agent can return `null` (skipped, or died after retries); strip nulls before `.map` or field access. filter(Boolean) is crash-safety only; it must never convert missing required coverage into success.
 - **`phase()` titles match the phases declared in `meta`** — every `phase("…")` call has a matching declared phase, and vice-versa.
 
-Then run a cheap syntax gate: write the authored script to a fresh, run-unique scratch file `/tmp/df-wf-check-<meta.name>-<epoch-seconds>.js` (a NEW filename every run — never reuse a prior run's path, as rewriting an existing file trips write guards), run `node --check` on that file, and only then pass the script text to the `Workflow` tool as usual. `node --check` catches SYNTAX errors only — it does NOT catch the runtime type errors above, so the checklist is the real safeguard.
+Then run a syntax gate: write the authored script to a fresh, run-unique scratch file `/tmp/df-wf-check-<meta.name>-<epoch-seconds>.js` (never a prior run's path), run `node --check` on that file, and only then pass the script text to the `Workflow` tool. `node --check` catches syntax errors only; the checklist covers the runtime errors.
 
 ### Budget scaling
 
-The `budget` global governs depth. Scale Review agent roster and verification votes to `budget`. A low-budget run uses a leaner roster and fewer verification votes; a high-budget run expands both. Never hardcode a roster size — let budget guide it.
+Scale the Review roster and the verification votes to the `budget` global: fewer at a low budget, more at a high budget. Never hardcode a roster size.
 
 ### Handoff convention for sequential Code agents within a ticket
 
-When a ticket requires multiple sequential Code agent phases, each Code agent appends its own `## Phase {N} Implementation Summary` section, at most 8,192 bytes, to `{toplevel}/.devflow/docs/handoff-{branch_slug}.md` (branch-scoped to prevent concurrent session clobber), `{branch_slug}` being the ticket's branch name with every `/` replaced by `-`, and `{toplevel}` being `git rev-parse --show-toplevel` in the checkout the ticket's branch is in — never a subdirectory. It never rewrites an earlier section. The next Code agent reads, via HANDOFF_FILE input, only the section of the phase immediately before its own, not the whole file. PRIOR_PHASE_SUMMARY is the compact in-context form; the handoff file is the durable form that survives context compaction. Code is authoritative, summaries are supplementary.
+When a ticket requires multiple sequential Code agent phases, each Code agent appends its own `## Phase {N} Implementation Summary` section, at most 8,192 bytes, to `{toplevel}/.devflow/docs/handoff-{branch_slug}.md`, `{branch_slug}` being the ticket's branch name with every `/` replaced by `-`, and `{toplevel}` being `git rev-parse --show-toplevel` in the checkout the ticket's branch is in — never a subdirectory. It never rewrites an earlier section. The next Code agent reads, via HANDOFF_FILE input, only the section of the phase immediately before its own, not the whole file. PRIOR_PHASE_SUMMARY is the in-context form; the handoff file survives context compaction. The code is authoritative over the summaries.
 
 ### IRON RULE (LLM-vs-plumbing)
 
-**Author ZERO deterministic feature code.** No parsers, no schedulers, no topological-sort, no dependency-graph helpers, no confidence formulas. ALL issue reading, dependency reasoning, and scheduling decisions are LLM judgment at runtime, performed by the workflow's agents. The recipe is instructions. The workflow script Claude authors IS the runtime logic — keep it free of hand-coded feature algorithms.
+**Author no deterministic feature code:** no parsers, schedulers, topological sorts, dependency-graph helpers or confidence formulas. The workflow's agents do all issue reading, dependency reasoning and scheduling by judgment at runtime.
 
 ### SAFETY BANNER
 
-**NEVER merge to main or master** — the workflow merges to an integration branch only. The user merges to main themselves after reviewing. This rule is absolute and must appear as an `engine_invariants()` note in every workflow that touches git.
+**NEVER merge to main or master** — the workflow merges to an integration branch only. The user merges to main themselves after reviewing. This rule must appear as an `engine_invariants()` note in every workflow that touches git.
 @end
 
 @define authoring_decisions():
@@ -101,7 +101,7 @@ When a ticket requires multiple sequential Code agent phases, each Code agent ap
 
 Before you author the workflow script, read `{ledger}/.devflow/curation/index.md`. If the file is absent or empty, set `DECISIONS_CONTEXT` to `(none)`; otherwise use the file content as `DECISIONS_CONTEXT`.
 
-The script body cannot perform this read — you (the main model) do it before authoring. Then inject the relevant DECISIONS_CONTEXT into the prompts of the Code, Fix, Design, Knowledge, Review and Harden agents, which follow `devflow:apply-decisions`. Those are the agent types above whose contract declares it; every other agent type gets no decisions context.
+Then inject the relevant DECISIONS_CONTEXT into the prompts of the Code, Fix, Design, Knowledge, Review and Harden agents, which follow `devflow:apply-decisions`. Those are the agent types above whose contract declares it; every other agent type gets no decisions context.
 
 {{decisions.decisions_slice()}} The script carries one `DECISIONS_CONTEXT` for every agent, so cut it once, over the whole run.
 
