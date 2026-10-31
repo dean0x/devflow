@@ -847,13 +847,13 @@ Cover every TEST_PLAN line on the integration branch as it stands. Report your S
 
    Nothing is fixed here, whatever the Status: the wave is done and its PR is open. Report the Test agent's Status.
 
-   **(b) Claims.** Append its TP claims, whatever its Status, to the `## Claims` section of `"{integration worktree root}/.devflow/docs/evidence-wave-{slug}.md"` — the file's last section, created when absent. Append only: never edit or remove a claim. Each line is `/implement`'s TP claim, keyed to the 40-hex `HEAD:` the Test agent's report shows:
+   **(b) Claims.** The evidence script writes the Test agent's TP claims, whatever its Status: one argument per `### Test Plan Evidence` row, with `:<exit>` added when the row's Exit is a number. `<head>` is the report's `HEAD:` value, or `none` if it holds anything but letters and digits (a before/after change too):
 
-```
-- TP-<n> <PASS|FAIL|SKIP> sha:<head> by:test exit:<0-255>
+```bash
+cd "{integration worktree root}" && node "$HOME/.devflow/scripts/verify-evidence.cjs" claim --evidence ".devflow/docs/evidence-wave-{slug}.md" --head <head> TP-<n>=<PASS|FAIL|SKIP>[:<exit>] ...
 ```
 
-   One line per `### Test Plan Evidence` row whose TP is in the wave test plan, with the row's outcome; the line ends at `by:test` when the row's Exit is not a number from 0 to 255. A report whose `HEAD:` is not a single 40-hex SHA — a reported before/after change included — gets no claim: record `Wave evidence: no claims (HEAD not one SHA)`.
+   No `CLAIM appended` line ⇒ record `Wave evidence: no claims`, with the reason of a `CLAIM refused` line.
 
    **(c) Push** the integration branch once — never force, no retry — so every claim's SHA is in the PR:
 

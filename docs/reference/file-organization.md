@@ -97,10 +97,10 @@ devflow/
 │           ├── resolve-settings.cjs  # Local settings resolver: folds project.json, config.json and the machine manifest into one settings line, the gate level included; no network, writes nothing
 │           ├── resolve-root.cjs      # Root resolver: one call prints the checkout root (`WORKTREE=`) and the ledger root (`LEDGER=`) a command works from; it requires resolve-settings.cjs for the git call and the ledger rule; no network, writes nothing
 │           ├── pr-evidence.cjs       # Pure core of test-plan evidence: grammars, markers, the state ladder
-│           ├── verify-evidence.cjs   # I/O half of test-plan evidence: check, render, verify, splice, readback, publish, readiness (`readiness --out` and `verify --stale-out` write local files only)
+│           ├── verify-evidence.cjs   # I/O half of test-plan evidence: check, render, verify, splice, readback, publish, readiness, claim (`readiness --out` and `verify --stale-out` write local files only; `claim` appends claim lines to the local evidence file)
 │           ├── release-trace.cjs     # Git-only release trace: last release tag + per-commit trace map
 │           ├── claude-md-audit.cjs   # CLAUDE.md @path import audit (read-only): grammar, bounds, display text and stamp format; run by session-start-context and, through the facade, init
-│           ├── ci-wait.cjs           # Bounded CI wait for one pushed head: reads gh only, prints one status line; /implement and /resolve call it inline
+│           ├── ci-wait.cjs           # Bounded CI wait for one pushed head: reads gh only, prints one status line, plus a NEXT line with --waits and --fixes; /implement and /resolve call it inline
 │           ├── resolve-base.cjs      # Base resolver for branch diffs: at most one bounded fetch of the base per run (none with no origin or a cross-repository PR), one status line (`BASE_REF=<hex|none> …`); /implement calls it inline in `local` mode, where a local base ahead of origin stays the base (keep-local policy), and in `pr` mode on re-validation when `gh` returned a PR; the Git agent's PR operations call it in `pr` mode, where origin's tip wins when it resolves; a fetch killed at its bound can leave a `refs/remotes/origin/<name>.lock` file, which later runs read as fetch-failed until the file is deleted
 │           ├── lib/project-config.cjs # The one parser of .devflow/project.json and .devflow/config.json (installed beside its two callers)
 │           └── hooks/                # Capture + memory + curation + ambient hooks

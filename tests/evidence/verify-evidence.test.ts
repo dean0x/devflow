@@ -79,6 +79,12 @@ interface PrEvidence {
   readonly LIMITS: Readonly<Record<string, number>>
   readonly MARKERS: Readonly<{ BLOCK_START: string; BLOCK_END: string; EVIDENCE_OPEN: string; EVIDENCE_HEAD_PREFIX: string; EVIDENCE_RE: RegExp }>
   readonly EVIDENCE_LINE_RE: RegExp
+  readonly CLAIMS_HEADING: string
+  parseClaims(text: unknown): Result<{
+    tp: ReadonlyMap<number, { outcome: string; sha: string; by: string; exit: number | null }>
+    gates: Readonly<Record<'validate' | 'qa', { outcome: string; sha: string; by: string } | null>>
+    malformed: number
+  }>
   parsePlan(text: unknown): Result<{ tps: readonly { id: number; line: string }[] }>
   parseBlock(text: unknown): Result<{ kind: 'lines'; ticked: readonly number[] } | { kind: 'counts'; total: number; verified: number }>
   parseEvidenceComment(text: unknown): Result<{ head: string; key: string; records: readonly TpRecord[] }>
@@ -267,6 +273,25 @@ describe('usage (exit 1, stdout empty)', () => {
     ['verify with a value on a switch', ['verify', '--pr', '7', '--approval=yes']],
     ['splice without --out', ['splice', '--pr', '7', '--state', 'd', '--block', 'b']],
     ['readback without --expect', ['readback', '--pr', '7']],
+    ['claim without arguments', ['claim']],
+    ['claim without --head', ['claim', '--evidence', 'e.md', 'gate']],
+    ['claim without --evidence', ['claim', '--head', 'a'.repeat(40), 'gate']],
+    ['claim without a claim', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40)]],
+    ['claim with a duplicated flag', ['claim', '--evidence', 'e.md', '--evidence', 'f.md', '--head', 'a'.repeat(40), 'gate']],
+    ['claim with an unknown flag', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), '--force', 'gate']],
+    ['claim with a flag after the claims', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), 'gate', '--plan', 'p.md']],
+    ['claim gate with --plan', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), '--plan', 'p.md', 'gate']],
+    ['claim gate with a TP', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), 'gate', 'TP-1=PASS']],
+    ['claim with an outcome that is not PASS, FAIL or SKIP', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), 'TP-1=PASSED']],
+    ['claim with a lower-case outcome', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), 'TP-1=pass']],
+    ['claim with TP-0', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), 'TP-0=PASS']],
+    ['claim with a leading-zero TP', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), 'TP-01=PASS']],
+    ['claim with a four-digit TP', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), 'TP-1000=PASS']],
+    ['claim with an empty exit', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), 'TP-1=PASS:']],
+    ['claim with a space in an exit', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), 'TP-1=PASS:1 2']],
+    ['claim with a TP twice', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), 'TP-1=PASS', 'TP-1=FAIL']],
+    ['claim with --flag=value', ['claim', '--evidence=e.md', '--head', 'a'.repeat(40), 'gate']],
+    ['claim with more TPs than a plan holds', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), ...Array.from({ length: 201 }, (_, i) => `TP-${i + 1}=PASS`)]],
   ]
 
   for (const [label, args] of USAGE_CASES) {
@@ -2403,6 +2428,427 @@ function collectMarkerLiterals(source: string): string[] {
   return codeLines(source).filter(l => /<!--\s*\/?devflow:/.test(l))
 }
 
+// ---------------------------------------------------------------------------
+// claim — the claim lines a Test or Validate report becomes (D-CLAIM-APPEND)
+// ---------------------------------------------------------------------------
+
+describe('claim — appends the claim lines of a report to the evidence file', () => {
+  const PLAN = [
+    tpLine(1, 'Login rejects a bad password', 'local'),
+    tpLine(2, 'The build is green', 'ci'),
+    tpLine(3, 'The page reads well', 'manual'),
+  ]
+  const EXCEPTION = '- `test-plan` self-attested by @octocat at 2026-09-25T10:00:00Z: no plan for a docs-only change'
+  const GATE = `- gate:validate PASS sha:${HEAD} by:validate`
+
+  /** The exec of a claim run: the tracked-file check is answered "not tracked", any other call fails the run. */
+  const noCalls: ExecFn = (file, args) => {
+    const tracked = trackedCheckAnswer(file, args)
+    if (tracked !== null) return tracked
+    throw new Error(`claim made a call: ${file} ${args.join(' ')}`)
+  }
+  /** The exec of a run that must stop before it asks git anything. */
+  const neverCalls: ExecFn = (file, args) => { throw new Error(`claim asked too early: ${file} ${args.join(' ')}`) }
+  /** The real git answers the tracked-file check; any other call fails the run. */
+  const realTrackedCheck: ExecFn = (file, args) => {
+    const tracked = trackedCheckAnswer(file, args, true)
+    if (tracked !== null) return tracked
+    throw new Error(`claim made a call: ${file} ${args.join(' ')}`)
+  }
+
+  const claim = (args: readonly string[], exec: ExecFn = noCalls): Outcome & { stderr: string } => runMain(['claim', ...args], { exec })
+  const fileWith = (text: string, name = 'e.md'): string => writeScratch(scratch('claim'), name, text)
+  const flags = (file: string, head = HEAD): string[] => ['--evidence', file, '--head', head]
+  const read = (file: string): string => fs.readFileSync(file, 'utf8')
+  /** The claim parser's view of every line after the `## Claims` heading of a file. */
+  function claimsOf(file: string) {
+    const parsed = PE.parseClaims(read(file).split(`${PE.CLAIMS_HEADING}\n`)[1])
+    if (!parsed.ok) throw new Error('the Claims section does not parse')
+    return parsed.value
+  }
+  const refusal = (reason: string): string => `CLAIM refused (${reason})\n`
+
+  describe('the lines', () => {
+    it('gate appends the gate claim to the Claims section and keeps every earlier byte', () => {
+      const before = evidenceFile(PLAN, [claimLine(1, 'PASS', OLD, 0)])
+      const file = fileWith(before)
+      const r = claim([...flags(file), 'gate'])
+      expect(r).toMatchObject({ code: 0, stdout: 'CLAIM appended:1 PASS:1 FAIL:0 SKIP:0 skipped:0\n' })
+      expect(read(file)).toBe(`${before}${GATE}\n`)
+    })
+
+    it('writes one line per TP the plan lists, in the order given, and counts each outcome', () => {
+      const file = fileWith(evidenceFile(PLAN))
+      const r = claim([...flags(file), 'TP-3=SKIP', 'TP-1=PASS:0', 'TP-2=FAIL:1'])
+      expect(r).toMatchObject({ code: 0, stdout: 'CLAIM appended:3 PASS:1 FAIL:1 SKIP:1 skipped:0\n' })
+      expect(read(file)).toBe(evidenceFile(PLAN, [
+        `- TP-3 SKIP sha:${HEAD} by:test`, claimLine(1, 'PASS', HEAD, 0), claimLine(2, 'FAIL', HEAD, 1),
+      ]))
+    })
+
+    it.each([
+      ['0', 0], ['7', 7], ['99', 99], ['100', 100], ['199', 199], ['249', 249], ['250', 250], ['255', 255],
+      ['256', null], ['300', null], ['007', null], ['00', null], ['-1', null], ['1.5', null], ['0x10', null],
+      ['abc', null], [EM, null], ['n/a', null], ['999999999999', null],
+    ] as const)('an exit of %s is written as exit:%s, and a line the claim parser accepts', (exit, kept) => {
+      const file = fileWith(evidenceFile(PLAN))
+      const r = claim([...flags(file), `TP-1=PASS:${exit}`])
+      expect(r.stdout).toBe('CLAIM appended:1 PASS:1 FAIL:0 SKIP:0 skipped:0\n')
+      expect(read(file)).toBe(evidenceFile(PLAN, [`- TP-1 PASS sha:${HEAD} by:test${kept === null ? '' : ` exit:${kept}`}`]))
+      const claims = claimsOf(file)
+      expect(claims.malformed).toBe(0)
+      expect(claims.tp.get(1)).toMatchObject({ outcome: 'PASS', sha: HEAD, by: 'test', exit: kept })
+    })
+
+    it('a TP with no exit ends at by:test', () => {
+      const file = fileWith(evidenceFile(PLAN))
+      claim([...flags(file), 'TP-3=SKIP'])
+      expect(claimsOf(file).tp.get(3)).toMatchObject({ outcome: 'SKIP', exit: null })
+    })
+
+    it('is append only: an earlier claim for the same TP stays, and the newest one wins', () => {
+      const file = fileWith(evidenceFile(PLAN))
+      claim([...flags(file), 'TP-1=PASS:0'])
+      claim([...flags(file, OLD), 'TP-1=FAIL:1'])
+      expect(read(file)).toBe(evidenceFile(PLAN, [
+        `- TP-1 PASS sha:${HEAD} by:test exit:0`, `- TP-1 FAIL sha:${OLD} by:test exit:1`,
+      ]))
+      expect(claimsOf(file).tp.get(1)).toMatchObject({ outcome: 'FAIL', sha: OLD, exit: 1 })
+    })
+
+    it('the gate claim and the TP claims of two runs all parse', () => {
+      const file = fileWith(evidenceFile(PLAN))
+      claim([...flags(file), 'gate'])
+      claim([...flags(file), 'TP-1=PASS:0', 'TP-2=FAIL', 'TP-3=SKIP:—'])
+      const claims = claimsOf(file)
+      expect(claims.malformed).toBe(0)
+      expect(claims.gates.validate).toMatchObject({ outcome: 'PASS', sha: HEAD, by: 'validate' })
+      expect([...claims.tp.keys()]).toEqual([1, 2, 3])
+    })
+  })
+
+  describe('the Claims section', () => {
+    it.each([['with a trailing newline', '\n'], ['without one', '']])('is created after the last section when the file has none (%s)', (_label, end) => {
+      const before = `# Evidence\n\n## Test Plan\n${PLAN.join('\n')}${end}`
+      const file = fileWith(before)
+      expect(claim([...flags(file), 'gate']).code).toBe(0)
+      expect(read(file)).toBe(`${before.endsWith('\n') ? before : `${before}\n`}\n## Claims\n${GATE}\n`)
+      expect(claimsOf(file).gates.validate).not.toBeNull()
+    })
+
+    it('is created after an Evidence Exceptions section, which stays before it', () => {
+      const before = ['## Test Plan', ...PLAN, '', '## Evidence Exceptions', EXCEPTION, ''].join('\n')
+      const file = fileWith(before)
+      expect(claim([...flags(file), 'gate']).code).toBe(0)
+      expect(read(file)).toBe(`${before}\n## Claims\n${GATE}\n`)
+    })
+
+    it('takes the line at the end of the section when the section is last, behind an Evidence Exceptions section', () => {
+      const before = ['## Test Plan', ...PLAN, '', '## Evidence Exceptions', EXCEPTION, '', '## Claims', ''].join('\n')
+      const file = fileWith(before)
+      expect(claim([...flags(file), 'gate']).code).toBe(0)
+      expect(read(file)).toBe(`${before}${GATE}\n`)
+    })
+
+    it('puts the line on its own line when the last claim has no line break', () => {
+      const before = evidenceFile(PLAN, [claimLine(1, 'PASS', OLD, 0)]).slice(0, -1)
+      const file = fileWith(before)
+      expect(claim([...flags(file), 'gate']).code).toBe(0)
+      expect(read(file)).toBe(`${before}\n${GATE}\n`)
+    })
+
+    it('creates the file, with the section, when it is absent and its folder exists', () => {
+      const file = path.join(scratch('claim'), 'evidence.md')
+      const r = claim([...flags(file), 'gate'])
+      expect(r).toMatchObject({ code: 0, stdout: 'CLAIM appended:1 PASS:1 FAIL:0 SKIP:0 skipped:0\n' })
+      expect(read(file)).toBe(`## Claims\n${GATE}\n`)
+    })
+
+    it('fills an empty file the same way', () => {
+      const file = fileWith('')
+      expect(claim([...flags(file), 'gate']).code).toBe(0)
+      expect(read(file)).toBe(`## Claims\n${GATE}\n`)
+    })
+
+    it('does not write a file for TP claims that no plan lists', () => {
+      const file = path.join(scratch('claim'), 'evidence.md')
+      const r = claim([...flags(file), 'TP-1=PASS'])
+      expect(r).toMatchObject({ code: 0, stdout: 'CLAIM appended:0 PASS:0 FAIL:0 SKIP:0 skipped:1\n' })
+      expect(fs.existsSync(file)).toBe(false)
+    })
+  })
+
+  describe('the plan that lists the TPs', () => {
+    it('is the evidence file\'s own Test Plan: a TP off it gets no line and is counted as skipped', () => {
+      const file = fileWith(evidenceFile(PLAN))
+      const r = claim([...flags(file), 'TP-1=PASS:0', 'TP-9=PASS:0', 'TP-200=FAIL'])
+      expect(r).toMatchObject({ code: 0, stdout: 'CLAIM appended:1 PASS:1 FAIL:0 SKIP:0 skipped:2\n' })
+      expect(read(file)).toBe(evidenceFile(PLAN, [claimLine(1, 'PASS', HEAD, 0)]))
+    })
+
+    it.each([
+      ['no Test Plan section', '## Claims\n'],
+      ['an empty Test Plan section', '## Test Plan\n\n## Claims\n'],
+    ])('lists nothing when the file has %s: every TP is skipped and the file is unchanged', (_label, before) => {
+      const file = fileWith(before)
+      const r = claim([...flags(file), 'TP-1=PASS', 'TP-2=FAIL'])
+      expect(r).toMatchObject({ code: 0, stdout: 'CLAIM appended:0 PASS:0 FAIL:0 SKIP:0 skipped:2\n' })
+      expect(read(file)).toBe(before)
+    })
+
+    it('is the --plan file when it is given, and the evidence file\'s own plan is then not read', () => {
+      const file = fileWith(evidenceFile(PLAN))
+      const plan = writeScratch(scratch('claim-plan'), 'stale-plan.md', `## Test Plan\n${PLAN[1]}\n`)
+      const r = claim([...flags(file), '--plan', plan, 'TP-1=PASS:0', 'TP-2=PASS:0'])
+      expect(r).toMatchObject({ code: 0, stdout: 'CLAIM appended:1 PASS:1 FAIL:0 SKIP:0 skipped:1\n' })
+      expect(read(file)).toBe(evidenceFile(PLAN, [claimLine(2, 'PASS', HEAD, 0)]))
+    })
+
+    it('may be a --plan file of bare TP lines, and the evidence file may then hold no plan at all', () => {
+      const file = fileWith('## Claims\n')
+      const plan = writeScratch(scratch('claim-plan'), 'plan.md', `${PLAN[0]}\n${PLAN[2]}\n`)
+      const r = claim([...flags(file), '--plan', plan, 'TP-1=PASS', 'TP-2=PASS', 'TP-3=PASS'])
+      expect(r.stdout).toBe('CLAIM appended:2 PASS:2 FAIL:0 SKIP:0 skipped:1\n')
+      expect(read(file)).toBe(`## Claims\n- TP-1 PASS sha:${HEAD} by:test\n- TP-3 PASS sha:${HEAD} by:test\n`)
+    })
+
+    it('lists nothing for a --plan file whose plan is empty', () => {
+      const before = evidenceFile(PLAN)
+      const file = fileWith(before)
+      const plan = writeScratch(scratch('claim-plan'), 'plan.md', '## Test Plan\n')
+      expect(claim([...flags(file), '--plan', plan, 'TP-1=PASS']).stdout).toBe('CLAIM appended:0 PASS:0 FAIL:0 SKIP:0 skipped:1\n')
+      expect(read(file)).toBe(before)
+    })
+
+    it.each([
+      ['a missing file', (): string => path.join(scratch('claim-plan'), 'absent.md')],
+      ['a file that is not a plan', (): string => writeScratch(scratch('claim-plan'), 'plan.md', 'not a plan\n')],
+      ['a path outside the path grammar', (): string => 'plan file.md'],
+    ])('a --plan that is %s is refused and the evidence file is unchanged', (_label, plan) => {
+      const before = evidenceFile(PLAN)
+      const file = fileWith(before)
+      const r = claim([...flags(file), '--plan', plan(), 'TP-1=PASS'])
+      expect(r).toMatchObject({ code: 2, stdout: refusal('plan file unusable') })
+      expect(read(file)).toBe(before)
+    })
+  })
+
+  describe('refusals leave the file as it was', () => {
+    const before = evidenceFile(PLAN, [claimLine(1, 'PASS', OLD, 0)])
+
+    it.each([
+      ['not hex', 'abc'],
+      ['upper case', 'A'.repeat(40)],
+      ['41 hex', 'a'.repeat(41)],
+      ['a 64-hex object id', 'a'.repeat(64)],
+      ['a reported before and after change', `${OLD} → ${HEAD}`],
+      ['the word none', 'none'],
+      ['a ref name', 'HEAD'],
+      ['a shell word', '$(id)'],
+    ])('a head that is %s: head not one sha, before any file is read and before git is asked', (_label, head) => {
+      const file = fileWith(before)
+      for (const claims of [['gate'], ['TP-1=PASS:0']]) {
+        const r = claim([...flags(file, head), ...claims], neverCalls)
+        expect(r).toMatchObject({ code: 2, stdout: refusal('head not one sha') })
+        expect(read(file)).toBe(before)
+      }
+    })
+
+    it('the head is judged before the path', () => {
+      const r = claim(['--evidence', 'a b.md', '--head', 'abc', 'gate'], neverCalls)
+      expect(r.stdout).toBe(refusal('head not one sha'))
+    })
+
+    it.each([
+      ['a path with a space', (): string => path.join(scratch('claim sp'), 'e.md')],
+      ['a path with a shell character', (): string => `${scratch('claim')}/e$(id).md`],
+      ['a folder that does not exist', (): string => path.join(scratch('claim'), 'missing', 'e.md')],
+    ])('%s: evidence file unusable, before git is asked, and nothing is created', (_label, evidence) => {
+      const file = evidence()
+      const folderExisted = fs.existsSync(path.dirname(file))
+      const r = claim([...flags(file), 'gate'], neverCalls)
+      expect(r).toMatchObject({ code: 2, stdout: refusal('evidence file unusable') })
+      expect(fs.existsSync(file)).toBe(false)
+      expect(fs.existsSync(path.dirname(file))).toBe(folderExisted)
+    })
+
+    it('a directory in the file\'s place is unusable', () => {
+      const dir = path.join(scratch('claim'), 'e.md')
+      fs.mkdirSync(dir)
+      expect(claim([...flags(dir), 'gate'])).toMatchObject({ code: 2, stdout: refusal('evidence file unusable') })
+      expect(fs.readdirSync(dir)).toEqual([])
+    })
+
+    it('a symlink in the file\'s place is unusable, and its target is not written', () => {
+      const dir = scratch('claim')
+      const target = writeScratch(dir, 'target.md', before)
+      const link = path.join(dir, 'link.md')
+      fs.symlinkSync(target, link)
+      expect(claim([...flags(link), 'gate'])).toMatchObject({ code: 2, stdout: refusal('evidence file unusable') })
+      expect(read(target)).toBe(before)
+    })
+
+    it.each([
+      ['a heading the evidence file does not know', `${before}\n## Notes\nx\n`],
+      ['a repeated heading', `${before}\n## Claims\n`],
+      ['an Evidence Exceptions section after the Claims section', evidenceFile(PLAN, [], [EXCEPTION])],
+      ['a malformed exception', `## Test Plan\n${PLAN[0]}\n\n## Evidence Exceptions\n- not an exception\n\n## Claims\n`],
+      ['a Test Plan that is not a plan', '## Test Plan\nnot a plan\n\n## Claims\n'],
+    ])('a file with %s is unusable', (_label, text) => {
+      const file = fileWith(text)
+      expect(claim([...flags(file), 'gate'])).toMatchObject({ code: 2, stdout: refusal('evidence file unusable') })
+      expect(read(file)).toBe(text)
+    })
+
+    it('a file that is not UTF-8 is unusable', () => {
+      const file = path.join(scratch('claim'), 'e.md')
+      fs.writeFileSync(file, Buffer.from([0x23, 0xff, 0xfe, 0x0a]))
+      expect(claim([...flags(file), 'gate'])).toMatchObject({ code: 2, stdout: refusal('evidence file unusable') })
+      expect([...fs.readFileSync(file)]).toEqual([0x23, 0xff, 0xfe, 0x0a])
+    })
+
+    it.skipIf(process.getuid?.() === 0)('a file that cannot be written: exit 3, no stdout, the file is as it was', () => {
+      const file = fileWith(before)
+      fs.chmodSync(file, 0o444)
+      const r = claim([...flags(file), 'gate'])
+      expect(r.code).toBe(3)
+      expect(r.stdout).toBe('')
+      expect(r.stderr).toContain('verify-evidence: an output file could not be written')
+      expect(read(file)).toBe(before)
+    })
+
+    it.skipIf(process.getuid?.() === 0)('a folder that cannot take the new file: exit 3, nothing is left behind', () => {
+      const dir = scratch('claim')
+      fs.chmodSync(dir, 0o555)
+      try {
+        const file = path.join(dir, 'e.md')
+        const r = claim([...flags(file), 'gate'])
+        expect(r.code).toBe(3)
+        expect(r.stdout).toBe('')
+        expect(fs.readdirSync(dir)).toEqual([])
+      } finally {
+        fs.chmodSync(dir, 0o755)
+      }
+    })
+  })
+
+  describe('a git-tracked file counts as absent (D-TRACKED-RESULT)', () => {
+    type FileState = 'committed' | 'staged' | 'untracked'
+    const seed = evidenceFile(PLAN, [claimLine(1, 'PASS', OLD, 0)])
+
+    /** A real repository that holds each file in the given state. */
+    function repoWith(files: Readonly<Record<string, FileState>>): string {
+      const dir = scratch('claim-tracked')
+      const home = scratch('claim-tracked-home')
+      realGit(dir, home, ['init', '-q'])
+      const names = Object.keys(files)
+      for (const name of names) fs.writeFileSync(path.join(dir, name), seed)
+      const committed = names.filter(n => files[n] === 'committed')
+      if (committed.length > 0) {
+        realGit(dir, home, ['add', '--', ...committed])
+        realGit(dir, home, ['commit', '-q', '-m', 'seed'])
+      }
+      const staged = names.filter(n => files[n] === 'staged')
+      if (staged.length > 0) realGit(dir, home, ['add', '--', ...staged])
+      return dir
+    }
+
+    it.each(['committed', 'staged'] as const)('a %s evidence file is refused and not written', state => {
+      const repo = repoWith({ 'evidence.md': state })
+      const file = path.join(repo, 'evidence.md')
+      const r = claim([...flags(file), 'gate'], realTrackedCheck)
+      expect(r).toMatchObject({ code: 2, stdout: refusal('evidence file tracked') })
+      expect(read(file)).toBe(seed)
+    })
+
+    it('control: the same file in the same repository, not added to git, is written', () => {
+      const repo = repoWith({ 'seed.md': 'committed', 'evidence.md': 'untracked' })
+      const file = path.join(repo, 'evidence.md')
+      expect(claim([...flags(file), 'gate'], realTrackedCheck).code).toBe(0)
+      expect(read(file)).toBe(`${seed}${GATE}\n`)
+    })
+
+    it('a git that cannot answer is a refusal too', () => {
+      const file = fileWith(seed)
+      const unsure: ExecFn = () => ({ status: 1, stdout: Buffer.alloc(0), stderr: Buffer.from('boom') })
+      expect(claim([...flags(file), 'gate'], unsure)).toMatchObject({ code: 2, stdout: refusal('evidence file tracked') })
+      expect(read(file)).toBe(seed)
+    })
+
+    it('a tracked --plan file is refused as an unusable plan, and the evidence file is not written', () => {
+      const repo = repoWith({ 'evidence.md': 'untracked', 'plan.md': 'committed' })
+      const file = path.join(repo, 'evidence.md')
+      const r = claim([...flags(file), '--plan', path.join(repo, 'plan.md'), 'TP-1=PASS'], realTrackedCheck)
+      expect(r).toMatchObject({ code: 2, stdout: refusal('plan file unusable') })
+      expect(read(file)).toBe(seed)
+    })
+  })
+
+  describe('through the real process', SPAWN_BUDGET, () => {
+    it('prints the one line and appends: exit 0', () => {
+      const dir = scratch('claim-proc')
+      const home = scratch('claim-proc-home')
+      const before = evidenceFile(PLAN)
+      const file = writeScratch(dir, 'evidence.md', before)
+      const r = runScript({ args: ['claim', '--evidence', file, '--head', HEAD, 'TP-1=PASS:0', 'TP-2=FAIL:1', 'TP-9=SKIP'], cwd: dir, home })
+      expect(r.status).toBe(0)
+      expect(r.stdout).toBe('CLAIM appended:2 PASS:1 FAIL:1 SKIP:0 skipped:1\n')
+      expect(read(file)).toBe(evidenceFile(PLAN, [claimLine(1, 'PASS', HEAD, 0), claimLine(2, 'FAIL', HEAD, 1)]))
+    })
+
+    it('prints the refusal line and exits 2 for a head that is not one SHA', () => {
+      const dir = scratch('claim-proc')
+      const home = scratch('claim-proc-home')
+      const before = evidenceFile(PLAN)
+      const file = writeScratch(dir, 'evidence.md', before)
+      const r = runScript({ args: ['claim', '--evidence', file, '--head', `${OLD} → ${HEAD}`, 'gate'], cwd: dir, home })
+      expect(r.status).toBe(2)
+      expect(r.stdout).toBe(refusal('head not one sha'))
+      expect(read(file)).toBe(before)
+    })
+
+    it('a usage error prints nothing on stdout: exit 1', () => {
+      const dir = scratch('claim-proc')
+      const r = runScript({ args: ['claim', '--evidence', 'e.md', 'gate'], cwd: dir, home: dir })
+      expect(r.status).toBe(1)
+      expect(r.stdout).toBe('')
+    })
+  })
+
+  describe('the output gate', () => {
+    it.each([
+      [0, 'CLAIM appended:0 PASS:0 FAIL:0 SKIP:0 skipped:0\n'],
+      [0, 'CLAIM appended:3 PASS:1 FAIL:1 SKIP:1 skipped:2\n'],
+      [0, 'CLAIM appended:200 PASS:200 FAIL:0 SKIP:0 skipped:0\n'],
+      [2, refusal('head not one sha')],
+      [2, refusal('evidence file tracked')],
+      [2, refusal('evidence file unusable')],
+      [2, refusal('plan file unusable')],
+    ])('admits %i %j', (code, stdout) => {
+      expect(VE.settleOutcome({ code, stdout })).toEqual({ code, stdout })
+    })
+
+    it.each([
+      [2, 'CLAIM appended:1 PASS:1 FAIL:0 SKIP:0 skipped:0\n'],
+      [3, 'CLAIM appended:1 PASS:1 FAIL:0 SKIP:0 skipped:0\n'],
+      [0, refusal('head not one sha')],
+      [5, refusal('head not one sha')],
+      [2, refusal('the branch is called main')],
+      [2, refusal('head not one sha').replace('CLAIM', 'claim')],
+      [0, 'CLAIM appended:3 PASS:1 FAIL:1 SKIP:0 skipped:0\n'],
+      [0, 'CLAIM appended:201 PASS:201 FAIL:0 SKIP:0 skipped:0\n'],
+      [0, 'CLAIM appended:1 PASS:1 FAIL:0 SKIP:0 skipped:201\n'],
+      [0, 'CLAIM appended:1 PASS:1 FAIL:0 SKIP:0 skipped:0 extra\n'],
+      [0, 'CLAIM appended:1 PASS:1 FAIL:0 SKIP:0 skipped:-1\n'],
+      [0, 'CLAIM appended:1 PASS:1 FAIL:0 SKIP:0 skipped:0'],
+      [0, 'CLAIM appended:1 PASS:1 FAIL:0 SKIP:0 skipped:0\nCLAIM appended:1 PASS:1 FAIL:0 SKIP:0 skipped:0\n'],
+      [2, `${refusal('head not one sha')}- TP-1 PASS\n`],
+    ])('refuses %i %j: nothing prints, exit 4', (code, stdout) => {
+      expect(VE.settleOutcome({ code, stdout })).toEqual({ code: 4, stdout: '' })
+    })
+  })
+})
+
 describe('source guards (verify-evidence.cjs)', () => {
   it('no shell, no exec, one production spawnSync', () => {
     expect(SOURCE.length).toBeGreaterThan(1000)
@@ -2539,7 +2985,7 @@ describe('source guards (verify-evidence.cjs)', () => {
       'D-VERIFY-VERIFYING-SHA', 'D-VERIFY-PUBLICATION', 'D-VERIFY-CAS',
       'D-OP-SCRIPT-POINTER', 'D-OP-BLOCK-GATE', 'D-PUBLISH-BOUNDS', 'D-PUBLISH-SCRUB-GATE',
       'D-READINESS-LADDER', 'D-READINESS-THREADS', 'D-READINESS-CLASSIFIER', 'D-READINESS-WORKFLOWS', 'D-READINESS-HEAD',
-      'D-READINESS-OUT', 'D-TRACKED-RESULT',
+      'D-READINESS-OUT', 'D-TRACKED-RESULT', 'D-CLAIM-APPEND',
     ]) {
       expect(SOURCE, `${marker} missing`).toContain(marker)
     }
@@ -2555,12 +3001,12 @@ describe('source guards (verify-evidence.cjs)', () => {
     const unguarded = (src: string): string[] => {
       const main = functionBodyOf(src, 'main')
       const asked = main.indexOf('admitPaths(io, parsed)')
-      return ['runVerify(', 'runPublish(', 'runReadiness('].filter(run => asked === -1 || main.indexOf(run) < asked)
+      return ['runVerify(', 'runPublish(', 'runReadiness(', 'runClaim('].filter(run => asked === -1 || main.indexOf(run) < asked)
     }
     expect(unguarded(SOURCE)).toEqual([])
     const probe = SOURCE.replace('admitPaths(io, parsed)', '{ args: parsed }')
     expect(probe, 'the seed must land').not.toBe(SOURCE)
-    expect(unguarded(probe)).toHaveLength(3)
+    expect(unguarded(probe)).toHaveLength(4)
   })
 })
 

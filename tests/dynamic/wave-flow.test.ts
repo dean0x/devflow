@@ -59,7 +59,7 @@ import * as path from 'path'
 
 import { compiledSkillRefsDir } from '../../src/core/assets.js'
 import { CODE_AGENT_TYPES, ROOT, parseFences, requireDistFile, resolveCurationOffSource, resolveVariantOffSource } from '../helpers.js'
-import { PR_EVIDENCE_SCRIPT, VERIFY_EVIDENCE_SCRIPT } from '../evidence/seam.js'
+import { CLAIM_TP_ARGS, PR_EVIDENCE_SCRIPT, VERIFY_EVIDENCE_SCRIPT, claimCallLines, runClaimCall } from '../evidence/seam.js'
 
 const BUILT = requireDistFile('dynamic-build.md')
 const BUILD_SOURCE = fs.readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'dynamic-build.mds'), 'utf-8')
@@ -1657,9 +1657,9 @@ describe('AC-13: under required, a merged row that links no ticket blocks the wa
 const STEP7 = '7. **Wave PR evidence**'
 const F4_LINE = 'Do NOT ask questions mid-workflow'
 const MAINTENANCE = '### Maintenance note'
-/** /implement's TP claim — the one grammar every claim appender writes. */
-const TP_CLAIM_TEMPLATE = '- TP-<n> <PASS|FAIL|SKIP> sha:<head> by:test exit:<0-255>'
-/** The wave evidence file, repo-relative, as step 3(b) writes it and step 7 hands it to `publish` (#455: inline, no Git spawn). */
+/** Step 7's claim call: the evidence script writes the claim lines of the Test agent's report (`claim` subcommand). */
+const WAVE_CLAIM_RUN = 'verify-evidence.cjs" claim --evidence ".devflow/docs/evidence-wave-{slug}.md" --head <head> '
+/** The wave evidence file, repo-relative, as step 3(b) writes it and step 7 hands it to `claim` and `publish` (#455: inline, no Git spawn). */
 const WAVE_EVIDENCE_FILE = '.devflow/docs/evidence-wave-{slug}.md'
 
 /** Built step 7, from its lead to the maintenance note, or null. */
@@ -1683,6 +1683,7 @@ export function collectWaveEvidenceStepDefects(built: string): string[] {
   const tests = fences.filter(f => f.includes('Agent(subagent_type="Test")'))
   const gits = fences.filter(f => f.includes('Agent(subagent_type="Git")'))
   const runs = fences.filter(f => f.includes('verify-evidence.cjs" publish'))
+  const claims = fences.filter(f => f.includes('verify-evidence.cjs" claim '))
   const f4 = offsetsOf(built, F4_LINE)
   need('placement: after step 6 and its F4 line, so step 6 keeps its one fence',
     f4.length === 1 && built.indexOf(STEP7) > f4[0] && built.indexOf(STEP7) > built.indexOf(STEP6))
@@ -1695,9 +1696,10 @@ export function collectWaveEvidenceStepDefects(built: string): string[] {
   need('the Test spawn: one Test agent on the integration worktree with the wave TP lines',
     tests.length === 1 && tests[0].includes('\nWORKTREE_PATH: {integration worktree root}\n')
     && tests[0].includes('\nTEST_PLAN: {the TP lines of the wave evidence file\'s ## Test Plan section}\n'))
-  need('the claims: /implement\'s TP claim, appended to the wave evidence file, keyed to one reported HEAD',
-    step.split('\n').includes(TP_CLAIM_TEMPLATE) && step.includes(`/${WAVE_EVIDENCE_FILE}"\``) && step.includes('`## Claims`')
-    && step.includes('gets no claim'))
+  need('the claims: the evidence script\'s claim call on the wave evidence file, keyed to one reported HEAD, one argument per TP row',
+    claims.length === 1 && claims[0].includes(`cd "{integration worktree root}" && node "$HOME/.devflow/scripts/${WAVE_CLAIM_RUN}${CLAIM_TP_ARGS}`)
+    && step.includes('`<head>` is the report\'s `HEAD:` value, or `none` if it holds anything but letters and digits')
+    && step.includes('No `CLAIM appended` line ⇒ record `Wave evidence: no claims`'))
   need('the push: once, never forced, and a failure does not stop the refresh',
     step.includes('push origin HEAD; echo "exit=$?"') && !/--force|\+HEAD|push -f\b/.test(step)
     && step.includes('`TRACEABILITY: DEGRADED (evidence push failed)` and refresh anyway'))
@@ -1720,9 +1722,9 @@ const STEP7_SEEDS: ReadonlyArray<readonly [site: string, from: string, to: strin
   ['the PR number', '`^[1-9][0-9]{0,9}$`', '`^[0-9]+$`'],
   ['no wave test plan', '`Wave evidence: skipped (no wave test plan)`', '`Wave evidence: attempted anyway`'],
   ['the Test spawn', 'Agent(subagent_type="Test")', 'Agent(subagent_type="Validate")'],
-  ['the claims', TP_CLAIM_TEMPLATE, '- TP-<n> <outcome> sha:<head> by:test'],
+  ['the claims', WAVE_CLAIM_RUN, 'verify-evidence.cjs" claim --evidence ".devflow/docs/evidence-wave-{slug}.md" '],
   ['the push', 'push origin HEAD; echo', 'push --force origin HEAD; echo'],
-  ['the refresh', ` --evidence "${WAVE_EVIDENCE_FILE}"`, ''],
+  ['the refresh', `publish --pr {n} --evidence "${WAVE_EVIDENCE_FILE}"`, 'publish --pr {n}'],
   ['the publication value', '**Resolve `REVIEW_PUBLICATION` per worktree:**', 'Resolve it somehow:'],
   ['never blocks', REFRESH_EMPTY_STDOUT, 'the run stops'],
   ['no policy in a call', '--publication {REVIEW_PUBLICATION resolved above, or auto};', '--publication {REVIEW_PUBLICATION resolved above, or auto} --policy {EVIDENCE_POLICY};'],
@@ -1756,22 +1758,32 @@ describe('W1: after the wave PR opens, step 7 claims its test plan and refreshes
     expect(offsetsOf(BUILT, 'verify-evidence.cjs" publish'), 'one refresh call').toHaveLength(1)
   })
 
-  it('the claim line is /implement\'s TP claim, byte for byte', () => {
-    const implement = requireDistFile('implement.md')
-    expect(implement.split('\n').filter(l => l.startsWith('- TP-<n> ')), '/implement states its TP claim once').toEqual([TP_CLAIM_TEMPLATE])
-    expect(waveEvidenceStep(BUILT)!.split('\n').filter(l => l.startsWith('- TP-<n> '))).toEqual([TP_CLAIM_TEMPLATE])
+  it('the claim call is the one /implement states, up to its gate slot', () => {
+    const implement = claimCallLines(requireDistFile('implement.md'))
+    expect(implement, '/implement states its claim call once').toHaveLength(1)
+    expect(implement[0].endsWith(`gate|${CLAIM_TP_ARGS}`), '/implement adds the gate slot to the TP arguments').toBe(true)
+    const wave = claimCallLines(waveEvidenceStep(BUILT)!)
+    expect(wave, 'step 7 states its claim call once').toHaveLength(1)
+    expect(wave[0].endsWith(` ${CLAIM_TP_ARGS}`), 'step 7 passes only the TP arguments').toBe(true)
   })
 
-  it('filled in, the claim template is a line pr-evidence admits — with or without its exit', () => {
-    const head = 'a'.repeat(40)
-    const fill = (outcome: string, exit: string | null): string => {
-      const line = TP_CLAIM_TEMPLATE.replace('<n>', '3').replace('<PASS|FAIL|SKIP>', outcome).replace('<head>', head)
-      return exit === null ? line.replace(' exit:<0-255>', '') : line.replace('<0-255>', exit)
+  it('run on a wave evidence file, the claim call appends lines pr-evidence admits — with or without their exit', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wave-claim-'))
+    try {
+      const file = path.join(dir, 'evidence-wave.md')
+      fs.writeFileSync(file, '## Test Plan\n- [ ] TP-1 (AC-1) The build is green — method:local\n- [ ] TP-2 (AC-1) The page reads well — method:local\n')
+      const call = claimCallLines(waveEvidenceStep(BUILT)!)[0]
+      const r = runClaimCall(call, { claims: 'TP-1=PASS:0 TP-2=SKIP TP-3=FAIL:1', head: 'a'.repeat(40), fill: [[WAVE_EVIDENCE_FILE, file]] })
+      expect(r.stdout).toBe('CLAIM appended:2 PASS:1 FAIL:0 SKIP:1 skipped:1\n')
+      const text = fs.readFileSync(file, 'utf-8')
+      expect(text.indexOf('## Claims'), 'the claims follow the plan').toBeGreaterThan(text.indexOf('## Test Plan'))
+      const lines = text.split('\n').filter(l => /^- TP-\d+ (PASS|FAIL|SKIP) /.test(l))
+      expect(lines).toHaveLength(2)
+      expect(lines.filter(l => !PE.CLAIM_LINE_RE.test(l))).toEqual([])
+      expect(lines.some(l => l.includes(' exit:0')) && lines.some(l => !l.includes(' exit:'))).toBe(true)
+    } finally {
+      fs.rmSync(dir, { recursive: true })
     }
-    const lines = ['PASS', 'FAIL', 'SKIP'].flatMap(o => [fill(o, '0'), fill(o, '255'), fill(o, null)])
-    expect(lines.filter(l => !PE.CLAIM_LINE_RE.test(l))).toEqual([])
-    // Negative control: the template itself, unfilled, is never a claim.
-    expect(PE.CLAIM_LINE_RE.test(TP_CLAIM_TEMPLATE)).toBe(false)
   })
 
   it('the repo-relative EVIDENCE_FILE of every admitted wave slug passes update-pr-evidence\'s value gate', () => {
