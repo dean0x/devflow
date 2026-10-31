@@ -4,14 +4,19 @@
  * The guide tells a person how to cut a workflow prompt. A cut that loses a rule is the failure
  * it exists to stop, so its own shape is pinned here:
  *
- *   - It has every part: the cut rules, the never-cut table, the core global rules, the
- *     architecture part, the cut record rule and the Turns section.
+ *   - It has every part: where the tokens go, the rules for every target, the cut rules, the
+ *     never-cut table, the core global rules, the architecture part, the cut record rule and the
+ *     Turns section.
+ *   - The token part names the four loads and the choice of targets by spend, and links the
+ *     target inventory. The rules for every target hold the size measure, the rule for new
+ *     structure, the model rule and the process rule.
  *   - The Turns section holds the four actions and no general efficiency line.
  *   - The never-cut table has the columns item, location and guard probe, and numbered rows. The
  *     rows include Principle 1 (orchestration only) and the Error Handling rule.
  *   - Each core global rule carries a mark, and Principle 1 and Error Handling are never-cut.
- *   - The architecture part names the one core file, the candidate reference files, the way the
- *     build and install layers carry a folder, and the build id.
+ *   - The architecture part names the one core file, the rare-branch rule and the skill folders.
+ *   - The target inventory has its measure method, the always-loaded text, a ranked list of at
+ *     least fifteen targets and the target groups.
  *   - The cut record rule names the bytes before and after, the importing hosts, and the stop
  *     for a cut below half of the before size.
  *   - The guide links to the live-check results, and those results sit in platform-assumptions.md
@@ -33,8 +38,14 @@ const read = (rel: string): string => readFileSync(path.join(ROOT, rel), 'utf8')
 
 const GUIDE = read('docs/reference/lean-prompts.md');
 const ASSUMPTIONS = read('docs/reference/platform-assumptions.md');
+const TARGETS = read('docs/reference/lean-prompts-targets.md');
+
+const TOKENS_SECTION = 'What to cut and where the tokens go';
+const TARGET_RULES_SECTION = 'Rules for every target';
 
 const REQUIRED_SECTIONS = [
+  TOKENS_SECTION,
+  TARGET_RULES_SECTION,
   'Cut rules',
   'Never-cut table',
   'Core global rules',
@@ -43,12 +54,10 @@ const REQUIRED_SECTIONS = [
   'Turns',
 ] as const;
 
-const ARCHITECTURE_PARTS = [
-  'One core file',
-  'Candidate reference files',
-  'How the build and install layers carry a folder',
-  'The build id',
-] as const;
+const ARCHITECTURE_PARTS = ['One core file', 'Rare branches', 'Skill folders'] as const;
+
+const TARGET_SECTIONS = ['How the numbers were measured', 'Always-loaded text', 'Ranked targets', 'Target groups'] as const;
+const MIN_RANKED_TARGETS = 15;
 
 const TURN_ACTIONS = [
   'Batch independent tool calls in one turn.',
@@ -69,8 +78,8 @@ const LIVE_CHECK_HEADER = [
 const LIVE_CHECK_HEADING = 'Skill folders and compaction re-attach';
 
 /** The rows of each table when it was written. A deleted row lowers the count and fails the guard. */
-const MIN_NEVER_CUT_ROWS = 19;
-const MIN_CORE_RULES = 11;
+const MIN_NEVER_CUT_ROWS = 18;
+const MIN_CORE_RULES = 5;
 
 // ── Parsing ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -197,7 +206,7 @@ function architectureDefects(guide: string): string[] {
   const parts = headingsOf(body, 3);
   const defects = ARCHITECTURE_PARTS.filter(part => !parts.includes(part)).map(part => `the architecture part lacks "${part}"`);
   for (const [needle, why] of [
-    ['one core file', 'the one-core-file decision'],
+    ['holds the whole typical path', 'the one-core-file decision'],
     ['fewer than half of real runs', 'the rare-branch test'],
     ['prefix must be at most 16,660 bytes', 'the prefix bound'],
     ['WORKFLOW_FOLDERS', 'the folder registry'],
@@ -230,10 +239,67 @@ function cutRuleDefects(guide: string): string[] {
     ['[never-cut table](#never-cut-table)', 'the link to the never-cut table'],
     ['Never cut Principles 1 to 4 or the Error Handling rule.', 'the rule for the principles and Error Handling'],
     ['A pinned sentence stays.', 'the rule for pinned sentences'],
-    ['Never raise a limit.', 'the rule that no limit rises'],
+    ['Never raise a limit in any other case.', 'the rule that no other limit rises'],
+    ['One independent reader checks the diff against every lens below.', 'the one audit for each pull request'],
   ] as const)
     .filter(([needle]) => !body.includes(needle))
     .map(([, why]) => `the cut rules lack ${why}`);
+}
+
+function tokensDefects(guide: string): string[] {
+  const body = sectionBody(guide, TOKENS_SECTION);
+  if (body === undefined) return [`missing section "${TOKENS_SECTION}"`];
+  const table = parseTable(body);
+  const loads = (table?.rows ?? []).map(row => row[0] ?? '');
+  const defects = [...(table?.shapeDefects ?? ['the load table is missing'])];
+  for (const load of ['Always loaded', 'Main prompt', 'Agent prompt', 'On demand']) {
+    if (!loads.includes(load)) defects.push(`the load table lacks "${load}"`);
+  }
+  for (const [needle, why] of [
+    ['Rank the targets by token spend', 'the choice by spend'],
+    ['Cut agent prompts that run many turns first.', 'the agent-first order'],
+    ['Count a preloaded skill in every agent that preloads it.', 'the preload rule'],
+    ['Cut a shared partial once', 'the shared-partial rule'],
+  ] as const) {
+    if (!body.includes(needle)) defects.push(`the token part lacks ${why}`);
+  }
+  if (!guide.includes('](lean-prompts-targets.md)')) defects.push('the guide does not link to the target inventory');
+  return defects;
+}
+
+function targetRuleDefects(guide: string): string[] {
+  const body = sectionBody(guide, TARGET_RULES_SECTION);
+  if (body === undefined) return [`missing section "${TARGET_RULES_SECTION}"`];
+  return ([
+    ['No fixed size target.', 'the rule against a fixed target'],
+    ['the bytes that a typical run reads in each build variant key, plus the turns per run', 'the size measure'],
+    ['may rise only when the typical-run read of that key falls by more', 'the one ceiling exception'],
+    ['All other ceilings only fall.', 'the rule for the other ceilings'],
+    ['No new structure', 'the rule for new structure'],
+    ['"finish and verify"', 'the model rule'],
+    ['one independent audit for each pull request', 'the process for a text-only cut'],
+    ['needs a plan first', 'the process for a structure or contract change'],
+  ] as const)
+    .filter(([needle]) => !body.includes(needle))
+    .map(([, why]) => `the rules for every target lack ${why}`);
+}
+
+function targetsDefects(targets: string): string[] {
+  const found = headingsOf(targets, 2);
+  const defects = TARGET_SECTIONS.filter(name => !found.includes(name)).map(name => `the target inventory lacks "${name}"`);
+  const ranked = sectionBody(targets, 'Ranked targets');
+  const table = ranked === undefined ? undefined : parseTable(ranked);
+  if (table === undefined) return [...defects, 'the ranked table is missing'];
+  defects.push(...table.shapeDefects, ...numberingDefects(table));
+  if (table.rows.length < MIN_RANKED_TARGETS) defects.push(`the ranked table holds ${table.rows.length} targets, expected at least ${MIN_RANKED_TARGETS}`);
+  // A range ranks by its top value, so each row's volume is the largest number in its cell.
+  const volumes = table.rows.map(row => Math.max(...[...(row[2] ?? '').matchAll(/\d[\d,]*/g)].map(match => Number(match[0].replace(/,/g, '')))));
+  volumes.forEach((volume, index) => {
+    if (index > 0 && volume > (volumes[index - 1] ?? 0)) defects.push(`rank ${index + 1} has a larger volume than rank ${index}`);
+  });
+  const groups = parseTable(sectionBody(targets, 'Target groups') ?? '');
+  if (groups === undefined || !sameCells(groups.header, ['Group', 'Files', 'Cuts that fit'])) defects.push('the target groups table is missing');
+  return defects;
 }
 
 function linkDefects(guide: string, assumptions: string): string[] {
@@ -299,6 +365,33 @@ describe('the lean-prompts guide has every required part', () => {
   it('holds the architecture part', () => {
     expect(architectureDefects(GUIDE)).toEqual([]);
   });
+
+  it('holds where the tokens go, and links the target inventory', () => {
+    expect(tokensDefects(GUIDE)).toEqual([]);
+  });
+
+  it('holds the rules for every target', () => {
+    expect(targetRuleDefects(GUIDE)).toEqual([]);
+  });
+});
+
+describe('the target inventory', () => {
+  it('holds the measure method, the always-loaded text, the ranked targets and the groups', () => {
+    expect(targetsDefects(TARGETS)).toEqual([]);
+  });
+
+  it('shows a lost section, a renumbered rank and a short ranked list each as a defect', () => {
+    expect(targetsDefects(seedOnce(TARGETS, '## Target groups\n', '## Groups\n'))).toContain('the target inventory lacks "Target groups"');
+    expect(targetsDefects(seedOnce(TARGETS, '| 2 | `test-driven-development` skill', '| 3 | `test-driven-development` skill'))).not.toEqual([]);
+    const ranked = sectionBody(TARGETS, 'Ranked targets') ?? '';
+    const lastRow = ranked.split('\n').filter(line => line.startsWith('| 15 |'))[0] ?? '';
+    expect(targetsDefects(seedOnce(TARGETS, `${lastRow}\n`, ''))).not.toEqual([]);
+    expect(targetsDefects(seedOnce(TARGETS, '| Group | Files | Cuts that fit |', 'Group, Files, Cuts that fit'))).toContain('the target groups table is missing');
+  });
+
+  it('shows a rank out of order as a defect', () => {
+    expect(targetsDefects(seedOnce(TARGETS, '| 15 | Git agent body | 46 |', '| 15 | Git agent body | 99 |'))).toContain('rank 15 has a larger volume than rank 14');
+  });
 });
 
 describe('the Turns section holds the four actions', () => {
@@ -310,7 +403,7 @@ describe('the Turns section holds the four actions', () => {
     const last = '4. Do not send a turn that only narrates.\n';
     expect(turnsDefects(seedOnce(GUIDE, last, ''))).not.toEqual([]);
     expect(turnsDefects(seedOnce(GUIDE, last, `${last}5. Check the result.\n`))).not.toEqual([]);
-    expect(turnsDefects(seedOnce(GUIDE, 'A turn is one model call in the main session.', 'Work efficiently.'))).toContain('Turns holds a general efficiency line');
+    expect(turnsDefects(seedOnce(GUIDE, 'A turn is one model call in the main session or in an agent.', 'Work efficiently.'))).toContain('Turns holds a general efficiency line');
     expect(turnsDefects(seedOnce(GUIDE, 'Read a reference only on its branch.', 'Read a reference.'))).not.toEqual([]);
   });
 });
@@ -351,8 +444,12 @@ describe('the core global rules', () => {
 describe('the other parts show a loss as a defect', () => {
   it('a missing section, a lost architecture part, a lost bound and a lost cut-record clause', () => {
     expect(sectionDefects(seedOnce(GUIDE, '## Turns\n', '## Turn list\n'))).toContain('missing section "Turns"');
-    expect(architectureDefects(seedOnce(GUIDE, '### The build id\n', '### The stamp\n'))).toContain('the architecture part lacks "The build id"');
-    expect(architectureDefects(seedOnce(GUIDE, 'The prefix must be at most 16,660 bytes.', 'The prefix must be short.'))).not.toEqual([]);
+    expect(architectureDefects(seedOnce(GUIDE, '### Skill folders\n', '### Folders\n'))).toContain('the architecture part lacks "Skill folders"');
+    expect(architectureDefects(seedOnce(GUIDE, 'The prefix must be at most 16,660 bytes', 'The prefix must be short'))).not.toEqual([]);
+    expect(tokensDefects(seedOnce(GUIDE, '| Agent prompt |', '| Spawn |'))).toContain('the load table lacks "Agent prompt"');
+    expect(tokensDefects(seedOnce(GUIDE, '](lean-prompts-targets.md)', '](targets.md)'))).toContain('the guide does not link to the target inventory');
+    expect(targetRuleDefects(seedOnce(GUIDE, 'All other ceilings only fall.', 'Other ceilings may move.'))).not.toEqual([]);
+    expect(cutRuleDefects(seedOnce(GUIDE, 'One independent reader checks the diff against every lens below.', 'Readers check the diff.'))).not.toEqual([]);
     expect(cutRecordDefects(seedOnce(GUIDE, 'leaves less than half of the before size, stop', 'leaves little'))).not.toEqual([]);
     expect(cutRuleDefects(seedOnce(GUIDE, 'A pinned sentence stays.', 'A pinned sentence can go.'))).not.toEqual([]);
   });
@@ -384,6 +481,10 @@ describe('the live-check results sit in platform-assumptions.md', () => {
 describe('the new text suits a public repository', () => {
   it('the guide names no local path, ticket, ledger identifier, workspace role or plan step', () => {
     expect(publicTextDefects(GUIDE)).toEqual([]);
+  });
+
+  it('the target inventory names none of them', () => {
+    expect(publicTextDefects(TARGETS)).toEqual([]);
   });
 
   it('the live-check section names none of them', () => {
