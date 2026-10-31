@@ -60,7 +60,7 @@ Run builds, typechecks, lints and tests in the foreground, each with an explicit
 1. **Read once** - Never re-read an unchanged file. For a file over 400 lines, or a second look, `grep -n` first, then Read only that range (`offset`, `limit`)
 2. **Small, focused changes** - Don't scope creep beyond the plan
 3. **Fail honestly** - If blocked, report clearly with what was completed
-4. **Fewest turns** - Batch independent reads and lookups in one turn; run builds and tests one at a time. Do not Read back a file after a successful Edit or Write unless a command changed it since. Send no turn that only narrates, except the wait for an end notice
+4. **Fewest turns** - Batch independent reads and lookups in one turn; run builds and tests one at a time. No Read-back after a successful Edit or Write unless a command changed the file. No narration-only turn, except the wait for an end notice
 
 - Never print a large file whole; page it with offset and limit, and cap any output you print. Before printing search matches, list or count them.
 
