@@ -852,12 +852,12 @@ describe('GAP-2: agentType: values in dist ↔ declared roster', () => {
     ).toHaveLength(0)
   })
 
-  /** The four dynamic hosts (build, plan, profile, tickets): each carries the preamble's valid-agentType sentence. */
-  const DYNAMIC_HOST_COUNT = 4
+  /** The three Workflow hosts (build, plan, tickets): each carries the preamble's valid-agentType sentence. dynamic-profile authors no Workflow. */
+  const DYNAMIC_HOST_COUNT = 3
 
   it("each dynamic host's valid-agentType sentence lists the roster and every type the host spawns", () => {
-    const hosts = requireDistFiles().filter(f => f.startsWith('dynamic-'))
-    expect(hosts, 'dynamic hosts in dist/commands').toHaveLength(DYNAMIC_HOST_COUNT)
+    const hosts = requireDistFiles().filter(f => f.startsWith('dynamic-') && f !== 'dynamic-profile.md')
+    expect(hosts, 'Workflow hosts in dist/commands').toHaveLength(DYNAMIC_HOST_COUNT)
     const roster = new Set(parseRosterFromSource().keys())
     expect(roster.size, '_roster.mds table is empty — parse failure?').toBeGreaterThan(0)
 

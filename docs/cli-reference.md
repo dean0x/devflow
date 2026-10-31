@@ -273,7 +273,7 @@ Both are tracked in [issue #343](https://github.com/dean0x/devflow/issues/343), 
 
 ## Gate Level
 
-The gate level is one of three words that say how much checking a command applies. Every command reads it from the one local settings line, as `GATE_LEVEL=<full|standard|lean>`, never from a file.
+The gate level is one of three words that say how much checking a command applies. A command reads it from the one local settings line, as `GATE_LEVEL=<full|standard|lean>`, never from a file.
 
 | Level | Meaning |
 |---|---|
