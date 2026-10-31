@@ -83,7 +83,7 @@ import {
 } from '../helpers.js'
 import { PROJECT_CONFIG_LIB, SETTINGS_SCRIPT, scopedEnv } from '../evidence-policy/scripted-shim.js'
 import { seedOnce } from '../guards/level-guard-helpers.js'
-import { PR_EVIDENCE_SCRIPT, RESOLVE_BASE_SCRIPT, VERIFY_EVIDENCE_SCRIPT } from './seam.js'
+import { PR_EVIDENCE_SCRIPT, RESOLVE_BASE_SCRIPT, VERIFY_EVIDENCE_SCRIPT, claimCallLines, runClaimCall } from './seam.js'
 
 /** Transcribed from the script's JSDoc — only what this suite calls. */
 interface VerifyEvidenceApi {
@@ -856,45 +856,48 @@ describe('AC-10/AC-11: the spawns carry the test plan', () => {
 // /implement — claims (AC-11)
 // ---------------------------------------------------------------------------
 
-/** The claim shapes the Evidence claims paragraph states: the lines of the fence under it. */
-function claimTemplates(content: string): string[] {
-  const at = content.indexOf('**Evidence claims** are lines appended')
+/** The `claim` call of the Evidence claims paragraph: the line of the fence under it. */
+function claimCalls(content: string): string[] {
+  const at = content.indexOf('**Evidence claims** come from')
   if (at === -1) return []
-  const fence = /```\n([\s\S]*?)```/.exec(content.slice(at))
-  return fence === null ? [] : fence[1].split('\n').filter(l => l !== '')
+  const fence = /```bash\n([\s\S]*?)```/.exec(content.slice(at))
+  return fence === null ? [] : claimCallLines(fence[1])
 }
 
 /**
- * Named collector: every concrete claim a template can produce that CLAIM_LINE_RE
- * refuses, plus template placeholders it cannot fill. `<a|b>` alternations are
- * expanded; `exit:<0-255>` is filled at both bounds and also dropped (the line may
- * end at `by:test`).
+ * Named collector: every way a claim call fails to run against the real script. Each call
+ * runs twice over an evidence file with a three-TP plan, once for the gate claim and once
+ * for TP claims; each line the script wrote must be a claim CLAIM_LINE_RE admits. A
+ * placeholder the test cannot fill is a defect too.
  */
-function collectInadmissibleClaims(templates: readonly string[]): string[] {
+function collectInadmissibleClaims(calls: readonly string[]): string[] {
   const head = 'a'.repeat(40)
+  const plan = [1, 2, 3].map(n => `- [ ] TP-${n} (AC-1) Scenario ${n} — method:manual`)
   const out: string[] = []
-  for (const template of templates) {
-    const alternation = /<([A-Z]+(?:\|[A-Z]+)+)>/.exec(template)
-    const outcomes = alternation === null ? [''] : alternation[1].split('|')
-    for (const outcome of outcomes) {
-      for (const exit of ['0', '255', null]) {
-        let line = template.replace('<head>', head).replace('<n>', '7')
-        if (alternation !== null) line = line.replace(alternation[0], outcome)
-        line = exit === null ? line.replace(/ exit:<0-255>$/, '') : line.replace('<0-255>', exit)
-        if (/<[^>]*>/.test(line)) out.push(`unfilled placeholder: ${template}`)
-        else if (!PE.CLAIM_LINE_RE.test(line)) out.push(`refused: ${line}`)
+  for (const call of calls) {
+    for (const [claims, appended] of [['gate', 1], ['TP-1=PASS:0 TP-2=FAIL:1 TP-3=SKIP:—', 3]] as const) {
+      const file = path.join(mkdtempSync(path.join(SCRATCH, 'claim-')), 'evidence.md')
+      writeFileSync(file, `## Test Plan\n${plan.join('\n')}\n\n## Claims\n`)
+      try {
+        const r = runClaimCall(call, { claims, head, fill: [['{EVIDENCE_FILE}', file]] })
+        if (r.code !== 0 || !r.stdout.startsWith(`CLAIM appended:${appended} `)) out.push(`refused: ${claims} → exit ${r.code} ${r.stdout.trim()}`)
+        for (const line of readFileSync(file, 'utf-8').split('\n').filter(l => l.startsWith('- ') && !l.startsWith('- [ ]'))) {
+          if (!PE.CLAIM_LINE_RE.test(line)) out.push(`inadmissible: ${line}`)
+        }
+      } catch (err) {
+        out.push((err as Error).message)
       }
     }
   }
   return [...new Set(out)]
 }
 
-describe('AC-11: /implement appends claims the evidence script can read', () => {
-  it('the gate and TP claim shapes fill to lines CLAIM_LINE_RE admits, with the claim outcome vocabulary', () => {
-    const templates = claimTemplates(implementMd())
-    expect(templates).toHaveLength(2)
-    expect(templates[1]).toContain(`<${claimOutcomes().join('|')}>`)
-    expect(collectInadmissibleClaims(templates)).toEqual([])
+describe('AC-11: /implement writes claims through the evidence script', () => {
+  it('the call is stated once, with the claim outcome vocabulary, and runs: a gate claim and TP claims land as lines CLAIM_LINE_RE admits', () => {
+    const calls = claimCalls(implementMd())
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toContain(`<${claimOutcomes().join('|')}>`)
+    expect(collectInadmissibleClaims(calls)).toEqual([])
   })
 
   it('Phase 6 and Phase 8 PASS append the gate claim, and every Phase 7 run its TP claims', () => {
@@ -903,16 +906,17 @@ describe('AC-11: /implement appends claims the evidence script can read', () => 
     expect(lines.filter(l => l.startsWith('After every Test agent run — whatever its Status, first run or retry — append its TP claims'))).toHaveLength(1)
   })
 
-  it('known-bad probes: an outcome outside the grammar, an unfilled placeholder and a short SHA are refused', () => {
-    expect(collectInadmissibleClaims(['- TP-<n> <PASS|PASSED> sha:<head> by:test exit:<0-255>'])).toContain(
-      `refused: - TP-7 PASSED sha:${'a'.repeat(40)} by:test exit:0`,
-    )
-    expect(collectInadmissibleClaims(['- TP-<n> <outcome> sha:<head> by:test'])).toEqual([
-      'unfilled placeholder: - TP-<n> <outcome> sha:<head> by:test',
-    ])
-    expect(collectInadmissibleClaims(['- gate:validate PASS sha:abc123 by:validate'])).toEqual([
-      'refused: - gate:validate PASS sha:abc123 by:validate',
-    ])
+  it('known-bad probes: a call without --head, a misspelled flag, an outcome outside the grammar and an unfilled placeholder are each reported', () => {
+    const [call] = claimCalls(implementMd())
+    expect(collectInadmissibleClaims([call])).toEqual([])
+    const probe = (seeded: string): string[] => {
+      expect(seeded, 'the seed must land').not.toBe(call)
+      return collectInadmissibleClaims([seeded])
+    }
+    expect(probe(call.replace(' --head <head>', ''))).toEqual(expect.arrayContaining([expect.stringMatching(/^refused: gate → exit 1/)]))
+    expect(probe(call.replace('--evidence', '--evidance'))).toEqual(expect.arrayContaining([expect.stringMatching(/^refused: gate → exit 1/)]))
+    expect(probe(call.replace('<PASS|FAIL|SKIP>', '<PASS|PASSED>'))).toEqual(expect.arrayContaining([expect.stringContaining('a placeholder is unfilled')]))
+    expect(probe(call.replace('{EVIDENCE_FILE}', '{EVIDENCE_PATH}'))).toEqual(expect.arrayContaining([expect.stringContaining('a placeholder is unfilled')]))
   })
 })
 
@@ -921,9 +925,9 @@ describe('AC-11: /implement appends claims the evidence script can read', () => 
 // ---------------------------------------------------------------------------
 //
 // The Test agent writes `HEAD: {before} → {after}` when HEAD moves during its run. That value is not a single
-// SHA, so no claim may be appended from the report. A reader who sees only the condition may take the `after`
-// SHA and append `sha:<after>`, a claim for a HEAD the tests did not all run at: a false pass. So the rule
-// states both the condition and the moved-HEAD example, in all four builds.
+// SHA, so no claim may be written from the report. A reader who sees only the condition may take the `after`
+// SHA and pass it, a claim for a HEAD the tests did not all run at: a false pass. So the paragraph states both
+// the condition (pass `none`, which the script refuses) and the moved-HEAD example, in all four builds.
 
 type ImplementKey = 'on' | 'curation-off' | 'compliance-off' | 'both-off'
 
@@ -936,11 +940,11 @@ function implementMdOfKey(key: ImplementKey): string {
   return text
 }
 
-const HEAD_RULE_LEAD = '- Append nothing from a report whose `HEAD:`'
-const HEAD_RULE_CONDITION = 'is not a single 40-hex SHA'
-const HEAD_RULE_EXAMPLE = 'a reported before/after change included'
+const HEAD_RULE_LEAD = '**Evidence claims** come from the evidence script'
+const HEAD_RULE_CONDITION = 'or `none` if it holds anything but letters and digits'
+const HEAD_RULE_EXAMPLE = 'a before/after change too'
 
-/** Named collector: what the HEAD rule bullet of the Evidence claims lacks, one defect per missing clause. */
+/** Named collector: what the HEAD rule of the Evidence claims paragraph lacks, one defect per missing clause. */
 function collectHeadRuleDefects(file: string, text: string): string[] {
   const rules = text.split('\n').filter(line => line.startsWith(HEAD_RULE_LEAD))
   if (rules.length !== 1) return [`${file}: ${rules.length} HEAD rule bullets, expected 1`]
@@ -960,14 +964,14 @@ describe('AC-11: the HEAD rule of the claim shapes states the condition and the 
 
     it(`${key}: known-bad probe: a lost condition is reported as the condition, and no other clause`, () => {
       const text = implementMdOfKey(key)
-      const broken = text.replace(HEAD_RULE_CONDITION, 'is not a SHA')
+      const broken = text.replace(HEAD_RULE_CONDITION, 'or `none` if it is odd')
       expect(broken, 'the condition seed must land').not.toBe(text)
       expect(collectHeadRuleDefects(file, broken)).toEqual([`${file}: the HEAD rule does not state the condition "${HEAD_RULE_CONDITION}"`])
     })
 
     it(`${key}: known-bad probe: a lost example is reported as the example, and no other clause`, () => {
       const text = implementMdOfKey(key)
-      const broken = text.replace(` — ${HEAD_RULE_EXAMPLE} —`, '')
+      const broken = text.replace(` (${HEAD_RULE_EXAMPLE})`, '')
       expect(broken, 'the example seed must land').not.toBe(text)
       expect(collectHeadRuleDefects(file, broken)).toEqual([`${file}: the HEAD rule does not state the moved-HEAD example "${HEAD_RULE_EXAMPLE}"`])
     })
@@ -2174,7 +2178,7 @@ function collectPointerDefects(md: string, revalidate: string = revalidateRefere
   const out = RETIRED_POINTERS.filter(p => md.includes(p)).map(p => `a retired pointer remains: "${p}"`)
   const need = (what: string, ok: boolean): void => { if (!ok) out.push(what) }
   need('Phase 1 does not point Harden at Phase 4', md.includes('Harden agent (Phase 4)'))
-  need('the Evidence-claims definition does not name Phase 6 and Phase 8', md.includes('`gate:validate` — after a Phase 6 or Phase 8 PASS.'))
+  need('the Evidence-claims definition does not name Phase 6 and Phase 8', md.includes('`gate` — after a Phase 6 or Phase 8 PASS.'))
   need('the TP claims are not tied to Phase 7', md.includes('`TP-<n>` — after every Phase 7 run'))
   need('the Test spawn does not point at Phase 6\'s claims', md.includes('append its TP claims (Phase 6\'s **Evidence claims**)'))
   need('the continuation path names no order', revalidate.includes('**Run Phases 3-8** — Polish (at `full`), Self-Review, Alignment, the one full Validate, QA Testing and the conditional Re-Validate'))

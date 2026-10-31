@@ -19,9 +19,13 @@
  */
 
 import { describe, it, expect } from 'vitest'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
+import * as path from 'path'
 
 import { collectOrderViolations, countOf, isAgentBlock, parseFences, requireDistFile, resolveVariantOffSource, type OrderRule } from '../helpers.js'
 import { seedOnce } from '../guards/level-guard-helpers.js'
+import { claimCallLines, runClaimCall } from '../evidence/seam.js'
 
 type OffKey = 'compliance-off' | 'both-off'
 
@@ -53,7 +57,8 @@ const STALE_RUN = '--evidence ".devflow/docs/evidence-{branch_slug}.md" --stale-
 const RESULT_RUN = 'verify-evidence.cjs" verify --pr {pr_number} --evidence ".devflow/docs/evidence-{branch_slug}.md" --comment-out'
 const READINESS_RUN = 'verify-evidence.cjs" readiness --pr {pr_number}'
 const TEST_SPAWN = 'Agent(subagent_type="Test"):\n"TEST_PLAN: <untrusted-test-plan>'
-const CLAIM_TEMPLATE = '- TP-<n> <PASS|FAIL|SKIP> sha:<head> by:test exit:<0-255>'
+/** The claim call of Step 9b-0 (the `claim` subcommand): the evidence script writes the claim lines to the local evidence file. */
+const CLAIM_RUN = `verify-evidence.cjs" claim --evidence ${EVIDENCE_FILE} --plan {TARGET_DIR_REL}/stale-plan.md --head <head> TP-<n>=`
 
 /** The text of a heading's section, up to the next phase heading, the knowledge write-back or the architecture section, or null when the heading is absent. */
 function sectionOf(md: string, heading: string): string | null {
@@ -101,8 +106,7 @@ function collectLocalEvidenceDefects(md: string): string[] {
   }
   if (!phase.includes(`\`STALE_REVERIFICATION\` and \`EVIDENCE_REFRESH\` as \`${NO_FILE}\``)) out.push('no local evidence file does not record SKIPPED for both outputs')
   if (!phase.includes('skip Steps 9b-0 and 9b-3, and run Step 9c without `--evidence`')) out.push('no local evidence file does not skip 9b-0 and 9b-3 and drop --evidence from 9c')
-  if (!phase.includes(`to the \`## Claims\` section of \`${EVIDENCE_FILE}\`, the local evidence file`)) out.push('the claims are not appended to the local evidence file')
-  if (!phase.includes(CLAIM_TEMPLATE)) out.push('the claim shape is not the claim grammar\'s')
+  if (!phase.includes(CLAIM_RUN)) out.push('the claims are not appended to the local evidence file')
   if (!phase.includes('The lines came from the evidence file, so they travel wrapped')) out.push('the stale lines do not travel wrapped as untrusted')
   if (fences.some(f => isAgentBlock(f, 'Git'))) out.push('a Git agent is spawned')
   if (!phase.includes('it writes nothing to GitHub')) out.push('Step 9b-3 does not say it writes nothing to GitHub')
@@ -167,7 +171,7 @@ function collectPolicyLineDefects(md: string): string[] {
 const ORDER: readonly OrderRule[] = [
   { label: '9b-0 opens Phase 9b', before: PHASE9B, after: STEP0 },
   { label: 'the stale-out check runs before the Test spawn', before: STALE_RUN, after: TEST_SPAWN },
-  { label: 'the claims follow the Test spawn', before: TEST_SPAWN, after: CLAIM_TEMPLATE },
+  { label: 'the claims follow the Test spawn', before: TEST_SPAWN, after: CLAIM_RUN },
   { label: '9b-3 follows 9b-0', before: STEP0, after: STEP3 },
   { label: 'the result call sits in 9b-3', before: STEP3, after: RESULT_RUN },
   { label: 'Phase 9c follows 9b-3', before: RESULT_RUN, after: PHASE9C },
@@ -203,7 +207,7 @@ describe('#648 AC-13, AC-19: the compliance-off builds of /resolve post nothing 
     expect(collectLocalEvidenceDefects(spawned)).toEqual(['a Git agent is spawned'])
     expect(collectLocalEvidenceDefects(seedOnce(md, ` --evidence "${EVIDENCE_FILE}" --stale-out`, ' --stale-out'))).toEqual(['the stale-out call does not pass the evidence file before --stale-out'])
     expect(collectLocalEvidenceDefects(seedOnce(md, ` --comment-out "${RESULT_FILE}"`, ' --comment-out "x.md"'))).toEqual(['--comment-out is not the local result file'])
-    expect(collectLocalEvidenceDefects(seedOnce(md, `to the \`## Claims\` section of \`${EVIDENCE_FILE}\`, the local evidence file`, 'to the PR body'))).toEqual(['the claims are not appended to the local evidence file'])
+    expect(collectLocalEvidenceDefects(seedOnce(md, `--evidence ${EVIDENCE_FILE} --plan`, '--evidence pr-body.md --plan'))).toEqual(['the claims are not appended to the local evidence file'])
     expect(collectOrderViolations('resolve.md', seedOnce(md, STEP3, '**Step 9b-3 later**').replace(PHASE9B, `${STEP3}\n\n${PHASE9B}`), ORDER).some(v => v.includes('9b-3 follows 9b-0'))).toBe(true)
   })
 })
@@ -279,6 +283,23 @@ describe('#648 AC-22: Step 9b-0 of the compliance-off builds reads and extends t
       expect(collectOrderViolations('resolve.md', md, ORDER), label).toEqual([])
       expect(countOf(md, TEST_SPAWN), `${label}: one Test spawn`).toBe(1)
       expect(collectLocalEvidenceDefects(md), label).toEqual([])
+    }
+  })
+
+  it('the claim call of each off build appends the claims to the local evidence file', () => {
+    for (const [label, key] of OFF_BUILDS) {
+      const calls = claimCallLines(resolveMdOff(key))
+      expect(calls.length, `${label}: the claim call is the corpus`).toBe(1)
+      const dir = mkdtempSync(path.join(tmpdir(), 'resolve-off-claim-'))
+      try {
+        writeFileSync(path.join(dir, 'stale-plan.md'), '- [ ] TP-1 (AC-1) The build is green — method:local\n')
+        const evidence = path.join(dir, 'evidence.md')
+        const r = runClaimCall(calls[0], { claims: 'TP-1=PASS:0', head: 'b'.repeat(40), fill: [[EVIDENCE_FILE, evidence], ['{TARGET_DIR_REL}', dir]] })
+        expect(r.stdout, label).toBe('CLAIM appended:1 PASS:1 FAIL:0 SKIP:0 skipped:0\n')
+        expect(readFileSync(evidence, 'utf-8'), label).toBe(`## Claims\n- TP-1 PASS sha:${'b'.repeat(40)} by:test exit:0\n`)
+      } finally {
+        rmSync(dir, { recursive: true })
+      }
     }
   })
 
