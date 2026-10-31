@@ -2386,9 +2386,13 @@ describe('Phase F traceability — release.md evidence + dynamic-build mechanism
 // ---------------------------------------------------------------------------
 // §19  Phase C publication gate wiring — _publication.mds partial (11th partial)
 //      code-review.md, resolve.md, (since #363) implement.md and (since #376)
-//      dynamic-build.md must expand publication_gate() and pass REVIEW_PUBLICATION
-//      only in Git spawns — post-*-summary for the two review hosts,
-//      update-pr-evidence for /implement and for the wave PR
+//      dynamic-build.md must expand the publication resolution steps and pass
+//      REVIEW_PUBLICATION only in Git spawns — post-*-summary for the two review
+//      hosts, update-pr-evidence for the wave PR. code-review, resolve and
+//      dynamic-build expand publication_gate(), which adds the Note on the Git
+//      agent's gate. /implement expands publication_resolve() alone: Phase 11
+//      hands the resolved value to the evidence script, which decides what each
+//      value means, so /implement names no Git-agent gate.
 // ---------------------------------------------------------------------------
 
 describe('publication_gate adoption in compiled host commands (Phase C)', () => {
@@ -2398,6 +2402,9 @@ describe('publication_gate adoption in compiled host commands (Phase C)', () => 
     'implement':     DIST_COMMANDS,
     'resolve':       DIST_COMMANDS,
   };
+
+  // The hosts that expand publication_gate() and so carry its Note. /implement expands publication_resolve() alone.
+  const NOTE_HOSTS = Object.keys(PUBLICATION_HOSTS).filter(basename => basename !== 'implement');
 
   // The Note of publication_gate(). Its first sentence keeps the `auto` condition
   // with the probe it describes: a colon joins "does not fail open" to the Git
@@ -2426,37 +2433,50 @@ describe('publication_gate adoption in compiled host commands (Phase C)', () => 
         content,
         `${destRelDir}/${basename}.md must expand the partial itself, not only name the value`,
       ).toContain('**Resolve `REVIEW_PUBLICATION` per worktree:**');
+      if (!NOTE_HOSTS.includes(basename)) continue;
       expect(
         collectPublicationNoteProblems(basename, content),
         `${destRelDir}/${basename}.md must keep the auto condition with the probe note`,
       ).toEqual([]);
     }
     expect(scanned, 'scanned zero publication hosts — guard is vacuous').toBeGreaterThan(0);
+    expect(NOTE_HOSTS, 'the Note hosts are every publication host but /implement').toEqual(['code-review', 'dynamic-build', 'resolve']);
+  });
+
+  it('/implement expands publication_resolve() alone: it resolves the value once and carries no Note on the Git agent gate', async () => {
+    const implement = await fs.readFile(path.join(BUILT_COMMANDS, 'implement.md'), 'utf-8');
+    const step = '**Resolve `REVIEW_PUBLICATION` per worktree:**';
+    expect(implement.split(step).length - 1, 'the value is resolved once').toBe(1);
+    expect(implement, 'no Note on the Git agent gate').not.toContain(AUTO_PROBE_NOTE);
+    expect(implement, 'no gate document named').not.toContain('publication-gate');
+    // Non-vacuity: a host that expands publication_gate() does carry the Note.
+    const resolve = await fs.readFile(path.join(BUILT_COMMANDS, 'resolve.md'), 'utf-8');
+    expect(resolve, 'resolve.md expands publication_gate()').toContain(AUTO_PROBE_NOTE);
   });
 
   it('known-bad probe: a publication host whose probe note lost the auto condition or its colon join is reported', async () => {
-    const implement = await fs.readFile(path.join(BUILT_COMMANDS, 'implement.md'), 'utf-8');
-    expect(collectPublicationNoteProblems('implement', implement), 'the real host is clean').toEqual([]);
+    const resolve = await fs.readFile(path.join(BUILT_COMMANDS, 'resolve.md'), 'utf-8');
+    expect(collectPublicationNoteProblems('resolve', resolve), 'the real host is clean').toEqual([]);
     const reported = [
-      `implement.md: the auto-condition probe note is missing — "${AUTO_PROBE_NOTE}" not found`,
+      `resolve.md: the auto-condition probe note is missing — "${AUTO_PROBE_NOTE}" not found`,
     ];
-    const without = (instead: string): string => implement.split(AUTO_PROBE_NOTE).join(instead);
-    expect(without('x'), 'the seed must change the text').not.toBe(implement);
+    const without = (instead: string): string => resolve.split(AUTO_PROBE_NOTE).join(instead);
+    expect(without('x'), 'the seed must change the text').not.toBe(resolve);
     expect(
       collectPublicationNoteProblems(
-        'implement',
+        'resolve',
         without('`auto` does not fail open. The Git agent probes the repository visibility and treats any error or unrecognised value as PUBLIC (mode STUB)'),
       ),
       'the superseded wording, which cut the probe loose from the auto condition, must be reported',
     ).toEqual(reported);
     expect(
       collectPublicationNoteProblems(
-        'implement',
+        'resolve',
         without('The Git agent probes the repository visibility and treats any error or unrecognised value as PUBLIC (mode STUB)'),
       ),
       'a probe note with no auto condition at all must be reported',
     ).toEqual(reported);
-    expect(collectPublicationNoteProblems('implement', ''), 'an empty host must be reported').toEqual(reported);
+    expect(collectPublicationNoteProblems('resolve', ''), 'an empty host must be reported').toEqual(reported);
   });
 
   it('every REVIEW_PUBLICATION: line in every compiled command is inside a Git-agent spawn block (spawn-scoped guard)', async () => {

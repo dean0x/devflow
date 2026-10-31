@@ -35,6 +35,10 @@
  * A second claim, at the end of the file: the independence criteria of PARALLEL_CODE_AGENTS sit in the PARALLEL
  * block, never in the strategy table row. A plan whose frontmatter names the strategy skips the table, so a
  * criterion that lives only in the row is no gate for that plan.
+ *
+ * A third claim, after it: two whole sentences that close a gap in the run (the Phase 2 stop for a failed Code agent and the
+ * Error Handling line for a run ended after Phase 9). They are not rows of the table above. They use the same collector, the
+ * same deletion probe, the whole-sentence probe and the heading probe.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -563,4 +567,95 @@ describe('the independence criteria of PARALLEL_CODE_AGENTS sit in the PARALLEL 
     const one = miniCommand('True artifact independence (rare)', CRITERIA_TEXT, 'Polish.')
     expect(collectParallelGateDefects('mini', `${one}\n${one}`)).toEqual(['mini: 2 PARALLEL_CODE_AGENTS blocks, expected 1'])
   })
+})
+
+// ---------------------------------------------------------------------------
+// The fault-fix sentences (X1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Two whole sentences that close a gap in the run, found while the Polish skip moved into the command. They are not rows of the
+ * never-cut table, so the table above holds its rows alone. They run through the same collector and the same probes.
+ *   - A Code agent with any Status other than COMPLETE, or none, stops the run before Phase 3. A list of the stopping statuses would
+ *     let an unknown status (a status such as PARTIAL) through.
+ *   - A run that the user ends after Phase 10 started still records the evidence and writes the report.
+ */
+const FAULT_FIX_ROWS: readonly Row[] = [
+  {
+    no: 'X1a',
+    item: 'Phase 2: a Code agent with a Status other than COMPLETE, or none, stops the run',
+    anchor: 'A Code agent with a Status other than COMPLETE, or none: report it and its cause, then halt.',
+    section: PHASE_2,
+    whole: true,
+  },
+  {
+    no: 'X1b',
+    item: 'Error Handling: a run ended after Phase 10 started still runs Phases 11 and 12',
+    anchor: 'If the user ends the run after Phase 10 started, run Phases 11 and 12 first.',
+    section: ERROR_HANDLING,
+    whole: true,
+  },
+]
+
+/**
+ * Each sentence as an earlier text of it worded it. The earlier text names the stopping statuses (FAILED and BLOCKED), so an unknown
+ * status does not halt; the earlier end-run line ends the rule at the PR, so a stop in Phase 10 skips the evidence. Neither is the
+ * pinned sentence, so the row must report it as missing.
+ */
+const FAULT_FIX_REWORDED: Readonly<Record<string, string>> = {
+  X1a: 'A Code agent with FAILED, BLOCKED or no Status: report it and its cause, then halt.',
+  X1b: 'If the user ends the run after Phase 9 opened the PR, run Phases 11 and 12 first.',
+}
+
+describe('the fault-fix sentences of /implement are in every compiled build, once, whole, under their section', () => {
+  for (const { key, file } of BUILDS) {
+    describe(`${key} (${file})`, () => {
+      it('holds each sentence once, whole, under its section', () => {
+        expect(FAULT_FIX_ROWS.map(r => r.no), 'the rows of the block').toEqual(['X1a', 'X1b'])
+        expect(collectPlacementDefects(file, readBuild(file), FAULT_FIX_ROWS)).toEqual([])
+      })
+
+      it('known-bad probe: deleting a sentence is reported as that sentence missing, and no other', () => {
+        const text = readBuild(file)
+        for (const row of FAULT_FIX_ROWS) {
+          expect(collectPlacementDefects(file, deleteAnchor(text, row), FAULT_FIX_ROWS), `deleting row ${row.no}`).toEqual([`${where(file, row)}: anchor missing`])
+        }
+      })
+
+      it('known-bad probe: a sentence glued to a word before it is reported as not whole, and no other', () => {
+        const text = readBuild(file)
+        for (const row of FAULT_FIX_ROWS) {
+          expect(countOf(text, row.anchor), `row ${row.no} must occur once for the gluing to be exact`).toBe(1)
+          expect(collectPlacementDefects(file, text.replace(row.anchor, () => `and ${row.anchor}`), FAULT_FIX_ROWS), `gluing row ${row.no}`).toEqual([`${where(file, row)}: not a whole sentence`])
+        }
+      })
+
+      it('known-bad probe: an earlier wording of a sentence is reported as that sentence missing: an unknown Code status no longer halts, and a stop in Phase 10 skips the evidence', () => {
+        const text = readBuild(file)
+        for (const row of FAULT_FIX_ROWS) {
+          const reworded = FAULT_FIX_REWORDED[row.no]
+          expect(reworded, `row ${row.no} has an earlier wording`).toBeDefined()
+          expect(reworded, `row ${row.no}: the earlier wording is not the pinned sentence`).not.toBe(row.anchor)
+          expect(countOf(text, row.anchor), `row ${row.no} must occur once for the reword to be exact`).toBe(1)
+          expect(collectPlacementDefects(file, text.replace(row.anchor, () => reworded as string), FAULT_FIX_ROWS), `rewording row ${row.no}`).toEqual([`${where(file, row)}: anchor missing`])
+        }
+      })
+
+      it('known-bad probe: a Phase 2 arm that drops "other than" or "or none" is reported as the arm missing', () => {
+        const text = readBuild(file)
+        const arm = (FAULT_FIX_ROWS.find(r => r.no === 'X1a') as Row).anchor
+        for (const [from, to] of [['a Status other than COMPLETE, or none', 'a Status of FAILED'], ['COMPLETE, or none', 'COMPLETE'], ['a Status other than COMPLETE', 'a failed Status']] as const) {
+          expect(arm.includes(from), `the arm holds "${from}"`).toBe(true)
+          expect(collectPlacementDefects(file, text.replace(arm, () => arm.replace(from, to)), FAULT_FIX_ROWS), `"${from}" changed`).toEqual([`${where(file, FAULT_FIX_ROWS[0] as Row)}: anchor missing`])
+        }
+      })
+
+      it('known-bad probe: renaming a heading is reported for each sentence under it, and no other', () => {
+        const text = readBuild(file)
+        for (const row of FAULT_FIX_ROWS) {
+          expect(collectPlacementDefects(file, renameHeading(text, row.section), FAULT_FIX_ROWS), `renaming "${row.section}"`).toEqual([`${where(file, row)}: sits under ${row.section} (renamed), expected ${row.section}`])
+        }
+      })
+    })
+  }
 })

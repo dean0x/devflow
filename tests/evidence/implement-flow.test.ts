@@ -1162,7 +1162,7 @@ describe('AC-11: Phase 11 runs the evidence script once, after Phase 10, for eve
     const early = md.replace('### Phase 10: CI Status Gate', '### Phase 10 later').replace('### Phase 12: Report', '### Phase 10: CI Status Gate\n\n### Phase 12: Report')
     expect(collectOrderViolations('implement.md', early, PHASE11_ORDER).some(v => v.includes('Phase 11 follows the CI gate'))).toBe(true)
     expect(collectPublicationImporters([
-      { name: 'implement', content: `@import { publication_gate } from "${PUBLICATION_IMPORT}"` },
+      { name: 'implement', content: `@import { publication_resolve } from "${PUBLICATION_IMPORT}"` },
       { name: 'stray', content: `@import "${PUBLICATION_IMPORT}" as pub` },
       { name: 'other', content: '@import { x } from "./_partials/_plan_contract.mds"' },
     ])).toEqual(['implement', 'stray'])
@@ -1433,8 +1433,8 @@ function selfReviewBuilds(): ReadonlyArray<{ readonly label: string; readonly md
   ]
 }
 
-/** The line that opens the Phase 6 Validate spawn: ALIGNED, or a single-pass Fix that reports COMPLETE. */
-const PHASE_6_LEAD = 'After ALIGNED, or a single-pass Fix that reports COMPLETE, spawn Validate agent:'
+/** The line that opens the Phase 6 Validate spawn: ALIGNED, a single-pass Fix that reports COMPLETE, or a user who continues after a Phase 5 report for decision. */
+const PHASE_6_LEAD = 'After ALIGNED, a single-pass Fix that reports COMPLETE, or a user who continues after a Phase 5 report, spawn Validate agent:'
 
 describe('#571, #572: /implement and Harden state the self-review scope, in both builds', () => {
   it.each(['curation on', 'curation off'])('%s: the three lines stand alone and the Phase 4 status line is unchanged', label => {
@@ -1639,7 +1639,9 @@ describe('#679, #680: the Validate and Test gates each state a BLOCKED arm that 
 /** Phase 9 stops the run at the report when the Git agent opens no PR: its sentence says that Phases 10 and 11 do not run. */
 const PHASE_9_STOP = 'Phases 10 and 11 do not run'
 /** The Phase 11 skip rule, as the command words it. */
-const PHASE_11_SKIP_RULE = 'Skip it only when the run stopped before Phase 10.'
+const PHASE_11_SKIP_RULE = 'Skip it only when the run stopped before Phase 10 started.'
+/** The Phase 11 lead: it runs after Phase 10, or after Phase 9 on the re-validation path, which has no Phase 10. */
+const PHASE_11_RUN_LEAD = "Run once, after Phase 10 or the re-validation path's Phase 9, under every strategy."
 /** The rule as it read before the fix: "an earlier phase" also reaches a stop in Phase 10, so a PR that Phase 9 opened got no evidence. */
 const PHASE_11_SKIP_RULE_EARLIER = 'Skip it only when an earlier phase stopped the run.'
 /** The Phase 10 arm that ends the gate and hands the run to Phase 11: the `proceed` answer of the CI wait. */
@@ -1663,6 +1665,7 @@ function collectPhase11SkipDefects(md: string): string[] {
   const bounded = /before Phase 10\b/.test(rule)
   const unbounded = /\bearlier\b/.test(rule)
   const out: string[] = []
+  if (!eleven.includes(PHASE_11_RUN_LEAD)) out.push(`the Phase 11 lead does not say: ${PHASE_11_RUN_LEAD}`)
   if (unbounded || /Phase 1[0-2]/.test(rule.replace(/before Phase 10\b/, ''))) out.push('the Phase 11 skip rule reaches a Phase 10 stop, so the PR that Phase 9 opened gets no evidence')
   for (const [phase, heading, stop] of [['Phase 7', H.p7, PHASE_7_STOP], ['Phase 9', H.p9, PHASE_9_STOP]] as const) {
     if (!(phaseSection(md, heading) ?? '').includes(stop)) out.push(`${phase}: the stop sentence "${stop}" is absent, so the skip rule has no stop to cover`)
@@ -1682,6 +1685,15 @@ describe('#675: the Phase 11 skip rule skips Phase 11 for every stop before Phas
     expect(phaseSection(md, H.p10), `${key}: Phase 10 hands the run to Phase 11`).toContain(PHASE_10_PASSING_ARM)
     expect(collectPhase11SkipDefects(md), key).toEqual([])
     expect(phaseSection(md, H.p11), `${key}: the skip rule, whole`).toContain(` ${PHASE_11_SKIP_RULE} `)
+    expect(phaseSection(md, H.p11), `${key}: the lead, whole`).toContain(PHASE_11_RUN_LEAD)
+  })
+
+  it.each(IMPLEMENT_KEYS)("%s: known-bad probes: a lead that lost the re-validation path's Phase 9, or the whole lead, is reported", key => {
+    const md = implementMdOfKey(key)
+    const lead = `the Phase 11 lead does not say: ${PHASE_11_RUN_LEAD}`
+    expect(collectPhase11SkipDefects(seedOnce(md, " or the re-validation path's Phase 9", '')), 'the re-validation path dropped').toEqual([lead])
+    expect(collectPhase11SkipDefects(seedOnce(md, PHASE_11_RUN_LEAD, 'Run once, after Phase 10, under every strategy.')), 'the lead as it was').toEqual([lead])
+    expect(collectPhase11SkipDefects(seedOnce(md, `${PHASE_11_RUN_LEAD} `, '')), 'the lead deleted').toEqual([lead])
   })
 
   it.each(IMPLEMENT_KEYS)('%s: known-bad probes: the earlier-phase rule, a rule that names only Phase 9, only Phase 7 or Phase 10, a missing rule, a lost stop sentence and a Phase 10 stop sentence are each reported', key => {
@@ -1707,10 +1719,13 @@ describe('#675: the Phase 11 skip rule skips Phase 11 for every stop before Phas
 })
 
 /**
- * Named collector (#675): the Phase 6 lead-in names both paths into Phase 6 and the status that gates the second one.
+ * Named collector (#675): the Phase 6 lead-in names the three paths into Phase 6 and the status that gates the second one.
  * A single-pass Fix that reports FAILED or BLOCKED reports the misalignments to the user and starts no Phase 6, so a
  * lead-in that says only that the Fix "completes" reads as "returns" and lets a reader start Phase 6 after a stop.
- * The lead-in must say ALIGNED as a whole word (MISALIGNED is the opposite status) and must say that the Fix reports COMPLETE.
+ * The third path is the user's go after a Phase 5 report for decision: the lead-in must name it, or Phase 6 has no
+ * stated way in from that report.
+ * The lead-in must say ALIGNED as a whole word (MISALIGNED is the opposite status), must say that the Fix reports COMPLETE,
+ * and must say that a user who continues after a Phase 5 report starts Phase 6.
  */
 function collectPhase6LeadDefects(md: string): string[] {
   const six = phaseSection(md, H.p6)
@@ -1720,24 +1735,30 @@ function collectPhase6LeadDefects(md: string): string[] {
   const out: string[] = []
   if (!/\bALIGNED\b/.test(leads[0])) out.push('the Phase 6 lead-in does not name ALIGNED')
   if (!leads[0].includes('a single-pass Fix that reports COMPLETE')) out.push('the Phase 6 lead-in does not name the COMPLETE status of the single-pass Fix')
+  if (!leads[0].includes('a user who continues after a Phase 5 report')) out.push('the Phase 6 lead-in does not name the user who continues after a Phase 5 report')
   return out
 }
 
-describe('#675: the Phase 6 lead-in names the COMPLETE status of the single-pass Fix, in all four builds', () => {
-  it.each(IMPLEMENT_KEYS)('%s: the lead-in names ALIGNED and the COMPLETE status', key => {
+describe('#675: the Phase 6 lead-in names ALIGNED, the COMPLETE status of the single-pass Fix and the user who continues, in all four builds', () => {
+  it.each(IMPLEMENT_KEYS)('%s: the lead-in names ALIGNED, the COMPLETE status and the continuing user', key => {
     const md = implementMdOfKey(key)
     expect(md.split('\n').filter(l => l === PHASE_6_LEAD), `${key}: the lead-in, whole`).toHaveLength(1)
     expect(collectPhase6LeadDefects(md), key).toEqual([])
   })
 
-  it.each(IMPLEMENT_KEYS)('%s: known-bad probes: the word completes, a lost status, a lost ALIGNED, MISALIGNED in its place, no lead-in, two leads and no section are each reported', key => {
+  it.each(IMPLEMENT_KEYS)('%s: known-bad probes: the word completes, a lost status, a lost ALIGNED, MISALIGNED in its place, a lost continue path, no lead-in, two leads and no section are each reported', key => {
     const md = implementMdOfKey(key)
     const noStatus = 'the Phase 6 lead-in does not name the COMPLETE status of the single-pass Fix'
-    expect(collectPhase6LeadDefects(seedOnce(md, PHASE_6_LEAD, 'After ALIGNED or a single-pass fix completes, spawn Validate agent:')), 'the lead-in before the fix').toEqual([noStatus])
-    expect(collectPhase6LeadDefects(seedOnce(md, PHASE_6_LEAD, 'After ALIGNED, or a single-pass Fix that returns, spawn Validate agent:'))).toEqual([noStatus])
-    expect(collectPhase6LeadDefects(seedOnce(md, PHASE_6_LEAD, 'After a single-pass Fix that reports COMPLETE, spawn Validate agent:'))).toEqual(['the Phase 6 lead-in does not name ALIGNED'])
-    expect(collectPhase6LeadDefects(seedOnce(md, PHASE_6_LEAD, 'After the gates, spawn Validate agent:'))).toEqual(['the Phase 6 lead-in does not name ALIGNED', noStatus])
-    expect(collectPhase6LeadDefects(seedOnce(md, PHASE_6_LEAD, 'After MISALIGNED, or a single-pass Fix that reports COMPLETE, spawn Validate agent:')), 'MISALIGNED holds the letters of ALIGNED but is not the status').toEqual(['the Phase 6 lead-in does not name ALIGNED'])
+    const noContinue = 'the Phase 6 lead-in does not name the user who continues after a Phase 5 report'
+    const CONTINUE_PATH = 'or a user who continues after a Phase 5 report'
+    expect(collectPhase6LeadDefects(seedOnce(md, PHASE_6_LEAD, `After ALIGNED, a single-pass fix completes, ${CONTINUE_PATH}, spawn Validate agent:`)), 'the lead-in before the fix').toEqual([noStatus])
+    expect(collectPhase6LeadDefects(seedOnce(md, PHASE_6_LEAD, `After ALIGNED, a single-pass Fix that returns, ${CONTINUE_PATH}, spawn Validate agent:`))).toEqual([noStatus])
+    expect(collectPhase6LeadDefects(seedOnce(md, PHASE_6_LEAD, `After a single-pass Fix that reports COMPLETE, ${CONTINUE_PATH}, spawn Validate agent:`))).toEqual(['the Phase 6 lead-in does not name ALIGNED'])
+    expect(collectPhase6LeadDefects(seedOnce(md, PHASE_6_LEAD, 'After the gates, spawn Validate agent:'))).toEqual(['the Phase 6 lead-in does not name ALIGNED', noStatus, noContinue])
+    expect(collectPhase6LeadDefects(seedOnce(md, PHASE_6_LEAD, `After MISALIGNED, a single-pass Fix that reports COMPLETE, ${CONTINUE_PATH}, spawn Validate agent:`)), 'MISALIGNED holds the letters of ALIGNED but is not the status').toEqual(['the Phase 6 lead-in does not name ALIGNED'])
+    expect(collectPhase6LeadDefects(seedOnce(md, ', or a user who continues after a Phase 5 report', '')), 'the continue path dropped').toEqual([noContinue])
+    expect(collectPhase6LeadDefects(seedOnce(md, 'who continues after a Phase 5 report', 'who continues')), 'the Phase 5 report dropped from the continue path').toEqual([noContinue])
+    expect(collectPhase6LeadDefects(seedOnce(md, 'a user who continues', 'a reader who continues')), 'the user replaced').toEqual([noContinue])
     expect(collectPhase6LeadDefects(seedOnce(md, `${PHASE_6_LEAD}\n`, ''))).toEqual(['Phase 6 holds 0 Validate spawn leads, expected 1'])
     expect(collectPhase6LeadDefects(seedOnce(md, PHASE_6_LEAD, `${PHASE_6_LEAD}\n${PHASE_6_LEAD}`))).toEqual(['Phase 6 holds 2 Validate spawn leads, expected 1'])
     expect(collectPhase6LeadDefects(seedOnce(md, H.p6, '### Phase 6 gone'))).toEqual([`${H.p6}: the section is absent`])
@@ -2586,7 +2607,11 @@ const PHASE11_ORDER_OFF: readonly OrderRule[] = PHASE11_ORDER.map(rule => ({
   after: rule.after === EVIDENCE_RUN ? OFF_EVIDENCE_RUN : rule.after,
 }))
 
-/** What an off build of /implement names nowhere: the PR-body inputs, the reference reads, the publish call and the publication pass. */
+/**
+ * What an off build of /implement names nowhere: the PR-body inputs, the reference reads, the publish call and the publication pass.
+ * Each text is one the on build holds, so the absence guard is not vacuous. The Git agent's publication gate document is named by
+ * no /implement build, on or off (`collectGateDocumentDefects`), so it has no row here.
+ */
 const OFF_ABSENT: ReadonlyArray<readonly [string, string]> = [
   ['the PR exceptions input', 'PR_EXCEPTIONS'],
   ['the PR test-plan block input', 'PR_TEST_PLAN_BLOCK'],
@@ -2596,12 +2621,19 @@ const OFF_ABSENT: ReadonlyArray<readonly [string, string]> = [
   ['the publish call', 'verify-evidence.cjs" publish'],
   ['the update-pr-evidence operation', 'update-pr-evidence'],
   ['the publish timeout', 'timeout: 180000'],
-  ['the publication gate document, which compliance off does not install', 'publication-gate'],
 ]
 
 /** Named collector: what an off build of /implement still names that a non-posting machine must not. */
 function collectOffAbsenceDefects(content: string): string[] {
   return OFF_ABSENT.filter(([, text]) => content.includes(text)).map(([what, text]) => `the off build names ${what}: ${text}`)
+}
+
+/** The document of the Git agent's publication gate. Compliance off does not install it, and /implement hands the resolved value to the evidence script in every build. */
+const GATE_DOCUMENT = 'publication-gate'
+
+/** Named collector: a /implement build that names the Git agent's publication gate document. */
+function collectGateDocumentDefects(content: string): string[] {
+  return content.includes(GATE_DOCUMENT) ? [`the build names the Git agent's publication gate document: ${GATE_DOCUMENT}`] : []
 }
 
 /**
@@ -2693,7 +2725,7 @@ describe('#648 AC-19: Phase 11 of the compliance-off builds runs the local verif
 
   it('the on build keeps the publish call, the publication pass and the timeout, so the absence guard is not vacuous', () => {
     const on = implementMd()
-    expect(OFF_ABSENT.length, 'the absence table is empty, so this guard proves nothing').toBeGreaterThanOrEqual(9)
+    expect(OFF_ABSENT.length, 'the absence table is empty, so this guard proves nothing').toBeGreaterThanOrEqual(8)
     expect(collectOffAbsenceDefects(on)).toEqual(OFF_ABSENT.map(([what, text]) => `the off build names ${what}: ${text}`))
     expect(collectOffEvidenceRunDefects(on)).toEqual(['expected one local verify call in Phase 11, found 0'])
   })
@@ -2719,9 +2751,17 @@ describe('#648 AC-19: Phase 11 of the compliance-off builds runs the local verif
     expect(collectOffEvidenceRunDefects(seedOnce(md, 'cd "{worktree}" && node "$HOME/.devflow/scripts/verify-evidence.cjs" verify', 'node "$HOME/.devflow/scripts/verify-evidence.cjs" verify'))).toEqual(['the call does not run from the worktree'])
     expect(collectOffAbsenceDefects(`${md}\nPR_TEST_PLAN_BLOCK: x`)).toEqual(['the off build names the PR test-plan block input: PR_TEST_PLAN_BLOCK'])
     expect(collectOffAbsenceDefects(`${md}\nthrough the Bash tool with \`timeout: 180000\``)).toEqual(['the off build names the publish timeout: timeout: 180000'])
-    expect(collectOffAbsenceDefects(`${md}\nthe Git agent's publication gate (\`references/publication-gate.md\` step 2)`))
-      .toEqual(['the off build names the publication gate document, which compliance off does not install: publication-gate'])
     expect(collectOrderViolations('implement.md', seedOnce(md, '### Phase 12: Report', '### Phase 12 later').replace('### Phase 11: Evidence', '### Phase 12: Report\n\n### Phase 11: Evidence'), PHASE11_ORDER_OFF).length).toBeGreaterThan(0)
+  })
+})
+
+describe('X1: no /implement build names the Git agent publication gate, because the evidence script decides what each value means', () => {
+  it.each(IMPLEMENT_KEYS)('%s: the build names no publication gate document, and a seeded note that names it is reported', key => {
+    const md = implementMdOfKey(key)
+    expect(collectGateDocumentDefects(md), key).toEqual([])
+    expect(md.length, `${key}: nothing read`).toBeGreaterThan(5_000)
+    const seeded = `${md}\nthe Git agent's publication gate (\`references/publication-gate.md\` step 2)`
+    expect(collectGateDocumentDefects(seeded)).toEqual([`the build names the Git agent's publication gate document: ${GATE_DOCUMENT}`])
   })
 })
 

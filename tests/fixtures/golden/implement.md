@@ -19,7 +19,7 @@ There is no producer-side grammar check: the operation that runs decides each to
 
 Note: under `github`, only the Git agent decides if a bare digit run is a reference. This command holds no provider knowledge.
 
-**Agent references.** Print the config directory once, before the first reference Read: run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"` in Bash. `{ref_dir}` is `<that directory>/skills/devflow:agent-references/references/commands`. Read each reference with the Read tool. When `{ref_dir}` is not in view (for example after a compaction), print the directory again with the same line.
+**Agent references.** Print the config directory once, before the first reference Read: run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"` in Bash. `{ref_dir}` is `<that directory>/skills/devflow:agent-references/references/commands`. Read each reference with the Read tool. When `{ref_dir}` is not in view (for example after a compaction), print the directory again with the same line. A failed or empty reference Read, except the Gate level read, stops the run: `implement: reference file <name> unreadable; run devflow init.`
 
 ## Phases
 
@@ -140,8 +140,6 @@ The accepted line is the only source of these values.
 **Resolve `REVIEW_PUBLICATION` per worktree:** take `REVIEW_PUBLICATION` from that worktree's settings line — the line resolved above for `{root}`, the worktree's root, by the settings block when this run has not yet resolved that root. The line already caps the personal choice at the team's, so it is `off`, `auto` or `full`, and `off` when the line was unresolvable.
 
 **Evidence stub:** only when `EVIDENCE_POLICY` is `required`, a resolved `off` becomes `stub`, so a counts-only record still reaches the PR. `stub` is never a config value.
-
-Note: `auto` does not fail open: the Git agent probes the repository visibility and treats any error or unrecognised value as PUBLIC (mode STUB). What each value does is decided by the Git agent's publication gate (`references/publication-gate.md` step 2); this partial only resolves the value.
 Phase 11 passes the resolved value to the evidence script (`publish`), which decides what each value means for the evidence comment. From the same line: `COMPLIANCE_FRAMEWORKS` is the settings line's `COMPLIANCE` with `generic` written `none`: `off`, `none`, or the framework ids the machine and this repository declare.
 
 **Set the compliance directive** from `COMPLIANCE_FRAMEWORKS`. `COMPLIANCE_DIRECTIVE` is empty when `COMPLIANCE_FRAMEWORKS` is `off`: a spawn line that holds only `{COMPLIANCE_DIRECTIVE}` is then left out. Otherwise `COMPLIANCE_DIRECTIVE` is this one line, with `<ids>` replaced by the value of `COMPLIANCE_FRAMEWORKS`:
@@ -303,12 +301,14 @@ DECISIONS_CONTEXT: {decisions_context}
 
 **Independence criteria** (all must be true for PARALLEL_CODE_AGENTS): no shared contracts, interfaces or integration points between subtasks; different files/modules with no imports between them.
 
+A Code agent with a Status other than COMPLETE, or none: report it and its cause, then halt.
+
 ### Phase 3: Polish
 
 **Produces:** POLISH_OUTPUT
 **Requires:** BASE_REF, GATE_LEVEL
 
-**Gate level.** At `standard` or `lean`, once per run, Read `{ref_dir}/implement-levels.md` (`{ref_dir}` is set in **Agent references.**; if it is not in view, print the directory again with that line), and apply each row to the phase it names.
+**Gate level.** At `standard` and `lean`, skip the Polish spawn (`POLISH_OUTPUT` reads `SKIPPED`; `{branch_diff}` stays defined), and Phase 5 runs one pass. At `lean`, once per run, also Read `{ref_dir}/implement-levels.md` and apply each row to the phase it names.
 
 - No row or rule overrides the next two lines.
 - If the Read fails, or the file has no `## Phases` heading with the `| Phase | standard | lean |` header, or a row breaks its grammar, apply no row, keep `GATE_LEVEL` and say `level reference unreadable: no level rows applied`.
@@ -362,6 +362,8 @@ FEATURE_KNOWLEDGE: {feature_knowledge_rules}
 Validate alignment with request and plan. Report ALIGNED or MISALIGNED with details."
 ```
 
+**One pass, at `standard` and `lean`:** each prompt of this phase opens with `GATE_LEVEL: {GATE_LEVEL}`, after any `OPERATION:` line. Run Evaluate once; a failed Evaluate spawn goes to Error Handling, and its retry is the same pass. On MISALIGNED, in place of steps 3 and 4, spawn the Fix once: on COMPLETE, set `ALIGNMENT_RESULT` to exactly `MISALIGNED (fixed once, not re-checked)` and start Phase 6; else report the misalignments to the user for decision.
+
 **If ALIGNED:** Continue to Phase 6
 
 **If MISALIGNED:**
@@ -384,6 +386,8 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
 
 Any other or missing Status: report the status or "none" and its cause, then halt; never ALIGNED.
 
+After a Phase 5 report for decision, if the user decides to continue, set `ALIGNMENT_RESULT` to exactly `MISALIGNED (user continued)` and start Phase 6.
+
 ### Phase 6: Validate
 
 **Produces:** VALIDATION_RESULT, VALIDATED_HEAD
@@ -391,7 +395,7 @@ Any other or missing Status: report the status or "none" and its cause, then hal
 
 Alignment-fix commits get no self-review: Phase 6 Validate and `/code-review` check them.
 
-After ALIGNED, or a single-pass Fix that reports COMPLETE, spawn Validate agent:
+After ALIGNED, a single-pass Fix that reports COMPLETE, or a user who continues after a Phase 5 report, spawn Validate agent:
 
 ```
 Agent(subagent_type="Validate"):
@@ -550,7 +554,7 @@ git push origin HEAD; echo "exit=$?"
 **Produces:** EVIDENCE_RESULT
 **Requires:** PR_NUMBER, EVIDENCE_FILE, REVIEW_PUBLICATION
 
-Run once, after Phase 10, under every strategy. Skip it only when the run stopped before Phase 10. A `ci` TP reads `INDETERMINATE` only when the CI gate could not tell or did not run.
+Run once, after Phase 10 or the re-validation path's Phase 9, under every strategy. Skip it only when the run stopped before Phase 10 started. A `ci` TP reads `INDETERMINATE` only when the CI gate could not tell or did not run.
 
 **Push first.** A claim whose SHA is not in the PR reads `UNVERIFIED`, so push the branch once before the script — never force, and no retry:
 
@@ -632,3 +636,5 @@ Non-blocking: if the Knowledge agent fails, log the failure and continue.
 ## Error Handling
 
 If any agent fails, report the phase, agent type and error. Offer: retry the phase, investigate, or escalate to user.
+
+If the user ends the run after Phase 10 started, run Phases 11 and 12 first.

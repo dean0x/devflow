@@ -175,31 +175,24 @@ const IMPLEMENT_READS_COMPLIANCE_OFF: readonly string[] = ['implement-levels.md'
  * What the paragraph that binds `{ref_dir}` says besides the binding, as the label of the defect and the text that carries
  * it: the directory is printed once, before the first reference Read, and printed again with the same line when `{ref_dir}`
  * is not in view (a session resumes from the current phase heading after a compaction, and the paragraph above `## Phases`
- * is then out of view). The second print is the same line, so the sanctioned-line count stays at one.
+ * is then out of view). The second print is the same line, so the sanctioned-line count stays at one. The paragraph also
+ * ends with the stop: a failed or empty reference Read halts the run with a message that names the file and the fix. The
+ * Gate level read is the one exception, because it fails closed (no row applied, Harden runs).
  */
 const IMPLEMENT_BINDER_PARTS: ReadonlyArray<readonly [label: string, text: string]> = [
   ['say to print the directory once, before the first reference Read', 'Print the config directory once, before the first reference Read'],
   [`name the case that a re-print answers: ${IMPLEMENT_REF_DIR} is not in view`, `When \`${IMPLEMENT_REF_DIR}\` is not in view`],
   ['say to print the directory again', 'print the directory again'],
   ['say to print it again with the same line', 'with the same line'],
-]
-
-/**
- * What the Gate level read says besides the file it reads. It is the one reference read that runs after Phase 1, so it is the read a session
- * reaches after a compaction, when the paragraph that binds `{ref_dir}` is out of view. The read names that paragraph by its bold lead and
- * says to print the directory again with its line. It copies no print line, so the sanctioned-line count stays at one.
- */
-const IMPLEMENT_GATE_READ_OPEN = '**Gate level.**'
-const IMPLEMENT_GATE_READ_PARTS: ReadonlyArray<readonly [label: string, text: string]> = [
-  [`name the paragraph that binds ${IMPLEMENT_REF_DIR}`, `\`${IMPLEMENT_REF_DIR}\` is set in **Agent references.**`],
-  [`say to print the directory again when ${IMPLEMENT_REF_DIR} is not in view`, 'if it is not in view, print the directory again with that line'],
+  ['stop the run on a failed or empty reference Read, except the Gate level read', 'A failed or empty reference Read, except the Gate level read, stops the run'],
+  ['name the file and the fix in the stop message', '`implement: reference file <name> unreadable; run devflow init.`'],
 ]
 
 /**
  * Named collector: how a compiled /implement reaches the Claude directory. The directory is resolved once: the sanctioned
  * line sits in one paragraph, which binds `{ref_dir}` to the references folder under `<that directory>`, says to print the
- * directory again with the same line when `{ref_dir}` is out of view, and comes before every read. The Gate level read, which runs
- * after Phase 1, points back to that paragraph and says to print the directory again with its line. Each read site names its
+ * directory again with the same line when `{ref_dir}` is out of view, stops the run on a failed reference Read, and comes
+ * before every read. Each read site names its
  * file under `{ref_dir}`, and no site names a root or a skills path of its own, so the site row of the file (one line) stands
  * for every read of the build. `reads` is the files the build reads, by file name.
  */
@@ -220,9 +213,6 @@ export function collectImplementDirReadDefects(body: string, reads: readonly str
     if (!binder.includes(`\`${IMPLEMENT_REF_DIR}\` is \`<that directory>/${IMPLEMENT_REFS_FOLDER}\``)) out.push(`the paragraph with the sanctioned line does not bind ${IMPLEMENT_REF_DIR} to the references folder under <that directory>`)
     for (const [label, text] of IMPLEMENT_BINDER_PARTS) if (!binder.includes(text)) out.push(`the paragraph with the sanctioned line does not ${label}`)
   }
-  const gateRead = body.split('\n\n').find(p => p.startsWith(IMPLEMENT_GATE_READ_OPEN))
-  if (gateRead === undefined) out.push('no Gate level read paragraph')
-  else for (const [label, text] of IMPLEMENT_GATE_READ_PARTS) if (!gateRead.includes(text)) out.push(`the Gate level read does not ${label}`)
   const read = [...body.matchAll(/\{ref_dir\}\/([a-z0-9-]+\.md)/g)].map(m => m[1]).sort()
   if (read.join(' ') !== [...reads].sort().join(' ')) out.push(`the files read through ${IMPLEMENT_REF_DIR} are ${read.join(', ')}, expected ${[...reads].sort().join(', ')}`)
   const use = body.indexOf(`${IMPLEMENT_REF_DIR}/`)
@@ -798,7 +788,7 @@ describe('no prompt reaches the Claude directory outside the CLAUDE_CONFIG_DIR r
 
   it('red probes: a binder that does not say to print the directory again when {ref_dir} is not in view is reported in /implement', () => {
     const implement = corpusFile('dist/commands/implement.md').content
-    // Each seed names text that the command holds once: "is not in view" and "print the directory again" also sit in the Gate level read, so a seed on them would reach the binder by position only.
+    // Each seed names text that the command holds once, so a seed lands in the binder and nowhere else.
     const seed = (from: string, to: string): string => seedOnce(implement, from, to)
     const defects = (text: string): string[] => collectImplementDirReadDefects(text, IMPLEMENT_READS_COMPLIANCE_ON)
     const reprint = ' When `{ref_dir}` is not in view (for example after a compaction), print the directory again with the same line.'
@@ -817,25 +807,20 @@ describe('no prompt reaches the Claude directory outside the CLAUDE_CONFIG_DIR r
     ])
   })
 
-  it('red probes: a Gate level read that does not point back to the binder is reported in /implement', () => {
+  it('red probes: a binder that does not stop the run on a failed reference Read, or stops it for the Gate level read too, is reported in /implement', () => {
     const implement = corpusFile('dist/commands/implement.md').content
-    const seed = (from: string, to: string): string => {
-      const next = implement.replace(from, () => to)
-      expect(next, `the seed ${JSON.stringify(from.slice(0, 40))} must change the text`).not.toBe(implement)
-      return next
-    }
+    const seed = (from: string, to: string): string => seedOnce(implement, from, to)
     const defects = (text: string): string[] => collectImplementDirReadDefects(text, IMPLEMENT_READS_COMPLIANCE_ON)
-    const lead = 'the Gate level read does not'
-    const names = `${lead} name the paragraph that binds ${IMPLEMENT_REF_DIR}`
-    const reprints = `${lead} say to print the directory again when ${IMPLEMENT_REF_DIR} is not in view`
-    // The clause names the binder and copies no print line, so the real command stays clean and holds one sanctioned line.
-    expect(defects(implement)).toEqual([])
-    const pointer = ' (`{ref_dir}` is set in **Agent references.**; if it is not in view, print the directory again with that line)'
-    expect(defects(seed(pointer, ''))).toEqual([names, reprints])
-    expect(defects(seed('is set in **Agent references.**', 'is set in the paragraph above'))).toEqual([names])
-    expect(defects(seed('print the directory again with that line', 'print it'))).toEqual([reprints])
-    expect(defects(seed('if it is not in view, print', 'print'))).toEqual([reprints])
-    expect(defects(seed('**Gate level.**', '**Level.**'))).toEqual(['no Gate level read paragraph'])
+    const lead = 'the paragraph with the sanctioned line does not'
+    const stops = `${lead} stop the run on a failed or empty reference Read, except the Gate level read`
+    const names = `${lead} name the file and the fix in the stop message`
+    const stop = ' A failed or empty reference Read, except the Gate level read, stops the run: `implement: reference file <name> unreadable; run devflow init.`'
+    expect(defects(implement), 'the real command stays clean').toEqual([])
+    expect(defects(seed(stop, '')), 'the stop sentence deleted').toEqual([stops, names])
+    expect(defects(seed('except the Gate level read, ', '')), 'the Gate level read no longer excepted').toEqual([stops])
+    expect(defects(seed('stops the run:', 'goes on:')), 'a stop that does not stop').toEqual([stops])
+    expect(defects(seed('A failed or empty reference Read', 'A failed reference Read')), 'an empty file no longer a failure').toEqual([stops])
+    expect(defects(seed('implement: reference file <name> unreadable; run devflow init.', 'implement: file missing.')), 'a message with no file name and no fix').toEqual([names])
   })
 
   it('red probe: the superseded presence gate, seeded into the real compiled command, is reported', () => {
