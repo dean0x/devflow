@@ -305,7 +305,7 @@ DECISIONS_CONTEXT: {decisions_context}
 
 **Independence criteria** (all must be true for PARALLEL_CODE_AGENTS): no shared contracts, interfaces or integration points between subtasks; different files/modules with no imports between them.
 
-A Code agent with FAILED, BLOCKED or no Status: report it and its cause, then halt.
+A Code agent with a Status other than COMPLETE, or none: report it and its cause, then halt.
 
 ### Phase 3: Polish
 
@@ -366,7 +366,7 @@ FEATURE_KNOWLEDGE: {feature_knowledge_rules}
 Validate alignment with request and plan. Report ALIGNED or MISALIGNED with details."
 ```
 
-**One pass, at `standard` and `lean`:** each prompt of this phase opens with `GATE_LEVEL: {GATE_LEVEL}`, after any `OPERATION:` line. Run Evaluate once; a failed spawn goes to Error Handling, and its retry is the same pass. On MISALIGNED, in place of steps 3 and 4, spawn the Fix once: on COMPLETE, set `ALIGNMENT_RESULT` to exactly `MISALIGNED (fixed once, not re-checked)` and start Phase 6; else report the misalignments to the user for decision.
+**One pass, at `standard` and `lean`:** each prompt of this phase opens with `GATE_LEVEL: {GATE_LEVEL}`, after any `OPERATION:` line. Run Evaluate once; a failed Evaluate spawn goes to Error Handling, and its retry is the same pass. On MISALIGNED, in place of steps 3 and 4, spawn the Fix once: on COMPLETE, set `ALIGNMENT_RESULT` to exactly `MISALIGNED (fixed once, not re-checked)` and start Phase 6; else report the misalignments to the user for decision.
 
 **If ALIGNED:** Continue to Phase 6
 
@@ -390,7 +390,7 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
 
 Any other or missing Status: report the status or "none" and its cause, then halt; never ALIGNED.
 
-After a report for decision, if the user decides to continue, start Phase 6.
+After a Phase 5 report for decision, if the user decides to continue, set `ALIGNMENT_RESULT` to exactly `MISALIGNED (user continued)` and start Phase 6.
 
 ### Phase 6: Validate
 
@@ -399,7 +399,7 @@ After a report for decision, if the user decides to continue, start Phase 6.
 
 Alignment-fix commits get no self-review: Phase 6 Validate and `/code-review` check them.
 
-After ALIGNED, or a single-pass Fix that reports COMPLETE, spawn Validate agent:
+After ALIGNED, a single-pass Fix that reports COMPLETE, or a user who continues after a Phase 5 report, spawn Validate agent:
 
 ```
 Agent(subagent_type="Validate"):
@@ -645,4 +645,4 @@ Non-blocking: if the Knowledge agent fails, log the failure and continue.
 
 If any agent fails, report the phase, agent type and error. Offer: retry the phase, investigate, or escalate to user.
 
-If the user ends the run after Phase 9 opened the PR, run Phases 11 and 12 first.
+If the user ends the run after Phase 10 started, run Phases 11 and 12 first.
