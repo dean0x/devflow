@@ -17,8 +17,8 @@ can turn it back on (D-FEATURES-NARROW-ONLY). The settings line also reads
 `CURATION=off` while git tracks the curation folders, or does not answer for them:
 the files there are the repository's own content, and devflow reads nothing in a
 folder it cannot tell is its own. So `decisions_gate()` is the one sentence every
-decisions host carries: with `CURATION=off` the step is skipped before it locates a
-ledger or reads an index. An unresolvable settings line reads `CURATION=off`, as the
+decisions host carries: with `CURATION=off` the step is skipped before it reads an index (the shared
+root step may already have named the ledger folder, but reads no file in it). An unresolvable settings line reads `CURATION=off`, as the
 fail-closed line does, because a failed resolution cannot show what git tracks. The
 gate reads the line the host's settings block resolved above; this partial imports
 nothing from `_settings.mds`. In a multi-worktree run the line is the start root's:
@@ -43,7 +43,7 @@ the gate and the locator, reached only from inside a curation-on arm, so a curat
 none of the rule (D-LEARNING-VARIANTS).
 
 @define decisions_gate():
-When the settings line says `CURATION=off`, set `DECISIONS_CONTEXT` to `(none)` and skip this step, locating no ledger and reading no index.
+When the settings line says `CURATION=off`, set `DECISIONS_CONTEXT` to `(none)` and skip this step, reading no index.
 @end
 
 @define decisions_locate():

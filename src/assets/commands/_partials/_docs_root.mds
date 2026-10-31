@@ -5,12 +5,14 @@ of `resolve-root.cjs` prints `WORKTREE=` (the checkout's toplevel, else the star
 directory) and `LEDGER=` (the decisions ledger's root: the main worktree when the
 checkout is a linked worktree and the main worktree holds a `.devflow/` folder, else the
 toplevel). The script holds no judgment: it takes the git call and the ledger rule from
-`resolve-settings.cjs`, the rule the curation hooks apply. The step runs once per run.
+`resolve-settings.cjs`, the rule the curation hooks apply. The step runs once per start
+directory, so a run over several worktrees resolves each one.
 `docs_root()` here, `knowledge_root()` in `_knowledge.mds` and `decisions_locate()` in
 `_decisions.mds` each expand it, so no host needs to know which of its steps comes
 first: the first one to run calls the script and the others reuse the answer. Each of the
 three adds only the facts its own host needs after the step. When the script fails, both
-roots are the start directory.
+roots are the start directory. A curation-off build also carries the `LEDGER=` line: the
+script only names that folder and reads no file in it.
 
 D-DOCS-ROOT extends D-PROMPT-ROOT from the decisions and knowledge loaders to
 every docs artifact a command reads or writes — design documents, research
@@ -35,7 +37,7 @@ scope. The hosts import `docs_root` alone, and `_knowledge.mds` and `_decisions.
 import `root_paths` alone; each adds one node to the importer's scope.
 
 @define root_paths():
-Once per run: if this run already resolved the roots, reuse them. From the start directory (`WORKTREE_PATH` if provided, otherwise cwd) run
+Once per start directory (`WORKTREE_PATH` if provided, otherwise cwd), run from it:
 
 ```bash
 node "$HOME/.devflow/scripts/resolve-root.cjs" "{start}"; echo "exit=$?"
