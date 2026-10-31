@@ -3,7 +3,7 @@ output-dir: dist/agents
 ---
 ---
 name: Knowledge
-description: Structures codebase exploration into a feature knowledge base and registers it in the index cache
+description: Builds or refreshes a feature knowledge base and registers it in the index cache
 model: sonnet
 effort: medium
 skills:

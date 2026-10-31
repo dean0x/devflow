@@ -20,12 +20,12 @@ const ARCHITECT_BODY_MAX_BYTES = 3_386
 /** The Architect agent body of the curation-off build, dist/curation-off/agents/architect.md, in bytes. */
 const ARCHITECT_BODY_CURATION_OFF_MAX_BYTES = 2_820
 /** The Explore agent body (hand-authored, one build), in bytes. */
-const EXPLORE_BODY_MAX_BYTES = 3_355
+const EXPLORE_BODY_MAX_BYTES = 3_276
 
 /** [skill, ceiling of its SKILL.md in bytes]. Each row's text is the pattern its numeric-floors.json entry pins. */
 const SKILL_MAX_BYTES: ReadonlyArray<readonly [string, number]> = [
-  ['gap-analysis', 5_575],
-  ['design-review', 4_415],
+  ['gap-analysis', 5_553],
+  ['design-review', 4_393],
 ]
 
 /** Named collector: the file is over its ceiling. */

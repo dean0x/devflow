@@ -106,6 +106,27 @@ export function collectDescriptionDefects(skills: ReadonlyArray<readonly [string
   return out
 }
 
+/** The opening of a user-trigger description, matched against what a person asks for. */
+export const USER_TRIGGER_FORM = 'This skill should be used when '
+/** The opening of an agent-internal description: the same trigger shape in fewer bytes. */
+export const AGENT_INTERNAL_FORM = 'Use when '
+
+/**
+ * Named collector: each classified skill whose description does not open with the form of its set. The
+ * reference-only skill is exempt: it disables model invocation, so the catalog never lists it.
+ */
+export function collectDescriptionFormDefects(skills: ReadonlyArray<readonly [string, string]>): string[] {
+  const out: string[] = []
+  for (const [name, text] of skills) {
+    if (REFERENCE_ONLY.includes(name)) continue
+    const form = AGENT_INTERNAL.includes(name) ? AGENT_INTERNAL_FORM : USER_TRIGGER.includes(name) ? USER_TRIGGER_FORM : null
+    const description = parseDescription(text)
+    if (form === null || description === null) continue
+    if (!description.startsWith(form)) out.push(`${name}: does not open with "${form}"`)
+  }
+  return out
+}
+
 /** The frontmatter block of a SKILL.md, or '' when it has none. */
 const frontmatterOf = (skill: string): string => /^---\n([\s\S]*?)\n---/.exec(skill)?.[1] ?? ''
 
@@ -304,6 +325,19 @@ describe('skill descriptions stay within their audience cap (D-SKILL-DESCRIPTION
       'brand-new-skill: in neither the agent-internal nor the user-trigger set — classify it',
     ])
     expect(collectDescriptionDefects([[AGENT_INTERNAL[0], skillWith('')]])).toEqual([`${AGENT_INTERNAL[0]}: no description`])
+  })
+
+  it('every description opens with the form of its set: "Use when" (agent-internal) or "This skill should be used when" (user-trigger)', () => {
+    expect(collectDescriptionFormDefects(liveSkills())).toEqual([])
+  })
+
+  it('known-bad probe: a wrong form in each set is reported, and only the reference-only skill is exempt', () => {
+    const internal = 'security'
+    const trigger = 'git'
+    expect(collectDescriptionFormDefects([[internal, skillWith('description: This skill should be used when x.')]])).toEqual([`${internal}: does not open with "Use when "`])
+    expect(collectDescriptionFormDefects([[internal, skillWith('description: Use when x.')]])).toEqual([])
+    expect(collectDescriptionFormDefects([[trigger, skillWith('description: Use when x.')]])).toEqual([`${trigger}: does not open with "This skill should be used when "`])
+    expect(collectDescriptionFormDefects([[REFERENCE_ONLY[0], skillWith('description: Any opening.')]])).toEqual([])
   })
 })
 

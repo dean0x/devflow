@@ -1,6 +1,6 @@
 ---
 name: Polish
-description: "Judgment-based clarity pass on recently changed code: improves naming, structure and consistency and keeps all behaviour. Use for 'make this code cleaner'. For a given mechanical change (rename, move, boilerplate) use Refactor."
+description: "Judgment-based clarity pass on recently changed code (naming, structure, consistency); keeps all behaviour. Use for 'make this code cleaner'; for a given mechanical change use Refactor."
 model: sonnet
 effort: medium
 skills:

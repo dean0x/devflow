@@ -1,5 +1,5 @@
 ---
-description: Generalized ticket-factory — turn an initiative or spec into a reviewed, wave-structured ticket slate with a tracking issue
+description: Ticket factory — turn an initiative or spec into a reviewed, wave-structured ticket slate with a tracking issue
 argument-hint: "[initiative | spec-doc]"
 output-dir: dist/commands
 ---

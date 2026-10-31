@@ -119,7 +119,7 @@ Create in `src/assets/skills/skill-name/SKILL.md` (~120-150 lines):
 ```markdown
 ---
 name: skill-name
-description: "This skill should be used when..." with concrete trigger words (≤200 chars for a user-trigger skill, ≤90 for an agent-internal one)
+description: "This skill should be used when..." (user-trigger, ≤200 chars) or "Use when..." (agent-internal, ≤90 chars), with concrete trigger words
 user-invocable: false
 allowed-tools: Read, Grep, Glob, AskUserQuestion
 activation:
@@ -172,7 +172,7 @@ For additional examples and detection patterns:
 
 Skill descriptions appear in Claude Code's skill catalog and influence when Claude auto-invokes skills. Poorly written descriptions can cause Claude to treat the description itself as instructions, bypassing the actual SKILL.md flowchart.
 
-**Format**: Descriptions MUST start with `"This skill should be used when..."`.
+**Format**: A user-trigger skill description MUST start with `"This skill should be used when..."`. An agent-internal skill description MUST start with `"Use when..."`: the model loads it by name, so the short form keeps the trigger shape in fewer bytes. The reference-only skill is exempt, because the catalog never lists it.
 
 **Include**: Concrete trigger words -- tool names, error types, user phrases, file types, or review focus areas that signal when the skill is relevant.
 
@@ -184,8 +184,8 @@ Skill descriptions appear in Claude Code's skill catalog and influence when Clau
 
 | Bad (process summary) | Good (trigger-only) |
 |---|---|
-| "Standard review methodology providing the 6-step process and 3-category issue classification used by all review agents." | "This skill should be used when performing a code review (the 6-step process)." |
-| "Security vulnerability analysis patterns for code review. Detects injection flaws, authentication bypasses, insecure cryptography." | "This skill should be used when reviewing code for injection, auth or secrets flaws." |
+| "Standard review methodology providing the 6-step process and 3-category issue classification used by all review agents." | "Use when performing a code review (the 6-step process)." |
+| "Security vulnerability analysis patterns for code review. Detects injection flaws, authentication bypasses, insecure cryptography." | "Use when reviewing code for injection, auth or secrets flaws." |
 | "Enforce RED-GREEN-REFACTOR cycle during implementation. Write failing tests before production code." | "This skill should be used when implementing new features, fixing bugs, or writing new code. Enforces RED-GREEN-REFACTOR." |
 
 ## Progressive Disclosure Structure

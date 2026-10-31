@@ -1,6 +1,6 @@
 ---
 name: security
-description: This skill should be used when reviewing code for injection, auth or secrets flaws.
+description: Use when reviewing code for injection, auth or secrets flaws.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---

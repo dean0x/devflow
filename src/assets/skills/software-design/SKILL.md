@@ -1,6 +1,6 @@
 ---
 name: software-design
-description: This skill should be used when the user asks to "handle errors", "inject dependencies", "return Result", "make it immutable", or implements business logic or error handling.
+description: This skill should be used when the user asks to "inject dependencies", "return Result", "make it immutable", or implements business logic or error handling.
 user-invocable: false
 allowed-tools: Read, Grep, Glob, AskUserQuestion
 ---

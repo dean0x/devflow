@@ -1,6 +1,6 @@
 ---
 name: apply-feature-knowledge
-description: Consume FEATURE_KNOWLEDGE, the pre-computed feature context
+description: Use when given the FEATURE_KNOWLEDGE context.
 user-invocable: false
 allowed-tools: Read, Bash
 ---

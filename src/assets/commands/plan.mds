@@ -1,5 +1,5 @@
 ---
-description: Unified design planning - combines requirements discovery, gap analysis, implementation planning, and design review into a single workflow
+description: Design planning - requirements discovery, gap analysis, implementation plan and design review in one workflow
 output-dir: dist/commands
 ---
 @import { knowledge_load } from "./_partials/_knowledge.mds"

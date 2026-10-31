@@ -10,7 +10,7 @@ output-dir: dist/agents
 @import "./_partials/_code.mds" as code
 ---
 name: Fix
-description: Autonomous gate-failure repair on feature branch. Fixes the listed validation, alignment, QA or CI failures, verifies, and commits.
+description: Fixes the listed validation, alignment, QA or CI failures on the feature branch, verifies, and commits.
 model: sonnet
 effort: high
 skills:

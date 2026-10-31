@@ -4,9 +4,9 @@ output-dir: dist/agents
 ---
 name: Git
 <!-- compliance:on -->
-description: Unified agent for all git/GitHub operations - issues, PR comments, tech debt, releases
+description: All git/GitHub operations - issues, PR comments, tech debt, releases
 <!-- compliance:off -->
-description: Unified agent for all git/GitHub operations - issues, releases
+description: All git/GitHub operations - issues, releases
 <!-- compliance:end -->
 model: haiku
 effort: medium
