@@ -57,7 +57,7 @@ export const KNOWLEDGE_COMMAND_HOSTS = [
   'self-review',
 ] as const;
 
-/** The 4 dynamic-workflow command hosts (src/assets/commands/<name>.mds). */
+/** The 4 dynamic command hosts (src/assets/commands/<name>.mds); three author a Workflow, dynamic-profile does not. */
 export const DYNAMIC_COMMAND_HOSTS = [
   'dynamic-build',
   'dynamic-plan',

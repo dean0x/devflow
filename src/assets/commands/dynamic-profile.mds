@@ -24,7 +24,7 @@ This command spawns one Knowledge agent that reads past session history across a
 d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"
 ```
 
-and use its one-line output. It depends on no other step, so run it in the same batch as the first command of this run. Pass it to the agent below as `CLAUDE_DIR`.
+and use its one-line output. Pass it to the agent below as `CLAUDE_DIR`.
 
 ---
 

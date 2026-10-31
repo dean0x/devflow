@@ -126,7 +126,7 @@ describe('the Code agent writes its own capped section and reads only the one be
     for (const paragraph of off) expect(paragraph, 'a compliance-off build words the protocol as the on build does').toBe(on)
   })
 
-  it('every dynamic command states the same convention through the shared preamble', () => {
+  it('every Workflow host states the same convention through the shared preamble', () => {
     for (const host of DYNAMIC_HOSTS) {
       const convention = handoffConvention(requireDistFile(`${host}.md`))
       expect(convention.length, `${host}: the convention moved`).toBeGreaterThan(300)
