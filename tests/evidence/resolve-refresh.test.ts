@@ -16,7 +16,7 @@
  *           grammar (CLAIM_LINE_RE) admits. The Test Status is read by its first word
  *           (`PASS (…)` is PASS); a Status whose first word is not PASS or FAIL
  *           (BLOCKED) still gets its claims, records `Test plan: DEGRADED (Test run blocked)`
- *           and counts PASS rows only (#679).
+ *           and takes m from the PASS count of the script's `CLAIM appended` line (#679).
  *   9b-3    D2-A: a separate, conditional refresh — never folded into 9b-2 — gated on
  *           the head having moved, passing the publication mode 9b-2 resolved. Since
  *           #455 it is one inline `verify-evidence.cjs publish` call, not a Git spawn.
@@ -31,11 +31,12 @@
 
 import { describe, it, expect } from 'vitest'
 import { createRequire } from 'module'
-import { readFileSync } from 'fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
 import * as path from 'path'
 
 import { collectOrderViolations, isAgentBlock, parseFences, requireDistFile, ROOT, type OrderRule } from '../helpers.js'
-import { PR_EVIDENCE_SCRIPT } from './seam.js'
+import { PR_EVIDENCE_SCRIPT, claimCallLines, runClaimCall } from './seam.js'
 
 /** Transcribed from pr-evidence.cjs's JSDoc — only the claim grammar. */
 interface ClaimGrammar {
@@ -50,7 +51,8 @@ const STEP3 = '**Step 9b-3: Refresh the test-plan evidence**'
 const PHASE9C = '### Phase 9c: Merge Readiness (Report-only)'
 const STALE_VERIFY = 'verify-evidence.cjs" verify --pr {pr_number} --stale-out "{TARGET_DIR_REL}/stale-plan.md"; echo "exit=$?"'
 const TEST_SPAWN = 'Agent(subagent_type="Test"):\n"TEST_PLAN: <untrusted-test-plan>'
-const CLAIM_TEMPLATE = '- TP-<n> <PASS|FAIL|SKIP> sha:<head> by:test exit:<0-255>'
+/** The claim call (`claim` subcommand): the evidence script writes the claim lines. */
+const CLAIM_RUN = 'verify-evidence.cjs" claim --evidence'
 const VERIFICATION_RECORD = 'Record `Test plan: {n} stale, {m} re-verified` under `## Verification`'
 const SUMMARY_SPAWN = '"OPERATION: post-resolution-summary'
 /** The 9b-3 call (#455): the script runs inline; no Git agent is spawned for it. */
@@ -65,7 +67,7 @@ const RESOLVE_ORDER: readonly OrderRule[] = [
   { label: '9b-2 precedes 9b-3', before: STEP2, after: STEP3 },
   { label: '9b-3 precedes Phase 9c', before: STEP3, after: PHASE9C },
   { label: 'the script detects STALE before any Test spawn', before: STALE_VERIFY, after: TEST_SPAWN },
-  { label: 'claims are appended after the Test spawn', before: TEST_SPAWN, after: CLAIM_TEMPLATE },
+  { label: 'claims are appended after the Test spawn', before: TEST_SPAWN, after: CLAIM_RUN },
   { label: 'the Verification record precedes the 9b-2 post', before: VERIFICATION_RECORD, after: SUMMARY_SPAWN },
   { label: 'the refresh call sits in 9b-3', before: STEP3, after: EVIDENCE_RUN },
   { label: 'the readiness call sits in Phase 9c', before: PHASE9C, after: READINESS_RUN },
@@ -107,8 +109,11 @@ function collectStaleReverifyDefects(md: string): string[] {
   if (!step.includes('Use its `EVIDENCE` line only on `exit=0`')) out.push('a failed script run may still drive a spawn')
   if (!step.includes('Run it only when `TARGET_DIR_REL` matches `^[A-Za-z0-9._/-]+$`')) out.push('the branch-derived TARGET_DIR_REL reaches the shell unchecked')
   if (!step.includes(VERIFICATION_RECORD)) out.push('the re-verification is not recorded under ## Verification')
-  if (!step.includes('A Test Status whose first word is not PASS or FAIL still gets its claims, but `Test plan: DEGRADED (Test run blocked)` replaces that line.')) out.push('a blocked or odd Status is not told apart by its first word, or does not record Test plan: DEGRADED (Test run blocked)')
-  if (!step.includes('`{m}` counts PASS rows only.')) out.push('m does not count PASS rows only')
+  if (!step.includes('A Test Status whose first word is not PASS or FAIL still gets its claims; `Test plan: DEGRADED (Test run blocked)` replaces that line.')) out.push('a blocked or odd Status is not told apart by its first word, or does not record Test plan: DEGRADED (Test run blocked)')
+  if (!step.includes('; `{m}` is the `CLAIM appended` line\'s `PASS` count (else 0).')) out.push('m does not count PASS rows only')
+  if (!step.includes('--plan {TARGET_DIR_REL}/stale-plan.md --head <head> ')) out.push('the claim call does not pass the stale file as the plan')
+  // The relative --evidence and --plan paths resolve only from the worktree.
+  if (!step.includes('cd {worktree} && node "$HOME/.devflow/scripts/verify-evidence.cjs" claim')) out.push('the claim call does not run from the worktree')
   return out
 }
 
@@ -187,16 +192,23 @@ describe('AC-15: /resolve re-verifies STALE TPs once and refreshes the evidence 
     expect(collectRefreshDefects(resolveMd())).toEqual([])
   })
 
-  it('the claim template fills to lines CLAIM_LINE_RE admits', () => {
-    const head = 'a'.repeat(40)
-    const fill = (outcome: string, exit: string | null): string =>
-      CLAIM_TEMPLATE.replace('<n>', '3').replace('<PASS|FAIL|SKIP>', outcome).replace('<head>', head).replace(exit === null ? ' exit:<0-255>' : '<0-255>', exit ?? '')
-    const md = resolveMd()
-    expect(md.split(CLAIM_TEMPLATE).length - 1, 'the claim template is the corpus').toBe(1)
-    for (const outcome of ['PASS', 'FAIL', 'SKIP']) {
-      for (const exit of ['0', '1', '255', null]) expect(PE.CLAIM_LINE_RE.test(fill(outcome, exit)), `${outcome} ${exit}`).toBe(true)
+  it('the claim call appends lines CLAIM_LINE_RE admits, for the TPs of the stale plan only', () => {
+    const calls = claimCallLines(resolveMd())
+    expect(calls.length, 'the claim call is the corpus').toBe(1)
+    const dir = mkdtempSync(path.join(tmpdir(), 'resolve-claim-'))
+    try {
+      const EM = '—'
+      writeFileSync(path.join(dir, 'stale-plan.md'), `- [ ] TP-2 (AC-1) The build is green ${EM} method:local\n- [ ] TP-3 (AC-1) The page reads well ${EM} method:local\n`)
+      const r = runClaimCall(calls[0], { claims: 'TP-1=PASS:0 TP-2=PASS:0 TP-3=FAIL:1', head: 'a'.repeat(40), fill: [['{TARGET_DIR_REL}', dir]] })
+      expect(r.stdout).toBe('CLAIM appended:2 PASS:1 FAIL:1 SKIP:0 skipped:1\n')
+      expect(r.code).toBe(0)
+      const lines = readFileSync(path.join(dir, 'evidence.md'), 'utf-8').trimEnd().split('\n')
+      expect(lines[0]).toBe('## Claims')
+      expect(lines.length).toBe(3)
+      for (const line of lines.slice(1)) expect(PE.CLAIM_LINE_RE.test(line), line).toBe(true)
+    } finally {
+      rmSync(dir, { recursive: true })
     }
-    expect(md).toContain('The line ends at `by:test` when the row\'s Exit is not a number from 0 to 255')
   })
 
   it('9c is one inline readiness call that passes the policy flag, report-only', () => {
@@ -230,10 +242,10 @@ describe('AC-15: /resolve re-verifies STALE TPs once and refreshes the evidence 
     expect(collectStaleReverifyDefects(md.replace('TEST_PLAN: <untrusted-test-plan>', 'TEST_PLAN: {stale lines}'))).toContain('the stale TPs travel unwrapped')
     expect(collectStaleReverifyDefects(md.replace('Run it only when `TARGET_DIR_REL` matches', 'Run it when `TARGET_DIR_REL` matches'))).toEqual(['the branch-derived TARGET_DIR_REL reaches the shell unchecked'])
     const statusFault = 'a blocked or odd Status is not told apart by its first word, or does not record Test plan: DEGRADED (Test run blocked)'
-    expect(collectStaleReverifyDefects(md.replace('but `Test plan: DEGRADED (Test run blocked)` replaces that line.', 'but nothing replaces that line.')), 'a blocked re-check records nothing').toEqual([statusFault])
-    expect(collectStaleReverifyDefects(md.replace('but `Test plan: DEGRADED (Test run blocked)` replaces', 'but `DEGRADED (Test run blocked)` replaces')), 'the Test plan label dropped').toEqual([statusFault])
+    expect(collectStaleReverifyDefects(md.replace('; `Test plan: DEGRADED (Test run blocked)` replaces that line.', '; nothing replaces that line.')), 'a blocked re-check records nothing').toEqual([statusFault])
+    expect(collectStaleReverifyDefects(md.replace('; `Test plan: DEGRADED (Test run blocked)` replaces', '; `DEGRADED (Test run blocked)` replaces')), 'the Test plan label dropped').toEqual([statusFault])
     expect(collectStaleReverifyDefects(md.replace('A Test Status whose first word is not PASS or FAIL', 'A Test Status other than PASS or FAIL')), 'a PASS with a skip note read as any other Status').toEqual([statusFault])
-    expect(collectStaleReverifyDefects(md.replace(' `{m}` counts PASS rows only.', '')), 'm counts every row').toEqual(['m does not count PASS rows only'])
+    expect(collectStaleReverifyDefects(md.replace('; `{m}` is the `CLAIM appended` line\'s `PASS` count (else 0)', '')), 'm counts every row').toEqual(['m does not count PASS rows only'])
     const gitDetect = '```\nAgent(subagent_type="Git"):\n"OPERATION: update-pr-evidence\nPR_NUMBER: {pr_number}"\n```\n'
     expect(collectStaleReverifyDefects(md.replace(STEP1, `${gitDetect}\n${STEP1}`))).toContain('9b-0 spawns a Git agent; STALE detection is the script\'s')
     expect(collectRefreshDefects(md.replace('Run this step only when Step 9b-0 ran — the head moved', 'Run this step always'))).toEqual(['9b-3 is not gated on the head having moved'])

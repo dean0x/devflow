@@ -18,7 +18,7 @@ cannot restore one.
 @end
 
 @define compliance_lens():
-**Resolve the compliance lens** for each worktree root, from its settings line — the line resolved above for that root, by the settings block when this run has not yet resolved it (every framework reference is installed on every machine, so no file check decides it).
+**Resolve the compliance lens** for each worktree root, from its settings line — the line resolved above for that root, by the settings block when this run has not yet resolved it (no file check decides it).
 
 **Set the compliance lens** from that line: {{compliance_frameworks()}}
 @end
@@ -42,7 +42,7 @@ For this compliance focus, {{compliance_load(ids)}}
 @end
 
 @define compliance_inject():
-**Set the compliance directive** from `COMPLIANCE_FRAMEWORKS`. `COMPLIANCE_DIRECTIVE` is empty when `COMPLIANCE_FRAMEWORKS` is `off`: a spawn line that holds only `{COMPLIANCE_DIRECTIVE}` is then left out, so a lens-off spawn carries nothing about compliance. Otherwise `COMPLIANCE_DIRECTIVE` is this one line, with `<ids>` replaced by the value of `COMPLIANCE_FRAMEWORKS`:
+**Set the compliance directive** from `COMPLIANCE_FRAMEWORKS`. `COMPLIANCE_DIRECTIVE` is empty when `COMPLIANCE_FRAMEWORKS` is `off`: a spawn line that holds only `{COMPLIANCE_DIRECTIVE}` is then left out. Otherwise `COMPLIANCE_DIRECTIVE` is this one line, with `<ids>` replaced by the value of `COMPLIANCE_FRAMEWORKS`:
 
 > {{compliance_directive("<ids>")}}
 @end
