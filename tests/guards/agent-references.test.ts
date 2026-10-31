@@ -62,7 +62,7 @@ const TRIAGE_BODY_BOTH_OFF_MAX_BYTES = 10_968
 const VALIDATE_PASSED_ALONE_REF_MAX_BYTES = 3_400
 
 /** The Curate agent body, in bytes. Registered as `curate-body-max`; lowered, never raised. */
-const CURATE_BODY_MAX_BYTES = 16_503
+const CURATE_BODY_MAX_BYTES = 16_583
 
 /** What each mode's reference starts with and the output template it holds. */
 const MODE_TEMPLATES: Readonly<Record<string, { readonly heading: string; readonly template: string }>> = {

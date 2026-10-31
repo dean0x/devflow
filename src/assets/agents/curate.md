@@ -258,14 +258,15 @@ config directory last. Rotation archives an observation no entry carries after 3
 without activity, and never touches anchored ones:
 
 ```bash
-cd "<project root>" && touch -c .devflow/curation/.pending-turns.processing && test -f .devflow/curation/.pending-turns.processing && { node "$HOME/.devflow/scripts/hooks/json-helper.cjs" rotate-observations; node "$HOME/.devflow/scripts/hooks/json-helper.cjs" claim-due; d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"; }
+cd "<project root>" && touch -c .devflow/curation/.pending-turns.processing && test -f .devflow/curation/.pending-turns.processing && { node "$HOME/.devflow/scripts/hooks/json-helper.cjs" rotate-observations 2>&1; node "$HOME/.devflow/scripts/hooks/json-helper.cjs" claim-due 2>&1; d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"; }
 ```
 
-No output at all means the heartbeat failed: the inputs vanished (Step 0). A
-rotate-observations refusal skips only the rotation. `due none` ends Part 2. Any other
-claim-due output lists due entries: Read
+No output at all means the heartbeat failed: the inputs vanished (Step 0). An op refusal
+follows the refusal rule above; a claim-due refusal (no `ref` line) skips maintenance.
+`due none` ends Part 2. Any other claim-due output lists due entries: Read
 `<that directory>/skills/devflow:agent-references/references/curate/maintain.md`, where that
-directory is the last line printed, with the Read tool, and follow it for those entries.
+directory is the last line printed, with the Read tool (unless Part 1 read it), and follow it
+for those entries.
 
 ## Finishing
 
