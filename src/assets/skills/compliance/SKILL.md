@@ -14,7 +14,7 @@ Regulatory compliance review for code that touches regulated data ${DEVFLOW_COMP
 > **IF IT TOUCHES REGULATED DATA: CLASSIFY IT, MINIMIZE IT, ENCRYPT IT, AUDIT IT**
 >
 > Regulated data crossing a code path without classification, minimization, encryption,
-> or an audit trail is a compliance gap — regardless of framework.
+> or an audit trail is a compliance gap — regardless of framework. No exceptions.
 
 ## Active Frameworks
 

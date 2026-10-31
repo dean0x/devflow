@@ -19,7 +19,7 @@ allowed-tools: Read, Grep, Glob, AskUserQuestion
 
 A **boundary** is any point where data crosses a trust domain. External data is hostile
 until parsed through a schema. Take `unknown`, not `any`, and parse it with a schema
-(for example Zod `UserSchema.safeParse(data)`) that yields a typed value or a
+(for example Zod `UserSchema.safeParse(data)`), with bounded lengths and ranges, that yields a typed value or a
 `Result` error; do not scatter manual `typeof` checks. Design the schema type so it
 cannot hold invalid data ("make illegal states unrepresentable"): it is the precondition
 callers must satisfy, and internal code then trusts the type, with no redundant runtime checks.

@@ -16,7 +16,7 @@ activation:
 
 ## Iron Law
 
-> **Explicit is better than implicit**
+> **EXPLICIT IS BETTER THAN IMPLICIT** [3]
 >
 > Type-hint every function signature. Name every exception. Use dataclasses over raw
 > dicts. Python's flexibility is a strength only when boundaries are explicit.

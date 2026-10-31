@@ -19,12 +19,12 @@ Sources in `references/sources.md`.
 
 ## Iron Law
 
-> **Composition over props**
+> **COMPOSITION OVER PROPS** [2][4][12]
 >
 > Use children and compound components, not prop drilling. If a component has >5 props,
 > it's doing too much. Split it. If you're passing data through 3+ levels, use context
 > or composition. Props are for configuration, not data plumbing.
-> "Before You memo(), try solving it with composition." — Dan Abramov
+> "Before You memo(), try solving it with composition." — Dan Abramov [4]
 
 ## Component Structure
 

@@ -14,8 +14,9 @@ Research before building. Check if a battle-tested solution exists before writin
 > **RESEARCH BEFORE BUILDING**
 >
 > Never write custom utility code without first checking if a battle-tested solution
-> exists. A maintained package with thousands of users beats a hand-rolled utility in
-> reliability, edge cases, and long-term maintenance.
+> exists. The best code is code you don't write. A maintained package with thousands
+> of users will always beat a hand-rolled utility in reliability, edge cases, and
+> long-term maintenance.
 
 ## When This Skill Activates
 

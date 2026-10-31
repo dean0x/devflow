@@ -16,11 +16,11 @@ activation:
 
 ## Iron Law
 
-> **Unknown over any**
+> **UNKNOWN OVER ANY**
 >
 > Never use `any`. Use `unknown` with type guards instead. `any` disables TypeScript's
 > entire value proposition — if you need flexibility, use generics; if you need to handle
-> arbitrary data, use `unknown` and validate. `any` is giving up.
+> arbitrary data, use `unknown` and validate. `any` is giving up. [1, Item 43]
 
 ## Type Safety
 

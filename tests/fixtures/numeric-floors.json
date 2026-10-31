@@ -1262,99 +1262,99 @@
     },
     {
       "id": "skill-compliance-max",
-      "ceiling": 3533,
-      "pattern": "['compliance', 3_533],",
+      "ceiling": 3548,
+      "pattern": "['compliance', 3_548],",
       "occurrences": 1,
       "sourceFile": "tests/guards/on-demand-skill-sizes.test.ts",
-      "description": "src/assets/skills/compliance/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 3,533, after the cut from 5,331."
+      "description": "src/assets/skills/compliance/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 3,548, after the cut from 5,331."
     },
     {
       "id": "skill-dependency-research-max",
-      "ceiling": 3713,
-      "pattern": "['dependency-research', 3_713],",
+      "ceiling": 3765,
+      "pattern": "['dependency-research', 3_765],",
       "occurrences": 1,
       "sourceFile": "tests/guards/on-demand-skill-sizes.test.ts",
-      "description": "src/assets/skills/dependency-research/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 3,713, after the cut from 4,802."
+      "description": "src/assets/skills/dependency-research/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 3,765, after the cut from 4,802."
     },
     {
       "id": "skill-boundary-validation-max",
-      "ceiling": 3047,
-      "pattern": "['boundary-validation', 3_047],",
+      "ceiling": 3081,
+      "pattern": "['boundary-validation', 3_081],",
       "occurrences": 1,
       "sourceFile": "tests/guards/on-demand-skill-sizes.test.ts",
-      "description": "src/assets/skills/boundary-validation/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 3,047, after the cut from 5,013."
+      "description": "src/assets/skills/boundary-validation/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 3,081, after the cut from 5,013."
     },
     {
       "id": "skill-patterns-max",
-      "ceiling": 2900,
-      "pattern": "['patterns', 2_900],",
+      "ceiling": 2981,
+      "pattern": "['patterns', 2_981],",
       "occurrences": 1,
       "sourceFile": "tests/guards/on-demand-skill-sizes.test.ts",
-      "description": "src/assets/skills/patterns/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 2,900, after the cut from 4,738."
+      "description": "src/assets/skills/patterns/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 2,981, after the cut from 4,738."
     },
     {
       "id": "skill-typescript-max",
-      "ceiling": 2698,
-      "pattern": "['typescript', 2_698],",
+      "ceiling": 2711,
+      "pattern": "['typescript', 2_711],",
       "occurrences": 1,
       "sourceFile": "tests/guards/on-demand-skill-sizes.test.ts",
-      "description": "src/assets/skills/typescript/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 2,698, after the cut from 4,700."
+      "description": "src/assets/skills/typescript/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 2,711, after the cut from 4,700."
     },
     {
       "id": "skill-python-max",
-      "ceiling": 2616,
-      "pattern": "['python', 2_616],",
+      "ceiling": 2620,
+      "pattern": "['python', 2_620],",
       "occurrences": 1,
       "sourceFile": "tests/guards/on-demand-skill-sizes.test.ts",
-      "description": "src/assets/skills/python/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 2,616, after the cut from 4,500."
+      "description": "src/assets/skills/python/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 2,620, after the cut from 4,500."
     },
     {
       "id": "skill-go-max",
-      "ceiling": 2344,
-      "pattern": "['go', 2_344],",
+      "ceiling": 2405,
+      "pattern": "['go', 2_405],",
       "occurrences": 1,
       "sourceFile": "tests/guards/on-demand-skill-sizes.test.ts",
-      "description": "src/assets/skills/go/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 2,344, after the cut from 4,296."
+      "description": "src/assets/skills/go/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 2,405, after the cut from 4,296."
     },
     {
       "id": "skill-java-max",
-      "ceiling": 2493,
-      "pattern": "['java', 2_493],",
+      "ceiling": 2506,
+      "pattern": "['java', 2_506],",
       "occurrences": 1,
       "sourceFile": "tests/guards/on-demand-skill-sizes.test.ts",
-      "description": "src/assets/skills/java/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 2,493, after the cut from 4,796."
+      "description": "src/assets/skills/java/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 2,506, after the cut from 4,796."
     },
     {
       "id": "skill-rust-max",
-      "ceiling": 2734,
-      "pattern": "['rust', 2_734],",
+      "ceiling": 2776,
+      "pattern": "['rust', 2_776],",
       "occurrences": 1,
       "sourceFile": "tests/guards/on-demand-skill-sizes.test.ts",
-      "description": "src/assets/skills/rust/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 2,734, after the cut from 4,822."
+      "description": "src/assets/skills/rust/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 2,776, after the cut from 4,822."
     },
     {
       "id": "skill-react-max",
-      "ceiling": 3616,
-      "pattern": "['react', 3_616],",
+      "ceiling": 3631,
+      "pattern": "['react', 3_631],",
       "occurrences": 1,
       "sourceFile": "tests/guards/on-demand-skill-sizes.test.ts",
-      "description": "src/assets/skills/react/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 3,616, after the cut from 5,454."
+      "description": "src/assets/skills/react/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 3,631, after the cut from 5,454."
     },
     {
       "id": "skill-accessibility-max",
-      "ceiling": 3444,
-      "pattern": "['accessibility', 3_444],",
+      "ceiling": 3455,
+      "pattern": "['accessibility', 3_455],",
       "occurrences": 1,
       "sourceFile": "tests/guards/on-demand-skill-sizes.test.ts",
-      "description": "src/assets/skills/accessibility/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 3,444, after the cut from 5,068."
+      "description": "src/assets/skills/accessibility/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 3,455, after the cut from 5,068."
     },
     {
       "id": "skill-ui-design-max",
-      "ceiling": 4079,
-      "pattern": "['ui-design', 4_079],",
+      "ceiling": 4096,
+      "pattern": "['ui-design', 4_096],",
       "occurrences": 1,
       "sourceFile": "tests/guards/on-demand-skill-sizes.test.ts",
-      "description": "src/assets/skills/ui-design/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 4,079, after the cut from 5,482."
+      "description": "src/assets/skills/ui-design/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 4,096, after the cut from 5,482."
     },
     {
       "id": "skill-research-codebase-max",
@@ -1374,11 +1374,11 @@
     },
     {
       "id": "skill-research-external-max",
-      "ceiling": 3396,
-      "pattern": "['research-external', 3_396],",
+      "ceiling": 3456,
+      "pattern": "['research-external', 3_456],",
       "occurrences": 1,
       "sourceFile": "tests/guards/on-demand-skill-sizes.test.ts",
-      "description": "src/assets/skills/research-external/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 3,396, after the cut from 4,363."
+      "description": "src/assets/skills/research-external/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 3,456, after the cut from 4,363."
     },
     {
       "id": "skill-research-market-max",

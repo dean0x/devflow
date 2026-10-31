@@ -21,11 +21,11 @@ Reference for web accessibility (WCAG 2.2 AA compliance), keyboard navigation, s
 
 ## Iron Law
 
-> **Every interaction must be possible without a mouse**
+> **EVERY INTERACTION MUST BE POSSIBLE WITHOUT A MOUSE** [1][3]
 >
 > Mouse-only interactions exclude users with motor disabilities, power users, and AT users.
 > Tab order, focus management, and keyboard shortcuts are not optional enhancements.
-> — WCAG 2.1 Principle 2 (Operable)
+> — WCAG 2.1 Principle 2 (Operable) [1]
 
 ## Keyboard Navigation
 

@@ -69,6 +69,7 @@ Before implementing, verify:
 - [ ] Handling all error cases explicitly
 - [ ] Using transactions for multi-step operations
 - [ ] No hardcoded values (use config)
+- [ ] Input validated at system boundaries; operations idempotent where possible
 
 ## Extended References
 

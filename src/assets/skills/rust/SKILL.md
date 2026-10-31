@@ -14,7 +14,7 @@ activation:
 
 ## Iron Law
 
-> **Make illegal states unrepresentable**
+> **MAKE ILLEGAL STATES UNREPRESENTABLE** [15][2, C-VALIDATE]
 >
 > Encode invariants in the type system. If a function can fail, return `Result`. If a value
 > might be absent, return `Option`. If a state transition is invalid, make it uncompilable.
@@ -44,7 +44,7 @@ See `references/ownership.md` for elision rules, interior mutability, Cow, and P
 
 ## Concurrency & Safety
 
-- Prefer channels (`tokio::sync::mpsc`) over shared mutable state (`Mutex<Vec>`). `Send`/`Sync` prevent data races at compile time.
+- Prefer bounded channels (`tokio::sync::mpsc::channel(100)`) over shared mutable state (`Mutex<Vec>`). `Send`/`Sync` prevent data races at compile time.
 - In async contexts use `tokio::fs` or `spawn_blocking`, never `std::fs`: it blocks the runtime.
 - No `unsafe` without a `// SAFETY:` comment.
 - Clippy clean: `cargo clippy -- -D warnings`.

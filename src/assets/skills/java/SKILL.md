@@ -15,12 +15,12 @@ activation:
 
 ## Iron Law
 
-> **Favor composition over inheritance**
+> **FAVOR COMPOSITION OVER INHERITANCE**
 >
 > Delegation and interfaces over class hierarchies. Inheritance creates tight coupling,
 > breaks encapsulation, and makes refactoring dangerous. Use interfaces for polymorphism,
 > records for data, and sealed classes for restricted hierarchies. Extend only when the
-> "is-a" relationship is genuinely invariant. — Effective Java, Item 18
+> "is-a" relationship is genuinely invariant. — Effective Java, Item 18 [1, Item 18]
 
 ## Type System (Modern Java)
 

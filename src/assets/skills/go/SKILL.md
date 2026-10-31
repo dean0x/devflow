@@ -16,17 +16,17 @@ Full bibliography: `references/sources.md`.
 
 ## Iron Law
 
-> **Errors are values**
+> **ERRORS ARE VALUES** [5][7]
 >
 > Never ignore errors. `if err != nil` is correctness, not boilerplate. Every error
 > return must be checked, wrapped with context, or explicitly documented as intentionally
-> ignored with `_ = fn()`. "Errors are values. Values can be programmed." — Rob Pike
+> ignored with `_ = fn()`. "Errors are values. Values can be programmed." — Rob Pike [5]
 
 ## Error Handling
 
 - Wrap with context, `return fmt.Errorf("finding user %s: %w", id, err)`, not a bare `return err`: the caller loses context.
 - Declare sentinel errors (`var ErrNotFound = errors.New("not found")`) and match them with `errors.Is`.
-- Never `val, _ := fn()` without the explicit `_ =` form.
+- Never discard an error with `val, _ := fn()`: check it, wrap it, or ignore it on purpose with `_ = fn()`.
 - No `panic` or `log.Fatal` in library code.
 
 ## Interface Design

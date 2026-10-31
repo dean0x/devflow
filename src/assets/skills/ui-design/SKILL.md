@@ -22,13 +22,13 @@ Reference for intentional visual design. Sources in `references/sources.md`.
 
 ## Iron Law
 
-> **Aesthetics must have intent**
+> **AESTHETICS MUST HAVE INTENT** [4][11]
 >
 > Every visual choice must be justified. Default styles, copied gradients, and
 > "looks modern" are not justifications. If you cannot explain why a specific
 > font, color, or animation exists, it's design debt. Good design is invisible
 > because it serves purpose — it satisfies mental models, not trends.
-> — Don Norman, *The Design of Everyday Things*; Laws of UX
+> — Don Norman, *The Design of Everyday Things* [11]; Laws of UX [4]
 
 ## 1. Typography
 
