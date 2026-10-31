@@ -1,5 +1,5 @@
 ---
-description: Research a topic using parallel multi-type Research agents with trust-aware synthesis
+description: Research a topic with parallel multi-type Research agents and trust-aware synthesis
 output-dir: dist/commands
 ---
 @import { knowledge_load } from "./_partials/_knowledge.mds"

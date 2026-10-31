@@ -1,5 +1,5 @@
 ---
-description: Explore codebase with structured analysis and optional feature knowledge creation
+description: Explore codebase with structured analysis; optionally build feature knowledge
 output-dir: dist/commands
 ---
 @import { knowledge_writeback } from "./_partials/_knowledge.mds"

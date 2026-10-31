@@ -1,6 +1,6 @@
 ---
 name: Validate
-description: Runs build, typecheck, lint and test; reports pass or fail with failure details; never fixes.
+description: Runs build, typecheck, lint and test; reports pass or fail with details; never fixes.
 model: haiku
 effort: medium
 skills:
