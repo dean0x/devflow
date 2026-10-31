@@ -677,6 +677,110 @@
       "description": "The Validate agent body, src/assets/agents/validate.md, in bytes. It is hand-authored. The lean lint-pack wiring and the per-file passed-alone re-run rule (the re-run sentence, the Read line with its conditions, and the Passed alone: line) are funded with named cuts in the same body; it measures 5,995 at #677 (6,003 at #666), with no headroom. It rose by 28 bytes to 6,023 at #677, because the wait rule now names the file that sets the result: a run could read the wrong file and report a pass. May be LOWERED, never raised: a later addition funds itself with a cut."
     },
     {
+      "id": "review-body-max",
+      "ceiling": 10739,
+      "pattern": "const REVIEW_BODY_MAX_BYTES = 10_739",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/review-group-sizes.test.ts",
+      "description": "The Review agent body of the curation-on build, dist/agents/review.md, in bytes. Every turn of every Review spawn reads it (opus, high effort, about eleven spawns per full review). Added by #720 (lean Review group) at 10,739, after the cut from 12,422."
+    },
+    {
+      "id": "review-body-curation-off-max",
+      "ceiling": 10143,
+      "pattern": "const REVIEW_BODY_CURATION_OFF_MAX_BYTES = 10_143",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/review-group-sizes.test.ts",
+      "description": "The Review agent body of the curation-off build, dist/curation-off/agents/review.md, in bytes. Added by #720 (lean Review group) at 10,143, after the cut from 11,623."
+    },
+    {
+      "id": "skill-review-methodology-max",
+      "ceiling": 3205,
+      "pattern": "['review-methodology', 3_205],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/review-group-sizes.test.ts",
+      "description": "src/assets/skills/review-methodology/SKILL.md, in bytes. The Review agent preloads it, so every turn of every Review spawn reads it. Added by #720 (lean Review group) at 3,205, after the cut from 4,403."
+    },
+    {
+      "id": "skill-architecture-max",
+      "ceiling": 3425,
+      "pattern": "['architecture', 3_425],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/review-group-sizes.test.ts",
+      "description": "src/assets/skills/architecture/SKILL.md, in bytes. A Review spawn with this focus loads it with the Skill tool and reads it in every later turn. Added by #720 (lean Review group) at 3,425, after the cut from 5,360."
+    },
+    {
+      "id": "skill-complexity-max",
+      "ceiling": 2487,
+      "pattern": "['complexity', 2_487],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/review-group-sizes.test.ts",
+      "description": "src/assets/skills/complexity/SKILL.md, in bytes. A Review spawn with this focus loads it with the Skill tool and reads it in every later turn. Added by #720 (lean Review group) at 2,487, after the cut from 4,390."
+    },
+    {
+      "id": "skill-consistency-max",
+      "ceiling": 2158,
+      "pattern": "['consistency', 2_158],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/review-group-sizes.test.ts",
+      "description": "src/assets/skills/consistency/SKILL.md, in bytes. A Review spawn with this focus loads it with the Skill tool and reads it in every later turn. Added by #720 (lean Review group) at 2,158, after the cut from 4,266."
+    },
+    {
+      "id": "skill-database-max",
+      "ceiling": 3050,
+      "pattern": "['database', 3_050],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/review-group-sizes.test.ts",
+      "description": "src/assets/skills/database/SKILL.md, in bytes. A Review spawn with this focus loads it with the Skill tool and reads it in every later turn. Added by #720 (lean Review group) at 3,050, after the cut from 4,797."
+    },
+    {
+      "id": "skill-dependencies-max",
+      "ceiling": 2055,
+      "pattern": "['dependencies', 2_055],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/review-group-sizes.test.ts",
+      "description": "src/assets/skills/dependencies/SKILL.md, in bytes. A Review spawn with this focus loads it with the Skill tool and reads it in every later turn. Added by #720 (lean Review group) at 2,055, after the cut from 3,714."
+    },
+    {
+      "id": "skill-documentation-max",
+      "ceiling": 2830,
+      "pattern": "['documentation', 2_830],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/review-group-sizes.test.ts",
+      "description": "src/assets/skills/documentation/SKILL.md, in bytes. A Review spawn with this focus loads it with the Skill tool and reads it in every later turn. Added by #720 (lean Review group) at 2,830, after the cut from 4,745."
+    },
+    {
+      "id": "skill-performance-max",
+      "ceiling": 3070,
+      "pattern": "['performance', 3_070],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/review-group-sizes.test.ts",
+      "description": "src/assets/skills/performance/SKILL.md, in bytes. A Review spawn with this focus loads it with the Skill tool and reads it in every later turn. Added by #720 (lean Review group) at 3,070, after the cut from 4,796."
+    },
+    {
+      "id": "skill-regression-max",
+      "ceiling": 3140,
+      "pattern": "['regression', 3_140],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/review-group-sizes.test.ts",
+      "description": "src/assets/skills/regression/SKILL.md, in bytes. A Review spawn with this focus loads it with the Skill tool and reads it in every later turn. Added by #720 (lean Review group) at 3,140, after the cut from 4,723."
+    },
+    {
+      "id": "skill-reliability-max",
+      "ceiling": 2546,
+      "pattern": "['reliability', 2_546],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/review-group-sizes.test.ts",
+      "description": "src/assets/skills/reliability/SKILL.md, in bytes. A Review spawn with this focus loads it with the Skill tool and reads it in every later turn. Added by #720 (lean Review group) at 2,546, after the cut from 4,542."
+    },
+    {
+      "id": "skill-security-max",
+      "ceiling": 4085,
+      "pattern": "['security', 4_085],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/review-group-sizes.test.ts",
+      "description": "src/assets/skills/security/SKILL.md, in bytes. A Review spawn with this focus loads it with the Skill tool and reads it in every later turn. Added by #720 (lean Review group) at 4,085, after the cut from 4,811."
+    },
+    {
       "id": "validate-passed-alone-ref-max",
       "ceiling": 3400,
       "pattern": "const VALIDATE_PASSED_ALONE_REF_MAX_BYTES = 3_400",
@@ -702,19 +806,19 @@
     },
     {
       "id": "command-code-review-max",
-      "ceiling": 34062,
-      "pattern": "['code-review', 'on', 34_062],",
+      "ceiling": 33149,
+      "pattern": "['code-review', 'on', 33_149],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/code-review.md, the curation-on build, in bytes. Measured 34,062 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (34,170 after the knowledge write-back filter and the index file name were restored for #675,34,162 after the decisions partial was condensed for #675, 34,332 after the knowledge partial was condensed for #675, 34,751 after the publication partial was condensed for #675, 34,888 after #561), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/commands/code-review.md, the curation-on build, in bytes. Measured 34,062 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (34,170 after the knowledge write-back filter and the index file name were restored for #675,34,162 after the decisions partial was condensed for #675, 34,332 after the knowledge partial was condensed for #675, 34,751 after the publication partial was condensed for #675, 34,888 after #561), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. #720 (lean Review group) lowered it to 33,149."
     },
     {
       "id": "command-code-review-curation-off-max",
-      "ceiling": 31487,
-      "pattern": "['code-review', 'off', 31_487],",
+      "ceiling": 30711,
+      "pattern": "['code-review', 'off', 30_711],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/curation-off/commands/code-review.md, the curation-off build, in bytes. Measured 31,487 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (31,595 after the knowledge write-back filter and the index file name were restored for #675,31,587 after the knowledge partial was condensed for #675, 32,006 after the publication partial was condensed for #675, 32,143 after #561), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/curation-off/commands/code-review.md, the curation-off build, in bytes. Measured 31,487 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (31,595 after the knowledge write-back filter and the index file name were restored for #675,31,587 after the knowledge partial was condensed for #675, 32,006 after the publication partial was condensed for #675, 32,143 after #561), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. #720 (lean Review group) lowered it to 30,711."
     },
     {
       "id": "command-debug-max",
@@ -926,19 +1030,19 @@
     },
     {
       "id": "command-code-review-compliance-off-max",
-      "ceiling": 31269,
-      "pattern": "['code-review', 'compliance-off', 31_269],",
+      "ceiling": 30468,
+      "pattern": "['code-review', 'compliance-off', 30_468],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/code-review.md, the compliance-off build, in bytes. Measured 31,269 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (31,377 after the knowledge write-back filter and the index file name were restored for #675,31,369 after the decisions partial was condensed for #675, 31,539 after the knowledge partial was condensed for #675, 31,958 at its first build), with no headroom. The rule sets no comparison with the all-on build. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/code-review.md, the compliance-off build, in bytes. Measured 31,269 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (31,377 after the knowledge write-back filter and the index file name were restored for #675,31,369 after the decisions partial was condensed for #675, 31,539 after the knowledge partial was condensed for #675, 31,958 at its first build), with no headroom. The rule sets no comparison with the all-on build. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. #720 (lean Review group) lowered it to 30,468."
     },
     {
       "id": "command-code-review-both-off-max",
-      "ceiling": 28694,
-      "pattern": "['code-review', 'both-off', 28_694],",
+      "ceiling": 28030,
+      "pattern": "['code-review', 'both-off', 28_030],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE (#648, AC-33): dist/curation-compliance-off/commands/code-review.md, the build with curation and compliance both off, in bytes. Measured 28,694 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (28,802 after the knowledge write-back filter and the index file name were restored for #675,28,794 after the knowledge partial was condensed for #675, 29,213 at its first build), with no headroom. The rule sets no comparison with the other builds. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE (#648, AC-33): dist/curation-compliance-off/commands/code-review.md, the build with curation and compliance both off, in bytes. Measured 28,694 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (28,802 after the knowledge write-back filter and the index file name were restored for #675,28,794 after the knowledge partial was condensed for #675, 29,213 at its first build), with no headroom. The rule sets no comparison with the other builds. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. #720 (lean Review group) lowered it to 28,030."
     },
     {
       "id": "command-dynamic-build-compliance-off-max",
