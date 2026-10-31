@@ -15,11 +15,14 @@
  *          produce exactly the Output enum git.md declares. Step 5 is EXECUTED: a
  *          small interpreter reads its clauses and runs them over every bucket
  *          multiset up to three checks, an undocumented bucket included.
- *   Gates  Both ci-status-gate blocks (/implement Phase 9, /resolve Phase 8) name
- *          an arm for every status the op can return, and that set is the one
- *          ci-wait.cjs exports as STATUSES (#421). The blocks wait through ci-wait
- *          (no Git re-spawn, a Bash timeout above 570 s and at most 600 s), spawn
- *          Code only on FAILING, and hold the budget of 3 waits and 2 fixes. The
+ *   Gates  ci-wait.cjs exports STATUSES, the set the op can return (#421), and
+ *          answers each status with a `NEXT` line (D-CI-NEXT). Both ci-status-gate
+ *          blocks (/implement Phase 10, /resolve Phase 8) name an arm for every
+ *          `NEXT` value the script prints. The blocks wait through ci-wait (no Git
+ *          re-spawn, a Bash timeout above 570 s and at most 600 s, the two counts
+ *          passed), spawn Fix only on `NEXT=fix`, and carry no rule the script owns:
+ *          the budget of 3 waits and 2 fixes and the full-deadline exception live in
+ *          ci-wait.cjs, held in ci-wait.test.ts over the whole domain. The
  *          script's exported classifier agrees with check-ci-status step 5 on
  *          every bucket multiset of 1 to 3 checks, an undocumented bucket
  *          included (D-CI-CLASSIFIER).
@@ -56,7 +59,7 @@ import * as path from 'path'
 import { createRequire } from 'module'
 
 import { compiledSkillRefsDir } from '../../src/core/assets.js'
-import { extractOpSectionFromCorpus, gitOperationReferenceCorpus, prHostRel, requireDistFile } from '../helpers.js'
+import { extractOpSectionFromCorpus, gitOperationReferenceCorpus, prHostRel, requireDistFile, resolveVariantOffSource } from '../helpers.js'
 import { CI_WAIT_SCRIPT, PR_EVIDENCE_SCRIPT, VERIFY_EVIDENCE_SCRIPT } from './seam.js'
 
 /** Transcribed from pr-evidence.cjs's JSDoc — only the EVIDENCE line grammar. */
@@ -71,6 +74,12 @@ interface CiWaitApi {
   readonly REASONS: readonly string[]
   readonly LINE_RE: RegExp
   readonly CI_WAIT_MAX_SECONDS: number
+  readonly MAX_WAITS: number
+  readonly MAX_FIXES: number
+  readonly NEXTS: readonly string[]
+  readonly FINAL_AFTER_FULL_WAIT: readonly string[]
+  readonly NEXT_LINES: readonly string[]
+  nextAction(result: { status: string; reason: string | null; waited: number }, waits: number, fixes: number): { next: string; say: string }
   renderLine(result: { status: string; pr: string; head: string; failing: string[]; pending: string[]; waited: number; reason: string | null }): string
   classifyChecks(checks: ReadonlyArray<{ name: string; bucket: string; workflow?: string }>): { status: string; reason: string | null }
   isConflicting(mergeable: unknown): boolean
@@ -311,48 +320,63 @@ function gateBlock(content: string): string {
   return at === -1 || end === -1 ? '' : content.slice(at, end)
 }
 
-/** Named collector: the statuses a gate block names no `**If …**` arm for. */
-function collectUnhandledCiStatuses(block: string, statuses: readonly string[]): string[] {
-  const handled = new Set([...block.matchAll(/\*\*If ([A-Z_]+(?: or [A-Z_]+)*)\*\*/g)].flatMap(m => m[1].split(' or ')))
-  return statuses.filter(s => !handled.has(s))
+/** Named collector: the `NEXT` values a gate block names no `**If `NEXT=…`**` arm for. */
+function collectUnhandledNexts(block: string, nexts: readonly string[]): string[] {
+  const handled = new Set([...block.matchAll(/\*\*If `NEXT=([a-z]+)`\*\*/g)].map(m => m[1]))
+  return nexts.filter(next => !handled.has(next))
 }
 
-describe('each ci-status-gate block has an arm for every status check-ci-status returns', () => {
-  const hosts = ['implement.md', 'resolve.md'] as const
+const GATE_HOSTS = ['implement', 'resolve'] as const
+type GateBuild = 'on' | 'curation-off' | 'compliance-off' | 'both-off'
+const GATE_BUILDS: readonly GateBuild[] = ['on', 'curation-off', 'compliance-off', 'both-off']
 
-  it('both blocks name all six statuses', () => {
-    const statuses = declaredStatuses('check-ci-status')
-    expect(statuses.length, 'no Output enum parsed').toBe(6)
-    for (const host of hosts) {
-      const block = gateBlock(requireDistFile(host))
-      expect(block.length, `${host}: no ci-status-gate block`).toBeGreaterThan(200)
-      expect(collectUnhandledCiStatuses(block, statuses), host).toEqual([])
-      expect(block, `${host}: an INDETERMINATE CI status is never a pass`).toContain('CI status unknown — verify manually before merging')
+/** The ci-status-gate block of one command in one build. A build the tree lacks throws, never skips. */
+function gateBlockOf(host: (typeof GATE_HOSTS)[number], build: GateBuild): string {
+  const text = build === 'on' ? requireDistFile(`${host}.md`) : resolveVariantOffSource(build, 'commands', host)
+  if (text === null) throw new Error(`the ${build} build of /${host} is absent: run \`npm run build:mds\``)
+  return gateBlock(text)
+}
+
+/** Every gate block in every build, labelled `host (build)`. */
+function allGateBlocks(): Array<readonly [label: string, build: GateBuild, block: string]> {
+  return GATE_HOSTS.flatMap(host => GATE_BUILDS.map(build => [`${host} (${build})`, build, gateBlockOf(host, build)] as const))
+}
+
+describe('each ci-status-gate block has an arm for every NEXT value ci-wait prints', () => {
+  it('the blocks of both commands, in all four builds, name wait, fix and proceed and the unreadable-answer fallback', () => {
+    expect(allGateBlocks()).toHaveLength(8)
+    for (const [label, , block] of allGateBlocks()) {
+      expect(block.length, `${label}: no ci-status-gate block`).toBeGreaterThan(200)
+      expect(collectUnhandledNexts(block, CW.NEXTS), label).toEqual([])
+      expect(block, `${label}: an unreadable answer is never a pass`).toContain('CI status unknown — verify manually before merging')
     }
   })
 
-  it('known-bad probe: the pre-#352 block, without an INDETERMINATE arm, is reported', () => {
-    const block = gateBlock(requireDistFile('implement.md'))
-    const old = block.split('\n').filter(l => !l.includes('**If INDETERMINATE**')).join('\n')
+  it('known-bad probe: a block without its `proceed` arm is reported', () => {
+    const block = gateBlockOf('implement', 'on')
+    const old = block.split('\n').filter(l => !l.includes('**If `NEXT=proceed`**')).join('\n')
     expect(old, 'the seed must land').not.toBe(block)
-    expect(collectUnhandledCiStatuses(old, declaredStatuses('check-ci-status'))).toEqual(['INDETERMINATE'])
+    expect(collectUnhandledNexts(old, CW.NEXTS)).toEqual(['proceed'])
   })
 })
 
-describe('#421: the arm names are ci-wait\'s STATUSES, which are check-ci-status\'s declared list', () => {
+describe('#421: ci-wait\'s STATUSES are check-ci-status\'s declared list, and the script answers each with a NEXT the blocks handle', () => {
   it('STATUSES equals the Output enum the op declares, in its order', () => {
-    expect(declaredStatuses('check-ci-status')).toEqual([...CW.STATUSES])
+    const statuses = declaredStatuses('check-ci-status')
+    expect(statuses.length, 'no Output enum parsed').toBe(6)
+    expect(statuses).toEqual([...CW.STATUSES])
   })
 
-  it('both gate blocks name an arm for every exported status', () => {
-    for (const host of ['implement.md', 'resolve.md'] as const) {
-      expect(collectUnhandledCiStatuses(gateBlock(requireDistFile(host)), CW.STATUSES), host).toEqual([])
+  it('every exported status gets one of the NEXT values the blocks name an arm for', () => {
+    for (const status of CW.STATUSES) {
+      const { next } = CW.nextAction({ status, reason: null, waited: 2 }, 1, 0)
+      expect(CW.NEXTS, status).toContain(next)
+      for (const [label, , block] of allGateBlocks()) expect(collectUnhandledNexts(block, [next]), `${label}: ${status}`).toEqual([])
     }
   })
 
-  it('known-bad probe: an exported status the blocks do not handle is reported', () => {
-    const block = gateBlock(requireDistFile('implement.md'))
-    expect(collectUnhandledCiStatuses(block, [...CW.STATUSES, 'CANCELLED'])).toEqual(['CANCELLED'])
+  it('known-bad probe: a NEXT value the blocks do not handle is reported', () => {
+    expect(collectUnhandledNexts(gateBlockOf('implement', 'on'), [...CW.NEXTS, 'stop'])).toEqual(['stop'])
   })
 })
 
@@ -361,10 +385,12 @@ const BASH_TIMEOUT_FLOOR_MS = CW.CI_WAIT_MAX_SECONDS * 1000
 const BASH_TIMEOUT_CEILING_MS = 600_000
 
 /**
- * Named collector: what a ci-status-gate block lacks now that the wait is a script.
- * No Git re-spawn or minute-by-minute poll; one ci-wait invocation with a timeout in
- * (570000, 600000]; Code spawned once, in the FAILING arm only, with no push of its
- * own; each arm carrying its own condition; the three messages the arms report.
+ * Named collector: what a ci-status-gate block lacks now that the wait and the gate table are
+ * a script. No Git re-spawn or minute-by-minute poll; one ci-wait invocation with a timeout in
+ * (570000, 600000] that passes the two counts; the `NEXT` line and its fallback; Fix spawned once,
+ * in the `NEXT=fix` arm only, with no push of its own and a wait budget equal to the script's; the
+ * `proceed` arm that says SAY; and none of the text the script now owns (its messages, the
+ * INDETERMINATE exception, a budget line).
  */
 function collectGateBlockDefects(block: string): string[] {
   const out: string[] = []
@@ -377,40 +403,65 @@ function collectGateBlockDefects(block: string): string[] {
   const timeout = Number(/`timeout: (\d+)`/.exec(calls[0] ?? '')?.[1])
   need('the ci-wait call carries a Bash timeout above 570000 and at most 600000', timeout > BASH_TIMEOUT_FLOOR_MS && timeout <= BASH_TIMEOUT_CEILING_MS)
   need('the call is bound to the head with `--head "$HEAD_SHA"`', (calls[0] ?? '').includes('--head "$HEAD_SHA"') && (calls[0] ?? '').includes('HEAD_SHA=$(git rev-parse HEAD)'))
+  need('the call does not pass the counts as `--waits {n} --fixes {m}`', (calls[0] ?? '').includes('--head "$HEAD_SHA" --waits {n} --fixes {m}`'))
+  need('the block does not say that the run prints the NEXT line', block.includes('then `NEXT=<wait|fix|proceed> SAY=<message>`'))
+  need(
+    'the block names no fallback for a missing or malformed NEXT line or a non-zero exit',
+    /A missing or malformed `NEXT=` line or a non-zero exit → report "CI status unknown — verify manually before merging" and proceed/.test(block),
+  )
   // D-CODE-VARIANTS: the CI fix is a gate-failure fix, so it runs on Fix and never on Code.
   const codeSpawns = block.split('\n').filter(l => l.includes('Agent(subagent_type="Fix")'))
   need(`expected one Fix spawn, found ${codeSpawns.length}`, codeSpawns.length === 1)
   need('the block spawns Code, which runs no CI fix', !block.includes('Agent(subagent_type="Code")'))
-  const failing = block.split('\n').find(l => l.includes('**If FAILING**')) ?? ''
-  need('the Code spawn is not in the FAILING arm', codeSpawns.length === 1 && codeSpawns[0] === failing)
-  need('the FAILING arm does not carry `PUSH: false`', failing.includes('`PUSH: false`') && failing.includes('with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES`'))
-  need('the FAILING arm does not state its fix budget at its step', failing.includes('fewer than 2 fixes have run'))
-  need('the FAILING arm does not push after a fix', failing.includes('After a fix, push with the command above'))
-  need('the FAILING arm has no DEGRADED push arm', failing.includes('`TRACEABILITY: DEGRADED (ci push failed)`'))
-  for (const status of ['PENDING', 'INDETERMINATE']) {
-    const arm = block.split('\n').find(l => l.includes(`**If ${status}**`)) ?? ''
-    need(`the ${status} arm does not state its wait budget at its step`, arm.includes('fewer than 3 waits have run'))
-  }
-  need('the budget line names 3 waits and 2 fixes', /\*\*Budget\*\*: at most 3 waits and 2 fixes/.test(block))
-  need('the still-running message is gone', block.includes('"CI still running — verify manually before merging"'))
-  need('the unknown message is gone', block.includes('"CI status unknown — verify manually before merging"'))
-  need('the no-CI skip message is gone', block.includes('"No PR/CI configured, skipping CI validation."'))
+  const failing = block.split('\n').find(l => l.includes('**If `NEXT=fix`**')) ?? ''
+  need('the Fix spawn is not in the `NEXT=fix` arm', codeSpawns.length === 1 && codeSpawns[0] === failing)
+  need('the `NEXT=fix` arm does not carry `PUSH: false`', failing.includes('`PUSH: false`') && failing.includes('with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES`'))
+  need('the `NEXT=fix` arm does not show SAY and the failing checks', failing.includes('report SAY and the failing checks from the CI line'))
+  need('the `NEXT=fix` arm does not push after a fix', failing.includes('After a fix, push with the command above'))
+  need(
+    'the `NEXT=fix` arm does not wait again under the script\'s wait budget',
+    Number(/if fewer than (\d+) waits have run, step 1 again/.exec(failing)?.[1]) === CW.MAX_WAITS,
+  )
+  need('the `NEXT=fix` arm has no DEGRADED push arm', failing.includes('`TRACEABILITY: DEGRADED (ci push failed)`'))
+  const proceed = block.split('\n').find(l => l.includes('**If `NEXT=proceed`**')) ?? ''
+  need('the `NEXT=proceed` arm does not say SAY unless it is `none`', proceed.includes('report SAY unless it is `none`'))
+  need('the `NEXT=wait` arm does not go back to step 1', block.split('\n').some(l => l.includes('**If `NEXT=wait`**') && l.includes('step 1 again')))
+  need('the block restates a message the script says', !/CI still running|skipping CI validation|CI still fails/.test(block))
+  need('the block restates the INDETERMINATE exception the script owns', !/head-mismatch|no-workflow-check|waited=570/.test(block))
+  need('the block restates a budget line the script owns', !/\*\*Budget\*\*|fewer than 2 fixes/.test(block))
   return out
 }
 
-describe('#421 AC-6/7: the gate blocks wait through ci-wait, spawn Code only on FAILING and hold the budget', () => {
-  const hosts = ['implement.md', 'resolve.md'] as const
-
-  it('both compiled blocks hold every statement', () => {
-    for (const host of hosts) {
-      const block = gateBlock(requireDistFile(host))
-      expect(block.length, `${host}: no ci-status-gate block`).toBeGreaterThan(200)
-      expect(collectGateBlockDefects(block), host).toEqual([])
+describe('#421 AC-6/7: the gate blocks wait through ci-wait, pass it the counts, spawn Fix only on `NEXT=fix` and say nothing the script owns', () => {
+  it('the blocks of both commands, in all four builds, hold every statement', () => {
+    for (const [label, , block] of allGateBlocks()) {
+      expect(block.length, `${label}: no ci-status-gate block`).toBeGreaterThan(200)
+      expect(collectGateBlockDefects(block), label).toEqual([])
     }
   })
 
-  it('known-bad probes: the block before #421, a short Bash timeout and a Code spawn off the FAILING arm are each reported', () => {
-    const block = gateBlock(requireDistFile('implement.md'))
+  it('DECISIONS_CONTEXT is on the Fix spawn in the curation-on builds and in no curation-off build', () => {
+    for (const [label, build, block] of allGateBlocks()) {
+      const fixArm = block.split('\n').find(l => l.includes('**If `NEXT=fix`**')) ?? ''
+      expect(fixArm.includes('`DECISIONS_CONTEXT`'), label).toBe(build === 'on' || build === 'compliance-off')
+    }
+  })
+
+  it('the two commands hold the same steps in the same order, with the same call apart from the worktree wording', () => {
+    const heads = (block: string): string[] => block.split('\n').filter(l => /^\d+\. /.test(l)).map(l => l.slice(0, 20))
+    for (const build of GATE_BUILDS) {
+      const implement = gateBlockOf('implement', build)
+      const resolve = gateBlockOf('resolve', build)
+      expect(heads(implement), build).toEqual(heads(resolve))
+      expect(heads(implement).length, `${build}: steps parsed`).toBe(4)
+      const call = (block: string): string => /`cd \{worktree\} && HEAD_SHA[^`]*`/.exec(block)?.[0] ?? ''
+      expect(call(implement), build).not.toBe('')
+      expect(call(implement), build).toBe(call(resolve))
+    }
+  })
+
+  it('known-bad probes: the block before #421, a short Bash timeout and a Fix spawn off the `NEXT=fix` arm are each reported', () => {
+    const block = gateBlockOf('implement', 'on')
     const old = [
       '1. Spawn `Agent(subagent_type="Git")` with `OPERATION: check-ci-status` and `PR_NUMBER` from PR_URL.',
       '4. **If PENDING** → poll every 60 seconds (global budget, see step 7). Re-spawn Git agent each poll.',
@@ -425,7 +476,8 @@ describe('#421 AC-6/7: the gate blocks wait through ci-wait, spawn Code only on 
     expect(collectGateBlockDefects(short)).toEqual(['the ci-wait call carries a Bash timeout above 570000 and at most 600000'])
     const over = block.replace('`timeout: 600000`', '`timeout: 900000`')
     expect(collectGateBlockDefects(over)).toEqual(['the ci-wait call carries a Bash timeout above 570000 and at most 600000'])
-    const stray = block.replace('5. **If INDETERMINATE**', '5. Spawn `Agent(subagent_type="Fix")` on any status. **If INDETERMINATE**')
+    const stray = block.replace('4. **If `NEXT=proceed`**', '4. Spawn `Agent(subagent_type="Fix")` on any answer. **If `NEXT=proceed`**')
+    expect(stray, 'the seed must land').not.toBe(block)
     expect(collectGateBlockDefects(stray)).toEqual(expect.arrayContaining(['expected one Fix spawn, found 2']))
     const onCode = block.replace('Agent(subagent_type="Fix")', 'Agent(subagent_type="Code")')
     expect(onCode, 'the seed must land').not.toBe(block)
@@ -433,54 +485,58 @@ describe('#421 AC-6/7: the gate blocks wait through ci-wait, spawn Code only on 
       'expected one Fix spawn, found 0',
       'the block spawns Code, which runs no CI fix',
     ]))
-    expect(collectGateBlockDefects(block.replace('fewer than 2 fixes have run', 'any number of fixes'))).toEqual(['the FAILING arm does not state its fix budget at its step'])
+  })
+
+  it('known-bad probes: no counts, no NEXT line, no fallback, a fourth wait and text the script owns are each reported', () => {
+    const block = gateBlockOf('implement', 'on')
+    const seeded = (from: string, to: string): string => {
+      const next = block.replace(from, to)
+      expect(next, `the seed must land: ${from}`).not.toBe(block)
+      return next
+    }
+    expect(collectGateBlockDefects(seeded(' --waits {n} --fixes {m}', ''))).toEqual(['the call does not pass the counts as `--waits {n} --fixes {m}`'])
+    expect(collectGateBlockDefects(seeded('then `NEXT=<wait|fix|proceed> SAY=<message>`', 'then one more line'))).toEqual(['the block does not say that the run prints the NEXT line'])
+    expect(collectGateBlockDefects(seeded('A missing or malformed `NEXT=` line or a non-zero exit', 'A non-zero exit'))).toEqual(['the block names no fallback for a missing or malformed NEXT line or a non-zero exit'])
+    expect(collectGateBlockDefects(seeded('if fewer than 3 waits have run, step 1 again', 'if fewer than 4 waits have run, step 1 again'))).toEqual(['the `NEXT=fix` arm does not wait again under the script\'s wait budget'])
+    expect(collectGateBlockDefects(seeded('report SAY unless it is `none`', 'report SAY'))).toEqual(['the `NEXT=proceed` arm does not say SAY unless it is `none`'])
+    expect(collectGateBlockDefects(seeded('2. **If `NEXT=wait`** → step 1 again.', '2. **If `NEXT=wait`** → stop.'))).toEqual(['the `NEXT=wait` arm does not go back to step 1'])
+    expect(collectGateBlockDefects(seeded('4. **If `NEXT=proceed`**', '4. **Budget**: report "CI still running" and apply the `head-mismatch` exception. **If `NEXT=proceed`**'))).toEqual([
+      'the block restates a message the script says',
+      'the block restates the INDETERMINATE exception the script owns',
+      'the block restates a budget line the script owns',
+    ])
   })
 })
 
 // ---------------------------------------------------------------------------
-// #664: the INDETERMINATE arm does not wait again after a full-deadline wait that ends
-// head-mismatch or no-workflow-check
+// #664: the gate does not wait again after a full-deadline wait that ends head-mismatch
+// or no-workflow-check. ci-wait.cjs answers `NEXT` from its own values (D-CI-NEXT), so the
+// rule is held on the script's answer, and the blocks are held to name no rule of their own.
 // ---------------------------------------------------------------------------
 
 /** The reasons for which a wait that ran the whole deadline is the final answer. */
 const FULL_WAIT_FINAL_REASONS: readonly string[] = ['head-mismatch', 'no-workflow-check']
-
-/** The step-5 arm of a gate block. */
-function indeterminateArm(block: string): string {
-  return block.split('\n').find(l => l.includes('**If INDETERMINATE**')) ?? ''
-}
 
 /** One INDETERMINATE line as ci-wait prints it, `reason` null for a line that has none. */
 function indeterminateLine(waited: number, reason: string | null): string {
   return CW.renderLine({ status: 'INDETERMINATE', pr: '12', head: 'aaaaaaa', failing: [], pending: [], waited, reason })
 }
 
-/**
- * The gate's decision on one printed line, read from the arm's own words: it waits
- * again only while fewer waits than the arm's count have run, and not after a line that
- * its `unless` clause names. A clause without `waited=` is final on the reason alone; a
- * clause that names no reason is final on nothing.
- */
-function waitsAgain(arm: string, line: string, waitsRun: number): boolean {
-  const budget = Number(/fewer than (\d+) waits have run/.exec(arm)?.[1])
-  if (!(waitsRun < budget)) return false
-  const unless = /unless ([^.]*)\./.exec(arm)?.[1] ?? ''
-  const clauseWaited = /`waited=(\d+)`/.exec(unless)?.[1]
-  const clauseReasons = CW.REASONS.filter(r => unless.includes(`\`reason=${r}\``) || unless.includes(`\`${r}\``))
-  const lineWaited = /waited=(\d+)/.exec(line)?.[1]
-  const lineReason = /reason=([a-z-]+)/.exec(line)?.[1]
-  const final = lineReason !== undefined && clauseReasons.includes(lineReason) && (clauseWaited === undefined || clauseWaited === lineWaited)
-  return !final
-}
+/** The gate's decision on one INDETERMINATE result: whether `NEXT` is `wait`, from the script's own values. */
+type IndeterminateGate = (waited: number, reason: string | null, waitsRun: number) => boolean
+
+/** The script's answer, as the gate reads it: no fixes have run, and an INDETERMINATE has no failing names. */
+const scriptWaitsAgain: IndeterminateGate = (waited, reason, waitsRun) =>
+  CW.nextAction({ status: 'INDETERMINATE', reason, waited }, waitsRun, 0).next === 'wait'
 
 /**
- * Named collector: the INDETERMINATE lines on which an arm decides other than the doctrine
+ * Named collector: the INDETERMINATE results on which a gate decides other than the doctrine
  * does. The domain is every reason ci-wait can print, no reason at all (a line the gate
  * cannot read as one), a full-deadline wait and an early one, after the first, the second
  * and the third wait. The doctrine: no wait after the third; no wait after a full-deadline
  * head-mismatch or no-workflow-check; a wait after every other line.
  */
-function collectIndeterminateArmDefects(arm: string): string[] {
+function collectIndeterminateGateDefects(waitsAgain: IndeterminateGate): string[] {
   const out: string[] = []
   const reasons: Array<string | null> = [...CW.REASONS, null]
   for (const waited of [CW.CI_WAIT_MAX_SECONDS, 2]) {
@@ -489,8 +545,8 @@ function collectIndeterminateArmDefects(arm: string): string[] {
       const final = waited === CW.CI_WAIT_MAX_SECONDS && reason !== null && FULL_WAIT_FINAL_REASONS.includes(reason)
       for (const waitsRun of [1, 2, 3]) {
         const want = waitsRun < 3 && !final
-        if (waitsAgain(arm, line, waitsRun) !== want) {
-          out.push(`${line.replace(/^.* waited=/, 'waited=')} after ${waitsRun} wait(s): the arm ${want ? 'reports' : 'waits again'}, the doctrine ${want ? 'waits again' : 'reports'}`)
+        if (waitsAgain(waited, reason, waitsRun) !== want) {
+          out.push(`${line.replace(/^.* waited=/, 'waited=')} after ${waitsRun} wait(s): the gate ${want ? 'reports' : 'waits again'}, the doctrine ${want ? 'waits again' : 'reports'}`)
         }
       }
     }
@@ -498,75 +554,69 @@ function collectIndeterminateArmDefects(arm: string): string[] {
   return out
 }
 
-describe('#664: the INDETERMINATE arm ends after a full-deadline head-mismatch or no-workflow-check and keeps the re-wait otherwise', () => {
-  const hosts = ['implement.md', 'resolve.md'] as const
-  const armsOf = () => hosts.map(host => [host, indeterminateArm(gateBlock(requireDistFile(host)))] as const)
-
+describe('#664: the gate ends after a full-deadline head-mismatch or no-workflow-check and keeps the re-wait otherwise', () => {
   it('the lines under test are lines ci-wait prints: its grammar accepts each', () => {
     for (const reason of FULL_WAIT_FINAL_REASONS) expect(CW.REASONS).toContain(reason)
+    expect([...CW.FINAL_AFTER_FULL_WAIT]).toEqual(FULL_WAIT_FINAL_REASONS)
     for (const reason of [...CW.REASONS, null]) {
       expect(CW.LINE_RE.test(indeterminateLine(CW.CI_WAIT_MAX_SECONDS, reason)), String(reason)).toBe(true)
     }
   })
 
-  it('the stop arm: after a full-deadline head-mismatch or no-workflow-check the gate reports at once and does not wait again', () => {
-    for (const [host, arm] of armsOf()) {
-      expect(arm.length, `${host}: no INDETERMINATE arm`).toBeGreaterThan(50)
-      for (const reason of FULL_WAIT_FINAL_REASONS) {
-        for (const waitsRun of [1, 2]) {
-          expect(waitsAgain(arm, indeterminateLine(CW.CI_WAIT_MAX_SECONDS, reason), waitsRun), `${host} ${reason} after ${waitsRun}`).toBe(false)
-        }
+  it('the stop: after a full-deadline head-mismatch or no-workflow-check the gate reports at once and does not wait again', () => {
+    for (const reason of FULL_WAIT_FINAL_REASONS) {
+      for (const waitsRun of [1, 2]) {
+        expect(scriptWaitsAgain(CW.CI_WAIT_MAX_SECONDS, reason, waitsRun), `${reason} after ${waitsRun}`).toBe(false)
       }
     }
   })
 
-  it('the kept re-wait: every other INDETERMINATE line waits again until the third wait, which reports', () => {
-    for (const [host, arm] of armsOf()) {
-      const others = [
-        ...CW.REASONS.filter(r => !FULL_WAIT_FINAL_REASONS.includes(r)).map(r => indeterminateLine(CW.CI_WAIT_MAX_SECONDS, r)),
-        indeterminateLine(CW.CI_WAIT_MAX_SECONDS, null),
-        ...FULL_WAIT_FINAL_REASONS.map(r => indeterminateLine(2, r)),
-      ]
-      for (const line of others) {
-        expect(waitsAgain(arm, line, 1), `${host}: ${line}`).toBe(true)
-        expect(waitsAgain(arm, line, 2), `${host}: ${line}`).toBe(true)
-        expect(waitsAgain(arm, line, 3), `${host}: ${line}`).toBe(false)
-      }
+  it('the kept re-wait: every other INDETERMINATE result waits again until the third wait, which reports', () => {
+    const others: Array<readonly [number, string | null]> = [
+      ...CW.REASONS.filter(r => !FULL_WAIT_FINAL_REASONS.includes(r)).map(r => [CW.CI_WAIT_MAX_SECONDS, r] as const),
+      [CW.CI_WAIT_MAX_SECONDS, null],
+      ...FULL_WAIT_FINAL_REASONS.map(r => [2, r] as const),
+    ]
+    for (const [waited, reason] of others) {
+      expect(scriptWaitsAgain(waited, reason, 1), `${waited} ${reason}`).toBe(true)
+      expect(scriptWaitsAgain(waited, reason, 2), `${waited} ${reason}`).toBe(true)
+      expect(scriptWaitsAgain(waited, reason, 3), `${waited} ${reason}`).toBe(false)
     }
   })
 
-  it('both arms agree with the doctrine on the whole domain', () => {
-    for (const [host, arm] of armsOf()) expect(collectIndeterminateArmDefects(arm), host).toEqual([])
+  it('the script agrees with the doctrine on the whole domain', () => {
+    expect(collectIndeterminateGateDefects(scriptWaitsAgain)).toEqual([])
   })
 
-  it('known-bad probes: an arm that waits again after a full-deadline head-mismatch, stops on an early line, stops on another reason or waits a fourth time is reported', () => {
-    const live = armsOf()[0][1]
-    const clause = /, unless [^.]*\./.exec(live)?.[0] ?? ''
-    expect(clause, 'the seed must land').not.toBe('')
+  it('no gate block states the rule: it lives in the script alone', () => {
+    for (const [label, , block] of allGateBlocks()) {
+      expect(block, label).not.toMatch(/head-mismatch|no-workflow-check|waited=570/)
+    }
+  })
 
-    const rewaits = live.replace(clause, '.')
-    expect(collectIndeterminateArmDefects(rewaits)).toEqual(expect.arrayContaining([
-      `waited=${CW.CI_WAIT_MAX_SECONDS} reason=head-mismatch after 1 wait(s): the arm waits again, the doctrine reports`,
-      `waited=${CW.CI_WAIT_MAX_SECONDS} reason=no-workflow-check after 2 wait(s): the arm waits again, the doctrine reports`,
+  it('known-bad probes: a gate that waits again after a full-deadline head-mismatch, stops on an early line, stops on another reason or waits a fourth time is reported', () => {
+    const rewaits: IndeterminateGate = (_waited, _reason, waitsRun) => waitsRun < 3
+    expect(collectIndeterminateGateDefects(rewaits)).toEqual(expect.arrayContaining([
+      `waited=${CW.CI_WAIT_MAX_SECONDS} reason=head-mismatch after 1 wait(s): the gate waits again, the doctrine reports`,
+      `waited=${CW.CI_WAIT_MAX_SECONDS} reason=no-workflow-check after 2 wait(s): the gate waits again, the doctrine reports`,
     ]))
 
-    const early = live.replace(`\`waited=${CW.CI_WAIT_MAX_SECONDS}\` with `, '')
-    expect(early, 'the seed must land').not.toBe(live)
-    expect(collectIndeterminateArmDefects(early)).toEqual(expect.arrayContaining([
-      'waited=2 reason=no-workflow-check after 1 wait(s): the arm reports, the doctrine waits again',
+    const early: IndeterminateGate = (_waited, reason, waitsRun) => waitsRun < 3 &&!(reason !== null && FULL_WAIT_FINAL_REASONS.includes(reason))
+    expect(collectIndeterminateGateDefects(early)).toEqual(expect.arrayContaining([
+      'waited=2 reason=no-workflow-check after 1 wait(s): the gate reports, the doctrine waits again',
     ]))
 
-    const other = live.replace('or `no-workflow-check`', 'or `no-workflow-check` or `deadline`')
-    expect(other, 'the seed must land').not.toBe(live)
-    expect(collectIndeterminateArmDefects(other)).toEqual([
-      `waited=${CW.CI_WAIT_MAX_SECONDS} reason=deadline after 1 wait(s): the arm reports, the doctrine waits again`,
-      `waited=${CW.CI_WAIT_MAX_SECONDS} reason=deadline after 2 wait(s): the arm reports, the doctrine waits again`,
+    const other: IndeterminateGate = (waited, reason, waitsRun) =>
+      waitsRun < 3 && !(waited === CW.CI_WAIT_MAX_SECONDS && reason !== null && [...FULL_WAIT_FINAL_REASONS, 'deadline'].includes(reason))
+    expect(collectIndeterminateGateDefects(other)).toEqual([
+      `waited=${CW.CI_WAIT_MAX_SECONDS} reason=deadline after 1 wait(s): the gate reports, the doctrine waits again`,
+      `waited=${CW.CI_WAIT_MAX_SECONDS} reason=deadline after 2 wait(s): the gate reports, the doctrine waits again`,
     ])
 
-    const fourth = live.replace('fewer than 3 waits have run', 'fewer than 4 waits have run')
-    expect(fourth, 'the seed must land').not.toBe(live)
-    expect(collectIndeterminateArmDefects(fourth)).toContain(
-      `waited=${CW.CI_WAIT_MAX_SECONDS} reason=deadline after 3 wait(s): the arm waits again, the doctrine reports`,
+    const fourth: IndeterminateGate = (waited, reason, waitsRun) =>
+      waitsRun < 4 && !(waited === CW.CI_WAIT_MAX_SECONDS && reason !== null && FULL_WAIT_FINAL_REASONS.includes(reason))
+    expect(collectIndeterminateGateDefects(fourth)).toContain(
+      `waited=${CW.CI_WAIT_MAX_SECONDS} reason=deadline after 3 wait(s): the gate waits again, the doctrine reports`,
     )
   })
 })

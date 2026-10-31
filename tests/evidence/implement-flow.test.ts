@@ -1638,8 +1638,8 @@ const PHASE_9_STOP = 'Phases 10 and 11 do not run'
 const PHASE_11_SKIP_RULE = 'Skip it only when the run stopped before Phase 10.'
 /** The rule as it read before the fix: "an earlier phase" also reaches a stop in Phase 10, so a PR that Phase 9 opened got no evidence. */
 const PHASE_11_SKIP_RULE_EARLIER = 'Skip it only when an earlier phase stopped the run.'
-/** The Phase 10 lead sentence for a passing gate, which hands the run to Phase 11. */
-const PHASE_10_PASSING_ARM = '2. **If PASSING** → proceed to Phase 11.'
+/** The Phase 10 arm that ends the gate and hands the run to Phase 11: the `proceed` answer of the CI wait. */
+const PHASE_10_PASSING_ARM = '4. **If `NEXT=proceed`** → report SAY unless it is `none`, then proceed to Phase 11.'
 
 /**
  * Named collector (#675): the Phase 11 skip rule skips Phase 11 for every stop before Phase 10 and for no stop in Phase 10.
@@ -1696,7 +1696,7 @@ describe('#675: the Phase 11 skip rule skips Phase 11 for every stop before Phas
     expect(collectPhase11SkipDefects(seedOnce(onlyNine, PHASE_7_STOP, 'Phase 11 runs.'))).toEqual([
       `Phase 7: the stop sentence "${PHASE_7_STOP}" is absent, so the skip rule has no stop to cover`,
     ])
-    expect(collectPhase11SkipDefects(seedOnce(md, PHASE_10_PASSING_ARM, '2. **If PASSING** → stop at the report; Phase 11 does not run.'))).toEqual(['Phase 10 says that Phase 11 does not run, so the PR that it leaves gets no evidence'])
+    expect(collectPhase11SkipDefects(seedOnce(md, PHASE_10_PASSING_ARM, '4. **If `NEXT=proceed`** → stop at the report; Phase 11 does not run.'))).toEqual(['Phase 10 says that Phase 11 does not run, so the PR that it leaves gets no evidence'])
     expect(collectPhase11SkipDefects(seedOnce(md, H.p10, '### Phase 10 gone'))).toEqual([`${H.p10}: the section is absent`])
     expect(collectPhase11SkipDefects(seedOnce(md, H.p11, '### Phase 11 gone'))).toEqual([`${H.p11}: the section is absent`])
   })
