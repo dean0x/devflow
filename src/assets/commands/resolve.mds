@@ -11,9 +11,9 @@ output-dir: dist/commands
 # Resolve Command
 
 <!-- compliance:on -->
-Process issues from code review reports: triage every issue through the blast-radius disposition matrix, fix FIX_NOW items with Code agents, verify fixes with a Validate agent gate, and track FIX_SEPARATE/TECH_DEBT items as manage-debt tickets. Defaults to the latest timestamped review directory. Supports multi-worktree auto-discovery.
+Triage every review issue through the blast-radius disposition matrix, fix FIX_NOW items with Code agents, verify with a Validate gate, and track FIX_SEPARATE/TECH_DEBT items as manage-debt tickets. Defaults to the latest review of each worktree.
 <!-- compliance:off -->
-Process issues from code review reports: triage every issue through the blast-radius disposition matrix, fix FIX_NOW items with Code agents, verify fixes with a Validate agent gate, and record FIX_SEPARATE/TECH_DEBT items in the resolution summary. Defaults to the latest timestamped review directory. Supports multi-worktree auto-discovery.
+Triage every review issue through the blast-radius disposition matrix, fix FIX_NOW items with Code agents, verify with a Validate gate, and record FIX_SEPARATE/TECH_DEBT items in the resolution summary. Defaults to the latest review of each worktree.
 <!-- compliance:end -->
 
 ## Usage
@@ -29,6 +29,8 @@ Process issues from code review reports: triage every issue through the blast-ra
 
 ### Phase 0: Worktree Discovery & Pre-Flight
 
+**Fewest turns.** Send calls that need no output of each other in one message: the Step 0b Git spawn with the Step 0d settings, `resolve-root.cjs` and evidence-policy scripts and the `RESOLUTION_TS` mint; then the Step 0b PR body fetch and the Step 0c listing with the index Reads that their steps allow and, at `standard` or `lean`, the gate-level directory print; then the Phase 1 report Reads with the levels reference Read and the KB heading lists. Step 0d runs `resolve-root.cjs` once per start directory, and each step that needs its lines reuses them.
+
 #### Step 0a: Discover Worktrees
 
 **Produces:** WORKTREES
@@ -38,10 +40,8 @@ Process issues from code review reports: triage every issue through the blast-ra
    - **More than one listed:** Invoke the `devflow:worktree-support` skill, then Read its `references/discovery.md` from the skill's base directory for the full 7-step algorithm; the canonical protected branch list stays in the skill. Parse the list, filter (skip protected/detached/mid-rebase), dedup by branch, sort by recent commit
    - **Exactly one listed:** load neither the skill nor the reference — that worktree is the only candidate, and Step 0b's Git agent validates its branch
    - Additional filter: must have unresolved reviews (latest review directory has no `resolution-summary.md`)
-2. **If `--path` flag provided:** use only that worktree, skip discovery
-   **`--path` validation**: Before proceeding, verify the path exists as a directory and appears in `git worktree list` output. If not: report error and stop.
-3. **If only 1 resolvable worktree:** proceed as single-worktree flow
-4. **If multiple resolvable worktrees:** report "Found N worktrees with unresolved reviews: {list}" and proceed with multi-worktree flow
+2. **`--path`:** use only that worktree and skip discovery. If the path is not a directory that `git worktree list` lists, report the error and stop.
+3. **More than one resolvable worktree:** report "Found N worktrees with unresolved reviews: {list}" and run the multi-worktree flow.
 
 #### Step 0b: Per-Worktree Pre-Flight (Git Agent)
 
@@ -80,7 +80,7 @@ If `pr_number` is absent or the command fails, set `PR_DESCRIPTION` to `(none)`.
 For each worktree:
 
 1. List directories in `{worktree}/.devflow/docs/reviews/{branch-slug}/`
-2. **If `--review {timestamp}` provided:** use that specific directory (not supported in multi-worktree mode)
+2. **If `--review {timestamp}` provided:** use that specific directory (not supported in multi-worktree mode: use `--path` with `--review`)
 3. **Otherwise:** sort directories by name descending, scan the 10 most recent directories only. Select the first that contains `review-summary.md` (complete review)
 4. **If latest directory already has `resolution-summary.md`:** the review is resolved — check bug-analysis fallback (step 5b).
 5. **Legacy fallback:** if no timestamped subdirectories exist but flat `*.md` files do in `{worktree}/.devflow/docs/reviews/{branch-slug}/`, read them directly.
@@ -123,7 +123,7 @@ Set `TARGET_DIR` to the selected review or bug-analysis directory path, and `TAR
 
 {{decisions_load()}}
 <!-- curation:on -->
-This produces a compact index of active ADR/PF entries written at render time — Deprecated/Superseded entries are already stripped. Pass `DECISIONS_CONTEXT` to the Triage agent in Phase 2 and to Code agents in Phase 4.
+Pass `DECISIONS_CONTEXT` to the Triage agent in Phase 2 and to Code agents in Phase 4.
 
 <!-- curation:end -->
 {{knowledge_load()}}
@@ -154,7 +154,7 @@ Set it per worktree, from that worktree's lens, and pass that worktree's `COMPLI
 - No level changes the Triage security gate or the ESCALATED route. The Verification Gate, the CI gate and the compliance directive run at every level.
 
 <!-- compliance:on -->
-**Mint `RESOLUTION_TS` once per run:** `date -u +%Y-%m-%dT%H:%M:%SZ`. Every worktree reuses it — the resolution comment's dedup marker is searched per PR, so one run key keeps a retry of this run deduplicated while the next /resolve on the same PR posts. Phase 5 writes it as the summary's `**Date**:` and Phase 9b-2 passes it, so the local file and the posted marker agree.
+**Mint `RESOLUTION_TS` once per run:** `date -u +%Y-%m-%dT%H:%M:%SZ`. Every worktree reuses it, so a retry of this run stays deduplicated while the next /resolve on the same PR posts. Phase 5 writes it as the summary's `**Date**:` and Phase 9b-2 passes it, so the local file and the posted marker agree.
 <!-- compliance:off -->
 **Mint `RESOLUTION_TS` once per run:** `date -u +%Y-%m-%dT%H:%M:%SZ`. Every worktree reuses it. Phase 5 writes it as the summary's `**Date**:`.
 <!-- compliance:end -->
@@ -164,28 +164,14 @@ Set it per worktree, from that worktree's lens, and pass that worktree's `COMPLI
 **Produces:** ISSUES
 **Requires:** TARGET_DIR
 
-Read review reports from `{TARGET_DIR}/*.md` and extract:
-
-**Exclude from issue extraction:**
-- `review-summary.md` (Synthesize agent output, not individual findings)
-- `resolution-summary.md` (from a previous partial run)
-- `bug-analysis-summary.md` (Synthesize agent output for bug-analysis runs)
-- `static-findings.md` (raw tool output, not individual findings)
-
-**Include:** ALL issues from all categories and severities, including Suggestions.
-
-Issues are extracted from `{TARGET_DIR}` only — never cross-reference reviews from other worktrees.
+Read the review reports `{TARGET_DIR}/*.md` in one message, except `review-summary.md`, `resolution-summary.md`, `bug-analysis-summary.md` and `static-findings.md`, which hold no single findings. Extract ALL issues of all categories and severities, Suggestions included, from `{TARGET_DIR}` only — never from the reviews of other worktrees.
 
 **Extract per issue:**
-- `id`: Generated from file:line:type
-- `file`: Full path
-- `line`: Line number
+- `id`: from file:line:type
+- `file` (full path), `line`, `type`, `description`, `suggested_fix`
 - `severity`: CRITICAL/HIGH/MEDIUM/LOW
 - `category`: blocking/should-fix/pre-existing
-- `type`: Issue type from review
-- `description`: Problem statement
-- `suggested_fix`: From review report
-- `reviewer_confidence`: Confidence percentage if present in the report (e.g., "85%"), else omit
+- `reviewer_confidence`: the report's percentage (e.g., "85%"), else omit
 
 <!-- compliance:on -->
 ### Phase 1b: Fetch External Review Threads
@@ -464,7 +450,7 @@ git -C {worktree} push; echo "exit=$?"
 **Produces:** DEBT_RESULT
 **Requires:** TRIAGE_RESULTS, TARGET_DIR
 
-**IMPORTANT**: Run sequentially across all worktrees (not in parallel) to avoid GitHub API conflicts.
+Run it one worktree at a time, never in parallel, to avoid GitHub API conflicts.
 
 If any issues are FIX_SEPARATE or TECH_DEBT, spawn Git agent. **DUPLICATE issues never create their own debt tickets** — a duplicate of a deferred primary is covered by the primary's ticket:
 
@@ -553,7 +539,7 @@ Run this step only when `EVIDENCE_POLICY` is `required` and THREAD_MAP is non-em
 
 Prepare THREAD_MAP with verdicts from triage/code agent results:
 - For each `ext-{N}`: match to an issue verdict (FIXED, FALSE_POSITIVE, BY_DESIGN, ESCALATED) by `file:line` correlation
-- If the matched issue has verdict DUPLICATE, use the **primary's** verdict and verification status for the reply — do not expose DUPLICATE to the thread author (caller-side mapping: the Git agent's verdict set has no DUPLICATE, so its contract stays unchanged)
+- If the matched issue has verdict DUPLICATE, use the **primary's** verdict and verification status for the reply — never expose DUPLICATE to the thread author: the Git agent's verdict set has none
 - Include `commit_sha` from Code agent results for FIXED verdicts
 - If `fork_no_push` is set: drop FIXED entries from THREAD_MAP — their commits never reached the PR — and record each as `DEGRADED` in `## Third-Party Threads`
 - Unmatched threads: ESCALATED (human review)
@@ -788,7 +774,6 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 | Fix attempt fails | Revert changes, mark BLOCKED, continue others |
 | Issue dependencies | Sequential chain, skip dependents if predecessor blocked |
 | No issues parsed | Report "No issues to resolve" |
-| `--review {timestamp}` in multi-worktree mode | Not supported — use `--path` + `--review` to target specific worktree + review |
 <!-- compliance:on -->
 | gh/GitHub absent | manage-debt degrades (`TRACEABILITY: DEGRADED ({reason})`); Tracked stays `(pending — TRACEABILITY: DEGRADED ({reason}))` — recorded, not dropped |
 | `EVIDENCE_POLICY` is `standard` | Phases 1b and 9b-step-1 are skipped; post-resolution-summary (Phase 9b step 2) still runs if a PR is known |
@@ -846,7 +831,7 @@ Written in Phase 5 to `{TARGET_DIR}/resolution-summary.md`:
 | Escalated | {n} |
 | Duplicates Collapsed | {n} |
 
-_(Note: `Deferred` = `## Fix Separately` count + `## Deferred to Tech Debt` count combined — the two sections are distinct by scope, but the Statistics row aggregates both for the convergence parser. `Total Issues` counts every triaged issue including collapsed duplicates; every row **between** `Total Issues` and `Duplicates Collapsed` counts UNIQUE (non-DUPLICATE) issues only, so `Total Issues` equals the sum of the rows below it. Excluding duplicates from `Fixed`, `False Positive`, and `Deferred` de-skews the fp\_ratio convergence formula in code-review without any parser change.)_
+_(Note: `Total Issues` counts every triaged issue, collapsed duplicates included; every row **between** `Total Issues` and `Duplicates Collapsed` counts UNIQUE (non-DUPLICATE) issues only, so `Total Issues` equals the sum of the rows below it.)_
 
 ## Verification
 | Command | Result |

@@ -22,7 +22,7 @@
  *   completeness  every artifact that holds a token has an off counterpart, the Curate
  *                 agent excepted (it runs only when curation is on);
  *   frontmatter   an off agent's frontmatter is its on frontmatter minus the preload line;
- *   settings      14 hosts carry the settings block when curation is on, 8 when it is off;
+ *   settings      13 hosts carry the settings block when curation is on, 8 when it is off;
  *   anchors       no status-line anchor the sampler reads sits inside an arm, and no off
  *                 arm repeats one, so the frozen fixture is untouched.
  *
@@ -46,6 +46,7 @@ import {
 import {
   CURATION_OFF_FILES,
   CURATION_VARIANT_HOSTS,
+  DECISIONS_COMMAND_HOSTS,
   MDS_COMMAND_HOSTS,
   MDS_GENERATOR_HOSTS,
   SETTINGS_BLOCK_HOSTS,
@@ -53,8 +54,8 @@ import {
 } from '../fixtures/mds-manifest.js'
 import { CURATION_OFF_OUTPUT_DIR } from '../../src/core/curation-variants.js'
 
-/** Settings blocks in the curation-on build: all 14 command hosts. */
-const ON_BLOCK_COUNT = 14
+/** Settings blocks in the curation-on build: every command host but dynamic-profile, which reads no settings line. */
+const ON_BLOCK_COUNT = 13
 /** Settings blocks in the curation-off build: the hosts with a consumer other than curation. */
 const OFF_BLOCK_COUNT = 8
 
@@ -308,7 +309,7 @@ describe('nothing under dist/curation-off holds a curation token, and no off age
 
   it('no off agent preloads apply-decisions, and every agent that declared it still does when curation is on', () => {
     const offAgents = offFiles().filter(rel => rel.startsWith('agents/'))
-    expect(offAgents.length, 'off agents').toBe(11)
+    expect(offAgents.length, 'off agents').toBe(12)
     for (const rel of offAgents) {
       const name = path.basename(rel, '.md')
       expect(parseFrontmatterSkills(readFileSync(path.join(OFF_DIR, rel), 'utf-8')), `${rel} preload`).not.toContain('apply-decisions')
@@ -374,7 +375,11 @@ describe('completeness: every artifact that holds a token has an off counterpart
 
   it('every artifact whose only token is the settings grammar still has a variant when it carries a curation arm', () => {
     const artifacts = collectArtifacts().filter(a => a.rel.startsWith('commands/'))
-    for (const a of artifacts) expect(existsSync(path.join(OFF_DIR, a.rel)), a.rel).toBe(true)
+    const armed = artifacts.filter(a => DECISIONS_COMMAND_HOSTS.includes(a.rel.slice('commands/'.length).replace(/\.md$/, '')))
+    expect(armed, 'the commands with a curation arm').toHaveLength(13)
+    for (const a of armed) expect(existsSync(path.join(OFF_DIR, a.rel)), a.rel).toBe(true)
+    // dynamic-profile has no arm and no variant, so it must hold no curation token.
+    expect(collectMissingCounterparts(artifacts.filter(a => !armed.includes(a)), () => false)).toEqual([])
   })
 
   it('known-bad probes: an artifact with a token and no variant is reported, and the Curate agent is not', () => {
@@ -421,19 +426,20 @@ describe('settings blocks per variant (AC-138)', () => {
   const carrying = (read: (host: string) => string | null): string[] =>
     MDS_COMMAND_HOSTS.filter(h => (read(h) ?? '').includes(SETTINGS_OPENING)).sort()
 
-  it('the curation-on build carries the block in all 14 hosts, once each', () => {
+  it('the curation-on build carries the block in 13 hosts, once each, and dynamic-profile carries none', () => {
     expect(carrying(h => requireDistFile(`${h}.md`))).toEqual([...SETTINGS_BLOCK_HOSTS].sort())
     expect(SETTINGS_BLOCK_HOSTS).toHaveLength(ON_BLOCK_COUNT)
-    for (const h of MDS_COMMAND_HOSTS) expect(requireDistFile(`${h}.md`).split(SETTINGS_OPENING).length - 1, h).toBe(1)
+    for (const h of SETTINGS_BLOCK_HOSTS) expect(requireDistFile(`${h}.md`).split(SETTINGS_OPENING).length - 1, h).toBe(1)
+    expect(requireDistFile('dynamic-profile.md')).not.toContain(SETTINGS_OPENING)
   })
 
-  it('the curation-off build carries it in the 8 hosts with a consumer other than curation, and the other six sit in the on arm', () => {
+  it('the curation-off build carries it in the 8 hosts with a consumer other than curation, and the other five sit in the on arm', () => {
     const off = carrying(h => resolveCurationOffSource('commands', h))
     expect(off).toEqual([...SETTINGS_BLOCK_HOSTS_CURATION_OFF].sort())
     expect(off).toHaveLength(OFF_BLOCK_COUNT)
-    const sixOnly = SETTINGS_BLOCK_HOSTS.filter(h => !(SETTINGS_BLOCK_HOSTS_CURATION_OFF as readonly string[]).includes(h))
-    expect(sixOnly).toHaveLength(ON_BLOCK_COUNT - OFF_BLOCK_COUNT)
-    for (const h of sixOnly) {
+    const onArmOnly = SETTINGS_BLOCK_HOSTS.filter(h => !(SETTINGS_BLOCK_HOSTS_CURATION_OFF as readonly string[]).includes(h))
+    expect(onArmOnly).toHaveLength(ON_BLOCK_COUNT - OFF_BLOCK_COUNT)
+    for (const h of onArmOnly) {
       const group = collectArmGroups(rawBody({ kind: 'commands', name: h, source: '' })).find(g => g.on !== null && g.on.includes(SETTINGS_OPENING))
       expect(group, `${h}: the block sits inside a curation-on arm`).toBeDefined()
       expect(resolveCurationOffSource('commands', h), `${h} (curation-off)`).not.toContain(SETTINGS_OPENING)
@@ -449,7 +455,7 @@ describe('settings blocks per variant (AC-138)', () => {
   })
 
   it('the runtime gate and Skim\'s CURATION skip live in the curation-on build only', () => {
-    for (const h of MDS_COMMAND_HOSTS) {
+    for (const h of DECISIONS_COMMAND_HOSTS) {
       expect(requireDistFile(`${h}.md`), `${h} (curation-on)`).toContain('When the settings line says `CURATION=off`')
       expect(resolveCurationOffSource('commands', h), `${h} (curation-off)`).not.toContain('When the settings line says `CURATION=off`')
     }

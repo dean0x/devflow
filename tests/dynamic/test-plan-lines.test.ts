@@ -269,7 +269,7 @@ export function collectPlanCheckDefects(built: string): string[] {
   const need = (label: string, ok: boolean): void => { if (!ok) out.push(label) }
   need('every plan: for every path in planPaths', step.includes('For every path in `planPaths`'))
   need('the section: its `## Test Plan` section is copied, never the whole file', step.includes('copy that plan\'s `## Test Plan` section') && step.includes('never the whole plan file'))
-  need('the copy: byte for byte into a fresh mktemp file with the Write tool', step.includes('byte for byte into a fresh `mktemp` file with the Write tool, never through an interpolated shell string'))
+  need('the copy: byte for byte into a new file in a mktemp -d folder with the Write tool', step.includes('byte for byte into a new file in a `mktemp -d` folder with the Write tool, never through an interpolated shell string'))
   need('the check: the script\'s check tp', step.split('\n').includes(CHECK_TP))
   need('the gate: only exit=0 passes', step.includes('`exit=0` passes'))
   need('the report: test plan malformed (<code>)', step.includes('`test plan malformed (<code>)`'))
@@ -357,7 +357,7 @@ export function collectBuildPassDefects(built: string): string[] {
   if (step === null) return ['step: Pre-authoring step 4 was not found']
   const out: string[] = []
   const need = (label: string, ok: boolean): void => { if (!ok) out.push(label) }
-  need('the copy: the plan\'s `## Test Plan` section into a fresh mktemp file with the Write tool', step.includes('Copy the plan\'s `## Test Plan` section byte for byte into a fresh `mktemp` file with the Write tool, never through an interpolated shell string'))
+  need('the copy: the plan\'s `## Test Plan` section into a new file in a mktemp -d folder with the Write tool', step.includes('Copy the plan\'s `## Test Plan` section byte for byte into a new file in a `mktemp -d` folder with the Write tool, never through an interpolated shell string'))
   need('the check: the script\'s check tp', step.split('\n').includes(CHECK_TP))
   need('the gate: only exit=0 passes testPlan, as one string', step.includes('Only `exit=0` passes it: pass the section\'s TP lines, as one string, as `testPlan`'))
   need('the note: Test plan: missing or malformed', step.includes('note `Test plan: missing or malformed` in the run summary'))
@@ -378,7 +378,7 @@ describe('AC-3: /dynamic-build passes `testPlan` only after `check tp` exits 0, 
     const d9d1c8e = '**4. Resolve plan and acceptance criteria**\n\n- Acceptance criteria and test plan (for Gate 2) — pass them as `criteria` and `testPlan` when invoking the workflow; a test plan alone still runs the Test agent\n\n'
     const seeded = seedOnce(BUILD_BUILT, step, d9d1c8e)
     expect(collectBuildPassDefects(seeded)).toEqual([
-      'the copy: the plan\'s `## Test Plan` section into a fresh mktemp file with the Write tool',
+      'the copy: the plan\'s `## Test Plan` section into a new file in a mktemp -d folder with the Write tool',
       'the check: the script\'s check tp',
       'the gate: only exit=0 passes testPlan, as one string',
       'the note: Test plan: missing or malformed',

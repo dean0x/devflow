@@ -1,0 +1,86 @@
+A partial: the text the two Design variants share. `design.mds` (Design: gap analysis, one
+focus per spawn) and `architect.mds` (Architect: the anti-pattern review of a plan) are
+the hosts. A host is any file with `output-dir:`; this file declares none, so the build skips it
+and it reaches an artifact only through the hosts that import it.
+
+D-DESIGN-VARIANTS: a spawn runs exactly one mode, so one agent for both modes would preload both
+mode skills on every spawn. Each host preloads only its own mode skill and carries its own first
+responsibility; what both need is written once here.
+
+The hosts import this partial as an alias (`as design`) and call each define once. A curation arm
+inside a define is split by the build like an arm in a host: the markers sit on lines of their own.
+
+@define input():
+- **Artifacts**: Design documents, specifications, issue bodies, or implementation plans to analyze
+
+**Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
+
+<!-- curation:on -->
+- **DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries for this repository (pre-rendered to `.devflow/curation/index.md` in its main worktree). `(none)` when absent. Use `devflow:apply-decisions` to Read full bodies on demand.
+<!-- curation:end -->
+- **FEATURE_KNOWLEDGE** (optional): Per KB, the Rules bullets most relevant to the feature, the KB path and a heading index, for pattern-aware gap analysis. Read the indexed sections for the architecture you build on — design additions that fit existing structure. Follow `devflow:apply-feature-knowledge`.
+
+<!-- curation:on -->
+## Apply Decisions
+
+Follow `devflow:apply-decisions` on the `DECISIONS_CONTEXT` index. A finding that rests on a decision or pitfall states that rule in words, never its ID: findings feed plans and tickets that are posted to the tracker. Skip when `DECISIONS_CONTEXT` is empty or `(none)`.
+
+<!-- curation:end -->
+@end
+
+@define rules():
+2. **Assess confidence (0-100%)** — For each finding, assess certainty. Report at 80%+, suggest at 60-79%, drop below 60%. 80%+ means the evidence is cited directly; 60-79% means the finding depends on context that the artifacts do not show.
+3. **Cite evidence** — Every finding must reference specific text from the provided artifacts using direct quotes or line references. Never invent evidence that the artifacts do not hold.
+4. **Write findings to output** — Format findings clearly with severity, confidence, evidence, and a concrete resolution.
+@end
+
+@define output():
+## Output
+
+```markdown
+# Design Analysis: {Mode} — {Focus (if applicable)}
+
+## Findings
+
+### CRITICAL
+**[{FOCUS}] Gap/Anti-Pattern: {title}** — Confidence: {n}%
+- Evidence: "{quoted text from artifact}"
+- Issue: {what is missing or wrong}
+- Resolution: {concrete action to address}
+
+### HIGH
+{findings...}
+
+### MEDIUM
+{findings...}
+
+### LOW
+{findings...}
+
+## Suggestions (60-79% confidence)
+- **{title}** (Confidence: {n}%) — {brief description, no fix required}
+
+## Summary
+| Severity | Count |
+|----------|-------|
+| CRITICAL | {n} |
+| HIGH | {n} |
+| MEDIUM | {n} |
+| LOW | {n} |
+
+**Overall Assessment**: {BLOCKING | SHOULD-ADDRESS | INFORMATIONAL}
+```
+
+Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file (via Bash or Write) and the message gives its path. Exempt, inline in full: the `## Findings` list.
+
+## Boundaries
+
+**Escalate to orchestrator:**
+- Context documents are missing or unreadable
+- Fundamental ambiguity that cannot be resolved without user input
+- Artifacts reference external systems not present in the provided context
+@end
+
+@export input
+@export rules
+@export output

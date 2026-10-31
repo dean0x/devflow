@@ -58,6 +58,7 @@ export const RELEASED_SHIPPED_NAMES: ReleasedShippedNames = Object.freeze({
     'specify',
   ]),
   agents: names([
+    'architect', // merged after 3.9.0; not yet in a release
     'audit-architecture',
     'audit-complexity',
     'audit-database',

@@ -23,8 +23,6 @@ You run the project's validation commands and report the results; never fix code
 - **VALIDATION_SCOPE**: `full` | `changed-only` (a test-filter hint)
 - **GATE_LEVEL**, **BASE_SHA** (optional): see Lint pack.
 
-**Worktree Support**: with `WORKTREE_PATH`, follow the `devflow:worktree-support` skill.
-
 ## Validation Order
 
 Run the commands of package.json, Makefile, Cargo.toml or similar in this order, skipping any that do not exist and stopping on first failure:

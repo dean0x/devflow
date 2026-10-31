@@ -29,8 +29,8 @@ const PR_EVIDENCE_OP = readFileSync(
   path.join(ROOT, 'dist', 'skills', 'git', 'references', 'pr', 'update-pr-evidence.md'), 'utf-8')
 const SCRIPT_DIR = path.join(ROOT, 'src', 'assets', 'scripts')
 
-/** The four commands whose workflow scripts stamp or slug a docs path. */
-const DYNAMIC_HOSTS = ['dynamic-build', 'dynamic-plan', 'dynamic-profile', 'dynamic-tickets'] as const
+/** The three commands whose workflow scripts stamp or slug a docs path. */
+const DYNAMIC_HOSTS = ['dynamic-build', 'dynamic-plan', 'dynamic-tickets'] as const
 
 /** Every family the compiled commands name directly under `.devflow/docs/`. */
 const EXPECTED_FAMILIES = [
@@ -272,7 +272,7 @@ describe('branch_slug is derived one way at every site', () => {
     expect(SKILL).toContain(BRANCH_GATE)
   })
 
-  it('/code-review, /bug-analysis, /implement and the four dynamic commands agree with it', () => {
+  it('/code-review, /bug-analysis, /implement and the three Workflow hosts agree with it', () => {
     expect(collectBranchSlugDefects(BRANCH_SITES, requireDistFile)).toEqual([])
   })
 
