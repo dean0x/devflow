@@ -104,8 +104,8 @@ const DYNAMIC_SITES: Readonly<Record<string, readonly SpawnSite[]>> = {
   'dynamic-tickets': [
     { label: 'drafter', start: 'const drafts = await phase("draft"', end: '\n// ', want: 'Design' },
     { label: 'cross-critic', start: 'const critic = await phase("cross-critic"', end: '\n// ', want: 'Design' },
-    { label: 'factory drafter', start: 'const drafts = await parallel(candidates.map(c => () =>', end: '\n```', want: 'Design' },
-    { label: 'factory cross-critic', start: 'const critic = await agent(`Whole-set completeness & coherence audit.', end: '\n```', want: 'Design' },
+    { label: 'factory drafter', start: 'passed as `schema:`: `{', end: ', schema: DRAFT_SCHEMA }`', want: 'Design' },
+    { label: 'factory cross-critic', start: 'REVISE_SCHEMA }`, `{', end: ', schema: CRITIC_SCHEMA }`', want: 'Design' },
   ],
   'dynamic-build': [
     { label: 'wave reader (step)', start: '**Step 1 — Read the wave**', end: '\n- ', want: 'Design' },
@@ -234,5 +234,8 @@ describe('/dynamic-plan writes plans with Architect; every other dynamic Design 
     const build = commandBuilds('dynamic-build')[0].content
     expect(collectDynamicSpawnDefects('db', seed(build, 'Spawn a `agentType: "Design"` agent (opus', 'Spawn a `agentType: "Architect"` agent (opus'), DYNAMIC_SITES['dynamic-build']))
       .toEqual(['db: the wave reader (step) spawns "Architect", expected Design'])
+    const tickets = commandBuilds('dynamic-tickets')[0].content
+    expect(collectDynamicSpawnDefects('dt', seed(tickets, '`{ agentType: "Design", schema: CRITIC_SCHEMA }`', '`{ agentType: "Architect", schema: CRITIC_SCHEMA }`'), DYNAMIC_SITES['dynamic-tickets']))
+      .toEqual(['dt: the factory cross-critic spawns "Architect", expected Design'])
   })
 })
