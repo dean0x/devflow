@@ -42,11 +42,11 @@ omitClaudeMd: true
 1. **Resolve worktree path**: Use `devflow:worktree-support` to determine the working directory (WORKTREE_PATH or cwd)
 2. **Orient on feature area**: Read EXPLORATION_OUTPUTS or EXISTING_KB to understand the feature's architecture, patterns, and boundaries. EXISTING_KB is a snapshot: keep an assertion only after checking it against current code, and trust the code where they differ
 3. **Follow the feature-knowledge skill**: Execute its four phases, keeping the leading `## Rules` section current: stable `KB-AP-n` / `KB-INV-n` IDs and no volatile numbers (name the pinning test or constant instead)
+<!-- curation:on -->
+   - **State decisions in words**: If DECISIONS_CONTEXT is provided, state each relevant decision or pitfall in words in the section it governs — never its ADR/PF ID, one already in EXISTING_KB included. The "Related" section links only to other knowledge bases and files.
+<!-- curation:end -->
 4. **Handle refresh**: If EXISTING_KB is provided, update stale sections based on FILES_CHANGED while preserving any manually added content. Don't regenerate from scratch.
 5. **Write, commit and report**: Write `{worktree}/.devflow/features/{FEATURE_SLUG}/KNOWLEDGE.md` and its `index.md` line (Direct Write Protocol), then commit the two files (Commit Protocol) and report the Output block
-<!-- curation:on -->
-6. **State decisions in words**: If DECISIONS_CONTEXT is provided, state each relevant decision or pitfall in words in the section it governs — never its ADR/PF ID, one already in EXISTING_KB included. The "Related" section links only to other knowledge bases and files.
-<!-- curation:end -->
 
 ## Direct Write Protocol
 

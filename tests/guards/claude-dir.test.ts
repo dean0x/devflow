@@ -331,6 +331,7 @@ export const SITE_ROWS: SiteRows = {
   'dist/curation-compliance-off/commands/implement.md': 1,
   'dist/curation-compliance-off/commands/plan.md': 2,
   'dist/curation-compliance-off/commands/resolve.md': 1,
+  'src/assets/skills/feature-knowledge/SKILL.md': 1,
 }
 
 /** What a file holds once the sanctioned line is taken out and each prose entry scoped to the file is replaced. */

@@ -29,7 +29,8 @@ Follow these four phases in order.
 
 Map where the code of this area lives and how it is structured: directories, languages and frameworks, entry points, configuration and existing documentation.
 
-**New KB only** (no `KNOWLEDGE.md` at the target path): with your first scan calls, run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"` in Bash. Then Read `<that directory>/skills/devflow:feature-knowledge/references/new-kb.md` once, with your next reads. It holds the category table, the category templates and a worked example. If the Read fails, choose the category from the frontmatter list and write the main sections from the template below.
+With your first scan calls, Glob the target `KNOWLEDGE.md` and run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"` in Bash.
+**New KB only** (the Glob finds no file): Read `<that directory>/skills/devflow:feature-knowledge/references/new-kb.md` once, with your next reads. It holds the category table, the category templates and a worked example. If the Read fails, choose the category from the frontmatter list and main sections that fit it.
 
 ### Phase 2: Extract
 
@@ -136,7 +137,7 @@ Run through this before writing. If any check fails, go back and fix it.
 - [ ] Anti-patterns documented with explanation of consequences
 
 **Structure:**
-- [ ] Category is correct and main sections follow the matching template
+- [ ] Category is correct; a new KB follows its category template, and a refresh keeps the existing sections
 - [ ] Description field starts with "Use when" and includes keywords
 - [ ] `## Rules` comes first: one-line bullets with `KB-AP-n` / `KB-INV-n` IDs, about 3–5K characters, no volatile numbers
 - [ ] File within the 40,000-character ceiling (curate, never truncate); description at most 220 characters
@@ -160,7 +161,7 @@ The whole line is at most 300 characters; reword a longer one, never cut it. Whe
 - `{areas}` is a comma-separated summary of the `directories:` frontmatter field
 - `{Use-when description}` is the `description:` frontmatter field value (the full "Use when..." sentence, at most 220 characters)
 
-The KNOWLEDGE.md frontmatter is always authoritative; the index line is a cache.
+If `index.md` does not exist, create it with just this line. The KNOWLEDGE.md frontmatter is always authoritative; the index line is a cache.
 
 ---
 
