@@ -630,35 +630,35 @@
     },
     {
       "id": "triage-body-max",
-      "ceiling": 11813,
-      "pattern": "const TRIAGE_BODY_MAX_BYTES = 11_813",
+      "ceiling": 11260,
+      "pattern": "const TRIAGE_BODY_MAX_BYTES = 11_260",
       "occurrences": 1,
       "sourceFile": "tests/guards/agent-references.test.ts",
-      "description": "The Triage agent body of the curation-on build, dist/agents/triage.md, in bytes. It loads on every spawn at every level, including full, where the Gate Level section skips itself. #484 added the GATE_LEVEL bullet and the Gate Level section to a body of 10,516 bytes; the pinned phrases of both stay, and the narrow-only restatement that the tier reference already holds was cut. Measured 11,813 after the review fixes of #484, with no headroom. May be LOWERED, never raised: text that only standard and lean need goes to references/triage/severity-tiers.md, which loads only then."
+      "description": "The Triage agent body of the curation-on build, dist/agents/triage.md, in bytes. It loads on every spawn at every level, including full, where the Gate Level section skips itself. #484 added the GATE_LEVEL bullet and the Gate Level section to a body of 10,516 bytes; the pinned phrases of both stay, and the narrow-only restatement that the tier reference already holds was cut. Measured 11,260 after the lean Resolve group (#716) and 11,813 after the review fixes of #484, with no headroom. May be LOWERED, never raised: text that only standard and lean need goes to references/triage/severity-tiers.md, which loads only then."
     },
     {
       "id": "triage-body-curation-off-max",
-      "ceiling": 11029,
-      "pattern": "const TRIAGE_BODY_CURATION_OFF_MAX_BYTES = 11_029",
+      "ceiling": 10525,
+      "pattern": "const TRIAGE_BODY_CURATION_OFF_MAX_BYTES = 10_525",
       "occurrences": 1,
       "sourceFile": "tests/guards/agent-references.test.ts",
-      "description": "The Triage agent body of the curation-off build, dist/curation-off/agents/triage.md, in bytes. It was 9,732 bytes before #484 added the GATE_LEVEL bullet and the Gate Level section. Measured 11,029 after the review fixes of #484, with no headroom. May be LOWERED, never raised: text that only standard and lean need goes to references/triage/severity-tiers.md, which loads only then."
+      "description": "The Triage agent body of the curation-off build, dist/curation-off/agents/triage.md, in bytes. It was 9,732 bytes before #484 added the GATE_LEVEL bullet and the Gate Level section. Measured 10,525 after the lean Resolve group (#716) and 11,029 after the review fixes of #484, with no headroom. May be LOWERED, never raised: text that only standard and lean need goes to references/triage/severity-tiers.md, which loads only then."
     },
     {
       "id": "triage-body-compliance-off-max",
-      "ceiling": 11752,
-      "pattern": "const TRIAGE_BODY_COMPLIANCE_OFF_MAX_BYTES = 11_752",
+      "ceiling": 11199,
+      "pattern": "const TRIAGE_BODY_COMPLIANCE_OFF_MAX_BYTES = 11_199",
       "occurrences": 1,
       "sourceFile": "tests/guards/agent-references.test.ts",
-      "description": "The Triage agent body of the compliance-off build, dist/compliance-off/agents/triage.md, in bytes. It is the all-on body less the line that sends a FIX_SEPARATE issue to the backlog step, which that build does not install. Measured 11,752 at its first build, with no headroom. May be LOWERED, never raised. The rule sets no comparison with the all-on build."
+      "description": "The Triage agent body of the compliance-off build, dist/compliance-off/agents/triage.md, in bytes. It is the all-on body less the line that sends a FIX_SEPARATE issue to the backlog step, which that build does not install. Measured 11,199 after the lean Resolve group (#716) and 11,752 at its first build, with no headroom. May be LOWERED, never raised. The rule sets no comparison with the all-on build."
     },
     {
       "id": "triage-body-both-off-max",
-      "ceiling": 10968,
-      "pattern": "const TRIAGE_BODY_BOTH_OFF_MAX_BYTES = 10_968",
+      "ceiling": 10464,
+      "pattern": "const TRIAGE_BODY_BOTH_OFF_MAX_BYTES = 10_464",
       "occurrences": 1,
       "sourceFile": "tests/guards/agent-references.test.ts",
-      "description": "The Triage agent body of the build with curation and compliance both off, dist/curation-compliance-off/agents/triage.md, in bytes. Measured 10,968 at its first build, with no headroom. May be LOWERED, never raised. The rule sets no comparison with the other builds."
+      "description": "The Triage agent body of the build with curation and compliance both off, dist/curation-compliance-off/agents/triage.md, in bytes. Measured 10,464 after the lean Resolve group (#716) and 10,968 at its first build, with no headroom. May be LOWERED, never raised. The rule sets no comparison with the other builds."
     },
     {
       "id": "curate-body-max",
@@ -998,19 +998,19 @@
     },
     {
       "id": "command-resolve-max",
-      "ceiling": 48356,
-      "pattern": "['resolve', 'on', 48_356],",
+      "ceiling": 47607,
+      "pattern": "['resolve', 'on', 47_607],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/resolve.md, the curation-on build, in bytes. Measured 48,356 after the CI gate and the claim lines moved into the scripts for #683, 48,605 after the shared command partials were cut for #715, 49,229 after the shared root step was cut again for #683, 49,354 after the publish script printed its own status lines for #683, 49,585 after the roots were resolved by one script call for #683, and 50,283 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (50,391 after the knowledge write-back filter and the index file name were restored for #675,50,311 after the decisions partial was condensed for #675, 50,481 after the knowledge partial was condensed for #675, 51,283 after the publication partial was condensed for #675, 51,398 at #679, 51,532 at #677); it was 51,543 after #484 added the severity tiers and 51,753 when main's fresh-base step (#495) and the Phase 6 level inputs met in one merge (main measures 51,773 under its 51,824 ceiling; 52,216 on the branch before the merge, paid by a named cut; 52,236 after the gate-level block stopped naming the worktree level; 52,248 after the empty-issues edge row was renamed; 52,252 after the gate-level block; 52,287 after #472; 52,422 when #456 closed), with no headroom. Main held 54,899 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/commands/resolve.md, the curation-on build, in bytes. Measured 47,607 after the lean Resolve group (#716), 48,356 after the CI gate and the claim lines moved into the scripts for #683, 48,605 after the shared command partials were cut for #715, 49,229 after the shared root step was cut again for #683, 49,354 after the publish script printed its own status lines for #683, 49,585 after the roots were resolved by one script call for #683, and 50,283 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (50,391 after the knowledge write-back filter and the index file name were restored for #675,50,311 after the decisions partial was condensed for #675, 50,481 after the knowledge partial was condensed for #675, 51,283 after the publication partial was condensed for #675, 51,398 at #679, 51,532 at #677); it was 51,543 after #484 added the severity tiers and 51,753 when main's fresh-base step (#495) and the Phase 6 level inputs met in one merge (main measures 51,773 under its 51,824 ceiling; 52,216 on the branch before the merge, paid by a named cut; 52,236 after the gate-level block stopped naming the worktree level; 52,248 after the empty-issues edge row was renamed; 52,252 after the gate-level block; 52,287 after #472; 52,422 when #456 closed), with no headroom. Main held 54,899 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-resolve-curation-off-max",
-      "ceiling": 46148,
-      "pattern": "['resolve', 'off', 46_148],",
+      "ceiling": 45533,
+      "pattern": "['resolve', 'off', 45_533],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/curation-off/commands/resolve.md, the curation-off build, in bytes. Measured 46,148 after the CI gate and the claim lines moved into the scripts for #683, 46,397 after the shared command partials were cut for #715, 46,903 after the shared root step was cut again for #683, 46,949 after the publish script printed its own status lines for #683, 47,180 after the roots were resolved by one script call for #683, and 47,253 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (47,361 after the knowledge write-back filter and the index file name were restored for #675,47,281 after the knowledge partial was condensed for #675, 48,083 after the publication partial was condensed for #675, 48,198 at #679, 48,332 at #677); it was 48,343 after #484 added the severity tiers and 48,553 when main's fresh-base step (#495) and the Phase 6 level inputs met in one merge (main measures 48,573 under its 48,624 ceiling; 49,016 on the branch before the merge, paid by a named cut; 49,036 after the gate-level block stopped naming the worktree level; 49,048 after the empty-issues edge row was renamed; 49,052 after the gate-level block; 49,087 after #472; 49,220 when #456 closed), with no headroom. Main held 51,692 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/curation-off/commands/resolve.md, the curation-off build, in bytes. Measured 45,533 after the lean Resolve group (#716), 46,148 after the CI gate and the claim lines moved into the scripts for #683, 46,397 after the shared command partials were cut for #715, 46,903 after the shared root step was cut again for #683, 46,949 after the publish script printed its own status lines for #683, 47,180 after the roots were resolved by one script call for #683, and 47,253 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (47,361 after the knowledge write-back filter and the index file name were restored for #675,47,281 after the knowledge partial was condensed for #675, 48,083 after the publication partial was condensed for #675, 48,198 at #679, 48,332 at #677); it was 48,343 after #484 added the severity tiers and 48,553 when main's fresh-base step (#495) and the Phase 6 level inputs met in one merge (main measures 48,573 under its 48,624 ceiling; 49,016 on the branch before the merge, paid by a named cut; 49,036 after the gate-level block stopped naming the worktree level; 49,048 after the empty-issues edge row was renamed; 49,052 after the gate-level block; 49,087 after #472; 49,220 when #456 closed), with no headroom. Main held 51,692 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-self-review-max",
@@ -1142,19 +1142,19 @@
     },
     {
       "id": "command-resolve-compliance-off-max",
-      "ceiling": 42219,
-      "pattern": "['resolve', 'compliance-off', 42_219],",
+      "ceiling": 41628,
+      "pattern": "['resolve', 'compliance-off', 41_628],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/resolve.md, the compliance-off build, in bytes. Measured 42,219 after the CI gate and the claim lines moved into the scripts for #683, 42,503 after the shared command partials were cut for #715, 43,103 after the shared root step was cut again for #683, 43,238 after the roots were resolved by one script call for #683, and 43,936 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (44,044 after the knowledge write-back filter and the index file name were restored for #675,43,964 after the decisions partial was condensed for #675, 44,134 after the knowledge partial was condensed for #675, 44,936 at #679, 45,070 at #677, 45,080 at its first build), with no headroom. The rule sets no comparison with the all-on build. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/resolve.md, the compliance-off build, in bytes. Measured 41,628 after the lean Resolve group (#716), 42,219 after the CI gate and the claim lines moved into the scripts for #683, 42,503 after the shared command partials were cut for #715, 43,103 after the shared root step was cut again for #683, 43,238 after the roots were resolved by one script call for #683, and 43,936 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (44,044 after the knowledge write-back filter and the index file name were restored for #675,43,964 after the decisions partial was condensed for #675, 44,134 after the knowledge partial was condensed for #675, 44,936 at #679, 45,070 at #677, 45,080 at its first build), with no headroom. The rule sets no comparison with the all-on build. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-resolve-both-off-max",
-      "ceiling": 39995,
-      "pattern": "['resolve', 'both-off', 39_995],",
+      "ceiling": 39538,
+      "pattern": "['resolve', 'both-off', 39_538],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE (#648, AC-33): dist/curation-compliance-off/commands/resolve.md, the build with curation and compliance both off, in bytes. Measured 39,995 after the CI gate and the claim lines moved into the scripts for #683, 40,279 after the shared command partials were cut for #715, 40,761 after the shared root step was cut again for #683, 40,817 after the roots were resolved by one script call for #683, and 40,890 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (40,998 after the knowledge write-back filter and the index file name were restored for #675,40,918 after the knowledge partial was condensed for #675, 41,720 at #679, 41,854 at #677, 41,864 at its first build), with no headroom. The rule sets no comparison with the other builds. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE (#648, AC-33): dist/curation-compliance-off/commands/resolve.md, the build with curation and compliance both off, in bytes. Measured 39,538 after the lean Resolve group (#716), 39,995 after the CI gate and the claim lines moved into the scripts for #683, 40,279 after the shared command partials were cut for #715, 40,761 after the shared root step was cut again for #683, 40,817 after the roots were resolved by one script call for #683, and 40,890 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (40,998 after the knowledge write-back filter and the index file name were restored for #675,40,918 after the knowledge partial was condensed for #675, 41,720 at #679, 41,854 at #677, 41,864 at its first build), with no headroom. The rule sets no comparison with the other builds. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "quality-cut-bullet-max-bytes",
