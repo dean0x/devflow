@@ -1475,6 +1475,30 @@
       "occurrences": 1,
       "sourceFile": "tests/guards/always-loaded-sizes.test.ts",
       "description": "Sum of the description bytes of every skill, command and agent row that a default install lists (core plugins, compliance off, no language plugin). Claude Code puts these rows in every main turn of every session. Added by #706 (lean always-loaded text) at 6,187 (7,048 on main before the cut, which already held the other-targets skill rows)."
+    },
+    {
+      "id": "harden-body-max",
+      "ceiling": 5011,
+      "pattern": "['harden', 'on', 5_011],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/other-agents-sizes.test.ts",
+      "description": "The Harden agent body of the curation-on build, dist/agents/harden.md, in bytes. Every turn of every Harden spawn reads it (opus; /implement and /self-review spawn it). Added at its measured 5,047 so that it can not grow back. Lowered by #706 (lean always-loaded descriptions) to 5011."
+    },
+    {
+      "id": "harden-body-curation-off-max",
+      "ceiling": 4443,
+      "pattern": "['harden', 'off', 4_443],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/other-agents-sizes.test.ts",
+      "description": "The Harden agent body of the curation-off build, dist/curation-off/agents/harden.md, in bytes. Added at its measured 4,479 so that it can not grow back. Lowered by #706 (lean always-loaded descriptions) to 4443."
+    },
+    {
+      "id": "polish-body-max",
+      "ceiling": 4495,
+      "pattern": "['polish', 'on', 4_495],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/other-agents-sizes.test.ts",
+      "description": "The Polish agent body, src/assets/agents/polish.md, in bytes. It is hand-authored, with one build. Every turn of every Polish spawn reads it (sonnet; /implement, /resolve and /self-review spawn it). Added at its measured 4,537 so that it can not grow back. Lowered by #706 (lean always-loaded descriptions) to 4495."
     }
   ]
 }
