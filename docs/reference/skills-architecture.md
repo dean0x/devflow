@@ -172,7 +172,7 @@ For additional examples and detection patterns:
 
 Skill descriptions appear in Claude Code's skill catalog and influence when Claude auto-invokes skills. Poorly written descriptions can cause Claude to treat the description itself as instructions, bypassing the actual SKILL.md flowchart.
 
-**Format**: A user-trigger skill description MUST start with `"This skill should be used when..."`. An agent-internal skill description MUST start with `"Use when..."`: the model loads it by name, so the short form keeps the trigger shape in fewer bytes.
+**Format**: A user-trigger skill description MUST start with `"This skill should be used when..."`. An agent-internal skill description MUST start with `"Use when..."`: the model loads it by name, so the short form keeps the trigger shape in fewer bytes. The reference-only skill is exempt, because the catalog never lists it.
 
 **Include**: Concrete trigger words -- tool names, error types, user phrases, file types, or review focus areas that signal when the skill is relevant.
 

@@ -1470,11 +1470,11 @@
     },
     {
       "id": "catalog-description-max",
-      "ceiling": 6267,
-      "pattern": "CATALOG_DESCRIPTION_MAX_BYTES = 6_267",
+      "ceiling": 6187,
+      "pattern": "CATALOG_DESCRIPTION_MAX_BYTES = 6_187",
       "occurrences": 1,
       "sourceFile": "tests/guards/always-loaded-sizes.test.ts",
-      "description": "Sum of the description bytes of every skill, command and agent row that a default install lists (core plugins, compliance off, no language plugin). Claude Code puts these rows in every main turn of every session. Added by #706 (lean always-loaded text) at 6,267, after the cut from 7,128."
+      "description": "Sum of the description bytes of every skill, command and agent row that a default install lists (core plugins, compliance off, no language plugin). Claude Code puts these rows in every main turn of every session. Added by #706 (lean always-loaded text) at 6,187 (7,048 on main before the cut, which already held the other-targets skill rows)."
     }
   ]
 }

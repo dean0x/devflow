@@ -14,7 +14,7 @@ import { ROOT, resolveAgentSource, resolveVariantOffSource } from '../helpers.js
 import { DEVFLOW_PLUGINS, type PluginDefinition } from '../../src/core/plugins.js'
 
 /** Sum of the description bytes of the default-install catalog rows. */
-const CATALOG_DESCRIPTION_MAX_BYTES = 6_267
+const CATALOG_DESCRIPTION_MAX_BYTES = 6_187
 
 /**
  * The single-line `description` value of a frontmatter block, unquoted, or null when it has none. A block

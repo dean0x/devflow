@@ -112,28 +112,17 @@ export const USER_TRIGGER_FORM = 'This skill should be used when '
 export const AGENT_INTERNAL_FORM = 'Use when '
 
 /**
- * Agent-internal skills of the other-targets skills pull request of the same lean epic, which converts
- * them to the short form. Each entry must still miss the form, so the list empties as they convert.
+ * Named collector: each classified skill whose description does not open with the form of its set. The
+ * reference-only skill is exempt: it disables model invocation, so the catalog never lists it.
  */
-export const FORM_PENDING: readonly string[] = [
-  'agent-references', 'compliance', 'docs-framework', 'research-codebase', 'research-competitor',
-  'research-external', 'research-market', 'research-technology',
-]
-
-/** Named collector: each classified skill whose description does not open with the form of its set. */
-export function collectDescriptionFormDefects(skills: ReadonlyArray<readonly [string, string]>, pending: readonly string[]): string[] {
+export function collectDescriptionFormDefects(skills: ReadonlyArray<readonly [string, string]>): string[] {
   const out: string[] = []
-  for (const name of pending) {
-    if (!AGENT_INTERNAL.includes(name)) out.push(`${name}: in FORM_PENDING but not agent-internal — only an agent-internal skill may wait`)
-  }
   for (const [name, text] of skills) {
+    if (REFERENCE_ONLY.includes(name)) continue
     const form = AGENT_INTERNAL.includes(name) ? AGENT_INTERNAL_FORM : USER_TRIGGER.includes(name) ? USER_TRIGGER_FORM : null
     const description = parseDescription(text)
     if (form === null || description === null) continue
-    const fits = description.startsWith(form)
-    if (pending.includes(name)) {
-      if (fits) out.push(`${name}: opens with "${form}" — remove it from FORM_PENDING`)
-    } else if (!fits) out.push(`${name}: does not open with "${form}"`)
+    if (!description.startsWith(form)) out.push(`${name}: does not open with "${form}"`)
   }
   return out
 }
@@ -339,19 +328,16 @@ describe('skill descriptions stay within their audience cap (D-SKILL-DESCRIPTION
   })
 
   it('every description opens with the form of its set: "Use when" (agent-internal) or "This skill should be used when" (user-trigger)', () => {
-    expect(collectDescriptionFormDefects(liveSkills(), FORM_PENDING)).toEqual([])
+    expect(collectDescriptionFormDefects(liveSkills())).toEqual([])
   })
 
-  it('known-bad probe: a wrong form in each set, and a pending skill that already fits, are each reported', () => {
+  it('known-bad probe: a wrong form in each set is reported, and only the reference-only skill is exempt', () => {
     const internal = 'security'
     const trigger = 'git'
-    expect(collectDescriptionFormDefects([[internal, skillWith('description: This skill should be used when x.')]], [])).toEqual([`${internal}: does not open with "Use when "`])
-    expect(collectDescriptionFormDefects([[internal, skillWith('description: Use when x.')]], [])).toEqual([])
-    expect(collectDescriptionFormDefects([[trigger, skillWith('description: Use when x.')]], [])).toEqual([`${trigger}: does not open with "This skill should be used when "`])
-    expect(collectDescriptionFormDefects([[internal, skillWith('description: Use when x.')]], [internal])).toEqual([`${internal}: opens with "Use when " — remove it from FORM_PENDING`])
-    expect(collectDescriptionFormDefects([[trigger, skillWith('description: Use when x.')]], [trigger])).toEqual([
-      `${trigger}: in FORM_PENDING but not agent-internal — only an agent-internal skill may wait`,
-    ])
+    expect(collectDescriptionFormDefects([[internal, skillWith('description: This skill should be used when x.')]])).toEqual([`${internal}: does not open with "Use when "`])
+    expect(collectDescriptionFormDefects([[internal, skillWith('description: Use when x.')]])).toEqual([])
+    expect(collectDescriptionFormDefects([[trigger, skillWith('description: Use when x.')]])).toEqual([`${trigger}: does not open with "This skill should be used when "`])
+    expect(collectDescriptionFormDefects([[REFERENCE_ONLY[0], skillWith('description: Any opening.')]])).toEqual([])
   })
 })
 
