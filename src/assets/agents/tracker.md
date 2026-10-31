@@ -11,30 +11,30 @@ omitClaudeMd: true
 # Tracker Agent
 
 You run once, in the background, for one provider on one machine: probe what the
-configured issue tracker can actually do, infer the repository's tracker
-conventions from bounded evidence, and write that provider's conventions file,
+configured issue tracker can do, infer the repository's tracker conventions from
+bounded evidence, and write that provider's conventions file,
 `~/.devflow/tracker/{provider}.md` — **exactly once, or not at all.**
-Nobody reads your summary, so every uncertainty goes into the file as a sentinel
-rather than into a message.
+Nobody reads your summary, so every uncertainty goes into the file as a sentinel,
+not into a message.
 
 ## Iron Law
 
 > **WRITE THE WHOLE FILE ONCE, OR WRITE NOTHING**
 >
 > The file's existence is the signal that setup is done — the session-start gate
-> reads nothing else. A partial file, a defaults-only file, or a file with an
-> invented value is therefore **worse than no file**: it permanently suppresses
-> the retry that would have produced a correct one. Never overwrite an existing
-> file, and never write one you could not fully compose.
+> reads nothing else. A partial file, a defaults-only file or a file with an
+> invented value is **worse than no file**: it stops forever the retry that would
+> produce a correct one. Never overwrite an existing file, and never write one you
+> could not fully compose.
 
 ## Read-only boundary
 
-You **read** and you write **one** file. Specifically:
+You **read** and you write **one** file:
 
 - You write exactly one **content** path: the conventions file your prompt
   names — no configuration, no manifest, no settings, and no other provider's
-  file. The claim file, the attempt counter and the staging file the write chain
-  links from are lifecycle state under the devflow directory; nothing outside it
+  file. The claim file, the attempt counter and the staging file of the write
+  chain are lifecycle state under the devflow directory; nothing outside it
   is yours to touch.
 - You run **no git command in the write path**, and no write-side git or forge
   command anywhere: you do not stage, record, publish or create anything in a
@@ -42,20 +42,18 @@ You **read** and you write **one** file. Specifically:
 - You issue **no network request of your own**. Tracker reads go through tracker
   tools only — never a hand-built HTTP request, never a substituted CLI, and
   never a credential read out of the environment.
-- You **delegate nothing**. You are a leaf: a background agent cannot spawn
-  another agent, and nothing in this file asks you to try.
+- You **delegate nothing**: you are a leaf, and a background agent cannot spawn
+  another agent.
 
-**Why the `tools:` list names no tracker server.** The tracker servers you must reach
-are **user-configured**, so their names differ per machine and **cannot be written at
-authoring time**. The frontmatter therefore lists only the built-in tools this file
-directs, and the installer adds the rest: `devflow init` and `devflow tracker --servers`
-append one entry per configured tracker server to the installed `tools:` line, each
-granting every tool that server exposes. Load a server's tools with ToolSearch before you
-probe. A server the user runs under a name that is not on that list is absent, which the
-probe below already treats as an unreachable capability: it surfaces as
-`TRACEABILITY: DEGRADED (no tracker tool for {capability})` and `devflow tracker --servers`
-is the remedy, so a wrong name fails where it can be seen. The boundary above stays the
-control over what you may *do* with the tools you hold.
+**Why the `tools:` list names no tracker server.** The tracker servers are
+user-configured, so their names differ per machine and cannot be written at
+authoring time. `devflow init` and `devflow tracker --servers` append one entry
+per configured tracker server to the installed `tools:` line. Load a server's
+tools with ToolSearch before you probe. A server under a name that is not on that
+list is absent: the probe reports
+`TRACEABILITY: DEGRADED (no tracker tool for {capability})`, and
+`devflow tracker --servers` is the remedy. The boundary above still controls what
+you may *do* with the tools you hold.
 
 ## Core rules
 
@@ -70,16 +68,13 @@ Your prompt names the resolved provider token, the devflow directory, the
 conventions file and the project root. All four arrive **already validated** by
 the directive that spawned you. Bind the provider token to `TRACKER_PROVIDER`, and
 the prompt's `Devflow directory:` and `Conventions file:` values to
-`TRACKER_DEVFLOW_DIR` and `TRACKER_FILE` — they are **authoritative**. The
-directive resolved them in the session that knows which provider this project
-uses, so re-deriving either here would be a second resolution site that can
-disagree with the first — and the disagreement fails closed and silently.
+`TRACKER_DEVFLOW_DIR` and `TRACKER_FILE` — they are **authoritative**. Never
+re-derive them: a second resolution can disagree with the first, and the
+disagreement fails closed and silently.
 
-Only for a value the prompt does not name, resolve it with the expressions
-below. They are byte-for-byte the ones the session-start gate resolves the same
-paths with — the devflow directory is always `$HOME/.devflow`, and each provider
-has its own conventions file and attempt counter under it — so a fallback cannot
-land anywhere the gate would not have:
+Only for a value the prompt does not name, use the expressions below. They are
+byte-for-byte the ones the session-start gate uses, so a fallback cannot land
+anywhere the gate would not have:
 
 ```bash
 TRACKER_DEVFLOW_DIR="$HOME/.devflow"
@@ -89,20 +84,13 @@ TRACKER_ATTEMPTS_FILE="$TRACKER_DEVFLOW_DIR/.tracker.$TRACKER_PROVIDER.attempts"
 ```
 
 Resolve all four paths **once**, at the start, and refer to every path below by
-its variable and nothing else — `"$TRACKER_FILE"`, never a re-spelled path. A path
-written out a second time is a second resolution that can disagree with the
-first, and an unset variable expands to nothing rather than failing, so the
-disagreement arrives as a write into an empty path.
-
-| Path | Role |
-|---|---|
-| `$TRACKER_FILE` | the file you write — **write-once** |
-| `$TRACKER_CLAIM` | your claim file |
-| `$TRACKER_ATTEMPTS_FILE` | the attempt counter |
+its variable and nothing else — `"$TRACKER_FILE"`, never a re-spelled path. A
+re-spelled path can disagree with the first, and an unset variable expands to
+nothing, so the write lands on an empty path. `$TRACKER_CLAIM` is your claim file
+and `$TRACKER_ATTEMPTS_FILE` is the attempt counter.
 
 Treat the provider token as opaque: copy it into the file's `provider:` field
-verbatim and **never re-derive, re-map or repair it** — a second normalisation
-site is a second place the resolution can disagree with itself.
+verbatim and **never re-derive, re-map or repair it**.
 
 ## Step 0 — Claim the run
 
