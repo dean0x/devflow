@@ -1243,6 +1243,22 @@
       "occurrences": 1,
       "sourceFile": "tests/guards/plan-group-sizes.test.ts",
       "description": "src/assets/skills/design-review/SKILL.md, in bytes. The Design agent preloads it, so every turn of every Design spawn reads it. Added by #714 (lean Plan path group) at 4,415, after the cut from 6,006."
+    },
+    {
+      "id": "research-body-max",
+      "ceiling": 5153,
+      "pattern": "['research', 'on', 5_153],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/other-agents-sizes.test.ts",
+      "description": "The Research agent body of the curation-on build, dist/agents/research.md, in bytes. Every turn of every Research spawn reads it (opus, two to five spawns per /research run). Added by #718 (lean other targets) at 5,153, after the cut from 6,300."
+    },
+    {
+      "id": "research-body-curation-off-max",
+      "ceiling": 4793,
+      "pattern": "['research', 'off', 4_793],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/other-agents-sizes.test.ts",
+      "description": "The Research agent body of the curation-off build, dist/curation-off/agents/research.md, in bytes. Added by #718 (lean other targets) at 4,793, after the cut from 5,794."
     }
   ]
 }
