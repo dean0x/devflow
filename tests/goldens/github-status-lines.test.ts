@@ -156,7 +156,7 @@ export const PRE_PHASE0_GIT_MD_LINES = 938
 // Phase-0 char baselines (JS `.length`, not bytes) — named constants so Phase-2's
 // byte-budget.test.ts can import them without re-deriving (C6). These are equality
 // baselines: they move only in the same commit as the golden fixture.
-export const GIT_MD_CHARS = 10_144
+export const GIT_MD_CHARS = 10_126
 export const GIT_MD_LINES = 130
 // SKILL_GIT_CHARS/SKILL_GIT_LINES pin src/assets/skills/git/SKILL.md, the
 // preloaded skill file the git-agent golden above cross-references. Like
@@ -165,7 +165,7 @@ export const GIT_MD_LINES = 130
 // to make a red test green on its own.
 export const SKILL_GIT_CHARS = 6_074
 export const SKILL_GIT_LINES = 193
-export const SKILL_WORKTREE_CHARS = 1_168
+export const SKILL_WORKTREE_CHARS = 1_135
 export const SKILL_WORKTREE_LINES = 34
 /**
  * The preloaded set's total size across the three files above — pinned literals,
@@ -179,7 +179,7 @@ export const SKILL_WORKTREE_LINES = 34
  * golden-regeneration commit that moves the parts, never on their own to clear a
  * red assertion.
  */
-export const TOTAL_CHARS = 17_386
+export const TOTAL_CHARS = 17_335
 export const TOTAL_LINES = 357
 
 // Fixture invariants — these ARE bytes (Buffer.byteLength), not JS .length

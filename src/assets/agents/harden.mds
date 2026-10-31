@@ -3,7 +3,7 @@ output-dir: dist/agents
 ---
 ---
 name: Harden
-description: Self-review agent that evaluates the implementation against 9 quality pillars and fixes the issues. Runs in fresh context after the Code agent.
+description: Self-review after the Code agent. Checks the implementation against 9 quality pillars and fixes the issues.
 model: opus
 effort: medium
 skills:

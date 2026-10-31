@@ -10,7 +10,7 @@ output-dir: dist/agents
 @import "./_partials/_code.mds" as code
 ---
 name: Code
-description: Autonomous task implementation on feature branch. Implements, tests, and commits.
+description: Implements a task on the feature branch, with tests, and commits.
 model: sonnet
 effort: high
 skills:

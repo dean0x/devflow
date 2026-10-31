@@ -27,10 +27,10 @@ const RESOLVE_OFF = resolveCurationOffSource('commands', 'resolve')
 if (RESOLVE_OFF === null) throw new Error('dist/curation-off/commands/resolve.md is absent: run `npm run build:mds`')
 
 interface TriageBuild { readonly label: string; readonly body: string; readonly bytes: number; readonly sha256: string }
-/** The two Triage builds, each with the length and sha256 of its build with the Gate Level bullet and section stripped. Re-based by the lean cut of #716, which cut text outside the Gate Level parts (before: 10,516 and 9,732 bytes, the builds before #484 added those parts). */
+/** The two Triage builds, each with the length and sha256 of its build with the Gate Level bullet and section stripped. Re-based by the lean cut of #716, which cut text outside the Gate Level parts (before: 10,516 and 9,732 bytes, the builds before #484 added those parts), and by the description cut of #706 (-29 bytes each). */
 const TRIAGE_BUILDS: readonly TriageBuild[] = [
-  { label: 'curation on', body: TRIAGE_ON, bytes: 9963, sha256: '3ab9235dfa2f05ddcfbb4cb48b2de71483e457cf25964d8a106ce9930c935fde' },
-  { label: 'curation off', body: TRIAGE_OFF, bytes: 9228, sha256: 'd6818af95f336ffc1e3ce3f202512b4eae1b143672f40cc0d36b60217f52db4a' },
+  { label: 'curation on', body: TRIAGE_ON, bytes: 9934, sha256: 'b161495872bb94367e24fc05bb57d9b59ad8a2870b3074424ece1bdec69955ba' },
+  { label: 'curation off', body: TRIAGE_OFF, bytes: 9199, sha256: 'e0a7a4ae6a5e6b435a6ac68babd478b4a59b29a9930da65ef44ec1be473510a7' },
 ]
 
 /** The Risk Tier cell of a prose-only item: the one value that Triage writes and that /resolve reads. 139 bytes. */

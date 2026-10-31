@@ -1,6 +1,6 @@
 ---
 name: gap-analysis
-description: This skill should be used when analyzing specs or plans for completeness gaps.
+description: Use when analyzing specs or plans for completeness gaps.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---

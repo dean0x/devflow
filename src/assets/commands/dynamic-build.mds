@@ -1,5 +1,5 @@
 ---
-description: Dependency-aware build engine — implement, review, and verify a single ticket or a full wave of tickets using devflow agents
+description: Dependency-aware build engine — implement, review and verify one ticket or a wave of tickets
 argument-hint: "[ticket | issue-url | plan-doc]"
 output-dir: dist/commands
 ---

@@ -3,7 +3,7 @@ output-dir: dist/agents
 ---
 ---
 name: Review
-description: Universal code review agent with parameterized focus. Dynamically loads pattern skill for assigned focus area.
+description: Code review of one focus area per spawn. Loads the pattern skill of that focus.
 model: opus
 effort: high
 skills:

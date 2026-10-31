@@ -1,6 +1,6 @@
 ---
 name: Git
-description: Unified agent for all git/GitHub operations - issues, PR comments, tech debt, releases
+description: All git/GitHub operations - issues, PR comments, tech debt, releases
 model: haiku
 effort: medium
 skills:

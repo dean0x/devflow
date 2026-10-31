@@ -1,6 +1,6 @@
 ---
 name: worktree-support
-description: Canonical worktree path resolution and discovery algorithm for agents and commands
+description: Use when resolving or discovering worktree paths.
 user-invocable: false
 allowed-tools: Bash, Read
 ---

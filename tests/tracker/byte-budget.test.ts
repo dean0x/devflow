@@ -206,7 +206,7 @@ import type {
  *
  * Re-derived by #712 (lean Git agent) from a measured 10_144 plus the 80 ch headroom: 10_224.
  */
-const BUDGET_GIT_MD = 10_224;
+const BUDGET_GIT_MD = 10_206;
 
 /**
  * Design-time derivation: the PRE-SPLIT capture of skills/git/SKILL.md, less the
@@ -276,7 +276,7 @@ const BUDGET_SKILL_MD = 6_154;
  * tests/fixtures/numeric-floors.json; lowering re-pins the value AND the pattern
  * in the same commit.
  */
-const BUDGET_LOADED_SET = 40_225;
+const BUDGET_LOADED_SET = 40_174;
 
 /**
  * THE JIRA-SCOPED loaded-set ceiling — a spawn under the Jira provider.
@@ -320,7 +320,7 @@ const BUDGET_LOADED_SET = 40_225;
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-jira` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_JIRA = 50_609;
+const BUDGET_LOADED_SET_JIRA = 50_558;
 
 /**
  * THE LINEAR-SCOPED loaded-set ceiling — a spawn under the Linear provider.
@@ -361,7 +361,7 @@ const BUDGET_LOADED_SET_JIRA = 50_609;
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-linear` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_LINEAR = 51_205;
+const BUDGET_LOADED_SET_LINEAR = 51_154;
 
 /**
  * THE PR-HOST loaded-set ceiling — the worst-case cost of a spawn that runs one of
@@ -417,7 +417,7 @@ const BUDGET_LOADED_SET_LINEAR = 51_205;
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-pr-host` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_PR_HOST = 23_400;
+const BUDGET_LOADED_SET_PR_HOST = 23_349;
 
 /**
  * THE PER-OPERATION LOAD CAP (D-OP-LOAD-CAP) — no single Git operation may load more

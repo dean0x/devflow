@@ -1,5 +1,5 @@
 ---
-description: Process review issues - validate with Triage agent, fix with Code agent, verify with Validate agent
+description: Process review issues - Triage validates, Code fixes, Validate verifies
 output-dir: dist/commands
 ---
 @import { knowledge_load, knowledge_writeback_after_load } from "./_partials/_knowledge.mds"

@@ -1,6 +1,6 @@
 ---
 name: apply-decisions
-description: Consume the DECISIONS_CONTEXT index; cite IDs in-session only
+description: Use when given DECISIONS_CONTEXT; cite IDs in-session only.
 user-invocable: false
 allowed-tools: Read, Bash
 ---

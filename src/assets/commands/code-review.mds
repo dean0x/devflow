@@ -1,5 +1,5 @@
 ---
-description: Comprehensive branch review using specialized sub-agents for PR readiness
+description: Branch review by specialized agents for PR readiness
 output-dir: dist/commands
 ---
 @import { knowledge_load } from "./_partials/_knowledge.mds"

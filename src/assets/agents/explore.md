@@ -1,6 +1,6 @@
 ---
 name: Explore
-description: "Read-only search agent for broad fan-out searches, when answering means sweeping many files, directories or naming conventions and you only need the conclusion, not the file dumps. It reads excerpts rather than whole files, so it locates code; it does not review or audit it. Specify search breadth: quick for one targeted lookup, medium for moderate exploration, very thorough for multiple locations and naming conventions."
+description: "Read-only search agent for broad fan-out searches across many files, directories or naming conventions, when you need only the conclusion, not the file dumps. It reads excerpts, so it locates code; it does not review or audit it. Specify breadth: quick for one targeted lookup, medium, or very thorough for many locations and naming conventions."
 model: sonnet
 effort: high
 tools:

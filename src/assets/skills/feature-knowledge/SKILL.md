@@ -1,6 +1,6 @@
 ---
 name: feature-knowledge
-description: Structures codebase exploration into a feature knowledge base
+description: Use when building a feature knowledge base.
 user-invocable: false
 allowed-tools:
   - Read
