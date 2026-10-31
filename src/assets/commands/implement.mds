@@ -430,16 +430,15 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
 
 Any other or missing Status: report and halt; never PASS.
 
-**Evidence claims** are lines appended to the `## Claims` section of `EVIDENCE_FILE` — the file's last section, created when absent. Append only: never edit or remove a claim; the last valid one per target wins. Each line takes exactly one of these shapes, where `<head>` is the 40-hex `HEAD:` the agent's report shows:
+**Evidence claims** come from the evidence script, which owns the claim lines and the `## Claims` section. `<head>` is the report's `HEAD:` value, or `none` if it holds anything but letters and digits (a before/after change too).
 
-```
-- gate:validate PASS sha:<head> by:validate
-- TP-<n> <PASS|FAIL|SKIP> sha:<head> by:test exit:<0-255>
+```bash
+cd "{worktree}" && node "$HOME/.devflow/scripts/verify-evidence.cjs" claim --evidence ".devflow/docs/evidence-{branch_slug}.md" --head <head> gate|TP-<n>=<PASS|FAIL|SKIP>[:<exit>] ...
 ```
 
-- `gate:validate` — after a Phase 6 or Phase 8 PASS.
-- `TP-<n>` — after every Phase 7 run, one line per `### Test Plan Evidence` row whose TP is in `TEST_PLAN`, with the row's outcome; the line ends at `by:test` when the row's Exit is not a number from 0 to 255.
-- Append nothing from a report whose `HEAD:` is not a single 40-hex SHA — a reported before/after change included — and say so in the Phase 12 report.
+- `gate` — after a Phase 6 or Phase 8 PASS.
+- `TP-<n>` — after every Phase 7 run, one argument per `### Test Plan Evidence` row; add `:<exit>` when the row's Exit is a number.
+- No `CLAIM appended` line means no claim was written: say so in the Phase 12 report.
 
 ### Phase 7: QA Testing
 
@@ -559,17 +558,14 @@ git push origin HEAD; echo "exit=$?"
 `exit=0` continues to the gate. Any other result, a rejected non-fast-forward push included, records `TRACEABILITY: DEGRADED (ci push failed)` for the Phase 12 report, reports "CI status unknown — verify manually before merging" and proceeds to Phase 11 without waiting.
 
 <!-- PATTERN: ci-status-gate -->
-1. Wait: run `cd {worktree} && HEAD_SHA=$(git rev-parse HEAD) && node "$HOME/.devflow/scripts/ci-wait.cjs" --pr {PR_NUMBER} --head "$HEAD_SHA"` through the Bash tool with `timeout: 600000`. Each run waits at most 570 seconds and prints one line, `CI <STATUS> pr=… head=… failing=… pending=… waited=…` (INDETERMINATE adds `reason=…`). A missing or unparseable line, an unknown status or a non-zero exit is INDETERMINATE.
-2. **If PASSING** → proceed to Phase 11.
-3. **If NO_PR or NO_CI** → skip: "No PR/CI configured, skipping CI validation." Proceed to Phase 11.
-4. **If PENDING** and fewer than 3 waits have run → wait again. Otherwise → report "CI still running — verify manually before merging" and proceed.
-5. **If INDETERMINATE** and fewer than 3 waits have run → wait again, unless `waited=570` with `reason=head-mismatch` or `no-workflow-check`. Otherwise → report "CI status unknown — verify manually before merging" and proceed.
+1. Wait: run `cd {worktree} && HEAD_SHA=$(git rev-parse HEAD) && node "$HOME/.devflow/scripts/ci-wait.cjs" --pr {PR_NUMBER} --head "$HEAD_SHA" --waits {n} --fixes {m}` through the Bash tool with `timeout: 600000`, where `{n}` is the waits run so far, this one included, and `{m}` is the Fix agents run so far. Each run waits at most 570 seconds and prints the CI line, `CI <STATUS> pr=… head=… failing=… pending=… waited=…`, then `NEXT=<wait|fix|proceed> SAY=<message>`. A missing or malformed `NEXT=` line or a non-zero exit → report "CI status unknown — verify manually before merging" and proceed to Phase 11.
+2. **If `NEXT=wait`** → step 1 again.
 <!-- curation:on -->
-6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES`, `DECISIONS_CONTEXT` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Fix agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
+3. **If `NEXT=fix`** → report SAY and the failing checks from the CI line. Spawn `Agent(subagent_type="Fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES`, `DECISIONS_CONTEXT` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Fix agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if fewer than 3 waits have run, step 1 again, else report "CI status unknown — verify manually before merging" and proceed to Phase 11; a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting.
 <!-- curation:off -->
-6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Fix agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
+3. **If `NEXT=fix`** → report SAY and the failing checks from the CI line. Spawn `Agent(subagent_type="Fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Fix agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if fewer than 3 waits have run, step 1 again, else report "CI status unknown — verify manually before merging" and proceed to Phase 11; a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting.
 <!-- curation:end -->
-7. **Budget**: at most 3 waits and 2 fixes in all. When one is spent, report the status and proceed.
+4. **If `NEXT=proceed`** → report SAY unless it is `none`, and the failing checks of a FAILING line, then proceed to Phase 11.
 <!-- /PATTERN: ci-status-gate -->
 
 ### Phase 11: Evidence
@@ -636,9 +632,9 @@ If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lin
 ## Principles
 
 <!-- compliance:on -->
-1. **Orchestration only** - Command spawns agents, never does work itself (no tests, builds or fixes); "Spawn X" means call the Agent tool; the inline calls are the bounded plumbing the charter allows: the fresh base step's resolver calls (Phase 1, re-validation), the Phase 10 and 11 pushes, the Phase 10 ci-wait call, the Phase 11 evidence publish call and the evidence script checks
+1. **Orchestration only** - Command spawns agents, never does work itself (no tests, builds or fixes); "Spawn X" means call the Agent tool; the inline calls are the bounded plumbing the charter allows: the fresh base step's resolver calls (Phase 1, re-validation), the Phase 10 and 11 pushes, the Phase 10 ci-wait call, the Phase 6-8 evidence claim calls, the Phase 11 evidence publish call and the evidence script checks
 <!-- compliance:off -->
-1. **Orchestration only** - Command spawns agents, never does work itself (no tests, builds or fixes); "Spawn X" means call the Agent tool; the inline calls are the bounded plumbing the charter allows: the fresh base step's resolver calls (Phase 1, re-validation), the Phase 10 and 11 pushes, the Phase 10 ci-wait call, the Phase 11 evidence verify call and the evidence script checks
+1. **Orchestration only** - Command spawns agents, never does work itself (no tests, builds or fixes); "Spawn X" means call the Agent tool; the inline calls are the bounded plumbing the charter allows: the fresh base step's resolver calls (Phase 1, re-validation), the Phase 10 and 11 pushes, the Phase 10 ci-wait call, the Phase 6-8 evidence claim calls, the Phase 11 evidence verify call and the evidence script checks
 <!-- compliance:end -->
 2. **Honest reporting** - Display agent outputs directly
 3. **Loop limits** - Max 2 validation retries, max 2 alignment fix iterations, max 2 QA retries before escalating to user; the CI gate allows at most 3 waits and 2 fixes

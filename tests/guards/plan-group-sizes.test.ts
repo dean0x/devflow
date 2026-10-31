@@ -1,6 +1,6 @@
 /**
- * Size ceilings of the Plan path group (#714): the Design agent body in both curation builds,
- * the two mode skills that it preloads, and the Explore agent body. A spawn reads these bytes
+ * Size ceilings of the Plan path group (#714): the Design and Architect agent bodies (#733) in
+ * both curation builds, the mode skill that each preloads, and the Explore agent body. A spawn reads these bytes
  * again in every turn, so each ceiling holds the size that the lean cut reached. The /plan
  * command builds keep their ceilings in command-size.test.ts. Each row is registered in
  * `tests/fixtures/numeric-floors.json`; lowered, never raised.
@@ -12,9 +12,13 @@ import * as path from 'path'
 import { ROOT, resolveAgentSource, resolveCurationOffSource } from '../helpers.js'
 
 /** The Design agent body of the curation-on build, dist/agents/design.md, in bytes. */
-const DESIGN_BODY_MAX_BYTES = 4_219
+const DESIGN_BODY_MAX_BYTES = 3_618
 /** The Design agent body of the curation-off build, dist/curation-off/agents/design.md, in bytes. */
-const DESIGN_BODY_CURATION_OFF_MAX_BYTES = 3_653
+const DESIGN_BODY_CURATION_OFF_MAX_BYTES = 3_052
+/** The Architect agent body of the curation-on build, dist/agents/architect.md, in bytes. */
+const ARCHITECT_BODY_MAX_BYTES = 3_387
+/** The Architect agent body of the curation-off build, dist/curation-off/agents/architect.md, in bytes. */
+const ARCHITECT_BODY_CURATION_OFF_MAX_BYTES = 2_821
 /** The Explore agent body (hand-authored, one build), in bytes. */
 const EXPLORE_BODY_MAX_BYTES = 3_355
 
@@ -30,12 +34,18 @@ function collectSizeDefects(label: string, text: string, ceiling: number): strin
   return bytes > ceiling ? [`${label} is ${bytes} bytes, ceiling ${ceiling}`] : []
 }
 
+function curationOffBody(name: string): string {
+  const off = resolveCurationOffSource('agents', name)
+  if (off === null) throw new Error(`dist/curation-off/agents/${name}.md is absent: run \`npm run build:mds\``)
+  return off
+}
+
 function agentBuilds(): ReadonlyArray<readonly [string, string, number]> {
-  const off = resolveCurationOffSource('agents', 'design')
-  if (off === null) throw new Error('dist/curation-off/agents/design.md is absent: run `npm run build:mds`')
   return [
     ['design.md (curation on)', resolveAgentSource('design').content, DESIGN_BODY_MAX_BYTES],
-    ['design.md (curation off)', off, DESIGN_BODY_CURATION_OFF_MAX_BYTES],
+    ['design.md (curation off)', curationOffBody('design'), DESIGN_BODY_CURATION_OFF_MAX_BYTES],
+    ['architect.md (curation on)', resolveAgentSource('architect').content, ARCHITECT_BODY_MAX_BYTES],
+    ['architect.md (curation off)', curationOffBody('architect'), ARCHITECT_BODY_CURATION_OFF_MAX_BYTES],
     ['explore.md', resolveAgentSource('explore').content, EXPLORE_BODY_MAX_BYTES],
   ]
 }

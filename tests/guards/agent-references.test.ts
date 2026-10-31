@@ -35,7 +35,7 @@ const SYNTHESIZE_MODE_REF_MAX_BYTES = 3_797
 const CODE_REVIEW_LEVELS_REF_MAX_BYTES = 1_349
 
 /** The `/plan` gate-level reference, in bytes. Registered as `plan-levels-ref-max`; lowered, never raised. */
-const PLAN_LEVELS_REF_MAX_BYTES = 4_009
+const PLAN_LEVELS_REF_MAX_BYTES = 3_995
 
 /** The `/resolve` gate-level reference, in bytes. Registered as `resolve-levels-ref-max`; lowered, never raised. */
 const RESOLVE_LEVELS_REF_MAX_BYTES = 2_690
@@ -47,16 +47,16 @@ const IMPLEMENT_LEVELS_REF_MAX_BYTES = 3_921
 const TRIAGE_TIERS_REF_MAX_BYTES = 4_562
 
 /** The Triage agent body of the curation-on build, dist/agents/triage.md, in bytes. Registered as `triage-body-max`; lowered, never raised. */
-const TRIAGE_BODY_MAX_BYTES = 11_813
+const TRIAGE_BODY_MAX_BYTES = 11_260
 
 /** The Triage agent body of the curation-off build, dist/curation-off/agents/triage.md, in bytes. Registered as `triage-body-curation-off-max`; lowered, never raised. */
-const TRIAGE_BODY_CURATION_OFF_MAX_BYTES = 11_029
+const TRIAGE_BODY_CURATION_OFF_MAX_BYTES = 10_525
 
 /** The Triage agent body of the compliance-off build, dist/compliance-off/agents/triage.md, in bytes. Registered as `triage-body-compliance-off-max`; lowered, never raised. */
-const TRIAGE_BODY_COMPLIANCE_OFF_MAX_BYTES = 11_752
+const TRIAGE_BODY_COMPLIANCE_OFF_MAX_BYTES = 11_199
 
 /** The Triage agent body of the build with both axes off, dist/curation-compliance-off/agents/triage.md, in bytes. Registered as `triage-body-both-off-max`; lowered, never raised. */
-const TRIAGE_BODY_BOTH_OFF_MAX_BYTES = 10_968
+const TRIAGE_BODY_BOTH_OFF_MAX_BYTES = 10_464
 
 /** The Validate passed-alone re-run reference, in bytes. Registered as `validate-passed-alone-ref-max`; lowered, never raised. */
 const VALIDATE_PASSED_ALONE_REF_MAX_BYTES = 3_400

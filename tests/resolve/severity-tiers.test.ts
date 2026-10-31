@@ -27,10 +27,10 @@ const RESOLVE_OFF = resolveCurationOffSource('commands', 'resolve')
 if (RESOLVE_OFF === null) throw new Error('dist/curation-off/commands/resolve.md is absent: run `npm run build:mds`')
 
 interface TriageBuild { readonly label: string; readonly body: string; readonly bytes: number; readonly sha256: string }
-/** The two Triage builds, each with the length and sha256 it had before the Gate Level bullet and section were added. */
+/** The two Triage builds, each with the length and sha256 of its build with the Gate Level bullet and section stripped. Re-based by the lean cut of #716, which cut text outside the Gate Level parts (before: 10,516 and 9,732 bytes, the builds before #484 added those parts). */
 const TRIAGE_BUILDS: readonly TriageBuild[] = [
-  { label: 'curation on', body: TRIAGE_ON, bytes: 10516, sha256: 'b0435abf2cc61a58d83ddb1ca00a46eb89660268cb9cf76be78c9c26e755eacd' },
-  { label: 'curation off', body: TRIAGE_OFF, bytes: 9732, sha256: '7995498bd170e525cd553913b5530d620f356f9ae10fb1371967ee2bdb8dee47' },
+  { label: 'curation on', body: TRIAGE_ON, bytes: 9963, sha256: '3ab9235dfa2f05ddcfbb4cb48b2de71483e457cf25964d8a106ce9930c935fde' },
+  { label: 'curation off', body: TRIAGE_OFF, bytes: 9228, sha256: 'd6818af95f336ffc1e3ce3f202512b4eae1b143672f40cc0d36b60217f52db4a' },
 ]
 
 /** The Risk Tier cell of a prose-only item: the one value that Triage writes and that /resolve reads. 139 bytes. */
@@ -278,7 +278,7 @@ export function stripGateLevel(body: string): { readonly text: string | null; re
   return { text: kept, defects }
 }
 
-/** AC-9: with the bullet and section stripped, a build equals its pre-change length and sha256. */
+/** AC-9: with the bullet and section stripped, a build equals its recorded length and sha256. */
 export function collectFullPathDigestDefects(body: string, bytes: number, sha256: string): string[] {
   const { text, defects } = stripGateLevel(body)
   if (text === null) return defects
@@ -658,7 +658,7 @@ describe('the Triage level bullet (TP-36)', () => {
 })
 
 describe('the full path is unchanged (TP-21)', () => {
-  it.each(TRIAGE_BUILDS)('$label: with the bullet and the Gate Level section stripped, the build equals its pre-change length and sha256', ({ body, bytes, sha256 }) => {
+  it.each(TRIAGE_BUILDS)('$label: with the bullet and the Gate Level section stripped, the build equals its recorded length and sha256', ({ body, bytes, sha256 }) => {
     expect(collectFullPathDigestDefects(body, bytes, sha256)).toEqual([])
   })
 
