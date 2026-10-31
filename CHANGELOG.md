@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Commands, agents, skills and rules are leaner** ([#706](https://github.com/dean0x/devflow/issues/706)). Over 14 commands, a typical run reads 18.7 % fewer bytes and takes 15.5 % fewer turns than at 3.11.0, before the always-loaded text, guide and `/implement` changes. The Design agent is now two agents: Design (gap analysis) and Architect (design review).
 - **A command now makes one script call to learn its roots, in place of up to three git calls** ([#683](https://github.com/dean0x/devflow/issues/683)).
   - The new `resolve-root.cjs` script prints the checkout root and the decisions ledger root. A command runs it once for each start directory and reuses the answer, so a run over several worktrees resolves each one.
   - The docs root, knowledge root and decisions locate steps each ran git and applied a rule to its output. They now share one step.
