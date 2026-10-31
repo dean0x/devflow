@@ -52,7 +52,7 @@ Phase 7 passes `COMPLIANCE_DIRECTIVE` to the Code agent that implements the fix,
 The orchestrator uses `DECISIONS_CONTEXT` locally when generating hypotheses (Phase 2) — prior pitfalls and decisions can suggest specific root causes to investigate. Follow `devflow:apply-decisions` to Read full entry bodies on demand. **Do NOT pass `DECISIONS_CONTEXT` to Explore investigators** — decisions context stays in the orchestrator; investigators examine code directly.
 
 <!-- curation:end -->
-**No up-front feature knowledge load** — debug investigation workers read code directly to avoid confirmation bias.
+**No up-front feature knowledge load** — debug investigation workers read code directly to avoid confirmation bias. Write back only if the investigation found durable, cross-cutting knowledge.
 
 ### Phase 2: Context Gathering
 

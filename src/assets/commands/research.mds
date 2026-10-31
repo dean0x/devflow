@@ -123,6 +123,7 @@ Output: {worktree}/.devflow/docs/research/{topic-slug}/{YYYY-MM-DD_HHMM}/researc
 **Requires:** RESEARCH_SUMMARY
 
 Present findings to user with:
+- The research folder `{worktree}/.devflow/docs/research/{topic-slug}/{YYYY-MM-DD_HHMM}/`
 - Trust annotations per finding: (trusted) for codebase, (untrusted) for web, (mixed) for technology
 - Explicit conflicts between codebase and web findings
 - Drill-down offer via AskUserQuestion
