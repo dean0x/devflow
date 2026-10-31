@@ -160,7 +160,7 @@ devflow/
 │   ├── integration/                  # Real claude / tarball installs
 │   └── fixtures/
 │       ├── golden/                   # git-agent.md (regenerated in fixture-only commits); github-status-lines.txt (frozen)
-│       └── numeric-floors.json       # Hand-registered ratchet manifest — floors raise, never lower; ceilings lower, never raise
+│       └── numeric-floors.json       # Hand-registered ratchet manifest — floors raise, never lower; ceilings lower, or rise only by the lean-prompts exception
 ├── docs/
 │   └── reference/                    # Extracted reference docs
 ```
