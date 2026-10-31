@@ -115,7 +115,7 @@ const EXEMPT_MARKERS: Readonly<Record<string, readonly string[]>> = {
 /** What every cap line states, whatever the agent. */
 const COMMON_CLAUSES: readonly string[] = [
   'about 1,500 tokens',
-  '`mktemp`',
+  '`mktemp',
   'gives its path',
   'Exempt',
 ]

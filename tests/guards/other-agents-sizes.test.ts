@@ -16,11 +16,11 @@ type Build = 'on' | 'off'
  * itself for a hand-authored agent. Each row's text is the pattern its numeric-floors.json entry pins.
  */
 const AGENT_MAX_BYTES: ReadonlyArray<readonly [string, Build, number]> = [
-  ['research', 'on', 5_184],
-  ['research', 'off', 4_824],
+  ['research', 'on', 5_183],
+  ['research', 'off', 4_823],
   ['evaluate', 'on', 4_234],
-  ['debug', 'on', 9_411],
-  ['debug', 'off', 9_051],
+  ['debug', 'on', 9_410],
+  ['debug', 'off', 9_050],
   ['skim', 'on', 6_617],
   ['skim', 'off', 5_495],
   ['tracker', 'on', 18_359],

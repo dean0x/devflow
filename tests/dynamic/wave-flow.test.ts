@@ -2453,7 +2453,7 @@ const WAVE_OFF_SEEDS: ReadonlyArray<readonly [site: string, from: string, to: st
   ['empty block', 'With no line under the heading, `PR_WAVE_BLOCK` is `(none)` and nothing is checked.', 'With no line under the heading, the wave PR is not opened.'],
   ['refused block', 'Wave PR: not opened (wave block refused: <the code on stderr>)', 'Wave PR: opened anyway'],
   ['no verdict table', 'It has no verdict table and no evidence section', 'It has a verdict table'],
-  ['test plan check only', 'check tp "{integration worktree root}/.devflow/docs/evidence-wave-{slug}.md"; echo "exit=$?"', 'check tp "{integration worktree root}/.devflow/docs/evidence-wave-{slug}.md"; echo "exit=$?"\nnode "$HOME/.devflow/scripts/verify-evidence.cjs" render --plan "{integration worktree root}/.devflow/docs/evidence-wave-{slug}.md"; echo "exit=$?"'],
+  ['test plan check only', 'check tp "<that file>"; echo "exit=$?"', 'check tp "<that file>"; echo "exit=$?"\nnode "$HOME/.devflow/scripts/verify-evidence.cjs" render --plan "<that file>"; echo "exit=$?"'],
   ['the ask', 'It references {n} linked tickets.', 'It links {n} merged tickets.'],
   ['the spawn', 'PR_WAVE_BLOCK: {PR_WAVE_BLOCK verbatim, or (none)}"', 'PR_WAVE_BLOCK: {PR_WAVE_BLOCK verbatim}\n   PR_TEST_PLAN_BLOCK: {PR_TEST_PLAN_BLOCK verbatim, or (none)}"'],
   ['no wave test plan', 'No wave test plan line ⇒ record `Wave evidence: skipped (no wave test plan)`', 'No wave test plan line ⇒ go on'],
