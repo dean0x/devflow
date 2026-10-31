@@ -1,6 +1,6 @@
 /**
- * Size ceilings of the agents that #718 (lean other targets) cut and that had no ceiling of
- * their own: each agent body in every curation build. A spawn reads these bytes again in every
+ * Size ceilings of the agents that had no ceiling of their own: those that #718 (lean other
+ * targets) cut, and Harden and Polish: each agent body in every curation build. A spawn reads these bytes again in every
  * turn, so each ceiling holds the size that the lean cut reached. Validate and Synthesize keep
  * their ceilings in validate-lint-pack.test.ts and agent-references.test.ts. Each row is
  * registered in `tests/fixtures/numeric-floors.json`; lowered, never raised.
@@ -24,6 +24,9 @@ const AGENT_MAX_BYTES: ReadonlyArray<readonly [string, Build, number]> = [
   ['skim', 'on', 6_617],
   ['skim', 'off', 5_495],
   ['tracker', 'on', 18_359],
+  ['harden', 'on', 5_047],
+  ['harden', 'off', 4_479],
+  ['polish', 'on', 4_537],
 ]
 
 /** Named collector: the file is over its ceiling. */
