@@ -1259,6 +1259,14 @@
       "occurrences": 1,
       "sourceFile": "tests/guards/other-agents-sizes.test.ts",
       "description": "The Research agent body of the curation-off build, dist/curation-off/agents/research.md, in bytes. Added by #718 (lean other targets) at 4,793, after the cut from 5,794."
+    },
+    {
+      "id": "evaluate-body-max",
+      "ceiling": 4234,
+      "pattern": "['evaluate', 'on', 4_234],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/other-agents-sizes.test.ts",
+      "description": "The Evaluate agent body, src/assets/agents/evaluate.md, in bytes. It is hand-authored, with one build. Every turn of every Evaluate spawn reads it (sonnet, one spawn per /implement alignment pass). Added by #718 (lean other targets) at 4,234, after the cut from 4,672."
     }
   ]
 }

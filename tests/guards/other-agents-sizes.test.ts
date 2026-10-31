@@ -11,10 +11,14 @@ import { resolveAgentSource, resolveCurationOffSource } from '../helpers.js'
 
 type Build = 'on' | 'off'
 
-/** [agent, curation build, ceiling of its compiled body in bytes]. Each row's text is the pattern its numeric-floors.json entry pins. */
+/**
+ * [agent, curation build, ceiling of its compiled body in bytes]. `on` is the default build, which is the source
+ * itself for a hand-authored agent. Each row's text is the pattern its numeric-floors.json entry pins.
+ */
 const AGENT_MAX_BYTES: ReadonlyArray<readonly [string, Build, number]> = [
   ['research', 'on', 5_153],
   ['research', 'off', 4_793],
+  ['evaluate', 'on', 4_234],
 ]
 
 /** Named collector: the file is over its ceiling. */
