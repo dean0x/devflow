@@ -84,7 +84,7 @@ Run builds, typechecks, lints and tests in the foreground, each with an explicit
 {Description of blocker or failure with recommendation}
 ```
 
-Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file (via Bash or Write) and the message gives its path. Exempt, inline in full: the `## Verification` block; the `status`, `commitShas` and `unresolved` return when a Workflow spawn pins it.
+Report cap: final message at most about 1,500 tokens; longer material goes to a new file in a `mktemp -d` folder and the message gives its path. Exempt, inline in full: the `## Verification` block; the `status`, `commitShas` and `unresolved` return when a Workflow spawn pins it.
 
 ## Boundaries
 

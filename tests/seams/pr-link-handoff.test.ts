@@ -1018,9 +1018,9 @@ describe('ensure-pr-ready opens the PR (D-LINK-VERBATIM, D-COMMIT-EXPLICIT, D-PR
     need('a failed scrub still creates the PR with a minimal body', ref.includes('**On scrubber failure** (non-zero exit or script missing): still create the PR — PR existence is the deliverable'))
     need('the degraded line is the redaction one', ref.includes('plus the literal line `TRACEABILITY: DEGRADED (redaction unavailable)`'))
     need('the raw body is never posted', ref.includes('Never post `$DEVFLOW_BODY_RAW`.'))
-    need('a given base is checked by reading, written to a fresh temp file with the Write tool and read back, and an empty file opens no PR',
+    need('a given base is checked by reading, written to a new file in a mktemp -d folder with the Write tool and read back, and an empty file opens no PR',
       ref.includes(`When \`BASE_BRANCH\` is given, check it first against the step-5a name check (${JUDGE_BY_READING}).`) &&
-      ref.includes('Read that file, Write `BASE_BRANCH` to it with the Write tool, and Read it back.') &&
+      ref.includes('Then Write `BASE_BRANCH` with the Write tool to a new file in a `mktemp -d` folder (`{name file}`), and Read it back.') &&
       ref.includes('An empty file ends with Status BLOCKED and no PR, after `rm -- "{name file}"`.'))
     // The 4a base, the 4c title and the 5a name each have a Write step.
     need('a failed Write is a missing value, never a shell write', ref.split(WRITE_FAILURE).length - 1 >= 3)
@@ -1048,7 +1048,7 @@ describe('ensure-pr-ready opens the PR (D-LINK-VERBATIM, D-COMMIT-EXPLICIT, D-PR
       { from: '**On scrubber failure** (non-zero exit or script missing): still create the PR — PR existence is the deliverable', to: '**On scrubber failure** (non-zero exit or script missing): create no PR', expected: 'a failed scrub still creates the PR with a minimal body' },
       { from: 'plus the literal line `TRACEABILITY: DEGRADED (redaction unavailable)`', to: 'plus a warning', expected: 'the degraded line is the redaction one' },
       { from: '--base="$(cat -- "$F")"', to: '--base "$BASE_BRANCH"', expected: 'the base reaches gh pr create only from the name file' },
-      { from: 'Read that file, Write `BASE_BRANCH` to it with the Write tool, and Read it back.', to: 'Run `printf "%s" "$BASE_BRANCH" > "$F"`.', expected: 'a given base is checked by reading, written to a fresh temp file with the Write tool and read back, and an empty file opens no PR' },
+      { from: 'Then Write `BASE_BRANCH` with the Write tool to a new file in a `mktemp -d` folder (`{name file}`), and Read it back.', to: 'Run `printf "%s" "$BASE_BRANCH" > "$F"`.', expected: 'a given base is checked by reading, written to a new file in a mktemp -d folder with the Write tool and read back, and an empty file opens no PR' },
       { from: WRITE_FAILURE, to: 'If the Write tool fails, write it with a shell command.', expected: 'a failed Write is a missing value, never a shell write' },
       { from: 'after the last create attempt, `rm -- "$F"`', to: 'after the first create attempt, `rm -- "$F"`', expected: 'the name file is removed after the last create attempt, so a scrubber failure opens the PR with the given base' },
       { from: 'and no second EXIT trap is armed', to: 'and a second EXIT trap is armed', expected: 'the D11 trap is unchanged and no second exit trap is armed for the base' },
@@ -1182,10 +1182,10 @@ function waveTestPlanText(source: string): string | null {
  */
 const WAVE_SLUG_GATE = 'Only a name matching `^wave/[a-z0-9][a-z0-9-]{0,59}$` opens a wave PR, and its part after `wave/` is the `{slug}` below'
 
-/** The wave's two commands over the slug-built evidence path, verbatim: double-quoted, each read by its exit code. */
+/** The wave's two commands, verbatim: the new file copied to the slug-built evidence path, then checked and rendered, double-quoted, each read by its exit code. */
 const WAVE_EVIDENCE_PATH = '"{integration worktree root}/.devflow/docs/evidence-wave-{slug}.md"'
-const WAVE_CHECK = `verify-evidence.cjs" check tp ${WAVE_EVIDENCE_PATH}; echo "exit=$?"`
-const WAVE_RENDER = `verify-evidence.cjs" render --plan ${WAVE_EVIDENCE_PATH}; echo "exit=$?"`
+const WAVE_CHECK = `cp -- "<that file>" ${WAVE_EVIDENCE_PATH} && node "$HOME/.devflow/scripts/verify-evidence.cjs" check tp "<that file>"; echo "exit=$?"`
+const WAVE_RENDER = `verify-evidence.cjs" render --plan "<that file>"; echo "exit=$?"`
 
 /** Named collector: what the wave caller's PR_TEST_PLAN_BLOCK rendering fails to state. */
 function collectWaveTestPlanRenderDefects(file: string, source: string): string[] {
@@ -1308,7 +1308,7 @@ describe('PR_TEST_PLAN_BLOCK forwarding — every ensure-pr-ready spawn carries 
     expect(collectWaveTestPlanRenderDefects(WAVE_CALLER, ungated))
       .toEqual([`${WAVE_CALLER}: the slug is shape-gated by the wave branch check, before the path is built`])
 
-    const unchecked = real.replace(/^node .*check tp .*evidence-wave.*\n/m, '')
+    const unchecked = real.replace(/^cp .*evidence-wave.*check tp .*\n/m, '')
     expect(unchecked, 'the check seed must land').not.toBe(real)
     expect(collectWaveTestPlanRenderDefects(WAVE_CALLER, unchecked)).toEqual([`${WAVE_CALLER}: the evidence path is checked, double-quoted`])
 

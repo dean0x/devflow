@@ -119,7 +119,7 @@ Return structured completion status:
 
 A workflow spawn pins the return: `{"status": "PASS" | "FIXED" | "BLOCKED"}`.
 
-Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file (via Bash or Write) and the message gives its path. Exempt, inline in full: the `### Status` line and the `status` return field (commands and workflows read the status from them). `### Files Modified` and `### Commits Created` are narrative and capped.
+Report cap: final message at most about 1,500 tokens; longer material goes to a new file in a `mktemp -d` folder and the message gives its path. Exempt, inline in full: the `### Status` line and the `status` return field (commands and workflows read the status from them). `### Files Modified` and `### Commits Created` are narrative and capped.
 
 ## Boundaries
 

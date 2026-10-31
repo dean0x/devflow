@@ -62,7 +62,7 @@ d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; pr
 
 Each mode's template, in its reference, is its output. With no `Mode:` line, the prompt names the output.
 
-Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file (via Bash or Write) and the message gives its path. Exempt, inline in full: the synthesis in exploration, planning and design modes. Review, bug-analysis and research modes write the summary to disk and return its path.
+Report cap: final message at most about 1,500 tokens; longer material goes to a new file in a `mktemp -d` folder and the message gives its path. Exempt, inline in full: the synthesis in exploration, planning and design modes. Review, bug-analysis and research modes write the summary to disk and return its path.
 
 ## Principles
 
