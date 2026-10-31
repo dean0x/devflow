@@ -1966,6 +1966,7 @@ module.exports = Object.freeze({
   MARKERS,
   TP_LINE_RE,
   CLAIM_LINE_RE,
+  CLAIMS_HEADING,
   EXCEPTION_LINE_RE,
   EVIDENCE_LINE_RE,
   SHA_RE,

@@ -226,7 +226,7 @@ describe('module surface', () => {
   it('exports exactly the documented names, frozen', () => {
     expect(Object.isFrozen(PE)).toBe(true)
     expect(Object.keys(PE).sort()).toEqual([
-      'CLAIM_LINE_RE', 'EVIDENCE_LINE_RE', 'EXCEPTION_KINDS', 'EXCEPTION_LINE_RE', 'GLOB_RE', 'LIMITS',
+      'CLAIMS_HEADING', 'CLAIM_LINE_RE', 'EVIDENCE_LINE_RE', 'EXCEPTION_KINDS', 'EXCEPTION_LINE_RE', 'GLOB_RE', 'LIMITS',
       'LOGIN_RE', 'MARKERS', 'METHODS', 'PRECEDENCE', 'SHA_RE', 'STATES', 'TP_LINE_RE',
       'TRUSTED_ASSOCIATIONS', 'TRUSTED_PERMISSIONS', 'VERIFIED_STATES',
       // The wave block (#365) — tests/evidence/wave-block.test.ts is their suite.
