@@ -1040,10 +1040,10 @@ function collectEvidenceRunDefects(content: string): string[] {
   if (!phase.includes('It never blocks')) out.push('Phase 11 may block')
   if (!phase.includes('Use the Bash tool with `timeout: 180000`')) out.push('the call carries no Bash timeout above the script\'s two deadlines')
   if (!phase.includes('path does not match `^[A-Za-z0-9._/-]{1,255}$`')) out.push('the evidence path reaches the shell ungated')
-  if (!phase.includes('Capture its stdout as `EVIDENCE_RESULT`; empty stdout (node could not run) is `TRACEABILITY: DEGRADED (evidence unavailable)`')) {
+  if (!phase.includes('Capture its stdout as `EVIDENCE_RESULT`; empty stdout, or an exit other than 0 or 2, is `TRACEABILITY: DEGRADED (evidence unavailable)`')) {
     out.push('a failed run names no DEGRADED reason')
   }
-  if (/`EVIDENCE` line|`\*\*Body\*\*:`|exit 2|any other exit/.test(phase)) out.push('Phase 11 restates what the script prints')
+  if (/`EVIDENCE` line|`\*\*Body\*\*:`/.test(phase)) out.push('Phase 11 restates what the script prints')
   return out
 }
 
@@ -1149,7 +1149,7 @@ describe('AC-11: Phase 11 runs the evidence script once, after Phase 10, for eve
     expect(collectEvidenceRunDefects(md.replace('Use the Bash tool with `timeout: 180000`', 'Use the Bash tool'))).toEqual([
       'the call carries no Bash timeout above the script\'s two deadlines',
     ])
-    const restated = md.replace('Capture its stdout as `EVIDENCE_RESULT`; empty stdout (node could not run) is', 'Capture its stdout as `EVIDENCE_RESULT`: the block, or on exit 2 the one line; empty stdout is')
+    const restated = md.replace('Capture its stdout as `EVIDENCE_RESULT`; empty stdout, or an exit other than 0 or 2, is', 'Capture its stdout as `EVIDENCE_RESULT`: its `EVIDENCE` line and its `**Body**:` line; empty stdout is')
     expect(restated, 'the seed must land').not.toBe(md)
     expect(collectEvidenceRunDefects(restated)).toEqual([
       'a failed run names no DEGRADED reason',

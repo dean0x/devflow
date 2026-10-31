@@ -50,7 +50,7 @@ const DOCS_ROOT_LEAD = '**Docs root (D-DOCS-ROOT).**';
 const ROOT_COMMAND = 'node "$HOME/.devflow/scripts/resolve-root.cjs" "{start}"; echo "exit=$?"';
 
 /** The sentence that makes the step run once per run. */
-const ONCE_PER_RUN = 'Once per run: if this run already resolved the roots, reuse them.';
+const ONCE_PER_RUN = 'Once per start directory (`WORKTREE_PATH` if provided, otherwise cwd), run from it:';
 
 /** What the prose says to do with any answer but the three accepted lines. */
 const FALLBACK_SENTENCE = 'Otherwise both are the start directory.';
