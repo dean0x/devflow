@@ -3,7 +3,7 @@ output-dir: dist/agents
 ---
 ---
 name: Debug
-description: Proactive bug finding agent with static+semantic analysis. Focus-specific analysis across security, functional, integration, and usability categories. The /bug-analysis command spawns it. It is not the /debug command.
+description: Proactive bug finding with static and semantic analysis, one focus per spawn (security, functional, integration or usability). The /bug-analysis command spawns it; it is not the /debug command.
 model: opus
 effort: medium
 skills:

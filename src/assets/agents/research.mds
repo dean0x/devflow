@@ -3,7 +3,7 @@ output-dir: dist/agents
 ---
 ---
 name: Research
-description: Multi-type research agent with dynamic skill loading. Receives research type, loads domain-specific skill, produces structured findings.
+description: One research type per spawn; loads that type's skill and produces structured findings.
 model: opus
 effort: medium
 skills:

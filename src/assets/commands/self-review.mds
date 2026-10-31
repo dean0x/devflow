@@ -1,5 +1,5 @@
 ---
-description: Self-review workflow - Polish agent (code clarity) then Harden agent (9-pillar quality gate)
+description: Polish (code clarity), then Harden (9-pillar quality gate)
 output-dir: dist/commands
 ---
 @import { knowledge_load, knowledge_writeback_after_load } from "./_partials/_knowledge.mds"
