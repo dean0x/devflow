@@ -30,7 +30,7 @@ Run a comprehensive code review of the current branch by spawning parallel revie
 
 1. **Discover reviewable worktrees**:
    - Run `git worktree list --porcelain` and count the worktrees it lists
-   - **More than one listed:** Invoke the `devflow:worktree-support` skill, then Read its `references/discovery.md` from the skill's base directory, and apply it
+   - **More than one listed:** Invoke the `devflow:worktree-support` skill, then Read its `references/discovery.md` from the skill's base directory for the full 7-step algorithm; the canonical protected branch list stays in the skill. Parse the list, filter (skip protected/detached/mid-rebase), dedup by branch, sort by recent commit
    - **Exactly one listed:** load neither the skill nor the reference — that worktree is the only candidate, and Step 0c's Git agent validates its branch
 2. **If `--path` flag provided:** use only that worktree, skip discovery
    **`--path` validation**: the path must be a directory in `git worktree list` output; if not, report an error and stop.
@@ -495,4 +495,4 @@ Per worktree, after successful completion:
 2. **Parallel, not background** - Multiple agents in one message, but `run_in_background=false` so phases complete before proceeding
 3. **Git agent for git work** - All git operations go through Git agent, except the exceptions named in Principle 1; its writes print nothing
 4. **Honest reporting** - Display agent outputs directly
-5. **Fewest turns** - Send calls that need no output of each other in one message: the Step 0a listing with the Step 0b-ii script; the Step 1.2b directory print with the Step 1.1 listing, and its Read with the `paths.txt` Read; the Phase 1b git calls with the Step 1.3 writes
+5. **Fewest turns** - Send calls that need no output of each other in one message: the Step 0a listing with the Step 0b-ii script; at `standard` or `lean`, the Step 1.2b directory print with the Step 1.1 listing, and its Read with the `paths.txt` Read; the Phase 1b git calls, each under its own condition, with the Step 1.3 writes

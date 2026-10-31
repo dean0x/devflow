@@ -37,6 +37,7 @@ Measurement tools: flame graphs for CPU hot paths (widest frames are hottest), H
 
 - **Blocking operations**: synchronous I/O (`readFileSync`) in a request path blocks the event loop.
 - **Sequential when parallel is possible**: independent awaits run serially, so the total is the sum, not the max. Fix: `Promise.all`.
+- **Wrong layer**: CPU micro-tuning on a path bound by disk or network I/O (RAM ~100ns, SSD ~100µs, network ~500µs).
 
 ### 4. Database Issues
 
@@ -72,8 +73,4 @@ Unnecessary re-renders, missing virtualization, missing code splitting. See `ref
 
 ## Quick Detection
 
-```bash
-grep -rn "for.*await\|\.forEach.*async" --include="*.ts"  # N+1
-grep -rn "readFileSync\|writeFileSync" --include="*.ts"   # Sync I/O
-grep -rn "SELECT \*" --include="*.ts" --include="*.sql"   # SELECT *
-```
+In the diff, search for `await` in a loop or `.forEach(async` (N+1), `readFileSync`/`writeFileSync` (sync I/O) and `SELECT *`.

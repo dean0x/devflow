@@ -12,20 +12,20 @@ import * as path from 'path'
 import { ROOT, resolveAgentSource, resolveCurationOffSource } from '../helpers.js'
 
 /** The Review agent body of the curation-on build, dist/agents/review.md, in bytes. */
-const REVIEW_BODY_MAX_BYTES = 10_739
+const REVIEW_BODY_MAX_BYTES = 10_930
 /** The Review agent body of the curation-off build, dist/curation-off/agents/review.md, in bytes. */
-const REVIEW_BODY_CURATION_OFF_MAX_BYTES = 10_143
+const REVIEW_BODY_CURATION_OFF_MAX_BYTES = 10_334
 
 /** [skill, ceiling of its SKILL.md in bytes]. Each row's text is the pattern its numeric-floors.json entry pins. */
 const SKILL_MAX_BYTES: ReadonlyArray<readonly [string, number]> = [
-  ['review-methodology', 3_205],
+  ['review-methodology', 3_217],
   ['architecture', 3_425],
   ['complexity', 2_487],
   ['consistency', 2_158],
   ['database', 3_050],
-  ['dependencies', 2_055],
+  ['dependencies', 2_073],
   ['documentation', 2_830],
-  ['performance', 3_070],
+  ['performance', 3_102],
   ['regression', 3_140],
   ['reliability', 2_546],
   ['security', 4_085],

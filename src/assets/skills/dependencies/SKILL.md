@@ -29,7 +29,7 @@ Detection patterns for dependency management and supply-chain review. Use with `
 
 - `references/violations.md` - Extended violation examples by category
 - `references/patterns.md` - Correct dependency management patterns
-- `references/detection.md` - Detection commands and CI integration
+- `references/detection.md` - Detection commands, CI integration and advisory sources
 
 ## Severity Guidelines
 

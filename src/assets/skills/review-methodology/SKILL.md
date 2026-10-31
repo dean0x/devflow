@@ -72,4 +72,4 @@ Create report with all three issue sections, summary counts, and merge recommend
 - `references/patterns.md`: diff commands, report file naming, and where PR publication happens
 - `references/violations.md`: review process anti-patterns and violations
 
-The Review agent loads one focus skill for each spawn: `devflow:security`, `devflow:performance`, `devflow:architecture`, `devflow:testing`, `devflow:consistency`, `devflow:complexity`, `devflow:regression`, `devflow:dependencies`, `devflow:documentation`, `devflow:typescript` or `devflow:database`.
+The Review agent loads one focus skill for each spawn, for example `devflow:security`, `devflow:performance`, `devflow:architecture`, `devflow:testing`, `devflow:consistency`, `devflow:complexity`, `devflow:regression`, `devflow:dependencies`, `devflow:documentation`, `devflow:typescript` or `devflow:database`.

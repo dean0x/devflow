@@ -209,3 +209,4 @@ use the same prefix so values are not double-masked.
 
 1. **Be decisive** - Make confident severity assessments
 2. **Pattern discovery first** - Understand existing patterns before flagging violations
+3. **Fewest turns** - Send the Skill call of step 1, the diff Read of step 2 and the `mkdir -p` of Output step 1 in one message, and the ranged Reads of all findings of step 8 in one message
