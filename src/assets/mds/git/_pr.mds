@@ -299,7 +299,7 @@ Load for `update-pr-evidence` under every tracker provider.
 ### Process
 
 1. From `WORKTREE_PATH` (else cwd), run `node "$HOME/.devflow/scripts/verify-evidence.cjs" publish --pr {PR_NUMBER}; echo "exit=$?"`, adding `--publication {REVIEW_PUBLICATION}` only when that is `auto`, `full`, `off` or `stub`, and `--evidence "{EVIDENCE_FILE}"` when given — only a value matching `^[A-Za-z0-9._/-]{1,255}$` reaches the shell; any other is a failed run. Set the Bash `timeout` to 180000.
-2. Print the script's stdout and nothing else. On exit 0 it is the `## PR Evidence` block: the heading, the line `EVIDENCE pr:<n> head:<sha> total:<n> VERIFIED-CI:<n> ATTESTED-LOCAL:<n> UNVERIFIED:<n> STALE:<n> FAILED:<n> INDETERMINATE:<n> stale:<ids|none> exceptions:<kinds|none> approval:<yes|no|unchecked> key:<hex> posted:<yes|no|n/a> body:<same|changed>`, and the `**Body**:` / `**Comment**:` line, then one `TRACEABILITY: DEGRADED ({reason})` line for each part that degraded, such as `DEGRADED (concurrent edit)` (the body edit then reads `SKIPPED`), `DEGRADED (body read-back mismatch)` or `DEGRADED (redaction unavailable)`: a body the script cannot scrub is never posted. On exit 2 it is `TRACEABILITY: DEGRADED (evidence unavailable)`. Any other exit, or empty stdout, is a failed run: emit that same line.
+2. Print the script's stdout and nothing else; a body the script cannot scrub is never posted. If the script did not run or printed nothing, emit `TRACEABILITY: DEGRADED (evidence unavailable)`.
 
 Run nothing else: the script makes the one PR read, the compare-and-swap body edit, its read-back and the evidence comment itself, edited in place when the viewer's own is the newest evidence comment, and posts nothing it could not scrub.
 @end

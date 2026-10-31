@@ -155,6 +155,8 @@ d .claude/skills/devflow:documentation/references/
 - .claude/skills/devflow:documentation/references/violations.md
 d .claude/skills/devflow:feature-knowledge/
 - .claude/skills/devflow:feature-knowledge/SKILL.md
+d .claude/skills/devflow:feature-knowledge/references/
+- .claude/skills/devflow:feature-knowledge/references/new-kb.md
 d .claude/skills/devflow:gap-analysis/
 - .claude/skills/devflow:gap-analysis/SKILL.md
 d .claude/skills/devflow:gap-analysis/references/
@@ -412,6 +414,7 @@ x .devflow/scripts/redact-secrets.cjs
 x .devflow/scripts/release-trace.cjs
 x .devflow/scripts/resolve-base.cjs
 x .devflow/scripts/resolve-evidence-policy.cjs
+x .devflow/scripts/resolve-root.cjs
 x .devflow/scripts/resolve-settings.cjs
 x .devflow/scripts/verify-evidence.cjs
 

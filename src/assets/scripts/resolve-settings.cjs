@@ -1436,7 +1436,9 @@ if (require.main === module) {
 
 // ---------------------------------------------------------------------------
 // Exports — the CLI seam (src/core/evidence-policy.ts), the capture hooks' gate read
-// without jq (hooks/queue-append requires machineSwitchOn) and the unit tests
+// without jq (hooks/queue-append requires machineSwitchOn), the root resolver
+// (resolve-root.cjs takes the git half of its answer from gitToplevel, defaultExec and
+// ledgerRootOf) and the unit tests
 // ---------------------------------------------------------------------------
 
 module.exports = Object.freeze({
@@ -1451,6 +1453,8 @@ module.exports = Object.freeze({
   foldSettings,
   readRepoLayers,
   machineSwitchOn,
+  defaultExec,
+  gitToplevel,
   ledgerRootOf,
   resolveSettings,
   formatSettingsLine,

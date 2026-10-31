@@ -1,4 +1,18 @@
-A partial: where a command's `.devflow/docs/` artifacts live (D-DOCS-ROOT, #406).
+A partial: where a command's roots are, and where its `.devflow/docs/` artifacts live (D-DOCS-ROOT, #406).
+
+`root_paths()` is the one step that resolves both roots a command works from. One call
+of `resolve-root.cjs` prints `WORKTREE=` (the checkout's toplevel, else the start
+directory) and `LEDGER=` (the decisions ledger's root: the main worktree when the
+checkout is a linked worktree and the main worktree holds a `.devflow/` folder, else the
+toplevel). The script holds no judgment: it takes the git call and the ledger rule from
+`resolve-settings.cjs`, the rule the curation hooks apply. The step runs once per start
+directory, so a run over several worktrees resolves each one.
+`docs_root()` here, `knowledge_root()` in `_knowledge.mds` and `decisions_locate()` in
+`_decisions.mds` each expand it, so no host needs to know which of its steps comes
+first: the first one to run calls the script and the others reuse the answer. Each of the
+three adds only the facts its own host needs after the step. When the script fails, both
+roots are the start directory. A curation-off build also carries the `LEDGER=` line: the
+script only names that folder and reads no file in it.
 
 D-DOCS-ROOT extends D-PROMPT-ROOT from the decisions and knowledge loaders to
 every docs artifact a command reads or writes — design documents, research
@@ -6,9 +20,8 @@ output, bug-analysis and wave directories, ticket sets, and `/implement`'s
 handoff and evidence files. They belong to the checkout, not to the directory
 the session started in: a relative `.devflow/docs/…` path written from
 `packages/app` scattered a second `.devflow/docs/` tree there, which no later
-run found. The rule is the knowledge loader's — the toplevel, else the start
-directory — because docs artifacts are per checkout like knowledge bases, not
-per repository like the decisions ledger.
+run found. The root is `WORKTREE`, because docs artifacts are per checkout like
+knowledge bases, not per repository like the decisions ledger.
 
 A path handed to an agent in repo-relative form (the fields the Git agent's
 operations print into a PR or issue comment, where an absolute path would leak
@@ -18,18 +31,26 @@ relative to, which the receiving agent resolves it under.
 forms; `tests/commands/partials-root.test.ts` runs the resolution command below
 from a root, a subdirectory and a worktree.
 
-One define, imported selectively: MDS deep-clones a module's whole scope into
+Two defines, no imports of their own: MDS deep-clones a module's whole scope into
 every define, so a selective import's capture cost is paid over the importer's
-scope, and a single define with no imports of its own adds one node to it.
+scope. The hosts import `docs_root` alone, and `_knowledge.mds` and `_decisions.mds`
+import `root_paths` alone; each adds one node to the importer's scope.
 
-@define docs_root():
-**Docs root (D-DOCS-ROOT).** Every `.devflow/docs/` path of this command lives at the checkout's toplevel, not under the start directory. From the start directory — `WORKTREE_PATH` if provided, otherwise cwd (`devflow:worktree-support`) — run
+@define root_paths():
+Once per start directory (`WORKTREE_PATH` if provided, otherwise cwd), run from it:
 
 ```bash
-git -C "{start}" rev-parse --show-toplevel
+node "$HOME/.devflow/scripts/resolve-root.cjs" "{start}"; echo "exit=$?"
 ```
 
-Its one-line output is `{worktree}`. If the command fails (outside a git repository), `{worktree}` is the start directory itself. Docs paths below are written `{worktree}/.devflow/docs/…`. A repo-relative docs path handed to an agent always travels with a `WORKTREE_PATH` naming its checkout.
+Accept only the three lines `WORKTREE=<absolute path>`, `LEDGER=<absolute path>` and `exit=0`, which set `{worktree}` and `{ledger}`. Otherwise both are the start directory.
 @end
 
+@define docs_root():
+**Docs root (D-DOCS-ROOT).** Every `.devflow/docs/` path is `{worktree}/.devflow/docs/…`. A repo-relative docs path handed to an agent travels with a `WORKTREE_PATH` naming its checkout.
+
+{{root_paths()}}
+@end
+
+@export root_paths
 @export docs_root

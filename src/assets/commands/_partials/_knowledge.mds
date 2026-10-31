@@ -1,3 +1,5 @@
+@import { root_paths } from "./_docs_root.mds"
+
 A partial: the feature-knowledge load and write-back steps. D-SETTINGS-LINE: it
 imports nothing from `_settings.mds`. Write-back Step 1 takes `KNOWLEDGE` from the
 settings line the host's settings block resolved above, and keeps the
@@ -12,7 +14,9 @@ index, writes the two files directly and commits them is held by its own body
 (knowledge.mds steps 6-8, Direct Write Protocol, Commit Protocol), so the spawn no
 longer restates it.
 
-The checkout-root block lives once, in `knowledge_root()`. `knowledge_load()` carries it,
+The checkout-root block lives once, in `knowledge_root()`, which expands the shared
+`root_paths()` step of `_docs_root.mds` (one `resolve-root.cjs` call, run once per run) and
+adds the knowledge fact. `knowledge_load()` carries it,
 and so does `knowledge_writeback()`, which a host with no load step uses. A host that renders
 `knowledge_load()` earlier in the same command calls `knowledge_writeback_after_load()`, whose
 Step 1 and Step 3 take the `{worktree}` that the load step resolved.
@@ -22,14 +26,13 @@ A host that resolves `{worktree}` earlier with `docs_root()` can call `knowledge
 then calls `knowledge_writeback_after_load()` too, and the `{worktree}` that the docs-root step
 resolved serves the write-back.
 
+The import is selective and takes `root_paths` alone: that define has no imports of its own, so
+it adds one node to the scope of each define here.
+
 @define knowledge_root():
-Resolve `{worktree}` as the checkout's toplevel, because feature knowledge bases are committed with the branch (D-PROMPT-ROOT): from the start directory — `WORKTREE_PATH` if provided, otherwise cwd (`devflow:worktree-support`) — run
+{{root_paths()}}
 
-```bash
-git -C "{start}" rev-parse --show-toplevel
-```
-
-and use its one-line output. If the command fails (outside a git repository), `{worktree}` is the start directory itself. All paths below are relative to `{worktree}`.
+All paths below are relative to `{worktree}`.
 @end
 
 @define knowledge_load_steps():
@@ -65,8 +68,6 @@ A KB with no Rules section labels its entries `Rules ({section name}):` and give
 {{knowledge_root()}}
 
 {{knowledge_load_steps()}}
-
-**One git call, then direct reads — no `.cjs` script.**
 @end
 
 @define knowledge_load_after_root():

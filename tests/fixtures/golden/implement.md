@@ -33,13 +33,15 @@ When the user explicitly asks to re-validate, re-check, or re-run quality gates 
 
 Record the current branch name as `BASE_BRANCH`. Stop the run unless it matches `^(?![-#]|origin\/|(?:@|(?:FETCH_|ORIG_|MERGE_)?HEAD)$)(?!.*\.\.)[A-Za-z0-9._\/+@,#-]{1,200}$` (judge the match by reading; never pass the value to a command), telling the user it allows only ASCII letters, digits and `._/+@,#-`, at most 200; no leading `-` or `#`, no `origin/` prefix, no `..`, not `@` or a HEAD name.
 
-**Docs root (D-DOCS-ROOT).** Every `.devflow/docs/` path of this command lives at the checkout's toplevel, not under the start directory. From the start directory — `WORKTREE_PATH` if provided, otherwise cwd (`devflow:worktree-support`) — run
+**Docs root (D-DOCS-ROOT).** Every `.devflow/docs/` path is `{worktree}/.devflow/docs/…`. A repo-relative docs path handed to an agent travels with a `WORKTREE_PATH` naming its checkout.
+
+Once per start directory (`WORKTREE_PATH` if provided, otherwise cwd), run from it:
 
 ```bash
-git -C "{start}" rev-parse --show-toplevel
+node "$HOME/.devflow/scripts/resolve-root.cjs" "{start}"; echo "exit=$?"
 ```
 
-Its one-line output is `{worktree}`. If the command fails (outside a git repository), `{worktree}` is the start directory itself. Docs paths below are written `{worktree}/.devflow/docs/…`. A repo-relative docs path handed to an agent always travels with a `WORKTREE_PATH` naming its checkout.
+Accept only the three lines `WORKTREE=<absolute path>`, `LEDGER=<absolute path>` and `exit=0`, which set `{worktree}` and `{ledger}`. Otherwise both are the start directory.
 
 **Resolve the evidence policy once per run**, from the repository root, before any step reads the values:
 
@@ -150,21 +152,17 @@ Pass `COMPLIANCE_DIRECTIVE` to every Code and Fix spawn, on a line of its own.
 
 ### Load DECISIONS_CONTEXT
 
-When the settings line says `CURATION=off`, set `DECISIONS_CONTEXT` to `(none)` and skip this step, locating no ledger and reading no index.
+When the settings line says `CURATION=off`, set `DECISIONS_CONTEXT` to `(none)` and skip this step, reading no index.
 
-The decisions ledger belongs to the repository, not to one checkout: a linked worktree reads the main worktree's copy, a subdirectory session the repository root's. Locate it with one git call, run from the start directory — `WORKTREE_PATH` if provided, otherwise cwd (`devflow:worktree-support`):
+The decisions ledger belongs to the repository, not to one checkout: a linked worktree reads the main worktree's copy.
+
+Once per start directory (`WORKTREE_PATH` if provided, otherwise cwd), run from it:
 
 ```bash
-git -C "{start}" rev-parse --path-format=absolute --show-toplevel --git-common-dir
+node "$HOME/.devflow/scripts/resolve-root.cjs" "{start}"; echo "exit=$?"
 ```
 
-Line 1 is the checkout's toplevel, line 2 the common git directory. A git older than 2.31 echoes `--path-format=absolute` back as a line of its own first. `{ledger}` is the first that applies:
-
-1. **The main worktree** — line 2 without its trailing `/.git`, when the output is exactly two lines each beginning with `/`, line 2 ends in `/.git`, and the directory left once it is removed is not your home directory and contains a `.devflow/` directory.
-2. **The toplevel** — line 1, or on an older git the line after the echoed flag.
-3. **The start directory itself** — when the command failed or printed no absolute toplevel (outside a git repository).
-
-This is the rule the curation hooks apply, so you read the index the Curate agent writes.
+Accept only the three lines `WORKTREE=<absolute path>`, `LEDGER=<absolute path>` and `exit=0`, which set `{worktree}` and `{ledger}`. Otherwise both are the start directory.
 
 **Step 1 — Read the pre-rendered index** `{ledger}/.devflow/curation/index.md`. Its content is `DECISIONS_CONTEXT`; if it is absent or empty, `DECISIONS_CONTEXT` is `(none)`.
 
@@ -574,7 +572,7 @@ git push origin HEAD; echo "exit=$?"
 cd "{worktree}" && node "$HOME/.devflow/scripts/verify-evidence.cjs" publish --pr {PR_NUMBER} --evidence ".devflow/docs/evidence-{branch_slug}.md" --publication {REVIEW_PUBLICATION resolved in Phase 1, or auto}; echo "exit=$?"
 ```
 
-Drop the `--evidence` pair when that file does not exist or its path does not match `^[A-Za-z0-9._/-]{1,255}$`. `{PR_NUMBER}` is digits only, and the publication value is `auto`, `full`, `off` or `stub`. Capture its stdout as `EVIDENCE_RESULT`: the `## PR Evidence` block — its `EVIDENCE` line and its `**Body**:` / `**Comment**:` line — and any `TRACEABILITY: DEGRADED ({reason})` lines after it (exit 0), or the one line `TRACEABILITY: DEGRADED (evidence unavailable)` (exit 2). Empty stdout or any other exit is `TRACEABILITY: DEGRADED (evidence unavailable)`. It never blocks: whatever it returns, continue to Phase 12.
+Drop the `--evidence` pair when that file does not exist or its path does not match `^[A-Za-z0-9._/-]{1,255}$`. `{PR_NUMBER}` is digits only, and the publication value is `auto`, `full`, `off` or `stub`. Capture its stdout as `EVIDENCE_RESULT`; empty stdout, or an exit other than 0 or 2, is `TRACEABILITY: DEGRADED (evidence unavailable)`. It never blocks: whatever it returns, continue to Phase 12.
 
 ### Phase 12: Report
 
@@ -582,7 +580,7 @@ Drop the `--evidence` pair when that file does not exist or its path does not ma
 
 Display completion summary with phase status, `Gate level: {GATE_LEVEL}` with any level note, Harden's `no files reviewed` line if any, Validate's `Lint pack:` line if any, PR info, and next steps.
 
-Show the test plan's evidence from Phase 11: `Test plan: {VERIFIED-CI + ATTESTED-LOCAL}/{total} verified (VERIFIED-CI {n}, ATTESTED-LOCAL {n})`, read from the `EVIDENCE` line and never inferred, then its `**Body**:` / `**Comment**:` line verbatim. Without an `EVIDENCE` line, show `Test plan: evidence unavailable`; with no test plan, `Test plan: missing`.
+Show the `Test plan:` line and the `**Body**:` / `**Comment**:` line of `EVIDENCE_RESULT` verbatim. Without a `Test plan:` line, show `Test plan: evidence unavailable`; with no test plan, `Test plan: missing`.
 
 If any Git agent output emitted `TRACEABILITY: DEGRADED ({reason})` lines during the run, or the fresh base step, Phase 10's push, Phase 11's push or Phase 11's script output carried one, surface them verbatim in the report under a `### Traceability` subsection.
 
