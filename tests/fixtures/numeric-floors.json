@@ -662,11 +662,11 @@
     },
     {
       "id": "curate-body-max",
-      "ceiling": 16710,
-      "pattern": "const CURATE_BODY_MAX_BYTES = 16_710",
+      "ceiling": 16503,
+      "pattern": "const CURATE_BODY_MAX_BYTES = 16_503",
       "occurrences": 1,
       "sourceFile": "tests/guards/agent-references.test.ts",
-      "description": "D-MAINTAIN-ON-DUE: the Curate agent body, src/assets/agents/curate.md, in bytes. Part 2's maintenance ladder, the claim-due output format and the close-out batch moved to references/curate/maintain.md, which a run reads only when claim-due hands out an entry; the body keeps the Part 2 heading, the claim heartbeat, rotate-observations, the claim-due call and the due-none line, and measures 16,690 (20,539 before the move). rotate-observations stays in the body so a run with nothing due still rotates. May be LOWERED, never raised."
+      "description": "D-MAINTAIN-ON-DUE: the Curate agent body, src/assets/agents/curate.md, in bytes. Part 2's maintenance ladder, the claim-due output format and the close-out batch moved to references/curate/maintain.md, which a run reads only when claim-due hands out an entry; the body keeps the Part 2 heading, the claim heartbeat, rotate-observations, the claim-due call and the due-none line, and measures 16,690 (20,539 before the move). #713 (lean Curate) joined the Part 2 opening calls into one Bash call and cut repeats: 16,655 -> 16,503. rotate-observations stays in the body so a run with nothing due still rotates. May be LOWERED, never raised."
     },
     {
       "id": "validate-body-max",
