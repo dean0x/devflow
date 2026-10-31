@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The settings script and the evidence-policy script print their own fail-closed line on every error exit, for every command prompt that runs them.
   - The Architecture section of the prompt is removed.
   - Phase 6 starts after ALIGNED, or after a single-pass alignment Fix that reports COMPLETE. Phase 11 is skipped only when the run stopped before Phase 10. A stop in Phase 10 does not skip it, so the evidence still reaches the PR.
+- **A standard `/implement` run reads about 3 KB less and makes 2 fewer tool calls** ([#675](https://github.com/dean0x/devflow/issues/675)).
+  - At `standard` and `lean`, the command itself skips Polish and runs Phase 5 in one pass. It no longer reads the level file at `standard`. Only a `lean` run reads it, for the Harden scope rule.
+  - The compiled command grows by 608 bytes (904 with compliance off), and a standard run reads 3,313 bytes less (3,017 with compliance off).
+  - A failed or empty reference read now stops the run and names the file. A failed level-file read on a `lean` run still runs Harden.
+  - Phase 2 stops when a Code agent reports FAILED or BLOCKED, or no status.
+  - After a Phase 5 report for decision, the run continues at Phase 6 when the user decides to continue. If the user ends the run after the PR opened, Phases 11 and 12 still run.
+  - Phase 11 also runs after the re-validation path opens the PR.
 
 ---
 
