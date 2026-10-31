@@ -574,11 +574,11 @@
     },
     {
       "id": "synthesize-body-max",
-      "ceiling": 4070,
-      "pattern": "const SYNTHESIZE_BODY_MAX_BYTES = 4_070",
+      "ceiling": 3288,
+      "pattern": "const SYNTHESIZE_BODY_MAX_BYTES = 3_288",
       "occurrences": 1,
       "sourceFile": "tests/guards/agent-references.test.ts",
-      "description": "D-MODE-BY-PATH: the Synthesize agent body, src/assets/agents/synthesize.md, in bytes. It carries the shared head, the six-row mode routing table, Output, Principles, Core rules and Boundaries, and measures 4,049. The six mode templates (12,970 bytes of the 16,560-byte body that #449's trim left; main held 16,665) live in the agent-references skill and a spawn reads one of them by explicit path. May be LOWERED, never raised: a template that grows back into the body is billed on every spawn, including the ten that pass no Mode line and read none."
+      "description": "D-MODE-BY-PATH: the Synthesize agent body, src/assets/agents/synthesize.md, in bytes. It carries the shared head, the six-row mode routing table, Output, Principles, Core rules and Boundaries, and measured 4,049 before #718. The six mode templates (12,970 bytes of the 16,560-byte body that #449's trim left; main held 16,665) live in the agent-references skill and a spawn reads one of them by explicit path. #718 (lean other targets) cut it to 3,288: the role paragraph, the worktree line, the Output lead and the Handle autonomously list repeated other text. May be LOWERED, never raised: a template that grows back into the body is billed on every spawn, including the ten that pass no Mode line and read none."
     },
     {
       "id": "synthesize-mode-ref-max",
@@ -694,11 +694,11 @@
     },
     {
       "id": "validate-body-max",
-      "ceiling": 6023,
-      "pattern": "const VALIDATE_BODY_MAX_BYTES = 6_023",
+      "ceiling": 5933,
+      "pattern": "const VALIDATE_BODY_MAX_BYTES = 5_933",
       "occurrences": 1,
       "sourceFile": "tests/guards/validate-lint-pack.test.ts",
-      "description": "The Validate agent body, src/assets/agents/validate.md, in bytes. It is hand-authored. The lean lint-pack wiring and the per-file passed-alone re-run rule (the re-run sentence, the Read line with its conditions, and the Passed alone: line) are funded with named cuts in the same body; it measures 5,995 at #677 (6,003 at #666), with no headroom. It rose by 28 bytes to 6,023 at #677, because the wait rule now names the file that sets the result: a run could read the wrong file and report a pass. May be LOWERED, never raised: a later addition funds itself with a cut."
+      "description": "The Validate agent body, src/assets/agents/validate.md, in bytes. It is hand-authored. The lean lint-pack wiring and the per-file passed-alone re-run rule (the re-run sentence, the Read line with its conditions, and the Passed alone: line) are funded with named cuts in the same body; it measures 5,995 at #677 (6,003 at #666), with no headroom. It rose by 28 bytes to 6,023 at #677, because the wait rule now names the file that sets the result: a run could read the wrong file and report a pass. #718 (lean other agents) cut it to 5,933: the worktree line repeated the preloaded skill. May be LOWERED, never raised: a later addition funds itself with a cut."
     },
     {
       "id": "review-body-max",
@@ -1251,6 +1251,70 @@
       "occurrences": 1,
       "sourceFile": "tests/guards/plan-group-sizes.test.ts",
       "description": "src/assets/skills/design-review/SKILL.md, in bytes. The Design agent preloads it, so every turn of every Design spawn reads it. Added by #714 (lean Plan path group) at 4,415, after the cut from 6,006."
+    },
+    {
+      "id": "research-body-max",
+      "ceiling": 5184,
+      "pattern": "['research', 'on', 5_184],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/other-agents-sizes.test.ts",
+      "description": "The Research agent body of the curation-on build, dist/agents/research.md, in bytes. Every turn of every Research spawn reads it (opus, two to five spawns per /research run). Added by #718 (lean other targets) at 5,184, after the cut from 6,300."
+    },
+    {
+      "id": "research-body-curation-off-max",
+      "ceiling": 4824,
+      "pattern": "['research', 'off', 4_824],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/other-agents-sizes.test.ts",
+      "description": "The Research agent body of the curation-off build, dist/curation-off/agents/research.md, in bytes. Added by #718 (lean other targets) at 4,824, after the cut from 5,794."
+    },
+    {
+      "id": "evaluate-body-max",
+      "ceiling": 4234,
+      "pattern": "['evaluate', 'on', 4_234],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/other-agents-sizes.test.ts",
+      "description": "The Evaluate agent body, src/assets/agents/evaluate.md, in bytes. It is hand-authored, with one build. Every turn of every Evaluate spawn reads it (sonnet, one spawn per /implement alignment pass). Added by #718 (lean other targets) at 4,234, after the cut from 4,672."
+    },
+    {
+      "id": "debug-agent-body-max",
+      "ceiling": 9411,
+      "pattern": "['debug', 'on', 9_411],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/other-agents-sizes.test.ts",
+      "description": "The Debug agent body of the curation-on build, dist/agents/debug.md, in bytes. Every turn of every Debug spawn reads it (opus, four spawns per /bug-analysis run, one per focus). Added by #718 (lean other targets) at 9,411, after the cut from 11,206."
+    },
+    {
+      "id": "debug-agent-body-curation-off-max",
+      "ceiling": 9051,
+      "pattern": "['debug', 'off', 9_051],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/other-agents-sizes.test.ts",
+      "description": "The Debug agent body of the curation-off build, dist/curation-off/agents/debug.md, in bytes. Added by #718 (lean other targets) at 9,051, after the cut from 10,686."
+    },
+    {
+      "id": "skim-body-max",
+      "ceiling": 6617,
+      "pattern": "['skim', 'on', 6_617],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/other-agents-sizes.test.ts",
+      "description": "The Skim agent body of the curation-on build, dist/agents/skim.md, in bytes. Every turn of every Skim spawn reads it (haiku; /explore, /plan and /research each spawn it). Added by #718 (lean other targets) at 6,617, after the cut from 7,708."
+    },
+    {
+      "id": "skim-body-curation-off-max",
+      "ceiling": 5495,
+      "pattern": "['skim', 'off', 5_495],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/other-agents-sizes.test.ts",
+      "description": "The Skim agent body of the curation-off build, dist/curation-off/agents/skim.md, in bytes. Added by #718 (lean other targets) at 5,495, after the cut from 6,586."
+    },
+    {
+      "id": "tracker-body-max",
+      "ceiling": 18359,
+      "pattern": "['tracker', 'on', 18_359],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/other-agents-sizes.test.ts",
+      "description": "The Tracker agent body, src/assets/agents/tracker.md, in bytes. It is hand-authored, with one build. Every turn of every Tracker spawn reads it (sonnet, hook-spawned once per provider setup). Added by #718 (lean other targets) at 18,359, after the cut from 27,110."
     }
   ]
 }

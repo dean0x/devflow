@@ -356,7 +356,7 @@ describe('Skim takes CURATION, skips Step 6 when it is off, and its callers pass
 
   it('Skim lists CURATION in its input context and opens Step 6 with the skip rule', () => {
     const skim = resolveAgentSource('skim').content
-    const inputContext = extractSection(skim, '## Input Context', '**Worktree Support**')
+    const inputContext = extractSection(skim, '## Input Context', '## Workflow')
     expect(inputContext).toContain('- **CURATION** (optional): `on` | `off`')
     expect(inputContext).toContain('Absent reads as `off`.')
     const step6 = extractSection(skim, '### Step 6: Project Knowledge', '### Step 7')
