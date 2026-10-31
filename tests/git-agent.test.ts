@@ -4317,7 +4317,7 @@ type FilePart = readonly [label: string, what: string, text: string];
 /** Steps 4a, 4c and 5a of ensure-pr-ready: the base name, the base and the title each reach `gh` and the resolver through a file. */
 const ENSURE_FILE_PARTS: readonly FilePart[] = [
   ['4a', '4a checks a given BASE_BRANCH by reading, before it runs any command', `When \`BASE_BRANCH\` is given, check it first against the step-5a name check (${JUDGE_BY_READING}). A mismatch ends with Status BLOCKED and no PR, naming only the allowed set.`],
-  ['4a', '4a writes a given BASE_BRANCH with the Write tool to a new file in a mktemp -d folder, and reads it back', 'Then Write `BASE_BRANCH` with the Write tool to a new file in a `mktemp -d` folder (`{name file}`), and Read it back.'],
+  ['4a', '4a writes a given BASE_BRANCH with the Write tool to a new file in a mktemp -d folder, and reads it back', 'Then Write `BASE_BRANCH` to a new file in a `mktemp -d` folder (`{name file}`) and Read it back.'],
   ['4a', '4a treats a failed Write as a missing value', WRITE_FAILURE],
   ['4a', '4a opens no PR when the name file reads back empty, and removes it', 'An empty file ends with Status BLOCKED and no PR, after `rm -- "{name file}"`.'],
   ['4a', '4a passes the base to gh pr create only from the name file, after test -s', 'then `test -s "$F" && gh pr create … --base="$(cat -- "$F")"`'],
@@ -4508,7 +4508,7 @@ describe('git agent: PR ops use a fresh base for branch diffs (#495)', () => {
     for (const [spelling, shellWrite] of SHELL_WRITE_PROBES) {
       const seeds: ReadonlyArray<readonly [string, string, string]> = [
         ['write a literal name with the Write tool, after a Read of the file', `write a literal name with \`${shellWrite}\``, '5a fills the name file only by its two reads and the Write tool: no shell write of the value'],
-        ['Then Write `BASE_BRANCH` with the Write tool to a new file in a `mktemp -d` folder (`{name file}`), and Read it back.', `Then run \`${shellWrite}\`, and Read it back.`, '4a and 4c fill their files only with the Write tool: no shell redirect into the file'],
+        ['Then Write `BASE_BRANCH` to a new file in a `mktemp -d` folder (`{name file}`) and Read it back.', `Then run \`${shellWrite}\`, and Read it back.`, '4a and 4c fill their files only with the Write tool: no shell redirect into the file'],
         ['Write the title with the Write tool to a new file in a `mktemp -d` folder (`{title file}`).', `Run \`${shellWrite}\`.`, '4a and 4c fill their files only with the Write tool: no shell redirect into the file'],
       ];
       for (const [from, to, what] of seeds) {
