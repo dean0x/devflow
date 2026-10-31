@@ -16,6 +16,7 @@ d sub/
 d .claude/
 d .claude/agents/
 d .claude/agents/devflow/
+- .claude/agents/devflow/architect.md
 - .claude/agents/devflow/code.md
 - .claude/agents/devflow/curate.md
 - .claude/agents/devflow/debug.md

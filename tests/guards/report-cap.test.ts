@@ -61,6 +61,8 @@ const EXEMPT_MARKERS: Readonly<Record<string, readonly string[]>> = {
   polish: ['completion status', 'commits'],
   evaluate: ['`### Status` line', '`### Misalignments Found`'],
   design: ['`## Findings` list'],
+  // D-DESIGN-VARIANTS: Architect shares Design's Output section from one partial, so it names the same exempt field.
+  architect: ['`## Findings` list'],
   skim: ['`### Relevant Files for Task`'],
   explore: [],
   knowledge: ['`KB_*` status block'],
@@ -158,8 +160,8 @@ function collectCapDefects(name: string, content: string): string[] {
 const roster = rosterOf(DEVFLOW_PLUGINS)
 
 describe('D-REPORT-CAP: the report cap on the roster', () => {
-  it('derives a roster of at least 18 agents from DEVFLOW_PLUGINS', () => {
-    expect(roster.length).toBeGreaterThanOrEqual(18)
+  it('derives a roster of at least 19 agents from DEVFLOW_PLUGINS', () => {
+    expect(roster.length).toBeGreaterThanOrEqual(19)
     expect(Object.keys(EXEMPT_MARKERS).sort(), 'every roster agent has an exempt-field record').toEqual([...roster].sort())
   })
 

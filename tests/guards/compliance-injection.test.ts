@@ -120,10 +120,10 @@ const CODE_SPAWN_FLOORS: Readonly<Record<string, number>> = {
 }
 
 /** Agents whose bodies may carry no compliance text at all (the Design focus list is the one allowance). */
-const STRICT_SLUGS = ['code', 'fix', 'refactor', 'review', 'design'] as const
+const STRICT_SLUGS = ['code', 'fix', 'refactor', 'review', 'design', 'architect'] as const
 
-/** The focus enumeration Design keeps: a list of focus names shared with every other focus, not compliance-only text. */
-const DESIGN_FOCUS_LIST = /completeness, architecture, security, performance, compliance, consistency, dependencies/
+/** The focus enumeration Design keeps (its `Focus` input line): focus names shared with every other focus, not compliance-only text. */
+const DESIGN_FOCUS_LIST = /completeness, architecture, security, performance, compliance, consistency, or dependencies/
 
 // ── Collectors ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -163,7 +163,7 @@ export function collectFocusSpawnDefects(host: string, text: string, agentType: 
   const out: string[] = []
   const fence = (agentType === 'Review'
     ? text.match(/Agent\(subagent_type="Review"[\s\S]*?```/)
-    : text.match(/Agent\(subagent_type="Design"\):\n"Mode: gap-analysis[\s\S]*?```/))?.[0]
+    : text.match(/Agent\(subagent_type="Design"\):\n"Focus: \{completeness\|architecture\|security\|performance\|compliance\|consistency\|dependencies\}\n[\s\S]*?```/))?.[0]
   if (fence === undefined) return [`${host}: no ${agentType} compliance-capable spawn fence found`]
   if (!fence.includes('{COMPLIANCE_FOCUS_DIRECTIVE}  (compliance focus only)')) out.push(`${host}: the ${agentType} spawn carries no focus directive`)
   if (fence.includes('COMPLIANCE_FRAMEWORKS')) out.push(`${host}: the ${agentType} spawn still carries the raw lens`)
@@ -522,7 +522,9 @@ describe('AC-309: no Review or Design body or preload carries compliance-only te
     const agents = resolveAllAgents()
     expect(agents.size, 'the agent corpus shrank').toBeGreaterThanOrEqual(15)
     for (const slug of STRICT_SLUGS) {
-      expect(agents.get(slug)?.content.length ?? 0, `${slug}: missing or empty`).toBeGreaterThan(4_000)
+      // D-DESIGN-VARIANTS: each Design variant carries one mode, so its body is shorter than the other strict bodies.
+      const floor = slug === 'design' || slug === 'architect' ? 3_000 : 4_000
+      expect(agents.get(slug)?.content.length ?? 0, `${slug}: missing or empty`).toBeGreaterThan(floor)
     }
   })
 
@@ -579,6 +581,11 @@ describe('AC-309: no Review or Design body or preload carries compliance-only te
     expect(collectAgentBodyDefects('design', design), 'the real Design body is clean: its focus list is the one allowance').toEqual([])
     expect(design, 'the Design body still lists the focus the allowance covers').toMatch(DESIGN_FOCUS_LIST)
     expect(collectAgentBodyDefects('design', `${design}\n- **COMPLIANCE_FRAMEWORKS** (compliance focus): ids\n`)).toEqual(['names COMPLIANCE_FRAMEWORKS', 'carries compliance text'])
+    // The focus-list allowance is Design's alone: the Architect body has no Focus input.
+    const architect = resolveAllAgents().get('architect')!.content
+    expect(collectAgentBodyDefects('architect', architect), 'the real Architect body is clean').toEqual([])
+    expect(collectAgentBodyDefects('architect', `${architect}\n- **Focus**: completeness, architecture, security, performance, compliance, consistency, or dependencies\n`))
+      .toEqual(['carries compliance text'])
     // Triage is out of scope: its paragraph dispositions findings and names neither the skill nor the lens.
     expect(collectAgentBodyDefects('triage', 'Compliance findings: default to FIX_SEPARATE.')).toEqual([])
   })
