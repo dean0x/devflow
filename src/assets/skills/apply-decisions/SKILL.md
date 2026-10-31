@@ -34,7 +34,7 @@ Find the entry's heading in the file the footer names:
 command grep -nF '## ADR-NNN:' "{worktree-from-footer}/.devflow/curation/decisions.md"
 ```
 
-For a pitfall use `## PF-NNN:` and `pitfalls.md`. Read with `offset` at the printed line and a `limit` of about 25, stopping at the next `## `. Search all chosen entries in one call, then Read their bodies in one turn. The footer is the single source of truth for paths; the ledger is git-ignored, so search by shell. A `verified` date is the last confirmation; none means unconfirmed.
+For a pitfall use `## PF-NNN:` and `pitfalls.md`. Read with `offset` at the printed line and a `limit` of about 25, stopping at the next `## `. Run the searches for all chosen entries in one turn, then their Reads in one turn. The footer is the single source of truth for paths; the ledger is git-ignored, so search by shell. A `verified` date is the last confirmation; none means unconfirmed.
 
 ### Step 4: Cite inline — in-session handoffs only
 

@@ -11,7 +11,7 @@ allowed-tools: Bash, Read
 
 > **WORKTREE_PATH IS A PREFIX, NOT A FLAG**
 >
-> When WORKTREE_PATH is provided, it is the root of ALL paths: git commands, file reads and `.devflow/docs/` paths.
+> When WORKTREE_PATH is provided, it replaces cwd as the root of ALL paths and commands.
 
 ## Agent Path Resolution
 
