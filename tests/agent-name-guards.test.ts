@@ -377,14 +377,6 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     contexts: ['clean reviewer'],
   },
   {
-    path: 'src/assets/skills/quality-gates/SKILL.md',
-    name: 'Reviewer',
-    reason:
-      'URL_LINK: "reviewer/" — URL path segment in Google Engineering Practices link; ' +
-      'not an agent spawn',
-    contexts: ['review/reviewer/'],
-  },
-  {
     path: 'src/assets/skills/compliance/frameworks/sox/reference.md',
     name: 'Reviewer',
     reason:
@@ -527,13 +519,6 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
   // Simplify — CONCEPT (a capitalised verb opening a sentence, not the agent renamed to Polish;
   // the lowercase verb needs no row)
   // -----------------------------------------------------------------------
-  {
-    path: 'src/assets/agents/polish.md',
-    name: 'Simplify',
-    reason:
-      'CONCEPT: the verb in the Polish agent\'s own instruction list; not an agent spawn reference',
-    contexts: ['Simplify code structure by:'],
-  },
   {
     path: 'src/assets/skills/test-driven-development/references/rationalization-prevention.md',
     name: 'Simplify',
