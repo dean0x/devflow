@@ -1,6 +1,6 @@
 # Correct Documentation Patterns
 
-Extended examples of proper documentation. See parent `SKILL.md` for brief examples and severity guidelines.
+Extended examples of proper documentation. See parent `SKILL.md` for the rules and severity guidelines.
 
 ---
 

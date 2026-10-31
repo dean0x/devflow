@@ -179,3 +179,13 @@ audit_deps() {
 | Licenses | `npx license-checker` |
 | Tree depth | `npm ls --all \| wc -l` |
 | Lockfile | `ls package-lock.json yarn.lock 2>/dev/null` |
+
+## Common Vulnerability Sources
+
+| Registry | URL |
+|----------|-----|
+| npm Advisory | https://www.npmjs.com/advisories |
+| Snyk Vuln DB | https://snyk.io/vuln |
+| GitHub Advisory | https://github.com/advisories |
+| NVD | https://nvd.nist.gov/ |
+| CISA KEV | https://www.cisa.gov/known-exploited-vulnerabilities-catalog |

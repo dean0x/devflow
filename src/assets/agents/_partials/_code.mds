@@ -26,8 +26,7 @@ inside a define is split by the build like an arm in a host: the markers sit on 
 - **TASK_DESCRIPTION**: What to do
 - **PUSH** (optional): `true` (default) | `false` — when false, commit only; orchestrator owns push/CI gate
 <!-- curation:on -->
-- **DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries.
-  When provided, use `devflow:apply-decisions` to Read full bodies on demand.
+- **DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries
 <!-- curation:end -->
 @end
 
@@ -61,8 +60,7 @@ Run builds, typechecks, lints and tests in the foreground, each with an explicit
 1. **Read once** - Never re-read an unchanged file. For a file over 400 lines, or a second look, `grep -n` first, then Read only that range (`offset`, `limit`)
 2. **Small, focused changes** - Don't scope creep beyond the plan
 3. **Fail honestly** - If blocked, report clearly with what was completed
-
-- Never print a large file whole; page it with offset and limit, and cap any output you print. Before printing search matches, list or count them.
+4. **Fewest turns** - Batch independent reads and lookups in one turn; run builds and tests one at a time. No Read-back after a successful Edit or Write unless a command changed the file. No narration-only turn, except the wait for an end notice
 
 ## Output
 
