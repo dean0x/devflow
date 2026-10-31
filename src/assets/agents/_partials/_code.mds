@@ -62,8 +62,6 @@ Run builds, typechecks, lints and tests in the foreground, each with an explicit
 3. **Fail honestly** - If blocked, report clearly with what was completed
 4. **Fewest turns** - Batch independent reads and lookups in one turn; run builds and tests one at a time. No Read-back after a successful Edit or Write unless a command changed the file. No narration-only turn, except the wait for an end notice
 
-- Never print a large file whole; page it with offset and limit, and cap any output you print. Before printing search matches, list or count them.
-
 ## Output
 
 ```markdown
