@@ -65,6 +65,16 @@ export const DYNAMIC_COMMAND_HOSTS = [
   'dynamic-tickets',
 ] as const;
 
+/**
+ * The command hosts that load decisions behind the CURATION gate: every one but dynamic-profile,
+ * one plain Knowledge spawn that passes no DECISIONS_CONTEXT. Each carries a curation arm.
+ */
+export const DECISIONS_COMMAND_HOSTS: readonly string[] = [
+  ...KNOWLEDGE_COMMAND_HOSTS,
+  ...DYNAMIC_COMMAND_HOSTS.filter(h => h !== 'dynamic-profile'),
+  'release',
+];
+
 /** The release command host (src/assets/commands/release.mds). */
 export const RELEASE_COMMAND_HOSTS = ['release'] as const;
 
@@ -273,7 +283,7 @@ export const MDS_GENERATOR_HOSTS = [
  * after its arm goes) turns one of them red.
  */
 export const CURATION_VARIANT_HOSTS: readonly string[] = [
-  ...MDS_COMMAND_HOSTS.filter(h => h !== 'dynamic-profile').map(h => `commands/${h}`),
+  ...DECISIONS_COMMAND_HOSTS.map(h => `commands/${h}`),
   ...[
     'code',
     'debug',

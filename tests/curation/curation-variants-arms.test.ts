@@ -46,6 +46,7 @@ import {
 import {
   CURATION_OFF_FILES,
   CURATION_VARIANT_HOSTS,
+  DECISIONS_COMMAND_HOSTS,
   MDS_COMMAND_HOSTS,
   MDS_GENERATOR_HOSTS,
   SETTINGS_BLOCK_HOSTS,
@@ -374,7 +375,11 @@ describe('completeness: every artifact that holds a token has an off counterpart
 
   it('every artifact whose only token is the settings grammar still has a variant when it carries a curation arm', () => {
     const artifacts = collectArtifacts().filter(a => a.rel.startsWith('commands/'))
-    for (const a of artifacts) expect(existsSync(path.join(OFF_DIR, a.rel)), a.rel).toBe(true)
+    const armed = artifacts.filter(a => DECISIONS_COMMAND_HOSTS.includes(a.rel.slice('commands/'.length).replace(/\.md$/, '')))
+    expect(armed, 'the commands with a curation arm').toHaveLength(13)
+    for (const a of armed) expect(existsSync(path.join(OFF_DIR, a.rel)), a.rel).toBe(true)
+    // dynamic-profile has no arm and no variant, so it must hold no curation token.
+    expect(collectMissingCounterparts(artifacts.filter(a => !armed.includes(a)), () => false)).toEqual([])
   })
 
   it('known-bad probes: an artifact with a token and no variant is reported, and the Curate agent is not', () => {
@@ -450,7 +455,7 @@ describe('settings blocks per variant (AC-138)', () => {
   })
 
   it('the runtime gate and Skim\'s CURATION skip live in the curation-on build only', () => {
-    for (const h of MDS_COMMAND_HOSTS) {
+    for (const h of DECISIONS_COMMAND_HOSTS) {
       expect(requireDistFile(`${h}.md`), `${h} (curation-on)`).toContain('When the settings line says `CURATION=off`')
       expect(resolveCurationOffSource('commands', h), `${h} (curation-off)`).not.toContain('When the settings line says `CURATION=off`')
     }

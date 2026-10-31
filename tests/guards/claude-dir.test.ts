@@ -489,7 +489,7 @@ function promptSurface(): CorpusClass[] {
     { label: 'references', files: readTree('dist/skills'), sentinel: 'dist/skills/git/references/publication-gate.md', floor: 20 },
     { label: 'skills', files: readTree('src/assets/skills'), sentinel: 'src/assets/skills/worktree-support/SKILL.md', floor: 30 },
     { label: 'rules', files: readTree('src/assets/rules'), sentinel: 'src/assets/rules/security.md', floor: 4 },
-    { label: 'curation-off', files: readTree('dist/curation-off'), sentinel: 'dist/curation-off/commands/code-review.md', floor: 25 },
+    { label: 'curation-off', files: readTree('dist/curation-off'), sentinel: 'dist/curation-off/commands/code-review.md', floor: 24 },
     { label: 'compliance-off', files: readTree('dist/compliance-off'), sentinel: 'dist/compliance-off/commands/implement.md', floor: 4 },
     { label: 'curation-compliance-off', files: readTree('dist/curation-compliance-off'), sentinel: 'dist/curation-compliance-off/commands/implement.md', floor: 3 },
     { label: 'compaction directive', files: [{ name: COMPACTION_ENTRY, content: compactDirectiveText() }], sentinel: COMPACTION_ENTRY, floor: 1 },

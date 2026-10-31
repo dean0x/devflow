@@ -180,18 +180,18 @@ describe('settings partial wiring', () => {
     expect(imports.filter(i => i.file.includes('/_partials/')), 'a partial imports the settings partial').toEqual([])
   })
 
-  it('every compiled host carries one block, before every consumer it carries', () => {
-    const files = requireDistFiles()
-    expect(files, 'the compiled corpus is the SETTINGS_BLOCK_HOSTS roster').toHaveLength(SETTINGS_BLOCK_HOSTS.length)
-    for (const file of files) {
-      expect(collectBlockProblems(file, requireDistFile(file)), file).toEqual([])
+  it('every settings host carries one block, before every consumer it carries', () => {
+    const outside = requireDistFiles().filter(f => !(SETTINGS_BLOCK_HOSTS as readonly string[]).includes(f.replace(/\.md$/, '')))
+    expect(outside, 'the compiled commands outside the SETTINGS_BLOCK_HOSTS roster').toEqual(['dynamic-profile.md'])
+    for (const host of SETTINGS_BLOCK_HOSTS) {
+      expect(collectBlockProblems(`${host}.md`, requireDistFile(`${host}.md`)), host).toEqual([])
     }
   })
 
-  it('every compiled host carries at least one consumer, so the order check is not vacuous', () => {
-    for (const file of requireDistFiles()) {
-      const text = requireDistFile(file)
-      expect(CONSUMER_ANCHORS.some(([, anchor]) => text.includes(anchor)), `${file}: no consumer of the settings line`).toBe(true)
+  it('every settings host carries at least one consumer, so the order check is not vacuous', () => {
+    for (const host of SETTINGS_BLOCK_HOSTS) {
+      const text = requireDistFile(`${host}.md`)
+      expect(CONSUMER_ANCHORS.some(([, anchor]) => text.includes(anchor)), `${host}: no consumer of the settings line`).toBe(true)
     }
   })
 
