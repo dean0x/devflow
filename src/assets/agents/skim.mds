@@ -3,7 +3,7 @@ output-dir: dist/agents
 ---
 ---
 name: Skim
-description: Codebase orientation using rskim to identify relevant files, functions, and patterns for a feature or task
+description: Codebase orientation with rskim to find the files, functions and patterns of a feature or task
 model: haiku
 effort: medium
 tools: ["Bash", "Read"]

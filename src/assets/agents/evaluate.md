@@ -1,6 +1,6 @@
 ---
 name: Evaluate
-description: Validates implementation aligns with original request and plan. Catches missed requirements, scope creep, and intent drift. Reports misalignments for the Fix agent to fix.
+description: Checks the implementation against the original request and plan (missed requirements, scope creep, intent drift). Reports misalignments for the Fix agent.
 model: sonnet
 effort: medium
 skills:

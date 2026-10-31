@@ -1,6 +1,6 @@
 ---
 name: Tracker
-description: Background tracker-conventions agent — probes the configured issue tracker's capabilities, infers repository conventions within bounds, and writes that provider's ~/.devflow/tracker/{provider}.md exactly once. Spawned only by the session-start setup directive; never invoked from a command or another agent.
+description: Background agent that probes the configured issue tracker's capabilities, infers repository conventions within bounds, and writes ~/.devflow/tracker/{provider}.md exactly once. Spawned only by the session-start setup directive; never from a command or another agent.
 model: sonnet
 skills:
   - devflow:git

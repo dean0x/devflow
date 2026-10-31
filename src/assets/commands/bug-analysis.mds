@@ -1,5 +1,5 @@
 ---
-description: Proactive bug finding with static and semantic analysis — hunts real bugs in changed code before merge
+description: Proactive bug finding in changed code before merge, with static and semantic analysis
 output-dir: dist/commands
 ---
 @import { knowledge_load } from "./_partials/_knowledge.mds"

@@ -1,5 +1,5 @@
 ---
-description: Debug issues using competing hypothesis investigation with parallel agents
+description: Debug issues with parallel agents on competing hypotheses
 output-dir: dist/commands
 ---
 @import { knowledge_writeback } from "./_partials/_knowledge.mds"
