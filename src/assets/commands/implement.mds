@@ -598,7 +598,7 @@ git push origin HEAD; echo "exit=$?"
 cd "{worktree}" && node "$HOME/.devflow/scripts/verify-evidence.cjs" publish --pr {PR_NUMBER} --evidence ".devflow/docs/evidence-{branch_slug}.md" --publication {REVIEW_PUBLICATION resolved in Phase 1, or auto}; echo "exit=$?"
 ```
 
-Drop the `--evidence` pair when that file does not exist or its path does not match `^[A-Za-z0-9._/-]{1,255}$`. `{PR_NUMBER}` is digits only, and the publication value is `auto`, `full`, `off` or `stub`. Capture its stdout as `EVIDENCE_RESULT`: the `## PR Evidence` block — its `EVIDENCE` line and its `**Body**:` / `**Comment**:` line — and any `TRACEABILITY: DEGRADED ({reason})` lines after it (exit 0), or the one line `TRACEABILITY: DEGRADED (evidence unavailable)` (exit 2). Empty stdout or any other exit is `TRACEABILITY: DEGRADED (evidence unavailable)`. It never blocks: whatever it returns, continue to Phase 12.
+Drop the `--evidence` pair when that file does not exist or its path does not match `^[A-Za-z0-9._/-]{1,255}$`. `{PR_NUMBER}` is digits only, and the publication value is `auto`, `full`, `off` or `stub`. Capture its stdout as `EVIDENCE_RESULT`; empty stdout (node could not run) is `TRACEABILITY: DEGRADED (evidence unavailable)`. It never blocks: whatever it returns, continue to Phase 12.
 <!-- compliance:off -->
 **Then verify, inline.** The verify is plumbing, so no Git agent runs it: `verify-evidence.cjs verify` reads the PR and the local evidence file, and writes the local result file. It writes nothing to GitHub:
 
@@ -616,7 +616,7 @@ Drop the `--evidence` pair when that file does not exist or its path does not ma
 Display completion summary with phase status, `Gate level: {GATE_LEVEL}` with any level note, Harden's `no files reviewed` line if any, Validate's `Lint pack:` line if any, PR info, and next steps.
 
 <!-- compliance:on -->
-Show the test plan's evidence from Phase 11: `Test plan: {VERIFIED-CI + ATTESTED-LOCAL}/{total} verified (VERIFIED-CI {n}, ATTESTED-LOCAL {n})`, read from the `EVIDENCE` line and never inferred, then its `**Body**:` / `**Comment**:` line verbatim. Without an `EVIDENCE` line, show `Test plan: evidence unavailable`; with no test plan, `Test plan: missing`.
+Show the `Test plan:` line and the `**Body**:` / `**Comment**:` line of `EVIDENCE_RESULT` verbatim. Without a `Test plan:` line, show `Test plan: evidence unavailable`; with no test plan, `Test plan: missing`.
 <!-- compliance:off -->
 Show the test plan's evidence from Phase 11: `Test plan: {VERIFIED-CI + ATTESTED-LOCAL}/{total} verified (VERIFIED-CI {n}, ATTESTED-LOCAL {n})`, read from the `EVIDENCE` line and never inferred, then `Evidence result: .devflow/docs/evidence-result-{branch_slug}.md (local; not posted)`. Without an `EVIDENCE` line, show `Test plan: evidence unavailable`; with no test plan, `Test plan: missing`.
 <!-- compliance:end -->
