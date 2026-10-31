@@ -8,7 +8,7 @@ note that names the Git agent's publication gate; a host with compliance off cal
 because the gate's reference file is not installed there.
 
 @define publication_resolve():
-**Resolve `REVIEW_PUBLICATION` per worktree:** take `REVIEW_PUBLICATION` from that worktree's settings line — the line resolved above for `{root}`, the worktree's root, by the settings block when this run has not yet resolved that root. The line already caps the personal choice at the team's (D-PUBLICATION-CEILING), so it is `off`, `auto` or `full`, and `off` when the line was unresolvable.
+**Resolve `REVIEW_PUBLICATION` per worktree:** take `REVIEW_PUBLICATION` from that worktree's settings line — the line resolved above for `{root}`, the worktree's root, by the settings block when this run has not yet resolved that root. The line already caps the personal choice at the team's, so it is `off`, `auto` or `full`, and `off` when the line was unresolvable.
 
 **Evidence stub:** only when `EVIDENCE_POLICY` is `required`, a resolved `off` becomes `stub`, so a counts-only record still reaches the PR. `stub` is never a config value.
 @end
