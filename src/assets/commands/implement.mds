@@ -430,16 +430,15 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
 
 Any other or missing Status: report and halt; never PASS.
 
-**Evidence claims** are lines appended to the `## Claims` section of `EVIDENCE_FILE` — the file's last section, created when absent. Append only: never edit or remove a claim; the last valid one per target wins. Each line takes exactly one of these shapes, where `<head>` is the 40-hex `HEAD:` the agent's report shows:
+**Evidence claims** come from the evidence script, which owns the claim lines and the `## Claims` section. `<head>` is the report's `HEAD:` value, or `none` if it holds anything but letters and digits (a before/after change too).
 
-```
-- gate:validate PASS sha:<head> by:validate
-- TP-<n> <PASS|FAIL|SKIP> sha:<head> by:test exit:<0-255>
+```bash
+node "$HOME/.devflow/scripts/verify-evidence.cjs" claim --evidence "{EVIDENCE_FILE}" --head <head> gate|TP-<n>=<PASS|FAIL|SKIP>[:<exit>] ...
 ```
 
-- `gate:validate` — after a Phase 6 or Phase 8 PASS.
-- `TP-<n>` — after every Phase 7 run, one line per `### Test Plan Evidence` row whose TP is in `TEST_PLAN`, with the row's outcome; the line ends at `by:test` when the row's Exit is not a number from 0 to 255.
-- Append nothing from a report whose `HEAD:` is not a single 40-hex SHA — a reported before/after change included — and say so in the Phase 12 report.
+- `gate` — after a Phase 6 or Phase 8 PASS.
+- `TP-<n>` — after every Phase 7 run, one argument per `### Test Plan Evidence` row; add `:<exit>` when the row's Exit is a number.
+- No `CLAIM appended` line means no claim was written: say so in the Phase 12 report.
 
 ### Phase 7: QA Testing
 

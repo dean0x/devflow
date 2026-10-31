@@ -97,7 +97,7 @@ devflow/
 │           ├── resolve-settings.cjs  # Local settings resolver: folds project.json, config.json and the machine manifest into one settings line, the gate level included; no network, writes nothing
 │           ├── resolve-root.cjs      # Root resolver: one call prints the checkout root (`WORKTREE=`) and the ledger root (`LEDGER=`) a command works from; it requires resolve-settings.cjs for the git call and the ledger rule; no network, writes nothing
 │           ├── pr-evidence.cjs       # Pure core of test-plan evidence: grammars, markers, the state ladder
-│           ├── verify-evidence.cjs   # I/O half of test-plan evidence: check, render, verify, splice, readback, publish, readiness (`readiness --out` and `verify --stale-out` write local files only)
+│           ├── verify-evidence.cjs   # I/O half of test-plan evidence: check, render, verify, splice, readback, publish, readiness, claim (`readiness --out` and `verify --stale-out` write local files only; `claim` appends claim lines to the local evidence file)
 │           ├── release-trace.cjs     # Git-only release trace: last release tag + per-commit trace map
 │           ├── claude-md-audit.cjs   # CLAUDE.md @path import audit (read-only): grammar, bounds, display text and stamp format; run by session-start-context and, through the facade, init
 │           ├── ci-wait.cjs           # Bounded CI wait for one pushed head: reads gh only, prints one status line, plus a NEXT line with --waits and --fixes; /implement and /resolve call it inline
