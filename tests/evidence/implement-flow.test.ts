@@ -879,7 +879,7 @@ function collectInadmissibleClaims(calls: readonly string[]): string[] {
       const file = path.join(mkdtempSync(path.join(SCRATCH, 'claim-')), 'evidence.md')
       writeFileSync(file, `## Test Plan\n${plan.join('\n')}\n\n## Claims\n`)
       try {
-        const r = runClaimCall(call, { claims, head, fill: [['{EVIDENCE_FILE}', file]] })
+        const r = runClaimCall(call, { claims, head, fill: [['.devflow/docs/evidence-{branch_slug}.md', file]] })
         if (r.code !== 0 || !r.stdout.startsWith(`CLAIM appended:${appended} `)) out.push(`refused: ${claims} → exit ${r.code} ${r.stdout.trim()}`)
         for (const line of readFileSync(file, 'utf-8').split('\n').filter(l => l.startsWith('- ') && !l.startsWith('- [ ]'))) {
           if (!PE.CLAIM_LINE_RE.test(line)) out.push(`inadmissible: ${line}`)
@@ -916,7 +916,7 @@ describe('AC-11: /implement writes claims through the evidence script', () => {
     expect(probe(call.replace(' --head <head>', ''))).toEqual(expect.arrayContaining([expect.stringMatching(/^refused: gate → exit 1/)]))
     expect(probe(call.replace('--evidence', '--evidance'))).toEqual(expect.arrayContaining([expect.stringMatching(/^refused: gate → exit 1/)]))
     expect(probe(call.replace('<PASS|FAIL|SKIP>', '<PASS|PASSED>'))).toEqual(expect.arrayContaining([expect.stringContaining('a placeholder is unfilled')]))
-    expect(probe(call.replace('{EVIDENCE_FILE}', '{EVIDENCE_PATH}'))).toEqual(expect.arrayContaining([expect.stringContaining('a placeholder is unfilled')]))
+    expect(probe(call.replace('{branch_slug}', '{branch_name}'))).toEqual(expect.arrayContaining([expect.stringContaining('a placeholder is unfilled')]))
   })
 })
 

@@ -430,7 +430,7 @@ Any other or missing Status: report and halt; never PASS.
 **Evidence claims** come from the evidence script, which owns the claim lines and the `## Claims` section. `<head>` is the report's `HEAD:` value, or `none` if it holds anything but letters and digits (a before/after change too).
 
 ```bash
-node "$HOME/.devflow/scripts/verify-evidence.cjs" claim --evidence "{EVIDENCE_FILE}" --head <head> gate|TP-<n>=<PASS|FAIL|SKIP>[:<exit>] ...
+cd "{worktree}" && node "$HOME/.devflow/scripts/verify-evidence.cjs" claim --evidence ".devflow/docs/evidence-{branch_slug}.md" --head <head> gate|TP-<n>=<PASS|FAIL|SKIP>[:<exit>] ...
 ```
 
 - `gate` — after a Phase 6 or Phase 8 PASS.
