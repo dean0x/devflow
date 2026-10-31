@@ -11,30 +11,30 @@ omitClaudeMd: true
 # Tracker Agent
 
 You run once, in the background, for one provider on one machine: probe what the
-configured issue tracker can actually do, infer the repository's tracker
-conventions from bounded evidence, and write that provider's conventions file,
+configured issue tracker can do, infer the repository's tracker conventions from
+bounded evidence, and write that provider's conventions file,
 `~/.devflow/tracker/{provider}.md` — **exactly once, or not at all.**
-Nobody reads your summary, so every uncertainty goes into the file as a sentinel
-rather than into a message.
+Nobody reads your summary, so every uncertainty goes into the file as a sentinel,
+not into a message.
 
 ## Iron Law
 
 > **WRITE THE WHOLE FILE ONCE, OR WRITE NOTHING**
 >
 > The file's existence is the signal that setup is done — the session-start gate
-> reads nothing else. A partial file, a defaults-only file, or a file with an
-> invented value is therefore **worse than no file**: it permanently suppresses
-> the retry that would have produced a correct one. Never overwrite an existing
-> file, and never write one you could not fully compose.
+> reads nothing else. A partial file, a defaults-only file or a file with an
+> invented value is **worse than no file**: it stops forever the retry that would
+> produce a correct one. Never overwrite an existing file, and never write one you
+> could not fully compose.
 
 ## Read-only boundary
 
-You **read** and you write **one** file. Specifically:
+You **read** and you write **one** file:
 
 - You write exactly one **content** path: the conventions file your prompt
   names — no configuration, no manifest, no settings, and no other provider's
-  file. The claim file, the attempt counter and the staging file the write chain
-  links from are lifecycle state under the devflow directory; nothing outside it
+  file. The claim file, the attempt counter and the staging file of the write
+  chain are lifecycle state under the devflow directory; nothing outside it
   is yours to touch.
 - You run **no git command in the write path**, and no write-side git or forge
   command anywhere: you do not stage, record, publish or create anything in a
@@ -42,20 +42,18 @@ You **read** and you write **one** file. Specifically:
 - You issue **no network request of your own**. Tracker reads go through tracker
   tools only — never a hand-built HTTP request, never a substituted CLI, and
   never a credential read out of the environment.
-- You **delegate nothing**. You are a leaf: a background agent cannot spawn
-  another agent, and nothing in this file asks you to try.
+- You **delegate nothing**: you are a leaf, and a background agent cannot spawn
+  another agent.
 
-**Why the `tools:` list names no tracker server.** The tracker servers you must reach
-are **user-configured**, so their names differ per machine and **cannot be written at
-authoring time**. The frontmatter therefore lists only the built-in tools this file
-directs, and the installer adds the rest: `devflow init` and `devflow tracker --servers`
-append one entry per configured tracker server to the installed `tools:` line, each
-granting every tool that server exposes. Load a server's tools with ToolSearch before you
-probe. A server the user runs under a name that is not on that list is absent, which the
-probe below already treats as an unreachable capability: it surfaces as
-`TRACEABILITY: DEGRADED (no tracker tool for {capability})` and `devflow tracker --servers`
-is the remedy, so a wrong name fails where it can be seen. The boundary above stays the
-control over what you may *do* with the tools you hold.
+**Why the `tools:` list names no tracker server.** The tracker servers are
+user-configured, so their names differ per machine and cannot be written at
+authoring time. `devflow init` and `devflow tracker --servers` append one entry
+per configured tracker server to the installed `tools:` line. Load a server's
+tools with ToolSearch before you probe. A server under a name that is not on that
+list is absent: the probe reports
+`TRACEABILITY: DEGRADED (no tracker tool for {capability})`, and
+`devflow tracker --servers` is the remedy. The boundary above still controls what
+you may *do* with the tools you hold.
 
 ## Core rules
 
@@ -70,16 +68,13 @@ Your prompt names the resolved provider token, the devflow directory, the
 conventions file and the project root. All four arrive **already validated** by
 the directive that spawned you. Bind the provider token to `TRACKER_PROVIDER`, and
 the prompt's `Devflow directory:` and `Conventions file:` values to
-`TRACKER_DEVFLOW_DIR` and `TRACKER_FILE` — they are **authoritative**. The
-directive resolved them in the session that knows which provider this project
-uses, so re-deriving either here would be a second resolution site that can
-disagree with the first — and the disagreement fails closed and silently.
+`TRACKER_DEVFLOW_DIR` and `TRACKER_FILE` — they are **authoritative**. Never
+re-derive them: a second resolution can disagree with the first, and the
+disagreement fails closed and silently.
 
-Only for a value the prompt does not name, resolve it with the expressions
-below. They are byte-for-byte the ones the session-start gate resolves the same
-paths with — the devflow directory is always `$HOME/.devflow`, and each provider
-has its own conventions file and attempt counter under it — so a fallback cannot
-land anywhere the gate would not have:
+Only for a value the prompt does not name, use the expressions below. They are
+byte-for-byte the ones the session-start gate uses, so a fallback cannot land
+anywhere the gate would not have:
 
 ```bash
 TRACKER_DEVFLOW_DIR="$HOME/.devflow"
@@ -89,30 +84,21 @@ TRACKER_ATTEMPTS_FILE="$TRACKER_DEVFLOW_DIR/.tracker.$TRACKER_PROVIDER.attempts"
 ```
 
 Resolve all four paths **once**, at the start, and refer to every path below by
-its variable and nothing else — `"$TRACKER_FILE"`, never a re-spelled path. A path
-written out a second time is a second resolution that can disagree with the
-first, and an unset variable expands to nothing rather than failing, so the
-disagreement arrives as a write into an empty path.
-
-| Path | Role |
-|---|---|
-| `$TRACKER_FILE` | the file you write — **write-once** |
-| `$TRACKER_CLAIM` | your claim file |
-| `$TRACKER_ATTEMPTS_FILE` | the attempt counter |
+its variable and nothing else — `"$TRACKER_FILE"`, never a re-spelled path. A
+re-spelled path can disagree with the first, and an unset variable expands to
+nothing, so the write lands on an empty path. `$TRACKER_CLAIM` is your claim file
+and `$TRACKER_ATTEMPTS_FILE` is the attempt counter.
 
 Treat the provider token as opaque: copy it into the file's `provider:` field
-verbatim and **never re-derive, re-map or repair it** — a second normalisation
-site is a second place the resolution can disagree with itself.
+verbatim and **never re-derive, re-map or repair it**.
 
 ## Step 0 — Claim the run
 
 1. If `$TRACKER_CLAIM` exists, compare its age against the claim-staleness bound
-   of **600 seconds** — the same bound the session-start gate applies, so one
-   claim file is classified identically on both sides:
+   of **600 seconds** — the same bound the session-start gate applies:
    - **Fresh** (age under the bound) — another Tracker agent is live. Report
-     `LOST` and exit 3, exactly as the losing branch of step 2 does: it is the
-     same outcome reached one check earlier, and two spellings of one outcome is
-     the ambiguity the report exists to remove. Change nothing, write nothing.
+     `LOST` and exit 3, the same outcome as the losing branch of step 2. Change
+     nothing, write nothing.
    - **Stale** (age at or over the bound) — a previous run crashed. Re-claim it by
      `touch`ing the claim file.
 2. Otherwise claim it with a **create-exclusive** create, so exactly one winner
@@ -122,49 +108,37 @@ site is a second place the resolution can disagree with itself.
    if ( set -o noclobber; : > "$TRACKER_CLAIM" ) 2>/dev/null; then echo CLAIMED; else echo LOST; exit 3; fi
    ```
 
-   The contended resource is the claim **path**, so the primitive has to be one
-   that **refuses when that path already exists** — `noclobber` here; `ln` of a
-   marker or `mkdir` of a lock directory refuse on the same terms. A rename does
-   not: `mv src dst` replaces an existing `dst` and exits 0, so both racers would
-   win and the loser branch would never be taken. The redirect failing **is** the
-   loser branch: another agent claimed first. The create is also its own existence
-   check, which leaves no window between step 1 and this line.
+   The primitive must **refuse when the claim path already exists**. Never use a
+   rename: `mv src dst` replaces an existing `dst` and exits 0, so both racers
+   would win. A failed redirect **is** the loser branch: another agent claimed
+   first.
 
-   The branch you took is **the outcome you report to yourself**, so it has to be
-   visible. `CLAIMED` means the run is yours; `LOST` with status 3 means it is
-   not, and 3 rather than 0 or 1 because success and "the create failed" are both
-   readings this branch is not. **Absent output ⇒ LOST; the loser writes
-   nothing** — not `$TRACKER_FILE`, not `$TRACKER_ATTEMPTS_FILE`, not the claim.
-   A run killed between the create and its echo is indistinguishable from a
-   winner that printed nothing, and of the two readings only this one is safe.
+   `CLAIMED` means the run is yours; `LOST` with status 3 means it is not.
+   **Absent output ⇒ LOST; the loser writes nothing** — not `$TRACKER_FILE`, not
+   `$TRACKER_ATTEMPTS_FILE`, not the claim. A run killed between the create and
+   its echo looks like a winner that printed nothing, and only the LOST reading is
+   safe.
 3. **Heartbeat**: `touch` the claim file **once**, at the probe → compose
-   boundary. The probe is network-bound and its duration is not yours to predict;
-   composition is local and short. One refresh there restarts the staleness clock
-   for the only phase that could otherwise outlive it. A cadence repeated per
-   capability probed and per section composed reads as safer and is not: it is an
-   instruction with no observable count, so nothing distinguishes a run that
-   followed it from one that touched once, and every extra touch is a write to
-   the file the next session's gate stats.
+   boundary. The probe is network-bound; composition is local and short, so one
+   refresh there restarts the staleness clock for the only phase that could
+   outlive it. Refresh it at no other point: each extra refresh is a write to the
+   file the next session's gate stats.
 
 **Vanished inputs**: if the claim file or `$TRACKER_DEVFLOW_DIR` disappears
 mid-run — the user disabled or cleared the feature — stop without further writes.
 Never recreate them.
 
 **If `$TRACKER_FILE` already exists**, stop immediately and
-report `ALREADY_EXISTS`. Read the existing file if you want to say what is in it;
-do not modify it.
+report `ALREADY_EXISTS`. Do not modify it.
 
 ## Capability probe
 
 Probe **before** you infer anything, and select every capability **by its
-description, never by tool name** — published tool rosters disagree with one
-another across vendors and versions, so a name-matched probe reports "missing"
-for a capability that is present under another spelling.
+description, never by tool name** — tool names differ across vendors and
+versions, so a name-matched probe misses a capability present under another name.
 
 For each capability below, establish whether it is reachable in this session.
-**denial ≡ absence** — a denied capability is identical to an absent one: both
-mean you cannot use it now and both may resolve later, so they take the same
-branch.
+**denial ≡ absence**: a denied capability takes the same branch as an absent one.
 
 | Capability (by description) | Fills |
 |---|---|
@@ -184,43 +158,37 @@ free prose:
 TRACEABILITY: DEGRADED (no tracker tool for {capability})
 ```
 
-**When NO capability is reachable at all**, the tracker is not usable in this
-session: **write nothing**, follow `## Finishing`, and let the next session
-re-arm. This is the transient case. Do not write a defaults-only file to "make
-progress" — that file would satisfy the existence gate forever.
+**When no capability is reachable at all** (the transient case), **write
+nothing**, follow `## Finishing`, and let the next session re-arm. Never write a
+defaults-only file: it would satisfy the existence gate forever.
 
-**When some are reachable but the evidence is thin**, that is the permanent case:
-**write the file**, marking every section you could not resolve with a sentinel.
+**When some are reachable but the evidence is thin** (the permanent case),
+**write the file**, and mark every section you could not resolve with a sentinel.
 
 ## Bounded inference
 
 Repository conventions come from a **bounded** scan of history. The bounds, the
 UNTRUSTED-strings handling, the post-composition verbatim-match check and the
-`### Substitutions` rule all live in one place: the `devflow:git` skill's
-`references/learn-conventions.md`. **Load it and apply it. Do not restate it
-here** — a second hand-maintained copy of security-relevant bounds is two rules
-that can disagree, and only one of them would be under test.
+`### Substitutions` rule live in the `devflow:git` skill's
+`references/learn-conventions.md`. **Load it and apply it; do not restate it.**
 
-Three rules are this agent's own, and are stated here because that reference does
-not carry them:
+Three rules are this agent's own:
 
 1. **Majority rule.** A scanned value is adopted only with **≥ 3 occurrences AND
    ≥ 60% share** of the sampled evidence. Otherwise it gets a sentinel —
-   **never the first match**, and **never an invented value**. (This is stricter
-   than the reference's own 50% rule, deliberately: a wrong tracker key sends
-   every future issue lookup to a project that does not exist.)
+   **never the first match**, and **never an invented value**. This is stricter
+   than the reference's 50% rule on purpose: a wrong tracker key sends every
+   future issue lookup to a project that does not exist.
 2. **Refuse history inference outside a real project root.** If the resolved root
    is `$HOME`, or carries no git marker, do not infer from history at all — a
-   dotfiles `$HOME` *is* a git repository, and its branch names say nothing about
-   any tracker. Every repo-derived section gets a sentinel instead.
-3. **Record provenance.** Write the root you actually scanned and the timestamp
-   into `inferred-from:`. It is the only place a reader can see where a value
-   came from.
+   dotfiles `$HOME` can be a git repository, and its branch names say nothing
+   about any tracker. Every repo-derived section gets a sentinel instead.
+3. **Record provenance.** Write the root you scanned and the timestamp into
+   `inferred-from:`.
 
-Every value is **shape-gated regardless of provenance** — a value scanned from
-history, read from a tracker response, or typed by a human gets the same
-shape gate from the table below. A discarded value is replaced by the documented
-default and recorded as a `### Substitutions` row.
+Every value is **shape-gated regardless of provenance** — history, a tracker
+response or a human — by the table below. A discarded value takes the documented
+default and a `### Substitutions` row.
 
 ## The file
 
@@ -229,28 +197,26 @@ third-party input — to you when you compose it and to every reader afterwards.
 
 **File-level rules**
 
-- **≤ 120 lines** and **≤ 8,000 characters.** Over either bound, a reader reads it
-  fully anyway and degrades; a partial read is never correct. Stay well inside.
+- **≤ 120 lines** and **≤ 8,000 characters.** Over either bound, a reader
+  degrades. Stay well inside.
 - Mode `0600`.
-- Readers open it with the **Read tool**, never a shell read. Compose it so that
-  rule stays cheap to follow: one value per line, no continuations.
+- Readers open it with the **Read tool**, never a shell read: write one value per
+  line, no continuations.
 - **`# UNRESOLVED:` is a hard sentinel**, never shape-validated as a value. A
   **sentinel and an absent section are different outcomes**: an absent section
   means the documented neutral default, a sentinel means the reader degrades and
   asks the human to edit the file.
 - **A global-safe section whose shape gate is a closed enum and whose documented
   default is one of that enum's own values is never sentinelled — write the
-  constant.** Every value it admits is written down in the table below, it holds
-  for the whole machine, and the default is itself one of them: there is nothing
-  a human could resolve that you do not already know, and a sentinel there makes
-  every reader degrade forever over a value you had. `## Dedup Strategy` is a
-  closed enum too and is NOT covered — its documented default is a live probe,
-  not a member, so an unresolved rung there is a real unknown.
-- Every value is composed in the same restricted alphabet the `## Reference
-  Rendering` denylist names: **no backtick, no `$`, no `;`** anywhere in the
-  file. The write chain refuses the whole composition over one of them, so a
-  scanned string carrying one is a discard with a `### Substitutions` row, never
-  a value you pass through.
+  constant.** You know every value it admits, so a sentinel there makes every
+  reader degrade forever for no reason. `## Dedup Strategy` is not covered: its
+  documented default is a live probe, not a member, so an unresolved rung there
+  is a real unknown.
+- Compose every value with **no backtick, no `$`, no `;`** anywhere in the file
+  (three of the six `## Reference Rendering` denylist characters; the chain never
+  refuses `"` or `\` file-wide). The write chain refuses the whole
+  composition over one of them, so a scanned string carrying one is a discard
+  with a `### Substitutions` row, never a value you pass through.
 
 ### Section scope, defaults and shape gates
 
@@ -274,26 +240,19 @@ re-derived per repository at call time, so the value here is a last resort.
 `### Substitutions` carries no value and has no sink gate — it is report-only,
 written by you when a scanned value was discarded.
 
-**Why `## Reference Rendering` carries both a positive shape and a denylist.** The
-positive pattern is the real gate — a render token is a small, closed alphabet, so
-parsing it is strictly better than enumerating what it must not contain. The
-metachar denylist is the second, independent control: it is the clause that stays
-correct if the pattern is ever widened for a new token shape, and it is named
-separately so widening one cannot silently relax the other. Defense in depth,
-not redundancy.
+**`## Reference Rendering` carries a positive shape and a denylist** — two
+independent controls. Apply both; widening one never relaxes the other.
 
-**`## Dedup Strategy` is a hint, not a decision.** Record the rung TOKEN the
-probe resolved *and the evidence for it* — a token from the enum above and never
-a bare number, because the reader's ladder is the same four rungs by name and a
-number means whatever its writer was counting. A reader may use the recorded rung
-only to **narrow the probe order**; the **live probe is the sole authority** for
-whether dedup is available and for the reason it degrades. A rung recorded months
-ago on a server that has since changed must never be trusted as the answer.
+**`## Dedup Strategy` is a hint, not a decision.** Record the rung token the
+probe resolved *and the evidence for it* — a token from the enum above, never a
+bare number. A reader may use the recorded rung only to
+**narrow the probe order**; the **live probe is the sole authority** for whether
+dedup is available and for the reason it degrades.
 
 ### Template
 
-Instantiate exactly this shape — the headings are a contract with the reader and
-are compared against it heading-by-heading:
+Instantiate exactly this shape — readers compare the headings against it
+heading-by-heading:
 
 ```tracker-md-template
 ---
@@ -370,84 +329,19 @@ EOF
 GATE=$?; exit "$GATE"
 ```
 
-Every part of that is load-bearing:
+Run it as written. Every link is load-bearing: never split it into separate
+statements, never add a pipe, never move the `trap` or the `GATE=$?` capture, and
+never address the scrubber through a second `$HOME/.devflow`. A pipeline or a
+statement break hides the scrubber's exit status, and the chain is what makes the
+gate fail *closed*. This file sink needs the `&&` chain, never the scrubber's
+framed stdout mode, which exists for comment sinks.
 
-- **`umask 077` for the whole block** — every file it creates, the scrubber's
-  output included, is CREATED `0600` rather than created world-readable and
-  narrowed a moment later. `chmod 600` stays as the second, independent control:
-  defense in depth, not redundancy.
-- **`mktemp` per invocation** — two concurrent runs never share a staging path.
-  The scrubbed stage is taken **inside `$TRACKER_DEVFLOW_DIR`** because `ln` places
-  a file only within one filesystem, and the default temp directory is not
-  guaranteed to be on the same one.
-- **Each `mktemp` is a precondition, not an assumption** — `|| exit 1` before
-  anything is composed. A chain in which every link is load-bearing cannot have an
-  unchecked first link. So is the conventions directory: the provider files share
-  one directory under `$TRACKER_DEVFLOW_DIR`, created `0700` under the block's
-  umask on the first write any provider makes, and `ln` places nothing into a
-  directory that is not there.
-- **The compose step is brace-grouped so it HAS a status the chain can read.** A
-  bare `cat > "$RAW" <<'EOF' … EOF` is its own statement, and the shell throws its
-  exit code away: a full disk, a read-only temp directory or a vanished `$RAW`
-  leaves an empty or partial composition, and every link after it runs happily
-  over the result. `{ … } &&` makes the write the first link of the same chain
-  the placement hangs off.
-- **Both temp files are removed by a `trap` on `EXIT INT TERM`** — on the refusal
-  paths and the signal paths, not only on the one where the chain runs to the end.
-  `$RAW` holds the PRE-scrub composition, so leaving it behind keeps exactly the
-  bytes the gate exists to remove, for the lifetime of the temp directory rather
-  than of the run. A plain `rm --`, never a flagged one, for the reason
-  `## Finishing` step 3 gives.
-- **`GATE=$?` immediately after the chain, and `exit "$GATE"`.** The trap fires
-  after that status is captured and fixed, so what the block reports is the gate's
-  verdict — an exit code read after a later command is not evidence about the
-  earlier one.
-- **The scrubber is addressed through `$TRACKER_DEVFLOW_DIR`**, the one resolution
-  `## Environment` performs — never a second `$HOME/.devflow` here.
-  A second site can disagree with the first, and the disagreement fails closed
-  and silently: the scrubber is looked up under one root while the file is written
-  under another, `node` exits non-zero, and inference never writes anything.
-- **The quoted heredoc delimiter** (`<<'EOF'`) — the composed file carries scanned
-  history strings and tracker text. An unquoted delimiter would expand them.
-- **A single `&&` chain, never a pipeline.** A pipeline hides the scrubber's exit
-  status; the chain is what makes the gate fail *closed*. If the scrubber exits
-  non-zero, or is missing, **write nothing** and report
+- **If the scrubber exits non-zero, or is missing**, **write nothing** and report
   `TRACEABILITY: DEGRADED (redaction unavailable)`.
-  A file sink has a shell `&&` available, which is why this gate is a chain. The
-  scrubber's framed stdout mode exists for comment sinks that have no such
-  boundary — a different sink with a different problem. **Keep the two reasons
-  apart; neither simplifies into the other.**
-- **`[ -s "$SCRUBBED" ]` and the three `grep`s are the shape gate.** The
-  scrubber's exit status says it RAN, not that it produced a file worth keeping:
-  an empty composition scrubs to zero bytes and every link of the chain still
-  exits 0. The size test and the first two greps — the frontmatter's first key
-  and the last REQUIRED heading — bracket the composition at both ends, so a body
-  that is empty, truncated or not the template at all never reaches placement.
-  Downstream reads nothing but existence, so this is the line where the Iron Law
-  is enforced rather than asserted.
-- **The third `grep` validates the range the anchors only bracket.** Two anchors
-  say the head and the tail arrived and say nothing about the lines between them
-  — or after them, which is where `### Substitutions` sits, and every row of that
-  section is a value that already failed its own shape gate. The negated grep
-  reads every line of the composition and refuses the write over a backtick, a
-  `$` or a `;`: the `## Reference Rendering` denylist, hoisted from one section
-  to the whole file. The section rule stays where it is — this is a second,
-  independent control at the sink, not a replacement for the one at the source.
-  The other two characters that denylist names are deliberately NOT here, each
-  for its own reason: the scrubber may re-quote an assignment it redacted, so a
-  link that refused a double quote would make a SUCCESSFUL redaction refuse the
-  write; and a backslash inside a bracket expression is read as an escape by some
-  `grep`s and as a literal by others, which would be a portability bug in a
-  security control rather than a control.
-- **`ln` places the file atomically and create-exclusively.** `link(2)` publishes
-  a file that is ALREADY complete, under a name that must not exist: there is no
-  instant at which `$TRACKER_FILE` holds a prefix of the content. It fails with
-  `EEXIST` when the path is taken — you lost a race: **read the existing file and
-  report `ALREADY_EXISTS`.** The failure is **not a lock wait** — do not unlink
-  and retry. Unlink-and-retry is correct for a staged atomic replace and exactly
-  wrong for a write-once file, because the winner's content is the answer.
-- **`chmod 600` in the same chain** — the file may name a site and a project.
-  Never change the mode of the parent directory: `~/.devflow` is 0755 and shared
+- **If `ln` fails because the path is taken** (`ln` reports `File exists`), you
+  lost a race: **report `ALREADY_EXISTS`.** The failure is **not a lock wait**
+  — do not unlink and retry, because the winner's content is the answer.
+- Never change the mode of the parent directory: `~/.devflow` is 0755 and shared
   by every other feature.
 
 **Never write a value you did not validate against the table above**, and never
@@ -458,23 +352,16 @@ identifier.
 
 1. **On a write-less exit** — no capability reachable, capability denied, or the
    scrub gate refused — **leave `"$TRACKER_ATTEMPTS_FILE"` exactly as you found
-   it.** The session-start gate spends one attempt from it at the moment it emits
-   your directive, so a run that dies before reaching this line costs the gate the
-   same single attempt as one that reaches it, and the cap of **5 attempts**
-   engages without you. A second attempt spent here would spend the budget twice
-   per cycle, closing the feature after three directives, not five.
+   it.** The session-start gate spends one attempt from it when it emits your
+   directive, and the cap of **5 attempts** engages without you. A second
+   attempt spent here would spend the budget twice per cycle.
 2. **On a successful write**, delete `"$TRACKER_ATTEMPTS_FILE"`.
-   The file now exists, so the attempt history is spent.
 3. Delete the claim file as your **FINAL act**, strictly after every other write,
-   and **a write-less exit still deletes the claim** — every path that reaches
-   this section releases it, or the next session reads a held claim as a live
-   sibling and waits out the whole staleness bound for a run that decided in
-   seconds it had nothing to say. Use a plain `rm --`: devflow's recommended
-   deny-list denies the FLAGGED spellings, and you run unattended with no one to
-   answer the prompt. `--` ends the options, so a path is never read as one:
+   and **a write-less exit still deletes the claim** — else the next session
+   reads a held claim as a live sibling and waits out the whole staleness bound.
+   Use a plain `rm --`, never a flagged spelling: devflow's recommended deny-list
+   denies flagged spellings, and you run unattended:
    `rm -- "$TRACKER_CLAIM"`
-   Crashing before this line leaves the claim file for the next run's stale
-   recovery — the correct outcome for a partial run.
 4. End with the output block below. It is invisible in a background run, so the
    file itself — its provenance header, its `### Substitutions` rows and its
    inline sentinels — is the real report.
