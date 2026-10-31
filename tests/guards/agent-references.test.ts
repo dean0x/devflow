@@ -41,7 +41,7 @@ const PLAN_LEVELS_REF_MAX_BYTES = 4_009
 const RESOLVE_LEVELS_REF_MAX_BYTES = 2_690
 
 /** The `/implement` gate-level reference, in bytes. Registered as `implement-levels-ref-max`; lowered, never raised. */
-const IMPLEMENT_LEVELS_REF_MAX_BYTES = 3_921
+const IMPLEMENT_LEVELS_REF_MAX_BYTES = 3_034
 
 /** The Triage severity-tiers reference, in bytes. Registered as `triage-tiers-ref-max`; lowered, never raised. */
 const TRIAGE_TIERS_REF_MAX_BYTES = 4_562

@@ -26,7 +26,7 @@ export const LEVEL_CMDS: readonly LevelCmd[] = ['implement', 'resolve']
 
 /** The rows that the reference of each command holds, as the lines of the file. A row joins the list in the change that decides it. */
 export const DECIDED_ROWS: Readonly<Record<LevelCmd, readonly string[]>> = {
-  implement: ['| 3 Polish | skip | skip |', '| 4 Self-Review | - | apply: harden-scope |', '| 5 Alignment Check | pass level; apply: single-pass | pass level; apply: single-pass |'],
+  implement: ['| 4 Self-Review | - | apply: harden-scope |'],
   resolve: ['| 2 Global Triage | pass level | pass level |', '| 6 Polish | skip | skip |'],
 }
 
@@ -106,8 +106,8 @@ export const LEVELS = Object.keys(LEVEL_CELL_INDEX) as readonly LevelColumn[]
 
 /**
  * The lines of the `full` Phase 5 re-check loop of /implement, each trimmed and each held once by the Phase 5 section. The
- * full-fences guard pins them in the compiled command, and the levels guard ties the step numbers of the `single-pass`
- * bullet to the two numbered steps here: the test of the attempt cap (index 1) and the report to the user (index 3).
+ * full-fences guard pins them in the compiled command, and the levels guard ties the step numbers of the one-pass
+ * paragraph of Phase 5 to the two numbered steps here: the test of the attempt cap (index 1) and the report to the user (index 3).
  */
 export const FULL_LOOP_LINES: readonly string[] = [
   '2. Increment `alignment_fix_count`',

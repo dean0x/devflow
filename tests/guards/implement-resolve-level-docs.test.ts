@@ -16,8 +16,9 @@
  * someone back to the docs. The three sites that state the lean Harden skip in detail (the README, docs/cli-reference.md
  * and the /implement section of docs/commands.md) each state the two report notes of the `harden-scope` bullet once, and
  * state the skip in a sentence that names `lean` and neither `standard` nor `full`. The two docs hold the same block.
- * The `5 Alignment Check` row (`pass level; apply: single-pass`) has the effect "one Evaluate pass": each site that covers
- * `/implement` says it once. Two more phrases of the route
+ * Two level effects of `/implement` have no row, because the command text sets them itself (X1): at `standard` and `lean` it
+ * skips the Polish spawn, and Phase 5 runs "one Evaluate pass". Each site that covers `/implement` says each once, as it did
+ * when a row set them (`COMMAND_EFFECTS`), and the compiled command holds the text that sets each one. Two more phrases of the route
  * after that pass are checked on their own: the README, docs/cli-reference.md and the /implement section of docs/commands.md
  * each state "one Fix round" once, and the two docs state the route of a Fix round that does not complete ("anything other
  * than COMPLETE") once. The README leaves that sentence out. This is a known limit, so the check does not hold it to one.
@@ -36,7 +37,7 @@ import { readFileSync } from 'fs'
 import * as path from 'path'
 
 import { GATE_LEVEL_EFFECT } from '../../src/cli/commands/gates.js'
-import { ROOT } from '../helpers.js'
+import { ROOT, requireDistFile, resolveCurationOffSource } from '../helpers.js'
 import { DECIDED_ROWS, LEVEL_CMDS, OPEN, REFS, countOf, parseRef, referenceRows, rowCells, sectionOf, seed, seedOnce, withRows, type LevelCmd } from './level-guard-helpers.js'
 
 /** The clauses that say the references hold no rows. No doc site keeps one once any table has a row. */
@@ -51,7 +52,7 @@ const SEVERITY_TIERS = /\bapplies severity tiers\b/
 /** What a doc site says when it states the lean Harden skip: "skip Harden on a docs-only diff" or "skips Harden on a docs-only diff". */
 const HARDEN_DOCS_SKIP = /\bskips? Harden on a docs-only diff\b/
 
-/** What a doc site says when it states the single Evaluate pass of the `5 Alignment Check` row: "runs one Evaluate pass". */
+/** What a doc site says when it states the single Evaluate pass of Phase 5 at `standard` and `lean`: "runs one Evaluate pass". */
 const EVALUATE_SINGLE_PASS = /\bone Evaluate pass\b/
 
 /** What a doc site says when it states the Fix round that follows the single Evaluate pass: "one Fix round runs". */
@@ -68,12 +69,27 @@ const BATCHING = /\bin (?:a )?batch(?:es)?\b/
  * key, so it sends someone back to the docs. A row with no entry here is reported.
  */
 const ROW_EFFECTS: ReadonlyMap<string, RegExp> = new Map([
-  ['implement:| 3 Polish | skip | skip |', POLISH_SKIP],
   ['implement:| 4 Self-Review | - | apply: harden-scope |', HARDEN_DOCS_SKIP],
-  ['implement:| 5 Alignment Check | pass level; apply: single-pass | pass level; apply: single-pass |', EVALUATE_SINGLE_PASS],
   ['resolve:| 2 Global Triage | pass level | pass level |', SEVERITY_TIERS],
   ['resolve:| 6 Polish | skip | skip |', POLISH_SKIP],
 ])
+
+/**
+ * A level effect that the `/implement` command text sets itself and no row holds (X1). `re` is what a doc site says of it, and
+ * `needle` is the text of the compiled command that sets it, so an effect whose text left the command is reported as stale.
+ */
+interface CommandEffect { readonly what: string; readonly re: RegExp; readonly needle: string }
+
+/** The two effects: the Polish skip and the single Evaluate pass, both at `standard` and `lean`. */
+const COMMAND_EFFECTS: readonly CommandEffect[] = [
+  { what: 'the Polish skip of /implement at standard and lean', re: POLISH_SKIP, needle: 'skip the Polish spawn' },
+  { what: 'the single Evaluate pass of /implement at standard and lean', re: EVALUATE_SINGLE_PASS, needle: 'Phase 5 runs one pass' },
+]
+
+/** The defect for each effect whose `needle` the compiled `/implement` text does not hold. Run on its own, so a probe can pass a command text with a needle cut out. */
+export function collectStaleCommandEffectDefects(command: string, effects: readonly CommandEffect[] = COMMAND_EFFECTS): string[] {
+  return effects.filter(({ needle }) => !command.includes(needle)).map(({ what, needle }) => `the command effect "${what}" names no text of the compiled /implement: ${needle}`)
+}
 
 /** The row with its last cell changed: a row that ends in `skip` ends in `-` instead, and any other row ends in `skip`. */
 const changeLastCell = (row: string): string => (row.endsWith(' skip |') ? row.replace(/ skip \|$/, ' - |') : row.replace(/ [^|]+ \|$/, ' skip |'))
@@ -277,6 +293,15 @@ const EVALUATE_ROUTE_CHECKS: readonly RouteCheck[] = [
   { what: 'the one Fix round after the single Evaluate pass', re: EVALUATE_ONE_FIX_ROUND, sites: FIX_ROUND_SITES },
   { what: 'the route of a Fix round that does not complete', re: EVALUATE_FIX_ROUTE, sites: FIX_ROUTE_SITES },
 ]
+/** The sites that cover `/implement`: each states each effect of `COMMAND_EFFECTS` once. */
+const IMPLEMENT_SITES: readonly ReadSite[] = DOC_SITES.filter(each => each.cmds.includes('implement'))
+/** The checks of the effects that the command text sets itself, over the real sites. */
+const COMMAND_EFFECT_CHECKS: readonly RouteCheck[] = COMMAND_EFFECTS.map(({ what, re }) => ({ what, re, sites: IMPLEMENT_SITES }))
+/** The compiled `/implement`, curation on and curation off: the texts that hold the command effects. */
+const IMPLEMENT_COMMANDS: ReadonlyArray<readonly [label: string, text: string]> = [
+  ['implement, curation on', requireDistFile('implement.md')],
+  ['implement, curation off', resolveCurationOffSource('commands', 'implement') ?? ''],
+]
 
 /** What the Harden block of a doc says of the files Harden skips over (#571). */
 const HARDEN_NEVER_REVIEWS = /\bnever reviews a deleted file or the old path of a rename\b/
@@ -302,10 +327,14 @@ const GATE_CLAIM_CHECKS: readonly RouteCheck[] = [
 
 describe('the doc sites state the effect of each shipped row and keep no retired claim (TP-6)', () => {
   /** Test-only sites: the probes do not depend on what the real docs say, so they hold before and after the rows ship. */
-  const effect = 'At standard and lean they skip Polish, and full keeps it.'
+  const polishEffect = 'At standard and lean they skip Polish, and full keeps it.'
+  const hardenEffect = 'At lean, /implement skips Harden on a docs-only diff.'
+  const effect = `${polishEffect} ${hardenEffect}`
+  const hardenRow = '| 4 Self-Review | - | apply: harden-scope |'
+  const polishRow = '| 6 Polish | skip | skip |'
   const site = (text: string, cmds: DocSite['cmds'] = BOTH_COMMANDS): DocSite => ({ label: 'the probe site', text, cmds })
   const none = { implement: withRows(REFS.implement, []), resolve: withRows(REFS.resolve, []) }
-  const both = { implement: withRows(REFS.implement, ['| 3 Polish | skip | skip |']), resolve: withRows(REFS.resolve, ['| 6 Polish | skip | skip |']) }
+  const both = { implement: withRows(REFS.implement, [hardenRow]), resolve: withRows(REFS.resolve, [polishRow]) }
   const onlyResolve = { implement: none.implement, resolve: both.resolve }
 
   it('the sites are the registered ones, each read from the product, and the shipped tables leave no defect', () => {
@@ -416,21 +445,21 @@ describe('the doc sites state the effect of each shipped row and keep no retired
   it('known-bad probes (test-only sites): a site that states the effect once is clean, and a site without it, or with it twice, is reported', () => {
     expect(collectDocSiteDefects([site(effect)], both)).toEqual([])
     expect(collectDocSiteDefects([site('Nothing about Polish here.')], both)).toEqual([
-      `the probe site does not state the effect of the implement row | 3 Polish | skip | skip |: it must match ${POLISH_SKIP}`,
-      `the probe site does not state the effect of the resolve row | 6 Polish | skip | skip |: it must match ${POLISH_SKIP}`,
+      `the probe site does not state the effect of the implement row ${hardenRow}: it must match ${HARDEN_DOCS_SKIP}`,
+      `the probe site does not state the effect of the resolve row ${polishRow}: it must match ${POLISH_SKIP}`,
     ])
     expect(collectDocSiteDefects([site(`${effect} ${effect}`)], both)).toEqual([
-      'the probe site states the effect of the implement row | 3 Polish | skip | skip | 2 times, expected once',
-      'the probe site states the effect of the resolve row | 6 Polish | skip | skip | 2 times, expected once',
+      `the probe site states the effect of the implement row ${hardenRow} 2 times, expected once`,
+      `the probe site states the effect of the resolve row ${polishRow} 2 times, expected once`,
     ])
   })
 
   it('known-bad probes (test-only sites): a site owes the effect of the rows of its own commands only', () => {
     expect(collectDocSiteDefects([site('No effect here.', ['implement'])], onlyResolve), 'an /implement site while only /resolve has a row').toEqual([])
     expect(collectDocSiteDefects([site('No effect here.', ['resolve'])], onlyResolve)).toEqual([
-      `the probe site does not state the effect of the resolve row | 6 Polish | skip | skip |: it must match ${POLISH_SKIP}`,
+      `the probe site does not state the effect of the resolve row ${polishRow}: it must match ${POLISH_SKIP}`,
     ])
-    expect(collectDocSiteDefects([site(effect, ['resolve'])], onlyResolve)).toEqual([])
+    expect(collectDocSiteDefects([site(polishEffect, ['resolve'])], onlyResolve)).toEqual([])
   })
 
   it('known-bad probes (test-only sites): once any table has a row, each retired claim at a site is reported', () => {
@@ -441,28 +470,28 @@ describe('the doc sites state the effect of each shipped row and keep no retired
   })
 
   it('known-bad probes (test-only sites): a shipped row with no ROW_EFFECTS entry is reported, and one changed cell is a new row', () => {
-    const unregistered = withRows(REFS.implement, ['| 3 Polish | skip | skip |', '| 5 Alignment Check | pass level | - |'])
+    const unregistered = withRows(REFS.implement, [hardenRow, '| 5 Alignment Check | pass level | - |'])
     expect(collectDocSiteDefects([site(effect)], { ...both, implement: unregistered })).toEqual(['the implement row | 5 Alignment Check | pass level | - | has no ROW_EFFECTS entry'])
-    const changed = withRows(REFS.implement, ['| 3 Polish | skip | - |'])
-    expect(collectDocSiteDefects([site(effect)], { ...both, implement: changed })).toEqual(['the implement row | 3 Polish | skip | - | has no ROW_EFFECTS entry'])
-    const other = new Map([['implement:| 3 Polish | skip | skip |', /\bleaves out Polish\b/]])
+    const changed = withRows(REFS.implement, ['| 4 Self-Review | - | skip |'])
+    expect(collectDocSiteDefects([site(effect)], { ...both, implement: changed })).toEqual(['the implement row | 4 Self-Review | - | skip | has no ROW_EFFECTS entry'])
+    const other = new Map([[`implement:${hardenRow}`, /\bleaves out Harden\b/]])
     expect(collectDocSiteDefects([site(effect, ['implement'])], both, other), 'a registered effect that the site lacks').toEqual([
-      'the resolve row | 6 Polish | skip | skip | has no ROW_EFFECTS entry',
-      'the probe site does not state the effect of the implement row | 3 Polish | skip | skip |: it must match /\\bleaves out Polish\\b/',
+      `the resolve row ${polishRow} has no ROW_EFFECTS entry`,
+      `the probe site does not state the effect of the implement row ${hardenRow}: it must match /\\bleaves out Harden\\b/`,
     ])
   })
 
   it('known-bad probes (test-only sites): a ROW_EFFECTS entry that names no shipped row is reported', () => {
-    const polishEntries = new Map<string, RegExp>([['implement:| 3 Polish | skip | skip |', POLISH_SKIP], ['resolve:| 6 Polish | skip | skip |', POLISH_SKIP]])
-    expect(collectStaleEffectDefects(both, polishEntries), 'an entry for each shipped row').toEqual([])
-    expect(collectStaleEffectDefects(none, polishEntries), 'no table has a row').toEqual([
-      'the ROW_EFFECTS entry implement:| 3 Polish | skip | skip | names no shipped row',
-      'the ROW_EFFECTS entry resolve:| 6 Polish | skip | skip | names no shipped row',
+    const entries = new Map<string, RegExp>([[`implement:${hardenRow}`, HARDEN_DOCS_SKIP], [`resolve:${polishRow}`, POLISH_SKIP]])
+    expect(collectStaleEffectDefects(both, entries), 'an entry for each shipped row').toEqual([])
+    expect(collectStaleEffectDefects(none, entries), 'no table has a row').toEqual([
+      `the ROW_EFFECTS entry implement:${hardenRow} names no shipped row`,
+      `the ROW_EFFECTS entry resolve:${polishRow} names no shipped row`,
     ])
-    expect(collectStaleEffectDefects(onlyResolve, polishEntries), 'the /implement row retired').toEqual(['the ROW_EFFECTS entry implement:| 3 Polish | skip | skip | names no shipped row'])
-    const changed = { ...both, implement: withRows(REFS.implement, ['| 3 Polish | skip | - |']) }
-    expect(collectStaleEffectDefects(changed, polishEntries), 'one cell of the row changed').toEqual(['the ROW_EFFECTS entry implement:| 3 Polish | skip | skip | names no shipped row'])
-    expect(collectStaleEffectDefects(both, new Map([...polishEntries, ['implement:| 3 Polish | - | skip |', POLISH_SKIP]])), 'an entry for a row that was never shipped').toEqual(['the ROW_EFFECTS entry implement:| 3 Polish | - | skip | names no shipped row'])
+    expect(collectStaleEffectDefects(onlyResolve, entries), 'the /implement row retired').toEqual([`the ROW_EFFECTS entry implement:${hardenRow} names no shipped row`])
+    const changed = { ...both, implement: withRows(REFS.implement, ['| 4 Self-Review | - | skip |']) }
+    expect(collectStaleEffectDefects(changed, entries), 'one cell of the row changed').toEqual([`the ROW_EFFECTS entry implement:${hardenRow} names no shipped row`])
+    expect(collectStaleEffectDefects(both, new Map([...entries, ['implement:| 4 Self-Review | skip | - |', HARDEN_DOCS_SKIP]])), 'an entry for a row that was never shipped').toEqual(['the ROW_EFFECTS entry implement:| 4 Self-Review | skip | - | names no shipped row'])
   })
 
   // The probes over the real sites need the rows to ship, so they ride with them. The pin test below fixes `shippedRows`,
@@ -472,9 +501,7 @@ describe('the doc sites state the effect of each shipped row and keep no retired
 
   it('known-bad probes (real sites): the decided rows are the ones the probes loop over', () => {
     expect(shippedRows.map(({ cmd, row }) => `${cmd}:${row}`)).toEqual([
-      'implement:| 3 Polish | skip | skip |',
       'implement:| 4 Self-Review | - | apply: harden-scope |',
-      'implement:| 5 Alignment Check | pass level; apply: single-pass | pass level; apply: single-pass |',
       'resolve:| 2 Global Triage | pass level | pass level |',
       'resolve:| 6 Polish | skip | skip |',
     ])
@@ -631,6 +658,45 @@ describe('the doc sites state the effect of each shipped row and keep no retired
           expect(phrase, `${real.label}: the phrase is there`).not.toBeNull()
           const repeated: DocSite = { ...real, text: `${real.text} ${phrase?.[0] ?? ''}` }
           expect(collectEvaluateRouteDefects([{ ...check, sites: [repeated] }]), `${real.label}: ${check.what} repeated`).toEqual([`${real.label} states ${check.what} 2 times, expected once`])
+        }
+      }
+    })
+  })
+
+  describe('the sites state the level effects that the /implement text sets itself, and the command holds their text (X1)', () => {
+    it('the checks cover the sites of /implement, and the real texts and the compiled command leave no defect', () => {
+      expect(IMPLEMENT_SITES.map(s => s.label)).toEqual([
+        'the devflow gates text',
+        'the README.md Gate level paragraph',
+        'the docs/cli-reference.md What reads it paragraph',
+        'the docs/commands.md /implement section',
+      ])
+      expect(COMMAND_EFFECTS.map(effect => effect.re)).toEqual([POLISH_SKIP, EVALUATE_SINGLE_PASS])
+      expect(COMMAND_EFFECT_CHECKS.map(check => check.sites.length)).toEqual([4, 4])
+      expect(collectEvaluateRouteDefects(COMMAND_EFFECT_CHECKS)).toEqual([])
+      for (const [label, text] of IMPLEMENT_COMMANDS) {
+        expect(text.length, `${label}: nothing read`).toBeGreaterThan(5_000)
+        expect(collectStaleCommandEffectDefects(text), label).toEqual([])
+      }
+    })
+
+    it('known-bad probes (real sites): a real site with an effect phrase taken out or repeated is reported', () => {
+      for (const check of COMMAND_EFFECT_CHECKS) {
+        for (const real of check.sites) {
+          const without: DocSite = { ...real, text: seed(real.text, check.re, 'does nothing special') }
+          expect(collectEvaluateRouteDefects([{ ...check, sites: [without] }]), `${real.label}: ${check.what} taken out`).toEqual([`${real.label} does not state ${check.what}`])
+          const phrase = real.text.match(check.re)
+          expect(phrase, `${real.label}: the phrase is there`).not.toBeNull()
+          const repeated: DocSite = { ...real, text: `${real.text} ${phrase?.[0] ?? ''}` }
+          expect(collectEvaluateRouteDefects([{ ...check, sites: [repeated] }]), `${real.label}: ${check.what} repeated`).toEqual([`${real.label} states ${check.what} 2 times, expected once`])
+        }
+      }
+    })
+
+    it('known-bad probes: an effect whose text left the compiled command is reported', () => {
+      for (const [label, text] of IMPLEMENT_COMMANDS) {
+        for (const { what, needle } of COMMAND_EFFECTS) {
+          expect(collectStaleCommandEffectDefects(seedOnce(text, needle, 'do nothing')), `${label}: ${what}`).toEqual([`the command effect "${what}" names no text of the compiled /implement: ${needle}`])
         }
       }
     })

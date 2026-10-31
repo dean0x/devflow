@@ -3,13 +3,16 @@
  * criterion of #480. `TP-n` is item n of the test plan of PR #574, which implements #481. Issue #481 lists five
  * criteria, and the `TP-n` numbers are not the numbers of that list.
  *
- * `GATE_LEVEL` comes from the accepted settings line. At `standard` and `lean`, each command reads its own level
- * reference once per run and applies the rows of that reference to the phases the rows name. At `full` it reads
- * nothing. Both references ship with the fixed row grammar. The rows they hold are the decided ones (`expectedRows`),
- * so this file holds what a row may say, where the command reads it and what no row may touch.
+ * `GATE_LEVEL` comes from the accepted settings line. `/resolve` reads its level reference at `standard` and `lean`,
+ * once per run, and applies the rows of that reference to the phases the rows name. `/implement` reads its reference
+ * at `lean` only: at `standard` and `lean` its own text skips the Polish spawn and runs Phase 5 as one pass (X1), and the
+ * reference holds the one row that only `lean` applies. At `full` neither command reads anything. Both references ship
+ * with the fixed row grammar. The rows they hold are the decided ones (`expectedRows`), so this file holds what a row
+ * may say, where the command reads it and what no row may touch.
  *   - `/implement`: one Gate level block at the start of Phase 3. The normal path and the re-validation path
  *     (Phases 3-8) both reach it. A failed read applies no row and keeps `GATE_LEVEL`, so at `lean` Phase 6 still
- *     passes the level to Validate and the lint pack still runs.
+ *     passes the level to Validate, the lint pack still runs and Harden runs: the `harden-scope` skip lives in the
+ *     reference alone.
  *   - `/resolve`: one Gate level block in Step 0d. Each worktree keeps its own level. A failed read applies no row
  *     in any worktree.
  *   - No level changes the security floor that each block names.
@@ -30,21 +33,24 @@
  *   g. The report lines that name the level.
  *   h. The two `/resolve` routes that skip phases, the numbered principles and the edge row that reports an empty parse.
  *   i. What a skipped Polish or Harden phase leaves alone: the branch diff definition, the output of each skippable
- *      phase (`SKIPPABLE_OUTPUTS`) and the readers of that output in both builds of the commands that skip it.
+ *      phase (`SKIPPABLE_OUTPUTS`) and the readers of that output in both builds of the commands that skip it. The
+ *      `/implement` Polish skip is a clause of the command's own Gate level lead (X1), so the lead is pinned too.
  *   j. The Evaluate level contract (#483): the agent reads its level from prompt line 1 only, and its Level scope
  *      keeps every criterion, plan step and behaviour defect while it drops only the named low-value items.
- *   k. The single Evaluate pass (#483): the `5 Alignment Check` row and the `single-pass` bullet, and the agents that a
- *      `pass level` phase spawns each read the level from prompt line 1 only (`collectPassLevelInputDefects`).
+ *   k. The single Evaluate pass (#483, moved into the command by X1): the "One pass" paragraph of Phase 5, and the agents
+ *      that a phase passing the level spawns each read the level from prompt line 1 only (`collectPassLevelInputDefects`).
  *   l. The re-validation path keeps Harden (#544): it skips Phase 2, so no Code report exists and the branch diff
  *      drops deleted files. Its reference says that Phase 4 keeps Harden at every level and that the `harden-scope`
  *      skip never applies there (`collectRevalidateHardenDefects`). The lens, publication and step-1 "Phase 1 ran" parts
  *      of the same path are held in `compliance-injection.test.ts` and `implement-flow.test.ts`.
+ *   m. A failed level-file Read leaves Harden to run (X1): the only skip of Harden is the `harden-scope` bullet of the
+ *      reference, so a command text that skips Harden on its own would still skip it when the Read fails.
  * The spawn fences of both commands are pinned in `implement-resolve-full-fences.test.ts`. The doc sites that state the
  * effect of each shipped row are checked in `implement-resolve-level-docs.test.ts`. The three commands that keep Polish
  * and read no level are checked in `implement-resolve-level-keepers.test.ts`. The three guards share
  * `level-guard-helpers.ts`.
  *
- * The reference arms (d, e, l) read the references. The command arms (a, b, c, f, g, h, i) read the compiled commands.
+ * The reference arms (d, e, l) read the references. The command arms (a, b, c, f, g, h, i, k, m) read the compiled commands.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -61,14 +67,14 @@ import { DECIDED_ROWS, FULL_LOOP_LINES, LEVELS, LEVEL_CELL_INDEX, OPEN, POLISH_S
 const LEVEL_DIR = 'skills/devflow:agent-references/references/commands'
 /** The placeholder `/implement` reads its references through, and the one paragraph that binds it. */
 const IMPLEMENT_REF_DIR = '{ref_dir}'
-const IMPLEMENT_BINDER = `**Agent references.** Print the config directory once, before the first reference Read: run \`${SANCTIONED_RESOLUTION_PRINT}\` in Bash. \`${IMPLEMENT_REF_DIR}\` is \`<that directory>/${LEVEL_DIR}\`. Read each reference with the Read tool. When \`${IMPLEMENT_REF_DIR}\` is not in view (for example after a compaction), print the directory again with the same line.`
-/** The back-pointer inside the `/implement` read sentence: a session resumes from the phase heading after a compaction, so the one read that runs after Phase 1 names the binder and says to print the directory again with its line. */
-const IMPLEMENT_BACK_POINTER_SET = `\`${IMPLEMENT_REF_DIR}\` is set in **Agent references.**`
-const IMPLEMENT_BACK_POINTER_REPRINT = 'if it is not in view, print the directory again with that line'
-const IMPLEMENT_BACK_POINTER = `(${IMPLEMENT_BACK_POINTER_SET}; ${IMPLEMENT_BACK_POINTER_REPRINT})`
+/** The stop that ends the binder: a failed or empty reference Read halts the run, except the Gate level read, which fails closed (no row applied, Harden runs). */
+const IMPLEMENT_STOP = 'A failed or empty reference Read, except the Gate level read, stops the run: `implement: reference file <name> unreadable; run devflow init.`'
+const IMPLEMENT_BINDER = `**Agent references.** Print the config directory once, before the first reference Read: run \`${SANCTIONED_RESOLUTION_PRINT}\` in Bash. \`${IMPLEMENT_REF_DIR}\` is \`<that directory>/${LEVEL_DIR}\`. Read each reference with the Read tool. When \`${IMPLEMENT_REF_DIR}\` is not in view (for example after a compaction), print the directory again with the same line. ${IMPLEMENT_STOP}`
 const TABLE_HEADER = '| Phase | standard | lean |'
 
 const GRAMMAR_CELL = "- **Cell:** `-` runs the phase as written; `skip`, alone, skips it; `apply: <name>` applies the `## Rules` bullet `<name>`; `pass level` puts the line `GATE_LEVEL: {GATE_LEVEL}` first in every spawn prompt of the phase, right after a leading `OPERATION:` line. A phase with no spawn takes only `-`. Join `apply:` and `pass level` with `; `. Each `apply:` names exactly one bullet. Any other cell is malformed."
+/** The cell grammar of the `/implement` reference: it reads at `lean` only, so a `standard` cell is `-` and a cell is `-` or one bullet. */
+const IMPLEMENT_GRAMMAR_CELL = '- **Cell:** `-` runs the phase as written; `apply: <name>` applies the `## Rules` bullet `<name>`, and names exactly one bullet. A `standard` cell is `-`. Any other cell is malformed.'
 const GRAMMAR_RULES_BULLET = '- **Rules bullet:** a Rules bullet opens `- **<name>:**`.'
 const GRAMMAR_SKIPPED = '- **Skipped:** a skipped phase does not stop the run, and the next phase starts as written. A phase that waits for a skipped phase starts at once. Each name on its `**Produces:**` line reads `SKIPPED`, and a report shows `SKIPPED`.'
 /** The words of the Note bullet that open the channel for a Produces value; the pin and the probe that drops them share the one text. */
@@ -81,8 +87,16 @@ const BAD_ROW = 'a row breaks its grammar'
 const UNREADABLE_LINE = '`level reference unreadable: no level rows applied`'
 const FAIL_CLOSED_HEAD = `If the Read fails, or the file ${NO_HEADING}, or ${BAD_ROW}, `
 const UNREADABLE = `say ${UNREADABLE_LINE}.`
-/** The condition that opens the read, in the read paragraph and in `levelCondition`. */
-const IMPLEMENT_CONDITION = 'At `standard` or `lean`, once per run'
+/**
+ * The Gate level lead of `/implement` (X1): at `standard` and `lean` the command skips the Polish spawn and Phase 5 runs one pass. Its
+ * three Polish clauses (`IMPLEMENT_POLISH_CLAUSES`) keep a Polish skip whole: the spawn, its output and the branch diff.
+ */
+const IMPLEMENT_POLISH_SKIP = 'At `standard` and `lean`, skip the Polish spawn (`POLISH_OUTPUT` reads `SKIPPED`; `{branch_diff}` stays defined)'
+const IMPLEMENT_LEAD = `${IMPLEMENT_POLISH_SKIP}, and Phase 5 runs one pass.`
+/** The clauses of the lead that keep a Polish skip whole: the spawn, its output and the branch diff that Harden and Evaluate still take. */
+const IMPLEMENT_POLISH_CLAUSES = ['At `standard` and `lean`, skip the Polish spawn', '`POLISH_OUTPUT` reads `SKIPPED`', '`{branch_diff}` stays defined'] as const
+/** The condition that opens the read, in the read paragraph and in `levelCondition`. `/implement` reads its file at `lean` only. */
+const IMPLEMENT_CONDITION = 'At `lean`, once per run'
 const RESOLVE_CONDITION = 'When any is `standard` or `lean`, once per run'
 
 /**
@@ -154,6 +168,8 @@ interface LevelSpec {
   readonly expectedBullets: readonly string[]
   /** The one exempt bullet (see `ExemptRemoval`). Absent: every bullet gets the full check. */
   readonly exemptRemoval?: ExemptRemoval
+  /** The phases whose spawns the command text itself tells to carry the level (X1), besides the phases whose rows pass it. */
+  readonly passLevelPhases?: readonly string[]
 }
 
 /** The Rules bullet `harden-scope` (#482) as the exact line of the `/implement` reference: the line that `HARDEN_EXEMPTION` exempts (see `ExemptRemoval`). */
@@ -161,29 +177,37 @@ const HARDEN_SCOPE = '- **harden-scope:** Before the Harden spawn, run its `{bra
 const HARDEN_NAME = 'harden-scope'
 const HARDEN_EXEMPTION: ExemptRemoval = { phase: '4', name: HARDEN_NAME, line: HARDEN_SCOPE, floorName: 'Harden' }
 
-/** The Rules bullet `single-pass` (#483) as the exact line of the `/implement` reference: Evaluate once, one Fix round in place of the re-check loop, and where each Fix report goes. */
-const SINGLE_PASS = '- **single-pass:** In Phase 5, run Evaluate once and never spawn it again in that pass; a retry of a failed Evaluate spawn is the same pass. On MISALIGNED, in place of steps 3 and 4, spawn the Phase 5 Fix once: on COMPLETE, set `ALIGNMENT_RESULT` to exactly `MISALIGNED (fixed once, not re-checked)` and start Phase 6; on FAILED, BLOCKED or anything else, report the misalignments to the user for decision.'
-const SINGLE_PASS_NAME = 'single-pass'
+/**
+ * The one-pass paragraph of Phase 5 (#483, moved from a Rules bullet into the command by X1): at `standard` and `lean`, Evaluate runs once, one Fix
+ * round takes the place of the re-check loop, and each Fix report goes to Phase 6 or to the user. The exact line of the compiled command.
+ */
+const ONE_PASS_OPEN = '**One pass, at `standard` and `lean`:**'
+const ONE_PASS = `${ONE_PASS_OPEN} each prompt of this phase opens with \`GATE_LEVEL: {GATE_LEVEL}\`, after any \`OPERATION:\` line. Run Evaluate once; a failed Evaluate spawn goes to Error Handling, and its retry is the same pass. On MISALIGNED, in place of steps 3 and 4, spawn the Fix once: on COMPLETE, set \`ALIGNMENT_RESULT\` to exactly \`MISALIGNED (fixed once, not re-checked)\` and start Phase 6; else report the misalignments to the user for decision.`
+/**
+ * The line after the "Any other or missing Status" arm of Phase 5: a Phase 5 report for decision ends the pass, and the user's go sets the
+ * alignment result and starts Phase 6. It is the second setter of `ALIGNMENT_RESULT`, beside the one-pass paragraph; `implement-alignment-status.test.ts` pins its parts.
+ */
+const CONTINUE_LINE = 'After a Phase 5 report for decision, if the user decides to continue, set `ALIGNMENT_RESULT` to exactly `MISALIGNED (user continued)` and start Phase 6.'
 
 const IMPLEMENT: LevelSpec = {
   cmd: 'implement',
   refFile: 'implement-levels.md',
   title: '# Implement: phases by gate level',
-  closed: [['3', 'Polish'], ['4', 'Self-Review'], ['5', 'Alignment Check']],
-  protectedPhases: ['1', '2', '6', '7', '8', '9', '10', '11', '12'],
-  intro: 'At `standard` and `lean`, a row sets its phase at that level. A phase with no row runs as written, and a table with no rows is well-formed.',
+  closed: [['4', 'Self-Review']],
+  protectedPhases: ['1', '2', '3', '5', '6', '7', '8', '9', '10', '11', '12'],
+  intro: "The command reads this file only at `lean`. A row's `lean` cell sets its phase, and its `standard` cell is `-`. A phase with no row runs as written, and a table with no rows is well-formed.",
   grammar: [
-    "- **Phase:** `3 Polish`, `4 Self-Review` or `5 Alignment Check`: the number and the text after `### Phase N: ` in the command, without a trailing parenthetical. Any other phase, or a name that does not match its number's heading by this rule, is malformed.",
-    GRAMMAR_CELL,
+    '- **Phase:** `4 Self-Review`: the number and the text after `### Phase 4: ` in the command. Any other phase is malformed.',
+    IMPLEMENT_GRAMMAR_CELL,
     GRAMMAR_RULES_BULLET,
     GRAMMAR_SKIPPED,
     GRAMMAR_NOTE,
-    '- **Gate level block:** the command reads this file at the start of Phase 3, before the Polish spawn. A `3 Polish` row with `skip` skips the Polish spawn, never that block or the `{branch_diff}` definition.',
+    '- **Gate level block:** the command reads this file at the start of Phase 3. The Polish skip and the Phase 5 one-pass rule are in the command, not here.',
     "- **Scope:** a row changes only its own phase's spawns and prompts. It adds no shell command, file write, push or GitHub action. It removes no security check, except that a `4 Self-Review` row may skip Harden, only through the Rules bullet `harden-scope`. It keeps Validate, the CI gate, the evidence claims and the compliance directive. An enabled compliance lens keeps Harden.",
     '- **Malformed:** no `## Phases` heading, no `| Phase | standard | lean |` header, or a row that breaks this grammar. Then the command applies no row.',
   ],
-  readParagraph: `${OPEN} ${IMPLEMENT_CONDITION}, Read \`${IMPLEMENT_REF_DIR}/implement-levels.md\` ${IMPLEMENT_BACK_POINTER}, and apply each row to the phase it names.`,
-  readPhrases: [IMPLEMENT_CONDITION.split(',')[0], 'once per run', `${IMPLEMENT_REF_DIR}/implement-levels.md`, IMPLEMENT_BACK_POINTER_SET, IMPLEMENT_BACK_POINTER_REPRINT, 'apply each row to the phase it names'],
+  readParagraph: `${OPEN} ${IMPLEMENT_LEAD} ${IMPLEMENT_CONDITION}, also Read \`${IMPLEMENT_REF_DIR}/implement-levels.md\` and apply each row to the phase it names.`,
+  readPhrases: [...IMPLEMENT_POLISH_CLAUSES, 'Phase 5 runs one pass', IMPLEMENT_CONDITION.split(',')[0], 'once per run', `${IMPLEMENT_REF_DIR}/implement-levels.md`, 'apply each row to the phase it names'],
   binder: IMPLEMENT_BINDER,
   items: [
     FLOOR_FIRST,
@@ -198,7 +222,7 @@ const IMPLEMENT: LevelSpec = {
   prevHas: '**Requires:**',
   nextParagraph: 'After the Code agent completes',
   moveBefore: '### Phase 2: Implement',
-  sampleRow: '3 Polish',
+  sampleRow: '4 Self-Review',
   neverSkip: [],
   triage: [],
   dataFlow: [
@@ -206,8 +230,9 @@ const IMPLEMENT: LevelSpec = {
     { site: 'Phase 12', kind: 'Requires', start: '### Phase 12: Report', end: null },
   ],
   expectedRows: DECIDED_ROWS.implement,
-  expectedBullets: [HARDEN_SCOPE, SINGLE_PASS],
+  expectedBullets: [HARDEN_SCOPE],
   exemptRemoval: HARDEN_EXEMPTION,
+  passLevelPhases: ['5'],
 }
 
 const RESOLVE: LevelSpec = {
@@ -956,9 +981,19 @@ function hardenInputDefect(body: string): string | null {
   return harden[0].includes('\nFILES_CHANGED: {branch_diff}\n') ? null : 'the Phase 4 Harden prompt does not take FILES_CHANGED: {branch_diff}'
 }
 
-/** TP-3, `/implement`: the branch diff is defined once, in Phase 3 prose before the Polish fence, and Harden takes it. */
+/** The defects of the Polish skip in the Gate level lead, the first paragraph of the block: each clause of `IMPLEMENT_POLISH_CLAUSES` appears there once. */
+function polishLeadDefects(body: string): string[] {
+  const start = body.indexOf(OPEN)
+  const lead = start === -1 ? '' : body.slice(start).split('\n\n')[0]
+  return IMPLEMENT_POLISH_CLAUSES.filter(clause => countOf(lead, clause) !== 1).map(clause => `the Gate level lead does not hold "${clause}" exactly once`)
+}
+
+/**
+ * TP-3, `/implement`: the branch diff is defined once, in Phase 3 prose before the Polish fence, and Harden takes it. The Polish skip is a
+ * clause of the Gate level lead (X1): it skips the spawn, sets `POLISH_OUTPUT` to `SKIPPED` and keeps the branch diff defined.
+ */
 export function collectImplementPolishInputDefects(body: string): string[] {
-  return [branchDiffDefinitionDefect(body), hardenInputDefect(body)].flatMap(defect => defect ?? [])
+  return [...[branchDiffDefinitionDefect(body), hardenInputDefect(body)].flatMap(defect => defect ?? []), ...polishLeadDefects(body)]
 }
 
 /**
@@ -1056,71 +1091,69 @@ export function collectEvaluateLevelDefects(evaluate: string): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// k. The single Evaluate pass (#483)
+// k. The single Evaluate pass (#483, moved into the command by X1)
 // ---------------------------------------------------------------------------
 
-/** The clauses of the `single-pass` bullet, each exact. The byte pin ties the reference to `SINGLE_PASS`; this list is the second check, and it names the clause that an edit of both drops. */
-const SINGLE_PASS_CLAUSES = [
-  'In Phase 5, run Evaluate once and never spawn it again in that pass; a retry of a failed Evaluate spawn is the same pass.',
-  'On MISALIGNED, in place of steps 3 and 4, spawn the Phase 5 Fix once',
+/** The clauses of the one-pass paragraph, each exact. The whole-paragraph pin is the first check; this list is the second, and it names the clause that an edit drops. */
+const ONE_PASS_CLAUSES = [
+  'each prompt of this phase opens with `GATE_LEVEL: {GATE_LEVEL}`, after any `OPERATION:` line.',
+  'Run Evaluate once; a failed Evaluate spawn goes to Error Handling, and its retry is the same pass.',
+  'On MISALIGNED, in place of steps 3 and 4, spawn the Fix once',
   'on COMPLETE, set `ALIGNMENT_RESULT` to exactly `MISALIGNED (fixed once, not re-checked)` and start Phase 6',
-  'on FAILED, BLOCKED or anything else, report the misalignments to the user for decision.',
+  'else report the misalignments to the user for decision.',
 ] as const
 
 /** Whether a level cell holds the part `part` (`pass level` or `apply: <name>`). */
 const cellHolds = (cell: string, part: string): boolean => cell.split('; ').includes(part)
 
+/** The paragraphs of Phase 5 that open with the one-pass label. */
+const onePassParagraphs = (body: string): string[] => phaseSection(body, '5').split('\n\n').filter(paragraph => paragraph.startsWith(ONE_PASS_OPEN))
+
 /**
- * #483: the `5 Alignment Check` row passes the level and applies `single-pass` in both columns, and the one `single-pass`
- * bullet holds each of its four clauses exactly once.
+ * #483: Phase 5 holds the one-pass paragraph once, equal to the pinned text, and each of its clauses once. At `standard` and `lean`
+ * the paragraph runs Evaluate once and takes the place of the re-check loop. The command carries it and the reference does not.
  */
-export function collectSinglePassDefects(ref: string): string[] {
-  const parsed = parseRef(ref)
-  const rows = parseRows(parsed).filter(row => row.num === '5')
-  const rowDefects = rows.length !== 1
-    ? [`the table holds ${rows.length} rows for phase 5, expected 1`]
-    : LEVELS.flatMap(level => {
-      const cell = rows[0].cells?.[LEVEL_CELL_INDEX[level]] ?? ''
-      return ['pass level', `apply: ${SINGLE_PASS_NAME}`].filter(part => !cellHolds(cell, part)).map(part => `row 5 ${level} cell "${cell}" lacks ${part}`)
-    })
-  const bullets = ruleBullets(parsed).filter(line => ruleBulletName(line) === SINGLE_PASS_NAME)
-  const bulletDefects = bullets.length !== 1
-    ? [`the Rules section holds ${bullets.length} ${SINGLE_PASS_NAME} bullets, expected 1`]
-    : SINGLE_PASS_CLAUSES.filter(clause => countOf(bullets[0], clause) !== 1).map(clause => `the ${SINGLE_PASS_NAME} bullet does not hold "${clause}" exactly once`)
-  return [...rowDefects, ...bulletDefects]
+export function collectOnePassDefects(body: string): string[] {
+  const found = onePassParagraphs(body)
+  if (found.length !== 1) return [`Phase 5 holds ${found.length} "${ONE_PASS_OPEN}" paragraphs, expected 1`]
+  return [
+    ...(found[0] === ONE_PASS ? [] : ['the one-pass paragraph is not the pinned text']),
+    ...ONE_PASS_CLAUSES.filter(clause => countOf(found[0], clause) !== 1).map(clause => `the one-pass paragraph does not hold "${clause}" exactly once`),
+  ]
 }
 
-/** The steps of the `full` re-check loop that the `single-pass` bullet replaces: "in place of steps N and M". */
+/** The steps of the `full` re-check loop that the one-pass paragraph replaces: "in place of steps N and M". */
 const REPLACED_STEPS = /in place of steps (\d+) and (\d+)\b/
 
 /**
- * #483: the numbers that the `single-pass` bullet of `ref` names as the steps it replaces are the leading numbers of the two
- * numbered steps of the `full` re-check loop that it replaces: the test of the attempt cap and the report to the user. A
- * renumber of the loop, or of the bullet alone, is reported.
+ * #483: the numbers that the one-pass paragraph names as the steps it replaces are the leading numbers of the two numbered steps of
+ * the `full` re-check loop that it replaces: the test of the attempt cap and the report to the user. A renumber of the loop, or of
+ * the paragraph alone, is reported.
  */
-export function collectSinglePassStepDefects(ref: string, loopLines: readonly string[] = FULL_LOOP_LINES): string[] {
+export function collectOnePassStepDefects(body: string, loopLines: readonly string[] = FULL_LOOP_LINES): string[] {
   const wanted = [loopLines[1], loopLines[3]].map(line => /^(\d+)\. /.exec(line ?? '')?.[1])
   if (wanted.some(step => step === undefined)) return ['the full loop lines hold no numbered step at index 1 or 3']
-  const bullets = ruleBullets(parseRef(ref)).filter(line => ruleBulletName(line) === SINGLE_PASS_NAME)
-  if (bullets.length !== 1) return [`the Rules section holds ${bullets.length} ${SINGLE_PASS_NAME} bullets, expected 1`]
-  const named = REPLACED_STEPS.exec(bullets[0])?.slice(1, 3) ?? []
-  return named.join(' and ') === wanted.join(' and ') ? [] : [`the ${SINGLE_PASS_NAME} bullet replaces steps ${named.join(' and ') || 'none'}, expected the steps ${wanted.join(' and ')} of the full loop`]
+  const found = onePassParagraphs(body)
+  if (found.length !== 1) return [`Phase 5 holds ${found.length} "${ONE_PASS_OPEN}" paragraphs, expected 1`]
+  const named = REPLACED_STEPS.exec(found[0])?.slice(1, 3) ?? []
+  return named.join(' and ') === wanted.join(' and ') ? [] : [`the one-pass paragraph replaces steps ${named.join(' and ') || 'none'}, expected the steps ${wanted.join(' and ')} of the full loop`]
 }
 
-/** The output that `single-pass` sets on a fixed round: Phase 5 produces it and Phase 12 reports it. */
+/** The output that the one-pass paragraph sets on a fixed round: Phase 5 produces it and Phase 12 reports it. */
 const ALIGNMENT_RESULT = 'ALIGNMENT_RESULT'
 
 /**
- * #483: the output that the `single-pass` bullet sets stays one name across the command. Phase 5 alone produces it, Phase 12
- * requires it, and the one `single-pass` bullet of `ref` names it.
+ * #483: the output that the command sets in Phase 5 stays one name across the command. Phase 5 alone produces it, Phase 12
+ * requires it, and the two lines that set it name it: the one-pass paragraph and the continue line that follows the
+ * unrouted-status arm.
  */
-export function collectAlignmentResultDefects(body: string, ref: string): string[] {
+export function collectAlignmentResultDefects(body: string): string[] {
   const produced = dataFlowNames(phaseSection(body, '5'), 'Produces')
   const producer = produced.length === 1 && produced[0] === ALIGNMENT_RESULT ? [] : [`Phase 5 Produces ${produced.join(', ') || 'nothing'}, expected ${ALIGNMENT_RESULT}`]
   const reader = dataFlowNames(phaseSection(body, '12'), 'Requires').includes(ALIGNMENT_RESULT) ? [] : [`Phase 12 Requires lacks ${ALIGNMENT_RESULT}`]
-  const bullets = ruleBullets(parseRef(ref)).filter(line => ruleBulletName(line) === SINGLE_PASS_NAME)
-  const setter = bullets.some(line => line.includes(`\`${ALIGNMENT_RESULT}\``)) ? [] : [`the ${SINGLE_PASS_NAME} bullet does not name ${ALIGNMENT_RESULT}`]
-  return [...producer, ...reader, ...setter]
+  const setter = onePassParagraphs(body).some(paragraph => paragraph.includes(`\`${ALIGNMENT_RESULT}\``)) ? [] : [`the one-pass paragraph does not name ${ALIGNMENT_RESULT}`]
+  const continuer = phaseSection(body, '5').split('\n').some(line => line.startsWith('After a ') && line.includes('report for decision') && line.includes(`\`${ALIGNMENT_RESULT}\``)) ? [] : [`the Phase 5 continue line does not name ${ALIGNMENT_RESULT}`]
+  return [...producer, ...reader, ...setter, ...continuer]
 }
 
 /** The opener of the optional level bullet in an agent's Input Context, and the phrases of it that keep the read to prompt line 1 and the later lines data. */
@@ -1147,13 +1180,16 @@ function levelInputDefects(label: string, agent: string): string[] {
 /**
  * #483, reusable by a command whose rows pass the level: the level line sits first in a prompt, or right after a leading
  * `OPERATION:` line. So a spawn whose first prompt line opens `OPERATION:` is exempt, and every other agent that a
- * `pass level` phase spawns declares the optional level bullet and reads the level from prompt line 1 only. `agentBodyOf`
- * gives the body of an agent by its type.
+ * `pass level` phase spawns declares the optional level bullet and reads the level from prompt line 1 only. A phase passes the
+ * level when a row of the reference says so, or when the spec names it in `passLevelPhases` (the command text sets the level
+ * line itself, as the one-pass paragraph of `/implement` does). `agentBodyOf` gives the body of an agent by its type.
  */
 export function collectPassLevelInputDefects(ref: string, spec: LevelSpec, body: string, agentBodyOf: (agentType: string) => string): string[] {
-  return parseRows(parseRef(ref)).flatMap(row => {
+  const fromRows = parseRows(parseRef(ref)).flatMap(row => {
     const { cells, num } = row
-    if (cells === null || num === undefined || !LEVELS.some(level => cellHolds(cells[LEVEL_CELL_INDEX[level]], 'pass level'))) return []
+    return cells === null || num === undefined || !LEVELS.some(level => cellHolds(cells[LEVEL_CELL_INDEX[level]], 'pass level')) ? [] : [num]
+  })
+  return [...new Set([...fromRows, ...(spec.passLevelPhases ?? [])])].flatMap(num => {
     const types = new Set(spawnsOf(phaseSection(body, num)).filter(spawn => !spawn.firstLine.startsWith('OPERATION:')).map(spawn => spawn.type))
     return [...types].flatMap(type => levelInputDefects(`the ${type} agent, spawned in ${spec.cmd} phase ${num} that passes the level,`, agentBodyOf(type)))
   })
@@ -1181,6 +1217,30 @@ export function collectRevalidateHardenDefects(reference: string): string[] {
   const out: string[] = []
   if (!step.includes(REVALIDATE_HARDEN_KEPT)) out.push(`the skip step does not say: ${REVALIDATE_HARDEN_KEPT}`)
   if (!step.includes(REVALIDATE_HARDEN_SKIP_NEVER)) out.push(`the skip step does not say: ${REVALIDATE_HARDEN_SKIP_NEVER}`)
+  return out
+}
+
+// ---------------------------------------------------------------------------
+// m. A failed level-file Read leaves Harden to run (X1)
+// ---------------------------------------------------------------------------
+
+/** The one line that spawns Harden in Phase 4. It holds no condition on the level, so a run that applied no row still reaches Harden. */
+const HARDEN_SPAWN_LINE = 'After Phase 3, spawn Harden agent:'
+/** A removal verb (the stems and phrases of the row-safety check), on the same line as the name `Harden`. */
+const REMOVAL_VERB = new RegExp(`(?:${VERB})`, 'i')
+
+/**
+ * X1: at `lean` the command reads its level file, and a failed Read applies no row. The only skip of Harden is the `harden-scope`
+ * bullet of that file, so a failed Read runs Harden only while the command text does not skip it. The text outside the code fences
+ * holds no line that names Harden with a removal verb, and Phase 4 spawns Harden on the one unconditional line.
+ */
+export function collectHardenAlwaysDefects(body: string): string[] {
+  const out: string[] = []
+  const spawns = outsideFences(phaseSection(body, '4')).split('\n').filter(line => /\bspawn Harden\b/.test(line))
+  if (spawns.length !== 1 || spawns[0] !== HARDEN_SPAWN_LINE) out.push(`Phase 4 does not spawn Harden on the one line: ${HARDEN_SPAWN_LINE}`)
+  for (const line of outsideFences(body).split('\n')) {
+    if (/\bHarden\b/.test(line) && REMOVAL_VERB.test(line)) out.push(`the command skips Harden on its own: ${line.slice(0, 120)}`)
+  }
   return out
 }
 
@@ -1218,11 +1278,17 @@ function seedIn(body: string, start: string, end: string | null, from: string | 
   return body.slice(0, at) + seed(text, from, to) + body.slice(at + text.length)
 }
 
+/**
+ * The spec without its exemption. The sample row of `/implement` sits on the exempt phase, where a row may apply only `harden-scope`,
+ * so a probe bullet on that row would also report the cell. A probe of the bullet text reads the full check alone.
+ */
+const probeSpec = (spec: LevelSpec): LevelSpec => ({ ...spec, exemptRemoval: undefined })
+
 /** The row-safety defects of a reference whose one row applies the Rules bullet `line`. A line that does not open `- **<name>:**` gets no row. `phase` is the row's phase cell. */
 function bulletDefects(spec: LevelSpec, line: string, phase: string = spec.sampleRow): string[] {
   const name = ruleBulletName(line)
   const rows = name === null ? [] : [`| ${phase} | apply: ${name} | - |`]
-  return collectRowSafetyDefects(withRows(REFS[spec.cmd], rows, [line]), spec, bodyOf(spec))
+  return collectRowSafetyDefects(withRows(REFS[spec.cmd], rows, [line]), probeSpec(spec), bodyOf(spec))
 }
 
 /** The reference with two of its `## ` sections in each other's place. */
@@ -1345,17 +1411,19 @@ describe('the level references hold the fixed grammar and the decided rows (AC-5
   it('known-bad probes: the phase set is closed and keyed by the compiled heading name, and a repeated phase heading is reported', () => {
     const impl = (rows: string[]): string[] => collectLevelReferenceDefects(withRows(REFS.implement, rows), IMPLEMENT, bodyOf(IMPLEMENT))
     expect(impl(['| 4 Polish | - | skip |'])).toEqual(expect.arrayContaining(['phase 4 is named "Polish", expected "Self-Review"', 'phase 4 "Polish" is not the compiled "### Phase 4:" heading ("Self-Review")']))
-    expect(impl(['| 6 Validate | skip | skip |'])).toContain('a row for phase 6, which is outside the closed set 3, 4, 5')
-    expect(impl(['| 12 Report | skip | skip |'])).toContain('a row for phase 12, which is outside the closed set 3, 4, 5')
+    expect(impl(['| 6 Validate | skip | skip |'])).toContain('a row for phase 6, which is outside the closed set 4')
+    expect(impl(['| 12 Report | skip | skip |'])).toContain('a row for phase 12, which is outside the closed set 4')
+    expect(impl(['| 3 Polish | skip | skip |']), 'Polish is outside the closed set: the command skips it').toContain('a row for phase 3, which is outside the closed set 4')
+    expect(impl(['| 5 Alignment Check | pass level | - |']), 'Alignment Check is outside the closed set: the command passes the level').toContain('a row for phase 5, which is outside the closed set 4')
     const res = (rows: string[]): string[] => collectLevelReferenceDefects(withRows(REFS.resolve, rows), RESOLVE, bodyOf(RESOLVE))
     expect(res(['| 9 Thread Resolution | skip | skip |'])).toContain('phase 9 is named "Thread Resolution", expected "Manage Debt"')
     expect(res(['| 9b Thread Resolution + Resolution Comment | skip | skip |'])).toContain('a row for phase 9b, which is outside the closed set 2, 3, 4, 6, 9')
     expect(res(['| 9c Merge Readiness | skip | skip |'])).toContain('a row for phase 9c, which is outside the closed set 2, 3, 4, 6, 9')
     expect(res(['| 9 Manage Debt | skip | skip |'])).toEqual(['row 9 standard: the cell takes skip, which phase 9 never takes', 'row 9 lean: the cell takes skip, which phase 9 never takes'])
-    const renamed = bodyOf(IMPLEMENT).replace('\n### Phase 3: Polish\n', '\n### Phase 3: Tidy\n')
+    const renamed = bodyOf(IMPLEMENT).replace('\n### Phase 4: Self-Review\n', '\n### Phase 4: Review\n')
     expect(renamed, 'the heading seed landed').not.toBe(bodyOf(IMPLEMENT))
-    expect(collectClosedSetDefects(IMPLEMENT, renamed)).toContain('the closed set names "3 Polish", but the compiled "### Phase 3:" heading is "Tidy"')
-    expect(collectLevelReferenceDefects(withRows(REFS.implement, ['| 3 Polish | skip | skip |']), IMPLEMENT, renamed)).toContain('phase 3 "Polish" is not the compiled "### Phase 3:" heading ("Tidy")')
+    expect(collectClosedSetDefects(IMPLEMENT, renamed)).toContain('the closed set names "4 Self-Review", but the compiled "### Phase 4:" heading is "Review"')
+    expect(collectLevelReferenceDefects(withRows(REFS.implement, ['| 4 Self-Review | - | - |']), IMPLEMENT, renamed)).toContain('phase 4 "Self-Review" is not the compiled "### Phase 4:" heading ("Review")')
     for (const spec of SPECS) {
       const [num, name] = spec.closed[0]
       expect(collectClosedSetDefects(spec, `${bodyOf(spec)}\n### Phase ${num}: ${name}\n`), `a second "### Phase ${num}:" heading of ${spec.cmd}`).toContain(`the compiled command holds 2 "### Phase ${num}:" headings, expected 1`)
@@ -1380,9 +1448,9 @@ describe('the level references hold the fixed grammar and the decided rows (AC-5
     expect(phaseSection(bodyOf(RESOLVE), '3'), 'Phase 3 of /resolve spawns no agent').not.toMatch(/\bAgent\(/)
     expect(res(['| 3 Batch FIX_NOW Issues | pass level | - |'])).toEqual(['row 3 standard: the cell takes pass level, but phase 3 has no spawn to carry it'])
     expect(res(['| 3 Batch FIX_NOW Issues | - | pass level |'])).toEqual(['row 3 lean: the cell takes pass level, but phase 3 has no spawn to carry it'])
-    const bare = seedIn(bodyOf(IMPLEMENT), '### Phase 3: Polish', '### Phase 4:', 'Agent(subagent_type="Polish"):', 'Run the Polish step:')
-    expect(collectLevelReferenceDefects(withRows(REFS.implement, ['| 3 Polish | pass level | - |']), IMPLEMENT, bare)).toEqual(['row 3 standard: the cell takes pass level, but phase 3 has no spawn to carry it'])
-    expect(collectLevelReferenceDefects(withRows(REFS.implement, ['| 3 Polish | pass level | - |']), IMPLEMENT, bodyOf(IMPLEMENT)), 'the unmodified Phase 3 spawns Polish').toEqual([])
+    const bare = seedIn(bodyOf(IMPLEMENT), '### Phase 4: Self-Review', '### Phase 5:', 'Agent(subagent_type="Harden"):', 'Run the Harden step:')
+    expect(collectLevelReferenceDefects(withRows(REFS.implement, ['| 4 Self-Review | pass level | - |']), IMPLEMENT, bare)).toEqual(['row 4 standard: the cell takes pass level, but phase 4 has no spawn to carry it'])
+    expect(collectLevelReferenceDefects(withRows(REFS.implement, ['| 4 Self-Review | pass level | - |']), IMPLEMENT, bodyOf(IMPLEMENT)), 'the unmodified Phase 4 spawns Harden').toEqual([])
   })
 
   it('known-bad probes: a phase with no spawn takes only -', () => {
@@ -1405,9 +1473,9 @@ describe('the level references hold the fixed grammar and the decided rows (AC-5
     const body = bodyOf(spec)
     const tidy = '- **tidy:** Polish only the files named in the diff.'
     const rows = spec.cmd === 'implement'
-      ? ['| 3 Polish | apply: tidy; pass level | skip |', `| 4 Self-Review | - | apply: ${HARDEN_NAME} |`, '| 5 Alignment Check | pass level | apply: tidy |']
+      ? [`| 4 Self-Review | - | apply: ${HARDEN_NAME} |`]
       : ['| 2 Global Triage | pass level | pass level |', '| 3 Batch FIX_NOW Issues | - | - |', '| 4 Fix | - | pass level |', '| 6 Polish | apply: tidy | skip |', '| 9 Manage Debt | pass level | - |']
-    const ref = withRows(REFS[spec.cmd], rows, spec.cmd === 'implement' ? [tidy, HARDEN_SCOPE] : [tidy])
+    const ref = withRows(REFS[spec.cmd], rows, spec.cmd === 'implement' ? [HARDEN_SCOPE] : [tidy])
     expect(collectLevelReferenceDefects(ref, spec, body)).toEqual([])
     expect(collectRowSafetyDefects(ref, spec, body)).toEqual([])
     expect(referenceRows(ref)).toEqual(rows)
@@ -1443,6 +1511,10 @@ describe('row safety is a tripwire over the references (AC-6)', () => {
     for (const phase of ['1 Setup', '2 Implement', '7 QA Testing', '8 Re-Validate', '9 Open PR', '10 CI Status Gate', '11 Evidence', '12 Report']) {
       expect(defects([`| ${phase} | skip | - |`]), phase).toContain(`a row for protected phase ${phase.split(' ')[0]}`)
     }
+    // The command skips Polish and runs Phase 5 as one pass by its own text (X1), so no row may touch either phase.
+    expect(defects(['| 3 Polish | skip | skip |']), 'Polish is protected: the command skips it').toContain('a row for protected phase 3')
+    expect(defects(['| 5 Alignment Check | pass level | - |']), 'Alignment Check is protected: the command passes the level').toContain('a row for protected phase 5')
+    expect(IMPLEMENT.protectedPhases, 'phases 3 and 5 are protected').toEqual(expect.arrayContaining(['3', '5']))
   })
 
   it('known-bad probes (/resolve): a row for a protected phase or a skipped never-skip phase is reported', () => {
@@ -1488,13 +1560,13 @@ describe('row safety is a tripwire over the references (AC-6)', () => {
     expect(defects([`| 4 Self-Review | - | apply: ${HARDEN_NAME}; pass level |`], [HARDEN_SCOPE]), 'the bullet joined with pass level').toEqual([neither('lean', `apply: ${HARDEN_NAME}; pass level`)])
     expect(defects(['| 4 Self-Review | - | - |']), 'a row that changes nothing').toEqual([])
     expect(defects([`| 4 Self-Review | apply: ${HARDEN_NAME} | apply: ${HARDEN_NAME} |`], [HARDEN_SCOPE]), 'the bullet in both columns').toEqual([])
-    // Another phase may still skip or pass the level.
-    expect(defects(['| 3 Polish | skip | skip |']), 'Polish may skip').toEqual([])
-    expect(defects(['| 5 Alignment Check | pass level | - |']), 'another phase may pass the level').toEqual([])
+    // No other phase takes a row: Polish and Alignment Check belong to the command text now (X1).
+    expect(defects(['| 3 Polish | skip | skip |']), 'no row for Polish').toEqual(['a row for protected phase 3'])
+    expect(defects(['| 5 Alignment Check | pass level | - |']), 'no row for Alignment Check').toEqual(['a row for protected phase 5'])
     // Any other way to drop Harden, in a cell name or a Rules bullet, removes a floor control.
     expect(defects(['| 4 Self-Review | apply: skip-harden | - |'], ['- **skip-harden:** Run the spawn.'])).toContain('row 4 standard cell "apply: skip-harden" removes or defers a floor control')
-    expect(defects(['| 3 Polish | apply: tidy | - |'], ['- **tidy:** Polish only the files named in the diff.'])).toEqual([])
-    expect(defects(['| 3 Polish | apply: tidy | - |'], ['- **tidy:** Skip Harden after Polish.']), 'the exemption is for the one bullet, not for any bullet that skips Harden').toContain('Rules bullet "tidy" removes or defers a floor control')
+    expect(defects(['| 4 Self-Review | apply: tidy | - |'], ['- **tidy:** Polish only the files named in the diff.']), 'a bullet other than the exempt one on the exempt phase').toEqual([neither('standard', 'apply: tidy')])
+    expect(defects(['| 4 Self-Review | apply: tidy | - |'], ['- **tidy:** Skip Harden after Polish.']), 'the exemption is for the one bullet, not for any bullet that skips Harden').toContain('Rules bullet "tidy" removes or defers a floor control')
   })
 
   it('known-bad probes (/implement): the Harden exemption holds for its spec, its name, its exact line and its one phase, and waives one floor name from the removal-verb arm only', () => {
@@ -1525,8 +1597,9 @@ describe('row safety is a tripwire over the references (AC-6)', () => {
     const edited = seed(HARDEN_SCOPE, 'docs-only diff', 'docs only')
     expect(run(IMPLEMENT, [row], [edited]), 'one word of the line changed').toEqual([floor])
     const row3 = `| 3 Polish | skip | apply: ${HARDEN_NAME} |`
-    expect(run(IMPLEMENT, [row3], [HARDEN_SCOPE]), 'applied by phase 3 alone').toEqual([floor])
-    expect(run(IMPLEMENT, [row3, row], [HARDEN_SCOPE]), 'applied by phases 3 and 4').toEqual([floor])
+    // A row of phase 3 is itself reported, because the command text owns that phase; the bullet it applies loses the exemption too.
+    expect(run(IMPLEMENT, [row3], [HARDEN_SCOPE]), 'applied by phase 3 alone').toEqual(['a row for protected phase 3', floor])
+    expect(run(IMPLEMENT, [row3, row], [HARDEN_SCOPE]), 'applied by phases 3 and 4').toEqual(['a row for protected phase 3', floor])
     expect(run(IMPLEMENT, [], [HARDEN_SCOPE]), 'applied by no row').toEqual([floor, `Rules bullet "${HARDEN_NAME}" is named by no row`])
     // Renamed: the line and the name both differ, and row 4 then applies a bullet that is not the exempt one.
     const renamed = seed(HARDEN_SCOPE, `- **${HARDEN_NAME}:**`, '- **probe:**')
@@ -1571,7 +1644,7 @@ describe('row safety is a tripwire over the references (AC-6)', () => {
   it('the harden-scope bullet holds each clause of its skip condition and names no test path, and its row leaves standard alone', () => {
     expect(lackedClauses(HARDEN_SCOPE), 'the clauses that the bullet lacks').toEqual([])
     expect(HARDEN_SCOPE, 'a test path is no docs path').not.toMatch(/\btests?\b|\.test\.|__tests__/i)
-    expect(IMPLEMENT.expectedBullets, 'the decided bullets, in the order of the reference').toEqual([HARDEN_SCOPE, SINGLE_PASS])
+    expect(IMPLEMENT.expectedBullets, 'the decided bullets: harden-scope alone, because the Polish skip and the one-pass rule moved into the command').toEqual([HARDEN_SCOPE])
     const rows = IMPLEMENT.expectedRows.filter(row => row.includes(`apply: ${HARDEN_NAME}`))
     expect(rows.map(row => rowCells(row)), 'the one row that applies the bullet: standard runs Harden, lean applies the bullet').toEqual([['4 Self-Review', '-', `apply: ${HARDEN_NAME}`]])
   })
@@ -1637,7 +1710,7 @@ describe('row safety is a tripwire over the references (AC-6)', () => {
   it.each(SPECS)('$cmd: known-bad probes: a Rules bullet that removes a floor control, routes security, adds an action or is named by no row is reported', spec => {
     const body = bodyOf(spec)
     const row = spec.sampleRow
-    const defects = (bullet: string): string[] => collectRowSafetyDefects(withRows(REFS[spec.cmd], [`| ${row} | apply: probe | - |`], [`- **probe:** ${bullet}`]), spec, body)
+    const defects = (bullet: string): string[] => collectRowSafetyDefects(withRows(REFS[spec.cmd], [`| ${row} | apply: probe | - |`], [`- **probe:** ${bullet}`]), probeSpec(spec), body)
     const floor = 'Rules bullet "probe" removes or defers a floor control'
     const routesSecurity = 'Rules bullet "probe" routes a security finding to a disposition'
     const routesEscalated = 'Rules bullet "probe" routes an ESCALATED finding to a disposition'
@@ -1765,19 +1838,22 @@ describe('row safety is a tripwire over the references (AC-6)', () => {
     const num = row.split(' ')[0]
     expect(collectRowSafetyDefects(withRows(ref, [`| ${row} | apply: bypass-security | - |`], ['- **bypass-security:** Polish the diff.']), spec, body))
       .toContain(`row ${num} standard cell "apply: bypass-security" removes or defers a floor control`)
-    expect(collectRowSafetyDefects(seedOnce(ref, 'without a trailing parenthetical', 'without its parenthetical'), spec, body)).toEqual(['the "## Grammar" text is not the pinned text'])
+    const phaseWords = spec.cmd === 'implement' ? ['Any other phase is malformed.', 'Any other phase is allowed.'] : ['without a trailing parenthetical', 'without its parenthetical']
+    expect(collectRowSafetyDefects(seedOnce(ref, phaseWords[0], phaseWords[1]), spec, body), 'the Phase bullet').toEqual(['the "## Grammar" text is not the pinned text'])
     expect(collectRowSafetyDefects(seedOnce(ref, 'a table with no rows is well-formed', 'a table with no rows is well formed'), spec, body)).toEqual(['the "## Phases" intro is not the pinned paragraph'])
     expect(collectRowSafetyDefects(seedOnce(ref, 'line reads `SKIPPED`', 'line reads `skipped`'), spec, body), 'the Skipped bullet').toEqual(['the "## Grammar" text is not the pinned text'])
-    expect(collectRowSafetyDefects(seedOnce(ref, 'puts the line `GATE_LEVEL: {GATE_LEVEL}` first in every spawn prompt of the phase, right after a leading `OPERATION:` line.', 'adds the line `GATE_LEVEL: {GATE_LEVEL}` to every spawn prompt of the phase.'), spec, body), 'the old pass level wording').toEqual(['the "## Grammar" text is not the pinned text'])
-    expect(collectRowSafetyDefects(seedOnce(ref, ' first in every spawn prompt of the phase, right after a leading `OPERATION:` line.', ' first in every spawn prompt of the phase.'), spec, body), 'the placement clause').toEqual(['the "## Grammar" text is not the pinned text'])
+    if (spec.cmd === 'implement') {
+      expect(collectRowSafetyDefects(seedOnce(ref, ' A `standard` cell is `-`.', ''), spec, body), 'the standard cell rule').toEqual(['the "## Grammar" text is not the pinned text'])
+      expect(collectRowSafetyDefects(seedOnce(ref, 'and names exactly one bullet', 'and names a bullet'), spec, body), 'the one-bullet rule').toEqual(['the "## Grammar" text is not the pinned text'])
+      expect(collectRowSafetyDefects(seedOnce(ref, ' The Polish skip and the Phase 5 one-pass rule are in the command, not here.', ''), spec, body), 'the pointer to the command').toEqual(['the "## Grammar" text is not the pinned text'])
+      expect(collectRowSafetyDefects(seedOnce(ref, 'The command reads this file only at `lean`. ', ''), spec, body), 'the lean-only read').toEqual(['the "## Phases" intro is not the pinned paragraph'])
+    } else {
+      expect(collectRowSafetyDefects(seedOnce(ref, 'puts the line `GATE_LEVEL: {GATE_LEVEL}` first in every spawn prompt of the phase, right after a leading `OPERATION:` line.', 'adds the line `GATE_LEVEL: {GATE_LEVEL}` to every spawn prompt of the phase.'), spec, body), 'the old pass level wording').toEqual(['the "## Grammar" text is not the pinned text'])
+      expect(collectRowSafetyDefects(seedOnce(ref, ' first in every spawn prompt of the phase, right after a leading `OPERATION:` line.', ' first in every spawn prompt of the phase.'), spec, body), 'the placement clause').toEqual(['the "## Grammar" text is not the pinned text'])
+    }
     expect(collectRowSafetyDefects(seedOnce(ref, RULES_INTRO, `${RULES_INTRO} Extra.`), spec, body)).toEqual(['the "## Rules" section holds text other than the pinned intro and its bullets'])
     expect(collectRowSafetyDefects(withRows(ref, [], ['- **tidy:** Polish the diff.\ncontinued here']), spec, body)).toContain('the "## Rules" section holds text other than the pinned intro and its bullets')
     expect(collectRowSafetyDefects(seedOnce(ref, '## Phases\n', 'Stray text.\n\n## Phases\n'), spec, body)).toContain('the reference holds text between its title and "## Phases"')
-  })
-
-  it('known-bad probe (/implement): a Gate level block bullet that stops keeping the branch diff definition on a Polish skip is reported (TP-3)', () => {
-    const cut = seedOnce(REFS.implement, ' or the `{branch_diff}` definition', '')
-    expect(collectRowSafetyDefects(cut, IMPLEMENT, bodyOf(IMPLEMENT))).toEqual(['the "## Grammar" text is not the pinned text'])
   })
 
   it('known-bad probes: a phase added to the command is protected by default, and a phase renamed in the closed set is reported', () => {
@@ -1822,7 +1898,7 @@ describe('the command carries one Gate level block, closed and in its place (AC-
     expect(defects(seed(body, binder, loosePrint))).toEqual([binderNotPinned(loosePrint), 'the command holds 0 sanctioned resolution lines, expected 1'])
     const looseFolder = binder.replace(`<that directory>/${LEVEL_DIR}`, '$HOME/.claude/skills')
     expect(defects(seed(body, binder, looseFolder))).toEqual([binderNotPinned(looseFolder)])
-    for (const phrase of ['before the first reference Read', 'in Bash', `\`${IMPLEMENT_REF_DIR}\` is`, 'with the Read tool', 'is not in view', 'print the directory again with the same line']) {
+    for (const phrase of ['before the first reference Read', 'in Bash', `\`${IMPLEMENT_REF_DIR}\` is`, 'with the Read tool', 'is not in view', 'print the directory again with the same line', 'except the Gate level read', 'stops the run']) {
       const edited = binder.replace(phrase, 'removed')
       expect(edited, `"${phrase}" is in the reference-folder paragraph`).not.toBe(binder)
       expect(defects(seed(body, binder, edited)), `removing "${phrase}"`).toEqual([binderNotPinned(edited)])
@@ -2089,6 +2165,20 @@ describe('a skipped Polish phase leaves the branch diff and the readers of its o
     expect(dataFlowNames(phaseSection(body, '3'), 'Produces'), 'Phase 3 produces the output that no later phase reads').toEqual(['POLISH_OUTPUT'])
   })
 
+  it.each(BUILDS.filter(b => b.spec === IMPLEMENT))('$label: known-bad probes (/implement): a Gate level lead that stops skipping Polish, or loses the output or the branch diff clause, is reported (X1)', ({ spec, body }) => {
+    const defects = (text: string): string[] => collectPolishSkipDefects(text, spec)
+    const lack = (clause: string): string => `the Gate level lead does not hold "${clause}" exactly once`
+    const [skip, output, diff] = IMPLEMENT_POLISH_CLAUSES
+    expect(body.includes(IMPLEMENT_LEAD), 'the compiled command carries the pinned lead').toBe(true)
+    expect(defects(body), 'the unmodified lead').toEqual([])
+    expect(defects(seedOnce(body, 'skip the Polish spawn', 'run the Polish spawn')), 'the Polish spawn no longer skipped').toEqual([lack(skip)])
+    expect(defects(seedOnce(body, 'At `standard` and `lean`, skip', 'At `lean`, skip')), 'the skip limited to lean').toEqual([lack(skip)])
+    expect(defects(seedOnce(body, '`POLISH_OUTPUT` reads `SKIPPED`', '`POLISH_OUTPUT` reads `DONE`')), 'the output of a skipped Polish phase changed').toEqual([lack(output)])
+    expect(defects(seedOnce(body, '; `{branch_diff}` stays defined', '')), 'the branch diff clause dropped').toEqual([lack(diff)])
+    expect(defects(seedOnce(body, ' (`POLISH_OUTPUT` reads `SKIPPED`; `{branch_diff}` stays defined)', '')), 'both clauses in the parenthesis dropped').toEqual([lack(output), lack(diff)])
+    expect(defects(seedOnce(body, IMPLEMENT_LEAD, '')), 'the whole lead dropped').toEqual([lack(skip), lack(output), lack(diff)])
+  })
+
   it.each(BUILDS.filter(b => b.spec === RESOLVE))('$label: known-bad probes (/resolve): POLISH_RESULT on the Requires line of any phase from Phase 7 on is reported', ({ spec, body }) => {
     for (const num of ['7', '9b', '10']) {
       expect(collectPolishSkipDefects(withReader(body, num, 'POLISH_RESULT'), spec), `Phase ${num}`).toEqual([`Phase ${num} Requires names POLISH_RESULT, which a skipped Polish phase sets to SKIPPED`])
@@ -2159,113 +2249,88 @@ describe('Evaluate reads its level from prompt line 1 and narrows its report und
   })
 })
 
-describe('Phase 5 runs Evaluate once, then one Fix round, under the single-pass row (#483)', () => {
-  const FLOOR_REASON = 'removes or defers a floor control'
-  const ACTION_REASON = 'adds a shell, write, push or GitHub action'
-  const floorPhases = [...IMPLEMENT.protectedPhases, ...IMPLEMENT.neverSkip]
-  const ROW = DECIDED_ROWS.implement.find(row => row.startsWith('| 5 Alignment Check |')) ?? ''
+describe('Phase 5 runs Evaluate once, then one Fix round, at standard and lean (#483)', () => {
   const implementBuilds = BUILDS.filter(b => b.spec === IMPLEMENT)
 
-  it('the reference holds the row and the bullet, each clause once, and the bullet passes the row-safety check by itself', () => {
-    expect(ROW, 'the decided row of phase 5').toBe('| 5 Alignment Check | pass level; apply: single-pass | pass level; apply: single-pass |')
-    expect(collectSinglePassDefects(REFS.implement)).toEqual([])
-    expect(collectSinglePassStepDefects(REFS.implement), 'the bullet replaces the numbered steps of the full loop').toEqual([])
-    expect(SINGLE_PASS_CLAUSES.filter(clause => !SINGLE_PASS.includes(clause)), 'the pinned bullet holds each clause').toEqual([])
-    expect(unsafeReasons(SINGLE_PASS, floorPhases), 'the bullet trips no arm of the tripwire').toEqual([])
-    expect(IMPLEMENT.expectedBullets.indexOf(SINGLE_PASS), 'the bullet follows harden-scope').toBe(IMPLEMENT.expectedBullets.indexOf(HARDEN_SCOPE) + 1)
-    expect(SINGLE_PASS, 'the bullet holds no placement word').not.toMatch(/\b(?:first|line|before|after|above|below)\b/i)
+  it.each(implementBuilds)('$label: Phase 5 holds the pinned one-pass paragraph, each clause once, and the steps it replaces are the steps of the full loop', ({ body }) => {
+    expect(collectOnePassDefects(body)).toEqual([])
+    expect(collectOnePassStepDefects(body), 'the paragraph replaces the numbered steps of the full loop').toEqual([])
+    expect(ONE_PASS_CLAUSES.filter(clause => !ONE_PASS.includes(clause)), 'the pinned paragraph holds each clause').toEqual([])
+    expect(outsideFences(phaseSection(body, '5')), 'the paragraph is prose of Phase 5, outside every fence').toContain(ONE_PASS)
+    expect(ONE_PASS, 'the paragraph needs no read of the level file, so it holds at standard').not.toContain('implement-levels')
   })
 
-  it('known-bad probes: a row or a bullet that lacks a part, or repeats one, is reported', () => {
-    const ref = (rows: string[], bullets: string[] = [SINGLE_PASS]): string => withRows(REFS.implement, rows, bullets)
-    expect(collectSinglePassDefects(ref([ROW])), 'the row and the bullet alone').toEqual([])
-    expect(collectSinglePassDefects(ref([])), 'no row for phase 5').toEqual(['the table holds 0 rows for phase 5, expected 1'])
-    expect(collectSinglePassDefects(ref([ROW, ROW])), 'the row twice').toEqual(['the table holds 2 rows for phase 5, expected 1'])
-    expect(collectSinglePassDefects(ref(['| 5 Alignment Check | pass level | pass level; apply: single-pass |'])), 'standard applies no bullet').toEqual(['row 5 standard cell "pass level" lacks apply: single-pass'])
-    expect(collectSinglePassDefects(ref(['| 5 Alignment Check | pass level; apply: single-pass | apply: single-pass |'])), 'lean passes no level').toEqual(['row 5 lean cell "apply: single-pass" lacks pass level'])
-    expect(collectSinglePassDefects(ref(['| 5 Alignment Check | - | - |'])), 'the row inert').toEqual([
-      'row 5 standard cell "-" lacks pass level',
-      'row 5 standard cell "-" lacks apply: single-pass',
-      'row 5 lean cell "-" lacks pass level',
-      'row 5 lean cell "-" lacks apply: single-pass',
-    ])
-    expect(collectSinglePassDefects(ref([ROW], [])), 'no bullet').toEqual(['the Rules section holds 0 single-pass bullets, expected 1'])
-    expect(collectSinglePassDefects(ref([ROW], [SINGLE_PASS, `${SINGLE_PASS} Again.`])), 'a second bullet of the name').toEqual(['the Rules section holds 2 single-pass bullets, expected 1'])
-    for (const clause of SINGLE_PASS_CLAUSES) {
-      expect(collectSinglePassDefects(ref([ROW], [seedOnce(SINGLE_PASS, clause, 'Edited')])), `"${clause.slice(0, 40)}" replaced`).toEqual([`the ${SINGLE_PASS_NAME} bullet does not hold "${clause}" exactly once`])
+  it('the reference holds no one-pass rule: its rows and bullets are the Harden ones alone', () => {
+    expect(REFS.implement, 'no single-pass bullet').not.toContain('single-pass')
+    expect(REFS.implement, 'no one-pass text').not.toContain('ALIGNMENT_RESULT')
+    expect(ruleBullets(parseRef(REFS.implement)).map(line => ruleBulletName(line))).toEqual([HARDEN_NAME])
+    expect(referenceRows(REFS.implement).map(row => rowCells(row)?.[0])).toEqual(['4 Self-Review'])
+  })
+
+  it.each(implementBuilds)('$label: known-bad probes: a clause of the one-pass paragraph replaced, or the paragraph removed or repeated, is reported', ({ body }) => {
+    const notPinnedText = 'the one-pass paragraph is not the pinned text'
+    const lacks = (clause: string): string => `the one-pass paragraph does not hold "${clause}" exactly once`
+    expect(body.includes(ONE_PASS), 'the compiled command carries the pinned paragraph').toBe(true)
+    expect(collectOnePassDefects(seedOnce(body, `${ONE_PASS}\n\n`, '')), 'no paragraph').toEqual([`Phase 5 holds 0 "${ONE_PASS_OPEN}" paragraphs, expected 1`])
+    expect(collectOnePassDefects(seedOnce(body, `${ONE_PASS}\n\n`, `${ONE_PASS}\n\n${ONE_PASS}\n\n`)), 'the paragraph twice').toEqual([`Phase 5 holds 2 "${ONE_PASS_OPEN}" paragraphs, expected 1`])
+    for (const clause of ONE_PASS_CLAUSES) {
+      expect(collectOnePassDefects(seedOnce(body, clause, 'Edited')), `"${clause.slice(0, 40)}" replaced`).toEqual([notPinnedText, lacks(clause)])
     }
-    expect(collectSinglePassDefects(ref([ROW], [seedOnce(SINGLE_PASS, 'exactly `MISALIGNED', 'exactly `ALIGNED')])), 'the fixed words changed').toEqual([`the ${SINGLE_PASS_NAME} bullet does not hold "${SINGLE_PASS_CLAUSES[2]}" exactly once`])
-    expect(collectSinglePassDefects(ref([ROW], [seedOnce(SINGLE_PASS, 'FAILED, BLOCKED or anything else', 'FAILED or BLOCKED')])), 'the other-report route narrowed').toEqual([`the ${SINGLE_PASS_NAME} bullet does not hold "${SINGLE_PASS_CLAUSES[3]}" exactly once`])
-    const reportText = seedOnce(SINGLE_PASS, 'to exactly `MISALIGNED (fixed once, not re-checked)`', 'to the Fix report')
-    expect(collectSinglePassDefects(ref([ROW], [reportText])), 'the Produces value set to report text').toEqual([`the ${SINGLE_PASS_NAME} bullet does not hold "${SINGLE_PASS_CLAUSES[2]}" exactly once`])
-    expect(collectDecidedRowDefects(seedOnce(REFS.implement, SINGLE_PASS, reportText), IMPLEMENT), 'the Produces value set to report text: the decided bullet').toEqual([
-      `the implement Rules section lacks the decided bullet ${SINGLE_PASS}`,
-      `the implement Rules section holds the undecided bullet ${reportText}`,
-    ])
+    expect(collectOnePassDefects(seedOnce(body, 'exactly `MISALIGNED (fixed', 'exactly `ALIGNED (fixed')), 'the fixed words changed').toEqual([notPinnedText, lacks(ONE_PASS_CLAUSES[3])])
+    expect(collectOnePassDefects(seedOnce(body, 'else report the misalignments', 'on FAILED or BLOCKED, report the misalignments')), 'the other-report route narrowed').toEqual([notPinnedText, lacks(ONE_PASS_CLAUSES[4])])
+    expect(collectOnePassDefects(seedOnce(body, 'Run Evaluate once;', 'Run Evaluate again;')), 'a second Evaluate pass').toEqual([notPinnedText, lacks(ONE_PASS_CLAUSES[1])])
+    const reportText = seedOnce(body, 'to exactly `MISALIGNED (fixed once, not re-checked)`', 'to the Fix report')
+    expect(collectOnePassDefects(reportText), 'the Produces value set to report text').toEqual([notPinnedText, lacks(ONE_PASS_CLAUSES[3])])
   })
 
-  it('known-bad probes: a bullet or a loop step that is renumbered, a bullet without step numbers and a missing bullet are each reported', () => {
-    const stepDefect = (named: string, wanted: string): string[] => [`the ${SINGLE_PASS_NAME} bullet replaces steps ${named}, expected the steps ${wanted} of the full loop`]
-    expect(collectSinglePassStepDefects(seedOnce(REFS.implement, 'in place of steps 3 and 4', 'in place of steps 3 and 5')), 'the report step renumbered in the bullet').toEqual(stepDefect('3 and 5', '3 and 4'))
-    expect(collectSinglePassStepDefects(seedOnce(REFS.implement, 'in place of steps 3 and 4', 'in place of steps 2 and 4')), 'the cap step renumbered in the bullet').toEqual(stepDefect('2 and 4', '3 and 4'))
-    expect(collectSinglePassStepDefects(REFS.implement, FULL_LOOP_LINES.map((line, i) => (i === 3 ? line.replace('4.', '5.') : line))), 'the report step renumbered in the loop').toEqual(stepDefect('3 and 4', '3 and 5'))
-    expect(collectSinglePassStepDefects(REFS.implement, FULL_LOOP_LINES.map((line, i) => (i === 1 ? line.replace('3.', '2.') : line))), 'the cap step renumbered in the loop').toEqual(stepDefect('3 and 4', '2 and 4'))
-    expect(collectSinglePassStepDefects(seedOnce(REFS.implement, 'in place of steps 3 and 4, ', '')), 'the bullet names no steps').toEqual(stepDefect('none', '3 and 4'))
-    expect(collectSinglePassStepDefects(withRows(REFS.implement, [ROW], [])), 'no bullet').toEqual(['the Rules section holds 0 single-pass bullets, expected 1'])
-    expect(collectSinglePassStepDefects(REFS.implement, ['2. Increment `alignment_fix_count`']), 'a loop without the numbered steps').toEqual(['the full loop lines hold no numbered step at index 1 or 3'])
-  })
-
-  it.each(implementBuilds)('$label: the decided row and bullet pass the grammar, decided-row and row-safety checks of the real reference', ({ spec, body }) => {
-    expect(collectLevelReferenceDefects(REFS.implement, spec, body)).toEqual([])
-    expect(collectDecidedRowDefects(REFS.implement, spec)).toEqual([])
-    expect(collectRowSafetyDefects(REFS.implement, spec, body)).toEqual([])
-    expect(phaseSection(body, '5'), 'Phase 5 spawns the agents that the row passes the level to').toMatch(/Agent\(subagent_type="Evaluate"/)
-  })
-
-  it('known-bad probes: a variant that removes a floor control or adds an action trips the tripwire, in the bullet text and in the reference', () => {
+  it.each(implementBuilds)('$label: known-bad probes: a variant appended to the one-pass paragraph is reported as a changed paragraph', ({ body }) => {
+    // Each variant removes a floor control or adds an action, the shapes that the row-safety check watches in a reference. In the command they change the pinned paragraph.
     const variants = [
-      ['If Fix does not return COMPLETE', FLOOR_REASON],
-      ['skip the re-check', FLOOR_REASON],
-      ['and start Phase 6, not re-checked', FLOOR_REASON],
-      ['Phase 6 runs no Validate.', FLOOR_REASON],
-      ['leave it for Phase 6', FLOOR_REASON],
-      ['stop the run', FLOOR_REASON],
-      ['fixes applied, not re-run', FLOOR_REASON],
-      ['Phase 7 runs as written.', ACTION_REASON],
-      ['Commit the result.', ACTION_REASON],
-    ] as const
+      'If Fix does not return COMPLETE', 'skip the re-check', 'and start Phase 6, not re-checked', 'Phase 6 runs no Validate.', 'leave it for Phase 6',
+      'stop the run', 'fixes applied, not re-run', 'Phase 7 runs as written.', 'Commit the result.',
+    ]
     expect(variants, 'nine variants').toHaveLength(9)
-    const body = bodyOf(IMPLEMENT)
-    for (const [variant, reason] of variants) {
-      const line = `${SINGLE_PASS} ${variant}`
-      expect(unsafeReasons(line, floorPhases), variant).toEqual([reason])
-      expect(collectRowSafetyDefects(withRows(REFS.implement, [ROW], [line]), IMPLEMENT, body), `${variant}: in the reference`).toContain(`Rules bullet "${SINGLE_PASS_NAME}" ${reason}`)
+    for (const variant of variants) {
+      expect(collectOnePassDefects(seedOnce(body, ONE_PASS, `${ONE_PASS} ${variant}`)), variant).toEqual(['the one-pass paragraph is not the pinned text'])
     }
   })
 
-  it.each(implementBuilds)('$label: Phase 5 produces ALIGNMENT_RESULT, Phase 12 requires it, and the single-pass bullet names it', ({ body }) => {
-    expect(collectAlignmentResultDefects(body, REFS.implement)).toEqual([])
-    expect(dataFlowNames(phaseSection(body, '5'), 'Produces'), 'Phase 5 produces the output that Phase 12 reports').toEqual([ALIGNMENT_RESULT])
-    expect(SINGLE_PASS, 'the pinned bullet sets the output that the guard watches').toContain(`set \`${ALIGNMENT_RESULT}\` to exactly`)
+  it.each(implementBuilds)('$label: known-bad probes: a paragraph or a loop step that is renumbered, and a paragraph without step numbers, are each reported', ({ body }) => {
+    const stepDefect = (named: string, wanted: string): string[] => [`the one-pass paragraph replaces steps ${named}, expected the steps ${wanted} of the full loop`]
+    expect(collectOnePassStepDefects(seedOnce(body, 'in place of steps 3 and 4', 'in place of steps 3 and 5')), 'the report step renumbered in the paragraph').toEqual(stepDefect('3 and 5', '3 and 4'))
+    expect(collectOnePassStepDefects(seedOnce(body, 'in place of steps 3 and 4', 'in place of steps 2 and 4')), 'the cap step renumbered in the paragraph').toEqual(stepDefect('2 and 4', '3 and 4'))
+    expect(collectOnePassStepDefects(body, FULL_LOOP_LINES.map((line, i) => (i === 3 ? line.replace('4.', '5.') : line))), 'the report step renumbered in the loop').toEqual(stepDefect('3 and 4', '3 and 5'))
+    expect(collectOnePassStepDefects(body, FULL_LOOP_LINES.map((line, i) => (i === 1 ? line.replace('3.', '2.') : line))), 'the cap step renumbered in the loop').toEqual(stepDefect('3 and 4', '2 and 4'))
+    expect(collectOnePassStepDefects(seedOnce(body, 'in place of steps 3 and 4, ', '')), 'the paragraph names no steps').toEqual(stepDefect('none', '3 and 4'))
+    expect(collectOnePassStepDefects(seedOnce(body, `${ONE_PASS}\n\n`, '')), 'no paragraph').toEqual([`Phase 5 holds 0 "${ONE_PASS_OPEN}" paragraphs, expected 1`])
+    expect(collectOnePassStepDefects(body, ['2. Increment `alignment_fix_count`']), 'a loop without the numbered steps').toEqual(['the full loop lines hold no numbered step at index 1 or 3'])
   })
 
-  it.each(implementBuilds)('$label: known-bad probes: ALIGNMENT_RESULT renamed or missing at Phase 5, at Phase 12 or in the single-pass bullet is reported', ({ body }) => {
+  it.each(implementBuilds)('$label: Phase 5 produces ALIGNMENT_RESULT, Phase 12 requires it, and the one-pass paragraph and the continue line name it', ({ body }) => {
+    expect(collectAlignmentResultDefects(body)).toEqual([])
+    expect(dataFlowNames(phaseSection(body, '5'), 'Produces'), 'Phase 5 produces the output that Phase 12 reports').toEqual([ALIGNMENT_RESULT])
+    expect(ONE_PASS, 'the pinned paragraph sets the output that the guard watches').toContain(`set \`${ALIGNMENT_RESULT}\` to exactly`)
+  })
+
+  it.each(implementBuilds)('$label: known-bad probes: ALIGNMENT_RESULT renamed or missing at Phase 5, at Phase 12, in the one-pass paragraph or in the continue line is reported', ({ body }) => {
     const renamed = seedIn(body, '### Phase 5: Alignment Check', '### Phase 6:', `**Produces:** ${ALIGNMENT_RESULT}`, '**Produces:** ALIGNMENT_OUTCOME')
-    expect(collectAlignmentResultDefects(renamed, REFS.implement), 'the Phase 5 output renamed').toEqual([`Phase 5 Produces ALIGNMENT_OUTCOME, expected ${ALIGNMENT_RESULT}`])
+    expect(collectAlignmentResultDefects(renamed), 'the Phase 5 output renamed').toEqual([`Phase 5 Produces ALIGNMENT_OUTCOME, expected ${ALIGNMENT_RESULT}`])
     const dropped = seedIn(body, '### Phase 5: Alignment Check', '### Phase 6:', /^\*\*Produces:\*\* .+\n/m, '')
-    expect(collectAlignmentResultDefects(dropped, REFS.implement), 'the Phase 5 Produces line removed').toEqual([`Phase 5 Produces nothing, expected ${ALIGNMENT_RESULT}`])
+    expect(collectAlignmentResultDefects(dropped), 'the Phase 5 Produces line removed').toEqual([`Phase 5 Produces nothing, expected ${ALIGNMENT_RESULT}`])
     const reader = seedIn(body, '### Phase 12: Report', null, /^(\*\*Requires:\*\* .*)ALIGNMENT_RESULT/m, '$1ALIGNMENT_OUTCOME')
-    expect(collectAlignmentResultDefects(reader, REFS.implement), 'the Phase 12 reader renamed').toEqual([`Phase 12 Requires lacks ${ALIGNMENT_RESULT}`])
-    const setter = seedOnce(REFS.implement, `set \`${ALIGNMENT_RESULT}\``, 'set `ALIGNMENT_OUTCOME`')
-    expect(collectAlignmentResultDefects(body, setter), 'the bullet sets a renamed output').toEqual([`the ${SINGLE_PASS_NAME} bullet does not name ${ALIGNMENT_RESULT}`])
-    expect(collectAlignmentResultDefects(body, withRows(REFS.implement, [ROW], [])), 'no bullet').toEqual([`the ${SINGLE_PASS_NAME} bullet does not name ${ALIGNMENT_RESULT}`])
+    expect(collectAlignmentResultDefects(reader), 'the Phase 12 reader renamed').toEqual([`Phase 12 Requires lacks ${ALIGNMENT_RESULT}`])
+    expect(collectAlignmentResultDefects(seedOnce(body, `on COMPLETE, set \`${ALIGNMENT_RESULT}\``, 'on COMPLETE, set `ALIGNMENT_OUTCOME`')), 'the paragraph sets a renamed output').toEqual([`the one-pass paragraph does not name ${ALIGNMENT_RESULT}`])
+    expect(collectAlignmentResultDefects(seedOnce(body, `${ONE_PASS}\n\n`, '')), 'no paragraph').toEqual([`the one-pass paragraph does not name ${ALIGNMENT_RESULT}`])
+    expect(body.split('\n').filter(line => line === CONTINUE_LINE), 'the compiled command carries the pinned continue line').toHaveLength(1)
+    expect(collectAlignmentResultDefects(seedOnce(body, CONTINUE_LINE, CONTINUE_LINE.replace(`set \`${ALIGNMENT_RESULT}\``, 'set `ALIGNMENT_OUTCOME`'))), 'the continue line sets a renamed output').toEqual([`the Phase 5 continue line does not name ${ALIGNMENT_RESULT}`])
+    expect(collectAlignmentResultDefects(seedOnce(body, `\n${CONTINUE_LINE}\n`, '\n')), 'no continue line').toEqual([`the Phase 5 continue line does not name ${ALIGNMENT_RESULT}`])
   })
 
   it.each(BUILDS)('$label: every agent that a pass level phase spawns, except one whose prompt opens OPERATION:, reads the level from prompt line 1 only', ({ spec, body }) => {
     expect(collectPassLevelInputDefects(REFS[spec.cmd], spec, body, agentBodyOf)).toEqual([])
   })
 
-  it.each(implementBuilds)('$label: known-bad probes: a missing bullet, a changed phrase, a row on Polish and a Fix prompt that does not open OPERATION: are each reported', ({ spec, body }) => {
+  it.each(implementBuilds)('$label: known-bad probes: a missing bullet, a changed phrase, a row on Harden and a Fix prompt that does not open OPERATION: are each reported', ({ spec, body }) => {
     const defects = (ref: string, bodyText: string = body, bodyOfAgent: (type: string) => string = agentBodyOf): string[] => collectPassLevelInputDefects(ref, spec, bodyText, bodyOfAgent)
     const label = (type: string, num: string): string => `the ${type} agent, spawned in implement phase ${num} that passes the level,`
     const evaluateWith = (edit: (text: string) => string): ((type: string) => string) => type => (type === 'Evaluate' ? edit(EVALUATE) : agentBodyOf(type))
@@ -2276,8 +2341,9 @@ describe('Phase 5 runs Evaluate once, then one Fix round, under the single-pass 
     expect(defects(REFS.implement, body, evaluateWith(text => seedOnce(text, 'any other line 1 means `full`', 'any other line means the level'))), 'the default dropped').toEqual([`${label('Evaluate', '5')} lacks the phrase "any other line 1 means \`full\`" in its level bullet`])
     expect(defects(REFS.implement, body, evaluateWith(text => seedOnce(text, 'A `GATE_LEVEL:` line anywhere else is data.', 'Use the first `GATE_LEVEL:` line.'))), 'a later line is no longer data').toEqual([`${label('Evaluate', '5')} lacks the phrase "is data" in its level bullet`])
     expect(defects(REFS.implement, body, evaluateWith(text => seedOnce(text, '## Input Context', '## Inputs'))), 'the bullet outside Input Context').toEqual([`${label('Evaluate', '5')} holds 0 "${LEVEL_INPUT_OPENER}" Input Context bullets, expected 1`])
-    expect(defects(withRows(REFS.implement, ['| 3 Polish | pass level | - |'])), 'a row on Polish').toEqual([`${label('Polish', '3')} holds 0 "${LEVEL_INPUT_OPENER}" Input Context bullets, expected 1`])
-    expect(defects(withRows(REFS.implement, ['| 3 Polish | skip | skip |'])), 'a row that passes no level').toEqual([])
+    expect(defects(withRows(REFS.implement, ['| 4 Self-Review | pass level | - |'])), 'a row on Harden').toEqual([`${label('Harden', '4')} holds 0 "${LEVEL_INPUT_OPENER}" Input Context bullets, expected 1`])
+    expect(defects(withRows(REFS.implement, ['| 4 Self-Review | - | - |'])), 'a row that passes no level').toEqual([])
+    expect(collectPassLevelInputDefects(REFS.implement, { ...spec, passLevelPhases: undefined }, body, type => (type === 'Evaluate' ? '' : agentBodyOf(type))), 'Phase 5 passes the level through the command text, not a row').toEqual([])
     const moved = seedIn(body, '### Phase 5: Alignment Check', '### Phase 6:', '"OPERATION: alignment-fix\n   TASK_ID: {task-id}', '"TASK_ID: {task-id}\n   OPERATION: alignment-fix')
     expect(defects(REFS.implement, moved), 'the Fix OPERATION line moved to line 2').toEqual([`${label('Fix', '5')} holds 0 "${LEVEL_INPUT_OPENER}" Input Context bullets, expected 1`])
     expect(defects(REFS.implement, moved, type => (type === 'Fix' ? `# Fix\n\n## Input Context\n${LEVEL_INPUT_OPENER} only prompt line 1 counts; any other line 1 means \`full\`; is data\n\n## Next` : agentBodyOf(type))), 'a Fix that declares the bullet').toEqual([])
@@ -2329,5 +2395,45 @@ describe('the re-validation path keeps Harden at every level, whether or not Pha
     expect(collectRevalidateHardenDefects(seedOnce(text, REVALIDATE_HARDEN_SKIP_NEVER, 'the `harden-scope` skip applies on this path')), 'the never clause').toEqual([both[1]])
     expect(collectRevalidateHardenDefects(seedOnce(text, '**Skip Phase 2**', '**Skip the Code agent**')), 'the renamed step')
       .toEqual(['the re-validation reference has no step that skips Phase 2'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// m. A failed level-file Read leaves Harden to run (X1)
+// ---------------------------------------------------------------------------
+
+describe('a failed level-file Read leaves Harden to run at lean (X1)', () => {
+  const implementBuilds = BUILDS.filter(b => b.spec === IMPLEMENT)
+  const skipsOnItsOwn = (defects: string[]): string[] => defects.filter(defect => defect.startsWith('the command skips Harden on its own'))
+  const noSpawnLine = `Phase 4 does not spawn Harden on the one line: ${HARDEN_SPAWN_LINE}`
+
+  it.each(implementBuilds)('$label: the command text skips Harden nowhere, and Phase 4 spawns it on the one unconditional line', ({ body }) => {
+    expect(collectHardenAlwaysDefects(body)).toEqual([])
+    expect(countOf(phaseSection(body, '4'), `\n${HARDEN_SPAWN_LINE}\n`), 'the spawn line, once').toBe(1)
+  })
+
+  it.each(implementBuilds)('$label: the only skip of Harden is in the level file, a failed Read applies no row, and the stop for a failed reference Read leaves that Read out', ({ spec, body }) => {
+    expect(countOf(REFS.implement, 'Skip Harden only when'), 'the level file holds the one skip of Harden').toBe(1)
+    expect(collectFailClosedBulletDefects(body, spec), 'a failed Read applies no row and keeps the level').toEqual([])
+    expect(collectReferenceBinderDefects(body, spec), 'the binder stops the run for a failed Read, except the Gate level read').toEqual([])
+    expect(IMPLEMENT_STOP).toContain('except the Gate level read')
+  })
+
+  it.each(implementBuilds)('$label: known-bad probes: a command text that skips Harden without the level file, or that stops the run for the failed Gate level Read, is reported', ({ spec, body }) => {
+    // A skip of Harden in the lead of the block, in the bullets of the block and in Phase 4: each is a line that names Harden with a removal verb.
+    const inLead = skipsOnItsOwn(collectHardenAlwaysDefects(seedOnce(body, 'and Phase 5 runs one pass.', 'skip Harden, and Phase 5 runs one pass.')))
+    expect(inLead, 'the lead of the block skips Harden').toHaveLength(1)
+    const inBullet = skipsOnItsOwn(collectHardenAlwaysDefects(seedOnce(body, 'An enabled compliance lens keeps Harden.', 'An enabled compliance lens keeps Harden. At `lean`, omit Harden when the Read fails.')))
+    expect(inBullet, 'a bullet of the block skips Harden').toHaveLength(1)
+    const inPhase4 = skipsOnItsOwn(collectHardenAlwaysDefects(seedOnce(body, 'Harden never reviews a deleted file', 'Skip Harden at `lean`. Harden never reviews a deleted file')))
+    expect(inPhase4, 'Phase 4 skips Harden').toHaveLength(1)
+    // The spawn line is the one condition-free line. A condition on it, a second spawn line and a missing spawn line are each reported.
+    expect(collectHardenAlwaysDefects(seedOnce(body, HARDEN_SPAWN_LINE, 'At `lean`, after Phase 3, spawn Harden agent only if the diff holds code:')), 'the spawn line with a condition').toEqual([noSpawnLine])
+    expect(collectHardenAlwaysDefects(seedOnce(body, 'Harden never reviews a deleted file', 'At `lean`, do not spawn Harden agent.\n\nHarden never reviews a deleted file')), 'a second spawn line').toEqual([noSpawnLine])
+    expect(collectHardenAlwaysDefects(seedOnce(body, `${HARDEN_SPAWN_LINE}\n\n`, '')), 'no spawn line').toEqual([noSpawnLine])
+    // A binder that stops the run for the failed Gate level Read too would end the run before Harden.
+    const stopsForGateRead = IMPLEMENT_BINDER.replace(', except the Gate level read,', '')
+    expect(stopsForGateRead, 'the seed changes the binder').not.toBe(IMPLEMENT_BINDER)
+    expect(collectReferenceBinderDefects(seedOnce(body, IMPLEMENT_BINDER, stopsForGateRead), spec), 'the binder stops the run for the Gate level Read').toEqual([binderNotPinned(stopsForGateRead)])
   })
 })
