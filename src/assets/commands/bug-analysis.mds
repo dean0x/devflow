@@ -9,8 +9,6 @@ output-dir: dist/commands
 @import "./_partials/_settings.mds" as settings
 # Bug Analysis Command
 
-Run a proactive bug analysis on the current branch: static analysis tools and parallel semantic analyzers, synthesized into one bug report.
-
 ## Usage
 
 `/bug-analysis [--full] [--no-static]`: `--full` ignores incremental state; `--no-static` skips static analysis.
@@ -224,9 +222,7 @@ Pick the focus analyzers from `CHANGED_FILES` (Step 2b; do not re-run `git diff`
 **Requires:** DIFF_RANGE, ANALYSIS_DIR, ACTIVE_FOCUSES, STATIC_FINDINGS, ACCEPTANCE_RULES, PLAN_CONTEXT, FEATURE_KNOWLEDGE
 <!-- curation:end -->
 
-Spawn ALL active Debug agents **in a single message** (parallel, NOT background):
-
-For each active focus, spawn:
+Spawn one Debug agent for each active focus, all in a single message (parallel, not background):
 ```
 Agent(subagent_type="Debug", run_in_background=false):
 "Analyze focusing on {focus}.
@@ -313,7 +309,7 @@ Seven phases: Phase 1 to Phase 7.
 |------|----------|
 | Rebase invalidates `.last-analysis-head` SHA | `git cat-file -t` check fails → fallback to full diff |
 | Zero changed files in DIFF_RANGE with exit 0 | Stop: "No changes to analyze." |
-| `--full` flag | Bypass incremental detection (Step 2a), run full diff from base |
+| `--full` flag | Step 2a takes the full-range path |
 | A scanner did not run or did not complete | Name the tool and why in `STATIC_FINDINGS`, not `(none)`; a tool that did not complete keeps the marker |
 
 ## Resolve Compatibility

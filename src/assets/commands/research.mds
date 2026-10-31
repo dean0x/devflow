@@ -8,8 +8,6 @@ output-dir: dist/commands
 @import "./_partials/_settings.mds" as settings
 # Research Command
 
-Research a topic by spawning parallel Research agents across multiple research types (codebase, external, market, competitor, technology). Findings are trust-annotated and synthesized into structured output.
-
 ## Usage
 
 ```
@@ -27,10 +25,7 @@ What follows `/research` is bound once, here. Every later step names it `COMMAND
 $ARGUMENTS
 </command-input>
 
-`COMMAND_INPUT` is one of:
-- Research question: "best caching strategies"
-- Comparison question: "compare React vs Svelte for our use case"
-- Empty: use conversation context
+An empty `COMMAND_INPUT` means: use the conversation context.
 
 ## Phases
 
@@ -54,12 +49,12 @@ $ARGUMENTS
 <!-- curation:end -->
 {{decisions_load()}}
 <!-- curation:on -->
-Use `DECISIONS_CONTEXT` locally when framing research — prior decisions and pitfalls suggest areas to investigate. Follow `devflow:apply-decisions` to Read full entry bodies on demand. Pass `DECISIONS_CONTEXT` to each Research agent in Phase 4 so their findings can account for relevant decisions.
+Use `DECISIONS_CONTEXT` locally to frame the research. Follow `devflow:apply-decisions` to Read full entry bodies on demand. Pass `DECISIONS_CONTEXT` to each Research agent in Phase 4.
 
 <!-- curation:end -->
 {{knowledge_load()}}
 
-Use `FEATURE_KNOWLEDGE` **locally** for research framing. Pass to each Research agent in Phase 4.
+Use `FEATURE_KNOWLEDGE` locally for research framing. Pass to each Research agent in Phase 4.
 
 ### Phase 2: Requirements
 
@@ -106,8 +101,6 @@ Each Research agent receives:
 - `ORIENT_OUTPUT`: Only for `codebase` type
 - `WORKTREE_PATH`: If in a worktree context
 
-Each Research agent writes findings to disk at OUTPUT_PATH.
-
 ### Phase 5: Synthesize
 
 **Produces:** RESEARCH_SUMMARY
@@ -130,6 +123,7 @@ Output: {worktree}/.devflow/docs/research/{topic-slug}/{YYYY-MM-DD_HHMM}/researc
 **Requires:** RESEARCH_SUMMARY
 
 Present findings to user with:
+- The research folder `{worktree}/.devflow/docs/research/{topic-slug}/{YYYY-MM-DD_HHMM}/`
 - Trust annotations per finding: (trusted) for codebase, (untrusted) for web, (mixed) for technology
 - Explicit conflicts between codebase and web findings
 - Drill-down offer via AskUserQuestion
@@ -151,53 +145,13 @@ If external research was skipped due to tool unavailability: inform user.
 
 ## Worktree Support
 
-If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktree workflows), pass it through to all spawned agents. Each agent's "Worktree Support" section handles path resolution.
-
-## Output
-
-Research findings saved to `{worktree}/.devflow/docs/research/{topic-slug}/{YYYY-MM-DD_HHMM}/`:
-- `{type}.md` per research type (codebase.md, external.md, etc.)
-- `research-summary.md` — synthesized findings with trust annotations
-
-## Architecture
-
-```
-/research (orchestrator)
-│
-<!-- curation:on -->
-├─ Phase 1: Load Decisions (Orchestrator-Local)
-<!-- curation:off -->
-├─ Phase 1: Load Context (Orchestrator-Local)
-<!-- curation:end -->
-│
-├─ Phase 2: Requirements
-│  └─ Infer 2-5 research types from question
-│
-├─ Phase 3: Orient (conditional — codebase type only)
-│  └─ Skim agent (codebase overview)
-│
-├─ Phase 4: Parallel Research agents
-│  └─ 2-5 Research agents in single message (all types simultaneously)
-│
-├─ Phase 5: Synthesize
-│  └─ Synthesize agent merges findings with trust-aware aggregation
-│
-├─ Phase 6: Present findings with trust annotations and drill-down offer
-│
-└─ Phase 7: Suggest feature knowledge creation (conditional)
-   └─ Knowledge agent (if codebase type researched + user accepts)
-```
+If the orchestrator receives a `WORKTREE_PATH` context, pass it through to all spawned agents.
 
 ## Principles
 
-1. **Parallel perspectives** — Multiple research types converge on truth better than any single perspective
-2. **Trust transparency** — Every finding is labeled with its trust level (trusted/untrusted/mixed)
-3. **Conflict surfacing** — Contradictions between codebase and web findings are highlighted, not hidden
-4. **Evidence over opinion** — All claims require citations (file:line or URL)
+1. **Evidence over opinion** — All claims require citations (file:line or URL)
 
 ## Error Handling
 
-- If WebSearch/WebFetch unavailable: restrict to codebase type, inform user
 - If a Research agent fails: continue with remaining outputs, note gap in synthesis
 - If Synthesize agent fails: present individual Research agent outputs directly
-- If feature knowledge creation fails: log failure, report research results normally
