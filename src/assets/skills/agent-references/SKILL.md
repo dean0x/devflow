@@ -46,5 +46,3 @@ allowed-tools: Read
 | `commands/{name}.md` | The command named in the file | The command's condition for that branch holds |
 
 The installed directory is `{claude_dir}/skills/devflow:agent-references/`, where `{claude_dir}` is Claude Code's directory: `CLAUDE_CONFIG_DIR` when that is set to an absolute path, else `$HOME/.claude`.
-The model never invokes this skill: `disable-model-invocation: true` keeps it out of the
-model's own skill choices, and `user-invocable: false` keeps it out of the slash menu.
