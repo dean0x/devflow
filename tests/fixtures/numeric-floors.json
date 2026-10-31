@@ -1299,6 +1299,14 @@
       "occurrences": 1,
       "sourceFile": "tests/guards/other-agents-sizes.test.ts",
       "description": "The Skim agent body of the curation-off build, dist/curation-off/agents/skim.md, in bytes. Added by #718 (lean other targets) at 5,495, after the cut from 6,586."
+    },
+    {
+      "id": "tracker-body-max",
+      "ceiling": 18285,
+      "pattern": "['tracker', 'on', 18_285],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/other-agents-sizes.test.ts",
+      "description": "The Tracker agent body, src/assets/agents/tracker.md, in bytes. It is hand-authored, with one build. Every turn of every Tracker spawn reads it (sonnet, hook-spawned once per provider setup). Added by #718 (lean other targets) at 18,285, after the cut from 27,110."
     }
   ]
 }

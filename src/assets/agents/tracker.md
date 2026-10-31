@@ -187,8 +187,8 @@ Three rules are this agent's own:
    `inferred-from:`.
 
 Every value is **shape-gated regardless of provenance** — history, a tracker
-response or a human — by the table below. A discarded value takes the documented default
-and a `### Substitutions` row.
+response or a human — by the table below. A discarded value takes the documented
+default and a `### Substitutions` row.
 
 ## The file
 
@@ -197,28 +197,25 @@ third-party input — to you when you compose it and to every reader afterwards.
 
 **File-level rules**
 
-- **≤ 120 lines** and **≤ 8,000 characters.** Over either bound, a reader reads it
-  fully anyway and degrades; a partial read is never correct. Stay well inside.
+- **≤ 120 lines** and **≤ 8,000 characters.** Over either bound, a reader
+  degrades. Stay well inside.
 - Mode `0600`.
-- Readers open it with the **Read tool**, never a shell read. Compose it so that
-  rule stays cheap to follow: one value per line, no continuations.
+- Readers open it with the **Read tool**, never a shell read: write one value per
+  line, no continuations.
 - **`# UNRESOLVED:` is a hard sentinel**, never shape-validated as a value. A
   **sentinel and an absent section are different outcomes**: an absent section
   means the documented neutral default, a sentinel means the reader degrades and
   asks the human to edit the file.
 - **A global-safe section whose shape gate is a closed enum and whose documented
   default is one of that enum's own values is never sentinelled — write the
-  constant.** Every value it admits is written down in the table below, it holds
-  for the whole machine, and the default is itself one of them: there is nothing
-  a human could resolve that you do not already know, and a sentinel there makes
-  every reader degrade forever over a value you had. `## Dedup Strategy` is a
-  closed enum too and is NOT covered — its documented default is a live probe,
-  not a member, so an unresolved rung there is a real unknown.
-- Every value is composed in the same restricted alphabet the `## Reference
-  Rendering` denylist names: **no backtick, no `$`, no `;`** anywhere in the
-  file. The write chain refuses the whole composition over one of them, so a
-  scanned string carrying one is a discard with a `### Substitutions` row, never
-  a value you pass through.
+  constant.** You know every value it admits, so a sentinel there makes every
+  reader degrade forever for no reason. `## Dedup Strategy` is not covered: its
+  documented default is a live probe, not a member, so an unresolved rung there
+  is a real unknown.
+- Compose every value with **no backtick, no `$`, no `;`** anywhere in the file
+  (the `## Reference Rendering` denylist). The write chain refuses the whole
+  composition over one of them, so a scanned string carrying one is a discard
+  with a `### Substitutions` row, never a value you pass through.
 
 ### Section scope, defaults and shape gates
 
@@ -242,26 +239,19 @@ re-derived per repository at call time, so the value here is a last resort.
 `### Substitutions` carries no value and has no sink gate — it is report-only,
 written by you when a scanned value was discarded.
 
-**Why `## Reference Rendering` carries both a positive shape and a denylist.** The
-positive pattern is the real gate — a render token is a small, closed alphabet, so
-parsing it is strictly better than enumerating what it must not contain. The
-metachar denylist is the second, independent control: it is the clause that stays
-correct if the pattern is ever widened for a new token shape, and it is named
-separately so widening one cannot silently relax the other. Defense in depth,
-not redundancy.
+**`## Reference Rendering` carries a positive shape and a denylist** — two
+independent controls. Apply both; widening one never relaxes the other.
 
-**`## Dedup Strategy` is a hint, not a decision.** Record the rung TOKEN the
-probe resolved *and the evidence for it* — a token from the enum above and never
-a bare number, because the reader's ladder is the same four rungs by name and a
-number means whatever its writer was counting. A reader may use the recorded rung
-only to **narrow the probe order**; the **live probe is the sole authority** for
-whether dedup is available and for the reason it degrades. A rung recorded months
-ago on a server that has since changed must never be trusted as the answer.
+**`## Dedup Strategy` is a hint, not a decision.** Record the rung token the
+probe resolved *and the evidence for it* — a token from the enum above, never a
+bare number. A reader may use the recorded rung only to
+**narrow the probe order**; the **live probe is the sole authority** for whether
+dedup is available and for the reason it degrades.
 
 ### Template
 
-Instantiate exactly this shape — the headings are a contract with the reader and
-are compared against it heading-by-heading:
+Instantiate exactly this shape — readers compare the headings against it
+heading-by-heading:
 
 ```tracker-md-template
 ---
@@ -338,84 +328,19 @@ EOF
 GATE=$?; exit "$GATE"
 ```
 
-Every part of that is load-bearing:
+Run it as written. Every link is load-bearing: never split it into separate
+statements, never add a pipe, never move the `trap` or the `GATE=$?` capture, and
+never address the scrubber through a second `$HOME/.devflow`. A pipeline or a
+statement break hides the scrubber's exit status, and the chain is what makes the
+gate fail *closed*. This file sink needs the `&&` chain, never the scrubber's
+framed stdout mode, which exists for comment sinks.
 
-- **`umask 077` for the whole block** — every file it creates, the scrubber's
-  output included, is CREATED `0600` rather than created world-readable and
-  narrowed a moment later. `chmod 600` stays as the second, independent control:
-  defense in depth, not redundancy.
-- **`mktemp` per invocation** — two concurrent runs never share a staging path.
-  The scrubbed stage is taken **inside `$TRACKER_DEVFLOW_DIR`** because `ln` places
-  a file only within one filesystem, and the default temp directory is not
-  guaranteed to be on the same one.
-- **Each `mktemp` is a precondition, not an assumption** — `|| exit 1` before
-  anything is composed. A chain in which every link is load-bearing cannot have an
-  unchecked first link. So is the conventions directory: the provider files share
-  one directory under `$TRACKER_DEVFLOW_DIR`, created `0700` under the block's
-  umask on the first write any provider makes, and `ln` places nothing into a
-  directory that is not there.
-- **The compose step is brace-grouped so it HAS a status the chain can read.** A
-  bare `cat > "$RAW" <<'EOF' … EOF` is its own statement, and the shell throws its
-  exit code away: a full disk, a read-only temp directory or a vanished `$RAW`
-  leaves an empty or partial composition, and every link after it runs happily
-  over the result. `{ … } &&` makes the write the first link of the same chain
-  the placement hangs off.
-- **Both temp files are removed by a `trap` on `EXIT INT TERM`** — on the refusal
-  paths and the signal paths, not only on the one where the chain runs to the end.
-  `$RAW` holds the PRE-scrub composition, so leaving it behind keeps exactly the
-  bytes the gate exists to remove, for the lifetime of the temp directory rather
-  than of the run. A plain `rm --`, never a flagged one, for the reason
-  `## Finishing` step 3 gives.
-- **`GATE=$?` immediately after the chain, and `exit "$GATE"`.** The trap fires
-  after that status is captured and fixed, so what the block reports is the gate's
-  verdict — an exit code read after a later command is not evidence about the
-  earlier one.
-- **The scrubber is addressed through `$TRACKER_DEVFLOW_DIR`**, the one resolution
-  `## Environment` performs — never a second `$HOME/.devflow` here.
-  A second site can disagree with the first, and the disagreement fails closed
-  and silently: the scrubber is looked up under one root while the file is written
-  under another, `node` exits non-zero, and inference never writes anything.
-- **The quoted heredoc delimiter** (`<<'EOF'`) — the composed file carries scanned
-  history strings and tracker text. An unquoted delimiter would expand them.
-- **A single `&&` chain, never a pipeline.** A pipeline hides the scrubber's exit
-  status; the chain is what makes the gate fail *closed*. If the scrubber exits
-  non-zero, or is missing, **write nothing** and report
+- **If the scrubber exits non-zero, or is missing**, **write nothing** and report
   `TRACEABILITY: DEGRADED (redaction unavailable)`.
-  A file sink has a shell `&&` available, which is why this gate is a chain. The
-  scrubber's framed stdout mode exists for comment sinks that have no such
-  boundary — a different sink with a different problem. **Keep the two reasons
-  apart; neither simplifies into the other.**
-- **`[ -s "$SCRUBBED" ]` and the three `grep`s are the shape gate.** The
-  scrubber's exit status says it RAN, not that it produced a file worth keeping:
-  an empty composition scrubs to zero bytes and every link of the chain still
-  exits 0. The size test and the first two greps — the frontmatter's first key
-  and the last REQUIRED heading — bracket the composition at both ends, so a body
-  that is empty, truncated or not the template at all never reaches placement.
-  Downstream reads nothing but existence, so this is the line where the Iron Law
-  is enforced rather than asserted.
-- **The third `grep` validates the range the anchors only bracket.** Two anchors
-  say the head and the tail arrived and say nothing about the lines between them
-  — or after them, which is where `### Substitutions` sits, and every row of that
-  section is a value that already failed its own shape gate. The negated grep
-  reads every line of the composition and refuses the write over a backtick, a
-  `$` or a `;`: the `## Reference Rendering` denylist, hoisted from one section
-  to the whole file. The section rule stays where it is — this is a second,
-  independent control at the sink, not a replacement for the one at the source.
-  The other two characters that denylist names are deliberately NOT here, each
-  for its own reason: the scrubber may re-quote an assignment it redacted, so a
-  link that refused a double quote would make a SUCCESSFUL redaction refuse the
-  write; and a backslash inside a bracket expression is read as an escape by some
-  `grep`s and as a literal by others, which would be a portability bug in a
-  security control rather than a control.
-- **`ln` places the file atomically and create-exclusively.** `link(2)` publishes
-  a file that is ALREADY complete, under a name that must not exist: there is no
-  instant at which `$TRACKER_FILE` holds a prefix of the content. It fails with
-  `EEXIST` when the path is taken — you lost a race: **read the existing file and
-  report `ALREADY_EXISTS`.** The failure is **not a lock wait** — do not unlink
-  and retry. Unlink-and-retry is correct for a staged atomic replace and exactly
-  wrong for a write-once file, because the winner's content is the answer.
-- **`chmod 600` in the same chain** — the file may name a site and a project.
-  Never change the mode of the parent directory: `~/.devflow` is 0755 and shared
+- **If `ln` fails because the path is taken**, you lost a race: **read the
+  existing file and report `ALREADY_EXISTS`.** The failure is **not a lock wait**
+  — do not unlink and retry, because the winner's content is the answer.
+- Never change the mode of the parent directory: `~/.devflow` is 0755 and shared
   by every other feature.
 
 **Never write a value you did not validate against the table above**, and never
@@ -426,23 +351,16 @@ identifier.
 
 1. **On a write-less exit** — no capability reachable, capability denied, or the
    scrub gate refused — **leave `"$TRACKER_ATTEMPTS_FILE"` exactly as you found
-   it.** The session-start gate spends one attempt from it at the moment it emits
-   your directive, so a run that dies before reaching this line costs the gate the
-   same single attempt as one that reaches it, and the cap of **5 attempts**
-   engages without you. A second attempt spent here would spend the budget twice
-   per cycle, closing the feature after three directives, not five.
+   it.** The session-start gate spends one attempt from it when it emits your
+   directive, and the cap of **5 attempts** engages without you. A second
+   attempt spent here would spend the budget twice per cycle.
 2. **On a successful write**, delete `"$TRACKER_ATTEMPTS_FILE"`.
-   The file now exists, so the attempt history is spent.
 3. Delete the claim file as your **FINAL act**, strictly after every other write,
-   and **a write-less exit still deletes the claim** — every path that reaches
-   this section releases it, or the next session reads a held claim as a live
-   sibling and waits out the whole staleness bound for a run that decided in
-   seconds it had nothing to say. Use a plain `rm --`: devflow's recommended
-   deny-list denies the FLAGGED spellings, and you run unattended with no one to
-   answer the prompt. `--` ends the options, so a path is never read as one:
+   and **a write-less exit still deletes the claim** — else the next session
+   reads a held claim as a live sibling and waits out the whole staleness bound.
+   Use a plain `rm --`, never a flagged spelling: devflow's recommended deny-list
+   denies flagged spellings, and you run unattended:
    `rm -- "$TRACKER_CLAIM"`
-   Crashing before this line leaves the claim file for the next run's stale
-   recovery — the correct outcome for a partial run.
 4. End with the output block below. It is invisible in a background run, so the
    file itself — its provenance header, its `### Substitutions` rows and its
    inline sentinels — is the real report.

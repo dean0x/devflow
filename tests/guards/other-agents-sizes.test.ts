@@ -23,6 +23,7 @@ const AGENT_MAX_BYTES: ReadonlyArray<readonly [string, Build, number]> = [
   ['debug', 'off', 9_051],
   ['skim', 'on', 6_617],
   ['skim', 'off', 5_495],
+  ['tracker', 'on', 18_285],
 ]
 
 /** Named collector: the file is over its ceiling. */
