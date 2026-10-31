@@ -10,13 +10,14 @@
  *   AC-6  the mechanics POINT at the script rather than restate it (#455,
  *         D-OP-SCRIPT-POINTER): one `verify-evidence.cjs publish` run, whose stdout
  *         is the op's whole answer. The reference holds no gh call, no
- *         `--body-file`, no scrubber chain and no marker. The `EVIDENCE` template
- *         the mechanics parse accepts and rejects exactly what `EVIDENCE_LINE_RE`
- *         does, over a differential table.
+ *         `--body-file`, no scrubber chain, no marker and no copy of the `EVIDENCE`
+ *         line grammar.
  *   AC-203 the script itself, run for real under a `gh` fake on PATH: it prints the
- *         exact `## PR Evidence` block in every scenario, scrubs before it posts,
- *         and makes no gh write after a failed scrub (the check that used to be a
- *         shell chain in the reference now lives here, where it can be executed).
+ *         exact `## PR Evidence` block (the `Test plan:` line included) in every
+ *         scenario, prints the one evidence unavailable line when it cannot, scrubs
+ *         before it posts, and makes no gh write after a failed scrub (the check that
+ *         used to be a shell chain in the reference now lives here, where it can be
+ *         executed).
  *
  * Every guard has a named collector, a non-empty-corpus assertion and a known-bad
  * probe. Every reader reads BUILT artifacts.
@@ -49,8 +50,6 @@ interface EvidenceFields {
 
 /** Only what this suite reads from the script. */
 interface EvidenceExports {
-  readonly EVIDENCE_LINE_RE: RegExp
-  readonly STATES: readonly string[]
   readonly MARKERS: Readonly<Record<string, unknown>>
   formatEvidenceLine(fields: EvidenceFields): { ok: true; value: string } | { ok: false }
 }
@@ -85,195 +84,7 @@ function contractSection(): string {
 }
 
 // ---------------------------------------------------------------------------
-// 1. The EVIDENCE template ↔ EVIDENCE_LINE_RE
-// ---------------------------------------------------------------------------
-
-/** Placeholder words whose meaning is the script's: compiled from the regex's own group. */
-const OPEN_PLACEHOLDERS: ReadonlySet<string> = new Set(['n', 'sha', 'ids', 'kinds', 'hex'])
-
-/** Escape a literal for a RegExp source. */
-function escapeRe(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')
-}
-
-/** The named capture groups of a RegExp source, in source order. */
-function namedGroups(source: string): string[] {
-  return [...source.matchAll(/\(\?<([A-Za-z][A-Za-z0-9]*)>/g)].map(m => m[1])
-}
-
-/** The source of one named group, without the group itself. Bounded by the source length. */
-function namedGroupSource(source: string, group: string): string {
-  const open = `(?<${group}>`
-  const start = source.indexOf(open)
-  if (start === -1) throw new Error(`no (?<${group}>…) group`)
-  let depth = 1
-  let inClass = false
-  for (let i = start + open.length; i < source.length; i++) {
-    const ch = source[i]
-    if (ch === '\\') { i++; continue }
-    if (inClass) { if (ch === ']') inClass = false; continue }
-    if (ch === '[') { inClass = true; continue }
-    if (ch === '(') depth++
-    if (ch === ')') {
-      depth--
-      if (depth === 0) return source.slice(start + open.length, i)
-    }
-  }
-  throw new Error(`(?<${group}>…) is unbalanced`)
-}
-
-/** Named collector: the one `EVIDENCE …` code span the mechanics parse, or null when not exactly one. */
-export function collectEvidenceTemplate(prBody: string): string | null {
-  const spans = [...prBody.matchAll(/`(EVIDENCE [^`]+)`/g)].map(m => m[1])
-  return spans.length === 1 ? spans[0] : null
-}
-
-/**
- * Compile the template to a RegExp. The i-th `<…>` placeholder is the regex's i-th
- * named group — order, not a hand-kept name map, so a reordered or dropped field
- * disagrees. A placeholder naming an open word (`<n>`, `<sha>`, `<ids|none>` …) takes
- * that group's own source; a closed one (`<yes|no|unchecked>`) compiles to its
- * listed values, so a value the template drops or invents disagrees.
- */
-export function compileEvidenceTemplate(template: string, re: RegExp): RegExp {
-  const groups = namedGroups(re.source)
-  let out = ''
-  let slot = 0
-  for (let i = 0; i < template.length;) {
-    if (template[i] === '<') {
-      const close = template.indexOf('>', i)
-      if (close === -1) throw new Error('template: unclosed <')
-      const body = template.slice(i + 1, close)
-      const group = groups[slot]
-      if (group === undefined) throw new Error(`template: placeholder ${slot + 1} has no group in the regex`)
-      out += body.split('|').some(word => OPEN_PLACEHOLDERS.has(word))
-        ? `(?:${namedGroupSource(re.source, group)})`
-        : `(?:${body.split('|').map(escapeRe).join('|')})`
-      slot++
-      i = close + 1
-      continue
-    }
-    out += escapeRe(template[i])
-    i++
-  }
-  if (slot !== groups.length) throw new Error(`template: ${slot} placeholders for ${groups.length} groups`)
-  return new RegExp(`^${out}$`)
-}
-
-const HEAD = '0123456789abcdef0123456789abcdef01234567'
-
-function line(over: Partial<EvidenceFields> = {}): string {
-  const fields: EvidenceFields = {
-    pr: 7,
-    head: HEAD,
-    total: 3,
-    counts: { 'VERIFIED-CI': 1, 'ATTESTED-LOCAL': 1, UNVERIFIED: 0, STALE: 1, FAILED: 0, INDETERMINATE: 0 },
-    stale: [2],
-    exceptions: [],
-    approval: 'unchecked',
-    key: '0123456789ab',
-    posted: 'no',
-    body: 'changed',
-    ...over,
-  }
-  const r = PE.formatEvidenceLine(fields)
-  if (!r.ok) throw new Error(`formatEvidenceLine refused ${JSON.stringify(fields)}`)
-  return r.value
-}
-
-/** The differential table: lines the script prints, and hostile near-misses. */
-function differentialTable(): string[] {
-  const zero = { 'VERIFIED-CI': 0, 'ATTESTED-LOCAL': 0, UNVERIFIED: 0, STALE: 0, FAILED: 0, INDETERMINATE: 0 }
-  const rows: string[] = [
-    line({ total: 0, counts: zero, stale: [] }),
-    line({ pr: 1_234_567_890 }),
-    line({ total: 200, counts: { ...zero, STALE: 200 }, stale: Array.from({ length: 200 }, (_, i) => i + 1) }),
-    line({ total: 100, counts: { ...zero, 'VERIFIED-CI': 99, FAILED: 1 }, stale: [] }),
-  ]
-  for (const approval of ['yes', 'no', 'unchecked']) {
-    for (const posted of ['yes', 'no', 'n/a']) {
-      for (const body of ['same', 'changed']) {
-        for (const exceptions of [[], ['ticket-link'], ['test-plan'], ['ticket-link', 'test-plan']]) {
-          rows.push(line({ approval, posted, body, exceptions }))
-        }
-      }
-    }
-  }
-  const ok = line()
-  rows.push(
-    ok.replace('approval:unchecked', 'approval:maybe'),
-    ok.replace('posted:no', 'posted:na'),
-    ok.replace('body:changed', 'body:SAME'),
-    ok.replace('exceptions:none', 'exceptions:test-plan,ticket-link'),
-    ok.replace('exceptions:none', 'exceptions:ticket-links'),
-    ok.replace(`head:${HEAD}`, `head:${HEAD.slice(1)}`),
-    ok.replace(`head:${HEAD}`, `head:${HEAD.toUpperCase()}`),
-    ok.replace('key:0123456789ab', 'key:0123456789a'),
-    ok.replace('pr:7', 'pr:0'),
-    ok.replace('pr:7', 'pr:07'),
-    ok.replace('total:3', 'total:201'),
-    ok.replace('stale:TP-2', 'stale:TP-0'),
-    ok.replace('stale:TP-2', 'stale:TP-2,'),
-    ok.replace('stale:TP-2', 'stale:2'),
-    ok.replace(' FAILED:0 ', ' '),
-    ok.replace('STALE:1 FAILED:0', 'FAILED:0 STALE:1'),
-    ok.replace('EVIDENCE ', 'EVIDENCE  '),
-    ok.replace('EVIDENCE', 'evidence'),
-    ` ${ok}`,
-    `${ok} `,
-    `${ok}\tx`,
-    ok.replace(' body:changed', ''),
-    '',
-  )
-  return rows
-}
-
-/** Named collector: the table rows on which the compiled template and the script's regex disagree. */
-export function collectTemplateDisagreements(candidate: RegExp, rows: readonly string[]): string[] {
-  return rows
-    .filter(row => candidate.test(row) !== PE.EVIDENCE_LINE_RE.test(row))
-    .map(row => `${JSON.stringify(row.slice(0, 120))}: template ${candidate.test(row) ? 'accepts' : 'rejects'}, EVIDENCE_LINE_RE ${PE.EVIDENCE_LINE_RE.test(row) ? 'accepts' : 'rejects'}`)
-}
-
-describe('AC-6: the EVIDENCE template accepts and rejects exactly what EVIDENCE_LINE_RE does', () => {
-  const prBody = requirePrBody()
-
-  it('the mechanics carry exactly one EVIDENCE template, and the table is two-sided', () => {
-    expect(collectEvidenceTemplate(prBody), 'exactly one `EVIDENCE …` span').not.toBeNull()
-    const rows = differentialTable()
-    const accepted = rows.filter(r => PE.EVIDENCE_LINE_RE.test(r))
-    expect(accepted.length, 'too few accepted rows').toBeGreaterThanOrEqual(70)
-    expect(rows.length - accepted.length, 'too few hostile rows').toBeGreaterThanOrEqual(20)
-  })
-
-  it('over the differential table', () => {
-    const template = collectEvidenceTemplate(prBody) ?? ''
-    expect(collectTemplateDisagreements(compileEvidenceTemplate(template, PE.EVIDENCE_LINE_RE), differentialTable())).toEqual([])
-  })
-
-  it('known-bad probe: a template that drops `unchecked` disagrees', () => {
-    const template = collectEvidenceTemplate(prBody) ?? ''
-    const seeded = template.replace('<yes|no|unchecked>', '<yes|no>')
-    expect(seeded, 'the seed must land').not.toBe(template)
-    expect(collectTemplateDisagreements(compileEvidenceTemplate(seeded, PE.EVIDENCE_LINE_RE), differentialTable()).length).toBeGreaterThan(0)
-  })
-
-  it('known-bad probe: a template with two fields swapped disagrees', () => {
-    const template = collectEvidenceTemplate(prBody) ?? ''
-    const seeded = template.replace('STALE:<n> FAILED:<n>', 'FAILED:<n> STALE:<n>')
-    expect(seeded, 'the seed must land').not.toBe(template)
-    expect(collectTemplateDisagreements(compileEvidenceTemplate(seeded, PE.EVIDENCE_LINE_RE), differentialTable()).length).toBeGreaterThan(0)
-  })
-
-  it('known-bad probe: a template that drops a field cannot even be compiled against the regex', () => {
-    const template = collectEvidenceTemplate(prBody) ?? ''
-    expect(() => compileEvidenceTemplate(template.replace(' body:<same|changed>', ''), PE.EVIDENCE_LINE_RE)).toThrow(/placeholders for/)
-  })
-})
-
-
-// ---------------------------------------------------------------------------
-// 2. The mechanics point at the script, and never restate it (#455)
+// 1. The mechanics point at the script, and never restate it (#455)
 // ---------------------------------------------------------------------------
 
 /** Only what this suite reads from verify-evidence.cjs. */
@@ -285,7 +96,7 @@ interface VerifyApi {
   readonly BODY_STATUSES: readonly string[]
   readonly COMMENT_STATUSES: readonly string[]
   main(argv: readonly string[], deps?: object): { code: number; stdout: string }
-  settleOutcome(outcome: unknown): { code: number; stdout: string }
+  settleOutcome(outcome: unknown, publish?: boolean): { code: number; stdout: string }
   parsePublishBlock(text: string): { evidenceLine: string; body: PartLike; comment: PartLike } | null
   renderPublishBlock(evidenceLine: string, body: PartLike, comment: PartLike): string
 }
@@ -312,14 +123,14 @@ function restatedGrammar(): string[] {
  */
 const REQUIRED_RULES: ReadonlyArray<readonly [label: string, text: string]> = [
   ['stdout-only', "Print the script's stdout and nothing else"],
-  ['exit-2 line', 'On exit 2 it is `TRACEABILITY: DEGRADED (evidence unavailable)`'],
-  ['failed run', 'Any other exit, or empty stdout, is a failed run'],
+  ['empty-stdout line', 'If the script did not run or printed nothing, emit `TRACEABILITY: DEGRADED (evidence unavailable)`'],
   ['evidence-file path gate', 'only a value matching `^[A-Za-z0-9._/-]{1,255}$` reaches the shell'],
   ['bash timeout', 'Set the Bash `timeout` to 180000'],
   ['unscrubbed never posted', 'a body the script cannot scrub is never posted'],
-  ['concurrent-edit reason', '`DEGRADED (concurrent edit)`'],
-  ['read-back reason', '`DEGRADED (body read-back mismatch)`'],
 ]
+
+/** Text of the block the script prints: its `EVIDENCE` line, its `Test plan:` line and its `Body` / `Comment` line. The mechanics spell none of it. */
+const SCRIPT_PRINTED_LITERALS: readonly string[] = ['`EVIDENCE ', 'INDETERMINATE:', 'ATTESTED-LOCAL', 'Test plan:', '**Body**:', '**Comment**:']
 
 /** What gh, the scrubber and the work files are called in: none of it belongs in the reference. */
 const SCRIPT_OWNED_LITERALS: readonly string[] = [
@@ -339,6 +150,9 @@ export function collectMechanicsDefects(prBody: string): string[] {
   }
   for (const text of restatedGrammar()) {
     if (prBody.includes(text)) out.push(`restates script-owned text ${JSON.stringify(text)}`)
+  }
+  for (const text of SCRIPT_PRINTED_LITERALS) {
+    if (prBody.includes(text)) out.push(`restates the block the script prints (${JSON.stringify(text)})`)
   }
   for (const text of ['publication-gate.md', '`full` → ']) {
     if (prBody.includes(text)) out.push(`decides publication itself (${text}) — the script decides the comment's form`)
@@ -384,6 +198,13 @@ describe('AC-6: the mechanics point at the script and restate nothing', () => {
     expect(collectMechanicsDefects(ungated)).toEqual(['does not state the evidence-file path gate rule'])
   })
 
+  it('known-bad probe: the EVIDENCE line, the Test plan line and the Body line put back are each reported', () => {
+    const seeded = `${prBody}\nIt prints \`EVIDENCE pr:<n> head:<sha>\`, then Test plan: 1/2 verified, then **Body**: EDITED.\n`
+    expect(collectMechanicsDefects(seeded)).toEqual(
+      ['`EVIDENCE ', 'Test plan:', '**Body**:'].map(text => `restates the block the script prints (${JSON.stringify(text)})`),
+    )
+  })
+
   it('known-bad probe: a marker literal, a verify run of its own and a visibility probe are each reported', () => {
     const block = String(PE.MARKERS.BLOCK_START)
     const seeded = `${prBody}\nFind ${block} with \`node verify-evidence.cjs verify --pr 7\`, then \`gh repo view --json visibility\`.\n`
@@ -397,7 +218,7 @@ describe('AC-6: the mechanics point at the script and restate nothing', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 3. The contract in the reference, and its statuses ↔ the script's vocabulary
+// 2. The contract in the reference, and its statuses ↔ the script's vocabulary
 // ---------------------------------------------------------------------------
 
 const INPUT_LINE =
@@ -464,7 +285,7 @@ describe('AC-5: the contract opens the reference, and its statuses are the scrip
 })
 
 // ---------------------------------------------------------------------------
-// 4. The script, run for real under a gh fake (AC-203)
+// 3. The script, run for real under a gh fake (AC-203)
 // ---------------------------------------------------------------------------
 
 /** Each test spawns node a dozen times (the script, the scrubber, the gh fake): generous under a loaded full-suite run. */
@@ -513,6 +334,9 @@ function runPublish(options: RunOptions = {}, runs = 1): ScriptRun[] {
 function runOnce(options: RunOptions = {}): ScriptRun {
   return runPublish(options, 1)[0]
 }
+
+/** The one line a `publish` that could not give its block prints, with its newline. */
+const UNAVAILABLE_LINE = 'TRACEABILITY: DEGRADED (evidence unavailable)\n'
 
 const verbs = (calls: readonly ShimCall[]): string[] => calls.map(c => c.args.slice(0, 2).join(' '))
 const STATUS_RE = /^\*\*Body\*\*: (.+) · \*\*Comment\*\*: (.+)$/m
@@ -563,6 +387,8 @@ describe('AC-203: publish prints the exact block, scrubs before it posts, and wr
     expect(block?.comment.status).toBe('POSTED')
     expect(r.stdout.split('\n')[0]).toBe('## PR Evidence')
     expect(r.stdout.split('\n')[1]).toMatch(/^EVIDENCE pr:7 head:c{40} total:2 /)
+    expect(r.stdout.split('\n')[2], 'two unverified test plan lines, no claim').toBe('Test plan: 0/2 verified (VERIFIED-CI 0, ATTESTED-LOCAL 0)')
+    expect(r.stdout.split('\n')[3]).toMatch(STATUS_RE)
     expect(r.stdout, 'no TRACEABILITY line on a clean run').not.toContain('TRACEABILITY')
     expect(verbs(r.writes)).toEqual(['pr edit', 'pr comment'])
     // The PR's own text survives the splice; the block sits beside it.
@@ -691,7 +517,7 @@ describe('AC-203: publish prints the exact block, scrubs before it posts, and wr
     expect(r.writes).toEqual([])
   })
 
-  it('14. a bad flag is a usage error: exit 1, stdout empty, gh never called', SPAWN_BUDGET, () => {
+  it('14. a bad flag is a usage error: exit 2, the one unavailable line, usage on stderr, gh never called', SPAWN_BUDGET, () => {
     for (const args of [
       ['publish', '--pr', '7', '--publication', 'bogus'],
       ['publish', '--pr', '07'],
@@ -700,10 +526,47 @@ describe('AC-203: publish prints the exact block, scrubs before it posts, and wr
       ['publish'],
     ]) {
       const r = runOnce({ args })
-      expect(r.code, args.join(' ')).toBe(1)
-      expect(r.stdout, args.join(' ')).toBe('')
+      expect(r.code, args.join(' ')).toBe(2)
+      expect(r.stdout, args.join(' ')).toBe(UNAVAILABLE_LINE)
+      expect(r.stderr, args.join(' ')).toContain('Usage:')
       expect(r.calls, args.join(' ')).toEqual([])
     }
+  })
+
+  it('14b. another subcommand keeps its usage exit: exit 1, stdout empty', SPAWN_BUDGET, () => {
+    for (const args of [['verify'], ['readiness', '--pr', '07'], ['bogus']]) {
+      const r = runOnce({ args })
+      expect(r.code, args.join(' ')).toBe(1)
+      expect(r.stdout, args.join(' ')).toBe('')
+    }
+  })
+
+  it('14c. an error thrown outside the handler in main: a publish still prints the unavailable line, another subcommand prints nothing', SPAWN_BUDGET, () => {
+    const seeded = (source: string): string => {
+      const at = 'const parsed = parseArgs(argv);'
+      expect(source, 'the seed must land').toContain(at)
+      return source.replace(at, `throw new Error('seeded'); ${at}`)
+    }
+    const publish = runOnce({ mutate: seeded })
+    expect(publish.code, publish.stderr).toBe(2)
+    expect(publish.stdout).toBe(UNAVAILABLE_LINE)
+    expect(publish.stderr).toContain('internal error (Error)')
+    expect(publish.calls, 'the seed throws before any gh call').toEqual([])
+
+    const other = runOnce({ mutate: seeded, args: ['verify', '--pr', String(SHIM_PR)] })
+    expect(other.code, other.stderr).toBe(4)
+    expect(other.stdout).toBe('')
+  })
+
+  it('14d. a block the output gate refuses: the run prints the unavailable line with exit 2', SPAWN_BUDGET, () => {
+    const seeded = (source: string): string => {
+      const at = "'**Body**: ' + partText(body)"
+      expect(source, 'the seed must land').toContain(at)
+      return source.replace(at, "'**Body** ' + partText(body)")
+    }
+    const r = runOnce({ mutate: seeded })
+    expect(r.code, r.stderr).toBe(2)
+    expect(r.stdout).toBe(UNAVAILABLE_LINE)
   })
 
   it('15. every run bounds its gh writes and cleans its work directory', SPAWN_BUDGET, () => {
@@ -1020,7 +883,7 @@ describe('the viewer\'s own evidence comment is edited in place, never doubled',
 })
 
 // ---------------------------------------------------------------------------
-// 5. The publish guard: the machine manifest decides, before any gh call
+// 4. The publish guard: the machine manifest decides, before any gh call
 // ---------------------------------------------------------------------------
 
 const OFF_LINE = 'TRACEABILITY: DEGRADED (compliance off)'
@@ -1210,10 +1073,24 @@ describe('the boundary prints a publish block only when it parses back to itself
     { status: 'POSTED', reason: null },
   )
 
-  it('accepts a rendered block and refuses a tampered one', () => {
+  /** The EVIDENCE line of a plan with the given counts, none stale. */
+  function evidenceLineFor(verifiedCi: number, attestedLocal: number, unverified: number): string {
+    const r = PE.formatEvidenceLine({
+      pr: 7, head: SHIM_HEAD, total: verifiedCi + attestedLocal + unverified,
+      counts: { 'VERIFIED-CI': verifiedCi, 'ATTESTED-LOCAL': attestedLocal, UNVERIFIED: unverified, STALE: 0, FAILED: 0, INDETERMINATE: 0 },
+      stale: [], exceptions: [], approval: 'unchecked', key: '0123456789ab', posted: 'no', body: 'changed',
+    })
+    if (!r.ok) throw new Error('formatEvidenceLine refused the fields')
+    return r.value
+  }
+
+  const refused = { code: 4, stdout: '' }
+  const unavailable = { code: 2, stdout: UNAVAILABLE_LINE }
+
+  it('accepts a rendered block and refuses a tampered one, and a refused publish answer is the unavailable line', () => {
     expect(evidenceLine.ok).toBe(true)
     expect(VE.settleOutcome({ code: 0, stdout: good })).toEqual({ code: 0, stdout: good })
-    const refused = { code: 4, stdout: '' }
+    expect(VE.settleOutcome({ code: 0, stdout: good }, true)).toEqual({ code: 0, stdout: good })
     for (const bad of [
       good.replace('EDITED', 'edited'),
       good.replace('## PR Evidence', '## PR evidence'),
@@ -1224,17 +1101,94 @@ describe('the boundary prints a publish block only when it parses back to itself
       good.slice(0, -1),
     ]) {
       expect(VE.settleOutcome({ code: 0, stdout: bad }), JSON.stringify(bad)).toEqual(refused)
+      expect(VE.settleOutcome({ code: 0, stdout: bad }, true), JSON.stringify(bad)).toEqual(unavailable)
     }
     expect(VE.settleOutcome({ code: 2, stdout: good }), 'a block with exit 2').toEqual(refused)
-    expect(VE.settleOutcome({ code: 0, stdout: 'TRACEABILITY: DEGRADED (evidence unavailable)\n' }), 'the degraded line with exit 0').toEqual(refused)
-    expect(VE.settleOutcome({ code: 2, stdout: 'TRACEABILITY: DEGRADED (evidence unavailable)\n' })).toEqual({ code: 2, stdout: 'TRACEABILITY: DEGRADED (evidence unavailable)\n' })
+    expect(VE.settleOutcome({ code: 2, stdout: good }, true), 'a block with exit 2').toEqual(unavailable)
+    expect(VE.settleOutcome({ code: 0, stdout: UNAVAILABLE_LINE }), 'the degraded line with exit 0').toEqual(refused)
+    expect(VE.settleOutcome({ code: 0, stdout: UNAVAILABLE_LINE }, true)).toEqual(unavailable)
+    expect(VE.settleOutcome(unavailable, true)).toEqual(unavailable)
+  })
+
+  it('settles no publish run to empty stdout: a usage exit, an empty answer and a malformed one each print the unavailable line', () => {
+    for (const outcome of [{ code: 1, stdout: '' }, { code: 4, stdout: '' }, { code: 0, stdout: '' }, { code: 99, stdout: 'x\n' }, null, 'text']) {
+      expect(VE.settleOutcome(outcome, true), JSON.stringify(outcome)).toEqual(unavailable)
+    }
+  })
+
+  it('leaves every other subcommand as it was: a usage exit and a refused answer print nothing', () => {
+    expect(VE.settleOutcome({ code: 1, stdout: '' })).toEqual({ code: 1, stdout: '' })
+    expect(VE.settleOutcome({ code: 1, stdout: '' }, false)).toEqual({ code: 1, stdout: '' })
+    expect(VE.settleOutcome({ code: 3, stdout: 'x\n' }, false)).toEqual(refused)
+    expect(VE.settleOutcome(null, false)).toEqual(refused)
+  })
+
+  it('prints the Test plan line from the EVIDENCE line: the sum of the two verified counts over the total', () => {
+    const cases: ReadonlyArray<readonly [verifiedCi: number, attestedLocal: number, unverified: number, tally: string]> = [
+      [3, 2, 2, '5/7 verified (VERIFIED-CI 3, ATTESTED-LOCAL 2)'],
+      [4, 0, 1, '4/5 verified (VERIFIED-CI 4, ATTESTED-LOCAL 0)'],
+      [0, 6, 0, '6/6 verified (VERIFIED-CI 0, ATTESTED-LOCAL 6)'],
+      [0, 0, 0, '0/0 verified (VERIFIED-CI 0, ATTESTED-LOCAL 0)'],
+      [0, 0, 3, '0/3 verified (VERIFIED-CI 0, ATTESTED-LOCAL 0)'],
+    ]
+    for (const [verifiedCi, attestedLocal, unverified, tally] of cases) {
+      const evidence = evidenceLineFor(verifiedCi, attestedLocal, unverified)
+      const block = VE.renderPublishBlock(evidence, { status: 'EDITED', reason: null }, { status: 'POSTED', reason: null })
+      expect(block.split('\n').slice(0, 4), tally).toEqual([
+        '## PR Evidence',
+        evidence,
+        `Test plan: ${tally}`,
+        '**Body**: EDITED · **Comment**: POSTED',
+      ])
+      expect(VE.settleOutcome({ code: 0, stdout: block }), tally).toEqual({ code: 0, stdout: block })
+    }
+  })
+
+  it('reads a block back into exactly the parts it was rendered from, the Test plan line included', () => {
+    const evidence = evidenceLineFor(3, 2, 2)
+    const body = { status: 'SKIPPED', reason: null }
+    const comment = { status: 'DEGRADED', reason: 'redaction unavailable' }
+    const block = VE.renderPublishBlock(evidence, body, comment)
+    const parsed = VE.parsePublishBlock(block)
+    expect(parsed).toEqual({ evidenceLine: evidence, body, comment })
+    expect(VE.renderPublishBlock(parsed?.evidenceLine ?? '', parsed?.body ?? body, parsed?.comment ?? comment)).toBe(block)
+  })
+
+  it('refuses a Test plan line that disagrees with the EVIDENCE line, or is missing, moved or reworded', () => {
+    const evidence = evidenceLineFor(3, 2, 2)
+    const block = VE.renderPublishBlock(evidence, { status: 'EDITED', reason: null }, { status: 'POSTED', reason: null })
+    const plan = 'Test plan: 5/7 verified (VERIFIED-CI 3, ATTESTED-LOCAL 2)'
+    expect(block, 'the seed line must be in the block').toContain(plan)
+    const [heading, evidenceRow, , statusRow] = block.split('\n')
+    for (const bad of [
+      block.replace('5/7 verified', '7/7 verified'),
+      block.replace('(VERIFIED-CI 3, ATTESTED-LOCAL 2)', '(VERIFIED-CI 2, ATTESTED-LOCAL 3)'),
+      block.replace('(VERIFIED-CI 3,', '(VERIFIED-CI 4,'),
+      block.replace('5/7 verified', '5/7'),
+      block.replace('Test plan:', 'Test plan :'),
+      block.replace(plan, `${plan} `),
+      block.replace(`${plan}\n`, ''),
+      `${heading}\n${evidenceRow}\n${statusRow}\n${plan}\n`,
+      block.replace(plan, `${plan}\n${plan}`),
+    ]) {
+      expect(VE.parsePublishBlock(bad), JSON.stringify(bad)).toBeNull()
+      expect(VE.settleOutcome({ code: 0, stdout: bad }), JSON.stringify(bad)).toEqual(refused)
+      expect(VE.settleOutcome({ code: 0, stdout: bad }, true), JSON.stringify(bad)).toEqual(unavailable)
+    }
+  })
+
+  it('refuses to render a block for an EVIDENCE line that does not parse', () => {
+    expect(() => VE.renderPublishBlock('EVIDENCE nope', { status: 'EDITED', reason: null }, { status: 'POSTED', reason: null })).toThrow()
   })
 
   it.each([OFF_LINE, UNREADABLE_LINE])('TP-73. the gate admits "%s" only with exit 2', line => {
     const stdout = `${line}\n`
     expect(VE.settleOutcome({ code: 2, stdout })).toEqual({ code: 2, stdout })
     expect(VE.settleOutcome({ code: 1, stdout }), 'a usage exit prints nothing').toEqual({ code: 1, stdout: '' })
-    for (const code of [0, 3, 4, 5, 9]) expect(VE.settleOutcome({ code, stdout }), `exit ${code}`).toEqual({ code: 4, stdout: '' })
+    for (const code of [0, 3, 4, 5, 9]) {
+      expect(VE.settleOutcome({ code, stdout }), `exit ${code}`).toEqual({ code: 4, stdout: '' })
+      expect(VE.settleOutcome({ code, stdout }, true), `exit ${code}, a publish run`).toEqual(unavailable)
+    }
     expect(VE.settleOutcome({ code: 2, stdout: line }), 'without its newline').toEqual({ code: 4, stdout: '' })
     expect(VE.settleOutcome({ code: 2, stdout: `${line} \n` }), 'a changed line').toEqual({ code: 4, stdout: '' })
     expect(VE.settleOutcome({ code: 2, stdout: `${stdout}${stdout}` }), 'the line twice').toEqual({ code: 4, stdout: '' })
@@ -1259,7 +1213,7 @@ describe('the boundary prints a publish block only when it parses back to itself
       { status: 'SKIPPED', reason: null },
       { status: 'DEGRADED', reason: 'redaction unavailable' },
     )
-    expect(degraded.split('\n').slice(3)).toEqual([
+    expect(degraded.split('\n').slice(4)).toEqual([
       'TRACEABILITY: DEGRADED (concurrent edit)',
       'TRACEABILITY: DEGRADED (redaction unavailable)',
       '',
