@@ -1467,6 +1467,30 @@
       "occurrences": 1,
       "sourceFile": "tests/guards/other-agents-sizes.test.ts",
       "description": "The Tracker agent body, src/assets/agents/tracker.md, in bytes. It is hand-authored, with one build. Every turn of every Tracker spawn reads it (sonnet, hook-spawned once per provider setup). Added by #718 (lean other targets) at 18,359, after the cut from 27,110."
+    },
+    {
+      "id": "harden-body-max",
+      "ceiling": 5047,
+      "pattern": "['harden', 'on', 5_047],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/other-agents-sizes.test.ts",
+      "description": "The Harden agent body of the curation-on build, dist/agents/harden.md, in bytes. Every turn of every Harden spawn reads it (opus; /implement and /self-review spawn it). Added at its measured 5,047 so that it can not grow back."
+    },
+    {
+      "id": "harden-body-curation-off-max",
+      "ceiling": 4479,
+      "pattern": "['harden', 'off', 4_479],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/other-agents-sizes.test.ts",
+      "description": "The Harden agent body of the curation-off build, dist/curation-off/agents/harden.md, in bytes. Added at its measured 4,479 so that it can not grow back."
+    },
+    {
+      "id": "polish-body-max",
+      "ceiling": 4537,
+      "pattern": "['polish', 'on', 4_537],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/other-agents-sizes.test.ts",
+      "description": "The Polish agent body, src/assets/agents/polish.md, in bytes. It is hand-authored, with one build. Every turn of every Polish spawn reads it (sonnet; /implement, /resolve and /self-review spawn it). Added at its measured 4,537 so that it can not grow back."
     }
   ]
 }

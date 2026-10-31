@@ -1018,10 +1018,10 @@ describe('ensure-pr-ready opens the PR (D-LINK-VERBATIM, D-COMMIT-EXPLICIT, D-PR
     need('a failed scrub still creates the PR with a minimal body', ref.includes('**On scrubber failure** (non-zero exit or script missing): still create the PR — PR existence is the deliverable'))
     need('the degraded line is the redaction one', ref.includes('plus the literal line `TRACEABILITY: DEGRADED (redaction unavailable)`'))
     need('the raw body is never posted', ref.includes('Never post `$DEVFLOW_BODY_RAW`.'))
-    need('a given base is checked by reading, written to a new file in a mktemp -d folder with the Write tool and read back, and an empty file opens no PR',
+    need('a given base is checked by reading, written to a new file in a mktemp -d folder with the Write tool, and an empty or missing file opens no PR',
       ref.includes(`When \`BASE_BRANCH\` is given, check it first against the step-5a name check (${JUDGE_BY_READING}).`) &&
-      ref.includes('Then Write `BASE_BRANCH` to a new file in a `mktemp -d` folder (`{name file}`) and Read it back.') &&
-      ref.includes('An empty file ends with Status BLOCKED and no PR, after `rm -- "{name file}"`.'))
+      ref.includes('Then Write `BASE_BRANCH` to a new file in a `mktemp -d` folder (`{name file}`).') &&
+      ref.includes('A failed `test -s` (an empty file, or none after a failed Write) ends with Status BLOCKED and no PR.'))
     // The 4a base, the 4c title and the 5a name each have a Write step.
     need('a failed Write is a missing value, never a shell write', ref.split(WRITE_FAILURE).length - 1 >= 3)
     need('the base reaches gh pr create only from the name file', ref.includes('`test -s "$F" && gh pr create … --base="$(cat -- "$F")"`') && (ref.match(/gh pr create[^\n`]*--base\S*/g) ?? []).every(call => call.endsWith('--base="$(cat')))
@@ -1048,7 +1048,7 @@ describe('ensure-pr-ready opens the PR (D-LINK-VERBATIM, D-COMMIT-EXPLICIT, D-PR
       { from: '**On scrubber failure** (non-zero exit or script missing): still create the PR — PR existence is the deliverable', to: '**On scrubber failure** (non-zero exit or script missing): create no PR', expected: 'a failed scrub still creates the PR with a minimal body' },
       { from: 'plus the literal line `TRACEABILITY: DEGRADED (redaction unavailable)`', to: 'plus a warning', expected: 'the degraded line is the redaction one' },
       { from: '--base="$(cat -- "$F")"', to: '--base "$BASE_BRANCH"', expected: 'the base reaches gh pr create only from the name file' },
-      { from: 'Then Write `BASE_BRANCH` to a new file in a `mktemp -d` folder (`{name file}`) and Read it back.', to: 'Run `printf "%s" "$BASE_BRANCH" > "$F"`.', expected: 'a given base is checked by reading, written to a new file in a mktemp -d folder with the Write tool and read back, and an empty file opens no PR' },
+      { from: 'Then Write `BASE_BRANCH` to a new file in a `mktemp -d` folder (`{name file}`).', to: 'Run `printf "%s" "$BASE_BRANCH" > "$F"`.', expected: 'a given base is checked by reading, written to a new file in a mktemp -d folder with the Write tool, and an empty or missing file opens no PR' },
       { from: WRITE_FAILURE, to: 'If the Write tool fails, write it with a shell command.', expected: 'a failed Write is a missing value, never a shell write' },
       { from: 'after the last create attempt, `rm -- "$F"`', to: 'after the first create attempt, `rm -- "$F"`', expected: 'the name file is removed after the last create attempt, so a scrubber failure opens the PR with the given base' },
       { from: 'and no second EXIT trap is armed', to: 'and a second EXIT trap is armed', expected: 'the D11 trap is unchanged and no second exit trap is armed for the base' },

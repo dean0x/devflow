@@ -1,7 +1,8 @@
 /**
- * Size ceilings of the agents that #718 (lean other targets) cut and that had no ceiling of
- * their own: each agent body in every curation build. A spawn reads these bytes again in every
- * turn, so each ceiling holds the size that the lean cut reached. Validate and Synthesize keep
+ * Size ceilings of the agents that have no ceiling elsewhere: those that #718 (lean other
+ * targets) cut, and Harden and Polish. Each agent body in every curation build has one. A
+ * spawn reads these bytes again in every turn, so each ceiling holds the measured size: after
+ * the lean cut for the #718 agents, as found for Harden and Polish. Validate and Synthesize keep
  * their ceilings in validate-lint-pack.test.ts and agent-references.test.ts. Each row is
  * registered in `tests/fixtures/numeric-floors.json`; lowered, never raised.
  */
@@ -24,6 +25,9 @@ const AGENT_MAX_BYTES: ReadonlyArray<readonly [string, Build, number]> = [
   ['skim', 'on', 6_617],
   ['skim', 'off', 5_495],
   ['tracker', 'on', 18_359],
+  ['harden', 'on', 5_047],
+  ['harden', 'off', 4_479],
+  ['polish', 'on', 4_537],
 ]
 
 /** Named collector: the file is over its ceiling. */
@@ -39,7 +43,7 @@ function bodyOf(agent: string, build: Build): string {
   return off
 }
 
-describe('the agents cut by #718 sit under their ceilings', () => {
+describe('the agents with no ceiling elsewhere sit under their ceilings', () => {
   it.each(AGENT_MAX_BYTES)('%s.md (curation %s) fits its ceiling', (agent, build, ceiling) => {
     const text = bodyOf(agent, build)
     expect(Buffer.byteLength(text), 'the body is read: the guard would pass vacuously on an empty one').toBeGreaterThan(2_000)
