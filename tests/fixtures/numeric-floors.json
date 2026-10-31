@@ -846,19 +846,19 @@
     },
     {
       "id": "command-debug-max",
-      "ceiling": 16841,
-      "pattern": "['debug', 'on', 16_841],",
+      "ceiling": 15161,
+      "pattern": "['debug', 'on', 15_161],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/debug.md, the curation-on build, in bytes. Measured 16,841 after the shared command partials were cut for #715, 17,566 after the shared root step was cut again for #683, 17,701 after the roots were resolved by one script call for #683, and 18,340 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (18,394 after the knowledge write-back filter and the index file name were restored for #675,18,322 after the decisions partial was condensed for #675, 18,492 after the knowledge partial was condensed for #675, 18,875 after the tracker note kept its github condition for #675, 18,881 after the tracker partial was condensed, 19,885 after #472, 19,967 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/commands/debug.md, the curation-on build, in bytes. Measured 15,161 after the host text was cut for #718, 16,841 after the shared command partials were cut for #715, 17,566 after the shared root step was cut again for #683, 17,701 after the roots were resolved by one script call for #683, and 18,340 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (18,394 after the knowledge write-back filter and the index file name were restored for #675,18,322 after the decisions partial was condensed for #675, 18,492 after the knowledge partial was condensed for #675, 18,875 after the tracker note kept its github condition for #675, 18,881 after the tracker partial was condensed, 19,885 after #472, 19,967 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-debug-curation-off-max",
-      "ceiling": 14914,
-      "pattern": "['debug', 'off', 14_914],",
+      "ceiling": 13259,
+      "pattern": "['debug', 'off', 13_259],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/curation-off/commands/debug.md, the curation-off build, in bytes. Measured 14,914 after the shared command partials were cut for #715, 15,521 after the shared root step was cut again for #683, 15,577 after the roots were resolved by one script call for #683, and 15,591 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (15,645 after the knowledge write-back filter and the index file name were restored for #675,15,573 after the knowledge partial was condensed for #675, 15,956 after the tracker note kept its github condition for #675, 15,962 after the tracker partial was condensed, 16,966 after #472, 17,046 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/curation-off/commands/debug.md, the curation-off build, in bytes. Measured 13,259 after the host text was cut for #718, 14,914 after the shared command partials were cut for #715, 15,521 after the shared root step was cut again for #683, 15,577 after the roots were resolved by one script call for #683, and 15,591 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (15,645 after the knowledge write-back filter and the index file name were restored for #675,15,573 after the knowledge partial was condensed for #675, 15,956 after the tracker note kept its github condition for #675, 15,962 after the tracker partial was condensed, 16,966 after #472, 17,046 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-dynamic-build-max",

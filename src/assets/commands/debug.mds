@@ -9,8 +9,6 @@ output-dir: dist/commands
 @import "./_partials/_compliance.mds" as compliance
 # Debug Command
 
-Investigate bugs by spawning parallel agents, each pursuing a different hypothesis. Evidence is aggregated and synthesized to identify the root cause.
-
 ## Usage
 
 ```
@@ -27,10 +25,7 @@ What follows `/debug` is bound once, here. Every later step names it `COMMAND_IN
 $ARGUMENTS
 </command-input>
 
-`COMMAND_INPUT` is one of:
-- Bug description: "login fails after session timeout"
-- Issue reference: "#42"
-- Empty: use conversation context
+An empty `COMMAND_INPUT` means: use the conversation context.
 
 ## Phases
 
@@ -57,7 +52,7 @@ Phase 7 passes `COMPLIANCE_DIRECTIVE` to the Code agent that implements the fix,
 The orchestrator uses `DECISIONS_CONTEXT` locally when generating hypotheses (Phase 2) — prior pitfalls and decisions can suggest specific root causes to investigate. Follow `devflow:apply-decisions` to Read full entry bodies on demand. **Do NOT pass `DECISIONS_CONTEXT` to Explore investigators** — decisions context stays in the orchestrator; investigators examine code directly.
 
 <!-- curation:end -->
-**No up-front feature knowledge load** — debug investigation workers read code directly to avoid confirmation bias. Feature knowledge is only written back at the end if the investigation surfaced durable, cross-cutting knowledge.
+**No up-front feature knowledge load** — debug investigation workers read code directly to avoid confirmation bias.
 
 ### Phase 2: Context Gathering
 
@@ -222,47 +217,11 @@ Ask user via AskUserQuestion: "Want me to implement this fix?"
 
 {{knowledge_writeback()}}
 
-## Architecture
-
-```
-/debug (orchestrator)
-│
-<!-- curation:on -->
-├─ Phase 1: Load Decisions Index (Orchestrator-Local)
-<!-- curation:off -->
-├─ Phase 1: Resolve Settings
-<!-- curation:end -->
-│  └─ No up-front feature knowledge load (avoids confirmation bias in investigators)
-│
-├─ Phase 2: Context gathering
-│  └─ Git agent (fetch issue, if #N provided)
-│
-├─ Phase 3: Parallel investigation
-│  └─ 3-5 Explore agents, one per hypothesis (single message)
-│
-├─ Phase 4: Converge
-│  └─ Validate confirmed hypotheses, unify partials, or generate second-round
-│
-├─ Phase 5: Synthesize
-│  └─ Synthesize agent aggregates and compares findings
-│
-├─ Phase 6: Root cause report with confidence level
-│
-├─ Phase 7: Offer Fix
-│  └─ AskUserQuestion → Code agent (fix) + Polish agent, or done
-│
-└─ Feature Knowledge Write-Back (Conditional)
-   └─ Knowledge agent (if investigation surfaced durable cross-cutting knowledge)
-```
-
 ## Principles
 
 1. **Competing hypotheses** - Never investigate a single theory; always have alternatives
-2. **Parallel execution** - All investigators run simultaneously for speed
-3. **Evidence-based** - Every claim requires file:line references
-4. **Honest uncertainty** - If no hypothesis survives, report that clearly
-5. **Convergence validation** - Confirmed hypotheses get additional validation to prevent confirmation bias
-6. **No pre-loaded knowledge in sub-agents** - Investigators read code fresh to avoid confirmation bias; feature knowledge write-back happens only after investigation completes
+2. **Evidence-based** - Every claim requires file:line references
+3. **Honest uncertainty** - If no hypothesis survives, report that clearly
 
 ## Error Handling
 
@@ -270,4 +229,3 @@ Ask user via AskUserQuestion: "Want me to implement this fix?"
 - If all hypotheses are disproved: report "No root cause identified" with investigation summary
 - If an investigator errors: continue with remaining results, note the gap
 - If convergence validation contradicts the original confirmation: downgrade confidence and report contradicting evidence
-- If user declines fix: done — report stands as documentation
