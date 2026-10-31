@@ -756,19 +756,19 @@ node "$HOME/.devflow/scripts/verify-evidence.cjs" check wave --links-only <that 
 <!-- compliance:end -->
 
 <!-- compliance:on -->
-   **(b) The wave test plan.** Take the checked TP lines each merged row's ticket was given in Pre-authoring step 4, in row order; renumber them `TP-1`, `TP-2`, … and prefix each scenario with its row's `T<k>: `. A line is never shortened or reworded: one whose prefixed scenario would pass 200 characters leaves its ticket with no usable test plan. Write `## Test Plan` and those lines, and nothing else, to `"{integration worktree root}/.devflow/docs/evidence-wave-{slug}.md"` with the Write tool, then run (the path double-quoted; one rewrite from the same lines after a refusal, never a second):
+   **(b) The wave test plan.** Take the checked TP lines each merged row's ticket was given in Pre-authoring step 4, in row order; renumber them `TP-1`, `TP-2`, … and prefix each scenario with its row's `T<k>: `. A line is never shortened or reworded: one whose prefixed scenario would pass 200 characters leaves its ticket with no usable test plan. Write `## Test Plan` and those lines, and nothing else, with the Write tool to a new file in (a)'s folder, then run (paths double-quoted; one rewrite from the same lines after a refusal, never a second):
 
 ```bash
-node "$HOME/.devflow/scripts/verify-evidence.cjs" check tp "{integration worktree root}/.devflow/docs/evidence-wave-{slug}.md"; echo "exit=$?"
-node "$HOME/.devflow/scripts/verify-evidence.cjs" render --plan "{integration worktree root}/.devflow/docs/evidence-wave-{slug}.md"; echo "exit=$?"
+cp -- "<that file>" "{integration worktree root}/.devflow/docs/evidence-wave-{slug}.md" && node "$HOME/.devflow/scripts/verify-evidence.cjs" check tp "<that file>"; echo "exit=$?"
+node "$HOME/.devflow/scripts/verify-evidence.cjs" render --plan "<that file>"; echo "exit=$?"
 ```
 
    Only when both exit 0 is `PR_TEST_PLAN_BLOCK` the render's stdout, byte for byte without its `exit=` line; in every other case it is `(none)`.
 <!-- compliance:off -->
-   **(b) The wave test plan.** Take the checked TP lines each merged entry's ticket was given in Pre-authoring step 4, in entry order; renumber them `TP-1`, `TP-2`, … and prefix each scenario with its entry's `T<k>: `. A line is never shortened or reworded: one whose prefixed scenario would pass 200 characters leaves its ticket with no usable test plan. Write `## Test Plan` and those lines, and nothing else, to `"{integration worktree root}/.devflow/docs/evidence-wave-{slug}.md"` with the Write tool, then run (the path double-quoted; one rewrite from the same lines after a refusal, never a second):
+   **(b) The wave test plan.** Take the checked TP lines each merged entry's ticket was given in Pre-authoring step 4, in entry order; renumber them `TP-1`, `TP-2`, … and prefix each scenario with its entry's `T<k>: `. A line is never shortened or reworded: one whose prefixed scenario would pass 200 characters leaves its ticket with no usable test plan. Write `## Test Plan` and those lines, and nothing else, with the Write tool to a new file in (a)'s folder, then run (paths double-quoted; one rewrite from the same lines after a refusal, never a second):
 
 ```bash
-node "$HOME/.devflow/scripts/verify-evidence.cjs" check tp "{integration worktree root}/.devflow/docs/evidence-wave-{slug}.md"; echo "exit=$?"
+cp -- "<that file>" "{integration worktree root}/.devflow/docs/evidence-wave-{slug}.md" && node "$HOME/.devflow/scripts/verify-evidence.cjs" check tp "<that file>"; echo "exit=$?"
 ```
 
    Only `exit=0` leaves a usable wave test plan; in every other case none remains.

@@ -9,7 +9,7 @@
  * only behind the script that owns its grammar — never a prose regex:
  *
  *   - order: the wave block, then the test-plan block;
- *   - the gate: each is Written to a fresh `mktemp` file and passed through
+ *   - the gate: each is Written to a new file in a `mktemp -d` folder and passed through
  *     `verify-evidence.cjs check wave|block`; only `exit=0` admits it, verbatim;
  *   - the refusal: anything else omits it — never repaired or partly pasted —
  *     and emits its named DEGRADED reason;
@@ -84,8 +84,8 @@ export function collectCallerBlockDefects(ref: string): string[] {
   const need = (what: string, ok: boolean): void => { if (!ok) out.push(what) }
   need('the wave block comes first, then the test-plan block', line.includes(WAVE_FIRST))
   need('a block is taken only when given and not `(none)`', line.includes('each when given and not `(none)`'))
-  need('the value is Written to a fresh mktemp file, not a shell string',
-    line.includes('to a fresh `mktemp` file with the Write tool') && line.includes('never via a shell string'))
+  need('the value is Written to a new file in a mktemp -d folder, not a shell string',
+    line.includes('to a new file in a `mktemp -d` folder with the Write tool') && line.includes('never via a shell string'))
   need('the gate is `verify-evidence.cjs check wave|block`', line.includes(GATE))
   need('only `exit=0` admits a block, verbatim', line.includes('Only `exit=0` admits it, verbatim'))
   need('a refused block is omitted, never repaired or partly pasted', line.includes('never repaired or partly pasted'))
@@ -149,7 +149,7 @@ describe('ensure-pr-ready 4a: the caller blocks are pasted only behind their che
         label: 'interpolated',
         from: ', never via a shell string,',
         to: ' or an echo,',
-        expected: 'the value is Written to a fresh mktemp file, not a shell string',
+        expected: 'the value is Written to a new file in a mktemp -d folder, not a shell string',
       },
     ]
     for (const seed of seeds) {

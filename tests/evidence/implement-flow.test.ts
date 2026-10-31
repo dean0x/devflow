@@ -2217,7 +2217,7 @@ const FRESH_BASE_CALL = `${NAME_FILE_TRAP} cd "{worktree}" && node "$HOME/.devfl
 
 /** What the fresh-base step states: [what it must say, the text that says it]. */
 const FRESH_BASE_PARTS: ReadonlyArray<readonly [string, string]> = [
-  ['the name written with the Write tool to a fresh temp file, after one Read of it', 'write `BASE_BRANCH` with the Write tool to the file that `F="$(mktemp)" && echo "F=$F"` prints, after one Read of it'],
+  ['the name written with the Write tool to a new file in a mktemp -d folder', 'write `BASE_BRANCH` with the Write tool to a new file in a `mktemp -d` folder (`{name file}`).'],
   ['a failed Write counts as a missing value and is never done by a shell command', WRITE_FAILURE],
   ['the local-rule call over the name file on stdin, in the worktree, with the trap and the exit status echoed', `run \`${FRESH_BASE_CALL}\``],
   ['the accepted-line test (40 or 64 hex, or none) with exit=0', 'Output other than one `BASE_REF=` line (40 or 64 hex, or `none`) with `exit=0`'],
