@@ -18,12 +18,7 @@ Run a comprehensive code review of the current branch by spawning parallel revie
 
 ## Usage
 
-```
-/code-review           (review current branch — or all worktrees if multiple found)
-/code-review #42       (review specific PR)
-/code-review --full    (force full-branch review, ignore previous review state)
-/code-review --path /path/to/worktree  (review a specific worktree only)
-```
+`/code-review` (the current branch, or every reviewable worktree), `/code-review #42` (one PR), `--full` (ignore the previous review state), `--path <worktree>` (one worktree only).
 
 ## Phases
 
@@ -306,7 +301,7 @@ The core, database, dependencies, documentation and compliance focuses, and ever
 
 {{decisions_load()}}
 <!-- curation:on -->
-This produces a compact index of active ADR/PF entries. Pass `DECISIONS_CONTEXT` to all Review agents as one shared slice, cut over the diff's files. Review agents use `devflow:apply-decisions` to Read full entry bodies on demand.
+Pass `DECISIONS_CONTEXT` to all Review agents as one shared slice, cut over the diff's files.
 
 <!-- curation:end -->
 {{knowledge_load()}}
@@ -354,11 +349,9 @@ Spawn Review agents **in a single message**, one per focus in REVIEW_FOCUS_LIST 
 | documentation | conditional | devflow:documentation | diff.patch |
 | compliance | diff-driven | devflow:compliance | diff.patch |
 
-Review agent count: `code` runs 8 core +1-12 at `full`, up to 2 fewer at `standard`, 3-4 at lean; a reduced class or a mix runs 2-6.
-
 {{compliance_focus_inject()}}
 
-Each Review agent invocation (all in one message, **NOT background**):
+Each Review agent invocation:
 ```
 Agent(subagent_type="Review", run_in_background=false):
 "Review focusing on {focus}. Load the pattern skill via the Skill tool: Skill(skill="devflow:{focus}").
@@ -455,35 +448,21 @@ Per worktree, after successful completion:
 
 ```
 /code-review
-│
 <!-- compliance:on -->
 ├─ Phase 0: Worktree Discovery & Pre-flight, Steps 0a-0f (Git agent per worktree, parallel)
 <!-- compliance:off -->
 ├─ Phase 0: Worktree Discovery & Pre-flight, Steps 0a-0e (Git agent per worktree, parallel)
 <!-- compliance:end -->
 │  ├─ Step 0b: Resolve the compliance lens and gate level
-│
-├─ Per worktree (SEQUENTIAL):
-│  │
-│  ├─ Phase 1: Analyze changed files
-│  │  ├─ Classify the diff (paths.txt → DIFF_CLASS)
-│  │  ├─ Choose the focuses
-│  │  └─ Write diff.patch and diff-{focus}.patch
-│  │
-│  ├─ Phase 2: Reviews (PARALLEL within worktree), one per REVIEW_FOCUS_LIST focus
-│  │  ├─ code: core (diff.patch), language (diff-{focus}.patch), conditional
-│  │  └─ docs-only / tests-only / lockfile-only: the reduced set (diff.patch)
-│  │
+└─ Per worktree (SEQUENTIAL):
+   ├─ Phase 1: Classify the diff, choose the focuses, write diff.patch and diff-{focus}.patch
+   ├─ Phase 2: Reviews (PARALLEL): code, or docs-only / tests-only / lockfile-only (the reduced set)
 <!-- compliance:on -->
-│  ├─ Phase 3: Synthesis → Review Comment (SEQUENTIAL within worktree)
-│  │  ├─ Step 3a: Synthesize agent (mode: review, writes review-summary.md)
-│  │  └─ Step 3b: Git agent (post-review-summary)
+   ├─ Phase 3: Synthesize agent, then Git agent (post-review-summary)
 <!-- compliance:off -->
-│  ├─ Phase 3: Synthesis → Review Summary (SEQUENTIAL within worktree)
-│  │  └─ Step 3a: Synthesize agent (mode: review, writes review-summary.md)
+   ├─ Phase 3: Synthesize agent (writes review-summary.md)
 <!-- compliance:end -->
-│  │
-│  └─ Phase 4: Write .last-review-head + display results
+   └─ Phase 4: Write .last-review-head + display results
 ```
 
 ## Edge Cases
@@ -492,7 +471,7 @@ Per worktree, after successful completion:
 |------|----------|
 | `--full` in multi-worktree mode | Applies to all worktrees (global modifier). It sets the diff range, never the gate level |
 <!-- compliance:on -->
-| Review comment already posted | Git agent matches its own marker on the `{cycle, timestamp}` pair → skip silently (D7) |
+| Review comment already posted | Git agent skips it (D7) |
 <!-- compliance:end -->
 | Docs-only diff | Its Step 1.1 set, narrowed by level |
 | Tests-only diff | Its Step 1.1 set, narrowed by level |
@@ -516,4 +495,4 @@ Per worktree, after successful completion:
 2. **Parallel, not background** - Multiple agents in one message, but `run_in_background=false` so phases complete before proceeding
 3. **Git agent for git work** - All git operations go through Git agent, except the exceptions named in Principle 1; its writes print nothing
 4. **Honest reporting** - Display agent outputs directly
-5. **Incremental by default** - Only review new changes unless `--full` specified
+5. **Fewest turns** - Send calls that need no output of each other in one message: the Step 0a listing with the Step 0b-ii script; at `standard` or `lean`, the Step 1.2b directory print with the Step 1.1 listing, and its Read with the `paths.txt` Read; the Phase 1b git calls, each under its own condition, with the Step 1.3 writes

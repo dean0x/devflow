@@ -327,7 +327,6 @@ const ENGINE_BRANCH_VARIANT: { readonly file: string; readonly copy: string } = 
 const DEFERRED_SKILL_FILES: readonly string[] = [
   'src/assets/skills/consistency/references/detection.md',
   'src/assets/skills/regression/references/detection.md',
-  'src/assets/skills/regression/SKILL.md',
   'src/assets/skills/review-methodology/references/patterns.md',
   'src/assets/skills/review-methodology/references/violations.md',
 ]
