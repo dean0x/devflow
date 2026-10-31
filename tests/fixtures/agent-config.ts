@@ -302,7 +302,20 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
     effort: 'high',
     policy: { kind: 'allow', tools: ['Read', 'Grep', 'Glob', 'Bash', 'Write', 'Edit', 'Skill', 'StructuredOutput'] },
     omitClaudeMd: false,
-    skills: ['worktree-support', 'apply-decisions', 'gap-analysis', 'design-review', 'apply-feature-knowledge'],
+    skills: ['worktree-support', 'apply-decisions', 'gap-analysis', 'apply-feature-knowledge'],
+    digest: [],
+  },
+  /**
+   * D-DESIGN-VARIANTS: Architect is the plan-writing and anti-pattern-review variant of Design.
+   * It preloads only the design-review mode skill, and Design only gap-analysis, so no spawn
+   * loads a mode skill it does not run.
+   */
+  architect: {
+    model: 'opus',
+    effort: 'high',
+    policy: { kind: 'allow', tools: ['Read', 'Grep', 'Glob', 'Bash', 'Write'] },
+    omitClaudeMd: false,
+    skills: ['worktree-support', 'apply-decisions', 'design-review', 'apply-feature-knowledge'],
     digest: [],
   },
   debug: {

@@ -46,7 +46,7 @@ Listed in Claude Code's skill catalog. May auto-invoke based on description matc
 |-------|---------|------------|
 | `boundary-validation` | Boundary validation enforcement | None; a model may invoke it by description |
 | `gap-analysis` | Gap analysis for design plans — missing flows, edge cases, failure modes | Design |
-| `design-review` | Design review patterns — architectural feasibility, tradeoffs, alternatives | Design |
+| `design-review` | Design review patterns — architectural feasibility, tradeoffs, alternatives | Architect |
 | `dependency-research` | Research-before-building enforcement | None; a model may invoke it by description |
 | `test-driven-development` | RED-GREEN-REFACTOR cycle enforcement | Code |
 

@@ -145,9 +145,9 @@ Pass the Skim agent context to all subsequent agents. Pass `DECISIONS_CONTEXT` t
 {{knowledge_load()}}
 
 <!-- curation:on -->
-Pass `FEATURE_KNOWLEDGE` to Explore and Design agents. Pass `DECISIONS_CONTEXT` to Design agents only.
+Pass `FEATURE_KNOWLEDGE` to Explore, Design and Architect agents. Pass `DECISIONS_CONTEXT` to Design agents only.
 <!-- curation:off -->
-Pass `FEATURE_KNOWLEDGE` to Explore and Design agents.
+Pass `FEATURE_KNOWLEDGE` to Explore, Design and Architect agents.
 <!-- curation:end -->
 
 **Gate level.** At `standard` or `lean`, once per run, run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"` in Bash and Read `<that directory>/skills/devflow:agent-references/references/commands/plan-levels.md` with the Read tool, and apply it to Phases 3-14.
@@ -219,8 +219,7 @@ Combine into: user needs, similar features, constraints, failure modes"
 
 ```
 Agent(subagent_type="Design"):
-"Mode: gap-analysis
-Focus: {completeness|architecture|security|performance|compliance|consistency|dependencies}
+"Focus: {completeness|architecture|security|performance|compliance|consistency|dependencies}
 <!-- curation:on -->
 DECISIONS_CONTEXT: {decisions_context}
 <!-- curation:end -->
@@ -343,12 +342,11 @@ Combine into: execution plan with strategy decision, gap mitigations integrated"
 **Produces:** REVIEW_FINDINGS
 **Requires:** PLANNING_SYNTHESIS
 
-Spawn 1 Design agent with mode `design-review`:
+Spawn 1 Architect agent:
 
 ```
-Agent(subagent_type="Design"):
-"Mode: design-review
-Artifacts:
+Agent(subagent_type="Architect"):
+"Artifacts:
   Implementation plan: {Phase 11 planning synthesis}
   Implementation exploration: {Phase 9 exploration synthesis}
   Codebase context: {Phase 2 output}"
