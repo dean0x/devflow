@@ -74,8 +74,6 @@ When `DECISIONS_CONTEXT` is not `(none)`, hand it only to the agents whose contr
 
 {{decisions_slice()}}
 
-Those agents follow `devflow:apply-decisions`. A host that uses the index in its own thread says so in its own step.
-
 <!-- curation:end -->
 @end
 

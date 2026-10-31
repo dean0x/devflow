@@ -15,7 +15,7 @@ $ARGUMENTS
 
 **Issue-reference grammar.** Scan `COMMAND_INPUT` for candidate issue references: a `#`-prefixed token or a bare digit run. Collect them in source order as `ISSUE_REFS`, and forward the list to the Git agent verbatim. Do not render, normalise, pad, strip or drop a token. Under `github`, a token that matches `^#?[1-9][0-9]{0,8}$` is a reference, and the Git agent renders it as `#{n}`.
 
-There is no producer-side grammar check: the operation that runs decides each token, and its Output block gives the result. `fetch-issue` uses a non-numeric token as a search term and returns the first open match or nothing. `fetch-issues-batch` drops a token that it cannot resolve and names it in `NOT_FOUND ({refs})`.
+There is no producer-side grammar check: the operation that runs decides each token, and its Output block gives the result.
 
 Note: under `github`, only the Git agent decides if a bare digit run is a reference. This command holds no provider knowledge.
 
@@ -49,7 +49,7 @@ Accept only the three lines `WORKTREE=<absolute path>`, `LEDGER=<absolute path>`
 node "$HOME/.devflow/scripts/resolve-evidence-policy.cjs" 2>/dev/null; echo "exit=$?"
 ```
 
-Accept the output only when it is exactly two lines: `exit=0` last and, before it, one line of the form `EVIDENCE_POLICY=<required|standard> SOURCE=<file|worktree|default|invalid|error> REF=<branch|none>[ WARN=<remote-unavailable|invalid-file|raised-by-compliance|pr-changes-policy>[,…]] ISSUE_REQUIRED=<true|false> APPLY_CONVENTIONS=<true|false> REQUIRE_NON_AUTHOR_APPROVAL=<true|false>` — these fields, in this order, nothing else, where `<branch>` is a branch name such as `main`. **Anything else** (including a script that cannot run) ⇒ use `EVIDENCE_POLICY=required SOURCE=error REF=none ISSUE_REQUIRED=true APPLY_CONVENTIONS=true REQUIRE_NON_AUTHOR_APPROVAL=true` instead.
+Accept the output only when it is exactly two lines: `exit=0` last and, before it, one line of the form `EVIDENCE_POLICY=<required|standard> SOURCE=<file|worktree|default|invalid|error> REF=<branch|none>[ WARN=<remote-unavailable|invalid-file|raised-by-compliance|pr-changes-policy>[,…]] ISSUE_REQUIRED=<true|false> APPLY_CONVENTIONS=<true|false> REQUIRE_NON_AUTHOR_APPROVAL=<true|false>` — these fields, in this order, nothing else, where `<branch>` is a branch name. **Anything else** (including a script that cannot run) ⇒ use `EVIDENCE_POLICY=required SOURCE=error REF=none ISSUE_REQUIRED=true APPLY_CONVENTIONS=true REQUIRE_NON_AUTHOR_APPROVAL=true` instead.
 
 Set `EVIDENCE_POLICY`, `ISSUE_REQUIRED`, `APPLY_CONVENTIONS` and `REQUIRE_NON_AUTHOR_APPROVAL` from the accepted line. Pass agents only the three mechanism inputs, never `EVIDENCE_POLICY`. Report `Evidence policy: {EVIDENCE_POLICY} (source: {SOURCE})`, plus any `WARN` tokens as advisory, once in the final report.
 When `EVIDENCE_POLICY` is `required`, record `TRACEABILITY: DEGRADED (compliance off on this machine; the repository requires evidence)` once, for the Phase 12 report.
@@ -139,7 +139,7 @@ When `EVIDENCE_POLICY` is `standard`, a missing test plan is never asked about: 
 - `TEST_PLAN`: the TP lines of the evidence file's `## Test Plan` section, or `(none)` when the test plan is missing.
 - `EVIDENCE_FILE`: `{worktree}/.devflow/docs/evidence-{branch_slug}.md`, its `## Evidence Exceptions` section now a byte copy of `EVIDENCE_EXCEPTIONS` (absent when that is `(none)`).
 
-**Resolve the settings line** once per worktree root, reusing a line this run already resolved for the same root. `{root}` is the worktree the values are for — the repository root in a one-worktree run:
+**Resolve the settings line** once per worktree root, reusing a line this run already resolved for the same root. `{root}` is the worktree the values are for:
 
 ```bash
 node "$HOME/.devflow/scripts/resolve-settings.cjs" "{root}" 2>/dev/null; echo "exit=$?"
@@ -149,12 +149,12 @@ Accept the output only when it is exactly two lines: `exit=0` last and, before i
 
 The accepted line is the only source of these values.
 
-**Resolve `REVIEW_PUBLICATION` per worktree:** take `REVIEW_PUBLICATION` from that worktree's settings line — the line resolved above for `{root}`, the worktree's root, by the settings block when this run has not yet resolved that root. The line already caps the personal choice at the team's (D-PUBLICATION-CEILING), so it is `off`, `auto` or `full`, and `off` when the line was unresolvable.
+**Resolve `REVIEW_PUBLICATION` per worktree:** take `REVIEW_PUBLICATION` from that worktree's settings line — the line resolved above for `{root}`, the worktree's root, by the settings block when this run has not yet resolved that root. The line already caps the personal choice at the team's, so it is `off`, `auto` or `full`, and `off` when the line was unresolvable.
 
 **Evidence stub:** only when `EVIDENCE_POLICY` is `required`, a resolved `off` becomes `stub`, so a counts-only record still reaches the PR. `stub` is never a config value.
 Phase 11 passes no publication value: the local verify posts nothing. From the same line: `COMPLIANCE_FRAMEWORKS` is the settings line's `COMPLIANCE` with `generic` written `none`: `off`, `none`, or the framework ids the machine and this repository declare.
 
-**Set the compliance directive** from `COMPLIANCE_FRAMEWORKS`. `COMPLIANCE_DIRECTIVE` is empty when `COMPLIANCE_FRAMEWORKS` is `off`: a spawn line that holds only `{COMPLIANCE_DIRECTIVE}` is then left out, so a lens-off spawn carries nothing about compliance. Otherwise `COMPLIANCE_DIRECTIVE` is this one line, with `<ids>` replaced by the value of `COMPLIANCE_FRAMEWORKS`:
+**Set the compliance directive** from `COMPLIANCE_FRAMEWORKS`. `COMPLIANCE_DIRECTIVE` is empty when `COMPLIANCE_FRAMEWORKS` is `off`: a spawn line that holds only `{COMPLIANCE_DIRECTIVE}` is then left out. Otherwise `COMPLIANCE_DIRECTIVE` is this one line, with `<ids>` replaced by the value of `COMPLIANCE_FRAMEWORKS`:
 
 > When the task touches regulated surface (data models, auth flows, logging/observability, payments, IaC, retention), invoke Skill(skill="devflow:compliance") and load references/{id}.md only for the ids in <ids> (none: generic controls only); never fabricate guidance for a framework you were not given.
 
@@ -184,23 +184,21 @@ When `DECISIONS_CONTEXT` is not `(none)`, hand it only to the agents whose contr
 
 Hand each agent that takes `DECISIONS_CONTEXT` a slice, not the whole index: the index lines whose title, scope or area touch the files and task it works on, verbatim, led by `(slice: N of M entries — full index: <absolute index path>)` and closed by the index footer. When unsure, include the line. Siblings over one diff share ONE slice.
 
-Those agents follow `devflow:apply-decisions`. A host that uses the index in its own thread says so in its own step.
-
 Pass `DECISIONS_CONTEXT` to Code agent (Phase 2) and Harden agent (Phase 4).
 
 ### Load Feature Knowledge
 
 **Step 1 — Read the index cache** `{worktree}/.devflow/features/index.md`. Each line has the form `- **{slug}** — {areas} — {Use-when description}`. If `index.md` is absent or has no entry line, glob `{worktree}/.devflow/features/*/KNOWLEDGE.md` and read only the YAML frontmatter of each file.
 
-**Step 2 — Pick relevant KBs:** select the entries whose documented area overlaps the current task (index line, or frontmatter `description` and `directories` on fallback). Prefer specificity over breadth.
+**Step 2 — Pick relevant KBs:** select the entries whose documented area overlaps the current task (index line, or frontmatter `description` and `directories` on fallback).
 
 **Step 3 — Read each selected KB's Rules.** `{kb}` is `{worktree}/.devflow/features/{slug}/KNOWLEDGE.md`:
 
-1. List its `##` headings with line numbers through Bash: `command grep -n '^## ' "{kb}"`. This only locates sections; the text of a KB comes from the Read view alone.
-2. Read the `## Rules` range (its line to the next heading) with the Read tool, using `offset` and `limit`, and choose the one to three bullets most relevant to the task.
+1. List its `##` headings with line numbers through Bash: `command grep -n '^## ' "{kb}"`, one call for every selected `{kb}`. This only locates sections; the text of a KB comes from the Read view alone.
+2. Read the `## Rules` range (its line to the next heading) with the Read tool, using `offset` and `limit`, all selected KBs in one turn, and choose the one to three bullets most relevant to the task.
 3. If the KB has no `## Rules` section, choose one to three entries from its `## Anti-Patterns` or `## Gotchas` range the same way, and label them by that section's name instead of an ID.
 
-When a KB contradicts the code you observe, **trust the code** — the code is the freshness mechanism; the KB may lag behind. A missing Rules section, a missing heading list and `(none)` are legitimate states, not errors.
+When a KB contradicts the code you observe, **trust the code**. A missing Rules section, a missing heading list and `(none)` are legitimate states, not errors.
 
 **Step 4 — Set FEATURE_KNOWLEDGE and FEATURE_KNOWLEDGE_RULES.** Write one block per selected KB. Paste each bullet verbatim from the Read view, never from a shell view. The path is relative to the checkout root; an agent resolves it under `WORKTREE_PATH` when one is provided.
 
@@ -600,11 +598,11 @@ If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lin
 
 **Step 1 — Check the opt-out gate, with `{root}` = `{worktree}`:** take the settings line resolved above for that root, resolving it with the settings block when this run has not yet.
 
-If the settings line says `KNOWLEDGE=off`, skip write-back entirely. The machine, the repository and the personal settings can each turn knowledge off, and none can turn it back on (D-FEATURES-NARROW-ONLY). The fail-closed line says `KNOWLEDGE=off` too.
+If the settings line says `KNOWLEDGE=off`, skip write-back entirely. The fail-closed line says `KNOWLEDGE=off` too.
 
 **Step 2 — Write back only if at least one is true:**
 - This workflow changed files in a directory that is documented by an existing feature knowledge base (a documented area changed). Knowledge bases are written through at that point, never on a background schedule.
-- This workflow found durable, cross-cutting knowledge about a codebase area that would help future agents working in the same area: patterns, anti-patterns, integration points, gotchas that a single file read does not show.
+- This workflow found durable, cross-cutting knowledge about a codebase area that future agents in that area need: patterns, anti-patterns, integration points, gotchas that a single file read does not show.
 
 Otherwise skip write-back silently.
 
@@ -632,7 +630,7 @@ Then commit the two files as your Commit Protocol directs."
 
 **Step 4 — Surface an uncommitted knowledge base:**
 
-When the Knowledge agent reports `KB_COMMIT: skipped (detached HEAD)`, the files were written but deliberately not committed — a commit on a detached HEAD becomes unreachable once HEAD moves. Tell the user in the workflow's final report, in one line, that the knowledge base was written but not committed, and name the uncommitted paths the agent listed, so they can commit them on a branch before the worktree is removed. Never commit them yourself.
+When the Knowledge agent reports `KB_COMMIT: skipped (detached HEAD)`, tell the user in the workflow's final report, in one line, that the knowledge base was written but not committed, and name the uncommitted paths the agent listed. Never commit them yourself.
 
 Non-blocking: if the Knowledge agent fails, log the failure and continue.
 

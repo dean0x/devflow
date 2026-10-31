@@ -25,7 +25,7 @@ literal in the block applies when the script output fails the check or the scrip
 cannot run at all.
 
 @define settings_resolve():
-**Resolve the settings line** once per worktree root, reusing a line this run already resolved for the same root. `{root}` is the worktree the values are for — the repository root in a one-worktree run:
+**Resolve the settings line** once per worktree root, reusing a line this run already resolved for the same root. `{root}` is the worktree the values are for:
 
 ```bash
 node "$HOME/.devflow/scripts/resolve-settings.cjs" "{root}" 2>/dev/null; echo "exit=$?"
