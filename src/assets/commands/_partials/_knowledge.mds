@@ -36,17 +36,17 @@ All paths below are relative to `{worktree}`.
 @end
 
 @define knowledge_load_steps():
-**Step 1 — Read the index cache** `{worktree}/.devflow/features/index.md`. Each line has the form `- **{slug}** — {areas} — {Use-when description}`. If `index.md` is absent or has no entry line, glob `{worktree}/.devflow/features/*/KNOWLEDGE.md` and read only the YAML frontmatter of each file.
+**Step 1 — Read the index cache** `{worktree}/.devflow/features/index.md`. Each line has the form `- **{slug}** — {areas} — {Use-when description}`. If `index.md` is absent or has no entry line, glob `{worktree}/.devflow/features/*/KNOWLEDGE.md` and read only the YAML frontmatter of each file, in one turn.
 
 **Step 2 — Pick relevant KBs:** select the entries whose documented area overlaps the current task (index line, or frontmatter `description` and `directories` on fallback).
 
 **Step 3 — Read each selected KB's Rules.** `{kb}` is `{worktree}/.devflow/features/{slug}/KNOWLEDGE.md`:
 
-1. List its `##` headings with line numbers through Bash: `command grep -n '^## ' "{kb}"`, one call for every selected `{kb}`. This only locates sections; the text of a KB comes from the Read view alone.
+1. List the `##` headings with line numbers of all selected KBs in one Bash call: `command grep -n '^## ' "{kb}" …`. With two or more paths, each line starts with its `{kb}:` path. This only locates sections; the text of a KB comes from the Read view alone.
 2. Read the `## Rules` range (its line to the next heading) with the Read tool, using `offset` and `limit`, all selected KBs in one turn, and choose the one to three bullets most relevant to the task.
 3. If the KB has no `## Rules` section, choose one to three entries from its `## Anti-Patterns` or `## Gotchas` range the same way, and label them by that section's name instead of an ID.
 
-When a KB contradicts the code you observe, **trust the code**. A missing Rules section, a missing heading list and `(none)` are legitimate states, not errors.
+When a KB contradicts the code you observe, **trust the code**.
 
 **Step 4 — Set FEATURE_KNOWLEDGE and FEATURE_KNOWLEDGE_RULES.** Write one block per selected KB. Paste each bullet verbatim from the Read view, never from a shell view. The path is relative to the checkout root; an agent resolves it under `WORKTREE_PATH` when one is provided.
 
@@ -116,7 +116,7 @@ Then commit the two files as your Commit Protocol directs."
 
 **Step 4 — Surface an uncommitted knowledge base:**
 
-When the Knowledge agent reports `KB_COMMIT: skipped (detached HEAD)`, tell the user in the workflow's final report, in one line, that the knowledge base was written but not committed, and name the uncommitted paths the agent listed. Never commit them yourself.
+When the Knowledge agent reports `KB_COMMIT: skipped (detached HEAD)`, tell the user in the workflow's final report, in one line, that the knowledge base was written but not committed, and name the uncommitted paths the agent listed, so they can commit them on a branch. Never commit them yourself.
 
 Non-blocking: if the Knowledge agent fails, log the failure and continue.
 @end
