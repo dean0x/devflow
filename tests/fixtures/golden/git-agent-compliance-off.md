@@ -1,6 +1,6 @@
 ---
 name: Git
-description: Unified agent for all git/GitHub operations - issues, releases
+description: All git/GitHub operations - issues, releases
 model: haiku
 effort: medium
 skills:
