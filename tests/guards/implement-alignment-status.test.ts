@@ -31,8 +31,19 @@ const STEP_2 = '2. Increment `alignment_fix_count`'
 const STEP_3 = '3. If `alignment_fix_count <= 2`:'
 const STEP_4 = '4. If `alignment_fix_count > 2`:'
 const ARM_LEAD = 'Any other or missing Status'
-/** The line that follows the arm: a report for decision ends the pass, and the user's go starts Phase 6. */
-const CONTINUE_LINE = 'After a report for decision, if the user decides to continue, start Phase 6.'
+/** The line that follows the arm: a Phase 5 report for decision ends the pass, and the user's go sets the alignment result and starts Phase 6. */
+const CONTINUE_LINE = 'After a Phase 5 report for decision, if the user decides to continue, set `ALIGNMENT_RESULT` to exactly `MISALIGNED (user continued)` and start Phase 6.'
+
+/** What the continue line must say, as the label of the defect and the text that carries it. */
+const CONTINUE_PARTS: ReadonlyArray<readonly [label: string, text: string]> = [
+  ['name the Phase 5 report', 'After a Phase 5 report for decision'],
+  ['hold on the user deciding to continue', 'if the user decides to continue'],
+  ['set ALIGNMENT_RESULT to the user-continued value', 'set `ALIGNMENT_RESULT` to exactly `MISALIGNED (user continued)`'],
+  ['start Phase 6', 'start Phase 6.'],
+]
+
+/** The unindented lines of a section that open a continue line: they open "After a " and name a report for decision. */
+const continueLines = (section: string): string[] => section.split('\n').filter(line => line.startsWith('After a ') && line.includes('report for decision'))
 
 /** What the arm must say, as the label of the defect and the text that carries it. */
 const ARM_PARTS: ReadonlyArray<readonly [label: string, text: string]> = [
@@ -80,8 +91,8 @@ function armLines(section: string): string[] {
 /**
  * The defects of Phase 5 of one compiled /implement: the section is present with both routed branches and the
  * alignment-fix steps, and it holds exactly one unindented arm after step 4 that reports the status and its cause,
- * halts and rules out ALIGNED. It also holds the one continue line: after a report for decision, the user's go starts
- * Phase 6.
+ * halts and rules out ALIGNED. It also holds the one continue line: after a Phase 5 report for decision, the user's go
+ * sets `ALIGNMENT_RESULT` to `MISALIGNED (user continued)` and starts Phase 6.
  */
 export function collectAlignmentStatusDefects(body: string): string[] {
   const section = sectionBetween(body, PHASE5, PHASE6)
@@ -109,8 +120,14 @@ export function collectAlignmentStatusDefects(body: string): string[] {
   }
   const step4 = section.indexOf(STEP_4)
   if (step4 !== -1 && section.indexOf(arm) < step4) defects.push('the unrouted-status arm sits before step 4 of the MISALIGNED branch')
-  const continues = section.split('\n').filter(line => line === CONTINUE_LINE).length
-  if (continues !== 1) defects.push(`Phase 5 holds the continue line ${continues} times, expected once`)
+  const continues = continueLines(section)
+  if (continues.length !== 1) {
+    defects.push(`Phase 5 holds ${continues.length} continue lines, expected 1`)
+    return defects
+  }
+  const missing = CONTINUE_PARTS.filter(([, text]) => !(continues[0] as string).includes(text))
+  for (const [label] of missing) defects.push(`the continue line does not ${label}`)
+  if (missing.length === 0 && continues[0] !== CONTINUE_LINE) defects.push('the continue line is not the pinned text')
   return defects
 }
 
@@ -212,15 +229,37 @@ describe('/implement Phase 5 stops on an unrouted Evaluate status', () => {
     })
 
     it('reports a deleted continue line', () => {
-      expect(collectAlignmentStatusDefects(seeded(`\n${CONTINUE_LINE}\n`, '\n'))).toEqual(['Phase 5 holds the continue line 0 times, expected once'])
+      expect(collectAlignmentStatusDefects(seeded(`\n${CONTINUE_LINE}\n`, '\n'))).toEqual(['Phase 5 holds 0 continue lines, expected 1'])
     })
 
-    it('reports a continue line that does not name the user decision', () => {
-      expect(collectAlignmentStatusDefects(seeded(CONTINUE_LINE, CONTINUE_LINE.replace('if the user decides to continue, ', '')))).toEqual(['Phase 5 holds the continue line 0 times, expected once'])
+    it('reports a continue line that does not name the Phase 5 report', () => {
+      expect(collectAlignmentStatusDefects(seeded(CONTINUE_LINE, CONTINUE_LINE.replace('After a Phase 5 report', 'After a report')))).toEqual(['the continue line does not name the Phase 5 report'])
+    })
+
+    it('reports a continue line that does not hold on the user deciding to continue', () => {
+      expect(collectAlignmentStatusDefects(seeded(CONTINUE_LINE, CONTINUE_LINE.replace('if the user decides to continue, ', '')))).toEqual(['the continue line does not hold on the user deciding to continue'])
+    })
+
+    it('reports a continue line that drops the ALIGNMENT_RESULT clause', () => {
+      const dropped = CONTINUE_LINE.replace(' set `ALIGNMENT_RESULT` to exactly `MISALIGNED (user continued)` and', '')
+      expect(dropped, 'the seed lands').not.toBe(CONTINUE_LINE)
+      expect(collectAlignmentStatusDefects(seeded(CONTINUE_LINE, dropped))).toEqual(['the continue line does not set ALIGNMENT_RESULT to the user-continued value'])
+    })
+
+    it('reports a continue line that sets another alignment result', () => {
+      expect(collectAlignmentStatusDefects(seeded(CONTINUE_LINE, CONTINUE_LINE.replace('MISALIGNED (user continued)', 'ALIGNED')))).toEqual(['the continue line does not set ALIGNMENT_RESULT to the user-continued value'])
+    })
+
+    it('reports a continue line that no longer starts Phase 6', () => {
+      expect(collectAlignmentStatusDefects(seeded(CONTINUE_LINE, CONTINUE_LINE.replace(' and start Phase 6.', '.')))).toEqual(['the continue line does not start Phase 6'])
     })
 
     it('reports a continue line that is repeated', () => {
-      expect(collectAlignmentStatusDefects(seeded(CONTINUE_LINE, `${CONTINUE_LINE}\n${CONTINUE_LINE}`))).toEqual(['Phase 5 holds the continue line 2 times, expected once'])
+      expect(collectAlignmentStatusDefects(seeded(CONTINUE_LINE, `${CONTINUE_LINE}\n${CONTINUE_LINE}`))).toEqual(['Phase 5 holds 2 continue lines, expected 1'])
+    })
+
+    it('reports a continue line that holds every part but is not the pinned text', () => {
+      expect(collectAlignmentStatusDefects(seeded(CONTINUE_LINE, `${CONTINUE_LINE.replace(' start Phase 6.', ' keep the report and start Phase 6.')}`))).toEqual(['the continue line is not the pinned text'])
     })
   })
 })

@@ -576,25 +576,36 @@ describe('the independence criteria of PARALLEL_CODE_AGENTS sit in the PARALLEL 
 /**
  * Two whole sentences that close a gap in the run, found while the Polish skip moved into the command. They are not rows of the
  * never-cut table, so the table above holds its rows alone. They run through the same collector and the same probes.
- *   - A Code agent that fails, blocks or reports no Status stops the run before Phase 3.
- *   - A run that the user ends after Phase 9 opened the PR still records the evidence and writes the report.
+ *   - A Code agent with any Status other than COMPLETE, or none, stops the run before Phase 3. A list of the stopping statuses would
+ *     let an unknown status (a status such as PARTIAL) through.
+ *   - A run that the user ends after Phase 10 started still records the evidence and writes the report.
  */
 const FAULT_FIX_ROWS: readonly Row[] = [
   {
     no: 'X1a',
-    item: 'Phase 2: a Code agent that fails, blocks or reports no Status stops the run',
-    anchor: 'A Code agent with FAILED, BLOCKED or no Status: report it and its cause, then halt.',
+    item: 'Phase 2: a Code agent with a Status other than COMPLETE, or none, stops the run',
+    anchor: 'A Code agent with a Status other than COMPLETE, or none: report it and its cause, then halt.',
     section: PHASE_2,
     whole: true,
   },
   {
     no: 'X1b',
-    item: 'Error Handling: a run ended after Phase 9 still runs Phases 11 and 12',
-    anchor: 'If the user ends the run after Phase 9 opened the PR, run Phases 11 and 12 first.',
+    item: 'Error Handling: a run ended after Phase 10 started still runs Phases 11 and 12',
+    anchor: 'If the user ends the run after Phase 10 started, run Phases 11 and 12 first.',
     section: ERROR_HANDLING,
     whole: true,
   },
 ]
+
+/**
+ * Each sentence as an earlier text of it worded it. The earlier text names the stopping statuses (FAILED and BLOCKED), so an unknown
+ * status does not halt; the earlier end-run line ends the rule at the PR, so a stop in Phase 10 skips the evidence. Neither is the
+ * pinned sentence, so the row must report it as missing.
+ */
+const FAULT_FIX_REWORDED: Readonly<Record<string, string>> = {
+  X1a: 'A Code agent with FAILED, BLOCKED or no Status: report it and its cause, then halt.',
+  X1b: 'If the user ends the run after Phase 9 opened the PR, run Phases 11 and 12 first.',
+}
 
 describe('the fault-fix sentences of /implement are in every compiled build, once, whole, under their section', () => {
   for (const { key, file } of BUILDS) {
@@ -616,6 +627,26 @@ describe('the fault-fix sentences of /implement are in every compiled build, onc
         for (const row of FAULT_FIX_ROWS) {
           expect(countOf(text, row.anchor), `row ${row.no} must occur once for the gluing to be exact`).toBe(1)
           expect(collectPlacementDefects(file, text.replace(row.anchor, () => `and ${row.anchor}`), FAULT_FIX_ROWS), `gluing row ${row.no}`).toEqual([`${where(file, row)}: not a whole sentence`])
+        }
+      })
+
+      it('known-bad probe: an earlier wording of a sentence is reported as that sentence missing: an unknown Code status no longer halts, and a stop in Phase 10 skips the evidence', () => {
+        const text = readBuild(file)
+        for (const row of FAULT_FIX_ROWS) {
+          const reworded = FAULT_FIX_REWORDED[row.no]
+          expect(reworded, `row ${row.no} has an earlier wording`).toBeDefined()
+          expect(reworded, `row ${row.no}: the earlier wording is not the pinned sentence`).not.toBe(row.anchor)
+          expect(countOf(text, row.anchor), `row ${row.no} must occur once for the reword to be exact`).toBe(1)
+          expect(collectPlacementDefects(file, text.replace(row.anchor, () => reworded as string), FAULT_FIX_ROWS), `rewording row ${row.no}`).toEqual([`${where(file, row)}: anchor missing`])
+        }
+      })
+
+      it('known-bad probe: a Phase 2 arm that drops "other than" or "or none" is reported as the arm missing', () => {
+        const text = readBuild(file)
+        const arm = (FAULT_FIX_ROWS.find(r => r.no === 'X1a') as Row).anchor
+        for (const [from, to] of [['a Status other than COMPLETE, or none', 'a Status of FAILED'], ['COMPLETE, or none', 'COMPLETE'], ['a Status other than COMPLETE', 'a failed Status']] as const) {
+          expect(arm.includes(from), `the arm holds "${from}"`).toBe(true)
+          expect(collectPlacementDefects(file, text.replace(arm, () => arm.replace(from, to)), FAULT_FIX_ROWS), `"${from}" changed`).toEqual([`${where(file, FAULT_FIX_ROWS[0] as Row)}: anchor missing`])
         }
       })
 

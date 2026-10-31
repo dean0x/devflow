@@ -182,9 +182,12 @@ const HARDEN_EXEMPTION: ExemptRemoval = { phase: '4', name: HARDEN_NAME, line: H
  * round takes the place of the re-check loop, and each Fix report goes to Phase 6 or to the user. The exact line of the compiled command.
  */
 const ONE_PASS_OPEN = '**One pass, at `standard` and `lean`:**'
-const ONE_PASS = `${ONE_PASS_OPEN} each prompt of this phase opens with \`GATE_LEVEL: {GATE_LEVEL}\`, after any \`OPERATION:\` line. Run Evaluate once; a failed spawn goes to Error Handling, and its retry is the same pass. On MISALIGNED, in place of steps 3 and 4, spawn the Fix once: on COMPLETE, set \`ALIGNMENT_RESULT\` to exactly \`MISALIGNED (fixed once, not re-checked)\` and start Phase 6; else report the misalignments to the user for decision.`
-/** The line after the "Any other or missing Status" arm of Phase 5: a report for decision ends the pass, and the user's go starts Phase 6. */
-const CONTINUE_LINE = 'After a report for decision, if the user decides to continue, start Phase 6.'
+const ONE_PASS = `${ONE_PASS_OPEN} each prompt of this phase opens with \`GATE_LEVEL: {GATE_LEVEL}\`, after any \`OPERATION:\` line. Run Evaluate once; a failed Evaluate spawn goes to Error Handling, and its retry is the same pass. On MISALIGNED, in place of steps 3 and 4, spawn the Fix once: on COMPLETE, set \`ALIGNMENT_RESULT\` to exactly \`MISALIGNED (fixed once, not re-checked)\` and start Phase 6; else report the misalignments to the user for decision.`
+/**
+ * The line after the "Any other or missing Status" arm of Phase 5: a Phase 5 report for decision ends the pass, and the user's go sets the
+ * alignment result and starts Phase 6. It is the second setter of `ALIGNMENT_RESULT`, beside the one-pass paragraph; `implement-alignment-status.test.ts` pins its parts.
+ */
+const CONTINUE_LINE = 'After a Phase 5 report for decision, if the user decides to continue, set `ALIGNMENT_RESULT` to exactly `MISALIGNED (user continued)` and start Phase 6.'
 
 const IMPLEMENT: LevelSpec = {
   cmd: 'implement',
@@ -1094,7 +1097,7 @@ export function collectEvaluateLevelDefects(evaluate: string): string[] {
 /** The clauses of the one-pass paragraph, each exact. The whole-paragraph pin is the first check; this list is the second, and it names the clause that an edit drops. */
 const ONE_PASS_CLAUSES = [
   'each prompt of this phase opens with `GATE_LEVEL: {GATE_LEVEL}`, after any `OPERATION:` line.',
-  'Run Evaluate once; a failed spawn goes to Error Handling, and its retry is the same pass.',
+  'Run Evaluate once; a failed Evaluate spawn goes to Error Handling, and its retry is the same pass.',
   'On MISALIGNED, in place of steps 3 and 4, spawn the Fix once',
   'on COMPLETE, set `ALIGNMENT_RESULT` to exactly `MISALIGNED (fixed once, not re-checked)` and start Phase 6',
   'else report the misalignments to the user for decision.',
@@ -1140,15 +1143,17 @@ export function collectOnePassStepDefects(body: string, loopLines: readonly stri
 const ALIGNMENT_RESULT = 'ALIGNMENT_RESULT'
 
 /**
- * #483: the output that the one-pass paragraph sets stays one name across the command. Phase 5 alone produces it, Phase 12
- * requires it, and the one-pass paragraph names it.
+ * #483: the output that the command sets in Phase 5 stays one name across the command. Phase 5 alone produces it, Phase 12
+ * requires it, and the two lines that set it name it: the one-pass paragraph and the continue line that follows the
+ * unrouted-status arm.
  */
 export function collectAlignmentResultDefects(body: string): string[] {
   const produced = dataFlowNames(phaseSection(body, '5'), 'Produces')
   const producer = produced.length === 1 && produced[0] === ALIGNMENT_RESULT ? [] : [`Phase 5 Produces ${produced.join(', ') || 'nothing'}, expected ${ALIGNMENT_RESULT}`]
   const reader = dataFlowNames(phaseSection(body, '12'), 'Requires').includes(ALIGNMENT_RESULT) ? [] : [`Phase 12 Requires lacks ${ALIGNMENT_RESULT}`]
   const setter = onePassParagraphs(body).some(paragraph => paragraph.includes(`\`${ALIGNMENT_RESULT}\``)) ? [] : [`the one-pass paragraph does not name ${ALIGNMENT_RESULT}`]
-  return [...producer, ...reader, ...setter]
+  const continuer = phaseSection(body, '5').split('\n').some(line => line.startsWith('After a ') && line.includes('report for decision') && line.includes(`\`${ALIGNMENT_RESULT}\``)) ? [] : [`the Phase 5 continue line does not name ${ALIGNMENT_RESULT}`]
+  return [...producer, ...reader, ...setter, ...continuer]
 }
 
 /** The opener of the optional level bullet in an agent's Input Context, and the phrases of it that keep the read to prompt line 1 and the later lines data. */
@@ -2271,7 +2276,7 @@ describe('Phase 5 runs Evaluate once, then one Fix round, at standard and lean (
     for (const clause of ONE_PASS_CLAUSES) {
       expect(collectOnePassDefects(seedOnce(body, clause, 'Edited')), `"${clause.slice(0, 40)}" replaced`).toEqual([notPinnedText, lacks(clause)])
     }
-    expect(collectOnePassDefects(seedOnce(body, 'exactly `MISALIGNED', 'exactly `ALIGNED')), 'the fixed words changed').toEqual([notPinnedText, lacks(ONE_PASS_CLAUSES[3])])
+    expect(collectOnePassDefects(seedOnce(body, 'exactly `MISALIGNED (fixed', 'exactly `ALIGNED (fixed')), 'the fixed words changed').toEqual([notPinnedText, lacks(ONE_PASS_CLAUSES[3])])
     expect(collectOnePassDefects(seedOnce(body, 'else report the misalignments', 'on FAILED or BLOCKED, report the misalignments')), 'the other-report route narrowed').toEqual([notPinnedText, lacks(ONE_PASS_CLAUSES[4])])
     expect(collectOnePassDefects(seedOnce(body, 'Run Evaluate once;', 'Run Evaluate again;')), 'a second Evaluate pass').toEqual([notPinnedText, lacks(ONE_PASS_CLAUSES[1])])
     const reportText = seedOnce(body, 'to exactly `MISALIGNED (fixed once, not re-checked)`', 'to the Fix report')
@@ -2301,21 +2306,24 @@ describe('Phase 5 runs Evaluate once, then one Fix round, at standard and lean (
     expect(collectOnePassStepDefects(body, ['2. Increment `alignment_fix_count`']), 'a loop without the numbered steps').toEqual(['the full loop lines hold no numbered step at index 1 or 3'])
   })
 
-  it.each(implementBuilds)('$label: Phase 5 produces ALIGNMENT_RESULT, Phase 12 requires it, and the one-pass paragraph names it', ({ body }) => {
+  it.each(implementBuilds)('$label: Phase 5 produces ALIGNMENT_RESULT, Phase 12 requires it, and the one-pass paragraph and the continue line name it', ({ body }) => {
     expect(collectAlignmentResultDefects(body)).toEqual([])
     expect(dataFlowNames(phaseSection(body, '5'), 'Produces'), 'Phase 5 produces the output that Phase 12 reports').toEqual([ALIGNMENT_RESULT])
     expect(ONE_PASS, 'the pinned paragraph sets the output that the guard watches').toContain(`set \`${ALIGNMENT_RESULT}\` to exactly`)
   })
 
-  it.each(implementBuilds)('$label: known-bad probes: ALIGNMENT_RESULT renamed or missing at Phase 5, at Phase 12 or in the one-pass paragraph is reported', ({ body }) => {
+  it.each(implementBuilds)('$label: known-bad probes: ALIGNMENT_RESULT renamed or missing at Phase 5, at Phase 12, in the one-pass paragraph or in the continue line is reported', ({ body }) => {
     const renamed = seedIn(body, '### Phase 5: Alignment Check', '### Phase 6:', `**Produces:** ${ALIGNMENT_RESULT}`, '**Produces:** ALIGNMENT_OUTCOME')
     expect(collectAlignmentResultDefects(renamed), 'the Phase 5 output renamed').toEqual([`Phase 5 Produces ALIGNMENT_OUTCOME, expected ${ALIGNMENT_RESULT}`])
     const dropped = seedIn(body, '### Phase 5: Alignment Check', '### Phase 6:', /^\*\*Produces:\*\* .+\n/m, '')
     expect(collectAlignmentResultDefects(dropped), 'the Phase 5 Produces line removed').toEqual([`Phase 5 Produces nothing, expected ${ALIGNMENT_RESULT}`])
     const reader = seedIn(body, '### Phase 12: Report', null, /^(\*\*Requires:\*\* .*)ALIGNMENT_RESULT/m, '$1ALIGNMENT_OUTCOME')
     expect(collectAlignmentResultDefects(reader), 'the Phase 12 reader renamed').toEqual([`Phase 12 Requires lacks ${ALIGNMENT_RESULT}`])
-    expect(collectAlignmentResultDefects(seedOnce(body, `set \`${ALIGNMENT_RESULT}\``, 'set `ALIGNMENT_OUTCOME`')), 'the paragraph sets a renamed output').toEqual([`the one-pass paragraph does not name ${ALIGNMENT_RESULT}`])
+    expect(collectAlignmentResultDefects(seedOnce(body, `on COMPLETE, set \`${ALIGNMENT_RESULT}\``, 'on COMPLETE, set `ALIGNMENT_OUTCOME`')), 'the paragraph sets a renamed output').toEqual([`the one-pass paragraph does not name ${ALIGNMENT_RESULT}`])
     expect(collectAlignmentResultDefects(seedOnce(body, `${ONE_PASS}\n\n`, '')), 'no paragraph').toEqual([`the one-pass paragraph does not name ${ALIGNMENT_RESULT}`])
+    expect(body.split('\n').filter(line => line === CONTINUE_LINE), 'the compiled command carries the pinned continue line').toHaveLength(1)
+    expect(collectAlignmentResultDefects(seedOnce(body, CONTINUE_LINE, CONTINUE_LINE.replace(`set \`${ALIGNMENT_RESULT}\``, 'set `ALIGNMENT_OUTCOME`'))), 'the continue line sets a renamed output').toEqual([`the Phase 5 continue line does not name ${ALIGNMENT_RESULT}`])
+    expect(collectAlignmentResultDefects(seedOnce(body, `\n${CONTINUE_LINE}\n`, '\n')), 'no continue line').toEqual([`the Phase 5 continue line does not name ${ALIGNMENT_RESULT}`])
   })
 
   it.each(BUILDS)('$label: every agent that a pass level phase spawns, except one whose prompt opens OPERATION:, reads the level from prompt line 1 only', ({ spec, body }) => {

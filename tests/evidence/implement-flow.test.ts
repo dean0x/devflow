@@ -1417,8 +1417,8 @@ function selfReviewBuilds(): ReadonlyArray<{ readonly label: string; readonly md
   ]
 }
 
-/** The line that opens the Phase 6 Validate spawn: ALIGNED, or a single-pass Fix that reports COMPLETE. */
-const PHASE_6_LEAD = 'After ALIGNED, or a single-pass Fix that reports COMPLETE, spawn Validate agent:'
+/** The line that opens the Phase 6 Validate spawn: ALIGNED, a single-pass Fix that reports COMPLETE, or a user who continues after a Phase 5 report for decision. */
+const PHASE_6_LEAD = 'After ALIGNED, a single-pass Fix that reports COMPLETE, or a user who continues after a Phase 5 report, spawn Validate agent:'
 
 describe('#571, #572: /implement and Harden state the self-review scope, in both builds', () => {
   it.each(['curation on', 'curation off'])('%s: the three lines stand alone and the Phase 4 status line is unchanged', label => {
@@ -1703,10 +1703,13 @@ describe('#675: the Phase 11 skip rule skips Phase 11 for every stop before Phas
 })
 
 /**
- * Named collector (#675): the Phase 6 lead-in names both paths into Phase 6 and the status that gates the second one.
+ * Named collector (#675): the Phase 6 lead-in names the three paths into Phase 6 and the status that gates the second one.
  * A single-pass Fix that reports FAILED or BLOCKED reports the misalignments to the user and starts no Phase 6, so a
  * lead-in that says only that the Fix "completes" reads as "returns" and lets a reader start Phase 6 after a stop.
- * The lead-in must say ALIGNED as a whole word (MISALIGNED is the opposite status) and must say that the Fix reports COMPLETE.
+ * The third path is the user's go after a Phase 5 report for decision: the lead-in must name it, or Phase 6 has no
+ * stated way in from that report.
+ * The lead-in must say ALIGNED as a whole word (MISALIGNED is the opposite status), must say that the Fix reports COMPLETE,
+ * and must say that a user who continues after a Phase 5 report starts Phase 6.
  */
 function collectPhase6LeadDefects(md: string): string[] {
   const six = phaseSection(md, H.p6)
@@ -1716,24 +1719,30 @@ function collectPhase6LeadDefects(md: string): string[] {
   const out: string[] = []
   if (!/\bALIGNED\b/.test(leads[0])) out.push('the Phase 6 lead-in does not name ALIGNED')
   if (!leads[0].includes('a single-pass Fix that reports COMPLETE')) out.push('the Phase 6 lead-in does not name the COMPLETE status of the single-pass Fix')
+  if (!leads[0].includes('a user who continues after a Phase 5 report')) out.push('the Phase 6 lead-in does not name the user who continues after a Phase 5 report')
   return out
 }
 
-describe('#675: the Phase 6 lead-in names the COMPLETE status of the single-pass Fix, in all four builds', () => {
-  it.each(IMPLEMENT_KEYS)('%s: the lead-in names ALIGNED and the COMPLETE status', key => {
+describe('#675: the Phase 6 lead-in names ALIGNED, the COMPLETE status of the single-pass Fix and the user who continues, in all four builds', () => {
+  it.each(IMPLEMENT_KEYS)('%s: the lead-in names ALIGNED, the COMPLETE status and the continuing user', key => {
     const md = implementMdOfKey(key)
     expect(md.split('\n').filter(l => l === PHASE_6_LEAD), `${key}: the lead-in, whole`).toHaveLength(1)
     expect(collectPhase6LeadDefects(md), key).toEqual([])
   })
 
-  it.each(IMPLEMENT_KEYS)('%s: known-bad probes: the word completes, a lost status, a lost ALIGNED, MISALIGNED in its place, no lead-in, two leads and no section are each reported', key => {
+  it.each(IMPLEMENT_KEYS)('%s: known-bad probes: the word completes, a lost status, a lost ALIGNED, MISALIGNED in its place, a lost continue path, no lead-in, two leads and no section are each reported', key => {
     const md = implementMdOfKey(key)
     const noStatus = 'the Phase 6 lead-in does not name the COMPLETE status of the single-pass Fix'
-    expect(collectPhase6LeadDefects(seedOnce(md, PHASE_6_LEAD, 'After ALIGNED or a single-pass fix completes, spawn Validate agent:')), 'the lead-in before the fix').toEqual([noStatus])
-    expect(collectPhase6LeadDefects(seedOnce(md, PHASE_6_LEAD, 'After ALIGNED, or a single-pass Fix that returns, spawn Validate agent:'))).toEqual([noStatus])
-    expect(collectPhase6LeadDefects(seedOnce(md, PHASE_6_LEAD, 'After a single-pass Fix that reports COMPLETE, spawn Validate agent:'))).toEqual(['the Phase 6 lead-in does not name ALIGNED'])
-    expect(collectPhase6LeadDefects(seedOnce(md, PHASE_6_LEAD, 'After the gates, spawn Validate agent:'))).toEqual(['the Phase 6 lead-in does not name ALIGNED', noStatus])
-    expect(collectPhase6LeadDefects(seedOnce(md, PHASE_6_LEAD, 'After MISALIGNED, or a single-pass Fix that reports COMPLETE, spawn Validate agent:')), 'MISALIGNED holds the letters of ALIGNED but is not the status').toEqual(['the Phase 6 lead-in does not name ALIGNED'])
+    const noContinue = 'the Phase 6 lead-in does not name the user who continues after a Phase 5 report'
+    const CONTINUE_PATH = 'or a user who continues after a Phase 5 report'
+    expect(collectPhase6LeadDefects(seedOnce(md, PHASE_6_LEAD, `After ALIGNED, a single-pass fix completes, ${CONTINUE_PATH}, spawn Validate agent:`)), 'the lead-in before the fix').toEqual([noStatus])
+    expect(collectPhase6LeadDefects(seedOnce(md, PHASE_6_LEAD, `After ALIGNED, a single-pass Fix that returns, ${CONTINUE_PATH}, spawn Validate agent:`))).toEqual([noStatus])
+    expect(collectPhase6LeadDefects(seedOnce(md, PHASE_6_LEAD, `After a single-pass Fix that reports COMPLETE, ${CONTINUE_PATH}, spawn Validate agent:`))).toEqual(['the Phase 6 lead-in does not name ALIGNED'])
+    expect(collectPhase6LeadDefects(seedOnce(md, PHASE_6_LEAD, 'After the gates, spawn Validate agent:'))).toEqual(['the Phase 6 lead-in does not name ALIGNED', noStatus, noContinue])
+    expect(collectPhase6LeadDefects(seedOnce(md, PHASE_6_LEAD, `After MISALIGNED, a single-pass Fix that reports COMPLETE, ${CONTINUE_PATH}, spawn Validate agent:`)), 'MISALIGNED holds the letters of ALIGNED but is not the status').toEqual(['the Phase 6 lead-in does not name ALIGNED'])
+    expect(collectPhase6LeadDefects(seedOnce(md, ', or a user who continues after a Phase 5 report', '')), 'the continue path dropped').toEqual([noContinue])
+    expect(collectPhase6LeadDefects(seedOnce(md, 'who continues after a Phase 5 report', 'who continues')), 'the Phase 5 report dropped from the continue path').toEqual([noContinue])
+    expect(collectPhase6LeadDefects(seedOnce(md, 'a user who continues', 'a reader who continues')), 'the user replaced').toEqual([noContinue])
     expect(collectPhase6LeadDefects(seedOnce(md, `${PHASE_6_LEAD}\n`, ''))).toEqual(['Phase 6 holds 0 Validate spawn leads, expected 1'])
     expect(collectPhase6LeadDefects(seedOnce(md, PHASE_6_LEAD, `${PHASE_6_LEAD}\n${PHASE_6_LEAD}`))).toEqual(['Phase 6 holds 2 Validate spawn leads, expected 1'])
     expect(collectPhase6LeadDefects(seedOnce(md, H.p6, '### Phase 6 gone'))).toEqual([`${H.p6}: the section is absent`])
