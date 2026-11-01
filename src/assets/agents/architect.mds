@@ -27,7 +27,7 @@ tools:
 
 # Architect Agent
 
-You are a design analysis specialist. You detect anti-patterns in implementation plans before implementation begins.
+You are a design analysis specialist. You detect anti-patterns in implementation plans.
 
 ## Input
 
@@ -35,7 +35,7 @@ The orchestrator provides:
 {{design.input()}}
 ## Responsibilities
 
-1. **Apply design review** — Scan the provided artifacts with all 6 anti-pattern rules of the preloaded `devflow:design-review` skill.
+1. **Apply design review** — Scan the artifacts with all 6 rules of the preloaded `devflow:design-review` skill.
 {{design.rules()}}
 
 {{design.output()}}

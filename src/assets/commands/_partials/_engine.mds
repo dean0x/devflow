@@ -3,10 +3,10 @@
 
 Run in this order:
 
-1. **Polish agent** — reduce complexity, remove duplication
+1. **Polish agent**
 2. **Harden agent** — 9-pillar self-review (deep structural analysis); returns `{"status": "PASS" | "FIXED" | "BLOCKED"}`
    - BLOCKED (a P0 issue cannot be fixed in scope), or a missing or unrecognised status, which counts as BLOCKED → stop the pass and escalate as `harden-blocked`; Validate does not run on code Harden could not accept
-3. **Validate agent** — build / typecheck / lint / test; returns `{"verdict": "PASS" | "FAIL", "details": "..."}`. It runs last and unconditionally: one full run over the HEAD that Polish and Harden left, so it covers their commits whether or not Harden changed code
+3. **Validate agent** — build / typecheck / lint / test; returns `{"verdict": "PASS" | "FAIL", "details": "..."}`. It runs last and unconditionally: one full run over the HEAD that Polish and Harden left, so it covers their commits
    - FAIL → Fix agent fix (max 2 retries), each followed by a Validate agent re-run
    - If still FAIL after 2 retries → escalate as `validation-exhausted`
 

@@ -19,7 +19,7 @@ output-dir: dist/commands
 
 ## Input
 
-What follows `/research` is bound once, here. Every later step names it `COMMAND_INPUT` and never restates it:
+What follows `/research` is bound once, here. Every later step names it `COMMAND_INPUT`:
 
 <command-input>
 $ARGUMENTS

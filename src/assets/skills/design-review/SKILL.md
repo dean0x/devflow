@@ -7,7 +7,7 @@ allowed-tools: Read, Grep, Glob
 
 # Design Review
 
-Anti-pattern detection for implementation plans. Catches structural problems before they become code.
+Anti-pattern detection for implementation plans.
 
 ## Iron Law
 
@@ -15,8 +15,7 @@ Anti-pattern detection for implementation plans. Catches structural problems bef
 >
 > A plan that implies N+1 queries will produce N+1 queries. A plan that omits error
 > handling will produce code with no error handling. Review the plan as rigorously as
-> you review the code — the plan is the blueprint that every implementation decision
-> follows.
+> the code: every implementation decision follows it.
 
 ## Anti-Pattern Detection Rules
 
@@ -113,9 +112,9 @@ Resolution: {concern A} belongs in {layer/module}; {concern B} belongs in {layer
 
 ## Severity Guidelines
 
-| Level | Criteria |
+| Level | An anti-pattern that |
 |-------|----------|
-| **CRITICAL** | Anti-pattern that will cause correctness failures (data loss, security breach) |
-| **HIGH** | Anti-pattern that will cause significant performance or maintainability problems |
-| **MEDIUM** | Anti-pattern that will require architectural rework post-implementation |
-| **LOW** | Anti-pattern that reduces code quality but is easily refactored |
+| **CRITICAL** | will cause correctness failures (data loss, security breach) |
+| **HIGH** | will cause significant performance or maintainability problems |
+| **MEDIUM** | will require architectural rework post-implementation |
+| **LOW** | reduces code quality but is easily refactored |

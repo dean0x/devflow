@@ -21,7 +21,7 @@ Orchestrate a single task by spawning agents.
 $ARGUMENTS
 </command-input>
 
-`COMMAND_INPUT` is the text above: a plan document path (an existing `.md` file), an issue reference, a task description, or empty (use the conversation).
+`COMMAND_INPUT` is the text above: a plan document path, an issue reference, a task description, or empty (use the conversation).
 
 {{issue_ref_grammar()}}
 
@@ -93,7 +93,7 @@ The issue token is forwarded **unclassified**: routing is by SHAPE alone. Only `
 <!-- compliance:end -->
 - **Token count.** Forwarding the FIRST token alone sends `/implement fix the login bug` as `ISSUE_INPUT: fix` with no description, so the request is dropped.
 
-**Capture from Git agent output**, each value as written. Never re-derive one issue value from another, and never infer one from a `TRACEABILITY: DEGRADED ({reason})` status line: that line is a status, not issue content.
+**Capture from Git agent output**, each value as written. Never re-derive one issue value from another, and never infer one from a `TRACEABILITY: DEGRADED ({reason})` status line.
 - `TASK_ID`: The branch name created by Git agent
 - `BASE_BRANCH`: Branch this feature was created from; stop unless it passes the setup check
 - `ISSUE_ID`: the `- **Issue ID**:` line under `### Handoff Values`, if any. `ISSUE_NUMBER` is this value.
@@ -629,7 +629,7 @@ If any Git agent output emitted `TRACEABILITY: DEGRADED ({reason})` lines during
 If any Git agent output emitted `TRACEABILITY: DEGRADED ({reason})` lines during the run, or the compliance-off line of Phase 1, the fresh base step, Phase 10's push, Phase 11's push or Phase 11's script output carried one, surface them verbatim in the report under a `### Traceability` subsection.
 <!-- compliance:end -->
 
-If Phase 9 listed uncommitted files, show them as a `### Uncommitted files` subsection: the user commits them or discards them.
+If Phase 9 listed uncommitted files, show them as a `### Uncommitted files` subsection.
 
 If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lines in the report.
 
