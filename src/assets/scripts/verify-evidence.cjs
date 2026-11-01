@@ -636,10 +636,14 @@ function appendTextFile(filePath, text) {
 /**
  * Replace the regular file `filePath` with `text` and keep its `mode`: the text goes to a
  * sibling temporary file, in the same folder, which a rename then puts in the file's place.
- * A write that fails leaves the file as it was and the temporary file removed, so a failed
- * replace never truncates it. The temporary file is created new (O_EXCL) and never through a
- * link (O_NOFOLLOW), and takes the old mode on its own descriptor, since the umask would
- * otherwise set the new file's mode. Returns whether the file was replaced.
+ * It refuses first what appendTextFile refuses, so the two writes of a claim agree: a file
+ * this process may not write, a link put in its place (O_NOFOLLOW), a FIFO (O_NONBLOCK) or
+ * any other object that is not a regular file. The probe opens the file for an append and
+ * writes nothing. A write that fails leaves the file as it was and the temporary file
+ * removed, so a failed replace never truncates it. The temporary file is created new
+ * (O_EXCL) and never through a link (O_NOFOLLOW), and takes the old mode on its own
+ * descriptor, since the umask would otherwise set the new file's mode. Returns whether the
+ * file was replaced.
  *
  * @param {string} filePath
  * @param {string} text
@@ -647,10 +651,21 @@ function appendTextFile(filePath, text) {
  * @returns {boolean}
  */
 function replaceTextFile(filePath, text, mode) {
+  const c = fs.constants;
+  let probe;
+  try {
+    probe = fs.openSync(filePath, c.O_WRONLY | c.O_APPEND | (c.O_NOFOLLOW || 0) | (c.O_NONBLOCK || 0));
+    if (!fs.fstatSync(probe).isFile()) return false;
+  } catch (_) {
+    return false;
+  } finally {
+    if (probe !== undefined) {
+      try { fs.closeSync(probe); } catch (_) { /* the probe wrote nothing */ }
+    }
+  }
   const temp = path.join(path.dirname(filePath), '.' + path.basename(filePath) + '.claim-' + process.pid);
   let fd;
   try {
-    const c = fs.constants;
     fd = fs.openSync(temp, c.O_WRONLY | c.O_CREAT | c.O_EXCL | (c.O_NOFOLLOW || 0), 0o600);
   } catch (_) {
     return false;

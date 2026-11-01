@@ -2573,6 +2573,26 @@ describe('claim — appends the claim lines of a report to the evidence file', (
       expect(fs.readdirSync(dir)).toEqual(['e.md'])
     })
 
+    it.skipIf(process.getuid?.() === 0).each([
+      ['is not last (the replace)', [EXCEPTION]],
+      ['is last (the append)', []],
+    ])('a read-only file whose Claims section %s: exit 3, the file and its mode are as they were, nothing is left behind', (_label, exceptions) => {
+      const dir = scratch('claim')
+      const before = evidenceFile(PLAN, [claimLine(1, 'PASS', OLD, 0)], exceptions)
+      const file = writeScratch(dir, 'e.md', before)
+      fs.chmodSync(file, 0o444)
+      try {
+        const r = claim([...flags(file), 'gate'])
+        expect(r.code).toBe(3)
+        expect(r.stdout).toBe('')
+        expect(read(file)).toBe(before)
+        expect(fs.statSync(file).mode & 0o777).toBe(0o444)
+        expect(fs.readdirSync(dir)).toEqual(['e.md'])
+      } finally {
+        fs.chmodSync(file, 0o644)
+      }
+    })
+
     it.skipIf(process.getuid?.() === 0)('a folder that cannot take the temporary file: exit 3, the file is byte for byte as it was, nothing is left behind', () => {
       const dir = scratch('claim')
       const before = evidenceFile(PLAN, [claimLine(1, 'PASS', OLD, 0)], [EXCEPTION])

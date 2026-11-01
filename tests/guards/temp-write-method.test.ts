@@ -36,15 +36,17 @@ function tempWriteViolations(text: string): string[] {
 
 /**
  * The folder rule: a step that makes its file in a `mktemp -d` folder and removes that file removes the
- * folder too, with `rmdir -- "${F%/*}"` after the file removal. `rmdir` refuses a folder that holds
- * anything, so it never reaches a file the step did not make. A recursive delete of the folder is no
- * way to do it. The rule works per source line, because each site states the folder and its removal
- * in one line. A line that names no file removal (a report-overflow line keeps its file for the reader)
- * and a plain `mktemp` file make no folder, so they are out of the rule.
+ * folder too: each file removal is followed at once by `; rmdir -- "${F%/*}"`. `rmdir` refuses a
+ * folder that holds anything, so it never reaches a file the step did not make. A recursive delete of
+ * the folder is no way to do it. The rule works per source line, because each site states the folder
+ * and its removals in one line, and it holds each removal of the line on its own: the retitle line
+ * removes its file in two places. A line that names no file removal (a report-overflow line keeps its
+ * file for the reader) and a plain `mktemp` file make no folder, so they are out of the rule.
  */
 const TEMP_DIR = /`mktemp -d`/
 const FILE_REMOVAL = /\brm -- "(?:\$F|\{[^}"]* file\})"/
-const FOLDER_REMOVAL = 'rmdir -- "${F%/*}"'
+/** A file removal that `; rmdir -- "${F%/*}"` does not follow at once. */
+const BARE_FILE_REMOVAL = /\brm -- "(?:\$F|\{[^}"]* file\})"(?!; rmdir -- "\$\{F%\/\*\}")/
 const RECURSIVE_REMOVAL = /\brm\s+-[A-Za-z]*[rR]/
 
 /** The lines that remove a `mktemp -d` file and leave its folder, or remove the folder recursively. */
@@ -52,12 +54,12 @@ function folderRemovalDefects(text: string): string[] {
   return text
     .split('\n')
     .filter(line => TEMP_DIR.test(line))
-    .filter(line => RECURSIVE_REMOVAL.test(line) || (FILE_REMOVAL.test(line) && !line.includes(FOLDER_REMOVAL)))
+    .filter(line => RECURSIVE_REMOVAL.test(line) || BARE_FILE_REMOVAL.test(line))
 }
 
-/** The lines that remove a `mktemp -d` file together with its folder. */
+/** The lines that remove a `mktemp -d` file together with its folder, at every removal. */
 function folderRemovalSites(text: string): string[] {
-  return text.split('\n').filter(line => TEMP_DIR.test(line) && FILE_REMOVAL.test(line) && line.includes(FOLDER_REMOVAL))
+  return text.split('\n').filter(line => TEMP_DIR.test(line) && FILE_REMOVAL.test(line) && !BARE_FILE_REMOVAL.test(line))
 }
 
 describe('temp-write-method', () => {
@@ -102,6 +104,10 @@ describe('temp-write-method', () => {
     expect(folderRemovalDefects('Write the name to a new file in a `mktemp -d` folder, then run `rm -r "$D"`.')).toHaveLength(1)
     expect(folderRemovalDefects(joined)).toEqual([])
     expect(folderRemovalSites(joined)).toHaveLength(1)
+    // A line with two removals, one joined and one bare, still leaves a folder: each removal is held on its own.
+    const halfJoined = 'Write the title to a new file in a `mktemp -d` folder (`{title file}`). A missing title skips the retitle after `F="{title file}"; rm -- "$F"`. Otherwise run `F="{title file}"; trap \'rm -- "$F"; rmdir -- "${F%/*}"\' EXIT; test -s "$F"`.'
+    expect(folderRemovalDefects(halfJoined)).toHaveLength(1)
+    expect(folderRemovalSites(halfJoined)).toEqual([])
     // A report-overflow line keeps its file, and a plain `mktemp` file makes no folder.
     expect(folderRemovalDefects('longer material goes to a new file in a `mktemp -d` folder and the message gives its path.')).toEqual([])
     expect(folderRemovalDefects('Run `F="$(mktemp)"; trap \'rm -- "$F"\' EXIT`.')).toEqual([])
