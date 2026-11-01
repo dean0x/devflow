@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The update hints now run the newest release** ([#754](https://github.com/dean0x/devflow/issues/754)). The HUD update badge and the reinstall hint after `uninstall` show `npx devflow-kit@latest init`. Without `@latest`, npx can run an old cached copy and install the old version again.
 - **The CI gate waits again when its own check fails** ([#752](https://github.com/dean0x/devflow/issues/752)).
   - A failed `gh` call or an unreadable result inside `ci-wait.cjs` printed one INDETERMINATE line and no `NEXT=` line. The `/implement` and `/resolve` prompts read the missing line as "proceed", so the gate did not wait.
   - With `--waits` and `--fixes`, the script now also prints the `NEXT=` line of an INDETERMINATE result that waited 0 seconds. The gate waits again while fewer than 3 waits have run. After that it proceeds and says that the CI status is unknown.

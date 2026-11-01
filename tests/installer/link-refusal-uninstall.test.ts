@@ -469,7 +469,7 @@ describe('the uninstall report for a refused folder', () => {
 describe('the outcome lines of an uninstall that refused a folder', () => {
   it('say success when no folder was refused', () => {
     expect(formatPluginRemovedLine(' (devflow-typescript)', 0)).toEqual({ level: 'success', message: 'Plugin removed (devflow-typescript)' });
-    expect(stripAnsi(formatUninstallOutro(0))).toBe('Devflow uninstalled successfully  Reinstall: npx devflow-kit init');
+    expect(stripAnsi(formatUninstallOutro(0))).toBe('Devflow uninstalled successfully  Reinstall: npx devflow-kit@latest init');
   });
 
   it('say the plugin was removed in part and count the folders left as they are', () => {
@@ -542,7 +542,7 @@ describe('uninstall --plugin states the outcome of a refusal in its last lines',
     expect(await exists(path.join(claudeDir, 'commands', 'devflow', 'bug-analysis.md'))).toBe(false);
     expect(successes).toContain(`Plugin removed (${PLUGIN})`);
     expect(warned.filter(line => line.includes('in part'))).toEqual([]);
-    expect(outros).toEqual(['Devflow uninstalled successfully  Reinstall: npx devflow-kit init']);
+    expect(outros).toEqual(['Devflow uninstalled successfully  Reinstall: npx devflow-kit@latest init']);
     expect(process.exitCode ?? 0).toBe(0);
   });
 });

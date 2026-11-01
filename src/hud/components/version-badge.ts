@@ -94,7 +94,7 @@ export default async function versionBadge(
   }
 
   if (info && compareVersions(current, info.latest) < 0) {
-    const badge = `\u2726 Devflow v${info.latest} \u00B7 update: npx devflow-kit init`;
+    const badge = `\u2726 Devflow v${info.latest} \u00B7 update: npx devflow-kit@latest init`;
     return { text: yellow(badge), raw: badge };
   }
 

@@ -1,5 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import type { GatherContext, GitStatus, TranscriptData } from '../src/hud/types.js';
+import { hudCacheDir, writeCache } from '../src/core/cache.js';
 
 // Import components
 import directory from '../src/hud/components/directory.js';
@@ -16,6 +20,7 @@ import sessionCost from '../src/hud/components/session-cost.js';
 import releaseInfo from '../src/hud/components/release-info.js';
 import worktreeCount from '../src/hud/components/worktree-count.js';
 import configCounts from '../src/hud/components/config-counts.js';
+import versionBadge from '../src/hud/components/version-badge.js';
 import { stripAnsi } from '../src/hud/colors.js';
 
 function makeCtx(overrides: Partial<GatherContext> = {}): GatherContext {
@@ -806,5 +811,35 @@ describe('stripAnsi', () => {
 
   it('handles strings without ANSI codes', () => {
     expect(stripAnsi('plain text')).toBe('plain text');
+  });
+});
+
+describe('versionBadge component', () => {
+  const dirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  // A seeded version-check cache keeps the component off the npm registry.
+  async function installedWithLatest(installed: string, latest: string): Promise<string> {
+    const devflowDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-badge-'));
+    dirs.push(devflowDir);
+    fs.writeFileSync(path.join(devflowDir, 'manifest.json'), JSON.stringify({ version: installed }));
+    await writeCache(hudCacheDir(devflowDir), 'version-check', { latest }, 60_000);
+    return devflowDir;
+  }
+
+  it('tells the user to update with @latest when a newer release exists', async () => {
+    const devflowDir = await installedWithLatest('3.12.0', '3.12.1');
+    const result = await versionBadge(makeCtx({ devflowDir }));
+    expect(result).not.toBeNull();
+    expect(result!.raw).toBe('✦ Devflow v3.12.1 · update: npx devflow-kit@latest init');
+    expect(stripAnsi(result!.text)).toBe(result!.raw);
+  });
+
+  it('shows nothing when the installed version is the newest', async () => {
+    const devflowDir = await installedWithLatest('3.12.1', '3.12.1');
+    expect(await versionBadge(makeCtx({ devflowDir }))).toBeNull();
   });
 });
