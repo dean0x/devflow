@@ -3182,7 +3182,11 @@ function isBelow(parent, child) {
  * below `io.cwd` by name, and the nearest folder that already exists resolves to `io.cwd` or
  * below it, so a link out of the working directory makes nothing. Each folder it makes goes
  * to `io.made`, deepest first, for removeMadeFolders. A path that holds a file where a folder
- * must be, or that the run may not make, is unusable.
+ * must be, or that the run may not make, is unusable. After each folder is made, its real path
+ * must lie below the real working directory; if a link swapped in after the first check led the
+ * folder out, the run is unusable and removeMadeFolders takes the folder away again. This check
+ * narrows the window for such a swap; it does not close it, because the later open of the
+ * evidence file resolves the path again.
  *
  * @param {Io} io
  * @param {string} dir  absolute
@@ -3205,6 +3209,7 @@ function ensureClaimFolder(io, dir) {
       at = path.join(at, part);
       fs.mkdirSync(at);
       io.made.unshift(at);
+      if (!isBelow(realRoot, fs.realpathSync(at))) return false;
     }
     return true;
   } catch (_) {
