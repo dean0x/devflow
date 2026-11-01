@@ -2564,6 +2564,24 @@ describe('claim — appends the claim lines of a report to the evidence file', (
       expect(read(file)).toBe(evidenceFile(PLAN, [claimLine(1, 'PASS', OLD, 0), claimLine(2, 'FAIL', HEAD, 1), `- TP-3 SKIP sha:${HEAD} by:test`], [EXCEPTION]))
     })
 
+    it('takes the line at the end of a CRLF Claims section that is not last, and keeps every other byte', () => {
+      const before = ['## Test Plan', ...PLAN, '', '## Claims', claimLine(1, 'PASS', OLD, 0), '', '## Evidence Exceptions', EXCEPTION, ''].join('\r\n')
+      const file = fileWith(before)
+      expect(claim([...flags(file), 'gate'])).toMatchObject({ code: 0, stdout: 'CLAIM appended:1 PASS:1 FAIL:0 SKIP:0 skipped:0\n' })
+      expect(read(file)).toBe(before.replace(`${claimLine(1, 'PASS', OLD, 0)}\r\n`, `${claimLine(1, 'PASS', OLD, 0)}\r\n${GATE}\n`))
+    })
+
+    it('refuses an insert that takes the file over the parser limit, and leaves the file and its folder as they were', () => {
+      const dir = scratch('claim')
+      const tail = `## Claims\n\n## Evidence Exceptions\n${EXCEPTION}\n`
+      const before = `${'x'.repeat(PE.LIMITS.INPUT_CHARS - tail.length - 2)}\n\n${tail}`
+      expect(before.length).toBe(PE.LIMITS.INPUT_CHARS)
+      const file = writeScratch(dir, 'e.md', before)
+      expect(claim([...flags(file), 'gate'])).toMatchObject({ code: 2, stdout: refusal('evidence file unusable') })
+      expect(read(file)).toBe(before)
+      expect(fs.readdirSync(dir)).toEqual(['e.md'])
+    })
+
     it.skipIf(process.getuid?.() === 0)('keeps the mode of the file and leaves no temporary file when the Claims section is not last', () => {
       const dir = scratch('claim')
       const file = writeScratch(dir, 'e.md', evidenceFile(PLAN, [], [EXCEPTION]))
