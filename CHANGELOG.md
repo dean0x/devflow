@@ -20,6 +20,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - A first claim into an evidence folder that did not exist was refused with `evidence file unusable`. The script now creates the folder, but only inside the working directory. If the run then refuses or writes no line, it removes the folders that it made.
   - A file whose `## Claims` section had another section after it was refused. The script now puts the new lines at the end of the Claims section. It writes the file through a temporary file in the same folder and keeps the file mode.
   - The script still refuses a file that does not parse, a file that git tracks, and a head that is not one SHA.
+- **A command removes the temporary folder that it made for a file** ([#752](https://github.com/dean0x/devflow/issues/752)).
+  - The PR create and retitle steps of the Git agent, and the fresh-base step of `/implement`, write their file in a new folder from `mktemp -d`. Since 3.12.0 they removed the file and left the empty folder in the temp directory.
+  - Each step now runs `rm -- "$F"; rmdir -- "${F%/*}"`. `rmdir` refuses a folder that holds anything, so it never removes a file that the step did not make. A step that gets an INT or TERM signal still leaves its file and folder.
+- **The Architect agent writes an implementation plan again** ([#752](https://github.com/dean0x/devflow/issues/752)). The Architect has a Plan writing section. When the prompt asks for a plan, the agent reads the gap-analysis skill, closes the gaps that it names and avoids the 6 design-review anti-patterns. The Design agent is unchanged.
+- **The design-review skill suggests a fix for each anti-pattern again** ([#752](https://github.com/dean0x/devflow/issues/752)). Each of the 6 anti-patterns has a `**Suggest:**` line after its flag format, as in 3.11.0.
+- **`/implement` forwards the PR link line and writes none of its own again** ([#752](https://github.com/dean0x/devflow/issues/752)). Both Phase 9 arms say that the command forwards the link line of Phase 1 verbatim, in every build.
+- **A feature knowledge pass again prefers the most specific entries** ([#752](https://github.com/dean0x/devflow/issues/752)). The knowledge step tells the agent to prefer the most specific entries. It also says that a missing Rules section, a missing heading list and `(none)` are normal, not errors. The Debug agent follows the `apply-feature-knowledge` skill for its feature knowledge.
+- **The quality gates scale their depth again** ([#752](https://github.com/dean0x/devflow/issues/752)). After the first gate, the shared engine says that depth scales to change size and budget, so a one-line fix gets a lighter pass.
+- **`/research` again tells the user why it uses the codebase only** ([#752](https://github.com/dean0x/devflow/issues/752)). If WebSearch and WebFetch are unavailable, the command restricts the research to the `codebase` type and tells the user why.
 
 ---
 
