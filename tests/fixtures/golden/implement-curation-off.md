@@ -60,7 +60,7 @@ Set `EVIDENCE_POLICY`, `ISSUE_REQUIRED`, `APPLY_CONVENTIONS` and `REQUIRE_NON_AU
 
 `PR_DESCRIPTION_GUIDANCE` is the full `## PR Description Guidance` section of the plan document. Any other input, empty input included, or a plan without that section, gives `(none)`.
 
-**Empty input.** When `COMMAND_INPUT` is empty — a plan handoff arrives this way, with the plan already in the conversation — there is no argument to name the branch from, and the Git agent sees none of this conversation. Write the description yourself: one line, taken from the plan's title or, with no plan, from the conversation. Send it as the setup-task `TASK_DESCRIPTION` below.
+**Empty input.** When `COMMAND_INPUT` is empty — a plan handoff arrives this way with the plan already in the conversation — no argument can name the branch, and the Git agent sees none of this conversation. Write the description yourself: one line, taken from the plan's title or, with no plan, from the conversation. Send it as the setup-task `TASK_DESCRIPTION` below.
 
 Spawn Git agent:
 
@@ -471,7 +471,7 @@ Any other or missing Status: report and halt; never PASS.
 **Produces:** PR_NUMBER
 **Requires:** BASE_BRANCH, BASE_REF, TASK_ID, ISSUE_NUMBER, ISSUE_PR_LINK, PR_EXCEPTIONS, PR_TEST_PLAN_BLOCK, PR_DESCRIPTION_GUIDANCE, APPLY_CONVENTIONS, CODE_AGENT_OUTPUT
 
-Run once, after the gates, under every strategy. No Code agent opens a PR: the Git agent does, and it pastes `ISSUE_PR_LINK`, `PR_EXCEPTIONS` and `PR_TEST_PLAN_BLOCK` through their paste gates and scrubs the body (D11) before `gh pr create`. This command writes no link line of its own: it forwards Phase 1's link line verbatim.
+Run once, after the gates, under every strategy. No Code agent opens a PR: the Git agent does, and it pastes `ISSUE_PR_LINK`, `PR_EXCEPTIONS` and `PR_TEST_PLAN_BLOCK` through their paste gates and scrubs the body (D11) before `gh pr create`. This command writes no link line and creates no PR itself: it forwards Phase 1's link line verbatim.
 
 ```
 Agent(subagent_type="Git"):
