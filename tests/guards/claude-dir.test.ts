@@ -289,6 +289,7 @@ const SYNTHESIZE_FILE = agentFile('synthesize')
 const CURATE_FILE = agentFile('curate')
 const VALIDATE_FILE = agentFile('validate')
 const TRIAGE_FILE = agentFile('triage')
+const ARCHITECT_FILE = agentFile('architect')
 
 /** Sanctioned-line counts by file name. A name can be absent, so a lookup yields `undefined` and the caller states the default. */
 type SiteRows = Readonly<Partial<Record<string, number>>>
@@ -308,6 +309,8 @@ export const SITE_ROWS: SiteRows = {
   [CURATE_FILE]: 2,
   [VALIDATE_FILE]: 1,
   [TRIAGE_FILE]: 1,
+  [ARCHITECT_FILE]: 1,
+  'dist/curation-off/agents/architect.md': 1,
   'dist/curation-off/agents/triage.md': 1,
   'dist/compliance-off/agents/triage.md': 1,
   'dist/compliance-off/commands/code-review.md': 1,

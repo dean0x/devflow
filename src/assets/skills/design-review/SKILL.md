@@ -33,6 +33,8 @@ Anti-pattern detection for implementation plans.
 Resolution: Replace loop with batch query: {proposed batch operation}.
 ```
 
+**Suggest:** collect the IDs first and batch-fetch the related rows in one query, or eager-load them (JOIN) in the list query.
+
 ### 2. God Functions
 
 **What to look for in a plan:**
@@ -47,6 +49,8 @@ Resolution: Replace loop with batch query: {proposed batch operation}.
 Resolution: Split into: {responsibility 1} → {responsibility 2} → {responsibility 3}.
 ```
 
+**Suggest:** one purpose per function; move notification, logging and other side effects to their own functions, and compose them at the service layer.
+
 ### 3. Missing Parallelism
 
 **What to look for in a plan:**
@@ -60,6 +64,8 @@ Resolution: Split into: {responsibility 1} → {responsibility 2} → {responsib
 [SEQUENTIAL BOTTLENECK] Steps {N}-{M}: "{quoted steps}" — no dependency between them.
 Resolution: Execute {step A} and {step B} in parallel: {proposed parallel pattern}.
 ```
+
+**Suggest:** run independent steps in parallel (`Promise.all`, goroutines, `asyncio.gather`), and name the steps that must stay in order.
 
 ### 4. Error Handling Gaps
 
@@ -76,6 +82,8 @@ Resolution: Execute {step A} and {step B} in parallel: {proposed parallel patter
 Resolution: Add: {on failure scenario} → {specific recovery action}.
 ```
 
+**Suggest:** for each external call, the action on timeout, 4xx and 5xx; a compensation step for each step of a multi-step operation; Result types or explicit error returns, never a silent failure.
+
 ### 5. Missing Caching
 
 **What to look for in a plan:**
@@ -90,6 +98,8 @@ Resolution: Add: {on failure scenario} → {specific recovery action}.
 Resolution: Cache {data} for {TTL}: {proposed cache strategy and invalidation}.
 ```
 
+**Suggest:** an application cache for cross-request data, a short-TTL in-memory cache for process-local reference data, and the invalidation (on update, by TTL, or both).
+
 ### 6. Poor Decomposition
 
 **What to look for in a plan:**
@@ -103,6 +113,8 @@ Resolution: Cache {data} for {TTL}: {proposed cache strategy and invalidation}.
 [DECOMPOSITION ISSUE] Step {N}: "{quoted plan text}" — combines {concern A} and {concern B}.
 Resolution: {concern A} belongs in {layer/module}; {concern B} belongs in {layer/module}.
 ```
+
+**Suggest:** one layer per step (presentation, business logic, data access); cross-cutting concerns (logging, auth, validation) in middleware or decorators; one bounded context per module.
 
 ## Extended References
 

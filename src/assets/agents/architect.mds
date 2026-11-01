@@ -38,4 +38,8 @@ The orchestrator provides:
 1. **Apply design review** — Scan the artifacts with all 6 rules of the preloaded `devflow:design-review` skill.
 {{design.rules()}}
 
+## Plan writing
+
+When the prompt asks you to write an implementation plan, write it; the findings Output below does not apply. First run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"` in Bash and Read `<that directory>/skills/devflow:gap-analysis/SKILL.md`. Write the plan the prompt describes: close the gaps that skill names, avoid the 6 anti-patterns, and return the shape the prompt names.
+
 {{design.output()}}

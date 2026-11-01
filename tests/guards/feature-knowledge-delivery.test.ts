@@ -59,6 +59,8 @@ const LOAD_ELEMENTS: ReadonlyArray<{ readonly label: string; readonly literal: s
   { label: 'the Rules label', literal: '\nRules:\n' },
   { label: 'a Rules bullet with its ID', literal: '- **KB-AP-2** {bullet text, verbatim}' },
   { label: 'the heading index', literal: 'Headings: L5 Rules · L40 Overview' },
+  { label: 'the specificity hint of the pick step', literal: 'Prefer the most specific entries.' },
+  { label: 'the missing parts that are normal states', literal: 'A missing Rules section, a missing heading list and `(none)` are normal, not errors.' },
   { label: 'the Bash heading listing', literal: "command grep -n '^## '" },
   { label: 'the Read-tool range read', literal: 'with the Read tool, using `offset` and `limit`' },
   { label: 'verbatim from the Read view', literal: 'Paste each bullet verbatim from the Read view, never from a shell view' },
@@ -412,6 +414,24 @@ describe('each recipient is told the form it receives (D-KB-DELIVERY-TIERS)', ()
       ...RULES_AGENTS.flatMap(a => collectFormDefects(a, inputBullet(resolveAgentSource(a).content), 'rules')),
     ]
     expect(defects).toEqual([])
+  })
+
+  it('the Debug agent points its FEATURE_KNOWLEDGE input at the consumer skill, in both builds', () => {
+    const pointer = 'Follow `devflow:apply-feature-knowledge`.'
+    const collectPointerDefects = (label: string, bullet: string | null): string[] =>
+      bullet === null ? [`${label}: no FEATURE_KNOWLEDGE Input bullet`] : bullet.includes(pointer) ? [] : [`${label}: the bullet does not name the consumer skill`]
+    const builds: ReadonlyArray<readonly [string, string | null]> = [
+      ['debug (curation on)', resolveAgentSource('debug').content],
+      ['debug (curation off)', resolveCurationOffSource('agents', 'debug')],
+    ]
+    for (const [label, body] of builds) {
+      expect(body, `${label}: the build is read`).not.toBeNull()
+      const bullet = inputBullet(body as string)
+      expect(collectPointerDefects(label, bullet)).toEqual([])
+      // Known-bad probes: the same collector reports a bullet without the pointer and a missing bullet.
+      expect(collectPointerDefects(label, (bullet as string).replace(pointer, ''))).toEqual([`${label}: the bullet does not name the consumer skill`])
+      expect(collectPointerDefects(label, null)).toEqual([`${label}: no FEATURE_KNOWLEDGE Input bullet`])
+    }
   })
 
   it('the evaluate form line holds none of the words the duty-ownership guard reserves for harden (AC-228)', () => {

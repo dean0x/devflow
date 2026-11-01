@@ -2083,11 +2083,17 @@ export const FLAGGED_RM = /\brm\s+-{1,2}[A-Za-z]/
 export const NAME_FILE_TRAP = 'F="{name file}"; trap \'rm -- "$F"\' EXIT;'
 
 /**
- * How `ensure-pr-ready` step 4a removes its name file: a trailing `rm` in the D11 shell, after the last create attempt.
- * The D11 trap runs `exit` on INT and TERM, so the trailing `rm` is not reached then, and the text says so.
- * A use site adds the closing period.
+ * The start of a resolver call over a name file that lives in a `mktemp -d` folder: the same trap, and the folder
+ * goes with the file. `rmdir` refuses a folder that holds anything, so the removal never reaches a file it did not make.
  */
-export const NAME_FILE_REMOVAL = 'in that same shell and after the last create attempt, `rm -- "$F"`. That `rm` runs when the shell reaches it; an INT or TERM signal skips it and leaves the file in the temp directory'
+export const NAME_DIR_TRAP = 'F="{name file}"; trap \'rm -- "$F"; rmdir -- "${F%/*}"\' EXIT;'
+
+/**
+ * How `ensure-pr-ready` step 4a removes its name file and the `mktemp -d` folder that held it: a trailing removal in the
+ * D11 shell, after the last create attempt. The D11 trap runs `exit` on INT and TERM, so the trailing removal is not
+ * reached then, and the text says so. A use site adds the closing period.
+ */
+export const NAME_FILE_REMOVAL = 'in that same shell and after the last create attempt, `rm -- "$F"; rmdir -- "${F%/*}"`. That removal runs when the shell reaches it; an INT or TERM signal skips it and leaves the file and its folder in the temp directory'
 
 /** The clause after each base-name class: the match is judged by reading and the value never reaches a command. A use site adds its own parentheses or punctuation. */
 export const JUDGE_BY_READING = 'judge the match by reading; never pass the value to a command'

@@ -71,6 +71,7 @@ import {
   collectSpawnScoping,
   runMdsBuild,
   requireDistFiles,
+  resolveVariantOffSource,
   gitAgentSinkCorpus,
   walkFiles,
   collectBackslashBraceLeaks,
@@ -1425,6 +1426,26 @@ describe('compiled dynamic-build.md: Gate 1 order (D-VALIDATE-ONCE)', () => {
     const steps = [...doctrine.matchAll(/^(\d)\. \*\*(\w+) agent\*\*/gm)].map(m => `${m[1]}:${m[2]}`);
     expect(steps).toEqual(['1:Polish', '2:Harden', '3:Validate']);
     expect(compiled).toContain('before Polish agent + Harden agent + Validate agent (in that order');
+  });
+
+  it('every build states the depth rule right after the Gate 1 exclusion, so a one-line fix gets a lighter pass', () => {
+    const DEPTH_RULE = 'Depth scales to change size and budget: a one-line fix gets a lighter pass.';
+    const EXCLUSION = '**Gate 1 contains NO Evaluate agent and NO Test agent.** Those are Gate 2 only.\n\n';
+    const builds: ReadonlyArray<readonly [string, string | null]> = [
+      ['on', compiled],
+      ['curation-off', resolveVariantOffSource('curation-off', 'commands', 'dynamic-build', BUILT_ROOT)],
+      ['compliance-off', resolveVariantOffSource('compliance-off', 'commands', 'dynamic-build', BUILT_ROOT)],
+      ['both-off', resolveVariantOffSource('both-off', 'commands', 'dynamic-build', BUILT_ROOT)],
+    ];
+    for (const [name, text] of builds) {
+      expect(text, `${name}: the build is read`).not.toBeNull();
+      expect((text as string).split(DEPTH_RULE).length - 1, `${name}: the depth rule appears once`).toBe(1);
+      expect(text, `${name}: the rule follows the Gate 1 exclusion`).toContain(`${EXCLUSION}${DEPTH_RULE}\n`);
+    }
+    // Known-bad probe: a build without the rule is reported by the same check.
+    const lost = compiled.replace(`${DEPTH_RULE}\n\n`, '');
+    expect(lost, 'the seed must land').not.toBe(compiled);
+    expect(lost).not.toContain(`${EXCLUSION}${DEPTH_RULE}\n`);
   });
 
   it('the escalation type list carries harden-blocked', () => {

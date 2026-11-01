@@ -11,14 +11,19 @@
  *   - /dynamic-plan's plan writer spawns Architect. Every other dynamic Design spawn keeps Design:
  *     the dynamic-plan cross-plan critic, the dynamic-tickets drafter and cross-critic, the
  *     ticket-factory drafter and cross-critic, and the dynamic-build wave reader.
+ *   - Architect writes the plans the dynamic plan writer asks for: its body holds a "Plan writing" section
+ *     that prints the config directory and Reads gap-analysis by install path, so the writer has both
+ *     mode skills while /plan Phase 12 preloads design-review alone. Design carries none of that text.
  *
  * Every guard has a named collector, a non-empty-corpus assertion and a known-bad probe run
  * through the same collector.
  */
 
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'fs'
+import * as path from 'path'
 
-import { parseFrontmatterSkills, requireDistFile, resolveAgentSource, resolveCurationOffSource, resolveVariantOffSource } from '../helpers.js'
+import { ROOT, parseFrontmatterSkills, requireDistFile, resolveAgentSource, resolveCurationOffSource, resolveVariantOffSource } from '../helpers.js'
 
 /** The two mode skills. Each variant preloads exactly one of them. */
 const MODE_SKILLS: readonly string[] = ['gap-analysis', 'design-review']
@@ -237,5 +242,115 @@ describe('/dynamic-plan writes plans with Architect; every other dynamic Design 
     const tickets = commandBuilds('dynamic-tickets')[0].content
     expect(collectDynamicSpawnDefects('dt', seed(tickets, '`{ agentType: "Design", schema: CRITIC_SCHEMA }`', '`{ agentType: "Architect", schema: CRITIC_SCHEMA }`'), DYNAMIC_SITES['dynamic-tickets']))
       .toEqual(['dt: the factory cross-critic spawns "Architect", expected Design'])
+  })
+})
+
+/** The Architect section that tells the plan writer how to read the gap-analysis skill it does not preload. */
+const PLAN_WRITING_HEADING = '\n## Plan writing\n'
+
+/** The one line that prints the Claude config directory, as every agent that reads an installed skill file prints it. */
+const CONFIG_DIR_PRINT = 'd="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf \'%s\\n\' "$d"'
+
+/** The installed path of the gap-analysis skill, in the form the agents use: the printed directory, then the skill file. */
+const GAP_ANALYSIS_PATH = '<that directory>/skills/devflow:gap-analysis/SKILL.md'
+
+/**
+ * Named collector: how a variant body falls short of its plan-writing rule. Architect writes the plans that
+ * /dynamic-plan asks for, so its body holds a "Plan writing" section that prints the config directory and Reads
+ * gap-analysis by install path (it preloads design-review alone). Design holds neither, so its spawn pays nothing for it.
+ */
+export function collectPlanWritingDefects(label: string, content: string, writesPlans: boolean): string[] {
+  const at = content.indexOf(PLAN_WRITING_HEADING)
+  if (!writesPlans) {
+    return at === -1 && !content.includes(GAP_ANALYSIS_PATH) ? [] : [`${label}: names a plan-writing section or the gap-analysis path, which only Architect carries`]
+  }
+  if (at === -1) return [`${label}: no "## Plan writing" section`]
+  const end = content.indexOf('\n## ', at + PLAN_WRITING_HEADING.length)
+  const section = content.slice(at, end === -1 ? undefined : end)
+  const out: string[] = []
+  if (!section.includes(CONFIG_DIR_PRINT)) out.push(`${label}: the plan-writing section does not print the config directory`)
+  if (!section.includes(`Read \`${GAP_ANALYSIS_PATH}\``)) out.push(`${label}: the plan-writing section does not Read gap-analysis by install path`)
+  if (content.indexOf(PLAN_WRITING_HEADING, at + 1) !== -1) out.push(`${label}: two plan-writing sections`)
+  return out
+}
+
+describe('Architect writes plans and reads gap-analysis by install path; Design carries no plan-writing text', () => {
+  it('reads both builds of both variants', () => {
+    expect(agentBuilds('architect').map(b => b.label)).toEqual(['architect (curation on)', 'architect (curation off)'])
+    expect(agentBuilds('design').map(b => b.label)).toEqual(['design (curation on)', 'design (curation off)'])
+  })
+
+  it('Architect, in both builds, holds the section that prints the directory and Reads gap-analysis', () => {
+    for (const b of agentBuilds('architect')) expect(collectPlanWritingDefects(b.label, b.content, true)).toEqual([])
+  })
+
+  it('Design, in both builds, holds neither the section nor the gap-analysis path', () => {
+    for (const b of agentBuilds('design')) expect(collectPlanWritingDefects(b.label, b.content, false)).toEqual([])
+  })
+
+  it('known-bad probes: a lost section, a lost print, a path by bare name, a doubled section and a Design with the text are each reported', () => {
+    const architect = agentBuilds('architect')[0].content
+    const seed = (from: string, to: string): string => {
+      expect(architect, `the seed anchor must exist (${from})`).toContain(from)
+      return architect.replace(from, to)
+    }
+    expect(collectPlanWritingDefects('a', seed('## Plan writing', '## Planning'), true)).toEqual(['a: no "## Plan writing" section'])
+    expect(collectPlanWritingDefects('a', seed(CONFIG_DIR_PRINT, 'echo "$HOME/.claude"'), true)).toEqual(['a: the plan-writing section does not print the config directory'])
+    expect(collectPlanWritingDefects('a', seed(`Read \`${GAP_ANALYSIS_PATH}\``, 'Read the gap-analysis skill'), true)).toEqual(['a: the plan-writing section does not Read gap-analysis by install path'])
+    expect(collectPlanWritingDefects('a', `${architect}\n## Plan writing\nagain\n`, true)).toEqual(['a: two plan-writing sections'])
+    const design = agentBuilds('design')[0].content
+    expect(collectPlanWritingDefects('d', `${design}${PLAN_WRITING_HEADING}x\n`, false)).toHaveLength(1)
+    expect(collectPlanWritingDefects('d', `${design}\nRead \`${GAP_ANALYSIS_PATH}\`\n`, false)).toHaveLength(1)
+  })
+})
+
+/** The design-review skill source: the one mode skill that Architect preloads. */
+const designReviewSource = (): string => readFileSync(path.join(ROOT, 'src', 'assets', 'skills', 'design-review', 'SKILL.md'), 'utf-8')
+
+/** The numbered anti-pattern rules of the skill, each with its heading and its text up to the next heading. */
+function antiPatternRules(skill: string): ReadonlyArray<{ readonly heading: string; readonly body: string }> {
+  return skill
+    .split(/^### (?=\d+\. )/m)
+    .slice(1)
+    .map(part => {
+      const body = part.split(/^## /m)[0]
+      return { heading: body.split('\n')[0], body }
+    })
+}
+
+/**
+ * Named collector: the anti-pattern rules whose text lacks the one-line `**Suggest:**` fix, after the
+ * "How to flag" block. The finding names the problem, the line says what to do instead, so a reviewer
+ * that flags a rule can propose the fix without a reference read.
+ */
+export function collectSuggestDefects(skill: string): string[] {
+  return antiPatternRules(skill).flatMap(({ heading, body }) => {
+    const afterFlag = body.slice(body.indexOf('**How to flag:**'))
+    const lines = afterFlag.split('\n').filter(line => line.startsWith('**Suggest:** '))
+    const fence = afterFlag.lastIndexOf('```')
+    return lines.length === 1 && afterFlag.indexOf('**Suggest:** ') > fence ? [] : [`rule "${heading}": ${lines.length} Suggest lines, expected one after the flag block`]
+  })
+}
+
+describe('every anti-pattern rule of design-review carries a one-line fix suggestion', () => {
+  it('holds six rules, each with its Suggest line', () => {
+    const skill = designReviewSource()
+    expect(antiPatternRules(skill), 'the skill holds no rule, so this guard proves nothing').toHaveLength(6)
+    expect(collectSuggestDefects(skill)).toEqual([])
+  })
+
+  it('known-bad probes: a dropped line and a doubled line are each reported', () => {
+    const skill = designReviewSource()
+    const dropped = skill.replace(/^\*\*Suggest:\*\* one purpose per function.*\n/m, '')
+    expect(dropped, 'the seed must land').not.toBe(skill)
+    expect(collectSuggestDefects(dropped)).toEqual(['rule "2. God Functions": 0 Suggest lines, expected one after the flag block'])
+    const doubled = skill.replace(/^(\*\*Suggest:\*\* an application cache.*\n)/m, '$1$1')
+    expect(doubled, 'the seed must land').not.toBe(skill)
+    expect(collectSuggestDefects(doubled)).toEqual(['rule "5. Missing Caching": 2 Suggest lines, expected one after the flag block'])
+    const moved = skill
+      .replace(/^\*\*Suggest:\*\* collect the IDs.*\n/m, '')
+      .replace('**How to flag:**\n```\n[N+1 RISK]', '**Suggest:** collect the IDs first.\n\n**How to flag:**\n```\n[N+1 RISK]')
+    expect(moved, 'the seed must land').not.toBe(skill)
+    expect(collectSuggestDefects(moved), 'a line before the flag block is no fix line').toEqual(['rule "1. N+1 Queries": 0 Suggest lines, expected one after the flag block'])
   })
 })

@@ -69,7 +69,7 @@ Analyze the research question to infer research types needed (min 2, max 5). For
 - `RESEARCH_QUESTION`: Focused sub-question for this type
 - `OUTPUT_PATH`: `{worktree}/.devflow/docs/research/{topic-slug}/{YYYY-MM-DD_HHMM}/{type}.md`
 
-**Tool availability check**: If WebSearch/WebFetch are unavailable, restrict to `codebase` type only.
+**Tool availability check**: If WebSearch/WebFetch are unavailable, restrict to `codebase` type only, telling the user why.
 
 ### Phase 3: Orient (Conditional)
 

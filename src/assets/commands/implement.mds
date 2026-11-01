@@ -192,7 +192,7 @@ Pass `DECISIONS_CONTEXT` to Code agent (Phase 2) and Harden agent (Phase 4).
 <!-- curation:end -->
 {{knowledge_load_after_root()}}
 
-**Fresh base.** Before Phase 2, write `BASE_BRANCH` with the Write tool to a new file in a `mktemp -d` folder (`{name file}`). If the Write tool fails, treat the value as missing; never write it with a shell command. Then run `F="{name file}"; trap 'rm -- "$F"' EXIT; cd "{worktree}" && node "$HOME/.devflow/scripts/resolve-base.cjs" local --name-stdin < "$F"; echo "exit=$?"`. Output other than one `BASE_REF=` line (40 or 64 hex, or `none`) with `exit=0` counts as `NOTE=stop`, `REASON=resolver-unavailable`. Record `BASE_REF`. By `NOTE`: `none` continues; `info` prints one plain line; `degraded` records `TRACEABILITY: DEGRADED (base {REASON}; fix: {fix})`; `stop` (`BASE_REF=none`) stops the run, naming REASON and its fix. Fix by REASON: no-merge-base `git fetch --unshallow`; no-ref or timeout `git fetch origin <base>` (`<base>` stays as written); resolver-unavailable `re-run; if it repeats, run devflow init`; invalid-name the allowed set, never the name; any other REASON none, and `; fix: {fix}` is left out.
+**Fresh base.** Before Phase 2, write `BASE_BRANCH` with the Write tool to a new file in a `mktemp -d` folder (`{name file}`). If the Write tool fails, treat the value as missing; never write it with a shell command. Then run `F="{name file}"; trap 'rm -- "$F"; rmdir -- "${F%/*}"' EXIT; cd "{worktree}" && node "$HOME/.devflow/scripts/resolve-base.cjs" local --name-stdin < "$F"; echo "exit=$?"`. Output other than one `BASE_REF=` line (40 or 64 hex, or `none`) with `exit=0` counts as `NOTE=stop`, `REASON=resolver-unavailable`. Record `BASE_REF`. By `NOTE`: `none` continues; `info` prints one plain line; `degraded` records `TRACEABILITY: DEGRADED (base {REASON}; fix: {fix})`; `stop` (`BASE_REF=none`) stops the run, naming REASON and its fix. Fix by REASON: no-merge-base `git fetch --unshallow`; no-ref or timeout `git fetch origin <base>` (`<base>` stays as written); resolver-unavailable `re-run; if it repeats, run devflow init`; invalid-name the allowed set, never the name; any other REASON none, and `; fix: {fix}` is left out.
 
 ### Phase 2: Implement
 
@@ -520,9 +520,9 @@ Any other or missing Status: report and halt; never PASS.
 <!-- compliance:end -->
 
 <!-- compliance:on -->
-Run once, after the gates, under every strategy. No Code agent opens a PR: the Git agent does, and it pastes `ISSUE_PR_LINK`, `PR_EXCEPTIONS` and `PR_TEST_PLAN_BLOCK` through their paste gates and scrubs the body (D11) before `gh pr create`.
+Run once, after the gates, under every strategy. No Code agent opens a PR: the Git agent does, and it pastes `ISSUE_PR_LINK`, `PR_EXCEPTIONS` and `PR_TEST_PLAN_BLOCK` through their paste gates and scrubs the body (D11) before `gh pr create`. This command writes no link line of its own: it forwards Phase 1's link line verbatim.
 <!-- compliance:off -->
-Run once, after the gates, under every strategy. No Code agent opens a PR: the Git agent does, and it pastes `ISSUE_PR_LINK` through its paste gate and scrubs the body (D11) before `gh pr create`.
+Run once, after the gates, under every strategy. No Code agent opens a PR: the Git agent does, and it pastes `ISSUE_PR_LINK` through its paste gate and scrubs the body (D11) before `gh pr create`. This command writes no link line of its own: it forwards Phase 1's link line verbatim.
 <!-- compliance:end -->
 
 ```

@@ -12,6 +12,8 @@ Run in this order:
 
 **Gate 1 contains NO Evaluate agent and NO Test agent.** Those are Gate 2 only.
 
+Depth scales to change size and budget: a one-line fix gets a lighter pass.
+
 **Cadence — Gate 1 runs at exactly two points per ticket:**
 1. **Gate 1 #1** — immediately after the initial Code agent implementation (inside `implement_bundle()`). An escalated result — Validate exhausted, or Harden BLOCKED — returns early: the ticket's engine returns `ESCALATED` with one escalation, and Gate 2 and the review pass never run on a broken or unfinished build.
 2. **Gate 1 #2** — the final gate, after all Gate-2 fixes and the entire review pass have completed. Harden BLOCKED here is `ESCALATED` as well.
