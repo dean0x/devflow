@@ -215,7 +215,7 @@ export function formatPluginRemovedLine(pluginLabel: string, refusedCount: numbe
  */
 export function formatUninstallOutro(refusedCount: number): string {
   if (refusedCount === 0) {
-    return `${color.green('Devflow uninstalled successfully')}${color.dim('  Reinstall: npx devflow-kit init')}`;
+    return `${color.green('Devflow uninstalled successfully')}${color.dim('  Reinstall: npx devflow-kit@latest init')}`;
   }
   return color.yellow(`Devflow uninstalled in part: ${leftAsTheyAre(refusedCount)}.`);
 }
