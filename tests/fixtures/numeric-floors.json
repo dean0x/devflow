@@ -1214,19 +1214,19 @@
     },
     {
       "id": "architect-body-max",
-      "ceiling": 3386,
-      "pattern": "const ARCHITECT_BODY_MAX_BYTES = 3_386",
+      "ceiling": 3782,
+      "pattern": "const ARCHITECT_BODY_MAX_BYTES = 3_782",
       "occurrences": 1,
       "sourceFile": "tests/guards/plan-group-sizes.test.ts",
-      "description": "The Architect agent body of the curation-on build, dist/agents/architect.md, in bytes. Every turn of the /plan Phase 12 spawn and the /dynamic-plan plan writer reads it (opus, high effort). Added by #733 (Design split into Design and Architect, D-DESIGN-VARIANTS) at 3,387."
+      "description": "The Architect agent body of the curation-on build, dist/agents/architect.md, in bytes. Every turn of the /plan Phase 12 spawn and the /dynamic-plan plan writer reads it (opus, high effort). Added by #733 (Design split into Design and Architect, D-DESIGN-VARIANTS) at 3,387. Raised by #752 from 3,386 to 3,782 (396 bytes): the Plan writing section lets the /dynamic-plan plan writer read gap-analysis by install path, as the Design agent that wrote plans at 3.11.0 preloaded it. The section adds 447 bytes; wording cuts in the same host took 51 first."
     },
     {
       "id": "architect-body-curation-off-max",
-      "ceiling": 2820,
-      "pattern": "const ARCHITECT_BODY_CURATION_OFF_MAX_BYTES = 2_820",
+      "ceiling": 3216,
+      "pattern": "const ARCHITECT_BODY_CURATION_OFF_MAX_BYTES = 3_216",
       "occurrences": 1,
       "sourceFile": "tests/guards/plan-group-sizes.test.ts",
-      "description": "The Architect agent body of the curation-off build, dist/curation-off/agents/architect.md, in bytes. Added by #733 (Design split into Design and Architect, D-DESIGN-VARIANTS) at 2,821."
+      "description": "The Architect agent body of the curation-off build, dist/curation-off/agents/architect.md, in bytes. Added by #733 (Design split into Design and Architect, D-DESIGN-VARIANTS) at 2,821. Raised by #752 from 2,820 to 3,216 (396 bytes), for the same Plan writing section as the curation-on build."
     },
     {
       "id": "explore-body-max",
@@ -1246,11 +1246,11 @@
     },
     {
       "id": "skill-design-review-max",
-      "ceiling": 4393,
-      "pattern": "['design-review', 4_393],",
+      "ceiling": 5217,
+      "pattern": "['design-review', 5_217],",
       "occurrences": 1,
       "sourceFile": "tests/guards/plan-group-sizes.test.ts",
-      "description": "src/assets/skills/design-review/SKILL.md, in bytes. The Design agent preloads it, so every turn of every Design spawn reads it. Added by #714 (lean Plan path group) at 4,415, after the cut from 6,006. Lowered by #706 (lean always-loaded descriptions) to 4393."
+      "description": "src/assets/skills/design-review/SKILL.md, in bytes. The Design agent preloads it, so every turn of every Design spawn reads it. Added by #714 (lean Plan path group) at 4,415, after the cut from 6,006. Lowered by #706 (lean always-loaded descriptions) to 4393. Raised by #752 from 4,393 to 5,217 (824 bytes): six one-line Suggest lines restore the fix advice that 3.11.0 gave for each anti-pattern. They add 981 bytes; wording cuts in the same skill took 157 first. Only Architect preloads it."
     },
     {
       "id": "skill-docs-framework-max",
