@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The root script no longer stops a slow git call** ([#752](https://github.com/dean0x/devflow/issues/752)).
   - `resolve-root.cjs` gave each git call a limit of 5 seconds. On a slow disk or a busy machine, git could miss that limit. The script then failed, and the command used its start directory for both roots.
   - The script now sets no time limit of its own, as the git call of 3.11.0 did. The timeout of the Bash tool still bounds the call. `resolve-settings.cjs` keeps its own limit.
+- **`verify-evidence.cjs claim` again handles a missing folder and a Claims section that is not last** ([#752](https://github.com/dean0x/devflow/issues/752)).
+  - A first claim into an evidence folder that did not exist was refused with `evidence file unusable`. The script now creates the folder, but only inside the working directory. If the run then refuses or writes no line, it removes the folders that it made.
+  - A file whose `## Claims` section had another section after it was refused. The script now puts the new lines at the end of the Claims section. It writes the file through a temporary file in the same folder and keeps the file mode.
+  - The script still refuses a file that does not parse, a file that git tracks, and a head that is not one SHA.
 
 ---
 
