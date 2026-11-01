@@ -2690,6 +2690,31 @@ describe('claim — appends the claim lines of a report to the evidence file', (
       expect(fs.readdirSync(outside)).toEqual([])
     })
 
+    it('behind a link swapped in while the folders are made is refused, and the folder it led out is taken away again', () => {
+      const cwd = scratch('claim-cwd')
+      const outside = scratch('claim-outside')
+      const file = made(cwd, 'docs', 'deep', 'e.md')
+      // The script holds the same fs module object. Once `docs` is made, a link to the outside
+      // folder takes its place, so the next folder (`docs/deep`) is made outside the working directory.
+      const sharedFs = req('fs') as { mkdirSync: (p: string, ...rest: unknown[]) => unknown }
+      const realMkdir = sharedFs.mkdirSync
+      sharedFs.mkdirSync = (p, ...rest) => {
+        const result = realMkdir.call(sharedFs, p, ...rest)
+        if (p === made(cwd, 'docs')) {
+          fs.rmdirSync(p)
+          fs.symlinkSync(outside, p)
+        }
+        return result
+      }
+      try {
+        expect(claim([...flags(file), 'gate'], noCalls, cwd)).toMatchObject({ code: 2, stdout: refusal('evidence file unusable') })
+      } finally {
+        sharedFs.mkdirSync = realMkdir
+      }
+      expect(fs.lstatSync(made(cwd, 'docs')).isSymbolicLink()).toBe(true)
+      expect(fs.readdirSync(outside)).toEqual([])
+    })
+
     it('with a file where a folder must be is not made: evidence file unusable', () => {
       const cwd = scratch('claim-cwd')
       writeScratch(cwd, 'docs', 'a file')
