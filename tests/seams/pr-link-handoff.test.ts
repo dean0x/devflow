@@ -1004,7 +1004,7 @@ describe('/implement Phase 9 — one Git ensure-pr-ready spawn, outside every st
 // second, different link line.
 // -------------------------------------------------------------------------
 
-const NO_OWN_LINK_LINE = "This command writes no link line of its own: it forwards Phase 1's link line verbatim."
+const NO_OWN_LINK_LINE = "This command writes no link line and creates no PR itself: it forwards Phase 1's link line verbatim."
 
 /** The Phase 9 block: from its heading to the CI gate heading, or null when either is absent. */
 function phase9Block(source: string): string | null {
@@ -1036,6 +1036,7 @@ describe('/implement writes no link line of its own in any build (D-LINK-VERBATI
     expect(source, 'the build is read: the guard would pass vacuously on an empty one').not.toBeNull()
     expect(Buffer.byteLength(source as string), 'the build is a whole command').toBeGreaterThan(10_000)
     expect(collectNoOwnLinkLineDefects(source as string)).toEqual([])
+    expect(phase9Block(source as string), 'Phase 9 says the command opens no PR itself: the Git agent does').toContain('creates no PR itself')
   })
 
   it('known-bad probes: a lost sentence, a doubled one and one outside the lead-in are each reported', () => {
@@ -1043,7 +1044,10 @@ describe('/implement writes no link line of its own in any build (D-LINK-VERBATI
     const lost = real.replace(` ${NO_OWN_LINK_LINE}`, '')
     expect(lost, 'the lost seed must land').not.toBe(real)
     expect(collectNoOwnLinkLineDefects(lost)).toEqual(['Phase 9 holds the no-own-link-line sentence 0 times, expected once'])
-    const doubled = real.replace(NO_OWN_LINK_LINE, `${NO_OWN_LINK_LINE} ${NO_OWN_LINK_LINE}`)
+    const noPrClause = real.replace(NO_OWN_LINK_LINE, "This command writes no link line of its own: it forwards Phase 1's link line verbatim.")
+    expect(noPrClause, 'the clause seed must land').not.toBe(real)
+    expect(collectNoOwnLinkLineDefects(noPrClause)).toEqual(['Phase 9 holds the no-own-link-line sentence 0 times, expected once'])
+    const doubled = real.replace(NO_OWN_LINK_LINE,`${NO_OWN_LINK_LINE} ${NO_OWN_LINK_LINE}`)
     expect(doubled, 'the doubled seed must land').not.toBe(real)
     expect(collectNoOwnLinkLineDefects(doubled)).toEqual(['Phase 9 holds the no-own-link-line sentence 2 times, expected once'])
     const inSpawn = lost.replace('Open the pull request for this branch', `${NO_OWN_LINK_LINE} Open the pull request for this branch`)

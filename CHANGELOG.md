@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`/implement` forwards the PR link line and writes none of its own again** ([#752](https://github.com/dean0x/devflow/issues/752)). Both Phase 9 arms say that the command forwards the link line of Phase 1 verbatim, in every build.
 - **A feature knowledge pass again prefers the most specific entries** ([#752](https://github.com/dean0x/devflow/issues/752)). The knowledge step tells the agent to prefer the most specific entries. It also says that a missing Rules section, a missing heading list and `(none)` are normal, not errors. The Debug agent follows the `apply-feature-knowledge` skill for its feature knowledge.
 - **The quality gates scale their depth again** ([#752](https://github.com/dean0x/devflow/issues/752)). After the first gate, the shared engine says that depth scales to change size and budget, so a one-line fix gets a lighter pass.
+- **The Debug agent again points to the `apply-feature-knowledge` skill** ([#752](https://github.com/dean0x/devflow/issues/752)). The Debug agent follows that skill for the feature knowledge in its input, as it did in 3.11.0.
 - **`/research` again tells the user why it uses the codebase only** ([#752](https://github.com/dean0x/devflow/issues/752)). If WebSearch and WebFetch are unavailable, the command restricts the research to the `codebase` type and tells the user why.
 
 ---
