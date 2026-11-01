@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - A failed `gh` call or an unreadable result inside `ci-wait.cjs` printed one INDETERMINATE line and no `NEXT=` line. The `/implement` and `/resolve` prompts read the missing line as "proceed", so the gate did not wait.
   - With `--waits` and `--fixes`, the script now also prints the `NEXT=` line of an INDETERMINATE result that waited 0 seconds. The gate waits again while fewer than 3 waits have run. After that it proceeds and says that the CI status is unknown.
   - A bad argument still prints the usage line with no `NEXT=` line.
+- **The root script no longer stops a slow git call** ([#752](https://github.com/dean0x/devflow/issues/752)).
+  - `resolve-root.cjs` gave each git call a limit of 5 seconds. On a slow disk or a busy machine, git could miss that limit. The script then failed, and the command used its start directory for both roots.
+  - The script now sets no time limit of its own, as the git call of 3.11.0 did. The timeout of the Bash tool still bounds the call. `resolve-settings.cjs` keeps its own limit.
 
 ---
 
