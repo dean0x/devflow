@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The CI gate waits again when its own check fails** ([#752](https://github.com/dean0x/devflow/issues/752)).
+  - A failed `gh` call or an unreadable result inside `ci-wait.cjs` printed one INDETERMINATE line and no `NEXT=` line. The `/implement` and `/resolve` prompts read the missing line as "proceed", so the gate did not wait.
+  - With `--waits` and `--fixes`, the script now also prints the `NEXT=` line of an INDETERMINATE result that waited 0 seconds. The gate waits again while fewer than 3 waits have run. After that it proceeds and says that the CI status is unknown.
+  - A bad argument still prints the usage line with no `NEXT=` line.
+
 ---
 
 ## [3.12.0] - 2026-10-31
