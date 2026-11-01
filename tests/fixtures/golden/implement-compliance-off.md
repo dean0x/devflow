@@ -11,7 +11,7 @@ Orchestrate a single task by spawning agents.
 $ARGUMENTS
 </command-input>
 
-`COMMAND_INPUT` is the text above: a plan document path (an existing `.md` file), an issue reference, a task description, or empty (use the conversation).
+`COMMAND_INPUT` is the text above: a plan document path, an issue reference, a task description, or empty (use the conversation).
 
 **Issue-reference grammar.** Scan `COMMAND_INPUT` for candidate issue references: a `#`-prefixed token or a bare digit run. Collect them in source order as `ISSUE_REFS`, and forward the list to the Git agent verbatim. Do not render, normalise, pad, strip or drop a token. Under `github`, a token that matches `^#?[1-9][0-9]{0,8}$` is a reference, and the Git agent renders it as `#{n}`.
 
@@ -61,7 +61,7 @@ When `EVIDENCE_POLICY` is `required`, record `TRACEABILITY: DEGRADED (compliance
 
 `PR_DESCRIPTION_GUIDANCE` is the full `## PR Description Guidance` section of the plan document. Any other input, empty input included, or a plan without that section, gives `(none)`.
 
-**Empty input.** When `COMMAND_INPUT` is empty — a plan handoff arrives this way, with the plan already in the conversation — there is no argument to name the branch from, and the Git agent sees none of this conversation. Write the description yourself: one line, taken from the plan's title or, with no plan, from the conversation. Send it as the setup-task `TASK_DESCRIPTION` below.
+**Empty input.** When `COMMAND_INPUT` is empty — a plan handoff arrives this way with the plan already in the conversation — no argument can name the branch, and the Git agent sees none of this conversation. Write the description yourself: one line, taken from the plan's title or, with no plan, from the conversation. Send it as the setup-task `TASK_DESCRIPTION` below.
 
 Spawn Git agent:
 
@@ -82,7 +82,7 @@ The issue token is forwarded **unclassified**: routing is by SHAPE alone. Only `
 - **Extension.** A path ending in `.md` is a plan document, never an issue reference: `ISSUE_INPUT` carries the plan's frontmatter `issue`, never the path.
 - **Token count.** Forwarding the FIRST token alone sends `/implement fix the login bug` as `ISSUE_INPUT: fix` with no description, so the request is dropped.
 
-**Capture from Git agent output**, each value as written. Never re-derive one issue value from another, and never infer one from a `TRACEABILITY: DEGRADED ({reason})` status line: that line is a status, not issue content.
+**Capture from Git agent output**, each value as written. Never re-derive one issue value from another, and never infer one from a `TRACEABILITY: DEGRADED ({reason})` status line.
 - `TASK_ID`: The branch name created by Git agent
 - `BASE_BRANCH`: Branch this feature was created from; stop unless it passes the setup check
 - `ISSUE_ID`: the `- **Issue ID**:` line under `### Handoff Values`, if any. `ISSUE_NUMBER` is this value.
@@ -190,15 +190,15 @@ Pass `DECISIONS_CONTEXT` to Code agent (Phase 2) and Harden agent (Phase 4).
 
 **Step 1 — Read the index cache** `{worktree}/.devflow/features/index.md`. Each line has the form `- **{slug}** — {areas} — {Use-when description}`. If `index.md` is absent or has no entry line, glob `{worktree}/.devflow/features/*/KNOWLEDGE.md` and read only the YAML frontmatter of each file, in one turn.
 
-**Step 2 — Pick relevant KBs:** select the entries whose documented area overlaps the current task (index line, or frontmatter `description` and `directories` on fallback).
+**Step 2 — Pick relevant KBs:** select the entries whose documented area overlaps the current task (index line, or frontmatter `description` and `directories` on fallback). Prefer the most specific entries.
 
 **Step 3 — Read each selected KB's Rules.** `{kb}` is `{worktree}/.devflow/features/{slug}/KNOWLEDGE.md`:
 
 1. List the `##` headings with line numbers of all selected KBs in one Bash call: `command grep -n '^## ' "{kb}" …`. With two or more paths, each line starts with its `{kb}:` path. This only locates sections; the text of a KB comes from the Read view alone.
 2. Read the `## Rules` range (its line to the next heading) with the Read tool, using `offset` and `limit`, all selected KBs in one turn, and choose the one to three bullets most relevant to the task.
-3. If the KB has no `## Rules` section, choose one to three entries from its `## Anti-Patterns` or `## Gotchas` range the same way, and label them by that section's name instead of an ID.
+3. If the KB has no `## Rules` section, choose one to three entries from its `## Anti-Patterns` or `## Gotchas` range the same way.
 
-When a KB contradicts the code you observe, **trust the code**.
+When a KB contradicts the code, **trust the code**. A missing Rules section, a missing heading list and `(none)` are normal, not errors.
 
 **Step 4 — Set FEATURE_KNOWLEDGE and FEATURE_KNOWLEDGE_RULES.** Write one block per selected KB. Paste each bullet verbatim from the Read view, never from a shell view. The path is relative to the checkout root; an agent resolves it under `WORKTREE_PATH` when one is provided.
 
@@ -211,9 +211,9 @@ Rules:
 Headings: L5 Rules · L40 Overview · L62 Anti-Patterns · L118 Key Files
 ```
 
-A KB with no Rules section labels its entries `Rules ({section name}):` and gives them no ID. `FEATURE_KNOWLEDGE` is these blocks; `FEATURE_KNOWLEDGE_RULES` is the same blocks without the `Headings:` line. Each spawn names the variable its recipient takes. If no KBs exist, no KBs are relevant, or `.devflow/features/` is absent, set both to `(none)`.
+A KB with no Rules section labels its entries `Rules ({section name}):` and gives them no ID. `FEATURE_KNOWLEDGE` is these blocks; `FEATURE_KNOWLEDGE_RULES` is the same blocks without the `Headings:` line. If no KBs exist, no KBs are relevant, or `.devflow/features/` is absent, set both to `(none)`.
 
-**Fresh base.** Before Phase 2, write `BASE_BRANCH` with the Write tool to a new file in a `mktemp -d` folder (`{name file}`). If the Write tool fails, treat the value as missing; never write it with a shell command. Then run `F="{name file}"; trap 'rm -- "$F"' EXIT; cd "{worktree}" && node "$HOME/.devflow/scripts/resolve-base.cjs" local --name-stdin < "$F"; echo "exit=$?"`. Output other than one `BASE_REF=` line (40 or 64 hex, or `none`) with `exit=0` counts as `NOTE=stop`, `REASON=resolver-unavailable`. Record `BASE_REF`. By `NOTE`: `none` continues; `info` prints one plain line; `degraded` records `TRACEABILITY: DEGRADED (base {REASON}; fix: {fix})`; `stop` (`BASE_REF=none`) stops the run, naming REASON and its fix. Fix by REASON: no-merge-base `git fetch --unshallow`; no-ref or timeout `git fetch origin <base>` (`<base>` stays as written); resolver-unavailable `re-run; if it repeats, run devflow init`; invalid-name the allowed set, never the name; any other REASON none, and `; fix: {fix}` is left out.
+**Fresh base.** Before Phase 2, write `BASE_BRANCH` with the Write tool to a new file in a `mktemp -d` folder (`{name file}`). If the Write tool fails, treat the value as missing; never write it with a shell command. Then run `F="{name file}"; trap 'rm -- "$F"; rmdir -- "${F%/*}"' EXIT; cd "{worktree}" && node "$HOME/.devflow/scripts/resolve-base.cjs" local --name-stdin < "$F"; echo "exit=$?"`. Output other than one `BASE_REF=` line (40 or 64 hex, or `none`) with `exit=0` counts as `NOTE=stop`, `REASON=resolver-unavailable`. Record `BASE_REF`. By `NOTE`: `none` continues; `info` prints one plain line; `degraded` records `TRACEABILITY: DEGRADED (base {REASON}; fix: {fix})`; `stop` (`BASE_REF=none`) stops the run, naming REASON and its fix. Fix by REASON: no-merge-base `git fetch --unshallow`; no-ref or timeout `git fetch origin <base>` (`<base>` stays as written); resolver-unavailable `re-run; if it repeats, run devflow init`; invalid-name the allowed set, never the name; any other REASON none, and `; fix: {fix}` is left out.
 
 ### Phase 2: Implement
 
@@ -518,7 +518,7 @@ Any other or missing Status: report and halt; never PASS.
 **Produces:** PR_NUMBER
 **Requires:** BASE_BRANCH, BASE_REF, TASK_ID, ISSUE_NUMBER, ISSUE_PR_LINK, PR_DESCRIPTION_GUIDANCE, APPLY_CONVENTIONS
 
-Run once, after the gates, under every strategy. No Code agent opens a PR: the Git agent does, and it pastes `ISSUE_PR_LINK` through its paste gate and scrubs the body (D11) before `gh pr create`.
+Run once, after the gates, under every strategy. No Code agent opens a PR: the Git agent does, and it pastes `ISSUE_PR_LINK` through its paste gate and scrubs the body (D11) before `gh pr create`. This command writes no link line and creates no PR itself: it forwards Phase 1's link line verbatim.
 
 ```
 Agent(subagent_type="Git"):
@@ -592,7 +592,7 @@ Show the test plan's evidence from Phase 11: `Test plan: {VERIFIED-CI + ATTESTED
 
 If any Git agent output emitted `TRACEABILITY: DEGRADED ({reason})` lines during the run, or the compliance-off line of Phase 1, the fresh base step, Phase 10's push, Phase 11's push or Phase 11's script output carried one, surface them verbatim in the report under a `### Traceability` subsection.
 
-If Phase 9 listed uncommitted files, show them as a `### Uncommitted files` subsection: the user commits them or discards them.
+If Phase 9 listed uncommitted files, show them as a `### Uncommitted files` subsection.
 
 If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lines in the report.
 

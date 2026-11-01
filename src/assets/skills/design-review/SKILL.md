@@ -7,7 +7,7 @@ allowed-tools: Read, Grep, Glob
 
 # Design Review
 
-Anti-pattern detection for implementation plans. Catches structural problems before they become code.
+Anti-pattern detection for implementation plans.
 
 ## Iron Law
 
@@ -15,8 +15,7 @@ Anti-pattern detection for implementation plans. Catches structural problems bef
 >
 > A plan that implies N+1 queries will produce N+1 queries. A plan that omits error
 > handling will produce code with no error handling. Review the plan as rigorously as
-> you review the code — the plan is the blueprint that every implementation decision
-> follows.
+> the code: every implementation decision follows it.
 
 ## Anti-Pattern Detection Rules
 
@@ -34,6 +33,8 @@ Anti-pattern detection for implementation plans. Catches structural problems bef
 Resolution: Replace loop with batch query: {proposed batch operation}.
 ```
 
+**Suggest:** collect the IDs first and batch-fetch the related rows in one query, or eager-load them (JOIN) in the list query.
+
 ### 2. God Functions
 
 **What to look for in a plan:**
@@ -48,6 +49,8 @@ Resolution: Replace loop with batch query: {proposed batch operation}.
 Resolution: Split into: {responsibility 1} → {responsibility 2} → {responsibility 3}.
 ```
 
+**Suggest:** one purpose per function; move notification, logging and other side effects to their own functions, and compose them at the service layer.
+
 ### 3. Missing Parallelism
 
 **What to look for in a plan:**
@@ -61,6 +64,8 @@ Resolution: Split into: {responsibility 1} → {responsibility 2} → {responsib
 [SEQUENTIAL BOTTLENECK] Steps {N}-{M}: "{quoted steps}" — no dependency between them.
 Resolution: Execute {step A} and {step B} in parallel: {proposed parallel pattern}.
 ```
+
+**Suggest:** run independent steps in parallel (`Promise.all`, goroutines, `asyncio.gather`), and name the steps that must stay in order.
 
 ### 4. Error Handling Gaps
 
@@ -77,6 +82,8 @@ Resolution: Execute {step A} and {step B} in parallel: {proposed parallel patter
 Resolution: Add: {on failure scenario} → {specific recovery action}.
 ```
 
+**Suggest:** for each external call, the action on timeout, 4xx and 5xx; a compensation step for each step of a multi-step operation; Result types or explicit error returns, never a silent failure.
+
 ### 5. Missing Caching
 
 **What to look for in a plan:**
@@ -90,6 +97,8 @@ Resolution: Add: {on failure scenario} → {specific recovery action}.
 [CACHING GAP] Step {N}: "{quoted plan text}" — {expensive operation} on every request.
 Resolution: Cache {data} for {TTL}: {proposed cache strategy and invalidation}.
 ```
+
+**Suggest:** an application cache for cross-request data, a short-TTL in-memory cache for process-local reference data, and the invalidation (on update, by TTL, or both).
 
 ### 6. Poor Decomposition
 
@@ -105,6 +114,8 @@ Resolution: Cache {data} for {TTL}: {proposed cache strategy and invalidation}.
 Resolution: {concern A} belongs in {layer/module}; {concern B} belongs in {layer/module}.
 ```
 
+**Suggest:** one layer per step (presentation, business logic, data access); cross-cutting concerns (logging, auth, validation) in middleware or decorators; one bounded context per module.
+
 ## Extended References
 
 | Reference | Content |
@@ -113,9 +124,9 @@ Resolution: {concern A} belongs in {layer/module}; {concern B} belongs in {layer
 
 ## Severity Guidelines
 
-| Level | Criteria |
+| Level | An anti-pattern that |
 |-------|----------|
-| **CRITICAL** | Anti-pattern that will cause correctness failures (data loss, security breach) |
-| **HIGH** | Anti-pattern that will cause significant performance or maintainability problems |
-| **MEDIUM** | Anti-pattern that will require architectural rework post-implementation |
-| **LOW** | Anti-pattern that reduces code quality but is easily refactored |
+| **CRITICAL** | will cause correctness failures (data loss, security breach) |
+| **HIGH** | will cause significant performance or maintainability problems |
+| **MEDIUM** | will require architectural rework post-implementation |
+| **LOW** | reduces code quality but is easily refactored |

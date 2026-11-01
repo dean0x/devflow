@@ -62,6 +62,7 @@ import {
   JUDGE_BY_READING,
   MAIN_PROBE,
   MASTER_FALLBACK,
+  NAME_DIR_TRAP,
   NAME_FILE_TRAP,
   NO_PR_CLAUSE,
   ORIGIN_HEAD_READ,
@@ -2233,8 +2234,8 @@ describe('#421 AC-26: the cross-references match the new phase numbers', () => {
 // #495 — Phase 1 resolves a fresh base once and every later diff starts at it
 // ---------------------------------------------------------------------------
 
-/** The call: the local rule over the name file read on stdin, in the worktree, with the file removed on every exit and the exit status echoed. */
-const FRESH_BASE_CALL = `${NAME_FILE_TRAP} cd "{worktree}" && node "$HOME/.devflow/scripts/resolve-base.cjs" local --name-stdin < "$F"; echo "exit=$?"`
+/** The call: the local rule over the name file read on stdin, in the worktree, with the file and its `mktemp -d` folder removed on every exit and the exit status echoed. */
+const FRESH_BASE_CALL = `${NAME_DIR_TRAP} cd "{worktree}" && node "$HOME/.devflow/scripts/resolve-base.cjs" local --name-stdin < "$F"; echo "exit=$?"`
 
 /** What the fresh-base step states: [what it must say, the text that says it]. */
 const FRESH_BASE_PARTS: ReadonlyArray<readonly [string, string]> = [
@@ -2289,14 +2290,15 @@ describe('#495: /implement resolves a fresh base once, before Phase 2, and every
     expect(collectImplementFreshBaseDefects(seeded)).toContain(`the fresh-base step lacks: ${what}`)
   })
 
-  it('known-bad probes: a name word, a call that reads no file and a flagged rm in the trap are each reported', () => {
+  it('known-bad probes: a name word, a call that reads no file, a flagged rm in the trap and a trap that leaves the folder are each reported', () => {
     const md = implementMd()
     const callPart = 'the fresh-base step lacks: the local-rule call over the name file on stdin, in the worktree, with the trap and the exit status echoed'
     for (const wounded of [
       FRESH_BASE_CALL.replace(' --name-stdin < "$F"', ' "${B}"'),
       FRESH_BASE_CALL.replace(' < "$F"', ''),
-      FRESH_BASE_CALL.replace('trap \'rm -- "$F"\'', 'trap \'rm -f "$F"\''),
-      FRESH_BASE_CALL.replace('trap \'rm -- "$F"\' EXIT; ', ''),
+      FRESH_BASE_CALL.replace('trap \'rm -- "$F"', 'trap \'rm -f "$F"'),
+      FRESH_BASE_CALL.replace('; rmdir -- "${F%/*}"', ''),
+      FRESH_BASE_CALL.replace('trap \'rm -- "$F"; rmdir -- "${F%/*}"\' EXIT; ', ''),
     ]) {
       expect(wounded, 'the seed must land').not.toBe(FRESH_BASE_CALL)
       const seeded = md.replace(FRESH_BASE_CALL, () => wounded)

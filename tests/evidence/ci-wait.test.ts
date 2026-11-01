@@ -2190,15 +2190,34 @@ describe('D-CI-NEXT: main prints the CI line, then the NEXT line, only when both
     expect(r.stdout.split('\n')).toEqual(['CI FAILING pr=12 head=aaaaaaa failing=x_NEXT_proceed SAY_none pending=- waited=2', nextLine('fix', SAY.fix), ''])
   })
 
-  it('a failure path prints the one failure line, with the flags as without them', async () => {
+  it('a wait that fails inside the script prints its INDETERMINATE line, and with the flags the NEXT line of a wait of 0 seconds', async () => {
     const boom = new Error('the clock failed')
     const clock: Clock = { now: () => { throw boom }, sleep: async () => undefined }
     const world = new World(() => viewOk())
     const plain = await CW.main(argvOf(), { exec: world.exec, clock })
-    const flagged = await CW.main([...argvOf(), '--waits', '1', '--fixes', '0'], { exec: world.exec, clock })
-    expect(plain).toEqual({ code: 0, stdout: 'CI INDETERMINATE pr=12 head=aaaaaaa waited=0 reason=gh-failed\n' })
-    expect(flagged).toEqual(plain)
+    const firstWait = await CW.main([...argvOf(), '--waits', '1', '--fixes', '0'], { exec: world.exec, clock })
+    const lastWait = await CW.main([...argvOf(), '--waits', '3', '--fixes', '0'], { exec: world.exec, clock })
+    const failure = 'CI INDETERMINATE pr=12 head=aaaaaaa waited=0 reason=gh-failed\n'
+    expect(plain).toEqual({ code: 0, stdout: failure })
+    expect(firstWait).toEqual({ code: 0, stdout: `${failure}${nextLine('wait', SAY.none)}\n` })
+    expect(lastWait).toEqual({ code: 0, stdout: `${failure}${nextLine('proceed', SAY.unknown)}\n` })
     expect(CW.checkLine(plain.stdout.slice(0, -1))).toBe(true)
+  })
+
+  it('a CI line that the self-check refuses prints the unparseable line, and with the flags the NEXT line of a wait of 0 seconds', async () => {
+    // The first clock read starts the wait; every later read is NaN, so the line renders `waited=NaN`.
+    const unreadable = (): Clock => {
+      let reads = 0
+      return { now: () => (reads++ === 0 ? 0 : Number.NaN), sleep: async () => undefined }
+    }
+    const exec = new World(({ kind }) => (kind === 'view' ? viewOk() : checksOk('pass')), false).exec
+    const plain = await CW.main(argvOf(), { exec, clock: unreadable() })
+    const firstWait = await CW.main([...argvOf(), '--waits', '1', '--fixes', '0'], { exec, clock: unreadable() })
+    const lastWait = await CW.main([...argvOf(), '--waits', '3', '--fixes', '0'], { exec, clock: unreadable() })
+    const refused = 'CI INDETERMINATE pr=12 head=aaaaaaa waited=0 reason=unparseable\n'
+    expect(plain).toEqual({ code: 0, stdout: refused })
+    expect(firstWait).toEqual({ code: 0, stdout: `${refused}${nextLine('wait', SAY.none)}\n` })
+    expect(lastWait).toEqual({ code: 0, stdout: `${refused}${nextLine('proceed', SAY.unknown)}\n` })
   })
 
   it('the usage line is the same with and without good flags beside a bad pr', async () => {

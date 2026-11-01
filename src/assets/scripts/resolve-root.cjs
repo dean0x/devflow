@@ -36,8 +36,9 @@
 //   - main() returns {code, line} and never calls process.exit or throws; the single
 //     `require.main === module` boundary is the only stdout write and the only
 //     exitCode assignment
-//   - every subprocess is spawned with an argv array (never a shell), stdin ignored,
-//     a timeout and a maxBuffer — resolve-settings.cjs's runGit does this
+//   - every subprocess is spawned with an argv array (never a shell), stdin ignored
+//     and a maxBuffer, with no time limit (D-ROOT-NO-TIMEOUT): main() clears the limit
+//     that resolve-settings.cjs's runGit sets, and resolve-settings.cjs keeps its own
 //   - a local read only: no network, nothing written
 
 'use strict';
@@ -113,7 +114,10 @@ function fail(code, reason) {
  */
 function main(argv, deps) {
   try {
-    const exec = deps && typeof deps.exec === 'function' ? deps.exec : settings.defaultExec;
+    const base = deps && typeof deps.exec === 'function' ? deps.exec : settings.defaultExec;
+    // D-ROOT-NO-TIMEOUT: git runs with no devflow time limit, as the Bash git call of the
+    // prompts did; the Bash tool's own timeout bounds the call. runGit's limit is removed here.
+    const exec = (file, gitArgs, opts) => base(file, gitArgs, { ...opts, timeout: undefined });
     const args = parseArgs(argv);
     if (args.kind === 'usage') {
       process.stderr.write(args.usage + '\n');

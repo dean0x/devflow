@@ -2,7 +2,7 @@ import { describe, it, expect, afterAll } from 'vitest'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
-import { ROOT, buildCommittedTree, cleanupCommittedTree, collectCodeSpawnSites, collectOrderViolations, ensurePrReadyReference, gitOperationReferenceCorpus, JUDGE_BY_READING, NAME_FILE_REMOVAL, PR_ONLY_KEYS, requireDistFile, walkFiles, WRITE_FAILURE } from '../helpers.js'
+import { ROOT, buildCommittedTree, cleanupCommittedTree, collectCodeSpawnSites, collectOrderViolations, ensurePrReadyReference, gitOperationReferenceCorpus, JUDGE_BY_READING, NAME_FILE_REMOVAL, PR_ONLY_KEYS, requireDistFile, resolveVariantOffSource, walkFiles, WRITE_FAILURE } from '../helpers.js'
 import { compiledSkillRefsDir } from '../../src/core/assets.js'
 
 /** The generated `devflow:git` reference tree — the providers' own mechanics. */
@@ -996,6 +996,67 @@ describe('/implement Phase 9 — one Git ensure-pr-ready spawn, outside every st
   }, 20_000)
 })
 
+// -------------------------------------------------------------------------
+// /implement writes no link line of its own (D-LINK-VERBATIM). The Git agent's Phase 1
+// rendering is the only link line, so Phase 9 says the command forwards that one and
+// renders none. Every build of the command holds the sentence in its Phase 9 block, the
+// lead-in before the spawn: a build that lost it would let the orchestrator write a
+// second, different link line.
+// -------------------------------------------------------------------------
+
+const NO_OWN_LINK_LINE = "This command writes no link line and creates no PR itself: it forwards Phase 1's link line verbatim."
+
+/** The Phase 9 block: from its heading to the CI gate heading, or null when either is absent. */
+function phase9Block(source: string): string | null {
+  const start = source.indexOf(PHASE9)
+  const end = source.indexOf('### Phase 10: CI Status Gate')
+  return start === -1 || end === -1 || end < start ? null : source.slice(start, end)
+}
+
+/** Named collector: how a built /implement fails to say that it writes no link line of its own. */
+function collectNoOwnLinkLineDefects(source: string): string[] {
+  const phase = phase9Block(source)
+  if (phase === null) return ['no Phase 9 block']
+  const count = phase.split(NO_OWN_LINK_LINE).length - 1
+  if (count !== 1) return [`Phase 9 holds the no-own-link-line sentence ${count} times, expected once`]
+  const lead = phase.slice(0, phase.indexOf('```'))
+  return lead.includes(NO_OWN_LINK_LINE) ? [] : ['the sentence is not in the lead-in before the spawn']
+}
+
+describe('/implement writes no link line of its own in any build (D-LINK-VERBATIM)', () => {
+  const builds: ReadonlyArray<readonly [string, () => string | null]> = [
+    ['on', () => requireDistFile('implement.md')],
+    ['curation-off', () => resolveVariantOffSource('curation-off', 'commands', 'implement')],
+    ['compliance-off', () => resolveVariantOffSource('compliance-off', 'commands', 'implement')],
+    ['both-off', () => resolveVariantOffSource('both-off', 'commands', 'implement')],
+  ]
+
+  it.each(builds)('the %s build forwards the Phase 1 link line and renders none of its own', (_name, read) => {
+    const source = read()
+    expect(source, 'the build is read: the guard would pass vacuously on an empty one').not.toBeNull()
+    expect(Buffer.byteLength(source as string), 'the build is a whole command').toBeGreaterThan(10_000)
+    expect(collectNoOwnLinkLineDefects(source as string)).toEqual([])
+    expect(phase9Block(source as string), 'Phase 9 says the command opens no PR itself: the Git agent does').toContain('creates no PR itself')
+  })
+
+  it('known-bad probes: a lost sentence, a doubled one and one outside the lead-in are each reported', () => {
+    const real = requireDistFile('implement.md')
+    const lost = real.replace(` ${NO_OWN_LINK_LINE}`, '')
+    expect(lost, 'the lost seed must land').not.toBe(real)
+    expect(collectNoOwnLinkLineDefects(lost)).toEqual(['Phase 9 holds the no-own-link-line sentence 0 times, expected once'])
+    const noPrClause = real.replace(NO_OWN_LINK_LINE, "This command writes no link line of its own: it forwards Phase 1's link line verbatim.")
+    expect(noPrClause, 'the clause seed must land').not.toBe(real)
+    expect(collectNoOwnLinkLineDefects(noPrClause)).toEqual(['Phase 9 holds the no-own-link-line sentence 0 times, expected once'])
+    const doubled = real.replace(NO_OWN_LINK_LINE,`${NO_OWN_LINK_LINE} ${NO_OWN_LINK_LINE}`)
+    expect(doubled, 'the doubled seed must land').not.toBe(real)
+    expect(collectNoOwnLinkLineDefects(doubled)).toEqual(['Phase 9 holds the no-own-link-line sentence 2 times, expected once'])
+    const inSpawn = lost.replace('Open the pull request for this branch', `${NO_OWN_LINK_LINE} Open the pull request for this branch`)
+    expect(inSpawn, 'the moved seed must land').not.toBe(lost)
+    expect(collectNoOwnLinkLineDefects(inSpawn)).toEqual(['the sentence is not in the lead-in before the spawn'])
+    expect(collectNoOwnLinkLineDefects(real.replace(PHASE9, '### Phase 9 later'))).toEqual(['no Phase 9 block'])
+  })
+})
+
 describe('ensure-pr-ready opens the PR (D-LINK-VERBATIM, D-COMMIT-EXPLICIT, D-PR-EXISTS)', () => {
   /** The six inputs #448 added to the operation, all optional. */
   const NEW_INPUTS = ['BASE_BRANCH', 'TASK_ID', 'ISSUE_NUMBER', 'ISSUE_PR_LINK', 'PR_EXCEPTIONS', 'COMMIT_UNCOMMITTED'] as const
@@ -1050,7 +1111,7 @@ describe('ensure-pr-ready opens the PR (D-LINK-VERBATIM, D-COMMIT-EXPLICIT, D-PR
       { from: '--base="$(cat -- "$F")"', to: '--base "$BASE_BRANCH"', expected: 'the base reaches gh pr create only from the name file' },
       { from: 'Then Write `BASE_BRANCH` to a new file in a `mktemp -d` folder (`{name file}`).', to: 'Run `printf "%s" "$BASE_BRANCH" > "$F"`.', expected: 'a given base is checked by reading, written to a new file in a mktemp -d folder with the Write tool, and an empty or missing file opens no PR' },
       { from: WRITE_FAILURE, to: 'If the Write tool fails, write it with a shell command.', expected: 'a failed Write is a missing value, never a shell write' },
-      { from: 'after the last create attempt, `rm -- "$F"`', to: 'after the first create attempt, `rm -- "$F"`', expected: 'the name file is removed after the last create attempt, so a scrubber failure opens the PR with the given base' },
+      { from: 'after the last create attempt, `rm -- "$F"; rmdir -- "${F%/*}"`', to: 'after the first create attempt, `rm -- "$F"; rmdir -- "${F%/*}"`', expected: 'the name file is removed after the last create attempt, so a scrubber failure opens the PR with the given base' },
       { from: 'and no second EXIT trap is armed', to: 'and a second EXIT trap is armed', expected: 'the D11 trap is unchanged and no second exit trap is armed for the base' },
       { from: '`ISSUE_PR_LINK` (optional), ', to: '', expected: 'the Input line does not declare ISSUE_PR_LINK as optional' },
     ]

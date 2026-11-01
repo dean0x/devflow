@@ -2456,7 +2456,8 @@ describe('claim — appends the claim lines of a report to the evidence file', (
     throw new Error(`claim made a call: ${file} ${args.join(' ')}`)
   }
 
-  const claim = (args: readonly string[], exec: ExecFn = noCalls): Outcome & { stderr: string } => runMain(['claim', ...args], { exec })
+  /** `cwd` is the working directory of the run; a missing folder is made only inside it. */
+  const claim = (args: readonly string[], exec: ExecFn = noCalls, cwd: string = tmp): Outcome & { stderr: string } => runMain(['claim', ...args], { exec, cwd })
   const fileWith = (text: string, name = 'e.md'): string => writeScratch(scratch('claim'), name, text)
   const flags = (file: string, head = HEAD): string[] => ['--evidence', file, '--head', head]
   const read = (file: string): string => fs.readFileSync(file, 'utf8')
@@ -2543,6 +2544,89 @@ describe('claim — appends the claim lines of a report to the evidence file', (
       expect(read(file)).toBe(`${before}\n## Claims\n${GATE}\n`)
     })
 
+    it.each([
+      ['an empty Claims section', []],
+      ['a Claims section that holds a claim', [claimLine(1, 'PASS', OLD, 0)]],
+    ])('takes the line at the end of %s that an Evidence Exceptions section follows, and that section is not touched', (_label, claims) => {
+      const before = evidenceFile(PLAN, claims, [EXCEPTION])
+      const file = fileWith(before)
+      expect(claim([...flags(file), 'gate'])).toMatchObject({ code: 0, stdout: 'CLAIM appended:1 PASS:1 FAIL:0 SKIP:0 skipped:0\n' })
+      expect(read(file)).toBe(evidenceFile(PLAN, [...claims, GATE], [EXCEPTION]))
+      expect(read(file).endsWith(`\n## Evidence Exceptions\n${EXCEPTION}\n`)).toBe(true)
+      expect(PE.evidenceSections(read(file)).ok).toBe(true)
+      expect(claimsOf(file).gates.validate).toMatchObject({ outcome: 'PASS', sha: HEAD })
+    })
+
+    it('puts a TP line behind the last claim of a Claims section that is not last, and keeps the blank line before the next heading', () => {
+      const before = evidenceFile(PLAN, [claimLine(1, 'PASS', OLD, 0)], [EXCEPTION])
+      const file = fileWith(before)
+      expect(claim([...flags(file), 'TP-2=FAIL:1', 'TP-3=SKIP'])).toMatchObject({ code: 0, stdout: 'CLAIM appended:2 PASS:0 FAIL:1 SKIP:1 skipped:0\n' })
+      expect(read(file)).toBe(evidenceFile(PLAN, [claimLine(1, 'PASS', OLD, 0), claimLine(2, 'FAIL', HEAD, 1), `- TP-3 SKIP sha:${HEAD} by:test`], [EXCEPTION]))
+    })
+
+    it('takes the line at the end of a CRLF Claims section that is not last, and keeps every other byte', () => {
+      const before = ['## Test Plan', ...PLAN, '', '## Claims', claimLine(1, 'PASS', OLD, 0), '', '## Evidence Exceptions', EXCEPTION, ''].join('\r\n')
+      const file = fileWith(before)
+      expect(claim([...flags(file), 'gate'])).toMatchObject({ code: 0, stdout: 'CLAIM appended:1 PASS:1 FAIL:0 SKIP:0 skipped:0\n' })
+      expect(read(file)).toBe(before.replace(`${claimLine(1, 'PASS', OLD, 0)}\r\n`, `${claimLine(1, 'PASS', OLD, 0)}\r\n${GATE}\n`))
+    })
+
+    it('refuses an insert that takes the file over the parser limit, and leaves the file and its folder as they were', () => {
+      const dir = scratch('claim')
+      const tail = `## Claims\n\n## Evidence Exceptions\n${EXCEPTION}\n`
+      const before = `${'x'.repeat(PE.LIMITS.INPUT_CHARS - tail.length - 2)}\n\n${tail}`
+      expect(before.length).toBe(PE.LIMITS.INPUT_CHARS)
+      const file = writeScratch(dir, 'e.md', before)
+      expect(claim([...flags(file), 'gate'])).toMatchObject({ code: 2, stdout: refusal('evidence file unusable') })
+      expect(read(file)).toBe(before)
+      expect(fs.readdirSync(dir)).toEqual(['e.md'])
+    })
+
+    it.skipIf(process.getuid?.() === 0)('keeps the mode of the file and leaves no temporary file when the Claims section is not last', () => {
+      const dir = scratch('claim')
+      const file = writeScratch(dir, 'e.md', evidenceFile(PLAN, [], [EXCEPTION]))
+      fs.chmodSync(file, 0o640)
+      expect(claim([...flags(file), 'gate']).code).toBe(0)
+      expect(fs.statSync(file).mode & 0o777).toBe(0o640)
+      expect(fs.readdirSync(dir)).toEqual(['e.md'])
+    })
+
+    it.skipIf(process.getuid?.() === 0).each([
+      ['is not last (the replace)', [EXCEPTION]],
+      ['is last (the append)', []],
+    ])('a read-only file whose Claims section %s: exit 3, the file and its mode are as they were, nothing is left behind', (_label, exceptions) => {
+      const dir = scratch('claim')
+      const before = evidenceFile(PLAN, [claimLine(1, 'PASS', OLD, 0)], exceptions)
+      const file = writeScratch(dir, 'e.md', before)
+      fs.chmodSync(file, 0o444)
+      try {
+        const r = claim([...flags(file), 'gate'])
+        expect(r.code).toBe(3)
+        expect(r.stdout).toBe('')
+        expect(read(file)).toBe(before)
+        expect(fs.statSync(file).mode & 0o777).toBe(0o444)
+        expect(fs.readdirSync(dir)).toEqual(['e.md'])
+      } finally {
+        fs.chmodSync(file, 0o644)
+      }
+    })
+
+    it.skipIf(process.getuid?.() === 0)('a folder that cannot take the temporary file: exit 3, the file is byte for byte as it was, nothing is left behind', () => {
+      const dir = scratch('claim')
+      const before = evidenceFile(PLAN, [claimLine(1, 'PASS', OLD, 0)], [EXCEPTION])
+      const file = writeScratch(dir, 'e.md', before)
+      fs.chmodSync(dir, 0o555)
+      try {
+        const r = claim([...flags(file), 'gate'])
+        expect(r.code).toBe(3)
+        expect(r.stdout).toBe('')
+        expect(read(file)).toBe(before)
+        expect(fs.readdirSync(dir)).toEqual(['e.md'])
+      } finally {
+        fs.chmodSync(dir, 0o755)
+      }
+    })
+
     it('takes the line at the end of the section when the section is last, behind an Evidence Exceptions section', () => {
       const before = ['## Test Plan', ...PLAN, '', '## Evidence Exceptions', EXCEPTION, '', '## Claims', ''].join('\n')
       const file = fileWith(before)
@@ -2575,6 +2659,98 @@ describe('claim — appends the claim lines of a report to the evidence file', (
       const r = claim([...flags(file), 'TP-1=PASS'])
       expect(r).toMatchObject({ code: 0, stdout: 'CLAIM appended:0 PASS:0 FAIL:0 SKIP:0 skipped:1\n' })
       expect(fs.existsSync(file)).toBe(false)
+    })
+  })
+
+  describe('a folder that does not exist', () => {
+    const made = (cwd: string, ...parts: string[]): string => path.join(cwd, ...parts)
+
+    it('inside the working directory is made, with the file in it', () => {
+      const cwd = scratch('claim-cwd')
+      const file = made(cwd, 'docs', 'deep', 'e.md')
+      const r = claim([...flags(file), 'gate'], noCalls, cwd)
+      expect(r).toMatchObject({ code: 0, stdout: 'CLAIM appended:1 PASS:1 FAIL:0 SKIP:0 skipped:0\n' })
+      expect(read(file)).toBe(`## Claims\n${GATE}\n`)
+    })
+
+    it('outside the working directory is not made: evidence file unusable, before git is asked', () => {
+      const cwd = scratch('claim-cwd')
+      const outside = scratch('claim-outside')
+      const file = made(outside, 'missing', 'e.md')
+      expect(claim([...flags(file), 'gate'], neverCalls, cwd)).toMatchObject({ code: 2, stdout: refusal('evidence file unusable') })
+      expect(fs.existsSync(made(outside, 'missing'))).toBe(false)
+    })
+
+    it('behind a link that leads out of the working directory is not made', () => {
+      const cwd = scratch('claim-cwd')
+      const outside = scratch('claim-outside')
+      fs.symlinkSync(outside, made(cwd, 'link'))
+      const file = made(cwd, 'link', 'missing', 'e.md')
+      expect(claim([...flags(file), 'gate'], neverCalls, cwd)).toMatchObject({ code: 2, stdout: refusal('evidence file unusable') })
+      expect(fs.readdirSync(outside)).toEqual([])
+    })
+
+    it('behind a link swapped in while the folders are made is refused, and the folder it led out is taken away again', () => {
+      const cwd = scratch('claim-cwd')
+      const outside = scratch('claim-outside')
+      const file = made(cwd, 'docs', 'deep', 'e.md')
+      // The script holds the same fs module object. Once `docs` is made, a link to the outside
+      // folder takes its place, so the next folder (`docs/deep`) is made outside the working directory.
+      const sharedFs = req('fs') as { mkdirSync: (p: string, ...rest: unknown[]) => unknown }
+      const realMkdir = sharedFs.mkdirSync
+      sharedFs.mkdirSync = (p, ...rest) => {
+        const result = realMkdir.call(sharedFs, p, ...rest)
+        if (p === made(cwd, 'docs')) {
+          fs.rmdirSync(p)
+          fs.symlinkSync(outside, p)
+        }
+        return result
+      }
+      try {
+        expect(claim([...flags(file), 'gate'], noCalls, cwd)).toMatchObject({ code: 2, stdout: refusal('evidence file unusable') })
+      } finally {
+        sharedFs.mkdirSync = realMkdir
+      }
+      expect(fs.lstatSync(made(cwd, 'docs')).isSymbolicLink()).toBe(true)
+      expect(fs.readdirSync(outside)).toEqual([])
+    })
+
+    it('with a file where a folder must be is not made: evidence file unusable', () => {
+      const cwd = scratch('claim-cwd')
+      writeScratch(cwd, 'docs', 'a file')
+      expect(claim([...flags(made(cwd, 'docs', 'deep', 'e.md')), 'gate'], neverCalls, cwd)).toMatchObject({ code: 2, stdout: refusal('evidence file unusable') })
+      expect(fs.readdirSync(cwd)).toEqual(['docs'])
+    })
+
+    it('is removed again when the run writes nothing, and the folder that already existed stays', () => {
+      const cwd = scratch('claim-cwd')
+      fs.mkdirSync(made(cwd, 'docs'))
+      const file = made(cwd, 'docs', 'a', 'b', 'e.md')
+      const r = claim([...flags(file), 'TP-1=PASS'], noCalls, cwd)
+      expect(r).toMatchObject({ code: 0, stdout: 'CLAIM appended:0 PASS:0 FAIL:0 SKIP:0 skipped:1\n' })
+      expect(fs.readdirSync(made(cwd, 'docs'))).toEqual([])
+    })
+
+    it.each([
+      ['a --plan file that is not a plan', (): string => writeScratch(scratch('claim-plan'), 'plan.md', 'not a plan\n'), noCalls],
+      ['a --plan file that git tracks', (): string => writeScratch(scratch('claim-plan'), 'tracked-plan.md', evidenceFile(PLAN)), ((file, args) => (
+        args.includes('ls-files') && args[args.length - 1] === 'tracked-plan.md'
+          ? { status: 0, stdout: Buffer.from('tracked-plan.md\0'), stderr: Buffer.alloc(0) }
+          : noCalls(file, args)
+      )) as ExecFn],
+    ])('is removed again when the run then refuses for %s', (_label, planFile, exec) => {
+      const cwd = scratch('claim-cwd')
+      const file = made(cwd, 'docs', 'deep', 'e.md')
+      const r = claim([...flags(file), '--plan', planFile(), 'TP-1=PASS'], exec, cwd)
+      expect(r).toMatchObject({ code: 2, stdout: refusal('plan file unusable') })
+      expect(fs.readdirSync(cwd)).toEqual([])
+    })
+
+    it('is kept, with the file in it, once the run writes a line', () => {
+      const cwd = scratch('claim-cwd')
+      const file = made(cwd, 'docs', 'e.md')
+      expect(claim([...flags(file), 'gate'], noCalls, cwd).code).toBe(0)
+      expect(fs.readdirSync(made(cwd, 'docs'))).toEqual(['e.md'])
     })
   })
 
@@ -2662,7 +2838,6 @@ describe('claim — appends the claim lines of a report to the evidence file', (
     it.each([
       ['a path with a space', (): string => path.join(scratch('claim sp'), 'e.md')],
       ['a path with a shell character', (): string => `${scratch('claim')}/e$(id).md`],
-      ['a folder that does not exist', (): string => path.join(scratch('claim'), 'missing', 'e.md')],
     ])('%s: evidence file unusable, before git is asked, and nothing is created', (_label, evidence) => {
       const file = evidence()
       const folderExisted = fs.existsSync(path.dirname(file))
@@ -2691,7 +2866,6 @@ describe('claim — appends the claim lines of a report to the evidence file', (
     it.each([
       ['a heading the evidence file does not know', `${before}\n## Notes\nx\n`],
       ['a repeated heading', `${before}\n## Claims\n`],
-      ['an Evidence Exceptions section after the Claims section', evidenceFile(PLAN, [], [EXCEPTION])],
       ['a malformed exception', `## Test Plan\n${PLAN[0]}\n\n## Evidence Exceptions\n- not an exception\n\n## Claims\n`],
       ['a Test Plan that is not a plan', '## Test Plan\nnot a plan\n\n## Claims\n'],
     ])('a file with %s is unusable', (_label, text) => {

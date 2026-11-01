@@ -68,15 +68,22 @@
 //             nothing is written. The `exit:` part is written only for a number from 0
 //             to 255. A TP that the plan does not list gets no line. The plan is the
 //             `## Test Plan` of the `--plan` file, or of the evidence file when `--plan`
-//             is absent. The `## Claims` section is the file's last section and is
-//             created when absent, and so is the file when its folder exists. The
-//             write is one append of every line, and the parser of pr-evidence.cjs
-//             accepts each line before it. It prints one line, exit 0:
+//             is absent. The `## Claims` section is created when absent, at the end
+//             of the file; when it is not the last section the lines go at its end
+//             (D-CLAIM-INSERT). A missing folder inside the working directory is
+//             created, and so is the file (D-CLAIM-FOLDER). The write is one append of
+//             every line, or, for a Claims section that is not last, one whole-file
+//             replace through a sibling temporary file that keeps the file's mode. The
+//             parser of pr-evidence.cjs accepts each line before it. It prints one
+//             line, exit 0:
 //             `CLAIM appended:<n> PASS:<n> FAIL:<n> SKIP:<n> skipped:<n>`
 //             (`skipped` counts the TPs that got no line), or exit 2 with
 //             `CLAIM refused (<reason>)`, the reason being `head not one sha`,
 //             `evidence file tracked` (git tracks it, or cannot say it does not),
-//             `evidence file unusable` or `plan file unusable`. A refusal writes nothing
+//             `evidence file unusable` (a file that does not parse, or a folder that is
+//             missing outside the working directory) or `plan file unusable`. A refusal
+//             writes nothing. A folder the run made is removed again when the run
+//             leaves no file in it
 // A git-tracked file counts as absent, like a tracked `.devflow/config.json`
 // (D-TRACKED-RESULT). `verify`, `publish` and `readiness` ask git about an `--evidence`
 // file before they read it, and about `--block-out`, `--comment-out`, `--stale-out` and
@@ -286,11 +293,12 @@ const USAGE = [
  * @typedef {{ ghCalls: number, runViews: number, throttled: boolean }} Budget
  *
  * @typedef {{ exec: ExecFn, env: NodeJS.ProcessEnv, cwd: string, now: () => number,
- *   deadline: number, budget: Budget, notes: Set<string>, stderr: (text: string) => void,
- *   ghCap?: number }} Io
+ *   deadline: number, budget: Budget, notes: Set<string>, made: string[],
+ *   stderr: (text: string) => void, ghCap?: number }} Io
  *   The imperative shell's one context: every call goes through it, so every
  *   bound is counted in one place. `notes` holds closed tokens for the stderr
- *   summary, never input bytes. `ghCap` replaces CAPS.GH_CALLS for a stage that
+ *   summary, never input bytes. `made` holds the folders a `claim` run created, deepest
+ *   first (D-CLAIM-FOLDER). `ghCap` replaces CAPS.GH_CALLS for a stage that
  *   carries a budget of its own (`publish`'s writes).
  *
  * @typedef {{ login: string, association: string, body: string, viewerDidAuthor: boolean, commentId: string }} PrComment
@@ -622,6 +630,59 @@ function appendTextFile(filePath, text) {
     if (fd !== undefined) {
       try { fs.closeSync(fd); } catch (_) { /* the write already decided */ }
     }
+  }
+}
+
+/**
+ * Replace the regular file `filePath` with `text` and keep its `mode`: the text goes to a
+ * sibling temporary file, in the same folder, which a rename then puts in the file's place.
+ * It refuses first what appendTextFile refuses, so the two writes of a claim agree: a file
+ * this process may not write, a link put in its place (O_NOFOLLOW), a FIFO (O_NONBLOCK) or
+ * any other object that is not a regular file. The probe opens the file for an append and
+ * writes nothing. A write that fails leaves the file as it was and the temporary file
+ * removed, so a failed replace never truncates it. The temporary file is created new
+ * (O_EXCL) and never through a link (O_NOFOLLOW), and takes the old mode on its own
+ * descriptor, since the umask would otherwise set the new file's mode. Returns whether the
+ * file was replaced.
+ *
+ * @param {string} filePath
+ * @param {string} text
+ * @param {number} mode  the permission bits of the file it replaces
+ * @returns {boolean}
+ */
+function replaceTextFile(filePath, text, mode) {
+  const c = fs.constants;
+  let probe;
+  try {
+    probe = fs.openSync(filePath, c.O_WRONLY | c.O_APPEND | (c.O_NOFOLLOW || 0) | (c.O_NONBLOCK || 0));
+    if (!fs.fstatSync(probe).isFile()) return false;
+  } catch (_) {
+    return false;
+  } finally {
+    if (probe !== undefined) {
+      try { fs.closeSync(probe); } catch (_) { /* the probe wrote nothing */ }
+    }
+  }
+  const temp = path.join(path.dirname(filePath), '.' + path.basename(filePath) + '.claim-' + process.pid);
+  let fd;
+  try {
+    fd = fs.openSync(temp, c.O_WRONLY | c.O_CREAT | c.O_EXCL | (c.O_NOFOLLOW || 0), 0o600);
+  } catch (_) {
+    return false;
+  }
+  try {
+    fs.fchmodSync(fd, mode);
+    fs.writeFileSync(fd, text, 'utf8');
+    fs.closeSync(fd);
+    fd = undefined;
+    fs.renameSync(temp, filePath);
+    return true;
+  } catch (_) {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch (_) { /* the write already failed */ }
+    }
+    try { fs.unlinkSync(temp); } catch (_) { /* the temporary file is already gone */ }
+    return false;
   }
 }
 
@@ -3098,11 +3159,84 @@ function claimRefusal(reason) {
   return { code: EXIT_CODES.INPUT_UNUSABLE, stdout: 'CLAIM refused (' + reason + ')\n' };
 }
 
+/** The most folders one path can hold: the bound of the walk up to the nearest folder that exists. */
+const FOLDER_DEPTH_MAX = 4096;
+
+/**
+ * Whether `child` lies below `parent`, by name alone. `parent` itself, and a path outside
+ * it, are not below it.
+ *
+ * @param {string} parent  absolute
+ * @param {string} child  absolute
+ * @returns {boolean}
+ */
+function isBelow(parent, child) {
+  const rel = path.relative(parent, child);
+  return rel !== '' && rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel);
+}
+
+/**
+ * D-CLAIM-FOLDER: the folder of the evidence file exists, or this run makes it. The Write
+ * tool made the folders of a file in 3.11.0, so a first claim into a folder that is not
+ * there yet worked. A run makes a folder only inside the working directory: the folder lies
+ * below `io.cwd` by name, and the nearest folder that already exists resolves to `io.cwd` or
+ * below it, so a link out of the working directory makes nothing. Each folder it makes goes
+ * to `io.made`, deepest first, for removeMadeFolders. A path that holds a file where a folder
+ * must be, or that the run may not make, is unusable. After each folder is made, its real path
+ * must lie below the real working directory; if a link swapped in after the first check led the
+ * folder out, the run is unusable and removeMadeFolders takes the folder away again. This check
+ * narrows the window for such a swap; it does not close it, because the later open of the
+ * evidence file resolves the path again.
+ *
+ * @param {Io} io
+ * @param {string} dir  absolute
+ * @returns {boolean}  whether the folder exists now
+ */
+function ensureClaimFolder(io, dir) {
+  if (isRealDirectory(dir)) return true;
+  try {
+    const root = path.resolve(io.cwd);
+    if (fs.lstatSync(dir, { throwIfNoEntry: false }) !== undefined || !isBelow(root, dir)) return false;
+    let near = dir;
+    for (let i = 0; i < FOLDER_DEPTH_MAX && fs.lstatSync(near, { throwIfNoEntry: false }) === undefined; i++) {
+      near = path.dirname(near);
+    }
+    const real = fs.realpathSync(near);
+    const realRoot = fs.realpathSync(root);
+    if (real !== realRoot && !isBelow(realRoot, real)) return false;
+    let at = near;
+    for (const part of path.relative(near, dir).split(path.sep)) {
+      at = path.join(at, part);
+      fs.mkdirSync(at);
+      io.made.unshift(at);
+      if (!isBelow(realRoot, fs.realpathSync(at))) return false;
+    }
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
+ * Take away the folders a `claim` run made. Each goes through rmdir, which refuses a folder
+ * that holds anything, so a folder that holds the evidence file, or a file another process
+ * put there, stays. It is never a recursive delete.
+ *
+ * @param {Io} io
+ * @returns {void}
+ */
+function removeMadeFolders(io) {
+  for (const dir of io.made.splice(0)) {
+    try { fs.rmdirSync(dir); } catch (_) { /* a folder that holds a file stays */ }
+  }
+}
+
 /**
  * The reason a `claim` run must not start, or null. Nothing is read or written before
- * this: the HEAD is one 40-hex SHA, each path is a path the commands build, the evidence
- * file sits in a folder that exists, and git says clearly that neither file is tracked
- * (D-TRACKED-RESULT).
+ * this, but the folder of the evidence file, when it is missing: the HEAD is one 40-hex
+ * SHA, each path is a path the commands build, the evidence file sits in a folder that
+ * exists or that the run makes inside the working directory (D-CLAIM-FOLDER), and git says
+ * clearly that neither file is tracked (D-TRACKED-RESULT).
  *
  * @param {Io} io
  * @param {Extract<ParsedArgs, { kind: 'claim' }>} args
@@ -3110,7 +3244,7 @@ function claimRefusal(reason) {
  */
 function claimRefusalReason(io, args) {
   if (!SHA40_RE.test(args.head)) return 'head not one sha';
-  if (!EVIDENCE_PATH_RE.test(args.evidence) || !isRealDirectory(path.dirname(path.resolve(args.evidence)))) return 'evidence file unusable';
+  if (!EVIDENCE_PATH_RE.test(args.evidence) || !ensureClaimFolder(io, path.dirname(path.resolve(args.evidence)))) return 'evidence file unusable';
   if (args.plan !== null && !EVIDENCE_PATH_RE.test(args.plan)) return 'plan file unusable';
   if (trackedState(io, args.evidence) !== 'untracked') return 'evidence file tracked';
   if (args.plan !== null && trackedState(io, args.plan) !== 'untracked') return 'plan file unusable';
@@ -3144,8 +3278,8 @@ function claimLine(line) {
 
 /**
  * The text to append: the lines, behind the `## Claims` heading when the file has no such
- * section (a blank line first, when the file holds anything). The section is the last of
- * the file, so the lines go at its end.
+ * section (a blank line first, when the file holds anything). The caller appends only when
+ * the section is the last of the file, so the lines go at its end.
  *
  * @param {string} text  the evidence file as it is, '' when it is absent
  * @param {boolean} hasSection
@@ -3157,6 +3291,51 @@ function claimAppendText(text, hasSection, lines) {
   if (text === '') return PE.CLAIMS_HEADING + '\n' + body;
   const lead = text.endsWith('\n') ? '' : '\n';
   return hasSection ? lead + body : lead + '\n' + PE.CLAIMS_HEADING + '\n' + body;
+}
+
+/**
+ * D-CLAIM-INSERT: the whole text with the lines put at the end of a `## Claims` section that
+ * another section follows: behind the last row of the section that is not blank, before the
+ * blank rows that precede the next heading. A row is blank as the parser of pr-evidence.cjs
+ * reads it, an empty row once its CR is gone. A text with no such section comes back as it was.
+ *
+ * @param {string} text
+ * @param {readonly string[]} lines
+ * @returns {string}
+ */
+function claimInsertText(text, lines) {
+  const rows = text.split('\n');
+  /** @param {string} row @returns {string} */
+  const bare = row => row.replace(/\r$/, '');
+  const start = rows.findIndex(row => bare(row) === PE.CLAIMS_HEADING);
+  if (start === -1) return text;
+  let end = rows.findIndex((row, i) => i > start && (bare(row) === '##' || bare(row).startsWith('## ')));
+  if (end === -1) end = rows.length;
+  let last = end - 1;
+  while (last > start && bare(rows[last]) === '') last--;
+  rows.splice(last + 1, 0, ...lines);
+  return rows.join('\n');
+}
+
+/**
+ * Whether `inserted` is `text` with the lines added at the end of its `## Claims` section and
+ * nothing else changed, as the parser of pr-evidence.cjs reads both: the Claims section grew by
+ * exactly the lines, its other sections are the same, and the result parses as an evidence file.
+ * This is the check the replace is held to before it writes.
+ *
+ * @param {string} text
+ * @param {string} inserted
+ * @param {readonly string[]} lines
+ * @returns {boolean}
+ */
+function claimInserted(text, inserted, lines) {
+  const before = PE.evidenceSections(text);
+  const after = PE.evidenceSections(inserted);
+  if (!before.ok || !after.ok || before.value.claims === null) return false;
+  return after.value.claims === before.value.claims + '\n' + lines.join('\n')
+    && after.value.testPlan === before.value.testPlan
+    && after.value.exceptions === before.value.exceptions
+    && parseEvidenceText(inserted) !== null;
 }
 
 /**
@@ -3181,9 +3360,13 @@ function claimPlanIds(args, evidence) {
 
 /**
  * D-CLAIM-APPEND: `claim`. The checks of claimRefusalReason have passed (admitPaths).
- * The evidence file is read as `verify` reads it, and its `## Claims` section, when it
- * has one, must be its last section. Then every line is built and checked, and one append
- * writes them all. A run that writes no line (every TP off the plan) changes no file.
+ * The evidence file is read as `verify` reads it; a file that does not parse is refused, as
+ * `verify` refuses it. Then every line is built and checked, and one write puts them all in.
+ * That write is an append when the `## Claims` section is the last section or is absent. When
+ * another section follows it, the write is a whole-file replace (D-CLAIM-INSERT) that adds the
+ * lines at the end of the Claims section, held to claimInserted before it writes. One claim
+ * run writes at a time, as the commands run it. A run that writes no line (every TP off the
+ * plan) changes no file.
  *
  * @param {Io} io
  * @param {Extract<ParsedArgs, { kind: 'claim' }>} args
@@ -3204,7 +3387,7 @@ function runClaim(io, args) {
   if (text === null || evidence === null) return claimRefusal('evidence file unusable');
   const headings = text.split('\n').map(row => row.replace(/\r$/, '')).filter(row => row === '##' || row.startsWith('## '));
   const hasSection = headings.includes(PE.CLAIMS_HEADING);
-  if (hasSection && headings[headings.length - 1] !== PE.CLAIMS_HEADING) return claimRefusal('evidence file unusable');
+  const sectionFollowed = hasSection && headings[headings.length - 1] !== PE.CLAIMS_HEADING;
   const listed = args.gate ? new Set() : claimPlanIds(args, evidence);
   if (listed === null) return claimRefusal('plan file unusable');
 
@@ -3222,8 +3405,16 @@ function runClaim(io, args) {
     lines.push(claimLine(claimLineOk(withExit) ? withExit : bare));
     tally[tp.outcome]++;
   }
-  if (lines.length > 0 && !appendTextFile(file, claimAppendText(text, hasSection, lines))) {
-    return refuse(io, EXIT_CODES.WRITE_FAILED, 'an output file could not be written');
+  if (lines.length > 0) {
+    let written;
+    if (sectionFollowed) {
+      const inserted = claimInsertText(text, lines);
+      if (!claimInserted(text, inserted, lines)) return claimRefusal('evidence file unusable');
+      written = replaceTextFile(file, inserted, st === undefined ? 0o600 : st.mode & 0o777);
+    } else {
+      written = appendTextFile(file, claimAppendText(text, hasSection, lines));
+    }
+    if (!written) return refuse(io, EXIT_CODES.WRITE_FAILED, 'an output file could not be written');
   }
   const skipped = args.gate ? 0 : args.tps.length - lines.length;
   return {
@@ -3294,6 +3485,7 @@ function main(argv, deps) {
     deadline: now() + DEADLINE_MS,
     budget: { ghCalls: 0, runViews: 0, throttled: false },
     notes: new Set(),
+    made: [],
     stderr: typeof d.stderr === 'function' ? d.stderr : (text => { process.stderr.write(text); }),
   };
   const parsed = parseArgs(argv);
@@ -3330,6 +3522,7 @@ function main(argv, deps) {
       if (args.out !== null) outcome = writeReadinessOut(io, args.out, args.pr, outcome, null, planSource(args));
     } else outcome = refuse(io, EXIT_CODES.REMOTE_FAILURE, label);
   }
+  removeMadeFolders(io);
   if (io.notes.size > 0) io.stderr('verify-evidence: notes: ' + [...io.notes].sort().join(',') + '\n');
   return outcome;
 }

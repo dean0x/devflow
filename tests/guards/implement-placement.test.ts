@@ -202,8 +202,8 @@ const ROWS: readonly Row[] = [
   },
   {
     no: '12c',
-    item: 'Fresh base: the temp file is removed on exit',
-    anchor: `trap 'rm -- "$F"' EXIT`,
+    item: 'Fresh base: the temp file and its folder are removed on exit',
+    anchor: `trap 'rm -- "$F"; rmdir -- "\${F%/*}"' EXIT`,
     section: FEATURE_KNOWLEDGE_LOAD,
   },
   {

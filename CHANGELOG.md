@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The CI gate waits again when its own check fails** ([#752](https://github.com/dean0x/devflow/issues/752)).
+  - A failed `gh` call or an unreadable result inside `ci-wait.cjs` printed one INDETERMINATE line and no `NEXT=` line. The `/implement` and `/resolve` prompts read the missing line as "proceed", so the gate did not wait.
+  - With `--waits` and `--fixes`, the script now also prints the `NEXT=` line of an INDETERMINATE result that waited 0 seconds. The gate waits again while fewer than 3 waits have run. After that it proceeds and says that the CI status is unknown.
+  - A bad argument still prints the usage line with no `NEXT=` line.
+- **The root script no longer stops a slow git call** ([#752](https://github.com/dean0x/devflow/issues/752)).
+  - `resolve-root.cjs` gave each git call a limit of 5 seconds. On a slow disk or a busy machine, git could miss that limit. The script then failed, and the command used its start directory for both roots.
+  - The script now sets no time limit of its own, as the git call of 3.11.0 did. The timeout of the Bash tool still bounds the call. `resolve-settings.cjs` keeps its own limit.
+- **`verify-evidence.cjs claim` again handles a missing folder and a Claims section that is not last** ([#752](https://github.com/dean0x/devflow/issues/752)).
+  - A first claim into an evidence folder that did not exist was refused with `evidence file unusable`. The script now creates the folder, but only inside the working directory. If the run then refuses or writes no line, it removes the folders that it made.
+  - A file whose `## Claims` section had another section after it was refused. The script now puts the new lines at the end of the Claims section. It writes the file through a temporary file in the same folder and keeps the file mode.
+  - The script still refuses a file that does not parse, a file that git tracks, and a head that is not one SHA.
+- **A command removes the temporary folder that it made for a file** ([#752](https://github.com/dean0x/devflow/issues/752)).
+  - The PR create and retitle steps of the Git agent, and the fresh-base step of `/implement`, write their file in a new folder from `mktemp -d`. Since 3.12.0 they removed the file and left the empty folder in the temp directory.
+  - Each step now runs `rm -- "$F"; rmdir -- "${F%/*}"`. `rmdir` refuses a folder that holds anything, so it never removes a file that the step did not make. A step that gets an INT or TERM signal still leaves its file and folder.
+- **The Architect agent writes an implementation plan again** ([#752](https://github.com/dean0x/devflow/issues/752)). The Architect has a Plan writing section. When the prompt asks for a plan, the agent reads the gap-analysis skill, closes the gaps that it names and avoids the 6 design-review anti-patterns. The Design agent is unchanged.
+- **The design-review skill suggests a fix for each anti-pattern again** ([#752](https://github.com/dean0x/devflow/issues/752)). Each of the 6 anti-patterns has a `**Suggest:**` line after its flag format, as in 3.11.0.
+- **`/implement` forwards the PR link line and writes none of its own again** ([#752](https://github.com/dean0x/devflow/issues/752)). Both Phase 9 arms say that the command forwards the link line of Phase 1 verbatim, in every build.
+- **A feature knowledge pass again prefers the most specific entries** ([#752](https://github.com/dean0x/devflow/issues/752)). The knowledge step tells the agent to prefer the most specific entries. It also says that a missing Rules section, a missing heading list and `(none)` are normal, not errors. The Debug agent follows the `apply-feature-knowledge` skill for its feature knowledge.
+- **The quality gates scale their depth again** ([#752](https://github.com/dean0x/devflow/issues/752)). After the first gate, the shared engine says that depth scales to change size and budget, so a one-line fix gets a lighter pass.
+- **The Debug agent again points to the `apply-feature-knowledge` skill** ([#752](https://github.com/dean0x/devflow/issues/752)). The Debug agent follows that skill for the feature knowledge in its input, as it did in 3.11.0.
+- **`/research` again tells the user why it uses the codebase only** ([#752](https://github.com/dean0x/devflow/issues/752)). If WebSearch and WebFetch are unavailable, the command restricts the research to the `codebase` type and tells the user why.
+
 ---
 
 ## [3.12.0] - 2026-10-31

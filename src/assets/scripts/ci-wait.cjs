@@ -33,10 +33,12 @@
 // table of /implement and /resolve as a pure function of the status, the reason, the
 // seconds waited and the two counts, so a prompt only acts on the answer. An argv that
 // fails its gate prints the short form
-// `CI INDETERMINATE pr=- head=- waited=0 reason=usage` and makes no gh call. The
+// `CI INDETERMINATE pr=- head=- waited=0 reason=usage`, with no NEXT line, and makes no
+// gh call. The
 // boundary re-checks the CI line against LINE_RE and the 400-character bound, and the
-// NEXT line against the fixed set NEXT_LINES, before it writes them. A failed check
-// prints the one failure line and no NEXT line, as it does without the two flags.
+// NEXT line against the fixed set NEXT_LINES, before it writes them. A wait that fails
+// inside the script prints its INDETERMINATE line (`gh-failed` or `unparseable`) and,
+// with the two flags, the NEXT line of an INDETERMINATE result that waited 0 seconds.
 // Exit 0 whenever a line was printed; a reader treats a missing or unparseable line, an
 // unlisted status or a non-zero exit as INDETERMINATE.
 //
@@ -1080,10 +1082,11 @@ async function main(argv, deps) {
     result = null;
     line = indeterminate('unparseable');
   }
-  if (result === null || parsed.waits === undefined || parsed.fixes === undefined) {
-    return { code: 0, stdout: line + '\n' };
-  }
-  const next = renderNext(nextAction(result, parsed.waits, parsed.fixes));
+  if (parsed.waits === undefined || parsed.fixes === undefined) return { code: 0, stdout: line + '\n' };
+  // D-CI-NEXT: a wait that failed inside this script is INDETERMINATE that waited 0 seconds,
+  // so the gate waits again while waits remain, as the prompts did before the NEXT line.
+  const failed = { status: 'INDETERMINATE', reason: null, waited: 0 };
+  const next = renderNext(nextAction(result === null ? failed : result, parsed.waits, parsed.fixes));
   if (!checkNext(next)) return { code: 0, stdout: indeterminate('unparseable') + '\n' };
   return { code: 0, stdout: line + '\n' + next + '\n' };
 }

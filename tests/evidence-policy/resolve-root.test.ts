@@ -41,6 +41,11 @@ interface RootScript {
 
 const rootScript = createRequire(import.meta.url)(ROOT_SCRIPT) as RootScript;
 
+const SETTINGS_SCRIPT = path.resolve(import.meta.dirname, '../../src/assets/scripts/resolve-settings.cjs');
+const settingsScript = createRequire(import.meta.url)(SETTINGS_SCRIPT) as {
+  readonly gitToplevel: (exec: ExecFn, dir: string) => unknown;
+};
+
 const COMMON_DIR_ARGV = ['rev-parse', '--path-format=absolute', '--git-common-dir'];
 
 describe('resolve-root.cjs on real git', { timeout: 60_000 }, () => {
@@ -261,6 +266,27 @@ describe('resolve-root.cjs main() with an injected exec', () => {
     // Local git reads by argv: no shell, and nothing but git.
     expect(recorded.map(c => c.file)).toEqual(['git', 'git']);
     expect(recorded.every(c => c.opts.shell === false)).toBe(true);
+  });
+
+  it('runs every git call with no time limit of its own, while resolve-settings keeps its limit', () => {
+    quiet();
+    const calls: ScriptedCall[] = [
+      toplevel(`${linked}\n`),
+      { tool: 'git', args: COMMON_DIR_ARGV, exit: 128, stderr: 'fatal: not a git repository\n' },
+    ];
+    const resolved = scriptedExec(calls);
+    expect(rootScript.main(argv(linked), { exec: resolved.exec }).code).toBe(0);
+    // Both reads ran (the toplevel and the ledger root), so the loop below is not empty.
+    expect(resolved.recorded).toHaveLength(2);
+    for (const call of resolved.recorded) {
+      expect(call.opts.timeout, call.args.join(' ')).toBeUndefined();
+      expect(typeof call.opts.maxBuffer, call.args.join(' ')).toBe('number');
+    }
+    // The limit the script removes is the one resolve-settings.cjs puts on the same call.
+    const direct = scriptedExec(calls);
+    settingsScript.gitToplevel(direct.exec, linked);
+    expect(direct.recorded).toHaveLength(1);
+    expect(direct.recorded[0].opts.timeout).toBe(5000);
   });
 
   it('names the directory for both roots when git answers that it is not a repository', () => {
