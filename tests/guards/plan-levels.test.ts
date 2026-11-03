@@ -13,7 +13,7 @@
  * and a failed read runs the full shape. Every spawn of the command names its agent type.
  *
  * What this file holds, each arm through a named collector and a known-bad probe over the same collector:
- *   1. Typed spawns: every spawn line and every `Agent(` fence names a roster agent or the built-in `Plan`,
+ *   1. Typed spawns: every spawn line and every `Agent(` fence names a roster agent (`Plan` is one),
  *      byte-exact, and the reference holds no spawn text. The floor is the set of seven types, not a site count.
  *   2. The reference: its phase rows, its input substitutes and its rules, closed to a title, three headings,
  *      table lines, bold-label rules and two pinned intros, with the text left in each rule bounded. The file
@@ -311,6 +311,7 @@ const RULE_NEEDLES: ReadonlyArray<readonly [string, readonly string[]]> = [
     'with `commands/plan-levels.md` replaced by `synthesize/planning.md`',
     'Read {path} with the Read tool and apply its Execution Strategy Decision and Context Risk.',
     'Report one TP line for each acceptance criterion first, then the steps with their files, then the strategy and context risk.',
+    'No report cap.',
     'Its prompt adds this line',
   ]],
   ['Reports', [
@@ -332,8 +333,8 @@ const RULE_NEEDLES: ReadonlyArray<readonly [string, readonly string[]]> = [
     'Scope rule: minimal fix; list siblings, do not expand scope.',
     'A security gap this change introduces or exposes stays in scope and blocking.',
     'Name a sibling vulnerability by its effect only, for Gate 1 and private reporting; it never enters the artifact, a ticket title or any posted text.',
-    "A sibling goes to the artifact's deferred list; /plan files no sibling ticket.",
-    'Gate 1 shows a sibling vulnerability by its effect only and keeps it out of the deferred list.',
+    "A sibling goes to the artifact's Known limits; /plan files no sibling ticket.",
+    'Gate 1 shows a sibling vulnerability by its effect only and keeps it out of the Known limits.',
   ]],
   ['Revise', [
     'Phase 10 with 1 Plan, then Phase 12; Phase 11 stays skipped.',
@@ -877,23 +878,25 @@ describe('the corpus is real', () => {
     expect(GATE_LEVELS).toContain('full')
     expect(GATE_LEVELS.filter(level => level !== 'full')).toEqual(['standard', 'lean'])
     expect(SCENARIOS.length, 'one or several issues, compliance, research').toBe(8)
-    expect(ROSTER_FORM_B, 'the roster names the agents the command spawns').toEqual(expect.arrayContaining(['Git', 'Skim', 'Explore', 'Synthesize', 'Design', 'Architect']))
-    expect(BUILT_IN_SPAWN_TYPES).toEqual(['Plan'])
+    expect(ROSTER_FORM_B, 'the roster names the agents the command spawns').toEqual(expect.arrayContaining(['Git', 'Skim', 'Explore', 'Synthesize', 'Design', 'Architect', 'Plan']))
+    expect(BUILT_IN_SPAWN_TYPES, 'devflow ships an agent for every type the command spawns').toEqual([])
     expect(ALLOWED).toContain('Plan')
   })
 })
 
 describe('every spawn names its type (AC-1)', () => {
-  it.each(VARIANTS)('$label: each spawn line and agent fence names a roster agent or the built-in Plan, and the types are the seven', ({ body }) => {
+  it.each(VARIANTS)('$label: each spawn line and agent fence names a roster agent, and the types are the seven', ({ body }) => {
     expect(collectUntypedSpawnDefects(body, ALLOWED)).toEqual([])
     expect(spawnTypesOf(body)).toEqual(SPAWN_TYPES)
   })
 
-  it('the Phase 10 planners name the built-in Plan type, and only the closed built-in set admits it', () => {
+  it('the Phase 10 planners name the Plan agent that devflow ships, a roster name and no built-in exemption', () => {
     const phase10 = phaseSection(ON, 10) ?? ''
     expect(phase10).toContain('Spawn 3 `Agent(subagent_type="Plan")` agents')
-    expect(ROSTER_FORM_B, 'no roster agent is named Plan').not.toContain('Plan')
-    expect(collectUntypedSpawnDefects(ON, ROSTER_FORM_B)).toEqual(['Phase 10: subagent_type "Plan" is not a roster name or a built-in type'])
+    expect(ROSTER_FORM_B, 'a roster agent is named Plan').toContain('Plan')
+    expect(collectUntypedSpawnDefects(ON, ROSTER_FORM_B)).toEqual([])
+    const withoutPlan = ROSTER_FORM_B.filter(name => name !== 'Plan')
+    expect(collectUntypedSpawnDefects(ON, withoutPlan), 'with no Plan agent the spawn is reported').toEqual(['Phase 10: subagent_type "Plan" is not a roster name or a built-in type'])
   })
 
   it('known-bad probes: an untyped planner line, general-purpose, lowercase plan, an untyped fence and a later phase fence are each reported', () => {
@@ -1021,8 +1024,8 @@ describe('the level reference holds the decided rows, substitutes and rules (AC-
     // The Scope rule: the exact quote, and the Gate 1 only sibling sentence.
     expect(defects(seed(REF, 'minimal fix; list siblings, do not', 'minimal fix; do not')))
       .toContain(lacks('Scope', 'Scope rule: minimal fix; list siblings, do not expand scope.'))
-    expect(defects(seed(REF, ' Gate 1 shows a sibling vulnerability by its effect only and keeps it out of the deferred list.', '')))
-      .toContain(lacks('Scope', 'Gate 1 shows a sibling vulnerability by its effect only and keeps it out of the deferred list.'))
+    expect(defects(seed(REF, ' Gate 1 shows a sibling vulnerability by its effect only and keeps it out of the Known limits.', '')))
+      .toContain(lacks('Scope', 'Gate 1 shows a sibling vulnerability by its effect only and keeps it out of the Known limits.'))
     // The Research data rule: the design-review prompt and Phase 14 are covered, and the (trusted) label only affects "verify".
     expect(defects(seed(REF, 'every gap, Plan and design-review prompt adds', 'every gap prompt and the Plan prompt add')))
       .toContain(lacks('Research data', 'when EXPLORE_OUTPUTS are research reports, every gap, Plan and design-review prompt adds'))

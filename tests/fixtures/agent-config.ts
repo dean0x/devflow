@@ -14,8 +14,8 @@
  * One table instead of one copy per file is what lets a shipped tier change be
  * an edit to a row, with the frontmatter line it describes, and nothing else.
  *
- * D-OMIT-CLAUDEMD-SET: twelve agents ship `omitClaudeMd: true`: Validate, Git, Triage,
- * Evaluate, Test, Research, Knowledge, Tracker, Curate, Skim, Synthesize and Explore.
+ * D-OMIT-CLAUDEMD-SET: thirteen agents ship `omitClaudeMd: true`: Validate, Git, Triage,
+ * Evaluate, Test, Research, Knowledge, Tracker, Curate, Skim, Synthesize, Explore and Plan.
  * Code, Harden and Polish keep CLAUDE.md, because they write or rewrite code to the
  * project's conventions; Review, Design and Debug are not in the set. A live probe (Claude Code 2.1.296) found that the flag drops BOTH the CLAUDE.md files and
  * `~/.claude/rules/**`, where devflow installs its rules (`~/.claude/rules/devflow/*.md`):
@@ -406,6 +406,25 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
    */
   explore: {
     model: 'sonnet',
+    effort: 'high',
+    policy: { kind: 'allow', tools: ['Read', 'Bash'] },
+    omitClaudeMd: true,
+    skills: [],
+    digest: ['context-economy'],
+  },
+  /**
+   * D-PLAN-ROW: Plan is devflow's override of the Plan agent built into Claude Code
+   * (D-EXPLORE-OVERRIDE in src/targets/claude-code/agent-type-owner.ts holds the
+   * precedence rule and the no-clobber install). It runs on Opus at high effort, where
+   * the built-in inherits the session model, so the planning step does not follow a
+   * cheaper session model. It is read-only (Read and Bash, as Explore: the other search
+   * tools are withheld from an agent that holds Bash) and omits CLAUDE.md and the rules,
+   * as the built-in does. It serves plan mode and /plan Phase 10, so the model is
+   * overridable through `devflow agents`. The row, the frontmatter of plan.md and
+   * tests/plan-agent.test.ts move together.
+   */
+  plan: {
+    model: 'opus',
     effort: 'high',
     policy: { kind: 'allow', tools: ['Read', 'Bash'] },
     omitClaudeMd: true,

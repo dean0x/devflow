@@ -233,6 +233,9 @@ git commit -m "refactor(utils): simplify string helper functions"
 ### Testing Gaps
 {Honest assessment}
 
+## Known Limits
+{Accepted risks and deferred items, one line each, or "None"}
+
 ## Related Issues
 Closes #{issue}
 

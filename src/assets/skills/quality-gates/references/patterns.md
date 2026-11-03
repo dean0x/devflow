@@ -11,7 +11,7 @@ For each pillar, ask:
 | Pillar | Key Questions |
 |--------|---------------|
 | Design | Does this follow existing patterns? Is it maintainable? |
-| Functionality | Does it meet requirements? Handle edge cases? |
+| Functionality | Does it meet requirements? Handle named edge cases? |
 | Security | Is input validated? Auth checked? Data protected? |
 | Complexity | Can someone understand this in 5 minutes? |
 | Error Handling | Are errors handled with Result types? Logged? |
@@ -191,7 +191,7 @@ try {
 
 ### 6. Tests - Correct Patterns
 
-**Fix Pattern**: Add tests for all new functions, test behavior not mocks, cover edge cases.
+**Fix Pattern**: Add a test for each acceptance-criterion behaviour, test behavior not mocks, cover named edge cases.
 
 ```typescript
 // GOOD: Testing behavior
@@ -213,7 +213,7 @@ describe('createUser', () => {
   });
 });
 
-// GOOD: Edge case coverage
+// GOOD: A test for the named edge case
 describe('divide', () => {
   it('divides positive numbers', () => {
     expect(divide(10, 2)).toBe(5);

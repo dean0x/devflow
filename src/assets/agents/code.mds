@@ -51,7 +51,7 @@ You implement a task from the orchestrator's execution plan on a feature branch,
 You receive from orchestrator:
 {{code.input_core()}}
 - **BASE_BRANCH**: Branch this feature branch was created from
-- **EXECUTION_PLAN**: Synthesized plan with steps, files, tests
+- **EXECUTION_PLAN**: Plan with steps, files, tests
 - **PATTERNS**: Codebase patterns to follow
 - **OPERATION** (optional): `implement` (default when absent) | `issue-fix` — selects operating mode; every spawn passes it as the first prompt line. Any other value returns BLOCKED, naming it, and changes nothing.
 - **ISSUES** (when OPERATION: issue-fix): FIX_NOW issues from the Triage agent
@@ -61,10 +61,10 @@ You receive from orchestrator:
 **Worktree Support**: With `WORKTREE_PATH`, resolve paths by the `devflow:worktree-support` skill; without it, use cwd.
 
 **Sequential execution context** (when chaining multiple Code agents):
-- **PRIOR_PHASE_SUMMARY**: Implementation summary from previous Code agent (see format below)
+- **PRIOR_PHASE_SUMMARY**: Summary from the previous Code agent (format in Handoff)
 - **FILES_FROM_PRIOR_PHASE**: Files created that must be read and understood
 - **HANDOFF_REQUIRED**: true if another Code agent follows this one
-- **HANDOFF_FILE** (optional): Path to the branch-scoped handoff file: read the one section of the phase before yours, and append your own section when HANDOFF_REQUIRED=true
+- **HANDOFF_FILE** (optional): Path to the branch-scoped handoff file (steps 1 and 6 below)
 
 ## Responsibilities
 
@@ -77,9 +77,9 @@ You receive from orchestrator:
 
 2. **Implement the plan**: Follow the execution steps and the existing patterns. Type everything. Use Result types if the codebase uses them.
 
-3. **Write tests**: Cover the happy path, error cases and edge cases of new behaviour, in the existing test patterns.
+3. **Write tests**: Write one failing test first for each acceptance-criterion behaviour (else each behaviour your steps' Must lines name). Add an edge-case test only for a named, concrete case. Always test trust boundaries, data loss, security and fail-closed paths.
 
-4. **Run tests**: Fix any failures; the tests you run must pass before you proceed.
+4. **Run tests**: Fix any failures; the tests you run must pass.
    **Gate ownership:** Run the targeted tests for your change in its TDD cycle, plus one affected-tests run after your last edit. In a fix mode, compile and run the named failing or regression tests. Never the full suite. Batch fixes: one build check per batch, not per edit. Only Validate runs the full suite.
 
 5. {{code.commit_push()}}
@@ -107,7 +107,7 @@ You fix the issues the Triage agent marked FIX_NOW. Do not re-litigate dispositi
 
 ## Handoff
 
-**If HANDOFF_REQUIRED=true**, end with the section you appended to `HANDOFF_FILE` (the orchestrator passes it on as PRIOR_PHASE_SUMMARY):
+**If HANDOFF_REQUIRED=true**, end with the section you appended to `HANDOFF_FILE`:
 
 ```markdown
 ## Phase {N} Implementation Summary

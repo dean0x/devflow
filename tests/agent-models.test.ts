@@ -1718,3 +1718,65 @@ describe('a saved override wins over the shipped sonnet tiers of Evaluate and Ex
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// #756: a saved `devflow agents` override still wins over Plan's shipped Opus tier
+// ---------------------------------------------------------------------------
+
+describe('a saved override wins over the shipped opus tier of Plan (#756)', () => {
+  let installDir: string;
+  let devflowDir: string;
+
+  beforeEach(async () => {
+    installDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-plan-install-'));
+    devflowDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-plan-state-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(installDir, { recursive: true, force: true });
+    await fs.rm(devflowDir, { recursive: true, force: true });
+  });
+
+  it('reads opus at high effort from the shipped file', async () => {
+    const defaults = await loadShippedAgentDefaults();
+    expect(defaults['plan']).toMatchObject({ model: 'opus', effort: 'high' });
+  });
+
+  it('the override survives a re-init that copies the shipped file again', async () => {
+    await saveAgentMapping(devflowDir, { version: 1, agents: { plan: { model: 'sonnet', effort: 'medium' } } });
+    const target = path.join(installDir, 'plan.md');
+
+    // Two inits in a row: each copies the shipped file (opus), then the mapping is re-applied.
+    for (let init = 0; init < 2; init++) {
+      await fs.writeFile(target, resolveAgentSource('plan').content, 'utf-8');
+      await reapplyAgentMapping({ installDir, devflowDir, proxyEnabled: false });
+
+      const after = await fs.readFile(target, 'utf-8');
+      expect(after, `init ${init + 1}`).toMatch(/^model: sonnet$/m);
+      expect(after, `init ${init + 1}`).toMatch(/^effort: medium$/m);
+    }
+  });
+
+  it('applying an override touches only model and effort: the read-only frontmatter stays', async () => {
+    const shipped = resolveAgentSource('plan').content;
+    const target = path.join(installDir, 'plan.md');
+    await fs.writeFile(target, shipped, 'utf-8');
+    await saveAgentMapping(devflowDir, { version: 1, agents: { plan: { model: 'sonnet' } } });
+
+    await reapplyAgentMapping({ installDir, devflowDir, proxyEnabled: false });
+
+    const after = await fs.readFile(target, 'utf-8');
+    expect(after).toMatch(/^model: sonnet$/m);
+    expect(after).toMatch(/^name: Plan$/m);
+    expect(after).toMatch(/^omitClaudeMd: true$/m);
+    expect(after).toMatch(/^tools:\n {2}- Read\n {2}- Bash$/m);
+    expect(after.replace(/^model: sonnet$/m, 'model: opus')).toBe(shipped);
+  });
+
+  it('with no override the shipped opus stays', async () => {
+    const target = path.join(installDir, 'plan.md');
+    await fs.writeFile(target, resolveAgentSource('plan').content, 'utf-8');
+    await reapplyAgentMapping({ installDir, devflowDir, proxyEnabled: false });
+    expect(await fs.readFile(target, 'utf-8')).toMatch(/^model: opus$/m);
+  });
+});

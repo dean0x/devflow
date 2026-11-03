@@ -89,6 +89,7 @@ export const RELEASED_SHIPPED_NAMES: ReleasedShippedNames = Object.freeze({
     'harden',
     'knowledge',
     'learning',
+    'plan', // merged after 3.12.1; not yet in a release
     'polish',
     'pr-comments',
     'project-state',

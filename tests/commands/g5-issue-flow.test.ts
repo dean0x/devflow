@@ -98,7 +98,7 @@ export function collectArtifactWriteInstructions(text: string): string[] {
 
 /** Phase 14 of /plan, split at the issue spawn. Null halves mean the anchor is absent. */
 function planPhase14(plan: string): { beforeSpawn: string | null; afterSpawn: string | null } {
-  const phase14 = sliceBetween(plan, '#### Phase 14: Output', '\n## Architecture')
+  const phase14 = sliceBetween(plan, '#### Phase 14: Output', '\n## Principles')
   if (phase14 === null) return { beforeSpawn: null, afterSpawn: null }
   const at = phase14.indexOf(PLAN_SPAWN)
   if (at === -1) return { beforeSpawn: phase14, afterSpawn: null }

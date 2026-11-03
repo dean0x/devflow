@@ -79,7 +79,7 @@ for (let i = 0; i <= array.length; i++) {  // Should be < not <=
 
 **Checklist**:
 - [ ] Happy path works correctly
-- [ ] Edge cases handled (null, empty, boundary values)
+- [ ] Named edge cases handled (null, empty, boundary values)
 - [ ] Error cases handled gracefully
 - [ ] No race conditions in concurrent code
 - [ ] No infinite loops or recursion without base case
@@ -204,7 +204,7 @@ it('creates user', async () => {
   expect(mockDb.insert).toHaveBeenCalled();  // Only checks mock was called
 });
 
-// BAD: Missing edge case tests
+// BAD: No test for a named edge case (division by zero)
 describe('divide', () => {
   it('divides numbers', () => {
     expect(divide(10, 2)).toBe(5);
@@ -215,9 +215,9 @@ describe('divide', () => {
 
 **Checklist**:
 - [ ] New code has corresponding tests
-- [ ] Tests cover happy path
-- [ ] Tests cover error cases
-- [ ] Tests cover edge cases
+- [ ] Tests cover each acceptance-criterion behaviour
+- [ ] Tests cover each trust-boundary, data-loss, security and fail-closed path
+- [ ] Edge-case tests exist only for named cases
 - [ ] Tests are not brittle (test behavior, not implementation)
 - [ ] Tests would fail if code breaks
 

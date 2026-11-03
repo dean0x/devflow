@@ -175,7 +175,7 @@ it('marks order as paid', async () => {
 
 ## Coverage Violations [4]
 
-### Missing Edge Cases [4]
+### Missing Named Edge Cases [4]
 
 Google SWE Book: happy-path-only tests provide false confidence [4]:
 

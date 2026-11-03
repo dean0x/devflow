@@ -11,14 +11,14 @@ The hosts import this partial as an alias (`as design`) and call each define onc
 inside a define is split by the build like an arm in a host: the markers sit on lines of their own.
 
 @define input():
-- **Artifacts**: Design documents, specifications, issue bodies, or implementation plans to analyze
+- **Artifacts**: Design documents, specifications, issue bodies or plans to analyze
 
-**Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
+**Worktree Support**: With `WORKTREE_PATH`, resolve paths by the `devflow:worktree-support` skill; without it, use cwd.
 
 <!-- curation:on -->
 - **DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries for this repository (pre-rendered to `.devflow/curation/index.md` in its main worktree). `(none)` when absent. Use `devflow:apply-decisions` to Read full bodies on demand.
 <!-- curation:end -->
-- **FEATURE_KNOWLEDGE** (optional): Per KB, the Rules bullets most relevant to the feature, the KB path and a heading index, for pattern-aware gap analysis. Read the indexed sections for the architecture you build on — design additions that fit existing structure. Follow `devflow:apply-feature-knowledge`.
+- **FEATURE_KNOWLEDGE** (optional): Per KB, the Rules bullets most relevant to the feature, the KB path and a heading index, for pattern-aware analysis. Read the indexed sections for the architecture you build on, so that additions fit it. Follow `devflow:apply-feature-knowledge`.
 
 <!-- curation:on -->
 ## Apply Decisions
@@ -29,9 +29,9 @@ Follow `devflow:apply-decisions` on the `DECISIONS_CONTEXT` index. A finding tha
 @end
 
 @define rules():
-2. **Assess confidence (0-100%)** — For each finding, assess certainty. Report at 80%+, suggest at 60-79%, drop below 60%. 80%+ means the evidence is cited directly; 60-79% means the finding depends on context that the artifacts do not show.
-3. **Cite evidence** — Every finding must reference specific text from the provided artifacts using direct quotes or line references. Never invent evidence that the artifacts do not hold.
-4. **Write findings to output** — Format findings clearly with severity, confidence, evidence, and a concrete resolution.
+2. **Assess confidence (0-100%)** — Report a finding at 80%+ (evidence cited directly), suggest it at 60-79% (it depends on context the artifacts do not show), drop it below 60%.
+3. **Cite evidence** — Quote the artifacts or cite a line for every finding. Never invent evidence.
+4. **Write findings to output** — Give each finding a severity, confidence, evidence and a resolution.
 @end
 
 @define output():
@@ -77,7 +77,7 @@ Report cap: final message at most about 1,500 tokens; longer material goes to a 
 
 **Escalate to orchestrator:**
 - Context documents are missing or unreadable
-- Fundamental ambiguity that cannot be resolved without user input
+- Ambiguity that only the user can resolve
 - Artifacts reference external systems not present in the provided context
 @end
 

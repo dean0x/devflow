@@ -1,10 +1,10 @@
 /**
- * D-EXPLORE-NO-CLOBBER: devflow's Explore agent never displaces an Explore agent the
- * user already owns.
+ * D-EXPLORE-NO-CLOBBER: devflow's Explore and Plan agents never displace an agent of the
+ * same type that the user already owns.
  *
  * Claude Code keys agents by their frontmatter `name:` alone, so a second agent named
- * Explore under the user directory would collide with devflow's and the winner would
- * be decided by file load order. The install therefore skips devflow's copy when
+ * Explore or Plan under the user directory would collide with devflow's and the winner
+ * would be decided by file load order. The install therefore skips devflow's copy when
  * another file under ~/.claude/agents defines the same type, warns, and leaves the
  * user's file untouched.
  *
@@ -155,6 +155,14 @@ describe('findForeignAgentOwner: who else defines this agent type', () => {
     await fs.writeFile(mine, agentFile('Explore'));
     expect(await scan()).toEqual({ ok: true, value: mine });
   });
+
+  it('finds a user file that defines Plan, and tells Plan from Explore and from a lowercase plan', async () => {
+    const mine = path.join(agentsRoot, 'my-planner.md');
+    await fs.writeFile(mine, agentFile('Plan'));
+    await fs.writeFile(path.join(agentsRoot, 'lower.md'), agentFile('plan'));
+    expect(await scan('Plan')).toEqual({ ok: true, value: mine });
+    expect(await scan('Explore')).toEqual({ ok: true, value: undefined });
+  });
 });
 
 describe('installViaFileCopy: devflow\'s Explore against a user-owned one (AC-303)', () => {
@@ -248,12 +256,82 @@ describe('installViaFileCopy: devflow\'s Explore against a user-owned one (AC-30
     await install();
     expect(await exists(installed('explore'))).toBe(true);
   });
+
+  it('ships plan.md into the devflow agent directory on a clean machine', async () => {
+    await install();
+    const shipped = await fs.readFile(installed('plan'), 'utf-8');
+    expect(shipped).toBe(resolveAgentSource('plan').content);
+    expect(warnings.filter(w => /\bplan\b/i.test(w))).toEqual([]);
+  });
+
+  it('leaves a user-owned Plan byte-identical, skips devflow\'s copy and warns', async () => {
+    const mine = path.join(claudeDir, 'agents', 'my-planner.md');
+    const mineBytes = agentFile('Plan', 'My own planner, tuned for my monorepo.\n');
+    await fs.mkdir(path.dirname(mine), { recursive: true });
+    await fs.writeFile(mine, mineBytes);
+
+    await install();
+
+    expect(await fs.readFile(mine, 'utf-8')).toBe(mineBytes);
+    expect(await exists(installed('plan'))).toBe(false);
+    expect(await exists(installed('explore')), 'a user Plan does not block devflow\'s Explore').toBe(true);
+    expect(await exists(installed('skim'))).toBe(true);
+    const notice = warnings.filter(w => w.includes(mine));
+    expect(notice).toHaveLength(1);
+    expect(notice[0]).toMatch(/Skipped devflow's Plan agent/);
+  });
+
+  it('leaves a user-owned Explore alone without blocking devflow\'s Plan', async () => {
+    const mine = path.join(claudeDir, 'agents', 'explore.md');
+    await fs.mkdir(path.dirname(mine), { recursive: true });
+    await fs.writeFile(mine, agentFile('Explore'));
+
+    await install();
+
+    expect(await exists(installed('explore'))).toBe(false);
+    expect(await exists(installed('plan'))).toBe(true);
+  });
+
+  it('removes a devflow Plan copy left by an earlier install once the user defines Plan', async () => {
+    await install();
+    expect(await exists(installed('plan'))).toBe(true);
+
+    const mine = path.join(claudeDir, 'agents', 'mine.md');
+    await fs.writeFile(mine, agentFile('Plan'));
+    warnings = [];
+    await install();
+
+    expect(await exists(installed('plan'))).toBe(false);
+    expect(await exists(mine)).toBe(true);
+    expect(warnings.filter(w => w.includes(mine))).toHaveLength(1);
+  });
+
+  it('still ships devflow\'s Plan when the user\'s agent is a lowercase plan, a different type', async () => {
+    const mine = path.join(claudeDir, 'agents', 'plan.md');
+    const mineBytes = agentFile('plan', 'A different agent.\n');
+    await fs.mkdir(path.dirname(mine), { recursive: true });
+    await fs.writeFile(mine, mineBytes);
+
+    await install();
+
+    expect(await exists(installed('plan'))).toBe(true);
+    expect(await fs.readFile(mine, 'utf-8')).toBe(mineBytes);
+    expect(warnings.filter(w => w.includes(mine))).toEqual([]);
+  });
 });
 
 describe('the override table names the shipped agent\'s real type', () => {
-  it('maps the explore registry name to the frontmatter name devflow\'s explore.md ships', () => {
-    const split = splitFrontmatter(resolveAgentSource('explore').content);
-    expect(split, 'explore.md has a frontmatter block').not.toBeNull();
-    expect(split?.inner).toMatch(new RegExp(`^name: ${BUILTIN_OVERRIDE_AGENTS.get('explore')}$`, 'm'));
+  it.each([
+    ['explore', 'Explore'],
+    ['plan', 'Plan'],
+  ])('maps the %s registry name to the frontmatter name %s that its agent file ships', (slug, type) => {
+    expect(BUILTIN_OVERRIDE_AGENTS.get(slug)).toBe(type);
+    const split = splitFrontmatter(resolveAgentSource(slug).content);
+    expect(split, `${slug}.md has a frontmatter block`).not.toBeNull();
+    expect(split?.inner).toMatch(new RegExp(`^name: ${type}$`, 'm'));
+  });
+
+  it('is closed: Explore and Plan are the only built-in types devflow takes over', () => {
+    expect([...BUILTIN_OVERRIDE_AGENTS.keys()].sort()).toEqual(['explore', 'plan']);
   });
 });

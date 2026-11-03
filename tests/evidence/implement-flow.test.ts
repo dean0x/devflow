@@ -31,7 +31,7 @@
  *          inline, no Git spawn) with the REVIEW_PUBLICATION Phase 1 resolved through
  *          the publication partial (its third importer, after the policy resolves).
  *   AC-9   /plan's artifact carries a `## Test Plan` section (required section
- *          13): Gate 2 shows the TP lines in the imported TP-line contract, and
+ *          7): Gate 2 shows the TP lines in the imported TP-line contract, and
  *          Phase 14 runs `check tp` over them before the artifact's one write —
  *          so the contract text, whose "Write every" would read as a second write
  *          instruction, stays out of Phase 14 (g5-issue-flow's single-write rule).
@@ -536,7 +536,7 @@ const PLAN_WRITE = '**Write the artifact now**'
 const PLAN_ORDER: readonly OrderRule[] = [
   { label: 'Gate 2 shows the TP lines in the contract\'s shape', before: '#### Phase 13: Gate 2', after: CONTRACT_HEAD },
   { label: 'the contract stays out of Phase 14', before: CONTRACT_HEAD, after: '#### Phase 14: Output' },
-  { label: 'section 13 is listed in Phase 14', before: '#### Phase 14: Output', after: '13. **Test Plan** — ' },
+  { label: 'the Test Plan section is listed in Phase 14', before: '#### Phase 14: Output', after: '7. **Test Plan** — ' },
   { label: 'the plan is checked before the artifact is written', before: PLAN_CHECK, after: PLAN_WRITE },
 ]
 
@@ -544,7 +544,7 @@ const PLAN_ORDER: readonly OrderRule[] = [
 function collectPlanTestPlanDefects(plan: string): string[] {
   const out = collectOrderViolations('plan.md', plan, PLAN_ORDER)
   const lines = plan.split('\n')
-  if (lines.filter(l => l === '### 12. PR Description Guidance').length !== 1) out.push('`### 12.` lost its number')
+  if (lines.filter(l => l === '### 6. PR Description Guidance').length !== 1) out.push('`### 6.` lost its number')
   if (!lines.some(l => l.startsWith('   - Test strategy — the test plan as TP lines'))) out.push('Gate 2 does not list the TP lines')
   const check = lines.find(l => l.startsWith('node ') && l.includes('verify-evidence.cjs" check tp <that file>; echo "exit=$?"'))
   if (check === undefined) out.push('Phase 14 runs no `check tp`')
@@ -552,18 +552,18 @@ function collectPlanTestPlanDefects(plan: string): string[] {
 }
 
 describe('AC-9: /plan keeps a checked `## Test Plan` section', () => {
-  it('Gate 2 shows the contract, section 13 is listed and the check precedes the one write', () => {
+  it('Gate 2 shows the contract, the Test Plan section is listed and the check precedes the one write', () => {
     const plan = requireDistFile('plan.md')
     expect(plan.split(CONTRACT_HEAD).length - 1, 'the contract expands exactly once').toBe(1)
     expect(collectPlanTestPlanDefects(plan)).toEqual([])
   })
 
-  it('known-bad probes: a lost section 13 and a check moved after the write are reported', () => {
+  it('known-bad probes: a lost Test Plan section and a check moved after the write are reported', () => {
     const plan = requireDistFile('plan.md')
-    const noSection = plan.replace('13. **Test Plan** — ', '13. Test plan — ')
+    const noSection = plan.replace('7. **Test Plan** — ', '7. Test plan — ')
     expect(noSection, 'the seed must land').not.toBe(plan)
     expect(collectPlanTestPlanDefects(noSection)).toEqual([
-      'plan.md: [section 13 is listed in Phase 14] after anchor absent: "13. **Test Plan** — "',
+      'plan.md: [the Test Plan section is listed in Phase 14] after anchor absent: "7. **Test Plan** — "',
     ])
     const late = plan.replace(PLAN_CHECK, 'Check later:').replace(PLAN_WRITE, `${PLAN_WRITE}\n\n${PLAN_CHECK}`)
     expect(collectPlanTestPlanDefects(late)).toEqual([

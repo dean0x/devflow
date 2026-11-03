@@ -27,6 +27,7 @@ d .claude/agents/devflow/
 - .claude/agents/devflow/git.md
 - .claude/agents/devflow/harden.md
 - .claude/agents/devflow/knowledge.md
+- .claude/agents/devflow/plan.md
 - .claude/agents/devflow/polish.md
 - .claude/agents/devflow/refactor.md
 - .claude/agents/devflow/research.md

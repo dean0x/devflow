@@ -614,12 +614,13 @@ export const PR_ONLY_KEYS = ['ISSUE_NUMBER', 'ISSUE_PR_LINK', 'PR_EXCEPTIONS'] a
 
 /**
  * The agent types a command may spawn although devflow ships no agent file for them: Claude Code's own
- * built-ins. `Plan` is the one: /plan's planning spawn uses it. The set is CLOSED: a new entry needs a
- * recorded decision, never an edit made to quiet a guard. A spawn guard compares a `subagent_type` value
- * to it byte-exact, before any case folding or hyphen stripping, so `plan` is not `Plan`. It never admits
- * `general-purpose`, which the built-in resolver would accept and a roster guard must still reject.
+ * built-ins. The set is EMPTY: devflow ships an agent for Explore and for Plan, so each of them is a roster
+ * name like any other. The set stays CLOSED: a new entry needs a recorded decision, never an edit made to
+ * quiet a guard. A spawn guard compares a `subagent_type` value to it byte-exact, before any case folding
+ * or hyphen stripping. It never admits `general-purpose`, which the built-in resolver would accept and a
+ * roster guard must still reject.
  */
-export const BUILT_IN_SPAWN_TYPES: readonly string[] = Object.freeze(['Plan'])
+export const BUILT_IN_SPAWN_TYPES: readonly string[] = Object.freeze([])
 
 export interface CodeSpawnSite {
   readonly file: string

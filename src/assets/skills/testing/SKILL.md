@@ -30,7 +30,7 @@ activation:
 |-------|---------|
 | Pyramid | Many unit → fewer integration → fewest E2E |
 | Trophy | Integration tests give best ROI for UI-heavy code |
-| Google | 70% unit / 20% integration / 10% E2E; avoid E2E excess |
+| Google | 70% unit / 20% integration / 10% E2E |
 
 ## Test Doubles Taxonomy
 
@@ -89,8 +89,8 @@ Quarantine flaky tests immediately — a suite that sometimes passes is worse th
 | Severity | Criteria |
 |----------|----------|
 | **CRITICAL** | Tests don't verify behavior; critical paths untested; everything mocked |
-| **HIGH** | Missing error paths; flaky tests; slow (>10s); setup >10 lines |
-| **MEDIUM** | Missing edge cases; weak assertions; unclear AAA structure |
+| **HIGH** | Untested trust-boundary, data-loss, security or fail-closed path; flaky tests; slow (>10s); setup >10 lines |
+| **MEDIUM** | Named edge case with no test; weak assertions; unclear AAA structure |
 | **LOW** | Organization; naming clarity |
 
 ## Test Suite Safety
@@ -103,17 +103,17 @@ Quarantine flaky tests immediately — a suite that sometimes passes is worse th
 
 | Reference | Contents |
 |-----------|----------|
-| `references/sources.md` | Full bibliography (20 sources) |
-| `references/violations.md` | Extended violations with citations |
+| `references/sources.md` | Bibliography (20 sources) |
+| `references/violations.md` | Violations with citations |
 | `references/patterns.md` | Correct patterns with citations |
-| `references/detection.md` | Bash commands for automated detection |
-| `references/report-template.md` | Report format for documenting issues |
+| `references/detection.md` | Detection commands |
+| `references/report-template.md` | Report format |
 
 ## Quality Gates
 
-- [ ] Setup <10 lines; use fakes over mocks for complex dependencies
+- [ ] Setup <10 lines
 - [ ] Each new assertion would fail, not error, with the change reverted: its RED run counts, else a bad input or a temporary uncommitted revert of your own edit, never a stash
-- [ ] All branches covered: happy path + errors + edge cases
+- [ ] A test for each acceptance-criterion behaviour; an edge-case test only for a named case
 - [ ] Test names describe expected behavior
 - [ ] Tests follow Arrange-Act-Assert structure
 - [ ] No flaky patterns

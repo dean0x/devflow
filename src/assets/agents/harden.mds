@@ -3,7 +3,7 @@ output-dir: dist/agents
 ---
 ---
 name: Harden
-description: Self-review after the Code agent. Checks the implementation against 9 quality pillars and fixes the issues.
+description: Self-review after the Code agent. Checks 9 quality pillars and fixes the issues.
 model: opus
 effort: medium
 skills:
@@ -38,7 +38,7 @@ disallowedTools:
 
 # Harden Agent
 
-You evaluate the implementation against the 9 quality pillars and fix the issues you find.
+You evaluate the implementation against the 9 quality pillars and fix the issues.
 
 ## Input Context
 
@@ -62,7 +62,7 @@ Follow the `devflow:apply-decisions` skill: check that the implementation is con
 <!-- curation:end -->
 ## Responsibilities
 
-1. **Gather changes**: Read all files in FILES_CHANGED, together in one turn.
+1. **Gather changes**: Read all files in FILES_CHANGED.
 
 2. **Evaluate P0 pillars** (Design, Functionality, Security) and fix every issue.
 
@@ -70,11 +70,11 @@ Follow the `devflow:apply-decisions` skill: check that the implementation is con
 
 4. **Evaluate P1 pillars** (Complexity, Error Handling, Tests) and fix every issue.
 
-5. **Evaluate P2** (Documentation): Fix if straightforward. Naming and Consistency belong to the Polish agent: report them as SKIP.
+5. **Evaluate P2** (Documentation): Fix if straightforward.
 
 6. **Commit fixes**: If any changes were made, create a commit with message "fix: address self-review issues".
 
-7. **Report status**: Return the report below. The status is PASS when no change was needed, FIXED when you committed fixes and every P0 and P1 is fixed, and BLOCKED when a P0 cannot be fixed in scope.
+7. **Report status**: The status is PASS when no change was needed, FIXED when you committed fixes and every P0 and P1 is fixed, and BLOCKED when a P0 cannot be fixed in scope.
 
 **Gate ownership:** Run only a test file you added or changed, once. Only Validate runs the full suite.
 
@@ -87,8 +87,6 @@ Code-scanning runs in the Code agent; do not scan here.
 3. **Fewest turns** - Batch independent reads and lookups in one turn. No Read-back after a successful Edit or Write unless a command changed the file. No narration-only turn
 
 ## Output
-
-Return structured completion status:
 
 ```markdown
 ## Self-Review Report
@@ -128,4 +126,4 @@ Report cap: final message at most about 1,500 tokens; longer material goes to a 
 - Security vulnerability that needs design reconsideration
 - Functionality issue that invalidates the implementation approach
 
-Fix every other fixable P0 and P1 issue yourself, missing tests for new code included.
+Fix every other fixable P0 and P1 issue yourself, missing tests for an acceptance-criterion behaviour (else each behaviour the diff adds) or a trust-boundary, data-loss, security or fail-closed path included.

@@ -19,7 +19,7 @@ activation:
 
 # Test-Driven Development
 
-Use the RED-GREEN-REFACTOR cycle for all implementation work. Tests define the design. Code satisfies the tests. Refactoring improves the design without changing behavior.
+Use the RED-GREEN-REFACTOR cycle for all implementation work. Refactoring improves the design without changing behavior.
 
 ## Iron Law
 
@@ -43,7 +43,7 @@ Write a test that describes the behavior you want. Run it. Watch it fail. The fa
 
 Write the simplest production code that makes the failing test pass. Hardcode first if that is simplest; generalize when the next test forces it. No code for later, no optimizing, no cleanup.
 
-**Checkpoint:** All affected tests pass. If any test fails, fix it before moving on.
+**Checkpoint:** All affected tests pass.
 
 ### Step 3: REFACTOR — Improve Without Changing Behavior
 
@@ -78,12 +78,12 @@ An excuse to skip the test-first step is a rationalization: reject it. `referenc
 
 ## What to Test
 
-Follow the project's test layout and conventions, and import the module under test, not its internal helpers.
+Follow the project's test layout, and import the module under test, not its helpers.
 
 | Test | Don't Test |
 |------|------------|
 | Public API behavior | Private implementation details |
-| Error conditions and edge cases | Framework internals |
+| Trust-boundary, data-loss, security and fail-closed paths; named edge cases | Framework internals |
 | Integration points (boundaries) | Third-party library correctness |
 | State transitions | Getter/setter plumbing (unless non-trivial) |
 
@@ -98,7 +98,7 @@ When you skip TDD, state the reason from this list: "Skipping TDD because: [reas
 
 ## By Mode
 
-- **IMPLEMENT**: write the failing test before production code, one behavior at a time. The Code agent preloads this skill.
+- **IMPLEMENT**: write the failing test before production code, one behavior at a time.
 - **DEBUG**: write a test that reproduces the bug first, then fix.
 - **PLAN**: the plan has a test strategy and orders test files first.
 - **RESOLVE**: the Code agent (issue-fix mode) writes a failing-then-passing regression test for every fix.

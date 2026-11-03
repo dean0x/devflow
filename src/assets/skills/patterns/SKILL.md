@@ -7,8 +7,6 @@ allowed-tools: Read, Grep, Glob
 
 # Implementation Patterns
 
-Reference for common implementation patterns.
-
 ## Iron Law
 
 > **FOLLOW EXISTING PATTERNS**
@@ -35,7 +33,7 @@ A bad parameter returns 400 and a failed authentication 401 before any work runs
 
 **Core pattern**: Validate event -> Process -> Handle errors -> Acknowledge
 
-Make each handler idempotent, so a redelivered event does no harm. Log an invalid event as a warning and drop it; do not throw.
+Make a handler idempotent only when the change has a repeated delivery (a retry, a queue, a webhook). Log an invalid event as a warning and drop it; do not throw.
 
 ### Configuration
 
@@ -69,7 +67,7 @@ Before implementing, verify:
 - [ ] Handling all error cases explicitly
 - [ ] Using transactions for multi-step operations
 - [ ] No hardcoded values (use config)
-- [ ] Input validated at system boundaries; operations idempotent where possible
+- [ ] Input validated at system boundaries; idempotent only for a repeated delivery
 
 ## Extended References
 

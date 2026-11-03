@@ -76,11 +76,11 @@
     },
     {
       "id": "agent-roster-count",
-      "floor": 21,
-      "pattern": "toBe(21)",
+      "floor": 22,
+      "pattern": "toBe(22)",
       "occurrences": 1,
       "sourceFile": "tests/guards/agent-source-resolver.test.ts",
-      "description": "resolveAllAgents() size — every DEVFLOW_PLUGINS agent resolves through the shared resolver (AC-0.7, GAP-07). 21 since #733 added the Architect variant of the Design agent (D-DESIGN-VARIANTS). The count includes the hook-spawned Tracker agent, which is declared in devflow-core-skills.agents and filtered at install time rather than held outside the roster, Explore, devflow's override of the Claude Code built-in, and the Fix and Refactor variants of the Code agent (D-CODE-VARIANTS). A floor may only rise."
+      "description": "resolveAllAgents() size — every DEVFLOW_PLUGINS agent resolves through the shared resolver (AC-0.7, GAP-07). 21 since #733 added the Architect variant of the Design agent (D-DESIGN-VARIANTS); 22 since #756 added Plan, devflow's override of the Claude Code built-in Plan. The count includes the hook-spawned Tracker agent, which is declared in devflow-core-skills.agents and filtered at install time rather than held outside the roster, Explore, devflow's override of the Claude Code built-in, and the Fix and Refactor variants of the Code agent (D-CODE-VARIANTS). A floor may only rise."
     },
     {
       "id": "seam-op-section-map",
@@ -284,11 +284,11 @@
     },
     {
       "id": "report-cap-roster-count",
-      "floor": 19,
-      "pattern": "roster.length).toBeGreaterThanOrEqual(19)",
+      "floor": 20,
+      "pattern": "roster.length).toBeGreaterThanOrEqual(20)",
       "occurrences": 1,
       "sourceFile": "tests/guards/report-cap.test.ts",
-      "description": "Roster agents that carry a `Report cap:` line (D-REPORT-CAP): the union of the plugin `agents` arrays, less `curate` and `tracker` (hook-spawned). The guard derives the roster rather than listing it and requires an exempt-field record for each member; this floor stops the derivation quietly returning fewer agents. The Git agent split (#425) removed the `git` exclusion and raised it from 14 to 15; the Explore override raised it to 16; the Fix and Refactor variants raised it to 18; #733 raised it to 19 with the Architect variant of the Design agent. Floors rise, never fall."
+      "description": "Roster agents that carry a `Report cap:` line (D-REPORT-CAP): the union of the plugin `agents` arrays, less `curate` and `tracker` (hook-spawned). The guard derives the roster rather than listing it and requires an exempt-field record for each member; this floor stops the derivation quietly returning fewer agents. The Git agent split (#425) removed the `git` exclusion and raised it from 14 to 15; the Explore override raised it to 16; the Fix and Refactor variants raised it to 18; #733 raised it to 19 with the Architect variant of the Design agent; #756 raised it to 20 with the Plan override. Floors rise, never fall."
     },
     {
       "id": "running-commands-site-count",
@@ -526,19 +526,19 @@
     },
     {
       "id": "code-preload-max-bytes",
-      "ceiling": 20159,
-      "pattern": "const CODE_PRELOAD_MAX_BYTES = 20_159",
+      "ceiling": 20014,
+      "pattern": "const CODE_PRELOAD_MAX_BYTES = 20_014",
       "occurrences": 1,
       "sourceFile": "tests/guards/code-preload.test.ts",
-      "description": "Total bytes of the six SKILL.md files in Code's frontmatter preload (git, testing, test-driven-development, worktree-support, apply-feature-knowledge, apply-decisions) (D-CODE-PRELOAD-CAP, D-CODE-PRELOADS). The ten-file preload was 53,450 bytes; the four mode skills left the preload and then left the agent altogether (D-NO-RUNTIME-SKILLS), and the set measured 25,489, which was the ceiling; #708 (lean Code-path skills) cut it to 20,820. #710 (lean spawn-wide skills) cut it to 20,208. Code keeps test-driven-development and apply-feature-knowledge because only its modes write tests first and only its spawns pass FEATURE_KNOWLEDGE; Fix and Refactor hold their own ceilings below. git, testing and test-driven-development are fixed terms here, so growth in any of the six pays for itself inside the six. May be LOWERED, never raised: a preload ceiling raised to fit what the six grew into is a description of their size, and Code is billed on it at every spawn. Lowered by #706 (lean always-loaded descriptions) to 20159."
+      "description": "Total bytes of the six SKILL.md files in Code's frontmatter preload (git, testing, test-driven-development, worktree-support, apply-feature-knowledge, apply-decisions) (D-CODE-PRELOAD-CAP, D-CODE-PRELOADS). The ten-file preload was 53,450 bytes; the four mode skills left the preload and then left the agent altogether (D-NO-RUNTIME-SKILLS), and the set measured 25,489, which was the ceiling; #708 (lean Code-path skills) cut it to 20,820. #710 (lean spawn-wide skills) cut it to 20,208. Code keeps test-driven-development and apply-feature-knowledge because only its modes write tests first and only its spawns pass FEATURE_KNOWLEDGE; Fix and Refactor hold their own ceilings below. git, testing and test-driven-development are fixed terms here, so growth in any of the six pays for itself inside the six. May be LOWERED, never raised: a preload ceiling raised to fit what the six grew into is a description of their size, and Code is billed on it at every spawn. Lowered by #706 (lean always-loaded descriptions) to 20159, and by #756 (lean plans) to 20138, and to the measured 20,014 when the testing and test-driven-development rows named security and fail-closed paths and a restated clause of the testing checklist paid for them."
     },
     {
       "id": "fix-preload-max-bytes",
-      "ceiling": 13848,
-      "pattern": "const FIX_PRELOAD_MAX_BYTES = 13_848",
+      "ceiling": 13815,
+      "pattern": "const FIX_PRELOAD_MAX_BYTES = 13_815",
       "occurrences": 1,
       "sourceFile": "tests/guards/code-preload.test.ts",
-      "description": "D-CODE-PRELOADS: total bytes of the four SKILL.md files in Fix's frontmatter preload (git, testing, worktree-support, apply-decisions). A gate-failure fix compiles and runs the named tests; it is not a test-first build, and no fix spawn passes FEATURE_KNOWLEDGE, so test-driven-development and apply-feature-knowledge stay with Code. The set measured 14,850; #708 (lean Code-path skills) cut it to 14,264. #710 (lean spawn-wide skills) cut it to 13,883. May be LOWERED, never raised: Fix is billed on it at every spawn. Lowered by #706 (lean always-loaded descriptions) to 13848."
+      "description": "D-CODE-PRELOADS: total bytes of the four SKILL.md files in Fix's frontmatter preload (git, testing, worktree-support, apply-decisions). A gate-failure fix compiles and runs the named tests; it is not a test-first build, and no fix spawn passes FEATURE_KNOWLEDGE, so test-driven-development and apply-feature-knowledge stay with Code. The set measured 14,850; #708 (lean Code-path skills) cut it to 14,264. #710 (lean spawn-wide skills) cut it to 13,883. May be LOWERED, never raised: Fix is billed on it at every spawn. Lowered by #706 (lean always-loaded descriptions) to 13848, and by #756 (lean plans) to 13839, and to the measured 13,815 when the testing severity row named security and fail-closed paths and a restated checklist clause paid for it."
     },
     {
       "id": "refactor-preload-max-bytes",
@@ -550,11 +550,11 @@
     },
     {
       "id": "code-body-max",
-      "ceiling": 9914,
-      "pattern": "const CODE_BODY_MAX_BYTES = 9_914",
+      "ceiling": 9886,
+      "pattern": "const CODE_BODY_MAX_BYTES = 9_886",
       "occurrences": 1,
       "sourceFile": "tests/guards/code-operation.test.ts",
-      "description": "D-CODE-VARIANTS and D-PR-BY-GIT: the compiled Code agent body, dist/agents/code.md, in bytes. It was 24,851 while one Code agent held all seven modes and also opened the PR; the Git agent's ensure-pr-ready reference owns the PR text (16,449), and the three variants split the modes, so Code keeps implement and issue-fix and measured 10,690 (it was 10,735 before the shared Running commands block was rewritten to wait for a run past its timeout, which cut 45 bytes). It was 11,155 after D-COMPLIANCE-INJECT moved the compliance step and input (525) out of the body into the command's directive; #452 then added the read-once and quiet-output rules and cut duplicate rules (418 net). The commit step then gained the check of the diff for secrets or tokens in logs or debug output, paid by removing the Output lead-in and the commit-only note, which the PUSH input line already states (net 2 lower, from 10,737). A later change widened that check to the staged diff of every file the agent commits and paid for it by removing the TASK_ID example from the shared input line, so the size did not change. The guard also holds the body free of every PR-opening phrase and keeps commit-and-push, the diff check once on the commit line, and the security scan (D-SCAN-IN-CODE). It rose by 28 bytes to 10,718 at #677, because the wait rule now names the file that sets the result: a run could read the wrong file and report a pass. #708 (lean Code agents) cut it to 10,079. #719 (lean core rules) cut it to 9,931: the body no longer copies the context-economy rule. May be lowered, never raised: a later addition funds itself with a cut. Lowered by #706 (lean always-loaded descriptions) to 9914."
+      "description": "D-CODE-VARIANTS and D-PR-BY-GIT: the compiled Code agent body, dist/agents/code.md, in bytes. It was 24,851 while one Code agent held all seven modes and also opened the PR; the Git agent's ensure-pr-ready reference owns the PR text (16,449), and the three variants split the modes, so Code keeps implement and issue-fix and measured 10,690 (it was 10,735 before the shared Running commands block was rewritten to wait for a run past its timeout, which cut 45 bytes). It was 11,155 after D-COMPLIANCE-INJECT moved the compliance step and input (525) out of the body into the command's directive; #452 then added the read-once and quiet-output rules and cut duplicate rules (418 net). The commit step then gained the check of the diff for secrets or tokens in logs or debug output, paid by removing the Output lead-in and the commit-only note, which the PUSH input line already states (net 2 lower, from 10,737). A later change widened that check to the staged diff of every file the agent commits and paid for it by removing the TASK_ID example from the shared input line, so the size did not change. The guard also holds the body free of every PR-opening phrase and keeps commit-and-push, the diff check once on the commit line, and the security scan (D-SCAN-IN-CODE). It rose by 28 bytes to 10,718 at #677, because the wait rule now names the file that sets the result: a run could read the wrong file and report a pass. #708 (lean Code agents) cut it to 10,079. #719 (lean core rules) cut it to 9,931: the body no longer copies the context-economy rule. May be lowered, never raised: a later addition funds itself with a cut. Lowered by #706 (lean always-loaded descriptions) to 9914, and by #756 (lean plans) to 9910: the proportional-tests line replaced the cover-everything line, and cuts in the same body paid for it. Lowered to 9886 when the test rule gained its fallback for a spawn without acceptance criteria and the handoff line dropped its restated PRIOR_PHASE_SUMMARY note."
     },
     {
       "id": "fix-body-max",
@@ -598,11 +598,11 @@
     },
     {
       "id": "plan-levels-ref-max",
-      "ceiling": 3995,
-      "pattern": "const PLAN_LEVELS_REF_MAX_BYTES = 3_995",
+      "ceiling": 3994,
+      "pattern": "const PLAN_LEVELS_REF_MAX_BYTES = 3_994",
       "occurrences": 1,
       "sourceFile": "tests/guards/agent-references.test.ts",
-      "description": "D-CMD-REF-HAND: references/commands/plan-levels.md of the agent-references skill, in bytes. /plan reads it once per run at the standard level (the default) or lean, so it is standing context on the default path. Measured 3,995 after #733 named Architect in the Phase 12 row, 4,009 after #690 listed plan siblings in place of tickets, with no headroom. May be LOWERED, never raised."
+      "description": "D-CMD-REF-HAND: references/commands/plan-levels.md of the agent-references skill, in bytes. /plan reads it once per run at the standard level (the default) or lean, so it is standing context on the default path. Measured 3,995 after #733 named Architect in the Phase 12 row, 4,009 after #690 listed plan siblings in place of tickets, with no headroom. Lowered to 3,994 by #756 (lean plans): the single Plan prompt gained the line that sets no report cap, and the extra dashes of a table separator paid for it. May be LOWERED, never raised."
     },
     {
       "id": "resolve-levels-ref-max",
@@ -702,19 +702,19 @@
     },
     {
       "id": "review-body-max",
-      "ceiling": 10898,
-      "pattern": "const REVIEW_BODY_MAX_BYTES = 10_898",
+      "ceiling": 10867,
+      "pattern": "const REVIEW_BODY_MAX_BYTES = 10_867",
       "occurrences": 1,
       "sourceFile": "tests/guards/review-group-sizes.test.ts",
-      "description": "The Review agent body of the curation-on build, dist/agents/review.md, in bytes. Every turn of every Review spawn reads it (opus, high effort, about eleven spawns per full review). Added by #720 (lean Review group) at 10,930, after the cut from 12,422. Lowered by #706 (lean always-loaded descriptions) to 10898."
+      "description": "The Review agent body of the curation-on build, dist/agents/review.md, in bytes. Every turn of every Review spawn reads it (opus, high effort, about eleven spawns per full review). Added by #720 (lean Review group) at 10,930, after the cut from 12,422. Lowered by #706 (lean always-loaded descriptions) to 10898, and by #756 (lean plans) to 10862: the skip-speculative-asks rule was added, and cuts in the same body paid for it. Raised to 10867, still below the 10898 on main, when the rule gained its exemption for a partial write that can lose data, a trust boundary and a fail-closed path; two step lead-ins restated by the Consolidation Rules and the report template paid for most of it."
     },
     {
       "id": "review-body-curation-off-max",
-      "ceiling": 10302,
-      "pattern": "const REVIEW_BODY_CURATION_OFF_MAX_BYTES = 10_302",
+      "ceiling": 10271,
+      "pattern": "const REVIEW_BODY_CURATION_OFF_MAX_BYTES = 10_271",
       "occurrences": 1,
       "sourceFile": "tests/guards/review-group-sizes.test.ts",
-      "description": "The Review agent body of the curation-off build, dist/curation-off/agents/review.md, in bytes. Added by #720 (lean Review group) at 10,334, after the cut from 11,623. Lowered by #706 (lean always-loaded descriptions) to 10302."
+      "description": "The Review agent body of the curation-off build, dist/curation-off/agents/review.md, in bytes. Added by #720 (lean Review group) at 10,334, after the cut from 11,623. Lowered by #706 (lean always-loaded descriptions) to 10302, and by #756 (lean plans) to 10266, with the curation-on build. Raised to 10271, still below the 10302 on main, with the curation-on build."
     },
     {
       "id": "skill-review-methodology-max",
@@ -950,19 +950,19 @@
     },
     {
       "id": "command-plan-max",
-      "ceiling": 33184,
-      "pattern": "['plan', 'on', 33_184],",
+      "ceiling": 32705,
+      "pattern": "['plan', 'on', 32_705],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/plan.md, the curation-on build, in bytes. Measured 33,881 after the Design agent was split into Design and Architect for #733, 33,929 after the shared command partials were cut for #715, 34,422 after the lean cut of the Plan path for #714, 35,325 after the shared root step was cut again for #683, 35,516 after the roots were resolved by one script call for #683, and 36,222 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (36,330 after the knowledge write-back filter and the index file name were restored for #675,36,322 after the decisions partial was condensed for #675, 36,492 after the knowledge partial was condensed for #675, 36,911 after the tracker note kept its github condition for #675, 36,917 after the docs root was condensed, 36,993 after the tracker partial, 37,997 after #473, 38,018 after #472, 38,096 when #456 closed), with no headroom. Main held 39,153 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. Lowered by #706 (lean always-loaded descriptions) to 33852."
+      "description": "D-CMD-SIZE: dist/commands/plan.md, the curation-on build, in bytes. Measured 32,191 after #756 made the plan artifact lean (lens, fold rule, Known limits) and cut the Architecture diagram, which restated the phases, to pay for it. Now 32,458, after the audit of #756 added the never-lower clause, the Known Limits guidance note and two restored source labels; main held 33,184. Earlier: 33,881 after the Design agent was split into Design and Architect for #733, 33,929 after the shared command partials were cut for #715, 34,422 after the lean cut of the Plan path for #714, 35,325 after the shared root step was cut again for #683, 35,516 after the roots were resolved by one script call for #683, and 36,222 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (36,330 after the knowledge write-back filter and the index file name were restored for #675,36,322 after the decisions partial was condensed for #675, 36,492 after the knowledge partial was condensed for #675, 36,911 after the tracker note kept its github condition for #675, 36,917 after the docs root was condensed, 36,993 after the tracker partial, 37,997 after #473, 38,018 after #472, 38,096 when #456 closed), with no headroom. Main held 39,153 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. Lowered by #706 (lean always-loaded descriptions) to 33852. Lowered by #756 (leaner plans: lean template, Architecture diagram cut) to the measured 32705, below the 33184 it had before #756."
     },
     {
       "id": "command-plan-curation-off-max",
-      "ceiling": 31563,
-      "pattern": "['plan', 'off', 31_563],",
+      "ceiling": 31101,
+      "pattern": "['plan', 'off', 31_101],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/curation-off/commands/plan.md, the curation-off build, in bytes. Measured 32,212 after the Design agent was split into Design and Architect for #733, 32,260 after the shared command partials were cut for #715, 32,635 after the lean cut of the Plan path for #714, 33,231 after the shared root step was cut again for #683, 33,343 after the roots were resolved by one script call for #683, and 33,424 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (33,532 after the knowledge write-back filter and the index file name were restored for #675,33,524 after the knowledge partial was condensed for #675, 33,943 after the tracker note kept its github condition for #675, 33,949 after the docs root was condensed, 34,025 after the tracker partial, 35,029 after #473, 35,050 after #472, 35,126 when #456 closed), with no headroom. Main held 36,166 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. Lowered by #706 (lean always-loaded descriptions) to 32183."
+      "description": "D-CMD-SIZE: dist/curation-off/commands/plan.md, the curation-off build, in bytes. Measured 30,587 after #756 made the plan artifact lean (lens, fold rule, Known limits) and cut the Architecture diagram, which restated the phases, to pay for it. Now 30,854, after the audit of #756 added the never-lower clause, the Known Limits guidance note and two restored source labels; main held 31,563. Earlier: 32,212 after the Design agent was split into Design and Architect for #733, 32,260 after the shared command partials were cut for #715, 32,635 after the lean cut of the Plan path for #714, 33,231 after the shared root step was cut again for #683, 33,343 after the roots were resolved by one script call for #683, and 33,424 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (33,532 after the knowledge write-back filter and the index file name were restored for #675,33,524 after the knowledge partial was condensed for #675, 33,943 after the tracker note kept its github condition for #675, 33,949 after the docs root was condensed, 34,025 after the tracker partial, 35,029 after #473, 35,050 after #472, 35,126 when #456 closed), with no headroom. Main held 36,166 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. Lowered by #706 (lean always-loaded descriptions) to 32183. Lowered by #756 (leaner plans) to the measured 31101, below the 31563 it had before #756."
     },
     {
       "id": "command-release-max",
@@ -1110,19 +1110,19 @@
     },
     {
       "id": "command-plan-compliance-off-max",
-      "ceiling": 33017,
-      "pattern": "['plan', 'compliance-off', 33_017],",
+      "ceiling": 32560,
+      "pattern": "['plan', 'compliance-off', 32_560],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/plan.md, the compliance-off build, in bytes. Measured 33,714 after the Design agent was split into Design and Architect for #733, 33,762 after the shared command partials were cut for #715, 34,255 after the lean cut of the Plan path for #714, 35,158 after the shared root step was cut again for #683, 35,349 after the roots were resolved by one script call for #683, and 36,055 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (36,163 after the knowledge write-back filter and the index file name were restored for #675,36,155 after the decisions partial was condensed for #675, 36,325 after the knowledge partial was condensed for #675, 36,744 after the tracker note kept its github condition for #675, 36,750 after the docs root was condensed, 36,826 after the tracker partial, 37,824 at its first build), with no headroom. The rule sets no comparison with the all-on build. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. Lowered by #706 (lean always-loaded descriptions) to 33685."
+      "description": "D-CMD-SIZE (#648, AC-33): dist/compliance-off/commands/plan.md, the compliance-off build, in bytes. Measured 32,046 after #756 made the plan artifact lean (lens, fold rule, Known limits) and cut the Architecture diagram, which restated the phases, to pay for it. Now 32,313, after the audit of #756 added the never-lower clause, the Known Limits guidance note and two restored source labels; main held 33,017. Earlier: 33,714 after the Design agent was split into Design and Architect for #733, 33,762 after the shared command partials were cut for #715, 34,255 after the lean cut of the Plan path for #714, 35,158 after the shared root step was cut again for #683, 35,349 after the roots were resolved by one script call for #683, and 36,055 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (36,163 after the knowledge write-back filter and the index file name were restored for #675,36,155 after the decisions partial was condensed for #675, 36,325 after the knowledge partial was condensed for #675, 36,744 after the tracker note kept its github condition for #675, 36,750 after the docs root was condensed, 36,826 after the tracker partial, 37,824 at its first build), with no headroom. The rule sets no comparison with the all-on build. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. Lowered by #706 (lean always-loaded descriptions) to 33685. Lowered by #756 (leaner plans) to the measured 32560, below the 33017 it had before #756."
     },
     {
       "id": "command-plan-both-off-max",
-      "ceiling": 31396,
-      "pattern": "['plan', 'both-off', 31_396],",
+      "ceiling": 30956,
+      "pattern": "['plan', 'both-off', 30_956],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE (#648, AC-33): dist/curation-compliance-off/commands/plan.md, the build with curation and compliance both off, in bytes. Measured 32,045 after the Design agent was split into Design and Architect for #733, 32,093 after the shared command partials were cut for #715, 32,468 after the lean cut of the Plan path for #714, 33,064 after the shared root step was cut again for #683, 33,176 after the roots were resolved by one script call for #683, and 33,257 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (33,365 after the knowledge write-back filter and the index file name were restored for #675,33,357 after the knowledge partial was condensed for #675, 33,776 after the tracker note kept its github condition for #675, 33,782 after the docs root was condensed, 33,858 after the tracker partial, 34,856 at its first build), with no headroom. The rule sets no comparison with the other builds. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. Lowered by #706 (lean always-loaded descriptions) to 32016."
+      "description": "D-CMD-SIZE (#648, AC-33): dist/curation-compliance-off/commands/plan.md, the build with curation and compliance both off, in bytes. Measured 30,442 after #756 made the plan artifact lean (lens, fold rule, Known limits) and cut the Architecture diagram, which restated the phases, to pay for it. Now 30,709, after the audit of #756 added the never-lower clause, the Known Limits guidance note and two restored source labels; main held 31,396. Earlier: 32,045 after the Design agent was split into Design and Architect for #733, 32,093 after the shared command partials were cut for #715, 32,468 after the lean cut of the Plan path for #714, 33,064 after the shared root step was cut again for #683, 33,176 after the roots were resolved by one script call for #683, and 33,257 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (33,365 after the knowledge write-back filter and the index file name were restored for #675,33,357 after the knowledge partial was condensed for #675, 33,776 after the tracker note kept its github condition for #675, 33,782 after the docs root was condensed, 33,858 after the tracker partial, 34,856 at its first build), with no headroom. The rule sets no comparison with the other builds. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. Lowered by #706 (lean always-loaded descriptions) to 32016. Lowered by #756 (leaner plans) to the measured 30956, below the 31396 it had before #756."
     },
     {
       "id": "command-release-compliance-off-max",
@@ -1198,19 +1198,19 @@
     },
     {
       "id": "design-body-max",
-      "ceiling": 3617,
-      "pattern": "const DESIGN_BODY_MAX_BYTES = 3_617",
+      "ceiling": 3360,
+      "pattern": "const DESIGN_BODY_MAX_BYTES = 3_360",
       "occurrences": 1,
       "sourceFile": "tests/guards/plan-group-sizes.test.ts",
-      "description": "The Design agent body of the curation-on build, dist/agents/design.md, in bytes. Every turn of every Design spawn reads it (opus, high effort, five to eight spawns per /plan run). Measured 3,617 after one temp-file Write method for #743, 3,618 after #733 moved the design-review mode to the Architect agent. Added by #714 (lean Plan path group) at 4,219, after the cut from 5,529."
+      "description": "The Design agent body of the curation-on build, dist/agents/design.md, in bytes. Every turn of every Design spawn reads it (opus, high effort, five to eight spawns per /plan run). Measured 3,617 after one temp-file Write method for #743, 3,618 after #733 moved the design-review mode to the Architect agent. Added by #714 (lean Plan path group) at 4,219, after the cut from 5,529. Lowered by #756 (lean plans) to 3,360: the wording cuts in the partial that Design shares with Architect pay for the Architect lens item."
     },
     {
       "id": "design-body-curation-off-max",
-      "ceiling": 3051,
-      "pattern": "const DESIGN_BODY_CURATION_OFF_MAX_BYTES = 3_051",
+      "ceiling": 2794,
+      "pattern": "const DESIGN_BODY_CURATION_OFF_MAX_BYTES = 2_794",
       "occurrences": 1,
       "sourceFile": "tests/guards/plan-group-sizes.test.ts",
-      "description": "The Design agent body of the curation-off build, dist/curation-off/agents/design.md, in bytes. Measured 3,051 after one temp-file Write method for #743, 3,052 after #733 moved the design-review mode to the Architect agent. Added by #714 (lean Plan path group) at 3,653, after the cut from 4,776."
+      "description": "The Design agent body of the curation-off build, dist/curation-off/agents/design.md, in bytes. Measured 3,051 after one temp-file Write method for #743, 3,052 after #733 moved the design-review mode to the Architect agent. Added by #714 (lean Plan path group) at 3,653, after the cut from 4,776. Lowered by #756 (lean plans) to 2,794, with the curation-on build."
     },
     {
       "id": "architect-body-max",
@@ -1218,7 +1218,7 @@
       "pattern": "const ARCHITECT_BODY_MAX_BYTES = 3_782",
       "occurrences": 1,
       "sourceFile": "tests/guards/plan-group-sizes.test.ts",
-      "description": "The Architect agent body of the curation-on build, dist/agents/architect.md, in bytes. Every turn of the /plan Phase 12 spawn and the /dynamic-plan plan writer reads it (opus, high effort). Added by #733 (Design split into Design and Architect, D-DESIGN-VARIANTS) at 3,387. Raised by #752 from 3,386 to 3,782 (396 bytes): the Plan writing section lets the /dynamic-plan plan writer read gap-analysis by install path, as the Design agent that wrote plans at 3.11.0 preloaded it. The section adds 447 bytes; wording cuts in the same host took 51 first."
+      "description": "The Architect agent body of the curation-on build, dist/agents/architect.md, in bytes. Every turn of the /plan Phase 12 spawn and the /dynamic-plan plan writer reads it (opus, high effort). Added by #733 (Design split into Design and Architect, D-DESIGN-VARIANTS) at 3,387. Raised by #752 from 3,386 to 3,782 (396 bytes): the Plan writing section lets the /dynamic-plan plan writer read gap-analysis by install path, as the Design agent that wrote plans at 3.11.0 preloaded it. The section adds 447 bytes; wording cuts in the same host took 51 first. Lowered by #756 (lean plans) to 3,775: the minimum-lens item was added, and wording cuts in the host and in the partial it shares with Design paid for it. Raised to 3,782, equal to main, when the minimum lens gained its never-flag clause for a trust-boundary, security, data-loss or fail-closed guard; two restated lines of the host paid for most of it."
     },
     {
       "id": "architect-body-curation-off-max",
@@ -1226,7 +1226,7 @@
       "pattern": "const ARCHITECT_BODY_CURATION_OFF_MAX_BYTES = 3_216",
       "occurrences": 1,
       "sourceFile": "tests/guards/plan-group-sizes.test.ts",
-      "description": "The Architect agent body of the curation-off build, dist/curation-off/agents/architect.md, in bytes. Added by #733 (Design split into Design and Architect, D-DESIGN-VARIANTS) at 2,821. Raised by #752 from 2,820 to 3,216 (396 bytes), for the same Plan writing section as the curation-on build."
+      "description": "The Architect agent body of the curation-off build, dist/curation-off/agents/architect.md, in bytes. Added by #733 (Design split into Design and Architect, D-DESIGN-VARIANTS) at 2,821. Raised by #752 from 2,820 to 3,216 (396 bytes), for the same Plan writing section as the curation-on build. Lowered by #756 (lean plans) to 3,209, with the curation-on build. Raised to 3,216, equal to main, with the curation-on build."
     },
     {
       "id": "explore-body-max",
@@ -1237,20 +1237,28 @@
       "description": "The Explore agent body, src/assets/agents/explore.md, in bytes. It overrides the built-in Explore machine-wide, so every turn of every Explore spawn of any session reads it (sonnet, high effort; eight spawns per /plan run). Added by #714 (lean Plan path group) at 3,355, after the cut from 3,477. Lowered by #706 (lean always-loaded descriptions) to 3276."
     },
     {
-      "id": "skill-gap-analysis-max",
-      "ceiling": 5553,
-      "pattern": "['gap-analysis', 5_553],",
+      "id": "plan-body-max",
+      "ceiling": 3255,
+      "pattern": "const PLAN_BODY_MAX_BYTES = 3_255",
       "occurrences": 1,
       "sourceFile": "tests/guards/plan-group-sizes.test.ts",
-      "description": "src/assets/skills/gap-analysis/SKILL.md, in bytes. The Design agent preloads it, so every turn of every Design spawn reads it. Added by #714 (lean Plan path group) at 5,575, after the cut from 6,519. Lowered by #706 (lean always-loaded descriptions) to 5553."
+      "description": "The Plan agent body, src/assets/agents/plan.md, in bytes. It overrides the built-in Plan machine-wide, so every turn of every Plan spawn of any session reads it (opus, high effort; three spawns per /plan run, and one per plan-mode research). Added by #756 (leaner plans) at 3,188, the size of the first version, below Explore's 3,276. Set to the measured 3,221 when the Never Cut list was extended to hold against the no-speculative-cases rule, then to 3,255 when it added the caller's stated requirements."
+    },
+    {
+      "id": "skill-gap-analysis-max",
+      "ceiling": 5545,
+      "pattern": "['gap-analysis', 5_545],",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/plan-group-sizes.test.ts",
+      "description": "src/assets/skills/gap-analysis/SKILL.md, in bytes. The Design agent preloads it, so every turn of every Design spawn reads it. Added by #714 (lean Plan path group) at 5,575, after the cut from 6,519. Lowered by #706 (lean always-loaded descriptions) to 5553. Lowered by #756 (caching gap only on a stated or measured hot path) to the measured 5545."
     },
     {
       "id": "skill-design-review-max",
-      "ceiling": 5217,
-      "pattern": "['design-review', 5_217],",
+      "ceiling": 5193,
+      "pattern": "['design-review', 5_193],",
       "occurrences": 1,
       "sourceFile": "tests/guards/plan-group-sizes.test.ts",
-      "description": "src/assets/skills/design-review/SKILL.md, in bytes. The Design agent preloads it, so every turn of every Design spawn reads it. Added by #714 (lean Plan path group) at 4,415, after the cut from 6,006. Lowered by #706 (lean always-loaded descriptions) to 4393. Raised by #752 from 4,393 to 5,217 (824 bytes): six one-line Suggest lines restore the fix advice that 3.11.0 gave for each anti-pattern. They add 981 bytes; wording cuts in the same skill took 157 first. Only Architect preloads it."
+      "description": "src/assets/skills/design-review/SKILL.md, in bytes. The Design agent preloads it, so every turn of every Design spawn reads it. Added by #714 (lean Plan path group) at 4,415, after the cut from 6,006. Lowered by #706 (lean always-loaded descriptions) to 4393. Raised by #752 from 4,393 to 5,217 (824 bytes): six one-line Suggest lines restore the fix advice that 3.11.0 gave for each anti-pattern. They add 981 bytes; wording cuts in the same skill took 157 first. Only Architect preloads it. Lowered to 5,193 by #756 (lean plans) when the intro sentence that gated all of rule 4 on a concrete case, restated by rules 4 and 5, was cut."
     },
     {
       "id": "skill-docs-framework-max",
@@ -1294,11 +1302,11 @@
     },
     {
       "id": "skill-patterns-max",
-      "ceiling": 2981,
-      "pattern": "['patterns', 2_981],",
+      "ceiling": 2972,
+      "pattern": "['patterns', 2_972],",
       "occurrences": 1,
       "sourceFile": "tests/guards/on-demand-skill-sizes.test.ts",
-      "description": "src/assets/skills/patterns/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 2,981, after the cut from 4,738."
+      "description": "src/assets/skills/patterns/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 2,981, after the cut from 4,738. Lowered by #756 (lean plans) to 2,972: the idempotency line now needs a repeated delivery, and the tagline under the title went."
     },
     {
       "id": "skill-typescript-max",
@@ -1470,27 +1478,27 @@
     },
     {
       "id": "catalog-description-max",
-      "ceiling": 5942,
-      "pattern": "CATALOG_DESCRIPTION_MAX_BYTES = 5_942",
+      "ceiling": 6170,
+      "pattern": "CATALOG_DESCRIPTION_MAX_BYTES = 6_170",
       "occurrences": 1,
       "sourceFile": "tests/guards/always-loaded-sizes.test.ts",
-      "description": "Sum of the description bytes of every skill, command and agent row that a default install lists (core plugins, compliance off, no language plugin). Claude Code puts these rows in every main turn of every session. Added by #706 (lean always-loaded text) at 6,187 (7,048 on main before the cut, which already held the other-targets skill rows). Lowered by #706 (lean descriptions, the rest) to 5942."
+      "description": "Sum of the description bytes of every skill, command and agent row that a default install lists (core plugins, compliance off, no language plugin). Claude Code puts these rows in every main turn of every session. Added by #706 (lean always-loaded text) at 6,187 (7,048 on main before the cut, which already held the other-targets skill rows). Lowered by #706 (lean descriptions, the rest) to 5942. Raised by #756 from 5942 to 6170 (228 bytes) for the description of the Plan agent, which devflow now ships in place of the built-in Plan. A typical session lists one Plan row either way: devflow's replaces the built-in's, whose length is not measured here, so a typical session reads about the same."
     },
     {
       "id": "harden-body-max",
-      "ceiling": 5011,
-      "pattern": "['harden', 'on', 5_011],",
+      "ceiling": 4940,
+      "pattern": "['harden', 'on', 4_940],",
       "occurrences": 1,
       "sourceFile": "tests/guards/other-agents-sizes.test.ts",
-      "description": "The Harden agent body of the curation-on build, dist/agents/harden.md, in bytes. Every turn of every Harden spawn reads it (opus; /implement and /self-review spawn it). Added at its measured 5,047 so that it can not grow back. Lowered by #706 (lean always-loaded descriptions) to 5011."
+      "description": "The Harden agent body of the curation-on build, dist/agents/harden.md, in bytes. Every turn of every Harden spawn reads it (opus; /implement and /self-review spawn it). Added at its measured 5,047 so that it can not grow back. Lowered by #706 (lean always-loaded descriptions) to 5011, and by #756 (lean plans) to 4998: the missing-test rule names the acceptance-criterion and never-cut paths, and cuts in the same body paid for it. Lowered to 4940 when the missing-test rule gained the fallback of each behaviour the diff adds; two restated lines of the same body paid for it with room left."
     },
     {
       "id": "harden-body-curation-off-max",
-      "ceiling": 4443,
-      "pattern": "['harden', 'off', 4_443],",
+      "ceiling": 4372,
+      "pattern": "['harden', 'off', 4_372],",
       "occurrences": 1,
       "sourceFile": "tests/guards/other-agents-sizes.test.ts",
-      "description": "The Harden agent body of the curation-off build, dist/curation-off/agents/harden.md, in bytes. Added at its measured 4,479 so that it can not grow back. Lowered by #706 (lean always-loaded descriptions) to 4443."
+      "description": "The Harden agent body of the curation-off build, dist/curation-off/agents/harden.md, in bytes. Added at its measured 4,479 so that it can not grow back. Lowered by #706 (lean always-loaded descriptions) to 4443, and by #756 (lean plans) to 4430, with the curation-on build. Lowered to 4372 with the curation-on build."
     },
     {
       "id": "polish-body-max",

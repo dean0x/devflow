@@ -1,5 +1,5 @@
 /**
- * Report caps on the built-in spawns the commands write as prose.
+ * Report caps on the Explore and Plan spawns the commands write as prose.
  *
  * D-CHARTER-BOUNDED-INLINE. The orchestrator charter asks every direct
  * delegation for a final report of bounded size, so a delegated result does not
@@ -8,9 +8,8 @@
  * `Agent(subagent_type="Explore")` agents"), not as a roster fence a template
  * could cap once — so each spawn instruction carries its own cap, with a token
  * figure: "at most about 1,500 tokens". A cap with no figure ("keep it short")
- * bounds nothing. Plan is a Claude Code built-in with no agent file, and its
- * spawn is a typed `Agent(subagent_type="Plan")` site like the others; the cap
- * count stays 3.
+ * bounds nothing. The Plan spawn is a typed `Agent(subagent_type="Plan")` site
+ * like the others; the cap count stays 3.
  *
  * Counted in the COMPILED commands, because that is what the model reads:
  *   - explore: the Phase 3 explorers                             (at least 1)
@@ -74,7 +73,7 @@ function readCompiled(): Map<string, string> {
   return new Map(Object.keys(REQUIRED_CAPS).map(command => [command, requireDistFile(`${command}.md`)]))
 }
 
-describe('report caps on built-in Explore and Plan spawns (D-CHARTER-BOUNDED-INLINE)', () => {
+describe('report caps on Explore and Plan spawns (D-CHARTER-BOUNDED-INLINE)', () => {
   it('explore, debug and plan each carry their report caps with a token figure', () => {
     const shortfalls = collectReportCapShortfalls(readCompiled())
     expect(shortfalls, `Report-cap shortfalls:\n  ${shortfalls.join('\n  ')}`).toEqual([])

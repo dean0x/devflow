@@ -20,7 +20,7 @@ const SKILL_MAX_BYTES: ReadonlyArray<readonly [string, number]> = [
   ['compliance', 3_526],
   ['dependency-research', 3_765],
   ['boundary-validation', 3_081],
-  ['patterns', 2_981],
+  ['patterns', 2_972],
   ['typescript', 2_711],
   ['python', 2_620],
   ['go', 2_405],

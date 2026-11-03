@@ -294,10 +294,10 @@ describe('Guard 4 (command integrity): declared commands ↔ source files', () =
 // Commands that contain NO subagent_type pattern at all are skipped from both
 // checks (they use a different spawn syntax, e.g. agentType in dynamic-*).
 //
-// Explore is a registered agent like any other: devflow ships an agent named Explore that
-// overrides the Claude Code built-in, so it is declared and checked in both directions.
-// Plan is the other built-in, and devflow ships no agent file for it: BUILT_IN_SPAWN_TYPES admits it
-// by exact name on the forward arm only (spawnedRegistryNames), and the reverse arm is unchanged.
+// Explore and Plan are registered agents like any other: devflow ships agents named Explore and Plan
+// that override the Claude Code built-ins, so each is declared and checked in both directions.
+// BUILT_IN_SPAWN_TYPES, the closed set of built-in types without an agent file that the forward arm
+// admits by exact name (spawnedRegistryNames), is empty.
 // Fails LOUD when dist/commands/ is absent — a silent skip is not a guard.
 
 // Matches both Agent(subagent_type="Name") and subagent_type: "Name" syntax.
@@ -318,9 +318,9 @@ const normalize = (name: string) => name.replace(/-/g, '').toLowerCase();
 /**
  * Named collector (pure): the normalized agent names a compiled command spawns, by `subagent_type` or
  * `agentType`. A `subagent_type` that byte-equals an entry of BUILT_IN_SPAWN_TYPES is skipped BEFORE
- * `normalize`: a built-in has no agent file, so no plugin declares it. The compare is on the raw text, so
- * `plan` and `general-purpose` still reach `normalize` and are reported as undeclared. The `agentType`
- * harvest has no such exemption: a dynamic host names roster agents only.
+ * `normalize`: a built-in without an agent file is declared by no plugin. The compare is on the raw text, so
+ * a type outside the set, `general-purpose` included, reaches `normalize` and is reported as undeclared. The
+ * `agentType` harvest has no such exemption: a dynamic host names roster agents only.
  */
 export function spawnedRegistryNames(content: string): Set<string> {
   const spawned = new Set<string>();
@@ -420,26 +420,23 @@ describe('Guard 5 (build-gated): spawned agents ↔ plugin agent declarations', 
     ).toHaveLength(0);
   });
 
-  it('known-bad probes: the built-in Plan spawn yields no registry name; plan and general-purpose do', () => {
-    // Plan is a Claude Code built-in with no agent file, so no plugin declares it.
-    expect(BUILT_IN_SPAWN_TYPES).toEqual(['Plan']);
+  it('known-bad probes: every spawn type is harvested, Plan and general-purpose included, because no built-in is exempt', () => {
+    // devflow ships an agent for Explore and for Plan, so the closed set of exempt built-ins is empty.
+    expect(BUILT_IN_SPAWN_TYPES).toEqual([]);
     const harvest = (text: string): string[] => [...spawnedRegistryNames(text)];
 
-    // Controls: a roster spawn is harvested, in both spawn syntaxes, so an empty result below means "skipped".
+    // Controls: a roster spawn is harvested, in both spawn syntaxes.
     expect(harvest('Agent(subagent_type="Explore"):')).toEqual(['explore']);
     expect(harvest('agent(`go`, { agentType: "Fix" })')).toEqual(['fix']);
 
-    // The built-in is skipped on its exact name, in the fenced and the one-line prose spawn.
-    expect(harvest('Agent(subagent_type="Plan"):')).toEqual([]);
-    expect(harvest('Spawn 3 `Agent(subagent_type="Plan")` agents')).toEqual([]);
-
-    // Anything near it is harvested, so Guard 5 reports it as an undeclared name.
-    expect(harvest('Agent(subagent_type="plan"):')).toEqual(['plan']);
-    expect(harvest('Agent(subagent_type="PLAN"):')).toEqual(['plan']);
-    expect(harvest('Agent(subagent_type="general-purpose"):')).toEqual(['generalpurpose']);
-
-    // The exemption is for subagent_type only: a dynamic host naming Plan through agentType is still harvested.
+    // Plan is harvested like any roster agent, in the fenced and the one-line prose spawn, so Guard 5
+    // requires a plugin to declare it.
+    expect(harvest('Agent(subagent_type="Plan"):')).toEqual(['plan']);
+    expect(harvest('Spawn 3 `Agent(subagent_type="Plan")` agents')).toEqual(['plan']);
     expect(harvest('agent(`go`, { agentType: "Plan" })')).toEqual(['plan']);
+
+    // A type with no agent file is harvested too, so Guard 5 reports it as an undeclared name.
+    expect(harvest('Agent(subagent_type="general-purpose"):')).toEqual(['generalpurpose']);
   });
 });
 

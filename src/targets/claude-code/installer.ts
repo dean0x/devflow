@@ -1990,7 +1990,7 @@ async function writeStampedAgent(
 
 /**
  * D-EXPLORE-NO-CLOBBER, install half: true when `agentName` takes over a built-in
- * agent type (Explore) and the user already owns an agent of that type under
+ * agent type (Explore, Plan) and the user already owns an agent of that type under
  * `{claudeDir}/agents`, so devflow's copy must not be installed.
  *
  * The user's file is only ever read. A copy of devflow's own left by an earlier install

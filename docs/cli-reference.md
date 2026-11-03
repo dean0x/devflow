@@ -64,9 +64,9 @@ Devflow's install folders belong to devflow, so keep your own files in their sta
 
 `init`, the `ambient`, `memory` and `proxy` toggles, and `uninstall` add and remove only the hooks devflow wrote in `settings.json`. A hook is devflow's only when its command ends in `/scripts/hooks/run-hook <name>`, or in a form an older release wrote (such as `/scripts/hooks/session-start-memory.sh`). A hook of yours whose command merely mentions a devflow hook's name (`capture-turn`, `memory-worker`, `ensure-proxy`, ...) is never touched, and removing a devflow hook leaves the other hooks in its matcher group in place, in order.
 
-### Your Explore agent stays yours
+### Your Explore and Plan agents stay yours
 
-devflow ships an `Explore` agent that replaces Claude Code's built-in Explore in every session, plan mode included. Claude Code matches agents by exact name, so a lowercase `explore` is a different agent. If an agent file under your agents directory already defines `Explore`, `init` skips devflow's copy and warns. `uninstall` removes devflow's copy, and the built-in applies again.
+devflow ships an `Explore` agent and a `Plan` agent. Each replaces Claude Code's built-in agent of the same name in every session, plan mode included. Claude Code matches agents by exact name, so a lowercase `explore` or `plan` is a different agent. If an agent file under your agents directory already defines `Explore` or `Plan`, `init` skips devflow's copy of that agent and warns. `uninstall` removes devflow's copies, and the built-ins apply again. Your own agent files stay as they are. devflow's Plan agent defaults to Opus at high effort; `devflow agents --set plan --model <model>` and `--effort <level>` change that. devflow's Plan reads with Read and Bash only, so it has no web tools. The Plan agent comes with the plan plugin. A project's own `.claude/agents` `Explore` or `Plan` agent wins in that project, and `init` does not check it.
 
 ## Plugin Management
 
