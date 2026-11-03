@@ -45,10 +45,10 @@ import {
   SUBPROCESS_TIMEOUT_MS, createSandbox, diffTree, excludeGit, readTree, removeSandbox, resolveOnPath, runCli,
   runCliOk, sandboxChildEnv, type Sandbox,
 } from './install-snapshot-helpers.js'
-import { bothOffDir, complianceOffDir, curationOffDir } from '../src/core/assets.js'
+import { bothOffDir, complianceOffDir, curationOffDir, variantOffDir } from '../src/core/assets.js'
 import { COMPLIANCE_OFF_REMOVED_SKILL_FILES } from '../src/core/compliance-off-files.js'
 import { generatedReferenceManifest, SKILL_REFS_SKILL_NAME } from '../src/core/mds-variants.js'
-import { CURATION_GATED_SKILLS, prefixSkillName } from '../src/core/plugins.js'
+import { CURATION_GATED_SKILLS, TDD_GATED_SKILLS, prefixSkillName } from '../src/core/plugins.js'
 import { initCommand } from '../src/cli/commands/init.js'
 import { uninstallCommand } from '../src/cli/commands/uninstall.js'
 import { ambientCommand } from '../src/cli/commands/ambient.js'
@@ -67,6 +67,7 @@ import { agentsCommand } from '../src/cli/commands/agents.js'
 import { complianceCommand } from '../src/cli/commands/compliance.js'
 import { trackerCommand } from '../src/cli/commands/tracker.js'
 import { behaviorCommand } from '../src/cli/commands/behavior.js'
+import { tddCommand } from '../src/cli/commands/tdd.js'
 import { gatesCommand } from '../src/cli/commands/gates.js'
 
 const CLI = requireBuiltCli()
@@ -116,6 +117,12 @@ const OFF_TREE_DIRS: ReadonlyArray<(kind: (typeof PROMPT_VARIANT_KINDS)[number])
   kind => bothOffDir(kind),
 ]
 
+/**
+ * The tdd trees that hold files, agents only: the Code agent is the one host with tdd arms,
+ * and it has a curation arm and no compliance arm.
+ */
+const TDD_AGENT_TREE_DIRS: readonly string[] = [variantOffDir('tdd-off', 'agents'), variantOffDir('curation-tdd-off', 'agents')]
+
 /** The installed path of every `.md` file in one off tree directory; an absent directory throws. */
 function offTreeFiles(dir: string, kind: (typeof PROMPT_VARIANT_KINDS)[number]): string[] {
   let names: string[]
@@ -138,8 +145,11 @@ function offTreeFiles(dir: string, kind: (typeof PROMPT_VARIANT_KINDS)[number]):
  * the toggle to the manifest and fail every row for a reason that names no cause.
  */
 function promptVariantAllow(): string[] {
-  const prompts = PROMPT_VARIANT_KINDS.flatMap(kind => OFF_TREE_DIRS.flatMap(dirOf => offTreeFiles(dirOf(kind), kind)))
-  const skills = CURATION_GATED_SKILLS.map(skill => `<HOME>/.claude/skills/${prefixSkillName(skill)}/**`)
+  const prompts = [
+    ...PROMPT_VARIANT_KINDS.flatMap(kind => OFF_TREE_DIRS.flatMap(dirOf => offTreeFiles(dirOf(kind), kind))),
+    ...TDD_AGENT_TREE_DIRS.flatMap(dir => offTreeFiles(dir, 'agents')),
+  ]
+  const skills = [...CURATION_GATED_SKILLS, ...TDD_GATED_SKILLS].map(skill => `<HOME>/.claude/skills/${prefixSkillName(skill)}/**`)
   return [...new Set([...prompts, ...skills, ...referenceVariantAllow()])]
 }
 
@@ -296,6 +306,11 @@ export const FENCE_ROWS: readonly FenceRow[] = [
   { args: ['behavior', '--disable'], allow: [MANIFEST, RULES_DIR], mustWrite: true },
   { args: ['behavior', '--status'], allow: NONE, mustWrite: false },
 
+  // The tdd switch converges the Code agent and its gated skill through the same prompt-variant surface.
+  { args: ['tdd', '--disable'], allow: [MANIFEST, PROMPT_VARIANT_SURFACE], mustWrite: true },
+  { args: ['tdd', '--enable'], allow: [MANIFEST, PROMPT_VARIANT_SURFACE], mustWrite: true },
+  { args: ['tdd', '--status'], allow: NONE, mustWrite: false },
+
   // Already installed by init's `--security user`: re-enabling may restamp the manifest only.
   { args: ['security', '--enable', '--user'], allow: [SETTINGS, MANIFEST], mustWrite: false },
   // From no deny list: enabling installs it in the user settings and records `user`.
@@ -362,7 +377,7 @@ export const UNFENCED_ACTIONS: Readonly<Record<string, string>> = {
 const COMMANDS: readonly Command[] = [
   initCommand, uninstallCommand, ambientCommand, memoryCommand, skillsCommand, hudCommand, flagsCommand,
   knowledgeCommand, curationCommand, rulesCommand, debugCommand, securityCommand, safeDeleteCommand,
-  proxyCommand, agentsCommand, complianceCommand, trackerCommand, behaviorCommand, gatesCommand,
+  proxyCommand, agentsCommand, complianceCommand, trackerCommand, behaviorCommand, gatesCommand, tddCommand,
 ]
 
 /** The options that make a command a toggle. */
@@ -445,7 +460,7 @@ describe('write-set fence: the prompt-variant allowlist', () => {
     PROMPT_VARIANT_PATHS.filter(entry => entry.startsWith(`<HOME>/.claude/${kind}/devflow/`))
   const treeFiles = (dir: string): string[] => readdirSync(dir).filter(name => name.endsWith('.md'))
 
-  it('is the union of the curation-off, compliance-off and both-off rosters, file by file, plus the curation-gated skill directory', () => {
+  it('is the union of the off-tree rosters, file by file, plus the gated skill directories', () => {
     // Non-vacuity: the roster really was read, and carries both kinds.
     expect(roster('commands').length).toBeGreaterThan(0)
     expect(roster('agents').length).toBeGreaterThan(0)
@@ -454,6 +469,8 @@ describe('write-set fence: the prompt-variant allowlist', () => {
       expect(roster(kind).map(entry => path.posix.basename(entry)).sort()).toEqual([...new Set(files)].sort())
     }
     expect(PROMPT_VARIANT_PATHS).toContain('<HOME>/.claude/skills/devflow:apply-decisions/**')
+    expect(PROMPT_VARIANT_PATHS).toContain('<HOME>/.claude/skills/devflow:test-driven-development/**')
+    expect(roster('agents')).toContain('<HOME>/.claude/agents/devflow/code.md')
   })
 
   it('covers the compliance-armed hosts, including the Git agent that no curation tree holds', () => {
@@ -470,7 +487,10 @@ describe('write-set fence: the prompt-variant allowlist', () => {
 
   it('admits no subtree of the commands, agents or skills directories', () => {
     const subtrees = PROMPT_VARIANT_PATHS.filter(entry => entry.endsWith('/**'))
-    expect(subtrees).toEqual(['<HOME>/.claude/skills/devflow:apply-decisions/**'])
+    expect(subtrees).toEqual([
+      '<HOME>/.claude/skills/devflow:apply-decisions/**',
+      '<HOME>/.claude/skills/devflow:test-driven-development/**',
+    ])
   })
 
   it('admits a roster agent, a roster command and the skill, and nothing beside them', () => {
@@ -565,6 +585,7 @@ describe('write-set fence coverage', () => {
     const surfaceRows = FENCE_ROWS.filter(row => row.allow.includes(PROMPT_VARIANT_SURFACE))
     const curationRows = surfaceRows.filter(row => row.args[0] === 'curation')
     const complianceRows = surfaceRows.filter(row => row.args[0] === 'compliance')
+    const tddRows = surfaceRows.filter(row => row.args[0] === 'tdd')
     // Non-vacuity: the surface really is in the table, in both curation toggles and in every compliance action
     // that converges the prompts.
     expect(curationRows.map(rowName)).toEqual(['devflow curation --disable', 'devflow curation --enable'])
@@ -575,8 +596,10 @@ describe('write-set fence coverage', () => {
       'devflow compliance --enable',
       'devflow compliance --disable (after --enable)',
     ])
-    expect(surfaceRows).toHaveLength(curationRows.length + complianceRows.length)
+    expect(tddRows.map(rowName)).toEqual(['devflow tdd --disable', 'devflow tdd --enable'])
+    expect(surfaceRows).toHaveLength(curationRows.length + complianceRows.length + tddRows.length)
     expect(allowlistSize(curationRows)).toBe(2) // the manifest and the surface
+    expect(allowlistSize([...curationRows, ...tddRows])).toBe(2) // the tdd axis rides the same surface
     // The posting axis adds the compliance rule and skill, and nothing for the prompts: they ride the surface.
     expect(allowlistSize([...curationRows, ...complianceRows])).toBe(4) // manifest, surface, rule, skill
     // The compliance rows derive their prompt paths from the surface: none lists a command or an agent by hand.
