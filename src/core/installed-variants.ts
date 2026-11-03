@@ -45,6 +45,23 @@ export function installRecordFor(converged: boolean, switches: InstalledVariants
   return converged ? perAxis(axis => switches[axis]) : null;
 }
 
+/**
+ * What the record says about one axis, read against the machine's switch for it: `on` and `off`
+ * are the two settled states (the record agrees with the switch), `mismatch` is a record that
+ * disagrees, and `unknown` is a record that is absent or unreadable.
+ */
+export type VariantRecordStatus = 'on' | 'off' | 'mismatch' | 'unknown';
+
+export function variantRecordStatus(
+  installed: InstalledVariants | null,
+  axis: VariantAxis,
+  enabled: boolean,
+): VariantRecordStatus {
+  if (installed === null) return 'unknown';
+  if (installed[axis] !== enabled) return 'mismatch';
+  return enabled ? 'on' : 'off';
+}
+
 /** What `devflow compliance --status` prints after `Posting:`. */
 export type PostingStatus =
   | 'installed'
@@ -61,9 +78,21 @@ export type PostingStatus =
  * both name the remedy.
  */
 export function postingStatus(installed: InstalledVariants | null, complianceEnabled: boolean): PostingStatus {
-  if (installed === null) return 'unknown (run devflow init)';
-  if (installed.compliance !== complianceEnabled) return 'mismatch (run devflow init)';
-  return complianceEnabled ? 'installed' : 'not installed';
+  const status = variantRecordStatus(installed, 'compliance', complianceEnabled);
+  switch (status) {
+    case 'on':
+      return 'installed';
+    case 'off':
+      return 'not installed';
+    case 'mismatch':
+      return 'mismatch (run devflow init)';
+    case 'unknown':
+      return 'unknown (run devflow init)';
+    default: {
+      const unhandled: never = status;
+      return unhandled;
+    }
+  }
 }
 
 /** What `devflow init` prints, once, when the installed prompts move from posting steps to none. */
