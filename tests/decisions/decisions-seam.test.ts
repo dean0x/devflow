@@ -362,7 +362,7 @@ describe('rule 2: a site that passes the key names a declared type', () => {
     }
   })
 
-  it('the plan\'s built-in Explore and Plan phases and its Git spawns carry no decisions', () => {
+  it('the plan\'s Explore and Plan phases and its Git spawns carry no decisions', () => {
     const text = requireDistFile('plan.md')
     for (const type of ['Explore', 'Plan', 'Git']) {
       const sites = collectCodeSpawnSites('plan.md', text, type)
@@ -385,7 +385,7 @@ describe('rule 3: every sentence that gives the key away names a declared receiv
   const declared = collectDeclaredTypes()
   const known = collectKnownTypes(compiled())
 
-  it('the corpus holds give-away sentences, and the known types include the built-ins', () => {
+  it('the corpus holds give-away sentences, and the known types include the shipped agents', () => {
     const sentences = compiled().flatMap(([, text]) => collectGiveAwaySentences(text))
     expect(sentences.length, 'give-away sentences found').toBeGreaterThanOrEqual(10)
     for (const type of ['Explore', 'Plan', 'Validate', 'Git', 'Code']) expect(known.has(type), type).toBe(true)
