@@ -25,8 +25,8 @@ const AGENT_MAX_BYTES: ReadonlyArray<readonly [string, Build, number]> = [
   ['skim', 'on', 6_605],
   ['skim', 'off', 5_483],
   ['tracker', 'on', 18_316],
-  ['harden', 'on', 5_009],
-  ['harden', 'off', 4_441],
+  ['harden', 'on', 4_940],
+  ['harden', 'off', 4_372],
   ['polish', 'on', 4_495],
 ]
 

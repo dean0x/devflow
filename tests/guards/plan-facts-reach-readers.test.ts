@@ -6,8 +6,7 @@
  *   - The artifact keeps the source of Breaking Changes and the data label of the issue text, and its
  *     Known Limits guidance field reaches the PR body: the Git agent's mapping table and the PR template
  *     carry it, in every provider and both compliance builds.
- *   - The Harden spawn gets the acceptance criteria. Code, Harden and the quality gates say what to test
- *     with none.
+ *   - Code, Harden and the quality gates say what to test when no acceptance criteria are given.
  *   - The testing and test-driven-development rows name security and fail-closed paths.
  *
  * Each rule has a named collector and known-bad probes. The byte ceilings are in the group size guards.
@@ -116,50 +115,15 @@ describe('the Known Limits guidance field reaches the PR body', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 3. The acceptance criteria reach Code and Harden
-// ---------------------------------------------------------------------------
-
-const HARDEN_CRITERIA_LINE = "ACCEPTANCE_CRITERIA: {the plan's Acceptance Criteria, if a plan exists}"
-
-/** The prompt of the Harden spawn: from its spawn line to its closing instruction. */
-function hardenSpawn(implement: string): string {
-  const start = implement.indexOf('Agent(subagent_type="Harden"):')
-  const end = implement.indexOf('Evaluate 9 pillars', start)
-  return start === -1 || end === -1 ? '' : implement.slice(start, end)
-}
-
-/** Named collector: the /implement builds whose Harden spawn is not given the acceptance criteria. */
-export function collectSpawnCriteriaDefects(label: string, implement: string): string[] {
-  return hardenSpawn(implement).includes(HARDEN_CRITERIA_LINE) ? [] : [`${label}: the Harden spawn is not given the acceptance criteria`]
-}
-
-describe('the Harden spawn gets the acceptance criteria', () => {
-  const builds = commandBuilds('implement')
-
-  it.each(builds)('%s passes them', (label, implement) => {
-    expect(implement.length, `${label}: the command is read`).toBeGreaterThan(30_000)
-    expect(collectSpawnCriteriaDefects(label, implement)).toEqual([])
-  })
-
-  it('known-bad probe: a Harden spawn without the field is reported', () => {
-    const implement = builds[0][1]
-    expect(collectSpawnCriteriaDefects('i', seed(implement, `${HARDEN_CRITERIA_LINE}\n`, ''))).toEqual(['i: the Harden spawn is not given the acceptance criteria'])
-  })
-})
-
-// ---------------------------------------------------------------------------
-// 4. What Code, Harden and the quality gates do with no criteria
+// 3. What Code, Harden and the quality gates do with no criteria
 // ---------------------------------------------------------------------------
 
 const DIFF_FALLBACK = 'else each behaviour the diff adds'
 const MUST_FALLBACK = "else each behaviour your steps' Must lines name"
 
-/** Named collector: how a Harden body falls short of taking the criteria and falling back without them. */
+/** Named collector: whether a Harden body falls back to the behaviours of the diff when it has no criteria. */
 export function collectHardenCriteriaDefects(label: string, harden: string): string[] {
-  const out: string[] = []
-  if (!harden.includes('- **ACCEPTANCE_CRITERIA** (optional)')) out.push(`${label}: Harden lists no ACCEPTANCE_CRITERIA input`)
-  if (!harden.includes(DIFF_FALLBACK)) out.push(`${label}: Harden has no fallback for no criteria`)
-  return out
+  return harden.includes(DIFF_FALLBACK) ? [] : [`${label}: Harden has no fallback for no criteria`]
 }
 
 /** Named collector: how the quality-gates skill falls short of a fallback on both pillars that key on criteria. */
@@ -184,7 +148,7 @@ describe('Code, Harden and the quality gates say what to test when no acceptance
   ] as const
   const gates = readSrc('skills', 'quality-gates', 'SKILL.md')
 
-  it.each(harden)('%s takes the criteria and falls back without them', (label, body) => {
+  it.each(harden)('%s falls back to the behaviours of the diff without criteria', (label, body) => {
     expect(body.length, `${label}: the body is read`).toBeGreaterThan(3_000)
     expect(collectHardenCriteriaDefects(label, body)).toEqual([])
   })
@@ -198,9 +162,8 @@ describe('Code, Harden and the quality gates say what to test when no acceptance
     expect(collectQualityGateFallbackDefects(gates)).toEqual([])
   })
 
-  it('known-bad probes: each lost input and fallback is reported', () => {
+  it('known-bad probes: each lost fallback is reported', () => {
     const body = harden[0][1]
-    expect(collectHardenCriteriaDefects('h', seed(body, '- **ACCEPTANCE_CRITERIA** (optional)', '- **CRITERIA** (optional)'))).toEqual(['h: Harden lists no ACCEPTANCE_CRITERIA input'])
     expect(collectHardenCriteriaDefects('h', seed(body, ` (${DIFF_FALLBACK})`, ''))).toEqual(['h: Harden has no fallback for no criteria'])
     expect(collectQualityGateFallbackDefects(seed(gates, ` (${DIFF_FALLBACK})`, ''))).toEqual(['the quality gates carry the fallback 1 times, expected 2 (Functionality and Tests)'])
     expect(collectCodeFallbackDefects('c', seed(code[0][1], ` (${MUST_FALLBACK})`, ''))).toEqual(['c: Code has no fallback to the Must lines of its steps'])
@@ -208,7 +171,7 @@ describe('Code, Harden and the quality gates say what to test when no acceptance
 })
 
 // ---------------------------------------------------------------------------
-// 5. The test rows name security and fail-closed paths
+// 4. The test rows name security and fail-closed paths
 // ---------------------------------------------------------------------------
 
 const TESTING_ROW = 'Untested trust-boundary, data-loss, security or fail-closed path'

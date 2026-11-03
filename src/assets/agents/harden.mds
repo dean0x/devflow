@@ -45,7 +45,6 @@ You evaluate the implementation against the 9 quality pillars and fix the issues
 You receive from orchestrator:
 - **TASK_DESCRIPTION**: What was implemented
 - **FILES_CHANGED** (optional): The branch diff's file list, with no deleted file or old rename path
-- **ACCEPTANCE_CRITERIA** (optional): The plan's Acceptance Criteria
 <!-- curation:on -->
 - **DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries for this repository (pre-rendered to `.devflow/curation/index.md` in its main worktree). `(none)` when absent. Use `devflow:apply-decisions` to Read full bodies on demand.
 <!-- curation:end -->

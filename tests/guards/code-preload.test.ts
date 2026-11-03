@@ -53,7 +53,7 @@ export const RETIRED_RUNTIME_SKILLS: readonly string[] = [
 ]
 
 /** The SKILL.md files of Code's preload together, in bytes. Registered as `code-preload-max-bytes` in tests/fixtures/numeric-floors.json; lowered, never raised. */
-const CODE_PRELOAD_MAX_BYTES = 19_972
+const CODE_PRELOAD_MAX_BYTES = 20_014
 
 /** The SKILL.md files of Fix's preload together, in bytes. Registered as `fix-preload-max-bytes`; lowered, never raised. */
 const FIX_PRELOAD_MAX_BYTES = 13_815

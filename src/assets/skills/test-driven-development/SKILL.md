@@ -60,6 +60,7 @@ After each cycle, all of these must hold:
 - [ ] Production code is minimal — nothing beyond what the test demands
 - [ ] ALL affected tests pass, not just the new one
 - [ ] Refactoring happened in Step 3 (or code is already clean — state explicitly)
+- [ ] No untested production code remains
 
 If any fails, you skipped TDD: back up and redo the cycle.
 
