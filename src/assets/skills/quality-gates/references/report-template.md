@@ -90,7 +90,7 @@ Add user profile update endpoint
 | Pillar | Status | Notes |
 |--------|--------|-------|
 | Design | PASS | Follows existing route/service pattern |
-| Functionality | PASS | All edge cases handled |
+| Functionality | PASS | Named edge cases handled |
 | Security | PASS | Auth middleware in place, input validated |
 
 ---

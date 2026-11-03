@@ -55,7 +55,7 @@ Use this template when reporting test design issues.
 |----------|---------|---------|
 | **CRITICAL** | Fundamental design flaws | Complex setup >10 lines, repetitive boilerplate >3 times, mock objects >5 methods, testing private methods |
 | **HIGH** | Maintenance complications | Difficult mocking >20 lines, implementation testing, environment manipulation, database seeding |
-| **MEDIUM** | Reduced clarity | Test helper abuse, inconsistent assertion patterns, missing edge case coverage |
+| **MEDIUM** | Reduced clarity | Test helper abuse, inconsistent assertion patterns, a named edge case with no test |
 | **LOW** | Minor improvements | Organization, naming clarity |
 
 ---

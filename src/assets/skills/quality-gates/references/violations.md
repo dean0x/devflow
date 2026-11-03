@@ -204,7 +204,7 @@ it('creates user', async () => {
   expect(mockDb.insert).toHaveBeenCalled();  // Only checks mock was called
 });
 
-// BAD: Missing edge case tests
+// BAD: No test for a named edge case (division by zero)
 describe('divide', () => {
   it('divides numbers', () => {
     expect(divide(10, 2)).toBe(5);
