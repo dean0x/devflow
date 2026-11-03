@@ -7,7 +7,7 @@ The excuses table, the mid-work red flags, a test-first example, and detailed co
 | Excuse | Why It Feels Right | Why It's Wrong | Correct Action |
 |--------|-------------------|----------------|----------------|
 | "I'll write tests after" | Need to see the shape first | Tests ARE the shape — they define the interface before implementation exists | Write the test first |
-| "Too simple to test" | It's just a getter/setter | Getters break, defaults change, edge cases hide in "simple" code | Write it — takes 30 seconds |
+| "Too simple to test" | It's just a getter/setter | Getters break and defaults change; code with an acceptance-criterion behaviour always gets its test | Test that behaviour — takes 30 seconds |
 | "I'll refactor later" | Just get it working now | "Later" never comes; technical debt compounds silently | Refactor now in Step 3 |
 | "Test is too hard to write" or "the test setup is too complex" | Mocking is painful | Hard-to-test code = bad design, and complex setup = too much coupling; the test is telling you the interface is wrong | Simplify the interface first |
 | "Need to see the whole picture" or "the architecture first" | Can't test what I haven't designed or structured yet | TDD IS design; each test reveals the next piece of the interface, and tests DEFINE the architecture | Let the tests drive the design and structure |

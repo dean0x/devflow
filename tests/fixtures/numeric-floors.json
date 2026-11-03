@@ -526,19 +526,19 @@
     },
     {
       "id": "code-preload-max-bytes",
-      "ceiling": 20159,
-      "pattern": "const CODE_PRELOAD_MAX_BYTES = 20_159",
+      "ceiling": 20138,
+      "pattern": "const CODE_PRELOAD_MAX_BYTES = 20_138",
       "occurrences": 1,
       "sourceFile": "tests/guards/code-preload.test.ts",
-      "description": "Total bytes of the six SKILL.md files in Code's frontmatter preload (git, testing, test-driven-development, worktree-support, apply-feature-knowledge, apply-decisions) (D-CODE-PRELOAD-CAP, D-CODE-PRELOADS). The ten-file preload was 53,450 bytes; the four mode skills left the preload and then left the agent altogether (D-NO-RUNTIME-SKILLS), and the set measured 25,489, which was the ceiling; #708 (lean Code-path skills) cut it to 20,820. #710 (lean spawn-wide skills) cut it to 20,208. Code keeps test-driven-development and apply-feature-knowledge because only its modes write tests first and only its spawns pass FEATURE_KNOWLEDGE; Fix and Refactor hold their own ceilings below. git, testing and test-driven-development are fixed terms here, so growth in any of the six pays for itself inside the six. May be LOWERED, never raised: a preload ceiling raised to fit what the six grew into is a description of their size, and Code is billed on it at every spawn. Lowered by #706 (lean always-loaded descriptions) to 20159."
+      "description": "Total bytes of the six SKILL.md files in Code's frontmatter preload (git, testing, test-driven-development, worktree-support, apply-feature-knowledge, apply-decisions) (D-CODE-PRELOAD-CAP, D-CODE-PRELOADS). The ten-file preload was 53,450 bytes; the four mode skills left the preload and then left the agent altogether (D-NO-RUNTIME-SKILLS), and the set measured 25,489, which was the ceiling; #708 (lean Code-path skills) cut it to 20,820. #710 (lean spawn-wide skills) cut it to 20,208. Code keeps test-driven-development and apply-feature-knowledge because only its modes write tests first and only its spawns pass FEATURE_KNOWLEDGE; Fix and Refactor hold their own ceilings below. git, testing and test-driven-development are fixed terms here, so growth in any of the six pays for itself inside the six. May be LOWERED, never raised: a preload ceiling raised to fit what the six grew into is a description of their size, and Code is billed on it at every spawn. Lowered by #706 (lean always-loaded descriptions) to 20159, and by #756 (lean plans) to 20138."
     },
     {
       "id": "fix-preload-max-bytes",
-      "ceiling": 13848,
-      "pattern": "const FIX_PRELOAD_MAX_BYTES = 13_848",
+      "ceiling": 13839,
+      "pattern": "const FIX_PRELOAD_MAX_BYTES = 13_839",
       "occurrences": 1,
       "sourceFile": "tests/guards/code-preload.test.ts",
-      "description": "D-CODE-PRELOADS: total bytes of the four SKILL.md files in Fix's frontmatter preload (git, testing, worktree-support, apply-decisions). A gate-failure fix compiles and runs the named tests; it is not a test-first build, and no fix spawn passes FEATURE_KNOWLEDGE, so test-driven-development and apply-feature-knowledge stay with Code. The set measured 14,850; #708 (lean Code-path skills) cut it to 14,264. #710 (lean spawn-wide skills) cut it to 13,883. May be LOWERED, never raised: Fix is billed on it at every spawn. Lowered by #706 (lean always-loaded descriptions) to 13848."
+      "description": "D-CODE-PRELOADS: total bytes of the four SKILL.md files in Fix's frontmatter preload (git, testing, worktree-support, apply-decisions). A gate-failure fix compiles and runs the named tests; it is not a test-first build, and no fix spawn passes FEATURE_KNOWLEDGE, so test-driven-development and apply-feature-knowledge stay with Code. The set measured 14,850; #708 (lean Code-path skills) cut it to 14,264. #710 (lean spawn-wide skills) cut it to 13,883. May be LOWERED, never raised: Fix is billed on it at every spawn. Lowered by #706 (lean always-loaded descriptions) to 13848, and by #756 (lean plans) to 13839."
     },
     {
       "id": "refactor-preload-max-bytes",
@@ -550,11 +550,11 @@
     },
     {
       "id": "code-body-max",
-      "ceiling": 9914,
-      "pattern": "const CODE_BODY_MAX_BYTES = 9_914",
+      "ceiling": 9910,
+      "pattern": "const CODE_BODY_MAX_BYTES = 9_910",
       "occurrences": 1,
       "sourceFile": "tests/guards/code-operation.test.ts",
-      "description": "D-CODE-VARIANTS and D-PR-BY-GIT: the compiled Code agent body, dist/agents/code.md, in bytes. It was 24,851 while one Code agent held all seven modes and also opened the PR; the Git agent's ensure-pr-ready reference owns the PR text (16,449), and the three variants split the modes, so Code keeps implement and issue-fix and measured 10,690 (it was 10,735 before the shared Running commands block was rewritten to wait for a run past its timeout, which cut 45 bytes). It was 11,155 after D-COMPLIANCE-INJECT moved the compliance step and input (525) out of the body into the command's directive; #452 then added the read-once and quiet-output rules and cut duplicate rules (418 net). The commit step then gained the check of the diff for secrets or tokens in logs or debug output, paid by removing the Output lead-in and the commit-only note, which the PUSH input line already states (net 2 lower, from 10,737). A later change widened that check to the staged diff of every file the agent commits and paid for it by removing the TASK_ID example from the shared input line, so the size did not change. The guard also holds the body free of every PR-opening phrase and keeps commit-and-push, the diff check once on the commit line, and the security scan (D-SCAN-IN-CODE). It rose by 28 bytes to 10,718 at #677, because the wait rule now names the file that sets the result: a run could read the wrong file and report a pass. #708 (lean Code agents) cut it to 10,079. #719 (lean core rules) cut it to 9,931: the body no longer copies the context-economy rule. May be lowered, never raised: a later addition funds itself with a cut. Lowered by #706 (lean always-loaded descriptions) to 9914."
+      "description": "D-CODE-VARIANTS and D-PR-BY-GIT: the compiled Code agent body, dist/agents/code.md, in bytes. It was 24,851 while one Code agent held all seven modes and also opened the PR; the Git agent's ensure-pr-ready reference owns the PR text (16,449), and the three variants split the modes, so Code keeps implement and issue-fix and measured 10,690 (it was 10,735 before the shared Running commands block was rewritten to wait for a run past its timeout, which cut 45 bytes). It was 11,155 after D-COMPLIANCE-INJECT moved the compliance step and input (525) out of the body into the command's directive; #452 then added the read-once and quiet-output rules and cut duplicate rules (418 net). The commit step then gained the check of the diff for secrets or tokens in logs or debug output, paid by removing the Output lead-in and the commit-only note, which the PUSH input line already states (net 2 lower, from 10,737). A later change widened that check to the staged diff of every file the agent commits and paid for it by removing the TASK_ID example from the shared input line, so the size did not change. The guard also holds the body free of every PR-opening phrase and keeps commit-and-push, the diff check once on the commit line, and the security scan (D-SCAN-IN-CODE). It rose by 28 bytes to 10,718 at #677, because the wait rule now names the file that sets the result: a run could read the wrong file and report a pass. #708 (lean Code agents) cut it to 10,079. #719 (lean core rules) cut it to 9,931: the body no longer copies the context-economy rule. May be lowered, never raised: a later addition funds itself with a cut. Lowered by #706 (lean always-loaded descriptions) to 9914, and by #756 (lean plans) to 9910: the proportional-tests line replaced the cover-everything line, and cuts in the same body paid for it."
     },
     {
       "id": "fix-body-max",
@@ -702,19 +702,19 @@
     },
     {
       "id": "review-body-max",
-      "ceiling": 10898,
-      "pattern": "const REVIEW_BODY_MAX_BYTES = 10_898",
+      "ceiling": 10862,
+      "pattern": "const REVIEW_BODY_MAX_BYTES = 10_862",
       "occurrences": 1,
       "sourceFile": "tests/guards/review-group-sizes.test.ts",
-      "description": "The Review agent body of the curation-on build, dist/agents/review.md, in bytes. Every turn of every Review spawn reads it (opus, high effort, about eleven spawns per full review). Added by #720 (lean Review group) at 10,930, after the cut from 12,422. Lowered by #706 (lean always-loaded descriptions) to 10898."
+      "description": "The Review agent body of the curation-on build, dist/agents/review.md, in bytes. Every turn of every Review spawn reads it (opus, high effort, about eleven spawns per full review). Added by #720 (lean Review group) at 10,930, after the cut from 12,422. Lowered by #706 (lean always-loaded descriptions) to 10898, and by #756 (lean plans) to 10862: the skip-speculative-asks rule was added, and cuts in the same body paid for it."
     },
     {
       "id": "review-body-curation-off-max",
-      "ceiling": 10302,
-      "pattern": "const REVIEW_BODY_CURATION_OFF_MAX_BYTES = 10_302",
+      "ceiling": 10266,
+      "pattern": "const REVIEW_BODY_CURATION_OFF_MAX_BYTES = 10_266",
       "occurrences": 1,
       "sourceFile": "tests/guards/review-group-sizes.test.ts",
-      "description": "The Review agent body of the curation-off build, dist/curation-off/agents/review.md, in bytes. Added by #720 (lean Review group) at 10,334, after the cut from 11,623. Lowered by #706 (lean always-loaded descriptions) to 10302."
+      "description": "The Review agent body of the curation-off build, dist/curation-off/agents/review.md, in bytes. Added by #720 (lean Review group) at 10,334, after the cut from 11,623. Lowered by #706 (lean always-loaded descriptions) to 10302, and by #756 (lean plans) to 10266, with the curation-on build."
     },
     {
       "id": "skill-review-methodology-max",
@@ -1302,11 +1302,11 @@
     },
     {
       "id": "skill-patterns-max",
-      "ceiling": 2981,
-      "pattern": "['patterns', 2_981],",
+      "ceiling": 2972,
+      "pattern": "['patterns', 2_972],",
       "occurrences": 1,
       "sourceFile": "tests/guards/on-demand-skill-sizes.test.ts",
-      "description": "src/assets/skills/patterns/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 2,981, after the cut from 4,738."
+      "description": "src/assets/skills/patterns/SKILL.md, in bytes. No agent preloads it: a run loads it with the Skill tool when it invokes the skill, and reads it again in every later turn. Added by #718 (lean on-demand skills) at 2,981, after the cut from 4,738. Lowered by #756 (lean plans) to 2,972: the idempotency line now needs a repeated delivery, and the tagline under the title went."
     },
     {
       "id": "skill-typescript-max",
@@ -1486,19 +1486,19 @@
     },
     {
       "id": "harden-body-max",
-      "ceiling": 5011,
-      "pattern": "['harden', 'on', 5_011],",
+      "ceiling": 4998,
+      "pattern": "['harden', 'on', 4_998],",
       "occurrences": 1,
       "sourceFile": "tests/guards/other-agents-sizes.test.ts",
-      "description": "The Harden agent body of the curation-on build, dist/agents/harden.md, in bytes. Every turn of every Harden spawn reads it (opus; /implement and /self-review spawn it). Added at its measured 5,047 so that it can not grow back. Lowered by #706 (lean always-loaded descriptions) to 5011."
+      "description": "The Harden agent body of the curation-on build, dist/agents/harden.md, in bytes. Every turn of every Harden spawn reads it (opus; /implement and /self-review spawn it). Added at its measured 5,047 so that it can not grow back. Lowered by #706 (lean always-loaded descriptions) to 5011, and by #756 (lean plans) to 4998: the missing-test rule names the acceptance-criterion and never-cut paths, and cuts in the same body paid for it."
     },
     {
       "id": "harden-body-curation-off-max",
-      "ceiling": 4443,
-      "pattern": "['harden', 'off', 4_443],",
+      "ceiling": 4430,
+      "pattern": "['harden', 'off', 4_430],",
       "occurrences": 1,
       "sourceFile": "tests/guards/other-agents-sizes.test.ts",
-      "description": "The Harden agent body of the curation-off build, dist/curation-off/agents/harden.md, in bytes. Added at its measured 4,479 so that it can not grow back. Lowered by #706 (lean always-loaded descriptions) to 4443."
+      "description": "The Harden agent body of the curation-off build, dist/curation-off/agents/harden.md, in bytes. Added at its measured 4,479 so that it can not grow back. Lowered by #706 (lean always-loaded descriptions) to 4443, and by #756 (lean plans) to 4430, with the curation-on build."
     },
     {
       "id": "polish-body-max",

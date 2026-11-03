@@ -101,7 +101,7 @@ Add user profile update endpoint
 |--------|--------|-------|
 | Complexity | PASS | Functions under 30 lines |
 | Error Handling | PASS | Uses Result types consistently |
-| Tests | PASS | Happy path, errors, and edges covered |
+| Tests | PASS | Each acceptance-criterion behaviour covered |
 
 ---
 

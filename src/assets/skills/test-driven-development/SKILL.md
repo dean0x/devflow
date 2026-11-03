@@ -78,12 +78,12 @@ An excuse to skip the test-first step is a rationalization: reject it. `referenc
 
 ## What to Test
 
-Follow the project's test layout and conventions, and import the module under test, not its internal helpers.
+Follow the project's test layout, and import the module under test, not its helpers.
 
 | Test | Don't Test |
 |------|------------|
 | Public API behavior | Private implementation details |
-| Error conditions and edge cases | Framework internals |
+| Errors at a trust boundary; named edge cases | Framework internals |
 | Integration points (boundaries) | Third-party library correctness |
 | State transitions | Getter/setter plumbing (unless non-trivial) |
 

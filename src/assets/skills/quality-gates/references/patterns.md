@@ -191,7 +191,7 @@ try {
 
 ### 6. Tests - Correct Patterns
 
-**Fix Pattern**: Add tests for all new functions, test behavior not mocks, cover edge cases.
+**Fix Pattern**: Add a test for each acceptance-criterion behaviour, test behavior not mocks, cover named edge cases.
 
 ```typescript
 // GOOD: Testing behavior

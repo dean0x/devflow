@@ -83,13 +83,13 @@ Follow `devflow:apply-decisions` on the `DECISIONS_CONTEXT` index. A finding tha
 <!-- curation:end -->
 ## Responsibilities
 
-1. **Load focus skill**: Before any analysis, invoke the Skill tool: `Skill(skill="devflow:{FOCUS}")` (substituting your assigned focus area). If the Skill invocation fails, proceed with the review using your built-in knowledge — the focus skill provides additional detection patterns but is not required for a useful review.
+1. **Load focus skill**: Before any analysis, invoke the Skill tool: `Skill(skill="devflow:{FOCUS}")` (substituting your assigned focus area). If the Skill call fails, review without it.
 2. **Identify changed lines** - Read the diff from `DIFF_FILE` when passed, else run `git diff {DIFF_RANGE}`
 3. **Apply 3-category classification** - Sort issues by where they occur
 4. **Apply focus-specific analysis** - Use pattern skill detection rules from the loaded skill file
 5. **Assign severity** - CRITICAL, HIGH, MEDIUM, LOW based on impact
 6. **Assess confidence** - Assign 0-100% confidence to each finding (see Confidence Scale below)
-7. **Filter by confidence** - Only report findings ≥80% in main sections; lower-confidence items go to Suggestions
+7. **Filter by confidence** - Report findings ≥80% in Blocking, Should-Fix and Pre-existing; 60-79% go to Suggestions; drop findings below 60%
 8. **Self-verify findings** — For each finding at ≥80% confidence (CRITICAL, HIGH, or MEDIUM):
    If the flagged lines are already visible in the diff output, skip the Read — the diff is
    sufficient for verification. Otherwise, Read the code at the flagged file:line as a
@@ -111,13 +111,12 @@ Assess how certain you are that each finding is a real issue (not a false positi
 | 60-79% | Medium | Plausible issue, but depends on context you may not fully see |
 | < 60% | Low | Possible concern, but likely a matter of style or interpretation |
 
-**Threshold**: Only report findings with ≥80% confidence in Blocking, Should-Fix, and Pre-existing sections. Findings with 60-79% confidence go to the Suggestions section. Findings < 60% are dropped entirely.
-
 ## Consolidation Rules
 
 1. **Group similar issues** — If 3+ instances of the same pattern appear (e.g., "missing error handling" in multiple functions), consolidate into 1 finding listing all locations rather than N separate findings
 2. **Skip stylistic preferences** — Do not flag formatting, naming style, or code organization choices unless they violate explicit project conventions found in CLAUDE.md, .editorconfig, or linter configs
 3. **Skip issues in unchanged code** — Pre-existing issues in lines you did NOT change should only be reported if CRITICAL severity (security vulnerabilities, data loss risks)
+4. **Skip speculative asks** — In every focus, do not ask for caching, retries, idempotency or compensation unless the diff shows a concrete case (an external call, a stated or measured hot path, a repeated delivery). A missing bound on an existing loop, retry or cache stays a finding.
 
 ## Cross-Cycle Awareness
 

@@ -30,7 +30,7 @@ Does the implementation fit the architecture? Follows existing patterns, respect
 If `FEATURE_KNOWLEDGE` is provided (Rules bullets and the KB path, no heading index), verify implementation respects each bullet's anti-pattern, gotcha or invariant; Read a KB section from its path for the architecture. Flag deviations as P0-Design issues when the documented pattern is clearly intentional.
 
 ### P0 - Functionality
-Does the code work? Happy path, edge cases (null, empty, boundary), no race conditions.
+Does the code work? Each acceptance criterion holds, each named edge case is handled, no race conditions.
 
 ### P0 - Security
 Any vulnerabilities? No injection, input validated, no hardcoded secrets, no secrets or tokens in logs or debug output, auth checked.
@@ -42,7 +42,7 @@ Understandable in 5 minutes? Functions < 50 lines, nesting < 4 levels, no magic 
 Errors handled explicitly? No swallowed exceptions, helpful messages, resources cleaned up.
 
 ### P1 - Tests
-New code tested? Covers happy path, errors, edges. Tests behavior, not implementation.
+New code tested? A test for each acceptance-criterion behaviour and for each trust-boundary, data-loss, security or fail-closed path; an edge-case test only for a named case. Tests behavior, not implementation.
 
 ### P2 - Documentation
 Will others understand? Complex logic commented, public APIs documented, no outdated comments.
