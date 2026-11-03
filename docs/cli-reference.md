@@ -66,7 +66,7 @@ Devflow's install folders belong to devflow, so keep your own files in their sta
 
 ### Your Explore and Plan agents stay yours
 
-devflow ships an `Explore` agent and a `Plan` agent. Each replaces Claude Code's built-in agent of the same name in every session, plan mode included. Claude Code matches agents by exact name, so a lowercase `explore` or `plan` is a different agent. If an agent file under your agents directory already defines `Explore` or `Plan`, `init` skips devflow's copy of that agent and warns. `uninstall` removes devflow's copies, and the built-ins apply again. Your own agent files stay as they are. devflow's Plan agent defaults to Opus at high effort; `devflow agents --set plan --model <model>` and `--effort <level>` change that.
+devflow ships an `Explore` agent and a `Plan` agent. Each replaces Claude Code's built-in agent of the same name in every session, plan mode included. Claude Code matches agents by exact name, so a lowercase `explore` or `plan` is a different agent. If an agent file under your agents directory already defines `Explore` or `Plan`, `init` skips devflow's copy of that agent and warns. `uninstall` removes devflow's copies, and the built-ins apply again. Your own agent files stay as they are. devflow's Plan agent defaults to Opus at high effort; `devflow agents --set plan --model <model>` and `--effort <level>` change that. devflow's Plan reads with Read and Bash only, so it has no web tools. The Plan agent comes with the plan plugin. A project's own `.claude/agents` `Explore` or `Plan` agent wins in that project, and `init` does not check it.
 
 ## Plugin Management
 
