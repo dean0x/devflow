@@ -3,7 +3,7 @@ description: Execute a single task through implementation, quality gates, and PR
 ---
 # Implement Command
 
-Orchestrate one task by spawning agents.
+Orchestrate a single task by spawning agents.
 
 ## Input
 
@@ -11,7 +11,7 @@ Orchestrate one task by spawning agents.
 $ARGUMENTS
 </command-input>
 
-`COMMAND_INPUT` is the text above: a plan document path, an issue reference, a task description, or empty.
+`COMMAND_INPUT` is the text above: a plan document path, an issue reference, a task description, or empty (use the conversation).
 
 **Issue-reference grammar.** Scan `COMMAND_INPUT` for candidate issue references: a `#`-prefixed token or a bare digit run. Collect them in source order as `ISSUE_REFS`, and forward the list to the Git agent verbatim. Do not render, normalise, pad, strip or drop a token. Under `github`, a token that matches `^#?[1-9][0-9]{0,8}$` is a reference, and the Git agent renders it as `#{n}`.
 
@@ -29,7 +29,7 @@ When the user explicitly asks to re-validate, re-check, or re-run quality gates 
 
 ### Phase 1: Setup
 
-**Produces:** TASK_ID, BASE_BRANCH, BASE_REF, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, ISSUE_PR_LINK, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, EVIDENCE_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, REVIEW_PUBLICATION, TDD, GATE_LEVEL
+**Produces:** TASK_ID, BASE_BRANCH, BASE_REF, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, ISSUE_PR_LINK, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, EVIDENCE_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, REVIEW_PUBLICATION, GATE_LEVEL
 
 Record the current branch name as `BASE_BRANCH`. Stop the run unless it matches `^(?![-#]|origin\/|(?:@|(?:FETCH_|ORIG_|MERGE_)?HEAD)$)(?!.*\.\.)[A-Za-z0-9._\/+@,#-]{1,200}$` (judge the match by reading; never pass the value to a command), telling the user it allows only ASCII letters, digits and `._/+@,#-`, at most 200; no leading `-` or `#`, no `origin/` prefix, no `..`, not `@` or a HEAD name.
 
@@ -139,13 +139,13 @@ When `EVIDENCE_POLICY` is `standard`, a missing test plan is never asked about: 
 - `TEST_PLAN`: the TP lines of the evidence file's `## Test Plan` section, or `(none)` when the test plan is missing.
 - `EVIDENCE_FILE`: `{worktree}/.devflow/docs/evidence-{branch_slug}.md`, its `## Evidence Exceptions` section now a byte copy of `EVIDENCE_EXCEPTIONS` (absent when that is `(none)`).
 
-**Resolve the settings line** once per worktree root, reusing this run's line for the same root. `{root}` is the worktree of these values:
+**Resolve the settings line** once per worktree root, reusing a line this run already resolved for the same root. `{root}` is the worktree the values are for:
 
 ```bash
 node "$HOME/.devflow/scripts/resolve-settings.cjs" "{root}" 2>/dev/null; echo "exit=$?"
 ```
 
-Accept the output only when it is exactly two lines: `exit=0` last and, before it, one line of the form `TRACKER=<github|jira|linear> TRACKER_SOURCE=<project|personal|machine|default> TRACKER_WARN=<none|mismatch|invalid> SITE=<none|https://<host>> KEY=<none|<key>> REVIEW_PUBLICATION=<off|auto|full> COMPLIANCE=<off|generic|<id>[,<id>…]> MEMORY=<on|off> CURATION=<on|off> KNOWLEDGE=<on|off> TDD=<on|off> GATE_LEVEL=<full|standard|lean>` — these fields, in this order, nothing else, where `<host>` is a lowercase dotted host name alone, `<key>` is 2–10 of `A-Z`, `0-9` and `_` starting with a letter, and each `<id>` is one of `gdpr`, `hipaa`, `pci-dss`, `soc2`, `iso-27001`, `sox`. **Anything else** (including a script that cannot run) ⇒ use `TRACKER=github TRACKER_SOURCE=default TRACKER_WARN=invalid SITE=none KEY=none REVIEW_PUBLICATION=off COMPLIANCE=generic MEMORY=off CURATION=off KNOWLEDGE=off TDD=on GATE_LEVEL=full` instead.
+Accept the output only when it is exactly two lines: `exit=0` last and, before it, one line of the form `TRACKER=<github|jira|linear> TRACKER_SOURCE=<project|personal|machine|default> TRACKER_WARN=<none|mismatch|invalid> SITE=<none|https://<host>> KEY=<none|<key>> REVIEW_PUBLICATION=<off|auto|full> COMPLIANCE=<off|generic|<id>[,<id>…]> MEMORY=<on|off> CURATION=<on|off> KNOWLEDGE=<on|off> GATE_LEVEL=<full|standard|lean>` — these fields, in this order, nothing else, where `<host>` is a lowercase dotted host name alone, `<key>` is 2–10 of `A-Z`, `0-9` and `_` starting with a letter, and each `<id>` is one of `gdpr`, `hipaa`, `pci-dss`, `soc2`, `iso-27001`, `sox`. **Anything else** (including a script that cannot run) ⇒ use `TRACKER=github TRACKER_SOURCE=default TRACKER_WARN=invalid SITE=none KEY=none REVIEW_PUBLICATION=off COMPLIANCE=generic MEMORY=off CURATION=off KNOWLEDGE=off GATE_LEVEL=full` instead.
 
 The accepted line is the only source of these values.
 
@@ -228,7 +228,7 @@ Setup context is the plan document, issue body or conversation.
 
 | Strategy | When |
 |----------|------|
-| **SINGLE_CODE_AGENT** | Default. A→Z implementation |
+| **SINGLE_CODE_AGENT** | Default. Coherent A→Z implementation |
 | **SEQUENTIAL_CODE_AGENTS** | The plan writes >= 10 files or has >= 7 steps |
 | **PARALLEL_CODE_AGENTS** | True artifact independence (rare) |
 
@@ -239,7 +239,6 @@ Setup context is the plan document, issue body or conversation.
 ```
 Agent(subagent_type="Code"):
 "OPERATION: implement
-TDD: {TDD}
 TASK_ID: {task-id}
 TASK_DESCRIPTION: {description}
 BASE_BRANCH: {base branch}
@@ -255,7 +254,6 @@ DECISIONS_CONTEXT: {decisions_context}
 ```
 Agent(subagent_type="Code"):
 "OPERATION: implement
-TDD: {TDD}
 TASK_ID: {task-id}
 TASK_DESCRIPTION: {phase 1 description}
 BASE_BRANCH: {base branch}
@@ -271,7 +269,6 @@ HANDOFF_FILE: {worktree}/.devflow/docs/handoff-{branch_slug}.md"
 ```
 Agent(subagent_type="Code"):
 "OPERATION: implement
-TDD: {TDD}
 TASK_ID: {task-id}
 TASK_DESCRIPTION: {phase N description}
 BASE_BRANCH: {base branch}
@@ -293,7 +290,6 @@ HANDOFF_FILE: {worktree}/.devflow/docs/handoff-{branch_slug}.md"
 ```
 Agent(subagent_type="Code"):  # Code agent 1
 "OPERATION: implement
-TDD: {TDD}
 TASK_ID: {task-id}-part1
 TASK_DESCRIPTION: {independent subtask 1}
 BASE_BRANCH: {base branch}
@@ -305,7 +301,6 @@ DECISIONS_CONTEXT: {decisions_context}
 
 Agent(subagent_type="Code"):  # Code agent 2 (same message)
 "OPERATION: implement
-TDD: {TDD}
 TASK_ID: {task-id}-part2
 TASK_DESCRIPTION: {independent subtask 2}
 BASE_BRANCH: {base branch}
@@ -547,7 +542,7 @@ Capture the `- **PR**: #{number}` line of its `### Branch` as `PR_NUMBER`, its `
 **Produces:** CI_STATUS
 **Requires:** PR_NUMBER, FILES_CHANGED
 
-Run under every strategy.
+Run under every strategy: Phase 9 opened the PR.
 
 **Push first, outside the gate block.** Push once — never force, and no retry:
 

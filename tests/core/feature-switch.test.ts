@@ -135,30 +135,6 @@ describe('isMachineFeatureOn (pure)', () => {
       }
     });
   });
-
-  describe('the tdd switch (machine only, absent is on)', () => {
-    it.each([
-      ['absent', {}, true],
-      ['a boolean true', { tdd: true }, true],
-      ['a boolean false', { tdd: false }, false],
-      ['the string "false"', { tdd: 'false' }, true],
-      ['null', { tdd: null }, true],
-    ])('reads %s as %s', (_label, features, expected) => {
-      expect(isMachineFeatureOn({ features }, 'tdd')).toBe(expected);
-    });
-
-    it('has no legacy key and no sibling: no other key moves it, and it moves no other switch', () => {
-      expect(isMachineFeatureOn({ features: { knowledge: false, kb: false, curation: false, learning: false, memory: false } }, 'tdd')).toBe(true);
-      const off = { features: { tdd: false } };
-      for (const feature of ['memory', 'curation', 'knowledge'] as const) expect(isMachineFeatureOn(off, feature)).toBe(true);
-    });
-
-    it('anything that is not a manifest-shaped object reads as on', () => {
-      for (const raw of [undefined, null, 42, [], { features: null }, { features: [false] }]) {
-        expect(isMachineFeatureOn(raw, 'tdd')).toBe(true);
-      }
-    });
-  });
 });
 
 describe('setMachineFeature (pure)', () => {
@@ -201,10 +177,9 @@ describe('setMachineFeature (pure)', () => {
       expect(isMachineFeatureOn(next, 'curation')).toBe(true);
     });
 
-    it('memory, knowledge and tdd still write one key', () => {
+    it('memory and knowledge still write one key', () => {
       expect((setMachineFeature({ features: {} }, 'memory', false, NOW) as { features: unknown }).features).toEqual({ memory: false });
       expect((setMachineFeature({ features: {} }, 'knowledge', false, NOW) as { features: unknown }).features).toEqual({ knowledge: false });
-      expect((setMachineFeature({ features: {} }, 'tdd', false, NOW) as { features: unknown }).features).toEqual({ tdd: false });
     });
   });
 

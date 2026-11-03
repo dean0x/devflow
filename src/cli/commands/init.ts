@@ -2889,9 +2889,6 @@ export const initCommand = new Command('init')
         memory: memoryEnabled,
         hud: hudEnabled,
         knowledge: knowledgeEnabled,
-        // The machine TDD switch has no init prompt and no init flag (`devflow tdd` sets it), so
-        // init carries the stored boolean forward and writes none on --reset or when none is stored.
-        ...(!options.reset && existingManifest?.features.tdd !== undefined ? { tdd: existingManifest.features.tdd } : {}),
         curation: curationEnabled,
         rules: rulesEnabled,
         // FlagsRecord written directly — key-presence encodes "known".

@@ -93,7 +93,6 @@ Follow the project's test layout, and import the module under test, not its help
 - **Non-code tasks**: documentation, configuration, CI changes
 - **Exploratory prototyping**: the user explicitly says "just spike this" or "prototype"
 - **Existing test suite changes**: modifying tests themselves (devflow:testing skill applies instead)
-- **`TDD: off` in the spawn**: tests may follow the code; the Code agent's rules say what stays
 
 When you skip TDD, state the reason from this list: "Skipping TDD because: [reason]."
 

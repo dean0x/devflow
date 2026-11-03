@@ -175,18 +175,6 @@ npx devflow-kit behavior --status           # Show whether it is on and whether 
 
 The rule is feature-owned (not plugin-scoped), like the compliance rule, and installs only while rules are enabled (`devflow rules --enable`). `--enable` and `--disable` write the machine switch `features.behavior` and update the installed file at once. `devflow init --behavior` / `--no-behavior` set the same switch: a plain re-init keeps it and `--reset` returns it to off. A shadow at `~/.devflow/rules/behavior.md` replaces the shipped text.
 
-## TDD
-
-The TDD switch is on by default. While it is on, the Code agent writes a failing test before the code. While it is off, the Code agent may write the tests after the code, and the RED step does not apply. The test plan, Validate and the bug-fix regression test stay. The switch applies to the Code agents that `/implement` spawns; other commands keep test first.
-
-```bash
-npx devflow-kit tdd --enable                # Turn it on (the default)
-npx devflow-kit tdd --disable               # Turn it off
-npx devflow-kit tdd --status                # Show whether it is on
-```
-
-The switch is a machine setting: `features.tdd` in `~/.devflow/manifest.json`. A missing key reads as on, and only a boolean `false` reads as off. No repository file changes it, and `devflow init` has no prompt or flag for it. A plain re-init keeps the value, and `--reset` returns it to on. `--enable` and `--disable` exit 1 when devflow is not installed, and they exit 1 when you give more than one of the three flags. The local settings line carries the value as `TDD=<on|off>`, and `/implement` passes it to each Code agent as `TDD: on|off`.
-
 ## Compliance
 
 Manage this machine's compliance frameworks: the always-on compliance rule, the frameworks stamped into the compliance skill, and whether the workflow commands carry steps that post to GitHub or a tracker.

@@ -52,16 +52,6 @@ export interface ManifestData {
     /** Absent (with no legacy `kb`) reads as true — D-FEATURES-ABSENT-ON in readManifest */
     knowledge: boolean;
     /**
-     * The machine TDD switch (`devflow tdd`). Absent reads as on, like knowledge, but the
-     * key stays absent in the typed manifest: {@link readManifest} carries it only when
-     * the stored value is a boolean, and a non-boolean reads as on without a heal. Init and
-     * every typed write carry it forward, so a re-init keeps a disabled switch.
-     *
-     * NEVER add `tdd` to the hard-null validation set or the heal set: every existing
-     * install lacks the key, and a heal would write a value nobody chose.
-     */
-    tdd?: boolean;
-    /**
      * The curation switch, renamed from learning (and, before that, decisions).
      * Absent (with no legacy key) reads as true — D-FEATURES-ABSENT-ON. On disk it is
      * stored under TWO keys, `curation` and its pre-rename copy `learning`; a false in
@@ -241,7 +231,6 @@ export function hasRequiredManifestFields(data: Record<string, unknown>): boolea
  * - features.proxy absent → false
  * - features.compliance absent/malformed → {enabled:false, frameworks:[]}
  * - features.behavior absent → false; malformed → false, healed on disk (D-BEHAVIOR-OPT-IN)
- * - features.tdd absent or not a boolean → left out of the result (reads as on); never healed
  * - features.tracker absent/malformed → {provider:'github'}
  * - features.tracker.servers absent → the default list; invalid → the default list, reported
  *   through `opts.onWarning` when the caller supplies one (this reader has no output channel)
@@ -343,7 +332,6 @@ export async function readManifest(
         memory: features.memory as boolean,
         hud: typeof features.hud === 'boolean' ? features.hud : false,
         knowledge,
-        ...(typeof features.tdd === 'boolean' ? { tdd: features.tdd } : {}),
         curation,
         rules: typeof features.rules === 'boolean' ? features.rules : true,
         flags: sanitizedFlags,

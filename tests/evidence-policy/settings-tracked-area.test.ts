@@ -71,7 +71,7 @@ const FL = '\u{FB02}';
 
 const UNCHANGED =
   'TRACKER=github TRACKER_SOURCE=default TRACKER_WARN=none SITE=none KEY=none '
-  + 'REVIEW_PUBLICATION=auto COMPLIANCE=off MEMORY=on CURATION=on KNOWLEDGE=on TDD=on GATE_LEVEL=standard';
+  + 'REVIEW_PUBLICATION=auto COMPLIANCE=off MEMORY=on CURATION=on KNOWLEDGE=on GATE_LEVEL=standard';
 
 /** The line with only its two switches changed. */
 const withSwitches = (memory: 'on' | 'off', curation: 'on' | 'off'): string =>
@@ -369,7 +369,7 @@ describe('an unreadable project or personal settings file keeps the machine swit
   const closedFields = (line: string): string => line.replace(/ MEMORY=\w+ CURATION=\w+/, ' MEMORY=* CURATION=*');
   const FAIL_CLOSED_FIELDS = closedFields(
     'TRACKER=github TRACKER_SOURCE=default TRACKER_WARN=invalid SITE=none KEY=none '
-    + 'REVIEW_PUBLICATION=off COMPLIANCE=generic MEMORY=on CURATION=on KNOWLEDGE=off TDD=on GATE_LEVEL=full',
+    + 'REVIEW_PUBLICATION=off COMPLIANCE=generic MEMORY=on CURATION=on KNOWLEDGE=off GATE_LEVEL=full',
   );
 
   it('unreadable project.json, machine on: the two switches stay on, the other fields close', () => {
