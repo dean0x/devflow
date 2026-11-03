@@ -337,6 +337,37 @@ export const COMPLIANCE_VARIANT_HOSTS: readonly string[] = [
 export const COMPLIANCE_OFF_FILES: readonly string[] = COMPLIANCE_VARIANT_HOSTS.map(h => `${h}.md`);
 
 /**
+ * The hosts whose compiled body carries a tdd arm, and therefore have a tdd-off variant:
+ * each is `<kind>/<name>`, the spelling of the other rosters. Only the Code agent has
+ * one: its preload of the test-driven-development skill and the test-first wording of
+ * its steps 3 and 4. Fix and Refactor are not test-first builds and carry no arm.
+ *
+ * The build's variant manifest, its printed count, the tdd trees and the packed tarball
+ * are asserted against it, so an arm added without a row, or a row left after its arm
+ * goes, turns one of them red. A host joins the roster in the commit that adds its first
+ * tdd arm.
+ */
+export const TDD_VARIANT_HOSTS: readonly string[] = ['agents/code'];
+
+/** The `dist/tdd-off/`-relative file of every host in TDD_VARIANT_HOSTS. */
+export const TDD_OFF_FILES: readonly string[] = TDD_VARIANT_HOSTS.map(h => `${h}.md`);
+
+/** The `dist/curation-tdd-off/`-relative file of every tdd host that also has a curation arm. */
+export const CURATION_TDD_OFF_FILES: readonly string[] = TDD_VARIANT_HOSTS
+  .filter(h => CURATION_VARIANT_HOSTS.includes(h))
+  .map(h => `${h}.md`);
+
+/** The `dist/compliance-tdd-off/`-relative file of every tdd host that also has a compliance arm. */
+export const COMPLIANCE_TDD_OFF_FILES: readonly string[] = TDD_VARIANT_HOSTS
+  .filter(h => COMPLIANCE_VARIANT_HOSTS.includes(h))
+  .map(h => `${h}.md`);
+
+/** The `dist/curation-compliance-tdd-off/`-relative file of every tdd host that has both other arms. */
+export const ALL_OFF_FILES: readonly string[] = TDD_VARIANT_HOSTS
+  .filter(h => CURATION_VARIANT_HOSTS.includes(h) && COMPLIANCE_VARIANT_HOSTS.includes(h))
+  .map(h => `${h}.md`);
+
+/**
  * The generated references whose compiled text carries a compliance arm, and therefore
  * differ between the compliance-on tree (`dist/skills/git/references/`) and the
  * compliance-off tree (`dist/compliance-off/skills/git/references/`): each is a path

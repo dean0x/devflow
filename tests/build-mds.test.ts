@@ -51,6 +51,11 @@ import {
   COMPLIANCE_VARIANT_HOSTS,
   COMPLIANCE_ARMED_REFERENCES,
   DECISIONS_COMMAND_HOSTS,
+  TDD_VARIANT_HOSTS,
+  TDD_OFF_FILES,
+  CURATION_TDD_OFF_FILES,
+  COMPLIANCE_TDD_OFF_FILES,
+  ALL_OFF_FILES,
 } from './fixtures/mds-manifest.js';
 import { ISSUE_CAPTURE_CONTRACT, type IssueCaptureEntry } from './fixtures/issue-capture-contract.js';
 import {
@@ -863,7 +868,7 @@ describe('expected-command-set guard (C2)', () => {
 describe('variant manifest', () => {
   interface Manifest {
     version: number;
-    hosts: Record<string, { curation: boolean; compliance: boolean }>;
+    hosts: Record<string, { curation: boolean; compliance: boolean; tdd: boolean }>;
   }
 
   /** Named collector: the manifest a build of the committed sources wrote, parsed. */
@@ -872,7 +877,7 @@ describe('variant manifest', () => {
   }
 
   /** Named collector: the hosts the manifest reports with an arm on one axis, sorted. */
-  function hostsWithArm(manifest: Manifest, axis: 'curation' | 'compliance'): string[] {
+  function hostsWithArm(manifest: Manifest, axis: 'curation' | 'compliance' | 'tdd'): string[] {
     return Object.entries(manifest.hosts).filter(([, axes]) => axes[axis]).map(([host]) => host).sort();
   }
 
@@ -927,6 +932,21 @@ describe('variant manifest', () => {
     expect(builtPrompts('dist/compliance-off')).toEqual([...COMPLIANCE_VARIANT_HOSTS].sort());
     expect(builtPrompts('dist/curation-compliance-off')).toEqual(both);
     expect(builtPrompts('dist/curation-off')).toEqual([...CURATION_VARIANT_HOSTS].sort());
+  });
+
+  it('reports the hosts with a tdd arm exactly as TDD_VARIANT_HOSTS names them', async () => {
+    const manifest = await builtManifest();
+    expect(TDD_VARIANT_HOSTS.length, 'the roster is empty: the comparison is vacuous').toBeGreaterThan(0);
+    expect(hostsWithArm(manifest, 'tdd')).toEqual([...TDD_VARIANT_HOSTS].sort());
+  });
+
+  it('the tdd trees hold exactly the files the rosters call for, and a tree with no host holds none', () => {
+    const files = (names: readonly string[]): string[] => names.map(f => f.replace(/\.md$/, '')).sort();
+    expect(builtPrompts('dist/tdd-off')).toEqual(files(TDD_OFF_FILES));
+    expect(builtPrompts('dist/curation-tdd-off')).toEqual(files(CURATION_TDD_OFF_FILES));
+    expect(builtPrompts('dist/compliance-tdd-off')).toEqual(files(COMPLIANCE_TDD_OFF_FILES));
+    expect(builtPrompts('dist/curation-compliance-tdd-off')).toEqual(files(ALL_OFF_FILES));
+    expect(builtPrompts('dist/tdd-off').length, 'the tdd-off tree is empty: the comparison is vacuous').toBeGreaterThan(0);
   });
 });
 

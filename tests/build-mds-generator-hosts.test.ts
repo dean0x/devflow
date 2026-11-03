@@ -60,6 +60,7 @@ import {
   DIST_COMMAND_FILES,
   CURATION_OFF_FILES,
   CURATION_VARIANT_HOSTS,
+  TDD_VARIANT_HOSTS,
 } from './fixtures/mds-manifest.js';
 import {
   MCP_BACKED_PROVIDER_SUBDIRS,
@@ -794,6 +795,7 @@ describe('IGNORE_DIRS covers tests/ and coverage/', () => {
 //     {partialCount} partial(s) skipped (no output-dir:)
 //     {hosts.length} host(s) to compile:
 //     {curationOffCount} curation-off variant(s) written
+//     {tddOffCount} tdd-off variant(s) written
 //
 // Until now nothing read them: `grep 'partial(s) skipped' tests/` returned zero
 // hits, so a discovery regression that silently dropped a host or reclassified a
@@ -809,11 +811,12 @@ describe('printed host/partial counts agree with the manifest (AC-1.8)', () => {
    */
   function parsePrintedCounts(
     output: string,
-  ): { hosts: number; partials: number; deferred: number; curationOff: number } {
+  ): { hosts: number; partials: number; deferred: number; curationOff: number; tddOff: number } {
     const hostMatch = /^\s*(\d+) host\(s\) to compile:/m.exec(output);
     const partialMatch = /^\s*(\d+) partial\(s\) skipped \(no output-dir:\)/m.exec(output);
     const deferredMatch = /^\s*(\d+) reference module\(s\) deferred \(generation gated\)/m.exec(output);
     const curationOffMatch = /^\s*(\d+) curation-off variant\(s\) written/m.exec(output);
+    const tddOffMatch = /^\s*(\d+) tdd-off variant\(s\) written/m.exec(output);
     if (!hostMatch) {
       throw new Error(`build output has no "N host(s) to compile:" line:\n${output}`);
     }
@@ -826,11 +829,15 @@ describe('printed host/partial counts agree with the manifest (AC-1.8)', () => {
     if (!curationOffMatch) {
       throw new Error(`build output has no "N curation-off variant(s) written" line:\n${output}`);
     }
+    if (!tddOffMatch) {
+      throw new Error(`build output has no "N tdd-off variant(s) written" line:\n${output}`);
+    }
     return {
       hosts: Number(hostMatch[1]),
       partials: Number(partialMatch[1]),
       deferred: Number(deferredMatch[1]),
       curationOff: Number(curationOffMatch[1]),
+      tddOff: Number(tddOffMatch[1]),
     };
   }
 
@@ -885,6 +892,11 @@ describe('printed host/partial counts agree with the manifest (AC-1.8)', () => {
       `build printed ${counts.curationOff} curation-off variant(s); the manifest names ` +
       `${CURATION_VARIANT_HOSTS.length}. Update CURATION_VARIANT_HOSTS if a host gained or lost an arm.`,
     ).toBe(CURATION_VARIANT_HOSTS.length);
+    expect(
+      counts.tddOff,
+      `build printed ${counts.tddOff} tdd-off variant(s); the manifest names ` +
+      `${TDD_VARIANT_HOSTS.length}. Update TDD_VARIANT_HOSTS if a host gained or lost a tdd arm.`,
+    ).toBe(TDD_VARIANT_HOSTS.length);
     for (const source of deferredReferenceModuleSources()) {
       expect(
         run.combined,
