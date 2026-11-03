@@ -44,6 +44,8 @@ export function collectConcreteCaseDefects(skill: string): string[] {
   if (four !== '' && !(four.includes('trust boundary') && four.includes('data loss'))) {
     out.push('design-review rule 4 does not keep error handling at a trust boundary or for data loss')
   }
+  const intro = skill.slice(skill.search(/^## Anti-Pattern Detection Rules/m), skill.search(/^### 1\. /m))
+  if (/\bRules? 4 and 5\b/.test(intro)) out.push('the intro gates all of rule 4 on a concrete case, not only its retry and compensation line')
   return out
 }
 
@@ -56,6 +58,9 @@ export function collectReviewDefects(label: string, review: string): string[] {
   if (!review.includes('A missing bound on an existing loop, retry or cache stays a finding')) {
     out.push(`${label}: a missing bound on an existing loop, retry or cache is no longer a finding`)
   }
+  if (!review.includes('A partial write that can lose data, a trust boundary and a fail-closed path need no case')) {
+    out.push(`${label}: a partial write that can lose data, a trust boundary and a fail-closed path now need a concrete case`)
+  }
   return out
 }
 
@@ -67,6 +72,9 @@ export function collectArchitectLensDefects(label: string, architect: string): s
   }
   if (!architect.includes('Flag an option, layer or config key with no ask and no concrete case')) {
     out.push(`${label}: no flag for an option, layer or config key with no ask`)
+  }
+  if (!architect.includes('Never flag a trust-boundary, security, data-loss or fail-closed guard, or its test')) {
+    out.push(`${label}: no never-flag clause for a trust-boundary, security, data-loss or fail-closed guard`)
   }
   return out
 }
@@ -136,6 +144,9 @@ describe('the Architect flags a step above the lowest rung (AC4)', () => {
     const lostAsk = body.replace('with no ask and no concrete case', 'with no reason')
     expect(lostAsk, 'the seed must land').not.toBe(body)
     expect(collectArchitectLensDefects('a', lostAsk)).toEqual(['a: no flag for an option, layer or config key with no ask'])
+    const lostNeverFlag = body.replace('Never flag a trust-boundary, security, data-loss or fail-closed guard, or its test.', '')
+    expect(lostNeverFlag, 'the seed must land').not.toBe(body)
+    expect(collectArchitectLensDefects('a', lostNeverFlag)).toEqual(['a: no never-flag clause for a trust-boundary, security, data-loss or fail-closed guard'])
   })
 })
 
@@ -161,6 +172,11 @@ describe('design review asks for a retry, compensation step or cache only with a
     const noDefinition = skill.replace('A concrete case is an external call in this change, a stated or measured hot path, or a repeated delivery.', '')
     expect(noDefinition, 'the seed must land').not.toBe(skill)
     expect(collectConcreteCaseDefects(noDefinition)).toEqual(['the skill does not define a concrete case'])
+    const gatesAllOfFour = skill.replace('a repeated delivery.', 'a repeated delivery. Rules 4 and 5 need one.')
+    expect(gatesAllOfFour, 'the seed must land').not.toBe(skill)
+    expect(collectConcreteCaseDefects(gatesAllOfFour)).toEqual([
+      'the intro gates all of rule 4 on a concrete case, not only its retry and compensation line',
+    ])
   })
 })
 
@@ -192,6 +208,11 @@ describe('the Review agent skips speculative asks and keeps the missing-bound fi
     const lostBound = body.replace('A missing bound on an existing loop, retry or cache stays a finding.', '')
     expect(lostBound, 'the seed must land').not.toBe(body)
     expect(collectReviewDefects('r', lostBound)).toEqual(['r: a missing bound on an existing loop, retry or cache is no longer a finding'])
+    const lostExemption = body.replace('A partial write that can lose data, a trust boundary and a fail-closed path need no case.', '')
+    expect(lostExemption, 'the seed must land').not.toBe(body)
+    expect(collectReviewDefects('r', lostExemption)).toEqual([
+      'r: a partial write that can lose data, a trust boundary and a fail-closed path now need a concrete case',
+    ])
   })
 })
 

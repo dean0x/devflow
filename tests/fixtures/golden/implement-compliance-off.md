@@ -348,6 +348,7 @@ After Phase 3, spawn Harden agent:
 Agent(subagent_type="Harden"):
 "TASK_DESCRIPTION: {task description}
 FILES_CHANGED: {branch_diff}
+ACCEPTANCE_CRITERIA: {the plan's Acceptance Criteria, if a plan exists}
 DECISIONS_CONTEXT: {decisions_context}
 FEATURE_KNOWLEDGE: {feature_knowledge_rules}
 Evaluate 9 pillars, fix P0/P1 issues, report status"
@@ -555,7 +556,7 @@ git push origin HEAD; echo "exit=$?"
 <!-- PATTERN: ci-status-gate -->
 1. Wait: run `cd {worktree} && HEAD_SHA=$(git rev-parse HEAD) && node "$HOME/.devflow/scripts/ci-wait.cjs" --pr {PR_NUMBER} --head "$HEAD_SHA" --waits {n} --fixes {m}` through the Bash tool with `timeout: 600000`, where `{n}` is the waits run so far, this one included, and `{m}` is the Fix agents run so far. Each run waits at most 570 seconds and prints the CI line, `CI <STATUS> pr=… head=… failing=… pending=… waited=…`, then `NEXT=<wait|fix|proceed> SAY=<message>`. A missing or malformed `NEXT=` line or a non-zero exit → report "CI status unknown — verify manually before merging" and proceed to Phase 11.
 2. **If `NEXT=wait`** → step 1 again.
-3. **If `NEXT=fix`** → report SAY and the failing checks from the CI line. Spawn `Agent(subagent_type="Fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES`, `DECISIONS_CONTEXT` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Fix agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if fewer than 3 waits have run, step 1 again, else report "CI status unknown — verify manually before merging" and proceed to Phase 11; a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting.
+3. **If `NEXT=fix`** → report SAY and the failing checks from the CI line. Spawn `Agent(subagent_type="Fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES`, `DECISIONS_CONTEXT` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else. After a fix, push with the command above and, if fewer than 3 waits have run, step 1 again, else report "CI status unknown — verify manually before merging" and proceed to Phase 11; a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting.
 4. **If `NEXT=proceed`** → report SAY unless it is `none`, and the failing checks of a FAILING line, then proceed to Phase 11.
 <!-- /PATTERN: ci-status-gate -->
 

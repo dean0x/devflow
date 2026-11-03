@@ -311,6 +311,7 @@ const RULE_NEEDLES: ReadonlyArray<readonly [string, readonly string[]]> = [
     'with `commands/plan-levels.md` replaced by `synthesize/planning.md`',
     'Read {path} with the Read tool and apply its Execution Strategy Decision and Context Risk.',
     'Report one TP line for each acceptance criterion first, then the steps with their files, then the strategy and context risk.',
+    'No report cap.',
     'Its prompt adds this line',
   ]],
   ['Reports', [

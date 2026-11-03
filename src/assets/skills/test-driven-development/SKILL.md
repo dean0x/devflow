@@ -60,7 +60,6 @@ After each cycle, all of these must hold:
 - [ ] Production code is minimal — nothing beyond what the test demands
 - [ ] ALL affected tests pass, not just the new one
 - [ ] Refactoring happened in Step 3 (or code is already clean — state explicitly)
-- [ ] No untested production code remains
 
 If any fails, you skipped TDD: back up and redo the cycle.
 
@@ -83,7 +82,7 @@ Follow the project's test layout, and import the module under test, not its help
 | Test | Don't Test |
 |------|------------|
 | Public API behavior | Private implementation details |
-| Errors at a trust boundary; named edge cases | Framework internals |
+| Trust-boundary, data-loss, security and fail-closed paths; named edge cases | Framework internals |
 | Integration points (boundaries) | Third-party library correctness |
 | State transitions | Getter/setter plumbing (unless non-trivial) |
 

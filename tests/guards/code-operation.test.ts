@@ -433,7 +433,7 @@ describe('the alignment-fix Protocol is its two lines, with no re-run of Evaluat
 // `fix-body-max` and `refactor-body-max`: lowered by a pass that cut the artifact, never raised to fit one that grew.
 
 /** The compiled Code agent body, in bytes. Registered as `code-body-max`; lowered, never raised. */
-const CODE_BODY_MAX_BYTES = 9_910
+const CODE_BODY_MAX_BYTES = 9_886
 
 /** The compiled Fix agent body, in bytes. Registered as `fix-body-max`; lowered, never raised. */
 const FIX_BODY_MAX_BYTES = 7_407

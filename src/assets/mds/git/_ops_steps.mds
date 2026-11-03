@@ -107,6 +107,7 @@ For each issue reference in `SHIPPED_ISSUES` (sequentially, the first ≤50 in l
    | Problem Being Solved | Summary |
    | Key Changes to Highlight | Changes |
    | Breaking Changes | Breaking Changes |
+   | Known Limits | Known Limits |
 <!-- compliance:on -->
    | Reviewer Focus Areas | Reviewer Focus Areas |
 <!-- compliance:end -->

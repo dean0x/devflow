@@ -77,7 +77,7 @@ You receive from orchestrator:
 
 2. **Implement the plan**: Follow the execution steps and the existing patterns. Type everything. Use Result types if the codebase uses them.
 
-3. **Write tests**: Write one failing test first for each acceptance-criterion behaviour. Add an edge-case test only for a named, concrete case. Always test trust boundaries, data loss, security and fail-closed paths.
+3. **Write tests**: Write one failing test first for each acceptance-criterion behaviour (else each behaviour your steps' Must lines name). Add an edge-case test only for a named, concrete case. Always test trust boundaries, data loss, security and fail-closed paths.
 
 4. **Run tests**: Fix any failures; the tests you run must pass.
    **Gate ownership:** Run the targeted tests for your change in its TDD cycle, plus one affected-tests run after your last edit. In a fix mode, compile and run the named failing or regression tests. Never the full suite. Batch fixes: one build check per batch, not per edit. Only Validate runs the full suite.
@@ -107,7 +107,7 @@ You fix the issues the Triage agent marked FIX_NOW. Do not re-litigate dispositi
 
 ## Handoff
 
-**If HANDOFF_REQUIRED=true**, end with the section you appended to `HANDOFF_FILE` (the orchestrator passes it on as PRIOR_PHASE_SUMMARY):
+**If HANDOFF_REQUIRED=true**, end with the section you appended to `HANDOFF_FILE`:
 
 ```markdown
 ## Phase {N} Implementation Summary

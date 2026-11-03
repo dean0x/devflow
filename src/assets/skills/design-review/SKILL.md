@@ -17,7 +17,7 @@ allowed-tools: Read, Grep, Glob
 
 ## Anti-Pattern Detection Rules
 
-A concrete case is an external call in this change, a stated or measured hot path, or a repeated delivery. Rules 4 and 5 need one.
+A concrete case is an external call in this change, a stated or measured hot path, or a repeated delivery.
 
 ### 1. N+1 Queries
 

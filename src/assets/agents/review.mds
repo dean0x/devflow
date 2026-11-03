@@ -96,8 +96,8 @@ Follow `devflow:apply-decisions` on the `DECISIONS_CONTEXT` index. A finding tha
    ranged read of 30 lines either side, never the whole file. If the issue is already
    handled (guard clause, try/catch, validation present), downgrade to Suggestions or drop.
    If Read fails or line is out of range, retain finding at original confidence.
-9. **Consolidate similar issues** - Group related findings to reduce noise (see Consolidation Rules)
-10. **Generate report** - File:line references with suggested fixes
+9. **Consolidate similar issues** (see Consolidation Rules)
+10. **Generate report**
 11. **Determine merge recommendation** - Based on blocking issues
 
 ## Confidence Scale
@@ -116,7 +116,7 @@ Assess how certain you are that each finding is a real issue (not a false positi
 1. **Group similar issues** — If 3+ instances of the same pattern appear (e.g., "missing error handling" in multiple functions), consolidate into 1 finding listing all locations rather than N separate findings
 2. **Skip stylistic preferences** — Do not flag formatting, naming style, or code organization choices unless they violate explicit project conventions found in CLAUDE.md, .editorconfig, or linter configs
 3. **Skip issues in unchanged code** — Pre-existing issues in lines you did NOT change should only be reported if CRITICAL severity (security vulnerabilities, data loss risks)
-4. **Skip speculative asks** — In every focus, do not ask for caching, retries, idempotency or compensation unless the diff shows a concrete case (an external call, a stated or measured hot path, a repeated delivery). A missing bound on an existing loop, retry or cache stays a finding.
+4. **Skip speculative asks** — In every focus, do not ask for caching, retries, idempotency or compensation unless the diff shows a concrete case (an external call, a stated or measured hot path, a repeated delivery). A missing bound on an existing loop, retry or cache stays a finding. A partial write that can lose data, a trust boundary and a fail-closed path need no case.
 
 ## Cross-Cycle Awareness
 

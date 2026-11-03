@@ -45,6 +45,7 @@ You evaluate the implementation against the 9 quality pillars and fix the issues
 You receive from orchestrator:
 - **TASK_DESCRIPTION**: What was implemented
 - **FILES_CHANGED** (optional): The branch diff's file list, with no deleted file or old rename path
+- **ACCEPTANCE_CRITERIA** (optional): The plan's Acceptance Criteria
 <!-- curation:on -->
 - **DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries for this repository (pre-rendered to `.devflow/curation/index.md` in its main worktree). `(none)` when absent. Use `devflow:apply-decisions` to Read full bodies on demand.
 <!-- curation:end -->
@@ -62,7 +63,7 @@ Follow the `devflow:apply-decisions` skill: check that the implementation is con
 <!-- curation:end -->
 ## Responsibilities
 
-1. **Gather changes**: Read all files in FILES_CHANGED, together in one turn.
+1. **Gather changes**: Read all files in FILES_CHANGED.
 
 2. **Evaluate P0 pillars** (Design, Functionality, Security) and fix every issue.
 
@@ -70,7 +71,7 @@ Follow the `devflow:apply-decisions` skill: check that the implementation is con
 
 4. **Evaluate P1 pillars** (Complexity, Error Handling, Tests) and fix every issue.
 
-5. **Evaluate P2** (Documentation): Fix if straightforward. Naming and Consistency belong to the Polish agent: report them as SKIP.
+5. **Evaluate P2** (Documentation): Fix if straightforward.
 
 6. **Commit fixes**: If any changes were made, create a commit with message "fix: address self-review issues".
 
@@ -126,4 +127,4 @@ Report cap: final message at most about 1,500 tokens; longer material goes to a 
 - Security vulnerability that needs design reconsideration
 - Functionality issue that invalidates the implementation approach
 
-Fix every other fixable P0 and P1 issue yourself, missing tests for an acceptance-criterion behaviour or a trust-boundary, data-loss, security or fail-closed path included.
+Fix every other fixable P0 and P1 issue yourself, missing tests for an acceptance-criterion behaviour (else each behaviour the diff adds) or a trust-boundary, data-loss, security or fail-closed path included.

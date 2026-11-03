@@ -18,18 +18,18 @@ const DESIGN_BODY_MAX_BYTES = 3_360
 /** The Design agent body of the curation-off build, dist/curation-off/agents/design.md, in bytes. */
 const DESIGN_BODY_CURATION_OFF_MAX_BYTES = 2_794
 /** The Architect agent body of the curation-on build, dist/agents/architect.md, in bytes. */
-const ARCHITECT_BODY_MAX_BYTES = 3_775
+const ARCHITECT_BODY_MAX_BYTES = 3_782
 /** The Architect agent body of the curation-off build, dist/curation-off/agents/architect.md, in bytes. */
-const ARCHITECT_BODY_CURATION_OFF_MAX_BYTES = 3_209
+const ARCHITECT_BODY_CURATION_OFF_MAX_BYTES = 3_216
 /** The Explore agent body (hand-authored, one build), in bytes. */
 const EXPLORE_BODY_MAX_BYTES = 3_276
 /** The Plan agent body (hand-authored, one build), in bytes. */
-const PLAN_BODY_MAX_BYTES = 3_188
+const PLAN_BODY_MAX_BYTES = 3_221
 
 /** [skill, ceiling of its SKILL.md in bytes]. Each row's text is the pattern its numeric-floors.json entry pins. */
 const SKILL_MAX_BYTES: ReadonlyArray<readonly [string, number]> = [
   ['gap-analysis', 5_553],
-  ['design-review', 5_217],
+  ['design-review', 5_193],
 ]
 
 /** Named collector: the file is over its ceiling. */

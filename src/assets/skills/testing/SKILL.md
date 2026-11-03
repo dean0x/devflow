@@ -89,7 +89,7 @@ Quarantine flaky tests immediately — a suite that sometimes passes is worse th
 | Severity | Criteria |
 |----------|----------|
 | **CRITICAL** | Tests don't verify behavior; critical paths untested; everything mocked |
-| **HIGH** | Untested trust-boundary or data-loss path; flaky tests; slow (>10s); setup >10 lines |
+| **HIGH** | Untested trust-boundary, data-loss, security or fail-closed path; flaky tests; slow (>10s); setup >10 lines |
 | **MEDIUM** | Named edge case with no test; weak assertions; unclear AAA structure |
 | **LOW** | Organization; naming clarity |
 
@@ -111,7 +111,7 @@ Quarantine flaky tests immediately — a suite that sometimes passes is worse th
 
 ## Quality Gates
 
-- [ ] Setup <10 lines; use fakes over mocks for complex dependencies
+- [ ] Setup <10 lines
 - [ ] Each new assertion would fail, not error, with the change reverted: its RED run counts, else a bad input or a temporary uncommitted revert of your own edit, never a stash
 - [ ] A test for each acceptance-criterion behaviour; an edge-case test only for a named case
 - [ ] Test names describe expected behavior
