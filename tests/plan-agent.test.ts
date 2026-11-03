@@ -44,6 +44,7 @@ const CHECKLIST: readonly ChecklistRow[] = [
   { behaviour: 'never cut: fail-closed paths', carriedBy: /fail-closed paths/ },
   { behaviour: 'never cut: error handling that keeps data', carriedBy: /error handling that keeps data/ },
   { behaviour: 'never cut: output contracts', carriedBy: /output contracts/ },
+  { behaviour: "never cut: the caller's stated requirements", carriedBy: /the caller's stated requirements/ },
   { behaviour: 'never cut: the tests of these', carriedBy: /or the tests of them/ },
   { behaviour: 'never cut: holds against the no-speculative-cases rule too', carriedBy: /The ladder and the no-speculative-cases rule never remove these/ },
   { behaviour: 'no speculative cases: a section', carriedBy: /^## No Speculative Cases$/m },

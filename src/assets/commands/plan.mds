@@ -201,7 +201,7 @@ Combine into: user needs, similar features, constraints, failure modes"
 | completeness | Missing AC, undefined error states, vague requirements |
 | architecture | Pattern violations, missing integration points, layering issues |
 | security | Auth gaps, input validation, secret handling, OWASP |
-| performance | N+1 patterns, missing caching, concurrency, query patterns |
+| performance | N+1 patterns, missing caching (only with a concrete case), concurrency, query patterns |
 | compliance | Regulatory gaps security doesn't cover: retention/erasure, audit-trail completeness, segregation of duties, IaC exposure (only when COMPLIANCE_ACTIVE) |
 
 **Multi-issue**: Spawn 6 Design agents **in a single message** (**7 when COMPLIANCE_ACTIVE**; same 4/5 plus):
@@ -306,7 +306,7 @@ Combine into: patterns to follow, integration points, reusable code, edge cases"
 **Produces:** PLAN_OUTPUTS
 **Requires:** IMPL_EXPLORATION_SYNTHESIS, GAP_SYNTHESIS
 
-Spawn 3 `Agent(subagent_type="Plan")` agents **in a single message**, each with implementation exploration synthesis and `GAP_SYNTHESIS`. Ask each agent for a final report of at most about 1,500 tokens: the plan itself, not a restatement of the exploration. Add this line to every Plan prompt, at every level: `Per step give its files, the callers and consumers to update, its Must lines (what has to hold) and one rung, the lowest that meets the acceptance criteria: not needed, reuse, standard library, installed dependency, one line, minimum new code. Add Known limits: accepted risks and deferred items, each with one reason. Never lower or flag a trust-boundary, security, data-loss or fail-closed guard, or its test.`
+Spawn 3 `Agent(subagent_type="Plan")` agents **in a single message**, each with implementation exploration synthesis and `GAP_SYNTHESIS`. Ask each agent for a final report of at most about 1,500 tokens: the plan itself, not a restatement of the exploration. Add this line to every Plan prompt, at every level: `Per step give its files, the callers and consumers to update, its Must lines (what has to hold) and one rung, the lowest that meets the acceptance criteria: not needed, reuse, standard library, installed dependency, one line, minimum new code. Add Known limits: accepted risks and deferred items of the whole change, each with one reason; a limit of one step goes on its Must line. Never lower or flag a trust-boundary, security, data-loss or fail-closed guard, or its test.`
 
 | Focus | Output |
 |-------|--------|
@@ -425,7 +425,7 @@ Required sections, in this order, no others:
 6. **PR Description Guidance** — the block below
 7. **Test Plan** — the TP lines Gate 2 confirmed, under a `## Test Plan` heading: at least one per acceptance criterion, each citing the criterion it covers
 
-**Fold first.** Fold every accepted gap, every accepted or not-planned design finding and every accepted risk into a Must line or into Known limits and deferrals, with one reason.
+**Fold first.** Fold every accepted gap, every accepted or not-planned design finding, every accepted risk, the problem mechanism and the Gate 1 exclusions into a Must line or into Known limits and deferrals, with one reason. A limit or risk of one step goes on that step's Must line; Known limits keeps only those of the whole change.
 
 ### 6. PR Description Guidance
 

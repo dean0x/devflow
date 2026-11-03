@@ -59,7 +59,7 @@ Domain expertise for detecting gaps in design documents, specifications, and pla
 
 **Detection patterns:**
 - N+1 patterns implied — loop-based data fetching without batch operation specified
-- Missing caching strategy — repeated expensive operations (DB queries, API calls) without cache layer
+- Missing caching strategy — repeated expensive calls on a stated or measured hot path, without cache layer
 - Concurrency concerns — shared mutable state accessed without locking or isolation strategy
 - Query patterns — filtering/sorting on unindexed fields implied by the feature
 - Unbounded result sets — list operations without pagination or size limits
@@ -101,5 +101,5 @@ Domain expertise for detecting gaps in design documents, specifications, and pla
 |-------|----------|----------|
 | **CRITICAL** | Gap that will cause data loss, security breach, or system failure | Missing auth on sensitive endpoint, undefined error recovery for financial transaction |
 | **HIGH** | Gap that will cause incorrect behavior or significant technical debt | Missing pagination on unbounded list, undefined race condition in concurrent update |
-| **MEDIUM** | Gap that will require rework if unaddressed | Vague acceptance criteria, missing caching strategy for frequently-read data |
+| **MEDIUM** | Gap that will require rework if unaddressed | Vague acceptance criteria, missing caching on a stated hot path |
 | **LOW** | Gap that is an improvement opportunity | Naming inconsistency, minor UX ambiguity with obvious resolution |

@@ -40,7 +40,7 @@ Name one rung for every step. Take the lowest rung that meets the acceptance cri
 
 ## Never Cut
 
-The ladder and the no-speculative-cases rule never remove these, or the tests of them: input validation at trust boundaries; security checks; guards against data loss and destructive operations; fail-closed paths; error handling that keeps data; output contracts.
+The ladder and the no-speculative-cases rule never remove these, or the tests of them: input validation at trust boundaries; security checks; guards against data loss and destructive operations; fail-closed paths; error handling that keeps data; output contracts; the caller's stated requirements.
 
 ## No Speculative Cases
 
