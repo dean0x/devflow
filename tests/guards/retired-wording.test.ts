@@ -54,7 +54,7 @@ import {
   VARIANT_MODULES,
   installedReferenceManifest,
 } from '../../src/core/mds-variants.js';
-import { VARIANT_MANIFEST_REL_PATH } from '../../src/core/curation-variants.js';
+import { OFF_OUTPUT_DIRS, VARIANT_MANIFEST_REL_PATH } from '../../src/core/curation-variants.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 
@@ -1141,7 +1141,10 @@ const MAX_DIST_DEPTH = 12;
 const MAX_DIST_FILES = 5000;
 
 const COMPILED_TS = /^dist\/(.+?)(?:\.d\.ts\.map|\.d\.ts|\.js\.map|\.js)$/;
-const BUILT_HOST = /^dist\/(?:(?:(?:curation|compliance|tdd)-)+off\/)?(commands|agents)\/([^/]+)\.md$/;
+/** A built host: the on tree, or one of the off trees the build writes (the names of OFF_OUTPUT_DIRS, no other order or repeat). */
+const BUILT_HOST = new RegExp(
+  `^dist/(?:(?:${Object.values(OFF_OUTPUT_DIRS).map(dir => dir.slice('dist/'.length)).join('|')})/)?(commands|agents)/([^/]+)\\.md$`,
+);
 const VARIANT_MANIFEST_SOURCE = 'scripts/build-mds.ts';
 
 /** The source file that the build makes `distRel` from, or null when none is known. */
@@ -1432,6 +1435,9 @@ describe('feature-word guard — dist mapping and probes (the same collector as 
     expect(distSourceOf('dist/curation-off/skills/git/references/pr/check-ci-status.md')).toBeNull();
     expect(distSourceOf('dist/tdd-off/stray/code.md'), 'a tdd tree holds commands and agents only').toBeNull();
     expect(distSourceOf('dist/tdd/agents/code.md'), 'a tree that is not an off tree has no source').toBeNull();
+    expect(distSourceOf('dist/tdd-curation-off/agents/code.md'), 'a misordered tree name has no source').toBeNull();
+    expect(distSourceOf('dist/tdd-tdd-off/agents/code.md'), 'a repeated axis in a tree name has no source').toBeNull();
+    expect(distSourceOf('dist/curation-tdd-off/agents/code.md'), 'a real tree name maps to its source').toBe('src/assets/agents/code.mds');
     expect(scanDist(`${OFF_REFERENCES_PREFIX}stray.md`, 'The learning step.\n')).toHaveLength(1);
   });
 
