@@ -22,9 +22,9 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { writeMachineFeature } from '../../core/feature-switch.js';
+import { isMachineFeatureOn, writeMachineFeature } from '../../core/feature-switch.js';
+import { readGateManifest } from '../../core/gate-level.js';
 import { readInstalledVariants, variantRecordStatus, type VariantRecordStatus } from '../../core/installed-variants.js';
-import { readManifest } from '../../core/manifest.js';
 import { TDD_GATED_SKILLS, prefixSkillName } from '../../core/plugins.js';
 import { getClaudeDirectory, getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
 import {
@@ -180,15 +180,16 @@ export async function readTddStatus(opts: {
   claudeDir: string;
   devflowDir: string;
 }): Promise<Result<TddStatus, 'not-installed'>> {
-  const manifest = await readManifest(opts.devflowDir);
-  if (manifest === null) return { ok: false, error: 'not-installed' };
-  const enabled = manifest.features.tdd;
+  // The raw read heals nothing: readManifest would rewrite a manifest that holds a legacy key.
+  const read = await readGateManifest(opts.devflowDir);
+  if (read.kind !== 'object') return { ok: false, error: 'not-installed' };
+  const enabled = isMachineFeatureOn(read.raw, 'tdd');
   return {
     ok: true,
     value: {
       enabled,
       skillInstalled: await pathExists(path.join(opts.claudeDir, 'skills', prefixSkillName(TDD_GATED_SKILLS[0]))),
-      record: variantRecordStatus(readInstalledVariants(manifest.installedVariants), 'tdd', enabled),
+      record: variantRecordStatus(readInstalledVariants(read.raw.installedVariants), 'tdd', enabled),
     },
   };
 }

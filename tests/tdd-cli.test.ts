@@ -320,6 +320,21 @@ describe('readTddStatus', () => {
 
     expect(await fs.readFile(path.join(devflowDir, 'manifest.json'), 'utf-8')).toBe(before);
   });
+
+  it('leaves a legacy manifest that readManifest would rewrite byte for byte', async () => {
+    // `kb` is the retired name of `knowledge`, and the pair `curation` without `learning` is a half-healed copy.
+    await writeManifest({ tdd: false, kb: true, curation: false, learning: undefined }, { installedVariants: { curation: false, compliance: true, tdd: false } });
+    const file = path.join(devflowDir, 'manifest.json');
+    const before = await fs.readFile(file, 'utf-8');
+
+    const status = await readTddStatus({ claudeDir, devflowDir });
+
+    expect(status).toEqual({ ok: true, value: { enabled: false, skillInstalled: false, record: 'off' } });
+    expect(await fs.readFile(file, 'utf-8'), 'the status wrote the manifest').toBe(before);
+
+    await readManifest(devflowDir);
+    expect(await fs.readFile(file, 'utf-8'), 'non-vacuity: readManifest heals this manifest').not.toBe(before);
+  });
 });
 
 describe('variantRecordStatus', () => {
