@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **devflow ships a `Plan` agent that replaces Claude Code's built-in Plan** ([#756](https://github.com/dean0x/devflow/issues/756)). It runs on Opus at high effort, reads the code without editing it, names the lowest workable rung for each step, and never drops input validation, security checks, data-loss guards, fail-closed paths or the tests of these. `/plan` Phase 10 uses it, and so does plan mode when Claude Code delegates research to the Plan subagent. `init` skips it and warns when you already own a `Plan` agent, `uninstall` removes only devflow's copy, and `devflow agents --set plan --model <model>` changes its model.
+- **`/plan` writes a lean artifact** ([#756](https://github.com/dean0x/devflow/issues/756)). The artifact keeps the acceptance criteria, the steps (each with its files, the callers and consumers to update, its Must lines and its rung), patterns, known limits and deferrals, PR guidance and the test plan, and drops the problem statement, scope, gap, integration, design-review and risk sections. Every accepted gap, design finding and risk becomes a Must line or a known limit. Phase 10 asks each Plan agent for one rung per step at every level, a revision replaces text and adds no section, and `/implement` hands the known limits to Evaluate, Test and a single Code agent, and the PR description lists them.
 
 ---
 

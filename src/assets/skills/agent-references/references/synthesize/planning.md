@@ -32,15 +32,15 @@ Count the files the plan writes and its plan steps, then choose:
 | 2 | frontend | {description} | `file3`, `file4` | 4-6 | Phase 1 |
 
 ### Implementation Plan
-| Step | Action | Files | Tests | Depends On |
-|------|--------|-------|-------|------------|
-| 1 | {action} | `file` | `test_file` | - |
-| 2 | {action} | `file` | `test_file` | Step 1 |
+| Step | Action | Files | Callers and consumers | Must | Rung | Tests | Depends On |
+|------|--------|-------|-----------------------|------|------|-------|------------|
+| 1 | {action} | `file` | `caller` | {what has to hold} | {lowest rung that works} | `test_file` | - |
+| 2 | {action} | `file` | `caller` | {what has to hold} | {lowest rung that works} | `test_file` | Step 1 |
 
-### Risk Assessment
-| Risk | Mitigation |
-|------|------------|
-| {issue} | {approach} |
+### Known limits and deferrals
+| Limit | Reason |
+|-------|--------|
+| {accepted risk, deferred or excluded item} | {one reason} |
 
 ### Complexity
 {Low | Medium | High} - {reasoning}

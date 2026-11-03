@@ -332,8 +332,8 @@ const RULE_NEEDLES: ReadonlyArray<readonly [string, readonly string[]]> = [
     'Scope rule: minimal fix; list siblings, do not expand scope.',
     'A security gap this change introduces or exposes stays in scope and blocking.',
     'Name a sibling vulnerability by its effect only, for Gate 1 and private reporting; it never enters the artifact, a ticket title or any posted text.',
-    "A sibling goes to the artifact's deferred list; /plan files no sibling ticket.",
-    'Gate 1 shows a sibling vulnerability by its effect only and keeps it out of the deferred list.',
+    "A sibling goes to the artifact's Known limits; /plan files no sibling ticket.",
+    'Gate 1 shows a sibling vulnerability by its effect only and keeps it out of the Known limits.',
   ]],
   ['Revise', [
     'Phase 10 with 1 Plan, then Phase 12; Phase 11 stays skipped.',
@@ -1023,8 +1023,8 @@ describe('the level reference holds the decided rows, substitutes and rules (AC-
     // The Scope rule: the exact quote, and the Gate 1 only sibling sentence.
     expect(defects(seed(REF, 'minimal fix; list siblings, do not', 'minimal fix; do not')))
       .toContain(lacks('Scope', 'Scope rule: minimal fix; list siblings, do not expand scope.'))
-    expect(defects(seed(REF, ' Gate 1 shows a sibling vulnerability by its effect only and keeps it out of the deferred list.', '')))
-      .toContain(lacks('Scope', 'Gate 1 shows a sibling vulnerability by its effect only and keeps it out of the deferred list.'))
+    expect(defects(seed(REF, ' Gate 1 shows a sibling vulnerability by its effect only and keeps it out of the Known limits.', '')))
+      .toContain(lacks('Scope', 'Gate 1 shows a sibling vulnerability by its effect only and keeps it out of the Known limits.'))
     // The Research data rule: the design-review prompt and Phase 14 are covered, and the (trusted) label only affects "verify".
     expect(defects(seed(REF, 'every gap, Plan and design-review prompt adds', 'every gap prompt and the Plan prompt add')))
       .toContain(lacks('Research data', 'when EXPLORE_OUTPUTS are research reports, every gap, Plan and design-review prompt adds'))
