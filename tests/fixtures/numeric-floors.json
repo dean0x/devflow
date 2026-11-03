@@ -1198,35 +1198,35 @@
     },
     {
       "id": "design-body-max",
-      "ceiling": 3617,
-      "pattern": "const DESIGN_BODY_MAX_BYTES = 3_617",
+      "ceiling": 3360,
+      "pattern": "const DESIGN_BODY_MAX_BYTES = 3_360",
       "occurrences": 1,
       "sourceFile": "tests/guards/plan-group-sizes.test.ts",
-      "description": "The Design agent body of the curation-on build, dist/agents/design.md, in bytes. Every turn of every Design spawn reads it (opus, high effort, five to eight spawns per /plan run). Measured 3,617 after one temp-file Write method for #743, 3,618 after #733 moved the design-review mode to the Architect agent. Added by #714 (lean Plan path group) at 4,219, after the cut from 5,529."
+      "description": "The Design agent body of the curation-on build, dist/agents/design.md, in bytes. Every turn of every Design spawn reads it (opus, high effort, five to eight spawns per /plan run). Measured 3,617 after one temp-file Write method for #743, 3,618 after #733 moved the design-review mode to the Architect agent. Added by #714 (lean Plan path group) at 4,219, after the cut from 5,529. Lowered by #756 (lean plans) to 3,360: the wording cuts in the partial that Design shares with Architect pay for the Architect lens item."
     },
     {
       "id": "design-body-curation-off-max",
-      "ceiling": 3051,
-      "pattern": "const DESIGN_BODY_CURATION_OFF_MAX_BYTES = 3_051",
+      "ceiling": 2794,
+      "pattern": "const DESIGN_BODY_CURATION_OFF_MAX_BYTES = 2_794",
       "occurrences": 1,
       "sourceFile": "tests/guards/plan-group-sizes.test.ts",
-      "description": "The Design agent body of the curation-off build, dist/curation-off/agents/design.md, in bytes. Measured 3,051 after one temp-file Write method for #743, 3,052 after #733 moved the design-review mode to the Architect agent. Added by #714 (lean Plan path group) at 3,653, after the cut from 4,776."
+      "description": "The Design agent body of the curation-off build, dist/curation-off/agents/design.md, in bytes. Measured 3,051 after one temp-file Write method for #743, 3,052 after #733 moved the design-review mode to the Architect agent. Added by #714 (lean Plan path group) at 3,653, after the cut from 4,776. Lowered by #756 (lean plans) to 2,794, with the curation-on build."
     },
     {
       "id": "architect-body-max",
-      "ceiling": 3782,
-      "pattern": "const ARCHITECT_BODY_MAX_BYTES = 3_782",
+      "ceiling": 3775,
+      "pattern": "const ARCHITECT_BODY_MAX_BYTES = 3_775",
       "occurrences": 1,
       "sourceFile": "tests/guards/plan-group-sizes.test.ts",
-      "description": "The Architect agent body of the curation-on build, dist/agents/architect.md, in bytes. Every turn of the /plan Phase 12 spawn and the /dynamic-plan plan writer reads it (opus, high effort). Added by #733 (Design split into Design and Architect, D-DESIGN-VARIANTS) at 3,387. Raised by #752 from 3,386 to 3,782 (396 bytes): the Plan writing section lets the /dynamic-plan plan writer read gap-analysis by install path, as the Design agent that wrote plans at 3.11.0 preloaded it. The section adds 447 bytes; wording cuts in the same host took 51 first."
+      "description": "The Architect agent body of the curation-on build, dist/agents/architect.md, in bytes. Every turn of the /plan Phase 12 spawn and the /dynamic-plan plan writer reads it (opus, high effort). Added by #733 (Design split into Design and Architect, D-DESIGN-VARIANTS) at 3,387. Raised by #752 from 3,386 to 3,782 (396 bytes): the Plan writing section lets the /dynamic-plan plan writer read gap-analysis by install path, as the Design agent that wrote plans at 3.11.0 preloaded it. The section adds 447 bytes; wording cuts in the same host took 51 first. Lowered by #756 (lean plans) to 3,775: the minimum-lens item was added, and wording cuts in the host and in the partial it shares with Design paid for it."
     },
     {
       "id": "architect-body-curation-off-max",
-      "ceiling": 3216,
-      "pattern": "const ARCHITECT_BODY_CURATION_OFF_MAX_BYTES = 3_216",
+      "ceiling": 3209,
+      "pattern": "const ARCHITECT_BODY_CURATION_OFF_MAX_BYTES = 3_209",
       "occurrences": 1,
       "sourceFile": "tests/guards/plan-group-sizes.test.ts",
-      "description": "The Architect agent body of the curation-off build, dist/curation-off/agents/architect.md, in bytes. Added by #733 (Design split into Design and Architect, D-DESIGN-VARIANTS) at 2,821. Raised by #752 from 2,820 to 3,216 (396 bytes), for the same Plan writing section as the curation-on build."
+      "description": "The Architect agent body of the curation-off build, dist/curation-off/agents/architect.md, in bytes. Added by #733 (Design split into Design and Architect, D-DESIGN-VARIANTS) at 2,821. Raised by #752 from 2,820 to 3,216 (396 bytes), for the same Plan writing section as the curation-on build. Lowered by #756 (lean plans) to 3,209, with the curation-on build."
     },
     {
       "id": "explore-body-max",

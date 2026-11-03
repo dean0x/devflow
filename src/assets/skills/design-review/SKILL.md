@@ -7,8 +7,6 @@ allowed-tools: Read, Grep, Glob
 
 # Design Review
 
-Anti-pattern detection for implementation plans.
-
 ## Iron Law
 
 > **CATCH IT IN THE PLAN, NOT IN THE PR**
@@ -19,13 +17,13 @@ Anti-pattern detection for implementation plans.
 
 ## Anti-Pattern Detection Rules
 
+A concrete case is an external call in this change, a stated or measured hot path, or a repeated delivery. Rules 4 and 5 need one.
+
 ### 1. N+1 Queries
 
 **What to look for in a plan:**
 - Steps that fetch a list, then loop to fetch related data per item
-- "For each X, get Y" language without mentioning batch operations
-- JOIN or batch-fetch never mentioned for related data
-- "Display X with Y" without specifying how Y is fetched
+- "For each X, get Y" or "Display X with Y" language, with no JOIN or batch fetch named
 
 **How to flag:**
 ```
@@ -41,7 +39,7 @@ Resolution: Replace loop with batch query: {proposed batch operation}.
 - Single step handling more than 3 distinct responsibilities
 - "Validate AND process AND notify AND log AND update" in one step
 - Steps described as "the main handler" that touch multiple subsystems
-- No clear single-sentence description of what the function does
+- No one-sentence description of what the function does
 
 **How to flag:**
 ```
@@ -54,8 +52,7 @@ Resolution: Split into: {responsibility 1} → {responsibility 2} → {responsib
 ### 3. Missing Parallelism
 
 **What to look for in a plan:**
-- Sequential steps with no data dependency between them
-- "First do A, then do B, then do C" where B doesn't need A's output
+- Sequential steps with no data dependency between them ("First do A, then B, then C")
 - Multiple external API calls or DB queries listed sequentially
 - Fan-out operations (notify all users, update all records) without parallel mention
 
@@ -72,9 +69,9 @@ Resolution: Execute {step A} and {step B} in parallel: {proposed parallel patter
 **What to look for in a plan:**
 - Happy path fully described, failure paths absent or vague
 - "If error, return error" without specifying what the caller does with it
-- Partial operations (multi-step) without rollback plan
+- Partial operations (multi-step) that can lose data, without rollback plan
 - External calls (API, DB, queue) without failure mode specification
-- Retry logic absent for transient failures (network timeouts, rate limits)
+- Retry or compensation absent: a finding only with a concrete case. Error handling at a trust boundary or for data loss needs no case.
 
 **How to flag:**
 ```
@@ -82,12 +79,12 @@ Resolution: Execute {step A} and {step B} in parallel: {proposed parallel patter
 Resolution: Add: {on failure scenario} → {specific recovery action}.
 ```
 
-**Suggest:** for each external call, the action on timeout, 4xx and 5xx; a compensation step for each step of a multi-step operation; Result types or explicit error returns, never a silent failure.
+**Suggest:** for each external call, the action on timeout, 4xx and 5xx; a compensation step only for a partial write that loses data; Result types or explicit error returns, never a silent failure.
 
 ### 5. Missing Caching
 
 **What to look for in a plan:**
-- Expensive operations called on every request without cache mention
+Only with a concrete case; else no finding.
 - "Fetch configuration on each request", "call third-party API per user action"
 - Reference data (categories, settings, permissions) loaded repeatedly
 - Computed aggregates recalculated on every read

@@ -101,6 +101,8 @@ Step 5: Build user dashboard
 
 ## 4. Error Handling Gaps
 
+A retry or compensation finding needs a concrete case. Here it is the S3 and database calls of this change.
+
 ### Before (Anti-Pattern)
 ```
 Step 7: Implement file upload
@@ -126,12 +128,13 @@ Step 7: Implement file upload
     - Queue cleanup job to delete orphaned S3 object
     - Return 500, log error with S3 key for manual cleanup if queue fails
 - Return 201 with file URL and metadata
-- Idempotency: if file with same hash already exists for user, return existing URL (no duplicate upload)
 ```
 
 ---
 
 ## 5. Missing Caching
+
+A caching finding needs a concrete case. Here it is three calls on every request, at 1000 req/s.
 
 ### Before (Anti-Pattern)
 ```
