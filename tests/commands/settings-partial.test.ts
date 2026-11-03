@@ -228,7 +228,7 @@ describe('the accepted line is SETTINGS_LINE_RE written out', () => {
   const body = defineBody(source(PARTIAL), 'settings_resolve')
 
   it('the template names the script\'s fields, in order, with the same closed value sets', () => {
-    expect(scriptFields(), 'no fields parsed from SETTINGS_LINE_RE — the comparison is vacuous').toHaveLength(11)
+    expect(scriptFields(), 'no fields parsed from SETTINGS_LINE_RE — the comparison is vacuous').toHaveLength(12)
     expect(collectGrammarDrift(template(body))).toEqual([])
   })
 
@@ -386,7 +386,7 @@ describe('the curation gate keeps its rationale out of the expanded prompt', () 
 
   it('the prompt fallback names both switches off', () => {
     const body = defineBody(source(PARTIAL), 'settings_resolve')
-    expect(body).toContain('MEMORY=off CURATION=off KNOWLEDGE=off GATE_LEVEL=full` instead.')
+    expect(body).toContain('MEMORY=off CURATION=off KNOWLEDGE=off TDD=on GATE_LEVEL=full` instead.')
   })
 
   it('the _decisions.mds header, before its first define, holds the rationale', () => {

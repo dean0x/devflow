@@ -143,6 +143,11 @@ export interface RepoSettings {
     readonly curation: SettingsSwitchState;
     readonly knowledge: SettingsSwitchState;
   };
+  /**
+   * The machine TDD switch (`features.tdd`): on unless the manifest holds a boolean false.
+   * No repository layer changes it, so it is not one of the narrow-only `switches`.
+   */
+  readonly tdd: boolean;
   /** The gate level that applies. `full` for a fail-closed result or a malformed deciding value. */
   readonly gateLevel: GateLevel;
   /**

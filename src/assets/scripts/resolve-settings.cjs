@@ -2,8 +2,8 @@
 // src/assets/scripts/resolve-settings.cjs
 //
 // Resolves the per-repository SETTINGS a prompt or the CLI acts on — tracker,
-// review publication, compliance lens, the three feature switches and the gate
-// level — from LOCAL layers, and prints them on ONE closed-vocabulary line. Installed as a
+// review publication, compliance lens, the three feature switches, the TDD switch and
+// the gate level — from LOCAL layers, and prints them on ONE closed-vocabulary line. Installed as a
 // top-level sibling of resolve-evidence-policy.cjs under ~/.devflow/scripts/,
 // sharing its parser (lib/project-config.cjs).
 //
@@ -63,11 +63,15 @@
 // value. The level comes from these two keys only — never from a task, a diff or
 // project.json.
 //
+// TDD is a MACHINE-ONLY switch: it reads the manifest's `features.tdd` alone, an
+// absent or non-boolean value is `on`, and only a boolean `false` is `off`. A `tdd`
+// key in project.json or config.json is ignored, and no unreadable file changes it.
+//
 // stdout is exactly one line plus "\n" (D-SETTINGS-LINE):
 //   TRACKER=<github|jira|linear> TRACKER_SOURCE=<project|personal|machine|default>
 //   TRACKER_WARN=<none|mismatch|invalid> SITE=<url|none> KEY=<KEY|none>
 //   REVIEW_PUBLICATION=<off|auto|full> COMPLIANCE=<off|generic|id,…>
-//   MEMORY=<on|off> CURATION=<on|off> KNOWLEDGE=<on|off> GATE_LEVEL=<full|standard|lean>
+//   MEMORY=<on|off> CURATION=<on|off> KNOWLEDGE=<on|off> TDD=<on|off> GATE_LEVEL=<full|standard|lean>
 // (one line on stdout; wrapped here for reading). Every value is a closed token
 // or a SITE/KEY that passed its shape gate, so no other byte of a config file can
 // reach stdout. Whole-file rule: a project.json or config.json that EXISTS but
@@ -127,6 +131,7 @@ const {
 /** @typedef {'full' | 'standard' | 'lean'} GateLevel */
 /** @typedef {'personal' | 'machine' | 'default'} GateLevelSource */
 /** @typedef {'memory' | 'curation' | 'knowledge'} FeatureSwitch */
+/** @typedef {FeatureSwitch | 'tdd'} MachineSwitch */
 /** @typedef {'machine' | 'project' | 'personal'} SwitchSource */
 
 /** Who decided TRACKER. `default` is github with no layer naming a provider. */
@@ -176,7 +181,7 @@ const EXIT_CODES = Object.freeze({
  * inside a readable object keep their per-key readings (AC-26).
  *
  * GATE_LEVEL is the last field, a closed group of the three level words: nothing
- * broader than `full|standard|lean` can follow KNOWLEDGE.
+ * broader than `full|standard|lean` can follow TDD.
  */
 const SETTINGS_LINE_RE = new RegExp(
   '^TRACKER=(?<tracker>' + TRACKER_PROVIDER_IDS.join('|') + ')'
@@ -188,6 +193,7 @@ const SETTINGS_LINE_RE = new RegExp(
   + ' COMPLIANCE=(?<compliance>off|generic|(?:' + COMPLIANCE_IDS.join('|') + ')(?:,(?:'
   + COMPLIANCE_IDS.join('|') + ')){0,' + String(COMPLIANCE_IDS.length - 1) + '})'
   + ' MEMORY=(?<memory>on|off) CURATION=(?<curation>on|off) KNOWLEDGE=(?<knowledge>on|off)'
+  + ' TDD=(?<tdd>on|off)'
   + ' GATE_LEVEL=(?<gateLevel>' + GATE_LEVELS.join('|') + ')$',
 );
 
@@ -201,14 +207,16 @@ const SETTINGS_LINE_RE = new RegExp(
  *   REVIEW_PUBLICATION=off   nothing is published (raised to a stub under required)
  *   COMPLIANCE=generic       the review lens still runs
  *   KNOWLEDGE=off            no knowledge write-back commits into the repository
- *   MEMORY/CURATION=off      a resolver that cannot say which repository it is in cannot
+ *   TDD=on                   the failing test comes first: a resolver that cannot read
+ *                            its inputs never allows less checking
+ *   MEMORY/CURATION=off     a resolver that cannot say which repository it is in cannot
  *                            tell whether git tracks their folders, so both stay off
  *   GATE_LEVEL=full          the most checking applies: a resolver that cannot read
  *                            its inputs never lowers the level
  */
 const SETTINGS_FAIL_CLOSED_LINE =
   'TRACKER=github TRACKER_SOURCE=default TRACKER_WARN=invalid SITE=none KEY=none '
-  + 'REVIEW_PUBLICATION=off COMPLIANCE=generic MEMORY=off CURATION=off KNOWLEDGE=off GATE_LEVEL=full';
+  + 'REVIEW_PUBLICATION=off COMPLIANCE=generic MEMORY=off CURATION=off KNOWLEDGE=off TDD=on GATE_LEVEL=full';
 
 /** Bound on each local git call. */
 const GIT_TIMEOUT_MS = 5000;
@@ -285,6 +293,7 @@ const PROJECT_REL = '.devflow/project.json';
  *   reviewPublication: Publication,
  *   compliance: { enabled: boolean, frameworks: readonly string[] },
  *   switches: { memory: SwitchState, curation: SwitchState, knowledge: SwitchState },
+ *   tdd: boolean,
  *   gateLevel: GateLevel,
  *   gateLevelSource: GateLevelSource | null,
  *   gateLevelInvalid: boolean,
@@ -298,6 +307,8 @@ const PROJECT_REL = '.devflow/project.json';
  *   ok              false only for a fail-closed resolution — the whole-file
  *                   rule's included, which still carries every readable lens
  *   compliance      enabled with no frameworks is `generic`
+ *   tdd             the machine's `features.tdd` alone; a repository layer never
+ *                   changes it, so it is not one of the narrow-only `switches`
  *   gateLevelSource the layer that decided the level. null only for a whole-line
  *                   fail-closed result (`ok` false), which has no deciding layer
  *   gateLevelInvalid the deciding layer holds a malformed level, so `gateLevel` is
@@ -359,6 +370,7 @@ const FAIL_CLOSED_SETTINGS = Object.freeze({
     curation: Object.freeze({ on: false, source: /** @type {SwitchSource} */ ('machine') }),
     knowledge: Object.freeze({ on: false, source: /** @type {SwitchSource} */ ('machine') }),
   }),
+  tdd: true,
   gateLevel: /** @type {GateLevel} */ ('full'),
   gateLevelSource: null,
   gateLevelInvalid: false,
@@ -395,6 +407,7 @@ const CURRENT_SWITCH_KEYS = Object.freeze({
   memory: Object.freeze(['memory']),
   curation: Object.freeze(['curation', 'learning']),
   knowledge: Object.freeze(['knowledge']),
+  tdd: Object.freeze(['tdd']),
 });
 
 /** The pre-rename key each switch was stored under (feature-switch.ts LEGACY_KEYS). */
@@ -410,7 +423,7 @@ const LEGACY_SWITCH_KEYS = Object.freeze({ curation: 'decisions', knowledge: 'kb
  * rule is held here alone.
  *
  * @param {unknown} manifest
- * @param {FeatureSwitch} feature
+ * @param {MachineSwitch} feature
  * @returns {boolean}
  */
 function machineSwitchOn(manifest, feature) {
@@ -722,7 +735,8 @@ function foldGateLevel(personal, manifest) {
  * a broken file affects only the keys it owns, so the lens stays the fold of
  * every readable layer (D-LENS-UNION) — and the memory and curation switches,
  * which stay as the machine set them (an unreadable file narrows nothing, and
- * the area answers narrow them afterwards). An unreadable project.json declares
+ * the area answers narrow them afterwards), and the TDD switch, which no
+ * repository file owns. An unreadable project.json declares
  * nothing readable of its own (repoCompliance null) but reads as a malformed
  * declaration, so its lens is at least `generic`; an unreadable config.json
  * owns no compliance at all, so the worktree project.json's ids still count.
@@ -739,6 +753,7 @@ function unreadableSettings(layer, inputs) {
   return Object.freeze({
     ...FAIL_CLOSED_SETTINGS,
     switches: Object.freeze({ ...FAIL_CLOSED_SETTINGS.switches, memory: machine('memory'), curation: machine('curation') }),
+    tdd: machineSwitchOn(inputs.manifest, 'tdd'),
     // The level stays `full` with no deciding layer, but a readable manifest still shows its own value.
     gateLevelMachine: machineGateLevel(inputs.manifest),
     compliance: lens.compliance,
@@ -769,6 +784,8 @@ function foldSettings(inputs) {
       curation: foldSwitch(project, personal, manifest, 'curation'),
       knowledge: foldSwitch(project, personal, manifest, 'knowledge'),
     }),
+    // Machine only: no repository layer is consulted (foldSwitch would read one).
+    tdd: machineSwitchOn(manifest, 'tdd'),
     ...foldGateLevel(personal, manifest),
     repoCompliance: lens.repoCompliance,
     defaultBranchCompliance: lens.defaultBranchCompliance,
@@ -1241,6 +1258,7 @@ function formatSettingsLine(s) {
     + ' MEMORY=' + onOff(s.switches.memory)
     + ' CURATION=' + onOff(s.switches.curation)
     + ' KNOWLEDGE=' + onOff(s.switches.knowledge)
+    + ' TDD=' + (s.tdd ? 'on' : 'off')
     + ' GATE_LEVEL=' + s.gateLevel;
 }
 

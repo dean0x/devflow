@@ -468,6 +468,60 @@ describe('readManifest', () => {
     expect(onDisk.features).toMatchObject({ hud: true, curation: true, learning: true, knowledge: true });
   });
 
+  describe('features.tdd (the machine TDD switch: absent is on, kept only as a boolean)', () => {
+    const write = async (features: Record<string, unknown>): Promise<string> => {
+      const file = path.join(tmpDir, 'manifest.json');
+      await fs.writeFile(
+        file,
+        JSON.stringify({ version: '3.12.1', plugins: [], scope: 'user', features: { ambient: true, memory: true, hud: false, knowledge: true, curation: true, learning: true, rules: true, ...features }, installedAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }),
+        'utf-8',
+      );
+      return file;
+    };
+
+    it.each([true, false])('keeps a stored %s', async (value) => {
+      await write({ tdd: value });
+      expect((await readManifest(tmpDir))?.features.tdd).toBe(value);
+    });
+
+    it('leaves an absent key out of the typed manifest, and writes nothing to heal it', async () => {
+      const file = await write({});
+      const before = await fs.readFile(file, 'utf-8');
+      expect(Object.hasOwn((await readManifest(tmpDir))?.features ?? {}, 'tdd')).toBe(false);
+      expect(await fs.readFile(file, 'utf-8')).toBe(before);
+    });
+
+    it.each(['false', 0, null, { enabled: false }])('leaves a non-boolean %j out, without a heal write', async (value) => {
+      const file = await write({ tdd: value });
+      const before = await fs.readFile(file, 'utf-8');
+      expect(Object.hasOwn((await readManifest(tmpDir))?.features ?? {}, 'tdd')).toBe(false);
+      expect(await fs.readFile(file, 'utf-8')).toBe(before);
+    });
+
+    it('survives a typed read and write, so a re-init keeps a disabled switch', async () => {
+      await write({ tdd: false });
+      const manifest = await readManifest(tmpDir);
+      expect(manifest).not.toBeNull();
+      await writeManifest(tmpDir, manifest!);
+      const onDisk = JSON.parse(await fs.readFile(path.join(tmpDir, 'manifest.json'), 'utf-8')) as { features: Record<string, unknown> };
+      expect(onDisk.features.tdd).toBe(false);
+    });
+
+    it('survives a syncManifestFeature toggle of another feature', async () => {
+      await write({ tdd: false });
+      await syncManifestFeature(tmpDir, 'hud', true);
+      const onDisk = JSON.parse(await fs.readFile(path.join(tmpDir, 'manifest.json'), 'utf-8')) as { features: Record<string, unknown> };
+      expect(onDisk.features).toMatchObject({ hud: true, tdd: false });
+    });
+
+    it('a write of an absent key adds no tdd key', async () => {
+      await write({});
+      await syncManifestFeature(tmpDir, 'hud', true);
+      const onDisk = JSON.parse(await fs.readFile(path.join(tmpDir, 'manifest.json'), 'utf-8')) as { features: Record<string, unknown> };
+      expect(Object.hasOwn(onDisk.features, 'tdd')).toBe(false);
+    });
+  });
+
   it('heals features.kb to features.knowledge on disk', async () => {
     const oldData = {
       version: '2.0.0',

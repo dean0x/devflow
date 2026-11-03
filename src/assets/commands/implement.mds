@@ -13,7 +13,7 @@ output-dir: dist/commands
 @import "./_partials/_settings.mds" as settings
 # Implement Command
 
-Orchestrate a single task by spawning agents.
+Orchestrate one task by spawning agents.
 
 ## Input
 
@@ -21,7 +21,7 @@ Orchestrate a single task by spawning agents.
 $ARGUMENTS
 </command-input>
 
-`COMMAND_INPUT` is the text above: a plan document path, an issue reference, a task description, or empty (use the conversation).
+`COMMAND_INPUT` is the text above: a plan document path, an issue reference, a task description, or empty.
 
 {{issue_ref_grammar()}}
 
@@ -37,15 +37,15 @@ When the user explicitly asks to re-validate, re-check, or re-run quality gates 
 
 <!-- curation:on -->
 <!-- compliance:on -->
-**Produces:** TASK_ID, BASE_BRANCH, BASE_REF, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, ISSUE_PR_LINK, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, PR_TEST_PLAN_BLOCK, REVIEW_PUBLICATION, GATE_LEVEL
+**Produces:** TASK_ID, BASE_BRANCH, BASE_REF, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, ISSUE_PR_LINK, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, PR_TEST_PLAN_BLOCK, REVIEW_PUBLICATION, TDD, GATE_LEVEL
 <!-- compliance:off -->
-**Produces:** TASK_ID, BASE_BRANCH, BASE_REF, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, ISSUE_PR_LINK, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, EVIDENCE_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, REVIEW_PUBLICATION, GATE_LEVEL
+**Produces:** TASK_ID, BASE_BRANCH, BASE_REF, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, ISSUE_PR_LINK, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, EVIDENCE_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, REVIEW_PUBLICATION, TDD, GATE_LEVEL
 <!-- compliance:end -->
 <!-- curation:off -->
 <!-- compliance:on -->
-**Produces:** TASK_ID, BASE_BRANCH, BASE_REF, EXECUTION_PLAN, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, ISSUE_PR_LINK, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, PR_TEST_PLAN_BLOCK, REVIEW_PUBLICATION, GATE_LEVEL
+**Produces:** TASK_ID, BASE_BRANCH, BASE_REF, EXECUTION_PLAN, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, ISSUE_PR_LINK, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, PR_TEST_PLAN_BLOCK, REVIEW_PUBLICATION, TDD, GATE_LEVEL
 <!-- compliance:off -->
-**Produces:** TASK_ID, BASE_BRANCH, BASE_REF, EXECUTION_PLAN, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, ISSUE_PR_LINK, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, EVIDENCE_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, REVIEW_PUBLICATION, GATE_LEVEL
+**Produces:** TASK_ID, BASE_BRANCH, BASE_REF, EXECUTION_PLAN, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, ISSUE_PR_LINK, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, EVIDENCE_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, REVIEW_PUBLICATION, TDD, GATE_LEVEL
 <!-- compliance:end -->
 <!-- curation:end -->
 
@@ -207,7 +207,7 @@ Setup context is the plan document, issue body or conversation.
 
 | Strategy | When |
 |----------|------|
-| **SINGLE_CODE_AGENT** | Default. Coherent A→Z implementation |
+| **SINGLE_CODE_AGENT** | Default. A→Z implementation |
 | **SEQUENTIAL_CODE_AGENTS** | The plan writes >= 10 files or has >= 7 steps |
 | **PARALLEL_CODE_AGENTS** | True artifact independence (rare) |
 
@@ -218,6 +218,7 @@ Setup context is the plan document, issue body or conversation.
 ```
 Agent(subagent_type="Code"):
 "OPERATION: implement
+TDD: {TDD}
 TASK_ID: {task-id}
 TASK_DESCRIPTION: {description}
 BASE_BRANCH: {base branch}
@@ -235,6 +236,7 @@ DECISIONS_CONTEXT: {decisions_context}
 ```
 Agent(subagent_type="Code"):
 "OPERATION: implement
+TDD: {TDD}
 TASK_ID: {task-id}
 TASK_DESCRIPTION: {phase 1 description}
 BASE_BRANCH: {base branch}
@@ -252,6 +254,7 @@ HANDOFF_FILE: {worktree}/.devflow/docs/handoff-{branch_slug}.md"
 ```
 Agent(subagent_type="Code"):
 "OPERATION: implement
+TDD: {TDD}
 TASK_ID: {task-id}
 TASK_DESCRIPTION: {phase N description}
 BASE_BRANCH: {base branch}
@@ -275,6 +278,7 @@ HANDOFF_FILE: {worktree}/.devflow/docs/handoff-{branch_slug}.md"
 ```
 Agent(subagent_type="Code"):  # Code agent 1
 "OPERATION: implement
+TDD: {TDD}
 TASK_ID: {task-id}-part1
 TASK_DESCRIPTION: {independent subtask 1}
 BASE_BRANCH: {base branch}
@@ -288,6 +292,7 @@ DECISIONS_CONTEXT: {decisions_context}
 
 Agent(subagent_type="Code"):  # Code agent 2 (same message)
 "OPERATION: implement
+TDD: {TDD}
 TASK_ID: {task-id}-part2
 TASK_DESCRIPTION: {independent subtask 2}
 BASE_BRANCH: {base branch}
@@ -553,7 +558,7 @@ Capture the `- **PR**: #{number}` line of its `### Branch` as `PR_NUMBER`, its `
 **Produces:** CI_STATUS
 **Requires:** PR_NUMBER, FILES_CHANGED
 
-Run under every strategy: Phase 9 opened the PR.
+Run under every strategy.
 
 **Push first, outside the gate block.** Push once — never force, and no retry:
 

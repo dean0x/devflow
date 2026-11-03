@@ -39,8 +39,13 @@ import { MANIFEST_LOCK_WAIT_MS, withManifestLock } from './manifest-lock.js';
  * retired (RETIRED_CONFIG_KEYS in feature-config.ts): no reader consults them,
  * so a stale `learning: false` left in an old config.json never comes back to
  * life as a switch.
+ *
+ * `features.tdd` is the one MACHINE-ONLY member. It reads like the others (an absent
+ * key is ON, and only a boolean `false` turns it off), but no repository layer
+ * narrows it: the settings resolver reads it from the manifest alone, and a `tdd` key
+ * in `project.json` or `config.json` is ignored.
  */
-export type MachineFeature = 'memory' | 'curation' | 'knowledge';
+export type MachineFeature = 'memory' | 'curation' | 'knowledge' | 'tdd';
 
 /**
  * Machine switches that are OPT-IN: off until the user turns them on.
@@ -80,6 +85,7 @@ const CURRENT_KEYS: Readonly<Record<MachineFeature, readonly string[]>> = {
   memory: ['memory'],
   curation: ['curation', 'learning'],
   knowledge: ['knowledge'],
+  tdd: ['tdd'],
 };
 
 /**
@@ -252,8 +258,8 @@ export async function readOptInFeature(devflowDir: string, feature: OptInMachine
  * D-NOOP-TOGGLE: a toggle to the value the manifest already records writes
  * nothing. The only bytes such a write could change are `updatedAt`, and that
  * field means "the manifest's content last changed", so a no-op must not move
- * it. This is the one write point of `devflow memory|curation|knowledge|behavior
- * --enable/--disable`, so the rule holds for all four at once.
+ * it. This is the one write point of `devflow memory|curation|knowledge|tdd|behavior
+ * --enable/--disable`, so the rule holds for all five at once.
  *
  * The read and the write run under the manifest lock (manifest-lock.ts), so the
  * heal in readManifest cannot write an older snapshot over this write. The wait is
