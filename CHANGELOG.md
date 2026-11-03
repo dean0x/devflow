@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`devflow tdd --enable | --disable | --status`** ([#758](https://github.com/dean0x/devflow/issues/758)). The switch is on by default. With it off, the installed Code agent has no test-first text and no `devflow:test-driven-development` preload, and the skill is not installed; the other test rules stay. The switch changes only the installed files, through the same build variants and converge as `devflow curation` and `devflow compliance`; no spawn or settings line carries it. A plain re-init keeps it, and `devflow init --reset` turns it back on. With no install manifest the command records nothing and exits 1.
+- **`devflow tdd --enable | --disable | --status`** ([#758](https://github.com/dean0x/devflow/issues/758)). The switch is on by default. With it off, the installed Code agent has no test-first text and no `devflow:test-driven-development` preload, the installed Triage agent no longer says that the Code agent works test-first, and the skill is not installed; the other test rules stay. The switch changes only the installed files, through the same build variants and converge as `devflow curation` and `devflow compliance`; no spawn or settings line carries it. A plain re-init keeps it, and `devflow init --reset` turns it back on. With no install manifest the command records nothing and exits 1.
 
 ### Changed
 

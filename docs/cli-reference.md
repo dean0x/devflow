@@ -177,7 +177,7 @@ The rule is feature-owned (not plugin-scoped), like the compliance rule, and ins
 
 ## TDD
 
-The TDD switch is on by default. With it on, the installed Code agent writes one failing test first for each acceptance-criterion behaviour and preloads the `devflow:test-driven-development` skill. With it off, the installed Code agent has none of the test-first text, and the skill is not installed.
+The TDD switch is on by default. With it on, the installed Code agent writes one failing test first for each acceptance-criterion behaviour and preloads the `devflow:test-driven-development` skill. With it off, the installed Code agent has none of the test-first text, the installed Triage agent no longer says that the Code agent works test-first, and the skill is not installed.
 
 ```bash
 npx devflow-kit tdd --enable            # Install the Code agent with the test-first text and the TDD skill

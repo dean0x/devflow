@@ -229,7 +229,7 @@ The build splits each compiled prompt on three axes: curation, compliance and td
 | Compliance | `<!-- compliance:on -->`, `<!-- compliance:off -->`, `<!-- compliance:end -->` |
 | TDD | `<!-- tdd:on -->`, `<!-- tdd:off -->`, `<!-- tdd:end -->` |
 
-An `on` arm stays only in the variants that keep its axis on. An `off` arm stays only in the variants that turn its axis off. One axis can nest inside an arm of another axis. Arms of two axes never overlap. The splitter is `src/core/curation-variants.ts`, and `scripts/build-mds.ts` writes the files. Only the Code agent host carries tdd arms. A tdd marker in a reference module or a workflow folder file is a build error.
+An `on` arm stays only in the variants that keep its axis on. An `off` arm stays only in the variants that turn its axis off. One axis can nest inside an arm of another axis. Arms of two axes never overlap. The splitter is `src/core/curation-variants.ts`, and `scripts/build-mds.ts` writes the files. Only the Code agent host and the Triage agent host carry tdd arms; Triage is the one host with all three, so it is the only file in `dist/compliance-tdd-off/` and `dist/curation-compliance-tdd-off/`. A tdd marker in a reference module or a workflow folder file is a build error.
 
 The build writes one output for each set of the host's axes that a machine can turn off:
 
