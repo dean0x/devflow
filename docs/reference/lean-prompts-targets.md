@@ -163,7 +163,7 @@ Each group is one pull request. No two groups cut the same file. A group that ch
 | Test | agent `test.md`, skill `qa` | Subtract. Keep "finish and verify" text. |
 | Git agent | agent `git.mds` | Subtract. Keep "finish and verify" text on Haiku. |
 | Curate | agent `curate.md` | Subtract. Rare branches to references only if their read rate is low. |
-| Plan path | agents `design.mds`, `explore.md`, skills `gap-analysis`, `design-review`, the `plan` host text | Subtract. Turn audit. |
+| Plan path | agents `design.mds`, `explore.md`, `plan.md`, skills `gap-analysis`, `design-review`, the `plan` host text | Subtract. Turn audit. |
 | Command partials | the command partials shared by more than one family: `_settings`, `_knowledge`, `_decisions`, `_evidence_policy`, `_docs_root`, `_compliance`, `_tracker`, `_plan_contract`, `_publication` | Cut each partial once, in this group only. Scripts that print the next action or their own fail-closed line. |
 | Resolve | the `resolve` host text, agent `triage.mds` | Subtract. Rare escalation arms to references. Scripts that print the next action. |
 | Dynamic family | the four dynamic commands and `_engine`, `_wave`, `_factory`, `_preamble`, `_roster`, `_ticket_template` | Subtract. Capital emphasis: 19 hits in `dynamic-build`. Count main turns first. |

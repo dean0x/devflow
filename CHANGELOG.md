@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **devflow ships a `Plan` agent that replaces Claude Code's built-in Plan** ([#756](https://github.com/dean0x/devflow/issues/756)). It runs on Opus at high effort, reads the code without editing it, names the lowest workable rung for each step, and never drops input validation, security checks, data-loss guards, fail-closed paths or the tests of these. `/plan` Phase 10 uses it, and so does plan mode when Claude Code delegates research to the Plan subagent. `init` skips it and warns when you already own a `Plan` agent, `uninstall` removes only devflow's copy, and `devflow agents --set plan --model <model>` changes its model.
+
 ---
 
 ## [3.12.1] - 2026-11-01

@@ -52,7 +52,7 @@ devflow/
 │   │   ├── post-install.ts           # Post-install setup
 │   │   ├── legacy.ts                 # Legacy hook cleanup
 │   │   ├── tracker-servers.ts        # Stamps configured tracker servers onto the installed Git/Tracker agents
-│   │   ├── agent-type-owner.ts       # Explore override: skips the install when the user owns an Explore agent
+│   │   ├── agent-type-owner.ts       # Explore and Plan overrides: skips the install of each when the user owns an agent of that type
 │   │   └── templates/                # Settings and config templates
 │   └── assets/                       # SINGLE SOURCE OF TRUTH for all installable assets
 │       ├── skills/                   # 42 skills
@@ -280,7 +280,7 @@ The markers are interim. Native conditionals in the MDS compiler replace them la
 
 ### Agents
 
-All 21 agents (`git`, `synthesize`, `skim`, `polish`, `code`, `fix`, `refactor`, `review`, `triage`, `evaluate`, `test`, `harden`, `validate`, `design`, `architect`, `knowledge`, `research`, `debug`, `curate`, `tracker`, `explore`) are shared, and every source lives in `src/assets/agents/`. Eight (`synthesize`, `polish`, `evaluate`, `test`, `validate`, `curate`, `tracker`, `explore`) are hand-authored `.md` files that install verbatim. The other thirteen (`git`, `code`, `fix`, `refactor`, `design`, `architect`, `debug`, `knowledge`, `research`, `review`, `harden`, `triage`, `skim`) are `.mds` generator hosts, compiled to `dist/agents/{name}.md` by `npm run build:mds`. The three Code hosts import the partial `_partials/_code.mds`, and Design and Architect import `_partials/_design.mds`. A partial declares no `output-dir:` and is never compiled directly.
+All 22 agents (`git`, `synthesize`, `skim`, `polish`, `code`, `fix`, `refactor`, `review`, `triage`, `evaluate`, `test`, `harden`, `validate`, `design`, `architect`, `knowledge`, `research`, `debug`, `curate`, `tracker`, `explore`, `plan`) are shared, and every source lives in `src/assets/agents/`. Nine (`synthesize`, `polish`, `evaluate`, `test`, `validate`, `curate`, `tracker`, `explore`, `plan`) are hand-authored `.md` files that install verbatim. The other thirteen (`git`, `code`, `fix`, `refactor`, `design`, `architect`, `debug`, `knowledge`, `research`, `review`, `harden`, `triage`, `skim`) are `.mds` generator hosts, compiled to `dist/agents/{name}.md` by `npm run build:mds`. The three Code hosts import the partial `_partials/_code.mds`, and Design and Architect import `_partials/_design.mds`. A partial declares no `output-dir:` and is never compiled directly.
 
 The installer resolves each declared agent over `agentSourceDirs()` in `src/core/assets.ts` — `dist/agents/`, then `src/assets/agents/` — and copies the first hit, so a compiled artifact supersedes a hand-authored file of the same name. When neither directory has the agent, the install throws naming both candidate paths and `npm run build:mds` rather than silently skipping it. `npm run build:cli` alone (TypeScript) does not produce installable agents; `npm run build` runs both steps.
 
