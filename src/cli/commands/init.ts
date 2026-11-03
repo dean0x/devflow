@@ -1406,7 +1406,8 @@ export const initCommand = new Command('init')
     // manifest value; only --behavior/--no-behavior and the Advanced wizard change it.
     let behaviorEnabled = seed.features.behavior;
     // tdd: a machine switch init only carries: the seed holds the prior manifest value (on when the
-    // manifest has none), and no flag or wizard step changes it. `devflow tdd` is its only writer.
+    // manifest has none, and under --reset), and no flag or wizard step changes it. `devflow tdd`
+    // is the only command that changes the value; `init --reset` turns it back on.
     const tddEnabled = seed.features.tdd;
     // compliance: manifest-group (like proxy); seed from prior manifest value.
     // CLI override applied below in both Recommended and Advanced paths.
@@ -2907,7 +2908,7 @@ export const initCommand = new Command('init')
         // overridden by --behavior/--no-behavior and the Advanced wizard. The rule file was
         // converged above to match it.
         behavior: behaviorEnabled,
-        // The tdd switch, carried from the prior manifest (`devflow tdd` is its only writer).
+        // The tdd switch, carried from the prior manifest (on under --reset).
         tdd: tddEnabled,
         // Resolved compliance state — seeded from prior manifest, overridden by CLI flags
         // and Advanced wizard selection. convergeComplianceArtifacts was called above.

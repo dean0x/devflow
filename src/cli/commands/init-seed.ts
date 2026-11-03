@@ -49,7 +49,8 @@ export interface FeatureSeed {
   behavior: boolean;
   /**
    * TDD switch — seeded from the manifest, on by default. Init keeps the machine's value
-   * (no wizard step, no init flag): `devflow tdd --enable|--disable` is the only writer.
+   * (no wizard step, no init flag), and `--reset` seeds the default (on), as it does for the
+   * other switches. `devflow tdd --enable|--disable` is the only command that sets it.
    */
   tdd: boolean;
   /**

@@ -136,8 +136,8 @@
  * Prune: after a clean build, every `.md` in dist/commands/ and dist/agents/ that
  * no host emitted is deleted (pruneOrphanCommands, pruneOrphanAgents), and the same
  * sweep runs recursively over dist/skills/git/references/ (pruneOrphanReferences)
- * and each of the three variant trees (pruneOrphanVariantTree). The workflow
- * trees, one per variant key, lose every folder no registered folder names
+ * and each variant tree of OFF_OUTPUT_DIRS (pruneOrphanVariantTree). The workflow
+ * trees, one per folder variant key (FOLDER_VARIANT_KEYS), lose every folder no registered folder names
  * (pruneOrphanWorkflowFolders) and every nested `.md` the build did not write
  * (pruneOrphanWorkflowFiles). Every sweep is keyed
  * on the files this build actually wrote. The compliance-off references sit inside

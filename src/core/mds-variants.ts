@@ -1669,8 +1669,8 @@ export const FOLDER_VARIANT_KEYS: readonly VariantKey[] = emittedVariantKeys(FOL
  *
  * Unlike a prompt, a folder is complete under every key (a byte copy of the on text
  * where no arm applies), so the key follows the switches alone and never depends on
- * which arms a file carries. The mapping is machineVariantKey's, with every arm assumed
- * present, so the key table has one owner.
+ * which arms a file carries. The mapping is machineVariantKey's, with the arms of
+ * FOLDER_ARMS (every axis except tdd, which no folder carries), so the key table has one owner.
  */
 export function workflowFolderKey(switches: VariantSwitches): VariantKey {
   return machineVariantKey(switches, FOLDER_ARMS);

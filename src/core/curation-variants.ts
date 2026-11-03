@@ -206,7 +206,11 @@ export function variantOffRelPath(key: OffVariantKey, kind: VariantKind, fileNam
 /**
  * The marker axes. Curation is listed first: it is the older axis and the first one a stray line is tested against.
  *
- * The one list every per-axis structure below is built from, so a new axis is one entry here.
+ * The per-axis records below are built from this list. A new axis also needs its own entries in
+ * VARIANT_KEYS and VARIANT_STATES (every combination), the off-tree constants and OFF_OUTPUT_DIRS,
+ * PRUNE_REASONS, MachineSwitchFeatures with machineSwitches, and FOLDER_ARMS. The type checker
+ * flags a missing per-axis record. A missing VARIANT_KEYS combination it does not flag: the table
+ * test over `2 ** VARIANT_AXES.length` rows pins that VARIANT_KEYS covers every combination.
  */
 export const VARIANT_AXES = ['curation', 'compliance', 'tdd'] as const;
 
@@ -659,8 +663,8 @@ export function describeVariantSplitError(error: VariantSplitError): string {
 /**
  * Repo-relative path of the variant manifest, written beside the variant trees.
  *
- * The installer reads it to learn which compiled prompts carry a curation arm and
- * which carry a compliance arm, so it never has to guess from the files it finds.
+ * The installer reads it to learn which axes each compiled prompt carries an arm on
+ * (curation, compliance, tdd), so it never has to guess from the files it finds.
  */
 export const VARIANT_MANIFEST_REL_PATH = 'dist/variant-axes.json';
 

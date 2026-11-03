@@ -51,7 +51,7 @@ export type MachineFeature = 'memory' | 'curation' | 'knowledge' | 'tdd';
  *
  * D-BEHAVIOR-OPT-IN: `features.behavior` in `~/.devflow/manifest.json` is the machine
  * switch for the behavior rule. It lives beside the {@link MachineFeature} switches and
- * shares their one write point, but it reads the opposite way: the three switches above
+ * shares their one write point, but it reads the opposite way: the four switches above
  * read an absent key as ON (every install predates them, and each gates a running
  * feature), while this one reads an absent key as OFF (no install has the rule until
  * `devflow init --behavior` or `devflow behavior --enable` asks for it). Only an
@@ -257,8 +257,8 @@ export async function readOptInFeature(devflowDir: string, feature: OptInMachine
  * D-NOOP-TOGGLE: a toggle to the value the manifest already records writes
  * nothing. The only bytes such a write could change are `updatedAt`, and that
  * field means "the manifest's content last changed", so a no-op must not move
- * it. This is the one write point of `devflow memory|curation|knowledge|behavior
- * --enable/--disable`, so the rule holds for all four at once.
+ * it. This is the one write point of `devflow memory|curation|knowledge|behavior|tdd
+ * --enable/--disable`, so the rule holds for all five at once.
  *
  * The read and the write run under the manifest lock (manifest-lock.ts), so the
  * heal in readManifest cannot write an older snapshot over this write. The wait is
