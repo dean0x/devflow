@@ -1125,7 +1125,8 @@ const trackedTestSources = (): ScannedFile[] =>
 // The build maps source to output in three ways:
 //   tsc            src/<x>.ts                        -> dist/<x>.js, <x>.d.ts and their .map files
 //   command/agent  src/assets/{commands,agents}/<n>.mds -> dist/{,<variant>/}{commands,agents}/<n>.md
-//                  (variant: curation-off, compliance-off or curation-compliance-off)
+//                  (variant: the off axes joined in the order curation, compliance, tdd, such as
+//                  curation-off, tdd-off or curation-compliance-tdd-off)
 //   manifest       scripts/build-mds.ts                -> dist/variant-axes.json
 //   references     the module of VARIANT_MODULES / MCP_CONTRACT_MODULE -> dist/skills/git/references/**
 //                  and, as a second output of the same module, dist/compliance-off/skills/git/references/**
@@ -1140,7 +1141,7 @@ const MAX_DIST_DEPTH = 12;
 const MAX_DIST_FILES = 5000;
 
 const COMPILED_TS = /^dist\/(.+?)(?:\.d\.ts\.map|\.d\.ts|\.js\.map|\.js)$/;
-const BUILT_HOST = /^dist\/(?:(?:curation-|compliance-|curation-compliance-)off\/)?(commands|agents)\/([^/]+)\.md$/;
+const BUILT_HOST = /^dist\/(?:(?:(?:curation|compliance|tdd)-)+off\/)?(commands|agents)\/([^/]+)\.md$/;
 const VARIANT_MANIFEST_SOURCE = 'scripts/build-mds.ts';
 
 /** The source file that the build makes `distRel` from, or null when none is known. */
@@ -1402,6 +1403,9 @@ describe('feature-word guard — dist mapping and probes (the same collector as 
     expect(distSourceOf('dist/curation-off/agents/code.md')).toBe('src/assets/agents/code.mds');
     expect(distSourceOf('dist/compliance-off/agents/code.md')).toBe('src/assets/agents/code.mds');
     expect(distSourceOf('dist/curation-compliance-off/commands/implement.md')).toBe('src/assets/commands/implement.mds');
+    expect(distSourceOf('dist/tdd-off/agents/code.md')).toBe('src/assets/agents/code.mds');
+    expect(distSourceOf('dist/curation-tdd-off/agents/code.md')).toBe('src/assets/agents/code.mds');
+    expect(distSourceOf('dist/curation-compliance-tdd-off/commands/implement.md')).toBe('src/assets/commands/implement.mds');
     expect(distSourceOf('dist/variant-axes.json')).toBe('scripts/build-mds.ts');
     expect(distSourceOf('dist/skills/git/references/decision-markers.md')).toBe('src/assets/mds/git/_references.mds');
     expect(distSourceOf('dist/skills/git/references/pr/create.md')).toBe('src/assets/mds/git/_pr.mds');
@@ -1426,6 +1430,8 @@ describe('feature-word guard — dist mapping and probes (the same collector as 
   it('known-bad probes: a file outside every module, or outside the two reference trees, has no source', () => {
     expect(distSourceOf(`${OFF_REFERENCES_PREFIX}stray.md`)).toBeNull();
     expect(distSourceOf('dist/curation-off/skills/git/references/pr/check-ci-status.md')).toBeNull();
+    expect(distSourceOf('dist/tdd-off/stray/code.md'), 'a tdd tree holds commands and agents only').toBeNull();
+    expect(distSourceOf('dist/tdd/agents/code.md'), 'a tree that is not an off tree has no source').toBeNull();
     expect(scanDist(`${OFF_REFERENCES_PREFIX}stray.md`, 'The learning step.\n')).toHaveLength(1);
   });
 

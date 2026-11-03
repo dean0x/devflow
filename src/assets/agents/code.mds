@@ -4,7 +4,9 @@ output-dir: dist/agents
 # edit runs on Refactor; the three hosts share _partials/_code.mds.
 # D-CODE-PRELOADS: Code preloads git, testing, test-driven-development, worktree-support,
 # apply-feature-knowledge and apply-decisions: implement writes tests first, and only the
-# implement and issue-fix spawns pass FEATURE_KNOWLEDGE.
+# implement and issue-fix spawns pass FEATURE_KNOWLEDGE. The test-driven-development preload
+# and the test-first wording of steps 3 and 4 sit in the tdd-on arm; the tdd-off build has
+# neither and keeps the test rules.
 # D-NO-RUNTIME-SKILLS: no Step 0 table, no DOMAIN input, no skill chosen by language or mode at run time.
 ---
 @import "./_partials/_code.mds" as code
@@ -16,7 +18,9 @@ effort: high
 skills:
   - devflow:git
   - devflow:testing
+<!-- tdd:on -->
   - devflow:test-driven-development
+<!-- tdd:end -->
   - devflow:worktree-support
   - devflow:apply-feature-knowledge
 <!-- curation:on -->
@@ -77,10 +81,18 @@ You receive from orchestrator:
 
 2. **Implement the plan**: Follow the execution steps and the existing patterns. Type everything. Use Result types if the codebase uses them.
 
+<!-- tdd:on -->
 3. **Write tests**: Write one failing test first for each acceptance-criterion behaviour (else each behaviour your steps' Must lines name). Add an edge-case test only for a named, concrete case. Always test trust boundaries, data loss, security and fail-closed paths.
+<!-- tdd:off -->
+3. **Write tests**: Write one test for each acceptance-criterion behaviour (else each behaviour your steps' Must lines name), with the code. Add an edge-case test only for a named, concrete case. Always test trust boundaries, data loss, security and fail-closed paths.
+<!-- tdd:end -->
 
 4. **Run tests**: Fix any failures; the tests you run must pass.
+<!-- tdd:on -->
    **Gate ownership:** Run the targeted tests for your change in its TDD cycle, plus one affected-tests run after your last edit. In a fix mode, compile and run the named failing or regression tests. Never the full suite. Batch fixes: one build check per batch, not per edit. Only Validate runs the full suite.
+<!-- tdd:off -->
+   **Gate ownership:** Run the targeted tests for your change, plus one affected-tests run after your last edit. In a fix mode, compile and run the named failing or regression tests. Never the full suite. Batch fixes: one build check per batch, not per edit. Only Validate runs the full suite.
+<!-- tdd:end -->
 
 5. {{code.commit_push()}}
 
