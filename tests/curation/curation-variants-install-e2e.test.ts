@@ -28,6 +28,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import {
+  ALL_SWITCHES_ON,
   machineVariantKey,
   parseVariantManifest,
   variantOffRelPath,
@@ -99,7 +100,7 @@ async function rosterOf(kind: Kind): Promise<string[]> {
 /** The built file an installed prompt must equal on a machine with these two switches (AC-27). */
 async function expectedFile(kind: Kind, file: string, machine: VariantSwitches): Promise<Buffer> {
   const host = (await builtHosts()).find(h => h.kind === kind && `${h.name}.md` === file);
-  const key = machineVariantKey(machine, host?.axes ?? { curation: false, compliance: false });
+  const key = machineVariantKey(machine, host?.axes ?? { curation: false, compliance: false, tdd: false });
   return fs.readFile(path.join(ROOT, key === 'on' ? path.join('dist', kind, file) : variantOffRelPath(key, kind, file)));
 }
 
@@ -107,9 +108,9 @@ async function expectedFile(kind: Kind, file: string, machine: VariantSwitches):
 async function variantOf(kind: Kind, file: string): Promise<Variant> {
   let installed: Buffer;
   try { installed = await fs.readFile(installedPrompt(kind, file)); } catch { return 'missing'; }
-  const { compliance } = await machineOf();
-  if (installed.equals(await expectedFile(kind, file, { curation: false, compliance }))) return 'off';
-  if (installed.equals(await expectedFile(kind, file, { curation: true, compliance }))) return 'on';
+  const machine = await machineOf();
+  if (installed.equals(await expectedFile(kind, file, { ...machine, curation: false }))) return 'off';
+  if (installed.equals(await expectedFile(kind, file, { ...machine, curation: true }))) return 'on';
   return 'other';
 }
 
@@ -154,14 +155,15 @@ async function manifestCuration(): Promise<boolean | undefined> {
   return manifest.features.learning;
 }
 
-/** Both switches as the manifest records them. A fresh machine has compliance off. */
+/** The switches as the manifest records them. A fresh machine has compliance off and tdd on. */
 async function machineOf(): Promise<VariantSwitches> {
   const manifest = JSON.parse(await fs.readFile(manifestFile(), 'utf-8')) as {
-    features: { learning?: boolean; curation?: boolean; compliance?: { enabled?: boolean } };
+    features: { learning?: boolean; curation?: boolean; compliance?: { enabled?: boolean }; tdd?: boolean };
   };
   return {
     curation: manifest.features.curation ?? manifest.features.learning ?? true,
     compliance: manifest.features.compliance?.enabled === true,
+    tdd: manifest.features.tdd !== false,
   };
 }
 
@@ -402,12 +404,12 @@ describe('a skill shadow follows the switch', () => {
 /** The fixed line every compliance-off command records when the repository requires evidence (AC-18). */
 const DEGRADED_LINE = 'compliance off on this machine; the repository requires evidence';
 
-/** The four machines: both switches, each way. */
+/** The four machines that keep tdd on: the other two switches, each way. */
 const MACHINES: readonly VariantSwitches[] = [
-  { curation: true, compliance: true },
-  { curation: false, compliance: true },
-  { curation: true, compliance: false },
-  { curation: false, compliance: false },
+  { curation: true, compliance: true, tdd: true },
+  { curation: false, compliance: true, tdd: true },
+  { curation: true, compliance: false, tdd: true },
+  { curation: false, compliance: false, tdd: true },
 ];
 
 const labelOf = (m: VariantSwitches): string => `curation ${m.curation ? 'on' : 'off'}, compliance ${m.compliance ? 'on' : 'off'}`;
@@ -546,7 +548,7 @@ describe('devflow compliance converges the install (AC-27, AC-28, AC-31)', () =>
     expect(out).toContain('posting steps remain installed until devflow init');
     expect(out).not.toContain('Compliance disabled');
     const plan = await fs.readFile(installedPrompt('commands', 'plan.md'));
-    expect(plan.equals(await expectedFile('commands', 'plan.md', { curation: true, compliance: true })), 'nothing was converged: the installed plan is still the compliance-on one').toBe(true);
+    expect(plan.equals(await expectedFile('commands', 'plan.md', ALL_SWITCHES_ON)), 'nothing was converged: the installed plan is still the compliance-on one').toBe(true);
     expect(JSON.parse(await fs.readFile(manifestFile(), 'utf-8')).features.compliance.enabled, 'the switch itself is still recorded').toBe(false);
   }, SCENARIO_TIMEOUT_MS);
 });

@@ -11,6 +11,7 @@ import {
   type PluginDefinition,
 } from '../src/core/plugins.js';
 import { installRuleFile, installAllRules, installViaFileCopy, validateRuleShadow, type Spinner } from '../src/targets/claude-code/installer.js';
+import { ALL_SWITCHES_ON } from '../src/core/curation-variants.js';
 import { listShadowedRules, hasRuleShadow, seedRuleShadow } from '../src/cli/commands/rules.js';
 import { COMPLIANCE_RULE_PLACEHOLDER } from '../src/core/compliance.js';
 import { testBackups } from './helpers.js';
@@ -324,8 +325,7 @@ describe('installViaFileCopy rules report', () => {
       await fs.mkdir(path.join(localClaudeDir, 'rules', 'devflow'), { recursive: true });
 
       const report = await installViaFileCopy({
-        curation: true,
-        compliance: true,
+        switches: ALL_SWITCHES_ON,
         plugins: [],
         claudeDir: localClaudeDir,
         devflowDir: localDevflowDir,
@@ -361,8 +361,7 @@ describe('installViaFileCopy rules report', () => {
       await fs.mkdir(path.join(localClaudeDir, 'rules', 'devflow'), { recursive: true });
 
       const report = await installViaFileCopy({
-        curation: true,
-        compliance: true,
+        switches: ALL_SWITCHES_ON,
         plugins: [],
         claudeDir: localClaudeDir,
         devflowDir: localDevflowDir,
@@ -395,8 +394,7 @@ describe('installViaFileCopy rules report', () => {
       await fs.mkdir(path.join(localClaudeDir, 'rules', 'devflow'), { recursive: true });
 
       const report = await installViaFileCopy({
-        curation: true,
-        compliance: true,
+        switches: ALL_SWITCHES_ON,
         plugins: [],
         claudeDir: localClaudeDir,
         devflowDir: localDevflowDir,
@@ -434,8 +432,7 @@ describe('installViaFileCopy rules report', () => {
 
       await expect(
         installViaFileCopy({
-          curation: true,
-          compliance: true,
+          switches: ALL_SWITCHES_ON,
           plugins: [],
           claudeDir: localClaudeDir,
           devflowDir: localDevflowDir,

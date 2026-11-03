@@ -31,6 +31,7 @@ import { describe, it, expect } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { agentSourceDirs, commandSourceDirs } from '../../src/core/assets.js';
+import { ALL_SWITCHES_ON, type VariantSwitches } from '../../src/core/curation-variants.js';
 import {
   DEVFLOW_PLUGINS,
   FEATURE_OWNED_SKILLS,
@@ -430,14 +431,14 @@ async function collectCurationOffInstalledRefs(): Promise<RawRef[]> {
   const files: string[] = [];
   const commandNames = new Set(DEVFLOW_PLUGINS.flatMap(p => p.commands.map(c => c.replace(/^\//, ''))));
   for (const name of commandNames) {
-    for (const dir of commandSourceDirs({ curation: false, compliance: true }, ROOT)) {
+    for (const dir of commandSourceDirs({ ...ALL_SWITCHES_ON, curation: false }, ROOT)) {
       const candidate = path.join(dir, `${name}.md`);
       if (await fs.access(candidate).then(() => true, () => false)) { files.push(candidate); break; }
     }
   }
   const agentNames = new Set(DEVFLOW_PLUGINS.flatMap(p => p.agents));
   for (const name of agentNames) {
-    for (const dir of agentSourceDirs(ROOT, { curation: false, compliance: true })) {
+    for (const dir of agentSourceDirs(ROOT, { ...ALL_SWITCHES_ON, curation: false })) {
       const candidate = path.join(dir, `${name}.md`);
       if (await fs.access(candidate).then(() => true, () => false)) { files.push(candidate); break; }
     }
@@ -506,13 +507,13 @@ describe('curation-gated skills (AC-148)', () => {
  * The reverse arm needs no off twin: an off prompt only ever drops text from the on variant, so
  * a `requires` entry the on corpus references stays referenced.
  */
-const COMPLIANCE_OFF_SWITCHES: ReadonlyArray<readonly [string, { curation: boolean; compliance: boolean }]> = [
-  ['compliance off', { curation: true, compliance: false }],
-  ['both off', { curation: false, compliance: false }],
+const COMPLIANCE_OFF_SWITCHES: ReadonlyArray<readonly [string, VariantSwitches]> = [
+  ['compliance off', { ...ALL_SWITCHES_ON, compliance: false }],
+  ['both off', { ...ALL_SWITCHES_ON, curation: false, compliance: false }],
 ];
 
 /** The command and agent files one plugin installs under the given switches, each from the first directory that holds it. */
-async function installedPromptFiles(plugin: PluginDefinition, switches: { curation: boolean; compliance: boolean }): Promise<string[]> {
+async function installedPromptFiles(plugin: PluginDefinition, switches: VariantSwitches): Promise<string[]> {
   const files: string[] = [];
   const pick = async (dirs: readonly string[], name: string): Promise<void> => {
     for (const dir of dirs) {
@@ -526,7 +527,7 @@ async function installedPromptFiles(plugin: PluginDefinition, switches: { curati
 }
 
 /** Named collector: references in the prompts of every plugin that no scope of its own covers, under the given switches. */
-async function collectOutOfScopeRefs(switches: { curation: boolean; compliance: boolean }): Promise<{ read: RawRef[]; dangling: string[] }> {
+async function collectOutOfScopeRefs(switches: VariantSwitches): Promise<{ read: RawRef[]; dangling: string[] }> {
   const read: RawRef[] = [];
   const dangling: string[] = [];
   for (const plugin of DEVFLOW_PLUGINS) {

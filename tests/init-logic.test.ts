@@ -53,6 +53,7 @@ import {
   DEVFLOW_GITIGNORE_BLOCK_WITHOUT_CLAUDEIGNORE,
 } from '../src/targets/claude-code/post-install.js';
 import { installViaFileCopy, type Spinner } from '../src/targets/claude-code/installer.js';
+import { ALL_SWITCHES_ON } from '../src/core/curation-variants.js';
 import { DEVFLOW_PLUGINS, buildAssetMaps, buildRulesMap, getAllAgentNames, getAllCommandNames } from '../src/core/plugins.js';
 import type { RunMigrationsResult } from '../src/core/migrations.js';
 import { LEGACY_SKILL_NAMES } from '../src/targets/claude-code/legacy.js';
@@ -1998,8 +1999,7 @@ describe('installViaFileCopy cleanup (isPartialInstall)', () => {
 
   it('full install (isPartialInstall=false) removes stale commands and agents', async () => {
     await installViaFileCopy({
-      curation: true,
-      compliance: true,
+      switches: ALL_SWITCHES_ON,
       plugins: [],
       claudeDir,
       devflowDir,
@@ -2019,8 +2019,7 @@ describe('installViaFileCopy cleanup (isPartialInstall)', () => {
     // 'stale' is absent from getAllCommandNames() and getAllAgentNames() — the
     // registry-diff sweep should remove it on every install shape, not just full installs.
     await installViaFileCopy({
-      curation: true,
-      compliance: true,
+      switches: ALL_SWITCHES_ON,
       plugins: [],
       claudeDir,
       devflowDir,
@@ -2070,8 +2069,7 @@ describe('init LEGACY_SKILL_NAMES cleanup pass', () => {
 
     const devflowDir = path.join(tmpDir, 'devflow');
     await installViaFileCopy({
-      curation: true,
-      compliance: true,
+      switches: ALL_SWITCHES_ON,
       plugins: [],
       claudeDir,
       devflowDir,
@@ -2103,8 +2101,7 @@ describe('init LEGACY_SKILL_NAMES cleanup pass', () => {
     const devflowDir = path.join(tmpDir, 'devflow');
     const backups = await testBackups(tmpDir, { claudeDir, devflowDir });
     await installViaFileCopy({
-      curation: true,
-      compliance: true,
+      switches: ALL_SWITCHES_ON,
       plugins: [],
       claudeDir,
       devflowDir,
@@ -2181,8 +2178,7 @@ describe('partial install registry-diff sweep correctness', () => {
 
     // --- Act ---
     await installViaFileCopy({
-      curation: true,
-      compliance: true,
+      switches: ALL_SWITCHES_ON,
       plugins: [],          // no plugins selected — pure partial install
       claudeDir,
       devflowDir,

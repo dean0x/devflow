@@ -18,6 +18,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { installViaFileCopy, type Spinner } from '../../src/targets/claude-code/installer.js';
+import { ALL_SWITCHES_ON } from '../../src/core/curation-variants.js';
 import { testBackups } from '../helpers.js';
 import {
   LANGUAGE_STAMPED_COMMANDS,
@@ -74,8 +75,7 @@ async function install(opts: {
 }): Promise<void> {
   const effective = opts.effectivePlugins ?? opts.plugins;
   await installViaFileCopy({
-    curation: opts.curation ?? true,
-    compliance: true,
+    switches: { ...ALL_SWITCHES_ON, curation: opts.curation ?? true },
     plugins: opts.plugins,
     effectivePlugins: effective,
     claudeDir,
@@ -378,7 +378,7 @@ describe('installViaFileCopy stamps the installed code-review from the effective
 describe('a curation-variant converge keeps the installed stamp', () => {
   const converge = (curation: boolean): ReturnType<typeof convergePromptVariants> =>
     convergePromptVariants({
-      claudeDir, switches: { curation, compliance: true }, plugins: [CORE, REVIEW, TYPESCRIPT, GO], warn: m => warnings.push(m),
+      claudeDir, switches: { ...ALL_SWITCHES_ON, curation }, plugins: [CORE, REVIEW, TYPESCRIPT, GO], warn: m => warnings.push(m),
     });
 
   it('switching the variant rewrites the file but carries the stamp across', async () => {

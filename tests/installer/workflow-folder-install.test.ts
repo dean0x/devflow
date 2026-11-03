@@ -21,11 +21,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { computeAssetsToRemove, enumerateDryRunExtras, formatDryRunPlan, removeAllDevFlow, removeSelectedPlugins, sweepDevflowNamespaces } from '../../src/cli/commands/uninstall.js';
 import { workflowFolderShadowRefusal } from '../../src/cli/commands/skills.js';
-import { VARIANT_KEYS } from '../../src/core/curation-variants.js';
-import { stampBuildId, workflowBuildId, workflowFolderFiles, workflowFolderKey, workflowFolderRelPath, workflowFoldersRootRelPath, type WorkflowFolder } from '../../src/core/mds-variants.js';
+import { ALL_SWITCHES_ON, type VariantSwitches } from '../../src/core/curation-variants.js';
+import { FOLDER_VARIANT_KEYS, stampBuildId, workflowBuildId, workflowFolderFiles, workflowFolderKey, workflowFolderRelPath, workflowFoldersRootRelPath, type WorkflowFolder } from '../../src/core/mds-variants.js';
 import { workflowFolderNames, type PluginDefinition } from '../../src/core/plugins.js';
 import { installViaFileCopy, type InstallReport, type Spinner } from '../../src/targets/claude-code/installer.js';
-import { convergeVariantAxes, type VariantMachineState } from '../../src/targets/claude-code/curation-install.js';
+import { convergeVariantAxes } from '../../src/targets/claude-code/curation-install.js';
 import { installWorkflowFolder, readWorkflowFolder } from '../../src/targets/claude-code/workflow-folder-install.js';
 import { assertTempHome } from '../setup/home-isolation.js';
 import { testBackups } from '../helpers.js';
@@ -68,11 +68,12 @@ const warn = (msg: string): void => { warnings.push(msg); };
 const folderDir = (dir: string = claudeDir, name: string = NAME): string => path.join(dir, 'skills', `devflow:${name}`);
 const exists = (file: string): Promise<boolean> => fs.lstat(file).then(() => true, () => false);
 
-type Switches = { curation: boolean; compliance: boolean };
-const ON: Switches = { curation: true, compliance: true };
-const COMPLIANCE_OFF: Switches = { curation: true, compliance: false };
-const CURATION_OFF: Switches = { curation: false, compliance: true };
-const BOTH_OFF: Switches = { curation: false, compliance: false };
+type Switches = VariantSwitches;
+const ON: Switches = ALL_SWITCHES_ON;
+const COMPLIANCE_OFF: Switches = { ...ALL_SWITCHES_ON, compliance: false };
+const CURATION_OFF: Switches = { ...ALL_SWITCHES_ON, curation: false };
+const BOTH_OFF: Switches = { ...ALL_SWITCHES_ON, curation: false, compliance: false };
+const TDD_OFF: Switches = { ...ALL_SWITCHES_ON, tdd: false };
 
 async function walk(dir: string, prefix = ''): Promise<string[]> {
   const out: string[] = [];
@@ -101,7 +102,7 @@ async function fileMap(dir: string): Promise<Record<string, string>> {
 
 /** The build tree of one key, as the build would have written it for a folder (the fixture by default): the id is the real one. */
 async function writeBuiltTrees(root: string, folder: WorkflowFolder = FIXTURE_FOLDER): Promise<void> {
-  for (const key of VARIANT_KEYS) {
+  for (const key of FOLDER_VARIANT_KEYS) {
     const bodies = workflowFolderFiles(folder, key).map(file => ({ file, body: `# ${file}\n\nbuilt for ${key}\n` }));
     const id = workflowBuildId(bodies);
     for (const { file, body } of bodies) {
@@ -141,7 +142,7 @@ async function install(
 ): Promise<InstallReport> {
   const plugins = opts.plugins ?? [OWNER];
   return installViaFileCopy({
-    ...switches,
+    switches,
     plugins,
     effectivePlugins: opts.effectivePlugins ?? plugins,
     claudeDir: opts.claude ?? claudeDir,
@@ -157,15 +158,13 @@ async function install(
   });
 }
 
-function machine(switches: Switches): VariantMachineState {
-  return { features: { curation: switches.curation, compliance: { enabled: switches.compliance, frameworks: [] }, rules: false } };
-}
-
 async function converge(switches: Switches, plugins: PluginDefinition[] = [OWNER]) {
   return convergeVariantAxes({
     claudeDir,
     devflowDir,
-    manifest: machine(switches),
+    switches,
+    frameworks: [],
+    rulesEnabled: false,
     plugins,
     warn,
     workflowFolders: [FIXTURE_FOLDER],
@@ -176,7 +175,7 @@ async function converge(switches: Switches, plugins: PluginDefinition[] = [OWNER
 
 /** A fresh install of one state into its own directories: what a converge must end at. */
 async function freshFolder(switches: Switches): Promise<Record<string, string>> {
-  const dir = path.join(tmp, `fresh-${switches.curation}-${switches.compliance}`);
+  const dir = path.join(tmp, `fresh-${switches.curation}-${switches.compliance}-${switches.tdd}`);
   await fs.mkdir(path.join(dir, 'home'), { recursive: true });
   await install(switches, { claude: path.join(dir, 'claude'), home: path.join(dir, 'home') });
   return fileMap(folderDir(path.join(dir, 'claude')));
@@ -205,6 +204,7 @@ describe('the install takes the folder of the exact key (TP-20)', () => {
     ['curation off', CURATION_OFF],
     ['compliance off', COMPLIANCE_OFF],
     ['both off', BOTH_OFF],
+    ['tdd off (a folder has no tdd arm)', TDD_OFF],
   ] as const)('%s: the installed folder is the files of that key and no others', async (_label, switches) => {
     await install(switches);
     const built = await builtFolder(switches);
@@ -296,7 +296,7 @@ describe('the install takes the folder of the exact key (TP-20)', () => {
 
   it('with no folder in the registry the workflow is an ordinary command and the install has no folder step', async () => {
     const base = {
-      ...ON,
+      switches: ON,
       claudeDir,
       devflowDir,
       skillsMap: new Map<string, string>(),

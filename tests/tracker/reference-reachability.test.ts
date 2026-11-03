@@ -975,8 +975,8 @@ describe('PR-host references: the merged step list is executable from what one s
 
 /** The two machine states that install compliance-off prompts: curation on and curation off, compliance off in both. */
 const OFF_MACHINES: readonly VariantSwitches[] = [
-  { curation: true, compliance: false },
-  { curation: false, compliance: false },
+  { curation: true, compliance: false, tdd: true },
+  { curation: false, compliance: false, tdd: true },
 ];
 
 /** A built compliance-off prompt: its repo-relative path and its text. */

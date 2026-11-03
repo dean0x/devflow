@@ -93,6 +93,7 @@ import { MIN_COMPILED_PROMPTS, RETIRED_INLINE_EXPANSION, ROOT, SANCTIONED_RESOLU
 import { seedOnce } from './level-guard-helpers.js'
 import { DEVFLOW_PLUGINS, buildScopedSkillsMap, getAllAgentNames } from '../../src/core/plugins.js'
 import { installViaFileCopy } from '../../src/targets/claude-code/installer.js'
+import { ALL_SWITCHES_ON } from '../../src/core/curation-variants.js'
 import { getClaudeDirectory } from '../../src/targets/claude-code/claude-paths.js'
 
 const countOf = (text: string, needle: string): number => text.split(needle).length - 1
@@ -630,7 +631,7 @@ describe('no prompt reaches the Claude directory outside the CLAUDE_CONFIG_DIR r
       const plugins = ['devflow-core-skills', 'devflow-code-review', 'devflow-typescript']
         .map(name => DEVFLOW_PLUGINS.find(p => p.name === name)!)
       await installViaFileCopy({
-        plugins, claudeDir, devflowDir, curation: true, compliance: true,
+        plugins, claudeDir, devflowDir, switches: ALL_SWITCHES_ON,
         skillsMap: buildScopedSkillsMap(plugins), agentsMap: new Map(), isPartialInstall: false,
         spinner: { start() {}, stop() {}, message() {} },
         backups: await testBackups(claudeDir, { claudeDir, devflowDir }),

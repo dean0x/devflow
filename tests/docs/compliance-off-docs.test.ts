@@ -312,7 +312,7 @@ const OFF_POLICY_LINE = 'TRACEABILITY: DEGRADED (compliance off on this machine;
 
 /** The four values of the `Posting:` line, as the code produces them. */
 function postingValues(): string[] {
-  const settled = { curation: true, compliance: true }
+  const settled = { curation: true, compliance: true, tdd: true }
   return [
     postingStatus(settled, true),
     postingStatus({ ...settled, compliance: false }, false),

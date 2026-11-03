@@ -3465,13 +3465,15 @@ describe('git agent: the compliance-off build carries no posting operation (AC-1
     expect(scrubSectionOf(off)).toBe(scrub);
   });
 
-  it('carries that scrub section in every Git agent file a machine installs, whatever its two switches (AC-45)', () => {
+  it('carries that scrub section in every Git agent file a machine installs, whatever its three switches (AC-45)', () => {
     const manifestText = readFileSync(path.join(ROOT, ...VARIANT_MANIFEST_REL_PATH.split('/')), 'utf-8');
     const parsed = parseVariantManifest(manifestText);
     if (!parsed.ok) throw new Error(`${VARIANT_MANIFEST_REL_PATH} does not parse: run \`npm run build:mds\``);
     const host = parsed.value.find(entry => entry.kind === 'agents' && entry.name === 'git');
     if (host === undefined) throw new Error('the variant manifest has no Git agent host');
-    const machines: VariantSwitches[] = [true, false].flatMap(curation => [true, false].map(compliance => ({ curation, compliance })));
+    const machines: VariantSwitches[] = [true, false].flatMap(curation =>
+      [true, false].flatMap(compliance => [true, false].map(tdd => ({ curation, compliance, tdd }))),
+    );
     const installed = new Set(
       machines.map(machine => {
         const key = machineVariantKey(machine, host.axes);

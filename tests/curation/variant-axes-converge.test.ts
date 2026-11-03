@@ -1,11 +1,11 @@
 /**
- * The one converge for both axes (#648, AC-27, AC-28, AC-29), against temp trees.
+ * The one converge for every axis (#648, AC-27, AC-28, AC-29), against temp trees.
  *
- * `convergeVariantAxes` makes the installed commands, agents and skills match the machine's curation
- * and compliance switches, and answers the fail-closed question of a compliance-off machine: does an
+ * `convergeVariantAxes` makes the installed commands, agents and skills match the machine's curation,
+ * compliance and tdd switches, and answers the fail-closed question of a compliance-off machine: does an
  * installed prompt still post? These tests drive it, and the toggle helper that wraps it, with a temp
  * Claude dir, a temp devflow dir and a temp package root that holds one host of each arm shape, so the
- * file each of the four machines must install is known byte for byte. Nothing touches the real HOME
+ * file each of the eight machines must install is known byte for byte. Nothing touches the real HOME
  * or the real `dist/`.
  */
 
@@ -23,11 +23,12 @@ import {
   variantToggleSkew,
   type ConvergeVariantAxesResult,
 } from '../../src/targets/claude-code/curation-install.js';
-import { bothOffDir, complianceOffDir, curationOffDir, skillsDir } from '../../src/core/assets.js';
+import { bothOffDir, complianceOffDir, skillsDir } from '../../src/core/assets.js';
+import type { VariantSwitches } from '../../src/core/curation-variants.js';
 import { postingStatus, readInstalledVariants } from '../../src/core/installed-variants.js';
 import { readManifest } from '../../src/core/manifest.js';
 import { getManifestLockPath } from '../../src/core/manifest-lock.js';
-import { DEVFLOW_PLUGINS, type PluginDefinition } from '../../src/core/plugins.js';
+import { DEVFLOW_PLUGINS, skillsOf, type PluginDefinition } from '../../src/core/plugins.js';
 import { assertTempHome } from '../setup/home-isolation.js';
 import { testBackups } from '../helpers.js';
 
@@ -53,6 +54,8 @@ vi.mock('../../src/core/manifest-lock.js', async importOriginal => {
 
 const SKILL = 'apply-decisions';
 const SKILL_DIR = 'devflow:apply-decisions';
+const TDD_SKILL = 'test-driven-development';
+const TDD_SKILL_DIR = 'devflow:test-driven-development';
 
 let tmp: string;
 let claudeDir: string;
@@ -78,76 +81,125 @@ async function exists(file: string): Promise<boolean> {
 const installedCommand = (name: string): string => path.join(claudeDir, 'commands', 'devflow', `${name}.md`);
 const installedAgent = (name: string): string => path.join(claudeDir, 'agents', 'devflow', `${name}.md`);
 
-/** One machine: the two switches. */
-interface Machine { readonly curation: boolean; readonly compliance: boolean }
+/** One machine: the switches. The tdd switch is on when a test leaves it out. */
+interface Machine { readonly curation: boolean; readonly compliance: boolean; readonly tdd?: boolean }
 
-/** The four machines, in the order the matrix walks them. */
+/** The eight machines, in the order the matrix walks them. */
 const MACHINES: readonly Machine[] = [
-  { curation: true, compliance: true },
-  { curation: false, compliance: true },
-  { curation: true, compliance: false },
-  { curation: false, compliance: false },
+  { curation: true, compliance: true, tdd: true },
+  { curation: false, compliance: true, tdd: true },
+  { curation: true, compliance: false, tdd: true },
+  { curation: false, compliance: false, tdd: true },
+  { curation: true, compliance: true, tdd: false },
+  { curation: false, compliance: true, tdd: false },
+  { curation: true, compliance: false, tdd: false },
+  { curation: false, compliance: false, tdd: false },
 ];
 
-const label = (m: Machine): string => `curation ${m.curation ? 'on' : 'off'}, compliance ${m.compliance ? 'on' : 'off'}`;
+const switchesOf = (m: Machine): VariantSwitches => ({ curation: m.curation, compliance: m.compliance, tdd: m.tdd ?? true });
+
+const label = (m: Machine): string =>
+  `curation ${m.curation ? 'on' : 'off'}, compliance ${m.compliance ? 'on' : 'off'}, tdd ${(m.tdd ?? true) ? 'on' : 'off'}`;
+
+/** The variant name of each set of turned-off axes, spelled out by hand: c curation, p compliance, t tdd. */
+const VARIANT_OF_OFF_SET: Readonly<Record<string, string>> = {
+  '': 'ON',
+  c: 'CURATION-OFF',
+  p: 'COMPLIANCE-OFF',
+  cp: 'BOTH-OFF',
+  t: 'TDD-OFF',
+  ct: 'CURATION-TDD-OFF',
+  pt: 'COMPLIANCE-TDD-OFF',
+  cpt: 'ALL-OFF',
+};
+
+/** The variant a host with arms on `arms` (letters c, p, t) is installed as on a machine. */
+function variantOf(m: Machine, arms: string): string {
+  const off = [
+    !m.curation && arms.includes('c') ? 'c' : '',
+    !m.compliance && arms.includes('p') ? 'p' : '',
+    !(m.tdd ?? true) && arms.includes('t') ? 't' : '',
+  ].join('');
+  return VARIANT_OF_OFF_SET[off];
+}
+
+/** Where each variant of a host lives: its key's tree, or the normal tree for ON. */
+const TREE_OF_VARIANT: Readonly<Record<string, string>> = {
+  'CURATION-OFF': 'curation-off',
+  'COMPLIANCE-OFF': 'compliance-off',
+  'BOTH-OFF': 'curation-compliance-off',
+  'TDD-OFF': 'tdd-off',
+  'CURATION-TDD-OFF': 'curation-tdd-off',
+  'COMPLIANCE-TDD-OFF': 'compliance-tdd-off',
+  'ALL-OFF': 'curation-compliance-tdd-off',
+};
+
+/** The arms (letters) of each host with an arm, and the axes each variant tree turns off. */
+const HOST_ARMS: ReadonlyArray<readonly [kind: 'commands' | 'agents', name: string, arms: string]> = [
+  ['commands', 'plan', 'cpt'],
+  ['commands', 'release', 'p'],
+  ['commands', 'implement', 'c'],
+  ['agents', 'code', 'c'],
+  ['commands', 'debug', 't'],
+];
+
+const AXES_OF_VARIANT: Readonly<Record<string, string>> = {
+  'CURATION-OFF': 'c', 'COMPLIANCE-OFF': 'p', 'BOTH-OFF': 'cp', 'TDD-OFF': 't',
+  'CURATION-TDD-OFF': 'ct', 'COMPLIANCE-TDD-OFF': 'pt', 'ALL-OFF': 'cpt',
+};
 
 /**
  * A package root with one host of each arm shape:
- *   - commands/plan: both arms (four files);
+ *   - commands/plan: all three arms (eight files);
  *   - commands/release: a compliance arm only (on and compliance-off);
  *   - commands/implement and agents/code: a curation arm only;
+ *   - commands/debug: a tdd arm only (on and tdd-off);
  *   - commands/no-arm: no arm.
  * and the build manifest that names the arms.
  */
 async function seedPackage(): Promise<void> {
-  await write(path.join(pkg, 'dist', 'commands', 'plan.md'), 'plan ON\n');
-  await write(path.join(curationOffDir('commands', pkg), 'plan.md'), 'plan CURATION-OFF\n');
-  await write(path.join(complianceOffDir('commands', pkg), 'plan.md'), 'plan COMPLIANCE-OFF\n');
-  await write(path.join(bothOffDir('commands', pkg), 'plan.md'), 'plan BOTH-OFF\n');
-  await write(path.join(pkg, 'dist', 'commands', 'release.md'), 'release ON\n');
-  await write(path.join(complianceOffDir('commands', pkg), 'release.md'), 'release COMPLIANCE-OFF\n');
-  await write(path.join(pkg, 'dist', 'commands', 'implement.md'), 'implement ON\n');
-  await write(path.join(curationOffDir('commands', pkg), 'implement.md'), 'implement CURATION-OFF\n');
+  const hosts: Record<string, Record<'curation' | 'compliance' | 'tdd', boolean>> = {};
+  for (const [kind, name, arms] of HOST_ARMS) {
+    await write(path.join(pkg, 'dist', kind, `${name}.md`), `${name} ON\n`);
+    for (const [variant, tree] of Object.entries(TREE_OF_VARIANT)) {
+      if ([...AXES_OF_VARIANT[variant]].every(letter => arms.includes(letter))) {
+        await write(path.join(pkg, 'dist', tree, kind, `${name}.md`), `${name} ${variant}\n`);
+      }
+    }
+    hosts[`${kind}/${name}`] = { curation: arms.includes('c'), compliance: arms.includes('p'), tdd: arms.includes('t') };
+  }
   await write(path.join(pkg, 'dist', 'commands', 'no-arm.md'), 'no-arm\n');
-  await write(path.join(pkg, 'dist', 'agents', 'code.md'), 'code ON\n');
-  await write(path.join(curationOffDir('agents', pkg), 'code.md'), 'code CURATION-OFF\n');
   await write(path.join(skillsDir(pkg), SKILL, 'SKILL.md'), 'apply-decisions of the temp package\n');
-  await write(path.join(pkg, 'dist', 'variant-axes.json'), JSON.stringify({
-    version: 1,
-    hosts: {
-      'agents/code': { curation: true, compliance: false },
-      'commands/implement': { curation: true, compliance: false },
-      'commands/plan': { curation: true, compliance: true },
-      'commands/release': { curation: false, compliance: true },
-    },
-  }));
+  await write(path.join(skillsDir(pkg), TDD_SKILL, 'SKILL.md'), 'test-driven-development of the temp package\n');
+  await write(path.join(pkg, 'dist', 'variant-axes.json'), JSON.stringify({ version: 1, hosts }));
 }
 
 /** What each installed prompt holds on a machine. */
 function expectedFiles(m: Machine): Record<string, string> {
-  const plan = m.curation ? (m.compliance ? 'plan ON' : 'plan COMPLIANCE-OFF') : (m.compliance ? 'plan CURATION-OFF' : 'plan BOTH-OFF');
-  return {
-    [installedCommand('plan')]: `${plan}\n`,
-    [installedCommand('release')]: `${m.compliance ? 'release ON' : 'release COMPLIANCE-OFF'}\n`,
-    [installedCommand('implement')]: `${m.curation ? 'implement ON' : 'implement CURATION-OFF'}\n`,
-    [installedCommand('no-arm')]: 'no-arm\n',
-    [installedAgent('code')]: `${m.curation ? 'code ON' : 'code CURATION-OFF'}\n`,
-  };
+  const files: Record<string, string> = { [installedCommand('no-arm')]: 'no-arm\n' };
+  for (const [kind, name, arms] of HOST_ARMS) {
+    const installed = kind === 'commands' ? installedCommand(name) : installedAgent(name);
+    files[installed] = `${name} ${variantOf(m, arms)}\n`;
+  }
+  return files;
 }
 
 async function installAs(m: Machine): Promise<void> {
   for (const [file, text] of Object.entries(expectedFiles(m))) await write(file, text);
 }
 
-const stateOf = (m: Machine, rules = false) => ({
-  features: { curation: m.curation, compliance: { enabled: m.compliance, frameworks: [] as string[] }, rules },
+/** The machine part of a converge call: the switches, the compliance frameworks and the rules flag. */
+const machineOf = (m: Machine, rules = false) => ({
+  switches: switchesOf(m),
+  frameworks: [] as string[],
+  rulesEnabled: rules,
 });
 
 const backupsOf = () => testBackups(tmp, { claudeDir, devflowDir });
 
 async function converge(m: Machine, plugins: readonly PluginDefinition[] = FULL_SELECTION): Promise<ConvergeVariantAxesResult> {
   return convergeVariantAxes({
-    claudeDir, devflowDir, manifest: stateOf(m), plugins, warn, packageRoot: pkg, backups: await backupsOf(),
+    claudeDir, devflowDir, ...machineOf(m), plugins, warn, packageRoot: pkg, backups: await backupsOf(),
   });
 }
 
@@ -191,7 +243,7 @@ describe('convergeVariantAxes: every machine ends on its own files (AC-27)', () 
 
     expect(second.commandsRewritten).toEqual([]);
     expect(second.agentsRewritten).toEqual([]);
-    expect(second.unchanged).toBe(4);
+    expect(second.unchanged).toBe(5);
   });
 
   it('a both-off machine takes the both-off file for a host with both arms, never the curation-off file', async () => {
@@ -316,7 +368,7 @@ describe('convergeVariantAxes: a compliance-off machine fails closed (AC-28)', (
     await installAs({ curation: true, compliance: true });
 
     const result = await convergeVariantAxes({
-      claudeDir: 'relative/claude', devflowDir, manifest: stateOf(OFF), plugins: FULL_SELECTION, warn, packageRoot: pkg,
+      claudeDir: 'relative/claude', devflowDir, ...machineOf(OFF), plugins: FULL_SELECTION, warn, packageRoot: pkg,
       backups: await backupsOf(),
     });
 
@@ -331,7 +383,7 @@ describe('convergeVariantAxes: a compliance-off machine fails closed (AC-28)', (
     await fs.rm(complianceOffDir('commands', pkg), { recursive: true });
     await fs.rm(bothOffDir('commands', pkg), { recursive: true });
 
-    const prompts = await convergePromptVariants({ claudeDir, switches: OFF, plugins: FULL_SELECTION, warn, packageRoot: pkg });
+    const prompts = await convergePromptVariants({ claudeDir, switches: switchesOf(OFF), plugins: FULL_SELECTION, warn, packageRoot: pkg });
 
     expect(prompts.posting.kind).toBe('left');
   });
@@ -485,7 +537,7 @@ describe('applyVariantToggle on the compliance axis (AC-27, AC-28, AC-29)', () =
     if (outcome.kind !== 'converged') return;
     expect(outcome.result.converged, warnings.join('\n')).toBe(true);
     expect(await read(installedCommand('release'))).toBe('release COMPLIANCE-OFF\n');
-    expect(readInstalledVariants((await readManifest(devflowDir))?.installedVariants)).toEqual({ curation: true, compliance: false });
+    expect(readInstalledVariants((await readManifest(devflowDir))?.installedVariants)).toEqual({ curation: true, compliance: false, tdd: true });
     expect(await exists(getManifestLockPath(devflowDir)), 'the record releases the manifest lock').toBe(false);
   });
 
@@ -505,7 +557,7 @@ describe('applyVariantToggle on the compliance axis (AC-27, AC-28, AC-29)', () =
     }
     expect(await read(installedCommand('release'))).toBe('release COMPLIANCE-OFF\n');
     expect(warnings.some(w => w.includes('lock could not be held'))).toBe(true);
-    expect(readInstalledVariants((await readManifest(devflowDir))?.installedVariants)).toEqual({ curation: true, compliance: true });
+    expect(readInstalledVariants((await readManifest(devflowDir))?.installedVariants)).toEqual({ curation: true, compliance: true, tdd: true });
   });
 
   it('known-bad probe: switches changed during the run remove the old record so the status reads unknown, and warn, and the converge stands', async () => {
@@ -535,7 +587,7 @@ describe('applyVariantToggle on the compliance axis (AC-27, AC-28, AC-29)', () =
 
     expect(outcome.kind).toBe('converged');
     expect(await read(installedCommand('release'))).toBe('release ON\n');
-    expect(readInstalledVariants((await readManifest(devflowDir))?.installedVariants)).toEqual({ curation: true, compliance: true });
+    expect(readInstalledVariants((await readManifest(devflowDir))?.installedVariants)).toEqual({ curation: true, compliance: true, tdd: true });
   });
 
   it('the record is written only after a clean converge: an unclean one leaves it as it stood', async () => {
@@ -548,7 +600,7 @@ describe('applyVariantToggle on the compliance axis (AC-27, AC-28, AC-29)', () =
     expect(outcome.kind).toBe('converged');
     if (outcome.kind !== 'converged') return;
     expect(outcome.result.posting.kind).toBe('left');
-    expect(readInstalledVariants((await readManifest(devflowDir))?.installedVariants)).toEqual({ curation: true, compliance: true });
+    expect(readInstalledVariants((await readManifest(devflowDir))?.installedVariants)).toEqual({ curation: true, compliance: true, tdd: true });
   });
 
   it('a toggle to the value already installed writes the manifest not at all', async () => {
@@ -568,7 +620,7 @@ describe('applyVariantToggle on the compliance axis (AC-27, AC-28, AC-29)', () =
 
     await toggle(false);
 
-    expect(readInstalledVariants((await readManifest(devflowDir))?.installedVariants)).toEqual({ curation: true, compliance: false });
+    expect(readInstalledVariants((await readManifest(devflowDir))?.installedVariants)).toEqual({ curation: true, compliance: false, tdd: true });
   });
 
   it('a version skew converges nothing and a compliance-off skew names the posting steps', async () => {
@@ -604,5 +656,191 @@ describe('applyVariantToggle on the compliance axis (AC-27, AC-28, AC-29)', () =
 
     expect(await read(installedCommand('plan'))).toBe('plan BOTH-OFF\n');
     expect(await read(installedCommand('implement'))).toBe('implement CURATION-OFF\n');
+  });
+});
+
+describe('convergeVariantAxes: the tdd axis', () => {
+  const tddSkillDir = (): string => path.join(claudeDir, 'skills', TDD_SKILL_DIR);
+  const curationSkillDir = (): string => path.join(claudeDir, 'skills', SKILL_DIR);
+  const TDD_OFF: Machine = { curation: true, compliance: true, tdd: false };
+
+  it('removes the test-driven-development skill with tdd off, restores it with tdd on, and leaves the apply-decisions skill alone', async () => {
+    await installAs({ curation: true, compliance: true });
+
+    const on = await converge({ curation: true, compliance: true });
+    expect(on.tddSkill).toBe('installed');
+    expect(await read(path.join(tddSkillDir(), 'SKILL.md'))).toBe('test-driven-development of the temp package\n');
+
+    const off = await converge(TDD_OFF);
+    expect(off.tddSkill).toBe('removed');
+    expect(off.skill, 'the curation skill is not touched by the tdd switch').toBe('unchanged');
+    expect(await exists(tddSkillDir())).toBe(false);
+    expect(await exists(curationSkillDir())).toBe(true);
+
+    const back = await converge({ curation: true, compliance: true });
+    expect(back.tddSkill).toBe('installed');
+    expect(await exists(tddSkillDir())).toBe(true);
+    expect(back.converged, warnings.join('\n')).toBe(true);
+    expect(warnings).toEqual([]);
+  });
+
+  it('a second run with tdd off removes nothing and reports the skill unchanged', async () => {
+    await installAs(TDD_OFF);
+    await converge({ curation: true, compliance: true });
+    expect((await converge(TDD_OFF)).tddSkill).toBe('removed');
+
+    const second = await converge(TDD_OFF);
+
+    expect(second.tddSkill).toBe('unchanged');
+    expect(second.converged).toBe(true);
+  });
+
+  it('curation off removes the curation skill and keeps the tdd skill', async () => {
+    await installAs({ curation: true, compliance: true });
+    await converge({ curation: true, compliance: true });
+
+    const result = await converge({ curation: false, compliance: true });
+
+    expect(result.skill).toBe('removed');
+    expect(result.tddSkill).toBe('unchanged');
+    expect(await exists(curationSkillDir())).toBe(false);
+    expect(await exists(tddSkillDir())).toBe(true);
+  });
+
+  it('a selection without the skill never gets it on enable', async () => {
+    const without = DEVFLOW_PLUGINS.find(plugin => !skillsOf([plugin]).has(TDD_SKILL));
+    if (without === undefined) throw new Error('the registry has no plugin without test-driven-development');
+
+    const result = await converge({ curation: true, compliance: true }, [without]);
+
+    expect(result.tddSkill).toBe('not-selected');
+    expect(await exists(tddSkillDir())).toBe(false);
+  });
+
+  it('known-bad probe: a tdd skill that cannot be installed fails the converge and does not stop the curation skill', async () => {
+    await fs.rm(path.join(skillsDir(pkg), TDD_SKILL), { recursive: true });
+
+    const result = await converge({ curation: true, compliance: true });
+
+    expect(result.tddSkill).toBe('failed');
+    expect(result.skill, 'a failure on one skill must not skip the next').toBe('installed');
+    expect(result.converged).toBe(false);
+    expect(warnings.some(w => w.startsWith('tdd variants:') && w.includes('test-driven-development'))).toBe(true);
+  });
+
+  it('every tdd machine takes the tdd-off file of a tdd-armed host, and the curation or compliance file where those are off too', async () => {
+    await installAs({ curation: true, compliance: true });
+
+    await converge({ curation: false, compliance: false, tdd: false });
+    expect(await read(installedCommand('plan'))).toBe('plan ALL-OFF\n');
+    expect(await read(installedCommand('debug'))).toBe('debug TDD-OFF\n');
+    expect(await read(installedCommand('release'))).toBe('release COMPLIANCE-OFF\n');
+    expect(await read(installedCommand('implement'))).toBe('implement CURATION-OFF\n');
+    expect(await read(installedAgent('code'))).toBe('code CURATION-OFF\n');
+  });
+
+  it('known-bad probe: the tdd-off file is not the on file (the matrix is not vacuous)', async () => {
+    await installAs({ curation: true, compliance: true });
+
+    await converge(TDD_OFF);
+
+    expect(await read(installedCommand('debug'))).not.toBe('debug ON\n');
+    expect(await read(installedCommand('no-arm'))).toBe('no-arm\n');
+  });
+});
+
+describe('applyVariantToggle on the tdd axis', () => {
+  const TDD_OFF_MACHINE: Machine = { curation: true, compliance: true, tdd: false };
+
+  async function writeInstallManifest(features: Record<string, unknown>, extra: Record<string, unknown> = {}): Promise<void> {
+    await write(path.join(devflowDir, 'manifest.json'), JSON.stringify({
+      version: '3.3.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: {
+        ambient: false, memory: false, hud: false, knowledge: true, curation: true, learning: true, rules: false,
+        compliance: { enabled: true, frameworks: [] },
+        ...features,
+      },
+      installedAt: '2026-10-10T00:00:00.000Z',
+      updatedAt: '2026-10-10T00:00:00.000Z',
+      ...extra,
+    }));
+  }
+
+  const toggle = async (enabled: boolean) =>
+    applyVariantToggle({
+      claudeDir, devflowDir, axis: 'tdd', enabled, runningVersion: '3.3.0', warn, packageRoot: pkg, backups: await backupsOf(),
+    });
+
+  it('tdd off converges the tdd-armed prompts, removes the skill and records all three switches', async () => {
+    await writeInstallManifest({ tdd: false });
+    await installAs({ curation: true, compliance: true });
+
+    const outcome = await toggle(false);
+
+    expect(outcome.kind).toBe('converged');
+    if (outcome.kind !== 'converged') return;
+    expect(outcome.result.converged, warnings.join('\n')).toBe(true);
+    expect(await read(installedCommand('debug'))).toBe('debug TDD-OFF\n');
+    expect(await read(installedCommand('plan'))).toBe('plan TDD-OFF\n');
+    expect(readInstalledVariants((await readManifest(devflowDir))?.installedVariants)).toEqual({ curation: true, compliance: true, tdd: false });
+  });
+
+  it('the other axes come from the manifest, so a compliance-off machine takes the compliance and tdd file', async () => {
+    await writeInstallManifest({ tdd: false, compliance: { enabled: false, frameworks: [] } });
+    await installAs({ curation: true, compliance: false });
+
+    await toggle(false);
+
+    expect(await read(installedCommand('plan'))).toBe('plan COMPLIANCE-TDD-OFF\n');
+    expect(await read(installedCommand('release'))).toBe('release COMPLIANCE-OFF\n');
+    expect(await read(installedCommand('debug'))).toBe('debug TDD-OFF\n');
+  });
+
+  it('tdd on restores the on files', async () => {
+    await writeInstallManifest({ tdd: true }, { installedVariants: { curation: true, compliance: true, tdd: false } });
+    await installAs(TDD_OFF_MACHINE);
+
+    const outcome = await toggle(true);
+
+    expect(outcome.kind).toBe('converged');
+    expect(await read(installedCommand('debug'))).toBe('debug ON\n');
+    expect(readInstalledVariants((await readManifest(devflowDir))?.installedVariants)).toEqual({ curation: true, compliance: true, tdd: true });
+  });
+
+  it('a manifest with no tdd feature reads as tdd on: a curation toggle leaves the tdd files on', async () => {
+    await writeInstallManifest({});
+    await installAs({ curation: true, compliance: true });
+
+    await applyVariantToggle({
+      claudeDir, devflowDir, axis: 'curation', enabled: false, runningVersion: '3.3.0', warn, packageRoot: pkg, backups: await backupsOf(),
+    });
+
+    expect(await read(installedCommand('debug'))).toBe('debug ON\n');
+    expect(await read(installedCommand('plan'))).toBe('plan CURATION-OFF\n');
+  });
+
+  it('a version skew converges nothing and names the tdd variants', async () => {
+    await writeInstallManifest({ tdd: false });
+    await installAs({ curation: true, compliance: true });
+
+    const outcome = await applyVariantToggle({
+      claudeDir, devflowDir, axis: 'tdd', enabled: false, runningVersion: '3.4.0', warn, packageRoot: pkg, backups: await backupsOf(),
+    });
+
+    expect(outcome.kind).toBe('skipped');
+    if (outcome.kind !== 'skipped') return;
+    expect(outcome.reason).toBe('version-skew');
+    expect(outcome.message).toContain('tdd-off');
+    expect(outcome.message).not.toContain('posting steps');
+    expect(await read(installedCommand('debug'))).toBe('debug ON\n');
+  });
+
+  it('variantToggleSkew names the tdd variant either way and never claims posting steps', () => {
+    expect(variantToggleSkew('3.3.0', '3.3.0', 'tdd', false)).toBeNull();
+    expect(variantToggleSkew('3.2.0', '3.3.0', 'tdd', true)).toContain('tdd-on');
+    expect(variantToggleSkew('3.2.0', '3.3.0', 'tdd', false)).toContain('tdd-off');
+    expect(variantToggleSkew('3.2.0', '3.3.0', 'tdd', false) ?? '').not.toContain('posting steps');
   });
 });

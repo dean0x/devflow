@@ -1,25 +1,26 @@
 /**
- * Prompt-variant installer for the Claude Code target: the curation and compliance switches.
+ * Prompt-variant installer for the Claude Code target: the curation, compliance and tdd switches.
  *
- * D-LEARNING-VARIANT-INSTALL: the install follows the machine's two switches
- * (`features.curation` and `features.compliance` in ~/.devflow/manifest.json) and
- * nothing else. Each command and agent that has an arm for a switch that is off is
+ * D-LEARNING-VARIANT-INSTALL: the install follows the machine's switches
+ * (`features.curation`, `features.compliance` and `features.tdd` in ~/.devflow/manifest.json)
+ * and nothing else. Each command and agent that has an arm for a switch that is off is
  * installed from the build tree of the machine's exact switch combination
- * (dist/{curation-off,compliance-off,curation-compliance-off}/{commands,agents}, built by
- * D-LEARNING-VARIANTS), and the apply-decisions skill is not installed when curation is
- * off, so the decisions text reaches no prompt and the skill has no reader. With a switch on,
+ * (the trees of OFF_OUTPUT_DIRS, such as dist/{curation-off,compliance-off,tdd-off}/{commands,agents},
+ * built by D-LEARNING-VARIANTS), and a skill that an off switch gates is not installed (the
+ * apply-decisions skill with curation off, the test-driven-development skill with tdd off), so
+ * the text reaches no prompt and the skill has no reader. With a switch on,
  * its on files are installed. A compliance-off machine carries no posting step in any prompt
  * that has a compliance arm. Three pieces carry it:
  *
  *   - the source order (src/core/assets.ts commandSourceDirs / agentSourceDirs):
  *     an off combination takes its own tree, and only the all-on combination takes the
  *     normal order, so a host with no arm installs its one file as before;
- *   - the skill condition (CURATION_GATED_SKILLS in src/core/plugins.ts):
- *     installViaFileCopy leaves the skill out when curation is off;
+ *   - the skill condition (AXIS_GATED_SKILLS in src/core/plugins.ts):
+ *     installViaFileCopy leaves out the skills an off switch gates;
  *   - {@link convergeVariantAxes}, below: the one converge that makes an
- *     ALREADY-installed tree match both switches, run by `devflow init` after the
- *     file copy and by `devflow curation` and `devflow compliance` after the switch is
- *     written ({@link applyVariantToggle}).
+ *     ALREADY-installed tree match every switch, run by `devflow init` after the
+ *     file copy and by `devflow curation`, `devflow compliance` and `devflow tdd` after
+ *     the switch is written ({@link applyVariantToggle}).
  *
  * The converge, decided in turn:
  *   - Its roster is the files that exist under the off trees, joined with the hosts the build
@@ -81,10 +82,9 @@ import * as path from 'path';
 
 import {
   agentSourceDirs,
-  bothOffDir,
   commandSourceDirs,
-  complianceOffDir,
   curationOffDir,
+  variantOffDir,
 } from '../../core/assets.js';
 import { carryStampedTools } from '../../core/agent-frontmatter.js';
 import { carryAgentOverrides, reapplyAgentMapping } from '../../core/agent-models.js';
@@ -92,11 +92,18 @@ import type { ComplianceFeatureState } from '../../core/compliance.js';
 import { describeEchoedValue } from '../../core/echo-value.js';
 import {
   ALL_SWITCHES_ON,
+  OFF_VARIANT_KEYS,
+  VARIANT_AXES,
   VARIANT_MANIFEST_REL_PATH,
   describeVariantManifestParseError,
+  machineSwitches,
   machineVariantKey,
+  offAxesOf,
   parseVariantManifest,
+  perAxis,
+  sameSwitches,
   variantOffRelPath,
+  type OffVariantKey,
   type VariantAxis,
   type VariantKind,
   type VariantSwitches,
@@ -109,7 +116,7 @@ import { isProxyEnabled } from '../../core/proxy-state.js';
 import { WORKFLOW_FOLDERS, type WorkflowFolder } from '../../core/mds-variants.js';
 import {
   DEVFLOW_PLUGINS,
-  CURATION_GATED_SKILLS,
+  AXIS_GATED_SKILLS,
   installedLanguageFocuses,
   prefixSkillName,
   selectedWorkflowFolders,
@@ -145,15 +152,15 @@ const KINDS: readonly VariantKind[] = ['commands', 'agents'];
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-/** What a converge left the curation-gated skill directory in. */
+/** What a converge left the gated skill directories of one axis in. */
 export type CurationSkillState =
   /** Installed, or replaced because the bytes differed. */
   | 'installed'
-  /** Removed (curation off). */
+  /** Removed (the axis is off). */
   | 'removed'
   /** Already as the switch wants it: present and identical, or absent. */
   | 'unchanged'
-  /** Curation on, but no plugin of the selection requires the skill: nothing installed. */
+  /** The axis is on, but no plugin of the selection requires the skill: nothing installed. */
   | 'not-selected'
   | 'failed';
 
@@ -162,8 +169,8 @@ export interface ConvergeCurationVariantsOptions {
   claudeDir: string;
   /** The machine root (~/.devflow), where skill shadows live. */
   devflowDir: string;
-  /** The machine's settled curation switch. */
-  curation: boolean;
+  /** The machine's settled switches. */
+  switches: VariantSwitches;
   /** The effective plugin selection: the skill is installed on switch-on only if its closure holds it. */
   plugins: readonly PluginDefinition[];
   warn: (msg: string) => void;
@@ -184,7 +191,10 @@ export interface ConvergeCurationVariantsResult {
   unchanged: number;
   /** Roster entries with no installed file (another plugin's, or never installed): left alone. */
   notInstalled: number;
+  /** What the converge left the curation-gated skill (apply-decisions) in. */
   skill: CurationSkillState;
+  /** What the converge left the tdd-gated skill (test-driven-development) in. */
+  tddSkill: CurationSkillState;
 }
 
 type FileOutcome = 'rewritten' | 'unchanged' | 'not-installed' | 'failed';
@@ -261,11 +271,11 @@ async function readVariantHosts(root: string): Promise<{ ok: true; hosts: Readon
 /**
  * The roster of one kind: the prompts that differ on an axis, sorted by file name.
  *
- * The files under the three off trees name them (the build owns which hosts have an arm), and a host the
+ * The files under the off trees name them (the build owns which hosts have an arm), and a host the
  * build manifest lists is added, so a tree removed from the package still leaves its hosts in the roster.
- * An arm comes from the manifest entry, or from the trees the file is in when the manifest does not list it
- * (a curation arm has a file under curation-off or both-off, a compliance arm under compliance-off or
- * both-off).
+ * An arm comes from the manifest entry, or from the trees the file is in when the manifest does not list it:
+ * a file in a tree has an arm on each axis its tree turns off (offAxesOf), so a curation arm has a file under
+ * curation-off or both-off, a compliance arm under compliance-off or both-off, and so on for the other trees.
  *
  * `present` is false when no tree holds this kind and the manifest lists none (the build has not run, or
  * only `build:cli` did), so the caller can say so instead of reporting a converge that had nothing to do.
@@ -280,31 +290,25 @@ async function readRoster(
   manifestHosts: ReadonlyMap<string, RosterHost> | null,
   warn: (msg: string) => void,
 ): Promise<{ hosts: RosterHost[]; present: boolean; incomplete: 'unreadable' | 'truncated' | null; refused: readonly RosterHost[] }> {
-  const listings = {
-    curation: await listVariantDir(curationOffDir(kind, root), kind, warn),
-    compliance: await listVariantDir(complianceOffDir(kind, root), kind, warn),
-    both: await listVariantDir(bothOffDir(kind, root), kind, warn),
-  };
+  const listings = new Map<OffVariantKey, readonly string[] | 'absent' | 'unreadable'>();
+  for (const key of OFF_VARIANT_KEYS) {
+    listings.set(key, await listVariantDir(variantOffDir(key, kind, root), kind, warn));
+  }
   const inferred = new Map<string, Record<VariantAxis, boolean>>();
-  const note = (names: readonly string[] | 'absent' | 'unreadable', axes: readonly VariantAxis[]): void => {
-    if (typeof names === 'string') return;
+  for (const [key, names] of listings) {
+    if (typeof names === 'string') continue;
+    const turnedOff = offAxesOf(key);
     for (const name of names) {
-      const arms = inferred.get(name) ?? { curation: false, compliance: false };
-      inferred.set(name, {
-        curation: arms.curation || axes.includes('curation'),
-        compliance: arms.compliance || axes.includes('compliance'),
-      });
+      const arms = inferred.get(name) ?? perAxis(() => false);
+      inferred.set(name, perAxis(axis => arms[axis] || turnedOff.includes(axis)));
     }
-  };
-  note(listings.curation, ['curation']);
-  note(listings.compliance, ['compliance']);
-  note(listings.both, ['curation', 'compliance']);
+  }
 
   const files = new Map<string, RosterHost>();
   const refused: RosterHost[] = [];
   for (const [file, axes] of inferred) files.set(file, { file, axes });
   for (const [key, host] of manifestHosts ?? []) {
-    if (!key.startsWith(`${kind}/`) || !(host.axes.curation || host.axes.compliance)) continue;
+    if (!key.startsWith(`${kind}/`) || !VARIANT_AXES.some(axis => host.axes[axis])) continue;
     if (ROSTER_NAME_RE.test(host.file)) {
       files.set(host.file, host);
     } else {
@@ -313,12 +317,13 @@ async function readRoster(
     }
   }
   const hosts = [...files.values()].sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
-  const present = hosts.length > 0 || Object.values(listings).some(listing => typeof listing !== 'string');
+  const listed = [...listings.values()];
+  const present = hosts.length > 0 || listed.some(listing => typeof listing !== 'string');
   if (hosts.length > MAX_CURATION_ROSTER) {
     warn(`prompt variants: ${hosts.length} ${kind} variants exceed the bound of ${MAX_CURATION_ROSTER}; converging the first ${MAX_CURATION_ROSTER}`);
     return { hosts: hosts.slice(0, MAX_CURATION_ROSTER), present: true, incomplete: 'truncated', refused };
   }
-  const unreadable = Object.values(listings).some(listing => listing === 'unreadable');
+  const unreadable = listed.some(listing => listing === 'unreadable');
   return { hosts, present, incomplete: unreadable ? 'unreadable' : null, refused };
 }
 
@@ -574,46 +579,55 @@ async function removeSkillFolder(target: string, backups: BackupSession): Promis
   }
 }
 
-/** Converge the curation-gated skill directories. A skill folder that was a link and was swapped is recorded in `links`. Never throws. */
-async function convergeSkills(opts: ConvergeCurationVariantsOptions, links: LinkReport): Promise<CurationSkillState> {
-  const { claudeDir, devflowDir, curation, plugins, warn } = opts;
+/**
+ * Converge the gated skill directories of every axis (AXIS_GATED_SKILLS): the state each axis'
+ * skills were left in. An axis that gates no skill is `unchanged`. A skill folder that was a link
+ * and was swapped is recorded in `links`. Never throws.
+ */
+async function convergeSkills(
+  opts: ConvergeCurationVariantsOptions,
+  links: LinkReport,
+): Promise<Readonly<Record<VariantAxis, CurationSkillState>>> {
+  const { claudeDir, devflowDir, switches, plugins, warn } = opts;
   const selected = skillsOf(plugins);
-  let state: CurationSkillState = 'unchanged';
+  const states = perAxis((): CurationSkillState => 'unchanged');
 
   // A skills folder that is a link or not a folder is refused once. The removal and the swap below
   // would reach the folder the link points to: `directoryState` of a skill folder follows the link
   // above it. The refusal is recorded in `links`, and the converge is not clean.
-  if (await refuseUnrealFolder(links, path.join(claudeDir, 'skills'))) return 'failed';
+  if (await refuseUnrealFolder(links, path.join(claudeDir, 'skills'))) return perAxis(() => 'failed');
 
-  // Every gated skill is converged: a failure on one must not skip the next.
-  for (const skill of CURATION_GATED_SKILLS) {
-    const target = path.join(claudeDir, 'skills', prefixSkillName(skill));
-    try {
-      if (!curation) {
-        const removal = await removeSkillFolder(target, opts.backups);
-        if (removal === 'removed') {
-          state = 'removed';
-        } else if (removal === 'kept') {
-          warn(`curation variants: the ${prefixSkillName(skill)} skill folder (${target}) still holds a file that could not be moved aside, so it was not removed`);
-          state = 'failed';
+  // Every gated skill of every axis is converged: a failure on one must not skip the next.
+  for (const axis of VARIANT_AXES) {
+    for (const skill of AXIS_GATED_SKILLS[axis]) {
+      const target = path.join(claudeDir, 'skills', prefixSkillName(skill));
+      try {
+        if (!switches[axis]) {
+          const removal = await removeSkillFolder(target, opts.backups);
+          if (removal === 'removed') {
+            states[axis] = 'removed';
+          } else if (removal === 'kept') {
+            warn(`${axis} variants: the ${prefixSkillName(skill)} skill folder (${target}) still holds a file that could not be moved aside, so it was not removed`);
+            states[axis] = 'failed';
+          }
+          continue;
         }
-        continue;
-      }
 
-      if (!selected.has(skill)) {
-        if (state === 'unchanged') state = 'not-selected';
-        continue;
+        if (!selected.has(skill)) {
+          if (states[axis] === 'unchanged') states[axis] = 'not-selected';
+          continue;
+        }
+        const resolved = await resolveSkillSource(skill, devflowDir, opts.packageRoot);
+        if ((await pathExists(target)) && (await treesIdentical(resolved.dir, target))) continue;
+        await swapInSkillDirectory(claudeDir, resolved.dir, target, links, opts.backups);
+        states[axis] = 'installed';
+      } catch (err) {
+        warn(`${axis} variants: could not converge the ${prefixSkillName(skill)} skill (${target}) — ${String(err)}`);
+        states[axis] = 'failed';
       }
-      const resolved = await resolveSkillSource(skill, devflowDir, opts.packageRoot);
-      if ((await pathExists(target)) && (await treesIdentical(resolved.dir, target))) continue;
-      await swapInSkillDirectory(claudeDir, resolved.dir, target, links, opts.backups);
-      state = 'installed';
-    } catch (err) {
-      warn(`curation variants: could not converge the ${prefixSkillName(skill)} skill (${target}) — ${String(err)}`);
-      state = 'failed';
     }
   }
-  return state;
+  return states;
 }
 
 // ── Convergence ────────────────────────────────────────────────────────────
@@ -621,7 +635,7 @@ async function convergeSkills(opts: ConvergeCurationVariantsOptions, links: Link
 export interface ConvergePromptVariantsOptions {
   /** Claude Code's config directory (e.g. ~/.claude). Must be absolute. */
   claudeDir: string;
-  /** The machine's settled curation and compliance switches. */
+  /** The machine's settled switches. */
   switches: VariantSwitches;
   /** The effective plugin selection: its language list is stamped into a copy that has none to carry. */
   plugins: readonly PluginDefinition[];
@@ -664,7 +678,7 @@ function notRun(switches: VariantSwitches, reason: string): ConvergePromptVarian
 }
 
 /**
- * Make the installed commands and agents match the machine's two switches: the per-kind
+ * Make the installed commands and agents match the machine's switches: the per-kind
  * converge of the prompts.
  *
  * Each roster host is rewritten to the file built for the machine's exact switches (see
@@ -763,24 +777,19 @@ export async function convergePromptVariants(opts: ConvergePromptVariantsOptions
   };
 }
 
-// ── The one converge for both axes ─────────────────────────────────────────
-
-/** The slice of the manifest the composed converge reads: the two switches, the frameworks and the rules switch. */
-export interface VariantMachineState {
-  readonly features: {
-    readonly curation: boolean;
-    readonly compliance: ComplianceFeatureState;
-    readonly rules: boolean;
-  };
-}
+// ── The one converge for every axis ────────────────────────────────────────
 
 export interface ConvergeVariantAxesOptions {
   /** Claude Code's config directory (e.g. ~/.claude). Must be absolute. */
   claudeDir: string;
   /** The machine root (~/.devflow), where skill shadows live. */
   devflowDir: string;
-  /** The machine's settled switches. The compliance part reaches its converge only through {@link convergeFromManifest}. */
-  manifest: VariantMachineState;
+  /** The machine's settled switches, built once by machineSwitches and passed down whole. */
+  switches: VariantSwitches;
+  /** The compliance frameworks the machine selected; the compliance converge reads them with `switches.compliance`. */
+  frameworks: ComplianceFeatureState['frameworks'];
+  /** The rules switch: the compliance rule is installed only while it is on. */
+  rulesEnabled: boolean;
   /** The effective plugin selection. */
   plugins: readonly PluginDefinition[];
   warn: (msg: string) => void;
@@ -916,17 +925,20 @@ export function workflowFoldersPosting(folders: ConvergeWorkflowFoldersResult, c
 }
 
 /**
- * The one converge for both switches: it makes the installed tree match the machine's curation
- * and compliance switches. `devflow init`, `devflow curation` and `devflow compliance` all call it.
+ * The one converge for every switch: it makes the installed tree match the machine's curation,
+ * compliance and tdd switches. `devflow init`, `devflow curation`, `devflow compliance` and
+ * `devflow tdd` all call it.
  *
  * It composes five per-kind converges, each a result and never a throw:
- *   - {@link convergePromptVariants}: the commands and agents, for both axes;
- *   - the apply-decisions skill, which follows the curation switch;
+ *   - {@link convergePromptVariants}: the commands and agents, for every axis;
+ *   - the gated skills: apply-decisions follows the curation switch and test-driven-development
+ *     the tdd switch;
  *   - {@link convergeFromManifest}: the compliance skill and rule, the one place the manifest
  *     becomes compliance options;
  *   - {@link convergeReferences}: the `devflow:git` references, which follow the compliance switch
  *     (the overlay from the one source root of the switch, then the removal list or the restore);
- *   - the workflow skill folders, which follow both switches (the folder of the exact key).
+ *   - the workflow skill folders, which follow the curation and compliance switches (the folder of
+ *     the exact key; a folder has no tdd arm).
  * A failed kind is a warning and `converged: false`, and the next kind still runs. A compliance-off
  * machine that still has a prompt or a reference file that posts, or cannot name one, is `posting`
  * and never `clear`: the caller decides what that costs (the compliance command exits non-zero,
@@ -935,8 +947,7 @@ export function workflowFoldersPosting(folders: ConvergeWorkflowFoldersResult, c
  * Never throws.
  */
 export async function convergeVariantAxes(opts: ConvergeVariantAxesOptions): Promise<ConvergeVariantAxesResult> {
-  const { claudeDir, devflowDir, manifest, plugins, warn, packageRoot, backups } = opts;
-  const switches: VariantSwitches = { curation: manifest.features.curation, compliance: manifest.features.compliance.enabled };
+  const { claudeDir, devflowDir, switches, frameworks, rulesEnabled, plugins, warn, packageRoot, backups } = opts;
 
   // Precondition, asserted in production code: a relative claudeDir would resolve
   // every install target somewhere unexpected, the skill removal included.
@@ -945,6 +956,7 @@ export async function convergeVariantAxes(opts: ConvergeVariantAxesOptions): Pro
     return {
       ...notRun(switches, 'the Claude directory is not an absolute path'),
       skill: 'unchanged',
+      tddSkill: 'unchanged',
       compliance: { removedPreexisting: false, converged: false, replacedLinks: [], refusedFolders: [] },
       references: {
         converged: false,
@@ -963,15 +975,22 @@ export async function convergeVariantAxes(opts: ConvergeVariantAxesOptions): Pro
     convergePromptVariants({ claudeDir, switches, plugins, warn, packageRoot }),
   );
   const skillLinks = newLinkReport();
-  const skill = await attempt<CurationSkillState>('curation variants', warn, 'failed', () =>
-    convergeSkills({ claudeDir, devflowDir, curation: switches.curation, plugins, warn, packageRoot, backups }, skillLinks),
+  const skills = await attempt('gated skills', warn, perAxis((): CurationSkillState => 'failed'), () =>
+    convergeSkills({ claudeDir, devflowDir, switches, plugins, warn, packageRoot, backups }, skillLinks),
   );
+  const { curation: skill, tdd: tddSkill } = skills;
   warnLinkReport(skillLinks, warn);
   const compliance = await attempt<ConvergeComplianceArtifactsResult>(
     'compliance artifacts',
     warn,
     { removedPreexisting: false, converged: false, replacedLinks: [], refusedFolders: [] },
-    () => convergeFromManifest({ claudeDir, devflowDir, manifest, warn, backups }),
+    () => convergeFromManifest({
+      claudeDir,
+      devflowDir,
+      manifest: { features: { compliance: { enabled: switches.compliance, frameworks }, rules: rulesEnabled } },
+      warn,
+      backups,
+    }),
   );
   const references = await attempt<ConvergeReferencesResult>(
     'reference converge',
@@ -1003,12 +1022,18 @@ export async function convergeVariantAxes(opts: ConvergeVariantAxesOptions): Pro
   );
 
   return {
-    converged: prompts.converged && skill !== 'failed' && compliance.converged && references.converged && workflowFolders.converged,
+    converged:
+      prompts.converged &&
+      VARIANT_AXES.every(axis => skills[axis] !== 'failed') &&
+      compliance.converged &&
+      references.converged &&
+      workflowFolders.converged,
     commandsRewritten: prompts.commandsRewritten,
     agentsRewritten: prompts.agentsRewritten,
     unchanged: prompts.unchanged,
     notInstalled: prompts.notInstalled,
     skill,
+    tddSkill,
     compliance,
     references,
     workflowFolders,
@@ -1070,7 +1095,8 @@ export function describeCurationConverge(
 
 /**
  * One line for what a converge changed on an axis, or null when it changed nothing: the prompts
- * rewritten for the variant the axis now holds and, for curation, the skill it installed or removed.
+ * rewritten for the variant the axis now holds and the gated skills it installed or removed
+ * (apply-decisions with curation, test-driven-development with tdd).
  */
 export function describeVariantConverge(
   result: ConvergeCurationVariantsResult & { readonly references?: ConvergeReferencesResult },
@@ -1085,8 +1111,14 @@ export function describeVariantConverge(
       `rewritten for the ${axis}-${enabled ? 'on' : 'off'} variant`,
     );
   }
-  if (result.skill === 'installed') parts.push('the apply-decisions skill installed');
-  if (result.skill === 'removed') parts.push('the apply-decisions skill removed');
+  const skillStates: ReadonlyArray<readonly [string, CurationSkillState]> = [
+    [AXIS_GATED_SKILLS.curation[0], result.skill],
+    [AXIS_GATED_SKILLS.tdd[0], result.tddSkill],
+  ];
+  for (const [skill, state] of skillStates) {
+    if (state === 'installed') parts.push(`the ${skill} skill installed`);
+    if (state === 'removed') parts.push(`the ${skill} skill removed`);
+  }
   const references = result.references;
   if (references !== undefined) {
     const changed = references.rewritten.length + references.restored.length;
@@ -1228,7 +1260,7 @@ async function recordInstalledVariants(devflowDir: string, switches: VariantSwit
     const locked = await withManifestLock(devflowDir, {}, async (lock): Promise<'written' | 'current' | 'no-manifest' | 'lock-lost' | 'switches-changed'> => {
       const manifest = await readManifest(devflowDir);
       if (manifest === null) return 'no-manifest';
-      if (manifest.features.curation !== switches.curation || manifest.features.compliance.enabled !== switches.compliance) {
+      if (!sameSwitches(machineSwitches(manifest.features), switches)) {
         // The record names switches that no longer hold: remove it, so the status reads unknown.
         if (!Object.hasOwn(manifest, 'installedVariants')) return 'switches-changed';
         if (!(await lock.stillHeld())) return 'lock-lost';
@@ -1237,9 +1269,9 @@ async function recordInstalledVariants(devflowDir: string, switches: VariantSwit
         return 'switches-changed';
       }
       const recorded = readInstalledVariants(manifest.installedVariants);
-      if (recorded !== null && recorded.curation === switches.curation && recorded.compliance === switches.compliance) return 'current';
+      if (recorded !== null && sameSwitches(recorded, switches)) return 'current';
       if (!(await lock.stillHeld())) return 'lock-lost';
-      await writeManifest(devflowDir, { ...manifest, installedVariants: { curation: switches.curation, compliance: switches.compliance } });
+      await writeManifest(devflowDir, { ...manifest, installedVariants: perAxis(axis => switches[axis]) });
       return 'written';
     });
     if (!locked.ok || locked.value === 'lock-lost') {
@@ -1255,11 +1287,11 @@ async function recordInstalledVariants(devflowDir: string, switches: VariantSwit
 }
 
 /**
- * What `devflow curation --enable/--disable` and `devflow compliance` do after the switch is
- * written: converge the installed tree onto both switches with the one converge, record the
+ * What `devflow curation`, `devflow compliance` and `devflow tdd` do after the switch is
+ * written: converge the installed tree onto every switch with the one converge, record the
  * installed variants when it finished clean, then reapply the saved agent model and effort mapping.
  *
- * The switch of the toggled axis is the value the caller just set. The other axis and the
+ * The switch of the toggled axis is the value the caller just set. The other axes and the
  * compliance frameworks come from the manifest, which the caller has already written.
  *
  * A version skew keeps the check this toggle has always had: the installed prompts are not the
@@ -1285,24 +1317,21 @@ export async function applyVariantToggle(opts: ApplyVariantToggleOptions): Promi
   if (skew !== null) return { kind: 'skipped', reason: 'version-skew', message: skew };
 
   const selection = new Set(manifest.plugins);
-  const state: VariantMachineState = {
-    features: {
-      curation: axis === 'curation' ? enabled : manifest.features.curation,
-      compliance: axis === 'compliance' ? { ...manifest.features.compliance, enabled } : manifest.features.compliance,
-      rules: manifest.features.rules,
-    },
-  };
+  // The toggled axis takes the value the caller just set; every other axis is the manifest's.
+  const switches: VariantSwitches = { ...machineSwitches(manifest.features), [axis]: enabled };
   const result = await convergeVariantAxes({
     claudeDir,
     devflowDir,
-    manifest: state,
+    switches,
+    frameworks: manifest.features.compliance.frameworks,
+    rulesEnabled: manifest.features.rules,
     plugins: DEVFLOW_PLUGINS.filter(plugin => selection.has(plugin.name)),
     warn,
     packageRoot: opts.packageRoot,
     backups: opts.backups,
   });
   if (result.converged) {
-    await recordInstalledVariants(devflowDir, { curation: state.features.curation, compliance: state.features.compliance.enabled }, warn);
+    await recordInstalledVariants(devflowDir, switches, warn);
   }
 
   let agentMappingReapplied = false;

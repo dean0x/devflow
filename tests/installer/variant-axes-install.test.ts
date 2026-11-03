@@ -26,7 +26,7 @@ import {
   type Spinner,
 } from '../../src/targets/claude-code/installer.js';
 import type { AgentSourceDirs } from '../../src/core/assets.js';
-import { renderVariantManifest, type VariantManifestHost } from '../../src/core/curation-variants.js';
+import { ALL_SWITCHES_ON, renderVariantManifest, type VariantManifestHost } from '../../src/core/curation-variants.js';
 import { buildAssetMaps, type PluginDefinition } from '../../src/core/plugins.js';
 import { TRACKER_MCP_SERVERS_DEFAULT } from '../../src/core/tracker.js';
 import { assertTempHome } from '../setup/home-isolation.js';
@@ -42,9 +42,16 @@ const TREE = {
   curationOff: 'dist/curation-off',
   complianceOff: 'dist/compliance-off',
   bothOff: 'dist/curation-compliance-off',
+  tddOff: 'dist/tdd-off',
+  curationTddOff: 'dist/curation-tdd-off',
+  complianceTddOff: 'dist/compliance-tdd-off',
+  allOff: 'dist/curation-compliance-tdd-off',
 } as const;
 
-type Variant = 'ON' | 'CURATION-OFF' | 'COMPLIANCE-OFF' | 'BOTH-OFF' | 'SRC';
+type Variant =
+  | 'ON' | 'CURATION-OFF' | 'COMPLIANCE-OFF' | 'BOTH-OFF'
+  | 'TDD-OFF' | 'CURATION-TDD-OFF' | 'COMPLIANCE-TDD-OFF' | 'ALL-OFF'
+  | 'SRC';
 
 /** The text a fixture file holds: its own name and the variant it stands for. */
 const text = (name: string, variant: Variant): string => `${name} ${variant}\n`;
@@ -54,7 +61,8 @@ const host = (
   name: string,
   curation: boolean,
   compliance: boolean,
-): VariantManifestHost => ({ kind, name, axes: { curation, compliance } });
+  tdd = false,
+): VariantManifestHost => ({ kind, name, axes: { curation, compliance, tdd } });
 
 /**
  * The fixture roster, by arms:
@@ -166,6 +174,8 @@ async function snapshotBoth(): Promise<{ claude: Record<string, string>; devflow
 interface Machine {
   curation: boolean;
   compliance: boolean;
+  /** The tdd switch; on when absent. */
+  tdd?: boolean;
   isPartialInstall?: boolean;
   agentSourceDirs?: AgentSourceDirs;
 }
@@ -180,8 +190,7 @@ async function install(machine: Machine): Promise<unknown> {
     agentsMap: buildAssetMaps([PLUGIN]).agentsMap,
     isPartialInstall: machine.isPartialInstall ?? false,
     spinner: noopSpinner,
-    curation: machine.curation,
-    compliance: machine.compliance,
+    switches: { curation: machine.curation, compliance: machine.compliance, tdd: machine.tdd ?? true },
     packageRoot: pkg,
     agentSourceDirs: machine.agentSourceDirs,
     warn,
@@ -251,16 +260,19 @@ describe('the variant each machine installs', () => {
   ];
 
   for (const { label, curation, compliance, expected } of MACHINES) {
-    it(`${label}: each prompt comes from the file for the machine's exact switches`, async () => {
-      await install({ curation, compliance });
+    // The roster has no tdd arm, so the tdd switch changes no file: the same files come either way.
+    for (const tdd of [true, false]) {
+      it(`${label}, tdd ${tdd ? 'on' : 'off'}: each prompt comes from the file for the machine's exact switches`, async () => {
+        await install({ curation, compliance, tdd });
 
-      for (const name of ['implement', 'plan', 'debug'] as const) {
-        expect(await fs.readFile(installedCommand(name), 'utf-8'), `command ${name}`).toBe(text(name, expected[name]));
-      }
-      for (const name of ['code', 'fix', 'evaluate'] as const) {
-        expect(await fs.readFile(installedAgent(name), 'utf-8'), `agent ${name}`).toBe(text(name, expected[name]));
-      }
-    });
+        for (const name of ['implement', 'plan', 'debug'] as const) {
+          expect(await fs.readFile(installedCommand(name), 'utf-8'), `command ${name}`).toBe(text(name, expected[name]));
+        }
+        for (const name of ['code', 'fix', 'evaluate'] as const) {
+          expect(await fs.readFile(installedAgent(name), 'utf-8'), `agent ${name}`).toBe(text(name, expected[name]));
+        }
+      });
+    }
   }
 
   it('compliance on reads no manifest: the install succeeds with none in the package', async () => {
@@ -359,8 +371,7 @@ describe('compliance off refuses an install whose variant manifest cannot be tru
       plugins: [PLUGIN],
       agentsMap: buildAssetMaps([PLUGIN]).agentsMap,
       claudeDir,
-      curation: true,
-      compliance: false,
+      switches: { ...ALL_SWITCHES_ON, compliance: false },
       packageRoot: pkg,
       trackerServers: TRACKER_MCP_SERVERS_DEFAULT,
       warn,
@@ -374,8 +385,7 @@ describe('compliance off refuses an install whose variant manifest cannot be tru
       plugins: [PLUGIN],
       agentsMap: buildAssetMaps([PLUGIN]).agentsMap,
       claudeDir,
-      curation: true,
-      compliance: false,
+      switches: { ...ALL_SWITCHES_ON, compliance: false },
       packageRoot: pkg,
       trackerServers: TRACKER_MCP_SERVERS_DEFAULT,
       warn,
@@ -429,7 +439,7 @@ describe('a both-off machine never falls through to the curation-off file (TP-10
     const message = await expectRefused(() => install({ curation: false, compliance: false }));
 
     expect(message).toContain(`${TREE.bothOff}/agents/code.md`);
-    expect(message).toContain('curation off and compliance off');
+    expect(message).toContain('curation off, compliance off, tdd on');
     expect(await fs.readFile(installedAgent('code'), 'utf-8'), 'the curation-off bytes were never installed').toBe('OLD code\n');
   });
 
@@ -514,8 +524,7 @@ describe('a compliance-armed prompt installs the file the check required', () =>
       plugins: [PLUGIN],
       agentsMap: buildAssetMaps([PLUGIN]).agentsMap,
       claudeDir,
-      curation: false,
-      compliance: false,
+      switches: { ...ALL_SWITCHES_ON, curation: false, compliance: false },
       packageRoot: pkg,
       trackerServers: TRACKER_MCP_SERVERS_DEFAULT,
       warn,
@@ -588,5 +597,166 @@ describe('a prompt with no compliance arm falls through with compliance off (TP-
     expect(await fs.readFile(installedCommand('implement'), 'utf-8')).toBe(text('implement', 'CURATION-OFF'));
     expect(await fs.readFile(installedAgent('code'), 'utf-8')).toBe(text('code', 'CURATION-OFF'));
     expect(await fs.readFile(installedAgent('fix'), 'utf-8')).toBe(text('fix', 'ON'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The tdd axis: every machine state installs the file for its exact switches
+// ---------------------------------------------------------------------------
+
+describe('a prompt with a tdd arm installs the file for every machine state', () => {
+  /**
+   * The roster by arms:
+   *   commands/implement and agents/code  carry all three arms
+   *   commands/plan                       carries a compliance arm and a tdd arm
+   *   commands/debug                      carries a tdd arm only
+   *   agents/fix                          carries none
+   */
+  const TDD_ROSTER: readonly VariantManifestHost[] = [
+    host('commands', 'implement', true, true, true),
+    host('commands', 'plan', false, true, true),
+    host('commands', 'debug', false, false, true),
+    host('agents', 'code', true, true, true),
+    host('agents', 'fix', false, false, false),
+  ];
+
+  /** Each off tree, the variant it holds and the axes a host needs an arm on to have a file in it. */
+  const TREES: ReadonlyArray<{
+    readonly tree: string;
+    readonly variant: Variant;
+    readonly needs: ReadonlyArray<'curation' | 'compliance' | 'tdd'>;
+  }> = [
+    { tree: TREE.curationOff, variant: 'CURATION-OFF', needs: ['curation'] },
+    { tree: TREE.complianceOff, variant: 'COMPLIANCE-OFF', needs: ['compliance'] },
+    { tree: TREE.bothOff, variant: 'BOTH-OFF', needs: ['curation', 'compliance'] },
+    { tree: TREE.tddOff, variant: 'TDD-OFF', needs: ['tdd'] },
+    { tree: TREE.curationTddOff, variant: 'CURATION-TDD-OFF', needs: ['curation', 'tdd'] },
+    { tree: TREE.complianceTddOff, variant: 'COMPLIANCE-TDD-OFF', needs: ['compliance', 'tdd'] },
+    { tree: TREE.allOff, variant: 'ALL-OFF', needs: ['curation', 'compliance', 'tdd'] },
+  ];
+
+  type Prompt = 'implement' | 'plan' | 'debug' | 'code' | 'fix' | 'evaluate';
+
+  async function seedTddPackage(): Promise<void> {
+    for (const { tree } of TREES) await fs.rm(inPkg(tree), { recursive: true, force: true });
+    await writeManifest(TDD_ROSTER);
+    for (const { kind, name, axes } of TDD_ROSTER) {
+      for (const { tree, variant, needs } of TREES) {
+        if (needs.every(axis => axes[axis])) await write(inPkg(`${tree}/${kind}/${name}.md`), text(name, variant));
+      }
+    }
+  }
+
+  beforeEach(async () => {
+    await seedTddPackage();
+  });
+
+  const MACHINES: ReadonlyArray<{
+    readonly label: string;
+    readonly machine: Machine;
+    readonly expected: Readonly<Record<Prompt, Variant>>;
+  }> = [
+    {
+      label: 'every switch on',
+      machine: { curation: true, compliance: true, tdd: true },
+      expected: { implement: 'ON', plan: 'ON', debug: 'ON', code: 'ON', fix: 'ON', evaluate: 'SRC' },
+    },
+    {
+      label: 'curation off',
+      machine: { curation: false, compliance: true, tdd: true },
+      expected: { implement: 'CURATION-OFF', plan: 'ON', debug: 'ON', code: 'CURATION-OFF', fix: 'ON', evaluate: 'SRC' },
+    },
+    {
+      label: 'compliance off',
+      machine: { curation: true, compliance: false, tdd: true },
+      expected: { implement: 'COMPLIANCE-OFF', plan: 'COMPLIANCE-OFF', debug: 'ON', code: 'COMPLIANCE-OFF', fix: 'ON', evaluate: 'SRC' },
+    },
+    {
+      label: 'curation and compliance off',
+      machine: { curation: false, compliance: false, tdd: true },
+      expected: { implement: 'BOTH-OFF', plan: 'COMPLIANCE-OFF', debug: 'ON', code: 'BOTH-OFF', fix: 'ON', evaluate: 'SRC' },
+    },
+    {
+      label: 'tdd off',
+      machine: { curation: true, compliance: true, tdd: false },
+      expected: { implement: 'TDD-OFF', plan: 'TDD-OFF', debug: 'TDD-OFF', code: 'TDD-OFF', fix: 'ON', evaluate: 'SRC' },
+    },
+    {
+      label: 'curation and tdd off',
+      machine: { curation: false, compliance: true, tdd: false },
+      expected: { implement: 'CURATION-TDD-OFF', plan: 'TDD-OFF', debug: 'TDD-OFF', code: 'CURATION-TDD-OFF', fix: 'ON', evaluate: 'SRC' },
+    },
+    {
+      label: 'compliance and tdd off',
+      machine: { curation: true, compliance: false, tdd: false },
+      expected: {
+        implement: 'COMPLIANCE-TDD-OFF', plan: 'COMPLIANCE-TDD-OFF', debug: 'TDD-OFF', code: 'COMPLIANCE-TDD-OFF', fix: 'ON', evaluate: 'SRC',
+      },
+    },
+    {
+      label: 'every switch off',
+      machine: { curation: false, compliance: false, tdd: false },
+      expected: { implement: 'ALL-OFF', plan: 'COMPLIANCE-TDD-OFF', debug: 'TDD-OFF', code: 'ALL-OFF', fix: 'ON', evaluate: 'SRC' },
+    },
+  ];
+
+  it('the table has one row for each of the eight machine states', () => {
+    const states = MACHINES.map(({ machine }) => `${machine.curation}/${machine.compliance}/${machine.tdd}`);
+    expect(new Set(states).size).toBe(8);
+  });
+
+  for (const { label, machine, expected } of MACHINES) {
+    it(`${label}: each prompt comes from the file for the machine's exact switches`, async () => {
+      await install(machine);
+
+      for (const name of ['implement', 'plan', 'debug'] as const) {
+        expect(await fs.readFile(installedCommand(name), 'utf-8'), `command ${name}`).toBe(text(name, expected[name]));
+      }
+      for (const name of ['code', 'fix', 'evaluate'] as const) {
+        expect(await fs.readFile(installedAgent(name), 'utf-8'), `agent ${name}`).toBe(text(name, expected[name]));
+      }
+    });
+  }
+
+  it('known-bad probe: a missing compliance and tdd file is refused, not covered by a file that keeps the tdd text', async () => {
+    await seedInstalled();
+    await fs.rm(inPkg(`${TREE.complianceTddOff}/commands/plan.md`));
+    expect(await exists(inPkg(`${TREE.complianceOff}/commands/plan.md`)), 'a shadowing file must exist').toBe(true);
+    expect(await exists(inPkg(`${TREE.tddOff}/commands/plan.md`)), 'a shadowing file must exist').toBe(true);
+
+    const message = await expectRefused(() => install({ curation: true, compliance: false, tdd: false }));
+
+    expect(message).toContain(`${TREE.complianceTddOff}/commands/plan.md`);
+    expect(message).toContain('curation on, compliance off, tdd off');
+  });
+
+  it('the same missing file does not stop a machine that keeps tdd on, which never reads that tree', async () => {
+    await fs.rm(inPkg(`${TREE.complianceTddOff}/commands/plan.md`));
+
+    await install({ curation: true, compliance: false, tdd: true });
+
+    expect(await fs.readFile(installedCommand('plan'), 'utf-8')).toBe(text('plan', 'COMPLIANCE-OFF'));
+  });
+
+  it('a machine with tdd off installs the tdd-off file of a prompt whose only arm is tdd, and the normal file of one with none', async () => {
+    await install({ curation: true, compliance: true, tdd: false });
+
+    expect(await fs.readFile(installedCommand('debug'), 'utf-8')).toBe(text('debug', 'TDD-OFF'));
+    expect(await fs.readFile(installedAgent('fix'), 'utf-8')).toBe(text('fix', 'ON'));
+  });
+
+  it('the copy alone, as the selective uninstall reaches it, installs the file for the machine switches', async () => {
+    await installCommandsAndAgents({
+      plugins: [PLUGIN],
+      agentsMap: buildAssetMaps([PLUGIN]).agentsMap,
+      claudeDir,
+      switches: { curation: false, compliance: false, tdd: false },
+      packageRoot: pkg,
+      trackerServers: TRACKER_MCP_SERVERS_DEFAULT,
+      warn,
+    });
+
+    expect(await fs.readFile(installedCommand('implement'), 'utf-8')).toBe(text('implement', 'ALL-OFF'));
+    expect(await fs.readFile(installedAgent('code'), 'utf-8')).toBe(text('code', 'ALL-OFF'));
   });
 });

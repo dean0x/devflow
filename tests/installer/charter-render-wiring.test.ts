@@ -25,6 +25,7 @@ import * as path from 'path';
 import * as p from '@clack/prompts';
 
 import { scriptsDir as packagedScriptsDir } from '../../src/core/assets.js';
+import { ALL_SWITCHES_ON } from '../../src/core/curation-variants.js';
 import {
   DELETED_PLUGIN_NAMES,
   DEVFLOW_PLUGINS,
@@ -302,8 +303,7 @@ describe('installViaFileCopy: the render is its own step after the script copy',
   }): Promise<void> {
     const effective = opts.effectivePlugins ?? opts.plugins;
     await installViaFileCopy({
-      curation: true,
-      compliance: true,
+      switches: ALL_SWITCHES_ON,
       plugins: opts.plugins,
       effectivePlugins: effective,
       claudeDir,

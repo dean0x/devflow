@@ -14,8 +14,9 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { formatBackupSummary } from '../../src/cli/commands/install-report.js';
-import { VARIANT_KEYS } from '../../src/core/curation-variants.js';
+import { ALL_SWITCHES_ON, type VariantKey } from '../../src/core/curation-variants.js';
 import {
+  FOLDER_VARIANT_KEYS,
   stampBuildId,
   workflowBuildId,
   workflowFolderFiles,
@@ -32,8 +33,8 @@ import { assertTempHome } from '../setup/home-isolation.js';
 import { at, backupRootOf, exists, makeHome, onlyRunFolder, put, removeHome, type TestHome } from './install-backup-harness.js';
 
 const NAME = FIXTURE_FOLDER.name;
-const KEY_ON = workflowFolderKey({ curation: true, compliance: true });
-const KEY_OFF = workflowFolderKey({ curation: true, compliance: false });
+const KEY_ON = workflowFolderKey(ALL_SWITCHES_ON);
+const KEY_OFF = workflowFolderKey({ ...ALL_SWITCHES_ON, compliance: false });
 const EVIDENCE = 'references/evidence-asks.md';
 
 let home: TestHome;
@@ -58,7 +59,7 @@ const openSession = (workflowFolders: readonly WorkflowFolder[] = [FIXTURE_FOLDE
   testBackups(home.home, { claudeDir: home.claudeDir, devflowDir: home.devflowDir, workflowFolders });
 
 /** The files a folder of one key holds, each saying which key it was built for. */
-function filesOf(key: (typeof VARIANT_KEYS)[number], folder: WorkflowFolder = FIXTURE_FOLDER): WorkflowFolderFile[] {
+function filesOf(key: VariantKey, folder: WorkflowFolder = FIXTURE_FOLDER): WorkflowFolderFile[] {
   return workflowFolderFiles(folder, key).map(file => ({ file, bytes: Buffer.from(`# ${file}\n\nbuilt for ${key}\n`) }));
 }
 
@@ -293,7 +294,7 @@ describe('a workflow that now ships as a folder', () => {
   /** The build tree of every key for the plan folder, in a package root of its own. */
   async function writePackage(): Promise<string> {
     const pkg = path.join(home.home, 'pkg');
-    for (const key of VARIANT_KEYS) {
+    for (const key of FOLDER_VARIANT_KEYS) {
       const bodies = workflowFolderFiles(PLAN_FOLDER, key).map(file => ({ file, body: `# ${file}\n\nbuilt for ${key}\n` }));
       const id = workflowBuildId(bodies);
       for (const { file, body } of bodies) {
@@ -315,8 +316,7 @@ describe('a workflow that now ships as a folder', () => {
       const backups = await openSession([PLAN_FOLDER]);
 
       const report = await installViaFileCopy({
-        curation: true,
-        compliance: true,
+        switches: ALL_SWITCHES_ON,
         plugins: [PLAN_OWNER],
         effectivePlugins: [PLAN_OWNER],
         claudeDir: home.claudeDir,

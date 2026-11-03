@@ -2,15 +2,17 @@ import { promises as fs } from 'fs';
 import { existsSync } from 'fs';
 import * as path from 'path';
 import type { PluginDefinition } from '../../core/plugins.js';
-import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, WORKFLOW_FOLDER_NAMES, buildAssetMaps, prefixSkillName, unprefixSkillName, getAllSkillNames, getAllAgentNames, getAllCommandNames, FEATURE_OWNED_SKILLS, resolveSkillInstallPlan, omitCurationGatedSkills, selectedWorkflowFolders, workflowFolderNames } from '../../core/plugins.js';
+import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, WORKFLOW_FOLDER_NAMES, buildAssetMaps, prefixSkillName, unprefixSkillName, getAllSkillNames, getAllAgentNames, getAllCommandNames, FEATURE_OWNED_SKILLS, resolveSkillInstallPlan, omitGatedSkills, selectedWorkflowFolders, workflowFolderNames } from '../../core/plugins.js';
 import { skillsDir, agentSourceDirs, rulesDir, commandSourceDirs, scriptsDir, compiledSkillRefsDir, skillRefsSourceDir, type AgentSourceDirs, type CommandSourceDirs } from '../../core/assets.js';
 import { getPackageRoot, isContainedIn } from '../../core/paths.js';
 import {
   ALL_SWITCHES_ON,
+  VARIANT_AXES,
   VARIANT_MANIFEST_REL_PATH,
   describeVariantManifestParseError,
   parseVariantManifest,
   requiredComplianceVariantFiles,
+  type VariantSwitches,
 } from '../../core/curation-variants.js';
 import { sweepOrphanedAssets, mdFileName, mdEntryName, type SweepResult } from '../../core/orphan-sweep.js';
 import { generatedReferenceManifest, installedReferenceManifest, PR_HOST_DESTINATION_ROOT, SKILL_REFS_SKILL_NAME, TRACKER_DESTINATION_ROOT, WORKFLOW_FOLDERS, type WorkflowFolder } from '../../core/mds-variants.js';
@@ -1885,41 +1887,32 @@ export interface FileCopyOptions {
   isPartialInstall: boolean;
   spinner: Spinner;
   /**
-   * The machine's SETTLED curation switch — required, with no default, because a
-   * caller that forgot it would install the wrong variant without any error.
+   * The machine's SETTLED switches, one per axis (curation, compliance, tdd) — required,
+   * with no default, because a caller that forgot them would install the wrong variant
+   * without any error. Built once from the machine state by machineSwitches and passed
+   * down whole. `devflow init` passes the value it has already settled from its flag,
+   * prompt and seed, never a raw seed or a repository's narrowing, so the files and the
+   * manifest it writes afterwards cannot disagree: the variant follows the machine switch
+   * alone.
    *
-   * D-LEARNING-VARIANT-INSTALL: false installs the curation-off variant of every
-   * command and agent that has one (dist/curation-off first, then the normal
-   * order) and leaves the apply-decisions skill out; true installs the
-   * curation-on files and the skill. `devflow init` passes the value it has
-   * already settled from its flag, prompt and seed, never the raw seed, so the
-   * files and the manifest it writes afterwards cannot disagree. A repository
-   * that narrows curation off (`features.curation: false` in its project.json)
-   * does not reach this option: the variant follows the machine switch alone, and
-   * the on variant's runtime gate covers the narrowed repository.
-   */
-  curation: boolean;
-  /**
-   * The machine's SETTLED compliance switch — required, with no default, for the same
-   * reason as {@link FileCopyOptions.curation}: a caller that forgot it would install the
-   * wrong variant without any error.
+   * D-LEARNING-VARIANT-INSTALL: an axis that is off installs the off variant of every
+   * command and agent that carries an arm on it (the trees of consultedOffKeys first, then
+   * the normal order) and leaves the skills that axis gates out (omitGatedSkills:
+   * apply-decisions with curation off, test-driven-development with tdd off); all on
+   * installs the normal files and every skill. A repository that narrows curation off
+   * (`features.curation: false` in its project.json) does not reach this option: the on
+   * variant's runtime gate covers the narrowed repository.
    *
-   * false installs the compliance-off variant of every command and agent that carries a
-   * compliance arm (dist/compliance-off, or dist/curation-compliance-off with curation
-   * off too), and REFUSES the install, before any file is written, when the variant
+   * Compliance off also REFUSES the install, before any file is written, when the variant
    * manifest (dist/variant-axes.json) is absent or invalid or when a compliance-armed
-   * prompt has no file for the machine's exact switches. true reads no manifest and
-   * installs as before. `devflow init` passes the value it has already settled from its
-   * flag, prompt and seed, never a raw seed or a repository's narrowing: the variant
-   * follows the machine switch alone, and the files and the manifest must agree.
-   *
-   * It also picks the references. false overlays the `devflow:git` references from the one
+   * prompt has no file for the machine's exact switches. Compliance on reads no manifest.
+   * It also picks the references. Off overlays the `devflow:git` references from the one
    * compliance-off source root onto the compliance-off manifest, REFUSES the install, before
    * any file is written, when that root is absent (it never falls through to the
    * compliance-on references), keeps the files of COMPLIANCE_OFF_REMOVED_SKILL_FILES out of the
    * skill copy, and removes the ones an earlier install left after it.
    */
-  compliance: boolean;
+  switches: VariantSwitches;
   /**
    * Package root the commands, agents, the variant manifest and the generated references
    * are read from. Injectable so a test installs from a temp tree instead of the live
@@ -2307,10 +2300,8 @@ export interface CommandsAndAgentsOptions {
   /** Agent name to owning plugin for `plugins` (buildAssetMaps), so a shared agent is copied once. */
   agentsMap: Map<string, string>;
   claudeDir: string;
-  /** The machine's settled curation switch — picks the command and agent variant (D-LEARNING-VARIANT-INSTALL). */
-  curation: boolean;
-  /** The machine's settled compliance switch — picks the variant too, and false refuses an install whose variant files are missing; see {@link FileCopyOptions.compliance}. */
-  compliance: boolean;
+  /** The machine's settled switches — pick the command and agent variant (D-LEARNING-VARIANT-INSTALL), and compliance off refuses an install whose variant files are missing; see {@link FileCopyOptions.switches}. */
+  switches: VariantSwitches;
   /** Package root to read from; see {@link FileCopyOptions.packageRoot}. */
   packageRoot?: string;
   /** The tracker tool servers stamped onto the Git agent's `tools:` line (D-TRACKER-SERVER-ALLOWLIST). */
@@ -2352,15 +2343,14 @@ function namedVariantFiles(items: readonly string[]): string {
  * An injected agent list wins as given.
  */
 function copySourceDirs(opts: {
-  curation: boolean;
-  compliance: boolean;
+  switches: VariantSwitches;
   packageRoot: string;
   agentSourceDirs?: AgentSourceDirs;
 }): { commands: CommandSourceDirs; agents: AgentSourceDirs } {
-  const { curation, compliance, packageRoot } = opts;
+  const { switches, packageRoot } = opts;
   return {
-    commands: commandSourceDirs({ curation, compliance }, packageRoot),
-    agents: opts.agentSourceDirs ?? agentSourceDirs(packageRoot, { curation, compliance }),
+    commands: commandSourceDirs(switches, packageRoot),
+    agents: opts.agentSourceDirs ?? agentSourceDirs(packageRoot, switches),
   };
 }
 
@@ -2387,13 +2377,12 @@ function copySourceDirs(opts: {
  * naming the build step. Only the file reads, so it leaves no partial install behind.
  */
 async function requireComplianceVariantFiles(opts: {
-  curation: boolean;
-  compliance: boolean;
+  switches: VariantSwitches;
   packageRoot: string;
   agentSourceDirs?: AgentSourceDirs;
 }): Promise<void> {
-  const { curation, compliance, packageRoot } = opts;
-  if (compliance) return;
+  const { switches, packageRoot } = opts;
+  if (switches.compliance) return;
 
   const manifestFile = path.join(packageRoot, ...VARIANT_MANIFEST_REL_PATH.split('/'));
   const remedy =
@@ -2419,12 +2408,12 @@ async function requireComplianceVariantFiles(opts: {
     );
   }
 
-  const sourceDirs = copySourceDirs({ curation, compliance, packageRoot, agentSourceDirs: opts.agentSourceDirs });
-  const machine = `curation ${curation ? 'on' : 'off'} and compliance off`;
+  const sourceDirs = copySourceDirs({ switches, packageRoot, agentSourceDirs: opts.agentSourceDirs });
+  const machine = VARIANT_AXES.map(axis => `${axis} ${switches[axis] ? 'on' : 'off'}`).join(', ');
   const missing: string[] = [];
   const shadowed: string[] = [];
   for (const host of parsed.value) {
-    const [rel] = requiredComplianceVariantFiles({ curation, compliance }, [host]);
+    const [rel] = requiredComplianceVariantFiles(switches, [host]);
     if (rel === undefined) continue;
 
     const required = path.join(packageRoot, ...rel.split('/'));
@@ -2488,17 +2477,16 @@ async function requireComplianceVariantFiles(opts: {
  * known and leaves it alone.
  */
 export async function installCommandsAndAgents(opts: CommandsAndAgentsOptions): Promise<void> {
-  const { plugins, agentsMap, claudeDir, curation, compliance, trackerServers, warn } = opts;
+  const { plugins, agentsMap, claudeDir, switches, trackerServers, warn } = opts;
   const skip = opts.skip ?? {};
   const packageRoot = opts.packageRoot ?? getPackageRoot();
 
   // Before the first write. installViaFileCopy checks earlier still, ahead of its pre-clean;
   // this call covers the caller that reaches the copy alone (the selective uninstall).
-  await requireComplianceVariantFiles({ curation, compliance, packageRoot, agentSourceDirs: opts.agentSourceDirs });
+  await requireComplianceVariantFiles({ switches, packageRoot, agentSourceDirs: opts.agentSourceDirs });
 
   const { commands: commandDirs, agents: agentDirs } = copySourceDirs({
-    curation,
-    compliance,
+    switches,
     packageRoot,
     agentSourceDirs: opts.agentSourceDirs,
   });
@@ -2580,8 +2568,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     rulesMap = new Map<string, string>(),
     isPartialInstall,
     spinner,
-    curation,
-    compliance,
+    switches,
     trackerServers = TRACKER_MCP_SERVERS_DEFAULT,
     warn = () => { /* no-op: callers without a logger still get the full InstallReport */ },
     backups,
@@ -2592,13 +2579,12 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // empty, and with it every folder step below is a no-op over an empty set.
   const folderRegistry = options.workflowFolders ?? WORKFLOW_FOLDERS;
   const folderWorkflows = workflowFolderNames(folderRegistry);
-  const folderSwitches = { curation, compliance };
   const folderFiles = new Map<string, readonly WorkflowFolderFile[]>();
   /** The files of one registered folder, read once. A failed read is a reason and never a throw. */
   const readFolder = async (folder: WorkflowFolder): Promise<WorkflowFolderRead> => {
     const cached = folderFiles.get(folder.name);
     if (cached !== undefined) return { ok: true, files: cached };
-    const read = await readWorkflowFolder(folder, folderSwitches, options.workflowFoldersRoot ?? packageRoot);
+    const read = await readWorkflowFolder(folder, switches, options.workflowFoldersRoot ?? packageRoot);
     if (read.ok) folderFiles.set(folder.name, read.files);
     return read;
   };
@@ -2612,7 +2598,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
 
   // The compliance-off refusal comes first, ahead of the pre-clean below: a refused install
   // must leave the installed tree as it found it.
-  await requireComplianceVariantFiles({ curation, compliance, packageRoot, agentSourceDirs: options.agentSourceDirs });
+  await requireComplianceVariantFiles({ switches, packageRoot, agentSourceDirs: options.agentSourceDirs });
   // The folders this run installs are read from the exact-key tree before the pre-clean for the
   // same reason, so a build that lacks one refuses the install and leaves the installed tree alone.
   await readFolders(selectedWorkflowFolders(plugins, folderWorkflows));
@@ -2621,9 +2607,9 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // root they are overlaid from. With compliance off the root is the compliance-off tree, and its
   // absence refuses the install here, before the pre-clean, so a refused install leaves the
   // installed tree as it found it and never falls through to the compliance-on references (AC-50).
-  const refsManifest = installedReferenceManifest({ compliance });
-  const refsSourceRoot = skillRefsSourceDir(compliance, packageRoot);
-  if (omitCurationGatedSkills(skillsMap, curation).has(SKILL_REFS_SKILL_NAME)) {
+  const refsManifest = installedReferenceManifest({ compliance: switches.compliance });
+  const refsSourceRoot = skillRefsSourceDir(switches.compliance, packageRoot);
+  if (omitGatedSkills(skillsMap, switches).has(SKILL_REFS_SKILL_NAME)) {
     await requireGeneratedTree(refsSourceRoot, refsManifest);
   }
 
@@ -2905,8 +2891,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     plugins: commandAgentPlugins,
     agentsMap: commandAgentMap,
     claudeDir,
-    curation,
-    compliance,
+    switches,
     packageRoot,
     trackerServers,
     agentSourceDirs: options.agentSourceDirs,
@@ -2951,15 +2936,15 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // A declared skill whose source directory is absent is a build/packaging failure
   // and throws rather than silently skipping (matches command pattern).
   //
-  // D-LEARNING-VARIANT-INSTALL: a curation-off machine skips the curation-gated
-  // skills here. The pre-clean above walked the UNFILTERED map, so on a full
+  // D-LEARNING-VARIANT-INSTALL: a machine with an axis off skips the skills that axis
+  // gates here (omitGatedSkills). The pre-clean above walked the UNFILTERED map, so on a full
   // install a leftover copy is already gone; a partial install leaves removal to
   // convergeVariantAxes, which init runs straight after this call.
   //
   // A refused skills root (a link or not a folder) gets no skill: every copy, and the overlay
   // below it, would write into the folder the link points to.
   spinner.message('Installing skills...');
-  const skillsToInstall = skillsRefused ? [] : [...omitCurationGatedSkills(skillsMap, curation).keys()];
+  const skillsToInstall = skillsRefused ? [] : [...omitGatedSkills(skillsMap, switches).keys()];
   for (const skillName of skillsToInstall) {
     const skillTarget = path.join(claudeDir, 'skills', prefixSkillName(skillName));
 
@@ -2989,7 +2974,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     await copyDirectory(
       resolved.dir,
       skillTarget,
-      compliance ? undefined : complianceOffCopyExclusions(skillName, resolved.dir),
+      switches.compliance ? undefined : complianceOffCopyExclusions(skillName, resolved.dir),
       report,
     );
     if (resolved.shadow === 'valid') {
@@ -3030,7 +3015,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // install copies over without clearing. A removal that was refused is a reported failure and
   // never an abort; the compliance converge that init runs next fails closed on the same files.
   // A refused skills root is not entered: the removal would reach files in the folder a link points to.
-  if (!compliance && !skillsRefused) {
+  if (!switches.compliance && !skillsRefused) {
     const removal = await removeComplianceOffFiles(path.join(claudeDir, 'skills'));
     for (const refusal of removal.refused) {
       report.sweepFailures.push({ kind: 'reference', name: refusal.entry, error: refusal.reason });

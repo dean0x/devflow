@@ -20,7 +20,8 @@ import { COMPLIANCE_OFF_REMOVED_SKILL_FILES } from '../../src/core/compliance-of
 import { writeManifest } from '../../src/core/manifest.js';
 import { installedReferenceManifest } from '../../src/core/mds-variants.js';
 import { getAllRuleNames } from '../../src/core/plugins.js';
-import { convergeVariantAxes, type ConvergeVariantAxesResult, type VariantMachineState } from '../../src/targets/claude-code/curation-install.js';
+import { ALL_SWITCHES_ON } from '../../src/core/curation-variants.js';
+import { convergeVariantAxes, type ConvergeVariantAxesResult } from '../../src/targets/claude-code/curation-install.js';
 import type { BackupSession } from '../../src/targets/claude-code/install-backup.js';
 import { convergeReferences } from '../../src/targets/claude-code/reference-converge.js';
 import { removeRulesFolder } from '../../src/targets/claude-code/rules-folder.js';
@@ -62,15 +63,13 @@ const SKILL_APPLY = 'skills/devflow:apply-decisions';
 const SKILL_COMPLIANCE = 'skills/devflow:compliance';
 const REFERENCES = 'skills/devflow:git/references';
 
-function machine(curation: boolean, compliance: boolean, rules: boolean): VariantMachineState {
-  return { features: { curation, compliance: { enabled: compliance, frameworks: [] }, rules } };
-}
-
 async function converge(curation: boolean, compliance: boolean, backups: BackupSession, rules = false): Promise<ConvergeVariantAxesResult> {
   return convergeVariantAxes({
     claudeDir: home.claudeDir,
     devflowDir: home.devflowDir,
-    manifest: machine(curation, compliance, rules),
+    switches: { ...ALL_SWITCHES_ON, curation, compliance },
+    frameworks: [],
+    rulesEnabled: rules,
     plugins: DEFAULT_PLUGINS,
     warn,
     backups,

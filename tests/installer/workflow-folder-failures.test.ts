@@ -14,9 +14,10 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { VARIANT_KEYS } from '../../src/core/curation-variants.js';
+import { ALL_SWITCHES_ON } from '../../src/core/curation-variants.js';
 import { RETIRED_SHIPPED } from '../../src/core/retired-shipped-names.js';
 import {
+  FOLDER_VARIANT_KEYS,
   stampBuildId,
   workflowBuildId,
   workflowFolderFiles,
@@ -32,8 +33,7 @@ import { assertTempHome } from '../setup/home-isolation.js';
 import { testBackups } from '../helpers.js';
 import { FIXTURE_FOLDER } from '../fixtures/workflow-folder.js';
 
-const SWITCHES = { curation: true, compliance: true } as const;
-const KEY = workflowFolderKey(SWITCHES);
+const KEY = workflowFolderKey(ALL_SWITCHES_ON);
 
 /** Copies of the fixture folder under other names, in registry order. */
 const ALPHA: WorkflowFolder = { ...FIXTURE_FOLDER, name: 'alpha' };
@@ -76,7 +76,7 @@ const exists = (file: string): Promise<boolean> => fs.lstat(file).then(() => tru
 
 /** The build tree of every key for one fixture folder, as the build would have written it. */
 async function writeBuiltTree(folder: WorkflowFolder): Promise<void> {
-  for (const key of VARIANT_KEYS) {
+  for (const key of FOLDER_VARIANT_KEYS) {
     const bodies = workflowFolderFiles(folder, key).map(file => ({ file, body: `# ${file}\n\nbuilt for ${key}\n` }));
     const id = workflowBuildId(bodies);
     for (const { file, body } of bodies) {
@@ -101,7 +101,7 @@ async function widenedInstall(registry: readonly WorkflowFolder[]): Promise<Inst
   await fs.mkdir(agents, { recursive: true });
   await fs.writeFile(path.join(agents, `${RETIRED_AGENT}.md`), '# an agent no plugin ships any more\n', 'utf-8');
   const report = await installViaFileCopy({
-    ...SWITCHES,
+    switches: ALL_SWITCHES_ON,
     plugins: [NAMED],
     effectivePlugins: [NAMED, ...registry.map(ownerOf)],
     claudeDir,

@@ -19,6 +19,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { installViaFileCopy, type Spinner } from '../../src/targets/claude-code/installer.js';
+import { ALL_SWITCHES_ON } from '../../src/core/curation-variants.js';
 import { testBackups } from '../helpers.js';
 import {
   formatSkillScopeSummary,
@@ -69,8 +70,7 @@ async function run(opts: {
 }) {
   const effective = opts.effectivePlugins ?? opts.plugins;
   return installViaFileCopy({
-    curation: true,
-    compliance: true,
+    switches: ALL_SWITCHES_ON,
     plugins: opts.plugins,
     effectivePlugins: effective,
     claudeDir,
@@ -631,8 +631,7 @@ describe('the agent copy loop leaves the Tracker agent to convergeTrackerArtifac
 
   async function installAll() {
     return installViaFileCopy({
-      curation: true,
-      compliance: true,
+      switches: ALL_SWITCHES_ON,
       plugins: everyPlugin(),
       effectivePlugins: everyPlugin(),
       claudeDir,
