@@ -97,6 +97,7 @@ export function collectKeptRuleDefects(tdd: string, code: string): string[] {
   if (!code.includes('**Regression test rule**: A regression fix without a failing-then-passing regression test is INCOMPLETE')) {
     out.push('the bug-fix regression rule is gone')
   }
+  if (!code.includes('Type everything.')) out.push('the typing rule is gone')
   for (const want of [
     'one failing test first for each acceptance-criterion behaviour',
     'an edge-case test only for a named, concrete case',
@@ -229,6 +230,7 @@ describe('the proportional-test rule replaces the cover-everything line, and the
     expect(collectKeptRuleDefects(tdd.replace('**Tests first, always.**', ''), code)).toEqual(['the TDD Iron Law is gone'])
     expect(collectKeptRuleDefects(tdd.replace('### Step 1: RED', '### Step 1'), code)).toEqual(['the TDD RED step is gone'])
     expect(collectKeptRuleDefects(tdd, code.replace('**Regression test rule**', '**Rule**'))).toEqual(['the bug-fix regression rule is gone'])
+    expect(collectKeptRuleDefects(tdd, code.replace('Type everything.', ''))).toEqual(['the typing rule is gone'])
     expect(collectKeptRuleDefects(tdd, code.replace('an edge-case test only for a named, concrete case', 'edge cases'))).toEqual([
       'the Code agent does not say: an edge-case test only for a named, concrete case',
     ])
