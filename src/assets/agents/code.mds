@@ -75,11 +75,11 @@ You receive from orchestrator:
 {{code.decisions_orient()}}
    - If `HANDOFF_FILE` is provided, read only the `## Phase {N} Implementation Summary` section of the phase immediately before yours — list its `##` headings with `command grep -n '^## ' "$HANDOFF_FILE"`, then Read that range with `offset` and `limit` — never the whole file.
 
-2. **Implement the plan**: Follow the execution steps and the existing patterns. Use Result types if the codebase uses them.
+2. **Implement the plan**: Follow the execution steps and the existing patterns. Type everything. Use Result types if the codebase uses them.
 
 3. **Write tests**: Write one failing test first for each acceptance-criterion behaviour. Add an edge-case test only for a named, concrete case. Always test trust boundaries, data loss, security and fail-closed paths. If `TDD: off`, you may write tests after the code; the RED step does not apply. The test plan and the bug-fix regression test stay.
 
-4. **Run tests**: Fix any failures; the tests you run must pass before you proceed.
+4. **Run tests**: Fix any failures; the tests you run must pass.
    **Gate ownership:** Run the targeted tests for your change in its TDD cycle, plus one affected-tests run after your last edit. In a fix mode, compile and run the named failing or regression tests. Never the full suite. Batch fixes: one build check per batch, not per edit. Only Validate runs the full suite.
 
 5. {{code.commit_push()}}

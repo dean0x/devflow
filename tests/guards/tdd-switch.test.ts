@@ -3,7 +3,8 @@
  *
  *   - `/implement` passes `TDD: {TDD}`, the settings-line value, to every Code spawn, in every build.
  *   - The Code body says what `TDD: off` allows (tests may follow the code, no RED step) and what stays
- *     (the test plan and the bug-fix regression test). Its test-first rule stays for the default.
+ *     (the test plan and the bug-fix regression test). Its test-first rule and its typing rule stay.
+ *   - The preloaded test-driven-development skill lists `TDD: off` among the cases where test first does not bind.
  *   - The switch is machine only: the repository config parser has no `tdd` switch, and no compiled prompt
  *     reads the manifest or a config file for it.
  *
@@ -13,6 +14,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { createRequire } from 'module'
+import * as fs from 'fs'
 import * as path from 'path'
 import { ROOT, requireDistFile, resolveAgentSource, resolveCurationOffSource, resolveVariantOffSource } from '../helpers.js'
 
@@ -104,8 +106,29 @@ describe('the Code body', () => {
     expect(collectCodeTddDefects('x', code.replace('Write one failing test first for each acceptance-criterion behaviour', ''))).toEqual(['x: the default test-first rule is gone'])
   })
 
+  it.each(BODIES)('%s keeps the typing rule', (_label, code) => {
+    expect(code).toContain('Type everything.')
+  })
+
   it('the Fix and Refactor bodies carry no TDD rule: only the implement spawn passes the value', () => {
     for (const name of ['fix', 'refactor']) expect(resolveAgentSource(name).content, name).not.toContain('TDD: off')
+  })
+})
+
+describe('the preloaded TDD skill yields to TDD: off', () => {
+  const SKILL = fs.readFileSync(path.join(ROOT, 'src/assets/skills/test-driven-development/SKILL.md'), 'utf8')
+  const exceptions = (text: string): string => text.split('## When TDD Does Not Apply')[1]?.split('\n## ')[0] ?? ''
+
+  it('lists `TDD: off` in the spawn as a case where test first does not bind', () => {
+    expect(exceptions(SKILL)).toContain('**`TDD: off` in the spawn**: tests may follow the code')
+  })
+
+  it('known-bad probe: a skill without the exception is reported', () => {
+    expect(exceptions(SKILL.replace('**`TDD: off` in the spawn**', '**other**'))).not.toContain('`TDD: off`')
+  })
+
+  it('keeps the Iron Law for the default', () => {
+    expect(SKILL).toContain('> **Tests first, always.**')
   })
 })
 

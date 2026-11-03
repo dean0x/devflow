@@ -19,7 +19,7 @@ activation:
 
 # Test-Driven Development
 
-Use the RED-GREEN-REFACTOR cycle for all implementation work. Tests define the design. Code satisfies the tests. Refactoring improves the design without changing behavior.
+Use the RED-GREEN-REFACTOR cycle for all implementation work. Refactoring improves the design without changing behavior.
 
 ## Iron Law
 
@@ -43,7 +43,7 @@ Write a test that describes the behavior you want. Run it. Watch it fail. The fa
 
 Write the simplest production code that makes the failing test pass. Hardcode first if that is simplest; generalize when the next test forces it. No code for later, no optimizing, no cleanup.
 
-**Checkpoint:** All affected tests pass. If any test fails, fix it before moving on.
+**Checkpoint:** All affected tests pass.
 
 ### Step 3: REFACTOR — Improve Without Changing Behavior
 
@@ -93,12 +93,13 @@ Follow the project's test layout, and import the module under test, not its help
 - **Non-code tasks**: documentation, configuration, CI changes
 - **Exploratory prototyping**: the user explicitly says "just spike this" or "prototype"
 - **Existing test suite changes**: modifying tests themselves (devflow:testing skill applies instead)
+- **`TDD: off` in the spawn**: tests may follow the code; the Code agent's rules say what stays
 
 When you skip TDD, state the reason from this list: "Skipping TDD because: [reason]."
 
 ## By Mode
 
-- **IMPLEMENT**: write the failing test before production code, one behavior at a time. The Code agent preloads this skill.
+- **IMPLEMENT**: write the failing test before production code, one behavior at a time.
 - **DEBUG**: write a test that reproduces the bug first, then fix.
 - **PLAN**: the plan has a test strategy and orders test files first.
 - **RESOLVE**: the Code agent (issue-fix mode) writes a failing-then-passing regression test for every fix.
