@@ -116,7 +116,7 @@ The host and partial rosters are named in `tests/fixtures/mds-manifest.ts` rathe
 ### Commands
 
 - Commands are orchestration-only — spawn agents, never do agent work in main session. `/code-review` spawns a language focus only when the installer stamped it into the installed command (re-stamped on every install and `uninstall --plugin`).
-- Author as `.mds` sources in `src/assets/commands/`; compiled output lands in `dist/commands/`. A host or partial with curation or compliance arms also builds `dist/curation-off/`, `dist/compliance-off/` and `dist/curation-compliance-off/`; a machine installs the build for its two switches, and `devflow curation` and `devflow compliance` converge to it
+- Author as `.mds` sources in `src/assets/commands/`; compiled output lands in `dist/commands/`. A host or partial with curation, compliance or tdd arms also builds one `dist/<axes>-off/` tree for each set of its axes that a machine can turn off (for example `dist/curation-off/`, `dist/curation-compliance-off/`, `dist/tdd-off/`); a machine installs the build for its switches, and `devflow curation`, `devflow compliance` and `devflow tdd` converge to it
 
 ### Commits
 

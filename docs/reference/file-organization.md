@@ -209,7 +209,7 @@ Assets live once in `src/assets/` and install to the user's `~/.claude/` — no 
 | Agents (generator host) | `src/assets/agents/{name}.mds` → `dist/agents/{name}.md` | `~/.claude/agents/devflow/{name}.md` | `npm run build:mds` |
 | Rules | `src/assets/rules/{name}.md` | `~/.claude/rules/devflow/{name}.md` | None — edit → init |
 | Commands | `src/assets/commands/{name}.mds` → `dist/commands/{name}.md` | `~/.claude/commands/devflow/{name}.md` | `npm run build:mds` |
-| Off variants (curation, compliance, both) | `dist/{curation-off,compliance-off,curation-compliance-off}/{commands,agents}/{name}.md`, built only for a host or partial with an arm on each axis that the tree turns off | `~/.claude/{commands,agents}/devflow/{name}.md`, in place of the file above, on a machine with that axis off | `npm run build:mds` |
+| Off variants (one tree for each set of axes turned off) | `dist/{curation-off,compliance-off,curation-compliance-off,tdd-off,curation-tdd-off,compliance-tdd-off,curation-compliance-tdd-off}/{commands,agents}/{name}.md`, built only for a host or partial with an arm on each axis that the tree turns off | `~/.claude/{commands,agents}/devflow/{name}.md`, in place of the file above, on a machine with that axis off | `npm run build:mds` |
 | Variant manifest | `dist/variant-axes.json`, written by every build | Not installed; the installer reads it when compliance is off | `npm run build:mds` |
 | Skill references (generated) | `src/assets/mds/**/*.mds` → `dist/skills/git/references/**` | `~/.claude/skills/devflow:git/references/**` | `npm run build:mds` |
 | Skill references (generated, compliance off) | The same modules → `dist/compliance-off/skills/git/references/**` | `~/.claude/skills/devflow:git/references/**`, in place of the row above, on a machine with compliance off | `npm run build:mds` |
@@ -221,39 +221,45 @@ Assets live once in `src/assets/` and install to the user's `~/.claude/` — no 
 
 ### Variant build
 
-The build splits each compiled prompt on two axes: curation and compliance. A marker sits alone on its line, in the host or in a partial that the host expands. Each axis has three markers:
+The build splits each compiled prompt on three axes: curation, compliance and tdd. The axes are one table, `VARIANT_AXES` and `VARIANT_STATES` in `src/core/curation-variants.ts`. A marker sits alone on its line, in the host or in a partial that the host expands. Each axis has three markers:
 
 | Axis | Markers |
 |------|---------|
 | Curation | `<!-- curation:on -->`, `<!-- curation:off -->`, `<!-- curation:end -->` |
 | Compliance | `<!-- compliance:on -->`, `<!-- compliance:off -->`, `<!-- compliance:end -->` |
+| TDD | `<!-- tdd:on -->`, `<!-- tdd:off -->`, `<!-- tdd:end -->` |
 
-An `on` arm stays only in the variants that keep its axis on. An `off` arm stays only in the variants that turn its axis off. One axis can nest inside an arm of the other axis. Arms of two axes never overlap. The splitter is `src/core/curation-variants.ts`, and `scripts/build-mds.ts` writes the files.
+An `on` arm stays only in the variants that keep its axis on. An `off` arm stays only in the variants that turn its axis off. One axis can nest inside an arm of another axis. Arms of two axes never overlap. The splitter is `src/core/curation-variants.ts`, and `scripts/build-mds.ts` writes the files. Only the Code agent host carries tdd arms. A tdd marker in a reference module or a workflow folder file is a build error.
 
-The build writes up to four outputs for each host:
+The build writes one output for each set of the host's axes that a machine can turn off:
 
-| Output | Curation | Compliance | Written for |
-|--------|----------|------------|-------------|
-| `dist/commands/`, `dist/agents/` (normal) | on | on | Every host |
-| `dist/curation-off/{commands,agents}/` | off | on | A host with a curation arm |
-| `dist/compliance-off/{commands,agents}/` | on | off | A host with a compliance arm |
-| `dist/curation-compliance-off/{commands,agents}/` | off | off | A host with both arms |
-| `dist/compliance-off/skills/git/references/` | n/a | off | Every reference file of the compliance-off manifest |
+| Output | Curation | Compliance | TDD | Written for |
+|--------|----------|------------|-----|-------------|
+| `dist/commands/`, `dist/agents/` (normal) | on | on | on | Every host |
+| `dist/curation-off/{commands,agents}/` | off | on | on | A host with a curation arm |
+| `dist/compliance-off/{commands,agents}/` | on | off | on | A host with a compliance arm |
+| `dist/curation-compliance-off/{commands,agents}/` | off | off | on | A host with both arms |
+| `dist/tdd-off/{commands,agents}/` | on | on | off | A host with a tdd arm |
+| `dist/curation-tdd-off/{commands,agents}/` | off | on | off | A host with a curation arm and a tdd arm |
+| `dist/compliance-tdd-off/{commands,agents}/` | on | off | off | A host with a compliance arm and a tdd arm |
+| `dist/curation-compliance-tdd-off/{commands,agents}/` | off | off | off | A host with all three arms |
+| `dist/compliance-off/skills/git/references/` | n/a | off | n/a | Every reference file of the compliance-off manifest |
 
-A host with no arm on an axis has no variant for that axis. A machine with that axis off then uses the variant for its other axis, or the normal file. The three off trees are siblings, so the removal of stale files in one tree never reaches another tree.
+A host with no arm on an axis has no variant for that axis. A machine with that axis off then uses the variant for its other axes, or the normal file. The off trees are siblings, so the removal of stale files in one tree never reaches another tree. Workflow folders carry no tdd arm, so the build writes them only under the tdd-on keys.
 
 The compliance-off references tree is complete, not a patch over `dist/skills/git/references/`. It holds every file of `installedReferenceManifest({ compliance: false })` in `src/core/mds-variants.ts`: the files of the posting operations (`POSTING_OPS`) and the publication-gate document are absent, and a module with no compliance arm is a byte copy of the compliance-on file. It is the one source root of a compliance-off install (`COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR`, chosen by `skillRefsSourceDir` in `src/core/assets.ts`). When that root is absent, the install refuses before it writes a file and never falls back to the compliance-on references. The build records each off reference as written, so the orphan prune of `dist/compliance-off/` keeps it. Three flat files sit outside the pruned `pr/` and `tracker/` subtrees, and a compliance-off install keeps them out of the skill copy and removes any an earlier install left, by exact name, through `COMPLIANCE_OFF_REMOVED_SKILL_FILES` in `src/core/compliance-off-files.ts`: `publication-gate.md`, `github-posting.md` and `implement-evidence-asks.md`. The copy exclusion, the removal and the restore are in `src/targets/claude-code/compliance-off-files.ts`.
 
-The build also writes the variant manifest, `dist/variant-axes.json`. It has `{ "version": 1, "hosts": { "<kind>/<name>": { "curation": <bool>, "compliance": <bool> } } }`, with one entry for each compiled host. Each flag says whether the host carries an arm on that axis.
+The build also writes the variant manifest, `dist/variant-axes.json`. It has `{ "version": 1, "hosts": { "<kind>/<name>": { "curation": <bool>, "compliance": <bool>, "tdd": <bool> } } }`, with one entry for each compiled host. Each flag says whether the host carries an arm on that axis. An entry with no `tdd` flag reads as no tdd arm.
 
-The installer takes the first file it finds in this order:
+The installer takes the first file it finds among the trees whose off axes are all off on the machine, the tree with the most off axes first, then the normal file (`offVariantDirs` in `src/core/assets.ts`). For example:
 
 | Machine | Source order |
 |---------|--------------|
 | Curation off and compliance off | `dist/curation-compliance-off/`, `dist/curation-off/`, `dist/compliance-off/`, then the normal file |
 | Compliance off only | `dist/compliance-off/`, then the normal file |
 | Curation off only | `dist/curation-off/`, then the normal file |
-| Both on | The normal file |
+| Curation off and tdd off | `dist/curation-tdd-off/`, `dist/curation-off/`, `dist/tdd-off/`, then the normal file |
+| All on | The normal file |
 
 When compliance is off, the installer first reads `dist/variant-axes.json`. For each host that carries a compliance arm, it needs the file that was built for the exact switches of the machine. On a machine with both axes off, a host with both arms needs its `curation-compliance-off` file and never its `curation-off` file. The install stops before it writes any file when the manifest is absent or not valid, or when one of these files is absent. The error names `npm run build:mds`. A host with no compliance arm is not checked. `npm run build:cli` alone does not write the manifest or the trees.
 
