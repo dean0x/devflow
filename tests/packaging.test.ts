@@ -473,9 +473,10 @@ describe('Guard 5 (files[] coverage): package.json includes required directories
  *      both-off tree (dist/curation-compliance-off/). A scoped pack of seeded files
  *      proves the `files` field carries a file under each tree, whatever the
  *      rosters hold.
- *  (g) Carry exactly the tdd-off variants the tdd roster names (dist/tdd-off/ and
- *      dist/curation-tdd-off/, the Code agent): a tdd-off machine installs them in
- *      place of the tdd-on prompt.
+ *  (g) Carry exactly the tdd-off variants the tdd roster names (dist/tdd-off/,
+ *      dist/curation-tdd-off/, dist/compliance-tdd-off/ and
+ *      dist/curation-compliance-tdd-off/; the Code agent and Triage): a tdd-off machine
+ *      installs them in place of the tdd-on prompt.
  *
  * Assert on parsed `npm pack --dry-run --json` output (structured
  * data), not on pipeline tails or partial string matching.
@@ -705,7 +706,7 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
     ).toEqual([...BOTH_OFF_FILES].sort());
   });
 
-  it('tarball carries exactly the roster\'s tdd-off variants, the Code agent in dist/tdd-off/ and dist/curation-tdd-off/', () => {
+  it('tarball carries exactly the roster\'s tdd-off variants in all four tdd trees', () => {
     const files = getPackFiles();
     expect(
       files.length,
@@ -724,7 +725,11 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
     expect(collectOffTreeFiles(files, COMPLIANCE_TDD_OFF_OUTPUT_DIR)).toEqual([...COMPLIANCE_TDD_OFF_FILES].sort());
     expect(collectOffTreeFiles(files, ALL_OFF_OUTPUT_DIR)).toEqual([...ALL_OFF_FILES].sort());
     expect(TDD_OFF_FILES, 'the roster is empty: the comparison is vacuous').toContain('agents/code.md');
+    expect(TDD_OFF_FILES).toContain('agents/triage.md');
     expect(CURATION_TDD_OFF_FILES).toContain('agents/code.md');
+    expect(CURATION_TDD_OFF_FILES).toContain('agents/triage.md');
+    expect(COMPLIANCE_TDD_OFF_FILES, 'Triage is the host with a compliance arm and a tdd arm').toEqual(['agents/triage.md']);
+    expect(ALL_OFF_FILES).toEqual(['agents/triage.md']);
   });
 
   it('known-bad probe: the collector keeps the tdd trees apart from the curation and compliance trees', () => {

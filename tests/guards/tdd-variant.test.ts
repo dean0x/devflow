@@ -1,5 +1,6 @@
 /**
- * The tdd variants of the Code agent (#758).
+ * The tdd variants of the Code agent and Triage (#758). Triage says the Code agent works
+ * test-first only with tdd on; its four tdd-off files say it writes one test for each behaviour.
  *
  * `features.tdd` picks which Code file a machine installs. With tdd on, the Code agent preloads the
  * test-driven-development skill and its steps say "write one failing test first" and name the "TDD
@@ -32,6 +33,7 @@ import { describe, it, expect } from 'vitest'
 
 import { ROOT, resolveAgentSource, resolveCurationOffSource, resolveVariantOffSource } from '../helpers.js'
 import { TDD_GATED_SKILLS } from '../../src/core/plugins.js'
+import type { OffVariantKey } from '../../src/core/curation-variants.js'
 
 /** The skill folders a tdd-off machine keeps: every shipped skill except the gated ones. */
 const SKILL_ROOTS = ['src/assets/skills', 'dist/skills'] as const
@@ -244,6 +246,71 @@ describe('the skills a tdd-off machine keeps (#758)', () => {
     const bibliography = { rel: TDD_TEXT_ALLOWED_FILES[0], text: 'Test Driven Development: By Example, TDD' }
     expect(collectSkillTddText([bibliography])).toEqual([])
     expect(collectSkillTddText([{ ...bibliography, rel: 'src/assets/skills/qa/references/other.md' }])).not.toEqual([])
+  })
+})
+
+const TRIAGE_ON_LINE = '**Careful** (Code agent works test-first):'
+const TRIAGE_OFF_LINE = '**Careful** (Code agent writes one test for each behaviour, with the code):'
+
+/** The eight Triage files: each tdd-off tree against the tdd-on tree with the same curation and compliance state. */
+const TRIAGE_PAIRS: ReadonlyArray<{ label: string; onKey: OffVariantKey | null; offKey: OffVariantKey }> = [
+  { label: 'curation on, compliance on', onKey: null, offKey: 'tdd-off' },
+  { label: 'curation off, compliance on', onKey: 'curation-off', offKey: 'curation-tdd-off' },
+  { label: 'curation on, compliance off', onKey: 'compliance-off', offKey: 'compliance-tdd-off' },
+  { label: 'curation off, compliance off', onKey: 'both-off', offKey: 'curation-compliance-tdd-off' },
+]
+
+function triageFile(key: OffVariantKey | null): string {
+  if (key === null) return resolveAgentSource('triage').content
+  const text = resolveVariantOffSource(key, 'agents', 'triage')
+  if (text === null) throw new Error(`dist/${key}/agents/triage.md is absent — run \`npm run build\` first`)
+  return text
+}
+
+/** Named collector: how a Triage file falls short of the tdd-off shape. */
+export function collectTriageTddOffDefects(text: string): string[] {
+  const out: string[] = []
+  if (/test-first/i.test(text)) out.push('says test-first')
+  if (!text.includes(TRIAGE_OFF_LINE)) out.push('lacks the tdd-off Careful line')
+  return out
+}
+
+/** Named collector: how a Triage file falls short of the tdd-on shape. */
+export function collectTriageTddOnDefects(text: string): string[] {
+  const out: string[] = []
+  if (!text.includes(TRIAGE_ON_LINE)) out.push('lacks the tdd-on Careful line')
+  if (text.includes(TRIAGE_OFF_LINE)) out.push('carries the tdd-off Careful line')
+  return out
+}
+
+describe('the Triage tdd arm (#758)', () => {
+  it.each(TRIAGE_PAIRS)('with $label: the tdd-off file never says the Code agent works test-first', ({ offKey }) => {
+    const off = triageFile(offKey)
+    expect(off.length, 'the file was read (non-vacuity)').toBeGreaterThan(1000)
+    expect(collectTriageTddOffDefects(off)).toEqual([])
+  })
+
+  it.each(TRIAGE_PAIRS)('with $label: the tdd-on file keeps its line', ({ onKey }) => {
+    expect(collectTriageTddOnDefects(triageFile(onKey))).toEqual([])
+  })
+
+  it.each(TRIAGE_PAIRS)('with $label: the tdd-off file is the tdd-on file with that one line replaced', ({ onKey, offKey }) => {
+    const on = triageFile(onKey)
+    expect(on.replace(TRIAGE_ON_LINE, TRIAGE_OFF_LINE), 'the replacement changes the on file (non-vacuity)').not.toBe(on)
+    expect(triageFile(offKey)).toBe(on.replace(TRIAGE_ON_LINE, TRIAGE_OFF_LINE))
+  })
+
+  it('known-bad probe: the old wording in a tdd-off file, a lost off line and a tdd-on file with the off line are each reported', () => {
+    const off = triageFile('tdd-off')
+    const on = triageFile(null)
+    expect(collectTriageTddOffDefects(off)).toEqual([])
+    expect(collectTriageTddOffDefects(off.replace(TRIAGE_OFF_LINE, TRIAGE_ON_LINE))).toEqual(['says test-first', 'lacks the tdd-off Careful line'])
+    expect(collectTriageTddOffDefects(off.replace(TRIAGE_OFF_LINE, ''))).toEqual(['lacks the tdd-off Careful line'])
+    expect(collectTriageTddOnDefects(on)).toEqual([])
+    expect(collectTriageTddOnDefects(on.replace(TRIAGE_ON_LINE, TRIAGE_OFF_LINE))).toEqual([
+      'lacks the tdd-on Careful line',
+      'carries the tdd-off Careful line',
+    ])
   })
 })
 

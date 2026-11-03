@@ -118,10 +118,16 @@ const OFF_TREE_DIRS: ReadonlyArray<(kind: (typeof PROMPT_VARIANT_KINDS)[number])
 ]
 
 /**
- * The tdd trees that hold files, agents only: the Code agent is the one host with tdd arms,
- * and it has a curation arm and no compliance arm.
+ * The tdd trees that hold files, agents only: the Code agent (curation arm, no compliance
+ * arm) and Triage (curation and compliance arms) are the hosts with tdd arms, so all four
+ * tdd trees hold an agent.
  */
-const TDD_AGENT_TREE_DIRS: readonly string[] = [variantOffDir('tdd-off', 'agents'), variantOffDir('curation-tdd-off', 'agents')]
+const TDD_AGENT_TREE_DIRS: readonly string[] = [
+  variantOffDir('tdd-off', 'agents'),
+  variantOffDir('curation-tdd-off', 'agents'),
+  variantOffDir('compliance-tdd-off', 'agents'),
+  variantOffDir('curation-compliance-tdd-off', 'agents'),
+]
 
 /** The installed path of every `.md` file in one off tree directory; an absent directory throws. */
 function offTreeFiles(dir: string, kind: (typeof PROMPT_VARIANT_KINDS)[number]): string[] {

@@ -6,10 +6,11 @@
  * a wiring mistake between the CLI, the installer and the converge. Every claim here is about what a
  * user's ~/.claude holds afterwards, on each of the four curation and compliance machines:
  *
- *   off   the installed Code agent is the tdd-off file of the machine, the test-driven-development
- *         skill folder is gone, and nothing else under ~/.claude changed (the curation and
- *         compliance files, the other skills and the other agents);
- *   on    every file under ~/.claude is byte-identical to the first install, the Code agent and the
+ *   off   the installed Code agent and Triage are the tdd-off files of the machine (Triage the one
+ *         for its curation and compliance state), the test-driven-development skill folder is
+ *         gone, and nothing else under ~/.claude changed (the curation and compliance files, the
+ *         other skills and the other agents);
+ *   on    every file under ~/.claude is byte-identical to the first install, both agents and the
  *         skill folder included.
  *
  * HOME safety: every spawn gets its env from the shared `sandboxEnv(tmpHome)`, which pins HOME to a
@@ -43,6 +44,7 @@ const QUIET = ['--no-ambient', '--no-memory', '--no-knowledge', '--no-rules'] as
 
 const TDD_SKILL_PREFIX = 'skills/devflow:test-driven-development/';
 const CODE_AGENT = 'agents/devflow/code.md';
+const TRIAGE_AGENT = 'agents/devflow/triage.md';
 const ANSI = /\u001b\[[0-9;]*m/g;
 
 let tmpHome: string;
@@ -100,11 +102,19 @@ async function installedRecord(): Promise<{ tdd?: boolean } | undefined> {
   return manifest.installedVariants;
 }
 
-/** The built file the Code agent must equal on a machine: Code carries a curation arm and a tdd arm, no compliance arm. */
-async function builtCode(machine: VariantSwitches): Promise<Buffer> {
-  const key = machineVariantKey(machine, { curation: true, compliance: false, tdd: true });
-  return fs.readFile(path.join(ROOT, key === 'on' ? path.join('dist', 'agents', 'code.md') : variantOffRelPath(key, 'agents', 'code.md')));
+/** The built file an agent must equal on a machine, from the axes its host carries an arm on. */
+async function builtAgent(name: string, arms: VariantSwitches, machine: VariantSwitches): Promise<Buffer> {
+  const key = machineVariantKey(machine, arms);
+  return fs.readFile(path.join(ROOT, key === 'on' ? path.join('dist', 'agents', `${name}.md`) : variantOffRelPath(key, 'agents', `${name}.md`)));
 }
+
+/** Code carries a curation arm and a tdd arm, no compliance arm. */
+const builtCode = (machine: VariantSwitches): Promise<Buffer> =>
+  builtAgent('code', { curation: true, compliance: false, tdd: true }, machine);
+
+/** Triage carries a curation, a compliance and a tdd arm. */
+const builtTriage = (machine: VariantSwitches): Promise<Buffer> =>
+  builtAgent('triage', { curation: true, compliance: true, tdd: true }, machine);
 
 const MACHINES: readonly { readonly curation: boolean; readonly compliance: boolean }[] = [
   { curation: true, compliance: false },
@@ -136,7 +146,9 @@ describe('devflow tdd --disable then --enable (#758, AC-4)', () => {
     const first = await digestOfClaudeDir();
     const firstCode = await fs.readFile(path.join(claudeDir(), CODE_AGENT));
     const switches: VariantSwitches = { ...machine, tdd: true };
+    const firstTriage = await fs.readFile(path.join(claudeDir(), TRIAGE_AGENT));
     expect(firstCode.equals(await builtCode(switches)), `${labelOf(machine)}: a fresh install holds the tdd-on Code file`).toBe(true);
+    expect(firstTriage.equals(await builtTriage(switches)), `${labelOf(machine)}: a fresh install holds the tdd-on Triage file`).toBe(true);
     expect([...first.keys()].filter(file => file.startsWith(TDD_SKILL_PREFIX)).length, 'the skill is installed (non-vacuity)').toBeGreaterThan(0);
 
     const disabled = okCli('tdd', '--disable');
@@ -145,9 +157,12 @@ describe('devflow tdd --disable then --enable (#758, AC-4)', () => {
     const offCode = await fs.readFile(path.join(claudeDir(), CODE_AGENT));
     expect(offCode.equals(await builtCode({ ...machine, tdd: false })), `${labelOf(machine)}: the Code agent is the tdd-off file`).toBe(true);
     expect(offCode.equals(firstCode), 'the tdd-off file differs from the tdd-on file').toBe(false);
+    const offTriage = await fs.readFile(path.join(claudeDir(), TRIAGE_AGENT));
+    expect(offTriage.equals(await builtTriage({ ...machine, tdd: false })), `${labelOf(machine)}: Triage is the tdd-off file for this machine's curation and compliance state`).toBe(true);
+    expect(offTriage.equals(firstTriage), 'the tdd-off Triage file differs from the tdd-on file').toBe(false);
     const turnedOff = differences(first, off);
     expect(turnedOff.added, 'no file is added').toEqual([]);
-    expect(turnedOff.changed, 'only the Code agent changes: the curation and compliance files stay').toEqual([CODE_AGENT]);
+    expect(turnedOff.changed, 'only the Code agent and Triage change: the other curation and compliance files stay').toEqual([CODE_AGENT, TRIAGE_AGENT]);
     expect(turnedOff.removed.length, 'the skill folder is gone').toBeGreaterThan(0);
     expect(turnedOff.removed.every(file => file.startsWith(TDD_SKILL_PREFIX)), `only the skill folder is removed: ${turnedOff.removed.join(', ')}`).toBe(true);
     expect((await features()).tdd).toBe(false);

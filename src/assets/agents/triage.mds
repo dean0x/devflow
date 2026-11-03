@@ -108,7 +108,11 @@ MUST become a tracked manage-debt ticket. Never report-only.
 - Adding tests or improving logging
 - Security fixes in isolated scope
 
+<!-- tdd:on -->
 **Careful** (Code agent works test-first):
+<!-- tdd:off -->
+**Careful** (Code agent writes one test for each behaviour, with the code):
+<!-- tdd:end -->
 - Public API or function signature changes
 - Shared state or data model modifications
 - Changes touching more than 3 files

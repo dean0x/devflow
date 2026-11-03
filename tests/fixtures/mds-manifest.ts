@@ -338,16 +338,19 @@ export const COMPLIANCE_OFF_FILES: readonly string[] = COMPLIANCE_VARIANT_HOSTS.
 
 /**
  * The hosts whose compiled body carries a tdd arm, and therefore have a tdd-off variant:
- * each is `<kind>/<name>`, the spelling of the other rosters. Only the Code agent has
- * one: its preload of the test-driven-development skill and the test-first wording of
- * its steps 3 and 4. Fix and Refactor are not test-first builds and carry no arm.
+ * each is `<kind>/<name>`, the spelling of the other rosters. Two agents have one: the
+ * Code agent (its preload of the test-driven-development skill and the test-first
+ * wording of its steps 3 and 4) and Triage (its Careful tier says the Code agent works
+ * test-first only while tdd is on). Fix and Refactor are not test-first builds and carry
+ * no arm. Triage also has a curation and a compliance arm, so it is the one host in all
+ * four tdd trees.
  *
  * The build's variant manifest, its printed count, the tdd trees and the packed tarball
  * are asserted against it, so an arm added without a row, or a row left after its arm
  * goes, turns one of them red. A host joins the roster in the commit that adds its first
  * tdd arm.
  */
-export const TDD_VARIANT_HOSTS: readonly string[] = ['agents/code'];
+export const TDD_VARIANT_HOSTS: readonly string[] = ['agents/code', 'agents/triage'];
 
 /** The `dist/tdd-off/`-relative file of every host in TDD_VARIANT_HOSTS. */
 export const TDD_OFF_FILES: readonly string[] = TDD_VARIANT_HOSTS.map(h => `${h}.md`);

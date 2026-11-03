@@ -40,7 +40,10 @@ import {
   OFF_VARIANT_KEYS,
   containsCurationMarker,
   containsVariantMarker,
+  parseVariantManifest,
+  requiredComplianceVariantFiles,
   variantOffRelPath,
+  VARIANT_MANIFEST_REL_PATH,
 } from '../../src/core/curation-variants.js';
 
 vi.setConfig({ testTimeout: 120_000 });
@@ -1228,6 +1231,23 @@ describe('the built dist/ tree', () => {
       { name: 'dist/agents/e.md', content: 'compliance:on is a setting here; <!-- an ordinary comment -->\n' },
     ];
     expect(collectSurvivingMarkers(seeded)).toEqual(['dist/commands/a.md', 'dist/agents/b.md', 'dist/commands/d.md']);
+  });
+
+  it('a compliance-off machine with tdd off finds the real Triage file of its exact switches, which is built', () => {
+    const parsed = parseVariantManifest(readFileSync(path.join(ROOT, VARIANT_MANIFEST_REL_PATH), 'utf-8'));
+    expect(parsed.ok, 'the built manifest parses').toBe(true);
+    if (!parsed.ok) return;
+    const triage = parsed.value.filter(h => h.kind === 'agents' && h.name === 'triage');
+    expect(triage.map(h => h.axes), 'Triage carries all three arms').toEqual([{ curation: true, compliance: true, tdd: true }]);
+    const expected = [
+      [{ curation: true, compliance: false, tdd: false }, 'dist/compliance-tdd-off/agents/triage.md'],
+      [{ curation: false, compliance: false, tdd: false }, 'dist/curation-compliance-tdd-off/agents/triage.md'],
+      [{ curation: true, compliance: false, tdd: true }, 'dist/compliance-off/agents/triage.md'],
+    ] as const;
+    for (const [machine, file] of expected) {
+      expect(requiredComplianceVariantFiles(machine, triage), JSON.stringify(machine)).toEqual([file]);
+      expect(readFileSync(path.join(ROOT, file), 'utf-8').length, `${file} is built`).toBeGreaterThan(1000);
+    }
   });
 
   it('CURATION_VARIANT_HOSTS names each host as <kind>/<name> with a known kind and no duplicate', () => {
