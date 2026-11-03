@@ -27,6 +27,7 @@ import {
   parseFrameworkList,
 } from '../src/core/compliance.js';
 import { bothOffDir, compiledComplianceOffSkillRefsDir, compiledSkillRefsDir, complianceOffDir, curationOffDir, skillsDir } from '../src/core/assets.js';
+import { ALL_SWITCHES_ON } from '../src/core/curation-variants.js';
 import { installRecordFor, postingStatus, readInstalledVariants } from '../src/core/installed-variants.js';
 import { readManifest, type ManifestData } from '../src/core/manifest.js';
 import { getManifestLockPath } from '../src/core/manifest-lock.js';
@@ -242,6 +243,7 @@ async function seedPackage(): Promise<void> {
   await write(path.join(pkg, 'dist', 'agents', 'code.md'), 'code ON\n');
   await write(path.join(curationOffDir('agents', pkg), 'code.md'), 'code CURATION-OFF\n');
   await write(path.join(skillsDir(pkg), 'apply-decisions', 'SKILL.md'), 'apply-decisions of the temp package\n');
+  await write(path.join(skillsDir(pkg), 'test-driven-development', 'SKILL.md'), 'test-driven-development of the temp package\n');
   await write(path.join(pkg, 'dist', 'variant-axes.json'), JSON.stringify({
     version: 1,
     hosts: {
@@ -325,7 +327,7 @@ describe('applyComplianceChange', () => {
     expect(await complianceOf()).toEqual({ enabled: false, frameworks: ['gdpr'] });
     expect(await fs.readFile(installedCommand('plan'), 'utf-8')).toBe('plan COMPLIANCE-OFF\n');
     expect(await fs.readFile(installedCommand('release'), 'utf-8')).toBe('release COMPLIANCE-OFF\n');
-    expect(readInstalledVariants(await recordOf()), warnings.join('\n')).toEqual({ curation: true, compliance: false });
+    expect(readInstalledVariants(await recordOf()), warnings.join('\n')).toEqual({ curation: true, compliance: false, tdd: true });
     expect(result.messages.some(m => m.level === 'error')).toBe(false);
   });
 
@@ -351,7 +353,7 @@ describe('applyComplianceChange', () => {
     expect(result.exitCode).toBe(0);
     expect(await fs.readFile(installedCommand('plan'), 'utf-8')).toBe('plan ON\n');
     expect(await fs.readFile(installedCommand('release'), 'utf-8')).toBe('release ON\n');
-    expect(readInstalledVariants(await recordOf()), warnings.join('\n')).toEqual({ curation: true, compliance: true });
+    expect(readInstalledVariants(await recordOf()), warnings.join('\n')).toEqual({ curation: true, compliance: true, tdd: true });
   });
 
   it('enable with a link at an installed reference folder exits 1 and names the failure; the switch stays on disk', async () => {
@@ -388,7 +390,7 @@ describe('applyComplianceChange', () => {
     expect(result.exitCode).toBe(0);
     expect(result.nextState).toEqual({ enabled: true, frameworks: ['gdpr', 'soc2'] });
     expect(await fs.readFile(installedCommand('release'), 'utf-8')).toBe('release ON\n');
-    expect(readInstalledVariants(await recordOf()), warnings.join('\n')).toEqual({ curation: true, compliance: true });
+    expect(readInstalledVariants(await recordOf()), warnings.join('\n')).toEqual({ curation: true, compliance: true, tdd: true });
   });
 
   it('a set that only changes the frameworks still converges, and reaches a missing record', async () => {
@@ -399,7 +401,7 @@ describe('applyComplianceChange', () => {
 
     expect(result.exitCode).toBe(0);
     expect(await complianceOf()).toEqual({ enabled: true, frameworks: ['hipaa'] });
-    expect(readInstalledVariants(await recordOf()), warnings.join('\n')).toEqual({ curation: true, compliance: true });
+    expect(readInstalledVariants(await recordOf()), warnings.join('\n')).toEqual({ curation: true, compliance: true, tdd: true });
   });
 
   it('disable with the compliance-off tree absent exits 1, lists the files and prints no success line (TP-41)', async () => {
@@ -419,7 +421,7 @@ describe('applyComplianceChange', () => {
     expect(result.messages.every(m => m.level === 'error')).toBe(true);
     expect(await fs.readFile(installedCommand('release'), 'utf-8')).toBe('release ON\n');
     expect(await complianceOf(), 'the switch is on disk whatever the converge did').toEqual({ enabled: false, frameworks: ['gdpr'] });
-    expect(readInstalledVariants(await recordOf()), 'an unclean converge leaves the record as it stood').toEqual({ curation: true, compliance: true });
+    expect(readInstalledVariants(await recordOf()), 'an unclean converge leaves the record as it stood').toEqual({ curation: true, compliance: true, tdd: true });
   });
 
   it('disable removes the posting-only skill files by name and exits 0 (AC-41)', async () => {
@@ -456,7 +458,7 @@ describe('applyComplianceChange', () => {
     expect(text).not.toContain('Compliance disabled');
     expect(await fs.readFile(path.join(asks, 'inner.md'), 'utf-8'), 'nothing inside the directory was touched').toBe('in the way\n');
     expect(await complianceOf()).toEqual({ enabled: false, frameworks: ['gdpr'] });
-    expect(readInstalledVariants(await recordOf()), 'an unclean converge leaves the record as it stood').toEqual({ curation: true, compliance: true });
+    expect(readInstalledVariants(await recordOf()), 'an unclean converge leaves the record as it stood').toEqual({ curation: true, compliance: true, tdd: true });
   });
 
   it('disable across a version skew exits 1 and says that posting steps remain installed until devflow init (TP-42)', async () => {
@@ -677,7 +679,7 @@ describe('applyComplianceChange', () => {
     expect(text).not.toContain('every posting step removed');
     expect(await complianceOf(), 'the switch is on disk whatever the rule removal did').toEqual({ enabled: false, frameworks: ['gdpr'] });
     expect(await fs.readFile(installedCommand('release'), 'utf-8')).toBe('release COMPLIANCE-OFF\n');
-    expect(readInstalledVariants(await recordOf()), 'an unclean converge withholds the record').toEqual({ curation: true, compliance: true });
+    expect(readInstalledVariants(await recordOf()), 'an unclean converge withholds the record').toEqual({ curation: true, compliance: true, tdd: true });
   });
 
   it('a disable that removes the rule prints the removed line and exits 0', async () => {
@@ -716,9 +718,20 @@ describe('readInstalledVariants, postingStatus and postingStatusLine', () => {
     });
   }
 
-  it('readInstalledVariants returns a fresh two-boolean record and ignores extra keys', () => {
-    const raw = { curation: false, compliance: true, future: 'axis' };
-    expect(readInstalledVariants(raw)).toEqual({ curation: false, compliance: true });
+  it('readInstalledVariants returns a fresh record of one boolean per axis and ignores extra keys', () => {
+    const raw = { curation: false, compliance: true, tdd: false, future: 'axis' };
+    expect(readInstalledVariants(raw)).toEqual({ curation: false, compliance: true, tdd: false });
+  });
+
+  it('a record written before the tdd axis existed reads as tdd on, and a record with a tdd value that is not a boolean is unknown', () => {
+    expect(readInstalledVariants({ curation: false, compliance: true })).toEqual({ curation: false, compliance: true, tdd: true });
+    expect(readInstalledVariants({ curation: true, compliance: true, tdd: 'off' })).toBeNull();
+    expect(readInstalledVariants({ curation: true, compliance: true, tdd: null })).toBeNull();
+  });
+
+  it('an axis that existed in the first record is still required: a record without compliance is unknown', () => {
+    expect(readInstalledVariants({ curation: true, tdd: true })).toBeNull();
+    expect(readInstalledVariants({ compliance: true, tdd: true })).toBeNull();
   });
 });
 
@@ -726,16 +739,17 @@ describe('readInstalledVariants, postingStatus and postingStatusLine', () => {
 
 describe('installRecordFor', () => {
   it('records the switches the prompts were converged onto when the converge finished clean', () => {
-    expect(installRecordFor(true, { curation: false, compliance: true })).toEqual({ curation: false, compliance: true });
-    expect(installRecordFor(true, { curation: true, compliance: false })).toEqual({ curation: true, compliance: false });
+    expect(installRecordFor(true, { ...ALL_SWITCHES_ON, curation: false })).toEqual({ curation: false, compliance: true, tdd: true });
+    expect(installRecordFor(true, { ...ALL_SWITCHES_ON, compliance: false })).toEqual({ curation: true, compliance: false, tdd: true });
+    expect(installRecordFor(true, { ...ALL_SWITCHES_ON, tdd: false })).toEqual({ curation: true, compliance: true, tdd: false });
   });
 
   it('withholds the record after a converge that did not finish clean', () => {
-    expect(installRecordFor(false, { curation: true, compliance: false })).toBeNull();
+    expect(installRecordFor(false, { ...ALL_SWITCHES_ON, compliance: false })).toBeNull();
   });
 
   it('returns a fresh record, not the switches object it was given', () => {
-    const switches = { curation: true, compliance: true };
+    const switches = { curation: true, compliance: true, tdd: true };
     const record = installRecordFor(true, switches);
     expect(record).not.toBe(switches);
     expect(readInstalledVariants(record)).toEqual(switches);

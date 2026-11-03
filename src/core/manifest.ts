@@ -97,6 +97,16 @@ export interface ManifestData {
      */
     behavior: boolean;
     /**
+     * TDD switch: false installs the Code agent without the TDD text and leaves the
+     * test-driven-development skill out. A machine switch only, read by the installer and
+     * the converge, never at run time. Absent or malformed reads as true
+     * (D-FEATURES-ABSENT-ON), exactly as {@link isMachineFeatureOn} reads it.
+     *
+     * NEVER add `tdd` to the hard-null validation set or the heal set: every existing
+     * install lacks the key, and an absent key is the on state, not a defect.
+     */
+    tdd: boolean;
+    /**
      * Issue tracker provider selection (enum github|jira|linear, default github) and the
      * optional list of tracker tool servers the Git and Tracker agents may call.
      * Absent in pre-tracker manifests — readManifest self-heals to
@@ -122,7 +132,8 @@ export interface ManifestData {
     gateLevel?: unknown;
   };
   /**
-   * The variant of each axis the installed prompts hold, `{ curation, compliance }`, written
+   * The variant of each axis the installed prompts hold, one boolean per axis (`curation`,
+   * `compliance`, and `tdd` when present), written
    * only after a converge that finished clean (AC-29). Typed `unknown` on purpose, like
    * `features.gateLevel`: this reader carries the key raw when the stored file has it and
    * never narrows it, so a hand-edited or newer-version value stays on disk. Only
@@ -231,6 +242,7 @@ export function hasRequiredManifestFields(data: Record<string, unknown>): boolea
  * - features.proxy absent → false
  * - features.compliance absent/malformed → {enabled:false, frameworks:[]}
  * - features.behavior absent → false; malformed → false, healed on disk (D-BEHAVIOR-OPT-IN)
+ * - features.tdd absent or malformed → true; nothing is healed on disk
  * - features.tracker absent/malformed → {provider:'github'}
  * - features.tracker.servers absent → the default list; invalid → the default list, reported
  *   through `opts.onWarning` when the caller supplies one (this reader has no output channel)
@@ -350,6 +362,8 @@ export async function readManifest(
         compliance: normalizeComplianceFeature(features.compliance),
         // D-BEHAVIOR-OPT-IN: absent/malformed → false (opt-in; the inverse of knowledge/curation).
         behavior: features.behavior === true,
+        // D-FEATURES-ABSENT-ON: absent/malformed → true. Not in needsHeal: no write is owed.
+        tdd: isMachineFeatureOn(data, 'tdd'),
         // Self-heal: absent/malformed/unknown tracker → {provider:'github'} (AC-3.21).
         // Deliberately NOT in the hard-null set above — see the field's doc comment.
         // Healing here is silent and emits no DEGRADED: that is the correct

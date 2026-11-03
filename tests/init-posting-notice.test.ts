@@ -33,6 +33,22 @@ describe('postingNoticeDue', () => {
     expect(postingNoticeDue(readInstalledVariants(record), complianceEnabled)).toBe(due);
   });
 
+  it.each([
+    [{ curation: true, compliance: false }, false],
+    [{ curation: false, compliance: false }, false],
+    [{ curation: true, compliance: true }, true],
+  ] as const)('a record written before the tdd axis (%j) gives the notice decision of the same record with tdd on', (record, due) => {
+    expect(postingNoticeDue(readInstalledVariants(record), false)).toBe(due);
+    expect(postingNoticeDue(readInstalledVariants({ ...record, tdd: true }), false)).toBe(due);
+  });
+
+  it('a tdd value in the record does not change the decision: the notice is about posting alone', () => {
+    for (const tdd of [true, false]) {
+      expect(postingNoticeDue(readInstalledVariants({ curation: true, compliance: false, tdd }), false)).toBe(false);
+      expect(postingNoticeDue(readInstalledVariants({ curation: true, compliance: true, tdd }), false)).toBe(true);
+    }
+  });
+
   it('treats a malformed record as unknown, which is due when compliance is off', () => {
     expect(postingNoticeDue(readInstalledVariants({ curation: 'yes', compliance: false }), false)).toBe(true);
     expect(postingNoticeDue(readInstalledVariants('compliance-off'), false)).toBe(true);
@@ -115,23 +131,36 @@ describe('devflow init prints the posting notice once', () => {
   it('prints it on the first compliance-off install, records the variant, and prints nothing on the next init', async () => {
     const first = runInit('--no-compliance');
     expect(noticeCount(first), first).toBe(1);
-    expect(await recordOnDisk()).toEqual({ curation: false, compliance: false });
+    expect(await recordOnDisk()).toEqual({ curation: false, compliance: false, tdd: true });
 
     const second = runInit('--no-compliance');
     expect(noticeCount(second), second).toBe(0);
   }, E2E_CHAIN_BUDGET_MS);
 
+  it('prints nothing again for a record written before the tdd axis, and records tdd on', async () => {
+    runInit('--no-compliance');
+    const manifestPath = path.join(home, '.devflow', 'manifest.json');
+    const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf-8')) as { installedVariants?: Record<string, unknown> };
+    expect(manifest.installedVariants, 'the first init recorded the variants').toBeDefined();
+    manifest.installedVariants = { curation: false, compliance: false };
+    await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
+
+    const out = runInit('--no-compliance');
+    expect(noticeCount(out), out).toBe(0);
+    expect(await recordOnDisk()).toEqual({ curation: false, compliance: false, tdd: true });
+  }, E2E_CHAIN_BUDGET_MS);
+
   it('prints nothing with compliance on', async () => {
     const out = runInit('--compliance', 'gdpr');
     expect(noticeCount(out), out).toBe(0);
-    expect(await recordOnDisk()).toEqual({ curation: false, compliance: true });
+    expect(await recordOnDisk()).toEqual({ curation: false, compliance: true, tdd: true });
   }, E2E_BUDGET_MS);
 
   it('prints it again when compliance moves from on to off', async () => {
     runInit('--compliance', 'gdpr');
     const off = runInit('--no-compliance');
     expect(noticeCount(off), off).toBe(1);
-    expect(await recordOnDisk()).toEqual({ curation: false, compliance: false });
+    expect(await recordOnDisk()).toEqual({ curation: false, compliance: false, tdd: true });
   }, E2E_CHAIN_BUDGET_MS);
 
   it('prints it when the manifest has no record, as on a machine from before this release', async () => {
@@ -143,6 +172,6 @@ describe('devflow init prints the posting notice once', () => {
 
     const out = runInit('--no-compliance');
     expect(noticeCount(out), out).toBe(1);
-    expect(await recordOnDisk()).toEqual({ curation: false, compliance: false });
+    expect(await recordOnDisk()).toEqual({ curation: false, compliance: false, tdd: true });
   }, E2E_CHAIN_BUDGET_MS);
 });

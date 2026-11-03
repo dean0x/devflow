@@ -33,7 +33,7 @@ function fullInstall(): ManifestData {
     knownPlugins: ['devflow-implement', 'devflow-code-review'],
     features: {
       ambient: true, memory: true, hud: false, knowledge: true, curation: true, rules: true,
-      flags: { tui: true }, security: 'user', proxy: true,
+      flags: { tui: true }, security: 'user', proxy: true, tdd: true,
       compliance: { enabled: true, frameworks: ['gdpr'] },
       tracker: { provider: 'jira' },
     },

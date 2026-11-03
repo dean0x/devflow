@@ -39,8 +39,12 @@ import { MANIFEST_LOCK_WAIT_MS, withManifestLock } from './manifest-lock.js';
  * retired (RETIRED_CONFIG_KEYS in feature-config.ts): no reader consults them,
  * so a stale `learning: false` left in an old config.json never comes back to
  * life as a switch.
+ *
+ * `tdd` is a machine switch only, with no repository layer: it picks which prompt files
+ * and which skill this machine installs, and nothing reads it at run time. It reads an
+ * absent key as ON, like the others (every install predates it).
  */
-export type MachineFeature = 'memory' | 'curation' | 'knowledge';
+export type MachineFeature = 'memory' | 'curation' | 'knowledge' | 'tdd';
 
 /**
  * Machine switches that are OPT-IN: off until the user turns them on.
@@ -80,6 +84,7 @@ const CURRENT_KEYS: Readonly<Record<MachineFeature, readonly string[]>> = {
   memory: ['memory'],
   curation: ['curation', 'learning'],
   knowledge: ['knowledge'],
+  tdd: ['tdd'],
 };
 
 /**
