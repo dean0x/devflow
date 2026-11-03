@@ -1,7 +1,7 @@
 /**
  * Size ceilings of the Plan path group (#714): the Design and Architect agent bodies (#733) in
- * both curation builds, the mode skill that each preloads, and the Explore agent body. A spawn reads these bytes
- * again in every turn, so each ceiling holds the size that the lean cut reached. The /plan
+ * both curation builds, the mode skill that each preloads, and the Explore and Plan agent bodies. A spawn reads
+ * these bytes again in every turn, so each ceiling holds the size that the lean cut reached. The /plan
  * command builds keep their ceilings in command-size.test.ts. Each row is registered in
  * `tests/fixtures/numeric-floors.json`; lowered, never raised. The one exception is #752, which restored
  * the Architect plan-writing section and the design-review Suggest lines after wording cuts in the same
@@ -23,6 +23,8 @@ const ARCHITECT_BODY_MAX_BYTES = 3_782
 const ARCHITECT_BODY_CURATION_OFF_MAX_BYTES = 3_216
 /** The Explore agent body (hand-authored, one build), in bytes. */
 const EXPLORE_BODY_MAX_BYTES = 3_276
+/** The Plan agent body (hand-authored, one build), in bytes. */
+const PLAN_BODY_MAX_BYTES = 3_188
 
 /** [skill, ceiling of its SKILL.md in bytes]. Each row's text is the pattern its numeric-floors.json entry pins. */
 const SKILL_MAX_BYTES: ReadonlyArray<readonly [string, number]> = [
@@ -49,6 +51,7 @@ function agentBuilds(): ReadonlyArray<readonly [string, string, number]> {
     ['architect.md (curation on)', resolveAgentSource('architect').content, ARCHITECT_BODY_MAX_BYTES],
     ['architect.md (curation off)', curationOffBody('architect'), ARCHITECT_BODY_CURATION_OFF_MAX_BYTES],
     ['explore.md', resolveAgentSource('explore').content, EXPLORE_BODY_MAX_BYTES],
+    ['plan.md', resolveAgentSource('plan').content, PLAN_BODY_MAX_BYTES],
   ]
 }
 

@@ -76,11 +76,11 @@
     },
     {
       "id": "agent-roster-count",
-      "floor": 21,
-      "pattern": "toBe(21)",
+      "floor": 22,
+      "pattern": "toBe(22)",
       "occurrences": 1,
       "sourceFile": "tests/guards/agent-source-resolver.test.ts",
-      "description": "resolveAllAgents() size — every DEVFLOW_PLUGINS agent resolves through the shared resolver (AC-0.7, GAP-07). 21 since #733 added the Architect variant of the Design agent (D-DESIGN-VARIANTS). The count includes the hook-spawned Tracker agent, which is declared in devflow-core-skills.agents and filtered at install time rather than held outside the roster, Explore, devflow's override of the Claude Code built-in, and the Fix and Refactor variants of the Code agent (D-CODE-VARIANTS). A floor may only rise."
+      "description": "resolveAllAgents() size — every DEVFLOW_PLUGINS agent resolves through the shared resolver (AC-0.7, GAP-07). 21 since #733 added the Architect variant of the Design agent (D-DESIGN-VARIANTS); 22 since #756 added Plan, devflow's override of the Claude Code built-in Plan. The count includes the hook-spawned Tracker agent, which is declared in devflow-core-skills.agents and filtered at install time rather than held outside the roster, Explore, devflow's override of the Claude Code built-in, and the Fix and Refactor variants of the Code agent (D-CODE-VARIANTS). A floor may only rise."
     },
     {
       "id": "seam-op-section-map",
@@ -284,11 +284,11 @@
     },
     {
       "id": "report-cap-roster-count",
-      "floor": 19,
-      "pattern": "roster.length).toBeGreaterThanOrEqual(19)",
+      "floor": 20,
+      "pattern": "roster.length).toBeGreaterThanOrEqual(20)",
       "occurrences": 1,
       "sourceFile": "tests/guards/report-cap.test.ts",
-      "description": "Roster agents that carry a `Report cap:` line (D-REPORT-CAP): the union of the plugin `agents` arrays, less `curate` and `tracker` (hook-spawned). The guard derives the roster rather than listing it and requires an exempt-field record for each member; this floor stops the derivation quietly returning fewer agents. The Git agent split (#425) removed the `git` exclusion and raised it from 14 to 15; the Explore override raised it to 16; the Fix and Refactor variants raised it to 18; #733 raised it to 19 with the Architect variant of the Design agent. Floors rise, never fall."
+      "description": "Roster agents that carry a `Report cap:` line (D-REPORT-CAP): the union of the plugin `agents` arrays, less `curate` and `tracker` (hook-spawned). The guard derives the roster rather than listing it and requires an exempt-field record for each member; this floor stops the derivation quietly returning fewer agents. The Git agent split (#425) removed the `git` exclusion and raised it from 14 to 15; the Explore override raised it to 16; the Fix and Refactor variants raised it to 18; #733 raised it to 19 with the Architect variant of the Design agent; #756 raised it to 20 with the Plan override. Floors rise, never fall."
     },
     {
       "id": "running-commands-site-count",
@@ -1237,6 +1237,14 @@
       "description": "The Explore agent body, src/assets/agents/explore.md, in bytes. It overrides the built-in Explore machine-wide, so every turn of every Explore spawn of any session reads it (sonnet, high effort; eight spawns per /plan run). Added by #714 (lean Plan path group) at 3,355, after the cut from 3,477. Lowered by #706 (lean always-loaded descriptions) to 3276."
     },
     {
+      "id": "plan-body-max",
+      "ceiling": 3188,
+      "pattern": "const PLAN_BODY_MAX_BYTES = 3_188",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/plan-group-sizes.test.ts",
+      "description": "The Plan agent body, src/assets/agents/plan.md, in bytes. It overrides the built-in Plan machine-wide, so every turn of every Plan spawn of any session reads it (opus, high effort; three spawns per /plan run, and one per plan-mode research). Added by #756 (leaner plans) at 3,188, the size of the first version, below Explore's 3,276."
+    },
+    {
       "id": "skill-gap-analysis-max",
       "ceiling": 5553,
       "pattern": "['gap-analysis', 5_553],",
@@ -1470,11 +1478,11 @@
     },
     {
       "id": "catalog-description-max",
-      "ceiling": 5942,
-      "pattern": "CATALOG_DESCRIPTION_MAX_BYTES = 5_942",
+      "ceiling": 6170,
+      "pattern": "CATALOG_DESCRIPTION_MAX_BYTES = 6_170",
       "occurrences": 1,
       "sourceFile": "tests/guards/always-loaded-sizes.test.ts",
-      "description": "Sum of the description bytes of every skill, command and agent row that a default install lists (core plugins, compliance off, no language plugin). Claude Code puts these rows in every main turn of every session. Added by #706 (lean always-loaded text) at 6,187 (7,048 on main before the cut, which already held the other-targets skill rows). Lowered by #706 (lean descriptions, the rest) to 5942."
+      "description": "Sum of the description bytes of every skill, command and agent row that a default install lists (core plugins, compliance off, no language plugin). Claude Code puts these rows in every main turn of every session. Added by #706 (lean always-loaded text) at 6,187 (7,048 on main before the cut, which already held the other-targets skill rows). Lowered by #706 (lean descriptions, the rest) to 5942. Raised by #756 from 5942 to 6170 (228 bytes) for the description of the Plan agent, which devflow now ships in place of the built-in Plan. A typical session lists one Plan row either way: devflow's replaces the built-in's, whose length is not measured here, so a typical session reads about the same."
     },
     {
       "id": "harden-body-max",

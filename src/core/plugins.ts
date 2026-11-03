@@ -141,7 +141,9 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-plan',
     description: 'Unified design planning with gap analysis and design review',
     commands: ['/plan'],
-    agents: ['git', 'skim', 'synthesize', 'design', 'architect', 'explore'],
+    // 'plan' is devflow's override of Claude Code's built-in Plan agent, spawned by type name in
+    // Phase 10 (D-EXPLORE-OVERRIDE and D-EXPLORE-NO-CLOBBER, targets/claude-code/agent-type-owner.ts).
+    agents: ['git', 'skim', 'synthesize', 'design', 'architect', 'explore', 'plan'],
     skills: ['gap-analysis', 'design-review', 'patterns', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
     // D-CHARTER-BOUNDED-INLINE: /plan's main thread orchestrates and loads no
     // companion skills, so `requires:` lists only skills this plugin's command,

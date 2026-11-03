@@ -13,7 +13,7 @@
  * and a failed read runs the full shape. Every spawn of the command names its agent type.
  *
  * What this file holds, each arm through a named collector and a known-bad probe over the same collector:
- *   1. Typed spawns: every spawn line and every `Agent(` fence names a roster agent or the built-in `Plan`,
+ *   1. Typed spawns: every spawn line and every `Agent(` fence names a roster agent (`Plan` is one),
  *      byte-exact, and the reference holds no spawn text. The floor is the set of seven types, not a site count.
  *   2. The reference: its phase rows, its input substitutes and its rules, closed to a title, three headings,
  *      table lines, bold-label rules and two pinned intros, with the text left in each rule bounded. The file
@@ -877,23 +877,25 @@ describe('the corpus is real', () => {
     expect(GATE_LEVELS).toContain('full')
     expect(GATE_LEVELS.filter(level => level !== 'full')).toEqual(['standard', 'lean'])
     expect(SCENARIOS.length, 'one or several issues, compliance, research').toBe(8)
-    expect(ROSTER_FORM_B, 'the roster names the agents the command spawns').toEqual(expect.arrayContaining(['Git', 'Skim', 'Explore', 'Synthesize', 'Design', 'Architect']))
-    expect(BUILT_IN_SPAWN_TYPES).toEqual(['Plan'])
+    expect(ROSTER_FORM_B, 'the roster names the agents the command spawns').toEqual(expect.arrayContaining(['Git', 'Skim', 'Explore', 'Synthesize', 'Design', 'Architect', 'Plan']))
+    expect(BUILT_IN_SPAWN_TYPES, 'devflow ships an agent for every type the command spawns').toEqual([])
     expect(ALLOWED).toContain('Plan')
   })
 })
 
 describe('every spawn names its type (AC-1)', () => {
-  it.each(VARIANTS)('$label: each spawn line and agent fence names a roster agent or the built-in Plan, and the types are the seven', ({ body }) => {
+  it.each(VARIANTS)('$label: each spawn line and agent fence names a roster agent, and the types are the seven', ({ body }) => {
     expect(collectUntypedSpawnDefects(body, ALLOWED)).toEqual([])
     expect(spawnTypesOf(body)).toEqual(SPAWN_TYPES)
   })
 
-  it('the Phase 10 planners name the built-in Plan type, and only the closed built-in set admits it', () => {
+  it('the Phase 10 planners name the Plan agent that devflow ships, a roster name and no built-in exemption', () => {
     const phase10 = phaseSection(ON, 10) ?? ''
     expect(phase10).toContain('Spawn 3 `Agent(subagent_type="Plan")` agents')
-    expect(ROSTER_FORM_B, 'no roster agent is named Plan').not.toContain('Plan')
-    expect(collectUntypedSpawnDefects(ON, ROSTER_FORM_B)).toEqual(['Phase 10: subagent_type "Plan" is not a roster name or a built-in type'])
+    expect(ROSTER_FORM_B, 'a roster agent is named Plan').toContain('Plan')
+    expect(collectUntypedSpawnDefects(ON, ROSTER_FORM_B)).toEqual([])
+    const withoutPlan = ROSTER_FORM_B.filter(name => name !== 'Plan')
+    expect(collectUntypedSpawnDefects(ON, withoutPlan), 'with no Plan agent the spawn is reported').toEqual(['Phase 10: subagent_type "Plan" is not a roster name or a built-in type'])
   })
 
   it('known-bad probes: an untyped planner line, general-purpose, lowercase plan, an untyped fence and a later phase fence are each reported', () => {

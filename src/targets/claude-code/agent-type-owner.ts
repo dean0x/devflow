@@ -1,17 +1,18 @@
 /**
  * Who else defines an agent type: the install-edge check behind devflow's Explore
- * override.
+ * and Plan overrides.
  *
  * Pure core (`parseAgentType`) with one bounded I/O function (`findForeignAgentOwner`)
  * at the installer edge. Result-style outcomes: nothing here throws.
  *
- * D-EXPLORE-OVERRIDE: devflow ships an agent whose frontmatter `name:` is `Explore`,
- * the same type as the Explore agent built into Claude Code. This is a documented,
- * supported override, not a collision: Claude Code merges its agent sources into one
- * map keyed by the exact `name:` string, in the order built-in, plugin, user, project,
- * flag, policy, and a later source replaces an earlier one. A user-level agent named
- * Explore therefore replaces the built-in for every session on the machine, plan mode
- * included, because the lookup is by agent type and no session mode bypasses it.
+ * D-EXPLORE-OVERRIDE: devflow ships agents whose frontmatter `name:` is `Explore` and
+ * `Plan`, the same types as the Explore and Plan agents built into Claude Code. This is
+ * a documented, supported override, not a collision: Claude Code merges its agent
+ * sources into one map keyed by the exact `name:` string, in the order built-in, plugin,
+ * user, project, flag, policy, and a later source replaces an earlier one. A user-level
+ * agent named Explore or Plan therefore replaces the built-in for every session on the
+ * machine, plan mode included, because the lookup is by agent type and no session mode
+ * bypasses it.
  *
  * Verified against Claude Code 2.1.296 (`claude --version`) by reading the binary:
  *   - the merge is `bz` (the Map keyed by `agentType`, last source wins);
@@ -19,16 +20,17 @@
  *     inherit-cap to Opus is gated on `source === "built-in"`, so it does not follow
  *     the override;
  *   - `omitGitStatus` is set by `agentType === "Explore" || agentType === "Plan"` and
- *     checks no source, so devflow's Explore is spared the git-status block too;
+ *     checks no source, so devflow's Explore and Plan are spared the git-status block too;
  *   - agents are matched with strict equality, so `explore` and `Explore` are two
- *     different agents.
+ *     different agents, and so are `plan` and `Plan`.
+ * The built-in Plan loads no CLAUDE.md either (docs/reference/platform-assumptions.md).
  * Uninstalling removes devflow's copy, and the built-in applies again.
  *
  * D-EXPLORE-NO-CLOBBER: two user-level agents with one type fall back to file load
- * order, so devflow never installs a second Explore beside the user's own. The install
- * skips its copy when another file under the agents directory defines the type, and
- * never touches that file. Matching is exact, as Claude Code's is: a lowercase
- * `explore` agent is a different agent and does not block the install.
+ * order, so devflow never installs a second Explore or Plan beside the user's own. The
+ * install skips its copy when another file under the agents directory defines the type,
+ * and never touches that file. Matching is exact, as Claude Code's is: a lowercase
+ * `explore` or `plan` agent is a different agent and does not block the install.
  */
 import { promises as fs, constants as fsConstants, type Dirent } from 'fs';
 import type { FileHandle } from 'fs/promises';
@@ -38,7 +40,10 @@ import * as path from 'path';
  * Registry agents that deliberately take over a built-in agent type, mapped to the
  * frontmatter `name:` they ship. The install checks each against the user's own agents.
  */
-export const BUILTIN_OVERRIDE_AGENTS: ReadonlyMap<string, string> = new Map([['explore', 'Explore']]);
+export const BUILTIN_OVERRIDE_AGENTS: ReadonlyMap<string, string> = new Map([
+  ['explore', 'Explore'],
+  ['plan', 'Plan'],
+]);
 
 /** Bytes read from the start of an agent file: enough for any frontmatter name line. */
 export const FRONTMATTER_READ_BYTES = 4096;

@@ -219,8 +219,10 @@ describe('renderCharter over every plugin set of the domain', () => {
       for (const token of text.matchAll(/devflow:([a-z][a-z-]*)/g)) {
         if (!installed.commands.has(token[1])) failures.push(`${label}: names the uninstalled workflow devflow:${token[1]}`);
       }
+      // The label of the handoff line ("Plan handoff") is a workflow term, not the Plan agent.
+      const prose = text.split(HANDOFF_LINE_PREFIX).join('');
       for (const agent of getAllAgentNames()) {
-        if (wordIn(text, capital(agent)) && !installed.agents.has(agent)) failures.push(`${label}: names the uninstalled agent ${capital(agent)}`);
+        if (wordIn(prose, capital(agent)) && !installed.agents.has(agent)) failures.push(`${label}: names the uninstalled agent ${capital(agent)}`);
       }
       if (FORBIDDEN_ROUTE.test(text)) failures.push(`${label}: names release, dynamic-* or self-review`);
 

@@ -1925,6 +1925,21 @@ describe('removeAllDevFlow — full uninstall (TEST-9a)', () => {
     await expect(fs.access(agentsDir)).rejects.toThrow();
   });
 
+  it('(9a) a user\'s own Plan agent outside agents/devflow stays byte-identical, and devflow\'s copy is gone', async () => {
+    const agentsRoot = path.join(claudeDir, 'agents');
+    const agentsDir = path.join(agentsRoot, 'devflow');
+    await fs.mkdir(agentsDir, { recursive: true });
+    await fs.writeFile(path.join(agentsDir, 'plan.md'), '---\nname: Plan\nmodel: opus\n---\n\ndevflow copy\n', 'utf-8');
+    const mine = path.join(agentsRoot, 'Plan.md');
+    const mineBytes = '---\nname: Plan\ndescription: my own planner\nmodel: sonnet\n---\n\nMy own planner.\n';
+    await fs.writeFile(mine, mineBytes, 'utf-8');
+
+    await removeAllDevFlow(claudeDir, path.join(claudeDir, 'scripts'), false);
+
+    await expect(fs.access(path.join(agentsDir, 'plan.md'))).rejects.toThrow();
+    expect(await fs.readFile(mine, 'utf-8')).toBe(mineBytes);
+  });
+
   it('(9a) commands/devflow is gone after full uninstall', async () => {
     const commandsDir = path.join(claudeDir, 'commands', 'devflow');
     await fs.mkdir(commandsDir, { recursive: true });
@@ -1986,6 +2001,23 @@ describe('removeSelectedPlugins — selective uninstall sweep (TEST-9b)', () => 
     await expect(
       fs.access(path.join(agentsDir, `${realAgent}.md`)),
     ).resolves.not.toThrow();
+  });
+
+  it('(9b) removing the plan plugin takes devflow\'s Plan agent and leaves a user\'s own Plan byte-identical', async () => {
+    const agentsRoot = path.join(claudeDir, 'agents');
+    const agentsDir = path.join(agentsRoot, 'devflow');
+    await fs.mkdir(agentsDir, { recursive: true });
+    await fs.writeFile(path.join(agentsDir, 'plan.md'), '---\nname: Plan\nmodel: opus\n---\n\ndevflow copy\n', 'utf-8');
+    const mine = path.join(agentsRoot, 'Plan.md');
+    const mineBytes = '---\nname: Plan\ndescription: my own planner\nmodel: sonnet\n---\n\nMy own planner.\n';
+    await fs.writeFile(mine, mineBytes, 'utf-8');
+
+    const planPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-plan');
+    expect(planPlugin?.agents, 'the plan plugin owns the plan agent').toContain('plan');
+    await removeSelectedPlugins(claudeDir, [planPlugin as PluginDefinition], false);
+
+    await expect(fs.access(path.join(agentsDir, 'plan.md'))).rejects.toThrow();
+    expect(await fs.readFile(mine, 'utf-8')).toBe(mineBytes);
   });
 
   it('(9b) commands: orphaned command files are swept; registry commands survive', async () => {
