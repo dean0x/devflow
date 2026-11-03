@@ -79,6 +79,8 @@ import {
   describeBuildIdCheckError,
   describeBuildStampError,
   describeWorkflowFolderError,
+  FOLDER_ARMS,
+  FOLDER_VARIANT_KEYS,
   findWorkflowFolderHost,
   isStampedWorkflowFile,
   parseWorkflowFolders,
@@ -103,11 +105,15 @@ import { compiledWorkflowFoldersDir, workflowFoldersSourceDir } from '../src/cor
 import { ALL_MDS_HOSTS, POSTING_OPERATIONS } from './fixtures/mds-manifest.js';
 import { walkFiles } from './helpers.js';
 import {
+  ALL_SWITCHES_ON,
   BOTH_OFF_OUTPUT_DIR,
   COMPLIANCE_OFF_OUTPUT_DIR,
   CURATION_OFF_OUTPUT_DIR,
   LEGACY_OFF_OUTPUT_DIR,
+  VARIANT_AXES,
   VARIANT_KEYS,
+  offAxesOf,
+  type VariantSwitches,
 } from '../src/core/curation-variants.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
@@ -1334,10 +1340,34 @@ describe('the files each variant key holds', () => {
   };
 
   it('keys follow the machine switches alone', () => {
-    expect(workflowFolderKey({ curation: true, compliance: true })).toBe('on');
-    expect(workflowFolderKey({ curation: false, compliance: true })).toBe('curation-off');
-    expect(workflowFolderKey({ curation: true, compliance: false })).toBe('compliance-off');
-    expect(workflowFolderKey({ curation: false, compliance: false })).toBe('both-off');
+    expect(workflowFolderKey(ALL_SWITCHES_ON)).toBe('on');
+    expect(workflowFolderKey({ ...ALL_SWITCHES_ON, curation: false })).toBe('curation-off');
+    expect(workflowFolderKey({ ...ALL_SWITCHES_ON, compliance: false })).toBe('compliance-off');
+    expect(workflowFolderKey({ ...ALL_SWITCHES_ON, curation: false, compliance: false })).toBe('both-off');
+  });
+
+  it('a folder has no tdd arm: its key is the same with tdd on or off, and only the tdd-on keys are built', () => {
+    expect(FOLDER_ARMS).toEqual({ curation: true, compliance: true, tdd: false });
+    expect([...FOLDER_VARIANT_KEYS]).toEqual(['on', 'curation-off', 'compliance-off', 'both-off']);
+    for (const key of FOLDER_VARIANT_KEYS) expect(offAxesOf(key), key).not.toContain('tdd');
+    for (const curation of [true, false]) {
+      for (const compliance of [true, false]) {
+        const on = workflowFolderKey({ curation, compliance, tdd: true });
+        expect(workflowFolderKey({ curation, compliance, tdd: false }), `${curation}/${compliance}`).toBe(on);
+        expect(FOLDER_VARIANT_KEYS).toContain(on);
+      }
+    }
+  });
+
+  it('known-bad probe: a machine with tdd off never reads a tdd tree of folders', () => {
+    const everyMachine: readonly VariantSwitches[] = [true, false].flatMap(curation =>
+      [true, false].flatMap(compliance => [true, false].map(tdd => ({ curation, compliance, tdd }))),
+    );
+    for (const machine of everyMachine) {
+      const key = workflowFolderKey(machine);
+      expect(workflowFoldersRootRelPath(key), JSON.stringify(machine)).not.toMatch(/tdd/);
+    }
+    expect(VARIANT_AXES).toContain('tdd');
   });
 
   it('a file flagged for compliance off is held by the keys that keep compliance on, and by no other', () => {
@@ -1345,6 +1375,13 @@ describe('the files each variant key holds', () => {
     expect(workflowFolderFiles(FOLDER, 'curation-off')).toEqual(['SKILL.md', 'note.md', 'references/asks.md']);
     expect(workflowFolderFiles(FOLDER, 'compliance-off')).toEqual(['SKILL.md', 'note.md']);
     expect(workflowFolderFiles(FOLDER, 'both-off')).toEqual(['SKILL.md', 'note.md']);
+  });
+
+  it('the files follow the compliance axis alone: a key that also turns tdd off holds what its tdd-on twin holds', () => {
+    expect(workflowFolderFiles(FOLDER, 'tdd-off')).toEqual(workflowFolderFiles(FOLDER, 'on'));
+    expect(workflowFolderFiles(FOLDER, 'curation-tdd-off')).toEqual(workflowFolderFiles(FOLDER, 'curation-off'));
+    expect(workflowFolderFiles(FOLDER, 'compliance-tdd-off')).toEqual(workflowFolderFiles(FOLDER, 'compliance-off'));
+    expect(workflowFolderFiles(FOLDER, 'curation-compliance-tdd-off')).toEqual(workflowFolderFiles(FOLDER, 'both-off'));
   });
 
   it('a folder with no flagged file holds the same files under every key', () => {
@@ -1376,13 +1413,22 @@ describe('the source root of the folders a machine reads', () => {
   const PKG = path.join(path.sep, 'pkg');
 
   it('is the one tree built for exactly the machine switches, never a list to fall through', () => {
-    expect(workflowFoldersSourceDir({ curation: true, compliance: true }, PKG)).toBe(path.join(PKG, 'dist', 'workflows'));
-    expect(workflowFoldersSourceDir({ curation: false, compliance: true }, PKG))
+    expect(workflowFoldersSourceDir(ALL_SWITCHES_ON, PKG)).toBe(path.join(PKG, 'dist', 'workflows'));
+    expect(workflowFoldersSourceDir({ ...ALL_SWITCHES_ON, curation: false }, PKG))
       .toBe(path.join(PKG, 'dist', 'curation-off', 'workflows'));
-    expect(workflowFoldersSourceDir({ curation: true, compliance: false }, PKG))
+    expect(workflowFoldersSourceDir({ ...ALL_SWITCHES_ON, compliance: false }, PKG))
       .toBe(path.join(PKG, 'dist', 'compliance-off', 'workflows'));
-    expect(workflowFoldersSourceDir({ curation: false, compliance: false }, PKG))
+    expect(workflowFoldersSourceDir({ ...ALL_SWITCHES_ON, curation: false, compliance: false }, PKG))
       .toBe(path.join(PKG, 'dist', 'curation-compliance-off', 'workflows'));
+  });
+
+  it('is the same tree with tdd off, because a folder carries no tdd arm', () => {
+    for (const curation of [true, false]) {
+      for (const compliance of [true, false]) {
+        expect(workflowFoldersSourceDir({ curation, compliance, tdd: false }, PKG), `${curation}/${compliance}`)
+          .toBe(workflowFoldersSourceDir({ curation, compliance, tdd: true }, PKG));
+      }
+    }
   });
 
   it('takes its spelling from the build destination of each key', () => {
