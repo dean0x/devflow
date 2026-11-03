@@ -177,7 +177,7 @@ The rule is feature-owned (not plugin-scoped), like the compliance rule, and ins
 
 ## TDD
 
-The TDD switch is on by default. While it is on, the Code agent writes a failing test before the code. While it is off, the Code agent may write the tests after the code, and the RED step does not apply. The test plan, Validate and the bug-fix regression test stay.
+The TDD switch is on by default. While it is on, the Code agent writes a failing test before the code. While it is off, the Code agent may write the tests after the code, and the RED step does not apply. The test plan, Validate and the bug-fix regression test stay. The switch applies to the Code agents that `/implement` spawns; other commands keep test first.
 
 ```bash
 npx devflow-kit tdd --enable                # Turn it on (the default)

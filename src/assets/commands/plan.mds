@@ -521,47 +521,6 @@ Display completion summary:
 
 ---
 
-## Architecture
-
-```
-/plan
-│
-├─ Block 1: Requirements Discovery
-│  ├─ Phase 1: GATE 0 - Requirements Discovery
-│  │  ├─ Git agent (fetch-issue / fetch-issues-batch) - issue mode only
-│  │  └─ AskUserQuestion: Validate interpretation
-<!-- curation:on -->
-│  ├─ Phase 2: Orient + Load Decisions
-<!-- curation:off -->
-│  ├─ Phase 2: Orient
-<!-- curation:end -->
-│  ├─ Phase 3: Explore Requirements (PARALLEL)
-│  └─ Phase 4: Synthesize Exploration
-│
-├─ Block 2: Gap Analysis
-│  ├─ Phase 5: Gap Analysis (PARALLEL)
-│  └─ Phase 6: Synthesize Gap Analysis
-│
-├─ Block 3: Scope Approval
-│  └─ Phase 7: GATE 1 - Validate Scope + Gaps
-│
-├─ Block 4: Implementation Design
-│  ├─ Phase 8: Explore Implementation (PARALLEL)
-│  ├─ Phase 9: Synthesize Implementation Exploration
-│  ├─ Phase 10: Plan Implementation (PARALLEL)
-│  └─ Phase 11: Synthesize Planning
-│
-├─ Block 5: Design Review + Approval
-│  ├─ Phase 12: Design Review
-│  └─ Phase 13: GATE 2 - Confirm Plan + Design Review
-│     └─ Revise ≤ 2 → back to Phase 10; after 2: Accept / Cancel / Restart /plan
-│
-├─ Block 6: Output
-│  └─ Phase 14: Output
-│     └─ Git agent (ensure-traceable-issue) - create or enrich tracker issue (optional)
-│
-```
-
 ## Principles
 
 1. **Strict delegation** — Never synthesize, analyze, or plan in main session; always spawn agents

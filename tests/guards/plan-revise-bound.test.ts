@@ -7,14 +7,12 @@
  * the levels reference cuts the first pass, on the run evidence in issue #473, and a
  * revision spawns two (Plan, Design). Either way an unbounded loop is an unbounded
  * bill. The bound is two revisions; then Gate 2 offers Accept, Cancel, or "Restart
- * /plan with these constraints". This guard holds only the loop's bound and its
- * diagram; tests/guards/plan-levels.test.ts holds the spawn counts of each level.
+ * /plan with these constraints". This guard holds only the loop's bound;
+ * tests/guards/plan-levels.test.ts holds the spawn counts of each level.
  *
  *   AC-201  Revise is "when fewer than 2 revisions have run", with a budget of "at most
  *           2 revisions"; after that Gate 2 offers Accept, Cancel and Restart. The
  *           Error Handling rule says the same, and no line still promises "no limit".
- *   AC-206  The Architecture diagram shows the Git spawns of Phase 1 and Phase 14 and
- *           the bounded Revise loop.
  *
  * Both builds are read: the curation-on command and the curation-off variant, because
  * the bound sits beside curation arms and a build that dropped it would lose it
@@ -54,14 +52,6 @@ function errorHandlingRule(content: string): string {
   return content.split('\n').find(l => l.startsWith('- If user selects "Revise" at Gate 2')) ?? ''
 }
 
-/** The Architecture diagram: the fenced block under `## Architecture`. */
-function diagram(content: string): string {
-  const at = content.indexOf('## Architecture')
-  const open = content.indexOf('```', at)
-  const close = content.indexOf('```', open + 3)
-  return at === -1 || open === -1 || close === -1 ? '' : content.slice(open, close)
-}
-
 /** Named collector: what a built /plan lacks of the Revise bound (AC-201). */
 export function collectReviseBoundDefects(content: string): string[] {
   const out: string[] = []
@@ -80,29 +70,6 @@ export function collectReviseBoundDefects(content: string): string[] {
     if (!rule.includes('Restart /plan with these constraints')) out.push('the Error Handling rule names no Restart')
   }
   if (/no limit on revisions|unlimited revisions|as many (?:times|revisions)/i.test(content)) out.push('a line still promises an unbounded Revise')
-  return out
-}
-
-/** Named collector: what the diagram lacks (AC-206): the two Git spawns and the bounded loop. */
-export function collectDiagramDefects(content: string): string[] {
-  const out: string[] = []
-  const d = diagram(content)
-  if (d === '') return ['no Architecture diagram']
-  const line = (needle: string): number => d.split('\n').findIndex(l => l.includes(needle))
-  const phase1 = line('Phase 1: GATE 0')
-  const fetch = line('Git agent (fetch-issue / fetch-issues-batch)')
-  const phase2 = line('Phase 2:')
-  if (fetch === -1) out.push('Phase 1 shows no Git fetch spawn')
-  else if (!(phase1 < fetch && fetch < phase2)) out.push('the Git fetch spawn is not under Phase 1')
-  const phase14 = line('Phase 14: Output')
-  const ensure = line('Git agent (ensure-traceable-issue)')
-  if (ensure === -1) out.push('Phase 14 shows no Git ensure-traceable-issue spawn')
-  else if (ensure < phase14) out.push('the Git ensure-traceable-issue spawn is not under Phase 14')
-  const gate2 = line('Phase 13: GATE 2')
-  const revise = line('Revise ≤ 2')
-  if (revise === -1) out.push('the diagram shows no bounded Revise loop')
-  else if (!(gate2 < revise && revise < phase14)) out.push('the Revise loop is not under Gate 2')
-  if (revise !== -1 && !d.split('\n')[revise].includes('Restart /plan')) out.push('the diagram does not show where Revise ends')
   return out
 }
 
@@ -139,27 +106,6 @@ for (const kind of ['curation-on', 'curation-off'] as const) {
     })
   })
 
-  describe(`AC-206: the /plan diagram shows the Git spawns and the bounded Revise (${kind} build)`, () => {
-    const build = builds().find(b => b.label === kind)!
-
-    it('reads a real diagram', () => {
-      // Non-vacuity: the phase lines of 6 blocks and 14 phases, not an empty slice. The sub-bullets that restated
-      // the focus tables of Phases 3, 5, 8 and 10 were cut (#456), so the floor is the phase index alone.
-      expect(diagram(build.content).split('\n').length, 'the diagram is short').toBeGreaterThan(25)
-    })
-
-    it('shows the Phase 1 and Phase 14 Git spawns and the Revise ≤ 2 loop under Gate 2', () => {
-      expect(collectDiagramDefects(build.content)).toEqual([])
-    })
-
-    it('known-bad probes: each missing piece is reported on its own', () => {
-      const c = build.content
-      expect(collectDiagramDefects(c.replace('│  │  ├─ Git agent (fetch-issue / fetch-issues-batch) - issue mode only\n', ''))).toEqual(['Phase 1 shows no Git fetch spawn'])
-      expect(collectDiagramDefects(c.replace('Git agent (ensure-traceable-issue) - create or enrich tracker issue (optional)', 'Create tracker issue (optional)'))).toEqual(['Phase 14 shows no Git ensure-traceable-issue spawn'])
-      expect(collectDiagramDefects(c.replace('│     └─ Revise ≤ 2 → back to Phase 10; after 2: Accept / Cancel / Restart /plan\n', ''))).toEqual(['the diagram shows no bounded Revise loop'])
-      expect(collectDiagramDefects(c.replace('after 2: Accept / Cancel / Restart /plan', 'after 2: stop'))).toEqual(['the diagram does not show where Revise ends'])
-    })
-  })
 }
 
 describe('both builds carry the same bound', () => {
