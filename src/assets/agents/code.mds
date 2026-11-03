@@ -84,7 +84,7 @@ You receive from orchestrator:
 <!-- tdd:on -->
 3. **Write tests**: Write one failing test first for each acceptance-criterion behaviour (else each behaviour your steps' Must lines name). Add an edge-case test only for a named, concrete case. Always test trust boundaries, data loss, security and fail-closed paths.
 <!-- tdd:off -->
-3. **Write tests**: Write one test for each acceptance-criterion behaviour (else each behaviour your steps' Must lines name), with the code. Add an edge-case test only for a named, concrete case. Always test trust boundaries, data loss, security and fail-closed paths.
+3. **Write tests**: Write one test for each acceptance-criterion behaviour (else each behaviour your steps' Must lines name), with the code. Add an edge-case test only for a named, concrete case. Always test trust boundaries, data loss, security and fail-closed paths. For a bug fix, first add a test that fails without the fix.
 <!-- tdd:end -->
 
 4. **Run tests**: Fix any failures; the tests you run must pass.
