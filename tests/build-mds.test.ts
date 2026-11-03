@@ -1091,6 +1091,20 @@ describe('a reference module may carry compliance arms and no curation marker (T
     expect(run.written, 'nothing is written for a refused module').toBe(false);
   });
 
+  it.each([
+    ['a whole-line tdd arm', '<!-- tdd:off -->\nA fallback line.\n<!-- tdd:end -->'],
+    ['a tdd marker with odd spacing and case', '<!--  TDD : on  -->\nA gated line.'],
+  ])('refuses a reference module that carries %s, because the tdd axis has nothing to select there', async (_label, probe) => {
+    const { source, opLine } = mcpSource();
+    const marked = source.replace(opLine, `${opLine}\n${probe}`);
+    expect(marked).not.toBe(source);
+    const run = await buildModule(marked);
+    expect(run.status, `expected exit 1.\n${run.combined}`).toBe(1);
+    expect(run.combined).toContain(`${MODULE_REL}: a reference module may not carry tdd-variant markers`);
+    expect(run.combined, 'the tdd refusal is not a compliance split refusal').not.toContain('compliance-variant split refused');
+    expect(run.written, 'nothing is written for a refused module').toBe(false);
+  });
+
   it('refuses a reference module that carries a marker of each axis, because of the curation one', async () => {
     const { source, opLine } = mcpSource();
     const marked = source.replace(opLine, `${opLine}\n<!-- curation:on -->\nA.\n<!-- curation:end -->\n<!-- compliance:on -->\nB.\n<!-- compliance:end -->`);

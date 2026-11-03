@@ -271,4 +271,20 @@ describe('a reference module with compliance arms (TP-54)', () => {
     expect(combined).toContain(`${PR_MODULE}: a reference module may not carry curation-variant markers`);
     expect(await readIfPresent(fakeRoot, `${SKILL_REFS_OUTPUT_DIR}/pr/validate-branch.md`)).toBeNull();
   });
+
+  it('refuses a tdd marker in a reference module, in the same fixture', async () => {
+    const { fakeRoot, status, combined } = await buildFixture({
+      'validate-branch': `A line.\n<!-- tdd:on -->\nA tdd line.\n<!-- tdd:end -->\n`,
+    });
+    expect(status, `expected exit 1.\n${combined}`).toBe(1);
+    expect(combined).toContain(`${PR_MODULE}: a reference module may not carry tdd-variant markers`);
+    expect(await readIfPresent(fakeRoot, `${SKILL_REFS_OUTPUT_DIR}/pr/validate-branch.md`)).toBeNull();
+  });
+
+  it('known-bad probe: the same section with no tdd marker builds, so the refusal comes from the marker alone', async () => {
+    const { status, combined } = await buildFixture({
+      'validate-branch': `A line.\nA plain line.\n`,
+    });
+    expect(status, `expected exit 0.\n${combined}`).toBe(0);
+  });
 });

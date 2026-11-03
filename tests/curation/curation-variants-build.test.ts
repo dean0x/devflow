@@ -602,7 +602,7 @@ const CON = '<!-- compliance:on -->';
 const COFF = '<!-- compliance:off -->';
 const CEND = '<!-- compliance:end -->';
 
-type Axis = 'curation' | 'compliance';
+type Axis = 'curation' | 'compliance' | 'tdd';
 
 /** An arm of one axis in one of the three forms: kept verbatim between markers, or resolved. */
 function axisArm(axis: Axis, form: Form, onLines: readonly string[], offLines: readonly string[] | null): string[] {
@@ -652,7 +652,7 @@ function treeOf(fakeRoot: string, sub: string): string[] {
 
 interface ManifestShape {
   version: number;
-  hosts: Record<string, { curation: boolean; compliance: boolean }>;
+  hosts: Record<string, { curation: boolean; compliance: boolean; tdd: boolean }>;
 }
 
 async function manifestOf(fakeRoot: string): Promise<{ text: string; manifest: ManifestShape }> {
@@ -756,11 +756,11 @@ describe('the variant manifest (TP-6)', () => {
     const { text, manifest } = await manifestOf(fakeRoot);
     expect(manifest.version).toBe(1);
     expect(manifest.hosts).toEqual({
-      'agents/iota': { curation: true, compliance: true },
-      'commands/delta': { curation: false, compliance: true },
-      'commands/kappa': { curation: true, compliance: false },
-      'commands/plain': { curation: false, compliance: false },
-      'commands/theta': { curation: true, compliance: true },
+      'agents/iota': { curation: true, compliance: true, tdd: false },
+      'commands/delta': { curation: false, compliance: true, tdd: false },
+      'commands/kappa': { curation: true, compliance: false, tdd: false },
+      'commands/plain': { curation: false, compliance: false, tdd: false },
+      'commands/theta': { curation: true, compliance: true, tdd: false },
     });
     expect(Object.keys(manifest.hosts), 'the hosts are listed in sorted order').toEqual([
       'agents/iota',
@@ -778,10 +778,10 @@ describe('the variant manifest (TP-6)', () => {
 
     const { manifest } = await manifestOf(fakeRoot);
     expect(manifest.hosts).toEqual({
-      'agents/beta': { curation: true, compliance: false },
-      'agents/gamma': { curation: false, compliance: false },
-      'commands/alpha': { curation: true, compliance: false },
-      'commands/plain': { curation: false, compliance: false },
+      'agents/beta': { curation: true, compliance: false, tdd: false },
+      'agents/gamma': { curation: false, compliance: false, tdd: false },
+      'commands/alpha': { curation: true, compliance: false, tdd: false },
+      'commands/plain': { curation: false, compliance: false, tdd: false },
     });
     expect(treeOf(fakeRoot, 'dist/compliance-off')).toEqual([]);
     expect(treeOf(fakeRoot, 'dist/curation-compliance-off')).toEqual([]);
@@ -852,7 +852,10 @@ describe('the orphan prune over the compliance trees is keyed on the files writt
   });
 
   it('sweeps the tree of every off variant key', async () => {
-    expect(OFF_VARIANT_KEYS).toEqual(['curation-off', 'compliance-off', 'both-off']);
+    expect(OFF_VARIANT_KEYS).toEqual([
+      'curation-off', 'compliance-off', 'both-off',
+      'tdd-off', 'curation-tdd-off', 'compliance-tdd-off', 'curation-compliance-tdd-off',
+    ]);
     await withFakeRoot(async fakeRoot => {
       await write(fakeRoot, 'src/assets/commands/plain.mds', PLAIN_COMMAND);
       const strays = OFF_VARIANT_KEYS.map(key => variantOffRelPath(key, 'commands', 'stray.md'));
@@ -882,7 +885,7 @@ describe('the orphan prune over the compliance trees is keyed on the files writt
       expect(treeOf(fakeRoot, 'dist/compliance-off')).toEqual(['agents/iota.md', 'commands/delta.md']);
       expect(treeOf(fakeRoot, 'dist/curation-compliance-off')).toEqual(['agents/iota.md']);
       const { manifest } = await manifestOf(fakeRoot);
-      expect(manifest.hosts['commands/theta']).toEqual({ curation: true, compliance: false });
+      expect(manifest.hosts['commands/theta']).toEqual({ curation: true, compliance: false, tdd: false });
     });
   });
 
@@ -962,7 +965,7 @@ describe('what the build refuses on the compliance axis (TP-6)', () => {
       ['stray', `text ${CON}\n`, 'compliance-variant split refused', 'names a compliance marker but is not one'],
       ['unopened', `text\n${CEND}\n`, 'compliance-variant split refused', 'a compliance:end marker with no open arm'],
       ['unclosed', `${CON}\ntext\n`, 'compliance-variant split refused', 'is never closed with compliance:end'],
-      ['overlap', `${ON}\ntext\n${CON}\nmore\n${END}\n${CEND}\n`, 'curation-variant split refused', 'arms of two axes may nest but not overlap'],
+      ['overlap', `${ON}\ntext\n${CON}\nmore\n${END}\n${CEND}\n`, 'curation-variant split refused', 'arms of different axes may nest but not overlap'],
     ];
     await withFakeRoot(async fakeRoot => {
       for (const [name, bodyText] of cases) {
@@ -972,6 +975,184 @@ describe('what the build refuses on the compliance axis (TP-6)', () => {
       expect(run.status, `expected exit 1.\n${run.combined}`).toBe(1);
       for (const [name, , label, message] of cases) {
         expect(run.combined, `${name}: the host and axis are named`).toContain(`src/assets/commands/${name}.mds: ${label}`);
+        expect(run.combined, `${name}: the reason is stated`).toContain(message);
+        expect(await readIfPresent(fakeRoot, `dist/commands/${name}.md`), `${name}: nothing is written`).toBeNull();
+      }
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The tdd axis in the build. A host with a tdd arm gets a tdd-off variant, and a host
+// with arms on several axes gets one variant for each combination of them, so a host
+// with all three axes holds eight bodies and seven off files.
+// ---------------------------------------------------------------------------
+
+/** The line each arm of each axis keeps, so a variant can be read back by the arms it holds. */
+const ARM_LINES: Readonly<Record<Axis, readonly [string, string]>> = {
+  curation: ['Curation is on.', 'Curation is off.'],
+  compliance: ['Compliance is on.', 'Compliance is off.'],
+  tdd: ['Tdd is on.', 'Tdd is off.'],
+};
+
+/** A command host with a standalone arm on each named axis, in the form given for it, or no arm on an axis left out. */
+function threeAxisCommand(name: string, forms: Readonly<Partial<Record<Axis, Form>>>): string {
+  const head = ['---', `description: ${name} command`, 'output-dir: dist/commands', '---'];
+  const arms = (Object.keys(ARM_LINES) as Axis[]).flatMap(axis => {
+    const form = forms[axis];
+    return form === undefined ? [] : axisArm(axis, form, [ARM_LINES[axis][0]], [ARM_LINES[axis][1]]);
+  });
+  return [...head, '', `# ${name}`, '', 'Intro.', ...arms, 'Outro.', ''].join('\n');
+}
+
+async function seedTddFixture(fakeRoot: string): Promise<void> {
+  await write(fakeRoot, 'src/assets/commands/tau.mds', threeAxisCommand('tau', { tdd: 'arms' }));
+  await write(fakeRoot, 'src/assets/commands/sigma.mds', threeAxisCommand('sigma', { curation: 'arms', tdd: 'arms' }));
+  await write(fakeRoot, 'src/assets/commands/rho.mds', threeAxisCommand('rho', { curation: 'arms', compliance: 'arms', tdd: 'arms' }));
+  await write(fakeRoot, 'src/assets/commands/kappa.mds', threeAxisCommand('kappa', { curation: 'arms' }));
+  await write(fakeRoot, 'src/assets/commands/plain.mds', PLAIN_COMMAND);
+}
+
+const tddBuild = sharedBuild(seedTddFixture);
+
+describe('a host with a tdd arm (#758)', () => {
+  it('writes a tree for each combination of off axes that a host has arms on, and nothing more', async () => {
+    const { fakeRoot, run } = await tddBuild();
+    expect(run.status, run.combined).toBe(0);
+
+    expect(treeOf(fakeRoot, 'dist/commands')).toEqual(['kappa.md', 'plain.md', 'rho.md', 'sigma.md', 'tau.md']);
+    expect(treeOf(fakeRoot, 'dist/tdd-off')).toEqual(['commands/rho.md', 'commands/sigma.md', 'commands/tau.md']);
+    expect(treeOf(fakeRoot, 'dist/curation-off')).toEqual(['commands/kappa.md', 'commands/rho.md', 'commands/sigma.md']);
+    expect(treeOf(fakeRoot, 'dist/curation-tdd-off')).toEqual(['commands/rho.md', 'commands/sigma.md']);
+    expect(treeOf(fakeRoot, 'dist/compliance-off')).toEqual(['commands/rho.md']);
+    expect(treeOf(fakeRoot, 'dist/compliance-tdd-off')).toEqual(['commands/rho.md']);
+    expect(treeOf(fakeRoot, 'dist/curation-compliance-off')).toEqual(['commands/rho.md']);
+    expect(treeOf(fakeRoot, 'dist/curation-compliance-tdd-off')).toEqual(['commands/rho.md']);
+    expect(run.combined).toContain('3 tdd-off variant(s) written');
+  });
+
+  it('each variant of a three-axis host keeps the arms of its own axes, and no marker reaches a built file', async () => {
+    const { fakeRoot, run } = await tddBuild();
+    expect(run.status, run.combined).toBe(0);
+
+    const dirOf: Readonly<Record<string, string>> = {
+      '': 'dist/commands',
+      c: 'dist/curation-off/commands',
+      p: 'dist/compliance-off/commands',
+      cp: 'dist/curation-compliance-off/commands',
+      t: 'dist/tdd-off/commands',
+      ct: 'dist/curation-tdd-off/commands',
+      pt: 'dist/compliance-tdd-off/commands',
+      cpt: 'dist/curation-compliance-tdd-off/commands',
+    };
+    expect(Object.keys(dirOf), 'one directory for each of the eight states').toHaveLength(8);
+    for (const [off, dir] of Object.entries(dirOf)) {
+      const text = (await readIfPresent(fakeRoot, `${dir}/rho.md`)) ?? '';
+      expect(text, `${dir}/rho.md exists`).not.toBe('');
+      expect(text.includes(ARM_LINES.curation[off.includes('c') ? 1 : 0]), `${dir}: curation arm`).toBe(true);
+      expect(text.includes(ARM_LINES.compliance[off.includes('p') ? 1 : 0]), `${dir}: compliance arm`).toBe(true);
+      expect(text.includes(ARM_LINES.tdd[off.includes('t') ? 1 : 0]), `${dir}: tdd arm`).toBe(true);
+      expect(text.includes(ARM_LINES.curation[off.includes('c') ? 0 : 1]), `${dir}: no other curation arm`).toBe(false);
+      expect(text.includes(ARM_LINES.compliance[off.includes('p') ? 0 : 1]), `${dir}: no other compliance arm`).toBe(false);
+      expect(text.includes(ARM_LINES.tdd[off.includes('t') ? 0 : 1]), `${dir}: no other tdd arm`).toBe(false);
+    }
+
+    const built = walkFiles(path.join(fakeRoot, 'dist'), f => f.endsWith('.md'));
+    expect(built.length, 'the fixture build wrote nothing').toBeGreaterThanOrEqual(15);
+    expect(built.filter(f => containsVariantMarker(readFileSync(f, 'utf-8')))).toEqual([]);
+  });
+
+  it('each variant equals the same host compiled with its arms resolved by hand', async () => {
+    await withFakeRoot(async fakeRoot => {
+      await write(fakeRoot, 'src/assets/commands/rho.mds', threeAxisCommand('rho', { curation: 'arms', compliance: 'arms', tdd: 'arms' }));
+      const form = (isOff: boolean): Form => (isOff ? 'off' : 'on');
+      const states = ['', 'c', 'p', 'cp', 't', 'ct', 'pt', 'cpt'];
+      for (const off of states) {
+        await write(fakeRoot, `src/assets/commands/rho-ref-${off === '' ? 'on' : off}.mds`, threeAxisCommand('rho', {
+          curation: form(off.includes('c')), compliance: form(off.includes('p')), tdd: form(off.includes('t')),
+        }));
+      }
+      const run = runBuild(fakeRoot);
+      expect(run.status, run.combined).toBe(0);
+      const trees: Readonly<Record<string, string>> = {
+        '': 'dist/commands/rho.md',
+        c: 'dist/curation-off/commands/rho.md',
+        p: 'dist/compliance-off/commands/rho.md',
+        cp: 'dist/curation-compliance-off/commands/rho.md',
+        t: 'dist/tdd-off/commands/rho.md',
+        ct: 'dist/curation-tdd-off/commands/rho.md',
+        pt: 'dist/compliance-tdd-off/commands/rho.md',
+        cpt: 'dist/curation-compliance-tdd-off/commands/rho.md',
+      };
+      for (const off of states) {
+        const built = await readIfPresent(fakeRoot, trees[off] as string);
+        const reference = await readIfPresent(fakeRoot, `dist/commands/rho-ref-${off === '' ? 'on' : off}.md`);
+        expect(built, trees[off]).not.toBeNull();
+        expect(reference, `reference ${off}`).not.toBeNull();
+        expect(built, `${trees[off]} must equal its resolved reference`).toBe(reference);
+      }
+    });
+  });
+
+  it('a host with no tdd arm gets no tdd tree, and the variants it already had are unchanged by the axis', async () => {
+    await withFakeRoot(async fakeRoot => {
+      await seedComplianceFixture(fakeRoot);
+      const run = runBuild(fakeRoot);
+      expect(run.status, run.combined).toBe(0);
+      for (const sub of ['tdd-off', 'curation-tdd-off', 'compliance-tdd-off', 'curation-compliance-tdd-off']) {
+        expect(treeOf(fakeRoot, `dist/${sub}`), sub).toEqual([]);
+      }
+      expect(run.combined).toContain('0 tdd-off variant(s) written');
+    });
+  });
+
+  it('the manifest records the tdd axis of each host', async () => {
+    const { fakeRoot, run } = await tddBuild();
+    expect(run.status, run.combined).toBe(0);
+    const { manifest } = await manifestOf(fakeRoot);
+    expect(manifest.hosts).toEqual({
+      'commands/kappa': { curation: true, compliance: false, tdd: false },
+      'commands/plain': { curation: false, compliance: false, tdd: false },
+      'commands/rho': { curation: true, compliance: true, tdd: true },
+      'commands/sigma': { curation: true, compliance: false, tdd: true },
+      'commands/tau': { curation: false, compliance: false, tdd: true },
+    });
+  });
+
+  it('removes the tdd trees of a host that lost its tdd arm, and sweeps a stray file from each', async () => {
+    await withFakeRoot(async fakeRoot => {
+      await seedTddFixture(fakeRoot);
+      expect(runBuild(fakeRoot).status).toBe(0);
+      await write(fakeRoot, 'dist/curation-compliance-tdd-off/commands/stray.md', 'old\n');
+      await write(fakeRoot, 'dist/tdd-off/commands/deep/stray.md', 'old\n');
+      await write(fakeRoot, 'src/assets/commands/tau.mds', PLAIN_COMMAND.replace('plain', 'tau'));
+      const run = runBuild(fakeRoot);
+      expect(run.status, run.combined).toBe(0);
+      expect(prunedPaths(run.combined).sort()).toEqual([
+        'dist/curation-compliance-tdd-off/commands/stray.md',
+        'dist/tdd-off/commands/deep/stray.md',
+        'dist/tdd-off/commands/tau.md',
+      ]);
+      expect(treeOf(fakeRoot, 'dist/tdd-off')).toEqual(['commands/rho.md', 'commands/sigma.md']);
+    });
+  });
+
+  it('refuses a tdd arm that is stray, unopened or unclosed, naming the tdd axis', async () => {
+    const TON = '<!-- tdd:on -->';
+    const TEND = '<!-- tdd:end -->';
+    const cases: ReadonlyArray<readonly [string, string, string]> = [
+      ['stray', `text ${TON}\n`, 'names a tdd marker but is not one'],
+      ['unopened', `text\n${TEND}\n`, 'a tdd:end marker with no open arm'],
+      ['unclosed', `${TON}\ntext\n`, 'is never closed with tdd:end'],
+    ];
+    await withFakeRoot(async fakeRoot => {
+      for (const [name, bodyText] of cases) {
+        await write(fakeRoot, `src/assets/commands/${name}.mds`, `---\ndescription: ${name}\noutput-dir: dist/commands\n---\n\n# ${name}\n\n${bodyText}`);
+      }
+      const run = runBuild(fakeRoot);
+      expect(run.status, `expected exit 1.\n${run.combined}`).toBe(1);
+      for (const [name, , message] of cases) {
+        expect(run.combined, `${name}: the host and axis are named`).toContain(`src/assets/commands/${name}.mds: tdd-variant split refused`);
         expect(run.combined, `${name}: the reason is stated`).toContain(message);
         expect(await readIfPresent(fakeRoot, `dist/commands/${name}.md`), `${name}: nothing is written`).toBeNull();
       }
