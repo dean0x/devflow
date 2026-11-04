@@ -9,7 +9,7 @@ description: Execute a single task through implementation, quality gates, and PR
 $ARGUMENTS
 </command-input>
 
-`COMMAND_INPUT` is the text above: a plan document path, an issue reference, a task description, or empty (use the conversation).
+`COMMAND_INPUT` is the text above: a plan document path, an issue reference, a task description, or empty.
 
 **Issue-reference grammar.** Scan `COMMAND_INPUT` for candidate issue references: a `#`-prefixed token or a bare digit run. Collect them in source order as `ISSUE_REFS`, and forward the list to the Git agent verbatim. Do not render, normalise, pad, strip or drop a token. Under `github`, a token that matches `^#?[1-9][0-9]{0,8}$` is a reference, and the Git agent renders it as `#{n}`.
 
@@ -58,7 +58,7 @@ Set `EVIDENCE_POLICY`, `ISSUE_REQUIRED`, `APPLY_CONVENTIONS` and `REQUIRE_NON_AU
 
 `PR_DESCRIPTION_GUIDANCE` is the full `## PR Description Guidance` section of the plan document. Any other input, empty input included, or a plan without that section, gives `(none)`.
 
-**Empty input.** When `COMMAND_INPUT` is empty, no argument can name the branch, and the Git agent sees none of this conversation. Write the description yourself: one line, taken from the plan's title or, with no plan, from the conversation. Send it as the setup-task `TASK_DESCRIPTION` below.
+**Empty input.** When `COMMAND_INPUT` is empty — a plan handoff arrives this way with the plan already in the conversation — no argument can name the branch, and the Git agent sees none of this conversation. Write the description yourself: one line, taken from the plan's title or, with no plan, from the conversation. Send it as the setup-task `TASK_DESCRIPTION` below.
 
 Spawn Git agent:
 
@@ -218,7 +218,7 @@ Setup context is the plan document, issue body or conversation.
 | **SEQUENTIAL_CODE_AGENTS** | The plan writes >= 10 files or has >= 7 steps |
 | **PARALLEL_CODE_AGENTS** | True artifact independence (rare) |
 
-Each phase or subtask `EXECUTION_PLAN` adds the plan's Acceptance Criteria and Known limits.
+Each phase or subtask `EXECUTION_PLAN` adds the plan's Acceptance Criteria and Known limits; its own steps still set its scope.
 
 ---
 
@@ -276,7 +276,7 @@ HANDOFF_FILE: {worktree}/.devflow/docs/handoff-{branch_slug}.md"
 **PARALLEL_CODE_AGENTS**: spawn all Code agents in one message, one subtask each.
 
 ```
-Agent(subagent_type="Code"):
+Agent(subagent_type="Code"):  # Code agent 1
 "OPERATION: implement
 TASK_ID: {task-id}-part1
 TASK_DESCRIPTION: {independent subtask 1}
@@ -287,7 +287,7 @@ FEATURE_KNOWLEDGE: {feature_knowledge}
 DECISIONS_CONTEXT: {decisions_context}
 {COMPLIANCE_DIRECTIVE}"
 
-Agent(subagent_type="Code"):
+Agent(subagent_type="Code"):  # Code agent 2 (same message)
 "OPERATION: implement
 TASK_ID: {task-id}-part2
 TASK_DESCRIPTION: {independent subtask 2}
@@ -431,7 +431,7 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
 
 Any other or missing Status: report and halt; never PASS.
 
-**Evidence claims** come from the evidence script, which owns the claim lines and the `## Claims` section. `<head>` is the report's `HEAD:` value, or `none` if it holds anything but letters and digits (a before/after change too).
+**Evidence claims** come from the evidence script. `<head>` is the report's `HEAD:` value, or `none` if it holds anything but letters and digits (a before/after change too).
 
 ```bash
 cd "{worktree}" && node "$HOME/.devflow/scripts/verify-evidence.cjs" claim --evidence ".devflow/docs/evidence-{branch_slug}.md" --head <head> gate|TP-<n>=<PASS|FAIL|SKIP>[:<exit>] ...
@@ -484,13 +484,13 @@ After every Test agent run — whatever its Status, first run or retry — appen
 **Produces:** REVALIDATION_RESULT
 **Requires:** QA_RESULT, VALIDATED_HEAD, BASE_REF, GATE_LEVEL
 
-Run this phase only if a qa-fix committed (`git rev-parse HEAD` differs from `VALIDATED_HEAD`); else skip to Phase 9. Spawn Validate agent:
+Run only if a qa-fix committed (`git rev-parse HEAD` differs from `VALIDATED_HEAD`); else skip to Phase 9. Spawn Validate agent:
 
 ```
 Agent(subagent_type="Validate"):
 "FILES_CHANGED: {output of `git diff --name-only --diff-filter=d VALIDATED_HEAD..HEAD`}
 VALIDATION_SCOPE: changed-only
-Verify the qa-fix commits did not break anything."
+Verify the qa-fix commits."
 ```
 
 At `lean`, open the prompt with Phase 6's `GATE_LEVEL` and `BASE_SHA` lines; its `Lint pack:` line, or `Lint pack: UNVERIFIED` if it prints none, replaces Phase 6's in VALIDATION_RESULT.
@@ -566,7 +566,7 @@ git push origin HEAD; echo "exit=$?"
 
 `exit=0` continues to the script. Any other result, a rejected non-fast-forward push included, does not block: record `TRACEABILITY: DEGRADED (evidence push failed)` for the Phase 12 report and run the script anyway.
 
-**Then refresh, inline.** The refresh is plumbing, so no Git agent runs it: `verify-evidence.cjs publish` is the whole `update-pr-evidence` operation, scrub included, in one call. Use the Bash tool with `timeout: 180000`:
+**Then refresh, inline.** `verify-evidence.cjs publish` is the whole `update-pr-evidence` operation, scrub included, in one call. Use the Bash tool with `timeout: 180000`:
 
 ```bash
 cd "{worktree}" && node "$HOME/.devflow/scripts/verify-evidence.cjs" publish --pr {PR_NUMBER} --evidence ".devflow/docs/evidence-{branch_slug}.md" --publication {REVIEW_PUBLICATION resolved in Phase 1, or auto}; echo "exit=$?"

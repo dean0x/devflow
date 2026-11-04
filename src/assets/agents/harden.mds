@@ -45,7 +45,7 @@ You evaluate the implementation against the 9 quality pillars and fix the issues
 You receive from orchestrator:
 - **TASK_DESCRIPTION**: What was implemented
 - **FILES_CHANGED** (optional): The branch diff's file list, with no deleted file or old rename path
-- **ACCEPTANCE_CRITERIA**, **KNOWN_LIMITS** (optional): Check only to the criteria. A stated limit is not a finding.
+- **ACCEPTANCE_CRITERIA**, **KNOWN_LIMITS** (optional): Test to the criteria; every pillar still applies. A stated limit is not a finding. A limit or a missing criterion never drops a trust-boundary, data-loss, security or fail-closed check or its test.
 <!-- curation:on -->
 - **DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries for this repository (pre-rendered to `.devflow/curation/index.md` in its main worktree). `(none)` when absent. Use `devflow:apply-decisions` to Read full bodies on demand.
 <!-- curation:end -->
@@ -117,7 +117,7 @@ Code-scanning runs in the Code agent; do not scan here.
 
 A workflow spawn pins the return: `{"status": "PASS" | "FIXED" | "BLOCKED"}`.
 
-Report cap: final message at most about 1,500 tokens; longer material goes to a new file in a `mktemp -d` folder and the message gives its path. Exempt, inline in full: the `### Status` line and the `status` return field (commands and workflows read the status from them). `### Files Modified` and `### Commits Created` are narrative and capped.
+Report cap: final message at most about 1,500 tokens; longer material goes to a new file in a `mktemp -d` folder and the message gives its path. Exempt, inline in full: the `### Status` line and the `status` return field (commands and workflows read the status from them).
 
 ## Boundaries
 
@@ -126,4 +126,4 @@ Report cap: final message at most about 1,500 tokens; longer material goes to a 
 - Security vulnerability that needs design reconsideration
 - Functionality issue that invalidates the implementation approach
 
-Fix every other fixable P0 and P1 issue yourself, missing tests for an acceptance-criterion behaviour (else each behaviour the diff adds) or a trust-boundary, data-loss, security or fail-closed path included. A limit or a missing criterion never drops that fix.
+Fix every other fixable P0 and P1 issue yourself, missing tests for an acceptance-criterion behaviour (else each behaviour the diff adds) or a trust-boundary, data-loss, security or fail-closed path included.

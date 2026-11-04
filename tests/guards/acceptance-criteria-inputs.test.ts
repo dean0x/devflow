@@ -19,8 +19,8 @@
  *
  * /implement passes them in its four builds (on, curation off, compliance off, both off): one Phase 2
  * sentence puts the plan's Acceptance Criteria and Known limits into each phase or subtask
- * `EXECUTION_PLAN` (the single spawn already takes the full plan), and the one Harden spawn carries both
- * input lines.
+ * `EXECUTION_PLAN`, whose own steps still set its scope (the single spawn already takes the full plan), and
+ * the one Harden spawn carries both input lines. The Harden line also keeps every pillar in force.
  *
  * What a green run does NOT prove: it proves the files carry the text. It does not prove that a model
  * follows it.
@@ -39,15 +39,12 @@ import {
 
 const INPUT_HEAD = '- **ACCEPTANCE_CRITERIA**, **KNOWN_LIMITS** (optional):'
 
-const CODE_INPUT_LINE =
-  `${INPUT_HEAD} Build only to the criteria and not past a stated limit. ` +
-  'A limit or a missing criterion never drops a trust-boundary, data-loss, security or fail-closed check or its test.'
+const NEVER_CUT_CLAUSE = 'A limit or a missing criterion never drops a trust-boundary, data-loss, security or fail-closed check or its test.'
 
-const HARDEN_INPUT_LINE = `${INPUT_HEAD} Check only to the criteria. A stated limit is not a finding.`
+const CODE_INPUT_LINE = `${INPUT_HEAD} Build only to the criteria and not past a stated limit. ${NEVER_CUT_CLAUSE}`
 
-/** The Harden never-cut sentence follows the rule that names the trust-boundary, data-loss, security and fail-closed paths. */
-const HARDEN_NEVER_CUT =
-  'or a trust-boundary, data-loss, security or fail-closed path included. A limit or a missing criterion never drops that fix.'
+const HARDEN_INPUT_LINE =
+  `${INPUT_HEAD} Test to the criteria; every pillar still applies. A stated limit is not a finding. ${NEVER_CUT_CLAUSE}`
 
 interface Build { readonly label: string; readonly text: string }
 
@@ -84,12 +81,6 @@ function collectInputLineDefects(label: string, text: string, expected: string):
   return lines[0] === expected ? [] : [`${label}: the criteria-and-limits input line differs from the pinned text`]
 }
 
-/** Named collector: how a Harden body falls short of its never-cut sentence, stated once. */
-function collectHardenNeverCutDefects(label: string, text: string): string[] {
-  const copies = text.split(HARDEN_NEVER_CUT).length - 1
-  return copies === 1 ? [] : [`${label}: the never-cut sentence appears ${copies} times, expected 1`]
-}
-
 describe('the Code agent reads ACCEPTANCE_CRITERIA and KNOWN_LIMITS in every build (#756)', () => {
   it.each(codeBuilds().map(b => [b.label, b.text] as const))('%s carries the input line and its never-cut clause once', (label, text) => {
     expect(text.length, 'the body is read: the guard would pass vacuously on an empty one').toBeGreaterThan(4_000)
@@ -98,8 +89,7 @@ describe('the Code agent reads ACCEPTANCE_CRITERIA and KNOWN_LIMITS in every bui
 
   it('known-bad probes: a lost never-cut clause, a lost limit rule and a repeated line are each reported', () => {
     const [{ label, text }] = codeBuilds()
-    const clause = 'A limit or a missing criterion never drops a trust-boundary, data-loss, security or fail-closed check or its test.'
-    const noClause = text.replace(` ${clause}`, '')
+    const noClause = text.replace(` ${NEVER_CUT_CLAUSE}`, '')
     expect(noClause, 'the seed must land').not.toBe(text)
     expect(collectInputLineDefects(label, noClause, CODE_INPUT_LINE)).toEqual([`${label}: the criteria-and-limits input line differs from the pinned text`])
     const noLimit = text.replace(' and not past a stated limit', '')
@@ -113,7 +103,7 @@ describe('the Code agent reads ACCEPTANCE_CRITERIA and KNOWN_LIMITS in every bui
 })
 
 const PHASE_PLAN_SENTENCE =
-  "Each phase or subtask `EXECUTION_PLAN` adds the plan's Acceptance Criteria and Known limits."
+  "Each phase or subtask `EXECUTION_PLAN` adds the plan's Acceptance Criteria and Known limits; its own steps still set its scope."
 
 const HARDEN_SPAWN_LINES = [
   'ACCEPTANCE_CRITERIA: {extracted criteria if available}',
@@ -165,20 +155,23 @@ describe('/implement passes ACCEPTANCE_CRITERIA and KNOWN_LIMITS in every build 
 })
 
 describe('the Harden agent reads ACCEPTANCE_CRITERIA and KNOWN_LIMITS in both builds (#756)', () => {
-  it.each(hardenBuilds().map(b => [b.label, b.text] as const))('%s carries the input line and the never-cut sentence once', (label, text) => {
+  it.each(hardenBuilds().map(b => [b.label, b.text] as const))('%s carries the input line and its never-cut clause once', (label, text) => {
     expect(text.length, 'the body is read: the guard would pass vacuously on an empty one').toBeGreaterThan(2_000)
     expect(collectInputLineDefects(label, text, HARDEN_INPUT_LINE)).toEqual([])
-    expect(collectHardenNeverCutDefects(label, text)).toEqual([])
   })
 
-  it('known-bad probes: a lost never-cut sentence, a lost limit rule and a repeated sentence are each reported', () => {
+  it('known-bad probes: a lost never-cut clause, a lost pillar rule, a lost limit rule and a repeated line are each reported', () => {
     const [{ label, text }] = hardenBuilds()
-    const noSentence = text.replace(' A limit or a missing criterion never drops that fix.', '')
-    expect(noSentence, 'the seed must land').not.toBe(text)
-    expect(collectHardenNeverCutDefects(label, noSentence)).toEqual([`${label}: the never-cut sentence appears 0 times, expected 1`])
+    const differs = [`${label}: the criteria-and-limits input line differs from the pinned text`]
+    const noClause = text.replace(` ${NEVER_CUT_CLAUSE}`, '')
+    expect(noClause, 'the seed must land').not.toBe(text)
+    expect(collectInputLineDefects(label, noClause, HARDEN_INPUT_LINE)).toEqual(differs)
+    const noPillars = text.replace('; every pillar still applies', '')
+    expect(noPillars, 'the seed must land').not.toBe(text)
+    expect(collectInputLineDefects(label, noPillars, HARDEN_INPUT_LINE)).toEqual(differs)
     const noLimit = text.replace(' A stated limit is not a finding.', '')
     expect(noLimit, 'the seed must land').not.toBe(text)
-    expect(collectInputLineDefects(label, noLimit, HARDEN_INPUT_LINE)).toEqual([`${label}: the criteria-and-limits input line differs from the pinned text`])
-    expect(collectHardenNeverCutDefects(label, `${text}\n${HARDEN_NEVER_CUT}\n`)).toEqual([`${label}: the never-cut sentence appears 2 times, expected 1`])
+    expect(collectInputLineDefects(label, noLimit, HARDEN_INPUT_LINE)).toEqual(differs)
+    expect(collectInputLineDefects(label, `${text}\n${HARDEN_INPUT_LINE}\n`, HARDEN_INPUT_LINE)).toEqual([`${label}: 2 criteria-and-limits input lines, expected 1`])
   })
 })
