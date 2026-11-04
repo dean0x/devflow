@@ -18,9 +18,13 @@
  * of passing vacuously.
  *
  * /implement passes them in its four builds (on, curation off, compliance off, both off): one Phase 2
- * sentence puts the plan's Acceptance Criteria and Known limits into each phase or subtask
- * `EXECUTION_PLAN`, whose own steps still set its scope (the single spawn already takes the full plan), and
- * the one Harden spawn carries both input lines. The Harden line also keeps every pillar in force.
+ * sentence puts the plan's Patterns to Follow, Known limits and the criteria that phase serves into each phase
+ * or subtask `EXECUTION_PLAN`: the criteria its Serves cell names, any criterion no cell names and each
+ * criterion that states a trust-boundary, security, data-loss or fail-closed property, or all criteria when no
+ * cell names a listed criterion. Its own steps still set its scope (the single spawn already takes the full
+ * plan). The one Harden spawn carries both input lines, and the Harden line also keeps every pillar in force.
+ * No Phase 2 Code spawn passes PATTERNS or PRIOR_PHASE_SUMMARY: the sentence carries the patterns and the
+ * handoff file carries the prior phase, so the phase-N spawn keeps HANDOFF_FILE.
  *
  * What a green run does NOT prove: it proves the files carry the text. It does not prove that a model
  * follows it.
@@ -102,8 +106,19 @@ describe('the Code agent reads ACCEPTANCE_CRITERIA and KNOWN_LIMITS in every bui
   })
 })
 
+const PHASE_PLAN_HEAD = "Each phase or subtask `EXECUTION_PLAN` adds the plan's"
+
 const PHASE_PLAN_SENTENCE =
-  "Each phase or subtask `EXECUTION_PLAN` adds the plan's Acceptance Criteria and Known limits; its own steps still set its scope."
+  `${PHASE_PLAN_HEAD} Patterns to Follow, Known limits, the criteria its Serves cell names, any criterion no cell names and each criterion that states a trust-boundary, security, data-loss or fail-closed property; a phase with no Serves cell that names a listed criterion gets all criteria; its own steps still set its scope.`
+
+/** The clauses of the phase-plan sentence, each named in the defect that reports it lost. */
+const PHASE_PLAN_CLAUSES: ReadonlyArray<readonly [name: string, clause: string]> = [
+  ['Patterns to Follow', 'Patterns to Follow, '],
+  ['Known limits', 'Known limits, '],
+  ['served and unserved criteria', 'the criteria its Serves cell names, any criterion no cell names'],
+  ['safety-criteria clause', ' and each criterion that states a trust-boundary, security, data-loss or fail-closed property'],
+  ['fallback to all criteria', '; a phase with no Serves cell that names a listed criterion gets all criteria'],
+]
 
 const HARDEN_SPAWN_LINES = [
   'ACCEPTANCE_CRITERIA: {extracted criteria if available}',
@@ -119,11 +134,18 @@ function implementBuilds(): Build[] {
   ]
 }
 
+/** Named collector: how an /implement build falls short of the phase-plan sentence, as one line holding every clause. */
+function collectPhasePlanSentenceDefects(label: string, text: string): string[] {
+  const lines = text.split('\n').filter(line => line.startsWith(PHASE_PLAN_HEAD))
+  if (lines.length !== 1) return [`${label}: the phase-plan sentence appears ${lines.length} times, expected 1`]
+  if (lines[0] === PHASE_PLAN_SENTENCE) return []
+  const lost = PHASE_PLAN_CLAUSES.filter(([, clause]) => !lines[0].includes(clause)).map(([name]) => `${label}: the phase-plan sentence lost its ${name}`)
+  return lost.length > 0 ? lost : [`${label}: the phase-plan sentence differs from the pinned text`]
+}
+
 /** Named collector: how an /implement build falls short of passing the criteria and limits. */
 function collectImplementDefects(label: string, text: string): string[] {
-  const defects: string[] = []
-  const sentences = text.split(PHASE_PLAN_SENTENCE).length - 1
-  if (sentences !== 1) defects.push(`${label}: the phase-plan sentence appears ${sentences} times, expected 1`)
+  const defects = collectPhasePlanSentenceDefects(label, text)
   const harden = parseFences(text).filter(block => isAgentBlock(block, 'Harden'))
   if (harden.length !== 1) return [...defects, `${label}: ${harden.length} Harden spawn blocks, expected 1`]
   for (const line of HARDEN_SPAWN_LINES) {
@@ -136,6 +158,18 @@ describe('/implement passes ACCEPTANCE_CRITERIA and KNOWN_LIMITS in every build 
   it.each(implementBuilds().map(b => [b.label, b.text] as const))('%s carries the phase-plan sentence and both Harden lines', (label, text) => {
     expect(text.length, 'the command is read: the guard would pass vacuously on an empty one').toBeGreaterThan(30_000)
     expect(collectImplementDefects(label, text)).toEqual([])
+  })
+
+  it('known-bad probes: each lost clause of the phase-plan sentence is reported by name', () => {
+    const [{ label, text }] = implementBuilds()
+    for (const [name, clause] of PHASE_PLAN_CLAUSES) {
+      const lost = text.replace(PHASE_PLAN_SENTENCE, PHASE_PLAN_SENTENCE.replace(clause, ''))
+      expect(lost, `the ${name} seed must land`).not.toBe(text)
+      expect(collectImplementDefects(label, lost)).toEqual([`${label}: the phase-plan sentence lost its ${name}`])
+    }
+    const reworded = text.replace(PHASE_PLAN_SENTENCE, PHASE_PLAN_SENTENCE.replace('still set its scope', 'set its scope'))
+    expect(reworded, 'the seed must land').not.toBe(text)
+    expect(collectImplementDefects(label, reworded)).toEqual([`${label}: the phase-plan sentence differs from the pinned text`])
   })
 
   it('known-bad probes: a lost sentence, a lost Harden line and a lost Harden block are each reported', () => {
@@ -151,6 +185,96 @@ describe('/implement passes ACCEPTANCE_CRITERIA and KNOWN_LIMITS in every build 
     const noHarden = text.replace('Agent(subagent_type="Harden")', 'Agent(subagent_type="Other")')
     expect(noHarden, 'the seed must land').not.toBe(text)
     expect(collectImplementDefects(label, noHarden)).toEqual([`${label}: 0 Harden spawn blocks, expected 1`])
+  })
+})
+
+const PHASE_2_HEADING = '### Phase 2: Implement'
+const PHASE_3_HEADING = '### Phase 3:'
+
+/** The Code fences of Phase 2: the single spawn, the phase 1 spawn, the phase N spawn and the parallel pair. */
+const PHASE_2_CODE_FENCES = 4
+
+/** Inputs no Phase 2 Code fence passes: the sentence carries the patterns, the handoff file carries the prior phase. */
+const REPEATED_SPAWN_INPUTS = ['PATTERNS:', 'PRIOR_PHASE_SUMMARY:'] as const
+
+/** The Phase 2 section of an /implement build, from its heading to the Phase 3 heading, or null when either is absent. */
+function phase2Section(text: string): string | null {
+  const start = text.indexOf(PHASE_2_HEADING)
+  const end = start === -1 ? -1 : text.indexOf(PHASE_3_HEADING, start)
+  return end === -1 ? null : text.slice(start, end)
+}
+
+/** Named collector: how the Phase 2 Code spawns of an /implement build repeat an input, or lose the handoff file of the phase-N spawn. */
+function collectPhase2SpawnInputDefects(label: string, text: string): string[] {
+  const section = phase2Section(text)
+  if (section === null) return [`${label}: the Phase 2 section is not found`]
+  const code = parseFences(section).filter(block => isAgentBlock(block, 'Code'))
+  if (code.length !== PHASE_2_CODE_FENCES) return [`${label}: ${code.length} Phase 2 Code fences, expected ${PHASE_2_CODE_FENCES}`]
+  const defects = code.flatMap((block, i) =>
+    REPEATED_SPAWN_INPUTS.filter(input => block.includes(input)).map(input => `${label}: Phase 2 Code fence ${i + 1} passes ${input}`),
+  )
+  const phaseN = code.filter(block => block.includes('FILES_FROM_PRIOR_PHASE:'))
+  if (phaseN.length !== 1) return [...defects, `${label}: ${phaseN.length} phase-N Code fences, expected 1`]
+  if (!phaseN[0].includes('HANDOFF_FILE:')) defects.push(`${label}: the phase-N Code fence lacks HANDOFF_FILE:`)
+  return defects
+}
+
+describe('no /implement Phase 2 Code spawn repeats PATTERNS or PRIOR_PHASE_SUMMARY in any build (#756)', () => {
+  it.each(implementBuilds().map(b => [b.label, b.text] as const))('%s passes neither input and keeps HANDOFF_FILE in the phase-N spawn', (label, text) => {
+    expect(text.length, 'the command is read: the guard would pass vacuously on an empty one').toBeGreaterThan(30_000)
+    expect(collectPhase2SpawnInputDefects(label, text)).toEqual([])
+  })
+
+  it('known-bad probes: a repeated input in each kind of Code fence, a lost HANDOFF_FILE and a lost phase-N fence are each reported', () => {
+    const [{ label, text }] = implementBuilds()
+    const seeded = (from: string, to: string): string => {
+      const edited = text.replace(from, to)
+      expect(edited, 'the seed must land').not.toBe(text)
+      return edited
+    }
+    const single = seeded('EXECUTION_PLAN: {full plan from setup context}\n', 'EXECUTION_PLAN: {full plan from setup context}\nPATTERNS: {patterns from plan document or empty}\n')
+    expect(collectPhase2SpawnInputDefects(label, single)).toEqual([`${label}: Phase 2 Code fence 1 passes PATTERNS:`])
+    const phase1 = seeded('EXECUTION_PLAN: {phase 1 steps}\n', 'EXECUTION_PLAN: {phase 1 steps}\nPATTERNS: {patterns from plan document or empty}\n')
+    expect(collectPhase2SpawnInputDefects(label, phase1)).toEqual([`${label}: Phase 2 Code fence 2 passes PATTERNS:`])
+    const summary = seeded('EXECUTION_PLAN: {phase N steps}\n', 'EXECUTION_PLAN: {phase N steps}\nPRIOR_PHASE_SUMMARY: {summary from previous Code agent}\n')
+    expect(collectPhase2SpawnInputDefects(label, summary)).toEqual([`${label}: Phase 2 Code fence 3 passes PRIOR_PHASE_SUMMARY:`])
+    const parallel = seeded('EXECUTION_PLAN: {subtask 2 steps}\n', 'EXECUTION_PLAN: {subtask 2 steps}\nPATTERNS: {patterns}\n')
+    expect(collectPhase2SpawnInputDefects(label, parallel)).toEqual([`${label}: Phase 2 Code fence 4 passes PATTERNS:`])
+    const noHandoff = seeded('HANDOFF_REQUIRED: {true if not last phase}\nHANDOFF_FILE: {worktree}/.devflow/docs/handoff-{branch_slug}.md"', 'HANDOFF_REQUIRED: {true if not last phase}"')
+    expect(collectPhase2SpawnInputDefects(label, noHandoff)).toEqual([`${label}: the phase-N Code fence lacks HANDOFF_FILE:`])
+    const noPhaseN = seeded('FILES_FROM_PRIOR_PHASE: {list of files created}\n', '')
+    expect(collectPhase2SpawnInputDefects(label, noPhaseN)).toEqual([`${label}: 0 phase-N Code fences, expected 1`])
+    const noSection = seeded(PHASE_2_HEADING, '### Phase 2: Build')
+    expect(collectPhase2SpawnInputDefects(label, noSection)).toEqual([`${label}: the Phase 2 section is not found`])
+  })
+})
+
+const CODE_BASE_BRANCH_INPUT = '- **BASE_BRANCH**: Branch this feature branch was created from\n'
+const CODE_PRIOR_PHASE_SUMMARY_INPUT = '- **PRIOR_PHASE_SUMMARY**: Summary from the previous Code agent (format in Handoff)\n'
+
+/** Named collector: how a Code body lists the PATTERNS input that no spawn passes, or loses the PRIOR_PHASE_SUMMARY input that the dynamic engine still names. */
+function collectCodeSpawnInputDefects(label: string, text: string): string[] {
+  const defects: string[] = []
+  if (/^- \*\*PATTERNS\*\*/m.test(text)) defects.push(`${label}: the dead PATTERNS input is listed`)
+  const summaries = text.split('\n').filter(line => line.startsWith('- **PRIOR_PHASE_SUMMARY**')).length
+  if (summaries !== 1) defects.push(`${label}: ${summaries} PRIOR_PHASE_SUMMARY input lines, expected 1`)
+  return defects
+}
+
+describe('the Code agent lists no PATTERNS input and keeps PRIOR_PHASE_SUMMARY in every build (#756)', () => {
+  it.each(codeBuilds().map(b => [b.label, b.text] as const))('%s', (label, text) => {
+    expect(text.length, 'the body is read: the guard would pass vacuously on an empty one').toBeGreaterThan(4_000)
+    expect(collectCodeSpawnInputDefects(label, text)).toEqual([])
+  })
+
+  it('known-bad probes: a listed PATTERNS input and a lost PRIOR_PHASE_SUMMARY input are each reported', () => {
+    const [{ label, text }] = codeBuilds()
+    const withPatterns = text.replace(CODE_BASE_BRANCH_INPUT, `${CODE_BASE_BRANCH_INPUT}- **PATTERNS**: Codebase patterns to follow\n`)
+    expect(withPatterns, 'the seed must land').not.toBe(text)
+    expect(collectCodeSpawnInputDefects(label, withPatterns)).toEqual([`${label}: the dead PATTERNS input is listed`])
+    const noSummary = text.replace(CODE_PRIOR_PHASE_SUMMARY_INPUT, '')
+    expect(noSummary, 'the seed must land').not.toBe(text)
+    expect(collectCodeSpawnInputDefects(label, noSummary)).toEqual([`${label}: 0 PRIOR_PHASE_SUMMARY input lines, expected 1`])
   })
 })
 

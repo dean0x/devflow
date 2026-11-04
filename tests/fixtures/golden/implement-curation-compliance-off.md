@@ -204,7 +204,7 @@ Setup context is the plan document, issue body or conversation.
 | **SEQUENTIAL_CODE_AGENTS** | The plan writes >= 10 files or has >= 7 steps |
 | **PARALLEL_CODE_AGENTS** | True artifact independence (rare) |
 
-Each phase or subtask `EXECUTION_PLAN` adds the plan's Acceptance Criteria and Known limits; its own steps still set its scope.
+Each phase or subtask `EXECUTION_PLAN` adds the plan's Patterns to Follow, Known limits, the criteria its Serves cell names, any criterion no cell names and each criterion that states a trust-boundary, security, data-loss or fail-closed property; a phase with no Serves cell that names a listed criterion gets all criteria; its own steps still set its scope.
 
 ---
 
@@ -217,7 +217,6 @@ TASK_ID: {task-id}
 TASK_DESCRIPTION: {description}
 BASE_BRANCH: {base branch}
 EXECUTION_PLAN: {full plan from setup context}
-PATTERNS: {patterns from plan document or empty}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 {COMPLIANCE_DIRECTIVE}"
 ```
@@ -231,7 +230,6 @@ TASK_ID: {task-id}
 TASK_DESCRIPTION: {phase 1 description}
 BASE_BRANCH: {base branch}
 EXECUTION_PLAN: {phase 1 steps}
-PATTERNS: {patterns from plan document or empty}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 {COMPLIANCE_DIRECTIVE}
 HANDOFF_REQUIRED: true
@@ -245,8 +243,6 @@ TASK_ID: {task-id}
 TASK_DESCRIPTION: {phase N description}
 BASE_BRANCH: {base branch}
 EXECUTION_PLAN: {phase N steps}
-PATTERNS: {patterns from plan document or empty}
-PRIOR_PHASE_SUMMARY: {summary from previous Code agent}
 FILES_FROM_PRIOR_PHASE: {list of files created}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 {COMPLIANCE_DIRECTIVE}
@@ -265,7 +261,6 @@ TASK_ID: {task-id}-part1
 TASK_DESCRIPTION: {independent subtask 1}
 BASE_BRANCH: {base branch}
 EXECUTION_PLAN: {subtask 1 steps}
-PATTERNS: {patterns}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 {COMPLIANCE_DIRECTIVE}"
 
@@ -275,7 +270,6 @@ TASK_ID: {task-id}-part2
 TASK_DESCRIPTION: {independent subtask 2}
 BASE_BRANCH: {base branch}
 EXECUTION_PLAN: {subtask 2 steps}
-PATTERNS: {patterns}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 {COMPLIANCE_DIRECTIVE}"
 ```
