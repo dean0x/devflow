@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`/implement` gives each Code phase or subtask and the Harden self-review the plan's acceptance criteria and known limits** ([#756](https://github.com/dean0x/devflow/issues/756)). With a sequential or parallel strategy, each phase or subtask plan adds the plan's Acceptance Criteria and Known limits, and its own steps still set its scope; a single Code agent already takes the full plan. The Harden spawn passes the same criteria as Evaluate and Test, and the plan's known limits (else `(none)`). Code builds only to the criteria and not past a stated limit. Harden tests to the criteria, every pillar still applies, and a stated limit is not a finding. A limit or a missing criterion never drops a trust-boundary, data-loss, security or fail-closed check or its test. `/dynamic-build`, `/resolve` and a spawn by hand pass no new input and work as before.
+
 ---
 
 ## [3.13.0] - 2026-11-04
