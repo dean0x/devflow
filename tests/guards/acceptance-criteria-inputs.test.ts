@@ -17,13 +17,25 @@
  * body with one part removed, so a collector that stopped seeing a defect fails its own probe instead
  * of passing vacuously.
  *
+ * /implement passes them in its four builds (on, curation off, compliance off, both off): one Phase 2
+ * sentence puts the plan's Acceptance Criteria and Known limits into each phase or subtask
+ * `EXECUTION_PLAN` (the single spawn already takes the full plan), and the one Harden spawn carries both
+ * input lines.
+ *
  * What a green run does NOT prove: it proves the files carry the text. It does not prove that a model
- * follows it, or that a command passes the inputs.
+ * follows it.
  */
 
 import { describe, it, expect } from 'vitest'
 
-import { resolveAgentSource, resolveCurationOffSource, resolveVariantOffSource } from '../helpers.js'
+import {
+  isAgentBlock,
+  parseFences,
+  requireDistFile,
+  resolveAgentSource,
+  resolveCurationOffSource,
+  resolveVariantOffSource,
+} from '../helpers.js'
 
 const INPUT_HEAD = '- **ACCEPTANCE_CRITERIA**, **KNOWN_LIMITS** (optional):'
 
@@ -97,6 +109,58 @@ describe('the Code agent reads ACCEPTANCE_CRITERIA and KNOWN_LIMITS in every bui
     expect(noLine, 'the seed must land').not.toBe(text)
     expect(collectInputLineDefects(label, noLine, CODE_INPUT_LINE)).toEqual([`${label}: 0 criteria-and-limits input lines, expected 1`])
     expect(collectInputLineDefects(label, `${text}\n${CODE_INPUT_LINE}\n`, CODE_INPUT_LINE)).toEqual([`${label}: 2 criteria-and-limits input lines, expected 1`])
+  })
+})
+
+const PHASE_PLAN_SENTENCE =
+  "Each phase or subtask `EXECUTION_PLAN` adds the plan's Acceptance Criteria and Known limits."
+
+const HARDEN_SPAWN_LINES = [
+  'ACCEPTANCE_CRITERIA: {extracted criteria if available}',
+  "KNOWN_LIMITS: {plan's Known limits, else (none)}",
+] as const
+
+function implementBuilds(): Build[] {
+  return [
+    { label: 'implement (on)', text: requireDistFile('implement.md') },
+    { label: 'implement (curation off)', text: required('dist/curation-off/commands/implement.md', resolveCurationOffSource('commands', 'implement')) },
+    { label: 'implement (compliance off)', text: required('compliance-off implement', resolveVariantOffSource('compliance-off', 'commands', 'implement')) },
+    { label: 'implement (both off)', text: required('both-off implement', resolveVariantOffSource('both-off', 'commands', 'implement')) },
+  ]
+}
+
+/** Named collector: how an /implement build falls short of passing the criteria and limits. */
+function collectImplementDefects(label: string, text: string): string[] {
+  const defects: string[] = []
+  const sentences = text.split(PHASE_PLAN_SENTENCE).length - 1
+  if (sentences !== 1) defects.push(`${label}: the phase-plan sentence appears ${sentences} times, expected 1`)
+  const harden = parseFences(text).filter(block => isAgentBlock(block, 'Harden'))
+  if (harden.length !== 1) return [...defects, `${label}: ${harden.length} Harden spawn blocks, expected 1`]
+  for (const line of HARDEN_SPAWN_LINES) {
+    if (!harden[0].split('\n').includes(line)) defects.push(`${label}: the Harden spawn lacks \`${line}\``)
+  }
+  return defects
+}
+
+describe('/implement passes ACCEPTANCE_CRITERIA and KNOWN_LIMITS in every build (#756)', () => {
+  it.each(implementBuilds().map(b => [b.label, b.text] as const))('%s carries the phase-plan sentence and both Harden lines', (label, text) => {
+    expect(text.length, 'the command is read: the guard would pass vacuously on an empty one').toBeGreaterThan(30_000)
+    expect(collectImplementDefects(label, text)).toEqual([])
+  })
+
+  it('known-bad probes: a lost sentence, a lost Harden line and a lost Harden block are each reported', () => {
+    const [{ label, text }] = implementBuilds()
+    const noSentence = text.replace(`${PHASE_PLAN_SENTENCE}\n`, '')
+    expect(noSentence, 'the seed must land').not.toBe(text)
+    expect(collectImplementDefects(label, noSentence)).toEqual([`${label}: the phase-plan sentence appears 0 times, expected 1`])
+    for (const line of HARDEN_SPAWN_LINES) {
+      const lost = text.replace(`${line}\n`, '')
+      expect(lost, 'the seed must land').not.toBe(text)
+      expect(collectImplementDefects(label, lost)).toEqual([`${label}: the Harden spawn lacks \`${line}\``])
+    }
+    const noHarden = text.replace('Agent(subagent_type="Harden")', 'Agent(subagent_type="Other")')
+    expect(noHarden, 'the seed must land').not.toBe(text)
+    expect(collectImplementDefects(label, noHarden)).toEqual([`${label}: 0 Harden spawn blocks, expected 1`])
   })
 })
 

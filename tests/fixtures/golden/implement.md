@@ -3,8 +3,6 @@ description: Execute a single task through implementation, quality gates, and PR
 ---
 # Implement Command
 
-Orchestrate a single task by spawning agents.
-
 ## Input
 
 <command-input>
@@ -60,7 +58,7 @@ Set `EVIDENCE_POLICY`, `ISSUE_REQUIRED`, `APPLY_CONVENTIONS` and `REQUIRE_NON_AU
 
 `PR_DESCRIPTION_GUIDANCE` is the full `## PR Description Guidance` section of the plan document. Any other input, empty input included, or a plan without that section, gives `(none)`.
 
-**Empty input.** When `COMMAND_INPUT` is empty — a plan handoff arrives this way with the plan already in the conversation — no argument can name the branch, and the Git agent sees none of this conversation. Write the description yourself: one line, taken from the plan's title or, with no plan, from the conversation. Send it as the setup-task `TASK_DESCRIPTION` below.
+**Empty input.** When `COMMAND_INPUT` is empty, no argument can name the branch, and the Git agent sees none of this conversation. Write the description yourself: one line, taken from the plan's title or, with no plan, from the conversation. Send it as the setup-task `TASK_DESCRIPTION` below.
 
 Spawn Git agent:
 
@@ -220,6 +218,8 @@ Setup context is the plan document, issue body or conversation.
 | **SEQUENTIAL_CODE_AGENTS** | The plan writes >= 10 files or has >= 7 steps |
 | **PARALLEL_CODE_AGENTS** | True artifact independence (rare) |
 
+Each phase or subtask `EXECUTION_PLAN` adds the plan's Acceptance Criteria and Known limits.
+
 ---
 
 **SINGLE_CODE_AGENT**:
@@ -276,7 +276,7 @@ HANDOFF_FILE: {worktree}/.devflow/docs/handoff-{branch_slug}.md"
 **PARALLEL_CODE_AGENTS**: spawn all Code agents in one message, one subtask each.
 
 ```
-Agent(subagent_type="Code"):  # Code agent 1
+Agent(subagent_type="Code"):
 "OPERATION: implement
 TASK_ID: {task-id}-part1
 TASK_DESCRIPTION: {independent subtask 1}
@@ -287,7 +287,7 @@ FEATURE_KNOWLEDGE: {feature_knowledge}
 DECISIONS_CONTEXT: {decisions_context}
 {COMPLIANCE_DIRECTIVE}"
 
-Agent(subagent_type="Code"):  # Code agent 2 (same message)
+Agent(subagent_type="Code"):
 "OPERATION: implement
 TASK_ID: {task-id}-part2
 TASK_DESCRIPTION: {independent subtask 2}
@@ -336,9 +336,11 @@ After Phase 3, spawn Harden agent:
 Agent(subagent_type="Harden"):
 "TASK_DESCRIPTION: {task description}
 FILES_CHANGED: {branch_diff}
+ACCEPTANCE_CRITERIA: {extracted criteria if available}
+KNOWN_LIMITS: {plan's Known limits, else (none)}
 DECISIONS_CONTEXT: {decisions_context}
 FEATURE_KNOWLEDGE: {feature_knowledge_rules}
-Evaluate 9 pillars, fix P0/P1 issues, report status"
+Evaluate 9 pillars"
 ```
 
 Harden agent reports `### Status: PASS | FIXED | BLOCKED`. **If BLOCKED:** report to user and halt. **If PASS or FIXED:** continue to Phase 5. A FIXED status commits fixes and starts no Validate of its own: the Phase 6 run covers them.
