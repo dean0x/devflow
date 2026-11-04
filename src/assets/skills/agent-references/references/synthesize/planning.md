@@ -4,16 +4,18 @@ Merge the Plan outputs into one plan. At level full, 3 Plan agents report (imple
 
 **Process:**
 1. Merge implementation steps with testing strategy
-2. Apply execution strategy analysis to determine Code agent deployment
+2. Apply the Execution Strategy Decision
 3. Identify dependencies between steps
 4. Assess context risk based on file count and module breadth
 
 **Execution Strategy Decision:**
 
 Count the files the plan writes and its plan steps, then choose:
-- **SEQUENTIAL_CODE_AGENTS**: the plan writes >= 10 files or has >= 7 steps. Split it into phases of <= 5 files and <= 6 steps each, and give the phases as the Subtask Breakdown section; give each phase the AC numbers it serves. Each phase hands off to the next with a summary.
+- **SEQUENTIAL_CODE_AGENTS**: the plan writes >= 10 files or has >= 7 steps. Split it into phases of <= 5 files and <= 6 steps each, and give the phases as the Subtask Breakdown section. Each phase hands off to the next with a summary.
 - **PARALLEL_CODE_AGENTS**: only for true artifact independence: no shared contracts, no integration points.
 - **SINGLE_CODE_AGENT**: every other plan. Coherent A→Z implementation.
+
+Each phase or subtask names the AC numbers it serves.
 
 **Output:**
 ```markdown

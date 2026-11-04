@@ -28,7 +28,8 @@
  *
  * /plan, in the same four builds, numbers the criteria AC-1, AC-2, ... and gives each Subtask Breakdown row
  * a Serves cell of the item-1 ACs it serves; the Synthesize planning template (`synthesize/planning.md`) has the Serves column and its
- * SEQUENTIAL rule asks for the AC numbers each phase serves. That is the cell the /implement sentence reads.
+ * rule asks for the AC numbers each phase or subtask serves, for a SEQUENTIAL and a PARALLEL plan alike. That is the cell
+ * the /implement sentence reads.
  *
  * What a green run does NOT prove: it proves the files carry the text. It does not prove that a model
  * follows it.
@@ -293,7 +294,7 @@ const PLAN_SERVES_CLAUSE = 'a Serves cell (the item-1 ACs it serves)'
 const PLAN_SUBTASK_LINE = `${PLAN_SUBTASK_LINE_HEAD}phases with domains, dependencies and ${PLAN_SERVES_CLAUSE}; only with more than one subtask`
 
 const PLANNING_REFERENCE = 'synthesize/planning.md'
-const PLANNING_SERVES_RULE = '; give each phase the AC numbers it serves'
+const PLANNING_SERVES_RULE = 'Each phase or subtask names the AC numbers it serves.'
 const PLANNING_SERVES_COLUMN = '| Steps | Serves |'
 
 function planBuilds(): Build[] {
@@ -319,13 +320,18 @@ function collectPlanArtifactDefects(label: string, text: string): string[] {
   return defects
 }
 
-/** Named collector: how the planning template falls short of asking for the AC numbers each phase serves, in its rule and in its Subtask Breakdown table. */
+/**
+ * Named collector: how the planning template falls short of asking for the AC numbers each phase or subtask serves, in its
+ * rule and in its Subtask Breakdown table. The rule is one line of its own after the strategy bullets, so it covers a
+ * PARALLEL_CODE_AGENTS plan as well as a SEQUENTIAL_CODE_AGENTS one, and a clause kept in only one bullet is reported.
+ */
 function collectPlanningTemplateDefects(label: string, text: string): string[] {
   const lines = text.split('\n')
   const defects: string[] = []
-  const rules = lines.filter(line => line.startsWith('- **SEQUENTIAL_CODE_AGENTS**'))
-  if (rules.length !== 1) defects.push(`${label}: ${rules.length} SEQUENTIAL_CODE_AGENTS rule lines, expected 1`)
-  else if (!rules[0].includes(PLANNING_SERVES_RULE)) defects.push(`${label}: the SEQUENTIAL_CODE_AGENTS rule does not ask for the AC numbers each phase serves`)
+  const parallel = lines.filter(line => line.startsWith('- **PARALLEL_CODE_AGENTS**'))
+  if (parallel.length !== 1) defects.push(`${label}: ${parallel.length} PARALLEL_CODE_AGENTS rule lines, expected 1`)
+  const rules = lines.filter(line => line === PLANNING_SERVES_RULE)
+  if (rules.length !== 1) defects.push(`${label}: ${rules.length} lines ask for the AC numbers each phase or subtask serves, expected 1 (one rule covers the SEQUENTIAL and PARALLEL plans)`)
   const headerAt = lines.findIndex(line => line.startsWith('| Phase |'))
   if (headerAt === -1) return [...defects, `${label}: the Subtask Breakdown table is not found`]
   if (!lines[headerAt].includes(PLANNING_SERVES_COLUMN)) defects.push(`${label}: the Subtask Breakdown table has no Serves column after Steps`)
@@ -343,7 +349,7 @@ describe('/plan numbers the criteria and names the criteria each phase serves, i
     expect(collectPlanArtifactDefects(label, text)).toEqual([])
   })
 
-  it('the planning template asks for the AC numbers each phase serves and has the Serves column', () => {
+  it('the planning template asks for the AC numbers each phase or subtask serves and has the Serves column', () => {
     const text = readAgentReference(PLANNING_REFERENCE)
     expect(text.length, 'the template is read: the guard would pass vacuously on an empty one').toBeGreaterThan(1_500)
     expect(collectPlanningTemplateDefects(PLANNING_REFERENCE, text)).toEqual([])
@@ -366,7 +372,7 @@ describe('/plan numbers the criteria and names the criteria each phase serves, i
     expect(collectPlanArtifactDefects(label, `${text}\n${PLAN_SUBTASK_LINE}\n`)).toEqual([`${label}: 2 Subtask Breakdown section lines in the plan artifact, expected 1`])
   })
 
-  it('known-bad probes: the dropped AC clause of the SEQUENTIAL rule and the dropped Serves column are each reported', () => {
+  it('known-bad probes: the AC rule lost, kept for SEQUENTIAL only or lost for PARALLEL, and the dropped Serves column are each reported', () => {
     const label = PLANNING_REFERENCE
     const text = readAgentReference(PLANNING_REFERENCE)
     const seeded = (from: string, to: string): string => {
@@ -374,8 +380,14 @@ describe('/plan numbers the criteria and names the criteria each phase serves, i
       expect(edited, 'the seed must land').not.toBe(text)
       return edited
     }
-    expect(collectPlanningTemplateDefects(label, seeded(PLANNING_SERVES_RULE, ''))).toEqual([`${label}: the SEQUENTIAL_CODE_AGENTS rule does not ask for the AC numbers each phase serves`])
-    expect(collectPlanningTemplateDefects(label, seeded('- **SEQUENTIAL_CODE_AGENTS**', '- **SEQUENTIAL**'))).toEqual([`${label}: 0 SEQUENTIAL_CODE_AGENTS rule lines, expected 1`])
+    const noRule = `${label}: 0 lines ask for the AC numbers each phase or subtask serves, expected 1 (one rule covers the SEQUENTIAL and PARALLEL plans)`
+    expect(collectPlanningTemplateDefects(label, seeded(`${PLANNING_SERVES_RULE}\n\n`, ''))).toEqual([noRule])
+    const sequentialOnly = seeded(`${PLANNING_SERVES_RULE}\n\n`, '').replace('as the Subtask Breakdown section.', 'as the Subtask Breakdown section; give each phase the AC numbers it serves.')
+    expect(sequentialOnly, 'the seed must land').not.toBe(text)
+    expect(collectPlanningTemplateDefects(label, sequentialOnly)).toEqual([noRule])
+    expect(collectPlanningTemplateDefects(label, seeded(PLANNING_SERVES_RULE, 'Each phase names the AC numbers it serves.'))).toEqual([noRule])
+    expect(collectPlanningTemplateDefects(label, `${text}\n${PLANNING_SERVES_RULE}\n`)).toEqual([noRule.replace('0 lines', '2 lines')])
+    expect(collectPlanningTemplateDefects(label, seeded('- **PARALLEL_CODE_AGENTS**', '- **PARALLEL**'))).toEqual([`${label}: 0 PARALLEL_CODE_AGENTS rule lines, expected 1`])
     const noColumn = text
       .replace('| Steps | Serves | Depends On |', '| Steps | Depends On |')
       .replace('|-------|--------|-------------|-------|-------|--------|------------|', '|-------|--------|-------------|-------|-------|------------|')
