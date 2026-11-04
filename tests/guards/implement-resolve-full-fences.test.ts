@@ -66,8 +66,8 @@ const PINNED_FENCES: Readonly<Record<string, readonly PinnedFence[]>> = {
   'dist/commands/resolve.md': [
     ['Step 0b: Per-Worktree Pre-Flight (Git Agent)', 'Git', 1, '3427a65881118757c983e02f39a1bea9024603a96bc39175640f4fe1dc9811bd'],
     ['Phase 1b: Fetch External Review Threads', 'Git', 1, 'b3a3328a3ae352dc08637c75088dfe6fff4d2f94d1bdd29cda71eba29cb12f71'],
-    ['Phase 2: Global Triage', 'Triage', 1, '1d14563888ec80b5b9daa508b7b7231de4a5730831c4a055d1b09b657ddf4de1'],
-    ['Phase 4: Fix (Code agent × N)', 'Code', 1, '00da930cec5a6925acc2454d122264faee44fabc998bacc1146458bc7e16eb35'],
+    ['Phase 2: Global Triage', 'Triage', 1, 'fa62d360c11c70d35b824e6aa645496ce03e3a006977d229ba25316883303ac7'],
+    ['Phase 4: Fix (Code agent × N)', 'Code', 1, '1ee89eb5a5d12f3ee617af3d9e4488366ce5fd095038682390d4823a6751ad49'],
     ['Phase 6: Polish', 'Polish', 1, '91b9fa0a27affb8358861e0571be27ff2ee4e59b4ba8379814d860ed95329da3'],
     ['Phase 7: Verification Gate', 'Validate', 1, '32626e7d0678f9248c8f25d7f84a49c9edbe2e59c20ecb094b3d15b64bdffb6d'],
     ['Phase 7: Verification Gate', 'Fix', 1, 'e1fe8256d1d5b2d473356cbd502b08e1b50d02ba83ca865d0f90f7d7defd9e75'],
@@ -98,8 +98,8 @@ const PINNED_FENCES: Readonly<Record<string, readonly PinnedFence[]>> = {
   'dist/curation-off/commands/resolve.md': [
     ['Step 0b: Per-Worktree Pre-Flight (Git Agent)', 'Git', 1, '3427a65881118757c983e02f39a1bea9024603a96bc39175640f4fe1dc9811bd'],
     ['Phase 1b: Fetch External Review Threads', 'Git', 1, 'b3a3328a3ae352dc08637c75088dfe6fff4d2f94d1bdd29cda71eba29cb12f71'],
-    ['Phase 2: Global Triage', 'Triage', 1, 'ac02513f3dbd49a8765e586eb85fc655efd82e25d1e60be640b9d39b7a1d990c'],
-    ['Phase 4: Fix (Code agent × N)', 'Code', 1, 'b6dfb4a1c640e304eb5b4477694ea9f46789e7fe8a51f275aed09a256b40c887'],
+    ['Phase 2: Global Triage', 'Triage', 1, '6ecc3501baeefa65f19a513d77897681cb45adc0acbdc61543141f6f73b0778b'],
+    ['Phase 4: Fix (Code agent × N)', 'Code', 1, '36cbbba8ff34bc250f00290d20ab2c830bf7f8e072fc54697f789e5b8fbcb7eb'],
     ['Phase 6: Polish', 'Polish', 1, '91b9fa0a27affb8358861e0571be27ff2ee4e59b4ba8379814d860ed95329da3'],
     ['Phase 7: Verification Gate', 'Validate', 1, '32626e7d0678f9248c8f25d7f84a49c9edbe2e59c20ecb094b3d15b64bdffb6d'],
     ['Phase 7: Verification Gate', 'Fix', 1, 'bbd779426a35c58b4a736587a137408a1ebb1f19ed4061855cc5ffa74488f63c'],
