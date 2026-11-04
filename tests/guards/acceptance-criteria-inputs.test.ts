@@ -26,6 +26,10 @@
  * No Phase 2 Code spawn passes PATTERNS or PRIOR_PHASE_SUMMARY: the sentence carries the patterns and the
  * handoff file carries the prior phase, so the phase-N spawn keeps HANDOFF_FILE.
  *
+ * /plan, in the same four builds, numbers the criteria AC-1, AC-2, ... and gives each Subtask Breakdown row
+ * a Serves cell; the Synthesize planning template (`synthesize/planning.md`) has the Serves column and its
+ * SEQUENTIAL rule asks for the AC numbers each phase serves. That is the cell the /implement sentence reads.
+ *
  * What a green run does NOT prove: it proves the files carry the text. It does not prove that a model
  * follows it.
  */
@@ -35,6 +39,7 @@ import { describe, it, expect } from 'vitest'
 import {
   isAgentBlock,
   parseFences,
+  readAgentReference,
   requireDistFile,
   resolveAgentSource,
   resolveCurationOffSource,
@@ -275,6 +280,112 @@ describe('the Code agent lists no PATTERNS input and keeps PRIOR_PHASE_SUMMARY i
     const noSummary = text.replace(CODE_PRIOR_PHASE_SUMMARY_INPUT, '')
     expect(noSummary, 'the seed must land').not.toBe(text)
     expect(collectCodeSpawnInputDefects(label, noSummary)).toEqual([`${label}: 0 PRIOR_PHASE_SUMMARY input lines, expected 1`])
+  })
+})
+
+const PLAN_AC_LINE_HEAD = '1. **Acceptance Criteria** — '
+const PLAN_AC_NUMBERING = ', numbered AC-1, AC-2, ...'
+const PLAN_SUBTASK_LINE_HEAD = '2. **Subtask Breakdown** — '
+const PLAN_SERVES_CLAUSE = 'a Serves cell (the AC numbers it serves)'
+const PLAN_SUBTASK_LINE = `${PLAN_SUBTASK_LINE_HEAD}phases with domains, dependencies and ${PLAN_SERVES_CLAUSE}; only with more than one subtask`
+
+const PLANNING_REFERENCE = 'synthesize/planning.md'
+const PLANNING_SERVES_RULE = '; give each phase the AC numbers it serves'
+const PLANNING_SERVES_COLUMN = '| Steps | Serves |'
+
+function planBuilds(): Build[] {
+  return [
+    { label: 'plan (on)', text: requireDistFile('plan.md') },
+    { label: 'plan (curation off)', text: required('dist/curation-off/commands/plan.md', resolveCurationOffSource('commands', 'plan')) },
+    { label: 'plan (compliance off)', text: required('compliance-off plan', resolveVariantOffSource('compliance-off', 'commands', 'plan')) },
+    { label: 'plan (both off)', text: required('both-off plan', resolveVariantOffSource('both-off', 'commands', 'plan')) },
+  ]
+}
+
+/** Named collector: how a /plan build falls short of numbering the criteria and naming the Serves cell in the plan artifact's section list. */
+function collectPlanArtifactDefects(label: string, text: string): string[] {
+  const lines = text.split('\n')
+  const criteria = lines.filter(line => line.startsWith(PLAN_AC_LINE_HEAD))
+  const subtasks = lines.filter(line => line.startsWith(PLAN_SUBTASK_LINE_HEAD))
+  const defects: string[] = []
+  if (criteria.length !== 1) defects.push(`${label}: ${criteria.length} Acceptance Criteria section lines in the plan artifact, expected 1`)
+  else if (!criteria[0].includes(PLAN_AC_NUMBERING)) defects.push(`${label}: the plan artifact does not number the criteria AC-1, AC-2, ...`)
+  if (subtasks.length !== 1) defects.push(`${label}: ${subtasks.length} Subtask Breakdown section lines in the plan artifact, expected 1`)
+  else if (!subtasks[0].includes(PLAN_SERVES_CLAUSE)) defects.push(`${label}: the Subtask Breakdown line lacks the Serves cell that names the AC numbers`)
+  else if (subtasks[0] !== PLAN_SUBTASK_LINE) defects.push(`${label}: the Subtask Breakdown line differs from the pinned text`)
+  return defects
+}
+
+/** Named collector: how the planning template falls short of asking for the AC numbers each phase serves, in its rule and in its Subtask Breakdown table. */
+function collectPlanningTemplateDefects(label: string, text: string): string[] {
+  const lines = text.split('\n')
+  const defects: string[] = []
+  const rules = lines.filter(line => line.startsWith('- **SEQUENTIAL_CODE_AGENTS**'))
+  if (rules.length !== 1) defects.push(`${label}: ${rules.length} SEQUENTIAL_CODE_AGENTS rule lines, expected 1`)
+  else if (!rules[0].includes(PLANNING_SERVES_RULE)) defects.push(`${label}: the SEQUENTIAL_CODE_AGENTS rule does not ask for the AC numbers each phase serves`)
+  const headerAt = lines.findIndex(line => line.startsWith('| Phase |'))
+  if (headerAt === -1) return [...defects, `${label}: the Subtask Breakdown table is not found`]
+  if (!lines[headerAt].includes(PLANNING_SERVES_COLUMN)) defects.push(`${label}: the Subtask Breakdown table has no Serves column after Steps`)
+  const rest = lines.slice(headerAt)
+  const tableEnd = rest.findIndex(line => !line.startsWith('|'))
+  const table = tableEnd === -1 ? rest : rest.slice(0, tableEnd)
+  const columns = (row: string): number => row.split('|').length
+  if (table.some(row => columns(row) !== columns(table[0]))) defects.push(`${label}: a Subtask Breakdown table row has a different column count from its header`)
+  return defects
+}
+
+describe('/plan numbers the criteria and names the criteria each phase serves, in every build (#756)', () => {
+  it.each(planBuilds().map(b => [b.label, b.text] as const))('%s numbers the criteria and has a Serves cell on the Subtask Breakdown line', (label, text) => {
+    expect(text.length, 'the command is read: the guard would pass vacuously on an empty one').toBeGreaterThan(25_000)
+    expect(collectPlanArtifactDefects(label, text)).toEqual([])
+  })
+
+  it('the planning template asks for the AC numbers each phase serves and has the Serves column', () => {
+    const text = readAgentReference(PLANNING_REFERENCE)
+    expect(text.length, 'the template is read: the guard would pass vacuously on an empty one').toBeGreaterThan(1_500)
+    expect(collectPlanningTemplateDefects(PLANNING_REFERENCE, text)).toEqual([])
+  })
+
+  it('known-bad probes: the dropped numbering, the dropped Serves cell and a lost or doubled section line are each reported', () => {
+    const [{ label, text }] = planBuilds()
+    const seeded = (from: string, to: string): string => {
+      const edited = text.replace(from, to)
+      expect(edited, 'the seed must land').not.toBe(text)
+      return edited
+    }
+    expect(collectPlanArtifactDefects(label, seeded(PLAN_AC_NUMBERING, ''))).toEqual([`${label}: the plan artifact does not number the criteria AC-1, AC-2, ...`])
+    expect(collectPlanArtifactDefects(label, seeded(`, dependencies and ${PLAN_SERVES_CLAUSE}`, ' and dependencies'))).toEqual([
+      `${label}: the Subtask Breakdown line lacks the Serves cell that names the AC numbers`,
+    ])
+    expect(collectPlanArtifactDefects(label, seeded(PLAN_SERVES_CLAUSE, 'a Serves cell'))).toEqual([`${label}: the Subtask Breakdown line lacks the Serves cell that names the AC numbers`])
+    expect(collectPlanArtifactDefects(label, seeded('; only with more than one subtask', ''))).toEqual([`${label}: the Subtask Breakdown line differs from the pinned text`])
+    expect(collectPlanArtifactDefects(label, seeded(`${PLAN_SUBTASK_LINE}\n`, ''))).toEqual([`${label}: 0 Subtask Breakdown section lines in the plan artifact, expected 1`])
+    expect(collectPlanArtifactDefects(label, `${text}\n${PLAN_SUBTASK_LINE}\n`)).toEqual([`${label}: 2 Subtask Breakdown section lines in the plan artifact, expected 1`])
+  })
+
+  it('known-bad probes: the dropped AC clause of the SEQUENTIAL rule and the dropped Serves column are each reported', () => {
+    const label = PLANNING_REFERENCE
+    const text = readAgentReference(PLANNING_REFERENCE)
+    const seeded = (from: string, to: string): string => {
+      const edited = text.replace(from, to)
+      expect(edited, 'the seed must land').not.toBe(text)
+      return edited
+    }
+    expect(collectPlanningTemplateDefects(label, seeded(PLANNING_SERVES_RULE, ''))).toEqual([`${label}: the SEQUENTIAL_CODE_AGENTS rule does not ask for the AC numbers each phase serves`])
+    expect(collectPlanningTemplateDefects(label, seeded('- **SEQUENTIAL_CODE_AGENTS**', '- **SEQUENTIAL**'))).toEqual([`${label}: 0 SEQUENTIAL_CODE_AGENTS rule lines, expected 1`])
+    const noColumn = text
+      .replace('| Steps | Serves | Depends On |', '| Steps | Depends On |')
+      .replace('|-------|--------|-------------|-------|-------|--------|------------|', '|-------|--------|-------------|-------|-------|------------|')
+      .replace('| 1-3 | AC-1, AC-2 | - |', '| 1-3 | - |')
+      .replace('| 4-6 | AC-3 | Phase 1 |', '| 4-6 | Phase 1 |')
+    expect(noColumn, 'the seed must land').not.toBe(text)
+    expect(collectPlanningTemplateDefects(label, noColumn)).toEqual([`${label}: the Subtask Breakdown table has no Serves column after Steps`])
+    const headerOnly = seeded('| Steps | Serves | Depends On |', '| Steps | Depends On |')
+    expect(collectPlanningTemplateDefects(label, headerOnly)).toEqual([
+      `${label}: the Subtask Breakdown table has no Serves column after Steps`,
+      `${label}: a Subtask Breakdown table row has a different column count from its header`,
+    ])
+    expect(collectPlanningTemplateDefects(label, seeded('| Phase | Domain |', '| Stage | Domain |'))).toEqual([`${label}: the Subtask Breakdown table is not found`])
   })
 })
 
