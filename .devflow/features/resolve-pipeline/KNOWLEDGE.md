@@ -157,6 +157,7 @@ A pre-filter, not a matrix row: it runs before the blast-radius matrix and selec
 | 0 | SECURITY GATE | Any security finding | Overrides everything; → FIX_NOW or ESCALATED only |
 | 1 | FALSE_POSITIVE | Review agent factually wrong | Cited grep/file:line proving the issue does not exist |
 | 2 | BY_DESIGN | Code is intentional | An ADR whose body was read, stated in words (curation on only), or an inline comment/doc |
+| 2b | FIX_SEPARATE (stated limit) | The finding asks for a case or option the diff does not attempt; never a fault in what the diff does, a blanket line, or a trust-boundary, data-loss, security or fail-closed finding, judged from the code, not the PR text | A KNOWN_LIMITS line names the work; Reason `stated limit` |
 | 3 | FIX_NOW | File in DIFF_FILES, OR isolated Standard fix, OR security/correctness in a touched path | Risk tier Standard or Careful |
 | 4 | FIX_SEPARATE | Valid but exceeds the diff blast radius | Must become a tracked manage-debt ticket |
 | 5 | TECH_DEBT | LAST RESORT: complete architectural overhaul only | Not "touches many files" or "changes public API" |
