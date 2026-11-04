@@ -550,11 +550,11 @@
     },
     {
       "id": "code-body-max",
-      "ceiling": 9886,
-      "pattern": "const CODE_BODY_MAX_BYTES = 9_886",
+      "ceiling": 9879,
+      "pattern": "const CODE_BODY_MAX_BYTES = 9_879",
       "occurrences": 1,
       "sourceFile": "tests/guards/code-operation.test.ts",
-      "description": "D-CODE-VARIANTS and D-PR-BY-GIT: the compiled Code agent body, dist/agents/code.md, in bytes. It was 24,851 while one Code agent held all seven modes and also opened the PR; the Git agent's ensure-pr-ready reference owns the PR text (16,449), and the three variants split the modes, so Code keeps implement and issue-fix and measured 10,690 (it was 10,735 before the shared Running commands block was rewritten to wait for a run past its timeout, which cut 45 bytes). It was 11,155 after D-COMPLIANCE-INJECT moved the compliance step and input (525) out of the body into the command's directive; #452 then added the read-once and quiet-output rules and cut duplicate rules (418 net). The commit step then gained the check of the diff for secrets or tokens in logs or debug output, paid by removing the Output lead-in and the commit-only note, which the PUSH input line already states (net 2 lower, from 10,737). A later change widened that check to the staged diff of every file the agent commits and paid for it by removing the TASK_ID example from the shared input line, so the size did not change. The guard also holds the body free of every PR-opening phrase and keeps commit-and-push, the diff check once on the commit line, and the security scan (D-SCAN-IN-CODE). It rose by 28 bytes to 10,718 at #677, because the wait rule now names the file that sets the result: a run could read the wrong file and report a pass. #708 (lean Code agents) cut it to 10,079. #719 (lean core rules) cut it to 9,931: the body no longer copies the context-economy rule. May be lowered, never raised: a later addition funds itself with a cut. Lowered by #706 (lean always-loaded descriptions) to 9914, and by #756 (lean plans) to 9910: the proportional-tests line replaced the cover-everything line, and cuts in the same body paid for it. Lowered to 9886 when the test rule gained its fallback for a spawn without acceptance criteria and the handoff line dropped its restated PRIOR_PHASE_SUMMARY note."
+      "description": "D-CODE-VARIANTS and D-PR-BY-GIT: the compiled Code agent body, dist/agents/code.md, in bytes. It was 24,851 while one Code agent held all seven modes and also opened the PR; the Git agent's ensure-pr-ready reference owns the PR text (16,449), and the three variants split the modes, so Code keeps implement and issue-fix and measured 10,690 (it was 10,735 before the shared Running commands block was rewritten to wait for a run past its timeout, which cut 45 bytes). It was 11,155 after D-COMPLIANCE-INJECT moved the compliance step and input (525) out of the body into the command's directive; #452 then added the read-once and quiet-output rules and cut duplicate rules (418 net). The commit step then gained the check of the diff for secrets or tokens in logs or debug output, paid by removing the Output lead-in and the commit-only note, which the PUSH input line already states (net 2 lower, from 10,737). A later change widened that check to the staged diff of every file the agent commits and paid for it by removing the TASK_ID example from the shared input line, so the size did not change. The guard also holds the body free of every PR-opening phrase and keeps commit-and-push, the diff check once on the commit line, and the security scan (D-SCAN-IN-CODE). It rose by 28 bytes to 10,718 at #677, because the wait rule now names the file that sets the result: a run could read the wrong file and report a pass. #708 (lean Code agents) cut it to 10,079. #719 (lean core rules) cut it to 9,931: the body no longer copies the context-economy rule. May be lowered, never raised: a later addition funds itself with a cut. Lowered by #706 (lean always-loaded descriptions) to 9914, and by #756 (lean plans) to 9910: the proportional-tests line replaced the cover-everything line, and cuts in the same body paid for it. Lowered to 9886 when the test rule gained its fallback for a spawn without acceptance criteria and the handoff line dropped its restated PRIOR_PHASE_SUMMARY note. Lowered to 9879 when the body gained the ACCEPTANCE_CRITERIA and KNOWN_LIMITS input line with its never-cut clause: the ISSUES input line (the issue-fix mode names it), the issue-fix PUSH gloss (the PUSH input line states it), the operating-mode gloss of the OPERATION line and three short glosses that the body restates elsewhere paid for it."
     },
     {
       "id": "fix-body-max",
@@ -1486,19 +1486,19 @@
     },
     {
       "id": "harden-body-max",
-      "ceiling": 4940,
-      "pattern": "['harden', 'on', 4_940],",
+      "ceiling": 4920,
+      "pattern": "['harden', 'on', 4_920],",
       "occurrences": 1,
       "sourceFile": "tests/guards/other-agents-sizes.test.ts",
-      "description": "The Harden agent body of the curation-on build, dist/agents/harden.md, in bytes. Every turn of every Harden spawn reads it (opus; /implement and /self-review spawn it). Added at its measured 5,047 so that it can not grow back. Lowered by #706 (lean always-loaded descriptions) to 5011, and by #756 (lean plans) to 4998: the missing-test rule names the acceptance-criterion and never-cut paths, and cuts in the same body paid for it. Lowered to 4940 when the missing-test rule gained the fallback of each behaviour the diff adds; two restated lines of the same body paid for it with room left."
+      "description": "The Harden agent body of the curation-on build, dist/agents/harden.md, in bytes. Every turn of every Harden spawn reads it (opus; /implement and /self-review spawn it). Added at its measured 5,047 so that it can not grow back. Lowered by #706 (lean always-loaded descriptions) to 5011, and by #756 (lean plans) to 4998: the missing-test rule names the acceptance-criterion and never-cut paths, and cuts in the same body paid for it. Lowered to 4940 when the missing-test rule gained the fallback of each behaviour the diff adds; two restated lines of the same body paid for it with room left. Lowered to 4920 when the body gained the ACCEPTANCE_CRITERIA and KNOWN_LIMITS input line and the never-cut sentence of its boundaries: the pillar names the output template lists again, the honest-assessment principle that the BLOCKED rules state and the commit message the commit step states paid for it."
     },
     {
       "id": "harden-body-curation-off-max",
-      "ceiling": 4372,
-      "pattern": "['harden', 'off', 4_372],",
+      "ceiling": 4352,
+      "pattern": "['harden', 'off', 4_352],",
       "occurrences": 1,
       "sourceFile": "tests/guards/other-agents-sizes.test.ts",
-      "description": "The Harden agent body of the curation-off build, dist/curation-off/agents/harden.md, in bytes. Added at its measured 4,479 so that it can not grow back. Lowered by #706 (lean always-loaded descriptions) to 4443, and by #756 (lean plans) to 4430, with the curation-on build. Lowered to 4372 with the curation-on build."
+      "description": "The Harden agent body of the curation-off build, dist/curation-off/agents/harden.md, in bytes. Added at its measured 4,479 so that it can not grow back. Lowered by #706 (lean always-loaded descriptions) to 4443, and by #756 (lean plans) to 4430, with the curation-on build. Lowered to 4372 with the curation-on build. Lowered to 4352 with the curation-on build."
     },
     {
       "id": "polish-body-max",
