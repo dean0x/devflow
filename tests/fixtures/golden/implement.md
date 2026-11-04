@@ -218,7 +218,7 @@ Setup context is the plan document, issue body or conversation.
 | **SEQUENTIAL_CODE_AGENTS** | The plan writes >= 10 files or has >= 7 steps |
 | **PARALLEL_CODE_AGENTS** | True artifact independence (rare) |
 
-Each phase or subtask `EXECUTION_PLAN` adds the plan's Patterns to Follow, Known limits, the criteria its Serves cell names, any criterion no cell names and each criterion that states a trust-boundary, security, data-loss or fail-closed property; a phase with no Serves cell that names a listed criterion gets all criteria; its own steps still set its scope.
+Each phase or subtask `EXECUTION_PLAN` adds the plan's Patterns to Follow, Known limits, the criteria its Serves cell names, any criterion no cell names and each criterion that states a trust-boundary, security, data-loss or fail-closed property; a phase whose cell is absent or names any unlisted number gets all criteria; its own steps still set its scope.
 
 ---
 

@@ -53,7 +53,7 @@ describe('triage.md — duplicate grouping pre-pass', () => {
   })
 
   it('restricts the matrix to group primaries', () => {
-    // The Assign disposition step holds the one statement; the pre-pass section no longer repeats it.
+    // The Assign disposition step holds the one statement.
     const section = extractSection(TRIAGE, '## Responsibilities', '## Duplicate Grouping Pre-Pass')
     expect(section).toContain("apply the blast-radius matrix to each group's primary")
   })

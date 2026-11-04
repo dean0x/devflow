@@ -46,7 +46,7 @@ The ladder and the no-speculative-cases rule never remove these, or the tests of
 
 ## No Speculative Cases
 
-An edge case, layer, option or config key needs a concrete case in the request or the code, or an ask from the caller. Else plan none. List it under Known limits and deferrals, with one reason.
+An edge case, layer, option or config key needs a concrete case in the request or the code, or an ask from the caller. Else skip it. List it under Known limits and deferrals, with one reason.
 
 ## Core rules
 

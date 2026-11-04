@@ -20,14 +20,14 @@
  * /implement passes them in its four builds (on, curation off, compliance off, both off): one Phase 2
  * sentence puts the plan's Patterns to Follow, Known limits and the criteria that phase serves into each phase
  * or subtask `EXECUTION_PLAN`: the criteria its Serves cell names, any criterion no cell names and each
- * criterion that states a trust-boundary, security, data-loss or fail-closed property, or all criteria when no
- * cell names a listed criterion. Its own steps still set its scope (the single spawn already takes the full
+ * criterion that states a trust-boundary, security, data-loss or fail-closed property, or all criteria when the
+ * phase's cell is absent or names any unlisted number. Its own steps still set its scope (the single spawn already takes the full
  * plan). The one Harden spawn carries both input lines, and the Harden line also keeps every pillar in force.
  * No Phase 2 Code spawn passes PATTERNS or PRIOR_PHASE_SUMMARY: the sentence carries the patterns and the
  * handoff file carries the prior phase, so the phase-N spawn keeps HANDOFF_FILE.
  *
  * /plan, in the same four builds, numbers the criteria AC-1, AC-2, ... and gives each Subtask Breakdown row
- * a Serves cell; the Synthesize planning template (`synthesize/planning.md`) has the Serves column and its
+ * a Serves cell of the item-1 ACs it serves; the Synthesize planning template (`synthesize/planning.md`) has the Serves column and its
  * SEQUENTIAL rule asks for the AC numbers each phase serves. That is the cell the /implement sentence reads.
  *
  * What a green run does NOT prove: it proves the files carry the text. It does not prove that a model
@@ -114,7 +114,7 @@ describe('the Code agent reads ACCEPTANCE_CRITERIA and KNOWN_LIMITS in every bui
 const PHASE_PLAN_HEAD = "Each phase or subtask `EXECUTION_PLAN` adds the plan's"
 
 const PHASE_PLAN_SENTENCE =
-  `${PHASE_PLAN_HEAD} Patterns to Follow, Known limits, the criteria its Serves cell names, any criterion no cell names and each criterion that states a trust-boundary, security, data-loss or fail-closed property; a phase with no Serves cell that names a listed criterion gets all criteria; its own steps still set its scope.`
+  `${PHASE_PLAN_HEAD} Patterns to Follow, Known limits, the criteria its Serves cell names, any criterion no cell names and each criterion that states a trust-boundary, security, data-loss or fail-closed property; a phase whose cell is absent or names any unlisted number gets all criteria; its own steps still set its scope.`
 
 /** The clauses of the phase-plan sentence, each named in the defect that reports it lost. */
 const PHASE_PLAN_CLAUSES: ReadonlyArray<readonly [name: string, clause: string]> = [
@@ -122,7 +122,7 @@ const PHASE_PLAN_CLAUSES: ReadonlyArray<readonly [name: string, clause: string]>
   ['Known limits', 'Known limits, '],
   ['served and unserved criteria', 'the criteria its Serves cell names, any criterion no cell names'],
   ['safety-criteria clause', ' and each criterion that states a trust-boundary, security, data-loss or fail-closed property'],
-  ['fallback to all criteria', '; a phase with no Serves cell that names a listed criterion gets all criteria'],
+  ['fallback to all criteria', '; a phase whose cell is absent or names any unlisted number gets all criteria'],
 ]
 
 const HARDEN_SPAWN_LINES = [
@@ -172,6 +172,9 @@ describe('/implement passes ACCEPTANCE_CRITERIA and KNOWN_LIMITS in every build 
       expect(lost, `the ${name} seed must land`).not.toBe(text)
       expect(collectImplementDefects(label, lost)).toEqual([`${label}: the phase-plan sentence lost its ${name}`])
     }
+    const typoCase = text.replace(PHASE_PLAN_SENTENCE, PHASE_PLAN_SENTENCE.replace(' or names any unlisted number', ''))
+    expect(typoCase, 'the unlisted-number seed must land').not.toBe(text)
+    expect(collectImplementDefects(label, typoCase), 'a fallback that leaves out a cell naming an unlisted number is reported').toEqual([`${label}: the phase-plan sentence lost its fallback to all criteria`])
     const reworded = text.replace(PHASE_PLAN_SENTENCE, PHASE_PLAN_SENTENCE.replace('still set its scope', 'set its scope'))
     expect(reworded, 'the seed must land').not.toBe(text)
     expect(collectImplementDefects(label, reworded)).toEqual([`${label}: the phase-plan sentence differs from the pinned text`])
@@ -286,7 +289,7 @@ describe('the Code agent lists no PATTERNS input and keeps PRIOR_PHASE_SUMMARY i
 const PLAN_AC_LINE_HEAD = '1. **Acceptance Criteria** — '
 const PLAN_AC_NUMBERING = ', numbered AC-1, AC-2, ...'
 const PLAN_SUBTASK_LINE_HEAD = '2. **Subtask Breakdown** — '
-const PLAN_SERVES_CLAUSE = 'a Serves cell (the AC numbers it serves)'
+const PLAN_SERVES_CLAUSE = 'a Serves cell (the item-1 ACs it serves)'
 const PLAN_SUBTASK_LINE = `${PLAN_SUBTASK_LINE_HEAD}phases with domains, dependencies and ${PLAN_SERVES_CLAUSE}; only with more than one subtask`
 
 const PLANNING_REFERENCE = 'synthesize/planning.md'

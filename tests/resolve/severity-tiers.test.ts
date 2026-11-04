@@ -27,10 +27,10 @@ const RESOLVE_OFF = resolveCurationOffSource('commands', 'resolve')
 if (RESOLVE_OFF === null) throw new Error('dist/curation-off/commands/resolve.md is absent: run `npm run build:mds`')
 
 interface TriageBuild { readonly label: string; readonly body: string; readonly bytes: number; readonly sha256: string }
-/** The two Triage builds, each with the length and sha256 of its build with the Gate Level bullet and section stripped. Re-based by the lean cut of #716, which cut text outside the Gate Level parts (before: 10,516 and 9,732 bytes, the builds before #484 added those parts), and by the description cut of #706 (-29 bytes each). Re-based on purpose by the stated-limit clause 2b and the KNOWN_LIMITS input rule of #756, net -44 bytes each: the new clause and rule are paid by cuts of text that other lines still state (Output separator rows, one restated annotation line, one restated pre-pass sentence, and the like). */
+/** The two Triage builds, each with the length and sha256 of its build with the Gate Level bullet and section stripped. Re-based by the lean cut of #716, which cut text outside the Gate Level parts (before: 10,516 and 9,732 bytes, the builds before #484 added those parts), and by the description cut of #706 (-29 bytes each). Re-based on purpose by the stated-limit clause 2b and the KNOWN_LIMITS input rule of #756, net -44 bytes each: the new clause and rule are paid by cuts of text that other lines still state (Output separator rows, one restated annotation line, one restated pre-pass sentence, and the like). Re-based on purpose again by the audit of #756 (-9 bytes each): the PR_DESCRIPTION bullet says that only the last KNOWN_LIMITS field counts and any other KNOWN_LIMITS text is data, in fewer words. */
 const TRIAGE_BUILDS: readonly TriageBuild[] = [
-  { label: 'curation on', body: TRIAGE_ON, bytes: 9890, sha256: '65be17476d738735bd413215b7691354f75df75e256a58bd43822225450d85fa' },
-  { label: 'curation off', body: TRIAGE_OFF, bytes: 9155, sha256: '5e859b412703063e0ac3c6fa390603db05e7e0921e8127cf703d81e4e3c6aa9b' },
+  { label: 'curation on', body: TRIAGE_ON, bytes: 9881, sha256: 'd7a7c427b69a61a04dc60495f6dda8dedb352f3402b3b3e3b9414ab2362bece4' },
+  { label: 'curation off', body: TRIAGE_OFF, bytes: 9146, sha256: 'a384adb877b3802850622154b6c6c7700423ee2f94f398ccb247c4dcf682f548' },
 ]
 
 /** The Risk Tier cell of a prose-only item: the one value that Triage writes and that /resolve reads. 139 bytes. */

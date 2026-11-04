@@ -418,7 +418,7 @@ context-risk: LOW
 
 Required sections, in this order, no others:
 1. **Acceptance Criteria** — testable success conditions, numbered AC-1, AC-2, ...: `ACCEPTANCE_CRITERIA` when fetched, refined by exploration + gap analysis
-2. **Subtask Breakdown** — phases with domains, dependencies and a Serves cell (the AC numbers it serves); only with more than one subtask
+2. **Subtask Breakdown** — phases with domains, dependencies and a Serves cell (the item-1 ACs it serves); only with more than one subtask
 3. **Implementation Plan** — ordered steps, each with Files, Callers and consumers to update, Must lines and Rung
 4. **Patterns to Follow** — from exploration synthesis (file:line references)
 5. **Known limits and deferrals** — accepted risks, deferred and excluded items, each with one reason

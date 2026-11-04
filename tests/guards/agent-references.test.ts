@@ -47,16 +47,16 @@ const IMPLEMENT_LEVELS_REF_MAX_BYTES = 3_034
 const TRIAGE_TIERS_REF_MAX_BYTES = 4_562
 
 /** The Triage agent body of the curation-on build, dist/agents/triage.md, in bytes. Registered as `triage-body-max`; lowered, never raised. */
-const TRIAGE_BODY_MAX_BYTES = 11_187
+const TRIAGE_BODY_MAX_BYTES = 11_178
 
 /** The Triage agent body of the curation-off build, dist/curation-off/agents/triage.md, in bytes. Registered as `triage-body-curation-off-max`; lowered, never raised. */
-const TRIAGE_BODY_CURATION_OFF_MAX_BYTES = 10_452
+const TRIAGE_BODY_CURATION_OFF_MAX_BYTES = 10_443
 
 /** The Triage agent body of the compliance-off build, dist/compliance-off/agents/triage.md, in bytes. Registered as `triage-body-compliance-off-max`; lowered, never raised. */
-const TRIAGE_BODY_COMPLIANCE_OFF_MAX_BYTES = 11_126
+const TRIAGE_BODY_COMPLIANCE_OFF_MAX_BYTES = 11_117
 
 /** The Triage agent body of the build with both axes off, dist/curation-compliance-off/agents/triage.md, in bytes. Registered as `triage-body-both-off-max`; lowered, never raised. */
-const TRIAGE_BODY_BOTH_OFF_MAX_BYTES = 10_391
+const TRIAGE_BODY_BOTH_OFF_MAX_BYTES = 10_382
 
 /** The Validate passed-alone re-run reference, in bytes. Registered as `validate-passed-alone-ref-max`; lowered, never raised. */
 const VALIDATE_PASSED_ALONE_REF_MAX_BYTES = 3_400
