@@ -21,6 +21,7 @@ import { proxyCommand } from './cli/commands/proxy.js';
 import { agentsCommand } from './cli/commands/agents.js';
 import { complianceCommand } from './cli/commands/compliance.js';
 import { behaviorCommand } from './cli/commands/behavior.js';
+import { tddCommand } from './cli/commands/tdd.js';
 import { trackerCommand } from './cli/commands/tracker.js';
 import { gatesCommand } from './cli/commands/gates.js';
 
@@ -59,6 +60,7 @@ program.addCommand(proxyCommand);
 program.addCommand(agentsCommand);
 program.addCommand(complianceCommand);
 program.addCommand(behaviorCommand);
+program.addCommand(tddCommand);
 program.addCommand(trackerCommand);
 program.addCommand(gatesCommand);
 

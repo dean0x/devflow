@@ -36,7 +36,12 @@ import { execSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { OFF_VARIANT_KEYS } from '../../src/core/curation-variants.js';
+import {
+  VARIANT_MANIFEST_REL_PATH,
+  emittedVariantKeys,
+  parseVariantManifest,
+  type OffVariantKey,
+} from '../../src/core/curation-variants.js';
 import { requireDistFile, requireDistFiles, resolveAgentSource, resolveVariantOffSource } from '../helpers.js';
 
 const DECISIONS_HEADING = '### Load DECISIONS_CONTEXT';
@@ -292,9 +297,18 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
       expect(section, `${file}: the retired "one git call" claim`).not.toContain('One git call');
     }
     // The docs-root order holds in every variant key of an after-root host, not only in the on key.
+    const manifest = parseVariantManifest(fs.readFileSync(path.resolve(import.meta.dirname, '..', '..', VARIANT_MANIFEST_REL_PATH), 'utf-8'));
+    expect(manifest.ok, 'the build manifest parses').toBe(true);
+    const manifestHosts = manifest.ok ? manifest.value : [];
     for (const file of AFTER_ROOT_LOAD_HOSTS) {
-      for (const key of OFF_VARIANT_KEYS) {
-        const text = resolveVariantOffSource(key, 'commands', file.replace(/\.md$/, ''));
+      const name = file.replace(/\.md$/, '');
+      // A host has a variant under each key its arms reach (emittedVariantKeys), never under a key of an axis it has no arm on.
+      const host = manifestHosts.find(h => h.kind === 'commands' && h.name === name);
+      expect(host, `${file} is in the build manifest`).toBeDefined();
+      const keys = emittedVariantKeys(host!.axes).filter((key): key is OffVariantKey => key !== 'on');
+      expect(keys.length, `${file} has an off variant to check`).toBeGreaterThanOrEqual(3);
+      for (const key of keys) {
+        const text = resolveVariantOffSource(key, 'commands', name);
         expect(text, `${file} has a ${key} variant`).not.toBeNull();
         expect(collectKnowledgeRootDefects(file, text as string), `${file} ${key} ${KNOWLEDGE_HEADING}`).toEqual([]);
       }

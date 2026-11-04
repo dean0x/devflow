@@ -27,6 +27,7 @@ import {
   parseAgentType,
 } from '../../src/targets/claude-code/agent-type-owner.js';
 import { installViaFileCopy, type Spinner } from '../../src/targets/claude-code/installer.js';
+import { ALL_SWITCHES_ON } from '../../src/core/curation-variants.js';
 import { DEVFLOW_PLUGINS, buildAssetMaps, type PluginDefinition } from '../../src/core/plugins.js';
 import { resolveAgentSource, splitFrontmatter, testBackups } from '../helpers.js';
 
@@ -192,8 +193,7 @@ describe('installViaFileCopy: devflow\'s Explore against a user-owned one (AC-30
   const install = async (): Promise<unknown> => {
     const { skillsMap, agentsMap } = buildAssetMaps(plugins);
     return installViaFileCopy({
-      curation: true,
-      compliance: true,
+      switches: ALL_SWITCHES_ON,
       plugins,
       effectivePlugins: plugins,
       claudeDir,

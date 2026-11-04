@@ -2,6 +2,7 @@
  * Shared plugin registry — single source of truth for all CLI commands.
  */
 
+import { VARIANT_AXES, type VariantAxis, type VariantSwitches } from './curation-variants.js';
 import { WORKFLOW_FOLDERS } from './mds-variants.js';
 
 /**
@@ -564,7 +565,7 @@ export const FEATURE_OWNED_RULES = ['compliance', 'behavior'] as const satisfies
  * apply-decisions, so the skill has no reader on a machine with curation off. It
  * stays OWNED and REQUIRED by its plugins in the registry — the closure guard
  * reasons over the curation-on variant, the superset — and the install drops it
- * on top of the selection: `installViaFileCopy` skips it when `curation` is false
+ * on top of the selection: `installViaFileCopy` skips it when the curation switch is off
  * and `convergeVariantAxes` installs or removes it when the switch flips.
  *
  * This is a machine-switch condition, not a deselection: the plan
@@ -573,24 +574,52 @@ export const FEATURE_OWNED_RULES = ['compliance', 'behavior'] as const satisfies
  * shadow as inactive for a plugin that is not selected.
  *
  * Used by:
- *   - installer.ts installViaFileCopy: omits these from the install loop when curation is off
+ *   - installer.ts installViaFileCopy (through omitGatedSkills): omits these from the install loop when curation is off
  *   - curation-install.ts convergeVariantAxes: installs or removes the directory
  *   - tests: independent literal ['apply-decisions'] (avoids the EXCLUDED-as-oracle trap)
  */
 export const CURATION_GATED_SKILLS = ['apply-decisions'] as const satisfies readonly string[];
 
 /**
- * A skills map with the curation-gated skills left out when curation is off.
+ * Skills a tdd-off machine does not install.
  *
- * Pure: the same map instance comes back when curation is on, a copy otherwise.
+ * The tdd-off variant of the Code agent preloads no test-driven-development skill, so
+ * the skill has no reader on a machine with tdd off. It stays OWNED and REQUIRED by its
+ * plugins in the registry, exactly as {@link CURATION_GATED_SKILLS} do: the install drops
+ * it on top of the selection when the tdd switch is off, and `convergeVariantAxes`
+ * installs or removes the directory when the switch flips. A machine-switch condition,
+ * not a deselection: the plan ({@link resolveSkillInstallPlan}) is untouched.
+ *
+ * Used by:
+ *   - installer.ts installViaFileCopy: omits these from the install loop when tdd is off
+ *   - curation-install.ts convergeVariantAxes: installs or removes the directory
  */
-export function omitCurationGatedSkills<V>(
+export const TDD_GATED_SKILLS = ['test-driven-development'] as const satisfies readonly string[];
+
+/**
+ * The skills each axis gates: not installed while the axis is off. Total over the axes, so
+ * a new axis cannot go without an answer; compliance gates no skill (its artifacts are
+ * feature-owned and converge on their own).
+ */
+export const AXIS_GATED_SKILLS: Readonly<Record<VariantAxis, readonly string[]>> = {
+  curation: CURATION_GATED_SKILLS,
+  compliance: [],
+  tdd: TDD_GATED_SKILLS,
+};
+
+/**
+ * A skills map with the skills left out that an off axis gates.
+ *
+ * Pure: the same map instance comes back when every axis is on or no off axis gates a
+ * skill, a copy otherwise.
+ */
+export function omitGatedSkills<V>(
   skillsMap: ReadonlyMap<string, V>,
-  curation: boolean,
+  switches: VariantSwitches,
 ): ReadonlyMap<string, V> {
-  if (curation) return skillsMap;
-  const gated: readonly string[] = CURATION_GATED_SKILLS;
-  return new Map([...skillsMap].filter(([skill]) => !gated.includes(skill)));
+  const gated = new Set(VARIANT_AXES.filter(axis => !switches[axis]).flatMap(axis => AXIS_GATED_SKILLS[axis]));
+  if (gated.size === 0) return skillsMap;
+  return new Map([...skillsMap].filter(([skill]) => !gated.has(skill)));
 }
 
 // ── Skill-closure boundaries ──────────────────────────────────────────────────

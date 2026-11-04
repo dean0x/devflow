@@ -340,10 +340,11 @@ describe('CHANGELOG guard is live (seeded known-bad input)', () => {
   });
 
   it('fails on an entry that sits below the lint-pack notes', () => {
-    const lowered = CHANGELOG.replace(ENTRY_HEADING, '### Upgrade notes — Other').replace(
-      '\n### Added\n',
-      `\n${ENTRY_HEADING}\n\nText.\n\n### Added\n`,
-    );
+    const moved = CHANGELOG.replace(ENTRY_HEADING, '### Upgrade notes — Other');
+    // The first `### Added` after the lint-pack notes, so the probe stays in their section.
+    const at = moved.indexOf('\n### Added\n', moved.indexOf(LINT_PACK_HEADING));
+    expect(at, 'the seed point exists: the probe would pass vacuously without it').toBeGreaterThan(moved.indexOf(LINT_PACK_HEADING));
+    const lowered = `${moved.slice(0, at)}\n${ENTRY_HEADING}\n\nText.\n${moved.slice(at)}`;
     expect(placementProblem(lowered)).not.toBeNull();
   });
 

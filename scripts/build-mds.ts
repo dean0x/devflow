@@ -77,8 +77,10 @@
  *     (name and description are required) minus the build keys; a reference host sheds
  *     its steering block and ships with none. A folder is built as a UNIT, because its
  *     build id (D-BUILD-ID) is made from all of its files: every host is compiled, then
- *     each variant key gets a COMPLETE folder for its own file list
- *     (workflowFolderFiles), and a key that lacks a file of its list fails the build.
+ *     each folder variant key (FOLDER_VARIANT_KEYS: the keys that keep tdd on) gets a
+ *     COMPLETE folder for its own file list (workflowFolderFiles), and a key that lacks a
+ *     file of its list fails the build. No folder is built under a key that turns tdd off,
+ *     and a workflow file with a tdd marker is refused.
  *     A file a compliance-off key omits has no destination for that key (the same
  *     absent-destination pattern as a reference module's compliance-off copy). The
  *     stamp goes into the first heading of every file outside references/. The
@@ -91,21 +93,22 @@
  * compilation unchanged and is removed from the compiled bytes.
  *
  * Prompt variants (D-LEARNING-VARIANTS, src/core/curation-variants.ts): after the
- * strip, a command or agent body is split on its curation and compliance markers.
+ * strip, a command or agent body is split on its curation, compliance and tdd markers.
  * The all-on variant is written to the host's own path. A host with a curation arm
  * also gets dist/curation-off/{commands,agents}/{name}.md, a host with a compliance
  * arm dist/compliance-off/..., and a host with both arms dist/curation-compliance-off/...
- * too. The split runs on the compiled text, so it costs no compileFile call and
- * nothing against the per-module compile-time guard. A reference module may carry
- * compliance markers, which select between its compliance-on and compliance-off
- * references (see the reference modules above), and no curation marker: that axis has
- * nothing to select there, so a curation marker is refused. None of the variant
+ * too; a host with a tdd arm gets dist/tdd-off/... and one tree for each combination with
+ * the other axes it carries (OFF_OUTPUT_DIRS). The split runs on the compiled text, so it
+ * costs no compileFile call and nothing against the per-module compile-time guard. A
+ * reference module may carry compliance markers, which select between its compliance-on
+ * and compliance-off references (see the reference modules above), and no curation or tdd
+ * marker: those axes have nothing to select there, so such a marker is refused. None of the variant
  * trees is an output-dir a host may declare: the allowlist stays the four shipped
  * directories.
  *
  * Variant manifest: after a clean build, dist/variant-axes.json records for every
- * compiled command and agent whether it carries a curation arm and whether it
- * carries a compliance arm. It is written on every successful build, even when no
+ * compiled command and agent whether it carries a curation arm, a compliance arm and
+ * a tdd arm. It is written on every successful build, even when no
  * host has a compliance arm. It is removed before the first host is written and
  * written last, after the prunes, so a refused, crashed or interrupted build leaves none.
  *
@@ -133,8 +136,8 @@
  * Prune: after a clean build, every `.md` in dist/commands/ and dist/agents/ that
  * no host emitted is deleted (pruneOrphanCommands, pruneOrphanAgents), and the same
  * sweep runs recursively over dist/skills/git/references/ (pruneOrphanReferences)
- * and each of the three variant trees (pruneOrphanVariantTree). The workflow
- * trees, one per variant key, lose every folder no registered folder names
+ * and each variant tree of OFF_OUTPUT_DIRS (pruneOrphanVariantTree). The workflow
+ * trees, one per folder variant key (FOLDER_VARIANT_KEYS), lose every folder no registered folder names
  * (pruneOrphanWorkflowFolders) and every nested `.md` the build did not write
  * (pruneOrphanWorkflowFiles). Every sweep is keyed
  * on the files this build actually wrote. The compliance-off references sit inside
@@ -167,6 +170,8 @@ import {
   splitVariantSections,
   AGENTS_OUTPUT_DIR,
   COMMANDS_OUTPUT_DIR,
+  FOLDER_ARMS,
+  FOLDER_VARIANT_KEYS,
   SKILL_REFS_OUTPUT_DIR,
   COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR,
   WORKFLOW_FOLDERS,
@@ -206,13 +211,15 @@ import {
   LEGACY_OFF_OUTPUT_DIR,
   OFF_OUTPUT_DIRS,
   OFF_VARIANT_KEYS,
-  VARIANT_KEYS,
+  VARIANT_AXES,
   VARIANT_MANIFEST_REL_PATH,
-  containsCurationMarker,
+  containsAxisMarker,
   containsVariantMarker,
   describeVariantManifestError,
   describeVariantSplitError,
   emittedVariantKeys,
+  perAxis,
+  recordOf,
   renderVariantManifest,
   splitVariants,
   variantOffRelPath,
@@ -790,12 +797,13 @@ type HostPlan =
       readonly file: string;
       readonly role: "core" | "reference";
       /**
-       * Where this file lands under each variant key, resolved absolute, or null for a key
-       * whose folder omits it (workflowFolderFiles). Planned for every key, and claimed in
-       * destsOf for every key that holds the file, so two hosts naming one file of one
-       * folder are caught while dist/ is still untouched.
+       * Where this file lands under each folder variant key (FOLDER_VARIANT_KEYS), resolved
+       * absolute, or null for a key whose folder omits it (workflowFolderFiles). Planned for
+       * every folder key, and claimed in destsOf for every key that holds the file, so two
+       * hosts naming one file of one folder are caught while dist/ is still untouched. A
+       * folder is not built under the keys that turn tdd off, so they have no entry.
        */
-      readonly dests: Readonly<Record<VariantKey, string | null>>;
+      readonly dests: ReadonlyMap<VariantKey, string | null>;
     };
 
 /** The plans a host compiles and writes alone: a prompt (one file) or a reference module (one file per operation). */
@@ -819,8 +827,8 @@ function destsOf(plan: HostPlan): readonly string[] {
     case "skill-refs":
       return plan.outputs.map(o => o.dest);
     case "workflow-skill":
-      return VARIANT_KEYS.flatMap(key => {
-        const dest = plan.dests[key];
+      return FOLDER_VARIANT_KEYS.flatMap(key => {
+        const dest = plan.dests.get(key) ?? null;
         return dest === null ? [] : [dest];
       });
     case "commands":
@@ -923,11 +931,7 @@ function planSingleFile(
     outAbs,
     dest: path.join(outAbs, fileName),
     name: nameResult.value,
-    offDests: {
-      "curation-off": offDest("curation-off"),
-      "compliance-off": offDest("compliance-off"),
-      "both-off": offDest("both-off"),
-    },
+    offDests: recordOf(OFF_VARIANT_KEYS, offDest),
   };
 }
 
@@ -1058,12 +1062,7 @@ function planWorkflowFolder(host: HostEntry, rel: string, outAbs: string): HostP
     folder: folder.name,
     file: entry.file,
     role: entry.role,
-    dests: {
-      on: destFor("on"),
-      "curation-off": destFor("curation-off"),
-      "compliance-off": destFor("compliance-off"),
-      "both-off": destFor("both-off"),
-    },
+    dests: new Map(FOLDER_VARIANT_KEYS.map((key): [VariantKey, string | null] => [key, destFor(key)])),
   };
 }
 
@@ -1161,7 +1160,13 @@ type HostAxes = Readonly<Record<VariantAxis, boolean>>;
  * is complete by construction (see the header), so a reader needs no record of which
  * file was armed.
  */
-const NO_ARMS: HostAxes = { curation: false, compliance: false };
+const NO_ARMS: HostAxes = perAxis(() => false);
+
+/**
+ * The axes a reference module selects on: compliance. A marker of any other axis in one
+ * has nothing to select, so the build refuses it.
+ */
+const REFERENCE_MODULE_AXES: readonly VariantAxis[] = ["compliance"];
 
 /** What a host's compiled body becomes: the files to write, and the axes it carries an arm on. */
 interface MaterializedHost {
@@ -1205,14 +1210,15 @@ function materializeOutputs(host: HostEntry, plan: StandalonePlan, body: string)
     return { outputs, axes: hasArms };
   }
 
-  // A reference module has one axis to select on, compliance. A curation marker in one
-  // has nothing to select: its sections ship as written on that axis, so the marker
+  // A reference module has one axis to select on, compliance. A marker of another axis in
+  // one has nothing to select: its sections ship as written on that axis, so the marker
   // would reach the installed reference as text.
-  if (containsCurationMarker(body)) {
+  const unselectable = VARIANT_AXES.find(axis => !REFERENCE_MODULE_AXES.includes(axis) && containsAxisMarker(axis, body));
+  if (unselectable !== undefined) {
     throw new Error(
-      `${rel}: a reference module may not carry curation-variant markers — its sections ship as ` +
-      `written, so a marker would reach the installed reference as text. Curation arms belong in a ` +
-      `command or agent host.`,
+      `${rel}: a reference module may not carry ${unselectable}-variant markers — its sections ship as ` +
+      `written, so a marker would reach the installed reference as text. Arms on the ${unselectable} ` +
+      `axis belong in a command or agent host.`,
     );
   }
   // Split into operation sections FIRST, then each section on its compliance arms: an
@@ -1367,7 +1373,18 @@ async function compileWorkflowHost(host: HostEntry, plan: WorkflowSkillPlan): Pr
   const result = await compileMarkdown(host);
   const cleaned = stripFrontmatterFor(plan, result.output, host.file);
   const split = splitVariants(cleaned);
-  if (!split.ok) throw variantSplitRefusal(path.relative(ROOT, host.file), split.error, cleaned);
+  const rel = path.relative(ROOT, host.file);
+  if (!split.ok) throw variantSplitRefusal(rel, split.error, cleaned);
+  // A folder is not built under the keys of an axis it has no arms for (FOLDER_ARMS), so an
+  // arm on that axis would never reach a variant and its on text would ship to every machine.
+  const unbuilt = VARIANT_AXES.find(axis => !FOLDER_ARMS[axis] && split.value.hasArms[axis]);
+  if (unbuilt !== undefined) {
+    throw new Error(
+      `${rel}: a workflow skill file may not carry ${unbuilt}-variant markers — the folders are not ` +
+      `built under the ${unbuilt}-off trees, so the off arm would never be installed. Arms on the ` +
+      `${unbuilt} axis belong in a command or agent host.`,
+    );
+  }
   return { host, plan, bodies: split.value.bodies, warnings: result.warnings };
 }
 
@@ -1382,7 +1399,7 @@ interface SettledWorkflowHost {
  * Settle one workflow folder once all of its hosts are compiled: check every variant key
  * against its own file list, stamp the build id, and return what to write. Writes nothing.
  *
- * For each variant key (VARIANT_KEYS):
+ * For each folder variant key (FOLDER_VARIANT_KEYS):
  *  1. Completeness. The key's folder must hold every file of its own list
  *     (workflowFolderFiles), so a registered host that was not found or not compiled
  *     fails the build, and a file the key's list omits is never required. Every key
@@ -1403,9 +1420,9 @@ function settleWorkflowFolder(
   const missing: string[] = [];
   const lackingFiles = new Set<string>();
 
-  for (const key of VARIANT_KEYS) {
+  for (const key of FOLDER_VARIANT_KEYS) {
     const members = settled.flatMap(s => {
-      const dest = s.compiled.plan.dests[key];
+      const dest = s.compiled.plan.dests.get(key) ?? null;
       return dest === null ? [] : [{ s, dest, file: s.compiled.plan.file, body: s.compiled.bodies[key] }];
     });
     const held = new Set(members.map(m => m.file));
@@ -1527,6 +1544,10 @@ const PRUNE_REASONS: Readonly<Record<OffVariantKey, string>> = {
   "curation-off": "no curation arm",
   "compliance-off": "no compliance arm",
   "both-off": "no host with arms on both axes",
+  "tdd-off": "no tdd arm",
+  "curation-tdd-off": "no host with arms on curation and tdd",
+  "compliance-tdd-off": "no host with arms on compliance and tdd",
+  "curation-compliance-tdd-off": "no host with arms on curation, compliance and tdd",
 };
 
 /**
@@ -1559,7 +1580,7 @@ function pruneOrphanVariantTree(dir: string, written: ReadonlySet<string>): stri
  * and the workflows folder of each variant tree. Siblings of the prompts' folders, so the
  * prune of one cannot reach another.
  */
-const WORKFLOW_TREES: readonly string[] = VARIANT_KEYS.map(key => workflowFoldersRootRelPath(key));
+const WORKFLOW_TREES: readonly string[] = FOLDER_VARIANT_KEYS.map(key => workflowFoldersRootRelPath(key));
 
 /**
  * Delete every folder under a workflow tree that no registered folder names.
@@ -1907,6 +1928,8 @@ async function main(): Promise<void> {
   writeFileAtomic(variantManifestPath(), manifest.value);
   const curationOffCount = outcomes.filter(o => o.prompt?.axes.curation === true).length;
   console.log(`  ${curationOffCount} curation-off variant(s) written`);
+  const tddOffCount = outcomes.filter(o => o.prompt?.axes.tdd === true).length;
+  console.log(`  ${tddOffCount} tdd-off variant(s) written`);
 
   console.log("\nMDS commands build complete!");
 }

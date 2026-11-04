@@ -25,6 +25,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { installViaFileCopy } from '../../src/targets/claude-code/installer.js';
+import { ALL_SWITCHES_ON } from '../../src/core/curation-variants.js';
 import { convergeTrackerArtifacts } from '../../src/targets/claude-code/tracker-install.js';
 import { loadShippedAgentDefaults } from '../../src/core/agent-models.js';
 import { agentSourceDirs, agentsDir, commandSourceDirs, compiledAgentsDir, type AgentSourceDirs } from '../../src/core/assets.js';
@@ -78,8 +79,7 @@ async function installAll(root: string, dirs?: AgentSourceDirs): Promise<Map<str
   const claudeDir = await fs.mkdtemp(path.join(root, 'claude-'));
   const devflowDir = path.join(claudeDir, 'devflow');
   await installViaFileCopy({
-    curation: true,
-    compliance: true,
+    switches: ALL_SWITCHES_ON,
     plugins: [plugin],
     claudeDir,
     devflowDir,
@@ -148,7 +148,7 @@ describe('agentSourceDirs() owns the dist-first policy', () => {
   });
 });
 
-describe('source order for the four switch combinations', () => {
+describe('source order for the eight switch combinations', () => {
   const root = path.join(os.tmpdir(), 'devflow-precedence-orders');
   const tree = (name: string, kind: 'commands' | 'agents'): string => path.join(root, 'dist', name, kind);
 
@@ -161,51 +161,65 @@ describe('source order for the four switch combinations', () => {
     readonly label: string;
     readonly curation: boolean;
     readonly compliance: boolean;
+    readonly tdd: boolean;
     readonly offTrees: readonly string[];
   }> = [
-    { label: 'both on', curation: true, compliance: true, offTrees: [] },
-    { label: 'curation off, compliance on', curation: false, compliance: true, offTrees: ['curation-off'] },
-    { label: 'curation on, compliance off', curation: true, compliance: false, offTrees: ['compliance-off'] },
-    { label: 'both off', curation: false, compliance: false, offTrees: ['curation-compliance-off', 'curation-off', 'compliance-off'] },
+    { label: 'all on', curation: true, compliance: true, tdd: true, offTrees: [] },
+    { label: 'curation off, compliance on', curation: false, compliance: true, tdd: true, offTrees: ['curation-off'] },
+    { label: 'curation on, compliance off', curation: true, compliance: false, tdd: true, offTrees: ['compliance-off'] },
+    { label: 'curation and compliance off', curation: false, compliance: false, tdd: true, offTrees: ['curation-compliance-off', 'curation-off', 'compliance-off'] },
+    { label: 'tdd off', curation: true, compliance: true, tdd: false, offTrees: ['tdd-off'] },
+    { label: 'curation and tdd off', curation: false, compliance: true, tdd: false, offTrees: ['curation-tdd-off', 'curation-off', 'tdd-off'] },
+    { label: 'compliance and tdd off', curation: true, compliance: false, tdd: false, offTrees: ['compliance-tdd-off', 'compliance-off', 'tdd-off'] },
+    {
+      label: 'all off',
+      curation: false,
+      compliance: false,
+      tdd: false,
+      offTrees: ['curation-compliance-tdd-off', 'curation-compliance-off', 'curation-tdd-off', 'compliance-tdd-off', 'curation-off', 'compliance-off', 'tdd-off'],
+    },
   ];
 
   const NORMAL_COMMANDS = [path.join(root, 'dist', 'commands')];
   const NORMAL_AGENTS = [path.join(root, 'dist', 'agents'), path.join(root, 'src', 'assets', 'agents')];
 
   for (const combination of COMBINATIONS) {
-    const { label, curation, compliance, offTrees } = combination;
+    const { label, curation, compliance, tdd, offTrees } = combination;
 
     it(`commandSourceDirs lists the off trees before the compiled directory, most-preferred first: ${label}`, () => {
-      expect(commandSourceDirs({ curation, compliance }, root)).toEqual([
+      expect(commandSourceDirs({ curation, compliance, tdd }, root)).toEqual([
         ...offTrees.map(name => tree(name, 'commands')),
         ...NORMAL_COMMANDS,
       ]);
     });
 
     it(`agentSourceDirs lists the off trees before the compiled and source directories: ${label}`, () => {
-      expect(agentSourceDirs(root, { curation, compliance })).toEqual([
+      expect(agentSourceDirs(root, { curation, compliance, tdd })).toEqual([
         ...offTrees.map(name => tree(name, 'agents')),
         ...NORMAL_AGENTS,
       ]);
     });
   }
 
-  it('the both-on order is the old single list, and the agent default is both on', () => {
-    expect(commandSourceDirs({ curation: true, compliance: true }, root)).toEqual(NORMAL_COMMANDS);
-    expect(agentSourceDirs(root, { curation: true, compliance: true })).toEqual(NORMAL_AGENTS);
+  it('the all-on order is the old single list, and the agent default is all on', () => {
+    expect(commandSourceDirs(ALL_SWITCHES_ON, root)).toEqual(NORMAL_COMMANDS);
+    expect(agentSourceDirs(root, ALL_SWITCHES_ON)).toEqual(NORMAL_AGENTS);
     expect(agentSourceDirs(root)).toEqual(NORMAL_AGENTS);
   });
 
-  it('the both-off tree is consulted before either single-axis tree (non-vacuity)', () => {
-    const dirs = commandSourceDirs({ curation: false, compliance: false }, root);
+  it('the tree with the most axes off is consulted before every tree with fewer (non-vacuity)', () => {
+    const dirs = commandSourceDirs({ curation: false, compliance: false, tdd: true }, root);
     expect(dirs.indexOf(tree('curation-compliance-off', 'commands'))).toBe(0);
     expect(dirs.length).toBe(4);
+    const all = commandSourceDirs({ curation: false, compliance: false, tdd: false }, root);
+    expect(all.indexOf(tree('curation-compliance-tdd-off', 'commands'))).toBe(0);
+    expect(all.length).toBe(8);
   });
 
-  it('the four orders differ from each other, so no switch is ignored (known-bad probe)', () => {
-    const orders = COMBINATIONS.map(c => JSON.stringify(commandSourceDirs({ curation: c.curation, compliance: c.compliance }, root)));
+  it('the eight orders differ from each other, so no switch is ignored (known-bad probe)', () => {
+    const orders = COMBINATIONS.map(c => JSON.stringify(commandSourceDirs(c, root)));
     expect(new Set(orders).size).toBe(COMBINATIONS.length);
-    const agentOrders = COMBINATIONS.map(c => JSON.stringify(agentSourceDirs(root, { curation: c.curation, compliance: c.compliance })));
+    const agentOrders = COMBINATIONS.map(c => JSON.stringify(agentSourceDirs(root, c)));
     expect(new Set(agentOrders).size).toBe(COMBINATIONS.length);
   });
 });

@@ -26,6 +26,7 @@ import { formatLinksSummary, formatRefusedFoldersSummary, formatReplacedLinksSum
 import { runRulesEnable } from '../../src/cli/commands/rules.js';
 import { reapplyAgentMapping, saveAgentMapping } from '../../src/core/agent-models.js';
 import { curationOffDir, skillsDir } from '../../src/core/assets.js';
+import { ALL_SWITCHES_ON } from '../../src/core/curation-variants.js';
 import { readManifest, writeManifest } from '../../src/core/manifest.js';
 import { DEVFLOW_PLUGINS } from '../../src/core/plugins.js';
 import { convergeBehaviorRule } from '../../src/targets/claude-code/behavior-install.js';
@@ -139,7 +140,7 @@ const installedRules = (): string => path.join(claudeDir, 'rules', 'devflow');
 const plugins = DEVFLOW_PLUGINS;
 /** The machine's switches for a prompt converge: curation off, compliance on, so the curation arm of each prompt flips. */
 const promptConverge = (): Promise<Links> =>
-  convergePromptVariants({ claudeDir, switches: { curation: false, compliance: true }, plugins, warn, packageRoot: pkg });
+  convergePromptVariants({ claudeDir, switches: { ...ALL_SWITCHES_ON, curation: false }, plugins, warn, packageRoot: pkg });
 const reapply = (): Promise<Links> =>
   reapplyAgentMapping({ installDir: installedAgents(), devflowDir, proxyEnabled: false, onWarning: warn });
 const restamp = (): Promise<Links> => restampTrackerAgents({ claudeDir, servers: ['linear'], warn });
@@ -422,7 +423,9 @@ describe('a skill folder that is a link is swapped whole and what it points to i
   const axes = async (curation: boolean) => convergeVariantAxes({
     claudeDir,
     devflowDir,
-    manifest: { features: { curation, compliance: { enabled: true, frameworks: [] }, rules: false } },
+    switches: { ...ALL_SWITCHES_ON, curation },
+    frameworks: [],
+    rulesEnabled: false,
     plugins,
     warn,
     packageRoot: pkg,

@@ -994,10 +994,12 @@ describe('D-PERSONAL-UNTRACKED: a tracked .devflow/config.json is ignored, with 
 // ---------------------------------------------------------------------------
 
 describe('TP-33: feature switches = machine AND project AND personal (only a literal false narrows)', () => {
-  const FEATURES: readonly MachineFeature[] = ['memory', 'curation', 'knowledge'];
+  /** The switches the settings line carries: tdd is a machine switch with no repository layer, so it has no row here. */
+  type SettingsFeature = Exclude<MachineFeature, 'tdd'>;
+  const FEATURES: readonly SettingsFeature[] = ['memory', 'curation', 'knowledge'];
   type Layer = 'absent' | 'true' | 'false' | 'malformed';
   const LAYERS: readonly Layer[] = ['absent', 'true', 'false', 'malformed'];
-  const fileFor = (feature: MachineFeature, v: Layer): string | undefined => (v === 'absent'
+  const fileFor = (feature: SettingsFeature, v: Layer): string | undefined => (v === 'absent'
     ? undefined
     : `{"features":{"${feature}":${v === 'malformed' ? '"false"' : v}}}`);
 

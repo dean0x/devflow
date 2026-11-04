@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`devflow tdd --enable | --disable | --status`** ([#758](https://github.com/dean0x/devflow/issues/758)). The switch is on by default. With it off, the installed Code agent has no test-first text and no `devflow:test-driven-development` preload, the installed Triage agent no longer says that the Code agent works test-first, and the skill is not installed; the other test rules stay. The switch changes only the installed files, through the same build variants and converge as `devflow curation` and `devflow compliance`; no spawn or settings line carries it. A plain re-init keeps it, and `devflow init --reset` turns it back on. With no install manifest the command records nothing and exits 1.
+
 ### Changed
 
 - **devflow ships a `Plan` agent that replaces Claude Code's built-in Plan** ([#756](https://github.com/dean0x/devflow/issues/756)). It runs on Opus at high effort, reads the code without editing it, names the lowest workable rung for each step, and never drops input validation, security checks, data-loss guards, fail-closed paths or the tests of these. `/plan` Phase 10 uses it, and so does plan mode when Claude Code delegates research to the Plan subagent. `init` skips it and warns when you already own a `Plan` agent, `uninstall` removes only devflow's copy, and `devflow agents --set plan --model <model>` changes its model.

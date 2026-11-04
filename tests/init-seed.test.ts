@@ -36,6 +36,7 @@ function makeManifest(overrides: Partial<ManifestData> = {}): ManifestData {
       curation: true,
       rules: true,
       proxy: false,
+      tdd: true,
       // Phase 2: FlagsRecord (was string[]); no deprecated viewMode field
       flags: { tui: true, lsp: true, 'tool-search': true },
     },
@@ -84,6 +85,7 @@ describe('resolveSeedFeatures', () => {
       rules: false,
       proxy: false,
       behavior: false,
+      tdd: true,
       compliance: { enabled: false, frameworks: [] },
       tracker: { provider: 'github' },
     });
@@ -389,6 +391,7 @@ describe('resolveInitSeed', () => {
         curation: true,
         rules: false,
         proxy: false,
+        tdd: true,
         flags: { tui: true, lsp: true, 'view-mode': 'verbose' },
       },
     });
@@ -418,6 +421,7 @@ describe('applyCliToggles', () => {
     rules: true,
     proxy: false,
     behavior: false,
+    tdd: true,
     compliance: { enabled: false, frameworks: [] },
     tracker: { provider: 'github' },
     // A concrete level, so the strict comparison below sees the key carried.
@@ -449,7 +453,7 @@ describe('applyCliToggles', () => {
   it('explicit true overrides base false', () => {
     const allFalse: FeatureSeed = {
       ambient: false, memory: false, hud: false, knowledge: false,
-      curation: false, rules: false, proxy: false,
+      curation: false, rules: false, proxy: false, tdd: false,
       compliance: { enabled: false, frameworks: [] },
       tracker: { provider: 'jira' },
     };
@@ -731,6 +735,38 @@ describe('behavior seeding', () => {
   it('resolveInitSeed: behavior is part of the features result', () => {
     const manifest = makeManifest({ features: { ...makeManifest().features, behavior: true } });
     expect(resolveInitSeed(manifest, '{}', DEVFLOW_PLUGINS).features.behavior).toBe(true);
+  });
+});
+
+// ── tdd seeding (resolveSeedFeatures + applyCliToggles) ───────────────────────
+
+describe('tdd seeding', () => {
+  it('FEATURE_DEFAULTS.tdd is true (the switch is on unless a machine turns it off)', () => {
+    expect(FEATURE_DEFAULTS.tdd).toBe(true);
+  });
+
+  it('fresh install (null manifest) and --reset → tdd on', () => {
+    expect(resolveSeedFeatures(null).tdd).toBe(true);
+  });
+
+  it('a manifest with no tdd key (every pre-tdd install) seeds on', () => {
+    const { tdd: _tdd, ...withoutTdd } = makeManifest().features;
+    expect(resolveSeedFeatures(makeManifest({ features: withoutTdd as ManifestData['features'] })).tdd).toBe(true);
+  });
+
+  it('a manifest with tdd off keeps it off across a re-init, and one with tdd on keeps it on', () => {
+    expect(resolveSeedFeatures(makeManifest({ features: { ...makeManifest().features, tdd: false } })).tdd).toBe(false);
+    expect(resolveSeedFeatures(makeManifest({ features: { ...makeManifest().features, tdd: true } })).tdd).toBe(true);
+  });
+
+  it('applyCliToggles: a seeded tdd passes through untouched when no toggle names it', () => {
+    expect(applyCliToggles({ ...FEATURE_DEFAULTS, tdd: false }, { ambient: true }).tdd).toBe(false);
+    expect(applyCliToggles({ ...FEATURE_DEFAULTS, tdd: true }, {}).tdd).toBe(true);
+  });
+
+  it('resolveInitSeed: tdd is part of the features result', () => {
+    const manifest = makeManifest({ features: { ...makeManifest().features, tdd: false } });
+    expect(resolveInitSeed(manifest, '{}', DEVFLOW_PLUGINS).features.tdd).toBe(false);
   });
 });
 

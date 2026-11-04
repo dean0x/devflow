@@ -9,6 +9,7 @@ import { getGitRoot } from '../../core/git.js';
 import type { PausedArea } from '../../core/area-pause-notice.js';
 import { isSameLocation } from '../../core/same-location.js';
 import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, WORKFLOW_FOLDER_NAMES, registeredPluginNames, buildAssetMaps, getAllSkillNames, getAllAgentNames, getAllCommandNames, parsePluginSelection, resolveFeatureRedirect, prefixSkillName, unprefixSkillName, skillsOf, selectedWorkflowFolders, FEATURE_OWNED_SKILLS, type PluginDefinition } from '../../core/plugins.js';
+import { machineSwitches } from '../../core/curation-variants.js';
 import { readManifest, readManifestPlugins, removeManifestPlugins } from '../../core/manifest.js';
 import { sweepOrphanedAssets, mdFileName, mdEntryName, type SweepResult } from '../../core/orphan-sweep.js';
 import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
@@ -1468,8 +1469,7 @@ export async function refreshRetainedCommandsAndAgents(opts: {
       plugins: retained,
       agentsMap: buildAssetMaps(retained).agentsMap,
       claudeDir,
-      curation: manifest.features.curation,
-      compliance: manifest.features.compliance.enabled,
+      switches: machineSwitches(manifest.features),
       trackerServers: effectiveTrackerServers(manifest.features.tracker),
       links,
       warn: (msg) => p.log.warn(msg),

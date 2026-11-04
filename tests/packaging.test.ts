@@ -40,6 +40,10 @@ import {
   CURATION_VARIANT_HOSTS,
   COMPLIANCE_OFF_FILES,
   COMPLIANCE_VARIANT_HOSTS,
+  TDD_OFF_FILES,
+  CURATION_TDD_OFF_FILES,
+  COMPLIANCE_TDD_OFF_FILES,
+  ALL_OFF_FILES,
   MDS_COMMAND_HOSTS,
   MDS_GENERATOR_HOSTS,
   MDS_REFERENCE_MODULES,
@@ -53,10 +57,14 @@ import {
   installedReferenceManifest,
 } from '../src/core/mds-variants.js';
 import {
+  ALL_OFF_OUTPUT_DIR,
   BOTH_OFF_OUTPUT_DIR,
   COMPLIANCE_OFF_OUTPUT_DIR,
+  COMPLIANCE_TDD_OFF_OUTPUT_DIR,
   CURATION_OFF_OUTPUT_DIR,
+  CURATION_TDD_OFF_OUTPUT_DIR,
   LEGACY_OFF_OUTPUT_DIR,
+  TDD_OFF_OUTPUT_DIR,
   VARIANT_MANIFEST_REL_PATH,
 } from '../src/core/curation-variants.js';
 
@@ -465,6 +473,10 @@ describe('Guard 5 (files[] coverage): package.json includes required directories
  *      both-off tree (dist/curation-compliance-off/). A scoped pack of seeded files
  *      proves the `files` field carries a file under each tree, whatever the
  *      rosters hold.
+ *  (g) Carry exactly the tdd-off variants the tdd roster names (dist/tdd-off/,
+ *      dist/curation-tdd-off/, dist/compliance-tdd-off/ and
+ *      dist/curation-compliance-tdd-off/; the Code agent and Triage): a tdd-off machine
+ *      installs them in place of the tdd-on prompt.
  *
  * Assert on parsed `npm pack --dry-run --json` output (structured
  * data), not on pipeline tails or partial string matching.
@@ -694,6 +706,48 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
     ).toEqual([...BOTH_OFF_FILES].sort());
   });
 
+  it('tarball carries exactly the roster\'s tdd-off variants in all four tdd trees', () => {
+    const files = getPackFiles();
+    expect(
+      files.length,
+      'npm pack --dry-run produced no files — run `npm run build` first (guard cannot verify)',
+    ).toBeGreaterThan(0);
+    // A tdd-off machine installs these files in place of the tdd-on prompt. One missing falls
+    // through to the tdd-on file, which ships the TDD text the switch was set to leave out.
+    expect(
+      collectOffTreeFiles(files, TDD_OFF_OUTPUT_DIR),
+      'Tarball dist/tdd-off/*.md set does not match TDD_VARIANT_HOSTS in tests/fixtures/mds-manifest.ts.',
+    ).toEqual([...TDD_OFF_FILES].sort());
+    expect(
+      collectOffTreeFiles(files, CURATION_TDD_OFF_OUTPUT_DIR),
+      'Tarball dist/curation-tdd-off/*.md set does not match the hosts that carry both a curation arm and a tdd arm.',
+    ).toEqual([...CURATION_TDD_OFF_FILES].sort());
+    expect(collectOffTreeFiles(files, COMPLIANCE_TDD_OFF_OUTPUT_DIR)).toEqual([...COMPLIANCE_TDD_OFF_FILES].sort());
+    expect(collectOffTreeFiles(files, ALL_OFF_OUTPUT_DIR)).toEqual([...ALL_OFF_FILES].sort());
+    expect(TDD_OFF_FILES, 'the roster is empty: the comparison is vacuous').toContain('agents/code.md');
+    expect(TDD_OFF_FILES).toContain('agents/triage.md');
+    expect(CURATION_TDD_OFF_FILES).toContain('agents/code.md');
+    expect(CURATION_TDD_OFF_FILES).toContain('agents/triage.md');
+    expect(COMPLIANCE_TDD_OFF_FILES, 'Triage is the host with a compliance arm and a tdd arm').toEqual(['agents/triage.md']);
+    expect(ALL_OFF_FILES).toEqual(['agents/triage.md']);
+  });
+
+  it('known-bad probe: the collector keeps the tdd trees apart from the curation and compliance trees', () => {
+    const seeded = [
+      'dist/tdd-off/agents/code.md',
+      'dist/curation-tdd-off/agents/code.md',
+      'dist/curation-off/agents/code.md',
+      'dist/compliance-tdd-off/commands/x.md',
+      'dist/curation-compliance-tdd-off/commands/y.md',
+      'dist/tdd-off/agents/notes.txt',
+    ];
+    expect(collectOffTreeFiles(seeded, TDD_OFF_OUTPUT_DIR)).toEqual(['agents/code.md']);
+    expect(collectOffTreeFiles(seeded, CURATION_TDD_OFF_OUTPUT_DIR)).toEqual(['agents/code.md']);
+    expect(collectOffTreeFiles(seeded, CURATION_OFF_OUTPUT_DIR)).toEqual(['agents/code.md']);
+    expect(collectOffTreeFiles(seeded, COMPLIANCE_TDD_OFF_OUTPUT_DIR)).toEqual(['commands/x.md']);
+    expect(collectOffTreeFiles(seeded, ALL_OFF_OUTPUT_DIR)).toEqual(['commands/y.md']);
+  });
+
   it('tarball carries the variant manifest the installer reads (dist/variant-axes.json)', () => {
     const files = getPackFiles();
     expect(
@@ -783,6 +837,10 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
       `${COMPLIANCE_OFF_OUTPUT_DIR}/agents/y.md`,
       `${BOTH_OFF_OUTPUT_DIR}/commands/x.md`,
       `${BOTH_OFF_OUTPUT_DIR}/agents/y.md`,
+      `${TDD_OFF_OUTPUT_DIR}/agents/y.md`,
+      `${CURATION_TDD_OFF_OUTPUT_DIR}/agents/y.md`,
+      `${COMPLIANCE_TDD_OFF_OUTPUT_DIR}/commands/x.md`,
+      `${ALL_OFF_OUTPUT_DIR}/commands/x.md`,
       VARIANT_MANIFEST_REL_PATH,
     ];
     // Controls: the scratch pack must apply the patterns. A map file under a tree and a

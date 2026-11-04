@@ -8,9 +8,9 @@ import {
 } from './mds-variants.js';
 import {
   ALL_SWITCHES_ON,
-  BOTH_OFF_OUTPUT_DIR,
-  COMPLIANCE_OFF_OUTPUT_DIR,
-  CURATION_OFF_OUTPUT_DIR,
+  OFF_OUTPUT_DIRS,
+  consultedOffKeys,
+  type OffVariantKey,
   type VariantKey,
   type VariantKind,
   type VariantSwitches,
@@ -70,20 +70,32 @@ export function commandsDir(): string {
 export type CommandSourceDirs = readonly [string, ...string[]];
 
 /**
+ * The variant directory of one off key: <the key's tree>/{commands,agents}/
+ *
+ * The spelling comes from OFF_OUTPUT_DIRS in curation-variants.ts, the build's own
+ * destinations, rather than being retyped here. Absent until the build has run, so every
+ * reader tolerates its absence.
+ *
+ * @param key - The off variant key.
+ * @param kind - Which prompt kind's variants.
+ * @param root - Package root to resolve against (see agentsDir).
+ */
+export function variantOffDir(key: OffVariantKey, kind: VariantKind, root: string = getPackageRoot()): string {
+  return join(root, ...OFF_OUTPUT_DIRS[key].split('/'), kind);
+}
+
+/**
  * Curation-off variant directory: dist/curation-off/{commands,agents}/
  *
  * Holds the curation-off variant of each prompt that carries a curation arm
  * (D-LEARNING-VARIANTS), and only those. Absent until the build has run, so every
  * reader tolerates its absence.
  *
- * The spelling comes from CURATION_OFF_OUTPUT_DIR in curation-variants.ts, the
- * build's own destination, rather than being retyped here.
- *
  * @param kind - Which prompt kind's variants.
  * @param root - Package root to resolve against (see agentsDir).
  */
 export function curationOffDir(kind: VariantKind, root: string = getPackageRoot()): string {
-  return join(root, ...CURATION_OFF_OUTPUT_DIR.split('/'), kind);
+  return variantOffDir('curation-off', kind, root);
 }
 
 /**
@@ -98,7 +110,7 @@ export function curationOffDir(kind: VariantKind, root: string = getPackageRoot(
  * @param root - Package root to resolve against (see agentsDir).
  */
 export function complianceOffDir(kind: VariantKind, root: string = getPackageRoot()): string {
-  return join(root, ...COMPLIANCE_OFF_OUTPUT_DIR.split('/'), kind);
+  return variantOffDir('compliance-off', kind, root);
 }
 
 /**
@@ -111,31 +123,24 @@ export function complianceOffDir(kind: VariantKind, root: string = getPackageRoo
  * @param root - Package root to resolve against (see agentsDir).
  */
 export function bothOffDir(kind: VariantKind, root: string = getPackageRoot()): string {
-  return join(root, ...BOTH_OFF_OUTPUT_DIR.split('/'), kind);
+  return variantOffDir('both-off', kind, root);
 }
 
 /**
  * The off-variant directories of one kind that a machine with these switches consults,
- * MOST-PREFERRED FIRST. Empty when both switches are on.
+ * MOST-PREFERRED FIRST. Empty when every switch is on.
  *
- * The one place the two-axis order is spelled; commandSourceDirs and agentSourceDirs
- * both take it from here. A both-off machine consults the both-off tree first, then the
- * two single-axis trees. This order does not decide which file a compliance-armed host
- * must have. The installer requires the file built for the machine's exact switches, so
- * on a both-off machine a host with both arms needs its both-off file and never its
- * curation-off file.
+ * The one place the order is spelled; commandSourceDirs and agentSourceDirs both take it
+ * from here. It is generated from the variant table (consultedOffKeys): every off tree
+ * whose axes are all off on the machine, the tree with the most axes off first. The first
+ * tree that holds a host's file is therefore the file for the machine's off axes that the
+ * host carries an arm on. A machine with one switch off consults one tree. This order does
+ * not decide which file a compliance-armed host must have. The installer requires the
+ * file built for the machine's exact switches, so on a both-off machine a host with both
+ * arms needs its both-off file and never its curation-off file.
  */
-function offVariantDirs(
-  kind: VariantKind,
-  { curation, compliance }: VariantSwitches,
-  root: string,
-): readonly string[] {
-  if (!curation && !compliance) {
-    return [bothOffDir(kind, root), curationOffDir(kind, root), complianceOffDir(kind, root)];
-  }
-  if (!compliance) return [complianceOffDir(kind, root)];
-  if (!curation) return [curationOffDir(kind, root)];
-  return [];
+function offVariantDirs(kind: VariantKind, switches: VariantSwitches, root: string): readonly string[] {
+  return consultedOffKeys(switches).map(key => variantOffDir(key, kind, root));
 }
 
 /**
@@ -154,10 +159,10 @@ function preferOff(
  *
  * D-LEARNING-VARIANT-INSTALL: with an axis off, the off-variant directories come
  * first, so a host with an arm installs its off variant and a host with none falls
- * through to the one compiled file. With both axes on the order is the normal
+ * through to the one compiled file. With every axis on the order is the normal
  * single-directory lookup.
  *
- * @param switches - The machine's settled curation and compliance switches.
+ * @param switches - The machine's settled switches (one per axis).
  * @param root - Package root to resolve against (see agentsDir).
  */
 export function commandSourceDirs(
@@ -244,14 +249,15 @@ export function compiledWorkflowFoldersDir(key: VariantKey, root: string = getPa
 /**
  * The workflow folders source root for a machine's switches: the tree built for exactly
  * those switches. One function, so the install, the converge and the status read cannot
- * pick different roots for one pair of switches.
+ * pick different roots for one set of switches.
  *
  * D-WORKFLOW-FOLDER-BUILD: a SINGLE root, never a preference list. A folder is complete
- * under every key, so no reader merges two trees, and a both-off machine never falls
- * through to a tree that still carries the text of an axis it switched off (the failure
- * commandSourceDirs' consumers guard against with an exact-key check).
+ * under every key it is built under (FOLDER_VARIANT_KEYS), so no reader merges two trees,
+ * and a both-off machine never falls through to a tree that still carries the text of an
+ * axis it switched off (the failure commandSourceDirs' consumers guard against with an
+ * exact-key check). A folder has no tdd arm, so the tdd switch does not pick a root.
  *
- * @param switches - The machine's settled curation and compliance switches.
+ * @param switches - The machine's settled switches (one per axis).
  * @param root - Package root to resolve against (see agentsDir).
  */
 export function workflowFoldersSourceDir(switches: VariantSwitches, root: string = getPackageRoot()): string {
@@ -283,7 +289,7 @@ export function workflowFoldersSourceDir(switches: VariantSwitches, root: string
  * reading the both-on tree.
  *
  * @param root - Package root to resolve against (see agentsDir).
- * @param switches - The machine's settled curation and compliance switches; every switch on by default.
+ * @param switches - The machine's settled switches (one per axis); every switch on by default.
  */
 export function agentSourceDirs(
   root: string = getPackageRoot(),

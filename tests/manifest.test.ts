@@ -82,7 +82,7 @@ describe('readManifest', () => {
       version: '1.4.0',
       plugins: ['devflow-core-skills', 'devflow-implement'],
       scope: 'user',
-      features: { ambient: true, memory: true, hud: false, knowledge: false, curation: false, rules: true, flags: {}, proxy: false, behavior: false, compliance: { enabled: false, frameworks: [] }, tracker: { provider: 'github' } },
+      features: { ambient: true, memory: true, hud: false, knowledge: false, curation: false, rules: true, flags: {}, proxy: false, behavior: false, tdd: true, compliance: { enabled: false, frameworks: [] }, tracker: { provider: 'github' } },
       installedAt: '2026-03-01T00:00:00.000Z',
       updatedAt: '2026-03-13T00:00:00.000Z',
     };
@@ -400,7 +400,7 @@ describe('readManifest', () => {
       version: '3.8.0', plugins: [], scope: 'user',
       features: {
         ambient: true, memory: true, hud: false, knowledge: true, curation, rules: true, flags: {}, proxy: false,
-        behavior: false, compliance: { enabled: false, frameworks: [] }, tracker: { provider: 'github' },
+        behavior: false, tdd: true, compliance: { enabled: false, frameworks: [] }, tracker: { provider: 'github' },
       },
       installedAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
     });
@@ -1838,6 +1838,68 @@ describe('gate level feature field', () => {
 // The reader carries the key as stored when it is present and leaves it out when it is
 // absent. It never narrows the value and never heals it, so a hand-edited or newer-version
 // value stays on disk and an install made before the field stays without it.
+
+describe('tdd feature field', () => {
+  let tmpDir: string;
+
+  /** A current manifest: every key a read heals is present, so a read of it writes nothing. */
+  const current = (tdd?: unknown) => ({
+    version: '3.8.0',
+    plugins: ['devflow-core-skills'],
+    scope: 'user',
+    features: {
+      ambient: true, memory: true, hud: false, knowledge: false, curation: false, learning: false, rules: true, flags: {},
+      proxy: false, behavior: false, compliance: { enabled: false, frameworks: [] }, tracker: { provider: 'github' },
+      ...(tdd === undefined ? {} : { tdd }),
+    },
+    installedAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  });
+
+  const writeRaw = (body: unknown) =>
+    fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(body), 'utf-8');
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-manifest-tdd-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('an absent tdd key reads as on, and the read writes nothing: the key is never healed in', async () => {
+    await writeRaw(current());
+    const before = await fs.readFile(path.join(tmpDir, 'manifest.json'), 'utf-8');
+
+    const result = await readManifest(tmpDir);
+
+    expect(result!.features.tdd).toBe(true);
+    expect(await fs.readFile(path.join(tmpDir, 'manifest.json'), 'utf-8'), 'a heal-free read leaves the file alone').toBe(before);
+  });
+
+  it('preserves tdd: false and tdd: true', async () => {
+    await writeRaw(current(false));
+    expect((await readManifest(tmpDir))!.features.tdd).toBe(false);
+    await writeRaw(current(true));
+    expect((await readManifest(tmpDir))!.features.tdd).toBe(true);
+  });
+
+  it('known-bad probe: a value that is not a boolean reads as on, never as off', async () => {
+    for (const value of ['false', 0, null, { enabled: false }, []]) {
+      await writeRaw(current(value));
+      const result = await readManifest(tmpDir);
+      expect(result, JSON.stringify(value)).not.toBeNull();
+      expect(result!.features.tdd, JSON.stringify(value)).toBe(true);
+    }
+  });
+
+  it('a tdd switch written by writeManifest is read back', async () => {
+    await writeRaw(current(false));
+    const read = await readManifest(tmpDir);
+    await writeManifest(tmpDir, { ...read!, features: { ...read!.features, tdd: true } });
+    expect((await readManifest(tmpDir))!.features.tdd).toBe(true);
+  });
+});
 
 describe('installedVariants field (raw carry)', () => {
   let tmpDir: string;

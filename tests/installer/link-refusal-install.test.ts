@@ -19,6 +19,7 @@ import { installViaFileCopy, type InstallReport, type Spinner } from '../../src/
 import { clearLinkedEntry, mergeLinkReports } from '../../src/targets/claude-code/linked-folder.js';
 import { convergeTrackerArtifacts } from '../../src/targets/claude-code/tracker-install.js';
 import { compiledSkillRefsDir } from '../../src/core/assets.js';
+import { ALL_SWITCHES_ON } from '../../src/core/curation-variants.js';
 import { generatedReferenceManifest } from '../../src/core/mds-variants.js';
 import { buildAssetMaps, DEVFLOW_PLUGINS } from '../../src/core/plugins.js';
 import { assertTempHome } from '../setup/home-isolation.js';
@@ -45,8 +46,7 @@ const exists = (file: string): Promise<boolean> => fs.lstat(file).then(() => tru
 async function install(isPartialInstall: boolean): Promise<InstallReport> {
   return installViaFileCopy({
     backups: await testBackups(tmp, { claudeDir, devflowDir }),
-    curation: true,
-    compliance: true,
+    switches: ALL_SWITCHES_ON,
     plugins: CODE_REVIEW,
     effectivePlugins: [...CORE, ...CODE_REVIEW],
     claudeDir,

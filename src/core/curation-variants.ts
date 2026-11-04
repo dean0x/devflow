@@ -1,6 +1,6 @@
 /**
- * Variant splitter: one compiled prompt body in, its variants out, on two marker
- * axes: curation and compliance.
+ * Variant splitter: one compiled prompt body in, its variants out, on the marker
+ * axes: curation, compliance and tdd.
  *
  * Pure module, zero I/O. Every refusal is a Result; the exiting shells are
  * scripts/build-mds.ts, which renders the split errors into the build's single exit,
@@ -12,11 +12,15 @@
  * the curation-on variant at today's path (dist/commands/x.md, dist/agents/x.md)
  * and the curation-off variant at dist/curation-off/{commands,agents}/x.md, only
  * for a host that has an arm. A prompt with no arm has one variant and no
- * curation-off file. The compliance axis works the same way: a body is split on
- * both axes into four variants, keyed `on`, `curation-off`, `compliance-off` and
- * `both-off`, and the build writes a variant only for a host that has an arm on
- * each axis that variant turns off. The off variants go to dist/curation-off/,
- * dist/compliance-off/ and dist/curation-compliance-off/, and the manifest
+ * curation-off file. The other axes work the same way: a body is split on every
+ * axis into one variant per combination of axes turned off (VARIANT_KEYS: `on`,
+ * `curation-off`, `compliance-off` and `both-off` for curation and compliance, and
+ * `tdd-off`, `curation-tdd-off`, `compliance-tdd-off` and `curation-compliance-tdd-off`
+ * for the same four with tdd off), and the build writes a variant only for a host
+ * that has an arm on each axis that variant turns off. The off variants go to the
+ * trees of OFF_OUTPUT_DIRS (dist/curation-off/, dist/compliance-off/,
+ * dist/curation-compliance-off/, dist/tdd-off/, dist/curation-tdd-off/,
+ * dist/compliance-tdd-off/ and dist/curation-compliance-tdd-off/), and the manifest
  * dist/variant-axes.json records which axes each host carries an arm on. The install
  * order of the trees per machine is owned by src/core/assets.ts, and the install refusal
  * for a compliance-off machine by src/targets/claude-code/installer.ts.
@@ -30,7 +34,8 @@
  *   <!-- curation:end -->    closes the arm
  *
  * and `<!-- compliance:on -->`, `<!-- compliance:off -->` and
- * `<!-- compliance:end -->` do the same for the compliance variants.
+ * `<!-- compliance:end -->` do the same for the compliance variants, and
+ * `<!-- tdd:on -->`, `<!-- tdd:off -->` and `<!-- tdd:end -->` for the tdd variants.
  *
  * A marker line matches VARIANT_MARKER_RE. It may be indented and may sit inside
  * a fenced block, a list, a define body or an agent's second frontmatter block,
@@ -43,9 +48,10 @@
  * A line goes into a variant only when every arm open at that line matches the
  * variant, so a body with no compliance marker splits on the curation axis to the
  * same bytes it always did, and the compliance state of the variant changes nothing.
+ * The same holds for a body with no tdd marker.
  *
- * One axis may nest fully inside an arm of the other. Two arms of one axis never
- * nest, and arms of two axes never overlap: at most one arm per axis is open, and
+ * One axis may nest fully inside an arm of another. Two arms of one axis never
+ * nest, and arms of different axes never overlap: at most one arm per axis is open, and
  * the arm opened last is the one that closes first.
  *
  * The markers are INTERIM. MDS 0.4.4 emits an `@if` inside a code fence or on an
@@ -56,31 +62,33 @@
  * @mdscript/mds upgrade it rides on proven byte-identical in dist/ and this module
  * deleted, is dean0x/devflow#439; the compliance axis rides the same swap
  * (dean0x/devflow#648). The mapping is one to one, per axis: `<!-- curation:on -->`
- * becomes `@if curation:` and `<!-- compliance:on -->` becomes `@if compliance:`,
+ * becomes `@if curation:`, `<!-- compliance:on -->` becomes `@if compliance:` and
+ * `<!-- tdd:on -->` becomes `@if tdd:`,
  * `off` becomes `@else:` and `end` becomes `@end`. A standalone `off` arm, with no
  * on arm before it, becomes an `@if <axis>:` with an empty body followed by
- * `@else:`. One axis nested inside the other becomes one `@if` inside the other,
+ * `@else:`. One axis nested inside another becomes one `@if` inside the other,
  * and an interleaving, which no `@if` nesting expresses, is a refusal here.
  *
  * What the splitter refuses, each as a VariantSplitError with the source line:
  *   - nesting: an `on` marker while an arm of its axis is open, or a second `off`
  *     in one arm;
- *   - an interleaving: an `off` or `end` marker for an arm while an arm of the other
+ *   - an interleaving: an `off` or `end` marker for an arm while an arm of another
  *     axis, opened after it, is still open;
  *   - an `end` with no open arm of its axis;
  *   - an arm still open at the end of the body;
  *   - an empty arm (no line with content between its marker and the next);
  *   - a retired marker: a line that names the pre-rename spelling of the marker, in
  *     any spacing or case, which would otherwise ship as prompt text;
- *   - a stray marker: a line that names `<!-- curation:` or `<!-- compliance:` but
- *     is not a whole-line marker, which would otherwise ship as prompt text.
+ *   - a stray marker: a line that names `<!-- curation:`, `<!-- compliance:` or
+ *     `<!-- tdd:` but is not a whole-line marker, which would otherwise ship as
+ *     prompt text.
  *
  * The retired spelling is never accepted as an alias: the build fails on it, so a
  * host that still carries it cannot ship a prompt with both variants silently equal.
  *
  * Scope guarantee: this module answers one question (what are the variants of this
  * body, and where do they land?) and a cheap one per axis for the build to ask of a
- * body that must carry no arms (containsCurationMarker, containsComplianceMarker). It
+ * body that must carry no arms (containsAxisMarker). It
  * also renders the variant manifest the build writes beside the trees
  * (renderVariantManifest) and parses it for the installer (parseVariantManifest), so the
  * build and the installer share one layout. It decides
@@ -108,7 +116,7 @@ function Err<E>(error: E): Result<never, E> {
 // Where the off variants land
 // ---------------------------------------------------------------------------
 
-/** The host kinds that can carry a curation or compliance arm: the ones whose output is a prompt, not a reference. */
+/** The host kinds that can carry an arm on an axis: the ones whose output is a prompt, not a reference. */
 export type VariantKind = 'commands' | 'agents';
 
 /**
@@ -137,6 +145,23 @@ export const COMPLIANCE_OFF_OUTPUT_DIR = 'dist/compliance-off';
 export const BOTH_OFF_OUTPUT_DIR = 'dist/curation-compliance-off';
 
 /**
+ * Repo-relative root of the tdd-off variants: tdd off, curation and compliance on.
+ *
+ * The three trees below are the same three off combinations of curation and compliance
+ * with tdd off as well. All are siblings under dist/, none inside another.
+ */
+export const TDD_OFF_OUTPUT_DIR = 'dist/tdd-off';
+
+/** Repo-relative root of the variants with curation and tdd off, compliance on. */
+export const CURATION_TDD_OFF_OUTPUT_DIR = 'dist/curation-tdd-off';
+
+/** Repo-relative root of the variants with compliance and tdd off, curation on. */
+export const COMPLIANCE_TDD_OFF_OUTPUT_DIR = 'dist/compliance-tdd-off';
+
+/** Repo-relative root of the variants with every axis off: curation, compliance and tdd. */
+export const ALL_OFF_OUTPUT_DIR = 'dist/curation-compliance-tdd-off';
+
+/**
  * Repo-relative root of the retired off tree, from before the rename.
  *
  * The build removes this folder whole after a clean run, so a checkout that built
@@ -157,6 +182,10 @@ export const OFF_OUTPUT_DIRS: Readonly<Record<OffVariantKey, string>> = {
   'curation-off': CURATION_OFF_OUTPUT_DIR,
   'compliance-off': COMPLIANCE_OFF_OUTPUT_DIR,
   'both-off': BOTH_OFF_OUTPUT_DIR,
+  'tdd-off': TDD_OFF_OUTPUT_DIR,
+  'curation-tdd-off': CURATION_TDD_OFF_OUTPUT_DIR,
+  'compliance-tdd-off': COMPLIANCE_TDD_OFF_OUTPUT_DIR,
+  'curation-compliance-tdd-off': ALL_OFF_OUTPUT_DIR,
 };
 
 /**
@@ -174,36 +203,82 @@ export function variantOffRelPath(key: OffVariantKey, kind: VariantKind, fileNam
 // Markers
 // ---------------------------------------------------------------------------
 
-/** The two marker axes. Curation is listed first: it is the older axis and the first one a stray line is tested against. */
-export const VARIANT_AXES = ['curation', 'compliance'] as const;
+/**
+ * The marker axes. Curation is listed first: it is the older axis and the first one a stray line is tested against.
+ *
+ * The per-axis records below are built from this list. A new axis also needs its own entries in
+ * VARIANT_KEYS and VARIANT_STATES (every combination), the off-tree constants and OFF_OUTPUT_DIRS,
+ * PRUNE_REASONS, MachineSwitchFeatures with machineSwitches, and FOLDER_ARMS. The type checker
+ * flags a missing per-axis record. A missing VARIANT_KEYS combination it does not flag: the table
+ * test over `2 ** VARIANT_AXES.length` rows pins that VARIANT_KEYS covers every combination.
+ */
+export const VARIANT_AXES = ['curation', 'compliance', 'tdd'] as const;
 
 export type VariantAxis = (typeof VARIANT_AXES)[number];
 
-/** A machine's settled switch on each axis. A named record, so the two flags cannot be swapped at a call site. */
+/** A record with one entry per member of `keys`, built by `valueOf`. The one place a total record is cast from a loop. */
+export function recordOf<K extends string, T>(keys: readonly K[], valueOf: (key: K) => T): Record<K, T> {
+  const record: Partial<Record<K, T>> = {};
+  for (const key of keys) record[key] = valueOf(key);
+  return record as Record<K, T>;
+}
+
+/** A record with one entry per axis, built by `valueOf`. */
+export function perAxis<T>(valueOf: (axis: VariantAxis) => T): Record<VariantAxis, T> {
+  return recordOf(VARIANT_AXES, valueOf);
+}
+
+/** A machine's settled switch on each axis. A named record, so the flags cannot be swapped at a call site. */
 export type VariantSwitches = Readonly<Record<VariantAxis, boolean>>;
 
 /** Every switch on: the machine whose prompts come from the normal compiled files. */
-export const ALL_SWITCHES_ON: VariantSwitches = Object.freeze({ curation: true, compliance: true });
+export const ALL_SWITCHES_ON: VariantSwitches = Object.freeze(perAxis(() => true));
+
+/** True when two switch records agree on every axis. */
+export function sameSwitches(a: VariantSwitches, b: VariantSwitches): boolean {
+  return VARIANT_AXES.every(axis => a[axis] === b[axis]);
+}
 
 /**
- * A whole-line marker of either axis. Group 1 captures the axis; group 2 captures
+ * The machine features the switches are read from: the shape the manifest and the init
+ * seed both hold. Compliance is a state record whose `enabled` is the switch.
+ */
+export interface MachineSwitchFeatures {
+  readonly curation: boolean;
+  readonly compliance: { readonly enabled: boolean };
+  readonly tdd: boolean;
+}
+
+/**
+ * The machine's settled switch on each axis, from its features.
+ *
+ * The ONE place the switches are built from the machine state. Every consumer takes the
+ * returned value whole (the installer, the converge, the folders, the install record) and
+ * never spells a switch per axis, so a new axis changes this function and the
+ * VariantSwitches type and no call site.
+ */
+export function machineSwitches(features: MachineSwitchFeatures): VariantSwitches {
+  return { curation: features.curation, compliance: features.compliance.enabled, tdd: features.tdd };
+}
+
+/**
+ * A whole-line marker of any axis. Group 1 captures the axis; group 2 captures
  * `on`, `off` or `end`.
  *
  * Anchored at both ends with no nested quantifier, so a match is linear in the
  * line length. Leading and trailing space or tab is allowed; anything else on the
- * line is not a marker.
+ * line is not a marker. The axis names are fixed words, never input.
  */
-export const VARIANT_MARKER_RE = /^[ \t]*<!-- (curation|compliance):(on|off|end) -->[ \t]*$/;
+export const VARIANT_MARKER_RE = new RegExp(`^[ \\t]*<!-- (${VARIANT_AXES.join('|')}):(on|off|end) -->[ \\t]*$`);
 
 /**
  * The fragment that makes a line a marker ATTEMPT on one axis: loose on spacing and
  * case so a malformed marker is caught rather than shipped. Every valid marker of
  * the axis contains it. None is global, so `test` keeps no state between lines.
  */
-const MARKER_FRAGMENT_RES: Readonly<Record<VariantAxis, RegExp>> = {
-  curation: /<!--\s*curation\s*:/i,
-  compliance: /<!--\s*compliance\s*:/i,
-};
+const MARKER_FRAGMENT_RES: Readonly<Record<VariantAxis, RegExp>> = perAxis(
+  axis => new RegExp(`<!--\\s*${axis}\\s*:`, 'i'),
+);
 
 /**
  * The same attempt test for the retired spelling of the marker. No spelling of it is
@@ -211,19 +286,32 @@ const MARKER_FRAGMENT_RES: Readonly<Record<VariantAxis, RegExp>> = {
  */
 const LEGACY_MARKER_FRAGMENT_RE = /<!--\s*learning\s*:/i;
 
+/** The axis the retired spelling belonged to. */
+const LEGACY_MARKER_AXIS: VariantAxis = 'curation';
+
+/** True when the text names a marker of the axis anywhere, valid or not; for curation also the retired spelling. */
+export function containsAxisMarker(axis: VariantAxis, text: string): boolean {
+  return MARKER_FRAGMENT_RES[axis].test(text) || (axis === LEGACY_MARKER_AXIS && LEGACY_MARKER_FRAGMENT_RE.test(text));
+}
+
 /** True when the text names a curation marker anywhere, in the current or the retired spelling, valid or not. */
 export function containsCurationMarker(text: string): boolean {
-  return MARKER_FRAGMENT_RES.curation.test(text) || LEGACY_MARKER_FRAGMENT_RE.test(text);
+  return containsAxisMarker('curation', text);
 }
 
 /** True when the text names a compliance marker anywhere, valid or not. */
 export function containsComplianceMarker(text: string): boolean {
-  return MARKER_FRAGMENT_RES.compliance.test(text);
+  return containsAxisMarker('compliance', text);
 }
 
-/** True when the text names a marker of either axis, or the retired spelling, valid or not. */
+/** True when the text names a tdd marker anywhere, valid or not. */
+export function containsTddMarker(text: string): boolean {
+  return containsAxisMarker('tdd', text);
+}
+
+/** True when the text names a marker of any axis, or the retired spelling, valid or not. */
 export function containsVariantMarker(text: string): boolean {
-  return containsCurationMarker(text) || containsComplianceMarker(text);
+  return VARIANT_AXES.some(axis => containsAxisMarker(axis, text));
 }
 
 type MarkerWord = 'on' | 'off' | 'end';
@@ -254,8 +342,21 @@ function attemptedAxisOf(line: string): VariantAxis | null {
 
 export type VariantArm = 'on' | 'off';
 
-/** The four variants of a body, named by the axes they turn off. */
-export const VARIANT_KEYS = ['on', 'curation-off', 'compliance-off', 'both-off'] as const;
+/**
+ * The variants of a body, one per combination of axes turned off, named by the axes
+ * they turn off. The four that keep tdd on come first and keep the names and trees
+ * they had before the tdd axis; the four that turn tdd off follow.
+ */
+export const VARIANT_KEYS = [
+  'on',
+  'curation-off',
+  'compliance-off',
+  'both-off',
+  'tdd-off',
+  'curation-tdd-off',
+  'compliance-tdd-off',
+  'curation-compliance-tdd-off',
+] as const;
 
 export type VariantKey = (typeof VARIANT_KEYS)[number];
 
@@ -264,13 +365,40 @@ export const OFF_VARIANT_KEYS: readonly OffVariantKey[] = VARIANT_KEYS.filter(
   (key): key is OffVariantKey => key !== 'on',
 );
 
-/** The arm each axis keeps in each variant. */
+/** The arm each axis keeps in each variant. Total over VARIANT_KEYS, with one row per combination of axes. */
 const VARIANT_STATES: Readonly<Record<VariantKey, Readonly<Record<VariantAxis, VariantArm>>>> = {
-  on: { curation: 'on', compliance: 'on' },
-  'curation-off': { curation: 'off', compliance: 'on' },
-  'compliance-off': { curation: 'on', compliance: 'off' },
-  'both-off': { curation: 'off', compliance: 'off' },
+  on: { curation: 'on', compliance: 'on', tdd: 'on' },
+  'curation-off': { curation: 'off', compliance: 'on', tdd: 'on' },
+  'compliance-off': { curation: 'on', compliance: 'off', tdd: 'on' },
+  'both-off': { curation: 'off', compliance: 'off', tdd: 'on' },
+  'tdd-off': { curation: 'on', compliance: 'on', tdd: 'off' },
+  'curation-tdd-off': { curation: 'off', compliance: 'on', tdd: 'off' },
+  'compliance-tdd-off': { curation: 'on', compliance: 'off', tdd: 'off' },
+  'curation-compliance-tdd-off': { curation: 'off', compliance: 'off', tdd: 'off' },
 };
+
+/** The arm an axis keeps in a variant. */
+export function variantArm(key: VariantKey, axis: VariantAxis): VariantArm {
+  return VARIANT_STATES[key][axis];
+}
+
+/** The axes a variant turns off, in VARIANT_AXES order. Empty for `on`. */
+export function offAxesOf(key: VariantKey): readonly VariantAxis[] {
+  return VARIANT_AXES.filter(axis => VARIANT_STATES[key][axis] === 'off');
+}
+
+/**
+ * The off variants a machine with these switches can read, MOST-PREFERRED FIRST: every
+ * off key whose off axes are all off on the machine, the key with the most axes off
+ * first, and keys with as many in VARIANT_KEYS order. The first key a host has a file
+ * for is the file for the machine's off axes that the host carries an arm on. Empty
+ * when every switch is on.
+ */
+export function consultedOffKeys(machine: VariantSwitches): readonly OffVariantKey[] {
+  return OFF_VARIANT_KEYS
+    .filter(key => offAxesOf(key).every(axis => !machine[axis]))
+    .sort((a, b) => offAxesOf(b).length - offAxesOf(a).length);
+}
 
 export interface VariantSplit {
   /**
@@ -286,19 +414,16 @@ export interface VariantSplit {
 }
 
 /**
- * The variants the build writes for a body, `on` first.
+ * The variants the build writes for a body, in VARIANT_KEYS order, `on` first.
  *
  * A variant is written only for a host that has an arm on each axis the variant turns
  * off: `curation-off` when the body carries a curation arm, `compliance-off` when it
- * carries a compliance arm, and `both-off` when it carries both. A body with no arm
- * has the one variant, because every key would give the same bytes.
+ * carries a compliance arm, `both-off` when it carries both, and the same for the
+ * variants that also turn tdd off. A body with no arm has the one variant, because
+ * every key would give the same bytes.
  */
 export function emittedVariantKeys(hasArms: Readonly<Record<VariantAxis, boolean>>): readonly VariantKey[] {
-  const keys: VariantKey[] = ['on'];
-  if (hasArms.curation) keys.push('curation-off');
-  if (hasArms.compliance) keys.push('compliance-off');
-  if (hasArms.curation && hasArms.compliance) keys.push('both-off');
-  return keys;
+  return VARIANT_KEYS.filter(key => VARIANT_AXES.every(axis => VARIANT_STATES[key][axis] === 'on' || hasArms[axis]));
 }
 
 /** Why a body cannot be split. Every line number is 1-based, in the body that was passed. */
@@ -440,7 +565,7 @@ function applyMarker(marker: Marker, lineNo: number, open: OpenArm[]): VariantSp
 }
 
 /**
- * Split a compiled body into its four variants.
+ * Split a compiled body into its variants (VARIANT_KEYS).
  *
  * Total and pure: the same input gives the same output, and a refusal is a
  * Result. The loop is one pass over the body's lines, so its bound is the body's
@@ -455,8 +580,8 @@ function applyMarker(marker: Marker, lineNo: number, open: OpenArm[]): VariantSp
  */
 export function splitVariants(body: string): Result<VariantSplit, VariantSplitError> {
   const lines = body.split('\n');
-  const kept: Record<VariantKey, string[]> = { on: [], 'curation-off': [], 'compliance-off': [], 'both-off': [] };
-  const seen: Record<VariantAxis, boolean> = { curation: false, compliance: false };
+  const kept = recordOf(VARIANT_KEYS, (): string[] => []);
+  const seen = perAxis(() => false);
   const open: OpenArm[] = [];
 
   for (let index = 0; index < lines.length; index++) {
@@ -474,12 +599,7 @@ export function splitVariants(body: string): Result<VariantSplit, VariantSplitEr
     return Err({ kind: 'unclosed-arm', axis: unclosed.axis, arm: unclosed.arm, openedAt: unclosed.openedAt });
   }
   return Ok({
-    bodies: {
-      on: kept.on.join('\n'),
-      'curation-off': kept['curation-off'].join('\n'),
-      'compliance-off': kept['compliance-off'].join('\n'),
-      'both-off': kept['both-off'].join('\n'),
-    },
+    bodies: recordOf(VARIANT_KEYS, key => kept[key].join('\n')),
     hasArms: seen,
   });
 }
@@ -502,7 +622,7 @@ export function describeVariantSplitError(error: VariantSplitError): string {
       return (
         `line ${error.line}: a ${error.axis}:${error.marker} marker ends the ${error.axis} arm opened at line ` +
         `${error.openedAt} while the ${error.innerAxis} arm opened at line ${error.innerOpenedAt} is still ` +
-        `open — arms of two axes may nest but not overlap; close the ${error.innerAxis} arm with ` +
+        `open — arms of different axes may nest but not overlap; close the ${error.innerAxis} arm with ` +
         `${error.innerAxis}:end first`
       );
     case 'repeated-off':
@@ -543,8 +663,8 @@ export function describeVariantSplitError(error: VariantSplitError): string {
 /**
  * Repo-relative path of the variant manifest, written beside the variant trees.
  *
- * The installer reads it to learn which compiled prompts carry a curation arm and
- * which carry a compliance arm, so it never has to guess from the files it finds.
+ * The installer reads it to learn which axes each compiled prompt carries an arm on
+ * (curation, compliance, tdd), so it never has to guess from the files it finds.
  */
 export const VARIANT_MANIFEST_REL_PATH = 'dist/variant-axes.json';
 
@@ -587,7 +707,7 @@ export function renderVariantManifest(hosts: readonly VariantManifestHost[]): Re
   for (const host of hosts) {
     const key = manifestKeyOf(host);
     if (entries.has(key)) return Err({ kind: 'duplicate-host', host: key });
-    entries.set(key, { curation: host.axes.curation, compliance: host.axes.compliance });
+    entries.set(key, perAxis(axis => host.axes[axis]));
   }
   const sorted: Record<string, Record<VariantAxis, boolean>> = {};
   for (const key of [...entries.keys()].sort(byCodeUnit)) {
@@ -658,16 +778,34 @@ export function parseVariantManifest(text: string): Result<readonly VariantManif
   for (const [key, value] of entries) {
     const match = MANIFEST_HOST_KEY_RE.exec(key);
     if (match === null) return Err({ kind: 'bad-host-key', key });
-    if (!isPlainRecord(value) || typeof value.curation !== 'boolean' || typeof value.compliance !== 'boolean') {
-      return Err({ kind: 'bad-host-axes', host: key });
-    }
-    hosts.push({
-      kind: match[1] as VariantKind,
-      name: match[2],
-      axes: { curation: value.curation, compliance: value.compliance },
-    });
+    if (!isPlainRecord(value)) return Err({ kind: 'bad-host-axes', host: key });
+    const axes = parseManifestAxes(value);
+    if (axes === null) return Err({ kind: 'bad-host-axes', host: key });
+    hosts.push({ kind: match[1] as VariantKind, name: match[2], axes });
   }
   return Ok(hosts);
+}
+
+/**
+ * The axes that existed before any later axis was added. A variant manifest or an install
+ * record written before a later axis existed has no entry for it; these axes stay required
+ * in both. An absent later axis reads as no arm in the manifest and as on in the record.
+ */
+export const ORIGINAL_AXES: readonly VariantAxis[] = ['curation', 'compliance'];
+
+/**
+ * The axes of one host entry, or null when an axis is not a boolean. An axis that is not
+ * in ORIGINAL_AXES may be absent, and then it is false.
+ */
+function parseManifestAxes(entry: Readonly<Record<string, unknown>>): Record<VariantAxis, boolean> | null {
+  const read: Partial<Record<VariantAxis, boolean>> = {};
+  for (const axis of VARIANT_AXES) {
+    const value = entry[axis];
+    if (typeof value === 'boolean') read[axis] = value;
+    else if (value === undefined && !ORIGINAL_AXES.includes(axis)) read[axis] = false;
+    else return null;
+  }
+  return perAxis(axis => read[axis] === true);
 }
 
 /** Render a manifest parse refusal as one line a person can act on. */
@@ -686,7 +824,7 @@ export function describeVariantManifestParseError(error: VariantManifestParseErr
     case 'bad-host-key':
       return `the host key "${error.key}" is not <commands|agents>/<name>`;
     case 'bad-host-axes':
-      return `the host ${error.host} does not carry a boolean "curation" and a boolean "compliance"`;
+      return `the host ${error.host} does not carry a boolean "curation" and a boolean "compliance" (and, when present, a boolean "tdd")`;
     default: {
       const unhandled: never = error;
       return `unhandled variant manifest parse error ${JSON.stringify(unhandled)}`;
@@ -708,11 +846,15 @@ export function machineVariantKey(
   machine: VariantSwitches,
   hasArms: Readonly<Record<VariantAxis, boolean>>,
 ): VariantKey {
-  const curationOff = !machine.curation && hasArms.curation;
-  const complianceOff = !machine.compliance && hasArms.compliance;
-  if (curationOff && complianceOff) return 'both-off';
-  if (curationOff) return 'curation-off';
-  return complianceOff ? 'compliance-off' : 'on';
+  const off = VARIANT_AXES.filter(axis => !machine[axis] && hasArms[axis]);
+  // VARIANT_STATES has one row per combination of axes, so exactly one off key matches a
+  // non-empty set (the table test pins that for every machine state and arm set), and
+  // `on` is the answer when nothing is off.
+  const found = OFF_VARIANT_KEYS.find(key => {
+    const turnedOff = offAxesOf(key);
+    return turnedOff.length === off.length && turnedOff.every(axis => off.includes(axis));
+  });
+  return found ?? 'on';
 }
 
 /**

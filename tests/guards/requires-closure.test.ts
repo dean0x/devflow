@@ -31,10 +31,12 @@ import { describe, it, expect } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { agentSourceDirs, commandSourceDirs } from '../../src/core/assets.js';
+import { ALL_SWITCHES_ON, type VariantSwitches } from '../../src/core/curation-variants.js';
 import {
   DEVFLOW_PLUGINS,
   FEATURE_OWNED_SKILLS,
   CURATION_GATED_SKILLS,
+  TDD_GATED_SKILLS,
   SKILL_NAMESPACE,
   PRESENCE_GATED_SKILLS,
   TEMPLATE_SKILL_REFS,
@@ -430,14 +432,14 @@ async function collectCurationOffInstalledRefs(): Promise<RawRef[]> {
   const files: string[] = [];
   const commandNames = new Set(DEVFLOW_PLUGINS.flatMap(p => p.commands.map(c => c.replace(/^\//, ''))));
   for (const name of commandNames) {
-    for (const dir of commandSourceDirs({ curation: false, compliance: true }, ROOT)) {
+    for (const dir of commandSourceDirs({ ...ALL_SWITCHES_ON, curation: false }, ROOT)) {
       const candidate = path.join(dir, `${name}.md`);
       if (await fs.access(candidate).then(() => true, () => false)) { files.push(candidate); break; }
     }
   }
   const agentNames = new Set(DEVFLOW_PLUGINS.flatMap(p => p.agents));
   for (const name of agentNames) {
-    for (const dir of agentSourceDirs(ROOT, { curation: false, compliance: true })) {
+    for (const dir of agentSourceDirs(ROOT, { ...ALL_SWITCHES_ON, curation: false })) {
       const candidate = path.join(dir, `${name}.md`);
       if (await fs.access(candidate).then(() => true, () => false)) { files.push(candidate); break; }
     }
@@ -506,13 +508,13 @@ describe('curation-gated skills (AC-148)', () => {
  * The reverse arm needs no off twin: an off prompt only ever drops text from the on variant, so
  * a `requires` entry the on corpus references stays referenced.
  */
-const COMPLIANCE_OFF_SWITCHES: ReadonlyArray<readonly [string, { curation: boolean; compliance: boolean }]> = [
-  ['compliance off', { curation: true, compliance: false }],
-  ['both off', { curation: false, compliance: false }],
+const COMPLIANCE_OFF_SWITCHES: ReadonlyArray<readonly [string, VariantSwitches]> = [
+  ['compliance off', { ...ALL_SWITCHES_ON, compliance: false }],
+  ['both off', { ...ALL_SWITCHES_ON, curation: false, compliance: false }],
 ];
 
 /** The command and agent files one plugin installs under the given switches, each from the first directory that holds it. */
-async function installedPromptFiles(plugin: PluginDefinition, switches: { curation: boolean; compliance: boolean }): Promise<string[]> {
+async function installedPromptFiles(plugin: PluginDefinition, switches: VariantSwitches): Promise<string[]> {
   const files: string[] = [];
   const pick = async (dirs: readonly string[], name: string): Promise<void> => {
     for (const dir of dirs) {
@@ -526,7 +528,7 @@ async function installedPromptFiles(plugin: PluginDefinition, switches: { curati
 }
 
 /** Named collector: references in the prompts of every plugin that no scope of its own covers, under the given switches. */
-async function collectOutOfScopeRefs(switches: { curation: boolean; compliance: boolean }): Promise<{ read: RawRef[]; dangling: string[] }> {
+async function collectOutOfScopeRefs(switches: VariantSwitches): Promise<{ read: RawRef[]; dangling: string[] }> {
   const read: RawRef[] = [];
   const dangling: string[] = [];
   for (const plugin of DEVFLOW_PLUGINS) {
@@ -561,6 +563,86 @@ describe('compliance-off prompts: every skill reference resolves in its plugin s
     const scope = skillsOf([plugin]);
     const refs = collectSkillRefs(`Load via Skill(skill="${NS}undeclared").`, 'synthetic-off.md');
     expect(refs.map(r => resolveRef(r, scope))).toEqual(['out-of-scope']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tdd-gated skills: the closure reasons over the tdd-on variant, and the tdd-off files resolve too
+// ---------------------------------------------------------------------------
+
+/**
+ * #758: a tdd-off machine does not install the skills in TDD_GATED_SKILLS, and its Code agent is the
+ * tdd-off file, which preloads none. The arms above read the tdd-on variant, where the skill is
+ * referenced and therefore required, so a gated skill stays in `requires` like any other. The forward
+ * arm runs here over the files each tdd-off machine installs, in the installer's own source order:
+ * none of them may name a gated skill, and every reference must still resolve in its plugin scope.
+ */
+const TDD_OFF_SWITCHES: ReadonlyArray<readonly [string, VariantSwitches]> = [
+  ['tdd off', { ...ALL_SWITCHES_ON, tdd: false }],
+  ['curation and tdd off', { ...ALL_SWITCHES_ON, curation: false, tdd: false }],
+  ['compliance and tdd off', { ...ALL_SWITCHES_ON, compliance: false, tdd: false }],
+  ['every axis off', { curation: false, compliance: false, tdd: false }],
+];
+
+/** Named predicate: the references that point at a skill a tdd-off machine does not install. */
+function danglingUnderTddOff(refs: readonly RawRef[]): string[] {
+  const gated = new Set<string>(TDD_GATED_SKILLS);
+  return refs.filter(r => gated.has(r.token)).map(r => `${r.raw} in ${r.file}`);
+}
+
+describe('tdd-gated skills (#758)', () => {
+  it('every gated skill is a registry skill that a plugin requires, and the tdd-on corpus references it', async () => {
+    expect(TDD_GATED_SKILLS.length, 'the gated set is not empty').toBeGreaterThan(0);
+    const known = new Set(getAllSkillNames());
+    const onRefs = await readRefs([
+      ...await walkMarkdown(COMMANDS_DIR),
+      ...await walkMarkdown(path.join(ROOT, 'dist', 'agents')),
+    ]);
+    for (const skill of TDD_GATED_SKILLS) {
+      expect(known.has(skill), `${skill} is a registry skill`).toBe(true);
+      expect(
+        DEVFLOW_PLUGINS.some(p => p.requires.includes(skill) || p.skills.includes(skill)),
+        `${skill} stays in at least one plugin's skills or requires: the closure reasons over the tdd-on variant`,
+      ).toBe(true);
+      expect(onRefs.some(r => r.token === skill), `the tdd-on corpus references ${skill} (non-vacuity)`).toBe(true);
+    }
+  });
+
+  it.each(TDD_OFF_SWITCHES)('the prompts a %s machine installs name no tdd-gated skill and reference only in-scope skills', async (_label, switches) => {
+    const { read, dangling } = await collectOutOfScopeRefs(switches);
+    expect(read.length, 'the off corpus was read (non-vacuity)').toBeGreaterThan(50);
+    expect(
+      danglingUnderTddOff(read),
+      'A prompt installed with tdd off must not point at a tdd-gated skill: give the host a tdd arm so its off variant drops the reference.',
+    ).toEqual([]);
+    expect(dangling).toEqual([]);
+  });
+
+  it('the corpus reads the tdd-off Code file on a tdd-off machine and the curation-tdd-off file when curation is off too', async () => {
+    const code = DEVFLOW_PLUGINS.find(p => p.agents.includes('code'));
+    expect(code, 'a plugin owns the Code agent').toBeDefined();
+    const [tddOff, curationTddOff, onFile] = await Promise.all([
+      installedPromptFiles(code!, TDD_OFF_SWITCHES[0][1]),
+      installedPromptFiles(code!, TDD_OFF_SWITCHES[1][1]),
+      installedPromptFiles(code!, ALL_SWITCHES_ON),
+    ]);
+    const rel = (files: readonly string[]): string[] => files.map(f => path.relative(ROOT, f));
+    expect(rel(tddOff)).toContain('dist/tdd-off/agents/code.md');
+    expect(rel(curationTddOff)).toContain('dist/curation-tdd-off/agents/code.md');
+    expect(rel(onFile), 'the tdd-on machine installs the plain file').toContain('dist/agents/code.md');
+  });
+
+  it('known-bad probe: a tdd-off corpus naming the skill is reported', () => {
+    const refs = collectSkillRefs(`Load via Skill(skill="${NS}${TDD_GATED_SKILLS[0]}").`, 'synthetic-off.md');
+    expect(danglingUnderTddOff(refs)).toEqual([`${NS}${TDD_GATED_SKILLS[0]} in synthetic-off.md`]);
+    expect(danglingUnderTddOff(collectSkillRefs(`Load via Skill(skill="${NS}security").`, 'synthetic-off.md'))).toEqual([]);
+  });
+
+  it('a gated skill is neither feature-owned nor presence-gated: its plugins own it normally', () => {
+    for (const skill of TDD_GATED_SKILLS) {
+      expect((FEATURE_OWNED_SKILLS as readonly string[]).includes(skill)).toBe(false);
+      expect(PRESENCE_GATED_SKILLS.includes(skill)).toBe(false);
+    }
   });
 });
 

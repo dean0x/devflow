@@ -34,6 +34,7 @@ import {
 } from '../src/core/tracker.js';
 import { runTrackerServers, runTrackerSet, type TrackerServersIO } from '../src/cli/commands/tracker.js';
 import { installViaFileCopy, type Spinner } from '../src/targets/claude-code/installer.js';
+import { ALL_SWITCHES_ON } from '../src/core/curation-variants.js';
 import { convergePromptVariants } from '../src/targets/claude-code/curation-install.js';
 import { convergeTrackerArtifacts } from '../src/targets/claude-code/tracker-install.js';
 import { restampTrackerAgents } from '../src/targets/claude-code/tracker-servers.js';
@@ -294,8 +295,7 @@ describe('the installed agents wear the stamp, whichever path wrote them', () =>
     const { skillsMap, agentsMap } = buildAssetMaps(plugins);
     return installViaFileCopy({
       backups: await testBackups(root, { claudeDir, devflowDir }),
-      curation: true,
-      compliance: true,
+      switches: ALL_SWITCHES_ON,
       plugins,
       effectivePlugins: plugins,
       claudeDir,
@@ -401,7 +401,7 @@ describe('the installed agents wear the stamp, whichever path wrote them', () =>
     });
 
     const run = (curation: boolean) =>
-      convergePromptVariants({ claudeDir, switches: { curation, compliance: true }, plugins: [plugin('devflow-plan')], warn: m => warnings.push(m), packageRoot });
+      convergePromptVariants({ claudeDir, switches: { ...ALL_SWITCHES_ON, curation }, plugins: [plugin('devflow-plan')], warn: m => warnings.push(m), packageRoot });
 
     it('keeps the list across an on to off to on switch, and a repeat run writes nothing', async () => {
       await fs.mkdir(path.dirname(installed('git')), { recursive: true });

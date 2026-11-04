@@ -48,6 +48,12 @@ export interface FeatureSeed {
    */
   behavior: boolean;
   /**
+   * TDD switch — seeded from the manifest, on by default. Init keeps the machine's value
+   * (no wizard step, no init flag), and `--reset` seeds the default (on), as it does for the
+   * other switches. `devflow tdd --enable|--disable` is the only command that sets it.
+   */
+  tdd: boolean;
+  /**
    * Compliance feature seed — seeded from the manifest (manifest-group, like proxy).
    * Default: {enabled:false, frameworks:[]} — compliance is opt-in, never auto-enabled.
    */
@@ -80,6 +86,7 @@ export const FEATURE_DEFAULTS: FeatureSeed = {
   rules: true,
   proxy: false,
   behavior: false,
+  tdd: true,
   compliance: { enabled: false, frameworks: [] },
   tracker: { provider: DEFAULT_TRACKER_PROVIDER },
   gateLevel: undefined,
@@ -114,6 +121,8 @@ export function resolveSeedFeatures(manifest: ManifestData | null): FeatureSeed 
   const proxy = manifest?.features.proxy ?? FEATURE_DEFAULTS.proxy;
   // D-BEHAVIOR-OPT-IN: a manifest from before the switch has no key — it seeds the default (off).
   const behavior = manifest?.features.behavior ?? FEATURE_DEFAULTS.behavior;
+  // The tdd switch: a manifest from before it reads on (readManifest), so re-init keeps what the machine holds.
+  const tdd = manifest?.features.tdd ?? FEATURE_DEFAULTS.tdd;
   // Return a fresh object so callers never hold a reference to FEATURE_DEFAULTS.compliance.
   // Without the spread, `manifest?.features.compliance ?? FEATURE_DEFAULTS.compliance` returns
   // the module-level default by reference — downstream mutation would corrupt it process-wide.
@@ -133,7 +142,7 @@ export function resolveSeedFeatures(manifest: ManifestData | null): FeatureSeed 
   // fold reads as the strictest level.
   const gateLevel = manifest?.features.gateLevel;
 
-  return { ambient, memory, hud, knowledge, curation, rules, proxy, behavior, compliance, tracker, gateLevel };
+  return { ambient, memory, hud, knowledge, curation, rules, proxy, behavior, tdd, compliance, tracker, gateLevel };
 }
 
 /**
@@ -436,6 +445,7 @@ export function applyCliToggles(
     rules: toggles.rules ?? base.rules,
     proxy: toggles.proxy ?? base.proxy,
     behavior: toggles.behavior ?? base.behavior,
+    tdd: toggles.tdd ?? base.tdd,
     compliance: toggles.compliance ?? base.compliance,
     tracker: toggles.tracker ?? base.tracker,
     gateLevel: base.gateLevel,

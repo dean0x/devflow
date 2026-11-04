@@ -548,6 +548,7 @@ d sub/
     "security": "user",
     "proxy": false,
     "behavior": false,
+    "tdd": true,
     "compliance": {
       "enabled": false,
       "frameworks": []
@@ -560,7 +561,8 @@ d sub/
   "updatedAt": "<TIMESTAMP>",
   "installedVariants": {
     "curation": false,
-    "compliance": false
+    "compliance": false,
+    "tdd": true
   }
 }
 

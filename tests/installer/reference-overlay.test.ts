@@ -44,7 +44,7 @@ import {
   type ReferenceSweepDelegate,
 } from '../../src/core/reference-sweep.js';
 import { compiledComplianceOffSkillRefsDir, compiledSkillRefsDir, skillsDir } from '../../src/core/assets.js';
-import { renderVariantManifest } from '../../src/core/curation-variants.js';
+import { ALL_SWITCHES_ON, renderVariantManifest } from '../../src/core/curation-variants.js';
 import { DEVFLOW_PLUGINS } from '../../src/core/plugins.js';
 import {
   expandVariants,
@@ -318,8 +318,7 @@ describe('reference overlay through installViaFileCopy (AC-2.4a)', () => {
   async function runInstall(effectivePlugins?: typeof DEVFLOW_PLUGINS) {
     return installViaFileCopy({
       backups: await testBackups(claudeDir, { claudeDir, devflowDir }),
-      curation: true,
-      compliance: true,
+      switches: ALL_SWITCHES_ON,
       plugins: [],
       effectivePlugins,
       claudeDir,
@@ -1920,8 +1919,7 @@ describe('compliance-off reference install (AC-41, AC-50)', () => {
   async function install(opts: { compliance: boolean; partial?: boolean; packageRoot?: string }) {
     return installViaFileCopy({
       backups: await testBackups(tmp, { claudeDir, devflowDir }),
-      curation: true,
-      compliance: opts.compliance,
+      switches: { ...ALL_SWITCHES_ON, compliance: opts.compliance },
       plugins: [],
       effectivePlugins: CORE,
       claudeDir,

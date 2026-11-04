@@ -35,13 +35,17 @@ import {
   commandSourceDirs,
   curationOffDir,
   skillsDir,
+  variantOffDir,
 } from '../../src/core/assets.js';
+import { ALL_SWITCHES_ON, VARIANT_AXES, type VariantSwitches } from '../../src/core/curation-variants.js';
 import {
+  AXIS_GATED_SKILLS,
   DEVFLOW_PLUGINS,
   buildAssetMaps,
   buildScopedSkillsMap,
   CURATION_GATED_SKILLS,
-  omitCurationGatedSkills,
+  TDD_GATED_SKILLS,
+  omitGatedSkills,
   skillsOf,
   type PluginDefinition,
 } from '../../src/core/plugins.js';
@@ -53,6 +57,9 @@ const SKILL = 'apply-decisions';
 const SKILL_DIR = 'devflow:apply-decisions';
 /** The temp package's own apply-decisions text: not the real skill's, so a read of the wrong root shows. */
 const PKG_SKILL = 'apply-decisions of the injected package root\n';
+const TDD_SKILL = 'test-driven-development';
+const TDD_SKILL_DIR = 'devflow:test-driven-development';
+const PKG_TDD_SKILL = 'test-driven-development of the injected package root\n';
 
 let tmp: string;
 let claudeDir: string;
@@ -87,6 +94,7 @@ async function exists(file: string): Promise<boolean> {
 const installedCommand = (name: string): string => path.join(claudeDir, 'commands', 'devflow', `${name}.md`);
 const installedAgent = (name: string): string => path.join(claudeDir, 'agents', 'devflow', `${name}.md`);
 const installedSkill = (): string => path.join(claudeDir, 'skills', SKILL_DIR);
+const installedTddSkill = (): string => path.join(claudeDir, 'skills', TDD_SKILL_DIR);
 
 /**
  * A package root with two hosts that have an arm (one command, one agent) and one
@@ -100,12 +108,13 @@ async function seedPackage(): Promise<void> {
   await write(path.join(pkg, 'dist', 'agents', 'code.md'), 'code ON\n');
   await write(path.join(curationOffDir('agents', pkg), 'code.md'), 'code OFF\n');
   await write(path.join(skillsDir(pkg), SKILL, 'SKILL.md'), PKG_SKILL);
+  await write(path.join(skillsDir(pkg), TDD_SKILL, 'SKILL.md'), PKG_TDD_SKILL);
   // The build manifest a compliance-off machine reads: both hosts carry a curation arm and no compliance arm.
   await write(path.join(pkg, 'dist', 'variant-axes.json'), JSON.stringify({
     version: 1,
     hosts: {
-      'agents/code': { curation: true, compliance: false },
-      'commands/implement': { curation: true, compliance: false },
+      'agents/code': { curation: true, compliance: false, tdd: false },
+      'commands/implement': { curation: true, compliance: false, tdd: false },
     },
   }));
 }
@@ -116,16 +125,18 @@ async function installOn(): Promise<void> {
   await write(installedAgent('code'), 'code ON\n');
 }
 
-/** The machine's switches for a converge: curation as given, compliance on (the curation axis alone moves here). */
+/** The machine for a converge: curation as given, the other switches on (the curation axis alone moves here). */
 const machine = (curation: boolean) => ({
-  features: { curation, compliance: { enabled: true, frameworks: [] as string[] }, rules: false },
+  switches: { ...ALL_SWITCHES_ON, curation },
+  frameworks: [] as string[],
+  rulesEnabled: false,
 });
 
 const backupsOf = () => testBackups(tmp, { claudeDir, devflowDir });
 
 async function converge(curation: boolean, plugins: readonly PluginDefinition[] = FULL_SELECTION) {
   return convergeVariantAxes({
-    claudeDir, devflowDir, manifest: machine(curation), plugins, warn, packageRoot: pkg, backups: await backupsOf(),
+    claudeDir, devflowDir, ...machine(curation), plugins, warn, packageRoot: pkg, backups: await backupsOf(),
   });
 }
 
@@ -151,36 +162,92 @@ afterEach(async () => {
 
 describe('source order (assets.ts)', () => {
   it('curation off puts the curation-off directory first for commands and for agents', () => {
-    expect(commandSourceDirs({ curation: false, compliance: true }, pkg)).toEqual([curationOffDir('commands', pkg), path.join(pkg, 'dist', 'commands')]);
-    expect(agentSourceDirs(pkg, { curation: false, compliance: true })).toEqual([
+    expect(commandSourceDirs({ ...ALL_SWITCHES_ON, curation: false }, pkg)).toEqual([curationOffDir('commands', pkg), path.join(pkg, 'dist', 'commands')]);
+    expect(agentSourceDirs(pkg, { ...ALL_SWITCHES_ON, curation: false })).toEqual([
       curationOffDir('agents', pkg),
       path.join(pkg, 'dist', 'agents'),
       path.join(pkg, 'src', 'assets', 'agents'),
     ]);
   });
 
-  it('curation on keeps today\'s order exactly, and the default is curation on', () => {
-    expect(commandSourceDirs({ curation: true, compliance: true }, pkg)).toEqual([path.join(pkg, 'dist', 'commands')]);
-    expect(agentSourceDirs(pkg, { curation: true, compliance: true })).toEqual([path.join(pkg, 'dist', 'agents'), path.join(pkg, 'src', 'assets', 'agents')]);
-    expect(agentSourceDirs(pkg)).toEqual(agentSourceDirs(pkg, { curation: true, compliance: true }));
+  it('curation on keeps today\'s order exactly, and the default is every switch on', () => {
+    expect(commandSourceDirs(ALL_SWITCHES_ON, pkg)).toEqual([path.join(pkg, 'dist', 'commands')]);
+    expect(agentSourceDirs(pkg, ALL_SWITCHES_ON)).toEqual([path.join(pkg, 'dist', 'agents'), path.join(pkg, 'src', 'assets', 'agents')]);
+    expect(agentSourceDirs(pkg)).toEqual(agentSourceDirs(pkg, ALL_SWITCHES_ON));
   });
 
   it('known-bad probe: the curation-off directory is never consulted when curation is on', () => {
-    expect(commandSourceDirs({ curation: true, compliance: true }, pkg).some(dir => dir.includes('curation-off'))).toBe(false);
-    expect(agentSourceDirs(pkg, { curation: true, compliance: true }).some(dir => dir.includes('curation-off'))).toBe(false);
+    expect(commandSourceDirs(ALL_SWITCHES_ON, pkg).some(dir => dir.includes('curation-off'))).toBe(false);
+    expect(agentSourceDirs(pkg, ALL_SWITCHES_ON).some(dir => dir.includes('curation-off'))).toBe(false);
+  });
+
+  /** The tree names a machine consults, most-preferred first, spelled out by hand: today's four states unchanged. */
+  const CONSULTED: ReadonlyArray<readonly [VariantSwitches, readonly string[]]> = [
+    [{ curation: true, compliance: true, tdd: true }, []],
+    [{ curation: false, compliance: true, tdd: true }, ['curation-off']],
+    [{ curation: true, compliance: false, tdd: true }, ['compliance-off']],
+    [{ curation: false, compliance: false, tdd: true }, ['curation-compliance-off', 'curation-off', 'compliance-off']],
+    [{ curation: true, compliance: true, tdd: false }, ['tdd-off']],
+    [{ curation: false, compliance: true, tdd: false }, ['curation-tdd-off', 'curation-off', 'tdd-off']],
+    [{ curation: true, compliance: false, tdd: false }, ['compliance-tdd-off', 'compliance-off', 'tdd-off']],
+    [
+      { curation: false, compliance: false, tdd: false },
+      ['curation-compliance-tdd-off', 'curation-compliance-off', 'curation-tdd-off', 'compliance-tdd-off', 'curation-off', 'compliance-off', 'tdd-off'],
+    ],
+  ];
+
+  it.each(CONSULTED)('machine %j consults %j in that order, for commands and for agents', (switches, trees) => {
+    expect(commandSourceDirs(switches, pkg)).toEqual([
+      ...trees.map(tree => path.join(pkg, 'dist', tree, 'commands')),
+      path.join(pkg, 'dist', 'commands'),
+    ]);
+    expect(agentSourceDirs(pkg, switches)).toEqual([
+      ...trees.map(tree => path.join(pkg, 'dist', tree, 'agents')),
+      path.join(pkg, 'dist', 'agents'),
+      path.join(pkg, 'src', 'assets', 'agents'),
+    ]);
+  });
+
+  it('the table covers each of the eight machine states once', () => {
+    expect(new Set(CONSULTED.map(([s]) => `${s.curation}/${s.compliance}/${s.tdd}`)).size).toBe(8);
+  });
+
+  it('known-bad probe: a machine with tdd on never consults a tdd tree', () => {
+    for (const [switches] of CONSULTED.filter(([s]) => s.tdd)) {
+      expect(commandSourceDirs(switches, pkg).some(dir => dir.includes('tdd')), JSON.stringify(switches)).toBe(false);
+      expect(agentSourceDirs(pkg, switches).some(dir => dir.includes('tdd')), JSON.stringify(switches)).toBe(false);
+    }
+  });
+
+  it('variantOffDir resolves a key under its own tree', () => {
+    expect(variantOffDir('tdd-off', 'agents', pkg)).toBe(path.join(pkg, 'dist', 'tdd-off', 'agents'));
+    expect(variantOffDir('curation-compliance-tdd-off', 'commands', pkg)).toBe(path.join(pkg, 'dist', 'curation-compliance-tdd-off', 'commands'));
   });
 });
 
 describe('the skill condition (plugins.ts)', () => {
-  it('the gated set is exactly apply-decisions, pinned as an independent literal', () => {
+  it('the gated sets are pinned as independent literals', () => {
     expect([...CURATION_GATED_SKILLS]).toEqual(['apply-decisions']);
+    expect([...TDD_GATED_SKILLS]).toEqual(['test-driven-development']);
+    expect(Object.keys(AXIS_GATED_SKILLS).sort()).toEqual([...VARIANT_AXES].sort());
+    expect(AXIS_GATED_SKILLS.compliance).toEqual([]);
   });
 
-  it('omitCurationGatedSkills drops the skill with curation off and returns the map itself with curation on', () => {
+  it('omitGatedSkills drops the curation skill with curation off and returns the map itself with every switch on', () => {
     const map = new Map([['apply-decisions', 'devflow-core-skills'], ['git', 'devflow-core-skills']]);
-    expect([...omitCurationGatedSkills(map, false).keys()]).toEqual(['git']);
-    expect(omitCurationGatedSkills(map, true)).toBe(map);
+    expect([...omitGatedSkills(map, { ...ALL_SWITCHES_ON, curation: false }).keys()]).toEqual(['git']);
+    expect(omitGatedSkills(map, ALL_SWITCHES_ON)).toBe(map);
     expect([...map.keys()], 'the input is never mutated').toEqual(['apply-decisions', 'git']);
+  });
+
+  it('omitGatedSkills drops the tdd skill with tdd off, and only that one', () => {
+    const map = new Map([['test-driven-development', 'devflow-core-skills'], ['apply-decisions', 'devflow-core-skills'], ['git', 'devflow-core-skills']]);
+    expect([...omitGatedSkills(map, { ...ALL_SWITCHES_ON, tdd: false }).keys()]).toEqual(['apply-decisions', 'git']);
+    expect([...omitGatedSkills(map, { ...ALL_SWITCHES_ON, curation: false, tdd: false }).keys()]).toEqual(['git']);
+    expect([...omitGatedSkills(map, { ...ALL_SWITCHES_ON, compliance: false }).keys()], 'compliance gates no skill').toEqual([
+      'test-driven-development', 'apply-decisions', 'git',
+    ]);
+    expect([...map.keys()], 'the input is never mutated').toEqual(['test-driven-development', 'apply-decisions', 'git']);
   });
 });
 
@@ -200,8 +267,7 @@ describe('installViaFileCopy honours the curation switch', () => {
   async function install(curation: boolean, isPartialInstall = false) {
     const plugins = selection();
     return installViaFileCopy({
-      curation,
-      compliance: true,
+      switches: { ...ALL_SWITCHES_ON, curation },
       plugins,
       effectivePlugins: plugins,
       claudeDir,
@@ -260,7 +326,7 @@ describe('installViaFileCopy honours the curation switch', () => {
 
     expect(await exists(installedSkill()), 'removal on a partial install belongs to the converge').toBe(true);
     const converged = await convergeVariantAxes({
-      claudeDir, devflowDir, manifest: machine(false), plugins: selection(), warn, backups: await backupsOf(),
+      claudeDir, devflowDir, ...machine(false), plugins: selection(), warn, backups: await backupsOf(),
     });
     expect(converged.skill).toBe('removed');
     expect(await exists(installedSkill())).toBe(false);
@@ -517,7 +583,7 @@ describe('convergeVariantAxes on the curation axis: failures only warn (AC-146)'
     await installOn();
 
     const result = await convergeVariantAxes({
-      claudeDir: 'relative/claude', devflowDir, manifest: machine(false), plugins: FULL_SELECTION, warn, packageRoot: pkg,
+      claudeDir: 'relative/claude', devflowDir, ...machine(false), plugins: FULL_SELECTION, warn, packageRoot: pkg,
       backups: await backupsOf(),
     });
 
@@ -779,6 +845,7 @@ describe('applyVariantToggle with a saved agent override (D-AGENT-OVERRIDE-CARRY
 
   it('a no-op toggle writes no agent file, reports none rewritten and does not reach for the reapply', async () => {
     await write(installedAgent('code'), agent('OFF', 'opus', 'low'));
+    await write(path.join(installedTddSkill(), 'SKILL.md'), PKG_TDD_SKILL);
     const before = await fs.stat(installedAgent('code'));
 
     const outcome = await toggle(false);
@@ -808,12 +875,23 @@ describe('applyVariantToggle with a saved agent override (D-AGENT-OVERRIDE-CARRY
 
 describe('describeCurationConverge and readRunningVersion', () => {
   const base: ConvergeCurationVariantsResult = {
-    converged: true, commandsRewritten: [], agentsRewritten: [], unchanged: 0, notInstalled: 0, skill: 'unchanged',
+    converged: true, commandsRewritten: [], agentsRewritten: [], unchanged: 0, notInstalled: 0,
+    skill: 'unchanged', tddSkill: 'unchanged',
   };
 
   it('says nothing when nothing changed, so a no-op toggle prints nothing', () => {
     expect(describeCurationConverge(base, false)).toBeNull();
-    expect(describeCurationConverge({ ...base, skill: 'not-selected' }, true)).toBeNull();
+    expect(describeCurationConverge({ ...base, skill: 'not-selected', tddSkill: 'not-selected' }, true)).toBeNull();
+  });
+
+  it('names the test-driven-development skill change, alone or beside the other skill', () => {
+    expect(describeCurationConverge({ ...base, tddSkill: 'removed' }, true)).toBe(
+      'the test-driven-development skill removed');
+    expect(describeCurationConverge({ ...base, tddSkill: 'installed' }, true)).toBe(
+      'the test-driven-development skill installed');
+    const both = describeCurationConverge({ ...base, skill: 'removed', tddSkill: 'removed' }, false);
+    expect(both).toContain('the apply-decisions skill removed');
+    expect(both).toContain('the test-driven-development skill removed');
   });
 
   it('counts the rewritten prompts and names the skill change', () => {

@@ -10,6 +10,7 @@ import {
 } from '../src/core/plugins.js';
 import { LEGACY_SKILL_NAMES } from '../src/targets/claude-code/legacy.js';
 import { installViaFileCopy, type InstallReport, type Spinner } from '../src/targets/claude-code/installer.js';
+import { ALL_SWITCHES_ON } from '../src/core/curation-variants.js';
 import { testBackups } from './helpers.js';
 import { hasShadow } from '../src/cli/commands/skills.js';
 
@@ -228,8 +229,7 @@ describe('installViaFileCopy skill lifecycle', () => {
   /** Run installViaFileCopy with the security skill (real source, no seedPlugin needed) */
   async function runInstall(opts?: { isPartialInstall?: boolean }): Promise<InstallReport> {
     return installViaFileCopy({
-      curation: true,
-      compliance: true,
+      switches: ALL_SWITCHES_ON,
       plugins: [],
       claudeDir,
       devflowDir,

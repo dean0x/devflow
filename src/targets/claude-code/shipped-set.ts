@@ -25,8 +25,8 @@ import * as path from 'path';
 import { skillsDir } from '../../core/assets.js';
 import { complianceSkillFiles } from '../../core/compliance.js';
 import { COMPLIANCE_OFF_REMOVED_SKILL_FILES } from '../../core/compliance-off-files.js';
-import { VARIANT_KEYS } from '../../core/curation-variants.js';
 import {
+  FOLDER_VARIANT_KEYS,
   SKILL_REFS_SKILL_NAME,
   installedReferenceManifest,
   workflowFolderFiles,
@@ -94,7 +94,7 @@ export function shippedPaths(inputs: ShippedSetInputs): Set<string> {
   for (const file of complianceSkillFiles()) paths.add(skillPath('compliance', file));
 
   for (const folder of inputs.workflowFolders) {
-    for (const key of VARIANT_KEYS) {
+    for (const key of FOLDER_VARIANT_KEYS) {
       for (const file of workflowFolderFiles(folder, key)) paths.add(skillPath(folder.name, file));
     }
   }

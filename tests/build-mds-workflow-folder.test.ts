@@ -4,8 +4,9 @@
  *
  * A workflow skill folder is one core host that becomes `SKILL.md` beside reference
  * hosts. The build compiles it as a UNIT, because its build id is made from all of its
- * files: every variant key (on, curation-off, compliance-off, both-off) gets a COMPLETE
- * folder for its own file list, the same id is stamped into the first heading of every
+ * files: every variant key that keeps tdd on (on, curation-off, compliance-off, both-off)
+ * gets a COMPLETE folder for its own file list, the other four keys get none, the same
+ * id is stamped into the first heading of every
  * file outside references/, and the reference files stay byte-equal.
  *
  * PR A ships an EMPTY real registry (WORKFLOW_FOLDERS), so no host in src/assets becomes
@@ -17,7 +18,7 @@
  */
 
 import { describe, it, expect, afterAll, beforeAll, vi } from 'vitest';
-import { promises as fs, readFileSync } from 'fs';
+import { promises as fs, existsSync, readFileSync } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { createHash } from 'crypto';
@@ -33,6 +34,7 @@ import {
 } from './fixtures/workflow-folder.js';
 import {
   BUILD_ID_LENGTH,
+  FOLDER_VARIANT_KEYS,
   WORKFLOW_FOLDERS_OUTPUT_DIR,
   checkFolderBuildIds,
   isStampedWorkflowFile,
@@ -148,6 +150,10 @@ const EXPECTED_FILES: Readonly<Record<VariantKey, readonly string[]>> = {
   'curation-off': ALL_FILES,
   'compliance-off': COMPLIANCE_OFF_FILES,
   'both-off': COMPLIANCE_OFF_FILES,
+  'tdd-off': ALL_FILES,
+  'curation-tdd-off': ALL_FILES,
+  'compliance-tdd-off': COMPLIANCE_OFF_FILES,
+  'curation-compliance-tdd-off': COMPLIANCE_OFF_FILES,
 };
 
 // ---------------------------------------------------------------------------
@@ -170,7 +176,7 @@ describe('the five-host fixture build', () => {
   });
 
   it('TP-18: every variant key holds a complete folder for its own file list', () => {
-    for (const key of VARIANT_KEYS) {
+    for (const key of FOLDER_VARIANT_KEYS) {
       const files = readFolder(built.root, key);
       expect(sortedKeys(files), `variant key '${key}'`).toEqual([...EXPECTED_FILES[key]].sort());
       expect(sortedKeys(files), `variant key '${key}' against the registry's own list`)
@@ -178,15 +184,28 @@ describe('the five-host fixture build', () => {
     }
   });
 
+  it('the folders are built under the four tdd-on keys only, so no tree is written under a key that turns tdd off', () => {
+    const tddOffKeys = VARIANT_KEYS.filter(key => !FOLDER_VARIANT_KEYS.includes(key));
+    expect([...FOLDER_VARIANT_KEYS].sort()).toEqual(['both-off', 'compliance-off', 'curation-off', 'on']);
+    expect([...tddOffKeys].sort()).toEqual(
+      ['compliance-tdd-off', 'curation-compliance-tdd-off', 'curation-tdd-off', 'tdd-off'],
+    );
+    for (const key of tddOffKeys) {
+      expect(existsSync(path.join(built.root, ...workflowFoldersRootRelPath(key).split('/'))), `variant key '${key}'`)
+        .toBe(false);
+      expect(readFolder(built.root, key).size, `variant key '${key}'`).toBe(0);
+    }
+  });
+
   it('the compliance-gated reference is in the compliance-on folders only', () => {
-    for (const key of VARIANT_KEYS) {
+    for (const key of FOLDER_VARIANT_KEYS) {
       const onlyOn = key === 'on' || key === 'curation-off';
       expect(readFolder(built.root, key).has('references/evidence-asks.md'), `variant key '${key}'`).toBe(onlyOn);
     }
   });
 
   it('TP-63: the core compiles to SKILL.md with its real frontmatter minus the build keys', () => {
-    for (const key of VARIANT_KEYS) {
+    for (const key of FOLDER_VARIANT_KEYS) {
       const core = readFolder(built.root, key).get('SKILL.md') ?? '';
       expect(core, `variant key '${key}'`).toMatch(
         /^---\nname: devflow:flow\ndescription: Fixture workflow skill for the build layer tests\n---\n/,
@@ -196,7 +215,7 @@ describe('the five-host fixture build', () => {
   });
 
   it('a reference host sheds its whole steering block and ships with no frontmatter', () => {
-    for (const key of VARIANT_KEYS) {
+    for (const key of FOLDER_VARIANT_KEYS) {
       for (const [file, text] of readFolder(built.root, key)) {
         if (file === 'SKILL.md') continue;
         expect(text.startsWith('---'), `${key}/${file}`).toBe(false);
@@ -230,7 +249,7 @@ describe('the five-host fixture build', () => {
   it('a file with no arm is a byte copy of the on text under every key that holds it', () => {
     const onLevels = readFolder(built.root, 'on').get('references/levels.md');
     expect(onLevels).toContain('Full, standard, lean.');
-    for (const key of VARIANT_KEYS) {
+    for (const key of FOLDER_VARIANT_KEYS) {
       expect(readFolder(built.root, key).get('references/levels.md'), `variant key '${key}'`).toBe(onLevels);
     }
     expect(readFolder(built.root, 'curation-off').get('references/evidence-asks.md'))
@@ -238,7 +257,7 @@ describe('the five-host fixture build', () => {
   });
 
   it('TP-41: every stamped file of one folder and key carries the same build id, in its first heading', () => {
-    for (const key of VARIANT_KEYS) {
+    for (const key of FOLDER_VARIANT_KEYS) {
       const files = readFolder(built.root, key);
       const id = idOf(files);
       expect(id, `variant key '${key}'`).toMatch(new RegExp(`^[0-9a-f]{${BUILD_ID_LENGTH}}$`));
@@ -252,7 +271,7 @@ describe('the five-host fixture build', () => {
   });
 
   it('TP-41: the reference files are outside the stamp and the check', () => {
-    for (const key of VARIANT_KEYS) {
+    for (const key of FOLDER_VARIANT_KEYS) {
       for (const [file, text] of readFolder(built.root, key)) {
         if (isStampedWorkflowFile(file)) continue;
         expect(file.startsWith('references/'), file).toBe(true);
@@ -266,7 +285,7 @@ describe('the five-host fixture build', () => {
   });
 
   it('TP-41: the id is the first 12 hex digits of the SHA-256 over the bodies before the stamp, sorted by file name', () => {
-    for (const key of VARIANT_KEYS) {
+    for (const key of FOLDER_VARIANT_KEYS) {
       const files = readFolder(built.root, key);
       const hash = createHash('sha256');
       for (const file of [...files.keys()].sort()) {
@@ -280,7 +299,7 @@ describe('the five-host fixture build', () => {
   });
 
   it('TP-41: the four keys have four ids, because their folders differ', () => {
-    const ids = VARIANT_KEYS.map(key => idOf(readFolder(built.root, key)));
+    const ids = FOLDER_VARIANT_KEYS.map(key => idOf(readFolder(built.root, key)));
     expect(new Set(ids).size, ids.join(', ')).toBe(4);
   });
 
@@ -328,7 +347,7 @@ describe('the build id follows the sources and nothing else (TP-41)', () => {
     expect(first.run.status, first.run.combined).toBe(0);
     expect(second.run.status, second.run.combined).toBe(0);
 
-    for (const key of VARIANT_KEYS) {
+    for (const key of FOLDER_VARIANT_KEYS) {
       const a = readFolder(first.root, key);
       const b = readFolder(second.root, key);
       expect(idOf(a), `variant key '${key}'`).toBe(idOf(b));
@@ -339,11 +358,11 @@ describe('the build id follows the sources and nothing else (TP-41)', () => {
   it('a rebuild of the same root rewrites the same bytes', async () => {
     const first = await buildFixture();
     expect(first.run.status, first.run.combined).toBe(0);
-    const before = Object.fromEntries(VARIANT_KEYS.map(key => [key, Object.fromEntries(readFolder(first.root, key))]));
+    const before = Object.fromEntries(FOLDER_VARIANT_KEYS.map(key => [key, Object.fromEntries(readFolder(first.root, key))]));
 
     const again = runBuild(first.root, registryJson());
     expect(again.status, again.combined).toBe(0);
-    const after = Object.fromEntries(VARIANT_KEYS.map(key => [key, Object.fromEntries(readFolder(first.root, key))]));
+    const after = Object.fromEntries(FOLDER_VARIANT_KEYS.map(key => [key, Object.fromEntries(readFolder(first.root, key))]));
     expect(after).toEqual(before);
   });
 
@@ -354,7 +373,7 @@ describe('the build id follows the sources and nothing else (TP-41)', () => {
         '---\noutput-dir: dist/workflows\n---\n@import "./_shared.mds" as shared\n# Base note\n\n{{shared.shared_line()}}\n\nA different note.\n',
     });
     expect(changed.run.status, changed.run.combined).toBe(0);
-    for (const key of VARIANT_KEYS) {
+    for (const key of FOLDER_VARIANT_KEYS) {
       expect(idOf(readFolder(changed.root, key)), `variant key '${key}'`).not.toBe(idOf(readFolder(base.root, key)));
       expect(readFolder(changed.root, key).get('references/levels.md'))
         .toBe(readFolder(base.root, key).get('references/levels.md'));
@@ -389,7 +408,7 @@ describe('a variant key that lacks a file of its own list fails the build (TP-18
     expect(run.combined).toContain(`${FIXTURE_DIR}/references/evidence-asks.mds`);
     await expect(fs.stat(path.join(root, ...WORKFLOW_FOLDERS_OUTPUT_DIR.split('/')))).rejects.toThrow();
     // All or nothing: the keys that omit the host are complete and must stay unwritten too.
-    for (const key of VARIANT_KEYS) {
+    for (const key of FOLDER_VARIANT_KEYS) {
       expect(readFolder(root, key).size, `variant key '${key}' was left half-written`).toBe(0);
     }
   });
@@ -397,7 +416,7 @@ describe('a variant key that lacks a file of its own list fails the build (TP-18
   it('a missing host that every key lists fails all four keys, and writes no file of the folder', async () => {
     const { root, run } = await buildFixture({ [`${FIXTURE_DIR}/base-note.mds`]: null });
     expect(run.status, run.combined).toBe(1);
-    for (const key of VARIANT_KEYS) {
+    for (const key of FOLDER_VARIANT_KEYS) {
       expect(run.combined).toContain(`variant key '${key}' lacks 'base-note.md'`);
       expect(readFolder(root, key).size, `variant key '${key}' was left half-written`).toBe(0);
     }
@@ -431,7 +450,7 @@ describe('a variant key that lacks a file of its own list fails the build (TP-18
     expect(run.status, run.combined).toBe(1);
     expect(run.combined).toContain('ci-fix.md');
     expect(run.combined).toContain('no heading line to carry the build id');
-    for (const key of VARIANT_KEYS) expect(readFolder(root, key).size).toBe(0);
+    for (const key of FOLDER_VARIANT_KEYS) expect(readFolder(root, key).size).toBe(0);
   });
 
   it('a source that already carries a stamp is refused', async () => {
@@ -441,6 +460,27 @@ describe('a variant key that lacks a file of its own list fails the build (TP-18
     });
     expect(run.status, run.combined).toBe(1);
     expect(run.combined).toContain('already carries a build stamp');
+  });
+
+  it('a workflow file with a tdd marker is refused, because the folders are not built under the tdd-off trees', async () => {
+    const { root, run } = await buildFixture({
+      [`${FIXTURE_DIR}/ci-fix.mds`]: [
+        '---', 'output-dir: dist/workflows', '---',
+        '# CI fix', '',
+        '<!-- tdd:on -->', 'Write the test first.', '<!-- tdd:off -->', 'Write the code.', '<!-- tdd:end -->', '',
+      ].join('\n'),
+    });
+    expect(run.status, run.combined).toBe(1);
+    expect(run.combined).toContain('ci-fix.mds');
+    expect(run.combined).toContain('may not carry tdd-variant markers');
+    for (const key of FOLDER_VARIANT_KEYS) expect(readFolder(root, key).size, `variant key '${key}'`).toBe(0);
+  });
+
+  it('the same file with no tdd marker builds, so the refusal above comes from the marker alone', async () => {
+    const { run } = await buildFixture({
+      [`${FIXTURE_DIR}/ci-fix.mds`]: '---\noutput-dir: dist/workflows\n---\n# CI fix\n\nWrite the code.\n',
+    });
+    expect(run.status, run.combined).toBe(0);
   });
 });
 
@@ -454,7 +494,7 @@ describe('the registry decides which hosts become a folder (D-WORKFLOW-FOLDER-BU
     expect(run.status, run.combined).toBe(1);
     expect(run.combined).toContain('is not registered in WORKFLOW_FOLDERS');
     for (const source of FIXTURE_HOST_SOURCES) expect(run.combined).toContain(source);
-    for (const key of VARIANT_KEYS) expect(readFolder(root, key).size).toBe(0);
+    for (const key of FOLDER_VARIANT_KEYS) expect(readFolder(root, key).size).toBe(0);
   });
 
   it('an empty shipped registry adds nothing to a build with no workflow host', async () => {
@@ -469,7 +509,7 @@ describe('the registry decides which hosts become a folder (D-WORKFLOW-FOLDER-BU
     expect(run.status, run.combined).toBe(0);
     expect(await fs.readFile(path.join(root, 'dist', 'commands', 'hello.md'), 'utf-8'))
       .toBe('---\ndescription: hello\n---\n# Hello\n');
-    for (const key of VARIANT_KEYS) {
+    for (const key of FOLDER_VARIANT_KEYS) {
       await expect(fs.stat(path.join(root, ...workflowFoldersRootRelPath(key).split('/'))), key).rejects.toThrow();
     }
   });
@@ -529,10 +569,10 @@ describe('orphan folders and nested orphan files are pruned', () => {
   it('removes a folder no registered folder names and a nested file no host wrote, under all four trees', async () => {
     const { root, run } = await buildFixture();
     expect(run.status, run.combined).toBe(0);
-    const before = Object.fromEntries(VARIANT_KEYS.map(key => [key, Object.fromEntries(readFolder(root, key))]));
+    const before = Object.fromEntries(FOLDER_VARIANT_KEYS.map(key => [key, Object.fromEntries(readFolder(root, key))]));
 
     const seeded: string[] = [];
-    for (const key of VARIANT_KEYS) {
+    for (const key of FOLDER_VARIANT_KEYS) {
       const tree = path.join(root, ...workflowFoldersRootRelPath(key).split('/'));
       const orphanFile = path.join(tree, 'gone', 'references', 'old.md');
       const orphanNested = path.join(tree, 'flow', 'references', 'old-reference.md');
@@ -547,11 +587,11 @@ describe('orphan folders and nested orphan files are pruned', () => {
     const again = runBuild(root, registryJson());
     expect(again.status, again.combined).toBe(0);
     for (const file of seeded) await expect(fs.stat(file), file).rejects.toThrow();
-    for (const key of VARIANT_KEYS) {
+    for (const key of FOLDER_VARIANT_KEYS) {
       const tree = path.join(root, ...workflowFoldersRootRelPath(key).split('/'));
       await expect(fs.stat(path.join(tree, 'gone')), `${key}: the orphan folder`).rejects.toThrow();
     }
-    const after = Object.fromEntries(VARIANT_KEYS.map(key => [key, Object.fromEntries(readFolder(root, key))]));
+    const after = Object.fromEntries(FOLDER_VARIANT_KEYS.map(key => [key, Object.fromEntries(readFolder(root, key))]));
     expect(after).toEqual(before);
     expect(again.combined).toContain('(no workflow skill folder)');
     expect(again.combined).toContain('(no workflow skill host)');
@@ -570,8 +610,8 @@ describe('orphan folders and nested orphan files are pruned', () => {
 
     const again = runBuild(root, null);
     expect(again.status, again.combined).toBe(0);
-    for (const key of VARIANT_KEYS) expect(readFolder(root, key).size, key).toBe(0);
-    for (const key of VARIANT_KEYS) {
+    for (const key of FOLDER_VARIANT_KEYS) expect(readFolder(root, key).size, key).toBe(0);
+    for (const key of FOLDER_VARIANT_KEYS) {
       await expect(fs.stat(path.join(root, ...workflowFoldersRootRelPath(key).split('/'), 'flow')), key).rejects.toThrow();
     }
   });

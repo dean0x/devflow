@@ -16,6 +16,7 @@ import {
 } from '../../src/core/plugins.js';
 import type { BackupSession } from '../../src/targets/claude-code/install-backup.js';
 import { installViaFileCopy, type InstallReport, type Spinner } from '../../src/targets/claude-code/installer.js';
+import { ALL_SWITCHES_ON } from '../../src/core/curation-variants.js';
 import { LEGACY_SKILL_NAMES } from '../../src/targets/claude-code/legacy.js';
 import { ROOT, testBackups } from '../helpers.js';
 import { assertTempHome, TEMP_HOME_PREFIX } from '../setup/home-isolation.js';
@@ -103,8 +104,7 @@ export async function runInstall(home: TestHome, options: RunInstallOptions): Pr
   const selectedList = [...selected];
   return installViaFileCopy({
     backups: options.backups ?? (await openSession(home)),
-    curation: options.curation ?? true,
-    compliance: options.compliance ?? true,
+    switches: { ...ALL_SWITCHES_ON, curation: options.curation ?? true, compliance: options.compliance ?? true },
     plugins: selectedList,
     effectivePlugins: [...effective],
     claudeDir: home.claudeDir,

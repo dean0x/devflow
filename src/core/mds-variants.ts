@@ -44,8 +44,12 @@ import { isContainedIn } from './paths.js';
 import {
   COMPLIANCE_OFF_OUTPUT_DIR,
   OFF_OUTPUT_DIRS,
+  VARIANT_KEYS,
+  emittedVariantKeys,
   machineVariantKey,
   splitVariants,
+  variantArm,
+  type VariantAxis,
   type VariantKey,
   type VariantSplitError,
   type VariantSwitches,
@@ -1649,16 +1653,24 @@ export function describeWorkflowFolderError(error: WorkflowFolderError): string 
   }
 }
 
-/** A folder is complete for every key, so the key a machine reads is the one for its switches alone. */
-const FOLDER_ARMS = { curation: true, compliance: true } as const;
+/**
+ * A folder is complete for every key it is built under, so the key a machine reads is the
+ * one for its switches alone. A folder is built under the tdd-on keys only: the tdd axis
+ * is outside the folders (no tdd arm), so a machine with tdd off reads the tdd-on folder.
+ * A total record, so a new axis cannot go without an answer here.
+ */
+export const FOLDER_ARMS: Readonly<Record<VariantAxis, boolean>> = { curation: true, compliance: true, tdd: false };
+
+/** The variant keys a workflow folder is built, planned, pruned and shipped under: the keys FOLDER_ARMS emits. */
+export const FOLDER_VARIANT_KEYS: readonly VariantKey[] = emittedVariantKeys(FOLDER_ARMS);
 
 /**
  * The variant key of the folder a machine with these switches reads.
  *
  * Unlike a prompt, a folder is complete under every key (a byte copy of the on text
  * where no arm applies), so the key follows the switches alone and never depends on
- * which arms a file carries. The mapping is machineVariantKey's, with every arm assumed
- * present, so the key table has one owner.
+ * which arms a file carries. The mapping is machineVariantKey's, with the arms of
+ * FOLDER_ARMS (every axis except tdd, which no folder carries), so the key table has one owner.
  */
 export function workflowFolderKey(switches: VariantSwitches): VariantKey {
   return machineVariantKey(switches, FOLDER_ARMS);
@@ -1666,7 +1678,7 @@ export function workflowFolderKey(switches: VariantSwitches): VariantKey {
 
 /** The keys whose folder omits the compliance-gated files: the ones that turn compliance off. */
 const COMPLIANCE_OFF_KEYS: ReadonlySet<VariantKey> = new Set(
-  [true, false].map(curation => workflowFolderKey({ curation, compliance: false })),
+  VARIANT_KEYS.filter(key => variantArm(key, 'compliance') === 'off'),
 );
 
 /**

@@ -175,6 +175,18 @@ npx devflow-kit behavior --status           # Show whether it is on and whether 
 
 The rule is feature-owned (not plugin-scoped), like the compliance rule, and installs only while rules are enabled (`devflow rules --enable`). `--enable` and `--disable` write the machine switch `features.behavior` and update the installed file at once. `devflow init --behavior` / `--no-behavior` set the same switch: a plain re-init keeps it and `--reset` returns it to off. A shadow at `~/.devflow/rules/behavior.md` replaces the shipped text.
 
+## TDD
+
+The TDD switch is on by default. With it on, the installed Code agent writes one failing test first for each acceptance-criterion behaviour and preloads the `devflow:test-driven-development` skill. With it off, the installed Code agent has none of the test-first text, the installed Triage agent no longer says that the Code agent works test-first, and the skill is not installed.
+
+```bash
+npx devflow-kit tdd --enable            # Install the Code agent with the test-first text and the TDD skill
+npx devflow-kit tdd --disable           # Install the Code agent without them, and remove the TDD skill
+npx devflow-kit tdd --status            # Show the switch and whether the installed files match it
+```
+
+The switch changes only the installed files: no command or agent spawn reads it at run time. Both states keep the other test rules: one test for each acceptance-criterion behaviour, an edge-case test only for a named case, tests for trust boundaries, data loss, security and fail-closed paths, and the regression test for a bug fix. `--enable` and `--disable` write the machine switch `features.tdd` (absent means on) and converge the installed files at once, with the same converge as `devflow curation` and `devflow compliance`. A plain re-init keeps the switch, and `devflow init --reset` turns it back on, as it does for the other switches. It is a machine setting only; a repository can not set it. With no install manifest, the command records nothing, says that Devflow is not installed, and exits 1. If the converge is skipped (an unreadable manifest, a version skew or an unknown running version) or does not finish, the command keeps the switch, says so, and exits 1; run `devflow init` to apply it.
+
 ## Compliance
 
 Manage this machine's compliance frameworks: the always-on compliance rule, the frameworks stamped into the compliance skill, and whether the workflow commands carry steps that post to GitHub or a tracker.

@@ -1,7 +1,7 @@
 /**
  * Unit tests for src/core/curation-variants.ts: the splitter that turns one
- * compiled prompt body into its variants, on two marker axes (curation and
- * compliance) (D-LEARNING-VARIANTS; AC-127, AC-134).
+ * compiled prompt body into its variants, on three marker axes (curation,
+ * compliance and tdd) (D-LEARNING-VARIANTS; AC-127, AC-134).
  *
  * Every refusal is shown by a known-bad probe: a seeded body that must be refused
  * with that kind and that line, so a splitter that stopped refusing is named here.
@@ -11,32 +11,51 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  ALL_OFF_OUTPUT_DIR,
+  ALL_SWITCHES_ON,
   BOTH_OFF_OUTPUT_DIR,
   COMPLIANCE_OFF_OUTPUT_DIR,
+  COMPLIANCE_TDD_OFF_OUTPUT_DIR,
   CURATION_OFF_OUTPUT_DIR,
+  CURATION_TDD_OFF_OUTPUT_DIR,
   LEGACY_OFF_OUTPUT_DIR,
+  OFF_OUTPUT_DIRS,
+  OFF_VARIANT_KEYS,
+  ORIGINAL_AXES,
+  TDD_OFF_OUTPUT_DIR,
+  VARIANT_AXES,
   VARIANT_KEYS,
   VARIANT_MANIFEST_REL_PATH,
   VARIANT_MANIFEST_VERSION,
   VARIANT_MARKER_RE,
+  consultedOffKeys,
   containsComplianceMarker,
   containsCurationMarker,
+  containsTddMarker,
   containsVariantMarker,
   describeVariantManifestError,
   describeVariantManifestParseError,
   describeVariantSplitError,
   emittedVariantKeys,
+  machineSwitches,
   machineVariantKey,
   MAX_VARIANT_MANIFEST_HOSTS,
+  offAxesOf,
   parseVariantManifest,
+  perAxis,
   renderVariantManifest,
   requiredComplianceVariantFiles,
+  sameSwitches,
   splitVariants,
+  variantArm,
   variantOffRelPath,
   type OffVariantKey,
+  type VariantAxis,
+  type VariantKey,
   type VariantManifestHost,
   type VariantSplit,
   type VariantSplitError,
+  type VariantSwitches,
 } from '../../src/core/curation-variants.js';
 
 const ON = '<!-- curation:on -->';
@@ -45,6 +64,27 @@ const END = '<!-- curation:end -->';
 const CON = '<!-- compliance:on -->';
 const COFF = '<!-- compliance:off -->';
 const CEND = '<!-- compliance:end -->';
+const TON = '<!-- tdd:on -->';
+const TOFF = '<!-- tdd:off -->';
+const TEND = '<!-- tdd:end -->';
+
+/** The four variants that keep tdd on, each with the variant that also turns tdd off. */
+const TDD_OFF_OF = {
+  on: 'tdd-off',
+  'curation-off': 'curation-tdd-off',
+  'compliance-off': 'compliance-tdd-off',
+  'both-off': 'curation-compliance-tdd-off',
+} as const;
+
+type TddOnKey = keyof typeof TDD_OFF_OF;
+
+/** Every machine switch state, one record per combination, built without the module under test. */
+const MACHINE_STATES: readonly VariantSwitches[] = [true, false].flatMap(curation =>
+  [true, false].flatMap(compliance => [true, false].map(tdd => ({ curation, compliance, tdd }))),
+);
+
+/** Every set of axes a host can carry arms on. */
+const ARM_SETS: readonly Readonly<Record<VariantAxis, boolean>>[] = MACHINE_STATES;
 
 /** Join lines the way a file holds them, ending in a newline. */
 function body(...lines: string[]): string {
@@ -63,6 +103,25 @@ function splitBoth(text: string): VariantSplit {
   const result = splitVariants(text);
   if (!result.ok) throw new Error(`expected a split, got ${JSON.stringify(result.error)}`);
   return result.value;
+}
+
+/**
+ * Split a body that has no tdd arm and read the four variants that keep tdd on, with the
+ * curation and compliance flags. The four variants that turn tdd off must be the same bytes,
+ * and tdd must have no arm, so this view also pins what a tdd axis does to a body without one.
+ */
+function twoAxisView(text: string): {
+  readonly bodies: Readonly<Record<TddOnKey, string>>;
+  readonly hasArms: Readonly<Record<'curation' | 'compliance', boolean>>;
+} {
+  const { bodies, hasArms } = splitBoth(text);
+  expect(hasArms.tdd, 'a body with no tdd marker has no tdd arm').toBe(false);
+  const keys = Object.keys(TDD_OFF_OF) as TddOnKey[];
+  for (const key of keys) expect(bodies[TDD_OFF_OF[key]], `${TDD_OFF_OF[key]} equals ${key}`).toBe(bodies[key]);
+  return {
+    bodies: { on: bodies.on, 'curation-off': bodies['curation-off'], 'compliance-off': bodies['compliance-off'], 'both-off': bodies['both-off'] },
+    hasArms: { curation: hasArms.curation, compliance: hasArms.compliance },
+  };
 }
 
 /** Split and read the curation axis alone: the `on` body, the `curation-off` body and the curation flag. */
@@ -356,10 +415,10 @@ describe('what the splitter refuses (known-bad probes, AC-134)', () => {
   });
 });
 
-describe('the two-axis split (TP-1)', () => {
-  it('yields four bodies, keeping a line only where every open arm matches', () => {
+describe('the split on curation and compliance (TP-1)', () => {
+  it('yields four bodies that keep tdd on, keeping a line only where every open arm matches', () => {
     const text = body('Head.', ON, 'c-on', OFF, 'c-off', END, 'Mid.', CON, 'p-on', COFF, 'p-off', CEND, 'Tail.');
-    expect(splitBoth(text)).toEqual({
+    expect(twoAxisView(text)).toEqual({
       bodies: {
         on: body('Head.', 'c-on', 'Mid.', 'p-on', 'Tail.'),
         'curation-off': body('Head.', 'c-off', 'Mid.', 'p-on', 'Tail.'),
@@ -370,15 +429,19 @@ describe('the two-axis split (TP-1)', () => {
     });
   });
 
-  it('keys the bodies by exactly the four variant names', () => {
-    expect([...VARIANT_KEYS]).toEqual(['on', 'curation-off', 'compliance-off', 'both-off']);
+  it('keys the bodies by exactly the eight variant names, the four older ones first and unchanged', () => {
+    expect([...VARIANT_KEYS]).toEqual([
+      'on', 'curation-off', 'compliance-off', 'both-off',
+      'tdd-off', 'curation-tdd-off', 'compliance-tdd-off', 'curation-compliance-tdd-off',
+    ]);
     expect(Object.keys(splitBoth('Just text.\n').bodies).sort()).toEqual([...VARIANT_KEYS].sort());
   });
 
   it('reports one hasArms flag per axis', () => {
-    expect(splitBoth(body('a', ON, 'x', END)).hasArms).toEqual({ curation: true, compliance: false });
-    expect(splitBoth(body('a', CON, 'x', CEND)).hasArms).toEqual({ curation: false, compliance: true });
-    expect(splitBoth(body('a', 'b')).hasArms).toEqual({ curation: false, compliance: false });
+    expect(splitBoth(body('a', ON, 'x', END)).hasArms).toEqual({ curation: true, compliance: false, tdd: false });
+    expect(splitBoth(body('a', CON, 'x', CEND)).hasArms).toEqual({ curation: false, compliance: true, tdd: false });
+    expect(splitBoth(body('a', TON, 'x', TEND)).hasArms).toEqual({ curation: false, compliance: false, tdd: true });
+    expect(splitBoth(body('a', 'b')).hasArms).toEqual({ curation: false, compliance: false, tdd: false });
   });
 
   it('a body with no marker is every variant, byte for byte', () => {
@@ -390,7 +453,7 @@ describe('the two-axis split (TP-1)', () => {
 
   it('a compliance arm has an else, and a standalone off arm is kept only where compliance is off', () => {
     const text = body('Head.', CON, 'p-on', COFF, 'p-off', CEND, COFF, 'only-off', CEND, 'Tail.');
-    expect(splitBoth(text).bodies).toEqual({
+    expect(twoAxisView(text).bodies).toEqual({
       on: body('Head.', 'p-on', 'Tail.'),
       'curation-off': body('Head.', 'p-on', 'Tail.'),
       'compliance-off': body('Head.', 'p-off', 'only-off', 'Tail.'),
@@ -409,7 +472,7 @@ describe('the two-axis split (TP-1)', () => {
 
   it('both curation bodies keep the compliance-on side, and a compliance arm alone leaves the curation flag false', () => {
     const text = body('Head.', ON, 'c-on', OFF, 'c-off', END, CON, 'p-on', COFF, 'p-off', CEND, 'Tail.');
-    const { bodies, hasArms } = splitBoth(text);
+    const { bodies, hasArms } = twoAxisView(text);
     expect(bodies.on).toBe(body('Head.', 'c-on', 'p-on', 'Tail.'));
     expect(bodies['curation-off']).toBe(body('Head.', 'c-off', 'p-on', 'Tail.'));
     expect(hasArms.curation).toBe(true);
@@ -456,7 +519,7 @@ describe('a body with no compliance marker (TP-2)', () => {
   });
 });
 
-describe('what the two-axis split refuses (TP-3)', () => {
+describe('what the split refuses on curation and compliance (TP-3)', () => {
   it('nesting within one axis: a compliance on arm inside a compliance arm', () => {
     expect(refusal(body('a', CON, 'x', CON, 'y', CEND, CEND))).toEqual({
       kind: 'nested-arm', axis: 'compliance', line: 4, arm: 'on', openedAt: 2,
@@ -566,6 +629,77 @@ describe('what the two-axis split refuses (TP-3)', () => {
   });
 });
 
+describe('what the split refuses on the tdd axis (TP-3)', () => {
+  it('nesting within the tdd axis, even with an arm of another axis between', () => {
+    expect(refusal(body('a', TON, 'x', TON, 'y', TEND, TEND))).toEqual({
+      kind: 'nested-arm', axis: 'tdd', line: 4, arm: 'on', openedAt: 2,
+    });
+    expect(refusal(body(TOFF, 'x', TON, 'y', TEND, TEND))).toEqual({
+      kind: 'nested-arm', axis: 'tdd', line: 3, arm: 'off', openedAt: 1,
+    });
+    expect(refusal(body(TON, CON, 'x', TON, 'y', TEND, CEND, TEND))).toEqual({
+      kind: 'nested-arm', axis: 'tdd', line: 4, arm: 'on', openedAt: 1,
+    });
+  });
+
+  it('a second tdd off in one arm', () => {
+    expect(refusal(body(TON, 'x', TOFF, 'y', TOFF, 'z', TEND))).toEqual({
+      kind: 'repeated-off', axis: 'tdd', line: 5, openedAt: 3,
+    });
+  });
+
+  it('interleaved arms of tdd and each other axis, either one closing first', () => {
+    expect(refusal(body(TON, 'x', CON, 'y', TEND, 'z', CEND))).toEqual({
+      kind: 'interleaved-arm', axis: 'tdd', marker: 'end', line: 5, openedAt: 1, innerAxis: 'compliance', innerOpenedAt: 3,
+    });
+    expect(refusal(body(ON, 'x', TON, 'y', END, 'z', TEND))).toEqual({
+      kind: 'interleaved-arm', axis: 'curation', marker: 'end', line: 5, openedAt: 1, innerAxis: 'tdd', innerOpenedAt: 3,
+    });
+    expect(refusal(body(TON, 'x', ON, 'y', TOFF, 'z', END, 'w', TEND))).toEqual({
+      kind: 'interleaved-arm', axis: 'tdd', marker: 'off', line: 5, openedAt: 1, innerAxis: 'curation', innerOpenedAt: 3,
+    });
+  });
+
+  it('an empty tdd arm, an unclosed one and an end with no arm', () => {
+    expect(refusal(body(TON, TEND))).toEqual({ kind: 'empty-arm', axis: 'tdd', arm: 'on', openedAt: 1, closedAt: 2 });
+    expect(refusal(body('a', TOFF, '', TEND))).toEqual({ kind: 'empty-arm', axis: 'tdd', arm: 'off', openedAt: 2, closedAt: 4 });
+    expect(refusal(body('a', TON, 'x', 'b'))).toEqual({ kind: 'unclosed-arm', axis: 'tdd', arm: 'on', openedAt: 2 });
+    expect(refusal(body('a', TEND, 'b'))).toEqual({ kind: 'unopened-end', axis: 'tdd', line: 2 });
+    expect(refusal(body(TON, 'x', TEND, TEND))).toEqual({ kind: 'unopened-end', axis: 'tdd', line: 4 });
+    expect(refusal(body(ON, 'x', TEND, END))).toEqual({ kind: 'unopened-end', axis: 'tdd', line: 3 });
+  });
+
+  it('a stray tdd marker: an attempt that is not a whole line', () => {
+    for (const stray of [`text ${TON}`, '<!--tdd:on-->', '<!-- Tdd:End -->', '<!-- tdd:ON -->']) {
+      expect(refusal(body('a', stray, 'b')), JSON.stringify(stray)).toEqual({
+        kind: 'stray-marker', axis: 'tdd', line: 2, text: stray,
+      });
+    }
+  });
+
+  it('a line that attempts markers of two axes names the first axis in the fixed order', () => {
+    expect(refusal(body('a', `${TON} and ${CON}`, 'b'))).toMatchObject({ kind: 'stray-marker', axis: 'compliance', line: 2 });
+    expect(refusal(body('a', `${TON} and ${ON}`, 'b'))).toMatchObject({ kind: 'stray-marker', axis: 'curation', line: 2 });
+  });
+
+  it('names the tdd axis in the one-line description, and no other axis', () => {
+    const errors: readonly VariantSplitError[] = [
+      { kind: 'nested-arm', axis: 'tdd', line: 7, arm: 'on', openedAt: 3 },
+      { kind: 'repeated-off', axis: 'tdd', line: 9, openedAt: 5 },
+      { kind: 'unopened-end', axis: 'tdd', line: 11 },
+      { kind: 'unclosed-arm', axis: 'tdd', arm: 'off', openedAt: 13 },
+      { kind: 'empty-arm', axis: 'tdd', arm: 'on', openedAt: 15, closedAt: 16 },
+      { kind: 'stray-marker', axis: 'tdd', line: 17, text: 'x <!-- tdd:on -->' },
+    ];
+    for (const error of errors) {
+      const text = describeVariantSplitError(error);
+      expect(text, error.kind).toMatch(/tdd/);
+      expect(text, error.kind).not.toMatch(/curation|compliance/);
+      expect(text.includes('\n'), error.kind).toBe(false);
+    }
+  });
+});
+
 describe('which refusal a line gets when it breaks more than one rule', () => {
   it('an end that closes an outer arm while an inner arm is open is an interleaving, not an empty arm', () => {
     expect(refusal(body(ON, CON, END, CEND))).toEqual({
@@ -614,7 +748,7 @@ describe('one axis nested inside the other (TP-4)', () => {
     const text = body(
       'Head.', ON, 'c-on', CON, 'p-on', COFF, 'p-off', CEND, 'c-on-tail', OFF, 'c-off', END, 'Tail.',
     );
-    expect(splitBoth(text)).toEqual({
+    expect(twoAxisView(text)).toEqual({
       bodies: {
         on: body('Head.', 'c-on', 'p-on', 'c-on-tail', 'Tail.'),
         'curation-off': body('Head.', 'c-off', 'Tail.'),
@@ -627,7 +761,7 @@ describe('one axis nested inside the other (TP-4)', () => {
 
   it('a curation arm inside a compliance arm', () => {
     const text = body('Head.', CON, 'p-on', ON, 'c-on', OFF, 'c-off', END, CEND, 'Tail.');
-    expect(splitBoth(text).bodies).toEqual({
+    expect(twoAxisView(text).bodies).toEqual({
       on: body('Head.', 'p-on', 'c-on', 'Tail.'),
       'curation-off': body('Head.', 'p-on', 'c-off', 'Tail.'),
       'compliance-off': body('Head.', 'Tail.'),
@@ -637,7 +771,7 @@ describe('one axis nested inside the other (TP-4)', () => {
 
   it('an outer arm whose only content is the inner arm is not empty', () => {
     const text = body('Head.', ON, CON, 'p', CEND, END, 'Tail.');
-    expect(splitBoth(text).bodies).toEqual({
+    expect(twoAxisView(text).bodies).toEqual({
       on: body('Head.', 'p', 'Tail.'),
       'curation-off': body('Head.', 'Tail.'),
       'compliance-off': body('Head.', 'Tail.'),
@@ -647,7 +781,7 @@ describe('one axis nested inside the other (TP-4)', () => {
 
   it('an inner arm inside the else of the outer axis', () => {
     const text = body('Head.', OFF, CON, 'q', COFF, 'r', CEND, END, 'Tail.');
-    expect(splitBoth(text).bodies).toEqual({
+    expect(twoAxisView(text).bodies).toEqual({
       on: body('Head.', 'Tail.'),
       'curation-off': body('Head.', 'q', 'Tail.'),
       'compliance-off': body('Head.', 'Tail.'),
@@ -657,7 +791,7 @@ describe('one axis nested inside the other (TP-4)', () => {
 
   it('two nested groups in one body, one nested each way', () => {
     const text = body('H', ON, 'a', CON, 'b', CEND, END, CON, 'c', ON, 'd', END, CEND, 'T');
-    expect(splitBoth(text).bodies).toEqual({
+    expect(twoAxisView(text).bodies).toEqual({
       on: body('H', 'a', 'b', 'c', 'd', 'T'),
       'curation-off': body('H', 'c', 'T'),
       'compliance-off': body('H', 'a', 'T'),
@@ -666,18 +800,25 @@ describe('one axis nested inside the other (TP-4)', () => {
   });
 });
 
-describe('parity over generated two-axis bodies', () => {
-  type Axis = 'curation' | 'compliance';
+describe('parity over generated three-axis bodies', () => {
+  type Axis = VariantAxis;
   type State = Readonly<Record<Axis, 'on' | 'off'>>;
   const MARKERS: Readonly<Record<Axis, readonly [string, string, string]>> = {
     curation: [ON, OFF, END],
     compliance: [CON, COFF, CEND],
+    tdd: [TON, TOFF, TEND],
   };
-  const STATES: Readonly<Record<(typeof VARIANT_KEYS)[number], State>> = {
-    on: { curation: 'on', compliance: 'on' },
-    'curation-off': { curation: 'off', compliance: 'on' },
-    'compliance-off': { curation: 'on', compliance: 'off' },
-    'both-off': { curation: 'off', compliance: 'off' },
+  const AXES: readonly Axis[] = ['curation', 'compliance', 'tdd'];
+  /** The arm each axis keeps in each variant, written out by hand: the oracle never reads the module's table. */
+  const STATES: Readonly<Record<VariantKey, State>> = {
+    on: { curation: 'on', compliance: 'on', tdd: 'on' },
+    'curation-off': { curation: 'off', compliance: 'on', tdd: 'on' },
+    'compliance-off': { curation: 'on', compliance: 'off', tdd: 'on' },
+    'both-off': { curation: 'off', compliance: 'off', tdd: 'on' },
+    'tdd-off': { curation: 'on', compliance: 'on', tdd: 'off' },
+    'curation-tdd-off': { curation: 'off', compliance: 'on', tdd: 'off' },
+    'compliance-tdd-off': { curation: 'on', compliance: 'off', tdd: 'off' },
+    'curation-compliance-tdd-off': { curation: 'off', compliance: 'off', tdd: 'off' },
   };
 
   function lcg(seed: number): () => number {
@@ -716,7 +857,8 @@ describe('parity over generated two-axis bodies', () => {
 
   /** An outer arm of `axis` that holds an inner arm of the other axis, placed as `shape` says. */
   function nestedArm(axis: Axis, id: string, shape: NestedShape, next: () => number): Piece {
-    const other: Axis = axis === 'curation' ? 'compliance' : 'curation';
+    const others = AXES.filter(candidate => candidate !== axis);
+    const other = others[Math.floor(next() * others.length)];
     const [on, off, end] = MARKERS[axis];
     const head = `head ${id}`;
     const tail = `tail ${id}`;
@@ -746,14 +888,16 @@ describe('parity over generated two-axis bodies', () => {
   it('every variant is the body with the arms it matches kept, nested or not', () => {
     let nested = 0;
     const reached: Record<NestedShape, number> = { on: 0, 'on-with-else': 0, else: 0, 'off-only': 0 };
+    const axisReached: Record<Axis, number> = { curation: 0, compliance: 0, tdd: 0 };
     for (let seed = 1; seed <= MAX_CASES; seed++) {
       const next = lcg(seed);
       const pieces: Piece[] = [];
       const segments = 1 + Math.floor(next() * MAX_SEGMENTS);
       for (let s = 0; s < segments; s++) {
         const id = `${seed}.${s}`;
-        const axis: Axis = next() < 0.5 ? 'curation' : 'compliance';
+        const axis = AXES[Math.floor(next() * AXES.length)];
         const kind = next();
+        if (kind >= 0.3) axisReached[axis]++;
         if (kind < 0.3) {
           const plain = `plain ${id}`;
           pieces.push({ lines: [plain], kept: () => [plain] });
@@ -775,6 +919,23 @@ describe('parity over generated two-axis bodies', () => {
     expect(nested, 'no generated body nested one axis in the other').toBeGreaterThan(MAX_CASES / 4);
     for (const shape of NESTED_SHAPES) {
       expect(reached[shape], `no generated body nested an inner arm in the ${shape} shape`).toBeGreaterThan(0);
+    }
+    for (const axis of AXES) expect(axisReached[axis], `no generated body carried a ${axis} arm`).toBeGreaterThan(MAX_CASES / 4);
+  });
+
+  it('three arms nest one inside another, each axis in each place, and every variant keeps the arms it matches', () => {
+    const text = body('H', ON, 'c1', CON, 'p1', TON, 't-on', TOFF, 't-off', TEND, 'p2', CEND, 'c2', END, 'T');
+    const { bodies } = splitBoth(text);
+    for (const key of VARIANT_KEYS) {
+      const state = STATES[key];
+      const want = ['H'];
+      if (state.curation === 'on') {
+        want.push('c1');
+        if (state.compliance === 'on') want.push('p1', state.tdd === 'on' ? 't-on' : 't-off', 'p2');
+        want.push('c2');
+      }
+      want.push('T');
+      expect(bodies[key], key).toBe(body(...want));
     }
   });
 });
@@ -873,65 +1034,143 @@ describe('containsComplianceMarker and containsVariantMarker', () => {
     expect(containsCurationMarker(`${CON}\ntext\n${CEND}`)).toBe(false);
   });
 
-  it('containsVariantMarker is the union of both axes and the retired spelling', () => {
+  it('containsTddMarker sees a valid marker, a malformed one and one embedded in prose, and no other axis', () => {
+    expect(containsTddMarker(`a\n${TON}\nb`)).toBe(true);
+    expect(containsTddMarker('<!--tdd:end-->')).toBe(true);
+    expect(containsTddMarker('see <!-- Tdd : off --> here')).toBe(true);
+    expect(containsTddMarker('tdd:on is a settings field\n<!-- an ordinary comment -->')).toBe(false);
+    expect(containsTddMarker(`${ON}\ntext\n${END}\n${CON}\ntext\n${CEND}`)).toBe(false);
+    expect(containsTddMarker('<!-- learning:on -->')).toBe(false);
+    expect(containsTddMarker('')).toBe(false);
+  });
+
+  it('the curation and compliance checks ignore a tdd marker', () => {
+    expect(containsCurationMarker(`${TON}\ntext\n${TEND}`)).toBe(false);
+    expect(containsComplianceMarker(`${TON}\ntext\n${TEND}`)).toBe(false);
+  });
+
+  it('containsVariantMarker is the union of all three axes and the retired spelling', () => {
     expect(containsVariantMarker(ON)).toBe(true);
     expect(containsVariantMarker(CEND)).toBe(true);
+    expect(containsVariantMarker(TOFF)).toBe(true);
     expect(containsVariantMarker('<!-- learning:on -->')).toBe(true);
-    expect(containsVariantMarker('curation:on and compliance:on are only words here')).toBe(false);
+    expect(containsVariantMarker('curation:on and compliance:on and tdd:on are only words here')).toBe(false);
     expect(containsVariantMarker('')).toBe(false);
   });
 });
 
 describe('where each off variant lands (TP-6)', () => {
-  const OFF_KEYS: readonly OffVariantKey[] = ['curation-off', 'compliance-off', 'both-off'];
+  const OFF_KEYS: readonly OffVariantKey[] = [
+    'curation-off', 'compliance-off', 'both-off',
+    'tdd-off', 'curation-tdd-off', 'compliance-tdd-off', 'curation-compliance-tdd-off',
+  ];
+  /** The tree of each off key, spelled out: the four older trees keep the names they always had. */
   const DIR_OF: Readonly<Record<OffVariantKey, string>> = {
-    'curation-off': CURATION_OFF_OUTPUT_DIR,
-    'compliance-off': COMPLIANCE_OFF_OUTPUT_DIR,
-    'both-off': BOTH_OFF_OUTPUT_DIR,
+    'curation-off': 'dist/curation-off',
+    'compliance-off': 'dist/compliance-off',
+    'both-off': 'dist/curation-compliance-off',
+    'tdd-off': 'dist/tdd-off',
+    'curation-tdd-off': 'dist/curation-tdd-off',
+    'compliance-tdd-off': 'dist/compliance-tdd-off',
+    'curation-compliance-tdd-off': 'dist/curation-compliance-tdd-off',
   };
 
   it('variantOffRelPath puts a variant beside its kind under the tree of its key', () => {
     expect(variantOffRelPath('curation-off', 'commands', 'implement.md')).toBe('dist/curation-off/commands/implement.md');
     expect(variantOffRelPath('compliance-off', 'commands', 'implement.md')).toBe('dist/compliance-off/commands/implement.md');
     expect(variantOffRelPath('both-off', 'agents', 'code.md')).toBe('dist/curation-compliance-off/agents/code.md');
+    expect(variantOffRelPath('tdd-off', 'agents', 'code.md')).toBe('dist/tdd-off/agents/code.md');
+    expect(variantOffRelPath('curation-compliance-tdd-off', 'commands', 'implement.md')).toBe(
+      'dist/curation-compliance-tdd-off/commands/implement.md',
+    );
   });
 
   it('every off key has its own tree and the key set is every variant key but on', () => {
     expect([...OFF_KEYS].sort()).toEqual(VARIANT_KEYS.filter(key => key !== 'on').sort());
+    expect([...OFF_VARIANT_KEYS]).toEqual([...OFF_KEYS]);
     const paths = OFF_KEYS.map(key => variantOffRelPath(key, 'agents', 'x.md'));
     expect(new Set(paths).size).toBe(OFF_KEYS.length);
     for (const key of OFF_KEYS) expect(variantOffRelPath(key, 'agents', 'x.md')).toBe(`${DIR_OF[key]}/agents/x.md`);
   });
 
+  it('the tree constants and the table agree with the spelled-out trees', () => {
+    expect(OFF_OUTPUT_DIRS).toEqual(DIR_OF);
+    expect([TDD_OFF_OUTPUT_DIR, CURATION_TDD_OFF_OUTPUT_DIR, COMPLIANCE_TDD_OFF_OUTPUT_DIR, ALL_OFF_OUTPUT_DIR]).toEqual([
+      'dist/tdd-off', 'dist/curation-tdd-off', 'dist/compliance-tdd-off', 'dist/curation-compliance-tdd-off',
+    ]);
+  });
+});
+
+describe('the variant table (TP-6)', () => {
+  it('has one row per combination of axes, each key naming exactly the axes it turns off', () => {
+    const seen = new Set<string>();
+    for (const key of VARIANT_KEYS) {
+      const off = offAxesOf(key);
+      seen.add(off.join('+'));
+      for (const axis of VARIANT_AXES) expect(variantArm(key, axis), `${key} ${axis}`).toBe(off.includes(axis) ? 'off' : 'on');
+    }
+    expect(seen.size).toBe(2 ** VARIANT_AXES.length);
+    expect(offAxesOf('on')).toEqual([]);
+    expect(offAxesOf('curation-compliance-tdd-off')).toEqual(['curation', 'compliance', 'tdd']);
+  });
+
+  it('every key that turns tdd off spells tdd-off, and no key that keeps tdd on does', () => {
+    for (const key of VARIANT_KEYS) expect(key.includes('tdd'), key).toBe(variantArm(key, 'tdd') === 'off');
+  });
 });
 
 describe('emittedVariantKeys (TP-6)', () => {
   it.each([
-    [false, false, ['on']],
-    [true, false, ['on', 'curation-off']],
-    [false, true, ['on', 'compliance-off']],
-    [true, true, ['on', 'curation-off', 'compliance-off', 'both-off']],
-  ] as const)('curation arm %s, compliance arm %s: writes %j', (curation, compliance, expected) => {
-    expect(emittedVariantKeys({ curation, compliance })).toEqual(expected);
+    [false, false, false, ['on']],
+    [true, false, false, ['on', 'curation-off']],
+    [false, true, false, ['on', 'compliance-off']],
+    [true, true, false, ['on', 'curation-off', 'compliance-off', 'both-off']],
+    [false, false, true, ['on', 'tdd-off']],
+    [true, false, true, ['on', 'curation-off', 'tdd-off', 'curation-tdd-off']],
+    [false, true, true, ['on', 'compliance-off', 'tdd-off', 'compliance-tdd-off']],
+    [
+      true, true, true,
+      ['on', 'curation-off', 'compliance-off', 'both-off', 'tdd-off', 'curation-tdd-off', 'compliance-tdd-off', 'curation-compliance-tdd-off'],
+    ],
+  ] as const)('curation arm %s, compliance arm %s, tdd arm %s: writes %j', (curation, compliance, tdd, expected) => {
+    expect(emittedVariantKeys({ curation, compliance, tdd })).toEqual(expected);
   });
 
-  it('is a subset of the variant keys, with on first and no key twice', () => {
-    for (const curation of [false, true]) {
-      for (const compliance of [false, true]) {
-        const keys = emittedVariantKeys({ curation, compliance });
-        expect(keys[0]).toBe('on');
-        expect(new Set(keys).size).toBe(keys.length);
-        for (const key of keys) expect(VARIANT_KEYS).toContain(key);
-      }
+  it('is a subset of the variant keys, with on first and no key twice, for every arm set', () => {
+    for (const arms of ARM_SETS) {
+      const keys = emittedVariantKeys(arms);
+      expect(keys[0]).toBe('on');
+      expect(new Set(keys).size).toBe(keys.length);
+      for (const key of keys) expect(VARIANT_KEYS).toContain(key);
+    }
+  });
+
+  it('writes a key only when every axis it turns off has an arm, and writes every such key', () => {
+    for (const arms of ARM_SETS) {
+      const want = VARIANT_KEYS.filter(key => offAxesOf(key).every(axis => arms[axis]));
+      expect(emittedVariantKeys(arms), JSON.stringify(arms)).toEqual(want);
+    }
+  });
+
+  it('a body with no arms gets the one variant, and a tdd-only body never gets a curation or compliance tree', () => {
+    expect(emittedVariantKeys({ curation: false, compliance: false, tdd: false })).toEqual(['on']);
+    for (const key of emittedVariantKeys({ curation: false, compliance: false, tdd: true })) {
+      expect(offAxesOf(key).every(axis => axis === 'tdd'), key).toBe(true);
     }
   });
 });
 
 describe('renderVariantManifest (TP-6)', () => {
-  const host = (kind: 'commands' | 'agents', name: string, curation: boolean, compliance: boolean): VariantManifestHost => ({
+  const host = (
+    kind: 'commands' | 'agents',
+    name: string,
+    curation: boolean,
+    compliance: boolean,
+    tdd = false,
+  ): VariantManifestHost => ({
     kind,
     name,
-    axes: { curation, compliance },
+    axes: { curation, compliance, tdd },
   });
 
   function render(hosts: readonly VariantManifestHost[]): string {
@@ -945,11 +1184,11 @@ describe('renderVariantManifest (TP-6)', () => {
     expect(VARIANT_MANIFEST_VERSION).toBe(1);
   });
 
-  it('renders the exact bytes: version, then each host as <kind>/<name> with both axes, sorted', () => {
+  it('renders the exact bytes: version, then each host as <kind>/<name> with every axis, sorted', () => {
     const text = render([
       host('commands', 'implement', true, false),
       host('agents', 'git', false, false),
-      host('agents', 'code', true, true),
+      host('agents', 'code', true, true, true),
     ]);
     expect(text).toBe(
       [
@@ -958,15 +1197,18 @@ describe('renderVariantManifest (TP-6)', () => {
         '  "hosts": {',
         '    "agents/code": {',
         '      "curation": true,',
-        '      "compliance": true',
+        '      "compliance": true,',
+        '      "tdd": true',
         '    },',
         '    "agents/git": {',
         '      "curation": false,',
-        '      "compliance": false',
+        '      "compliance": false,',
+        '      "tdd": false',
         '    },',
         '    "commands/implement": {',
         '      "curation": true,',
-        '      "compliance": false',
+        '      "compliance": false,',
+        '      "tdd": false',
         '    }',
         '  }',
         '}',
@@ -980,10 +1222,10 @@ describe('renderVariantManifest (TP-6)', () => {
     const forward = render(hosts);
     expect(render([...hosts].reverse())).toBe(forward);
     expect(render([hosts[1], hosts[2], hosts[0]])).toBe(forward);
-    const parsed = JSON.parse(forward) as { version: number; hosts: Record<string, { curation: boolean; compliance: boolean }> };
+    const parsed = JSON.parse(forward) as { version: number; hosts: Record<string, Record<VariantAxis, boolean>> };
     expect(parsed.version).toBe(VARIANT_MANIFEST_VERSION);
     expect(Object.keys(parsed.hosts)).toEqual(['agents/a', 'commands/a', 'commands/b']);
-    expect(parsed.hosts['agents/a']).toEqual({ curation: false, compliance: true });
+    expect(parsed.hosts['agents/a']).toEqual({ curation: false, compliance: true, tdd: false });
   });
 
   it('sorts by code unit, not by locale: an uppercase name comes before a lowercase one, a dash before a letter', () => {
@@ -992,9 +1234,10 @@ describe('renderVariantManifest (TP-6)', () => {
   });
 
   it('writes the axes in a fixed order whatever order the input object lists them', () => {
-    const swapped: VariantManifestHost = { kind: 'agents', name: 'x', axes: { compliance: true, curation: false } };
+    const swapped: VariantManifestHost = { kind: 'agents', name: 'x', axes: { tdd: true, compliance: true, curation: false } };
     const text = render([swapped]);
     expect(text.indexOf('"curation"')).toBeLessThan(text.indexOf('"compliance"'));
+    expect(text.indexOf('"compliance"')).toBeLessThan(text.indexOf('"tdd"'));
   });
 
   it('an empty roster renders an empty host map and ends in a newline', () => {
@@ -1015,7 +1258,7 @@ describe('renderVariantManifest (TP-6)', () => {
 
 describe('parseVariantManifest (TP-9)', () => {
   const manifest = (hosts: unknown, version: unknown = 1): string => JSON.stringify({ version, hosts });
-  const axes = (curation: boolean, compliance: boolean) => ({ curation, compliance });
+  const axes = (curation: boolean, compliance: boolean, tdd = false) => ({ curation, compliance, tdd });
 
   function parse(text: string): readonly VariantManifestHost[] {
     const result = parseVariantManifest(text);
@@ -1031,13 +1274,30 @@ describe('parseVariantManifest (TP-9)', () => {
 
   it('reads back what renderVariantManifest wrote, host for host', () => {
     const hosts: VariantManifestHost[] = [
-      { kind: 'agents', name: 'code', axes: axes(true, true) },
+      { kind: 'agents', name: 'code', axes: axes(true, true, true) },
       { kind: 'agents', name: 'git', axes: axes(false, false) },
+      { kind: 'commands', name: 'debug', axes: axes(false, false, true) },
       { kind: 'commands', name: 'implement', axes: axes(true, false) },
     ];
     const rendered = renderVariantManifest(hosts);
     if (!rendered.ok) throw new Error('render failed');
     expect(parse(rendered.value)).toEqual(hosts);
+  });
+
+  it('a host written before the tdd axis existed has no tdd arm: an absent tdd reads as false', () => {
+    const text = manifest({ 'agents/code': { curation: true, compliance: true } });
+    expect(parse(text)).toEqual([{ kind: 'agents', name: 'code', axes: { curation: true, compliance: true, tdd: false } }]);
+  });
+
+  it('the two older axes stay required, and a tdd that is present must be a boolean', () => {
+    expect(ORIGINAL_AXES).toEqual(['curation', 'compliance']);
+    expect(refusal(manifest({ 'agents/code': { curation: true, tdd: true } }))).toEqual({ kind: 'bad-host-axes', host: 'agents/code' });
+    expect(refusal(manifest({ 'agents/code': { curation: true, compliance: true, tdd: 'true' } }))).toEqual({
+      kind: 'bad-host-axes', host: 'agents/code',
+    });
+    expect(refusal(manifest({ 'agents/code': { curation: true, compliance: true, tdd: null } }))).toEqual({
+      kind: 'bad-host-axes', host: 'agents/code',
+    });
   });
 
   it('an empty host map is a valid manifest with no hosts', () => {
@@ -1116,11 +1376,13 @@ describe('parseVariantManifest (TP-9)', () => {
     }
     expect(describeVariantManifestParseError({ kind: 'bad-host-key', key: 'x/y' })).toContain('x/y');
     expect(describeVariantManifestParseError({ kind: 'bad-host-axes', host: 'agents/a' })).toContain('agents/a');
+    expect(describeVariantManifestParseError({ kind: 'bad-host-axes', host: 'agents/a' })).toContain('tdd');
   });
 });
 
 describe('machineVariantKey (TP-10)', () => {
-  const on = { curation: true, compliance: true };
+  const sw = (curation: boolean, compliance: boolean, tdd = true): VariantSwitches => ({ curation, compliance, tdd });
+  const arms = (curation: boolean, compliance: boolean, tdd = false): Record<VariantAxis, boolean> => ({ curation, compliance, tdd });
 
   it.each([
     // [machine curation, machine compliance, host curation arm, host compliance arm, key]
@@ -1133,47 +1395,152 @@ describe('machineVariantKey (TP-10)', () => {
     [false, false, true, false, 'curation-off'],
     [false, false, false, true, 'compliance-off'],
     [false, false, false, false, 'on'],
-  ] as const)('machine curation %s compliance %s, host arms %s/%s: %s', (mc, mp, hc, hp, key) => {
-    expect(machineVariantKey({ curation: mc, compliance: mp }, { curation: hc, compliance: hp })).toBe(key);
+  ] as const)('tdd on, machine curation %s compliance %s, host arms %s/%s: %s', (mc, mp, hc, hp, key) => {
+    expect(machineVariantKey(sw(mc, mp), arms(hc, hp))).toBe(key);
+    expect(machineVariantKey(sw(mc, mp), arms(hc, hp, true))).toBe(key);
+  });
+
+  /** The variant for a set of turned-off axes, spelled out by hand: c curation, p compliance, t tdd. */
+  const KEY_OF_OFF_SET: Readonly<Record<string, VariantKey>> = {
+    '': 'on',
+    c: 'curation-off',
+    p: 'compliance-off',
+    cp: 'both-off',
+    t: 'tdd-off',
+    ct: 'curation-tdd-off',
+    pt: 'compliance-tdd-off',
+    cpt: 'curation-compliance-tdd-off',
+  };
+
+  /** The oracle: an axis is off for a host only when the machine has it off and the host has an arm on it. */
+  function oracle(machine: VariantSwitches, hasArms: Readonly<Record<VariantAxis, boolean>>): VariantKey {
+    const letters = [
+      !machine.curation && hasArms.curation ? 'c' : '',
+      !machine.compliance && hasArms.compliance ? 'p' : '',
+      !machine.tdd && hasArms.tdd ? 't' : '',
+    ].join('');
+    return KEY_OF_OFF_SET[letters];
+  }
+
+  it('answers every machine state for every arm set, as the hand-written oracle does', () => {
+    let cases = 0;
+    for (const machine of MACHINE_STATES) {
+      for (const hasArms of ARM_SETS) {
+        expect(machineVariantKey(machine, hasArms), `${JSON.stringify(machine)} / ${JSON.stringify(hasArms)}`).toBe(oracle(machine, hasArms));
+        cases++;
+      }
+    }
+    expect(cases).toBe(64);
+    expect(new Set(MACHINE_STATES.flatMap(machine => ARM_SETS.map(hasArms => oracle(machine, hasArms)))).size).toBe(VARIANT_KEYS.length);
   });
 
   it('is always a variant the build writes for that host', () => {
-    for (const mc of [false, true]) {
-      for (const mp of [false, true]) {
-        for (const hc of [false, true]) {
-          for (const hp of [false, true]) {
-            const key = machineVariantKey({ curation: mc, compliance: mp }, { curation: hc, compliance: hp });
-            expect(emittedVariantKeys({ curation: hc, compliance: hp })).toContain(key);
-          }
-        }
+    for (const machine of MACHINE_STATES) {
+      for (const hasArms of ARM_SETS) {
+        expect(emittedVariantKeys(hasArms)).toContain(machineVariantKey(machine, hasArms));
       }
     }
-    expect(machineVariantKey(on, { curation: true, compliance: true })).toBe('on');
+    expect(machineVariantKey(ALL_SWITCHES_ON, arms(true, true, true))).toBe('on');
+  });
+
+  it('is the first file the installer would find: the first consulted key the host has a file for', () => {
+    for (const machine of MACHINE_STATES) {
+      for (const hasArms of ARM_SETS) {
+        const emitted = emittedVariantKeys(hasArms);
+        const firstFound = consultedOffKeys(machine).find(key => emitted.includes(key)) ?? 'on';
+        expect(machineVariantKey(machine, hasArms), `${JSON.stringify(machine)} / ${JSON.stringify(hasArms)}`).toBe(firstFound);
+      }
+    }
+  });
+
+  it('known-bad probe: an axis the machine has off but the host has no arm on does not pick a variant', () => {
+    expect(machineVariantKey(sw(true, true, false), arms(true, true, false))).toBe('on');
+    expect(machineVariantKey(sw(true, true, false), arms(true, true, true))).toBe('tdd-off');
+  });
+});
+
+describe('consultedOffKeys (TP-6)', () => {
+  it('is empty when every switch is on', () => {
+    expect(consultedOffKeys(ALL_SWITCHES_ON)).toEqual([]);
+  });
+
+  it.each([
+    [{ curation: false, compliance: true, tdd: true }, ['curation-off']],
+    [{ curation: true, compliance: false, tdd: true }, ['compliance-off']],
+    [{ curation: true, compliance: true, tdd: false }, ['tdd-off']],
+    [{ curation: false, compliance: false, tdd: true }, ['both-off', 'curation-off', 'compliance-off']],
+    [{ curation: false, compliance: true, tdd: false }, ['curation-tdd-off', 'curation-off', 'tdd-off']],
+    [{ curation: true, compliance: false, tdd: false }, ['compliance-tdd-off', 'compliance-off', 'tdd-off']],
+    [
+      { curation: false, compliance: false, tdd: false },
+      ['curation-compliance-tdd-off', 'both-off', 'curation-tdd-off', 'compliance-tdd-off', 'curation-off', 'compliance-off', 'tdd-off'],
+    ],
+  ] as const)('machine %j reads %j, the key with the most axes off first', (machine, expected) => {
+    expect(consultedOffKeys(machine)).toEqual(expected);
+  });
+
+  it('lists 2^n - 1 keys for n axes off, each at most once, none that turns an axis off the machine has on', () => {
+    for (const machine of MACHINE_STATES) {
+      const keys = consultedOffKeys(machine);
+      const offCount = VARIANT_AXES.filter(axis => !machine[axis]).length;
+      expect(keys.length).toBe(2 ** offCount - 1);
+      expect(new Set(keys).size).toBe(keys.length);
+      for (const key of keys) expect(offAxesOf(key).every(axis => !machine[axis]), key).toBe(true);
+      for (let i = 1; i < keys.length; i++) {
+        expect(offAxesOf(keys[i - 1]).length, `${keys[i - 1]} before ${keys[i]}`).toBeGreaterThanOrEqual(offAxesOf(keys[i]).length);
+      }
+    }
+  });
+});
+
+describe('the machine switches value', () => {
+  it('machineSwitches reads each axis from the machine features, compliance from its enabled flag', () => {
+    expect(machineSwitches({ curation: false, compliance: { enabled: true }, tdd: false })).toEqual({
+      curation: false, compliance: true, tdd: false,
+    });
+    expect(machineSwitches({ curation: true, compliance: { enabled: false }, tdd: true })).toEqual({
+      curation: true, compliance: false, tdd: true,
+    });
+  });
+
+  it('has one entry per axis, and ALL_SWITCHES_ON is every one of them on and cannot be changed', () => {
+    expect(Object.keys(machineSwitches({ curation: true, compliance: { enabled: true }, tdd: true })).sort()).toEqual([...VARIANT_AXES].sort());
+    expect(ALL_SWITCHES_ON).toEqual(perAxis(() => true));
+    expect(Object.isFrozen(ALL_SWITCHES_ON)).toBe(true);
+  });
+
+  it('sameSwitches is true only when every axis agrees', () => {
+    expect(sameSwitches(ALL_SWITCHES_ON, { ...ALL_SWITCHES_ON })).toBe(true);
+    for (const axis of VARIANT_AXES) {
+      expect(sameSwitches(ALL_SWITCHES_ON, { ...ALL_SWITCHES_ON, [axis]: false }), axis).toBe(false);
+    }
   });
 });
 
 describe('requiredComplianceVariantFiles (TP-9, TP-10)', () => {
   const hosts: readonly VariantManifestHost[] = [
-    { kind: 'agents', name: 'code', axes: { curation: true, compliance: true } },
-    { kind: 'commands', name: 'implement', axes: { curation: false, compliance: true } },
-    { kind: 'commands', name: 'debug', axes: { curation: true, compliance: false } },
-    { kind: 'agents', name: 'git', axes: { curation: false, compliance: false } },
+    { kind: 'agents', name: 'code', axes: { curation: true, compliance: true, tdd: false } },
+    { kind: 'commands', name: 'implement', axes: { curation: false, compliance: true, tdd: false } },
+    { kind: 'commands', name: 'debug', axes: { curation: true, compliance: false, tdd: false } },
+    { kind: 'agents', name: 'git', axes: { curation: false, compliance: false, tdd: false } },
   ];
+  const machine = (curation: boolean, compliance: boolean, tdd = true): VariantSwitches => ({ curation, compliance, tdd });
 
   it('compliance on needs no file', () => {
-    expect(requiredComplianceVariantFiles({ curation: true, compliance: true }, hosts)).toEqual([]);
-    expect(requiredComplianceVariantFiles({ curation: false, compliance: true }, hosts)).toEqual([]);
+    expect(requiredComplianceVariantFiles(machine(true, true), hosts)).toEqual([]);
+    expect(requiredComplianceVariantFiles(machine(false, true), hosts)).toEqual([]);
+    expect(requiredComplianceVariantFiles(machine(false, true, false), hosts)).toEqual([]);
   });
 
   it('curation on, compliance off needs the compliance-off file of each compliance-armed host, and no other', () => {
-    expect(requiredComplianceVariantFiles({ curation: true, compliance: false }, hosts)).toEqual([
+    expect(requiredComplianceVariantFiles(machine(true, false), hosts)).toEqual([
       'dist/compliance-off/agents/code.md',
       'dist/compliance-off/commands/implement.md',
     ]);
   });
 
   it('both off needs the both-off file where the host carries both arms, and never the curation-off file', () => {
-    const files = requiredComplianceVariantFiles({ curation: false, compliance: false }, hosts);
+    const files = requiredComplianceVariantFiles(machine(false, false), hosts);
     expect(files).toEqual([
       'dist/curation-compliance-off/agents/code.md',
       'dist/compliance-off/commands/implement.md',
@@ -1183,7 +1550,34 @@ describe('requiredComplianceVariantFiles (TP-9, TP-10)', () => {
 
   it('a roster with no compliance arm needs nothing on any machine', () => {
     const none = hosts.filter(h => !h.axes.compliance);
-    expect(requiredComplianceVariantFiles({ curation: false, compliance: false }, none)).toEqual([]);
+    for (const state of MACHINE_STATES) expect(requiredComplianceVariantFiles(state, none), JSON.stringify(state)).toEqual([]);
+  });
+
+  it('a host with no tdd arm needs the same file whether the machine has tdd on or off', () => {
+    for (const curation of [true, false]) {
+      expect(requiredComplianceVariantFiles(machine(curation, false, false), hosts)).toEqual(
+        requiredComplianceVariantFiles(machine(curation, false, true), hosts),
+      );
+    }
+  });
+
+  it('a host with a tdd arm needs the tree of every axis the machine has off', () => {
+    const armed: readonly VariantManifestHost[] = [
+      { kind: 'agents', name: 'code', axes: { curation: true, compliance: true, tdd: true } },
+      { kind: 'commands', name: 'implement', axes: { curation: false, compliance: true, tdd: true } },
+    ];
+    expect(requiredComplianceVariantFiles(machine(true, false, false), armed)).toEqual([
+      'dist/compliance-tdd-off/agents/code.md',
+      'dist/compliance-tdd-off/commands/implement.md',
+    ]);
+    expect(requiredComplianceVariantFiles(machine(false, false, false), armed)).toEqual([
+      'dist/curation-compliance-tdd-off/agents/code.md',
+      'dist/compliance-tdd-off/commands/implement.md',
+    ]);
+    expect(requiredComplianceVariantFiles(machine(true, false, true), armed)).toEqual([
+      'dist/compliance-off/agents/code.md',
+      'dist/compliance-off/commands/implement.md',
+    ]);
   });
 });
 
@@ -1201,10 +1595,13 @@ describe('where the curation-off variant lands', () => {
     expect(LEGACY_OFF_OUTPUT_DIR.startsWith(`${CURATION_OFF_OUTPUT_DIR}/`)).toBe(false);
   });
 
-  it('the compliance-off and both-off trees are named under dist, and no tree sits inside another', () => {
+  it('the other off trees are named under dist, and no tree sits inside another', () => {
     expect(COMPLIANCE_OFF_OUTPUT_DIR).toBe('dist/compliance-off');
     expect(BOTH_OFF_OUTPUT_DIR).toBe('dist/curation-compliance-off');
-    const trees = [CURATION_OFF_OUTPUT_DIR, COMPLIANCE_OFF_OUTPUT_DIR, BOTH_OFF_OUTPUT_DIR, LEGACY_OFF_OUTPUT_DIR];
+    const trees = [
+      ...Object.values(OFF_OUTPUT_DIRS),
+      LEGACY_OFF_OUTPUT_DIR,
+    ];
     expect(new Set(trees).size).toBe(trees.length);
     for (const tree of trees) {
       for (const other of trees) {

@@ -2349,6 +2349,7 @@ export function makeManifest(overrides: Partial<ManifestData> = {}): ManifestDat
       rules: true,
       proxy: false,
       behavior: false,
+      tdd: true,
       compliance: { enabled: false, frameworks: [] },
       tracker: { provider: DEFAULT_TRACKER_PROVIDER },
       flags: { tui: true, lsp: true, 'tool-search': true },

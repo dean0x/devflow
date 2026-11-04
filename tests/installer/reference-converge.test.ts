@@ -16,7 +16,8 @@ import * as path from 'path';
 import { formatRefusedFoldersSummary, formatReplacedLinksSummary } from '../../src/cli/commands/install-report.js';
 import { removeAllDevFlow } from '../../src/cli/commands/uninstall.js';
 import { installViaFileCopy, planOverlayUnits, type Spinner } from '../../src/targets/claude-code/installer.js';
-import { applyVariantToggle, convergeVariantAxes, describePostingLeft, type VariantMachineState } from '../../src/targets/claude-code/curation-install.js';
+import { ALL_SWITCHES_ON } from '../../src/core/curation-variants.js';
+import { applyVariantToggle, convergeVariantAxes, describePostingLeft } from '../../src/targets/claude-code/curation-install.js';
 import { convergeReferences } from '../../src/targets/claude-code/reference-converge.js';
 import { compiledSkillRefsDir } from '../../src/core/assets.js';
 import { renderVariantManifest } from '../../src/core/curation-variants.js';
@@ -77,16 +78,17 @@ async function referenceSurface(dir: string): Promise<Record<string, string>> {
   return surface;
 }
 
-function machine(compliance: boolean): VariantMachineState {
-  return { features: { curation: true, compliance: { enabled: compliance, frameworks: [] }, rules: false } };
-}
+const machine = (compliance: boolean) => ({
+  switches: { ...ALL_SWITCHES_ON, compliance },
+  frameworks: [] as string[],
+  rulesEnabled: false,
+});
 
 const backupsOf = (dir = claudeDir, home = devflowDir) => testBackups(tmp, { claudeDir: dir, devflowDir: home });
 
 async function installInto(dir: string, home: string, compliance: boolean, isPartialInstall = false) {
   return installViaFileCopy({
-    curation: true,
-    compliance,
+    switches: { ...ALL_SWITCHES_ON, compliance },
     plugins: [],
     effectivePlugins: CORE,
     claudeDir: dir,
@@ -102,7 +104,7 @@ async function installInto(dir: string, home: string, compliance: boolean, isPar
 
 async function converge(compliance: boolean, packageRoot?: string) {
   return convergeVariantAxes({
-    claudeDir, devflowDir, manifest: machine(compliance), plugins: CORE, warn, packageRoot, backups: await backupsOf(),
+    claudeDir, devflowDir, ...machine(compliance), plugins: CORE, warn, packageRoot, backups: await backupsOf(),
   });
 }
 
@@ -466,8 +468,7 @@ async function installEveryFolder(isPartialInstall: boolean) {
   const added = DEVFLOW_PLUGINS.filter(p => p.name === 'devflow-code-review');
   return installViaFileCopy({
     backups: await backupsOf(),
-    curation: true,
-    compliance: true,
+    switches: ALL_SWITCHES_ON,
     plugins: added,
     effectivePlugins: [...CORE, ...added],
     claudeDir,

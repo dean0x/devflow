@@ -111,6 +111,7 @@ import {
   attributionSeedFrom,
 } from './attribution-prompts.js';
 import { convergeVariantAxes, describePostingLeft, installedVersionMatches, readRunningVersion } from '../../targets/claude-code/curation-install.js';
+import { VARIANT_AXES, machineSwitches } from '../../core/curation-variants.js';
 import { POSTING_OFF_NOTICE, installRecordFor, postingNoticeDue, readInstalledVariants } from '../../core/installed-variants.js';
 import {
   auditAndRecordClaudeMd,
@@ -859,6 +860,7 @@ export function buildHudOnlyManifest(
       ambient: false, memory: false, hud: true, knowledge: false,
       curation: false, rules: false, flags: {}, proxy: false,
       behavior: false,
+      tdd: true,
       compliance: { enabled: false, frameworks: [] },
       // The exported default, not a literal — the one constant every other
       // module reads, so a moved default moves here too.
@@ -1403,6 +1405,10 @@ export const initCommand = new Command('init')
     // → false (FEATURE_DEFAULTS.behavior); re-inits and the Recommended path keep the prior
     // manifest value; only --behavior/--no-behavior and the Advanced wizard change it.
     let behaviorEnabled = seed.features.behavior;
+    // tdd: a machine switch init only carries: the seed holds the prior manifest value (on when the
+    // manifest has none, and under --reset), and no flag or wizard step changes it. `devflow tdd`
+    // is the only command that changes the value; `init --reset` turns it back on.
+    const tddEnabled = seed.features.tdd;
     // compliance: manifest-group (like proxy); seed from prior manifest value.
     // CLI override applied below in both Recommended and Advanced paths.
     let complianceEnabled = seed.features.compliance.enabled;
@@ -2215,6 +2221,16 @@ export const initCommand = new Command('init')
       hadComplianceRule = true;
     } catch { /* absent — no legacy artifact */ }
 
+    // The SETTLED switches, after the flag, the prompt and the seed have all had their say
+    // (D-LEARNING-VARIANT-INSTALL), never a raw seed or a repository's narrowing: built once here
+    // and passed whole to the install, the converge and the install record, so the files installed
+    // and the manifest written at the end of init cannot disagree about them.
+    const switches = machineSwitches({
+      curation: curationEnabled,
+      compliance: { enabled: complianceEnabled },
+      tdd: tddEnabled,
+    });
+
     // Install via file copy
     let installReport: InstallReport;
     const installWarnings: string[] = [];
@@ -2229,14 +2245,9 @@ export const initCommand = new Command('init')
         rulesMap,
         isPartialInstall: !!options.plugin,
         spinner: s,
-        // The SETTLED switch, after the flag, the prompt and the seed have all had
-        // their say (D-LEARNING-VARIANT-INSTALL): the files installed here and the
-        // manifest written at the end of init cannot disagree about it.
-        curation: curationEnabled,
-        // The SETTLED compliance switch, never a raw seed or a repository's narrowing: the
-        // variant follows the machine switch alone, and with it off the install refuses
-        // before it writes a file when the variant files are not all there.
-        compliance: complianceEnabled,
+        // With compliance off the install refuses before it writes a file when the variant
+        // files are not all there.
+        switches,
         trackerServers,
         // Non-fatal install notices with no other channel (skipped symlinks in the
         // generated reference tree, mode-normalisation failures) reach the user rather
@@ -2252,10 +2263,10 @@ export const initCommand = new Command('init')
       process.exit(1);
     }
 
-    // The one converge for both switches (D-LEARNING-VARIANT-INSTALL, AC-27): the file copy
+    // The one converge for every switch (D-LEARNING-VARIANT-INSTALL, AC-27): the file copy
     // above installed the variant of everything IT installed; on a `--plugin` install the
     // other plugins' files, already on disk, may still be another variant (this run may
-    // have flipped a switch), and the apply-decisions skill is removed here when the copy
+    // have flipped a switch), and a skill an off switch gates is removed here when the copy
     // skipped it on a partial install. It also converges the compliance skill and rule, so
     // enabling or disabling compliance during init needs no separate devflow compliance run.
     // Rewrites only what is installed. Warn-not-abort: a failure is a warning here and the
@@ -2264,20 +2275,16 @@ export const initCommand = new Command('init')
     const variantConverge = await convergeVariantAxes({
       claudeDir,
       devflowDir,
-      manifest: {
-        features: {
-          curation: curationEnabled,
-          compliance: { enabled: complianceEnabled, frameworks: complianceFrameworks },
-          rules: rulesEnabled,
-        },
-      },
+      switches,
+      frameworks: complianceFrameworks,
+      rulesEnabled,
       plugins: effectivePlugins,
       warn: (msg) => installWarnings.push(msg),
       backups,
     });
     if (verbose && variantConverge.converged) {
       p.log.info(
-        `Curation ${curationEnabled ? 'on' : 'off'}, compliance ${complianceEnabled ? 'on' : 'off'} variants: ` +
+        `Variants (${VARIANT_AXES.map(axis => `${axis} ${switches[axis] ? 'on' : 'off'}`).join(', ')}): ` +
         `${variantConverge.commandsRewritten.length} command(s) and ${variantConverge.agentsRewritten.length} agent(s) ` +
         `rewritten, ${variantConverge.unchanged} already current`,
       );
@@ -2873,7 +2880,7 @@ export const initCommand = new Command('init')
 
     // Write installation manifest for upgrade tracking (non-fatal — install already succeeded)
     const now = new Date().toISOString();
-    const installRecord = installRecordFor(variantConverge.converged, { curation: curationEnabled, compliance: complianceEnabled });
+    const installRecord = installRecordFor(variantConverge.converged, switches);
     const manifestData = {
       version,
       // Resolved above, before the install, because the skills install set is
@@ -2901,6 +2908,8 @@ export const initCommand = new Command('init')
         // overridden by --behavior/--no-behavior and the Advanced wizard. The rule file was
         // converged above to match it.
         behavior: behaviorEnabled,
+        // The tdd switch, carried from the prior manifest (on under --reset).
+        tdd: tddEnabled,
         // Resolved compliance state — seeded from prior manifest, overridden by CLI flags
         // and Advanced wizard selection. convergeComplianceArtifacts was called above.
         // normalizeFrameworks: dedup + filter unknowns before persisting.
