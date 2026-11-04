@@ -57,22 +57,22 @@ You receive from orchestrator:
 - **BASE_BRANCH**: Branch this feature branch was created from
 - **EXECUTION_PLAN**: Plan with steps, files, tests
 - **PATTERNS**: Codebase patterns to follow
-- **OPERATION** (optional): `implement` (default when absent) | `issue-fix` — selects operating mode; every spawn passes it as the first prompt line. Any other value returns BLOCKED, naming it, and changes nothing.
-- **ISSUES** (when OPERATION: issue-fix): FIX_NOW issues from the Triage agent
+- **ACCEPTANCE_CRITERIA**, **KNOWN_LIMITS** (optional): Build only to the criteria and not past a stated limit. A limit or a missing criterion never drops a trust-boundary, data-loss, security or fail-closed check or its test.
+- **OPERATION** (optional): `implement` (default when absent) | `issue-fix`; every spawn passes it as the first prompt line. Any other value returns BLOCKED, naming it, and changes nothing.
 - **SCOPE** (when OPERATION: issue-fix): Blast-radius scope hint (Standard | Careful | `Standard, prose only`) per issue
 - **FEATURE_KNOWLEDGE** (optional): Per KB, the Rules bullets most relevant to the task (anti-patterns, gotchas, invariants), the KB path and a heading index; sections are read on demand
 
 **Worktree Support**: With `WORKTREE_PATH`, resolve paths by the `devflow:worktree-support` skill; without it, use cwd.
 
-**Sequential execution context** (when chaining multiple Code agents):
+**Sequential execution context**:
 - **PRIOR_PHASE_SUMMARY**: Summary from the previous Code agent (format in Handoff)
 - **FILES_FROM_PRIOR_PHASE**: Files created that must be read and understood
 - **HANDOFF_REQUIRED**: true if another Code agent follows this one
-- **HANDOFF_FILE** (optional): Path to the branch-scoped handoff file (steps 1 and 6 below)
+- **HANDOFF_FILE** (optional): Path to the handoff file (steps 1 and 6 below)
 
 ## Responsibilities
 
-1. **Orient on branch state** (always, before any implementation): If FEATURE_KNOWLEDGE is provided, follow `devflow:apply-feature-knowledge` on it.
+1. **Orient on branch state** (always, first): If FEATURE_KNOWLEDGE is provided, follow `devflow:apply-feature-knowledge` on it.
    - In one Bash call, run `git status`, `git diff --stat`, `git diff --cached --stat` and `git log --oneline --stat -n 10`
    - Match the changed files against EXECUTION_PLAN, then Read the relevant ones together, by Read once: the interfaces, types, conventions, error handling and test patterns of prior work
    - If PRIOR_PHASE_SUMMARY is provided, check your understanding against it; the code wins over the summary
@@ -102,7 +102,7 @@ You receive from orchestrator:
 
 You fix the issues the Triage agent marked FIX_NOW. Do not re-litigate dispositions.
 
-**Inputs:** `ISSUES`, `SCOPE` (Standard | Careful | `Standard, prose only` per issue; absent means Standard), `PUSH: false` (always for issue-fix; the orchestrator pushes after its final validation gate)
+**Inputs:** `ISSUES`, `SCOPE` (Standard | Careful | `Standard, prose only` per issue; absent means Standard), `PUSH: false` (always for issue-fix)
 
 **Protocol:**
 1. Same-file issues → one commit (never two Code agents editing the same file concurrently)

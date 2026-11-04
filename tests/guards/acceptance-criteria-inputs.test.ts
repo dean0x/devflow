@@ -1,0 +1,177 @@
+/**
+ * The Code and Harden agents read the plan's acceptance criteria and known limits (#756).
+ *
+ * A spawn that holds a phase of the plan, or a self-review of the branch, can pass
+ * `ACCEPTANCE_CRITERIA` and `KNOWN_LIMITS`. Both agents then build, test and check only to the criteria,
+ * and neither treats a stated limit as a finding or builds past it. The limit and the criteria never
+ * lower a safety floor: a limit or a missing criterion never drops a trust-boundary, data-loss, security or
+ * fail-closed check or its test. Absent inputs keep today's behaviour, so both inputs are optional.
+ *
+ * This file reads the COMPILED agent files a session loads, in every variant key:
+ *
+ *   Code    curation on and off, each with tdd on and off (`dist/agents/`, `dist/curation-off/agents/`,
+ *           `dist/tdd-off/agents/`, `dist/curation-tdd-off/agents/`);
+ *   Harden  curation on and off (`dist/agents/`, `dist/curation-off/agents/`).
+ *
+ * Every arm runs through a named collector, and each known-bad probe feeds the same collector a
+ * body with one part removed, so a collector that stopped seeing a defect fails its own probe instead
+ * of passing vacuously.
+ *
+ * /implement passes them in its four builds (on, curation off, compliance off, both off): one Phase 2
+ * sentence puts the plan's Acceptance Criteria and Known limits into each phase or subtask
+ * `EXECUTION_PLAN`, whose own steps still set its scope (the single spawn already takes the full plan), and
+ * the one Harden spawn carries both input lines. The Harden line also keeps every pillar in force.
+ *
+ * What a green run does NOT prove: it proves the files carry the text. It does not prove that a model
+ * follows it.
+ */
+
+import { describe, it, expect } from 'vitest'
+
+import {
+  isAgentBlock,
+  parseFences,
+  requireDistFile,
+  resolveAgentSource,
+  resolveCurationOffSource,
+  resolveVariantOffSource,
+} from '../helpers.js'
+
+const INPUT_HEAD = '- **ACCEPTANCE_CRITERIA**, **KNOWN_LIMITS** (optional):'
+
+const NEVER_CUT_CLAUSE = 'A limit or a missing criterion never drops a trust-boundary, data-loss, security or fail-closed check or its test.'
+
+const CODE_INPUT_LINE = `${INPUT_HEAD} Build only to the criteria and not past a stated limit. ${NEVER_CUT_CLAUSE}`
+
+const HARDEN_INPUT_LINE =
+  `${INPUT_HEAD} Test to the criteria; every pillar still applies. A stated limit is not a finding. ${NEVER_CUT_CLAUSE}`
+
+interface Build { readonly label: string; readonly text: string }
+
+function required(label: string, text: string | null): string {
+  if (text === null) throw new Error(`${label} is absent: run \`npm run build:mds\``)
+  return text
+}
+
+function codeBuilds(): Build[] {
+  return [
+    { label: 'code (curation on, tdd on)', text: resolveAgentSource('code').content },
+    { label: 'code (curation off, tdd on)', text: required('dist/curation-off/agents/code.md', resolveCurationOffSource('agents', 'code')) },
+    { label: 'code (curation on, tdd off)', text: required('dist/tdd-off/agents/code.md', resolveVariantOffSource('tdd-off', 'agents', 'code')) },
+    { label: 'code (curation off, tdd off)', text: required('dist/curation-tdd-off/agents/code.md', resolveVariantOffSource('curation-tdd-off', 'agents', 'code')) },
+  ]
+}
+
+function hardenBuilds(): Build[] {
+  return [
+    { label: 'harden (curation on)', text: resolveAgentSource('harden').content },
+    { label: 'harden (curation off)', text: required('dist/curation-off/agents/harden.md', resolveCurationOffSource('agents', 'harden')) },
+  ]
+}
+
+/** The lines of a body that open with the input head. */
+function inputLines(text: string): string[] {
+  return text.split('\n').filter(line => line.startsWith(INPUT_HEAD))
+}
+
+/** Named collector: how a body falls short of carrying `expected` once, as its one criteria-and-limits input line. */
+function collectInputLineDefects(label: string, text: string, expected: string): string[] {
+  const lines = inputLines(text)
+  if (lines.length !== 1) return [`${label}: ${lines.length} criteria-and-limits input lines, expected 1`]
+  return lines[0] === expected ? [] : [`${label}: the criteria-and-limits input line differs from the pinned text`]
+}
+
+describe('the Code agent reads ACCEPTANCE_CRITERIA and KNOWN_LIMITS in every build (#756)', () => {
+  it.each(codeBuilds().map(b => [b.label, b.text] as const))('%s carries the input line and its never-cut clause once', (label, text) => {
+    expect(text.length, 'the body is read: the guard would pass vacuously on an empty one').toBeGreaterThan(4_000)
+    expect(collectInputLineDefects(label, text, CODE_INPUT_LINE)).toEqual([])
+  })
+
+  it('known-bad probes: a lost never-cut clause, a lost limit rule and a repeated line are each reported', () => {
+    const [{ label, text }] = codeBuilds()
+    const noClause = text.replace(` ${NEVER_CUT_CLAUSE}`, '')
+    expect(noClause, 'the seed must land').not.toBe(text)
+    expect(collectInputLineDefects(label, noClause, CODE_INPUT_LINE)).toEqual([`${label}: the criteria-and-limits input line differs from the pinned text`])
+    const noLimit = text.replace(' and not past a stated limit', '')
+    expect(noLimit, 'the seed must land').not.toBe(text)
+    expect(collectInputLineDefects(label, noLimit, CODE_INPUT_LINE)).toEqual([`${label}: the criteria-and-limits input line differs from the pinned text`])
+    const noLine = text.replace(`${CODE_INPUT_LINE}\n`, '')
+    expect(noLine, 'the seed must land').not.toBe(text)
+    expect(collectInputLineDefects(label, noLine, CODE_INPUT_LINE)).toEqual([`${label}: 0 criteria-and-limits input lines, expected 1`])
+    expect(collectInputLineDefects(label, `${text}\n${CODE_INPUT_LINE}\n`, CODE_INPUT_LINE)).toEqual([`${label}: 2 criteria-and-limits input lines, expected 1`])
+  })
+})
+
+const PHASE_PLAN_SENTENCE =
+  "Each phase or subtask `EXECUTION_PLAN` adds the plan's Acceptance Criteria and Known limits; its own steps still set its scope."
+
+const HARDEN_SPAWN_LINES = [
+  'ACCEPTANCE_CRITERIA: {extracted criteria if available}',
+  "KNOWN_LIMITS: {plan's Known limits, else (none)}",
+] as const
+
+function implementBuilds(): Build[] {
+  return [
+    { label: 'implement (on)', text: requireDistFile('implement.md') },
+    { label: 'implement (curation off)', text: required('dist/curation-off/commands/implement.md', resolveCurationOffSource('commands', 'implement')) },
+    { label: 'implement (compliance off)', text: required('compliance-off implement', resolveVariantOffSource('compliance-off', 'commands', 'implement')) },
+    { label: 'implement (both off)', text: required('both-off implement', resolveVariantOffSource('both-off', 'commands', 'implement')) },
+  ]
+}
+
+/** Named collector: how an /implement build falls short of passing the criteria and limits. */
+function collectImplementDefects(label: string, text: string): string[] {
+  const defects: string[] = []
+  const sentences = text.split(PHASE_PLAN_SENTENCE).length - 1
+  if (sentences !== 1) defects.push(`${label}: the phase-plan sentence appears ${sentences} times, expected 1`)
+  const harden = parseFences(text).filter(block => isAgentBlock(block, 'Harden'))
+  if (harden.length !== 1) return [...defects, `${label}: ${harden.length} Harden spawn blocks, expected 1`]
+  for (const line of HARDEN_SPAWN_LINES) {
+    if (!harden[0].split('\n').includes(line)) defects.push(`${label}: the Harden spawn lacks \`${line}\``)
+  }
+  return defects
+}
+
+describe('/implement passes ACCEPTANCE_CRITERIA and KNOWN_LIMITS in every build (#756)', () => {
+  it.each(implementBuilds().map(b => [b.label, b.text] as const))('%s carries the phase-plan sentence and both Harden lines', (label, text) => {
+    expect(text.length, 'the command is read: the guard would pass vacuously on an empty one').toBeGreaterThan(30_000)
+    expect(collectImplementDefects(label, text)).toEqual([])
+  })
+
+  it('known-bad probes: a lost sentence, a lost Harden line and a lost Harden block are each reported', () => {
+    const [{ label, text }] = implementBuilds()
+    const noSentence = text.replace(`${PHASE_PLAN_SENTENCE}\n`, '')
+    expect(noSentence, 'the seed must land').not.toBe(text)
+    expect(collectImplementDefects(label, noSentence)).toEqual([`${label}: the phase-plan sentence appears 0 times, expected 1`])
+    for (const line of HARDEN_SPAWN_LINES) {
+      const lost = text.replace(`${line}\n`, '')
+      expect(lost, 'the seed must land').not.toBe(text)
+      expect(collectImplementDefects(label, lost)).toEqual([`${label}: the Harden spawn lacks \`${line}\``])
+    }
+    const noHarden = text.replace('Agent(subagent_type="Harden")', 'Agent(subagent_type="Other")')
+    expect(noHarden, 'the seed must land').not.toBe(text)
+    expect(collectImplementDefects(label, noHarden)).toEqual([`${label}: 0 Harden spawn blocks, expected 1`])
+  })
+})
+
+describe('the Harden agent reads ACCEPTANCE_CRITERIA and KNOWN_LIMITS in both builds (#756)', () => {
+  it.each(hardenBuilds().map(b => [b.label, b.text] as const))('%s carries the input line and its never-cut clause once', (label, text) => {
+    expect(text.length, 'the body is read: the guard would pass vacuously on an empty one').toBeGreaterThan(2_000)
+    expect(collectInputLineDefects(label, text, HARDEN_INPUT_LINE)).toEqual([])
+  })
+
+  it('known-bad probes: a lost never-cut clause, a lost pillar rule, a lost limit rule and a repeated line are each reported', () => {
+    const [{ label, text }] = hardenBuilds()
+    const differs = [`${label}: the criteria-and-limits input line differs from the pinned text`]
+    const noClause = text.replace(` ${NEVER_CUT_CLAUSE}`, '')
+    expect(noClause, 'the seed must land').not.toBe(text)
+    expect(collectInputLineDefects(label, noClause, HARDEN_INPUT_LINE)).toEqual(differs)
+    const noPillars = text.replace('; every pillar still applies', '')
+    expect(noPillars, 'the seed must land').not.toBe(text)
+    expect(collectInputLineDefects(label, noPillars, HARDEN_INPUT_LINE)).toEqual(differs)
+    const noLimit = text.replace(' A stated limit is not a finding.', '')
+    expect(noLimit, 'the seed must land').not.toBe(text)
+    expect(collectInputLineDefects(label, noLimit, HARDEN_INPUT_LINE)).toEqual(differs)
+    expect(collectInputLineDefects(label, `${text}\n${HARDEN_INPUT_LINE}\n`, HARDEN_INPUT_LINE)).toEqual([`${label}: 2 criteria-and-limits input lines, expected 1`])
+  })
+})

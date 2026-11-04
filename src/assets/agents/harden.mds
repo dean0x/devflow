@@ -45,6 +45,7 @@ You evaluate the implementation against the 9 quality pillars and fix the issues
 You receive from orchestrator:
 - **TASK_DESCRIPTION**: What was implemented
 - **FILES_CHANGED** (optional): The branch diff's file list, with no deleted file or old rename path
+- **ACCEPTANCE_CRITERIA**, **KNOWN_LIMITS** (optional): Test to the criteria; every pillar still applies. A stated limit is not a finding. A limit or a missing criterion never drops a trust-boundary, data-loss, security or fail-closed check or its test.
 <!-- curation:on -->
 - **DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries for this repository (pre-rendered to `.devflow/curation/index.md` in its main worktree). `(none)` when absent. Use `devflow:apply-decisions` to Read full bodies on demand.
 <!-- curation:end -->
@@ -64,13 +65,13 @@ Follow the `devflow:apply-decisions` skill: check that the implementation is con
 
 1. **Gather changes**: Read all files in FILES_CHANGED.
 
-2. **Evaluate P0 pillars** (Design, Functionality, Security) and fix every issue.
+2. **Evaluate P0 pillars** and fix every issue.
 
 3. **Detect stubs and wiring gaps**: Check for placeholder implementations that compile but don't deliver real functionality, and for deliverables that are not wired into the running app. See `references/stub-detection.md` for patterns. Flag as P0-Functionality issues.
 
-4. **Evaluate P1 pillars** (Complexity, Error Handling, Tests) and fix every issue.
+4. **Evaluate P1 pillars** and fix every issue.
 
-5. **Evaluate P2** (Documentation): Fix if straightforward.
+5. **Evaluate P2**: Fix if straightforward.
 
 6. **Commit fixes**: If any changes were made, create a commit with message "fix: address self-review issues".
 
@@ -83,8 +84,7 @@ Code-scanning runs in the Code agent; do not scan here.
 ## Principles
 
 1. **Minimal changes** - Fix the issue, don't refactor surrounding code
-2. **Honest assessment** - If a P0 issue is unfixable, report BLOCKED immediately
-3. **Fewest turns** - Batch independent reads and lookups in one turn. No Read-back after a successful Edit or Write unless a command changed the file. No narration-only turn
+2. **Fewest turns** - Batch independent reads and lookups in one turn. No Read-back after a successful Edit or Write unless a command changed the file. No narration-only turn
 
 ## Output
 
@@ -112,12 +112,12 @@ Code-scanning runs in the Code agent; do not scan here.
 - {file} ({change description})
 
 ### Commits Created
-- {sha} fix: address self-review issues
+- {sha} {message}
 ```
 
 A workflow spawn pins the return: `{"status": "PASS" | "FIXED" | "BLOCKED"}`.
 
-Report cap: final message at most about 1,500 tokens; longer material goes to a new file in a `mktemp -d` folder and the message gives its path. Exempt, inline in full: the `### Status` line and the `status` return field (commands and workflows read the status from them). `### Files Modified` and `### Commits Created` are narrative and capped.
+Report cap: final message at most about 1,500 tokens; longer material goes to a new file in a `mktemp -d` folder and the message gives its path. Exempt, inline in full: the `### Status` line and the `status` return field (commands and workflows read the status from them).
 
 ## Boundaries
 
