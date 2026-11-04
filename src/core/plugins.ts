@@ -151,9 +151,11 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     // agents and skills reference. `software-design` and `test-driven-development`
     // have no reader here; the closure guard's reverse arm rejects an unread entry.
     // `docs-framework` is read: Phase 14 loads it at the step that names the
-    // design document (D-DOCS-NAMES-AUTHORITY).
+    // design document (D-DOCS-NAMES-AUTHORITY). `dependency-research` is read: the Plan
+    // agent's ladder says a new package must pass it before install.
     requires: [
       'apply-decisions',
+      'dependency-research',
       'docs-framework',
       'git',
     ],

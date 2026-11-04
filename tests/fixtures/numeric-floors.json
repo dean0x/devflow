@@ -204,11 +204,11 @@
     },
     {
       "id": "requires-closure-token-floor",
-      "floor": 41,
-      "pattern": "REF_TOKEN_FLOOR = 41",
+      "floor": 42,
+      "pattern": "REF_TOKEN_FLOOR = 42",
       "occurrences": 1,
       "sourceFile": "tests/guards/requires-closure.test.ts",
-      "description": "Distinct devflow: skill references across the widened closure corpus (dist/commands + agent sources + skill bodies incl. references/). Non-vacuity floor for the bidirectional requires: guard — a scanner that stopped matching would make both arms pass over an empty corpus. Measured 2026-09-19: 200 files, 297 sites, 44 distinct. LOWERED 44 -> 41 by #449 (a deliberate exception to \"a floor may only rise\"): the Code variants took the Step 0 table and the DOMAIN input out of the Code prompt (D-NO-RUNTIME-SKILLS), and the three skill names boundary-validation, dependency-research and patterns appeared only in that deleted Step 0 and DOMAIN text of the Code agent, so they left the corpus with it and no other reference was removed. Old value 44; accepted by the user 2026-10-12."
+      "description": "Distinct devflow: skill references across the widened closure corpus (dist/commands + agent sources + skill bodies incl. references/). Non-vacuity floor for the bidirectional requires: guard — a scanner that stopped matching would make both arms pass over an empty corpus. Measured 2026-09-19: 200 files, 297 sites, 44 distinct. LOWERED 44 -> 41 by #449 (a deliberate exception to \"a floor may only rise\"): the Code variants took the Step 0 table and the DOMAIN input out of the Code prompt (D-NO-RUNTIME-SKILLS), and the three skill names boundary-validation, dependency-research and patterns appeared only in that deleted Step 0 and DOMAIN text of the Code agent, so they left the corpus with it and no other reference was removed. Old value 44; accepted by the user 2026-10-12. RAISED 41 -> 42 by #756: the Plan agent's ladder names dependency-research again, in the line that sends a new package through it before install."
     },
     {
       "id": "installed-reference-count-github",
@@ -1238,11 +1238,11 @@
     },
     {
       "id": "plan-body-max",
-      "ceiling": 3255,
-      "pattern": "const PLAN_BODY_MAX_BYTES = 3_255",
+      "ceiling": 3254,
+      "pattern": "const PLAN_BODY_MAX_BYTES = 3_254",
       "occurrences": 1,
       "sourceFile": "tests/guards/plan-group-sizes.test.ts",
-      "description": "The Plan agent body, src/assets/agents/plan.md, in bytes. It overrides the built-in Plan machine-wide, so every turn of every Plan spawn of any session reads it (opus, high effort; three spawns per /plan run, and one per plan-mode research). Added by #756 (leaner plans) at 3,188, the size of the first version, below Explore's 3,276. Set to the measured 3,221 when the Never Cut list was extended to hold against the no-speculative-cases rule, then to 3,255 when it added the caller's stated requirements."
+      "description": "The Plan agent body, src/assets/agents/plan.md, in bytes. It overrides the built-in Plan machine-wide, so every turn of every Plan spawn of any session reads it (opus, high effort; three spawns per /plan run, and one per plan-mode research). Added by #756 (leaner plans) at 3,188, the size of the first version, below Explore's 3,276. Set to the measured 3,221 when the Never Cut list was extended to hold against the no-speculative-cases rule, then to 3,255 when it added the caller's stated requirements. Lowered again by #756 to the measured 3,254: the line that sends a new package through devflow:dependency-research before install was paid for by four cuts in the same file."
     },
     {
       "id": "skill-gap-analysis-max",
@@ -1478,11 +1478,11 @@
     },
     {
       "id": "catalog-description-max",
-      "ceiling": 6170,
-      "pattern": "CATALOG_DESCRIPTION_MAX_BYTES = 6_170",
+      "ceiling": 6103,
+      "pattern": "CATALOG_DESCRIPTION_MAX_BYTES = 6_103",
       "occurrences": 1,
       "sourceFile": "tests/guards/always-loaded-sizes.test.ts",
-      "description": "Sum of the description bytes of every skill, command and agent row that a default install lists (core plugins, compliance off, no language plugin). Claude Code puts these rows in every main turn of every session. Added by #706 (lean always-loaded text) at 6,187 (7,048 on main before the cut, which already held the other-targets skill rows). Lowered by #706 (lean descriptions, the rest) to 5942. Raised by #756 from 5942 to 6170 (228 bytes) for the description of the Plan agent, which devflow now ships in place of the built-in Plan. A typical session lists one Plan row either way: devflow's replaces the built-in's, whose length is not measured here, so a typical session reads about the same."
+      "description": "Sum of the description bytes of every skill, command and agent row that a default install lists (core plugins, compliance off, no language plugin). Claude Code puts these rows in every main turn of every session. Added by #706 (lean always-loaded text) at 6,187 (7,048 on main before the cut, which already held the other-targets skill rows). Lowered by #706 (lean descriptions, the rest) to 5942. Raised by #756 from 5942 to 6170 (228 bytes) for the description of the Plan agent, which devflow now ships in place of the built-in Plan. A typical session lists one Plan row either way: devflow's replaces the built-in's, whose length is not measured here, so a typical session reads about the same. Lowered by #756 from 6170 to the measured 6103: the Plan agent description lost `Read-only ` and `, critical files, known limits` (40 bytes), and the ceiling's remaining 27 bytes of slack went with them."
     },
     {
       "id": "harden-body-max",
