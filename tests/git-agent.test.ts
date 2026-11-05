@@ -3596,6 +3596,18 @@ describe('git references: the compliance-off build carries no evidence paste, ex
       }
       expect(off, 'the off file keeps a caller block').not.toContain('Caller block');
     });
+
+    it(`${provider}/ensure-pr-ready: step 4a keeps the Comment-sink scrub in the compliance-off file and drops the caller-block phrases`, () => {
+      const rel = operationReferenceRel('ensure-pr-ready', provider);
+      if (rel === null) throw new Error(`ensure-pr-ready has no reference for ${provider}`);
+      const on = readBuiltReference(SKILL_REFS_OUTPUT_DIR, rel);
+      const off = readBuiltReference(COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR, rel);
+      const callerPhrases = ['then append the caller blocks', ' — a failed one posts neither block'];
+      expect(collectHeldLiterals(on, callerPhrases), 'the on file keeps both phrases, or the absence check proves nothing').toEqual(callerPhrases);
+      expect(off, 'the off file must keep the scrub rule of step 4a').toContain('Apply the Comment-sink scrub (D11);');
+      expect(off, 'the off file must keep the D11 paragraph pointer of step 4a').toContain('the D11 paragraph below creates the PR.');
+      expect(collectHeldLiterals(off, callerPhrases)).toEqual([]);
+    });
   }
 
   it('ensure-pr-ready source: the caller block is an on-only arm, and no off arm follows it', () => {
@@ -3833,6 +3845,22 @@ const SCRUB_LINE_TOKENS: readonly string[] = [
  */
 const ORDERED_SUBSET_SCRUB_OPS: readonly string[] = ['ensure-traceable-issue'];
 
+/**
+ * The two phrases of ensure-pr-ready step 4a that only the compliance-on file carries, each with the
+ * text the compliance-off line has in its place: the compliance-off build has no caller block to append,
+ * so its 4a line names neither the append nor the block a failed scrub drops. The rest of the line, the
+ * scrub rule included, is the same bytes in both builds.
+ */
+const ENSURE_PR_READY_CALLER_PHRASES: ReadonlyArray<readonly [on: string, off: string]> = [
+  [', then append the caller blocks', ''],
+  [' — a failed one posts neither block;', ';'],
+];
+
+/** The compliance-on text of ensure-pr-ready as its compliance-off scrub lines must read it. */
+function withoutCallerBlockPhrases(on: string): string {
+  return ENSURE_PR_READY_CALLER_PHRASES.reduce((text, [phrase, instead]) => text.replace(phrase, instead), on);
+}
+
 type ScrubRelation = 'identical' | 'ordered-subset';
 
 /** Named extractor: the lines of a reference that carry a scrub token, in order. */
@@ -3901,8 +3929,9 @@ describe('git references: the scrub and the writes it gates are unchanged by the
     for (const provider of TRACKER_PROVIDER_IDS) {
       it(`${provider}/${op}: the compliance-off scrub lines are ${relationOf(op) === 'identical' ? 'the compliance-on lines' : 'an ordered subset of the compliance-on lines'}`, () => {
         const rel = refOf(op, provider);
-        expect(scrubLinesOf(readOn(rel)).length, 'the on file must hold scrub lines, or the comparison proves nothing').toBeGreaterThan(0);
-        expect(collectScrubDefects(readOn(rel), readOff(rel), relationOf(op))).toEqual([]);
+        const on = op === 'ensure-pr-ready' ? withoutCallerBlockPhrases(readOn(rel)) : readOn(rel);
+        expect(scrubLinesOf(on).length, 'the on file must hold scrub lines, or the comparison proves nothing').toBeGreaterThan(0);
+        expect(collectScrubDefects(on, readOff(rel), relationOf(op))).toEqual([]);
       });
     }
   }
