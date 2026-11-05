@@ -144,7 +144,7 @@ For each capability below, establish whether it is reachable in this session.
 |---|---|
 | read project and issue-type metadata | `## Project` key, `## Issue Types`, `## Required Fields` |
 | enumerate and apply workflow transitions | `## Transitions` |
-| list issues by a structured filter | `## Wave Filter`, `## Iteration Policy` |
+| list issues by a structured filter | `## Iteration Policy` |
 | identify the current user | `## Assignee`, `## Dedup Strategy` (`authored-marker`) |
 | read and write an entity property on an issue | `## Dedup Strategy` (`entity-property`) |
 | edit an existing comment in place | `## Dedup Strategy` (`comment-edit-in-place`) |
@@ -233,7 +233,6 @@ re-derived per repository at call time, so the value here is a last resort.
 | `## Transitions` | repo-derived | `none` | an exact match against the workflow states enumerated this run; never inferred |
 | `## Assignee` | global-safe | `none` | enum: `none` \| `self`; `self` requires identify-current-user and degrades with it; **never** a literal email address or account identifier |
 | `## Tech Debt` | global-safe | `single rolling item` | enum: `single rolling item` |
-| `## Wave Filter` | repo-derived | `tracker not configured` | structured filter fields only; no free-text query field is permitted |
 | `## Reference Rendering` | global-safe | the resolved provider's documented default | `^[A-Za-z0-9 #{}/_.-]{1,60}$`; denylist: backtick \| dollar \| double-quote \| backslash \| semicolon \| newline; a discard ⇒ default + a `### Substitutions` row ; **never write `# UNRESOLVED:` here** — an unresolved rendering is the resolved provider's documented default, which its mechanics state and the reader applies |
 | `## Dedup Strategy` | global-safe | probe live | enum: `entity-property` \| `comment-edit-in-place` \| `authored-marker` \| `post-with-warning` — the reader's ladder rungs, strongest evidence first — recorded with its probe evidence |
 
@@ -281,9 +280,6 @@ none
 
 ## Tech Debt
 single rolling item
-
-## Wave Filter
-- <structured field>: <value>
 
 ## Reference Rendering
 branch-token: <token shape>
