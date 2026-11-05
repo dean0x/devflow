@@ -127,8 +127,8 @@ export const PROBE_MARKERS: readonly Marker[] = [
     label: 'list-by-filter',
     pattern: /gh issue list[^\n]*--(?:label|milestone)\b/i,
     justification:
-      'GAP-26\'s wave defect exactly: a per-round re-read of the wave\'s issues. The wave states ' +
-      'that refresh as one `fetch-issues-batch` call per round, and never capping how many tickets ' +
+      'GAP-26\'s defect exactly: a per-round re-read of a set of issues. A caller states that ' +
+      'refresh as one `fetch-issues-batch` call per round, and never capping how many tickets ' +
       'a round runs keeps its page bound an API bound — which only holds while the call is made ' +
       'once per round.',
   },
@@ -387,7 +387,7 @@ describe('capability-hoist: no capability probe runs inside a loop [DR-11]', () 
           '## Operation: seeded-setup-task',
           '',
           '**Process:**',
-          'Iterate over every ticket in the wave:',
+          'Iterate over every ticket in the batch:',
           '   - Resolve the branch type through the label→type map for this ticket.',
           '',
           '**Output:**',

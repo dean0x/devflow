@@ -63,7 +63,6 @@ describe('POSTING_OFF_NOTICE', () => {
       'review or resolution summaries',
       'backlog entries',
       'review-thread replies',
-      'wave reports',
       'plan artifacts',
       'release back-links',
       'GitHub or a tracker',

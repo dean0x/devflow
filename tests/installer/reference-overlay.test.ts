@@ -1910,7 +1910,7 @@ describe('compliance-off reference install (AC-41, AC-50)', () => {
   const CORE = DEVFLOW_PLUGINS.filter(p => p.name === 'devflow-core-skills');
   const SKILLS = new Map([['git', 'devflow-core-skills'], ['agent-references', 'devflow-core-skills']]);
 
-  /** The generated references the compliance-off manifest drops: the 16 operation files and the publication gate. */
+  /** The generated references the compliance-off manifest drops: the 13 operation files and the publication gate. */
   const omittedRefs = (): string[] => {
     const kept = new Set(installedReferenceManifest({ compliance: false }));
     return generatedReferenceManifest().filter(rel => !kept.has(rel));
@@ -1974,14 +1974,14 @@ describe('compliance-off reference install (AC-41, AC-50)', () => {
     await fs.rm(tmp, { recursive: true, force: true });
   });
 
-  it('the omitted references are the 16 operation files and the publication gate', () => {
+  it('the omitted references are the 13 operation files and the publication gate', () => {
     const omitted = omittedRefs();
-    expect(omitted).toHaveLength(17);
+    expect(omitted).toHaveLength(14);
     expect(omitted).toContain('publication-gate.md');
     expect(omitted.filter(rel => rel !== 'publication-gate.md').every(rel => /^(pr|tracker\/[a-z]+)\//.test(rel))).toBe(true);
   });
 
-  it('a fresh compliance-off install holds none of the 17 omitted references and none of the 3 flat files (TP-57)', async () => {
+  it('a fresh compliance-off install holds none of the 14 omitted references and none of the 3 flat files (TP-57)', async () => {
     const report = await install({ compliance: false });
 
     for (const rel of omittedRefs()) {

@@ -1046,7 +1046,6 @@ describe('git agent — static content guards', () => {
     'post-review-summary',
     'post-resolution-summary',
     'backlink-shipped-issues',
-    'post-wave-report',
     'gather-release-evidence',
     'setup-task',
     'validate-branch',
@@ -1123,18 +1122,6 @@ describe('git agent — static content guards', () => {
       extractOpSectionOrEmpty(sinkCorpusWithoutPrHost(), 'post-resolution-summary'),
       'the 60000 cap must live ONLY in the PR-host reference',
     ).not.toContain('60000');
-  });
-
-  it('post-wave-report: 60000-char comment cap is present', () => {
-    // Mode 'union' [DR-18]: P2-S6 moved this op's compose step into the generated
-    // post-wave-report reference, and §14.3 classes `size_cap` as one of the two
-    // genuine provider facts — so the cap travels with the mechanics and the pin
-    // follows it (GAP-21). The floor literal is unchanged; only the corpus widened.
-    const sec = extractOpSection(cachedSinkCorpus(), 'post-wave-report', 'union');
-    expect(
-      sec,
-      'post-wave-report: missing 60000-char cap',
-    ).toContain('60000');
   });
 
   it('manage-debt: 60000-char archive threshold is present (AC-0.12)', () => {
@@ -2389,16 +2376,16 @@ describe('git agent — static content guards', () => {
     ).toHaveLength(0);
   });
 
-  it('D11 known-bad probe: dropping the PR-host tree narrows the posting set from 8 to 5 (SG-8 non-vacuity)', () => {
+  it('D11 known-bad probe: dropping the PR-host tree narrows the posting set from 7 to 4 (SG-8 non-vacuity)', () => {
     // SG-8's proof obligation, and the one thing the floor of 8 above cannot show
     // on its own: the forward guard is green whichever file carries a posting
     // op's sink, so green alone never establishes that the union corpus is what
-    // carries three of those eight. This drives the SAME predicate over the
+    // carries three of those seven. This drives the SAME predicate over the
     // narrowed corpus and pins the number that only the widening supplies.
     //
-    // Three of the eight vanish entirely — post-review-summary,
-    // post-resolution-summary and resolve-review-threads post only from `pr/`. The five tracker-side posters stay: backlink-shipped-issues,
-    // ensure-traceable-issue, manage-debt and post-wave-report post from
+    // Three of the seven vanish entirely — post-review-summary,
+    // post-resolution-summary and resolve-review-threads post only from `pr/`. The four tracker-side posters stay: backlink-shipped-issues,
+    // ensure-traceable-issue and manage-debt post from
     // `tracker/{provider}/`, and so does ensure-pr-ready — a tracker operation whose
     // per-provider reference carries the PR skeleton too, so both of its PR-body
     // writes (step 4a's create and step 4b's scrub-then-edit) sit beside its
@@ -2407,7 +2394,6 @@ describe('git agent — static content guards', () => {
       'manage-debt',
       'backlink-shipped-issues',
       'ensure-traceable-issue',
-      'post-wave-report',
       'ensure-pr-ready',
     ];
     const narrowed = sinkCorpusWithoutPrHost();
@@ -2420,7 +2406,7 @@ describe('git agent — static content guards', () => {
     // regression reported as agreement (the `scanned > 0` anti-pattern, one level up).
     expect(
       [...postingOps].sort(),
-      `without references/${PR_HOST_DESTINATION_ROOT}/ the posting set must fall from 8 to exactly these 5 ` +
+      `without references/${PR_HOST_DESTINATION_ROOT}/ the posting set must fall from 7 to exactly these 4 ` +
       'ops — a set that does not move proves the union corpus was never load-bearing',
     ).toEqual([...EXPECTED_WITHOUT_PR_HOST].sort());
   });
@@ -2969,15 +2955,14 @@ describe('git agent — static content guards', () => {
   //       The prior combined predicate (<untrusted-issue-body> OR <external-thread>) scored 3 on
   //       main from the pre-existing <external-thread> ops, making the issue-body detection vacuous.
   //
-  //   (b) <external-thread>: fetch-review-threads, post-resolution-summary, post-wave-report.
+  //   (b) <external-thread>: fetch-review-threads, post-resolution-summary.
   //       Pre-existing on main (stabilisation assertion, named-set ensures no silent op drift).
   //
   // OP-SCOPED: an op's slice is its OWN section, cut at the next unfenced `## ` heading, so the
   // shared `## Principles` / `## Boundaries` trailer can never satisfy the predicate for the last
   // operation in the file. Every listed op carries its containment marker itself:
-  // `fetch-review-threads` wraps the bodies it returns, while `post-resolution-summary` and
-  // `post-wave-report` each state the non-reproduction half of Principle 8 for the remote-derived
-  // artifact they post.
+  // `fetch-review-threads` wraps the bodies it returns, while `post-resolution-summary`
+  // states the non-reproduction half of Principle 8 for the remote-derived artifact it posts.
 
   /**
    * The remote-body placeholders a summary op's compose template must never carry.
@@ -3028,13 +3013,11 @@ describe('git agent — static content guards', () => {
     // ── (b) External-thread containment ──────────────────────────────────────
     // Predicate: <external-thread> ONLY.
     // Named set: stabilises the set; any silent removal of an expected op is loud.
-    // These three ops pre-existed on main; the assertion existed there too — its non-vacuity
+    // These ops pre-existed on main; the assertion existed there too — its non-vacuity
     // is proved by the named-set: removing <external-thread> from any listed op fails toContain.
-    const EXPECTED_EXTERNAL_THREAD_OPS = ['fetch-review-threads', 'post-resolution-summary', 'post-wave-report'];
-    // Every op's non-reproduction reminder is in its own reference (D-OP-ONE-REF), so all three
-    // are read in 'sole' mode. post-wave-report's reminder is provider-neutral step text that
-    // each provider's reference carries; the GitHub reference stands for them here and the
-    // per-provider read is the moved-obligations arm at the end of this file.
+    const EXPECTED_EXTERNAL_THREAD_OPS = ['fetch-review-threads', 'post-resolution-summary'];
+    // Every op's non-reproduction reminder is in its own reference (D-OP-ONE-REF), so both
+    // are read in 'sole' mode.
     const opsWithExternalThread = opNames.filter(
       op => opSection(op).includes('<external-thread>'),
     );
@@ -3052,16 +3035,15 @@ describe('git agent — static content guards', () => {
     // Negative arm: summary/reply ops must not interpolate remote body placeholders.
     //
     // Mode 'union' [DR-18]: each of these ops is read over every file that declares it
-    // — references/pr/ for the two review-summary ops, each provider's mechanics for
-    // post-wave-report — and a placeholder is most likely to appear in a compose
-    // template. A negative check narrowed to one provider goes blind exactly where the
-    // risk is (the same reasoning that keeps `learn-conventions`' negative arm on the
-    // sink corpus).
+    // — references/pr/ for the two review-summary ops — and a placeholder is most likely
+    // to appear in a compose template. A negative check narrowed to one file goes blind
+    // exactly where the risk is (the same reasoning that keeps `learn-conventions`'
+    // negative arm on the sink corpus).
     //
     // In-scope witness: every compose template states the 60000-char cap, and the
     // contract block does not. A surface without `60000` is not reading the compose
     // half, and the absence check below would be green over the wrong text.
-    const SUMMARY_OPS = ['post-review-summary', 'post-resolution-summary', 'post-wave-report'];
+    const SUMMARY_OPS = ['post-review-summary', 'post-resolution-summary'];
     for (const op of SUMMARY_OPS) {
       const surface = summaryComposeSurface(cachedSinkCorpus(), op);
       expect(
@@ -3337,7 +3319,6 @@ export const GIT_OPERATION_ROSTER: readonly string[] = [
   'backlink-shipped-issues',
   'associate-release',
   'ensure-traceable-issue',
-  'post-wave-report',
   'update-pr-evidence',
 ];
 
@@ -3379,7 +3360,7 @@ describe('git agent: the operation roster is unchanged (registry Guard 6)', () =
   });
 
   it('the roster check is non-vacuous, and the collector sees a seeded change', () => {
-    expect(GIT_OPERATION_ROSTER.length, 'the named set is empty').toBe(20);
+    expect(GIT_OPERATION_ROSTER.length, 'the named set is empty').toBe(19);
     const seeded = '## Operations\n\n| Operation | Purpose |\n|---|---|\n| `setup-task` | a |\n| `renamed-op` | b |\n\n## Output\n\n| `later-op` | c |\n';
     expect(collectOperationNames(seeded)).toEqual(['setup-task', 'renamed-op']);
   });
@@ -3390,7 +3371,7 @@ describe('git agent: the operation roster is unchanged (registry Guard 6)', () =
 //
 // A machine with compliance off installs no step that posts to GitHub or a tracker, so
 // the agent that routes those operations holds no row, no loading line and no name for
-// any of the eight. The comment-sink scrub stays outside every arm: the operations that
+// any of the seven. The comment-sink scrub stays outside every arm: the operations that
 // remain (PR create, issue create, release create) still publish a body through it.
 // ---------------------------------------------------------------------------
 
@@ -3426,9 +3407,9 @@ describe('git agent: the compliance-off build carries no posting operation (AC-1
   if (offText === null) throw new Error('dist/compliance-off/agents/git.md is absent: run `npm run build:mds`');
   const off = offText;
 
-  it('names no posting operation anywhere, while the compliance-on agent names each of the eight', () => {
+  it('names no posting operation anywhere, while the compliance-on agent names each of the seven', () => {
     expect(collectPostingOpNames(off)).toEqual([]);
-    expect([...collectPostingOpNames(on)].sort(), 'the on agent must name all eight, or the scan proves nothing').toEqual([...POSTING_OPERATIONS].sort());
+    expect([...collectPostingOpNames(on)].sort(), 'the on agent must name all seven, or the scan proves nothing').toEqual([...POSTING_OPERATIONS].sort());
   });
 
   it('routes every other operation, in the registered order', () => {
@@ -3595,17 +3576,28 @@ describe('git references: the compliance-off build carries no evidence paste, ex
       });
     }
 
-    it(`${provider}/ensure-pr-ready: the compliance-off file admits the wave block through the links-only check and keeps the wave caller block`, () => {
+    it(`${provider}/ensure-pr-ready: neither build names a wave block, and the compliance-off file keeps no caller block`, () => {
       const rel = operationReferenceRel('ensure-pr-ready', provider);
       if (rel === null) throw new Error(`ensure-pr-ready has no reference for ${provider}`);
       const on = readBuiltReference(SKILL_REFS_OUTPUT_DIR, rel);
       const off = readBuiltReference(COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR, rel);
-      expect(on).toContain('`PR_WAVE_BLOCK` (`check wave`)');
-      expect(on, 'the on file keeps the plain wave check').not.toContain('--links-only');
-      expect(off).toContain('check wave --links-only <file>');
-      expect(off).toContain('`PR_WAVE_BLOCK`');
+      expect(on, 'the on file keeps its caller block, or the absence checks below read the wrong file').toContain('   - **Caller blocks**');
+      for (const [name, text] of [['on', on], ['off', off]] as const) {
+        expect(text, `the ${name} file names the wave block input`).not.toContain('PR_WAVE_BLOCK');
+        expect(text, `the ${name} file names the wave gate`).not.toContain('check wave');
+        expect(text, `the ${name} file keeps a marker line`).not.toContain('compliance:');
+      }
+      expect(off, 'the off file keeps a caller block').not.toContain('Caller block');
     });
   }
+
+  it('ensure-pr-ready source: the caller block is an on-only arm, and no off arm follows it', () => {
+    const lines = readFileSync(path.join(ROOT, 'src', 'assets', 'mds', 'git', '_ops_steps.mds'), 'utf-8').split('\n');
+    const at = lines.findIndex(line => line.startsWith('   - **Caller blocks**'));
+    expect(at, 'the caller block line is not in _ops_steps.mds').toBeGreaterThan(0);
+    expect(lines[at - 1], 'the caller block opens an on arm').toBe('<!-- compliance:on -->');
+    expect(lines[at + 1], 'the on arm ends right after the caller block, with no off arm').toBe('<!-- compliance:end -->');
+  });
 
   it('decision-markers: the compliance-off file drops the thread-resolution (D9) and publication-gate (D10) rows and keeps the other markers', () => {
     const on = readBuiltReference(SKILL_REFS_OUTPUT_DIR, 'decision-markers.md');
@@ -4060,8 +4052,8 @@ describe('git agent: the D9 resolve condition is stated once in the reference tr
 // #358 moved non-contract text out of dist/agents/git.md into the references
 // each operation already loads: resolve-review-threads' verdict definitions and
 // its rate-limit pre-read, check-merge-readiness' report-only rule (PR-host
-// tree), ensure-traceable-issue's D3 section list and untrusted-input rule, and
-// post-wave-report's input definitions (every tracker provider's tree). A move is
+// tree), and ensure-traceable-issue's D3 section list and untrusted-input rule
+// (every tracker provider's tree). A move is
 // only a move while three things hold, and each arm below owns one:
 //   - the text is inside the op's own section of EVERY tree that must carry it
 //     (a tracker op resolves its provider per spawn, so one provider carrying it
@@ -4097,9 +4089,6 @@ const MOVED_OBLIGATIONS: readonly MovedObligation[] = [
   { op: 'check-merge-readiness', literal: 'Never take action on the PR', trees: PR_HOST_TREE },
   { op: 'ensure-traceable-issue', literal: '**D3 issue template sections:** `## Initial Request`, `## Product Requirements`, `## Implementation Plan`', trees: TRACKER_PROVIDER_TREES },
   { op: 'ensure-traceable-issue', literal: '`TASK_DESCRIPTION`, `INITIAL_REQUEST`, `REQUIREMENTS` and `LABELS` are caller-supplied and untrusted', trees: TRACKER_PROVIDER_TREES },
-  { op: 'post-wave-report', literal: '- `TRACKING_ISSUE`: tracker issue reference for the parent tracking issue', trees: TRACKER_PROVIDER_TREES },
-  { op: 'post-wave-report', literal: '- `WAVE_REPORT_PATH`: Repo-relative or absolute path to the wave-report.md file', trees: TRACKER_PROVIDER_TREES },
-  { op: 'post-wave-report', literal: '- `WAVE_ID`: Timestamped wave directory slug', trees: TRACKER_PROVIDER_TREES },
 ];
 
 /**
