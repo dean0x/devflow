@@ -811,6 +811,7 @@ describe('tool/body agreement (D-TOOL-BODY-MATCH)', () => {
 });
 
 describe('structured return (D-STRUCTURED-RETURN-TOOL)', () => {
+  // No devflow command spawns these with a schema now, but a user can spawn them from their own Workflow script with one, and a tools list without StructuredOutput would break that spawn.
   it('Review, Design and Synthesize hold StructuredOutput', () => {
     for (const name of ['review', 'design', 'synthesize']) {
       expect(agent(name).fm.tools, name).toContain('StructuredOutput');

@@ -14,9 +14,9 @@ import * as path from 'path'
 import { ROOT, resolveAgentSource, resolveCurationOffSource } from '../helpers.js'
 
 /** The Design agent body of the curation-on build, dist/agents/design.md, in bytes. */
-const DESIGN_BODY_MAX_BYTES = 3_360
+const DESIGN_BODY_MAX_BYTES = 3_348
 /** The Design agent body of the curation-off build, dist/curation-off/agents/design.md, in bytes. */
-const DESIGN_BODY_CURATION_OFF_MAX_BYTES = 2_794
+const DESIGN_BODY_CURATION_OFF_MAX_BYTES = 2_782
 /** The Architect agent body of the curation-on build, dist/agents/architect.md, in bytes. */
 const ARCHITECT_BODY_MAX_BYTES = 3_782
 /** The Architect agent body of the curation-off build, dist/curation-off/agents/architect.md, in bytes. */

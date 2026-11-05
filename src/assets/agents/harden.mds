@@ -115,9 +115,7 @@ Code-scanning runs in the Code agent; do not scan here.
 - {sha} {message}
 ```
 
-A workflow spawn pins the return: `{"status": "PASS" | "FIXED" | "BLOCKED"}`.
-
-Report cap: final message at most about 1,500 tokens; longer material goes to a new file in a `mktemp -d` folder and the message gives its path. Exempt, inline in full: the `### Status` line and the `status` return field (commands and workflows read the status from them).
+Report cap: final message at most about 1,500 tokens; longer material goes to a new file in a `mktemp -d` folder and the message gives its path. Exempt, inline in full: the `### Status` line (commands read the status from it).
 
 ## Boundaries
 

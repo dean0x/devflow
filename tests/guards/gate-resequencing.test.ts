@@ -75,8 +75,7 @@ function collectStatusDefects(f: StatusFiles): string[] {
   const out: string[] = []
   const need = (what: string, ok: boolean): void => { if (!ok) out.push(what) }
   need('harden.md: Output does not declare `### Status: PASS | FIXED | BLOCKED`', f.harden.includes('### Status: PASS | FIXED | BLOCKED'))
-  need('harden.md: the workflow return is not pinned', f.harden.includes('{"status": "PASS" | "FIXED" | "BLOCKED"}'))
-  need('harden.md: the exempt fields are not the Status line and the status return field', /Exempt, inline in full: the `### Status` line and the `status` return field/.test(f.harden))
+  need('harden.md: the exempt field is not the Status line', /Exempt, inline in full: the `### Status` line \(commands read the status from it\)\./.test(f.harden))
   need('harden.md: the three statuses are not defined', /PASS when no change was needed, FIXED when you committed fixes and every P0 and P1 is fixed, and BLOCKED when a P0 cannot be fixed in scope/.test(f.harden))
   need('quality-gates SKILL.md: the overall status is not PASS / FIXED / BLOCKED', f.skillMd.includes('Status: PASS / FIXED / BLOCKED'))
   need('report-template.md: the overall status is not PASS / FIXED / BLOCKED', f.template.includes('**Status**: PASS / FIXED / BLOCKED'))

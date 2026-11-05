@@ -7,7 +7,7 @@ output-dir: dist/agents
 @import "./_partials/_design.mds" as design
 ---
 name: Design
-description: "Gap analysis of a spec, plan or ticket set; one focus per spawn."
+description: "Gap analysis of a spec or plan; one focus per spawn."
 model: opus
 effort: high
 skills:
