@@ -26,8 +26,8 @@
  * github-status-lines.txt is frozen, and the --unfreeze refusal guard below
  * protects that fixture only. Overriding the freeze takes an explicit, dated user
  * authorisation naming the exact bytes it permits, and each such authorisation is
- * spent by the single commit that uses it. Ten have been granted and all
- * ten are spent:
+ * spent by the single commit that uses it. Eleven have been granted and all
+ * eleven are spent:
  *
  *   2026-09-14  e4876e0  the extractor retarget after the mechanics split
  *   2026-09-15  c0b9860  the two `**Mechanics:**` pointer lines, at fixture
@@ -86,6 +86,17 @@
  *                        and spent on it, a deletion: manage-debt step 3 lists
  *                        only the two resolution-summary sections it adds items
  *                        from. Nothing was added; the other 238 lines are
+ *                        byte-identical.
+ *   2026-11-05  (#756; user)  the eleventh re-capture, granted for six lines
+ *                        and spent on all six, deletions only: the sources of
+ *                        those lines are removed with the dynamic feature.
+ *                        Fixture lines 222-224 (post-wave-report: the dedup
+ *                        line, the compose opener and the markdown fence), 227
+ *                        (the wave-report marker) and 231-232 (the two
+ *                        dynamic-build lines on the report's dedup and on the
+ *                        missing tracking issue). The sampler also dropped the
+ *                        post-wave-report reference from its closed list.
+ *                        Nothing was added; the other 232 lines are
  *                        byte-identical.
  *
  * THE AUTHORISATION IS SPENT. Any further change to this fixture requires a new
@@ -183,8 +194,8 @@ export const TOTAL_CHARS = 17_335
 export const TOTAL_LINES = 357
 
 // Fixture invariants — these ARE bytes (Buffer.byteLength), not JS .length
-export const FIXTURE_BYTES = 18_167
-export const FIXTURE_NEWLINES = 238
+export const FIXTURE_BYTES = 17_334
+export const FIXTURE_NEWLINES = 232
 
 describe('golden: github-status-lines frozen fixture (AC-0.9)', () => {
   it('extractStatusLines() is byte-equal to the golden fixture', () => {
