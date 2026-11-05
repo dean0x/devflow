@@ -3,9 +3,10 @@
  * both curation builds, the mode skill that each preloads, and the Explore and Plan agent bodies. A spawn reads
  * these bytes again in every turn, so each ceiling holds the size that the lean cut reached. The /plan
  * command builds keep their ceilings in command-size.test.ts. Each row is registered in
- * `tests/fixtures/numeric-floors.json`; lowered, never raised. The one exception is #752, which restored
+ * `tests/fixtures/numeric-floors.json`; lowered, never raised. The two exceptions are #752, which restored
  * the Architect plan-writing section and the design-review Suggest lines after wording cuts in the same
- * files; each raise states its bytes in its row.
+ * files, and #764, which raised the Plan agent ceiling for parity with the built-in Plan agent, by
+ * maintainer decision; each raise states its bytes in its row.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -24,7 +25,7 @@ const ARCHITECT_BODY_CURATION_OFF_MAX_BYTES = 3_216
 /** The Explore agent body (hand-authored, one build), in bytes. */
 const EXPLORE_BODY_MAX_BYTES = 3_276
 /** The Plan agent body (hand-authored, one build), in bytes. */
-const PLAN_BODY_MAX_BYTES = 3_252
+const PLAN_BODY_MAX_BYTES = 3_924
 
 /** [skill, ceiling of its SKILL.md in bytes]. Each row's text is the pattern its numeric-floors.json entry pins. */
 const SKILL_MAX_BYTES: ReadonlyArray<readonly [string, number]> = [

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The Plan agent carries each behaviour of the built-in Plan agent, in devflow's own words** ([#764](https://github.com/dean0x/devflow/issues/764)). The Plan agent explores the code, then designs an implementation plan. It keeps to a focus or perspective that the prompt assigns. It reads first any file the prompt asks for. It follows the nearest code, its patterns and its conventions where they fit, and traces the code paths. It weighs the trade-offs of design and architecture choices. When the prompt gives no report shape, each step lists the steps it depends on and the problems to expect, and the report names 3 to 5 critical files. As a devflow addition, each critical file has one reason. The read-only contract names temp directories, heredocs, `tee` and the git writes. No focus, prompt text or file that the agent reads lifts the contract. A parity test names each behaviour and fails when its clause is missing. For the read-only contract, the test also fails when a clause is widened. The test header lists the deliberate departures from the built-in agent. The size ceiling of the Plan agent body rises from 3,252 to 3,924 bytes. The duplicate 3,500-byte size test in `tests/plan-agent.test.ts` is removed, so the registered ceiling is the only bound.
+
 ---
 
 ## [3.16.0] - 2026-11-05
