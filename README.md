@@ -21,7 +21,7 @@ One feature, four commands, bird's-eye view — each command is an agent pipelin
 ```text
 you: /plan add rate limiting to the /api/upload endpoint
 
-  Skim · Explore         orient in the codebase — relevant modules, existing middleware patterns
+  Skim · Explore         orient in the codebase (at depth normal) — relevant modules, existing middleware patterns
   Design                 gap analysis: completeness, security, performance
   Plan · Synthesize      PR-ready plan document → .devflow/docs/design/
   Git                    traceable issue #42 opened
