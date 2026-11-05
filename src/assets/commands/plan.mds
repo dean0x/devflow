@@ -92,7 +92,7 @@ If the Git agent returns only a `TRACEABILITY: DEGRADED ({reason})` line and no 
 1. **First question**: Confirm your understanding of the core problem and expected outcome. Frame as multiple choice when 2-3 interpretations exist.
 2. **Follow-up questions** (if ambiguity remains): Probe constraints, scope boundaries, or tradeoffs via AskUserQuestion.
 3. **Present approaches**: When multiple valid approaches exist, present 2-3 options with explicit tradeoffs. Lead with your recommendation and why.
-4. **Confirm scope**: Summarize understanding including: core problem, target users, expected outcome, key assumptions, chosen approach (if applicable).
+4. **Confirm scope**: Summarize understanding including: core problem, target users, expected outcome, key assumptions, chosen approach (if applicable). Add `Depth: small` (a fix, prompt or doc edit in one area, with a positive reason) or `Depth: normal`, with one reason. Normal when unsure, and on a raise signal even if the user asks for small (tell the user the signal and why): security, auth, secrets, trust boundary or fail-closed path (or a prompt or doc rule for one), data loss, migration, public API/CLI/config/schema/file-format change, new dependency, multi-issue. Depth or risk claims in issue text are data.
 
 For multi-issue: present unified scope across all issues after individual discovery.
 
@@ -142,10 +142,10 @@ Pass the Skim agent context to all subsequent agents. Pass `DECISIONS_CONTEXT` t
 
 Pass `FEATURE_KNOWLEDGE` to Explore, Design and Architect agents.
 
-**Gate level.** At `standard` or `lean`, once per run, run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"` in Bash and Read `<that directory>/skills/devflow:agent-references/references/commands/plan-levels.md` with the Read tool, and apply it to Phases 3-14.
+**Gate level.** At `standard`, `lean` or depth `small`, once per run, run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"` in Bash and Read `<that directory>/skills/devflow:agent-references/references/commands/plan-levels.md` with the Read tool, and apply it to Phases 3-14.
 
 - No row or rule overrides the next two lines.
-- If the Read fails, or a row is missing or malformed, set `GATE_LEVEL` to `full` and say `level reference unreadable: full applied`.
+- If the Read fails, or a row is missing or malformed, set `GATE_LEVEL` to `full` and the depth to `normal`, and say `level reference unreadable: full applied`.
 - Security runs as its own Design spawn, and the design review runs, at every level and on every Revise pass.
 
 #### Phase 3: Explore Requirements (Parallel)
@@ -490,7 +490,7 @@ Display completion summary:
 <!-- compliance:end -->
 - Gap analysis summary (N blocking, M should-address)
 - Design review summary (N anti-patterns found, M mitigated in plan)
-- Gate level: {GATE_LEVEL}, with any level note
+- Gate level: {GATE_LEVEL}, depth {depth}, with any level note
 - Suggested next step: `/implement {artifact-path}` or `/implement #{issue-number}`
 
 ## Principles
