@@ -1130,6 +1130,30 @@ describe('resolvePluginList', () => {
     );
     expect(result).toEqual(['devflow-core-skills', 'devflow-ui-design', 'devflow-code-review']);
   });
+
+  describe('a manifest that lists the removed devflow-dynamic plugin', () => {
+    const withDynamic: ManifestData = {
+      ...existingManifest,
+      plugins: ['devflow-core-skills', 'devflow-dynamic', 'devflow-implement'],
+    };
+
+    it('loses the plugin on a partial install and keeps the user\'s other plugins in order', () => {
+      const result = resolvePluginList(['devflow-code-review'], withDynamic, true);
+      expect(result).toEqual(['devflow-core-skills', 'devflow-implement', 'devflow-code-review']);
+      expect(result).not.toContain('devflow-dynamic');
+    });
+
+    it('loses the plugin on a partial install that reinstalls only an existing plugin', () => {
+      const result = resolvePluginList(['devflow-implement'], withDynamic, true);
+      expect(result).toEqual(['devflow-core-skills', 'devflow-implement']);
+    });
+
+    it('loses the plugin on a full install, which records exactly the installed plugins', () => {
+      const result = resolvePluginList(['devflow-core-skills', 'devflow-implement'], withDynamic, false);
+      expect(result).toEqual(['devflow-core-skills', 'devflow-implement']);
+      expect(result).not.toContain('devflow-dynamic');
+    });
+  });
 });
 
 describe('syncManifestFeature', () => {

@@ -19,13 +19,14 @@ import {
   projectRoots,
   resolveClaudeignoreOutcome,
   formatSafeDeleteStatus,
+  initCommand,
   type TrackerLifecycleIO,
 } from '../src/cli/commands/init.js';
 import { formatTrackerSummary } from '../src/cli/commands/tracker-prompts.js';
 import type { SummaryLine } from '../src/cli/commands/install-report.js';
 import { stripAnsi } from '../src/core/ansi.js';
 import { TRACKER_MCP_SERVERS_DEFAULT, TRACKER_PROVIDER_IDS } from '../src/core/tracker.js';
-import { writeManifest, type ManifestData } from '../src/core/manifest.js';
+import { readManifest, writeManifest, type ManifestData } from '../src/core/manifest.js';
 import {
   applyTrackerSentinel,
   rearmTrackerInference,
@@ -35,6 +36,7 @@ import {
 import { parsePluginSelection } from '../src/core/plugins.js';
 import { getManagedSettingsPath } from '../src/targets/claude-code/claude-paths.js';
 import { ROOT, testBackups } from './helpers.js';
+import { assertTempHome, TEMP_HOME_PREFIX } from './setup/home-isolation.js';
 import {
   installManagedSettings,
   installClaudeignore,
@@ -3225,4 +3227,103 @@ describe('init ambient convergence keeps user hooks (TP-25)', () => {
     const source = await fs.readFile(new URL('../src/cli/commands/init.ts', import.meta.url), 'utf-8');
     expect(source).toContain('await convergeAmbientHooks(content, ambientEnabled, devflowDir)');
   });
+});
+
+/**
+ * TP-15 and TP-16 (AC-5): the removed dynamic plugin is an unknown plugin name. A list that holds
+ * it, alone or beside a live plugin, exits 1 with the unknown-plugin error and no retire notice,
+ * before init writes anything.
+ */
+describe('init --plugin refuses the removed dynamic plugin (TP-15, TP-16)', () => {
+  let home: string
+  let errors: string[]
+  let infos: string[]
+  let exits: Array<number | undefined>
+  let cwd: string
+
+  /** Every file below `dir` as relative path -> bytes (base64), so a changed byte or a new file shows. */
+  async function treeOf(dir: string, rel = '.'): Promise<Record<string, string>> {
+    const out: Record<string, string> = {}
+    for (const entry of await fs.readdir(path.join(dir, rel), { withFileTypes: true })) {
+      const child = path.join(rel, entry.name)
+      if (entry.isDirectory()) Object.assign(out, { [`${child}/`]: 'dir' }, await treeOf(dir, child))
+      else out[child] = (await fs.readFile(path.join(dir, child))).toString('base64')
+    }
+    return out
+  }
+
+  beforeEach(async () => {
+    home = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), TEMP_HOME_PREFIX)))
+    assertTempHome(home)
+    errors = []
+    infos = []
+    exits = []
+    cwd = process.cwd()
+    vi.stubEnv('HOME', home)
+    vi.stubEnv('USERPROFILE', home)
+    const commandsDir = path.join(home, '.claude', 'commands', 'devflow')
+    await fs.mkdir(commandsDir, { recursive: true })
+    await fs.writeFile(path.join(commandsDir, 'implement.md'), '# the shipped implement command\n')
+    await writeManifest(path.join(home, '.devflow'), {
+      version: '2.0.0',
+      plugins: ['devflow-implement'],
+      scope: 'user',
+      knownPlugins: ['devflow-implement'],
+      features: {
+        ambient: true, memory: true, hud: true, knowledge: true, learning: true, rules: true,
+        flags: {}, security: 'user', proxy: false, compliance: { enabled: false, frameworks: [] },
+      },
+      installedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    })
+    // The first read of a manifest completes its missing keys on disk; it happens here, before the
+    // snapshot, so the snapshot holds the manifest as init finds it.
+    expect(await readManifest(path.join(home, '.devflow'))).not.toBeNull()
+    vi.spyOn(p.log, 'error').mockImplementation((msg: string) => { errors.push(String(msg)) })
+    vi.spyOn(p.log, 'info').mockImplementation((msg: string) => { infos.push(String(msg)) })
+    vi.spyOn(p.log, 'warn').mockImplementation(() => undefined)
+    vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      exits.push(code)
+      throw new Error('process.exit')
+    }) as typeof process.exit)
+    process.chdir(home)
+  })
+
+  afterEach(async () => {
+    process.chdir(cwd)
+    vi.restoreAllMocks()
+    vi.unstubAllEnvs()
+    await fs.rm(home, { recursive: true, force: true })
+  })
+
+  /** Run the real command, with its option state cleared first. */
+  async function runInit(list: string): Promise<void> {
+    (initCommand as unknown as { _optionValues: Record<string, unknown> })._optionValues = {}
+    await expect(
+      initCommand.parseAsync(['--plugin', list, '--recommended', '--no-ambient', '--no-memory', '--no-knowledge', '--no-hud'], { from: 'user' }),
+    ).rejects.toThrow('process.exit')
+  }
+
+  it.each(['dynamic', 'devflow-dynamic'])('--plugin %s exits 1 with the unknown-plugin error and no retire notice', async (list) => {
+    await runInit(list)
+
+    expect(exits).toEqual([1])
+    expect(errors).toEqual(['Unknown plugin(s): devflow-dynamic'])
+    expect(infos.filter(line => /compliance|built-in/.test(line)), 'no retire notice').toEqual([])
+    expect(infos.some(line => line.startsWith('Valid plugins:') && !line.includes('devflow-dynamic'))).toBe(true)
+  })
+
+  it.each(['devflow-implement,dynamic', 'dynamic,devflow-implement', 'devflow-implement,devflow-dynamic'])(
+    'the mixed list %s exits 1 and leaves the install tree and the manifest unchanged',
+    async (list) => {
+      const before = await treeOf(home)
+      expect(Object.keys(before).some(key => key.endsWith('manifest.json'))).toBe(true)
+
+      await runInit(list)
+
+      expect(exits).toEqual([1])
+      expect(errors).toEqual(['Unknown plugin(s): devflow-dynamic'])
+      expect(await treeOf(home)).toEqual(before)
+    },
+  )
 });

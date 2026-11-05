@@ -555,6 +555,14 @@ describe('DELETED_PLUGIN_NAMES consistency', () => {
     });
   });
 
+  it('keeps a removed plugin in a mixed list unknown and gives no notice, so the whole list is refused', () => {
+    const redirect = resolveFeatureRedirect(['devflow-implement', 'dynamic']);
+    expect(redirect.notice).toBeUndefined();
+    expect(redirect.redirected).toEqual([]);
+    expect(redirect.remaining).toEqual(['devflow-implement', 'dynamic']);
+    expect(parsePluginSelection(redirect.remaining.join(','), DEVFLOW_PLUGINS).invalid).toEqual(['devflow-dynamic']);
+  });
+
   it('does not overlap LEGACY_PLUGIN_NAMES keys (deletion would pre-empt the rename)', () => {
     // resolvePluginList filters deleted names BEFORE applying the rename map, so a
     // name in both lists is dropped rather than migrated to its new name.
