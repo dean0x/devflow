@@ -1,34 +1,31 @@
 /**
  * Numeric ratchet manifest guard (P0-S22, AC-0.17, DR-27a).
  *
- * Mechanizes two rules with one mechanism:
- *   - no pinned FLOOR may decrease   (`floors` in tests/fixtures/numeric-floors.json)
- *   - no pinned CEILING may increase (`ceilings` in the same file)
+ * Pins each FLOOR (a minimum a test asserts, `floors` in tests/fixtures/numeric-floors.json)
+ * and each CEILING (a maximum, `ceilings` in the same file) with one mechanism.
  *
  * Each entry records a number (e.g. host file count = 13, BUDGET_GIT_MD = 55_750)
  * along with the exact assertion pattern that encodes it and the source file that
  * contains it.
  *
- * Why both directions. A floors-only manifest guards the counts and leaves every
- * budget unguarded in the direction that matters: `BUDGET_GIT_MD` could be raised
- * to whatever dist/agents/git.md grew into, and each guard would stay green while
- * asserting nothing but "the current size is the current size". A ceiling may be
- * LOWERED as the artifact shrinks — that is the ratchet tightening — and may never
- * be raised, with one exception: the compiled-size ceiling of one prompt file may rise
- * when the bytes that a typical run reads in that build variant key fall by more, and the
- * entry's description records the numbers for each key and the reason
- * (docs/reference/lean-prompts.md, Rules for every target).
+ * The rule. Any floor or ceiling may move up or down. The entry's description and the
+ * PR body give the old value, the new value and the reason. The lean-prompts goal
+ * stays: the bytes that a typical run reads should not grow, and a ceiling rise states
+ * its reason (docs/reference/lean-prompts.md, Rules for every target). An older
+ * description or comment that says a value may only rise or only fall is history; this
+ * rule replaces it. What the guard stops is a silent move: a value changed in the
+ * assertion or in the manifest, but not in both.
  *
  * This guard verifies, for both arrays:
  *   1. Each pattern still exists in the designated source file, at the recorded
- *      number of sites (the value has not moved in the forbidden direction).
+ *      number of sites (no site moved without the manifest).
  *   2. New entries are allowed — only existing entries are checked.
  *   3. Each entry's pattern actually spells its value, so the record is enforceable.
- *   4. Non-vacuity: both arrays are non-empty, and a seeded bad value proves the
- *      guard is live — DECREMENTED for a floor, INCREMENTED for a ceiling.
+ *   4. Non-vacuity: both arrays are non-empty, and a seeded value one step DOWN and
+ *      one step UP at a single site proves the guard is live in both directions.
  *
  * To move a pin: update both the assertion AND the manifest entry's value,
- * `pattern` and `occurrences` — and only in the permitted direction.
+ * `pattern`, `occurrences` and `description` (old value, new value, reason).
  *
  * Mechanic 2 (H10) for non-vacuity: the known-bad scenario is synthesised in
  * memory, so no committed source file is ever touched to show red.
@@ -44,7 +41,7 @@ const ROOT = path.resolve(import.meta.dirname, '../..');
 // Load manifest
 // ---------------------------------------------------------------------------
 
-/** Which way a pinned value may never move. */
+/** Which kind of limit a pinned value is: a minimum (floor) or a maximum (ceiling). */
 type Ratchet = 'floor' | 'ceiling';
 
 interface RawEntry {
@@ -67,7 +64,7 @@ interface RawEntry {
 
 interface PinnedEntry {
   id: string;
-  /** The pinned number, whichever direction it ratchets. */
+  /** The pinned number, floor or ceiling. */
   value: number;
   pattern: string;
   occurrences: number;
@@ -102,7 +99,7 @@ function loadManifest(): RatchetManifest {
  * Normalise one array of the manifest into direction-tagged entries.
  * `floor` and `ceiling` are separate keys on purpose: an entry that carried a
  * bare `value` would read identically in both arrays, and a paste between them
- * would silently flip the ratchet direction.
+ * would silently turn a minimum into a maximum.
  */
 function pinned(ratchet: Ratchet): PinnedEntry[] {
   const manifest = loadManifest();
@@ -162,7 +159,6 @@ function checkShape(entries: readonly PinnedEntry[], arrayName: string): void {
 /** Named collector: entries whose pattern no longer appears often enough in its source. */
 function collectMovedPins(entries: readonly PinnedEntry[]): string[] {
   const violations: string[] = [];
-  const forbidden = (e: PinnedEntry) => (e.ratchet === 'floor' ? 'lowered' : 'raised');
 
   for (const entry of entries) {
     const absPath = path.join(ROOT, entry.sourceFile);
@@ -184,9 +180,9 @@ function collectMovedPins(entries: readonly PinnedEntry[]): string[] {
         `  pattern : ${entry.pattern}\n` +
         `  ${entry.label.padEnd(7)} : ${entry.value}\n` +
         `  desc    : ${entry.description}\n` +
-        `  → An assertion was likely ${forbidden(entry)} past the pinned ${entry.label} (DR-27a).\n` +
-        `    If it was moved in the permitted direction, or a pinned site deliberately removed,\n` +
-        `    update numeric-floors.json with the new value, pattern and occurrences.`,
+        `  → An assertion likely moved away from the pinned ${entry.label} (DR-27a).\n` +
+        `    If the move or the removal of a site is deliberate, update numeric-floors.json with the\n` +
+        `    new value, pattern and occurrences, and give the old value, new value and reason in its description.`,
       );
     }
   }
@@ -204,11 +200,11 @@ function collectUnencodedPins(entries: readonly PinnedEntry[]): string[] {
 }
 
 /**
- * Seed each entry's value one step in the FORBIDDEN direction and prove the same
- * presence check would report it. Runs over every entry, not just the first:
+ * Seed each entry's value one step DOWN and one step UP at a single site and prove the
+ * same presence check would report each move. Runs over every entry, not just the first:
  * probing one left the rest unproven.
  */
-function probeForbiddenDirection(entries: readonly PinnedEntry[]): void {
+function probeSingleSiteMoves(entries: readonly PinnedEntry[]): void {
   expect(entries.length, 'array must have at least one entry for the probe').toBeGreaterThan(0);
 
   for (const entry of entries) {
@@ -222,29 +218,30 @@ function probeForbiddenDirection(entries: readonly PinnedEntry[]): void {
       `[${entry.id}] real pattern "${entry.pattern}" must appear ≥ ${entry.occurrences}× in ${entry.sourceFile}`,
     ).toBeGreaterThanOrEqual(entry.occurrences);
 
-    // RED half: moving a SINGLE site one step the wrong way is enough to trip the
-    // guard — a floor DOWN, a ceiling UP. This is the case a presence-only check
+    // RED half: moving a SINGLE site one step in either direction, with no manifest
+    // update, is enough to trip the guard. This is the case a presence-only check
     // misses whenever occurrences > 1.
     const token = renderValueToken(entry.pattern, entry.value)!;
-    const badValue = entry.ratchet === 'floor' ? entry.value - 1 : entry.value + 1;
-    const badPattern = entry.pattern.replace(token, renderSameStyle(badValue, token));
-    expect(
-      badPattern,
-      `[${entry.id}] the seeded pattern must differ from the real one`,
-    ).not.toBe(entry.pattern);
+    for (const [step, direction] of [[-1, 'below'], [1, 'above']] as const) {
+      const movedPattern = entry.pattern.replace(token, renderSameStyle(entry.value + step, token));
+      expect(
+        movedPattern,
+        `[${entry.id}] the seeded pattern must differ from the real one`,
+      ).not.toBe(entry.pattern);
 
-    const syntheticContent = realContent.replace(entry.pattern, badPattern);
-    expect(
-      countOccurrences(syntheticContent, entry.pattern),
-      `[${entry.id}] non-vacuity: moving one of ${entry.occurrences} site(s) ` +
-      `${entry.ratchet === 'floor' ? 'below' : 'above'} the pinned ${entry.label} must drop the ` +
-      `match count below the pinned occurrences — otherwise a partial change is invisible`,
-    ).toBeLessThan(entry.occurrences);
+      const syntheticContent = realContent.replace(entry.pattern, movedPattern);
+      expect(
+        countOccurrences(syntheticContent, entry.pattern),
+        `[${entry.id}] non-vacuity: moving one of ${entry.occurrences} site(s) ` +
+        `${direction} the pinned ${entry.label} must drop the ` +
+        `match count below the pinned occurrences — otherwise a partial change is invisible`,
+      ).toBeLessThan(entry.occurrences);
+    }
   }
 }
 
 // ---------------------------------------------------------------------------
-// Floors — may rise, never fall
+// Floors — minimums; a move in either direction updates the manifest too
 // ---------------------------------------------------------------------------
 
 describe('numeric floor manifest guard (DR-27a, P0-S22)', () => {
@@ -253,7 +250,7 @@ describe('numeric floor manifest guard (DR-27a, P0-S22)', () => {
     checkShape(pinned('floor'), 'floors');
   });
 
-  it('every pinned floor pattern still exists in its designated source file (no floor may decrease)', () => {
+  it('every pinned floor pattern still exists in its designated source file (no floor moved without the manifest)', () => {
     const violations = collectMovedPins(pinned('floor'));
     expect(
       violations,
@@ -264,7 +261,7 @@ describe('numeric floor manifest guard (DR-27a, P0-S22)', () => {
   it("every entry's pattern actually encodes its floor (a pattern that doesn't is unenforceable)", () => {
     // Without this, {floor: 999, pattern: "toBe(14)"} passes forever: the guard
     // only greps the pattern, so the recorded floor would be decorative. It is
-    // also the precondition for the decrement probe below.
+    // also the precondition for the single-site probe below.
     const violations = collectUnencodedPins(pinned('floor'));
     expect(
       violations,
@@ -272,16 +269,16 @@ describe('numeric floor manifest guard (DR-27a, P0-S22)', () => {
     ).toHaveLength(0);
   });
 
-  it('non-vacuity: a DECREMENTED pattern would fail the guard for EVERY floor entry (mechanic 2, H10)', () => {
+  it('non-vacuity: a DECREMENTED or INCREMENTED site would fail the guard for EVERY floor entry (mechanic 2, H10)', () => {
     // The probe handles both spellings of a numeral: "60_000" does not contain
     // "60000", so a naive replace would be an identity and the assertion would
     // fail for the wrong reason. renderValueToken resolves the spelling first.
-    probeForbiddenDirection(pinned('floor'));
+    probeSingleSiteMoves(pinned('floor'));
   });
 });
 
 // ---------------------------------------------------------------------------
-// Ceilings — may be lowered, never raised
+// Ceilings — maximums; a move in either direction updates the manifest too
 // ---------------------------------------------------------------------------
 
 describe('numeric ceiling manifest guard (DR-27a, mirrored arm)', () => {
@@ -289,7 +286,7 @@ describe('numeric ceiling manifest guard (DR-27a, mirrored arm)', () => {
     checkShape(pinned('ceiling'), 'ceilings');
   });
 
-  it('every pinned ceiling pattern still exists in its designated source file (no ceiling may increase)', () => {
+  it('every pinned ceiling pattern still exists in its designated source file (no ceiling moved without the manifest)', () => {
     const violations = collectMovedPins(pinned('ceiling'));
     expect(
       violations,
@@ -305,15 +302,15 @@ describe('numeric ceiling manifest guard (DR-27a, mirrored arm)', () => {
     ).toHaveLength(0);
   });
 
-  it('non-vacuity: an INCREMENTED pattern would fail the guard for EVERY ceiling entry (mechanic 2, H10)', () => {
-    // The mirror of the floor probe. A budget raised to fit whatever the artifact
-    // grew into asserts nothing; this proves the guard sees that move.
-    probeForbiddenDirection(pinned('ceiling'));
+  it('non-vacuity: an INCREMENTED or DECREMENTED site would fail the guard for EVERY ceiling entry (mechanic 2, H10)', () => {
+    // The mirror of the floor probe. A budget moved in its test alone, with no
+    // manifest record, asserts nothing; this proves the guard sees that move.
+    probeSingleSiteMoves(pinned('ceiling'));
   });
 
-  it('the two arrays are disjoint — no constant ratchets in both directions at once', () => {
-    // A pin present in both arrays could never move at all, which is a freeze,
-    // not a ratchet; more likely it is a paste that flipped a direction silently.
+  it('the two arrays are disjoint — no constant is both a minimum and a maximum', () => {
+    // A pin present in both arrays is most likely a paste that turned a minimum
+    // into a maximum silently.
     const floorIds = new Set(pinned('floor').map(e => e.id));
     const both = pinned('ceiling').filter(e => floorIds.has(e.id)).map(e => e.id);
     expect(both, `ids registered as both floor and ceiling: ${both.join(', ')}`).toEqual([]);

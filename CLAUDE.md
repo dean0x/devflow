@@ -135,7 +135,7 @@ Use conventional commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore
 - Rules are flat `.md` files (no subdirectory nesting) in `src/assets/rules/{name}.md`; the installer validates against the registry
 
 ### Test Ratchets
-- `tests/fixtures/numeric-floors.json`: floors rise; ceilings fall, or rise only if a typical run then reads less (numbers in the PR)
+- `tests/fixtures/numeric-floors.json`: a value may move either way; its `description` and the PR give old value, new value, reason
 
 ## Reference Documents
 
