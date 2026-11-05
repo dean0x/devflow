@@ -54,7 +54,6 @@ For this compliance focus, {{compliance_load(ids)}}
 @end
 
 @export compliance_frameworks
-@export compliance_lens
 @export compliance_gate
 @export compliance_directive
 @export compliance_focus_directive
