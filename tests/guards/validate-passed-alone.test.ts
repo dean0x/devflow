@@ -685,7 +685,8 @@ describe('the Validate body re-runs each failed test file alone and labels it', 
 
   it('probes: the stub inside the Running commands block is reported', () => {
     const stub = stubOf(BODY)
-    const moved = seed(seed(BODY, ` ${stub}`, ''), '- The same rules hold', `${stub}\n- The same rules hold`)
+    const blockEnd = '- Never wrap a build or test command'
+    const moved = seed(seed(BODY, ` ${stub}`, ''), blockEnd, `${stub}\n${blockEnd}`)
     const defects = withBody(moved)
     expect(defects).toContain('the Running commands block names PASSED-ALONE or the Passed alone line')
     expect(defects).toContain('the body lost: the Read of the reference through the sanctioned directory line')

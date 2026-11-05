@@ -113,9 +113,11 @@ describe('the Validation Order table has a Quiet form column and a fallback sent
     const moved = body.replace(FALLBACK, '').replace('## Output', `${FALLBACK}\n\n## Output`)
     expect(collectTableDefects(moved)).toEqual(['the fallback sentence sits inside or after the Running commands block'])
 
-    expect(collectBlockIntrusions(body.replace('- The same rules hold', '| a | b |\n- The same rules hold'))).toEqual(['the block carries a table row'])
-    expect(collectBlockIntrusions(body.replace('- The same rules hold', `${FALLBACK}\n- The same rules hold`))).toEqual(['the block carries the fallback sentence'])
-    expect(collectBlockIntrusions(body.replace('- The same rules hold', 'Quiet form first.\n- The same rules hold'))).toEqual(['the block names the Quiet form column'])
+    const blockEnd = '- Never wrap a build or test command'
+    expect(body.split(blockEnd).length - 1, 'the seed anchor lands once in the block').toBe(1)
+    expect(collectBlockIntrusions(body.replace(blockEnd, `| a | b |\n${blockEnd}`))).toEqual(['the block carries a table row'])
+    expect(collectBlockIntrusions(body.replace(blockEnd, `${FALLBACK}\n${blockEnd}`))).toEqual(['the block carries the fallback sentence'])
+    expect(collectBlockIntrusions(body.replace(blockEnd, `Quiet form first.\n${blockEnd}`))).toEqual(['the block names the Quiet form column'])
     expect(collectTableDefects('no table here')).toEqual(['no Validation Order table'])
   })
 })

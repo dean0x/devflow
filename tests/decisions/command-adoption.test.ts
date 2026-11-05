@@ -242,35 +242,6 @@ describe('consumers read the decisions index from the main worktree', () => {
     expect(body.indexOf('{{decisions_gate()}}'), 'the gate comes before the locator').toBeLessThan(body.indexOf('{{decisions_locate()}}'))
   })
 
-  it('_preamble.mds alias-imports the locator and calls it, with no selective import', () => {
-    const source = loadFile('src/assets/commands/_partials/_preamble.mds')
-    expect(source).toMatch(/^@import "\.\/_decisions\.mds" as decisions$/m)
-    expect(source).toContain('{{decisions.decisions_locate()}}')
-    expect(source).not.toMatch(/@import \{[^}]*\} from "\.\/_decisions\.mds"/)
-    expect(source).toContain('`{ledger}/.devflow/curation/index.md`')
-  })
-
-  it('the decisions step is its own define, authoring_decisions: gate then locator, none of it in authoring_preamble', () => {
-    const source = loadFile('src/assets/commands/_partials/_preamble.mds')
-    const defineBody = (name: string): string => {
-      const at = source.indexOf(`@define ${name}():`)
-      return source.slice(at, source.indexOf('\n@end', at))
-    }
-    const decisions = defineBody('authoring_decisions')
-    expect(decisions).toContain('{{decisions.decisions_gate()}}')
-    expect(decisions.indexOf('{{decisions.decisions_gate()}}')).toBeLessThan(decisions.indexOf('{{decisions.decisions_locate()}}'))
-    expect(source).toMatch(/^@export authoring_decisions$/m)
-    const preamble = defineBody('authoring_preamble')
-    for (const stray of ['DECISIONS_CONTEXT', 'decisions_locate', 'decisions_gate', 'apply-decisions']) {
-      expect(preamble, `authoring_preamble carries ${stray}`).not.toContain(stray)
-    }
-  })
-
-  it('the dynamic-build implement bundle passes the DECISIONS_CONTEXT loaded before authoring', () => {
-    const content = loadFile('dist/commands/dynamic-build.md')
-    expect(content).toContain('relevant DECISIONS_CONTEXT (the index you loaded before authoring)')
-    expect(content).not.toContain('DECISIONS_CONTEXT (from `.devflow/curation/index.md`)')
-  })
 })
 
 // -------------------------------------------------------------------------

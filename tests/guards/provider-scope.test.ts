@@ -20,7 +20,7 @@
  *      collectOpsNamingContract for the second half, and INJECTED registries for
  *      the gate itself, where the probe is a registry with no tool-call provider
  *      rather than a seeded file.
- *   5. The `/plan` command and the three dynamic commands promise a tracker
+ *   5. The `/plan` command promises a tracker
  *      issue, not a host issue or a host CLI — collectHostIssueLiterals. Collector
  *      1 cannot see this one: `github` is the DEFAULT provider, not a foreign token.
  *
@@ -1064,7 +1064,7 @@ describe('provider-scope: _mcp.md is generated only behind its gate (AC-2.7 re-s
 });
 
 // ---------------------------------------------------------------------------
-// 5. The plan and dynamic commands' tracker paths name no HOST
+// 5. The plan command's tracker paths name no HOST
 // ---------------------------------------------------------------------------
 
 /**
@@ -1074,9 +1074,8 @@ describe('provider-scope: _mcp.md is generated only behind its gate (AC-2.7 re-s
  * thing to a Jira user: `/plan` asks "create a GitHub issue for this plan?" and
  * then spawns `ensure-traceable-issue`, whose mechanics create a Jira one.
  *
- * The scope is the plan command and, since #376 (W4), the three dynamic commands
- * whose preflights once checked a `gh` CLI for "GitHub paths": each reads or files
- * issues only through the Git agent, which resolves the tracker itself. Source and
+ * The scope is the plan command, which reads or files issues only through the Git
+ * agent, which resolves the tracker itself. Source and
  * compiled, because that is where the prompt the user answers lives. Widening the
  * scope is the right response to the literal turning up elsewhere; loosening the
  * token is not.
@@ -1088,17 +1087,8 @@ const PLAN_COMMAND_ARTIFACTS: readonly { readonly path: string; readonly file: s
 
 const PLAN_COMMAND_PATHS: readonly string[] = PLAN_COMMAND_ARTIFACTS.map(a => a.path);
 
-/** The three dynamic commands that read or file tracker issues, source and compiled. */
-const DYNAMIC_COMMAND_ARTIFACTS: readonly { readonly path: string; readonly file: string }[] =
-  ['dynamic-build', 'dynamic-plan', 'dynamic-tickets'].flatMap(name => [
-    { path: `src/assets/commands/${name}.mds`, file: path.join(ROOT, 'src', 'assets', 'commands', `${name}.mds`) },
-    { path: `dist/commands/${name}.md`, file: path.join(DIST_COMMANDS, `${name}.md`) },
-  ]);
-
-const DYNAMIC_COMMAND_PATHS: readonly string[] = DYNAMIC_COMMAND_ARTIFACTS.map(a => a.path);
-
 /** Every artifact the host-literal scan covers. */
-const HOST_LITERAL_ARTIFACTS = [...PLAN_COMMAND_ARTIFACTS, ...DYNAMIC_COMMAND_ARTIFACTS];
+const HOST_LITERAL_ARTIFACTS = PLAN_COMMAND_ARTIFACTS;
 const HOST_LITERAL_PATHS: readonly string[] = HOST_LITERAL_ARTIFACTS.map(a => a.path);
 
 /**
@@ -1119,8 +1109,8 @@ function hostLiteralCorpus(): CorpusEntry[] {
  * grammar: naming the host there tells the reader which provider the example is
  * written for rather than promising them that provider. Every other site is a
  * sentence about what the operation DOES, which is provider-independent. The
- * dynamic commands have no such synopsis, so the exemption is the plan
- * command's alone — a `#### Usage notes` heading in a partial is no synopsis.
+ * exemption is the plan command's alone — a `#### Usage notes` heading in a
+ * partial is no synopsis.
  *
  * A region rather than a line, for the reason `PROVIDER_MAP_ALLOWLIST` is one: a
  * line-scoped exemption goes stale on a rewrap.
@@ -1133,13 +1123,9 @@ const HOST_ISSUE_LITERAL = 'GitHub issue';
 /**
  * Every host literal the scan reports: the host issue, and the three spellings of
  * the retired GitHub-only preflight — its item name, its no-remote clause and the
- * one CLI it checked. The Workflow preamble's "no tracker CLI of any kind, `gh`
- * included" is a prohibition over every tracker, and matches none of them.
+ * one CLI it checked.
  */
 const HOST_LITERALS = [HOST_ISSUE_LITERAL, 'GitHub paths', 'GitHub-dependent', '`gh` CLI'] as const;
-
-/** The provider-neutral preflight item each dynamic command states instead. */
-const TRACKER_PATHS_ITEM = '**Tracker paths:**';
 
 /** Everything outside the usage synopsis. */
 function stripPlanUsage(content: string): string {
@@ -1149,13 +1135,12 @@ function stripPlanUsage(content: string): string {
   return end === -1 ? content.slice(0, start) : content.slice(0, start) + content.slice(end);
 }
 
-/** Named collector: host literals in the plan and dynamic commands, outside the plan command's usage synopsis. */
+/** Named collector: host literals in the plan command, outside its usage synopsis. */
 export function collectHostIssueLiterals(corpus: CorpusEntry[]): string[] {
   const violations: string[] = [];
   for (const entry of corpus) {
     if (!HOST_LITERAL_PATHS.includes(entry.path)) continue;
-    const text = PLAN_COMMAND_PATHS.includes(entry.path) ? stripPlanUsage(entry.content) : entry.content;
-    for (const line of text.split('\n')) {
+    for (const line of stripPlanUsage(entry.content).split('\n')) {
       if (HOST_LITERALS.some(literal => line.includes(literal))) {
         violations.push(`${entry.path}: ${line.trim().slice(0, 90)}`);
       }
@@ -1164,12 +1149,12 @@ export function collectHostIssueLiterals(corpus: CorpusEntry[]): string[] {
   return violations;
 }
 
-describe('provider-scope: the plan and dynamic commands promise a tracker issue, not a host issue', () => {
+describe('provider-scope: the plan command promises a tracker issue, not a host issue', () => {
   const corpus = hostLiteralCorpus();
 
-  it('all eight artifacts are scanned and non-empty', () => {
+  it('both artifacts are scanned and non-empty', () => {
     expect(corpus.map(e => e.path)).toEqual(HOST_LITERAL_PATHS);
-    expect(HOST_LITERAL_PATHS).toHaveLength(8);
+    expect(HOST_LITERAL_PATHS).toHaveLength(2);
     for (const entry of corpus) {
       expect(
         entry.content.length,
@@ -1191,14 +1176,6 @@ describe('provider-scope: the plan and dynamic commands promise a tracker issue,
         stripPlanUsage(entry.content).length,
         `${file}: the usage region was not found — the synopsis anchors changed`,
       ).toBeLessThan(entry.content.length);
-    }
-  });
-
-  it('each dynamic command states the provider-neutral Tracker paths item in its preflight', () => {
-    for (const file of DYNAMIC_COMMAND_PATHS) {
-      const content = requireCorpusEntry(corpus, file).content;
-      expect(content, `${file}: no Tracker paths item`).toContain(TRACKER_PATHS_ITEM);
-      expect(content, `${file}: the item must route through the Git agent`).toContain('TRACEABILITY: DEGRADED (');
     }
   });
 
@@ -1231,7 +1208,7 @@ describe('provider-scope: the plan and dynamic commands promise a tracker issue,
 
     expect(
       collectHostIssueLiterals([{ path: 'dist/commands/implement.md', content: 'a GitHub issue\n' }]),
-      'the collector is scoped to the plan and dynamic commands — another command is not its business',
+      'the collector is scoped to the plan command — another command is not its business',
     ).toEqual([]);
 
     // …and over the REAL bytes, so the live arm's silence is evidence about these
@@ -1240,29 +1217,22 @@ describe('provider-scope: the plan and dynamic commands promise a tracker issue,
       collectHostIssueLiterals(
         hostLiteralCorpus().map(e => ({ ...e, content: `${e.content}\nCreate or enrich a GitHub issue?\n` })),
       ),
-      'a regression appended to the shipped bytes must be reported in all eight artifacts',
+      'a regression appended to the shipped bytes must be reported in both artifacts',
     ).toEqual(HOST_LITERAL_PATHS.map(p => `${p}: Create or enrich a GitHub issue?`));
   });
 
-  it('known-bad probe: the 0e520fc GitHub-only preflights, restored into the real bytes, are reported in every dynamic artifact', () => {
+  it('known-bad probe: the 0e520fc GitHub-only preflights, restored into the real bytes, are reported in both plan artifacts', () => {
     const restored = '3. **GitHub paths:** if the input is a GitHub issue URL, `gh` CLI must be authenticated.';
-    const seeded = hostLiteralCorpus().map(e =>
-      DYNAMIC_COMMAND_PATHS.includes(e.path) ? { ...e, content: `${e.content}\n${restored}\n` } : e);
-    expect(collectHostIssueLiterals(seeded)).toEqual(DYNAMIC_COMMAND_PATHS.map(p => `${p}: ${restored.slice(0, 90)}`));
+    const seeded = hostLiteralCorpus().map(e => ({ ...e, content: `${e.content}\n${restored}\n` }));
+    expect(collectHostIssueLiterals(seeded)).toEqual(PLAN_COMMAND_PATHS.map(p => `${p}: ${restored.slice(0, 90)}`));
   });
 
-  it('known-bad probe: each host literal fires alone, and the synopsis exemption is the plan command\'s only', () => {
+  it('known-bad probe: each host literal fires alone', () => {
     for (const literal of HOST_LITERALS) {
       expect(
-        collectHostIssueLiterals([{ path: DYNAMIC_COMMAND_PATHS[0], content: `skip ${literal} steps\n` }]),
+        collectHostIssueLiterals([{ path: PLAN_COMMAND_PATHS[0], content: `skip ${literal} steps\n` }]),
         literal,
-      ).toEqual([`${DYNAMIC_COMMAND_PATHS[0]}: skip ${literal} steps`]);
-    }
-    for (const file of DYNAMIC_COMMAND_PATHS) {
-      expect(
-        collectHostIssueLiterals([{ path: file, content: '## Usage\n3. **GitHub paths:** check it\n## Input\n' }]),
-        `${file}: a usage-shaped region is no exemption outside the plan command`,
-      ).toEqual([`${file}: 3. **GitHub paths:** check it`]);
+      ).toEqual([`${PLAN_COMMAND_PATHS[0]}: skip ${literal} steps`]);
     }
   });
 });

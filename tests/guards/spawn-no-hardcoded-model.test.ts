@@ -6,9 +6,9 @@
  * names a model of its own overrides the frontmatter at spawn time, so a user's
  * override for that agent never reaches the spawn. Five `Validate` spawns did
  * exactly that with `model="haiku"`, which equals the shipped tier today and is
- * invisible until a user overrides `validate`. The rule is the same one the
- * workflow preamble states for `agent()` options (omit `opts.model` whenever
- * `agentType` is set), and this guard is the mechanical form of both. The spawn
+ * invisible until a user overrides `validate`. The rule holds for a workflow
+ * `agent()` call too (omit its `model` option whenever `agentType` is set), and
+ * this guard is the mechanical form of both. The spawn
  * lines themselves carry no marker: an HTML comment survives into
  * `dist/commands`, so a marker there would cost prompt tokens on every run.
  *
@@ -275,11 +275,6 @@ describe('no spawn names a model of its own (D-SPAWN-NO-MODEL)', () => {
     const types = spawnedTypes(agentSites)
     expect(types.size, `agent types read: ${[...types].sort().join(', ')}`)
       .toBeGreaterThanOrEqual(SPAWNED_AGENT_TYPE_FLOOR)
-  })
-
-  it('finds workflow agent() calls, and sees their options', () => {
-    const workflowCalls = sites.filter(site => site.form === 'agent' && /\bagentType\s*:/.test(site.code))
-    expect(workflowCalls.length, 'no workflow agent() call with an agentType was read').toBeGreaterThan(0)
   })
 
   it('every call in the corpus is read whole: its parentheses balance', () => {

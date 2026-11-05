@@ -52,7 +52,7 @@ import { COMPLIANCE_VARIANT_HOSTS, CURATION_VARIANT_HOSTS } from '../fixtures/md
 
 // ── Independent oracles: the directive lines as the commands must render them ─────────────────────────
 
-/** The Code-family directive for `ids` (`<ids>` in prose, `${COMPLIANCE_FRAMEWORKS}` in the workflow script). */
+/** The Code-family directive for `ids` (`<ids>` in the command prose). */
 const codeDirective = (ids: string): string =>
   'When the task touches regulated surface (data models, auth flows, logging/observability, payments, IaC, retention), ' +
   `invoke Skill(skill="devflow:compliance") and load references/{id}.md only for the ids in ${ids} ` +
@@ -65,9 +65,6 @@ const focusDirective = (ids: string): string =>
 
 /** The clause every prose host that sets the directive states: lens off means an empty directive. */
 const OFF_CLAUSE = '`COMPLIANCE_DIRECTIVE` is empty when `COMPLIANCE_FRAMEWORKS` is `off`'
-
-/** The workflow script's version of the same condition. */
-const JS_OFF_CLAUSE = 'const COMPLIANCE_DIRECTIVE = COMPLIANCE_FRAMEWORKS === "off" ? "" : `'
 
 const ACTIVE_SENTENCE = '`COMPLIANCE_ACTIVE` is `true` unless `COMPLIANCE_FRAMEWORKS` is `off`.'
 
@@ -104,8 +101,8 @@ const REVALIDATE_LENS_BANNED: ReadonlyArray<readonly [string, string | RegExp, s
 const PRE_FIX_SETTINGS_STEP =
   '4. **Take GATE_LEVEL**: unless Phase 1 ran, run the **Resolve the settings line** step of Phase 1 once for this worktree, and take `GATE_LEVEL` from the line it accepts, or from its fail-closed line when it accepts none. Phase 6 passes it to Validate.'
 
-/** A spawn that passes the directive: a fence line, a template line, a prose sentence or the engine's pseudo-form. */
-const DIRECTIVE_REF = /\$?\{COMPLIANCE_DIRECTIVE\}|(?:with|carries) `COMPLIANCE_DIRECTIVE`|\+ COMPLIANCE_DIRECTIVE \+/
+/** A spawn that passes the directive: a fence line or a prose sentence. */
+const DIRECTIVE_REF = /\{COMPLIANCE_DIRECTIVE\}|with `COMPLIANCE_DIRECTIVE`/
 
 /** Compiled commands that spawn Code-family agents, and the spawn sites each carries today. Floors: may only rise. */
 const CODE_SPAWN_FLOORS: Readonly<Record<string, number>> = {
@@ -115,8 +112,6 @@ const CODE_SPAWN_FLOORS: Readonly<Record<string, number>> = {
   'resolve.md': 3,
   // the fix the user accepts in the Offer Fix phase
   'debug.md': 1,
-  // implement, validation-fix, alignment-fix, qa-fix, review-fix and final-validation-fix templates + the merge-conflict resolver sentence + the engine partial's pseudo-form
-  'dynamic-build.md': 8,
 }
 
 /** Agents whose bodies may carry no compliance text at all (the Design focus list is the one allowance). */
@@ -139,16 +134,11 @@ export function collectRawLensSites(sites: readonly CodeSpawnSite[]): string[] {
 
 /**
  * Named collector: hosts that spawn Code-family agents but do not set the directive behind the lens condition
- * or render its line as the oracle spells it. `dynamic-build.md` sets it in its workflow script.
+ * or render its line as the oracle spells it.
  */
 export function collectUngatedHosts(hosts: ReadonlyArray<readonly [string, string]>): string[] {
   const out: string[] = []
   for (const [file, text] of hosts) {
-    if (file === 'dynamic-build.md') {
-      if (!text.includes(JS_OFF_CLAUSE)) out.push(`${file}: the workflow script does not empty the directive when the lens is off`)
-      if (!text.includes(codeDirective('${COMPLIANCE_FRAMEWORKS}'))) out.push(`${file}: the script's directive line differs from the partial's`)
-      continue
-    }
     if (!text.includes(OFF_CLAUSE)) out.push(`${file}: does not state that the directive is empty when the lens is off`)
     if (!text.includes(`> ${codeDirective('<ids>')}`)) out.push(`${file}: does not render the directive line`)
   }
@@ -367,7 +357,6 @@ describe('AC-308: no Code-family body carries the compliance skill; each spawn s
     // Each anchor lives in a curation-off arm alone, so only the curation-off sweep can see it change.
     const probes: Array<[string, string, string]> = [
       ['implement.md', '`COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES` and `PUSH: false`', '`COMPLIANCE_FRAMEWORKS`, `CI_FAILURES` and `PUSH: false`'],
-      ['dynamic-build.md', 'plan + COMPLIANCE_DIRECTIVE + handoff', 'plan + COMPLIANCE_FRAMEWORKS + handoff'],
     ]
     for (const [host, anchor, stale] of probes) {
       expect(requireDistFile(host), `${host}: the anchor must be curation-off only`).not.toContain(anchor)
@@ -394,14 +383,10 @@ describe('AC-308: no Code-family body carries the compliance skill; each spawn s
 
   it('known-bad probe: a spawn site of each shape that drops the directive is reported by the same collector', () => {
     const implement = requireDistFile('implement.md')
-    const dynamic = requireDistFile('dynamic-build.md')
     // [host, live text, the directive as that shape spells it, what the spawn reads without it]
     const probes: Array<[string, string, string, string]> = [
       ['implement.md', implement, '\n   {COMPLIANCE_DIRECTIVE}"', '"'],                                  // an indented fix-phase fence
       ['implement.md', implement, ' with `COMPLIANCE_DIRECTIVE` (when it is not empty)', ''],            // the CI-fix prose spawn
-      ['dynamic-build.md', dynamic, '\n${COMPLIANCE_DIRECTIVE}', ''],                                    // a template spawn
-      ['dynamic-build.md', dynamic, ' and carries `COMPLIANCE_DIRECTIVE` (when it is not empty)', ''],   // the merge-conflict resolver sentence
-      ['dynamic-build.md', dynamic, ' + COMPLIANCE_DIRECTIVE + handoff', ' + handoff'],                  // the engine partial's pseudo-form
     ]
     for (const [host, real, directive, without] of probes) {
       expect(collectUndirectedSites(collectCodeSpawnSites(host, real)), `${host}: the live text is clean`).toEqual([])
@@ -413,10 +398,8 @@ describe('AC-308: no Code-family body carries the compliance skill; each spawn s
 
   it('known-bad probe: a spawn that hands the agent the raw lens is reported', () => {
     const implement = requireDistFile('implement.md')
-    const dynamic = requireDistFile('dynamic-build.md')
     const probes: Array<[string, string, string, string]> = [
       ['implement.md', implement, '\n   {COMPLIANCE_DIRECTIVE}"', '\n   {COMPLIANCE_DIRECTIVE}\n   COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}"'],
-      ['dynamic-build.md', dynamic, '\n${COMPLIANCE_DIRECTIVE}', '\n${COMPLIANCE_DIRECTIVE}\nCOMPLIANCE_FRAMEWORKS: ${COMPLIANCE_FRAMEWORKS}'],
     ]
     for (const [host, real, from, to] of probes) {
       expect(collectRawLensSites(collectCodeSpawnSites(host, real)), `${host}: the live text is clean`).toEqual([])
@@ -439,10 +422,6 @@ describe('AC-308: no Code-family body carries the compliance skill; each spawn s
       .toEqual(['implement.md: does not state that the directive is empty when the lens is off'])
     expect(collectUngatedHosts(reseed('implement.md', 'invoke Skill(skill="devflow:compliance")', 'invoke the skill')))
       .toEqual(['implement.md: does not render the directive line'])
-    expect(collectUngatedHosts(reseed('dynamic-build.md', JS_OFF_CLAUSE, 'const COMPLIANCE_DIRECTIVE = COMPLIANCE_FRAMEWORKS === "x" ? "" : `')))
-      .toEqual(['dynamic-build.md: the workflow script does not empty the directive when the lens is off'])
-    expect(collectUngatedHosts(reseed('dynamic-build.md', 'only for the ids in ${COMPLIANCE_FRAMEWORKS}', 'for all ids')))
-      .toEqual(["dynamic-build.md: the script's directive line differs from the partial's"])
   })
 
   it('known-bad probe: a Code-family body that names the skill, takes the lens or mentions compliance is reported', () => {

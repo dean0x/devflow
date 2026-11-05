@@ -359,7 +359,7 @@ describe('only the implement Phase 6 Validate fence carries the level and the ba
       const doc = COMMANDS.find(d => d.label === label)
       expect(collectValidateSpawns(doc?.text ?? '').length, label).toBe(2)
     }
-    for (const base of ['resolve', 'self-review', 'release', 'dynamic-build']) {
+    for (const base of ['resolve', 'self-review', 'release']) {
       for (const label of [`dist/commands/${base}.md`, `dist/curation-off/commands/${base}.md`]) {
         const doc = COMMANDS.find(d => d.label === label)
         expect(doc, `${label} is read`).toBeDefined()
@@ -403,7 +403,7 @@ describe('only the implement Phase 6 Validate fence carries the level and the ba
       const noSite = (text: string): string => seed(text, '### Phase 6: Validate', '### Phase 6: Check')
       expect(collectSpawnSiteDefects(withDoc(SPAWN_CORPUS, label, noSite)), label).toContain(`${label}: Phase 6 has no Validate spawn`)
     }
-    for (const base of ['resolve', 'self-review', 'release', 'dynamic-build']) {
+    for (const base of ['resolve', 'self-review', 'release']) {
       for (const label of [`dist/commands/${base}.md`, `dist/curation-off/commands/${base}.md`]) {
         const addBase = (text: string): string => {
           const spawn = collectValidateSpawns(text)[0] ?? ''

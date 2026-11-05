@@ -9,8 +9,7 @@
  *   - Tracker holds its input rules in its Core rules, so it drops `boundary-validation`;
  *   - Synthesize reads no skill: the three review categories sit in its review mode as a table
  *     (`review-methodology` is gone), and its callers pass every output path (`docs-framework` is gone,
- *     with `/dynamic-tickets` stating the ticket slug rule itself, and `/plan` and `/research`
- *     loading the skill on the main thread where they name a document);
+ *     with `/plan` and `/research` loading the skill on the main thread where they name a document);
  *   - Triage drops `security` for D-TRIAGE-SECURITY-INLINE: the security-finding definition and the
  *     never-quote-a-live-secret rule, inline in about 400 bytes.
  *
@@ -166,21 +165,6 @@ describe('Knowledge still says to verify what it keeps (D-PRELOAD-CLEANUP)', () 
       expect(body).toContain('EXISTING_KB is a snapshot: keep an assertion only after checking it against current code, and trust the code where they differ')
       expect(body).not.toContain('devflow:apply-feature-knowledge')
     }
-  })
-})
-
-describe('/dynamic-tickets states its ticket slug rule itself (D-PRELOAD-CLEANUP)', () => {
-  const RULE = "title.toLowerCase().replace(/[^a-z0-9]+/g, '-')"
-
-  it('the tracking-issue phase names the rule the amend phase applies, so no preload supplies it', () => {
-    const text = requireDistFile('dynamic-tickets.md')
-    const amend = text.indexOf('Apply cross-set amendments to ticket')
-    const tracking = text.indexOf('Write ticket files and a tracking-issue document')
-    expect(amend, 'the amend phase was not found').toBeGreaterThan(-1)
-    expect(tracking, 'the tracking-issue phase was not found').toBeGreaterThan(amend)
-    expect(text.slice(amend, tracking), 'the amend phase applies the rule').toContain(RULE)
-    expect(text.slice(tracking), 'the tracking-issue phase states it too').toContain(RULE)
-    expect(text.slice(tracking)).toContain('${OUTDIR}/{ticket-slug}.md')
   })
 })
 

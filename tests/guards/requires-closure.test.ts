@@ -99,7 +99,7 @@ interface RawRef {
  * classified out by their left context rather than by an allowlist of names —
  * an allowlist would also swallow a misspelt skill, which is precisely the
  * defect the forward arm exists to catch:
- *   - `/devflow:dynamic-plan`      — a slash-command reference (leading `/`);
+ *   - `/devflow:plan`              — a slash-command reference (leading `/`);
  *   - `<!-- devflow:review-summary` — a devflow marker comment.
  * Everything else is a skill reference and must resolve.
  */
@@ -242,7 +242,7 @@ describe('requires closure (forward): every skill reference resolves in scope', 
 
   it('known-bad probe: the two non-skill devflow: spellings are classified out, a typo is not', () => {
     const body = [
-      `See \`/${NS}dynamic-plan\` for the planning pass.`,
+      `See \`/${NS}plan\` for the planning pass.`,
       `<!-- ${NS}review-summary ts:{TS} -->`,
       `Load \`${NS}securty\` for the security pass.`,
     ].join('\n');
