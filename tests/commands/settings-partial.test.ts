@@ -182,7 +182,7 @@ describe('settings partial wiring', () => {
 
   it('every settings host carries one block, before every consumer it carries', () => {
     const outside = requireDistFiles().filter(f => !(SETTINGS_BLOCK_HOSTS as readonly string[]).includes(f.replace(/\.md$/, '')))
-    expect(outside, 'the compiled commands outside the SETTINGS_BLOCK_HOSTS roster').toEqual(['dynamic-profile.md'])
+    expect(outside, 'the compiled commands outside the SETTINGS_BLOCK_HOSTS roster').toEqual([])
     for (const host of SETTINGS_BLOCK_HOSTS) {
       expect(collectBlockProblems(`${host}.md`, requireDistFile(`${host}.md`)), host).toEqual([])
     }
@@ -207,11 +207,10 @@ describe('settings partial wiring', () => {
   it('exactly the SETTINGS_BLOCK_HOSTS roster carries the block (both directions)', () => {
     const carrying = requireDistFiles().filter(f => requireDistFile(f).includes(OPENING)).map(f => f.replace(/\.md$/, '')).sort()
     expect(carrying).toEqual([...SETTINGS_BLOCK_HOSTS].sort())
-    // release carries the block beside the five that loaded decisions before; dynamic-profile loads none, so it carries none.
-    for (const host of ['release', 'bug-analysis', 'research', 'dynamic-plan', 'dynamic-tickets']) {
+    // release carries the block beside the commands that load decisions.
+    for (const host of ['release', 'bug-analysis', 'research']) {
       expect(carrying, host).toContain(host)
     }
-    expect(carrying).not.toContain('dynamic-profile')
   })
 
   it('every compiled block invokes the resolver with the same bytes', () => {
@@ -219,7 +218,7 @@ describe('settings partial wiring', () => {
       .flatMap(f => requireDistFile(f).split('\n'))
       .filter(l => l.includes('resolve-settings.cjs'))
     // One invocation per host: the count is the roster's, restated here on purpose.
-    expect(lines.length).toBe(13)
+    expect(lines.length).toBe(10)
     expect([...new Set(lines)]).toEqual([INVOCATION])
   })
 })

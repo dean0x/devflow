@@ -176,7 +176,7 @@ function findStaleNameOccurrences(
 /**
  * References that appear with devflow: prefix but are NOT skills —
  * they are command names or slash-command shortcuts. Derived from the
- * plugin registry so removals (e.g. dynamic-wave) are reflected automatically
+ * plugin registry so removals are reflected automatically
  * without hand-editing this set.
  *
  * D-DESIGN: 'review' and 'pipeline' were previously hand-listed here but have
@@ -191,13 +191,12 @@ const COMMAND_REFS = new Set(getAllCommandNames());
  * Comment marker namespaces that share the devflow: prefix but are neither skills
  * nor commands. Examples:
  *   <!-- devflow:review-summary cycle:{N} -->
- *   <!-- devflow:wave-report wave:{ID} -->
  *   <!-- devflow:shipped v{VERSION} -->
  *   <!-- devflow:resolution-summary -->
  *
  * Not all of them are HTML comments. A tracker whose comment format has no
  * HTML-comment node carries the marker as the comment's visible FIRST LINE
- * instead — `devflow:wave {WAVE_ID}`, `devflow:traceability {ISSUE_REF}` — so the
+ * instead — `devflow:traceability {ISSUE_REF}` — so the
  * set is keyed on the NAMESPACE rather than on the syntax that wraps it. Every
  * entry is owned by exactly one operation, which is what stops the kinds from
  * mutually suppressing (GAP-20); this set only records that none of them is a
@@ -209,16 +208,9 @@ const COMMAND_REFS = new Set(getAllCommandNames());
  */
 const MARKER_REFS = new Set([
   'review-summary',
-  'wave-report',
   'shipped',
   'resolution-summary',
-  // The two namespaces §14.4 fixes for a provider whose comments cannot carry an
-  // HTML comment. `wave` is deliberately NOT `wave-report`: the appendix spells the
-  // per-kind namespaces `devflow:shipped` / `devflow:wave` / `devflow:traceability`,
-  // and the GitHub path's `wave-report` spelling is frozen by the Phase-0 golden. No
-  // reader crosses providers, so the two spellings cannot collide — but they are a
-  // real divergence and are recorded rather than quietly unified.
-  'wave',
+  // The namespace §14.4 fixes for a provider whose comments cannot carry an HTML comment.
   'traceability',
   // The PR test-plan evidence markers (#363): the body block's open/close pair
   // (`devflow:test-plan`) and the evidence comment's first line (`devflow:evidence`).

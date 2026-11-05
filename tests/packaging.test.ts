@@ -530,7 +530,7 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
       .map(f => f.replace(/^dist\/commands\//, ''))
       .sort();
     // Set equality against the shared manifest, not a bare count: a rename plus an
-    // addition in the same commit leaves the count at 14 and the tarball wrong.
+    // addition in the same commit leaves the count unchanged and the tarball wrong.
     expect(
       commandMds,
       `Tarball dist/commands/*.md set does not match tests/fixtures/mds-manifest.ts.\n` +

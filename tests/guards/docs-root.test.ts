@@ -62,19 +62,9 @@ const EXEMPTIONS: readonly Exemption[] = [
     reason: 'the evidence refresh runs inline after `cd "{worktree}"` on the same line, so the repo-relative --evidence path resolves under the worktree root; the script gates the value to ^[A-Za-z0-9._/-]{1,255}$, which an absolute path with a space would fail',
   },
   {
-    file: 'dist/commands/dynamic-build.md',
-    line: 'verify-evidence.cjs" publish --pr {n} --evidence ".devflow/docs/evidence-wave-{slug}.md"',
-    reason: 'the wave PR refresh runs inline after `cd "{integration worktree root}"` on the same line, so the repo-relative --evidence path resolves under the integration worktree root',
-  },
-  {
     file: 'dist/commands/implement.md',
     line: 'verify-evidence.cjs" claim --evidence ".devflow/docs/evidence-{branch_slug}.md"',
     reason: 'the claim call runs after `cd "{worktree}"` on the same line, so the repo-relative --evidence path resolves under the worktree root; the script gates the value to ^[A-Za-z0-9._/-]{1,255}$, which an absolute path with a space would fail',
-  },
-  {
-    file: 'dist/commands/dynamic-build.md',
-    line: 'verify-evidence.cjs" claim --evidence ".devflow/docs/evidence-wave-{slug}.md"',
-    reason: 'the wave claim call runs after `cd "{integration worktree root}"` on the same line, so the repo-relative --evidence path resolves under the integration worktree root',
   },
 ]
 
@@ -131,9 +121,7 @@ function collectRelativeDocs(corpus: ReadonlyArray<{ name: string; content: stri
 const commands = () => requireDistFiles().map(n => ({ name: `dist/commands/${n}`, content: requireDistFile(n) }))
 
 /** The hosts that write docs artifacts, and so must carry the docs root. */
-const DOCS_ROOT_HOSTS = [
-  'bug-analysis.md', 'dynamic-build.md', 'dynamic-plan.md', 'dynamic-tickets.md', 'implement.md', 'plan.md', 'research.md',
-]
+const DOCS_ROOT_HOSTS = ['bug-analysis.md', 'implement.md', 'plan.md', 'research.md']
 
 
 describe('no compiled command reads or writes a relative .devflow/docs path (D-DOCS-ROOT)', () => {
@@ -185,7 +173,7 @@ describe('no compiled command reads or writes a relative .devflow/docs path (D-D
       '3. Create timestamped analysis directory: `mkdir -p .devflow/docs/bug-analysis/{branch-slug}/{timestamp}/`',
       '1. List `.devflow/docs/design/*.md` — sort descending by filename',
       '- `OUTPUT_PATH`: `.devflow/docs/research/{topic-slug}/{YYYY-MM-DD_HHMM}/{type}.md`',
-      'const OUTDIR = `.devflow/docs/design/${slug}/${ts}`;',
+      'const OUTDIR = `.devflow/docs/research/${slug}/${ts}`;',
       'Write the handoff to ".devflow/docs/handoff-{branch_slug}.md".',
       // Rooted once and relative once on the same line: the relative one is reported.
       'Copy `{worktree}/.devflow/docs/a.md` to `.devflow/docs/b.md`.',
@@ -202,8 +190,8 @@ describe('no compiled command reads or writes a relative .devflow/docs path (D-D
   it('negative controls: rooted paths, relative fields beside WORKTREE_PATH and the rule sentence are not reported', () => {
     const controls = [
       '1. Check `{worktree}/.devflow/docs/bug-analysis/{branch-slug}/.last-analysis-head`:',
-      'const OUTDIR = `${ROOT}/.devflow/docs/tickets/${slug}/${ts}`;',
-      'node "$HOME/.devflow/scripts/verify-evidence.cjs" check tp "{integration worktree root}/.devflow/docs/evidence-wave-{slug}.md"',
+      'const OUTDIR = `${ROOT}/.devflow/docs/research/${slug}/${ts}`;',
+      'node "$HOME/.devflow/scripts/verify-evidence.cjs" check tp "{worktree}/.devflow/docs/evidence-{branch_slug}.md"',
       '```\nAgent(subagent_type="Git"):\n"OPERATION: update-pr-evidence\nEVIDENCE_FILE: .devflow/docs/evidence-{branch_slug}.md\nWORKTREE_PATH: {worktree}\n"\n```',
       `${RULE_LEAD} Every \`.devflow/docs/\` path this command reads or writes lives at the checkout's toplevel.`,
     ]

@@ -81,8 +81,8 @@ const DEBUG_COMMAND_TEXT = 'devflow:debug, else ';
 const DEBUG_FALLBACK_TEXT = ', else Explore investigates and Code fixes';
 const DEBUG_AGENT_TEXT = '; never the Debug agent';
 const HANDOFF_LINE_PREFIX = '- Plan handoff: ';
-/** A workflow the charter must never route to: release, self-review and the dynamic-* family. (The Harden line says "self-review" in prose.) */
-const FORBIDDEN_ROUTE = /\brelease\b|dynamic-|devflow:self-review|\/self-review/i;
+/** A workflow the charter must never route to: release and self-review. (The Harden line says "self-review" in prose.) */
+const FORBIDDEN_ROUTE = /\brelease\b|devflow:self-review|\/self-review/i;
 const TEXT_SPANS = [FIX_TEXT, DEBUG_COMMAND_TEXT, DEBUG_FALLBACK_TEXT, DEBUG_AGENT_TEXT] as const;
 
 /** The most plugins a domain may hold: 2^12 sets keeps the loop small. */
@@ -183,7 +183,7 @@ describe('the test domain', () => {
     expect(names).toEqual(
       expect.arrayContaining([
         'devflow-implement', 'devflow-plan', 'devflow-research', 'devflow-explore', 'devflow-code-review',
-        'devflow-resolve', 'devflow-bug-analysis', 'devflow-debug', 'devflow-dynamic',
+        'devflow-resolve', 'devflow-bug-analysis', 'devflow-debug',
       ]),
     );
     expect(names).not.toContain('devflow-release');
@@ -224,7 +224,7 @@ describe('renderCharter over every plugin set of the domain', () => {
       for (const agent of getAllAgentNames()) {
         if (wordIn(prose, capital(agent)) && !installed.agents.has(agent)) failures.push(`${label}: names the uninstalled agent ${capital(agent)}`);
       }
-      if (FORBIDDEN_ROUTE.test(text)) failures.push(`${label}: names release, dynamic-* or self-review`);
+      if (FORBIDDEN_ROUTE.test(text)) failures.push(`${label}: names release or self-review`);
 
       if (text !== oracle(installed)) failures.push(`${label}: differs from the string-replace oracle`);
 
@@ -285,7 +285,7 @@ describe('renderCharter over every plugin set of the domain', () => {
     }
   });
 
-  it('renders every registry plugin as the full set and never names release, dynamic-* or self-review workflows', () => {
+  it('renders every registry plugin as the full set and never names release or self-review workflows', () => {
     const inventory = charterInventory(DEVFLOW_PLUGINS.map(p => p.name));
     const result = renderCharter(SOURCE, inventory.commands, inventory.agents);
     expect(result).toEqual({ ok: true, content: SOURCE_LESS_DEBUG_FALLBACK });

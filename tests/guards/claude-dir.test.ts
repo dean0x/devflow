@@ -268,7 +268,6 @@ export const ALLOWED_RULE_PROSE: readonly AllowedRuleProse[] = [
     replaceWith: CLAUDE_DIR_PLACEHOLDER,
     binds: CLAUDE_DIR_PLACEHOLDER,
     files: [
-      'dist/commands/dynamic-profile.md',
       'src/assets/skills/agent-references/SKILL.md',
     ],
   },
@@ -298,7 +297,6 @@ type SiteRows = Readonly<Partial<Record<string, number>>>
 /** How many sanctioned lines each file holds. A file that is not listed holds none. */
 export const SITE_ROWS: SiteRows = {
   'dist/commands/code-review.md': 1,
-  'dist/commands/dynamic-profile.md': 1,
   'dist/commands/plan.md': 2,
   'dist/commands/implement.md': 1,
   'dist/commands/resolve.md': 1,
@@ -598,16 +596,6 @@ describe('no prompt reaches the Claude directory outside the CLAUDE_CONFIG_DIR r
 
   it('each file holds the number of sanctioned lines its site row states, and no other file holds one', () => {
     expect(collectSiteRowDefects(wholeCorpus())).toEqual([])
-  })
-
-  it('the consumer carries the sanctioned resolution: /dynamic-profile', () => {
-    // The positive half: a clean scan must mean the probe moved onto the rule,
-    // not that it was deleted.
-    const profile = requireDistFile('dynamic-profile.md')
-    expect(profile).toContain(SANCTIONED_RESOLUTION_PRINT)
-    for (const sub of ['{claude_dir}/projects/', '{claude_dir}/history.jsonl', '{claude_dir}/rules/']) {
-      expect(profile, `dynamic-profile reads ${sub} under the resolved directory`).toContain(sub)
-    }
   })
 
   it("/code-review's language gate is the install-time stamp, and its one directory read is the level reference (D-LANGUAGE-FOCUS-STAMP)", async () => {
