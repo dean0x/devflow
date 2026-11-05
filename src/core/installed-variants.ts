@@ -98,7 +98,7 @@ export function postingStatus(installed: InstalledVariants | null, complianceEna
 /** What `devflow init` prints, once, when the installed prompts move from posting steps to none. */
 export const POSTING_OFF_NOTICE =
   'Compliance is off on this machine, so devflow installed no step that posts test-plan evidence, ' +
-  'review or resolution summaries, backlog entries, review-thread replies, wave reports, plan artifacts ' +
+  'review or resolution summaries, backlog entries, review-thread replies, plan artifacts ' +
   'or release back-links to GitHub or a tracker. Results stay in local files under .devflow/docs/. ' +
   'To install these steps, run `devflow compliance --enable`.';
 

@@ -188,8 +188,8 @@ export async function runComplianceStep(opts: {
     'framework reference files into the compliance skill. Only the\n' +
     'frameworks you select are included — zero selection = generic controls.\n\n' +
     'Compliance on also installs the steps that post test-plan evidence, review\n' +
-    'and resolution summaries, backlog entries, review-thread replies, wave\n' +
-    'reports, plan artifacts and release back-links to GitHub or a tracker.\n' +
+    'and resolution summaries, backlog entries, review-thread replies,\n' +
+    'plan artifacts and release back-links to GitHub or a tracker.\n' +
     'Compliance off installs none of them; results stay in local files under\n' +
     '.devflow/docs/.\n\n' +
     formatFrameworkCatalogue(),

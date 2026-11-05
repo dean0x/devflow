@@ -429,7 +429,6 @@ export const TRACKER_OPS = [
   'backlink-shipped-issues',
   'associate-release',
   'ensure-traceable-issue',
-  'post-wave-report',
   'ensure-pr-ready',
 ] as const;
 
@@ -537,7 +536,6 @@ export const POSTING_OPS = [
   'post-resolution-summary',
   'update-pr-evidence',
   'manage-debt',
-  'post-wave-report',
   'backlink-shipped-issues',
   'associate-release',
 ] as const satisfies readonly ((typeof PR_HOST_OPS)[number] | (typeof TRACKER_OPS)[number])[];
