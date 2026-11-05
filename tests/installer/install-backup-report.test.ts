@@ -52,7 +52,7 @@ import { openBackupSession, openBackupSessionOrFail, runWithBackupReport, runWit
 import { applyComplianceChange } from '../../src/cli/commands/compliance.js';
 import { convergeInstalledVariants } from '../../src/cli/commands/curation.js';
 import { formatSweepSummary, initCommand } from '../../src/cli/commands/init.js';
-import { sweepLegacyDevflowFiles } from '../../src/cli/commands/legacy-sweep.js';
+import { sweepLegacyDevflowFiles } from '../../src/targets/claude-code/legacy-sweep.js';
 import { formatBackupSummary, formatKeptLegacySkills, type SummaryLine } from '../../src/cli/commands/install-report.js';
 import { runRulesEnable } from '../../src/cli/commands/rules.js';
 import { readManifest } from '../../src/core/manifest.js';

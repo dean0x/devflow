@@ -58,7 +58,7 @@ import { DEVFLOW_PLUGINS, buildAssetMaps, buildRulesMap, getAllAgentNames, getAl
 import type { RunMigrationsResult } from '../src/core/migrations.js';
 import { LEGACY_SKILL_NAMES } from '../src/targets/claude-code/legacy.js';
 import { convergeAmbientHooks } from '../src/cli/commands/ambient.js';
-import { sweepLegacySkillFolders } from '../src/cli/commands/legacy-sweep.js';
+import { sweepLegacySkillFolders } from '../src/targets/claude-code/legacy-sweep.js';
 
 describe('parsePluginSelection', () => {
   it('parses comma-separated plugin names', () => {

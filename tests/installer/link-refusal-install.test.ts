@@ -14,7 +14,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { formatRefusedFoldersSummary, formatReplacedLinksSummary } from '../../src/cli/commands/install-report.js';
-import { sweepLegacyDevflowFiles } from '../../src/cli/commands/legacy-sweep.js';
+import { sweepLegacyDevflowFiles } from '../../src/targets/claude-code/legacy-sweep.js';
 import { installViaFileCopy, type InstallReport, type Spinner } from '../../src/targets/claude-code/installer.js';
 import { clearLinkedEntry, mergeLinkReports } from '../../src/targets/claude-code/linked-folder.js';
 import { convergeTrackerArtifacts } from '../../src/targets/claude-code/tracker-install.js';

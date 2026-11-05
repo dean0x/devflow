@@ -18,7 +18,7 @@ import { installViaFileCopy, installScripts, type InstallReport } from '../../ta
 import { logSummaryLines, openBackupSession, runWithLateBackupReport } from './backup-session.js';
 import { formatKeptLegacySkills, formatLinksSummary, formatOverlaySummary, formatSkillScopeSummary, formatTrackerAssetSummary, isPluginListUnchanged, type SummaryLine } from './install-report.js';
 import { mergeLinkReports, newLinkReport, type LinkReport } from '../../targets/claude-code/linked-folder.js';
-import { sweepLegacyDevflowFiles, sweepLegacySkillFolders } from './legacy-sweep.js';
+import { sweepLegacyDevflowFiles, sweepLegacySkillFolders } from '../../targets/claude-code/legacy-sweep.js';
 import { removeRulesFolder, rulesFolderRefusedMessage } from '../../targets/claude-code/rules-folder.js';
 import { convergeTrackerArtifacts, type ConvergeTrackerArtifactsResult, type TrackerAgentState } from '../../targets/claude-code/tracker-install.js';
 import {

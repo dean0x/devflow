@@ -9,7 +9,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { sweepLegacySkillFolders } from '../../src/cli/commands/legacy-sweep.js';
+import { sweepLegacySkillFolders } from '../../src/targets/claude-code/legacy-sweep.js';
 import { formatBackupSummary } from '../../src/cli/commands/install-report.js';
 import { RETIRED_SHIPPED } from '../../src/core/retired-shipped-names.js';
 import { createBackupSession, createPathSet, type BackupSession } from '../../src/targets/claude-code/install-backup.js';

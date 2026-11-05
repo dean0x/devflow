@@ -3,10 +3,10 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { LEGACY_COMMAND_NAMES, LEGACY_RULE_NAMES } from '../../core/plugins.js';
 import { RETIRED_SHIPPED } from '../../core/retired-shipped-names.js';
-import type { BackupSession } from '../../targets/claude-code/install-backup.js';
-import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
-import { BARE_LEGACY_SKILL_HASHES } from '../../targets/claude-code/legacy-skill-hashes.js';
-import { directoryState, isUnrealFolder, type LinkReport } from '../../targets/claude-code/linked-folder.js';
+import type { BackupSession } from './install-backup.js';
+import { LEGACY_SKILL_NAMES } from './legacy.js';
+import { BARE_LEGACY_SKILL_HASHES } from './legacy-skill-hashes.js';
+import { directoryState, isUnrealFolder, type LinkReport } from './linked-folder.js';
 
 /** The prefix of a skill folder in devflow's own namespace. A folder without it is bare. */
 const NAMESPACE_PREFIX = 'devflow:';

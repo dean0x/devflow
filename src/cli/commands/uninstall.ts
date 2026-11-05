@@ -53,7 +53,7 @@ import { installCommandsAndAgents } from '../../targets/claude-code/installer.js
 import { BACKUP_ROOT_NAME, escapeName } from '../../targets/claude-code/install-backup.js';
 import { isUnrealFolder, newLinkReport, refuseUnrealFolder, refusedFolderStatement, type LinkReport } from '../../targets/claude-code/linked-folder.js';
 import { formatReplacedLinksSummary, type SummaryLine } from './install-report.js';
-import { judgeBareLegacySkill } from './legacy-sweep.js';
+import { judgeBareLegacySkill } from '../../targets/claude-code/legacy-sweep.js';
 
 /**
  * Which install `uninstall` acts on: the machine-wide install (`user`), or a
