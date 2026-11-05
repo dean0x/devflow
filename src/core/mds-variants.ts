@@ -514,13 +514,13 @@ export const PR_HOST_OPS = [
 export const PR_HOST_DESTINATION_ROOT = 'pr';
 
 /**
- * The eight Git operations that post to GitHub or to a tracker: the one roster of
+ * The seven Git operations that post to GitHub or to a tracker: the one roster of
  * them. Posting steps are a compile-time variant keyed on the machine compliance
  * switch alone, and this list says which reference files that variant drops.
  *
  * A compliance-off install carries no reference file of any of them: four under
- * `pr/` and, for each of the three providers, four under `tracker/{provider}/`, which
- * is 16 files. `check-merge-readiness` is deliberately absent: it reads state and
+ * `pr/` and, for each of the three providers, three under `tracker/{provider}/`, which
+ * is 13 files. `check-merge-readiness` is deliberately absent: it reads state and
  * posts nothing. The names are checked against the registry twice, once at compile
  * time here (each is a PR-host or a tracker operation) and once at run time by
  * {@link checkPostingOps}, because the manifest that omits them must fail closed: a
@@ -1087,7 +1087,7 @@ export function generatedReferenceManifest(): readonly string[] {
  *
  * `compliance: false` is the install of a machine with compliance off: the same
  * manifest without the references of the posting operations ({@link POSTING_OPS},
- * 16 files) and without the publication gate document, which only those operations
+ * 13 files) and without the publication gate document, which only those operations
  * load. Any other value, and an absent option, is today's manifest. The omission
  * fails closed: a posting name the registry does not carry asserts, because a name
  * that matched no file would leave a posting reference in a compliance-off install.

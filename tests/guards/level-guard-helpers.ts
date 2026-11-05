@@ -30,7 +30,7 @@ export const DECIDED_ROWS: Readonly<Record<LevelCmd, readonly string[]>> = {
   resolve: ['| 2 Global Triage | pass level | pass level |', '| 6 Polish | skip | skip |'],
 }
 
-/** How a command writes a Polish spawn: the `subagent_type` argument of a prose or block call, or the `agentType` option of a dynamic-build call. */
+/** How a command writes a Polish spawn: the `subagent_type` argument of a prose or block call, or the `agentType` option of a fenced call. */
 export const POLISH_MARKERS = ['subagent_type="Polish"', 'agentType: "Polish"'] as const
 export const POLISH_SPAWN = `Agent(${POLISH_MARKERS[0]}`
 

@@ -303,8 +303,8 @@ describe('Guard 4 (command integrity): declared commands ↔ source files', () =
 // Matches both Agent(subagent_type="Name") and subagent_type: "Name" syntax.
 const SPAWN_RE = /subagent_type[=:]\s*"([^"]+)"/gi;
 
-// Also matches agentType: "Name" (used by dynamic-* Workflow commands).
-// Harvesting this signal lets Guard 5 verify dynamic plugin agents without a blanket exemption.
+// Also matches agentType: "Name" (the option form of a fenced spawn).
+// Harvesting this signal lets Guard 5 verify the agents such spawns name without a blanket exemption.
 const AGENT_TYPE_RE = /agentType:\s*"([^"]+)"/gi;
 
 /**
@@ -320,7 +320,7 @@ const normalize = (name: string) => name.replace(/-/g, '').toLowerCase();
  * `agentType`. A `subagent_type` that byte-equals an entry of BUILT_IN_SPAWN_TYPES is skipped BEFORE
  * `normalize`: a built-in without an agent file is declared by no plugin. The compare is on the raw text, so
  * a type outside the set, `general-purpose` included, reaches `normalize` and is reported as undeclared. The
- * `agentType` harvest has no such exemption: a dynamic host names roster agents only.
+ * `agentType` harvest has no such exemption: it names roster agents only.
  */
 export function spawnedRegistryNames(content: string): Set<string> {
   const spawned = new Set<string>();

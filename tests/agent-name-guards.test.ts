@@ -455,18 +455,6 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
   },
 
   // -----------------------------------------------------------------------
-  // Evaluator — CONCEPT (.devflow/features corpus)
-  // -----------------------------------------------------------------------
-  {
-    path: '.devflow/features/dynamic-workflow-engine/KNOWLEDGE.md',
-    name: 'Evaluator',
-    reason:
-      'CONCEPT: evaluator_panel — live MDS function name defined in _engine.mds; ' +
-      'not a Form-B spawn key',
-    contexts: ['evaluator_panel'],
-  },
-
-  // -----------------------------------------------------------------------
   // Simplify — CONCEPT (a capitalised verb opening a sentence, not the agent renamed to Polish;
   // the lowercase verb needs no row)
   // -----------------------------------------------------------------------

@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes — The dynamic commands are removed
+
+The four dynamic commands (`/dynamic-build`, `/dynamic-plan`, `/dynamic-profile` and `/dynamic-tickets`) and the `devflow-dynamic` plugin are removed ([#756](https://github.com/dean0x/devflow/issues/756)).
+This is a breaking change.
+
+**What you must do:**
+
+- Run `devflow init` after the upgrade. It removes the installed command files. Before you run it, Claude Code still lists the old commands. After it, Claude Code reports an unknown command for each of them.
+- Use `/plan` and then `/implement` for each change.
+- Remove the plugin name from your scripts. `devflow init --plugin=dynamic` (or `devflow-dynamic`) and `devflow uninstall --plugin=dynamic` exit 1 as an unknown plugin. A list that holds one of these names changes nothing.
+
+**What else changes:**
+
+- The Git agent operation `post-wave-report` and `verify-evidence.cjs check wave` are removed.
+- `/code-review` and `/bug-analysis` no longer read per-ticket plans.
+
+**What devflow keeps and no longer reads:** `~/.devflow/preference-profile.md` (`devflow uninstall` still offers to remove it), the ticket sets, plans and wave reports under `.devflow/docs/`, and the `## Wave Filter` section of your tracker conventions file, which is now ignored. Delete them when you no longer need them.
+
 ---
 
 ## [3.15.0] - 2026-11-05

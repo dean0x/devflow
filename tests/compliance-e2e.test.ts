@@ -1378,8 +1378,7 @@ describe('S23 (TP-43, AC-37): a hipaa repository never changes the machine compl
 
   /**
    * The compliance-off command prompts that the machine installs: every compliance-armed command
-   * host whose plugin the recommended install selects (the optional dynamic-build and
-   * dynamic-tickets commands are not installed).
+   * host whose plugin the recommended install selects.
    */
   async function installedOffCommandNames(): Promise<string[]> {
     const installed = await listDir(path.join(claudeDir, 'commands', 'devflow'));

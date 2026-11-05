@@ -97,7 +97,7 @@ The tag push and the release create are hard failures. The commit list, back-lin
 
 - **CI releases bypass `/release`.** The `workflow_dispatch` release above runs in GitHub Actions, not through `/release`, so it gathers no evidence, asks nothing about untraced commits, and posts no back-links or release markers. Run `/release --dry-run` first when a release needs its trace.
 - **No server-side enforcement.** Every evidence gate runs inside the devflow commands on the machine running them. Nothing in CI or branch protection checks the evidence policy, a test plan or a trace map: a PR opened or a release cut without devflow meets no gate.
-- **No auto-merge.** Devflow never merges a PR. `check-merge-readiness` only reports READY or NOT_READY, and `/dynamic-build` opens the wave PR but never merges it.
+- **No auto-merge.** Devflow never merges a PR. `check-merge-readiness` only reports READY or NOT_READY.
 
 ## Residual Races
 

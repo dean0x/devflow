@@ -79,7 +79,7 @@ Supports multi-worktree auto-discovery — one command reviews all active branch
 
 ### PR-comment publication
 
-This section applies only with compliance on: with compliance off, no step posts a comment and the results stay in local files under `.devflow/docs/`. Applies to `/code-review` and `/resolve`. On public repositories, Devflow posts a counts-only stub comment by default (visibility is probed at run time; the gate fails closed to the stub on any error). Set `reviewPublication: full` in `.devflow/config.json` to post the full report regardless of repo visibility, or `off` to disable comment posting (`auto` is the default). A team `reviewPublication` in the committed `.devflow/project.json` is a ceiling only — it can lower your value, never raise it: with no personal value the result is at most `auto` (a team `off` still lowers it), so a branch that commits `full` cannot skip the visibility gate for whoever reviews it; commands take the result from the `resolve-settings.cjs` line, and resolve `off` when that line cannot be resolved. Under a `required` evidence policy, `off` resolves to `stub`: the counts-only stub still posts, so a record reaches the PR (`stub` is not a value you can configure). In the full report and in the stub, a summary section whose heading starts with the word `Private`, in any letter case (for example `## Private notes`), stays out of the comment. A heading line inside a code block counts too. The section ends before the next heading of the same or a higher level, or at the end of the file. If no public text remains, no comment is posted, also under a `required` policy. The local summary file is not edited. The secret scrubber still runs on every post, and a `Private` section is not a place for credentials. The test-plan evidence comment — posted by `/implement`, `/resolve` and `/dynamic-build`'s wave PR — makes no visibility probe: it is the stub under `auto`, full only under `full`, and absent under `off` unless the policy turned `off` into `stub`. Every body posted to GitHub — whether a full report or a stub — is run through the `redact-secrets.cjs` scrubber unconditionally; if the scrubber is missing (stale `~/.devflow` before running `devflow init`) or exits non-zero, the post is suppressed and `TRACEABILITY: DEGRADED (redaction unavailable)` is reported rather than publishing unredacted content.
+This section applies only with compliance on: with compliance off, no step posts a comment and the results stay in local files under `.devflow/docs/`. Applies to `/code-review` and `/resolve`. On public repositories, Devflow posts a counts-only stub comment by default (visibility is probed at run time; the gate fails closed to the stub on any error). Set `reviewPublication: full` in `.devflow/config.json` to post the full report regardless of repo visibility, or `off` to disable comment posting (`auto` is the default). A team `reviewPublication` in the committed `.devflow/project.json` is a ceiling only — it can lower your value, never raise it: with no personal value the result is at most `auto` (a team `off` still lowers it), so a branch that commits `full` cannot skip the visibility gate for whoever reviews it; commands take the result from the `resolve-settings.cjs` line, and resolve `off` when that line cannot be resolved. Under a `required` evidence policy, `off` resolves to `stub`: the counts-only stub still posts, so a record reaches the PR (`stub` is not a value you can configure). In the full report and in the stub, a summary section whose heading starts with the word `Private`, in any letter case (for example `## Private notes`), stays out of the comment. A heading line inside a code block counts too. The section ends before the next heading of the same or a higher level, or at the end of the file. If no public text remains, no comment is posted, also under a `required` policy. The local summary file is not edited. The secret scrubber still runs on every post, and a `Private` section is not a place for credentials. The test-plan evidence comment — posted by `/implement` and `/resolve` — makes no visibility probe: it is the stub under `auto`, full only under `full`, and absent under `off` unless the policy turned `off` into `stub`. Every body posted to GitHub — whether a full report or a stub — is run through the `redact-secrets.cjs` scrubber unconditionally; if the scrubber is missing (stale `~/.devflow` before running `devflow init`) or exits non-zero, the post is suppressed and `TRACEABILITY: DEGRADED (redaction unavailable)` is reported rather than publishing unredacted content.
 
 ## /resolve
 
@@ -190,70 +190,6 @@ Incremental by default — only analyzes commits since the last run. The marker 
 ```
 /bug-analysis                # Analyze current branch (incremental)
 /bug-analysis --full         # Full analysis (ignore previous runs)
-```
-
-## Running the full pipeline
-
-The three dynamic commands form a sequential delivery pipeline — each stage produces output consumed by the next:
-
-```
-/dynamic-tickets <initiative>   # decompose initiative into tickets
-                                # ↓ review the ticket slate
-/dynamic-plan <ticket-dir>      # plan + challenge each ticket
-                                # ↓ answer DECISIONS-NEEDED.md
-/dynamic-build <ticket-dir>     # implement, review, and verify
-                                # ↓ review the gated wave PR, refreshed with test-plan evidence, and merge it
-```
-
-The command boundary is the human gate: each stage returns to you before the next begins — there is no automatic hand-off between them.
-
-## /dynamic-tickets
-
-Ticket factory — turn an initiative or spec into a reviewed, wave-structured ticket slate with a tracking issue.
-
-Breaks an initiative or feature spec into discrete, dependency-ordered implementation tickets. Each ticket gets an acceptance-criteria block and a wave assignment. Produces the ticket files and a tracking-issue document, written by the Synthesize agent, under `.devflow/docs/tickets/{slug}/{timestamp}/`.
-
-Under a `required` evidence policy, once the workflow returns, the Git agent files the tracking issue and then one issue per ticket in dependency order, at most 50 in all. Each reference is written back into its file as an `**Issue:**` line, and each ticket's issue names its dependencies by reference; `/dynamic-build` reads those lines. Under `standard` nothing is filed. An issue the Git agent cannot file stays a local file and is reported `TRACEABILITY: DEGRADED`.
-
-Typical flow: write a spec (`spec.md`), run `/dynamic-tickets` over it, then deliver wave by wave — `/dynamic-plan` on a wave, `/dynamic-build` on that plan, and repeat for the next wave until the spec is shipped. Suited to system-scale work; for a single feature, prefer the orchestrated `/plan` → `/implement` flow.
-
-```
-/dynamic-tickets <initiative-description-or-file>
-```
-
-## /dynamic-plan
-
-Parallel wave planning — challenge each ticket plan, write acceptance criteria and test plans, resolve decisions from the preference profile, output `DECISIONS-NEEDED.md`.
-
-Takes a ticket directory (from `/dynamic-tickets`) or a list of tracker issues and runs a parallel planning pass: for each ticket, challenges the design, writes detailed acceptance criteria and a test plan of TP lines, and resolves known decisions against `~/.devflow/preference-profile.md`. After the workflow, each plan's test plan is checked with `verify-evidence.cjs check tp`, and a malformed one is named in the report. Plans and `DECISIONS-NEEDED.md` land under `.devflow/docs/design/{slug}/{timestamp}/`; unresolved decisions go to the user for review.
-
-```
-/dynamic-plan <ticket-dir>
-```
-
-## /dynamic-build
-
-Dependency-aware build engine — implement, review and verify one ticket or a wave of tickets.
-
-Executes the devflow implement→review→verify pipeline for one ticket or all tickets in a wave, respecting dependency order. Each ticket runs as a separate Code agent on the branch the Git agent's setup-task created for it — the engine never names a branch itself, and a ticket whose setup reports no branch stops; cross-ticket dependencies block until their prerequisites are merged into the integration branch.
-
-**Tracking-issue argument (optional)**: pass an explicit issue reference or URL, or the command reads the `**Issue:**` line of the `tracking-issue.md` written by `/dynamic-tickets`. The tracking issue never reaches a ticket — each ticket builds against its own issue. After the wave, the Git agent posts the wave report as a comment on the tracking issue. If none is found, the run continues and notes `TRACEABILITY: DEGRADED (no tracking issue for this run)` in the summary.
-
-**Wave PR**: after a wave that merged at least one ticket, the end-of-run questions include one asking whether to open a PR from the `wave/{slug}` integration branch. Its body closes each merged ticket's issue, references each quarantined one, and names the tracking issue only in a `Refs` line — never `Closes`, because it outlives the wave. It also carries a Wave Evidence table and the wave's combined test plan. Under a `required` evidence policy, a merged ticket without a ticket link or a usable test plan blocks the wave PR. Once it is open, a Test agent runs the wave test plan on the integration branch and the PR's test-plan block and evidence comment are refreshed. The wave PR is never merged by devflow — you merge it.
-
-```
-/dynamic-build <ticket-dir>          # Build all tickets in a wave
-/dynamic-build <ticket-file>         # Build a single ticket
-```
-
-## /dynamic-profile
-
-Decision-preference profile distiller — mine past session transcripts of all projects into `~/.devflow/preference-profile.md`.
-
-Scans Claude Code session transcripts from all known projects (under `$CLAUDE_CONFIG_DIR` when it is an absolute path, else `~/.claude`), extracts repeated design and implementation preferences (style choices, library selections, architectural patterns), and writes a structured preference profile. Consumed by `/dynamic-plan` to auto-resolve common decisions without human intervention.
-
-```
-/dynamic-profile
 ```
 
 ## Ambient Mode

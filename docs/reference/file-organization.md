@@ -20,7 +20,7 @@ devflow/
 │   │   ├── flags-view/               # Claude Code flags editor TUI — standalone `devflow flags` command, inline screen mode (state.ts, render.ts, terminal.ts, index.ts)
 │   │   └── agents-view/              # Per-agent model config TUI (state.ts, render.ts, terminal.ts)
 │   ├── core/                         # Shared logic (single source of truth for registry + utilities)
-│   │   ├── plugins.ts                # DEVFLOW_PLUGINS registry — 21 plugin entries
+│   │   ├── plugins.ts                # DEVFLOW_PLUGINS registry — 20 plugin entries
 │   │   ├── paths.ts                  # getPackageRoot + asset path helpers
 │   │   ├── assets.ts                 # skillsDir, agentsDir, rulesDir, scriptsDir, commandsDir,
 │   │   │                             #   compiledAgentsDir, agentSourceDirs (dist-first order owner)
@@ -155,7 +155,6 @@ devflow/
 │   ├── docs/                         # Docs guards — the CLAUDE.md Tracker block cap and the selection-scoped naming
 │   ├── guards/                       # Named-collector guards with known-bad probes: literal-agent-paths, retired-wording, numeric-floor-manifest, agent-source-resolver, agent-source-precedence, dist-agents, extended-references, capability-hoist, heredoc-quoting, fence-grammar, provider-scope, requires-closure, no-permission-skip-in-hooks (no hook script spells a permission-skip flag, the skip-all mode or an allow-list flag)
 │   ├── tracker/                      # Tracker contract/mechanics split — byte budget, schema scope, hostile values, single-authority registries, reference reachability
-│   ├── dynamic/                      # Two-sided writer↔reader grammar seams
 │   ├── installer/                    # Generated-reference overlay (converge-not-merge, atomic per-unit swap)
 │   ├── integration/                  # Real claude / tarball installs
 │   └── fixtures/
@@ -263,7 +262,7 @@ The installer takes the first file it finds among the trees whose off axes are a
 
 When compliance is off, the installer first reads `dist/variant-axes.json`. For each host that carries a compliance arm, it needs the file that was built for the exact switches of the machine. On a machine with both axes off, a host with both arms needs its `curation-compliance-off` file and never its `curation-off` file. The install stops before it writes any file when the manifest is absent or not valid, or when one of these files is absent. The error names `npm run build:mds`. A host with no compliance arm is not checked. `npm run build:cli` alone does not write the manifest or the trees.
 
-Ten hosts carry a compliance arm: the commands `implement`, `resolve`, `code-review`, `bug-analysis`, `dynamic-build`, `dynamic-tickets`, `plan` and `release`, and the agents `git` and `triage`. The roster is `COMPLIANCE_VARIANT_HOSTS` in `tests/fixtures/mds-manifest.ts`. The build writes `dist/variant-axes.json` and one file in `dist/compliance-off/` for each of the ten hosts. It writes `dist/curation-compliance-off/` only for a host that also carries a curation arm, so the `git` agent has no file there: it has no curation arm, and its `compliance-off` file serves a machine with both axes off.
+Eight hosts carry a compliance arm: the commands `implement`, `resolve`, `code-review`, `bug-analysis`, `plan` and `release`, and the agents `git` and `triage`. The roster is `COMPLIANCE_VARIANT_HOSTS` in `tests/fixtures/mds-manifest.ts`. The build writes `dist/variant-axes.json` and one file in `dist/compliance-off/` for each of the eight hosts. It writes `dist/curation-compliance-off/` only for a host that also carries a curation arm, so the `git` agent has no file there: it has no curation arm, and its `compliance-off` file serves a machine with both axes off.
 
 The markers are interim. Native conditionals in the MDS compiler replace them later. The header comment of `src/core/curation-variants.ts` gives the one-to-one mapping.
 
