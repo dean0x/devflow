@@ -9,8 +9,8 @@
  *         RegExp that accepts and rejects exactly what TP_LINE_RE does over a
  *         differential table; the Fields prose names the script's own bounds; the
  *         States, Methods and precedence lists equal STATES, METHODS and PRECEDENCE.
- *         The partial stays import-free with two defines (bounding its compile cost), and every
- *         adopter — the two /dynamic-* commands, /plan (#363 P4: its Gate 2 shows
+ *         The partial stays import-free with one define (bounding its compile cost), and every
+ *         adopter — /plan (#363 P4: its Gate 2 shows
  *         the TP lines its `## Test Plan` section keeps) and /implement (its Phase 1
  *         authors or copies them) — carries the define's whole expansion exactly once.
  *
@@ -60,13 +60,12 @@ const PE = createRequire(import.meta.url)(PR_EVIDENCE_SCRIPT) as ContractExports
 const PARTIAL_PATH = path.join(ROOT, 'src', 'assets', 'commands', '_partials', '_plan_contract.mds')
 const PARTIAL_IMPORT = './_partials/_plan_contract.mds'
 const TP_DEFINE = 'test_plan_line'
-const CONTRACT_DEFINE = 'acceptance_criteria_contract'
 const EM = '—'
 
-/** Compile cost is exponential in the define count; the contract partial holds exactly these. */
-const KNOWN_DEFINES: readonly string[] = [TP_DEFINE, CONTRACT_DEFINE]
+/** Compile cost is exponential in the define count; the contract partial holds exactly this one. */
+const KNOWN_DEFINES: readonly string[] = [TP_DEFINE]
 /** The command hosts that import the contract partial, sorted. */
-const CONTRACT_ADOPTERS: readonly string[] = ['dynamic-build', 'dynamic-plan', 'implement', 'plan']
+const CONTRACT_ADOPTERS: readonly string[] = ['implement', 'plan']
 
 interface TextFile {
   readonly name: string
@@ -374,24 +373,18 @@ function collectExpansionDefects(files: readonly TextFile[], expansion: string):
 }
 
 describe('AC-2: the _plan_contract partial', () => {
-  it('declares exactly the two known defines, test_plan_line first, each exported, with no import', () => {
+  it('declares exactly the one known define, test_plan_line, exported, with no import', () => {
     const { defines, exports, imports } = collectDeclarations(partialSource())
-    expect(defines, 'MDS captures at definition site, so the called define comes first').toEqual([...KNOWN_DEFINES])
+    expect(defines, 'the partial holds only the TP-line define').toEqual([...KNOWN_DEFINES])
     expect([...exports].sort()).toEqual([...defines].sort())
     expect(imports).toEqual([])
   })
 
-  it('known-bad probe: a third define and an import are reported', () => {
+  it('known-bad probe: a second define and an import are reported', () => {
     const seeded = `@import { x } from "./_y.mds"\n${partialSource()}\n@define smuggled():\nbody\n@end\n`
     const { defines, imports } = collectDeclarations(seeded)
     expect(defines).toContain('smuggled')
     expect(imports).toHaveLength(1)
-  })
-
-  it('the contract define calls test_plan_line() exactly once', () => {
-    const body = defineBody(partialSource(), CONTRACT_DEFINE) ?? ''
-    expect(body.length, 'the contract define is empty').toBeGreaterThan(500)
-    expect(body.split('\n').filter(l => l.trim() === `{{${TP_DEFINE}()}}`)).toHaveLength(1)
   })
 
   it('is imported by exactly the adopter hosts', () => {

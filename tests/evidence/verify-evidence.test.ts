@@ -259,7 +259,10 @@ describe('usage (exit 1, stdout empty)', () => {
     ['check with an unknown kind', ['check', 'plan', 'x']],
     ['check with a flag', ['check', 'tp', '--x']],
     ['check with a second file', ['check', 'tp', 'a', 'b']],
-    ['check wave --links-only without a file', ['check', 'wave', '--links-only']],
+    ['check without a file', ['check', 'tp']],
+    ['check with an empty file argument', ['check', 'block', '']],
+    ['check wave, which is no kind', ['check', 'wave', 'x']],
+    ['check wave --links-only, which is no kind', ['check', 'wave', '--links-only', 'x']],
     ['check tp with --links-only', ['check', 'tp', '--links-only', 'a']],
     ['render without --plan', ['render']],
     ['render with a positional', ['render', 'x']],
@@ -360,6 +363,17 @@ describe('check', () => {
     expect(runMain(['check', 'tp', dir]).code).toBe(2)
   })
 
+  it('a file that is not UTF-8 is input-unusable (exit 2)', () => {
+    const dir = scratch('check-latin1')
+    const file = writeScratch(dir, 'latin1.md', '')
+    fs.writeFileSync(file, Buffer.from([0x23, 0x23, 0x20, 0xff, 0xfe, 0x0a]))
+    for (const kind of ['tp', 'block', 'exceptions'] as const) {
+      const r = runMain(['check', kind, file])
+      expect(r.code, kind).toBe(2)
+      expect(r.stdout, kind).toBe('')
+    }
+  })
+
   it('a diagnostic names the error code and line number, never a byte of the input', () => {
     const dir = scratch('check-diag')
     const sentinel = 'SENTINEL-SCENARIO-TEXT'
@@ -369,6 +383,23 @@ describe('check', () => {
     expect(r.stderr).toMatch(/malformed at line 2/)
     expect(r.stderr).not.toContain(sentinel)
   })
+
+  it('through the real process: exit 0, 5, 2 and 1, each with not one byte on stdout', () => {
+    const home = scratch('check-real-home')
+    const good = writeScratch(home, 'good.md', `${BLOCK_START}\n## Test Plan\n${GOOD_TP}\n${BLOCK_END}\n`)
+    const ticked = writeScratch(home, 'ticked.md', `${BLOCK_START}\n## Test Plan\n- [x] ${GOOD_TP.slice(6)}\n${BLOCK_END}\n`)
+    const cases: ReadonlyArray<readonly [readonly string[], number]> = [
+      [['check', 'block', good], 0],
+      [['check', 'block', ticked], 5],
+      [['check', 'block', path.join(home, 'no-such-file.md')], 2],
+      [['check', 'block'], 1],
+    ]
+    for (const [args, status] of cases) {
+      const r = runScript({ args, cwd: home, home })
+      expect(r.status, `${args.join(' ')}: ${r.stderr}`).toBe(status)
+      expect(r.stdout, args.join(' ')).toBe('')
+    }
+  }, 20_000)
 })
 
 // ---------------------------------------------------------------------------

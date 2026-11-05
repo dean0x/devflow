@@ -130,9 +130,8 @@ function runOnText(sub: readonly string[], text: string, name: string): { code: 
 // ensure-pr-ready — the PR_TEST_PLAN_BLOCK paste gate (AC-10)
 // ---------------------------------------------------------------------------
 //
-// The paste gate lives in ensure-pr-ready step 4a, beside the PR it opens (D-PR-BY-GIT). One
-// `check block` serves the test-plan block and the wave block, so the rule is one bullet, "Caller
-// blocks", read here beside the exception gate and the scrub.
+// The paste gate lives in ensure-pr-ready step 4a, beside the PR it opens (D-PR-BY-GIT). The rule
+// is one bullet, "Caller blocks", read here beside the exception gate and the scrub.
 
 const CALLER_BLOCKS = '   - **Caller blocks**'
 const EXCEPTIONS_PASTE = '**Pasting `PR_EXCEPTIONS`.**'
@@ -166,14 +165,14 @@ function collectTestPlanPasteDefects(ref: string): string[] {
   const out: string[] = []
   const need = (what: string, ok: boolean): void => { if (!ok) out.push(what) }
   need('the value is saved with the Write tool, not a shell string', para.includes('with the Write tool') && para.includes('never via a shell string'))
-  need('the gate is `verify-evidence.cjs check block`', para.includes('`PR_TEST_PLAN_BLOCK` (`check block`)') && /verify-evidence\.cjs" check <wave\|block> <file>; echo "exit=\$\?"/.test(para))
+  need('the gate is `verify-evidence.cjs check block`', para.includes('`PR_TEST_PLAN_BLOCK` (`check block`)') && /verify-evidence\.cjs" check block <file>; echo "exit=\$\?"/.test(para))
   need('only `exit=0` admits the value', para.includes('Only `exit=0` admits it, verbatim'))
   need('it is scrubbed with the body', step4a.includes('then append the caller blocks. Apply the Comment-sink scrub (D11)'))
   need('a mismatch is omitted, never repaired or partly pasted', para.includes('never repaired or partly pasted'))
   need('the DEGRADED reason', para.includes('`TRACEABILITY: DEGRADED (test-plan block does not match its grammar)`'))
-  need('`(none)` is the documented absent case', para.includes('each when given and not `(none)`'))
+  need('`(none)` is the documented absent case', para.includes('when given and not `(none)`'))
   need('the scrubber-failure body never carries it', step4a.includes('a failed one posts neither block'))
-  need('there is exactly one test-plan check', ref.split('check block').length - 1 === 1)
+  need('there is exactly one test-plan check', ref.split('verify-evidence.cjs" check block').length - 1 === 1)
   return out
 }
 
@@ -194,10 +193,10 @@ describe('AC-10: ensure-pr-ready pastes PR_TEST_PLAN_BLOCK only through `check b
     const repairs = ref.replace('never repaired or partly pasted', 'repaired, then pasted')
     expect(repairs, 'the seed must land').not.toBe(ref)
     expect(collectTestPlanPasteDefects(repairs)).toEqual(['a mismatch is omitted, never repaired or partly pasted'])
-    const ungated = ref.replace(' check <wave|block> <file>', ' render --plan <file>')
+    const ungated = ref.replace(' check block <file>', ' render --plan <file>')
     expect(ungated, 'the seed must land').not.toBe(ref)
-    expect(collectTestPlanPasteDefects(ungated)).toEqual(['the gate is `verify-evidence.cjs check block`'])
-    expect(collectTestPlanPasteDefects(`${ref}\nthen run check block again`)).toEqual(['there is exactly one test-plan check'])
+    expect(collectTestPlanPasteDefects(ungated)).toEqual(['the gate is `verify-evidence.cjs check block`', 'there is exactly one test-plan check'])
+    expect(collectTestPlanPasteDefects(`${ref}\nthen run verify-evidence.cjs" check block again`)).toEqual(['there is exactly one test-plan check'])
     expect(collectTestPlanPasteDefects(ref.replace(CALLER_BLOCKS, '   - **Blocks**'))).toEqual(['no single caller-blocks paste paragraph'])
   })
 
@@ -1114,14 +1113,13 @@ describe('0b: Phase 11 pushes the branch before the evidence call', () => {
 })
 
 describe('AC-11: Phase 11 runs the evidence script once, after Phase 10, for every strategy', () => {
-  it('the publication partial has four importers, /implement among them', () => {
+  it('the publication partial has three importers, /implement among them', () => {
     const sources = walkFiles(path.join(ROOT, 'src'), f => f.endsWith('.mds')).map(f => ({
       name: path.basename(f, '.mds'),
       content: readFileSync(f, 'utf-8'),
     }))
     expect(sources.length, 'the src/ .mds walk found nothing').toBeGreaterThanOrEqual(20)
-    // dynamic-build joined in #376 (W1): the wave PR's evidence refresh resolves the same value.
-    expect(collectPublicationImporters(sources)).toEqual(['code-review', 'dynamic-build', 'implement', 'resolve'])
+    expect(collectPublicationImporters(sources)).toEqual(['code-review', 'implement', 'resolve'])
   })
 
   it('the order holds and the call carries the op\'s Input as flags', () => {
@@ -1376,7 +1374,7 @@ const ALIGNMENT_NO_REVIEW_OPENING = 'Alignment-fix commits get no self-review'
 const ALIGNMENT_NO_REVIEW_LINE = 'Alignment-fix commits get no self-review: Phase 6 Validate and `/code-review` check them.'
 /**
  * The Harden agent line for an empty `FILES_CHANGED` (#571), and the opening that finds it. The exit applies to a prompt
- * that has the line and lists no file. A prompt with no such line, as `/dynamic-build` sends, gets a review of the branch.
+ * that has the line and lists no file. A prompt with no such line gets a review of the branch.
  */
 const HARDEN_EMPTY_OPENING = '**Empty FILES_CHANGED**:'
 const HARDEN_EMPTY_LINE = '**Empty FILES_CHANGED**: If the prompt has a `FILES_CHANGED` line that lists no file, report `### Status: PASS` with the line `no files reviewed`, and review nothing; with no `FILES_CHANGED` line, find the branch changes and review them.'

@@ -1,10 +1,9 @@
 /**
  * The evidence-policy DISPOSITION table, held two ways (#362, AC-8).
  *
- * Design §6 disposes of every site that used to key on compliance (rows 1–13; row
- * 14 is the /dynamic-tickets note §3.16 added and, since #365, its issue-filing
- * step; row 15 is /implement's test-plan
- * ask, #363 PR4, which keys on the policy as /plan's issue step does): each one now
+ * Design §6 disposes of every site that used to key on compliance (row 15 is
+ * /implement's test-plan ask, #363 PR4, which keys on the policy as /plan's issue
+ * step does; the row numbers are the design's own): each one now
  * gates on a mechanism input (`ISSUE_REQUIRED`, `APPLY_CONVENTIONS`,
  * `REQUIRE_NON_AUTHOR_APPROVAL`), on `EVIDENCE_POLICY` itself at a caller, or
  * stays on `COMPLIANCE_ACTIVE` because it is the review lens rather than
@@ -65,8 +64,6 @@ const policyGate = 'only when `EVIDENCE_POLICY` is `required`'
 /** The publication partial's rule sentence, stated once and expanded into each of its hosts. */
 const PUBLICATION_STUB_RULE = '**Evidence stub:**'
 const fenceKey = (name: GateName): string => `${name}: {${name}}`
-const recipeKey = (name: GateName): string => `${name}: \${${name}}`
-const recipeConst = (name: GateName): string => `const ${name} = `
 const declared = (name: GateName): string => `\`${name}\``
 
 /**
@@ -153,29 +150,6 @@ const DISPOSITION: readonly DispositionRow[] = [
       { file: 'commands/implement.md', anchor: fenceKey('ISSUE_REQUIRED'), phrase: fenceKey('ISSUE_REQUIRED') },
       { file: 'commands/implement.md', anchor: fenceKey('APPLY_CONVENTIONS'), phrase: fenceKey('APPLY_CONVENTIONS') },
       { file: 'commands/implement.md', anchor: '**Ticket link, ', phrase: gate('ISSUE_REQUIRED') },
-    ],
-  },
-  {
-    // #365 (PR6, D3): the recipe stops a ticket before implementing when setup-task
-    // captured no Issue ID. The workflow cannot ask, so it never records an exception
-    // (decision (b): /implement alone records one) — a wave quarantines the ticket and
-    // its dependents instead. The wave PR, opened at the command boundary, forwards the
-    // resolved conventions input and reads the policy command-side for its test plan
-    // (D4: no wave exception); the policy never reaches a spawn fence.
-    row: 6,
-    subject: '/dynamic-build recipe setup-task call and wave PR — stops before implementing when no issue ID (headless — never an exception)',
-    inputs: ['ISSUE_REQUIRED', 'APPLY_CONVENTIONS', 'EVIDENCE_POLICY'],
-    on: 'forward the resolved inputs; stops before implementing when no issue ID (headless — never an exception); a merged wave ticket with no test plan, or no ticket link, blocks the wave PR',
-    off: 'forward the resolved inputs; no stop; the wave PR test plan is optional',
-    sites: [
-      { file: 'commands/dynamic-build.md', anchor: recipeConst('ISSUE_REQUIRED'), phrase: recipeConst('ISSUE_REQUIRED') },
-      { file: 'commands/dynamic-build.md', anchor: recipeConst('APPLY_CONVENTIONS'), phrase: recipeConst('APPLY_CONVENTIONS') },
-      { file: 'commands/dynamic-build.md', anchor: recipeKey('ISSUE_REQUIRED'), phrase: recipeKey('ISSUE_REQUIRED') },
-      { file: 'commands/dynamic-build.md', anchor: recipeKey('APPLY_CONVENTIONS'), phrase: recipeKey('APPLY_CONVENTIONS') },
-      { file: 'commands/dynamic-build.md', anchor: 'if (ISSUE_REQUIRED === "true"', phrase: 'if (ISSUE_REQUIRED === "true" && ISSUE_NUMBER === "(none)")' },
-      { file: 'commands/dynamic-build.md', anchor: '**Required plan**', phrase: policyGate },
-      { file: 'commands/dynamic-build.md', anchor: '**Required link**', phrase: policyGate },
-      { file: 'commands/dynamic-build.md', after: '6. **Wave PR**', anchor: fenceKey('APPLY_CONVENTIONS'), phrase: fenceKey('APPLY_CONVENTIONS') },
     ],
   },
   {
@@ -274,9 +248,8 @@ const DISPOSITION: readonly DispositionRow[] = [
   },
   {
     // Caller side: the publication partial turns a resolved `off` into `stub` under
-    // the policy (it expands into its four hosts — /implement since #363 and
-    // /dynamic-build since #376, each for its PR's evidence comment), and each review
-    // host's Edge Cases row says so.
+    // the policy (it expands into its three hosts — /implement since #363 for its
+    // PR's evidence comment), and each review host's Edge Cases row says so.
     // Op side: the `stub` value, which names no gate.
     row: 13,
     subject: 'publication `off` → `stub` — the caller turns it, the op accepts it',
@@ -285,7 +258,6 @@ const DISPOSITION: readonly DispositionRow[] = [
     off: '`off` stays `off`: no comment posts',
     sites: [
       { file: 'commands/code-review.md', anchor: PUBLICATION_STUB_RULE, phrase: policyGate },
-      { file: 'commands/dynamic-build.md', anchor: PUBLICATION_STUB_RULE, phrase: policyGate },
       { file: 'commands/implement.md', anchor: PUBLICATION_STUB_RULE, phrase: policyGate },
       { file: 'commands/resolve.md', anchor: PUBLICATION_STUB_RULE, phrase: policyGate },
       { file: 'commands/code-review.md', after: '## Edge Cases', anchor: '| `reviewPublication: off` |', phrase: policyGate },
@@ -295,20 +267,6 @@ const DISPOSITION: readonly DispositionRow[] = [
       { file: prHostRef('post-review-summary'), after: '## Operation: post-review-summary', anchor: '**Publication**:', phrase: '| STUB (evidence policy)' },
       { file: prHostRef('post-resolution-summary'), after: '## Operation: post-resolution-summary', anchor: '**Input:**', phrase: '| `off` | `stub`;' },
       { file: prHostRef('post-resolution-summary'), after: '## Operation: post-resolution-summary', anchor: '**Publication**:', phrase: '| STUB (evidence policy)' },
-    ],
-  },
-  {
-    // Beyond design §6: the /dynamic-tickets slate gate names the ticket expectation (§3.16),
-    // and since #365 (PR6, D5) the command files the issues itself — after the workflow
-    // returns, sequentially and capped, so the six-phase pipeline never files one.
-    row: 14,
-    subject: '/dynamic-tickets slate gate and its post-workflow filing step',
-    inputs: ['ISSUE_REQUIRED'],
-    on: 'file one issue per ticket and the tracking issue after the workflow',
-    off: 'no note; file nothing',
-    sites: [
-      { file: 'commands/dynamic-tickets.md', anchor: '- **Evidence policy:**', phrase: gate('ISSUE_REQUIRED') },
-      { file: 'commands/dynamic-tickets.md', anchor: '**File the issues**', phrase: gate('ISSUE_REQUIRED') },
     ],
   },
   {
@@ -505,8 +463,9 @@ describe('evidence-policy disposition: the table and the tree agree, both ways (
     expect(exempt.size, 'the resolution text the exemption names is empty').toBeGreaterThanOrEqual(4)
   })
 
-  it('the table is well-formed: numbered 1..15 in order, each row with sites and a named input', () => {
-    expect(DISPOSITION.map(r => r.row)).toEqual(Array.from({ length: 15 }, (_, i) => i + 1))
+  it('the table is well-formed: numbered in ascending order without repeats, each row with sites and a named input', () => {
+    const numbers = DISPOSITION.map(r => r.row)
+    expect(numbers).toEqual([...new Set(numbers)].sort((a, b) => a - b))
     for (const row of DISPOSITION) {
       expect(row.sites.length, `row ${row.row} has no site`).toBeGreaterThan(0)
       expect(row.inputs.length, `row ${row.row} gates on nothing`).toBeGreaterThan(0)
@@ -560,24 +519,6 @@ describe('evidence-policy disposition: the table and the tree agree, both ways (
     expect(collectSiteDefects(DISPOSITION, ungated)).toHaveLength(1)
   })
 
-  it('known-bad probe: the ticket-link stop, the wave PR plan and link rules and the filing step, each ungated, are reported (#365)', () => {
-    // Each seed drops one new gate from its line, the way an unconditional rewrite
-    // would; the same direction-1 collector must name that one row and site.
-    const seeds: ReadonlyArray<readonly [string, string, string, string]> = [
-      ['commands/dynamic-build.md', 'if (ISSUE_REQUIRED === "true" && ISSUE_NUMBER === "(none)")', 'if (ISSUE_NUMBER === "(none)")', 'row 6 commands/dynamic-build.md: no line holds'],
-      ['commands/dynamic-build.md', `**Required plan** — ${policyGate}:`, '**Required plan** — always:', 'row 6 commands/dynamic-build.md:'],
-      ['commands/dynamic-build.md', `**Required link** — ${policyGate}:`, '**Required link** — always:', 'row 6 commands/dynamic-build.md:'],
-      ['commands/dynamic-tickets.md', `**File the issues** ${gate('ISSUE_REQUIRED')}.`, '**File the issues** always.', 'row 14 commands/dynamic-tickets.md:'],
-    ]
-    for (const [file, from, to, expected] of seeds) {
-      const seeded = corpus.map(f => (f.file === file ? { ...f, content: f.content.replace(from, to) } : f))
-      expect(seeded.find(f => f.file === file)!.content, `the seed "${from}" must land`).not.toBe(corpus.find(f => f.file === file)!.content)
-      const defects = collectSiteDefects(DISPOSITION, seeded)
-      expect(defects, defects.join('\n')).toHaveLength(1)
-      expect(defects[0].startsWith(expected), defects[0]).toBe(true)
-    }
-  })
-
   it('known-bad probe: a gate on a name its row does not declare is reported', () => {
     const drifted = corpus.map(f =>
       f.file === 'commands/bug-analysis.md'
@@ -591,21 +532,21 @@ describe('evidence-policy disposition: the table and the tree agree, both ways (
 
 /**
  * Row 13's caller side, held beyond its sites: the `off` → `stub` turn is stated
- * ONCE — in the publication partial, expanded into its four hosts — and the two
- * review hosts can report the label it produces; /implement (#363) and
- * /dynamic-build's wave PR (#376) hand the value to the update-pr-evidence
- * operation — since #455 as `verify-evidence.cjs publish --publication …`, run
- * inline — whose comment has no publication label. A host that restated the rule would be a
+ * ONCE — in the publication partial, expanded into its three hosts — and the two
+ * review hosts can report the label it produces; /implement (#363) hands the value
+ * to the update-pr-evidence operation — since #455 as
+ * `verify-evidence.cjs publish --publication …`, run inline — whose comment has no
+ * publication label. A host that restated the rule would be a
  * second authority free to drift from the partial; an Edge Cases row may describe
  * the outcome, but never carries the rule sentence itself.
  *
  * The order half (the policy resolves before the partial reads it) is held by
  * tests/evidence-policy/partial-wiring.test.ts, whose order guard reads every line
- * naming `EVIDENCE_POLICY` in all eight policy files — the expanded rule included.
+ * naming `EVIDENCE_POLICY` in all six policy files — the expanded rule included.
  */
 describe('row 13 caller side: the publication stub is one rule, reported by the review hosts', () => {
   const corpus = builtCorpus()
-  const PUBLICATION_HOSTS = ['commands/code-review.md', 'commands/dynamic-build.md', 'commands/implement.md', 'commands/resolve.md'] as const
+  const PUBLICATION_HOSTS = ['commands/code-review.md', 'commands/implement.md', 'commands/resolve.md'] as const
   const REVIEW_HOSTS = ['commands/code-review.md', 'commands/resolve.md'] as const
   const STUB_LABEL = 'STUB (evidence policy)'
 
@@ -661,18 +602,7 @@ describe('row 13 caller side: the publication stub is one rule, reported by the 
     expect(implement).not.toContain('OPERATION: update-pr-evidence')
   })
 
-  it('/dynamic-build step 7 passes the resolved value to the publish script, its one consumer there', () => {
-    const build = corpus.find(f => f.file === 'commands/dynamic-build.md')!.content
-    const call = publishCall(build)
-    expect(call.line).toContain('--publication {REVIEW_PUBLICATION resolved above, or auto}')
-    expect(call.fence).toContain('verify-evidence.cjs" publish')
-    expect(build).not.toContain('OPERATION: update-pr-evidence')
-    // Resolved before the call that reads it, in the same step.
-    expect(build.indexOf(PUBLICATION_STUB_RULE)).toBeGreaterThan(build.indexOf('7. **Wave PR evidence**'))
-    expect(build.indexOf(PUBLICATION_STUB_RULE)).toBeLessThan(build.indexOf(call.line))
-  })
-
-  it('known-bad probe: a fifth host restating the rule is reported', () => {
+  it('known-bad probe: a fourth host restating the rule is reported', () => {
     const seeded = corpus.map(f =>
       f.file === 'commands/bug-analysis.md'
         ? { ...f, content: `${f.content}\n${PUBLICATION_STUB_RULE} ${policyGate}, a resolved \`off\` becomes \`stub\`.\n` }
