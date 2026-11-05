@@ -30,7 +30,7 @@
  * dependencies and the problems to expect; name 3 to 5 critical files; change nothing. The table pins
  * these behaviours, not the wording as a whole.
  *
- * Where the body departs, the departure is pinned too: the role and change-nothing line sit at the top
+ * Where the body departs from the built-in agent, it does so on purpose: the role and change-nothing line sit at the top
  * because the caller's report shape wins and the cap line stays last; a Phase 10 Focus counts as the
  * perspective; the body adds no step that surveys the whole architecture, and research reaches the code
  * each step touches; the `mktemp` overflow is the only file. Two devflow additions that CHECKLIST pins
