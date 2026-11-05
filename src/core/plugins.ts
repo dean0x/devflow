@@ -90,8 +90,8 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
      * Hook-spawned agents live here, and `commands: []` above is why that works.
      *
      * Guard 5 reverse (registry-integrity.test.ts, "declared agents are spawned")
-     * skips a plugin whose commands spawn nothing — `if (spawned.size === 0)
-     * continue` — and this plugin ships no commands at all. So `curate` and
+     * skips a plugin with no harvested command spawns — `if (aggregate ===
+     * undefined) continue` — and this plugin ships no commands at all. So `curate` and
      * `tracker`, which are spawned by a SessionStart directive rather than by any
      * command, satisfy the reverse check STRUCTURALLY.
      *
