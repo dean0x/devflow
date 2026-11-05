@@ -2329,7 +2329,7 @@ describe('git agent — static content guards', () => {
     // LOWERED 8 → 7 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the
     // post-wave-report operation and its posts left with the dynamic feature, so the counted code is
     // removed and no coverage is lost; every remaining posting op still names the scrub. Old value 8;
-    // accepted by the user 2026-11-05.
+    // accepted by the maintainer 2026-11-05.
     const sinkCorpus = cachedSinkCorpus();
     const opNames: readonly string[] = GIT_OPERATIONS;
 
@@ -3036,7 +3036,7 @@ describe('git agent — static content guards', () => {
       `containment (external-thread): expected >= 2 ops with <external-thread>; found [${opsWithExternalThread.join(', ')}]`,
     // LOWERED 3 -> 2 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the
     // post-wave-report operation, one of the three that wrapped remote thread text, left with the dynamic
-    // feature; the two named ops above still carry the tag. Old value 3; accepted by the user 2026-11-05.
+    // feature; the two named ops above still carry the tag. Old value 3; accepted by the maintainer 2026-11-05.
     ).toBeGreaterThanOrEqual(2); // floor: containment-external-thread-floor (numeric-floors.json)
 
     // Negative arm: summary/reply ops must not interpolate remote body placeholders.

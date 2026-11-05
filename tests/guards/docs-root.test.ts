@@ -131,8 +131,9 @@ describe('no compiled command reads or writes a relative .devflow/docs path (D-D
     const mentions = corpus.reduce((n, c) => n + c.content.split(DOCS).length - 1, 0)
     // Non-vacuity: the corpus carries the paths this guard is about.
     // LOWERED 60 -> 42 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the
-    // four dynamic command hosts, which carried many of these paths, left the corpus, so the counted code
-    // is removed and no coverage is lost.
+    // four dynamic command hosts, which carried many of these paths, left the corpus. code-review and
+    // bug-analysis each lost one mention too: the per-ticket plan path in their design-plan step. So the
+    // counted code is removed and no coverage is lost.
     expect(mentions).toBeGreaterThanOrEqual(42)
   })
 

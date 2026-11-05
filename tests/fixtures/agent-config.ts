@@ -284,8 +284,8 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
    * every one on Opus, and 3.1% of all subagent cache-equivalent tokens (report
    * .devflow/docs/research/token-diet-subagents/report.2026-10-10_0256.md). The
    * check compares a diff against a plan and a request, which fits the Sonnet tier
-   * Code and Test already ship. The row, the `model:` line of evaluate.md and the
-   * dynamic roster table move together.
+   * Code and Test already ship. The row and the `model:` line of evaluate.md
+   * move together.
    */
   evaluate: {
     model: 'sonnet',
