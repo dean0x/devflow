@@ -3,7 +3,7 @@ feature: installer-shadowing-backups
 name: Install Backup Session & Legacy Sweeps
 description: "Use when changing the install backup session, shipped set, retired name lists, folder swaps or the bare legacy skill hash gate. Keywords: install-backups, retired, hash gate, swap."
 category: architecture
-directories: [src/targets/claude-code/install-backup.ts, src/targets/claude-code/shipped-set.ts, src/targets/claude-code/folder-swap.ts, src/targets/claude-code/rules-folder.ts, src/targets/claude-code/legacy-skill-hashes.ts, src/cli/commands/backup-session.ts, src/cli/commands/legacy-sweep.ts, src/core/retired-shipped-names.ts, src/core/path-set.ts]
+directories: [src/targets/claude-code/install-backup.ts, src/targets/claude-code/shipped-set.ts, src/targets/claude-code/folder-swap.ts, src/targets/claude-code/rules-folder.ts, src/targets/claude-code/legacy-skill-hashes.ts, src/cli/commands/backup-session.ts, src/targets/claude-code/legacy-sweep.ts, src/core/retired-shipped-names.ts, src/core/path-set.ts]
 created: 2026-10-30
 updated: 2026-10-30
 ---
@@ -58,9 +58,9 @@ The reference overlay (`installer-shadowing-reference-overlay`) shares the sessi
 
 ## Legacy Sweeps and the Hash Gate
 
-`src/cli/commands/legacy-sweep.ts` runs from init after the install:
+`src/targets/claude-code/legacy-sweep.ts` holds the two sweeps. `sweepLegacySkillFolders` runs from init after the install:
 
-- `sweepLegacyDevflowFiles` removes, by exact name through `removeExact`, the retired and legacy command and rule files. It skips a name shipped today, and skips a folder the install refused, that the session kept, or that is a link now.
+- `sweepLegacyDevflowFiles` runs inside `convergeVariantAxes` (`curation-install.ts`), which init and the switch commands call. It removes, by exact name through `removeExact`, the retired and legacy command and rule files. It skips a name shipped today, and skips a folder the install refused, that the session kept, or that is a link now.
 - `sweepLegacySkillFolders` walks `LEGACY_SKILL_NAMES`. A name with a `skillFiles` listing goes by the listing: listed files are removed, the rest of the folder moves. A `devflow:`-prefixed name moves whole. A bare name moves only on the hash gate.
 - `judgeBareLegacySkill(folder, name)` reads at most one file and answers `absent`, `devflow` (a regular `SKILL.md` whose SHA-256 is in `BARE_LEGACY_SKILL_HASHES`), `other` (a different file, or one too large to be a release copy) or `unknown` (no `SKILL.md`, not a regular file, the folder or file is a link, or a read failed). Init moves on `devflow`, says nothing on `other`, and returns `unknown` folders in `kept` so the run names them. A name with no table entry was never installed bare by a release, so its folder is `other`.
 - `legacy-skill-hashes.ts` is frozen data built by hashing every `SKILL.md` in the published `devflow-kit` packages that installed bare skill folders. The table only grows; `tests/guards/legacy-skill-hashes.test.ts` proves its shape, its match with the released-names fixture and its floors.
@@ -82,7 +82,7 @@ The reference overlay (`installer-shadowing-reference-overlay`) shares the sessi
 - `src/targets/claude-code/rules-folder.ts` — `removeRulesFolder`
 - `src/targets/claude-code/legacy-skill-hashes.ts` — `BARE_LEGACY_SKILL_HASHES`
 - `src/core/retired-shipped-names.ts` — `RETIRED_SHIPPED`, `retiredPathSet`; `src/core/path-set.ts` — `PathSet`, `createPathSet`
-- `src/cli/commands/backup-session.ts` — `openBackupSession`, `runWithBackupReport`; `src/cli/commands/legacy-sweep.ts` — the two sweeps and `judgeBareLegacySkill`
+- `src/cli/commands/backup-session.ts` — `openBackupSession`, `runWithBackupReport`; `src/targets/claude-code/legacy-sweep.ts` — the two sweeps and `judgeBareLegacySkill`
 - `tests/guards/install-backup-sets.test.ts`, `tests/guards/legacy-skill-hashes.test.ts`, `tests/guards/install-backup-callers.test.ts`, `tests/guards/install-backup-isolation.test.ts` — the pins
 
 ## Related

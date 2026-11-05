@@ -475,9 +475,11 @@ function readTree(dir: string): PromptFile[] {
 function promptSurface(): CorpusClass[] {
   const commands = requireDistFiles().map(n => ({ name: `dist/commands/${n}`, content: requireDistFile(n) }))
   const agents = [...resolveAllAgents().values()].map(a => ({ name: rel(a.path), content: a.content }))
-  // LOWERED by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the four dynamic
-  // command hosts left the roster, so the counted files are removed and no coverage is lost.
-  // commands 14 -> 10; curation-off 24 -> 22 (the curation-armed dynamic hosts' off builds).
+  // LOWERED 14 -> 10 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the four
+  // dynamic command hosts left the roster, so the counted files are removed and no coverage is lost. Old value 14.
+  // LOWERED 24 -> 22 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the off builds
+  // of the curation-armed dynamic hosts left the roster, so the counted files are removed and no coverage is
+  // lost. Old value 24.
   return [
     { label: 'commands', files: commands, sentinel: 'dist/commands/code-review.md', floor: 10 },
     { label: 'agents', files: agents, sentinel: 'dist/agents/git.md', floor: getAllAgentNames().length },
