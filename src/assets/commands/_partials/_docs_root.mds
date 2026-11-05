@@ -16,7 +16,7 @@ script only names that folder and reads no file in it.
 
 D-DOCS-ROOT extends D-PROMPT-ROOT from the decisions and knowledge loaders to
 every docs artifact a command reads or writes — design documents, research
-output, bug-analysis and wave directories, ticket sets, and `/implement`'s
+output, bug-analysis directories, and `/implement`'s
 handoff and evidence files. They belong to the checkout, not to the directory
 the session started in: a relative `.devflow/docs/…` path written from
 `packages/app` scattered a second `.devflow/docs/` tree there, which no later

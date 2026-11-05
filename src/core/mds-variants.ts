@@ -86,7 +86,7 @@ function Err<E>(error: E): Result<never, E> {
  *  - Total length: 1–64 characters.
  *
  * Accepts every basename the repo ships (`implement`, `code-review`,
- * `dynamic-build`, `git`, …) and refuses uppercase, whitespace, and shell
+ * `bug-analysis`, `git`, …) and refuses uppercase, whitespace, and shell
  * metacharacters outright.
  */
 const OUTPUT_NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;

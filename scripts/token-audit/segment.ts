@@ -28,9 +28,6 @@ export const WORKFLOW_SKILLS: ReadonlySet<string> = new Set([
   'devflow:resolve',
   'devflow:release',
   'devflow:debug',
-  'devflow:dynamic-tickets',
-  'devflow:dynamic-build',
-  'devflow:dynamic-plan',
   'devflow:self-review',
   'devflow:explore',
 ]);

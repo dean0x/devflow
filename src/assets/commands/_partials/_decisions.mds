@@ -1,7 +1,6 @@
 @import { root_paths } from "./_docs_root.mds"
 
-A partial: the decisions-index steps the knowledge-workflow commands and the
-dynamic commands share.
+A partial: the decisions-index steps the knowledge-workflow commands share.
 
 `decisions_locate()` names where the ledger belongs and expands
 the shared `root_paths()` step of `_docs_root.mds`. One `resolve-root.cjs` call, run once per
