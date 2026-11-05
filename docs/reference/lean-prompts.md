@@ -30,7 +30,7 @@ Choose targets in this order:
 
 1. No fixed size target. The measure is the bytes that a typical run reads in each build variant key, plus the turns per run. The typical-run read is the prompt plus the files that the run reads on its typical path. Neither should grow in any key.
    - Any floor or ceiling in `tests/fixtures/numeric-floors.json` may move up or down. The entry's `description` and the pull request body give the old value, the new value and the reason.
-   - The goal stays: the typical-run read should not grow. A ceiling rise states its reason.
+   - The goal: the typical-run read should not grow. A ceiling rise states its reason.
    - An older description or test comment that says a value may only rise or only fall is history. This rule replaces it.
 2. No new structure, such as step maps, state tables, step graphs or step files, unless its measured gain is larger than its bytes and turns.
 3. A rule that must always hold moves into a script or a hook, not into stronger words.

@@ -9,10 +9,10 @@
  * contains it.
  *
  * The rule. Any floor or ceiling may move up or down. The entry's description and the
- * PR body give the old value, the new value and the reason. The lean-prompts goal
- * stays: the bytes that a typical run reads should not grow, and a ceiling rise states
+ * PR body give the old value, the new value and the reason. The lean-prompts goal:
+ * the bytes that a typical run reads should not grow, and a ceiling rise states
  * its reason (docs/reference/lean-prompts.md, Rules for every target). An older
- * description or comment that says a value may only rise or only fall is history; this
+ * description or test comment that says a value may only rise or only fall is history; this
  * rule replaces it. What the guard stops is a silent move: a value changed in the
  * assertion or in the manifest, but not in both.
  *
@@ -180,7 +180,7 @@ function collectMovedPins(entries: readonly PinnedEntry[]): string[] {
         `  pattern : ${entry.pattern}\n` +
         `  ${entry.label.padEnd(7)} : ${entry.value}\n` +
         `  desc    : ${entry.description}\n` +
-        `  → An assertion likely moved away from the pinned ${entry.label} (DR-27a).\n` +
+        `  → An assertion or its manifest entry likely moved away from the pinned ${entry.label} (DR-27a).\n` +
         `    If the move or the removal of a site is deliberate, update numeric-floors.json with the\n` +
         `    new value, pattern and occurrences, and give the old value, new value and reason in its description.`,
       );
