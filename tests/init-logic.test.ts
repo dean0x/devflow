@@ -3133,6 +3133,44 @@ describe('init.ts structural guard — the Advanced --tracker arm emits its outc
 })
 
 /**
+ * TP-43 (AC-4): init sweeps the retired command and rule files once, inside the one converge, and
+ * hands that converge the folders its install refused. A second sweep call in init would run the
+ * same list again and report posting before it.
+ */
+describe('init.ts structural guard — init sweeps once, through the converge (TP-43)', () => {
+  const INIT_SOURCE = path.resolve(import.meta.dirname, '../src/cli/commands/init.ts')
+  const CALL_ANCHOR = 'await convergeVariantAxes({'
+
+  /** The argument object of init's converge call, from its opening through the line before it closes. `null` when the call is absent. */
+  function convergeCallBody(source: string): string | null {
+    const start = source.indexOf(CALL_ANCHOR)
+    if (start === -1) return null
+    const end = source.indexOf('\n    });', start)
+    if (end === -1) return null
+    return source.slice(start, end)
+  }
+
+  it('passes the folders the install refused into the converge', async () => {
+    const source = await fs.readFile(INIT_SOURCE, 'utf-8')
+    const call = convergeCallBody(source)
+    expect(call, 'the converge call must be findable').not.toBeNull()
+    expect(call).toContain('refusedFolders: installReport.refusedFolders')
+  })
+
+  it('has no sweep of the retired command and rule files of its own', async () => {
+    const source = await fs.readFile(INIT_SOURCE, 'utf-8')
+    expect(source.includes('sweepLegacyDevflowFiles'), 'init.ts names the sweep').toBe(false)
+  })
+
+  it('known-bad probe: the collector reports a call that passes no folders, and a missing call', () => {
+    const bare = `${CALL_ANCHOR}\n      claudeDir,\n      backups,\n    });\n`
+    expect(convergeCallBody(bare)).toContain('backups,')
+    expect(convergeCallBody(bare)).not.toContain('refusedFolders')
+    expect(convergeCallBody('// no converge here')).toBeNull()
+  })
+})
+
+/**
  * TP-25 (AC-21, D-AMBIENT-EXACT-HOOK): init's settings pass converges the ambient
  * hooks through `convergeAmbientHooks` — remove-then-add with ambient on, remove
  * with it off. A user's hook that merely contains the word "preamble", and every
