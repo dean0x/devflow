@@ -46,10 +46,12 @@ const CONTEXT_TOKEN = 'DECISIONS_CONTEXT'
 
 /**
  * Code-family spawn sites (Code, Fix and Refactor, D-CODE-VARIANTS) the hosts carry: implement 9,
- * resolve 3, debug 1 (13 in all). Floor: may only rise. It reads 21, and this test stays red until
- * the maintainer decides the floor.
+ * resolve 3, debug 1 (13 in all). Floor: may only rise.
+ * LOWERED 21 -> 13 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the 8
+ * Code-family spawn sites of the dynamic-build host left the roster, so the counted code is removed and
+ * no coverage is lost.
  */
-const CODE_SITE_FLOOR = 21
+const CODE_SITE_FLOOR = 13
 
 /** Decisions-loading hosts: every command host (10) loads the index behind the gate. */
 const DECISIONS_HOST_COUNT = 10

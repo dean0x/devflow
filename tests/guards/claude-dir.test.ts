@@ -475,13 +475,16 @@ function readTree(dir: string): PromptFile[] {
 function promptSurface(): CorpusClass[] {
   const commands = requireDistFiles().map(n => ({ name: `dist/commands/${n}`, content: requireDistFile(n) }))
   const agents = [...resolveAllAgents().values()].map(a => ({ name: rel(a.path), content: a.content }))
+  // LOWERED by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the four dynamic
+  // command hosts left the roster, so the counted files are removed and no coverage is lost.
+  // commands 14 -> 10; curation-off 24 -> 22 (the curation-armed dynamic hosts' off builds).
   return [
-    { label: 'commands', files: commands, sentinel: 'dist/commands/code-review.md', floor: 14 },
+    { label: 'commands', files: commands, sentinel: 'dist/commands/code-review.md', floor: 10 },
     { label: 'agents', files: agents, sentinel: 'dist/agents/git.md', floor: getAllAgentNames().length },
     { label: 'references', files: readTree('dist/skills'), sentinel: 'dist/skills/git/references/publication-gate.md', floor: 20 },
     { label: 'skills', files: readTree('src/assets/skills'), sentinel: 'src/assets/skills/worktree-support/SKILL.md', floor: 30 },
     { label: 'rules', files: readTree('src/assets/rules'), sentinel: 'src/assets/rules/security.md', floor: 4 },
-    { label: 'curation-off', files: readTree('dist/curation-off'), sentinel: 'dist/curation-off/commands/code-review.md', floor: 24 },
+    { label: 'curation-off', files: readTree('dist/curation-off'), sentinel: 'dist/curation-off/commands/code-review.md', floor: 22 },
     { label: 'compliance-off', files: readTree('dist/compliance-off'), sentinel: 'dist/compliance-off/commands/implement.md', floor: 4 },
     { label: 'curation-compliance-off', files: readTree('dist/curation-compliance-off'), sentinel: 'dist/curation-compliance-off/commands/implement.md', floor: 3 },
     { label: 'compaction directive', files: [{ name: COMPACTION_ENTRY, content: compactDirectiveText() }], sentinel: COMPACTION_ENTRY, floor: 1 },

@@ -36,7 +36,7 @@
  *   - tests/guards/provider-scope.test.ts
  *       SETTINGS_BLOCK_HOSTS            — the files whose settings-line shape may name every provider
  *
- * Length floors (`>= 14` hosts, `>= 15` partials) are asserted alongside the set-equality in
+ * Length floors (`>= 10` hosts, `>= 16` partials) are asserted alongside the set-equality in
  * tests/build-mds.test.ts and registered in tests/fixtures/numeric-floors.json.
  * A floor never decreases; a manifest entry may only be added or renamed in step
  * with the file on disk.

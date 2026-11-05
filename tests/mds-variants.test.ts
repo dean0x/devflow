@@ -1702,8 +1702,10 @@ describe('the build id (D-BUILD-ID)', () => {
  * apart (installed-reference-count-github, installed-reference-count-provider),
  * which rose from 24 and 36 to meet here. This is the compliance-ON install; the
  * compliance-off install has its own floor, INSTALLED_REFS_COMPLIANCE_OFF.
+ * LOWERED 47 -> 44 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the three
+ * post-wave-report references left the manifest, so the counted code is removed and no coverage is lost.
  */
-const INSTALLED_REFS = 47;
+const INSTALLED_REFS = 44;
 
 /**
  * Files a compliance-OFF install carries: the compliance-on manifest less the thirteen

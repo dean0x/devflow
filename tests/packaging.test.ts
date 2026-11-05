@@ -957,8 +957,10 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
     const manifest = generatedReferenceManifest();
     expect(
       manifest.length,
+      // LOWERED 47 -> 44 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the three
+      // post-wave-report references left the manifest (numeric-floors.json: packed-reference-manifest-size).
       'a manifest short enough to enumerate by hand makes this assertion vacuous',
-    ).toBeGreaterThanOrEqual(47);
+    ).toBeGreaterThanOrEqual(44);
 
     expect(
       collectMissingPackedReferences(files, manifest),

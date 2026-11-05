@@ -190,7 +190,10 @@ describe('every compiled Code-family spawn opens with its OPERATION (D-CODE-OPER
   it('every spawn site resolves to an existing variant, whose source is named for it (AC-303)', () => {
     expect(collectUnknownCodeTypes(compiled())).toEqual([])
     const sites = compiled().flatMap(([file, text]) => collectCodeSpawnSites(file, text))
-    expect(sites.length, 'no Code-family spawn was read').toBeGreaterThan(15)
+    // LOWERED 15 -> 12 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the 8
+    // Code-family spawn sites of the dynamic-build host left the roster (13 remain), so the counted code is
+    // removed and no coverage is lost.
+    expect(sites.length, 'no Code-family spawn was read').toBeGreaterThan(12)
     for (const agentType of new Set(sites.map(s => s.agentType))) {
       expect(/^name: (\S+)$/m.exec(resolveAgentSource(codeSlugOf(agentType)).content)?.[1], `${agentType}: the agent source is named for the type`).toBe(agentType)
     }
@@ -396,13 +399,13 @@ describe('the alignment-fix Protocol is its two lines, with no re-run of Evaluat
 // `fix-body-max` and `refactor-body-max`: lowered by a pass that cut the artifact, never raised to fit one that grew.
 
 /** The compiled Code agent body, in bytes. Registered as `code-body-max`; lowered, never raised. */
-const CODE_BODY_MAX_BYTES = 9_828
+const CODE_BODY_MAX_BYTES = 9_606
 
 /** The compiled Fix agent body, in bytes. Registered as `fix-body-max`; lowered, never raised. */
-const FIX_BODY_MAX_BYTES = 7_407
+const FIX_BODY_MAX_BYTES = 7_348
 
 /** The compiled Refactor agent body, in bytes. Registered as `refactor-body-max`; lowered, never raised. */
-const REFACTOR_BODY_MAX_BYTES = 6_093
+const REFACTOR_BODY_MAX_BYTES = 6_034
 
 const BODY_CEILINGS: Readonly<Record<string, number>> = {
   'Code': CODE_BODY_MAX_BYTES,

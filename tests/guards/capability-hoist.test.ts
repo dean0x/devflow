@@ -309,15 +309,18 @@ describe('capability-hoist: no capability probe runs inside a loop [DR-11]', () 
       'unreadable, and the guard would pass without reading anything. Run `npm run build`.',
     ).toBeGreaterThan(0);
 
-    // 42 = learn-conventions.md + 33 provider blocks (three providers × eleven per-op
+    // 39 = learn-conventions.md + 30 provider blocks (three providers × ten per-op
     // references) + 8 PR-host references. The agent body holds no `**Process:**` block: every
     // operation's steps are the `### Process` block of its one reference (D-OP-ONE-REF).
     // Registered as `capability-hoist-block-floor`; the literal is spelled here so a decrement
     // is visible at the assertion, not only in the manifest.
+    // LOWERED 42 -> 39 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the
+    // post-wave-report reference left each of the three providers, so the counted blocks are removed and
+    // no coverage is lost.
     expect(
       blocks.length,
       'too few process blocks to be scanning the generated references',
-    ).toBeGreaterThanOrEqual(42);
+    ).toBeGreaterThanOrEqual(39);
 
     expect(LOOP_MARKERS.length, 'LOOP_MARKERS must be non-empty').toBeGreaterThan(0);
     expect(PROBE_MARKERS.length, 'PROBE_MARKERS must be non-empty').toBeGreaterThan(0);

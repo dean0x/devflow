@@ -373,8 +373,11 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
 
   it('every compiled docs root resolves the checkout toplevel, from a root, a subdirectory and a worktree', () => {
     const hosts = knowledgeHosts(DOCS_ROOT_LEAD);
-    // Non-vacuity: the seven docs-writing commands carry it.
-    expect(hosts.length).toBeGreaterThanOrEqual(7);
+    // Non-vacuity: the four docs-writing commands carry it.
+    // LOWERED 7 -> 4 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the three
+    // dynamic hosts that wrote docs artifacts left the roster, so the counted code is removed and no
+    // coverage is lost.
+    expect(hosts.length).toBeGreaterThanOrEqual(4);
     for (const file of hosts) {
       const section = sectionOf(requireDistFile(file), DOCS_ROOT_LEAD);
       expect(collectRootCommand(section), `${file}: the docs-root command`).toBe(ROOT_COMMAND);

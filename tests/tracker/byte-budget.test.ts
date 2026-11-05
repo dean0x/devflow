@@ -148,6 +148,13 @@ import type {
  * (35_474 to 35_476), so each measurement fell 249 ch rather than 251: BUDGET_GIT_MD, the GitHub row
  * and the PR-host row now sit 78 ch under their ceilings (from 80), the Jira and Linear rows 56 ch (from 58).
  *
+ * #756 (the dynamic feature sunset) removed the post-wave-report operation and its text from the Git agent
+ * and the tracker references. Every git.md-carrying row fell again to min(previous ceiling, measurement +
+ * 80): BUDGET_GIT_MD from 10_206 to 10_102 (measured 10_022), the GitHub row from 40_174 to 40_107
+ * (40_027), the Jira row from 50_558 to 50_491 (50_411), the Linear row from 51_154 to 51_087 (51_007)
+ * and the PR-host row from 23_349 to 23_245 (23_165). GIT_OP_LOAD_MAX stays: its worst operation, Linear
+ * setup-task, did not change.
+ *
  * The 80 ch is general headroom, not a reservation: no line of it is spoken for,
  * and an addition still funds itself with a cut. Each ceiling was set as
  * min(its previous ceiling, measured actual + 80), so a row's headroom drifts away
@@ -206,7 +213,7 @@ import type {
  *
  * Re-derived by #712 (lean Git agent) from a measured 10_144 plus the 80 ch headroom: 10_224.
  */
-const BUDGET_GIT_MD = 10_206;
+const BUDGET_GIT_MD = 10_102;
 
 /**
  * Design-time derivation: the PRE-SPLIT capture of skills/git/SKILL.md, less the
@@ -276,7 +283,7 @@ const BUDGET_SKILL_MD = 6_154;
  * tests/fixtures/numeric-floors.json; lowering re-pins the value AND the pattern
  * in the same commit.
  */
-const BUDGET_LOADED_SET = 40_174;
+const BUDGET_LOADED_SET = 40_107;
 
 /**
  * THE JIRA-SCOPED loaded-set ceiling — a spawn under the Jira provider.
@@ -320,7 +327,7 @@ const BUDGET_LOADED_SET = 40_174;
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-jira` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_JIRA = 50_558;
+const BUDGET_LOADED_SET_JIRA = 50_491;
 
 /**
  * THE LINEAR-SCOPED loaded-set ceiling — a spawn under the Linear provider.
@@ -360,7 +367,7 @@ const BUDGET_LOADED_SET_JIRA = 50_558;
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-linear` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_LINEAR = 51_154;
+const BUDGET_LOADED_SET_LINEAR = 51_087;
 
 /**
  * THE PR-HOST loaded-set ceiling — the worst-case cost of a spawn that runs one of
@@ -416,7 +423,7 @@ const BUDGET_LOADED_SET_LINEAR = 51_154;
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-pr-host` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_PR_HOST = 23_349;
+const BUDGET_LOADED_SET_PR_HOST = 23_245;
 
 /**
  * THE PER-OPERATION LOAD CAP (D-OP-LOAD-CAP) — no single Git operation may load more

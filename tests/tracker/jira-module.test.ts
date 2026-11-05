@@ -958,8 +958,11 @@ describe('jira module: marker dedup (AC-3.14, GAP-20)', () => {
     }
     expect(
       MARKER_NAMESPACES.length,
+      // LOWERED 3 -> 2 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the wave
+      // report namespace row left with the post-wave-report operation, so the counted row is removed and no
+      // coverage is lost.
       'the namespace table is empty, so the loop above ran zero times',
-    ).toBeGreaterThanOrEqual(3);
+    ).toBeGreaterThanOrEqual(2);
   });
 
   it('no marker namespace leaks into an op that does not own it', () => {

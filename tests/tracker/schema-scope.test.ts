@@ -1250,8 +1250,12 @@ describe('[DR-04] DEGRADED literal registry: forward direction', () => {
       // 25 since #393 (PR6): `tracker mechanics unavailable` RETIRED —
       // moved to RETIRED_REASONS, whose arm is the stricter one (absent
       // everywhere), and the union floor below is what stops a row leaving both.
-      '§14.2 fixes 25 non-`(none)` reasons; a shorter table is a narrowed registry',
-    ).toBeGreaterThanOrEqual(25);
+      // 24 since #756: `not a wave branch` and `no tracking issue for this run` left the live
+      // table and joined RETIRED_REASONS. LOWERED 25 -> 24 by #756 (a deliberate exception to
+      // "a floor may only rise") on 2026-11-05: the two live rows left with the dynamic feature,
+      // so the counted rows are removed and no coverage is lost; the union floor below stays at 34.
+      '§14.2 fixes 24 non-`(none)` reasons; a shorter table is a narrowed registry',
+    ).toBeGreaterThanOrEqual(24);
     expect(
       CANONICAL_REASONS.length + RETIRED_REASONS.length,
       // 26 live + 7 retired before #393; a retirement moves a row between the two

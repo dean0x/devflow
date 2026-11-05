@@ -706,7 +706,9 @@ async function deployedCommands(): Promise<Array<readonly [string, string]>> {
   const { run, root } = await buildCommittedTree()
   expect(run.status, `the committed-tree build must succeed.\n${run.combined}`).toBe(0)
   const names = fs.readdirSync(path.join(root, 'dist', 'commands')).filter(f => f.endsWith('.md'))
-  expect(names.length, 'no compiled command — the corpus is empty').toBeGreaterThan(10)
+  // LOWERED 10 -> 9 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the four
+  // dynamic command hosts left the roster, so the counted code is removed and no coverage is lost.
+  expect(names.length, 'no compiled command — the corpus is empty').toBeGreaterThan(9)
   return names.map(name => [name, requireDistFile(name, root)] as const)
 }
 
@@ -1226,7 +1228,9 @@ describe('PR_TEST_PLAN_BLOCK forwarding — every ensure-pr-ready spawn carries 
     const corpus = fs.readdirSync(path.join(root, 'dist', 'commands'))
       .filter(f => f.endsWith('.md'))
       .map(name => ({ name, content: requireDistFile(name, root) }))
-    expect(corpus.length, 'no compiled command — the discovery corpus is empty').toBeGreaterThan(10)
+    // LOWERED 10 -> 9 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the four
+    // dynamic command hosts left the roster, so the counted code is removed and no coverage is lost.
+    expect(corpus.length, 'no compiled command — the discovery corpus is empty').toBeGreaterThan(9)
     expect(
       collectCallerDrift(corpus, ENSURE_PR_READY_CALLERS),
       'an ensure-pr-ready caller outside the named set is a spawn this seam never reads — add it to ' +

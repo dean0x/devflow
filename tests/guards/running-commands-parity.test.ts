@@ -168,28 +168,6 @@ function collectBoundDefects(block: string): string[] {
   return defects
 }
 
-/**
- * The dynamic-build prompt sites that name the block, each anchored by its own
- * quoted text: the Code implementation prompt, both Gate 1 Validate prompts and
- * the Validate re-run after a Gate 1 fix in each pass, both Fix prompts after
- * Gate 2, the review-batch fix prompt, the Test prompt and the post-merge Validate.
- * A site names "your Running commands block" and never copies the block, because
- * a sub-agent spawned with an agentType loads its body as its standing
- * instruction (measured on Claude Code 2.1.294 inside a Workflow).
- */
-const DYNAMIC_BUILD_SITES: readonly string[] = [
-  'When you build or run tests to verify your work, follow your Running commands block.',
-  'Run build, typecheck, lint, and tests on branch ${BRANCH}.\nFollow your Running commands block',
-  'after fix attempt ${attempt} (follow your Running commands block)',
-  'Self-verify your fix compiles, following your Running commands block. Commit fixes.',
-  'Follow your Running commands block for every scenario command.',
-  'Self-verify your fix compiles and the scenarios pass, following your Running commands block.',
-  'Fix all findings in this batch. Self-verify your fix compiles, following your Running commands block.',
-  '(final gate after all fixing).\nFollow your Running commands block',
-  '(final gate, after fix attempt ${attempt}; follow your Running commands block)',
-  '(merge commit ${merge.mergeSha}).\nFollow your Running commands block',
-]
-
 /** Named collector: what test.md's body does around the block. */
 function collectTestAddendumDefects(test: string): string[] {
   const defects: string[] = []
@@ -257,10 +235,6 @@ describe('D-FOREGROUND-RUN: the Running commands block', () => {
     const defects = Object.entries(carriers()).flatMap(([name, body]) =>
       collectBlocks(body).flatMap(block => collectBoundDefects(block).map(defect => `${name}: ${defect}`)))
     expect(defects).toEqual([])
-  })
-
-  it('the list of prompt sites keeps its floor', () => {
-    expect(DYNAMIC_BUILD_SITES.length).toBeGreaterThanOrEqual(9)
   })
 
   it('test.md puts the dev server in a section of its own after the block, and names Monitor nowhere else', () => {

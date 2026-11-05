@@ -130,7 +130,10 @@ describe('no compiled command reads or writes a relative .devflow/docs path (D-D
     expect(corpus.map(c => c.name.replace('dist/commands/', '')).sort()).toEqual([...DIST_COMMAND_FILES].sort())
     const mentions = corpus.reduce((n, c) => n + c.content.split(DOCS).length - 1, 0)
     // Non-vacuity: the corpus carries the paths this guard is about.
-    expect(mentions).toBeGreaterThanOrEqual(60)
+    // LOWERED 60 -> 42 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the
+    // four dynamic command hosts, which carried many of these paths, left the corpus, so the counted code
+    // is removed and no coverage is lost.
+    expect(mentions).toBeGreaterThanOrEqual(42)
   })
 
   it('every docs-writing host carries the docs root, and nothing else resolves it', () => {

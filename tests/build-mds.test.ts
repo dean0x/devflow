@@ -195,8 +195,10 @@ describe('MDS host discovery', () => {
     // another added in the same commit; naming the set is what pins the roster.
     const { hosts } = await collectMdsNames(COMMANDS_DIR);
     expect(hosts).toEqual([...MDS_COMMAND_HOSTS].sort());
-    // Manifest length floor — floors never decrease (numeric-floors.json: dist-host-count).
-    expect(MDS_COMMAND_HOSTS.length).toBeGreaterThanOrEqual(14);
+    // Manifest length floor (numeric-floors.json: dist-host-count).
+    // LOWERED 14 -> 10 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05:
+    // the four dynamic command hosts left the roster, so the counted code is removed and no coverage is lost.
+    expect(MDS_COMMAND_HOSTS.length).toBeGreaterThanOrEqual(10);
   });
 
   /**
@@ -290,8 +292,11 @@ describe('MDS host discovery', () => {
       partials,
       'the walk must reach outside src/assets/commands/_partials/, or widening it bought nothing',
     ).toContain(MDS_REFERENCE_PARTIALS[0]);
-    // Manifest length floor — floors never decrease (numeric-floors.json: partial-count).
-    expect(ALL_MDS_PARTIALS.length).toBeGreaterThanOrEqual(17);
+    // Manifest length floor (numeric-floors.json: partial-count).
+    // LOWERED 17 -> 16 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05:
+    // the six dynamic-only command partials left the roster, so the counted code is removed and no coverage
+    // is lost.
+    expect(ALL_MDS_PARTIALS.length).toBeGreaterThanOrEqual(16);
   });
 
   it('known-bad probe: the repo-wide collector reports a seeded partial and skips a seeded host', async () => {
@@ -811,10 +816,12 @@ describe('expected-command-set guard (C2)', () => {
       mdFiles,
       `the built dist/commands/ must hold exactly the manifest's output set, got: ${mdFiles.join(', ')}`,
     ).toEqual([...DIST_COMMAND_FILES].sort());
+    // LOWERED 14 -> 10 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the four
+    // dynamic command hosts left the roster (numeric-floors.json: dist-files-count; five sites spell it).
     expect(
       DIST_COMMAND_FILES.length,
-      'DIST_COMMAND_FILES = the 14 compiled command hosts',
-    ).toBe(14);
+      'DIST_COMMAND_FILES = the 10 compiled command hosts',
+    ).toBe(10);
   });
 
   it('the deployed dist/commands/ holds the same set (read-only, fail-loud when unbuilt)', () => {
@@ -1518,8 +1525,10 @@ describe('compliance wiring in compiled host commands (review lens) + mechanism 
       keyLines += found.keyLines;
     }
     expect(scanned, 'scanned zero dist commands — guard is vacuous').toBe(DIST_FILES.length);
-    // implement 2 + code-review 1 + bug-analysis 1 + dynamic-build's recipe 2.
-    expect(keyLines, 'fewer mechanism-key lines than the four passing commands carry — is the guard reading them?').toBeGreaterThanOrEqual(6);
+    // implement, code-review and bug-analysis carry 5 key lines between them.
+    // LOWERED 6 -> 5 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the two key
+    // lines of the dynamic-build recipe left with that host, so the counted code is removed and no coverage is lost.
+    expect(keyLines, 'fewer mechanism-key lines than the three passing commands carry — is the guard reading them?').toBeGreaterThanOrEqual(5);
     expect(violations, 'mechanism inputs are Git-agent inputs only:\n' + violations.join('\n')).toEqual([]);
   });
 
@@ -1850,7 +1859,7 @@ describe('publication_gate adoption in compiled host commands (Phase C)', () => 
 // ---------------------------------------------------------------------------
 // §20  DIST_FILES non-vacuity + compliance_gate adoption guard (P0-S21, P0-S22)
 //
-// §14.5 scope rule: deployed-behaviour guards scan DIST_FILES (14 files = the 14
+// §14.5 scope rule: deployed-behaviour guards scan DIST_FILES (10 files = the 10
 // compiled MDS command hosts).
 //
 // compliance_gate() adoption guard: 2 importers (code-review, plan) must use the
@@ -1869,8 +1878,10 @@ describe('publication_gate adoption in compiled host commands (Phase C)', () => 
 // ---------------------------------------------------------------------------
 
 describe('DIST_FILES scope (§14.5, P0-S21) + compliance_gate adoption (P0-S22)', () => {
-  it('DIST_FILES contains exactly 14 entries (the 14 compiled hosts, release included) — non-vacuity (P0-S21)', () => {
-    expect(DIST_FILES.length, 'DIST_FILES must have exactly 14 entries (one per compiled host)').toBe(14);
+  it('DIST_FILES contains exactly 10 entries (the 10 compiled hosts, release included) — non-vacuity (P0-S21)', () => {
+    // LOWERED 14 -> 10 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the four
+    // dynamic command hosts left the roster (numeric-floors.json: dist-files-count).
+    expect(DIST_FILES.length, 'DIST_FILES must have exactly 10 entries (one per compiled host)').toBe(10);
     expect(DIST_FILES).toContain('release.md');
   });
 
@@ -2367,7 +2378,7 @@ describe('_tracker.mds adoption + per-define non-emptiness (P2-S9)', () => {
 // §21  gh issue scope guard (AC-0.4, P0-S21)
 //
 // No `gh issue` invocation or descriptive mention in any DIST_FILE entry
-// outside a Git spawn fence. Scans all 14 DIST_FILES (§14.5 deployed-behaviour
+// outside a Git spawn fence. Scans all 10 DIST_FILES (§14.5 deployed-behaviour
 // rule). Three recorded exceptions encoded as an explicit allowlist (never a
 // loosened regex):
 //
@@ -2378,7 +2389,7 @@ describe('_tracker.mds adoption + per-define non-emptiness (P2-S9)', () => {
 // These are PR-description fetches that legitimately appear outside spawn
 // fences. All other `gh` invocations must be inside Git-agent spawn blocks.
 //
-// Non-vacuity: DIST_FILES.length === 14 (proven in §20 above).
+// Non-vacuity: DIST_FILES.length === 10 (proven in §20 above).
 // Known-bad sample (mechanic 2): inline corpus with a bare `gh issue view` line
 // — asserted inside the test.
 // ---------------------------------------------------------------------------
@@ -2399,10 +2410,12 @@ describe('gh issue scope guard — no gh issue calls outside Git spawn fences (A
 
     // Fail-loud: the build must have produced the tree (R3 — never skip).
     const distFiles = (await fs.readdir(distDir)).filter(f => f.endsWith('.md'));
+    // LOWERED 14 -> 10 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the four
+    // dynamic command hosts left the roster (numeric-floors.json: dist-files-count).
     expect(
       distFiles.length,
-      `the built dist/commands/ has ${distFiles.length} .md files — expected 14`,
-    ).toBe(14);
+      `the built dist/commands/ has ${distFiles.length} .md files — expected 10`,
+    ).toBe(10);
 
     // Named collector — used by both the main guard loop and the non-vacuity probe (M12c).
     // Extracts `gh issue` occurrences in prose (non-fence) content.
@@ -2539,7 +2552,7 @@ describe('this file never spawns a build against the real repo root', () => {
 // already diverged once, producing duplicate comments.
 //
 // Deployed-behaviour guard -> DIST_FILES scope (§14.5), non-vacuity
-// distFilesScanned === 14. The marker literals themselves are asserted to still
+// distFilesScanned === 10. The marker literals themselves are asserted to still
 // exist in the Git agent's sink corpus, so this reads as a RELOCATION and not as
 // a deletion: if both halves went missing, the first assertion would pass
 // vacuously and nothing would dedup at all.
@@ -2559,10 +2572,12 @@ describe('dedup-marker ownership — `<!-- devflow:` absent from dist/commands (
 
   it('no dist command restates a `<!-- devflow:` marker literal', async () => {
     const distFiles = (await fs.readdir(BUILT_COMMANDS)).filter(f => f.endsWith('.md'));
+    // LOWERED 14 -> 10 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the four
+    // dynamic command hosts left the roster (numeric-floors.json: dist-files-count).
     expect(
       distFiles.length,
-      `the built dist/commands/ has ${distFiles.length} .md files — expected 14`,
-    ).toBe(14);
+      `the built dist/commands/ has ${distFiles.length} .md files — expected 10`,
+    ).toBe(10);
 
     const violations: string[] = [];
     let distFilesScanned = 0;
@@ -2578,8 +2593,8 @@ describe('dedup-marker ownership — `<!-- devflow:` absent from dist/commands (
     ).toHaveLength(0);
     expect(
       distFilesScanned,
-      `marker guard is vacuous: expected 14 files scanned, got ${distFilesScanned}`,
-    ).toBe(14);
+      `marker guard is vacuous: expected 10 files scanned, got ${distFilesScanned}`,
+    ).toBe(10);
   });
 
   it('known-bad probe: the same collector flags a seeded restatement in a temp copy', async () => {

@@ -352,10 +352,10 @@ describe('non-vacuity: per-agent-type fence counts', () => {
     ).toBe(gitFencesMentioningOperation)
   })
 
-  it('at least 12 operations have a live caller fence (key-map non-vacuity)', () => {
+  it('at least 11 operations have a live caller fence (key-map non-vacuity)', () => {
     // Directions 1 and 2 iterate keysPassedByOp. An empty or near-empty map makes
     // both of them assert nothing regardless of how many fences were counted.
-    // M9: git.md declares 20 ## Operation: sections; 12 have a live caller fence in
+    // M9: git.md declares 19 ## Operation: sections; 11 have a live caller fence in
     // dist/commands/. The eight without are:
     //   - learn-conventions: internal — invoked by setup-task step 1b inside the Git
     //     agent itself, not by any command fence.
@@ -374,11 +374,14 @@ describe('non-vacuity: per-agent-type fence counts', () => {
     //     prose; the operation names appear in plain text, not in Agent(…) spawn
     //     fences the parser recognises.
     // Raise when new caller fences are added (numeric-floors.json seam-ops-with-callers).
+    // LOWERED 12 -> 11 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the
+    // post-wave-report operation, whose only caller fence sat in the dynamic-build host, left with that
+    // host, so the counted fence is removed and no coverage is lost.
     expect(
       keysPassedByOp.size,
-      `only ${keysPassedByOp.size} operations have caller fences — expected ≥ 12; ` +
+      `only ${keysPassedByOp.size} operations have caller fences — expected ≥ 11; ` +
       'the forward and reverse directions iterate this map and would be near-vacuous',
-    ).toBeGreaterThanOrEqual(12)
+    ).toBeGreaterThanOrEqual(11)
   })
 
   it('op→section map covers at least 17 operations [DR-24]', () => {

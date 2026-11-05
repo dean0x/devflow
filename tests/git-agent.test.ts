@@ -2317,15 +2317,19 @@ describe('git agent — static content guards', () => {
   const isPostingSection = (sec: string): boolean =>
     sec.includes('--body-file') || sec.includes('-F body=@');
 
-  it('D11: every posting op (--body-file or -F body=@) references D11 (forward guard, ≥8 ops)', () => {
-    // Non-vacuous: assert ≥ 8 posting ops exist AND each one references D11
+  it('D11: every posting op (--body-file or -F body=@) references D11 (forward guard, ≥7 ops)', () => {
+    // Non-vacuous: assert ≥ 7 posting ops exist AND each one references D11
     // Sink corpus = git.md ∪ dist/skills/git/references/*.md (ENOENT-tolerant on dist).
     // Mode 'union' — a posting op's D11 reference may live in a moved mechanics file
-    // (Phase 2+); unioning ensures the floor never silently drops below 8 [DR-18, AC-0.8].
+    // (Phase 2+); unioning ensures the floor never silently drops below 7 [DR-18, AC-0.8].
     // 8 → 9 with #363's update-pr-evidence (the PR-body edit and the evidence comment);
     // 9 → 8 with #455, which moved that op's two posts into verify-evidence.cjs publish — its
     // reference points at the script and holds no --body-file, and the scrub-before-post check
     // runs against the script in tests/evidence/update-pr-evidence.test.ts.
+    // LOWERED 8 → 7 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the
+    // post-wave-report operation and its posts left with the dynamic feature, so the counted code is
+    // removed and no coverage is lost; every remaining posting op still names the scrub. Old value 8;
+    // accepted by the user 2026-11-05.
     const sinkCorpus = cachedSinkCorpus();
     const opNames: readonly string[] = GIT_OPERATIONS;
 
@@ -2342,8 +2346,8 @@ describe('git agent — static content guards', () => {
 
     expect(
       postingOps.length,
-      `D11 forward guard: expected ≥ 8 posting ops, found ${postingOps.length}: [${postingOps.join(', ')}]`,
-    ).toBeGreaterThanOrEqual(8);
+      `D11 forward guard: expected ≥ 7 posting ops, found ${postingOps.length}: [${postingOps.join(', ')}]`,
+    ).toBeGreaterThanOrEqual(7);
     expect(
       postingOpsWithoutD11,
       `D11 forward guard: posting ops missing Comment-sink scrub (D11) named reference: [${postingOpsWithoutD11.join(', ')}]`,
@@ -2377,7 +2381,7 @@ describe('git agent — static content guards', () => {
   });
 
   it('D11 known-bad probe: dropping the PR-host tree narrows the posting set from 7 to 4 (SG-8 non-vacuity)', () => {
-    // SG-8's proof obligation, and the one thing the floor of 8 above cannot show
+    // SG-8's proof obligation, and the one thing the floor of 7 above cannot show
     // on its own: the forward guard is green whichever file carries a posting
     // op's sink, so green alone never establishes that the union corpus is what
     // carries three of those seven. This drives the SAME predicate over the
@@ -2401,7 +2405,7 @@ describe('git agent — static content guards', () => {
     const postingOps = opNames.filter(op =>
       isPostingSection(extractOpSectionOrEmpty(narrowed, op)),
     );
-    // A NAMED set, not a count: a count of 5 is equally satisfied by losing
+    // A NAMED set, not a count: a count of 4 is equally satisfied by losing
     // `ensure-pr-ready` and gaining an unrelated op, which would be a real
     // regression reported as agreement (the `scanned > 0` anti-pattern, one level up).
     expect(
@@ -3029,8 +3033,11 @@ describe('git agent — static content guards', () => {
     }
     expect(
       opsWithExternalThread.length,
-      `containment (external-thread): expected >= 3 ops with <external-thread>; found [${opsWithExternalThread.join(', ')}]`,
-    ).toBeGreaterThanOrEqual(3); // floor: containment-external-thread-floor (numeric-floors.json)
+      `containment (external-thread): expected >= 2 ops with <external-thread>; found [${opsWithExternalThread.join(', ')}]`,
+    // LOWERED 3 -> 2 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the
+    // post-wave-report operation, one of the three that wrapped remote thread text, left with the dynamic
+    // feature; the two named ops above still carry the tag. Old value 3; accepted by the user 2026-11-05.
+    ).toBeGreaterThanOrEqual(2); // floor: containment-external-thread-floor (numeric-floors.json)
 
     // Negative arm: summary/reply ops must not interpolate remote body placeholders.
     //

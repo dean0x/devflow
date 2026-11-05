@@ -576,7 +576,9 @@ describe('Phase 1 chooses focuses by trigger AND stamp (AC-312, AC-318)', () => 
 
   it('no compiled command probes for installed skills with test -f (positive control: the DIFF_FILE line exists)', () => {
     const commands = requireDistFiles().map(name => ({ name: `dist/commands/${name}`, content: requireDistFile(name) }))
-    expect(commands.length, 'the corpus is the command set').toBeGreaterThanOrEqual(14)
+    // LOWERED 14 -> 10 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the four
+    // dynamic command hosts left the roster, so the counted code is removed and no coverage is lost.
+    expect(commands.length, 'the corpus is the command set').toBeGreaterThanOrEqual(10)
     expect(commands.map(c => c.name)).toContain('dist/commands/code-review.md')
     for (const { label, body } of VARIANTS) {
       expect(collectProbeDefects([{ name: `${label}/code-review.md`, content: body }]), label).toEqual([])

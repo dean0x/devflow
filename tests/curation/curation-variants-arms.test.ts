@@ -240,7 +240,9 @@ describe('the roster of arm-bearing hosts is the hosts whose compiled body carri
 describe('parity: each variant is the compiled host with its arms resolved (AC-127)', () => {
   it('the curation-on file of every arm-bearing host equals the body with every arm resolved on', () => {
     const hosts = collectHosts().filter(h => CURATION_VARIANT_HOSTS.includes(`${h.kind}/${h.name}`))
-    expect(hosts.length, 'arm-bearing hosts').toBeGreaterThanOrEqual(23)
+    // LOWERED 23 -> 22 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the
+    // curation-armed dynamic hosts left the roster, so the counted code is removed and no coverage is lost.
+    expect(hosts.length, 'arm-bearing hosts').toBeGreaterThanOrEqual(22)
     for (const host of hosts) {
       const raw = rawBody(host)
       expect(comparable(host, onFile(host)), `${host.kind}/${host.name} curation-on`).toBe(expectedVariant(raw, 'on'))
