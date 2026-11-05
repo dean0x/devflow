@@ -46,17 +46,9 @@ All generated documentation lives under `.devflow/docs/` at the checkout's tople
 ├── design/
 │   ├── {ISSUE_ID}-{topic-slug}.{timestamp}.md  # /plan, one issue
 │   ├── multi-{topic-slug}.{timestamp}.md       # /plan, several issues (frontmatter issue: pending)
-│   ├── {topic-slug}.{timestamp}.md             # /plan, no issue
-│   └── {slug}/{timestamp}/            # /dynamic-plan run
-│       ├── {ticket-slug}-plan.md      # one plan per ticket
-│       └── DECISIONS-NEEDED.md
-├── tickets/{slug}/{timestamp}/         # /dynamic-tickets
-│   ├── {ticket-slug}.md
-│   └── tracking-issue.md
-├── waves/{slug}/{timestamp}/wave-report.md   # /dynamic-build
+│   └── {topic-slug}.{timestamp}.md             # /plan, no issue
 ├── handoff-{branch-slug}.md            # Code agent phase handoff; deleted once the PR exists
-├── evidence-{branch-slug}.md           # /implement test plan and claims; stays after the PR
-└── evidence-wave-{slug}.md             # /dynamic-build wave test plan and claims
+└── evidence-{branch-slug}.md           # /implement test plan and claims; stays after the PR
 
 .devflow/memory/
 ├── WORKING-MEMORY.md                   # Auto-maintained by Stop hook (overwritten)
@@ -77,7 +69,6 @@ The head markers for incremental runs are not part of this tree. `/code-review` 
 
 `YYYY-MM-DD_HHMM`, local time (sortable, readable), computed once per run and reused for every path of that run.
 - **Same-minute collision.** `/code-review`, `/bug-analysis` and `/research` create their run directory themselves: when it already exists, the second run appends seconds (`2025-12-26_143005`). It sorts after its minute, so newest-first listings stay correct.
-- **Workflow runs** (`tickets/`, `design/{slug}/`, `waves/`) are stamped in local time by the workflow that creates them and take no collision suffix: a second run in the same minute writes into the first's directory.
 - A design document's timestamp is the suffix before `.md`, so a listing sorts by that suffix, not by the leading `{ISSUE_ID}`.
 
 ### Branch Slugs
@@ -87,16 +78,11 @@ A slug builds a path or reaches a shell only when it matches `^[A-Za-z0-9._-]{1,
 
 ### Topic Slugs
 
-One rule for every topic and initiative `{slug}`: lowercase; each run of characters outside `a-z0-9` becomes one `-`; leading and trailing `-` are trimmed; at most 50 characters (trim again after the cut); `untitled` when nothing is left:
+One rule for every topic `{slug}`: lowercase; each run of characters outside `a-z0-9` becomes one `-`; leading and trailing `-` are trimmed; at most 50 characters (trim again after the cut); `untitled` when nothing is left:
 ```bash
 TOPIC_SLUG=$(s=$(echo "$TOPIC" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' | cut -c1-50 | sed -E 's/-+$//'); echo "${s:-untitled}")
 ```
-`/plan` and `/research` take `{topic-slug}` from it. `/dynamic-tickets` uses it for the initiative `{slug}`, and `/dynamic-plan` reuses the `{slug}` of the ticket set it plans (`wave` for any other source).
-
-### Exceptions
-
-- **`{ticket-slug}`** (`tickets/…/{ticket-slug}.md`, `design/…/{ticket-slug}-plan.md`): the ticket title lowercased with each run outside `a-z0-9` as one `-`, nothing trimmed and no length cap. `/dynamic-tickets` matches a ticket file by this name when it amends the ticket, so trimming would rename a file its own amend phase already wrote.
-- **Wave `{slug}`** (`waves/`, `evidence-wave-{slug}.md`): the part of the integration branch after `wave/`, at most 60 characters, not derived by the topic rule. It makes `evidence-wave-{slug}.md` the `evidence-{branch-slug}.md` of the branch `wave/{slug}`.
+`/plan` and `/research` take `{topic-slug}` from it.
 
 ### File Naming Patterns
 
@@ -126,7 +112,7 @@ ensure_docs_dir() { mkdir -p "$(get_docs_root)/.devflow/docs/$1"; }
 - **Reviews**: the Review agents and the Synthesize agent (review mode) write into `reviews/{branch-slug}/{timestamp}/`; `/resolve` adds `resolution-summary.md` (Phase 5); `/code-review` overwrites its `.last-review-head` marker, under the git directory, with the HEAD SHA.
 - **Bug analysis**: the Debug agents and the Synthesize agent (bug-analysis mode) write into `bug-analysis/{branch-slug}/{timestamp}/`; the scanner calls write the SARIF files, the changed-name list for the Snyk filter and the CodeQL log, and the counts step writes the findings tables, all into that run folder; `/bug-analysis` overwrites its `.last-analysis-head` marker, under the git directory, with the HEAD SHA only when every tool that was to run completed, or `--no-static` is set.
 - **Research**: the Research agents write `{type}.md`, and the Synthesize agent (research mode) writes `research-summary.md` through `RESEARCH_BASE_DIR`, both into `research/{topic-slug}/{timestamp}/`.
-- **Design**: `/plan` writes the design document; `/dynamic-plan` writes `design/{slug}/{timestamp}/`, `/dynamic-tickets` `tickets/{slug}/{timestamp}/`, `/dynamic-build` `waves/{slug}/{timestamp}/` and `evidence-wave-{slug}.md`.
+- **Design**: `/plan` writes the design document.
 - **Handoff and evidence**: `/implement` writes `evidence-{branch-slug}.md`, which stays after the PR, and the handoff file, to which each Code agent appends one phase section and which is deleted once the PR exists.
 - **Memory and curation**: the Stop hook overwrites `.devflow/memory/WORKING-MEMORY.md`; `decisions.md` and `pitfalls.md` are rendered from `decisions-ledger.jsonl` (active entries in full, inactive ones in an Inactive table).
 

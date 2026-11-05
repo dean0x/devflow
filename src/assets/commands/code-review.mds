@@ -61,8 +61,8 @@ When `EVIDENCE_POLICY` is `required`, record `TRACEABILITY: DEGRADED (compliance
 **Requires:** WORKTREES
 
 Discover PR description guidance from plan artifact (per worktree):
-1. List the design plans: `{worktree}/.devflow/docs/design/*.md` (a `/plan` artifact) and `{worktree}/.devflow/docs/design/*/*/*-plan.md` (a `/dynamic-plan` per-ticket plan)
-2. Sort by timestamp, newest first, and scan the 10 most recent. A `/plan` artifact's timestamp is the `YYYY-MM-DD_HHMM` before its `.md`; a per-ticket plan's is the name of its parent directory. Never sort by file name, which starts with an issue ID or a ticket slug. A per-ticket plan counts only when its `{ticket-slug}` (its file name without `-plan.md`) appears in the worktree's branch name
+1. List the design plans: `{worktree}/.devflow/docs/design/*.md` (a `/plan` artifact)
+2. Sort by timestamp, newest first, and scan the 10 most recent. A `/plan` artifact's timestamp is the `YYYY-MM-DD_HHMM` before its `.md`. Never sort by file name
 3. Read the most recent file that carries the section, extract `## PR Description Guidance` section
 4. If no plan files exist or section not found, set `PR_DESCRIPTION_GUIDANCE` to `(none)`
 

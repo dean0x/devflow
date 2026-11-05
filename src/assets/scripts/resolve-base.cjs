@@ -126,9 +126,7 @@ const tty = require('tty');
 
 /**
  * The strict base-name class, one literal. Every prompt that checks a base name copies its
- * `source` exactly, and a test holds each copy equal to this export. The one deliberate
- * variant is the dynamic-build helper's BRANCH_NAME: a ticket branch is local, so the helper
- * holds this class less the `origin/` refusal, and a test holds that relation. In words: 1 to
+ * `source` exactly, and a test holds each copy equal to this export. In words: 1 to
  * 200 ASCII letters, digits and `._/+@,#-`; not starting with `-`, `#` or `origin/`; no `..`;
  * not the whole name `@`, `HEAD`, `FETCH_HEAD`, `ORIG_HEAD` or `MERGE_HEAD`.
  */

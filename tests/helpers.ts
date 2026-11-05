@@ -1792,7 +1792,6 @@ export function statusLineRefReader(): StatusLineRefReader {
  */
 export function extractStatusLines(gitContent?: string): string {
   const git = gitContent ?? resolveAgentSource('git').content
-  const dynamicBuild = readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'dynamic-build.mds'), 'utf-8')
   const resolveMds = readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'resolve.mds'), 'utf-8')
 
   // Sampling runs through the module-level reader so the closed list's refusal
@@ -1937,36 +1936,17 @@ export function extractStatusLines(gitContent?: string): string {
     between(ref('tracker/github/backlink-shipped-issues.md'), '1. Fetch existing comments authored by the viewer:', 'Apply the Comment-sink scrub (D11) and post via `gh issue comment {number} --body-file "$DEVFLOW_BODY"`.'),
     // ensure-traceable-issue plan-artifact + create steps — MOVED whole (P2-S6)
     between(ref('tracker/github/ensure-traceable-issue.md'), '     ```\n   - If `PLAN_ARTIFACT_PATH` provided:', '- Title: derived from `TASK_DESCRIPTION` (same slug logic as setup-task)'),
-    // post-wave-report dedup check + compose steps — MOVED whole (P2-S6), then split by #425
-    // (D-STRADDLE-SPLIT). The moved step 2 ("Resolve and read WAVE_REPORT_PATH", provider-neutral
-    // step text, D-NEUTRAL-STEP-MOVE) now sits in the reference BETWEEN the dedup check and step 3,
-    // where it was never part of this sample (it lived in the agent). So the sample is read in two
-    // pieces, the dedup line and the compose opener, and rejoined with the single newline the
-    // pre-split reference had between them.
-    [
-      singleLine(ref('tracker/github/post-wave-report.md'), '   - If found: skip — report `Skipped: wave report for {WAVE_ID} already posted`'),
-      between(ref('tracker/github/post-wave-report.md'), '3. Compose the comment body:', '   ```markdown'),
-    ].join('\n'),
-    // Guard-5 dedup marker lines (baseline lines 366, 742, 921)
-    // Use 5-space / 3-space prefix to target the template lines, not the search-step lines
+    // Guard-5 dedup marker lines (baseline lines 366, 742)
+    // Use a 5-space prefix to target the template lines, not the search-step lines
     // that also reference these markers within the same operation section.
     singleLine(ref('pr/post-review-summary.md'), '     <!-- devflow:review-summary'),
     singleLine(ref('pr/post-resolution-summary.md'), '     <!-- devflow:resolution-summary'),
-    // …the third moved with post-wave-report's compose step.
-    singleLine(ref('tracker/github/post-wave-report.md'), '   <!-- devflow:wave-report'),
     // PR-body guidance table and D11 scrub directive (baseline lines 93, 95, 99). They live in
     // ensure-pr-ready step 4a (D-PR-BY-GIT) and are sampled from its one reference, byte for byte
     // (D-FROZEN-REPOINT).
     singleLine(gitOp('ensure-pr-ready'), '| Related Issues (ISSUE_NUMBER provided) |'),
     singleLine(gitOp('ensure-pr-ready'), 'When `ISSUE_NUMBER` is provided, always include'),
     singleLine(gitOp('ensure-pr-ready'), '**D11 scrub (PR body is a GitHub-visible sink):**'),
-    // dynamic-build.mds: wave-report dedup and DEGRADED rules (lines 522, 524).
-    // The old anchor ("deduplicates via marker `<!-- devflow:wave-report …`") no
-    // longer exists: P2-S12 removed the caller-restated marker literal, because the
-    // operation owns the marker (GAP-20). Retargeted to the successor sentence —
-    // same line, same rule, same caller.
-    singleLine(dynamicBuild, 'deduplicates via its own marker'),
-    singleLine(dynamicBuild, 'In WAVE mode, if no tracking-issue number'),
     // resolve.mds: Tracked field rules and phase diagram (lines 244, 354, 501, 510, 541, 619)
     singleLine(resolveMds, 'Set `Tracked` for FIX_SEPARATE and TECH_DEBT items'),
     singleLine(resolveMds, '- **DEGRADED**: if Git agent returns `TRACEABILITY: DEGRADED'),

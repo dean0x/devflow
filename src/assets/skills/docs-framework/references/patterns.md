@@ -18,8 +18,7 @@ Correct patterns for Devflow documentation artifacts with templates and helper f
 │   └── {timestamp}/                # Incremental review
 │       └── ...
 ├── design/                         # Implementation plans
-│   ├── {ISSUE_ID}-{topic-slug}.{timestamp}.md   # /plan (multi-{topic-slug} / {topic-slug} without an issue)
-│   └── {slug}/{timestamp}/         # /dynamic-plan: {ticket-slug}-plan.md, DECISIONS-NEEDED.md
+│   └── {ISSUE_ID}-{topic-slug}.{timestamp}.md   # /plan (multi-{topic-slug} / {topic-slug} without an issue)
 └── CATCH_UP.md                     # Latest summary (overwritten)
 ```
 
