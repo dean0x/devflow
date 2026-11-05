@@ -21,7 +21,8 @@ This is a breaking change.
 
 **What else changes:**
 
-- The Git agent operation `post-wave-report` is removed.
+- The Git agent operation `post-wave-report` is removed. `devflow init` removes its three installed reference files, with compliance on or off.
+- `devflow init` removes `devflow-dynamic` from the plugin list that devflow records for your install.
 - `verify-evidence.cjs check wave` is removed. It now exits 1 and prints its usage text.
 - `/code-review` and `/bug-analysis` no longer read per-ticket plans.
 
