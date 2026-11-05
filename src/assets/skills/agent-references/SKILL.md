@@ -12,15 +12,15 @@ allowed-tools: Read
      other modes do not, so the agent body stays small and the spawn reads one file on demand.
      D-MODE-BY-PATH: Synthesize reads exactly one synthesize/{mode}.md by explicit path.
      D-MAINTAIN-ON-DUE: Curate reads curate/maintain.md only after claim-due hands out an entry.
-     Validate reads validate/passed-alone.md after a failed Test row, once per run; an unread file
+     Validate reads validate/passed-alone.md once per run; an unread file
      accepts no path, so nothing is re-run and every failure is REAL.
      D-CMD-REF-HAND: a command moves a rare branch here (hand-authored, byte for byte) and keeps only
      the condition and the read path, so a run that never takes the branch never carries its text.
      Only text with no curation arm and no Git-spawn fence moves.
      /code-review reads commands/code-review-levels.md on its default path (standard or lean), once
      per run; a failed read applies the full sets.
-     /plan reads commands/plan-levels.md at standard or lean, once per run; a failed read runs the
-     full shape.
+     /plan reads commands/plan-levels.md at standard, lean or depth small, once per run; a failed read runs the
+     full shape at depth normal.
      /implement reads commands/implement-levels.md at the start of Phase 3 at lean only, once per
      run. /resolve reads commands/resolve-levels.md in Step 0d when any worktree is standard or
      lean, once per run. A failed read applies no row and keeps the level.
