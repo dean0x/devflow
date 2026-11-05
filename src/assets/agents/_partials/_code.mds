@@ -53,7 +53,6 @@ Run builds, typechecks, lints and tests in the foreground, each with an explicit
 - A run expected to exceed the ceiling may be split into parts, run in sequence.
 - Never re-run a command when nothing it reads has changed.
 - Never wrap a build or test command in `sh -c`, `bash -c`, `python3 -c` or `node -e`: permission rules deny wrapped commands they allow directly.
-- The same rules hold inside a dynamic Workflow sub-agent.
 
 ## Principles
 
@@ -84,7 +83,7 @@ Run builds, typechecks, lints and tests in the foreground, each with an explicit
 {Description of blocker or failure with recommendation}
 ```
 
-Report cap: final message at most about 1,500 tokens; longer material goes to a new file in a `mktemp -d` folder and the message gives its path. Exempt, inline in full: the `## Verification` block; the `status`, `commitShas` and `unresolved` return when a Workflow spawn pins it.
+Report cap: final message at most about 1,500 tokens; longer material goes to a new file in a `mktemp -d` folder and the message gives its path. Exempt, inline in full: the `## Verification` block.
 
 ## Boundaries
 

@@ -64,7 +64,7 @@ This KB covers the knowledge side: load, write-back, delivery tiers, KB shape an
 | Component | Path | Role |
 |-----------|------|------|
 | MDS partial | `src/assets/commands/_partials/_knowledge.mds` | Defines and exports `knowledge_load` and `knowledge_writeback`. It imports nothing, not even `_settings.mds`: write-back Step 1 takes the settings line the host's own settings block resolved above (D-SETTINGS-LINE) |
-| Host commands | `src/assets/commands/{name}.mds` | The ten hosts that import the partial. Load: bug-analysis, code-review, implement, plan, release, research, resolve, self-review. Write-back: debug, explore, implement, resolve, self-review. The dynamic hosts are not knowledge-specific |
+| Host commands | `src/assets/commands/{name}.mds` | The ten hosts that import the partial. Load: bug-analysis, code-review, implement, plan, release, research, resolve, self-review. Write-back: debug, explore, implement, resolve, self-review |
 | Author agent | `src/assets/agents/knowledge.mds` | Generator host (curation arms on its `DECISIONS_CONTEXT` input, its `apply-decisions` preload and its `CROSS_REFERENCES` line). Writes KNOWLEDGE.md and the index line directly; model sonnet. Preloads `feature-knowledge` and `worktree-support` (plus `apply-decisions` in the curation-on build); ships `omitClaudeMd: true` with a short `## Core rules` digest (context economy, untrusted input, no secrets) held to its `AGENT_CONFIG` row by `tests/guards/core-rules-digest.test.ts` |
 | Author skill | `src/assets/skills/feature-knowledge/SKILL.md` | The four-phase authoring process, the Rules-first template and Worked Example, the Rules ID rules, the size budget, the refresh rule, the legacy-KB note and index registration (line and description caps) |
 | Consumption skill | `src/assets/skills/apply-feature-knowledge/SKILL.md` | `allowed-tools: Read, Bash`. A three-step algorithm over the delivered `Rules:` blocks: cite `{slug} KB-AP-n` (a legacy bullet as `{slug} {section}`), read a section on demand with Read `offset`/`limit` from the `Headings:` line or `command grep -n '^## '`, quote KB text only from a Read view |
@@ -110,7 +110,7 @@ This KB covers the knowledge side: load, write-back, delivery tiers, KB shape an
 
 **/research bespoke block.** `/research` loads with `knowledge_load` but its Phase 7 offers creation through its own spawn (checks the index, asks the user, then spawns the Knowledge agent) because the write-back list omits research. The block is the research workflow's equivalent of `knowledge_writeback`.
 
-**Handoff read like a KB (D-HANDOFF-CAP).** In sequential Code phases each Code agent appends its own phase section (at most 8,192 bytes) to `handoff-{branch_slug}.md` with a Bash `>>` redirect; the orchestrator writes no phase section. The next Code agent reads only the prior phase's section, with the KB-load idiom. `tests/guards/handoff-sections.test.ts` holds the Code agent, `/implement`'s Handoff Protocol and the dynamic commands' shared convention to one statement.
+**Handoff read like a KB (D-HANDOFF-CAP).** In sequential Code phases each Code agent appends its own phase section (at most 8,192 bytes) to `handoff-{branch_slug}.md` with a Bash `>>` redirect; the orchestrator writes no phase section. The next Code agent reads only the prior phase's section, with the KB-load idiom. `tests/guards/handoff-sections.test.ts` holds the Code agent and `/implement`'s Handoff Protocol to one statement.
 
 ## Constraints
 
@@ -159,7 +159,7 @@ This KB covers the knowledge side: load, write-back, delivery tiers, KB shape an
 - `.devflow/features/feature-knowledge-system-reference-modules/KNOWLEDGE.md` — the reference-module registry, generation gate and manifests
 - `.devflow/features/curation-capture-system-delivery/KNOWLEDGE.md` — the decisions slice that the write-back spawn passes as `DECISIONS_CONTEXT`
 - `.devflow/features/ambient-orchestrator/KNOWLEDGE.md` — the orchestrator charter, whose Feature knowledge bullet hands a direct delegation the same Rules block by hand
-- `.devflow/features/dynamic-workflow-engine/KNOWLEDGE.md` — the command-host side: what the compiled workflow commands must say
+- `.devflow/features/command-shared-partials/KNOWLEDGE.md` — the command-host side: the settings block, decisions step and tracker vocabulary the compiled commands share
 - `.devflow/features/installer-shadowing/KNOWLEDGE.md` — how the installer and the curation toggle consume `dist/curation-off/`
 - `.devflow/features/tracker-references/KNOWLEDGE.md`, `.devflow/features/tracker-feature/KNOWLEDGE.md` — reference-file content and the provider dimension
 - `.devflow/features/test-harness/KNOWLEDGE.md` — the guard and golden conventions the knowledge tests build on

@@ -14,7 +14,8 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { formatRefusedFoldersSummary, formatReplacedLinksSummary } from '../../src/cli/commands/install-report.js';
-import { sweepLegacyDevflowFiles } from '../../src/cli/commands/legacy-sweep.js';
+import { convergeVariantAxes } from '../../src/targets/claude-code/curation-install.js';
+import { sweepLegacyDevflowFiles } from '../../src/targets/claude-code/legacy-sweep.js';
 import { installViaFileCopy, type InstallReport, type Spinner } from '../../src/targets/claude-code/installer.js';
 import { clearLinkedEntry, mergeLinkReports } from '../../src/targets/claude-code/linked-folder.js';
 import { convergeTrackerArtifacts } from '../../src/targets/claude-code/tracker-install.js';
@@ -387,6 +388,16 @@ describe('a link at a path that a later step writes is reported only once a real
   });
 });
 
+/** Move `folder` to a place outside the Claude directory, link `folder` to it, and add a 0600 `file` the user keeps there. */
+async function linkFolderWithLegacyFile(folder: string, file: string): Promise<string> {
+  const outside = path.join(tmp, 'outside-folder');
+  await fs.rename(folder, outside);
+  await fs.symlink(outside, folder, 'dir');
+  await fs.writeFile(path.join(outside, file), USER_BYTES, 'utf-8');
+  await fs.chmod(path.join(outside, file), 0o600);
+  return outside;
+}
+
 describe('the legacy sweep that follows an install skips a devflow folder that is a link', () => {
   const SWEEP_ROWS = [
     { name: 'a legacy command', folder: ['commands', 'devflow'], file: 'specify.md' },
@@ -398,15 +409,6 @@ describe('the legacy sweep that follows an install skips a devflow folder that i
     { ...row, listed: true, label: `${row.name}, the install listed the folder as refused` },
     { ...row, listed: false, label: `${row.name}, the install did not list the folder` },
   ]);
-
-  async function linkFolderWithLegacyFile(folder: string, file: string): Promise<string> {
-    const outside = path.join(tmp, 'outside-folder');
-    await fs.rename(folder, outside);
-    await fs.symlink(outside, folder, 'dir');
-    await fs.writeFile(path.join(outside, file), USER_BYTES, 'utf-8');
-    await fs.chmod(path.join(outside, file), 0o600);
-    return outside;
-  }
 
   it.each(CASES)('$label: the file below the link is not removed', async (row) => {
     await install(false);
@@ -422,7 +424,9 @@ describe('the legacy sweep that follows an install skips a devflow folder that i
     });
 
     expect(await snapshot(outside), 'no file, folder or mode below the link changed').toEqual(before);
-    expect(swept).toEqual({ removed: [] });
+    // A retired command below the link stays and is named, since it may still post; a rule is never named.
+    const commandsLeft = row.folder[0] === 'commands' ? [path.join(folder, row.file)] : [];
+    expect(swept).toEqual({ removed: [], commandsLeft });
     expect((await fs.lstat(folder)).isSymbolicLink(), 'the link is left in place').toBe(true);
   });
 
@@ -436,6 +440,61 @@ describe('the legacy sweep that follows an install skips a devflow folder that i
 
     expect([...swept.removed].sort()).toEqual(SWEEP_ROWS.map(row => path.join(claudeDir, ...row.folder, row.file)).sort());
     for (const row of SWEEP_ROWS) expect(await exists(path.join(claudeDir, ...row.folder, row.file)), row.name).toBe(false);
+  });
+});
+
+describe('the converge that follows an install gets the folders the install refused (TP-43)', () => {
+  const RETIRED_COMMAND = 'dynamic-build.md';
+  const commandsFolder = (): string => path.join(claudeDir, 'commands', 'devflow');
+
+  const converge = async (refusedFolders: readonly string[]) => convergeVariantAxes({
+    claudeDir,
+    devflowDir,
+    switches: ALL_SWITCHES_ON,
+    frameworks: [],
+    rulesEnabled: true,
+    plugins: [...CORE, ...CODE_REVIEW],
+    warn,
+    backups: await testBackups(tmp, { claudeDir, devflowDir }),
+    refusedFolders,
+  });
+
+  it('removes a retired command from a real commands folder that the install did not refuse', async () => {
+    await install(false);
+    const retired = path.join(commandsFolder(), RETIRED_COMMAND);
+    await fs.writeFile(retired, 'a command of an old release\n', 'utf-8');
+
+    await converge([]);
+
+    expect(await exists(retired), 'the retired command is swept by the converge').toBe(false);
+  });
+
+  it('leaves a retired command in a commands folder that the install refused', async () => {
+    await install(false);
+    const retired = path.join(commandsFolder(), RETIRED_COMMAND);
+    await fs.writeFile(retired, 'a command of an old release\n', 'utf-8');
+
+    await converge([commandsFolder()]);
+
+    expect(await exists(retired), 'a refused folder loses no file').toBe(true);
+  });
+
+  it.each([
+    { name: 'commands/devflow', folder: ['commands', 'devflow'], file: RETIRED_COMMAND },
+    { name: 'rules/devflow', folder: ['rules', 'devflow'], file: 'security.md' },
+  ])('a linked $name that the install refused loses no file to the converge', async row => {
+    await install(false);
+    const folder = path.join(claudeDir, ...row.folder);
+    const outside = await linkFolderWithLegacyFile(folder, row.file);
+    const before = await snapshot(outside);
+    const installReport = await install(true);
+    expect(installReport.refusedFolders, 'precondition: the partial install refused the linked folder').toEqual([folder]);
+
+    const result = await converge(installReport.refusedFolders);
+
+    expect(await snapshot(outside), 'no file, folder or mode below the link changed').toEqual(before);
+    expect((await fs.lstat(folder)).isSymbolicLink(), 'the link is left in place').toBe(true);
+    expect(result.refusedFolders).toContain(folder);
   });
 });
 

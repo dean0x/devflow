@@ -492,8 +492,8 @@ describe('ensure-pr-ready — a supplied ISSUE_PR_LINK is final and step 4b comp
     expect(FINAL, 'a supplied value is final, `(none)` included').toMatch(/When it is given, `\(none\)` included,/)
     expect(FINAL, '`(none)` no longer leaves the answer to step 4b').not.toMatch(/`\(none\)` or absent leaves the answer to step 4b/)
     expect(FINAL, 'the old condition excluded `(none)`').not.toContain('given and not `(none)`')
-    expect(FINAL, 'only an absent key reaches step 4b').toContain('Only an absent `ISSUE_PR_LINK` goes to step 4b')
-    expect(FINAL, 'an admitted wave block is the section\'s only writer').toContain('no admitted wave block exists')
+    expect(FINAL, 'every absent key reaches step 4b, with no other condition').toContain('Only an absent `ISSUE_PR_LINK` goes to step 4b.')
+    expect(FINAL, 'no wave block is a second writer of the section').not.toMatch(/wave/i)
     expect(NONE, 'an absent block is no longer a `(none)` case — only a supplied value is read here').not.toContain('absent `### Handoff Values` block')
   })
 
@@ -666,10 +666,8 @@ describe('handoff seam — setup-task and fetch-issue producers ↔ ensure-pr-re
 // consumer is the PR-opening Git spawn, so the relation over its fences is: a workflow
 // that captures ISSUE_PR_LINK forwards it to its PR-opening Git spawn (D-LINK-FLOOR),
 // and every such fence that passes ISSUE_NUMBER passes ISSUE_PR_LINK beside it, so step
-// 4b (which runs only for an absent link) never meets a set issue. A workflow
-// opens its PR in one of two ways, both named below: /implement passes the link
-// itself, /dynamic-build composes a wave block from each ticket's captured
-// `issuePrLink` and passes that.
+// 4b (which runs only for an absent link) never meets a set issue. /implement is
+// the one workflow that captures the link and opens a PR: it passes the link itself.
 //
 // Corpus discipline: the assertion is about DEPLOYED text, so it reads
 // dist/. It gets dist/ from buildCommittedTree() — a build of a COPY of the
@@ -708,19 +706,21 @@ async function deployedCommands(): Promise<Array<readonly [string, string]>> {
   const { run, root } = await buildCommittedTree()
   expect(run.status, `the committed-tree build must succeed.\n${run.combined}`).toBe(0)
   const names = fs.readdirSync(path.join(root, 'dist', 'commands')).filter(f => f.endsWith('.md'))
-  expect(names.length, 'no compiled command — the corpus is empty').toBeGreaterThan(10)
+  // LOWERED 10 -> 9 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the four
+  // dynamic command hosts left the roster, so the counted code is removed and no coverage is lost.
+  expect(names.length, 'no compiled command — the corpus is empty').toBeGreaterThan(9)
   return names.map(name => [name, requireDistFile(name, root)] as const)
 }
 
 describe('no Code spawn forwards a PR input (AC-204, D-PR-BY-GIT)', () => {
   it('ISSUE_NUMBER, ISSUE_PR_LINK and PR_EXCEPTIONS reach no Code spawn in any deployed command — exact 0', async () => {
     const commands = await deployedCommands()
-    // Non-vacuity: the three hosts that spawn Code each contribute spawn sites the scan really read.
+    // Non-vacuity: the two hosts that spawn Code each contribute spawn sites the scan really read.
     const sitesByHost = (host: string): number => {
       const text = commands.find(([name]) => name === host)?.[1] ?? ''
       return collectCodeSpawnSites(host, text).length
     }
-    for (const [host, floor] of [['implement.md', 9], ['dynamic-build.md', 8], ['resolve.md', 3]] as const) {
+    for (const [host, floor] of [['implement.md', 9], ['resolve.md', 3]] as const) {
       expect(sitesByHost(host), `${host}: the collector stopped reading Code spawns`).toBeGreaterThanOrEqual(floor)
     }
     expect(
@@ -779,21 +779,19 @@ describe('src/assets names neither CREATE_PR nor the retired pr-create mode (AC-
 // "Captures" is read off the deployed text: the command names ISSUE_PR_LINK (the
 // issue-capture contract, or the engine's per-ticket binding). "Opens a PR" is an
 // `OPERATION: ensure-pr-ready` spawn. A command that does both must carry the link
-// into that spawn — the key itself, or, for the wave, the wave block composed from
-// the captured links. The named set is cross-checked against discovery both ways,
-// so a new capturing PR-opener goes red here until it joins the set.
+// into that spawn through the key itself. The named set is cross-checked against
+// discovery both ways, so a new capturing PR-opener goes red here until it joins
+// the set.
 // -------------------------------------------------------------------------
 
 /** Each capturing PR-opening command, and the spawn key through which it forwards the captured link. */
 const LINK_FORWARDERS: Readonly<Record<string, string>> = {
   'implement.md': 'ISSUE_PR_LINK:',
-  'dynamic-build.md': 'PR_WAVE_BLOCK:',
 }
 
 /**
  * The count of PR-opening Git spawns that pass `ISSUE_PR_LINK:` itself — the floor
- * `issue-pr-link-pr-open-sites`. One: /implement's Phase 9. The wave composes its
- * links into PR_WAVE_BLOCK, which is the other named route and is not counted here.
+ * `issue-pr-link-pr-open-sites`. One: /implement's Phase 9.
  */
 const MIN_PR_OPEN_SITES = 1
 
@@ -879,15 +877,10 @@ describe('ISSUE_PR_LINK reaches the PR-opening Git spawn (D-LINK-FLOOR)', () => 
     const commands = await deployedCommands()
     const corpus = commands.map(([name, content]) => ({ name, content }))
     const implement = commands.find(([n]) => n === 'implement.md')?.[1] ?? ''
-    const wave = commands.find(([n]) => n === 'dynamic-build.md')?.[1] ?? ''
 
     const dropped = implement.replace(/^ISSUE_PR_LINK: .*\n/m, '')
     expect(dropped, 'the drop seed must land').not.toBe(implement)
     expect(collectUnforwardedPrOpens('implement.md', dropped)).toHaveLength(1)
-
-    const waveDropped = wave.replace(/^ *PR_WAVE_BLOCK: .*\n/m, '')
-    expect(waveDropped, 'the wave drop seed must land').not.toBe(wave)
-    expect(collectUnforwardedPrOpens('dynamic-build.md', waveDropped)).toHaveLength(1)
 
     // A review host that begins to capture the link and open a PR without naming itself.
     const seeded = corpus.map(c => c.name === 'code-review.md' ? { ...c, content: `${c.content}\nISSUE_PR_LINK: {captured}\n` } : c)
@@ -1089,7 +1082,7 @@ describe('ensure-pr-ready opens the PR (D-LINK-VERBATIM, D-COMMIT-EXPLICIT, D-PR
     need('the name file is removed after the last create attempt, so a scrubber failure opens the PR with the given base',
       ref.includes(`${NAME_FILE_REMOVAL}.`))
     need('the D11 trap is unchanged and no second exit trap is armed for the base', ref.includes('The D11 trap stays unchanged: its rm list does not gain the name file, and no second EXIT trap is armed.'))
-    need('exactly one test-plan check', ref.split('check block').length - 1 === 1)
+    need('exactly one test-plan check', ref.split('verify-evidence.cjs" check block').length - 1 === 1)
     return out
   }
 
@@ -1121,7 +1114,8 @@ describe('ensure-pr-ready opens the PR (D-LINK-VERBATIM, D-COMMIT-EXPLICIT, D-PR
       expect(collectPrOpenDefects(wounded), seed.expected).toContain(seed.expected)
     }
     // A second test-plan check is the duplicate the merge exists to prevent.
-    expect(collectPrOpenDefects(`${real}\nrun check block again`)).toContain('exactly one test-plan check')
+    expect(collectPrOpenDefects(`${real}\nnode "$HOME/.devflow/scripts/verify-evidence.cjs" check block again`))
+      .toContain('exactly one test-plan check')
   })
 })
 
@@ -1137,22 +1131,18 @@ describe('ensure-pr-ready opens the PR (D-LINK-VERBATIM, D-COMMIT-EXPLICIT, D-PR
 //
 // The caller set is NAMED and then cross-checked against discovery over every
 // compiled command, both ways: a new ensure-pr-ready caller goes red here until it
-// joins the named set — and with it this arm. /dynamic-build joined with its wave
-// PR (#365 P3), which also passes the wave block; its test-plan block comes from
-// the wave's own evidence file, rendered after the workflow (not /implement's).
+// joins the named set — and with it this arm. No caller passes a wave block: the
+// test-plan block is the one caller block the step takes.
 // -------------------------------------------------------------------------
 
 /** The two review hosts: they render the test-plan block from /implement's evidence file (D8). */
 const REVIEW_CALLERS: readonly string[] = ['code-review.md', 'bug-analysis.md']
 
-/** The wave host: it renders the test-plan block from the wave evidence file, and passes the wave block. */
-const WAVE_CALLER = 'dynamic-build.md'
-
 /** The pipeline host: its Phase 9 opens the PR and passes /implement's own PR_TEST_PLAN_BLOCK, rendered in Phase 1. */
 const IMPLEMENT_CALLER = 'implement.md'
 
 /** The deployed commands that spawn ensure-pr-ready. Named, and cross-checked against discovery. */
-const ENSURE_PR_READY_CALLERS: readonly string[] = [...REVIEW_CALLERS, WAVE_CALLER, IMPLEMENT_CALLER]
+const ENSURE_PR_READY_CALLERS: readonly string[] = [...REVIEW_CALLERS, IMPLEMENT_CALLER]
 
 const ENSURE_PR_READY_OP = 'OPERATION: ensure-pr-ready'
 
@@ -1226,54 +1216,9 @@ function collectTestPlanRenderDefects(file: string, source: string): string[] {
   return out
 }
 
-/** The lead of the wave's step 3(b), which renders its test-plan block. */
-const WAVE_TEST_PLAN_LEAD = '**(b) The wave test plan.**'
-
-/** The wave's step 3(b): from its lead to the ensure-pr-ready spawn it feeds. */
-function waveTestPlanText(source: string): string | null {
-  const at = source.indexOf(WAVE_TEST_PLAN_LEAD)
-  if (at === -1) return null
-  const end = source.indexOf(ENSURE_PR_READY_OP, at)
-  return end === -1 ? null : source.slice(at, end)
-}
-
-/**
- * The wave's slug gate: the branch check that names `{slug}`. The evidence path is
- * built from that slug, so the gate must come before the path is.
- */
-const WAVE_SLUG_GATE = 'Only a name matching `^wave/[a-z0-9][a-z0-9-]{0,59}$` opens a wave PR, and its part after `wave/` is the `{slug}` below'
-
-/** The wave's two commands, verbatim: the new file copied to the slug-built evidence path, then checked and rendered, double-quoted, each read by its exit code. */
-const WAVE_EVIDENCE_PATH = '"{integration worktree root}/.devflow/docs/evidence-wave-{slug}.md"'
-const WAVE_CHECK = `cp -- "<that file>" ${WAVE_EVIDENCE_PATH} && node "$HOME/.devflow/scripts/verify-evidence.cjs" check tp "<that file>"; echo "exit=$?"`
-const WAVE_RENDER = `verify-evidence.cjs" render --plan "<that file>"; echo "exit=$?"`
-
-/** Named collector: what the wave caller's PR_TEST_PLAN_BLOCK rendering fails to state. */
-function collectWaveTestPlanRenderDefects(file: string, source: string): string[] {
-  const text = waveTestPlanText(source)
-  if (text === null) return [`${file}: no wave test-plan render before the ensure-pr-ready spawn`]
-  const out: string[] = []
-  const need = (what: string, ok: boolean): void => { if (!ok) out.push(`${file}: ${what}`) }
-  const gateAt = source.indexOf(WAVE_SLUG_GATE)
-  need('the slug is shape-gated by the wave branch check, before the path is built', gateAt !== -1 && gateAt < source.indexOf(WAVE_TEST_PLAN_LEAD))
-  need('the evidence path is checked, double-quoted', text.includes(WAVE_CHECK))
-  need('the evidence path is rendered, double-quoted', text.includes(WAVE_RENDER))
-  need('only two `exit=0` yield the block, else `(none)`',
-    text.includes('Only when both exit 0 is `PR_TEST_PLAN_BLOCK` the render\'s stdout, byte for byte without its `exit=` line; in every other case it is `(none)`'))
-  return out
-}
-
-/** The wave block key, as the one caller that has a wave block passes it. */
-const WAVE_BLOCK_KEY = 'PR_WAVE_BLOCK: {PR_WAVE_BLOCK verbatim}'
-
-/** Named collector: ensure-pr-ready payloads whose wave-block key disagrees with their caller — the wave must pass it, a review host must not. */
-function collectWaveBlockKeyDrift(payloads: readonly SpawnPayload[]): string[] {
-  return payloads.flatMap(p => {
-    const carries = p.block.includes('PR_WAVE_BLOCK:')
-    if (p.file === WAVE_CALLER && !p.block.includes(WAVE_BLOCK_KEY)) return [`${p.file}:${p.line}: the wave spawn does not pass ${WAVE_BLOCK_KEY}`]
-    if (p.file !== WAVE_CALLER && carries) return [`${p.file}:${p.line}: a review host passes PR_WAVE_BLOCK, which only the wave has`]
-    return []
-  })
+/** Named collector: the lines of a deployed command that still name the removed wave block key. */
+function collectWaveBlockKeyLeaks(file: string, source: string): string[] {
+  return source.split('\n').flatMap((l, i) => l.includes('PR_WAVE_BLOCK') ? [`${file}:${i + 1}: passes PR_WAVE_BLOCK, which no host has`] : [])
 }
 
 describe('PR_TEST_PLAN_BLOCK forwarding — every ensure-pr-ready spawn carries the key (AC-5)', () => {
@@ -1283,7 +1228,9 @@ describe('PR_TEST_PLAN_BLOCK forwarding — every ensure-pr-ready spawn carries 
     const corpus = fs.readdirSync(path.join(root, 'dist', 'commands'))
       .filter(f => f.endsWith('.md'))
       .map(name => ({ name, content: requireDistFile(name, root) }))
-    expect(corpus.length, 'no compiled command — the discovery corpus is empty').toBeGreaterThan(10)
+    // LOWERED 10 -> 9 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the four
+    // dynamic command hosts left the roster, so the counted code is removed and no coverage is lost.
+    expect(corpus.length, 'no compiled command — the discovery corpus is empty').toBeGreaterThan(9)
     expect(
       collectCallerDrift(corpus, ENSURE_PR_READY_CALLERS),
       'an ensure-pr-ready caller outside the named set is a spawn this seam never reads — add it to ' +
@@ -1299,10 +1246,8 @@ describe('PR_TEST_PLAN_BLOCK forwarding — every ensure-pr-ready spawn carries 
       'resolve.md: spawns ensure-pr-ready but is not a named caller',
       'bug-analysis.md: named caller spawns no ensure-pr-ready',
     ])
-    // …and the wave caller dropped from the named set is the drift this arm first caught (#365 P3),
-    // /implement's Phase 9 (#448) the one after it.
+    // …and /implement's Phase 9 (#448) dropped from the named set is the drift this arm caught.
     expect(collectCallerDrift(corpus, REVIEW_CALLERS)).toEqual([
-      `${WAVE_CALLER}: spawns ensure-pr-ready but is not a named caller`,
       `${IMPLEMENT_CALLER}: spawns ensure-pr-ready but is not a named caller`,
     ])
   }, 20_000) // pays for the memoised committed-tree build.
@@ -1329,52 +1274,23 @@ describe('PR_TEST_PLAN_BLOCK forwarding — every ensure-pr-ready spawn carries 
       .toEqual([])
   }, 20_000)
 
-  it('the wave caller renders the block from the wave evidence file, slug-gated and quoted, before the spawn', async () => {
-    const { root } = await buildCommittedTree()
-    expect(collectWaveTestPlanRenderDefects(WAVE_CALLER, requireDistFile(WAVE_CALLER, root))).toEqual([])
+  it('no host passes PR_WAVE_BLOCK', async () => {
+    const { run, root } = await buildCommittedTree()
+    expect(run.status, `the committed-tree build must succeed.\n${run.combined}`).toBe(0)
+    const names = fs.readdirSync(path.join(root, 'dist', 'commands')).filter(f => f.endsWith('.md'))
+    expect(names, 'the named callers are in the corpus the scan reads').toEqual(expect.arrayContaining([...ENSURE_PR_READY_CALLERS]))
+    expect(names.flatMap(name => collectWaveBlockKeyLeaks(name, requireDistFile(name, root)))).toEqual([])
   }, 20_000)
 
-  it('the wave spawn passes PR_WAVE_BLOCK, and no review host does', async () => {
+  it('known-bad probe: a host that gains a wave block key is reported', async () => {
     const { root } = await buildCommittedTree()
-    const payloads = ENSURE_PR_READY_CALLERS.flatMap(name => collectEnsurePrReadySpawns(name, requireDistFile(name, root)))
-    expect(payloads.filter(p => p.file === WAVE_CALLER), 'the wave caller has exactly one ensure-pr-ready spawn').toHaveLength(1)
-    expect(collectWaveBlockKeyDrift(payloads)).toEqual([])
-  }, 20_000)
-
-  it('known-bad probes: the wave spawn losing its wave block, and a review host gaining one, are reported', async () => {
-    const { root } = await buildCommittedTree()
-    const wave = requireDistFile(WAVE_CALLER, root)
-    const dropped = wave.replace(/^ *PR_WAVE_BLOCK: .*\n/m, '')
-    expect(dropped, 'the drop seed must land').not.toBe(wave)
-    expect(collectWaveBlockKeyDrift(collectEnsurePrReadySpawns(WAVE_CALLER, dropped))).toHaveLength(1)
-
     const review = requireDistFile('code-review.md', root)
+    expect(collectWaveBlockKeyLeaks('code-review.md', review), 'the real text is clean, so the seed fails for its own reason').toEqual([])
     const gained = review.replace(/^(PR_TEST_PLAN_BLOCK: .*)$/m, '$1\nPR_WAVE_BLOCK: {PR_WAVE_BLOCK verbatim}')
     expect(gained, 'the gain seed must land').not.toBe(review)
-    expect(collectWaveBlockKeyDrift(collectEnsurePrReadySpawns('code-review.md', gained))).toEqual([
-      expect.stringContaining('a review host passes PR_WAVE_BLOCK'),
+    expect(collectWaveBlockKeyLeaks('code-review.md', gained)).toEqual([
+      expect.stringContaining('passes PR_WAVE_BLOCK'),
     ])
-  }, 20_000)
-
-  it('known-bad probes: the wave render unquoted, ungated, or missing is reported', async () => {
-    const { root } = await buildCommittedTree()
-    const real = requireDistFile(WAVE_CALLER, root)
-
-    const unquoted = real.replace(/render --plan "([^"]*)"/, 'render --plan $1')
-    expect(unquoted, 'the unquoting seed must land').not.toBe(real)
-    expect(collectWaveTestPlanRenderDefects(WAVE_CALLER, unquoted)).toEqual([`${WAVE_CALLER}: the evidence path is rendered, double-quoted`])
-
-    const ungated = real.replace(WAVE_SLUG_GATE, 'Any name opens a wave PR')
-    expect(ungated, 'the gate seed must land').not.toBe(real)
-    expect(collectWaveTestPlanRenderDefects(WAVE_CALLER, ungated))
-      .toEqual([`${WAVE_CALLER}: the slug is shape-gated by the wave branch check, before the path is built`])
-
-    const unchecked = real.replace(/^cp .*evidence-wave.*check tp .*\n/m, '')
-    expect(unchecked, 'the check seed must land').not.toBe(real)
-    expect(collectWaveTestPlanRenderDefects(WAVE_CALLER, unchecked)).toEqual([`${WAVE_CALLER}: the evidence path is checked, double-quoted`])
-
-    expect(collectWaveTestPlanRenderDefects(WAVE_CALLER, real.replace(WAVE_TEST_PLAN_LEAD, '**(b) The plan.**')))
-      .toEqual([`${WAVE_CALLER}: no wave test-plan render before the ensure-pr-ready spawn`])
   }, 20_000)
 
   it('known-bad probes: a dropped key, an unquoted path and an ungated slug are reported', async () => {

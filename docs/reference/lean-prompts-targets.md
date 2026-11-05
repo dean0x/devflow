@@ -65,17 +65,13 @@ The main session re-reads a command on each of its turns. Main turns are known f
 
 | Command | on | co | cmo | both | Runs in the sample | Re-read MB |
 |---|---|---|---|---|---|---|
-| dynamic-build | 105,421 | 102,034 | 102,429 | 99,042 | not counted | not measured |
 | resolve | 50,283 | 47,253 | 43,936 | 40,890 | 10 | not measured |
 | implement | 43,478 | 40,794 | 44,856 | 42,172 | 52 | 61 to 104 |
-| dynamic-tickets | 41,146 | 36,999 | 41,294 | 37,147 | not counted | not measured |
 | plan | 36,222 | 33,424 | 36,055 | 33,257 | 5 | not measured |
-| dynamic-plan | 35,740 | 31,450 | 35,740 | 31,450 | not counted | not measured |
 | code-review | 34,062 | 31,487 | 31,269 | 28,694 | 10 full reviews; 14 more runs with 1 to 3 Review agents | not measured |
 | bug-analysis | 23,724 | 20,130 | 23,193 | 19,599 | not counted | not measured |
 | release | 22,297 | 19,141 | 17,199 | 14,043 | not counted | not measured |
 | debug | 18,340 | 15,591 | 18,340 | 15,591 | not counted | not measured |
-| dynamic-profile | 16,329 | 12,673 | 16,329 | 12,673 | not counted | not measured |
 | self-review | 14,255 | 11,353 | 14,255 | 11,353 | not counted | not measured |
 | research | 14,177 | 10,351 | 14,177 | 10,351 | not counted | not measured |
 | explore | 12,325 | 9,593 | 12,325 | 9,593 | not counted | not measured |
@@ -84,19 +80,15 @@ Shared partials, with the hosts that import them:
 
 | Partial | Source bytes | Hosts |
 |---|---|---|
-| `_settings` | 3,005 | all fourteen commands |
+| `_settings` | 3,005 | all ten commands |
 | `_knowledge` | 7,413 | bug-analysis, code-review, debug, explore, implement, plan, release, research, resolve, self-review |
 | `_decisions` | 4,936 | the same ten hosts as `_knowledge` |
-| `_evidence_policy` | 1,264 | bug-analysis, code-review, dynamic-build, dynamic-tickets, implement, plan, release, resolve |
-| `_docs_root` | 2,123 | bug-analysis, dynamic-build, dynamic-plan, dynamic-tickets, implement, plan, research |
-| `_compliance` | 3,154 | code-review, debug, dynamic-build, implement, plan, resolve |
-| `_tracker` | 2,622 | debug, dynamic-build, dynamic-plan, implement, plan |
-| `_plan_contract` | 4,493 | dynamic-build, dynamic-plan, implement, plan |
-| `_publication` | 1,547 | code-review, dynamic-build, implement, resolve |
-| `_engine`, `_wave` | 19,233, 12,321 | dynamic-build |
-| `_factory`, `_ticket_template` | 9,189, 2,631 | dynamic-tickets |
-| `_preamble` | 7,877 | the four dynamic commands |
-| `_roster` | 2,332 | dynamic-build, dynamic-plan, dynamic-tickets |
+| `_evidence_policy` | 1,264 | bug-analysis, code-review, implement, plan, release, resolve |
+| `_docs_root` | 2,123 | bug-analysis, implement, plan, research |
+| `_compliance` | 3,154 | code-review, debug, implement, plan, resolve |
+| `_tracker` | 2,622 | debug, implement, plan |
+| `_plan_contract` | 4,493 | implement, plan |
+| `_publication` | 1,547 | code-review, implement, resolve |
 | agents `_code` | 5,898 | Code, Fix, Refactor |
 
 ## Skills
@@ -166,7 +158,6 @@ Each group is one pull request. No two groups cut the same file. A group that ch
 | Plan path | agents `design.mds`, `explore.md`, `plan.md`, skills `gap-analysis`, `design-review`, the `plan` host text | Subtract. Turn audit. |
 | Command partials | the command partials shared by more than one family: `_settings`, `_knowledge`, `_decisions`, `_evidence_policy`, `_docs_root`, `_compliance`, `_tracker`, `_plan_contract`, `_publication` | Cut each partial once, in this group only. Scripts that print the next action or their own fail-closed line. |
 | Resolve | the `resolve` host text, agent `triage.mds` | Subtract. Rare escalation arms to references. Scripts that print the next action. |
-| Dynamic family | the four dynamic commands and `_engine`, `_wave`, `_factory`, `_preamble`, `_roster`, `_ticket_template` | Subtract. Capital emphasis: 19 hits in `dynamic-build`. Count main turns first. |
 | Other targets | agents Validate, Evaluate, Synthesize, Skim, Research, Debug, Tracker; the other command hosts; the skills that no agent preloads; the hook text | One target at a time, by measured spend. Debug has 11 capital-emphasis hits. |
 
 The Code family and the Code-path skills can share one pull request when the review stays in one round. One number, the Code load per spawn, measures both.

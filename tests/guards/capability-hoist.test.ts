@@ -127,8 +127,8 @@ export const PROBE_MARKERS: readonly Marker[] = [
     label: 'list-by-filter',
     pattern: /gh issue list[^\n]*--(?:label|milestone)\b/i,
     justification:
-      'GAP-26\'s wave defect exactly: a per-round re-read of the wave\'s issues. The wave states ' +
-      'that refresh as one `fetch-issues-batch` call per round, and never capping how many tickets ' +
+      'GAP-26\'s defect exactly: a per-round re-read of a set of issues. A caller states that ' +
+      'refresh as one `fetch-issues-batch` call per round, and never capping how many tickets ' +
       'a round runs keeps its page bound an API bound — which only holds while the call is made ' +
       'once per round.',
   },
@@ -309,15 +309,18 @@ describe('capability-hoist: no capability probe runs inside a loop [DR-11]', () 
       'unreadable, and the guard would pass without reading anything. Run `npm run build`.',
     ).toBeGreaterThan(0);
 
-    // 42 = learn-conventions.md + 33 provider blocks (three providers × eleven per-op
+    // 39 = learn-conventions.md + 30 provider blocks (three providers × ten per-op
     // references) + 8 PR-host references. The agent body holds no `**Process:**` block: every
     // operation's steps are the `### Process` block of its one reference (D-OP-ONE-REF).
     // Registered as `capability-hoist-block-floor`; the literal is spelled here so a decrement
     // is visible at the assertion, not only in the manifest.
+    // LOWERED 42 -> 39 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the
+    // post-wave-report reference left each of the three providers, so the counted blocks are removed and
+    // no coverage is lost.
     expect(
       blocks.length,
       'too few process blocks to be scanning the generated references',
-    ).toBeGreaterThanOrEqual(42);
+    ).toBeGreaterThanOrEqual(39);
 
     expect(LOOP_MARKERS.length, 'LOOP_MARKERS must be non-empty').toBeGreaterThan(0);
     expect(PROBE_MARKERS.length, 'PROBE_MARKERS must be non-empty').toBeGreaterThan(0);
@@ -387,7 +390,7 @@ describe('capability-hoist: no capability probe runs inside a loop [DR-11]', () 
           '## Operation: seeded-setup-task',
           '',
           '**Process:**',
-          'Iterate over every ticket in the wave:',
+          'Iterate over every ticket in the batch:',
           '   - Resolve the branch type through the label→type map for this ticket.',
           '',
           '**Output:**',

@@ -206,7 +206,6 @@ const LOCAL_FILES_BY_COMMAND: Readonly<Record<string, readonly string[]>> = {
   'code-review': ['review-summary.md', '.last-review-head'],
   resolve: ['resolution-summary.md', 'evidence-{branch_slug}.md', 'evidence-result-{branch_slug}.md', 'readiness-{branch_slug}.md'],
   implement: ['evidence-{branch_slug}.md', 'evidence-result-{branch_slug}.md'],
-  'dynamic-build': ['wave-report.md', 'evidence-wave-{slug}.md', 'evidence-result-wave-{slug}.md', 'readiness-wave-{slug}.md'],
   'bug-analysis': ['bug-analysis-summary.md', '.last-analysis-head'],
 }
 
@@ -217,8 +216,8 @@ const OFF_COMMANDS: readonly string[] = COMPLIANCE_VARIANT_HOSTS
 
 /** The names a compliance-off build uses for the files it writes, found by shape. */
 const LOCAL_FILE_SHAPES: readonly RegExp[] = [
-  /\b(?:evidence-result|evidence|readiness)(?:-wave)?-\{(?:branch_slug|slug)\}\.md/g,
-  /\b(?:review-summary|resolution-summary|wave-report|bug-analysis-summary)\.md/g,
+  /\b(?:evidence-result|evidence|readiness)-\{branch_slug\}\.md/g,
+  /\b(?:review-summary|resolution-summary|bug-analysis-summary)\.md/g,
   /\.last-(?:review|analysis)-head\b/g,
 ]
 
@@ -290,8 +289,8 @@ describe('architecture.md: the local result files of the compliance-off builds',
   })
 
   it('the collectors are live (known-bad probes)', () => {
-    expect(collectLocalFiles('see `.devflow/docs/readiness-wave-{slug}.md` and review-summary.md')).toEqual([
-      'readiness-wave-{slug}.md',
+    expect(collectLocalFiles('see `.devflow/docs/readiness-{branch_slug}.md` and review-summary.md')).toEqual([
+      'readiness-{branch_slug}.md',
       'review-summary.md',
     ])
     expect(collectLocalFiles('writes bug-analysis-summary.md and "$M/.last-analysis-head"')).toEqual([

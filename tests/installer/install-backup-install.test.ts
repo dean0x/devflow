@@ -10,7 +10,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { sweepLegacyDevflowFiles, sweepLegacySkillFolders } from '../../src/cli/commands/legacy-sweep.js';
+import { sweepLegacyDevflowFiles, sweepLegacySkillFolders } from '../../src/targets/claude-code/legacy-sweep.js';
 import { formatBackupSummary, formatKeptLegacySkills } from '../../src/cli/commands/install-report.js';
 import { RETIRED_SHIPPED } from '../../src/core/retired-shipped-names.js';
 import { createBackupSession, createPathSet, type BackupSession } from '../../src/targets/claude-code/install-backup.js';
@@ -511,7 +511,125 @@ describe('the legacy sweep after an install', () => {
     });
 
     expect(swept.removed).toEqual([]);
+    expect(swept.commandsLeft, 'a shipped name is never listed as a retired command left').toEqual([]);
     expect(await exists(shippedFile)).toBe(true);
+  });
+
+  describe('the retired command files that stay', () => {
+    const STUCK = 'dynamic-build';
+    const OTHER = 'dynamic-plan';
+
+    it('names a retired command whose removal is refused, and removes the other retired commands', async () => {
+      await runInstall(home, { shape: 'full' });
+      const stuck = await put(home, `commands/devflow/${STUCK}.md`);
+      const other = await put(home, `commands/devflow/${OTHER}.md`);
+      const realUnlink = fs.unlink.bind(fs);
+      vi.spyOn(fs, 'unlink').mockImplementation(async target => {
+        if (target === stuck) throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+        return realUnlink(target);
+      });
+      const session = await openSession(home);
+
+      const swept = await sweepLegacyDevflowFiles({ claudeDir: home.claudeDir, report: NO_REFUSED, backups: session });
+
+      expect(swept.removed).toEqual([other]);
+      expect(swept.commandsLeft).toEqual([stuck]);
+      expect(await exists(stuck), 'the refused file stays').toBe(true);
+    });
+
+    it('names no command when every retired command is removed', async () => {
+      await runInstall(home, { shape: 'full' });
+      await put(home, `commands/devflow/${STUCK}.md`);
+      await put(home, `commands/devflow/${OTHER}.md`);
+
+      const swept = await sweepLegacyDevflowFiles({
+        claudeDir: home.claudeDir, report: NO_REFUSED, backups: await openSession(home),
+      });
+
+      expect(swept.removed).toHaveLength(2);
+      expect(swept.commandsLeft).toEqual([]);
+    });
+
+    it('names a retired command in a folder the session could not scan', async () => {
+      await runInstall(home, { shape: 'full' });
+      const retired = await put(home, `commands/devflow/${STUCK}.md`);
+      const session = await testBackups(home.home, { claudeDir: home.claudeDir, devflowDir: home.devflowDir, entryCap: 1 });
+      await session.prepass([at(home, 'commands/devflow')]);
+      expect(session.isKept(at(home, 'commands/devflow')), 'precondition: the folder is over the cap').toBe(true);
+
+      const swept = await sweepLegacyDevflowFiles({ claudeDir: home.claudeDir, report: NO_REFUSED, backups: session });
+
+      expect(swept.removed).toEqual([]);
+      expect(swept.commandsLeft).toEqual([retired]);
+      expect(await exists(retired)).toBe(true);
+    });
+
+    it('names a retired command in a folder the install refused', async () => {
+      await runInstall(home, { shape: 'full' });
+      const retired = await put(home, `commands/devflow/${STUCK}.md`);
+      const refused = { refusedFolders: [at(home, 'commands/devflow')] };
+
+      const swept = await sweepLegacyDevflowFiles({ claudeDir: home.claudeDir, report: refused, backups: await openSession(home) });
+
+      expect(swept.removed).toEqual([]);
+      expect(swept.commandsLeft).toEqual([retired]);
+      expect(await exists(retired)).toBe(true);
+    });
+
+    it('names nothing in a skipped folder that holds no retired command', async () => {
+      await runInstall(home, { shape: 'full' });
+      const refused = { refusedFolders: [at(home, 'commands/devflow')] };
+
+      const swept = await sweepLegacyDevflowFiles({ claudeDir: home.claudeDir, report: refused, backups: await openSession(home) });
+
+      expect(swept.commandsLeft).toEqual([]);
+    });
+
+    it('fails closed: names a retired command whose state cannot be read, in a skipped folder', async () => {
+      await runInstall(home, { shape: 'full' });
+      const retired = await put(home, `commands/devflow/${STUCK}.md`);
+      const refused = { refusedFolders: [at(home, 'commands/devflow')] };
+      const realLstat = fs.lstat.bind(fs);
+      vi.spyOn(fs, 'lstat').mockImplementation(async (target, opts) => {
+        if (target === retired) throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+        return realLstat(target, opts);
+      });
+
+      const swept = await sweepLegacyDevflowFiles({ claudeDir: home.claudeDir, report: refused, backups: await openSession(home) });
+
+      expect(swept.commandsLeft).toEqual([retired]);
+    });
+
+    it('names no command that is shipped today', async () => {
+      await runInstall(home, { shape: 'full' });
+      const shippedName = otherPluginCommand();
+      const refused = { refusedFolders: [at(home, 'commands/devflow')] };
+
+      const swept = await sweepLegacyDevflowFiles({
+        claudeDir: home.claudeDir, report: refused, legacyCommands: [shippedName], backups: await openSession(home),
+      });
+
+      expect(swept.commandsLeft).toEqual([]);
+      expect(await exists(at(home, `commands/devflow/${shippedName}.md`)), 'the shipped file is not touched').toBe(true);
+    });
+
+    it('names no retired rule that stays: rules do not post', async () => {
+      await runInstall(home, { shape: 'full' });
+      const rule = await put(home, 'rules/devflow/old-rule.md');
+      const realUnlink = fs.unlink.bind(fs);
+      vi.spyOn(fs, 'unlink').mockImplementation(async target => {
+        if (target === rule) throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+        return realUnlink(target);
+      });
+
+      const swept = await sweepLegacyDevflowFiles({
+        claudeDir: home.claudeDir, report: NO_REFUSED, legacyRules: ['old-rule'], backups: await openSession(home),
+      });
+
+      expect(swept.removed).toEqual([]);
+      expect(await exists(rule), 'the refused rule stays').toBe(true);
+      expect(swept.commandsLeft).toEqual([]);
+    });
   });
 });
 

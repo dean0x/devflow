@@ -211,8 +211,10 @@ describe('generated reference manifest (bidirectional registry doctrine)', () =>
     const manifest = generatedReferenceManifest();
     expect(
       manifest.length,
+      // LOWERED 47 -> 44 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the three
+      // post-wave-report references left the manifest (numeric-floors.json: generated-reference-manifest-size).
       'a manifest short enough to enumerate by hand makes every convergence assertion vacuous',
-    ).toBeGreaterThanOrEqual(47);
+    ).toBeGreaterThanOrEqual(44);
     expect(manifest).toContain('tracker/github/setup-task.md');
     expect(manifest).toContain('decision-markers.md');
     expect(manifest.filter(p => p.startsWith('tracker/github/')).length).toBeGreaterThanOrEqual(10);
@@ -639,7 +641,9 @@ describe('converge-not-merge staged swap (GAP-24)', () => {
     await overlayWithBackups({ referencesTarget: target, sourceRoot, manifest });
 
     const files = (await walkTree(target)).filter(p => !p.endsWith('/'));
-    expect(files.length, 'no files installed — the mode assertion would be vacuous').toBeGreaterThanOrEqual(47);
+    // LOWERED 47 -> 44 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the three
+    // post-wave-report references left the manifest (the same count as generated-reference-manifest-size).
+    expect(files.length, 'no files installed — the mode assertion would be vacuous').toBeGreaterThanOrEqual(44);
     for (const rel of files) {
       const stat = await fs.stat(abs(target, rel));
       expect(stat.mode & 0o777, `${rel} must be normalised to 0644`).toBe(0o644);
@@ -1910,7 +1914,7 @@ describe('compliance-off reference install (AC-41, AC-50)', () => {
   const CORE = DEVFLOW_PLUGINS.filter(p => p.name === 'devflow-core-skills');
   const SKILLS = new Map([['git', 'devflow-core-skills'], ['agent-references', 'devflow-core-skills']]);
 
-  /** The generated references the compliance-off manifest drops: the 16 operation files and the publication gate. */
+  /** The generated references the compliance-off manifest drops: the 13 operation files and the publication gate. */
   const omittedRefs = (): string[] => {
     const kept = new Set(installedReferenceManifest({ compliance: false }));
     return generatedReferenceManifest().filter(rel => !kept.has(rel));
@@ -1974,14 +1978,14 @@ describe('compliance-off reference install (AC-41, AC-50)', () => {
     await fs.rm(tmp, { recursive: true, force: true });
   });
 
-  it('the omitted references are the 16 operation files and the publication gate', () => {
+  it('the omitted references are the 13 operation files and the publication gate', () => {
     const omitted = omittedRefs();
-    expect(omitted).toHaveLength(17);
+    expect(omitted).toHaveLength(14);
     expect(omitted).toContain('publication-gate.md');
     expect(omitted.filter(rel => rel !== 'publication-gate.md').every(rel => /^(pr|tracker\/[a-z]+)\//.test(rel))).toBe(true);
   });
 
-  it('a fresh compliance-off install holds none of the 17 omitted references and none of the 3 flat files (TP-57)', async () => {
+  it('a fresh compliance-off install holds none of the 14 omitted references and none of the 3 flat files (TP-57)', async () => {
     const report = await install({ compliance: false });
 
     for (const rel of omittedRefs()) {

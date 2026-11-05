@@ -1,7 +1,6 @@
 @import { root_paths } from "./_docs_root.mds"
 
-A partial: the decisions-index steps the knowledge-workflow commands and the
-dynamic commands share.
+A partial: the decisions-index steps the knowledge-workflow commands share.
 
 `decisions_locate()` names where the ledger belongs and expands
 the shared `root_paths()` step of `_docs_root.mds`. One `resolve-root.cjs` call, run once per
@@ -28,7 +27,7 @@ D-LEARNING-VARIANTS: the gate guards a repository that narrows curation off on a
 where it is on. On a machine with curation off the decisions text is absent altogether: the
 whole of `decisions_load()` is a curation-on arm, so every expansion of it exists only in the
 curation-on build. `decisions_gate()` and `decisions_locate()` are leaves, reached only from
-inside an arm (`decisions_load()`, `authoring_decisions()`, or a host's own on arm), and carry
+inside an arm (`decisions_load()` or a host's own on arm), and carry
 no arm of their own: an arm cannot nest.
 
 D-DECISIONS-SLICE: the index is handed on as a slice, never whole. The orchestrating main model

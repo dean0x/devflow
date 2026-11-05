@@ -181,9 +181,7 @@ const TEST_TOOLS: readonly string[] = [
  * D-AGENT-CONFIG-TABLE: the shipped model, effort, tool policy, omitClaudeMd and
  * preload of every registered agent. Each agent's frontmatter is the
  * sole authority for these values at runtime; this table is the pin that holds the
- * frontmatter to the decision. `_roster.mds` carries no effort column, and its
- * model tiers are held to the same frontmatter by the roster guard in
- * tests/agent-name-guards.test.ts.
+ * frontmatter to the decision.
  *
  * Departures from the plan's tool table, each decided:
  *  - Design gains `Skill`: the /plan compliance-focus spawn tells the agent to
@@ -286,8 +284,8 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
    * every one on Opus, and 3.1% of all subagent cache-equivalent tokens (report
    * .devflow/docs/research/token-diet-subagents/report.2026-10-10_0256.md). The
    * check compares a diff against a plan and a request, which fits the Sonnet tier
-   * Code and Test already ship. The row, the `model:` line of evaluate.md and the
-   * dynamic roster table move together.
+   * Code and Test already ship. The row and the `model:` line of evaluate.md
+   * move together.
    */
   evaluate: {
     model: 'sonnet',

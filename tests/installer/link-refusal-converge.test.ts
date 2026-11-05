@@ -503,6 +503,73 @@ describe('a skill folder that is a link is swapped whole and what it points to i
 });
 
 // ---------------------------------------------------------------------------
+// The retired command files below a commands folder that is a link
+// ---------------------------------------------------------------------------
+
+describe('a commands folder that is a link, with a retired command below it (AC-4)', () => {
+  const RETIRED_FILE = 'dynamic-build.md';
+
+  const axes = async (compliance: boolean) => convergeVariantAxes({
+    claudeDir,
+    devflowDir,
+    switches: { ...ALL_SWITCHES_ON, compliance },
+    frameworks: [],
+    rulesEnabled: false,
+    plugins,
+    warn,
+    packageRoot: pkg,
+    backups: await backupsOf(),
+  });
+
+  beforeEach(async () => {
+    // The build manifest that a compliance-off converge reads: both hosts of the package carry a curation arm only.
+    await write(path.join(pkg, 'dist', 'variant-axes.json'), JSON.stringify({
+      version: 1,
+      hosts: {
+        'commands/implement': { curation: true, compliance: false, tdd: false },
+        'agents/code': { curation: true, compliance: false, tdd: false },
+      },
+    }));
+  });
+
+  it.each([false, true])('removes nothing through the link (compliance %s)', async compliance => {
+    await linkFolder(installedCommands(), { [RETIRED_FILE]: 'a command of an old release\n' });
+    const before = await snapshot(outside);
+
+    const result = await axes(compliance);
+
+    expect(await snapshot(outside), 'the place outside keeps every byte, file and mode').toEqual(before);
+    expect((await fs.lstat(installedCommands())).isSymbolicLink(), 'the link is still in place').toBe(true);
+    expect(result.refusedFolders).toContain(installedCommands());
+  });
+
+  it('with compliance off, posting is left and names the retired command, and the converge is not clean', async () => {
+    await linkFolder(installedCommands(), { [RETIRED_FILE]: 'a command of an old release\n' });
+
+    const result = await axes(false);
+
+    expect(result.posting).toEqual({ kind: 'left', files: [path.join(installedCommands(), RETIRED_FILE)] });
+    expect(result.converged).toBe(false);
+  });
+
+  it('with compliance on, the retired command is not named as posting', async () => {
+    await linkFolder(installedCommands(), { [RETIRED_FILE]: 'a command of an old release\n' });
+
+    const result = await axes(true);
+
+    expect(result.posting).toEqual({ kind: 'clear' });
+  });
+
+  it('with compliance off and no retired command below the link, posting is clear', async () => {
+    await linkFolder(installedCommands(), {});
+
+    const result = await axes(false);
+
+    expect(result.posting).toEqual({ kind: 'clear' });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // `devflow init` prints the links of its agent model reapply through the install summary
 // ---------------------------------------------------------------------------
 

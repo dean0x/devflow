@@ -9,8 +9,7 @@
 // through SHA ancestry, the diff since the claim, and `gh run view --attempt`.
 //
 // Usage:
-//   node verify-evidence.cjs check tp|block|exceptions|wave <file>
-//   node verify-evidence.cjs check wave --links-only <file>
+//   node verify-evidence.cjs check tp|block|exceptions <file>
 //   node verify-evidence.cjs render --plan <file>
 //   node verify-evidence.cjs verify --pr <n> [--publication <mode>] [--evidence <file>]
 //        [--state <dir>] [--block-out <file>] [--comment-out <file>] [--stale-out <file>] [--approval]
@@ -25,10 +24,7 @@
 // stdout (D-VERIFY-STDOUT) is empty or exactly one of these shapes, each closed-vocabulary
 // (the render block's TP lines come from the caller's own plan file):
 //   check     nothing — the exit code is the answer; the diagnostic is on stderr.
-//             `check wave --links-only` also admits the links-only wave block (the
-//             `## Related Issues` heading and `Refs #<n>` or `Refs <KEY-N>` lines, no
-//             evidence section); plain `check wave` refuses that block as malformed
-//   render   the creation block: markers, `## Test Plan`, every TP unticked
+//   render    the creation block: markers, `## Test Plan`, every TP unticked
 //   verify    EVIDENCE pr:<n> head:<sha> total:<n> VERIFIED-CI:<n> ATTESTED-LOCAL:<n>
 //             UNVERIFIED:<n> STALE:<n> FAILED:<n> INDETERMINATE:<n> stale:<ids|none>
 //             exceptions:<kinds|none> approval:<yes|no|unchecked> key:<hex>
@@ -262,8 +258,7 @@ const CLAIM_REFUSAL_RE = /^CLAIM refused \((?<reason>head not one sha|evidence f
 const CLAIM_ARG_RE = /^TP-(?<n>[1-9][0-9]{0,2})=(?<outcome>PASS|FAIL|SKIP)(?::(?<exit>[^\s]{1,12}))?$/;
 
 const USAGE = [
-  'Usage: node verify-evidence.cjs check tp|block|exceptions|wave <file>',
-  '       node verify-evidence.cjs check wave --links-only <file>',
+  'Usage: node verify-evidence.cjs check tp|block|exceptions <file>',
   '       node verify-evidence.cjs render --plan <file>',
   '       node verify-evidence.cjs verify --pr <n> [--publication <mode>] [--evidence <file>]',
   '            [--state <dir>] [--block-out <file>] [--comment-out <file>] [--stale-out <file>] [--approval]',
@@ -323,7 +318,7 @@ const USAGE = [
 
 /**
  * @typedef {{ kind: 'usage' }
- *   | { kind: 'check', what: 'tp' | 'block' | 'exceptions' | 'wave', file: string, linksOnly: boolean }
+ *   | { kind: 'check', what: 'tp' | 'block' | 'exceptions', file: string }
  *   | { kind: 'render', plan: string }
  *   | { kind: 'verify', pr: number, publication: string, evidence: string | null, state: string | null,
  *       blockOut: string | null, commentOut: string | null, staleOut: string | null, approval: boolean }
@@ -394,12 +389,10 @@ function parseArgs(argv) {
   const sub = rest[0];
   const tail = rest.slice(1);
   if (sub === 'check') {
-    // `check wave --links-only <file>` is the one three-argument form: the links-only wave block is opt-in.
-    const linksOnly = tail.length === 3 && tail[0] === 'wave' && tail[1] === '--links-only';
-    if ((tail.length !== 2 && !linksOnly) || !['tp', 'block', 'exceptions', 'wave'].includes(tail[0])) return USAGE_ARGS;
-    const file = tail[tail.length - 1];
+    if (tail.length !== 2 || !['tp', 'block', 'exceptions'].includes(tail[0])) return USAGE_ARGS;
+    const file = tail[1];
     if (typeof file !== 'string' || file === '' || file.startsWith('-') || file.length > MAX_ARG_CHARS) return USAGE_ARGS;
-    return { kind: 'check', what: /** @type {'tp' | 'block' | 'exceptions' | 'wave'} */ (tail[0]), file, linksOnly };
+    return { kind: 'check', what: /** @type {'tp' | 'block' | 'exceptions'} */ (tail[0]), file };
   }
   if (sub === 'render') {
     const f = parseFlags(tail, { '--plan': 'value' });
@@ -2137,8 +2130,7 @@ function sectionOrWhole(text, section) {
 }
 
 /**
- * `check wave` reads the whole file: a wave block is a PR-body section of its
- * own, never a section of an evidence file.
+ * `check tp|block|exceptions`: the exit code is the answer, and stdout stays empty.
  *
  * @param {Io} io
  * @param {Extract<ParsedArgs, { kind: 'check' }>} args
@@ -2150,11 +2142,14 @@ function runCheck(io, args) {
   let result;
   if (args.what === 'tp') result = PE.parsePlan(sectionOrWhole(text, 'testPlan'));
   else if (args.what === 'exceptions') result = PE.parseExceptions(sectionOrWhole(text, 'exceptions'));
-  else if (args.what === 'wave') result = PE.parseWaveBlock(text, { linksOnly: args.linksOnly });
-  else {
+  else if (args.what === 'block') {
     const b = PE.parseBlock(text);
     // R7 pastes only the creation form: TP lines, none ticked.
     result = b.ok && (b.value.kind !== 'lines' || b.value.ticked.length > 0) ? { ok: false, error: { code: 'invalid', line: 0 } } : b;
+  }
+  if (result === undefined) {
+    io.stderr(USAGE + '\n');
+    return { code: EXIT_CODES.USAGE, stdout: '' };
   }
   if (result.ok) return { code: EXIT_CODES.OK, stdout: '' };
   io.stderr('verify-evidence: check ' + args.what + ': ' + result.error.code

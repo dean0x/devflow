@@ -210,7 +210,7 @@ Every loop and read has a bound, each a named constant: in the store those its K
 | D-LEARNING-VARIANT-INSTALL, D-LEARNING-PRELOAD-MACHINE-ONLY | the install and the toggle follow the machine switch; the skill preload is met by the variant | `convergeCurationVariants`, `applyCurationToggle`, `commandSourceDirs`/`agentSourceDirs`, `CURATION_GATED_SKILLS` | delivery |
 | D-AGENT-OVERRIDE-CARRY | the converge keeps an installed agent's `model:` and `effort:` | `withInstalledState` (`curation-install.ts`), `carryAgentOverrides` | delivery |
 | D-DECISIONS-LEARNING-GATE | a decisions load skips on `CURATION=off` before it locates or reads | `decisions_gate()` (`_decisions.mds`) | delivery |
-| D-DECISIONS-DECLARED-ONLY | the index goes only to agents whose contract declares it | `authoring_decisions()` (`_preamble.mds`), `tests/decisions/decisions-seam.test.ts` | delivery |
+| D-DECISIONS-DECLARED-ONLY | the index goes only to agents whose contract declares it | `decisions_load()` step 2 (`_decisions.mds`), `tests/decisions/decisions-seam.test.ts` | delivery |
 | D-DECISIONS-CHARTER-HANDOFF | the pass rule lives in the session-start decisions block | `DECISIONS_PASS_RULE` (`session-start-context`) | delivery |
 | D-BACKUP-RENAME | the pre-compact backup is replaced by a rename, never rewritten in place | `pre-compact-memory` | memory-worker |
 | D-MEMORY-WORKER-LEAN, D-QUEUE-NO-ORPHAN-DELETE | the memory worker's argv and probe; an orphan queue is left in place | `background-memory-update` | memory-worker |

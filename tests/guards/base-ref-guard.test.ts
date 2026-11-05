@@ -29,9 +29,8 @@
  * by tests/guards/code-review-diff-gating.test.ts and tests/bug-analysis/structural.test.ts), the
  * review agent's DIFF_RANGE rule (code-review-diff-gating), /implement's Phase 1 and
  * re-validation text (tests/evidence/implement-flow.test.ts), the Git ops' steps 5 to 7
- * (tests/git-agent.test.ts) and the ticket command's base commit, review ranges and changed-files
- * step (tests/dynamic/wave-flow.test.ts). The ticket command is swept like any other prompt
- * for base names and class copies; its `BRANCH_NAME` class variant is the one exempt copy.
+ * (tests/git-agent.test.ts). Every prompt is swept for base names and class copies, and no
+ * prompt is exempt from the class-copy check.
  *
  * How a site is identified. Every collector returns Findings: a file label, the curation
  * arm, a rule and an anchor. For a shell line the anchor is the command text. For a
@@ -314,15 +313,6 @@ const DEFERRED_FILES: readonly string[] = [
   'agents/debug.md',
 ]
 
-/**
- * The one copy of the class that a built prompt may hold besides `STRICT_NAME_RE.source`: the ticket command's
- * `BRANCH_NAME`, the same class less its `origin/` refusal. Only this exact text is exempt, and only in that command.
- */
-const ENGINE_BRANCH_VARIANT: { readonly file: string; readonly copy: string } = {
-  file: 'commands/dynamic-build.md',
-  copy: '^(?![-#]|(?:@|(?:FETCH_|ORIG_|MERGE_)?HEAD)$)(?!.*\\.\\.)[A-Za-z0-9._/+@,#-]{1,200}$',
-}
-
 /** The review-focus skill files keep their literal range wording until #545 (review-focus skills read the base from DIFF_RANGE) lands. */
 const DEFERRED_SKILL_FILES: readonly string[] = [
   'src/assets/skills/consistency/references/detection.md',
@@ -367,7 +357,7 @@ function collectNameSites(p: Prompt, includeDeferred = false): Finding[] {
       found.push({ rule: 'shell-name', file: p.file, arm: p.arm, anchor: squash(span), detail: 'a base name reaches a shell line; a command takes it only from the name file' })
     }
     for (const copy of findNameClassCopies(line.text)) {
-      if (copy === STRICT || (p.file === ENGINE_BRANCH_VARIANT.file && copy === ENGINE_BRANCH_VARIANT.copy)) continue
+      if (copy === STRICT) continue
       found.push({ rule: 'strict-copy', file: p.file, arm: p.arm, anchor: `copy ${copy.slice(0, 60)}`, detail: 'a copy of the class differs from STRICT_NAME_RE.source' })
     }
   }
@@ -408,8 +398,6 @@ const CALL_BUDGET: Readonly<Record<string, CallBudget>> = {
   'commands/code-review.md': { direct: 0, spawns: 1 },
   // One call per run.
   'commands/bug-analysis.md': { direct: 0, spawns: 1 },
-  // One ensure-pr-ready call per wave PR.
-  'commands/dynamic-build.md': { direct: 0, spawns: 1 },
   'git-ops/ensure-pr-ready.md': { direct: 1, mode: 'pr' },
   // One call per validate-branch run.
   'git-ops/validate-branch.md': { direct: 1, mode: 'pr' },
@@ -856,24 +844,13 @@ describe('known-bad probes: each collector reports the seeded bad text and passe
     expect(nameSites('agents/seeded.md', CHECKED)).toEqual([])
   })
 
-  it('shell-name: the ticket command is swept like any other prompt, so a base name seeded into a shell span of either curation variant is reported', () => {
-    const variants = prompts.filter(p => p.file === 'commands/dynamic-build.md')
-    expect(variants.map(p => p.arm).sort()).toEqual(['off', 'on'])
-    for (const p of variants) {
-      expect(collectNameSites(p), `${p.arm}: the built command`).toEqual([])
-      const sites = collectNameSites({ ...p, text: `${p.text}\nRun \`git diff --name-only {BASE_BRANCH}...HEAD\`.\n` })
-      expect(sites.map(f => f.rule), `${p.arm}: the seeded name`).toEqual(['shell-name'])
-    }
-  })
-
-  it('strict-copy: the ticket command\'s own variant of the class is the one exempt copy; a widened variant there, or the variant in another prompt, is reported', () => {
-    const { file, copy } = ENGINE_BRANCH_VARIANT
+  it('strict-copy: the class without its origin/ refusal is reported in every prompt, so no prompt is exempt', () => {
+    const variant = '^(?![-#]|(?:@|(?:FETCH_|ORIG_|MERGE_)?HEAD)$)(?!.*\\.\\.)[A-Za-z0-9._/+@,#-]{1,200}$'
+    expect(variant, 'the variant differs from the strict source').not.toBe(STRICT)
     const copySites = (at: string, text: string): string[] => collectNameSites(seeded(at, text)).filter(f => f.rule === 'strict-copy').map(f => f.anchor)
-    for (const p of prompts.filter(q => q.file === file)) expect(p.text, `${p.arm}: the built command holds the exempt variant`).toContain(copy)
-    expect(copySites(file, `const BRANCH_NAME = /${copy}/;`)).toEqual([])
-    expect(copySites(file, `const BRANCH_NAME = /${copy.replace('{1,200}', '{1,255}')}/;`)).toHaveLength(1)
-    expect(copySites(file, `const BRANCH_NAME = /${copy.replace('+@,#', '+~@,#')}/;`)).toHaveLength(1)
-    expect(copySites('agents/seeded.md', `const BRANCH_NAME = /${copy}/;`)).toHaveLength(1)
+    for (const file of ['agents/seeded.md', 'commands/implement.md', 'commands/code-review.md']) {
+      expect(copySites(file, `Check: \`${variant}\`.`), file).toHaveLength(1)
+    }
   })
 
   describe('strict-copy: any other check of the class is reported, in a base source as much as outside one', () => {
@@ -1063,9 +1040,9 @@ describe('known-bad probes: each collector reports the seeded bad text and passe
     const call = `\`${callOf(LOCAL_REST)}\`\n`
     const anchors = (file: string, text: string): string[] => callFindings(seeded(file, text)).map(u => u.anchor)
     expect(anchors('agents/seeded.md', call)).toContain('call count')
-    expect(anchors('commands/dynamic-build.md', 'OPERATION: ensure-pr-ready')).toEqual([])
-    expect(anchors('commands/dynamic-build.md', 'OPERATION: ensure-pr-ready\nOPERATION: ensure-pr-ready')).toContain('ensure-pr-ready spawns')
-    expect(anchors('commands/dynamic-build.md', 'no spawn')).toContain('ensure-pr-ready spawns')
+    expect(anchors('commands/code-review.md', 'OPERATION: ensure-pr-ready')).toEqual([])
+    expect(anchors('commands/code-review.md', 'OPERATION: ensure-pr-ready\nOPERATION: ensure-pr-ready')).toContain('ensure-pr-ready spawns')
+    expect(anchors('commands/code-review.md', 'no spawn')).toContain('ensure-pr-ready spawns')
   })
 
   it('resolver-call: the re-validation reference makes one pr call and one local call, never two of a mode', () => {

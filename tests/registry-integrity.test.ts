@@ -291,8 +291,9 @@ describe('Guard 4 (command integrity): declared commands ↔ source files', () =
 //   Reverse:  every agent declared in the plugin's agents array is spawned (with
 //             subagent_type syntax) in at least one of the plugin's compiled commands.
 //
-// Commands that contain NO subagent_type pattern at all are skipped from both
-// checks (they use a different spawn syntax, e.g. agentType in dynamic-*).
+// Commands that contain NO spawn pattern at all (neither subagent_type nor agentType) are skipped
+// from both checks. No command uses agentType now; the harvest guards the option form of a spawn
+// if a command uses it again.
 //
 // Explore and Plan are registered agents like any other: devflow ships agents named Explore and Plan
 // that override the Claude Code built-ins, so each is declared and checked in both directions.
@@ -303,8 +304,8 @@ describe('Guard 4 (command integrity): declared commands ↔ source files', () =
 // Matches both Agent(subagent_type="Name") and subagent_type: "Name" syntax.
 const SPAWN_RE = /subagent_type[=:]\s*"([^"]+)"/gi;
 
-// Also matches agentType: "Name" (used by dynamic-* Workflow commands).
-// Harvesting this signal lets Guard 5 verify dynamic plugin agents without a blanket exemption.
+// Also matches agentType: "Name" (the option form of a fenced spawn).
+// Harvesting this signal lets Guard 5 verify the agents such spawns name without a blanket exemption.
 const AGENT_TYPE_RE = /agentType:\s*"([^"]+)"/gi;
 
 /**
@@ -320,7 +321,7 @@ const normalize = (name: string) => name.replace(/-/g, '').toLowerCase();
  * `agentType`. A `subagent_type` that byte-equals an entry of BUILT_IN_SPAWN_TYPES is skipped BEFORE
  * `normalize`: a built-in without an agent file is declared by no plugin. The compare is on the raw text, so
  * a type outside the set, `general-purpose` included, reaches `normalize` and is reported as undeclared. The
- * `agentType` harvest has no such exemption: a dynamic host names roster agents only.
+ * `agentType` harvest has no such exemption: it names roster agents only.
  */
 export function spawnedRegistryNames(content: string): Set<string> {
   const spawned = new Set<string>();
@@ -371,8 +372,8 @@ describe('Guard 5 (build-gated): spawned agents ↔ plugin agent declarations', 
       }
 
       // Collect all spawned agent names (normalized, deduplicated).
-      // Harvest both subagent_type= / subagent_type: AND agentType: so that dynamic-*
-      // Workflow commands (which use agentType) are covered without a blanket exemption.
+      // Harvest both subagent_type= / subagent_type: AND agentType:, so a command that spawns by
+      // the option form, if one does again, is checked without a blanket exemption.
       const spawned = spawnedRegistryNames(content);
 
       // If the command uses no known spawn syntax at all, skip both checks.
@@ -398,8 +399,8 @@ describe('Guard 5 (build-gated): spawned agents ↔ plugin agent declarations', 
     // Reverse: declared → spawned (per-plugin aggregate).
     // Checks that each declared agent is spawned in AT LEAST ONE of the plugin's
     // compiled commands — not necessarily every command.
-    // Both subagent_type and agentType are now harvested, so dynamic-* agents that use
-    // agentType (Workflow runtime) are covered without a blanket plugin exemption.
+    // Both subagent_type and agentType are harvested, so an agent spawned by the option form,
+    // if a command uses it again, counts as spawned without a blanket plugin exemption.
     for (const plugin of DEVFLOW_PLUGINS) {
       const aggregate = pluginAggregateSpawned.get(plugin.name);
       if (aggregate === undefined) continue; // no known spawn syntax in any command — skip

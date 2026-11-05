@@ -479,35 +479,6 @@ When creating or enriching a GitHub issue via the `ensure-traceable-issue` opera
 <!-- compliance:end -->
 @end
 
-@define post_wave_report():
-## Operation: post-wave-report
-
-{{ops.post_wave_report_contract()}}
-
-Load when the resolved tracker provider is `github` and the operation is `post-wave-report`.
-
-**Mechanics held here:** the `### Process` body — locating the wave's tracking item and posting or updating the report.
-
-{{common.wave_report_inputs()}}
-
-### Process
-
-1. Check for existing marker (author-filtered — a third party posting the marker must not suppress the post):
-   - Fetch viewer login: `gh api user --jq '.login'` → store as VIEWER_LOGIN
-   - `gh issue view {TRACKING_ISSUE} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
-   - Search for `<!-- devflow:wave-report wave:{WAVE_ID} -->` in viewer-authored comment bodies only
-   - If found: skip — report `Skipped: wave report for {WAVE_ID} already posted`
-{{steps.wave_report_read_step()}}
-3. Compose the comment body:
-   ```markdown
-   <!-- devflow:wave-report wave:{WAVE_ID} -->
-   {contents of WAVE_REPORT_PATH}
-   ```
-   Cap the composed body at 60000 characters; if larger, truncate and end with
-   `…truncated — full report in the local wave artifact {WAVE_REPORT_PATH} (not committed; ask the author)`.
-4. Write composed body to `$DEVFLOW_BODY_RAW`; apply the Comment-sink scrub (D11) and post via `gh issue comment {TRACKING_ISSUE} --body-file "$DEVFLOW_BODY"`.
-@end
-
 @define ensure_pr_ready():
 ## Operation: ensure-pr-ready
 
@@ -553,9 +524,6 @@ Load when the resolved tracker provider is `github` and the operation is `ensure
 
 <!-- op: ensure-traceable-issue -->
 {{ensure_traceable_issue()}}
-
-<!-- op: post-wave-report -->
-{{post_wave_report()}}
 
 <!-- op: ensure-pr-ready -->
 {{ensure_pr_ready()}}

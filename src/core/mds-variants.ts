@@ -86,7 +86,7 @@ function Err<E>(error: E): Result<never, E> {
  *  - Total length: 1–64 characters.
  *
  * Accepts every basename the repo ships (`implement`, `code-review`,
- * `dynamic-build`, `git`, …) and refuses uppercase, whitespace, and shell
+ * `bug-analysis`, `git`, …) and refuses uppercase, whitespace, and shell
  * metacharacters outright.
  */
 const OUTPUT_NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
@@ -404,7 +404,7 @@ export function resolveOutputDir(
 // ---------------------------------------------------------------------------
 
 /**
- * The 11 tracker operations whose provider mechanics are generated as separate
+ * The 10 tracker operations whose provider mechanics are generated as separate
  * skill reference files.
  *
  * Bidirectional parity, the COMPLIANCE_SKILL_TOKENS model
@@ -429,7 +429,6 @@ export const TRACKER_OPS = [
   'backlink-shipped-issues',
   'associate-release',
   'ensure-traceable-issue',
-  'post-wave-report',
   'ensure-pr-ready',
 ] as const;
 
@@ -515,13 +514,13 @@ export const PR_HOST_OPS = [
 export const PR_HOST_DESTINATION_ROOT = 'pr';
 
 /**
- * The eight Git operations that post to GitHub or to a tracker: the one roster of
+ * The seven Git operations that post to GitHub or to a tracker: the one roster of
  * them. Posting steps are a compile-time variant keyed on the machine compliance
  * switch alone, and this list says which reference files that variant drops.
  *
  * A compliance-off install carries no reference file of any of them: four under
- * `pr/` and, for each of the three providers, four under `tracker/{provider}/`, which
- * is 16 files. `check-merge-readiness` is deliberately absent: it reads state and
+ * `pr/` and, for each of the three providers, three under `tracker/{provider}/`, which
+ * is 13 files. `check-merge-readiness` is deliberately absent: it reads state and
  * posts nothing. The names are checked against the registry twice, once at compile
  * time here (each is a PR-host or a tracker operation) and once at run time by
  * {@link checkPostingOps}, because the manifest that omits them must fail closed: a
@@ -537,7 +536,6 @@ export const POSTING_OPS = [
   'post-resolution-summary',
   'update-pr-evidence',
   'manage-debt',
-  'post-wave-report',
   'backlink-shipped-issues',
   'associate-release',
 ] as const satisfies readonly ((typeof PR_HOST_OPS)[number] | (typeof TRACKER_OPS)[number])[];
@@ -1089,7 +1087,7 @@ export function generatedReferenceManifest(): readonly string[] {
  *
  * `compliance: false` is the install of a machine with compliance off: the same
  * manifest without the references of the posting operations ({@link POSTING_OPS},
- * 16 files) and without the publication gate document, which only those operations
+ * 13 files) and without the publication gate document, which only those operations
  * load. Any other value, and an absent option, is today's manifest. The omission
  * fails closed: a posting name the registry does not carry asserts, because a name
  * that matched no file would leave a posting reference in a compliance-off install.

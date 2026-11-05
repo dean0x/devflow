@@ -130,7 +130,10 @@ describe('no Code variant carries a Step 0 table, a DOMAIN input or a runtime sk
   it('no Code-family spawn in a compiled command passes DOMAIN', () => {
     const commands = requireDistFiles().map(f => [f, requireDistFile(f)] as const)
     const sites = commands.flatMap(([file, text]) => collectCodeSpawnSites(file, text))
-    expect(sites.length, 'no Code-family spawn was read').toBeGreaterThan(15)
+    // LOWERED 15 -> 12 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the 8
+    // Code-family spawn sites of the dynamic-build host left the roster (13 remain), so the counted code is
+    // removed and no coverage is lost.
+    expect(sites.length, 'no Code-family spawn was read').toBeGreaterThan(12)
     expect(collectDomainSpawnDefects(commands)).toEqual([])
   })
 

@@ -1,26 +1,24 @@
 /**
- * ensure-pr-ready step 4a's caller blocks (#365, PR6; AC-4).
+ * ensure-pr-ready step 4a's caller block (#365, PR6; AC-4).
  *
- * A caller may hand ensure-pr-ready two pre-rendered blocks for the PR body it
- * creates: `PR_WAVE_BLOCK` (the wave's `## Related Issues` plus its evidence
- * table, from /dynamic-build) and `PR_TEST_PLAN_BLOCK` (the rendered test plan,
- * from /code-review and /bug-analysis). Both are attacker-influenceable text by
- * the time they reach a GitHub-visible sink, so the reference admits each one
- * only behind the script that owns its grammar — never a prose regex:
+ * A caller may hand ensure-pr-ready one pre-rendered block for the PR body it
+ * creates: `PR_TEST_PLAN_BLOCK` (the rendered test plan, from /code-review and
+ * /bug-analysis). It is attacker-influenceable text by the time it reaches a
+ * GitHub-visible sink, so the reference admits it only behind the script that
+ * owns its grammar — never a prose regex:
  *
- *   - order: the wave block, then the test-plan block;
- *   - the gate: each is Written to a new file in a `mktemp -d` folder and passed through
- *     `verify-evidence.cjs check wave|block`; only `exit=0` admits it, verbatim;
+ *   - the gate: it is Written to a new file in a `mktemp -d` folder and passed through
+ *     `verify-evidence.cjs check block`; only `exit=0` admits it, verbatim;
  *   - the refusal: anything else omits it — never repaired or partly pasted —
  *     and emits its named DEGRADED reason;
- *   - the 4b skip: an admitted wave block IS the body's `## Related Issues`;
- *   - the scrub: the blocks join the body before the D11 scrub, and a failed
- *     scrub posts neither.
+ *   - the scrub: the block joins the body before the D11 scrub, and a failed
+ *     scrub posts nothing;
+ *   - the absence: no wave block input, gate or reason is left in any provider's file.
  *
  * Every guard has a named collector, a non-empty-corpus assertion and a known-bad
  * probe run through the same collector, so a guard that cannot see its subject
  * fails instead of passing on an empty read. The gate is also EXECUTED: the
- * two subcommands the reference names are run against the real script, so a
+ * subcommand the reference names is run against the real script, so a
  * reference naming a subcommand the script does not route goes red here rather
  * than at a user's PR.
  */
@@ -55,14 +53,15 @@ const PR_READY_REL = operationReferenceRel('ensure-pr-ready', 'github') ?? ''
 const STEP_4A = '4a. Check if PR exists'
 const STEP_4C = '4c. Retitle'
 const CALLER_BLOCKS = '   - **Caller blocks**'
-const WAVE_FIRST = '`PR_WAVE_BLOCK` (`check wave`), then `PR_TEST_PLAN_BLOCK` (`check block`)'
-const GATE = 'verify-evidence.cjs" check <wave|block> <file>; echo "exit=$?"'
+const BLOCK_WHEN_GIVEN = '`PR_TEST_PLAN_BLOCK` (`check block`), when given and not `(none)`'
+const GATE = 'verify-evidence.cjs" check block <file>; echo "exit=$?"'
 const APPEND = 'then append the caller blocks'
 const SCRUB = 'Apply the Comment-sink scrub (D11)'
-const WAVE_REASON = '`TRACEABILITY: DEGRADED (wave block does not match its grammar)`'
 const TEST_PLAN_REASON = '`TRACEABILITY: DEGRADED (test-plan block does not match its grammar)`'
+/** What the removed wave block left in a reference: its input name and its gate. */
+const WAVE_LITERALS = ['PR_WAVE_BLOCK', 'check wave'] as const
 
-/** The ordering claims over the whole reference: the bullet sits inside 4a, blocks join before the scrub. */
+/** The ordering claims over the whole reference: the bullet sits inside 4a, the block joins before the scrub. */
 const REF_ORDER: readonly OrderRule[] = [
   { label: 'the caller blocks are step 4a\'s', before: STEP_4A, after: CALLER_BLOCKS },
   { label: 'the caller blocks precede 4c', before: CALLER_BLOCKS, after: STEP_4C },
@@ -82,62 +81,51 @@ export function collectCallerBlockDefects(ref: string): string[] {
   const step4a = ref.split('\n').find(l => l.startsWith(STEP_4A)) ?? ''
   const out: string[] = []
   const need = (what: string, ok: boolean): void => { if (!ok) out.push(what) }
-  need('the wave block comes first, then the test-plan block', line.includes(WAVE_FIRST))
-  need('a block is taken only when given and not `(none)`', line.includes('each when given and not `(none)`'))
+  need('the test-plan block is taken only when given and not `(none)`', line.includes(BLOCK_WHEN_GIVEN))
   need('the value is Written to a new file in a mktemp -d folder, not a shell string',
     line.includes('to a new file in a `mktemp -d` folder with the Write tool') && line.includes('never via a shell string'))
-  need('the gate is `verify-evidence.cjs check wave|block`', line.includes(GATE))
+  need('the gate is `verify-evidence.cjs check block`', line.includes(GATE))
   need('only `exit=0` admits a block, verbatim', line.includes('Only `exit=0` admits it, verbatim'))
   need('a refused block is omitted, never repaired or partly pasted', line.includes('never repaired or partly pasted'))
-  need('the wave refusal reason', line.includes(WAVE_REASON))
   need('the test-plan refusal reason', line.includes(TEST_PLAN_REASON))
   need('the refusals report under the Output\'s steps-4b/4c line', line.includes('with steps 4b/4c\'s lines'))
-  need('an admitted wave block skips step 4b',
-    line.includes('An admitted wave block is the body\'s only `## Related Issues`: skip 4b.'))
   need('a failed scrub posts neither block', step4a.includes(`${SCRUB} — a failed one posts neither block`))
   out.push(...collectOrderViolations(PR_READY_REL, ref, REF_ORDER))
   return out
 }
 
-/** Named collector: the `check` subcommands the gate names, read out of `check <a|b>`. */
+/** Named collector: the `check` subcommand the gate names, read out of `check <name> <file>`. */
 export function collectGateSubcommands(ref: string): string[] {
-  const m = /verify-evidence\.cjs" check <([a-z|]+)> <file>/.exec(callerBlocksLine(ref) ?? '')
-  return m === null ? [] : m[1].split('|')
+  const m = /verify-evidence\.cjs" check ([a-z]+) <file>/.exec(callerBlocksLine(ref) ?? '')
+  return m === null ? [] : [m[1]]
 }
 
-describe('ensure-pr-ready 4a: the caller blocks are pasted only behind their checks (AC-4)', () => {
-  it('the reference states the order, the gate, the refusal, the 4b skip and the scrub exclusion', () => {
+/** Named collector: every line that still names the removed wave block's input or gate. */
+export function collectWaveResidue(ref: string): string[] {
+  return ref.split('\n').filter(l => WAVE_LITERALS.some(w => l.includes(w)))
+}
+
+describe('ensure-pr-ready 4a: the caller block is pasted only behind its check (AC-4)', () => {
+  it('the reference states the gate, the refusal and the scrub exclusion', () => {
     const ref = ensurePrReadyReference()
     expect(ref.length, 'the PR-host reference is empty').toBeGreaterThan(0)
     expect(collectCallerBlockDefects(ref)).toEqual([])
   })
 
-  it('known-bad probes: a reversed order, a lost gate, a repair, a kept 4b, an unscrubbed paste', () => {
+  it('known-bad probes: a lost gate, a repair, an unscrubbed paste, a late append', () => {
     const ref = ensurePrReadyReference()
     const seeds: ReadonlyArray<{ label: string; from: string; to: string; expected: string }> = [
       {
-        label: 'reversed',
-        from: WAVE_FIRST,
-        to: '`PR_TEST_PLAN_BLOCK` (`check block`), then `PR_WAVE_BLOCK` (`check wave`)',
-        expected: 'the wave block comes first, then the test-plan block',
-      },
-      {
         label: 'ungated',
-        from: ' check <wave|block> <file>',
+        from: ' check block <file>',
         to: ' render --plan <file>',
-        expected: 'the gate is `verify-evidence.cjs check wave|block`',
+        expected: 'the gate is `verify-evidence.cjs check block`',
       },
       {
         label: 'repairing',
         from: 'never repaired or partly pasted',
         to: 'repaired, then pasted',
         expected: 'a refused block is omitted, never repaired or partly pasted',
-      },
-      {
-        label: '4b kept',
-        from: ' An admitted wave block is the body\'s only `## Related Issues`: skip 4b.',
-        to: '',
-        expected: 'an admitted wave block skips step 4b',
       },
       {
         label: 'scrub failure pastes',
@@ -176,13 +164,29 @@ describe('ensure-pr-ready 4a: the caller blocks are pasted only behind their che
     }
   })
 
-  it('the ensure-pr-ready reference declares both blocks as optional inputs', () => {
+  it('the ensure-pr-ready reference declares the test-plan block as an optional input, and no wave block', () => {
+    for (const provider of TRACKER_PROVIDERS.map(p => p.id)) {
+      const ref = ensurePrReadyReference(provider)
+      const section = ref.slice(ref.indexOf('## Operation: ensure-pr-ready'))
+      const input = section.split('\n').find(l => l.startsWith('**Input:**')) ?? ''
+      expect(input, `${provider}: the ensure-pr-ready Input line`).not.toBe('')
+      expect(input, provider).toContain('`PR_TEST_PLAN_BLOCK` (optional)')
+      expect(input, provider).not.toContain('PR_WAVE_BLOCK')
+    }
+  })
+
+  it('no provider reference names the wave block input or its gate', () => {
+    for (const provider of TRACKER_PROVIDERS.map(p => p.id)) {
+      const ref = ensurePrReadyReference(provider)
+      expect(ref.length, `${provider}: the reference is empty`).toBeGreaterThan(0)
+      expect(collectWaveResidue(ref), provider).toEqual([])
+    }
+  })
+
+  it('known-bad probe: a wave input or gate seeded into the reference is reported', () => {
     const ref = ensurePrReadyReference()
-    const section = ref.slice(ref.indexOf('## Operation: ensure-pr-ready'))
-    const input = section.split('\n').find(l => l.startsWith('**Input:**')) ?? ''
-    expect(input, 'the ensure-pr-ready Input line').not.toBe('')
-    expect(input).toContain('`PR_TEST_PLAN_BLOCK` (optional)')
-    expect(input).toContain('`PR_WAVE_BLOCK` (optional)')
+    expect(collectWaveResidue(`${ref}\n- PR_WAVE_BLOCK (optional)`)).toEqual(['- PR_WAVE_BLOCK (optional)'])
+    expect(collectWaveResidue(ref.replace('check block <file>', 'check wave <file>'))).toHaveLength(1)
   })
 })
 
@@ -192,26 +196,9 @@ describe('ensure-pr-ready 4a: the caller blocks are pasted only behind their che
 
 const EM = '—'
 
-/** The §3.1 wave block of the #365 design: admitted as written. */
-const WAVE_BLOCK = [
-  '## Related Issues',
-  'Closes #12',
-  'Closes #14',
-  'Refs #13',
-  '',
-  '## Wave Evidence',
-  '| T | Ticket | Verdict | Evaluate | Test | Surviving | Coverage |',
-  '|---|---|---|---|---|---|---|',
-  '| T1 | #12 | PASS | PASS | PASS | 0 | complete |',
-  '| T2 | #14 | UNVERIFIED | PASS | FAIL-FIXED | 0 | complete |',
-  '| T3 | #13 | QUARANTINED | FAIL-FIXED | SKIPPED | 2 | incomplete |',
-  `| T4 | #15 | BLOCKED | ${EM} | ${EM} | ${EM} | ${EM} |`,
-  '',
-].join('\n')
-
 const PLAN = [
   '## Test Plan',
-  `- [ ] TP-1 (AC-1) the wave PR carries its evidence table ${EM} method:ci`,
+  `- [ ] TP-1 (AC-1) the PR carries its test plan ${EM} method:ci`,
   '',
 ].join('\n')
 
@@ -222,9 +209,8 @@ function runOnText(sub: readonly string[], text: string, name: string): { code: 
   return VE.main(['node', 'verify-evidence.cjs', ...sub, file], { stderr: () => {} })
 }
 
-/** The block each subcommand must admit: the wave example, or a rendered test plan. */
-function admittedSample(sub: string): string {
-  if (sub === 'wave') return WAVE_BLOCK
+/** The block the gate must admit: a rendered test plan. */
+function admittedSample(): string {
   const r = runOnText(['render', '--plan'], PLAN, 'plan.md')
   if (r.code !== 0) throw new Error(`render --plan exited ${r.code}`)
   return r.stdout
@@ -233,8 +219,8 @@ function admittedSample(sub: string): string {
 /** Named collector: subcommands the script does not decide as the paste rule needs. */
 export function collectGateMisroutes(subs: readonly string[]): string[] {
   const out: string[] = []
+  const sample = admittedSample()
   for (const sub of subs) {
-    const sample = sub === 'wave' || sub === 'block' ? admittedSample(sub) : WAVE_BLOCK
     const admit = runOnText(['check', sub], sample, `${sub}-ok.md`)
     if (admit.code !== 0 || admit.stdout !== '') out.push(`check ${sub}: its own block exits ${admit.code}, not an admit`)
     const refuse = runOnText(['check', sub], '(none)\n', `${sub}-none.md`)
@@ -244,25 +230,23 @@ export function collectGateMisroutes(subs: readonly string[]): string[] {
 }
 
 describe('ensure-pr-ready 4a: the named gate routes to the real script (AC-4)', () => {
-  it('the reference names exactly `check wave` and `check block`, and each admits its block and refuses (none)', () => {
+  it('the reference names exactly `check block`, and it admits its block and refuses (none)', () => {
     const subs = collectGateSubcommands(ensurePrReadyReference())
-    expect(subs).toEqual(['wave', 'block'])
+    expect(subs).toEqual(['block'])
     expect(collectGateMisroutes(subs)).toEqual([])
   })
 
-  it('a closing line moved onto the QUARANTINED row is refused, so it never reaches the PR body', () => {
-    const moved = WAVE_BLOCK.replace('Refs #13', 'Closes #13')
-    expect(moved).not.toBe(WAVE_BLOCK)
-    expect(runOnText(['check', 'wave'], moved, 'moved.md')).toEqual({ code: 5, stdout: '' })
+  it('the wave gate is no subcommand of the script: it exits 1 with nothing on stdout', () => {
+    expect(runOnText(['check', 'wave'], admittedSample(), 'wave.md')).toEqual({ code: 1, stdout: '' })
   })
 
   it('known-bad probe: a reference naming a subcommand the script does not route is reported', () => {
-    const wounded = ensurePrReadyReference().replace('check <wave|block> <file>', 'check <waves|block> <file>')
+    const wounded = ensurePrReadyReference().replace('check block <file>', 'check blocks <file>')
     const subs = collectGateSubcommands(wounded)
-    expect(subs).toEqual(['waves', 'block'])
+    expect(subs).toEqual(['blocks'])
     expect(collectGateMisroutes(subs)).toEqual([
-      'check waves: its own block exits 1, not an admit',
-      'check waves: the (none) placeholder exits 1, not 5',
+      'check blocks: its own block exits 1, not an admit',
+      'check blocks: the (none) placeholder exits 1, not 5',
     ])
   })
 })

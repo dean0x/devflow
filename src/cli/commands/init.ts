@@ -18,7 +18,7 @@ import { installViaFileCopy, installScripts, type InstallReport } from '../../ta
 import { logSummaryLines, openBackupSession, runWithLateBackupReport } from './backup-session.js';
 import { formatKeptLegacySkills, formatLinksSummary, formatOverlaySummary, formatSkillScopeSummary, formatTrackerAssetSummary, isPluginListUnchanged, type SummaryLine } from './install-report.js';
 import { mergeLinkReports, newLinkReport, type LinkReport } from '../../targets/claude-code/linked-folder.js';
-import { sweepLegacyDevflowFiles, sweepLegacySkillFolders } from './legacy-sweep.js';
+import { sweepLegacySkillFolders } from '../../targets/claude-code/legacy-sweep.js';
 import { removeRulesFolder, rulesFolderRefusedMessage } from '../../targets/claude-code/rules-folder.js';
 import { convergeTrackerArtifacts, type ConvergeTrackerArtifactsResult, type TrackerAgentState } from '../../targets/claude-code/tracker-install.js';
 import {
@@ -2271,7 +2271,9 @@ export const initCommand = new Command('init')
     // enabling or disabling compliance during init needs no separate devflow compliance run.
     // Rewrites only what is installed. Warn-not-abort: a failure is a warning here and the
     // install record below is withheld, so the status line says to run init again. The agent
-    // mapping is reapplied below.
+    // mapping is reapplied below. It also sweeps the stale commands (e.g., /review -> /code-review)
+    // and rules of earlier installs, with the folders this install refused: nothing is removed
+    // through a link, and each removed file is named on the retired line of the backup record.
     const variantConverge = await convergeVariantAxes({
       claudeDir,
       devflowDir,
@@ -2281,6 +2283,7 @@ export const initCommand = new Command('init')
       plugins: effectivePlugins,
       warn: (msg) => installWarnings.push(msg),
       backups,
+      refusedFolders: installReport.refusedFolders,
     });
     if (verbose && variantConverge.converged) {
       p.log.info(
@@ -2331,11 +2334,6 @@ export const initCommand = new Command('init')
     s.message('Cleaning up');
     const legacySkills = await sweepLegacySkillFolders({ claudeDir, backups, legacySkills: LEGACY_SKILL_NAMES });
     logSummaryLines(formatKeptLegacySkills(legacySkills.kept));
-
-    // Clean up stale commands (e.g., /review → /code-review) and rules from previous installations.
-    // A folder the install refused, or that is a link, is not swept: nothing is read or removed through it.
-    // Each removed file is named on the retired line of the backup record.
-    await sweepLegacyDevflowFiles({ claudeDir, report: installReport, backups });
 
     // Disable rules directory if rules not enabled: the files devflow did not ship move aside first.
     if (!rulesEnabled) {

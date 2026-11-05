@@ -12,7 +12,7 @@ Devflow enhances Claude Code with intelligent development workflows. Modificatio
 
 ## Architecture Overview
 
-Registry-driven CLI tool with 21 plugins (12 core + 9 optional). Plugins are entries in DEVFLOW_PLUGINS in `src/core/plugins.ts` — each entry declares its `commands`, `agents`, `skills`, and `rules` arrays. All assets live once in `src/assets/`; most install directly, and `.mds` sources compile via `npm run build:mds` — command hosts to `dist/commands/`, agent generator hosts to `dist/agents/`, and reference modules in `src/assets/mds/` to `dist/skills/git/references/`.
+Registry-driven CLI tool with 20 plugins (12 core + 8 optional). Plugins are entries in DEVFLOW_PLUGINS in `src/core/plugins.ts` — each entry declares its `commands`, `agents`, `skills`, and `rules` arrays. All assets live once in `src/assets/`; most install directly, and `.mds` sources compile via `npm run build:mds` — command hosts to `dist/commands/`, agent generator hosts to `dist/agents/`, and reference modules in `src/assets/mds/` to `dist/skills/git/references/`.
 
 Invariants:
 
@@ -107,7 +107,7 @@ The host and partial rosters are named in `tests/fixtures/mds-manifest.ts` rathe
 - Reference skills via frontmatter, don't duplicate skill content
 - Use `tools` frontmatter to platform-restrict agent tool access (prefer over prompt-level prohibitions)
 - An agent is either a hand-authored `src/assets/agents/{name}.md` or an MDS generator host `{name}.mds` that declares `output-dir: dist/agents` in a leading steering block and compiles to `dist/agents/{name}.md`; an agent never has both
-- Two agents are **hook-spawned, never workflow roster members** — `curate` (the session-start curation directive) and `tracker` (the session-start tracker-setup directive). Neither has a `_roster.mds` row, and no command spawns either.
+- Two agents are **hook-spawned, never workflow roster members** — `curate` (the session-start curation directive) and `tracker` (the session-start tracker-setup directive). No command spawns either.
 - An agent with `omitClaudeMd: true` loads neither CLAUDE.md nor `~/.claude/rules/**`, so its body carries a `## Core rules` digest of exactly the lines its `CORE_RULES_DIGEST` row declares (`tests/fixtures/agent-config.ts`); Curate reads CLAUDE.md and the rule files itself
 - `explore` and `plan` ship `name: Explore` and `name: Plan`, which replace the built-ins machine-wide, plan mode included (exact-name match). Install skips one the user already has; uninstall restores the built-in.
 - Code ships as three compiled variants from `src/assets/agents/_partials/_code.mds`: `Code` (implement, issue-fix), `Fix` (validation-fix, alignment-fix, qa-fix, ci-fix) and `Refactor` (edit). A mode lives in exactly one variant, each variant has its own preload and its own `devflow agents` slug, and no variant selects a skill at run time

@@ -281,6 +281,45 @@ describe('each converge keeps one file of the user and names it', () => {
   });
 });
 
+describe('a switch converge removes the retired command files and names them', () => {
+  const RETIRED = 'commands/devflow/dynamic-build.md';
+
+  it.each([
+    ['compliance off', true, false],
+    ['curation off', false, true],
+    ['no switch changed', true, true],
+  ] as const)('%s: the retired command goes, by its exact name, and is named once with no backup copy', async (_label, curation, compliance) => {
+    await runInstall(home, { shape: 'full' });
+    const retired = await put(home, RETIRED, 'a retired command\n');
+    const mine = await put(home, 'commands/devflow/mine-teams.md', 'mine, for teams\n');
+    const backups = await openSession(home);
+
+    const result = await converge(curation, compliance, backups);
+
+    expect(result.converged, warnings.join('\n')).toBe(true);
+    expect(result.posting).toEqual({ kind: 'clear' });
+    expect(await exists(retired), 'the retired command is removed').toBe(false);
+    expect(backups.snapshot().retiredRemoved).toEqual([retired]);
+    expect(summaryOf(backups)).toContain(`Removed 1 retired devflow file(s): ${retired}`);
+    expect(await fs.readFile(mine, 'utf8'), 'a file of the user whose name only looks retired stays').toBe('mine, for teams\n');
+    expect(backups.snapshot().moved).toEqual([]);
+    expect(backupRootOf(home), 'a retired file is removed, never copied to the backup folder').toBeNull();
+  });
+
+  it('a second converge of the same state names nothing more', async () => {
+    await runInstall(home, { shape: 'full' });
+    const retired = await put(home, RETIRED, 'a retired command\n');
+    const backups = await openSession(home);
+
+    await converge(true, false, backups);
+    const second = await converge(true, false, backups);
+
+    expect(second.converged, warnings.join('\n')).toBe(true);
+    expect(second.posting).toEqual({ kind: 'clear' });
+    expect(backups.snapshot().retiredRemoved).toEqual([retired]);
+  });
+});
+
 describe('a file that cannot move', () => {
   function failRenameOf(fileName: string): void {
     const realRename = fs.rename.bind(fs);

@@ -74,11 +74,11 @@ This is the **orchestrated flow** — you stay in the loop between every step. W
 
 **Compliance built in.** Six regulatory frameworks — GDPR, HIPAA, PCI DSS, SOC 2, ISO 27001, SOX. Every install carries the review skill with all six framework references; `devflow compliance --enable` adds an always-on rule for exactly the frameworks you select. A repository can declare its own frameworks in `.devflow/project.json` (`"compliance":["hipaa"]`), and the compliance review then runs there on any machine — with your machine's frameworks plus the repository's, loading only those references — without ever touching your rule. Compliance reviews activate automatically when a diff touches regulated surface. Enabling it on your machine also makes `required` the floor of your team's [evidence policy](#evidence-policy) on your machine: tracker-linked PRs, checked test plans, traced releases and a non-author approval before a PR reads merge-ready.
 
-**Your issue tracker, not just GitHub.** Pick the tracker your team actually uses — GitHub, Jira, or Linear — at `devflow init`, with `devflow init --tracker <id>`, or later with `devflow tracker --set <id>`; that sets your machine's default. A repository can select its own in `.devflow/project.json`, and devflow follows it there automatically — one machine can work on a Jira repository and a GitHub one side by side. Every install carries every provider's mechanics (48 generated reference files, the tool-call contract among them) and the background agent, because pull requests stay on GitHub whatever your tracker and any repository may pick any provider. On a non-GitHub tracker that agent learns your conventions once per provider (project key, issue types, required fields, workflow transitions, how a reference renders) and writes them to `~/.devflow/tracker/{provider}.md`, so traceability speaks your tracker's vocabulary instead of assuming `#123`. Each provider's conventions are learned from the first repository that uses it. Those files are yours: hand-editable, kept across an uninstall, and refused rather than silently trusted if one no longer names its own provider. The Git and Tracker agents reach a tracker only through the servers you allow (Atlassian, Jira and Linear by default); `devflow tracker --servers` names others. **GitHub is the default** and needs no configuration: no background run and no conventions file.
+**Your issue tracker, not just GitHub.** Pick the tracker your team actually uses — GitHub, Jira, or Linear — at `devflow init`, with `devflow init --tracker <id>`, or later with `devflow tracker --set <id>`; that sets your machine's default. A repository can select its own in `.devflow/project.json`, and devflow follows it there automatically — one machine can work on a Jira repository and a GitHub one side by side. Every install carries every provider's mechanics (44 generated reference files, the tool-call contract among them) and the background agent, because pull requests stay on GitHub whatever your tracker and any repository may pick any provider. On a non-GitHub tracker that agent learns your conventions once per provider (project key, issue types, required fields, workflow transitions, how a reference renders) and writes them to `~/.devflow/tracker/{provider}.md`, so traceability speaks your tracker's vocabulary instead of assuming `#123`. Each provider's conventions are learned from the first repository that uses it. Those files are yours: hand-editable, kept across an uninstall, and refused rather than silently trusted if one no longer names its own provider. The Git and Tracker agents reach a tracker only through the servers you allow (Atlassian, Jira and Linear by default); `devflow tracker --servers` names others. **GitHub is the default** and needs no configuration: no background run and no conventions file.
 
 **Full lifecycle.** Beyond the core flow: `/explore` maps a codebase into knowledge bases, `/research` runs multi-type research with trust-aware synthesis, `/debug` investigates with competing hypotheses in parallel, `/bug-analysis` hunts bugs before review, `/self-review` runs Polish + Harden quality passes, and `/release` ships with learned configuration.
 
-**Everything is composable.** 21 plugins (12 core + 9 optional). Install only what you need.
+**Everything is composable.** 20 plugins (12 core + 8 optional). Install only what you need.
 
 **HUD.** A persistent status line updates on every prompt — project, branch, diff stats, context usage, model, cost with weekly/monthly totals, quota reset timers (Claude and Codex), and configuration counts at a glance.
 
@@ -89,38 +89,6 @@ Opus 4.6 (1M) · 3 MCPs 2 rules · $1.42 · $18.50/wk · $62.30/mo
 ```
 
 **Security.** Deny lists block dangerous tool patterns out of the box — configurable during init and toggleable any time with `devflow security` (`--enable`/`--disable`/`--status`).
-
-## Graph workflows
-
-Prompt engineering became context engineering; the current frontier is **graph engineering** — designing agentic work as an explicit graph of nodes, dependencies, and gates rather than one long conversation. Devflow ships it as ready-made recipes.
-
-When to use which: the orchestrated flow is for a **feature**; graph workflows are for a **system**. Start from a spec, break it into a dependency graph of tickets, then deliver it wave by wave — plan a wave, build a wave, repeat until the spec is shipped:
-
-```text
-you: /dynamic-tickets specs/billing-v2.md
-
-  Ticket factory         spec → 14 dependency-graphed tickets across 4 waves
-                         each ticket adversarially reviewed
-  Git                    tracking issue + one issue per ticket filed (required evidence policy)
-
-you: /dynamic-plan (wave 1)
-
-  Plan ×4                every wave-1 ticket plan-challenged in parallel: acceptance criteria + test plans
-  Preference profile     known decisions auto-resolved from ~/.devflow/preference-profile.md
-  Decision gate          DECISIONS-NEEDED.md — 2 calls only you can make
-
-you: (answer 2 decisions, walk away) /dynamic-build (wave 1)
-
-  Wave 1                 4 tickets   implement → review → verify, dependency-ordered
-  Git                    wave report posted to the tracking issue
-  Git · Test             wave PR opened once you say so · its test-plan evidence refreshed
-
-you: /dynamic-plan (wave 2) → /dynamic-build (wave 2) → …
-
-  — four waves later: 14/14 tickets landed, spec shipped —
-```
-
-Graph runs trade tokens for autonomy: you make your calls at each wave's decision gate, then the wave builds — a single build run can go 20+ hours unattended. In practice you'll live in the orchestrated flow day to day and reach for graph workflows when you're delivering a whole system. Both share the same agents, quality gates, memory, and learned decisions.
 
 ## Quick Start
 
@@ -172,10 +140,6 @@ To keep the knowledge bases or conventions local, add `.devflow/features/` or `.
 | `/debug` | Competing hypothesis investigation |
 | `/bug-analysis` | Proactive bug finding with static and semantic analysis |
 | `/release` | Adaptive release with learned configuration |
-| `/dynamic-tickets` | Graph workflows: spec or initiative → dependency-graphed, wave-structured ticket slate |
-| `/dynamic-plan` | Graph workflows: parallel plan-challenge, acceptance criteria, decision gate |
-| `/dynamic-build` | Graph workflows: dependency-aware engine — build, review, verify wave by wave |
-| `/dynamic-profile` | Distill session transcripts into a decision-preference profile |
 
 See [docs/commands.md](https://github.com/dean0x/devflow/blob/main/docs/commands.md) for detailed usage.
 
@@ -219,13 +183,12 @@ How much evidence a change must carry is a team decision, so it lives in the fil
 | | `standard` | `required` |
 |---|---|---|
 | Tracker issue | optional — `/plan` offers to create one | mandatory — `/plan` creates or enriches one; `/implement` without one records a self-attested exception or stops |
-| Test plan | written and shown on the PR when there is one; a missing plan is only reported | mandatory — `/implement` without one records a self-attested exception or stops, and a wave PR with a merged ticket lacking one is blocked |
+| Test plan | written and shown on the PR when there is one; a missing plan is only reported | mandatory — `/implement` without one records a self-attested exception or stops |
 | Naming conventions | not learned, not applied | learned once into `.devflow/conventions.md`, then applied to branch names and PR titles |
 | External review threads | left alone | `/resolve` replies to them and resolves the ones it verifiably fixed |
 | Merge readiness | not checked by `/resolve` | `/resolve` checks it, and READY needs a trusted non-author approval |
 | Releases | no trace gate (`--dry-run` still shows the trace) | `/release` maps every commit since the last release to its issue; untraced commits are attested or the release halts; shipped issues are back-linked and added to the release marker |
 | `reviewPublication: off` | no PR comment | the counts-only stub still posts, unless no public text remains |
-| `/dynamic-tickets` | files no issues | files the tracking issue and one issue per ticket |
 
 **Defaults.** With no committed `evidence` and no `policy.json` the policy is `standard`, unless compliance is enabled on the machine running devflow — at any framework count — which makes it `required` there, or the repository's `project.json` carries a `compliance` key — on the default branch, its tracking copy or the working tree, whatever its value — which makes it `required` everywhere.
 
@@ -258,7 +221,7 @@ A PR carries a test plan: one TP line per acceptance criterion, in one fixed sha
 | `FAILED` | a fail, a non-zero exit code, or a failing CI run |
 | `INDETERMINATE` | something the verdict needs could not be resolved, such as a CI run still in progress or expired |
 
-Only the first two count as verified, and the block ticks exactly those lines. `update-pr-evidence` re-derives every state at the PR's head, updates the block — reduced to one counts line when the lines would push the body past its size limit — and edits the evidence comment your login posted so it names the new head. It posts a new comment only when your login has none, or when a newer evidence comment from another user follows it. `/implement`, `/resolve` and the wave PR of `/dynamic-build` all refresh it.
+Only the first two count as verified, and the block ticks exactly those lines. `update-pr-evidence` re-derives every state at the PR's head, updates the block — reduced to one counts line when the lines would push the body past its size limit — and edits the evidence comment your login posted so it names the new head. It posts a new comment only when your login has none, or when a newer evidence comment from another user follows it. `/implement` and `/resolve` both refresh it.
 
 The evidence comment is a counts-only **STUB** unless `reviewPublication` is `full`. **FULL** adds the scenario table, with links to the CI runs, and the reasons for any self-attested exception, and falls back to the STUB above 55,000 characters. `off` posts no evidence comment, except under a `required` policy, where it becomes the STUB. A self-attested exception — no tracker issue, or no test plan — is recorded in the PR body under `## Evidence Exceptions`, with who attested it and when.
 
@@ -307,7 +270,7 @@ See [docs/cli-reference.md](https://github.com/dean0x/devflow/blob/main/docs/cli
 | Tool | Role | What It Does |
 |------|------|-------------|
 | **[Skim](https://github.com/dean0x/skim)** | Context Optimization | Code-aware AST parsing, command rewriting, output compression |
-| **Devflow** | Meta-Harness | Orchestrated + graph workflows, parallel review, memory, curated decisions |
+| **Devflow** | Meta-Harness | Orchestrated workflow, parallel review, memory, curated decisions |
 | **[MDS](https://github.com/dean0x/mdscript)** | Prompt Engineering | Composable template language for prompts — variables, loops, conditionals, imports, compiled to clean Markdown |
 
 ## Building from Source

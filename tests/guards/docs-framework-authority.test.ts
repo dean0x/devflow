@@ -2,14 +2,12 @@
  * D-DOCS-NAMES-AUTHORITY — `devflow:docs-framework` is the one authority for the names under
  * `.devflow/docs/`, so every command that writes or looks up such a path must agree with it.
  *
- * The skill had drifted from what the commands write: it knew nothing of `/dynamic-plan`'s per-ticket
- * `design/{slug}/{ts}/` folders, the `handoff-*` and `evidence-*` files or the multi-issue and
- * no-issue design documents, while `/dynamic-tickets` and `/dynamic-plan` stamped UTC and capped slugs
- * at 40 where the skill says local time and 50. This guard holds the two sides together:
+ * The skill had drifted from what the commands write: it knew nothing of the `handoff-*` and
+ * `evidence-*` files or the multi-issue and no-issue design documents. This guard holds the two
+ * sides together:
  *
  *  - every path family a compiled command names under `.devflow/docs/` appears in the skill;
- *  - the timestamp and slug expressions the workflow scripts run give the answers the skill's own
- *    helpers give, so a rule changed on one side fails here;
+ *  - the skill's two topic-slug derivations (its helper and its inline line) give one answer;
  *  - every site that derives `branch_slug` derives it the same way, and every site that names a
  *    `handoff-*` or `evidence-*` file spells it the way the skill does.
  *
@@ -29,12 +27,9 @@ const PR_EVIDENCE_OP = readFileSync(
   path.join(ROOT, 'dist', 'skills', 'git', 'references', 'pr', 'update-pr-evidence.md'), 'utf-8')
 const SCRIPT_DIR = path.join(ROOT, 'src', 'assets', 'scripts')
 
-/** The three commands whose workflow scripts stamp or slug a docs path. */
-const DYNAMIC_HOSTS = ['dynamic-build', 'dynamic-plan', 'dynamic-tickets'] as const
-
 /** Every family the compiled commands name directly under `.devflow/docs/`. */
 const EXPECTED_FAMILIES = [
-  'bug-analysis', 'design', 'evidence-', 'evidence-wave-', 'handoff-', 'research', 'reviews', 'tickets', 'waves',
+  'bug-analysis', 'design', 'evidence-', 'handoff-', 'research', 'reviews',
 ] as const
 
 interface NamedText {
@@ -74,20 +69,18 @@ describe('the skill names every path family the commands write', () => {
     expect(collectUnknownFamilies(collectDocFamilies(compiledCommands()).keys(), SKILL)).toEqual([])
   })
 
-  it('the skill tree carries the dynamic layouts, with the sub-folders and the files in them', () => {
+  it('the skill tree carries the design folder, the handoff and evidence files and the files in the run folders', () => {
     for (const piece of [
-      'design/\n', '└── {slug}/{timestamp}/', '{ticket-slug}-plan.md', 'DECISIONS-NEEDED.md',
-      'tickets/{slug}/{timestamp}/', 'tracking-issue.md', 'waves/{slug}/{timestamp}/wave-report.md',
-      'handoff-{branch-slug}.md', 'evidence-{branch-slug}.md', 'evidence-wave-{slug}.md',
+      'design/\n', 'handoff-{branch-slug}.md', 'evidence-{branch-slug}.md',
       'resolution-summary.md', 'evidence.md', 'stale-plan.md',
     ]) {
       expect(SKILL, `the skill does not carry ${JSON.stringify(piece)}`).toContain(piece)
     }
   })
 
-  it('known-bad probe: a skill without the waves directory is reported', () => {
-    const probe = SKILL.replaceAll('waves', 'wafts')
-    expect(collectUnknownFamilies(collectDocFamilies(compiledCommands()).keys(), probe)).toEqual(['waves'])
+  it('known-bad probe: a skill without the reviews directory is reported', () => {
+    const probe = SKILL.replaceAll('reviews', 'rvws')
+    expect(collectUnknownFamilies(collectDocFamilies(compiledCommands()).keys(), probe)).toEqual(['reviews'])
   })
 })
 
@@ -103,44 +96,20 @@ describe('/plan writes the three design-document names the skill lists', () => {
   it('each of them is in the skill, and there are three', () => {
     const names = planDesignNames(requireDistFile('plan.md'))
     expect(names).toHaveLength(3)
-    for (const n of names) expect(SKILL, n).toContain(`├── ${n}`)
+    // The last row of the design folder is drawn with └──, the others with ├──.
+    for (const n of names) expect(SKILL, n).toContain(`── ${n}`)
   })
 
   it('known-bad probe: a skill with only the single-issue variant is reported', () => {
     const probe = SKILL.replace('├── multi-{topic-slug}.{timestamp}.md', '├── gone')
-    const missing = planDesignNames(requireDistFile('plan.md')).filter(n => !probe.includes(`├── ${n}`))
+    const missing = planDesignNames(requireDistFile('plan.md')).filter(n => !probe.includes(`── ${n}`))
     expect(missing).toEqual(['multi-{topic-slug}.{timestamp}.md'])
   })
 })
 
 // ---------------------------------------------------------------------------
-// The workflow scripts' timestamp and slug expressions
+// The skill's topic slug: one rule, two spellings
 // ---------------------------------------------------------------------------
-
-/** The script lines that bind `slug` and `ts`: from `const slug = args.slug` to the `const ts =` line. */
-export function scriptStampLines(command: string): string {
-  const lines = command.split('\n')
-  const from = lines.findIndex(l => l.startsWith('const slug = args.slug'))
-  const to = lines.findIndex((l, i) => i > from && l.startsWith('const ts ='))
-  if (from === -1 || to === -1) throw new Error('the slug/ts lines of the workflow script were not found')
-  return lines.slice(from, to + 1).join('\n')
-}
-
-/** A clock whose local fields and UTC string disagree, so only a local-time expression passes. */
-class SkewedDate {
-  getFullYear(): number { return 2026 }
-  getMonth(): number { return 3 }
-  getDate(): number { return 7 }
-  getHours(): number { return 9 }
-  getMinutes(): number { return 5 }
-  toISOString(): string { return '2026-04-07T14:05:00.000Z' }
-}
-
-/** Run the script's slug/ts lines for an `initiative` and `args`, with the skewed clock. */
-export function runStampLines(command: string, args: Record<string, string>, initiative: string): { slug: string; ts: string } {
-  const body = `${scriptStampLines(command)}\nreturn { slug, ts }`
-  return new Function('args', 'initiative', 'Date', body)(args, initiative, SkewedDate) as { slug: string; ts: string }
-}
 
 /** The skill's own topic-slug helper, run in bash on one topic. */
 function skillTopicSlug(topic: string): string {
@@ -173,57 +142,29 @@ const TOPICS = [
   'This is a very long topic name that describes the entire feature and more words',
 ]
 
-describe('the workflow scripts follow the skill: local time, one slug rule', () => {
-  const tickets = requireDistFile('dynamic-tickets.md')
-  const plan = requireDistFile('dynamic-plan.md')
-
-  it('both scripts stamp YYYY-MM-DD_HHMM from the local clock, not the UTC string', () => {
-    expect(runStampLines(tickets, {}, 'x').ts).toBe('2026-04-07_0905')
-    expect(runStampLines(plan, {}, 'x').ts).toBe('2026-04-07_0905')
-  })
-
-  it('known-bad probe: the retired UTC expression is reported', () => {
-    const utc = tickets.replace(/^const ts =.*$/m,
-      "const ts = new Date().toISOString().slice(0,16).replace(/[-:T]/g, (c) => c === 'T' ? '_' : c === ':' ? '' : c);")
-    expect(runStampLines(utc, {}, 'x').ts).not.toBe('2026-04-07_0905')
-  })
-
-  it('/dynamic-tickets derives the initiative slug as the skill does, for every topic', () => {
+describe('the skill derives a topic slug one way: its inline line and its helper agree', () => {
+  it('the inline line gives the helper\'s answer for every topic', () => {
     for (const topic of TOPICS) {
-      const fromScript = runStampLines(tickets, {}, topic).slug
-      expect(fromScript, JSON.stringify(topic)).toBe(skillTopicSlug(topic))
-      expect(skillInlineTopicSlug(topic), JSON.stringify(topic)).toBe(fromScript)
+      expect(skillInlineTopicSlug(topic), JSON.stringify(topic)).toBe(skillTopicSlug(topic))
     }
   })
 
-  it('the slug is capped at 50 and never ends in a dash', () => {
-    const long = runStampLines(tickets, {}, `${'x'.repeat(49)} yz`).slug
-    expect(long).toBe('x'.repeat(49))
-    expect(runStampLines(tickets, {}, TOPICS[TOPICS.length - 1]).slug.length).toBeLessThanOrEqual(50)
+  it('the slug is capped at 50, never ends in a dash and is `untitled` when nothing is left', () => {
+    expect(skillTopicSlug(`${'x'.repeat(49)} yz`)).toBe('x'.repeat(49))
+    expect(skillTopicSlug(TOPICS[TOPICS.length - 1]).length).toBeLessThanOrEqual(50)
+    expect(skillTopicSlug('!!!')).toBe('untitled')
+    expect(skillInlineTopicSlug('!!!')).toBe('untitled')
   })
 
-  it('a slug handed in as an argument wins, in both scripts', () => {
-    expect(runStampLines(tickets, { slug: 'given' }, 'ignored').slug).toBe('given')
-    expect(runStampLines(plan, { slug: 'given' }, 'ignored').slug).toBe('given')
-    expect(runStampLines(plan, {}, 'ignored').slug).toBe('wave')
-  })
-
-  it('known-bad probe: the retired 40-character cap is reported', () => {
-    const capped = tickets.replace('.slice(0, 50)', '.slice(0, 40)')
-    expect(runStampLines(capped, {}, 'x'.repeat(60)).slug.length).toBe(40)
-    expect(runStampLines(tickets, {}, 'x'.repeat(60)).slug.length).toBe(50)
-  })
-
-  it('/dynamic-plan passes the slug of the ticket set it plans, and names its plans by the ticket slug', () => {
-    expect(plan).toContain("and its `slug` argument: the `{slug}` of the ticket directory (`tickets/{slug}/{ts}/`) when that is the ticket source, otherwise `wave`.")
-    expect(plan).toContain("{ticket-slug} being the ticket's file name without .md when it came from a ticket directory, otherwise the ticket title run through title.toLowerCase().replace(/[^a-z0-9]+/g, '-') with nothing trimmed")
-  })
-
-  it('the skill documents the ticket-slug exception and the dynamic commands apply that rule', () => {
-    const rule = "title.toLowerCase().replace(/[^a-z0-9]+/g, '-') with nothing trimmed"
-    expect(tickets).toContain(rule)
-    expect(plan).toContain(rule)
-    expect(SKILL).toContain('nothing trimmed and no length cap')
+  it('known-bad probe: a 40-character cap in the helper is reported', () => {
+    const helper = /^get_topic_slug\(\) \{.*\}$/m.exec(SKILL)?.[0] ?? ''
+    const capped = helper.replace('cut -c1-50', 'cut -c1-40')
+    expect(capped).not.toBe(helper)
+    const run = (fn: string): string => execFileSync('bash', ['-c', `${fn}\nget_topic_slug "$1"`, 'bash', 'x'.repeat(60)], {
+      encoding: 'utf-8', env: { ...process.env, LC_ALL: 'C' },
+    }).trimEnd()
+    expect(run(capped).length).toBe(40)
+    expect(run(helper).length).toBe(50)
   })
 })
 
@@ -238,21 +179,15 @@ interface BranchSite {
   readonly file: string
   /** The sentence that derives `branch_slug` at this site. */
   readonly sentence: string
-  /** True when the site gates the slug before it builds a path. */
-  readonly gated: boolean
 }
 
 const BRANCH_SITES: readonly BranchSite[] = [
-  { label: '/code-review', file: 'code-review.md', gated: true,
+  { label: '/code-review', file: 'code-review.md',
     sentence: '`branch_slug` is `git -C "{worktree}" branch --show-current` with every `/` replaced by `-`.' },
-  { label: '/bug-analysis', file: 'bug-analysis.md', gated: true,
+  { label: '/bug-analysis', file: 'bug-analysis.md',
     sentence: '`branch_slug` is `git -C "{worktree}" branch --show-current` with every `/` replaced by `-`.' },
-  { label: '/implement', file: 'implement.md', gated: true,
+  { label: '/implement', file: 'implement.md',
     sentence: '`branch_slug`: `TASK_ID` with every `/` replaced by `-`.' },
-  ...DYNAMIC_HOSTS.map((host): BranchSite => ({
-    label: `/${host}`, file: `${host}.md`, gated: false,
-    sentence: "`{branch_slug}` being the ticket's branch name with every `/` replaced by `-`",
-  })),
 ]
 
 /** Named collector: the ways a site's `branch_slug` derivation departs from the skill's. */
@@ -261,7 +196,7 @@ export function collectBranchSlugDefects(sites: readonly BranchSite[], read: (fi
   for (const site of sites) {
     const text = read(site.file)
     if (!text.includes(site.sentence)) out.push(`${site.label}: does not derive branch_slug as "${site.sentence}"`)
-    if (site.gated && !text.includes(BRANCH_GATE)) out.push(`${site.label}: does not gate branch_slug on ${BRANCH_GATE}`)
+    if (!text.includes(BRANCH_GATE)) out.push(`${site.label}: does not gate branch_slug on ${BRANCH_GATE}`)
   }
   return out
 }
@@ -272,11 +207,11 @@ describe('branch_slug is derived one way at every site', () => {
     expect(SKILL).toContain(BRANCH_GATE)
   })
 
-  it('/code-review, /bug-analysis, /implement and the three Workflow hosts agree with it', () => {
+  it('/code-review, /bug-analysis and /implement agree with it', () => {
     expect(collectBranchSlugDefects(BRANCH_SITES, requireDistFile)).toEqual([])
   })
 
-  it('known-bad probe: a derivation in the wrong checkout, a lost gate and a missing site are reported', () => {
+  it('known-bad probe: a derivation in the wrong checkout, a lost gate and a lost derivation are reported', () => {
     const real = (file: string): string => requireDistFile(file)
     const noC = (file: string): string => file === 'bug-analysis.md'
       ? real(file).replace('git -C "{worktree}" branch --show-current', 'git branch --show-current') : real(file)
@@ -285,8 +220,8 @@ describe('branch_slug is derived one way at every site', () => {
     ])
     const ungated = (file: string): string => file === 'implement.md' ? real(file).replaceAll(BRANCH_GATE, '') : real(file)
     expect(collectBranchSlugDefects(BRANCH_SITES, ungated)).toEqual([`/implement: does not gate branch_slug on ${BRANCH_GATE}`])
-    const lost = (file: string): string => file === 'dynamic-plan.md'
-      ? real(file).replace("`{branch_slug}` being the ticket's branch name", '`{branch_slug}`') : real(file)
+    const lost = (file: string): string => file === 'implement.md'
+      ? real(file).replace('`TASK_ID` with every `/` replaced by `-`', '`TASK_ID`') : real(file)
     expect(collectBranchSlugDefects(BRANCH_SITES, lost)).toHaveLength(1)
   })
 
@@ -313,7 +248,7 @@ describe('branch_slug is derived one way at every site', () => {
 // ---------------------------------------------------------------------------
 
 /** The spellings a command may name a handoff or evidence file by (under `.devflow/docs/`). */
-const FILE_SPELLINGS = new Set(['handoff-{branch_slug}.md', 'evidence-{branch_slug}.md', 'evidence-wave-{slug}.md'])
+const FILE_SPELLINGS = new Set(['handoff-{branch_slug}.md', 'evidence-{branch_slug}.md'])
 
 /** Named collector: every handoff-* / evidence-* spelling in the commands that is not an admitted one. */
 export function collectFileSpellings(commands: readonly NamedText[]): { all: Set<string>; strays: string[] } {
@@ -329,7 +264,7 @@ export function collectFileSpellings(commands: readonly NamedText[]): { all: Set
 }
 
 describe('handoff-* and evidence-* files are spelled one way wherever they are written or read', () => {
-  it('every command site uses one of the three admitted spellings, and all three occur', () => {
+  it('every command site uses one of the two admitted spellings, and both occur', () => {
     const { all, strays } = collectFileSpellings(compiledCommands())
     expect(strays).toEqual([])
     expect([...all].sort()).toEqual([...FILE_SPELLINGS].sort())
@@ -346,14 +281,6 @@ describe('handoff-* and evidence-* files are spelled one way wherever they are w
     }
   })
 
-  it('evidence-wave-{slug}.md is evidence-{branch_slug}.md for the branch wave/{slug}', () => {
-    const branchSlug = (branch: string): string => branch.replaceAll('/', '-')
-    for (const slug of ['auth', 'sdlc-pr6-2026', 'a'.repeat(60)]) {
-      expect(`evidence-${branchSlug(`wave/${slug}`)}.md`).toBe(`evidence-wave-${slug}.md`)
-    }
-    expect(SKILL).toContain("the `evidence-{branch-slug}.md` of the branch `wave/{slug}`")
-  })
-
   it('the repo-relative EVIDENCE_FILE of every admitted slug passes update-pr-evidence\'s value gate', () => {
     const gate = /only a value matching `(\^[^`]+\$)` reaches the shell/.exec(PR_EVIDENCE_OP)?.[1]
     expect(gate, 'the op\'s EVIDENCE_FILE gate is found').toBe('^[A-Za-z0-9._/-]{1,255}$')
@@ -362,7 +289,6 @@ describe('handoff-* and evidence-* files are spelled one way wherever they are w
     const longest = 'a'.repeat(200)
     expect(branchGate.test(longest)).toBe(true)
     expect(re.test(`.devflow/docs/evidence-${longest}.md`)).toBe(true)
-    expect(re.test(`.devflow/docs/evidence-wave-${'a'.repeat(60)}.md`)).toBe(true)
     // Negative control: a slug the branch gate refuses is refused by the op's gate too.
     expect(branchGate.test('feat+x')).toBe(false)
     expect(re.test('.devflow/docs/evidence-feat+x.md')).toBe(false)
@@ -371,7 +297,7 @@ describe('handoff-* and evidence-* files are spelled one way wherever they are w
   it('the evidence scripts take the file as an argument and never name or locate it', () => {
     for (const script of ['verify-evidence.cjs', 'pr-evidence.cjs']) {
       const text = readFileSync(path.join(SCRIPT_DIR, script), 'utf-8')
-      expect(/handoff-|evidence-(?:\{|\$|wave-|[a-z]*slug)/.test(text), script).toBe(false)
+      expect(/handoff-|evidence-(?:\{|\$|[a-z]*slug)/.test(text), script).toBe(false)
     }
     expect(readFileSync(path.join(SCRIPT_DIR, 'verify-evidence.cjs'), 'utf-8')).toContain('--evidence <file>')
   })

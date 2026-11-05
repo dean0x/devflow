@@ -3,17 +3,24 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { LEGACY_COMMAND_NAMES, LEGACY_RULE_NAMES } from '../../core/plugins.js';
 import { RETIRED_SHIPPED } from '../../core/retired-shipped-names.js';
-import type { BackupSession } from '../../targets/claude-code/install-backup.js';
-import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
-import { BARE_LEGACY_SKILL_HASHES } from '../../targets/claude-code/legacy-skill-hashes.js';
-import { directoryState, isUnrealFolder, type LinkReport } from '../../targets/claude-code/linked-folder.js';
+import type { BackupSession } from './install-backup.js';
+import { LEGACY_SKILL_NAMES } from './legacy.js';
+import { BARE_LEGACY_SKILL_HASHES } from './legacy-skill-hashes.js';
+import { directoryState, isUnrealFolder, type LinkReport } from './linked-folder.js';
 
 /** The prefix of a skill folder in devflow's own namespace. A folder without it is bare. */
 const NAMESPACE_PREFIX = 'devflow:';
 
-/** The retired files {@link sweepLegacyDevflowFiles} removed, as paths. The backup session names them. */
+/** What {@link sweepLegacyDevflowFiles} did. */
 export interface LegacySweepResult {
+  /** The retired files the sweep removed, as paths. The backup session names them. */
   readonly removed: readonly string[];
+  /**
+   * The retired or legacy command files that still exist after the sweep, as paths, in sweep order:
+   * a removal that stayed, a file in a folder the sweep skipped, and a file whose state cannot be
+   * read. A command is a prompt that may still post. A shipped name is never listed, and no rule is.
+   */
+  readonly commandsLeft: readonly string[];
 }
 
 /**
@@ -30,16 +37,43 @@ const uniqueNames = (...lists: ReadonlyArray<readonly string[]>): string[] => [.
 
 /**
  * Remove `<folder>/<name>.md` for each name, by exact name. A name that is shipped today is never
- * removed, and a file that stays is left for the session's record.
+ * removed, and a file that stays is left for the session's record and named in `kept`.
  */
-async function removeRetiredMarkdown(folder: string, names: readonly string[], backups: BackupSession): Promise<string[]> {
+async function removeRetiredMarkdown(
+  folder: string,
+  names: readonly string[],
+  backups: BackupSession,
+): Promise<{ removed: string[]; kept: string[] }> {
   const removed: string[] = [];
+  const kept: string[] = [];
   for (const name of names) {
     const file = path.join(folder, `${name}.md`);
     if (backups.classifyAt(file, 'file') === 'shipped') continue;
-    if ((await backups.removeExact(file)).status === 'removed') removed.push(file);
+    const outcome = await backups.removeExact(file);
+    if (outcome.status === 'removed') removed.push(file);
+    else if (outcome.status === 'kept') kept.push(file);
   }
-  return removed;
+  return { removed, kept };
+}
+
+/**
+ * The `<folder>/<name>.md` files of `names` that exist in a folder the sweep skipped, by `lstat`
+ * alone: nothing is read or removed there. A shipped name is never listed. A path that `lstat`
+ * cannot read for any reason but ENOENT is listed, since it may still exist.
+ */
+async function retiredMarkdownPresent(folder: string, names: readonly string[], backups: BackupSession): Promise<string[]> {
+  const present: string[] = [];
+  for (const name of names) {
+    const file = path.join(folder, `${name}.md`);
+    if (backups.classifyAt(file, 'file') === 'shipped') continue;
+    try {
+      await fs.lstat(file);
+      present.push(file);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') present.push(file);
+    }
+  }
+  return present;
 }
 
 /**
@@ -50,9 +84,10 @@ async function removeRetiredMarkdown(folder: string, names: readonly string[], b
  * matched here: the install's pre-pass moves it aside and names it.
  *
  * A folder the install refused (`report.refusedFolders`), that the session could not scan, or that
- * is a link now is skipped whole: the sweep reads and removes nothing there, and the folder a link
- * points to is left as it is. Every removal goes through `backups`, so each removed file is named
- * once, on the retired line of its record. Never throws.
+ * is a link now is skipped whole: the sweep removes nothing there, and the folder a link points to
+ * is left as it is. Every removal goes through `backups`, so each removed file is named once, on the
+ * retired line of its record. The retired command files that stay, in a skipped folder too, are
+ * returned in `commandsLeft`. Never throws.
  *
  * @param opts.legacyCommands - Legacy command names; added to the retired commands.
  * @param opts.legacyRules - Legacy rule names; added to the retired rules.
@@ -68,18 +103,23 @@ export async function sweepLegacyDevflowFiles(opts: {
   const commands = uniqueNames(RETIRED_SHIPPED.commands, opts.legacyCommands ?? LEGACY_COMMAND_NAMES);
   const rules = uniqueNames(RETIRED_SHIPPED.rules, opts.legacyRules ?? LEGACY_RULE_NAMES);
   const removed: string[] = [];
+  const commandsLeft: string[] = [];
 
   const commandsDir = path.join(claudeDir, 'commands', 'devflow');
   if (await mayRemoveFrom(report, backups, commandsDir)) {
-    removed.push(...await removeRetiredMarkdown(commandsDir, commands, backups));
+    const swept = await removeRetiredMarkdown(commandsDir, commands, backups);
+    removed.push(...swept.removed);
+    commandsLeft.push(...swept.kept);
+  } else {
+    commandsLeft.push(...await retiredMarkdownPresent(commandsDir, commands, backups));
   }
 
   const rulesDir = path.join(claudeDir, 'rules', 'devflow');
   if (await mayRemoveFrom(report, backups, rulesDir)) {
-    removed.push(...await removeRetiredMarkdown(rulesDir, rules, backups));
+    removed.push(...(await removeRetiredMarkdown(rulesDir, rules, backups)).removed);
   }
 
-  return { removed };
+  return { removed, commandsLeft };
 }
 
 /** The bare legacy folders that {@link sweepLegacySkillFolders} kept because it could not tell who made them. */

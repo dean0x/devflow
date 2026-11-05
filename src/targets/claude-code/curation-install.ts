@@ -129,6 +129,7 @@ import { swapFolderIn } from './folder-swap.js';
 import { copyDirectory, resolveSkillSource } from './installer.js';
 import type { BackupSession } from './install-backup.js';
 import { LANGUAGE_STAMPED_COMMANDS, stampForConverge } from './language-stamp.js';
+import { sweepLegacyDevflowFiles, type LegacySweepResult } from './legacy-sweep.js';
 import { directoryState, newLinkReport, refuseUnrealFolder, refusedFolderMessage, unlinkLinkAt, warnLinkReport, writeFileReplacingLink, type LinkReport } from './linked-folder.js';
 import { convergeReferences, type ConvergeReferencesResult } from './reference-converge.js';
 import { installWorkflowFolder, readWorkflowFolder } from './workflow-folder-install.js';
@@ -208,12 +209,12 @@ interface RosterHost {
 /**
  * Whether the installed prompts and references of a compliance-off machine are free of the posting steps.
  *
- *   - `clear`: compliance is on, or every installed compliance-armed prompt holds the file built for the machine
- *     and the installed references hold the compliance-off set.
- *   - `left`: these installed files (prompts, or reference files that could not be removed) could not be
- *     converged and may still post.
+ *   - `clear`: compliance is on, or every installed compliance-armed prompt holds the file built for the machine,
+ *     the installed references hold the compliance-off set and no retired command file stays.
+ *   - `left`: these installed files (prompts, retired command files, or reference files that could not be
+ *     removed) could not be converged and may still post.
  *   - `unknown`: the build manifest that names the compliance-armed prompts is unusable, or the references
- *     could not be converged, so the files that still post cannot be named.
+ *     or the retired command files could not be converged, so the files that still post cannot be named.
  */
 export type PostingConverge =
   | { readonly kind: 'clear' }
@@ -804,6 +805,11 @@ export interface ConvergeVariantAxesOptions {
   workflowFoldersRoot?: string;
   /** The backup session of the run: the one the install before this converge used, when there was one. */
   backups: BackupSession;
+  /**
+   * Devflow folders the install before this converge refused (a link or not a folder). The retired
+   * sweep adds them to the folders the prompt converge refused and removes nothing from them.
+   */
+  refusedFolders?: readonly string[];
 }
 
 /** What the workflow-folder converge did. */
@@ -929,8 +935,10 @@ export function workflowFoldersPosting(folders: ConvergeWorkflowFoldersResult, c
  * compliance and tdd switches. `devflow init`, `devflow curation`, `devflow compliance` and
  * `devflow tdd` all call it.
  *
- * It composes five per-kind converges, each a result and never a throw:
+ * It composes six per-kind converges, each a result and never a throw:
  *   - {@link convergePromptVariants}: the commands and agents, for every axis;
+ *   - {@link sweepLegacyDevflowFiles}: the retired command and rule files, by exact name, on every
+ *     converge (a retired command that stays makes a compliance-off `posting` `left`);
  *   - the gated skills: apply-decisions follows the curation switch and test-driven-development
  *     the tdd switch;
  *   - {@link convergeFromManifest}: the compliance skill and rule, the one place the manifest
@@ -940,7 +948,7 @@ export function workflowFoldersPosting(folders: ConvergeWorkflowFoldersResult, c
  *   - the workflow skill folders, which follow the curation and compliance switches (the folder of
  *     the exact key; a folder has no tdd arm).
  * A failed kind is a warning and `converged: false`, and the next kind still runs. A compliance-off
- * machine that still has a prompt or a reference file that posts, or cannot name one, is `posting`
+ * machine that still has a prompt, a retired command or a reference file that posts, or cannot name one, is `posting`
  * and never `clear`: the caller decides what that costs (the compliance command exits non-zero,
  * init and curation warn).
  *
@@ -973,6 +981,16 @@ export async function convergeVariantAxes(opts: ConvergeVariantAxesOptions): Pro
 
   const prompts = await attempt('prompt variants', warn, notRun(switches, 'the prompt converge failed'), () =>
     convergePromptVariants({ claudeDir, switches, plugins, warn, packageRoot }),
+  );
+  // The retired command files go on every converge, by the same exact-name sweep that init uses: a
+  // switch at the same version as the last init has no init between to remove them, and a retired
+  // command that stays may still post.
+  const retired = await attempt<LegacySweepResult | null>('retired sweep', warn, null, () =>
+    sweepLegacyDevflowFiles({
+      claudeDir,
+      report: { refusedFolders: [...prompts.refusedFolders, ...(opts.refusedFolders ?? [])] },
+      backups,
+    }),
   );
   const skillLinks = newLinkReport();
   const skills = await attempt('gated skills', warn, perAxis((): CurationSkillState => 'failed'), () =>
@@ -1024,6 +1042,8 @@ export async function convergeVariantAxes(opts: ConvergeVariantAxesOptions): Pro
   return {
     converged:
       prompts.converged &&
+      retired !== null &&
+      (switches.compliance || retired.commandsLeft.length === 0) &&
       VARIANT_AXES.every(axis => skills[axis] !== 'failed') &&
       compliance.converged &&
       references.converged &&
@@ -1038,12 +1058,26 @@ export async function convergeVariantAxes(opts: ConvergeVariantAxesOptions): Pro
     references,
     workflowFolders,
     posting: mergePosting(
-      mergePosting(prompts.posting, referencesPosting(references)),
-      workflowFoldersPosting(workflowFolders, switches.compliance),
+      mergePosting(
+        mergePosting(prompts.posting, referencesPosting(references)),
+        workflowFoldersPosting(workflowFolders, switches.compliance),
+      ),
+      retiredCommandsPosting(retired, switches.compliance),
     ),
     replacedLinks: [...prompts.replacedLinks, ...skillLinks.replacedLinks, ...compliance.replacedLinks],
     refusedFolders: [...prompts.refusedFolders, ...compliance.refusedFolders],
   };
+}
+
+/**
+ * The posting answer of the retired sweep. Compliance on is clear. With compliance off, a retired
+ * command file that stays may still post, so it is named. A sweep that threw (`null`) cannot say which
+ * files stay, so it is `unknown` and never `clear`.
+ */
+function retiredCommandsPosting(swept: LegacySweepResult | null, compliance: boolean): PostingConverge {
+  if (compliance) return POSTING_CLEAR;
+  if (swept === null) return { kind: 'unknown', reason: 'the retired command files: the sweep failed' };
+  return swept.commandsLeft.length > 0 ? { kind: 'left', files: swept.commandsLeft } : POSTING_CLEAR;
 }
 
 /**

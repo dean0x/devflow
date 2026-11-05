@@ -15,6 +15,7 @@ import {
   partitionSelectablePlugins,
   prefixSkillName,
   resolveFeatureRedirect,
+  parsePluginSelection,
   WORKFLOW_ORDER,
   EXCLUDED,
   DELETED_PLUGIN_NAMES,
@@ -389,8 +390,8 @@ describe('optional plugin flag', () => {
     }
   });
 
-  it('non-language plugins do not have optional: true (except dynamic)', () => {
-    const allowedOptional = new Set([...languagePluginNames, 'devflow-dynamic']);
+  it('non-language plugins do not have optional: true', () => {
+    const allowedOptional = new Set(languagePluginNames);
     for (const plugin of DEVFLOW_PLUGINS) {
       if (!allowedOptional.has(plugin.name)) {
         expect(plugin.optional, `${plugin.name} should not be optional`).toBeFalsy();
@@ -535,6 +536,31 @@ describe('DELETED_PLUGIN_NAMES consistency', () => {
 
   it('contains devflow-compliance (compliance converted to built-in feature in B2)', () => {
     expect(DELETED_PLUGIN_NAMES).toContain('devflow-compliance');
+  });
+
+  it('contains devflow-dynamic, and the registry no longer carries it', () => {
+    expect(DELETED_PLUGIN_NAMES).toContain('devflow-dynamic');
+    expect(DEVFLOW_PLUGINS.map(p => p.name)).not.toContain('devflow-dynamic');
+  });
+
+  it('gives a removed plugin no redirect: both spellings are unknown plugin names', () => {
+    expect(resolveFeatureRedirect(['dynamic', 'devflow-dynamic'])).toEqual({
+      redirected: [],
+      remaining: ['dynamic', 'devflow-dynamic'],
+      notice: undefined,
+    });
+    expect(parsePluginSelection('dynamic,devflow-dynamic', DEVFLOW_PLUGINS)).toEqual({
+      selected: ['devflow-dynamic', 'devflow-dynamic'],
+      invalid: ['devflow-dynamic', 'devflow-dynamic'],
+    });
+  });
+
+  it('keeps a removed plugin in a mixed list unknown and gives no notice, so the whole list is refused', () => {
+    const redirect = resolveFeatureRedirect(['devflow-implement', 'dynamic']);
+    expect(redirect.notice).toBeUndefined();
+    expect(redirect.redirected).toEqual([]);
+    expect(redirect.remaining).toEqual(['devflow-implement', 'dynamic']);
+    expect(parsePluginSelection(redirect.remaining.join(','), DEVFLOW_PLUGINS).invalid).toEqual(['devflow-dynamic']);
   });
 
   it('does not overlap LEGACY_PLUGIN_NAMES keys (deletion would pre-empt the rename)', () => {

@@ -150,20 +150,18 @@ describe('init stamps the installed /code-review from the selection (AC-309)', (
 describe('a partial install re-stamps without a full re-init (AC-310)', () => {
   it('init --plugin=devflow-typescript leaves the already-installed code-review stamping typescript', async () => {
     init();
-    // /dynamic-build ships with the optional devflow-dynamic plugin; install it so "carries no stamp" is a claim about a real file.
-    init('--plugin=devflow-dynamic');
     expect(await stampOf('code-review')).toBe('(none)');
-    const before = await fs.stat(installedCommand('dynamic-build'));
+    const before = await fs.stat(installedCommand('release'));
 
     const out = okCli('init', ...QUIET, '--recommended', '--plugin=devflow-typescript');
 
     expect(await stampOf('code-review')).toBe('typescript');
     expect(out).not.toMatch(/language stamp/);
     // The partial run did not re-copy the other plugins' commands.
-    expect((await fs.stat(installedCommand('dynamic-build'))).ino).toBe(before.ino);
-    expect(await stampCarriers(), 'dynamic-build carries no stamp').toEqual(['code-review.md']);
-    expect(await fs.readFile(installedCommand('dynamic-build'), 'utf-8'))
-      .toBe(await variantBytes('dynamic-build', DEFAULT_SWITCHES));
+    expect((await fs.stat(installedCommand('release'))).ino).toBe(before.ino);
+    expect(await stampCarriers(), 'release carries no stamp').toEqual(['code-review.md']);
+    expect(await fs.readFile(installedCommand('release'), 'utf-8'))
+      .toBe(await variantBytes('release', DEFAULT_SWITCHES));
   }, SCENARIO_TIMEOUT_MS);
 });
 

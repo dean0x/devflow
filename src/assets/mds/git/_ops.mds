@@ -5,7 +5,7 @@ expanding into the reference modules that import it
 (`tests/fixtures/mds-manifest.ts` names it in `MDS_REFERENCE_PARTIALS`). Three partials
 hold the operation text, split by who imports them:
 
-- `_ops.mds` (this file) — the contracts of the eleven tracker operations and of
+- `_ops.mds` (this file) — the contracts of the ten tracker operations and of
   `learn-conventions`; imported by the three provider modules and by `_references.mds`.
 - `_ops_pr.mds` — the contracts of the eight PR-host operations; imported by `_pr.mds`.
 - `_ops_steps.mds` — the inline steps the tracker operations run identically under every
@@ -56,9 +56,9 @@ These defines call nothing, so they capture nothing.
 Pre-flight: make the branch ready for review and open its PR.
 
 <!-- compliance:on -->
-**Input:** `WORKTREE_PATH` (optional), `BASE_BRANCH` (optional), `BASE_REF` (optional), `TASK_ID` (optional), `ISSUE_NUMBER` (optional), `ISSUE_PR_LINK` (optional), `PR_EXCEPTIONS` (optional), `COMMIT_UNCOMMITTED` (optional), `PR_DESCRIPTION_GUIDANCE` (optional), `PR_TEST_PLAN_BLOCK` (optional), `PR_WAVE_BLOCK` (optional), `APPLY_CONVENTIONS`
+**Input:** `WORKTREE_PATH` (optional), `BASE_BRANCH` (optional), `BASE_REF` (optional), `TASK_ID` (optional), `ISSUE_NUMBER` (optional), `ISSUE_PR_LINK` (optional), `PR_EXCEPTIONS` (optional), `COMMIT_UNCOMMITTED` (optional), `PR_DESCRIPTION_GUIDANCE` (optional), `PR_TEST_PLAN_BLOCK` (optional), `APPLY_CONVENTIONS`
 <!-- compliance:off -->
-**Input:** `WORKTREE_PATH` (optional), `BASE_BRANCH` (optional), `BASE_REF` (optional), `TASK_ID` (optional), `ISSUE_NUMBER` (optional), `ISSUE_PR_LINK` (optional), `COMMIT_UNCOMMITTED` (optional), `PR_DESCRIPTION_GUIDANCE` (optional), `PR_WAVE_BLOCK` (optional), `APPLY_CONVENTIONS`
+**Input:** `WORKTREE_PATH` (optional), `BASE_BRANCH` (optional), `BASE_REF` (optional), `TASK_ID` (optional), `ISSUE_NUMBER` (optional), `ISSUE_PR_LINK` (optional), `COMMIT_UNCOMMITTED` (optional), `PR_DESCRIPTION_GUIDANCE` (optional), `APPLY_CONVENTIONS`
 <!-- compliance:end -->
 
 **Output:**
@@ -383,22 +383,6 @@ Create or enrich a tracker issue using the D3 issue template.
 ```
 @end
 
-@define post_wave_report_contract():
-Post the wave completion summary as a comment on the tracking issue.
-
-**Input:** `TRACKING_ISSUE`, `WAVE_REPORT_PATH`, `WAVE_ID`, `WORKTREE_PATH` (optional)
-
-**Degradation (D4):** No remote / `gh` unauthenticated → `TRACEABILITY: DEGRADED ({reason})`, warn, return.
-
-**Output:**
-```markdown
-## Wave Report Posted
-**Tracking Issue**: {ISSUE_REF}
-**Wave ID**: {WAVE_ID}
-**Status**: POSTED | SKIPPED (already posted) | DEGRADED ({reason})
-```
-@end
-
 @export ensure_pr_ready_contract
 @export setup_task_contract
 @export fetch_issue_contract
@@ -410,4 +394,3 @@ Post the wave completion summary as a comment on the tracking issue.
 @export backlink_shipped_issues_contract
 @export associate_release_contract
 @export ensure_traceable_issue_contract
-@export post_wave_report_contract

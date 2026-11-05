@@ -50,14 +50,14 @@ const OUTPUT_HEADING: Readonly<Record<string, string>> = { research: '## Output 
  * fields the spawning commands parse or hand on (see the header).
  */
 const EXEMPT_MARKERS: Readonly<Record<string, readonly string[]>> = {
-  code: ['`## Verification` block', '`commitShas`', '`unresolved`'],
+  code: ['`## Verification` block'],
   // D-CODE-VARIANTS: the variants share Code's Output section from one partial, so they name the same exempt fields.
-  fix: ['`## Verification` block', '`commitShas`', '`unresolved`'],
-  refactor: ['`## Verification` block', '`commitShas`', '`unresolved`'],
+  fix: ['`## Verification` block'],
+  refactor: ['`## Verification` block'],
   validate: ['`HEAD:` line', '`Passed alone:` line', '| Command | Status | Exit | Duration |', '`Lint pack:` line', '30 lines per failing command'],
   // `### Blockers` carries the cause and log path that /implement reports when the Test agent reports BLOCKED.
   test: ['### Test Plan Evidence', '| ID | TP | Type |', '### Blockers', '### Evidence Log'],
-  harden: ['`### Status` line', '`status` return field'],
+  harden: ['`### Status` line'],
   polish: ['completion status', 'commits'],
   evaluate: ['`### Status` line', '`### Misalignments Found`'],
   design: ['`## Findings` list'],
@@ -67,7 +67,7 @@ const EXEMPT_MARKERS: Readonly<Record<string, readonly string[]>> = {
   explore: [],
   plan: [],
   knowledge: ['`KB_*` status block'],
-  review: ['report path', '`filesExamined`', '`findings`'],
+  review: ['report path', 'counts and recommendation'],
   debug: ['Exempt: none'],
   research: ['Exempt: none'],
   triage: ['whole ledger'],

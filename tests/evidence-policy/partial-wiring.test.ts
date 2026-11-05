@@ -7,7 +7,7 @@
  *   AC-1  The partial holds at most two defines and no imports, which bound its
  *         MDS compile cost. Exactly the EVIDENCE_POLICY_PARTIAL_ADOPTERS hosts
  *         import it, and each calls `evidence_policy()` once.
- *   AC-2  The invocation line is byte-identical in all eight adopter command files,
+ *   AC-2  The invocation line is byte-identical in all six adopter command files,
  *         and each holds the define's whole expansion once. A source that re-inlines
  *         the expansion instead of importing it is reported. The parse template is pinned to the
  *         script's own OUTPUT_LINE_RE by key order and by a differential
@@ -133,7 +133,7 @@ function builtExpansion(): string {
   return body
 }
 
-/** The eight compiled command files that resolve the policy: one per adopter. */
+/** The six compiled command files that resolve the policy: one per adopter. */
 function policyCommandCorpus(): TextFile[] {
   return EVIDENCE_POLICY_PARTIAL_ADOPTERS.map(h => `${h}.md`).map(name => ({
     name,
@@ -468,10 +468,10 @@ function partialTemplate(): string {
   return templates[0]
 }
 
-describe('AC-2: the invocation is identical in all eight command files', () => {
-  it('each command file holds exactly one invocation line, and all eight are the same bytes', () => {
+describe('AC-2: the invocation is identical in all six command files', () => {
+  it('each command file holds exactly one invocation line, and all six are the same bytes', () => {
     const corpus = policyCommandCorpus()
-    expect(corpus.map(f => f.name), 'the corpus is the eight adopters').toHaveLength(8)
+    expect(corpus.map(f => f.name), 'the corpus is the six adopters').toHaveLength(6)
 
     const invocations = collectPolicyInvocations(corpus)
     for (const { name, lines } of invocations) {
@@ -828,7 +828,7 @@ function collectPolicyReadsBeforeResolution(file: string, content: string): stri
 describe('order: the evidence policy resolves before its first read', () => {
   it('in every adopter', () => {
     const corpus = policyCommandCorpus()
-    expect(corpus).toHaveLength(8)
+    expect(corpus).toHaveLength(6)
     expect(corpus.flatMap(f => collectPolicyReadsBeforeResolution(f.name, f.content))).toEqual([])
   })
 

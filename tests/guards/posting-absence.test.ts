@@ -366,9 +366,6 @@ interface PlainSpawn {
 const PLAIN_SPAWNS: readonly PlainSpawn[] = [
   { host: 'code-review', op: 'ensure-pr-ready', inputs: ['PR_DESCRIPTION_GUIDANCE:', 'APPLY_CONVENTIONS:'] },
   { host: 'bug-analysis', op: 'ensure-pr-ready', inputs: ['APPLY_CONVENTIONS:'] },
-  { host: 'dynamic-build', op: 'setup-task', inputs: ['TASK_DESCRIPTION:', 'ISSUE_REQUIRED:', 'APPLY_CONVENTIONS:'] },
-  { host: 'dynamic-build', op: 'ensure-pr-ready', inputs: ['PR_DESCRIPTION_GUIDANCE:', 'APPLY_CONVENTIONS:', 'PR_WAVE_BLOCK:'] },
-  { host: 'dynamic-tickets', op: 'ensure-traceable-issue', inputs: ['TASK_DESCRIPTION:', 'REQUIREMENTS:', 'WORKTREE_PATH:'] },
   {
     host: 'plan',
     op: 'ensure-traceable-issue',

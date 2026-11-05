@@ -228,7 +228,7 @@ describe('linear module: the generated per-op references', () => {
  *
  * It is part of the MARKER, not a visible footer: `git.md`'s attribution rule
  * confines the `*Posted by …*` footer to the two summary operations, and these
- * three comment kinds carry the marker only.
+ * two comment kinds carry the marker only.
  */
 const DISCRIMINATOR_URL = 'https://github.com/dean0x/devflow';
 
@@ -285,17 +285,10 @@ describe('linear module: rank 4 — post with a warning (OD-12, B-6)', () => {
 });
 
 /**
- * The three comment kinds and their marker namespaces (§14.4 `marker_format`).
- *
- * §14.4's spellings, not GitHub's: the GitHub wave marker is frozen by the Phase-0
- * golden as `devflow:wave-report`, and the appendix fixes the per-kind namespace as
- * `devflow:wave`. No reader crosses providers, so they cannot collide — and the
- * three-provider marker table only stays one table while every provider uses the
- * appendix's spelling.
+ * The comment kinds and their marker namespaces (§14.4 `marker_format`).
  */
 const MARKER_NAMESPACES: ReadonlyArray<{ readonly kind: string; readonly op: string }> = [
   { kind: 'devflow:shipped', op: 'backlink-shipped-issues' },
-  { kind: 'devflow:wave', op: 'post-wave-report' },
   { kind: 'devflow:traceability', op: 'ensure-traceable-issue' },
 ];
 
@@ -309,8 +302,11 @@ describe('linear module: marker namespaces (AC-3.14, GAP-20)', () => {
     }
     expect(
       MARKER_NAMESPACES.length,
+      // LOWERED 3 -> 2 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the wave
+      // report namespace row left with the post-wave-report operation, so the counted row is removed and no
+      // coverage is lost.
       'the namespace table is empty, so the loop above ran zero times',
-    ).toBeGreaterThanOrEqual(3);
+    ).toBeGreaterThanOrEqual(2);
   });
 
   it('no marker namespace leaks into an op that does not own it', () => {
@@ -329,7 +325,7 @@ describe('linear module: marker namespaces (AC-3.14, GAP-20)', () => {
     ).toEqual([]);
   });
 
-  it('every marker line carries the discriminator, in all three kinds', () => {
+  it('every marker line carries the discriminator, in every kind', () => {
     // The discriminator is per-marker, so it has to be on every marker rather than
     // stated once as policy: a kind that dropped it would dedup on the marker alone
     // and inherit exactly the false-positive rank 4 cannot otherwise rule out.
@@ -343,15 +339,6 @@ describe('linear module: marker namespaces (AC-3.14, GAP-20)', () => {
     }
   });
 
-  it('GitHub\'s frozen wave spelling does not leak into this provider', () => {
-    // The one mandated divergence, asserted as a negative so it cannot be "fixed"
-    // by copying GitHub's marker across.
-    expect(
-      linearTree(),
-      '`devflow:wave-report` is GitHub\'s spelling, frozen by the Phase-0 golden. §14.4 fixes the ' +
-      'per-kind namespace as `devflow:wave`, and the appendix wins for every new provider',
-    ).not.toContain('devflow:wave-report');
-  });
 });
 
 // ---------------------------------------------------------------------------

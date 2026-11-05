@@ -105,27 +105,6 @@ const OPERATION_LINE_RE = /^[ \t]*"?OPERATION: (\S+)/m
 const PASSED_KEY_RE = /^[ \t]*"?([A-Z_][A-Z0-9_]*): /gm
 
 /**
- * True for a language-tagged fence (```js …), i.e. a dynamic-workflow recipe
- * rather than a prose spawn block.
- *
- * The corpus splits cleanly along this line: every `Agent(subagent_type="X")`
- * spawn lives in an untagged prose fence, and every `agentType: "X"` call lives
- * in a ```js recipe. A recipe is one fence holding many agent() calls of
- * different types — dist/commands/dynamic-build.md has a single fence with 24
- * calls across 9 agent types — so fence-level key attribution is meaningless
- * there: harvesting every `KEY:` line would credit the Code agents' prompts to
- * whichever OPERATION appeared first.
- *
- * Recorded scope limitation: the `setup-task` spawn inside that recipe is
- * therefore not key-checked by this seam. Per-call parsing of recipe bodies is
- * a separate guard, not a widened regex here.
- */
-function isRecipeFence(fence: string): boolean {
-  const firstNewline = fence.indexOf('\n')
-  return fence.slice(3, firstNewline === -1 ? undefined : firstNewline).trim().length > 0
-}
-
-/**
  * Harvest the operation name and passed keys from one spawn fence.
  * Returns null when the fence declares no OPERATION.
  *
@@ -235,8 +214,6 @@ let fencesScanned: Map<string, number>
 // anchors stopped matching the corpus — the vacuity failure mode.
 let gitFencesMentioningOperation: number
 let gitFencesOpMatched: number
-// Language-tagged recipe fences skipped by the scan (see isRecipeFence).
-let recipeFencesSkipped: number
 
 beforeAll(() => {
   distFiles = requireDistFiles()
@@ -270,10 +247,7 @@ beforeAll(() => {
   // the Tracker agent is spawned by the SessionStart hook's directive, never by a
   // command, so a `Agent(subagent_type="Tracker")` fence anywhere in dist/commands
   // would mean a second spawn site for an agent whose whole claim-file lifecycle
-  // assumes one. Because the claim is a ceiling, its counter is incremented BEFORE
-  // the recipe-fence skip below while Git's and Code's are incremented after — a
-  // language-tagged recipe is legitimately excluded from a parseability floor, but
-  // a Tracker spawn hidden in one would still be a Tracker spawn.
+  // assumes one. Its counter reads every fence, whatever the fence's language tag.
   fencesScanned = new Map([['Git', 0], ['Code', 0], ['Tracker', 0]])
   /** Count one fence for `agent`, refusing a key the counter map never declared. */
   const bumpFence = (agent: string): void => {
@@ -288,17 +262,12 @@ beforeAll(() => {
   }
   gitFencesMentioningOperation = 0
   gitFencesOpMatched = 0
-  recipeFencesSkipped = 0
 
   for (const entry of corpusEntries) {
     const fences = parseFences(entry.content)
     for (const fence of fences) {
       if (isAgentBlock(fence, 'Tracker')) {
         bumpFence('Tracker')
-      }
-      if (isRecipeFence(fence)) {
-        if (isAgentBlock(fence, 'Git') || isAgentBlock(fence, 'Code')) recipeFencesSkipped++
-        continue
       }
       if (isAgentBlock(fence, 'Git')) {
         bumpFence('Git')
@@ -349,8 +318,8 @@ describe('non-vacuity: per-agent-type fence counts', () => {
     // Mechanic (b). Without this, the ceiling above is satisfied by a predicate
     // that recognises nothing — the difference between "no command spawns Tracker"
     // and "nothing can see a Tracker spawn" is invisible in a green log.
-    // Both spawn spellings isAgentBlock accepts are seeded, and the recipe form
-    // too, because the counter above is deliberately read before the recipe skip.
+    // Both spawn spellings isAgentBlock accepts are seeded, and a language-tagged
+    // fence too, because the counter above reads every fence.
     for (const seeded of [
       'Agent(subagent_type="Tracker")',
       'agentType: "Tracker"',
@@ -363,16 +332,6 @@ describe('non-vacuity: per-agent-type fence counts', () => {
     }
     // …and the control: a sibling agent's fence is not a Tracker fence.
     expect(isAgentBlock('Agent(subagent_type="Git")', 'Tracker')).toBe(false)
-  })
-
-  it('recipe fences are excluded and the exclusion arm is live', () => {
-    // Non-vacuity for the isRecipeFence arm: if it ever stops matching, the
-    // multi-agent ```js recipes would be swept into the prose scan and attribute
-    // unrelated keys to whichever OPERATION appeared first.
-    expect(
-      recipeFencesSkipped,
-      'no language-tagged agent recipe fence was skipped — isRecipeFence no longer matches the corpus',
-    ).toBeGreaterThan(0)
   })
 
   it('every prose Git fence that mentions OPERATION: is actually parsed (anchor coverage)', () => {
@@ -393,10 +352,10 @@ describe('non-vacuity: per-agent-type fence counts', () => {
     ).toBe(gitFencesMentioningOperation)
   })
 
-  it('at least 12 operations have a live caller fence (key-map non-vacuity)', () => {
+  it('at least 11 operations have a live caller fence (key-map non-vacuity)', () => {
     // Directions 1 and 2 iterate keysPassedByOp. An empty or near-empty map makes
     // both of them assert nothing regardless of how many fences were counted.
-    // M9: git.md declares 20 ## Operation: sections; 12 have a live caller fence in
+    // M9: git.md declares 19 ## Operation: sections; 11 have a live caller fence in
     // dist/commands/. The eight without are:
     //   - learn-conventions: internal — invoked by setup-task step 1b inside the Git
     //     agent itself, not by any command fence.
@@ -405,22 +364,24 @@ describe('non-vacuity: per-agent-type fence counts', () => {
     //     readers that are not command fences: its Output `**Status**:` enum is the authority
     //     `ci-wait.cjs` is pinned to (tests/evidence/merge-readiness.test.ts), and
     //     check-merge-readiness step 3 loads its PR-host reference for the classification.
-    //   - update-pr-evidence and check-merge-readiness (#455): /implement, /resolve and
-    //     /dynamic-build run them through `verify-evidence.cjs publish` and `readiness`
+    //   - update-pr-evidence and check-merge-readiness (#455): /implement and /resolve
+    //     run them through `verify-evidence.cjs publish` and `readiness`
     //     instead of a Git spawn. Both operations stay defined in PR_HOST_OPS and route to the
     //     same scripts, so a direct delegation still works; the commands' script calls are
-    //     pinned in tests/evidence/implement-flow.test.ts, resolve-refresh.test.ts and
-    //     tests/dynamic/wave-flow.test.ts.
+    //     pinned in tests/evidence/implement-flow.test.ts and resolve-refresh.test.ts.
     //   - create-release, gather-release-evidence, backlink-shipped-issues,
     //     associate-release (#364): described only in the hand-authored release.md
     //     prose; the operation names appear in plain text, not in Agent(…) spawn
     //     fences the parser recognises.
     // Raise when new caller fences are added (numeric-floors.json seam-ops-with-callers).
+    // LOWERED 12 -> 11 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the
+    // post-wave-report operation, whose only caller fence sat in the dynamic-build host, left with that
+    // host, so the counted fence is removed and no coverage is lost.
     expect(
       keysPassedByOp.size,
-      `only ${keysPassedByOp.size} operations have caller fences — expected ≥ 12; ` +
+      `only ${keysPassedByOp.size} operations have caller fences — expected ≥ 11; ` +
       'the forward and reverse directions iterate this map and would be near-vacuous',
-    ).toBeGreaterThanOrEqual(12)
+    ).toBeGreaterThanOrEqual(11)
   })
 
   it('op→section map covers at least 17 operations [DR-24]', () => {
@@ -430,11 +391,11 @@ describe('non-vacuity: per-agent-type fence counts', () => {
     ).toBeGreaterThanOrEqual(17)
   })
 
-  it('DIST_FILES has exactly 14 compiled command files', () => {
+  it('DIST_FILES has exactly 10 compiled command files', () => {
     expect(
       distFiles.length,
-      `DIST_FILES has ${distFiles.length} files, expected 14 — DIST_FILES vs ALL_HOSTS divergence is permanent (SG-13)`,
-    ).toBe(14)
+      `DIST_FILES has ${distFiles.length} files, expected 10 — the ten command hosts`,
+    ).toBe(10)
   })
 })
 
@@ -706,7 +667,7 @@ describe('reverse: every required **Input:** value is passed by at least one cal
 // fetch-issues-batch slices and searched the join. A join cannot distinguish
 // "both ops emit this" from "one op emits it and the other does not", so
 // `fetch-issues-batch` emitting no `### Handoff Values` block at all was invisible
-// here while plan.mds / dynamic-plan.mds batch flows captured three values from
+// here while the plan.mds batch flow captured three values from
 // it. That is GAP-15's shape, one seam over: a consumer with no producer.
 //
 // The corpus is the operation references (via gitCorpus built in beforeAll), NOT DIST_FILES.

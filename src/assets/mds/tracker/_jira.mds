@@ -411,34 +411,6 @@ The D3 section headings are the canonical ones; only the transport differs from 
 <!-- compliance:end -->
 @end
 
-@define post_wave_report():
-## Operation: post-wave-report
-
-{{ops.post_wave_report_contract()}}
-
-Load when the resolved tracker provider is `jira` and the operation is `post-wave-report`.
-
-**Mechanics held here:** the `### Process` body — locating the wave's tracking item and posting the report once.
-
-{{common.wave_report_inputs()}}
-
-### Process
-
-**Setup (once):** resolve the capability set and the current-user `accountId` from the *identify current user* capability. `accountId` unavailable ⇒ `TRACEABILITY: DEGRADED (dedup unavailable — duplicate possible)` and post anyway.
-
-1. Check for an existing marker on the tracking item, author-filtered — a third party posting the marker must not suppress the post.
-   - Read the tracking item's comments through the *list comments with authors* capability and keep only the ones that `accountId` authored.
-   - This operation owns the `devflow:wave` namespace and no other. Match **line 1** of each such comment for equality against `devflow:wave {WAVE_ID}`; a marker on any later line **does not suppress**.
-   - **The scan is a FULL scan, not a newest-first early exit.** A wave report's marker carries a wave id, and wave ids are not monotonic in comment order, so an early exit can miss the one comment that matters. Bound it at `≤5` pages and **fail closed**: if the bound is reached before the scan completes, report `TRUNCATED ({n} not processed)` and **DO NOT POST** — a duplicate wave report is a worse outcome than a missing one, because the next run cannot tell which is authoritative.
-   - If found: skip — report `Skipped: wave report for {WAVE_ID} already posted`.
-{{steps.wave_report_read_step()}}
-3. Compose the comment: line 1 the marker `devflow:wave {WAVE_ID}`, then the contents of `WAVE_REPORT_PATH`. Cap the composed content at `{{comment_cap()}}` characters; over the cap, truncate in **preservation order** — the marker, then the status and DEGRADED lines, then the pointer sentence — and end with `…truncated — full report in the local wave artifact {WAVE_REPORT_PATH} (not committed; ask the author)`.
-4. Post it through `### Posting gate` below.
-
-{{mcp.posting_gate_head("the write")}}
-4. Post through the *add comment* capability with arguments (issue key, body: {SCRUBBED_BODY}).
-@end
-
 @define ensure_pr_ready():
 ## Operation: ensure-pr-ready
 
@@ -484,9 +456,6 @@ Load when the resolved tracker provider is `jira` and the operation is `ensure-p
 
 <!-- op: ensure-traceable-issue -->
 {{ensure_traceable_issue()}}
-
-<!-- op: post-wave-report -->
-{{post_wave_report()}}
 
 <!-- op: ensure-pr-ready -->
 {{ensure_pr_ready()}}

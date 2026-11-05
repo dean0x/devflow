@@ -360,7 +360,7 @@ describe('Code, Fix and Refactor read a file once and cap their output, in both 
     expect(duplicate, 'the seed must land').not.toBe(body)
     expect(collectReadOnceDefects(duplicate)).toEqual(['2 read-once lines, expected 1'])
 
-    const inBlock = missing.replace('- The same rules hold', `${line}\n- The same rules hold`)
+    const inBlock = missing.replace('- Never re-run a command when nothing it reads has changed.', `${line}\n- Never re-run a command when nothing it reads has changed.`)
     expect(inBlock, 'the seed must land').not.toBe(missing)
     expect(collectReadOnceDefects(inBlock)).toEqual(['the read-once line sits inside the Running commands block'])
 

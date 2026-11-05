@@ -252,8 +252,10 @@ function hookDirectives(): PromptFile[] {
 function promptSurface(): CorpusClass[] {
   const commands = requireDistFiles().map(n => ({ name: `dist/commands/${n}`, content: requireDistFile(n) }))
   const agents = [...resolveAllAgents().values()].map(a => ({ name: rel(a.path), content: a.content }))
+  // LOWERED 14 -> 10 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the four
+  // dynamic command hosts left the roster, so the counted files are removed and no coverage is lost.
   return [
-    { label: 'commands', files: commands, sentinel: 'dist/commands/implement.md', floor: 14 },
+    { label: 'commands', files: commands, sentinel: 'dist/commands/implement.md', floor: 10 },
     { label: 'agents', files: agents, sentinel: 'dist/agents/git.md', floor: getAllAgentNames().length },
     { label: 'references', files: readTree('dist/skills'), sentinel: 'dist/skills/git/references/publication-gate.md', floor: 20 },
     { label: 'skills', files: readTree('src/assets/skills'), sentinel: 'src/assets/skills/git/SKILL.md', floor: 30 },

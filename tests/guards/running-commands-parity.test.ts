@@ -22,9 +22,6 @@
  *   - the wait rule is one whole line as written, so a clause added, dropped or negated
  *     inside it is seen even when every marker stays, and no line keeps the retired
  *     wording that reported an overrun BLOCKED with no wait;
- *   - the engine's `build_execution_doctrine()` renders the same text, names all
- *     five carriers in the sentence that introduces it, and the dynamic-build
- *     prompt sites name the block instead of copying it;
  *   - test.md's dev-server addendum follows the block as a section of its own and
  *     is where the dev server is started in the background: Monitor, which the
  *     block prohibits, is not named there or anywhere else in the body.
@@ -35,11 +32,11 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { mkdtempSync, readFileSync, rmSync } from 'fs'
+import { mkdtempSync, rmSync } from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 import { spawnSync } from 'child_process'
-import { ROOT, collectUnfencedH2, requireDistFile, resolveAgentSource } from '../helpers.js'
+import { collectUnfencedH2, resolveAgentSource } from '../helpers.js'
 
 const BLOCK_HEADING = '## Running commands'
 
@@ -88,7 +85,6 @@ const ELEMENTS: ReadonlyArray<{ label: string; marker: string }> = [
   { label: '(f) a run expected to exceed the ceiling may be split into parts, run in sequence', marker: 'may be split into parts, run in sequence' },
   { label: '(g) no re-run without a change', marker: 'Never re-run a command when nothing it reads has changed' },
   { label: '(h) no interpreter wrapper', marker: '`sh -c`, `bash -c`, `python3 -c` or `node -e`' },
-  { label: '(i) the same rules in a Workflow sub-agent', marker: 'inside a dynamic Workflow sub-agent' },
 ]
 
 type Bodies = Readonly<Record<string, string>>
@@ -172,74 +168,6 @@ function collectBoundDefects(block: string): string[] {
   return defects
 }
 
-/** The body of the engine's `build_execution_doctrine()` define, or null when absent. */
-function engineDoctrine(engine: string): string | null {
-  const start = engine.indexOf('@define build_execution_doctrine():')
-  if (start === -1) return null
-  const end = engine.indexOf('\n@end', start)
-  return end === -1 ? null : engine.slice(start, end)
-}
-
-/** The block without its heading line: the text the engine renders. */
-function blockBody(block: string): string {
-  return block.slice(block.indexOf('\n') + 1).trim()
-}
-
-/** Named collector: how the engine's doctrine departs from the block. */
-function collectEngineDefects(engine: string, block: string): string[] {
-  const doctrine = engineDoctrine(engine)
-  if (doctrine === null) return ['_engine.mds: no build_execution_doctrine() define']
-  return doctrine.includes(blockBody(block)) ? [] : ['_engine.mds: build_execution_doctrine() does not render the block\'s text']
-}
-
-/**
- * Named collector: how the engine's sentence that introduces the block departs
- * from CARRIERS. The sentence reads "The A, B and C agents each carry this
- * `## Running commands` block": every carrier must be named, and no other agent.
- */
-function collectCarrierListDefects(engine: string): string[] {
-  const doctrine = engineDoctrine(engine)
-  if (doctrine === null) return ['_engine.mds: no build_execution_doctrine() define']
-  const named = /^The (.+) agents each carry this `## Running commands` block/m.exec(doctrine)?.[1]
-  if (named === undefined) return ['_engine.mds: build_execution_doctrine() names no carrier list']
-  const listed = named.split(/, | and /).map(name => name.toLowerCase())
-  const carriers: readonly string[] = CARRIERS
-  return [
-    ...carriers.filter(name => !listed.includes(name)).map(name => `_engine.mds: the carrier list omits ${name}`),
-    ...listed.filter(name => !carriers.includes(name)).map(name => `_engine.mds: the carrier list names ${name}, which carries no block`),
-  ]
-}
-
-/**
- * The dynamic-build prompt sites that name the block, each anchored by its own
- * quoted text: the Code implementation prompt, both Gate 1 Validate prompts and
- * the Validate re-run after a Gate 1 fix in each pass, both Fix prompts after
- * Gate 2, the review-batch fix prompt, the Test prompt and the post-merge Validate.
- * A site names "your Running commands block" and never copies the block, because
- * a sub-agent spawned with an agentType loads its body as its standing
- * instruction (measured on Claude Code 2.1.294 inside a Workflow).
- */
-const DYNAMIC_BUILD_SITES: readonly string[] = [
-  'When you build or run tests to verify your work, follow your Running commands block.',
-  'Run build, typecheck, lint, and tests on branch ${BRANCH}.\nFollow your Running commands block',
-  'after fix attempt ${attempt} (follow your Running commands block)',
-  'Self-verify your fix compiles, following your Running commands block. Commit fixes.',
-  'Follow your Running commands block for every scenario command.',
-  'Self-verify your fix compiles and the scenarios pass, following your Running commands block.',
-  'Fix all findings in this batch. Self-verify your fix compiles, following your Running commands block.',
-  '(final gate after all fixing).\nFollow your Running commands block',
-  '(final gate, after fix attempt ${attempt}; follow your Running commands block)',
-  '(merge commit ${merge.mergeSha}).\nFollow your Running commands block',
-]
-
-/** Named collector: prompt sites a dynamic-build body does not carry exactly once. */
-function collectSiteDefects(body: string): string[] {
-  return DYNAMIC_BUILD_SITES.flatMap(site => {
-    const hits = body.split(site).length - 1
-    return hits === 1 ? [] : [`${hits} occurrences of: ${site.split('\n')[0]}`]
-  })
-}
-
 /** Named collector: what test.md's body does around the block. */
 function collectTestAddendumDefects(test: string): string[] {
   const defects: string[] = []
@@ -286,12 +214,6 @@ function runCaptureForm(form: string, command: string, scratch: string): string[
 const carriers = (): Record<string, string> =>
   Object.fromEntries(CARRIERS.map(name => [name, resolveAgentSource(name).content]))
 
-const engineSource = (): string =>
-  readFileSync(path.join(ROOT, 'src', 'assets', 'commands', '_partials', '_engine.mds'), 'utf-8')
-
-const dynamicBuildSource = (): string =>
-  readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'dynamic-build.mds'), 'utf-8')
-
 describe('D-FOREGROUND-RUN: the Running commands block', () => {
   it('Code, Fix, Refactor, Validate and Test each carry exactly one block, byte-identical, within the byte target', () => {
     expect(collectParityDefects(carriers())).toEqual([])
@@ -313,21 +235,6 @@ describe('D-FOREGROUND-RUN: the Running commands block', () => {
     const defects = Object.entries(carriers()).flatMap(([name, body]) =>
       collectBlocks(body).flatMap(block => collectBoundDefects(block).map(defect => `${name}: ${defect}`)))
     expect(defects).toEqual([])
-  })
-
-  it('the engine renders the same text', () => {
-    const block = collectBlocks(carriers().code)[0]
-    expect(collectEngineDefects(engineSource(), block)).toEqual([])
-  })
-
-  it('the engine names all five carriers of the block, and no other agent', () => {
-    expect(collectCarrierListDefects(engineSource())).toEqual([])
-  })
-
-  it('the dynamic-build prompt sites name the block, in the source and in the compiled command', () => {
-    expect(DYNAMIC_BUILD_SITES.length).toBeGreaterThanOrEqual(9)
-    expect(collectSiteDefects(dynamicBuildSource())).toEqual([])
-    expect(collectSiteDefects(requireDistFile('dynamic-build.md'))).toEqual([])
   })
 
   it('test.md puts the dev server in a section of its own after the block, and names Monitor nowhere else', () => {
@@ -423,41 +330,7 @@ describe('D-FOREGROUND-RUN: the Running commands block', () => {
     expect(collectBoundDefects(code.replace('600000 ms', '300000 ms'))).toContain('the block\'s prose names a time bound: 300000 ms')
   })
 
-  it('known-bad probe: a prompt site that goes back to prescribing a procedure is reported', () => {
-    const reverted = dynamicBuildSource().replace(
-      'Follow your Running commands block for every scenario command.',
-      'Use the poll procedure for every scenario command.',
-    )
-    expect(collectSiteDefects(reverted)).toEqual([
-      '0 occurrences of: Follow your Running commands block for every scenario command.',
-    ])
-  })
-
-  it('known-bad probe: a carrier list that omits Fix and Refactor, names an agent with no block, or is gone, is reported', () => {
-    const engine = engineSource()
-    const shipped = 'The Code, Fix, Refactor, Validate and Test agents each carry this'
-    const seed = (to: string): string => {
-      expect(engine.split(shipped).length - 1, 'the seed must land once').toBe(1)
-      return engine.replace(shipped, () => to)
-    }
-    expect(collectCarrierListDefects(seed('The Validate, Code and Test agents each carry this'))).toEqual([
-      '_engine.mds: the carrier list omits fix',
-      '_engine.mds: the carrier list omits refactor',
-    ])
-    expect(collectCarrierListDefects(seed('The Code, Fix, Refactor, Validate, Test and Harden agents each carry this'))).toEqual([
-      '_engine.mds: the carrier list names harden, which carries no block',
-    ])
-    expect(collectCarrierListDefects(seed('These agents each carry this'))).toEqual([
-      '_engine.mds: build_execution_doctrine() names no carrier list',
-    ])
-    expect(collectCarrierListDefects('no engine here')).toEqual(['_engine.mds: no build_execution_doctrine() define'])
-  })
-
-  it('known-bad probe: an engine that drifts from the block, and a Monitor clause in test.md, are reported', () => {
-    const code = collectBlocks(carriers().code)[0]
-    expect(collectEngineDefects(engineSource().replace('tail -n 40', 'tail -n 41'), code)).toEqual([
-      '_engine.mds: build_execution_doctrine() does not render the block\'s text',
-    ])
+  it('known-bad probe: a Monitor clause in test.md is reported', () => {
     const test = carriers().test
     expect(collectTestAddendumDefects(`${test}\nKeep Monitor for dev-server readiness.\n`)).toEqual([
       'test.md: Monitor is named outside the block\'s prohibition',

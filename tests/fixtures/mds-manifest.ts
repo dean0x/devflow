@@ -36,7 +36,7 @@
  *   - tests/guards/provider-scope.test.ts
  *       SETTINGS_BLOCK_HOSTS            — the files whose settings-line shape may name every provider
  *
- * Length floors (`>= 14` hosts, `>= 15` partials) are asserted alongside the set-equality in
+ * Length floors (`>= 10` hosts, `>= 16` partials) are asserted alongside the set-equality in
  * tests/build-mds.test.ts and registered in tests/fixtures/numeric-floors.json.
  * A floor never decreases; a manifest entry may only be added or renamed in step
  * with the file on disk.
@@ -57,36 +57,26 @@ export const KNOWLEDGE_COMMAND_HOSTS = [
   'self-review',
 ] as const;
 
-/** The 4 dynamic command hosts (src/assets/commands/<name>.mds); three author a Workflow, dynamic-profile does not. */
-export const DYNAMIC_COMMAND_HOSTS = [
-  'dynamic-build',
-  'dynamic-plan',
-  'dynamic-profile',
-  'dynamic-tickets',
-] as const;
-
-/**
- * The command hosts that load decisions behind the CURATION gate: every one but dynamic-profile,
- * one plain Knowledge spawn that passes no DECISIONS_CONTEXT. Each carries a curation arm.
- */
-export const DECISIONS_COMMAND_HOSTS: readonly string[] = [
-  ...KNOWLEDGE_COMMAND_HOSTS,
-  ...DYNAMIC_COMMAND_HOSTS.filter(h => h !== 'dynamic-profile'),
-  'release',
-];
-
 /** The release command host (src/assets/commands/release.mds). */
 export const RELEASE_COMMAND_HOSTS = ['release'] as const;
 
-/** All 14 command hosts compiled into dist/commands/. */
+/**
+ * The command hosts that load decisions behind the CURATION gate: every command host.
+ * Each carries a curation arm.
+ */
+export const DECISIONS_COMMAND_HOSTS: readonly string[] = [
+  ...KNOWLEDGE_COMMAND_HOSTS,
+  ...RELEASE_COMMAND_HOSTS,
+];
+
+/** All 10 command hosts compiled into dist/commands/. */
 export const MDS_COMMAND_HOSTS = [
   ...KNOWLEDGE_COMMAND_HOSTS,
-  ...DYNAMIC_COMMAND_HOSTS,
   ...RELEASE_COMMAND_HOSTS,
 ] as const;
 
 /**
- * The 15 partials in src/assets/commands/_partials/, by BASENAME. A partial
+ * The 9 partials in src/assets/commands/_partials/, by BASENAME. A partial
  * declares no `output-dir:`, so the build skips it — it is imported by hosts
  * instead. The `_` prefix is the partial convention (and is refused by
  * validateOutputName, so a partial can never become an output filename by
@@ -99,18 +89,12 @@ export const MDS_PARTIALS = [
   '_compliance',
   '_decisions',
   '_docs_root',
-  '_engine',
   '_evidence_policy',
-  '_factory',
   '_knowledge',
   '_plan_contract',
-  '_preamble',
   '_publication',
-  '_roster',
   '_settings',
-  '_ticket_template',
   '_tracker',
-  '_wave',
 ] as const;
 
 /**
@@ -164,15 +148,13 @@ export const ALL_MDS_PARTIALS: readonly string[] = [
  * count, for the same reason as every other roster here: a count stays green when
  * one adopter is dropped and another added in the same commit.
  *
- * These are the five commands that either parse issue references out of
+ * These are the three commands that either parse issue references out of
  * `$ARGUMENTS` or read a Git-agent Output block — the two things the partial's
- * defines govern. A sixth command that starts doing either must join this list
+ * defines govern. A fourth command that starts doing either must join this list
  * rather than restate the rule inline, which is the divergence P2-S9 removed.
  */
 export const TRACKER_PARTIAL_ADOPTERS = [
   'debug',
-  'dynamic-build',
-  'dynamic-plan',
   'implement',
   'plan',
 ] as const;
@@ -181,15 +163,13 @@ export const TRACKER_PARTIAL_ADOPTERS = [
  * The hosts that adopt `_partials/_evidence_policy.mds` (SDLC-evidence PR3b,
  * #362). Named as a set for the same reason as TRACKER_PARTIAL_ADOPTERS.
  *
- * These are the eight commands that act on the resolved evidence policy. Each
+ * These are the six commands that act on the resolved evidence policy. Each
  * resolves it once per run through `evidence_policy()`, so the invocation and its
  * parse have one authority, and each imports the define rather than restating it.
  */
 export const EVIDENCE_POLICY_PARTIAL_ADOPTERS = [
   'bug-analysis',
   'code-review',
-  'dynamic-build',
-  'dynamic-tickets',
   'implement',
   'plan',
   'release',
@@ -198,13 +178,13 @@ export const EVIDENCE_POLICY_PARTIAL_ADOPTERS = [
 
 /**
  * The hosts whose compiled text carries the `_partials/_settings.mds` block (#392,
- * D-SETTINGS-LINE): every command host but dynamic-profile (13), each expanding
+ * D-SETTINGS-LINE): every command host (10), each expanding
  * `settings_resolve()` exactly once, before the earliest of its consumers. The hosts import the partial themselves,
  * as alias imports; no partial does. Named as a set for the same reason as the rosters
  * above: the provider-scope guard allowlists the block's closed provider set in exactly
  * these files, and tests/commands/settings-partial.test.ts holds the set to the build.
  *
- * The block count (13) and the curation-off count (8) are test-local constants beside
+ * The block count (10) and the curation-off count (7) are test-local constants beside
  * their assertions, not manifest rows: a count held here would be a second place to
  * keep in step with this set.
  */
@@ -212,9 +192,6 @@ export const SETTINGS_BLOCK_HOSTS = [
   'bug-analysis',
   'code-review',
   'debug',
-  'dynamic-build',
-  'dynamic-plan',
-  'dynamic-tickets',
   'explore',
   'implement',
   'plan',
@@ -227,16 +204,15 @@ export const SETTINGS_BLOCK_HOSTS = [
 /**
  * The hosts whose curation-OFF build still carries the settings block: the ones with
  * a consumer other than curation (a compliance lens, a publication gate or a knowledge
- * write-back). The other five of SETTINGS_BLOCK_HOSTS (bug-analysis, dynamic-plan,
- * dynamic-tickets, release, research) only read the line for the
+ * write-back). The other three of SETTINGS_BLOCK_HOSTS (bug-analysis, release,
+ * research) only read the line for the
  * decisions gate or a Skim spawn, so the block sits inside their curation-on arm.
- * Named as a set; the curation-off count (8) is a test-local constant beside its
+ * Named as a set; the curation-off count (7) is a test-local constant beside its
  * assertion.
  */
 export const SETTINGS_BLOCK_HOSTS_CURATION_OFF = [
   'code-review',
   'debug',
-  'dynamic-build',
   'explore',
   'implement',
   'plan',
@@ -278,7 +254,7 @@ export const MDS_GENERATOR_HOSTS = [
  * same reason as every other roster here: a count stays green when one host
  * loses its arm and another gains one in the same commit.
  *
- * Every command host but dynamic-profile (13; each loads decisions, or hands them on, behind an arm)
+ * Every command host (10; each loads decisions, or hands them on, behind an arm)
  * and the twelve agent hosts that declare `DECISIONS_CONTEXT` (eleven, the three Code
  * variants and the two Design variants among them) or take the `CURATION` input (Skim). The Curate agent, `curate.md`, is hand-authored
  * and runs only when curation is on, so it has no variant. The assertions over
@@ -327,8 +303,6 @@ export const COMPLIANCE_VARIANT_HOSTS: readonly string[] = [
   'commands/resolve',
   'commands/code-review',
   'commands/bug-analysis',
-  'commands/dynamic-build',
-  'commands/dynamic-tickets',
   'commands/plan',
   'commands/release',
 ];
@@ -467,7 +441,7 @@ export const MDS_REFERENCE_MODULES = [
 ] as const;
 
 /**
- * The 14 files that must exist in dist/commands/ after a build: one per command
+ * The 10 files that must exist in dist/commands/ after a build: one per command
  * host. This is DIST_FILES — deployed-behaviour scope (§14.5). Every command is a
  * compiled host, so no file here is copied rather than compiled.
  */

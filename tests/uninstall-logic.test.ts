@@ -4,7 +4,8 @@ import { execFileSync } from 'child_process';
 import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { type ConfirmPrompt, formatProjectDataPlan, partitionProjectData, resolveProjectDataPlan, computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, userContentPaths, resolveDevflowDirCleanup, resolveProjectDataCleanup, removeDevFlowInstallArtifacts, installArtifactPaths, resolveInstallArtifactPaths, enumerateDryRunExtras, removeAllDevFlow, removeSelectedPlugins, sweepDevflowNamespaces, isDevFlowInstalled, runDryRunPhase, runSelectivePhaseForScope, runFullPhaseForScope, runCleanupPhase, resolveInstalledPlugins } from '../src/cli/commands/uninstall.js';
+import { type ConfirmPrompt, formatProjectDataPlan, partitionProjectData, resolveProjectDataPlan, computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, userContentPaths, resolveDevflowDirCleanup, resolveProjectDataCleanup, removeDevFlowInstallArtifacts, installArtifactPaths, resolveInstallArtifactPaths, enumerateDryRunExtras, removeAllDevFlow, removeSelectedPlugins, sweepDevflowNamespaces, isDevFlowInstalled, runDryRunPhase, runSelectivePhaseForScope, runFullPhaseForScope, runCleanupPhase, resolveInstalledPlugins, uninstallCommand } from '../src/cli/commands/uninstall.js';
+import * as clack from '@clack/prompts';
 import { isSameLocation } from '../src/core/same-location.js';
 import { DEVFLOW_PLUGINS, getAllAgentNames, parsePluginSelection, skillsOf, type PluginDefinition } from '../src/core/plugins.js';
 import { TRACKER_ATTEMPTS_NAMES, TRACKER_PROVIDER_IDS, TRACKER_STAGED_PREFIX } from '../src/core/tracker.js';
@@ -2045,6 +2046,23 @@ describe('removeSelectedPlugins — selective uninstall sweep (TEST-9b)', () => 
     ).resolves.not.toThrow();
   });
 
+  it('(TP-17) a selective uninstall of another plugin sweeps the stale dynamic command files as orphans', async () => {
+    const commandsDir = path.join(claudeDir, 'commands', 'devflow');
+    await fs.mkdir(commandsDir, { recursive: true });
+    const stale = ['dynamic-build', 'dynamic-plan', 'dynamic-profile', 'dynamic-tickets'];
+    for (const name of stale) await fs.writeFile(path.join(commandsDir, `${name}.md`), `# stale ${name}\n`, 'utf-8');
+    await fs.writeFile(path.join(commandsDir, 'implement.md'), '# implement', 'utf-8');
+
+    const other = DEVFLOW_PLUGINS.find(candidate => candidate.name === 'devflow-bug-analysis') as PluginDefinition;
+    expect(other, 'the registry holds the other plugin').toBeDefined();
+    await removeSelectedPlugins(claudeDir, [other], false);
+
+    for (const name of stale) {
+      await expect(fs.access(path.join(commandsDir, `${name}.md`)), `${name} is swept`).rejects.toThrow();
+    }
+    await expect(fs.access(path.join(commandsDir, 'implement.md'))).resolves.not.toThrow();
+  });
+
   it('(9b-A6) sweepDevflowNamespaces removes orphaned devflow:* skill dirs, spares registry skills', async () => {
     // A6: skills were missing from the selective sweep before this fix.
     const skillsDir = path.join(claudeDir, 'skills');
@@ -2744,6 +2762,45 @@ describe('uninstall and the install backups', () => {
     expect(await exists(path.join(devflowDir, 'skills', 'my-skill', 'SKILL.md'))).toBe(true);
     expect(await exists(path.join(devflowDir, 'manifest.json'))).toBe(false);
     expect(out).toContain(`${devflowDir} preserved (removing scripts and install artifacts only)`);
+  });
+
+  describe('the preference profile (TP-9)', () => {
+    const PROFILE_BYTES = '# My preferences\n\nOnly the user wrote this.\n';
+    const profileFile = (): string => path.join(devflowDir, 'preference-profile.md');
+
+    beforeEach(async () => {
+      await fs.writeFile(profileFile(), PROFILE_BYTES, 'utf-8');
+    });
+
+    it('a full uninstall offers to remove the profile: the prompt names it before anything is wiped', async () => {
+      const { asked } = await run({ isTTY: true, answer: false });
+
+      expect(asked).toHaveLength(1);
+      expect(asked[0].message).toContain(`Remove entire ${devflowDir}?`);
+      expect(asked[0].printed).toContain('preference-profile.md');
+    });
+
+    it('a declined offer keeps the profile byte-identical and still removes the manifest', async () => {
+      await run({ isTTY: true, answer: false });
+
+      expect(await fs.readFile(profileFile(), 'utf-8')).toBe(PROFILE_BYTES);
+      expect(await exists(path.join(devflowDir, 'manifest.json'))).toBe(false);
+    });
+
+    it('an accepted offer removes the profile with the rest of the folder', async () => {
+      await run({ isTTY: true, answer: true });
+
+      expect(await exists(profileFile())).toBe(false);
+    });
+
+    it('a selective uninstall of one plugin leaves the profile byte-identical', async () => {
+      const plugin = DEVFLOW_PLUGINS.find(candidate => candidate.name === 'devflow-bug-analysis') as PluginDefinition;
+      expect(plugin, 'the registry holds the plugin').toBeDefined();
+
+      await runSelectivePhaseForScope({ claudeDir, devflowDir, selectedPlugins: [plugin], verbose: false, scope: 'user' });
+
+      expect(await fs.readFile(profileFile(), 'utf-8')).toBe(PROFILE_BYTES);
+    });
   });
 
   it('a confirmed wipe removes the whole devflow folder, backup root included', async () => {
@@ -4114,4 +4171,85 @@ describe('the project-data step keeps a data area that git tracks files in, or d
       }
     });
   });
+});
+
+// ---------------------------------------------------------------------------
+// TP-15 and TP-16 (AC-5): the removed dynamic plugin is an unknown plugin name. A list that holds it,
+// alone or beside a live plugin, exits 1 with the unknown-plugin error and no retire notice, and
+// removes nothing.
+// ---------------------------------------------------------------------------
+
+describe('uninstall --plugin refuses the removed dynamic plugin (TP-15, TP-16)', () => {
+  let home: string;
+  let errors: string[];
+  let infos: string[];
+  let exits: Array<number | undefined>;
+
+  /** Every file below `dir` as relative path -> bytes (base64), so a removed or changed file shows. */
+  async function treeOf(dir: string, rel = '.'): Promise<Record<string, string>> {
+    const out: Record<string, string> = {};
+    for (const entry of await fs.readdir(path.join(dir, rel), { withFileTypes: true })) {
+      const child = path.join(rel, entry.name);
+      if (entry.isDirectory()) Object.assign(out, { [`${child}/`]: 'dir' }, await treeOf(dir, child));
+      else out[child] = (await fs.readFile(path.join(dir, child))).toString('base64');
+    }
+    return out;
+  }
+
+  beforeEach(async () => {
+    home = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), TEMP_HOME_PREFIX)));
+    assertTempHome(home);
+    errors = [];
+    infos = [];
+    exits = [];
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('USERPROFILE', home);
+    const commandsDir = path.join(home, '.claude', 'commands', 'devflow');
+    await fs.mkdir(commandsDir, { recursive: true });
+    await fs.writeFile(path.join(commandsDir, 'implement.md'), '# the shipped implement command\n', 'utf-8');
+    await fs.mkdir(path.join(home, '.devflow'), { recursive: true });
+    await fs.writeFile(path.join(home, '.devflow', 'manifest.json'), '{"plugins":["devflow-implement"]}\n', 'utf-8');
+    vi.spyOn(clack.log, 'error').mockImplementation((msg: string) => { errors.push(String(msg)); });
+    vi.spyOn(clack.log, 'info').mockImplementation((msg: string) => { infos.push(String(msg)); });
+    vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      exits.push(code);
+      throw new Error('process.exit');
+    }) as typeof process.exit);
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    await fs.rm(home, { recursive: true, force: true });
+  });
+
+  /** Run the real command, with its option state cleared first. */
+  async function runUninstall(list: string): Promise<void> {
+    (uninstallCommand as unknown as { _optionValues: Record<string, unknown> })._optionValues = {};
+    await expect(
+      uninstallCommand.parseAsync(['--plugin', list, '--scope', 'user'], { from: 'user' }),
+    ).rejects.toThrow('process.exit');
+  }
+
+  it.each(['dynamic', 'devflow-dynamic'])('--plugin %s exits 1 with the unknown-plugin error and no retire notice', async (list) => {
+    await runUninstall(list);
+
+    expect(exits).toEqual([1]);
+    expect(errors).toEqual(['Unknown plugin(s): devflow-dynamic']);
+    expect(infos, 'the valid-plugins line alone: no retire notice').toEqual([expect.stringMatching(/^Valid plugins: (?![\s\S]*devflow-dynamic)/)]);
+  });
+
+  it.each(['devflow-implement,dynamic', 'dynamic,devflow-implement', 'devflow-implement,devflow-dynamic'])(
+    'the mixed list %s exits 1 and leaves the install tree and the manifest unchanged',
+    async (list) => {
+      const before = await treeOf(home);
+      expect(Object.keys(before)).toContain(path.join('.', '.devflow', 'manifest.json'));
+
+      await runUninstall(list);
+
+      expect(exits).toEqual([1]);
+      expect(errors).toEqual(['Unknown plugin(s): devflow-dynamic']);
+      expect(await treeOf(home)).toEqual(before);
+    },
+  );
 });

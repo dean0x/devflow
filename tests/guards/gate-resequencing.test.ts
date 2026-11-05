@@ -5,8 +5,8 @@
  *   D-SCRUTINIZE-STATUS      Harden reports `PASS | FIXED | BLOCKED` and every
  *                            file that states or reads the status uses that word set:
  *                            its own Output, the quality-gates skill and report
- *                            template, /implement Phase 4, /self-review Phase 2 and
- *                            both dynamic-build Gate 1 passes. READY is not a status
+ *                            template, /implement Phase 4 and /self-review Phase 2.
+ *                            READY is not a status
  *                            of Harden or quality-gates, and no Harden output
  *                            lists Naming or Consistency as PASS or FIXED: those two
  *                            belong to Polish and are reported as SKIP.
@@ -51,7 +51,6 @@ interface StatusFiles {
   readonly template: string
   readonly implement: string
   readonly selfReview: string
-  readonly dynamicBuild: string
 }
 
 function statusFiles(): StatusFiles {
@@ -61,7 +60,6 @@ function statusFiles(): StatusFiles {
     template: skill(path.join('references', 'report-template.md')),
     implement: requireDistFile('implement.md'),
     selfReview: requireDistFile('self-review.md'),
-    dynamicBuild: requireDistFile('dynamic-build.md'),
   }
 }
 
@@ -77,8 +75,7 @@ function collectStatusDefects(f: StatusFiles): string[] {
   const out: string[] = []
   const need = (what: string, ok: boolean): void => { if (!ok) out.push(what) }
   need('harden.md: Output does not declare `### Status: PASS | FIXED | BLOCKED`', f.harden.includes('### Status: PASS | FIXED | BLOCKED'))
-  need('harden.md: the workflow return is not pinned', f.harden.includes('{"status": "PASS" | "FIXED" | "BLOCKED"}'))
-  need('harden.md: the exempt fields are not the Status line and the status return field', /Exempt, inline in full: the `### Status` line and the `status` return field/.test(f.harden))
+  need('harden.md: the exempt field is not the Status line', /Exempt, inline in full: the `### Status` line \(commands read the status from it\)\./.test(f.harden))
   need('harden.md: the three statuses are not defined', /PASS when no change was needed, FIXED when you committed fixes and every P0 and P1 is fixed, and BLOCKED when a P0 cannot be fixed in scope/.test(f.harden))
   need('quality-gates SKILL.md: the overall status is not PASS / FIXED / BLOCKED', f.skillMd.includes('Status: PASS / FIXED / BLOCKED'))
   need('report-template.md: the overall status is not PASS / FIXED / BLOCKED', f.template.includes('**Status**: PASS / FIXED / BLOCKED'))
@@ -88,7 +85,6 @@ function collectStatusDefects(f: StatusFiles): string[] {
   }
   need('/implement Phase 4 does not read PASS | FIXED | BLOCKED', /Harden agent reports `### Status: PASS \| FIXED \| BLOCKED`/.test(f.implement))
   need('/self-review does not read STATUS (PASS|FIXED|BLOCKED)', f.selfReview.includes('Extract: STATUS (PASS|FIXED|BLOCKED)'))
-  need('dynamic-build does not pin the Harden return in both passes', f.dynamicBuild.split('Return: {"status": "PASS" | "FIXED" | "BLOCKED"}').length - 1 === 2)
   for (const [name, text] of [['harden.md', f.harden], ['quality-gates SKILL.md', f.skillMd], ['report-template.md', f.template]] as const) {
     if (/\bREADY\b/.test(text)) out.push(`${name}: READY is still a status`)
     if (POLISH_PILLAR_AS_VERDICT.test(text)) out.push(`${name}: Naming or Consistency is graded PASS or FIXED`)
@@ -96,14 +92,14 @@ function collectStatusDefects(f: StatusFiles): string[] {
   return out
 }
 
-describe('D-SCRUTINIZE-STATUS (#421 AC-23/24): one status vocabulary across the six files', () => {
+describe('D-SCRUTINIZE-STATUS (#421 AC-23/24): one status vocabulary across the five files', () => {
   it('every file states or reads PASS | FIXED | BLOCKED, READY is gone, and Naming and Consistency are SKIP', () => {
     const f = statusFiles()
     for (const [name, text] of Object.entries(f)) expect(text.length, `${name}: nothing read`).toBeGreaterThan(500)
     expect(collectStatusDefects(f)).toEqual([])
   })
 
-  it('known-bad probes: READY restored, a lost FIXED, a graded Naming row and a lost pin are each reported', () => {
+  it('known-bad probes: READY restored, a lost FIXED, a graded Naming row and a lost status row are each reported', () => {
     const f = statusFiles()
     expect(collectStatusDefects({ ...f, skillMd: f.skillMd.replace('Status: PASS / FIXED / BLOCKED', 'Status: READY / BLOCKED') })).toEqual([
       'quality-gates SKILL.md: the overall status is not PASS / FIXED / BLOCKED',
@@ -117,9 +113,6 @@ describe('D-SCRUTINIZE-STATUS (#421 AC-23/24): one status vocabulary across the 
     ])
     expect(collectStatusDefects({ ...f, harden: f.harden.replace('- Naming: SKIP (Polish agent)', '- Naming: PASS | FIXED (description)') })).toEqual([
       'harden.md: Naming or Consistency is graded PASS or FIXED',
-    ])
-    expect(collectStatusDefects({ ...f, dynamicBuild: f.dynamicBuild.replace('Return: {"status": "PASS" | "FIXED" | "BLOCKED"}', 'Report any code you changed.') })).toEqual([
-      'dynamic-build does not pin the Harden return in both passes',
     ])
     expect(collectStatusDefects({ ...f, template: f.template.replace('| FIXED | Issue found and resolved | Fixes were committed and every P0 and P1 is fixed |', '| FIXED | Issue found and resolved | |') })).toEqual([
       'report-template.md: the Status Definitions table has no overall meaning for FIXED',

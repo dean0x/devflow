@@ -13,15 +13,12 @@
  *
  * The guard reads `dist/commands`, the text the Code agents actually receive, through the shared collector in
  * tests/helpers.ts that the compliance-lens test also uses. It fails loudly when dist is absent. Per shape:
- *   - a fenced payload or a workflow template literal: the first non-empty prompt line is
+ *   - a fenced payload or a template literal: the first non-empty prompt line is
  *     `OPERATION: <one of the seven>`;
  *   - a prose spawn sentence: the sentence contains `OPERATION: <one of the seven>`.
  * A mode on a later line does not count, because a reader skimming the first line must see it. Per-host,
  * per-variant counts meet the floors below, which are test-local constants and not manifest rows: a floor on
  * a spawn count that later work legitimately lowers would block that work, because manifest floors never fall.
- *
- * The `_preamble.mds` usage example (`agent("your prompt here", { agentType: "Code" })`) documents the
- * call and is not a spawn; it is not a template literal, so the collector does not count it.
  *
  * D-CODE-OPERATION-PINS: the mode each spawn names must fit what the spawn does, and the variant it names must
  * own that mode. A review-finding fix is `issue-fix` on Code, so the regression-test rule applies to it; a gate
@@ -39,15 +36,14 @@ import {
 import type { CodeSpawnSite } from '../helpers.js'
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..')
-const PREAMBLE_PATH = path.join(ROOT, 'src', 'assets', 'commands', '_partials', '_preamble.mds')
 
 /**
  * Compiled commands that spawn each variant, and the spawn sites each carries today. Floors: may only rise.
  * Refactor is spawned by the orchestrator charter alone, so no compiled command carries a site for it.
  */
 const OPERATION_FLOORS: Readonly<Record<string, Readonly<Record<string, number>>>> = {
-  'Code': { 'implement.md': 5, 'resolve.md': 1, 'debug.md': 1, 'dynamic-build.md': 4 },
-  'Fix': { 'implement.md': 4, 'resolve.md': 2, 'dynamic-build.md': 4 },
+  'Code': { 'implement.md': 5, 'resolve.md': 1, 'debug.md': 1 },
+  'Fix': { 'implement.md': 4, 'resolve.md': 2 },
   'Refactor': {},
 }
 
@@ -117,13 +113,6 @@ const MODE_PINS: ReadonlyArray<readonly [host: string, anchor: string, mode: str
   ['resolve.md', 'VALIDATION_FAILURES: {parsed failures from Validate agent}', 'validation-fix', 'Fix'],
   ['resolve.md', '`CI_FAILURES`', 'ci-fix', 'Fix'],
   ['debug.md', 'TASK_DESCRIPTION: Implement the fix for this root cause', 'implement', 'Code'],
-  ['dynamic-build.md', 'Implement the following ticket on branch', 'implement', 'Code'],
-  ['dynamic-build.md', 'Fix the validation failures on branch', 'validation-fix', 'Fix'],
-  ['dynamic-build.md', 'Fix the alignment issues identified by the Evaluate agent', 'alignment-fix', 'Fix'],
-  ['dynamic-build.md', 'Fix the failing acceptance test scenarios', 'qa-fix', 'Fix'],
-  ['dynamic-build.md', 'Fix the following confirmed review findings', 'issue-fix', 'Code'],
-  ['dynamic-build.md', 'Fix the final validation failures on branch', 'validation-fix', 'Fix'],
-  ['dynamic-build.md', 'Spawn a Code agent', 'implement', 'Code'],
 ]
 
 /** Named collector: pins that match no site, more than one site, or a site naming another mode. */
@@ -201,7 +190,10 @@ describe('every compiled Code-family spawn opens with its OPERATION (D-CODE-OPER
   it('every spawn site resolves to an existing variant, whose source is named for it (AC-303)', () => {
     expect(collectUnknownCodeTypes(compiled())).toEqual([])
     const sites = compiled().flatMap(([file, text]) => collectCodeSpawnSites(file, text))
-    expect(sites.length, 'no Code-family spawn was read').toBeGreaterThan(15)
+    // LOWERED 15 -> 12 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the 8
+    // Code-family spawn sites of the dynamic-build host left the roster (13 remain), so the counted code is
+    // removed and no coverage is lost.
+    expect(sites.length, 'no Code-family spawn was read').toBeGreaterThan(12)
     for (const agentType of new Set(sites.map(s => s.agentType))) {
       expect(/^name: (\S+)$/m.exec(resolveAgentSource(codeSlugOf(agentType)).content)?.[1], `${agentType}: the agent source is named for the type`).toBe(agentType)
     }
@@ -210,14 +202,6 @@ describe('every compiled Code-family spawn opens with its OPERATION (D-CODE-OPER
     }
   })
 
-  it('the _preamble.mds usage example is unchanged and is not counted as a site', () => {
-    expect(readFileSync(PREAMBLE_PATH, 'utf-8')).toContain('agent("your prompt here", { agentType: "Code" })')
-    for (const host of ['dynamic-plan.md', 'dynamic-tickets.md']) {
-      const text = requireDistFile(host)
-      expect(text, `${host} carries the example`).toContain('agent("your prompt here", { agentType: "Code" })')
-      expect(collectCodeSpawnSites(host, text), `${host}: the example is not a spawn`).toEqual([])
-    }
-  })
 })
 
 describe('known-bad probes: each shape of untagged or misrouted spawn is reported (D-CODE-OPERATION-MODES)', () => {
@@ -245,24 +229,13 @@ describe('known-bad probes: each shape of untagged or misrouted spawn is reporte
     expect(defects[0]).toMatch(/^implement\.md:\d+: the first prompt line is "TASK_ID: \{task-id\}", not OPERATION: <mode>$/)
   })
 
-  it('(b) a template literal with OPERATION on its second line', () => {
-    const defects = collectOperationDefects(seeded(
-      'dynamic-build.md',
-      'agent(`OPERATION: implement\nImplement the following ticket on branch ${BRANCH}:',
-      'agent(`Implement the following ticket on branch ${BRANCH}:\nOPERATION: implement',
-    ))
-    expect(defects).toHaveLength(1)
-    expect(defects[0]).toMatch(/^dynamic-build\.md:\d+: the first prompt line is "Implement the following ticket on branch/)
-  })
-
-  it('(c) a prose spawn sentence with no OPERATION', () => {
-    const defects = collectOperationDefects(seeded(
-      'dynamic-build.md',
-      ' whose prompt opens with `OPERATION: implement` and carries `COMPLIANCE_DIRECTIVE` (when it is not empty) and `DECISIONS_CONTEXT`, with FULL intent context:',
-      ' with FULL intent context:',
-    ))
-    expect(defects).toHaveLength(1)
-    expect(defects[0]).toMatch(/^dynamic-build\.md:\d+: the spawn sentence names no OPERATION: <mode>$/)
+  it('(b) a template literal with OPERATION on its second line, and one with the mode on the wrong variant', () => {
+    const site = (agentType: string, payload: string): CodeSpawnSite => ({ file: 'synthetic.md', line: 7, agentType, payload })
+    expect(collectOperationDefect(site('Code', 'agent(`OPERATION: implement\nImplement the task:`, { agentType: "Code" })'))).toBeNull()
+    expect(collectOperationDefect(site('Code', 'agent(`Implement the task:\nOPERATION: implement`, { agentType: "Code" })')))
+      .toBe('synthetic.md:7: the first prompt line is "Implement the task:", not OPERATION: <mode>')
+    expect(collectOperationDefect(site('Code', 'agent(`OPERATION: validation-fix\nFix the failures:`, { agentType: "Code" })')))
+      .toBe('synthetic.md:7: OPERATION: validation-fix runs on Fix, but the spawn names Code')
   })
 
   it('(c) the CI-fix prose spawn without its mode', () => {
@@ -291,20 +264,13 @@ describe('known-bad probes: each shape of untagged or misrouted spawn is reporte
     const fixOnCode = collectOperationDefects(seeded('implement.md', 'Agent(subagent_type="Fix"):\n   "OPERATION: qa-fix\n', 'Agent(subagent_type="Code"):\n   "OPERATION: qa-fix\n'))
     expect(fixOnCode).toHaveLength(1)
     expect(fixOnCode[0]).toMatch(/^implement\.md:\d+: OPERATION: qa-fix runs on Fix, but the spawn names Code$/)
-    const templateOnCode = collectOperationDefects(seeded(
-      'dynamic-build.md',
-      'Commit fixes with conventional-commit message.`, { agentType: "Fix" });',
-      'Commit fixes with conventional-commit message.`, { agentType: "Code" });',
-    ))
-    expect(templateOnCode).toHaveLength(1)
-    expect(templateOnCode[0]).toMatch(/^dynamic-build\.md:\d+: OPERATION: validation-fix runs on Fix, but the spawn names Code$/)
     const issueFixOnFix = collectOperationDefects(seeded(
-      'dynamic-build.md',
-      'unresolved": ["<description of any finding that could not be fixed>"]}`, { agentType: "Code" });',
-      'unresolved": ["<description of any finding that could not be fixed>"]}`, { agentType: "Fix" });',
+      'resolve.md',
+      'Agent(subagent_type="Code"):\n"OPERATION: issue-fix\n',
+      'Agent(subagent_type="Fix"):\n"OPERATION: issue-fix\n',
     ))
     expect(issueFixOnFix).toHaveLength(1)
-    expect(issueFixOnFix[0]).toMatch(/^dynamic-build\.md:\d+: OPERATION: issue-fix runs on Code, but the spawn names Fix$/)
+    expect(issueFixOnFix[0]).toMatch(/^resolve\.md:\d+: OPERATION: issue-fix runs on Code, but the spawn names Fix$/)
   })
 
   it('(g) a spawn naming a Code variant that does not exist is reported (AC-303)', () => {
@@ -313,8 +279,8 @@ describe('known-bad probes: each shape of untagged or misrouted spawn is reporte
   })
 
   it('a pinned spawn naming another mode, and a pin whose anchor vanished, are each reported', () => {
-    const wrong = collectPinDefects(seeded('dynamic-build.md', '`OPERATION: issue-fix\nFix the following confirmed review findings', '`OPERATION: implement\nFix the following confirmed review findings'))
-    expect(wrong.some(d => d.includes('"Fix the following confirmed review findings" names implement, expected issue-fix'))).toBe(true)
+    const wrong = collectPinDefects(seeded('resolve.md', 'Agent(subagent_type="Code"):\n"OPERATION: issue-fix\n', 'Agent(subagent_type="Code"):\n"OPERATION: implement\n'))
+    expect(wrong.some(d => d.includes('"ISSUES: {fix_now_issues_in_batch}" names implement, expected issue-fix'))).toBe(true)
     const gone = collectPinDefects(seeded('resolve.md', 'ISSUES: {fix_now_issues_in_batch}', 'ISSUE_LIST: {fix_now_issues_in_batch}'))
     expect(gone).toContain('resolve.md: 0 Code sites match "ISSUES: {fix_now_issues_in_batch}", expected one')
   })
@@ -433,13 +399,13 @@ describe('the alignment-fix Protocol is its two lines, with no re-run of Evaluat
 // `fix-body-max` and `refactor-body-max`: lowered by a pass that cut the artifact, never raised to fit one that grew.
 
 /** The compiled Code agent body, in bytes. Registered as `code-body-max`; lowered, never raised. */
-const CODE_BODY_MAX_BYTES = 9_828
+const CODE_BODY_MAX_BYTES = 9_524
 
 /** The compiled Fix agent body, in bytes. Registered as `fix-body-max`; lowered, never raised. */
-const FIX_BODY_MAX_BYTES = 7_407
+const FIX_BODY_MAX_BYTES = 7_266
 
 /** The compiled Refactor agent body, in bytes. Registered as `refactor-body-max`; lowered, never raised. */
-const REFACTOR_BODY_MAX_BYTES = 6_093
+const REFACTOR_BODY_MAX_BYTES = 5_952
 
 const BODY_CEILINGS: Readonly<Record<string, number>> = {
   'Code': CODE_BODY_MAX_BYTES,

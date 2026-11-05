@@ -12,8 +12,7 @@
  *     re-stamp a copy an earlier run stamped. It carries no MDS interpolation braces, and it sits outside
  *     every curation arm, so both variants carry it. A separate stamped file would add a file to the
  *     install walk and the install goldens, which an in-place rewrite leaves unchanged.
- *   - Only code-review.md carries it. /dynamic-build spawns every review focus and drops none (plan
- *     decision 1), so it has no stamp, no reduced classes and no DIFF_FILE.
+ *   - Only code-review.md carries it.
  *   - The stamp describes what is on disk, so it is computed from the EFFECTIVE selection
  *     (`FileCopyOptions.effectivePlugins`), never from the plugins one run copies, and it is applied after
  *     the command copy and the orphan sweep, whether or not code-review's own plugin is in the run. The

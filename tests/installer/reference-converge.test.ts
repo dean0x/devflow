@@ -312,6 +312,83 @@ describe('the references converge fails closed on the off side', () => {
   });
 });
 
+describe('a stale post-wave-report reference under the tracker subtree (TP-13)', () => {
+  const STALE = ['github', 'jira', 'linear'].map(provider => `devflow:git/references/tracker/${provider}/post-wave-report.md`);
+
+  const stuck = (): string => flatFile(STALE[0]);
+  const mine = (): string => flatFile('devflow:git/references/tracker/github/my-notes.md');
+
+  /**
+   * Both values of the compliance switch, with the posting answer the converge gives when its prune
+   * of a stale reference fails: with compliance off the overlay is unproven, so posting is unknown;
+   * with compliance on no file posts, so posting is clear.
+   */
+  const SWITCHES = [
+    { label: 'off', compliance: false, pruneFailsAs: { converged: false, unproven: true, posting: 'unknown' } },
+    { label: 'on', compliance: true, pruneFailsAs: { converged: false, unproven: false, posting: 'clear' } },
+  ] as const;
+
+  /** A machine of the given compliance switch that still holds the three references of an old release. */
+  async function plantStale(compliance: boolean): Promise<void> {
+    await installInto(claudeDir, devflowDir, compliance);
+    for (const entry of STALE) await fs.writeFile(flatFile(entry), 'a reference of an old release\n', 'utf-8');
+  }
+
+  /**
+   * A user file in the github provider folder that cannot be moved aside, so the folder is not
+   * swapped out and the overlay's prune is what removes the stale reference beside it.
+   */
+  async function keepUserFileInGithubFolder(): Promise<void> {
+    const file = mine();
+    await fs.writeFile(file, 'a note of mine\n', 'utf-8');
+    const realRename = fs.rename.bind(fs);
+    vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      if (from === file) throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+      return realRename(from, to);
+    });
+  }
+
+  it.each(SWITCHES)('a compliance-$label converge removes each one, and posting is clear', async ({ compliance }) => {
+    await plantStale(compliance);
+
+    const result = await converge(compliance);
+
+    expect(result.converged, warnings.join('\n')).toBe(true);
+    expect(result.posting).toEqual({ kind: 'clear' });
+    for (const entry of STALE) expect(await exists(flatFile(entry)), `${entry} is removed`).toBe(false);
+  });
+
+  it.each(SWITCHES)('compliance $label: beside a user file that stays, the prune removes it and names it, and posting is clear', async ({ compliance }) => {
+    await plantStale(compliance);
+    await keepUserFileInGithubFolder();
+
+    const result = await converge(compliance);
+
+    expect(result.posting).toEqual({ kind: 'clear' });
+    for (const entry of STALE) expect(await exists(flatFile(entry)), `${entry} is removed`).toBe(false);
+    expect(result.references.removed).toContain(STALE[0]);
+    expect(await fs.readFile(mine(), 'utf-8'), 'the user file stays where it is').toBe('a note of mine\n');
+  });
+
+  it.each(SWITCHES)('compliance $label: a prune that fails leaves the file in place and gives the posting answer of that switch', async ({ compliance, pruneFailsAs }) => {
+    await plantStale(compliance);
+    await keepUserFileInGithubFolder();
+    const file = stuck();
+    const realUnlink = fs.unlink.bind(fs);
+    vi.spyOn(fs, 'unlink').mockImplementation(async target => {
+      if (target === file) throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+      return realUnlink(target);
+    });
+
+    const result = await converge(compliance);
+
+    expect(result.converged).toBe(pruneFailsAs.converged);
+    expect(result.references.unproven).toBe(pruneFailsAs.unproven);
+    expect(result.posting.kind).toBe(pruneFailsAs.posting);
+    expect(await exists(file), 'the file that could not be pruned stays').toBe(true);
+  });
+});
+
 describe('a compliance-off install keeps the posting files out of the skill copy', () => {
   const POSTING = 'devflow:git/references/github-posting.md';
   const POSTING_FILES = [POSTING, ASKS];

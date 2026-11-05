@@ -4,18 +4,18 @@
  * Covers the unified frontmatter-driven MDS build pipeline.
  *
  * Scenario coverage:
- *  1. Discovery == 14 — discoverHosts() finds exactly the 14 expected basenames.
+ *  1. Discovery == 10 — discoverHosts() finds exactly the 10 expected basenames.
  *  2. output-dir stripped — compiled outputs contain no output-dir: key.
  *  3. Partial expansion — no un-expanded call sites or @import lines in outputs.
  *  4. MDS mechanism (regression) — happy compile, error path (isMdsError + mds:: code),
  *     isMdsError rejects non-mds values.
  *  5. Script happy-path exit — the committed sources compile cleanly and the compiled
  *     set lands in dist/commands/ (exact cardinality is pinned by scenario 6).
- *  6. Forgotten-key guard (C2) — expected-command-set: all 9 knowledge + 4 dynamic + release outputs present.
+ *  6. Forgotten-key guard (C2) — expected-command-set: all 9 knowledge + release outputs present.
  *  7. Dest safety negative (C3) — a host with a wrong output-dir → exit 1 + "typo?" message.
  *  8. npm scripts (C4) — package.json has build:mds, not the two old scripts, and build chains it.
  *  9. Ignored-dir walk (P3) — a .mds with output-dir: under node_modules/ is not compiled.
- * 10. dynamic-build.md doctrine greps.
+ * 10. implement.md and self-review.md keep the Gate 1 shape and the strict base-name class.
  * 11. knowledge outputs contain no feature-knowledge.cjs references.
  * 22. this file never spawns a build against the real repo root.
  *
@@ -39,7 +39,6 @@ import { createRequire } from 'module';
 import { init, compile, isMdsError } from '@mdscript/mds';
 import {
   KNOWLEDGE_COMMAND_HOSTS,
-  DYNAMIC_COMMAND_HOSTS,
   MDS_COMMAND_HOSTS,
   MDS_PARTIALS,
   MDS_REFERENCE_PARTIALS,
@@ -76,7 +75,6 @@ import {
   collectSpawnScoping,
   runMdsBuild,
   requireDistFiles,
-  resolveVariantOffSource,
   gitAgentSinkCorpus,
   walkFiles,
   collectBackslashBraceLeaks,
@@ -108,7 +106,7 @@ let BUILT_ROOT: string;
 
 /**
  * Several tests here spawn `tsx scripts/build-mds.ts`, and the committed-corpus
- * build compiles all 14 outputs. The 5s vitest default is far below what a cold
+ * build compiles all 10 outputs. The 5s vitest default is far below what a cold
  * tsx start costs under full-suite load, so the file declares its own floor once
  * rather than annotating each test.
  */
@@ -126,16 +124,15 @@ afterAll(cleanupCommittedTree);
 // Names come from the shared manifest (tests/fixtures/mds-manifest.ts) — the one
 // definition of which files the build owns. These aliases are this file's local
 // vocabulary for those sets; COMMAND_HOSTS is the manifest's MDS_COMMAND_HOSTS
-// (14 command hosts) and is deliberately NOT the manifest's ALL_MDS_HOSTS, which
+// (10 command hosts) and is deliberately NOT the manifest's ALL_MDS_HOSTS, which
 // also carries the generator hosts.
 //
-// DIST_FILES = the 14 deployed commands, one per compiled MDS host (§14.5). Every
+// DIST_FILES = the 10 deployed commands, one per compiled MDS host (§14.5). Every
 // command is a host: no static command file exists to be copied beside them.
 // Scope rule (§14.5):
 //   - compilation guards (escaped braces, un-expanded call sites) → COMMAND_HOSTS scope
 //   - deployed-behaviour guards (spawn fences, gh issue absence, retired wording) → DIST_FILES scope
 const KNOWLEDGE_HOSTS = KNOWLEDGE_COMMAND_HOSTS;
-const DYNAMIC_HOSTS = DYNAMIC_COMMAND_HOSTS;
 const COMMAND_HOSTS = MDS_COMMAND_HOSTS;
 const DIST_FILES = DIST_COMMAND_FILES;
 
@@ -153,7 +150,7 @@ async function ensureInit(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// 1. Discovery == 14
+// 1. Discovery == 10
 // ---------------------------------------------------------------------------
 
 describe('MDS host discovery', () => {
@@ -193,13 +190,15 @@ describe('MDS host discovery', () => {
     return { hosts: hosts.sort(), partials: partials.sort(), subdirs: subdirs.sort() };
   }
 
-  it('commands/ holds exactly the manifest\'s 14 command hosts (both directions)', async () => {
+  it('commands/ holds exactly the manifest\'s 10 command hosts (both directions)', async () => {
     // Set equality, not a count. A count stays green when one host is renamed and
     // another added in the same commit; naming the set is what pins the roster.
     const { hosts } = await collectMdsNames(COMMANDS_DIR);
     expect(hosts).toEqual([...MDS_COMMAND_HOSTS].sort());
-    // Manifest length floor — floors never decrease (numeric-floors.json: dist-host-count).
-    expect(MDS_COMMAND_HOSTS.length).toBeGreaterThanOrEqual(14);
+    // Manifest length floor (numeric-floors.json: dist-host-count).
+    // LOWERED 14 -> 10 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05:
+    // the four dynamic command hosts left the roster, so the counted code is removed and no coverage is lost.
+    expect(MDS_COMMAND_HOSTS.length).toBeGreaterThanOrEqual(10);
   });
 
   /**
@@ -293,8 +292,11 @@ describe('MDS host discovery', () => {
       partials,
       'the walk must reach outside src/assets/commands/_partials/, or widening it bought nothing',
     ).toContain(MDS_REFERENCE_PARTIALS[0]);
-    // Manifest length floor — floors never decrease (numeric-floors.json: partial-count).
-    expect(ALL_MDS_PARTIALS.length).toBeGreaterThanOrEqual(17);
+    // Manifest length floor (numeric-floors.json: partial-count).
+    // LOWERED 17 -> 16 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05:
+    // the six dynamic-only command partials left the roster, so the counted code is removed and no coverage
+    // is lost.
+    expect(ALL_MDS_PARTIALS.length).toBeGreaterThanOrEqual(16);
   });
 
   it('known-bad probe: the repo-wide collector reports a seeded partial and skips a seeded host', async () => {
@@ -423,26 +425,6 @@ describe('output-dir: stripped from compiled outputs', () => {
     expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
   });
 
-  it('dynamic compiled outputs preserve argument-hint:', async () => {
-    let scanned = 0;
-    for (const basename of DYNAMIC_HOSTS) {
-      const outputPath = path.join(BUILT_COMMANDS, `${basename}.md`);
-      let content: string;
-      try {
-        content = await fs.readFile(outputPath, 'utf-8');
-      } catch {
-        continue;
-      }
-      scanned++;
-      if (/^---\r?\n/.test(content)) {
-        expect(
-          content,
-          `${DIST_COMMANDS}/${basename}.md must preserve argument-hint:`,
-        ).toMatch(/^argument-hint:/m);
-      }
-    }
-    expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -692,7 +674,7 @@ describe('decisions_load adoption in compiled knowledge command outputs', () => 
 
   // D-DECISIONS-LEARNING-GATE: the CURATION=off sentence must come before the
   // ledger-locate git call and before the index read, so curation off locates no
-  // ledger and reads no index. Every host but dynamic-profile loads decisions behind it.
+  // ledger and reads no index. Every command host loads decisions behind it.
   // Named collector, shared by the live scan and the known-bad probe below.
   const GATE_SENTENCE = 'When the settings line says `CURATION=off`';
   // The decisions step's own locate sentence, then the first root call after it: a docs or knowledge
@@ -712,14 +694,14 @@ describe('decisions_load adoption in compiled knowledge command outputs', () => 
     return gate < locate && locate < read ? [] : [`${basename}: gate@${gate} locate@${locate} read@${read} are not in that order`];
   }
 
-  it('the CURATION=off gate precedes the ledger-locate call and the index read in all 13 decisions hosts', async () => {
+  it('the CURATION=off gate precedes the ledger-locate call and the index read in all 10 decisions hosts', async () => {
     let scanned = 0;
     for (const basename of DECISIONS_COMMAND_HOSTS) {
       const content = await fs.readFile(path.join(BUILT_COMMANDS, `${basename}.md`), 'utf-8');
       scanned++;
       expect(collectGateOrderProblems(basename, content), basename).toEqual([]);
     }
-    expect(scanned, 'the gate-order scan is vacuous').toEqual(13);
+    expect(scanned, 'the gate-order scan is vacuous').toEqual(10);
   });
 
   it('known-bad probe: moving the gate sentence after the index read is reported', async () => {
@@ -825,17 +807,7 @@ describe('expected-command-set guard (C2)', () => {
     }
   });
 
-  it('all 4 dynamic command outputs exist post-build', async () => {
-    for (const basename of DYNAMIC_HOSTS) {
-      const outputPath = path.join(BUILT_COMMANDS, `${basename}.md`);
-      await expect(
-        fs.access(outputPath),
-        `Expected compiled output missing: ${DIST_COMMANDS}/${basename}.md`,
-      ).resolves.toBeUndefined();
-    }
-  });
-
-  it('a build of the committed sources holds exactly the manifest\'s 14 output files (both directions)', async () => {
+  it('a build of the committed sources holds exactly the manifest\'s 10 output files (both directions)', async () => {
     // Set equality names which files must be there; the length pin below keeps
     // the roster from shrinking behind it.
     const files = await fs.readdir(BUILT_COMMANDS);
@@ -844,10 +816,12 @@ describe('expected-command-set guard (C2)', () => {
       mdFiles,
       `the built dist/commands/ must hold exactly the manifest's output set, got: ${mdFiles.join(', ')}`,
     ).toEqual([...DIST_COMMAND_FILES].sort());
+    // LOWERED 14 -> 10 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the four
+    // dynamic command hosts left the roster (numeric-floors.json: dist-files-count; five sites spell it).
     expect(
       DIST_COMMAND_FILES.length,
-      'DIST_COMMAND_FILES = the 14 compiled command hosts',
-    ).toBe(14);
+      'DIST_COMMAND_FILES = the 10 compiled command hosts',
+    ).toBe(10);
   });
 
   it('the deployed dist/commands/ holds the same set (read-only, fail-loud when unbuilt)', () => {
@@ -982,9 +956,9 @@ describe('the compliance-off references tree (AC-39)', () => {
     expect(builtReferences(COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR)).toEqual([...manifest].sort());
   });
 
-  it('holds none of the 17 references a compliance-off install omits', () => {
+  it('holds none of the 14 references a compliance-off install omits', () => {
     const omitted = installedReferenceManifest().filter(rel => !installedReferenceManifest({ compliance: false }).includes(rel));
-    expect(omitted).toHaveLength(17);
+    expect(omitted).toHaveLength(14);
     const built = new Set(builtReferences(COMPLIANCE_OFF_SKILL_REFS_OUTPUT_DIR));
     for (const rel of omitted) expect(built.has(rel), `${rel} is in the compliance-off tree`).toBe(false);
   });
@@ -1351,515 +1325,24 @@ describe('ignored-dir walk (P3)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 10. dynamic-build.md doctrine greps
+// 10. implement and self-review keep the Gate 1 shape and the strict base-name class
 // ---------------------------------------------------------------------------
 
-describe('compiled dynamic-build.md: Gate-1-twice cadence + build execution doctrine', () => {
-  let compiled: string;
+/** The strict base-name class the resolver exports and implement.mds copies for BASE_BRANCH. */
+const STRICT_NAME_SOURCE = (createRequire(import.meta.url)(RESOLVE_BASE_SCRIPT) as { STRICT_NAME_RE: RegExp }).STRICT_NAME_RE.source;
 
-  beforeAll(async () => {
-    compiled = await fs.readFile(
-      path.join(BUILT_COMMANDS, 'dynamic-build.md'),
-      'utf-8',
-    );
-  });
-
-  it('renders the build_execution_doctrine as the Running commands block (foreground, no background run)', () => {
-    expect(compiled).toContain('Build execution doctrine');
-    expect(compiled).toContain('Running commands');
-    expect(compiled).not.toContain('run_in_background');
-  });
-
-  it('runs ONE final Gate 1 (#2) after the review pass', () => {
-    expect(compiled).toContain('gate1-final');
-    expect(compiled).toContain('Gate 1 #2');
-  });
-
-  it('spawns Polish and Harden exactly twice each (Gate 1 #1 + Gate 1 #2)', () => {
-    // Obsolete-forever strings ('Gate 1 only — no Gate 2 for review-fixes',
-    // 'Polish recent fixes', '9-pillar review of recent fixes') dropped; count assertions
-    // are the real structural guard under the new single-pass architecture.
-    const polishCount = (compiled.match(/agentType: "Polish"/g) ?? []).length;
-    const hardenCount = (compiled.match(/agentType: "Harden"/g) ?? []).length;
-    expect(polishCount, 'Polish should run only in the two Gate-1 passes').toBe(2);
-    expect(hardenCount, 'Harden should run only in the two Gate-1 passes').toBe(2);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 10b. dynamic-build.md: Gate 1 order, one Validate per pass, the post-merge Validate
-//      and its undo (#421: D-VALIDATE-ONCE, D-GATE1-ESCALATION, D-WAVE-MERGE-VALIDATE)
-//
-// Every guard has a named collector and a known-bad probe through the same collector;
-// the absence guards (no codeChanged, no hard reset, no Validate asked of Git, no model
-// on a Validate) pass vacuously when the text they read is missing, so each probe seeds
-// the defect and each test asserts the corpus it read.
-// ---------------------------------------------------------------------------
-
-/** The text from `from` to `to`, or null unless both anchors occur once, in that order. */
-function between(text: string, from: string, to: string): string | null {
-  const a = text.indexOf(from);
-  const b = text.indexOf(to, a + from.length);
-  return a === -1 || b === -1 || text.indexOf(from, a + 1) !== -1 ? null : text.slice(a, b);
-}
-
-/**
- * Named collector: where a Gate 1 pass does not run Polish, then Harden, then
- * Validate, with the first Validate unconditional (a top-level statement of the phase
- * callback, not inside an `if`).
- */
-function collectGate1OrderViolations(compiled: string): string[] {
-  const passes: ReadonlyArray<readonly [string, string | null]> = [
-    ['Gate 1 #1', between(compiled, 'const gate1 = await phase("gate1"', 'const gate2 = await phase("gate2"')],
-    ['Gate 1 #2', between(compiled, 'const gate1Final = await phase("gate1-final"', '// PASS requires survivingFindings.length === 0')],
-  ];
-  const out: string[] = [];
-  for (const [label, pass] of passes) {
-    if (pass === null) {
-      out.push(`${label}: the pass was not found`);
-      continue;
-    }
-    const at = (type: string): number => pass.indexOf(`{ agentType: "${type}" }`);
-    const [polish, harden, validate] = [at('Polish'), at('Harden'), at('Validate')];
-    if (polish === -1 || harden === -1 || validate === -1) out.push(`${label}: a spawn is missing`);
-    else if (!(polish < harden && harden < validate)) out.push(`${label}: the order is not Polish, Harden, Validate`);
-    if (!/^  const validation = await agent\(/m.test(pass)) out.push(`${label}: the first Validate is not an unconditional statement of the pass`);
-    if (pass.includes('codeChanged')) out.push(`${label}: the pass still branches on codeChanged`);
-  }
-  return out;
-}
-
-describe('compiled dynamic-build.md: Gate 1 order (D-VALIDATE-ONCE)', () => {
-  let compiled: string;
-  beforeAll(async () => {
-    compiled = await fs.readFile(path.join(BUILT_COMMANDS, 'dynamic-build.md'), 'utf-8');
-  });
-
-  it('both passes spawn Polish, Harden, then Validate, and Validate is unconditional', () => {
-    expect(collectGate1OrderViolations(compiled)).toEqual([]);
-  });
-
-  it('Polish and Harden are still spawned exactly twice each, and no Validate spawn names a model', () => {
-    expect((compiled.match(/agentType: "Polish"/g) ?? []).length).toBe(2);
-    expect((compiled.match(/agentType: "Harden"/g) ?? []).length).toBe(2);
-    const validates = [...compiled.matchAll(/agent\(`(?:(?!agent\(`)[\s\S])*?`, \{ agentType: "Validate"[^}]*\}/g)].map(m => m[0]);
-    expect(validates.length, 'no Validate spawn read').toBeGreaterThanOrEqual(5);
-    expect(validates.filter(v => /\bmodel\b/.test(v.slice(v.lastIndexOf('`'))))).toEqual([]);
-  });
-
-  it('codeChanged appears nowhere in the compiled engine, /implement or /self-review', async () => {
-    for (const name of ['dynamic-build.md', 'implement.md', 'self-review.md']) {
+describe('compiled implement.md and self-review.md', () => {
+  it('codeChanged appears nowhere in /implement or /self-review', async () => {
+    for (const name of ['implement.md', 'self-review.md']) {
       const text = await fs.readFile(path.join(BUILT_COMMANDS, name), 'utf-8');
       expect(text.length, `${name}: nothing read`).toBeGreaterThan(1000);
       expect(text, name).not.toContain('codeChanged');
     }
   });
 
-  it('gate1_postcode() and engine_invariants() state the same order, with Validate last', () => {
-    const doctrine = between(compiled, '### GATE 1 — Post-code pipeline', '**Gate 1 contains NO Evaluate agent') ?? '';
-    const steps = [...doctrine.matchAll(/^(\d)\. \*\*(\w+) agent\*\*/gm)].map(m => `${m[1]}:${m[2]}`);
-    expect(steps).toEqual(['1:Polish', '2:Harden', '3:Validate']);
-    expect(compiled).toContain('before Polish agent + Harden agent + Validate agent (in that order');
-  });
-
-  it('every build states the depth rule right after the Gate 1 exclusion, so a one-line fix gets a lighter pass', () => {
-    const DEPTH_RULE = 'Depth scales to change size and budget: a one-line fix gets a lighter pass.';
-    const EXCLUSION = '**Gate 1 contains NO Evaluate agent and NO Test agent.** Those are Gate 2 only.\n\n';
-    const builds: ReadonlyArray<readonly [string, string | null]> = [
-      ['on', compiled],
-      ['curation-off', resolveVariantOffSource('curation-off', 'commands', 'dynamic-build', BUILT_ROOT)],
-      ['compliance-off', resolveVariantOffSource('compliance-off', 'commands', 'dynamic-build', BUILT_ROOT)],
-      ['both-off', resolveVariantOffSource('both-off', 'commands', 'dynamic-build', BUILT_ROOT)],
-    ];
-    for (const [name, text] of builds) {
-      expect(text, `${name}: the build is read`).not.toBeNull();
-      expect((text as string).split(DEPTH_RULE).length - 1, `${name}: the depth rule appears once`).toBe(1);
-      expect(text, `${name}: the rule follows the Gate 1 exclusion`).toContain(`${EXCLUSION}${DEPTH_RULE}\n`);
-    }
-    // Known-bad probe: a build without the rule is reported by the same check.
-    const lost = compiled.replace(`${DEPTH_RULE}\n\n`, '');
-    expect(lost, 'the seed must land').not.toBe(compiled);
-    expect(lost).not.toContain(`${EXCLUSION}${DEPTH_RULE}\n`);
-  });
-
-  it('the escalation type list carries harden-blocked', () => {
-    expect(compiled).toMatch(/"type": "merge-conflict \| gate2-fail \| validation-exhausted \| harden-blocked \|/);
-  });
-
-  it('known-bad probes: the order before #421 and a surviving codeChanged branch are reported', () => {
-    const swapped = compiled
-      .replace('  const validation = await agent(`Run build, typecheck, lint, and tests on branch ${BRANCH}.\nFollow', '  const earlyValidation = await agent(`Run build, typecheck, lint, and tests on branch ${BRANCH}.\nFollow');
-    expect(swapped, 'the seed must land').not.toBe(compiled);
-    expect(collectGate1OrderViolations(swapped)).toEqual(['Gate 1 #1: the first Validate is not an unconditional statement of the pass']);
-    const branching = compiled.replace('  await agent(`Polish and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Polish" });', '  if (harden.codeChanged) { await agent(`x`, { agentType: "Validate" }); }\n  await agent(`Polish and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Polish" });');
-    expect(collectGate1OrderViolations(branching).some(v => v.includes('Gate 1 #1'))).toBe(true);
-    expect(collectGate1OrderViolations('no passes here')).toEqual(['Gate 1 #1: the pass was not found', 'Gate 1 #2: the pass was not found']);
-  });
-});
-
-/** The undo spawn's prompt template: from its lead to the Git spawn options. */
-function undoPrompt(text: string): string | null {
-  const at = text.indexOf('agent(`Undo the merge ${merge.mergeSha}');
-  const end = text.indexOf('{ agentType: "Git" }', at);
-  return at === -1 || end === -1 ? null : text.slice(at, end);
-}
-
-/** Named collector: what the undo instruction lacks, or carries that it must not. */
-function collectUndoDefects(text: string): string[] {
-  const prompt = undoPrompt(text);
-  if (prompt === null) return ['no undo spawn'];
-  const out: string[] = [];
-  if (!prompt.includes('git reset --keep ${merge.baseSha}')) out.push('the undo does not run reset --keep on the recorded pre-merge SHA');
-  if (/git reset --keep \$\{merge\.mergeSha\}/.test(prompt)) out.push('the undo resets to the merge commit or its first parent');
-  if (/reset\s+--hard|--hard/.test(prompt)) out.push('the undo names a hard reset');
-  if (/\bpush\b/i.test(prompt)) out.push('the undo names a push');
-  if (!prompt.includes('only when no remote branch contains ${merge.mergeSha}')) out.push('the undo is not gated on no remote branch containing the merge');
-  for (const check of ['git symbolic-ref --short HEAD', 'git rev-parse refs/heads/${INTEGRATION_BRANCH}', 'git rev-parse ${merge.mergeSha}^1']) {
-    if (!prompt.includes(check)) out.push(`the undo does not run the read-only check ${check}`);
-  }
-  if (!prompt.includes('{"undone": true, "head": "<40-hex from git rev-parse refs/heads/${INTEGRATION_BRANCH}>"}') || !prompt.includes('{"undone": false, "reason":')) out.push('the undo does not pin both return shapes');
-  return out;
-}
-
-/** The merge spawn's prompt template: from its lead to the Git spawn options. */
-function mergePrompt(text: string): string | null {
-  const at = text.indexOf('agent(`Merge ${engineResult.branch}');
-  const end = text.indexOf('{ agentType: "Git" }', at);
-  return at === -1 || end === -1 ? null : text.slice(at, end);
-}
-
-/** The merge-in-progress check and the abort the merge instruction pins, as the shipped prompt words them. */
-const MERGE_ABORT_RULE = 'If the merge stops after it began (git rev-parse -q --verify MERGE_HEAD succeeds), run git merge --abort; if that abort fails, return merged true with no mergeSha.';
-/** The local-branch check that runs before the merge, as the shipped prompt words it. */
-const LOCAL_BRANCH_CHECK = 'run git rev-parse --verify --quiet refs/heads/${engineResult.branch} (on a non-zero exit return merged false, reason "no such local branch")';
-
-/** Named collector: what the merge instruction lacks. Its git lines are the ones the real-git test runs. */
-function collectMergeDefects(text: string): string[] {
-  const prompt = mergePrompt(text);
-  if (prompt === null) return ['no merge spawn'];
-  const out: string[] = [];
-  if (!prompt.includes('git merge --no-ff ')) out.push('the merge is not pinned to git merge --no-ff');
-  else if (!prompt.includes('git merge --no-ff refs/heads/${engineResult.branch}')) out.push('the merge is not of refs/heads/<branch>');
-  if (!prompt.includes('run git rev-parse ${INTEGRATION_BRANCH} as baseSha')) out.push('the merge does not record the integration head as baseSha');
-  if (!prompt.includes(LOCAL_BRANCH_CHECK)) out.push('the merge does not check for a local branch before it merges');
-  if (!prompt.includes(MERGE_ABORT_RULE)) out.push('the merge does not abort only a merge that began');
-  if (!prompt.includes('A merge that did not begin returns merged false with the reason.')) out.push('the merge does not return merged false for a merge that did not begin');
-  const recordAt = prompt.indexOf('as baseSha');
-  const mergeAt = prompt.indexOf('git merge --no-ff');
-  if (recordAt !== -1 && mergeAt !== -1 && recordAt > mergeAt) out.push('the merge records baseSha after the merge');
-  const checkAt = prompt.indexOf('git rev-parse --verify --quiet refs/heads/');
-  if (checkAt !== -1 && mergeAt !== -1 && checkAt > mergeAt) out.push('the merge checks for a local branch after the merge');
-  return out;
-}
-
-/** The Git prompts of a dynamic-build source or build: every Git template literal and Git spawn fence. */
-function gitPrompts(text: string): string[] {
-  const templates = [...text.matchAll(/agent\(`(?:(?!agent\(`)[\s\S])*?`, \{ agentType: "Git" \}/g)].map(m => m[0]);
-  const fences = [...text.matchAll(/Agent\(subagent_type="Git"\):\n"[\s\S]*?"\n/g)].map(m => m[0]);
-  return [...templates, ...fences];
-}
-
-/** Named collector: Git prompts that ask Git to run Validate, and doctrine lines that still tell Git to. */
-function collectGitValidateRequests(text: string): string[] {
-  const out = gitPrompts(text).filter(p => /\bValidate\b/.test(p)).map(p => `a Git prompt mentions Validate: ${p.split('\n')[0].slice(0, 70)}`);
-  for (const line of text.split('\n')) {
-    if (/After any resolution: Validate agent|run Validate agent \(build \+ test\)|Run Validate agent \(build \+ test\)/i.test(line)) out.push(`a doctrine line asks for a Validate: ${line.trim().slice(0, 70)}`);
-  }
-  return out;
-}
-
-describe('dynamic-build: the post-merge Validate belongs to the workflow, and a red merge is undone (D-WAVE-MERGE-VALIDATE)', () => {
-  let compiled: string;
-  let sources: Record<string, string>;
-  beforeAll(async () => {
-    compiled = await fs.readFile(path.join(BUILT_COMMANDS, 'dynamic-build.md'), 'utf-8');
-    sources = {
-      'dynamic-build.mds': readFileSync(path.join(COMMANDS_DIR, 'dynamic-build.mds'), 'utf-8'),
-      '_wave.mds': readFileSync(path.join(PARTIALS_DIR, '_wave.mds'), 'utf-8'),
-      '_engine.mds': readFileSync(path.join(PARTIALS_DIR, '_engine.mds'), 'utf-8'),
-    };
-  });
-
-  it('the undo runs three read-only checks, reset --keep on the recorded pre-merge SHA, the remote gate and both returns, and no caret reset, no hard reset and no push', () => {
-    expect(collectUndoDefects(compiled)).toEqual([]);
-    expect(collectUndoDefects(sources['dynamic-build.mds'])).toEqual([]);
-  });
-
-  it('known-bad probes: a hard reset, a push and a missing gate are each reported', () => {
-    const hard = compiled.replace('git reset --keep ${merge.baseSha}', 'git reset --hard ${merge.baseSha}');
-    expect(hard, 'the seed must land').not.toBe(compiled);
-    expect(collectUndoDefects(hard)).toEqual(expect.arrayContaining(['the undo does not run reset --keep on the recorded pre-merge SHA', 'the undo names a hard reset']));
-    const caret = compiled.replace('git reset --keep ${merge.baseSha}', 'git reset --keep ${merge.mergeSha}^1');
-    expect(caret, 'the seed must land').not.toBe(compiled);
-    expect(collectUndoDefects(caret)).toEqual(['the undo does not run reset --keep on the recorded pre-merge SHA', 'the undo resets to the merge commit or its first parent']);
-    const unchecked = compiled.replace('git rev-parse ${merge.mergeSha}^1 must print', 'git log -1 must print');
-    expect(unchecked, 'the seed must land').not.toBe(compiled);
-    expect(collectUndoDefects(unchecked)).toEqual(['the undo does not run the read-only check git rev-parse ${merge.mergeSha}^1']);
-    const pushing = compiled.replace('and no other that changes a branch or a remote', 'then push the branch');
-    expect(collectUndoDefects(pushing)).toEqual(['the undo names a push']);
-    expect(collectUndoDefects(compiled.replace('only when no remote branch contains ${merge.mergeSha}', 'whether or not a branch contains ${merge.mergeSha}'))).toEqual(['the undo is not gated on no remote branch containing the merge']);
-    expect(collectUndoDefects('nothing')).toEqual(['no undo spawn']);
-  });
-
-  it('the merge records baseSha, checks for a local branch, runs git merge --no-ff on refs/heads/<branch>, and aborts only a merge that began', () => {
-    expect(collectMergeDefects(compiled)).toEqual([]);
-    expect(collectMergeDefects(sources['dynamic-build.mds'])).toEqual([]);
-  });
-
-  it('known-bad probes: a bare-name or plain merge, a missing baseSha record, a late baseSha, a missing or late branch check and an abort that is unconditional, conflict-only or absent are each reported', () => {
-    const plain = compiled.replace('git merge --no-ff refs/heads/${engineResult.branch}', 'git merge refs/heads/${engineResult.branch}');
-    expect(plain, 'the seed must land').not.toBe(compiled);
-    expect(collectMergeDefects(plain)).toEqual(['the merge is not pinned to git merge --no-ff']);
-    const bare = compiled.replace('git merge --no-ff refs/heads/${engineResult.branch}', 'git merge --no-ff ${engineResult.branch}');
-    expect(bare, 'the seed must land').not.toBe(compiled);
-    expect(collectMergeDefects(bare)).toEqual(['the merge is not of refs/heads/<branch>']);
-    const unrecorded = compiled.replace('run git rev-parse ${INTEGRATION_BRANCH} as baseSha', 'note the head');
-    expect(unrecorded, 'the seed must land').not.toBe(compiled);
-    expect(collectMergeDefects(unrecorded)).toContain('the merge does not record the integration head as baseSha');
-    const lateRecord = compiled.replace('run git rev-parse ${INTEGRATION_BRANCH} as baseSha, ', '').replace('. If the merge stops after it began', ', then run git rev-parse ${INTEGRATION_BRANCH} as baseSha. If the merge stops after it began');
-    expect(lateRecord, 'the seed must land').not.toBe(compiled);
-    expect(lateRecord.includes('baseSha. If the merge stops after it began'), 'the second half of the seed must land').toBe(true);
-    expect(collectMergeDefects(lateRecord)).toEqual(['the merge records baseSha after the merge']);
-    const unchecked = compiled.replace('run git rev-parse --verify --quiet refs/heads/${engineResult.branch} (on a non-zero exit return merged false, reason "no such local branch"), then run git merge', 'run git merge');
-    expect(unchecked, 'the seed must land').not.toBe(compiled);
-    expect(collectMergeDefects(unchecked)).toEqual(['the merge does not check for a local branch before it merges']);
-    const lateCheck = compiled.replace('run git rev-parse --verify --quiet refs/heads/${engineResult.branch} (on a non-zero exit return merged false, reason "no such local branch"), then run git merge --no-ff refs/heads/${engineResult.branch}.', 'run git merge --no-ff refs/heads/${engineResult.branch}, then run git rev-parse --verify --quiet refs/heads/${engineResult.branch} (on a non-zero exit return merged false, reason "no such local branch").');
-    expect(lateCheck, 'the seed must land').not.toBe(compiled);
-    expect(collectMergeDefects(lateCheck)).toEqual(['the merge checks for a local branch after the merge']);
-    const nothing = compiled.replace('git merge --abort', 'git status');
-    expect(nothing, 'the seed must land').not.toBe(compiled);
-    expect(collectMergeDefects(nothing)).toEqual(['the merge does not abort only a merge that began']);
-    const anyStop = compiled.replace('If the merge stops after it began (git rev-parse -q --verify MERGE_HEAD succeeds), run git merge --abort', 'If the merge stops for any reason, run git merge --abort');
-    expect(anyStop, 'the seed must land').not.toBe(compiled);
-    expect(collectMergeDefects(anyStop)).toEqual(['the merge does not abort only a merge that began']);
-    const conflictOnly = compiled.replace('If the merge stops after it began (git rev-parse -q --verify MERGE_HEAD succeeds), run git merge --abort', 'On a conflict, run git merge --abort');
-    expect(conflictOnly, 'the seed must land').not.toBe(compiled);
-    expect(collectMergeDefects(conflictOnly)).toEqual(['the merge does not abort only a merge that began']);
-    const unbegun = compiled.replace(' A merge that did not begin returns merged false with the reason.', '');
-    expect(unbegun, 'the seed must land').not.toBe(compiled);
-    expect(collectMergeDefects(unbegun)).toEqual(['the merge does not return merged false for a merge that did not begin']);
-    expect(collectMergeDefects('nothing')).toEqual(['no merge spawn']);
-  });
-
-  it('no Git prompt and no doctrine line in dynamic-build, _wave or _engine asks Git to run Validate', () => {
-    for (const [name, text] of Object.entries(sources)) expect(collectGitValidateRequests(text), name).toEqual([]);
-    expect(collectGitValidateRequests(compiled)).toEqual([]);
-    expect(gitPrompts(compiled).length, 'no Git prompt read').toBeGreaterThanOrEqual(3);
-  });
-
-  it('known-bad probes: the pre-#421 merge prompt and the pre-#421 doctrine step are reported', () => {
-    const oldMerge = compiled.replace('Do not push, and run no build or test.', 'Run Validate agent (build + test) after merge.');
-    expect(oldMerge, 'the seed must land').not.toBe(compiled);
-    expect(collectGitValidateRequests(oldMerge).length).toBeGreaterThan(0);
-    const oldStep = sources['_wave.mds'].replace(/^5\. After any resolution:.*$/m, '5. After any resolution: Validate agent (build + test) immediately');
-    expect(oldStep, 'the seed must land').not.toBe(sources['_wave.mds']);
-    expect(collectGitValidateRequests(oldStep)).toEqual(['a doctrine line asks for a Validate: 5. After any resolution: Validate agent (build + test) immediately']);
-  });
-
-  it('the wave doctrine says the post-merge Validate always runs, unless a bad or unchanged SHA halts the wave first, and treeEqual is recorded only', () => {
-    expect(compiled).toContain('It always runs, except when the wave halts first on a merge with a bad or unchanged SHA');
-    expect(compiled).toContain('a true value never skips the Validate');
-  });
-
-  it('the wave doctrine names the merge helper as the place of the undo spawn', () => {
-    expect(compiled).toContain('The undo spawn in `mergeValidateUndo` states its gates and exact git lines');
-    expect(compiled).not.toContain('The undo spawn in the wave loop');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 10c. dynamic-build.md: the wave merge arm stays flat and lives in one helper (#486, finding 6)
-//
-// The merge, the post-merge Validate and the undo were seven levels deep in the
-// per-ticket loop, and the depth hid the undo defect. Both guards have a named
-// collector and a seeded known-bad probe; each test asserts the corpus it read.
-// ---------------------------------------------------------------------------
-
-const WAVE_WHILE = 'while (remainingTickets.length > 0';
-const MERGE_HELPER = 'const mergeValidateUndo = async (ticketId, engineResult) => {';
-/** The deepest a per-ticket loop line may sit below the `while`, in block levels. */
-const MAX_LOOP_LEVELS = 5;
-
-/** The wave loop's lines: from the `while` line to the closing brace at column 0, or null unless the `while` occurs once. */
-function waveLoopLines(text: string): string[] | null {
-  const lines = text.split('\n');
-  const start = lines.findIndex(l => l.startsWith(WAVE_WHILE));
-  if (start === -1 || lines.filter(l => l.startsWith(WAVE_WHILE)).length !== 1) return null;
-  const end = lines.findIndex((l, i) => i > start && l === '}');
-  return end === -1 ? null : lines.slice(start, end + 1);
-}
-
-/** Named collector: loop lines more than MAX_LOOP_LEVELS block levels below the `while` (the fence indents two spaces a level). */
-function collectLoopDepthDefects(text: string): string[] {
-  const loop = waveLoopLines(text);
-  if (loop === null) return ['no wave loop'];
-  const out: string[] = [];
-  for (const line of loop) {
-    const levels = (line.length - line.trimStart().length) / 2;
-    if (line.trim() !== '' && levels > MAX_LOOP_LEVELS) out.push(`a loop line sits ${levels} levels below the while: ${line.trim().slice(0, 50)}`);
-  }
-  return out;
-}
-
-/**
- * Named collector: where the merge helper is missing, misplaced, reaches the loop's state, or the
- * loop no longer calls it once right after the engine verdict check.
- */
-function collectMergeHelperDefects(text: string): string[] {
-  const at = text.indexOf(MERGE_HELPER);
-  if (at === -1 || text.indexOf(MERGE_HELPER, at + 1) !== -1) return ['the merge helper is not declared exactly once'];
-  const end = text.indexOf('\n};\n', at);
-  const loopAt = text.indexOf(WAVE_WHILE);
-  if (end === -1 || loopAt === -1) return ['the merge helper or the wave loop has no end'];
-  const out: string[] = [];
-  const shaAt = text.indexOf('const MERGE_SHA = ');
-  if (!(shaAt !== -1 && shaAt < at && end < loopAt)) out.push('the helper does not sit below MERGE_SHA and above the loop');
-  const body = text.slice(at, end);
-  for (const name of ['waveState', 'results', 'remainingTickets', 'WAVE_TICKETS', 'rowOf', 'reAskedThisDeadlock']) {
-    if (new RegExp(`\\b${name}\\b`).test(body)) out.push(`the helper reaches the loop's ${name}`);
-  }
-  if ((body.match(/agentType: "(\w+)"/g) ?? []).join(',') !== 'agentType: "Git",agentType: "Validate",agentType: "Git"') out.push('the helper does not spawn Git, Validate and Git, in that order');
-  if ((text.match(/if \(post\?\.verdict === "PASS"\) \{/g) ?? []).length !== 1) out.push('the PASS check does not appear exactly once');
-  const loop = text.slice(loopAt);
-  if ((loop.match(/await mergeValidateUndo\(ticketId, engineResult\)/g) ?? []).length !== 1) out.push('the loop does not call the helper exactly once');
-  const afterEngine = loop.slice(loop.lastIndexOf('await runSingleTicketEngine(')).split('\n').slice(1).map(l => l.trim()).filter(l => l !== '' && !l.startsWith('//') && !l.startsWith('<!--'));
-  if (!(afterEngine[0] ?? '').startsWith('if (["PASS", "UNVERIFIED"].includes(')) out.push('the verdict check is not the first statement after the engine call');
-  return out;
-}
-
-/** The strict base-name class the resolver exports and implement.mds copies for BASE_BRANCH. */
-const STRICT_NAME_SOURCE = (createRequire(import.meta.url)(RESOLVE_BASE_SCRIPT) as { STRICT_NAME_RE: RegExp }).STRICT_NAME_RE.source;
-
-/** The repo's ref allowlist, as the helper's regex literal states it: a character class takes the slash unescaped. */
-const REF_ALLOWLIST_CLASS = '[A-Za-z0-9._/+@,#-]{1,200}';
-
-/** The part of the strict class the helper shares: the same refusals, less the `origin/` prefix, written as a regex literal. */
-const HELPER_SHARED_SHAPE = `/${STRICT_NAME_SOURCE.replace('origin\\/|', '').replace('._\\/+', '._/+')}/`;
-
-/** Named collector: the helper's `BRANCH_NAME` literal when it is not the shared part of implement's strict class. */
-function collectSharedShapeDefects(text: string): string[] {
-  const shape = /const BRANCH_NAME = (\/.*\/);/.exec(text)?.[1];
-  return shape === HELPER_SHARED_SHAPE ? [] : ["BRANCH_NAME is not the shared part of implement's strict class"];
-}
-
-/**
- * Named collector: where the helper lets a Git-reported ticket branch into a git line unchecked.
- * The check must refuse a value that is not a string, be the repo's ref allowlist narrowed by a
- * leading dash or hash, a revision name and any double dot, and run in the helper before the merge spawn.
- */
-function collectBranchCheckDefects(text: string): string[] {
-  const at = text.indexOf(MERGE_HELPER);
-  const end = at === -1 ? -1 : text.indexOf('\n};\n', at);
-  if (at === -1 || end === -1) return ['no merge helper'];
-  const out: string[] = [];
-  const shape = /const BRANCH_NAME = (\/.*\/);/.exec(text.slice(0, at))?.[1] ?? '';
-  const leading = /^\/\^\(\?!\[([^\]]*)\]/.exec(shape)?.[1] ?? '';
-  if (!shape.includes(REF_ALLOWLIST_CLASS)) out.push('BRANCH_NAME is not the repo ref allowlist');
-  if (!leading.includes('-')) out.push('BRANCH_NAME does not refuse a leading dash');
-  if (!leading.includes('#')) out.push('BRANCH_NAME does not refuse a leading hash');
-  if (!shape.includes('|(?:@|(?:FETCH_|ORIG_|MERGE_)?HEAD)$)')) out.push('BRANCH_NAME does not refuse a revision name');
-  if (!shape.includes('(?!.*\\.\\.)')) out.push('BRANCH_NAME does not refuse a double dot');
-  const body = text.slice(at, end);
-  const checkAt = body.indexOf('BRANCH_NAME.test(engineResult.branch)');
-  const mergeAt = body.indexOf('agent(`Merge ');
-  if (checkAt === -1 || mergeAt === -1 || checkAt > mergeAt) out.push('the helper does not check the branch before the merge spawn');
-  if (!body.includes('typeof engineResult.branch !== "string" || !BRANCH_NAME.test(engineResult.branch)')) out.push('the helper does not refuse a branch that is not a string');
-  return out;
-}
-
-/** The compiled helper with its branch check moved from before the merge spawn to after it, or `text` when the check is not found. */
-function moveBranchCheckAfterMerge(text: string): string {
-  const lineStart = text.indexOf('  if (typeof engineResult.branch !== "string"');
-  const lineEnd = lineStart === -1 ? -1 : text.indexOf('\n', lineStart) + 1;
-  if (lineEnd === 0) return text;
-  const spawnEnd = text.indexOf('{ agentType: "Git" });\n', lineEnd);
-  if (spawnEnd === -1) return text;
-  const afterSpawn = spawnEnd + '{ agentType: "Git" });\n'.length;
-  return text.slice(0, lineStart) + text.slice(lineEnd, afterSpawn) + text.slice(lineStart, lineEnd) + text.slice(afterSpawn);
-}
-
-describe('dynamic-build: the wave merge arm stays flat and lives in one helper (#486, finding 6)', () => {
-  let compiled: string;
-  let source: string;
-  beforeAll(async () => {
-    compiled = await fs.readFile(path.join(BUILT_COMMANDS, 'dynamic-build.md'), 'utf-8');
-    source = readFileSync(path.join(COMMANDS_DIR, 'dynamic-build.mds'), 'utf-8');
-  });
-
-  it('no per-ticket loop line sits more than five block levels below the while', () => {
-    expect(waveLoopLines(compiled)?.length ?? 0, 'the compiled loop was not read').toBeGreaterThan(30);
-    expect(waveLoopLines(source)?.length ?? 0, 'the source loop was not read').toBeGreaterThan(30);
-    expect(collectLoopDepthDefects(compiled)).toEqual([]);
-    expect(collectLoopDepthDefects(source)).toEqual([]);
-  });
-
-  it('the merge, the post-merge Validate and the undo sit in one helper that takes only the ticket and its engine result', () => {
-    expect(collectMergeHelperDefects(compiled)).toEqual([]);
-    expect(collectMergeHelperDefects(source)).toEqual([]);
-  });
-
-  it('the helper checks the ticket branch against the repo ref allowlist before the merge spawn, and implement states the same allowlist', async () => {
-    expect(collectBranchCheckDefects(compiled)).toEqual([]);
-    expect(collectBranchCheckDefects(source)).toEqual([]);
+  it('implement states the strict base-name class the resolver exports', async () => {
     const implement = await fs.readFile(path.join(BUILT_COMMANDS, 'implement.md'), 'utf-8');
-    expect(implement, 'implement no longer states the strict class the wave helper shares').toContain(STRICT_NAME_SOURCE);
-  });
-
-  it("the helper's BRANCH_NAME is the strict class less the origin/ prefix refusal", () => {
-    expect(collectSharedShapeDefects(compiled)).toEqual([]);
-    expect(collectSharedShapeDefects(source)).toEqual([]);
-    const narrower = compiled.replace('(?!.*\\.\\.)', '');
-    expect(narrower, 'the seed must land').not.toBe(compiled);
-    expect(collectSharedShapeDefects(narrower)).toEqual(["BRANCH_NAME is not the shared part of implement's strict class"]);
-    const withPrefix = compiled.replace('(?![-#]|', '(?![-#]|origin\\/|');
-    expect(withPrefix, 'the seed must land').not.toBe(compiled);
-    expect(collectSharedShapeDefects(withPrefix)).toEqual(["BRANCH_NAME is not the shared part of implement's strict class"]);
-    expect(collectSharedShapeDefects('nothing')).toEqual(["BRANCH_NAME is not the shared part of implement's strict class"]);
-  });
-
-  it('known-bad probes: a missing check, a late check, an untyped value, a loose allowlist and a missing leading, revision or double-dot guard are each reported', () => {
-    const unchecked = compiled.replace('typeof engineResult.branch !== "string" || !BRANCH_NAME.test(engineResult.branch)', 'false');
-    expect(unchecked, 'the seed must land').not.toBe(compiled);
-    expect(collectBranchCheckDefects(unchecked)).toEqual(['the helper does not check the branch before the merge spawn', 'the helper does not refuse a branch that is not a string']);
-    const late = moveBranchCheckAfterMerge(compiled);
-    expect(late, 'the seed must land').not.toBe(compiled);
-    expect(collectBranchCheckDefects(late)).toEqual(['the helper does not check the branch before the merge spawn']);
-    const coerced = compiled.replace('typeof engineResult.branch !== "string" || !BRANCH_NAME.test(engineResult.branch)', '!BRANCH_NAME.test(String(engineResult.branch))');
-    expect(coerced, 'the seed must land').not.toBe(compiled);
-    expect(collectBranchCheckDefects(coerced)).toEqual(['the helper does not check the branch before the merge spawn', 'the helper does not refuse a branch that is not a string']);
-    const loose = compiled.replace('[A-Za-z0-9._/+@,#-]{1,200}', '[A-Za-z0-9._/+@,#-]{1,255}');
-    expect(loose, 'the seed must land').not.toBe(compiled);
-    expect(collectBranchCheckDefects(loose)).toEqual(['BRANCH_NAME is not the repo ref allowlist']);
-    const noDash = compiled.replace('(?![-#]|', '(?![#]|');
-    expect(noDash, 'the seed must land').not.toBe(compiled);
-    expect(collectBranchCheckDefects(noDash)).toEqual(['BRANCH_NAME does not refuse a leading dash']);
-    const noHash = compiled.replace('(?![-#]|', '(?![-]|');
-    expect(noHash, 'the seed must land').not.toBe(compiled);
-    expect(collectBranchCheckDefects(noHash)).toEqual(['BRANCH_NAME does not refuse a leading hash']);
-    const noRevisions = compiled.replace('|(?:@|(?:FETCH_|ORIG_|MERGE_)?HEAD)$)', ')');
-    expect(noRevisions, 'the seed must land').not.toBe(compiled);
-    expect(collectBranchCheckDefects(noRevisions)).toEqual(['BRANCH_NAME does not refuse a revision name']);
-    const dots = compiled.replace('(?!.*\\.\\.)', '');
-    expect(dots, 'the seed must land').not.toBe(compiled);
-    expect(collectBranchCheckDefects(dots)).toEqual(['BRANCH_NAME does not refuse a double dot']);
-    expect(collectBranchCheckDefects('nothing')).toEqual(['no merge helper']);
-  });
-
-  it('known-bad probes: a seven-level arm, a helper that reaches loop state and a helper that is missing are each reported', () => {
-    const deep = compiled.replace('        if (halted !== null) waveState.halted = halted;', '        if (halted !== null) {\n          if (kept) {\n            if (reason) {\n              waveState.halted = halted;\n            }\n          }\n        }');
-    expect(deep, 'the seed must land').not.toBe(compiled);
-    expect(collectLoopDepthDefects(deep)).toContain('a loop line sits 7 levels below the while: waveState.halted = halted;');
-    expect(collectLoopDepthDefects('nothing')).toEqual(['no wave loop']);
-    const reaching = compiled.replace('  const treeEqual = ', '  waveState.round++;\n  const treeEqual = ');
-    expect(reaching, 'the seed must land').not.toBe(compiled);
-    expect(collectMergeHelperDefects(reaching)).toEqual(["the helper reaches the loop's waveState"]);
-    const twice = compiled.replace('  const undo = await agent(', '  if (post?.verdict === "PASS") {\n    return done(true, "");\n  }\n  const undo = await agent(');
-    expect(twice, 'the seed must land').not.toBe(compiled);
-    expect(collectMergeHelperDefects(twice)).toEqual(['the PASS check does not appear exactly once']);
-    expect(collectMergeHelperDefects(compiled.replace(MERGE_HELPER, 'const mergeValidateUndo2 = async (ticketId, engineResult) => {'))).toEqual(['the merge helper is not declared exactly once']);
-    const earlyCall = compiled.replace('      // PASS and UNVERIFIED merge', '      void engineResult;\n      // PASS and UNVERIFIED merge');
-    expect(earlyCall, 'the seed must land').not.toBe(compiled);
-    expect(collectMergeHelperDefects(earlyCall)).toEqual(['the verdict check is not the first statement after the engine call']);
+    expect(implement, 'implement no longer states the strict class the resolver exports').toContain(STRICT_NAME_SOURCE);
   });
 });
 
@@ -1888,185 +1371,6 @@ describe('compiled knowledge commands — no stale call-site references', () => 
       ).toBe(false);
     }
     expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 12. dynamic-build.md streamlining doctrine (C1–C9)
-// Pins the exact prose authored in Phase 1. Each assertion corresponds to a
-// named forensic change (C1–C9) in the streamlining PR.
-// ---------------------------------------------------------------------------
-
-describe('compiled dynamic-build.md: streamlining doctrine (C1–C9)', () => {
-  let compiled: string;
-
-  beforeAll(async () => {
-    compiled = await fs.readFile(
-      path.join(BUILT_COMMANDS, 'dynamic-build.md'),
-      'utf-8',
-    );
-  });
-
-  it('C1: single-pass review — DELTA REVIEW and multi-cycle machinery absent, single-pass invariant present', () => {
-    expect(compiled).toContain('The review pass runs exactly ONCE');
-    expect(compiled).not.toContain('DELTA REVIEW');
-    expect(compiled).not.toContain('reviewBaseSha');
-    expect(compiled).not.toContain('maxCycles');
-    expect(compiled).not.toContain('cyclesRun');
-    expect(compiled).not.toContain('fixedInCycle');
-    expect(compiled).not.toContain('preFixSha');
-    expect(compiled).not.toContain('allCoverageGaps');
-    // Skeleton guard: the doctrine prose above can stay intact while a cycle loop
-    // creeps back into the authored script body. Pin the loop construct's absence too.
-    expect(compiled).not.toContain('for (let cycle');
-    expect(compiled).toContain('The pass runs exactly ONCE');
-    // rename-guard: the old review_loop export token and prose phrase must be absent
-    // after the review_loop → review_pass rename. Grep confirms these are
-    // absent in dist today; these assertions would fire if a stray partial re-introduced them.
-    expect(compiled).not.toContain('review_loop');
-    expect(compiled).not.toMatch(/review[- ]loop/i);
-    // Unique-block pins (deleting either block leaves test green without these)
-    // Invariant #7 unique: appears only in engine_invariants() block, not in review_pass() prose
-    expect(compiled).toContain('Never author additional cycles or a delta re-review of fix commits');
-    // review_pass() prose unique: appears only in the review → verify → fix doctrine, not in invariant #7
-    expect(compiled).toContain('Budget scales roster and verification votes, NEVER the number of passes');
-  });
-
-  it('C2: Review agent result contract — reviewed: true, coverage-gap handling, chunk/stagger cadence', () => {
-    expect(compiled).toContain('reviewed: true');
-    expect(compiled).toContain('review coverage incomplete');
-    expect(compiled).toContain('coverageGaps.length === 0');
-    // Chunk/stagger: Review agents dispatched in bounded parallel batches
-    expect(compiled).toContain('const chunk = await parallel(reviewThunks.slice(i, i + chunkSize));');
-  });
-
-  it('C3: findings disposition replaces old survivingFindings raw dump', () => {
-    expect(compiled).toContain('Findings disposition');
-    expect(compiled).toContain('max 5 findings');
-    // Old line removed — single-quoted so ${} is treated as a literal string, not a template
-    expect(compiled).not.toContain('Surviving findings: ${JSON.stringify(reviewResult.survivingFindings)}');
-  });
-
-  it('C4: FAIL-FIXED verdict label for fix-and-continue paths', () => {
-    expect(compiled).toContain('FAIL-FIXED');
-  });
-
-  it('C5: wave hardening — ALWAYS ready rule, cascade quarantine, never kills the wave, Design reader', () => {
-    expect(compiled).toContain('ALWAYS ready');
-    expect(compiled).toContain('cascade');
-    expect(compiled).toContain('never kills the wave');
-    expect(compiled).toContain('agentType: "Design"');
-  });
-
-  it('C6: build execution doctrine — cheapest-sufficient, one gate per phase, never wrapped, never polled', () => {
-    expect(compiled).toContain('Cheapest-sufficient validation');
-    expect(compiled).toContain('One build gate per phase');
-    expect(compiled).toContain('Never wrap a build or test command in `sh -c`');
-    expect(compiled).toContain('never poll across turns');
-  });
-
-  it('C8: scratch path is run-unique — old fixed filename /tmp/df-wf-check.js is gone', () => {
-    // Absence guard: old fixed name must be gone.
-    expect(compiled).not.toContain('/tmp/df-wf-check.js');
-    // Positive guards: new run-unique prefix and doctrine phrase must be present so that
-    // removing or renaming the scratch-path mechanism causes this test to fail.
-    expect(compiled).toContain('df-wf-check-');
-    expect(compiled).toContain('run-unique scratch file');
-  });
-
-  it('C9: no unauthorized side-effects doctrine — stated provider-neutrally (P2-S12, GAP-41)', () => {
-    // Invariant #6 is a SAFETY rule, not prose. Bound to one vendor it stops
-    // applying the moment a second tracker exists — a real regression, which is
-    // why the disposition here is guard-with-test rather than documentation.
-    expect(
-      compiled,
-      'the invariant must forbid side-effects on whatever tracker is resolved',
-    ).toContain('No unauthorized tracker or remote side-effects');
-    expect(compiled).toContain('issues/PRs on the tracker');
-    expect(
-      compiled,
-      'the rule must say it is not vendor-scoped, or a later reader re-narrows it',
-    ).toContain('This applies to whatever tracker is resolved, not to one vendor');
-    // Non-vacuous against the exact pre-neutralisation literal.
-    expect(
-      compiled,
-      'the GitHub-bound wording must be gone, not merely accompanied by the neutral one',
-    ).not.toContain('No unauthorized GitHub side-effects');
-    // The rule's FORCE must survive the rewording — a neutral sentence that
-    // dropped "NEVER" would pass a wording check and forbid nothing.
-    expect(compiled).toContain('Sub-agents NEVER create issues/PRs on the tracker');
-    expect(compiled).toContain('beyond the ticket-authorized branch');
-  });
-
-  it('C9b: the sandbox note does not read as gh-only (P2-S12)', () => {
-    // `gh` stays named — it is the concrete CLI an author would reach for, and
-    // naming it is what makes the denial legible. What changed is the scope:
-    // the denial is over any tracker CLI, not over one binary.
-    expect(compiled).toContain('NO filesystem / Node.js / CLI access');
-    expect(compiled).toContain('no tracker CLI of any kind, `gh` included');
-    expect(compiled).not.toContain('NO filesystem / Node.js / `gh` CLI access');
-  });
-
-  it('C10: post-wave-report Git spawn survived the dynamic-wave removal', () => {
-    // The block was REWRITTEN this cycle — pin the current load-bearing literals.
-    // Each literal verified against dist/commands/dynamic-build.md after npm run build:mds.
-    expect(compiled).toContain('OPERATION: post-wave-report');
-    expect(compiled).toContain('TRACKING_ISSUE:');
-    expect(compiled).toContain('WAVE_REPORT_PATH: .devflow/docs/waves/');
-    expect(compiled).toContain('WAVE_ID:');
-    expect(compiled).toContain('WORKTREE_PATH:');  // new this cycle
-    // WAVE-mode guard sentence
-    expect(compiled).toContain('skip this step entirely in SINGLE mode');
-    // DEGRADED-visibility literal when no tracking issue was resolved
-    expect(compiled).toContain('TRACEABILITY: DEGRADED (no tracking issue for this run)');
-    // The dedup marker literal is NOT pinned here any more. GAP-20: the operation
-    // owns the marker format; a caller that restates it has already diverged once
-    // and produced duplicate comments. The caller now says only that the Git agent
-    // deduplicates via its own marker, and the marker literal is pinned where it
-    // lives — see the `<!-- devflow:` negative guard in §23 below.
-    expect(compiled).toContain('deduplicates via its own marker');
-  });
-
-  it('meta.phases matches every phase("…") call site', () => {
-    // Two phases: arrays exist in the compiled file: a placeholder ["..."] in the
-    // Workflow runtime contract example and the real SINGLE-mode meta declaration.
-    // Filter to the real declaration (does not contain '"..."').
-    // The WAVE skeleton uses the same phases conceptually but does not declare its own
-    // meta block with a phases array — scoped to SINGLE-mode by design.
-    const phasesMatches = [...compiled.matchAll(/phases:\s*(\[[^\]]*\])/g)];
-    const realMatch = phasesMatches.find(m => !m[1].includes('"..."'));
-    expect(realMatch, 'real SINGLE-mode meta.phases not found in compiled output').toBeDefined();
-    const declared = JSON.parse(realMatch![1].replace(/'/g, '"')) as string[];
-    // Use trailing-comma regex to exclude the prose mention of phase("…") at the pre-flight
-    // checklist (no comma follows the closing paren there), which is NOT a call site.
-    const called = [...compiled.matchAll(/\bphase\("([^"]+)",/g)].map(m => m[1] as string);
-    expect(declared.length, 'phases array is empty — guard is vacuous').toBeGreaterThan(0);
-    expect(new Set(called)).toEqual(new Set(declared));
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 13. --dry-run removal (C7)
-// dynamic-build, plan, tickets must NOT contain --dry-run.
-// dynamic-profile must still contain it (untouched per plan).
-// ---------------------------------------------------------------------------
-
-describe('compiled dynamic commands: --dry-run removal (C7)', () => {
-  const DRY_RUN_ABSENT = ['dynamic-build', 'dynamic-plan', 'dynamic-tickets'] as const;
-
-  it('dynamic-build, plan, tickets do NOT contain --dry-run', async () => {
-    for (const basename of DRY_RUN_ABSENT) {
-      const content = await fs.readFile(path.join(BUILT_COMMANDS, `${basename}.md`), 'utf-8');
-      expect(
-        content,
-        `${basename}.md must not contain --dry-run after C7 removal`,
-      ).not.toContain('--dry-run');
-    }
-  });
-
-  it('compiled dynamic-profile.md still contains --dry-run (untouched by plan)', async () => {
-    const content = await fs.readFile(path.join(BUILT_COMMANDS, 'dynamic-profile.md'), 'utf-8');
-    expect(content).toContain('--dry-run');
   });
 });
 
@@ -2221,8 +1525,10 @@ describe('compliance wiring in compiled host commands (review lens) + mechanism 
       keyLines += found.keyLines;
     }
     expect(scanned, 'scanned zero dist commands — guard is vacuous').toBe(DIST_FILES.length);
-    // implement 2 + code-review 1 + bug-analysis 1 + dynamic-build's recipe 2.
-    expect(keyLines, 'fewer mechanism-key lines than the four passing commands carry — is the guard reading them?').toBeGreaterThanOrEqual(6);
+    // implement, code-review and bug-analysis carry 5 key lines between them.
+    // LOWERED 6 -> 5 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the two key
+    // lines of the dynamic-build recipe left with that host, so the counted code is removed and no coverage is lost.
+    expect(keyLines, 'fewer mechanism-key lines than the three passing commands carry — is the guard reading them?').toBeGreaterThanOrEqual(5);
     expect(violations, 'mechanism inputs are Git-agent inputs only:\n' + violations.join('\n')).toEqual([]);
   });
 
@@ -2394,13 +1700,11 @@ describe('Phase E traceability — implement.md and plan.md (Steps 2.5, 2.6)', (
 });
 
 // ---------------------------------------------------------------------------
-// §18  Phase F release evidence (Step 2.9) + dynamic pipeline mechanism inputs +
-//      ISSUE_NUMBER (Step 2.11, #362)
+// §18  Phase F release evidence (Step 2.9)
 //      release.md: COMMIT_LIST, SHIPPED_ISSUES, backlink-shipped-issues
-//      dynamic-build.md: ISSUE_REQUIRED, APPLY_CONVENTIONS, ISSUE_NUMBER
 // ---------------------------------------------------------------------------
 
-describe('Phase F traceability — release.md evidence + dynamic-build mechanism inputs (Steps 2.9, 2.11)', () => {
+describe('Phase F traceability — release.md evidence (Step 2.9)', () => {
   it('release.md contains COMMIT_LIST, SHIPPED_ISSUES, and backlink-shipped-issues (Step 2.9 release evidence)', async () => {
     const outputPath = path.join(BUILT_COMMANDS, 'release.md');
     const content = await fs.readFile(outputPath, 'utf-8');
@@ -2420,31 +1724,14 @@ describe('Phase F traceability — release.md evidence + dynamic-build mechanism
     expect(content, 'release.md must not gate on the compliance lens').not.toContain('COMPLIANCE_ACTIVE');
     expect(content, 'release.md must not check the compliance skill path').not.toContain('skills/devflow:compliance/SKILL.md');
   });
-
-  it('dynamic-build.md passes the mechanism inputs and ISSUE_NUMBER, and restates no branch convention (#362)', async () => {
-    // Inverted from the Step 2.11 pin. The recipe's setup-task call carries both
-    // mechanism inputs, and the branch-naming restatement is gone: setup-task's own
-    // step 1b owns the convention and states its gate there.
-    const outputPath = path.join(BUILT_COMMANDS, 'dynamic-build.md');
-    const content = await fs.readFile(outputPath, 'utf-8');
-    expect(content).toContain('ISSUE_REQUIRED: ${ISSUE_REQUIRED}');
-    expect(content).toContain('APPLY_CONVENTIONS: ${APPLY_CONVENTIONS}');
-    expect(
-      content,
-      'dynamic-build.md must contain ISSUE_NUMBER (Code-agent issue threading, Step 2.11)',
-    ).toContain('ISSUE_NUMBER');
-    expect(content, 'dynamic-build.md must not gate on the compliance lens').not.toContain('COMPLIANCE_ACTIVE');
-    expect(content, 'setup-task owns the branch convention; the host must not restate it').not.toContain('Branch Naming');
-  });
 });
 
 // ---------------------------------------------------------------------------
 // §19  Phase C publication gate wiring — _publication.mds partial (11th partial)
-//      code-review.md, resolve.md, (since #363) implement.md and (since #376)
-//      dynamic-build.md must expand the publication resolution steps and pass
-//      REVIEW_PUBLICATION only in Git spawns — post-*-summary for the two review
-//      hosts, update-pr-evidence for the wave PR. code-review, resolve and
-//      dynamic-build expand publication_gate(), which adds the Note on the Git
+//      code-review.md, resolve.md and (since #363) implement.md must expand the
+//      publication resolution steps and pass REVIEW_PUBLICATION only in Git
+//      spawns — post-*-summary for the two review hosts. code-review and resolve
+//      expand publication_gate(), which adds the Note on the Git
 //      agent's gate. /implement expands publication_resolve() alone: Phase 11
 //      hands the resolved value to the evidence script, which decides what each
 //      value means, so /implement names no Git-agent gate.
@@ -2453,7 +1740,6 @@ describe('Phase F traceability — release.md evidence + dynamic-build mechanism
 describe('publication_gate adoption in compiled host commands (Phase C)', () => {
   const PUBLICATION_HOSTS: Record<string, string> = {
     'code-review':   DIST_COMMANDS,
-    'dynamic-build': DIST_COMMANDS,
     'implement':     DIST_COMMANDS,
     'resolve':       DIST_COMMANDS,
   };
@@ -2474,7 +1760,7 @@ describe('publication_gate adoption in compiled host commands (Phase C)', () => 
       : [`${basename}.md: the auto-condition probe note is missing — "${AUTO_PROBE_NOTE}" not found`];
   }
 
-  it('code-review.md, dynamic-build.md, implement.md and resolve.md contain REVIEW_PUBLICATION resolution step', async () => {
+  it('code-review.md, implement.md and resolve.md contain REVIEW_PUBLICATION resolution step', async () => {
     let scanned = 0;
     for (const [basename, destRelDir] of Object.entries(PUBLICATION_HOSTS)) {
       const outputPath = path.join(BUILT_COMMANDS, `${basename}.md`);
@@ -2495,7 +1781,7 @@ describe('publication_gate adoption in compiled host commands (Phase C)', () => 
       ).toEqual([]);
     }
     expect(scanned, 'scanned zero publication hosts — guard is vacuous').toBeGreaterThan(0);
-    expect(NOTE_HOSTS, 'the Note hosts are every publication host but /implement').toEqual(['code-review', 'dynamic-build', 'resolve']);
+    expect(NOTE_HOSTS, 'the Note hosts are every publication host but /implement').toEqual(['code-review', 'resolve']);
   });
 
   it('/implement expands publication_resolve() alone: it resolves the value once and carries no Note on the Git agent gate', async () => {
@@ -2573,19 +1859,18 @@ describe('publication_gate adoption in compiled host commands (Phase C)', () => 
 // ---------------------------------------------------------------------------
 // §20  DIST_FILES non-vacuity + compliance_gate adoption guard (P0-S21, P0-S22)
 //
-// §14.5 scope rule: deployed-behaviour guards scan DIST_FILES (14 files = the 14
+// §14.5 scope rule: deployed-behaviour guards scan DIST_FILES (10 files = the 10
 // compiled MDS command hosts).
 //
 // compliance_gate() adoption guard: 2 importers (code-review, plan) must use the
 // shared {compliance_gate()} partial — the review lens is the one command-layer
 // gate on COMPLIANCE_ACTIVE. implement, resolve and debug ALIAS-import the same partial for
-// compliance_frameworks() and compliance_inject(), and dynamic-build for compliance_lens()
-// (the gate minus its COMPLIANCE_ACTIVE sentence): they set the Code directive from the lens
+// compliance_frameworks() and compliance_inject(): they set the Code directive from the lens
 // (D-COMPLIANCE-INJECT) and gate nothing on it. release carries no compliance gate at all since #362: its
 // evidence and back-link steps gate on EVIDENCE_POLICY, resolved by the
 // evidence_policy() text it imports. hostsScanned === 2 asserts non-vacuity
 // [DR-27a].
-// bug-analysis, dynamic-build and implement dropped the selective import in #362: their
+// bug-analysis and implement dropped the selective import in #362: their
 // only use of the check was to key a Git spawn, and the evidence policy now supplies the
 // mechanism inputs those spawns take. resolve dropped it in the same PR: its thread
 // steps gate on EVIDENCE_POLICY and its merge readiness on
@@ -2593,8 +1878,10 @@ describe('publication_gate adoption in compiled host commands (Phase C)', () => 
 // ---------------------------------------------------------------------------
 
 describe('DIST_FILES scope (§14.5, P0-S21) + compliance_gate adoption (P0-S22)', () => {
-  it('DIST_FILES contains exactly 14 entries (the 14 compiled hosts, release included) — non-vacuity (P0-S21)', () => {
-    expect(DIST_FILES.length, 'DIST_FILES must have exactly 14 entries (one per compiled host)').toBe(14);
+  it('DIST_FILES contains exactly 10 entries (the 10 compiled hosts, release included) — non-vacuity (P0-S21)', () => {
+    // LOWERED 14 -> 10 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the four
+    // dynamic command hosts left the roster (numeric-floors.json: dist-files-count).
+    expect(DIST_FILES.length, 'DIST_FILES must have exactly 10 entries (one per compiled host)').toBe(10);
     expect(DIST_FILES).toContain('release.md');
   });
 
@@ -2870,7 +2157,7 @@ describe('_tracker.mds adoption + per-define non-emptiness (P2-S9)', () => {
     expect(
       hostsScanned,
       `_tracker adoption guard is vacuous: expected ${TRACKER_PARTIAL_ADOPTERS.length} hosts, got ${hostsScanned}`,
-    ).toBe(5);
+    ).toBe(3);
     for (const host of TRACKER_NOTE_ONLY_HOSTS) {
       expect(
         (TRACKER_PARTIAL_ADOPTERS as readonly string[]).includes(host),
@@ -3091,7 +2378,7 @@ describe('_tracker.mds adoption + per-define non-emptiness (P2-S9)', () => {
 // §21  gh issue scope guard (AC-0.4, P0-S21)
 //
 // No `gh issue` invocation or descriptive mention in any DIST_FILE entry
-// outside a Git spawn fence. Scans all 14 DIST_FILES (§14.5 deployed-behaviour
+// outside a Git spawn fence. Scans all 10 DIST_FILES (§14.5 deployed-behaviour
 // rule). Three recorded exceptions encoded as an explicit allowlist (never a
 // loosened regex):
 //
@@ -3102,7 +2389,7 @@ describe('_tracker.mds adoption + per-define non-emptiness (P2-S9)', () => {
 // These are PR-description fetches that legitimately appear outside spawn
 // fences. All other `gh` invocations must be inside Git-agent spawn blocks.
 //
-// Non-vacuity: DIST_FILES.length === 14 (proven in §20 above).
+// Non-vacuity: DIST_FILES.length === 10 (proven in §20 above).
 // Known-bad sample (mechanic 2): inline corpus with a bare `gh issue view` line
 // — asserted inside the test.
 // ---------------------------------------------------------------------------
@@ -3123,10 +2410,12 @@ describe('gh issue scope guard — no gh issue calls outside Git spawn fences (A
 
     // Fail-loud: the build must have produced the tree (R3 — never skip).
     const distFiles = (await fs.readdir(distDir)).filter(f => f.endsWith('.md'));
+    // LOWERED 14 -> 10 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the four
+    // dynamic command hosts left the roster (numeric-floors.json: dist-files-count).
     expect(
       distFiles.length,
-      `the built dist/commands/ has ${distFiles.length} .md files — expected 14`,
-    ).toBe(14);
+      `the built dist/commands/ has ${distFiles.length} .md files — expected 10`,
+    ).toBe(10);
 
     // Named collector — used by both the main guard loop and the non-vacuity probe (M12c).
     // Extracts `gh issue` occurrences in prose (non-fence) content.
@@ -3263,7 +2552,7 @@ describe('this file never spawns a build against the real repo root', () => {
 // already diverged once, producing duplicate comments.
 //
 // Deployed-behaviour guard -> DIST_FILES scope (§14.5), non-vacuity
-// distFilesScanned === 14. The marker literals themselves are asserted to still
+// distFilesScanned === 10. The marker literals themselves are asserted to still
 // exist in the Git agent's sink corpus, so this reads as a RELOCATION and not as
 // a deletion: if both halves went missing, the first assertion would pass
 // vacuously and nothing would dedup at all.
@@ -3283,10 +2572,12 @@ describe('dedup-marker ownership — `<!-- devflow:` absent from dist/commands (
 
   it('no dist command restates a `<!-- devflow:` marker literal', async () => {
     const distFiles = (await fs.readdir(BUILT_COMMANDS)).filter(f => f.endsWith('.md'));
+    // LOWERED 14 -> 10 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the four
+    // dynamic command hosts left the roster (numeric-floors.json: dist-files-count).
     expect(
       distFiles.length,
-      `the built dist/commands/ has ${distFiles.length} .md files — expected 14`,
-    ).toBe(14);
+      `the built dist/commands/ has ${distFiles.length} .md files — expected 10`,
+    ).toBe(10);
 
     const violations: string[] = [];
     let distFilesScanned = 0;
@@ -3302,8 +2593,8 @@ describe('dedup-marker ownership — `<!-- devflow:` absent from dist/commands (
     ).toHaveLength(0);
     expect(
       distFilesScanned,
-      `marker guard is vacuous: expected 14 files scanned, got ${distFilesScanned}`,
-    ).toBe(14);
+      `marker guard is vacuous: expected 10 files scanned, got ${distFilesScanned}`,
+    ).toBe(10);
   });
 
   it('known-bad probe: the same collector flags a seeded restatement in a temp copy', async () => {
@@ -3311,20 +2602,20 @@ describe('dedup-marker ownership — `<!-- devflow:` absent from dist/commands (
     // sentence put back — never the committed tree.
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-marker-probe-'));
     try {
-      const real = await fs.readFile(path.join(BUILT_COMMANDS, 'dynamic-build.md'), 'utf-8');
-      const seededPath = path.join(tmp, 'dynamic-build.md');
+      const real = await fs.readFile(path.join(BUILT_COMMANDS, 'code-review.md'), 'utf-8');
+      const seededPath = path.join(tmp, 'code-review.md');
       await fs.writeFile(
         seededPath,
-        real + '\n   The Git agent deduplicates via marker `<!-- devflow:wave-report wave:{WAVE_ID} -->`.\n',
+        real + '\n   The Git agent deduplicates via marker `<!-- devflow:review-summary -->`.\n',
         'utf-8',
       );
       const seeded = await fs.readFile(seededPath, 'utf-8');
       expect(
-        collectMarkerLiterals('dynamic-build.md', seeded),
+        collectMarkerLiterals('code-review.md', seeded),
         'the collector must fire on a seeded restatement',
       ).toHaveLength(1);
       // …and must clear the unseeded original, or it is flagging something else.
-      expect(collectMarkerLiterals('dynamic-build.md', real)).toHaveLength(0);
+      expect(collectMarkerLiterals('code-review.md', real)).toHaveLength(0);
     } finally {
       await fs.rm(tmp, { recursive: true, force: true });
     }
@@ -3340,7 +2631,6 @@ describe('dedup-marker ownership — `<!-- devflow:` absent from dist/commands (
     for (const marker of [
       '<!-- devflow:review-summary',
       '<!-- devflow:resolution-summary',
-      '<!-- devflow:wave-report',
     ]) {
       expect(
         joined,

@@ -18,11 +18,11 @@
  *                 preloads apply-decisions. The one thing outside the rule is the settings
  *                 block's grammar line, which names the CURATION field of the line the
  *                 resolver prints: SETTINGS_LINE_RE is pinned and the field does not
- *                 move, so the 8 off hosts that keep the block keep that line;
+ *                 move, so the 7 off hosts that keep the block keep that line;
  *   completeness  every artifact that holds a token has an off counterpart, the Curate
  *                 agent excepted (it runs only when curation is on);
  *   frontmatter   an off agent's frontmatter is its on frontmatter minus the preload line;
- *   settings      13 hosts carry the settings block when curation is on, 8 when it is off;
+ *   settings      10 hosts carry the settings block when curation is on, 7 when it is off;
  *   anchors       no status-line anchor the sampler reads sits inside an arm, and no off
  *                 arm repeats one, so the frozen fixture is untouched.
  *
@@ -54,10 +54,10 @@ import {
 } from '../fixtures/mds-manifest.js'
 import { CURATION_OFF_OUTPUT_DIR } from '../../src/core/curation-variants.js'
 
-/** Settings blocks in the curation-on build: every command host but dynamic-profile, which reads no settings line. */
-const ON_BLOCK_COUNT = 13
+/** Settings blocks in the curation-on build: every command host. */
+const ON_BLOCK_COUNT = 10
 /** Settings blocks in the curation-off build: the hosts with a consumer other than curation. */
-const OFF_BLOCK_COUNT = 8
+const OFF_BLOCK_COUNT = 7
 
 const TOKEN_RE = /DECISIONS_CONTEXT|decisions_context|apply-decisions|curation\/index\.md|curation\/decisions\.md|CURATION/
 /** What an on arm may hold besides a token: the heading, step and tree wording that names decisions. */
@@ -75,7 +75,7 @@ const OFF_DIR = path.join(ROOT, CURATION_OFF_OUTPUT_DIR)
 type Kind = 'commands' | 'agents'
 interface Host { readonly kind: Kind; readonly name: string; readonly source: string }
 
-/** Named collector: every host the build compiles into a prompt — the 14 commands and the generator-host agents. */
+/** Named collector: every host the build compiles into a prompt — the command hosts and the generator-host agents. */
 function collectHosts(): Host[] {
   return [
     ...MDS_COMMAND_HOSTS.map(name => ({ kind: 'commands' as const, name, source: path.join(ROOT, 'src/assets/commands', `${name}.mds`) })),
@@ -240,7 +240,9 @@ describe('the roster of arm-bearing hosts is the hosts whose compiled body carri
 describe('parity: each variant is the compiled host with its arms resolved (AC-127)', () => {
   it('the curation-on file of every arm-bearing host equals the body with every arm resolved on', () => {
     const hosts = collectHosts().filter(h => CURATION_VARIANT_HOSTS.includes(`${h.kind}/${h.name}`))
-    expect(hosts.length, 'arm-bearing hosts').toBeGreaterThanOrEqual(23)
+    // LOWERED 23 -> 22 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the
+    // curation-armed dynamic hosts left the roster, so the counted code is removed and no coverage is lost.
+    expect(hosts.length, 'arm-bearing hosts').toBeGreaterThanOrEqual(22)
     for (const host of hosts) {
       const raw = rawBody(host)
       expect(comparable(host, onFile(host)), `${host.kind}/${host.name} curation-on`).toBe(expectedVariant(raw, 'on'))
@@ -382,9 +384,9 @@ describe('completeness: every artifact that holds a token has an off counterpart
   it('every artifact whose only token is the settings grammar still has a variant when it carries a curation arm', () => {
     const artifacts = collectArtifacts().filter(a => a.rel.startsWith('commands/'))
     const armed = artifacts.filter(a => DECISIONS_COMMAND_HOSTS.includes(a.rel.slice('commands/'.length).replace(/\.md$/, '')))
-    expect(armed, 'the commands with a curation arm').toHaveLength(13)
+    expect(armed, 'the commands with a curation arm').toHaveLength(MDS_COMMAND_HOSTS.length)
     for (const a of armed) expect(existsSync(path.join(OFF_DIR, a.rel)), a.rel).toBe(true)
-    // dynamic-profile has no arm and no variant, so it must hold no curation token.
+    // A command without an arm and without a variant must hold no curation token.
     expect(collectMissingCounterparts(artifacts.filter(a => !armed.includes(a)), () => false)).toEqual([])
   })
 
@@ -432,14 +434,13 @@ describe('settings blocks per variant (AC-138)', () => {
   const carrying = (read: (host: string) => string | null): string[] =>
     MDS_COMMAND_HOSTS.filter(h => (read(h) ?? '').includes(SETTINGS_OPENING)).sort()
 
-  it('the curation-on build carries the block in 13 hosts, once each, and dynamic-profile carries none', () => {
+  it('the curation-on build carries the block in 10 hosts, once each', () => {
     expect(carrying(h => requireDistFile(`${h}.md`))).toEqual([...SETTINGS_BLOCK_HOSTS].sort())
     expect(SETTINGS_BLOCK_HOSTS).toHaveLength(ON_BLOCK_COUNT)
     for (const h of SETTINGS_BLOCK_HOSTS) expect(requireDistFile(`${h}.md`).split(SETTINGS_OPENING).length - 1, h).toBe(1)
-    expect(requireDistFile('dynamic-profile.md')).not.toContain(SETTINGS_OPENING)
   })
 
-  it('the curation-off build carries it in the 8 hosts with a consumer other than curation, and the other five sit in the on arm', () => {
+  it('the curation-off build carries it in the 7 hosts with a consumer other than curation, and the other three sit in the on arm', () => {
     const off = carrying(h => resolveCurationOffSource('commands', h))
     expect(off).toEqual([...SETTINGS_BLOCK_HOSTS_CURATION_OFF].sort())
     expect(off).toHaveLength(OFF_BLOCK_COUNT)
@@ -476,17 +477,16 @@ describe('settings blocks per variant (AC-138)', () => {
 
 describe('no status-line anchor sits inside an arm, and no off arm repeats one (AC-153)', () => {
   /** The anchors the status-line sampler reads from a source file, taken from the sampler itself. */
-  function collectSamplerAnchors(): Array<{ target: 'prReady' | 'dynamicBuild' | 'resolveMds'; anchor: string }> {
+  function collectSamplerAnchors(): Array<{ target: 'prReady' | 'resolveMds'; anchor: string }> {
     const helpers = readFileSync(path.join(ROOT, 'tests/helpers.ts'), 'utf-8')
-    return [...helpers.matchAll(/singleLine\((gitOp\('ensure-pr-ready'\)|dynamicBuild|resolveMds), '((?:[^'\\]|\\.)*)'\)/g)]
-      .map(m => ({ target: (m[1] === "gitOp('ensure-pr-ready')" ? 'prReady' : m[1]) as 'prReady' | 'dynamicBuild' | 'resolveMds', anchor: m[2].replace(/\\'/g, "'") }))
+    return [...helpers.matchAll(/singleLine\((gitOp\('ensure-pr-ready'\)|resolveMds), '((?:[^'\\]|\\.)*)'\)/g)]
+      .map(m => ({ target: (m[1] === "gitOp('ensure-pr-ready')" ? 'prReady' : m[1]) as 'prReady' | 'resolveMds', anchor: m[2].replace(/\\'/g, "'") }))
   }
 
   // The three PR-body lines live in ensure-pr-ready's PR skeleton (D-PR-BY-GIT). That
   // skeleton is a reference partial, which carries no curation arms and has no curation-off variant.
   const SOURCE_OF = {
     prReady: 'src/assets/mds/git/_ops_steps.mds',
-    dynamicBuild: 'src/assets/commands/dynamic-build.mds',
     resolveMds: 'src/assets/commands/resolve.mds',
   } as const
 
@@ -510,10 +510,9 @@ describe('no status-line anchor sits inside an arm, and no off arm repeats one (
 
   const read = (rel: string): string => readFileSync(path.join(ROOT, rel), 'utf-8')
 
-  it('the sampler reads 11 source anchors: 3 from the ensure-pr-ready skeleton, 2 from dynamic-build and 6 from resolve', () => {
+  it('the sampler reads 9 source anchors: 3 from the ensure-pr-ready skeleton and 6 from resolve', () => {
     const anchors = collectSamplerAnchors()
     expect(anchors.filter(a => a.target === 'prReady')).toHaveLength(3)
-    expect(anchors.filter(a => a.target === 'dynamicBuild')).toHaveLength(2)
     expect(anchors.filter(a => a.target === 'resolveMds')).toHaveLength(6)
   })
 
@@ -524,7 +523,7 @@ describe('no status-line anchor sits inside an arm, and no off arm repeats one (
   it('no curation-off file repeats an anchor line, so the sampler reading the on variant meets each once', () => {
     for (const { target, anchor } of collectSamplerAnchors()) {
       if (target === 'prReady') continue // a reference has no curation-off variant
-      const off = resolveCurationOffSource('commands', target === 'dynamicBuild' ? 'dynamic-build' : 'resolve')
+      const off = resolveCurationOffSource('commands', 'resolve')
       const copies = (off ?? '').split('\n').filter(l => l.includes(anchor)).length
       expect(copies, `"${anchor.slice(0, 50)}" in the curation-off build`).toBeLessThanOrEqual(1)
     }

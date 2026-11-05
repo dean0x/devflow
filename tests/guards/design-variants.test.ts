@@ -8,10 +8,7 @@
  *     gap-analysis and not design-review; Architect preloads design-review and not gap-analysis.
  *   - /plan spawns Design in the Phase 5 fences and Architect in the Phase 12 fence, with no
  *     `Mode:` line, in every build of the command.
- *   - /dynamic-plan's plan writer spawns Architect. Every other dynamic Design spawn keeps Design:
- *     the dynamic-plan cross-plan critic, the dynamic-tickets drafter and cross-critic, the
- *     ticket-factory drafter and cross-critic, and the dynamic-build wave reader.
- *   - Architect writes the plans the dynamic plan writer asks for: its body holds a "Plan writing" section
+ *   - Architect writes the plans a prompt asks for: its body holds a "Plan writing" section
  *     that prints the config directory and Reads gap-analysis by install path, so the writer has both
  *     mode skills while /plan Phase 12 preloads design-review alone. Design carries none of that text.
  *
@@ -93,47 +90,6 @@ export function collectPlanSpawnDefects(label: string, content: string): string[
   return out
 }
 
-/** One dynamic spawn site: where it starts, where its call ends, and the agent type it must name. */
-interface SpawnSite {
-  readonly label: string
-  readonly start: string
-  readonly end: string
-  readonly want: 'Design' | 'Architect'
-}
-
-const DYNAMIC_SITES: Readonly<Record<string, readonly SpawnSite[]>> = {
-  'dynamic-plan': [
-    { label: 'plan writer', start: 'const plans = await phase("plan-parallel"', end: '\n// ', want: 'Architect' },
-    { label: 'cross-plan critic', start: 'const crossCritic = await phase("cross-plan-critic"', end: '\n// ', want: 'Design' },
-  ],
-  'dynamic-tickets': [
-    { label: 'drafter', start: 'const drafts = await phase("draft"', end: '\n// ', want: 'Design' },
-    { label: 'cross-critic', start: 'const critic = await phase("cross-critic"', end: '\n// ', want: 'Design' },
-    { label: 'factory drafter', start: 'passed as `schema:`: `{', end: ', schema: DRAFT_SCHEMA }`', want: 'Design' },
-    { label: 'factory cross-critic', start: 'REVISE_SCHEMA }`, `{', end: ', schema: CRITIC_SCHEMA }`', want: 'Design' },
-  ],
-  'dynamic-build': [
-    { label: 'wave reader (step)', start: '**Step 1 — Read the wave**', end: '\n- ', want: 'Design' },
-    { label: 'wave reader (script)', start: 'const waveRead = await agent(', end: '\n  );', want: 'Design' },
-  ],
-}
-
-/** Named collector: each dynamic site names exactly one agent type in its own span, and it is the decided one. */
-export function collectDynamicSpawnDefects(label: string, content: string, sites: readonly SpawnSite[]): string[] {
-  const out: string[] = []
-  for (const site of sites) {
-    const at = content.indexOf(site.start)
-    if (at === -1) { out.push(`${label}: no ${site.label}`); continue }
-    if (content.indexOf(site.start, at + 1) !== -1) out.push(`${label}: the ${site.label} start is not unique`)
-    const end = content.indexOf(site.end, at + site.start.length)
-    if (end === -1) { out.push(`${label}: the ${site.label} has no end`); continue }
-    const types = [...content.slice(at, end).matchAll(/agentType:\s*"([^"]+)"/g)].map(m => m[1])
-    if (types.length !== 1) out.push(`${label}: the ${site.label} names ${types.length} agent types, expected 1`)
-    else if (types[0] !== site.want) out.push(`${label}: the ${site.label} spawns "${types[0]}", expected ${site.want}`)
-  }
-  return out
-}
-
 describe('each Design variant preloads exactly its own mode skill, in both curation builds', () => {
   it('reads both builds of both variants, each with its own name', () => {
     for (const [slug, name] of VARIANTS) {
@@ -201,50 +157,6 @@ describe('/plan spawns Design in Phase 5 and Architect in Phase 12, with no Mode
   })
 })
 
-describe('/dynamic-plan writes plans with Architect; every other dynamic Design spawn keeps Design', () => {
-  const hosts = Object.keys(DYNAMIC_SITES)
-
-  it('reads every build of the three dynamic commands, and the sites name both types', () => {
-    expect(hosts).toEqual(['dynamic-plan', 'dynamic-tickets', 'dynamic-build'])
-    expect(commandBuilds('dynamic-plan')).toHaveLength(2)
-    expect(commandBuilds('dynamic-tickets')).toHaveLength(4)
-    expect(commandBuilds('dynamic-build')).toHaveLength(4)
-    const wants = Object.values(DYNAMIC_SITES).flat().map(s => s.want)
-    expect(wants.filter(w => w === 'Architect')).toHaveLength(1)
-    expect(wants.filter(w => w === 'Design')).toHaveLength(7)
-  })
-
-  it.each(hosts.flatMap(host => commandBuilds(host).map(b => [b.label, host, b.content] as const)))(
-    '%s names the decided type at each site',
-    (label, host, content) => {
-      expect(collectDynamicSpawnDefects(label, content, DYNAMIC_SITES[host])).toEqual([])
-    },
-  )
-
-  it('known-bad probes: a Design plan writer, an Architect critic, a lost site and a site with two types are each reported', () => {
-    const plan = commandBuilds('dynamic-plan')[0].content
-    const sites = DYNAMIC_SITES['dynamic-plan']
-    const seed = (text: string, from: string, to: string): string => {
-      expect(text, `the seed anchor must exist (${from})`).toContain(from)
-      return text.replace(from, to)
-    }
-    expect(collectDynamicSpawnDefects('dp', seed(plan, '{ agentType: "Architect" }', '{ agentType: "Design" }'), sites))
-      .toEqual(['dp: the plan writer spawns "Design", expected Architect'])
-    expect(collectDynamicSpawnDefects('dp', plan.replace(/(phase\("cross-plan-critic"[\s\S]*?)agentType: "Design"/, '$1agentType: "Architect"'), sites))
-      .toEqual(['dp: the cross-plan critic spawns "Architect", expected Design'])
-    expect(collectDynamicSpawnDefects('dp', seed(plan, 'const crossCritic = await phase("cross-plan-critic"', 'const critic = await phase("critic"'), sites))
-      .toEqual(['dp: no cross-plan critic'])
-    expect(collectDynamicSpawnDefects('dp', seed(plan, '{ agentType: "Architect" }', '{ agentType: "Architect" }, { agentType: "Design" }'), sites))
-      .toEqual(['dp: the plan writer names 2 agent types, expected 1'])
-    const build = commandBuilds('dynamic-build')[0].content
-    expect(collectDynamicSpawnDefects('db', seed(build, 'Spawn a `agentType: "Design"` agent (opus', 'Spawn a `agentType: "Architect"` agent (opus'), DYNAMIC_SITES['dynamic-build']))
-      .toEqual(['db: the wave reader (step) spawns "Architect", expected Design'])
-    const tickets = commandBuilds('dynamic-tickets')[0].content
-    expect(collectDynamicSpawnDefects('dt', seed(tickets, '`{ agentType: "Design", schema: CRITIC_SCHEMA }`', '`{ agentType: "Architect", schema: CRITIC_SCHEMA }`'), DYNAMIC_SITES['dynamic-tickets']))
-      .toEqual(['dt: the factory cross-critic spawns "Architect", expected Design'])
-  })
-})
-
 /** The Architect section that tells the plan writer how to read the gap-analysis skill it does not preload. */
 const PLAN_WRITING_HEADING = '\n## Plan writing\n'
 
@@ -256,7 +168,7 @@ const GAP_ANALYSIS_PATH = '<that directory>/skills/devflow:gap-analysis/SKILL.md
 
 /**
  * Named collector: how a variant body falls short of its plan-writing rule. Architect writes the plans that
- * /dynamic-plan asks for, so its body holds a "Plan writing" section that prints the config directory and Reads
+ * a prompt asks for, so its body holds a "Plan writing" section that prints the config directory and Reads
  * gap-analysis by install path (it preloads design-review alone). Design holds neither, so its spawn pays nothing for it.
  */
 export function collectPlanWritingDefects(label: string, content: string, writesPlans: boolean): string[] {

@@ -48,7 +48,7 @@ const MAX_ARGUMENTS_PER_COMMAND = 1;
 /**
  * The commands that bind the user's input, as a set rather than a count: a count
  * stays green when one host drops its binding and another gains one in the same
- * commit. The five tracker adopters bind it because they scan it for issue
+ * commit. The three tracker adopters bind it because they scan it for issue
  * references; the other three read it as their subject.
  */
 const INPUT_BOUND_COMMANDS: readonly string[] = [
@@ -268,9 +268,9 @@ describe('arguments once (D-ARGS-ONCE): known-bad probes', () => {
 
   it('a tracker adopter missing from the corpus fails', () => {
     const corpus = wellFormedCorpus();
-    corpus.delete('dynamic-plan');
+    corpus.delete('plan');
     expect(collectArgumentViolations(corpus)).toContain(
-      'dynamic-plan.md is absent from the corpus — a tracker adopter must be compiled',
+      'plan.md is absent from the corpus — a tracker adopter must be compiled',
     );
   });
 

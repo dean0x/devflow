@@ -37,7 +37,6 @@ import { describe, it, expect } from 'vitest'
 import {
   collectCodeSpawnSites,
   collectUnfencedLines,
-  collectValidAgentTypes,
   requireDistFile,
   requireDistFiles,
   resolveAllAgents,
@@ -46,16 +45,16 @@ import {
 const CONTEXT_TOKEN = 'DECISIONS_CONTEXT'
 
 /**
- * Code-family spawn sites (Code, Fix and Refactor, D-CODE-VARIANTS) the four hosts carry today
- * (implement 9, resolve 3, debug 1, dynamic-build 8). Floor: may only rise.
+ * Code-family spawn sites (Code, Fix and Refactor, D-CODE-VARIANTS) the hosts carry: implement 9,
+ * resolve 3, debug 1 (13 in all). Floor: may only rise.
+ * LOWERED 21 -> 13 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the 8
+ * Code-family spawn sites of the dynamic-build host left the roster, so the counted code is removed and
+ * no coverage is lost.
  */
-const CODE_SITE_FLOOR = 21
+const CODE_SITE_FLOOR = 13
 
-/** Decisions-loading hosts: every command host but dynamic-profile (13) loads the index behind the gate. */
-const DECISIONS_HOST_COUNT = 13
-
-/** The preamble's illustrative usage example: text, not a spawn. */
-const PREAMBLE_EXAMPLE = 'agent("your prompt here", { agentType: "Code" })'
+/** Decisions-loading hosts: every command host (10) loads the index behind the gate. */
+const DECISIONS_HOST_COUNT = 10
 
 // ── The declared set, from the agent sources ────────────────────────────────
 
@@ -165,24 +164,6 @@ function namedTypes(phrase: string, known: ReadonlySet<string>): string[] {
   return [...phrase.matchAll(/\b[A-Z][A-Za-z]+\b/g)].map(m => m[0]).filter(w => known.has(w))
 }
 
-/**
- * Named collector: the valid agent types that declare the key but are missing from the receivers of a host's
- * authoring-step inject sentence. A declared type the host can spawn and hand the key to, yet the sentence does
- * not name, is told it gets none ("every other agent type gets no decisions context").
- */
-function collectUnnamedReceivers(host: string, text: string, declared: ReadonlySet<string>): string[] {
-  const valid = collectValidAgentTypes(text)
-  if (valid === null) return [`${host}: no valid-agentType sentence`]
-  const inject = text.split('\n').find(l => l.includes('Then inject the relevant DECISIONS_CONTEXT')) ?? ''
-  if (inject === '') return [`${host}: no inject sentence`]
-  const phrase = receiverPhrase(inject.slice(inject.indexOf('Then inject')))
-  const receivers = phrase.slice(0, phrase.indexOf(' agents'))
-  return valid
-    .filter(type => declared.has(type))
-    .filter(type => !new RegExp(`(?<![\\w-])${type}(?![\\w-])`).test(receivers))
-    .map(type => `${host}: the inject sentence omits ${type}, which is valid and declares the key`)
-}
-
 /** Named collector: give-away sentences that name no receiver or an undeclared one, and are not classified. */
 function collectBadSentences(
   file: string,
@@ -253,7 +234,7 @@ describe('rule 1: every Code spawn site passes the key', () => {
     expect(total, 'Code spawn sites found').toBeGreaterThanOrEqual(CODE_SITE_FLOOR)
   })
 
-  it('every site carries DECISIONS_CONTEXT, in each of the four syntaxes plus the engine pseudo-form', () => {
+  it('every site carries DECISIONS_CONTEXT, in each syntax the commands use', () => {
     expect(collectKeylessCodeSites(compiled())).toEqual([])
   })
 
@@ -284,32 +265,9 @@ describe('rule 1: every Code spawn site passes the key', () => {
     expect(found[0]).toMatch(/^implement\.md:\d+$/)
   })
 
-  it('known-bad probe: a JavaScript Code call without the token is reported', () => {
-    const found = probe('dynamic-build.md', 'Fix the alignment issues identified by the Evaluate agent on branch ${BRANCH}:\n${evaluation?.rationale || "see the Evaluate agent\'s report"}\nDECISIONS_CONTEXT: ${DECISIONS_CONTEXT}\n', 'Fix the alignment issues identified by the Evaluate agent on branch ${BRANCH}:\n${evaluation?.rationale || "see the Evaluate agent\'s report"}\n')
-    expect(found).toHaveLength(1)
-  })
-
-  it('known-bad probe: the engine pseudo Code call without the key is reported', () => {
-    const found = probe('dynamic-build.md', 'plan + DECISIONS_CONTEXT + COMPLIANCE_DIRECTIVE', 'plan + COMPLIANCE_DIRECTIVE')
-    expect(found).toHaveLength(1)
-  })
-
   it('known-bad probe: a prose Code task without the key is reported', () => {
     const found = probe('implement.md', '`CI_FAILURES`, `DECISIONS_CONTEXT` and `PUSH: false`', '`CI_FAILURES` and `PUSH: false`')
     expect(found).toHaveLength(1)
-  })
-
-  it('known-bad probe: the merge-conflict resolver sentence without the key is reported', () => {
-    const found = probe('dynamic-build.md', ' and carries `COMPLIANCE_DIRECTIVE` (when it is not empty) and `DECISIONS_CONTEXT`,', ' and carries `COMPLIANCE_DIRECTIVE` (when it is not empty),')
-    expect(found).toHaveLength(1)
-  })
-
-  it('the preamble usage example is text, not a spawn, so it needs no key', () => {
-    for (const host of ['dynamic-plan.md', 'dynamic-tickets.md']) {
-      const text = requireDistFile(host)
-      expect(text, `${host} carries the example`).toContain(PREAMBLE_EXAMPLE)
-      expect(collectCodeSpawnSites(host, text, 'Code'), `${host}: the example is not a spawn`).toEqual([])
-    }
   })
 })
 
@@ -330,35 +288,34 @@ describe('rule 2: a site that passes the key names a declared type', () => {
   })
 
   it('known-bad probe: a Validate spawn handed the key is reported', () => {
-    const host = 'dynamic-build.md'
+    const host = 'implement.md'
     const real = requireDistFile(host)
-    const from = 'Return: {"verdict": "PASS" | "FAIL", "details": "..."}`, { agentType: "Validate" });'
+    const from = 'VALIDATION_SCOPE: full\nRun build, typecheck, lint, test. Report pass/fail with failure details."'
     expect(real).toContain(from)
-    const seeded = real.replace(from, 'DECISIONS_CONTEXT: ${DECISIONS_CONTEXT}\n' + from)
+    const seeded = real.replace(from, 'VALIDATION_SCOPE: full\nDECISIONS_CONTEXT: {decisions_context}\nRun build, typecheck, lint, test. Report pass/fail with failure details."')
     const found = collectUndeclaredReceivers([[host, seeded]], collectDeclaredTypes())
     expect(found).toHaveLength(1)
     expect(found[0]).toMatch(/\(Validate\)$/)
   })
 
-  it('known-bad probe: an Evaluate template handed the key is reported', () => {
-    const host = 'dynamic-plan.md'
+  it('known-bad probe: an Evaluate spawn handed the key is reported', () => {
+    const host = 'implement.md'
     const real = requireDistFile(host)
-    const from = 'Ticket: ${JSON.stringify((tickets || [])[i])}\n'
+    const from = 'Validate alignment with request and plan. Report ALIGNED or MISALIGNED with details."'
     expect(real).toContain(from)
-    const found = collectUndeclaredReceivers([[host, real.replace(from, from + 'Decisions context: ${DECISIONS_CONTEXT}\n')]], collectDeclaredTypes())
+    const seeded = real.replace(from, 'DECISIONS_CONTEXT: {decisions_context}\n' + from)
+    const found = collectUndeclaredReceivers([[host, seeded]], collectDeclaredTypes())
     expect(found).toHaveLength(1)
     expect(found[0]).toMatch(/\(Evaluate\)$/)
   })
 
-  it('release and dynamic-profile spawn nothing that carries the key (or the knowledge)', () => {
-    for (const host of ['release.md', 'dynamic-profile.md']) {
-      const text = requireDistFile(host)
-      const spawnLines = text.split('\n').filter(l => /subagent_type="|agentType: "(?!Code")/.test(l))
-      expect(spawnLines.length, `${host}: spawn lines found`).toBeGreaterThanOrEqual(1)
-      for (const line of spawnLines) {
-        expect(line, `${host}: ${line.slice(0, 60)}`).not.toContain(CONTEXT_TOKEN)
-        expect(line, `${host}: ${line.slice(0, 60)}`).not.toContain('FEATURE_KNOWLEDGE')
-      }
+  it('release spawns nothing that carries the key (or the knowledge)', () => {
+    const text = requireDistFile('release.md')
+    const spawnLines = text.split('\n').filter(l => /subagent_type="|agentType: "(?!Code")/.test(l))
+    expect(spawnLines.length, 'release.md: spawn lines found').toBeGreaterThanOrEqual(1)
+    for (const line of spawnLines) {
+      expect(line, `release.md: ${line.slice(0, 60)}`).not.toContain(CONTEXT_TOKEN)
+      expect(line, `release.md: ${line.slice(0, 60)}`).not.toContain('FEATURE_KNOWLEDGE')
     }
   })
 
@@ -371,12 +328,11 @@ describe('rule 2: a site that passes the key names a declared type', () => {
     }
   })
 
-  it('dynamic-plan\'s Evaluate and Synthesize spawns carry none', () => {
-    const text = requireDistFile('dynamic-plan.md')
-    for (const type of ['Evaluate', 'Synthesize']) {
-      const sites = collectCodeSpawnSites('dynamic-plan.md', text, type)
-      expect(sites.length, `${type} sites in dynamic-plan.md`).toBeGreaterThanOrEqual(1)
-      for (const s of sites) expect(s.payload, `${type} at dynamic-plan.md:${s.line}`).not.toContain(CONTEXT_TOKEN)
+  it('the Evaluate spawn of implement and the Synthesize spawns of plan and code-review carry none', () => {
+    for (const [host, type] of [['implement.md', 'Evaluate'], ['plan.md', 'Synthesize'], ['code-review.md', 'Synthesize']] as const) {
+      const sites = collectCodeSpawnSites(host, requireDistFile(host), type)
+      expect(sites.length, `${type} sites in ${host}`).toBeGreaterThanOrEqual(1)
+      for (const s of sites) expect(s.payload, `${type} at ${host}:${s.line}`).not.toContain(CONTEXT_TOKEN)
     }
   })
 })
@@ -427,47 +383,6 @@ describe('rule 3: every sentence that gives the key away names a declared receiv
   it('a fenced line is not a sentence: a JavaScript comment that says "injected" is left to rules 1 and 2', () => {
     const text = '```js\nconst DECISIONS_CONTEXT = args.decisionsContext || "";  // injected before authoring\n```\n'
     expect(collectGiveAwaySentences(text)).toEqual([])
-  })
-})
-
-describe('the authoring step names declared receivers only (AC-125)', () => {
-  it('the dynamic commands inject into declared agent types, and dynamic-plan\'s note names Design alone', () => {
-    const declared = collectDeclaredTypes()
-    const step = (host: string): string => {
-      const text = requireDistFile(host)
-      const at = text.indexOf('### DECISIONS_CONTEXT — obtain BEFORE authoring')
-      expect(at, `${host}: the authoring decisions step`).toBeGreaterThan(-1)
-      return text.slice(at, text.indexOf('\n### ', at + 10) === -1 ? undefined : text.indexOf('\n### ', at + 10))
-    }
-    for (const host of ['dynamic-build.md', 'dynamic-plan.md', 'dynamic-tickets.md']) {
-      const inject = step(host).split('\n').find(l => /inject the relevant DECISIONS_CONTEXT/.test(l)) ?? ''
-      const named = namedTypes(receiverPhrase(inject.slice(inject.indexOf('Then inject'))), collectKnownTypes(compiled()))
-      expect(named.length, `${host}: receivers named`).toBeGreaterThanOrEqual(2)
-      expect(named.filter(t => !declared.has(t)), `${host}: undeclared receivers`).toEqual([])
-    }
-    const note = requireDistFile('dynamic-plan.md').split('\n').find(l => l.includes('note verbatim ADR/PF IDs to inject into')) ?? ''
-    expect(note).toContain('into Design agent prompts.')
-    expect(note).not.toContain('Evaluate')
-  })
-
-  it('the inject sentence names every valid agent type that declares the key, the Fix variant included', () => {
-    const declared = collectDeclaredTypes()
-    const hosts = ['dynamic-build.md', 'dynamic-plan.md', 'dynamic-tickets.md']
-    // Non-vacuity: the valid-and-declared types are read, and the Code-family variant a workflow spawns is among them.
-    const reachable = (collectValidAgentTypes(requireDistFile(hosts[0])) ?? []).filter(t => declared.has(t))
-    expect(reachable.length, 'valid agent types that declare the key').toBeGreaterThanOrEqual(2)
-    expect(reachable).toContain('Fix')
-    for (const host of hosts) expect(collectUnnamedReceivers(host, requireDistFile(host), declared), host).toEqual([])
-  })
-
-  it('known-bad probe: an inject sentence that drops Fix is reported', () => {
-    const declared = collectDeclaredTypes()
-    const text = requireDistFile('dynamic-build.md')
-    const dropped = text.replace('the Code, Fix, Design,', 'the Code, Design,')
-    expect(dropped, 'the sentence names Fix beside Code').not.toBe(text)
-    expect(collectUnnamedReceivers('dynamic-build.md', dropped, declared)).toEqual([
-      'dynamic-build.md: the inject sentence omits Fix, which is valid and declares the key',
-    ])
   })
 })
 

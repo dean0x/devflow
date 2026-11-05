@@ -4,9 +4,9 @@
  * `TRACKER_SCHEMA_SECTIONS` in tests/helpers.ts is the THIRD PARTY the writer↔reader
  * heading seam binds to, so that two prompt files which both lost a section cannot
  * agree with each other and stay green. A third party is only worth having if IT
- * cannot silently shrink, and a length FLOOR cannot carry that claim: `>= 11` counts
+ * cannot silently shrink, and a length FLOOR cannot carry that claim: `>= 10` counts
  * duplicates, so a list that drops one heading and repeats another clears the floor
- * while describing a ten-section schema — and the reader block legitimately spells
+ * while describing a nine-section schema — and the reader block legitimately spells
  * `## Reference Rendering` twice, so a duplicate in that position looks ordinary.
  *
  * The check therefore lives at the oracle's CONSTRUCTION — exactly
@@ -59,7 +59,7 @@ describe('the §14.3 heading oracle cannot silently shrink', () => {
 
   it('known-bad probe: DROP-ONE + DUPLICATE-ONE is reported — the mutation a floor admits', () => {
     // The compound mutation is the one that matters: it leaves the LENGTH at
-    // TRACKER_SCHEMA_SECTION_COUNT, so every `>= 11` or `toHaveLength(11)` check
+    // TRACKER_SCHEMA_SECTION_COUNT, so every `>= 10` or `toHaveLength(10)` check
     // passes over a schema that has lost `### Substitutions` entirely.
     const wounded = [...TRACKER_SCHEMA_SECTIONS.slice(0, -1), TRACKER_SCHEMA_SECTIONS[0]];
     expect(wounded, 'the mutation must preserve the length, or it is not this mutation')

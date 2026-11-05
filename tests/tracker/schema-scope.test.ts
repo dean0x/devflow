@@ -305,6 +305,115 @@ describe('[DR-21] writer ↔ reader heading equality, both directions', () => {
 });
 
 // ---------------------------------------------------------------------------
+// AC-11 — an old-shape tracker file is still read: a retired section is ignored
+// ---------------------------------------------------------------------------
+
+const RETIRED_WAVE_FILTER_HEADING = '## Wave Filter';
+
+/**
+ * A tracker conventions file written before the Wave Filter section was retired.
+ * It stays on the user's disk (user content, never rewritten), so the reader meets
+ * it on every run. Inline on purpose: the fixture must not move with the oracle.
+ */
+const OLD_SHAPE_TRACKER_FILE = [
+  '---',
+  'provider: jira',
+  '---',
+  '',
+  '## Project',
+  '- site: tracker.example.test',
+  '- key: ABC',
+  '',
+  '## Issue Types',
+  '- Task',
+  '',
+  '## Iteration Policy',
+  '- none',
+  '',
+  RETIRED_WAVE_FILTER_HEADING,
+  '- status: Ready',
+  '',
+  '## Transitions',
+  '- Done',
+  '',
+  '### Substitutions',
+  '- none',
+  '',
+].join('\n');
+
+/** The `##` and `###` headings of a tracker file, in order. */
+function collectTrackerFileHeadings(file: string): string[] {
+  return file.split('\n').filter(line => /^#{2,3} \S/.test(line)).map(line => line.trim());
+}
+
+/**
+ * Named collector: how the reader contract treats an old-shape tracker file.
+ * The retired heading must be absent from the contract's section list, the contract
+ * must say an unlisted section is ignored and never DEGRADED, and the file's
+ * retired heading must be the only one of its headings the list does not name.
+ */
+export function collectOldShapeDefects(block: string, file: string): string[] {
+  const defects: string[] = [];
+  const listed = new Set(collectContractHeadings(block));
+  if (listed.has(RETIRED_WAVE_FILTER_HEADING)) {
+    defects.push(`the reader contract still lists ${RETIRED_WAVE_FILTER_HEADING}`);
+  }
+  if (!/A section not in this list is ignored, never DEGRADED/.test(block)) {
+    defects.push('the reader contract does not say an unlisted section is ignored, never DEGRADED');
+  }
+  const unlisted = collectTrackerFileHeadings(file).filter(heading => !listed.has(heading));
+  if (unlisted.join('\n') !== RETIRED_WAVE_FILTER_HEADING) {
+    defects.push(
+      `the file headings the contract does not list are [${unlisted.join(', ')}]; ` +
+      `expected only ${RETIRED_WAVE_FILTER_HEADING}`,
+    );
+  }
+  return defects;
+}
+
+describe('[AC-11] an old-shape tracker file with a Wave Filter section is read, not degraded', () => {
+  const block = preambleContractBlock();
+
+  /** Replace `from` with `to` in the block, failing loud when `from` is absent. */
+  function seed(from: string, to: string): string {
+    expect(block, `seed anchor not found in the reader block: ${from}`).toContain(from);
+    return block.replace(from, to);
+  }
+
+  it('the fixture is an old-shape file: it carries the retired heading and other sections', () => {
+    const headings = collectTrackerFileHeadings(OLD_SHAPE_TRACKER_FILE);
+    expect(headings).toContain(RETIRED_WAVE_FILTER_HEADING);
+    expect(headings.length, 'the fixture needs sections beside the retired one').toBeGreaterThan(3);
+  });
+
+  it('the contract lists no Wave Filter, ignores an unlisted section, and the file\'s other headings are listed', () => {
+    expect(collectOldShapeDefects(block, OLD_SHAPE_TRACKER_FILE)).toEqual([]);
+  });
+
+  it('known-bad probe: a contract that lists the retired section is reported', () => {
+    const seeded = seed('`## Project` (site, key)', '`## Wave Filter` · `## Project` (site, key)');
+    expect(collectOldShapeDefects(seeded, OLD_SHAPE_TRACKER_FILE)).toEqual([
+      `the reader contract still lists ${RETIRED_WAVE_FILTER_HEADING}`,
+      expect.stringContaining('expected only ## Wave Filter'),
+    ]);
+  });
+
+  it('known-bad probe: a contract without the "ignored, never DEGRADED" sentence is reported', () => {
+    const seeded = seed('A section not in this list is ignored, never DEGRADED.', '');
+    expect(collectOldShapeDefects(seeded, OLD_SHAPE_TRACKER_FILE)).toEqual([
+      'the reader contract does not say an unlisted section is ignored, never DEGRADED',
+    ]);
+  });
+
+  it('known-bad probe: a listed section dropped from the contract is reported as an unlisted file heading', () => {
+    const seeded = seed(' · `## Transitions`', '');
+    expect(collectOldShapeDefects(seeded, OLD_SHAPE_TRACKER_FILE)).toEqual([
+      expect.stringContaining('## Wave Filter, ## Transitions'),
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 3. AC-3.16 — the three-way sweep: ONE reader, enumerated by name
 // ---------------------------------------------------------------------------
 
@@ -681,13 +790,11 @@ const LIVE_REASONS: readonly string[] = [
   'tracker.md required fields incomplete — edit the conventions file in ~/.devflow/tracker/',
   'ambiguous issue reference',
   'redaction unavailable',
-  // Both of these were listed as deferred on first draft and the mirror arm below
-  // caught them: they already have emitting sites at this boundary. `no tracking
-  // issue for this run` is §14.2's "existing, byte-pinned" row, and the
-  // `Depends on:` foreign-shape row landed with the ref grammar in an earlier
-  // phase. A deferral that is not real hides a row from BOTH arms.
+  // This row was listed as deferred on first draft and the mirror arm below caught
+  // it: the `Depends on:` foreign-shape row landed with the ref grammar in an earlier
+  // phase and already has an emitting site at this boundary. A deferral that is not
+  // real hides a row from BOTH arms.
   'foreign issue reference {ref}',
-  'no tracking issue for this run',
   // ── Live from Phase 3b: the tool-call contract and the first provider
   // mechanics tree. Each row moved here in the commit that authored its emitting
   // site, which is the discipline DEFERRED_REASONS' comment describes.
@@ -731,12 +838,6 @@ const LIVE_REASONS: readonly string[] = [
   'release marker closed',
   'release marker unavailable',
   'ambiguous release marker',
-  // #365 (PR6): /dynamic-build's post-workflow wave PR step. The integration
-  // worktree's branch is not `wave/<slug>` — the user directed another branch, or
-  // the name failed the slug gate the evidence-file path is built from — so no
-  // wave PR is composed, asked about or opened. Emitted by the command, never by
-  // a provider: no tracker is involved.
-  'not a wave branch',
   // manage-debt's shared contract, expanded by every provider: `resolution-summary.md` is the
   // operation's only input, and its absence is a broken precondition. The operation reports it and
   // leaves the backlog alone, so the caller keeps `Tracked` pending instead of backfilling it.
@@ -950,7 +1051,6 @@ const SHIPPED_ISSUES_REFERENCE_PATH = /[\\/]tracker[\\/][a-z]+[\\/](?:backlink-s
  */
 const HOST_COMPOSED_REASONS: readonly string[] = [
   'cannot push to fork',
-  'wave block does not match its grammar',
   'test-plan block does not match its grammar',
   // The paste gates of the PR ensure-pr-ready opens (D-PR-BY-GIT): the link line and the evidence
   // exceptions are shape-checked at the paste, and a mismatch degrades the PR, never the verdict.
@@ -1043,6 +1143,12 @@ const RETIRED_REASONS: readonly string[] = [
   'tracker mechanics unavailable',
   // #393 (PR6): the pre-per-provider remedy — the file it names no longer exists.
   'tracker.md required fields incomplete — edit ~/.devflow/tracker.md',
+  // The wave PR's branch check, the wave block's paste gate and the wave run's
+  // missing tracking issue: the commands and the PR skeleton that emitted them are
+  // gone, so no site may name any of them again.
+  'not a wave branch',
+  'wave block does not match its grammar',
+  'no tracking issue for this run',
 ];
 
 /** Phase-3 status-line literals that share the registry [DR-01]. */
@@ -1144,8 +1250,12 @@ describe('[DR-04] DEGRADED literal registry: forward direction', () => {
       // 25 since #393 (PR6): `tracker mechanics unavailable` RETIRED —
       // moved to RETIRED_REASONS, whose arm is the stricter one (absent
       // everywhere), and the union floor below is what stops a row leaving both.
-      '§14.2 fixes 25 non-`(none)` reasons; a shorter table is a narrowed registry',
-    ).toBeGreaterThanOrEqual(25);
+      // 24 since #756: `not a wave branch` and `no tracking issue for this run` left the live
+      // table and joined RETIRED_REASONS. LOWERED 25 -> 24 by #756 (a deliberate exception to
+      // "a floor may only rise") on 2026-11-05: the two live rows left with the dynamic feature,
+      // so the counted rows are removed and no coverage is lost; the union floor below stays at 34.
+      '§14.2 fixes 24 non-`(none)` reasons; a shorter table is a narrowed registry',
+    ).toBeGreaterThanOrEqual(24);
     expect(
       CANONICAL_REASONS.length + RETIRED_REASONS.length,
       // 26 live + 7 retired before #393; a retirement moves a row between the two
@@ -1226,15 +1336,17 @@ describe('[DR-04] DEGRADED literal registry: forward direction', () => {
     );
   };
 
-  it('known-bad probe: the wave PR branch check, stripped from the commands, is reported unemitted (#365)', () => {
-    // The one emitter of `not a wave branch` is /dynamic-build's post-workflow step.
-    // Drop it from a copy of the command corpus and the forward predicate must name it.
-    const reason = 'not a wave branch';
+  it('known-bad probe: manage-debt\'s missing-summary reason, stripped from the sinks, is reported unemitted', () => {
+    // The only emitters of `resolution summary missing` are the three providers'
+    // manage-debt references. Drop it from a copy of the sink corpus and the forward
+    // predicate must name it.
+    const reason = 'resolution summary missing';
+    const sinks = gitAgentSinkCorpus();
     const commands = commandCorpus();
-    expect(commands.some(e => e.content.includes(`DEGRADED (${reason})`)), 'the emitter must be in the corpus').toBe(true);
-    const stripped = commands.map(e => ({ ...e, content: e.content.split(`DEGRADED (${reason})`).join('DEGRADED ({reason})') }));
-    expect(collectUnemittedReasons([reason], [...gitAgentSinkCorpus(), ...stripped])).toEqual([reason]);
-    expect(collectUnemittedReasons([reason], [...gitAgentSinkCorpus(), ...commands])).toEqual([]);
+    expect(sinks.some(e => e.content.includes(`DEGRADED (${reason})`)), 'the emitter must be in the corpus').toBe(true);
+    const stripped = sinks.map(e => ({ ...e, content: e.content.split(`DEGRADED (${reason})`).join('DEGRADED ({reason})') }));
+    expect(collectUnemittedReasons([reason], [...stripped, ...commands])).toEqual([reason]);
+    expect(collectUnemittedReasons([reason], [...sinks, ...commands])).toEqual([]);
   });
 
   it('every LIVE reason is emitted by at least one named site', () => {
@@ -1502,7 +1614,7 @@ describe('[DR-04] DEGRADED literal registry: reverse direction', () => {
       }
     }
     expect(survivors, `retired reason(s) still present:\n  ${survivors.join('\n  ')}`).toEqual([]);
-    expect(RETIRED_REASONS.length, 'the retired list shrank').toBeGreaterThanOrEqual(9);
+    expect(RETIRED_REASONS.length, 'the retired list shrank').toBeGreaterThanOrEqual(12);
   });
 
   it('known-bad probe: the reason collector reads real and nested parentheses', () => {

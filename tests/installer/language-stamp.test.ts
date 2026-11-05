@@ -237,7 +237,7 @@ describe('restampInstalledCommands', () => {
     await fs.writeFile(installedReview(), content, 'utf-8');
   }
 
-  it('stamps only code-review: decision 1 keeps /dynamic-build out', () => {
+  it('stamps only code-review', () => {
     expect([...LANGUAGE_STAMPED_COMMANDS]).toEqual(['code-review']);
   });
 
@@ -355,13 +355,13 @@ describe('installViaFileCopy stamps the installed code-review from the effective
     expect(stampOf(await readInstalledReview())).toBe('Installed language focuses: go');
   });
 
-  it('no other installed command carries the stamp line: /dynamic-build is out of #428', async () => {
+  it('no other installed command carries the stamp line', async () => {
     const everything = DEVFLOW_PLUGINS.filter(p => p.name !== 'devflow-ambient');
     await install({ plugins: everything, isPartialInstall: false });
 
     const dir = path.join(claudeDir, 'commands', 'devflow');
     const files = (await fs.readdir(dir)).filter(f => f.endsWith('.md')).sort();
-    expect(files, 'non-vacuity: the whole command set is installed').toEqual(expect.arrayContaining(['code-review.md', 'dynamic-build.md']));
+    expect(files, 'non-vacuity: the whole command set is installed').toEqual(expect.arrayContaining(['code-review.md', 'release.md']));
     const carriers: string[] = [];
     for (const file of files) {
       if ((await fs.readFile(path.join(dir, file), 'utf-8')).split('\n').some(l => l.startsWith('Installed language focuses: '))) carriers.push(file);

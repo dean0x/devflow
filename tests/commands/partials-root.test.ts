@@ -19,9 +19,8 @@
  * to every `.devflow/docs/` artifact a command reads or writes — tests/guards/
  * docs-root.test.ts holds the paths to it, and this file runs its command. Both used to read from cwd, so a session started in `packages/app`
  * loaded `(none)` and a write-back committed `packages/app/.devflow/features`.
- * The other decisions readers follow the same ledger: the dynamic commands'
- * `authoring_decisions` step (the three Workflow hosts)
- * and the release command both expand `decisions_locate`. No agent reads the
+ * The other decisions reader follows the same ledger: the release command
+ * expands `decisions_locate`. No agent reads the
  * index for itself any more (the Code agent's fallback is gone, #426), and
  * every expansion sits behind the `decisions_gate` sentence.
  *
@@ -45,7 +44,6 @@ import {
 import { requireDistFile, requireDistFiles, resolveAgentSource, resolveVariantOffSource } from '../helpers.js';
 
 const DECISIONS_HEADING = '### Load DECISIONS_CONTEXT';
-const AUTHORING_DECISIONS_HEADING = '### DECISIONS_CONTEXT — obtain BEFORE authoring';
 const RELEASE_CONTEXT_HEADING = '### Phase 1b: Load Context';
 const KNOWLEDGE_HEADING = '### Load Feature Knowledge';
 const WRITEBACK_HEADING = '### Feature Knowledge Write-Back (Conditional)';
@@ -375,8 +373,11 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
 
   it('every compiled docs root resolves the checkout toplevel, from a root, a subdirectory and a worktree', () => {
     const hosts = knowledgeHosts(DOCS_ROOT_LEAD);
-    // Non-vacuity: the seven docs-writing commands carry it.
-    expect(hosts.length).toBeGreaterThanOrEqual(7);
+    // Non-vacuity: the four docs-writing commands carry it.
+    // LOWERED 7 -> 4 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the three
+    // dynamic hosts that wrote docs artifacts left the roster, so the counted code is removed and no
+    // coverage is lost.
+    expect(hosts.length).toBeGreaterThanOrEqual(4);
     for (const file of hosts) {
       const section = sectionOf(requireDistFile(file), DOCS_ROOT_LEAD);
       expect(collectRootCommand(section), `${file}: the docs-root command`).toBe(ROOT_COMMAND);
@@ -391,21 +392,6 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
     }
     expect(rootsFrom(runFromStart(command as string, outside, env), outside).worktree).toBe(outside);
   });
-
-  it('the dynamic commands locate the main ledger by the same rule before authoring', () => {
-    const hosts = knowledgeHosts(AUTHORING_DECISIONS_HEADING)
-    // Non-vacuity: every command that expands authoring_decisions, once each.
-    expect(hosts.sort()).toEqual(['dynamic-build.md', 'dynamic-plan.md', 'dynamic-tickets.md'])
-    for (const file of hosts) {
-      const section = sectionOf(requireDistFile(file), AUTHORING_DECISIONS_HEADING)
-      expect(collectRootCommand(section), `${file}: the resolution command`).toBe(ROOT_COMMAND)
-      expect(section, `${file}: the index path`).toContain('`{ledger}/.devflow/curation/index.md`')
-      expect(section, `${file}: the retired checkout-relative read`).not.toContain('for the current worktree')
-      expect(section, `${file}: the repository owns the ledger`).toContain("a linked worktree reads the main worktree's copy")
-    }
-    const command = collectRootCommand(sectionOf(requireDistFile(hosts[0]), AUTHORING_DECISIONS_HEADING))
-    expect(rootsFrom(runFromStart(command as string, wt, env), wt).ledger).toBe(main)
-  })
 
   it('release.md expands the decisions locate rule behind the curation gate and reads the index from the ledger it names', () => {
     // release.mds imports the two defines, so the compiled section is the define bodies.

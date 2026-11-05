@@ -332,10 +332,10 @@ describe('the name lists only grow', () => {
   const retiredSkillFileCount = Object.values(RETIRED_SHIPPED.skillFiles).reduce((sum, files) => sum + files.length, 0);
 
   it('keeps each retired list at or above its floor', () => {
-    expect(RETIRED_SHIPPED.commands.length).toBeGreaterThanOrEqual(15);
+    expect(RETIRED_SHIPPED.commands.length).toBeGreaterThanOrEqual(19);
     expect(RETIRED_SHIPPED.agents.length).toBeGreaterThanOrEqual(35);
     expect(RETIRED_SHIPPED.skills.length).toBeGreaterThanOrEqual(189);
-    expect(retiredSkillFileCount).toBeGreaterThanOrEqual(2);
+    expect(retiredSkillFileCount).toBeGreaterThanOrEqual(5);
   });
 
   it('keeps each list of the released-name fixture at or above its floor', () => {
@@ -354,6 +354,9 @@ describe('retiredPathSet', () => {
     expect(retired.files.has('commands/devflow/specify.md')).toBe(true);
     expect(retired.files.has('commands/devflow/pre-pr.md')).toBe(true);
     expect(retired.files.has('agents/devflow/coder.md')).toBe(true);
+    for (const name of ['dynamic-build', 'dynamic-plan', 'dynamic-profile', 'dynamic-tickets']) {
+      expect(retired.files.has(`commands/devflow/${name}.md`), `${name} is a retired command`).toBe(true);
+    }
     expect(retired.holds('commands/devflow')).toBe(true);
     expect(retired.holds('agents/devflow')).toBe(true);
   });
@@ -361,6 +364,10 @@ describe('retiredPathSet', () => {
   it('maps the listed files of a skill folder that exists today', () => {
     expect(retired.files.has('skills/devflow:git/references/pr/ensure-pr-ready.md')).toBe(true);
     expect(retired.files.has('skills/devflow:agent-references/references/learning/maintain.md')).toBe(true);
+    for (const provider of ['github', 'jira', 'linear']) {
+      const file = `skills/devflow:git/references/tracker/${provider}/post-wave-report.md`;
+      expect(retired.files.has(file), `${file} is a retired skill file`).toBe(true);
+    }
     expect(retired.holds('skills/devflow:git/references/pr')).toBe(true);
   });
 

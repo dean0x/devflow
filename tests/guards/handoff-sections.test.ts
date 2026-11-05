@@ -10,10 +10,9 @@
  * `## Evidence Exceptions` section is the orchestrator's: written first, before any Code spawn,
  * byte-identical afterwards and outside any cap.
  *
- * Three places state the protocol and must agree: the Code agent (its HANDOFF_FILE input, orientation
- * read, handoff step and Output template), the `**Handoff Protocol**` paragraph of `/implement`, and
- * the handoff convention that the three Workflow hosts share through `authoring_preamble()`. The
- * persistence clauses `tests/evidence-policy/ticket-gate.test.ts` pins stay byte-identical.
+ * Two places state the protocol and must agree: the Code agent (its HANDOFF_FILE input, orientation
+ * read, handoff step and Output template) and the `**Handoff Protocol**` paragraph of `/implement`.
+ * The persistence clauses `tests/evidence-policy/ticket-gate.test.ts` pins stay byte-identical.
  *
  * Each arm runs through a named collector, and the known-bad probes feed the same collectors.
  */
@@ -23,7 +22,6 @@ import { describe, it, expect } from 'vitest'
 import { ensurePrReadyReference, readAgentReference, requireDistFile, resolveAgentSource, resolveVariantOffSource } from '../helpers.js'
 
 const SECTION_HEADING = '## Phase {N} Implementation Summary'
-const DYNAMIC_HOSTS = ['dynamic-build', 'dynamic-plan', 'dynamic-tickets'] as const
 
 /**
  * The compliance-off builds of /implement (#648): compliance off with curation on, and with curation off. The handoff
@@ -43,15 +41,6 @@ export function handoffProtocol(implement: string): string {
   return implement.split('\n').find(l => l.startsWith('**Handoff Protocol**')) ?? ''
 }
 
-/** The shared handoff convention paragraph of a compiled dynamic command. */
-export function handoffConvention(command: string): string {
-  const start = command.indexOf('### Handoff convention for sequential Code agents within a ticket')
-  if (start === -1) return ''
-  const rest = command.slice(start)
-  const end = rest.indexOf('\n### ', 5)
-  return end === -1 ? rest : rest.slice(0, end)
-}
-
 interface Rule {
   readonly label: string
   /** True when the text states the rule. */
@@ -67,11 +56,11 @@ const CODE_RULES: readonly Rule[] = [
   { label: 'append-only', holds: t => t.includes('with a Bash `>>` redirect, never rewriting an earlier section or the `## Evidence Exceptions` section') },
   { label: 'the reader takes only the preceding phase', holds: t => /read only the `## Phase \{N\} Implementation Summary` section of the phase immediately before yours/.test(t) },
   { label: 'never the whole file', holds: t => t.includes('never the whole file') },
-  { label: 'the code wins over the summary and the handoff section', holds: t => t.includes('never the whole file. The code wins over both.') },
+  { label: 'the code wins over the handoff section', holds: t => t.includes('never the whole file. The code wins over it.') },
   { label: 'the Output template names the appended section', holds: t => t.includes('end with the section you appended to `HANDOFF_FILE`') },
 ]
 
-/** What the orchestrator-side texts (the Handoff Protocol paragraph, the shared convention) must state. */
+/** What the orchestrator-side text (the Handoff Protocol paragraph) must state. */
 const ORCHESTRATOR_RULES: readonly Rule[] = [
   { label: 'the Code agent is the writer', holds: t => /[Ee]ach Code agent[^.]*appends its own `## Phase \{N\} Implementation Summary` section/.test(t) },
   { label: 'the 8,192-byte cap', holds: t => t.includes('at most 8,192 bytes') },
@@ -127,30 +116,18 @@ describe('the Code agent writes its own capped section and reads only the one be
     for (const paragraph of off) expect(paragraph, 'a compliance-off build words the protocol as the on build does').toBe(on)
   })
 
-  it('every Workflow host states the same convention through the shared preamble', () => {
-    for (const host of DYNAMIC_HOSTS) {
-      const convention = handoffConvention(requireDistFile(`${host}.md`))
-      expect(convention.length, `${host}: the convention moved`).toBeGreaterThan(300)
-      expect(collectRuleDefects(host, convention, ORCHESTRATOR_RULES)).toEqual([])
-    }
-  })
-
-  it('known-bad probe: each lost rule in each of the three places is reported', () => {
+  it('known-bad probe: each lost rule in each of the two places is reported', () => {
     const code = resolveAgentSource('code').content
     const paragraph = handoffProtocol(requireDistFile('implement.md'))
-    const convention = handoffConvention(requireDistFile('dynamic-build.md'))
     const seeds: ReadonlyArray<readonly [string, string, string, readonly Rule[], string]> = [
       ['code', code, '8,192 bytes', CODE_RULES, 'the 8,192-byte cap'],
       ['code', code, 'with a Bash `>>` redirect', CODE_RULES, 'append-only'],
       ['code', code, 'immediately before yours', CODE_RULES, 'the reader takes only the preceding phase'],
       ['code', code, 'never the whole file', CODE_RULES, 'never the whole file'],
-      ['code', code, 'The code wins over both.', CODE_RULES, 'the code wins over the summary and the handoff section'],
+      ['code', code, 'The code wins over it.', CODE_RULES, 'the code wins over the handoff section'],
       ['implement', paragraph, 'at most 8,192 bytes', ORCHESTRATOR_RULES, 'the 8,192-byte cap'],
       ['implement', paragraph, 'never rewriting an earlier section', ORCHESTRATOR_RULES, 'append-only'],
       ['implement', paragraph, 'immediately before its own', ORCHESTRATOR_RULES, 'the reader takes only the preceding phase'],
-      ['dynamic-build', convention, 'at most 8,192 bytes', ORCHESTRATOR_RULES, 'the 8,192-byte cap'],
-      ['dynamic-build', convention, 'It never rewrites an earlier section', ORCHESTRATOR_RULES, 'append-only'],
-      ['dynamic-build', convention, 'only the section of the phase immediately before its own', ORCHESTRATOR_RULES, 'the reader takes only the preceding phase'],
     ]
     for (const [label, text, literal, rules, rule] of seeds) {
       const broken = text.replaceAll(literal, 'x')
@@ -173,7 +150,6 @@ describe('no rule rewrites an earlier section or the Evidence Exceptions section
     const texts: Array<readonly [string, string]> = [
       ['code', code],
       ['implement', handoffProtocol(implement)],
-      ...DYNAMIC_HOSTS.map(h => [h, handoffConvention(requireDistFile(`${h}.md`))] as const),
     ]
     expect(texts.every(([, t]) => t.length > 300)).toBe(true)
     expect(texts.flatMap(([label, t]) => collectRewriteAllowances(label, t))).toEqual([])

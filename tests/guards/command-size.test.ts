@@ -10,19 +10,19 @@
  * that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a
  * line of the same command already states.
  *
- *   - AC-402. All 14 compiled commands have a ceiling in each build they have, and nothing else does.
+ *   - AC-402. All 10 compiled commands have a ceiling in each build they have, and nothing else does.
  *   - AC-401. /implement, /resolve, /plan and /code-review end below the size main held, in both builds.
  *   - A curation-off build never exceeds its curation-on build: it is the same host with its curation
  *     arms removed.
  *
  * Four builds exist (`Build`): `on`, `off` (curation off, the name its rows and floor ids have always
- * used), `compliance-off` and `both-off`. A command with a curation arm has a curation-off build (all but
- * /dynamic-profile, which has no arm), a command with a compliance arm has a compliance-off build,
+ * used), `compliance-off` and `both-off`. A command with a curation arm has a curation-off build (all
+ * ten do), a command with a compliance arm has a compliance-off build,
  * and one that also has a curation arm has a both-off build (#648, AC-33). Those ceilings sit at the
  * size measured at their first build, with zero headroom, as `command-<name>-compliance-off-max` and
  * `command-<name>-both-off-max`. The rule sets no comparison between an off build and the on build:
  * a compliance-off command can carry a local line the on build replaces with a posting step, so it can
- * be larger (/implement and /dynamic-tickets are).
+ * be larger (/implement is).
  *
  * Every guard has a named collector, a non-empty-corpus assertion and a known-bad probe run through the
  * same collector.
@@ -45,27 +45,16 @@ const OFF_VARIANT: Readonly<Record<Exclude<Build, 'on'>, OffVariantKey>> = {
 
 /** [command, build, ceiling in bytes]. Each row's text is the pattern its numeric-floors.json entry pins. */
 const COMMAND_MAX_BYTES: ReadonlyArray<readonly [string, Build, number]> = [
-  ['bug-analysis', 'on', 22_385],
-  ['bug-analysis', 'off', 19_659],
-  ['bug-analysis', 'compliance-off', 21_854],
-  ['bug-analysis', 'both-off', 19_128],
-  ['code-review', 'on', 32_204],
-  ['code-review', 'off', 30_588],
-  ['code-review', 'compliance-off', 29_547],
-  ['code-review', 'both-off', 27_931],
+  ['bug-analysis', 'on', 22_063],
+  ['bug-analysis', 'off', 19_337],
+  ['bug-analysis', 'compliance-off', 21_532],
+  ['bug-analysis', 'both-off', 18_806],
+  ['code-review', 'on', 31_882],
+  ['code-review', 'off', 30_266],
+  ['code-review', 'compliance-off', 29_225],
+  ['code-review', 'both-off', 27_609],
   ['debug', 'on', 15_221],
   ['debug', 'off', 13_319],
-  ['dynamic-build', 'on', 93_087],
-  ['dynamic-build', 'off', 90_494],
-  ['dynamic-build', 'compliance-off', 90_401],
-  ['dynamic-build', 'both-off', 87_808],
-  ['dynamic-plan', 'on', 30_145],
-  ['dynamic-plan', 'off', 26_539],
-  ['dynamic-profile', 'on', 4_657],
-  ['dynamic-tickets', 'on', 31_425],
-  ['dynamic-tickets', 'off', 27_954],
-  ['dynamic-tickets', 'compliance-off', 31_573],
-  ['dynamic-tickets', 'both-off', 28_102],
   ['explore', 'on', 9_451],
   ['explore', 'off', 7_686],
   ['implement', 'on', 41_816],
@@ -186,9 +175,11 @@ const COMPLIANCE_COMMANDS: readonly string[] = COMPLIANCE_VARIANT_HOSTS
   .filter(host => host.startsWith('commands/'))
   .map(host => host.slice('commands/'.length))
 
-describe('AC-402: all 14 compiled commands have a byte ceiling in each build they have', () => {
+describe('AC-402: all 10 compiled commands have a byte ceiling in each build they have', () => {
   it('the table covers exactly the compiled commands, in each build they have', () => {
-    expect(MDS_COMMAND_HOSTS.length, 'the roster is empty, so this guard proves nothing').toBeGreaterThanOrEqual(14)
+    // LOWERED 14 -> 10 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the four
+    // dynamic command hosts left the roster, so the counted code is removed and no coverage is lost.
+    expect(MDS_COMMAND_HOSTS.length, 'the roster is empty, so this guard proves nothing').toBeGreaterThanOrEqual(10)
     expect(COMMAND_MAX_BYTES).toHaveLength(MDS_COMMAND_HOSTS.reduce((rows, command) => rows + buildsOf(command).length, 0))
     expect(collectCoverageDefects(COMMAND_MAX_BYTES, MDS_COMMAND_HOSTS)).toEqual([])
   })
@@ -201,7 +192,7 @@ describe('AC-402: all 14 compiled commands have a byte ceiling in each build the
     const rows = COMMAND_MAX_BYTES
     expect(collectCoverageDefects(rows.filter(([c, b]) => !(c === 'plan' && b === 'off')), MDS_COMMAND_HOSTS)).toEqual(['plan/off: no ceiling'])
     expect(collectCoverageDefects([...rows, ['gone', 'on', 1]], MDS_COMMAND_HOSTS)).toEqual(['gone/on: a ceiling for no compiled command'])
-    expect(collectCoverageDefects([...rows, ['dynamic-profile', 'off', 1]], MDS_COMMAND_HOSTS), 'a host with no curation arm has no curation-off build').toEqual(['dynamic-profile/off: a ceiling for no compiled command'])
+    expect(collectCoverageDefects([...rows, ['debug', 'compliance-off', 1]], MDS_COMMAND_HOSTS), 'a host with no compliance arm has no compliance-off build').toEqual(['debug/compliance-off: a ceiling for no compiled command'])
     expect(collectCoverageDefects([...rows, ['plan', 'on', 1]], MDS_COMMAND_HOSTS)).toEqual(['plan/on: two ceilings'])
     expect(collectOversize(rows, (c, b) => (c === 'plan' && b === 'on' ? ceilingOf('plan', 'on')! + 1 : 0))).toEqual([
       `plan/on: ${ceilingOf('plan', 'on')! + 1} bytes, ceiling ${ceilingOf('plan', 'on')}`,
@@ -212,7 +203,9 @@ describe('AC-402: all 14 compiled commands have a byte ceiling in each build the
 
 describe('AC-33: each compliance-off and both-off command build has a ceiling at its measured size', () => {
   it('the compliance commands are the roster hosts of kind commands, and each is a compiled command', () => {
-    expect(COMPLIANCE_COMMANDS.length, 'the compliance roster holds no command, so this guard proves nothing').toBeGreaterThanOrEqual(8)
+    // LOWERED 8 -> 6 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the two
+    // compliance-armed dynamic hosts left the roster, so the counted code is removed and no coverage is lost.
+    expect(COMPLIANCE_COMMANDS.length, 'the compliance roster holds no command, so this guard proves nothing').toBeGreaterThanOrEqual(6)
     for (const command of COMPLIANCE_COMMANDS) expect(MDS_COMMAND_HOSTS, command).toContain(command)
   })
 
@@ -263,7 +256,9 @@ describe('AC-401: the four trimmed commands end below main in both builds', () =
 describe('a curation-off build never exceeds its curation-on build', () => {
   it('holds for the built commands and for their ceilings', () => {
     const armed = MDS_COMMAND_HOSTS.filter(command => buildsOf(command).includes('off'))
-    expect(armed.length, 'no command has a curation-off build, so this guard proves nothing').toBeGreaterThanOrEqual(13)
+    // LOWERED 13 -> 10 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the three
+    // curation-armed dynamic hosts left the roster, so the counted code is removed and no coverage is lost.
+    expect(armed.length, 'no command has a curation-off build, so this guard proves nothing').toBeGreaterThanOrEqual(10)
     expect(collectOffAboveOn(builtBytes, armed)).toEqual([])
     expect(collectOffAboveOn(ceilingOf, armed)).toEqual([])
   })

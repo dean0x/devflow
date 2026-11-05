@@ -811,6 +811,7 @@ describe('tool/body agreement (D-TOOL-BODY-MATCH)', () => {
 });
 
 describe('structured return (D-STRUCTURED-RETURN-TOOL)', () => {
+  // No devflow command spawns these with a schema now, but a user can spawn them from their own Workflow script with one, and a tools list without StructuredOutput would break that spawn.
   it('Review, Design and Synthesize hold StructuredOutput', () => {
     for (const name of ['review', 'design', 'synthesize']) {
       expect(agent(name).fm.tools, name).toContain('StructuredOutput');
@@ -820,22 +821,37 @@ describe('structured return (D-STRUCTURED-RETURN-TOOL)', () => {
   const commandTexts = (): string[] =>
     walkFiles(COMMANDS_DIR, file => file.endsWith('.mds') || file.endsWith('.md')).map(file => readFileSync(file, 'utf-8'));
 
-  it('every agent type a command spawns with a schema: option can return through the tool', () => {
+  /** Named collector: the agent types spawned with a schema: option that have no table row or cannot return through the tool. */
+  function collectSchemaSpawnDefects(texts: readonly string[]): string[] {
     const types = new Set<string>();
-    for (const text of commandTexts()) for (const type of collectSchemaSpawnTypes(text)) types.add(type);
-    expect([...types].sort(), 'the scan must read the three schema-bearing agent types').toEqual(['Design', 'Review', 'Synthesize']);
-    for (const type of types) {
+    for (const text of texts) for (const type of collectSchemaSpawnTypes(text)) types.add(type);
+    return [...types].sort().flatMap(type => {
       const row = agents.get(type.toLowerCase());
-      expect(row, `${type} is spawned with a schema but has no table row`).toBeDefined();
-      if (row?.fm.tools !== null && row !== undefined) {
-        expect(row.fm.tools, `${type} is spawned with a schema but lacks StructuredOutput`).toContain('StructuredOutput');
-      }
-    }
+      if (row === undefined) return [`${type} is spawned with a schema but has no table row`];
+      return row.fm.tools !== null && !row.fm.tools.includes('StructuredOutput')
+        ? [`${type} is spawned with a schema but lacks StructuredOutput`]
+        : [];
+    });
+  }
+
+  it('every agent type a command spawns with a schema: option can return through the tool', () => {
+    expect(commandTexts().length, 'the scan reads the command sources').toBeGreaterThan(0);
+    expect(collectSchemaSpawnDefects(commandTexts())).toEqual([]);
   });
 
   it('known-bad probe: a schema-bearing spawn is read at either argument order and ignored without one', () => {
     expect([...collectSchemaSpawnTypes('agent(`go`, { agentType: "Triage", schema: S });')]).toEqual(['Triage']);
     expect([...collectSchemaSpawnTypes('agent(`go`, { agentType: "Code" });')]).toEqual([]);
+  });
+
+  it('known-bad probe: a schema-bearing spawn of a type without the tool, or without a table row, is reported', () => {
+    expect(collectSchemaSpawnDefects(['agent(`go`, { agentType: "Review", schema: S });'])).toEqual([]);
+    expect(collectSchemaSpawnDefects(['agent(`go`, { agentType: "Git", schema: S });'])).toEqual([
+      'Git is spawned with a schema but lacks StructuredOutput',
+    ]);
+    expect(collectSchemaSpawnDefects(['agent(`go`, { agentType: "Nobody", schema: S });'])).toEqual([
+      'Nobody is spawned with a schema but has no table row',
+    ]);
   });
 });
 

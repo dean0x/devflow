@@ -11,14 +11,11 @@
  * misses the frontmatter `name:` leaves every structural guard green while every
  * spawn fails at runtime. These guards close that gap.
  *
- * All five guards are GREEN on current names (phase 1). Populated/updated in
- * subsequent phases as agents are renamed.
+ * The guards are GREEN on current names. Populated/updated as agents are renamed.
  *
  * GAP-1  Form A ↔ Form B — slug (filename) vs frontmatter name:
- * GAP-2  agentType: coverage — dynamic commands use only declared roster agents,
- *        plus exact-case subagent_type closure over dist and hook scripts
+ * GAP-2  Exact-case subagent_type closure over dist and hook scripts
  * GAP-3  Orchestrator charter — byte-size cap + no retired agent names
- * GAP-4  Model tiers (dist-gated) — roster model tiers match agent frontmatter
  * GAP-5  Retired-name sweep (dist-gated) — no retired names in any shipped
  *        artifact, with context-scoped allowlisting
  */
@@ -28,7 +25,7 @@ import { existsSync, readFileSync, readdirSync, type Dirent } from 'fs'
 import * as path from 'path'
 import { getAllAgentNames } from '../src/core/plugins.js'
 import { LEGACY_AGENT_KEYS, canonicaliseAgentKeys } from '../src/core/agent-models.js'
-import { BUILT_IN_SPAWN_TYPES, collectValidAgentTypes, requireDistFiles, requireDistFile, resolveAgentSource, resolveAllAgents } from './helpers.js'
+import { BUILT_IN_SPAWN_TYPES, requireDistFiles, resolveAllAgents } from './helpers.js'
 import {
   HANDOFF_PREFIX,
   REPORT_CAP,
@@ -48,7 +45,6 @@ const ROOT_DOC_FILES = ['README.md', 'CLAUDE.md', 'CONTRIBUTING.md'].map(f => pa
 const FEATURES_DIR = path.join(ROOT, '.devflow', 'features')
 const SCRIPTS_DIR = path.join(ASSETS_DIR, 'scripts')
 const CHARTER_PATH = path.join(ROOT, 'src', 'assets', 'scripts', 'hooks', 'assets', 'orchestrator-charter.md')
-const ROSTER_SRC = path.join(ROOT, 'src', 'assets', 'commands', '_partials', '_roster.mds')
 
 // ---------------------------------------------------------------------------
 // GAP-1 exception map — slug → expected form B name
@@ -298,36 +294,6 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
   },
 
   // -----------------------------------------------------------------------
-  // Evaluator — CONCEPT (MDS function name)
-  // The actual Evaluate agent is spawned via agentType: "Evaluate".
-  // evaluator_panel() is an MDS function (the single Gate 2 Evaluate spawn's
-  // doctrine); the merged spawn's prompt carries no role label of its own.
-  // -----------------------------------------------------------------------
-  {
-    path: 'src/assets/commands/dynamic-build.mds',
-    name: 'Evaluator',
-    reason:
-      'CONCEPT: evaluator_panel MDS function import/call — not a Form-B spawn key; ' +
-      'actual spawn uses agentType: "Evaluate"',
-    contexts: ['evaluator_panel'],
-  },
-  {
-    path: 'src/assets/commands/_partials/_engine.mds',
-    name: 'Evaluator',
-    reason:
-      'CONCEPT: @define evaluator_panel() MDS function definition and export — not a Form-B spawn key',
-    contexts: ['evaluator_panel'],
-  },
-  {
-    path: 'dist/commands/dynamic-build.md',
-    name: 'Evaluator',
-    reason:
-      'CONCEPT: compiled output of dynamic-build.mds; the evaluator_panel function name ' +
-      '— not a Form-B spawn key',
-    contexts: ['evaluator_panel'],
-  },
-
-  // -----------------------------------------------------------------------
   // Reviewer — DATA_FIELD, CONTRACT, CONCEPT, THIRD_PARTY (generic term)
   // -----------------------------------------------------------------------
   {
@@ -362,21 +328,6 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     contexts: ['reviewer_confidence'],
   },
   {
-    path: 'src/assets/commands/dynamic-build.mds',
-    name: 'Reviewer',
-    reason:
-      'CONCEPT: "dead-reviewer detection" — detection concept in comment; not an agent spawn',
-    contexts: ['dead-reviewer'],
-  },
-  {
-    path: 'src/assets/commands/_partials/_engine.mds',
-    name: 'Reviewer',
-    reason:
-      'CONCEPT: "clean reviewer" — generic prose in Review agent result contract description; ' +
-      'not an agent spawn',
-    contexts: ['clean reviewer'],
-  },
-  {
     path: 'src/assets/skills/compliance/frameworks/sox/reference.md',
     name: 'Reviewer',
     reason:
@@ -406,14 +357,6 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     reason:
       'DATA_FIELD: compiled resolve.mds; reviewer_confidence field — not an agent spawn',
     contexts: ['reviewer_confidence'],
-  },
-  {
-    path: 'dist/commands/dynamic-build.md',
-    name: 'Reviewer',
-    reason:
-      'CONCEPT: compiled dynamic-build.mds; "dead-reviewer" concept + "clean reviewer" prose ' +
-      '— not agent spawns',
-    contexts: ['dead-reviewer', 'clean reviewer'],
   },
   {
     path: 'dist/commands/plan.md',
@@ -512,18 +455,6 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
   },
 
   // -----------------------------------------------------------------------
-  // Evaluator — CONCEPT (.devflow/features corpus)
-  // -----------------------------------------------------------------------
-  {
-    path: '.devflow/features/dynamic-workflow-engine/KNOWLEDGE.md',
-    name: 'Evaluator',
-    reason:
-      'CONCEPT: evaluator_panel — live MDS function name defined in _engine.mds; ' +
-      'not a Form-B spawn key',
-    contexts: ['evaluator_panel'],
-  },
-
-  // -----------------------------------------------------------------------
   // Simplify — CONCEPT (a capitalised verb opening a sentence, not the agent renamed to Polish;
   // the lowercase verb needs no row)
   // -----------------------------------------------------------------------
@@ -580,9 +511,6 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Normalize an agent name for cross-form comparison: strip hyphens, lowercase. */
-const normalize = (name: string) => name.replace(/-/g, '').toLowerCase()
-
 /** Capitalize only the first character; leave the rest unchanged. */
 const capitalizeFirst = (s: string): string =>
   s.length === 0 ? s : s[0].toUpperCase() + s.slice(1)
@@ -593,14 +521,6 @@ function readFrontmatterName(filePath: string): string {
   // name: must be the second line in the frontmatter block
   const m = content.match(/^---\n(?:.*\n)*?name:\s*(\S+)/)
   if (!m) throw new Error(`No name: field in frontmatter of ${filePath}`)
-  return m[1]
-}
-
-/** Parse model: value from agent frontmatter. */
-function readFrontmatterModel(filePath: string): string {
-  const content = readFileSync(filePath, 'utf-8')
-  const m = content.match(/^---\n(?:.*\n)*?model:\s*(\S+)/)
-  if (!m) throw new Error(`No model: field in frontmatter of ${filePath}`)
   return m[1]
 }
 
@@ -653,40 +573,6 @@ function collectScriptFiles(dir: string): string[] {
 }
 
 /**
- * Extract agentType: values from compiled content.
- * Pattern is case-insensitive and tolerates no-space form (agentType:"X").
- */
-function extractAgentTypes(content: string): Set<string> {
-  const result = new Set<string>()
-  const re = /agentType[=:]\s*"([^"]+)"/gi
-  for (const m of content.matchAll(re)) result.add(m[1])
-  return result
-}
-
-/**
- * Named collector: how a compiled dynamic host's "Valid `agentType` values" sentence (the preamble's
- * closed list) differs from the types the host spawns and from the roster. A type the host spawns but the
- * sentence omits tells the main model that its own script is invalid, so the three disagree; a listed
- * type the roster lacks (or the reverse) is a name no spawn or no registry entry stands behind.
- */
-function collectValidListDefects(host: string, text: string, roster: ReadonlySet<string>): string[] {
-  const listed = collectValidAgentTypes(text)
-  if (listed === null) return [`${host}: no "Valid \`agentType\` values" sentence`]
-  const listedSet = new Set(listed)
-  const out: string[] = []
-  for (const type of extractAgentTypes(text)) {
-    if (!listedSet.has(type)) out.push(`${host}: spawns "${type}", which the valid-agentType sentence does not list`)
-  }
-  for (const type of listed) {
-    if (!roster.has(type)) out.push(`${host}: lists "${type}", which the roster does not`)
-  }
-  for (const type of roster) {
-    if (!listedSet.has(type)) out.push(`${host}: omits "${type}", which the roster lists`)
-  }
-  return out
-}
-
-/**
  * A `subagent_type` literal: `subagent_type="X"`, `subagent_type: "X"` and the shell-escaped
  * `subagent_type=\"X\"` form used inside hook heredoc strings.
  */
@@ -706,34 +592,6 @@ export function collectSpawnLiteralDefects(displayPath: string, content: string,
     out.push(`  ${displayPath}: subagent_type "${name}" does not byte-equal any agent frontmatter name:`)
   }
   return out
-}
-
-/**
- * Parse the "| AgentName | tier | … |" roster table from _roster.mds source.
- * Returns name → model tier.
- */
-function parseRosterFromSource(): Map<string, string> {
-  const content = readFileSync(ROSTER_SRC, 'utf-8')
-  const roster = new Map<string, string>()
-  for (const line of content.split('\n')) {
-    const m = line.match(/^\|\s*([\w-]+)\s*\|\s*(haiku|sonnet|opus)\s*\|/)
-    if (m) roster.set(m[1], m[2])
-  }
-  return roster
-}
-
-/**
- * Parse the roster table from compiled dist/commands/dynamic-build.md.
- * Throws (does NOT return) when dist is absent — FAIL-LOUD requirement.
- */
-function parseRosterFromDist(): Map<string, string> {
-  const content = requireDistFile('dynamic-build.md')
-  const roster = new Map<string, string>()
-  for (const line of content.split('\n')) {
-    const m = line.match(/^\|\s*([\w-]+)\s*\|\s*(haiku|sonnet|opus)\s*\|/)
-    if (m) roster.set(m[1], m[2])
-  }
-  return roster
 }
 
 // ---------------------------------------------------------------------------
@@ -787,115 +645,10 @@ describe('GAP-1: slug (form A) ↔ frontmatter name: (form B)', () => {
 })
 
 // ---------------------------------------------------------------------------
-// GAP-2: agentType: coverage
+// GAP-2: subagent_type closure
 // ---------------------------------------------------------------------------
 
-describe('GAP-2: agentType: values in dist ↔ declared roster', () => {
-  /**
-   * Explore is a devflow agent that overrides the Claude Code built-in of the same
-   * name (D-EXPLORE-OVERRIDE). The prose commands spawn it by type name and it is
-   * not a member of the dynamic roster, so a workflow `agentType` of Explore would
-   * be held against the roster like any other type: none is expected.
-   */
-  it('agentType values in dist match the _roster.mds roster exactly (fail-loud when dist absent)', () => {
-    // FAIL-LOUD: requireDistFiles() throws when dist is absent — not a skip.
-    const distFiles = requireDistFiles()
-
-    // Collect all agentType values from all compiled command files.
-    // Two patterns cover the full surface:
-    //   agentType: "X"   — standard JS object form
-    //   agentType:"X"    — no-space form (present in _engine.mds compiled output)
-    const agentTypesInDist = new Set<string>()
-    for (const file of distFiles) {
-      const content = readFileSync(path.join(DIST_COMMANDS_DIR, file), 'utf-8')
-      for (const name of extractAgentTypes(content)) {
-        agentTypesInDist.add(name)
-      }
-    }
-
-    // Parse the declared roster (form B names + model tier) from source.
-    const sourceRoster = parseRosterFromSource()
-    expect(sourceRoster.size, '_roster.mds table is empty — parse failure?').toBeGreaterThan(0)
-
-    const registryNormalized = new Set(getAllAgentNames().map(normalize))
-
-    // Check 1: roster ⊆ registry (every roster entry is a real registered agent).
-    const rosterNotInRegistry: string[] = []
-    for (const [name] of sourceRoster) {
-      if (!registryNormalized.has(normalize(name))) {
-        rosterNotInRegistry.push(name)
-      }
-    }
-    expect(
-      rosterNotInRegistry,
-      `_roster.mds declares agents not in the registry (DEVFLOW_PLUGINS):\n  ${rosterNotInRegistry.join('\n  ')}\n` +
-      'Either add them to src/core/plugins.ts or remove from the roster.',
-    ).toHaveLength(0)
-
-    // Check 2: set-equality between declared roster and agentType values in dist.
-    const rosterNames = new Set(sourceRoster.keys())
-
-    const inRosterNotInDist = [...rosterNames].filter(
-      n => !agentTypesInDist.has(n),
-    )
-    expect(
-      inRosterNotInDist,
-      `Roster agents never used as agentType in dist/commands/ — roster or dist out of sync:\n  ${inRosterNotInDist.join('\n  ')}`,
-    ).toHaveLength(0)
-
-    const inDistNotInRoster = [...agentTypesInDist].filter(
-      n => !rosterNames.has(n),
-    )
-    expect(
-      inDistNotInRoster,
-      `agentType values in dist/commands/ not in _roster.mds — update the roster or fix the command:\n  ${inDistNotInRoster.join('\n  ')}`,
-    ).toHaveLength(0)
-  })
-
-  /** The three Workflow hosts (build, plan, tickets): each carries the preamble's valid-agentType sentence. dynamic-profile authors no Workflow. */
-  const DYNAMIC_HOST_COUNT = 3
-
-  it("each dynamic host's valid-agentType sentence lists the roster and every type the host spawns", () => {
-    const hosts = requireDistFiles().filter(f => f.startsWith('dynamic-') && f !== 'dynamic-profile.md')
-    expect(hosts, 'Workflow hosts in dist/commands').toHaveLength(DYNAMIC_HOST_COUNT)
-    const roster = new Set(parseRosterFromSource().keys())
-    expect(roster.size, '_roster.mds table is empty — parse failure?').toBeGreaterThan(0)
-
-    // Non-vacuity: every host yields a list, and the hosts together spawn at least one type to hold it to.
-    const texts = hosts.map(h => [h, requireDistFile(h)] as const)
-    for (const [host, text] of texts) {
-      expect(collectValidAgentTypes(text)?.length ?? 0, `${host}: types in the valid-agentType sentence`).toBeGreaterThan(0)
-    }
-    const spawned = new Set(texts.flatMap(([, text]) => [...extractAgentTypes(text)]))
-    expect(spawned.size, 'agentType values the dynamic hosts spawn').toBeGreaterThan(0)
-
-    expect(texts.flatMap(([host, text]) => collectValidListDefects(host, text, roster))).toEqual([])
-  })
-
-  it('known-bad probes: a dropped spawned type, an invented type and a missing sentence are each reported', () => {
-    const host = 'dynamic-build.md'
-    const text = requireDistFile(host)
-    const roster = new Set(parseRosterFromSource().keys())
-    const line = text.split('\n').find(l => l.startsWith('Valid `agentType` values: ')) ?? ''
-    expect(line, 'the valid-agentType sentence').not.toBe('')
-    const listed = collectValidAgentTypes(text) ?? []
-    const withList = (types: readonly string[]): string => text.replace(line, `Valid \`agentType\` values: ${types.join(', ')}.`)
-
-    // Control: the real host passes, so the probes below are not red for an unrelated reason.
-    expect(collectValidListDefects(host, text, roster)).toEqual([])
-
-    expect(collectValidListDefects(host, withList(listed.filter(t => t !== 'Fix')), roster)).toEqual([
-      `${host}: spawns "Fix", which the valid-agentType sentence does not list`,
-      `${host}: omits "Fix", which the roster lists`,
-    ])
-    expect(collectValidListDefects(host, withList([...listed, 'Fixer']), roster)).toEqual([
-      `${host}: lists "Fixer", which the roster does not`,
-    ])
-    expect(collectValidListDefects(host, text.replace(line, ''), roster)).toEqual([
-      `${host}: no "Valid \`agentType\` values" sentence`,
-    ])
-  })
-
+describe('GAP-2: subagent_type literals ↔ live form-B names', () => {
   it('subagent_type literals in dist and hook scripts exactly match a live form-B name (case-sensitive)', () => {
     /**
      * Guard 5 (registry-integrity) compares subagent_type values to registry
@@ -1095,46 +848,6 @@ describe('GAP-3: orchestrator charter integrity', () => {
     // The charter has no allowlist: any retired spelling in it is a defect.
     const violations = collectRetiredNameViolations('orchestrator-charter.md', charter, RETIRED_AGENT_FORM_B, [])
     expect(violations, violations.join('\n')).toHaveLength(0)
-  })
-})
-
-// ---------------------------------------------------------------------------
-// GAP-4: Model tiers (dist-gated)
-// ---------------------------------------------------------------------------
-
-describe('GAP-4: roster model tiers match agent frontmatter (fail-loud when dist absent)', () => {
-  it('every roster entry model tier matches that agent\'s frontmatter model: field', () => {
-    // FAIL-LOUD: parseRosterFromDist() throws when dist is absent — not a skip.
-    const rosterFromDist = parseRosterFromDist()
-    const sourceRosterSize = parseRosterFromSource().size
-    expect(rosterFromDist.size, 'dist roster table is empty — parse failure or dist is stale?').toBeGreaterThan(0)
-    expect(
-      rosterFromDist.size,
-      `dist roster has ${rosterFromDist.size} entries but source _roster.mds has ${sourceRosterSize} — dist is stale, run npm run build:mds`,
-    ).toBe(sourceRosterSize)
-
-    const violations: string[] = []
-    for (const [agentName, rosterTier] of rosterFromDist) {
-      // Map from form B name to agent file: normalize for lookup
-      const agentSlug = getAllAgentNames().find(
-        slug => normalize(slug) === normalize(agentName),
-      )
-      if (!agentSlug) {
-        violations.push(`  Roster entry '${agentName}' has no matching agent file in src/assets/agents/`)
-        continue
-      }
-      // Use resolveAgentSource (dist-preferred, src-fallback) so the lookup survives
-      // future agent renames without updating a hardcoded directory constant (AC-0.7).
-      const agentFile = resolveAgentSource(agentSlug).path
-      const frontmatterModel = readFrontmatterModel(agentFile)
-      if (frontmatterModel !== rosterTier) {
-        violations.push(
-          `  ${agentSlug}.md: frontmatter model: '${frontmatterModel}' ≠ roster tier '${rosterTier}'\n` +
-          `  Update either the agent frontmatter or the _roster.mds table — they must agree.`,
-        )
-      }
-    }
-    expect(violations, `Model tier mismatches:\n${violations.join('\n')}`).toHaveLength(0)
   })
 })
 

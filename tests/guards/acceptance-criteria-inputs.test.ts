@@ -261,29 +261,29 @@ describe('no /implement Phase 2 Code spawn repeats PATTERNS or PRIOR_PHASE_SUMMA
 const CODE_BASE_BRANCH_INPUT = '- **BASE_BRANCH**: Branch this feature branch was created from\n'
 const CODE_PRIOR_PHASE_SUMMARY_INPUT = '- **PRIOR_PHASE_SUMMARY**: Summary from the previous Code agent (format in Handoff)\n'
 
-/** Named collector: how a Code body lists the PATTERNS input that no spawn passes, or loses the PRIOR_PHASE_SUMMARY input that the dynamic engine still names. */
+/** Named collector: how a Code body lists the PATTERNS input or the PRIOR_PHASE_SUMMARY input, which no spawn passes. */
 function collectCodeSpawnInputDefects(label: string, text: string): string[] {
   const defects: string[] = []
   if (/^- \*\*PATTERNS\*\*/m.test(text)) defects.push(`${label}: the dead PATTERNS input is listed`)
   const summaries = text.split('\n').filter(line => line.startsWith('- **PRIOR_PHASE_SUMMARY**')).length
-  if (summaries !== 1) defects.push(`${label}: ${summaries} PRIOR_PHASE_SUMMARY input lines, expected 1`)
+  if (summaries !== 0) defects.push(`${label}: ${summaries} PRIOR_PHASE_SUMMARY input lines, expected 0`)
   return defects
 }
 
-describe('the Code agent lists no PATTERNS input and keeps PRIOR_PHASE_SUMMARY in every build (#756)', () => {
+describe('the Code agent lists no PATTERNS input and no PRIOR_PHASE_SUMMARY input in every build (#756)', () => {
   it.each(codeBuilds().map(b => [b.label, b.text] as const))('%s', (label, text) => {
     expect(text.length, 'the body is read: the guard would pass vacuously on an empty one').toBeGreaterThan(4_000)
     expect(collectCodeSpawnInputDefects(label, text)).toEqual([])
   })
 
-  it('known-bad probes: a listed PATTERNS input and a lost PRIOR_PHASE_SUMMARY input are each reported', () => {
+  it('known-bad probes: a listed PATTERNS input and a listed PRIOR_PHASE_SUMMARY input are each reported', () => {
     const [{ label, text }] = codeBuilds()
     const withPatterns = text.replace(CODE_BASE_BRANCH_INPUT, `${CODE_BASE_BRANCH_INPUT}- **PATTERNS**: Codebase patterns to follow\n`)
     expect(withPatterns, 'the seed must land').not.toBe(text)
     expect(collectCodeSpawnInputDefects(label, withPatterns)).toEqual([`${label}: the dead PATTERNS input is listed`])
-    const noSummary = text.replace(CODE_PRIOR_PHASE_SUMMARY_INPUT, '')
-    expect(noSummary, 'the seed must land').not.toBe(text)
-    expect(collectCodeSpawnInputDefects(label, noSummary)).toEqual([`${label}: 0 PRIOR_PHASE_SUMMARY input lines, expected 1`])
+    const withSummary = text.replace(CODE_BASE_BRANCH_INPUT, `${CODE_BASE_BRANCH_INPUT}${CODE_PRIOR_PHASE_SUMMARY_INPUT}`)
+    expect(withSummary, 'the seed must land').not.toBe(text)
+    expect(collectCodeSpawnInputDefects(label, withSummary)).toEqual([`${label}: 1 PRIOR_PHASE_SUMMARY input lines, expected 0`])
   })
 })
 

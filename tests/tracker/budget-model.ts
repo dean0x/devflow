@@ -464,9 +464,8 @@ export type TransitiveRefs = Readonly<Record<string, Readonly<Record<string, rea
  * FLAT and per provider. Each row names every op the closure reaches from that op
  * under that provider, never a chain to follow: a two-hop target is listed directly,
  * and the closure scan (nameableFromProvider) is what proves the list complete. Per
- * provider because the hops genuinely differ — Linear's post-wave-report states its
- * marker's second discriminator only in backlink-shipped-issues' reference, and no
- * other provider's does.
+ * provider because the hops can differ — one provider's reference may defer a rule
+ * to a sibling operation's reference that another provider states inline.
  *
  * Only hops whose load no reference literal already prices live here: setup-task's
  * `learn-conventions` and check-merge-readiness's `check-ci-status` are hops too, and
@@ -494,7 +493,6 @@ export const MODEL_TRANSITIVE_REFS: TransitiveRefs = {
     'setup-task': ['ensure-traceable-issue'],
     'gather-release-evidence': ['backlink-shipped-issues'],
     'associate-release': ['backlink-shipped-issues'],
-    'post-wave-report': ['backlink-shipped-issues'],
   },
 };
 
@@ -1021,10 +1019,10 @@ export const INFORMATIONAL_OP_MENTIONS: readonly InformationalOpMention[] = [
     why: 'Scope of Principle 5\'s footer rule — the two summary operations that append it; the rule is ' +
       'written on the same line, so no operation\'s mechanics are needed to apply it.',
   })),
-  ...['post-review-summary', 'post-resolution-summary', 'post-wave-report', 'backlink-shipped-issues'].map(target => ({
+  ...['post-review-summary', 'post-resolution-summary', 'backlink-shipped-issues'].map(target => ({
     file: 'agents/git.md',
     target,
-    anchor: 'no comment-posting op (e.g. `post-review-summary`, `post-resolution-summary`, `post-wave-report`, `backlink-shipped-issues`)',
+    anchor: 'no comment-posting op (e.g. `post-review-summary`, `post-resolution-summary`, `backlink-shipped-issues`)',
     why: 'Scope of Principle 8\'s no-reproduction rule — the posting operations it governs; the rule ' +
       'itself is written on the same line, so no operation\'s mechanics are needed to apply it.',
   })),

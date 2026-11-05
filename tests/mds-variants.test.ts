@@ -1702,12 +1702,14 @@ describe('the build id (D-BUILD-ID)', () => {
  * apart (installed-reference-count-github, installed-reference-count-provider),
  * which rose from 24 and 36 to meet here. This is the compliance-ON install; the
  * compliance-off install has its own floor, INSTALLED_REFS_COMPLIANCE_OFF.
+ * LOWERED 47 -> 44 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the three
+ * post-wave-report references left the manifest, so the counted code is removed and no coverage is lost.
  */
-const INSTALLED_REFS = 47;
+const INSTALLED_REFS = 44;
 
 /**
- * Files a compliance-OFF install carries: the compliance-on manifest less the sixteen
- * posting operation files and the publication-gate document (47 - 17). Registered in
+ * Files a compliance-OFF install carries: the compliance-on manifest less the thirteen
+ * posting operation files and the publication-gate document (44 - 14). Registered in
  * tests/fixtures/numeric-floors.json as installed-reference-count-compliance-off.
  * A floor, not an equality: a new kept reference raises it, and it never lowers.
  */
@@ -1760,7 +1762,7 @@ describe('installedReferenceManifest — every provider, whatever the machine se
 // ---------------------------------------------------------------------------
 //
 // A compliance-off install carries no reference that describes a posting step. The
-// set it omits is POSTING_OPS (the eight posting operations, whichever directory a
+// set it omits is POSTING_OPS (the seven posting operations, whichever directory a
 // file of one sits in) plus the publication-gate document. The oracle below finds
 // the same files by PATH, not by calling the function under test, so a registry
 // that moved an op would turn the comparison red rather than agree with itself.
@@ -1793,9 +1795,9 @@ describe('POSTING_OPS and the compliance-off reference manifest (TP-56)', () => 
     expect(POSTING_OPERATIONS).toBe(POSTING_OPS);
   });
 
-  it('holds eight distinct operations, each one a PR-host or a tracker operation', () => {
-    expect(POSTING_OPS).toHaveLength(8);
-    expect(new Set(POSTING_OPS).size).toBe(8);
+  it('holds seven distinct operations, each one a PR-host or a tracker operation', () => {
+    expect(POSTING_OPS).toHaveLength(7);
+    expect(new Set(POSTING_OPS).size).toBe(7);
     const registered: readonly string[] = [...PR_HOST_OPS, ...TRACKER_OPS];
     for (const op of POSTING_OPS) expect(registered, `${op} is not a registered operation`).toContain(op);
   });
@@ -1822,14 +1824,14 @@ describe('POSTING_OPS and the compliance-off reference manifest (TP-56)', () => 
     expect(describePostingOpsError(refused)).toContain('manage-debt');
   });
 
-  it('omits the 16 operation files and the publication-gate document, and nothing else', () => {
+  it('omits the 13 operation files and the publication-gate document, and nothing else', () => {
     const omitted = on.filter(rel => !off.includes(rel)).sort();
     const expected = [...postingOpFiles(on), ...COMPLIANCE_OFF_OMITTED_DOCS.map(doc => `${doc}.md`)].sort();
     expect(omitted).toEqual(expected);
     expect(postingOpFiles(on).filter(rel => rel.startsWith('pr/'))).toHaveLength(4);
-    expect(postingOpFiles(on).filter(rel => rel.startsWith('tracker/'))).toHaveLength(12);
+    expect(postingOpFiles(on).filter(rel => rel.startsWith('tracker/'))).toHaveLength(9);
     expect(omitted).toContain('publication-gate.md');
-    expect(off).toHaveLength(on.length - 17);
+    expect(off).toHaveLength(on.length - 14);
     expect(off.length).toBeGreaterThanOrEqual(INSTALLED_REFS_COMPLIANCE_OFF);
   });
 

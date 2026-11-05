@@ -131,7 +131,7 @@ Step 0c takes, per worktree, the newest of the 10 most recent timestamped direct
 - **One reason-to-fix table** serves `ensure-pr-ready` 5b, `validate-branch` 6 and /implement's fresh-base step: no-merge-base, no-ref or timeout, resolver-unavailable (re-run, then `devflow init`) and invalid-name (the allowed set, never the name). The `reason-fix-table` rule of `tests/guards/base-ref-guard.test.ts` holds the three copies equal, so edit them together.
 - **An unanswered local git call** (timeout, signal kill, git that will not start) is `resolver-unavailable` at every call site; `LOCAL_TIMEOUT_MS` and `RUN_BUDGET_MS` (kept under the Bash limit) are exported and pinned by `tests/evidence/resolve-base-process.test.ts`.
 - **One run per /implement**: Phase 9 passes the Phase 1 `BASE_REF` to `ensure-pr-ready`, which skips its own resolver run and 5b when it is 40 or 64 lowercase hex and the PR's base name equals `BASE_BRANCH`, else runs `pr` mode.
-- **Stored heads**: /code-review and /bug-analysis use the stored review head only when it is 40 or 64 lowercase hex, else the full-range path. **Name classes**: `STRICT_NAME_RE` is the one class; `dynamic-build.mds`'s `BRANCH_NAME` is its single deliberate variant, less the `origin/` refusal.
+- **Stored heads**: /code-review and /bug-analysis use the stored review head only when it is 40 or 64 lowercase hex, else the full-range path. **Name classes**: `STRICT_NAME_RE` is the one class.
 
 ### Traceability Layer (Evidence-Policy-Gated)
 
@@ -273,7 +273,6 @@ Beyond the pins the Rules name:
 
 ## Related
 
-- `.devflow/features/dynamic-workflow-engine/KNOWLEDGE.md` — the dynamic-build pipeline the Phase 3 batch cap came from
 - `.devflow/features/compliance-feature/KNOWLEDGE.md` — the compliance lens, the traceability Git operations and the `TRACEABILITY: DEGRADED` contract
 - `.devflow/features/feature-knowledge-system/KNOWLEDGE.md` — how `FEATURE_KNOWLEDGE` reaches Triage and the issue-fix spawns, and how the curation variants build
 - `.devflow/features/curation-capture-system/KNOWLEDGE.md` — `decisions_load()` and the `DECISIONS_CONTEXT` index

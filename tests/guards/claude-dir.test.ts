@@ -268,7 +268,6 @@ export const ALLOWED_RULE_PROSE: readonly AllowedRuleProse[] = [
     replaceWith: CLAUDE_DIR_PLACEHOLDER,
     binds: CLAUDE_DIR_PLACEHOLDER,
     files: [
-      'dist/commands/dynamic-profile.md',
       'src/assets/skills/agent-references/SKILL.md',
     ],
   },
@@ -298,7 +297,6 @@ type SiteRows = Readonly<Partial<Record<string, number>>>
 /** How many sanctioned lines each file holds. A file that is not listed holds none. */
 export const SITE_ROWS: SiteRows = {
   'dist/commands/code-review.md': 1,
-  'dist/commands/dynamic-profile.md': 1,
   'dist/commands/plan.md': 2,
   'dist/commands/implement.md': 1,
   'dist/commands/resolve.md': 1,
@@ -477,13 +475,18 @@ function readTree(dir: string): PromptFile[] {
 function promptSurface(): CorpusClass[] {
   const commands = requireDistFiles().map(n => ({ name: `dist/commands/${n}`, content: requireDistFile(n) }))
   const agents = [...resolveAllAgents().values()].map(a => ({ name: rel(a.path), content: a.content }))
+  // LOWERED 14 -> 10 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the four
+  // dynamic command hosts left the roster, so the counted files are removed and no coverage is lost. Old value 14.
+  // LOWERED 24 -> 22 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the off builds
+  // of the curation-armed dynamic hosts left the roster, so the counted files are removed and no coverage is
+  // lost. Old value 24.
   return [
-    { label: 'commands', files: commands, sentinel: 'dist/commands/code-review.md', floor: 14 },
+    { label: 'commands', files: commands, sentinel: 'dist/commands/code-review.md', floor: 10 },
     { label: 'agents', files: agents, sentinel: 'dist/agents/git.md', floor: getAllAgentNames().length },
     { label: 'references', files: readTree('dist/skills'), sentinel: 'dist/skills/git/references/publication-gate.md', floor: 20 },
     { label: 'skills', files: readTree('src/assets/skills'), sentinel: 'src/assets/skills/worktree-support/SKILL.md', floor: 30 },
     { label: 'rules', files: readTree('src/assets/rules'), sentinel: 'src/assets/rules/security.md', floor: 4 },
-    { label: 'curation-off', files: readTree('dist/curation-off'), sentinel: 'dist/curation-off/commands/code-review.md', floor: 24 },
+    { label: 'curation-off', files: readTree('dist/curation-off'), sentinel: 'dist/curation-off/commands/code-review.md', floor: 22 },
     { label: 'compliance-off', files: readTree('dist/compliance-off'), sentinel: 'dist/compliance-off/commands/implement.md', floor: 4 },
     { label: 'curation-compliance-off', files: readTree('dist/curation-compliance-off'), sentinel: 'dist/curation-compliance-off/commands/implement.md', floor: 3 },
     { label: 'compaction directive', files: [{ name: COMPACTION_ENTRY, content: compactDirectiveText() }], sentinel: COMPACTION_ENTRY, floor: 1 },
@@ -598,16 +601,6 @@ describe('no prompt reaches the Claude directory outside the CLAUDE_CONFIG_DIR r
 
   it('each file holds the number of sanctioned lines its site row states, and no other file holds one', () => {
     expect(collectSiteRowDefects(wholeCorpus())).toEqual([])
-  })
-
-  it('the consumer carries the sanctioned resolution: /dynamic-profile', () => {
-    // The positive half: a clean scan must mean the probe moved onto the rule,
-    // not that it was deleted.
-    const profile = requireDistFile('dynamic-profile.md')
-    expect(profile).toContain(SANCTIONED_RESOLUTION_PRINT)
-    for (const sub of ['{claude_dir}/projects/', '{claude_dir}/history.jsonl', '{claude_dir}/rules/']) {
-      expect(profile, `dynamic-profile reads ${sub} under the resolved directory`).toContain(sub)
-    }
   })
 
   it("/code-review's language gate is the install-time stamp, and its one directory read is the level reference (D-LANGUAGE-FOCUS-STAMP)", async () => {

@@ -18,7 +18,6 @@
  * run-time `test -f` probe. The installer side is held by tests/installer/language-stamp*.test.ts;
  * this file holds the prompt side, in both curation variants.
  *
- * Decision 1 of the plan keeps /dynamic-build out: its sources carry none of this.
  *
  * Every arm runs through a named collector and has a known-bad probe over the same collector, so a
  * green result cannot come from a collector that finds nothing.
@@ -577,7 +576,9 @@ describe('Phase 1 chooses focuses by trigger AND stamp (AC-312, AC-318)', () => 
 
   it('no compiled command probes for installed skills with test -f (positive control: the DIFF_FILE line exists)', () => {
     const commands = requireDistFiles().map(name => ({ name: `dist/commands/${name}`, content: requireDistFile(name) }))
-    expect(commands.length, 'the corpus is the command set').toBeGreaterThanOrEqual(14)
+    // LOWERED 14 -> 10 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the four
+    // dynamic command hosts left the roster, so the counted code is removed and no coverage is lost.
+    expect(commands.length, 'the corpus is the command set').toBeGreaterThanOrEqual(10)
     expect(commands.map(c => c.name)).toContain('dist/commands/code-review.md')
     for (const { label, body } of VARIANTS) {
       expect(collectProbeDefects([{ name: `${label}/code-review.md`, content: body }]), label).toEqual([])
@@ -1008,38 +1009,5 @@ describe('the command text and the Architecture tree describe the new behaviour'
       .toContain('Edge Cases has no a fail-safe row')
     expect(collectDocsOfBehaviourDefects(seed(ON, /Classify the diff/g, 'Detect file types'))).toContain('the Architecture tree does not show the classification')
     expect(collectDocsOfBehaviourDefects(seed(ON, ', Steps 0a-0f', ''))).toContain('the Architecture tree does not show the Phase 0 step range')
-  })
-})
-
-describe('/dynamic-build is out of #428 (decision 1, AC-314)', () => {
-  const sources = ['_partials/_engine.mds', 'dynamic-build.mds', '_partials/_wave.mds'].map(f => ({
-    name: `src/assets/commands/${f}`,
-    content: readFileSync(path.join(ROOT, 'src/assets/commands', f), 'utf-8'),
-  }))
-
-  /** Named collector: every gating token these sources must not carry. */
-  function collectDynamicBuildLeaks(files: ReadonlyArray<{ name: string; content: string }>): string[] {
-    const tokens: ReadonlyArray<readonly [string, RegExp]> = [
-      ['DIFF_FILE', /\bDIFF_FILE\b/],
-      ['DIFF_CLASS', /\bDIFF_CLASS\b/],
-      ['a patch file', /\bdiff(?:-[\w{}-]+)?\.patch\b/],
-      ['a reduced class', /\b(?:docs-only|tests-only|lockfile-only)\b/],
-      ['the language stamp', /Installed language focuses/],
-      ['a stamp-gated row', /stamp-gated/],
-    ]
-    return files.flatMap(f => tokens.filter(([, re]) => re.test(f.content)).map(([label]) => `${f.name}: ${label}`))
-  }
-
-  it('the engine, the command and the wave partial carry no filter, stamp or DIFF_FILE', () => {
-    expect(sources).toHaveLength(3)
-    expect(sources.every(s => s.content.length > 2000)).toBe(true)
-    expect(collectDynamicBuildLeaks(sources)).toEqual([])
-    expect(collectDynamicBuildLeaks([{ name: 'compiled dynamic-build', content: requireDistFile('dynamic-build.md') }])).toEqual([])
-  })
-
-  it('known-bad probe: a stamp or DIFF_FILE seeded into the engine is reported', () => {
-    const engine = sources[0]
-    expect(collectDynamicBuildLeaks([{ ...engine, content: `${engine.content}\nDIFF_FILE: x\n` }])).toEqual([`${engine.name}: DIFF_FILE`])
-    expect(collectDynamicBuildLeaks([{ ...engine, content: `${engine.content}\nInstalled language focuses: go\n` }])).toEqual([`${engine.name}: the language stamp`])
   })
 })

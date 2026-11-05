@@ -68,8 +68,6 @@ const TRACKER_NAME = 'Tracker';
 const TRACKER_SOURCE = resolveAgentSource(TRACKER_SLUG);
 const TRACKER_TEXT = TRACKER_SOURCE.content;
 
-const ROSTER_SRC = path.join(ROOT, 'src', 'assets', 'commands', '_partials', '_roster.mds');
-
 // ---------------------------------------------------------------------------
 // Named collectors — each is driven by a guard AND by a known-bad probe
 // ---------------------------------------------------------------------------
@@ -1824,7 +1822,7 @@ describe('~/.devflow/tracker.md schema template (§14.3, P3a-S16)', () => {
   it('known-bad probe: a renamed or dropped heading is reported', () => {
     const renamed = template!.replace('## Tech Debt', '## Technical Debt');
     expect(collectTrackerTemplateHeadings(renamed)).not.toEqual([...TRACKER_SCHEMA_SECTIONS]);
-    const dropped = template!.split('\n').filter(l => l.trim() !== '## Wave Filter').join('\n');
+    const dropped = template!.split('\n').filter(l => l.trim() !== '## Assignee').join('\n');
     expect(collectTrackerTemplateHeadings(dropped)).not.toEqual([...TRACKER_SCHEMA_SECTIONS]);
   });
 
@@ -1946,7 +1944,7 @@ describe('~/.devflow/tracker.md schema template (§14.3, P3a-S16)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Registration (P3a-S10) — structural Guard-5 pass, no roster row
+// Registration (P3a-S10) — structural Guard-5 pass
 // ---------------------------------------------------------------------------
 
 describe('Tracker agent registration (P3a-S10, EC-68)', () => {
@@ -1970,18 +1968,6 @@ describe('Tracker agent registration (P3a-S10, EC-68)', () => {
     // one out from under the structural pass.
     const owners = DEVFLOW_PLUGINS.filter(p => p.agents.includes(TRACKER_SLUG));
     expect(owners[0].agents).toContain('curate');
-  });
-
-  it('adds NO _roster.mds row — the roster is set-equal to dist spawn sites', () => {
-    const roster = readFileSync(ROSTER_SRC, 'utf-8');
-    expect(
-      roster,
-      'agent-name-guards asserts set-equality both ways between _roster.mds and the agentType ' +
-      'values in dist/commands/. Tracker appears in no command, so a roster row fails ' +
-      'inRosterNotInDist — and the roster resolver throws on a name it cannot read.',
-    ).not.toContain(TRACKER_NAME);
-    // Non-vacuity: the roster really is the file this assertion thinks it is.
-    expect(roster, 'roster corpus is wrong — it should list the workflow agents').toContain('Synthesize');
   });
 
   it('adds nothing to the orchestrator charter', () => {

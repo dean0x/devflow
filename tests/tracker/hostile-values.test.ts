@@ -137,13 +137,12 @@ const MIN_HOSTILE_PAYLOADS = 9;
 /**
  * How a validator cell rejects.
  *
- * `enumerated` and `structured` are TOTAL rejections by construction: §14.3 says
- * those sections accept only a value enumerated from the tracker during this run,
- * or only structured filter fields, so no free string is ever admissible. They are
- * modelled as kinds rather than skipped, because "this field admits nothing a
- * scanner could have invented" is the property under test — and it is a property of
- * the CELL, graded by the arm that reads the kind, never by a rejection reason
- * pushed for every payload whatever the payload is.
+ * `enumerated` is a TOTAL rejection by construction: §14.3 says those sections
+ * accept only a value enumerated from the tracker during this run, so no free
+ * string is ever admissible. It is modelled as a kind rather than skipped, because
+ * "this field admits nothing a scanner could have invented" is the property under
+ * test — and it is a property of the CELL, graded by the arm that reads the kind,
+ * never by a rejection reason pushed for every payload whatever the payload is.
  *
  * `deniedShape` is the one prose prohibition in the table with teeth of its own:
  * `## Assignee`'s "**never** a literal email address or account identifier" names
@@ -154,8 +153,7 @@ type ValidatorKind =
   | 'closedSet'
   | 'denylist'
   | 'deniedShape'
-  | 'enumerated'
-  | 'structured';
+  | 'enumerated';
 
 interface Validator {
   /** The arm's own text, so a report can name WHICH alternative admitted a value. */
@@ -289,7 +287,6 @@ export function parseValidator(cell: string): Validator {
 
   if (IDENTITY_DENIAL.test(cell)) kinds.push('deniedShape');
   if (/enumerated this run/.test(cell)) kinds.push('enumerated');
-  if (/structured filter fields only/.test(cell)) kinds.push('structured');
 
   if (kinds.length === 0) {
     throw new Error(
@@ -319,8 +316,8 @@ export function parseValidatorArms(cell: string): Validator[] {
  * the arm's `patterns` are alternatives to each other, so the shape check rejects
  * only when EVERY form fails.
  *
- * `enumerated` and `structured` push nothing: they are properties of the CELL, not
- * verdicts on a value. A reason pushed for them lands on every payload alike, so
+ * `enumerated` pushes nothing: it is a property of the CELL, not a verdict on a
+ * value. A reason pushed for them lands on every payload alike, so
  * every row carrying one would pass whatever the payload and whatever the row's
  * other checks said. Those rows are graded by the arm that reads the kind instead.
  */
@@ -369,7 +366,7 @@ function hasShapeCheck(arm: Validator): boolean {
 
 /** True when an arm admits NOTHING a hand edit or a history scan could produce. */
 function isTotalRejection(arm: Validator): boolean {
-  return arm.kinds.includes('enumerated') || arm.kinds.includes('structured');
+  return arm.kinds.includes('enumerated');
 }
 
 /** A schema row's section heading, backticks and the `→ field` suffix left as written. */
@@ -388,7 +385,6 @@ function sectionOf(row: TrackerSchemaRow): string {
 const TOTAL_REJECTION_ONLY_SECTIONS: readonly string[] = [
   '## Iteration Policy',
   '## Transitions',
-  '## Wave Filter',
 ];
 
 // ---------------------------------------------------------------------------
@@ -672,7 +668,6 @@ describe('hostile values: tracker.md fields (AC-3.7, register row 22)', () => {
       'denylist',
       'deniedShape',
       'enumerated',
-      'structured',
     ] as const) {
       expect(live, `no schema row declares a '${kind}' validator — parser surface with no subject`).toContain(kind);
     }

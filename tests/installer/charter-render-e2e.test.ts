@@ -256,7 +256,7 @@ describe('a full recommended install', () => {
       expect(after.sentinel).toBeNull();
     });
 
-    it('keeps the Fix clause, because resolve and dynamic still declare the Fix agent', () => {
+    it('keeps the Fix clause, because resolve still declares the Fix agent', () => {
       expect(remaining).toContain('devflow-resolve');
       expect(charterOf(after)).toMatch(/\bFix \(/);
     });

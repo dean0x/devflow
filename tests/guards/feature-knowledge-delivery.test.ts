@@ -196,7 +196,9 @@ function wholeKbCorpus(): Array<readonly [string, string]> {
 describe('no shipped prompt delivers a whole KB (D-KB-DELIVERY-TIERS)', () => {
   it('no command, the release source, the charter or the consumer skill reads or concatenates a KB in full', () => {
     const corpus = wholeKbCorpus()
-    expect(corpus.length, 'nothing scanned').toBeGreaterThanOrEqual(17)
+    // LOWERED 17 -> 13 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the four
+    // dynamic command hosts left the corpus, so the counted code is removed and no coverage is lost.
+    expect(corpus.length, 'nothing scanned').toBeGreaterThanOrEqual(13)
     expect(corpus.flatMap(([label, text]) => collectWholeKbShapes(label, text))).toEqual([])
   })
 
@@ -287,7 +289,9 @@ export function collectTierDefects(file: string, text: string, expected: readonl
 describe('each spawn names the variable of its recipient tier (D-KB-DELIVERY-TIERS)', () => {
   it('every compiled command (both variants) matches the tier table, and no other command passes the input', () => {
     const commands = requireDistFiles().map(f => [f.replace(/\.md$/, ''), requireDistFile(f)] as const)
-    expect(commands.length, 'nothing scanned').toBeGreaterThanOrEqual(14)
+    // LOWERED 14 -> 10 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the four
+    // dynamic command hosts left the roster, so the counted code is removed and no coverage is lost.
+    expect(commands.length, 'nothing scanned').toBeGreaterThanOrEqual(10)
     const defects = commands.flatMap(([name, text]) => collectTierDefects(name, text, TIER_TABLE[name] ?? []))
     expect(defects).toEqual([])
     const total = commands.reduce((sum, [, text]) => sum + collectFkSites(text).length, 0)

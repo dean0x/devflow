@@ -530,7 +530,7 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
       .map(f => f.replace(/^dist\/commands\//, ''))
       .sort();
     // Set equality against the shared manifest, not a bare count: a rename plus an
-    // addition in the same commit leaves the count at 14 and the tarball wrong.
+    // addition in the same commit leaves the count unchanged and the tarball wrong.
     expect(
       commandMds,
       `Tarball dist/commands/*.md set does not match tests/fixtures/mds-manifest.ts.\n` +
@@ -957,8 +957,10 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
     const manifest = generatedReferenceManifest();
     expect(
       manifest.length,
+      // LOWERED 47 -> 44 by #756 (a deliberate exception to "a floor may only rise") on 2026-11-05: the three
+      // post-wave-report references left the manifest (numeric-floors.json: packed-reference-manifest-size).
       'a manifest short enough to enumerate by hand makes this assertion vacuous',
-    ).toBeGreaterThanOrEqual(47);
+    ).toBeGreaterThanOrEqual(44);
 
     expect(
       collectMissingPackedReferences(files, manifest),

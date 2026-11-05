@@ -1,12 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { promises as fs, existsSync } from 'fs';
 import * as path from 'path';
-import { DEVFLOW_PLUGINS, getAllSkillNames, getAllAgentNames, getAllRuleNames } from '../src/core/plugins.js';
+import { getAllSkillNames, getAllAgentNames, getAllRuleNames } from '../src/core/plugins.js';
 import { resolveAgentSource, resolveAllAgents, splitFrontmatter } from './helpers.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const ASSETS_DIR = path.join(ROOT, 'src', 'assets');
-const COMMANDS_DIR = path.join(ASSETS_DIR, 'commands');
 
 describe('skill references', () => {
   it('every skill referenced in plugins exists in src/assets/skills/', async () => {
@@ -185,74 +184,5 @@ describe('agent frontmatter compliance contract', () => {
     const mdOnly = entries.filter(f => f.endsWith('.md')).map(f => path.basename(f, '.md'));
     expect([...resolveAllAgents().keys()]).toContain('git');
     expect(mdOnly, 'an .md-only filter is the vacuous corpus this guard no longer uses').not.toContain('git');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// devflow-dynamic declared commands ↔ src/assets/commands/*.mds source parity
-//
-// Ties the 4 command names declared in DEVFLOW_PLUGINS to the 4 dynamic-*.mds
-// host files in src/assets/commands/ whose basename starts with 'dynamic-'.
-// In the restructured layout all hosts output to dist/commands/ (single target),
-// so the dynamic hosts are identified by name prefix, not by output-dir content.
-//
-// Deriving from source (not from compiled output) means this test passes even
-// on a clean checkout before build:mds has run — the only reliable contract.
-//
-// A dynamic host rename (e.g. dynamic-plan.mds → dynamic-orchestrate.mds)
-// without updating plugins.ts would fail this test, surfacing the drift before
-// it ships.
-// ---------------------------------------------------------------------------
-
-describe('devflow-dynamic declared commands ↔ src/assets/commands/ source parity', () => {
-  it('declared command names match dynamic-host .mds files in src/assets/commands/ (1:1)', async () => {
-    const dynPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-dynamic');
-    expect(dynPlugin, 'devflow-dynamic must be registered in DEVFLOW_PLUGINS').toBeDefined();
-
-    // Derive expected command names from .mds files whose basename starts with 'dynamic-'
-    const entries = await fs.readdir(COMMANDS_DIR, { withFileTypes: true });
-    const dynamicSourceNames = entries
-      .filter(e => e.isFile() && e.name.endsWith('.mds') && e.name.startsWith('dynamic-'))
-      .map(e => '/' + path.basename(e.name, '.mds'))
-      .sort();
-
-    const declaredCommands = [...dynPlugin!.commands].sort();
-
-    expect(
-      declaredCommands,
-      `devflow-dynamic declared commands must match dynamic-host sources 1:1.\n` +
-      `  declared:  ${declaredCommands.join(', ')}\n` +
-      `  from src:  ${dynamicSourceNames.join(', ')}`,
-    ).toEqual(dynamicSourceNames);
-  });
-
-  it('every declared devflow-dynamic command has a corresponding .mds source file in src/assets/commands/', async () => {
-    const dynPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-dynamic');
-    expect(dynPlugin).toBeDefined();
-
-    for (const cmd of dynPlugin!.commands) {
-      const sourceName = cmd.replace(/^\//, '') + '.mds';
-      const sourcePath = path.join(COMMANDS_DIR, sourceName);
-      await expect(
-        fs.access(sourcePath),
-        `Command '${cmd}' declared in DEVFLOW_PLUGINS has no source at src/assets/commands/${sourceName}`,
-      ).resolves.toBeUndefined();
-    }
-  });
-
-  it('every dynamic-host .mds in src/assets/commands/ is declared as a devflow-dynamic command', async () => {
-    const dynPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-dynamic');
-    expect(dynPlugin).toBeDefined();
-
-    const declaredSet = new Set(dynPlugin!.commands);
-    const entries = await fs.readdir(COMMANDS_DIR, { withFileTypes: true });
-
-    for (const e of entries.filter(e => e.isFile() && e.name.endsWith('.mds') && e.name.startsWith('dynamic-'))) {
-      const expectedCmd = '/' + path.basename(e.name, '.mds');
-      expect(
-        declaredSet.has(expectedCmd),
-        `src/assets/commands/${e.name} is a dynamic host but '${expectedCmd}' is not declared in DEVFLOW_PLUGINS. Add it to devflow-dynamic.commands in src/core/plugins.ts`,
-      ).toBe(true);
-    }
   });
 });

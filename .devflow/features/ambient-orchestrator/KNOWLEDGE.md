@@ -230,7 +230,7 @@ The system can land in two kinds of partial state, both repaired by `--enable`.
 - Feature knowledge: `curation-capture-system` — the memory worker fires UserPromptSubmit and SessionStart hooks too, with the `DEVFLOW_BG_UPDATER` guard as the coupling point; also covers `session-start-context` Sections 1–4 and the decisions index the pass rule points at
 - Feature knowledge: `curation-capture-system-delivery` — how `DECISIONS_CONTEXT` reaches agents, including the slice rule the pass rule restates
 - Feature knowledge: `tracker-feature` — Section 3 of `session-start-context`, the tracker setup directive that gates on `startup|clear`
-- Feature knowledge: `dynamic-workflow-engine` — the bind-once `COMMAND_INPUT` convention that makes a no-argument plan handoff safe, and the guards that hold it
+- Feature knowledge: `command-shared-partials` — the bind-once `COMMAND_INPUT` convention that makes a no-argument plan handoff safe, and the guards that hold it
 - Feature knowledge: `feature-knowledge-system` — how the entries the charter's Feature knowledge rule passes (Rules bullets, heading index) are written and consumed
 - Feature knowledge: `installer-shadowing` — `composeScripts` copies `src/assets/scripts/` (including `claude-md-audit.cjs`) to `~/.devflow/scripts/`, skipping the charter and the sentinel that `installRenderedCharter` writes; init and uninstall handle the stamp
 - `docs/reference/hooks.md`, `docs/reference/platform-assumptions.md`, `docs/reference/claude-code-flags-probe.md` — prose reference for Sections 5 and 6 and the `source`, `systemMessage` and `CLAUDE_CODE_AUTO_COMPACT_WINDOW` assumptions

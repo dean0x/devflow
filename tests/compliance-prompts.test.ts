@@ -481,34 +481,12 @@ describe('TP-43 (AC-37): the compiled compliance lens loads only the ids the set
     }
   });
 
-  it('/dynamic-build resolves the lens before authoring and derives the directive its implementing Code agent gets', () => {
-    // The engine's Code agents lost the presence check with install-all; the ids reach them
-    // only through the directive the script builds from the shape-gated lens.
-    const text = requireDistFile('dynamic-build.md');
-    expect(text, 'the mapping sentence').toContain(FRAMEWORKS_SENTENCE);
-    expect(text, 'a pass-through host never gates on the lens').not.toContain('COMPLIANCE_ACTIVE');
-    expect(text).toMatch(/\*\*Resolve the settings line\*\*[\s\S]*\*\*Set the compliance lens\*\* from that line/);
-    // Authored in as a shape-gated constant: anything but off, none or a registry-shaped id list is `off`.
-    const constant = /^const COMPLIANCE_FRAMEWORKS = .*args\.complianceFrameworks.*$/m.exec(text)?.[0] ?? '';
-    expect(constant, 'no COMPLIANCE_FRAMEWORKS constant in the SINGLE skeleton').not.toBe('');
-    expect(constant).toContain(': "off"');
-    const implement = /await phase\("implement"[\s\S]*?\{ agentType: "Code" \}/.exec(text)?.[0] ?? '';
-    expect(implement, 'no implement-phase Code spawn found').not.toBe('');
-    expect(implement).toContain('${COMPLIANCE_DIRECTIVE}');
-    expect(implement, 'the lens itself no longer reaches the agent').not.toContain('COMPLIANCE_FRAMEWORKS');
-    // The directive is built from the validated constant, never from the raw argument.
-    expect(text).toMatch(/^const COMPLIANCE_DIRECTIVE = COMPLIANCE_FRAMEWORKS === "off" \? "" : `.*\$\{COMPLIANCE_FRAMEWORKS\}/m);
-    // WAVE mode runs the same engine per ticket and must forward the constant.
-    expect(text).toMatch(/runSingleTicketEngine\(\{[^\n]*complianceFrameworks: COMPLIANCE_FRAMEWORKS/);
-  });
-
   it('the directives and the skills that run the lens load references for the given ids only', () => {
     // D-COMPLIANCE-INJECT: the instruction lives in the command's directive, not in an agent body.
     const LOAD_RULE = 'load references/{id}.md only for the ids in <ids> (none: generic controls only)';
     for (const host of ['implement.md', 'resolve.md', 'debug.md', 'code-review.md', 'plan.md']) {
       expect(requireDistFile(host), `${host}: the directive's load rule`).toContain(LOAD_RULE);
     }
-    expect(requireDistFile('dynamic-build.md')).toContain('load references/{id}.md only for the ids in ${COMPLIANCE_FRAMEWORKS} (none: generic controls only)');
     for (const slug of ['code', 'fix', 'refactor', 'review', 'design']) {
       expect(resolveAgentSource(slug).content, `${slug}: the body carries no lens input`).not.toContain('COMPLIANCE_FRAMEWORKS');
     }
