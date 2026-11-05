@@ -493,7 +493,6 @@ d sub/
     "devflow-self-review",
     "devflow-bug-analysis",
     "devflow-ambient",
-    "devflow-dynamic",
     "devflow-typescript",
     "devflow-react",
     "devflow-accessibility",

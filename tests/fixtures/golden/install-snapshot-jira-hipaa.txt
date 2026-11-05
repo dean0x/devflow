@@ -197,7 +197,6 @@ d .claude/skills/devflow:git/references/tracker/github/
 - .claude/skills/devflow:git/references/tracker/github/fetch-issues-batch.md
 - .claude/skills/devflow:git/references/tracker/github/gather-release-evidence.md
 - .claude/skills/devflow:git/references/tracker/github/manage-debt.md
-- .claude/skills/devflow:git/references/tracker/github/post-wave-report.md
 - .claude/skills/devflow:git/references/tracker/github/setup-task.md
 d .claude/skills/devflow:git/references/tracker/jira/
 - .claude/skills/devflow:git/references/tracker/jira/associate-release.md
@@ -209,7 +208,6 @@ d .claude/skills/devflow:git/references/tracker/jira/
 - .claude/skills/devflow:git/references/tracker/jira/fetch-issues-batch.md
 - .claude/skills/devflow:git/references/tracker/jira/gather-release-evidence.md
 - .claude/skills/devflow:git/references/tracker/jira/manage-debt.md
-- .claude/skills/devflow:git/references/tracker/jira/post-wave-report.md
 - .claude/skills/devflow:git/references/tracker/jira/setup-task.md
 d .claude/skills/devflow:git/references/tracker/linear/
 - .claude/skills/devflow:git/references/tracker/linear/associate-release.md
@@ -221,7 +219,6 @@ d .claude/skills/devflow:git/references/tracker/linear/
 - .claude/skills/devflow:git/references/tracker/linear/fetch-issues-batch.md
 - .claude/skills/devflow:git/references/tracker/linear/gather-release-evidence.md
 - .claude/skills/devflow:git/references/tracker/linear/manage-debt.md
-- .claude/skills/devflow:git/references/tracker/linear/post-wave-report.md
 - .claude/skills/devflow:git/references/tracker/linear/setup-task.md
 - .claude/skills/devflow:git/references/trust-rule.md
 - .claude/skills/devflow:git/references/violations.md
@@ -576,7 +573,6 @@ d sub/
     "devflow-self-review",
     "devflow-bug-analysis",
     "devflow-ambient",
-    "devflow-dynamic",
     "devflow-typescript",
     "devflow-react",
     "devflow-accessibility",
