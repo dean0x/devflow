@@ -404,7 +404,7 @@ export function resolveOutputDir(
 // ---------------------------------------------------------------------------
 
 /**
- * The 11 tracker operations whose provider mechanics are generated as separate
+ * The 10 tracker operations whose provider mechanics are generated as separate
  * skill reference files.
  *
  * Bidirectional parity, the COMPLIANCE_SKILL_TOKENS model

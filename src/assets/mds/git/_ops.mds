@@ -5,7 +5,7 @@ expanding into the reference modules that import it
 (`tests/fixtures/mds-manifest.ts` names it in `MDS_REFERENCE_PARTIALS`). Three partials
 hold the operation text, split by who imports them:
 
-- `_ops.mds` (this file) — the contracts of the eleven tracker operations and of
+- `_ops.mds` (this file) — the contracts of the ten tracker operations and of
   `learn-conventions`; imported by the three provider modules and by `_references.mds`.
 - `_ops_pr.mds` — the contracts of the eight PR-host operations; imported by `_pr.mds`.
 - `_ops_steps.mds` — the inline steps the tracker operations run identically under every
