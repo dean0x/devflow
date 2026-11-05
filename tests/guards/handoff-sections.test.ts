@@ -67,6 +67,7 @@ const CODE_RULES: readonly Rule[] = [
   { label: 'append-only', holds: t => t.includes('with a Bash `>>` redirect, never rewriting an earlier section or the `## Evidence Exceptions` section') },
   { label: 'the reader takes only the preceding phase', holds: t => /read only the `## Phase \{N\} Implementation Summary` section of the phase immediately before yours/.test(t) },
   { label: 'never the whole file', holds: t => t.includes('never the whole file') },
+  { label: 'the code wins over the summary and the handoff section', holds: t => t.includes('never the whole file. The code wins over both.') },
   { label: 'the Output template names the appended section', holds: t => t.includes('end with the section you appended to `HANDOFF_FILE`') },
 ]
 
@@ -143,6 +144,7 @@ describe('the Code agent writes its own capped section and reads only the one be
       ['code', code, 'with a Bash `>>` redirect', CODE_RULES, 'append-only'],
       ['code', code, 'immediately before yours', CODE_RULES, 'the reader takes only the preceding phase'],
       ['code', code, 'never the whole file', CODE_RULES, 'never the whole file'],
+      ['code', code, 'The code wins over both.', CODE_RULES, 'the code wins over the summary and the handoff section'],
       ['implement', paragraph, 'at most 8,192 bytes', ORCHESTRATOR_RULES, 'the 8,192-byte cap'],
       ['implement', paragraph, 'never rewriting an earlier section', ORCHESTRATOR_RULES, 'append-only'],
       ['implement', paragraph, 'immediately before its own', ORCHESTRATOR_RULES, 'the reader takes only the preceding phase'],

@@ -24,7 +24,7 @@ const ARCHITECT_BODY_CURATION_OFF_MAX_BYTES = 3_216
 /** The Explore agent body (hand-authored, one build), in bytes. */
 const EXPLORE_BODY_MAX_BYTES = 3_276
 /** The Plan agent body (hand-authored, one build), in bytes. */
-const PLAN_BODY_MAX_BYTES = 3_255
+const PLAN_BODY_MAX_BYTES = 3_252
 
 /** [skill, ceiling of its SKILL.md in bytes]. Each row's text is the pattern its numeric-floors.json entry pins. */
 const SKILL_MAX_BYTES: ReadonlyArray<readonly [string, number]> = [

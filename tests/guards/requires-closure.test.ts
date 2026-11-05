@@ -60,8 +60,10 @@ const AGENT_DIRS = [path.join(ROOT, 'dist', 'agents'), path.join(ROOT, 'src', 'a
  * boundary-validation, dependency-research and patterns appeared only in that
  * deleted Step 0 and DOMAIN text, so they left the corpus with it. Old value 44;
  * accepted by the user 2026-10-12.
+ * RAISED 41 -> 42 by #756: the Plan agent's ladder names dependency-research
+ * again, in the line that sends a new package through it before install.
  */
-const REF_TOKEN_FLOOR = 41;
+const REF_TOKEN_FLOOR = 42;
 
 /**
  * The namespace prefix, composed rather than spelled inline in the probes below.

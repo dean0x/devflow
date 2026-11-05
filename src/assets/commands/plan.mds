@@ -368,7 +368,7 @@ Use AskUserQuestion to present:
    - Context risk level (LOW/MEDIUM/HIGH/CRITICAL)
    - Unresolved gaps carried forward
 
-**Test plan lines.** Gate 2 shows the test plan in the one shape `/implement` and the evidence scripts read. Word each scenario in plain words, with no `#`, `@` or `/`: name the files it covers in `files:`, never an issue, a person or a URL. The TP-line contract:
+**Test plan lines.** Gate 2 shows the test plan in the one shape `/implement` and the evidence scripts read. The TP-line contract:
 
 {{test_plan_line()}}
 
@@ -417,8 +417,8 @@ context-risk: LOW
 ```
 
 Required sections, in this order, no others:
-1. **Acceptance Criteria** — testable success conditions: `ACCEPTANCE_CRITERIA` when fetched, refined by exploration + gap analysis
-2. **Subtask Breakdown** — phases with domains and dependencies; only with more than one subtask
+1. **Acceptance Criteria** — testable success conditions, numbered AC-1, AC-2, ...: `ACCEPTANCE_CRITERIA` when fetched, refined by exploration + gap analysis
+2. **Subtask Breakdown** — phases with domains, dependencies and a Serves cell (the item-1 ACs it serves); only with more than one subtask
 3. **Implementation Plan** — ordered steps, each with Files, Callers and consumers to update, Must lines and Rung
 4. **Patterns to Follow** — from exploration synthesis (file:line references)
 5. **Known limits and deferrals** — accepted risks, deferred and excluded items, each with one reason

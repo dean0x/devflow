@@ -7,6 +7,10 @@
  * not the wording as a whole:
  *   - it is read-only, and an edit attempt fails because it holds no edit tool;
  *   - it names one rung of the minimum ladder for every step, lowest rung first;
+ *   - it says a new package is rung 6 only if it is open source, widely used, well maintained, free of
+ *     known vulnerabilities and light on dependencies, and must pass `devflow:dependency-research` before
+ *     install, in a line that adds no rung and never says "load" (it holds no Skill tool and cannot vet
+ *     a package at install time, so it needs the cues to decide whether a package is an option at all);
  *   - it never cuts the safety list, and keeps the tests of that list;
  *   - it plans no speculative case: that goes to "Known limits and deferrals";
  *   - the caller's report shape and cap win over its default.
@@ -37,6 +41,7 @@ const CHECKLIST: readonly ChecklistRow[] = [
   { behaviour: 'ladder: a section', carriedBy: /^## Minimum Ladder$/m },
   { behaviour: 'ladder: one rung named per step', carriedBy: /Name one rung for every step/ },
   { behaviour: 'ladder: the lowest rung that meets the acceptance criteria', carriedBy: /Take the lowest rung that meets the acceptance criteria/ },
+  { behaviour: 'ladder: a new package is rung 6 only if it meets the cues, and passes dependency-research before install', carriedBy: /^6\. new code, the minimum\.\n\nNew package: rung 6, only if [^\n]*; else [^\n]*\. Must: pass `devflow:dependency-research` before install\.$/m },
   { behaviour: 'never cut: a section', carriedBy: /^## Never Cut$/m },
   { behaviour: 'never cut: input validation at trust boundaries', carriedBy: /input validation at trust boundaries/ },
   { behaviour: 'never cut: security checks', carriedBy: /security checks/ },
@@ -94,6 +99,37 @@ function collectLadderDefects(body: string): string[] {
   return defects;
 }
 
+/**
+ * The cues that decide whether a package is an option at all, each as the name a defect reports and the
+ * pattern that carries it. The agent holds no Skill tool, so the vetting at install time comes too late
+ * to keep a poorly maintained, little used or heavy package out of the plan.
+ */
+const NEW_PACKAGE_CUES: ReadonlyArray<readonly [string, RegExp]> = [
+  ['the gate (only if)', /rung 6, only if /],
+  ['open source', /\bopen source\b/],
+  ['widely used', /\bwidely used\b/],
+  ['well maintained', /\bwell maintained\b/],
+  ['free of known vulnerabilities', /\bfree of known vulnerabilities\b/],
+  ['light on dependencies', /\blight on dependencies\b/],
+  ['the fallback (else the minimum code)', /; else [^\n]*minimum code\./],
+];
+
+/**
+ * Named collector: how the new-package line departs from its shape. It is one line, it gives every cue, it names
+ * the skill, and it never says "load": the agent holds no Skill tool, so it can pass the skill's name on, not load it.
+ */
+function collectNewPackageLineDefects(body: string): string[] {
+  const lines = body.split('\n').filter(line => line.startsWith('New package:'));
+  if (lines.length !== 1) return [`the body has ${lines.length} new-package lines, expected 1`];
+  const defects: string[] = [];
+  for (const [name, pattern] of NEW_PACKAGE_CUES) {
+    if (!pattern.test(lines[0])) defects.push(`the new-package line lacks the cue "${name}"`);
+  }
+  if (!lines[0].includes('`devflow:dependency-research`')) defects.push('the new-package line does not name devflow:dependency-research');
+  if (/\b[Ll]oad\b/.test(lines[0])) defects.push('the new-package line says "load"');
+  return defects;
+}
+
 /** Named collector: how the body falls short of naming only the tools the agent really has. */
 function collectToolNameDefects(body: string): string[] {
   return /\b(?:Grep|Glob|Write|Edit)\b/.test(body)
@@ -128,6 +164,33 @@ describe('the Plan override keeps what the plan spec gives it (AC2)', () => {
     expect(collectLadderDefects(body.replace('5. a one-line change;', '4. a one-line change;'))).toContain('rung 5 is not "a one-line change"');
   });
 
+  it('gives the cues that decide whether a package is an option at all, and reports a ladder line without them', () => {
+    expect(collectNewPackageLineDefects(body)).toEqual([]);
+    for (const [name, pattern] of NEW_PACKAGE_CUES) {
+      const probe = body.replace(pattern, '');
+      expect(probe, `the seed for "${name}" must land`).not.toBe(body);
+      expect(collectNewPackageLineDefects(probe), name).toEqual([`the new-package line lacks the cue "${name}"`]);
+    }
+    const bare = body.replace(/^New package: [^\n]*$/m, 'New package: rung 6; Must: pass `devflow:dependency-research` before install.');
+    expect(bare, 'the seed must land').not.toBe(body);
+    expect(collectNewPackageLineDefects(bare)).toEqual(NEW_PACKAGE_CUES.map(([name]) => `the new-package line lacks the cue "${name}"`));
+    expect(collectChecklistGaps(bare)).toEqual(['ladder: a new package is rung 6 only if it meets the cues, and passes dependency-research before install']);
+  });
+
+  it('names dependency-research for a new package, adds no rung, and never says "load"', () => {
+    expect(collectNewPackageLineDefects(body)).toEqual([]);
+    expect(collectLadderDefects(body), 'the new-package line leaves the ladder at six rungs').toEqual([]);
+    const seventh = body.replace(/^New package: [^\n]*$/m, '7. New package: rung 6.');
+    expect(seventh, 'the seed must land').not.toBe(body);
+    expect(collectLadderDefects(seventh)).toContain('the ladder lists 7 rungs, expected 6');
+    const loading = body.replace('Must: pass `devflow', 'Must: load `devflow');
+    expect(loading, 'the seed must land').not.toBe(body);
+    expect(collectNewPackageLineDefects(loading)).toEqual(['the new-package line says "load"']);
+    expect(collectNewPackageLineDefects(body.replace('dependency-research', 'dependency-check'))).toEqual(['the new-package line does not name devflow:dependency-research']);
+    expect(collectNewPackageLineDefects(body.replace(/^New package: [^\n]*\n/m, ''))).toEqual(['the body has 0 new-package lines, expected 1']);
+    expect(collectNewPackageLineDefects(`${body}\nNew package: again.`)).toEqual(['the body has 2 new-package lines, expected 1']);
+  });
+
   it('names no search or write tool the agent does not hold (it searches through Bash commands)', () => {
     expect(collectToolNameDefects(body)).toEqual([]);
     expect(collectToolNameDefects(`${body}\nUse the Grep tool.`)).toHaveLength(1);
@@ -154,7 +217,7 @@ describe('the Plan override keeps what the plan spec gives it (AC2)', () => {
 
   it('describes itself for both callers: plan mode research and /plan Phase 10', () => {
     const description = /^description: "(.*)"$/m.exec(frontmatter)?.[1] ?? '';
-    expect(description).toMatch(/^Read-only planner/);
+    expect(description).toMatch(/^Planner for a change that needs research first\./);
     expect(description).toMatch(/It never edits\./);
     expect(description).toMatch(/The caller sets the report shape and length\./);
     expect(description).toMatch(/steps with files, callers to update and checks/);

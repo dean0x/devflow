@@ -50,7 +50,8 @@ Score each candidate against evaluation criteria. See `references/evaluation-cri
 
 Quick checklist:
 - [ ] Last published within 12 months
-- [ ] Weekly downloads > 1,000 (npm) or equivalent traction
+- [ ] Real user base: weekly downloads > 1,000 (npm), or equivalent dependents or stars
+- [ ] Few transitive dependencies, not a deep tree
 - [ ] No known vulnerabilities (check Snyk/npm audit)
 - [ ] API fits the use case without heavy wrapping
 - [ ] License compatible with project (MIT/Apache/BSD preferred)
@@ -67,7 +68,7 @@ Choose one of four outcomes:
 | **Compose** | No single package fits, but 2-3 small ones combine well | Install multiple, write glue code |
 | **Build** | Nothing fits, or dependency cost exceeds value | Write custom, document why |
 
-**Document the decision** in a code comment at the usage site, for example `// research: Adopted date-fns for date formatting (2M weekly downloads, 30KB)` or `// research: Built custom — no package handles our specific wire format`.
+**Document the decision** in a code comment at the usage site, for example `// research: Adopted date-fns for date formatting (2M weekly downloads, 30KB)`.
 
 ## Anti-Patterns
 
