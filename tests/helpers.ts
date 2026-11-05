@@ -1346,7 +1346,7 @@ export const TRACKER_TEMPLATE_FENCE_TAG = 'tracker-md-template'
  * a deliberate schema change; one that does not is the accident the oracle
  * refuses at import.
  */
-export const TRACKER_SCHEMA_SECTION_COUNT = 11
+export const TRACKER_SCHEMA_SECTION_COUNT = 10
 
 /**
  * Named collector: the ways a candidate §14.3 heading list fails to be an oracle.
@@ -1354,7 +1354,7 @@ export const TRACKER_SCHEMA_SECTION_COUNT = 11
  * Three mutation classes, each reported by name:
  *   - DUPLICATE — the same heading twice. A duplicate inflates every length
  *     comparison while the schema it describes has shrunk, which is how a
- *     `>= 11` floor accepts a ten-section list.
+ *     `>= 10` floor accepts a nine-section list.
  *   - SHORT — fewer distinct headings than §14.3 fixes (drop-one).
  *   - LONG — more (add-one).
  *
@@ -1430,7 +1430,6 @@ export const TRACKER_SCHEMA_SECTIONS: readonly string[] = requireSchemaOracle([
   '## Transitions',
   '## Assignee',
   '## Tech Debt',
-  '## Wave Filter',
   '## Reference Rendering',
   '## Dedup Strategy',
   '### Substitutions',

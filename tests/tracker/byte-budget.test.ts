@@ -351,9 +351,8 @@ const BUDGET_LOADED_SET_JIRA = 50_558;
  * server (OD-12), so each rung's unavailability and BOTH halves of the rank-4 marker
  * predicate (the first-line binding and the second discriminator) have to be written
  * down. That file is RECORDED in the shape table as `max_op linear reference`; since
- * #376 it is not a term of this row. It still reaches the row through
- * post-wave-report's hop, which on this provider alone is priced: its marker's second
- * discriminator is stated only there.
+ * #376 it is not a term of this row. It still reaches the row through the hops of
+ * gather-release-evidence and associate-release, which are priced.
  *
  * Re-derived by #710 from a measured 51_700 plus the 80 ch headroom: 51_780 (the same preload cuts).
  * Re-derived by #712 from a measured 51_125 plus the 80 ch headroom: 51_205 (the git.md cut).
@@ -1889,19 +1888,19 @@ describe('byte budget: body-hop closure — seeded-reader probes (in memory, nev
   });
 
   it('P5 — a pointer inside a HOP TARGET is followed to a fixed point, not one hop deep', () => {
-    // setup-task → ensure-traceable-issue (priced) → post-wave-report (seeded) →
-    // backlink-shipped-issues (post-wave-report's own Linear hop). A one-hop scan would
+    // setup-task → ensure-traceable-issue (priced) → associate-release (seeded) →
+    // backlink-shipped-issues (associate-release's own hop). A one-hop scan would
     // report neither of the last two.
     const readReference = seededReader({
       'tracker/linear/ensure-traceable-issue.md': body =>
-        `${body}\nPost the plan through \`post-wave-report\`'s marker rule.\n`,
+        `${body}\nHand the evidence to \`associate-release\` afterwards.\n`,
     });
     const closure = nameableFromProvider('linear', 'setup-task', { readReference });
     expect(collectUnpricedHops('linear', 'setup-task', closure).sort()).toEqual([
+      'linear/setup-task → tracker/linear/associate-release.md',
       'linear/setup-task → tracker/linear/backlink-shipped-issues.md',
-      'linear/setup-task → tracker/linear/post-wave-report.md',
     ]);
-    expect(closure.hops.some(m => m.file === 'tracker/linear/ensure-traceable-issue.md' && m.target === 'post-wave-report'))
+    expect(closure.hops.some(m => m.file === 'tracker/linear/ensure-traceable-issue.md' && m.target === 'associate-release'))
       .toBe(true);
   });
 

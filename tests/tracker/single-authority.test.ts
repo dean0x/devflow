@@ -1171,11 +1171,6 @@ export const NEUTRAL_STEPS: readonly NeutralStep[] = [
     op: 'gather-release-evidence',
     conditions: ['Where the grammar is `KEY-N`, its KEY must equal the resolved project key'],
   },
-  {
-    define: 'wave_report_read_step',
-    op: 'post-wave-report',
-    conditions: ['if repo-relative, resolve against WORKTREE_PATH when supplied, else against cwd'],
-  },
   { define: 'manage_debt_step_3', op: 'manage-debt', partial: 'opsteps', conditions: [] },
 ];
 
@@ -1265,12 +1260,12 @@ describe('D-NEUTRAL-STEP-MOVE: moved step text is authored once and identical in
   });
 
   it('known-bad probe: a copy edited in place, in one provider, is reported by the same collector', () => {
-    const step = NEUTRAL_STEPS.find(s => s.define === 'wave_report_read_step')!;
+    const step = NEUTRAL_STEPS.find(s => s.define === 'release_evidence_range_steps')!;
     const refs = referencesFor(step.op);
     const jira = refs.get('jira')!;
     const body = bodyOf(step)!;
     expect(jira.includes(body), 'the seed must start from a faithful copy').toBe(true);
-    const edited = new Map(refs).set('jira', jira.replace('use as-is', 'use verbatim'));
+    const edited = new Map(refs).set('jira', jira.replace('bounded at 200 candidates', 'bounded at 500 candidates'));
     expect(edited.get('jira')).not.toBe(jira);
     expect(collectDivergentCopies(step, body, edited)).toEqual([`jira/${step.op}: lacks the ${step.define} text`]);
   });

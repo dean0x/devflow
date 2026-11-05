@@ -937,15 +937,14 @@ describe('jira module: the per-op aggregate call budget [DR-09]', () => {
 // ---------------------------------------------------------------------------
 
 /**
- * The three comment kinds and their marker namespaces (§14.4 `marker_format`).
+ * The comment kinds and their marker namespaces (§14.4 `marker_format`).
  *
- * Namespaced per kind because a single global marker makes the three kinds
- * MUTUALLY SUPPRESS: a shipped-version back-link would satisfy the wave report's
- * dedup predicate and the wave report would never post (GAP-20).
+ * Namespaced per kind because a single global marker makes the kinds MUTUALLY
+ * SUPPRESS: a shipped-version back-link would satisfy the traceability comment's
+ * dedup predicate and the traceability comment would never post (GAP-20).
  */
 const MARKER_NAMESPACES: ReadonlyArray<{ readonly kind: string; readonly op: string }> = [
   { kind: 'devflow:shipped', op: 'backlink-shipped-issues' },
-  { kind: 'devflow:wave', op: 'post-wave-report' },
   { kind: 'devflow:traceability', op: 'ensure-traceable-issue' },
 ];
 
