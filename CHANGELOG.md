@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [3.15.0] - 2026-11-05
+
 ### Changed
 
 - **`/resolve` passes the PR's stated known limits to its agents, `/plan` numbers its criteria, and `/implement` gives each phase its own** ([#756](https://github.com/dean0x/devflow/issues/756)). `/resolve` reads the Known limits section of the PR description (the first heading that starts `Known limits`, at most 2,000 bytes, else `(none)`) and gives it to Triage and to the issue-fix Code agent as untrusted data. Triage defers a finding that asks for work a stated limit names. It never defers a fault in what the diff does, a blanket line, or a trust-boundary, data-loss, security or fail-closed finding. With compliance on, a deferred item still becomes a ticket. `/plan` numbers the acceptance criteria (AC-1, AC-2, ...) and each Subtask Breakdown row names the criteria it serves. `/implement` gives each phase or subtask the plan's Patterns to Follow, Known limits, the criteria its Serves cell names, any criterion no cell names, and each criterion that states a trust-boundary, security, data-loss or fail-closed property; a phase whose cell is absent or names an unlisted criterion gets all criteria. A single Code agent, Harden, Evaluate and Test still get all criteria. `/implement` no longer repeats the plan's patterns or the previous phase summary in its Code spawns, because the agents get both from the plan and the handoff file. The Plan agent takes a new package only if it is open source, widely used, well maintained, free of known vulnerabilities and light on dependencies; such a package is rung 6 and must pass `devflow:dependency-research` before install, and its checklist asks for a real user base and few transitive dependencies. Every touched size ceiling falls to the new size.
@@ -2470,6 +2474,7 @@ devflow init
 ---
 
 [Unreleased]: https://github.com/dean0x/devflow/compare/v3.8.0...HEAD
+[3.15.0]: https://github.com/dean0x/devflow/compare/v3.14.0...v3.15.0
 [3.14.0]: https://github.com/dean0x/devflow/compare/v3.13.0...v3.14.0
 [3.13.0]: https://github.com/dean0x/devflow/compare/v3.12.1...v3.13.0
 [3.12.1]: https://github.com/dean0x/devflow/compare/v3.12.0...v3.12.1
