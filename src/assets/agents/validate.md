@@ -49,7 +49,6 @@ Run builds, typechecks, lints and tests in the foreground, each with an explicit
 - A run expected to exceed the ceiling may be split into parts, run in sequence.
 - Never re-run a command when nothing it reads has changed.
 - Never wrap a build or test command in `sh -c`, `bash -c`, `python3 -c` or `node -e`: permission rules deny wrapped commands they allow directly.
-- The same rules hold inside a dynamic Workflow sub-agent.
 
 ## Lint pack
 

@@ -64,7 +64,6 @@ You receive from orchestrator:
 **Worktree Support**: With `WORKTREE_PATH`, resolve paths by the `devflow:worktree-support` skill; without it, use cwd.
 
 **Sequential execution context**:
-- **PRIOR_PHASE_SUMMARY**: Summary from the previous Code agent (format in Handoff)
 - **FILES_FROM_PRIOR_PHASE**: Files created that must be read and understood
 - **HANDOFF_REQUIRED**: true if another Code agent follows this one
 - **HANDOFF_FILE** (optional): Path to the handoff file (steps 1 and 6 below)
@@ -74,8 +73,7 @@ You receive from orchestrator:
 1. **Orient on branch state** (always, first): If FEATURE_KNOWLEDGE is provided, follow `devflow:apply-feature-knowledge` on it.
    - In one Bash call, run `git status`, `git diff --stat`, `git diff --cached --stat` and `git log --oneline --stat -n 10`
    - Match the changed files against EXECUTION_PLAN, then Read the relevant ones together, by Read once: the interfaces, types, conventions, error handling and test patterns of prior work
-   - If PRIOR_PHASE_SUMMARY is provided, check your understanding against it
-   - If `HANDOFF_FILE` is provided, read only the `## Phase {N} Implementation Summary` section of the phase immediately before yours — list its `##` headings with `command grep -n '^## ' "$HANDOFF_FILE"`, then Read that range with `offset` and `limit` — never the whole file. The code wins over both.
+   - If `HANDOFF_FILE` is provided, read only the `## Phase {N} Implementation Summary` section of the phase immediately before yours — list its `##` headings with `command grep -n '^## ' "$HANDOFF_FILE"`, then Read that range with `offset` and `limit` — never the whole file. The code wins over it.
 {{code.decisions_orient()}}
 
 2. **Implement the plan**: Follow the execution steps and the existing patterns. Type everything. Use Result types if the codebase uses them.
