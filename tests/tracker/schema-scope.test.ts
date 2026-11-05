@@ -305,6 +305,115 @@ describe('[DR-21] writer ↔ reader heading equality, both directions', () => {
 });
 
 // ---------------------------------------------------------------------------
+// AC-11 — an old-shape tracker file is still read: a retired section is ignored
+// ---------------------------------------------------------------------------
+
+const RETIRED_WAVE_FILTER_HEADING = '## Wave Filter';
+
+/**
+ * A tracker conventions file written before the Wave Filter section was retired.
+ * It stays on the user's disk (user content, never rewritten), so the reader meets
+ * it on every run. Inline on purpose: the fixture must not move with the oracle.
+ */
+const OLD_SHAPE_TRACKER_FILE = [
+  '---',
+  'provider: jira',
+  '---',
+  '',
+  '## Project',
+  '- site: tracker.example.test',
+  '- key: ABC',
+  '',
+  '## Issue Types',
+  '- Task',
+  '',
+  '## Iteration Policy',
+  '- none',
+  '',
+  RETIRED_WAVE_FILTER_HEADING,
+  '- status: Ready',
+  '',
+  '## Transitions',
+  '- Done',
+  '',
+  '### Substitutions',
+  '- none',
+  '',
+].join('\n');
+
+/** The `##` and `###` headings of a tracker file, in order. */
+function collectTrackerFileHeadings(file: string): string[] {
+  return file.split('\n').filter(line => /^#{2,3} \S/.test(line)).map(line => line.trim());
+}
+
+/**
+ * Named collector: how the reader contract treats an old-shape tracker file.
+ * The retired heading must be absent from the contract's section list, the contract
+ * must say an unlisted section is ignored and never DEGRADED, and the file's
+ * retired heading must be the only one of its headings the list does not name.
+ */
+export function collectOldShapeDefects(block: string, file: string): string[] {
+  const defects: string[] = [];
+  const listed = new Set(collectContractHeadings(block));
+  if (listed.has(RETIRED_WAVE_FILTER_HEADING)) {
+    defects.push(`the reader contract still lists ${RETIRED_WAVE_FILTER_HEADING}`);
+  }
+  if (!/A section not in this list is ignored, never DEGRADED/.test(block)) {
+    defects.push('the reader contract does not say an unlisted section is ignored, never DEGRADED');
+  }
+  const unlisted = collectTrackerFileHeadings(file).filter(heading => !listed.has(heading));
+  if (unlisted.join('\n') !== RETIRED_WAVE_FILTER_HEADING) {
+    defects.push(
+      `the file headings the contract does not list are [${unlisted.join(', ')}]; ` +
+      `expected only ${RETIRED_WAVE_FILTER_HEADING}`,
+    );
+  }
+  return defects;
+}
+
+describe('[AC-11] an old-shape tracker file with a Wave Filter section is read, not degraded', () => {
+  const block = preambleContractBlock();
+
+  /** Replace `from` with `to` in the block, failing loud when `from` is absent. */
+  function seed(from: string, to: string): string {
+    expect(block, `seed anchor not found in the reader block: ${from}`).toContain(from);
+    return block.replace(from, to);
+  }
+
+  it('the fixture is an old-shape file: it carries the retired heading and other sections', () => {
+    const headings = collectTrackerFileHeadings(OLD_SHAPE_TRACKER_FILE);
+    expect(headings).toContain(RETIRED_WAVE_FILTER_HEADING);
+    expect(headings.length, 'the fixture needs sections beside the retired one').toBeGreaterThan(3);
+  });
+
+  it('the contract lists no Wave Filter, ignores an unlisted section, and the file\'s other headings are listed', () => {
+    expect(collectOldShapeDefects(block, OLD_SHAPE_TRACKER_FILE)).toEqual([]);
+  });
+
+  it('known-bad probe: a contract that lists the retired section is reported', () => {
+    const seeded = seed('`## Project` (site, key)', '`## Wave Filter` · `## Project` (site, key)');
+    expect(collectOldShapeDefects(seeded, OLD_SHAPE_TRACKER_FILE)).toEqual([
+      `the reader contract still lists ${RETIRED_WAVE_FILTER_HEADING}`,
+      expect.stringContaining('expected only ## Wave Filter'),
+    ]);
+  });
+
+  it('known-bad probe: a contract without the "ignored, never DEGRADED" sentence is reported', () => {
+    const seeded = seed('A section not in this list is ignored, never DEGRADED.', '');
+    expect(collectOldShapeDefects(seeded, OLD_SHAPE_TRACKER_FILE)).toEqual([
+      'the reader contract does not say an unlisted section is ignored, never DEGRADED',
+    ]);
+  });
+
+  it('known-bad probe: a listed section dropped from the contract is reported as an unlisted file heading', () => {
+    const seeded = seed(' · `## Transitions`', '');
+    expect(collectOldShapeDefects(seeded, OLD_SHAPE_TRACKER_FILE)).toEqual([
+      expect.stringContaining('## Wave Filter, ## Transitions'),
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 3. AC-3.16 — the three-way sweep: ONE reader, enumerated by name
 // ---------------------------------------------------------------------------
 
