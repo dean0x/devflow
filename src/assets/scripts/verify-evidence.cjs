@@ -24,7 +24,7 @@
 // stdout (D-VERIFY-STDOUT) is empty or exactly one of these shapes, each closed-vocabulary
 // (the render block's TP lines come from the caller's own plan file):
 //   check     nothing — the exit code is the answer; the diagnostic is on stderr.
-//   render  the creation block: markers, `## Test Plan`, every TP unticked
+//   render    the creation block: markers, `## Test Plan`, every TP unticked
 //   verify    EVIDENCE pr:<n> head:<sha> total:<n> VERIFIED-CI:<n> ATTESTED-LOCAL:<n>
 //             UNVERIFIED:<n> STALE:<n> FAILED:<n> INDETERMINATE:<n> stale:<ids|none>
 //             exceptions:<kinds|none> approval:<yes|no|unchecked> key:<hex>
