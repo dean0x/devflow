@@ -28,9 +28,10 @@ Choose targets in this order:
 
 ## Rules for every target
 
-1. No fixed size target. The measure is the bytes that a typical run reads in each build variant key, plus the turns per run. The typical-run read is the prompt plus the files that the run reads on its typical path. Neither may grow in any key.
-   - The compiled ceiling of one file may rise only when the typical-run read of that key falls by more. The pull request body gives the numbers for each key and the reason. The description of the ceiling in `tests/fixtures/numeric-floors.json` records the same numbers.
-   - All other ceilings only fall.
+1. No fixed size target. The measure is the bytes that a typical run reads in each build variant key, plus the turns per run. The typical-run read is the prompt plus the files that the run reads on its typical path. Neither should grow in any key.
+   - Any floor or ceiling in `tests/fixtures/numeric-floors.json` may move up or down. The entry's `description` and the pull request body give the old value, the new value and the reason.
+   - The goal: the typical-run read should not grow. A ceiling rise states its reason.
+   - An older description or test comment that says a value may only rise or only fall is history. This rule replaces it.
 2. No new structure, such as step maps, state tables, step graphs or step files, unless its measured gain is larger than its bytes and turns.
 3. A rule that must always hold moves into a script or a hook, not into stronger words.
 4. Keep "finish and verify" text for an agent on a smaller model: Haiku, or Sonnet at low or medium effort. Its `model` and `effort` frontmatter say which.
@@ -45,7 +46,7 @@ Follow these steps for each cut commit.
 2. Edit the text as it stands on the current base. A hunk made on an older base can bring back text that a later change removed.
 3. Write one cut-log row for each hunk in the commit body. A row holds the rule number, the kind of cut, the bytes, and the never-cut items that the hunk touches. Write "none" when the hunk touches no item.
 4. Build once.
-5. Measure the compiled size of every host in every variant key, and the typical-run read of the target. Lower each size limit that fell, in the same commit. If a host grew, revert that hunk, unless the exception of the first rule for every target applies. Never raise a limit in any other case.
+5. Measure the compiled size of every host in every variant key, and the typical-run read of the target. Lower each size limit that fell, in the same commit. If a host grew, revert that hunk, or raise its limit as the first rule for every target says. A raise gives the old value, the new value and the reason.
 6. Run the contract tests of the cut host. Put each failure in one class:
    - A contract that moved: adapt the probe or the collector to the new place.
    - A contract that is lost: restore the text.

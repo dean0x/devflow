@@ -239,7 +239,7 @@ function cutRuleDefects(guide: string): string[] {
     ['[never-cut table](#never-cut-table)', 'the link to the never-cut table'],
     ['Never cut Principles 1 to 4 or the Error Handling rule.', 'the rule for the principles and Error Handling'],
     ['A pinned sentence stays.', 'the rule for pinned sentences'],
-    ['Never raise a limit in any other case.', 'the rule that no other limit rises'],
+    ['A raise gives the old value, the new value and the reason.', 'the record for a raised limit'],
     ['One independent reader checks the diff against every lens below.', 'the one audit for each pull request'],
   ] as const)
     .filter(([needle]) => !body.includes(needle))
@@ -273,8 +273,9 @@ function targetRuleDefects(guide: string): string[] {
   return ([
     ['No fixed size target.', 'the rule against a fixed target'],
     ['the bytes that a typical run reads in each build variant key, plus the turns per run', 'the size measure'],
-    ['may rise only when the typical-run read of that key falls by more', 'the one ceiling exception'],
-    ['All other ceilings only fall.', 'the rule for the other ceilings'],
+    ['may move up or down. The entry\'s `description` and the pull request body give the old value, the new value and the reason.', 'the rule that a pinned value moves either way with a record'],
+    ['the typical-run read should not grow. A ceiling rise states its reason.', 'the goal and the reason for a ceiling rise'],
+    ['This rule replaces it.', 'the rule over older one-way notes'],
     ['No new structure', 'the rule for new structure'],
     ['"finish and verify"', 'the model rule'],
     ['one independent audit for each pull request', 'the process for a text-only cut'],
@@ -448,7 +449,7 @@ describe('the other parts show a loss as a defect', () => {
     expect(architectureDefects(seedOnce(GUIDE, 'The prefix must be at most 16,660 bytes', 'The prefix must be short'))).not.toEqual([]);
     expect(tokensDefects(seedOnce(GUIDE, '| Agent prompt |', '| Spawn |'))).toContain('the load table lacks "Agent prompt"');
     expect(tokensDefects(seedOnce(GUIDE, '](lean-prompts-targets.md)', '](targets.md)'))).toContain('the guide does not link to the target inventory');
-    expect(targetRuleDefects(seedOnce(GUIDE, 'All other ceilings only fall.', 'Other ceilings may move.'))).not.toEqual([]);
+    expect(targetRuleDefects(seedOnce(GUIDE, 'A ceiling rise states its reason.', 'A ceiling may rise.'))).not.toEqual([]);
     expect(cutRuleDefects(seedOnce(GUIDE, 'One independent reader checks the diff against every lens below.', 'Readers check the diff.'))).not.toEqual([]);
     expect(cutRecordDefects(seedOnce(GUIDE, 'leaves less than half of the before size, stop', 'leaves little'))).not.toEqual([]);
     expect(cutRuleDefects(seedOnce(GUIDE, 'A pinned sentence stays.', 'A pinned sentence can go.'))).not.toEqual([]);
