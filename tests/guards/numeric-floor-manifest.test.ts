@@ -55,7 +55,8 @@ interface RawEntry {
    * How many sites in `sourceFile` spell this value. Checking mere presence is
    * not enough when a pattern repeats: `toBe(14)` appears at 5 sites and
    * `60_000` at 21, so moving one of them leaves the pattern present and the
-   * change undetected. The guard requires at least this many matches.
+   * change undetected. The guard requires exactly this many matches: the
+   * presence check fails on fewer, and the single-site probe fails on more.
    */
   occurrences: number;
   sourceFile: string;
