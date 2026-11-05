@@ -511,6 +511,7 @@ describe('the legacy sweep after an install', () => {
     });
 
     expect(swept.removed).toEqual([]);
+    expect(swept.commandsLeft, 'a shipped name is never listed as a retired command left').toEqual([]);
     expect(await exists(shippedFile)).toBe(true);
   });
 

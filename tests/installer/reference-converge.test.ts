@@ -318,9 +318,19 @@ describe('a stale post-wave-report reference under the tracker subtree (TP-13)',
   const stuck = (): string => flatFile(STALE[0]);
   const mine = (): string => flatFile('devflow:git/references/tracker/github/my-notes.md');
 
-  /** A compliance-off machine that still holds the three references of an old release. */
-  async function plantStale(): Promise<void> {
-    await installInto(claudeDir, devflowDir, false);
+  /**
+   * Both values of the compliance switch, with the posting answer the converge gives when its prune
+   * of a stale reference fails: with compliance off the overlay is unproven, so posting is unknown;
+   * with compliance on no file posts, so posting is clear.
+   */
+  const SWITCHES = [
+    { label: 'off', compliance: false, pruneFailsAs: { converged: false, unproven: true, posting: 'unknown' } },
+    { label: 'on', compliance: true, pruneFailsAs: { converged: false, unproven: false, posting: 'clear' } },
+  ] as const;
+
+  /** A machine of the given compliance switch that still holds the three references of an old release. */
+  async function plantStale(compliance: boolean): Promise<void> {
+    await installInto(claudeDir, devflowDir, compliance);
     for (const entry of STALE) await fs.writeFile(flatFile(entry), 'a reference of an old release\n', 'utf-8');
   }
 
@@ -338,21 +348,21 @@ describe('a stale post-wave-report reference under the tracker subtree (TP-13)',
     });
   }
 
-  it('a compliance-off converge removes each one, and posting is clear', async () => {
-    await plantStale();
+  it.each(SWITCHES)('a compliance-$label converge removes each one, and posting is clear', async ({ compliance }) => {
+    await plantStale(compliance);
 
-    const result = await converge(false);
+    const result = await converge(compliance);
 
     expect(result.converged, warnings.join('\n')).toBe(true);
     expect(result.posting).toEqual({ kind: 'clear' });
     for (const entry of STALE) expect(await exists(flatFile(entry)), `${entry} is removed`).toBe(false);
   });
 
-  it('beside a user file that stays, the prune removes it and names it, and posting is clear', async () => {
-    await plantStale();
+  it.each(SWITCHES)('compliance $label: beside a user file that stays, the prune removes it and names it, and posting is clear', async ({ compliance }) => {
+    await plantStale(compliance);
     await keepUserFileInGithubFolder();
 
-    const result = await converge(false);
+    const result = await converge(compliance);
 
     expect(result.posting).toEqual({ kind: 'clear' });
     for (const entry of STALE) expect(await exists(flatFile(entry)), `${entry} is removed`).toBe(false);
@@ -360,8 +370,8 @@ describe('a stale post-wave-report reference under the tracker subtree (TP-13)',
     expect(await fs.readFile(mine(), 'utf-8'), 'the user file stays where it is').toBe('a note of mine\n');
   });
 
-  it('a prune that fails leaves posting unknown, never clear, and the file stays', async () => {
-    await plantStale();
+  it.each(SWITCHES)('compliance $label: a prune that fails leaves the file in place and gives the posting answer of that switch', async ({ compliance, pruneFailsAs }) => {
+    await plantStale(compliance);
     await keepUserFileInGithubFolder();
     const file = stuck();
     const realUnlink = fs.unlink.bind(fs);
@@ -370,11 +380,11 @@ describe('a stale post-wave-report reference under the tracker subtree (TP-13)',
       return realUnlink(target);
     });
 
-    const result = await converge(false);
+    const result = await converge(compliance);
 
-    expect(result.converged).toBe(false);
-    expect(result.references.unproven).toBe(true);
-    expect(result.posting.kind).toBe('unknown');
+    expect(result.converged).toBe(pruneFailsAs.converged);
+    expect(result.references.unproven).toBe(pruneFailsAs.unproven);
+    expect(result.posting.kind).toBe(pruneFailsAs.posting);
     expect(await exists(file), 'the file that could not be pruned stays').toBe(true);
   });
 });

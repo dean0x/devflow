@@ -233,6 +233,17 @@ const installedCommand = (name: string): string => path.join(claudeDir, 'command
 const installedRule = (): string => path.join(claudeDir, 'rules', 'devflow', 'compliance.md');
 const exists = (file: string): Promise<boolean> => fs.stat(file).then(() => true, () => false);
 
+/** Every file below `dir` as relative path -> bytes. */
+async function treeBytes(dir: string): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  for (const entry of await fs.readdir(dir, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    const file = path.join(entry.parentPath, entry.name);
+    out[path.relative(dir, file)] = await fs.readFile(file, 'utf-8');
+  }
+  return out;
+}
+
 async function seedPackage(): Promise<void> {
   await write(path.join(pkg, 'dist', 'commands', 'plan.md'), 'plan ON\n');
   await write(path.join(curationOffDir('commands', pkg), 'plan.md'), 'plan CURATION-OFF\n');
@@ -557,6 +568,23 @@ describe('applyComplianceChange', () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.messages.map(m => m.text).join('\n')).toContain('cannot be named');
+  });
+
+  it('disable with the commands folder a link to a folder that holds a retired command exits 1 and names that file; nothing is removed through the link', async () => {
+    const manifest = await manifestWith({ enabled: true, frameworks: [] });
+    await installOnFiles();
+    const linked = path.join(tmp, 'elsewhere-commands');
+    await fs.rename(path.dirname(installedCommand('plan')), linked);
+    await write(path.join(linked, 'dynamic-build.md'), 'a retired command of an old release\n');
+    await fs.symlink(linked, path.dirname(installedCommand('plan')), 'dir');
+    const before = await treeBytes(linked);
+
+    const result = await change(manifest, 'disable');
+
+    expect(result.exitCode).toBe(1);
+    expect(result.messages.map(m => m.text).join('\n')).toContain(installedCommand('dynamic-build'));
+    expect(await treeBytes(linked), 'the folder behind the link and its files are unchanged').toEqual(before);
+    expect((await fs.lstat(path.dirname(installedCommand('plan')))).isSymbolicLink(), 'the link itself stays').toBe(true);
   });
 
   it('never mutates the manifest it is given', async () => {

@@ -4236,8 +4236,7 @@ describe('uninstall --plugin refuses the removed dynamic plugin (TP-15, TP-16)',
 
     expect(exits).toEqual([1]);
     expect(errors).toEqual(['Unknown plugin(s): devflow-dynamic']);
-    expect(infos.filter(line => /compliance|built-in/.test(line)), 'no retire notice').toEqual([]);
-    expect(infos.some(line => line.startsWith('Valid plugins:') && !line.includes('devflow-dynamic'))).toBe(true);
+    expect(infos, 'the valid-plugins line alone: no retire notice').toEqual([expect.stringMatching(/^Valid plugins: (?![\s\S]*devflow-dynamic)/)]);
   });
 
   it.each(['devflow-implement,dynamic', 'dynamic,devflow-implement', 'devflow-implement,devflow-dynamic'])(
