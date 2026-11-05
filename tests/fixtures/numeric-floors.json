@@ -300,11 +300,11 @@
     },
     {
       "id": "retired-commands-count",
-      "floor": 15,
-      "pattern": "RETIRED_SHIPPED.commands.length).toBeGreaterThanOrEqual(15)",
+      "floor": 19,
+      "pattern": "RETIRED_SHIPPED.commands.length).toBeGreaterThanOrEqual(19)",
       "occurrences": 1,
       "sourceFile": "tests/guards/install-backup-sets.test.ts",
-      "description": "Command names on the delete list of src/core/retired-shipped-names.ts: every command a release shipped and the build no longer ships (15 at 3.9.0). The install removes such a file with no backup, so the list only grows; a blanket rename that rewrites a name here drops the count and fails this floor."
+      "description": "Command names on the delete list of src/core/retired-shipped-names.ts: every command a release shipped and the build no longer ships (15 at 3.9.0, 19 once four more commands were retired). The install removes such a file with no backup, so the list only grows; a blanket rename that rewrites a name here drops the count and fails this floor."
     },
     {
       "id": "retired-agents-count",
@@ -324,11 +324,11 @@
     },
     {
       "id": "retired-skill-files-count",
-      "floor": 2,
-      "pattern": "expect(retiredSkillFileCount).toBeGreaterThanOrEqual(2)",
+      "floor": 5,
+      "pattern": "expect(retiredSkillFileCount).toBeGreaterThanOrEqual(5)",
       "occurrences": 1,
       "sourceFile": "tests/guards/install-backup-sets.test.ts",
-      "description": "Files on the skillFiles delete list of src/core/retired-shipped-names.ts, summed over the skill folders: two files that a release shipped inside a skill folder that exists today (devflow:git and devflow:agent-references). The list only grows."
+      "description": "Files on the skillFiles delete list of src/core/retired-shipped-names.ts, summed over the skill folders: five files that a release shipped inside a skill folder that exists today (devflow:git and devflow:agent-references). The list only grows."
     },
     {
       "id": "released-commands-count",

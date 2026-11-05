@@ -43,6 +43,10 @@ export const RETIRED_SHIPPED: RetiredShipped = Object.freeze({
     'commit',
     'design',
     'devlog',
+    'dynamic-build',
+    'dynamic-plan',
+    'dynamic-profile',
+    'dynamic-tickets',
     'get-issue',
     'plan-next-steps',
     'pre-commit',
@@ -286,6 +290,9 @@ export const RETIRED_SHIPPED: RetiredShipped = Object.freeze({
     ]),
     'devflow:git': names([
       'references/pr/ensure-pr-ready.md',
+      'references/tracker/github/post-wave-report.md',
+      'references/tracker/jira/post-wave-report.md',
+      'references/tracker/linear/post-wave-report.md',
     ]),
   }),
 });

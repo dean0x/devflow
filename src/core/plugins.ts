@@ -101,9 +101,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
      * this plugin ever gains a command, the right fix is a new commands-less
      * plugin for the hook-spawned agents — never an exemption.
      *
-     * Neither agent may gain a `_roster.mds` row: that file is asserted
-     * set-equal, both directions, against the `agentType` values present in
-     * dist/commands/, and a hook-spawned agent appears in none of them.
+     * No command spawns either agent, so no command names either `agentType`.
      */
     agents: ['curate', 'tracker'],
     /**
@@ -372,38 +370,6 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     rules: [],
   },
   {
-    name: 'devflow-dynamic',
-    description: 'Dynamic workflow recipes - dependency-aware tickets→plan→build delivery pipeline',
-    // Commands compiled from commands/*.mds at build time (build:mds).
-    commands: ['/dynamic-tickets', '/dynamic-plan', '/dynamic-build', '/dynamic-profile'],
-    agents: ['code', 'fix', 'validate', 'polish', 'harden', 'evaluate', 'test', 'review', 'git', 'synthesize', 'knowledge', 'design', 'architect'],
-    skills: ['apply-decisions', 'apply-feature-knowledge', 'worktree-support', 'docs-framework'],
-    requires: [
-      'architecture',
-      'complexity',
-      'consistency',
-      'database',
-      'dependencies',
-      'design-review',
-      'documentation',
-      'feature-knowledge',
-      'gap-analysis',
-      'git',
-      'performance',
-      'qa',
-      'quality-gates',
-      'regression',
-      'reliability',
-      'review-methodology',
-      'security',
-      'software-design',
-      'test-driven-development',
-      'testing',
-    ],
-    optional: true,
-    rules: [],
-  },
-  {
     name: 'devflow-typescript',
     description: 'TypeScript language patterns - type safety, generics, utility types, type guards',
     commands: [],
@@ -516,6 +482,7 @@ export function registeredPluginNames(names: readonly string[]): string[] {
 export const DELETED_PLUGIN_NAMES: readonly string[] = [
   'devflow-audit-claude',
   'devflow-compliance', // D-B2: converted to built-in feature (devflow compliance); skill/rule assets stay in src/assets/ under feature system management
+  'devflow-dynamic',
 ];
 
 /**
@@ -1110,15 +1077,13 @@ export const LEGACY_RULE_NAMES: readonly string[] = [];
 /**
  * Canonical display order for workflow commands shown at end of init.
  * Mirrors the user-facing pipeline: research → explore → plan → implement →
- * code-review → resolve → self-review → bug-analysis → debug → release →
- * dynamic pipeline (dynamic-tickets → dynamic-plan → dynamic-build → dynamic-profile).
+ * code-review → resolve → self-review → bug-analysis → debug → release.
  * Export so init.ts can import it rather than keeping a local copy.
  */
 export const WORKFLOW_ORDER: readonly string[] = [
   '/research', '/explore', '/plan', '/implement',
   '/code-review', '/resolve', '/self-review', '/bug-analysis',
   '/debug', '/release',
-  '/dynamic-tickets', '/dynamic-plan', '/dynamic-build', '/dynamic-profile',
 ];
 
 /**
