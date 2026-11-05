@@ -51,10 +51,6 @@ No gate may be skipped. If user says "proceed" or "whatever you think", state re
 
 ## Phases
 
----
-
-### Block 1: Requirements Discovery
-
 #### Phase 1: Gate 0 — Requirements Discovery
 
 **Produces:** CONFIRMED_SCOPE
@@ -157,7 +153,7 @@ Pass `FEATURE_KNOWLEDGE` to Explore, Design and Architect agents.
 **Produces:** EXPLORE_OUTPUTS
 **Requires:** SKIM_CONTEXT, GATE_LEVEL
 
-Spawn 4 `Agent(subagent_type="Explore")` agents **in a single message**, each with Skim agent context and `FEATURE_KNOWLEDGE: {feature_knowledge}` (from Phase 2). Include the instruction: "The FEATURE_KNOWLEDGE is a baseline — VALIDATE, EXTEND, and CORRECT it. For anything it already covers, cite its KB IDs (`{slug} KB-AP-n`) instead of restating the text. Focus on areas the feature knowledge doesn't cover and changes since it was last updated." Ask each agent for a final report of at most about 1,500 tokens: findings with file:line references, not file dumps.
+Spawn 4 `Agent(subagent_type="Explore")` agents **in a single message**, each with Skim agent context and `FEATURE_KNOWLEDGE: {feature_knowledge}`. Include the instruction: "The FEATURE_KNOWLEDGE is a baseline — VALIDATE, EXTEND, and CORRECT it. For anything it already covers, cite its KB IDs (`{slug} KB-AP-n`) instead of restating the text. Focus on areas the feature knowledge doesn't cover and changes since it was last updated." Ask each agent for a final report of at most about 1,500 tokens: findings with file:line references, not file dumps.
 
 | Focus | Thoroughness | Find |
 |-------|-------------|------|
@@ -178,10 +174,6 @@ Mode: exploration
 Explore outputs: {all 4 outputs}
 Combine into: user needs, similar features, constraints, failure modes"
 ```
-
----
-
-### Block 2: Gap Analysis
 
 #### Phase 5: Gap Analysis (Parallel)
 
@@ -241,10 +233,6 @@ Design agent outputs: {all Design agent outputs}
 Deduplicate, boost confidence for multi-agent flags, categorize by severity."
 ```
 
----
-
-### Block 3: Scope Approval
-
 #### Phase 7: Gate 1 — Validate Scope + Gaps
 
 **Produces:** ACCEPTED_SCOPE, ACCEPTED_GAPS
@@ -258,7 +246,7 @@ Use AskUserQuestion to present and validate:
    - v1 scope (what's included)
    - Explicit exclusions
 
-2. **Gaps** (from Phase 6)
+2. **Gaps**
    - Blocking gaps (CRITICAL/HIGH) with proposed resolutions
    - Should-address recommendations (MEDIUM)
    - Informational items (LOW)
@@ -269,10 +257,6 @@ User can:
 - Override specific gaps (accept risk and proceed)
 
 **MANDATORY**: Do not proceed to implementation design until Gate 1 is confirmed.
-
----
-
-### Block 4: Implementation Design
 
 #### Phase 8: Explore Implementation (Parallel)
 
@@ -327,10 +311,6 @@ Planner outputs: {all 3 outputs}
 Combine into: execution plan with strategy decision, gap mitigations integrated"
 ```
 
----
-
-### Block 5: Design Review + Approval
-
 #### Phase 12: Design Review
 
 **Produces:** REVIEW_FINDINGS
@@ -354,18 +334,18 @@ Agent(subagent_type="Architect"):
 Use AskUserQuestion to present:
 
 1. **Implementation Plan Summary**
-   - Execution strategy (SINGLE_CODE_AGENT / SEQUENTIAL_CODE_AGENTS / PARALLEL_CODE_AGENTS)
+   - Execution strategy
    - Key implementation steps with files
-   - Test strategy — the test plan as TP lines, at least one per acceptance criterion (shape below)
+   - Test strategy — the test plan as TP lines (shape below)
 
-2. **Design Review Findings** (from Phase 12)
+2. **Design Review Findings**
    - Each anti-pattern finding with severity and proposed mitigation
    - Which findings are already addressed in the plan
 
-3. **Acceptance Criteria** (from gap analysis + exploration)
+3. **Acceptance Criteria**
 
 4. **Risks**
-   - Context risk level (LOW/MEDIUM/HIGH/CRITICAL)
+   - Context risk level
    - Unresolved gaps carried forward
 
 **Test plan lines.** Gate 2 shows the test plan in the one shape `/implement` and the evidence scripts read. The TP-line contract:
@@ -379,10 +359,6 @@ User can:
 - **Restart /plan with these constraints** — offered in place of Revise once 2 revisions have run: stop gracefully, write no artifact, and print the constraints given so far for a fresh `/plan` run
 
 **MANDATORY**: Do not write design artifact until Gate 2 is confirmed.
-
----
-
-### Block 6: Output
 
 #### Phase 14: Output
 
@@ -503,8 +479,6 @@ Capture `ISSUE_NUMBER` from the Git agent output for use in the completion repor
 
 **Patch the frontmatter `issue:` line in place** — when it still reads `issue: pending` and the spawn returned an issue (`CREATED` or `ENRICHED`), replace only that one line inside the leading `---` block with `issue: {ISSUE_NUMBER}` — bare, no `#` (`issue: #42` parses as YAML null) — using the Edit tool. Never rename the artifact, never rewrite it, never spawn `ensure-traceable-issue` again. Declined or DEGRADED ⇒ leave `issue: pending`.
 
-Surface any `TRACEABILITY: DEGRADED ({reason})` lines from the Git agent output in the report.
-
 **Report:**
 
 Display completion summary:
@@ -518,8 +492,6 @@ Display completion summary:
 - Design review summary (N anti-patterns found, M mitigated in plan)
 - Gate level: {GATE_LEVEL}, with any level note
 - Suggested next step: `/implement {artifact-path}` or `/implement #{issue-number}`
-
----
 
 ## Principles
 
