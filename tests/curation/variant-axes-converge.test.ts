@@ -29,6 +29,7 @@ import { postingStatus, readInstalledVariants } from '../../src/core/installed-v
 import { readManifest } from '../../src/core/manifest.js';
 import { getManifestLockPath } from '../../src/core/manifest-lock.js';
 import { DEVFLOW_PLUGINS, skillsOf, type PluginDefinition } from '../../src/core/plugins.js';
+import type { BackupSession } from '../../src/targets/claude-code/install-backup.js';
 import { assertTempHome } from '../setup/home-isolation.js';
 import { testBackups } from '../helpers.js';
 
@@ -49,6 +50,23 @@ vi.mock('../../src/core/manifest-lock.js', async importOriginal => {
       await hook?.();
       return actual.withManifestLock(...args);
     }) as typeof actual.withManifestLock,
+  };
+});
+
+/**
+ * A seam on the retired-name sweep: while `fail` is set, the sweep throws. It stands in for a fault the
+ * sweep does not expect, which the converge must turn into a fail-closed answer.
+ */
+const sweepSeam = vi.hoisted(() => ({ fail: false }));
+
+vi.mock('../../src/targets/claude-code/legacy-sweep.js', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../src/targets/claude-code/legacy-sweep.js')>();
+  return {
+    ...actual,
+    sweepLegacyDevflowFiles: (async (...args: Parameters<typeof actual.sweepLegacyDevflowFiles>) => {
+      if (sweepSeam.fail) throw new Error('the sweep failed: injected');
+      return actual.sweepLegacyDevflowFiles(...args);
+    }) as typeof actual.sweepLegacyDevflowFiles,
   };
 });
 
@@ -203,6 +221,15 @@ async function converge(m: Machine, plugins: readonly PluginDefinition[] = FULL_
   });
 }
 
+/** Make the removal of `file` fail, so that the file stays where it is. */
+function refuseRemovalOf(file: string): void {
+  const realUnlink = fs.unlink.bind(fs);
+  vi.spyOn(fs, 'unlink').mockImplementation(async target => {
+    if (target === file) throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+    return realUnlink(target);
+  });
+}
+
 beforeEach(async () => {
   tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-variant-axes-'));
   expect(() => assertTempHome(tmp)).not.toThrow();
@@ -216,6 +243,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
+  sweepSeam.fail = false;
   await fs.rm(tmp, { recursive: true, force: true });
 });
 
@@ -579,6 +608,39 @@ describe('applyVariantToggle on the compliance axis (AC-27, AC-28, AC-29)', () =
     expect(warnings.some(w => w.includes('install record') && w.includes('switches changed'))).toBe(true);
   });
 
+  it('disable at the same version also removes a retired command, and posting is clear', async () => {
+    await writeInstallManifest('3.3.0', { compliance: { enabled: false, frameworks: [] } }, { installedVariants: { curation: true, compliance: true } });
+    await installAs({ curation: true, compliance: true });
+    await write(installedCommand('dynamic-build'), 'a command of an old release\n');
+
+    const outcome = await toggle(false);
+
+    expect(outcome.kind).toBe('converged');
+    if (outcome.kind !== 'converged') return;
+    expect(outcome.result.converged, warnings.join('\n')).toBe(true);
+    expect(outcome.result.posting).toEqual({ kind: 'clear' });
+    expect(await exists(installedCommand('dynamic-build')), 'the retired command is removed').toBe(false);
+    expect(readInstalledVariants((await readManifest(devflowDir))?.installedVariants)).toEqual({ curation: true, compliance: false, tdd: true });
+  });
+
+  it('enable: a retired command that stays does not block the install record, and the other retired commands go', async () => {
+    await writeInstallManifest('3.3.0', { compliance: { enabled: true, frameworks: [] } }, { installedVariants: { curation: true, compliance: false } });
+    await installAs({ curation: true, compliance: false });
+    await write(installedCommand('dynamic-build'), 'a command of an old release\n');
+    await write(installedCommand('dynamic-plan'), 'a command of an old release\n');
+    refuseRemovalOf(installedCommand('dynamic-build'));
+
+    const outcome = await toggle(true);
+
+    expect(outcome.kind).toBe('converged');
+    if (outcome.kind !== 'converged') return;
+    expect(outcome.result.converged, warnings.join('\n')).toBe(true);
+    expect(outcome.result.posting).toEqual({ kind: 'clear' });
+    expect(await exists(installedCommand('dynamic-build')), 'the refused file stays').toBe(true);
+    expect(await exists(installedCommand('dynamic-plan')), 'the other retired command goes').toBe(false);
+    expect(readInstalledVariants((await readManifest(devflowDir))?.installedVariants)).toEqual({ curation: true, compliance: true, tdd: true });
+  });
+
   it('enable restores the on files and records the compliance-on variant', async () => {
     await writeInstallManifest('3.3.0', { compliance: { enabled: true, frameworks: ['gdpr'] } }, { installedVariants: { curation: true, compliance: false } });
     await installAs({ curation: true, compliance: false });
@@ -842,5 +904,101 @@ describe('applyVariantToggle on the tdd axis', () => {
     expect(variantToggleSkew('3.2.0', '3.3.0', 'tdd', true)).toContain('tdd-on');
     expect(variantToggleSkew('3.2.0', '3.3.0', 'tdd', false)).toContain('tdd-off');
     expect(variantToggleSkew('3.2.0', '3.3.0', 'tdd', false) ?? '').not.toContain('posting steps');
+  });
+});
+
+describe('convergeVariantAxes: the retired command files (AC-4)', () => {
+  const ALL_ON: Machine = { curation: true, compliance: true, tdd: true };
+  const COMPLIANCE_OFF: Machine = { curation: true, compliance: false, tdd: true };
+  const RETIRED = ['dynamic-build', 'dynamic-plan'] as const;
+
+  /** A machine on `from` that still holds the retired commands of an old release. */
+  async function installWithRetired(from: Machine): Promise<void> {
+    await installAs(from);
+    for (const name of RETIRED) await write(installedCommand(name), `${name} of an old release\n`);
+  }
+
+  const convergeWith = (m: Machine, backups: BackupSession, refusedFolders?: readonly string[]) =>
+    convergeVariantAxes({
+      claudeDir, devflowDir, ...machineOf(m), plugins: FULL_SELECTION, warn, packageRoot: pkg, backups, refusedFolders,
+    });
+
+  it.each([
+    ['compliance off', COMPLIANCE_OFF],
+    ['curation off', { curation: false, compliance: true, tdd: true }],
+    ['tdd off', { curation: true, compliance: true, tdd: false }],
+  ] as const)('%s: each retired command is removed through the backup session and named, and the prompts still converge', async (_label, to) => {
+    await installWithRetired(ALL_ON);
+    const backups = await backupsOf();
+
+    const result = await convergeWith(to, backups);
+
+    expect(result.converged, warnings.join('\n')).toBe(true);
+    expect(result.posting).toEqual({ kind: 'clear' });
+    for (const name of RETIRED) expect(await exists(installedCommand(name)), `${name} is removed`).toBe(false);
+    expect([...backups.snapshot().retiredRemoved].sort()).toEqual(RETIRED.map(installedCommand).sort());
+    expect(backups.snapshot().moved).toEqual([]);
+    for (const [file, text] of Object.entries(expectedFiles(to))) expect(await read(file), file).toBe(text);
+  });
+
+  it('compliance off: a retired command that stays makes posting left and names it, never clear', async () => {
+    await installWithRetired(ALL_ON);
+    refuseRemovalOf(installedCommand('dynamic-build'));
+
+    const result = await convergeWith(COMPLIANCE_OFF, await backupsOf());
+
+    expect(result.posting).toEqual({ kind: 'left', files: [installedCommand('dynamic-build')] });
+    expect(result.converged).toBe(false);
+    expect(await exists(installedCommand('dynamic-build')), 'the refused file stays').toBe(true);
+    expect(await exists(installedCommand('dynamic-plan')), 'the other retired command goes').toBe(false);
+  });
+
+  it('compliance on: a retired command that stays does not make the converge fail', async () => {
+    await installWithRetired(ALL_ON);
+    refuseRemovalOf(installedCommand('dynamic-build'));
+
+    const result = await convergeWith(ALL_ON, await backupsOf());
+
+    expect(result.converged, warnings.join('\n')).toBe(true);
+    expect(result.posting).toEqual({ kind: 'clear' });
+    expect(await exists(installedCommand('dynamic-build')), 'the refused file stays').toBe(true);
+    expect(await exists(installedCommand('dynamic-plan')), 'the other retired command goes').toBe(false);
+  });
+
+  it('compliance off: a folder the caller refused is not swept, and its retired commands are named as left', async () => {
+    await installWithRetired(ALL_ON);
+    const commandsFolder = path.join(claudeDir, 'commands', 'devflow');
+
+    const result = await convergeWith(COMPLIANCE_OFF, await backupsOf(), [commandsFolder]);
+
+    expect(result.posting).toEqual({
+      kind: 'left',
+      files: RETIRED.map(installedCommand),
+    });
+    expect(result.converged).toBe(false);
+    for (const name of RETIRED) expect(await exists(installedCommand(name)), `${name} stays`).toBe(true);
+  });
+
+  it('fail closed: a sweep that throws leaves posting unknown with compliance off, and the converge not converged', async () => {
+    await installWithRetired(ALL_ON);
+    sweepSeam.fail = true;
+
+    const result = await convergeWith(COMPLIANCE_OFF, await backupsOf());
+
+    expect(result.posting.kind).toBe('unknown');
+    expect(result.converged).toBe(false);
+    expect(warnings.some(w => w.includes('retired sweep'))).toBe(true);
+    expect(await read(installedCommand('release')), 'the other steps still ran').toBe('release COMPLIANCE-OFF\n');
+  });
+
+  it('a sweep that throws with compliance on leaves the converge not converged and posting clear', async () => {
+    await installWithRetired(ALL_ON);
+    sweepSeam.fail = true;
+
+    const result = await convergeWith(ALL_ON, await backupsOf());
+
+    expect(result.posting).toEqual({ kind: 'clear' });
+    expect(result.converged).toBe(false);
+    expect(warnings.some(w => w.includes('retired sweep'))).toBe(true);
   });
 });
