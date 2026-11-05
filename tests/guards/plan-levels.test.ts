@@ -567,7 +567,7 @@ const PLANNING_REF = { from: 'commands/plan-levels.md', to: 'synthesize/planning
 const PLANNING_MARKERS = ['**Execution Strategy Decision:**', '**Context Risk**'] as const
 
 /** The sentence that limits the one planner to the two sections the Plan rule names, so the output template does not replace the order its prompt gives. */
-const PLANNING_SCOPE = "At levels standard and lean, one Plan agent applies only this file's Execution Strategy Decision and Context Risk, and reports in the order its prompt gives."
+const PLANNING_SCOPE = "When one Plan agent runs, it applies only this file's Execution Strategy Decision and Context Risk, and reports in the order its prompt gives."
 
 /** The text of a file, or null when it is absent. A read that fails for any other reason throws. */
 const readIfPresent = (file: string): string | null => (existsSync(file) ? readFileSync(file, 'utf-8') : null)
@@ -1238,7 +1238,7 @@ describe('the Plan rule sends the one planner to a file that exists and still ho
     expect(defects(REF, LEVELS_FILE, () => renamedDecision)).toEqual(['synthesize/planning.md lacks the section the Plan rule applies: **Execution Strategy Decision:**'])
     expect(defects(REF, LEVELS_FILE, () => '')).toHaveLength(3)
     // The scope sentence: a planner told to apply the whole file would follow the output template and lose the order its prompt gives.
-    expect(defects(REF, LEVELS_FILE, () => seed(PLANNING, PLANNING_SCOPE, 'At levels standard and lean, one Plan agent applies this file itself.')))
+    expect(defects(REF, LEVELS_FILE, () => seed(PLANNING, PLANNING_SCOPE, 'When one Plan agent runs, it applies this file itself.')))
       .toEqual(['synthesize/planning.md lacks the scope sentence for the one planner'])
     expect(defects(seed(REF, 'apply its Execution Strategy Decision and Context Risk', 'apply its Execution Strategy Decision and Risk'))).toEqual(['the Plan rule does not name: Context Risk'])
     expect(defects(seed(REF, 'apply its Execution Strategy Decision and', 'apply its strategy and'))).toEqual(['the Plan rule does not name: Execution Strategy Decision'])
