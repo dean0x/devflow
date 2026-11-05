@@ -34,8 +34,8 @@ const SYNTHESIZE_MODE_REF_MAX_BYTES = 3_797
 /** The `/code-review` gate-level reference, in bytes. Registered as `code-review-levels-ref-max`; lowered, never raised. */
 const CODE_REVIEW_LEVELS_REF_MAX_BYTES = 1_349
 
-/** The `/plan` gate-level reference, in bytes. Registered as `plan-levels-ref-max`; lowered, never raised. */
-const PLAN_LEVELS_REF_MAX_BYTES = 3_994
+/** The `/plan` gate-level reference, in bytes. Registered as `plan-levels-ref-max`; raised from 3,994 for the small depth, the entry's description gives the reason. */
+const PLAN_LEVELS_REF_MAX_BYTES = 4_419
 
 /** The `/resolve` gate-level reference, in bytes. Registered as `resolve-levels-ref-max`; lowered, never raised. */
 const RESOLVE_LEVELS_REF_MAX_BYTES = 2_690

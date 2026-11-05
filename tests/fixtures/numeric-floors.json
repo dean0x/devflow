@@ -590,11 +590,11 @@
     },
     {
       "id": "plan-levels-ref-max",
-      "ceiling": 3994,
-      "pattern": "const PLAN_LEVELS_REF_MAX_BYTES = 3_994",
+      "ceiling": 4419,
+      "pattern": "const PLAN_LEVELS_REF_MAX_BYTES = 4_419",
       "occurrences": 1,
       "sourceFile": "tests/guards/agent-references.test.ts",
-      "description": "D-CMD-REF-HAND: references/commands/plan-levels.md of the agent-references skill, in bytes. /plan reads it once per run at the standard level (the default) or lean, so it is standing context on the default path. Measured 3,995 after #733 named Architect in the Phase 12 row, 4,009 after #690 listed plan siblings in place of tickets, with no headroom. Lowered to 3,994 by #756 (lean plans): the single Plan prompt gained the line that sets no report cap, and the extra dashes of a table separator paid for it. May be LOWERED, never raised."
+      "description": "D-CMD-REF-HAND: references/commands/plan-levels.md of the agent-references skill, in bytes. /plan reads it once per run at the standard level (the default) or lean, and at depth small at every level, so it is standing context on the default path. Measured 3,995 after #733 named Architect in the Phase 12 row, 4,009 after #690 listed plan siblings in place of tickets, with no headroom. Lowered to 3,994 by #756 (lean plans): the single Plan prompt gained the line that sets no report cap, and the extra dashes of a table separator paid for it. A value may move either way; the description and the PR give the old value, the new value and the reason. Raised once by #756 (plan depth): old 3,994, new 4,419, reason: small depth rows and rules (the small counts in the Phase 3 and 5 cells, the small lead of the Research rule, the no-combined-spawn and code-read clause of the Gaps rule, the not-run-at-small marks and the late raise-signal rule, +452 bytes; the restated focus words of the Explore rule paid 27 bytes). The reference grows by 425 bytes and each of the four /plan builds falls by 7 bytes, so the bytes that a typical /plan run reads at depth normal rise by 418."
     },
     {
       "id": "resolve-levels-ref-max",
