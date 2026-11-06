@@ -13,6 +13,7 @@
  *   - The Size forecast line has one shape, defined once in the Phase 10 steps row of the plan command and
  *     named, never repeated, by Gate 2, the artifact template and the run report. docs/commands.md carries
  *     the same literal and the reading rule, and no earlier phase and no level reference mentions it.
+ *     The planning synthesis template copies the steps report's line unchanged, or gives none.
  *     The implement command takes the plan document's Implementation Plan without that line, so no agent
  *     reads the forecast as a limit.
  *
@@ -319,6 +320,15 @@ export function collectExecutionPlanForecastDefects(label: string, implement: st
   return count === 1 ? [] : [`${label}: the plan document step names the Size forecast line as left out of EXECUTION_PLAN ${count} times, expected 1`]
 }
 
+const PLANNING_FORECAST_SLOT = "\n\n{the steps report's Size forecast line, unchanged; no line when it has none}\n\n### Known limits and deferrals\n"
+
+/** Named collector: how the planning synthesis template falls short of one slot that ends its Implementation Plan, copies the line or gives none, and restates no shape. */
+export function collectPlanningForecastDefects(planning: string): string[] {
+  const count = planning.split(PLANNING_FORECAST_SLOT).length - 1
+  if (count !== 1) return [`the planning template ends its Implementation Plan with the Size forecast slot ${count} times, expected 1`]
+  return planning.includes('Size forecast:') ? ['the planning template restates the Size forecast shape'] : []
+}
+
 describe('the Size forecast line has one shape in every plan build and in the commands doc', () => {
   const builds = commandBuilds('plan')
   const levels = readSrc('skills', 'agent-references', 'references', 'commands', 'plan-levels.md')
@@ -326,9 +336,21 @@ describe('the Size forecast line has one shape in every plan build and in the co
   const on = builds[0][1]
   const shape = forecastSpans(on)[0]
   const implementBuilds = commandBuilds('implement')
+  const planning = readSrc('skills', 'agent-references', 'references', 'synthesize', 'planning.md')
 
   it.each(implementBuilds)('%s leaves the Size forecast line out of EXECUTION_PLAN', (label, implement) => {
     expect(collectExecutionPlanForecastDefects(label, implement)).toEqual([])
+  })
+
+  it('the planning synthesis template ends its Implementation Plan with the steps report line unchanged, or none', () => {
+    expect(collectPlanningForecastDefects(planning)).toEqual([])
+  })
+
+  it('known-bad probes: a lost none clause and a restated shape in the planning template are each reported once', () => {
+    expect(collectPlanningForecastDefects(seed(planning, '; no line when it has none', '')))
+      .toEqual(['the planning template ends its Implementation Plan with the Size forecast slot 0 times, expected 1'])
+    expect(collectPlanningForecastDefects(seed(planning, '## Mode: Planning\n', '## Mode: Planning\nSize forecast: files a-b\n')))
+      .toEqual(['the planning template restates the Size forecast shape'])
   })
 
   it('known-bad probes: a plan document step that keeps the Size forecast line in EXECUTION_PLAN is reported once', () => {
