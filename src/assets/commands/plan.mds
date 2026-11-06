@@ -294,7 +294,7 @@ Spawn 3 `Agent(subagent_type="Plan")` agents **in a single message**, each with 
 
 | Focus | Output |
 |-------|--------|
-| Implementation steps | Ordered steps with files, dependencies, gap mitigations |
+| Implementation steps | Ordered steps with files, dependencies, gap mitigations; right after them, in the message: `Size forecast: files a-b, added a-b, removed a-b, commits a-b`, whole numbers, a <= b, for the whole change with tests and docs: files written (created, changed or deleted), diff lines added and removed, commits `/implement` makes before review. Never drop or shrink a step to fit it |
 | Testing strategy | One scenario per acceptance-criterion behaviour, with how it is verified (CI, a local command, or manual steps) and the files it covers; an edge-case scenario only for a named case, but always one for each trust-boundary, data-loss, security and fail-closed path |
 | Execution strategy | SINGLE_CODE_AGENT vs SEQUENTIAL_CODE_AGENTS vs PARALLEL_CODE_AGENTS |
 
@@ -335,7 +335,7 @@ Use AskUserQuestion to present:
 
 1. **Implementation Plan Summary**
    - Execution strategy
-   - Key implementation steps with files
+   - Key implementation steps with files, and the Size forecast line
    - Test strategy — the test plan as TP lines, at least one per acceptance criterion (shape below)
 
 2. **Design Review Findings**
@@ -395,7 +395,7 @@ context-risk: LOW
 Required sections, in this order, no others:
 1. **Acceptance Criteria** — testable success conditions, numbered AC-1, AC-2, ...: `ACCEPTANCE_CRITERIA` when fetched, refined by exploration + gap analysis
 2. **Subtask Breakdown** — phases with domains, dependencies and a Serves cell (the item-1 ACs it serves); only with more than one subtask
-3. **Implementation Plan** — ordered steps, each with Files, Callers and consumers to update, Must lines and Rung
+3. **Implementation Plan** — ordered steps, each with Files, Callers and consumers to update, Must lines and Rung; last, after a blank line, the latest Plan run's Size forecast line (no bullet, bold or backticks) if it fits the Phase 10 shape with a <= b, else none
 4. **Patterns to Follow** — from exploration synthesis (file:line references)
 5. **Known limits and deferrals** — accepted risks, deferred and excluded items, each with one reason
 6. **PR Description Guidance** — the block below
@@ -491,6 +491,7 @@ Display completion summary:
 - Gap analysis summary (N blocking, M should-address)
 - Design review summary (N anti-patterns found, M mitigated in plan)
 - Gate level: {GATE_LEVEL}, depth {depth from CONFIRMED_SCOPE, else normal}, with any level note
+- Size forecast line, or why it is absent
 - Suggested next step: `/implement {artifact-path}` or `/implement #{issue-number}`
 
 ## Principles
