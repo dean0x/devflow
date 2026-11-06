@@ -10,8 +10,9 @@
  *     carry it, in every provider and both compliance builds.
  *   - Code, Harden and the quality gates say what to test when no acceptance criteria are given.
  *   - The testing and test-driven-development rows name security and fail-closed paths.
- *   - The Size forecast line has one shape, defined once in the Phase 10 steps row of the plan command and
- *     named, never repeated, by Gate 2, the artifact template and the run report. docs/commands.md carries
+ *   - The Size forecast line has one shape, defined once on the Phase 10 instruction line of the plan command
+ *     (the text each Plan prompt is built from) and named, never repeated, by Gate 2, the artifact template
+ *     and the run report: the build holds the literal `Size forecast:` once. docs/commands.md carries
  *     the same literal and the reading rule, and no earlier phase and no level reference mentions it.
  *     The planning synthesis template copies the steps report's line unchanged, or gives none.
  *     The implement command takes the plan document's Implementation Plan without that line, so no agent
@@ -51,11 +52,11 @@ function seed(text: string, from: string, to: string): string {
 // ---------------------------------------------------------------------------
 
 const FORECAST_FACTS: ReadonlyArray<readonly [string, string]> = [
-  ['the steps row does not send the Size forecast line right after the steps, in the message', 'right after them, in the message:'],
-  ['the steps row lets a step be dropped or shrunk to fit the Size forecast', 'Never drop or shrink a step to fit it'],
-  ['the artifact copies a Size forecast line that does not fit the shape', 'if it fits the Phase 10 shape with a <= b, else none'],
-  ['the artifact may keep a stale Size forecast line after a Revise', "the latest Plan run's Size forecast line"],
-  ['Gate 2 does not name the Size forecast line', 'and the Size forecast line'],
+  ['the Phase 10 instruction does not ask the agent that reports the steps for one plain Size forecast line right after them, in the message', 'Ask the agent that reports the steps for one plain line right after them, in the message (no bullet, bold or backticks):'],
+  ['the Phase 10 instruction lets a step be dropped or shrunk to fit the Size forecast', 'Never drop or shrink a step to fit it'],
+  ['Gate 2 shows a Size forecast line that does not fit the shape, or does not say it is absent', "the steps report's Size forecast line if it fits the Phase 10 shape, else its absence"],
+  ['the artifact may keep a stale Size forecast line after a Revise', "the one Size forecast line Gate 2 showed (the latest Plan run's)"],
+  ['the artifact may keep a second Size forecast line, or a line when Gate 2 showed none', 'unchanged, and no other copy; none if Gate 2 showed none'],
   ['the run report does not say why the Size forecast line is absent', 'Size forecast line, or why it is absent'],
 ]
 
@@ -262,6 +263,8 @@ describe('the testing HIGH row and the TDD What to Test row name security and fa
 const SIZE_FORECAST_RE = /^Size forecast: files (\d+)-(\d+), added (\d+)-(\d+), removed (\d+)-(\d+), commits (\d+)-(\d+)$/
 const FORECAST_SPAN_RE = /`(Size forecast:[^`]*)`/g
 const FORECAST_SAMPLES = ['0-0', '1-2', '3-30'] as const
+const PHASE_10_INSTRUCTION_START = 'Spawn 3 `Agent(subagent_type="Plan")` agents'
+const GATE_2_FORECAST_ANCHOR = "and the steps report's Size forecast line"
 const FORECAST_READING_RULE = 'A reader takes the line only when it is the last line of that section and the only match; otherwise the forecast is absent.'
 
 /** Named collector: how a Size forecast line falls short of the shape, then of low not above high in each range. */
@@ -278,10 +281,21 @@ function forecastSpans(plan: string): string[] {
   return [...plan.matchAll(FORECAST_SPAN_RE)].map((m) => m[1])
 }
 
-/** Named collector: the first way a plan build falls short of one backticked shape with four ranges that each sample swap satisfies. */
+/** The line of `text` that holds the character at `index`. */
+function lineAt(text: string, index: number): string {
+  const end = text.indexOf('\n', index)
+  return text.slice(text.lastIndexOf('\n', index) + 1, end < 0 ? text.length : end)
+}
+
+/** Named collector: the first way a plan build falls short of one shape (backticked, and no other `Size forecast:` text) on the Phase 10 instruction line, with four ranges that each sample swap satisfies. */
 export function collectForecastShapeDefects(label: string, plan: string): string[] {
   const spans = forecastSpans(plan)
   if (spans.length !== 1) return [`${label}: the backticked Size forecast shape appears ${spans.length} times, expected 1`]
+  const literals = plan.split('Size forecast:').length - 1
+  if (literals !== 1) return [`${label}: the literal "Size forecast:" appears ${literals} times, expected 1`]
+  if (!lineAt(plan, plan.indexOf(`\`${spans[0]}\``)).startsWith(PHASE_10_INSTRUCTION_START)) {
+    return [`${label}: the Size forecast shape is not on the Phase 10 instruction line`]
+  }
   const ranges = spans[0].match(/\ba-b\b/g)?.length ?? 0
   if (ranges !== 4) return [`${label}: the shape holds ${ranges} a-b ranges, expected 4`]
   for (const sample of FORECAST_SAMPLES) {
@@ -359,7 +373,7 @@ describe('the Size forecast line has one shape in every plan build and in the co
       .toEqual(['i: the plan document step names the Size forecast line as left out of EXECUTION_PLAN 0 times, expected 1'])
   })
 
-  it.each(builds)('%s defines the shape once, with samples that fit it, and names it only at its sites', (label, plan) => {
+  it.each(builds)('%s defines the shape once on the Phase 10 instruction line, with samples that fit it, and names it only at its sites', (label, plan) => {
     expect(collectForecastShapeDefects(label, plan)).toEqual([])
     expect(collectForecastSiteDefects(label, plan, levels)).toEqual([])
     for (const [what, needle] of FORECAST_FACTS) {
@@ -379,13 +393,17 @@ describe('the Size forecast line has one shape in every plan build and in the co
     expect(collectForecastLineDefects(good.replace('1-2', '5-2'))).toEqual(['a range has its low above its high: 5-2'])
   })
 
-  it('known-bad probes: a missing field, a changed word and a second copy are each reported once', () => {
+  it('known-bad probes: a missing field, a changed word, a second copy, a plain copy and a moved shape are each reported once', () => {
     expect(collectForecastShapeDefects('p', seed(on, ', removed a-b', ''))).toEqual(['p: the shape holds 3 a-b ranges, expected 4'])
     expect(collectForecastShapeDefects('p', seed(on, ', added a-b', ', lines a-b'))).toEqual([
       'p: the sample 0-0 gives a line that fails: the line does not fit the Size forecast shape: Size forecast: files 0-0, lines 0-0, removed 0-0, commits 0-0',
     ])
-    expect(collectForecastShapeDefects('p', seed(on, 'and the Size forecast line', `and the Size forecast line \`${shape}\``)))
+    expect(collectForecastShapeDefects('p', seed(on, GATE_2_FORECAST_ANCHOR, `${GATE_2_FORECAST_ANCHOR} \`${shape}\``)))
       .toEqual(['p: the backticked Size forecast shape appears 2 times, expected 1'])
+    expect(collectForecastShapeDefects('p', seed(on, GATE_2_FORECAST_ANCHOR, `${GATE_2_FORECAST_ANCHOR} (Size forecast: files a-b)`)))
+      .toEqual(['p: the literal "Size forecast:" appears 2 times, expected 1'])
+    const moved = seed(seed(on, `\`${shape}\``, 'the shape'), GATE_2_FORECAST_ANCHOR, `${GATE_2_FORECAST_ANCHOR} \`${shape}\``)
+    expect(collectForecastShapeDefects('p', moved)).toEqual(['p: the Size forecast shape is not on the Phase 10 instruction line'])
   })
 
   it('known-bad probes: a doc word change, a lost reading rule, an early mention and a level mention are each reported once', () => {
