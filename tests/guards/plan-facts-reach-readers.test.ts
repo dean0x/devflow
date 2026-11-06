@@ -13,6 +13,8 @@
  *   - The Size forecast line has one shape, defined once in the Phase 10 steps row of the plan command and
  *     named, never repeated, by Gate 2, the artifact template and the run report. docs/commands.md carries
  *     the same literal and the reading rule, and no earlier phase and no level reference mentions it.
+ *     The implement command takes the plan document's Implementation Plan without that line, so no agent
+ *     reads the forecast as a limit.
  *
  * Each rule has a named collector and known-bad probes. The byte ceilings are in the group size guards.
  */
@@ -309,12 +311,31 @@ export function collectForecastSiteDefects(label: string, plan: string, levels: 
   return out
 }
 
+const EXECUTION_PLAN_STRIP = 'Implementation Plan (without its Size forecast line)'
+
+/** Named collector: how an implement build falls short of leaving the Size forecast line out of EXECUTION_PLAN, once. */
+export function collectExecutionPlanForecastDefects(label: string, implement: string): string[] {
+  const count = implement.split(EXECUTION_PLAN_STRIP).length - 1
+  return count === 1 ? [] : [`${label}: the plan document step names the Size forecast line as left out of EXECUTION_PLAN ${count} times, expected 1`]
+}
+
 describe('the Size forecast line has one shape in every plan build and in the commands doc', () => {
   const builds = commandBuilds('plan')
   const levels = readSrc('skills', 'agent-references', 'references', 'commands', 'plan-levels.md')
   const doc = readFileSync(path.join(ROOT, 'docs', 'commands.md'), 'utf-8')
   const on = builds[0][1]
   const shape = forecastSpans(on)[0]
+  const implementBuilds = commandBuilds('implement')
+
+  it.each(implementBuilds)('%s leaves the Size forecast line out of EXECUTION_PLAN', (label, implement) => {
+    expect(collectExecutionPlanForecastDefects(label, implement)).toEqual([])
+  })
+
+  it('known-bad probes: a plan document step that keeps the Size forecast line in EXECUTION_PLAN is reported once', () => {
+    const implement = implementBuilds[0][1]
+    expect(collectExecutionPlanForecastDefects('i', seed(implement, ' (without its Size forecast line)', '')))
+      .toEqual(['i: the plan document step names the Size forecast line as left out of EXECUTION_PLAN 0 times, expected 1'])
+  })
 
   it.each(builds)('%s defines the shape once, with samples that fit it, and names it only at its sites', (label, plan) => {
     expect(collectForecastShapeDefects(label, plan)).toEqual([])

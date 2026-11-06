@@ -54,7 +54,7 @@ Set `EVIDENCE_POLICY`, `ISSUE_REQUIRED`, `APPLY_CONVENTIONS` and `REQUIRE_NON_AU
 **Plan Document Handling** (when `COMMAND_INPUT` is a path ending in `.md`):
 1. Read the plan document. From its YAML frontmatter, take `execution-strategy` and `issue`.
 2. If the frontmatter `issue` is present and is not `pending`: forward it verbatim as the setup-task `ISSUE_INPUT` (`pending` means /plan's issue step degraded or was declined — treat it as absent)
-3. Extract its Subtask Breakdown, Implementation Plan, Patterns to Follow, Known limits and Acceptance Criteria as `EXECUTION_PLAN`. Captured values override defaults from Git agent where present.
+3. Extract its Subtask Breakdown, Implementation Plan (without its Size forecast line), Patterns to Follow, Known limits and Acceptance Criteria as `EXECUTION_PLAN`. Captured values override defaults from Git agent where present.
 
 `PR_DESCRIPTION_GUIDANCE` is the full `## PR Description Guidance` section of the plan document. Any other input, empty input included, or a plan without that section, gives `(none)`.
 
