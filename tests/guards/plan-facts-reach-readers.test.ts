@@ -15,8 +15,9 @@
  *     and the run report: the build holds the literal `Size forecast:` once. docs/commands.md carries
  *     the same literal and the reading rule, and no earlier phase and no level reference mentions it.
  *     The planning synthesis template copies the steps report's line unchanged, or gives none.
- *     The implement command takes the plan document's Implementation Plan without that line, so no agent
- *     reads the forecast as a limit.
+ *     The implement command takes the plan document's Implementation Plan without that line, and its Code
+ *     spawns take EXECUTION_PLAN as their setup context, never the whole document, so no agent reads the
+ *     forecast as a limit.
  *
  * Each rule has a named collector and known-bad probes. The byte ceilings are in the group size guards.
  */
@@ -334,7 +335,15 @@ export function collectExecutionPlanForecastDefects(label: string, implement: st
   return count === 1 ? [] : [`${label}: the plan document step names the Size forecast line as left out of EXECUTION_PLAN ${count} times, expected 1`]
 }
 
-const PLANNING_FORECAST_SLOT = "\n\n{the steps report's Size forecast line, unchanged; no line when it has none}\n\n### Known limits and deferrals\n"
+const SETUP_CONTEXT_RULE = 'Setup context is EXECUTION_PLAN, else the issue body or conversation.'
+
+/** Named collector: how an implement build falls short of one Phase 2 rule that makes the setup context EXECUTION_PLAN, not the whole plan document. */
+export function collectSetupContextDefects(label: string, implement: string): string[] {
+  const count = implement.split(SETUP_CONTEXT_RULE).length - 1
+  return count === 1 ? [] : [`${label}: the Phase 2 setup context rule that names EXECUTION_PLAN appears ${count} times, expected 1`]
+}
+
+const PLANNING_FORECAST_SLOT ="\n\n{the steps report's Size forecast line, unchanged; no line when it has none}\n\n### Known limits and deferrals\n"
 
 /** Named collector: how the planning synthesis template falls short of one slot that ends its Implementation Plan, copies the line or gives none, and restates no shape. */
 export function collectPlanningForecastDefects(planning: string): string[] {
@@ -354,6 +363,16 @@ describe('the Size forecast line has one shape in every plan build and in the co
 
   it.each(implementBuilds)('%s leaves the Size forecast line out of EXECUTION_PLAN', (label, implement) => {
     expect(collectExecutionPlanForecastDefects(label, implement)).toEqual([])
+  })
+
+  it.each(implementBuilds)('%s makes the setup context of the Code spawns EXECUTION_PLAN, not the whole plan document', (label, implement) => {
+    expect(collectSetupContextDefects(label, implement)).toEqual([])
+  })
+
+  it('known-bad probes: a setup context that is the whole plan document is reported once', () => {
+    const implement = implementBuilds[0][1]
+    expect(collectSetupContextDefects('i', seed(implement, SETUP_CONTEXT_RULE, 'Setup context is the plan document, issue body or conversation.')))
+      .toEqual(['i: the Phase 2 setup context rule that names EXECUTION_PLAN appears 0 times, expected 1'])
   })
 
   it('the planning synthesis template ends its Implementation Plan with the steps report line unchanged, or none', () => {

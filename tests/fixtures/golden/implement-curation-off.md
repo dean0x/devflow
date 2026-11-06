@@ -180,7 +180,7 @@ A KB with no Rules section labels its entries `Rules ({section name}):` and give
 **Produces:** CODE_AGENT_OUTPUT, FILES_CHANGED
 **Requires:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN
 
-Setup context is the plan document, issue body or conversation.
+Setup context is EXECUTION_PLAN, else the issue body or conversation.
 
 **Strategy Selection**:
 - If plan document provided: use `execution-strategy` from frontmatter (if absent, use the table below)

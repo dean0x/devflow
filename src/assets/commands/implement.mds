@@ -197,7 +197,7 @@ Pass `DECISIONS_CONTEXT` to Code agent (Phase 2) and Harden agent (Phase 4).
 **Produces:** CODE_AGENT_OUTPUT, FILES_CHANGED
 **Requires:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN
 
-Setup context is the plan document, issue body or conversation.
+Setup context is EXECUTION_PLAN, else the issue body or conversation.
 
 **Strategy Selection**:
 - If plan document provided: use `execution-strategy` from frontmatter (if absent, use the table below)
