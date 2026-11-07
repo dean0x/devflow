@@ -10,6 +10,14 @@
  *     carry it, in every provider and both compliance builds.
  *   - Code, Harden and the quality gates say what to test when no acceptance criteria are given.
  *   - The testing and test-driven-development rows name security and fail-closed paths.
+ *   - The Size forecast line has one shape, defined once on the Phase 10 instruction line of the plan command
+ *     (the text each Plan prompt is built from) and named, never repeated, by Gate 2, the artifact template
+ *     and the run report: the build holds the literal `Size forecast:` once. docs/commands.md carries
+ *     the same literal and the reading rule, and no earlier phase and no level reference mentions it.
+ *     The planning synthesis template copies the steps report's line unchanged, or gives none.
+ *     The implement command takes the plan document's Implementation Plan without that line, and its Code
+ *     spawns take EXECUTION_PLAN as their setup context, never the whole document, so no agent reads the
+ *     forecast as a limit.
  *
  * Each rule has a named collector and known-bad probes. The byte ceilings are in the group size guards.
  */
@@ -44,6 +52,15 @@ function seed(text: string, from: string, to: string): string {
 // 1. The plan command
 // ---------------------------------------------------------------------------
 
+const FORECAST_FACTS: ReadonlyArray<readonly [string, string]> = [
+  ['the Phase 10 instruction does not ask the agent that reports the steps for one plain Size forecast line right after them, in the message', 'Ask the agent that reports the steps for one plain line right after them, in the message (no bullet, bold or backticks):'],
+  ['the Phase 10 instruction lets a step be dropped or shrunk to fit the Size forecast', 'Never drop or shrink a step to fit it'],
+  ['Gate 2 shows a Size forecast line that does not fit the shape, or does not say it is absent', "the steps report's Size forecast line if it fits the Phase 10 shape, else its absence"],
+  ['the artifact may keep a stale Size forecast line after a Revise', "the one Size forecast line Gate 2 showed (the latest Plan run's)"],
+  ['the artifact may keep a second Size forecast line, or a line when Gate 2 showed none', 'unchanged, and no other copy; none if Gate 2 showed none'],
+  ['the run report does not say why the Size forecast line is absent', 'Size forecast line, or why it is absent'],
+]
+
 const PLAN_FACTS: ReadonlyArray<readonly [string, string]> = [
   ['the Plan lens does not forbid lowering a trust-boundary, security, data-loss or fail-closed guard', 'Never lower or flag a trust-boundary, security, data-loss or fail-closed guard, or its test.'],
   ['the Testing strategy row does not keep a scenario for each trust-boundary, data-loss, security and fail-closed path', 'but always one for each trust-boundary, data-loss, security and fail-closed path'],
@@ -54,6 +71,7 @@ const PLAN_FACTS: ReadonlyArray<readonly [string, string]> = [
   ['a limit of one step does not go on its Must line', "A limit or risk of one step goes on that step's Must line; Known limits keeps only those of the whole change."],
   ['the Plan lens does not send a limit of one step to its Must line', 'a limit of one step goes on its Must line'],
   ['a revision may add a section', 'A revision replaces the affected text. It adds no section.'],
+  ...FORECAST_FACTS,
 ]
 
 const TEMPLATE_START = 'Required sections, in this order, no others:\n'
@@ -236,5 +254,185 @@ describe('the testing HIGH row and the TDD What to Test row name security and fa
       .toEqual(['the testing HIGH row does not name security and fail-closed paths'])
     expect(collectTestRowDefects(testing, seed(tdd, TDD_ROW, 'Errors at a trust boundary; named edge cases')))
       .toEqual(['the TDD What to Test row does not name security and fail-closed paths'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 5. The Size forecast line has one shape
+// ---------------------------------------------------------------------------
+
+const SIZE_FORECAST_RE = /^Size forecast: files (\d+)-(\d+), added (\d+)-(\d+), removed (\d+)-(\d+), commits (\d+)-(\d+)$/
+const FORECAST_SPAN_RE = /`(Size forecast:[^`]*)`/g
+const FORECAST_SAMPLES = ['0-0', '1-2', '3-30'] as const
+const PHASE_10_INSTRUCTION_START = 'Spawn 3 `Agent(subagent_type="Plan")` agents'
+const GATE_2_FORECAST_ANCHOR = "and the steps report's Size forecast line"
+const FORECAST_READING_RULE = 'A reader takes the line only when it is the last line of that section and the only match; otherwise the forecast is absent.'
+
+/** Named collector: how a Size forecast line falls short of the shape, then of low not above high in each range. */
+export function collectForecastLineDefects(line: string): string[] {
+  const match = SIZE_FORECAST_RE.exec(line)
+  if (match === null) return [`the line does not fit the Size forecast shape: ${line}`]
+  for (let low = 1; low < match.length; low += 2) {
+    if (Number(match[low]) > Number(match[low + 1])) return [`a range has its low above its high: ${match[low]}-${match[low + 1]}`]
+  }
+  return []
+}
+
+function forecastSpans(plan: string): string[] {
+  return [...plan.matchAll(FORECAST_SPAN_RE)].map((m) => m[1])
+}
+
+/** The line of `text` that holds the character at `index`. */
+function lineAt(text: string, index: number): string {
+  const end = text.indexOf('\n', index)
+  return text.slice(text.lastIndexOf('\n', index) + 1, end < 0 ? text.length : end)
+}
+
+/** Named collector: the first way a plan build falls short of one shape (backticked, and no other `Size forecast:` text) on the Phase 10 instruction line, with four ranges that each sample swap satisfies. */
+export function collectForecastShapeDefects(label: string, plan: string): string[] {
+  const spans = forecastSpans(plan)
+  if (spans.length !== 1) return [`${label}: the backticked Size forecast shape appears ${spans.length} times, expected 1`]
+  const literals = plan.split('Size forecast:').length - 1
+  if (literals !== 1) return [`${label}: the literal "Size forecast:" appears ${literals} times, expected 1`]
+  if (!lineAt(plan, plan.indexOf(`\`${spans[0]}\``)).startsWith(PHASE_10_INSTRUCTION_START)) {
+    return [`${label}: the Size forecast shape is not on the Phase 10 instruction line`]
+  }
+  const ranges = spans[0].match(/\ba-b\b/g)?.length ?? 0
+  if (ranges !== 4) return [`${label}: the shape holds ${ranges} a-b ranges, expected 4`]
+  for (const sample of FORECAST_SAMPLES) {
+    const [defect] = collectForecastLineDefects(spans[0].replace(/\ba-b\b/g, sample))
+    if (defect !== undefined) return [`${label}: the sample ${sample} gives a line that fails: ${defect}`]
+  }
+  return []
+}
+
+/** Named collector: the first way the /plan section of docs/commands.md falls short of the shape literal once and the reading rule. */
+export function collectForecastDocDefects(shape: string, doc: string): string[] {
+  const start = doc.indexOf('\n## /plan\n')
+  const end = doc.indexOf('\n## /implement\n')
+  if (start < 0 || end < start) return ['docs/commands.md has no /plan section']
+  const section = doc.slice(start, end)
+  const count = section.split(`\`${shape}\``).length - 1
+  if (count !== 1) return [`the /plan section of docs/commands.md holds the Size forecast literal ${count} times, expected 1`]
+  return section.includes(FORECAST_READING_RULE) ? [] : ['the /plan section of docs/commands.md has no reading rule for the Size forecast line']
+}
+
+/** Named collector: where the Size forecast appears that it must not: before Phase 10, or in the plan level reference. */
+export function collectForecastSiteDefects(label: string, plan: string, levels: string): string[] {
+  const phase10 = plan.indexOf('#### Phase 10:')
+  if (phase10 < 0) return [`${label}: the plan has no Phase 10 heading`]
+  const out: string[] = []
+  if (plan.slice(0, phase10).includes('Size forecast')) out.push(`${label}: the Size forecast is named before Phase 10`)
+  if (levels.includes('Size forecast')) out.push(`${label}: the plan level reference names the Size forecast`)
+  return out
+}
+
+const EXECUTION_PLAN_STRIP = 'Implementation Plan (without its Size forecast line)'
+
+/** Named collector: how an implement build falls short of leaving the Size forecast line out of EXECUTION_PLAN, once. */
+export function collectExecutionPlanForecastDefects(label: string, implement: string): string[] {
+  const count = implement.split(EXECUTION_PLAN_STRIP).length - 1
+  return count === 1 ? [] : [`${label}: the plan document step names the Size forecast line as left out of EXECUTION_PLAN ${count} times, expected 1`]
+}
+
+const SETUP_CONTEXT_RULE = 'Setup context is EXECUTION_PLAN, else the issue body or conversation.'
+
+/** Named collector: how an implement build falls short of one Phase 2 rule that makes the setup context EXECUTION_PLAN, not the whole plan document. */
+export function collectSetupContextDefects(label: string, implement: string): string[] {
+  const count = implement.split(SETUP_CONTEXT_RULE).length - 1
+  return count === 1 ? [] : [`${label}: the Phase 2 setup context rule that names EXECUTION_PLAN appears ${count} times, expected 1`]
+}
+
+const PLANNING_FORECAST_SLOT ="\n\n{the steps report's Size forecast line, unchanged; no line when it has none}\n\n### Known limits and deferrals\n"
+
+/** Named collector: how the planning synthesis template falls short of one slot that ends its Implementation Plan, copies the line or gives none, and restates no shape. */
+export function collectPlanningForecastDefects(planning: string): string[] {
+  const count = planning.split(PLANNING_FORECAST_SLOT).length - 1
+  if (count !== 1) return [`the planning template ends its Implementation Plan with the Size forecast slot ${count} times, expected 1`]
+  return planning.includes('Size forecast:') ? ['the planning template restates the Size forecast shape'] : []
+}
+
+describe('the Size forecast line has one shape in every plan build and in the commands doc', () => {
+  const builds = commandBuilds('plan')
+  const levels = readSrc('skills', 'agent-references', 'references', 'commands', 'plan-levels.md')
+  const doc = readFileSync(path.join(ROOT, 'docs', 'commands.md'), 'utf-8')
+  const on = builds[0][1]
+  const shape = forecastSpans(on)[0]
+  const implementBuilds = commandBuilds('implement')
+  const planning = readSrc('skills', 'agent-references', 'references', 'synthesize', 'planning.md')
+
+  it.each(implementBuilds)('%s leaves the Size forecast line out of EXECUTION_PLAN', (label, implement) => {
+    expect(collectExecutionPlanForecastDefects(label, implement)).toEqual([])
+  })
+
+  it.each(implementBuilds)('%s makes the setup context of the Code spawns EXECUTION_PLAN, not the whole plan document', (label, implement) => {
+    expect(collectSetupContextDefects(label, implement)).toEqual([])
+  })
+
+  it('known-bad probes: a setup context that is the whole plan document is reported once', () => {
+    const implement = implementBuilds[0][1]
+    expect(collectSetupContextDefects('i', seed(implement, SETUP_CONTEXT_RULE, 'Setup context is the plan document, issue body or conversation.')))
+      .toEqual(['i: the Phase 2 setup context rule that names EXECUTION_PLAN appears 0 times, expected 1'])
+  })
+
+  it('the planning synthesis template ends its Implementation Plan with the steps report line unchanged, or none', () => {
+    expect(collectPlanningForecastDefects(planning)).toEqual([])
+  })
+
+  it('known-bad probes: a lost none clause and a restated shape in the planning template are each reported once', () => {
+    expect(collectPlanningForecastDefects(seed(planning, '; no line when it has none', '')))
+      .toEqual(['the planning template ends its Implementation Plan with the Size forecast slot 0 times, expected 1'])
+    expect(collectPlanningForecastDefects(seed(planning, '## Mode: Planning\n', '## Mode: Planning\nSize forecast: files a-b\n')))
+      .toEqual(['the planning template restates the Size forecast shape'])
+  })
+
+  it('known-bad probes: a plan document step that keeps the Size forecast line in EXECUTION_PLAN is reported once', () => {
+    const implement = implementBuilds[0][1]
+    expect(collectExecutionPlanForecastDefects('i', seed(implement, ' (without its Size forecast line)', '')))
+      .toEqual(['i: the plan document step names the Size forecast line as left out of EXECUTION_PLAN 0 times, expected 1'])
+  })
+
+  it.each(builds)('%s defines the shape once on the Phase 10 instruction line, with samples that fit it, and names it only at its sites', (label, plan) => {
+    expect(collectForecastShapeDefects(label, plan)).toEqual([])
+    expect(collectForecastSiteDefects(label, plan, levels)).toEqual([])
+    for (const [what, needle] of FORECAST_FACTS) {
+      expect(plan.split(needle).length - 1, `${label}: ${what}: the needle is unique`).toBe(1)
+    }
+  })
+
+  it.each(builds)('the commands doc carries the literal of %s once, with the reading rule', (label, plan) => {
+    expect(collectForecastDocDefects(forecastSpans(plan)[0] ?? '', doc)).toEqual([])
+  })
+
+  it('known-bad probes: a line that does not fit, or has a low above its high, is reported once', () => {
+    const good = 'Size forecast: files 1-2, added 3-4, removed 5-6, commits 7-8'
+    expect(collectForecastLineDefects(good)).toEqual([])
+    const letter = good.replace('1-2', '1-x')
+    expect(collectForecastLineDefects(letter)).toEqual([`the line does not fit the Size forecast shape: ${letter}`])
+    expect(collectForecastLineDefects(good.replace('1-2', '5-2'))).toEqual(['a range has its low above its high: 5-2'])
+  })
+
+  it('known-bad probes: a missing field, a changed word, a second copy, a plain copy and a moved shape are each reported once', () => {
+    expect(collectForecastShapeDefects('p', seed(on, ', removed a-b', ''))).toEqual(['p: the shape holds 3 a-b ranges, expected 4'])
+    expect(collectForecastShapeDefects('p', seed(on, ', added a-b', ', lines a-b'))).toEqual([
+      'p: the sample 0-0 gives a line that fails: the line does not fit the Size forecast shape: Size forecast: files 0-0, lines 0-0, removed 0-0, commits 0-0',
+    ])
+    expect(collectForecastShapeDefects('p', seed(on, GATE_2_FORECAST_ANCHOR, `${GATE_2_FORECAST_ANCHOR} \`${shape}\``)))
+      .toEqual(['p: the backticked Size forecast shape appears 2 times, expected 1'])
+    expect(collectForecastShapeDefects('p', seed(on, GATE_2_FORECAST_ANCHOR, `${GATE_2_FORECAST_ANCHOR} (Size forecast: files a-b)`)))
+      .toEqual(['p: the literal "Size forecast:" appears 2 times, expected 1'])
+    const moved = seed(seed(on, `\`${shape}\``, 'the shape'), GATE_2_FORECAST_ANCHOR, `${GATE_2_FORECAST_ANCHOR} \`${shape}\``)
+    expect(collectForecastShapeDefects('p', moved)).toEqual(['p: the Size forecast shape is not on the Phase 10 instruction line'])
+  })
+
+  it('known-bad probes: a doc word change, a lost reading rule, an early mention and a level mention are each reported once', () => {
+    expect(collectForecastDocDefects(shape, seed(doc, 'removed a-b, commits', 'deleted a-b, commits')))
+      .toEqual(['the /plan section of docs/commands.md holds the Size forecast literal 0 times, expected 1'])
+    expect(collectForecastDocDefects(shape, seed(doc, FORECAST_READING_RULE, '')))
+      .toEqual(['the /plan section of docs/commands.md has no reading rule for the Size forecast line'])
+    expect(collectForecastSiteDefects('p', seed(on, 'Add `Depth: small`', 'Size forecast. Add `Depth: small`'), levels))
+      .toEqual(['p: the Size forecast is named before Phase 10'])
+    expect(collectForecastSiteDefects('p', on, seed(levels, '# Plan: phases by gate level', '# Plan: phases by gate level, Size forecast')))
+      .toEqual(['p: the plan level reference names the Size forecast'])
   })
 })

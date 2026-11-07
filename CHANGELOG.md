@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`/plan` adds a Size forecast line to the plan** ([#771](https://github.com/dean0x/devflow/issues/771)). The design artifact's Implementation Plan section ends with one plain line, `Size forecast: files a-b, added a-b, removed a-b, commits a-b`: whole-number ranges, a <= b, for the files the change writes, the added and removed diff lines (tests and docs included) and the commits `/implement` makes before review. Gate 2 and the run report show it. `/plan` copies the line only when it has this shape, else leaves it out and says so. It changes no gate, depth or level, and `/implement` does not pass it to its agents. The four `/plan` build ceilings rise by 690 bytes and the four `/implement` ceilings by 39.
+
 ---
 
 ## [3.17.0] - 2026-11-06

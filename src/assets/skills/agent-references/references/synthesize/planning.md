@@ -24,7 +24,6 @@ Each phase or subtask names the AC numbers it serves.
 ### Execution Strategy
 **Type**: {SINGLE_CODE_AGENT | SEQUENTIAL_CODE_AGENTS | PARALLEL_CODE_AGENTS}
 **Context Risk**: {LOW | MEDIUM | HIGH | CRITICAL}
-**File Estimate**: {n} files across {m} modules
 **Reason**: {why this strategy}
 
 ### Subtask Breakdown (if not SINGLE_CODE_AGENT)
@@ -38,6 +37,8 @@ Each phase or subtask names the AC numbers it serves.
 |------|--------|-------|-----------------------|------|------|-------|------------|
 | 1 | {action} | `file` | `caller` | {what has to hold} | {lowest rung that works} | `test_file` | - |
 | 2 | {action} | `file` | `caller` | {what has to hold} | {lowest rung that works} | `test_file` | Step 1 |
+
+{the steps report's Size forecast line, unchanged; no line when it has none}
 
 ### Known limits and deferrals
 | Limit | Reason |
