@@ -593,7 +593,7 @@ Non-blocking: if the Knowledge agent fails, log the failure and continue.
 
 ## Principles
 
-1. **Orchestration only** - Command spawns agents, never does work itself (no tests, builds or fixes); "Spawn X" means call the Agent tool; the inline calls are the bounded plumbing the charter allows: the fresh base step's resolver calls (Phase 1, re-validation), the Phase 10 and 11 pushes, the Phase 10 ci-wait call, the Phase 6-8 evidence claim calls, the Phase 11 evidence publish call and the evidence script checks
+1. **Orchestration only** - Command spawns agents, never does work itself (no tests, builds or fixes); "Spawn X" means call the Agent tool; the inline calls are bounded plumbing the charter allows: the fresh base step's resolver calls (Phase 1, re-validation), the Phase 10 and 11 pushes, the Phase 10 ci-wait call, the Phase 6-8 evidence claim calls, the Phase 11 evidence publish call and the evidence and plan hash script checks
 2. **Honest reporting** - Display agent outputs directly
 3. **Loop limits** - Max 2 validation retries, max 2 alignment fix iterations, max 2 QA retries before escalating to user; the CI gate allows at most 3 waits and 2 fixes
 4. **CI awareness** - CI status is checked before merge; test-plan evidence (Phase 11) is recorded under every strategy
