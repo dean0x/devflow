@@ -97,7 +97,8 @@ const EXECUTION_PLAN_LINES = `\`EXECUTION_PLAN\` to two lines: \`PLAN_FILE: {PLA
 const HASH_CALL = `node "$HOME/.devflow/scripts/plan-files.cjs" hash '{PLAN_FILE}'`
 const RECORD = 'and record `PLAN_SHA`, the digest after `SHA256=`.'
 const STOP = 'The PLAN_SHA check runs it again. Other output or a changed digest stops the run, naming the cause.'
-const PHASE_LINE = "With `PLAN_FILE`, a phase's `PLAN_SECTIONS` names its step and criterion numbers, never their text."
+const PHASE_LINE =
+  'With `PLAN_FILE`, each phase or subtask `EXECUTION_PLAN` is the `PLAN_FILE:` line plus its own `PLAN_SECTIONS:` line, which names its step and criterion numbers, never their text.'
 const CRITERIA = 'ACCEPTANCE_CRITERIA: {extracted criteria if available, or (in PLAN_FILE)}'
 const EVALUATE_FENCE_END = 'Report ALIGNED or MISALIGNED with details."\n```'
 const EVALUATE_CHECK = 'With `PLAN_SHA`, run the PLAN_SHA check in the next spawn message (alone, if none); use the verdict only if it passes.'
@@ -115,7 +116,7 @@ const CLAIMS: ReadonlyArray<readonly [name: string, anchor: string]> = [
   ['the plan file is not hashed in Phase 1', HASH_CALL],
   ['the digest is not recorded as PLAN_SHA', RECORD],
   ['other output or a changed digest does not stop the run', STOP],
-  ['a phase does not name its steps and criteria by number', PHASE_LINE],
+  ['a phase or subtask EXECUTION_PLAN is not the PLAN_FILE line plus its own PLAN_SECTIONS line of step and criterion numbers', PHASE_LINE],
   ['the Evaluate return has no PLAN_SHA check, or the check runs without PLAN_SHA', EVALUATE_CHECK],
   ['the Test return has no PLAN_SHA check, or the check runs without PLAN_SHA', TEST_CHECK],
   ['the Orchestration-only principle does not name the plan hash calls', PRINCIPLE_HASH],

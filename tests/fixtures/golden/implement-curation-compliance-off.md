@@ -109,7 +109,7 @@ Note: `ISSUE_CONTENT` stays inside its `<untrusted-issue-body>` markers wherever
 
 **Record the exception at once**, before any Code spawn: set `EVIDENCE_EXCEPTIONS` to the rendered section. The test plan step below writes it into `EVIDENCE_FILE`, its one home. `EVIDENCE_EXCEPTIONS` is `(none)` until an exception is recorded.
 
-**Test plan.** Before any Code spawn, give the task a test plan in the evidence file `{worktree}/.devflow/docs/evidence-{branch_slug}.md` (`EVIDENCE_FILE`) — unlike the handoff file, it stays after the PR exists. It holds up to three sections, in this order and nothing else: `## Test Plan`; `## Evidence Exceptions`, a byte copy of `EVIDENCE_EXCEPTIONS` present only while that is not `(none)`; and `## Claims`, always last. Create the file if absent; if it exists, replace its `## Test Plan` and `## Evidence Exceptions` sections and keep `## Claims` byte-identical.
+**Test plan.** Before any Code spawn, give the task a test plan in the evidence file `{worktree}/.devflow/docs/evidence-{branch_slug}.md` (`EVIDENCE_FILE`). It holds up to three sections, in this order and nothing else: `## Test Plan`; `## Evidence Exceptions`, a byte copy of `EVIDENCE_EXCEPTIONS` present only while that is not `(none)`; and `## Claims`, always last. Create the file if absent; if it exists, replace its `## Test Plan` and `## Evidence Exceptions` sections and keep `## Claims` byte-identical.
 
 Write the `## Test Plan` section: when `COMMAND_INPUT` is a plan document with a `## Test Plan` section, copy that section's lines verbatim; otherwise write one TP line per acceptance criterion the plan, the issue or the task text states, numbered from `TP-1`. Never invent a criterion, and word every scenario yourself in plain words: a scenario holds no `#`, `@` or `/` — no issue reference, mention, closing keyword target or URL — and the files a TP covers go in its `files:` field. Each line follows the TP-line contract:
 
@@ -207,7 +207,7 @@ Setup context is EXECUTION_PLAN, else the issue body or conversation.
 
 Each phase or subtask `EXECUTION_PLAN` adds the plan's Patterns to Follow, Known limits, the criteria its Serves cell names, any criterion no cell names and each criterion that states a trust-boundary, security, data-loss or fail-closed property; a phase whose cell is absent or names any unlisted number gets all criteria; its own steps still set its scope.
 
-With `PLAN_FILE`, a phase's `PLAN_SECTIONS` names its step and criterion numbers, never their text.
+With `PLAN_FILE`, each phase or subtask `EXECUTION_PLAN` is the `PLAN_FILE:` line plus its own `PLAN_SECTIONS:` line, which names its step and criterion numbers, never their text.
 
 ---
 
@@ -484,7 +484,7 @@ Any other or missing Status: report and halt; never PASS.
 **Produces:** PR_NUMBER
 **Requires:** BASE_BRANCH, BASE_REF, TASK_ID, ISSUE_NUMBER, ISSUE_PR_LINK, PR_DESCRIPTION_GUIDANCE, APPLY_CONVENTIONS
 
-Run once, after the gates, under every strategy. No Code agent opens a PR: the Git agent does, and it pastes `ISSUE_PR_LINK` through its paste gate and scrubs the body (D11) before `gh pr create`. This command writes no link line and creates no PR itself: it forwards Phase 1's link line verbatim.
+Run once, after the gates, under every strategy. The Git agent opens the PR and pastes `ISSUE_PR_LINK` through its paste gate and scrubs the body (D11) before `gh pr create`. This command writes no link line and creates no PR itself: it forwards Phase 1's link line verbatim.
 
 ```
 Agent(subagent_type="Git"):
@@ -546,7 +546,7 @@ git push origin HEAD; echo "exit=$?"
 cd "{worktree}" && node "$HOME/.devflow/scripts/verify-evidence.cjs" verify --pr {PR_NUMBER} --evidence ".devflow/docs/evidence-{branch_slug}.md" --comment-out ".devflow/docs/evidence-result-{branch_slug}.md"; echo "exit=$?"
 ```
 
-Drop the `--evidence` pair when that file does not exist or its path does not match `^[A-Za-z0-9._/-]{1,255}$`. `{PR_NUMBER}` is digits only. Capture its stdout as `EVIDENCE_RESULT`: its one `EVIDENCE` line (exit 0), or the one line `TRACEABILITY: DEGRADED (evidence unavailable)` (exit 2). Empty stdout or any other exit is `TRACEABILITY: DEGRADED (evidence unavailable)`. It never blocks: whatever it returns, continue to Phase 12.
+Drop the `--evidence` pair when that file does not exist or its path does not match `^[A-Za-z0-9._/-]{1,255}$`. `{PR_NUMBER}` is digits only. Capture its stdout as `EVIDENCE_RESULT`: its one `EVIDENCE` line (exit 0), or the one line `TRACEABILITY: DEGRADED (evidence unavailable)` (exit 2). Empty stdout or any other exit is `TRACEABILITY: DEGRADED (evidence unavailable)`. It never blocks.
 
 ### Phase 12: Report
 

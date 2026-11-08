@@ -125,9 +125,9 @@ The issue token is forwarded **unclassified**: routing is by SHAPE alone. Only `
 <!-- compliance:end -->
 
 <!-- compliance:on -->
-**Test plan.** Before any Code spawn, give the task a test plan in the evidence file `{worktree}/.devflow/docs/evidence-{branch_slug}.md` (`EVIDENCE_FILE`) — unlike the handoff file, it stays after the PR exists. It holds up to three sections, in this order and nothing else: `## Test Plan`; `## Evidence Exceptions`, a byte copy of `PR_EXCEPTIONS` present only while that is not `(none)`; and `## Claims`, always last. Create the file if absent; if it exists, replace its `## Test Plan` and `## Evidence Exceptions` sections and keep `## Claims` byte-identical.
+**Test plan.** Before any Code spawn, give the task a test plan in the evidence file `{worktree}/.devflow/docs/evidence-{branch_slug}.md` (`EVIDENCE_FILE`). It holds up to three sections, in this order and nothing else: `## Test Plan`; `## Evidence Exceptions`, a byte copy of `PR_EXCEPTIONS` present only while that is not `(none)`; and `## Claims`, always last. Create the file if absent; if it exists, replace its `## Test Plan` and `## Evidence Exceptions` sections and keep `## Claims` byte-identical.
 <!-- compliance:off -->
-**Test plan.** Before any Code spawn, give the task a test plan in the evidence file `{worktree}/.devflow/docs/evidence-{branch_slug}.md` (`EVIDENCE_FILE`) — unlike the handoff file, it stays after the PR exists. It holds up to three sections, in this order and nothing else: `## Test Plan`; `## Evidence Exceptions`, a byte copy of `EVIDENCE_EXCEPTIONS` present only while that is not `(none)`; and `## Claims`, always last. Create the file if absent; if it exists, replace its `## Test Plan` and `## Evidence Exceptions` sections and keep `## Claims` byte-identical.
+**Test plan.** Before any Code spawn, give the task a test plan in the evidence file `{worktree}/.devflow/docs/evidence-{branch_slug}.md` (`EVIDENCE_FILE`). It holds up to three sections, in this order and nothing else: `## Test Plan`; `## Evidence Exceptions`, a byte copy of `EVIDENCE_EXCEPTIONS` present only while that is not `(none)`; and `## Claims`, always last. Create the file if absent; if it exists, replace its `## Test Plan` and `## Evidence Exceptions` sections and keep `## Claims` byte-identical.
 <!-- compliance:end -->
 
 <!-- compliance:on -->
@@ -212,7 +212,7 @@ Setup context is EXECUTION_PLAN, else the issue body or conversation.
 
 Each phase or subtask `EXECUTION_PLAN` adds the plan's Patterns to Follow, Known limits, the criteria its Serves cell names, any criterion no cell names and each criterion that states a trust-boundary, security, data-loss or fail-closed property; a phase whose cell is absent or names any unlisted number gets all criteria; its own steps still set its scope.
 
-With `PLAN_FILE`, a phase's `PLAN_SECTIONS` names its step and criterion numbers, never their text.
+With `PLAN_FILE`, each phase or subtask `EXECUTION_PLAN` is the `PLAN_FILE:` line plus its own `PLAN_SECTIONS:` line, which names its step and criterion numbers, never their text.
 
 ---
 
@@ -521,9 +521,9 @@ Any other or missing Status: report and halt; never PASS.
 <!-- compliance:end -->
 
 <!-- compliance:on -->
-Run once, after the gates, under every strategy. No Code agent opens a PR: the Git agent does, and it pastes `ISSUE_PR_LINK`, `PR_EXCEPTIONS` and `PR_TEST_PLAN_BLOCK` through their paste gates and scrubs the body (D11) before `gh pr create`. This command writes no link line and creates no PR itself: it forwards Phase 1's link line verbatim.
+Run once, after the gates, under every strategy. The Git agent opens the PR and pastes `ISSUE_PR_LINK`, `PR_EXCEPTIONS` and `PR_TEST_PLAN_BLOCK` through their paste gates and scrubs the body (D11) before `gh pr create`. This command writes no link line and creates no PR itself: it forwards Phase 1's link line verbatim.
 <!-- compliance:off -->
-Run once, after the gates, under every strategy. No Code agent opens a PR: the Git agent does, and it pastes `ISSUE_PR_LINK` through its paste gate and scrubs the body (D11) before `gh pr create`. This command writes no link line and creates no PR itself: it forwards Phase 1's link line verbatim.
+Run once, after the gates, under every strategy. The Git agent opens the PR and pastes `ISSUE_PR_LINK` through its paste gate and scrubs the body (D11) before `gh pr create`. This command writes no link line and creates no PR itself: it forwards Phase 1's link line verbatim.
 <!-- compliance:end -->
 
 ```
@@ -601,7 +601,7 @@ git push origin HEAD; echo "exit=$?"
 cd "{worktree}" && node "$HOME/.devflow/scripts/verify-evidence.cjs" publish --pr {PR_NUMBER} --evidence ".devflow/docs/evidence-{branch_slug}.md" --publication {REVIEW_PUBLICATION resolved in Phase 1, or auto}; echo "exit=$?"
 ```
 
-Drop the `--evidence` pair when that file does not exist or its path does not match `^[A-Za-z0-9._/-]{1,255}$`. `{PR_NUMBER}` is digits only, and the publication value is `auto`, `full`, `off` or `stub`. Capture its stdout as `EVIDENCE_RESULT`; empty stdout, or an exit other than 0 or 2, is `TRACEABILITY: DEGRADED (evidence unavailable)`. It never blocks: whatever it returns, continue to Phase 12.
+Drop the `--evidence` pair when that file does not exist or its path does not match `^[A-Za-z0-9._/-]{1,255}$`. `{PR_NUMBER}` is digits only, and the publication value is `auto`, `full`, `off` or `stub`. Capture its stdout as `EVIDENCE_RESULT`; empty stdout, or an exit other than 0 or 2, is `TRACEABILITY: DEGRADED (evidence unavailable)`. It never blocks.
 <!-- compliance:off -->
 **Then verify, inline.** `verify-evidence.cjs verify` reads the PR and the local evidence file, and writes the local result file. It writes nothing to GitHub:
 
@@ -609,7 +609,7 @@ Drop the `--evidence` pair when that file does not exist or its path does not ma
 cd "{worktree}" && node "$HOME/.devflow/scripts/verify-evidence.cjs" verify --pr {PR_NUMBER} --evidence ".devflow/docs/evidence-{branch_slug}.md" --comment-out ".devflow/docs/evidence-result-{branch_slug}.md"; echo "exit=$?"
 ```
 
-Drop the `--evidence` pair when that file does not exist or its path does not match `^[A-Za-z0-9._/-]{1,255}$`. `{PR_NUMBER}` is digits only. Capture its stdout as `EVIDENCE_RESULT`: its one `EVIDENCE` line (exit 0), or the one line `TRACEABILITY: DEGRADED (evidence unavailable)` (exit 2). Empty stdout or any other exit is `TRACEABILITY: DEGRADED (evidence unavailable)`. It never blocks: whatever it returns, continue to Phase 12.
+Drop the `--evidence` pair when that file does not exist or its path does not match `^[A-Za-z0-9._/-]{1,255}$`. `{PR_NUMBER}` is digits only. Capture its stdout as `EVIDENCE_RESULT`: its one `EVIDENCE` line (exit 0), or the one line `TRACEABILITY: DEGRADED (evidence unavailable)` (exit 2). Empty stdout or any other exit is `TRACEABILITY: DEGRADED (evidence unavailable)`. It never blocks.
 <!-- compliance:end -->
 
 ### Phase 12: Report
