@@ -59,7 +59,7 @@ All generated documentation lives under `.devflow/docs/` at the checkout's tople
 └── pitfalls.md                         # Known pitfalls (PF-NNN format)
 ```
 
-`{ISSUE_ID}` is the filesystem-safe issue identifier the Git agent emits as `- **Issue ID**:` under `### Handoff Values`. A multi-issue batch fetch returns none, which is why that variant is named `multi-`.
+`{ISSUE_ID}` is the filesystem-safe issue identifier the Git agent emits as `- **Issue ID**:` under `### Handoff Values`. A multi-issue batch fetch returns none, which is why that variant is named `multi-`. Example: `42-jwt-auth.2026-04-07_1430.md`.
 
 The head markers for incremental runs are not part of this tree. `/code-review` and `/bug-analysis` keep each one under the git directory of the worktree, at `<git dir>/devflow/reviews/{branch-slug}/.last-review-head` and `<git dir>/devflow/bug-analysis/{branch-slug}/.last-analysis-head`. `<git dir>` is the path that `git rev-parse --absolute-git-dir` prints, so each worktree has its own markers.
 
