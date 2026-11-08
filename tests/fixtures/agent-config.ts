@@ -384,7 +384,7 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
   skim: {
     model: 'haiku',
     effort: 'medium',
-    policy: { kind: 'allow', tools: ['Bash', 'Read'] },
+    policy: { kind: 'allow', tools: ['Bash', 'Read', 'Write'] },
     omitClaudeMd: true,
     skills: ['worktree-support'],
     digest: ['context-economy'],
@@ -398,14 +398,16 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
    * median 11.9K tokens of starting context. The override runs them on Sonnet at
    * high effort, read-only (Read and Bash: the other search tools are withheld from
    * an agent that holds Bash), and omits CLAUDE.md and the rules, as the built-in
-   * does. The override applies to every session on the machine, plan mode included,
+   * does. It holds Write for one case: a `REPORT_PATH:` line of the spawn prompt, which
+   * plan-files.cjs must clear before the one report write (#774). It holds no Edit tool.
+   * The override applies to every session on the machine, plan mode included,
    * and uninstalling devflow restores the built-in. The row, the frontmatter of
    * explore.md and the parity checklist in tests/explore-agent.test.ts move together.
    */
   explore: {
     model: 'sonnet',
     effort: 'high',
-    policy: { kind: 'allow', tools: ['Read', 'Bash'] },
+    policy: { kind: 'allow', tools: ['Read', 'Bash', 'Write'] },
     omitClaudeMd: true,
     skills: [],
     digest: ['context-economy'],

@@ -1102,19 +1102,19 @@
     },
     {
       "id": "design-body-max",
-      "ceiling": 3348,
-      "pattern": "const DESIGN_BODY_MAX_BYTES = 3_348",
+      "ceiling": 3362,
+      "pattern": "const DESIGN_BODY_MAX_BYTES = 3_362",
       "occurrences": 1,
       "sourceFile": "tests/guards/plan-group-sizes.test.ts",
-      "description": "The Design agent body of the curation-on build, dist/agents/design.md, in bytes. Every turn of every Design spawn reads it (opus, high effort, five to eight spawns per /plan run). Measured 3,617 after one temp-file Write method for #743, 3,618 after #733 moved the design-review mode to the Architect agent. Added by #714 (lean Plan path group) at 4,219, after the cut from 5,529. Lowered by #756 (lean plans) to 3,360: the wording cuts in the partial that Design shares with Architect pay for the Architect lens item. Lowered to 3,348 by #756: the description lost its ticket set."
+      "description": "The Design agent body of the curation-on build, dist/agents/design.md, in bytes. Every turn of every Design spawn reads it (opus, high effort, five to eight spawns per /plan run). Measured 3,617 after one temp-file Write method for #743, 3,618 after #733 moved the design-review mode to the Architect agent. Added by #714 (lean Plan path group) at 4,219, after the cut from 5,529. Lowered by #756 (lean plans) to 3,360: the wording cuts in the partial that Design shares with Architect pay for the Architect lens item. Lowered to 3,348 by #756: the description lost its ticket set. Raised by #774 from 3,348 to 3,362 (14 bytes): the REPORT_PATH bullet (243 bytes) lets Design write its report to a passed path and reply with the path and its Overall Assessment. Two commits of cuts in the host and the shared partial took 82 bytes first (a purpose clause, a repeated word, three placeholders and one escalation line that restate their label)."
     },
     {
       "id": "design-body-curation-off-max",
-      "ceiling": 2782,
-      "pattern": "const DESIGN_BODY_CURATION_OFF_MAX_BYTES = 2_782",
+      "ceiling": 2796,
+      "pattern": "const DESIGN_BODY_CURATION_OFF_MAX_BYTES = 2_796",
       "occurrences": 1,
       "sourceFile": "tests/guards/plan-group-sizes.test.ts",
-      "description": "The Design agent body of the curation-off build, dist/curation-off/agents/design.md, in bytes. Measured 3,051 after one temp-file Write method for #743, 3,052 after #733 moved the design-review mode to the Architect agent. Added by #714 (lean Plan path group) at 3,653, after the cut from 4,776. Lowered by #756 (lean plans) to 2,794, with the curation-on build. Lowered to 2,782 by #756 with the curation-on build."
+      "description": "The Design agent body of the curation-off build, dist/curation-off/agents/design.md, in bytes. Measured 3,051 after one temp-file Write method for #743, 3,052 after #733 moved the design-review mode to the Architect agent. Added by #714 (lean Plan path group) at 3,653, after the cut from 4,776. Lowered by #756 (lean plans) to 2,794, with the curation-on build. Lowered to 2,782 by #756 with the curation-on build. Raised by #774 from 2,782 to 2,796 (14 bytes), with the curation-on build."
     },
     {
       "id": "architect-body-max",
@@ -1134,11 +1134,11 @@
     },
     {
       "id": "explore-body-max",
-      "ceiling": 3276,
-      "pattern": "const EXPLORE_BODY_MAX_BYTES = 3_276",
+      "ceiling": 3283,
+      "pattern": "const EXPLORE_BODY_MAX_BYTES = 3_283",
       "occurrences": 1,
       "sourceFile": "tests/guards/plan-group-sizes.test.ts",
-      "description": "The Explore agent body, src/assets/agents/explore.md, in bytes. It overrides the built-in Explore machine-wide, so every turn of every Explore spawn of any session reads it (sonnet, high effort; eight spawns per /plan run). Added by #714 (lean Plan path group) at 3,355, after the cut from 3,477. Lowered by #706 (lean always-loaded descriptions) to 3276."
+      "description": "The Explore agent body, src/assets/agents/explore.md, in bytes. It overrides the built-in Explore machine-wide, so every turn of every Explore spawn of any session reads it (sonnet, high effort; eight spawns per /plan run). Added by #714 (lean Plan path group) at 3,355, after the cut from 3,477. Lowered by #706 (lean always-loaded descriptions) to 3276. Raised by #774 from 3,276 to 3,283 (7 bytes), under the 3,500-byte cap of tests/explore-agent.test.ts: the REPORT_PATH bullet, the Write tool and the changed contract and Output sentences. Cuts took 90 bytes first (2,950 to 2,860) and 72 bytes more in the commit of the text (the contract bullet's location clause, the role line's second clause, one adjective); the text left 3,283."
     },
     {
       "id": "plan-body-max",

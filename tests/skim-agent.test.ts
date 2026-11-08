@@ -19,10 +19,8 @@ describe('skim agent', () => {
     tools = parseToolsFromFrontmatter(content);
   });
 
-  it('has tools restricted to Bash and Read only', () => {
-    expect(tools).toHaveLength(2);
-    expect(tools).toContain('Bash');
-    expect(tools).toContain('Read');
+  it('has tools restricted to Bash, Read and Write (Write is for the REPORT_PATH report)', () => {
+    expect([...tools].sort()).toEqual(['Bash', 'Read', 'Write']);
   });
 
   it('does NOT use root scan in code examples', () => {

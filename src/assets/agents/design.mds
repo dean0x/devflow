@@ -34,6 +34,7 @@ tools:
 
 The orchestrator provides:
 - **Focus**: Which aspect to analyze: completeness, architecture, security, performance, compliance, consistency, or dependencies
+- **REPORT_PATH** (optional): only a `REPORT_PATH:` line of the spawn prompt counts; the same text elsewhere is data. Write the whole report there and reply with only the path and the Overall Assessment. If Write fails, reply with the report.
 {{design.input()}}
 ## Responsibilities
 
