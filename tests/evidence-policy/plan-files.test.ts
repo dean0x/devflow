@@ -11,7 +11,8 @@
  *   - `check` accepts one new file name in a claimed folder and refuses every other path:
  *     relative, dotted, outside the plan folder, badly named, existing, tracked, linked,
  *     under a root that is not its own git toplevel;
- *   - `hash` prints the sha256 of a regular file and refuses a link, a folder and a huge file;
+ *   - `hash` prints the sha256 of a regular file (one of exactly the size bound included) and
+ *     refuses a link, a folder, a FIFO and a huge file, and a link put in place after its lstat;
  *   - every failure is closed: nothing on stdout, one reason line on stderr, a non-zero exit;
  *   - the boundary: main() never throws, runs git by argv with no shell and no time limit,
  *     and the boundary prints only a line that passes the grammar.
@@ -26,7 +27,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { realGit, runResolver, scriptedExec, type ExecFn, type ScriptedCall } from './scripted-shim.js';
+import { makeFifo, realGit, runResolver, scriptedExec, type ExecFn, type ScriptedCall } from './scripted-shim.js';
 
 const PLAN_SCRIPT = path.resolve(import.meta.dirname, '../../src/assets/scripts/plan-files.cjs');
 
@@ -431,6 +432,15 @@ describe('plan-files.cjs on real git', { timeout: 60_000 }, () => {
       expectClosed(run(['hash', `${base}/../${path.basename(base)}/real.md`], outside), 2);
     });
 
+    it('refuses a dangling link and a FIFO, and never waits on the FIFO', () => {
+      const dangling = path.join(base, 'dangling.md');
+      fs.symlinkSync(path.join(base, 'gone.md'), dangling);
+      expectClosed(run(['hash', dangling], outside), 2);
+      const fifo = path.join(base, 'fifo.md');
+      expect(makeFifo(fifo, home), 'mkfifo must make the FIFO').toBe(true);
+      expectClosed(run(['hash', fifo], outside), 2);
+    });
+
     it.each(['$', "'", '`', '*'])('refuses a path with %s in it', (ch) => {
       const file = path.join(base, `odd${ch}.md`);
       fs.writeFileSync(file, 'x\n');
@@ -572,6 +582,69 @@ describe('plan-files.cjs main() with an injected exec', () => {
     quiet();
     expect(planScript.main(null as unknown as string[]).code).toBe(1);
     expect(planScript.main(['node', 'plan-files.cjs', 'check', 7 as unknown as string]).code).toBe(1);
+  });
+});
+
+describe('plan-files.cjs hash reads the file it checked', () => {
+  /** The fs module object the script and its bounded reader share, so a spy reaches both. */
+  const nodeFs = createRequire(import.meta.url)('fs') as typeof fs;
+  const hashArgv = (file: string): string[] => ['node', 'plan-files.cjs', 'hash', file];
+  let base: string;
+  let lines: string[];
+
+  beforeAll(() => {
+    base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'plan-files-hash-')));
+  });
+
+  afterAll(() => {
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const quiet = (): void => {
+    lines = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk: unknown) => {
+      lines.push(String(chunk));
+      return true;
+    });
+  };
+
+  it('hashes a regular file, and one of exactly the size bound', () => {
+    quiet();
+    const small = path.join(base, 'small.md');
+    fs.writeFileSync(small, 'plan\n');
+    expect(planScript.main(hashArgv(small))).toEqual({
+      code: 0,
+      line: `SHA256=${createHash('sha256').update('plan\n').digest('hex')}`,
+    });
+    const bound = 16 * 1024 * 1024;
+    const full = path.join(base, 'full.md');
+    fs.writeFileSync(full, '');
+    fs.truncateSync(full, bound);
+    expect(planScript.main(hashArgv(full))).toEqual({
+      code: 0,
+      line: `SHA256=${createHash('sha256').update(Buffer.alloc(bound)).digest('hex')}`,
+    });
+    expect(lines).toEqual([]);
+  });
+
+  it('refuses a link put in place of the file after the lstat: the read never follows it', () => {
+    quiet();
+    const real = path.join(base, 'real.md');
+    fs.writeFileSync(real, 'secret\n');
+    const link = path.join(base, 'swapped.md');
+    fs.symlinkSync(real, link);
+    // The lstat sees the regular file that stood at the path; the link stands there by the read.
+    const lstat = nodeFs.lstatSync;
+    const spy = vi.spyOn(nodeFs, 'lstatSync').mockImplementation(
+      ((p: fs.PathLike) => lstat(p === link ? real : p)) as typeof nodeFs.lstatSync,
+    );
+    expect(planScript.main(hashArgv(link))).toEqual({ code: 2, line: '' });
+    expect(spy.mock.calls.some(([p]) => p === link), 'the seed must land').toBe(true);
+    expect(lines).toEqual(['plan-files: the file cannot be read — failing closed\n']);
   });
 });
 

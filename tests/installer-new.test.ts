@@ -280,12 +280,13 @@ describe('composeScripts', () => {
   }, SUBPROCESS_TIMEOUT_MS);
 
   it('copies plan-files.cjs beside resolve-settings.cjs, and the INSTALLED plan-file checker loads both (install path pin)', async () => {
-    // plan-files.cjs requires ./resolve-settings.cjs and ./hooks/lib/tracked-areas.cjs through
-    // __dirname, so the set only works when all three land in the same relative places.
+    // plan-files.cjs requires ./lib/project-config.cjs, ./resolve-settings.cjs and
+    // ./hooks/lib/tracked-areas.cjs through __dirname, so the set only works when all four land
+    // in the same relative places.
     const target = path.join(tmpDir, 'scripts');
     await composeScripts(target);
 
-    for (const rel of ['plan-files.cjs', 'resolve-settings.cjs', path.join('hooks', 'lib', 'tracked-areas.cjs')]) {
+    for (const rel of ['plan-files.cjs', path.join('lib', 'project-config.cjs'), 'resolve-settings.cjs', path.join('hooks', 'lib', 'tracked-areas.cjs')]) {
       const installed = path.join(target, rel);
       await expect(fs.access(installed), `${rel} not found in the scripts dir`).resolves.toBeUndefined();
       expect((await fs.readFile(installed, 'utf-8')).length, `${rel} must be non-empty`).toBeGreaterThan(0);

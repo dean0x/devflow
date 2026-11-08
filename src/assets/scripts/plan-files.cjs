@@ -5,7 +5,8 @@
 // pasted text: claim the run folder, check one report path before an agent writes it, and
 // hash a finished report. Installed as a top-level sibling of resolve-settings.cjs under
 // ~/.devflow/scripts/, and it requires that file: the git toplevel call and its default exec
-// are resolve-settings.cjs's own (gitToplevel, defaultExec). The script holds no other
+// are resolve-settings.cjs's own (gitToplevel, defaultExec), and the bounded file read is
+// lib/project-config.cjs's (readBoundedRegularFile). The script holds no other
 // judgment and writes nothing except the folders `claim` makes. No network.
 //
 // Usage: node plan-files.cjs claim
@@ -34,7 +35,9 @@
 // (a dangling link counts); git tracks nothing under the plan folder.
 //
 // `hash` refuses a path unless it is absolute with the same character rule, and lstat shows
-// a regular file (never a link) of at most MAX_HASH_BYTES.
+// a regular file (never a link) of at most MAX_HASH_BYTES. The bytes come from one open of the
+// file with no link followed and no wait on a FIFO, checked again by fstat
+// (readBoundedRegularFile of lib/project-config.cjs), so the file hashed is the file checked.
 //
 // Fail closed: on any failure stdout stays empty, stderr holds one reason line and the exit
 // code is not 0.
@@ -60,6 +63,7 @@
 
 const crypto = require('crypto');
 const fs = require('fs');
+const projectConfig = require('./lib/project-config.cjs');
 const settings = require('./resolve-settings.cjs');
 const trackedAreas = require('./hooks/lib/tracked-areas.cjs');
 
@@ -298,13 +302,12 @@ function hash(file) {
   }
   if (!stat.isFile()) return fail(EXIT_CODES.REFUSED, 'the path is not a regular file');
   if (stat.size > MAX_HASH_BYTES) return fail(EXIT_CODES.REFUSED, 'the file is over ' + MAX_HASH_BYTES + ' bytes');
-  let bytes;
-  try {
-    bytes = fs.readFileSync(file);
-  } catch (_) {
-    return fail(EXIT_CODES.REFUSED, 'the file cannot be read');
-  }
-  return { code: EXIT_CODES.OK, line: 'SHA256=' + crypto.createHash('sha256').update(bytes).digest('hex') };
+  // The lstat above only names the reason. The read opens the file once, never through a link
+  // and never waiting on a FIFO, and checks the opened file again, so a file changed after the
+  // lstat is refused, not hashed.
+  const read = projectConfig.readBoundedRegularFile(file, MAX_HASH_BYTES, false);
+  if (read.kind !== 'ok') return fail(EXIT_CODES.REFUSED, 'the file cannot be read');
+  return { code: EXIT_CODES.OK, line: 'SHA256=' + crypto.createHash('sha256').update(read.bytes).digest('hex') };
 }
 
 /**
