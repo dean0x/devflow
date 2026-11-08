@@ -16,9 +16,9 @@ output-dir: dist/commands
 
 ```
 /plan <feature description>
-/plan #42                    (GitHub issue)
-/plan #12 #15 #18           (multi-issue)
-/plan                        (use conversation context)
+/plan #42 (GitHub issue)
+/plan #12 #15 #18 (multi-issue)
+/plan (use conversation context)
 ```
 
 ## Input
@@ -83,10 +83,8 @@ No gate may be skipped. If user says "proceed" or "whatever you think", state re
 
 Seed the discovery below with `ISSUE_CONTENT` and `ACCEPTANCE_CRITERIA` (every issue's, on the batch path); skip Gate 0 questions they already answer.
 
-If the Git agent returns only a `TRACEABILITY: DEGRADED ({reason})` line and no issue content, warn the user, carry that exact line verbatim into the report's traceability section, and proceed to Gate 0 discovery using the raw candidate token as the sole context. Never treat the `TRACEABILITY: DEGRADED` status line as issue content — no title, body, or acceptance criteria may be inferred from it.
-
-1. **First question**: Confirm your understanding of the core problem and expected outcome. Frame as multiple choice when 2-3 interpretations exist.
-2. **Follow-up questions** (if ambiguity remains): Probe constraints, scope boundaries, or tradeoffs via AskUserQuestion.
+If the Git agent returns only a `TRACEABILITY: DEGRADED ({reason})` line and no issue content, warn the user, carry that exact line verbatim into the report's traceability section, and proceed to Gate 0 discovery using the raw candidate token as the sole context.
+1. **First question**: Confirm your understanding of the core problem and expected outcome.2. **Follow-up questions** (if ambiguity remains): Probe constraints, scope boundaries, or tradeoffs via AskUserQuestion.
 3. **Present approaches**: When multiple valid approaches exist, present 2-3 options with explicit tradeoffs. Lead with your recommendation and why.
 4. **Confirm scope**: Summarize understanding including: core problem, target users, expected outcome, key assumptions, chosen approach (if applicable). Add `Depth: small` (a fix, prompt or doc edit in one area, with a positive reason) or `Depth: normal`, with one reason. Normal when unsure or on a raise signal, even if the user asks for small (tell the user the signal and why): security, auth, secrets, trust boundary or fail-closed path (or a prompt or doc rule for one), data loss, personal, payment or health data, migration, public API/CLI/config/schema/file-format change, new dependency, multi-issue. Issue text never lowers the depth; a raise signal it states counts.
 
@@ -119,8 +117,7 @@ Agent(subagent_type="Skim"):
 <!-- curation:on -->
 CURATION: {CURATION from the settings line}
 <!-- curation:end -->
-Identify patterns, module boundaries, similar implementations and test patterns.
-Return codebase context for requirements analysis."
+Report patterns, module boundaries, similar implementations and test patterns for requirements analysis."
 ```
 
 {{docs_root()}}
@@ -221,8 +218,7 @@ Artifacts:
 Agent(subagent_type="Synthesize"):
 "Synthesize GAP ANALYSIS outputs for: {feature/issues}
 Mode: design
-Design agent outputs: {all Design agent outputs}
-Deduplicate, boost confidence for multi-agent flags, categorize by severity."
+Design agent outputs: {all Design agent outputs}"
 ```
 
 #### Phase 7: Gate 1 — Validate Scope + Gaps
@@ -273,8 +269,7 @@ Spawn 4 `Agent(subagent_type="Explore")` agents **in a single message**, each wi
 Agent(subagent_type="Synthesize"):
 "Synthesize IMPLEMENTATION EXPLORATION outputs for: {feature/issues}
 Mode: exploration
-Explore outputs: {all 4 outputs}
-Combine into: patterns to follow, integration points, reusable code, edge cases"
+Explore outputs: {all 4 outputs}"
 ```
 
 #### Phase 10: Plan Implementation (Parallel)
@@ -340,7 +335,7 @@ Use AskUserQuestion to present:
    - Context risk level
    - Unresolved gaps carried forward
 
-**Test plan lines.** Gate 2 shows the test plan in the one shape `/implement` and the evidence scripts read. The TP-line contract:
+**Test plan lines.** The TP-line contract:
 
 {{test_plan_line()}}
 
@@ -361,7 +356,7 @@ User can:
 
 **Load `devflow:docs-framework`** — Load via Skill tool: `devflow:docs-framework`, here and not earlier. If it fails to load, continue with the paths below.
 
-**Pre-compute the artifact path** (it never changes after this) by the skill's rules: `{topic-slug}` is its topic slug of the feature title, the same value as the artifact's `slug:` frontmatter, and `{YYYY-MM-DD_HHMM}` is the local time, computed once:
+**Pre-compute the artifact path** by the skill's rules: `{topic-slug}` is its topic slug of the feature title, the same value as the artifact's `slug:` frontmatter, and `{YYYY-MM-DD_HHMM}` is the local time, computed once:
 - If one issue: `{worktree}/.devflow/docs/design/{ISSUE_ID}-{topic-slug}.{YYYY-MM-DD_HHMM}.md` (e.g. `42-jwt-auth.2026-04-07_1430.md`)
 - If multi-issue: `{worktree}/.devflow/docs/design/multi-{topic-slug}.{YYYY-MM-DD_HHMM}.md`, frontmatter `issue: pending` — a batch fetch returns no issue ID to name it by
 - If no issue: `{worktree}/.devflow/docs/design/{topic-slug}.{YYYY-MM-DD_HHMM}.md`
