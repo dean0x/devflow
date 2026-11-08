@@ -84,14 +84,6 @@ TOPIC_SLUG=$(s=$(echo "$TOPIC" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9
 ```
 `/plan` and `/research` take `{topic-slug}` from it.
 
-### File Naming Patterns
-
-| Type | Pattern | Example |
-|------|---------|---------|
-| Special indexes | `UPPERCASE.md` | `WORKING-MEMORY.md`, `INDEX.md` |
-| Status logs | `{timestamp}.md` | `2025-12-26_1430.md` |
-| Design documents | `{ISSUE_ID}-{topic-slug}.{timestamp}.md` | `42-jwt-auth.2026-04-07_1430.md` |
-
 ## Helper Functions
 
 Define these inline, in the Bash call that needs them, for consistent naming. `.devflow/docs/` lives at the checkout's toplevel, never under a subdirectory the session started in:

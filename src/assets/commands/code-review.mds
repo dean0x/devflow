@@ -11,9 +11,9 @@ output-dir: dist/commands
 # Code Review Command
 
 <!-- compliance:on -->
-Run a comprehensive code review of the current branch by spawning parallel review agents, then synthesizing results into PR comments.
+Run a code review of the current branch by spawning parallel review agents, then synthesizing results into PR comments.
 <!-- compliance:off -->
-Run a comprehensive code review of the current branch by spawning parallel review agents, then synthesizing results into a local review summary.
+Run a code review of the current branch by spawning parallel review agents, then synthesizing results into a local review summary.
 <!-- compliance:end -->
 
 ## Usage
@@ -30,7 +30,7 @@ Run a comprehensive code review of the current branch by spawning parallel revie
 
 1. **Discover reviewable worktrees**:
    - Run `git worktree list --porcelain` and count the worktrees it lists
-   - **More than one listed:** Invoke the `devflow:worktree-support` skill, then Read its `references/discovery.md` from the skill's base directory for the full 7-step algorithm; the canonical protected branch list stays in the skill. Parse the list, filter (skip protected/detached/mid-rebase), dedup by branch, sort by recent commit
+   - **More than one listed:** Invoke the `devflow:worktree-support` skill, then Read its `references/discovery.md` from the skill's base directory; the canonical protected branch list stays in the skill. Parse the list, filter (skip protected/detached/mid-rebase), dedup by branch, sort by recent commit
    - **Exactly one listed:** load neither the skill nor the reference — that worktree is the only candidate, and Step 0c's Git agent validates its branch
 2. **If `--path` flag provided:** use only that worktree, skip discovery
    **`--path` validation**: the path must be a directory in `git worktree list` output; if not, report an error and stop.
@@ -75,7 +75,7 @@ Render the test-plan block (per worktree) from `/implement`'s evidence file, and
 node "$HOME/.devflow/scripts/verify-evidence.cjs" render --plan "{worktree}/.devflow/docs/evidence-{branch_slug}.md"; echo "exit=$?"
 ```
 
-3. On `exit=0`, `PR_TEST_PLAN_BLOCK` is its stdout byte for byte without that `exit=` line; in every other case it is `(none)`. Nothing here waits on it: the Git agent pastes it only behind its own check, and only into a PR it creates.
+3. On `exit=0`, `PR_TEST_PLAN_BLOCK` is its stdout byte for byte without that `exit=` line; in every other case it is `(none)`.
 
 <!-- compliance:end -->
 For each reviewable worktree, spawn Git agent:
@@ -367,7 +367,6 @@ FEATURE_KNOWLEDGE: {feature_knowledge}
 PR_DESCRIPTION: <pr-description>{pr_description}</pr-description>
 PRIOR_RESOLUTIONS: <prior-resolution-summary>{prior_resolutions}</prior-resolution-summary>
 {COMPLIANCE_FOCUS_DIRECTIVE}  (compliance focus only)
-If PRIOR_RESOLUTIONS is not (none), follow Cross-Cycle Awareness in review.md.
 <!-- curation:on -->
 Follow devflow:apply-decisions to scan the index and Read full ADR/PF bodies on demand.
 <!-- curation:end -->

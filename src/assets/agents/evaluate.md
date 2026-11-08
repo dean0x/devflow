@@ -61,7 +61,7 @@ omitClaudeMd: true
 ### Misalignments Found (if MISALIGNED)
 
 | Type | Description | Files | Suggested Fix |
-|------|-------------|-------|---------------|
+|---|---|---|---|
 | missing | {what's missing} | {file paths} | {how to fix} |
 | scope_creep | {what's out of scope} | {file paths} | {remove or justify} |
 | incomplete | {what's partially done} | {file paths} | {what remains} |
@@ -73,7 +73,7 @@ omitClaudeMd: true
 
 ### Re-verification (if applicable)
 | Previously Failed | Status | Notes |
-|-------------------|--------|-------|
+|---|---|---|
 | {item} | RESOLVED/STILL_FAILING | {details} |
 ```
 

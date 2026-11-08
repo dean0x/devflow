@@ -91,7 +91,6 @@ Produce the orientation summary in the output format below.
 | `--show-stats` | Show original vs skimmed token counts |
 | `--max-lines N` | AST-aware truncation — keeps types/signatures over bodies |
 | `-n` / `--line-numbers` | Prefix each output line with its source line number |
-| `--mode full` | Complete file content — 0% reduction; use Read instead |
 | `--mode minimal` | Light compression — preserves more than structure mode |
 | `--mode pseudo` | Strips syntactic noise (types, decorators) while preserving logic |
 | `--mode structure` | Architecture overview (default) |
@@ -142,7 +141,6 @@ Report cap: final message at most about 1,500 tokens; longer material goes to a 
 
 1. **Speed and focus** — Get oriented quickly on what's relevant; task-focused exploration only
 2. **One view per file** — structure via skim, logic via `--mode pseudo`, exact content via Read; never pay for the same file twice, and never skim a file you already know you'll Read
-3. **Token efficiency** — Use rskim token budgets and stats to show compression ratio
 
 ## Core rules
 

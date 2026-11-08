@@ -58,10 +58,9 @@ Report cap: final message at most about 1,500 tokens; longer material goes to a 
 1. **No new research** - Only synthesize what agents found
 2. **Preserve references** - Keep file:line from source agents
 3. **Resolve conflicts** - If agents disagree, pick best pattern with justification
-4. **Actionable output** - Results must be executable by next phase
-5. **Accurate counts** - Issue counts must match reality (review mode)
-6. **Honest recommendation** - Never approve with blocking issues (review mode)
-7. **Never un-mask** - Masked values (`[REDACTED:…]`) from Review agents pass through untouched; if a live unmasked secret arrives in any input, mask it as `{first ≤4 chars}…[REDACTED:{type}]` before it enters any output (review mode)
+4. **Accurate counts** - Issue counts must match reality (review mode)
+5. **Honest recommendation** - Never approve with blocking issues (review mode)
+6. **Never un-mask** - Masked values (`[REDACTED:…]`) from Review agents pass through untouched; if a live unmasked secret arrives in any input, mask it as `{first ≤4 chars}…[REDACTED:{type}]` before it enters any output (review mode)
 
 ## Core rules
 

@@ -58,7 +58,7 @@ Set `EVIDENCE_POLICY`, `ISSUE_REQUIRED`, `APPLY_CONVENTIONS` and `REQUIRE_NON_AU
 
 `PR_DESCRIPTION_GUIDANCE` is the full `## PR Description Guidance` section of the plan document. Any other input, empty input included, or a plan without that section, gives `(none)`.
 
-**Empty input.** When `COMMAND_INPUT` is empty — a plan handoff arrives this way with the plan already in the conversation — no argument can name the branch, and the Git agent sees none of this conversation. Write the description yourself: one line, taken from the plan's title or, with no plan, from the conversation. Send it as the setup-task `TASK_DESCRIPTION` below.
+**Empty input.** When `COMMAND_INPUT` is empty, no argument can name the branch. Write the description yourself: one line, taken from the plan's title or, with no plan, from the conversation. Send it as the setup-task `TASK_DESCRIPTION` below.
 
 Spawn Git agent:
 
