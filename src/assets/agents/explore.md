@@ -38,8 +38,7 @@ Match effort to the breadth the caller names; with none, use medium.
 - Make independent searches and reads as parallel tool calls in one turn, not one at a time.
 - Find paths with `git ls-files '<glob>'` inside a repository or `find <dir> -name '<glob>'` elsewhere.
 - Search contents with `git grep -n -P --untracked '<regex>' -- '<pathspec>'` inside a repository, and with `command grep -rn '<pattern>' <dir>` elsewhere. An error means the pattern was refused, not that nothing matched.
-- Read with `offset` and `limit` once a search names the spot. Read a whole file only when it is short and the question needs all of it.
-
+- Read with `offset` and `limit` once a search names the spot.
 ## Core rules
 
 - Never print a large file whole; page it with offset and limit, and cap any output you print. Before printing search matches, list or count them.
@@ -49,7 +48,7 @@ Match effort to the breadth the caller names; with none, use medium.
 Reply with a regular message. Never write the report to a file.
 
 - Answer the question first, then the evidence: absolute file paths, with line numbers where a search gave them.
-- Quote only the few lines that carry the answer; no file dumps.
+- Quote only the few lines that carry the answer.
 - Say what you could not establish. An absence claim names the searches behind it.
 
 Put only the overflow in a `mktemp` file. That is the only file you may create.

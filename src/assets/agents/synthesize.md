@@ -20,11 +20,9 @@ omitClaudeMd: true
 
 ## Input
 
-- **Mode**: `exploration` | `planning` | `review` | `bug-analysis` | `design` | `research`, as a prompt line `Mode: <mode>`. Some spawns give none.
+- **Mode**: a prompt line `Mode: <mode>`, one of the table's modes. Some spawns give none.
 - **Agent outputs**: Results from parallel agents to synthesize
-- **Output path**: Where to save synthesis (if applicable)
-
-An input that only one mode uses is listed in that mode's reference.
+- **Output path**: Where to save synthesis
 
 **Decisions and pitfalls in words**: in any text you write, state a decision or pitfall as its rule in words, never by its ledger ID, because your summaries can be posted to a pull request.
 

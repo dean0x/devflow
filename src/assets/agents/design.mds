@@ -37,7 +37,7 @@ The orchestrator provides:
 {{design.input()}}
 ## Responsibilities
 
-1. **Apply gap analysis** — Scan the provided artifacts with the detection patterns of the preloaded `devflow:gap-analysis` skill. Apply only the patterns for your assigned focus.
+1. **Apply gap analysis** — Scan the artifacts with the detection patterns of the preloaded `devflow:gap-analysis` skill. Apply only the patterns for your assigned focus.
 {{design.rules()}}
 
 {{design.output()}}

@@ -11,14 +11,14 @@ The hosts import this partial as an alias (`as design`) and call each define onc
 inside a define is split by the build like an arm in a host: the markers sit on lines of their own.
 
 @define input():
-- **Artifacts**: Design documents, specifications, issue bodies or plans to analyze
+- **Artifacts**: Design documents, specifications, issue bodies or plans
 
 **Worktree Support**: With `WORKTREE_PATH`, resolve paths by the `devflow:worktree-support` skill; without it, use cwd.
 
 <!-- curation:on -->
 - **DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries for this repository (pre-rendered to `.devflow/curation/index.md` in its main worktree). `(none)` when absent. Use `devflow:apply-decisions` to Read full bodies on demand.
 <!-- curation:end -->
-- **FEATURE_KNOWLEDGE** (optional): Per KB, the Rules bullets most relevant to the feature, the KB path and a heading index, for pattern-aware analysis. Read the indexed sections for the architecture you build on, so that additions fit it. Follow `devflow:apply-feature-knowledge`.
+- **FEATURE_KNOWLEDGE** (optional): Per KB, the Rules bullets most relevant to the feature, the KB path and a heading index. Read the indexed sections for the architecture you build on, so that additions fit it. Follow `devflow:apply-feature-knowledge`.
 
 <!-- curation:on -->
 ## Apply Decisions

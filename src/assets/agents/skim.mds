@@ -31,7 +31,7 @@ Run these steps in order. Skip a step only where its own gate says so.
 
 Run `ls` on the project root via Bash to identify source directories and project type. Then Read the project manifest (`package.json`, `Cargo.toml`, `go.mod`, `pyproject.toml`, etc.) to understand the project.
 
-Never run `npx rskim .` or `npx rskim` on the repo root — it scans all files including `node_modules/` and produces millions of tokens. Always target specific source directories.
+Never run `npx rskim .` or `npx rskim` on the repo root — it scans all files including `node_modules/` and produces millions of tokens.
 
 ### Step 2: Primary Source Skim
 
@@ -121,7 +121,7 @@ skim also handles prose/config files (`.md`, `.json`, `.yaml`, `.toml`) — the 
 | `path/file.ts` | {description} | {functions, types} |
 
 ### Key Functions/Types / Integration Points / Patterns Observed
-{Functions, types, integration points, and patterns relevant to the task}
+{Those relevant to the task}
 
 ### Risk Hotspots
 {Top hotspots from heatmap --insights, or "None assessed (greenfield task)" when skipped}
