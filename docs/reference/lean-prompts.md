@@ -42,7 +42,7 @@ Choose targets in this order:
 A cut removes text from a prompt or moves it to another file. A cut never changes what the prompt guarantees.
 Follow these steps for each cut commit.
 
-1. List the never-cut items of the cut text. For `/implement`, use the [never-cut table](#never-cut-table). For another target, list the output contracts, fail-closed rules, scrub and security rules, and the text that a test pins.
+1. List the never-cut items of the cut text. For `/implement`, use the [never-cut table](#never-cut-table). For another target, list the output contracts, fail-closed rules, scrub and security rules, and the text that a test pins. A protected span goes into `NEVER_CUT_ITEMS` in `tests/guards/never-cut.test.ts`, and a cut runs that guard before it lands.
 2. Edit the text as it stands on the current base. A hunk made on an older base can bring back text that a later change removed.
 3. Write one cut-log row for each hunk in the commit body. A row holds the rule number, the kind of cut, the bytes, and the never-cut items that the hunk touches. Write "none" when the hunk touches no item.
 4. Build once.
