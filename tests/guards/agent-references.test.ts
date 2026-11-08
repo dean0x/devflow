@@ -26,10 +26,10 @@ import {
 import { variantOffRelPath, type OffVariantKey } from '../../src/core/curation-variants.js'
 
 /** The Synthesize agent body, in bytes. Registered as `synthesize-body-max`; lowered, never raised. */
-const SYNTHESIZE_BODY_MAX_BYTES = 3_272
+const SYNTHESIZE_BODY_MAX_BYTES = 3_171
 
 /** The largest single Synthesize mode reference, in bytes. Registered as `synthesize-mode-ref-max`; lowered, never raised. */
-const SYNTHESIZE_MODE_REF_MAX_BYTES = 3_797
+const SYNTHESIZE_MODE_REF_MAX_BYTES = 3_780
 
 /** The `/code-review` gate-level reference, in bytes. Registered as `code-review-levels-ref-max`; lowered, never raised. */
 const CODE_REVIEW_LEVELS_REF_MAX_BYTES = 1_349

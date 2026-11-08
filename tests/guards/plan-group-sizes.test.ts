@@ -20,9 +20,9 @@ const DESIGN_BODY_MAX_BYTES = 3_362
 /** The Design agent body of the curation-off build, dist/curation-off/agents/design.md, in bytes. */
 const DESIGN_BODY_CURATION_OFF_MAX_BYTES = 2_796
 /** The Architect agent body of the curation-on build, dist/agents/architect.md, in bytes. */
-const ARCHITECT_BODY_MAX_BYTES = 3_782
+const ARCHITECT_BODY_MAX_BYTES = 3_709
 /** The Architect agent body of the curation-off build, dist/curation-off/agents/architect.md, in bytes. */
-const ARCHITECT_BODY_CURATION_OFF_MAX_BYTES = 3_216
+const ARCHITECT_BODY_CURATION_OFF_MAX_BYTES = 3_143
 /** The Explore agent body (hand-authored, one build), in bytes. */
 const EXPLORE_BODY_MAX_BYTES = 3_283
 /** The Plan agent body (hand-authored, one build), in bytes. */

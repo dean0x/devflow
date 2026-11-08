@@ -566,19 +566,19 @@
     },
     {
       "id": "synthesize-body-max",
-      "ceiling": 3272,
-      "pattern": "const SYNTHESIZE_BODY_MAX_BYTES = 3_272",
+      "ceiling": 3171,
+      "pattern": "const SYNTHESIZE_BODY_MAX_BYTES = 3_171",
       "occurrences": 1,
       "sourceFile": "tests/guards/agent-references.test.ts",
-      "description": "D-MODE-BY-PATH: the Synthesize agent body, src/assets/agents/synthesize.md, in bytes. It carries the shared head, the six-row mode routing table, Output, Principles, Core rules and Boundaries, and measured 4,049 before #718. The six mode templates (12,970 bytes of the 16,560-byte body that #449's trim left; main held 16,665) live in the agent-references skill and a spawn reads one of them by explicit path. #718 (lean other targets) cut it to 3,288: the role paragraph, the worktree line, the Output lead and the Handle autonomously list repeated other text. May be LOWERED, never raised: a template that grows back into the body is billed on every spawn, including the ten that pass no Mode line and read none. Lowered by #706 (lean descriptions, the rest) to 3272."
+      "description": "D-MODE-BY-PATH: the Synthesize agent body, src/assets/agents/synthesize.md, in bytes. It carries the shared head, the six-row mode routing table, Output, Principles, Core rules and Boundaries, and measured 4,049 before #718. The six mode templates (12,970 bytes of the 16,560-byte body that #449's trim left; main held 16,665) live in the agent-references skill and a spawn reads one of them by explicit path. #718 (lean other targets) cut it to 3,288: the role paragraph, the worktree line, the Output lead and the Handle autonomously list repeated other text. May be LOWERED, never raised: a template that grows back into the body is billed on every spawn, including the ten that pass no Mode line and read none. Lowered by #706 (lean descriptions, the rest) to 3272. Lowered from 3272 to 3171 by #774 (pass file paths), the measured size with no headroom. The cuts that paid for the report-path text were 101 bytes larger than that text."
     },
     {
       "id": "synthesize-mode-ref-max",
-      "ceiling": 3797,
-      "pattern": "const SYNTHESIZE_MODE_REF_MAX_BYTES = 3_797",
+      "ceiling": 3780,
+      "pattern": "const SYNTHESIZE_MODE_REF_MAX_BYTES = 3_780",
       "occurrences": 1,
       "sourceFile": "tests/guards/agent-references.test.ts",
-      "description": "D-MODE-BY-PATH: the largest single Synthesize mode reference, references/synthesize/{mode}.md of the agent-references skill, in bytes. Review is the largest at 3,797 (its template, its merge rules and the review-only inputs); Bug Analysis follows at 3,643 with the STATIC_STATUS input and its rules. A spawn loads the body plus exactly one of these. May be LOWERED, never raised."
+      "description": "D-MODE-BY-PATH: the largest single Synthesize mode reference, references/synthesize/{mode}.md of the agent-references skill, in bytes. Review is the largest at 3,780 (its template, its merge rules and the review-only inputs); Bug Analysis follows at 3,643 with the STATIC_STATUS input and its rules. A spawn loads the body plus exactly one of these. May be LOWERED, never raised. Lowered from 3797 to 3780 by #774 (pass file paths), the measured size of the Review reference with no headroom. The shorter input bullets that name the file paths are 17 bytes smaller than the text they replace."
     },
     {
       "id": "code-review-levels-ref-max",
@@ -694,19 +694,19 @@
     },
     {
       "id": "review-body-max",
-      "ceiling": 10772,
-      "pattern": "const REVIEW_BODY_MAX_BYTES = 10_772",
+      "ceiling": 10690,
+      "pattern": "const REVIEW_BODY_MAX_BYTES = 10_690",
       "occurrences": 1,
       "sourceFile": "tests/guards/review-group-sizes.test.ts",
-      "description": "The Review agent body of the curation-on build, dist/agents/review.md, in bytes. Every turn of every Review spawn reads it (opus, high effort, about eleven spawns per full review). Added by #720 (lean Review group) at 10,930, after the cut from 12,422. Lowered by #706 (lean always-loaded descriptions) to 10898, and by #756 (lean plans) to 10862: the skip-speculative-asks rule was added, and cuts in the same body paid for it. Raised to 10867, still below the 10898 on main, when the rule gained its exemption for a partial write that can lose data, a trust boundary and a fail-closed path; two step lead-ins restated by the Consolidation Rules and the report template paid for most of it. Lowered to 10772 by #756, the measured size with no headroom: the report cap line lost its clause for the structured result of a Workflow spawn."
+      "description": "The Review agent body of the curation-on build, dist/agents/review.md, in bytes. Every turn of every Review spawn reads it (opus, high effort, about eleven spawns per full review). Added by #720 (lean Review group) at 10,930, after the cut from 12,422. Lowered by #706 (lean always-loaded descriptions) to 10898, and by #756 (lean plans) to 10862: the skip-speculative-asks rule was added, and cuts in the same body paid for it. Raised to 10867, still below the 10898 on main, when the rule gained its exemption for a partial write that can lose data, a trust boundary and a fail-closed path; two step lead-ins restated by the Consolidation Rules and the report template paid for most of it. Lowered to 10772 by #756, the measured size with no headroom: the report cap line lost its clause for the structured result of a Workflow spawn. Lowered from 10772 to 10690 by #774 (pass file paths), the measured size with no headroom. The cuts of restated text that paid for the two file-path input bullets were 82 bytes larger than those bullets."
     },
     {
       "id": "review-body-curation-off-max",
-      "ceiling": 10176,
-      "pattern": "const REVIEW_BODY_CURATION_OFF_MAX_BYTES = 10_176",
+      "ceiling": 10094,
+      "pattern": "const REVIEW_BODY_CURATION_OFF_MAX_BYTES = 10_094",
       "occurrences": 1,
       "sourceFile": "tests/guards/review-group-sizes.test.ts",
-      "description": "The Review agent body of the curation-off build, dist/curation-off/agents/review.md, in bytes. Added by #720 (lean Review group) at 10,334, after the cut from 11,623. Lowered by #706 (lean always-loaded descriptions) to 10302, and by #756 (lean plans) to 10266, with the curation-on build. Raised to 10271, still below the 10302 on main, with the curation-on build. Lowered to 10176 by #756 with the curation-on build."
+      "description": "The Review agent body of the curation-off build, dist/curation-off/agents/review.md, in bytes. Added by #720 (lean Review group) at 10,334, after the cut from 11,623. Lowered by #706 (lean always-loaded descriptions) to 10302, and by #756 (lean plans) to 10266, with the curation-on build. Raised to 10271, still below the 10302 on main, with the curation-on build. Lowered to 10176 by #756 with the curation-on build. Lowered from 10176 to 10094 by #774 (pass file paths), the measured size with no headroom, with the curation-on build."
     },
     {
       "id": "skill-review-methodology-max",
@@ -822,19 +822,19 @@
     },
     {
       "id": "command-code-review-max",
-      "ceiling": 31882,
-      "pattern": "['code-review', 'on', 31_882],",
+      "ceiling": 31610,
+      "pattern": "['code-review', 'on', 31_610],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/code-review.md, the curation-on build, in bytes. Measured 32,225 after the shared command partials were cut for #715, 32,545 after the lean Review group (#720) and #683 met in one merge, 33,229 after the shared root step was cut again for #683, 33,364 after the roots were resolved by one script call for #683, and 34,062 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (34,170 after the knowledge write-back filter and the index file name were restored for #675,34,162 after the decisions partial was condensed for #675, 34,332 after the knowledge partial was condensed for #675, 34,751 after the publication partial was condensed for #675, 34,888 after #561), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. Lowered by #706 (lean always-loaded descriptions) to 32204. Lowered by #756 to 31882, the measured size with no headroom: the per-ticket design-document glob left the command (322 bytes in every build)."
+      "description": "D-CMD-SIZE: dist/commands/code-review.md, the curation-on build, in bytes. Measured 32,225 after the shared command partials were cut for #715, 32,545 after the lean Review group (#720) and #683 met in one merge, 33,229 after the shared root step was cut again for #683, 33,364 after the roots were resolved by one script call for #683, and 34,062 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (34,170 after the knowledge write-back filter and the index file name were restored for #675,34,162 after the decisions partial was condensed for #675, 34,332 after the knowledge partial was condensed for #675, 34,751 after the publication partial was condensed for #675, 34,888 after #561), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. Lowered by #706 (lean always-loaded descriptions) to 32204. Lowered by #756 to 31882, the measured size with no headroom: the per-ticket design-document glob left the command (322 bytes in every build). Lowered from 31882 to 31610 by #774 (pass file paths), the measured size with no headroom. The cuts of restated text that paid for the file-path text were 272 bytes larger than that text."
     },
     {
       "id": "command-code-review-curation-off-max",
-      "ceiling": 30266,
-      "pattern": "['code-review', 'off', 30_266],",
+      "ceiling": 29994,
+      "pattern": "['code-review', 'off', 29_994],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/curation-off/commands/code-review.md, the curation-off build, in bytes. Measured 30,609 after the shared command partials were cut for #715, 30,811 after the lean Review group (#720) and #683 met in one merge, 31,358 after the shared root step was cut again for #683, 31,414 after the roots were resolved by one script call for #683, and 31,487 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (31,595 after the knowledge write-back filter and the index file name were restored for #675,31,587 after the knowledge partial was condensed for #675, 32,006 after the publication partial was condensed for #675, 32,143 after #561), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. Lowered by #706 (lean always-loaded descriptions) to 30588. Lowered by #756 to 30266, the measured size with no headroom: the per-ticket design-document glob left the command (322 bytes in every build)."
+      "description": "D-CMD-SIZE: dist/curation-off/commands/code-review.md, the curation-off build, in bytes. Measured 30,609 after the shared command partials were cut for #715, 30,811 after the lean Review group (#720) and #683 met in one merge, 31,358 after the shared root step was cut again for #683, 31,414 after the roots were resolved by one script call for #683, and 31,487 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (31,595 after the knowledge write-back filter and the index file name were restored for #675,31,587 after the knowledge partial was condensed for #675, 32,006 after the publication partial was condensed for #675, 32,143 after #561), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. Lowered by #706 (lean always-loaded descriptions) to 30588. Lowered by #756 to 30266, the measured size with no headroom: the per-ticket design-document glob left the command (322 bytes in every build). Lowered from 30266 to 29994 by #774 (pass file paths), the measured size with no headroom. The cuts of restated text that paid for the file-path text were 272 bytes larger than that text."
     },
     {
       "id": "command-debug-max",
@@ -886,19 +886,19 @@
     },
     {
       "id": "command-plan-max",
-      "ceiling": 33310,
-      "pattern": "['plan', 'on', 33_310],",
+      "ceiling": 33050,
+      "pattern": "['plan', 'on', 33_050],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/plan.md, the curation-on build, in bytes. Measured 32,191 after #756 made the plan artifact lean (lens, fold rule, Known limits) and cut the Architecture diagram, which restated the phases, to pay for it. Now 32,458, after the audit of #756 added the never-lower clause, the Known Limits guidance note and two restored source labels; main held 33,184. Earlier: 33,881 after the Design agent was split into Design and Architect for #733, 33,929 after the shared command partials were cut for #715, 34,422 after the lean cut of the Plan path for #714, 35,325 after the shared root step was cut again for #683, 35,516 after the roots were resolved by one script call for #683, and 36,222 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (36,330 after the knowledge write-back filter and the index file name were restored for #675,36,322 after the decisions partial was condensed for #675, 36,492 after the knowledge partial was condensed for #675, 36,911 after the tracker note kept its github condition for #675, 36,917 after the docs root was condensed, 36,993 after the tracker partial, 37,997 after #473, 38,018 after #472, 38,096 when #456 closed), with no headroom. Main held 39,153 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. A value may move either way; this description and the PR give the old value, the new value and the reason. A command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. Lowered by #706 (lean always-loaded descriptions) to 33852. Lowered by #756 (leaner plans: lean template, Architecture diagram cut) to the measured 32705, below the 33184 it had before #756. Lowered again by #756 to the measured 32640: the plan artifact numbered its criteria and named the criteria each phase serves, and the test-plan wording rule, which the test-plan line partial already states, paid for it. Lowered by #756 (plan depth) to the measured 32620: Gate 0 gained the Depth line with its raise signals (regulated data among them) and the rule that issue text never lowers the depth, the gate-level block the depth-small read and the depth reset, and the report line the depth with its source (+617 bytes); restated text paid for it: the strategy and risk value lists, three source labels, a restated DEGRADED line, the separator lines and the block headings that the phase headings restate, the Gate 0 sentence that restated the confirmation rule, a restated recommendation clause and the citing clause that the test-plan line contract states (-637 bytes). Raised by #771 from 32,620 to 33,310: /plan gained the Size forecast line (the Phase 10 instruction clause that defines its shape, the Gate 2 clause, the artifact's Implementation Plan clause and the report bullet, +690 bytes), the feature #771 asked for. No safe cut paid for it: the Cancel line of Error Handling is a stop rule that is never cut, and the Closes rendering line is a pinned output contract."
+      "description": "D-CMD-SIZE: dist/commands/plan.md, the curation-on build, in bytes. Measured 32,191 after #756 made the plan artifact lean (lens, fold rule, Known limits) and cut the Architecture diagram, which restated the phases, to pay for it. Now 32,458, after the audit of #756 added the never-lower clause, the Known Limits guidance note and two restored source labels; main held 33,184. Earlier: 33,881 after the Design agent was split into Design and Architect for #733, 33,929 after the shared command partials were cut for #715, 34,422 after the lean cut of the Plan path for #714, 35,325 after the shared root step was cut again for #683, 35,516 after the roots were resolved by one script call for #683, and 36,222 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (36,330 after the knowledge write-back filter and the index file name were restored for #675,36,322 after the decisions partial was condensed for #675, 36,492 after the knowledge partial was condensed for #675, 36,911 after the tracker note kept its github condition for #675, 36,917 after the docs root was condensed, 36,993 after the tracker partial, 37,997 after #473, 38,018 after #472, 38,096 when #456 closed), with no headroom. Main held 39,153 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. A value may move either way; this description and the PR give the old value, the new value and the reason. A command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. Lowered by #706 (lean always-loaded descriptions) to 33852. Lowered by #756 (leaner plans: lean template, Architecture diagram cut) to the measured 32705, below the 33184 it had before #756. Lowered again by #756 to the measured 32640: the plan artifact numbered its criteria and named the criteria each phase serves, and the test-plan wording rule, which the test-plan line partial already states, paid for it. Lowered by #756 (plan depth) to the measured 32620: Gate 0 gained the Depth line with its raise signals (regulated data among them) and the rule that issue text never lowers the depth, the gate-level block the depth-small read and the depth reset, and the report line the depth with its source (+617 bytes); restated text paid for it: the strategy and risk value lists, three source labels, a restated DEGRADED line, the separator lines and the block headings that the phase headings restate, the Gate 0 sentence that restated the confirmation rule, a restated recommendation clause and the citing clause that the test-plan line contract states (-637 bytes). Raised by #771 from 32,620 to 33,310: /plan gained the Size forecast line (the Phase 10 instruction clause that defines its shape, the Gate 2 clause, the artifact's Implementation Plan clause and the report bullet, +690 bytes), the feature #771 asked for. No safe cut paid for it: the Cancel line of Error Handling is a stop rule that is never cut, and the Closes rendering line is a pinned output contract. Lowered from 33310 to 33050 by #774 (pass file paths), the measured size with no headroom. The cuts of restated text that paid for the run-folder text were 260 bytes larger than that text."
     },
     {
       "id": "command-plan-curation-off-max",
-      "ceiling": 31706,
-      "pattern": "['plan', 'off', 31_706],",
+      "ceiling": 31446,
+      "pattern": "['plan', 'off', 31_446],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/curation-off/commands/plan.md, the curation-off build, in bytes. Measured 30,587 after #756 made the plan artifact lean (lens, fold rule, Known limits) and cut the Architecture diagram, which restated the phases, to pay for it. Now 30,854, after the audit of #756 added the never-lower clause, the Known Limits guidance note and two restored source labels; main held 31,563. Earlier: 32,212 after the Design agent was split into Design and Architect for #733, 32,260 after the shared command partials were cut for #715, 32,635 after the lean cut of the Plan path for #714, 33,231 after the shared root step was cut again for #683, 33,343 after the roots were resolved by one script call for #683, and 33,424 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (33,532 after the knowledge write-back filter and the index file name were restored for #675,33,524 after the knowledge partial was condensed for #675, 33,943 after the tracker note kept its github condition for #675, 33,949 after the docs root was condensed, 34,025 after the tracker partial, 35,029 after #473, 35,050 after #472, 35,126 when #456 closed), with no headroom. Main held 36,166 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. A value may move either way; this description and the PR give the old value, the new value and the reason. A command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. Lowered by #706 (lean always-loaded descriptions) to 32183. Lowered by #756 (leaner plans) to the measured 31101, below the 31563 it had before #756. Lowered again by #756 to the measured 31036: the plan artifact numbered its criteria and named the criteria each phase serves, and the test-plan wording rule, which the test-plan line partial already states, paid for it. Lowered by #756 (plan depth) to the measured 31016: Gate 0 gained the Depth line with its raise signals (regulated data among them) and the rule that issue text never lowers the depth, the gate-level block the depth-small read and the depth reset, and the report line the depth with its source (+617 bytes); restated text paid for it: the strategy and risk value lists, three source labels, a restated DEGRADED line, the separator lines and the block headings that the phase headings restate, the Gate 0 sentence that restated the confirmation rule, a restated recommendation clause and the citing clause that the test-plan line contract states (-637 bytes). Raised by #771 from 31,016 to 31,706: /plan gained the Size forecast line (the Phase 10 instruction clause that defines its shape, the Gate 2 clause, the artifact's Implementation Plan clause and the report bullet, +690 bytes), the feature #771 asked for. No safe cut paid for it: the Cancel line of Error Handling is a stop rule that is never cut, and the Closes rendering line is a pinned output contract."
+      "description": "D-CMD-SIZE: dist/curation-off/commands/plan.md, the curation-off build, in bytes. Measured 30,587 after #756 made the plan artifact lean (lens, fold rule, Known limits) and cut the Architecture diagram, which restated the phases, to pay for it. Now 30,854, after the audit of #756 added the never-lower clause, the Known Limits guidance note and two restored source labels; main held 31,563. Earlier: 32,212 after the Design agent was split into Design and Architect for #733, 32,260 after the shared command partials were cut for #715, 32,635 after the lean cut of the Plan path for #714, 33,231 after the shared root step was cut again for #683, 33,343 after the roots were resolved by one script call for #683, and 33,424 after the settings and evidence-policy scripts printed their own fail-closed line for #675 (33,532 after the knowledge write-back filter and the index file name were restored for #675,33,524 after the knowledge partial was condensed for #675, 33,943 after the tracker note kept its github condition for #675, 33,949 after the docs root was condensed, 34,025 after the tracker partial, 35,029 after #473, 35,050 after #472, 35,126 when #456 closed), with no headroom. Main held 36,166 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. A value may move either way; this description and the PR give the old value, the new value and the reason. A command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states. Lowered by #706 (lean always-loaded descriptions) to 32183. Lowered by #756 (leaner plans) to the measured 31101, below the 31563 it had before #756. Lowered again by #756 to the measured 31036: the plan artifact numbered its criteria and named the criteria each phase serves, and the test-plan wording rule, which the test-plan line partial already states, paid for it. Lowered by #756 (plan depth) to the measured 31016: Gate 0 gained the Depth line with its raise signals (regulated data among them) and the rule that issue text never lowers the depth, the gate-level block the depth-small read and the depth reset, and the report line the depth with its source (+617 bytes); restated text paid for it: the strategy and risk value lists, three source labels, a restated DEGRADED line, the separator lines and the block headings that the phase headings restate, the Gate 0 sentence that restated the confirmation rule, a restated recommendation clause and the citing clause that the test-plan line contract states (-637 bytes). Raised by #771 from 31,016 to 31,706: /plan gained the Size forecast line (the Phase 10 instruction clause that defines its shape, the Gate 2 clause, the artifact's Implementation Plan clause and the report bullet, +690 bytes), the feature #771 asked for. No safe cut paid for it: the Cancel line of Error Handling is a stop rule that is never cut, and the Closes rendering line is a pinned output contract. Lowered from 31706 to 31446 by #774 (pass file paths), the measured size with no headroom. The cuts of restated text that paid for the run-folder text were 260 bytes larger than that text."
     },
     {
       "id": "command-release-max",
@@ -1078,11 +1078,11 @@
     },
     {
       "id": "test-body-max",
-      "ceiling": 10989,
-      "pattern": "const TEST_BODY_MAX_BYTES = 10_989",
+      "ceiling": 10926,
+      "pattern": "const TEST_BODY_MAX_BYTES = 10_926",
       "occurrences": 1,
       "sourceFile": "tests/guards/test-group-sizes.test.ts",
-      "description": "The Test agent body, src/assets/agents/test.md, in bytes. It is hand-authored, so every build key ships it unchanged, and every turn of every Test spawn reads it. Added by #711 (lean Test group) at 11,099, after the cut from 11,211. The cut also moved the Bash Execution Constraints into the body (1,069 bytes) from references/browser-testing.md, which every run read before. May be LOWERED, never raised. Lowered by #706 (lean always-loaded descriptions) to 11071. Lowered to 10989 by #756, the measured size with no headroom: one sentence of the shared Running commands text that only a removed command used, and the names of the removed commands in the TEST_PLAN input line, left the body."
+      "description": "The Test agent body, src/assets/agents/test.md, in bytes. It is hand-authored, so every build key ships it unchanged, and every turn of every Test spawn reads it. Added by #711 (lean Test group) at 11,099, after the cut from 11,211. The cut also moved the Bash Execution Constraints into the body (1,069 bytes) from references/browser-testing.md, which every run read before. May be LOWERED, never raised. Lowered by #706 (lean always-loaded descriptions) to 11071. Lowered to 10989 by #756, the measured size with no headroom: one sentence of the shared Running commands text that only a removed command used, and the names of the removed commands in the TEST_PLAN input line, left the body. Lowered from 10989 to 10926 by #774 (pass file paths), the measured size with no headroom. The cuts that paid for the plan-file input line were 63 bytes larger than that line."
     },
     {
       "id": "skill-qa-max",
@@ -1118,19 +1118,19 @@
     },
     {
       "id": "architect-body-max",
-      "ceiling": 3782,
-      "pattern": "const ARCHITECT_BODY_MAX_BYTES = 3_782",
+      "ceiling": 3709,
+      "pattern": "const ARCHITECT_BODY_MAX_BYTES = 3_709",
       "occurrences": 1,
       "sourceFile": "tests/guards/plan-group-sizes.test.ts",
-      "description": "The Architect agent body of the curation-on build, dist/agents/architect.md, in bytes. Every turn of the /plan Phase 12 spawn reads it (opus, high effort). Added by #733 (Design split into Design and Architect, D-DESIGN-VARIANTS) at 3,387. Raised by #752 from 3,386 to 3,782 (396 bytes): the Plan writing section lets the plan writer read gap-analysis by install path, as the Design agent that wrote plans at 3.11.0 preloaded it. The section adds 447 bytes; wording cuts in the same host took 51 first. Lowered by #756 (lean plans) to 3,775: the minimum-lens item was added, and wording cuts in the host and in the partial it shares with Design paid for it. Raised to 3,782, equal to main, when the minimum lens gained its never-flag clause for a trust-boundary, security, data-loss or fail-closed guard; two restated lines of the host paid for most of it."
+      "description": "The Architect agent body of the curation-on build, dist/agents/architect.md, in bytes. Every turn of the /plan Phase 12 spawn reads it (opus, high effort). Added by #733 (Design split into Design and Architect, D-DESIGN-VARIANTS) at 3,387. Raised by #752 from 3,386 to 3,782 (396 bytes): the Plan writing section lets the plan writer read gap-analysis by install path, as the Design agent that wrote plans at 3.11.0 preloaded it. The section adds 447 bytes; wording cuts in the same host took 51 first. Lowered by #756 (lean plans) to 3,775: the minimum-lens item was added, and wording cuts in the host and in the partial it shares with Design paid for it. Raised to 3,782, equal to main, when the minimum lens gained its never-flag clause for a trust-boundary, security, data-loss or fail-closed guard; two restated lines of the host paid for most of it. Lowered from 3782 to 3709 by #774 (pass file paths), the measured size with no headroom. The cuts of restated text in the Design partial, which Architect shares with Design, took 73 bytes out of this body. The report-path text sits in the Design host only."
     },
     {
       "id": "architect-body-curation-off-max",
-      "ceiling": 3216,
-      "pattern": "const ARCHITECT_BODY_CURATION_OFF_MAX_BYTES = 3_216",
+      "ceiling": 3143,
+      "pattern": "const ARCHITECT_BODY_CURATION_OFF_MAX_BYTES = 3_143",
       "occurrences": 1,
       "sourceFile": "tests/guards/plan-group-sizes.test.ts",
-      "description": "The Architect agent body of the curation-off build, dist/curation-off/agents/architect.md, in bytes. Added by #733 (Design split into Design and Architect, D-DESIGN-VARIANTS) at 2,821. Raised by #752 from 2,820 to 3,216 (396 bytes), for the same Plan writing section as the curation-on build. Lowered by #756 (lean plans) to 3,209, with the curation-on build. Raised to 3,216, equal to main, with the curation-on build."
+      "description": "The Architect agent body of the curation-off build, dist/curation-off/agents/architect.md, in bytes. Added by #733 (Design split into Design and Architect, D-DESIGN-VARIANTS) at 2,821. Raised by #752 from 2,820 to 3,216 (396 bytes), for the same Plan writing section as the curation-on build. Lowered by #756 (lean plans) to 3,209, with the curation-on build. Raised to 3,216, equal to main, with the curation-on build. Lowered from 3216 to 3143 by #774 (pass file paths), the measured size with no headroom, with the curation-on build."
     },
     {
       "id": "explore-body-max",
@@ -1334,11 +1334,11 @@
     },
     {
       "id": "evaluate-body-max",
-      "ceiling": 4217,
-      "pattern": "['evaluate', 'on', 4_217],",
+      "ceiling": 4216,
+      "pattern": "['evaluate', 'on', 4_216],",
       "occurrences": 1,
       "sourceFile": "tests/guards/other-agents-sizes.test.ts",
-      "description": "The Evaluate agent body, src/assets/agents/evaluate.md, in bytes. It is hand-authored, with one build. Every turn of every Evaluate spawn reads it (sonnet, one spawn per /implement alignment pass). Added by #718 (lean other targets) at 4,234, after the cut from 4,672. Lowered by #706 (lean descriptions, the rest) to 4217."
+      "description": "The Evaluate agent body, src/assets/agents/evaluate.md, in bytes. It is hand-authored, with one build. Every turn of every Evaluate spawn reads it (sonnet, one spawn per /implement alignment pass). Added by #718 (lean other targets) at 4,234, after the cut from 4,672. Lowered by #706 (lean descriptions, the rest) to 4217. Lowered from 4217 to 4216 by #774 (pass file paths), the measured size with no headroom. The cuts that paid for the plan-file input line were 1 byte larger than that line."
     },
     {
       "id": "debug-agent-body-max",
@@ -1358,19 +1358,19 @@
     },
     {
       "id": "skim-body-max",
-      "ceiling": 6605,
-      "pattern": "['skim', 'on', 6_605],",
+      "ceiling": 6577,
+      "pattern": "['skim', 'on', 6_577],",
       "occurrences": 1,
       "sourceFile": "tests/guards/other-agents-sizes.test.ts",
-      "description": "The Skim agent body of the curation-on build, dist/agents/skim.md, in bytes. Every turn of every Skim spawn reads it (haiku; /explore, /plan and /research each spawn it). Added by #718 (lean other targets) at 6,617, after the cut from 7,708. Lowered by #706 (lean descriptions, the rest) to 6605."
+      "description": "The Skim agent body of the curation-on build, dist/agents/skim.md, in bytes. Every turn of every Skim spawn reads it (haiku; /explore, /plan and /research each spawn it). Added by #718 (lean other targets) at 6,617, after the cut from 7,708. Lowered by #706 (lean descriptions, the rest) to 6605. Lowered from 6605 to 6577 by #774 (pass file paths), the measured size with no headroom. The cuts that paid for the report-path text were 28 bytes larger than that text."
     },
     {
       "id": "skim-body-curation-off-max",
-      "ceiling": 5483,
-      "pattern": "['skim', 'off', 5_483],",
+      "ceiling": 5455,
+      "pattern": "['skim', 'off', 5_455],",
       "occurrences": 1,
       "sourceFile": "tests/guards/other-agents-sizes.test.ts",
-      "description": "The Skim agent body of the curation-off build, dist/curation-off/agents/skim.md, in bytes. Added by #718 (lean other targets) at 5,495, after the cut from 6,586. Lowered by #706 (lean descriptions, the rest) to 5483."
+      "description": "The Skim agent body of the curation-off build, dist/curation-off/agents/skim.md, in bytes. Added by #718 (lean other targets) at 5,495, after the cut from 6,586. Lowered by #706 (lean descriptions, the rest) to 5483. Lowered from 5483 to 5455 by #774 (pass file paths), the measured size with no headroom, with the curation-on build."
     },
     {
       "id": "tracker-body-max",
