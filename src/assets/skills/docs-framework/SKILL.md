@@ -106,7 +106,7 @@ ensure_docs_dir() { mkdir -p "$(get_docs_root)/.devflow/docs/$1"; }
 - **Reviews**: the Review agents and the Synthesize agent (review mode) write into `reviews/{branch-slug}/{timestamp}/`; `/resolve` adds `resolution-summary.md` (Phase 5); `/code-review` overwrites its `.last-review-head` marker, under the git directory, with the HEAD SHA.
 - **Bug analysis**: the Debug agents and the Synthesize agent (bug-analysis mode) write into `bug-analysis/{branch-slug}/{timestamp}/`; the scanner calls write the SARIF files, the changed-name list for the Snyk filter and the CodeQL log, and the counts step writes the findings tables, all into that run folder; `/bug-analysis` overwrites its `.last-analysis-head` marker, under the git directory, with the HEAD SHA only when every tool that was to run completed, or `--no-static` is set.
 - **Research**: the Research agents write `{type}.md`, and the Synthesize agent (research mode) writes `research-summary.md` through `RESEARCH_BASE_DIR`, both into `research/{topic-slug}/{timestamp}/`.
-- **Design**: `/plan` writes the design document, and its Skim, Explore, Design and Synthesize agents write `plan/{timestamp}/{agent}-{k}.md`.
+- **Design**: `/plan` writes the design document, and its Skim, Design and Synthesize agents write `plan/{timestamp}/{agent}-{k}.md`.
 - **Handoff and evidence**: `/implement` writes `evidence-{branch-slug}.md`, which stays after the PR, and the handoff file, to which each Code agent appends one phase section and which is deleted once the PR exists.
 - **Memory and curation**: the Stop hook overwrites `.devflow/memory/WORKING-MEMORY.md`; `decisions.md` and `pitfalls.md` are rendered from `decisions-ledger.jsonl` (active entries in full, inactive ones in an Inactive table).
 

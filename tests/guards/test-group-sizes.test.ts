@@ -12,7 +12,7 @@ import * as path from 'path'
 import { ROOT, resolveAgentSource } from '../helpers.js'
 
 /** The Test agent body (test.md), in bytes. It is hand-authored, so every build key ships it unchanged. */
-const TEST_BODY_MAX_BYTES = 10_926
+const TEST_BODY_MAX_BYTES = 10_908
 /** src/assets/skills/qa/SKILL.md, in bytes. */
 const QA_SKILL_MAX_BYTES = 4_574
 /** src/assets/skills/qa/references/browser-testing.md, in bytes. */

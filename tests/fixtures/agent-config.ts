@@ -398,8 +398,7 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
    * median 11.9K tokens of starting context. The override runs them on Sonnet at
    * high effort, read-only (Read and Bash: the other search tools are withheld from
    * an agent that holds Bash), and omits CLAUDE.md and the rules, as the built-in
-   * does. It holds Write for one case: a `REPORT_PATH:` line of the spawn prompt, which
-   * plan-files.cjs must clear before the one report write (#774). It holds no Edit tool.
+   * does. It holds no Write or Edit tool, so /plan takes its reply as text (#774).
    * The override applies to every session on the machine, plan mode included,
    * and uninstalling devflow restores the built-in. The row, the frontmatter of
    * explore.md and the parity checklist in tests/explore-agent.test.ts move together.
@@ -407,7 +406,7 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
   explore: {
     model: 'sonnet',
     effort: 'high',
-    policy: { kind: 'allow', tools: ['Read', 'Bash', 'Write'] },
+    policy: { kind: 'allow', tools: ['Read', 'Bash'] },
     omitClaudeMd: true,
     skills: [],
     digest: ['context-economy'],

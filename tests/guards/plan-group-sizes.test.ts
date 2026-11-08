@@ -6,7 +6,7 @@
  * `tests/fixtures/numeric-floors.json`; lowered, never raised. The exceptions are #752, which restored
  * the Architect plan-writing section and the design-review Suggest lines after wording cuts in the same
  * files, #764, which raised the Plan agent ceiling for parity with the built-in Plan agent, by
- * maintainer decision, and #774, which raised the Design and Explore ceilings for the report-path
+ * maintainer decision, and #774, which raised the Design ceilings for the report-path check and write
  * text after cuts in the same files; each raise states its bytes in its row.
  */
 
@@ -16,15 +16,15 @@ import * as path from 'path'
 import { ROOT, resolveAgentSource, resolveCurationOffSource } from '../helpers.js'
 
 /** The Design agent body of the curation-on build, dist/agents/design.md, in bytes. */
-const DESIGN_BODY_MAX_BYTES = 3_362
+const DESIGN_BODY_MAX_BYTES = 3_478
 /** The Design agent body of the curation-off build, dist/curation-off/agents/design.md, in bytes. */
-const DESIGN_BODY_CURATION_OFF_MAX_BYTES = 2_796
+const DESIGN_BODY_CURATION_OFF_MAX_BYTES = 2_912
 /** The Architect agent body of the curation-on build, dist/agents/architect.md, in bytes. */
 const ARCHITECT_BODY_MAX_BYTES = 3_709
 /** The Architect agent body of the curation-off build, dist/curation-off/agents/architect.md, in bytes. */
 const ARCHITECT_BODY_CURATION_OFF_MAX_BYTES = 3_143
 /** The Explore agent body (hand-authored, one build), in bytes. */
-const EXPLORE_BODY_MAX_BYTES = 3_283
+const EXPLORE_BODY_MAX_BYTES = 2_768
 /** The Plan agent body (hand-authored, one build), in bytes. */
 const PLAN_BODY_MAX_BYTES = 3_924
 

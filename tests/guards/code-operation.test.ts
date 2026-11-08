@@ -400,7 +400,7 @@ describe('the alignment-fix Protocol is its two lines, with no re-run of Evaluat
 // value and the reason.
 
 /** The compiled Code agent body, in bytes. Registered as `code-body-max`. */
-const CODE_BODY_MAX_BYTES = 9_662
+const CODE_BODY_MAX_BYTES = 9_657
 
 /** The compiled Fix agent body, in bytes. Registered as `fix-body-max`. */
 const FIX_BODY_MAX_BYTES = 7_266
