@@ -44,9 +44,9 @@ Follow `devflow:apply-decisions` on the `DECISIONS_CONTEXT` index. A finding tha
 
 ### CRITICAL
 **[{FOCUS}] Gap/Anti-Pattern: {title}** — Confidence: {n}%
-- Evidence: "{quoted text from artifact}"
+- Evidence: "{quoted text}"
 - Issue: {what is missing or wrong}
-- Resolution: {concrete action to address}
+- Resolution: {concrete action}
 
 ### HIGH
 {findings...}
@@ -78,7 +78,7 @@ Report cap: final message at most about 1,500 tokens; longer material goes to a 
 **Escalate to orchestrator:**
 - Context documents are missing or unreadable
 - Ambiguity that only the user can resolve
-- Artifacts reference external systems not present in the provided context
+- Artifacts reference external systems not present in the context
 @end
 
 @export input
