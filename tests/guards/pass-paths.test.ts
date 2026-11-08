@@ -23,7 +23,8 @@
  *                  resolution and its stop, the two-line `EXECUTION_PLAN`, the hash call and its stop, the
  *                  phase line, the two criteria placeholders, and one check after the Evaluate spawn and one
  *                  after the Test spawn, each only for a run that recorded `PLAN_SHA`; the Orchestration-only
- *                  principle names the plan hash calls among the inline calls.
+ *                  principle names the plan hash calls among the inline calls; the evidence file lead says the
+ *                  file stays after the PR exists.
  *   reader arm     every compiled build of Code, Evaluate and Test (each variant tree that holds the agent)
  *                  carries the read-only-the-named-sections clause and the data clause on its `EXECUTION_PLAN`
  *                  line; every Code build also carries the never-edit clause.
@@ -107,6 +108,7 @@ const TEST_CHECK =
   "append its TP claims (Phase 6's **Evidence claims**). With `PLAN_SHA`, run the PLAN_SHA check in that message; use the Status only if it passes."
 const PHASE_2 = '### Phase 2: Implement'
 const PRINCIPLE_HASH = 'and the evidence and plan hash script checks'
+const EVIDENCE_STAYS = 'it stays after the PR exists'
 
 /** The claims: each is one anchor that a build holds exactly once, named by the defect that reports it lost. */
 const CLAIMS: ReadonlyArray<readonly [name: string, anchor: string]> = [
@@ -120,6 +122,7 @@ const CLAIMS: ReadonlyArray<readonly [name: string, anchor: string]> = [
   ['the Evaluate return has no PLAN_SHA check, or the check runs without PLAN_SHA', EVALUATE_CHECK],
   ['the Test return has no PLAN_SHA check, or the check runs without PLAN_SHA', TEST_CHECK],
   ['the Orchestration-only principle does not name the plan hash calls', PRINCIPLE_HASH],
+  ['the evidence file lead does not say it stays after the PR exists, so a cleanup could delete it', EVIDENCE_STAYS],
 ]
 
 /** The order of the claims: the path is settled before it is read, the hash before Phase 2, each check after its spawn. */

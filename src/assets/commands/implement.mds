@@ -125,9 +125,9 @@ The issue token is forwarded **unclassified**: routing is by SHAPE alone. Only `
 <!-- compliance:end -->
 
 <!-- compliance:on -->
-**Test plan.** Before any Code spawn, give the task a test plan in the evidence file `{worktree}/.devflow/docs/evidence-{branch_slug}.md` (`EVIDENCE_FILE`). It holds up to three sections, in this order and nothing else: `## Test Plan`; `## Evidence Exceptions`, a byte copy of `PR_EXCEPTIONS` present only while that is not `(none)`; and `## Claims`, always last. Create the file if absent; if it exists, replace its `## Test Plan` and `## Evidence Exceptions` sections and keep `## Claims` byte-identical.
+**Test plan.** Before any Code spawn, give the task a test plan in the evidence file `{worktree}/.devflow/docs/evidence-{branch_slug}.md` (`EVIDENCE_FILE`) — unlike the handoff file, it stays after the PR exists. It holds up to three sections, in this order and nothing else: `## Test Plan`; `## Evidence Exceptions`, a byte copy of `PR_EXCEPTIONS` present only while that is not `(none)`; and `## Claims`, always last. Create the file if absent; if it exists, replace its `## Test Plan` and `## Evidence Exceptions` sections and keep `## Claims` byte-identical.
 <!-- compliance:off -->
-**Test plan.** Before any Code spawn, give the task a test plan in the evidence file `{worktree}/.devflow/docs/evidence-{branch_slug}.md` (`EVIDENCE_FILE`). It holds up to three sections, in this order and nothing else: `## Test Plan`; `## Evidence Exceptions`, a byte copy of `EVIDENCE_EXCEPTIONS` present only while that is not `(none)`; and `## Claims`, always last. Create the file if absent; if it exists, replace its `## Test Plan` and `## Evidence Exceptions` sections and keep `## Claims` byte-identical.
+**Test plan.** Before any Code spawn, give the task a test plan in the evidence file `{worktree}/.devflow/docs/evidence-{branch_slug}.md` (`EVIDENCE_FILE`) — unlike the handoff file, it stays after the PR exists. It holds up to three sections, in this order and nothing else: `## Test Plan`; `## Evidence Exceptions`, a byte copy of `EVIDENCE_EXCEPTIONS` present only while that is not `(none)`; and `## Claims`, always last. Create the file if absent; if it exists, replace its `## Test Plan` and `## Evidence Exceptions` sections and keep `## Claims` byte-identical.
 <!-- compliance:end -->
 
 <!-- compliance:on -->
