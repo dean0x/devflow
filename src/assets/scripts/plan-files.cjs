@@ -32,8 +32,13 @@
 // `check` refuses a path unless: it is absolute with no `.`, `..` or empty part; it holds
 // none of ' " $ ` \ * ? [ ] { } and no control character; its name matches <letters>-<1 to 3
 // digits>.md; its folder is a stamp; the folder above that is <root>/.devflow/docs/plan and
-// <root> is its own git toplevel; no part below <root> is a link; nothing stands at the path
-// (a dangling link counts); git tracks nothing under the plan folder.
+// <root> is its own git toplevel; `.devflow`, `docs`, `plan` and the stamp folder each stand
+// as a real folder, never a link (a `claim` made them); nothing stands at the path (a dangling
+// link counts); git tracks nothing under the plan folder.
+//
+// The tracking question of `claim` and `check` is asked without regard to letter case: a
+// tracked `.DEVFLOW/docs/plan`, `.devflow/docſ/plan` or `.devﬂow/docs/plan` entry counts, as
+// a case-folding file system opens it as the plan folder.
 //
 // `hash` refuses a path unless it is absolute with the same character rule, and lstat shows
 // a regular file (never a link) of at most MAX_HASH_BYTES. The bytes come from one open of the
@@ -77,11 +82,24 @@ const EXIT_CODES = Object.freeze({
 
 const USAGE = 'usage: node plan-files.cjs claim | check <path> | hash <file>';
 
-/** The plan folder as git spells it, relative to the root. */
+/** The plan folder, relative to the root. */
 const PLAN_PATHSPEC = '.devflow/docs/plan';
 
 /** The folders below the root that lead to the run folders, in walk order. */
 const PLAN_PARTS = Object.freeze(PLAN_PATHSPEC.split('/'));
+
+/**
+ * The plan folder in every spelling a case-folding file system opens as PLAN_PATHSPEC, each a
+ * literal path matched without regard to ASCII letter case: an index entry at the folder, or
+ * anywhere below it, matches. git's `icase` folds ASCII letters only, but APFS (the macOS
+ * default) also folds U+FB02 to "fl" and U+017F to "s", so `.devﬂow` (DEVFLOW_SPELLINGS of
+ * tracked-areas.cjs) and `docſ` open the same folders. The code is written with escapes, so
+ * each code point is named.
+ */
+const DOCS_SPELLINGS = Object.freeze(['docs', 'doc\u{17F}']);
+const PLAN_LISTING_PATHSPECS = Object.freeze(
+  trackedAreas.DEVFLOW_SPELLINGS.flatMap(dir => DOCS_SPELLINGS.map(docs => ':(icase,literal)' + dir + '/' + docs + '/plan')),
+);
 
 /** A character no plan path may hold: shell and glob specials, and any control character (C0 and DEL). */
 const PATH_BAD_RE = /['"$`\\*?[\]{}\x00-\x1f\x7f]/;
@@ -145,9 +163,10 @@ function standingAt(p) {
 }
 
 /**
- * Whether git tracks anything under the plan folder of `root`. One `git ls-files` over the
- * plan pathspec; it reads the index with the repository's fsmonitor command turned off
- * (D-NO-FSMONITOR) and without the variables that redirect git to another repository.
+ * Whether git tracks anything under the plan folder of `root`, in any spelling a case-folding
+ * file system opens (PLAN_LISTING_PATHSPECS). One `git ls-files` over those pathspecs; it
+ * reads the index with the repository's fsmonitor command turned off (D-NO-FSMONITOR) and
+ * without the variables that redirect git to another repository.
  *   tracked    at least one entry listed, whatever the exit status
  *   untracked  exit 0 with nothing listed
  *   unknown    git did not answer, its listing overflowed, or it exited non-zero with nothing listed
@@ -157,7 +176,7 @@ function standingAt(p) {
  * @returns {'tracked' | 'untracked' | 'unknown'}
  */
 function planTracking(exec, root) {
-  const res = exec('git', ['--no-literal-pathspecs', '-c', 'core.fsmonitor=false', 'ls-files', '-z', '--', PLAN_PATHSPEC], {
+  const res = exec('git', ['--no-literal-pathspecs', '-c', 'core.fsmonitor=false', 'ls-files', '-z', '--', ...PLAN_LISTING_PATHSPECS], {
     cwd: root,
     env: Object.assign({}, trackedAreas.gitEnvWithoutRedirects(process.env), { GIT_TERMINAL_PROMPT: '0' }),
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -275,7 +294,7 @@ function check(exec, target) {
   for (const part of [...PLAN_PARTS, stamp]) {
     dir += '/' + part;
     const standing = standingAt(dir);
-    if (standing === 'absent') break;
+    if (standing === 'absent') return fail(EXIT_CODES.REFUSED, 'no run folder was claimed: nothing stands at ' + JSON.stringify(dir).slice(0, 300));
     if (standing === 'other') return fail(EXIT_CODES.REFUSED, 'a link or a file stands at ' + JSON.stringify(dir).slice(0, 300));
   }
   if (standingAt(target) !== 'absent') return fail(EXIT_CODES.REFUSED, 'something stands at the path already');

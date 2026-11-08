@@ -9,8 +9,10 @@
  *   - `claim` makes a stamp-only run folder, one folder at a time, and refuses a linked or
  *     tracked plan folder, a root with a character the paths refuse, and any argument;
  *   - `check` accepts one new file name in a claimed folder and refuses every other path:
- *     relative, dotted, outside the plan folder, badly named, existing, tracked, linked,
+ *     relative, dotted, outside the plan folder, badly named, existing, tracked (in any
+ *     spelling a case-folding file system opens), linked, in a run folder no claim made,
  *     under a root that is not its own git toplevel;
+ *   - `check` fails closed with exit 4 when git does not answer, or its listing overflows;
  *   - `hash` prints the sha256 of a regular file (one of exactly the size bound included) and
  *     refuses a link, a folder, a FIFO and a huge file, and a link put in place after its lstat;
  *   - every failure is closed: nothing on stdout, one reason line on stderr, a non-zero exit;
@@ -53,12 +55,23 @@ const planScript = createRequire(import.meta.url)(PLAN_SCRIPT) as PlanScript;
 
 const STAMP_RE = /^\d{4}-\d{2}-\d{2}_\d{4}(?:\d{2})?$/;
 const TOPLEVEL_ARGV = ['rev-parse', '--show-toplevel'];
-const LS_FILES_ARGV = ['--no-literal-pathspecs', '-c', 'core.fsmonitor=false', 'ls-files', '-z', '--', '.devflow/docs/plan'];
+/**
+ * The plan folder in every spelling a case-folding file system opens as `.devflow/docs/plan`:
+ * git's `icase` folds ASCII letters, and APFS also folds U+FB02 to "fl" and U+017F to "s".
+ */
+const PLAN_LISTING_PATHSPECS = [
+  ':(icase,literal).devflow/docs/plan',
+  ':(icase,literal).devflow/doc\u{17F}/plan',
+  ':(icase,literal).dev\u{FB02}ow/docs/plan',
+  ':(icase,literal).dev\u{FB02}ow/doc\u{17F}/plan',
+];
+const LS_FILES_ARGV = ['--no-literal-pathspecs', '-c', 'core.fsmonitor=false', 'ls-files', '-z', '--', ...PLAN_LISTING_PATHSPECS];
 
 describe('plan-files.cjs on real git', { timeout: 60_000 }, () => {
   let base: string;
   let home: string;
   let outside: string;
+  let emptyBin: string;
   let counter = 0;
 
   /** Run the script as a subprocess from `cwd`. */
@@ -100,11 +113,16 @@ describe('plan-files.cjs on real git', { timeout: 60_000 }, () => {
     fs.mkdirSync(path.join(home, '.devflow'), { recursive: true });
     outside = path.join(base, 'outside');
     fs.mkdirSync(outside);
+    emptyBin = path.join(base, 'empty-bin');
+    fs.mkdirSync(emptyBin);
   });
 
   afterAll(() => {
     fs.rmSync(base, { recursive: true, force: true });
   });
+
+  /** A new empty folder that no other test writes in, for an assertion that nothing was made there. */
+  const emptyFolder = (): string => fs.mkdtempSync(path.join(base, 'empty-'));
 
   describe('claim', () => {
     it('makes the stamp folder under the plan folder from a subdirectory and prints its path', () => {
@@ -142,25 +160,27 @@ describe('plan-files.cjs on real git', { timeout: 60_000 }, () => {
     });
 
     it('refuses outside a git repository and makes nothing', () => {
-      expectClosed(run(['claim'], outside), 2);
-      expect(fs.readdirSync(outside)).toEqual([]);
+      const bare = emptyFolder();
+      expectClosed(run(['claim'], bare), 2);
+      expect(fs.readdirSync(bare)).toEqual([]);
     });
 
     it.each([
-      ['.devflow', (repo: string) => fs.symlinkSync(outside, path.join(repo, '.devflow'))],
-      ['docs', (repo: string) => {
+      ['.devflow', (repo: string, target: string) => fs.symlinkSync(target, path.join(repo, '.devflow'))],
+      ['docs', (repo: string, target: string) => {
         fs.mkdirSync(path.join(repo, '.devflow'));
-        fs.symlinkSync(outside, path.join(repo, '.devflow', 'docs'));
+        fs.symlinkSync(target, path.join(repo, '.devflow', 'docs'));
       }],
-      ['plan', (repo: string) => {
+      ['plan', (repo: string, target: string) => {
         fs.mkdirSync(path.join(repo, '.devflow', 'docs'), { recursive: true });
-        fs.symlinkSync(outside, path.join(repo, '.devflow', 'docs', 'plan'));
+        fs.symlinkSync(target, path.join(repo, '.devflow', 'docs', 'plan'));
       }],
     ])('refuses a linked %s folder and writes nothing through the link', (_label, link) => {
       const repo = freshRepo();
-      link(repo);
+      const linked = emptyFolder();
+      link(repo, linked);
       expectClosed(run(['claim'], repo), 2);
-      expect(fs.readdirSync(outside)).toEqual([]);
+      expect(fs.readdirSync(linked)).toEqual([]);
     });
 
     it('refuses a plan folder that git tracks', () => {
@@ -394,10 +414,84 @@ describe('plan-files.cjs on real git', { timeout: 60_000 }, () => {
       expectClosed(run(['check', path.join(missing, '.devflow', 'docs', 'plan', '2026-11-08_1405', 'explore-1.md')], outside), 2);
     });
 
+    it.each(['.devflow', 'docs', 'plan', 'stamp'])('refuses a path when the %s folder is absent, because no claim made it', (label) => {
+      const repo = freshRepo();
+      const parts = ['.devflow', 'docs', 'plan', '2026-11-08_1405'];
+      const present = ['.devflow', 'docs', 'plan', 'stamp'].indexOf(label);
+      if (present > 0) fs.mkdirSync(path.join(repo, ...parts.slice(0, present)), { recursive: true });
+      const r = run(['check', path.join(repo, ...parts, 'explore-1.md')], repo);
+      expectClosed(r, 2);
+      expect(r.stderr).toMatch(/^plan-files: no run folder was claimed/);
+      expect(fs.existsSync(path.join(repo, ...parts.slice(0, present + 1)))).toBe(false);
+    });
+
+    it('refuses a path directly below the file system root, whatever its other parts hold', () => {
+      const r = run(['check', '/.devflow/docs/plan/2026-11-08_1405/explore-1.md'], outside);
+      expectClosed(r, 2);
+      expect(r.stderr).toMatch(/^plan-files: the path is not below a checkout root/);
+    });
+
+    it('refuses a root that is a file, not a folder', () => {
+      const file = path.join(base, `root-file-${counter++}`);
+      fs.writeFileSync(file, 'x\n');
+      const r = run(['check', path.join(file, '.devflow', 'docs', 'plan', '2026-11-08_1405', 'explore-1.md')], outside);
+      expectClosed(r, 2);
+      expect(r.stderr).toMatch(/^plan-files: the root is not a folder/);
+    });
+
+    it('fails closed with exit 4 when git is not installed on the path', () => {
+      const repo = freshRepo();
+      const target = path.join(claimIn(repo), 'explore-1.md');
+      const r = runResolver({
+        home, args: ['check', target], cwd: repo, script: PLAN_SCRIPT, extraEnv: { PATH: emptyBin },
+      });
+      expectClosed(r, 4);
+      expect(r.stderr).toMatch(/^plan-files: git did not answer/);
+    });
+
     it('refuses no argument and two arguments, as a usage error', () => {
       const repo = freshRepo();
       expectClosed(run(['check'], repo), 1);
       expectClosed(run(['check', '/a', '/b'], repo), 1);
+    });
+  });
+
+  describe('a plan folder that git tracks under another spelling', () => {
+    const spellings: ReadonlyArray<readonly [string, string]> = [
+      ['upper-case letters', '.DEVFLOW/docs/plan/2000-01-01_0000/a-1.md'],
+      ['a mixed-case docs and plan folder', '.devflow/Docs/PLAN/2000-01-01_0000/a-1.md'],
+      ['the fl ligature in .devflow', '.dev\u{FB02}ow/docs/plan/2000-01-01_0000/a-1.md'],
+      ['the long s in docs', '.devflow/doc\u{17F}/plan/2000-01-01_0000/a-1.md'],
+    ];
+
+    /**
+     * Put `entry` in the index with no file on disk and `core.ignorecase` off, so the answer
+     * does not depend on the file system the test runs on.
+     */
+    const trackEntry = (repo: string, entry: string): void => {
+      realGit(repo, home, ['config', 'core.ignorecase', 'false']);
+      const seed = path.join(base, `seed-${counter++}.txt`);
+      fs.writeFileSync(seed, 'x\n');
+      const blob = realGit(repo, home, ['hash-object', '-w', seed]).trim();
+      realGit(repo, home, ['update-index', '--add', '--cacheinfo', `100644,${blob},${entry}`]);
+    };
+
+    it.each(spellings)('claim refuses an entry spelled with %s, and makes nothing', (_label, entry) => {
+      const repo = freshRepo();
+      trackEntry(repo, entry);
+      const r = run(['claim'], repo);
+      expectClosed(r, 2);
+      expect(r.stderr).toMatch(/^plan-files: git tracks files under the plan folder/);
+      expect(fs.existsSync(path.join(repo, '.devflow'))).toBe(false);
+    });
+
+    it.each(spellings)('check refuses a report in a claimed folder when an entry is spelled with %s', (_label, entry) => {
+      const repo = freshRepo();
+      const target = path.join(claimIn(repo), 'explore-1.md');
+      trackEntry(repo, entry);
+      const r = run(['check', target], repo);
+      expectClosed(r, 2);
+      expect(r.stderr).toMatch(/^plan-files: git tracks files under the plan folder/);
     });
   });
 
@@ -468,8 +562,6 @@ describe('plan-files.cjs on real git', { timeout: 60_000 }, () => {
 
   it('fails when git is not installed on the path', () => {
     const repo = freshRepo();
-    const emptyBin = path.join(base, 'empty-bin');
-    fs.mkdirSync(emptyBin, { recursive: true });
     const r = runResolver({
       home, args: ['claim'], cwd: repo, script: PLAN_SCRIPT, extraEnv: { PATH: emptyBin },
     });
@@ -495,6 +587,7 @@ describe('plan-files.cjs main() with an injected exec', () => {
 
   afterEach(() => {
     errors.mockRestore();
+    vi.unstubAllEnvs();
   });
 
   const quiet = (): string[] => {
@@ -509,7 +602,16 @@ describe('plan-files.cjs main() with an injected exec', () => {
   const toplevel = (stdout: string, exit = 0): ScriptedCall => ({ tool: 'git', args: TOPLEVEL_ARGV, stdout, exit });
   const lsFiles = (stdout: string, exit = 0): ScriptedCall => ({ tool: 'git', args: LS_FILES_ARGV, stdout, exit });
   const claimArgv = ['node', 'plan-files.cjs', 'claim'];
+  const checkArgv = (target: string): string[] => ['node', 'plan-files.cjs', 'check', target];
   const stamp = (): Date => new Date(2026, 10, 8, 14, 5, 30);
+
+  /** A claimed run folder in a root of its own, so no test sees another's folders. */
+  const claimedRoot = (): { readonly dir: string; readonly target: string } => {
+    const dir = fs.mkdtempSync(path.join(base, 'claimed-'));
+    const runDir = path.join(dir, '.devflow', 'docs', 'plan', '2026-11-08_1405');
+    fs.mkdirSync(runDir, { recursive: true });
+    return { dir, target: path.join(runDir, 'explore-1.md') };
+  };
 
   it('runs every git call by argv, with no shell and no time limit of its own', () => {
     quiet();
@@ -543,6 +645,41 @@ describe('plan-files.cjs main() with an injected exec', () => {
     expect(planScript.main(claimArgv, { exec, now: stamp, cwd: fresh })).toEqual({ code: 4, line: '' });
     expect(lines).toHaveLength(1);
     expect(fs.readdirSync(fresh)).toEqual([]);
+  });
+
+  it('runs the tracked-file listing without the variables that redirect git, and keeps the others', () => {
+    quiet();
+    const fresh = fs.mkdtempSync(path.join(base, 'env-'));
+    vi.stubEnv('GIT_INDEX_FILE', path.join(fresh, 'empty-index'));
+    vi.stubEnv('GIT_DIR', path.join(fresh, 'other.git'));
+    vi.stubEnv('GIT_LITERAL_PATHSPECS', '1');
+    vi.stubEnv('PLAN_FILES_KEPT', 'kept');
+    const { exec, recorded } = scriptedExec([toplevel(`${fresh}\n`), lsFiles('')]);
+    expect(planScript.main(claimArgv, { exec, now: stamp, cwd: fresh }).code).toBe(0);
+    const listing = recorded.find(call => call.args.includes('ls-files'));
+    expect(listing, 'the listing call must be made').toBeDefined();
+    const env = (listing?.opts.env ?? {}) as Record<string, string | undefined>;
+    expect(env.GIT_INDEX_FILE).toBeUndefined();
+    expect(env.GIT_DIR).toBeUndefined();
+    expect(env.GIT_LITERAL_PATHSPECS).toBeUndefined();
+    expect(env.PLAN_FILES_KEPT).toBe('kept');
+    expect(env.GIT_TERMINAL_PROMPT).toBe('0');
+  });
+
+  it('fails closed with exit 4, and prints nothing, when check gets no answer to the tracked-file listing', () => {
+    const lines = quiet();
+    const { dir, target } = claimedRoot();
+    const { exec } = scriptedExec([toplevel(`${dir}\n`), lsFiles('', 128)]);
+    expect(planScript.main(checkArgv(target), { exec })).toEqual({ code: 4, line: '' });
+    expect(lines).toEqual(['plan-files: git did not answer for the plan folder — failing closed\n']);
+  });
+
+  it('fails closed with exit 4, not as a tracked folder, when check gets a listing that overflows', () => {
+    const lines = quiet();
+    const { dir, target } = claimedRoot();
+    const { exec } = scriptedExec([toplevel(`${dir}\n`), lsFiles(`${'x'.repeat(4097)}\0`)]);
+    expect(planScript.main(checkArgv(target), { exec })).toEqual({ code: 4, line: '' });
+    expect(lines).toEqual(['plan-files: git did not answer for the plan folder — failing closed\n']);
   });
 
   it('fails closed with exit 2 when the listing names a tracked entry, whatever the exit status', () => {
