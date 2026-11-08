@@ -52,8 +52,8 @@ Accept the output only when it is exactly two lines: `exit=0` last and, before i
 Set `EVIDENCE_POLICY`, `ISSUE_REQUIRED`, `APPLY_CONVENTIONS` and `REQUIRE_NON_AUTHOR_APPROVAL` from the accepted line. Pass agents only the three mechanism inputs, never `EVIDENCE_POLICY`. Report `Evidence policy: {EVIDENCE_POLICY} (source: {SOURCE})`, plus any `WARN` tokens as advisory, once in the final report.
 
 **Plan Document Handling** (when `COMMAND_INPUT` is a path ending in `.md`):
-1. Resolve a relative path against `{worktree}`; stop on `'` or a control character in it. Read the plan document. From its YAML frontmatter, take `execution-strategy` and `issue`.
-2. If the frontmatter `issue` is present and is not `pending`: forward it verbatim as the setup-task `ISSUE_INPUT` (`pending` means /plan's issue step degraded or was declined — treat it as absent)
+1. Resolve and normalize a relative path against `{worktree}`; stop on `'` or a control character in it. Read the plan document. From its YAML frontmatter, take `execution-strategy` and `issue`.
+2. If the frontmatter `issue` is present and is not `pending`: forward it verbatim as the setup-task `ISSUE_INPUT` (`pending`: treat it as absent)
 3. Set `PLAN_FILE` to its absolute path and `EXECUTION_PLAN` to two lines: `PLAN_FILE: {PLAN_FILE}` and `PLAN_SECTIONS: Subtask Breakdown, Implementation Plan (without its Size forecast line), Patterns to Follow, Known limits, Acceptance Criteria`. Captured values override defaults from Git agent where present.
 4. Run `node "$HOME/.devflow/scripts/plan-files.cjs" hash '{PLAN_FILE}'` and record `PLAN_SHA`, the digest after `SHA256=`. The PLAN_SHA check runs it again. Other output or a changed digest stops the run, naming the cause.
 
@@ -195,7 +195,7 @@ Setup context is EXECUTION_PLAN, else the issue body or conversation.
 
 Each phase or subtask `EXECUTION_PLAN` adds the plan's Patterns to Follow, Known limits, the criteria its Serves cell names, any criterion no cell names and each criterion that states a trust-boundary, security, data-loss or fail-closed property; a phase whose cell is absent or names any unlisted number gets all criteria; its own steps still set its scope.
 
-With `PLAN_FILE`, each phase or subtask `EXECUTION_PLAN` is the `PLAN_FILE:` line plus its own `PLAN_SECTIONS:` line, which names its step and criterion numbers, never their text.
+With `PLAN_FILE`, each phase or subtask `EXECUTION_PLAN` is the `PLAN_FILE:` line plus its own `PLAN_SECTIONS:` line, which names Patterns to Follow, Known limits and its step and criterion numbers, never their text.
 
 ---
 
@@ -329,7 +329,7 @@ FEATURE_KNOWLEDGE: {feature_knowledge_rules}
 Validate alignment with request and plan. Report ALIGNED or MISALIGNED with details."
 ```
 
-With `PLAN_SHA`, run the PLAN_SHA check in the next spawn message (alone, if none); use the verdict only if it passes.
+With `PLAN_SHA`, run the PLAN_SHA check alone when Evaluate returns; start no spawn until it passes.
 
 **One pass, at `standard` and `lean`:** each prompt of this phase opens with `GATE_LEVEL: {GATE_LEVEL}`, after any `OPERATION:` line. Run Evaluate once; a failed Evaluate spawn goes to Error Handling, and its retry is the same pass. On MISALIGNED, in place of steps 3 and 4, spawn the Fix once: on COMPLETE, set `ALIGNMENT_RESULT` to exactly `MISALIGNED (fixed once, not re-checked)` and start Phase 6; else report the misalignments to the user for decision.
 
@@ -421,7 +421,7 @@ TEST_PLAN: {the TP lines of the evidence file's ## Test Plan section, or (none)}
 Design and execute scenario-based acceptance tests. Report your Status with evidence."
 ```
 
-After every Test agent run — whatever its Status, first run or retry — append its TP claims (Phase 6's **Evidence claims**). With `PLAN_SHA`, run the PLAN_SHA check in that message; use the Status only if it passes.
+After every Test agent run — whatever its Status, first run or retry — append its TP claims (Phase 6's **Evidence claims**). With `PLAN_SHA`, run the PLAN_SHA check in that message; start no spawn until it passes.
 
 **If PASS** (first word of the Status): Continue to Phase 8
 
@@ -593,7 +593,7 @@ Non-blocking: if the Knowledge agent fails, log the failure and continue.
 
 ## Principles
 
-1. **Orchestration only** - Command spawns agents, never does work itself (no tests, builds or fixes); "Spawn X" means call the Agent tool; the inline calls are bounded plumbing the charter allows: the fresh base step's resolver calls (Phase 1, re-validation), the Phase 10 and 11 pushes, the Phase 10 ci-wait call, the Phase 6-8 evidence claim calls, the Phase 11 evidence publish call and the evidence and plan hash script checks
+1. **Orchestration only** - Command spawns agents, never does work itself (no tests, builds or fixes); "Spawn X" means call the Agent tool; the inline calls are the bounded plumbing the charter allows: the fresh base step's resolver calls (Phase 1, re-validation), the Phase 10 and 11 pushes, the Phase 10 ci-wait call, the Phase 6-8 evidence claim calls, the Phase 11 evidence publish call and the evidence and plan hash script checks
 2. **Honest reporting** - Display agent outputs directly
 3. **Loop limits** - Max 2 validation retries, max 2 alignment fix iterations, max 2 QA retries before escalating to user; the CI gate allows at most 3 waits and 2 fixes
 4. **CI awareness** - CI status is checked before merge; test-plan evidence (Phase 11) is recorded under every strategy

@@ -89,7 +89,7 @@ function commandBuilds(name: string): Build[] {
   return builds
 }
 
-const RESOLVE = 'Resolve a relative path against `{worktree}`;'
+const RESOLVE = 'Resolve and normalize a relative path against `{worktree}`;'
 const PATH_STOP = " stop on `'` or a control character in it."
 const READ = 'Read the plan document.'
 const SECTIONS =
@@ -99,33 +99,40 @@ const HASH_CALL = `node "$HOME/.devflow/scripts/plan-files.cjs" hash '{PLAN_FILE
 const RECORD = 'and record `PLAN_SHA`, the digest after `SHA256=`.'
 const STOP = 'The PLAN_SHA check runs it again. Other output or a changed digest stops the run, naming the cause.'
 const PHASE_LINE =
-  'With `PLAN_FILE`, each phase or subtask `EXECUTION_PLAN` is the `PLAN_FILE:` line plus its own `PLAN_SECTIONS:` line, which names its step and criterion numbers, never their text.'
+  'With `PLAN_FILE`, each phase or subtask `EXECUTION_PLAN` is the `PLAN_FILE:` line plus its own `PLAN_SECTIONS:` line, which names Patterns to Follow, Known limits and its step and criterion numbers, never their text.'
 const CRITERIA = 'ACCEPTANCE_CRITERIA: {extracted criteria if available, or (in PLAN_FILE)}'
 const EVALUATE_FENCE_END = 'Report ALIGNED or MISALIGNED with details."\n```'
-const EVALUATE_CHECK = 'With `PLAN_SHA`, run the PLAN_SHA check in the next spawn message (alone, if none); use the verdict only if it passes.'
+const EVALUATE_CHECK = 'With `PLAN_SHA`, run the PLAN_SHA check alone when Evaluate returns; start no spawn until it passes.'
 const TEST_FENCE_END = 'Report your Status with evidence."\n```'
 const TEST_CHECK =
-  "append its TP claims (Phase 6's **Evidence claims**). With `PLAN_SHA`, run the PLAN_SHA check in that message; use the Status only if it passes."
+  "append its TP claims (Phase 6's **Evidence claims**). With `PLAN_SHA`, run the PLAN_SHA check in that message; start no spawn until it passes."
+const ALIGNMENT_FIX = 'OPERATION: alignment-fix'
+const QA_FIX = 'OPERATION: qa-fix'
 const PHASE_2 = '### Phase 2: Implement'
+const PRINCIPLE_BASE = 'the inline calls are the bounded plumbing the charter allows'
 const PRINCIPLE_HASH = 'and the evidence and plan hash script checks'
 const EVIDENCE_STAYS = 'it stays after the PR exists'
 
 /** The claims: each is one anchor that a build holds exactly once, named by the defect that reports it lost. */
 const CLAIMS: ReadonlyArray<readonly [name: string, anchor: string]> = [
-  ['a relative plan path is not resolved against the worktree root', RESOLVE],
+  ['a relative plan path is not normalized and resolved against the worktree root', RESOLVE],
   ['a path with a quote or a control character does not stop the run', PATH_STOP],
   ['EXECUTION_PLAN is not set to the PLAN_FILE and PLAN_SECTIONS lines', EXECUTION_PLAN_LINES],
   ['the plan file is not hashed in Phase 1', HASH_CALL],
   ['the digest is not recorded as PLAN_SHA', RECORD],
   ['other output or a changed digest does not stop the run', STOP],
-  ['a phase or subtask EXECUTION_PLAN is not the PLAN_FILE line plus its own PLAN_SECTIONS line of step and criterion numbers', PHASE_LINE],
-  ['the Evaluate return has no PLAN_SHA check, or the check runs without PLAN_SHA', EVALUATE_CHECK],
-  ['the Test return has no PLAN_SHA check, or the check runs without PLAN_SHA', TEST_CHECK],
+  [
+    'a phase or subtask EXECUTION_PLAN is not the PLAN_FILE line plus its own PLAN_SECTIONS line of Patterns to Follow, Known limits, and step and criterion numbers',
+    PHASE_LINE,
+  ],
+  ['the Evaluate return has no PLAN_SHA check alone before any spawn, or the check runs without PLAN_SHA', EVALUATE_CHECK],
+  ['the Test return has no PLAN_SHA check before any spawn, or the check runs without PLAN_SHA', TEST_CHECK],
+  ['the Orchestration-only principle does not keep the base wording of its inline calls', PRINCIPLE_BASE],
   ['the Orchestration-only principle does not name the plan hash calls', PRINCIPLE_HASH],
   ['the evidence file lead does not say it stays after the PR exists, so a cleanup could delete it', EVIDENCE_STAYS],
 ]
 
-/** The order of the claims: the path is settled before it is read, the hash before Phase 2, each check after its spawn. */
+/** The order of the claims: the path is settled before it is read, the hash before Phase 2, each check after its spawn and before the fix spawn that acts on its verdict. */
 const ORDER_RULES: readonly OrderRule[] = [
   { label: 'the path is resolved before the plan is read', before: RESOLVE, after: READ },
   { label: 'EXECUTION_PLAN is set after the plan is read', before: READ, after: EXECUTION_PLAN_LINES },
@@ -134,6 +141,8 @@ const ORDER_RULES: readonly OrderRule[] = [
   { label: 'the phase line sits in Phase 2', before: PHASE_2, after: PHASE_LINE },
   { label: 'the Evaluate check follows the Evaluate spawn', before: EVALUATE_FENCE_END, after: EVALUATE_CHECK },
   { label: 'the Test check follows the Test spawn', before: TEST_FENCE_END, after: TEST_CHECK },
+  { label: 'the Evaluate check precedes the alignment-fix spawn', before: EVALUATE_CHECK, after: ALIGNMENT_FIX },
+  { label: 'the Test check precedes the qa-fix spawn', before: TEST_CHECK, after: QA_FIX },
 ]
 
 /** Named collector: the claims an /implement build lacks, the criteria placeholders that stay text-only, and (when every claim is present) the order it breaks. */
@@ -173,6 +182,45 @@ describe('/implement passes the plan file path and the section names in every bu
     expect(collectImplementDefects('i', evaluate)).toEqual([`i: ${CLAIMS[7][0]}`])
     const test = seed(text, TEST_CHECK, TEST_CHECK.replace('With `PLAN_SHA`, run', 'Run'))
     expect(collectImplementDefects('i', test)).toEqual([`i: ${CLAIMS[8][0]}`])
+  })
+
+  it('known-bad probes: the wording before the review fixes is reported by the name of its claim, in each build', () => {
+    const before: ReadonlyArray<readonly [anchor: string, wording: string]> = [
+      [RESOLVE, 'Resolve a relative path against `{worktree}`;'],
+      [
+        PHASE_LINE,
+        'With `PLAN_FILE`, each phase or subtask `EXECUTION_PLAN` is the `PLAN_FILE:` line plus its own `PLAN_SECTIONS:` line, which names its step and criterion numbers, never their text.',
+      ],
+      [EVALUATE_CHECK, 'With `PLAN_SHA`, run the PLAN_SHA check in the next spawn message (alone, if none); use the verdict only if it passes.'],
+      [
+        TEST_CHECK,
+        "append its TP claims (Phase 6's **Evidence claims**). With `PLAN_SHA`, run the PLAN_SHA check in that message; use the Status only if it passes.",
+      ],
+      [PRINCIPLE_BASE, 'the inline calls are bounded plumbing the charter allows'],
+    ]
+    for (const { text } of builds) {
+      for (const [anchor, wording] of before) {
+        const name = CLAIMS.find(([, claim]) => claim === anchor)?.[0]
+        expect(name, `a claim holds the anchor (${anchor})`).toBeDefined()
+        expect(collectImplementDefects('i', seed(text, anchor, wording)), name).toEqual([`i: ${name}`])
+      }
+    }
+  })
+
+  it('known-bad probes: a check placed after the fix spawn that acts on its verdict is reported once', () => {
+    const { text } = builds[0]
+    const evaluateLate = seed(
+      seed(text, `\n\n${EVALUATE_CHECK}`, ''),
+      '   - Loop back to Phase 5 (re-check alignment).',
+      `   - ${EVALUATE_CHECK}\n   - Loop back to Phase 5 (re-check alignment).`,
+    )
+    expect(collectImplementDefects('i', evaluateLate)).toEqual([expect.stringContaining('[the Evaluate check precedes the alignment-fix spawn]')])
+    const testLate = seed(
+      seed(text, TEST_CHECK, "append its TP claims (Phase 6's **Evidence claims**)."),
+      '   - Loop back to Phase 7.',
+      `   - ${TEST_CHECK}\n   - Loop back to Phase 7.`,
+    )
+    expect(collectImplementDefects('i', testLate)).toEqual([expect.stringContaining('[the Test check precedes the qa-fix spawn]')])
   })
 
   it('known-bad probes: a check placed before its spawn instead of after the return is reported once', () => {
