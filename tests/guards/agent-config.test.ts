@@ -66,11 +66,14 @@ import { existsSync, readFileSync } from 'fs';
 import * as path from 'path';
 
 import { getAllAgentNames } from '../../src/core/plugins.js';
-import { ROOT, resolveAgentSource, splitFrontmatter, walkFiles } from '../helpers.js';
+import { CODE_AGENT_TYPES, ROOT, codeSlugOf, resolveAgentSource, splitFrontmatter, walkFiles } from '../helpers.js';
 import { loadShippedAgentDefaults } from '../../src/core/agent-models.js';
 import {
   AGENT_CONFIG,
+  CODE_FAMILY_DENY_EXTRA,
   DEBUG_FOCUS_SKILLS,
+  DENY_AGENT_KEEP,
+  KEEP_AGENTS,
   MCP_DENY_AGENTS,
   SHARED_DENYLIST,
   type AgentConfigRow,
@@ -222,7 +225,8 @@ function collectRowViolations(name: string, fm: AgentFrontmatter, row: AgentConf
  * Every way the shared denylist, or a denylist agent's use of it, breaks the rules.
  * D-SCAN-IN-CODE: the one wildcard a denylist may hold is `mcp__*`, on an agent named in
  * MCP_DENY_AGENTS; every other wildcard, a named MCP tool, and any WebFetch or WebSearch deny
- * is still reported, and an allowlist never holds a wildcard.
+ * is still reported, and an allowlist never holds a wildcard. An agent in KEEP_AGENTS keeps
+ * every tool in DENY_AGENT_KEEP, so a deny of one is reported too.
  */
 function collectDenylistViolations(name: string, fm: AgentFrontmatter): string[] {
   const out: string[] = [];
@@ -238,6 +242,8 @@ function collectDenylistViolations(name: string, fm: AgentFrontmatter): string[]
     if (isAllowedWildcard(tool)) continue;
     if (tool === 'WebFetch' || tool === 'WebSearch' || tool.startsWith('mcp__')) {
       out.push(`${name}.md: denies "${tool}"; a denylist agent keeps its MCP and web access`);
+    } else if (KEEP_AGENTS.includes(name) && DENY_AGENT_KEEP.includes(tool)) {
+      out.push(`${name}.md: denies "${tool}"; ${name} keeps it`);
     }
   }
   return out;
@@ -259,11 +265,18 @@ function collectCompletenessViolations(registered: readonly string[], table: rea
 // Named collectors: D-TOOL-BODY-MATCH
 // ---------------------------------------------------------------------------
 
-/** Every built-in tool name a body can direct, apart from MCP tools, which are read by prefix. */
+/**
+ * Every built-in tool name a body can direct, apart from MCP tools, which are read by prefix:
+ * the fixed list, SHARED_DENYLIST and every deny row's `extra`, without a wildcard name (the
+ * alternation below never holds `*`).
+ */
 const TOOL_VOCABULARY: readonly string[] = [
-  'Read', 'Write', 'Edit', 'Grep', 'Glob', 'Bash', 'Skill', 'Monitor', 'ToolSearch', 'TaskStop',
-  'StructuredOutput', 'WebFetch', 'WebSearch', ...SHARED_DENYLIST,
-];
+  ...new Set([
+    'Read', 'Write', 'Edit', 'Grep', 'Glob', 'Bash', 'Skill', 'Monitor', 'ToolSearch', 'TaskStop',
+    'StructuredOutput', 'WebFetch', 'WebSearch', ...SHARED_DENYLIST,
+    ...Object.values(AGENT_CONFIG).flatMap(row => (row.policy.kind === 'deny' ? row.policy.extra : [])),
+  ]),
+].filter(name => !name.includes('*'));
 const TOOL_ALTERNATION = TOOL_VOCABULARY.join('|');
 
 /** `Name(` as a call, not a longer identifier or a path segment. */
@@ -533,6 +546,25 @@ describe('the table: every agent ships its row (D-AGENT-CONFIG-TABLE)', () => {
         expect(violations.length, label).toBeGreaterThan(0);
       });
     }
+
+    const codeFamilySlugs = CODE_AGENT_TYPES.map(codeSlugOf);
+
+    it('reports each Code-family extra name removed from each Code-family row', () => {
+      expect(codeFamilySlugs.length, 'the probe loops over the whole family').toBeGreaterThan(0);
+      for (const slug of codeFamilySlugs) {
+        for (const extra of CODE_FAMILY_DENY_EXTRA) {
+          const row = AGENT_CONFIG[slug];
+          const fm = renderRow(slug, row, f => { f.disallowedTools = (f.disallowedTools ?? []).filter(tool => tool !== extra); });
+          expect(collectRowViolations(slug, fm, row).length, `${slug} without ${extra}`).toBeGreaterThan(0);
+        }
+      }
+    });
+
+    it('reports the Code-family extra list on the Research row, which denies the shared list only', () => {
+      const row = AGENT_CONFIG.research;
+      const fm = renderRow('research', row, f => { f.disallowedTools = [...(f.disallowedTools ?? []), ...CODE_FAMILY_DENY_EXTRA]; });
+      expect(collectRowViolations('research', fm, row).length).toBeGreaterThan(0);
+    });
   });
 
   describe('the frontmatter parser reads both list forms', () => {
@@ -607,10 +639,21 @@ describe('one shared denylist (D-SHARED-DENYLIST)', () => {
     for (const tool of SHARED_DENYLIST) expect(tool, tool).toMatch(/^[A-Z][A-Za-z]+$/);
   });
 
-  it('Code and Research deny exactly the list, and Harden and Polish deny it plus Skill and mcp__*', () => {
-    for (const name of ['code', 'research']) {
-      expect(sameSet(agent(name).fm.disallowedTools ?? [], SHARED_DENYLIST), name).toBe(true);
+  it('the Code-family extra list holds six distinct names in order, each spelled out, none on the shared list', () => {
+    expect(CODE_FAMILY_DENY_EXTRA).toEqual(['Monitor', 'TaskStop', 'Workflow', 'Artifact', 'ListAgents', 'ReportFindings']);
+    expect(duplicates(CODE_FAMILY_DENY_EXTRA)).toEqual([]);
+    for (const tool of CODE_FAMILY_DENY_EXTRA) expect(tool, tool).toMatch(/^[A-Z][A-Za-z]+$/);
+    expect(CODE_FAMILY_DENY_EXTRA.filter(tool => SHARED_DENYLIST.includes(tool))).toEqual([]);
+  });
+
+  it('Code, Fix and Refactor deny the list plus the Code-family extra and declare no tools, Research denies exactly the list, and Harden and Polish deny it plus Skill and mcp__*', () => {
+    expect(CODE_AGENT_TYPES.length, 'the loop covers the whole family').toBeGreaterThan(0);
+    for (const slug of CODE_AGENT_TYPES.map(codeSlugOf)) {
+      expect(sameSet(agent(slug).fm.disallowedTools ?? [], [...SHARED_DENYLIST, ...CODE_FAMILY_DENY_EXTRA]), slug).toBe(true);
+      expect(agent(slug).fm.tools, slug).toBeNull();
+      expect(agent(slug).fm.keys, slug).not.toContain('tools');
     }
+    expect(sameSet(agent('research').fm.disallowedTools ?? [], SHARED_DENYLIST), 'research').toBe(true);
     for (const name of ['harden', 'polish']) {
       expect(sameSet(agent(name).fm.disallowedTools ?? [], [...SHARED_DENYLIST, 'Skill', 'mcp__*']), name).toBe(true);
     }
@@ -640,12 +683,49 @@ describe('one shared denylist (D-SHARED-DENYLIST)', () => {
     expect(collectDenylistViolations('x', base)).toEqual([]);
   });
 
+  it('the keep set holds fifteen names, none denied and none an MCP name, and binds every deny-list agent outside MCP_DENY_AGENTS', () => {
+    expect(DENY_AGENT_KEEP).toHaveLength(15);
+    expect(duplicates(DENY_AGENT_KEEP)).toEqual([]);
+    expect(KEEP_AGENTS.length, 'the keep set binds at least one agent').toBeGreaterThan(0);
+    for (const slug of CODE_AGENT_TYPES.map(codeSlugOf)) expect(KEEP_AGENTS, slug).toContain(slug);
+    expect(KEEP_AGENTS).toContain('research');
+    for (const slug of MCP_DENY_AGENTS) expect(KEEP_AGENTS, slug).not.toContain(slug);
+    const denied = [
+      ...SHARED_DENYLIST,
+      ...KEEP_AGENTS.flatMap(slug => {
+        const policy = AGENT_CONFIG[slug].policy;
+        return policy.kind === 'deny' ? policy.extra : [];
+      }),
+    ];
+    expect(DENY_AGENT_KEEP.filter(tool => denied.includes(tool))).toEqual([]);
+    expect(DENY_AGENT_KEEP.filter(tool => tool.startsWith('mcp__'))).toEqual([]);
+  });
+
+  it('known-bad probe: a kept tool added to any keep-set agent\'s row is reported, once, by name', () => {
+    for (const slug of KEEP_AGENTS) {
+      for (const kept of DENY_AGENT_KEEP) {
+        const fm = renderRow(slug, AGENT_CONFIG[slug], f => { f.disallowedTools = [...(f.disallowedTools ?? []), kept]; });
+        const violations = collectDenylistViolations(slug, fm);
+        expect(violations, `${slug} denying ${kept}`).toHaveLength(1);
+        expect(violations[0], `${slug} denying ${kept}`).toContain(`"${kept}"`);
+      }
+    }
+  });
+
+  it('Harden and Polish deny Skill, which the keep set holds, and the keep-set check stays quiet on them', () => {
+    for (const slug of MCP_DENY_AGENTS) {
+      const fm = renderRow(slug, AGENT_CONFIG[slug]);
+      expect(fm.disallowedTools, slug).toContain('Skill');
+      expect(collectDenylistViolations(slug, fm), slug).toEqual([]);
+    }
+  });
+
   it('known-bad probes: mcp__* is allowed for Harden and Polish only, and nothing else widens (D-SCAN-IN-CODE)', () => {
     const base = renderRow('harden', AGENT_CONFIG.harden);
     expect(collectDenylistViolations('harden', base)).toEqual([]);
     expect(collectDenylistViolations('polish', renderRow('polish', AGENT_CONFIG.polish))).toEqual([]);
-    // The same list on any other agent is reported (a wildcard, and a denied MCP name).
-    expect(collectDenylistViolations('code', base)).toHaveLength(2);
+    // The same list on any other agent is reported (a wildcard, and a denied MCP name). Code also keeps Skill.
+    expect(collectDenylistViolations('code', base)).toHaveLength(3);
     expect(collectDenylistViolations('git', base)).toHaveLength(2);
     // A different wildcard, a named MCP tool and a web tool stay rejected on the permitted agents.
     expect(collectDenylistViolations('harden', { ...base, disallowedTools: ['Bash*'] })).toHaveLength(1);
@@ -806,6 +886,25 @@ describe('tool/body agreement (D-TOOL-BODY-MATCH)', () => {
 
     it('does not read a path segment or a longer identifier as a call', () => {
       expect(loaded('See src/Agent(1) and MyAgent(x) and foo.Skill(y).', noSkill)).toEqual([]);
+    });
+
+    it('reports each Code-family extra name, as a call and as "the X tool", on each Code-family row', () => {
+      expect(CODE_AGENT_TYPES.length, 'the probe loops over the whole family').toBeGreaterThan(0);
+      for (const slug of CODE_AGENT_TYPES.map(codeSlugOf)) {
+        const fm = renderRow(slug, AGENT_CONFIG[slug]);
+        for (const extra of CODE_FAMILY_DENY_EXTRA) {
+          expect(loaded(`Then run ${extra}(x) to finish.`, fm), `${slug}: ${extra} as a call`).toEqual([extra]);
+          expect(loaded(`Then use the ${extra} tool to finish.`, fm), `${slug}: ${extra} as a phrase`).toEqual([extra]);
+          expect(loaded(`Never run ${extra}(x), and do not use the ${extra} tool.`, fm), `${slug}: ${extra} negated`).toEqual([]);
+        }
+      }
+    });
+
+    it('leaves the Code-family extra names alone on the Research row, which does not deny them', () => {
+      const research = renderRow('research', AGENT_CONFIG.research);
+      for (const extra of CODE_FAMILY_DENY_EXTRA) {
+        expect(loaded(`Then run ${extra}(x) and use the ${extra} tool.`, research), extra).toEqual([]);
+      }
     });
   });
 });

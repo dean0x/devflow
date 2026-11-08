@@ -37,6 +37,12 @@ disallowedTools:
   - RemoteTrigger
   - PushNotification
   - DesignSync
+  - Monitor
+  - TaskStop
+  - Workflow
+  - Artifact
+  - ListAgents
+  - ReportFindings
 ---
 
 # Refactor Agent

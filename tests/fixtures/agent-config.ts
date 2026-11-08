@@ -88,11 +88,10 @@ export interface AgentConfigRow {
  * allowlist and reach their tracker servers through whole-server entries the installer
  * stamps (D-GIT-ROW, D-TRACKER-ROW).
  *
- * Code and Research deny exactly this list. Harden and Polish deny it plus
- * `Skill`, and `mcp__*` as their own `extra` (D-SCAN-IN-CODE): the only wildcards
- * a denylist may hold, which MCP_DENY_AGENTS names. `Artifact`, `ListAgents` and
- * `ReportFindings` appear on the registry observed while the table was drafted
- * but not on the approved list, so they are not here.
+ * Research denies exactly this list. Code, Fix and Refactor deny it plus
+ * CODE_FAMILY_DENY_EXTRA. Harden and Polish deny it plus `Skill`, and `mcp__*` as
+ * their own `extra` (D-SCAN-IN-CODE): the only wildcards a denylist may hold, which
+ * MCP_DENY_AGENTS names.
  */
 export const SHARED_DENYLIST: readonly string[] = [
   'Agent',
@@ -112,6 +111,45 @@ export const SHARED_DENYLIST: readonly string[] = [
   'RemoteTrigger',
   'PushNotification',
   'DesignSync',
+];
+
+/**
+ * The tools Code, Fix and Refactor deny beyond SHARED_DENYLIST, so that they start and stop no
+ * other agent. Workflow and TaskStop are fixed members whatever their measured cost. Each name
+ * is spelled out, with no wildcard, no `mcp__` name, no WebFetch and no WebSearch. A name the
+ * runtime does not expose is a no-op (verified 2026-11-09, Claude Code 2.1.319).
+ */
+export const CODE_FAMILY_DENY_EXTRA: readonly string[] = [
+  'Monitor',
+  'TaskStop',
+  'Workflow',
+  'Artifact',
+  'ListAgents',
+  'ReportFindings',
+];
+
+/**
+ * The tools every deny-list agent outside MCP_DENY_AGENTS keeps, because its work or its scan
+ * step needs them (today Code, Fix, Refactor and Research). `collectDenylistViolations` already
+ * keeps WebFetch, WebSearch and every `mcp__` name for all agents; this set names the built-in
+ * tools beside them. No name here is on SHARED_DENYLIST or CODE_FAMILY_DENY_EXTRA.
+ */
+export const DENY_AGENT_KEEP: readonly string[] = [
+  'Bash',
+  'Read',
+  'Write',
+  'Edit',
+  'Glob',
+  'Grep',
+  'Skill',
+  'ToolSearch',
+  'WebFetch',
+  'WebSearch',
+  'StructuredOutput',
+  'ListMcpResourcesTool',
+  'ReadMcpResourceTool',
+  'ReadMcpResourceDirTool',
+  'RefreshMcpTools',
 ];
 
 /**
@@ -205,7 +243,7 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
   code: {
     model: 'sonnet',
     effort: 'high',
-    policy: { kind: 'deny', extra: [] },
+    policy: { kind: 'deny', extra: CODE_FAMILY_DENY_EXTRA },
     omitClaudeMd: false,
     skills: null,
     digest: [],
@@ -219,7 +257,7 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
   fix: {
     model: 'sonnet',
     effort: 'high',
-    policy: { kind: 'deny', extra: [] },
+    policy: { kind: 'deny', extra: CODE_FAMILY_DENY_EXTRA },
     omitClaudeMd: false,
     skills: null,
     digest: [],
@@ -227,7 +265,7 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
   refactor: {
     model: 'sonnet',
     effort: 'high',
-    policy: { kind: 'deny', extra: [] },
+    policy: { kind: 'deny', extra: CODE_FAMILY_DENY_EXTRA },
     omitClaudeMd: false,
     skills: null,
     digest: [],
@@ -475,6 +513,15 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
     digest: ['context-economy', 'untrusted-input', 'no-secrets', 'bounded-loops'],
   },
 };
+
+/**
+ * The deny-list agents that DENY_AGENT_KEEP binds: the slugs of the AGENT_CONFIG rows with a
+ * deny policy, minus MCP_DENY_AGENTS. Derived from the table, never listed, so a new deny-list
+ * row is covered without an edit here.
+ */
+export const KEEP_AGENTS: readonly string[] = Object.entries(AGENT_CONFIG)
+  .filter(([slug, row]) => row.policy.kind === 'deny' && !MCP_DENY_AGENTS.includes(slug))
+  .map(([slug]) => slug);
 
 /**
  * The agents that ship `omitClaudeMd: true`, each with the digest lines its body carries.

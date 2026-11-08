@@ -397,16 +397,16 @@ describe('the alignment-fix Protocol is its two lines, with no re-run of Evaluat
 // that line ahead of the security-scan block, and the block itself (D-SCAN-IN-CODE). The compiled body of each
 // variant is held under its ceiling, registered in tests/fixtures/numeric-floors.json as `code-body-max`,
 // `fix-body-max` and `refactor-body-max`: a value moves either way, and its entry there gives the old value, the new
-// value and the reason.
+// value and the reason. Each ceiling counts the whole compiled file, frontmatter included.
 
 /** The compiled Code agent body, in bytes. Registered as `code-body-max`. */
-const CODE_BODY_MAX_BYTES = 9_657
+const CODE_BODY_MAX_BYTES = 9_742
 
 /** The compiled Fix agent body, in bytes. Registered as `fix-body-max`. */
-const FIX_BODY_MAX_BYTES = 7_266
+const FIX_BODY_MAX_BYTES = 7_351
 
 /** The compiled Refactor agent body, in bytes. Registered as `refactor-body-max`. */
-const REFACTOR_BODY_MAX_BYTES = 5_952
+const REFACTOR_BODY_MAX_BYTES = 6_037
 
 const BODY_CEILINGS: Readonly<Record<string, number>> = {
   'Code': CODE_BODY_MAX_BYTES,
