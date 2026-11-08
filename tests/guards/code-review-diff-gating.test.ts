@@ -306,7 +306,8 @@ export function collectPrincipleDefects(body: string): string[] {
   if (/ls-files/.test(p1)) out.push('principle 1 names the tracked-file probe ls-files')
   if (!/bounded Phase 1 path listing/.test(p1)) out.push('principle 1 does not name the bounded path listing')
   if (!/`diff\.patch`/.test(p1) || !/`diff-\{focus\}\.patch`/.test(p1)) out.push('principle 1 does not name the patch writes')
-  if (!/the writes \(`diff\.patch`, `diff-\{focus\}\.patch`, the marker and its `mkdir -p`\)/.test(p1)) out.push('principle 1 does not name the marker and its `mkdir -p` among the writes')
+  if (!/the writes \([^)]*, the marker and its `mkdir -p`\)/.test(p1)) out.push('principle 1 does not name the marker and its `mkdir -p` among the writes')
+  if (!/the writes \(`diff\.patch`, `diff-\{focus\}\.patch`, `pr-description\.txt`, `prior-resolutions\.txt`, the marker/.test(p1)) out.push('principle 1 does not name the PR body file and the prior resolutions file among the writes')
   if (!/exceptions? named in Principle 1/.test(line(3))) out.push('principle 3 does not point at the exceptions of Principle 1')
   return out
 }
@@ -989,6 +990,10 @@ describe('the main thread never prints or reads diff contents (AC-320, AC-326)',
       .toContain('principle 1 does not name the marker and its `mkdir -p` among the writes')
     expect(collectPrincipleDefects(seed(ON, ' and its `mkdir -p`', '')))
       .toContain('principle 1 does not name the marker and its `mkdir -p` among the writes')
+    expect(collectPrincipleDefects(seed(ON, ' `pr-description.txt`,', '')))
+      .toEqual(['principle 1 does not name the PR body file and the prior resolutions file among the writes'])
+    expect(collectPrincipleDefects(seed(ON, ' `prior-resolutions.txt`,', '')))
+      .toEqual(['principle 1 does not name the PR body file and the prior resolutions file among the writes'])
   })
 
   it('the orchestrator charter still carries its ad-hoc rule: the command states its own exceptions instead of amending it', () => {
