@@ -380,6 +380,7 @@ d .devflow/scripts/hud/components/
 d .devflow/scripts/lib/
 x .devflow/scripts/lib/project-config.cjs
 - .devflow/scripts/package.json
+x .devflow/scripts/plan-files.cjs
 x .devflow/scripts/pr-evidence.cjs
 x .devflow/scripts/redact-secrets.cjs
 x .devflow/scripts/release-trace.cjs
