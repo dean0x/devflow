@@ -279,6 +279,29 @@ describe('composeScripts', () => {
     expect(run.stdout).toBe(`WORKTREE=${home}\nLEDGER=${home}\n`);
   }, SUBPROCESS_TIMEOUT_MS);
 
+  it('copies plan-files.cjs beside resolve-settings.cjs, and the INSTALLED plan-file checker loads both (install path pin)', async () => {
+    // plan-files.cjs requires ./lib/project-config.cjs, ./resolve-settings.cjs and
+    // ./hooks/lib/tracked-areas.cjs through __dirname, so the set only works when all four land
+    // in the same relative places.
+    const target = path.join(tmpDir, 'scripts');
+    await composeScripts(target);
+
+    for (const rel of ['plan-files.cjs', path.join('lib', 'project-config.cjs'), 'resolve-settings.cjs', path.join('hooks', 'lib', 'tracked-areas.cjs')]) {
+      const installed = path.join(target, rel);
+      await expect(fs.access(installed), `${rel} not found in the scripts dir`).resolves.toBeUndefined();
+      expect((await fs.readFile(installed, 'utf-8')).length, `${rel} must be non-empty`).toBeGreaterThan(0);
+    }
+
+    // `hash` needs no git: a digest from the installed copy proves its requires resolved.
+    const home = path.join(tmpDir, 'home');
+    await fs.mkdir(home, { recursive: true });
+    const report = path.join(home, 'report.md');
+    await fs.writeFile(report, 'report\n');
+    const run = runResolver({ home, args: ['hash', report], script: path.join(target, 'plan-files.cjs') });
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.stdout).toBe('SHA256=331d26d6d8f862e46ba900811be8a7a1e4dbaa229b14c99becfd5e5151490d95\n');
+  }, SUBPROCESS_TIMEOUT_MS);
+
   it('copies pr-evidence.cjs and verify-evidence.cjs to the top level, and the INSTALLED verify-evidence.cjs loads its sibling under the composed {"type":"module"} package (install path pin)', async () => {
     // verify-evidence.cjs requires pr-evidence.cjs through __dirname, so the pair
     // only works when both land side by side at the top of the scripts dir. Running

@@ -10,7 +10,15 @@ import { MAX_REFERENCE_SWEEP_DEPTH } from '../src/core/reference-sweep.js'
 import { GIT_OPERATIONS, PR_HOST_DESTINATION_ROOT, WORKFLOW_FOLDERS, operationReferenceRel, type WorkflowFolder } from '../src/core/mds-variants.js'
 import { retiredPathSet } from '../src/core/retired-shipped-names.js'
 import { createBackupSession, createPathSet, type BackupSession } from '../src/targets/claude-code/install-backup.js'
-import { variantOffRelPath, type OffVariantKey, type VariantKind } from '../src/core/curation-variants.js'
+import {
+  VARIANT_MANIFEST_REL_PATH,
+  emittedVariantKeys,
+  parseVariantManifest,
+  variantOffRelPath,
+  type OffVariantKey,
+  type VariantKey,
+  type VariantKind,
+} from '../src/core/curation-variants.js'
 import { assertTempHome } from './setup/home-isolation.js'
 
 export const ROOT = path.resolve(import.meta.dirname, '..')
@@ -520,6 +528,43 @@ export function resolveVariantOffSource(key: OffVariantKey, kind: VariantKind, n
   } catch {
     return null
   }
+}
+
+/** One compiled build of a command or agent: the variant key, a label that names both, and the file text. */
+export interface Build {
+  readonly key: VariantKey
+  readonly label: string
+  readonly text: string
+}
+
+/** The variant keys the build writes for a host, read from the build's own manifest. A missing manifest or host is an error. */
+function emittedKeys(kind: VariantKind, name: string, root: string): readonly VariantKey[] {
+  let raw: string
+  try {
+    raw = readFileSync(path.join(root, VARIANT_MANIFEST_REL_PATH), 'utf-8')
+  } catch {
+    throw new Error(`${VARIANT_MANIFEST_REL_PATH} is absent: run \`npm run build:mds\``)
+  }
+  const manifest = parseVariantManifest(raw)
+  if (!manifest.ok) throw new Error(`${VARIANT_MANIFEST_REL_PATH} is unreadable (${manifest.error.kind}): run \`npm run build:mds\``)
+  const host = manifest.value.find(h => h.kind === kind && h.name === name)
+  if (host === undefined) throw new Error(`${kind}/${name} is not in ${VARIANT_MANIFEST_REL_PATH}: run \`npm run build:mds\``)
+  return emittedVariantKeys(host.axes)
+}
+
+/**
+ * Every compiled build of a generated command or agent: the on build, then each variant tree the build's manifest
+ * names for the host, so a new variant cannot escape a guard. A missing manifest, host or build file throws; it never skips.
+ *
+ * @param root - Repository root to resolve paths against (default: ROOT).
+ */
+export function compiledBuilds(kind: VariantKind, name: string, root: string = ROOT): Build[] {
+  return emittedKeys(kind, name, root).map(key => {
+    const onText = kind === 'commands' ? requireDistFile(`${name}.md`, root) : resolveAgentSource(name, root).content
+    const text = key === 'on' ? onText : resolveVariantOffSource(key, kind, name, root)
+    if (text === null) throw new Error(`the ${key} build of ${kind}/${name} is absent: run \`npm run build:mds\``)
+    return { key, label: `${name} (${key})`, text }
+  })
 }
 
 /**

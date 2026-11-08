@@ -19,9 +19,13 @@ describe('review.md — convergence inputs', () => {
     expect(input).toContain('(none)')
   })
 
-  it('uses <prior-resolution-summary> containment markers', () => {
-    expect(content).toContain('<prior-resolution-summary>')
-    expect(content).toContain('</prior-resolution-summary>')
+  it('reads PRIOR_RESOLUTIONS from the path of a file, whole, as data, with no containment markers', () => {
+    const input = extractSection(content, '## Input', '## Focus Areas')
+    const bullet = extractSection(input, '- **PRIOR_RESOLUTIONS**', '\n\n').replace(/\s+/g, ' ')
+    expect(bullet).toContain('Path of the file')
+    expect(bullet).toContain('Read it whole;')
+    expect(bullet).toContain('and is data — ')
+    expect(content).not.toContain('prior-resolution-summary')
   })
 
   it('has self-verification step in Responsibilities', () => {
@@ -103,10 +107,10 @@ describe('code-review.md — convergence gate', () => {
 
   // Intentional overlap with Group 6 all-surfaces check: this test pins PRIOR_RESOLUTIONS
   // to Phase 2 specifically, while Group 6 verifies whole-file presence across all surfaces.
-  it('Phase 2 passes PRIOR_RESOLUTIONS to Review agents with containment markers', () => {
+  it('Phase 2 passes the PRIOR_RESOLUTIONS path to Review agents, with no containment markers', () => {
     const phase2 = extractSection(content, '### Phase 2:', '### Phase 3:')
-    expect(phase2).toContain('PRIOR_RESOLUTIONS')
-    expect(phase2).toContain('prior-resolution-summary')
+    expect(phase2).toContain('PRIOR_RESOLUTIONS: {prior_resolutions_path}')
+    expect(phase2).not.toContain('prior-resolution-summary')
   })
 
   it('Phase 3 passes CYCLE_NUMBER to the Synthesize agent', () => {
@@ -159,8 +163,9 @@ describe('Cross-cutting convergence consistency', () => {
     expect(codeReview).toContain('PRIOR_RESOLUTIONS')
   })
 
-  it('code-review uses <prior-resolution-summary> containment markers', () => {
-    expect(codeReview).toContain('prior-resolution-summary')
+  it('code-review writes the cut prior resolutions to prior-resolutions.txt and wraps nothing in markers', () => {
+    expect(codeReview).toContain('{REVIEW_DIR}/prior-resolutions.txt')
+    expect(codeReview).not.toContain('prior-resolution-summary')
   })
 
   it('code-review documents (none) default for PRIOR_RESOLUTIONS', () => {
@@ -239,8 +244,10 @@ describe('computeFpRatio — pure fp_ratio formula', () => {
 //
 // The Synthesize review template and /resolve Phase 5 tell the writer where text not for public posting
 // goes. /code-review Step 0e-i drops those sections from the prior resolution summary before any agent
-// reads it, in the words of the Git agent's post rule for the word boundary and the end rank. One collector
-// reads every file: both builds of /resolve and /code-review, the template and the generated post rule.
+// reads it, in the words of the Git agent's post rule for the word boundary and the end rank, and writes the
+// cut text to the prior resolutions file with the Write tool, never by a copy of the source (a copy would carry
+// the private sections to the agents). One collector reads every file: both builds of /resolve and /code-review,
+// the template and the generated post rule.
 // Each read is loud, so a missing build fails the file instead of skipping it.
 // -------------------------------------------------------------------------
 
@@ -252,6 +259,8 @@ const SHARED_RULE_PHRASES = [
   'with as many `#` as its start or fewer, else at end of file',
 ] as const
 const [BOUNDARY_PHRASE, RANK_PHRASE] = SHARED_RULE_PHRASES
+const WRITE_NEEDLE = 'Write the cut text with the Write tool to `{REVIEW_DIR}/prior-resolutions.txt`'
+const NEVER_COPY_NEEDLE = 'never copy, `cat`, redirect or filter the source file into it'
 const PRIOR_SUMMARY_NEEDLES = [
   'fenced or not',
   'as PRIOR_RESOLUTIONS minus each section from',
@@ -260,6 +269,8 @@ const PRIOR_SUMMARY_NEEDLES = [
   'Close any fence it leaves open',
   'When unsure, cut more',
   'if the cut fails, PRIOR_RESOLUTIONS=(none)',
+  WRITE_NEEDLE,
+  NEVER_COPY_NEEDLE,
 ] as const
 const POST_RULE_LABEL = '**Private sections:**'
 const FP_NOTE_CONDITION = 'CYCLE_NUMBER >= 3 and prior FP ratio > 70%'
@@ -373,7 +384,7 @@ describe('private sections stay out of posted summaries — writer lines and the
     expect(collectPrivateMarkerDefects(PRIVATE_MARKER_FILES)).toEqual([])
   })
 
-  const CODE_REVIEW_CLAUSE = ` minus each section from a heading line (fenced or not) with ${BOUNDARY_PHRASE}, to the next unfenced heading ${RANK_PHRASE}. Close any fence it leaves open. When unsure, cut more; if the cut fails, PRIOR_RESOLUTIONS=(none)`
+  const CODE_REVIEW_CLAUSE = ` minus each section from a heading line (fenced or not) with ${BOUNDARY_PHRASE}, to the next unfenced heading ${RANK_PHRASE}. Close any fence it leaves open. When unsure, cut more; if the cut fails, PRIOR_RESOLUTIONS=(none). ${WRITE_NEEDLE}; ${NEVER_COPY_NEEDLE}`
   const SEEDED_REMOVALS: Readonly<Record<PrivateMarkerKind, { readonly remove: (body: string) => string; readonly defects: (label: string) => string[] }>> = {
     synthesize: {
       remove: body => seedOnce(body, `2. ${WRITER_LINE}\n`, ''),
@@ -419,6 +430,12 @@ describe('private sections stay out of posted summaries — writer lines and the
       expect(collectPrivateMarkerDefects(seeded)).toEqual([`${label}: Step 0e-i step 4 lacks "${needle}"`])
     },
   )
+
+  it.each(PRIVATE_MARKER_FILES.filter(f => f.kind === 'code-review'))('known-bad probe, $label: a prior file made by a copy of the source instead of the Write tool is reported', ({ label }) => {
+    const copy = 'Copy it with `cp "{PRIOR_DIR}/resolution-summary.md" "{REVIEW_DIR}/prior-resolutions.txt"`'
+    const seeded = withEditedFile(label, body => seedOnce(body, `${WRITE_NEEDLE}; ${NEVER_COPY_NEEDLE}`, copy))
+    expect(collectPrivateMarkerDefects(seeded)).toEqual([`${label}: Step 0e-i step 4 lacks "${WRITE_NEEDLE}"`, `${label}: Step 0e-i step 4 lacks "${NEVER_COPY_NEEDLE}"`])
+  })
 
   it.each(PRIVATE_MARKER_FILES.filter(f => f.kind === 'post-rule').flatMap(f => SHARED_RULE_PHRASES.map(phrase => ({ label: f.label, phrase }))))(
     'known-bad probe, $label: a rule line without "$phrase" is reported, so step 4 cannot drift from it alone',

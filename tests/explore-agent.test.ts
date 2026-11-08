@@ -14,6 +14,9 @@
  *   - the report-cap line the roster guard requires admits one `mktemp` overflow file,
  *     the single exception to "creates no file".
  *
+ * The agent holds Read and Bash only, so it writes no report file to a path a caller passes:
+ * /plan takes its reply as text.
+ *
  * Every arm runs through a named collector, and the known-bad probes feed the same
  * collector a body with one clause removed, so a collector that stopped seeing
  * defects fails its own probe instead of passing vacuously.
@@ -29,7 +32,7 @@ interface ParityRow {
 const PARITY: readonly ParityRow[] = [
   { behaviour: 'read-only: a contract section', carriedBy: /^## Read-Only Contract$/m },
   { behaviour: 'read-only: no creating, editing, deleting, moving or copying files', carriedBy: /do not:\n- create, edit, delete, move or copy a file/ },
-  { behaviour: 'read-only: no redirects or heredocs into files', carriedBy: /redirect or pipe output into a file, or write one with a heredoc/ },
+  { behaviour: 'read-only: no redirects, pipes, heredocs or tee into files', carriedBy: /^- redirect or pipe output into a file, or write one with a heredoc or `tee`;$/m },
   { behaviour: 'read-only: no git writes, installs or other state changes', carriedBy: /git write \(`add`, `commit`[^)]*\), install a package, run a build, or run any command that changes system state/ },
   { behaviour: 'read-only: an edit attempt fails (no edit tools)', carriedBy: /Read and Bash only, so an edit attempt fails/ },
   { behaviour: 'thoroughness: quick', carriedBy: /\*\*quick\*\*: one targeted lookup/ },
@@ -59,6 +62,11 @@ function collectToolNameDefects(body: string): string[] {
   return defects;
 }
 
+/** Named collector: the report-path rules the body carries although the agent holds no Write tool. */
+function collectReportPathResidue(body: string): string[] {
+  return ['REPORT_PATH', 'plan-files.cjs'].filter(word => body.includes(word)).map(word => `the body names ${word}`);
+}
+
 const explore = resolveAgentSource('explore');
 const split = splitFrontmatter(explore.content);
 const body = split?.body ?? '';
@@ -83,13 +91,21 @@ describe('the Explore override keeps the built-in\'s behaviours (AC-304)', () =>
     expect(collectToolNameDefects(body)).toEqual([]);
     expect(collectToolNameDefects(`${body}\nUse the Grep tool.`)).toHaveLength(1);
     expect(collectToolNameDefects(`${body}\nUse Glob for paths.`)).toHaveLength(1);
+    expect(collectToolNameDefects(`${body}\nUse the Edit tool.`)).toHaveLength(1);
+    expect(collectToolNameDefects(`${body}\nUse the Write tool for notes.`)).toHaveLength(1);
   });
 
   it('allows exactly one file: the mktemp report overflow', () => {
     const mentions = body.match(/mktemp/g) ?? [];
     expect(mentions.length).toBe(2);
-    expect(body).toMatch(/That is the only file you may create\./);
+    expect(body).toMatch(/The overflow `mktemp` file is the only file you may create\./);
     expect(body).toMatch(/The one allowance is report overflow/);
+  });
+
+  it('takes no REPORT_PATH and runs no plan-files check, so /plan takes its reply as text', () => {
+    expect(collectReportPathResidue(body)).toEqual([]);
+    expect(collectReportPathResidue(`${body}\n- **REPORT_PATH** (optional): write it there.`)).toEqual(['the body names REPORT_PATH']);
+    expect(collectReportPathResidue(`${body}\nRun plan-files.cjs check.`)).toEqual(['the body names plan-files.cjs']);
   });
 
   it('ships the frontmatter that makes it a drop-in override: the built-in\'s name, read-only tools, no CLAUDE.md', () => {
@@ -97,7 +113,8 @@ describe('the Explore override keeps the built-in\'s behaviours (AC-304)', () =>
     expect(frontmatter).toMatch(/^model: sonnet$/m);
     expect(frontmatter).toMatch(/^effort: high$/m);
     expect(frontmatter).toMatch(/^omitClaudeMd: true$/m);
-    expect(frontmatter).toMatch(/^tools:\n {2}- Read\n {2}- Bash$/m);
+    const tools = [...(/^tools:\n((?: {2}- .+\n?)+)/m.exec(frontmatter)?.[1] ?? '').matchAll(/^ {2}- (.+)$/gm)].map(m => m[1]);
+    expect(tools, 'Read and Bash only: no Write, no Edit').toEqual(['Read', 'Bash']);
     expect(frontmatter, 'a search agent preloads no skill').not.toMatch(/^skills:/m);
     expect(frontmatter, 'an allowlist, never a denylist').not.toMatch(/^disallowedTools:/m);
   });
