@@ -58,43 +58,29 @@
  */
 
 import { describe, it, expect } from 'vitest'
+import { existsSync } from 'fs'
+import * as path from 'path'
 
-import { OFF_VARIANT_KEYS } from '../../src/core/curation-variants.js'
 import {
+  ROOT,
   collectOrderViolations,
+  compiledBuilds,
+  countOf,
   isAgentBlock,
   parseFences,
   readAgentReference,
-  requireDistFile,
   resolveAgentSource,
-  resolveVariantOffSource,
+  seedOnce,
+  type Build,
   type OrderRule,
 } from '../helpers.js'
-
-interface Build { readonly label: string; readonly text: string }
-
-/** Replace `from` with `to` in `text` once, and fail the probe when the anchor is absent or repeated. */
-function seed(text: string, from: string, to: string): string {
-  expect(text.split(from).length - 1, `the seed anchor must occur once (${from})`).toBe(1)
-  return text.replace(from, () => to)
-}
 
 // ---------------------------------------------------------------------------
 // 1. The /implement arm
 // ---------------------------------------------------------------------------
 
-const COMMAND_OFF_KEYS = ['curation-off', 'compliance-off', 'both-off'] as const
-
-/** The four builds of a command: curation and compliance on, then each switch off. */
-function commandBuilds(name: string): Build[] {
-  const builds: Build[] = [{ label: `${name} (on)`, text: requireDistFile(`${name}.md`) }]
-  for (const key of COMMAND_OFF_KEYS) {
-    const text = resolveVariantOffSource(key, 'commands', name)
-    if (text === null) throw new Error(`the ${key} build of /${name} is absent: run \`npm run build:mds\``)
-    builds.push({ label: `${name} (${key})`, text })
-  }
-  return builds
-}
+/** The builds of a command, as many as its manifest names: for /implement, /plan and /code-review, curation and compliance on, then each switch off, then both. */
+const commandBuilds = (name: string): Build[] => compiledBuilds('commands', name)
 
 const RESOLVE = 'Resolve and normalize a relative path against `{worktree}`;'
 const PATH_STOP = " stop on `'` or a control character in it."
@@ -154,7 +140,7 @@ const ORDER_RULES: readonly OrderRule[] = [
 
 /** Named collector: the claims an /implement build lacks, the criteria placeholders that stay text-only, and (when every claim is present) the order it breaks. */
 export function collectImplementDefects(label: string, text: string): string[] {
-  const lost = CLAIMS.filter(([, anchor]) => text.split(anchor).length - 1 !== 1).map(([name]) => `${label}: ${name}`)
+  const lost = CLAIMS.filter(([, anchor]) => countOf(text, anchor) !== 1).map(([name]) => `${label}: ${name}`)
   const defects = [...lost]
   for (const agent of ['Evaluate', 'Test']) {
     const spawns = parseFences(text).filter(block => isAgentBlock(block, agent))
@@ -178,16 +164,16 @@ describe('/implement passes the plan file path and the section names in every bu
   it('known-bad probes: each dropped claim is reported by its name, in each build', () => {
     for (const { text } of builds) {
       for (const [name, anchor] of CLAIMS) {
-        expect(collectImplementDefects('i', seed(text, anchor, '')), name).toEqual([`i: ${name}`])
+        expect(collectImplementDefects('i', seedOnce(text, anchor, '')), name).toEqual([`i: ${name}`])
       }
     }
   })
 
   it('known-bad probes: a check on a run without PLAN_SHA is reported by the name of its claim', () => {
     const { text } = builds[0]
-    const evaluate = seed(text, EVALUATE_CHECK, EVALUATE_CHECK.replace('With `PLAN_SHA`, run', 'Run'))
+    const evaluate = seedOnce(text, EVALUATE_CHECK, EVALUATE_CHECK.replace('With `PLAN_SHA`, run', 'Run'))
     expect(collectImplementDefects('i', evaluate)).toEqual([`i: ${CLAIMS[7][0]}`])
-    const test = seed(text, TEST_CHECK, TEST_CHECK.replace('With `PLAN_SHA`, run', 'Run'))
+    const test = seedOnce(text, TEST_CHECK, TEST_CHECK.replace('With `PLAN_SHA`, run', 'Run'))
     expect(collectImplementDefects('i', test)).toEqual([`i: ${CLAIMS[8][0]}`])
   })
 
@@ -209,21 +195,21 @@ describe('/implement passes the plan file path and the section names in every bu
       for (const [anchor, wording] of before) {
         const name = CLAIMS.find(([, claim]) => claim === anchor)?.[0]
         expect(name, `a claim holds the anchor (${anchor})`).toBeDefined()
-        expect(collectImplementDefects('i', seed(text, anchor, wording)), name).toEqual([`i: ${name}`])
+        expect(collectImplementDefects('i', seedOnce(text, anchor, wording)), name).toEqual([`i: ${name}`])
       }
     }
   })
 
   it('known-bad probes: a check placed after the fix spawn that acts on its verdict is reported once', () => {
     const { text } = builds[0]
-    const evaluateLate = seed(
-      seed(text, `\n\n${EVALUATE_CHECK}`, ''),
+    const evaluateLate = seedOnce(
+      seedOnce(text, `\n\n${EVALUATE_CHECK}`, ''),
       '   - Loop back to Phase 5 (re-check alignment).',
       `   - ${EVALUATE_CHECK}\n   - Loop back to Phase 5 (re-check alignment).`,
     )
     expect(collectImplementDefects('i', evaluateLate)).toEqual([expect.stringContaining('[the Evaluate check precedes the alignment-fix spawn]')])
-    const testLate = seed(
-      seed(text, TEST_CHECK, "append its TP claims (Phase 6's **Evidence claims**)."),
+    const testLate = seedOnce(
+      seedOnce(text, TEST_CHECK, "append its TP claims (Phase 6's **Evidence claims**)."),
       '   - Loop back to Phase 7.',
       `   - ${TEST_CHECK}\n   - Loop back to Phase 7.`,
     )
@@ -232,14 +218,14 @@ describe('/implement passes the plan file path and the section names in every bu
 
   it('known-bad probes: a check placed before its spawn instead of after the return is reported once', () => {
     const { text } = builds[0]
-    const evaluateEarly = seed(
-      seed(text, `\n\n${EVALUATE_CHECK}`, ''),
+    const evaluateEarly = seedOnce(
+      seedOnce(text, `\n\n${EVALUATE_CHECK}`, ''),
       `${CRITERIA}\nFEATURE_KNOWLEDGE: {feature_knowledge_rules}`,
       `${EVALUATE_CHECK}\n${CRITERIA}\nFEATURE_KNOWLEDGE: {feature_knowledge_rules}`,
     )
     expect(collectImplementDefects('i', evaluateEarly)).toEqual([expect.stringContaining('[the Evaluate check follows the Evaluate spawn]')])
-    const testEarly = seed(
-      seed(text, TEST_CHECK, "append its TP claims (Phase 6's **Evidence claims**)."),
+    const testEarly = seedOnce(
+      seedOnce(text, TEST_CHECK, "append its TP claims (Phase 6's **Evidence claims**)."),
       'Design and execute scenario-based acceptance tests.',
       `${TEST_CHECK} Design and execute scenario-based acceptance tests.`,
     )
@@ -249,18 +235,18 @@ describe('/implement passes the plan file path and the section names in every bu
   it('known-bad probes: a hash taken after Phase 2 starts, and a path read before it is resolved, are each reported once', () => {
     const { text } = builds[0]
     const step = `4. Run \`${HASH_CALL}\` ${RECORD} ${STOP}`
-    const lateHash = seed(seed(text, `${step}\n`, ''), `${PHASE_2}\n`, `${PHASE_2}\n${step}\n`)
+    const lateHash = seedOnce(seedOnce(text, `${step}\n`, ''), `${PHASE_2}\n`, `${PHASE_2}\n${step}\n`)
     expect(collectImplementDefects('i', lateHash)).toEqual([expect.stringContaining('[PLAN_SHA is recorded before Phase 2]')])
-    const lateResolve = seed(seed(text, `${RESOLVE}${PATH_STOP} ${READ}`, READ), 'Captured values override', `${RESOLVE}${PATH_STOP} Captured values override`)
+    const lateResolve = seedOnce(seedOnce(text, `${RESOLVE}${PATH_STOP} ${READ}`, READ), 'Captured values override', `${RESOLVE}${PATH_STOP} Captured values override`)
     expect(collectImplementDefects('i', lateResolve)).toEqual([expect.stringContaining('[the path is resolved before the plan is read]')])
   })
 
   it('known-bad probes: a criteria placeholder that stays text-only, in either spawn, is reported once', () => {
     const { text } = builds[0]
     const plain = 'ACCEPTANCE_CRITERIA: {extracted criteria if available}'
-    const evaluateOnly = seed(text, `${CRITERIA}\nFEATURE_KNOWLEDGE: {feature_knowledge_rules}`, `${plain}\nFEATURE_KNOWLEDGE: {feature_knowledge_rules}`)
+    const evaluateOnly = seedOnce(text, `${CRITERIA}\nFEATURE_KNOWLEDGE: {feature_knowledge_rules}`, `${plain}\nFEATURE_KNOWLEDGE: {feature_knowledge_rules}`)
     expect(collectImplementDefects('i', evaluateOnly)).toEqual(['i: the Evaluate spawn does not point ACCEPTANCE_CRITERIA at PLAN_FILE'])
-    const testOnly = seed(text, `${CRITERIA}\nTEST_PLAN:`, `${plain}\nTEST_PLAN:`)
+    const testOnly = seedOnce(text, `${CRITERIA}\nTEST_PLAN:`, `${plain}\nTEST_PLAN:`)
     expect(collectImplementDefects('i', testOnly)).toEqual(['i: the Test spawn does not point ACCEPTANCE_CRITERIA at PLAN_FILE'])
   })
 })
@@ -275,14 +261,13 @@ const NEVER_EDIT_CLAUSE = 'Never edit PLAN_FILE.'
 const BLOCKED_CLAUSE = 'If PLAN_FILE cannot be read, return BLOCKED.'
 const PLAN_LINE_HEAD = '- **EXECUTION_PLAN**:'
 
-/** Every compiled build of an agent: the on build, then each variant tree that holds the agent. */
+/**
+ * Every compiled build of an agent. A generator host (`{name}.mds`) has the builds its manifest names, and a
+ * missing manifest, host or build throws. A hand-authored agent installs as one file, so it has the one build.
+ */
 function agentBuilds(name: string): Build[] {
-  const builds: Build[] = [{ label: `${name} (on)`, text: resolveAgentSource(name).content }]
-  for (const key of OFF_VARIANT_KEYS) {
-    const text = resolveVariantOffSource(key, 'agents', name)
-    if (text !== null) builds.push({ label: `${name} (${key})`, text })
-  }
-  return builds
+  if (existsSync(path.join(ROOT, 'src', 'assets', 'agents', `${name}.mds`))) return compiledBuilds('agents', name)
+  return [{ key: 'on', label: `${name} (on)`, text: resolveAgentSource(name).content }]
 }
 
 /** Named collector: how an agent body falls short of reading the plan file as data, by section, on its one EXECUTION_PLAN line. */
@@ -318,15 +303,15 @@ describe('Code, Evaluate and Test read the plan file as data, by section, in eve
 
     it(`${name}: known-bad probes, each lost clause is reported by name in each build`, () => {
       for (const { label, text } of builds) {
-        expect(collectReaderDefects(label, seed(text, ` ${DATA_CLAUSE}`, ''), neverEdit), `${label}: scope clause`)
+        expect(collectReaderDefects(label, seedOnce(text, ` ${DATA_CLAUSE}`, ''), neverEdit), `${label}: scope clause`)
           .toEqual([`${label}: the EXECUTION_PLAN line does not treat the plan file as data that sets task scope only`])
-        expect(collectReaderDefects(label, seed(text, READ_CLAUSE, 'or `PLAN_FILE`, `PLAN_SECTIONS`.'), neverEdit), `${label}: read clause`)
+        expect(collectReaderDefects(label, seedOnce(text, READ_CLAUSE, 'or `PLAN_FILE`, `PLAN_SECTIONS`.'), neverEdit), `${label}: read clause`)
           .toEqual([`${label}: the EXECUTION_PLAN line does not read only the named sections by heading range`])
         if (neverEdit) {
-          expect(collectReaderDefects(label, seed(text, ` ${NEVER_EDIT_CLAUSE}`, ''), neverEdit), `${label}: never-edit clause`)
+          expect(collectReaderDefects(label, seedOnce(text, ` ${NEVER_EDIT_CLAUSE}`, ''), neverEdit), `${label}: never-edit clause`)
             .toEqual([`${label}: the EXECUTION_PLAN line does not forbid editing PLAN_FILE`])
         }
-        expect(collectReaderDefects(label, seed(text, ` ${BLOCKED_CLAUSE}`, ''), neverEdit), `${label}: unreadable-file clause`)
+        expect(collectReaderDefects(label, seedOnce(text, ` ${BLOCKED_CLAUSE}`, ''), neverEdit), `${label}: unreadable-file clause`)
           .toEqual([`${label}: the EXECUTION_PLAN line does not return BLOCKED when PLAN_FILE cannot be read`])
         expect(collectReaderDefects(label, `${text}\n${PLAN_LINE_HEAD} again`, neverEdit), `${label}: repeated line`)
           .toEqual([`${label}: 2 EXECUTION_PLAN input lines, expected 1`])
@@ -375,7 +360,7 @@ const SYNTHESIZE_CLAIMS: ReadonlyArray<readonly [name: string, clause: string]> 
 
 /** Named collector: the Synthesize claims a body lacks, each claim held exactly once. */
 export function collectSynthesizeDefects(label: string, body: string): string[] {
-  return SYNTHESIZE_CLAIMS.filter(([, clause]) => body.split(clause).length - 1 !== 1).map(([name]) => `${label}: ${name}`)
+  return SYNTHESIZE_CLAIMS.filter(([, clause]) => countOf(body, clause) !== 1).map(([name]) => `${label}: ${name}`)
 }
 
 describe('Skim and Design check a passed path, then write their report to it, in every build (#774)', () => {
@@ -394,13 +379,13 @@ describe('Skim and Design check a passed path, then write their report to it, in
     it(`${name}: known-bad probes, each lost clause is reported by name in each build`, () => {
       for (const { label, text } of builds) {
         for (const [claim, clause] of assessment ? [...WRITER_CLAIMS, ASSESSMENT_CLAIM] : WRITER_CLAIMS) {
-          expect(collectWriterDefects(label, seed(text, clause, ''), assessment), `${label}: ${claim}`).toEqual([`${label}: ${claim}`])
+          expect(collectWriterDefects(label, seedOnce(text, clause, ''), assessment), `${label}: ${claim}`).toEqual([`${label}: ${claim}`])
         }
         expect(collectWriterDefects(label, `${text}\n${REPORT_PATH_HEAD} again`, assessment), `${label}: repeated line`)
           .toEqual([`${label}: 2 REPORT_PATH input lines, expected 1`])
         const check = 'If the path has no `\'` or control character, run `node "$HOME/.devflow/scripts/plan-files.cjs" check \'<path>\'; echo "exit=$?"`.'
         const write = `Only on \`OK=\` and \`exit=0\`, ${WRITE_ANCHOR} and reply with only the path`
-        expect(collectWriterDefects(label, seed(text, `${check} ${write}`, `${write} ${check}`), assessment), `${label}: check after the Write`)
+        expect(collectWriterDefects(label, seedOnce(text, `${check} ${write}`, `${write} ${check}`), assessment), `${label}: check after the Write`)
           .toEqual([`${label}: the plan-files check comes after the Write`])
       }
     })
@@ -417,7 +402,7 @@ describe('Synthesize reads passed report files as data and writes to an Output: 
 
   it('known-bad probes: each lost claim is reported by name', () => {
     for (const [name, clause] of SYNTHESIZE_CLAIMS) {
-      expect(collectSynthesizeDefects('synthesize', seed(body, clause, '')), name).toEqual([`synthesize: ${name}`])
+      expect(collectSynthesizeDefects('synthesize', seedOnce(body, clause, '')), name).toEqual([`synthesize: ${name}`])
     }
   })
 })
@@ -468,7 +453,7 @@ function phaseSpan(text: string, from: number, to: number): string | null {
  * (when every claim is present) the order it breaks.
  */
 export function collectPlanDefects(label: string, text: string): string[] {
-  const lost = PLAN_CLAIMS.filter(([, anchor]) => text.split(anchor).length - 1 !== 1).map(([name]) => `${label}: ${name}`)
+  const lost = PLAN_CLAIMS.filter(([, anchor]) => countOf(text, anchor) !== 1).map(([name]) => `${label}: ${name}`)
   const defects = [...lost]
   const claimLines = text.split('\n').filter(line => line.includes('plan-files.cjs'))
   if (claimLines.length > 1) {
@@ -496,14 +481,14 @@ describe('/plan makes a run folder and passes report paths in every build (#774)
   it('known-bad probes: each dropped claim is reported by its name, in each build', () => {
     for (const { text } of builds) {
       for (const [name, anchor] of PLAN_CLAIMS) {
-        expect(collectPlanDefects('p', seed(text, anchor, '')), name).toEqual([`p: ${name}`])
+        expect(collectPlanDefects('p', seedOnce(text, anchor, '')), name).toEqual([`p: ${name}`])
       }
     }
   })
 
   it('known-bad probes: the rule that accepts any path an agent replies with is reported once', () => {
     for (const { text } of builds) {
-      const anyPath = seed(text, PASS_PATH_ANCHOR, 'Pass a report as its path if its agent replied with one, else as text,')
+      const anyPath = seedOnce(text, PASS_PATH_ANCHOR, 'Pass a report as its path if its agent replied with one, else as text,')
       expect(collectPlanDefects('p', anyPath)).toEqual([`p: ${PASS_PATH_CLAIM_NAME}`])
     }
   })
@@ -511,27 +496,27 @@ describe('/plan makes a run folder and passes report paths in every build (#774)
   it('known-bad probes: a claim line that holds the feature, a title or a topic, and a second claim line, are each reported once', () => {
     for (const { text } of builds) {
       for (const extra of ['for {feature/issues}', 'for the title', 'for $TOPIC']) {
-        const bad = seed(text, 'Only a `RUN_DIR=', `${extra}. Only a \`RUN_DIR=`)
+        const bad = seedOnce(text, 'Only a `RUN_DIR=', `${extra}. Only a \`RUN_DIR=`)
         expect(collectPlanDefects('p', bad), extra).toEqual(['p: the claim line holds the feature, a title or a topic'])
       }
-      const second = seed(text, 'Spawn Skim agent', 'Run plan-files.cjs again.\n\nSpawn Skim agent')
+      const second = seedOnce(text, 'Spawn Skim agent', 'Run plan-files.cjs again.\n\nSpawn Skim agent')
       expect(collectPlanDefects('p', second)).toEqual(['p: 2 lines name plan-files.cjs, expected 1'])
     }
   })
 
   it('known-bad probes: a report path in a Plan or Architect prompt is reported once', () => {
     for (const { text } of builds) {
-      const plan = seed(text, 'Spawn 3 `Agent(subagent_type="Plan")` agents', 'Spawn 3 `Agent(subagent_type="Plan")` agents with `REPORT_PATH: {run}/plan-1.md`')
+      const plan = seedOnce(text, 'Spawn 3 `Agent(subagent_type="Plan")` agents', 'Spawn 3 `Agent(subagent_type="Plan")` agents with `REPORT_PATH: {run}/plan-1.md`')
       expect(collectPlanDefects('p', plan)).toEqual(['p: a Plan prompt gets a report path'])
-      const architect = seed(text, 'Spawn 1 Architect agent:', 'Spawn 1 Architect agent with `REPORT_PATH: {run}/architect-1.md`:')
+      const architect = seedOnce(text, 'Spawn 1 Architect agent:', 'Spawn 1 Architect agent with `REPORT_PATH: {run}/architect-1.md`:')
       expect(collectPlanDefects('p', architect)).toEqual(['p: an Architect prompt gets a report path'])
     }
   })
 
   it('known-bad probes: a step that globs the run folder is reported once', () => {
     for (const { text } of builds) {
-      expect(collectPlanDefects('p', seed(text, GATE_READ, `${GATE_READ} Glob \`{run}\` for reports.`))).toEqual(['p: a step globs the run folder'])
-      expect(collectPlanDefects('p', seed(text, GATE_READ, `${GATE_READ} List \`{run}/*.md\`.`))).toEqual(['p: a step globs the run folder'])
+      expect(collectPlanDefects('p', seedOnce(text, GATE_READ, `${GATE_READ} Glob \`{run}\` for reports.`))).toEqual(['p: a step globs the run folder'])
+      expect(collectPlanDefects('p', seedOnce(text, GATE_READ, `${GATE_READ} List \`{run}/*.md\`.`))).toEqual(['p: a step globs the run folder'])
     }
   })
 
@@ -541,10 +526,10 @@ describe('/plan makes a run folder and passes report paths in every build (#774)
       const skimLine = text.split('\n').find(line => line.startsWith('Spawn Skim agent'))
       expect(claimLine, 'the claim line is found').toBeDefined()
       expect(skimLine, 'the Skim spawn line is found').toBeDefined()
-      const lateClaim = seed(seed(text, `${claimLine}\n\n`, ''), `${skimLine}\n`, `${skimLine}\n${claimLine}\n`)
+      const lateClaim = seedOnce(seedOnce(text, `${claimLine}\n\n`, ''), `${skimLine}\n`, `${skimLine}\n${claimLine}\n`)
       expect(collectPlanDefects('p', lateClaim)).toEqual([expect.stringContaining('[the claim comes before the Skim spawn]')])
       const phase3 = '#### Phase 3: Explore Requirements (Parallel)\n'
-      const lateRule = seed(seed(text, ` ${GATE_READ}`, ''), phase3, `${phase3}\n${GATE_READ}\n`)
+      const lateRule = seedOnce(seedOnce(text, ` ${GATE_READ}`, ''), phase3, `${phase3}\n${GATE_READ}\n`)
       expect(collectPlanDefects('p', lateRule)).toEqual([expect.stringContaining('[the report rules come before Phase 3]')])
     }
   })
@@ -554,11 +539,13 @@ describe('/plan makes a run folder and passes report paths in every build (#774)
 // 5. The /code-review arm
 // ---------------------------------------------------------------------------
 
+const WORKTREE_STOP = "Stop on `'` or a control character in `{worktree}`."
 const MKDIR_STEP = '`mkdir -p {worktree}/.devflow/docs/reviews/{branch-slug}/{timestamp}/`. '
 const FETCH_GATE = 'Only when `pr_number` is digits only, fetch the PR body in the same Bash call:'
 const FETCH_COMMAND =
   `F='{REVIEW_DIR}/pr-description'; gh pr view {pr_number} --json body --jq '.body' > "$F.tmp" 2>/dev/null && mv -- "$F.tmp" "$F.txt"; r=$?; rm -- "$F.tmp" 2>/dev/null; echo "exit=$r"`
 const BODY_RULE = '`PR_DESCRIPTION` is `{REVIEW_DIR}/pr-description.txt` on `exit=0`, else `(none)`.'
+const FIRST_CYCLE = 'If CYCLE_NUMBER = 0: set PRIOR_RESOLUTIONS=(none), `prior_resolutions_path`=(none),'
 const WRITE_CLAUSE = 'Write the cut text with the Write tool to `{REVIEW_DIR}/prior-resolutions.txt`;'
 const NO_SHELL_CLAUSE = 'never copy, `cat`, redirect or filter the source file into it.'
 const CUT_FAIL_CLAUSE = '`prior_resolutions_path` is that path; if the cut or the Write fails it is `(none)`.'
@@ -571,13 +558,16 @@ const CODE_REVIEW_CLAIMS: ReadonlyArray<readonly [name: string, anchor: string]>
   ['the PR body fetch is not gated on a digits-only pr_number, in the Bash call of the mkdir', `${MKDIR_STEP}${FETCH_GATE}`],
   ['the PR body is not fetched to a temp file and moved to pr-description.txt only after the fetch succeeds', FETCH_COMMAND],
   ['PR_DESCRIPTION is not the pr-description.txt path on exit=0 and (none) otherwise', BODY_RULE],
+  ['the first review cycle does not set the prior resolutions path to (none)', FIRST_CYCLE],
   ['the cut prior resolutions are not written with the Write tool to prior-resolutions.txt', WRITE_CLAUSE],
   ['the prior resolutions file may be made by a copy, cat, redirect or filter of the source file', NO_SHELL_CLAUSE],
   ['a failed cut or Write does not leave the prior resolutions path as (none)', CUT_FAIL_CLAUSE],
+  ['a worktree path with a quote or a control character does not stop the run before the quoted PR body fetch', WORKTREE_STOP],
 ]
 
-/** The order of the claims: the body is fetched, then the prior resolutions are written, then the Review agents are spawned. */
+/** The order of the claims: the worktree path is checked before the quoted fetch, the body is fetched, then the prior resolutions are written, then the Review agents are spawned. */
 const CODE_REVIEW_ORDER_RULES: readonly OrderRule[] = [
+  { label: 'the worktree path stop comes before the PR body fetch', before: WORKTREE_STOP, after: FETCH_COMMAND },
   { label: 'the PR body fetch comes before the prior resolutions write', before: FETCH_COMMAND, after: WRITE_CLAUSE },
   { label: 'the prior resolutions write comes before the Review spawns', before: WRITE_CLAUSE, after: PHASE_2_HEADING },
 ]
@@ -592,7 +582,7 @@ const DIRECT_BODY_REDIRECT = />\s*"?(?:\$F\.txt|[^\s"]*pr-description\.txt)/
  * claim is present) the order it breaks.
  */
 export function collectCodeReviewDefects(label: string, text: string): string[] {
-  const lost = CODE_REVIEW_CLAIMS.filter(([, anchor]) => text.split(anchor).length - 1 !== 1).map(([name]) => `${label}: ${name}`)
+  const lost = CODE_REVIEW_CLAIMS.filter(([, anchor]) => countOf(text, anchor) !== 1).map(([name]) => `${label}: ${name}`)
   const defects = [...lost]
   const fences = parseFences(text)
   const reviews = fences.filter(block => isAgentBlock(block, 'Review'))
@@ -611,7 +601,7 @@ export function collectCodeReviewDefects(label: string, text: string): string[] 
   }
   if (/<pr-description>|<prior-resolution-summary>/.test(text)) defects.push(`${label}: a spawn still wraps a file's text in containment markers`)
   if (fences.some(block => block.includes('prior-resolutions'))) defects.push(`${label}: a command block names the prior resolutions file`)
-  const named = text.split(WRITE_CLAUSE).join('').split('prior-resolutions').length - 1
+  const named = countOf(text.split(WRITE_CLAUSE).join(''), 'prior-resolutions')
   if (named !== 1) defects.push(`${label}: prior-resolutions is named ${named} times outside the Write step, expected 1 (Principle 1)`)
   if (fences.some(block => DIRECT_BODY_REDIRECT.test(block))) defects.push(`${label}: the PR body file is redirected into before the fetch succeeds`)
   return lost.length === 0 ? [...defects, ...collectOrderViolations(label, text, CODE_REVIEW_ORDER_RULES)] : defects
@@ -628,14 +618,14 @@ describe('/code-review passes the PR body and the cut prior resolutions as files
   it('known-bad probes: each dropped claim is reported by its name, in each build', () => {
     for (const { text } of builds) {
       for (const [name, anchor] of CODE_REVIEW_CLAIMS) {
-        expect(collectCodeReviewDefects('c', seed(text, anchor, '')), name).toEqual([`c: ${name}`])
+        expect(collectCodeReviewDefects('c', seedOnce(text, anchor, '')), name).toEqual([`c: ${name}`])
       }
     }
   })
 
   it('known-bad probes: a PR body redirected into its final file before the fetch succeeds is reported', () => {
     for (const { text } of builds) {
-      const bad = seed(text, FETCH_COMMAND, `F='{REVIEW_DIR}/pr-description'; gh pr view {pr_number} --json body --jq '.body' > "$F.txt" 2>/dev/null; echo "exit=$?"`)
+      const bad = seedOnce(text, FETCH_COMMAND, `F='{REVIEW_DIR}/pr-description'; gh pr view {pr_number} --json body --jq '.body' > "$F.txt" 2>/dev/null; echo "exit=$?"`)
       expect(collectCodeReviewDefects('c', bad)).toEqual([`c: ${CODE_REVIEW_CLAIMS[1][0]}`, 'c: the PR body file is redirected into before the fetch succeeds'])
     }
   })
@@ -651,10 +641,10 @@ describe('/code-review passes the PR body and the cut prior resolutions as files
     const NAMED_TWICE = 'c: prior-resolutions is named 2 times outside the Write step, expected 1 (Principle 1)'
     for (const { text } of builds) {
       for (const form of forms) {
-        const inBlock = seed(text, step, `\`\`\`bash\n${form}\n\`\`\`\n\n${step}`)
+        const inBlock = seedOnce(text, step, `\`\`\`bash\n${form}\n\`\`\`\n\n${step}`)
         expect(collectCodeReviewDefects('c', inBlock), `block: ${form}`)
           .toEqual(['c: a command block names the prior resolutions file', NAMED_TWICE])
-        const inProse = seed(text, ` ${CUT_FAIL_CLAUSE}`, ` Run \`${form}\`. ${CUT_FAIL_CLAUSE}`)
+        const inProse = seedOnce(text, ` ${CUT_FAIL_CLAUSE}`, ` Run \`${form}\`. ${CUT_FAIL_CLAUSE}`)
         expect(collectCodeReviewDefects('c', inProse), `prose: ${form}`).toEqual([NAMED_TWICE])
       }
     }
@@ -664,19 +654,26 @@ describe('/code-review passes the PR body and the cut prior resolutions as files
     const wrappedBody = '<pr-description>{pr_description}</pr-description>'
     const wrappedPrior = '<prior-resolution-summary>{prior_resolutions}</prior-resolution-summary>'
     for (const { text } of builds) {
-      expect(collectCodeReviewDefects('c', seed(text, BODY_LINE, `PR_DESCRIPTION: ${wrappedBody}`)))
+      expect(collectCodeReviewDefects('c', seedOnce(text, BODY_LINE, `PR_DESCRIPTION: ${wrappedBody}`)))
         .toEqual(['c: the Review spawn does not pass the PR body path', "c: a spawn still wraps a file's text in containment markers"])
-      expect(collectCodeReviewDefects('c', seed(text, `${PRIOR_LINE}\n{COMPLIANCE_FOCUS_DIRECTIVE}`, 'PRIOR_RESOLUTIONS: {prior_resolutions}\n{COMPLIANCE_FOCUS_DIRECTIVE}')))
+      expect(collectCodeReviewDefects('c', seedOnce(text, `${PRIOR_LINE}\n{COMPLIANCE_FOCUS_DIRECTIVE}`, 'PRIOR_RESOLUTIONS: {prior_resolutions}\n{COMPLIANCE_FOCUS_DIRECTIVE}')))
         .toEqual(['c: the Review spawn does not pass the prior resolutions path'])
-      expect(collectCodeReviewDefects('c', seed(text, `${PRIOR_LINE}\nInclude Convergence`, `PRIOR_RESOLUTIONS: ${wrappedPrior}\nInclude Convergence`)))
+      expect(collectCodeReviewDefects('c', seedOnce(text, `${PRIOR_LINE}\nInclude Convergence`, `PRIOR_RESOLUTIONS: ${wrappedPrior}\nInclude Convergence`)))
         .toEqual(['c: the Synthesize spawn does not pass the prior resolutions path', "c: a spawn still wraps a file's text in containment markers"])
+    }
+  })
+
+  it('known-bad probe: a worktree path stop that sits after the quoted PR body fetch is reported once', () => {
+    for (const { text } of builds) {
+      const late = seedOnce(seedOnce(text, `${WORKTREE_STOP} `, ''), BODY_RULE, `${BODY_RULE} ${WORKTREE_STOP}`)
+      expect(collectCodeReviewDefects('c', late)).toEqual([expect.stringContaining('[the worktree path stop comes before the PR body fetch]')])
     }
   })
 
   it('known-bad probe: a Write step that sits after the Review spawns begin is reported once', () => {
     for (const { text } of builds) {
       const sentence = ` ${WRITE_CLAUSE} ${NO_SHELL_CLAUSE} ${CUT_FAIL_CLAUSE}`
-      const late = seed(seed(text, sentence, ''), `${PHASE_2_HEADING}\n`, `${PHASE_2_HEADING}\n${sentence}\n`)
+      const late = seedOnce(seedOnce(text, sentence, ''), `${PHASE_2_HEADING}\n`, `${PHASE_2_HEADING}\n${sentence}\n`)
       expect(collectCodeReviewDefects('c', late)).toEqual([expect.stringContaining('[the prior resolutions write comes before the Review spawns]')])
     }
   })
@@ -703,7 +700,7 @@ function bulletOf(body: string, head: string): string {
 
 /** Named collector: how a body falls short of reading one passed file whole, as data, on its one input bullet; and any containment marker. */
 export function collectFileInputDefects(label: string, body: string, head: string): string[] {
-  if (body.split(head).length - 1 !== 1) return [`${label}: expected one "${head}" input bullet`]
+  if (countOf(body, head) !== 1) return [`${label}: expected one "${head}" input bullet`]
   const bullet = bulletOf(body, head)
   const defects = FILE_INPUT_CLAIMS.filter(([, clause]) => !bullet.includes(clause)).map(([name]) => `${label}: ${name} (${head})`)
   if (/<pr-description>|<prior-resolution-summary>/.test(body)) defects.push(`${label}: the body still names containment markers`)

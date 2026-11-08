@@ -115,7 +115,7 @@ For each worktree:
    - **Full-range path (no marker, or `--full`):**
      - Stop as for a (rejected) Base line unless `base_ref` is 40 or 64 hex.
      - Set `DIFF_RANGE` to `{base_ref}...HEAD`
-3. Create timestamped review directory: `mkdir -p {worktree}/.devflow/docs/reviews/{branch-slug}/{timestamp}/`. Only when `pr_number` is digits only, fetch the PR body in the same Bash call:
+3. Stop on `'` or a control character in `{worktree}`. Create timestamped review directory: `mkdir -p {worktree}/.devflow/docs/reviews/{branch-slug}/{timestamp}/`. Only when `pr_number` is digits only, fetch the PR body in the same Bash call:
 
 ```bash
 F='{REVIEW_DIR}/pr-description'; gh pr view {pr_number} --json body --jq '.body' > "$F.tmp" 2>/dev/null && mv -- "$F.tmp" "$F.txt"; r=$?; rm -- "$F.tmp" 2>/dev/null; echo "exit=$r"
@@ -131,7 +131,7 @@ F='{REVIEW_DIR}/pr-description'; gh pr view {pr_number} --json body --jq '.body'
 For each worktree:
 1. List the timestamped directories: `ls -1d {worktree}/.devflow/docs/reviews/{branch-slug}/20* 2>/dev/null | sort -r`
 2. Iterate once: count each directory containing `resolution-summary.md` as CYCLE_NUMBER; capture the first (newest) as PRIOR_DIR.
-3. If CYCLE_NUMBER = 0: set PRIOR_RESOLUTIONS=(none), CYCLE_NUMBER=1, proceed.
+3. If CYCLE_NUMBER = 0: set PRIOR_RESOLUTIONS=(none), `prior_resolutions_path`=(none), CYCLE_NUMBER=1, proceed.
 4. Otherwise: set CYCLE_NUMBER = count + 1. Read `{PRIOR_DIR}/resolution-summary.md` as PRIOR_RESOLUTIONS minus each section from a heading line (fenced or not) with the word `Private` (any case) not followed by a letter or digit, to the next unfenced heading with as many `#` as its start or fewer, else at end of file. Close any fence it leaves open. When unsure, cut more; if the cut fails, PRIOR_RESOLUTIONS=(none). Write the cut text with the Write tool to `{REVIEW_DIR}/prior-resolutions.txt`; never copy, `cat`, redirect or filter the source file into it. `prior_resolutions_path` is that path; if the cut or the Write fails it is `(none)`.
 5. If `--full`: still load PRIOR_RESOLUTIONS.
 

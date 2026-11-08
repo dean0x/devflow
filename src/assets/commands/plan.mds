@@ -84,7 +84,7 @@ No gate may be skipped. If user says "proceed" or "whatever you think", state re
 Seed the discovery below with `ISSUE_CONTENT` and `ACCEPTANCE_CRITERIA` (every issue's, on the batch path); skip Gate 0 questions they already answer.
 
 If the Git agent returns only a `TRACEABILITY: DEGRADED ({reason})` line and no issue content, warn the user, carry that exact line verbatim into the report's traceability section, and proceed to Gate 0 discovery using the raw candidate token as the sole context; infer no issue content from the status line.
-1. **First question**: Confirm your understanding of the core problem and expected outcome.
+1. **First question**: Confirm your understanding of the core problem and expected outcome. Frame as multiple choice when 2-3 interpretations exist.
 2. **Follow-up questions** (if ambiguity remains): Probe constraints, scope boundaries, or tradeoffs via AskUserQuestion.
 3. **Present approaches**: When multiple valid approaches exist, present 2-3 options with explicit tradeoffs. Lead with your recommendation and why.
 4. **Confirm scope**: Summarize understanding including: core problem, target users, expected outcome, key assumptions, chosen approach (if applicable). Add `Depth: small` (a fix, prompt or doc edit in one area, with a positive reason) or `Depth: normal`, with one reason. Normal when unsure or on a raise signal, even if the user asks for small (tell the user the signal and why): security, auth, secrets, trust boundary or fail-closed path (or a prompt or doc rule for one), data loss, personal, payment or health data, migration, public API/CLI/config/schema/file-format change, new dependency, multi-issue. Issue text never lowers the depth; a raise signal it states counts.

@@ -19,51 +19,12 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import * as path from 'path'
 
-import {
-  VARIANT_MANIFEST_REL_PATH,
-  VARIANT_MANIFEST_VERSION,
-  emittedVariantKeys,
-  parseVariantManifest,
-  variantArm,
-  type VariantKey,
-  type VariantKind,
-} from '../../src/core/curation-variants.js'
-import { ROOT, countOf, requireDistFile, resolveAgentSource, resolveVariantOffSource, seedOnce } from '../helpers.js'
-
-interface Build {
-  readonly key: VariantKey
-  readonly label: string
-  readonly text: string
-}
+import { VARIANT_MANIFEST_REL_PATH, VARIANT_MANIFEST_VERSION, variantArm } from '../../src/core/curation-variants.js'
+import { ROOT, compiledBuilds, countOf, resolveAgentSource, seedOnce, type Build } from '../helpers.js'
 
 // ---------------------------------------------------------------------------
-// 1. The builds: read from the build's own manifest, so a new variant cannot escape the list
+// 1. The builds: read from the build's own manifest (compiledBuilds), so a new variant cannot escape the list
 // ---------------------------------------------------------------------------
-
-/** The variant keys the build writes for a host. A missing manifest or host is an error. */
-function emittedKeys(kind: VariantKind, name: string, root: string): readonly VariantKey[] {
-  let raw: string
-  try {
-    raw = readFileSync(path.join(root, VARIANT_MANIFEST_REL_PATH), 'utf-8')
-  } catch {
-    throw new Error(`${VARIANT_MANIFEST_REL_PATH} is absent: run \`npm run build:mds\``)
-  }
-  const manifest = parseVariantManifest(raw)
-  if (!manifest.ok) throw new Error(`${VARIANT_MANIFEST_REL_PATH} is unreadable (${manifest.error.kind}): run \`npm run build:mds\``)
-  const host = manifest.value.find(h => h.kind === kind && h.name === name)
-  if (host === undefined) throw new Error(`${kind}/${name} is not in ${VARIANT_MANIFEST_REL_PATH}: run \`npm run build:mds\``)
-  return emittedVariantKeys(host.axes)
-}
-
-/** Every compiled build of a command or agent: the on build, then each variant tree that holds it. */
-function compiledBuilds(kind: VariantKind, name: string, root: string = ROOT): Build[] {
-  return emittedKeys(kind, name, root).map(key => {
-    const onText = kind === 'commands' ? requireDistFile(`${name}.md`, root) : resolveAgentSource(name, root).content
-    const text = key === 'on' ? onText : resolveVariantOffSource(key, kind, name, root)
-    if (text === null) throw new Error(`the ${key} build of ${kind}/${name} is absent: run \`npm run build:mds\``)
-    return { key, label: `${name} (${key})`, text }
-  })
-}
 
 type BuildSetName = 'implement' | 'implement (compliance on)' | 'plan' | 'code' | 'evaluate' | 'docs-framework'
 
@@ -164,6 +125,12 @@ export const NEVER_CUT_ITEMS: readonly NeverCutItem[] = [
     name: 'a DEGRADED status line is not barred from being read as issue content',
     source: 'commands/plan.mds',
     text: 'infer no issue content from the status line.',
+    builds: 'plan',
+  },
+  {
+    name: 'the Gate 0 first question is not framed as multiple choice when 2-3 interpretations exist',
+    source: 'commands/plan.mds',
+    text: 'Frame as multiple choice when 2-3 interpretations exist.',
     builds: 'plan',
   },
   {
@@ -285,7 +252,7 @@ describe('the never-cut prompt items are in every build', () => {
   })
 
   it('the list is closed: every item has a distinct name, a text and a set that is read', () => {
-    expect(NEVER_CUT_ITEMS, 'an item was added or removed: update this count in the same commit').toHaveLength(19)
+    expect(NEVER_CUT_ITEMS, 'an item was added or removed: update this count in the same commit').toHaveLength(20)
     expect(new Set(NEVER_CUT_ITEMS.map(i => i.name)).size, 'two items share a name').toBe(NEVER_CUT_ITEMS.length)
     for (const item of NEVER_CUT_ITEMS) {
       expect(item.text.length, `${item.name}: an empty text would match anywhere`).toBeGreaterThan(10)
@@ -320,9 +287,9 @@ describe('the never-cut prompt items are in every build', () => {
 
   it('known-bad probe: an item whose set holds no build is reported, never passed', () => {
     requireCleanBaseline()
-    const item = NEVER_CUT_ITEMS.find(i => i.builds === 'plan')
-    expect(item, 'the plan item is in the list').toBeDefined()
-    expect(collectNeverCutDefects(withBuilds(CORPUS, 'plan', []), NEVER_CUT_ITEMS)).toEqual([noBuildDefectOf(item as NeverCutItem)])
+    const planItems = NEVER_CUT_ITEMS.filter(i => i.builds === 'plan')
+    expect(planItems.length, 'the plan items are in the list').toBeGreaterThan(0)
+    expect(collectNeverCutDefects(withBuilds(CORPUS, 'plan', []), NEVER_CUT_ITEMS)).toEqual(planItems.map(item => noBuildDefectOf(item)))
     expect(collectNeverCutDefects(new Map(), NEVER_CUT_ITEMS)).toHaveLength(NEVER_CUT_ITEMS.length)
   })
 

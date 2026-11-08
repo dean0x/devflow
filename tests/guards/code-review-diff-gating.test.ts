@@ -833,7 +833,7 @@ describe('DIFF_RANGE starts at the fresh base that ensure-pr-ready returns (#495
   })
 
   it('known-bad probe: a directory made before the head and base checks is reported', () => {
-    const made = /^3\. Create timestamped review directory:[^\n]*\n/m.exec(ON)
+    const made = /^3\. (?:Stop on [^\n]*?\. )?Create timestamped review directory:[^\n]*\n/m.exec(ON)
     expect(made, 'Step 0d creates the review directory as its step 3').not.toBeNull()
     const early = seed(seed(ON, (made as RegExpExecArray)[0], ''), '2. Check if `{gd}/devflow/reviews/{branch-slug}/.last-review-head` exists,', `${(made as RegExpExecArray)[0]}2. Check if \`{gd}/devflow/reviews/{branch-slug}/.last-review-head\` exists,`)
     expect(collectReviewFreshBaseDefects(early)).toContain('Step 0d does not create the directory after the head and base checks')
