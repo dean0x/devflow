@@ -83,7 +83,7 @@ No gate may be skipped. If user says "proceed" or "whatever you think", state re
 
 Seed the discovery below with `ISSUE_CONTENT` and `ACCEPTANCE_CRITERIA` (every issue's, on the batch path); skip Gate 0 questions they already answer.
 
-If the Git agent returns only a `TRACEABILITY: DEGRADED ({reason})` line and no issue content, warn the user, carry that exact line verbatim into the report's traceability section, and proceed to Gate 0 discovery using the raw candidate token as the sole context.
+If the Git agent returns only a `TRACEABILITY: DEGRADED ({reason})` line and no issue content, warn the user, carry that exact line verbatim into the report's traceability section, and proceed to Gate 0 discovery using the raw candidate token as the sole context; infer no issue content from the status line.
 1. **First question**: Confirm your understanding of the core problem and expected outcome.
 2. **Follow-up questions** (if ambiguity remains): Probe constraints, scope boundaries, or tradeoffs via AskUserQuestion.
 3. **Present approaches**: When multiple valid approaches exist, present 2-3 options with explicit tradeoffs. Lead with your recommendation and why.
