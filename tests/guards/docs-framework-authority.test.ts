@@ -73,6 +73,7 @@ describe('the skill names every path family the commands write', () => {
     for (const piece of [
       'design/\n', 'handoff-{branch-slug}.md', 'evidence-{branch-slug}.md',
       'resolution-summary.md', 'evidence.md', 'stale-plan.md',
+      'plan/{timestamp}/', '{agent}-{k}.md', '{pr-description,prior-resolutions}.txt', 'plan-files.cjs claim',
     ]) {
       expect(SKILL, `the skill does not carry ${JSON.stringify(piece)}`).toContain(piece)
     }
@@ -322,8 +323,8 @@ describe('a same-minute second run takes seconds, in the skill and in every comm
     expect(collectCollisionDefects(requireDistFile)).toEqual([])
   })
 
-  it('the skill says which three commands do, and what the suffix is', () => {
-    expect(SKILL).toContain('`/code-review`, `/bug-analysis` and `/research` create their run directory themselves')
+  it('the skill says which four commands do, and what the suffix is', () => {
+    expect(SKILL).toContain('`/code-review`, `/bug-analysis`, `/research` and `/plan` create their run directory themselves')
     expect(SKILL).toContain('appends seconds (`2025-12-26_143005`)')
   })
 

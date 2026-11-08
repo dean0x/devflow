@@ -28,6 +28,7 @@ All generated documentation lives under `.devflow/docs/` at the checkout's tople
 │   └── {timestamp}/                   # one directory per review
 │       ├── {focus}.md                 # Review agent report (security.md, architecture.md, ...)
 │       ├── review-summary.md          # Synthesize agent output
+│       ├── {pr-description,prior-resolutions}.txt  # /code-review: passed to agents by path
 │       ├── resolution-summary.md      # /resolve
 │       ├── evidence.md                # /resolve: appended test-plan claims
 │       └── stale-plan.md              # /resolve: stale test-plan lines
@@ -43,6 +44,7 @@ All generated documentation lives under `.devflow/docs/` at the checkout's tople
 ├── research/{topic-slug}/{timestamp}/  # /research
 │   ├── {type}.md                      # Research agent output (codebase.md, external.md, ...)
 │   └── research-summary.md            # Synthesize agent output
+├── plan/{timestamp}/                   # /plan, from plan-files.cjs claim
 ├── design/
 │   ├── {ISSUE_ID}-{topic-slug}.{timestamp}.md  # /plan, one issue
 │   ├── multi-{topic-slug}.{timestamp}.md       # /plan, several issues (frontmatter issue: pending)
@@ -68,7 +70,7 @@ The head markers for incremental runs are not part of this tree. `/code-review` 
 ### Timestamps
 
 `YYYY-MM-DD_HHMM`, local time (sortable, readable), computed once per run and reused for every path of that run.
-- **Same-minute collision.** `/code-review`, `/bug-analysis` and `/research` create their run directory themselves: when it already exists, the second run appends seconds (`2025-12-26_143005`). It sorts after its minute, so newest-first listings stay correct.
+- **Same-minute collision.** `/code-review`, `/bug-analysis`, `/research` and `/plan` create their run directory themselves: when it already exists, the second run appends seconds (`2025-12-26_143005`). It sorts after its minute, so newest-first listings stay correct.
 - A design document's timestamp is the suffix before `.md`, so a listing sorts by that suffix, not by the leading `{ISSUE_ID}`.
 
 ### Branch Slugs
@@ -104,7 +106,7 @@ ensure_docs_dir() { mkdir -p "$(get_docs_root)/.devflow/docs/$1"; }
 - **Reviews**: the Review agents and the Synthesize agent (review mode) write into `reviews/{branch-slug}/{timestamp}/`; `/resolve` adds `resolution-summary.md` (Phase 5); `/code-review` overwrites its `.last-review-head` marker, under the git directory, with the HEAD SHA.
 - **Bug analysis**: the Debug agents and the Synthesize agent (bug-analysis mode) write into `bug-analysis/{branch-slug}/{timestamp}/`; the scanner calls write the SARIF files, the changed-name list for the Snyk filter and the CodeQL log, and the counts step writes the findings tables, all into that run folder; `/bug-analysis` overwrites its `.last-analysis-head` marker, under the git directory, with the HEAD SHA only when every tool that was to run completed, or `--no-static` is set.
 - **Research**: the Research agents write `{type}.md`, and the Synthesize agent (research mode) writes `research-summary.md` through `RESEARCH_BASE_DIR`, both into `research/{topic-slug}/{timestamp}/`.
-- **Design**: `/plan` writes the design document.
+- **Design**: `/plan` writes the design document, and its Skim, Explore, Design and Synthesize agents write `plan/{timestamp}/{agent}-{k}.md`.
 - **Handoff and evidence**: `/implement` writes `evidence-{branch-slug}.md`, which stays after the PR, and the handoff file, to which each Code agent appends one phase section and which is deleted once the PR exists.
 - **Memory and curation**: the Stop hook overwrites `.devflow/memory/WORKING-MEMORY.md`; `decisions.md` and `pitfalls.md` are rendered from `decisions-ledger.jsonl` (active entries in full, inactive ones in an Inactive table).
 
