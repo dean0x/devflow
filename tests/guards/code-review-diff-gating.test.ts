@@ -340,7 +340,7 @@ export function collectStampLineDefects(body: string): string[] {
 /** Edge Cases rows and the Architecture tree. */
 export function collectDocsOfBehaviourDefects(body: string): string[] {
   const out: string[] = []
-  const edge = sectionBetween(body, '## Edge Cases', '## Backwards Compatibility')
+  const edge = sectionBetween(body, '## Edge Cases', '## Principles')
   if (edge === null) return ['no Edge Cases section']
   const rows = tableRows(edge).map(r => r.join(' | '))
   const need: ReadonlyArray<readonly [string, RegExp]> = [
