@@ -4,10 +4,12 @@
 // The checks a plan run makes before agents pass report files by path instead of by
 // pasted text: claim the run folder, check one report path before an agent writes it, and
 // hash a plan file (/implement checks that it did not change). Installed as a top-level
-// sibling of resolve-settings.cjs under ~/.devflow/scripts/, and it requires that file and
-// lib/project-config.cjs: the git toplevel call and its default exec are
-// resolve-settings.cjs's own (gitToplevel, defaultExec), and the bounded file read is
-// lib/project-config.cjs's (readBoundedRegularFile). The script holds no other judgment
+// sibling of resolve-settings.cjs under ~/.devflow/scripts/, and it requires that file,
+// lib/project-config.cjs and hooks/lib/tracked-areas.cjs: the git toplevel call and its
+// default exec are resolve-settings.cjs's own (gitToplevel, defaultExec), the bounded file
+// read is lib/project-config.cjs's (readBoundedRegularFile), and the `.devflow` folder
+// spellings and the git environment without redirects are tracked-areas.cjs's
+// (DEVFLOW_SPELLINGS, gitEnvWithoutRedirects). The script holds no other judgment
 // and writes nothing except the folders `claim` makes. No network.
 //
 // Usage: node plan-files.cjs claim
