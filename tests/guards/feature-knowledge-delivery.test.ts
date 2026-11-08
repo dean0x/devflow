@@ -308,7 +308,7 @@ describe('each spawn names the variable of its recipient tier (D-KB-DELIVERY-TIE
     const expected = TIER_TABLE.implement
     expect(collectTierDefects('implement', implement, expected)).toEqual([])
 
-    const evaluateRich = implement.replace('ACCEPTANCE_CRITERIA: {extracted criteria if available}\nFEATURE_KNOWLEDGE: {feature_knowledge_rules}', 'ACCEPTANCE_CRITERIA: {extracted criteria if available}\nFEATURE_KNOWLEDGE: {feature_knowledge}')
+    const evaluateRich = implement.replace('ACCEPTANCE_CRITERIA: {extracted criteria if available, or (in PLAN_FILE)}\nFEATURE_KNOWLEDGE: {feature_knowledge_rules}', 'ACCEPTANCE_CRITERIA: {extracted criteria if available, or (in PLAN_FILE)}\nFEATURE_KNOWLEDGE: {feature_knowledge}')
     expect(evaluateRich, 'the seed must land').not.toBe(implement)
     expect(collectTierDefects('implement', evaluateRich, expected)).toHaveLength(1)
 
