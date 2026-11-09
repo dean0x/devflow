@@ -114,10 +114,14 @@ export const SHARED_DENYLIST: readonly string[] = [
 ];
 
 /**
- * The tools Code, Fix and Refactor deny beyond SHARED_DENYLIST, so that they start and stop no
- * other agent. Workflow and TaskStop are fixed members whatever their measured cost. Each name
- * is spelled out, with no wildcard, no `mcp__` name, no WebFetch and no WebSearch. A name the
- * runtime does not expose is a no-op (verified 2026-11-09, Claude Code 2.1.319).
+ * The tools Code, Fix and Refactor deny beyond SHARED_DENYLIST, because no path of these agents
+ * uses them. Workflow starts agents and ListAgents finds agents to message; these agents start
+ * and message no agent. TaskStop stops a background run and Monitor waits on one; these agents
+ * run commands in the foreground. Artifact publishes a page and ReportFindings reports review
+ * findings; these agents do neither. Workflow and TaskStop are fixed members whatever their
+ * measured cost. Each name is spelled out, with no wildcard, no `mcp__` name, no WebFetch and no
+ * WebSearch. A name the runtime does not expose is a no-op (verified 2026-11-09, Claude Code
+ * 2.1.319).
  */
 export const CODE_FAMILY_DENY_EXTRA: readonly string[] = [
   'Monitor',
@@ -130,9 +134,10 @@ export const CODE_FAMILY_DENY_EXTRA: readonly string[] = [
 
 /**
  * The tools every deny-list agent outside MCP_DENY_AGENTS keeps, because its work or its scan
- * step needs them (today Code, Fix, Refactor and Research). `collectDenylistViolations` already
- * keeps WebFetch, WebSearch and every `mcp__` name for all agents; this set names the built-in
- * tools beside them. No name here is on SHARED_DENYLIST or CODE_FAMILY_DENY_EXTRA.
+ * step needs them (today Code, Fix, Refactor and Research). `collectDenylistViolations` reports a
+ * deny of WebFetch, WebSearch or any `mcp__` name for all agents. This set lists the built-in
+ * tools these agents keep, WebFetch and WebSearch included, and no `mcp__` name. No name here is
+ * on SHARED_DENYLIST or CODE_FAMILY_DENY_EXTRA.
  */
 export const DENY_AGENT_KEEP: readonly string[] = [
   'Bash',
