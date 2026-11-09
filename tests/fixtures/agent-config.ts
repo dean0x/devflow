@@ -82,8 +82,8 @@ export interface AgentConfigRow {
  * D-SHARED-DENYLIST: the orchestration and host-UI tools that no worker agent
  * needs. One list, spelled exactly, with no wildcard: a wildcard in
  * `disallowedTools` removes MCP names, and the denylist agents that keep their
- * user-environment MCP and web access (Code and Research) must not lose
- * them, so every name is written out. A denied name the runtime does not expose
+ * user-environment MCP and web access (Code, Fix, Refactor and Research) must not
+ * lose them, so every name is written out. A denied name the runtime does not expose
  * is assumed to be a no-op. Git and Tracker are not denylist agents: they hold an
  * allowlist and reach their tracker servers through whole-server entries the installer
  * stamps (D-GIT-ROW, D-TRACKER-ROW).
