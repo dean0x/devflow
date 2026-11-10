@@ -198,7 +198,7 @@ interface AmbientOptions {
  */
 export function createAmbientCommand(): Command {
   return new Command('ambient')
-  .description('Enable or disable ambient mode (orchestrator charter + plan handoff)')
+  .description('Enable or disable ambient mode (orchestrator charter + per-prompt reminder)')
   .option('--enable', 'Register ambient mode hooks')
   .option('--disable', 'Remove ambient mode hooks')
   .option('--status', 'Check if ambient mode is enabled')
@@ -280,7 +280,7 @@ export function createAmbientCommand(): Command {
       await writeSettingsFileAtomic(settingsPath, updated);
       await syncManifestFeature(devflowDir, 'ambient', true);
       p.log.success('Ambient mode enabled — orchestrator hooks registered');
-      p.log.info(color.dim('Charter at session start, reminder per prompt, plan handoffs run devflow:implement when it is installed (git repos only)'));
+      p.log.info(color.dim('Charter at session start, reminder per prompt (git repos only)'));
     }
 
     if (options.disable) {

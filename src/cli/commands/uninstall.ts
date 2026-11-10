@@ -48,7 +48,7 @@ import { MANIFEST_LOCK_NAME, MANIFEST_LOCK_STALE_MARK } from '../../core/manifes
 import { CURATION_DIR_NAME, CURATION_TUNING_FILE_NAME, LEGACY_NAMES, MOVE_JOURNAL_SUFFIX, MOVE_LOCK_PREFIX, MOVE_LOCK_SUFFIX, getMemoryDir } from '../../core/project-paths.js';
 import { probeTrackedArea, type TrackedAreasAnswer } from '../../core/tracked-areas.js';
 import { restampInstalledCommands } from '../../targets/claude-code/language-stamp.js';
-import { installRenderedCharter, removeHandoffSentinel } from '../../targets/claude-code/charter-render.js';
+import { installRenderedCharter } from '../../targets/claude-code/charter-render.js';
 import { installCommandsAndAgents } from '../../targets/claude-code/installer.js';
 import { BACKUP_ROOT_NAME, escapeName } from '../../targets/claude-code/install-backup.js';
 import { isUnrealFolder, newLinkReport, refuseUnrealFolder, refusedFolderStatement, type LinkReport } from '../../targets/claude-code/linked-folder.js';
@@ -327,7 +327,7 @@ export async function resolveInstalledPlugins(devflowDir: string): Promise<Plugi
  * It is deliberately NOT {@link resolveInstalledPlugins}: that falls back to the whole registry when the
  * manifest is missing or names nothing, which is the safe direction for retaining assets, and the wrong one
  * here. The registry would render a charter that routes to every workflow on a machine that installed none
- * of them. With no record the caller leaves the installed charter as it is and takes only the sentinel away.
+ * of them. With no record the caller leaves the installed charter as it is.
  * A record that lists no plugin is a record of nothing installed, so it yields the empty set rather than null.
  */
 export function charterPluginsAfterRemoval(
@@ -1488,15 +1488,13 @@ export async function refreshRetainedCommandsAndAgents(opts: {
 
 /**
  * Re-render the installed orchestrator charter for the plugins that stay after a selective removal, so it
- * stops routing to a workflow whose skill was just removed, and take the implement sentinel away when
- * implement is among the removed.
+ * stops routing to a workflow whose skill was just removed.
  *
  * D-CHARTER-INSTALL-RENDER: the set comes from the MANIFEST record, read without a heal so the file stays
  * byte-identical, which still lists the removed plugins until the caller drops the record, never from the
  * registry fallback of {@link resolveInstalledPlugins}. The record is read only where the change guard lets
  * a change through. With no usable record there is nothing to render from and the installed charter stays
- * as it is, but the sentinel needs no record and goes when implement is among the removed. An uninstall
- * never creates a file, so a machine whose charter is not installed gets none. A failure is a warning,
+ * as it is. An uninstall never creates a file, so a machine whose charter is not installed gets none. A failure is a warning,
  * never a failure of the uninstall.
  */
 async function rerenderCharterAfterRemoval(
@@ -1508,10 +1506,7 @@ async function rerenderCharterAfterRemoval(
   const warn = (msg: string): void => p.log.warn(msg);
   const recorded = (await mayChange(path.join(devflowDir, 'manifest.json'))) ? await readManifestPlugins(devflowDir) : null;
   const retained = charterPluginsAfterRemoval(recorded, removedPluginNames);
-  if (retained === null) {
-    await removeHandoffSentinel({ scriptsDir, removedPlugins: removedPluginNames, warn, mayChange });
-    return;
-  }
+  if (retained === null) return;
   await installRenderedCharter({ scriptsDir, plugins: retained, warn, mayChange, mode: 'uninstall' });
 }
 
