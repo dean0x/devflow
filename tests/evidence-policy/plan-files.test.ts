@@ -283,6 +283,32 @@ describe('plan-files.cjs on real git', { timeout: 60_000 }, () => {
       expect(fs.lstatSync(runDir).isDirectory()).toBe(true);
     });
 
+    it.each(['reviews', 'bug-analysis', 'research'])('outside a git checkout, claims a %s folder under the working folder', family => {
+      const bare = emptyFolder();
+      const r = run(['claim', family, 'jwt'], bare);
+      expect(r.stderr).toBe('');
+      expect(r.status).toBe(0);
+      const runDir = /^RUN_DIR=(.+)\n$/.exec(r.stdout)?.[1] ?? '';
+      expect(path.dirname(runDir)).toBe(path.join(bare, '.devflow', 'docs', family, 'jwt'));
+      expect(path.basename(runDir)).toMatch(STAMP_RE);
+      expect(fs.lstatSync(runDir).isDirectory()).toBe(true);
+    });
+
+    it('outside a git checkout, still refuses a linked folder and writes nothing through the link', () => {
+      const bare = emptyFolder();
+      const linked = emptyFolder();
+      fs.symlinkSync(linked, path.join(bare, '.devflow'));
+      expectClosed(run(['claim', 'research', 'jwt'], bare), 2);
+      expect(fs.readdirSync(linked)).toEqual([]);
+    });
+
+    it('outside a git checkout, the plan and design claims still refuse and make nothing', () => {
+      const bare = emptyFolder();
+      expectClosed(run(['claim'], bare), 2);
+      expectClosed(run(['claim', 'design'], bare), 2);
+      expect(fs.readdirSync(bare)).toEqual([]);
+    });
+
     it('accepts a folder that git tracks, unlike the plan folder', () => {
       const repo = freshRepo();
       const tracked = path.join(repo, '.devflow', 'docs', 'research', 'jwt', '2000-01-01_0000');

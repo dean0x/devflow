@@ -90,7 +90,7 @@ Load for `post-review-summary` under every tracker provider.
 
 1. Check for existing comment with this run's marker (author-filtered, so a third party's copy of the marker cannot suppress it):
    - Fetch viewer login: `gh api user --jq '.login'` → store as VIEWER_LOGIN
-   - `gh pr view {PR_NUMBER} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
+   - Only when `PR_NUMBER` is digits only (else post nothing and report `TRACEABILITY: DEGRADED (PR number not digits)`): `gh pr view {PR_NUMBER} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
    - Search for `<!-- devflow:review-summary cycle:{CYCLE_NUMBER} ts:{REVIEW_TIMESTAMP}` in the viewer-authored comment bodies only (full pair match)
    - If found: skip — report `Skipped: already posted for cycle {CYCLE_NUMBER} ts:{REVIEW_TIMESTAMP}`
 2. Load `references/publication-gate.md` and resolve `REVIEW_PUBLICATION` by its step 2; `off` ends the op without posting.
@@ -220,7 +220,7 @@ Load for `post-resolution-summary` under every tracker provider.
 
 1. Check for an existing marker (author-filtered, so a third party's copy of it cannot suppress devflow's comment):
    - Fetch viewer login: `gh api user --jq '.login'` → store as VIEWER_LOGIN
-   - `gh pr view {PR_NUMBER} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
+   - Only when `PR_NUMBER` is digits only (else post nothing and report `TRACEABILITY: DEGRADED (PR number not digits)`): `gh pr view {PR_NUMBER} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
    - Search the viewer-authored bodies only for the exact key `<!-- devflow:resolution-summary ts:{RESOLUTION_TS} -->`
    - If found: skip — report `Skipped: already posted for ts:{RESOLUTION_TS}`
 2. Load `references/publication-gate.md` and resolve `REVIEW_PUBLICATION` by its step 2; `off` ends the op without posting.
@@ -263,14 +263,14 @@ Load for `check-merge-readiness` under every tracker provider.
 
 ### Process
 
-Run the script from `WORKTREE_PATH` (else cwd) and print its stdout, nothing else: `node "$HOME/.devflow/scripts/verify-evidence.cjs" readiness --pr {PR_NUMBER}; echo "exit=$?"`, adding `--require-non-author-approval {REQUIRE_NON_AUTHOR_APPROVAL}` only when that is `true` or `false`, with the Bash `timeout` at 180000. On exit 0 or 2 its stdout is the `## Merge Readiness` block (exit 2: `DEGRADED`, closed by a `TRACEABILITY: DEGRADED ({reason})` line); any other exit, or empty stdout, is `TRACEABILITY: DEGRADED (readiness unavailable)`. The script makes the reads and applies the ladder below, so the steps are its specification: run none of them yourself.
+Run the script only when `PR_NUMBER` is digits only (any other value is `TRACEABILITY: DEGRADED (readiness unavailable)`), from `WORKTREE_PATH` (else cwd), and print its stdout, nothing else: `node "$HOME/.devflow/scripts/verify-evidence.cjs" readiness --pr {PR_NUMBER}; echo "exit=$?"`, adding `--require-non-author-approval {REQUIRE_NON_AUTHOR_APPROVAL}` only when that is `true` or `false`, with the Bash `timeout` at 180000. On exit 0 or 2 its stdout is the `## Merge Readiness` block (exit 2: `DEGRADED`, closed by a `TRACEABILITY: DEGRADED ({reason})` line); any other exit, or empty stdout, is `TRACEABILITY: DEGRADED (readiness unavailable)`. The script makes the reads and applies the ladder below, so the steps are its specification: run none of them yourself.
 
 1. Fetch unresolved review threads via GraphQL: `reviewThreads(first: 100) { nodes { isResolved } totalCount }`. Count unresolved from nodes (`isResolved == false`). If `totalCount > 100`, report the unresolved count as approximate: prefix with `>` and note `(count approximate — PR has more than 100 threads)`.
 2. Fetch PR review decision: `gh pr view {PR_NUMBER} --json reviewDecision --jq '.reviewDecision'`
    - Values: `APPROVED`, `CHANGES_REQUESTED`, `REVIEW_REQUIRED`, or null
 3. Fetch CI status (same logic as `check-ci-status`)
    Those steps are in `references/pr/check-ci-status.md` — load it and apply them to this `PR_NUMBER`, every arm unchanged.
-4. Read the test-plan evidence at the current head, from `WORKTREE_PATH` (else cwd): `node "$HOME/.devflow/scripts/verify-evidence.cjs" verify --pr {PR_NUMBER} --approval; echo "exit=$?"`. The evidence is *known* only on `exit=0` with stdout exactly one `EVIDENCE pr:{PR_NUMBER} …` line; otherwise it is *unknown*. From it read `total`, `VERIFIED-CI`, `ATTESTED-LOCAL` (report the two apart), `exceptions` and `approval`; *verified* = `VERIFIED-CI` + `ATTESTED-LOCAL`, never inferred from an absent field. The script re-derives every state at the head and decides `approval` by the trust rule; it prints nothing it read from the PR.
+4. Read the test-plan evidence at the current head, for a `PR_NUMBER` of digits only, from `WORKTREE_PATH` (else cwd): `node "$HOME/.devflow/scripts/verify-evidence.cjs" verify --pr {PR_NUMBER} --approval; echo "exit=$?"`. The evidence is *known* only on `exit=0` with stdout exactly one `EVIDENCE pr:{PR_NUMBER} …` line; otherwise it is *unknown*. From it read `total`, `VERIFIED-CI`, `ATTESTED-LOCAL` (report the two apart), `exceptions` and `approval`; *verified* = `VERIFIED-CI` + `ATTESTED-LOCAL`, never inferred from an absent field. The script re-derives every state at the head and decides `approval` by the trust rule; it prints nothing it read from the PR.
 5. Classify (first matching rule wins):
    - `NOT_READY (unresolved threads: {n})` — unresolved_threads > 0
    - `NOT_READY (changes requested)` — reviewDecision == `CHANGES_REQUESTED`
@@ -298,7 +298,7 @@ Load for `update-pr-evidence` under every tracker provider.
 
 ### Process
 
-1. From `WORKTREE_PATH` (else cwd), run `node "$HOME/.devflow/scripts/verify-evidence.cjs" publish --pr {PR_NUMBER}; echo "exit=$?"`, adding `--publication {REVIEW_PUBLICATION}` only when that is `auto`, `full`, `off` or `stub`, and `--evidence "{EVIDENCE_FILE}"` when given — only a value matching `^[A-Za-z0-9._/-]{1,255}$` reaches the shell; any other is a failed run. Set the Bash `timeout` to 180000.
+1. From `WORKTREE_PATH` (else cwd), run `node "$HOME/.devflow/scripts/verify-evidence.cjs" publish --pr {PR_NUMBER}; echo "exit=$?"`, adding `--publication {REVIEW_PUBLICATION}` only when that is `auto`, `full`, `off` or `stub`, and `--evidence "{EVIDENCE_FILE}"` when given — only a `PR_NUMBER` of digits only and a value matching `^[A-Za-z0-9._/-]{1,255}$` reach the shell; any other is a failed run. Set the Bash `timeout` to 180000.
 2. Print the script's stdout and nothing else; a body the script cannot scrub is never posted. If the script did not run or printed nothing, emit `TRACEABILITY: DEGRADED (evidence unavailable)`.
 
 Run nothing else: the script makes the one PR read, the compare-and-swap body edit, its read-back and the evidence comment itself, edited in place when the viewer's own is the newest evidence comment, and posts nothing it could not scrub.

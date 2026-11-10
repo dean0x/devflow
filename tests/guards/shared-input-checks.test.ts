@@ -10,6 +10,9 @@
  *                shell call takes a title. The skill, /plan and /research state the slug pattern
  *                `^[a-z0-9-]{1,50}$` and the `untitled` fallback.
  *   PR arm       /code-review, /bug-analysis and /resolve fetch the PR body only when `pr_number` is digits only.
+ *   Git PR arm   the Git agent's PR operations (post-review-summary, post-resolution-summary, check-merge-readiness,
+ *                update-pr-evidence) pass `PR_NUMBER` to `gh pr view` or a `--pr` flag only when it is digits only, and
+ *                every such use in a build is gated.
  *
  * Each arm runs through a named collector, and the known-bad probes feed the same collector. The compiled files are
  * read, never the sources, because the compiled file is what a user installs. A missing build is an error.
@@ -19,7 +22,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
 import * as path from 'path'
 
 import { ROOT, compiledBuilds, seedOnce, type Build } from '../helpers.js'
@@ -229,6 +232,73 @@ describe('the PR body is fetched only for a PR number of digits (#781)', () => {
         .toEqual([`${build.label}: the PR-body fetch has no digits-only gate`])
       expect(collectPrFetchDefects(gate, { ...build, text: `${build.text}\n${PR_FETCH}` }))
         .toEqual([`${build.label}: a second PR-body fetch`])
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 4. The Git-agent PR arm
+// ---------------------------------------------------------------------------
+
+/** Every build tree that can hold a compiled PR operation of the Git skill. */
+const PR_OP_TREES = ['', 'compliance-off', 'curation-off', 'curation-compliance-off']
+
+/** Every compiled build of one PR operation; a missing on-build is an error, never a skip. */
+function prOpBuilds(op: string): Build[] {
+  const builds = PR_OP_TREES.flatMap(tree => {
+    const file = path.join(ROOT, 'dist', tree, 'skills', 'git', 'references', 'pr', `${op}.md`)
+    return existsSync(file) ? [{ key: (tree || 'on') as Build['key'], label: `${op} (${tree || 'on'})`, text: readFileSync(file, 'utf-8') }] : []
+  })
+  if (!builds.some(b => b.label.endsWith('(on)'))) throw new Error(`dist/skills/git/references/pr/${op}.md is absent: run \`npm run build:mds\``)
+  return builds
+}
+
+const COMMENTS_GATE = 'Only when `PR_NUMBER` is digits only (else post nothing and report `TRACEABILITY: DEGRADED (PR number not digits)`): `gh pr view {PR_NUMBER} --json comments'
+const READINESS_GATE = 'Run the script only when `PR_NUMBER` is digits only (any other value is `TRACEABILITY: DEGRADED (readiness unavailable)`), from `WORKTREE_PATH` (else cwd), and print its stdout, nothing else: `node "$HOME/.devflow/scripts/verify-evidence.cjs" readiness --pr {PR_NUMBER}'
+/** check-merge-readiness runs only its script: its steps, the review-decision fetch included, are the script's specification. */
+const SPEC_ONLY = 'The script makes the reads and applies the ladder below, so the steps are its specification: run none of them yourself.'
+const EVIDENCE_GATE = '4. Read the test-plan evidence at the current head, for a `PR_NUMBER` of digits only, from `WORKTREE_PATH` (else cwd): `node "$HOME/.devflow/scripts/verify-evidence.cjs" verify --pr {PR_NUMBER}'
+const PUBLISH_GATE = 'only a `PR_NUMBER` of digits only and a value matching `^[A-Za-z0-9._/-]{1,255}$` reach the shell; any other is a failed run.'
+
+/** The PR-number shell sites of the Git agent: each operation, and the gated text that each of its sites must carry. */
+const GIT_PR_SITES: readonly { op: string; gates: readonly string[] }[] = [
+  { op: 'post-review-summary', gates: [COMMENTS_GATE] },
+  { op: 'post-resolution-summary', gates: [COMMENTS_GATE] },
+  { op: 'check-merge-readiness', gates: [READINESS_GATE, SPEC_ONLY, EVIDENCE_GATE] },
+  { op: 'update-pr-evidence', gates: [PUBLISH_GATE] },
+]
+
+/** A PR-number placeholder that reaches a `gh pr view` or a `--pr` flag. */
+const PR_NUMBER_USE_RE = /gh pr view \{PR_NUMBER\}|--pr \{PR_NUMBER\}/g
+
+/** Named collector: a Git-agent PR operation whose PR number reaches a command with no digits-only gate. */
+export function collectGitPrDefects(gates: readonly string[], build: Build): string[] {
+  const out: string[] = []
+  for (const gate of gates) {
+    if (!build.text.includes(gate)) out.push(`${build.label}: no digits-only gate "${gate.slice(0, 40)}"`)
+  }
+  const uses = [...build.text.matchAll(PR_NUMBER_USE_RE)].length
+  if (uses !== gates.length) out.push(`${build.label}: ${uses} PR-number uses, ${gates.length} gated`)
+  return out
+}
+
+describe('the Git agent passes a PR number to a command only when it is digits only (#781)', () => {
+  for (const { op, gates } of GIT_PR_SITES) {
+    it(`${op}: every build gates each PR-number use`, () => {
+      expect(prOpBuilds(op).flatMap(b => collectGitPrDefects(gates, b))).toEqual([])
+    })
+  }
+
+  it('known-bad probes: a lost gate and an ungated second use are each reported', () => {
+    for (const { op, gates } of GIT_PR_SITES) {
+      const build = prOpBuilds(op)[0]
+      for (const gate of gates) {
+        const head = gate.slice(0, gate.indexOf('`gh pr view') === -1 ? gate.indexOf('`node') : gate.indexOf('`gh pr view'))
+        expect(collectGitPrDefects(gates, { ...build, text: seedOnce(build.text, head, '') }), gate)
+          .toEqual([`${build.label}: no digits-only gate "${gate.slice(0, 40)}"`])
+      }
+      expect(collectGitPrDefects(gates, { ...build, text: `${build.text}\nRun \`gh pr view {PR_NUMBER} --json body\`.` }))
+        .toEqual([`${build.label}: ${gates.length + 1} PR-number uses, ${gates.length} gated`])
     }
   })
 })

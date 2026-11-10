@@ -24,7 +24,9 @@
 //   claim  RUN_DIR=<absolute path>   a new stamp folder (YYYY-MM-DD_HHMM) under
 //                                    <root>/.devflow/docs/plan, or under
 //                                    <root>/.devflow/docs/<family>/<slug>; the root is the git
-//                                    toplevel of the working directory; no title enters the path
+//                                    toplevel of the working directory, or outside a checkout,
+//                                    for a <family> claim only, the working directory itself;
+//                                    no title enters the path
 //   claim design  DIR=<absolute path>  the folder <root>/.devflow/docs/design
 //   check  OK=<path>                 <path> may be written: a new <word>-<n>.md file in a
 //                                    stamp folder under the root's own plan folder, or a new
@@ -297,9 +299,10 @@ function claim(exec, now, cwd, family, slug) {
   if (parts === null) return fail(EXIT_CODES.REFUSED, 'the ' + family + ' slug breaks its rule');
   const top = settings.gitToplevel(exec, cwd);
   if (top.kind === 'unknown') return fail(EXIT_CODES.INTERNAL_ERROR, 'git did not answer');
-  if (top.kind === 'none') return fail(EXIT_CODES.REFUSED, 'not inside a git repository');
-  const root = top.root;
-  if (plainParts(root) === null) return fail(EXIT_CODES.REFUSED, 'the checkout root path holds a character that plan paths refuse');
+  const slugFamily = Object.prototype.hasOwnProperty.call(SLUG_FAMILIES, family);
+  if (top.kind === 'none' && !slugFamily) return fail(EXIT_CODES.REFUSED, 'not inside a git repository');
+  const root = top.kind === 'none' ? cwd : top.root;
+  if (plainParts(root) === null) return fail(EXIT_CODES.REFUSED, 'the root path holds a character that plan paths refuse');
   const stamps = family === 'design' ? [] : stampsOf(now());
   if (stamps === null) return fail(EXIT_CODES.INTERNAL_ERROR, 'the clock gave no usable date');
   if (family === 'plan') {
