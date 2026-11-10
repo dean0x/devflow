@@ -90,7 +90,7 @@ Load for `post-review-summary` under every tracker provider.
 
 1. Check for existing comment with this run's marker (author-filtered, so a third party's copy of the marker cannot suppress it):
    - Fetch viewer login: `gh api user --jq '.login'` → store as VIEWER_LOGIN
-   - Only when `PR_NUMBER` is digits only (else post nothing and report `TRACEABILITY: DEGRADED (PR number not digits)`): `gh pr view {PR_NUMBER} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
+   - If `PR_NUMBER` is digits only (else report `Skipped: PR_NUMBER not digits`): `gh pr view {PR_NUMBER} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
    - Search for `<!-- devflow:review-summary cycle:{CYCLE_NUMBER} ts:{REVIEW_TIMESTAMP}` in the viewer-authored comment bodies only (full pair match)
    - If found: skip — report `Skipped: already posted for cycle {CYCLE_NUMBER} ts:{REVIEW_TIMESTAMP}`
 2. Load `references/publication-gate.md` and resolve `REVIEW_PUBLICATION` by its step 2; `off` ends the op without posting.
@@ -220,7 +220,7 @@ Load for `post-resolution-summary` under every tracker provider.
 
 1. Check for an existing marker (author-filtered, so a third party's copy of it cannot suppress devflow's comment):
    - Fetch viewer login: `gh api user --jq '.login'` → store as VIEWER_LOGIN
-   - Only when `PR_NUMBER` is digits only (else post nothing and report `TRACEABILITY: DEGRADED (PR number not digits)`): `gh pr view {PR_NUMBER} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
+   - If `PR_NUMBER` is digits only (else report `Skipped: PR_NUMBER not digits`): `gh pr view {PR_NUMBER} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
    - Search the viewer-authored bodies only for the exact key `<!-- devflow:resolution-summary ts:{RESOLUTION_TS} -->`
    - If found: skip — report `Skipped: already posted for ts:{RESOLUTION_TS}`
 2. Load `references/publication-gate.md` and resolve `REVIEW_PUBLICATION` by its step 2; `off` ends the op without posting.
@@ -298,7 +298,7 @@ Load for `update-pr-evidence` under every tracker provider.
 
 ### Process
 
-1. From `WORKTREE_PATH` (else cwd), run `node "$HOME/.devflow/scripts/verify-evidence.cjs" publish --pr {PR_NUMBER}; echo "exit=$?"`, adding `--publication {REVIEW_PUBLICATION}` only when that is `auto`, `full`, `off` or `stub`, and `--evidence "{EVIDENCE_FILE}"` when given — only a `PR_NUMBER` of digits only and a value matching `^[A-Za-z0-9._/-]{1,255}$` reach the shell; any other is a failed run. Set the Bash `timeout` to 180000.
+1. Only when `PR_NUMBER` is digits only (else a failed run), from `WORKTREE_PATH` (else cwd), run `node "$HOME/.devflow/scripts/verify-evidence.cjs" publish --pr {PR_NUMBER}; echo "exit=$?"`, adding `--publication {REVIEW_PUBLICATION}` only when that is `auto`, `full`, `off` or `stub`, and `--evidence "{EVIDENCE_FILE}"` when given — only a value matching `^[A-Za-z0-9._/-]{1,255}$` reaches the shell; any other is a failed run. Set the Bash `timeout` to 180000.
 2. Print the script's stdout and nothing else; a body the script cannot scrub is never posted. If the script did not run or printed nothing, emit `TRACEABILITY: DEGRADED (evidence unavailable)`.
 
 Run nothing else: the script makes the one PR read, the compare-and-swap body edit, its read-back and the evidence comment itself, edited in place when the viewer's own is the newest evidence comment, and posts nothing it could not scrub.

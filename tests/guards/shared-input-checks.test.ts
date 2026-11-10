@@ -253,12 +253,12 @@ function prOpBuilds(op: string): Build[] {
   return builds
 }
 
-const COMMENTS_GATE = 'Only when `PR_NUMBER` is digits only (else post nothing and report `TRACEABILITY: DEGRADED (PR number not digits)`): `gh pr view {PR_NUMBER} --json comments'
+const COMMENTS_GATE = 'If `PR_NUMBER` is digits only (else report `Skipped: PR_NUMBER not digits`): `gh pr view {PR_NUMBER} --json comments'
 const READINESS_GATE = 'Run the script only when `PR_NUMBER` is digits only (any other value is `TRACEABILITY: DEGRADED (readiness unavailable)`), from `WORKTREE_PATH` (else cwd), and print its stdout, nothing else: `node "$HOME/.devflow/scripts/verify-evidence.cjs" readiness --pr {PR_NUMBER}'
 /** check-merge-readiness runs only its script: its steps, the review-decision fetch included, are the script's specification. */
 const SPEC_ONLY = 'The script makes the reads and applies the ladder below, so the steps are its specification: run none of them yourself.'
 const EVIDENCE_GATE = '4. Read the test-plan evidence at the current head, for a `PR_NUMBER` of digits only, from `WORKTREE_PATH` (else cwd): `node "$HOME/.devflow/scripts/verify-evidence.cjs" verify --pr {PR_NUMBER}'
-const PUBLISH_GATE = 'only a `PR_NUMBER` of digits only and a value matching `^[A-Za-z0-9._/-]{1,255}$` reach the shell; any other is a failed run.'
+const PUBLISH_GATE = '1. Only when `PR_NUMBER` is digits only (else a failed run), from `WORKTREE_PATH` (else cwd), run `node "$HOME/.devflow/scripts/verify-evidence.cjs" publish --pr {PR_NUMBER}'
 
 /** The PR-number shell sites of the Git agent: each operation, and the gated text that each of its sites must carry. */
 const GIT_PR_SITES: readonly { op: string; gates: readonly string[] }[] = [
