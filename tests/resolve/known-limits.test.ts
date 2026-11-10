@@ -180,7 +180,7 @@ function resolveBuilds(): ResolveBuild[] {
 /** The two lines that give PR_DESCRIPTION `(none)` when the fetch fails or no PR exists; KNOWN_LIMITS is then `(none)` as well. */
 const FETCH_DEFAULTS: readonly string[] = [
   'PR_DESCRIPTION=$(gh pr view {pr_number} --json body --jq \'.body\' 2>/dev/null || echo "(none)")',
-  'If `pr_number` is absent or the command fails, set `PR_DESCRIPTION` to `(none)`.',
+  'If `pr_number` is absent or not digits only, or the command fails, set `PR_DESCRIPTION` to `(none)`.',
 ]
 const fetchDefect = (label: string, line: string): string => `${label}: the failed-fetch default is absent or repeated: "${line.slice(0, 50)}"`
 

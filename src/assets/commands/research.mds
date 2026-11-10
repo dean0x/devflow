@@ -62,12 +62,12 @@ Use `FEATURE_KNOWLEDGE` locally for research framing. Pass to each Research agen
 
 **Load `devflow:docs-framework`** — Load via Skill tool: `devflow:docs-framework`, here and not earlier, so a run that stops before this phase never pays for it. If it fails to load, continue with the rules below.
 
-Name the research directory by the skill's rules, once: `{topic-slug}` is its topic slug of the research question and `{YYYY-MM-DD_HHMM}` is the local time. When `{worktree}/.devflow/docs/research/{topic-slug}/{YYYY-MM-DD_HHMM}` already exists (a same-minute collision), the timestamp takes seconds instead, `YYYY-MM-DD_HHMMSS`. Every path of this run uses that one directory.
+Name the research directory by the skill's rules, once: `{topic-slug}` is its topic slug of the research question, made in prose; no shell call takes the question. Use the slug only when it matches `^[a-z0-9-]{1,50}$`, else use `untitled`. Stop on `'` or a control character in `{worktree}`. Claim the directory: `(cd '{worktree}' && node "$HOME/.devflow/scripts/plan-files.cjs" claim research '{topic-slug}'); echo "exit=$?"`. Only a `RUN_DIR=<path>` line with `exit=0` sets `{RESEARCH_DIR}` to that path, `{worktree}/.devflow/docs/research/{topic-slug}/<stamp>`; else stop with the script's reason. Every path of this run uses that one directory.
 
 Analyze the research question to infer research types needed (min 2, max 5). For each type:
 - `RESEARCH_TYPE`: `codebase | external | market | competitor | technology`
 - `RESEARCH_QUESTION`: Focused sub-question for this type
-- `OUTPUT_PATH`: `{worktree}/.devflow/docs/research/{topic-slug}/{YYYY-MM-DD_HHMM}/{type}.md`
+- `OUTPUT_PATH`: `{RESEARCH_DIR}/{type}.md`
 
 **Tool availability check**: If WebSearch/WebFetch are unavailable, restrict to `codebase` type only, telling the user why.
 
@@ -113,9 +113,9 @@ Agent(subagent_type="Synthesize", run_in_background=false):
 "Mode: research
 WORKTREE_PATH: {WORKTREE_PATH}  (omit if none was provided)
 RESEARCH_OUTPUTS: {the OUTPUT_PATH of every Research agent that wrote its file}
-RESEARCH_BASE_DIR: {worktree}/.devflow/docs/research/{topic-slug}/{YYYY-MM-DD_HHMM}
+RESEARCH_BASE_DIR: {RESEARCH_DIR}
 Merge findings with trust-aware aggregation.
-Output: {worktree}/.devflow/docs/research/{topic-slug}/{YYYY-MM-DD_HHMM}/research-summary.md"
+Output: {RESEARCH_DIR}/research-summary.md"
 ```
 
 ### Phase 6: Present
@@ -123,7 +123,7 @@ Output: {worktree}/.devflow/docs/research/{topic-slug}/{YYYY-MM-DD_HHMM}/researc
 **Requires:** RESEARCH_SUMMARY
 
 Present findings to user with:
-- The research folder `{worktree}/.devflow/docs/research/{topic-slug}/{YYYY-MM-DD_HHMM}/`
+- The research folder `{RESEARCH_DIR}/`
 - Trust annotations per finding: (trusted) for codebase, (untrusted) for web, (mixed) for technology
 - Explicit conflicts between codebase and web findings
 - Drill-down offer via AskUserQuestion

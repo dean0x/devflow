@@ -7,7 +7,6 @@
  * sides together:
  *
  *  - every path family a compiled command names under `.devflow/docs/` appears in the skill;
- *  - the skill's two topic-slug derivations (its helper and its inline line) give one answer;
  *  - every site that derives `branch_slug` derives it the same way, and every site that names a
  *    `handoff-*` or `evidence-*` file spells it the way the skill does.
  *
@@ -105,67 +104,6 @@ describe('/plan writes the three design-document names the skill lists', () => {
     const probe = SKILL.replace('├── multi-{topic-slug}.{timestamp}.md', '├── gone')
     const missing = planDesignNames(requireDistFile('plan.md')).filter(n => !probe.includes(`── ${n}`))
     expect(missing).toEqual(['multi-{topic-slug}.{timestamp}.md'])
-  })
-})
-
-// ---------------------------------------------------------------------------
-// The skill's topic slug: one rule, two spellings
-// ---------------------------------------------------------------------------
-
-/** The skill's own topic-slug helper, run in bash on one topic. */
-function skillTopicSlug(topic: string): string {
-  const helper = /^get_topic_slug\(\) \{.*\}$/m.exec(SKILL)?.[0]
-  if (helper === undefined) throw new Error('get_topic_slug not found in the skill')
-  return execFileSync('bash', ['-c', `${helper}\nget_topic_slug "$1"`, 'bash', topic], {
-    encoding: 'utf-8', env: { ...process.env, LC_ALL: 'C' },
-  }).trimEnd()
-}
-
-/** The skill's inline `TOPIC_SLUG=` line, run in bash on one topic. */
-function skillInlineTopicSlug(topic: string): string {
-  const line = /^TOPIC_SLUG=.*$/m.exec(SKILL)?.[0]
-  if (line === undefined) throw new Error('the TOPIC_SLUG line was not found in the skill')
-  return execFileSync('bash', ['-c', `TOPIC="$1"\n${line}\nprintf '%s' "$TOPIC_SLUG"`, 'bash', topic], {
-    encoding: 'utf-8', env: { ...process.env, LC_ALL: 'C' },
-  })
-}
-
-const TOPICS = [
-  'JWT Authentication',
-  'OAuth 2.0 Integration',
-  "Bug: User can't login (v2.0)",
-  'JWT/Auth_Tokens',
-  '  --  ',
-  '!!!',
-  'Ünïcode café',
-  `${'a'.repeat(44)} bcdefg hij`,
-  `${'x'.repeat(49)} yz`,
-  'This is a very long topic name that describes the entire feature and more words',
-]
-
-describe('the skill derives a topic slug one way: its inline line and its helper agree', () => {
-  it('the inline line gives the helper\'s answer for every topic', () => {
-    for (const topic of TOPICS) {
-      expect(skillInlineTopicSlug(topic), JSON.stringify(topic)).toBe(skillTopicSlug(topic))
-    }
-  })
-
-  it('the slug is capped at 50, never ends in a dash and is `untitled` when nothing is left', () => {
-    expect(skillTopicSlug(`${'x'.repeat(49)} yz`)).toBe('x'.repeat(49))
-    expect(skillTopicSlug(TOPICS[TOPICS.length - 1]).length).toBeLessThanOrEqual(50)
-    expect(skillTopicSlug('!!!')).toBe('untitled')
-    expect(skillInlineTopicSlug('!!!')).toBe('untitled')
-  })
-
-  it('known-bad probe: a 40-character cap in the helper is reported', () => {
-    const helper = /^get_topic_slug\(\) \{.*\}$/m.exec(SKILL)?.[0] ?? ''
-    const capped = helper.replace('cut -c1-50', 'cut -c1-40')
-    expect(capped).not.toBe(helper)
-    const run = (fn: string): string => execFileSync('bash', ['-c', `${fn}\nget_topic_slug "$1"`, 'bash', 'x'.repeat(60)], {
-      encoding: 'utf-8', env: { ...process.env, LC_ALL: 'C' },
-    }).trimEnd()
-    expect(run(capped).length).toBe(40)
-    expect(run(helper).length).toBe(50)
   })
 })
 
@@ -308,31 +246,12 @@ describe('handoff-* and evidence-* files are spelled one way wherever they are w
 // Run directories, and the topic slug /plan and /research take from the skill
 // ---------------------------------------------------------------------------
 
-/** The commands that create their own timestamped run directory, and so meet a same-minute second run. */
-const RUN_DIRECTORY_COMMANDS = ['code-review.md', 'bug-analysis.md', 'research.md'] as const
-
-/** Named collector: the run-directory commands that do not say what to do when the directory exists. */
-export function collectCollisionDefects(read: (file: string) => string): string[] {
-  return RUN_DIRECTORY_COMMANDS
-    .filter(file => !(/same-minute/.test(read(file)) && read(file).includes('`YYYY-MM-DD_HHMMSS`')))
-    .map(file => `${file}: does not append seconds on a same-minute collision`)
-}
-
-describe('a same-minute second run takes seconds, in the skill and in every command that creates the directory', () => {
-  it('/code-review, /bug-analysis and /research each state it', () => {
-    expect(collectCollisionDefects(requireDistFile)).toEqual([])
-  })
-
-  it('the skill says which four commands do, and what the suffix is', () => {
-    expect(SKILL).toContain('`/code-review`, `/bug-analysis`, `/research` and `/plan` create their run directory themselves')
+// The commands claim their run directory with plan-files.cjs, which adds the seconds on a clash:
+// tests/guards/shared-input-checks.test.ts pins each claim, tests/evidence-policy/plan-files.test.ts the seconds.
+describe('a same-minute second run takes seconds, in the skill', () => {
+  it('the skill says which four commands claim a run directory, and what the suffix is', () => {
+    expect(SKILL).toContain('`/code-review`, `/bug-analysis`, `/research` and `/plan` create their run directory with `plan-files.cjs claim`')
     expect(SKILL).toContain('appends seconds (`2025-12-26_143005`)')
-  })
-
-  it('known-bad probe: /research without the rule is reported', () => {
-    const probe = (file: string): string => file === 'research.md'
-      ? requireDistFile(file).replace('a same-minute collision', 'a repeat').replace('`YYYY-MM-DD_HHMMSS`', 'seconds')
-      : requireDistFile(file)
-    expect(collectCollisionDefects(probe)).toEqual(['research.md: does not append seconds on a same-minute collision'])
   })
 })
 

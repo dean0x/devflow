@@ -2083,7 +2083,7 @@ function collectFullRangeDefects(body: string, shape: DiffRangeShape): string[] 
   if (!/unless `base_ref` is 40 or 64 hex/.test(lines[named[0] + 1] ?? '')) out.push('the full-range path does not stop unless base_ref is 40 or 64 hex')
   if (!(lines[named[0] + 2] ?? '').includes('Set `DIFF_RANGE` to `{base_ref}...HEAD`')) out.push('the full-range path does not build DIFF_RANGE from base_ref right after the hex test')
   const checksEnd = Math.max(s.indexOf('unless `base_ref` is 40 or 64 hex'), s.indexOf('No new commits since last'))
-  if (checksEnd === -1 || s.indexOf('mkdir -p') < checksEnd) out.push(`${shape.step} does not create the directory after the head and base checks`)
+  if (checksEnd === -1 || s.indexOf('plan-files.cjs" claim') < checksEnd) out.push(`${shape.step} does not create the directory after the head and base checks`)
   return out
 }
 

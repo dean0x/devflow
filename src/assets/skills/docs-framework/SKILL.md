@@ -70,7 +70,7 @@ The head markers for incremental runs are not part of this tree. `/code-review` 
 ### Timestamps
 
 `YYYY-MM-DD_HHMM`, local time (sortable, readable), computed once per run and reused for every path of that run.
-- **Same-minute collision.** `/code-review`, `/bug-analysis`, `/research` and `/plan` create their run directory themselves: when it already exists, the second run appends seconds (`2025-12-26_143005`). It sorts after its minute, so newest-first listings stay correct.
+- **Same-minute collision.** `/code-review`, `/bug-analysis`, `/research` and `/plan` create their run directory with `plan-files.cjs claim`: when it already exists, the second run appends seconds (`2025-12-26_143005`). It sorts after its minute, so newest-first listings stay correct.
 - A design document's timestamp is the suffix before `.md`, so a listing sorts by that suffix, not by the leading `{ISSUE_ID}`.
 
 ### Branch Slugs
@@ -80,11 +80,7 @@ A slug builds a path or reaches a shell only when it matches `^[A-Za-z0-9._-]{1,
 
 ### Topic Slugs
 
-One rule for every topic `{slug}`: lowercase; each run of characters outside `a-z0-9` becomes one `-`; leading and trailing `-` are trimmed; at most 50 characters (trim again after the cut); `untitled` when nothing is left:
-```bash
-TOPIC_SLUG=$(s=$(echo "$TOPIC" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' | cut -c1-50 | sed -E 's/-+$//'); echo "${s:-untitled}")
-```
-`/plan` and `/research` take `{topic-slug}` from it.
+One rule for every topic `{slug}`: lowercase; each run of characters outside `a-z0-9` becomes one `-`; leading and trailing `-` are trimmed; at most 50 characters (trim again after the cut); `untitled` when nothing is left. A command makes the slug in prose; no shell call takes the topic. It uses the slug only when it matches `^[a-z0-9-]{1,50}$`, else `untitled`. `/plan` and `/research` take `{topic-slug}` from it.
 
 ## Helper Functions
 
@@ -92,12 +88,10 @@ Define these inline, in the Bash call that needs them, for consistent naming. `.
 
 ```bash
 get_timestamp() { date +%Y-%m-%d_%H%M; }
-get_run_stamp() { local t; t=$(get_timestamp); [ -e "$1/$t" ] && t=$(date +%Y-%m-%d_%H%M%S); echo "$t"; }  # $1: parent of the run directory
 get_branch_slug() { local b; b=$(git branch --show-current 2>/dev/null); echo "${b:-standalone}" | sed 's/\//-/g'; }
-get_topic_slug() { local s; s=$(echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' | cut -c1-50 | sed -E 's/-+$//'); echo "${s:-untitled}"; }
-get_docs_root() { git rev-parse --show-toplevel 2>/dev/null || pwd; }
-ensure_docs_dir() { mkdir -p "$(get_docs_root)/.devflow/docs/$1"; }
 ```
+
+Make a run directory, or the `design/` folder, only with `node "$HOME/.devflow/scripts/plan-files.cjs" claim`, never with `mkdir -p`: the script applies the shared folder checks.
 
 ## Agent Persistence Rules
 
