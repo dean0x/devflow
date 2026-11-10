@@ -24,6 +24,12 @@ disallowedTools:
   - RemoteTrigger
   - PushNotification
   - DesignSync
+  - Monitor
+  - TaskStop
+  - Workflow
+  - Artifact
+  - ListAgents
+  - ReportFindings
   - Skill
   - mcp__*
 ---

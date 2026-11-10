@@ -84,14 +84,22 @@ export interface AgentConfigRow {
  * `disallowedTools` removes MCP names, and the denylist agents that keep their
  * user-environment MCP and web access (Code, Fix, Refactor and Research) must not
  * lose them, so every name is written out. A denied name the runtime does not expose
- * is assumed to be a no-op. Git and Tracker are not denylist agents: they hold an
- * allowlist and reach their tracker servers through whole-server entries the installer
- * stamps (D-GIT-ROW, D-TRACKER-ROW).
+ * is assumed to be a no-op (verified 2026-11-09, Claude Code 2.1.319). Git and Tracker
+ * are not denylist agents: they hold an allowlist and reach their tracker servers
+ * through whole-server entries the installer stamps (D-GIT-ROW, D-TRACKER-ROW).
  *
- * Research denies exactly this list. Code, Fix and Refactor deny it plus
- * CODE_FAMILY_DENY_EXTRA. Harden and Polish deny it plus `Skill`, and `mcp__*` as
- * their own `extra` (D-SCAN-IN-CODE): the only wildcards a denylist may hold, which
- * MCP_DENY_AGENTS names.
+ * Code, Fix, Refactor and Research deny exactly this list. Harden and Polish deny it plus
+ * `Skill`, and `mcp__*` as their own `extra` (D-SCAN-IN-CODE): the only wildcards a denylist
+ * may hold, which MCP_DENY_AGENTS names.
+ *
+ * The six names after DesignSync are unused by all six agents, and each start pays tokens for
+ * every tool it lists. Workflow starts agents and ListAgents finds agents to message; none of
+ * these agents starts, stops or messages one. TaskStop stops a background run and Monitor waits
+ * on one; these agents run commands in the foreground (Harden runs one changed test file) or run
+ * none (Polish). Artifact publishes a page; none of them does. ReportFindings reports review
+ * findings; Harden reports in its final message and Research writes its findings to OUTPUT_PATH
+ * with Write. Workflow, TaskStop, ListAgents and Artifact stay members whatever their measured
+ * cost.
  */
 export const SHARED_DENYLIST: readonly string[] = [
   'Agent',
@@ -111,19 +119,6 @@ export const SHARED_DENYLIST: readonly string[] = [
   'RemoteTrigger',
   'PushNotification',
   'DesignSync',
-];
-
-/**
- * The tools Code, Fix and Refactor deny beyond SHARED_DENYLIST, because no path of these agents
- * uses them. Workflow starts agents and ListAgents finds agents to message; these agents start
- * and message no agent. TaskStop stops a background run and Monitor waits on one; these agents
- * run commands in the foreground. Artifact publishes a page and ReportFindings reports review
- * findings; these agents do neither. Workflow and TaskStop are fixed members whatever their
- * measured cost. Each name is spelled out, with no wildcard, no `mcp__` name, no WebFetch and no
- * WebSearch. A name the runtime does not expose is a no-op (verified 2026-11-09, Claude Code
- * 2.1.319).
- */
-export const CODE_FAMILY_DENY_EXTRA: readonly string[] = [
   'Monitor',
   'TaskStop',
   'Workflow',
@@ -137,7 +132,7 @@ export const CODE_FAMILY_DENY_EXTRA: readonly string[] = [
  * step needs them (today Code, Fix, Refactor and Research). `collectDenylistViolations` reports a
  * deny of WebFetch, WebSearch or any `mcp__` name for all agents. This set lists the built-in
  * tools these agents keep, WebFetch and WebSearch included, and no `mcp__` name. No name here is
- * on SHARED_DENYLIST or CODE_FAMILY_DENY_EXTRA.
+ * on SHARED_DENYLIST.
  */
 export const DENY_AGENT_KEEP: readonly string[] = [
   'Bash',
@@ -248,7 +243,7 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
   code: {
     model: 'sonnet',
     effort: 'high',
-    policy: { kind: 'deny', extra: CODE_FAMILY_DENY_EXTRA },
+    policy: { kind: 'deny', extra: [] },
     omitClaudeMd: false,
     skills: null,
     digest: [],
@@ -262,7 +257,7 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
   fix: {
     model: 'sonnet',
     effort: 'high',
-    policy: { kind: 'deny', extra: CODE_FAMILY_DENY_EXTRA },
+    policy: { kind: 'deny', extra: [] },
     omitClaudeMd: false,
     skills: null,
     digest: [],
@@ -270,7 +265,7 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
   refactor: {
     model: 'sonnet',
     effort: 'high',
-    policy: { kind: 'deny', extra: CODE_FAMILY_DENY_EXTRA },
+    policy: { kind: 'deny', extra: [] },
     omitClaudeMd: false,
     skills: null,
     digest: [],
