@@ -31,7 +31,7 @@ import * as path from 'path'
 
 import {
   CODE_AGENT_TYPES, CODE_MODES, CODE_OPERATIONS, codeSlugOf, collectCodeSpawnSites,
-  requireDistFile, requireDistFiles, resolveAgentSource, resolveCurationOffSource,
+  requireDistFile, requireDistFiles, resolveAgentSource, resolveCurationOffSource, resolveVariantOffSource,
 } from '../helpers.js'
 import type { CodeSpawnSite } from '../helpers.js'
 
@@ -397,22 +397,35 @@ describe('the alignment-fix Protocol is its two lines, with no re-run of Evaluat
 // that line ahead of the security-scan block, and the block itself (D-SCAN-IN-CODE). The compiled body of each
 // variant is held under its ceiling, registered in tests/fixtures/numeric-floors.json as `code-body-max`,
 // `fix-body-max` and `refactor-body-max`: a value moves either way, and its entry there gives the old value, the new
-// value and the reason.
+// value and the reason. Each ceiling counts the whole compiled file, frontmatter included. Only Code has TDD arms,
+// so its two tdd-off builds hold their own ceilings, `code-body-tdd-off-max` and `code-body-curation-tdd-off-max`.
 
 /** The compiled Code agent body, in bytes. Registered as `code-body-max`. */
-const CODE_BODY_MAX_BYTES = 9_657
+const CODE_BODY_MAX_BYTES = 9_742
 
 /** The compiled Fix agent body, in bytes. Registered as `fix-body-max`. */
-const FIX_BODY_MAX_BYTES = 7_266
+const FIX_BODY_MAX_BYTES = 7_351
 
 /** The compiled Refactor agent body, in bytes. Registered as `refactor-body-max`. */
-const REFACTOR_BODY_MAX_BYTES = 5_952
+const REFACTOR_BODY_MAX_BYTES = 6_037
 
 const BODY_CEILINGS: Readonly<Record<string, number>> = {
   'Code': CODE_BODY_MAX_BYTES,
   'Fix': FIX_BODY_MAX_BYTES,
   'Refactor': REFACTOR_BODY_MAX_BYTES,
 }
+
+/** The compiled Code agent body of the tdd-off build, dist/tdd-off/agents/code.md, in bytes. Registered as `code-body-tdd-off-max`. */
+const CODE_BODY_TDD_OFF_MAX_BYTES = 9_750
+
+/** The compiled Code agent body of the curation-tdd-off build, dist/curation-tdd-off/agents/code.md, in bytes. Registered as `code-body-curation-tdd-off-max`. */
+const CODE_BODY_CURATION_TDD_OFF_MAX_BYTES = 9_398
+
+/** Each tdd-off build of the Code agent and the ceiling it is held under. Fix and Refactor have no TDD arm. */
+const CODE_TDD_OFF_CEILINGS: ReadonlyArray<readonly [key: 'tdd-off' | 'curation-tdd-off', ceiling: number]> = [
+  ['tdd-off', CODE_BODY_TDD_OFF_MAX_BYTES],
+  ['curation-tdd-off', CODE_BODY_CURATION_TDD_OFF_MAX_BYTES],
+]
 
 /** Phrases that belong to opening a PR, none of which a Code body may carry. */
 const PR_ONLY_PHRASES: readonly string[] = [
@@ -486,6 +499,15 @@ describe('no Code variant opens a PR, each body checks its staged diff once befo
     }
   })
 
+  it('each Code tdd-off build holds the same rules under its own ceiling', () => {
+    for (const [key, ceiling] of CODE_TDD_OFF_CEILINGS) {
+      const off = resolveVariantOffSource(key, 'agents', codeSlugOf('Code'))
+      expect(off, `dist/${key}/agents/code.md is absent — run \`npm run build\` first`).not.toBeNull()
+      expect(Buffer.byteLength(off!), `Code (${key}): the body is empty — the guard would pass vacuously`).toBeGreaterThan(4_000)
+      expect(collectCodeBodyDefects(off!, ceiling), `Code (${key})`).toEqual([])
+    }
+  })
+
   it('the diff check repeats, word for word, the secrets-and-tokens words of the Security line that Harden loads', () => {
     const skill = readFileSync(path.join(ROOT, 'src', 'assets', 'skills', 'quality-gates', 'SKILL.md'), 'utf-8').split('\n')
     const heading = skill.indexOf('### P0 - Security')
@@ -511,6 +533,15 @@ describe('no Code variant opens a PR, each body checks its staged diff once befo
       .toEqual(['the Code body lost "**Commit and push**"'])
     const bytes = Buffer.byteLength(real)
     expect(collectCodeBodyDefects(real, bytes - 1)).toEqual([`the Code body is ${bytes} bytes, ceiling ${bytes - 1}`])
+  })
+
+  it('known-bad probe: each Code tdd-off body one byte over its ceiling is reported for that reason alone', () => {
+    for (const [key] of CODE_TDD_OFF_CEILINGS) {
+      const real = resolveVariantOffSource(key, 'agents', codeSlugOf('Code'))
+      expect(real, `dist/${key}/agents/code.md is absent — run \`npm run build\` first`).not.toBeNull()
+      const bytes = Buffer.byteLength(real!)
+      expect(collectCodeBodyDefects(real!, bytes - 1), key).toEqual([`the Code body is ${bytes} bytes, ceiling ${bytes - 1}`])
+    }
   })
 
   it('known-bad probe: a removed, doubled or misplaced diff check is each reported for that reason alone', () => {
