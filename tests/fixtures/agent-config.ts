@@ -95,8 +95,9 @@ export interface AgentConfigRow {
  * The six names after DesignSync are unused by all six agents, and each start pays tokens for
  * every tool it lists. Workflow starts agents and ListAgents finds agents to message; none of
  * these agents starts, stops or messages one. TaskStop stops a background run and Monitor waits
- * on one; these agents run commands in the foreground (Harden runs one changed test file) or run
- * none (Polish). Artifact publishes a page; none of them does. ReportFindings reports review
+ * on one; these agents run every command in the foreground (Harden runs only the test files it
+ * changed, and Polish runs no build, test or lint command). Artifact publishes a page; none of
+ * them does. ReportFindings reports review
  * findings; Harden reports in its final message and Research writes its findings to OUTPUT_PATH
  * with Write. Workflow, TaskStop, ListAgents and Artifact stay members whatever their measured
  * cost.
