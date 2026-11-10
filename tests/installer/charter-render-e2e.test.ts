@@ -1,16 +1,16 @@
 /**
- * Sandbox end-to-end for the install-time orchestrator charter render and the implement sentinel
+ * Sandbox end-to-end for the install-time orchestrator charter render
  * (src/targets/claude-code/charter-render.ts, D-CHARTER-INSTALL-RENDER).
  *
  * tests/installer/charter-render.test.ts holds the pure render and the writer. This file drives the BUILT
  * CLI (`init`, `init --hud-only`, `uninstall --plugin`) in a D-SNAPSHOT-SANDBOX home and reads back what a
- * user's machine holds: the charter under ~/.devflow/scripts/hooks/assets, the sentinel beside it, and
- * what the INSTALLED preamble hook emits for a plan-handoff prompt.
+ * user's machine holds: the charter under ~/.devflow/scripts/hooks/assets, and what the INSTALLED preamble
+ * hook emits for a prompt that begins `Implement the following plan:`.
  *
  * Expected charters come from `renderCharter(source, ...charterInventory(<manifest plugins>))`, never from
  * hand-written charter text. A few short, hand-written probes sit beside the exact comparison so a wrong
- * span table cannot agree with its own render: the workflow names in the list, the plan-handoff bullet,
- * the Fix clause and the debug sentence.
+ * span table cannot agree with its own render: the workflow names in the list, the Fix clause and the
+ * debug sentence.
  *
  * HOME safety: every sandbox home is an mkdtemp under os.tmpdir(), checked on creation and again by
  * `sandboxEnv` on every spawn. Nothing here reads or writes the real ~/.claude or ~/.devflow. The tests
@@ -18,18 +18,17 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { spawnSync } from 'child_process';
-import { readFileSync, realpathSync, statSync } from 'fs';
+import { existsSync, readFileSync, realpathSync, statSync, writeFileSync } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
 import { ROOT, requireBuiltCli } from '../helpers.js';
 import {
   CHARTER_RELPATH,
-  HANDOFF_SENTINEL_RELPATH,
   charterInventory,
   renderCharter,
 } from '../../src/targets/claude-code/charter-render.js';
-import { HANDOFF_TEMPLATE, REMINDER_TEMPLATE } from '../fixtures/ambient-templates.js';
+import { REMINDER_TEMPLATE } from '../fixtures/ambient-templates.js';
 import {
   SUBPROCESS_TIMEOUT_MS,
   createSandbox,
@@ -43,7 +42,6 @@ requireBuiltCli();
 
 const PACKAGED_SCRIPTS = path.join(ROOT, 'src', 'assets', 'scripts');
 const SOURCE = readFileSync(path.join(PACKAGED_SCRIPTS, CHARTER_RELPATH), 'utf-8');
-const SENTINEL_SOURCE = readFileSync(path.join(PACKAGED_SCRIPTS, HANDOFF_SENTINEL_RELPATH), 'utf-8');
 
 /** One init or uninstall spawn runs up to SUBPROCESS_TIMEOUT_MS; a group runs a handful of them. */
 const GROUP_TIMEOUT_MS = 5 * SUBPROCESS_TIMEOUT_MS;
@@ -63,8 +61,7 @@ const DEBUG_FALLBACK = ', else Explore investigates and Code fixes';
 const DEBUG_FALLBACK_TEXT = 'Explore investigates and Code fixes';
 const WORKFLOW_BULLET = '- Real-scale work matching a workflow:';
 const BUG_FIX_BULLET = '- Bug fix:';
-const HANDOFF_BULLET = '- Plan handoff:';
-const HANDOFF_PROMPT = 'Implement the following plan:\n\n# Add caching\n\n1. Add Redis\n2. Write tests';
+const PLAN_PROMPT = 'Implement the following plan:\n\n# Add caching\n\n1. Add Redis\n2. Write tests';
 
 // ── Sandboxes ───────────────────────────────────────────────────────────────
 
@@ -94,7 +91,6 @@ interface FileState {
 
 interface CharterState {
   readonly charter: FileState | null;
-  readonly sentinel: FileState | null;
 }
 
 function readFileState(file: string): FileState | null {
@@ -111,7 +107,6 @@ const scriptsDirOf = (sb: Sandbox): string => path.join(sb.home, '.devflow', 'sc
 function installedState(sb: Sandbox): CharterState {
   return {
     charter: readFileState(path.join(scriptsDirOf(sb), CHARTER_RELPATH)),
-    sentinel: readFileState(path.join(scriptsDirOf(sb), HANDOFF_SENTINEL_RELPATH)),
   };
 }
 
@@ -169,15 +164,13 @@ function preambleContext(sb: Sandbox, prompt: string): string {
 
 // Non-vacuity: the source this file renders has the shape the probes below look for.
 describe('the packaged charter the e2e renders', () => {
-  it('has one workflow bullet, one bug-fix bullet, one handoff bullet and one debug fallback', () => {
+  it('has one workflow bullet, one bug-fix bullet and one debug fallback', () => {
     expect(workflowNames(SOURCE)).toEqual([
       'devflow:implement', 'devflow:plan', 'devflow:research', 'devflow:explore',
       'devflow:code-review', 'devflow:resolve', 'devflow:bug-analysis',
     ]);
     expect(SOURCE.split(DEBUG_FALLBACK).length - 1).toBe(1);
     expect(SOURCE.split('\n').filter(line => line.startsWith(BUG_FIX_BULLET))).toHaveLength(1);
-    expect(SOURCE.split('\n').filter(line => line.startsWith(HANDOFF_BULLET))).toHaveLength(1);
-    expect(SENTINEL_SOURCE.length).toBeGreaterThan(0);
   });
 });
 
@@ -206,29 +199,34 @@ describe('a full recommended install', () => {
     expect(charterOf(first)).toBe(SOURCE.replace(DEBUG_FALLBACK, ''));
   });
 
-  it('names every workflow and the plan handoff', () => {
-    const charter = charterOf(first);
-    expect(workflowNames(charter)).toEqual(workflowNames(SOURCE));
-    expect(lineStartingWith(charter, HANDOFF_BULLET)).toBeDefined();
+  it('names every workflow', () => {
+    expect(workflowNames(charterOf(first))).toEqual(workflowNames(SOURCE));
   });
 
-  it('installs the sentinel with the packaged content', () => {
-    expect(first.sentinel, 'the implement sentinel is installed').not.toBeNull();
-    expect(first.sentinel!.bytes.toString('utf-8')).toBe(SENTINEL_SOURCE);
+  it('gives a prompt that begins `Implement the following plan:` the orchestrator reminder, with implement installed', () => {
+    expect(preambleContext(sb, PLAN_PROMPT)).toBe(REMINDER_TEMPLATE);
   });
 
-  it('gives a plan-handoff prompt the handoff directive from the installed preamble', () => {
-    expect(preambleContext(sb, HANDOFF_PROMPT)).toBe(HANDOFF_TEMPLATE);
-  });
+  describe('then init runs again over a leftover implement-installed file', () => {
+    // An install from before the plan-handoff removal left this file beside the charter.
+    const leftover = (): string => path.join(scriptsDirOf(sb), 'hooks', 'assets', 'implement-installed');
+    let second: CharterState;
 
-  it('leaves the charter and the sentinel unchanged, bytes and mtime, when init runs again', () => {
-    runCliOk(sb, FULL_INIT);
-    const second = installedState(sb);
-    expect(second.charter!.bytes.equals(first.charter!.bytes)).toBe(true);
-    expect(second.sentinel!.bytes.equals(first.sentinel!.bytes)).toBe(true);
-    expect(second.charter!.mtimeMs).toBe(first.charter!.mtimeMs);
-    expect(second.sentinel!.mtimeMs).toBe(first.sentinel!.mtimeMs);
-  }, GROUP_TIMEOUT_MS);
+    beforeAll(() => {
+      writeFileSync(leftover(), 'marker\n');
+      runCliOk(sb, FULL_INIT);
+      second = installedState(sb);
+    }, GROUP_TIMEOUT_MS);
+
+    it('removes the leftover file', () => {
+      expect(existsSync(leftover())).toBe(false);
+    });
+
+    it('leaves the charter unchanged, bytes and mtime', () => {
+      expect(second.charter!.bytes.equals(first.charter!.bytes)).toBe(true);
+      expect(second.charter!.mtimeMs).toBe(first.charter!.mtimeMs);
+    });
+  });
 
   describe('then uninstall --plugin=implement', () => {
     let after: CharterState;
@@ -248,12 +246,10 @@ describe('a full recommended install', () => {
       expect(charterOf(after)).toBe(renderFor(remaining));
     });
 
-    it('removes the plan-handoff line and the implement workflow, and removes the sentinel', () => {
+    it('removes the implement workflow and keeps the others', () => {
       const charter = charterOf(after);
-      expect(lineStartingWith(charter, HANDOFF_BULLET)).toBeUndefined();
       expect(workflowNames(charter)).not.toContain('devflow:implement');
       expect(workflowNames(charter)).toContain('devflow:resolve');
-      expect(after.sentinel).toBeNull();
     });
 
     it('keeps the Fix clause, because resolve still declares the Fix agent', () => {
@@ -261,8 +257,8 @@ describe('a full recommended install', () => {
       expect(charterOf(after)).toMatch(/\bFix \(/);
     });
 
-    it('gives a plan-handoff prompt the generic reminder from the installed preamble', () => {
-      expect(preambleContext(sb, HANDOFF_PROMPT)).toBe(REMINDER_TEMPLATE);
+    it('still gives a prompt that begins `Implement the following plan:` the orchestrator reminder', () => {
+      expect(preambleContext(sb, PLAN_PROMPT)).toBe(REMINDER_TEMPLATE);
     });
   });
 });
@@ -302,20 +298,14 @@ describe('the founder set', () => {
     expect(charter).toMatch(/\bFix \(/);
   });
 
-  it('writes the plan-handoff line and the sentinel, because implement is installed', () => {
-    expect(lineStartingWith(charterOf(installed), HANDOFF_BULLET)).toBeDefined();
-    expect(installed.sentinel!.bytes.toString('utf-8')).toBe(SENTINEL_SOURCE);
-  });
-
-  it('gives a plan-handoff prompt the handoff directive from the installed preamble', () => {
-    expect(preambleContext(sb, HANDOFF_PROMPT)).toBe(HANDOFF_TEMPLATE);
+  it('gives a prompt that begins `Implement the following plan:` the orchestrator reminder, with implement installed', () => {
+    expect(preambleContext(sb, PLAN_PROMPT)).toBe(REMINDER_TEMPLATE);
   });
 
   it('keeps the render byte for byte when init --hud-only runs', () => {
     runCliOk(sb, ['init', '--hud-only']);
     const afterHud = installedState(sb);
     expect(afterHud.charter!.bytes.equals(installed.charter!.bytes)).toBe(true);
-    expect(afterHud.sentinel!.bytes.equals(installed.sentinel!.bytes)).toBe(true);
     expect(manifestPlugins(sb)).toEqual(plugins);
   }, GROUP_TIMEOUT_MS);
 
@@ -338,10 +328,8 @@ describe('the founder set', () => {
     expect(lineStartingWith(before, BUG_FIX_BULLET)).not.toContain('devflow:debug');
     expect(lineStartingWith(before, BUG_FIX_BULLET)).toContain(DEBUG_FALLBACK_TEXT);
 
-    // Every other line stays, the plan handoff and the sentinel with them.
+    // Every other line stays.
     expect(linesWithout(charter, BUG_FIX_BULLET)).toEqual(linesWithout(before, BUG_FIX_BULLET));
-    expect(withDebug.sentinel!.bytes.equals(installed.sentinel!.bytes)).toBe(true);
-    expect(preambleContext(sb, HANDOFF_PROMPT)).toBe(HANDOFF_TEMPLATE);
   }, GROUP_TIMEOUT_MS);
 });
 
@@ -364,18 +352,16 @@ describe('an install with no workflow plugin', () => {
     expect(charterOf(installed)).toBe(renderFor(plugins));
   });
 
-  it('names no workflow, no Fix agent, no Debug agent and no plan handoff', () => {
+  it('names no workflow, no Fix agent and no Debug agent', () => {
     const charter = charterOf(installed);
     expect(workflowNames(charter)).toBeNull();
     expect(charter).not.toContain('devflow:');
     expect(charter).not.toMatch(/\bFix \(/);
     expect(charter).not.toContain('never the Debug agent');
-    expect(lineStartingWith(charter, HANDOFF_BULLET)).toBeUndefined();
   });
 
-  it('writes no sentinel, so a plan-handoff prompt gets the generic reminder', () => {
-    expect(installed.sentinel).toBeNull();
-    expect(preambleContext(sb, HANDOFF_PROMPT)).toBe(REMINDER_TEMPLATE);
+  it('gives a prompt that begins `Implement the following plan:` the orchestrator reminder', () => {
+    expect(preambleContext(sb, PLAN_PROMPT)).toBe(REMINDER_TEMPLATE);
   });
 });
 
@@ -409,10 +395,8 @@ describe('an install of bug-analysis alone', () => {
     expect(charter).not.toMatch(/\bFix \(/);
   });
 
-  it('writes no plan handoff and no sentinel', () => {
-    expect(lineStartingWith(charterOf(installed), HANDOFF_BULLET)).toBeUndefined();
-    expect(installed.sentinel).toBeNull();
-    expect(preambleContext(sb, HANDOFF_PROMPT)).toBe(REMINDER_TEMPLATE);
+  it('gives a prompt that begins `Implement the following plan:` the orchestrator reminder', () => {
+    expect(preambleContext(sb, PLAN_PROMPT)).toBe(REMINDER_TEMPLATE);
   });
 });
 
@@ -433,11 +417,9 @@ describe('init --hud-only on a machine with no manifest', () => {
     expect(charter).toBe(renderFor([]));
     expect(charter).not.toContain('devflow:');
     expect(workflowNames(charter)).toBeNull();
-    expect(lineStartingWith(charter, HANDOFF_BULLET)).toBeUndefined();
   });
 
-  it('writes no sentinel', () => {
-    expect(installed.sentinel).toBeNull();
-    expect(preambleContext(sb, HANDOFF_PROMPT)).toBe(REMINDER_TEMPLATE);
+  it('gives a prompt that begins `Implement the following plan:` the orchestrator reminder', () => {
+    expect(preambleContext(sb, PLAN_PROMPT)).toBe(REMINDER_TEMPLATE);
   });
 });

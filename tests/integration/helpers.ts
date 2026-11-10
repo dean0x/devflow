@@ -438,7 +438,7 @@ export function buildPreloadArgs(
   return buildClaudeArgs(prompt, ['--model', options.model, '--session-id', options.sessionId], options.allowedTools);
 }
 
-/** The arguments of a stream-json run that stops at the first Skill call (the ambient tests). */
+/** The arguments of a stream-json run that stops at the first Skill call. */
 export function buildStreamingArgs(
   prompt: string,
   options: { model: string; allowedTools: string; systemPrompt: string | false },

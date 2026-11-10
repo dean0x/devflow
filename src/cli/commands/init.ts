@@ -879,7 +879,7 @@ export function buildHudOnlyManifest(
  * what the manifest says is installed: the recorded plugins, with a deleted name pruned and a legacy name
  * mapped as every other partial run does (`resolvePluginList`), and only names this registry has kept
  * ({@link registeredPluginNames}). With no manifest, or one `readManifest()` refused, nothing is known to be installed, so the set is EMPTY: the
- * render then names no workflow, and no sentinel is written. The registry fallback that uninstall takes
+ * render then names no workflow. The registry fallback that uninstall takes
  * would hand a machine with no record every workflow's routing line, which is the failure the render exists
  * to prevent.
  */
@@ -992,7 +992,7 @@ export const initCommand = new Command('init')
   .addOption(new Option('--scope <type>', 'Retired: Devflow installs machine-wide only').hideHelp())
   .option('--verbose', 'Show detailed installation output')
   .option('--plugin <names>', 'Install specific plugin(s), comma-separated (e.g., implement,code-review)')
-  .option('--ambient', 'Enable ambient mode (orchestrator charter + plan handoff)')
+  .option('--ambient', 'Enable ambient mode (orchestrator charter + per-prompt reminder)')
   .option('--no-ambient', 'Disable ambient mode')
   .option('--memory', 'Enable working memory (session context preservation)')
   .option('--no-memory', 'Disable working memory hooks')
@@ -1099,8 +1099,8 @@ export const initCommand = new Command('init')
         existingHudManifest = await readManifest(devflowDir);
       } catch { /* absent on fresh install — existingHudManifest stays null */ }
 
-      // Install HUD scripts to devflow dir. The orchestrator charter and the implement sentinel
-      // render for the plugins the manifest records, and for the empty set when it records none
+      // Install HUD scripts to devflow dir. The orchestrator charter renders for the plugins
+      // the manifest records, and for the empty set when it records none
       // (D-CHARTER-INSTALL-RENDER). A render failure is a warning.
       try {
         await installScripts({
@@ -1679,7 +1679,7 @@ export const initCommand = new Command('init')
           'Puts every session (git repos only) in orchestrator posture:\n' +
           'a charter of up to ~850 tokens at session start plus a per-prompt reminder\n' +
           'steer the main model to delegate work to agents and devflow workflows\n' +
-          'instead of doing it mainline. Plan-mode handoffs run devflow:implement when it is installed.',
+          'instead of doing it mainline.',
           'Ambient Mode',
         );
         const ambientChoice = await p.select({
@@ -2380,6 +2380,7 @@ export const initCommand = new Command('init')
       'decisions-usage-scan.cjs',
       'learning-lock',
       'lib/learning-store.cjs',
+      'assets/implement-installed',
     ];
     const hooksDir = path.join(devflowDir, 'scripts', 'hooks');
     for (const legacy of LEGACY_HOOK_FILES) {

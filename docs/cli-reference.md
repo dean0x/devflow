@@ -17,7 +17,7 @@ Use `--recommended` or `--advanced` flags for non-interactive setup.
 | Option | Description |
 |--------|-------------|
 | `--plugin <names>` | Comma-separated plugin names (e.g., `implement,code-review`) |
-| `--ambient` / `--no-ambient` | Enable/disable ambient mode — orchestrator charter + plan handoff (default: on) |
+| `--ambient` / `--no-ambient` | Enable/disable ambient mode — orchestrator charter + per-prompt reminder (default: on) |
 | `--memory` / `--no-memory` | Enable/disable working memory (default: on) |
 | `--curation` / `--no-curation` | Enable/disable curation (default: on); with curation off, init installs the curation-off prompts and not `devflow:apply-decisions` |
 | `--knowledge` / `--no-knowledge` | Enable/disable feature knowledge (default: on) |
@@ -89,7 +89,7 @@ npx devflow-kit init --plugin=implement,code-review  # Install multiple
 | `devflow-release` | Core | Adaptive release with learned configuration |
 | `devflow-self-review` | Core | Polish + Harden |
 | `devflow-bug-analysis` | Core | Proactive bug finding with static and semantic analysis |
-| `devflow-ambient` | Core | Ambient mode (orchestrator charter + plan handoff) |
+| `devflow-ambient` | Core | Ambient mode (orchestrator charter + per-prompt reminder) |
 | `devflow-core-skills` | Core | Auto-activating quality skills |
 | `devflow-typescript` | Language | TypeScript patterns |
 | `devflow-react` | Language | React patterns |
@@ -103,7 +103,7 @@ npx devflow-kit init --plugin=implement,code-review  # Install multiple
 ## Ambient Mode
 
 ```bash
-npx devflow-kit ambient --enable     # Enable ambient mode (orchestrator charter + plan handoff)
+npx devflow-kit ambient --enable     # Enable ambient mode (orchestrator charter + per-prompt reminder)
 npx devflow-kit ambient --disable    # Disable ambient mode
 npx devflow-kit ambient --status     # Show current status (partial state detected and reported)
 ```

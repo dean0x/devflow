@@ -11,12 +11,11 @@
  * the output ceiling (about 40 lines) and the exclusions (diffs, logs, test runs). Two sentences
  * would let an edit keep the grant and lose the bound.
  *
- * Two neighbours hold with it. Direct delegations ask for a report of bounded size, so a delegated
- * result does not flood the main thread. And a plan handoff invokes the workflow with NO plan text:
- * the model already holds the plan, so passing it again as skill input doubles it in context.
+ * A neighbour holds with it: direct delegations ask for a report of bounded size, so a delegated
+ * result does not flood the main thread.
  *
  * Deterministic code checks shape here and makes no judgment: it looks for the bound words in one
- * sentence, a token figure on the report cap, and the absence of "full plan" on the handoff line.
+ * sentence and a token figure on the report cap.
  */
 
 export const BOUND_WORDS: ReadonlyArray<readonly [string, RegExp]> = [
@@ -29,7 +28,6 @@ export const BOUND_WORDS: ReadonlyArray<readonly [string, RegExp]> = [
   ['test', /\btests?\b/i],
 ]
 export const REPORT_CAP = /\bat most (?:about )?\d[\d,]* tokens\b/i
-export const HANDOFF_PREFIX = 'Implement the following plan:'
 
 /** The last routing line: everything else goes to the closest roster agent, and no model is named. */
 export const ROSTER_FALLBACK = '- Anything else: the closest roster agent, never general-purpose.'
@@ -72,18 +70,6 @@ export function collectCharterContentViolations(charter: string): string[] {
     }
     if (!/`issue-fix`/.test(line) || !/else `implement`/.test(line)) {
       violations.push('the Code routing line does not keep issue-fix and implement on Code')
-    }
-  }
-
-  const handoffLines = charter.split('\n').filter(line => line.includes(HANDOFF_PREFIX))
-  if (handoffLines.length !== 1) {
-    violations.push(`expected exactly one line naming "${HANDOFF_PREFIX}", found ${handoffLines.length}`)
-  } else {
-    if (!handoffLines[0].includes('devflow:implement')) {
-      violations.push('the handoff line does not invoke devflow:implement')
-    }
-    if (/full plan/i.test(handoffLines[0])) {
-      violations.push('the handoff line tells the orchestrator to pass the full plan as skill input')
     }
   }
   return violations

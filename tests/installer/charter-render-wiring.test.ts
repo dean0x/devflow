@@ -1,16 +1,16 @@
 /**
  * D-CHARTER-INSTALL-RENDER wiring: the install-time charter render has ONE writer.
  *
- * `composeScripts` copies the packaged scripts verbatim and skips the orchestrator charter and the implement
- * sentinel; `installRenderedCharter` writes both. This file holds the wiring around that writer:
+ * `composeScripts` copies the packaged scripts verbatim and skips the orchestrator charter;
+ * `installRenderedCharter` writes it. This file holds the wiring around that writer:
  *
  *   - `copyDirectory` skips an explicit set of source paths and still copies everything when none is given;
- *   - `composeScripts` never writes either file, and never puts the full source over a render;
+ *   - `composeScripts` never writes the charter, and never puts the full source over a render;
  *   - `installViaFileCopy` renders from the EFFECTIVE selection, reruns write nothing, and a render that
  *     fails warns without aborting the install;
  *   - `init --hud-only` renders from the manifest record, and from the empty set when there is none;
  *   - `uninstall --plugin` renders from the manifest record minus the removed plugins; without a record it
- *     leaves the charter and removes the sentinel when implement goes. It only ever removes the sentinel.
+ *     leaves the charter as it is.
  *
  * The renders themselves, over every plugin set, are held by tests/installer/charter-render.test.ts. The
  * built CLI end to end is held by tests/installer/charter-render-e2e.test.ts.
@@ -43,20 +43,17 @@ import {
 } from '../../src/targets/claude-code/installer.js';
 import {
   CHARTER_RELPATH,
-  HANDOFF_SENTINEL_RELPATH,
   charterInventory,
   installRenderedCharter,
   renderCharter,
 } from '../../src/targets/claude-code/charter-render.js';
 import { hudOnlyCharterPlugins } from '../../src/cli/commands/init.js';
 import { charterPluginsAfterRemoval, runSelectivePhaseForScope } from '../../src/cli/commands/uninstall.js';
-import { HANDOFF_PREFIX } from '../helpers/charter-guards.js';
 import { makeManifest, testBackups } from '../helpers.js';
 
 const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
 
 const SOURCE = readFileSync(path.join(packagedScriptsDir(), CHARTER_RELPATH), 'utf-8');
-const SENTINEL_SOURCE = readFileSync(path.join(packagedScriptsDir(), HANDOFF_SENTINEL_RELPATH), 'utf-8');
 
 const plugin = (name: string): PluginDefinition => {
   const found = DEVFLOW_PLUGINS.find(p => p.name === name);
@@ -78,8 +75,6 @@ function rendered(plugins: ReadonlyArray<PluginDefinition>): string {
   if (!result.ok) throw new Error(`render failed for the test oracle: ${result.reason} ${result.span}`);
   return result.content;
 }
-
-const handoffLines = (text: string): number => text.split('\n').filter(line => line.includes(HANDOFF_PREFIX)).length;
 
 let root: string;
 
@@ -150,47 +145,41 @@ describe('copyDirectory skips the source paths it is told to', () => {
 });
 
 // ---------------------------------------------------------------------------
-// composeScripts is not a writer of the charter or the sentinel
+// composeScripts is not a writer of the charter
 // ---------------------------------------------------------------------------
 
-describe('composeScripts: the verbatim script copy writes neither the charter nor the sentinel', () => {
+describe('composeScripts: the verbatim script copy does not write the charter', () => {
   let scripts: string;
   const charterAt = (): string => path.join(scripts, CHARTER_RELPATH);
-  const sentinelAt = (): string => path.join(scripts, HANDOFF_SENTINEL_RELPATH);
 
   beforeEach(() => {
     scripts = path.join(root, 'scripts');
   });
 
-  it('copies the other scripts and leaves neither file behind', async () => {
+  it('copies the other scripts and leaves no charter behind', async () => {
     await composeScripts(scripts);
     expect(await exists(path.join(scripts, 'hooks', 'run-hook'))).toBe(true);
     expect(await exists(path.join(scripts, 'hud.sh'))).toBe(true);
     expect(await exists(charterAt())).toBe(false);
-    expect(await exists(sentinelAt())).toBe(false);
   });
 
-  it('the render writes both, executable, and a second render changes nothing', async () => {
+  it('the render writes the charter, executable, and a second render changes nothing', async () => {
     await composeScripts(scripts);
     const warnings: string[] = [];
     const first = await installRenderedCharter({
       scriptsDir: scripts, plugins: [CORE, AMBIENT, IMPLEMENT], warn: m => warnings.push(m), mode: 'install',
     });
-    expect(first).toEqual({ charter: 'rewritten', sentinel: 'rewritten' });
+    expect(first).toEqual({ charter: 'rewritten' });
     expect(warnings).toEqual([]);
 
     const charter = await snapshot(charterAt());
-    const sentinel = await snapshot(sentinelAt());
-    expect(sentinel.bytes).toBe(SENTINEL_SOURCE);
     expect(charter.mode).toBe(0o755);
-    expect(sentinel.mode).toBe(0o755);
 
     const second = await installRenderedCharter({
       scriptsDir: scripts, plugins: [CORE, AMBIENT, IMPLEMENT], warn: m => warnings.push(m), mode: 'install',
     });
-    expect(second).toEqual({ charter: 'unchanged', sentinel: 'unchanged' });
+    expect(second).toEqual({ charter: 'unchanged' });
     expect(await snapshot(charterAt())).toEqual(charter);
-    expect(await snapshot(sentinelAt())).toEqual(sentinel);
   });
 
   it('a script copy over a render leaves the render, its mtime and its mode untouched', async () => {
@@ -204,19 +193,6 @@ describe('composeScripts: the verbatim script copy writes neither the charter no
     await composeScripts(scripts);
 
     expect(await snapshot(charterAt())).toEqual(charter);
-    expect(await exists(sentinelAt()), 'implement is not installed, so no sentinel').toBe(false);
-  });
-
-  it('a script copy does not bring a removed sentinel back', async () => {
-    await composeScripts(scripts);
-    await installRenderedCharter({
-      scriptsDir: scripts, plugins: [CORE, AMBIENT, IMPLEMENT], warn: () => {}, mode: 'install',
-    });
-    await fs.rm(sentinelAt());
-
-    await composeScripts(scripts);
-
-    expect(await exists(sentinelAt())).toBe(false);
   });
 });
 
@@ -227,29 +203,26 @@ describe('composeScripts: the verbatim script copy writes neither the charter no
 describe('installScripts: the script copy and the charter render are one step', () => {
   let scripts: string;
   const charterAt = (): string => path.join(scripts, CHARTER_RELPATH);
-  const sentinelAt = (): string => path.join(scripts, HANDOFF_SENTINEL_RELPATH);
 
   beforeEach(() => {
     scripts = path.join(root, 'scripts');
   });
 
-  it('leaves a whole tree: the copied scripts, the rendered charter and the sentinel', async () => {
+  it('leaves a whole tree: the copied scripts and the rendered charter', async () => {
     const warnings: string[] = [];
     await installScripts({ scriptsTarget: scripts, plugins: [CORE, AMBIENT, IMPLEMENT], warn: m => warnings.push(m) });
 
     expect(await exists(path.join(scripts, 'hooks', 'run-hook'))).toBe(true);
     expect(await exists(path.join(scripts, 'hud.sh'))).toBe(true);
     expect(await fs.readFile(charterAt(), 'utf-8')).toBe(rendered([CORE, AMBIENT, IMPLEMENT]));
-    expect(await fs.readFile(sentinelAt(), 'utf-8')).toBe(SENTINEL_SOURCE);
     expect(warnings).toEqual([]);
   });
 
-  it('renders for the plugins it is given: a set without implement gets no sentinel and no handoff line', async () => {
+  it('renders for the plugins it is given: a set without implement gets no route to it', async () => {
     await installScripts({ scriptsTarget: scripts, plugins: [CORE, AMBIENT, REVIEW], warn: () => {} });
 
     expect(await fs.readFile(charterAt(), 'utf-8')).toBe(rendered([CORE, AMBIENT, REVIEW]));
-    expect(handoffLines(await fs.readFile(charterAt(), 'utf-8'))).toBe(0);
-    expect(await exists(sentinelAt())).toBe(false);
+    expect(await fs.readFile(charterAt(), 'utf-8')).not.toContain('devflow:implement');
   });
 
   it('a charter the render cannot read warns, and the copied scripts are still there', async () => {
@@ -286,7 +259,6 @@ describe('installViaFileCopy: the render is its own step after the script copy',
   let devflowDir: string;
   let warnings: string[];
   const charterAt = (): string => path.join(devflowDir, 'scripts', CHARTER_RELPATH);
-  const sentinelAt = (): string => path.join(devflowDir, 'scripts', HANDOFF_SENTINEL_RELPATH);
 
   beforeEach(async () => {
     claudeDir = path.join(root, 'claude');
@@ -317,21 +289,19 @@ describe('installViaFileCopy: the render is its own step after the script copy',
     });
   }
 
-  it('a full install writes the charter rendered for its plugins and the sentinel when implement is in them', async () => {
+  it('a full install writes the charter rendered for its plugins', async () => {
     const plugins = [CORE, AMBIENT, IMPLEMENT, REVIEW];
     await install({ plugins, isPartialInstall: false });
 
     expect(await fs.readFile(charterAt(), 'utf-8')).toBe(rendered(plugins));
-    expect(handoffLines(await fs.readFile(charterAt(), 'utf-8'))).toBe(1);
-    expect(await fs.readFile(sentinelAt(), 'utf-8')).toBe(SENTINEL_SOURCE);
     expect(warnings).toEqual([]);
   });
 
-  it('a selection without implement installs a charter with no handoff line and no sentinel', async () => {
+  it('a selection without implement installs a charter with no route to it', async () => {
     await install({ plugins: [CORE, AMBIENT, PLAN], isPartialInstall: false });
 
-    expect(handoffLines(await fs.readFile(charterAt(), 'utf-8'))).toBe(0);
-    expect(await exists(sentinelAt())).toBe(false);
+    expect(await fs.readFile(charterAt(), 'utf-8')).toBe(rendered([CORE, AMBIENT, PLAN]));
+    expect(await fs.readFile(charterAt(), 'utf-8')).not.toContain('devflow:implement');
   });
 
   it('a partial install renders from the effective selection, not from the plugins it copied', async () => {
@@ -344,19 +314,16 @@ describe('installViaFileCopy: the render is its own step after the script copy',
     });
 
     expect(await fs.readFile(charterAt(), 'utf-8')).toBe(rendered([CORE, AMBIENT, IMPLEMENT, REVIEW, BUG_ANALYSIS]));
-    expect(await exists(sentinelAt()), 'implement stays installed').toBe(true);
   });
 
-  it('a rerun with the same selection writes neither file again', async () => {
+  it('a rerun with the same selection does not write the charter again', async () => {
     const plugins = [CORE, AMBIENT, IMPLEMENT, REVIEW];
     await install({ plugins, isPartialInstall: false });
     const charter = await snapshot(charterAt());
-    const sentinel = await snapshot(sentinelAt());
 
     await install({ plugins, isPartialInstall: false });
 
     expect(await snapshot(charterAt())).toEqual(charter);
-    expect(await snapshot(sentinelAt())).toEqual(sentinel);
   });
 
   it('a charter the render cannot read warns and the install still completes', async () => {
@@ -367,7 +334,6 @@ describe('installViaFileCopy: the render is its own step after the script copy',
 
     expect(warnings.some(w => w.includes('charter render:'))).toBe(true);
     expect(await exists(path.join(devflowDir, 'scripts', 'hooks', 'run-hook')), 'the rest of the scripts were installed').toBe(true);
-    expect(await exists(sentinelAt()), 'the sentinel has its own isolation').toBe(true);
   });
 });
 
@@ -403,26 +369,28 @@ describe('hudOnlyCharterPlugins: the record of the machine, or nothing', () => {
     expect(hudOnlyCharterPlugins(makeManifest({ plugins: [...DELETED_PLUGIN_NAMES] }))).toEqual([]);
   });
 
-  it('the empty set renders no handoff line and writes no sentinel', async () => {
+  it('the empty set renders a charter that routes to no workflow', async () => {
     const scripts = path.join(root, 'scripts');
     await composeScripts(scripts);
     const result = await installRenderedCharter({
       scriptsDir: scripts, plugins: hudOnlyCharterPlugins(null), warn: () => {}, mode: 'install',
     });
     expect(result.charter).toBe('rewritten');
-    expect(handoffLines(await fs.readFile(path.join(scripts, CHARTER_RELPATH), 'utf-8'))).toBe(0);
-    expect(await exists(path.join(scripts, HANDOFF_SENTINEL_RELPATH))).toBe(false);
+    const charter = await fs.readFile(path.join(scripts, CHARTER_RELPATH), 'utf-8');
+    expect(charter).toBe(rendered([]));
+    expect(charter).not.toContain('devflow:implement');
   });
 
-  it('a recorded set that holds implement keeps the sentinel and the handoff line', async () => {
+  it('a recorded set that holds implement keeps its route in the charter', async () => {
     const scripts = path.join(root, 'scripts');
     await composeScripts(scripts);
     const manifest = makeManifest({ plugins: ['devflow-core-skills', 'devflow-implement'] });
     await installRenderedCharter({
       scriptsDir: scripts, plugins: hudOnlyCharterPlugins(manifest), warn: () => {}, mode: 'install',
     });
-    expect(handoffLines(await fs.readFile(path.join(scripts, CHARTER_RELPATH), 'utf-8'))).toBe(1);
-    expect(await exists(path.join(scripts, HANDOFF_SENTINEL_RELPATH))).toBe(true);
+    const charter = await fs.readFile(path.join(scripts, CHARTER_RELPATH), 'utf-8');
+    expect(charter).toBe(rendered([CORE, IMPLEMENT]));
+    expect(charter).toContain('devflow:implement');
   });
 });
 
@@ -516,9 +484,8 @@ describe('runSelectivePhaseForScope renders the charter for the plugins that sta
   let claudeDir: string;
   let devflowDir: string;
   const charterAt = (): string => path.join(devflowDir, 'scripts', CHARTER_RELPATH);
-  const sentinelAt = (): string => path.join(devflowDir, 'scripts', HANDOFF_SENTINEL_RELPATH);
 
-  /** An installed charter and sentinel for `plugins`, written by the real writer. */
+  /** An installed charter for `plugins`, written by the real writer. */
   async function installCharterFor(plugins: PluginDefinition[]): Promise<void> {
     await installRenderedCharter({
       scriptsDir: path.join(devflowDir, 'scripts'), plugins, warn: () => {}, mode: 'install',
@@ -536,36 +503,31 @@ describe('runSelectivePhaseForScope renders the charter for the plugins that sta
     await fs.mkdir(devflowDir, { recursive: true });
   });
 
-  it('removing implement drops the handoff line and the sentinel and keeps the rest of the render', async () => {
+  it('removing implement drops its route and keeps the rest of the render', async () => {
     const installed = [CORE, AMBIENT, IMPLEMENT, REVIEW, BUG_ANALYSIS];
     await installCharterFor(installed);
     await recordManifest(installed.map(p => p.name));
-    expect(handoffLines(await fs.readFile(charterAt(), 'utf-8'))).toBe(1);
+    expect(await fs.readFile(charterAt(), 'utf-8')).toContain('devflow:implement');
 
     await runSelectivePhaseForScope({
       claudeDir, devflowDir, selectedPlugins: [IMPLEMENT], verbose: false, installedPlugins: installed,
     });
 
     expect(await fs.readFile(charterAt(), 'utf-8')).toBe(rendered([CORE, AMBIENT, REVIEW, BUG_ANALYSIS]));
-    expect(await exists(sentinelAt())).toBe(false);
+    expect(await fs.readFile(charterAt(), 'utf-8')).not.toContain('devflow:implement');
   });
 
-  it('removing another plugin keeps the sentinel and rewrites nothing that did not change', async () => {
+  it('removing another plugin keeps the route to implement', async () => {
     const installed = [CORE, AMBIENT, IMPLEMENT, REVIEW];
     await installCharterFor(installed);
     await recordManifest(installed.map(p => p.name));
-    // An old mtime, so a rewrite of the same bytes shows even on a coarse file clock.
-    const longAgo = new Date('2020-01-01T00:00:00Z');
-    await fs.utimes(sentinelAt(), longAgo, longAgo);
-    const sentinel = await snapshot(sentinelAt());
 
     await runSelectivePhaseForScope({
       claudeDir, devflowDir, selectedPlugins: [REVIEW], verbose: false, installedPlugins: installed,
     });
 
     expect(await fs.readFile(charterAt(), 'utf-8')).toBe(rendered([CORE, AMBIENT, IMPLEMENT]));
-    expect(sentinel.bytes).toBe(SENTINEL_SOURCE);
-    expect(await snapshot(sentinelAt())).toEqual(sentinel);
+    expect(await fs.readFile(charterAt(), 'utf-8')).toContain('devflow:implement');
   });
 
   it('renders from the manifest record, not from the installedPlugins the caller passes', async () => {
@@ -580,7 +542,7 @@ describe('runSelectivePhaseForScope renders the charter for the plugins that sta
     expect(await fs.readFile(charterAt(), 'utf-8')).toBe(rendered([CORE, AMBIENT, REVIEW]));
   });
 
-  it('with no manifest record it leaves the installed charter as it was and removes the sentinel when implement goes', async () => {
+  it('with no manifest record it leaves the installed charter as it was', async () => {
     await installCharterFor([CORE, AMBIENT, IMPLEMENT]);
     const charter = await snapshot(charterAt());
 
@@ -589,23 +551,9 @@ describe('runSelectivePhaseForScope renders the charter for the plugins that sta
     });
 
     expect(await snapshot(charterAt())).toEqual(charter);
-    expect(await exists(sentinelAt())).toBe(false);
   });
 
-  it('with no manifest record it leaves the charter and the sentinel as they were when implement stays', async () => {
-    await installCharterFor([CORE, AMBIENT, IMPLEMENT, PLAN]);
-    const charter = await snapshot(charterAt());
-    const sentinel = await snapshot(sentinelAt());
-
-    await runSelectivePhaseForScope({
-      claudeDir, devflowDir, selectedPlugins: [PLAN], verbose: false, installedPlugins: DEVFLOW_PLUGINS,
-    });
-
-    expect(await snapshot(charterAt())).toEqual(charter);
-    expect(await snapshot(sentinelAt())).toEqual(sentinel);
-  });
-
-  it('in a legacy local install a manifest that is a link is not read: the charter stays and the sentinel still goes', async () => {
+  it('in a legacy local install a manifest that is a link is not read: the charter stays', async () => {
     const installed = [CORE, AMBIENT, IMPLEMENT, REVIEW];
     await installCharterFor(installed);
     const elsewhere = path.join(root, 'elsewhere');
@@ -619,11 +567,10 @@ describe('runSelectivePhaseForScope renders the charter for the plugins that sta
     });
 
     expect(await snapshot(charterAt())).toEqual(charter);
-    expect(await exists(sentinelAt())).toBe(false);
     expect((await fs.lstat(path.join(devflowDir, 'manifest.json'))).isSymbolicLink()).toBe(true);
   });
 
-  it('never creates the charter or the sentinel', async () => {
+  it('never creates the charter', async () => {
     await recordManifest(['devflow-core-skills', 'devflow-ambient', 'devflow-implement', 'devflow-plan']);
 
     await runSelectivePhaseForScope({
@@ -631,20 +578,6 @@ describe('runSelectivePhaseForScope renders the charter for the plugins that sta
     });
 
     expect(await exists(charterAt())).toBe(false);
-    expect(await exists(sentinelAt())).toBe(false);
-  });
-
-  it('never creates a sentinel that implement being installed would call for', async () => {
-    // A charter an older release installed, with no sentinel: uninstall may take the sentinel away, never add it.
-    await installCharterFor([CORE, AMBIENT, IMPLEMENT, PLAN]);
-    await fs.rm(sentinelAt());
-    await recordManifest(['devflow-core-skills', 'devflow-ambient', 'devflow-implement', 'devflow-plan']);
-
-    await runSelectivePhaseForScope({
-      claudeDir, devflowDir, selectedPlugins: [PLAN], verbose: false, installedPlugins: [CORE, AMBIENT, IMPLEMENT, PLAN],
-    });
-
-    expect(await exists(sentinelAt())).toBe(false);
   });
 
   it('a charter it cannot read does not stop the rest of the phase', async () => {

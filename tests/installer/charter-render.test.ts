@@ -33,23 +33,18 @@ import {
   CHARTER_SPANS,
   CHARTER_WORKFLOW_ITEMS,
   CHARTER_WORKFLOW_LIST,
-  HANDOFF_SENTINEL_RELPATH,
   type InstallRenderedCharterOptions,
-  type RemoveHandoffSentinelOptions,
   charterInventory,
   installRenderedCharter,
-  removeHandoffSentinel,
   renderCharter,
 } from '../../src/targets/claude-code/charter-render.js';
 import {
-  HANDOFF_PREFIX,
   collectCharterContentViolations,
   collectCharterKnowledgeDefects,
   collectCharterRoutingViolations,
 } from '../helpers/charter-guards.js';
 
 const SOURCE = readFileSync(path.join(packagedScriptsDir(), CHARTER_RELPATH), 'utf-8');
-const SENTINEL_SOURCE = readFileSync(path.join(packagedScriptsDir(), HANDOFF_SENTINEL_RELPATH), 'utf-8');
 
 const stripSlash = (cmd: string): string => (cmd.startsWith('/') ? cmd.slice(1) : cmd);
 const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -80,7 +75,6 @@ const FIX_TEXT = 'Fix (`OPERATION:` `validation-fix`, `alignment-fix`, `qa-fix` 
 const DEBUG_COMMAND_TEXT = 'devflow:debug, else ';
 const DEBUG_FALLBACK_TEXT = ', else Explore investigates and Code fixes';
 const DEBUG_AGENT_TEXT = '; never the Debug agent';
-const HANDOFF_LINE_PREFIX = '- Plan handoff: ';
 /** A workflow the charter must never route to: release and self-review. (The Harden line says "self-review" in prose.) */
 const FORBIDDEN_ROUTE = /\brelease\b|devflow:self-review|\/self-review/i;
 const TEXT_SPANS = [FIX_TEXT, DEBUG_COMMAND_TEXT, DEBUG_FALLBACK_TEXT, DEBUG_AGENT_TEXT] as const;
@@ -121,9 +115,6 @@ function oracle(installed: Installed): string {
     ? out.replace(DEBUG_FALLBACK_TEXT, () => '')
     : out.replace(DEBUG_COMMAND_TEXT, () => '');
   if (!installed.agents.has('debug')) out = out.replace(DEBUG_AGENT_TEXT, () => '');
-  if (!installed.commands.has('implement')) {
-    out = out.split('\n').filter(line => !line.startsWith(HANDOFF_LINE_PREFIX)).join('\n');
-  }
   return out;
 }
 
@@ -156,7 +147,6 @@ const SOURCE_LESS_DEBUG_FALLBACK = SOURCE.replace(DEBUG_FALLBACK_TEXT, () => '')
 const SOURCE_LINES = SOURCE.split('\n');
 const SOURCE_LINE_VARIANTS = SOURCE_LINES.map(lineVariants);
 const WORKFLOW_LINE_INDEX = SOURCE_LINES.findIndex(line => line.includes(WORKFLOW_LIST));
-const HANDOFF_LINE_INDEX = SOURCE_LINES.findIndex(line => line.startsWith(HANDOFF_LINE_PREFIX));
 
 /** Walks the render against the source in order. Returns the source lines the render dropped, or null when a line has no source. */
 function droppedLines(rendered: string): number[] | null {
@@ -219,20 +209,15 @@ describe('renderCharter over every plugin set of the domain', () => {
       for (const token of text.matchAll(/devflow:([a-z][a-z-]*)/g)) {
         if (!installed.commands.has(token[1])) failures.push(`${label}: names the uninstalled workflow devflow:${token[1]}`);
       }
-      // The label of the handoff line ("Plan handoff") is a workflow term, not the Plan agent.
-      const prose = text.split(HANDOFF_LINE_PREFIX).join('');
       for (const agent of getAllAgentNames()) {
-        if (wordIn(prose, capital(agent)) && !installed.agents.has(agent)) failures.push(`${label}: names the uninstalled agent ${capital(agent)}`);
+        if (wordIn(text, capital(agent)) && !installed.agents.has(agent)) failures.push(`${label}: names the uninstalled agent ${capital(agent)}`);
       }
       if (FORBIDDEN_ROUTE.test(text)) failures.push(`${label}: names release or self-review`);
 
       if (text !== oracle(installed)) failures.push(`${label}: differs from the string-replace oracle`);
 
       const dropped = droppedLines(text);
-      const expectedDropped = [
-        ...(WORKFLOWS.some(([cmd]) => installed.commands.has(cmd)) ? [] : [WORKFLOW_LINE_INDEX]),
-        ...(installed.commands.has('implement') ? [] : [HANDOFF_LINE_INDEX]),
-      ].sort((a, b) => a - b);
+      const expectedDropped = WORKFLOWS.some(([cmd]) => installed.commands.has(cmd)) ? [] : [WORKFLOW_LINE_INDEX];
       if (dropped === null) failures.push(`${label}: a rendered line is neither a source line nor one with spans deleted`);
       else if (dropped.join() !== expectedDropped.join()) failures.push(`${label}: dropped source lines ${dropped.join()} (expected ${expectedDropped.join()})`);
 
@@ -251,15 +236,9 @@ describe('renderCharter over every plugin set of the domain', () => {
       const debugTail = `${installed.commands.has('debug') ? 'devflow:debug' : 'Explore investigates and Code fixes'}${installed.agents.has('debug') ? '; never the Debug agent' : ''}.`;
       const debugHead = 'All debug work (root cause of a reported bug): ';
       if (!text.split('\n').some(line => line.endsWith(debugHead + debugTail))) failures.push(`${label}: debug sentence does not end "${debugTail}"`);
-      if (text.split('\n').filter(line => line.startsWith(HANDOFF_LINE_PREFIX)).length !== (installed.commands.has('implement') ? 1 : 0)) {
-        failures.push(`${label}: handoff line present/absent does not follow implement`);
-      }
 
       const content = collectCharterContentViolations(text);
-      const allowed = installed.commands.has('implement')
-        ? []
-        : [`expected exactly one line naming "${HANDOFF_PREFIX}", found 0`];
-      if (content.join('|') !== allowed.join('|')) failures.push(`${label}: content violations ${JSON.stringify(content)}`);
+      if (content.length > 0) failures.push(`${label}: content violations ${JSON.stringify(content)}`);
       const routing = collectCharterRoutingViolations(text);
       if (routing.length > 0) failures.push(`${label}: routing violations ${JSON.stringify(routing)}`);
       const knowledge = collectCharterKnowledgeDefects(text);
@@ -292,7 +271,7 @@ describe('renderCharter over every plugin set of the domain', () => {
     expect(SOURCE).not.toMatch(FORBIDDEN_ROUTE);
   });
 
-  it('renders the empty set: no workflow, no Fix route, no Debug agent, no handoff', () => {
+  it('renders the empty set: no workflow, no Fix route, no Debug agent', () => {
     const result = render(installedBy([CORE, AMBIENT]));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -311,19 +290,15 @@ describe('renderCharter over every plugin set of the domain', () => {
 });
 
 describe('the span table', () => {
-  const lineCount = (prefix: string): number => SOURCE_LINES.filter(line => line.startsWith(prefix)).length;
   const textCount = (text: string): number => SOURCE.split(text).length - 1;
 
   it('matches the source charter exactly once per span', () => {
     expect(CHARTER_WORKFLOW_LIST).toBe(WORKFLOW_LIST);
     expect(textCount(WORKFLOW_LIST)).toBe(1);
     for (const span of CHARTER_SPANS) {
-      const count = span.shape === 'line' ? lineCount(span.text) : textCount(span.text);
-      expect(count, `span ${JSON.stringify(span.text)}`).toBe(1);
+      expect(textCount(span.text), `span ${JSON.stringify(span.text)}`).toBe(1);
     }
-    expect(CHARTER_SPANS.map(span => span.text).sort()).toEqual(
-      [...TEXT_SPANS, HANDOFF_LINE_PREFIX].sort(),
-    );
+    expect(CHARTER_SPANS.map(span => span.text).sort()).toEqual([...TEXT_SPANS].sort());
     expect(CHARTER_WORKFLOW_ITEMS.map(item => item.text)).toEqual(WORKFLOWS.map(([, text]) => text));
   });
 
@@ -364,19 +339,12 @@ describe('the span table', () => {
     expect(result).toMatchObject({ ok: false, reason: 'missing', span: text });
   });
 
-  it('fails when the handoff line is missing from the source', () => {
-    const seeded = SOURCE_LINES.filter(line => !line.startsWith(HANDOFF_LINE_PREFIX)).join('\n');
-    const result = renderCharter(seeded, new Set(), new Set());
-    expect(result).toMatchObject({ ok: false, reason: 'missing', span: HANDOFF_LINE_PREFIX });
-  });
-
   it.each([
     ['a text span', FIX_TEXT],
     ['the debug command span', DEBUG_COMMAND_TEXT],
     ['the debug fallback span', DEBUG_FALLBACK_TEXT],
     ['the debug agent span', DEBUG_AGENT_TEXT],
     ['the workflow list', WORKFLOW_LIST],
-    ['the handoff line', HANDOFF_LINE_PREFIX],
   ])('fails when %s occurs twice in the source', (_what, text) => {
     const seeded = `${SOURCE}\n${text}`;
     const result = renderCharter(seeded, new Set(), new Set());
@@ -384,9 +352,9 @@ describe('the span table', () => {
   });
 
   it('fails when two removals would overlap, instead of cutting through both', () => {
-    // Move the Fix span into the handoff line: each span still occurs once, but with Fix and implement
-    // both absent the line removal and the text removal share bytes.
-    const moved = SOURCE.replace(FIX_TEXT, () => '').replace(HANDOFF_LINE_PREFIX, () => `${HANDOFF_LINE_PREFIX}${FIX_TEXT}`);
+    // Move the Fix span into the workflow line: each span still occurs once, but with Fix and every
+    // workflow absent the whole-line removal and the text removal share bytes.
+    const moved = SOURCE.replace(FIX_TEXT, () => '').replace(WORKFLOW_LINE_PREFIX, () => `${WORKFLOW_LINE_PREFIX}${FIX_TEXT}`);
     const result = renderCharter(moved, new Set(), new Set());
     expect(result).toMatchObject({ ok: false, reason: 'overlap' });
     expect(renderCharter(moved, new Set(['implement']), new Set(['fix'])).ok).toBe(true);
@@ -429,7 +397,6 @@ describe('installRenderedCharter', () => {
   let warnings: string[];
 
   const charterPath = (): string => path.join(installed, CHARTER_RELPATH);
-  const sentinelPath = (): string => path.join(installed, HANDOFF_SENTINEL_RELPATH);
   const warn = (msg: string): void => { warnings.push(msg); };
   const exists = (file: string): Promise<boolean> => fs.access(file).then(() => true, () => false);
   const names = (...plugins: string[]): string[] => ['devflow-core-skills', 'devflow-ambient', ...plugins];
@@ -450,13 +417,11 @@ describe('installRenderedCharter', () => {
     await fs.rm(root, { recursive: true, force: true });
   });
 
-  it('writes the full-set charter and the sentinel for a full install, silently, with mode 0755', async () => {
+  it('writes the full-set charter for a full install, silently, with mode 0755', async () => {
     const result = await sync(DEVFLOW_PLUGINS.map(p => p.name));
-    expect(result).toEqual({ charter: 'rewritten', sentinel: 'rewritten' });
+    expect(result).toEqual({ charter: 'rewritten' });
     expect(await fs.readFile(charterPath(), 'utf-8')).toBe(SOURCE_LESS_DEBUG_FALLBACK);
-    expect(await fs.readFile(sentinelPath(), 'utf-8')).toBe(SENTINEL_SOURCE);
     expect((await fs.stat(charterPath())).mode & 0o777).toBe(0o755);
-    expect((await fs.stat(sentinelPath())).mode & 0o777).toBe(0o755);
     expect(warnings).toEqual([]);
   });
 
@@ -470,20 +435,18 @@ describe('installRenderedCharter', () => {
         process.umask(previous);
       }
       expect((await fs.stat(charterPath())).mode & 0o777).toBe(0o755);
-      expect((await fs.stat(sentinelPath())).mode & 0o777).toBe(0o755);
     },
   );
 
   it('writes the rendered charter for a narrowed set', async () => {
     const result = await sync(FOUNDER);
-    expect(result).toEqual({ charter: 'rewritten', sentinel: 'rewritten' });
+    expect(result).toEqual({ charter: 'rewritten' });
     const inventory = charterInventory(FOUNDER);
     const expected = renderCharter(SOURCE, inventory.commands, inventory.agents);
     expect(expected.ok).toBe(true);
     expect(await fs.readFile(charterPath(), 'utf-8')).toBe(expected.ok ? expected.content : '');
     expect(await fs.readFile(charterPath(), 'utf-8')).not.toBe(SOURCE);
     expect(await fs.readFile(charterPath(), 'utf-8')).not.toContain('devflow:research');
-    expect(await exists(sentinelPath())).toBe(true);
   });
 
   it('accepts plugin definitions as well as plugin names', async () => {
@@ -495,59 +458,48 @@ describe('installRenderedCharter', () => {
     expect(afterObject).toBe(await fs.readFile(charterPath(), 'utf-8'));
   });
 
-  it('writes nothing on a rerun: outcomes unchanged, bytes and mtime kept', async () => {
+  it('writes nothing on a rerun: outcome unchanged, bytes and mtime kept', async () => {
     await sync(FOUNDER);
     const past = new Date('2020-01-01T00:00:00Z');
-    await Promise.all([charterPath(), sentinelPath()].map(file => fs.utimes(file, past, past)));
-    const before = await Promise.all([charterPath(), sentinelPath()].map(async file => ({
-      bytes: await fs.readFile(file),
-      mtime: (await fs.stat(file)).mtimeMs,
-    })));
+    await fs.utimes(charterPath(), past, past);
+    const snapshot = async () => ({ bytes: await fs.readFile(charterPath()), mtime: (await fs.stat(charterPath())).mtimeMs });
+    const before = await snapshot();
     const again = await sync(FOUNDER);
-    expect(again).toEqual({ charter: 'unchanged', sentinel: 'unchanged' });
-    const after = await Promise.all([charterPath(), sentinelPath()].map(async file => ({
-      bytes: await fs.readFile(file),
-      mtime: (await fs.stat(file)).mtimeMs,
-    })));
-    expect(after).toEqual(before);
+    expect(again).toEqual({ charter: 'unchanged' });
+    expect(await snapshot()).toEqual(before);
     expect(warnings).toEqual([]);
   });
 
-  it('removes the sentinel when implement is not installed, and reports it absent on the next run', async () => {
+  it('rewrites the charter when the selection shrinks, and reports it unchanged on the next run', async () => {
     await sync(FOUNDER);
-    expect(await exists(sentinelPath())).toBe(true);
+    expect(await fs.readFile(charterPath(), 'utf-8')).toContain('devflow:implement');
     const without = names('devflow-plan');
-    expect(await sync(without)).toEqual({ charter: 'rewritten', sentinel: 'rewritten' });
-    expect(await exists(sentinelPath())).toBe(false);
-    expect(await fs.readFile(charterPath(), 'utf-8')).not.toContain(HANDOFF_PREFIX);
-    expect(await sync(without)).toEqual({ charter: 'unchanged', sentinel: 'absent' });
-    expect(warnings).toEqual([]);
-  });
-
-  it('in uninstall mode creates neither file on a machine that has none', async () => {
-    expect(await sync(FOUNDER, { mode: 'uninstall' })).toEqual({ charter: 'absent', sentinel: 'absent' });
-    expect(await exists(charterPath())).toBe(false);
-    expect(await exists(sentinelPath())).toBe(false);
-    expect(warnings).toEqual([]);
-  });
-
-  it('in uninstall mode renders over an installed charter, leaves the sentinel while implement stays, and removes it when implement goes', async () => {
-    await fs.writeFile(charterPath(), SOURCE, { mode: 0o755 });
-    await fs.writeFile(sentinelPath(), 'stale marker\n');
-
-    expect(await sync(FOUNDER, { mode: 'uninstall' })).toEqual({ charter: 'rewritten', sentinel: 'unchanged' });
-    expect(await fs.readFile(charterPath(), 'utf-8')).not.toContain('devflow:research');
-    expect(await fs.readFile(sentinelPath(), 'utf-8')).toBe('stale marker\n');
-
-    expect(await sync(names('devflow-plan'), { mode: 'uninstall' })).toMatchObject({ charter: 'rewritten', sentinel: 'rewritten' });
+    expect(await sync(without)).toEqual({ charter: 'rewritten' });
     expect(await fs.readFile(charterPath(), 'utf-8')).not.toContain('devflow:implement');
-    expect(await exists(sentinelPath())).toBe(false);
+    expect(await sync(without)).toEqual({ charter: 'unchanged' });
+    expect(warnings).toEqual([]);
+  });
+
+  it('in uninstall mode creates no file on a machine that has none', async () => {
+    expect(await sync(FOUNDER, { mode: 'uninstall' })).toEqual({ charter: 'absent' });
+    expect(await exists(charterPath())).toBe(false);
+    expect(warnings).toEqual([]);
+  });
+
+  it('in uninstall mode renders over an installed charter', async () => {
+    await fs.writeFile(charterPath(), SOURCE, { mode: 0o755 });
+
+    expect(await sync(FOUNDER, { mode: 'uninstall' })).toEqual({ charter: 'rewritten' });
+    expect(await fs.readFile(charterPath(), 'utf-8')).not.toContain('devflow:research');
+
+    expect(await sync(names('devflow-plan'), { mode: 'uninstall' })).toEqual({ charter: 'rewritten' });
+    expect(await fs.readFile(charterPath(), 'utf-8')).not.toContain('devflow:implement');
     expect(warnings).toEqual([]);
   });
 
   it('creates the hooks/assets directory when the copy left none', async () => {
     await fs.rm(path.join(installed, 'hooks'), { recursive: true });
-    expect(await sync(FOUNDER)).toEqual({ charter: 'rewritten', sentinel: 'rewritten' });
+    expect(await sync(FOUNDER)).toEqual({ charter: 'rewritten' });
     expect(await exists(charterPath())).toBe(true);
   });
 
@@ -570,47 +522,26 @@ describe('installRenderedCharter', () => {
     async () => {
       await fs.chmod(path.join(installed, 'hooks', 'assets'), 0o555);
       const result = await sync(FOUNDER);
-      expect(result).toEqual({ charter: 'failed', sentinel: 'failed' });
-      expect(warnings.length).toBe(2);
+      expect(result).toEqual({ charter: 'failed' });
+      expect(warnings.length).toBe(1);
     },
   );
 
-  it('leaves both files alone when the change guard refuses the target', async () => {
+  it('leaves the charter alone when the change guard refuses the target', async () => {
     const refused: string[] = [];
     const result = await sync(FOUNDER, { mayChange: async target => { refused.push(target); return false; } });
-    expect(result).toEqual({ charter: 'failed', sentinel: 'failed' });
-    expect(refused.sort()).toEqual([charterPath(), sentinelPath()].sort());
+    expect(result).toEqual({ charter: 'failed' });
+    expect(refused).toEqual([charterPath()]);
     expect(await exists(charterPath())).toBe(false);
-    expect(await exists(sentinelPath())).toBe(false);
   });
 
-  it('in uninstall mode keeps an installed sentinel when the change guard refuses its removal', async () => {
-    await sync(FOUNDER);
-    const sentinelBytes = await fs.readFile(sentinelPath(), 'utf-8');
-    const asked: string[] = [];
-    const result = await sync(names('devflow-plan'), {
-      mode: 'uninstall',
-      mayChange: async target => { asked.push(target); return target !== sentinelPath(); },
-    });
-    expect(result).toEqual({ charter: 'rewritten', sentinel: 'failed' });
-    expect(asked).toContain(sentinelPath());
-    expect(await fs.readFile(sentinelPath(), 'utf-8')).toBe(sentinelBytes);
-    expect(warnings).toEqual([]);
-  });
-
-  it.each([
-    ['install', 'implement stays', FOUNDER],
-    ['install', 'implement goes', names('devflow-plan')],
-    ['uninstall', 'implement stays', FOUNDER],
-    ['uninstall', 'implement goes', names('devflow-plan')],
-  ] as const)('in %s mode, when %s, asks the change guard about each file before it reads one', async (mode, _case, plugins) => {
-    // A directory where a file belongs cannot be read as a file, so any read of it would warn.
+  it.each(['install', 'uninstall'] as const)('in %s mode, asks the change guard about the charter before it reads it', async (mode) => {
+    // A directory where the file belongs cannot be read as a file, so any read of it would warn.
     await fs.mkdir(charterPath());
-    await fs.mkdir(sentinelPath());
     const asked: string[] = [];
-    const result = await sync(plugins, { mode, mayChange: async target => { asked.push(target); return false; } });
-    expect(result).toEqual({ charter: 'failed', sentinel: 'failed' });
-    expect(asked.sort()).toEqual([charterPath(), sentinelPath()].sort());
+    const result = await sync(FOUNDER, { mode, mayChange: async target => { asked.push(target); return false; } });
+    expect(result).toEqual({ charter: 'failed' });
+    expect(asked).toEqual([charterPath()]);
     expect(warnings).toEqual([]);
   });
 
@@ -619,10 +550,9 @@ describe('installRenderedCharter', () => {
     await fs.mkdir(path.join(packaged, 'hooks', 'assets'), { recursive: true });
     const seeded = SOURCE.replace(DEBUG_AGENT_TEXT, () => '');
     await fs.writeFile(path.join(packaged, CHARTER_RELPATH), seeded);
-    await fs.writeFile(path.join(packaged, HANDOFF_SENTINEL_RELPATH), SENTINEL_SOURCE);
 
     const result = await sync(FOUNDER, { packagedScriptsDir: packaged });
-    expect(result).toEqual({ charter: 'rewritten', sentinel: 'rewritten' });
+    expect(result).toEqual({ charter: 'rewritten' });
     expect(await fs.readFile(charterPath(), 'utf-8')).toBe(seeded);
     expect(warnings.length).toBe(1);
     expect(warnings[0]).toContain(DEBUG_AGENT_TEXT);
@@ -632,14 +562,14 @@ describe('installRenderedCharter', () => {
     const packaged = path.join(root, 'empty-packaged');
     await fs.mkdir(packaged, { recursive: true });
     const result = await sync(FOUNDER, { packagedScriptsDir: packaged });
-    expect(result).toEqual({ charter: 'failed', sentinel: 'failed' });
-    expect(warnings.length).toBe(2);
+    expect(result).toEqual({ charter: 'failed' });
+    expect(warnings.length).toBe(1);
     expect(await exists(charterPath())).toBe(false);
   });
 
   it('refuses a relative scripts directory with one warning', async () => {
     const result = await installRenderedCharter({ scriptsDir: 'scripts', plugins: FOUNDER, warn, mode: 'install' });
-    expect(result).toEqual({ charter: 'failed', sentinel: 'failed' });
+    expect(result).toEqual({ charter: 'failed' });
     expect(warnings.length).toBe(1);
   });
 
@@ -652,68 +582,5 @@ describe('installRenderedCharter', () => {
       mode: 'install',
     });
     expect(result.charter).toBe('failed');
-  });
-});
-
-describe('removeHandoffSentinel', () => {
-  let root: string;
-  let installed: string;
-  let warnings: string[];
-
-  const charterPath = (): string => path.join(installed, CHARTER_RELPATH);
-  const sentinelPath = (): string => path.join(installed, HANDOFF_SENTINEL_RELPATH);
-  const warn = (msg: string): void => { warnings.push(msg); };
-  const exists = (file: string): Promise<boolean> => fs.access(file).then(() => true, () => false);
-
-  const remove = (removedPlugins: string[], extra: Partial<RemoveHandoffSentinelOptions> = {}) =>
-    removeHandoffSentinel({ scriptsDir: installed, removedPlugins, warn, ...extra });
-
-  beforeEach(async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), 'charter-sentinel-'));
-    installed = path.join(root, 'scripts');
-    warnings = [];
-    await installRenderedCharter({
-      scriptsDir: installed, plugins: DEVFLOW_PLUGINS.map(p => p.name), warn, mode: 'install',
-    });
-  });
-
-  afterEach(async () => {
-    await fs.rm(root, { recursive: true, force: true });
-  });
-
-  it('removes the sentinel when implement is among the removed plugins and leaves the charter as it is', async () => {
-    const charter = await fs.readFile(charterPath());
-    expect(await exists(sentinelPath())).toBe(true);
-    expect(await remove(['devflow-implement'])).toBe('rewritten');
-    expect(await exists(sentinelPath())).toBe(false);
-    expect(await fs.readFile(charterPath())).toEqual(charter);
-    expect(await remove(['devflow-implement'])).toBe('absent');
-    expect(warnings).toEqual([]);
-  });
-
-  it('leaves the sentinel when the removed plugins keep implement installed', async () => {
-    expect(await remove(['devflow-plan', 'devflow-code-review'])).toBe('unchanged');
-    expect(await exists(sentinelPath())).toBe(true);
-  });
-
-  it('keeps the sentinel the change guard refuses to remove, after asking about it', async () => {
-    const asked: string[] = [];
-    const result = await remove(['devflow-implement'], { mayChange: async target => { asked.push(target); return false; } });
-    expect(result).toBe('failed');
-    expect(asked).toEqual([sentinelPath()]);
-    expect(await fs.readFile(sentinelPath(), 'utf-8')).toBe(SENTINEL_SOURCE);
-    expect(warnings).toEqual([]);
-  });
-
-  it('creates nothing on a machine that has no scripts directory', async () => {
-    await fs.rm(installed, { recursive: true });
-    expect(await remove(['devflow-implement'])).toBe('absent');
-    expect(await exists(installed)).toBe(false);
-  });
-
-  it('refuses a relative scripts directory with one warning', async () => {
-    expect(await remove(['devflow-implement'], { scriptsDir: 'scripts' })).toBe('failed');
-    expect(warnings.length).toBe(1);
-    expect(await exists(sentinelPath())).toBe(true);
   });
 });
