@@ -455,7 +455,8 @@ function phaseSpan(text: string, from: number, to: number): string | null {
 export function collectPlanDefects(label: string, text: string): string[] {
   const lost = PLAN_CLAIMS.filter(([, anchor]) => countOf(text, anchor) !== 1).map(([name]) => `${label}: ${name}`)
   const defects = [...lost]
-  const claimLines = text.split('\n').filter(line => line.includes('plan-files.cjs'))
+  // The Phase 14 design-folder check names the script too; tests/guards/shared-input-checks.test.ts pins that line.
+  const claimLines = text.split('\n').filter(line => line.includes('plan-files.cjs') && !line.includes('plan-files.cjs" claim design &&'))
   if (claimLines.length > 1) {
     defects.push(`${label}: ${claimLines.length} lines name plan-files.cjs, expected 1`)
   } else if (claimLines.length === 1 && /\{feature|title|topic/i.test(claimLines[0])) {
@@ -540,8 +541,7 @@ describe('/plan makes a run folder and passes report paths in every build (#774)
 // ---------------------------------------------------------------------------
 
 const WORKTREE_STOP = "Stop on `'` or a control character in `{worktree}`."
-const MKDIR_STEP = '`mkdir -p {worktree}/.devflow/docs/reviews/{branch-slug}/{timestamp}/`. '
-const FETCH_GATE = 'Only when `pr_number` is digits only, fetch the PR body in the same Bash call:'
+const FETCH_GATE = 'Then, only when `pr_number` is digits only, fetch the PR body:'
 const FETCH_COMMAND =
   `F='{REVIEW_DIR}/pr-description'; gh pr view {pr_number} --json body --jq '.body' > "$F.tmp" 2>/dev/null && mv -- "$F.tmp" "$F.txt"; r=$?; rm -- "$F.tmp" 2>/dev/null; echo "exit=$r"`
 const BODY_RULE = '`PR_DESCRIPTION` is `{REVIEW_DIR}/pr-description.txt` on `exit=0`, else `(none)`.'
@@ -555,7 +555,7 @@ const PHASE_2_HEADING = '### Phase 2: Run Reviews (Parallel)'
 
 /** The claims: each is one anchor that a /code-review build holds exactly once, named by the defect that reports it lost. */
 const CODE_REVIEW_CLAIMS: ReadonlyArray<readonly [name: string, anchor: string]> = [
-  ['the PR body fetch is not gated on a digits-only pr_number, in the Bash call of the mkdir', `${MKDIR_STEP}${FETCH_GATE}`],
+  ['the PR body fetch is not gated on a digits-only pr_number', FETCH_GATE],
   ['the PR body is not fetched to a temp file and moved to pr-description.txt only after the fetch succeeds', FETCH_COMMAND],
   ['PR_DESCRIPTION is not the pr-description.txt path on exit=0 and (none) otherwise', BODY_RULE],
   ['the first review cycle does not set the prior resolutions path to (none)', FIRST_CYCLE],
@@ -665,7 +665,7 @@ describe('/code-review passes the PR body and the cut prior resolutions as files
 
   it('known-bad probe: a worktree path stop that sits after the quoted PR body fetch is reported once', () => {
     for (const { text } of builds) {
-      const late = seedOnce(seedOnce(text, `${WORKTREE_STOP} `, ''), BODY_RULE, `${BODY_RULE} ${WORKTREE_STOP}`)
+      const late = seedOnce(seedOnce(text, WORKTREE_STOP, ''), BODY_RULE, `${BODY_RULE} ${WORKTREE_STOP}`)
       expect(collectCodeReviewDefects('c', late)).toEqual([expect.stringContaining('[the worktree path stop comes before the PR body fetch]')])
     }
   })

@@ -307,7 +307,7 @@ export function collectPrincipleDefects(body: string): string[] {
   if (!/bounded Phase 1 path listing/.test(p1)) out.push('principle 1 does not name the bounded path listing')
   if (!/`diff\.patch`/.test(p1) || !/`diff-\{focus\}\.patch`/.test(p1)) out.push('principle 1 does not name the patch writes')
   if (!/the writes \([^)]*, the marker and its `mkdir -p`\)/.test(p1)) out.push('principle 1 does not name the marker and its `mkdir -p` among the writes')
-  if (!/the writes \(`diff\.patch`, `diff-\{focus\}\.patch`, `pr-description\.txt`, `prior-resolutions\.txt`, the marker/.test(p1)) out.push('principle 1 does not name the PR body file and the prior resolutions file among the writes')
+  if (!/the writes \(the review-directory claim, `diff\.patch`, `diff-\{focus\}\.patch`, `pr-description\.txt`, `prior-resolutions\.txt`, the marker/.test(p1)) out.push('principle 1 does not name the PR body file and the prior resolutions file among the writes')
   if (!/exceptions? named in Principle 1/.test(line(3))) out.push('principle 3 does not point at the exceptions of Principle 1')
   return out
 }
@@ -833,11 +833,11 @@ describe('DIFF_RANGE starts at the fresh base that ensure-pr-ready returns (#495
   })
 
   it('known-bad probe: a directory made before the head and base checks is reported', () => {
-    const made = /^3\. (?:Stop on [^\n]*?\. )?Create timestamped review directory:[^\n]*\n/m.exec(ON)
-    expect(made, 'Step 0d creates the review directory as its step 3').not.toBeNull()
+    const made = /^3\. Claim the review directory:[^\n]*\n/m.exec(ON)
+    expect(made, 'Step 0d claims the review directory as its step 3').not.toBeNull()
     const early = seed(seed(ON, (made as RegExpExecArray)[0], ''), '2. Check if `{gd}/devflow/reviews/{branch-slug}/.last-review-head` exists,', `${(made as RegExpExecArray)[0]}2. Check if \`{gd}/devflow/reviews/{branch-slug}/.last-review-head\` exists,`)
     expect(collectReviewFreshBaseDefects(early)).toContain('Step 0d does not create the directory after the head and base checks')
-    expect(collectReviewFreshBaseDefects(seed(ON, 'mkdir -p {worktree}', 'mkdir {worktree}')))
+    expect(collectReviewFreshBaseDefects(seed(ON, 'plan-files.cjs" claim reviews', 'plan-files.cjs" make reviews')))
       .toContain('Step 0d does not create the directory after the head and base checks')
   })
 })

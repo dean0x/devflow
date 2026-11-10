@@ -245,8 +245,8 @@ describe('bug-analysis.md — DIFF_RANGE starts at the fresh base that ensure-pr
   });
 
   it('known-bad probe: a directory made before the head and base checks is reported', () => {
-    const made = /^3\. Create timestamped analysis directory:[^\n]*\n/m.exec(content);
-    expect(made, 'Step 2a creates the analysis directory as its step 3').not.toBeNull();
+    const made = /^2\. Stop on [^\n]*Claim the analysis directory:[^\n]*\n/m.exec(content);
+    expect(made, 'Step 2a claims the analysis directory as its step 2').not.toBeNull();
     const early = content.replace(made?.[0] ?? '', '').replace('1. Check `{gd}/devflow/bug-analysis/{branch-slug}/.last-analysis-head`,', `${made?.[0] ?? ''}1. Check \`{gd}/devflow/bug-analysis/{branch-slug}/.last-analysis-head\`,`);
     expect(early, 'the probe must move the directory step').not.toBe(content);
     expect(collectAnalysisFreshBaseDefects(early)).toContain('Step 2a does not create the directory after the head and base checks');

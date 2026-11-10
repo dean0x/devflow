@@ -463,7 +463,7 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
     justification:
       'The skill told agents to `source .devflow/scripts/docs-helpers.sh`, a repo-local install ' +
       'path that no install provides since the local scope was retired (#406). The helpers are ' +
-      'defined inline, and ensure_docs_dir roots .devflow/docs at the checkout toplevel (D-DOCS-ROOT).',
+      'defined inline, and .devflow/docs sits at the checkout toplevel (D-DOCS-ROOT).',
   },
   {
     literal: 'Append-only. Status changes allowed',

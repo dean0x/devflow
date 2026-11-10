@@ -258,6 +258,222 @@ describe('plan-files.cjs on real git', { timeout: 60_000 }, () => {
     });
   });
 
+  describe('claim of a reviews, bug-analysis or research run folder', () => {
+    /** Claim `family`/`slug` in `repo` and return the printed run folder. */
+    const claimFamily = (repo: string, family: string, slug: string): string => {
+      const r = run(['claim', family, slug], repo);
+      expect(r.stderr).toBe('');
+      expect(r.status).toBe(0);
+      const runDir = /^RUN_DIR=(.+)\n$/.exec(r.stdout)?.[1] ?? '';
+      expect(runDir).not.toBe('');
+      return runDir;
+    };
+
+    it.each([
+      ['reviews', 'feat-12-login.v2_x'],
+      ['bug-analysis', 'Feature-X'],
+      ['research', 'jwt-auth-2'],
+    ])('makes a %s stamp folder under the slug folder and prints its path', (family, slug) => {
+      const repo = freshRepo();
+      const sub = path.join(repo, 'packages');
+      fs.mkdirSync(sub);
+      const runDir = claimFamily(sub, family, slug);
+      expect(path.dirname(runDir)).toBe(path.join(repo, '.devflow', 'docs', family, slug));
+      expect(path.basename(runDir)).toMatch(STAMP_RE);
+      expect(fs.lstatSync(runDir).isDirectory()).toBe(true);
+    });
+
+    it.each(['reviews', 'bug-analysis', 'research'])('outside a git checkout, claims a %s folder under the working folder', family => {
+      const bare = emptyFolder();
+      const r = run(['claim', family, 'jwt'], bare);
+      expect(r.stderr).toBe('');
+      expect(r.status).toBe(0);
+      const runDir = /^RUN_DIR=(.+)\n$/.exec(r.stdout)?.[1] ?? '';
+      expect(path.dirname(runDir)).toBe(path.join(bare, '.devflow', 'docs', family, 'jwt'));
+      expect(path.basename(runDir)).toMatch(STAMP_RE);
+      expect(fs.lstatSync(runDir).isDirectory()).toBe(true);
+    });
+
+    it('outside a git checkout, still refuses a linked folder and writes nothing through the link', () => {
+      const bare = emptyFolder();
+      const linked = emptyFolder();
+      fs.symlinkSync(linked, path.join(bare, '.devflow'));
+      expectClosed(run(['claim', 'research', 'jwt'], bare), 2);
+      expect(fs.readdirSync(linked)).toEqual([]);
+    });
+
+    it('outside a git checkout, the plan and design claims still refuse and make nothing', () => {
+      const bare = emptyFolder();
+      expectClosed(run(['claim'], bare), 2);
+      expectClosed(run(['claim', 'design'], bare), 2);
+      expect(fs.readdirSync(bare)).toEqual([]);
+    });
+
+    it('accepts a folder that git tracks, unlike the plan folder', () => {
+      const repo = freshRepo();
+      const tracked = path.join(repo, '.devflow', 'docs', 'research', 'jwt', '2000-01-01_0000');
+      fs.mkdirSync(tracked, { recursive: true });
+      fs.writeFileSync(path.join(tracked, 'codebase.md'), 'x\n');
+      realGit(repo, home, ['add', '-f', '.devflow/docs/research']);
+      realGit(repo, home, ['commit', '-q', '-m', 'track']);
+      const runDir = claimFamily(repo, 'research', 'jwt');
+      expect(path.dirname(runDir)).toBe(path.dirname(tracked));
+    });
+
+    it.each([
+      ['.devflow', ['.devflow']],
+      ['docs', ['.devflow', 'docs']],
+      ['family', ['.devflow', 'docs', 'reviews']],
+      ['slug', ['.devflow', 'docs', 'reviews', 'main']],
+    ])('refuses a linked %s folder and writes nothing through the link', (_label, parts) => {
+      const repo = freshRepo();
+      const linked = emptyFolder();
+      const at = path.join(repo, ...parts);
+      fs.mkdirSync(path.dirname(at), { recursive: true });
+      fs.symlinkSync(linked, at);
+      expectClosed(run(['claim', 'reviews', 'main'], repo), 2);
+      expect(fs.readdirSync(linked)).toEqual([]);
+    });
+
+    it.each([
+      ['reviews', '..'],
+      ['reviews', '.'],
+      ['reviews', 'a/b'],
+      ['reviews', "it's"],
+      ['bug-analysis', 'cost$x'],
+      ['bug-analysis', ''],
+      ['bug-analysis', 'x'.repeat(201)],
+      ['research', 'Upper-case'],
+      ['research', 'my title'],
+      ['research', 'jwt.auth'],
+      ['research', 'x'.repeat(51)],
+    ])('refuses the %s slug %j and makes nothing', (family, slug) => {
+      const repo = freshRepo();
+      expectClosed(run(['claim', family, slug], repo), 2);
+      expect(fs.existsSync(path.join(repo, '.devflow'))).toBe(false);
+    });
+
+    it.each([
+      [['claim', 'plan', 'x']],
+      [['claim', 'reviews']],
+      [['claim', 'unknown', 'x']],
+      [['claim', 'research', 'a', 'b']],
+      [['claim', 'design', 'x']],
+    ])('refuses the argument list %j as a usage error', args => {
+      const repo = freshRepo();
+      expectClosed(run(args, repo), 1);
+      expect(fs.existsSync(path.join(repo, '.devflow'))).toBe(false);
+    });
+
+    it('names the minute, then the second on a clash, with an injected clock', () => {
+      const errors = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      try {
+        const repo = freshRepo();
+        const now = (): Date => new Date(2026, 10, 8, 14, 5, 30);
+        const argv = ['node', 'plan-files.cjs', 'claim', 'bug-analysis', 'main'];
+        const dir = path.join(repo, '.devflow', 'docs', 'bug-analysis', 'main');
+        expect(planScript.main(argv, { now, cwd: repo })).toEqual({ code: 0, line: `RUN_DIR=${dir}/2026-11-08_1405` });
+        expect(planScript.main(argv, { now, cwd: repo })).toEqual({ code: 0, line: `RUN_DIR=${dir}/2026-11-08_140530` });
+        expect(planScript.main(argv, { now, cwd: repo })).toEqual({ code: 4, line: '' });
+      } finally {
+        errors.mockRestore();
+      }
+    });
+  });
+
+  describe('claim design and check of a design file', () => {
+    const DESIGN_NAMES = ['42-jwt-auth.2026-04-07_1430.md', 'multi-jwt-auth.2026-04-07_1430.md', 'PROJ-7-x.2026-04-07_143005.md', 'untitled.2026-04-07_1430.md'];
+
+    const claimDesign = (repo: string): string => {
+      const r = run(['claim', 'design'], repo);
+      expect(r.stderr).toBe('');
+      expect(r.status).toBe(0);
+      const dir = /^DIR=(.+)\n$/.exec(r.stdout)?.[1] ?? '';
+      expect(dir).toBe(path.join(repo, '.devflow', 'docs', 'design'));
+      return dir;
+    };
+
+    it('makes the design folder, keeps it on a second claim, and prints its path', () => {
+      const repo = freshRepo();
+      const dir = claimDesign(repo);
+      fs.writeFileSync(path.join(dir, 'kept.2000-01-01_0000.md'), 'kept\n');
+      expect(claimDesign(repo)).toBe(dir);
+      expect(fs.readdirSync(dir)).toEqual(['kept.2000-01-01_0000.md']);
+    });
+
+    it.each(DESIGN_NAMES)('accepts the new design file %s', name => {
+      const repo = freshRepo();
+      const target = path.join(claimDesign(repo), name);
+      const r = run(['check', target], outside);
+      expect(r.stderr).toBe('');
+      expect(r.status).toBe(0);
+      expect(r.stdout).toBe(`OK=${target}\n`);
+    });
+
+    it('accepts a design folder that git tracks', () => {
+      const repo = freshRepo();
+      const dir = claimDesign(repo);
+      fs.writeFileSync(path.join(dir, 'old.2000-01-01_0000.md'), 'x\n');
+      realGit(repo, home, ['add', '-f', '.devflow/docs/design']);
+      realGit(repo, home, ['commit', '-q', '-m', 'track']);
+      expect(run(['check', path.join(dir, DESIGN_NAMES[0])], repo).status).toBe(0);
+    });
+
+    it.each([
+      ['.devflow', ['.devflow']],
+      ['docs', ['.devflow', 'docs']],
+      ['design', ['.devflow', 'docs', 'design']],
+    ])('claim refuses a linked %s folder and writes nothing through the link', (_label, parts) => {
+      const repo = freshRepo();
+      const linked = emptyFolder();
+      const at = path.join(repo, ...parts);
+      fs.mkdirSync(path.dirname(at), { recursive: true });
+      fs.symlinkSync(linked, at);
+      expectClosed(run(['claim', 'design'], repo), 2);
+      expect(fs.readdirSync(linked)).toEqual([]);
+    });
+
+    it('check refuses a design file under a linked design folder', () => {
+      const repo = freshRepo();
+      const linked = emptyFolder();
+      fs.mkdirSync(path.join(repo, '.devflow', 'docs'), { recursive: true });
+      fs.symlinkSync(linked, path.join(repo, '.devflow', 'docs', 'design'));
+      expectClosed(run(['check', path.join(repo, '.devflow', 'docs', 'design', DESIGN_NAMES[0])], repo), 2);
+    });
+
+    it('check refuses an existing file, a link and a dangling link at the path', () => {
+      const repo = freshRepo();
+      const dir = claimDesign(repo);
+      const target = emptyFolder();
+      fs.writeFileSync(path.join(dir, DESIGN_NAMES[0]), 'x\n');
+      fs.symlinkSync(path.join(target, 'f.md'), path.join(dir, DESIGN_NAMES[1]));
+      fs.writeFileSync(path.join(target, 'g.md'), 'x\n');
+      fs.symlinkSync(path.join(target, 'g.md'), path.join(dir, DESIGN_NAMES[2]));
+      for (const name of DESIGN_NAMES.slice(0, 3)) {
+        expectClosed(run(['check', path.join(dir, name)], repo), 2);
+      }
+      expect(fs.readdirSync(target)).toEqual(['g.md']);
+    });
+
+    it.each([
+      'jwt-auth.md',
+      'jwt-auth.2026-04-07.md',
+      '-jwt.2026-04-07_1430.md',
+      '.jwt.2026-04-07_1430.md',
+      'jwt auth.2026-04-07_1430.md',
+      'jwt-auth.2026-04-07_1430.txt',
+    ])('check refuses the design name %j', name => {
+      const repo = freshRepo();
+      expectClosed(run(['check', path.join(claimDesign(repo), name)], repo), 2);
+    });
+
+    it('check refuses a design file when no claim made the folder', () => {
+      const repo = freshRepo();
+      expectClosed(run(['check', path.join(repo, '.devflow', 'docs', 'design', DESIGN_NAMES[0])], repo), 2);
+      expect(fs.existsSync(path.join(repo, '.devflow'))).toBe(false);
+    });
+  });
+
   describe('check', () => {
     it('accepts a new report file in a claimed folder', () => {
       const repo = freshRepo();

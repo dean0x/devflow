@@ -99,12 +99,9 @@ BRANCH_SLUG=$(b=$(git branch --show-current 2>/dev/null); echo "${b:-standalone}
 
 ### Topic Slugs
 
-Lowercase, each run of characters outside `a-z0-9` becomes one dash, no leading or trailing dash, max 50 chars, `untitled` when nothing is left.
+Lowercase, each run of characters outside `a-z0-9` becomes one dash, no leading or trailing dash, max 50 chars, `untitled` when nothing is left. The command makes the slug in prose; no shell call takes the topic. It uses the slug only when it matches `^[a-z0-9-]{1,50}$`, else `untitled`.
 
-```bash
-TOPIC_SLUG=$(s=$(echo "$TOPIC" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' | cut -c1-50 | sed -E 's/-+$//'); echo "${s:-untitled}")
-
-# Examples:
+```
 # "JWT Authentication"       -> jwt-authentication
 # "Fix User Login Bug"       -> fix-user-login-bug
 # "OAuth 2.0 Integration"    -> oauth-2-0-integration
@@ -156,65 +153,17 @@ get_branch_slug() {
         echo "$branch" | sed 's/\//-/g'
     fi
 }
-
-# Convert topic to slug format
-get_topic_slug() {
-    local slug
-    slug=$(echo "$1" | tr '[:upper:]' '[:lower:]' | \
-        sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' | \
-        cut -c1-50 | sed -E 's/-+$//')
-    echo "${slug:-untitled}"
-}
-
-# The checkout's toplevel, else the working directory outside git
-get_docs_root() {
-    git rev-parse --show-toplevel 2>/dev/null || pwd
-}
-
-# Ensure docs directory exists
-ensure_docs_dir() {
-    local subdir="$1"
-    mkdir -p "$(get_docs_root)/.devflow/docs/$subdir"
-}
-
-# Get full output path for a document
-get_doc_path() {
-    local subdir="$1"
-    local filename="$2"
-    ensure_docs_dir "$subdir"
-    echo "$(get_docs_root)/.devflow/docs/$subdir/$filename"
-}
-
-# Create timestamped status log path
-get_status_path() {
-    local timestamp
-    timestamp=$(get_timestamp)
-    get_doc_path "status" "${timestamp}.md"
-}
-
-# Create timestamped review directory and return path for a focus report
-get_review_path() {
-    local focus="$1"
-    local branch_slug
-    local timestamp
-    branch_slug=$(get_branch_slug)
-    timestamp=$(get_timestamp)
-    ensure_docs_dir "reviews/$branch_slug/$timestamp"
-    echo "$(get_docs_root)/.devflow/docs/reviews/$branch_slug/$timestamp/${focus}.md"
-}
 ```
 
-### Usage Example
+### Run Folders
+
+Make a run folder, or the `design/` folder, only with the shared script, never with `mkdir -p`. It applies the shared folder checks, and it adds seconds to the stamp on a same-minute clash:
 
 ```bash
-# Define the helpers above in the same Bash call, then use them
-TIMESTAMP=$(get_timestamp)
-BRANCH_SLUG=$(get_branch_slug)
-ensure_docs_dir "reviews/$BRANCH_SLUG"
-
-# Create output path
-OUTPUT=$(get_review_path "security")
-echo "Writing to: $OUTPUT"
+# Run in the checkout. One line on stdout: RUN_DIR=<path>, or DIR=<path> for design.
+node "$HOME/.devflow/scripts/plan-files.cjs" claim reviews '<branch-slug>'
+node "$HOME/.devflow/scripts/plan-files.cjs" claim research '<topic-slug>'
+node "$HOME/.devflow/scripts/plan-files.cjs" claim design
 ```
 
 ---
@@ -340,18 +289,17 @@ get_branch_slug  # Returns: standalone
 
 Every run of special characters becomes one dash:
 
-```bash
-get_topic_slug "Bug: User can't login (v2.0)"
-# Returns: bug-user-can-t-login-v2-0
+```
+"Bug: User can't login (v2.0)" -> bug-user-can-t-login-v2-0
 ```
 
 ### Long Topic Names
 
 Truncated at 50 characters:
 
-```bash
-get_topic_slug "This is a very long topic name that exceeds the maximum allowed length"
-# Returns: this-is-a-very-long-topic-name-that-exceeds-the-m
+```
+"This is a very long topic name that exceeds the maximum allowed length"
+  -> this-is-a-very-long-topic-name-that-exceeds-the-m
 ```
 
 ---

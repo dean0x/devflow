@@ -134,7 +134,10 @@ describe('no compiled command reads or writes a relative .devflow/docs path (D-D
     // four dynamic command hosts, which carried many of these paths, left the corpus. code-review and
     // bug-analysis each lost one mention too: the per-ticket plan path in their design-plan step. So the
     // counted code is removed and no coverage is lost.
-    expect(mentions).toBeGreaterThanOrEqual(42)
+    // LOWERED 42 -> 36 by #781: /code-review, /bug-analysis and /research name their run folder through the
+    // plan-files.cjs claim, which makes it at the checkout root, so six literal folder paths left the corpus.
+    // tests/guards/shared-input-checks.test.ts pins each claim, so no coverage is lost.
+    expect(mentions).toBeGreaterThanOrEqual(36)
   })
 
   it('every docs-writing host carries the docs root, and nothing else resolves it', () => {

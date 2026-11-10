@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // src/assets/scripts/plan-files.cjs
 //
-// The checks a plan run makes before agents pass report files by path instead of by
-// pasted text: claim the run folder, check one report path before an agent writes it, and
-// hash a plan file (/implement checks that it did not change). Installed as a top-level
+// The checks a command makes before it writes under <root>/.devflow/docs: claim a run folder
+// (/plan, /code-review, /bug-analysis, /research) or the design folder (/plan), check one
+// report or design path before it is written, and hash a plan file (/implement checks that it
+// did not change). The name comes from its first user, /plan. Installed as a top-level
 // sibling of resolve-settings.cjs under ~/.devflow/scripts/, and it requires that file,
 // lib/project-config.cjs and hooks/lib/tracked-areas.cjs: the git toplevel call and its
 // default exec are resolve-settings.cjs's own (gitToplevel, defaultExec), the bounded file
@@ -13,32 +14,44 @@
 // and writes nothing except the folders `claim` makes. No network.
 //
 // Usage: node plan-files.cjs claim
+//        node plan-files.cjs claim reviews|bug-analysis <branch-slug>
+//        node plan-files.cjs claim research <topic-slug>
+//        node plan-files.cjs claim design
 //        node plan-files.cjs check <path>
 //        node plan-files.cjs hash <file>
 //
 // stdout on success is exactly one line, ended by "\n":
 //   claim  RUN_DIR=<absolute path>   a new stamp folder (YYYY-MM-DD_HHMM) under
-//                                    <root>/.devflow/docs/plan; the root is the git toplevel
-//                                    of the working directory; no title enters the path
+//                                    <root>/.devflow/docs/plan, or under
+//                                    <root>/.devflow/docs/<family>/<slug>; the root is the git
+//                                    toplevel of the working directory, or outside a checkout,
+//                                    for a <family> claim only, the working directory itself;
+//                                    no title enters the path
+//   claim design  DIR=<absolute path>  the folder <root>/.devflow/docs/design
 //   check  OK=<path>                 <path> may be written: a new <word>-<n>.md file in a
-//                                    stamp folder under the root's own plan folder
+//                                    stamp folder under the root's own plan folder, or a new
+//                                    design file in the root's own design folder
 //   hash   SHA256=<hex>              the sha256 of a regular file
 //
-// `claim` takes no argument. It refuses a root whose path holds a character that `check`
-// refuses, and refuses when git tracks anything under the plan folder. It walks `.devflow`,
-// `docs` and `plan` with lstat: each is absent or a real folder, never a link. It makes each
-// missing folder on its own, never recursively, then the stamp folder with a plain mkdir. A
-// clash is retried once with seconds in the stamp (YYYY-MM-DD_HHMMSS); a second failure is an
-// error.
+// `claim` refuses a root whose path holds a character that `check` refuses. It walks each
+// folder below the root with lstat: each is absent or a real folder, never a link. It makes
+// each missing folder on its own, never recursively, then the stamp folder with a plain
+// mkdir. A clash is retried once with seconds in the stamp (YYYY-MM-DD_HHMMSS); a second
+// failure is an error. A branch slug matches ^[A-Za-z0-9._-]{1,200}$ and is not `.` or `..`;
+// a topic slug matches ^[a-z0-9-]{1,50}$. `claim design` makes no stamp folder.
 //
 // `check` refuses a path unless: it is absolute with no `.`, `..` or empty part; it holds
-// none of ' " $ ` \ * ? [ ] { } and no control character; its name matches <letters>-<1 to 3
-// digits>.md; its folder is a stamp; the folder above that is <root>/.devflow/docs/plan and
-// <root> is its own git toplevel; `.devflow`, `docs`, `plan` and the stamp folder each stand
-// as a real folder, never a link (a `claim` made them); nothing stands at the path (a dangling
-// link counts); git tracks nothing under the plan folder.
+// none of ' " $ ` \ * ? [ ] { } and no control character; <root> is its own git toplevel;
+// each folder below <root> stands as a real folder, never a link (a `claim` made them);
+// nothing stands at the path (a dangling link counts); and it has one of two shapes:
+//   - a report: its name matches <letters>-<1 to 3 digits>.md, its folder is a stamp, the
+//     folder above that is <root>/.devflow/docs/plan, and git tracks nothing under the plan
+//     folder;
+//   - a design file: its folder is <root>/.devflow/docs/design and its name is
+//     <name>.<stamp>.md, <name> being a letter or digit, then letters, digits, `.`, `_`, `-`.
 //
-// The tracking question of `claim` and `check` is asked without regard to letter case: a
+// Only the plan folder has the tracking rule: a team may commit reviews, bug analyses,
+// research and design files. Its question is asked without regard to letter case: a
 // tracked `.DEVFLOW/docs/plan`, `.devflow/docſ/plan` or `.devﬂow/docs/plan` entry counts, as
 // a case-folding file system opens it as the plan folder.
 //
@@ -82,13 +95,29 @@ const EXIT_CODES = Object.freeze({
   INTERNAL_ERROR: 4,
 });
 
-const USAGE = 'usage: node plan-files.cjs claim | check <path> | hash <file>';
+const USAGE = 'usage: node plan-files.cjs claim [reviews|bug-analysis|research <slug> | design] | check <path> | hash <file>';
 
 /** The plan folder, relative to the root. */
 const PLAN_PATHSPEC = '.devflow/docs/plan';
 
-/** The folders below the root that lead to the run folders, in walk order. */
+/** The folders below the root that lead to the plan run folders, in walk order. */
 const PLAN_PARTS = Object.freeze(PLAN_PATHSPEC.split('/'));
+
+/** The folders below the root that lead to the design files, in walk order. */
+const DESIGN_PARTS = Object.freeze(['.devflow', 'docs', 'design']);
+
+/** A branch slug: the branch name with each `/` made `-` (docs-framework, Branch Slugs). */
+const BRANCH_SLUG_RE = /^[A-Za-z0-9._-]{1,200}$/;
+
+/** A topic slug, as a command made it in prose (docs-framework, Topic Slugs). */
+const TOPIC_SLUG_RE = /^[a-z0-9-]{1,50}$/;
+
+/** The run-folder families below <root>/.devflow/docs that take a slug, each with its slug rule. */
+const SLUG_FAMILIES = Object.freeze({
+  reviews: BRANCH_SLUG_RE,
+  'bug-analysis': BRANCH_SLUG_RE,
+  research: TOPIC_SLUG_RE,
+});
 
 /**
  * The plan folder in every spelling a case-folding file system opens as PLAN_PATHSPEC, each a
@@ -112,8 +141,11 @@ const NAME_RE = /^[a-z]+-[0-9]{1,3}\.md$/;
 /** A run folder name: a date and a time, with or without seconds. */
 const STAMP_RE = /^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{4}(?:[0-9]{2})?$/;
 
+/** A design file name: <name>.<stamp>.md, the name led by a letter or a digit. */
+const DESIGN_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,200}\.[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{4}(?:[0-9]{2})?\.md$/;
+
 /** The grammar of a successful answer: one line, an absolute path or a digest, no control character. */
-const OUTPUT_RE = /^(?:(?:RUN_DIR|OK)=\/[^\x00-\x1f\x7f]*|SHA256=[0-9a-f]{64})$/;
+const OUTPUT_RE = /^(?:(?:RUN_DIR|DIR|OK)=\/[^\x00-\x1f\x7f]*|SHA256=[0-9a-f]{64})$/;
 
 const MAX_PATH_CHARS = 4096;
 const MAX_SEGMENTS = 64;
@@ -122,12 +154,16 @@ const LISTING_MAX_BUFFER = 4096;
 
 /**
  * @param {unknown} argv  process.argv
- * @returns {{ kind: 'claim' } | { kind: 'check' | 'hash', target: string } | { kind: 'usage' }}
+ * @returns {{ kind: 'claim', family: string, slug: string } | { kind: 'check' | 'hash', target: string } | { kind: 'usage' }}
  */
 function parseArgs(argv) {
   const rest = Array.isArray(argv) ? argv.slice(2) : [];
   if (rest.some(arg => typeof arg !== 'string')) return { kind: 'usage' };
-  if (rest.length === 1 && rest[0] === 'claim') return { kind: 'claim' };
+  if (rest.length === 1 && rest[0] === 'claim') return { kind: 'claim', family: 'plan', slug: '' };
+  if (rest.length === 2 && rest[0] === 'claim' && rest[1] === 'design') return { kind: 'claim', family: 'design', slug: '' };
+  if (rest.length === 3 && rest[0] === 'claim' && Object.prototype.hasOwnProperty.call(SLUG_FAMILIES, rest[1])) {
+    return { kind: 'claim', family: rest[1], slug: rest[2] };
+  }
   if (rest.length === 2 && (rest[0] === 'check' || rest[0] === 'hash')) {
     return { kind: rest[0], target: rest[1] };
   }
@@ -236,29 +272,52 @@ function ensureFolder(dir) {
 }
 
 /**
+ * The folders below the root that a claim walks, in walk order, or null for a slug that its
+ * family's rule refuses.
+ *
+ * @param {string} family  'plan', 'design' or a SLUG_FAMILIES key
+ * @param {string} slug
+ * @returns {readonly string[] | null}
+ */
+function claimParts(family, slug) {
+  if (family === 'plan') return PLAN_PARTS;
+  if (family === 'design') return DESIGN_PARTS;
+  if (slug === '.' || slug === '..' || !SLUG_FAMILIES[family].test(slug)) return null;
+  return ['.devflow', 'docs', family, slug];
+}
+
+/**
  * @param {(file: string, args: string[], opts: object) => any} exec
  * @param {() => Date} now
  * @param {string} cwd
+ * @param {string} family  'plan', 'design' or a SLUG_FAMILIES key
+ * @param {string} slug
  * @returns {{ code: number, line: string }}
  */
-function claim(exec, now, cwd) {
+function claim(exec, now, cwd, family, slug) {
+  const parts = claimParts(family, slug);
+  if (parts === null) return fail(EXIT_CODES.REFUSED, 'the ' + family + ' slug breaks its rule');
   const top = settings.gitToplevel(exec, cwd);
   if (top.kind === 'unknown') return fail(EXIT_CODES.INTERNAL_ERROR, 'git did not answer');
-  if (top.kind === 'none') return fail(EXIT_CODES.REFUSED, 'not inside a git repository');
-  const root = top.root;
-  if (plainParts(root) === null) return fail(EXIT_CODES.REFUSED, 'the checkout root path holds a character that plan paths refuse');
-  const stamps = stampsOf(now());
+  const slugFamily = Object.prototype.hasOwnProperty.call(SLUG_FAMILIES, family);
+  if (top.kind === 'none' && !slugFamily) return fail(EXIT_CODES.REFUSED, 'not inside a git repository');
+  const root = top.kind === 'none' ? cwd : top.root;
+  if (plainParts(root) === null) return fail(EXIT_CODES.REFUSED, 'the root path holds a character that plan paths refuse');
+  const stamps = family === 'design' ? [] : stampsOf(now());
   if (stamps === null) return fail(EXIT_CODES.INTERNAL_ERROR, 'the clock gave no usable date');
-  const tracking = planTracking(exec, root);
-  if (tracking === 'tracked') return fail(EXIT_CODES.REFUSED, 'git tracks files under the plan folder');
-  if (tracking === 'unknown') return fail(EXIT_CODES.INTERNAL_ERROR, 'git did not answer for the plan folder');
+  if (family === 'plan') {
+    const tracking = planTracking(exec, root);
+    if (tracking === 'tracked') return fail(EXIT_CODES.REFUSED, 'git tracks files under the plan folder');
+    if (tracking === 'unknown') return fail(EXIT_CODES.INTERNAL_ERROR, 'git did not answer for the plan folder');
+  }
   let dir = root;
-  for (const part of PLAN_PARTS) {
+  for (const part of parts) {
     dir += '/' + part;
     if (!ensureFolder(dir)) {
       return fail(EXIT_CODES.REFUSED, 'a link or a file stands at, or no folder can be made at, ' + JSON.stringify(dir).slice(0, 300));
     }
   }
+  if (family === 'design') return { code: EXIT_CODES.OK, line: 'DIR=' + dir };
   for (const stamp of stamps) {
     try {
       fs.mkdirSync(dir + '/' + stamp);
@@ -279,6 +338,10 @@ function check(exec, target) {
   const parts = plainParts(target);
   if (parts === null) return fail(EXIT_CODES.REFUSED, 'the path is not an absolute path of plain names');
   const last = parts.length - 1;
+  if (last >= 4 && parts.slice(last - 3, last).join('/') === DESIGN_PARTS.join('/')) {
+    if (!DESIGN_NAME_RE.test(parts[last])) return fail(EXIT_CODES.REFUSED, 'the design file name is not <name>.<stamp>.md');
+    return checkBelowRoot(exec, target, '/' + parts.slice(0, last - 3).join('/'), DESIGN_PARTS, false);
+  }
   if (last < 5) return fail(EXIT_CODES.REFUSED, 'the path is not below a checkout root');
   const stamp = parts[last - 1];
   if (!NAME_RE.test(parts[last])) return fail(EXIT_CODES.REFUSED, 'the file name is not <letters>-<number>.md');
@@ -286,14 +349,29 @@ function check(exec, target) {
   if (parts.slice(last - 4, last - 1).join('/') !== PLAN_PATHSPEC) {
     return fail(EXIT_CODES.REFUSED, 'the run folder is not under .devflow/docs/plan');
   }
-  const root = '/' + parts.slice(0, last - 4).join('/');
+  return checkBelowRoot(exec, target, '/' + parts.slice(0, last - 4).join('/'), [...PLAN_PARTS, stamp], true);
+}
+
+/**
+ * The rules of `check` that both shapes share: the root is a folder and its own git
+ * toplevel, each of `folders` below it stands as a real folder, nothing stands at `target`,
+ * and, with `planRule`, git tracks nothing under the plan folder.
+ *
+ * @param {(file: string, args: string[], opts: object) => any} exec
+ * @param {string} target
+ * @param {string} root
+ * @param {readonly string[]} folders  the folders between the root and the target, in walk order
+ * @param {boolean} planRule
+ * @returns {{ code: number, line: string }}
+ */
+function checkBelowRoot(exec, target, root, folders, planRule) {
   try {
     if (!fs.statSync(root).isDirectory()) return fail(EXIT_CODES.REFUSED, 'the root is not a folder');
   } catch (_) {
     return fail(EXIT_CODES.REFUSED, 'the root does not exist');
   }
   let dir = root;
-  for (const part of [...PLAN_PARTS, stamp]) {
+  for (const part of folders) {
     dir += '/' + part;
     const standing = standingAt(dir);
     if (standing === 'absent') return fail(EXIT_CODES.REFUSED, 'no run folder was claimed: nothing stands at ' + JSON.stringify(dir).slice(0, 300));
@@ -304,9 +382,11 @@ function check(exec, target) {
   if (top.kind === 'unknown') return fail(EXIT_CODES.INTERNAL_ERROR, 'git did not answer');
   if (top.kind === 'none') return fail(EXIT_CODES.REFUSED, 'the root is not inside a git repository');
   if (top.root !== root) return fail(EXIT_CODES.REFUSED, 'the root is not its own git toplevel');
-  const tracking = planTracking(exec, root);
-  if (tracking === 'tracked') return fail(EXIT_CODES.REFUSED, 'git tracks files under the plan folder');
-  if (tracking === 'unknown') return fail(EXIT_CODES.INTERNAL_ERROR, 'git did not answer for the plan folder');
+  if (planRule) {
+    const tracking = planTracking(exec, root);
+    if (tracking === 'tracked') return fail(EXIT_CODES.REFUSED, 'git tracks files under the plan folder');
+    if (tracking === 'unknown') return fail(EXIT_CODES.INTERNAL_ERROR, 'git did not answer for the plan folder');
+  }
   return { code: EXIT_CODES.OK, line: 'OK=' + target };
 }
 
@@ -347,7 +427,7 @@ function main(argv, deps) {
     const cwd = deps && typeof deps.cwd === 'string' ? deps.cwd : process.cwd();
     const args = parseArgs(argv);
     switch (args.kind) {
-      case 'claim': return claim(exec, now, cwd);
+      case 'claim': return claim(exec, now, cwd, args.family, args.slug);
       case 'check': return check(exec, args.target);
       case 'hash': return hash(args.target);
       default: return fail(EXIT_CODES.USAGE, USAGE);
