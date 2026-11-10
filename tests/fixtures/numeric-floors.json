@@ -1334,19 +1334,19 @@
     },
     {
       "id": "research-body-max",
-      "ceiling": 5133,
-      "pattern": "['research', 'on', 5_133],",
+      "ceiling": 5218,
+      "pattern": "['research', 'on', 5_218],",
       "occurrences": 1,
       "sourceFile": "tests/guards/other-agents-sizes.test.ts",
-      "description": "The Research agent body of the curation-on build, dist/agents/research.md, in bytes. Every turn of every Research spawn reads it (opus, two to five spawns per /research run). Added by #718 (lean other targets) at 5,184, after the cut from 6,300. Lowered by #706 (lean descriptions, the rest) to 5133."
+      "description": "The Research agent body of the curation-on build, dist/agents/research.md, in bytes. Every turn of every Research spawn reads it (opus, two to five spawns per /research run). Added by #718 (lean other targets) at 5,184, after the cut from 6,300. Lowered by #706 (lean descriptions, the rest) to 5133. Raised by #778 from 5133 to 5218, the measured size with no headroom: six frontmatter deny lines, no body text."
     },
     {
       "id": "research-body-curation-off-max",
-      "ceiling": 4773,
-      "pattern": "['research', 'off', 4_773],",
+      "ceiling": 4858,
+      "pattern": "['research', 'off', 4_858],",
       "occurrences": 1,
       "sourceFile": "tests/guards/other-agents-sizes.test.ts",
-      "description": "The Research agent body of the curation-off build, dist/curation-off/agents/research.md, in bytes. Added by #718 (lean other targets) at 4,824, after the cut from 5,794. Lowered by #706 (lean descriptions, the rest) to 4773."
+      "description": "The Research agent body of the curation-off build, dist/curation-off/agents/research.md, in bytes. Added by #718 (lean other targets) at 4,824, after the cut from 5,794. Lowered by #706 (lean descriptions, the rest) to 4773. Raised by #778 from 4773 to 4858, the measured size with no headroom: six frontmatter deny lines, no body text, with the curation-on build."
     },
     {
       "id": "evaluate-body-max",
@@ -1406,27 +1406,27 @@
     },
     {
       "id": "harden-body-max",
-      "ceiling": 4806,
-      "pattern": "['harden', 'on', 4_806],",
+      "ceiling": 4891,
+      "pattern": "['harden', 'on', 4_891],",
       "occurrences": 1,
       "sourceFile": "tests/guards/other-agents-sizes.test.ts",
-      "description": "The Harden agent body of the curation-on build, dist/agents/harden.md, in bytes. Every turn of every Harden spawn reads it (opus; /implement and /self-review spawn it). Added at its measured 5,047 so that it can not grow back. Lowered by #706 (lean always-loaded descriptions) to 5011, and by #756 (lean plans) to 4998: the missing-test rule names the acceptance-criterion and never-cut paths, and cuts in the same body paid for it. Lowered to 4940 when the missing-test rule gained the fallback of each behaviour the diff adds; two restated lines of the same body paid for it with room left. Lowered to 4931 for #756 when the body gained the ACCEPTANCE_CRITERIA and KNOWN_LIMITS input line with its never-cut clause: the pillar names the output template lists again, the honest-assessment principle that the BLOCKED rules state, the commit message the commit step states and the sentence that caps the two narrative output lists paid for it. Lowered to 4806 by #756, the measured size with no headroom: the Output section lost its Workflow return pin and the status return field."
+      "description": "The Harden agent body of the curation-on build, dist/agents/harden.md, in bytes. Every turn of every Harden spawn reads it (opus; /implement and /self-review spawn it). Added at its measured 5,047 so that it can not grow back. Lowered by #706 (lean always-loaded descriptions) to 5011, and by #756 (lean plans) to 4998: the missing-test rule names the acceptance-criterion and never-cut paths, and cuts in the same body paid for it. Lowered to 4940 when the missing-test rule gained the fallback of each behaviour the diff adds; two restated lines of the same body paid for it with room left. Lowered to 4931 for #756 when the body gained the ACCEPTANCE_CRITERIA and KNOWN_LIMITS input line with its never-cut clause: the pillar names the output template lists again, the honest-assessment principle that the BLOCKED rules state, the commit message the commit step states and the sentence that caps the two narrative output lists paid for it. Lowered to 4806 by #756, the measured size with no headroom: the Output section lost its Workflow return pin and the status return field. Raised by #778 from 4806 to 4891, the measured size with no headroom: six frontmatter deny lines, no body text."
     },
     {
       "id": "harden-body-curation-off-max",
-      "ceiling": 4238,
-      "pattern": "['harden', 'off', 4_238],",
+      "ceiling": 4323,
+      "pattern": "['harden', 'off', 4_323],",
       "occurrences": 1,
       "sourceFile": "tests/guards/other-agents-sizes.test.ts",
-      "description": "The Harden agent body of the curation-off build, dist/curation-off/agents/harden.md, in bytes. Added at its measured 4,479 so that it can not grow back. Lowered by #706 (lean always-loaded descriptions) to 4443, and by #756 (lean plans) to 4430, with the curation-on build. Lowered to 4372 with the curation-on build. Lowered to 4363 with the curation-on build for #756. Lowered to 4238 by #756 with the curation-on build."
+      "description": "The Harden agent body of the curation-off build, dist/curation-off/agents/harden.md, in bytes. Added at its measured 4,479 so that it can not grow back. Lowered by #706 (lean always-loaded descriptions) to 4443, and by #756 (lean plans) to 4430, with the curation-on build. Lowered to 4372 with the curation-on build. Lowered to 4363 with the curation-on build for #756. Lowered to 4238 by #756 with the curation-on build. Raised by #778 from 4238 to 4323, the measured size with no headroom: six frontmatter deny lines, no body text, with the curation-on build."
     },
     {
       "id": "polish-body-max",
-      "ceiling": 4495,
-      "pattern": "['polish', 'on', 4_495],",
+      "ceiling": 4580,
+      "pattern": "['polish', 'on', 4_580],",
       "occurrences": 1,
       "sourceFile": "tests/guards/other-agents-sizes.test.ts",
-      "description": "The Polish agent body, src/assets/agents/polish.md, in bytes. It is hand-authored, with one build. Every turn of every Polish spawn reads it (sonnet; /implement, /resolve and /self-review spawn it). Added at its measured 4,537 so that it can not grow back. Lowered by #706 (lean always-loaded descriptions) to 4495."
+      "description": "The Polish agent body, src/assets/agents/polish.md, in bytes. It is hand-authored, with one build. Every turn of every Polish spawn reads it (sonnet; /implement, /resolve and /self-review spawn it). Added at its measured 4,537 so that it can not grow back. Lowered by #706 (lean always-loaded descriptions) to 4495. Raised by #778 from 4495 to 4580, the measured size with no headroom: six frontmatter deny lines, no body text."
     }
   ]
 }
