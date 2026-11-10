@@ -76,7 +76,7 @@ Guarded by `tests/build-mds.test.ts` section 22: every adopting host's compiled 
 
 Claude Code replaces `$ARGUMENTS` with the full argument string at every occurrence in a command file, so a pasted plan or stack trace is copied into the main-thread context once per occurrence; a command with no placeholder gets its input appended once as a final `ARGUMENTS:` line. A host that reads its input binds the placeholder exactly once, in its input section, on its own line inside a `<command-input>` block (never an inline code span, which a multi-line or backtick-bearing argument breaks). `issue_ref_grammar()` scans `COMMAND_INPUT`, so the partial adds no occurrence of its own.
 
-Held by `tests/guards/arguments-once.test.ts` over the compiled commands (at most one placeholder per command, none positional, exactly one in each `TRACKER_PARTIAL_ADOPTERS` host, each between `<command-input>` lines) and, on the installed copy, by `tests/install-bound-input.test.ts`. A plan handoff that invokes `devflow:implement` passes no arguments, so `COMMAND_INPUT` is empty there (see `ambient-orchestrator`).
+Held by `tests/guards/arguments-once.test.ts` over the compiled commands (at most one placeholder per command, none positional, exactly one in each `TRACKER_PARTIAL_ADOPTERS` host, each between `<command-input>` lines) and, on the installed copy, by `tests/install-bound-input.test.ts`.
 
 ## Vocabulary: `{ISSUE_REF}`, `{ISSUE_ID}`, `{ISSUE_PR_LINK}`
 
