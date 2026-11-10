@@ -360,7 +360,7 @@ User can:
 **Load `devflow:docs-framework`** — Load via Skill tool: `devflow:docs-framework`, here and not earlier. If it fails to load, continue with the paths below.
 
 **Pre-compute the artifact path** by the skill's rules: `{topic-slug}` is its topic slug of the feature title, the same value as the artifact's `slug:` frontmatter, made in prose; no shell call takes the title. Use the slug only when it matches `^[a-z0-9-]{1,50}$`, else use `untitled`. `{YYYY-MM-DD_HHMM}` is the local time, computed once:
-- If one issue: `{worktree}/.devflow/docs/design/{ISSUE_ID}-{topic-slug}.{YYYY-MM-DD_HHMM}.md`
+- If one issue: `{worktree}/.devflow/docs/design/{ISSUE_ID}-{topic-slug}.{YYYY-MM-DD_HHMM}.md` (e.g. `42-jwt-auth.2026-04-07_1430.md`)
 - If multi-issue: `{worktree}/.devflow/docs/design/multi-{topic-slug}.{YYYY-MM-DD_HHMM}.md`, frontmatter `issue: pending`
 - If no issue: `{worktree}/.devflow/docs/design/{topic-slug}.{YYYY-MM-DD_HHMM}.md`
 
@@ -427,7 +427,7 @@ node "$HOME/.devflow/scripts/verify-evidence.cjs" check tp <that file>; echo "ex
 
 `exit=0` passes. On any other result, correct the lines once — the script names the failing line and its code on stderr — and check again. Still failing ⇒ keep the section as it stands and say so in the report: `/implement` re-checks it before any Code spawn.
 
-Stop on `'` or a control character in `{worktree}`. Check the artifact path first: `node "$HOME/.devflow/scripts/plan-files.cjs" claim design && node "$HOME/.devflow/scripts/plan-files.cjs" check '{the artifact path}'; echo "exit=$?"`. Only an `OK=` line with `exit=0` lets the next step run; else stop, make no artifact, and report the script's reason.
+Stop on `'` or a control character in the artifact path. Check it first: `(cd '{worktree}' && node "$HOME/.devflow/scripts/plan-files.cjs" claim design && node "$HOME/.devflow/scripts/plan-files.cjs" check '{the artifact path}'); echo "exit=$?"`. When the check refuses because a file stands at the path, give the stamp seconds (`YYYY-MM-DD_HHMMSS`) and check once more. Only an `OK=` line with `exit=0` lets the next step run; else stop, make no artifact, and report the script's reason.
 
 **Write the artifact now** — frontmatter `issue: {ISSUE_ID}` if an issue is already known, else `issue: pending`.
 

@@ -78,7 +78,7 @@ If `pr_number` is absent or not digits only, set `PR_DESCRIPTION` to `(none)`.
      - Stop as for a (rejected) Base line unless `base_ref` is 40 or 64 hex.
      - Set `DIFF_RANGE` to `{base_ref}...HEAD`
 2. Stop on `'` or a control character in `{worktree}`. Claim the analysis directory: `(cd '{worktree}' && node "$HOME/.devflow/scripts/plan-files.cjs" claim bug-analysis '{branch-slug}'); echo "exit=$?"`.
-3. Only a `RUN_DIR=<path>` line with `exit=0` sets `ANALYSIS_DIR` to that path; else stop with the script's reason.
+3. Only a `RUN_DIR=<path>` line with `exit=0` sets `ANALYSIS_DIR` to that path and `{timestamp}` to its last part; else stop with the script's reason.
 
 #### Step 2b: Check Changed Files
 

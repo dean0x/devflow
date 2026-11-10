@@ -3,7 +3,9 @@
  *
  *   folder arm   /code-review, /bug-analysis and /research make their run folder, and /plan its design folder,
  *                only with `plan-files.cjs claim`, never with `mkdir -p`. Only the script's success line sets the
- *                folder; any other result stops the step. /plan runs `check` on the design path before the Write.
+ *                folder; any other result stops the step. A quote or a control character in the quoted path stops the
+ *                step first. /plan runs `check` on the design path before the Write, and takes seconds in the stamp
+ *                once when a file stands at that path.
  *   slug arm     the docs-framework skill and its patterns reference hold no shell form of the topic slug: no
  *                shell call takes a title. The skill, /plan and /research state the slug pattern
  *                `^[a-z0-9-]{1,50}$` and the `untitled` fallback.
@@ -29,12 +31,16 @@ const TOPIC_SLUG_PATTERN = '`^[a-z0-9-]{1,50}$`'
 // 1. The folder arm
 // ---------------------------------------------------------------------------
 
+const WORKTREE_STOP = 'Stop on `\'` or a control character in `{worktree}`.'
+
 interface FolderSite {
   readonly command: string
   /** The claim call, byte for byte. */
   readonly claim: string
   /** The sentence that lets only the script's success line set the folder. */
   readonly rule: string
+  /** The stop on a quote or a control character in the path that the shell call quotes. */
+  readonly stop: string
 }
 
 const FOLDER_SITES: readonly FolderSite[] = [
@@ -42,25 +48,29 @@ const FOLDER_SITES: readonly FolderSite[] = [
     command: 'code-review',
     claim: `\`(cd '{worktree}' && ${SCRIPT} claim reviews '{branch-slug}'); echo "exit=$?"\``,
     rule: 'Only a `RUN_DIR=<path>` line with `exit=0` sets `REVIEW_DIR` to that path and `TIMESTAMP` to its last part; else stop with the script\'s reason.',
+    stop: WORKTREE_STOP,
   },
   {
     command: 'bug-analysis',
     claim: `\`(cd '{worktree}' && ${SCRIPT} claim bug-analysis '{branch-slug}'); echo "exit=$?"\``,
-    rule: 'Only a `RUN_DIR=<path>` line with `exit=0` sets `ANALYSIS_DIR` to that path; else stop with the script\'s reason.',
+    rule: 'Only a `RUN_DIR=<path>` line with `exit=0` sets `ANALYSIS_DIR` to that path and `{timestamp}` to its last part; else stop with the script\'s reason.',
+    stop: WORKTREE_STOP,
   },
   {
     command: 'research',
     claim: `\`(cd '{worktree}' && ${SCRIPT} claim research '{topic-slug}'); echo "exit=$?"\``,
     rule: 'Only a `RUN_DIR=<path>` line with `exit=0` sets `{RESEARCH_DIR}` to that path, `{worktree}/.devflow/docs/research/{topic-slug}/<stamp>`; else stop with the script\'s reason.',
+    stop: WORKTREE_STOP,
   },
   {
     command: 'plan',
-    claim: `\`${SCRIPT} claim design && ${SCRIPT} check '{the artifact path}'; echo "exit=$?"\``,
+    claim: `\`(cd '{worktree}' && ${SCRIPT} claim design && ${SCRIPT} check '{the artifact path}'); echo "exit=$?"\``,
     rule: 'Only an `OK=` line with `exit=0` lets the next step run; else stop, make no artifact, and report the script\'s reason.',
+    stop: 'Stop on `\'` or a control character in the artifact path.',
   },
 ]
 
-const WORKTREE_STOP = 'Stop on `\'` or a control character in `{worktree}`.'
+const PLAN_RETRY = 'When the check refuses because a file stands at the path, give the stamp seconds (`YYYY-MM-DD_HHMMSS`) and check once more.'
 const UNCHECKED_MKDIR_RE = /mkdir -p[^`\n]*\.devflow\/docs/
 const PLAN_WRITE = '**Write the artifact now**'
 
@@ -72,12 +82,13 @@ export function collectFolderDefects(site: FolderSite, build: Build): string[] {
   if (claimAt === -1) out.push(`${build.label}: no claim call`)
   else if (text.indexOf(site.claim, claimAt + 1) !== -1) out.push(`${build.label}: a second claim call`)
   if (!text.includes(site.rule)) out.push(`${build.label}: no rule that only the success line sets the folder`)
-  const stopAt = text.indexOf(WORKTREE_STOP)
-  if (stopAt === -1 || (claimAt !== -1 && stopAt > claimAt)) out.push(`${build.label}: no stop on a quote in the worktree before the claim`)
+  const stopAt = text.indexOf(site.stop)
+  if (stopAt === -1 || (claimAt !== -1 && stopAt > claimAt)) out.push(`${build.label}: no stop on a quote in the quoted path before the claim`)
   if (UNCHECKED_MKDIR_RE.test(text)) out.push(`${build.label}: a mkdir -p of a docs folder`)
   if (site.command === 'plan') {
     const writeAt = text.indexOf(PLAN_WRITE)
     if (writeAt === -1 || claimAt === -1 || claimAt > writeAt) out.push(`${build.label}: the design check is not before the write`)
+    if (!text.includes(PLAN_RETRY)) out.push(`${build.label}: no seconds retry when a file stands at the design path`)
   }
   return out
 }
@@ -100,7 +111,7 @@ describe('the run and design folders are made only by the shared claim (#781)', 
     expect(probe(seedOnce(build.text, site.claim, '`mkdir -p {worktree}/.devflow/docs/reviews/x/`')))
       .toEqual([`${build.label}: no claim call`, `${build.label}: a mkdir -p of a docs folder`])
     expect(probe(seedOnce(build.text, site.rule, 'Set `REVIEW_DIR`.'))).toEqual([`${build.label}: no rule that only the success line sets the folder`])
-    expect(probe(seedOnce(build.text, WORKTREE_STOP, ''))).toEqual([`${build.label}: no stop on a quote in the worktree before the claim`])
+    expect(probe(seedOnce(build.text, WORKTREE_STOP, ''))).toEqual([`${build.label}: no stop on a quote in the quoted path before the claim`])
     expect(probe(`${build.text}\n${site.claim}`)).toEqual([`${build.label}: a second claim call`])
   })
 
@@ -109,6 +120,10 @@ describe('the run and design folders are made only by the shared claim (#781)', 
     const build = folderBuilds(site)[0]
     const moved = seedOnce(seedOnce(build.text, site.claim, 'CLAIM_GONE'), PLAN_WRITE, `${PLAN_WRITE} ${site.claim}`)
     expect(collectFolderDefects(site, { ...build, text: moved })).toEqual([`${build.label}: the design check is not before the write`])
+    expect(collectFolderDefects(site, { ...build, text: seedOnce(build.text, PLAN_RETRY, '') }))
+      .toEqual([`${build.label}: no seconds retry when a file stands at the design path`])
+    expect(collectFolderDefects(site, { ...build, text: seedOnce(build.text, site.stop, 'Stop on `\'` in `{worktree}`.') }))
+      .toEqual([`${build.label}: no stop on a quote in the quoted path before the claim`])
   })
 })
 
