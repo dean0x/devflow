@@ -119,5 +119,4 @@ A provider-neutral vocabulary replaced the old GitHub-bound `#issue-number` plac
 - `.devflow/features/installer-shadowing/KNOWLEDGE.md`: installing the curation-on or curation-off variant for the machine's curation switch and converging it when the switch toggles.
 - `.devflow/features/feature-knowledge-system/KNOWLEDGE.md`: the MDS build pipeline, the splitter and the knowledge host commands.
 - `.devflow/features/resolve-pipeline/KNOWLEDGE.md`: `/resolve` also spawns the Code family (Fix for gate failures) and carries the decisions key on its validation-fix and ci-fix spawns, under the same every-Code-spawn rule.
-- `.devflow/features/ambient-orchestrator/KNOWLEDGE.md`: a plan handoff invokes `devflow:implement` with no arguments, so `COMMAND_INPUT` is empty there.
 - `.devflow/features/test-harness/KNOWLEDGE.md`: the named-collector, seeded-probe and ratchet-manifest guard shape these guards follow.
