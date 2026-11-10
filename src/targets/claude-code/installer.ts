@@ -30,7 +30,6 @@ import { BUILTIN_OVERRIDE_AGENTS, findForeignAgentOwner } from './agent-type-own
 import { restampInstalledCommands } from './language-stamp.js';
 import {
   CHARTER_RELPATH,
-  HANDOFF_SENTINEL_RELPATH,
   installRenderedCharter,
   type InstallRenderedCharterOptions,
 } from './charter-render.js';
@@ -1748,8 +1747,8 @@ function collectRelativeImports(source: string): string[] {
  *       under ~/.devflow/scripts/ at the same relative-to-dist/ paths
  *   (c) ~/.devflow/scripts/package.json → {"type":"module"}
  *
- * The copy leaves out the orchestrator charter and the implement sentinel. Install the
- * directory with {@link installScripts}, which writes both after the copy.
+ * The copy leaves out the orchestrator charter. Install the directory with
+ * {@link installScripts}, which writes the charter after the copy.
  *
  * Frozen externally-referenced paths:
  *   ~/.devflow/scripts/hooks/run-hook   (hook bootstrap entry)
@@ -1767,16 +1766,12 @@ export async function composeScripts(scriptsTarget: string): Promise<void> {
   // run never did and re-init stopped being a no-op on disk (#388 AC-3). Scoping the
   // chmod to the copied entries makes the first and every later run agree.
   //
-  // D-CHARTER-INSTALL-RENDER: the orchestrator charter and the implement sentinel are
-  // NOT part of this verbatim copy. The charter is installed as a render of the packaged
-  // source for the installed plugin set, and the sentinel exists only while implement is
-  // installed; `installRenderedCharter` is the only writer of both, so no copy here can put
-  // the full source charter or a stale sentinel back over a render.
+  // D-CHARTER-INSTALL-RENDER: the orchestrator charter is NOT part of this verbatim copy.
+  // It is installed as a render of the packaged source for the installed plugin set;
+  // `installRenderedCharter` is its only writer, so no copy here can put the full source
+  // charter back over a render.
   const srcScripts = scriptsDir();
-  const rendered = new Set([
-    path.join(srcScripts, CHARTER_RELPATH),
-    path.join(srcScripts, HANDOFF_SENTINEL_RELPATH),
-  ]);
+  const rendered = new Set([path.join(srcScripts, CHARTER_RELPATH)]);
   try {
     await copyDirectory(srcScripts, scriptsTarget, rendered);
     if (process.platform !== 'win32') {
@@ -1845,7 +1840,7 @@ export interface InstallScriptsOptions {
 
 /**
  * Install the scripts directory whole: the verbatim copy of {@link composeScripts}, then the orchestrator
- * charter and the implement sentinel it skips.
+ * charter it skips.
  *
  * D-CHARTER-INSTALL-RENDER: a tree from `composeScripts` alone has no charter, so every caller outside this
  * module goes through here and none pairs the two steps by hand. The render is its own step, outside the
@@ -3063,7 +3058,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // (no dev tooling, no raw TypeScript).
   spinner.message('Installing scripts...');
   const scriptsTarget = path.join(devflowDir, 'scripts');
-  // The charter and the sentinel render from the EFFECTIVE selection (a partial install
+  // The charter renders from the EFFECTIVE selection (a partial install
   // keeps what earlier runs installed).
   await installScripts({
     scriptsTarget,

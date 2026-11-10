@@ -27,7 +27,6 @@ import { getAllAgentNames } from '../src/core/plugins.js'
 import { LEGACY_AGENT_KEYS, canonicaliseAgentKeys } from '../src/core/agent-models.js'
 import { BUILT_IN_SPAWN_TYPES, requireDistFiles, resolveAllAgents } from './helpers.js'
 import {
-  HANDOFF_PREFIX,
   REPORT_CAP,
   collectCharterContentViolations,
   collectCharterKnowledgeDefects,
@@ -761,14 +760,20 @@ describe('GAP-3: orchestrator charter integrity', () => {
     ).toBeLessThanOrEqual(MAX_CHARTER_BYTES)
   })
 
-  // The bounded-inline exception, the report cap, the Code routing line and the handoff line are
+  // The bounded-inline exception, the report cap and the Code routing line are
   // held by collectCharterContentViolations (tests/helpers/charter-guards.ts), which any rendering
   // of the charter can run too.
 
-  it('charter carries the bounded-inline exception, a token-figure report cap, the no-argument handoff and a Code routing line that names OPERATION', () => {
+  it('charter carries the bounded-inline exception, a token-figure report cap and a Code routing line that names OPERATION', () => {
     const charter = readFileSync(CHARTER_PATH, 'utf-8')
     const violations = collectCharterContentViolations(charter)
     expect(violations, `Orchestrator charter content violations:\n  ${violations.join('\n  ')}`).toEqual([])
+  })
+
+  it('charter carries no plan-handoff routing: no line names the handoff prefix or a plan handoff', () => {
+    const charter = readFileSync(CHARTER_PATH, 'utf-8')
+    expect(charter).not.toContain('Implement the following plan:')
+    expect(charter).not.toMatch(/plan handoff/i)
   })
 
   it('routing ends with a roster-only fallback that names no model', () => {
@@ -793,7 +798,7 @@ describe('GAP-3: orchestrator charter integrity', () => {
     expect(collectCharterRoutingViolations(namesModel)).toEqual(['the routing lines name a model'])
   })
 
-  it('known-bad probe: a charter without the bounds, without a report figure, without OPERATION on the Code line, or with "full plan" is reported', () => {
+  it('known-bad probe: a charter without the bounds, without a report figure, or without OPERATION on the Code line is reported', () => {
     const charter = readFileSync(CHARTER_PATH, 'utf-8')
     // Non-vacuity: the real charter is clean, so each seed below fails for its own reason.
     expect(collectCharterContentViolations(charter)).toEqual([])
@@ -823,12 +828,6 @@ describe('GAP-3: orchestrator charter integrity', () => {
     const editOnCode = charter.replace(': `issue-fix` for', ': `edit` for mechanical changes, `issue-fix` for')
     expect(editOnCode, 'the seed must land').not.toBe(charter)
     expect(collectCharterContentViolations(editOnCode)).toContain('the Code routing line still routes edit to Code')
-
-    const fullPlan = charter.replace(HANDOFF_PREFIX, `${HANDOFF_PREFIX} pass the full plan as skill input,`)
-    expect(fullPlan, 'the seed must land').not.toBe(charter)
-    expect(collectCharterContentViolations(fullPlan)).toContain(
-      'the handoff line tells the orchestrator to pass the full plan as skill input',
-    )
   })
 
   it('known-bad probe: bound words scattered over several sentences do not count as one bounded sentence', () => {
@@ -836,7 +835,6 @@ describe('GAP-3: orchestrator charter integrity', () => {
       'The main thread may run a single command.',
       'It is git or gh only, and its output stays under about 40 lines.',
       'Never a diff, a log or a test run.',
-      `If the first message begins with ${HANDOFF_PREFIX} invoke devflow:implement.`,
       'Ask for a report of at most about 1,500 tokens.',
     ].join('\n')
     const violations = collectCharterContentViolations(scattered)

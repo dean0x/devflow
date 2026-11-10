@@ -1,5 +1,5 @@
 /**
- * Install-time render of the ambient orchestrator charter, and the implement sentinel.
+ * Install-time render of the ambient orchestrator charter.
  *
  * D-CHARTER-INSTALL-RENDER: the packaged charter (src/assets/scripts/hooks/assets/orchestrator-charter.md)
  * is the FULL text. It routes to workflows and agents that a machine may not install, so `devflow init`
@@ -21,13 +21,9 @@
  *   - devflow-ambient's agents count as installed whatever the selection says. The charter belongs to that
  *     plugin, and the hooks inject it only while ambient mode is on, which is when `devflow init` installs
  *     the plugin; `devflow ambient --enable` warns when it is not installed.
- *   - The sentinel (`hooks/assets/implement-installed`) exists exactly when devflow-implement is installed.
- *     The per-prompt preamble branches on its existence with a shell builtin, so the plan-handoff directive
- *     runs only where the workflow it names exists. This module is the only writer of the charter and the
- *     sentinel at install time; the verbatim script copy skips both.
+ *   - This module is the only writer of the charter at install time; the verbatim script copy skips it.
  *   - `mode: 'uninstall'` is the uninstall mode. An uninstall re-renders a charter that is installed from the
- *     manifest record and may take the sentinel away, but never creates a file. With no record to render
- *     from, `removeHandoffSentinel` takes the sentinel away alone and the charter stays as it is.
+ *     manifest record, but never creates the file. With no record to render from, the charter stays as it is.
  *   - A change guard is asked about a file before the file is read, and every write or removal follows it.
  *   - After a package upgrade the installed charter stays as rendered until the next `devflow init`.
  *
@@ -44,17 +40,11 @@ import { DEVFLOW_PLUGINS, registeredPluginNames } from '../../core/plugins.js';
 /** The charter, relative to the scripts directory (packaged and installed alike). */
 export const CHARTER_RELPATH = 'hooks/assets/orchestrator-charter.md';
 
-/** The sentinel, relative to the scripts directory. It exists exactly when devflow-implement is installed. */
-export const HANDOFF_SENTINEL_RELPATH = 'hooks/assets/implement-installed';
-
 /** The plugin whose agents the charter always treats as installed. */
 const AMBIENT_PLUGIN = 'devflow-ambient';
 
-/** The permission bits of an installed charter or sentinel: the hooks directory is installed executable. */
+/** The permission bits of an installed charter: the hooks directory is installed executable. */
 const INSTALLED_MODE = 0o755;
-
-/** The command whose presence the sentinel records. */
-const HANDOFF_COMMAND = 'implement';
 
 /** Something the registry installs and a span depends on. */
 export interface CharterOwner {
@@ -72,8 +62,7 @@ export interface CharterListItem {
 
 /** A piece of the charter that goes away with its owner. */
 export interface CharterSpan {
-  /** `text` matches the exact characters. `line` matches the one line that starts with `text`. */
-  readonly shape: 'text' | 'line';
+  /** The exact characters of the span. */
   readonly text: string;
   readonly owner: CharterOwner;
   /** Whether the render removes the span when its owner is absent, or (the debug fallback only) present. */
@@ -100,33 +89,23 @@ export const CHARTER_WORKFLOW_LIST: string = CHARTER_WORKFLOW_ITEMS.map(item => 
 /** Every other span: removal-only, each tied to one owner. */
 export const CHARTER_SPANS: readonly CharterSpan[] = [
   {
-    shape: 'text',
     text: 'Fix (`OPERATION:` `validation-fix`, `alignment-fix`, `qa-fix` or `ci-fix`), else ',
     owner: { kind: 'agent', name: 'fix' },
     removedWhen: 'absent',
   },
   {
-    shape: 'text',
     text: 'devflow:debug, else ',
     owner: { kind: 'command', name: 'debug' },
     removedWhen: 'absent',
   },
   {
-    shape: 'text',
     text: ', else Explore investigates and Code fixes',
     owner: { kind: 'command', name: 'debug' },
     removedWhen: 'present',
   },
   {
-    shape: 'text',
     text: '; never the Debug agent',
     owner: { kind: 'agent', name: 'debug' },
-    removedWhen: 'absent',
-  },
-  {
-    shape: 'line',
-    text: '- Plan handoff: ',
-    owner: { kind: 'command', name: HANDOFF_COMMAND },
     removedWhen: 'absent',
   },
 ];
@@ -202,20 +181,10 @@ function lineRangeAt(source: string, index: number): Located {
 
 /** The one place `span` sits in `source`, or the way it fails to. */
 function locateSpan(source: string, span: CharterSpan): Located | { readonly reason: 'missing' | 'repeated' } {
-  if (span.shape === 'text') {
-    const count = occurrencesOf(source, span.text);
-    if (count !== 1) return { reason: count === 0 ? 'missing' : 'repeated' };
-    const start = source.indexOf(span.text);
-    return { start, end: start + span.text.length };
-  }
-  const starts: number[] = [];
-  let lineStart = 0;
-  for (const line of source.split('\n')) {
-    if (line.startsWith(span.text)) starts.push(lineStart);
-    lineStart += line.length + 1;
-  }
-  if (starts.length !== 1) return { reason: starts.length === 0 ? 'missing' : 'repeated' };
-  return lineRangeAt(source, starts[0]);
+  const count = occurrencesOf(source, span.text);
+  if (count !== 1) return { reason: count === 0 ? 'missing' : 'repeated' };
+  const start = source.indexOf(span.text);
+  return { start, end: start + span.text.length };
 }
 
 /**
@@ -299,18 +268,16 @@ export interface InstallRenderedCharterOptions {
   /** A change guard for a legacy local install (D-CLI-NO-SYMLINK), asked before a target is read; omitted, every target may change. */
   readonly mayChange?: (target: string) => Promise<boolean>;
   /**
-   * `install` writes the charter and keeps the sentinel in step with the selection. `uninstall` only changes
-   * what is already installed: it renders over a charter that is there, takes the sentinel away, and never
-   * creates either file.
+   * `install` writes the charter. `uninstall` only changes what is already installed: it renders over a
+   * charter that is there, and never creates the file.
    */
   readonly mode: 'install' | 'uninstall';
-  /** The packaged scripts directory to read the full charter and the sentinel from. Tests only; omitted, the package's own. */
+  /** The packaged scripts directory to read the full charter from. Tests only; omitted, the package's own. */
   readonly packagedScriptsDir?: string;
 }
 
 export interface InstallRenderedCharterResult {
   readonly charter: CharterFileOutcome;
-  readonly sentinel: CharterFileOutcome;
 }
 
 /** The file's bytes, or null when there is no such file. Any other failure throws to the caller's catch. */
@@ -346,26 +313,6 @@ async function writeIfChanged(file: string, current: Buffer | null, text: string
   return 'rewritten';
 }
 
-/**
- * Remove the sentinel behind the change guard, without reading it; a file that is already gone is not an
- * error. A failure is a warning and `failed`.
- */
-async function removeSentinel(
-  sentinelTarget: string,
-  mayChange: InstallRenderedCharterOptions['mayChange'],
-  warn: (msg: string) => void,
-): Promise<CharterFileOutcome> {
-  try {
-    if (!(await permitted(sentinelTarget, mayChange))) return 'failed';
-    await fs.unlink(sentinelTarget);
-    return 'rewritten';
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return 'absent';
-    warn(`charter render: could not sync the implement sentinel (${sentinelTarget}) — ${String(err)}`);
-    return 'failed';
-  }
-}
-
 /** Why a render failed, in a sentence for the warning. */
 function describeFailure(result: Extract<CharterRenderResult, { ok: false }>): string {
   const problem = {
@@ -377,11 +324,10 @@ function describeFailure(result: Extract<CharterRenderResult, { ok: false }>): s
 }
 
 /**
- * Write the charter rendered for `plugins`, and sync the implement sentinel with it.
+ * Write the charter rendered for `plugins`.
  *
  * Called by installScripts after the script copy (which installViaFileCopy and `init --hud-only` both
- * run), and by the selective uninstall phase. The two files are independent: each has its own try/catch,
- * so a failure on one never costs the other. Each file is checked with the change guard before it is read.
+ * run), and by the selective uninstall phase. The file is checked with the change guard before it is read.
  * Bytes are compared with the bytes on disk at the moment of writing, so a rerun that changes nothing
  * writes nothing.
  */
@@ -392,12 +338,11 @@ export async function installRenderedCharter(opts: InstallRenderedCharterOptions
   // Precondition, asserted in production code: a relative scriptsDir would resolve against the working directory.
   if (!path.isAbsolute(target)) {
     warn(`charter render: scriptsDir is not an absolute path ("${target}") — the installed charter was not rendered`);
-    return { charter: 'failed', sentinel: 'failed' };
+    return { charter: 'failed' };
   }
 
   const inventory = charterInventory(plugins.map(plugin => (typeof plugin === 'string' ? plugin : plugin.name)));
   const charterTarget = path.join(target, CHARTER_RELPATH);
-  const sentinelTarget = path.join(target, HANDOFF_SENTINEL_RELPATH);
 
   const packagedRoot = (): string | null => {
     try {
@@ -425,53 +370,6 @@ export async function installRenderedCharter(opts: InstallRenderedCharterOptions
     }
   };
 
-  const syncSentinel = async (): Promise<CharterFileOutcome> => {
-    if (!inventory.commands.has(HANDOFF_COMMAND)) return removeSentinel(sentinelTarget, mayChange, warn);
-    try {
-      if (!(await permitted(sentinelTarget, mayChange))) return 'failed';
-      const current = await readIfPresent(sentinelTarget);
-      if (mode === 'uninstall') return current === null ? 'absent' : 'unchanged';
-      const root = packagedRoot();
-      if (root === null) return 'failed';
-      const text = await fs.readFile(path.join(root, HANDOFF_SENTINEL_RELPATH), 'utf-8');
-      return await writeIfChanged(sentinelTarget, current, text);
-    } catch (err) {
-      warn(`charter render: could not sync the implement sentinel (${sentinelTarget}) — ${String(err)}`);
-      return 'failed';
-    }
-  };
-
-  const charter = await installCharter();
-  const sentinel = await syncSentinel();
-  return { charter, sentinel };
+  return { charter: await installCharter() };
 }
 
-export interface RemoveHandoffSentinelOptions {
-  /** The installed scripts directory (`~/.devflow/scripts`). Must be absolute. */
-  readonly scriptsDir: string;
-  /** The plugins being removed. Names outside DEVFLOW_PLUGINS select nothing. */
-  readonly removedPlugins: readonly string[];
-  readonly warn: (msg: string) => void;
-  /** A change guard for a legacy local install (D-CLI-NO-SYMLINK), asked before the sentinel is touched. */
-  readonly mayChange?: (target: string) => Promise<boolean>;
-}
-
-/**
- * Take the implement sentinel away when the removed plugins include the owner of the handoff command, and
- * touch nothing else. For an uninstall with no manifest record: the charter has nothing to be rendered
- * from and stays as it is, but the sentinel needs no record, and without it the per-prompt preamble falls
- * back to the generic reminder instead of naming a workflow that is gone.
- *
- * `rewritten` when the sentinel was removed, `absent` when there was none, `unchanged` when the removed
- * plugins leave implement installed, `failed` when the guard refused or a warning says what went wrong.
- * Never throws.
- */
-export async function removeHandoffSentinel(opts: RemoveHandoffSentinelOptions): Promise<CharterFileOutcome> {
-  const warn = quietly(opts.warn);
-  if (!path.isAbsolute(opts.scriptsDir)) {
-    warn(`charter render: scriptsDir is not an absolute path ("${opts.scriptsDir}") — the implement sentinel was not removed`);
-    return 'failed';
-  }
-  if (!charterInventory(opts.removedPlugins).commands.has(HANDOFF_COMMAND)) return 'unchanged';
-  return removeSentinel(path.join(opts.scriptsDir, HANDOFF_SENTINEL_RELPATH), opts.mayChange, warn);
-}

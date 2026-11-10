@@ -1,33 +1,12 @@
 /**
- * Exact strings output by the preamble hook for each dispatch branch.
+ * Exact string output by the preamble hook for a prompt that reaches its reminder branch.
  *
- * Shared between shell-hooks.test.ts (unit assertions) and
- * tests/integration/ambient-activation.test.ts (systemPrompt simulation) to
- * ensure both test layers stay in sync when the hook templates change.
- *
- * These values are verified byte-equal against preamble hook output in Suite 1
- * and Suite 3 of shell-hooks.test.ts. If the preamble hook changes either
- * string, the shell-hook tests fail first — the integration tests automatically
- * reflect the new value because they import from here.
- *
- * The preamble hook detects a handoff by prefix only, because Claude Code's
- * handoff payload is undocumented and has changed shape; these constants are
- * the full fixed output strings (not substrings used for detection).
+ * This value is verified byte-equal against preamble hook output in Suites 1, 3 and 5
+ * of shell-hooks.test.ts. If the preamble hook changes the string, those tests fail first.
+ * It is the full fixed output string, not a substring used for detection.
  */
 
-/**
- * Fixed string emitted by the preamble hook for a plan-handoff prompt while the
- * implement sentinel (hooks/assets/implement-installed) exists. Without the
- * sentinel the same prompt gets REMINDER_TEMPLATE.
- */
-export const HANDOFF_TEMPLATE =
-  "The user's prompt is a plan handoff (it begins with `Implement the following plan:`). " +
-  "In one short sentence, tell the user you're invoking `devflow:implement`. " +
-  'Then immediately invoke it with the Skill tool and no arguments: ' +
-  'the plan is already in this conversation, so the skill needs no input. ' +
-  'Do not pause to ask whether to proceed.';
-
-/** Fixed string emitted by the preamble hook for a normal (non-handoff, non-slash) prompt, and for a handoff prompt when implement is not installed. */
+/** Fixed string emitted by the preamble hook for every prompt that is neither empty nor a slash command. */
 export const REMINDER_TEMPLATE =
   "Orchestrator reminder: coordinate, don't produce — delegate edits, builds and multi-file reads " +
   'to a roster agent or a devflow workflow skill; keep only judgment work mainline (conversation, decisions, routing, combining agent reports).';
