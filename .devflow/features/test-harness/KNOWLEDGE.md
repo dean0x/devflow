@@ -5,7 +5,7 @@ description: "Use when adding a guard, seam or golden test, changing the agent-s
 category: conventions
 directories: [tests/helpers.ts, tests/git-agent.test.ts, tests/seams, tests/goldens, tests/guards, tests/fixtures, scripts/update-golden.ts, tests/integration, tests/tracker, tests/installer, tests/evidence, tests/provider-literals.test.ts, tests/tracker-agent.test.ts, tests/commands, tests/install-bound-input.test.ts, tests/curation, tests/decisions, tests/bug-analysis]
 created: 2026-09-06
-updated: 2026-11-09
+updated: 2026-11-10
 ---
 
 # Test Harness
@@ -24,6 +24,7 @@ updated: 2026-11-09
 - **KB-INV-10** Every CLI-spawning test file names one `SUBPROCESS_TIMEOUT_MS` and uses it for the `spawnSync` timeout AND every `it()` timeout, directly or through a describe-level `{ timeout }` option.
 - **KB-INV-11** `/code-review` and `/bug-analysis` check their fresh-base and stored-head text through the shared `collectFreshBaseDefects` / `collectStoredHeadDefects` in `tests/helpers.ts` (shaped by a `DiffRangeShape`); a fact only one command states goes in that guard's wrapper collector or its `FreshBaseParts`, never a copy of the shared checks.
 - **KB-INV-12** A deny-list agent outside `MCP_DENY_AGENTS` keeps every `DENY_AGENT_KEEP` tool: `collectDenylistViolations` reports a deny of one, over `KEEP_AGENTS` derived from the deny rows.
+- **KB-INV-13** An allow-list agent never grants a `SHARED_DENYLIST` name: `collectDenylistViolations` reports it, because every deny-list agent denies that name.
 - **KB-AP-1** `scanned > 0` over a corpus is necessary, not sufficient: assert completeness against a named set (`getAllAgentNames()`, a manifest) and, for a scan of two sources, by provenance that both contributed.
 - **KB-AP-2** A probe that reimplements the collector inline, or names one member of a set the gate ranges over, stays green after the guard breaks: call the real collector and loop the probe over the whole set.
 - **KB-AP-3** Never write into the real `dist/` or `src/` from a test, nor rebuild the repo's own `dist/`: parallel workers read those paths and an unscoped build repairs staleness mid-suite; use `buildCommittedTree()` or a temp root.
@@ -155,7 +156,7 @@ Guard 10 reads each operation in `GIT_OPERATIONS` through `opSection = extractOp
 
 **`retired-wording.test.ts`** is one shared grep guard with a denylist that grows over time, never a new grep and never emptied. Each `RETIRED_LITERALS` entry carries an optional `scope: readonly string[]` (corpus path-prefixes the literal is retired FROM; absent means the whole corpus). Rows include `gh issue` (scope `dist/commands/`), `sleep 60`, `<!-- devflow:`, `{issue}`, the retired section-14.2 DEGRADED-reason synonyms, and retired budget figures such as `77,824` scoped to `CHANGELOG.md`. Scoped rows exist because a number that WAS a live ceiling is legitimately still quotable in narrative prose about what changed; the guard's job is to stop it being quoted as a CURRENT one. The `77,824` row (the pre-split preloaded-set figure) holds because the loaded set is now priced PER PATH and every provider row sits BELOW the retired figure, so it cannot come back as a ceiling either.
 
-**Agent tool denylists (`tests/fixtures/agent-config.ts`).** Research denies `SHARED_DENYLIST`; Code, Fix and Refactor add `CODE_FAMILY_DENY_EXTRA`; Harden and Polish add `Skill` and `mcp__*`. The guard's `TOOL_VOCABULARY` comes from a fixed list, `SHARED_DENYLIST` and every deny row's extra.
+**Agent tool denylists (`tests/fixtures/agent-config.ts`).** All six deny-list agents (Code, Fix, Refactor, Research, Harden, Polish) share `SHARED_DENYLIST`; the last six names, after `DesignSync` (Monitor, TaskStop, Workflow, Artifact, ListAgents, ReportFindings), are unused by all six. Harden and Polish add `Skill` and `mcp__*` as their row's `extra`. `DENY_AGENTS` in `tests/guards/agent-config.test.ts` is derived from the rows whose policy is a deny, never listed, so a new deny row joins every loop over it. The guard's `TOOL_VOCABULARY` comes from a fixed list, `SHARED_DENYLIST` and every deny row's extra; a test in that file pins the list's length and its lack of duplicates. `collectDenylistViolations` also reports an allow-list agent whose `tools` grants any `SHARED_DENYLIST` name (KB-INV-13).
 
 **`dist-agents.test.ts` AC-1.2 absence guard.** The Phase-2 construct-absence guard matches **anchored regexes, not substrings**. `LEGALISED_IN_PHASE2 = ['expandVariants(', '(module, op)']` narrows the fence deliberately. What did NOT become legal and stays forbidden: `@if`, `variants:` as a line-start YAML key, `tracker-<provider>.md` as a filename token, `{provider}.md` as a templated output name, and `@import`/`@define` inside a compiled AGENT host.
 
@@ -187,7 +188,7 @@ Guard 10 reads each operation in `GIT_OPERATIONS` through `opSection = extractOp
 - `tests/setup/isolate-env.ts` / `tests/setup/home-isolation.ts` - the unit suite's per-file temp HOME setup file and its pure half; `tests/setup/isolate-env.test.ts` is its canary and red probe
 - `tests/fixtures/mds-manifest.ts` - the build-ownership name manifests (`test-harness-goldens-budgets`)
 - `tests/guards/dist-agents.test.ts` - dist/agents parity for every generator host, frontmatter-shape guard, AC-1.2 absence guard; `tests/guards/agent-source-resolver.test.ts` - resolver unit tests and the `extractOpSectionFromCorpus` sole/union mode tests; `agent-roster-count` is its floor
-- `tests/fixtures/agent-config.ts` - `AGENT_CONFIG` (model, effort, tool policy, `omitClaudeMd`, preloads and core-rules `digest` per agent), `SHARED_DENYLIST`, `CODE_FAMILY_DENY_EXTRA`, `DENY_AGENT_KEEP`, `KEEP_AGENTS`, `MCP_DENY_AGENTS`, `CORE_RULES_DIGEST`; `tests/guards/agent-config.test.ts` holds the shipped frontmatter to it, and the digest, scan and preload guards are in `test-harness-prompt-install`
+- `tests/fixtures/agent-config.ts` - `AGENT_CONFIG` (model, effort, tool policy, `omitClaudeMd`, preloads and core-rules `digest` per agent), `SHARED_DENYLIST` (denied by all six deny-list agents), `DENY_AGENT_KEEP`, `KEEP_AGENTS`, `MCP_DENY_AGENTS`, `CORE_RULES_DIGEST`; `tests/guards/agent-config.test.ts` holds the shipped frontmatter to it, and the digest, scan and preload guards are in `test-harness-prompt-install`
 - `tests/token-audit.test.ts` + `tests/fixtures/token-audit/` - the dev-only `scripts/token-audit` tooling: synthetic, redacted transcripts whose expected numbers are hand-computed, independent of the code under test
 - `tests/guards/literal-agent-paths.test.ts` - the `SCAN_DIRS` literal-path guard
 - `tests/guards/retired-wording.test.ts` - scoped denylist of retired literals
