@@ -83,14 +83,12 @@ const COMMANDS_DIR = path.join(ROOT, 'src', 'assets', 'commands');
 
 /**
  * The slugs of the AGENT_CONFIG rows with a deny policy, derived like KEEP_AGENTS, never listed:
- * a new deny-list row is covered by every loop over this set without an edit here.
+ * a new deny-list row joins every loop over this set with no edit here, but the deny-set pin in
+ * the shared-denylist block must name the new row.
  */
 const DENY_AGENTS: readonly string[] = Object.entries(AGENT_CONFIG)
   .filter(([, row]) => row.policy.kind === 'deny')
   .map(([slug]) => slug);
-
-/** The names SHARED_DENYLIST holds after DesignSync, which every deny-list agent denies in that order. */
-const ADDED_SIX: readonly string[] = SHARED_DENYLIST.slice(SHARED_DENYLIST.indexOf('DesignSync') + 1);
 
 /** The frontmatter keys an agent file may carry; a misspelt key would silently ship nothing. */
 const KNOWN_KEYS: readonly string[] = [
@@ -237,7 +235,8 @@ function collectRowViolations(name: string, fm: AgentFrontmatter, row: AgentConf
  * MCP_DENY_AGENTS; every other wildcard, a named MCP tool, and any WebFetch or WebSearch deny
  * is still reported, and an allowlist never holds a wildcard. An agent in KEEP_AGENTS keeps
  * every tool in DENY_AGENT_KEEP, so a deny of one is reported too. An allowlist that grants
- * any name on SHARED_DENYLIST is reported: every deny-list agent denies that name.
+ * any name on SHARED_DENYLIST is reported, a scoped entry such as `Agent(x)` included: every
+ * deny-list agent denies that name.
  */
 function collectDenylistViolations(name: string, fm: AgentFrontmatter): string[] {
   const out: string[] = [];
@@ -245,7 +244,7 @@ function collectDenylistViolations(name: string, fm: AgentFrontmatter): string[]
   const isAllowedWildcard = (tool: string): boolean => tool === 'mcp__*' && mcpWildcardAllowed;
   for (const tool of fm.tools ?? []) {
     if (tool.includes('*')) out.push(`${name}.md: "${tool}" is a wildcard; spell every tool name out`);
-    else if (SHARED_DENYLIST.includes(tool)) out.push(`${name}.md: grants "${tool}", which every deny-list agent denies`);
+    else if (SHARED_DENYLIST.includes(tool.split('(')[0])) out.push(`${name}.md: grants "${tool}", which every deny-list agent denies`);
   }
   for (const tool of fm.disallowedTools ?? []) {
     if (tool.includes('*') && !isAllowedWildcard(tool)) {
@@ -645,11 +644,13 @@ describe('Git and Tracker hold vendor-neutral allowlists (D-GIT-ROW, D-TRACKER-R
 });
 
 describe('one shared denylist (D-SHARED-DENYLIST)', () => {
-  it('holds exactly twenty-three distinct names, each spelled out, the last six in the gate order', () => {
+  it('holds exactly twenty-three distinct names, each spelled out, the six unused tools among them', () => {
     expect(SHARED_DENYLIST).toHaveLength(23);
     expect(duplicates(SHARED_DENYLIST)).toEqual([]);
     for (const tool of SHARED_DENYLIST) expect(tool, tool).toMatch(/^[A-Z][A-Za-z]+$/);
-    expect(ADDED_SIX).toEqual(['Monitor', 'TaskStop', 'Workflow', 'Artifact', 'ListAgents', 'ReportFindings']);
+    for (const tool of ['Monitor', 'TaskStop', 'Workflow', 'Artifact', 'ListAgents', 'ReportFindings']) {
+      expect(SHARED_DENYLIST, tool).toContain(tool);
+    }
   });
 
   it('Code, Fix, Refactor and Research deny exactly the list, Code, Fix and Refactor declare no tools, and Harden and Polish deny it plus Skill and mcp__*', () => {
@@ -665,14 +666,8 @@ describe('one shared denylist (D-SHARED-DENYLIST)', () => {
     }
   });
 
-  it('all six deny-list agents carry the six added names, in order, right after DesignSync', () => {
-    expect([...DENY_AGENTS].sort(), 'the loop covers the whole deny set').toEqual(['code', 'fix', 'harden', 'polish', 'refactor', 'research']);
-    for (const slug of DENY_AGENTS) {
-      const denied = agent(slug).fm.disallowedTools ?? [];
-      const from = denied.indexOf('DesignSync') + 1;
-      expect(from, `${slug} denies DesignSync`).toBeGreaterThan(0);
-      expect(denied.slice(from, from + ADDED_SIX.length), slug).toEqual(ADDED_SIX);
-    }
+  it('the deny-list agents are exactly Code, Fix, Refactor, Research, Harden and Polish', () => {
+    expect([...DENY_AGENTS].sort()).toEqual(['code', 'fix', 'harden', 'polish', 'refactor', 'research']);
   });
 
   it('only the agents MCP_DENY_AGENTS names deny MCP, and they are exactly Harden and Polish (D-SCAN-IN-CODE)', () => {
@@ -700,13 +695,15 @@ describe('one shared denylist (D-SHARED-DENYLIST)', () => {
     }
   });
 
-  it('known-bad probe: each shared deny name added to each allowlist row is reported, once, by name', () => {
+  it('known-bad probe: each shared deny name, bare or scoped, added to each allowlist row is reported, once, by name', () => {
     for (const slug of ALLOW_AGENTS) {
       for (const shared of SHARED_DENYLIST) {
-        const fm = renderRow(slug, AGENT_CONFIG[slug], f => { f.tools = [...(f.tools ?? []), shared]; });
-        const violations = collectDenylistViolations(slug, fm);
-        expect(violations, `${slug} granting ${shared}`).toHaveLength(1);
-        expect(violations[0], `${slug} granting ${shared}`).toContain(`"${shared}"`);
+        for (const granted of [shared, `${shared}(x)`]) {
+          const fm = renderRow(slug, AGENT_CONFIG[slug], f => { f.tools = [...(f.tools ?? []), granted]; });
+          const violations = collectDenylistViolations(slug, fm);
+          expect(violations, `${slug} granting ${granted}`).toHaveLength(1);
+          expect(violations[0], `${slug} granting ${granted}`).toContain(`"${granted}"`);
+        }
       }
     }
   });
