@@ -616,7 +616,7 @@ describe('explicit timeouts and live-file wiring', () => {
     expect(BEFORE_ALL_TIMEOUT_MS).toBe(180_000);
   });
 
-  it.each(['tests/integration/subagent-skill-preload.test.ts', 'tests/integration/ambient-activation.test.ts'])(
+  it.each(['tests/integration/subagent-skill-preload.test.ts'])(
     '%s builds its context, installs with the long timeout, skips with a reason, and disposes it',
     (rel) => {
       const source = readFileSync(path.join(ROOT, rel), 'utf-8');

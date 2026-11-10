@@ -874,14 +874,14 @@ describe('ambient --enable reports when the ambient agents are not installed', (
     expect(warn).toHaveBeenLastCalledWith(WARNING);
   });
 
-  it('describes plan handoffs as running devflow:implement only when it is installed', async () => {
+  it('describes the charter at session start and the reminder per prompt, with no plan handoff', async () => {
     await writeManifest(['devflow-ambient']);
 
     await enable();
 
     const lines = info.mock.calls.map((call) => String(call[0]));
-    expect(lines.some((l) => l.includes('plan handoffs run devflow:implement when it is installed'))).toBe(true);
-    expect(lines.some((l) => l.includes('auto-run'))).toBe(false);
+    expect(lines.some((l) => l.includes('Charter at session start, reminder per prompt'))).toBe(true);
+    expect(lines.some((l) => /handoff|devflow:implement|auto-run/i.test(l))).toBe(false);
   });
 });
 

@@ -5,11 +5,10 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as net from 'net';
 import { createRequire } from 'module';
-import { HANDOFF_TEMPLATE, REMINDER_TEMPLATE } from './fixtures/ambient-templates.js';
+import { REMINDER_TEMPLATE } from './fixtures/ambient-templates.js';
 import { useWarmFakeExecutables } from './helpers/warm-fake-executable.js';
 import { buildRoutingConfigJson } from '../src/core/proxy-state.js';
 import { DEVFLOW_PLUGINS } from '../src/core/plugins.js';
-import { HANDOFF_SENTINEL_RELPATH } from '../src/targets/claude-code/charter-render.js';
 import { CURATION_DIR_NAME, LEGACY_NAMES, curationMoveMarkerKey } from '../src/core/project-paths.js';
 import { getCurationMoveMarkerPath } from '../src/core/curation-move-notice.js';
 import { AREA_PAUSE_NOTICE } from '../src/core/area-pause-notice.js';
@@ -1298,8 +1297,7 @@ describe('preamble — orchestrator charter mode', () => {
   let tmpDir: string;   // has a .git dir → git gate passes
   let noGitDir: string; // plain dir, no .git → git gate rejects
 
-  // HANDOFF_TEMPLATE and REMINDER_TEMPLATE are imported from tests/fixtures/ambient-templates.ts
-  // to keep this file and tests/integration/ambient-activation.test.ts in sync.
+  // REMINDER_TEMPLATE is imported from tests/fixtures/ambient-templates.ts.
 
   beforeAll(() => {
     // Guard: verify that os.tmpdir() is not inside a git repository.
@@ -1357,47 +1355,6 @@ describe('preamble — orchestrator charter mode', () => {
   // -------------------------------------------------------------------------
 
   describe('Suite 1 — Functionality', () => {
-    // --- Plan-handoff fast-path ---
-
-    it('F3a: native handoff flavor (prefix + \\n\\n + plan + transcript suffix) → handoff directive', () => {
-      const prompt =
-        'Implement the following plan:\n\n# Add caching\n\n1. Add Redis\n2. Write tests\n\n' +
-        '...before exiting plan mode (if you are in plan mode), read the full transcript at: /tmp/session.jsonl';
-      const out = runPreamble(prompt);
-      const parsed = JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } };
-      expect(parsed.hookSpecificOutput.additionalContext).toBe(HANDOFF_TEMPLATE);
-    });
-
-    it('F3b: same-session handoff flavor (prefix + space + plan text) → handoff directive', () => {
-      const out = runPreamble('Implement the following plan: add caching to the system');
-      const parsed = JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } };
-      expect(parsed.hookSpecificOutput.additionalContext).toBe(HANDOFF_TEMPLATE);
-    });
-
-    it('F3c: modest leading whitespace before prefix → handoff directive', () => {
-      const out = runPreamble('  \n\nImplement the following plan: add caching');
-      const parsed = JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } };
-      expect(parsed.hookSpecificOutput.additionalContext).toBe(HANDOFF_TEMPLATE);
-    });
-
-    it('F3d: prefix mid-prompt → reminder (not handoff)', () => {
-      const out = runPreamble('Please Implement the following plan: add X');
-      const parsed = JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } };
-      expect(parsed.hookSpecificOutput.additionalContext).toBe(REMINDER_TEMPLATE);
-    });
-
-    it('F3e: lowercase prefix → reminder (prefix is case-sensitive)', () => {
-      const out = runPreamble('implement the following plan: add X');
-      const parsed = JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } };
-      expect(parsed.hookSpecificOutput.additionalContext).toBe(REMINDER_TEMPLATE);
-    });
-
-    it('F3f: prefix without colon → reminder (literal match requires colon)', () => {
-      const out = runPreamble('Implement the following plan now — add caching');
-      const parsed = JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } };
-      expect(parsed.hookSpecificOutput.additionalContext).toBe(REMINDER_TEMPLATE);
-    });
-
     // --- Slash / empty skip ---
 
     it('F4a: slash command → empty stdout', () => {
@@ -1480,8 +1437,8 @@ describe('preamble — orchestrator charter mode', () => {
       expect(runPreambleNoGit('fix the auth bug')).toBe('');
     });
 
-    it('F6b: non-git CWD → empty stdout for handoff prompt [AC-F6]', () => {
-      expect(runPreambleNoGit('Implement the following plan: add caching')).toBe('');
+    it('F6b: non-git CWD → empty stdout for a multi-line prompt [AC-F6]', () => {
+      expect(runPreambleNoGit('plan a caching layer\n\n1. Add Redis\n2. Write tests')).toBe('');
     });
 
     it('F6c: .git as a plain FILE (worktree style) → fires correctly', () => {
@@ -1512,15 +1469,15 @@ describe('preamble — orchestrator charter mode', () => {
     it('F12a: 300 leading spaces → HEAD collapses to empty after strip → silent exit [AC-F12]', () => {
       // HEAD = PROMPT[0:256] = 256 spaces.  After whitespace-strip, HEAD = "".
       // The empty-HEAD branch fires: exit 0, no output (same as F4f whitespace-only rule).
-      const prompt = ' '.repeat(300) + 'Implement the following plan: add caching';
+      const prompt = ' '.repeat(300) + 'fix the auth bug';
       const out = runPreamble(prompt);
       expect(out).toBe('');
     });
 
-    it('F12b: non-space prefix pushed past byte 256 → reminder, not handoff directive [AC-F12]', () => {
+    it('F12b: non-space prefix pushed past byte 256 → orchestrator reminder [AC-F12]', () => {
       // HEAD = PROMPT[0:256] = 'a' × 256.  After strip, HEAD = 'a' × 256.
-      // Does not match the handoff prefix → orchestrator reminder branch fires.
-      const prompt = 'a'.repeat(260) + 'Implement the following plan: add caching';
+      // Not empty and not a slash → orchestrator reminder branch fires.
+      const prompt = 'a'.repeat(260) + 'fix the auth bug';
       const out = runPreamble(prompt);
       expect(out.length).toBeGreaterThan(0);
       const parsed = JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } };
@@ -1544,8 +1501,8 @@ describe('preamble — orchestrator charter mode', () => {
   // -------------------------------------------------------------------------
 
   describe('Suite 2 — API contract', () => {
-    it('C1/C6a: handoff output has exactly one top-level key hookSpecificOutput with correct schema', () => {
-      const out = runPreamble('Implement the following plan: add caching');
+    it('C1/C6: reminder output has exactly one top-level key hookSpecificOutput with correct schema', () => {
+      const out = runPreamble('fix the auth bug');
       const parsed = JSON.parse(out) as Record<string, unknown>;
       expect(Object.keys(parsed)).toEqual(['hookSpecificOutput']);
       const hso = parsed.hookSpecificOutput as Record<string, unknown>;
@@ -1555,25 +1512,12 @@ describe('preamble — orchestrator charter mode', () => {
       expect(Object.keys(hso).sort()).toEqual(['additionalContext', 'hookEventName'].sort());
     });
 
-    it('C1/C6b: reminder output has correct schema', () => {
-      const out = runPreamble('fix the auth bug');
-      const parsed = JSON.parse(out) as Record<string, unknown>;
-      expect(Object.keys(parsed)).toEqual(['hookSpecificOutput']);
-      const hso = parsed.hookSpecificOutput as Record<string, unknown>;
-      expect(hso.hookEventName).toBe('UserPromptSubmit');
-      expect(Object.keys(hso).sort()).toEqual(['additionalContext', 'hookEventName'].sort());
-    });
-
     it('C2: empty stdout on slash → zero bytes', () => {
       expect(runPreamble('/implement foo').length).toBe(0);
     });
 
     it('C2: empty stdout on empty prompt → zero bytes', () => {
       expect(runPreamble('').length).toBe(0);
-    });
-
-    it('C3a: exit code 0 on handoff match', () => {
-      expect(() => runPreamble('Implement the following plan: add caching')).not.toThrow();
     });
 
     it('C3b: exit code 0 on reminder (normal prompt)', () => {
@@ -1589,12 +1533,6 @@ describe('preamble — orchestrator charter mode', () => {
       expect(() => {
         execSync(`bash "${PREAMBLE_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
       }).not.toThrow();
-    });
-
-    it('C4: no file I/O on handoff — tmpDir unchanged (only .git present)', () => {
-      const before = fs.readdirSync(tmpDir).sort();
-      runPreamble('Implement the following plan: add caching');
-      expect(fs.readdirSync(tmpDir).sort()).toEqual(before);
     });
 
     it('C4: no file I/O on reminder — tmpDir unchanged', () => {
@@ -1631,17 +1569,6 @@ describe('preamble — orchestrator charter mode', () => {
     ];
 
     for (const { label, tail } of hostilePayloads) {
-      it(`C3: hostile tail after handoff prefix (${label}) — fixed handoff template, no injection`, () => {
-        const prompt = `Implement the following plan: ${tail}`;
-        const inputFile = path.join(tmpDir, `input-handoff-${label.replace(/\W/g, '_')}.json`);
-        fs.writeFileSync(inputFile, JSON.stringify({ cwd: tmpDir, prompt }));
-        const out = execSync(`bash "${PREAMBLE_HOOK}" < "${inputFile}"`, {
-          stdio: ['pipe', 'pipe', 'pipe'],
-        }).toString();
-        const parsed = JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } };
-        expect(parsed.hookSpecificOutput.additionalContext).toBe(HANDOFF_TEMPLATE);
-      });
-
       it(`C3: hostile standalone prompt (${label}) — fixed reminder template, no injection`, () => {
         const prompt = `${tail}`;
         const inputFile = path.join(tmpDir, `input-stand-${label.replace(/\W/g, '_')}.json`);
@@ -1738,19 +1665,25 @@ describe('preamble — orchestrator charter mode', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Suite 5 — Handoff gate on the implement sentinel
+  // Suite 5 — A plan-handoff prompt is an ordinary prompt
   // -------------------------------------------------------------------------
   //
-  // The handoff directive tells the model to invoke devflow:implement. devflow
-  // writes hooks/assets/implement-installed while that command is installed and
-  // removes it otherwise. These tests run the preamble from a private copy of
-  // the hooks directory so each case controls the sentinel; HOME points into a
-  // temp dir so no run can reach the real one.
+  // A prompt that begins `Implement the following plan:` once made the preamble
+  // direct the model to invoke devflow:implement while the file
+  // hooks/assets/implement-installed existed. The preamble reads no such file
+  // now: the prompt gets the orchestrator reminder, as any other prompt does.
+  // These tests run the preamble from a private copy of the hooks directory so a
+  // case can leave that file next to the hook (an install from before the
+  // removal that the legacy sweep has not reached yet); HOME points into a temp
+  // dir so no run can reach the real one.
 
-  describe('Suite 5 — Handoff gate on the implement sentinel', () => {
+  describe('Suite 5 — A plan-handoff prompt is an ordinary prompt', () => {
     const HOOKS_FILES = ['preamble', 'hook-bootstrap', 'debug-trace', 'log-paths', 'json-parse', 'json-helper.cjs', 'git-marker'];
-    const SENTINEL_NAME = 'implement-installed';
-    const HANDOFF_PROMPT = 'Implement the following plan:\n\n# Add caching\n\n1. Add Redis\n2. Write tests';
+    const LEFTOVER_MARKER = 'implement-installed';
+    const NATIVE_PLAN_PROMPT =
+      'Implement the following plan:\n\n# Add caching\n\n1. Add Redis\n2. Write tests\n\n' +
+      '...before exiting plan mode (if you are in plan mode), read the full transcript at: /tmp/session.jsonl';
+    const SAME_SESSION_PLAN_PROMPT = 'Implement the following plan: add caching to the system';
 
     let hooksCopy: string;
     let fakeHome: string;
@@ -1769,8 +1702,8 @@ describe('preamble — orchestrator charter mode', () => {
       fs.rmSync(fakeHome, { recursive: true, force: true });
     });
 
-    function writeSentinel(): void {
-      fs.writeFileSync(path.join(hooksCopy, 'assets', SENTINEL_NAME), 'sentinel\n');
+    function writeLeftoverMarker(): void {
+      fs.writeFileSync(path.join(hooksCopy, 'assets', LEFTOVER_MARKER), 'marker\n');
     }
 
     function emitted(prompt: string): string {
@@ -1783,46 +1716,25 @@ describe('preamble — orchestrator charter mode', () => {
       return (JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } }).hookSpecificOutput.additionalContext;
     }
 
-    it('G1: handoff prompt without the sentinel gets the generic reminder', () => {
-      expect(emitted(HANDOFF_PROMPT)).toBe(REMINDER_TEMPLATE);
+    it('G1: the native handoff prompt gets exactly the orchestrator reminder', () => {
+      expect(emitted(NATIVE_PLAN_PROMPT)).toBe(REMINDER_TEMPLATE);
     });
 
-    it('G2: same-session handoff flavor without the sentinel gets the generic reminder', () => {
-      expect(emitted('Implement the following plan: add caching')).toBe(REMINDER_TEMPLATE);
+    it('G2: the same-session handoff prompt gets exactly the orchestrator reminder', () => {
+      expect(emitted(SAME_SESSION_PLAN_PROMPT)).toBe(REMINDER_TEMPLATE);
     });
 
-    it('G3: handoff prompt with the sentinel gets the handoff directive', () => {
-      writeSentinel();
-      expect(emitted(HANDOFF_PROMPT)).toBe(HANDOFF_TEMPLATE);
+    it('G3: a leftover implement-installed file does not change the reminder for a handoff prompt', () => {
+      writeLeftoverMarker();
+      expect(emitted(NATIVE_PLAN_PROMPT)).toBe(REMINDER_TEMPLATE);
+      expect(emitted(SAME_SESSION_PLAN_PROMPT)).toBe(REMINDER_TEMPLATE);
     });
 
-    it('G4: a directory at the sentinel path does not count as the sentinel', () => {
-      fs.mkdirSync(path.join(hooksCopy, 'assets', SENTINEL_NAME));
-      expect(emitted(HANDOFF_PROMPT)).toBe(REMINDER_TEMPLATE);
-    });
-
-    it('G5: the sentinel never changes a non-handoff prompt or the slash skip', () => {
-      writeSentinel();
+    it('G4: a leftover implement-installed file does not change a normal prompt or the slash and empty skips', () => {
+      writeLeftoverMarker();
       expect(emitted('fix the auth bug')).toBe(REMINDER_TEMPLATE);
       expect(emitted('/implement foo')).toBe('');
       expect(emitted('')).toBe('');
-    });
-
-    it('G6: removing the sentinel returns a handoff prompt to the reminder', () => {
-      writeSentinel();
-      expect(emitted(HANDOFF_PROMPT)).toBe(HANDOFF_TEMPLATE);
-      fs.rmSync(path.join(hooksCopy, 'assets', SENTINEL_NAME));
-      expect(emitted(HANDOFF_PROMPT)).toBe(REMINDER_TEMPLATE);
-    });
-
-    it('G7: the sentinel path in the preamble is the one the installer writes', () => {
-      const src = fs.readFileSync(PREAMBLE_SRC, 'utf-8');
-      const match = /\[ -f "\$SCRIPT_DIR\/([^"]+)" \]/.exec(src);
-      expect(match).not.toBeNull();
-      // SCRIPT_DIR is the hooks directory; HANDOFF_SENTINEL_RELPATH is relative to scripts/.
-      expect(`hooks/${match![1]}`).toBe(HANDOFF_SENTINEL_RELPATH);
-      expect(path.basename(match![1])).toBe(SENTINEL_NAME);
-      expect(fs.statSync(path.join(HOOKS_DIR, '..', HANDOFF_SENTINEL_RELPATH)).isFile()).toBe(true);
     });
   });
 });
@@ -2151,14 +2063,6 @@ describe('session-start-orchestrator', () => {
     const { stdout } = runHook(ORCHESTRATOR_HOOK, { cwd: tmpDir }, homeDir);
     const parsed = JSON.parse(stdout) as { hookSpecificOutput: { additionalContext: string } };
     expect(parsed.hookSpecificOutput.additionalContext).toContain('ORCHESTRATOR CHARTER');
-  });
-
-  it('AC-F1: additionalContext contains plan-handoff prefix and devflow:implement', () => {
-    const { stdout } = runHook(ORCHESTRATOR_HOOK, { cwd: tmpDir }, homeDir);
-    const parsed = JSON.parse(stdout) as { hookSpecificOutput: { additionalContext: string } };
-    const ctx = parsed.hookSpecificOutput.additionalContext;
-    expect(ctx).toContain('Implement the following plan:');
-    expect(ctx).toContain('devflow:implement');
   });
 
   it('AC-F1: additionalContext routes by roster agent and pins no model (no haiku/sonnet/opus)', () => {

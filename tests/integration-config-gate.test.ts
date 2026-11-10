@@ -1,10 +1,10 @@
 /**
  * Guard for the DEVFLOW_INTEGRATION_ALL opt-in in vitest.integration.config.ts.
  *
- * Two integration files start live `claude` sessions: they need a credential and
- * spend real tokens. Without the opt-in the integration config excludes both, so
+ * One integration file starts live `claude` sessions: it needs a credential and
+ * spends real tokens. Without the opt-in the integration config excludes it, so
  * `npm run test:integration` starts no session and runs no live `init`. With an
- * explicit affirmative (1, true or yes) both are collected. A gate that opts in on
+ * explicit affirmative (1, true or yes) it is collected. A gate that opts in on
  * any non-empty string turns `DEVFLOW_INTEGRATION_ALL=0` — the spelling a developer
  * reaches for to say "no" — into a live run, so the gate is asserted directly here
  * rather than left to the shape of the expression.
@@ -13,7 +13,7 @@
  * never run the integration suite.
  *
  * What a green run does NOT prove: that a live file added later is on the list.
- * A third integration file that starts `claude` joins LIVE_CLAUDE_TESTS by hand.
+ * A second integration file that starts `claude` joins LIVE_CLAUDE_TESTS by hand.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -23,7 +23,6 @@ import { configDefaults } from 'vitest/config';
 import integrationConfig, {
   isAffirmative,
   integrationExclude,
-  LIVE_AMBIENT_TEST,
   LIVE_PRELOAD_TEST,
   LIVE_CLAUDE_TESTS,
 } from '../vitest.integration.config.js';
@@ -79,14 +78,14 @@ describe('DEVFLOW_INTEGRATION_ALL gate (isAffirmative)', () => {
 });
 
 describe('integration exclude list', () => {
-  it('names both live-claude files, and both exist', () => {
-    expect([...LIVE_CLAUDE_TESTS].sort()).toEqual([LIVE_AMBIENT_TEST, LIVE_PRELOAD_TEST].sort());
+  it('names the live-claude file, and it exists', () => {
+    expect([...LIVE_CLAUDE_TESTS]).toEqual([LIVE_PRELOAD_TEST]);
     for (const file of LIVE_CLAUDE_TESTS) {
       expect(existsSync(path.join(ROOT, file)), `${file} is on the live list but is not a file`).toBe(true);
     }
   });
 
-  it('excludes both live-claude files for every non-affirmative value', () => {
+  it('excludes every live-claude file for every non-affirmative value', () => {
     for (const value of ['0', 'false', 'no', 'off', '', undefined]) {
       for (const file of LIVE_CLAUDE_TESTS) {
         expect(
@@ -101,7 +100,7 @@ describe('integration exclude list', () => {
     }
   });
 
-  it('collects both live-claude files only for an explicit affirmative', () => {
+  it('collects every live-claude file only for an explicit affirmative', () => {
     for (const value of ['1', 'true', 'yes']) {
       for (const file of LIVE_CLAUDE_TESTS) {
         expect(
@@ -119,15 +118,15 @@ describe('integration exclude list', () => {
   it('detects a live file that a glob exclude covers, not only a literal path', () => {
     // `isCollected` has to read `exclude` the way it reads `include`. A literal-path
     // comparison would report the file as collected and miss a glob that removes it.
-    const file = LIVE_AMBIENT_TEST;
-    expect(isCollected(file, '1', INCLUDE, [LIVE_AMBIENT_TEST]), 'a literal path covers the file').toBe(false);
-    expect(isCollected(file, '1', INCLUDE, ['tests/integration/ambient-*.test.ts']), 'a * glob covers the file').toBe(false);
-    expect(isCollected(file, '1', INCLUDE, ['**/ambient-activation.test.ts']), 'a **/ glob covers the file').toBe(false);
+    const file = LIVE_PRELOAD_TEST;
+    expect(isCollected(file, '1', INCLUDE, [LIVE_PRELOAD_TEST]), 'a literal path covers the file').toBe(false);
+    expect(isCollected(file, '1', INCLUDE, ['tests/integration/subagent-*.test.ts']), 'a * glob covers the file').toBe(false);
+    expect(isCollected(file, '1', INCLUDE, ['**/subagent-skill-preload.test.ts']), 'a **/ glob covers the file').toBe(false);
     expect(isCollected(file, '1', INCLUDE, ['tests/integration/**']), 'a trailing ** glob covers the file').toBe(false);
   });
 
   it('keeps a live file collected when no exclude glob covers it', () => {
-    const file = LIVE_AMBIENT_TEST;
+    const file = LIVE_PRELOAD_TEST;
     expect(isCollected(file, '1', INCLUDE, ['**/node_modules/**', '**/.git/**'])).toBe(true);
     expect(isCollected(file, '1', INCLUDE, ['tests/integration/preload-*.test.ts'])).toBe(true);
     expect(isCollected(file, '1', INCLUDE, [])).toBe(true);
@@ -170,7 +169,7 @@ describe('include-list matcher used by the collection arms', () => {
   const PATTERN = 'tests/integration/**/*.test.ts';
 
   it('matches a test file at any depth under tests/integration', () => {
-    expect(globToRegExp(PATTERN).test('tests/integration/ambient-activation.test.ts')).toBe(true);
+    expect(globToRegExp(PATTERN).test(LIVE_PRELOAD_TEST)).toBe(true);
     expect(globToRegExp(PATTERN).test('tests/integration/deep/er/x.test.ts')).toBe(true);
   });
 
