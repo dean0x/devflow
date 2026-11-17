@@ -53,7 +53,7 @@ export default async function codexQuota(
       dim('Codex ') +
       parts.map((p) => p.text).join(dim(' · ')) +
       (limited ? ' ' + red('limited') : '') +
-      dim(age),
+      (age ? dim(age) : ''),
     raw: 'Codex ' + parts.map((p) => p.raw).join(' · ') + (limited ? ' limited' : '') + age,
   };
 }

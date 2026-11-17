@@ -567,6 +567,33 @@ describe('codexQuota component', () => {
     expect((await codexQuota(at(nowSec() - 2 * 86400 - 30)))!.raw).toBe('Codex 7d reset · data 2d old');
   });
 
+  it('switches to the age at exactly one hour, and to days at exactly 24 hours', async () => {
+    const at = (observedAt: number) =>
+      makeCtx({
+        codexUsage: {
+          windows: [{ minutes: 10080, usedPercent: 64, resetsAt: nowSec() - 60 }],
+          limitReached: null,
+          observedAt,
+        },
+      });
+    expect((await codexQuota(at(nowSec() - 3600)))!.raw).toBe('Codex 7d reset · data 1h old');
+    expect((await codexQuota(at(nowSec() - 86400 + 60)))!.raw).toBe('Codex 7d reset · data 23h old');
+    expect((await codexQuota(at(nowSec() - 86400)))!.raw).toBe('Codex 7d reset · data 1d old');
+  });
+
+  it('shows no age for a record observed in the future', async () => {
+    const ctx = makeCtx({
+      codexUsage: {
+        windows: [{ minutes: 10080, usedPercent: 12, resetsAt: nowSec() + 86400 + 30 }],
+        limitReached: null,
+        observedAt: nowSec() + 7200,
+      },
+    });
+    const result = await codexQuota(ctx);
+    expect(result!.raw).not.toContain('old');
+    expect(result!.text).not.toContain('\x1b[2m\x1b[0m');
+  });
+
   it('resets only the window that has passed its reset time', async () => {
     const ctx = makeCtx({
       codexUsage: {

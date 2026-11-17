@@ -202,6 +202,16 @@ describe('Codex usage reader', () => {
       expect(readCodexUsage(sessionsDir, NOW)?.windows[0]?.usedPercent).toBe(21);
     });
 
+    it('skips a record observed more than 5 minutes in the future and reads the next rollout', () => {
+      const futureLine = tokenCountLine(
+        JSON.parse(codexRecord(window(10080, 99))).payload.rate_limits,
+        new Date(NOW + 2 * 3_600_000).toISOString(),
+      );
+      writeRollout('2026/10/13', 'rollout-future.jsonl', lines(futureLine), 1_000);
+      writeRollout('2026/10/12', 'rollout-earlier.jsonl', lines(codexRecord(window(10080, 21))), 2 * 3_600_000);
+      expect(readCodexUsage(sessionsDir, NOW)?.windows[0]?.usedPercent).toBe(21);
+    });
+
     it('tries only the three newest rollouts', () => {
       const empty = lines(JSON.stringify({ type: 'session_meta', payload: {} }));
       writeRollout('2026/10/13', 'rollout-1.jsonl', empty, 1_000);
@@ -361,6 +371,12 @@ describe('gatherCodexUsage', () => {
     seedRollout(21);
     writeSnapshotFile(snapshotFile, snapshot({ observed_at: LINE_OBSERVED_AT, windows: [window(10080, 3)] }));
     expect((await gatherCodexUsage(devflowDir, sessionsDir, snapshotFile, NOW))?.windows[0]?.usedPercent).toBe(3);
+  });
+
+  it('uses the logs when the proxy snapshot is invalid', async () => {
+    seedRollout(21);
+    writeSnapshotFile(snapshotFile, '{not json');
+    expect((await gatherCodexUsage(devflowDir, sessionsDir, snapshotFile, NOW))?.windows[0]?.usedPercent).toBe(21);
   });
 
   it('uses the proxy snapshot alone when there are no Codex session logs', async () => {

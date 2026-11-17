@@ -9,10 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **The HUD Codex quota no longer shows an old or false value.** Before, a window past its reset time showed `0%`, and the HUD read only the Codex CLI session logs. When the devflow proxy carries your Codex traffic, the Codex CLI writes no log, so the value stopped at your last direct Codex use. Now:
+- **The HUD Codex quota no longer shows a false `0%`, and it shows the age of old data.** Before, a window past its reset time showed `0%`. Also, when the Devflow proxy carries your Codex traffic, the Codex CLI writes no session log, so the value stopped at your last direct Codex use, with no sign that it was old. Now:
   - A window past its reset time shows `reset` (for example `Codex 7d reset`), because its use since the reset is not known.
   - A record older than one hour ends with its age, for example `· data 3h old`.
-  - The HUD also reads an optional proxy snapshot, `~/.cache/subswitch/codex-quota.json`, and shows the newer of the snapshot and the log record. Without the snapshot, the HUD reads the logs as before.
+  - The HUD also reads an optional quota snapshot of the Devflow proxy, and shows the newer of the snapshot and the log record. A later proxy release writes this snapshot. Until then, the HUD reads the logs as before.
 
 ---
 

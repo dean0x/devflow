@@ -13,8 +13,15 @@ export const CODEX_TAIL_BYTES = 1024 * 1024;
 export const CODEX_TAIL_RETRY_BYTES = 4 * 1024 * 1024;
 /** A proxy snapshot larger than this is not read. */
 export const CODEX_SNAPSHOT_MAX_BYTES = 64 * 1024;
-/** A record observed further than this in the future is rejected, so a bad clock cannot win the newest-record choice. */
+/**
+ * A record observed further than this in the future is rejected, in the logs and in
+ * the snapshot, so a bad clock cannot win the newest-record choice.
+ */
 const MAX_CLOCK_SKEW_SEC = 300;
+
+function isInFuture(observedAt: number, now: number): boolean {
+  return observedAt > Math.floor(now / 1000) + MAX_CLOCK_SKEW_SEC;
+}
 
 const MAX_YEAR_DIRS = 3;
 const MAX_DAY_DIRS = 14;
@@ -56,8 +63,11 @@ export function codexSessionsDir(home: string): string {
  *     "windows": [{ "window_minutes": n, "used_percent": n, "resets_at": <epoch s> }],
  *     "rate_limit_reached_type": string | null }
  *
- * The file is optional. The HUD takes the snapshot or the newest rollout record,
- * whichever has the later observed_at.
+ * The writer replaces the file atomically (a temporary file, then a rename), so a
+ * reader never sees a part-written file. The file is optional. The HUD takes the
+ * snapshot or the newest rollout record, whichever has the later observed_at.
+ * This function and readCodexSnapshot are the only places that know the path and
+ * the format.
  */
 export function codexSnapshotFile(home: string): string {
   return path.join(home, '.cache', 'subswitch', 'codex-quota.json');
@@ -248,6 +258,7 @@ function recentRollouts(sessionsDir: string, now: number): { file: string; mtime
  * to show: no sessions directory, no rollout modified within CODEX_MAX_AGE_MS, or
  * no valid record in the newest MAX_ROLLOUTS_READ of them (a session that has not
  * yet had a model response holds no record, so the next-newest rollout is tried).
+ * A record observed in the future (see MAX_CLOCK_SKEW_SEC) is skipped the same way.
  *
  * @param sessionsDir  Codex's sessions directory (see codexSessionsDir).
  * @param now          Epoch milliseconds, for the rollout age bound.
@@ -255,9 +266,40 @@ function recentRollouts(sessionsDir: string, now: number): { file: string; mtime
 export function readCodexUsage(sessionsDir: string, now: number): CodexUsage | null {
   for (const { file, mtimeMs } of recentRollouts(sessionsDir, now).slice(0, MAX_ROLLOUTS_READ)) {
     const usage = latestUsageInFile(file, mtimeMs);
-    if (usage !== null) return usage;
+    if (usage !== null && !isInFuture(usage.observedAt, now)) return usage;
   }
   return null;
+}
+
+/**
+ * The whole text of `file` through one descriptor, or null when it is missing, a
+ * symbolic link, not a regular file, or larger than `maxBytes`. O_NONBLOCK keeps a
+ * FIFO from blocking the open.
+ */
+function readSmallFile(file: string, maxBytes: number): string | null {
+  let fd: number;
+  try {
+    fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+  } catch {
+    return null;
+  }
+  try {
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile() || stat.size > maxBytes) return null;
+    // One byte over the bound shows a file that grew after the fstat.
+    const buf = Buffer.alloc(maxBytes + 1);
+    let total = 0;
+    while (total < buf.length) {
+      const read = fs.readSync(fd, buf, total, buf.length - total, total);
+      if (read === 0) break;
+      total += read;
+    }
+    return total > maxBytes ? null : buf.toString('utf-8', 0, total);
+  } catch {
+    return null;
+  } finally {
+    fs.closeSync(fd);
+  }
 }
 
 /**
@@ -269,14 +311,8 @@ export function readCodexUsage(sessionsDir: string, now: number): CodexUsage | n
  * @param now   Epoch milliseconds.
  */
 export function readCodexSnapshot(file: string, now: number): CodexUsage | null {
-  let text: string;
-  try {
-    const stat = fs.lstatSync(file);
-    if (!stat.isFile() || stat.size > CODEX_SNAPSHOT_MAX_BYTES) return null;
-    text = fs.readFileSync(file, 'utf-8');
-  } catch {
-    return null;
-  }
+  const text = readSmallFile(file, CODEX_SNAPSHOT_MAX_BYTES);
+  if (text === null) return null;
   let data: unknown;
   try {
     data = JSON.parse(text);
@@ -286,8 +322,7 @@ export function readCodexSnapshot(file: string, now: number): CodexUsage | null 
   const obj = asRecord(data);
   if (obj === null || obj.version !== 1 || !Array.isArray(obj.windows)) return null;
   const observedAt = obj.observed_at;
-  const nowSec = Math.floor(now / 1000);
-  if (!isFiniteNumber(observedAt) || observedAt > nowSec + MAX_CLOCK_SKEW_SEC) return null;
+  if (!isFiniteNumber(observedAt) || isInFuture(observedAt, now)) return null;
   if (now - observedAt * 1000 > CODEX_MAX_AGE_MS) return null;
   return makeUsage(codexWindows(obj.windows), obj.rate_limit_reached_type, Math.floor(observedAt));
 }
