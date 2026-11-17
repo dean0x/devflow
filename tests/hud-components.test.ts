@@ -484,6 +484,7 @@ describe('codexQuota component', () => {
       codexUsage: {
         windows: [{ minutes: 10080, usedPercent: 2, resetsAt: sixDays21HoursFromNow() }],
         limitReached: null,
+        observedAt: nowSec(),
       },
     });
     const result = await codexQuota(ctx);
@@ -499,6 +500,7 @@ describe('codexQuota component', () => {
           { minutes: 10080, usedPercent: 12, resetsAt: nowSec() + 3 * 86400 + 4 * 3600 + 30 },
         ],
         limitReached: null,
+        observedAt: nowSec(),
       },
     });
     const result = await codexQuota(ctx);
@@ -516,6 +518,7 @@ describe('codexQuota component', () => {
           { minutes: 45, usedPercent: 30, resetsAt: nowSec() + 600 },
         ],
         limitReached: null,
+        observedAt: nowSec(),
       },
     });
     const result = await codexQuota(ctx);
@@ -524,18 +527,44 @@ describe('codexQuota component', () => {
     expect(result!.raw).toContain('45m ');
   });
 
-  it('renders a window whose reset time has passed as 0% with no countdown', async () => {
+  it('renders a window whose reset time has passed as "reset", with no percent, bar or countdown', async () => {
     const ctx = makeCtx({
       codexUsage: {
         windows: [{ minutes: 10080, usedPercent: 88, resetsAt: nowSec() - 60 }],
         limitReached: null,
+        observedAt: nowSec(),
       },
     });
     const result = await codexQuota(ctx);
     expect(result).not.toBeNull();
-    expect(result!.raw).toContain(' 0%');
-    expect(result!.raw).not.toContain('88%');
-    expect(result!.raw).not.toContain('(');
+    expect(result!.raw).toBe('Codex 7d reset');
+    expect(stripAnsi(result!.text)).toBe(result!.raw);
+  });
+
+  it('shows no data age while the record is under an hour old', async () => {
+    const ctx = makeCtx({
+      codexUsage: {
+        windows: [{ minutes: 10080, usedPercent: 12, resetsAt: nowSec() + 86400 + 30 }],
+        limitReached: null,
+        observedAt: nowSec() - 59 * 60,
+      },
+    });
+    expect((await codexQuota(ctx))!.raw).not.toContain('old');
+  });
+
+  it('ends with the data age in hours, then days, once the record is an hour old', async () => {
+    const at = (observedAt: number) =>
+      makeCtx({
+        codexUsage: {
+          windows: [{ minutes: 10080, usedPercent: 64, resetsAt: nowSec() - 60 }],
+          limitReached: null,
+          observedAt,
+        },
+      });
+    const hours = await codexQuota(at(nowSec() - 3 * 3600 - 30));
+    expect(hours!.raw).toBe('Codex 7d reset · data 3h old');
+    expect(stripAnsi(hours!.text)).toBe(hours!.raw);
+    expect((await codexQuota(at(nowSec() - 2 * 86400 - 30)))!.raw).toBe('Codex 7d reset · data 2d old');
   });
 
   it('resets only the window that has passed its reset time', async () => {
@@ -546,11 +575,11 @@ describe('codexQuota component', () => {
           { minutes: 10080, usedPercent: 12, resetsAt: nowSec() + 86400 + 30 },
         ],
         limitReached: null,
+        observedAt: nowSec(),
       },
     });
     const raw = (await codexQuota(ctx))!.raw;
-    expect(raw).toContain('5h ');
-    expect(raw).toContain(' 0% \u00B7 7d ');
+    expect(raw).toContain('Codex 5h reset \u00B7 7d ');
     expect(raw).toContain('12% (1d)');
   });
 
@@ -559,6 +588,7 @@ describe('codexQuota component', () => {
       codexUsage: {
         windows: [{ minutes: 10080, usedPercent: 100, resetsAt: nowSec() + 86400 }],
         limitReached: 'rate_limit_reached',
+        observedAt: nowSec(),
       },
     });
     const result = await codexQuota(ctx);
@@ -571,6 +601,7 @@ describe('codexQuota component', () => {
       codexUsage: {
         windows: [{ minutes: 10080, usedPercent: 100, resetsAt: nowSec() - 60 }],
         limitReached: 'rate_limit_reached',
+        observedAt: nowSec(),
       },
     });
     const result = await codexQuota(ctx);
@@ -582,7 +613,7 @@ describe('codexQuota component', () => {
   });
 
   it('returns null when the data holds no window', async () => {
-    const ctx = makeCtx({ codexUsage: { windows: [], limitReached: null } });
+    const ctx = makeCtx({ codexUsage: { windows: [], limitReached: null, observedAt: nowSec() } });
     expect(await codexQuota(ctx)).toBeNull();
   });
 });

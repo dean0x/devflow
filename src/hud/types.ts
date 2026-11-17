@@ -112,13 +112,16 @@ export interface CodexWindow {
 }
 
 /**
- * Codex usage limits read from the newest rate-limit record in Codex's session
- * logs. Windows are ordered by ascending length.
+ * Codex usage limits from the newest rate-limit record: the proxy's snapshot or
+ * Codex's session logs, whichever was observed last. Windows are ordered by
+ * ascending length.
  */
 export interface CodexUsage {
   windows: readonly CodexWindow[];
   /** Codex's rate_limit_reached_type when a limit is hit, else null. */
   limitReached: string | null;
+  /** Epoch seconds: when Codex reported these limits. */
+  observedAt: number;
 }
 
 /**

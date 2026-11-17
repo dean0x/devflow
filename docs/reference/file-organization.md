@@ -371,7 +371,7 @@ The HUD (`dist/hud/index.js`) is a configurable TypeScript status line. The fixe
 
 Configuration: `~/.devflow/hud.json` (`{ enabled, detail }`). Manage via `devflow hud --status | --enable | --disable | --detail | --no-detail`.
 
-Data source: `context_window.current_usage` and `rate_limits` from Claude Code's JSON stdin. The Codex quota segment reads the newest rate-limit record in `~/.codex/sessions` (local logs only: no credential file, no network) and is hidden when Codex has no recent session. Git data gathered with 1s per-command timeout. Overall 2s timeout with graceful degradation.
+Data source: `context_window.current_usage` and `rate_limits` from Claude Code's JSON stdin. The Codex quota segment reads the newest rate-limit record from `~/.codex/sessions` and from the proxy snapshot `~/.cache/subswitch/codex-quota.json`, whichever was observed last (local files only: no credential file, no network). It is hidden when neither holds a recent record. Git data gathered with 1s per-command timeout. Overall 2s timeout with graceful degradation.
 
 ## Namespace Ownership and Orphan Sweep
 

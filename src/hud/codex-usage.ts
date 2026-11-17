@@ -11,6 +11,10 @@ export const CODEX_MAX_AGE_MS = 8 * 24 * 60 * 60 * 1000;
 /** The first read of a rollout, and the one larger read when it holds no record. */
 export const CODEX_TAIL_BYTES = 1024 * 1024;
 export const CODEX_TAIL_RETRY_BYTES = 4 * 1024 * 1024;
+/** A proxy snapshot larger than this is not read. */
+export const CODEX_SNAPSHOT_MAX_BYTES = 64 * 1024;
+/** A record observed further than this in the future is rejected, so a bad clock cannot win the newest-record choice. */
+const MAX_CLOCK_SKEW_SEC = 300;
 
 const MAX_YEAR_DIRS = 3;
 const MAX_DAY_DIRS = 14;
@@ -20,21 +24,43 @@ const MAX_ROLLOUTS_READ = 3;
 const YEAR_DIR = /^\d{4}$/;
 const MONTH_DIR = /^(0[1-9]|1[0-2])$/;
 const DAY_DIR = /^(0[1-9]|[12]\d|3[01])$/;
+/**
+ * Plain rollouts only. Codex compresses a rollout to `.jsonl.zst` once its session
+ * is done, and a done session is older than the plain rollout of a later one, so
+ * the newest record is never in a compressed file.
+ */
 const ROLLOUT_FILE = /^rollout-.*\.jsonl$/;
 
 /**
- * D-CODEX-LOCAL-LOGS-ONLY: Codex usage comes from the rate-limit records the
- * Codex CLI already writes to its own session logs under ~/.codex/sessions. The
- * statusline reads those logs and nothing else: it opens no credential file
- * (auth.json) and makes no network call, so it cannot leak a token or stall on a
- * request. Reason: the HUD runs on every prompt under a 2 s budget, and Codex
- * publishes the account's limits in every model response it logs.
+ * D-CODEX-LOCAL-LOGS-ONLY: Codex usage comes from local files that already hold
+ * Codex's rate-limit records: the Codex CLI's own session logs under
+ * ~/.codex/sessions, and the snapshot the proxy writes (D-CODEX-PROXY-SNAPSHOT).
+ * The statusline opens no credential file (auth.json) and makes no network call,
+ * so it cannot leak a token or stall on a request. Reason: the HUD runs on every
+ * prompt under a 2 s budget, and Codex publishes the account's limits in every
+ * model response.
  *
  * The directory is always <home>/.codex, as the proxy's Codex credential check
  * resolves it; a CODEX_HOME override is not honoured.
  */
 export function codexSessionsDir(home: string): string {
   return path.join(home, '.codex', 'sessions');
+}
+
+/**
+ * D-CODEX-PROXY-SNAPSHOT: when Codex traffic goes through the proxy (subswitch),
+ * the Codex CLI writes no rollout, so the logs stop at the last direct CLI use.
+ * The proxy then writes the limits of each Codex response to one snapshot file:
+ *
+ *   { "version": 1, "observed_at": <epoch s>,
+ *     "windows": [{ "window_minutes": n, "used_percent": n, "resets_at": <epoch s> }],
+ *     "rate_limit_reached_type": string | null }
+ *
+ * The file is optional. The HUD takes the snapshot or the newest rollout record,
+ * whichever has the later observed_at.
+ */
+export function codexSnapshotFile(home: string): string {
+  return path.join(home, '.cache', 'subswitch', 'codex-quota.json');
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -54,12 +80,31 @@ function makeWindow(minutes: unknown, usedPercent: unknown, resetsAt: unknown): 
   return { minutes, usedPercent: Math.max(0, Math.min(100, usedPercent)), resetsAt };
 }
 
-function makeUsage(windows: readonly CodexWindow[], limitReached: unknown): CodexUsage | null {
+function makeUsage(windows: readonly CodexWindow[], limitReached: unknown, observedAt: number): CodexUsage | null {
   if (windows.length === 0) return null;
   return {
     windows: [...windows].sort((a, b) => a.minutes - b.minutes),
     limitReached: typeof limitReached === 'string' && limitReached !== '' ? limitReached : null,
+    observedAt,
   };
+}
+
+/** Windows in Codex's own field names (window_minutes, used_percent, resets_at); incomplete ones are skipped. */
+function codexWindows(slots: readonly unknown[]): CodexWindow[] {
+  const windows: CodexWindow[] = [];
+  for (const slot of slots) {
+    const raw = asRecord(slot);
+    const parsed = raw && makeWindow(raw.window_minutes, raw.used_percent, raw.resets_at);
+    if (parsed) windows.push(parsed);
+  }
+  return windows;
+}
+
+/** Epoch seconds of an ISO timestamp, or null. */
+function isoToEpochSec(value: unknown): number | null {
+  if (typeof value !== 'string') return null;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
 }
 
 /**
@@ -72,8 +117,10 @@ function makeUsage(windows: readonly CodexWindow[], limitReached: unknown): Code
  * Parses one rollout line into usage. Accepts only a token_count event whose
  * rate_limits are the codex limit with at least one complete window; premium
  * records, null windows, `rate_limits: null` and malformed lines are skipped.
+ * The line's timestamp is the observed time; a line without one takes
+ * `fallbackObservedAt` (the file's mtime).
  */
-function parseUsageLine(line: string): CodexUsage | null {
+function parseUsageLine(line: string, fallbackObservedAt: number): CodexUsage | null {
   let record: unknown;
   try {
     record = JSON.parse(line);
@@ -85,22 +132,17 @@ function parseUsageLine(line: string): CodexUsage | null {
   const limits = asRecord(payload.rate_limits);
   if (limits === null || limits.limit_id !== 'codex') return null;
 
-  const windows: CodexWindow[] = [];
-  for (const slot of [limits.primary, limits.secondary]) {
-    const raw = asRecord(slot);
-    const parsed = raw && makeWindow(raw.window_minutes, raw.used_percent, raw.resets_at);
-    if (parsed) windows.push(parsed);
-  }
-  return makeUsage(windows, limits.rate_limit_reached_type);
+  const observedAt = isoToEpochSec(asRecord(record)?.timestamp) ?? fallbackObservedAt;
+  return makeUsage(codexWindows([limits.primary, limits.secondary]), limits.rate_limit_reached_type, observedAt);
 }
 
 /** The last line in `text` that holds a valid record, scanning backwards. */
-function lastUsageIn(text: string): CodexUsage | null {
+function lastUsageIn(text: string, fallbackObservedAt: number): CodexUsage | null {
   const lines = text.split('\n');
   for (let i = lines.length - 1; i >= 0; i--) {
     // Cheap prefilter: most lines are not token_count events and are never parsed.
     if (!lines[i].includes('"token_count"')) continue;
-    const usage = parseUsageLine(lines[i]);
+    const usage = parseUsageLine(lines[i], fallbackObservedAt);
     if (usage) return usage;
   }
   return null;
@@ -138,11 +180,12 @@ function readTail(file: string, bytes: number): { text: string; whole: boolean }
  * CODEX_TAIL_RETRY_BYTES. Rollouts reach tens of MB, and a tail holds the newest
  * records.
  */
-function latestUsageInFile(file: string): CodexUsage | null {
+function latestUsageInFile(file: string, mtimeMs: number): CodexUsage | null {
+  const fallbackObservedAt = Math.floor(mtimeMs / 1000);
   for (const bytes of [CODEX_TAIL_BYTES, CODEX_TAIL_RETRY_BYTES]) {
     const tail = readTail(file, bytes);
     if (tail === null) return null;
-    const usage = lastUsageIn(tail.text);
+    const usage = lastUsageIn(tail.text, fallbackObservedAt);
     if (usage !== null || tail.whole) return usage;
   }
   return null;
@@ -184,7 +227,7 @@ function recentDayDirs(sessionsDir: string): string[] {
  * directories are searched and rollouts untouched for CODEX_MAX_AGE_MS are
  * ignored, which bounds the work on a long-lived ~/.codex.
  */
-function recentRollouts(sessionsDir: string, now: number): string[] {
+function recentRollouts(sessionsDir: string, now: number): { file: string; mtimeMs: number }[] {
   const rollouts: { file: string; mtimeMs: number }[] = [];
   for (const dayDir of recentDayDirs(sessionsDir)) {
     for (const name of listNames(dayDir, 'file', ROLLOUT_FILE).slice(0, MAX_ROLLOUTS_PER_DAY)) {
@@ -197,29 +240,68 @@ function recentRollouts(sessionsDir: string, now: number): string[] {
       }
     }
   }
-  return rollouts.sort((a, b) => b.mtimeMs - a.mtimeMs).map((r) => r.file);
+  return rollouts.sort((a, b) => b.mtimeMs - a.mtimeMs);
 }
 
 /**
- * Codex's latest rate-limit record, or null when there is none to show: no sessions
- * directory, no rollout modified within CODEX_MAX_AGE_MS, or no valid record in the
- * newest MAX_ROLLOUTS_READ of them (a session that has not yet had a model response
- * holds no record, so the next-newest rollout is tried).
+ * Codex's latest rate-limit record in the session logs, or null when there is none
+ * to show: no sessions directory, no rollout modified within CODEX_MAX_AGE_MS, or
+ * no valid record in the newest MAX_ROLLOUTS_READ of them (a session that has not
+ * yet had a model response holds no record, so the next-newest rollout is tried).
  *
  * @param sessionsDir  Codex's sessions directory (see codexSessionsDir).
  * @param now          Epoch milliseconds, for the rollout age bound.
  */
 export function readCodexUsage(sessionsDir: string, now: number): CodexUsage | null {
-  for (const file of recentRollouts(sessionsDir, now).slice(0, MAX_ROLLOUTS_READ)) {
-    const usage = latestUsageInFile(file);
+  for (const { file, mtimeMs } of recentRollouts(sessionsDir, now).slice(0, MAX_ROLLOUTS_READ)) {
+    const usage = latestUsageInFile(file, mtimeMs);
     if (usage !== null) return usage;
   }
   return null;
 }
 
+/**
+ * The proxy's snapshot (D-CODEX-PROXY-SNAPSHOT), or null when it is missing, not a
+ * regular file, larger than CODEX_SNAPSHOT_MAX_BYTES, of another version, malformed,
+ * observed in the future, or older than CODEX_MAX_AGE_MS.
+ *
+ * @param file  The snapshot path (see codexSnapshotFile).
+ * @param now   Epoch milliseconds.
+ */
+export function readCodexSnapshot(file: string, now: number): CodexUsage | null {
+  let text: string;
+  try {
+    const stat = fs.lstatSync(file);
+    if (!stat.isFile() || stat.size > CODEX_SNAPSHOT_MAX_BYTES) return null;
+    text = fs.readFileSync(file, 'utf-8');
+  } catch {
+    return null;
+  }
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  const obj = asRecord(data);
+  if (obj === null || obj.version !== 1 || !Array.isArray(obj.windows)) return null;
+  const observedAt = obj.observed_at;
+  const nowSec = Math.floor(now / 1000);
+  if (!isFiniteNumber(observedAt) || observedAt > nowSec + MAX_CLOCK_SKEW_SEC) return null;
+  if (now - observedAt * 1000 > CODEX_MAX_AGE_MS) return null;
+  return makeUsage(codexWindows(obj.windows), obj.rate_limit_reached_type, Math.floor(observedAt));
+}
+
+/** The record with the later observedAt; the snapshot wins a tie. */
+function newest(snapshot: CodexUsage | null, logs: CodexUsage | null): CodexUsage | null {
+  if (snapshot === null) return logs;
+  if (logs === null) return snapshot;
+  return logs.observedAt > snapshot.observedAt ? logs : snapshot;
+}
+
 function validateCodexUsage(data: unknown): CodexUsage | null {
   const obj = asRecord(data);
-  if (obj === null || !Array.isArray(obj.windows)) return null;
+  if (obj === null || !Array.isArray(obj.windows) || !isFiniteNumber(obj.observedAt)) return null;
   const windows: CodexWindow[] = [];
   for (const entry of obj.windows) {
     const raw = asRecord(entry);
@@ -227,24 +309,26 @@ function validateCodexUsage(data: unknown): CodexUsage | null {
     if (!parsed) return null;
     windows.push(parsed);
   }
-  return makeUsage(windows, obj.limitReached);
+  return makeUsage(windows, obj.limitReached, obj.observedAt);
 }
 
 /**
  * Codex usage for the statusline: the cached read while it is under 30 s old, else
- * a fresh read of the logs, cached when it found a record. A run that finds none
- * caches nothing and rescans, which is a handful of directory reads.
+ * a fresh read of the proxy snapshot and the logs, the newer of the two cached when
+ * one holds a record. A run that finds none caches nothing and rescans, which is a
+ * handful of directory reads.
  */
 export async function gatherCodexUsage(
   devflowDir: string,
   sessionsDir: string,
+  snapshotFile: string,
   now: number = Date.now(),
 ): Promise<CodexUsage | null> {
   const cacheDir = hudCacheDir(devflowDir);
   const cached = readCache<CodexUsage>(cacheDir, CODEX_CACHE_KEY, validateCodexUsage);
   if (cached !== null) return cached;
 
-  const usage = readCodexUsage(sessionsDir, now);
+  const usage = newest(readCodexSnapshot(snapshotFile, now), readCodexUsage(sessionsDir, now));
   if (usage !== null) await writeCache(cacheDir, CODEX_CACHE_KEY, usage, CODEX_CACHE_TTL_MS);
   return usage;
 }

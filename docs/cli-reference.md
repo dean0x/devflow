@@ -384,7 +384,7 @@ npx devflow-kit hud --detail         # Show tool/agent descriptions
 npx devflow-kit hud --no-detail      # Hide tool/agent descriptions
 ```
 
-The HUD also shows your OpenAI Codex usage limits (the weekly window, plus the 5-hour window when your plan has one) next to the Claude quota. It reads them from Codex's own session logs under `~/.codex/sessions`, makes no network call, and shows nothing when you do not use Codex.
+The HUD also shows your OpenAI Codex usage limits (the weekly window, plus the 5-hour window when your plan has one) next to the Claude quota. It reads them from Codex's own session logs under `~/.codex/sessions`. When the devflow proxy carries your Codex traffic, it also reads the proxy's snapshot `~/.cache/subswitch/codex-quota.json`, and it shows the newer of the two records. It makes no network call, and it shows nothing when you do not use Codex. A window past its reset time shows `reset`, because its use since the reset is not known. A record older than one hour ends with its age, for example `· data 3h old`.
 
 When the curation ledger (`.devflow/curation/decisions-ledger.jsonl`) exists and git tracks a file in a curation data folder, or does not answer, the HUD shows no curation counts and no skip line.
 
