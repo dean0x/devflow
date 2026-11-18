@@ -412,15 +412,23 @@ describe('buildRoutingConfigJson — existing config preservation', () => {
     expect(obj.logLevel).toBe('info');
   });
 
-  it('does not carry a codexIngress block — devflow\'s relay serves Claude Code only (D-EFR-4)', () => {
-    const existing = JSON.stringify({
+  it('carries only the Devflow routing keys from the relay config', () => {
+    const supported = {
       port: 4141,
       logLevel: 'warn',
+      anthropic: { connectTimeoutMs: 5_000 },
+      providers: { codex: { aliases: { fast: 'gpt-6.2-sol' } } },
+      limits: { maxBufferedBodyBytes: 1_048_576 },
+    };
+    const existing = JSON.stringify({
+      ...supported,
+      configVersion: 2,
+      accessProfiles: {},
+      routes: {},
       codexIngress: { enabled: true, claude: { enabled: true } },
     });
-    const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
-    expect(Object.prototype.hasOwnProperty.call(obj, 'codexIngress')).toBe(false);
-    expect(obj.logLevel).toBe('warn');
+
+    expect(JSON.parse(buildRoutingConfigJson(4141, existing))).toEqual(supported);
   });
 
   it('port in output always reflects the authoritative devflow port, not the existing file', () => {

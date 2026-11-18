@@ -19,15 +19,26 @@ import {
   isDormantExternalModel,
 } from '../src/core/external-models.js';
 
-// Literal GPT model IDs — independent of the deleted hardcoded registry.
-// Canonical registry ids that still route by exact id under subswitch@0.6.0
-// (gpt-5.5 is retired from discovery but remains exact-id routable).
-// End-state only — no compatibility imports from deleted exports.
-const KNOWN_GPT_IDS = ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5'];
 import {
   countExternalMappedAgents,
   type AgentMappingFile,
 } from '../src/core/agent-models.js';
+
+// Canonical Codex IDs from the 0.7.0 registry, including the retired ID.
+// Saved exact-ID assignments must still count as external.
+const KNOWN_GPT_IDS = [
+  'gpt-6.2-sol',
+  'gpt-6.2-astra',
+  'gpt-6.1-terra',
+  'gpt-6.1-sol',
+  'gpt-6-astra',
+  'gpt-6-sol',
+  'gpt-6-luna',
+  'gpt-5.6-sol',
+  'gpt-5.6-terra',
+  'gpt-5.6-luna',
+  'gpt-5.5',
+];
 
 // ---------------------------------------------------------------------------
 // CLAUDE_MODEL_ALIASES

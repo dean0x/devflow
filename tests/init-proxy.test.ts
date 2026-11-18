@@ -39,17 +39,22 @@ function makeAgentFrontmatter(model: string): string {
   return `---\nmodel: ${model}\ndescription: Test agent\n---\n\nAgent body.\n`;
 }
 
-/**
- * Known GPT model IDs — literal list so this test file does not depend on the
- * hardcoded registry in external-models.ts (which is deleted in Commit 9).
- * Canonical registry ids that still route by exact id under subswitch@0.6.0
- * (gpt-5.5 is retired from discovery but remains exact-id routable).
- * End-state only — no externalModelIds() import.
- */
-const GPT_IDS = ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5'];
+// Canonical Codex IDs from the 0.7.0 registry, including the retired ID.
+const GPT_IDS = [
+  'gpt-6.2-sol',
+  'gpt-6.2-astra',
+  'gpt-6.1-terra',
+  'gpt-6.1-sol',
+  'gpt-6-astra',
+  'gpt-6-sol',
+  'gpt-6-luna',
+  'gpt-5.6-sol',
+  'gpt-5.6-terra',
+  'gpt-5.6-luna',
+  'gpt-5.5',
+] as const;
 
-/** Pick a known GPT model ID for the mapping. */
-const A_GPT_MODEL = GPT_IDS[0]!; // 'gpt-5.6-sol'
+const A_GPT_MODEL = GPT_IDS[0];
 
 /**
  * Single preflight deps factory — defaults to a passing configuration (port free,
