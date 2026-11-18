@@ -1,7 +1,7 @@
-import { constants, promises as fs } from 'node:fs';
+import { readFileBytes } from './read-file-bytes.js';
 import { join } from 'node:path';
 import { findFlag, holdsOwnEnvPayload, holdsUserEnvValue, isEnvBooleanFlag } from './flags.js';
-import { readGateManifest } from './gate-level.js';
+import { readGateManifest, type GateManifestRead } from './gate-level.js';
 import { classifyProxyBaseUrl, DEFAULT_PROXY_PORT, readProxyState } from './proxy-state.js';
 import type { ProxyEnvState, Result } from './proxy-state.js';
 
@@ -103,24 +103,23 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 async function readSettingsEnv(settingsPath: string): Promise<RawRecord | undefined> {
+  const bytes = await readFileBytes(settingsPath, MAX_SETTINGS_BYTES);
+  if (bytes === 'absent') return {};
+  if (typeof bytes === 'string') return undefined;
   try {
-    // O_NONBLOCK prevents a pipe at this path from blocking the open.
-    const file = await fs.open(settingsPath, constants.O_RDONLY | constants.O_NONBLOCK);
-    try {
-      const stat = await file.stat();
-      if (!stat.isFile() || stat.size > MAX_SETTINGS_BYTES) return undefined;
-      const buffer = Buffer.alloc(stat.size + 1);
-      const { bytesRead } = await file.read(buffer);
-      if (bytesRead !== stat.size) return undefined;
-      const settings: unknown = JSON.parse(buffer.toString('utf8', 0, bytesRead));
-      if (!isPlainObject(settings)) return undefined;
-      return isPlainObject(settings.env) ? settings.env : {};
-    } finally {
-      await file.close();
-    }
-  } catch (err) {
-    return err instanceof Error && 'code' in err && err.code === 'ENOENT' ? {} : undefined;
+    const settings: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes));
+    if (!isPlainObject(settings)) return undefined;
+    return isPlainObject(settings.env) ? settings.env : {};
+  } catch {
+    return undefined;
   }
+}
+
+/** An unrelated manifest defect does not erase a readable switch. */
+export function codeModeManifestSignals(manifest: GateManifestRead | null) {
+  const rawFeatures = manifest && 'raw' in manifest ? manifest.raw.features : null;
+  const features = isPlainObject(rawFeatures) ? rawFeatures : null;
+  return { record: isPlainObject(features?.flags) ? features.flags : null, manifestProxy: features?.proxy === true };
 }
 
 /**
@@ -137,17 +136,16 @@ export async function readCodeModeSignals(
     const [proxy, manifest] = devflowDir === null
       ? [null, null]
       : await Promise.all([readProxyState(devflowDir), readGateManifest(devflowDir)]);
-    const rawFeatures = manifest && 'raw' in manifest ? manifest.raw.features : null;
-    const features = isPlainObject(rawFeatures) ? rawFeatures : null;
+    const { record, manifestProxy } = codeModeManifestSignals(manifest);
     const urlState = classifyProxyBaseUrl(env?.ANTHROPIC_BASE_URL, proxy?.ok ? proxy.value.port : DEFAULT_PROXY_PORT);
     return {
       ok: true,
       value: {
         env,
-        record: isPlainObject(features?.flags) ? features.flags : null,
+        record,
         proxyOn: isProxyOn({
           proxyJsonOn: proxy !== null && (!proxy.ok || proxy.value.enabled),
-          manifestProxy: features?.proxy === true,
+          manifestProxy,
           urlState,
         }),
       },

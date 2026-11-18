@@ -169,6 +169,16 @@ describe('readCodeModeSignals', () => {
     await expectRefusal(true);
   });
 
+  it('refuses when proxy.json exceeds the local state size limit', async () => {
+    await fs.writeFile(join(devflowDir, 'proxy.json'), JSON.stringify({ enabled: false, padding: ' '.repeat(1024 * 1024) }));
+    await expectRefusal(true);
+  });
+
+  it('refuses when proxy.json is not a regular file', async () => {
+    await fs.mkdir(join(devflowDir, 'proxy.json'));
+    await expectRefusal(true);
+  });
+
   it('refuses when proxy.json cannot be parsed', async () => {
     await fs.writeFile(join(devflowDir, 'proxy.json'), '{');
     await expectRefusal(true);
@@ -192,6 +202,12 @@ describe('readCodeModeSignals', () => {
   it.each(['{', 'null', '[]', '42'])('reports unavailable settings for a root of %s', async (body) => {
     await fs.writeFile(settingsPath, body);
     expect(await read()).toMatchObject({ ok: true, value: { env: undefined, proxyOn: false } });
+  });
+
+  it('reports unavailable settings when a JSON string has invalid UTF-8 bytes', async () => {
+    const bytes = Buffer.concat([Buffer.from('{"value":"'), Buffer.from([0xff]), Buffer.from('"}')]);
+    await fs.writeFile(settingsPath, bytes);
+    expect(await read()).toMatchObject({ ok: true, value: { env: undefined } });
   });
 
   it('reports unavailable settings when the path is a directory', async () => {

@@ -39,12 +39,14 @@ import {
   CODE_MODE_READ_FAILURE,
   PROXY_ENABLE_REFUSAL,
   codeModeBlockers,
+  codeModeManifestSignals,
   isCodeModeOn,
   isProxyOn,
   isTrafficOn,
   readCodeModeSignals,
 } from '../../core/code-mode.js';
-import { syncManifestFeature, readManifest } from '../../core/manifest.js';
+import { syncManifestFeature } from '../../core/manifest.js';
+import { readGateManifest } from '../../core/gate-level.js';
 import { writeSettingsFileAtomic } from '../../core/fs-atomic.js';
 import { scrubChildEnv, openProxyLog, rotateProxyLogIfLarge } from '../../core/proxy-log.js';
 import { inspectCodexAuth, classifyCodexAuthReadError, type CodexAuthState } from '../../core/codex-auth-inspect.js';
@@ -1406,11 +1408,12 @@ async function runStatus(): Promise<void> {
   p.intro(color.bgBlue(color.white(' Devflow Proxy Status ')));
 
   // Feature state: manifest + proxy.json
-  const manifest = await readManifest(devflowDir, { heal: false });
+  const manifest = await readGateManifest(devflowDir);
+  const { record, manifestProxy } = codeModeManifestSignals(manifest);
   const proxyStateResult = await readProxyState(devflowDir);
   const proxyState = proxyStateResult.ok ? proxyStateResult.value : null;
 
-  const manifestEnabled = manifest?.features.proxy ?? false;
+  const manifestEnabled = manifest.kind === 'object' && manifestProxy;
   const stateEnabled = proxyState?.enabled ?? false;
 
   if (manifestEnabled !== stateEnabled) {
@@ -1473,10 +1476,9 @@ async function runStatus(): Promise<void> {
   };
   p.log.info(`ANTHROPIC_BASE_URL: ${envStateLabels[envState]}`);
 
-  const record = manifest?.features.flags ?? null;
   for (const line of codeModeBlockers({
     codeModeOn: isCodeModeOn(record, env),
-    proxyOn: isProxyOn({ proxyJsonOn: !proxyStateResult.ok || stateEnabled, manifestProxy: manifestEnabled, urlState: envState }),
+    proxyOn: isProxyOn({ proxyJsonOn: !proxyStateResult.ok || stateEnabled, manifestProxy, urlState: envState }),
     trafficOn: isTrafficOn(record, env),
   })) p.log.warn(line);
 

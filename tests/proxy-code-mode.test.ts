@@ -178,6 +178,15 @@ describe('proxy --status Code Mode warnings', () => {
     expect(vi.mocked(p.log.warn).mock.calls).toEqual([[CODE_MODE_PROXY_BLOCKER]]);
   });
 
+  it('uses readable switches even if another manifest field is absent', async () => {
+    seedFile('.devflow/manifest.json', JSON.stringify({ features: { flags: codeOn, proxy: true } }));
+    const before = snapshot();
+    await run('--status');
+    expect(vi.mocked(p.log.warn).mock.calls).toEqual([[CODE_MODE_PROXY_BLOCKER]]);
+    expect(process.exitCode).toBe(0);
+    expect(snapshot()).toEqual(before);
+  });
+
   it('uses the recorded traffic flag without a proxy signal', async () => {
     seedManifest({ ...codeOn, 'disable-nonessential-traffic': true });
     seedFile('.claude/settings.json', '{"env":[]}');

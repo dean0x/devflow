@@ -595,7 +595,13 @@ export async function applyTuiResult(
   const viewModeExplicit = newRecord['view-mode'] !== existingRecord['view-mode'];
 
   const codeModeRow = result.rows.find(row => row.id === 'code-mode');
-  const check = await checkCodeModeWrite(claudeDir, devflowDir, codeModeRow?.configuredValue === true);
+  const codeModeEdited = codeModeRow !== undefined && codeModeRow.configuredValue !== codeModeRow.originalValue;
+  if (!codeModeEdited) {
+    // A save of other rows must respect a settings edit made while the editor was open.
+    const seed = respectUserOwnedSettings(existingRecord, existingRecord, freshSettingsContent);
+    newRecord['code-mode'] = seed['code-mode'] === true;
+  }
+  const check = await checkCodeModeWrite(claudeDir, devflowDir, codeModeEdited && codeModeRow.configuredValue === true);
   if (!check.ok) return 'refused';
 
   const persistResult = await persistFlagConfig(
@@ -603,7 +609,7 @@ export async function applyTuiResult(
     { ...check.value, viewModeExplicit },
   );
   if (persistResult.ok) {
-    if (codeModeRow && codeModeRow.configuredValue !== codeModeRow.originalValue) {
+    if (codeModeEdited) {
       logFlagSuccess(codeModeRow.id, `${codeModeRow.id} ${formatFlagValue(codeModeRow.def, codeModeRow.configuredValue)}`);
     }
     return 'saved';

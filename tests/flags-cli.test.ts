@@ -172,17 +172,20 @@ describe('flags CLI — createFlagsCommand factory', () => {
       expect(process.exitCode).toBe(0);
     }
 
-    async function runTui(changes: FlagsRecord) {
+    async function runTui(changes: FlagsRecord, beforeSave?: () => Promise<void>) {
       const streams = [process.stdin, process.stdout];
       const tty = streams.map(stream => stream.isTTY);
       streams.forEach(stream => Object.defineProperty(stream, 'isTTY', { value: true, configurable: true }));
       vi.doMock('../src/cli/flags-view/index.js', () => ({
-        runFlagsTui: async (rows: ReturnType<typeof buildFlagRows>) => ({
-          action: 'save',
-          rows: rows.map(row => Object.hasOwn(changes, row.id)
-            ? { ...row, configuredValue: changes[row.id] }
-            : row),
-        }),
+        runFlagsTui: async (rows: ReturnType<typeof buildFlagRows>) => {
+          await beforeSave?.();
+          return {
+            action: 'save',
+            rows: rows.map(row => Object.hasOwn(changes, row.id)
+              ? { ...row, configuredValue: changes[row.id] }
+              : row),
+          };
+        },
       }));
       vi.resetModules();
       try {
@@ -312,6 +315,15 @@ describe('flags CLI — createFlagsCommand factory', () => {
       expect(env).toMatchObject({ ANTHROPIC_BASE_URL: foreignUrl, ANTHROPIC_AUTH_TOKEN: fixtureAuth });
       expect(apiKeyHelper).toBe(fixtureHelper);
       expect(vi.mocked(p.log.success).mock.calls.flat().join('\n')).toContain(codeMode.CODE_MODE_NEW_SESSIONS_SUFFIX);
+    });
+
+    it.each([
+      { flags: { 'code-mode': true }, initial: '1', fresh: '0', on: false },
+      { flags: {}, initial: '0', fresh: '1', on: true },
+    ])('keeps a user change from $initial to $fresh while the editor is open', async ({ flags, initial, fresh, on }) => {
+      const { settingsPath } = await seed(flags, { [codeKey]: initial });
+      await runTui({ lsp: true }, () => fs.writeFile(settingsPath, JSON.stringify({ env: { [codeKey]: fresh } })));
+      await expectSaved(on, fresh);
     });
 
     it('keeps a hand-set on value on an unrelated TUI save', async () => {
