@@ -29,11 +29,21 @@ import {
   buildProxyState,
   buildRoutingConfigJson,
   proxyBaseUrl,
+  classifyProxyBaseUrl,
   readProxyEnvState,
   proxyJsonExists,
   resolveProxyBin,
   DEFAULT_PROXY_PORT,
 } from '../../core/proxy-state.js';
+import {
+  CODE_MODE_READ_FAILURE,
+  PROXY_ENABLE_REFUSAL,
+  codeModeBlockers,
+  isCodeModeOn,
+  isProxyOn,
+  isTrafficOn,
+  readCodeModeSignals,
+} from '../../core/code-mode.js';
 import { syncManifestFeature, readManifest } from '../../core/manifest.js';
 import { writeSettingsFileAtomic } from '../../core/fs-atomic.js';
 import { scrubChildEnv, openProxyLog, rotateProxyLogIfLarge } from '../../core/proxy-log.js';
@@ -1380,6 +1390,10 @@ export const proxyCommand = new Command('proxy')
 
 // ─── Status ───────────────────────────────────────────────────────────────────
 
+function isSettingsRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 async function runStatus(): Promise<void> {
   const devflowDir = getDevFlowDirectory();
   const claudeDir = getClaudeDirectory();
@@ -1392,7 +1406,7 @@ async function runStatus(): Promise<void> {
   p.intro(color.bgBlue(color.white(' Devflow Proxy Status ')));
 
   // Feature state: manifest + proxy.json
-  const manifest = await readManifest(devflowDir);
+  const manifest = await readManifest(devflowDir, { heal: false });
   const proxyStateResult = await readProxyState(devflowDir);
   const proxyState = proxyStateResult.ok ? proxyStateResult.value : null;
 
@@ -1443,12 +1457,14 @@ async function runStatus(): Promise<void> {
   }
 
   // Env state
-  let envState: 'ours' | 'ours-other-port' | 'foreign' | 'absent' = 'absent';
+  let env: Record<string, unknown> | undefined;
   try {
     const settingsJson = await fs.readFile(settingsPath, 'utf-8');
-    envState = readProxyEnvState(settingsJson, port);
-  } catch { /* settings missing */ }
+    const settings: unknown = JSON.parse(settingsJson);
+    if (isSettingsRecord(settings) && isSettingsRecord(settings.env)) env = settings.env;
+  } catch { /* settings unavailable */ }
 
+  const envState = classifyProxyBaseUrl(env?.ANTHROPIC_BASE_URL, port);
   const envStateLabels: Record<typeof envState, string> = {
     'ours': color.green('set (our relay)'),
     'ours-other-port': color.yellow('set (our relay, different port)'),
@@ -1456,6 +1472,13 @@ async function runStatus(): Promise<void> {
     'absent': color.dim('not set'),
   };
   p.log.info(`ANTHROPIC_BASE_URL: ${envStateLabels[envState]}`);
+
+  const record = manifest?.features.flags ?? null;
+  for (const line of codeModeBlockers({
+    codeModeOn: isCodeModeOn(record, env),
+    proxyOn: isProxyOn({ proxyJsonOn: !proxyStateResult.ok || stateEnabled, manifestProxy: manifestEnabled, urlState: envState }),
+    trafficOn: isTrafficOn(record, env),
+  })) p.log.warn(line);
 
   // Codex auth — inspect contents, not just existence. A file the relay would
   // reject (bad JSON, no account id) 401s every request while an existence check
@@ -1532,6 +1555,18 @@ async function runEnable(portOption: string | undefined): Promise<void> {
     return;
   }
   const port = portResult.value;
+
+  const signals = await readCodeModeSignals(claudeDir, devflowDir);
+  if (!signals.ok || signals.value.env === undefined) {
+    p.log.error(CODE_MODE_READ_FAILURE);
+    process.exitCode = 1;
+    return;
+  }
+  if (isCodeModeOn(signals.value.record, signals.value.env)) {
+    p.log.error(PROXY_ENABLE_REFUSAL);
+    process.exitCode = 1;
+    return;
+  }
 
   const s = p.spinner();
   s.start('Running preflight checks...');
