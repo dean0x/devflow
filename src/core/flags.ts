@@ -6,7 +6,7 @@
  *
  * D14: Typed registry — flags carry kind (boolean|enum|number|string), target
  * (env|setting), and per-kind defaultValue. Neutral values delete their target
- * key; active values write the appropriate payload. Number 0 is ACTIVE. Sink
+ * key when its guard permits deletion. Active values write the payload. Number 0 is ACTIVE. Sink
  * validation via coerceFlagValue (validate at the convergence
  * point every caller reaches). applyFlags(settingsJson, FlagsRecord) is the
  * sole API; init.ts works directly with FlagsRecord (no legacy string[] bridge).
@@ -86,7 +86,9 @@ interface BooleanFlagDefCommon extends FlagDefCommon {
 export interface EnvBooleanFlagDef extends BooleanFlagDefCommon {
   readonly target: EnvFlagTarget;
   readonly onPayload: string;
-  /** Env keys are never shape-guarded — `never` makes that a compile error, not a silent no-op. */
+  /** D-CODE-MODE-OWN-VALUE: manage only the exact `onPayload` for this env key. */
+  readonly deleteOnlyOwnPayload?: true;
+  /** Only setting keys can use a shape guard. */
   readonly settingDeleteGuard?: never;
 }
 
@@ -391,7 +393,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     id: 'disable-nonessential-traffic',
     label: 'Disable non-essential traffic',
     description: 'Suppress usage metrics telemetry',
-    hint: 'Suppresses usage telemetry sent back to Anthropic',
+    hint: 'Suppresses usage telemetry sent to Anthropic; Code Mode does not start',
     blurb: 'suppress usage telemetry',
     kind: 'boolean',
     target: { type: 'env', key: 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC' },
@@ -501,6 +503,29 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     // Note: the legacy `teammateMode:"auto"` settings key is stripped by
     // src/core/teammate-mode-cleanup.ts during uninstall (stripDevflowTeammateModeFromJson).
     // The env var above is the only surface managed by FLAG_REGISTRY for this flag.
+  },
+  {
+    /**
+     * D-CODE-MODE-VENDOR: Claude Code docs, "Run tool calls from code with Code Mode"
+     * (read 2026-11-18). JavaScript can make several tool calls in one step.
+     * Deny and ask rules and PreToolUse hooks still apply per call. Auto mode
+     * reviews the code; other modes prompt per call when their rules require it.
+     * The blockers below apply. Code Mode does not work with `-p`, so `claude -p`
+     * workers are unaffected. The flag registry owns this key; the proxy never writes it.
+     */
+    id: 'code-mode',
+    label: 'Code Mode (experimental)',
+    description: 'Blocked by the Devflow proxy, disable-nonessential-traffic, a custom ANTHROPIC_BASE_URL, '
+      + 'apiKeyHelper, ANTHROPIC_AUTH_TOKEN, or OpenTelemetry export. '
+      + 'Code Mode with agent-teams needs Claude Code v2.1.326+.',
+    hint: 'Enable experimental Code Mode for every new session',
+    blurb: 'tool calls run from code',
+    kind: 'boolean',
+    target: { type: 'env', key: 'CLAUDE_CODE_EXPERIMENTAL_CODE_MODE' },
+    onPayload: '1',
+    deleteOnlyOwnPayload: true,
+    recommended: false,
+    defaultValue: false,
   },
 
   {
@@ -1219,29 +1244,15 @@ export function settingHoldsUserValue(settingsJson: string, flagId: string): boo
 }
 
 /**
- * D-ADOPT-RESPECTS-USER: seed a guarded setting flag OFF when adopting it ON would
- * overwrite a value the user already owns.
+ * D-ADOPT-RESPECTS-USER: seed guarded flags from the current settings without
+ * replacing user values. For a setting with a shape guard, seed an unclaimed
+ * flag OFF when `settingHoldsUserValue` is true. Keep any claimed setting flag.
+ * For an env flag with an own-payload guard, adopt an unclaimed on payload as ON,
+ * or seed an ON record as OFF if the user has a different value.
  *
- * A flag the manifest does not record is adopted at its `defaultValue`. For a flag whose
- * target is a settings.json key with a `settingDeleteGuard`, adopting ON writes its
- * managed payload over whatever is on disk (the guard protects deletion, not writes).
- * When the key already holds a value that is not the managed shape - a user's own `"1h"`
- * under `subagentPromptCacheTtl` - that write would silently replace a deliberate choice.
- * Such a flag is set `false` instead; with the record then claiming `false`, the converge
- * pipeline neither writes nor deletes the user's value.
- *
- * Scope: only flags ABSENT from `manifestFlags` (or all of them on a fresh install, when
- * it is null). A flag the manifest records keeps its value in `flags`, so an explicit
- * enable still wins. `devflow init --reset` hands this an empty settings snapshot
- * (resolveResetGatedInputs), so nothing is detected and the factory default stands. The rule is generic over guarded
- * setting flags: no flag id is special-cased, and `settingHoldsUserValue` is the one place
- * that decides "the disk holds something that is not ours". For a flag whose default is
- * already OFF (suppress-attribution) it changes nothing.
- *
- * Two callers apply the same rule: the init seed, and the flags TUI's starting rows (an
- * upgrade that has not run init yet would otherwise offer a Save that overwrites the value).
- *
- * Pure function - the settings snapshot is read by the caller and passed in.
+ * Init and the flags TUI share this rule for their starting rows. An empty reset
+ * snapshot leaves the factory defaults intact. The caller supplies the pre-strip
+ * snapshot; this function does no I/O.
  */
 export function respectUserOwnedSettings(
   flags: FlagsRecord,
@@ -1254,7 +1265,13 @@ export function respectUserOwnedSettings(
     if (!adoptedAtDefault) continue;
     if (settingHoldsUserValue(settingsSnapshot, flag.id)) result[flag.id] = false;
   }
-  return result;
+  let env: Record<string, unknown> | undefined;
+  try {
+    env = asPlainObject(asPlainObject(JSON.parse(settingsSnapshot))?.env);
+  } catch {
+    // Treat an unreadable seed snapshot as absent, as with guarded settings.
+  }
+  return foldOwnEnvPayloads(result, manifestFlags, env, []);
 }
 
 /**
@@ -1269,12 +1286,56 @@ export function respectUserOwnedSettings(
  * across the entire apply/strip pipeline.
  *
  * Single-source invariant: both the disable path (applyFlags neutral branch) and
- * the uninstall path (stripFlags) collapse to this predicate.
+ * the uninstall path (stripFlags) use this predicate for settings and its twin
+ * `canDeleteEnvKey` for env keys.
  */
 function canDeleteSettingKey(flag: ClaudeCodeFlag, settings: Record<string, unknown>): boolean {
   if (flag.kind !== 'boolean') return true;
   if (flag.settingDeleteGuard === undefined) return true;
   return settingValueHoldsManagedShape(flag, settings[flag.target.key]);
+}
+
+/** An env flag with an own-payload guard owns only its exact on payload. */
+export function holdsOwnEnvPayload(
+  flag: EnvBooleanFlagDef,
+  env: Readonly<Record<string, unknown>> | undefined,
+): boolean {
+  return flag.deleteOnlyOwnPayload === true && env?.[flag.target.key] === flag.onPayload;
+}
+
+/** Any other present value at a guarded env key belongs to the user. */
+export function holdsUserEnvValue(
+  flag: EnvBooleanFlagDef,
+  env: Readonly<Record<string, unknown>> | undefined,
+): boolean {
+  return flag.deleteOnlyOwnPayload === true && env !== undefined
+    && Object.hasOwn(env, flag.target.key) && !holdsOwnEnvPayload(flag, env);
+}
+
+function canDeleteEnvKey(flag: ClaudeCodeFlag, env: Readonly<Record<string, unknown>>): boolean {
+  return !isEnvBooleanFlag(flag) || flag.deleteOnlyOwnPayload === undefined
+    || holdsOwnEnvPayload(flag, env);
+}
+
+/** Adopt unclaimed payloads and keep user values unless this write explicitly turns the flag on. */
+function foldOwnEnvPayloads(
+  record: FlagsRecord,
+  claimedIn: FlagsRecord | null,
+  env: Readonly<Record<string, unknown>> | undefined,
+  explicitOn: readonly string[],
+): FlagsRecord {
+  const result = { ...record };
+  for (const flag of FLAG_REGISTRY) {
+    if (!isEnvBooleanFlag(flag) || flag.deleteOnlyOwnPayload === undefined) continue;
+    const id = flag.id;
+    const claimed = claimedIn !== null && Object.hasOwn(claimedIn, id);
+    if (!claimed && holdsOwnEnvPayload(flag, env)) {
+      result[id] = true;
+    } else if (record[id] === true && holdsUserEnvValue(flag, env) && !explicitOn.includes(id)) {
+      result[id] = false;
+    }
+  }
+  return result;
 }
 
 /**
@@ -1321,7 +1382,7 @@ function buildPayload(flag: ClaudeCodeFlag, value: FlagValue): unknown {
  *
  * - Unknown flag IDs are skipped (forward-compatible with future flags).
  * - `coerceFlagValue` is called at the sink before applying.
- * - Neutral values delete their target key.
+ * - Neutral values delete their target key when the ownership guard permits it.
  * - Env payloads for number flags are stringified ('40', never 40).
  * - Setting payloads for string flags with wrapKey are shaped ({ command: v }).
  * - env object is created on demand; deleted when it becomes empty.
@@ -1348,11 +1409,10 @@ export function applyFlags(settingsJson: string, flags: FlagsRecord): string {
     const safe = coerceFlagValue(flag, value);
 
     if (isNeutral(flag, safe)) {
-      // Neutral → delete the target key
       if (flag.target.type === 'env') {
         // asPlainObject guard: "env": [] must not delete a user's env var (applies TS-M3)
         const env = asPlainObject(settings.env);
-        if (env) delete env[flag.target.key];
+        if (env && canDeleteEnvKey(flag, env)) delete env[flag.target.key];
       } else {
         if (canDeleteSettingKey(flag, settings)) delete settings[flag.target.key];
       }
@@ -1380,9 +1440,9 @@ export function applyFlags(settingsJson: string, flags: FlagsRecord): string {
 
 /**
  * Strip all flag-managed keys from a settings JSON string.
- * Registry-driven unconditional delete. Now covers viewMode (via view-mode
- * registry entry) and object-valued settings (spellcheck → key deleted).
- * Cleans up empty env object. Strip-then-apply idempotence preserved (INV-1).
+ * Registry-driven guarded delete: respect setting shape guards and env own-payload
+ * guards. Remove the env object if it is empty. Preserve strip-then-apply
+ * idempotence with the converged record (INV-1).
  */
 export function stripFlags(settingsJson: string): string {
   // REL-M2 sink guard: mirror of applyFlags — throw early on a
@@ -1397,7 +1457,7 @@ export function stripFlags(settingsJson: string): string {
 
   for (const flag of FLAG_REGISTRY) {
     if (flag.target.type === 'env') {
-      if (env) delete env[flag.target.key];
+      if (env && canDeleteEnvKey(flag, env)) delete env[flag.target.key];
     } else {
       if (canDeleteSettingKey(flag, settings)) delete settings[flag.target.key];
     }
@@ -1493,18 +1553,18 @@ export function resolveFinalViewMode(
  *     - `null`       → nothing previously owned (fresh install)
  *     - `FlagsRecord`→ the original manifest flags BEFORE seeding (init path)
  *
- *   A flag is "claimed" when it is present and non-null in the claimed set.
+ *   A flag is "claimed" when its ID is present in the claimed set.
  *   Claimed: record value wins (devflow previously set this value).
  *   Unclaimed: fold from settings — if the user has a value in settings.json,
  *   adopt it into the record (devflow takes ownership).
  *
- *   Boolean flags: never folded — on/off is always record-driven.
+ *   Boolean flags: Step 2b adopts unclaimed managed settings. Step 2c adopts
+ *   unclaimed env on payloads and folds ON to OFF for user values unless this
+ *   write explicitly turns the flag on. All other booleans stay record-driven.
  *
- * The fold MUST run on pre-strip content — `stripFlags` removes the target
- * keys, making any fold after strip vacuous.
+ * The folds must use pre-strip content to see managed values before deletion.
  *
- * Uninstall note: `src/cli/commands/uninstall.ts` calls `stripFlags` directly
- * with no record argument, preserving its full-sweep semantics. Do not change.
+ * Uninstall uses `stripFlags` directly and honors the same delete guards.
  *
  * Pure function: no I/O.
  *
@@ -1515,6 +1575,7 @@ export function resolveFinalViewMode(
  * @param opts.ownedRecord  Prior ownership set; see semantics above.
  *                        Init path: `existingManifest?.features.flags ?? null`.
  *                        persistFlagConfig path: omit (undefined).
+ * @param opts.explicitOn  IDs this write turns from OFF to ON. Default: none.
  * @returns `{ settings: updated JSON string, record: folded FlagsRecord }`
  */
 export function convergeFlagsIntoSettings(
@@ -1523,6 +1584,7 @@ export function convergeFlagsIntoSettings(
   opts: {
     viewModeExplicit: boolean;
     ownedRecord?: FlagsRecord | null;
+    explicitOn?: readonly string[];
   },
 ): { settings: string; record: FlagsRecord } {
   // ── Step 1: fold view-mode (must read pre-strip) ──────────────────────────
@@ -1540,8 +1602,7 @@ export function convergeFlagsIntoSettings(
 
   // ── Step 2: fold existing values for valued flags (pre-strip) ────────────
   // D15-adopt: for unclaimed valued flags, read the current settings value and
-  // adopt it into the record. Claimed flags (previously set by devflow) keep
-  // their record value; boolean flags are never folded.
+  // adopt it into the record. Claimed valued flags keep their record value.
   //
   // "Claimed" is determined by opts.ownedRecord:
   //   undefined → use `record` (persistFlagConfig: manifest record = owned set)
@@ -1559,7 +1620,7 @@ export function convergeFlagsIntoSettings(
   const env = asPlainObject(parsed.env);
 
   for (const flag of FLAG_REGISTRY) {
-    if (flag.kind === 'boolean') continue;   // boolean flags: record-driven only
+    if (flag.kind === 'boolean') continue;   // boolean folds follow below
     if (flag.id === 'view-mode') continue;   // already handled above
 
     // Check whether devflow previously owned this flag's key.
@@ -1601,8 +1662,7 @@ export function convergeFlagsIntoSettings(
   // ── Step 2b: adopt guarded boolean settings before the strip ─────────────
   // D-ATTR-ADOPT: a delete guard is evidence about the VALUE,
   // never about the record — a pre-existing on-disk key whose value matches the
-  // managed shape means devflow wrote it, so adopt it into the record now, before
-  // stripFlags can unconditionally remove it on the next line.
+  // managed shape qualifies for adoption before stripFlags removes that value.
   //
   // Mirror of the view-mode fold (Step 1): adopt only when:
   //   (a) the flag has a settingDeleteGuard (guarded boolean only)
@@ -1628,9 +1688,12 @@ export function convergeFlagsIntoSettings(
     }
   }
 
-  // ── Step 3: strip all managed keys, then apply the folded record ──────────
+  // ── Step 2c: fold guarded env values before the strip ───────────────────
+  const finalRecord = foldOwnEnvPayloads(folded, claimedIn, env, opts.explicitOn ?? []);
+
+  // ── Step 3: strip managed keys, then apply the folded record ─────────────
   const stripped = stripFlags(settingsJson);
-  const applied = JSON.parse(applyFlags(stripped, folded)) as Record<string, unknown>;
+  const applied = JSON.parse(applyFlags(stripped, finalRecord)) as Record<string, unknown>;
 
   // ── Step 4: restore the pre-strip key order (D-KEY-ORDER) ────────────────
   const ordered = orderKeysLike(parsed, applied);
@@ -1640,7 +1703,7 @@ export function convergeFlagsIntoSettings(
     ? { ...ordered, env: orderKeysLike(beforeEnv, afterEnv) }
     : ordered;
 
-  return { settings: JSON.stringify(settings, null, 2) + '\n', record: folded };
+  return { settings: JSON.stringify(settings, null, 2) + '\n', record: finalRecord };
 }
 
 /**

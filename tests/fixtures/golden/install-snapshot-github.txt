@@ -595,6 +595,7 @@ d sub/
       "disable-1m-context": false,
       "disable-autoupdater": false,
       "agent-teams": false,
+      "code-mode": false,
       "enable-todo-tools": false,
       "suppress-attribution": false,
       "subagent-spawn-depth": null,
