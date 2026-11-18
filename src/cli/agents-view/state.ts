@@ -162,7 +162,7 @@ export function pickerNames(models: readonly ExternalModel[]): readonly string[]
  * picker name that represents it in the TUI cycle.
  *
  * Used by buildRow to normalize a stored canonical id to its alias on read,
- * e.g. 'gpt-5.6-sol' → 'sol', so the value stays in-cycle and does not
+ * e.g. 'gpt-6.2-sol' → 'sol', so the value stays in-cycle and does not
  * appear as an off-cycle pin. NEVER rewrites the value on disk — only for
  * display.
  *
@@ -490,7 +490,7 @@ export function buildRow(input: InitRowInput): AgentRow {
   const cycle = worker ? WORKER_MODEL_CYCLE : (input.modelCycle ?? []);
 
   // Normalize stored canonical id to picker name (Fix 1: in-memory only, never
-  // written back to disk). E.g. 'gpt-5.6-sol' → 'sol' when pickerNameMap is known.
+  // written back to disk). E.g. 'gpt-6.2-sol' → 'sol' when pickerNameMap is known.
   // This keeps the value in-cycle so it does not become a spurious off-cycle pin.
   const normalizedSavedModel =
     input.savedModel !== undefined && input.pickerNameMap !== undefined
