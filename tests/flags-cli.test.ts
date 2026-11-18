@@ -1359,7 +1359,7 @@ describe('flags CLI — createFlagsCommand factory', () => {
       Object.defineProperty(process.stdin, 'isTTY', { value: origStdinIsTTY, configurable: true });
       // Remove the doMock registration and clear module cache so subsequent tests
       // get the real flags-view implementation.
-      vi.unmock('../src/cli/flags-view/index.js');
+      vi.doUnmock('../src/cli/flags-view/index.js');
       vi.resetModules();
     });
 
@@ -1440,7 +1440,7 @@ describe('flags CLI — createFlagsCommand factory', () => {
     afterEach(() => {
       Object.defineProperty(process.stdout, 'isTTY', { value: origStdoutIsTTY, configurable: true });
       Object.defineProperty(process.stdin, 'isTTY', { value: origStdinIsTTY, configurable: true });
-      vi.unmock('../src/cli/flags-view/index.js');
+      vi.doUnmock('../src/cli/flags-view/index.js');
       vi.resetModules();
     });
 
@@ -1504,7 +1504,7 @@ describe('flags CLI — createFlagsCommand factory', () => {
     afterEach(() => {
       Object.defineProperty(process.stdout, 'isTTY', { value: origStdoutIsTTY, configurable: true });
       Object.defineProperty(process.stdin, 'isTTY', { value: origStdinIsTTY, configurable: true });
-      vi.unmock('../src/cli/flags-view/index.js');
+      vi.doUnmock('../src/cli/flags-view/index.js');
       vi.resetModules();
     });
 
