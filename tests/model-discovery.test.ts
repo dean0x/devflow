@@ -1020,24 +1020,30 @@ describe('T1: Real-binary — discoverExternalModels with live runtime', () => {
     // deadline, so machine load cannot turn a slow but correct exec into known:false.
     const result = await discoverExternalModels(cacheDir, logPath, liveRuntimeDeps);
 
-    // subswitch models --json (0.6.0) is a static registry dump: no auth, no relay,
-    // no config file required (verified: exit 0, configFileFound:false; the runtime's
-    // user-level config is isolated by D-EFR-6, covered by T13). The per-test
-    // cacheDir is freshly created (beforeEach), so no cache hit is possible — source
-    // must be 'live'. Guarding these behind `if (result.known)` would let the test
-    // pass vacuously when the live call incorrectly returns known:false.
+    // The registry query needs no auth, relay or config file. T13 covers isolation
+    // from user config. The fresh cache directory requires a live result.
     expect(result.known, discoveryLog()).toBe(true);
     if (!result.known) return; // TypeScript narrowing only
     expect(result.source).toBe('live');
-    expect(result.models.length).toBeGreaterThan(0);
-    // selectableNames must be non-empty and duplicate-free
-    expect(result.selectableNames.length).toBeGreaterThan(0);
+
+    // Routable, non-retired rows from the installed 0.7.0 `models --json` registry.
+    expect(result.models.map(({ id, aliases }) => [id, aliases])).toEqual([
+      ['gpt-6.2-sol', ['sol']],
+      ['gpt-6.2-astra', ['astra']],
+      ['gpt-6.1-terra', []],
+      ['gpt-6.1-sol', []],
+      ['gpt-6-astra', []],
+      ['gpt-6-sol', []],
+      ['gpt-6-luna', ['luna']],
+      ['gpt-5.6-sol', []],
+      ['gpt-5.6-terra', ['terra']],
+      ['gpt-5.6-luna', []],
+    ]);
     expect(new Set(result.selectableNames).size).toBe(result.selectableNames.length);
-    // aliasToId must cover all selectableNames
     for (const name of result.selectableNames) {
       expect(result.aliasToId.has(name)).toBe(true);
     }
-    // 0.6.0 lists gpt-5.5 with retired:true, routable:false — never offered.
+    // The registry retains gpt-5.5 for exact-ID routes only, not selection.
     expect(result.selectableNames).not.toContain('gpt-5.5');
   }, LIVE_SPAWN_TEST_TIMEOUT_MS);
 });

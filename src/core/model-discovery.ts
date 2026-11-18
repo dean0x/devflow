@@ -127,7 +127,7 @@ const DISCOVERY_ARGV: readonly ['models', '--json'] = ['models', '--json'];
  * collision, no alias-equals-canonical-id).
  */
 export interface ExternalModel {
-  /** Canonical routing-runtime model ID, e.g. 'gpt-5.6-sol'. */
+  /** Canonical routing-runtime model ID, e.g. 'gpt-6.2-sol'. */
   readonly id: string;
   /** Short-form aliases in registry order, e.g. ['sol']. May be empty. */
   readonly aliases: readonly string[];
@@ -148,8 +148,8 @@ export type ExternalModelCatalog =
       readonly models: readonly ExternalModel[];
       /**
        * Map from every selectable name to its canonical id.
-       * Covers both aliases (e.g. 'sol' → 'gpt-5.6-sol') and canonical ids
-       * (e.g. 'gpt-5.6-sol' → 'gpt-5.6-sol').
+       * Covers both aliases (e.g. 'sol' → 'gpt-6.2-sol') and canonical ids
+       * (e.g. 'gpt-6.2-sol' → 'gpt-6.2-sol').
        */
       readonly aliasToId: ReadonlyMap<string, string>;
       /**

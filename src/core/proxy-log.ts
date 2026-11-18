@@ -32,14 +32,12 @@ export const PROXY_LOG_TAIL_BYTES = 1_048_576;
  * Call sites compose on top of this result to add process-specific vars
  * (e.g. SUBSWITCH_CONFIG for the relay spawn and doctor spawn).
  *
- * On the paths devflow
- * invokes (serve, doctor, models) the routing runtime reads ANTHROPIC_API_KEY,
- * FORCE_COLOR, NO_COLOR (dist/tty.js, presence semantics), SUBSWITCH_CONFIG and
- * XDG_CONFIG_HOME (user-config lookup, reached only on an implicit config load —
- * see D-EFR-6 in model-discovery.ts). CI is read only by `init`; CODEX_HOME and
- * CLAUDE_CONFIG_DIR only by the Codex ingress, `init` and the Codex doctor, none of
- * which devflow enables or invokes. Verified by whole-dist grep of the 0.6.0
- * package. An allowlist is the correct shape: 61 inherited vars → 6.
+ * The 0.7.0 serve, doctor, and models paths need no additional inherited keys.
+ * Devflow sets SUBSWITCH_CONFIG for explicit loads and isolates XDG_CONFIG_HOME
+ * for discovery. The relay uses its defaults for color and limit observations:
+ * do not inherit FORCE_COLOR, NO_COLOR, SUBSWITCH_LIMIT_RECORDING, or
+ * SUBSWITCH_LIMIT_DIR. Init and native Codex ingress use other variables that
+ * the Devflow proxy does not need.
  *
  * HOME is retained: the runtime's loadConfig resolves ~ paths via homedir().
  *

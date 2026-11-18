@@ -129,14 +129,10 @@ export async function writeProxyState(
  * Top-level keys devflow carries into the routing config. Unknown top-level keys
  * cause a hard relay startup error — never emit them.
  *
- * @D-EFR-4 Subswitch 0.6.0 routing config contract:
- *   FileConfigSchema is a z.strictObject with exactly 6 accepted top-level keys:
- *   port, logLevel, anthropic, providers, limits, codexIngress. Unknown keys cause a
- *   hard startup error — the relay refuses to start. anthropic and limits are
- *   themselves strictObject + prefault({}), so they may be partially specified.
- *   codexIngress is accepted by the relay but deliberately NOT carried: devflow's
- *   relay serves Claude Code only, and the ingress block would make it accept native
- *   Codex traffic and hold Claude credentials on devflow's behalf.
+ * @D-EFR-4 The 0.7.0 FileConfigSchema also accepts configVersion, accessProfiles,
+ * routes, and codexIngress. Devflow carries only the keys below. Its proxy serves
+ * Claude Code through the default routing table, not explicit subscription routes
+ * or native Codex ingress. The anthropic and limits blocks accept partial values.
  */
 const ROUTING_CONFIG_ALLOWED_TOP_KEYS = new Set<string>([
   'port', 'logLevel', 'anthropic', 'providers', 'limits',

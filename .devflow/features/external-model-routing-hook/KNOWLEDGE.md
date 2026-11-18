@@ -85,7 +85,7 @@ The hook takes the spawn lock with `curation_lock_acquire` (stale-break by the l
 
 - `scrubChildEnv()` in `proxy-log.ts` returns only the base variables present in `process.env` (`PATH`, `HOME`, `TMPDIR`, `LANG`, `LC_ALL`, `NODE_EXTRA_CA_CERTS`; plus `SystemRoot`, `APPDATA`, `USERPROFILE`, `ComSpec` on win32). Absent variables are omitted rather than set to undefined.
 - Call sites add their process-specific variables on top: `SUBSWITCH_CONFIG` for the relay spawn and the doctor spawn; model discovery adds `NO_COLOR` and an `XDG_CONFIG_HOME` redirect (see the agent-config knowledge base).
-- The runtime's reads on the paths devflow invokes (serve, doctor, models) are `ANTHROPIC_API_KEY`, `FORCE_COLOR`, `NO_COLOR`, `SUBSWITCH_CONFIG` and `XDG_CONFIG_HOME`; an allowlist is the correct shape because the rest of the inherited environment is noise or risk. `HOME` stays because the runtime resolves `~` paths through `homedir()`.
+- The runtime's reads on the paths devflow invokes (serve, doctor, models) are `ANTHROPIC_API_KEY`, `FORCE_COLOR`, `NO_COLOR`, `SUBSWITCH_CONFIG`, `SUBSWITCH_LIMIT_DIR`, `SUBSWITCH_LIMIT_RECORDING` and `XDG_CONFIG_HOME`; devflow passes neither limit variable, so the relay keeps its default limit observations; an allowlist is the correct shape because the rest of the inherited environment is noise or risk. `HOME` stays because the runtime resolves `~` paths through `homedir()`.
 - A drift-guard test in `tests/proxy-log.test.ts` asserts the hook contains the conditional `NODE_EXTRA_CA_CERTS` append, so a one-sided change is caught (KB-AP-3, KB-AP-4).
 
 ## Log Handling

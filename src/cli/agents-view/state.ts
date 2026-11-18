@@ -141,16 +141,15 @@ function pickerNamesFor(model: ExternalModel): readonly string[] {
  *   - Contribute the canonical ID if and only if the model has NO aliases.
  *
  * This means:
- *   gpt-5.6-sol  [aliases: ['sol']]   → 'sol'
- *   gpt-5.5      [aliases: []]        → 'gpt-5.5'
- *   gpt-x        [aliases: ['a','b']] → 'a', 'b'
+ *   gpt-6.2-sol   [aliases: ['sol']]   → 'sol'
+ *   gpt-6.1-terra [aliases: []]        → 'gpt-6.1-terra'
+ *   gpt-x         [aliases: ['a','b']] → 'a', 'b'
  *
- * When a currently-alias-less model gains an alias in a future subswitch
- * release, it automatically renders as that alias with no code change.
+ * If a model gains an alias, the picker uses that alias with no code change.
  *
  * NOTE: catalog.selectableNames is NOT used here — it doubles as the --set
  * validation allowlist (includes both aliases and canonical ids). Narrowing
- * it would reject `devflow agents --set coder --model gpt-5.6-sol`.
+ * it would reject `devflow agents --set code --model gpt-6.2-sol`.
  *
  * Pure function, no I/O.
  */
@@ -163,7 +162,7 @@ export function pickerNames(models: readonly ExternalModel[]): readonly string[]
  * picker name that represents it in the TUI cycle.
  *
  * Used by buildRow to normalize a stored canonical id to its alias on read,
- * e.g. 'gpt-5.6-sol' → 'sol', so the value stays in-cycle and does not
+ * e.g. 'gpt-6.2-sol' → 'sol', so the value stays in-cycle and does not
  * appear as an off-cycle pin. NEVER rewrites the value on disk — only for
  * display.
  *
@@ -445,7 +444,7 @@ export interface InitRowInput {
   /**
    * Map from stored identifier (alias or canonical id) to picker name.
    * Built by buildPickerNameMap(catalog). When provided, normalizes a stored
-   * canonical id (e.g. 'gpt-5.6-sol') to its alias ('sol') so the configured
+   * canonical id (e.g. 'gpt-6.2-sol') to its alias ('sol') so the configured
    * model stays in-cycle and does not appear as an off-cycle pin.
    * NEVER writes the normalized value back to disk.
    * Optional: omit on the proxy-off / cache-miss path where normalization
@@ -491,7 +490,7 @@ export function buildRow(input: InitRowInput): AgentRow {
   const cycle = worker ? WORKER_MODEL_CYCLE : (input.modelCycle ?? []);
 
   // Normalize stored canonical id to picker name (Fix 1: in-memory only, never
-  // written back to disk). E.g. 'gpt-5.6-sol' → 'sol' when pickerNameMap is known.
+  // written back to disk). E.g. 'gpt-6.2-sol' → 'sol' when pickerNameMap is known.
   // This keeps the value in-cycle so it does not become a spurious off-cycle pin.
   const normalizedSavedModel =
     input.savedModel !== undefined && input.pickerNameMap !== undefined
