@@ -294,6 +294,28 @@ export function proxyBaseUrl(port: number): string {
   return `http://127.0.0.1:${port}`;
 }
 
+const OUR_BASE_URL_PATTERN = /^http:\/\/127\.0\.0\.1:\d+$/;
+
+export type ProxyEnvState = 'ours' | 'ours-other-port' | 'foreign' | 'absent';
+
+/** Classify a settings URL. A relay URL on any port counts as a proxy signal. */
+export function classifyProxyBaseUrl(url: unknown, port: number): ProxyEnvState {
+  if (typeof url !== 'string') return 'absent';
+  if (url === proxyBaseUrl(port)) return 'ours';
+  if (OUR_BASE_URL_PATTERN.test(url)) return 'ours-other-port';
+  return 'foreign';
+}
+
+/** Read the proxy env state from settings JSON. Invalid JSON still raises a parse error. */
+export function readProxyEnvState(settingsJson: string, port: number): ProxyEnvState {
+  const settings = JSON.parse(settingsJson) as Record<string, unknown>;
+  const env = settings.env;
+  const url = typeof env === 'object' && env !== null && 'ANTHROPIC_BASE_URL' in env
+    ? env.ANTHROPIC_BASE_URL
+    : undefined;
+  return classifyProxyBaseUrl(url, port);
+}
+
 // ---------------------------------------------------------------------------
 // isProxyEnabled — the primary contract other modules consume
 // ---------------------------------------------------------------------------

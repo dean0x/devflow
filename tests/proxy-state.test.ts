@@ -21,6 +21,7 @@ import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import {
+  classifyProxyBaseUrl,
   readProxyState,
   writeProxyState,
   buildRoutingConfigJson,
@@ -42,6 +43,19 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await fs.rm(tmpDir, { recursive: true, force: true });
+});
+
+describe('proxy URL classification', () => {
+  it.each([
+    ['http://127.0.0.1:5050', 'ours'],
+    ['http://127.0.0.1:4141', 'ours-other-port'],
+    ['https://gateway.example', 'foreign'],
+    ['http://127.0.0.1:5050/', 'foreign'],
+    [{ href: 'http://127.0.0.1:5050' }, 'absent'],
+    [undefined, 'absent'],
+  ])('classifies %j as %s', (url, state) => {
+    expect(classifyProxyBaseUrl(url, 5050)).toBe(state);
+  });
 });
 
 // ---------------------------------------------------------------------------

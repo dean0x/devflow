@@ -29,6 +29,7 @@ import {
   buildProxyState,
   buildRoutingConfigJson,
   proxyBaseUrl,
+  readProxyEnvState,
   proxyJsonExists,
   resolveProxyBin,
   DEFAULT_PROXY_PORT,
@@ -65,6 +66,8 @@ import {
   type Settings,
 } from '../../targets/claude-code/hooks.js';
 
+export { readProxyEnvState } from '../../core/proxy-state.js';
+
 // ─── Result type (local pattern) ──────────────────────────────────────────────
 
 type Result<T, E = string> = { ok: true; value: T } | { ok: false; error: E };
@@ -92,9 +95,6 @@ const isProxyHook = devflowHookOwner([PROXY_HOOK_MARKER]);
 
 /** The events the ensure-proxy hook is registered on. */
 const PROXY_HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit'] as const;
-
-/** Pattern matching our relay's ANTHROPIC_BASE_URL value. */
-const OUR_BASE_URL_PATTERN = /^http:\/\/127\.0\.0\.1:\d+$/;
 
 /** Timeout for individual TCP connect probes and HTTP health checks (ms). */
 const PROBE_TIMEOUT_MS = 2000;
@@ -256,29 +256,6 @@ export function stripProxyEnv(settingsJson: string, managedPort: number): string
   const settings = JSON.parse(settingsJson) as Settings;
   _stripProxyEnvFromObject(settings, managedPort);
   return JSON.stringify(settings, null, 2) + '\n';
-}
-
-/**
- * Read the proxy env state from a settings JSON string.
- *
- * Returns:
- *   'ours'           — ANTHROPIC_BASE_URL = our relay on the given port
- *   'ours-other-port'— ANTHROPIC_BASE_URL = our relay on a different port
- *   'foreign'        — ANTHROPIC_BASE_URL set but not our relay
- *   'absent'         — ANTHROPIC_BASE_URL not set
- */
-export function readProxyEnvState(
-  settingsJson: string,
-  port: number,
-): 'ours' | 'ours-other-port' | 'foreign' | 'absent' {
-  const settings = JSON.parse(settingsJson) as Settings;
-  const s = settings as Record<string, unknown>;
-  const env = s.env as Record<string, unknown> | undefined;
-  const url = env?.ANTHROPIC_BASE_URL;
-  if (typeof url !== 'string') return 'absent';
-  if (url === proxyBaseUrl(port)) return 'ours';
-  if (OUR_BASE_URL_PATTERN.test(url)) return 'ours-other-port';
-  return 'foreign';
 }
 
 // ─── Pure hook helpers ──────────────────────────────────────────────────────────
