@@ -329,6 +329,21 @@ export const FENCE_ROWS: readonly FenceRow[] = [
   { args: ['flags', '--unset', 'max-concurrent-subagents'], allow: [SETTINGS, MANIFEST], mustWrite: true },
   { args: ['flags', '--status'], allow: NONE, mustWrite: false },
   { args: ['flags', '--list'], allow: NONE, mustWrite: false },
+  {
+    args: ['flags', '--enable', 'code-mode'], allow: NONE, mustWrite: false, exitCode: 1,
+    seed: sb => writeFileSync(path.join(sb.home, '.devflow', 'proxy.json'), '{"enabled":true}\n'),
+  },
+  {
+    args: ['flags', '--disable', 'code-mode'], allow: [SETTINGS, MANIFEST], mustWrite: true,
+    seed: sb => {
+      rewriteHomeJson(sb, '.claude/settings.json', settings => {
+        (settings.env as Record<string, unknown>).CLAUDE_CODE_EXPERIMENTAL_CODE_MODE = '1'
+      })
+      rewriteHomeJson(sb, '.devflow/manifest.json', manifest => {
+        ((manifest.features as Record<string, unknown>).flags as Record<string, unknown>)['code-mode'] = true
+      })
+    },
+  },
 
   { args: ['debug', '--enable'], allow: [SETTINGS], mustWrite: true },
   { args: ['debug', '--disable'], allow: [SETTINGS], mustWrite: true },

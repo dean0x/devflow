@@ -73,8 +73,17 @@ export function codeModeBlockers({ codeModeOn, proxyOn, trafficOn }: CodeModeBlo
 }
 
 /** Warn once per blocker in the final state, even if the write did not add it. */
-export function writeTimeWarnings(_before: CodeModeBlockerState, after: CodeModeBlockerState): string[] {
+export function writeTimeWarnings(_before: CodeModeBlockerState | undefined, after: CodeModeBlockerState): string[] {
   return codeModeBlockers(after);
+}
+
+export function codeModeStatusNotes({ record, env }: CodeModeSignals): string[] {
+  if (!codeModeFlag || !isEnvBooleanFlag(codeModeFlag)) return [];
+  if (holdsUserEnvValue(codeModeFlag, env)) return [CODE_MODE_USER_VALUE_NOTE];
+  if (record?.['code-mode'] === false && holdsOwnEnvPayload(codeModeFlag, env)) {
+    return [CODE_MODE_RECORD_FALSE_NOTE];
+  }
+  return [];
 }
 
 export function initCodeModeWarnings({ proxyEnabled, record, env }: {
