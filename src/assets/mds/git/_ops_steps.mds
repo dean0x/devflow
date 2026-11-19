@@ -123,9 +123,11 @@ For each issue reference in `SHIPPED_ISSUES` (sequentially, the first ≤50 in l
 
    | Tracker grammar | `ISSUE_PR_LINK` must match |
    |---|---|
-   | `github` | `^Closes #[1-9][0-9]{0,8}$` |
+   | `github` | `^(Closes|Refs) #[1-9][0-9]{0,8}$` |
    | `jira` | `^Refs [A-Z][A-Z0-9_]{1,9}-[1-9][0-9]{0,8}$` |
    | `linear` | `^Refs [A-Z][A-Z0-9]{0,9}-[1-9][0-9]{0,8}$` |
+
+   Under `github`, `Closes #{n}` closes the issue at merge and `Refs #{n}` only links it. A caller passes `Refs #{n}` for a PR that is one part of the issue; the last PR keeps `Closes #{n}`.
 
    This is a sink check, not a provider check: the spawn that resolved the provider rendered the line, this spawn does not re-derive it, and you never decide it. Two bounds sit outside the pattern because an anchor cannot express them, and you apply both: the value is **rejected if it carries a newline** — anchors are read as end-of-LINE by some engines, and everything after the first line would land in the PR body as free text — and rejected if it exceeds **60 characters**, which no valid line approaches.
 
