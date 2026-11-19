@@ -32,7 +32,7 @@ export const PROXY_LOG_TAIL_BYTES = 1_048_576;
  * Call sites compose on top of this result to add process-specific vars
  * (e.g. SUBSWITCH_CONFIG for the relay spawn and doctor spawn).
  *
- * The 0.7.0 serve, doctor, and models paths need no additional inherited keys.
+ * The 0.8.0 serve, doctor, and models paths need no additional inherited keys.
  * Devflow sets SUBSWITCH_CONFIG for explicit loads and isolates XDG_CONFIG_HOME
  * for discovery. The relay uses its defaults for color and limit observations:
  * do not inherit FORCE_COLOR, NO_COLOR, SUBSWITCH_LIMIT_RECORDING, or

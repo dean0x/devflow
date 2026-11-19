@@ -129,7 +129,7 @@ export async function writeProxyState(
  * Top-level keys devflow carries into the routing config. Unknown top-level keys
  * cause a hard relay startup error — never emit them.
  *
- * @D-EFR-4 The 0.7.0 FileConfigSchema also accepts configVersion, accessProfiles,
+ * @D-EFR-4 The 0.8.0 FileConfigSchema also accepts configVersion, accessProfiles,
  * routes, and codexIngress. Devflow carries only the keys below. Its proxy serves
  * Claude Code through the default routing table, not explicit subscription routes
  * or native Codex ingress. The anthropic and limits blocks accept partial values.
