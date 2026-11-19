@@ -142,6 +142,7 @@ interface PrEvidence {
   readonly SHA_RE: RegExp
   readonly GLOB_RE: RegExp
   readonly LOGIN_RE: RegExp
+  readonly PLAN_HEADING: string
   parsePlan(text: unknown): Result<Plan>
   parseClaims(text: unknown): Result<Claims>
   parseExceptions(text: unknown): Result<readonly ExceptionRecord[]>
@@ -227,7 +228,7 @@ describe('module surface', () => {
     expect(Object.isFrozen(PE)).toBe(true)
     expect(Object.keys(PE).sort()).toEqual([
       'CLAIMS_HEADING', 'CLAIM_LINE_RE', 'EVIDENCE_LINE_RE', 'EXCEPTION_KINDS', 'EXCEPTION_LINE_RE', 'GLOB_RE', 'LIMITS',
-      'LOGIN_RE', 'MARKERS', 'METHODS', 'PRECEDENCE', 'SHA_RE', 'STATES', 'TP_LINE_RE',
+      'LOGIN_RE', 'MARKERS', 'METHODS', 'PLAN_HEADING', 'PRECEDENCE', 'SHA_RE', 'STATES', 'TP_LINE_RE',
       'TRUSTED_ASSOCIATIONS', 'TRUSTED_PERMISSIONS', 'VERIFIED_STATES',
       'classify', 'dedupeKey', 'evidenceSections', 'exception', 'findBlock', 'formatEvidenceLine',
       'isRepoLink', 'matchGlob', 'parseBlock', 'parseClaims', 'parseEvidenceComment', 'parseEvidenceLine',
@@ -546,6 +547,8 @@ describe('TP_LINE_RE and parsePlan', () => {
   it('refuses order, duplicates, stray text, a late heading, empty and oversize input — with a line number only', () => {
     expect(PE.parsePlan([tpLine(2, 1, 'a', 'ci'), tpLine(1, 1, 'b', 'ci')].join('\n'))).toEqual({ ok: false, error: { code: 'order', line: 2 } })
     expect(PE.parsePlan([tpLine(1, 1, 'a', 'ci'), tpLine(1, 1, 'b', 'ci')].join('\n'))).toEqual({ ok: false, error: { code: 'duplicate', line: 2 } })
+    // A repeat that is not next to its first line breaks the order rule, not the duplicate rule.
+    expect(PE.parsePlan([tpLine(1, 1, 'a', 'ci'), tpLine(2, 1, 'b', 'ci'), tpLine(1, 1, 'c', 'ci')].join('\n'))).toEqual({ ok: false, error: { code: 'order', line: 3 } })
     expect(PE.parsePlan([tpLine(1, 1, 'a', 'ci'), 'free text'].join('\n'))).toEqual({ ok: false, error: { code: 'malformed', line: 2 } })
     expect(PE.parsePlan([tpLine(1, 1, 'a', 'ci'), '## Test Plan'].join('\n'))).toEqual({ ok: false, error: { code: 'malformed', line: 2 } })
     expect(errCode(PE.parsePlan('## Test Plan\n\n'))).toBe('empty')
@@ -1457,6 +1460,13 @@ describe('evidenceSections', () => {
     expect(errCode(PE.evidenceSections('## Claims\n## Claims'))).toBe('duplicate')
     expect(errCode(PE.evidenceSections('## Test Plan\n## Notes'))).toBe('malformed')
     expect(errCode(PE.evidenceSections('## constructor'))).toBe('malformed')
+  })
+
+  it('exports the Test Plan heading that the section parser and the plan parser read', () => {
+    const tp = tpLine(1, 1, 'a', 'ci')
+    expect(PE.PLAN_HEADING).toBe('## Test Plan')
+    expect(unwrap(PE.evidenceSections(`# Evidence\n\n${PE.PLAN_HEADING}\n${tp}\n`)).testPlan).toBe(`${PE.PLAN_HEADING}\n${tp}`)
+    expect(unwrap(PE.parsePlan(`${PE.PLAN_HEADING}\n${tp}\n`)).tps.map(t => t.id)).toEqual([1])
   })
 })
 

@@ -300,7 +300,7 @@ chmod 600 "$LOG_FILE" 2>/dev/null || true
 # TLS errors rather than being a no-op). NODE_OPTIONS is deliberately excluded:
 # it permits arbitrary code execution via --require/--import.
 # Mirrored in scrubChildEnv() in proxy-log.ts; both allowlists must stay in sync.
-# The 0.7.0 relay uses default settings for limit observations. Do not pass
+# The 0.8.0 relay uses default settings for limit observations. Do not pass
 # SUBSWITCH_LIMIT_RECORDING or SUBSWITCH_LIMIT_DIR from the parent.
 # Bash 3.2-safe: bash arrays and array append (+=) are supported since bash 2.0.
 # nohup + env -i chain: nohup inherits the parent env (irrelevant — env -i clears

@@ -115,6 +115,7 @@ interface VerifyEvidence {
   settleOutcome(outcome: unknown): Outcome
   commentIdOf(url: unknown, pr: number): string
   editTarget(pr: { readonly comments: readonly FactsComment[] }): EditTarget | null
+  claimCause(io: { readonly stderr: (text: string) => void }, text: unknown): void
 }
 
 const req = createRequire(import.meta.url)
@@ -229,7 +230,7 @@ describe('module surface', () => {
     expect(Object.keys(VE).sort()).toEqual([
       'CAPS', 'EXIT_CODES', 'PR_FIELDS', 'main', 'settleOutcome',
       'BODY_STATUSES', 'COMMENT_STATUSES', 'readinessVerdict', 'bindCiHead', 'renderPublishBlock', 'parsePublishBlock', 'renderReadinessBlock', 'parseReadinessBlock', 'writeReadinessOut',
-      'commentIdOf', 'editTarget',
+      'commentIdOf', 'editTarget', 'claimCause',
     ].sort())
   })
 
@@ -252,7 +253,12 @@ describe('module surface', () => {
 // ---------------------------------------------------------------------------
 
 describe('usage (exit 1, stdout empty)', () => {
-  const USAGE_CASES: ReadonlyArray<readonly [string, readonly string[]]> = [
+  const SHA = 'a'.repeat(40)
+  const FLAGS = 'the flags are absent, repeated or bad'
+  const GATE_ALONE = 'gate takes no plan and no other claim'
+  const notOne = (k: number): string => `argument ${k} is not one TP claim of the form TP-n=PASS, FAIL or SKIP with an optional exit`
+  /** Each row: a label, the arguments, and for `claim` the cause its stderr names (`verify-evidence: claim: <cause>`). */
+  const USAGE_CASES: ReadonlyArray<readonly [string, readonly string[], string?]> = [
     ['no subcommand', []],
     ['an unknown subcommand', ['frobnicate']],
     ['check without a kind', ['check']],
@@ -276,35 +282,72 @@ describe('usage (exit 1, stdout empty)', () => {
     ['verify with a value on a switch', ['verify', '--pr', '7', '--approval=yes']],
     ['splice without --out', ['splice', '--pr', '7', '--state', 'd', '--block', 'b']],
     ['readback without --expect', ['readback', '--pr', '7']],
-    ['claim without arguments', ['claim']],
-    ['claim without --head', ['claim', '--evidence', 'e.md', 'gate']],
-    ['claim without --evidence', ['claim', '--head', 'a'.repeat(40), 'gate']],
-    ['claim without a claim', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40)]],
-    ['claim with a duplicated flag', ['claim', '--evidence', 'e.md', '--evidence', 'f.md', '--head', 'a'.repeat(40), 'gate']],
-    ['claim with an unknown flag', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), '--force', 'gate']],
-    ['claim with a flag after the claims', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), 'gate', '--plan', 'p.md']],
-    ['claim gate with --plan', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), '--plan', 'p.md', 'gate']],
-    ['claim gate with a TP', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), 'gate', 'TP-1=PASS']],
-    ['claim with an outcome that is not PASS, FAIL or SKIP', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), 'TP-1=PASSED']],
-    ['claim with a lower-case outcome', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), 'TP-1=pass']],
-    ['claim with TP-0', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), 'TP-0=PASS']],
-    ['claim with a leading-zero TP', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), 'TP-01=PASS']],
-    ['claim with a four-digit TP', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), 'TP-1000=PASS']],
-    ['claim with an empty exit', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), 'TP-1=PASS:']],
-    ['claim with a space in an exit', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), 'TP-1=PASS:1 2']],
-    ['claim with a TP twice', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), 'TP-1=PASS', 'TP-1=FAIL']],
-    ['claim with --flag=value', ['claim', '--evidence=e.md', '--head', 'a'.repeat(40), 'gate']],
-    ['claim with more TPs than a plan holds', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), ...Array.from({ length: 201 }, (_, i) => `TP-${i + 1}=PASS`)]],
+    ['claim without arguments', ['claim'], FLAGS],
+    ['claim without --head', ['claim', '--evidence', 'e.md', 'gate'], FLAGS],
+    ['claim without --evidence', ['claim', '--head', SHA, 'gate'], FLAGS],
+    ['claim without a claim', ['claim', '--evidence', 'e.md', '--head', SHA], 'there is no claim'],
+    ['claim with a duplicated flag', ['claim', '--evidence', 'e.md', '--evidence', 'f.md', '--head', SHA, 'gate'], FLAGS],
+    ['claim with an unknown flag', ['claim', '--evidence', 'e.md', '--head', SHA, '--force', 'gate'], FLAGS],
+    ['claim with a flag missing its value', ['claim', '--evidence', 'e.md', '--head'], FLAGS],
+    ['claim with a flag after the gate', ['claim', '--evidence', 'e.md', '--head', SHA, 'gate', '--plan', 'p.md'], GATE_ALONE],
+    ['claim with a flag after the TP claims', ['claim', '--evidence', 'e.md', '--head', SHA, 'TP-1=PASS', '--plan', 'p.md'], 'argument 2 is a flag after the claims'],
+    ['claim gate with --plan', ['claim', '--evidence', 'e.md', '--head', SHA, '--plan', 'p.md', 'gate'], GATE_ALONE],
+    ['claim gate with a TP', ['claim', '--evidence', 'e.md', '--head', SHA, 'gate', 'TP-1=PASS'], GATE_ALONE],
+    ['claim a TP before gate', ['claim', '--evidence', 'e.md', '--head', SHA, 'TP-1=PASS', 'gate'], GATE_ALONE],
+    ['claim with an outcome that is not PASS, FAIL or SKIP', ['claim', '--evidence', 'e.md', '--head', SHA, 'TP-1=PASSED'], notOne(1)],
+    ['claim with a lower-case outcome', ['claim', '--evidence', 'e.md', '--head', SHA, 'TP-1=pass'], notOne(1)],
+    ['claim with TP-0', ['claim', '--evidence', 'e.md', '--head', SHA, 'TP-0=PASS'], notOne(1)],
+    ['claim with a leading-zero TP', ['claim', '--evidence', 'e.md', '--head', SHA, 'TP-01=PASS'], notOne(1)],
+    ['claim with a four-digit TP', ['claim', '--evidence', 'e.md', '--head', SHA, 'TP-1000=PASS'], notOne(1)],
+    ['claim with an empty exit', ['claim', '--evidence', 'e.md', '--head', SHA, 'TP-1=PASS:'], notOne(1)],
+    ['claim with a space in an exit (no split hint)', ['claim', '--evidence', 'e.md', '--head', SHA, 'TP-1=PASS:1 2'], notOne(1)],
+    ['claim with a bad third argument (k counts from the first claim)', ['claim', '--evidence', 'e.md', '--head', SHA, 'TP-1=PASS', 'TP-2=FAIL', 'TP-3=OK'], notOne(3)],
+    ['claim with two TP claims in one argument', ['claim', '--evidence', 'e.md', '--head', SHA, 'TP-1=PASS TP-2=FAIL'],
+      'argument 1 holds more than one TP claim; pass each TP claim as its own argument'],
+    ['claim with every claim packed in the second argument', ['claim', '--evidence', 'e.md', '--head', SHA, 'TP-1=PASS', 'TP-2=PASS,TP-3=SKIP'],
+      'argument 2 holds more than one TP claim; pass each TP claim as its own argument'],
+    ['claim with a TP twice', ['claim', '--evidence', 'e.md', '--head', SHA, 'TP-1=PASS', 'TP-1=FAIL'], 'TP-1 is given more than once in this call'],
+    ['claim with a TP twice, apart', ['claim', '--evidence', 'e.md', '--head', SHA, 'TP-12=PASS', 'TP-3=PASS', 'TP-12=FAIL:1'], 'TP-12 is given more than once in this call'],
+    ['claim with --flag=value', ['claim', '--evidence=e.md', '--head', SHA, 'gate'], FLAGS],
+    ['claim with more TPs than a plan holds', ['claim', '--evidence', 'e.md', '--head', SHA, ...Array.from({ length: 201 }, (_, i) => `TP-${i + 1}=PASS`)],
+      'there are more than 200 TP arguments'],
   ]
 
-  for (const [label, args] of USAGE_CASES) {
+  for (const [label, args, cause] of USAGE_CASES) {
     it(`${label} → exit 1, empty stdout, usage on stderr`, () => {
       const r = runMain(args, { exec: () => { throw new Error('usage must make no call') } })
       expect(r.code).toBe(1)
       expect(r.stdout).toBe('')
       expect(r.stderr).toMatch(/Usage:/)
+      if (cause === undefined) expect(r.stderr).not.toContain('verify-evidence: claim:')
+      else expect(r.stderr).toContain(`verify-evidence: claim: ${cause}\n`)
     })
   }
+
+  it('every claim row names its cause, and every other row names none', () => {
+    const claimRows = USAGE_CASES.filter(([, args]) => args[0] === 'claim')
+    expect(claimRows.length).toBeGreaterThanOrEqual(20)
+    expect(claimRows.filter(([, , cause]) => cause === undefined)).toEqual([])
+    expect(USAGE_CASES.filter(([, args, cause]) => args[0] !== 'claim' && cause !== undefined)).toEqual([])
+  })
+
+  it('a claim cause holds no byte of the argument it names', () => {
+    const noCall: ExecFn = () => { throw new Error('usage must make no call') }
+    const split = runMain(['claim', '--evidence', 'e.md', '--head', SHA, 'TP-1=PASS', 'TP-9=PASS <b>TP-8</b> @x #1 `y`'], { exec: noCall })
+    const bad = runMain(['claim', '--evidence', 'e.md', '--head', SHA, '<b>TP-9</b>=PASS @x #1 `y`'], { exec: noCall })
+    expect(split.stderr).toContain('verify-evidence: claim: argument 2 holds more than one TP claim; pass each TP claim as its own argument\n')
+    expect(bad.stderr).toContain(`verify-evidence: claim: ${notOne(1)}\n`)
+    for (const s of ['<b>', '@x', '#1', '`y`', 'TP-8', 'TP-9']) {
+      expect(split.stderr, s).not.toContain(s)
+      expect(bad.stderr, s).not.toContain(s)
+    }
+  })
+
+  it('the cause line comes before the unchanged usage text', () => {
+    const r = runMain(['claim', '--evidence', 'e.md', '--head', SHA], { exec: () => { throw new Error('usage must make no call') } })
+    const plain = runMain(['frobnicate'], { exec: () => { throw new Error('usage must make no call') } })
+    expect(r.stderr).toBe(`verify-evidence: claim: there is no claim\n${plain.stderr}`)
+  })
 
   it('through the real process too: exit 1 and not one byte on stdout', () => {
     const home = scratch('usage-home')
@@ -1188,7 +1231,7 @@ describe('trusted record — refresh mode reads claims from it (D-VERIFY-RECORD)
   it('a counts-only or malformed body block cannot serve as the plan: exit 2, stdout empty', () => {
     const counts = `${BLOCK_START}\n## Test Plan\nVerified 0/2: VERIFIED-CI 0, ATTESTED-LOCAL 0, UNVERIFIED 2, STALE 0, FAILED 0, INDETERMINATE 0 (counts only: the TP lines exceed the PR body limit)\n${BLOCK_END}\n`
     const dup = `${blockOf([CI])}\n${blockOf([LOCAL])}\n`
-    for (const b of [counts, dup]) {
+    for (const b of [counts, dup, blockOf([LOCAL, CI]), blockOf([CI, LOCAL, CI])]) {
       const v = verifyScn({ scn: { body: b } })
       expect(v.code).toBe(2)
       expect(v.stdout).toBe('')
@@ -1322,6 +1365,108 @@ describe('refresh re-derives a recorded claim from current facts (D-VERIFY-RECOR
     expect(later.states.get(1)).toBe('VERIFIED-CI')
     expect(later.states.get(2)).toBe('ATTESTED-LOCAL')
     expect(later.fields?.posted, 'the state moved, so the key is new and the evidence posts').toBe('no')
+  })
+})
+
+describe('the notes that name why a TP did not verify', () => {
+  const LOCAL = tpLine(1, 'a local check', 'local', ['src/**'])
+  /** The closed tokens of the stderr summary line, or none. */
+  const notesOf = (stderr: string): string[] => {
+    const m = /^verify-evidence: notes: (\S+)$/m.exec(stderr)
+    return m === null ? [] : m[1].split(',')
+  }
+  const viewer = (text: string): CommentSpec => ({ login: 'devbot', body: text, viewerDidAuthor: true })
+  const record = (over: Partial<RecordSpec> = {}): RecordSpec =>
+    ({ id: 1, state: 'UNVERIFIED', sha: HEAD, line: LOCAL, out: 'PASS', ...over })
+
+  it('a local PASS with no exit code reads UNVERIFIED and carries the note local-no-exit', () => {
+    const v = verifyScn({ scn: {}, evidence: evidenceFile([LOCAL], [claimLine(1, 'PASS', HEAD)]) })
+    expect(v.code, v.stderr).toBe(0)
+    expect(v.states.get(1)).toBe('UNVERIFIED')
+    expect(notesOf(v.stderr)).toEqual(['local-no-exit'])
+  })
+
+  it('so does a trusted record of a local PASS with no exit code (refresh mode)', () => {
+    const body = `Intro.\n\n${blockOf([LOCAL])}\n`
+    const v = verifyScn({ scn: { body, comments: [viewer(recordComment(HEAD, [record()]))] } })
+    expect(v.states.get(1)).toBe('UNVERIFIED')
+    expect(notesOf(v.stderr)).toContain('local-no-exit')
+  })
+
+  it('so does a local PASS with no exit code at an older SHA in the PR, when the change since misses the TP files', () => {
+    const scn: Scn = { ancestry: { [OLD]: 'in' }, diffs: { [OLD]: ['docs/x.md'] } }
+    const v = verifyScn({ scn, evidence: evidenceFile([LOCAL], [claimLine(1, 'PASS', OLD)]) })
+    expect(v.code, v.stderr).toBe(0)
+    expect(v.states.get(1)).toBe('UNVERIFIED')
+    expect(notesOf(v.stderr)).toEqual(['local-no-exit'])
+  })
+
+  /** Each row: a label, the evidence file's claims, the scenario, and the state the ladder gives. */
+  const QUIET: ReadonlyArray<readonly [string, readonly string[], Scn, State]> = [
+    ['no claim', [], {}, 'UNVERIFIED'],
+    ['a SKIP', [claimLine(1, 'SKIP', HEAD)], {}, 'UNVERIFIED'],
+    ['a claim SHA outside the PR', [claimLine(1, 'PASS', OUTSIDE)], { ancestry: { [OUTSIDE]: 'out' } }, 'UNVERIFIED'],
+    ['a PASS with exit 0', [claimLine(1, 'PASS', HEAD, 0)], {}, 'ATTESTED-LOCAL'],
+    ['a PASS with exit 1', [claimLine(1, 'PASS', HEAD, 1)], {}, 'FAILED'],
+    ['a FAIL with no exit', [claimLine(1, 'FAIL', HEAD)], {}, 'FAILED'],
+    ['a PASS with no exit that the change since makes STALE', [claimLine(1, 'PASS', OLD)], { ancestry: { [OLD]: 'in' }, diffs: { [OLD]: ['src/a.ts'] } }, 'STALE'],
+    ['a PASS with no exit whose diff cannot be read', [claimLine(1, 'PASS', OLD)], { ancestry: { [OLD]: 'in' }, diffs: { [OLD]: 'error' } }, 'INDETERMINATE'],
+  ]
+
+  for (const [label, claims, scn, state] of QUIET) {
+    it(`no local-no-exit note for ${label} (${state})`, () => {
+      const v = verifyScn({ scn, evidence: evidenceFile([LOCAL], claims) })
+      expect(v.code, v.stderr).toBe(0)
+      expect(v.states.get(1)).toBe(state)
+      expect(notesOf(v.stderr)).not.toContain('local-no-exit')
+    })
+  }
+
+  it('no local-no-exit note for a record whose TP text changed, though the state is UNVERIFIED', () => {
+    const edited = `Intro.\n\n${blockOf([LOCAL.replace('a local check', 'an edited check')])}\n`
+    const v = verifyScn({ scn: { body: edited, comments: [viewer(recordComment(HEAD, [record()]))] } })
+    expect(v.states.get(1)).toBe('UNVERIFIED')
+    expect(notesOf(v.stderr)).not.toContain('local-no-exit')
+  })
+
+  describe('run-failed: a failed CI run fails a ci PASS', () => {
+    const CI = tpLine(2, 'the suite covers src', 'ci', ['src/**'])
+    const ciAt = (outcome: 'PASS' | 'FAIL', sha = HEAD): string => evidenceFile([CI], [claimLine(2, outcome, sha)])
+
+    it('a ci PASS whose run at its SHA failed reads FAILED and carries the note run-failed, and no run text', () => {
+      const v = verifyScn({ scn: { runs: { [HEAD]: [{ id: 101 }, { id: 102, conclusion: 'failure' }] } }, evidence: ciAt('PASS') })
+      expect(v.states.get(2)).toBe('FAILED')
+      expect(v.records[0].run).toEqual({ id: 102, attempt: 1 })
+      expect(notesOf(v.stderr)).toEqual(['run-failed'])
+      expect(v.stderr).not.toContain('actions/runs')
+    })
+
+    it('so does one that the head\'s failed runs decide, when its own SHA has no runs', () => {
+      const scn: Scn = { ancestry: { [OLD]: 'in' }, diffs: { [OLD]: ['docs/x.md'] }, runs: { [OLD]: [], [HEAD]: [{ id: 201, conclusion: 'failure' }] } }
+      const v = verifyScn({ scn, evidence: ciAt('PASS', OLD) })
+      expect(v.states.get(2)).toBe('FAILED')
+      expect(notesOf(v.stderr)).toContain('run-failed')
+    })
+
+    it.each([
+      ['a ci FAIL with a failed run', 'FAILED', ciAt('FAIL'), { runs: { [HEAD]: [{ id: 101, conclusion: 'failure' }] } }],
+      ['a ci PASS whose runs all pass', 'VERIFIED-CI', ciAt('PASS'), { runs: { [HEAD]: [{ id: 101 }] } }],
+      ['a ci PASS with a failed run beside an expired one', 'INDETERMINATE', ciAt('PASS'), { runs: { [HEAD]: [{ id: 101, conclusion: 'failure' }, { id: 102, expired: true }] } }],
+      ['a local PASS with exit 1', 'FAILED', evidenceFile([LOCAL], [claimLine(1, 'PASS', HEAD, 1)]), {}],
+    ] as const)('no run-failed note for %s (%s)', (_label, state, evidence, scn) => {
+      const v = verifyScn({ scn, evidence })
+      expect([...v.states.values()]).toEqual([state])
+      expect(notesOf(v.stderr)).not.toContain('run-failed')
+    })
+  })
+
+  it('no local-no-exit note for a ci or a manual PASS with no exit', () => {
+    const ci = tpLine(2, 'a ci check', 'ci')
+    const manual = tpLine(3, 'a manual check', 'manual')
+    const v = verifyScn({ scn: { runs: { [HEAD]: [{ id: 101 }] } }, evidence: evidenceFile([ci, manual], [claimLine(2, 'PASS', HEAD), claimLine(3, 'PASS', HEAD)]) })
+    expect(v.states.get(2)).toBe('VERIFIED-CI')
+    expect(v.states.get(3)).toBe('ATTESTED-LOCAL')
+    expect(notesOf(v.stderr)).not.toContain('local-no-exit')
   })
 })
 
@@ -2441,6 +2586,28 @@ function collectRunCallSites(source: string): string[] {
   return sites
 }
 
+/**
+ * The function each stderr write (`io.stderr(` or `process.stderr.write(`) sits in, with the
+ * count of its writes. '(top level)' is code outside every top-level function.
+ */
+function collectStderrWriters(source: string): Record<string, number> {
+  const sites = new Map<string, number>()
+  let current = '(top level)'
+  for (const line of codeLines(source)) {
+    const fn = /^function (\w+)\(/.exec(line)
+    if (fn) current = fn[1]
+    else if (line.startsWith('}')) current = '(top level)'
+    const writes = line.match(/\bstderr(?:\.write)?\s*\(/g)
+    if (writes !== null) sites.set(current, (sites.get(current) ?? 0) + writes.length)
+  }
+  return Object.fromEntries(sites)
+}
+
+/** The closed list of stderr writers: each function that writes to stderr, with the count of its writes. */
+const STDERR_WRITERS: Readonly<Record<string, number>> = Object.freeze({
+  runCheck: 2, evidenceUnavailable: 1, publishRefusal: 1, claimCause: 1, refuse: 1, main: 3, '(top level)': 1,
+})
+
 /** A git( argv that names a revision-taking command without routing through rev(). */
 function collectUnrevvedGitCalls(source: string): string[] {
   const code = codeLines(source).join('\n')
@@ -2521,7 +2688,7 @@ describe('claim — appends the claim lines of a report to the evidence file', (
     it.each([
       ['0', 0], ['7', 7], ['99', 99], ['100', 100], ['199', 199], ['249', 249], ['250', 250], ['255', 255],
       ['256', null], ['300', null], ['007', null], ['00', null], ['-1', null], ['1.5', null], ['0x10', null],
-      ['abc', null], [EM, null], ['n/a', null], ['999999999999', null],
+      ['abc', null], [EM, null], ['n/a', null], ['HTTP-503', null], ['999999999999', null],
     ] as const)('an exit of %s is written as exit:%s, and a line the claim parser accepts', (exit, kept) => {
       const file = fileWith(evidenceFile(PLAN))
       const r = claim([...flags(file), `TP-1=PASS:${exit}`])
@@ -2530,6 +2697,31 @@ describe('claim — appends the claim lines of a report to the evidence file', (
       const claims = claimsOf(file)
       expect(claims.malformed).toBe(0)
       expect(claims.tp.get(1)).toMatchObject({ outcome: 'PASS', sha: HEAD, by: 'test', exit: kept })
+    })
+
+    it('accepts CAPS.TPS TP arguments in one call, one line each', () => {
+      const tps = Array.from({ length: VE.CAPS.TPS }, (_, i) => tpLine(i + 1, `step ${i + 1}`, 'manual'))
+      const file = fileWith(evidenceFile(tps))
+      const r = claim([...flags(file), ...tps.map((_, i) => `TP-${i + 1}=PASS`)])
+      expect(r).toMatchObject({ code: 0, stdout: `CLAIM appended:${VE.CAPS.TPS} PASS:${VE.CAPS.TPS} FAIL:0 SKIP:0 skipped:0\n` })
+      expect(claimsOf(file).tp.size).toBe(VE.CAPS.TPS)
+    })
+
+    it.each([
+      ['TP-2=PASS:0,TP-3=SKIP', 'argument 74 holds more than one TP claim; pass each TP claim as its own argument'],
+      ['TP-5=FAILED', 'argument 74 is not one TP claim of the form TP-n=PASS, FAIL or SKIP with an optional exit'],
+      ['TP-0=PASS', 'argument 74 is not one TP claim of the form TP-n=PASS, FAIL or SKIP with an optional exit'],
+      ['--plan', 'argument 74 is a flag after the claims'],
+      ['gate', 'gate takes no plan and no other claim'],
+    ])('refuses the whole batch when argument 74 is %s', (last, cause) => {
+      const tps = Array.from({ length: 76 }, (_, i) => tpLine(i + 1, `step ${i + 1}`, 'manual'))
+      const before = evidenceFile(tps, [claimLine(5, 'PASS', OLD)])
+      const file = fileWith(before)
+      const first = Array.from({ length: 73 }, (_, i) => `TP-${i + 4}=PASS`)
+      const r = claim([...flags(file), ...first, last], neverCalls)
+      expect(r).toMatchObject({ code: 1, stdout: '' })
+      expect(r.stderr).toContain(`verify-evidence: claim: ${cause}\n`)
+      expect(read(file)).toBe(before)
     })
 
     it('a TP with no exit ends at by:test', () => {
@@ -2556,6 +2748,68 @@ describe('claim — appends the claim lines of a report to the evidence file', (
       expect(claims.malformed).toBe(0)
       expect(claims.gates.validate).toMatchObject({ outcome: 'PASS', sha: HEAD, by: 'validate' })
       expect([...claims.tp.keys()]).toEqual([1, 2, 3])
+    })
+  })
+
+  describe('a method:local PASS with no exit code from 0 to 255', () => {
+    const MIXED = [
+      tpLine(1, 'a ci check', 'ci'),
+      tpLine(3, 'a local check', 'local'),
+      tpLine(5, 'a manual check', 'manual'),
+      tpLine(7, 'another local check', 'local'),
+      tpLine(9, 'a third local check', 'local'),
+    ]
+    const RULE = 'with no exit code from 0 to 255; verify reads'
+    const many = (ids: string): string =>
+      `verify-evidence: claim: ${ids} are method:local PASS claims ${RULE} them UNVERIFIED, and only exit 0 from the Test report counts\n`
+    const one = (id: string): string =>
+      `verify-evidence: claim: ${id} is a method:local PASS claim ${RULE} it UNVERIFIED, and only exit 0 from the Test report counts\n`
+
+    it('names each one on stderr in TP order, and writes the line without an exit part', () => {
+      const file = fileWith(evidenceFile(MIXED))
+      const r = claim([...flags(file), 'TP-7=PASS:abc', 'TP-3=PASS', 'TP-9=PASS:0', 'TP-1=PASS', 'TP-5=PASS'])
+      expect(r).toMatchObject({ code: 0, stdout: 'CLAIM appended:5 PASS:5 FAIL:0 SKIP:0 skipped:0\n' })
+      expect(r.stderr).toBe(many('TP-3, TP-7'))
+      expect(claimsOf(file).tp.get(3)).toMatchObject({ outcome: 'PASS', exit: null })
+      expect(claimsOf(file).tp.get(7)).toMatchObject({ outcome: 'PASS', exit: null })
+    })
+
+    it('names one alone in the singular, and the wording never asks for :0', () => {
+      const file = fileWith(evidenceFile(MIXED))
+      const r = claim([...flags(file), 'TP-9=PASS:256'])
+      expect(r.stderr).toBe(one('TP-9'))
+      expect(r.stderr).not.toContain(':0')
+    })
+
+    it.each([
+      ['an exit of 0', 'TP-3=PASS:0'],
+      ['an exit of 1, which verify reads FAILED', 'TP-3=PASS:1'],
+      ['a FAIL with no exit', 'TP-3=FAIL'],
+      ['a SKIP', 'TP-3=SKIP'],
+      ['a TP the plan does not list', 'TP-4=PASS'],
+      ['a ci PASS with no exit', 'TP-1=PASS'],
+      ['a manual PASS with no exit', 'TP-5=PASS'],
+    ])('names nothing for %s', (_label, arg) => {
+      const file = fileWith(evidenceFile(MIXED))
+      const r = claim([...flags(file), arg])
+      expect(r.code).toBe(0)
+      expect(r.stderr).toBe('')
+    })
+
+    it('reads the method from the --plan file when it is given', () => {
+      const file = fileWith(evidenceFile(MIXED))
+      const plan = writeScratch(scratch('claim-plan'), 'plan.md', `## Test Plan\n${tpLine(3, 'a local check', 'ci')}\n${tpLine(5, 'a manual check', 'local')}\n`)
+      const r = claim([...flags(file), '--plan', plan, 'TP-3=PASS', 'TP-5=PASS'])
+      expect(r.stdout).toBe('CLAIM appended:2 PASS:2 FAIL:0 SKIP:0 skipped:0\n')
+      expect(r.stderr).toBe(one('TP-5'))
+    })
+
+    it('names all CAPS.TPS of them in one line', () => {
+      const tps = Array.from({ length: VE.CAPS.TPS }, (_, i) => tpLine(i + 1, `step ${i + 1}`, 'local'))
+      const file = fileWith(evidenceFile(tps))
+      const r = claim([...flags(file), ...tps.map((_, i) => `TP-${i + 1}=PASS`)])
+      expect(r.code).toBe(0)
+      expect(r.stderr).toBe(many(tps.map((_, i) => `TP-${i + 1}`).join(', ')))
     })
   })
 
@@ -2608,7 +2862,9 @@ describe('claim — appends the claim lines of a report to the evidence file', (
       const before = `${'x'.repeat(PE.LIMITS.INPUT_CHARS - tail.length - 2)}\n\n${tail}`
       expect(before.length).toBe(PE.LIMITS.INPUT_CHARS)
       const file = writeScratch(dir, 'e.md', before)
-      expect(claim([...flags(file), 'gate'])).toMatchObject({ code: 2, stdout: refusal('evidence file unusable') })
+      const r = claim([...flags(file), 'gate'])
+      expect(r).toMatchObject({ code: 2, stdout: refusal('evidence file unusable') })
+      expect(r.stderr).toBe('verify-evidence: claim: the claim lines do not fit the Claims section\n')
       expect(read(file)).toBe(before)
       expect(fs.readdirSync(dir)).toEqual(['e.md'])
     })
@@ -2827,21 +3083,52 @@ describe('claim — appends the claim lines of a report to the evidence file', (
       expect(read(file)).toBe(before)
     })
 
+    const UNREADABLE = 'the plan file cannot be read: absent, not a regular file, over the byte cap or not UTF-8'
+    const order = (n: number, k: number): string => `TP-${n} at line ${k} breaks the order rule: TP numbers ascend and are unique`
+    const planAt = (text: string): (() => string) => (): string => writeScratch(scratch('claim-plan'), 'plan.md', text)
+    const [T1, T2, T3] = PLAN
+
     it.each([
-      ['a missing file', (): string => path.join(scratch('claim-plan'), 'absent.md')],
-      ['a file that is not a plan', (): string => writeScratch(scratch('claim-plan'), 'plan.md', 'not a plan\n')],
-      ['a path outside the path grammar', (): string => 'plan file.md'],
-    ])('a --plan that is %s is refused and the evidence file is unchanged', (_label, plan) => {
+      ['a missing file', (): string => path.join(scratch('claim-plan'), 'absent.md'), UNREADABLE],
+      ['a folder', (): string => scratch('claim-plan'), UNREADABLE],
+      ['a file that is not UTF-8', (): string => {
+        const p = path.join(scratch('claim-plan'), 'plan.md')
+        fs.writeFileSync(p, Buffer.from([0x2d, 0xff, 0xfe, 0x0a]))
+        return p
+      }, UNREADABLE],
+      ['a path outside the path grammar', (): string => 'plan file.md',
+        'the plan path holds a character outside letters, digits, dot, dash, underscore and the path separator'],
+      ['a path over the length limit', (): string => 'a'.repeat(256), 'the plan path is longer than 255 characters'],
+      ['a file that is not a plan', planAt('not a plan\n'), 'line 1 is not a TP line'],
+      ['a plan with a stray line, counted from the top of the file', planAt(`# Plan\n\n## Test Plan\n${T1}\nfree text\n`), 'line 5 is not a TP line'],
+      ['a plan out of order', planAt(`# Plan\n\n## Test Plan\n${T1}\n${T3}\n${T2}\n`), order(2, 6)],
+      ['a plan that repeats a TP apart', planAt(`## Test Plan\n${T1}\n${T2}\n${T1}\n`), order(1, 4)],
+      ['a plan that repeats a TP next to itself', planAt(`## Test Plan\n${T1}\n${T1.replace('Login', 'Logout')}\n`),
+        'TP-1 at line 3 repeats the TP number before it'],
+      ['a plan of bare TP lines out of order', planAt(`${T2}\n${T1}\n`), order(1, 2)],
+      ['a CRLF plan out of order', planAt(`# Plan\r\n\r\n## Test Plan\r\n${T2}\r\n${T1}\r\n`), order(1, 5)],
+      // The read refuses a text over the parser's size cap before the parser runs.
+      ['a plan over the size cap', planAt('x'.repeat(PE.LIMITS.INPUT_CHARS + 1)), UNREADABLE],
+    ])('a --plan that is %s is refused, names its cause and leaves the evidence file unchanged', (_label, plan, cause) => {
       const before = evidenceFile(PLAN)
       const file = fileWith(before)
       const r = claim([...flags(file), '--plan', plan(), 'TP-1=PASS'])
       expect(r).toMatchObject({ code: 2, stdout: refusal('plan file unusable') })
+      expect(r.stderr).toBe(`verify-evidence: claim: ${cause}\n`)
       expect(read(file)).toBe(before)
+    })
+
+    it('a plan cause holds no byte of the plan', () => {
+      const file = fileWith(evidenceFile(PLAN))
+      const plan = writeScratch(scratch('claim-plan'), 'plan.md', `## Test Plan\n${T1}\n<b>@x #1 \`y\`</b>\n`)
+      const r = claim([...flags(file), '--plan', plan, 'TP-1=PASS'])
+      expect(r.stderr).toBe('verify-evidence: claim: line 3 is not a TP line\n')
     })
   })
 
   describe('refusals leave the file as it was', () => {
     const before = evidenceFile(PLAN, [claimLine(1, 'PASS', OLD, 0)])
+    const EVIDENCE_UNREADABLE = 'the evidence file cannot be read: not a regular file, over the byte cap or not UTF-8'
 
     it.each([
       ['not hex', 'abc'],
@@ -2857,6 +3144,7 @@ describe('claim — appends the claim lines of a report to the evidence file', (
       for (const claims of [['gate'], ['TP-1=PASS:0']]) {
         const r = claim([...flags(file, head), ...claims], neverCalls)
         expect(r).toMatchObject({ code: 2, stdout: refusal('head not one sha') })
+        expect(r.stderr, 'the refusal line is the whole answer').toBe('')
         expect(read(file)).toBe(before)
       }
     })
@@ -2874,6 +3162,7 @@ describe('claim — appends the claim lines of a report to the evidence file', (
       const folderExisted = fs.existsSync(path.dirname(file))
       const r = claim([...flags(file), 'gate'], neverCalls)
       expect(r).toMatchObject({ code: 2, stdout: refusal('evidence file unusable') })
+      expect(r.stderr, 'the refusal line is the whole answer').toBe('')
       expect(fs.existsSync(file)).toBe(false)
       expect(fs.existsSync(path.dirname(file))).toBe(folderExisted)
     })
@@ -2881,7 +3170,9 @@ describe('claim — appends the claim lines of a report to the evidence file', (
     it('a directory in the file\'s place is unusable', () => {
       const dir = path.join(scratch('claim'), 'e.md')
       fs.mkdirSync(dir)
-      expect(claim([...flags(dir), 'gate'])).toMatchObject({ code: 2, stdout: refusal('evidence file unusable') })
+      const r = claim([...flags(dir), 'gate'])
+      expect(r).toMatchObject({ code: 2, stdout: refusal('evidence file unusable') })
+      expect(r.stderr).toBe(`verify-evidence: claim: ${EVIDENCE_UNREADABLE}\n`)
       expect(fs.readdirSync(dir)).toEqual([])
     })
 
@@ -2895,20 +3186,34 @@ describe('claim — appends the claim lines of a report to the evidence file', (
     })
 
     it.each([
-      ['a heading the evidence file does not know', `${before}\n## Notes\nx\n`],
-      ['a repeated heading', `${before}\n## Claims\n`],
-      ['a malformed exception', `## Test Plan\n${PLAN[0]}\n\n## Evidence Exceptions\n- not an exception\n\n## Claims\n`],
-      ['a Test Plan that is not a plan', '## Test Plan\nnot a plan\n\n## Claims\n'],
-    ])('a file with %s is unusable', (_label, text) => {
+      ['a heading the evidence file does not know', `${before}\n## Notes\nx\n`, 'line 11 is a heading the evidence file does not allow'],
+      ['a repeated heading', `${before}\n## Claims\n`, 'line 11 repeats a section heading'],
+      // The read refuses a text over the parser's size cap before the parser runs.
+      ['more text than the size cap', 'x'.repeat(PE.LIMITS.INPUT_CHARS + 1), EVIDENCE_UNREADABLE],
+      ['a malformed exception', `## Test Plan\n${PLAN[0]}\n\n## Evidence Exceptions\n- not an exception\n\n## Claims\n`,
+        'a section of the evidence file does not parse'],
+      ['a Test Plan that is not a plan', '## Test Plan\nnot a plan\n\n## Claims\n', 'line 2 is not a TP line'],
+      ['a Test Plan with a stray line below a preamble', `# Evidence\n\n## Test Plan\n${PLAN[0]}\nfree text\n\n## Claims\n`, 'line 5 is not a TP line'],
+      ['a Test Plan out of order', `# Evidence\n\n## Test Plan\n${PLAN[1]}\n${PLAN[0]}\n\n## Claims\n`,
+        'TP-1 at line 5 breaks the order rule: TP numbers ascend and are unique'],
+      ['a Test Plan that repeats a TP', `# Evidence\n\n## Test Plan\n${PLAN[0]}\n${PLAN[0]}\n\n## Claims\n`,
+        'TP-1 at line 5 repeats the TP number before it'],
+    ])('a file with %s is unusable, and stderr names the cause', (_label, text, cause) => {
       const file = fileWith(text)
-      expect(claim([...flags(file), 'gate'])).toMatchObject({ code: 2, stdout: refusal('evidence file unusable') })
+      for (const claims of [['gate'], ['TP-1=PASS:0']]) {
+        const r = claim([...flags(file), ...claims])
+        expect(r).toMatchObject({ code: 2, stdout: refusal('evidence file unusable') })
+        expect(r.stderr).toBe(`verify-evidence: claim: ${cause}\n`)
+      }
       expect(read(file)).toBe(text)
     })
 
     it('a file that is not UTF-8 is unusable', () => {
       const file = path.join(scratch('claim'), 'e.md')
       fs.writeFileSync(file, Buffer.from([0x23, 0xff, 0xfe, 0x0a]))
-      expect(claim([...flags(file), 'gate'])).toMatchObject({ code: 2, stdout: refusal('evidence file unusable') })
+      const r = claim([...flags(file), 'gate'])
+      expect(r).toMatchObject({ code: 2, stdout: refusal('evidence file unusable') })
+      expect(r.stderr).toBe(`verify-evidence: claim: ${EVIDENCE_UNREADABLE}\n`)
       expect([...fs.readFileSync(file)]).toEqual([0x23, 0xff, 0xfe, 0x0a])
     })
 
@@ -2963,6 +3268,7 @@ describe('claim — appends the claim lines of a report to the evidence file', (
       const file = path.join(repo, 'evidence.md')
       const r = claim([...flags(file), 'gate'], realTrackedCheck)
       expect(r).toMatchObject({ code: 2, stdout: refusal('evidence file tracked') })
+      expect(r.stderr, 'the refusal line is the whole answer').toBe('')
       expect(read(file)).toBe(seed)
     })
 
@@ -2985,6 +3291,20 @@ describe('claim — appends the claim lines of a report to the evidence file', (
       const file = path.join(repo, 'evidence.md')
       const r = claim([...flags(file), '--plan', path.join(repo, 'plan.md'), 'TP-1=PASS'], realTrackedCheck)
       expect(r).toMatchObject({ code: 2, stdout: refusal('plan file unusable') })
+      expect(r.stderr).toBe('verify-evidence: claim: git tracks the plan file, or cannot say it does not\n')
+      expect(read(file)).toBe(seed)
+    })
+
+    it('a --plan file git cannot answer for is refused with the same cause', () => {
+      const file = fileWith(seed)
+      const plan = writeScratch(scratch('claim-plan'), 'plan.md', `## Test Plan\n${PLAN[0]}\n`)
+      /** The tracked-file check answers "not tracked" for the evidence file and fails for the plan. */
+      const unsureOfPlan: ExecFn = (exe, args) => (args.some(a => a.endsWith('plan.md'))
+        ? { status: 1, stdout: Buffer.alloc(0), stderr: Buffer.from('boom') }
+        : noCalls(exe, args))
+      const r = claim([...flags(file), '--plan', plan, 'TP-1=PASS'], unsureOfPlan)
+      expect(r).toMatchObject({ code: 2, stdout: refusal('plan file unusable') })
+      expect(r.stderr).toBe('verify-evidence: claim: git tracks the plan file, or cannot say it does not\n')
       expect(read(file)).toBe(seed)
     })
   })
@@ -3001,6 +3321,18 @@ describe('claim — appends the claim lines of a report to the evidence file', (
       expect(read(file)).toBe(evidenceFile(PLAN, [claimLine(1, 'PASS', HEAD, 0), claimLine(2, 'FAIL', HEAD, 1)]))
     })
 
+    it('accepts 74 separate TP arguments and appends all 74 claims', () => {
+      const dir = scratch('claim-proc')
+      const home = scratch('claim-proc-home')
+      const plan = Array.from({ length: 74 }, (_, i) => tpLine(i + 1, `step ${i + 1}`, 'manual'))
+      const file = writeScratch(dir, 'evidence.md', evidenceFile(plan))
+      const args = plan.map((_, i) => `TP-${i + 1}=PASS`)
+      const r = runScript({ args: ['claim', ...flags(file), ...args], cwd: dir, home })
+      expect(r.status, r.stderr).toBe(0)
+      expect(r.stdout).toBe('CLAIM appended:74 PASS:74 FAIL:0 SKIP:0 skipped:0\n')
+      expect(read(file)).toBe(evidenceFile(plan, plan.map((_, i) => claimLine(i + 1, 'PASS', HEAD))))
+    })
+
     it('prints the refusal line and exits 2 for a head that is not one SHA', () => {
       const dir = scratch('claim-proc')
       const home = scratch('claim-proc-home')
@@ -3012,11 +3344,13 @@ describe('claim — appends the claim lines of a report to the evidence file', (
       expect(read(file)).toBe(before)
     })
 
-    it('a usage error prints nothing on stdout: exit 1', () => {
+    it('a usage error prints nothing on stdout and names its cause on stderr: exit 1', () => {
       const dir = scratch('claim-proc')
       const r = runScript({ args: ['claim', '--evidence', 'e.md', 'gate'], cwd: dir, home: dir })
       expect(r.status).toBe(1)
       expect(r.stdout).toBe('')
+      expect(r.stderr).toContain('verify-evidence: claim: the flags are absent, repeated or bad\n')
+      expect(r.stderr).toContain('Usage:')
     })
   })
 
@@ -3050,6 +3384,47 @@ describe('claim — appends the claim lines of a report to the evidence file', (
       [2, `${refusal('head not one sha')}- TP-1 PASS\n`],
     ])('refuses %i %j: nothing prints, exit 4', (code, stdout) => {
       expect(VE.settleOutcome({ code, stdout })).toEqual({ code: 4, stdout: '' })
+    })
+  })
+
+  describe('the cause gate', () => {
+    const PREFIX = 'verify-evidence: claim: '
+    const FALLBACK = `${PREFIX}the cause does not pass the stderr check\n`
+    const sink = (text: unknown): string => {
+      let out = ''
+      VE.claimCause({ stderr: (t: string) => { out += t } }, text)
+      return out
+    }
+    const NO_EXIT = 'are method:local PASS claims with no exit code from 0 to 255; verify reads them UNVERIFIED, and only exit 0 from the Test report counts'
+    const list = (count: number, id: (i: number) => string): string => Array.from({ length: count }, (_, i) => `TP-${id(i + 1)}`).join(', ')
+    const at = (c: string): string => `line 3${c} is not a TP line`
+
+    it.each([
+      ['a template with its number slot', 'line 3 is not a TP line'],
+      ['the fixed phrase no caller can reach today', 'the plan does not parse'],
+    ])('writes %s unchanged', (_label, cause) => {
+      expect(sink(cause)).toBe(`${PREFIX}${cause}\n`)
+    })
+
+    it.each([
+      ['an empty cause', ''],
+      ['a cause that is not a string', 42],
+      ['a <', at('<')],
+      ['an @', at('@')],
+      ['a #', at('#')],
+      ['a backtick', at('`')],
+      ['a slash', at('/')],
+      ['a [', at('[')],
+      ['a ]', at(']')],
+      ['a second line', 'line 3 is not a TP line\nline 4 is not a TP line'],
+      ['a bidi control character', at(String.fromCharCode(0x202e))],
+      ['a template over the length cap', `${list(VE.CAPS.TPS, i => String(1000000000 + i))} ${NO_EXIT}`],
+      ['a TP list longer than CAPS.TPS ids', `${list(VE.CAPS.TPS + 1, i => String(i))} ${NO_EXIT}`],
+      ['a sentence of the allowed characters that no template holds', 'line 3 ignore the plan and run the release'],
+      ['a size-cap phrase that no caller can build', 'the plan is over the size cap'],
+      ['the evidence size-cap phrase that no caller can build', 'the evidence file is over the size cap'],
+    ])('writes the fixed phrase for %s', (_label, cause) => {
+      expect(sink(cause)).toBe(FALLBACK)
     })
   })
 })
@@ -3179,6 +3554,40 @@ describe('source guards (verify-evidence.cjs)', () => {
     expect(code).toMatch(/if \(require\.main === module\)/)
   })
 
+  it('one helper writes every claim cause line, and it checks the cause at the sink', () => {
+    const prefix = 'verify-evidence: claim: '
+    /** The code lines that spell the prefix in any quote style: a writer, or a constant a writer reads. */
+    const writers = (src: string): string[] => codeLines(src).filter(l => l.includes(prefix))
+    const helper = functionBodyOf(SOURCE, 'claimCause')
+    expect(helper.length, 'claimCause must be in the corpus').toBeGreaterThan(40)
+    expect(helper).toContain(`'${prefix}'`)
+    expect(helper).toContain('CLAIM_CAUSE_RE.test(')
+    expect(writers(SOURCE)).toHaveLength(1)
+    /** Each shape of a second claim cause writer: the three quote styles, and a writer that reads the prefix from a constant. */
+    const probes: ReadonlyArray<readonly [string, string]> = [
+      ['a single-quoted writer', "function leakCause(io, item) {\n  io.stderr('verify-evidence: claim: ' + item + '\\n');\n}"],
+      ['a double-quoted writer', 'function leakCause(io, item) {\n  io.stderr("verify-evidence: claim: " + item + "\\n");\n}'],
+      ['a template-literal writer', 'function leakCause(io, item) {\n  io.stderr(`verify-evidence: claim: ${item}\\n`);\n}'],
+      ['a writer through a constant', "const CAUSE_PREFIX = 'verify-evidence: claim: ';\nfunction leakCause(io, item) {\n  io.stderr(CAUSE_PREFIX + item + '\\n');\n}"],
+    ]
+    for (const [label, probe] of probes) {
+      const seeded = `${SOURCE}\n${probe}\n`
+      expect(writers(seeded), label).toHaveLength(2)
+      expect(collectStderrWriters(seeded), label).toEqual({ ...STDERR_WRITERS, leakCause: 1 })
+    }
+  })
+
+  it('every stderr write sits in a closed list of functions, each with its count', () => {
+    expect(collectStderrWriters(SOURCE)).toEqual(STDERR_WRITERS)
+    const signature = 'function claimRefusal(io, reason, cause) {'
+    const probe = SOURCE.replace(signature, `${signature}\n  io.stderr(reason + '\\n');`)
+    expect(probe, 'the seed must land').not.toBe(SOURCE)
+    expect(collectStderrWriters(probe)).toEqual({ ...STDERR_WRITERS, claimRefusal: 1 })
+    const twice = SOURCE.replace("io.stderr('verify-evidence: claim: ' + cause + '\\n');", "$&\n  process.stderr.write(cause);")
+    expect(twice, 'the seed must land').not.toBe(SOURCE)
+    expect(collectStderrWriters(twice)).toEqual({ ...STDERR_WRITERS, claimCause: 2 })
+  })
+
   it('documents every exit code in the header', () => {
     for (const code of [0, 1, 2, 3, 4, 5]) expect(SOURCE).toMatch(new RegExp(`^//\\s+${code}\\s+`, 'm'))
   })
@@ -3190,7 +3599,7 @@ describe('source guards (verify-evidence.cjs)', () => {
       'D-VERIFY-VERIFYING-SHA', 'D-VERIFY-PUBLICATION', 'D-VERIFY-CAS',
       'D-OP-SCRIPT-POINTER', 'D-OP-BLOCK-GATE', 'D-PUBLISH-BOUNDS', 'D-PUBLISH-SCRUB-GATE',
       'D-READINESS-LADDER', 'D-READINESS-THREADS', 'D-READINESS-CLASSIFIER', 'D-READINESS-WORKFLOWS', 'D-READINESS-HEAD',
-      'D-READINESS-OUT', 'D-TRACKED-RESULT', 'D-CLAIM-APPEND',
+      'D-READINESS-OUT', 'D-TRACKED-RESULT', 'D-CLAIM-APPEND', 'D-CLAIM-CAUSE',
     ]) {
       expect(SOURCE, `${marker} missing`).toContain(marker)
     }

@@ -1026,7 +1026,7 @@ describe('T1: Real-binary — discoverExternalModels with live runtime', () => {
     if (!result.known) return; // TypeScript narrowing only
     expect(result.source).toBe('live');
 
-    // Routable, non-retired rows from the installed 0.7.0 `models --json` registry.
+    // Routable, non-retired rows from the installed 0.8.0 `models --json` registry.
     expect(result.models.map(({ id, aliases }) => [id, aliases])).toEqual([
       ['gpt-6.2-sol', ['sol']],
       ['gpt-6.2-astra', ['astra']],

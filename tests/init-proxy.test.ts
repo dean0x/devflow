@@ -39,7 +39,7 @@ function makeAgentFrontmatter(model: string): string {
   return `---\nmodel: ${model}\ndescription: Test agent\n---\n\nAgent body.\n`;
 }
 
-// Canonical Codex IDs from the 0.7.0 registry, including the retired ID.
+// Canonical Codex IDs from the 0.8.0 registry, including the retired ID.
 const GPT_IDS = [
   'gpt-6.2-sol',
   'gpt-6.2-astra',
