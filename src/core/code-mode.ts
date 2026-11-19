@@ -102,7 +102,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-async function readSettingsEnv(settingsPath: string): Promise<RawRecord | undefined> {
+export async function readSettingsEnv(settingsPath: string): Promise<RawRecord | undefined> {
   const bytes = await readFileBytes(settingsPath, MAX_SETTINGS_BYTES);
   if (bytes === 'absent') return {};
   if (typeof bytes === 'string') return undefined;

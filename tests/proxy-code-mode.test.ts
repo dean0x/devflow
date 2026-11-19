@@ -178,6 +178,19 @@ describe('proxy --status Code Mode warnings', () => {
     expect(vi.mocked(p.log.warn).mock.calls).toEqual([[CODE_MODE_PROXY_BLOCKER]]);
   });
 
+  it('completes status without Code Mode warnings from settings over 1 MiB', async () => {
+    const settings = JSON.stringify({
+      env: { [codeKey]: '1', [trafficKey]: '1', ANTHROPIC_BASE_URL: 'http://127.0.0.1:4142' },
+    });
+    seedFile('.claude/settings.json', settings.padEnd(1024 * 1024 + 1));
+
+    await run('--status');
+
+    expect(p.log.warn).not.toHaveBeenCalled();
+    expect(p.log.info).toHaveBeenCalledWith(expect.stringMatching(/^ANTHROPIC_BASE_URL: .*not set/u));
+    expect(process.exitCode).toBe(0);
+  });
+
   it('uses readable switches even if another manifest field is absent', async () => {
     seedFile('.devflow/manifest.json', JSON.stringify({ features: { flags: codeOn, proxy: true } }));
     const before = snapshot();

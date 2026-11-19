@@ -44,6 +44,7 @@ import {
   isProxyOn,
   isTrafficOn,
   readCodeModeSignals,
+  readSettingsEnv,
 } from '../../core/code-mode.js';
 import { syncManifestFeature } from '../../core/manifest.js';
 import { readGateManifest } from '../../core/gate-level.js';
@@ -1392,10 +1393,6 @@ export const proxyCommand = new Command('proxy')
 
 // ─── Status ───────────────────────────────────────────────────────────────────
 
-function isSettingsRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 async function runStatus(): Promise<void> {
   const devflowDir = getDevFlowDirectory();
   const claudeDir = getClaudeDirectory();
@@ -1460,13 +1457,7 @@ async function runStatus(): Promise<void> {
   }
 
   // Env state
-  let env: Record<string, unknown> | undefined;
-  try {
-    const settingsJson = await fs.readFile(settingsPath, 'utf-8');
-    const settings: unknown = JSON.parse(settingsJson);
-    if (isSettingsRecord(settings) && isSettingsRecord(settings.env)) env = settings.env;
-  } catch { /* settings unavailable */ }
-
+  const env = await readSettingsEnv(settingsPath);
   const envState = classifyProxyBaseUrl(env?.ANTHROPIC_BASE_URL, port);
   const envStateLabels: Record<typeof envState, string> = {
     'ours': color.green('set (our relay)'),
