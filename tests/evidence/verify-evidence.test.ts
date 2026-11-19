@@ -252,7 +252,12 @@ describe('module surface', () => {
 // ---------------------------------------------------------------------------
 
 describe('usage (exit 1, stdout empty)', () => {
-  const USAGE_CASES: ReadonlyArray<readonly [string, readonly string[]]> = [
+  const SHA = 'a'.repeat(40)
+  const FLAGS = 'the flags are absent, repeated or bad'
+  const GATE_ALONE = 'gate takes no plan and no other claim'
+  const notOne = (k: number): string => `argument ${k} is not one TP claim of the form TP-n=PASS, FAIL or SKIP with an optional exit`
+  /** Each row: a label, the arguments, and for `claim` the cause its stderr names (`verify-evidence: claim: <cause>`). */
+  const USAGE_CASES: ReadonlyArray<readonly [string, readonly string[], string?]> = [
     ['no subcommand', []],
     ['an unknown subcommand', ['frobnicate']],
     ['check without a kind', ['check']],
@@ -276,35 +281,72 @@ describe('usage (exit 1, stdout empty)', () => {
     ['verify with a value on a switch', ['verify', '--pr', '7', '--approval=yes']],
     ['splice without --out', ['splice', '--pr', '7', '--state', 'd', '--block', 'b']],
     ['readback without --expect', ['readback', '--pr', '7']],
-    ['claim without arguments', ['claim']],
-    ['claim without --head', ['claim', '--evidence', 'e.md', 'gate']],
-    ['claim without --evidence', ['claim', '--head', 'a'.repeat(40), 'gate']],
-    ['claim without a claim', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40)]],
-    ['claim with a duplicated flag', ['claim', '--evidence', 'e.md', '--evidence', 'f.md', '--head', 'a'.repeat(40), 'gate']],
-    ['claim with an unknown flag', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), '--force', 'gate']],
-    ['claim with a flag after the claims', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), 'gate', '--plan', 'p.md']],
-    ['claim gate with --plan', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), '--plan', 'p.md', 'gate']],
-    ['claim gate with a TP', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), 'gate', 'TP-1=PASS']],
-    ['claim with an outcome that is not PASS, FAIL or SKIP', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), 'TP-1=PASSED']],
-    ['claim with a lower-case outcome', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), 'TP-1=pass']],
-    ['claim with TP-0', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), 'TP-0=PASS']],
-    ['claim with a leading-zero TP', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), 'TP-01=PASS']],
-    ['claim with a four-digit TP', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), 'TP-1000=PASS']],
-    ['claim with an empty exit', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), 'TP-1=PASS:']],
-    ['claim with a space in an exit', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), 'TP-1=PASS:1 2']],
-    ['claim with a TP twice', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), 'TP-1=PASS', 'TP-1=FAIL']],
-    ['claim with --flag=value', ['claim', '--evidence=e.md', '--head', 'a'.repeat(40), 'gate']],
-    ['claim with more TPs than a plan holds', ['claim', '--evidence', 'e.md', '--head', 'a'.repeat(40), ...Array.from({ length: 201 }, (_, i) => `TP-${i + 1}=PASS`)]],
+    ['claim without arguments', ['claim'], FLAGS],
+    ['claim without --head', ['claim', '--evidence', 'e.md', 'gate'], FLAGS],
+    ['claim without --evidence', ['claim', '--head', SHA, 'gate'], FLAGS],
+    ['claim without a claim', ['claim', '--evidence', 'e.md', '--head', SHA], 'there is no claim'],
+    ['claim with a duplicated flag', ['claim', '--evidence', 'e.md', '--evidence', 'f.md', '--head', SHA, 'gate'], FLAGS],
+    ['claim with an unknown flag', ['claim', '--evidence', 'e.md', '--head', SHA, '--force', 'gate'], FLAGS],
+    ['claim with a flag missing its value', ['claim', '--evidence', 'e.md', '--head'], FLAGS],
+    ['claim with a flag after the gate', ['claim', '--evidence', 'e.md', '--head', SHA, 'gate', '--plan', 'p.md'], GATE_ALONE],
+    ['claim with a flag after the TP claims', ['claim', '--evidence', 'e.md', '--head', SHA, 'TP-1=PASS', '--plan', 'p.md'], 'argument 2 is a flag after the claims'],
+    ['claim gate with --plan', ['claim', '--evidence', 'e.md', '--head', SHA, '--plan', 'p.md', 'gate'], GATE_ALONE],
+    ['claim gate with a TP', ['claim', '--evidence', 'e.md', '--head', SHA, 'gate', 'TP-1=PASS'], GATE_ALONE],
+    ['claim a TP before gate', ['claim', '--evidence', 'e.md', '--head', SHA, 'TP-1=PASS', 'gate'], GATE_ALONE],
+    ['claim with an outcome that is not PASS, FAIL or SKIP', ['claim', '--evidence', 'e.md', '--head', SHA, 'TP-1=PASSED'], notOne(1)],
+    ['claim with a lower-case outcome', ['claim', '--evidence', 'e.md', '--head', SHA, 'TP-1=pass'], notOne(1)],
+    ['claim with TP-0', ['claim', '--evidence', 'e.md', '--head', SHA, 'TP-0=PASS'], notOne(1)],
+    ['claim with a leading-zero TP', ['claim', '--evidence', 'e.md', '--head', SHA, 'TP-01=PASS'], notOne(1)],
+    ['claim with a four-digit TP', ['claim', '--evidence', 'e.md', '--head', SHA, 'TP-1000=PASS'], notOne(1)],
+    ['claim with an empty exit', ['claim', '--evidence', 'e.md', '--head', SHA, 'TP-1=PASS:'], notOne(1)],
+    ['claim with a space in an exit (no split hint)', ['claim', '--evidence', 'e.md', '--head', SHA, 'TP-1=PASS:1 2'], notOne(1)],
+    ['claim with a bad third argument (k counts from the first claim)', ['claim', '--evidence', 'e.md', '--head', SHA, 'TP-1=PASS', 'TP-2=FAIL', 'TP-3=OK'], notOne(3)],
+    ['claim with two TP claims in one argument', ['claim', '--evidence', 'e.md', '--head', SHA, 'TP-1=PASS TP-2=FAIL'],
+      'argument 1 holds more than one TP claim; pass each TP claim as its own argument'],
+    ['claim with every claim packed in the second argument', ['claim', '--evidence', 'e.md', '--head', SHA, 'TP-1=PASS', 'TP-2=PASS,TP-3=SKIP'],
+      'argument 2 holds more than one TP claim; pass each TP claim as its own argument'],
+    ['claim with a TP twice', ['claim', '--evidence', 'e.md', '--head', SHA, 'TP-1=PASS', 'TP-1=FAIL'], 'TP-1 is given more than once in this call'],
+    ['claim with a TP twice, apart', ['claim', '--evidence', 'e.md', '--head', SHA, 'TP-12=PASS', 'TP-3=PASS', 'TP-12=FAIL:1'], 'TP-12 is given more than once in this call'],
+    ['claim with --flag=value', ['claim', '--evidence=e.md', '--head', SHA, 'gate'], FLAGS],
+    ['claim with more TPs than a plan holds', ['claim', '--evidence', 'e.md', '--head', SHA, ...Array.from({ length: 201 }, (_, i) => `TP-${i + 1}=PASS`)],
+      'there are more than 200 TP arguments'],
   ]
 
-  for (const [label, args] of USAGE_CASES) {
+  for (const [label, args, cause] of USAGE_CASES) {
     it(`${label} → exit 1, empty stdout, usage on stderr`, () => {
       const r = runMain(args, { exec: () => { throw new Error('usage must make no call') } })
       expect(r.code).toBe(1)
       expect(r.stdout).toBe('')
       expect(r.stderr).toMatch(/Usage:/)
+      if (cause === undefined) expect(r.stderr).not.toContain('verify-evidence: claim:')
+      else expect(r.stderr).toContain(`verify-evidence: claim: ${cause}\n`)
     })
   }
+
+  it('every claim row names its cause, and every other row names none', () => {
+    const claimRows = USAGE_CASES.filter(([, args]) => args[0] === 'claim')
+    expect(claimRows.length).toBeGreaterThanOrEqual(20)
+    expect(claimRows.filter(([, , cause]) => cause === undefined)).toEqual([])
+    expect(USAGE_CASES.filter(([, args, cause]) => args[0] !== 'claim' && cause !== undefined)).toEqual([])
+  })
+
+  it('a claim cause holds no byte of the argument it names', () => {
+    const noCall: ExecFn = () => { throw new Error('usage must make no call') }
+    const split = runMain(['claim', '--evidence', 'e.md', '--head', SHA, 'TP-1=PASS', 'TP-9=PASS <b>TP-8</b> @x #1 `y`'], { exec: noCall })
+    const bad = runMain(['claim', '--evidence', 'e.md', '--head', SHA, '<b>TP-9</b>=PASS @x #1 `y`'], { exec: noCall })
+    expect(split.stderr).toContain('verify-evidence: claim: argument 2 holds more than one TP claim; pass each TP claim as its own argument\n')
+    expect(bad.stderr).toContain(`verify-evidence: claim: ${notOne(1)}\n`)
+    for (const s of ['<b>', '@x', '#1', '`y`', 'TP-8', 'TP-9']) {
+      expect(split.stderr, s).not.toContain(s)
+      expect(bad.stderr, s).not.toContain(s)
+    }
+  })
+
+  it('the cause line comes before the unchanged usage text', () => {
+    const r = runMain(['claim', '--evidence', 'e.md', '--head', SHA], { exec: () => { throw new Error('usage must make no call') } })
+    const plain = runMain(['frobnicate'], { exec: () => { throw new Error('usage must make no call') } })
+    expect(r.stderr).toBe(`verify-evidence: claim: there is no claim\n${plain.stderr}`)
+  })
 
   it('through the real process too: exit 1 and not one byte on stdout', () => {
     const home = scratch('usage-home')
@@ -2532,6 +2574,14 @@ describe('claim — appends the claim lines of a report to the evidence file', (
       expect(claims.tp.get(1)).toMatchObject({ outcome: 'PASS', sha: HEAD, by: 'test', exit: kept })
     })
 
+    it('accepts CAPS.TPS TP arguments in one call, one line each', () => {
+      const tps = Array.from({ length: VE.CAPS.TPS }, (_, i) => tpLine(i + 1, `step ${i + 1}`, 'manual'))
+      const file = fileWith(evidenceFile(tps))
+      const r = claim([...flags(file), ...tps.map((_, i) => `TP-${i + 1}=PASS`)])
+      expect(r).toMatchObject({ code: 0, stdout: `CLAIM appended:${VE.CAPS.TPS} PASS:${VE.CAPS.TPS} FAIL:0 SKIP:0 skipped:0\n` })
+      expect(claimsOf(file).tp.size).toBe(VE.CAPS.TPS)
+    })
+
     it('a TP with no exit ends at by:test', () => {
       const file = fileWith(evidenceFile(PLAN))
       claim([...flags(file), 'TP-3=SKIP'])
@@ -3012,11 +3062,13 @@ describe('claim — appends the claim lines of a report to the evidence file', (
       expect(read(file)).toBe(before)
     })
 
-    it('a usage error prints nothing on stdout: exit 1', () => {
+    it('a usage error prints nothing on stdout and names its cause on stderr: exit 1', () => {
       const dir = scratch('claim-proc')
       const r = runScript({ args: ['claim', '--evidence', 'e.md', 'gate'], cwd: dir, home: dir })
       expect(r.status).toBe(1)
       expect(r.stdout).toBe('')
+      expect(r.stderr).toContain('verify-evidence: claim: the flags are absent, repeated or bad\n')
+      expect(r.stderr).toContain('Usage:')
     })
   })
 
@@ -3177,6 +3229,17 @@ describe('source guards (verify-evidence.cjs)', () => {
     expect([...code.matchAll(/process\.stdout\.write\(/g)]).toHaveLength(1)
     expect(code).not.toMatch(/process\.exit\(/)
     expect(code).toMatch(/if \(require\.main === module\)/)
+  })
+
+  it('one helper writes every claim cause line, and it checks the cause at the sink', () => {
+    const prefix = "'verify-evidence: claim: '"
+    const writers = (src: string): string[] => codeLines(src).filter(l => l.includes(prefix))
+    const helper = functionBodyOf(SOURCE, 'claimCause')
+    expect(helper.length, 'claimCause must be in the corpus').toBeGreaterThan(40)
+    expect(helper).toContain(prefix)
+    expect(helper).toContain('CLAIM_CAUSE_RE.test(')
+    expect(writers(SOURCE)).toHaveLength(1)
+    expect(writers(`${SOURCE}\n  io.stderr(${prefix} + item + '\\n');\n`)).toHaveLength(2)
   })
 
   it('documents every exit code in the header', () => {

@@ -256,6 +256,14 @@ const CLAIM_APPENDED_RE = /^CLAIM appended:(?<n>[0-9]{1,3}) PASS:(?<pass>[0-9]{1
 const CLAIM_REFUSAL_RE = /^CLAIM refused \((?<reason>head not one sha|evidence file tracked|evidence file unusable|plan file unusable)\)$/;
 /** One `claim` argument: the TP, its outcome, and an exit the script keeps only as a number from 0 to 255. */
 const CLAIM_ARG_RE = /^TP-(?<n>[1-9][0-9]{0,2})=(?<outcome>PASS|FAIL|SKIP)(?::(?<exit>[^\s]{1,12}))?$/;
+/**
+ * The shape of every `verify-evidence: claim: <cause>` stderr line, checked at the sink
+ * (claimCause): fixed phrases, digits and parser codes only, never a byte of argv, a plan,
+ * a path, git or gh. The bound holds the longest cause: CAPS.TPS ids, `TP-200, ` each.
+ */
+const CLAIM_CAUSE_RE = /^[A-Za-z0-9 .,:;()=+-]{1,2000}$/;
+/** What claimCause writes for a cause that fails CLAIM_CAUSE_RE. */
+const CLAIM_CAUSE_FALLBACK = 'the cause does not pass the stderr check';
 
 const USAGE = [
   'Usage: node verify-evidence.cjs check tp|block|exceptions <file>',
@@ -318,6 +326,7 @@ const USAGE = [
 
 /**
  * @typedef {{ kind: 'usage' }
+ *   | { kind: 'usage', cause: string }
  *   | { kind: 'check', what: 'tp' | 'block' | 'exceptions', file: string }
  *   | { kind: 'render', plan: string }
  *   | { kind: 'verify', pr: number, publication: string, evidence: string | null, state: string | null,
@@ -464,10 +473,40 @@ function parseArgs(argv) {
 }
 
 /**
+ * A `claim` usage error that names its cause: main writes the cause through claimCause,
+ * then the usage text.
+ *
+ * @param {string} cause  a fixed phrase of parseClaimArgs, with numbers only
+ * @returns {ParsedArgs}
+ */
+function claimUsage(cause) {
+  return Object.freeze({ kind: /** @type {'usage'} */ ('usage'), cause });
+}
+
+/**
+ * Why one claim argument (number `k`, counted from 1 at the first claim argument) is not
+ * one TP claim. An argument that holds a second `TP-` gets the hint to split it; one with a
+ * space only in its exit (`TP-1=PASS:1 2`) does not.
+ *
+ * @param {string} item
+ * @param {number} k
+ * @returns {string}
+ */
+function claimArgCause(item, k) {
+  const at = 'argument ' + Number(k);
+  if (item.startsWith('--')) return at + ' is a flag after the claims';
+  if (item.indexOf('TP-', item.indexOf('TP-') + 1) > 0) {
+    return at + ' holds more than one TP claim; pass each TP claim as its own argument';
+  }
+  return at + ' is not one TP claim of the form TP-n=PASS, FAIL or SKIP with an optional exit';
+}
+
+/**
  * D-CLAIM-APPEND: `claim` takes its flags first, then either the one word `gate` or
  * one to CAPS.TPS `TP-<n>=<outcome>[:<exit>]` arguments, each TP at most once. A bad
- * flag or argument is a usage error. `--head` is not checked here: a value that is not
- * one SHA is a refusal with a line, since the caller passes what its report shows.
+ * flag or argument is a usage error that names its cause (claimUsage): the first cause
+ * found, in this order. `--head` is not checked here: a value that is not one SHA is a
+ * refusal with a line, since the caller passes what its report shows.
  *
  * @param {readonly string[]} tail
  * @returns {ParsedArgs}
@@ -480,21 +519,28 @@ function parseClaimArgs(tail) {
   const head = f === null ? null : flagValue(f, '--head');
   const plan = f === null ? null : flagValue(f, '--plan');
   const items = tail.slice(flagCount);
-  if (evidence === null || head === null || items.length === 0 || items.length > CAPS.TPS) return USAGE_ARGS;
-  if (items.length === 1 && items[0] === 'gate') {
-    return plan === null ? { kind: 'claim', evidence, head, plan, gate: true, tps: [] } : USAGE_ARGS;
+  if (evidence === null || head === null) return claimUsage('the flags are absent, repeated or bad');
+  if (items.length === 0) return claimUsage('there is no claim');
+  if (items.length > CAPS.TPS) return claimUsage('there are more than ' + Number(CAPS.TPS) + ' TP arguments');
+  if (items.includes('gate')) {
+    return items.length === 1 && plan === null
+      ? { kind: 'claim', evidence, head, plan, gate: true, tps: [] }
+      : claimUsage('gate takes no plan and no other claim');
   }
   const tps = [];
-  for (const item of items) {
-    const m = CLAIM_ARG_RE.exec(item);
-    if (m === null || m.groups === undefined) return USAGE_ARGS;
+  const seen = new Set();
+  for (let k = 0; k < items.length; k++) {
+    const m = CLAIM_ARG_RE.exec(items[k]);
+    if (m === null || m.groups === undefined) return claimUsage(claimArgCause(items[k], k + 1));
+    const id = Number(m.groups.n);
+    if (seen.has(id)) return claimUsage('TP-' + id + ' is given more than once in this call');
+    seen.add(id);
     tps.push({
-      id: Number(m.groups.n),
+      id,
       outcome: /** @type {'PASS' | 'FAIL' | 'SKIP'} */ (m.groups.outcome),
       exit: m.groups.exit === undefined ? null : m.groups.exit,
     });
   }
-  if (new Set(tps.map(tp => tp.id)).size !== tps.length) return USAGE_ARGS;
   return { kind: 'claim', evidence, head, plan, gate: false, tps };
 }
 
@@ -3147,6 +3193,20 @@ function runReadiness(io, args, deps) {
 // assign states.
 
 /**
+ * Write one `verify-evidence: claim: <cause>` line to stderr. Every such line goes through
+ * here, and the cause is checked against CLAIM_CAUSE_RE at this sink, as claimLine checks each
+ * claim line: a cause that fails it is replaced by a fixed phrase, so no input byte can pass.
+ *
+ * @param {Io} io
+ * @param {string} text
+ * @returns {void}
+ */
+function claimCause(io, text) {
+  const cause = typeof text === 'string' && CLAIM_CAUSE_RE.test(text) ? text : CLAIM_CAUSE_FALLBACK;
+  io.stderr('verify-evidence: claim: ' + cause + '\n');
+}
+
+/**
  * @param {string} reason  one of the CLAIM_REFUSAL_RE reasons
  * @returns {Outcome}
  */
@@ -3485,6 +3545,7 @@ function main(argv, deps) {
   };
   const parsed = parseArgs(argv);
   if (parsed.kind === 'usage') {
+    if ('cause' in parsed) claimCause(io, parsed.cause);
     io.stderr(USAGE + '\n');
     return { code: EXIT_CODES.USAGE, stdout: '' };
   }
