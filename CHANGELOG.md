@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Experimental Code Mode flag.** Use `devflow flags --enable code-mode` for direct Claude Code sessions. The flag is off by default. This change applies to new sessions only. Code Mode does not start while the Devflow proxy or `disable-nonessential-traffic` is on.
+
 ### Fixed
 
 - **A PR that is one part of a larger GitHub issue now links to the issue and does not close it.** Before, the Git agent accepted only `Closes #N` in a PR body, so the PR got no issue link. Now it also accepts `Refs #N`. When the task or plan of `/implement` says that the PR is one part of the issue, and not its last PR, the PR body gets `Refs #N`. The last PR keeps `Closes #N`. When the merged commit message holds the `Refs #N` line, the release trace counts the commit as traced, not as shipped.

@@ -18,6 +18,7 @@ import { createRequire } from 'module';
 import { join } from 'path';
 import { promises as fs } from 'fs';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
+import { readFileBytes } from './read-file-bytes.js';
 
 // ---------------------------------------------------------------------------
 // Result type (local; matches codebase pattern of per-module definitions)
@@ -41,6 +42,7 @@ function Err<E>(error: E): Result<never, E> {
 
 /** Default port for the Devflow proxy. */
 export const DEFAULT_PROXY_PORT = 4141;
+const MAX_PROXY_STATE_BYTES = 1024 * 1024;
 
 /**
  * State persisted to ~/.devflow/proxy.json.
@@ -70,8 +72,14 @@ export interface ProxyState {
  */
 export async function readProxyState(devflowDir: string): Promise<Result<ProxyState, string>> {
   const statePath = join(devflowDir, 'proxy.json');
+  const bytes = await readFileBytes(statePath, MAX_PROXY_STATE_BYTES);
+  if (bytes === 'absent') {
+    return Ok({ version: 1, enabled: false, port: DEFAULT_PROXY_PORT,
+      binPath: null, configPath: null, resolvedAt: null, devflowVersion: null });
+  }
+  if (typeof bytes === 'string') return Err('Cannot read the Devflow proxy state file.');
   try {
-    const content = await fs.readFile(statePath, 'utf-8');
+    const content = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
     const data = JSON.parse(content) as Record<string, unknown>;
 
     // Tolerant parse: provide safe defaults for missing/invalid fields.
@@ -85,21 +93,8 @@ export async function readProxyState(devflowDir: string): Promise<Result<ProxySt
       devflowVersion: typeof data.devflowVersion === 'string' ? data.devflowVersion : null,
     };
     return Ok(state);
-  } catch (err: unknown) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') {
-      // File missing → return a default disabled state (not an error).
-      return Ok({
-        version: 1,
-        enabled: false,
-        port: DEFAULT_PROXY_PORT,
-        binPath: null,
-        configPath: null,
-        resolvedAt: null,
-        devflowVersion: null,
-      });
-    }
-    return Err(`Failed to read proxy state: ${(err as Error).message}`);
+  } catch {
+    return Err('Cannot parse the Devflow proxy state file.');
   }
 }
 
@@ -292,6 +287,28 @@ export function buildProxyState(opts: {
  */
 export function proxyBaseUrl(port: number): string {
   return `http://127.0.0.1:${port}`;
+}
+
+const OUR_BASE_URL_PATTERN = /^http:\/\/127\.0\.0\.1:\d+$/;
+
+export type ProxyEnvState = 'ours' | 'ours-other-port' | 'foreign' | 'absent';
+
+/** Classify a settings URL. A relay URL on any port counts as a proxy signal. */
+export function classifyProxyBaseUrl(url: unknown, port: number): ProxyEnvState {
+  if (typeof url !== 'string') return 'absent';
+  if (url === proxyBaseUrl(port)) return 'ours';
+  if (OUR_BASE_URL_PATTERN.test(url)) return 'ours-other-port';
+  return 'foreign';
+}
+
+/** Read the proxy env state from settings JSON. Invalid JSON still raises a parse error. */
+export function readProxyEnvState(settingsJson: string, port: number): ProxyEnvState {
+  const settings = JSON.parse(settingsJson) as Record<string, unknown>;
+  const env = settings.env;
+  const url = typeof env === 'object' && env !== null && 'ANTHROPIC_BASE_URL' in env
+    ? env.ANTHROPIC_BASE_URL
+    : undefined;
+  return classifyProxyBaseUrl(url, port);
 }
 
 // ---------------------------------------------------------------------------

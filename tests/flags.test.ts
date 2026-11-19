@@ -21,6 +21,7 @@ import {
   convergeFlagsIntoSettings,
   settingHoldsManagedShape,
   settingHoldsUserValue,
+  respectUserOwnedSettings,
   isEnvBooleanFlag,
   // Kept verbatim
   VIEW_MODES,
@@ -1034,6 +1035,113 @@ describe('bash-max-timeout-ms flag', () => {
 
 // ─── New flag: auto-compact-window ────────────────────────────────────────────
 
+describe('code-mode registry entry', () => {
+  it('offers Code Mode after Agent Teams and leaves it off by default', () => {
+    const agentTeams = FLAG_REGISTRY.findIndex(f => f.id === 'agent-teams');
+    expect(FLAG_REGISTRY[agentTeams + 1]).toMatchObject({
+      id: 'code-mode',
+      label: 'Code Mode (experimental)',
+      kind: 'boolean',
+      target: { type: 'env', key: 'CLAUDE_CODE_EXPERIMENTAL_CODE_MODE' },
+      onPayload: '1',
+      defaultValue: false,
+      recommended: false,
+    });
+    expect(getDefaultFlagsRecord()['code-mode']).toBe(false);
+  });
+
+  it('names the Code Mode blockers and the minimum Agent Teams version', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'code-mode');
+    expect(flag?.description).toContain('Claude Code v2.1.326+');
+    for (const blocker of [
+      'Devflow proxy',
+      'disable-nonessential-traffic',
+      'ANTHROPIC_BASE_URL',
+      'apiKeyHelper',
+      'ANTHROPIC_AUTH_TOKEN',
+      'OpenTelemetry export',
+    ]) {
+      expect(flag?.description).toContain(blocker);
+    }
+    expect(flag?.hint).toMatch(/experimental.*every new session/i);
+  });
+
+  it('warns that the non-essential traffic flag stops Code Mode', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'disable-nonessential-traffic');
+    expect(flag?.hint).toContain('Code Mode does not start');
+  });
+});
+
+describe('code-mode own-value rule', () => {
+  const id = 'code-mode';
+  const key = 'CLAUDE_CODE_EXPERIMENTAL_CODE_MODE';
+  const settingsWith = (value: unknown): string => JSON.stringify({ env: { [key]: value } });
+  const opts = { viewModeExplicit: false };
+
+  it.each(['0', 'true', '', 1])('preserves user value %j on disable', value => {
+    expect(JSON.parse(applyFlags(settingsWith(value), { [id]: false })))
+      .toEqual({ env: { [key]: value } });
+  });
+
+  it('deletes the exact on payload on disable', () => {
+    const enabled = applyFlags('{}', { [id]: true });
+    expect(JSON.parse(enabled)).toEqual({ env: { [key]: '1' } });
+    expect(JSON.parse(applyFlags(enabled, { [id]: false }))).toEqual({});
+  });
+
+  it('strips only the exact on payload', () => {
+    expect(JSON.parse(stripFlags(settingsWith('0')))).toEqual({ env: { [key]: '0' } });
+    expect(JSON.parse(stripFlags(settingsWith('1')))).toEqual({});
+  });
+
+  it.each([
+    { path: 'flags', record: {}, options: opts },
+    { path: 'init', record: { [id]: false }, options: { ...opts, ownedRecord: {} } },
+  ])('adopts a hand-set on payload before the strip on the $path path', ({ record, options }) => {
+    const result = convergeFlagsIntoSettings(settingsWith('1'), record, options);
+    expect(result.record[id]).toBe(true);
+    expect(JSON.parse(result.settings)).toEqual({ env: { [key]: '1' } });
+  });
+
+  it('keeps a claimed off value and strips the exact on payload', () => {
+    const result = convergeFlagsIntoSettings(settingsWith('1'), { [id]: false }, opts);
+    expect(result.record[id]).toBe(false);
+    expect(JSON.parse(result.settings)).toEqual({});
+  });
+
+  it('folds a stale on record to off without a second change on the next pass', () => {
+    const initial = { [id]: true };
+    const result = convergeFlagsIntoSettings(settingsWith('0'), initial, opts);
+    expect(result.record[id]).toBe(false);
+    expect(initial[id]).toBe(true);
+    expect(JSON.parse(result.settings)).toEqual({ env: { [key]: '0' } });
+    expect(convergeFlagsIntoSettings(result.settings, result.record, opts)).toEqual(result);
+  });
+
+  it('replaces a user value only if this flag is explicit on', () => {
+    const record = { [id]: true };
+    const settings = settingsWith('0');
+    const unrelated = convergeFlagsIntoSettings(settings, record, { ...opts, explicitOn: ['lsp'] });
+    expect(unrelated.record[id]).toBe(false);
+    expect(JSON.parse(unrelated.settings)).toEqual({ env: { [key]: '0' } });
+
+    const requested = convergeFlagsIntoSettings(settings, record, { ...opts, explicitOn: [id] });
+    expect(requested.record[id]).toBe(true);
+    expect(JSON.parse(requested.settings)).toEqual({ env: { [key]: '1' } });
+  });
+
+  it('seeds on for a hand-set on payload with no manifest claim', () => {
+    const seed = respectUserOwnedSettings({ [id]: false }, {}, settingsWith('1'));
+    expect(seed[id]).toBe(true);
+  });
+
+  it('seeds off when settings hold a user value and the manifest claims on', () => {
+    const record = { [id]: true };
+    const seed = respectUserOwnedSettings(record, record, settingsWith('0'));
+    expect(seed[id]).toBe(false);
+  });
+});
+
 /**
  * D-AUTO-COMPACT-WINDOW-OPT-IN (AC-406). The flag is opt-in: unset by default, so a
  * fresh install and a re-init (init applies the seeded record without asking) never
@@ -1070,8 +1178,8 @@ describe('auto-compact-window flag', () => {
     expect(ids.indexOf('auto-compact-window')).toBeGreaterThan(lastBoolean);
   });
 
-  it('the registry holds 32 flags (docs/cli-reference.md and file-organization.md state the count)', () => {
-    expect(FLAG_REGISTRY).toHaveLength(32);
+  it('the registry holds 33 flags', () => {
+    expect(FLAG_REGISTRY).toHaveLength(33);
   });
 
   it('a set value is written to the settings env block as a decimal string', () => {

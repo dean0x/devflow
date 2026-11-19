@@ -3,9 +3,9 @@ feature: external-model-routing
 name: External Model Routing & Per-Agent Model Config
 description: "Use when working on the proxy lifecycle (enable, disable, status, preflight), relay teardown, proxy.json or routing config. Keywords: devflow proxy, relay, ANTHROPIC_BASE_URL, dormancy."
 category: architecture
-directories: [src/core/proxy-state.ts, src/core/codex-auth-inspect.ts, src/cli/commands/proxy.ts]
+directories: [src/core/proxy-state.ts, src/core/code-mode.ts, src/core/read-file-bytes.ts, src/core/codex-auth-inspect.ts, src/cli/commands/proxy.ts]
 created: 2026-07-24
-updated: 2026-10-13
+updated: 2026-11-19
 ---
 
 # External Model Routing & Per-Agent Model Config
@@ -22,6 +22,8 @@ updated: 2026-10-13
 - **KB-AP-8** Never spawn `binPath` directly: npm does not guarantee executable bits, so always `node <binPath>`.
 - **KB-AP-9** Never leave stub relays that tests spawn unreaped on the failure path: orphans stretched the full run from seconds to tens of minutes and caused spurious failures in unrelated files.
 - **KB-AP-10** Never treat `proxy.json` ENOENT as an error: `readProxyState()` returns the default disabled state, and an error there is a false negative on fresh installs.
+- **KB-AP-11** Never duplicate the `ANTHROPIC_BASE_URL` classifier, read `proxy.json` outside `readProxyState`, or put a path, errno or parser message in its error: `classifyProxyBaseUrl` and `readProxyEnvState` live in `proxy-state.ts` (`proxy.ts` only re-exports the latter), and `readProxyState` reads through the bounded reader and returns fixed text.
+- **KB-AP-12** Never let `--enable` reach `mkdir`, the spinner, the routing-config write, preflight or hook registration before the Code Mode check: the refusal precedes every side effect, drift repair included.
 - **KB-INV-1** `isProxyEnabled()` reads only `proxy.json` and is the sole dormancy authority; every path that forces the proxy off writes `proxy.json enabled:false` alongside manifest, hooks and env, or a later reapply writes GPT ids with no relay.
 - **KB-INV-2** `reapplyAgentMapping` runs only after init preflight has resolved the final `proxyEnabled`.
 - **KB-INV-3** Teardown always removes the hooks; it strips env only when `applyProxyTeardownToSettings` receives a managed port derived from an existing `proxy.json` (D-STRIP-1).
@@ -32,6 +34,9 @@ updated: 2026-10-13
 - **KB-INV-8** Init never spawns the relay or runs doctor; a preflight failure warns and forces `proxyEnabled=false`, never aborting init. The first session's hook starts the relay.
 - **KB-INV-9** `--port` has no commander default: omission means the remembered port in `proxy.json` wins.
 - **KB-INV-10** The Codex JWT is decoded for display only: never signature-verified, no token material returned, the account id truncated.
+- **KB-INV-11** `proxy --enable` refuses (exit 1, nothing written) while Code Mode is on, and also when the Code Mode signals cannot be read (settings unparseable or unreadable); disable and every turn-off path are never blocked by Code Mode.
+- **KB-INV-12** `proxy --status` prints Code Mode blocker lines only while Code Mode is on, as warnings after the `ANTHROPIC_BASE_URL` line, from the shared predicates in `code-mode.ts`; it never prints settings values. It reads `settings.json` only through `readSettingsEnv` (bounded reader, never a bare `fs.readFile`): an unreadable or oversize file gives no env, so the URL shows as not set and no blocker line comes from that file.
+- **KB-INV-13** `readProxyState` returns the default disabled state only for an absent file; an unreadable, oversize, non-regular, non-directory-parent or unparseable file is an `Err` with fixed text, and the Code Mode signal reader counts that `Err` as the proxy being on.
 
 ## Overview
 
@@ -52,7 +57,7 @@ The routing runtime is an internal package (`subswitch`, exact-pinned in `packag
 
 | File | Role |
 |------|------|
-| `~/.devflow/proxy.json` | Runtime authority, tolerant-parsed by `readProxyState()`. ENOENT yields the default disabled state (KB-AP-10). Fields: `enabled`, `port`, `binPath`, `configPath`, `resolvedAt`, `devflowVersion`. |
+| `~/.devflow/proxy.json` | Runtime authority, read by `readProxyState()` through the bounded `readFileBytes` (regular file only, size-capped by `MAX_PROXY_STATE_BYTES`; read failures return fixed error text, KB-AP-11), then field-tolerant parsed. Only an absent file yields the default disabled state (KB-AP-10, KB-INV-13). Fields: `enabled`, `port`, `binPath`, `configPath`, `resolvedAt`, `devflowVersion`. |
 | `~/.devflow/proxy-routing.json` | Routing config from `buildRoutingConfigJson(port, existingContent?)`, written before preflight on enable (contract below). |
 | `manifest.features.proxy` | Init/uninstall authority. `resolveSeedFeatures` seeds it from `manifest?.features.proxy ?? FEATURE_DEFAULTS.proxy`; `--reset` seeds `false`. |
 | `proxy.pid`, `logs/proxy.log`, `.proxy-spawn.lock` | Relay pid record (best-effort), relay log, spawn lock. Handled in the hook knowledge base. |
@@ -64,6 +69,7 @@ The routing runtime is an internal package (`subswitch`, exact-pinned in `packag
 ### Enable path (crash-safe)
 
 1. `resolvePort(portOption, priorPort)`: the remembered port from `proxy.json` unless `--port` is given (KB-INV-9).
+1b. **Code Mode gate** (KB-INV-11, KB-AP-12): right after the port resolves and before the spinner, `readCodeModeSignals(claudeDir, devflowDir)` reads local files only (settings env, `proxy.json`, the manifest, never the relay). A failed read or an unparseable `settings.json` prints `CODE_MODE_READ_FAILURE`; `isCodeModeOn(record, env)` true prints `PROXY_ENABLE_REFUSAL`. Both set exit 1 and return. The gate sits in `runEnable`, so it also stops drift repair (`proxy.json` on and manifest off, or the reverse) and a hand-set Code Mode with no or a corrupt manifest. The message constants live in `code-mode.ts`; do not reword them inline. The flags side of the pair is in the wizard-flags knowledge base.
 2. Create `~/.devflow` and `logs/` (0700), run `rotateProxyLogIfLarge` (pre-spawn only; see the hook knowledge base), then write `proxy-routing.json` through `buildRoutingConfigJson(port, existingContent)`.
 3. `runProxyPreflight()`: four ordered checks (see Preflight). Doctor is deliberately excluded (KB-AP-3).
 4. Write `proxy.json enabled:true` with the freshly resolved `binPath`.
@@ -87,6 +93,10 @@ Hard failures at any step set `process.exitCode = 1` and return (KB-INV-7). Enab
 7. Always warn that already-running Claude Code sessions captured `ANTHROPIC_BASE_URL` in their env and stay routed until restarted.
 
 `devflow uninstall` only reports a still-running relay (PID and a manual `kill` hint); it never signals. `--status` always probes the relay, even when disabled, so it surfaces the case of a disabled feature with a relay still listening.
+
+### Status Code Mode lines
+
+`runStatus` reads the manifest with the raw `readGateManifest` and takes the flag record and manifest proxy switch from `codeModeManifestSignals` (an unrelated manifest defect does not erase a readable switch). After the `ANTHROPIC_BASE_URL` line it prints `codeModeBlockers(...)` as warnings, fed by `isCodeModeOn`, `isTrafficOn` and `isProxyOn`. The proxy signal there is `proxy.json` enabled or unreadable, the manifest switch, or a relay URL on any port (`ours` or `ours-other-port`, from `classifyProxyBaseUrl`). With Code Mode off, a proxy that is on prints nothing extra. Status reads `settings.json` through `readSettingsEnv`, the same bounded reader (`MAX_SETTINGS_BYTES` cap) that `readCodeModeSignals` uses: an absent file gives an empty env, and an unreadable, oversize, non-object or unparseable file leaves `env` undefined. The URL then shows as not set, and the blockers fall back to the manifest record and the proxy signals. `tests/proxy-code-mode.test.ts` pins an oversize settings file: status ends with exit 0, no warnings and a not-set URL line.
 
 ### Settings teardown
 
@@ -114,7 +124,7 @@ Hard failures at any step set `process.exitCode = 1` and return (KB-INV-7). Enab
 
 ### Init and uninstall
 
-**Init never runs doctor and never spawns** (KB-INV-8). With routing wanted, it recovers the remembered port (init has no `--port`), writes the routing config through `buildRoutingConfigJson` (a write failure forces `proxyEnabled=false`), runs `runProxyPreflight` with `buildRealPreflightDeps({ swallowSettingsReadError: true })`, and on success writes `proxy.json enabled:true` with the freshly resolved `binPath` (the heal path for upgrades). On failure it warns, forces `proxyEnabled=false` and writes `proxy.json enabled:false` when the prior state was enabled; with the proxy off at entry, a prior enabled `proxy.json` is marked disabled the same way. Deeper diagnostics (doctor, spawn) live in `devflow proxy --enable` and `--status`.
+**Init never runs doctor and never spawns** (KB-INV-8). With routing wanted, it recovers the remembered port (init has no `--port`), writes the routing config through `buildRoutingConfigJson` (a write failure forces `proxyEnabled=false`), runs `runProxyPreflight` with `buildRealPreflightDeps({ swallowSettingsReadError: true })`, and on success writes `proxy.json enabled:true` with the freshly resolved `binPath` (the heal path for upgrades). On failure it warns, forces `proxyEnabled=false` and writes `proxy.json enabled:false` when the prior state was enabled; with the proxy off at entry, a prior enabled `proxy.json` is marked disabled the same way. Deeper diagnostics (doctor, spawn) live in `devflow proxy --enable` and `--status`. Init does not refuse on Code Mode: it only warns (`initCodeModeWarnings`) from the converged flag record and the post-preflight `proxyEnabled`, so the warning describes the final state; the refusal belongs to `proxy --enable` and the flags writes.
 
 `init.ts` gates the env strip on `proxyJsonExists()` (explicit `D-STRIP-1` comment): with no file on a machine that never had the proxy, no stripping runs; with the file, its port is passed to `_stripProxyEnvFromObject` as `managedPort`. The `reapplyAgentMapping` call comes after the preflight block (KB-INV-2) and is skipped only when the mapping has no agent entries and the proxy is off (see the agent-config knowledge base).
 
@@ -132,7 +142,7 @@ Hard failures at any step set `process.exitCode = 1` and return (KB-INV-7). Enab
 | `applyProxyEnv`, `stripProxyEnv` | Pure settings-JSON-string transforms, no mutation |
 | `applyDisableToSettings`, `applyProxyTeardownToSettings` | Both-operations invariant; unified teardown (D-STRIP-1) |
 | `addProxyHooks`, `removeProxyHooks`, `hasProxyHooks` | Hook mutation helpers |
-| `readProxyEnvState` | One of `ours`, `ours-other-port`, `foreign`, `absent`, for `--status` |
+| `readProxyEnvState` | Re-exported from `proxy-state.ts` (where it and `classifyProxyBaseUrl` are defined, so `code-mode.ts` can use them without importing the CLI); one of `ours`, `ours-other-port`, `foreign`, `absent`. Invalid settings JSON still raises, so callers parse first and report malformed settings themselves, as check ④ does |
 | `formatCodexAuthLine(state, path, now)` | `{ level, msg }`: `warn` when the state is `unreadable`, `info` otherwise; expiry is informational only because the relay refreshes tokens proactively; `AUTH_MODE_MAX_LEN` bounds the rendered auth mode (hostile `~/.codex/auth.json`) |
 | `formatExternalModelsLine(catalog, logPath)` | Selectable model names, or `unavailable` with the log path |
 | `realHttpGet(url, timeoutMs)` | Bounded HTTP GET |
@@ -187,11 +197,15 @@ There is no override-confirm prompt: the merge is purely additive (Devflow entri
 
 - **KB-AP-8** — `resolveProxyBin()` uses `createRequire(import.meta.url)`, the ESM-safe way to resolve CommonJS package paths; `require.resolve('subswitch/package.json')` finds the package relative to devflow's own `node_modules`, not the user's project.
 - **KB-AP-9** — Reap stub relays with `afterEach`/`onTestFinished`, SIGTERM then SIGKILL, and confirm death with `process.kill(pid, 0)`. The incident: orphaned stub relays accumulated over weeks and produced spurious failures in memory-pipeline and capture-hook tests that were repeatedly misdiagnosed as product defects.
+- **KB-AP-11** — `readProxyState` returns `Err` with fixed text (`Cannot read the Devflow proxy state file.` or `Cannot parse the Devflow proxy state file.`), so callers can print it without leaking a path or errno. `tests/proxy-state.test.ts` pins the fixed texts with literals: the parse text for invalid JSON, and the read text for a directory at `proxy.json`, an oversize file and a file at the Devflow directory path. Change a text only with that test. A caller that needs "unreadable means on" (the Code Mode reader) checks `!proxy.ok`; one that wants defaults must not treat `Err` as absent. A malformed file is an `Err`, not a silent default, so a hand-damaged `proxy.json` shows up as proxy-on in the Code Mode checks.
+- **KB-AP-12** — The gate order in `runEnable` is port, Code Mode signals, spinner, mkdir. `tests/proxy-code-mode.test.ts` pins refusal before writes or the spinner, drift repair, hand-set enable with an absent or corrupt manifest, and signal-reader failure. `tests/write-set-fence.test.ts` has a `proxy --enable` row (`proxy.json` disabled, the manifest flag record with `code-mode` true) expecting exit 1 and no writes; the successful `--enable` stays exempt because the relay it starts writes outside the fence.
 - Non-fatal everywhere: artifact removal in uninstall and disable, `writeFileAtomicExclusive`'s chmod, and the hook's binPath re-resolution never abort their command.
 
 ## Key Files
 
-- `src/core/proxy-state.ts` — `ProxyState` schema and read/write, `isProxyEnabled()`, `proxyJsonExists()`, `resolveProxyBin()` and `RUNTIME_VERSION_RE`, `buildRoutingConfigJson()`, `ROUTING_CONFIG_REJECTED_SUBKEYS`
+- `src/core/proxy-state.ts` — `ProxyState` schema and read/write, `isProxyEnabled()`, `proxyJsonExists()`, `classifyProxyBaseUrl()`, `readProxyEnvState()`, `resolveProxyBin()` and `RUNTIME_VERSION_RE`, `buildRoutingConfigJson()`, `ROUTING_CONFIG_REJECTED_SUBKEYS`
+- `src/core/code-mode.ts` — the Code Mode predicates, `readSettingsEnv` (bounded settings env reader), signal reader, blockers and fixed message constants that `runEnable` and `runStatus` call
+- `src/core/read-file-bytes.ts` — `readFileBytes`, the bounded regular-file reader behind `readProxyState` and `readSettingsEnv`; any failure, a failed close included, gives `unreadable` (the conservative result)
 - `src/core/codex-auth-inspect.ts` — `inspectCodexAuth()`, `classifyCodexAuthReadError()`
 - `src/core/fs-atomic.ts` — `writeFileAtomicExclusive()` (mode-preserving), `writeSettingsFileAtomic()` (symlink-following)
 - `src/cli/commands/proxy.ts` — `proxyCommand`, `runEnable`, `runDisable`, `runStatus` and the seams in the table above
@@ -205,6 +219,7 @@ There is no override-confirm prompt: the merge is purely additive (Devflow entri
 
 - `.devflow/features/external-model-routing-hook/KNOWLEDGE.md` — the hook that starts the relay on SessionStart, the relay `env -i` allowlist and `scrubChildEnv()` it must stay in sync with
 - `.devflow/features/external-model-routing-agent-config/KNOWLEDGE.md` — mapping engine, dormancy, agent state, TUI, discovery and cache; the proxy off-switch rules above feed its dormancy semantics
+- `.devflow/features/installer-shadowing-wizard-flags/KNOWLEDGE.md` — the Code Mode flag, its predicates and the flags-side refusal that pairs with the proxy enable refusal
 - `.devflow/features/installer-shadowing/KNOWLEDGE.md` — `resolveSeedFeatures`, manifest-group feature seeding and uninstall artifact cleanup patterns that the proxy extends
 - `.devflow/features/curation-capture-system-memory-worker/KNOWLEDGE.md` — the memory worker's side of `agents.memory`
 - `src/core/` and `src/cli/` — all state I/O and pure logic in core, CLI orchestration in cli; the proxy feature is the canonical multi-module example of the split

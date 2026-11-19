@@ -1,4 +1,4 @@
-import { promises as fs, constants as fsConstants } from 'fs';
+import { readFileBytes } from './read-file-bytes.js';
 import * as path from 'path';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
 import { hasRequiredManifestFields } from './manifest.js';
@@ -147,42 +147,6 @@ function startsWithBom(bytes: Uint8Array): boolean {
   return bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf;
 }
 
-/** Bytes of the manifest, or why not: one bounded read of a regular file, followed through links. */
-async function readManifestBytes(manifestPath: string): Promise<Buffer | 'absent' | 'corrupt'> {
-  try {
-    let st;
-    try {
-      st = await fs.stat(manifestPath);
-    } catch (err: unknown) {
-      const code = (err as NodeJS.ErrnoException).code;
-      return code === 'ENOENT' || code === 'ENOTDIR' ? 'absent' : 'corrupt';
-    }
-    if (!st.isFile() || st.size > MAX_MANIFEST_BYTES) return 'corrupt';
-
-    // O_NONBLOCK: a FIFO swapped in after the stat cannot block the open.
-    const handle = await fs.open(manifestPath, fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK || 0));
-    try {
-      const opened = await handle.stat();
-      if (!opened.isFile() || opened.size > MAX_MANIFEST_BYTES) return 'corrupt';
-      // One byte past the stat'd size: a file that grew between the stat and the
-      // read is refused rather than truncated into something that parses. Each
-      // pass reads at least one byte or stops, so the loop is bounded by the buffer.
-      const buf = Buffer.alloc(opened.size + 1);
-      let total = 0;
-      for (let pass = 0; pass < buf.length && total < buf.length; pass++) {
-        const { bytesRead } = await handle.read(buf, total, buf.length - total, null);
-        if (bytesRead === 0) break;
-        total += bytesRead;
-      }
-      return total > opened.size ? 'corrupt' : buf.subarray(0, total);
-    } finally {
-      await handle.close().catch(() => undefined);
-    }
-  } catch {
-    return 'corrupt';
-  }
-}
-
 /**
  * Read `<devflowDir>/manifest.json` raw, for the gate level. Never throws, never
  * exits and never writes: unlike readManifest() it heals nothing, models no key
@@ -196,9 +160,9 @@ async function readManifestBytes(manifestPath: string): Promise<Buffer | 'absent
  * readManifest() parses the text as read and refuses it.
  */
 export async function readGateManifest(devflowDir: string): Promise<GateManifestRead> {
-  const bytes = await readManifestBytes(path.join(devflowDir, 'manifest.json'));
-  if (bytes === 'absent') return ABSENT;
-  if (bytes === 'corrupt') return CORRUPT;
+  const bytes = await readFileBytes(path.join(devflowDir, 'manifest.json'), MAX_MANIFEST_BYTES);
+  if (bytes === 'absent' || bytes === 'not-directory') return ABSENT;
+  if (bytes === 'unreadable') return CORRUPT;
   let parsed: unknown;
   try {
     parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));

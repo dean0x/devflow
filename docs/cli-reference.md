@@ -461,7 +461,7 @@ npx devflow-kit flags --unset <ids>      # Reset flag(s) to neutral, comma-separ
 
 `--enable` and `--disable` accept boolean flags only. Non-boolean flags (enum, number, string) use `--set id=value`. Passing a non-boolean id to `--enable`/`--disable` prints an error and redirects to `--set`.
 
-All 32 flags by kind and devflow default:
+All 33 flags by kind and Devflow default:
 
 | Flag ID | Kind | Target | Devflow Default |
 |---------|------|--------|-----------------|
@@ -478,7 +478,7 @@ All 32 flags by kind and devflow default:
 | `brief` | boolean | env `CLAUDE_CODE_BRIEF` | `false` |
 | `thinking-summaries` | boolean | setting `showThinkingSummaries` | `false` |
 | `subprocess-env-scrub` | boolean | env `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` | `false` |
-| `disable-nonessential-traffic` | boolean | env `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` | `false` |
+| `disable-nonessential-traffic` | boolean | env `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` | `false` (Code Mode does not start if this flag is on) |
 | `forked-subagents` | boolean | env `CLAUDE_CODE_FORK_SUBAGENT` | `false` |
 | `disable-adaptive-thinking` | boolean | env `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING` | `false` |
 | `always-thinking` | boolean | setting `alwaysThinkingEnabled` | `false` |
@@ -487,6 +487,7 @@ All 32 flags by kind and devflow default:
 | `disable-1m-context` | boolean | env `CLAUDE_CODE_DISABLE_1M_CONTEXT` | `false` |
 | `disable-autoupdater` | boolean | env `DISABLE_AUTOUPDATER` | `false` |
 | `agent-teams` | boolean | env `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` | `false` |
+| `code-mode` | boolean | env `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE` | `false`⁶ |
 | `enable-todo-tools` | boolean | env `CLAUDE_CODE_ENABLE_TODO_TOOLS` | `false` |
 | `suppress-attribution` | boolean | setting `attribution` | `false` ²|
 | `subagent-spawn-depth` | number | env `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` | unset (upstream: 3) |
@@ -508,6 +509,13 @@ All 32 flags by kind and devflow default:
 
 ⁵ `subagent-cache-5m` writes `"5m"`, so subagents write 5-minute prompt-cache entries while the main session keeps the 1-hour TTL of `prompt-caching-1h`. Disabling or uninstalling deletes the key only when it holds `"5m"`. When the key already holds another value (say `"1h"`), `devflow init` and the flags TUI record the flag off and keep your value; `init --reset` writes `"5m"`.
 
+⁶ `code-mode` is experimental and off by default. This change applies to new sessions only. Code Mode does not work with `claude -p`. Deny rules, ask rules, and `PreToolUse` hooks still apply to each tool call.
+
+- **Blockers.** Code Mode does not start with the Devflow proxy or `disable-nonessential-traffic` on. A custom `ANTHROPIC_BASE_URL`, `apiKeyHelper`, `ANTHROPIC_AUTH_TOKEN`, or OpenTelemetry export also blocks Code Mode. Code Mode with `agent-teams` needs Claude Code v2.1.326 or later.
+- **User settings only.** Claude Code reads the enable value only from `env` in user settings. A `0` in the shell or in any settings file takes priority. A project setting cannot turn Code Mode on. Devflow checks only local state and the user settings `env`, not shell exports or project settings.
+- **Values Devflow keeps.** Devflow writes `"1"` to enable Code Mode. If the key has a different value, Devflow keeps your value and records `code-mode` off on the next flag write. An explicit request to turn `code-mode` on can replace that value. Devflow removes the key only if it holds `"1"`.
+- **Refusals and warnings.** Devflow refuses to turn `code-mode` on while the Devflow proxy is on. Run `devflow proxy --disable` first. Devflow warns about the proxy and `disable-nonessential-traffic` only while Code Mode is on. Devflow does not check the other blockers. If both Code Mode and the proxy are on after proxy preflight, `devflow init` warns and keeps both on.
+
 ## External Model Routing (Devflow Proxy)
 
 Route Devflow agents through GPT models via your OpenAI/Codex subscription. When enabled, a local Devflow proxy relay intercepts agent requests and forwards them to the configured model.
@@ -523,9 +531,9 @@ npx devflow-kit proxy --enable --port <n>  # Enable on a specific port (default:
 
 | Option | Description |
 |--------|-------------|
-| `--enable` | Enable routing — runs preflight, writes `~/.devflow/proxy.json` and `~/.devflow/proxy-routing.json`, starts and verifies the relay, injects `ANTHROPIC_BASE_URL` and `CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT` into `settings.json`, applies saved agent model mapping |
+| `--enable` | Enable routing — runs preflight, writes `~/.devflow/proxy.json` and `~/.devflow/proxy-routing.json`, starts and verifies the relay, injects `ANTHROPIC_BASE_URL` and `CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT` into `settings.json`, applies saved agent model mapping. If Code Mode is on, this command refuses the change. Run `devflow flags --disable code-mode` first. |
 | `--disable` | Disable routing — reverts agent frontmatter to Claude defaults, removes env override; mapping is preserved for re-enable; the relay process is left running for live sessions (a manual `kill <pid>` hint is shown) |
-| `--status` | Show feature state (enabled/disabled, port), relay process and PID, `ANTHROPIC_BASE_URL` and `CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT` env state, Codex auth content (not just existence), external-mapped agent count, cached model registry, and proxy log path |
+| `--status` | Show feature state (enabled/disabled, port), relay process and PID, `ANTHROPIC_BASE_URL` and `CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT` env state, Codex auth content (not just existence), external-mapped agent count, cached model registry, and proxy log path. Warn about the proxy or `disable-nonessential-traffic` only while Code Mode is on. |
 | `--port <n>` | Override the relay port (default 4141); takes effect on next enable |
 
 Takes effect in new Claude Code sessions after `--enable`. The relay auto-starts on `SessionStart` via the `ensure-proxy` hook; `UserPromptSubmit` exits immediately with no action (SessionStart handles all relay-start and warning logic). Routing state is stored in `~/.devflow/proxy.json`; per-agent model mapping in `~/.devflow/agent-models.json`.

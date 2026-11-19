@@ -7,7 +7,7 @@
  *
  * Coverage:
  *  - readProxyState: ENOENT → default disabled state (TEST-2)
- *  - readProxyState: malformed JSON → tolerant default, no throw (TEST-2)
+ *  - readProxyState: unreadable state or invalid JSON → fixed error (TEST-2)
  *  - writeProxyState → readProxyState round-trip (TEST-2)
  *  - Tolerant field parsing: wrong-typed fields self-heal to defaults (TEST-2)
  *  - buildRoutingConfigJson: port-only shape — no injected anthropic block (AC-C4)
@@ -21,6 +21,7 @@ import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import {
+  classifyProxyBaseUrl,
   readProxyState,
   writeProxyState,
   buildRoutingConfigJson,
@@ -42,6 +43,19 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await fs.rm(tmpDir, { recursive: true, force: true });
+});
+
+describe('proxy URL classification', () => {
+  it.each([
+    ['http://127.0.0.1:5050', 'ours'],
+    ['http://127.0.0.1:4141', 'ours-other-port'],
+    ['https://gateway.example', 'foreign'],
+    ['http://127.0.0.1:5050/', 'foreign'],
+    [{ href: 'http://127.0.0.1:5050' }, 'absent'],
+    [undefined, 'absent'],
+  ])('classifies %j as %s', (url, state) => {
+    expect(classifyProxyBaseUrl(url, 5050)).toBe(state);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -77,27 +91,23 @@ describe('readProxyState — missing file', () => {
 });
 
 // ---------------------------------------------------------------------------
-// readProxyState — malformed JSON (TEST-2)
+// readProxyState — read and parse errors (TEST-2)
 // ---------------------------------------------------------------------------
 
-describe('readProxyState — malformed JSON', () => {
-  it('returns ok with default state for malformed JSON input', async () => {
-    await fs.writeFile(path.join(tmpDir, 'proxy.json'), 'not-json{{{', 'utf-8');
-    // Should not throw; should return a Result
-    let result: Awaited<ReturnType<typeof readProxyState>>;
-    expect(async () => {
-      result = await readProxyState(tmpDir);
-    }).not.toThrow();
-    result = await readProxyState(tmpDir);
-    // Must return an Err (parse error is surfaced as Err, not a throw)
-    // The implementation returns Err for JSON.parse failures that are not ENOENT
-    expect(typeof result.ok).toBe('boolean');
-  });
+describe('readProxyState — read and parse errors', () => {
+  const readError = 'Cannot read the Devflow proxy state file.';
+  const proxyJson = (dir: string) => path.join(dir, 'proxy.json');
 
-  it('does not throw for malformed JSON — Result returned instead', async () => {
-    await fs.writeFile(path.join(tmpDir, 'proxy.json'), '{ "enabled": true, >>>bad<<<', 'utf-8');
-    // The key requirement: no exception escapes readProxyState
-    await expect(readProxyState(tmpDir)).resolves.toBeDefined();
+  it.each([
+    ['invalid JSON', '.', (dir: string) => fs.writeFile(proxyJson(dir), '{'),
+      'Cannot parse the Devflow proxy state file.'],
+    ['a directory at proxy.json', '.', (dir: string) => fs.mkdir(proxyJson(dir)), readError],
+    ['a file over the read limit', '.', (dir: string) => fs.writeFile(proxyJson(dir), '{}'.padEnd(1024 * 1024 + 1)), readError],
+    ['a file at the Devflow directory path', 'not-a-dir', (dir: string) => fs.writeFile(dir, 'x'), readError],
+  ] as const)('returns a fixed error for %s', async (_input, subpath, arrange, error) => {
+    const devflowDir = path.join(tmpDir, subpath);
+    await arrange(devflowDir);
+    expect(await readProxyState(devflowDir)).toStrictEqual({ ok: false, error });
   });
 });
 
