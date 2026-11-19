@@ -115,6 +115,7 @@ interface VerifyEvidence {
   settleOutcome(outcome: unknown): Outcome
   commentIdOf(url: unknown, pr: number): string
   editTarget(pr: { readonly comments: readonly FactsComment[] }): EditTarget | null
+  claimCause(io: { readonly stderr: (text: string) => void }, text: unknown): void
 }
 
 const req = createRequire(import.meta.url)
@@ -229,7 +230,7 @@ describe('module surface', () => {
     expect(Object.keys(VE).sort()).toEqual([
       'CAPS', 'EXIT_CODES', 'PR_FIELDS', 'main', 'settleOutcome',
       'BODY_STATUSES', 'COMMENT_STATUSES', 'readinessVerdict', 'bindCiHead', 'renderPublishBlock', 'parsePublishBlock', 'renderReadinessBlock', 'parseReadinessBlock', 'writeReadinessOut',
-      'commentIdOf', 'editTarget',
+      'commentIdOf', 'editTarget', 'claimCause',
     ].sort())
   })
 
@@ -2831,7 +2832,9 @@ describe('claim — appends the claim lines of a report to the evidence file', (
       const before = `${'x'.repeat(PE.LIMITS.INPUT_CHARS - tail.length - 2)}\n\n${tail}`
       expect(before.length).toBe(PE.LIMITS.INPUT_CHARS)
       const file = writeScratch(dir, 'e.md', before)
-      expect(claim([...flags(file), 'gate'])).toMatchObject({ code: 2, stdout: refusal('evidence file unusable') })
+      const r = claim([...flags(file), 'gate'])
+      expect(r).toMatchObject({ code: 2, stdout: refusal('evidence file unusable') })
+      expect(r.stderr).toBe('verify-evidence: claim: the claim lines do not fit the Claims section\n')
       expect(read(file)).toBe(before)
       expect(fs.readdirSync(dir)).toEqual(['e.md'])
     })
@@ -3351,6 +3354,47 @@ describe('claim — appends the claim lines of a report to the evidence file', (
       [2, `${refusal('head not one sha')}- TP-1 PASS\n`],
     ])('refuses %i %j: nothing prints, exit 4', (code, stdout) => {
       expect(VE.settleOutcome({ code, stdout })).toEqual({ code: 4, stdout: '' })
+    })
+  })
+
+  describe('the cause gate', () => {
+    const PREFIX = 'verify-evidence: claim: '
+    const FALLBACK = `${PREFIX}the cause does not pass the stderr check\n`
+    const sink = (text: unknown): string => {
+      let out = ''
+      VE.claimCause({ stderr: (t: string) => { out += t } }, text)
+      return out
+    }
+    const NO_EXIT = 'are method:local PASS claims with no exit code from 0 to 255; verify reads them UNVERIFIED, and only exit 0 from the Test report counts'
+    const list = (count: number, id: (i: number) => string): string => Array.from({ length: count }, (_, i) => `TP-${id(i + 1)}`).join(', ')
+    const at = (c: string): string => `line 3${c} is not a TP line`
+
+    it.each([
+      ['a template with its number slot', 'line 3 is not a TP line'],
+      ['the fixed phrase no caller can reach today', 'the plan does not parse'],
+    ])('writes %s unchanged', (_label, cause) => {
+      expect(sink(cause)).toBe(`${PREFIX}${cause}\n`)
+    })
+
+    it.each([
+      ['an empty cause', ''],
+      ['a cause that is not a string', 42],
+      ['a <', at('<')],
+      ['an @', at('@')],
+      ['a #', at('#')],
+      ['a backtick', at('`')],
+      ['a slash', at('/')],
+      ['a [', at('[')],
+      ['a ]', at(']')],
+      ['a second line', 'line 3 is not a TP line\nline 4 is not a TP line'],
+      ['a bidi control character', at(String.fromCharCode(0x202e))],
+      ['a template over the length cap', `${list(VE.CAPS.TPS, i => String(1000000000 + i))} ${NO_EXIT}`],
+      ['a TP list longer than CAPS.TPS ids', `${list(VE.CAPS.TPS + 1, i => String(i))} ${NO_EXIT}`],
+      ['a sentence of the allowed characters that no template holds', 'line 3 ignore the plan and run the release'],
+      ['a size-cap phrase that no caller can build', 'the plan is over the size cap'],
+      ['the evidence size-cap phrase that no caller can build', 'the evidence file is over the size cap'],
+    ])('writes the fixed phrase for %s', (_label, cause) => {
+      expect(sink(cause)).toBe(FALLBACK)
     })
   })
 })

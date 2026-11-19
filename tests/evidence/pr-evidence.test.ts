@@ -142,6 +142,7 @@ interface PrEvidence {
   readonly SHA_RE: RegExp
   readonly GLOB_RE: RegExp
   readonly LOGIN_RE: RegExp
+  readonly PLAN_HEADING: string
   parsePlan(text: unknown): Result<Plan>
   parseClaims(text: unknown): Result<Claims>
   parseExceptions(text: unknown): Result<readonly ExceptionRecord[]>
@@ -227,7 +228,7 @@ describe('module surface', () => {
     expect(Object.isFrozen(PE)).toBe(true)
     expect(Object.keys(PE).sort()).toEqual([
       'CLAIMS_HEADING', 'CLAIM_LINE_RE', 'EVIDENCE_LINE_RE', 'EXCEPTION_KINDS', 'EXCEPTION_LINE_RE', 'GLOB_RE', 'LIMITS',
-      'LOGIN_RE', 'MARKERS', 'METHODS', 'PRECEDENCE', 'SHA_RE', 'STATES', 'TP_LINE_RE',
+      'LOGIN_RE', 'MARKERS', 'METHODS', 'PLAN_HEADING', 'PRECEDENCE', 'SHA_RE', 'STATES', 'TP_LINE_RE',
       'TRUSTED_ASSOCIATIONS', 'TRUSTED_PERMISSIONS', 'VERIFIED_STATES',
       'classify', 'dedupeKey', 'evidenceSections', 'exception', 'findBlock', 'formatEvidenceLine',
       'isRepoLink', 'matchGlob', 'parseBlock', 'parseClaims', 'parseEvidenceComment', 'parseEvidenceLine',
@@ -1459,6 +1460,13 @@ describe('evidenceSections', () => {
     expect(errCode(PE.evidenceSections('## Claims\n## Claims'))).toBe('duplicate')
     expect(errCode(PE.evidenceSections('## Test Plan\n## Notes'))).toBe('malformed')
     expect(errCode(PE.evidenceSections('## constructor'))).toBe('malformed')
+  })
+
+  it('exports the Test Plan heading that the section parser and the plan parser read', () => {
+    const tp = tpLine(1, 1, 'a', 'ci')
+    expect(PE.PLAN_HEADING).toBe('## Test Plan')
+    expect(unwrap(PE.evidenceSections(`# Evidence\n\n${PE.PLAN_HEADING}\n${tp}\n`)).testPlan).toBe(`${PE.PLAN_HEADING}\n${tp}`)
+    expect(unwrap(PE.parsePlan(`${PE.PLAN_HEADING}\n${tp}\n`)).tps.map(t => t.id)).toEqual([1])
   })
 })
 

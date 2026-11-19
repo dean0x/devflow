@@ -91,11 +91,13 @@
 //             or the rule that line k breaks (TP-n out of order or repeated, or a line that
 //             is not a TP line). An `evidence file unusable` refusal names a file that
 //             cannot be read, a heading at line k that the file does not allow or repeats,
-//             the rule that line k of its Test Plan breaks, or a section that does not
-//             parse. A line k of a file counts from 1 at the top of the file. A run that
-//             writes a method:local PASS with no exit code from 0 to 255 names those TPs:
-//             verify reads them UNVERIFIED, because a local PASS needs exit 0. A cause holds
-//             only digits and fixed phrases, never a byte of argv, a file, git or gh
+//             the rule that line k of its Test Plan breaks, a section that does not parse,
+//             or claim lines that do not fit the Claims section. A line k of a file counts
+//             from 1 at the top of the file. A run that writes a method:local PASS with no
+//             exit code from 0 to 255 names those TPs: verify reads them UNVERIFIED, because
+//             a local PASS needs exit 0. The sink lets a cause through only when it is one
+//             of a closed list of fixed phrases with digits in their number slots; any other
+//             text becomes one fixed phrase. No byte of argv, a file, git or gh gets in.
 // A git-tracked file counts as absent, like a tracked `.devflow/config.json`
 // (D-TRACKED-RESULT). `verify`, `publish` and `readiness` ask git about an `--evidence`
 // file before they read it, and about `--block-out`, `--comment-out`, `--stale-out` and
@@ -279,12 +281,71 @@ const CLAIM_REFUSAL_RE = /^CLAIM refused \((?<reason>head not one sha|evidence f
 /** One `claim` argument: the TP, its outcome, and an exit the script keeps only as a number from 0 to 255. */
 const CLAIM_ARG_RE = /^TP-(?<n>[1-9][0-9]{0,2})=(?<outcome>PASS|FAIL|SKIP)(?::(?<exit>[^\s]{1,12}))?$/;
 /**
- * The shape of every `verify-evidence: claim: <cause>` stderr line, checked at the sink
- * (claimCause): fixed phrases, digits and parser codes only, never a byte of argv, a plan,
- * a path, git or gh. The bound holds the longest cause, the list of CAPS.TPS ids (each at most
- * `TP-200, `, 8 characters) and its fixed phrase.
+ * D-CLAIM-CAUSE: every cause a `claim` run can write on stderr, as a closed list of templates.
+ * The text of a template is a fixed phrase. `<n>` is a number slot of 1 to 10 digits. `<tps>` is
+ * a list of 2 to CAPS.TPS TP ids (`TP-<n>`, joined by `, `). A new cause needs a new row here.
  */
-const CLAIM_CAUSE_RE = /^[A-Za-z0-9 .,:;()=+-]{1,2000}$/;
+const CLAIM_CAUSE_TEMPLATES = Object.freeze([
+  // parseClaimArgs: the usage errors
+  'the flags are absent, repeated or bad',
+  'there is no claim',
+  'there are more than <n> TP arguments',
+  'gate takes no plan and no other claim',
+  'argument <n> is a flag after the claims',
+  'argument <n> holds more than one TP claim; pass each TP claim as its own argument',
+  'argument <n> is not one TP claim of the form TP-n=PASS, FAIL or SKIP with an optional exit',
+  'TP-<n> is given more than once in this call',
+  // claimRefusalReason and claimPlanIds: plan file unusable
+  'the plan path is longer than <n> characters',
+  'the plan path holds a character outside letters, digits, dot, dash, underscore and the path separator',
+  'git tracks the plan file, or cannot say it does not',
+  'the plan file cannot be read: absent, not a regular file, over the byte cap or not UTF-8',
+  // planCause
+  'line <n> is not a TP line',
+  'TP-<n> at line <n> breaks the order rule: TP numbers ascend and are unique',
+  'TP-<n> at line <n> repeats the TP number before it',
+  'the plan does not parse',
+  // runClaim and evidenceCause: evidence file unusable
+  'the evidence file cannot be read: not a regular file, over the byte cap or not UTF-8',
+  'line <n> is a heading the evidence file does not allow',
+  'line <n> repeats a section heading',
+  'a section of the evidence file does not parse',
+  'the claim lines do not fit the Claims section',
+  // localNoExitCause
+  'TP-<n> is a method:local PASS claim with no exit code from 0 to 255; verify reads it UNVERIFIED, and only exit 0 from the Test report counts',
+  '<tps> are method:local PASS claims with no exit code from 0 to 255; verify reads them UNVERIFIED, and only exit 0 from the Test report counts',
+]);
+/** The most characters of a cause. The longest one holds CAPS.TPS ids (each at most `TP-200, `) and its phrase. */
+const CLAIM_CAUSE_MAX_CHARS = 2000;
+/** The pattern of each slot of CLAIM_CAUSE_TEMPLATES. A Map, so no prototype key can match. */
+const CLAIM_CAUSE_SLOTS = new Map([
+  ['<n>', '[0-9]{1,10}'],
+  ['<tps>', 'TP-[0-9]{1,10}(?:, TP-[0-9]{1,10}){1,' + (CAPS.TPS - 1) + '}'],
+]);
+
+/**
+ * One template of CLAIM_CAUSE_TEMPLATES as a pattern: each phrase part is escaped, then each
+ * slot gets its digit pattern.
+ *
+ * @param {string} template
+ * @returns {string}
+ */
+function causePattern(template) {
+  return template
+    .split(/(<n>|<tps>)/)
+    .map((part, i) => (i % 2 === 1 ? CLAIM_CAUSE_SLOTS.get(part) : part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+    .join('');
+}
+
+/**
+ * The shape of every `verify-evidence: claim: <cause>` stderr line, checked at the sink
+ * (claimCause): one of CLAIM_CAUSE_TEMPLATES exactly, with digits in its slots, and at most
+ * CLAIM_CAUSE_MAX_CHARS characters. Any other text, a line break and any character outside a
+ * phrase or a slot fail it.
+ */
+const CLAIM_CAUSE_RE = new RegExp(
+  '^(?=.{1,' + CLAIM_CAUSE_MAX_CHARS + '}$)(?:' + CLAIM_CAUSE_TEMPLATES.map(causePattern).join('|') + ')$',
+);
 /** What claimCause writes for a cause that fails CLAIM_CAUSE_RE. */
 const CLAIM_CAUSE_FALLBACK = 'the cause does not pass the stderr check';
 
@@ -3245,8 +3306,9 @@ function runReadiness(io, args, deps) {
 /**
  * D-CLAIM-CAUSE: write one `verify-evidence: claim: <cause>` line to stderr. Every such line
  * goes through here, and the cause is checked against CLAIM_CAUSE_RE at this sink, as claimLine
- * checks each claim line: a cause that fails it is replaced by a fixed phrase, so no input byte
- * can pass.
+ * checks each claim line. A cause passes only when it is one of CLAIM_CAUSE_TEMPLATES with
+ * digits in its slots, so a caller can add no text of its own, a new caller included. A cause
+ * that fails is replaced by CLAIM_CAUSE_FALLBACK.
  *
  * @param {Io} io
  * @param {string} text
@@ -3263,7 +3325,7 @@ function claimCause(io, text) {
  *
  * @param {Io} io
  * @param {string} reason  one of the CLAIM_REFUSAL_RE reasons
- * @param {string | null} cause  a fixed phrase with digits and parser codes only, or null
+ * @param {string | null} cause  a cause of CLAIM_CAUSE_TEMPLATES, or null
  * @returns {Outcome}
  */
 function claimRefusal(io, reason, cause) {
@@ -3271,29 +3333,29 @@ function claimRefusal(io, reason, cause) {
   return { code: EXIT_CODES.INPUT_UNUSABLE, stdout: 'CLAIM refused (' + reason + ')\n' };
 }
 
-/** The `## Test Plan` heading as the parsers of pr-evidence.cjs read it. */
-const PLAN_HEADING = '## Test Plan';
-
 /** The causes of a plan file or an evidence file that cannot be read at all. */
 const PLAN_UNREADABLE_CAUSE = 'the plan file cannot be read: absent, not a regular file, over the byte cap or not UTF-8';
 const EVIDENCE_UNREADABLE_CAUSE = 'the evidence file cannot be read: not a regular file, over the byte cap or not UTF-8';
+/** The cause of an insert that claimInserted refuses, such as one over the parser's size limit. */
+const CLAIM_INSERT_CAUSE = 'the claim lines do not fit the Claims section';
 
 /**
  * The cause of a plan that parsePlan refuses, from its error alone: the code, and the line as a
  * line of the whole file. A plan read from the `## Test Plan` section counts its lines from that
  * heading, so the heading's row index is added; a file with no such section is the plan itself,
  * and the offset is 0. The TP number is read from that row by the TP grammar. Only digits and
- * fixed phrases go in, never a byte of the file.
+ * fixed phrases go in, never a byte of the file. A heading row that is not found, and an error
+ * code with no rule of its own, give `the plan does not parse`.
  *
  * @param {string} text  the whole file
  * @param {{ code: string, line: number }} error  a parsePlan error
  * @returns {string}
  */
 function planCause(text, error) {
-  if (error.code === 'oversize') return 'the plan is over the size cap';
   const rows = text.split('\n').map(row => row.replace(/\r$/, ''));
   const sections = PE.evidenceSections(text);
-  const offset = sections.ok && sections.value.testPlan !== null ? rows.indexOf(PLAN_HEADING) : 0;
+  const offset = sections.ok && sections.value.testPlan !== null ? rows.indexOf(PE.PLAN_HEADING) : 0;
+  if (offset < 0) return 'the plan does not parse';
   const k = Number(offset) + Number(error.line);
   if (error.code === 'malformed') return 'line ' + k + ' is not a TP line';
   const m = PE.TP_LINE_RE.exec(k >= 1 && k <= rows.length ? rows[k - 1] : '');
@@ -3317,7 +3379,6 @@ function evidenceCause(text) {
     const k = Number(sections.error.line);
     if (sections.error.code === 'malformed') return 'line ' + k + ' is a heading the evidence file does not allow';
     if (sections.error.code === 'duplicate') return 'line ' + k + ' repeats a section heading';
-    if (sections.error.code === 'oversize') return 'the evidence file is over the size cap';
     return 'a section of the evidence file does not parse';
   }
   if (sections.value.testPlan !== null) {
@@ -3625,7 +3686,7 @@ function runClaim(io, args) {
     let written;
     if (sectionFollowed) {
       const inserted = claimInsertText(text, lines);
-      if (!claimInserted(text, inserted, lines)) return claimRefusal(io, 'evidence file unusable', null);
+      if (!claimInserted(text, inserted, lines)) return claimRefusal(io, 'evidence file unusable', CLAIM_INSERT_CAUSE);
       written = replaceTextFile(file, inserted, st === undefined ? 0o600 : st.mode & 0o777);
     } else {
       written = appendTextFile(file, claimAppendText(text, hasSection, lines));
@@ -3865,4 +3926,5 @@ module.exports = Object.freeze({
   writeReadinessOut,
   commentIdOf,
   editTarget,
+  claimCause,
 });

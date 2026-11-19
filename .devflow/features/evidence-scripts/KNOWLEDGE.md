@@ -22,7 +22,7 @@ updated: 2026-11-19
 - **KB-INV-8** Stdout and stderr notes use closed tokens only. No byte of a PR body, comment, run, plan, path, argv, git answer or gh answer reaches them.
 - **KB-AP-1** Do not add a state decision to `verify-evidence.cjs`. Add an arm to `ARMS` and let the parity tests catch drift.
 - **KB-AP-2** Do not write a `claim: <cause>` line with `io.stderr` directly. The single-writer test fails, and an input byte can reach stderr.
-- **KB-AP-3** Do not put an argument, a path, a plan line or a git or gh answer into a cause. Use fixed phrases, digits and parser codes.
+- **KB-AP-3** Do not put an argument, a path, a plan line or a git or gh answer into a cause. Use a template of `CLAIM_CAUSE_TEMPLATES` with digits in its slots.
 - **KB-AP-4** Do not let a note change a verdict. `noteVerdict` runs after `classify` and only adds a token.
 - **KB-AP-5** Do not add a stdout shape to a subcommand without adding it to `settleShape`. Unlisted output fails closed.
 - **KB-AP-6** Do not add a TP-to-job link and do not claim one exists. The TP line has no CI job field (a known limit).
@@ -97,8 +97,9 @@ Why so strict: every field pasted into a PR body is an action sink. The script g
 
 D-CLAIM-CAUSE: stdout names the closed reason. Stderr names the cause that the reason hides.
 
-- `claimCause(io, text)` writes `verify-evidence: claim: <cause>`. A cause that fails `CLAIM_CAUSE_RE` (letters, digits, space and `.,:;()=+-`, 1 to 2000 characters) becomes `CLAIM_CAUSE_FALLBACK`. A test (`one helper writes every claim cause line…`) counts exactly one source line that holds the prefix, and checks that the helper calls `CLAIM_CAUSE_RE.test(`.
-- Causes for a plan or evidence file come from `planCause` and `evidenceCause`. They name an unreadable file, an oversize file, a heading the file does not allow or repeats, or the rule that line k breaks. Line k counts from line 1 of the whole file. A plan read from the `## Test Plan` section adds the heading's row offset.
+- `claimCause(io, text)` writes `verify-evidence: claim: <cause>`. `CLAIM_CAUSE_RE` is built from the closed list `CLAIM_CAUSE_TEMPLATES`. A cause passes only when it is one template exactly, with digits in its slots, and has 1 to 2000 characters. A `<n>` slot holds 1 to 10 digits. A `<tps>` slot holds 2 to 200 TP ids, joined by `, `. Any other cause becomes `CLAIM_CAUSE_FALLBACK`. A new cause needs a new template row. The cause-gate tests call the exported `claimCause` with bad input and expect the fallback line. A test (`one helper writes every claim cause line…`) counts exactly one source line that holds the prefix, and checks that the helper calls `CLAIM_CAUSE_RE.test(`.
+- Causes for a plan or evidence file come from `planCause` and `evidenceCause`. They name an unreadable file, a heading the file does not allow or repeats, or the rule that line k breaks. Line k counts from line 1 of the whole file. A plan read from the `## Test Plan` section (`PE.PLAN_HEADING`) adds the heading's row offset. Any other parser error code gives a fixed phrase. A file over the size cap never reaches these helpers, because `readTextFile` refuses it first.
+- An insert that `claimInserted` refuses gives `the claim lines do not fit the Claims section`.
 - A `claimRefusal` with a null cause writes nothing on stderr. Head, tracked evidence file and evidence path refusals use null, because the stdout reason is enough.
 - A run that writes a method:local PASS line with no exit (none given, or one outside 0 to 255) adds a cause that names those TPs (`localNoExitCause`). The exit stays 0. The cause lists TP numbers as digits.
 
@@ -125,7 +126,7 @@ D-CLAIM-CAUSE: stdout names the closed reason. Stderr names the cause that the r
 
 **KB-AP-1.** The ladder lives in one table so the contract prose, the code and the tests share one order. A second place that decides a state can disagree with the table, and nothing then pins them together.
 
-**KB-AP-2 and KB-AP-3.** A cause line is read by the agent that ran `claim`. An argument or file line in it is an injection path. The sink check stops that for every caller, including a new one.
+**KB-AP-2 and KB-AP-3.** A cause line is read by the agent that ran `claim`. An argument or file line in it is an injection path. The sink accepts only a listed template with digits in its slots, so no caller can add its own text, a new caller included. The digits can still be wrong, so a caller must build each number from parsed values.
 
 **KB-AP-6.** A ci TP does not name its own CI job, so the script cannot tell which run belongs to which TP. The fail-closed rule (any failed run fails the TP) is the cost of that. A per-TP job link needs a new field in `TP_LINE_RE`, the contract partial, the claim line and `verify`. Do not fake it with a name match on the scenario text.
 
