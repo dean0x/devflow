@@ -1367,6 +1367,69 @@ describe('refresh re-derives a recorded claim from current facts (D-VERIFY-RECOR
   })
 })
 
+describe('the notes that name why a TP did not verify', () => {
+  const LOCAL = tpLine(1, 'a local check', 'local', ['src/**'])
+  /** The closed tokens of the stderr summary line, or none. */
+  const notesOf = (stderr: string): string[] => {
+    const m = /^verify-evidence: notes: (\S+)$/m.exec(stderr)
+    return m === null ? [] : m[1].split(',')
+  }
+  const viewer = (text: string): CommentSpec => ({ login: 'devbot', body: text, viewerDidAuthor: true })
+  const record = (over: Partial<RecordSpec> = {}): RecordSpec =>
+    ({ id: 1, state: 'UNVERIFIED', sha: HEAD, line: LOCAL, out: 'PASS', ...over })
+
+  it('a local PASS with no exit code reads UNVERIFIED and carries the note local-no-exit', () => {
+    const v = verifyScn({ scn: {}, evidence: evidenceFile([LOCAL], [claimLine(1, 'PASS', HEAD)]) })
+    expect(v.code, v.stderr).toBe(0)
+    expect(v.states.get(1)).toBe('UNVERIFIED')
+    expect(notesOf(v.stderr)).toEqual(['local-no-exit'])
+  })
+
+  it('so does a trusted record of a local PASS with no exit code (refresh mode)', () => {
+    const body = `Intro.\n\n${blockOf([LOCAL])}\n`
+    const v = verifyScn({ scn: { body, comments: [viewer(recordComment(HEAD, [record()]))] } })
+    expect(v.states.get(1)).toBe('UNVERIFIED')
+    expect(notesOf(v.stderr)).toContain('local-no-exit')
+  })
+
+  /** Each row: a label, the evidence file's claims, the scenario, and the state the ladder gives. */
+  const QUIET: ReadonlyArray<readonly [string, readonly string[], Scn, State]> = [
+    ['no claim', [], {}, 'UNVERIFIED'],
+    ['a SKIP', [claimLine(1, 'SKIP', HEAD)], {}, 'UNVERIFIED'],
+    ['a claim SHA outside the PR', [claimLine(1, 'PASS', OUTSIDE)], { ancestry: { [OUTSIDE]: 'out' } }, 'UNVERIFIED'],
+    ['a PASS with exit 0', [claimLine(1, 'PASS', HEAD, 0)], {}, 'ATTESTED-LOCAL'],
+    ['a PASS with exit 1', [claimLine(1, 'PASS', HEAD, 1)], {}, 'FAILED'],
+    ['a FAIL with no exit', [claimLine(1, 'FAIL', HEAD)], {}, 'FAILED'],
+    ['a PASS with no exit that the change since makes STALE', [claimLine(1, 'PASS', OLD)], { ancestry: { [OLD]: 'in' }, diffs: { [OLD]: ['src/a.ts'] } }, 'STALE'],
+    ['a PASS with no exit whose diff cannot be read', [claimLine(1, 'PASS', OLD)], { ancestry: { [OLD]: 'in' }, diffs: { [OLD]: 'error' } }, 'INDETERMINATE'],
+  ]
+
+  for (const [label, claims, scn, state] of QUIET) {
+    it(`no local-no-exit note for ${label} (${state})`, () => {
+      const v = verifyScn({ scn, evidence: evidenceFile([LOCAL], claims) })
+      expect(v.code, v.stderr).toBe(0)
+      expect(v.states.get(1)).toBe(state)
+      expect(notesOf(v.stderr)).not.toContain('local-no-exit')
+    })
+  }
+
+  it('no local-no-exit note for a record whose TP text changed, though the state is UNVERIFIED', () => {
+    const edited = `Intro.\n\n${blockOf([LOCAL.replace('a local check', 'an edited check')])}\n`
+    const v = verifyScn({ scn: { body: edited, comments: [viewer(recordComment(HEAD, [record()]))] } })
+    expect(v.states.get(1)).toBe('UNVERIFIED')
+    expect(notesOf(v.stderr)).not.toContain('local-no-exit')
+  })
+
+  it('no local-no-exit note for a ci or a manual PASS with no exit', () => {
+    const ci = tpLine(2, 'a ci check', 'ci')
+    const manual = tpLine(3, 'a manual check', 'manual')
+    const v = verifyScn({ scn: { runs: { [HEAD]: [{ id: 101 }] } }, evidence: evidenceFile([ci, manual], [claimLine(2, 'PASS', HEAD), claimLine(3, 'PASS', HEAD)]) })
+    expect(v.states.get(2)).toBe('VERIFIED-CI')
+    expect(v.states.get(3)).toBe('ATTESTED-LOCAL')
+    expect(notesOf(v.stderr)).not.toContain('local-no-exit')
+  })
+})
+
 describe('evidence mode merges the file over the record', () => {
   const CI = tpLine(1, 'the suite covers login', 'ci')
   const LOCAL = tpLine(2, 'a local check', 'local')
@@ -2606,6 +2669,68 @@ describe('claim — appends the claim lines of a report to the evidence file', (
       expect(claims.malformed).toBe(0)
       expect(claims.gates.validate).toMatchObject({ outcome: 'PASS', sha: HEAD, by: 'validate' })
       expect([...claims.tp.keys()]).toEqual([1, 2, 3])
+    })
+  })
+
+  describe('a method:local PASS with no exit code from 0 to 255', () => {
+    const MIXED = [
+      tpLine(1, 'a ci check', 'ci'),
+      tpLine(3, 'a local check', 'local'),
+      tpLine(5, 'a manual check', 'manual'),
+      tpLine(7, 'another local check', 'local'),
+      tpLine(9, 'a third local check', 'local'),
+    ]
+    const RULE = 'with no exit code from 0 to 255; verify reads'
+    const many = (ids: string): string =>
+      `verify-evidence: claim: ${ids} are method:local PASS claims ${RULE} them UNVERIFIED, and only exit 0 from the Test report counts\n`
+    const one = (id: string): string =>
+      `verify-evidence: claim: ${id} is a method:local PASS claim ${RULE} it UNVERIFIED, and only exit 0 from the Test report counts\n`
+
+    it('names each one on stderr in TP order, and writes the line without an exit part', () => {
+      const file = fileWith(evidenceFile(MIXED))
+      const r = claim([...flags(file), 'TP-7=PASS:abc', 'TP-3=PASS', 'TP-9=PASS:0', 'TP-1=PASS', 'TP-5=PASS'])
+      expect(r).toMatchObject({ code: 0, stdout: 'CLAIM appended:5 PASS:5 FAIL:0 SKIP:0 skipped:0\n' })
+      expect(r.stderr).toBe(many('TP-3, TP-7'))
+      expect(claimsOf(file).tp.get(3)).toMatchObject({ outcome: 'PASS', exit: null })
+      expect(claimsOf(file).tp.get(7)).toMatchObject({ outcome: 'PASS', exit: null })
+    })
+
+    it('names one alone in the singular, and the wording never asks for :0', () => {
+      const file = fileWith(evidenceFile(MIXED))
+      const r = claim([...flags(file), 'TP-9=PASS:256'])
+      expect(r.stderr).toBe(one('TP-9'))
+      expect(r.stderr).not.toContain(':0')
+    })
+
+    it.each([
+      ['an exit of 0', 'TP-3=PASS:0'],
+      ['an exit of 1, which verify reads FAILED', 'TP-3=PASS:1'],
+      ['a FAIL with no exit', 'TP-3=FAIL'],
+      ['a SKIP', 'TP-3=SKIP'],
+      ['a TP the plan does not list', 'TP-4=PASS'],
+      ['a ci PASS with no exit', 'TP-1=PASS'],
+      ['a manual PASS with no exit', 'TP-5=PASS'],
+    ])('names nothing for %s', (_label, arg) => {
+      const file = fileWith(evidenceFile(MIXED))
+      const r = claim([...flags(file), arg])
+      expect(r.code).toBe(0)
+      expect(r.stderr).toBe('')
+    })
+
+    it('reads the method from the --plan file when it is given', () => {
+      const file = fileWith(evidenceFile(MIXED))
+      const plan = writeScratch(scratch('claim-plan'), 'plan.md', `## Test Plan\n${tpLine(3, 'a local check', 'ci')}\n${tpLine(5, 'a manual check', 'local')}\n`)
+      const r = claim([...flags(file), '--plan', plan, 'TP-3=PASS', 'TP-5=PASS'])
+      expect(r.stdout).toBe('CLAIM appended:2 PASS:2 FAIL:0 SKIP:0 skipped:0\n')
+      expect(r.stderr).toBe(one('TP-5'))
+    })
+
+    it('names all CAPS.TPS of them in one line', () => {
+      const tps = Array.from({ length: VE.CAPS.TPS }, (_, i) => tpLine(i + 1, `step ${i + 1}`, 'local'))
+      const file = fileWith(evidenceFile(tps))
+      const r = claim([...flags(file), ...tps.map((_, i) => `TP-${i + 1}=PASS`)])
+      expect(r.code).toBe(0)
+      expect(r.stderr).toBe(many(tps.map((_, i) => `TP-${i + 1}`).join(', ')))
     })
   })
 

@@ -259,7 +259,8 @@ const CLAIM_ARG_RE = /^TP-(?<n>[1-9][0-9]{0,2})=(?<outcome>PASS|FAIL|SKIP)(?::(?
 /**
  * The shape of every `verify-evidence: claim: <cause>` stderr line, checked at the sink
  * (claimCause): fixed phrases, digits and parser codes only, never a byte of argv, a plan,
- * a path, git or gh. The bound holds the longest cause: CAPS.TPS ids, `TP-200, ` each.
+ * a path, git or gh. The bound holds the longest cause, the list of CAPS.TPS ids (each at most
+ * `TP-200, `, 8 characters) and its fixed phrase.
  */
 const CLAIM_CAUSE_RE = /^[A-Za-z0-9 .,:;()=+-]{1,2000}$/;
 /** What claimCause writes for a cause that fails CLAIM_CAUSE_RE. */
@@ -1775,13 +1776,32 @@ function classifyTp(io, repo, memo, x) {
   // no claim rests on it (tpInputs attaches none) — INDETERMINATE, sha:none.
   if (x.forceIndeterminate) return { state: 'INDETERMINATE', sha: null, outcome: null, run: null, exit: null };
   const facts = gatherFacts(io, repo, memo, x);
-  const verdict = PE.classify(x.tp, facts);
+  let verdict = PE.classify(x.tp, facts);
   const claim = /** @type {any} */ (x.claim);
   if (x.tp.method === 'ci' && verdict.state === 'ATTESTED-LOCAL' && verdict.run === 'none' && claim.sha !== repo.head) {
     const headRuns = runsAt(io, memo, repo.head);
-    if (headRuns !== null) return PE.classify(x.tp, { ...facts, verifyingSha: repo.head, runs: headRuns });
+    if (headRuns !== null) verdict = PE.classify(x.tp, { ...facts, verifyingSha: repo.head, runs: headRuns });
   }
+  noteVerdict(io, x, facts, verdict);
   return verdict;
+}
+
+/**
+ * Add the closed note that names why a TP's final verdict did not verify, where the ladder's
+ * own result says so; the verdict itself never changes. `local-no-exit`: a local PASS in the
+ * PR, with its TP text unchanged, that has no exit code, reads UNVERIFIED because only exit 0
+ * attests a local TP. The note follows the final state, so a STALE, an INDETERMINATE and every
+ * other UNVERIFIED cause get none.
+ *
+ * @param {Io} io
+ * @param {TpInput} x
+ * @param {Record<string, unknown>} facts
+ * @param {{ state: string, outcome: string | null, run: any, exit: number | null }} verdict
+ * @returns {void}
+ */
+function noteVerdict(io, x, facts, verdict) {
+  if (verdict.state === 'UNVERIFIED' && x.tp.method === 'local' && verdict.outcome === 'PASS' && verdict.exit === null
+    && facts.inPr === true && facts.textMatches !== false) io.notes.add('local-no-exit');
 }
 
 // ---------------------------------------------------------------------------
@@ -3394,13 +3414,13 @@ function claimInserted(text, inserted, lines) {
 }
 
 /**
- * The TP numbers the plan lists: the `## Test Plan` of the `--plan` file, else of the
- * evidence file. A plan with no TP line, or no plan section, lists none. Null when the
- * `--plan` file cannot serve as a plan.
+ * The TPs the plan lists, each with its method: the `## Test Plan` of the `--plan` file,
+ * else of the evidence file. A plan with no TP line, or no plan section, lists none. Null
+ * when the `--plan` file cannot serve as a plan.
  *
  * @param {Extract<ParsedArgs, { kind: 'claim' }>} args
  * @param {EvidenceInput} evidence
- * @returns {Set<number> | null}
+ * @returns {Map<number, string> | null}  TP number to method
  */
 function claimPlanIds(args, evidence) {
   let plan = evidence.plan;
@@ -3410,7 +3430,39 @@ function claimPlanIds(args, evidence) {
     if (parsed === null || (!parsed.ok && parsed.error.code !== 'empty')) return null;
     plan = parsed.ok ? parsed.value : { tps: [] };
   }
-  return new Set((plan === null ? [] : plan.tps).map(tp => tp.id));
+  return new Map((plan === null ? [] : plan.tps).map(tp => [tp.id, tp.method]));
+}
+
+/**
+ * The TPs of the written lines that verify reads UNVERIFIED for want of an exit code: the
+ * plan lists them as method:local, and the claim parser reads each one's line as a PASS with
+ * no exit (none was given, or the one given is not a number from 0 to 255). Only exit 0
+ * attests a local TP (the ATTESTED-LOCAL arm of pr-evidence.cjs). In ascending order.
+ *
+ * @param {Map<number, string>} listed  TP number to method
+ * @param {readonly string[]} lines  the claim lines this run writes
+ * @returns {number[]}
+ */
+function localNoExitIds(listed, lines) {
+  const parsed = PE.parseClaims(lines.join('\n'));
+  if (!parsed.ok) return [];
+  return [...parsed.value.tp.values()]
+    .filter(c => c.outcome === 'PASS' && c.exit === null && listed.get(c.tp) === 'local')
+    .map(c => Number(c.tp))
+    .sort((a, b) => a - b);
+}
+
+/**
+ * The stderr cause that names the TPs of localNoExitIds, as digits, at most CAPS.TPS of them.
+ *
+ * @param {readonly number[]} ids  at least one
+ * @returns {string}
+ */
+function localNoExitCause(ids) {
+  const named = ids.map(id => 'TP-' + Number(id)).join(', ');
+  return ids.length === 1
+    ? named + ' is a method:local PASS claim with no exit code from 0 to 255; verify reads it UNVERIFIED, and only exit 0 from the Test report counts'
+    : named + ' are method:local PASS claims with no exit code from 0 to 255; verify reads them UNVERIFIED, and only exit 0 from the Test report counts';
 }
 
 /**
@@ -3443,7 +3495,7 @@ function runClaim(io, args) {
   const headings = text.split('\n').map(row => row.replace(/\r$/, '')).filter(row => row === '##' || row.startsWith('## '));
   const hasSection = headings.includes(PE.CLAIMS_HEADING);
   const sectionFollowed = hasSection && headings[headings.length - 1] !== PE.CLAIMS_HEADING;
-  const listed = args.gate ? new Set() : claimPlanIds(args, evidence);
+  const listed = args.gate ? new Map() : claimPlanIds(args, evidence);
   if (listed === null) return claimRefusal('plan file unusable');
 
   /** @type {string[]} */
@@ -3471,6 +3523,8 @@ function runClaim(io, args) {
     }
     if (!written) return refuse(io, EXIT_CODES.WRITE_FAILED, 'an output file could not be written');
   }
+  const noExit = localNoExitIds(listed, lines);
+  if (noExit.length > 0) claimCause(io, localNoExitCause(noExit));
   const skipped = args.gate ? 0 : args.tps.length - lines.length;
   return {
     code: EXIT_CODES.OK,
