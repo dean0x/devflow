@@ -79,7 +79,23 @@
 //             `evidence file unusable` (a file that does not parse, or a folder that is
 //             missing outside the working directory) or `plan file unusable`. A refusal
 //             writes nothing. A folder the run made is removed again when the run
-//             leaves no file in it
+//             leaves no file in it.
+//             D-CLAIM-CAUSE: stderr gets one `verify-evidence: claim: <cause>` line for what
+//             the stdout line does not name. A usage error (exit 1) names the first cause
+//             found: the flags are absent, repeated or bad; there is no claim; there are
+//             more than 200 TP arguments; gate takes no plan and no other claim; argument k
+//             is a flag after the claims, holds more than one TP claim, or is not one TP
+//             claim; or TP-n is given more than once in this call. k counts from 1 at the
+//             first claim argument. A `plan file unusable` refusal names the path shape, a
+//             plan file that git tracks or cannot answer for, a file that cannot be read,
+//             or the rule that line k breaks (TP-n out of order or repeated, or a line that
+//             is not a TP line). An `evidence file unusable` refusal names a file that
+//             cannot be read, a heading at line k that the file does not allow or repeats,
+//             the rule that line k of its Test Plan breaks, or a section that does not
+//             parse. A line k of a file counts from 1 at the top of the file. A run that
+//             writes a method:local PASS with no exit code from 0 to 255 names those TPs:
+//             verify reads them UNVERIFIED, because a local PASS needs exit 0. A cause holds
+//             only digits and fixed phrases, never a byte of argv, a file, git or gh
 // A git-tracked file counts as absent, like a tracked `.devflow/config.json`
 // (D-TRACKED-RESULT). `verify`, `publish` and `readiness` ask git about an `--evidence`
 // file before they read it, and about `--block-out`, `--comment-out`, `--stale-out` and
@@ -91,6 +107,11 @@
 // answer for, is refused as a write failure (exit 3, empty stdout) and left untouched.
 // No byte of a PR body, a comment, a review or a gh/git answer is ever printed: the
 // boundary re-checks every stdout line against these shapes before writing it.
+// The stderr summary `verify-evidence: notes: <tokens>` lists closed tokens, sorted.
+// Two of them name why a TP did not verify, and neither changes a state:
+// `local-no-exit`, a local PASS with no exit code that reads UNVERIFIED (a local PASS
+// needs exit 0), and `run-failed`, a ci PASS that reads FAILED because a run at its
+// verifying commit failed (any failed run at that commit fails a ci TP).
 //
 // Exit codes:
 //   0  ok
@@ -3218,9 +3239,10 @@ function runReadiness(io, args, deps) {
 // assign states.
 
 /**
- * Write one `verify-evidence: claim: <cause>` line to stderr. Every such line goes through
- * here, and the cause is checked against CLAIM_CAUSE_RE at this sink, as claimLine checks each
- * claim line: a cause that fails it is replaced by a fixed phrase, so no input byte can pass.
+ * D-CLAIM-CAUSE: write one `verify-evidence: claim: <cause>` line to stderr. Every such line
+ * goes through here, and the cause is checked against CLAIM_CAUSE_RE at this sink, as claimLine
+ * checks each claim line: a cause that fails it is replaced by a fixed phrase, so no input byte
+ * can pass.
  *
  * @param {Io} io
  * @param {string} text
