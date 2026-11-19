@@ -486,13 +486,13 @@ When creating or enriching a GitHub issue via the `ensure-traceable-issue` opera
 
 Load when the resolved tracker provider is `github` and the operation is `ensure-pr-ready`.
 
-**Mechanics held here:** the whole operation. Steps 1–4a, the PR-host half of step 4b and steps 4c–6 are PR-host mechanics, the same under every provider (written once in `_ops.mds`); step 4b takes its link line and refuses it the same way under every provider; the line itself, `Closes #{n}`, is this provider's.
+**Mechanics held here:** the whole operation. Steps 1–4a, the PR-host half of step 4b and steps 4c–6 are PR-host mechanics, the same under every provider (written once in `_ops.mds`); step 4b takes its link line and refuses it the same way under every provider; the line itself, `Closes #{n}` or `Refs #{n}`, is this provider's.
 
 ### Process
 
 {{opsteps.ensure_pr_ready_steps_to_4a()}}
 
-4b. (ALWAYS-ON) Ensure the PR body contains a `## Related Issues` section with the `Closes #{n}` line of this branch's issue. {{common.pr_link_resolution()}}
+4b. (ALWAYS-ON) Ensure the PR body contains a `## Related Issues` section with the `Closes #{n}` or `Refs #{n}` line of this branch's issue. {{common.pr_link_resolution()}}
 {{opsteps.ensure_pr_ready_steps_from_4c()}}
 
 {{opsteps.ensure_pr_ready_pr_edit()}}

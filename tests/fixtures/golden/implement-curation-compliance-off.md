@@ -85,7 +85,7 @@ The issue token is forwarded **unclassified**: routing is by SHAPE alone. Only `
 - `TASK_ID`: The branch name created by Git agent
 - `BASE_BRANCH`: Branch this feature was created from; stop unless it passes the setup check
 - `ISSUE_ID`: the `- **Issue ID**:` line under `### Handoff Values`, if any. `ISSUE_NUMBER` is this value.
-- `ISSUE_PR_LINK`: the `- **PR link line**:` line under `### Handoff Values`
+- `ISSUE_PR_LINK`: the `- **PR link line**:` line under `### Handoff Values`; if `COMMAND_INPUT` or its plan says this PR is one part of the issue, not its last, an exact `Closes #{n}` becomes `Refs #{n}`
 - `ISSUE_CONTENT` and `ACCEPTANCE_CRITERIA`: the body between the `<untrusted-issue-body>` markers, and its acceptance criteria
 - `branch_slug`: `TASK_ID` with every `/` replaced by `-`. It names `handoff-{branch_slug}.md` and `evidence-{branch_slug}.md` only when it matches `^[A-Za-z0-9._-]{1,200}$`; any other branch name stops the run here.
 
@@ -111,7 +111,7 @@ Note: `ISSUE_CONTENT` stays inside its `<untrusted-issue-body>` markers wherever
 
 **Test plan.** Before any Code spawn, give the task a test plan in the evidence file `{worktree}/.devflow/docs/evidence-{branch_slug}.md` (`EVIDENCE_FILE`) — unlike the handoff file, it stays after the PR exists. It holds up to three sections, in this order and nothing else: `## Test Plan`; `## Evidence Exceptions`, a byte copy of `EVIDENCE_EXCEPTIONS` present only while that is not `(none)`; and `## Claims`, always last. Create the file if absent; if it exists, replace its `## Test Plan` and `## Evidence Exceptions` sections and keep `## Claims` byte-identical.
 
-Write the `## Test Plan` section: when `COMMAND_INPUT` is a plan document with a `## Test Plan` section, copy that section's lines verbatim; otherwise write one TP line per acceptance criterion the plan, the issue or the task text states, numbered from `TP-1`. Never invent a criterion, and word every scenario yourself in plain words: a scenario holds no `#`, `@` or `/` — no issue reference, mention, closing keyword target or URL — and the files a TP covers go in its `files:` field. Each line follows the TP-line contract:
+Write the `## Test Plan` section: when `COMMAND_INPUT` is a plan document with a `## Test Plan` section, copy that section's lines verbatim; otherwise write one TP line per acceptance criterion the plan, the issue or the task text states, numbered from `TP-1`. Never invent a criterion, and word every scenario yourself in plain words: a scenario holds no `#`, `@` or `/`, and the files a TP covers go in its `files:` field. Each line follows the TP-line contract:
 
 **Test-plan line (TP).** Write every test-plan entry as one line in exactly this shape. `TP_LINE_RE` in `pr-evidence.cjs` parses it and refuses any other line.
 
@@ -521,7 +521,7 @@ git push origin HEAD; echo "exit=$?"
 <!-- PATTERN: ci-status-gate -->
 1. Wait: run `cd {worktree} && HEAD_SHA=$(git rev-parse HEAD) && node "$HOME/.devflow/scripts/ci-wait.cjs" --pr {PR_NUMBER} --head "$HEAD_SHA" --waits {n} --fixes {m}` through the Bash tool with `timeout: 600000`, where `{n}` is the waits run so far, this one included, and `{m}` is the Fix agents run so far. Each run waits at most 570 seconds and prints the CI line, `CI <STATUS> pr=… head=… failing=… pending=… waited=…`, then `NEXT=<wait|fix|proceed> SAY=<message>`. A missing or malformed `NEXT=` line or a non-zero exit → report "CI status unknown — verify manually before merging" and proceed to Phase 11.
 2. **If `NEXT=wait`** → step 1 again.
-3. **If `NEXT=fix`** → report SAY and the failing checks from the CI line. Spawn `Agent(subagent_type="Fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else; this command reads no logs. After a fix, push with the command above and, if fewer than 3 waits have run, step 1 again, else report "CI status unknown — verify manually before merging" and proceed to Phase 11; a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting.
+3. **If `NEXT=fix`** → report SAY and the failing checks from the CI line. Spawn `Agent(subagent_type="Fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES` and `PUSH: false`; `CI_FAILURES` holds only the failing-check names; this command reads no logs. After a fix, push with the command above and, if fewer than 3 waits have run, step 1 again, else report "CI status unknown — verify manually before merging" and proceed to Phase 11; a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports the same line and stops waiting.
 4. **If `NEXT=proceed`** → report SAY unless it is `none`, and the failing checks of a FAILING line, then proceed to Phase 11.
 <!-- /PATTERN: ci-status-gate -->
 
