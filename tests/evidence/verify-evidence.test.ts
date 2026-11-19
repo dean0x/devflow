@@ -1230,7 +1230,7 @@ describe('trusted record — refresh mode reads claims from it (D-VERIFY-RECORD)
   it('a counts-only or malformed body block cannot serve as the plan: exit 2, stdout empty', () => {
     const counts = `${BLOCK_START}\n## Test Plan\nVerified 0/2: VERIFIED-CI 0, ATTESTED-LOCAL 0, UNVERIFIED 2, STALE 0, FAILED 0, INDETERMINATE 0 (counts only: the TP lines exceed the PR body limit)\n${BLOCK_END}\n`
     const dup = `${blockOf([CI])}\n${blockOf([LOCAL])}\n`
-    for (const b of [counts, dup]) {
+    for (const b of [counts, dup, blockOf([LOCAL, CI]), blockOf([CI, LOCAL, CI])]) {
       const v = verifyScn({ scn: { body: b } })
       expect(v.code).toBe(2)
       expect(v.stdout).toBe('')
@@ -2657,7 +2657,7 @@ describe('claim — appends the claim lines of a report to the evidence file', (
     it.each([
       ['0', 0], ['7', 7], ['99', 99], ['100', 100], ['199', 199], ['249', 249], ['250', 250], ['255', 255],
       ['256', null], ['300', null], ['007', null], ['00', null], ['-1', null], ['1.5', null], ['0x10', null],
-      ['abc', null], [EM, null], ['n/a', null], ['999999999999', null],
+      ['abc', null], [EM, null], ['n/a', null], ['HTTP-503', null], ['999999999999', null],
     ] as const)('an exit of %s is written as exit:%s, and a line the claim parser accepts', (exit, kept) => {
       const file = fileWith(evidenceFile(PLAN))
       const r = claim([...flags(file), `TP-1=PASS:${exit}`])
@@ -2674,6 +2674,23 @@ describe('claim — appends the claim lines of a report to the evidence file', (
       const r = claim([...flags(file), ...tps.map((_, i) => `TP-${i + 1}=PASS`)])
       expect(r).toMatchObject({ code: 0, stdout: `CLAIM appended:${VE.CAPS.TPS} PASS:${VE.CAPS.TPS} FAIL:0 SKIP:0 skipped:0\n` })
       expect(claimsOf(file).tp.size).toBe(VE.CAPS.TPS)
+    })
+
+    it.each([
+      ['TP-2=PASS:0,TP-3=SKIP', 'argument 74 holds more than one TP claim; pass each TP claim as its own argument'],
+      ['TP-5=FAILED', 'argument 74 is not one TP claim of the form TP-n=PASS, FAIL or SKIP with an optional exit'],
+      ['TP-0=PASS', 'argument 74 is not one TP claim of the form TP-n=PASS, FAIL or SKIP with an optional exit'],
+      ['--plan', 'argument 74 is a flag after the claims'],
+      ['gate', 'gate takes no plan and no other claim'],
+    ])('refuses the whole batch when argument 74 is %s', (last, cause) => {
+      const tps = Array.from({ length: 76 }, (_, i) => tpLine(i + 1, `step ${i + 1}`, 'manual'))
+      const before = evidenceFile(tps, [claimLine(5, 'PASS', OLD)])
+      const file = fileWith(before)
+      const first = Array.from({ length: 73 }, (_, i) => `TP-${i + 4}=PASS`)
+      const r = claim([...flags(file), ...first, last], neverCalls)
+      expect(r).toMatchObject({ code: 1, stdout: '' })
+      expect(r.stderr).toContain(`verify-evidence: claim: ${cause}\n`)
+      expect(read(file)).toBe(before)
     })
 
     it('a TP with no exit ends at by:test', () => {
@@ -3048,6 +3065,7 @@ describe('claim — appends the claim lines of a report to the evidence file', (
       }, UNREADABLE],
       ['a path outside the path grammar', (): string => 'plan file.md',
         'the plan path holds a character outside letters, digits, dot, dash, underscore and the path separator'],
+      ['a path over the length limit', (): string => 'a'.repeat(256), 'the plan path is longer than 255 characters'],
       ['a file that is not a plan', planAt('not a plan\n'), 'line 1 is not a TP line'],
       ['a plan with a stray line, counted from the top of the file', planAt(`# Plan\n\n## Test Plan\n${T1}\nfree text\n`), 'line 5 is not a TP line'],
       ['a plan out of order', planAt(`# Plan\n\n## Test Plan\n${T1}\n${T3}\n${T2}\n`), order(2, 6)],
@@ -3268,6 +3286,18 @@ describe('claim — appends the claim lines of a report to the evidence file', (
       expect(r.status).toBe(0)
       expect(r.stdout).toBe('CLAIM appended:2 PASS:1 FAIL:1 SKIP:0 skipped:1\n')
       expect(read(file)).toBe(evidenceFile(PLAN, [claimLine(1, 'PASS', HEAD, 0), claimLine(2, 'FAIL', HEAD, 1)]))
+    })
+
+    it('accepts 74 separate TP arguments and appends all 74 claims', () => {
+      const dir = scratch('claim-proc')
+      const home = scratch('claim-proc-home')
+      const plan = Array.from({ length: 74 }, (_, i) => tpLine(i + 1, `step ${i + 1}`, 'manual'))
+      const file = writeScratch(dir, 'evidence.md', evidenceFile(plan))
+      const args = plan.map((_, i) => `TP-${i + 1}=PASS`)
+      const r = runScript({ args: ['claim', ...flags(file), ...args], cwd: dir, home })
+      expect(r.status, r.stderr).toBe(0)
+      expect(r.stdout).toBe('CLAIM appended:74 PASS:74 FAIL:0 SKIP:0 skipped:0\n')
+      expect(read(file)).toBe(evidenceFile(plan, plan.map((_, i) => claimLine(i + 1, 'PASS', HEAD))))
     })
 
     it('prints the refusal line and exits 2 for a head that is not one SHA', () => {

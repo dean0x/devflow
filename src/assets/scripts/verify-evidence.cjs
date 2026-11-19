@@ -218,8 +218,9 @@ const REDACT_TIMEOUT_MS = 20000;
 const COMMENT_POST_MAX_CHARS = PE.LIMITS.BODY_CHARS;
 /** The scrubber, a sibling of this script under ~/.devflow/scripts/. */
 const REDACT_SCRIPT = path.join(__dirname, 'redact-secrets.cjs');
-/** What a `publish` `--evidence` value may spell: the relative paths the commands build. */
-const EVIDENCE_PATH_RE = /^[A-Za-z0-9._/-]{1,255}$/;
+/** What an evidence or plan path may spell: the bounded paths the commands build. */
+const EVIDENCE_PATH_MAX_CHARS = 255;
+const EVIDENCE_PATH_RE = new RegExp(`^[A-Za-z0-9._/-]{1,${EVIDENCE_PATH_MAX_CHARS}}$`);
 /** The `--publication` values a caller may pass (REVIEW_PUBLICATION, resolved). */
 const PUBLICATION_VALUES = Object.freeze(['auto', 'full', 'off', 'stub']);
 
@@ -553,7 +554,10 @@ function parseClaimArgs(tail) {
   const seen = new Set();
   for (let k = 0; k < items.length; k++) {
     const m = CLAIM_ARG_RE.exec(items[k]);
-    if (m === null || m.groups === undefined) return claimUsage(claimArgCause(items[k], k + 1));
+    // A second claim can fit inside the optional exit. Refuse the whole call before any write.
+    if (m === null || m.groups === undefined || /TP-[0-9]{1,3}=/.test(m.groups.exit ?? '')) {
+      return claimUsage(claimArgCause(items[k], k + 1));
+    }
     const id = Number(m.groups.n);
     if (seen.has(id)) return claimUsage('TP-' + id + ' is given more than once in this call');
     seen.add(id);
@@ -1820,7 +1824,7 @@ function classifyTp(io, repo, memo, x) {
  * @param {Io} io
  * @param {TpInput} x
  * @param {Record<string, unknown>} facts
- * @param {{ state: string, outcome: string | null, run: any, exit: number | null }} verdict
+ * @param {{ state: string, outcome: string | null, run: unknown, exit: number | null }} verdict
  * @returns {void}
  */
 function noteVerdict(io, x, facts, verdict) {
@@ -3415,7 +3419,10 @@ function claimRefusalReason(io, args) {
     return { reason: 'evidence file unusable', cause: null };
   }
   if (args.plan !== null && !EVIDENCE_PATH_RE.test(args.plan)) {
-    return { reason: 'plan file unusable', cause: 'the plan path holds a character outside letters, digits, dot, dash, underscore and the path separator' };
+    const cause = args.plan.length > EVIDENCE_PATH_MAX_CHARS
+      ? 'the plan path is longer than ' + Number(EVIDENCE_PATH_MAX_CHARS) + ' characters'
+      : 'the plan path holds a character outside letters, digits, dot, dash, underscore and the path separator';
+    return { reason: 'plan file unusable', cause };
   }
   if (trackedState(io, args.evidence) !== 'untracked') return { reason: 'evidence file tracked', cause: null };
   if (args.plan !== null && trackedState(io, args.plan) !== 'untracked') {
