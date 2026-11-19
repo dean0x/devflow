@@ -1791,7 +1791,10 @@ function classifyTp(io, repo, memo, x) {
  * own result says so; the verdict itself never changes. `local-no-exit`: a local PASS in the
  * PR, with its TP text unchanged, that has no exit code, reads UNVERIFIED because only exit 0
  * attests a local TP. The note follows the final state, so a STALE, an INDETERMINATE and every
- * other UNVERIFIED cause get none.
+ * other UNVERIFIED cause get none. `run-failed`: a ci PASS reads FAILED because a run at its
+ * verifying SHA failed (the claim's own runs, or the head's); any failed run fails a ci TP, since
+ * no TP field names its own job. A FAIL claim gets no note. The note is a closed token, with no
+ * byte of a run.
  *
  * @param {Io} io
  * @param {TpInput} x
@@ -1802,6 +1805,8 @@ function classifyTp(io, repo, memo, x) {
 function noteVerdict(io, x, facts, verdict) {
   if (verdict.state === 'UNVERIFIED' && x.tp.method === 'local' && verdict.outcome === 'PASS' && verdict.exit === null
     && facts.inPr === true && facts.textMatches !== false) io.notes.add('local-no-exit');
+  if (verdict.state === 'FAILED' && x.tp.method === 'ci' && verdict.outcome === 'PASS'
+    && verdict.run !== null && typeof verdict.run === 'object') io.notes.add('run-failed');
 }
 
 // ---------------------------------------------------------------------------

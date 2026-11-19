@@ -1420,6 +1420,37 @@ describe('the notes that name why a TP did not verify', () => {
     expect(notesOf(v.stderr)).not.toContain('local-no-exit')
   })
 
+  describe('run-failed: a failed CI run fails a ci PASS', () => {
+    const CI = tpLine(2, 'the suite covers src', 'ci', ['src/**'])
+    const ciAt = (outcome: 'PASS' | 'FAIL', sha = HEAD): string => evidenceFile([CI], [claimLine(2, outcome, sha)])
+
+    it('a ci PASS whose run at its SHA failed reads FAILED and carries the note run-failed, and no run text', () => {
+      const v = verifyScn({ scn: { runs: { [HEAD]: [{ id: 101 }, { id: 102, conclusion: 'failure' }] } }, evidence: ciAt('PASS') })
+      expect(v.states.get(2)).toBe('FAILED')
+      expect(v.records[0].run).toEqual({ id: 102, attempt: 1 })
+      expect(notesOf(v.stderr)).toEqual(['run-failed'])
+      expect(v.stderr).not.toContain('actions/runs')
+    })
+
+    it('so does one that the head\'s failed runs decide, when its own SHA has no runs', () => {
+      const scn: Scn = { ancestry: { [OLD]: 'in' }, diffs: { [OLD]: ['docs/x.md'] }, runs: { [OLD]: [], [HEAD]: [{ id: 201, conclusion: 'failure' }] } }
+      const v = verifyScn({ scn, evidence: ciAt('PASS', OLD) })
+      expect(v.states.get(2)).toBe('FAILED')
+      expect(notesOf(v.stderr)).toContain('run-failed')
+    })
+
+    it.each([
+      ['a ci FAIL with a failed run', 'FAILED', ciAt('FAIL'), { runs: { [HEAD]: [{ id: 101, conclusion: 'failure' }] } }],
+      ['a ci PASS whose runs all pass', 'VERIFIED-CI', ciAt('PASS'), { runs: { [HEAD]: [{ id: 101 }] } }],
+      ['a ci PASS with a failed run beside an expired one', 'INDETERMINATE', ciAt('PASS'), { runs: { [HEAD]: [{ id: 101, conclusion: 'failure' }, { id: 102, expired: true }] } }],
+      ['a local PASS with exit 1', 'FAILED', evidenceFile([LOCAL], [claimLine(1, 'PASS', HEAD, 1)]), {}],
+    ] as const)('no run-failed note for %s (%s)', (_label, state, evidence, scn) => {
+      const v = verifyScn({ scn, evidence })
+      expect([...v.states.values()]).toEqual([state])
+      expect(notesOf(v.stderr)).not.toContain('run-failed')
+    })
+  })
+
   it('no local-no-exit note for a ci or a manual PASS with no exit', () => {
     const ci = tpLine(2, 'a ci check', 'ci')
     const manual = tpLine(3, 'a manual check', 'manual')
