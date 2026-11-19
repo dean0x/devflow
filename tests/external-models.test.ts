@@ -24,7 +24,7 @@ import {
   type AgentMappingFile,
 } from '../src/core/agent-models.js';
 
-// Canonical Codex IDs from the 0.7.0 registry, including the retired ID.
+// Canonical Codex IDs from the 0.8.0 registry, including the retired ID.
 // Saved exact-ID assignments must still count as external.
 const KNOWN_GPT_IDS = [
   'gpt-6.2-sol',
