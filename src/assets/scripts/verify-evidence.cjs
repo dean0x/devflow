@@ -79,7 +79,25 @@
 //             `evidence file unusable` (a file that does not parse, or a folder that is
 //             missing outside the working directory) or `plan file unusable`. A refusal
 //             writes nothing. A folder the run made is removed again when the run
-//             leaves no file in it
+//             leaves no file in it.
+//             D-CLAIM-CAUSE: stderr gets one `verify-evidence: claim: <cause>` line for what
+//             the stdout line does not name. A usage error (exit 1) names the first cause
+//             found: the flags are absent, repeated or bad; there is no claim; there are
+//             more than 200 TP arguments; gate takes no plan and no other claim; argument k
+//             is a flag after the claims, holds more than one TP claim, or is not one TP
+//             claim; or TP-n is given more than once in this call. k counts from 1 at the
+//             first claim argument. A `plan file unusable` refusal names the path shape, a
+//             plan file that git tracks or cannot answer for, a file that cannot be read,
+//             or the rule that line k breaks (TP-n out of order or repeated, or a line that
+//             is not a TP line). An `evidence file unusable` refusal names a file that
+//             cannot be read, a heading at line k that the file does not allow or repeats,
+//             the rule that line k of its Test Plan breaks, a section that does not parse,
+//             or claim lines that do not fit the Claims section. A line k of a file counts
+//             from 1 at the top of the file. A run that writes a method:local PASS with no
+//             exit code from 0 to 255 names those TPs: verify reads them UNVERIFIED, because
+//             a local PASS needs exit 0. The sink lets a cause through only when it is one
+//             of a closed list of fixed phrases with digits in their number slots; any other
+//             text becomes one fixed phrase. No byte of argv, a file, git or gh gets in.
 // A git-tracked file counts as absent, like a tracked `.devflow/config.json`
 // (D-TRACKED-RESULT). `verify`, `publish` and `readiness` ask git about an `--evidence`
 // file before they read it, and about `--block-out`, `--comment-out`, `--stale-out` and
@@ -91,6 +109,11 @@
 // answer for, is refused as a write failure (exit 3, empty stdout) and left untouched.
 // No byte of a PR body, a comment, a review or a gh/git answer is ever printed: the
 // boundary re-checks every stdout line against these shapes before writing it.
+// The stderr summary `verify-evidence: notes: <tokens>` lists closed tokens, sorted.
+// Two of them name why a TP did not verify, and neither changes a state:
+// `local-no-exit`, a local PASS with no exit code that reads UNVERIFIED (a local PASS
+// needs exit 0), and `run-failed`, a ci PASS that reads FAILED because a run at its
+// verifying commit failed (any failed run at that commit fails a ci TP).
 //
 // Exit codes:
 //   0  ok
@@ -197,8 +220,9 @@ const REDACT_TIMEOUT_MS = 20000;
 const COMMENT_POST_MAX_CHARS = PE.LIMITS.BODY_CHARS;
 /** The scrubber, a sibling of this script under ~/.devflow/scripts/. */
 const REDACT_SCRIPT = path.join(__dirname, 'redact-secrets.cjs');
-/** What a `publish` `--evidence` value may spell: the relative paths the commands build. */
-const EVIDENCE_PATH_RE = /^[A-Za-z0-9._/-]{1,255}$/;
+/** What an evidence or plan path may spell: the bounded paths the commands build. */
+const EVIDENCE_PATH_MAX_CHARS = 255;
+const EVIDENCE_PATH_RE = new RegExp(`^[A-Za-z0-9._/-]{1,${EVIDENCE_PATH_MAX_CHARS}}$`);
 /** The `--publication` values a caller may pass (REVIEW_PUBLICATION, resolved). */
 const PUBLICATION_VALUES = Object.freeze(['auto', 'full', 'off', 'stub']);
 
@@ -256,6 +280,74 @@ const CLAIM_APPENDED_RE = /^CLAIM appended:(?<n>[0-9]{1,3}) PASS:(?<pass>[0-9]{1
 const CLAIM_REFUSAL_RE = /^CLAIM refused \((?<reason>head not one sha|evidence file tracked|evidence file unusable|plan file unusable)\)$/;
 /** One `claim` argument: the TP, its outcome, and an exit the script keeps only as a number from 0 to 255. */
 const CLAIM_ARG_RE = /^TP-(?<n>[1-9][0-9]{0,2})=(?<outcome>PASS|FAIL|SKIP)(?::(?<exit>[^\s]{1,12}))?$/;
+/**
+ * D-CLAIM-CAUSE: every cause a `claim` run can write on stderr, as a closed list of templates.
+ * The text of a template is a fixed phrase. `<n>` is a number slot of 1 to 10 digits. `<tps>` is
+ * a list of 2 to CAPS.TPS TP ids (`TP-<n>`, joined by `, `). A new cause needs a new row here.
+ */
+const CLAIM_CAUSE_TEMPLATES = Object.freeze([
+  // parseClaimArgs: the usage errors
+  'the flags are absent, repeated or bad',
+  'there is no claim',
+  'there are more than <n> TP arguments',
+  'gate takes no plan and no other claim',
+  'argument <n> is a flag after the claims',
+  'argument <n> holds more than one TP claim; pass each TP claim as its own argument',
+  'argument <n> is not one TP claim of the form TP-n=PASS, FAIL or SKIP with an optional exit',
+  'TP-<n> is given more than once in this call',
+  // claimRefusalReason and claimPlanIds: plan file unusable
+  'the plan path is longer than <n> characters',
+  'the plan path holds a character outside letters, digits, dot, dash, underscore and the path separator',
+  'git tracks the plan file, or cannot say it does not',
+  'the plan file cannot be read: absent, not a regular file, over the byte cap or not UTF-8',
+  // planCause
+  'line <n> is not a TP line',
+  'TP-<n> at line <n> breaks the order rule: TP numbers ascend and are unique',
+  'TP-<n> at line <n> repeats the TP number before it',
+  'the plan does not parse',
+  // runClaim and evidenceCause: evidence file unusable
+  'the evidence file cannot be read: not a regular file, over the byte cap or not UTF-8',
+  'line <n> is a heading the evidence file does not allow',
+  'line <n> repeats a section heading',
+  'a section of the evidence file does not parse',
+  'the claim lines do not fit the Claims section',
+  // localNoExitCause
+  'TP-<n> is a method:local PASS claim with no exit code from 0 to 255; verify reads it UNVERIFIED, and only exit 0 from the Test report counts',
+  '<tps> are method:local PASS claims with no exit code from 0 to 255; verify reads them UNVERIFIED, and only exit 0 from the Test report counts',
+]);
+/** The most characters of a cause. The longest one holds CAPS.TPS ids (each at most `TP-200, `) and its phrase. */
+const CLAIM_CAUSE_MAX_CHARS = 2000;
+/** The pattern of each slot of CLAIM_CAUSE_TEMPLATES. A Map, so no prototype key can match. */
+const CLAIM_CAUSE_SLOTS = new Map([
+  ['<n>', '[0-9]{1,10}'],
+  ['<tps>', 'TP-[0-9]{1,10}(?:, TP-[0-9]{1,10}){1,' + (CAPS.TPS - 1) + '}'],
+]);
+
+/**
+ * One template of CLAIM_CAUSE_TEMPLATES as a pattern: each phrase part is escaped, then each
+ * slot gets its digit pattern.
+ *
+ * @param {string} template
+ * @returns {string}
+ */
+function causePattern(template) {
+  return template
+    .split(/(<n>|<tps>)/)
+    .map((part, i) => (i % 2 === 1 ? CLAIM_CAUSE_SLOTS.get(part) : part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+    .join('');
+}
+
+/**
+ * The shape of every `verify-evidence: claim: <cause>` stderr line, checked at the sink
+ * (claimCause): one of CLAIM_CAUSE_TEMPLATES exactly, with digits in its slots, and at most
+ * CLAIM_CAUSE_MAX_CHARS characters. Any other text, a line break and any character outside a
+ * phrase or a slot fail it.
+ */
+const CLAIM_CAUSE_RE = new RegExp(
+  '^(?=.{1,' + CLAIM_CAUSE_MAX_CHARS + '}$)(?:' + CLAIM_CAUSE_TEMPLATES.map(causePattern).join('|') + ')$',
+);
+/** What claimCause writes for a cause that fails CLAIM_CAUSE_RE. */
+const CLAIM_CAUSE_FALLBACK = 'the cause does not pass the stderr check';
 
 const USAGE = [
   'Usage: node verify-evidence.cjs check tp|block|exceptions <file>',
@@ -318,6 +410,7 @@ const USAGE = [
 
 /**
  * @typedef {{ kind: 'usage' }
+ *   | { kind: 'usage', cause: string }
  *   | { kind: 'check', what: 'tp' | 'block' | 'exceptions', file: string }
  *   | { kind: 'render', plan: string }
  *   | { kind: 'verify', pr: number, publication: string, evidence: string | null, state: string | null,
@@ -464,10 +557,40 @@ function parseArgs(argv) {
 }
 
 /**
+ * A `claim` usage error that names its cause: main writes the cause through claimCause,
+ * then the usage text.
+ *
+ * @param {string} cause  a fixed phrase of parseClaimArgs, with numbers only
+ * @returns {ParsedArgs}
+ */
+function claimUsage(cause) {
+  return Object.freeze({ kind: /** @type {'usage'} */ ('usage'), cause });
+}
+
+/**
+ * Why one claim argument (number `k`, counted from 1 at the first claim argument) is not
+ * one TP claim. An argument that holds a second `TP-` gets the hint to split it; one with a
+ * space only in its exit (`TP-1=PASS:1 2`) does not.
+ *
+ * @param {string} item
+ * @param {number} k
+ * @returns {string}
+ */
+function claimArgCause(item, k) {
+  const at = 'argument ' + Number(k);
+  if (item.startsWith('--')) return at + ' is a flag after the claims';
+  if (item.indexOf('TP-', item.indexOf('TP-') + 1) > 0) {
+    return at + ' holds more than one TP claim; pass each TP claim as its own argument';
+  }
+  return at + ' is not one TP claim of the form TP-n=PASS, FAIL or SKIP with an optional exit';
+}
+
+/**
  * D-CLAIM-APPEND: `claim` takes its flags first, then either the one word `gate` or
  * one to CAPS.TPS `TP-<n>=<outcome>[:<exit>]` arguments, each TP at most once. A bad
- * flag or argument is a usage error. `--head` is not checked here: a value that is not
- * one SHA is a refusal with a line, since the caller passes what its report shows.
+ * flag or argument is a usage error that names its cause (claimUsage): the first cause
+ * found, in this order. `--head` is not checked here: a value that is not one SHA is a
+ * refusal with a line, since the caller passes what its report shows.
  *
  * @param {readonly string[]} tail
  * @returns {ParsedArgs}
@@ -480,21 +603,31 @@ function parseClaimArgs(tail) {
   const head = f === null ? null : flagValue(f, '--head');
   const plan = f === null ? null : flagValue(f, '--plan');
   const items = tail.slice(flagCount);
-  if (evidence === null || head === null || items.length === 0 || items.length > CAPS.TPS) return USAGE_ARGS;
-  if (items.length === 1 && items[0] === 'gate') {
-    return plan === null ? { kind: 'claim', evidence, head, plan, gate: true, tps: [] } : USAGE_ARGS;
+  if (evidence === null || head === null) return claimUsage('the flags are absent, repeated or bad');
+  if (items.length === 0) return claimUsage('there is no claim');
+  if (items.length > CAPS.TPS) return claimUsage('there are more than ' + Number(CAPS.TPS) + ' TP arguments');
+  if (items.includes('gate')) {
+    return items.length === 1 && plan === null
+      ? { kind: 'claim', evidence, head, plan, gate: true, tps: [] }
+      : claimUsage('gate takes no plan and no other claim');
   }
   const tps = [];
-  for (const item of items) {
-    const m = CLAIM_ARG_RE.exec(item);
-    if (m === null || m.groups === undefined) return USAGE_ARGS;
+  const seen = new Set();
+  for (let k = 0; k < items.length; k++) {
+    const m = CLAIM_ARG_RE.exec(items[k]);
+    // A second claim can fit inside the optional exit. Refuse the whole call before any write.
+    if (m === null || m.groups === undefined || /TP-[0-9]{1,3}=/.test(m.groups.exit ?? '')) {
+      return claimUsage(claimArgCause(items[k], k + 1));
+    }
+    const id = Number(m.groups.n);
+    if (seen.has(id)) return claimUsage('TP-' + id + ' is given more than once in this call');
+    seen.add(id);
     tps.push({
-      id: Number(m.groups.n),
+      id,
       outcome: /** @type {'PASS' | 'FAIL' | 'SKIP'} */ (m.groups.outcome),
       exit: m.groups.exit === undefined ? null : m.groups.exit,
     });
   }
-  if (new Set(tps.map(tp => tp.id)).size !== tps.length) return USAGE_ARGS;
   return { kind: 'claim', evidence, head, plan, gate: false, tps };
 }
 
@@ -916,8 +1049,8 @@ function trackedState(io, file) {
  * the write failure (exit 3): no file is written. An `--evidence` file that is not
  * clearly untracked is dropped, so the run goes on exactly as if `--evidence` was not
  * given; the stderr summary then carries the closed note `evidence-ignored`. Stdout
- * keeps its grammar. A `claim` run has its own refusal line for each of these cases
- * (claimRefusalReason).
+ * keeps its grammar. A `claim` run has its own refusal line for each of these cases, and
+ * a stderr cause for a plan file refusal (claimRefusalReason).
  *
  * @param {Io} io
  * @param {ParsedArgs} args
@@ -925,8 +1058,8 @@ function trackedState(io, file) {
  */
 function admitPaths(io, args) {
   if (args.kind === 'claim') {
-    const reason = claimRefusalReason(io, args);
-    return reason === null ? { args } : { outcome: claimRefusal(reason) };
+    const refused = claimRefusalReason(io, args);
+    return refused === null ? { args } : { outcome: claimRefusal(io, refused.reason, refused.cause) };
   }
   if (args.kind !== 'verify' && args.kind !== 'publish' && args.kind !== 'readiness') return { args };
   const outs = args.kind === 'verify' ? [args.blockOut, args.commentOut, args.staleOut]
@@ -1729,13 +1862,37 @@ function classifyTp(io, repo, memo, x) {
   // no claim rests on it (tpInputs attaches none) — INDETERMINATE, sha:none.
   if (x.forceIndeterminate) return { state: 'INDETERMINATE', sha: null, outcome: null, run: null, exit: null };
   const facts = gatherFacts(io, repo, memo, x);
-  const verdict = PE.classify(x.tp, facts);
+  let verdict = PE.classify(x.tp, facts);
   const claim = /** @type {any} */ (x.claim);
   if (x.tp.method === 'ci' && verdict.state === 'ATTESTED-LOCAL' && verdict.run === 'none' && claim.sha !== repo.head) {
     const headRuns = runsAt(io, memo, repo.head);
-    if (headRuns !== null) return PE.classify(x.tp, { ...facts, verifyingSha: repo.head, runs: headRuns });
+    if (headRuns !== null) verdict = PE.classify(x.tp, { ...facts, verifyingSha: repo.head, runs: headRuns });
   }
+  noteVerdict(io, x, facts, verdict);
   return verdict;
+}
+
+/**
+ * Add the closed note that names why a TP's final verdict did not verify, where the ladder's
+ * own result says so; the verdict itself never changes. `local-no-exit`: a local PASS in the
+ * PR, with its TP text unchanged, that has no exit code, reads UNVERIFIED because only exit 0
+ * attests a local TP. The note follows the final state, so a STALE, an INDETERMINATE and every
+ * other UNVERIFIED cause get none. `run-failed`: a ci PASS reads FAILED because a run at its
+ * verifying SHA failed (the claim's own runs, or the head's); any failed run fails a ci TP, since
+ * no TP field names its own job. A FAIL claim gets no note. The note is a closed token, with no
+ * byte of a run.
+ *
+ * @param {Io} io
+ * @param {TpInput} x
+ * @param {Record<string, unknown>} facts
+ * @param {{ state: string, outcome: string | null, run: unknown, exit: number | null }} verdict
+ * @returns {void}
+ */
+function noteVerdict(io, x, facts, verdict) {
+  if (verdict.state === 'UNVERIFIED' && x.tp.method === 'local' && verdict.outcome === 'PASS' && verdict.exit === null
+    && facts.inPr === true && facts.textMatches !== false) io.notes.add('local-no-exit');
+  if (verdict.state === 'FAILED' && x.tp.method === 'ci' && verdict.outcome === 'PASS'
+    && verdict.run !== null && typeof verdict.run === 'object') io.notes.add('run-failed');
 }
 
 // ---------------------------------------------------------------------------
@@ -3147,11 +3304,88 @@ function runReadiness(io, args, deps) {
 // assign states.
 
 /**
+ * D-CLAIM-CAUSE: write one `verify-evidence: claim: <cause>` line to stderr. Every such line
+ * goes through here, and the cause is checked against CLAIM_CAUSE_RE at this sink, as claimLine
+ * checks each claim line. A cause passes only when it is one of CLAIM_CAUSE_TEMPLATES with
+ * digits in its slots, so a caller can add no text of its own, a new caller included. A cause
+ * that fails is replaced by CLAIM_CAUSE_FALLBACK.
+ *
+ * @param {Io} io
+ * @param {string} text
+ * @returns {void}
+ */
+function claimCause(io, text) {
+  const cause = typeof text === 'string' && CLAIM_CAUSE_RE.test(text) ? text : CLAIM_CAUSE_FALLBACK;
+  io.stderr('verify-evidence: claim: ' + cause + '\n');
+}
+
+/**
+ * Every `claim` refusal: the stdout line, and the cause on stderr through claimCause when
+ * there is one. Stdout keeps its closed reason; only stderr carries the cause.
+ *
+ * @param {Io} io
  * @param {string} reason  one of the CLAIM_REFUSAL_RE reasons
+ * @param {string | null} cause  a cause of CLAIM_CAUSE_TEMPLATES, or null
  * @returns {Outcome}
  */
-function claimRefusal(reason) {
+function claimRefusal(io, reason, cause) {
+  if (cause !== null) claimCause(io, cause);
   return { code: EXIT_CODES.INPUT_UNUSABLE, stdout: 'CLAIM refused (' + reason + ')\n' };
+}
+
+/** The causes of a plan file or an evidence file that cannot be read at all. */
+const PLAN_UNREADABLE_CAUSE = 'the plan file cannot be read: absent, not a regular file, over the byte cap or not UTF-8';
+const EVIDENCE_UNREADABLE_CAUSE = 'the evidence file cannot be read: not a regular file, over the byte cap or not UTF-8';
+/** The cause of an insert that claimInserted refuses, such as one over the parser's size limit. */
+const CLAIM_INSERT_CAUSE = 'the claim lines do not fit the Claims section';
+
+/**
+ * The cause of a plan that parsePlan refuses, from its error alone: the code, and the line as a
+ * line of the whole file. A plan read from the `## Test Plan` section counts its lines from that
+ * heading, so the heading's row index is added; a file with no such section is the plan itself,
+ * and the offset is 0. The TP number is read from that row by the TP grammar. Only digits and
+ * fixed phrases go in, never a byte of the file. A heading row that is not found, and an error
+ * code with no rule of its own, give `the plan does not parse`.
+ *
+ * @param {string} text  the whole file
+ * @param {{ code: string, line: number }} error  a parsePlan error
+ * @returns {string}
+ */
+function planCause(text, error) {
+  const rows = text.split('\n').map(row => row.replace(/\r$/, ''));
+  const sections = PE.evidenceSections(text);
+  const offset = sections.ok && sections.value.testPlan !== null ? rows.indexOf(PE.PLAN_HEADING) : 0;
+  if (offset < 0) return 'the plan does not parse';
+  const k = Number(offset) + Number(error.line);
+  if (error.code === 'malformed') return 'line ' + k + ' is not a TP line';
+  const m = PE.TP_LINE_RE.exec(k >= 1 && k <= rows.length ? rows[k - 1] : '');
+  const n = m === null || m.groups === undefined ? null : Number(m.groups.n);
+  if (n !== null && error.code === 'order') return 'TP-' + n + ' at line ' + k + ' breaks the order rule: TP numbers ascend and are unique';
+  if (n !== null && error.code === 'duplicate') return 'TP-' + n + ' at line ' + k + ' repeats the TP number before it';
+  return 'the plan does not parse';
+}
+
+/**
+ * The cause of an evidence file that parseEvidenceText refuses: the section split first, then
+ * the `## Test Plan`, else a fixed phrase for the Claims or Exceptions section. Each line number
+ * is a line of the file.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function evidenceCause(text) {
+  const sections = PE.evidenceSections(text);
+  if (!sections.ok) {
+    const k = Number(sections.error.line);
+    if (sections.error.code === 'malformed') return 'line ' + k + ' is a heading the evidence file does not allow';
+    if (sections.error.code === 'duplicate') return 'line ' + k + ' repeats a section heading';
+    return 'a section of the evidence file does not parse';
+  }
+  if (sections.value.testPlan !== null) {
+    const plan = PE.parsePlan(sections.value.testPlan);
+    if (!plan.ok && plan.error.code !== 'empty') return planCause(text, plan.error);
+  }
+  return 'a section of the evidence file does not parse';
 }
 
 /** The most folders one path can hold: the bound of the walk up to the nearest folder that exists. */
@@ -3231,18 +3465,30 @@ function removeMadeFolders(io) {
  * this, but the folder of the evidence file, when it is missing: the HEAD is one 40-hex
  * SHA, each path is a path the commands build, the evidence file sits in a folder that
  * exists or that the run makes inside the working directory (D-CLAIM-FOLDER), and git says
- * clearly that neither file is tracked (D-TRACKED-RESULT).
+ * clearly that neither file is tracked (D-TRACKED-RESULT). The checks run in this order.
+ * `reason` is the stdout reason. `cause` is the stderr cause of a plan file refusal (its path
+ * shape, or git tracks it); it is null for the head, a tracked evidence file and an evidence
+ * path or folder that is unusable, since the stdout reason already names each of them.
  *
  * @param {Io} io
  * @param {Extract<ParsedArgs, { kind: 'claim' }>} args
- * @returns {string | null}
+ * @returns {{ reason: string, cause: string | null } | null}
  */
 function claimRefusalReason(io, args) {
-  if (!SHA40_RE.test(args.head)) return 'head not one sha';
-  if (!EVIDENCE_PATH_RE.test(args.evidence) || !ensureClaimFolder(io, path.dirname(path.resolve(args.evidence)))) return 'evidence file unusable';
-  if (args.plan !== null && !EVIDENCE_PATH_RE.test(args.plan)) return 'plan file unusable';
-  if (trackedState(io, args.evidence) !== 'untracked') return 'evidence file tracked';
-  if (args.plan !== null && trackedState(io, args.plan) !== 'untracked') return 'plan file unusable';
+  if (!SHA40_RE.test(args.head)) return { reason: 'head not one sha', cause: null };
+  if (!EVIDENCE_PATH_RE.test(args.evidence) || !ensureClaimFolder(io, path.dirname(path.resolve(args.evidence)))) {
+    return { reason: 'evidence file unusable', cause: null };
+  }
+  if (args.plan !== null && !EVIDENCE_PATH_RE.test(args.plan)) {
+    const cause = args.plan.length > EVIDENCE_PATH_MAX_CHARS
+      ? 'the plan path is longer than ' + Number(EVIDENCE_PATH_MAX_CHARS) + ' characters'
+      : 'the plan path holds a character outside letters, digits, dot, dash, underscore and the path separator';
+    return { reason: 'plan file unusable', cause };
+  }
+  if (trackedState(io, args.evidence) !== 'untracked') return { reason: 'evidence file tracked', cause: null };
+  if (args.plan !== null && trackedState(io, args.plan) !== 'untracked') {
+    return { reason: 'plan file unusable', cause: 'git tracks the plan file, or cannot say it does not' };
+  }
   return null;
 }
 
@@ -3334,23 +3580,57 @@ function claimInserted(text, inserted, lines) {
 }
 
 /**
- * The TP numbers the plan lists: the `## Test Plan` of the `--plan` file, else of the
- * evidence file. A plan with no TP line, or no plan section, lists none. Null when the
- * `--plan` file cannot serve as a plan.
+ * The TPs the plan lists, each with its method: the `## Test Plan` of the `--plan` file,
+ * else of the evidence file. A plan with no TP line, or no plan section, lists none. A
+ * `--plan` file that cannot serve as a plan gives its cause instead: it cannot be read, or
+ * the planCause of its grammar error.
  *
  * @param {Extract<ParsedArgs, { kind: 'claim' }>} args
  * @param {EvidenceInput} evidence
- * @returns {Set<number> | null}
+ * @returns {{ ok: true, value: Map<number, string> } | { ok: false, cause: string }}  TP number to method
  */
 function claimPlanIds(args, evidence) {
   let plan = evidence.plan;
   if (args.plan !== null) {
     const text = readTextFile(args.plan);
-    const parsed = text === null ? null : PE.parsePlan(sectionOrWhole(text, 'testPlan'));
-    if (parsed === null || (!parsed.ok && parsed.error.code !== 'empty')) return null;
+    if (text === null) return { ok: false, cause: PLAN_UNREADABLE_CAUSE };
+    const parsed = PE.parsePlan(sectionOrWhole(text, 'testPlan'));
+    if (!parsed.ok && parsed.error.code !== 'empty') return { ok: false, cause: planCause(text, parsed.error) };
     plan = parsed.ok ? parsed.value : { tps: [] };
   }
-  return new Set((plan === null ? [] : plan.tps).map(tp => tp.id));
+  return { ok: true, value: new Map((plan === null ? [] : plan.tps).map(tp => [tp.id, tp.method])) };
+}
+
+/**
+ * The TPs of the written lines that verify reads UNVERIFIED for want of an exit code: the
+ * plan lists them as method:local, and the claim parser reads each one's line as a PASS with
+ * no exit (none was given, or the one given is not a number from 0 to 255). Only exit 0
+ * attests a local TP (the ATTESTED-LOCAL arm of pr-evidence.cjs). In ascending order.
+ *
+ * @param {Map<number, string>} listed  TP number to method
+ * @param {readonly string[]} lines  the claim lines this run writes
+ * @returns {number[]}
+ */
+function localNoExitIds(listed, lines) {
+  const parsed = PE.parseClaims(lines.join('\n'));
+  if (!parsed.ok) return [];
+  return [...parsed.value.tp.values()]
+    .filter(c => c.outcome === 'PASS' && c.exit === null && listed.get(c.tp) === 'local')
+    .map(c => Number(c.tp))
+    .sort((a, b) => a - b);
+}
+
+/**
+ * The stderr cause that names the TPs of localNoExitIds, as digits, at most CAPS.TPS of them.
+ *
+ * @param {readonly number[]} ids  at least one
+ * @returns {string}
+ */
+function localNoExitCause(ids) {
+  const named = ids.map(id => 'TP-' + Number(id)).join(', ');
+  return ids.length === 1
+    ? named + ' is a method:local PASS claim with no exit code from 0 to 255; verify reads it UNVERIFIED, and only exit 0 from the Test report counts'
+    : named + ' are method:local PASS claims with no exit code from 0 to 255; verify reads them UNVERIFIED, and only exit 0 from the Test report counts';
 }
 
 /**
@@ -3374,17 +3654,19 @@ function runClaim(io, args) {
   try {
     st = fs.lstatSync(file, { throwIfNoEntry: false });
   } catch (_) {
-    return claimRefusal('evidence file unusable');
+    return claimRefusal(io, 'evidence file unusable', EVIDENCE_UNREADABLE_CAUSE);
   }
-  if (st !== undefined && !st.isFile()) return claimRefusal('evidence file unusable');
+  if (st !== undefined && !st.isFile()) return claimRefusal(io, 'evidence file unusable', EVIDENCE_UNREADABLE_CAUSE);
   const text = st === undefined ? '' : readTextFile(file);
-  const evidence = text === null ? null : parseEvidenceText(text);
-  if (text === null || evidence === null) return claimRefusal('evidence file unusable');
+  if (text === null) return claimRefusal(io, 'evidence file unusable', EVIDENCE_UNREADABLE_CAUSE);
+  const evidence = parseEvidenceText(text);
+  if (evidence === null) return claimRefusal(io, 'evidence file unusable', evidenceCause(text));
   const headings = text.split('\n').map(row => row.replace(/\r$/, '')).filter(row => row === '##' || row.startsWith('## '));
   const hasSection = headings.includes(PE.CLAIMS_HEADING);
   const sectionFollowed = hasSection && headings[headings.length - 1] !== PE.CLAIMS_HEADING;
-  const listed = args.gate ? new Set() : claimPlanIds(args, evidence);
-  if (listed === null) return claimRefusal('plan file unusable');
+  const plan = args.gate ? { ok: true, value: new Map() } : claimPlanIds(args, evidence);
+  if (!plan.ok) return claimRefusal(io, 'plan file unusable', plan.cause);
+  const listed = plan.value;
 
   /** @type {string[]} */
   const lines = [];
@@ -3404,13 +3686,15 @@ function runClaim(io, args) {
     let written;
     if (sectionFollowed) {
       const inserted = claimInsertText(text, lines);
-      if (!claimInserted(text, inserted, lines)) return claimRefusal('evidence file unusable');
+      if (!claimInserted(text, inserted, lines)) return claimRefusal(io, 'evidence file unusable', CLAIM_INSERT_CAUSE);
       written = replaceTextFile(file, inserted, st === undefined ? 0o600 : st.mode & 0o777);
     } else {
       written = appendTextFile(file, claimAppendText(text, hasSection, lines));
     }
     if (!written) return refuse(io, EXIT_CODES.WRITE_FAILED, 'an output file could not be written');
   }
+  const noExit = localNoExitIds(listed, lines);
+  if (noExit.length > 0) claimCause(io, localNoExitCause(noExit));
   const skipped = args.gate ? 0 : args.tps.length - lines.length;
   return {
     code: EXIT_CODES.OK,
@@ -3485,6 +3769,7 @@ function main(argv, deps) {
   };
   const parsed = parseArgs(argv);
   if (parsed.kind === 'usage') {
+    if ('cause' in parsed) claimCause(io, parsed.cause);
     io.stderr(USAGE + '\n');
     return { code: EXIT_CODES.USAGE, stdout: '' };
   }
@@ -3641,4 +3926,5 @@ module.exports = Object.freeze({
   writeReadinessOut,
   commentIdOf,
   editTarget,
+  claimCause,
 });
