@@ -269,6 +269,37 @@ describe('flags CLI — createFlagsCommand factory', () => {
       await expectUnchanged(files);
     });
 
+    describe.each(['CLI enable', 'TUI save'])('%s', entry => {
+      it.each([
+        {
+          name: 'a file over the read limit',
+          bytes: () => Buffer.from(JSON.stringify({
+            env: { ANTHROPIC_BASE_URL: relayUrl },
+            pad: 'x'.repeat(1024 * 1024),
+          })),
+        },
+        {
+          name: 'a file with invalid UTF-8',
+          bytes: () => Buffer.concat([
+            Buffer.from(`{"env":{"ANTHROPIC_BASE_URL":"${relayUrl}"},"pad":"`),
+            Buffer.from([0xff]),
+            Buffer.from('"}'),
+          ]),
+        },
+      ])('refuses $name without changes to either file', async ({ bytes }) => {
+        const files = await seed({}, {});
+        const settingsBytes = bytes();
+        await fs.writeFile(files.settingsPath, settingsBytes);
+
+        if (entry === 'CLI enable') await flagsCmd.parseAsync(['--enable', 'code-mode'], { from: 'user' });
+        else await runTui({ 'code-mode': true });
+
+        expectRefusal('Cannot make this change because Devflow could not check the Code Mode and proxy state.');
+        expect(await fs.readFile(files.settingsPath)).toEqual(settingsBytes);
+        expect(await fs.readFile(files.manifestPath)).toEqual(Buffer.from(files.manifestBytes));
+      });
+    });
+
     it.each([
       { args: ['--disable', 'code-mode'] },
       { args: ['--unset', 'code-mode'] },
@@ -332,6 +363,20 @@ describe('flags CLI — createFlagsCommand factory', () => {
       await runTui({ lsp: true });
 
       await expectSaved(true, '1');
+    });
+
+    it('allows CLI re-enable when Code Mode and the proxy are already on', async () => {
+      await seed({ 'code-mode': true }, { [codeKey]: '1' });
+      await seedProxy();
+
+      await flagsCmd.parseAsync(['--enable', 'code-mode'], { from: 'user' });
+
+      await expectSaved(true, '1');
+      expect(p.log.error).not.toHaveBeenCalled();
+      expect(p.log.success).toHaveBeenCalledOnce();
+      expect(vi.mocked(p.log.warn).mock.calls).toEqual([[
+        'Code Mode does not start while the Devflow proxy is on. Run `devflow flags --disable code-mode` or `devflow proxy --disable`.',
+      ]]);
     });
 
     it('allows an unrelated TUI save when Code Mode and the proxy are already on', async () => {
