@@ -1103,6 +1103,8 @@ describe('/implement partial-PR rule — Closes by default, Refs for one part of
     expect(arm.test('Part of #102'), 'only one non-closing form is admitted').toBe(false)
     expect(PR_READY, 'the gate says which PR takes which form')
       .toContain('A caller passes `Refs #{n}` for a PR that is one part of the issue; the last PR keeps `Closes #{n}`.')
+    expect(PR_READY, 'step 4b publishes an admitted partial line on an existing PR; it must not ask for `Closes`')
+      .toContain('section with the `Closes #{n}` or `Refs #{n}` line of this branch\'s issue.')
   })
 
   it('known-bad probes: an unconditional swap, a lost rule and a rule moved past Phase 9 are each reported', () => {
