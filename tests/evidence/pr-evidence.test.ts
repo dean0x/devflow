@@ -546,6 +546,8 @@ describe('TP_LINE_RE and parsePlan', () => {
   it('refuses order, duplicates, stray text, a late heading, empty and oversize input — with a line number only', () => {
     expect(PE.parsePlan([tpLine(2, 1, 'a', 'ci'), tpLine(1, 1, 'b', 'ci')].join('\n'))).toEqual({ ok: false, error: { code: 'order', line: 2 } })
     expect(PE.parsePlan([tpLine(1, 1, 'a', 'ci'), tpLine(1, 1, 'b', 'ci')].join('\n'))).toEqual({ ok: false, error: { code: 'duplicate', line: 2 } })
+    // A repeat that is not next to its first line breaks the order rule, not the duplicate rule.
+    expect(PE.parsePlan([tpLine(1, 1, 'a', 'ci'), tpLine(2, 1, 'b', 'ci'), tpLine(1, 1, 'c', 'ci')].join('\n'))).toEqual({ ok: false, error: { code: 'order', line: 3 } })
     expect(PE.parsePlan([tpLine(1, 1, 'a', 'ci'), 'free text'].join('\n'))).toEqual({ ok: false, error: { code: 'malformed', line: 2 } })
     expect(PE.parsePlan([tpLine(1, 1, 'a', 'ci'), '## Test Plan'].join('\n'))).toEqual({ ok: false, error: { code: 'malformed', line: 2 } })
     expect(errCode(PE.parsePlan('## Test Plan\n\n'))).toBe('empty')

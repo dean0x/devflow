@@ -3002,21 +3002,51 @@ describe('claim — appends the claim lines of a report to the evidence file', (
       expect(read(file)).toBe(before)
     })
 
+    const UNREADABLE = 'the plan file cannot be read: absent, not a regular file, over the byte cap or not UTF-8'
+    const order = (n: number, k: number): string => `TP-${n} at line ${k} breaks the order rule: TP numbers ascend and are unique`
+    const planAt = (text: string): (() => string) => (): string => writeScratch(scratch('claim-plan'), 'plan.md', text)
+    const [T1, T2, T3] = PLAN
+
     it.each([
-      ['a missing file', (): string => path.join(scratch('claim-plan'), 'absent.md')],
-      ['a file that is not a plan', (): string => writeScratch(scratch('claim-plan'), 'plan.md', 'not a plan\n')],
-      ['a path outside the path grammar', (): string => 'plan file.md'],
-    ])('a --plan that is %s is refused and the evidence file is unchanged', (_label, plan) => {
+      ['a missing file', (): string => path.join(scratch('claim-plan'), 'absent.md'), UNREADABLE],
+      ['a folder', (): string => scratch('claim-plan'), UNREADABLE],
+      ['a file that is not UTF-8', (): string => {
+        const p = path.join(scratch('claim-plan'), 'plan.md')
+        fs.writeFileSync(p, Buffer.from([0x2d, 0xff, 0xfe, 0x0a]))
+        return p
+      }, UNREADABLE],
+      ['a path outside the path grammar', (): string => 'plan file.md',
+        'the plan path holds a character outside letters, digits, dot, dash, underscore and the path separator'],
+      ['a file that is not a plan', planAt('not a plan\n'), 'line 1 is not a TP line'],
+      ['a plan with a stray line, counted from the top of the file', planAt(`# Plan\n\n## Test Plan\n${T1}\nfree text\n`), 'line 5 is not a TP line'],
+      ['a plan out of order', planAt(`# Plan\n\n## Test Plan\n${T1}\n${T3}\n${T2}\n`), order(2, 6)],
+      ['a plan that repeats a TP apart', planAt(`## Test Plan\n${T1}\n${T2}\n${T1}\n`), order(1, 4)],
+      ['a plan that repeats a TP next to itself', planAt(`## Test Plan\n${T1}\n${T1.replace('Login', 'Logout')}\n`),
+        'TP-1 at line 3 repeats the TP number before it'],
+      ['a plan of bare TP lines out of order', planAt(`${T2}\n${T1}\n`), order(1, 2)],
+      ['a CRLF plan out of order', planAt(`# Plan\r\n\r\n## Test Plan\r\n${T2}\r\n${T1}\r\n`), order(1, 5)],
+      // The read refuses a text over the parser's size cap before the parser runs.
+      ['a plan over the size cap', planAt('x'.repeat(PE.LIMITS.INPUT_CHARS + 1)), UNREADABLE],
+    ])('a --plan that is %s is refused, names its cause and leaves the evidence file unchanged', (_label, plan, cause) => {
       const before = evidenceFile(PLAN)
       const file = fileWith(before)
       const r = claim([...flags(file), '--plan', plan(), 'TP-1=PASS'])
       expect(r).toMatchObject({ code: 2, stdout: refusal('plan file unusable') })
+      expect(r.stderr).toBe(`verify-evidence: claim: ${cause}\n`)
       expect(read(file)).toBe(before)
+    })
+
+    it('a plan cause holds no byte of the plan', () => {
+      const file = fileWith(evidenceFile(PLAN))
+      const plan = writeScratch(scratch('claim-plan'), 'plan.md', `## Test Plan\n${T1}\n<b>@x #1 \`y\`</b>\n`)
+      const r = claim([...flags(file), '--plan', plan, 'TP-1=PASS'])
+      expect(r.stderr).toBe('verify-evidence: claim: line 3 is not a TP line\n')
     })
   })
 
   describe('refusals leave the file as it was', () => {
     const before = evidenceFile(PLAN, [claimLine(1, 'PASS', OLD, 0)])
+    const EVIDENCE_UNREADABLE = 'the evidence file cannot be read: not a regular file, over the byte cap or not UTF-8'
 
     it.each([
       ['not hex', 'abc'],
@@ -3032,6 +3062,7 @@ describe('claim — appends the claim lines of a report to the evidence file', (
       for (const claims of [['gate'], ['TP-1=PASS:0']]) {
         const r = claim([...flags(file, head), ...claims], neverCalls)
         expect(r).toMatchObject({ code: 2, stdout: refusal('head not one sha') })
+        expect(r.stderr, 'the refusal line is the whole answer').toBe('')
         expect(read(file)).toBe(before)
       }
     })
@@ -3049,6 +3080,7 @@ describe('claim — appends the claim lines of a report to the evidence file', (
       const folderExisted = fs.existsSync(path.dirname(file))
       const r = claim([...flags(file), 'gate'], neverCalls)
       expect(r).toMatchObject({ code: 2, stdout: refusal('evidence file unusable') })
+      expect(r.stderr, 'the refusal line is the whole answer').toBe('')
       expect(fs.existsSync(file)).toBe(false)
       expect(fs.existsSync(path.dirname(file))).toBe(folderExisted)
     })
@@ -3056,7 +3088,9 @@ describe('claim — appends the claim lines of a report to the evidence file', (
     it('a directory in the file\'s place is unusable', () => {
       const dir = path.join(scratch('claim'), 'e.md')
       fs.mkdirSync(dir)
-      expect(claim([...flags(dir), 'gate'])).toMatchObject({ code: 2, stdout: refusal('evidence file unusable') })
+      const r = claim([...flags(dir), 'gate'])
+      expect(r).toMatchObject({ code: 2, stdout: refusal('evidence file unusable') })
+      expect(r.stderr).toBe(`verify-evidence: claim: ${EVIDENCE_UNREADABLE}\n`)
       expect(fs.readdirSync(dir)).toEqual([])
     })
 
@@ -3070,20 +3104,34 @@ describe('claim — appends the claim lines of a report to the evidence file', (
     })
 
     it.each([
-      ['a heading the evidence file does not know', `${before}\n## Notes\nx\n`],
-      ['a repeated heading', `${before}\n## Claims\n`],
-      ['a malformed exception', `## Test Plan\n${PLAN[0]}\n\n## Evidence Exceptions\n- not an exception\n\n## Claims\n`],
-      ['a Test Plan that is not a plan', '## Test Plan\nnot a plan\n\n## Claims\n'],
-    ])('a file with %s is unusable', (_label, text) => {
+      ['a heading the evidence file does not know', `${before}\n## Notes\nx\n`, 'line 11 is a heading the evidence file does not allow'],
+      ['a repeated heading', `${before}\n## Claims\n`, 'line 11 repeats a section heading'],
+      // The read refuses a text over the parser's size cap before the parser runs.
+      ['more text than the size cap', 'x'.repeat(PE.LIMITS.INPUT_CHARS + 1), EVIDENCE_UNREADABLE],
+      ['a malformed exception', `## Test Plan\n${PLAN[0]}\n\n## Evidence Exceptions\n- not an exception\n\n## Claims\n`,
+        'a section of the evidence file does not parse'],
+      ['a Test Plan that is not a plan', '## Test Plan\nnot a plan\n\n## Claims\n', 'line 2 is not a TP line'],
+      ['a Test Plan with a stray line below a preamble', `# Evidence\n\n## Test Plan\n${PLAN[0]}\nfree text\n\n## Claims\n`, 'line 5 is not a TP line'],
+      ['a Test Plan out of order', `# Evidence\n\n## Test Plan\n${PLAN[1]}\n${PLAN[0]}\n\n## Claims\n`,
+        'TP-1 at line 5 breaks the order rule: TP numbers ascend and are unique'],
+      ['a Test Plan that repeats a TP', `# Evidence\n\n## Test Plan\n${PLAN[0]}\n${PLAN[0]}\n\n## Claims\n`,
+        'TP-1 at line 5 repeats the TP number before it'],
+    ])('a file with %s is unusable, and stderr names the cause', (_label, text, cause) => {
       const file = fileWith(text)
-      expect(claim([...flags(file), 'gate'])).toMatchObject({ code: 2, stdout: refusal('evidence file unusable') })
+      for (const claims of [['gate'], ['TP-1=PASS:0']]) {
+        const r = claim([...flags(file), ...claims])
+        expect(r).toMatchObject({ code: 2, stdout: refusal('evidence file unusable') })
+        expect(r.stderr).toBe(`verify-evidence: claim: ${cause}\n`)
+      }
       expect(read(file)).toBe(text)
     })
 
     it('a file that is not UTF-8 is unusable', () => {
       const file = path.join(scratch('claim'), 'e.md')
       fs.writeFileSync(file, Buffer.from([0x23, 0xff, 0xfe, 0x0a]))
-      expect(claim([...flags(file), 'gate'])).toMatchObject({ code: 2, stdout: refusal('evidence file unusable') })
+      const r = claim([...flags(file), 'gate'])
+      expect(r).toMatchObject({ code: 2, stdout: refusal('evidence file unusable') })
+      expect(r.stderr).toBe(`verify-evidence: claim: ${EVIDENCE_UNREADABLE}\n`)
       expect([...fs.readFileSync(file)]).toEqual([0x23, 0xff, 0xfe, 0x0a])
     })
 
@@ -3138,6 +3186,7 @@ describe('claim — appends the claim lines of a report to the evidence file', (
       const file = path.join(repo, 'evidence.md')
       const r = claim([...flags(file), 'gate'], realTrackedCheck)
       expect(r).toMatchObject({ code: 2, stdout: refusal('evidence file tracked') })
+      expect(r.stderr, 'the refusal line is the whole answer').toBe('')
       expect(read(file)).toBe(seed)
     })
 
@@ -3160,6 +3209,20 @@ describe('claim — appends the claim lines of a report to the evidence file', (
       const file = path.join(repo, 'evidence.md')
       const r = claim([...flags(file), '--plan', path.join(repo, 'plan.md'), 'TP-1=PASS'], realTrackedCheck)
       expect(r).toMatchObject({ code: 2, stdout: refusal('plan file unusable') })
+      expect(r.stderr).toBe('verify-evidence: claim: git tracks the plan file, or cannot say it does not\n')
+      expect(read(file)).toBe(seed)
+    })
+
+    it('a --plan file git cannot answer for is refused with the same cause', () => {
+      const file = fileWith(seed)
+      const plan = writeScratch(scratch('claim-plan'), 'plan.md', `## Test Plan\n${PLAN[0]}\n`)
+      /** The tracked-file check answers "not tracked" for the evidence file and fails for the plan. */
+      const unsureOfPlan: ExecFn = (exe, args) => (args.some(a => a.endsWith('plan.md'))
+        ? { status: 1, stdout: Buffer.alloc(0), stderr: Buffer.from('boom') }
+        : noCalls(exe, args))
+      const r = claim([...flags(file), '--plan', plan, 'TP-1=PASS'], unsureOfPlan)
+      expect(r).toMatchObject({ code: 2, stdout: refusal('plan file unusable') })
+      expect(r.stderr).toBe('verify-evidence: claim: git tracks the plan file, or cannot say it does not\n')
       expect(read(file)).toBe(seed)
     })
   })

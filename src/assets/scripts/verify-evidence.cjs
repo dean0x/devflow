@@ -963,8 +963,8 @@ function trackedState(io, file) {
  * the write failure (exit 3): no file is written. An `--evidence` file that is not
  * clearly untracked is dropped, so the run goes on exactly as if `--evidence` was not
  * given; the stderr summary then carries the closed note `evidence-ignored`. Stdout
- * keeps its grammar. A `claim` run has its own refusal line for each of these cases
- * (claimRefusalReason).
+ * keeps its grammar. A `claim` run has its own refusal line for each of these cases, and
+ * a stderr cause for a plan file refusal (claimRefusalReason).
  *
  * @param {Io} io
  * @param {ParsedArgs} args
@@ -972,8 +972,8 @@ function trackedState(io, file) {
  */
 function admitPaths(io, args) {
   if (args.kind === 'claim') {
-    const reason = claimRefusalReason(io, args);
-    return reason === null ? { args } : { outcome: claimRefusal(reason) };
+    const refused = claimRefusalReason(io, args);
+    return refused === null ? { args } : { outcome: claimRefusal(io, refused.reason, refused.cause) };
   }
   if (args.kind !== 'verify' && args.kind !== 'publish' && args.kind !== 'readiness') return { args };
   const outs = args.kind === 'verify' ? [args.blockOut, args.commentOut, args.staleOut]
@@ -3227,11 +3227,73 @@ function claimCause(io, text) {
 }
 
 /**
+ * Every `claim` refusal: the stdout line, and the cause on stderr through claimCause when
+ * there is one. Stdout keeps its closed reason; only stderr carries the cause.
+ *
+ * @param {Io} io
  * @param {string} reason  one of the CLAIM_REFUSAL_RE reasons
+ * @param {string | null} cause  a fixed phrase with digits and parser codes only, or null
  * @returns {Outcome}
  */
-function claimRefusal(reason) {
+function claimRefusal(io, reason, cause) {
+  if (cause !== null) claimCause(io, cause);
   return { code: EXIT_CODES.INPUT_UNUSABLE, stdout: 'CLAIM refused (' + reason + ')\n' };
+}
+
+/** The `## Test Plan` heading as the parsers of pr-evidence.cjs read it. */
+const PLAN_HEADING = '## Test Plan';
+
+/** The causes of a plan file or an evidence file that cannot be read at all. */
+const PLAN_UNREADABLE_CAUSE = 'the plan file cannot be read: absent, not a regular file, over the byte cap or not UTF-8';
+const EVIDENCE_UNREADABLE_CAUSE = 'the evidence file cannot be read: not a regular file, over the byte cap or not UTF-8';
+
+/**
+ * The cause of a plan that parsePlan refuses, from its error alone: the code, and the line as a
+ * line of the whole file. A plan read from the `## Test Plan` section counts its lines from that
+ * heading, so the heading's row index is added; a file with no such section is the plan itself,
+ * and the offset is 0. The TP number is read from that row by the TP grammar. Only digits and
+ * fixed phrases go in, never a byte of the file.
+ *
+ * @param {string} text  the whole file
+ * @param {{ code: string, line: number }} error  a parsePlan error
+ * @returns {string}
+ */
+function planCause(text, error) {
+  if (error.code === 'oversize') return 'the plan is over the size cap';
+  const rows = text.split('\n').map(row => row.replace(/\r$/, ''));
+  const sections = PE.evidenceSections(text);
+  const offset = sections.ok && sections.value.testPlan !== null ? rows.indexOf(PLAN_HEADING) : 0;
+  const k = Number(offset) + Number(error.line);
+  if (error.code === 'malformed') return 'line ' + k + ' is not a TP line';
+  const m = PE.TP_LINE_RE.exec(k >= 1 && k <= rows.length ? rows[k - 1] : '');
+  const n = m === null || m.groups === undefined ? null : Number(m.groups.n);
+  if (n !== null && error.code === 'order') return 'TP-' + n + ' at line ' + k + ' breaks the order rule: TP numbers ascend and are unique';
+  if (n !== null && error.code === 'duplicate') return 'TP-' + n + ' at line ' + k + ' repeats the TP number before it';
+  return 'the plan does not parse';
+}
+
+/**
+ * The cause of an evidence file that parseEvidenceText refuses: the section split first, then
+ * the `## Test Plan`, else a fixed phrase for the Claims or Exceptions section. Each line number
+ * is a line of the file.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function evidenceCause(text) {
+  const sections = PE.evidenceSections(text);
+  if (!sections.ok) {
+    const k = Number(sections.error.line);
+    if (sections.error.code === 'malformed') return 'line ' + k + ' is a heading the evidence file does not allow';
+    if (sections.error.code === 'duplicate') return 'line ' + k + ' repeats a section heading';
+    if (sections.error.code === 'oversize') return 'the evidence file is over the size cap';
+    return 'a section of the evidence file does not parse';
+  }
+  if (sections.value.testPlan !== null) {
+    const plan = PE.parsePlan(sections.value.testPlan);
+    if (!plan.ok && plan.error.code !== 'empty') return planCause(text, plan.error);
+  }
+  return 'a section of the evidence file does not parse';
 }
 
 /** The most folders one path can hold: the bound of the walk up to the nearest folder that exists. */
@@ -3311,18 +3373,27 @@ function removeMadeFolders(io) {
  * this, but the folder of the evidence file, when it is missing: the HEAD is one 40-hex
  * SHA, each path is a path the commands build, the evidence file sits in a folder that
  * exists or that the run makes inside the working directory (D-CLAIM-FOLDER), and git says
- * clearly that neither file is tracked (D-TRACKED-RESULT).
+ * clearly that neither file is tracked (D-TRACKED-RESULT). The checks run in this order.
+ * `reason` is the stdout reason. `cause` is the stderr cause of a plan file refusal (its path
+ * shape, or git tracks it); it is null for the head, a tracked evidence file and an evidence
+ * path or folder that is unusable, since the stdout reason already names each of them.
  *
  * @param {Io} io
  * @param {Extract<ParsedArgs, { kind: 'claim' }>} args
- * @returns {string | null}
+ * @returns {{ reason: string, cause: string | null } | null}
  */
 function claimRefusalReason(io, args) {
-  if (!SHA40_RE.test(args.head)) return 'head not one sha';
-  if (!EVIDENCE_PATH_RE.test(args.evidence) || !ensureClaimFolder(io, path.dirname(path.resolve(args.evidence)))) return 'evidence file unusable';
-  if (args.plan !== null && !EVIDENCE_PATH_RE.test(args.plan)) return 'plan file unusable';
-  if (trackedState(io, args.evidence) !== 'untracked') return 'evidence file tracked';
-  if (args.plan !== null && trackedState(io, args.plan) !== 'untracked') return 'plan file unusable';
+  if (!SHA40_RE.test(args.head)) return { reason: 'head not one sha', cause: null };
+  if (!EVIDENCE_PATH_RE.test(args.evidence) || !ensureClaimFolder(io, path.dirname(path.resolve(args.evidence)))) {
+    return { reason: 'evidence file unusable', cause: null };
+  }
+  if (args.plan !== null && !EVIDENCE_PATH_RE.test(args.plan)) {
+    return { reason: 'plan file unusable', cause: 'the plan path holds a character outside letters, digits, dot, dash, underscore and the path separator' };
+  }
+  if (trackedState(io, args.evidence) !== 'untracked') return { reason: 'evidence file tracked', cause: null };
+  if (args.plan !== null && trackedState(io, args.plan) !== 'untracked') {
+    return { reason: 'plan file unusable', cause: 'git tracks the plan file, or cannot say it does not' };
+  }
   return null;
 }
 
@@ -3415,22 +3486,24 @@ function claimInserted(text, inserted, lines) {
 
 /**
  * The TPs the plan lists, each with its method: the `## Test Plan` of the `--plan` file,
- * else of the evidence file. A plan with no TP line, or no plan section, lists none. Null
- * when the `--plan` file cannot serve as a plan.
+ * else of the evidence file. A plan with no TP line, or no plan section, lists none. A
+ * `--plan` file that cannot serve as a plan gives its cause instead: it cannot be read, or
+ * the planCause of its grammar error.
  *
  * @param {Extract<ParsedArgs, { kind: 'claim' }>} args
  * @param {EvidenceInput} evidence
- * @returns {Map<number, string> | null}  TP number to method
+ * @returns {{ ok: true, value: Map<number, string> } | { ok: false, cause: string }}  TP number to method
  */
 function claimPlanIds(args, evidence) {
   let plan = evidence.plan;
   if (args.plan !== null) {
     const text = readTextFile(args.plan);
-    const parsed = text === null ? null : PE.parsePlan(sectionOrWhole(text, 'testPlan'));
-    if (parsed === null || (!parsed.ok && parsed.error.code !== 'empty')) return null;
+    if (text === null) return { ok: false, cause: PLAN_UNREADABLE_CAUSE };
+    const parsed = PE.parsePlan(sectionOrWhole(text, 'testPlan'));
+    if (!parsed.ok && parsed.error.code !== 'empty') return { ok: false, cause: planCause(text, parsed.error) };
     plan = parsed.ok ? parsed.value : { tps: [] };
   }
-  return new Map((plan === null ? [] : plan.tps).map(tp => [tp.id, tp.method]));
+  return { ok: true, value: new Map((plan === null ? [] : plan.tps).map(tp => [tp.id, tp.method])) };
 }
 
 /**
@@ -3486,17 +3559,19 @@ function runClaim(io, args) {
   try {
     st = fs.lstatSync(file, { throwIfNoEntry: false });
   } catch (_) {
-    return claimRefusal('evidence file unusable');
+    return claimRefusal(io, 'evidence file unusable', EVIDENCE_UNREADABLE_CAUSE);
   }
-  if (st !== undefined && !st.isFile()) return claimRefusal('evidence file unusable');
+  if (st !== undefined && !st.isFile()) return claimRefusal(io, 'evidence file unusable', EVIDENCE_UNREADABLE_CAUSE);
   const text = st === undefined ? '' : readTextFile(file);
-  const evidence = text === null ? null : parseEvidenceText(text);
-  if (text === null || evidence === null) return claimRefusal('evidence file unusable');
+  if (text === null) return claimRefusal(io, 'evidence file unusable', EVIDENCE_UNREADABLE_CAUSE);
+  const evidence = parseEvidenceText(text);
+  if (evidence === null) return claimRefusal(io, 'evidence file unusable', evidenceCause(text));
   const headings = text.split('\n').map(row => row.replace(/\r$/, '')).filter(row => row === '##' || row.startsWith('## '));
   const hasSection = headings.includes(PE.CLAIMS_HEADING);
   const sectionFollowed = hasSection && headings[headings.length - 1] !== PE.CLAIMS_HEADING;
-  const listed = args.gate ? new Map() : claimPlanIds(args, evidence);
-  if (listed === null) return claimRefusal('plan file unusable');
+  const plan = args.gate ? { ok: true, value: new Map() } : claimPlanIds(args, evidence);
+  if (!plan.ok) return claimRefusal(io, 'plan file unusable', plan.cause);
+  const listed = plan.value;
 
   /** @type {string[]} */
   const lines = [];
@@ -3516,7 +3591,7 @@ function runClaim(io, args) {
     let written;
     if (sectionFollowed) {
       const inserted = claimInsertText(text, lines);
-      if (!claimInserted(text, inserted, lines)) return claimRefusal('evidence file unusable');
+      if (!claimInserted(text, inserted, lines)) return claimRefusal(io, 'evidence file unusable', null);
       written = replaceTextFile(file, inserted, st === undefined ? 0o600 : st.mode & 0o777);
     } else {
       written = appendTextFile(file, claimAppendText(text, hasSection, lines));
