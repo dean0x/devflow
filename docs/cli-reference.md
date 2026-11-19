@@ -509,7 +509,7 @@ All 33 flags by kind and Devflow default:
 
 ⁵ `subagent-cache-5m` writes `"5m"`, so subagents write 5-minute prompt-cache entries while the main session keeps the 1-hour TTL of `prompt-caching-1h`. Disabling or uninstalling deletes the key only when it holds `"5m"`. When the key already holds another value (say `"1h"`), `devflow init` and the flags TUI record the flag off and keep your value; `init --reset` writes `"5m"`.
 
-⁶ `code-mode` is experimental and off by default. This change applies to new sessions only. Code Mode does not work with `claude -p`.
+⁶ `code-mode` is experimental and off by default. This change applies to new sessions only. Code Mode does not work with `claude -p`. Deny rules, ask rules, and `PreToolUse` hooks still apply to each tool call.
 
 - **Blockers.** Code Mode does not start with the Devflow proxy or `disable-nonessential-traffic` on. A custom `ANTHROPIC_BASE_URL`, `apiKeyHelper`, `ANTHROPIC_AUTH_TOKEN`, or OpenTelemetry export also blocks Code Mode. Code Mode with `agent-teams` needs Claude Code v2.1.326 or later.
 - **User settings only.** Claude Code reads the enable value only from `env` in user settings. A `0` in the shell or in any settings file takes priority. A project setting cannot turn Code Mode on. Devflow checks only local state and the user settings `env`, not shell exports or project settings.
