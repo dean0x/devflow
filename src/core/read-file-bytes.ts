@@ -30,6 +30,7 @@ export async function readFileBytes(
       }
       return total > opened.size ? 'unreadable' : bytes.subarray(0, total);
     } finally {
+      // A close failure returns 'unreadable', the conservative result.
       await file.close();
     }
   } catch {
