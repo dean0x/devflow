@@ -142,7 +142,7 @@ describe('ensure-pr-ready — ### Handoff Values consumer', () => {
     expect(
       PR_READY,
       'the PR body is a GitHub-visible sink; a returned value is still attacker-influenceable at the paste site',
-    ).toContain('^Closes #[1-9][0-9]{0,8}$')
+    ).toContain('^(Closes|Refs) #[1-9][0-9]{0,8}$')
     expect(
       PR_READY,
       'a malformed ref must emit a DEGRADED reason, never be silently repaired or dropped',
@@ -205,6 +205,12 @@ function collectPasteArms(source: string): Map<string, string> {
 /** Every payload, with the providers whose arm must ACCEPT it. Absent ⇒ every arm rejects. */
 const PASTE_PAYLOADS: ReadonlyArray<{ label: string; value: string; accepts: readonly string[] }> = [
   { label: 'a github link line', value: 'Closes #12', accepts: ['github'] },
+  // #793: `Refs #N` links a PR that is one part of an issue and does not close it.
+  // It is the one non-closing form, and the release trace already counts it as traced.
+  { label: 'a github partial-PR link line', value: 'Refs #12', accepts: ['github'] },
+  { label: 'a non-closing form other than Refs', value: 'Part of #12', accepts: [] },
+  { label: 'a closing verb other than Closes', value: 'Fixes #12', accepts: [] },
+  { label: 'a partial line with a zero number', value: 'Refs #0', accepts: [] },
   // The jira and linear rows OVERLAP on a plain uppercase key, and the table
   // records that rather than pretending otherwise. Under the union gate the
   // overlap is harmless — either row admitting a line is enough to paste it —
@@ -1047,6 +1053,78 @@ describe('/implement writes no link line of its own in any build (D-LINK-VERBATI
     expect(inSpawn, 'the moved seed must land').not.toBe(lost)
     expect(collectNoOwnLinkLineDefects(inSpawn)).toEqual(['the sentence is not in the lead-in before the spawn'])
     expect(collectNoOwnLinkLineDefects(real.replace(PHASE9, '### Phase 9 later'))).toEqual(['no Phase 9 block'])
+  })
+})
+
+// -------------------------------------------------------------------------
+// The partial-PR rule (#793). One issue can need several PRs, and only the last
+// one may close it. /implement captures the `Closes #{n}` line by default; only
+// a task input that says the PR is one part of the issue swaps the verb to
+// `Refs`, with the same number. The swap sits in the Phase 1 capture, so Phase 9
+// still forwards the captured line verbatim. The Git agent's paste gate must then
+// admit the line, or the PR loses its issue link — the observed defect.
+// -------------------------------------------------------------------------
+
+/** The capture bullet of ISSUE_PR_LINK, with its partial-PR rule: condition, then swap. */
+const PARTIAL_PR_CAPTURE =
+  '- `ISSUE_PR_LINK`: the `- **PR link line**:` line under `### Handoff Values`; if `COMMAND_INPUT` or its plan ' +
+  'says this PR is one part of the issue, not its last, an exact `Closes #{n}` becomes `Refs #{n}`\n'
+
+/** Named collector: how a built /implement fails to capture the link with the partial-PR rule. */
+function collectPartialPrRuleDefects(source: string): string[] {
+  const out: string[] = []
+  const count = source.split(PARTIAL_PR_CAPTURE).length - 1
+  if (count !== 1) out.push(`the rule-bearing ISSUE_PR_LINK capture appears ${count} times, expected once`)
+  const phase9 = source.indexOf(PHASE9)
+  if (phase9 !== -1 && source.indexOf(PARTIAL_PR_CAPTURE) > phase9) out.push('the rule is not in the Phase 1 capture')
+  return out
+}
+
+describe('/implement partial-PR rule — Closes by default, Refs for one part of an issue (#793)', () => {
+  const builds: ReadonlyArray<readonly [string, () => string | null]> = [
+    ['on', () => requireDistFile('implement.md')],
+    ['curation-off', () => resolveVariantOffSource('curation-off', 'commands', 'implement')],
+    ['compliance-off', () => resolveVariantOffSource('compliance-off', 'commands', 'implement')],
+    ['both-off', () => resolveVariantOffSource('both-off', 'commands', 'implement')],
+  ]
+
+  it.each(builds)('the %s build captures the link with the rule, once, in Phase 1', (_name, read) => {
+    const source = read()
+    expect(source, 'the build is read: the guard would pass vacuously on an empty one').not.toBeNull()
+    expect(collectPartialPrRuleDefects(source as string)).toEqual([])
+  })
+
+  it('both paths reach the PR: the paste gate admits the default line and the partial line', () => {
+    const github = collectPasteArms(PR_READY).get('github')
+    expect(github, 'no github paste arm').toBeDefined()
+    const arm = new RegExp(github!)
+    expect(arm.test('Closes #102'), 'default path: the last PR closes the issue').toBe(true)
+    expect(arm.test('Refs #102'), 'partial path: an earlier PR links the issue and leaves it open').toBe(true)
+    expect(arm.test('Part of #102'), 'only one non-closing form is admitted').toBe(false)
+    expect(PR_READY, 'the gate says which PR takes which form')
+      .toContain('A caller passes `Refs #{n}` for a PR that is one part of the issue; the last PR keeps `Closes #{n}`.')
+  })
+
+  it('known-bad probes: an unconditional swap, a lost rule and a rule moved past Phase 9 are each reported', () => {
+    const real = requireDistFile('implement.md')
+    const unconditional = real.replace(
+      'if `COMMAND_INPUT` or its plan says this PR is one part of the issue, not its last, an exact', 'an exact')
+    expect(unconditional, 'the condition seed must land').not.toBe(real)
+    expect(collectPartialPrRuleDefects(unconditional))
+      .toEqual(['the rule-bearing ISSUE_PR_LINK capture appears 0 times, expected once'])
+    const lost = real.replace(PARTIAL_PR_CAPTURE, '- `ISSUE_PR_LINK`: the `- **PR link line**:` line under `### Handoff Values`\n')
+    expect(lost, 'the lost seed must land').not.toBe(real)
+    expect(collectPartialPrRuleDefects(lost))
+      .toEqual(['the rule-bearing ISSUE_PR_LINK capture appears 0 times, expected once'])
+    const moved = lost.replace(PHASE9, `${PHASE9}\n\n${PARTIAL_PR_CAPTURE}`)
+    expect(collectPartialPrRuleDefects(moved)).toEqual(['the rule is not in the Phase 1 capture'])
+  })
+
+  it('the default path is unchanged: Phase 9 forwards the captured line verbatim', () => {
+    const real = requireDistFile('implement.md')
+    const spawn = collectEnsurePrReadySpawns('implement.md', real)
+    expect(spawn, 'one Phase 9 spawn').toHaveLength(1)
+    expect(spawn[0].block).toContain('ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}')
   })
 })
 

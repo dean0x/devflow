@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Routing runtime pinned to `subswitch@0.8.0`** — before: `0.6.0`. The Devflow proxy adds `gpt-6.2-sol`, `gpt-6.2-astra`, and `gpt-6.1-terra` to the model catalog. The runtime marks `gpt-6.1-terra` as a preview model. The `sol` and `astra` aliases now select their GPT-6.2 models. An agent set to either alias moves to the new model at its next session. To keep the old model, use `devflow agents --set <agent> --model <id>` with `gpt-6.1-sol` or `gpt-6-astra`. The `terra` alias still selects `gpt-5.6-terra`; select `gpt-6.1-terra` by exact ID. The `proxy-routing.json` format stays the same. The relay now keeps private rate-limit records in `~/.cache/subswitch/limits/<port>/` (four files, at most 8 MiB for each port, owner-only permissions). `devflow uninstall` does not remove this folder. A project `subswitch.config.json` can no longer set sign-in addresses, credential files or `allowInsecureBaseUrl`. The Devflow proxy does not use a project file, so this change has no effect on it.
 
+### Fixed
+
+- **A PR that is one part of a larger GitHub issue now links to the issue and does not close it.** Before, the Git agent accepted only `Closes #N` in a PR body, so the PR got no issue link. Now it also accepts `Refs #N`. When the task or plan of `/implement` says that the PR is one part of the issue, and not its last PR, the PR body gets `Refs #N`. The last PR keeps `Closes #N`. When the merged commit message holds the `Refs #N` line, the release trace counts the commit as traced, not as shipped.
+
 ---
 
 ## [3.19.1] - 2026-11-17
