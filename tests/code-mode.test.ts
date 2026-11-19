@@ -122,6 +122,14 @@ describe('Code Mode refusals and warnings', () => {
     expect(codeMode.PROXY_ENABLE_REFUSAL).toContain('devflow flags --disable code-mode');
   });
 
+  it.each([
+    ['CODE_MODE_USER_VALUE_NOTE', 'your settings override the flag'],
+    ['CODE_MODE_RECORD_FALSE_NOTE', 'the flag record is off'],
+    ['CODE_MODE_READ_FAILURE', 'could not check the Code Mode and proxy state'],
+  ] as const)('includes the reason in %s', (name, reason) => {
+    expect(codeMode[name]).toContain(reason);
+  });
+
   it('does not name the routing runtime in any exported message', () => {
     for (const value of Object.values(codeMode)) {
       if (typeof value === 'string') expect(value).not.toMatch(/subswitch/i);
@@ -184,6 +192,12 @@ describe('readCodeModeSignals', () => {
     await expectRefusal(true);
   });
 
+  it('refuses when the Devflow directory path is a file', async () => {
+    await fs.rmdir(devflowDir);
+    await fs.writeFile(devflowDir, 'x');
+    await expectRefusal(true);
+  });
+
   it.each([
     ['http://127.0.0.1:4141', true],
     ['http://127.0.0.1:4123', true],
@@ -213,6 +227,12 @@ describe('readCodeModeSignals', () => {
   it('reports unavailable settings when the path is a directory', async () => {
     await fs.mkdir(settingsPath);
     expect(await read()).toMatchObject({ ok: true, value: { env: undefined } });
+  });
+
+  it('reports unavailable settings when the Claude directory path is a file', async () => {
+    await fs.rmdir(claudeDir);
+    await fs.writeFile(claudeDir, 'x');
+    expect(await read()).toMatchObject({ ok: true, value: { env: undefined, proxyOn: false } });
   });
 
   it.skipIf(process.getuid?.() === 0 || process.platform === 'win32')('reports unavailable settings for permission errors', async () => {
