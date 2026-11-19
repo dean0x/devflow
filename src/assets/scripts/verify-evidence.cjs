@@ -83,7 +83,7 @@
 //             D-CLAIM-CAUSE: stderr gets one `verify-evidence: claim: <cause>` line for what
 //             the stdout line does not name. A usage error (exit 1) names the first cause
 //             found: the flags are absent, repeated or bad; there is no claim; there are
-//             more than 200 TP arguments; gate takes no plan and no other claim; argument k
+//             n TP arguments, over the limit of 200; gate takes no plan and no other claim; argument k
 //             is a flag after the claims, holds more than one TP claim, or is not one TP
 //             claim; or TP-n is given more than once in this call. k counts from 1 at the
 //             first claim argument. A `plan file unusable` refusal names the path shape, a
@@ -289,7 +289,7 @@ const CLAIM_CAUSE_TEMPLATES = Object.freeze([
   // parseClaimArgs: the usage errors
   'the flags are absent, repeated or bad',
   'there is no claim',
-  'there are more than <n> TP arguments',
+  'there are <n> TP arguments; the limit is <n>',
   'gate takes no plan and no other claim',
   'argument <n> is a flag after the claims',
   'argument <n> holds more than one TP claim; pass each TP claim as its own argument',
@@ -605,7 +605,9 @@ function parseClaimArgs(tail) {
   const items = tail.slice(flagCount);
   if (evidence === null || head === null) return claimUsage('the flags are absent, repeated or bad');
   if (items.length === 0) return claimUsage('there is no claim');
-  if (items.length > CAPS.TPS) return claimUsage('there are more than ' + Number(CAPS.TPS) + ' TP arguments');
+  if (items.length > CAPS.TPS) {
+    return claimUsage('there are ' + Number(items.length) + ' TP arguments; the limit is ' + Number(CAPS.TPS));
+  }
   if (items.includes('gate')) {
     return items.length === 1 && plan === null
       ? { kind: 'claim', evidence, head, plan, gate: true, tps: [] }

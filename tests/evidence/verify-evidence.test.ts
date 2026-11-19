@@ -310,7 +310,9 @@ describe('usage (exit 1, stdout empty)', () => {
     ['claim with a TP twice, apart', ['claim', '--evidence', 'e.md', '--head', SHA, 'TP-12=PASS', 'TP-3=PASS', 'TP-12=FAIL:1'], 'TP-12 is given more than once in this call'],
     ['claim with --flag=value', ['claim', '--evidence=e.md', '--head', SHA, 'gate'], FLAGS],
     ['claim with more TPs than a plan holds', ['claim', '--evidence', 'e.md', '--head', SHA, ...Array.from({ length: 201 }, (_, i) => `TP-${i + 1}=PASS`)],
-      'there are more than 200 TP arguments'],
+      'there are 201 TP arguments; the limit is 200'],
+    ['claim with far more TPs than a plan holds', ['claim', '--evidence', 'e.md', '--head', SHA, ...Array.from({ length: 250 }, (_, i) => `TP-${i + 1}=PASS`)],
+      'there are 250 TP arguments; the limit is 200'],
   ]
 
   for (const [label, args, cause] of USAGE_CASES) {
