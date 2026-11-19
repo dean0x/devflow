@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [3.19.2] - 2026-11-19
+
 ### Changed
 
 - **Routing runtime pinned to `subswitch@0.8.0`** — before: `0.6.0`. The Devflow proxy adds `gpt-6.2-sol`, `gpt-6.2-astra`, and `gpt-6.1-terra` to the model catalog. The runtime marks `gpt-6.1-terra` as a preview model. The `sol` and `astra` aliases now select their GPT-6.2 models. An agent set to either alias moves to the new model at its next session. To keep the old model, use `devflow agents --set <agent> --model <id>` with `gpt-6.1-sol` or `gpt-6-astra`. The `terra` alias still selects `gpt-5.6-terra`; select `gpt-6.1-terra` by exact ID. The `proxy-routing.json` format stays the same. The relay now keeps private rate-limit records in `~/.cache/subswitch/limits/<port>/` (four files, at most 8 MiB for each port, owner-only permissions). `devflow uninstall` does not remove this folder. A project `subswitch.config.json` can no longer set sign-in addresses, credential files or `allowInsecureBaseUrl`. The Devflow proxy does not use a project file, so this change has no effect on it.
@@ -2562,6 +2566,7 @@ devflow init
 ---
 
 [Unreleased]: https://github.com/dean0x/devflow/compare/v3.8.0...HEAD
+[3.19.2]: https://github.com/dean0x/devflow/compare/v3.19.1...v3.19.2
 [3.19.1]: https://github.com/dean0x/devflow/compare/v3.19.0...v3.19.1
 [3.19.0]: https://github.com/dean0x/devflow/compare/v3.18.0...v3.19.0
 [3.18.0]: https://github.com/dean0x/devflow/compare/v3.17.0...v3.18.0
