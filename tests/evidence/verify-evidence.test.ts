@@ -1393,6 +1393,14 @@ describe('the notes that name why a TP did not verify', () => {
     expect(notesOf(v.stderr)).toContain('local-no-exit')
   })
 
+  it('so does a local PASS with no exit code at an older SHA in the PR, when the change since misses the TP files', () => {
+    const scn: Scn = { ancestry: { [OLD]: 'in' }, diffs: { [OLD]: ['docs/x.md'] } }
+    const v = verifyScn({ scn, evidence: evidenceFile([LOCAL], [claimLine(1, 'PASS', OLD)]) })
+    expect(v.code, v.stderr).toBe(0)
+    expect(v.states.get(1)).toBe('UNVERIFIED')
+    expect(notesOf(v.stderr)).toEqual(['local-no-exit'])
+  })
+
   /** Each row: a label, the evidence file's claims, the scenario, and the state the ladder gives. */
   const QUIET: ReadonlyArray<readonly [string, readonly string[], Scn, State]> = [
     ['no claim', [], {}, 'UNVERIFIED'],
@@ -2578,6 +2586,28 @@ function collectRunCallSites(source: string): string[] {
   return sites
 }
 
+/**
+ * The function each stderr write (`io.stderr(` or `process.stderr.write(`) sits in, with the
+ * count of its writes. '(top level)' is code outside every top-level function.
+ */
+function collectStderrWriters(source: string): Record<string, number> {
+  const sites = new Map<string, number>()
+  let current = '(top level)'
+  for (const line of codeLines(source)) {
+    const fn = /^function (\w+)\(/.exec(line)
+    if (fn) current = fn[1]
+    else if (line.startsWith('}')) current = '(top level)'
+    const writes = line.match(/\bstderr(?:\.write)?\s*\(/g)
+    if (writes !== null) sites.set(current, (sites.get(current) ?? 0) + writes.length)
+  }
+  return Object.fromEntries(sites)
+}
+
+/** The closed list of stderr writers: each function that writes to stderr, with the count of its writes. */
+const STDERR_WRITERS: Readonly<Record<string, number>> = Object.freeze({
+  runCheck: 2, evidenceUnavailable: 1, publishRefusal: 1, claimCause: 1, refuse: 1, main: 3, '(top level)': 1,
+})
+
 /** A git( argv that names a revision-taking command without routing through rev(). */
 function collectUnrevvedGitCalls(source: string): string[] {
   const code = codeLines(source).join('\n')
@@ -3525,14 +3555,37 @@ describe('source guards (verify-evidence.cjs)', () => {
   })
 
   it('one helper writes every claim cause line, and it checks the cause at the sink', () => {
-    const prefix = "'verify-evidence: claim: '"
+    const prefix = 'verify-evidence: claim: '
+    /** The code lines that spell the prefix in any quote style: a writer, or a constant a writer reads. */
     const writers = (src: string): string[] => codeLines(src).filter(l => l.includes(prefix))
     const helper = functionBodyOf(SOURCE, 'claimCause')
     expect(helper.length, 'claimCause must be in the corpus').toBeGreaterThan(40)
-    expect(helper).toContain(prefix)
+    expect(helper).toContain(`'${prefix}'`)
     expect(helper).toContain('CLAIM_CAUSE_RE.test(')
     expect(writers(SOURCE)).toHaveLength(1)
-    expect(writers(`${SOURCE}\n  io.stderr(${prefix} + item + '\\n');\n`)).toHaveLength(2)
+    /** Each shape of a second claim cause writer: the three quote styles, and a writer that reads the prefix from a constant. */
+    const probes: ReadonlyArray<readonly [string, string]> = [
+      ['a single-quoted writer', "function leakCause(io, item) {\n  io.stderr('verify-evidence: claim: ' + item + '\\n');\n}"],
+      ['a double-quoted writer', 'function leakCause(io, item) {\n  io.stderr("verify-evidence: claim: " + item + "\\n");\n}'],
+      ['a template-literal writer', 'function leakCause(io, item) {\n  io.stderr(`verify-evidence: claim: ${item}\\n`);\n}'],
+      ['a writer through a constant', "const CAUSE_PREFIX = 'verify-evidence: claim: ';\nfunction leakCause(io, item) {\n  io.stderr(CAUSE_PREFIX + item + '\\n');\n}"],
+    ]
+    for (const [label, probe] of probes) {
+      const seeded = `${SOURCE}\n${probe}\n`
+      expect(writers(seeded), label).toHaveLength(2)
+      expect(collectStderrWriters(seeded), label).toEqual({ ...STDERR_WRITERS, leakCause: 1 })
+    }
+  })
+
+  it('every stderr write sits in a closed list of functions, each with its count', () => {
+    expect(collectStderrWriters(SOURCE)).toEqual(STDERR_WRITERS)
+    const signature = 'function claimRefusal(io, reason, cause) {'
+    const probe = SOURCE.replace(signature, `${signature}\n  io.stderr(reason + '\\n');`)
+    expect(probe, 'the seed must land').not.toBe(SOURCE)
+    expect(collectStderrWriters(probe)).toEqual({ ...STDERR_WRITERS, claimRefusal: 1 })
+    const twice = SOURCE.replace("io.stderr('verify-evidence: claim: ' + cause + '\\n');", "$&\n  process.stderr.write(cause);")
+    expect(twice, 'the seed must land').not.toBe(SOURCE)
+    expect(collectStderrWriters(twice)).toEqual({ ...STDERR_WRITERS, claimCause: 2 })
   })
 
   it('documents every exit code in the header', () => {
