@@ -5,7 +5,7 @@ All notable changes to Devflow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [3.19.3] - 2026-11-20
 
 ### Fixed
 
@@ -2572,6 +2572,7 @@ devflow init
 ---
 
 [Unreleased]: https://github.com/dean0x/devflow/compare/v3.8.0...HEAD
+[3.19.3]: https://github.com/dean0x/devflow/compare/v3.19.2...v3.19.3
 [3.19.2]: https://github.com/dean0x/devflow/compare/v3.19.1...v3.19.2
 [3.19.1]: https://github.com/dean0x/devflow/compare/v3.19.0...v3.19.1
 [3.19.0]: https://github.com/dean0x/devflow/compare/v3.18.0...v3.19.0
