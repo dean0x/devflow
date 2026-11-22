@@ -284,8 +284,8 @@ describe('Guard 3b (MDS pin): compiler pinned to an exact version in devDependen
 // ---------------------------------------------------------------------------
 
 const TOKENMETER_PACKAGE = '@dean0x/tokenmeter';
-const TOKENMETER_VERSION = '0.1.0';
-const TOKENMETER_INTEGRITY = 'sha512-rarVXVQhkJoBvGYowCu/7ZOwnkmWa9Zw3jJGZQZOTxWqZfXxQeyRfqYXB78tY/QWrvpFPfeAN/u+vEqabo/8mg==';
+const TOKENMETER_VERSION = '0.2.0';
+const TOKENMETER_INTEGRITY = 'sha512-Ll9Smj7VGRwzHr5mdWXCIXR9rZjYcRhRkx+mfm3MjiwmAx0HYROJPj2Sqvz8yW4esbJV9W8MQesUi04DkaoA4Q==';
 
 describe('Guard 3c (tokenmeter pin): tokenmeter matches the approved release', () => {
   it('declares tokenmeter at the exact version in dependencies', async () => {
