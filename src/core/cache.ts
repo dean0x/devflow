@@ -4,8 +4,7 @@
  * Generic TTL cache — sync reads, async writes.
  *
  * Sync-read / async-write asymmetry:
- *   Reads use readFileSync: a ~1KB cache entry takes ~0.01ms and sits on
- *   the TUI startup path where async I/O would complicate the call site.
+ *   Reads take a bounded snapshot of a regular file on the TUI startup path.
  *   Writes use writeFileAtomicExclusive (async): no sync atomic-write variant
  *   exists in this codebase; cache writes always happen in async contexts.
  *
@@ -108,6 +107,24 @@ function safeEntryPath(cacheDir: string, key: string): string | null {
 // Private read helper
 // ---------------------------------------------------------------------------
 
+/** Allow a fully escaped 256 KiB model list plus the JSON envelope. */
+const MAX_ENTRY_BYTES = 2 * 1024 * 1024;
+
+function readRegularEntry(filePath: string): string | null {
+  const { O_RDONLY, O_NOFOLLOW, O_NONBLOCK } = fs.constants;
+  const fd = fs.openSync(filePath, O_RDONLY | O_NOFOLLOW | O_NONBLOCK);
+  try {
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile() || stat.size > MAX_ENTRY_BYTES) return null;
+    // Read at most one byte beyond the reported size, even if the file grows.
+    const buffer = Buffer.alloc(stat.size + 1);
+    const size = fs.readSync(fd, buffer, 0, buffer.length, 0);
+    return size === stat.size ? buffer.toString('utf8', 0, size) : null;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 function readCacheEntry<T>(
   cacheDir: string,
   key: string,
@@ -117,7 +134,8 @@ function readCacheEntry<T>(
   if (filePath === null) return null;
 
   try {
-    const raw = fs.readFileSync(filePath, 'utf-8');
+    const raw = readRegularEntry(filePath);
+    if (raw === null) return null;
     const envelope = parseRawEnvelope(raw);
     if (envelope === null) return null;
     // parseRawEnvelope guarantees timestamp is not in the future, so age >= 0.
@@ -191,8 +209,7 @@ export function parseRawEnvelope(
  *
  * - Creates cacheDir at mode 0700 if absent (owner-only access).
  * - Writes the entry via atomic tmp→rename (no delete-then-write window).
- * - Hardens the entry to 0600 after the write (owner-only read/write for cache data
- *   that will feed agent frontmatter in later phases).
+ * - Sets mode 0600 before the rename, including when replacing an older entry.
  * - TTL is clamped to MAX_TTL_MS before storage.
  * - Non-fatal on any I/O error — cache write failure is never surfaced to the user.
  *
@@ -219,13 +236,8 @@ export async function writeCache<T>(
       timestamp: timestamp ?? Date.now(),
       ttl: Math.min(Math.abs(ttlMs), MAX_TTL_MS),
     };
-    await writeFileAtomicExclusive(filePath, JSON.stringify(envelope));
+    await writeFileAtomicExclusive(filePath, JSON.stringify(envelope), { exactMode: 0o600 });
   } catch {
-    // Cache write failure is non-fatal
-    return;
+    // A cache write failure does not affect the current result.
   }
-  // Harden entry to 0600 after the atomic write. writeFileAtomicExclusive
-  // preserves the existing mode on re-writes; this chmod bootstraps 0600 on
-  // the first write to a fresh entry. Best-effort, non-fatal.
-  try { await fsAsync.chmod(filePath, 0o600); } catch { /* non-fatal */ }
 }

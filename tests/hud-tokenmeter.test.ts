@@ -20,7 +20,7 @@ beforeEach(async () => {
   cache = join(root, 'cache', 'tokenmeter-hud.json');
   await fs.mkdir(dirname(bin), { recursive: true });
   await fs.mkdir(join(dirname(dirname(bin)), 'dist'));
-  await fs.writeFile(join(root, 'tokenmeter.json'), JSON.stringify({ version: 1, binPath: bin }));
+  await fs.writeFile(join(root, 'tokenmeter.json'), JSON.stringify({ version: 1, binPath: bin }), { mode: 0o600 });
   const clock = vi.spyOn(Date, 'now').mockReturnValue(NOW);
   setClock = (now) => { clock.mockReturnValue(now); };
 });
@@ -193,6 +193,20 @@ describe.skipIf(process.getuid === undefined)('tokenmeter HUD client', () => {
     setClock(NOW + 29_999);
     expect(await gather()).toBeNull();
     setClock(NOW + 30_000);
+    expect(await gather()).toEqual(usage);
+  });
+
+  it.each(['oversize', 'linked'])('fetches again for a valid but %s cache entry', async (kind) => {
+    await fs.mkdir(dirname(cache));
+    const absent = JSON.stringify({ timestamp: NOW, ttl: 30_000, data: { usage: null } });
+    if (kind === 'oversize') {
+      await fs.writeFile(cache, absent.padEnd(2 * 1024 * 1024 + 1, ' '));
+    } else {
+      const other = join(root, 'other.json');
+      await fs.writeFile(other, absent);
+      await fs.symlink(other, cache);
+    }
+    await stub(envelope());
     expect(await gather()).toEqual(usage);
   });
 

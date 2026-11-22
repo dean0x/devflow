@@ -509,24 +509,6 @@ describe('codexQuota component', () => {
     expect(result!.raw).toMatch(/^Codex 5h .{8} 40% \(1h 2m\) \u00B7 7d .{8} 12% \(3d 4h\)$/);
   });
 
-  it('labels an unrecognised window length generically', async () => {
-    const ctx = makeCtx({
-      codexUsage: {
-        windows: [
-          { minutes: 180, usedPercent: 10, resetsAt: nowSec() + 600 },
-          { minutes: 43200, usedPercent: 20, resetsAt: nowSec() + 86400 },
-          { minutes: 45, usedPercent: 30, resetsAt: nowSec() + 600 },
-        ],
-        limitReached: null,
-        observedAt: Date.now(),
-      },
-    });
-    const result = await codexQuota(ctx);
-    expect(result!.raw).toContain('3h ');
-    expect(result!.raw).toContain('30d ');
-    expect(result!.raw).toContain('45m ');
-  });
-
   it('renders a window whose reset time has passed as "reset", with no percent, bar or countdown', async () => {
     const ctx = makeCtx({
       codexUsage: {
@@ -627,7 +609,7 @@ describe('codexQuota component', () => {
     const ctx = makeCtx({
       codexUsage: {
         windows: [{ minutes: 10080, usedPercent: 100, resetsAt: nowSec() + 86400 }],
-        limitReached: 'rate_limit_reached',
+        limitReached: 'reached',
         observedAt: Date.now(),
       },
     });
@@ -640,7 +622,7 @@ describe('codexQuota component', () => {
     const ctx = makeCtx({
       codexUsage: {
         windows: [{ minutes: 10080, usedPercent: 100, resetsAt: nowSec() - 60 }],
-        limitReached: 'rate_limit_reached',
+        limitReached: 'reached',
         observedAt: Date.now(),
       },
     });

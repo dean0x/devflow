@@ -2,13 +2,6 @@ import type { ComponentResult, GatherContext } from '../types.js';
 import { dim, red } from '../colors.js';
 import { renderQuotaWindow } from './usage-quota.js';
 
-/** "5h" for 300 minutes, "7d" for 10080; any other length reads as whole days, whole hours, else minutes. */
-function windowLabel(minutes: number): string {
-  if (minutes % 1440 === 0) return `${minutes / 1440}d`;
-  if (minutes % 60 === 0) return `${minutes / 60}h`;
-  return `${minutes}m`;
-}
-
 /** Data at or above this age shows a suffix. */
 export const CODEX_STALE_AFTER_SEC = 600;
 
@@ -38,7 +31,7 @@ export default async function codexQuota(
   const hasReset = (resetsAt: number): boolean => resetsAt * 1000 <= nowMs;
 
   const parts = usage.windows.map((w) => {
-    const label = windowLabel(w.minutes);
+    const label = w.minutes === 300 ? '5h' : '7d';
     return hasReset(w.resetsAt)
       ? { text: dim(`${label} reset`), raw: `${label} reset` }
       : renderQuotaWindow(label, w.usedPercent, w.resetsAt);

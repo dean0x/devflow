@@ -367,13 +367,16 @@ describe('installViaFileCopy: the render is its own step after the script copy',
 // init --hud-only: the plugin set it renders for
 // ---------------------------------------------------------------------------
 
-it('init --hud-only refreshes the saved Codex usage bin path', async () => {
+it('init --hud-only replaces the old quota reader with the saved tool path', async () => {
   const cwd = process.cwd();
   const hudOnly: unknown = initCommand.getOptionValue('hudOnly');
   const devflowDir = path.join(root, '.devflow');
   const state = path.join(devflowDir, 'tokenmeter.json');
   assertTempHome(root);
-  await fs.mkdir(devflowDir);
+  const hudDir = path.join(devflowDir, 'scripts', 'hud');
+  const retiredReader = path.join(hudDir, 'codex-usage.js');
+  await fs.mkdir(hudDir, { recursive: true });
+  await fs.writeFile(retiredReader, '');
   await fs.mkdir(path.join(root, '.claude'));
   await fs.writeFile(state, '{"version":1,"binPath":"stale"}');
   vi.stubEnv('HOME', root);
@@ -382,6 +385,7 @@ it('init --hud-only refreshes the saved Codex usage bin path', async () => {
   try {
     await initCommand.parseAsync(['--hud-only'], { from: 'user' });
 
+    await expect(fs.lstat(retiredReader)).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(fs.readFile(state, 'utf8').then((text): unknown => JSON.parse(text)))
       .resolves.toEqual({ version: 1, binPath: expectedCodexBin() });
   } finally {

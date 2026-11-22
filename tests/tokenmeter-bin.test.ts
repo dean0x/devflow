@@ -164,13 +164,31 @@ describe('readTokenmeterBin', () => {
     expect(readTokenmeterBin(dir)).toBe(binPath);
   });
 
+  const rootOwnedPackage = (path: string) => {
+    const stat = lstatSync(path);
+    return { ...stat, uid: 0, isFile: () => stat.isFile(), isDirectory: () => stat.isDirectory() };
+  };
+
   it('accepts root ownership of the file and directories', async () => {
     await setState();
-    const lstat = (path: string) => {
-      const stat = lstatSync(path);
-      return { ...stat, uid: 0, isFile: () => stat.isFile(), isDirectory: () => stat.isDirectory() };
-    };
-    expect(readTokenmeterBin(dir, { lstat })).toBe(binPath);
+    expect(readTokenmeterBin(dir, { lstat: rootOwnedPackage })).toBe(binPath);
+  });
+
+  it('rejects state owned by a different user even with a root-owned package', async () => {
+    await setState();
+    const uid = (await fs.stat(statePath)).uid;
+    const otherUser = vi.spyOn(process, 'getuid').mockReturnValue(uid === 1 ? 2 : 1);
+    try {
+      expect(readTokenmeterBin(dir, { lstat: rootOwnedPackage })).toBeNull();
+    } finally {
+      otherUser.mockRestore();
+    }
+  });
+
+  it.each([0o644, 0o660])('rejects valid state with mode %i instead of 0600', async (mode) => {
+    await setState();
+    await fs.chmod(statePath, mode);
+    expect(readTokenmeterBin(dir)).toBeNull();
   });
 
   it('returns absence when state is missing', () => {
@@ -180,14 +198,14 @@ describe('readTokenmeterBin', () => {
   it.each(['{', 'null', '{"version":2}', '{"version":1,"binPath":7}', '{"version":1}'])(
     'returns absence for invalid state: %s',
     async (text) => {
-      await fs.writeFile(statePath, text);
+      await fs.writeFile(statePath, text, { mode: 0o600 });
       expect(readTokenmeterBin(dir)).toBeNull();
     },
   );
 
   it('rejects state larger than 4 KiB even if it contains valid JSON', async () => {
     const state = JSON.stringify({ version: 1, binPath });
-    await fs.writeFile(statePath, state.padEnd(4096, ' '));
+    await fs.writeFile(statePath, state.padEnd(4096, ' '), { mode: 0o600 });
     expect(readTokenmeterBin(dir)).toBe(binPath);
     await fs.appendFile(statePath, ' ');
     expect(readTokenmeterBin(dir)).toBeNull();

@@ -9,12 +9,12 @@ interface BinReadDeps {
   readonly lstat?: (path: string) => PathStat;
 }
 
-function readState(file: string): unknown {
+function readState(file: string, uid: number): unknown {
   const { O_RDONLY, O_NOFOLLOW, O_NONBLOCK } = fs.constants;
   const fd = fs.openSync(file, O_RDONLY | O_NOFOLLOW | O_NONBLOCK);
   try {
     const stat = fs.fstatSync(fd);
-    if (!stat.isFile() || stat.size > MAX_STATE_BYTES) return null;
+    if (!stat.isFile() || stat.uid !== uid || (stat.mode & 0o777) !== 0o600 || stat.size > MAX_STATE_BYTES) return null;
     // The extra byte detects growth after fstat.
     const buf = Buffer.alloc(MAX_STATE_BYTES + 1);
     let length = 0;
@@ -48,7 +48,7 @@ export function readTokenmeterBin(devflowDir: string, deps: BinReadDeps = {}): s
   if (uid === undefined || !fs.constants.O_NOFOLLOW) return null;
   const lstat = deps.lstat ?? fs.lstatSync;
   try {
-    const binPath = parseBinPath(readState(join(devflowDir, 'tokenmeter.json')));
+    const binPath = parseBinPath(readState(join(devflowDir, 'tokenmeter.json'), uid));
     if (binPath === null) return null;
     const start = binPath.lastIndexOf(PACKAGE_PATH);
     if (start < 0 || fs.realpathSync(binPath) !== binPath) return null;
