@@ -153,13 +153,18 @@ function cacheTtl(usage: CodexUsage | null, now: number): number {
   return Math.min(NEAR_STALE_CACHE_MS, STALE_AFTER_MS - age);
 }
 
-export async function gatherTokenmeterUsage(devflowDir: string, now = Date.now()): Promise<CodexUsage | null> {
+export async function gatherTokenmeterUsage(
+  devflowDir: string,
+  now = Date.now(),
+  options: { readonly waitForCache?: boolean } = {},
+): Promise<CodexUsage | null> {
   const cacheDir = hudCacheDir(devflowDir);
   const cached = readCache(cacheDir, CACHE_KEY, (value) => parseCached(value, now));
   if (cached !== null) return cached.usage;
 
   const bin = readTokenmeterBin(devflowDir);
   const usage = bin === null ? null : await fetchUsage(bin, now);
-  await writeCache(cacheDir, CACHE_KEY, { usage }, cacheTtl(usage, now), now);
+  const cacheWrite = writeCache(cacheDir, CACHE_KEY, { usage }, cacheTtl(usage, now), now);
+  if (options.waitForCache !== false) await cacheWrite;
   return usage;
 }

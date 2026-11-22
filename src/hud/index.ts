@@ -104,7 +104,8 @@ async function run(): Promise<string> {
       ? parseTranscript(stdin.transcript_path)
       : Promise.resolve(null),
     needsCurationCounts ? gatherLedgerCurationCounts(cwd) : Promise.resolve(null),
-    needsCodexUsage ? gatherTokenmeterUsage(devflowDir) : Promise.resolve(null),
+    // The cache write must not use time from the render budget.
+    needsCodexUsage ? gatherTokenmeterUsage(devflowDir, Date.now(), { waitForCache: false }) : Promise.resolve(null),
   ]);
 
   // Extract usage quota from stdin rate_limits (replaces OAuth fetch)
