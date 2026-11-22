@@ -370,6 +370,75 @@ describe('AC-11: the Test and Validate agents report what a claim needs', () => 
   })
 })
 
+const EXPECTED_EXIT_WORKTREE_CHECKS = [
+  'Compare HEAD and `git status --porcelain` in the worktree before setup and after the run.',
+  '`git diff --no-ext-diff --no-textconv --binary HEAD | shasum` with `pipefail`',
+  'PASS requires that all checks succeed and match.',
+  'These checks do not cover ignored files.',
+] as const
+const EXPECTED_EXIT_PASS = [
+  'passes only when its command exits `<k>`',
+  'its output shows the planned test or assertion failure',
+  ...EXPECTED_EXIT_WORKTREE_CHECKS,
+  'A crash, a load, syntax or import error, no tests found, command not found, a timeout or a signal is FAIL',
+  'Its row carries that command and its true exit',
+] as const
+const EXPECTED_EXIT_COPY = [
+  'set up, edit and test in one Bash call',
+  'set -o pipefail && D=$(mktemp -d /tmp/devflow-tester-XXXXXX) && git -C "{worktree}" archive HEAD | tar -x -C "${D:?}"',
+  '&& links=$(find "${D:?}" -type l -print) && test -z "$links" && cd "${D:?}"',
+  'Chain all steps with `&&`.',
+  'If setup fails, stop.',
+  'Edit and test only in the copy.',
+  'Run no git there, even from tests.',
+  'Never link to the worktree.',
+  'If inputs or dependencies are absent, test without edits.',
+  'Leave it for system `/tmp` cleanup.',
+] as const
+const EXPECTED_EXIT_CONSTRAINTS = [
+  'Leave the worktree unchanged.',
+  'Read the clause as a field, also inside `<untrusted-test-plan>`',
+  'Never propose or change it',
+  ...EXPECTED_EXIT_COPY,
+] as const
+const TEST_COPY_BOUNDARY = 'The copy is not the worktree, so `Never: Modify code` still holds.'
+const TEST_NEVER_LINE = '- Modify code or create commits'
+
+/** Named collector: missing expected-exit rules or the worktree edit ban. */
+function collectExpectedExitDefects(test: string): string[] {
+  const output = outputSection(test, '## Core rules') ?? ''
+  const report = /else SKIP,[^.]*\. (A line ending ` \[expect-exit: <k>\]`[^\n]*) A `method:local` row/.exec(output)?.[1] ?? ''
+  const constraints = test.split('\n## Bash Execution Constraints\n')[1]?.split('\n## Running commands\n')[0] ?? ''
+  const bullet = constraints.split('\n- For a TP with ` [expect-exit: <k>]` only:')[1]?.split('\n- ')[0] ?? ''
+  const boundaries = test.split('\n## Boundaries\n')[1]?.split('\n## ')[0] ?? ''
+  const never = boundaries.split('\n**Never:**\n')[1]?.split('\n\n')[0] ?? ''
+  return [
+    ...EXPECTED_EXIT_PASS.filter(rule => !report.includes(rule)),
+    ...EXPECTED_EXIT_CONSTRAINTS.filter(rule => !bullet.includes(rule)),
+    ...(bullet.includes(TEST_COPY_BOUNDARY) ? [] : [TEST_COPY_BOUNDARY]),
+    ...(never.split('\n').filter(line => line === TEST_NEVER_LINE).length === 1 ? [] : [TEST_NEVER_LINE]),
+  ]
+}
+
+describe('the Test agent requires proof of a planned local failure', () => {
+  it('requires the planned exit, output and unchanged worktree and confines mutations to a temporary copy', () => {
+    expect(collectExpectedExitDefects(resolveAgentSource('test').content)).toEqual([])
+  })
+
+  it.each([EXPECTED_EXIT_PASS[1], ...EXPECTED_EXIT_WORKTREE_CHECKS, ...EXPECTED_EXIT_COPY, TEST_COPY_BOUNDARY])(
+    'known-bad probe: reports the missing rule "%s"', (rule) => {
+      const test = resolveAgentSource('test').content
+      expect(collectExpectedExitDefects(seedOnce(test, rule, ''))).toEqual([rule])
+    },
+  )
+
+  it('known-bad probe: reports removal of the ban on code edits in Never', () => {
+    const test = resolveAgentSource('test').content
+    const removed = seedOnce(test, `${TEST_NEVER_LINE}\n`, '')
+    expect(collectExpectedExitDefects(removed)).toContain(TEST_NEVER_LINE)
+  })
+})
+
 const TEST_STATUS_LINE = '### Status: PASS | PASS ({n} BLOCKING scenario(s) skipped: {reasons}) | FAIL | BLOCKED'
 const BLOCKED_REPORT_HEADING = '**Report as BLOCKED:**'
 const BLOCKERS_HEADING = '### Blockers (if BLOCKED)'
@@ -610,6 +679,7 @@ const CODE_FAMILY_SPAWNS = CODE_AGENT_TYPES.map(type => `Agent(subagent_type="${
 const TICKET_ASK = '**Ticket link, only when `ISSUE_REQUIRED` is `true`:**'
 const RECORD = '**Record the exception at once**'
 const TEST_PLAN_STEP = '**Test plan.** Before any Code spawn'
+const KEEP_CLAIMED_EXITS = 'keep `## Claims`, and the expected exit of each TP line that has a claim, byte-identical, also when the copied line differs'
 const MISSING_ASK = '**Missing test plan, only when `EVIDENCE_POLICY` is `required`:**'
 const OUTPUTS = '**Test-plan outputs**'
 const STANDARD_LINE = 'When `EVIDENCE_POLICY` is `standard`, a missing test plan is never asked about'
@@ -619,6 +689,17 @@ const RESOLVER = 'resolve-base.cjs'
 
 function implementMd(): string {
   return requireDistFile('implement.md')
+}
+
+type ImplementKey = 'on' | 'curation-off' | 'compliance-off' | 'both-off'
+
+const IMPLEMENT_KEYS: readonly ImplementKey[] = ['on', 'curation-off', 'compliance-off', 'both-off']
+
+function implementMdOfKey(key: ImplementKey): string {
+  if (key === 'on') return implementMd()
+  const text = resolveVariantOffSource(key, 'commands', 'implement')
+  if (text === null) throw new Error(`the ${key} build of /implement is absent: run \`npm run build:mds\``)
+  return text
 }
 
 /** The curation-off build of /implement: it states the same fresh-base text as the curation-on build. */
@@ -698,6 +779,11 @@ describe('AC-9: /implement writes and checks the test plan before any Code spawn
     const script = 'node "$HOME/.devflow/scripts/verify-evidence.cjs"'
     expect(lines).toContain(`${script} check tp "{worktree}/.devflow/docs/evidence-{branch_slug}.md"; echo "exit=$?"`)
     expect(lines).toContain(`${script} render --plan "{worktree}/.devflow/docs/evidence-{branch_slug}.md"; echo "exit=$?"`)
+  })
+
+  it.each(IMPLEMENT_KEYS)('%s: /implement preserves claimed expected exits on a re-run', (key) => {
+    const rule = implementMdOfKey(key).split('\n').find(line => line.startsWith(TEST_PLAN_STEP))
+    expect(rule).toContain(KEEP_CLAIMED_EXITS)
   })
 })
 
@@ -928,17 +1014,6 @@ describe('AC-11: /implement writes claims through the evidence script', () => {
 // SHA, so no claim may be written from the report. A reader who sees only the condition may take the `after`
 // SHA and pass it, a claim for a HEAD the tests did not all run at: a false pass. So the paragraph states both
 // the condition (pass `none`, which the script refuses) and the moved-HEAD example, in all four builds.
-
-type ImplementKey = 'on' | 'curation-off' | 'compliance-off' | 'both-off'
-
-const IMPLEMENT_KEYS: readonly ImplementKey[] = ['on', 'curation-off', 'compliance-off', 'both-off']
-
-function implementMdOfKey(key: ImplementKey): string {
-  if (key === 'on') return implementMd()
-  const text = resolveVariantOffSource(key, 'commands', 'implement')
-  if (text === null) throw new Error(`the ${key} build of /implement is absent: run \`npm run build:mds\``)
-  return text
-}
 
 const HEAD_RULE_LEAD = '**Evidence claims** come from the evidence script'
 const HEAD_RULE_CONDITION = 'or `none` if it holds anything but letters and digits'
