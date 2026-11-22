@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   The HUD shows the data age from 10 minutes. If tokenmeter cannot find Codex, log data at least 10 minutes old does not show.
 
-- **Routing runtime pinned to `subswitch@0.9.0`** — before: `0.8.0`. With this runtime, the Devflow proxy uses the separate-session start on macOS and Linux. The Devflow proxy model catalog does not change.
+- **Routing runtime pinned to `0.9.0`** — before: `0.8.0`. With this runtime, the Devflow proxy uses the separate-session start on macOS and Linux. The Devflow proxy model catalog does not change.
 
 ### Removed
 
