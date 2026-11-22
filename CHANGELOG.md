@@ -9,7 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **The HUD uses tokenmeter for Codex quota.** tokenmeter checks recent session logs and can start `codex app-server` in the background at most once per minute per data folder. The HUD shows the data age from 10 minutes. If tokenmeter cannot find Codex, log data at least 10 minutes old does not show.
+- **The HUD uses tokenmeter for Codex quota.** tokenmeter checks recent session logs in the background. By default, tokenmeter can start `codex app-server` at most about once per minute per data folder. Codex can then use its stored sign-in to request the limits from OpenAI over HTTP. To stop the app server and keep the log source, run `npx @dean0x/tokenmeter@0.2.0 config app_server off`.
+
+  The HUD shows the data age from 10 minutes. If tokenmeter cannot find Codex, log data at least 10 minutes old does not show.
 
 ### Removed
 

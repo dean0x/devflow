@@ -386,15 +386,17 @@ npx devflow-kit hud --no-detail      # Hide tool/agent descriptions
 
 The HUD shows the weekly Codex quota next to the Claude quota. It also shows the 5-hour Codex quota if your plan has one. When the HUD cache expires, devflow runs `tokenmeter hud` from the path that `devflow init` saves. The cache usually lasts 30 seconds. For readings at least 60 seconds old but less than 10 minutes old, the cache lasts at most 5 seconds.
 
-The command returns the latest saved reading without waiting for Codex. A refresh is due at 60 seconds. In the background, tokenmeter checks recent Codex session logs and can start `codex app-server` at most once per minute per data folder. It uses the newest reading from the two sources. Codex signs in by itself. Neither devflow nor tokenmeter makes an HTTP call or reads a credential file for this check.
+The command returns the latest saved data. It does not wait for Codex. A refresh is due at 60 seconds. tokenmeter checks recent Codex session logs in the background. It uses the newest data from the logs or the app server.
 
-A window past its reset time shows `reset`. A reading at least 10 minutes old shows its age, for example `· data 10m old`. If tokenmeter cannot find Codex on `PATH`, log data at least 10 minutes old does not show. If neither source has data, the HUD omits the Codex segment. The Claude quota stays visible when available.
+By default, tokenmeter can start `codex app-server` at most about once per minute per data folder. Codex can then use its stored sign-in to request the limits from OpenAI over HTTP.
 
-To stop app-server calls and keep the log source, run:
+To stop the app server and keep the log source, run:
 
 ```bash
 npx @dean0x/tokenmeter@0.2.0 config app_server off
 ```
+
+A window past its reset time shows `reset`. A reading at least 10 minutes old shows its age, for example `· data 10m old`. If tokenmeter cannot find Codex on `PATH`, log data at least 10 minutes old does not show. If neither source has data, the HUD omits the Codex segment. The Claude quota stays visible when available.
 
 After an upgrade, run `devflow init` again to install the HUD and save the tool path. If the npx cache clears and the saved path is lost, run `devflow init` again.
 
