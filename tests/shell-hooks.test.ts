@@ -5456,7 +5456,7 @@ describe('ensure-proxy behavioral tests', () => {
   // execSync is running. The HTTP stub is spawned as a SEPARATE child process
   // so it has its own event loop and can respond to curl independently.
 
-  it('CONS-5: recognizes relay identity when "name" field is not first in health body', async () => {
+  it('recognizes the live relay and keeps its oversized log intact', async () => {
     const port = await allocateFreePort();
 
     // Write a minimal HTTP server that returns the health body with "name" LAST.
@@ -5500,10 +5500,15 @@ describe('ensure-proxy behavioral tests', () => {
       expect(up, `HTTP stub did not come up on port ${port}`).toBe(true);
 
       writeProxyJson({ enabled: true, port });
+      const logPath = path.join(homeDir, '.devflow', 'logs', 'proxy.log');
+      fs.mkdirSync(path.dirname(logPath));
+      fs.writeFileSync(logPath, `original log start\n${'x'.repeat(2 * 1024 * 1024)}\n`);
       const { exitCode, stdout } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir);
       expect(exitCode).toBe(0);
-      // No "port occupied" warning — relay identity correctly recognized via json_field parse
       expect(stdout).toBe('');
+      const log = fs.readFileSync(logPath, 'utf-8');
+      expect(log).toContain('healthy (correct identity)');
+      expect(log.startsWith('original log start\n')).toBe(true);
     } finally {
       if (stubPid !== null) {
         try { process.kill(stubPid, 'SIGTERM'); } catch { /* already gone */ }
@@ -5548,6 +5553,7 @@ describe('ensure-proxy behavioral tests', () => {
         [
           "const net = require('net');",
           "const fs = require('fs');",
+          "if (process.argv[2] === '--version') { console.log('0.8.0'); process.exit(0); }",
           "const cfg = JSON.parse(fs.readFileSync(process.env.SUBSWITCH_CONFIG, 'utf-8'));",
           'net.createServer((s) => s.end()).listen(cfg.port, "127.0.0.1");',
         ].join('\n'),
@@ -5560,6 +5566,102 @@ describe('ensure-proxy behavioral tests', () => {
       fs.writeFileSync(configPath, buildRoutingConfigJson(port));
       return configPath;
     }
+
+    async function runRelayStart(version: string, mode = 'success') {
+      const port = await allocateFreePort();
+      const binPath = path.join(tmpDir, 'start-relay.cjs');
+      const callsPath = path.join(tmpDir, 'start.json');
+      const configPath = writeRoutingConfig(port);
+      fs.writeFileSync(binPath, `
+        const fs = require('node:fs');
+        const args = process.argv.slice(2);
+        if (args[0] === '--version') {
+          if (${JSON.stringify(version)} === 'slow') {
+            setTimeout(() => console.log('0.9.0'), 5000);
+          } else if (${JSON.stringify(version)} === 'failed') {
+            console.log('0.9.0');
+            process.exitCode = 1;
+          } else console.log(${JSON.stringify(version)});
+        } else if (args[0] === 'listen') {
+          require('node:net').createServer((socket) => socket.end())
+            .listen(${port}, '127.0.0.1', () => process.send?.('ready'));
+          setTimeout(() => process.exit(), 10000);
+        } else {
+          fs.writeFileSync(${JSON.stringify(callsPath)}, JSON.stringify({
+            args, cwd: process.cwd(), pid: process.pid,
+            config: process.env.SUBSWITCH_CONFIG, home: process.env.HOME,
+            nodeOptions: process.env.NODE_OPTIONS ?? null,
+          }));
+          if (!args.includes('--detach')) {
+            console.log('legacy relay output');
+            require('node:net').createServer((socket) => socket.end()).listen(${port}, '127.0.0.1');
+            setTimeout(() => process.exit(), 10000);
+          } else if (${JSON.stringify(mode)} === 'not_ready') {
+            console.error('not_ready\\n' + 'x'.repeat(4096) + 'stderr end marker');
+            process.exitCode = 1;
+          } else {
+            const child = require('node:child_process').spawn(process.execPath, [__filename, 'listen'], {
+              detached: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+            });
+            child.once('message', () => {
+              child.disconnect();
+              child.unref();
+              console.log(child.pid);
+            });
+          }
+        }
+      `);
+      writeProxyJson({ enabled: true, port, binPath, configPath });
+      const result = runHook(PROXY_HOOK, SESSION_INPUT, homeDir, { NODE_OPTIONS: '--trace-warnings' });
+      const machineDir = path.join(homeDir, '.devflow');
+      const pidFile = path.join(machineDir, 'proxy.pid');
+      const call = JSON.parse(fs.readFileSync(callsPath, 'utf-8'));
+      const pid = fs.existsSync(pidFile) ? fs.readFileSync(pidFile, 'utf-8') : '';
+      return { result, machineDir, port, configPath, call, pid, log: fs.readFileSync(path.join(machineDir, 'logs', 'proxy.log'), 'utf-8') };
+    }
+
+    it('starts a supported relay in the machine folder and records the reported PID', async () => {
+      const { result, machineDir, port, configPath, call, pid, log } = await runRelayStart('relay v0.9.0 (1.0.0)');
+      expect(result).toMatchObject({ exitCode: 0, stdout: '', stderr: '' });
+      expect(call).toMatchObject({
+        args: ['serve', '--detach', '--port', String(port)], cwd: fs.realpathSync(machineDir),
+        config: configPath, home: homeDir, nodeOptions: null,
+      });
+      expect(pid).toMatch(/^[1-9][0-9]*$/);
+      expect(pid).not.toBe(String(call.pid));
+      expect(log).toContain('relay detach exit 0');
+      expect(log.split('\n')).not.toContain(pid);
+      expect(log).not.toContain('legacy relay output');
+    }, NODE_RUN_MS);
+
+    it.each([
+      ['0.8.0 (1.0.0)', 'relay version 0.8.0 has no detach'],
+      ['unparseable', 'relay version unparseable'],
+      ['failed', 'relay version check failed'],
+      ['slow', 'relay version check failed'],
+    ])('uses the legacy start when the version is %s', async (version, reason) => {
+      const { result, machineDir, call, pid, log } = await runRelayStart(version);
+      expect(result).toMatchObject({ exitCode: 0, stdout: '', stderr: '' });
+      expect(call.args).toEqual(['serve']);
+      expect(call.cwd).not.toBe(machineDir);
+      expect(pid).toBe(String(call.pid));
+      expect(log).toContain('legacy relay output');
+      expect(log).toContain(`${reason}; legacy start`);
+    }, NODE_RUN_MS);
+
+    it('warns after a failed detach and records one bounded diagnostic', async () => {
+      const { result, log, pid } = await runRelayStart('0.9.0', 'not_ready');
+      expect(result).toMatchObject({ exitCode: 0, stderr: '' });
+      expect(JSON.parse(result.stdout || '{}')).toMatchObject({
+        hookSpecificOutput: { additionalContext: expect.stringContaining('relay failed to start') },
+      });
+      const diagnostics = log.split('\n').filter((line) => line.includes('relay detach exit'));
+      expect(diagnostics).toHaveLength(1);
+      expect(diagnostics[0]).toContain('relay detach exit 1: not_ready ');
+      expect(Buffer.byteLength(diagnostics[0] ?? '')).toBeLessThan(2200);
+      expect(log).not.toContain('stderr end marker');
+      expect(pid).toBe('');
+    }, NODE_RUN_MS);
 
     it('spawns the relay on SessionStart when the port is down, and exits 0 silently', async () => {
       const port = await allocateFreePort();
@@ -5654,6 +5756,7 @@ describe('ensure-proxy behavioral tests', () => {
         [
           "const net = require('net');",
           "const fs = require('fs');",
+          'if (process.argv[2] === "--version") { console.log("0.8.0"); process.exit(0); }',
           'const cfg = JSON.parse(fs.readFileSync(process.env.SUBSWITCH_CONFIG, "utf-8"));',
           `fs.writeFileSync(${JSON.stringify(envCapturePath)}, JSON.stringify(process.env));`,
           'net.createServer((s) => s.end()).listen(cfg.port, "127.0.0.1");',
@@ -5714,6 +5817,7 @@ describe('ensure-proxy behavioral tests', () => {
         [
           "const net = require('net');",
           "const fs = require('fs');",
+          'if (process.argv[2] === "--version") { console.log("0.8.0"); process.exit(0); }',
           'const cfg = JSON.parse(fs.readFileSync(process.env.SUBSWITCH_CONFIG, "utf-8"));',
           `fs.writeFileSync(${JSON.stringify(envCapturePath)}, JSON.stringify(process.env));`,
           'net.createServer((s) => s.end()).listen(cfg.port, "127.0.0.1");',
@@ -5763,6 +5867,7 @@ describe('ensure-proxy behavioral tests', () => {
         [
           "const net = require('net');",
           "const fs = require('fs');",
+          'if (process.argv[2] === "--version") { console.log("0.8.0"); process.exit(0); }',
           'const cfg = JSON.parse(fs.readFileSync(process.env.SUBSWITCH_CONFIG, "utf-8"));',
           `fs.writeFileSync(${JSON.stringify(envCapturePath)}, JSON.stringify(process.env));`,
           'net.createServer((s) => s.end()).listen(cfg.port, "127.0.0.1");',
