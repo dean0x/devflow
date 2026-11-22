@@ -34,6 +34,7 @@ import {
   type PluginDefinition,
 } from '../../src/core/plugins.js';
 import { readManifestPlugins, writeManifest } from '../../src/core/manifest.js';
+import * as claudePaths from '../../src/targets/claude-code/claude-paths.js';
 import {
   composeScripts,
   copyDirectory,
@@ -411,9 +412,18 @@ it('init --hud-only replaces the old quota reader with the saved tool path', () 
   expectQuotaReaderReplacement(['--hud-only']),
 );
 
-it.skipIf(systemManagedSettingsAtRisk())('full init replaces the old quota reader with the saved tool path', () =>
-  expectQuotaReaderReplacement(['--recommended', '--security', 'none', '--no-proxy']),
-);
+it.skipIf(systemManagedSettingsAtRisk())('full init replaces the old quota reader with the saved tool path', async () => {
+  const managedPath = path.join(root, 'managed-settings.json');
+  await fs.writeFile(managedPath, JSON.stringify({ permissions: { deny: ['Bash(sudo *)'] } }));
+  const managedPathSpy = vi.spyOn(claudePaths, 'getManagedSettingsPath').mockReturnValue(managedPath);
+  try {
+    await expectQuotaReaderReplacement(['--recommended', '--security', 'none', '--no-proxy']);
+  } finally {
+    managedPathSpy.mockRestore();
+  }
+
+  await expect(fs.lstat(managedPath)).rejects.toMatchObject({ code: 'ENOENT' });
+});
 
 describe('hudOnlyCharterPlugins: the record of the machine, or nothing', () => {
   it('no manifest, or one readManifest refused, is the empty set', () => {
