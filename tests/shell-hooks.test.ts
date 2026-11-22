@@ -5567,14 +5567,20 @@ describe('ensure-proxy behavioral tests', () => {
       return configPath;
     }
 
-    async function runRelayStart(version: string, mode = 'success') {
+    async function runRelayStart(
+      version: string,
+      mode: 'success' | 'not_ready' | 'no_listener' | 'mktemp_failure' = 'success',
+      reportedPid?: string,
+    ) {
       const port = await allocateFreePort();
       const binPath = path.join(tmpDir, 'start-relay.cjs');
       const callsPath = path.join(tmpDir, 'start.json');
+      const readyPath = path.join(tmpDir, 'ready');
       const configPath = writeRoutingConfig(port);
       fs.writeFileSync(binPath, `
         const fs = require('node:fs');
         const args = process.argv.slice(2);
+        const readyPath = ${JSON.stringify(readyPath)};
         if (args[0] === '--version') {
           if (${JSON.stringify(version)} === 'slow') {
             setTimeout(() => console.log('0.9.0'), 5000);
@@ -5584,7 +5590,7 @@ describe('ensure-proxy behavioral tests', () => {
           } else console.log(${JSON.stringify(version)});
         } else if (args[0] === 'listen') {
           require('node:net').createServer((socket) => socket.end())
-            .listen(${port}, '127.0.0.1', () => process.send?.('ready'));
+            .listen(${port}, '127.0.0.1', () => fs.writeFileSync(readyPath, String(process.pid)));
           setTimeout(() => process.exit(), 10000);
         } else {
           fs.writeFileSync(${JSON.stringify(callsPath)}, JSON.stringify({
@@ -5599,47 +5605,90 @@ describe('ensure-proxy behavioral tests', () => {
           } else if (${JSON.stringify(mode)} === 'not_ready') {
             console.error('not_ready\\n' + 'x'.repeat(4096) + 'stderr end marker');
             process.exitCode = 1;
-          } else {
+          } else if (${JSON.stringify(mode)} !== 'no_listener') {
             const child = require('node:child_process').spawn(process.execPath, [__filename, 'listen'], {
-              detached: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+              detached: true, stdio: ['ignore', 'ignore', 'ignore'],
             });
-            child.once('message', () => {
-              child.disconnect();
-              child.unref();
-              console.log(child.pid);
-            });
+            child.unref();
+            let attempts = 0;
+            const wait = setInterval(() => {
+              const ready = fs.existsSync(readyPath);
+              if (!ready && ++attempts < 200) return;
+              clearInterval(wait);
+              if (!ready) { process.exitCode = 1; return; }
+              const printedPid = ${JSON.stringify(reportedPid)} ?? String(child.pid);
+              if (printedPid) console.log(printedPid);
+            }, 10);
           }
         }
       `);
+      const fakeBinDir = path.join(tmpDir, 'fake-bin');
+      fs.mkdirSync(fakeBinDir);
+      // Check fd 3 before Node can use that slot for its own descriptors.
+      fs.writeFileSync(path.join(fakeBinDir, 'node'), `#!/bin/bash
+if [ "$2" = serve ] && [ "$3" = --detach ] && { : >&3; } 2>/dev/null; then
+  : > "$1.fd3"
+fi
+exec '${process.execPath.replaceAll("'", "'\\''")}' "$@"
+`, { mode: 0o755 });
+      if (mode === 'mktemp_failure') {
+        fs.writeFileSync(path.join(fakeBinDir, 'mktemp'), `#!/bin/bash
+case "$1" in */.proxy-detach.*) exit 1 ;; esac
+exec /usr/bin/mktemp "$@"
+`, { mode: 0o755 });
+      }
+      const env = { NODE_OPTIONS: '--trace-warnings', PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH ?? ''}` };
       writeProxyJson({ enabled: true, port, binPath, configPath });
-      const result = runHook(PROXY_HOOK, SESSION_INPUT, homeDir, { NODE_OPTIONS: '--trace-warnings' });
+      const started = Date.now();
+      const result = runHook(PROXY_HOOK, SESSION_INPUT, homeDir, env);
+      const elapsedMs = Date.now() - started;
       const machineDir = path.join(homeDir, '.devflow');
       const pidFile = path.join(machineDir, 'proxy.pid');
-      const call = JSON.parse(fs.readFileSync(callsPath, 'utf-8'));
+      const call = fs.existsSync(callsPath) ? JSON.parse(fs.readFileSync(callsPath, 'utf-8')) : undefined;
       const pid = fs.existsSync(pidFile) ? fs.readFileSync(pidFile, 'utf-8') : '';
-      return { result, machineDir, port, configPath, call, pid, log: fs.readFileSync(path.join(machineDir, 'logs', 'proxy.log'), 'utf-8') };
+      return {
+        result, machineDir, port, configPath, call, pid, elapsedMs,
+        launcherInheritedFd3: fs.existsSync(`${binPath}.fd3`),
+        log: fs.readFileSync(path.join(machineDir, 'logs', 'proxy.log'), 'utf-8'),
+      };
     }
 
-    it('starts a supported relay in the machine folder and records the reported PID', async () => {
-      const { result, machineDir, port, configPath, call, pid, log } = await runRelayStart('relay v0.9.0 (1.0.0)');
+    it.each(['relay v0.9.0 (1.0.0)', '0.10.0', '1.0.0'])(
+      'starts in the machine folder and records the PID for version %s', async (version) => {
+        const { result, machineDir, port, configPath, call, pid, log, elapsedMs } = await runRelayStart(version);
+        expect(result).toMatchObject({ exitCode: 0, stdout: '', stderr: '' });
+        expect(call).toMatchObject({
+          args: ['serve', '--detach', '--port', String(port)], cwd: fs.realpathSync(machineDir),
+          config: configPath, home: homeDir, nodeOptions: null,
+        });
+        expect(elapsedMs).toBeLessThan(9000);
+        expect(pid).toMatch(/^[1-9][0-9]*$/);
+        expect(pid).not.toBe(String(call.pid));
+        expect(log).toContain('relay detach exit 0');
+        expect(log.split('\n')).not.toContain(pid);
+        expect(log).not.toContain('legacy relay output');
+      }, NODE_RUN_MS,
+    );
+
+    it('does not pass the PID capture pipe as fd 3 to the detach launcher', async () => {
+      const { launcherInheritedFd3 } = await runRelayStart('0.9.0');
+      expect(launcherInheritedFd3).toBe(false);
+    }, NODE_RUN_MS);
+
+    it('releases the spawn lock after detach', async () => {
+      const { result, machineDir } = await runRelayStart('0.9.0');
       expect(result).toMatchObject({ exitCode: 0, stdout: '', stderr: '' });
-      expect(call).toMatchObject({
-        args: ['serve', '--detach', '--port', String(port)], cwd: fs.realpathSync(machineDir),
-        config: configPath, home: homeDir, nodeOptions: null,
-      });
-      expect(pid).toMatch(/^[1-9][0-9]*$/);
-      expect(pid).not.toBe(String(call.pid));
-      expect(log).toContain('relay detach exit 0');
-      expect(log.split('\n')).not.toContain(pid);
-      expect(log).not.toContain('legacy relay output');
+      expect(fs.existsSync(path.join(machineDir, '.proxy-spawn.lock'))).toBe(false);
     }, NODE_RUN_MS);
 
     it.each([
       ['0.8.0 (1.0.0)', 'relay version 0.8.0 has no detach'],
+      ['0.8.9', 'relay version 0.8.9 has no detach'],
+      ['', 'relay version unparseable'],
       ['unparseable', 'relay version unparseable'],
       ['failed', 'relay version check failed'],
       ['slow', 'relay version check failed'],
-    ])('uses the legacy start when the version is %s', async (version, reason) => {
+    ])('uses the legacy start when the version is %j', async (version, reason) => {
       const { result, machineDir, call, pid, log } = await runRelayStart(version);
       expect(result).toMatchObject({ exitCode: 0, stdout: '', stderr: '' });
       expect(call.args).toEqual(['serve']);
@@ -5661,6 +5710,39 @@ describe('ensure-proxy behavioral tests', () => {
       expect(Buffer.byteLength(diagnostics[0] ?? '')).toBeLessThan(2200);
       expect(log).not.toContain('stderr end marker');
       expect(pid).toBe('');
+    }, NODE_RUN_MS);
+
+    it.each([
+      ['nonnumeric PID', 'not-a-pid'],
+      ['empty stdout', ''],
+      ['zero PID', '0'],
+      ['PID above 2147483647', '2147483648'],
+    ])('keeps a ready relay without a PID file for %s', async (_label, reportedPid) => {
+      const { result, pid } = await runRelayStart('0.9.0', 'success', reportedPid);
+      expect(result).toMatchObject({ exitCode: 0, stdout: '', stderr: '' });
+      expect(pid).toBe('');
+    }, NODE_RUN_MS);
+
+    it('records the maximum PID that the CLI accepts', async () => {
+      const { pid } = await runRelayStart('0.9.0', 'success', '2147483647');
+      expect(pid).toBe('2147483647');
+    }, NODE_RUN_MS);
+
+    it('uses detach without a PID file if mktemp fails', async () => {
+      const { call, result, pid, launcherInheritedFd3 } = await runRelayStart('0.9.0', 'mktemp_failure');
+      expect(result).toMatchObject({ exitCode: 0, stdout: '', stderr: '' });
+      expect(call).toMatchObject({ args: ['serve', '--detach', '--port', expect.any(String)] });
+      expect(launcherInheritedFd3).toBe(false);
+      expect(pid).toBe('');
+    }, NODE_RUN_MS);
+
+    it('warns if detach exits 0 but the port stays down', async () => {
+      const { result, log } = await runRelayStart('0.9.0', 'no_listener');
+      expect(result).toMatchObject({ exitCode: 0, stderr: '' });
+      expect(JSON.parse(result.stdout || '{}')).toMatchObject({
+        hookSpecificOutput: { additionalContext: expect.stringContaining('relay failed to start') },
+      });
+      expect(log).toContain('relay detach exit 0');
     }, NODE_RUN_MS);
 
     it('spawns the relay on SessionStart when the port is down, and exits 0 silently', async () => {

@@ -311,17 +311,25 @@ warn_relay_start() {
   json_session_output "$CONTEXT"
 }
 
+run_detach_launcher() (
+  cd "$MACHINE_DEVFLOW_DIR" && exec env -i "${_RELAY_ENV[@]}" \
+    "$NODE_BIN" "$PROXY_BIN" serve --detach --port "$PROXY_PORT"
+)
+
 launch_detached_relay() {
   local pid error_file diagnostic status
+  local pid_re='^0*([1-9][0-9]{0,9})$'
   if ! error_file=$(mktemp "$MACHINE_DEVFLOW_DIR/.proxy-detach.XXXXXX" 2>/dev/null); then
-    log "relay detach exit 1: could not prepare diagnostic capture"
-    return 1
+    run_detach_launcher </dev/null >/dev/null 2>&1 3>&-
+    status=$?
+    log "relay detach exit $status: diagnostic capture unavailable"
+    return "$status"
   fi
-  # Use fd 3 for stdout (the PID). Cap stderr and drain the rest without stopping the launcher.
+  # Copy fd 3 to stdout, then close it so relay children cannot hold the capture pipe open.
+  # Cap stderr and drain the rest without stopping the launcher.
   pid=$(
     {
-      (cd "$MACHINE_DEVFLOW_DIR" && exec env -i "${_RELAY_ENV[@]}" \
-        "$NODE_BIN" "$PROXY_BIN" serve --detach --port "$PROXY_PORT") </dev/null 2>&1 >&3 |
+      run_detach_launcher </dev/null 2>&1 >&3 3>&- |
         { head -c 2048 | LC_ALL=C tr '[:cntrl:]' ' '; cat >/dev/null; } >"$error_file"
       exit "${PIPESTATUS[0]}"
     } 3>&1
@@ -331,11 +339,10 @@ launch_detached_relay() {
   rm -f "$error_file"
   log "relay detach exit $status${diagnostic:+: $diagnostic}"
   if [ "$status" -ne 0 ]; then return 1; fi
-  case "$pid" in
-    ''|*[!0123456789]*) ;;
-    *) printf '%s' "$pid" > "$MACHINE_DEVFLOW_DIR/proxy.pid" 2>/dev/null || \
-         log "warn: could not write proxy.pid (non-fatal)" ;;
-  esac
+  if [[ "$pid" =~ $pid_re ]] && [ "${BASH_REMATCH[1]}" -le 2147483647 ]; then
+    printf '%s' "${BASH_REMATCH[1]}" > "$MACHINE_DEVFLOW_DIR/proxy.pid" 2>/dev/null || \
+      log "warn: could not write proxy.pid (non-fatal)"
+  fi
   return 0
 }
 
