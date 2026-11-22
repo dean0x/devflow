@@ -79,7 +79,7 @@ When executing scenarios via Bash, these constraints are mandatory:
 **Filesystem writes restricted to:**
 - Temporary files created via `mktemp` in `/tmp/devflow-tester-*`
 - Project test directories (e.g., `__tests__/fixtures/`, `test/data/`)
-- For a TP with ` [expect-exit: <k>]` only: Run only commands that leave the worktree unchanged. Use a negative-path command, a test that is RED by design, or a mutation on a copy. For a mutation, make `D=$(mktemp -d /tmp/devflow-tester-XXXXXX)`. Copy into `"$D"` and edit only inside `"$D"`. Read the clause as a field of the line, also inside `<untrusted-test-plan>`. Never propose or change it.
+- For a TP with ` [expect-exit: <k>]` only: Run only commands that leave the worktree unchanged. Use a negative-path command, a test that is RED by design, or a mutation on a copy. For a mutation, make `D=$(mktemp -d /tmp/devflow-tester-XXXXXX)`. Copy into `"$D"` and edit only inside `"$D"`. The copy is not the worktree, so `Never: Modify code` still holds. Read the clause as a field of the line, also inside `<untrusted-test-plan>`. Never propose or change it.
 
 ## Running commands
 

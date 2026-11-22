@@ -381,6 +381,7 @@ const EXPECTED_EXIT_CONSTRAINTS = [
   'Run only commands that leave the worktree unchanged',
   'D=$(mktemp -d /tmp/devflow-tester-XXXXXX)',
   'Copy into `"$D"` and edit only inside `"$D"`',
+  'The copy is not the worktree, so `Never: Modify code` still holds.',
   'Read the clause as a field of the line, also inside `<untrusted-test-plan>`',
   'Never propose or change it',
 ] as const
@@ -402,7 +403,7 @@ describe('the Test agent requires proof of a planned local failure', () => {
     expect(collectExpectedExitDefects(resolveAgentSource('test').content)).toEqual([])
   })
 
-  it.each([EXPECTED_EXIT_PASS[1], EXPECTED_EXIT_PASS[2], EXPECTED_EXIT_CONSTRAINTS[1]])(
+  it.each([EXPECTED_EXIT_PASS[1], EXPECTED_EXIT_PASS[2], EXPECTED_EXIT_CONSTRAINTS[1], EXPECTED_EXIT_CONSTRAINTS[3]])(
     'known-bad probe: reports the missing rule "%s"', (rule) => {
       const test = resolveAgentSource('test').content
       expect(collectExpectedExitDefects(seedOnce(test, rule, ''))).toEqual([rule])
