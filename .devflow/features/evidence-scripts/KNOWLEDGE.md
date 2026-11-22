@@ -14,7 +14,7 @@ updated: 2026-11-22
 
 - **KB-INV-1** Only `pr-evidence.cjs` and `verify-evidence.cjs verify` assign a TP state. A `claim` line is an input to `verify`, never a state.
 - **KB-INV-2** The state ladder is the frozen `ARMS` table in `pr-evidence.cjs`. First match wins. Every arm but the last is a positive match. The last arm is UNVERIFIED. `PRECEDENCE` is derived from `ARMS`.
-- **KB-INV-3** A local PASS verifies only with the expected exit: 0 by default, or the value of `[expect-exit: <k>]`. A local PASS with no usable exit code (an integer from 0 to 255) reads UNVERIFIED if no earlier arm applies.
+- **KB-INV-3** A file claim applies only when its expected exit matches the TP. No clause or claim field means 0. A local PASS needs the expected exit. Without a usable exit code (an integer from 0 to 255), it reads UNVERIFIED if no earlier arm applies.
 - **KB-INV-4** Any failed run at the claim commit fails a ci TP, so a ci PASS then reads FAILED. No run is matched to one TP.
 - **KB-INV-5** Stdout leaves the script only through `settleOutcome` and `settleShape`. A line that is not a closed shape prints nothing and exits 4.
 - **KB-INV-6** Every `verify-evidence: claim: <cause>` line goes through `claimCause`. It checks the cause against `CLAIM_CAUSE_RE` at the sink.
@@ -42,7 +42,7 @@ A TP line has this form: `- [ ] TP-<n> (AC-<m>) <scenario> — method:<ci|local|
 - TP numbers ascend and are unique. A plan that breaks this gives a parse error code (`order` or `duplicate`).
 - `files` globs use `GLOB_RE`. A TP with no files goes STALE as soon as the claim commit is not the head.
 - The contract partial (`_plan_contract.mds`) and `TP_LINE_RE` must agree. `tests/evidence/contract-parity.test.ts` compiles the contract shape and runs both over a table. Edit both together.
-- A claim line has this form: `- TP-<n> <PASS|FAIL|SKIP> sha:<40 hex> by:test[ exit:<0-255>]`. The gate line is `- gate:validate PASS sha:<head> by:validate`. The pattern is `CLAIM_LINE_RE`. In an evidence file the last valid claim for a TP wins, so a claim file only grows.
+- A claim line has this form: `- TP-<n>[ expect-exit:<1-125>] <PASS|FAIL|SKIP> sha:<40 hex> by:test[ exit:<0-255>]`. The gate line is `- gate:validate PASS sha:<head> by:validate`. The pattern is `CLAIM_LINE_RE`. In an evidence file the last valid claim for a TP wins, so a claim file only grows.
 
 ## The state ladder
 
@@ -50,7 +50,7 @@ A TP line has this form: `- [ ] TP-<n> (AC-<m>) <scenario> — method:<ci|local|
 
 | Order | State | It matches when |
 |---|---|---|
-| 1 | UNVERIFIED | no usable claim, a SKIP, a claim SHA outside the PR, or TP text that no longer matches the trusted record |
+| 1 | UNVERIFIED | no usable claim, a SKIP, a claim SHA outside the PR, a file claim with a different expected exit, or a TP text hash mismatch |
 | 2 | INDETERMINATE | the head is unresolved, the claim is not in the PR, a needed diff is missing, or (ci) the runs are missing, too many, at a wrong SHA or not settled |
 | 3 | STALE | the claim is at an older commit and the TP has no files or the diff overlaps them |
 | 4 | FAILED | a FAIL claim, a local claim with an exit that differs from the expected exit, or (ci) any failed run |
@@ -73,7 +73,8 @@ Form: `claim --evidence <file> --head <sha> [--plan <file>] gate | TP-<n>=<PASS|
 - **Folder.** A missing folder below the working directory is made (`ensureClaimFolder`). `main` removes each folder it made when the run leaves no file in it (`removeMadeFolders`). A link out of the working directory makes nothing.
 - **Write.** One append of every line. When `## Claims` is not the last section, `claimInsertText` puts the lines at its end, and one whole-file replace writes the result through a sibling temporary file that keeps the mode. `claimInserted` must confirm that only the Claims section grew. A failed write exits 3, and the file stays as it was.
 - **Plan scope.** A TP the plan does not list gets no line and counts in `skipped`. A run that writes no line changes no file.
-- **Exit field.** The `exit:` part is kept only when the claim parser accepts a number from 0 to 255. Otherwise the line is written without it.
+- **Expected exit.** Use `--plan` if given, or the plan in the evidence file. If the TP has an expected-exit clause, `claim` saves its value as `expect-exit:<k>`. A claim without this field applies only to a TP without the clause.
+- **Exit field.** `claim` keeps `exit:` only if the parser accepts a number from 0 to 255.
 - **Success.** One line, exit 0: `CLAIM appended:<n> PASS:<n> FAIL:<n> SKIP:<n> skipped:<n>`.
 
 ## The stdout gates

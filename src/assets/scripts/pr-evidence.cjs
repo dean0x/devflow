@@ -133,9 +133,10 @@ const TP_LINE_RE = Object.freeze(/^- \[ \] TP-(?<n>200|1[0-9]{2}|[1-9][0-9]?) \(
 
 /**
  * One claim line of the evidence file's `## Claims` section:
- *   - (TP-<n>|gate:(validate|qa)) (PASS|FAIL|SKIP) sha:<40-hex> by:(test|validate)[ exit:<0-255>]
+ *   - (TP-<n>[ expect-exit:<1-125>]|gate:(validate|qa)) (PASS|FAIL|SKIP) sha:<40-hex> by:(test|validate)[ exit:<0-255>]
+ * D-CLAIM-EXPECTED-EXIT: No field means 0. This keeps old claims usable only for a TP with no clause.
  */
-const CLAIM_LINE_RE = Object.freeze(/^- (?<target>TP-(?<tp>200|1[0-9]{2}|[1-9][0-9]?)|gate:(?<gate>validate|qa)) (?<outcome>PASS|FAIL|SKIP) sha:(?<sha>[0-9a-f]{40}) by:(?<by>test|validate)(?: exit:(?<exit>25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9]))?$/);
+const CLAIM_LINE_RE = Object.freeze(/^- (?:(?<target>TP-(?<tp>200|1[0-9]{2}|[1-9][0-9]?))(?: expect-exit:(?<expectedExit>12[0-5]|1[01][0-9]|[1-9][0-9]?))?|(?<gateTarget>gate:(?<gate>validate|qa))) (?<outcome>PASS|FAIL|SKIP) sha:(?<sha>[0-9a-f]{40}) by:(?<by>test|validate)(?: exit:(?<exit>25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9]))?$/);
 
 /**
  * One evidence-exception line. Identical to the Code agent's paste gate for
@@ -262,7 +263,7 @@ const TRUSTED_PERMISSIONS = Object.freeze(['admin', 'write']);
  * @typedef {{ tps: readonly Tp[] }} Plan
  *
  * @typedef {{ target: string, tp: number | null, gate: 'validate' | 'qa' | null,
- *   outcome: Outcome, sha: string, by: 'test' | 'validate', exit: number | null }} Claim
+ *   outcome: Outcome, sha: string, by: 'test' | 'validate', exit: number | null, expectedExit: number }} Claim
  * @typedef {{ tp: Map<number, Claim>, gates: { validate: Claim | null, qa: Claim | null },
  *   malformed: number, truncated: boolean }} Claims
  *
@@ -489,13 +490,14 @@ function parseClaimLine(line) {
   if (m === null || m.groups === undefined) return null;
   const g = m.groups;
   return Object.freeze({
-    target: g.target,
+    target: g.target ?? g.gateTarget,
     tp: g.tp === undefined ? null : Number(g.tp),
     gate: g.gate === undefined ? null : /** @type {'validate' | 'qa'} */ (g.gate),
     outcome: /** @type {Outcome} */ (g.outcome),
     sha: g.sha,
     by: /** @type {'test' | 'validate'} */ (g.by),
     exit: g.exit === undefined ? null : Number(g.exit),
+    expectedExit: g.expectedExit === undefined ? 0 : Number(g.expectedExit),
   });
 }
 

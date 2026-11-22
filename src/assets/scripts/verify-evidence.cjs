@@ -1713,7 +1713,9 @@ function runsAt(io, memo, sha) {
 // ---------------------------------------------------------------------------
 
 /**
- * @typedef {{ plan: { tps: readonly any[] } | null, claims: Map<number, object>, exceptions: readonly any[] | null,
+ * @typedef {import('./pr-evidence.cjs').Tp} Tp
+ * @typedef {import('./pr-evidence.cjs').Claim} Claim
+ * @typedef {{ plan: { tps: readonly Tp[] } | null, claims: Map<number, Claim>, exceptions: readonly any[] | null,
  *   malformed: number }} EvidenceInput
  */
 
@@ -1788,9 +1790,10 @@ function bodyPlan(body) {
  * contradicts its state.
  *
  * @param {any} record  a parseEvidenceComment TpRecord
- * @returns {object | null}  a Claim, or null for no claim
+ * @param {number} expectedExit  from the TP line that matches the record's hash
+ * @returns {Claim | null}  a Claim, or null for no claim
  */
-function recordClaim(record) {
+function recordClaim(record, expectedExit) {
   if (record.sha === null) return null;
   return Object.freeze({
     target: 'TP-' + record.id,
@@ -1800,6 +1803,7 @@ function recordClaim(record) {
     sha: record.sha,
     by: 'test',
     exit: record.exit,
+    expectedExit,
   });
 }
 
@@ -1808,7 +1812,7 @@ function recordClaim(record) {
 // ---------------------------------------------------------------------------
 
 /**
- * @typedef {{ tp: any, hash: string, recorded: boolean, claim: object | null,
+ * @typedef {{ tp: Tp, hash: string, recorded: boolean, claim: Claim | null,
  *   textMatches: boolean | undefined, forceIndeterminate: boolean }} TpInput
  *   `recorded`: the trusted record carries this TP with the same text hash.
  */
@@ -1915,16 +1919,14 @@ function publicationMode(publication) {
 
 /**
  * The claims, hashes and text checks for every TP of the plan (D-VERIFY-RECORD):
- * a file claim wins; else the trusted record's, when the record's `h:` equals the
- * TP's hash. A body-sourced TP's text counts only when that hash matches — and a
- * claim attaches only to text that counts: body text that fails the check gets no
- * claim at all, not even the file's. The file's claim was made against the text
- * the record published, not this text, and a record binding the two would pass
- * the next refresh's hash check and launder the claim onto it. A TP whose record
+ * A file claim takes precedence. If its expected exit differs from the TP's, attach no claim.
+ * With no file claim, use the trusted record's when its `h:` equals the TP's hash.
+ * For a TP from the body, require that hash match even with a file claim.
+ * Do not carry a claim that fails either check into a new record. A TP whose record
  * is unknown (D-VERIFY-THROTTLE) gets no claim either. Null when a TP line fails
  * its grammar (the hash is refused).
  *
- * @param {{ tps: readonly any[] }} plan
+ * @param {{ tps: readonly Tp[] }} plan
  * @param {EvidenceInput | null} evidence
  * @param {TrustedRecord} record
  * @param {boolean} fromFile
@@ -1944,9 +1946,9 @@ function tpInputs(plan, evidence, record, fromFile) {
     // D-VERIFY-THROTTLE: when the record itself is unknown, so is every claim or
     // text check that would have come from it.
     const forceIndeterminate = record.kind === 'unknown' && (!fromFile || fileClaim === undefined);
-    const claim = textMatches === false || forceIndeterminate ? null
-      : fileClaim !== undefined ? fileClaim
-        : recordApplies ? recordClaim(rec) : null;
+    const bindMismatch = fileClaim !== undefined && fileClaim.expectedExit !== tp.expectedExit;
+    const candidate = fileClaim ?? (recordApplies ? recordClaim(rec, tp.expectedExit) : null);
+    const claim = textMatches === false || forceIndeterminate || bindMismatch ? null : candidate;
     inputs.push({ tp, hash: hash.value, recorded: recordApplies, claim, textMatches, forceIndeterminate });
   }
   return inputs;
@@ -3582,16 +3584,16 @@ function claimInserted(text, inserted, lines) {
 }
 
 /**
- * The TPs the plan lists, each with its method: the `## Test Plan` of the `--plan` file,
- * else of the evidence file. A plan with no TP line, or no plan section, lists none. A
+ * The TPs the plan lists: the `## Test Plan` of the `--plan` file, else of the evidence file.
+ * A plan with no TP line, or no plan section, lists none. A
  * `--plan` file that cannot serve as a plan gives its cause instead: it cannot be read, or
  * the planCause of its grammar error.
  *
  * @param {Extract<ParsedArgs, { kind: 'claim' }>} args
  * @param {EvidenceInput} evidence
- * @returns {{ ok: true, value: Map<number, string> } | { ok: false, cause: string }}  TP number to method
+ * @returns {{ ok: true, value: Map<number, Tp> } | { ok: false, cause: string }}  TP number to plan entry
  */
-function claimPlanIds(args, evidence) {
+function claimPlanTps(args, evidence) {
   let plan = evidence.plan;
   if (args.plan !== null) {
     const text = readTextFile(args.plan);
@@ -3600,7 +3602,7 @@ function claimPlanIds(args, evidence) {
     if (!parsed.ok && parsed.error.code !== 'empty') return { ok: false, cause: planCause(text, parsed.error) };
     plan = parsed.ok ? parsed.value : { tps: [] };
   }
-  return { ok: true, value: new Map((plan === null ? [] : plan.tps).map(tp => [tp.id, tp.method])) };
+  return { ok: true, value: new Map((plan === null ? [] : plan.tps).map(tp => [tp.id, tp])) };
 }
 
 /**
@@ -3609,7 +3611,7 @@ function claimPlanIds(args, evidence) {
  * no exit (none was given, or the one given is not a number from 0 to 255). A local PASS
  * needs the exit code its TP line expects. Return the TP numbers in ascending order.
  *
- * @param {Map<number, string>} listed  TP number to method
+ * @param {Map<number, Tp>} listed  TP number to plan entry
  * @param {readonly string[]} lines  the claim lines this run writes
  * @returns {number[]}
  */
@@ -3617,7 +3619,7 @@ function localNoExitIds(listed, lines) {
   const parsed = PE.parseClaims(lines.join('\n'));
   if (!parsed.ok) return [];
   return [...parsed.value.tp.values()]
-    .filter(c => c.outcome === 'PASS' && c.exit === null && listed.get(c.tp) === 'local')
+    .filter(c => c.outcome === 'PASS' && c.exit === null && c.tp !== null && listed.get(c.tp)?.method === 'local')
     .map(c => Number(c.tp))
     .sort((a, b) => a - b);
 }
@@ -3667,7 +3669,7 @@ function runClaim(io, args) {
   const headings = text.split('\n').map(row => row.replace(/\r$/, '')).filter(row => row === '##' || row.startsWith('## '));
   const hasSection = headings.includes(PE.CLAIMS_HEADING);
   const sectionFollowed = hasSection && headings[headings.length - 1] !== PE.CLAIMS_HEADING;
-  const plan = args.gate ? { ok: true, value: new Map() } : claimPlanIds(args, evidence);
+  const plan = args.gate ? { ok: /** @type {const} */ (true), value: new Map() } : claimPlanTps(args, evidence);
   if (!plan.ok) return claimRefusal(io, 'plan file unusable', plan.cause);
   const listed = plan.value;
 
@@ -3679,8 +3681,10 @@ function runClaim(io, args) {
     tally.PASS++;
   }
   for (const tp of args.tps) {
-    if (!listed.has(tp.id)) continue;
-    const bare = '- TP-' + tp.id + ' ' + tp.outcome + ' sha:' + args.head + ' by:test';
+    const expectedExit = listed.get(tp.id)?.expectedExit;
+    if (expectedExit === undefined) continue;
+    const bind = expectedExit === 0 ? '' : ' expect-exit:' + expectedExit;
+    const bare = '- TP-' + tp.id + bind + ' ' + tp.outcome + ' sha:' + args.head + ' by:test';
     const withExit = tp.exit === null ? bare : bare + ' exit:' + tp.exit;
     lines.push(claimLine(claimLineOk(withExit) ? withExit : bare));
     tally[tp.outcome]++;

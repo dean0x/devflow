@@ -1448,7 +1448,8 @@ describe('the notes that name why a TP did not verify', () => {
     [undefined, 'UNVERIFIED', ['local-no-exit']],
   ] as const)('a local TP that expects exit 1 gives %s → %s with these notes: %j', (exit, state, notes) => {
     const line = `${LOCAL} [expect-exit: 1]`
-    const v = verifyScn({ scn: {}, evidence: evidenceFile([line], [claimLine(1, 'PASS', HEAD, exit)]) })
+    const claim = claimLine(1, 'PASS', HEAD, exit).replace('TP-1 ', 'TP-1 expect-exit:1 ')
+    const v = verifyScn({ scn: {}, evidence: evidenceFile([line], [claim]) })
     expect(v.code, v.stderr).toBe(0)
     expect(v.states.get(1)).toBe(state)
     expect(notesOf(v.stderr)).toEqual(notes)
@@ -1524,12 +1525,13 @@ describe('evidence mode merges the file over the record', () => {
     expect(v.states.get(2)).toBe('UNVERIFIED')
   })
 
-  it('known limit: a file claim follows its TP number after an expected-exit edit', () => {
+  it('an old claim still applies without a clause, but not after an expected exit is added', () => {
     const claims = [claimLine(2, 'PASS', HEAD, 1)]
     const verifyLine = (line: string): VerifyRun => verifyScn({ scn: {}, evidence: evidenceFile([line], claims) })
     expect(verifyLine(LOCAL).states.get(2)).toBe('FAILED')
-    expect(verifyLine(`${LOCAL} [expect-exit: 1]`).states.get(2)).toBe('ATTESTED-LOCAL')
-    expect(verifyLine(`${LOCAL} [expect-exit: 2]`).states.get(2)).toBe('FAILED')
+    const edited = verifyLine(`${LOCAL} [expect-exit: 1]`)
+    expect(edited.states.get(2)).toBe('UNVERIFIED')
+    expect(edited.records[0]).toMatchObject({ sha: null, outcome: null, exit: null })
   })
 
   it('a file with claims but no plan takes the plan from the body block (hash-checked)', () => {
@@ -2723,6 +2725,19 @@ describe('claim — appends the claim lines of a report to the evidence file', (
       expect(read(file)).toBe(evidenceFile(PLAN, [
         `- TP-3 SKIP sha:${HEAD} by:test`, claimLine(1, 'PASS', HEAD, 0), claimLine(2, 'FAIL', HEAD, 1),
       ]))
+    })
+
+    it.each([false, true])('binds the expected exit from the plan (--plan: %s)', separate => {
+      const line = `${PLAN[0]} [expect-exit: 1]`
+      const file = fileWith(separate ? '## Claims\n' : evidenceFile([line]))
+      const plan = separate ? ['--plan', fileWith(`## Test Plan\n${line}\n`, 'plan.md')] : []
+      const r = claim([...flags(file), ...plan, 'TP-1=PASS:1'])
+      expect(r).toMatchObject({ code: 0, stdout: 'CLAIM appended:1 PASS:1 FAIL:0 SKIP:0 skipped:0\n' })
+      const evidence = separate ? `${read(file)}\n## Test Plan\n${line}\n` : read(file)
+      const verifyLine = (tp: string): VerifyRun => verifyScn({ scn: {}, evidence: evidence.replace(line, tp) })
+      expect(verifyLine(line).states.get(1)).toBe('ATTESTED-LOCAL')
+      expect(verifyLine(line.replace(': 1]', ': 2]')).states.get(1)).toBe('UNVERIFIED')
+      expect(verifyLine(PLAN[0]).states.get(1)).toBe('UNVERIFIED')
     })
 
     it.each([

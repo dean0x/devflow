@@ -58,6 +58,7 @@ interface Claim {
   readonly sha: string
   readonly by: 'test' | 'validate'
   readonly exit: number | null
+  readonly expectedExit: number
 }
 interface Claims {
   readonly tp: ReadonlyMap<number, Claim>
@@ -629,6 +630,18 @@ describe('CLAIM_LINE_RE and parseClaims', () => {
   it.each(valid.map(v => [v]))('accepts %s', line => { expect(PE.CLAIM_LINE_RE.test(line)).toBe(true) })
   it.each(invalid)('rejects %s', (_, line) => { expect(PE.CLAIM_LINE_RE.test(line)).toBe(false) })
 
+  it('parses a canonical expected exit for a TP claim, separate from its actual exit', () => {
+    const c = unwrap(PE.parseClaims(`- TP-1 expect-exit:125 PASS sha:${SHA_A} by:test exit:2`))
+    expect(c.tp.get(1)).toMatchObject({ expectedExit: 125, exit: 2 })
+    expect(c.malformed).toBe(0)
+  })
+
+  it.each(['0', '126', '01', '-1', '1@x'])('rejects a claim bind of %s', expectedExit => {
+    const c = unwrap(PE.parseClaims(`- TP-1 expect-exit:${expectedExit} PASS sha:${SHA_A} by:test exit:1`))
+    expect(c.tp.size).toBe(0)
+    expect(c.malformed).toBe(1)
+  })
+
   it('the last valid claim per TP wins; gates are held apart; malformed lines are counted', () => {
     const text = [
       '## Claims',
@@ -641,7 +654,7 @@ describe('CLAIM_LINE_RE and parseClaims', () => {
       '',
     ].join('\r\n')
     const c = unwrap(PE.parseClaims(text))
-    expect(c.tp.get(1)).toEqual({ target: 'TP-1', tp: 1, gate: null, outcome: 'PASS', sha: SHA_B, by: 'test', exit: 0 })
+    expect(c.tp.get(1)).toEqual({ target: 'TP-1', tp: 1, gate: null, outcome: 'PASS', sha: SHA_B, by: 'test', exit: 0, expectedExit: 0 })
     expect(c.tp.get(2)?.outcome).toBe('SKIP')
     expect(c.tp.has(3)).toBe(false)
     expect(c.gates.validate?.sha).toBe(SHA_B)
