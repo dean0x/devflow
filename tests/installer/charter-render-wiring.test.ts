@@ -50,6 +50,7 @@ import {
 import { hudOnlyCharterPlugins, initCommand } from '../../src/cli/commands/init.js';
 import { charterPluginsAfterRemoval, runSelectivePhaseForScope } from '../../src/cli/commands/uninstall.js';
 import { makeManifest, testBackups } from '../helpers.js';
+import { systemManagedSettingsAtRisk } from '../helpers/managed-settings.js';
 import { assertTempHome } from '../setup/home-isolation.js';
 
 const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
@@ -367,10 +368,7 @@ describe('installViaFileCopy: the render is its own step after the script copy',
 // init --hud-only: the plugin set it renders for
 // ---------------------------------------------------------------------------
 
-it.each([
-  { command: 'init --hud-only', args: ['--hud-only'] },
-  { command: 'full init', args: ['--recommended', '--security', 'none', '--no-proxy'] },
-])('$command replaces the old quota reader with the saved tool path', async ({ args }) => {
+async function expectQuotaReaderReplacement(args: string[]): Promise<void> {
   const cwd = process.cwd();
   const savedOptions = initCommand.options.map(option => {
     const key = option.attributeName();
@@ -407,7 +405,15 @@ it.each([
       else initCommand.setOptionValueWithSource(key, value, source);
     }
   }
-});
+}
+
+it('init --hud-only replaces the old quota reader with the saved tool path', () =>
+  expectQuotaReaderReplacement(['--hud-only']),
+);
+
+it.skipIf(systemManagedSettingsAtRisk())('full init replaces the old quota reader with the saved tool path', () =>
+  expectQuotaReaderReplacement(['--recommended', '--security', 'none', '--no-proxy']),
+);
 
 describe('hudOnlyCharterPlugins: the record of the machine, or nothing', () => {
   it('no manifest, or one readManifest refused, is the empty set', () => {
