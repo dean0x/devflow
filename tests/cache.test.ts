@@ -16,11 +16,15 @@
  *   - parseRawEnvelope: shared envelope parser for raw-file readers
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import * as nodeFs from 'node:fs';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { readCache, writeCache, MAX_TTL_MS, parseRawEnvelope, modelCacheDir, hudCacheDir } from '../src/core/cache.js';
+
+vi.mock('node:fs', { spy: true });
 
 const IS_WIN32 = process.platform === 'win32';
 
@@ -135,6 +139,44 @@ describe('safeEntryPath — path containment guard', () => {
   });
 });
 
+describe('readCache — entry files', () => {
+  it.skipIf(IS_WIN32)('treats a symlink to a fresh entry as a miss', async () => {
+    await writeCache(cacheDir, 'target', { value: 'fresh' }, 60_000);
+    await fs.symlink(path.join(cacheDir, 'target.json'), path.join(cacheDir, 'link.json'));
+
+    expect(readCache(cacheDir, 'target', validateTestData)).toEqual({ value: 'fresh' });
+    expect(readCache(cacheDir, 'link', validateTestData)).toBeNull();
+  });
+
+  it.skipIf(IS_WIN32)('treats a FIFO as a miss without a blocking open or a read', async () => {
+    const fifo = path.join(cacheDir, 'pipe.json');
+    execFileSync('mkfifo', [fifo], { timeout: 5_000 });
+    const actualFs = await vi.importActual<typeof nodeFs>('node:fs');
+    const { O_NONBLOCK } = actualFs.constants;
+    // Force a safe open so a regression cannot block the test process.
+    const open = vi.spyOn(nodeFs, 'openSync').mockImplementation((file, flags, mode) =>
+      actualFs.openSync(file, Number(flags) | O_NONBLOCK, mode));
+    const read = vi.spyOn(nodeFs, 'readSync');
+    open.mockClear();
+    read.mockClear();
+    try {
+      expect(readCache(cacheDir, 'pipe', validateTestData)).toBeNull();
+      expect(open.mock.calls.every(([, flags]) => (Number(flags) & O_NONBLOCK) !== 0)).toBe(true);
+      expect(read).not.toHaveBeenCalled();
+    } finally {
+      open.mockRestore();
+      read.mockRestore();
+    }
+  });
+
+  it('treats a valid entry one byte over 2 MiB as a miss', async () => {
+    const envelope = JSON.stringify({ data: { value: 'fresh' }, timestamp: Date.now(), ttl: 60_000 });
+    await fs.writeFile(path.join(cacheDir, 'large.json'), envelope.padEnd(2 * 1024 * 1024 + 1));
+
+    expect(readCache(cacheDir, 'large', validateTestData)).toBeNull();
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Corrupt / hostile envelope — AC-S6
 // ---------------------------------------------------------------------------
@@ -222,11 +264,15 @@ describe.skipIf(IS_WIN32)('writeCache — permissions (AC-S5)', () => {
     expect(stat.mode & 0o777).toBe(0o700);
   });
 
-  it('writes cache entry at 0600', async () => {
-    await writeCache(cacheDir, 'perm-key', { value: 'x' }, 60_000);
+  it('writes an entry at 0600 even if the previous file had mode 0644', async () => {
     const filePath = path.join(cacheDir, 'perm-key.json');
-    const stat = await fs.stat(filePath);
-    expect(stat.mode & 0o777).toBe(0o600);
+    await fs.writeFile(filePath, 'old entry');
+    await fs.chmod(filePath, 0o644);
+
+    await writeCache(cacheDir, 'perm-key', { value: 'x' }, 60_000);
+
+    expect((await fs.stat(filePath)).mode & 0o777).toBe(0o600);
+    expect(readCache(cacheDir, 'perm-key', validateTestData)).toEqual({ value: 'x' });
   });
 });
 

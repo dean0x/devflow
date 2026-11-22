@@ -73,6 +73,10 @@ function isSupportedLength(value: unknown): value is 300 | 10080 {
   return value === 300 || value === 10080;
 }
 
+/**
+ * D-CODEX-WINDOW-BY-MINUTES: Identify Codex windows by length.
+ * Keep only 300- and 10080-minute windows. Skip other lengths without discarding supported windows.
+ */
 function parseUsage(value: unknown, now: number): CodexUsage | null {
   if (!isRecord(value) || value.schema !== 'tokenmeter.v1' || value.ok !== true) return null;
   const { data } = value;

@@ -367,9 +367,16 @@ describe('installViaFileCopy: the render is its own step after the script copy',
 // init --hud-only: the plugin set it renders for
 // ---------------------------------------------------------------------------
 
-it('init --hud-only replaces the old quota reader with the saved tool path', async () => {
+it.each([
+  { command: 'init --hud-only', args: ['--hud-only'] },
+  { command: 'full init', args: ['--recommended', '--security', 'none', '--no-proxy'] },
+])('$command replaces the old quota reader with the saved tool path', async ({ args }) => {
   const cwd = process.cwd();
-  const hudOnly: unknown = initCommand.getOptionValue('hudOnly');
+  const savedOptions = initCommand.options.map(option => {
+    const key = option.attributeName();
+    const value: unknown = initCommand.getOptionValue(key);
+    return { key, value, source: initCommand.getOptionValueSource(key) };
+  });
   const devflowDir = path.join(root, '.devflow');
   const state = path.join(devflowDir, 'tokenmeter.json');
   assertTempHome(root);
@@ -382,16 +389,23 @@ it('init --hud-only replaces the old quota reader with the saved tool path', asy
   vi.stubEnv('HOME', root);
   vi.stubEnv('USERPROFILE', root);
   process.chdir(root);
+  const exit = vi.spyOn(process, 'exit').mockImplementation(code => {
+    throw new Error(`init exited with code ${code}`);
+  });
   try {
-    await initCommand.parseAsync(['--hud-only'], { from: 'user' });
+    await initCommand.parseAsync(args, { from: 'user' });
 
     await expect(fs.lstat(retiredReader)).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(fs.readFile(state, 'utf8').then((text): unknown => JSON.parse(text)))
       .resolves.toEqual({ version: 1, binPath: expectedCodexBin() });
   } finally {
+    exit.mockRestore();
     process.chdir(cwd);
     vi.unstubAllEnvs();
-    initCommand.setOptionValue('hudOnly', hudOnly);
+    for (const { key, value, source } of savedOptions) {
+      if (source === undefined) initCommand.setOptionValue(key, value);
+      else initCommand.setOptionValueWithSource(key, value, source);
+    }
   }
 });
 

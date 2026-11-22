@@ -100,7 +100,7 @@ export interface UsageData {
 }
 
 /**
- * One Codex rate-limit window, identified by its length (D-CODEX-WINDOW-BY-MINUTES).
+ * One Codex rate-limit window. See D-CODEX-WINDOW-BY-MINUTES in `parseUsage` in `tokenmeter.ts`.
  */
 export interface CodexWindow {
   /** Window length in minutes. */

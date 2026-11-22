@@ -373,7 +373,7 @@ Configuration: `~/.devflow/hud.json` (`{ enabled, detail }`). Manage via `devflo
 
 The HUD reads `context_window.current_usage` and `rate_limits` from Claude Code's JSON stdin. For Codex quota, it runs `tokenmeter hud` from the path in `~/.devflow/tokenmeter.json` when the HUD cache expires. `devflow init` saves this path. The HUD omits the Codex segment if it cannot use the saved path or get a reading. See [HUD (Status Line)](../cli-reference.md#hud-status-line) for the refresh rules and the app-server switch.
 
-Each Git command has a 1-second deadline. The HUD has a 2-second deadline and shows the data it has.
+Each Git command has a 1-second deadline. If the HUD reaches its 2-second deadline, it prints nothing.
 
 ## Namespace Ownership and Orphan Sweep
 
