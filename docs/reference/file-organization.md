@@ -371,7 +371,9 @@ The HUD (`dist/hud/index.js`) is a configurable TypeScript status line. The fixe
 
 Configuration: `~/.devflow/hud.json` (`{ enabled, detail }`). Manage via `devflow hud --status | --enable | --disable | --detail | --no-detail`.
 
-Data source: `context_window.current_usage` and `rate_limits` from Claude Code's JSON stdin. The Codex quota segment reads the newest rate-limit record from `~/.codex/sessions` and from the optional Devflow proxy quota snapshot (path in `codexSnapshotFile`), whichever was observed last (local files only: no credential file, no network). It is hidden when neither holds a recent record. Git data gathered with 1s per-command timeout. Overall 2s timeout with graceful degradation.
+The HUD reads `context_window.current_usage` and `rate_limits` from Claude Code's JSON stdin. For Codex quota, it runs `tokenmeter hud` from the path in `~/.devflow/tokenmeter.json` when the HUD cache expires. `devflow init` saves this path. The HUD omits the Codex segment if it cannot use the saved path or get a reading. See [HUD (Status Line)](../cli-reference.md#hud-status-line) for the refresh rules and the app-server switch.
+
+Each Git command has a 1-second deadline. The HUD has a 2-second deadline and shows the data it has.
 
 ## Namespace Ownership and Orphan Sweep
 
@@ -449,6 +451,7 @@ Skills are removed individually rather than by namespace directory, because `~/.
 | Logs | `~/.devflow/logs/` | Per-project hook logs (capped at the 200 most recently written folders) + `proxy.log` |
 | Costs | `~/.devflow/costs/` | Session cost history |
 | Cache | `~/.devflow/cache/` | Model-discovery and HUD component caches |
+| Codex quota tool path | `~/.devflow/tokenmeter.json` | Path that the HUD uses to run `tokenmeter hud` |
 | Proxy state | `~/.devflow/proxy.json`, `proxy-routing.json`, `proxy.pid`, `.proxy-spawn.lock/` | Relay runtime state |
 | Manifest lock | `~/.devflow/manifest.json.lock/`, `manifest.json.lock.stale-<pid>-<12 hex>/` | A lock directory (it holds one `holder` token file) that a crash, or a failed cleanup of a stale break, leaves behind. Only a real directory of exactly that name goes |
 

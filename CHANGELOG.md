@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The HUD uses tokenmeter for Codex quota.** tokenmeter checks recent session logs and can start `codex app-server` in the background at most once per minute per data folder. The HUD shows the data age from 10 minutes. If tokenmeter cannot find Codex, log data at least 10 minutes old does not show.
+
+### Removed
+
+- The Devflow proxy quota snapshot reader in the HUD.
+
+### Upgrade notes
+
+- After the upgrade, run `devflow init` again to install the HUD and save the tool path.
+
 ---
 
 ## [3.19.3] - 2026-11-20
