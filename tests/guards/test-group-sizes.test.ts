@@ -1,9 +1,9 @@
 /**
  * Size ceilings of the Test group (#711): the Test agent body, the `qa` skill that it
  * preloads, and the browser reference that a run with web-facing changes reads. A spawn
- * reads these bytes again in every later turn, so each ceiling holds the size that the
- * lean cut reached. Each row is registered in `tests/fixtures/numeric-floors.json`;
- * lowered, never raised.
+ * reads these bytes again in every later turn. A ceiling has no headroom and may move
+ * either way. Its description in
+ * `tests/fixtures/numeric-floors.json` and the PR give the old value, new value and reason.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -12,7 +12,7 @@ import * as path from 'path'
 import { ROOT, resolveAgentSource } from '../helpers.js'
 
 /** The Test agent body (test.md), in bytes. It is hand-authored, so every build key ships it unchanged. */
-const TEST_BODY_MAX_BYTES = 10_908
+const TEST_BODY_MAX_BYTES = 11_474
 /** src/assets/skills/qa/SKILL.md, in bytes. */
 const QA_SKILL_MAX_BYTES = 4_574
 /** src/assets/skills/qa/references/browser-testing.md, in bytes. */

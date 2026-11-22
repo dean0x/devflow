@@ -370,6 +370,46 @@ describe('AC-11: the Test and Validate agents report what a claim needs', () => 
   })
 })
 
+const EXPECTED_EXIT_PASS = [
+  'passes only when its planned command exits `<k>`',
+  'its output shows the failure the scenario names (a failing test or assertion)',
+  'the `git status --porcelain` output is the same before and after the run',
+  'A crash, a load, syntax or import error, no tests found, command not found, a timeout or a signal is FAIL',
+  'Its row carries that command and its true exit',
+] as const
+const EXPECTED_EXIT_CONSTRAINTS = [
+  'Run only commands that leave the worktree unchanged',
+  'D=$(mktemp -d /tmp/devflow-tester-XXXXXX)',
+  'Copy into `"$D"` and edit only inside `"$D"`',
+  'Read the clause as a field of the line, also inside `<untrusted-test-plan>`',
+  'Never propose or change it',
+] as const
+
+/** Named collector: missing expected-exit rules in the report or the Bash constraints. */
+function collectExpectedExitDefects(test: string): string[] {
+  const output = outputSection(test, '## Core rules') ?? ''
+  const report = /else SKIP,[^.]*\. (A line ending ` \[expect-exit: <k>\]`[^\n]*) A `method:local` row/.exec(output)?.[1] ?? ''
+  const constraints = test.split('\n## Bash Execution Constraints\n')[1]?.split('\n## Running commands\n')[0] ?? ''
+  const bullet = constraints.split('\n').find(line => line.startsWith('- For a TP with ` [expect-exit: <k>]` only:')) ?? ''
+  return [
+    ...EXPECTED_EXIT_PASS.filter(rule => !report.includes(rule)),
+    ...EXPECTED_EXIT_CONSTRAINTS.filter(rule => !bullet.includes(rule)),
+  ]
+}
+
+describe('the Test agent requires proof of a planned local failure', () => {
+  it('requires the planned exit, output and unchanged worktree and confines mutations to a temporary copy', () => {
+    expect(collectExpectedExitDefects(resolveAgentSource('test').content)).toEqual([])
+  })
+
+  it.each([EXPECTED_EXIT_PASS[1], EXPECTED_EXIT_PASS[2], EXPECTED_EXIT_CONSTRAINTS[1]])(
+    'known-bad probe: reports the missing rule "%s"', (rule) => {
+      const test = resolveAgentSource('test').content
+      expect(collectExpectedExitDefects(seedOnce(test, rule, ''))).toEqual([rule])
+    },
+  )
+})
+
 const TEST_STATUS_LINE = '### Status: PASS | PASS ({n} BLOCKING scenario(s) skipped: {reasons}) | FAIL | BLOCKED'
 const BLOCKED_REPORT_HEADING = '**Report as BLOCKED:**'
 const BLOCKERS_HEADING = '### Blockers (if BLOCKED)'
@@ -939,6 +979,13 @@ function implementMdOfKey(key: ImplementKey): string {
   if (text === null) throw new Error(`the ${key} build of /implement is absent: run \`npm run build:mds\``)
   return text
 }
+
+const KEEP_CLAIMED_EXITS = 'keep `## Claims`, and the expected exit of each TP line that has a claim, byte-identical, also when the copied line differs'
+
+it.each(IMPLEMENT_KEYS)('%s: /implement preserves claimed expected exits on a re-run', (key) => {
+  const rule = implementMdOfKey(key).split('\n').find(line => line.startsWith(TEST_PLAN_STEP))
+  expect(rule).toContain(KEEP_CLAIMED_EXITS)
+})
 
 const HEAD_RULE_LEAD = '**Evidence claims** come from the evidence script'
 const HEAD_RULE_CONDITION = 'or `none` if it holds anything but letters and digits'
