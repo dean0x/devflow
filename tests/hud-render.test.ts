@@ -110,11 +110,22 @@ describe('render', () => {
     expect(capacityLine).toMatch(/5h .{8} 30% \u00B7 Codex 7d .{8} 12% \(1d\) \u00B7 1\/2 todos$/);
   });
 
-  it('omits the Codex segment when there is no Codex data', async () => {
+  it('keeps the Claude capacity line and session cost when Codex data is absent', async () => {
     const ctx = makeCtx({
-      usage: { fiveHourPercent: 30, sevenDayPercent: null, fiveHourResetsAt: null, sevenDayResetsAt: null },
+      stdin: {
+        model: { display_name: 'Claude Opus 4' },
+        context_window: { context_window_size: 200000, used_percentage: 20 },
+        cost: { total_cost_usd: 1.25 },
+      },
+      usage: { fiveHourPercent: 30, sevenDayPercent: 60, fiveHourResetsAt: null, sevenDayResetsAt: null },
+      codexUsage: null,
     });
-    expect(stripAnsi(await render(ctx))).not.toContain('Codex');
+    const lines = stripAnsi(await render(ctx)).split('\n');
+
+    expect(lines).toHaveLength(3);
+    expect(lines[1]).toMatch(/^Context .{8} 20% · 5h .{8} 30% · 7d .{8} 60%$/);
+    expect(lines[2]).toBe('Opus 4 [200k] · $1.25');
+    expect(lines.join('\n')).not.toContain('Codex');
   });
 
   it('renders todos at the end of the capacity line', async () => {
