@@ -88,6 +88,14 @@ Context ████░░░░ 42% · 5h ████░░░░ 45% (2h 15m)
 Opus 4.6 (1M) · 3 MCPs 2 rules · $1.42 · $18.50/wk · $62.30/mo
 ```
 
+For Codex limits, the HUD runs `tokenmeter hud` when its cache expires, usually after 30 seconds. tokenmeter checks recent Codex session logs in the background. By default, tokenmeter can start `codex app-server` at most about once per minute per data folder. Codex can then use its stored sign-in to request the limits from OpenAI over HTTP.
+
+To stop the app server and keep the log source, run `npx @dean0x/tokenmeter@0.2.0 config app_server off`.
+
+The HUD shows the age of data that is at least 10 minutes old. If tokenmeter cannot find Codex on `PATH`, log data at least 10 minutes old does not show. If neither source has data, the HUD omits the Codex segment.
+
+After an upgrade, run `devflow init` again. See the [HUD reference](https://github.com/dean0x/devflow/blob/main/docs/cli-reference.md#hud-status-line).
+
 **Security.** Deny lists block dangerous tool patterns out of the box — configurable during init and toggleable any time with `devflow security` (`--enable`/`--disable`/`--status`).
 
 ## Quick Start

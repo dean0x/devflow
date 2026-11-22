@@ -16,11 +16,15 @@
  *   - parseRawEnvelope: shared envelope parser for raw-file readers
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import * as nodeFs from 'node:fs';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { readCache, writeCache, MAX_TTL_MS, parseRawEnvelope, modelCacheDir, hudCacheDir } from '../src/core/cache.js';
+
+vi.mock('node:fs', { spy: true });
 
 const IS_WIN32 = process.platform === 'win32';
 
@@ -91,6 +95,19 @@ describe('readCache — TTL expiry', () => {
     expect(result).toBeNull();
   });
 
+  it('uses the supplied write timestamp up to, but not at, expiry', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_999);
+    const value = { value: 'ok' };
+    try {
+      await writeCache(cacheDir, 'key', value, 1_000, 1_000);
+      expect(readCache(cacheDir, 'key', validateTestData)).toEqual(value);
+      clock.mockReturnValue(2_000);
+      expect(readCache(cacheDir, 'key', validateTestData)).toBeNull();
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('returns value when still within TTL', async () => {
     await writeCache(cacheDir, 'fresh', { value: 'ok' }, 60_000);
     const result = readCache<TestData>(cacheDir, 'fresh', validateTestData);
@@ -132,6 +149,45 @@ describe('safeEntryPath — path containment guard', () => {
     await writeCache(cacheDir, 'simple-key', { value: 'ok' }, 60_000);
     const result = readCache<TestData>(cacheDir, 'simple-key', validateTestData);
     expect(result).toEqual({ value: 'ok' });
+  });
+});
+
+describe('readCache — entry files', () => {
+  it.skipIf(IS_WIN32)('treats a symlink to a fresh entry as a miss', async () => {
+    await writeCache(cacheDir, 'target', { value: 'fresh' }, 60_000);
+    await fs.symlink(path.join(cacheDir, 'target.json'), path.join(cacheDir, 'link.json'));
+
+    expect(readCache(cacheDir, 'target', validateTestData)).toEqual({ value: 'fresh' });
+    expect(readCache(cacheDir, 'link', validateTestData)).toBeNull();
+  });
+
+  it.skipIf(IS_WIN32)('treats a FIFO as a miss without a blocking open or a read', async () => {
+    const fifo = path.join(cacheDir, 'pipe.json');
+    execFileSync('mkfifo', [fifo], { timeout: 5_000 });
+    const actualFs = await vi.importActual<typeof nodeFs>('node:fs');
+    const { O_NONBLOCK } = actualFs.constants;
+    // Force a safe open so a regression cannot block the test process.
+    const open = vi.spyOn(nodeFs, 'openSync').mockImplementation((file, flags, mode) =>
+      actualFs.openSync(file, Number(flags) | O_NONBLOCK, mode));
+    const read = vi.spyOn(nodeFs, 'readSync');
+    open.mockClear();
+    read.mockClear();
+    try {
+      expect(readCache(cacheDir, 'pipe', validateTestData)).toBeNull();
+      expect(open).toHaveBeenCalledTimes(1);
+      expect(Number(open.mock.calls[0]?.[1]) & O_NONBLOCK).not.toBe(0);
+      expect(read).not.toHaveBeenCalled();
+    } finally {
+      open.mockRestore();
+      read.mockRestore();
+    }
+  });
+
+  it('treats a valid entry one byte over 2 MiB as a miss', async () => {
+    const envelope = JSON.stringify({ data: { value: 'fresh' }, timestamp: Date.now(), ttl: 60_000 });
+    await fs.writeFile(path.join(cacheDir, 'large.json'), envelope.padEnd(2 * 1024 * 1024 + 1));
+
+    expect(readCache(cacheDir, 'large', validateTestData)).toBeNull();
   });
 });
 
@@ -222,11 +278,15 @@ describe.skipIf(IS_WIN32)('writeCache — permissions (AC-S5)', () => {
     expect(stat.mode & 0o777).toBe(0o700);
   });
 
-  it('writes cache entry at 0600', async () => {
-    await writeCache(cacheDir, 'perm-key', { value: 'x' }, 60_000);
+  it('writes an entry at 0600 even if the previous file had mode 0644', async () => {
     const filePath = path.join(cacheDir, 'perm-key.json');
-    const stat = await fs.stat(filePath);
-    expect(stat.mode & 0o777).toBe(0o600);
+    await fs.writeFile(filePath, 'old entry');
+    await fs.chmod(filePath, 0o644);
+
+    await writeCache(cacheDir, 'perm-key', { value: 'x' }, 60_000);
+
+    expect((await fs.stat(filePath)).mode & 0o777).toBe(0o600);
+    expect(readCache(cacheDir, 'perm-key', validateTestData)).toEqual({ value: 'x' });
   });
 });
 

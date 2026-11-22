@@ -1028,6 +1028,7 @@ export function installArtifactPaths(devflowDir: string): ReadonlyArray<InstallA
     // The whole costs/ tree is removed so sessions/ and archive.jsonl cannot
     // drift from their write sites in src/hud/cost-history.ts.
     { relPath: 'costs', isDir: true },
+    { relPath: 'tokenmeter.json' },
     // proxy artifacts
     { relPath: 'proxy.json' },
     { relPath: 'proxy-routing.json' },
@@ -1078,8 +1079,7 @@ export function installArtifactPaths(devflowDir: string): ReadonlyArray<InstallA
 }
 
 /**
- * Remove Devflow install artifacts from devflowDir: manifest.json, migrations.json,
- * proxy artifacts, logs/, costs/, and cache/.
+ * Remove the manifest and the files and directories in {@link installArtifactPaths}.
  * The scripts/ directory is already removed by removeAllDevFlow.
  *
  * Used for:
