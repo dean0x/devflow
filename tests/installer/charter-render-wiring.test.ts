@@ -54,7 +54,14 @@ import { makeManifest, testBackups } from '../helpers.js';
 import { systemManagedSettingsAtRisk } from '../helpers/managed-settings.js';
 import { assertTempHome } from '../setup/home-isolation.js';
 
+vi.mock('node:module', async (importOriginal) => {
+  const original = await importOriginal<typeof import('node:module')>();
+  return { ...original, createRequire: vi.fn(original.createRequire) };
+});
+
 const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
+const CODEX_PATH_WARNING = 'The HUD cannot use the saved Codex usage tool path. ' +
+  'Reinstall devflow-kit with umask 022 or in a trusted location. Run devflow init again.';
 
 const SOURCE = readFileSync(path.join(packagedScriptsDir(), CHARTER_RELPATH), 'utf-8');
 
@@ -86,6 +93,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.mocked(createRequire).mockReset();
   await fs.rm(root, { recursive: true, force: true });
 });
 
@@ -369,7 +377,23 @@ describe('installViaFileCopy: the render is its own step after the script copy',
 // init --hud-only: the plugin set it renders for
 // ---------------------------------------------------------------------------
 
-async function expectQuotaReaderReplacement(args: string[]): Promise<void> {
+async function makeCodexPackage(mode: number): Promise<string> {
+  const fixture = await fs.realpath(root);
+  const pkg = path.join(fixture, 'node_modules', '@dean0x/tokenmeter');
+  const entry = 'bin/tokenmeter.js';
+  await fs.mkdir(path.join(pkg, 'bin'), { recursive: true, mode: 0o700 });
+  await fs.mkdir(path.join(pkg, 'dist'), { mode: 0o700 });
+  await fs.writeFile(path.join(pkg, entry), '', { mode: 0o600 });
+  await fs.writeFile(path.join(pkg, 'package.json'), JSON.stringify({ bin: { tokenmeter: entry } }));
+  await fs.chmod(pkg, mode);
+  vi.mocked(createRequire).mockReturnValueOnce(createRequire(path.join(fixture, 'package.json')));
+  return path.join(pkg, entry);
+}
+
+async function expectQuotaReaderReplacement(
+  args: string[],
+  expectedBin = expectedCodexBin(),
+): Promise<void> {
   const cwd = process.cwd();
   const savedOptions = initCommand.options.map(option => {
     const key = option.attributeName();
@@ -396,7 +420,7 @@ async function expectQuotaReaderReplacement(args: string[]): Promise<void> {
 
     await expect(fs.lstat(retiredReader)).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(fs.readFile(state, 'utf8').then((text): unknown => JSON.parse(text)))
-      .resolves.toEqual({ version: 1, binPath: expectedCodexBin() });
+      .resolves.toEqual({ version: 1, binPath: expectedBin });
   } finally {
     exit.mockRestore();
     process.chdir(cwd);
@@ -412,16 +436,27 @@ it('init --hud-only replaces the old quota reader with the saved tool path', () 
   expectQuotaReaderReplacement(['--hud-only']),
 );
 
-it.skipIf(systemManagedSettingsAtRisk())('full init replaces the old quota reader with the saved tool path', async () => {
+it.skipIf(systemManagedSettingsAtRisk()).each([
+  { name: 'trusted', mode: 0o755, expectedWarnings: [] },
+  { name: 'group-writable', mode: 0o775, expectedWarnings: [CODEX_PATH_WARNING] },
+])('full init completes and reports Codex usage for a $name package', async ({ mode, expectedWarnings }) => {
+  const binPath = await makeCodexPackage(mode);
   const managedPath = path.join(root, 'managed-settings.json');
   await fs.writeFile(managedPath, JSON.stringify({ permissions: { deny: ['Bash(sudo *)'] } }));
   const managedPathSpy = vi.spyOn(claudePaths, 'getManagedSettingsPath').mockReturnValue(managedPath);
+  const warnings: string[] = [];
+  const warn = vi.spyOn(p.log, 'warn').mockImplementation((message) => {
+    warnings.push(message);
+  });
   try {
-    await expectQuotaReaderReplacement(['--recommended', '--security', 'none', '--no-proxy']);
+    await expectQuotaReaderReplacement(['--recommended', '--security', 'none', '--no-proxy'], binPath);
   } finally {
+    warn.mockRestore();
     managedPathSpy.mockRestore();
   }
 
+  expect(warnings.filter(message => message.includes('Codex usage'))).toEqual(expectedWarnings);
+  expect((await fs.stat(path.dirname(path.dirname(binPath)))).mode & 0o777).toBe(mode);
   await expect(fs.lstat(managedPath)).rejects.toMatchObject({ code: 'ENOENT' });
 });
 

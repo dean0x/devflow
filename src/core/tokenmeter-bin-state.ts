@@ -42,7 +42,7 @@ function isTrusted(stat: PathStat, uid: number): boolean {
   return (stat.uid === uid || stat.uid === 0) && (stat.mode & 0o022) === 0;
 }
 
-/** D-TOKENMETER-BIN-TRUST: Check the saved path again before each HUD spawn. */
+/** D-TOKENMETER-BIN-TRUST: Check the saved path after init writes it and before each HUD spawn. */
 export function readTokenmeterBin(devflowDir: string, deps: BinReadDeps = {}): string | null {
   const uid = process.getuid?.();
   if (uid === undefined || !fs.constants.O_NOFOLLOW) return null;

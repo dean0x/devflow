@@ -317,6 +317,7 @@ d .devflow/scripts/core/
 - .devflow/scripts/core/observations.js
 - .devflow/scripts/core/paths.js
 - .devflow/scripts/core/project-paths.js
+- .devflow/scripts/core/tokenmeter-bin-state.js
 - .devflow/scripts/core/tracked-areas.js
 d .devflow/scripts/hooks/
 d .devflow/scripts/hooks/assets/
@@ -384,7 +385,6 @@ d .devflow/scripts/hud/components/
 - .devflow/scripts/hud/index.js
 - .devflow/scripts/hud/render.js
 - .devflow/scripts/hud/stdin.js
-- .devflow/scripts/hud/tokenmeter-bin.js
 - .devflow/scripts/hud/tokenmeter.js
 - .devflow/scripts/hud/transcript.js
 d .devflow/scripts/lib/

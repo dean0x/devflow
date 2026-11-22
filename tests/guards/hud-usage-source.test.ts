@@ -8,7 +8,7 @@ const CLI_REFERENCE = 'docs/cli-reference.md';
 const FILE_ORGANIZATION = 'docs/reference/file-organization.md';
 const CHANGELOG = 'CHANGELOG.md';
 const BIN_OWNER = 'src/core/tokenmeter-bin.ts';
-const BIN_READER = 'src/hud/tokenmeter-bin.ts';
+const BIN_READER = 'src/core/tokenmeter-bin-state.ts';
 const PACKAGE = '@dean0x/tokenmeter';
 const read = (file: string): string => readFileSync(join(ROOT, file), 'utf8');
 const entry = (relPath: string): CorpusEntry => ({ relPath, content: read(relPath) });
@@ -108,7 +108,7 @@ describe('HUD Codex usage source', () => {
   it('does not open network connections or read credential files from the HUD or its bin modules', () => {
     const hud = hudSources();
     expect(hud.length).toBeGreaterThan(0);
-    expectClean([...hud, entry(BIN_OWNER)], matches(NETWORK_OR_CREDENTIAL));
+    expectClean([...hud, entry(BIN_OWNER), entry(BIN_READER)], matches(NETWORK_OR_CREDENTIAL));
   });
 
   it('does not use PATH to find the tokenmeter executable', () => {
@@ -121,7 +121,7 @@ describe('HUD Codex usage source', () => {
     expect(existingPaths(RETIRED_FILES)).toEqual([]);
     const hud = hudSources();
     expect(hud.length).toBeGreaterThan(0);
-    expectClean([...hud, entry('src/core/cache.ts'), entry(BIN_OWNER)], matches(RETIRED_READER));
+    expectClean([...hud, entry('src/core/cache.ts'), entry(BIN_OWNER), entry(BIN_READER)], matches(RETIRED_READER));
   });
 
   it('names no relay package in the current docs or the new HUD sources', () => {
@@ -137,7 +137,7 @@ describe('HUD Codex usage source', () => {
     expect(goldens.length).toBeGreaterThan(0);
     expectClean([
       ...codexDocs(), currentChangelog(), ...hudSources(), ...goldens, ...tokenmeterTests.map(entry),
-      ...['package.json', 'package-lock.json', 'src/core/cache.ts', 'src/core/fs-atomic.ts', BIN_OWNER,
+      ...['package.json', 'package-lock.json', 'src/core/cache.ts', 'src/core/fs-atomic.ts', BIN_OWNER, BIN_READER,
         'src/cli/commands/init.ts', 'src/cli/commands/uninstall.ts', 'src/targets/claude-code/installer.ts'].map(entry),
     ], hasLocalPath);
   });

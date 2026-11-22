@@ -85,7 +85,8 @@ describe('the HUD run from the installed scripts directory', { timeout: 30_000 }
     expect(fs.existsSync(path.join(scripts, 'core', 'tracked-areas.js'))).toBe(true);
     expect(fs.existsSync(path.join(scripts, 'core', 'cache.js'))).toBe(true);
     expect(fs.existsSync(path.join(scripts, 'hud', 'tokenmeter.js'))).toBe(true);
-    expect(fs.existsSync(path.join(scripts, 'hud', 'tokenmeter-bin.js'))).toBe(true);
+    expect(fs.existsSync(path.join(scripts, 'core', 'tokenmeter-bin-state.js'))).toBe(true);
+    expect(fs.existsSync(path.join(scripts, 'core', 'tokenmeter-bin.js'))).toBe(false);
     expect(fs.existsSync(path.join(scripts, 'node_modules'))).toBe(false);
     expect(fs.existsSync(path.join(scripts, '..', 'package.json'))).toBe(false);
     expect(fs.existsSync(path.join(scripts, '..', '..', 'package.json'))).toBe(false);

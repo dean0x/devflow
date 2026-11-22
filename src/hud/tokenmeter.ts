@@ -3,7 +3,7 @@ import { statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, isAbsolute } from 'node:path';
 import { hudCacheDir, readCache, writeCache } from '../core/cache.js';
-import { readTokenmeterBin } from './tokenmeter-bin.js';
+import { readTokenmeterBin } from '../core/tokenmeter-bin-state.js';
 import type { CodexUsage, CodexWindow } from './types.js';
 
 const CACHE_KEY = 'tokenmeter-hud';

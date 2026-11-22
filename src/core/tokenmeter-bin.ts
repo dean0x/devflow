@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
+import { readTokenmeterBin } from './tokenmeter-bin-state.js';
 
 const PACKAGE_NAME = '@dean0x/tokenmeter';
 const BIN_NAME = 'tokenmeter';
@@ -56,6 +57,12 @@ export async function installTokenmeterState(devflowDir: string): Promise<Result
     });
   } catch {
     return { ok: false, error: 'Could not save the Codex usage tool path. Run devflow init again.' };
+  }
+  if (readTokenmeterBin(devflowDir) !== binPath) {
+    return { ok: true, value: {
+      warning: 'The HUD cannot use the saved Codex usage tool path. ' +
+        'Reinstall devflow-kit with umask 022 or in a trusted location. Run devflow init again.',
+    } };
   }
   if (npxWarning) {
     return { ok: true, value: { warning: 'Codex usage can stop if the npx cache clears. Run devflow init again.' } };

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installTokenmeterState, resolvePackageBin } from '../src/core/tokenmeter-bin.js';
-import { readTokenmeterBin } from '../src/hud/tokenmeter-bin.js';
+import { readTokenmeterBin } from '../src/core/tokenmeter-bin-state.js';
 import { installScripts } from '../src/targets/claude-code/installer.js';
 
 vi.mock('node:module', async (importOriginal) => {
