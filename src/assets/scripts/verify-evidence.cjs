@@ -83,7 +83,7 @@
 //             D-CLAIM-CAUSE: stderr gets one `verify-evidence: claim: <cause>` line for what
 //             the stdout line does not name. A usage error (exit 1) names the first cause
 //             found: the flags are absent, repeated or bad; there is no claim; there are
-//             more than 200 TP arguments; gate takes no plan and no other claim; argument k
+//             n TP arguments, over the limit of 200; gate takes no plan and no other claim; argument k
 //             is a flag after the claims, holds more than one TP claim, or is not one TP
 //             claim; or TP-n is given more than once in this call. k counts from 1 at the
 //             first claim argument. A `plan file unusable` refusal names the path shape, a
@@ -94,10 +94,11 @@
 //             the rule that line k of its Test Plan breaks, a section that does not parse,
 //             or claim lines that do not fit the Claims section. A line k of a file counts
 //             from 1 at the top of the file. A run that writes a method:local PASS with no
-//             exit code from 0 to 255 names those TPs: verify reads them UNVERIFIED, because
-//             a local PASS needs exit 0. The sink lets a cause through only when it is one
-//             of a closed list of fixed phrases with digits in their number slots; any other
-//             text becomes one fixed phrase. No byte of argv, a file, git or gh gets in.
+//             exit code from 0 to 255 names those TPs. Verify reads them UNVERIFIED.
+//             A local PASS needs the exit code its TP line expects: 0 without a clause,
+//             or the value of [expect-exit: <k>]. The sink accepts only a fixed phrase from
+//             a closed list, with digits in its number slots. Any other text becomes one
+//             fixed phrase. No byte of argv, a file, git or gh gets in.
 // A git-tracked file counts as absent, like a tracked `.devflow/config.json`
 // (D-TRACKED-RESULT). `verify`, `publish` and `readiness` ask git about an `--evidence`
 // file before they read it, and about `--block-out`, `--comment-out`, `--stale-out` and
@@ -111,9 +112,9 @@
 // boundary re-checks every stdout line against these shapes before writing it.
 // The stderr summary `verify-evidence: notes: <tokens>` lists closed tokens, sorted.
 // Two of them name why a TP did not verify, and neither changes a state:
-// `local-no-exit`, a local PASS with no exit code that reads UNVERIFIED (a local PASS
-// needs exit 0), and `run-failed`, a ci PASS that reads FAILED because a run at its
-// verifying commit failed (any failed run at that commit fails a ci TP).
+// `local-no-exit`: a local PASS with no exit code reads UNVERIFIED, since it needs
+// the exit code its TP line expects. `run-failed`: a ci PASS reads FAILED because
+// a run at its verifying commit failed (any failed run at that commit fails a ci TP).
 //
 // Exit codes:
 //   0  ok
@@ -289,7 +290,7 @@ const CLAIM_CAUSE_TEMPLATES = Object.freeze([
   // parseClaimArgs: the usage errors
   'the flags are absent, repeated or bad',
   'there is no claim',
-  'there are more than <n> TP arguments',
+  'there are <n> TP arguments; the limit is <n>',
   'gate takes no plan and no other claim',
   'argument <n> is a flag after the claims',
   'argument <n> holds more than one TP claim; pass each TP claim as its own argument',
@@ -312,8 +313,8 @@ const CLAIM_CAUSE_TEMPLATES = Object.freeze([
   'a section of the evidence file does not parse',
   'the claim lines do not fit the Claims section',
   // localNoExitCause
-  'TP-<n> is a method:local PASS claim with no exit code from 0 to 255; verify reads it UNVERIFIED, and only exit 0 from the Test report counts',
-  '<tps> are method:local PASS claims with no exit code from 0 to 255; verify reads them UNVERIFIED, and only exit 0 from the Test report counts',
+  'TP-<n> is a method:local PASS claim with no exit code from 0 to 255; verify reads it UNVERIFIED, and only the exit code its TP line expects counts',
+  '<tps> are method:local PASS claims with no exit code from 0 to 255; verify reads them UNVERIFIED, and only the exit code its TP line expects counts',
 ]);
 /** The most characters of a cause. The longest one holds CAPS.TPS ids (each at most `TP-200, `) and its phrase. */
 const CLAIM_CAUSE_MAX_CHARS = 2000;
@@ -605,7 +606,9 @@ function parseClaimArgs(tail) {
   const items = tail.slice(flagCount);
   if (evidence === null || head === null) return claimUsage('the flags are absent, repeated or bad');
   if (items.length === 0) return claimUsage('there is no claim');
-  if (items.length > CAPS.TPS) return claimUsage('there are more than ' + Number(CAPS.TPS) + ' TP arguments');
+  if (items.length > CAPS.TPS) {
+    return claimUsage('there are ' + Number(items.length) + ' TP arguments; the limit is ' + Number(CAPS.TPS));
+  }
   if (items.includes('gate')) {
     return items.length === 1 && plan === null
       ? { kind: 'claim', evidence, head, plan, gate: true, tps: [] }
@@ -1710,7 +1713,9 @@ function runsAt(io, memo, sha) {
 // ---------------------------------------------------------------------------
 
 /**
- * @typedef {{ plan: { tps: readonly any[] } | null, claims: Map<number, object>, exceptions: readonly any[] | null,
+ * @typedef {import('./pr-evidence.cjs').Tp} Tp
+ * @typedef {import('./pr-evidence.cjs').Claim} Claim
+ * @typedef {{ plan: { tps: readonly Tp[] } | null, claims: Map<number, Claim>, exceptions: readonly any[] | null,
  *   malformed: number }} EvidenceInput
  */
 
@@ -1785,9 +1790,10 @@ function bodyPlan(body) {
  * contradicts its state.
  *
  * @param {any} record  a parseEvidenceComment TpRecord
- * @returns {object | null}  a Claim, or null for no claim
+ * @param {number} expectedExit  from the TP line that matches the record's hash
+ * @returns {Claim | null}  a Claim, or null for no claim
  */
-function recordClaim(record) {
+function recordClaim(record, expectedExit) {
   if (record.sha === null) return null;
   return Object.freeze({
     target: 'TP-' + record.id,
@@ -1797,6 +1803,7 @@ function recordClaim(record) {
     sha: record.sha,
     by: 'test',
     exit: record.exit,
+    expectedExit,
   });
 }
 
@@ -1805,7 +1812,7 @@ function recordClaim(record) {
 // ---------------------------------------------------------------------------
 
 /**
- * @typedef {{ tp: any, hash: string, recorded: boolean, claim: object | null,
+ * @typedef {{ tp: Tp, hash: string, recorded: boolean, claim: Claim | null,
  *   textMatches: boolean | undefined, forceIndeterminate: boolean }} TpInput
  *   `recorded`: the trusted record carries this TP with the same text hash.
  */
@@ -1873,11 +1880,10 @@ function classifyTp(io, repo, memo, x) {
 }
 
 /**
- * Add the closed note that names why a TP's final verdict did not verify, where the ladder's
- * own result says so; the verdict itself never changes. `local-no-exit`: a local PASS in the
- * PR, with its TP text unchanged, that has no exit code, reads UNVERIFIED because only exit 0
- * attests a local TP. The note follows the final state, so a STALE, an INDETERMINATE and every
- * other UNVERIFIED cause get none. `run-failed`: a ci PASS reads FAILED because a run at its
+ * Add a closed note for the final verdict, without a change to that verdict.
+ * `local-no-exit`: a local PASS needs the exit code its TP line expects. Add the note only
+ * when a PASS with no exit reads UNVERIFIED, its commit is in the PR and its TP text matches.
+ * `run-failed`: a ci PASS reads FAILED because a run at its
  * verifying SHA failed (the claim's own runs, or the head's); any failed run fails a ci TP, since
  * no TP field names its own job. A FAIL claim gets no note. The note is a closed token, with no
  * byte of a run.
@@ -1913,16 +1919,14 @@ function publicationMode(publication) {
 
 /**
  * The claims, hashes and text checks for every TP of the plan (D-VERIFY-RECORD):
- * a file claim wins; else the trusted record's, when the record's `h:` equals the
- * TP's hash. A body-sourced TP's text counts only when that hash matches — and a
- * claim attaches only to text that counts: body text that fails the check gets no
- * claim at all, not even the file's. The file's claim was made against the text
- * the record published, not this text, and a record binding the two would pass
- * the next refresh's hash check and launder the claim onto it. A TP whose record
+ * A file claim takes precedence. If its expected exit differs from the TP's, attach no claim.
+ * With no file claim, use the trusted record's when its `h:` equals the TP's hash.
+ * For a TP from the body, require that hash match even with a file claim.
+ * Do not carry a claim that fails either check into a new record. A TP whose record
  * is unknown (D-VERIFY-THROTTLE) gets no claim either. Null when a TP line fails
  * its grammar (the hash is refused).
  *
- * @param {{ tps: readonly any[] }} plan
+ * @param {{ tps: readonly Tp[] }} plan
  * @param {EvidenceInput | null} evidence
  * @param {TrustedRecord} record
  * @param {boolean} fromFile
@@ -1942,9 +1946,9 @@ function tpInputs(plan, evidence, record, fromFile) {
     // D-VERIFY-THROTTLE: when the record itself is unknown, so is every claim or
     // text check that would have come from it.
     const forceIndeterminate = record.kind === 'unknown' && (!fromFile || fileClaim === undefined);
-    const claim = textMatches === false || forceIndeterminate ? null
-      : fileClaim !== undefined ? fileClaim
-        : recordApplies ? recordClaim(rec) : null;
+    const bindMismatch = fileClaim !== undefined && fileClaim.expectedExit !== tp.expectedExit;
+    const candidate = fileClaim ?? (recordApplies ? recordClaim(rec, tp.expectedExit) : null);
+    const claim = textMatches === false || forceIndeterminate || bindMismatch ? null : candidate;
     inputs.push({ tp, hash: hash.value, recorded: recordApplies, claim, textMatches, forceIndeterminate });
   }
   return inputs;
@@ -3580,16 +3584,16 @@ function claimInserted(text, inserted, lines) {
 }
 
 /**
- * The TPs the plan lists, each with its method: the `## Test Plan` of the `--plan` file,
- * else of the evidence file. A plan with no TP line, or no plan section, lists none. A
+ * The TPs the plan lists: the `## Test Plan` of the `--plan` file, else of the evidence file.
+ * A plan with no TP line, or no plan section, lists none. A
  * `--plan` file that cannot serve as a plan gives its cause instead: it cannot be read, or
  * the planCause of its grammar error.
  *
  * @param {Extract<ParsedArgs, { kind: 'claim' }>} args
  * @param {EvidenceInput} evidence
- * @returns {{ ok: true, value: Map<number, string> } | { ok: false, cause: string }}  TP number to method
+ * @returns {{ ok: true, value: Map<number, Tp> } | { ok: false, cause: string }}  TP number to plan entry
  */
-function claimPlanIds(args, evidence) {
+function claimPlanTps(args, evidence) {
   let plan = evidence.plan;
   if (args.plan !== null) {
     const text = readTextFile(args.plan);
@@ -3598,16 +3602,16 @@ function claimPlanIds(args, evidence) {
     if (!parsed.ok && parsed.error.code !== 'empty') return { ok: false, cause: planCause(text, parsed.error) };
     plan = parsed.ok ? parsed.value : { tps: [] };
   }
-  return { ok: true, value: new Map((plan === null ? [] : plan.tps).map(tp => [tp.id, tp.method])) };
+  return { ok: true, value: new Map((plan === null ? [] : plan.tps).map(tp => [tp.id, tp])) };
 }
 
 /**
  * The TPs of the written lines that verify reads UNVERIFIED for want of an exit code: the
  * plan lists them as method:local, and the claim parser reads each one's line as a PASS with
- * no exit (none was given, or the one given is not a number from 0 to 255). Only exit 0
- * attests a local TP (the ATTESTED-LOCAL arm of pr-evidence.cjs). In ascending order.
+ * no exit (none was given, or the one given is not a number from 0 to 255). A local PASS
+ * needs the exit code its TP line expects. Return the TP numbers in ascending order.
  *
- * @param {Map<number, string>} listed  TP number to method
+ * @param {Map<number, Tp>} listed  TP number to plan entry
  * @param {readonly string[]} lines  the claim lines this run writes
  * @returns {number[]}
  */
@@ -3615,13 +3619,14 @@ function localNoExitIds(listed, lines) {
   const parsed = PE.parseClaims(lines.join('\n'));
   if (!parsed.ok) return [];
   return [...parsed.value.tp.values()]
-    .filter(c => c.outcome === 'PASS' && c.exit === null && listed.get(c.tp) === 'local')
+    .filter(c => c.outcome === 'PASS' && c.exit === null && c.tp !== null && listed.get(c.tp)?.method === 'local')
     .map(c => Number(c.tp))
     .sort((a, b) => a - b);
 }
 
 /**
- * The stderr cause that names the TPs of localNoExitIds, as digits, at most CAPS.TPS of them.
+ * The stderr cause names at most CAPS.TPS ids from localNoExitIds. It states that only
+ * the expected exit counts, without copying the exit or any other TP text.
  *
  * @param {readonly number[]} ids  at least one
  * @returns {string}
@@ -3629,8 +3634,8 @@ function localNoExitIds(listed, lines) {
 function localNoExitCause(ids) {
   const named = ids.map(id => 'TP-' + Number(id)).join(', ');
   return ids.length === 1
-    ? named + ' is a method:local PASS claim with no exit code from 0 to 255; verify reads it UNVERIFIED, and only exit 0 from the Test report counts'
-    : named + ' are method:local PASS claims with no exit code from 0 to 255; verify reads them UNVERIFIED, and only exit 0 from the Test report counts';
+    ? named + ' is a method:local PASS claim with no exit code from 0 to 255; verify reads it UNVERIFIED, and only the exit code its TP line expects counts'
+    : named + ' are method:local PASS claims with no exit code from 0 to 255; verify reads them UNVERIFIED, and only the exit code its TP line expects counts';
 }
 
 /**
@@ -3664,7 +3669,7 @@ function runClaim(io, args) {
   const headings = text.split('\n').map(row => row.replace(/\r$/, '')).filter(row => row === '##' || row.startsWith('## '));
   const hasSection = headings.includes(PE.CLAIMS_HEADING);
   const sectionFollowed = hasSection && headings[headings.length - 1] !== PE.CLAIMS_HEADING;
-  const plan = args.gate ? { ok: true, value: new Map() } : claimPlanIds(args, evidence);
+  const plan = args.gate ? { ok: /** @type {const} */ (true), value: new Map() } : claimPlanTps(args, evidence);
   if (!plan.ok) return claimRefusal(io, 'plan file unusable', plan.cause);
   const listed = plan.value;
 
@@ -3676,8 +3681,10 @@ function runClaim(io, args) {
     tally.PASS++;
   }
   for (const tp of args.tps) {
-    if (!listed.has(tp.id)) continue;
-    const bare = '- TP-' + tp.id + ' ' + tp.outcome + ' sha:' + args.head + ' by:test';
+    const expectedExit = listed.get(tp.id)?.expectedExit;
+    if (expectedExit === undefined) continue;
+    const bind = expectedExit === 0 ? '' : ' expect-exit:' + expectedExit;
+    const bare = '- TP-' + tp.id + bind + ' ' + tp.outcome + ' sha:' + args.head + ' by:test';
     const withExit = tp.exit === null ? bare : bare + ' exit:' + tp.exit;
     lines.push(claimLine(claimLineOk(withExit) ? withExit : bare));
     tally[tp.outcome]++;

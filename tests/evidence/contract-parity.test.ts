@@ -142,15 +142,19 @@ function spans(line: string): string[] {
   return [...line.matchAll(/`([^`]+)`/g)].map(m => m[1])
 }
 
-/** Named collector: the Shape bullet's two templates — the line and its optional files suffix. */
-function collectShapeTemplates(text: string): { line: string; files: string } {
+/** Named collector: the Shape bullet's templates and the method that permits the exit clause. */
+function collectShapeTemplates(text: string) {
   const shape = bullet(text, 'Shape')
   if (shape === null) throw new Error('the contract has no Shape bullet')
   const all = spans(shape)
   const line = all.find(s => s.startsWith('- [ ] TP-'))
   const files = all.find(s => s.startsWith(' [files:'))
+  const exit = all.find(s => s.startsWith(' [expect-exit:'))
   if (line === undefined || files === undefined) throw new Error('the Shape bullet lacks the line or the files template')
-  return { line, files }
+  if (exit === undefined) throw new Error('the Shape bullet lacks the expected-exit template')
+  if (all.indexOf(exit) < all.indexOf(files)) throw new Error('the expected-exit template must follow the files template')
+  const scope = /on a `([a-z]+)` line only/.exec(shape)?.[1]
+  return { line, files, exit, scope }
 }
 
 /** Named collector: the closed state list, as written in the States bullet. */
@@ -182,6 +186,7 @@ interface FieldRules {
   readonly scenarioMax: number | null
   readonly globClass: string | null
   readonly globsPerLine: number | null
+  readonly expectedExitMax: number | null
   readonly excluded: readonly string[]
   readonly forbiddenText: string | null
 }
@@ -204,6 +209,7 @@ function collectFieldRules(text: string): FieldRules {
     scenarioMax: num(/`<scenario>` is 1–(\d+) printable characters/),
     globClass: globClass === null ? null : globClass[1],
     globsPerLine: num(/at most (\d+) per line/),
+    expectedExitMax: num(/`<k>` is 1–(\d+)/),
     excluded: excluded.sort(),
     forbiddenText: excludedClause === null ? null : excludedClause[2],
   }
@@ -220,22 +226,22 @@ const REPEAT_TOKEN = '[, <glob>…]'
  * Compile the Shape templates into one RegExp, so its accept/reject behaviour can
  * be compared with TP_LINE_RE's.
  *
- *   `<n>` `<m>` `<scenario>`  TP_LINE_RE's own `n`, `ac` and `scenario` groups (each
- *                             is a grammar, not a list; the Fields arm pins their
- *                             bounds against the prose separately)
+ *   `<n>` `<m>` `<scenario>` `<k>`  TP_LINE_RE's named groups; the Fields arm pins
+ *                                   their bounds against the prose separately
  *   `<glob>`                  GLOB_RE's class and bound
  *   `<a|b|c>`                 one of the listed values
  *   `[, <glob>…]`             `, <glob>` again, at most (globs per line − 1) times
  *   anything else             literal text — `[ ]`, `[files: ` and `]` included
  *
- * The files template is optional ("optionally followed by").
+ * The files and exit clauses are optional. The exit clause can name a method scope.
  */
-function compileShape(templates: { line: string; files: string }, globsPerLine: number): RegExp {
+function compileShape(templates: ReturnType<typeof collectShapeTemplates>, globsPerLine: number): RegExp {
   const glob = PE.GLOB_RE.source.replace(/^\^/, '').replace(/\$$/, '')
   const placeholders: Readonly<Record<string, string>> = {
     n: namedGroupSource(PE.TP_LINE_RE.source, 'n'),
     m: namedGroupSource(PE.TP_LINE_RE.source, 'ac'),
     scenario: namedGroupSource(PE.TP_LINE_RE.source, 'scenario'),
+    k: namedGroupSource(PE.TP_LINE_RE.source, 'expectedExit'),
     glob,
   }
   const compile = (template: string): string => {
@@ -261,7 +267,9 @@ function compileShape(templates: { line: string; files: string }, globsPerLine: 
     }
     return out
   }
-  return new RegExp(`^${compile(templates.line)}(?:${compile(templates.files)})?$`, 'u')
+  const files = `(?:${compile(templates.files)})?`
+  const scope = templates.scope === undefined ? '' : `(?<=method:${escapeRe(templates.scope)}${files})`
+  return new RegExp(`^${compile(templates.line)}${files}(?:${scope}${compile(templates.exit)})?$`, 'u')
 }
 
 /**
@@ -303,7 +311,21 @@ function differentialTable(): string[] {
       rows.push(tp(n, m, 's', method, Array.from({ length: 10 }, (_, i) => `g${i}`).join(', ')))
     }
   }
+  for (const method of PE.METHODS) {
+    for (const files of [undefined, 'a.ts, src/**']) {
+      const line = tp(1, 1, 'x', method, files)
+      rows.push(line, `${line} [expect-exit: 1]`, `${line} [expect-exit: 125]`)
+    }
+  }
+  const local = tp(1, 1, 'x', 'local')
+  const exit = `${local} [expect-exit: 1]`
   rows.push(
+    `${exit} [files: a.ts]`,
+    `${exit} [expect-exit: 2]`,
+    `${exit} trailing text`,
+    `${local} [expect-exit:1]`,
+    ...[0, '01', -1, '', ...Array.from({ length: 131 }, (_, i) => i + 126)]
+      .map(k => `${local} [expect-exit: ${k}]`),
     tp(1, 1, 'x', 'e2e'),                                        // unlisted method
     tp(1, 1, 'x', 'CI'),
     tp(1, 1, 'x', ''),
@@ -448,6 +470,34 @@ describe('AC-2: the Shape template accepts and rejects exactly what TP_LINE_RE d
     expect(collectGrammarDisagreements(compiled, differentialTable()).length).toBeGreaterThan(0)
   })
 
+  it('known-bad probe: an unscoped exit clause admits ci and manual lines', () => {
+    const text = contractText()
+    const seeded = text.replace('on a `local` line only, ', '')
+    expect(seeded, 'the seed must land').not.toBe(text)
+    const compiled = compileShape(collectShapeTemplates(seeded), collectFieldRules(text).globsPerLine ?? 0)
+    const nonLocal = ['ci', 'manual'].flatMap(method => [undefined, 'a.ts, src/**'].flatMap(files =>
+      [1, 125].map(k => `${tp(1, 1, 'x', method, files)} [expect-exit: ${k}]`)))
+    expect(collectGrammarDisagreements(compiled, differentialTable())).toEqual(
+      nonLocal.map(row => `${JSON.stringify(row)}: template accepts, TP_LINE_RE rejects`),
+    )
+  })
+
+  it('known-bad probe: a missing exit template is reported', () => {
+    const text = contractText()
+    const seeded = text.replace('` [expect-exit: <k>]`', '')
+    expect(seeded, 'the seed must land').not.toBe(text)
+    expect(() => collectShapeTemplates(seeded)).toThrow('the Shape bullet lacks the expected-exit template')
+  })
+
+  it('known-bad probe: the Shape bullet puts the expected exit before the files', () => {
+    const text = contractText()
+    const { files, exit } = collectShapeTemplates(text)
+    const seeded = text.replace(`\`${files}\` and, on a \`local\` line only, \`${exit}\``,
+      `\`${exit}\` on a \`local\` line only, then \`${files}\``)
+    expect(seeded).not.toBe(text)
+    expect(() => collectShapeTemplates(seeded)).toThrow('the expected-exit template must follow the files template')
+  })
+
   it('known-bad probe: a files bound of 9 disagrees with TP_LINE_RE', () => {
     const text = contractText()
     const compiled = compileShape(collectShapeTemplates(text), 9)
@@ -462,6 +512,7 @@ describe('AC-2: the Fields prose names the script\'s own bounds', () => {
     scenarioMax: PE.LIMITS.SCENARIO_MAX,
     globClass: `[A-Za-z0-9._/*?-]{1,${PE.LIMITS.GLOB_MAX}}`,
     globsPerLine: PE.LIMITS.GLOBS_PER_LINE,
+    expectedExitMax: PE.LIMITS.EXPECTED_EXIT_MAX,
     excluded: ['<', '>', '[', ']', '`', '#', '@', '/'].sort(),
     forbiddenText: ` ${EM} method:`,
   }
@@ -481,6 +532,9 @@ describe('AC-2: the Fields prose names the script\'s own bounds', () => {
     expect(ok(tp(1, 1, 'é'.repeat(L.SCENARIO_MAX + 1), 'ci'))).toBe(false)
     expect(ok(tp(1, 1, 'x', 'ci', 'a'.repeat(L.GLOB_MAX)))).toBe(true)
     expect(ok(tp(1, 1, 'x', 'ci', 'a'.repeat(L.GLOB_MAX + 1)))).toBe(false)
+    const local = tp(1, 1, 'x', 'local')
+    expect(ok(`${local} [expect-exit: ${L.EXPECTED_EXIT_MAX}]`)).toBe(true)
+    expect(ok(`${local} [expect-exit: ${L.EXPECTED_EXIT_MAX + 1}]`)).toBe(false)
     for (const ch of expected.excluded) expect(ok(tp(1, 1, `a${ch}b`, 'ci')), ch).toBe(false)
     expect(ok(tp(1, 1, `a${expected.forbiddenText}ci`, 'ci'))).toBe(false)
   })
@@ -513,6 +567,21 @@ describe('AC-2: the Fields prose names the script\'s own bounds', () => {
     const raised = text.replace('`<n>` is 1–200', '`<n>` is 1–250')
     expect(raised, 'the seed must land').not.toBe(text)
     expect(collectFieldRules(raised)).not.toEqual(expected)
+  })
+
+  it('known-bad probe: a prose exit bound of 124 disagrees with the script', () => {
+    const text = contractText()
+    const seeded = text.replace('`<k>` is 1–125', '`<k>` is 1–124')
+    expect(seeded, 'the seed must land').not.toBe(text)
+    expect(collectFieldRules(seeded)).toEqual({ ...expected, expectedExitMax: 124 })
+    expect(collectFieldRules(seeded).expectedExitMax).not.toBe(expected.expectedExitMax)
+  })
+
+  it('reserves expected exits for failures stated by the criterion, not for retries', () => {
+    const methods = bullet(contractText(), 'Methods')
+    expect(methods).toContain('a planned failure the criterion states')
+    expect(methods).toContain('the scenario naming the output that shows it')
+    expect(methods).toContain('never add, change or remove it to settle a FAILED or UNVERIFIED TP')
   })
 })
 

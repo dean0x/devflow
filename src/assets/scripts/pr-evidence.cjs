@@ -51,6 +51,7 @@ const EXCEPTION_KINDS = Object.freeze(/** @type {ExceptionKind[]} */ (['ticket-l
  *   TP_MAX / AC_MAX         highest TP number and AC number a line may cite
  *   SCENARIO_MAX            scenario length, in code points
  *   GLOB_MAX / GLOBS_PER_LINE  one glob's length; globs on one TP line
+ *   EXPECTED_EXIT_MAX        highest expected exit on a local TP line
  *   CLAIM_LINES             claim lines read — the LAST ones (append-only, newest wins)
  *   COMMENT_LINES           lines read from an evidence comment
  *   BODY_CHARS              a PR body after the splice; over it the block becomes counts only
@@ -66,6 +67,7 @@ const LIMITS = Object.freeze({
   SCENARIO_MAX: 200,
   GLOB_MAX: 120,
   GLOBS_PER_LINE: 10,
+  EXPECTED_EXIT_MAX: 125,
   CLAIM_LINES: 400,
   COMMENT_LINES: 1000,
   BODY_CHARS: 60000,
@@ -112,8 +114,10 @@ const LOGIN_RE = Object.freeze(/^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/);
 /**
  * D-TP-LINE: one test-plan line, as `_plan_contract.mds` define `test_plan_line()`
  * states it (parity-pinned by tests/evidence/contract-parity.test.ts):
- *   - [ ] TP-<n> (AC-<m>) <scenario> — method:<ci|local|manual>[ [files: <glob>[, <glob>…]]]
- * <n> 1–200, <m> 1–999, no leading zeros. The scenario is 1–200 printable code
+ *   - [ ] TP-<n> (AC-<m>) <scenario> — method:<ci|local|manual>[ [files: <glob>[, <glob>…]]][ [expect-exit: <k>]]
+ * <n> 1–200, <m> 1–999, no leading zeros. Only `method:local` admits the final
+ * expected exit clause: <k> 1–125, no leading zeros. The default expected exit is 0.
+ * The scenario is 1–200 printable code
  * points (no Unicode control, format, surrogate, private-use, unassigned or
  * line/paragraph-separator character) with no leading or trailing space, no `<`,
  * `>`, backtick, `[`, `]`, `#`, `@` or `/`, and never the text ` — method:`. The
@@ -125,13 +129,14 @@ const LOGIN_RE = Object.freeze(/^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/);
  * the exception reason carries. A path belongs in `files:`, whose glob class keeps
  * `/` and admits no `#` or `@`.
  */
-const TP_LINE_RE = Object.freeze(/^- \[ \] TP-(?<n>200|1[0-9]{2}|[1-9][0-9]?) \(AC-(?<ac>[1-9][0-9]{0,2})\) (?<scenario>(?! )(?:(?! — method:)[^\p{C}\p{Zl}\p{Zp}<>`[\]#@\/]){1,200}(?<! )) — method:(?<method>ci|local|manual)(?: \[files: (?<files>[A-Za-z0-9._/*?-]{1,120}(?:, [A-Za-z0-9._/*?-]{1,120}){0,9})\])?$/u);
+const TP_LINE_RE = Object.freeze(/^- \[ \] TP-(?<n>200|1[0-9]{2}|[1-9][0-9]?) \(AC-(?<ac>[1-9][0-9]{0,2})\) (?<scenario>(?! )(?:(?! — method:)[^\p{C}\p{Zl}\p{Zp}<>`[\]#@\/]){1,200}(?<! )) — method:(?<method>ci|local|manual)(?: \[files: (?<files>[A-Za-z0-9._/*?-]{1,120}(?:, [A-Za-z0-9._/*?-]{1,120}){0,9})\])?(?:(?<=method:local(?: \[files: [^\]]*\])?) \[expect-exit: (?<expectedExit>12[0-5]|1[01][0-9]|[1-9][0-9]?)\])?$/u);
 
 /**
  * One claim line of the evidence file's `## Claims` section:
- *   - (TP-<n>|gate:(validate|qa)) (PASS|FAIL|SKIP) sha:<40-hex> by:(test|validate)[ exit:<0-255>]
+ *   - (TP-<n>[ expect-exit:<1-125>]|gate:(validate|qa)) (PASS|FAIL|SKIP) sha:<40-hex> by:(test|validate)[ exit:<0-255>]
+ * D-CLAIM-EXPECTED-EXIT: No field means 0. This keeps old claims usable only for a TP with no clause.
  */
-const CLAIM_LINE_RE = Object.freeze(/^- (?<target>TP-(?<tp>200|1[0-9]{2}|[1-9][0-9]?)|gate:(?<gate>validate|qa)) (?<outcome>PASS|FAIL|SKIP) sha:(?<sha>[0-9a-f]{40}) by:(?<by>test|validate)(?: exit:(?<exit>25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9]))?$/);
+const CLAIM_LINE_RE = Object.freeze(/^- (?:(?<target>TP-(?<tp>200|1[0-9]{2}|[1-9][0-9]?))(?: expect-exit:(?<expectedExit>12[0-5]|1[01][0-9]|[1-9][0-9]?))?|(?<gateTarget>gate:(?<gate>validate|qa))) (?<outcome>PASS|FAIL|SKIP) sha:(?<sha>[0-9a-f]{40}) by:(?<by>test|validate)(?: exit:(?<exit>25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9]))?$/);
 
 /**
  * One evidence-exception line. Identical to the Code agent's paste gate for
@@ -251,12 +256,14 @@ const TRUSTED_PERMISSIONS = Object.freeze(['admin', 'write']);
  * @template T
  * @typedef {{ ok: true, value: T } | { ok: false, error: { code: ErrorCode, line: number } }} Result
  *
- * @typedef {{ id: number, ac: number, scenario: string, method: Method, files: readonly string[], line: string }} Tp
+ * @typedef {{ id: number, ac: number, scenario: string, method: Method, files: readonly string[],
+ *   expectedExit: number, line: string }} Tp
+ *   `expectedExit` is the expected exit in the clause, or 0 if absent.
  *   `line` is the canonical (unticked) text — the text hashed for `h:`.
  * @typedef {{ tps: readonly Tp[] }} Plan
  *
  * @typedef {{ target: string, tp: number | null, gate: 'validate' | 'qa' | null,
- *   outcome: Outcome, sha: string, by: 'test' | 'validate', exit: number | null }} Claim
+ *   outcome: Outcome, sha: string, by: 'test' | 'validate', exit: number | null, expectedExit: number }} Claim
  * @typedef {{ tp: Map<number, Claim>, gates: { validate: Claim | null, qa: Claim | null },
  *   malformed: number, truncated: boolean }} Claims
  *
@@ -438,6 +445,7 @@ function parseTpLine(line) {
     scenario: g.scenario,
     method: /** @type {Method} */ (g.method),
     files: Object.freeze(g.files === undefined ? [] : g.files.split(', ')),
+    expectedExit: g.expectedExit === undefined ? 0 : Number(g.expectedExit),
     line,
   });
 }
@@ -482,13 +490,14 @@ function parseClaimLine(line) {
   if (m === null || m.groups === undefined) return null;
   const g = m.groups;
   return Object.freeze({
-    target: g.target,
+    target: g.target ?? g.gateTarget,
     tp: g.tp === undefined ? null : Number(g.tp),
     gate: g.gate === undefined ? null : /** @type {'validate' | 'qa'} */ (g.gate),
     outcome: /** @type {Outcome} */ (g.outcome),
     sha: g.sha,
     by: /** @type {'test' | 'validate'} */ (g.by),
     exit: g.exit === undefined ? null : Number(g.exit),
+    expectedExit: g.expectedExit === undefined ? 0 : Number(g.expectedExit),
   });
 }
 
@@ -750,7 +759,11 @@ function isTp(tp) {
   return isIntIn(t.id, 1, LIMITS.TP_MAX)
     && typeof t.method === 'string' && METHODS.includes(/** @type {Method} */ (t.method))
     && Array.isArray(t.files) && t.files.length <= LIMITS.GLOBS_PER_LINE
-    && t.files.every(f => typeof f === 'string');
+    && t.files.every(f => typeof f === 'string')
+    && typeof t.line === 'string'
+    && isIntIn(t.expectedExit, 0, LIMITS.EXPECTED_EXIT_MAX)
+    && (t.method === 'local' || t.expectedExit === 0)
+    && parseTpLine(t.line)?.expectedExit === t.expectedExit;
 }
 
 /**
@@ -852,7 +865,7 @@ const ARMS = Object.freeze([
     test: x => {
       const claim = /** @type {Claim} */ (x.claim);
       return claim.outcome === 'FAIL'
-        || (x.tp.method === 'local' && claim.exit !== null && claim.exit !== 0)
+        || (x.tp.method === 'local' && claim.exit !== null && claim.exit !== x.tp.expectedExit)
         || (isCi(x) && x.runs.some(runFailed));
     },
     run: x => (isCi(x) ? firstRun(x.runs, runFailed) : null),
@@ -872,13 +885,13 @@ const ARMS = Object.freeze([
     run: x => firstRun(x.runs, r => r.conclusion === 'success'),
   },
   {
-    // A local PASS with exit 0, a manual PASS, or a ci PASS whose SHA has no runs
-    // at all (labelled run:none, and never counted as VERIFIED-CI).
+    // A local PASS with the expected exit, a manual PASS, or a ci PASS whose SHA
+    // has no runs at all (labelled run:none, and never counted as VERIFIED-CI).
     state: 'ATTESTED-LOCAL',
     test: x => {
       const claim = /** @type {Claim} */ (x.claim);
       if (claim.outcome !== 'PASS') return false;
-      if (x.tp.method === 'local') return claim.exit === 0;
+      if (x.tp.method === 'local') return claim.exit !== null && claim.exit === x.tp.expectedExit;
       if (x.tp.method === 'manual') return true;
       return x.runs.length === 0;
     },

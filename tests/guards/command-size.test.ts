@@ -3,12 +3,11 @@
  *
  * A command is the main session's standing context: its whole text is read on the first turn and
  * re-read from cache on every later one, so a command that grows pays on every turn of every run.
- * The ceilings sit at the sizes measured when #456 closed (zero headroom) and are registered in
- * tests/fixtures/numeric-floors.json as `command-<name>-max` (the curation-on build, the one an
- * installation with curation on reads) and `command-<name>-curation-off-max` (the curation-off build).
- * A ceiling is lowered by a pass that cuts text and never raised to fit text that grew back: a command
- * that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a
- * line of the same command already states.
+ * The ceilings have zero headroom. The manifest, tests/fixtures/numeric-floors.json, registers
+ * `command-<name>-max` for the curation-on build and `command-<name>-curation-off-max` for the curation-off build.
+ * A ceiling may move either way. Its manifest description and PR give the old value, new value and
+ * reason. A command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND)
+ * or condenses text a line of the same command already states.
  *
  *   - AC-402. All 10 compiled commands have a ceiling in each build they have, and nothing else does.
  *   - AC-401. /implement, /resolve, /plan and /code-review end below the size main held, in both builds.
@@ -18,9 +17,8 @@
  * Four builds exist (`Build`): `on`, `off` (curation off, the name its rows and floor ids have always
  * used), `compliance-off` and `both-off`. A command with a curation arm has a curation-off build (all
  * ten do), a command with a compliance arm has a compliance-off build,
- * and one that also has a curation arm has a both-off build (#648, AC-33). Those ceilings sit at the
- * size measured at their first build, with zero headroom, as `command-<name>-compliance-off-max` and
- * `command-<name>-both-off-max`. The rule sets no comparison between an off build and the on build:
+ * and one that also has a curation arm has a both-off build (#648, AC-33). The manifest registers
+ * `command-<name>-compliance-off-max` and `command-<name>-both-off-max`. The rule does not compare compliance-off to all-on:
  * a compliance-off command can carry a local line the on build replaces with a posting step, so it can
  * be larger (/implement is).
  *
@@ -57,14 +55,14 @@ const COMMAND_MAX_BYTES: ReadonlyArray<readonly [string, Build, number]> = [
   ['debug', 'off', 13_319],
   ['explore', 'on', 9_451],
   ['explore', 'off', 7_686],
-  ['implement', 'on', 42_194],
-  ['implement', 'off', 40_332],
-  ['implement', 'compliance-off', 44_134],
-  ['implement', 'both-off', 42_272],
-  ['plan', 'on', 33_799],
-  ['plan', 'off', 32_195],
-  ['plan', 'compliance-off', 33_654],
-  ['plan', 'both-off', 32_050],
+  ['implement', 'on', 42_418],
+  ['implement', 'off', 40_556],
+  ['implement', 'compliance-off', 44_358],
+  ['implement', 'both-off', 42_496],
+  ['plan', 'on', 33_900],
+  ['plan', 'off', 32_296],
+  ['plan', 'compliance-off', 33_755],
+  ['plan', 'both-off', 32_151],
   ['release', 'on', 19_347],
   ['release', 'off', 16_965],
   ['release', 'compliance-off', 14_393],

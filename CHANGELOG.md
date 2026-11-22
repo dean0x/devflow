@@ -10,12 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Experimental Code Mode flag.** Use `devflow flags --enable code-mode` for direct Claude Code sessions. The flag is off by default. This change applies to new sessions only. Code Mode does not start while the Devflow proxy or `disable-nonessential-traffic` is on.
+- A local test plan can specify ` [expect-exit: <k>]` (1 to 125) for a planned failure. A local PASS needs the expected exit, which defaults to 0. A file claim applies only if its saved expected exit matches the test plan. Old claim lines without `expect-exit:` parse with expected exit 0 and apply only to TPs without clauses; with clauses, they give UNVERIFIED, not FAILED.
+
+---
+
+## [3.19.3] - 2026-11-20
 
 ### Fixed
 
 - **A PR that is one part of a larger GitHub issue now links to the issue and does not close it.** Before, the Git agent accepted only `Closes #N` in a PR body, so the PR got no issue link. Now it also accepts `Refs #N`. When the task or plan of `/implement` says that the PR is one part of the issue, and not its last PR, the PR body gets `Refs #N`. The last PR keeps `Closes #N`. When the merged commit message holds the `Refs #N` line, the release trace counts the commit as traced, not as shipped.
 - **The evidence script now names the cause of an unclear claim or verify result** ([#787](https://github.com/dean0x/devflow/issues/787)). Before, a refused `claim` call showed only the usage text or a short refusal reason. Also, `verify` gave no reason for some results. Each unclear result cost the agent extra turns. Now:
-  - A `claim` usage error writes one `verify-evidence: claim: <cause>` line on stderr before the usage text. The cause names bad flags, no claim, more than 200 TP arguments, `gate` with other input, a TP given twice, or the position of a bad argument. Positions count from 1 at the first claim argument. An argument that holds two TP claims gets the hint to pass each claim as its own argument.
+  - A `claim` usage error writes one `verify-evidence: claim: <cause>` line on stderr before the usage text. The cause names bad flags, no claim, more than 200 TP arguments (with the count it got), `gate` with other input, a TP given twice, or the position of a bad argument. Positions count from 1 at the first claim argument. An argument that holds two TP claims gets the hint to pass each claim as its own argument.
   - `claim` names the cause on stderr for a `plan file unusable` refusal. It also names the cause when it cannot read or parse the evidence file, or when new claim lines do not fit its Claims section. For a test plan grammar error, the cause gives the file line and the rule that the line breaks. For an order or repeat error, it also gives the TP number. Other causes are the path shape, a plan file that git tracks, a file that cannot be read, and a heading that the evidence file does not allow or repeats.
   - `claim` names each `method:local` PASS that has no exit code from 0 to 255. `verify` keeps such a claim UNVERIFIED, because a local PASS needs exit 0, and adds the note `local-no-exit`.
   - When a failed CI run fails a `ci` PASS, `verify` adds the note `run-failed`. Any failed run at the commit of the claim fails a `ci` TP.
@@ -2576,6 +2581,7 @@ devflow init
 ---
 
 [Unreleased]: https://github.com/dean0x/devflow/compare/v3.8.0...HEAD
+[3.19.3]: https://github.com/dean0x/devflow/compare/v3.19.2...v3.19.3
 [3.19.2]: https://github.com/dean0x/devflow/compare/v3.19.1...v3.19.2
 [3.19.1]: https://github.com/dean0x/devflow/compare/v3.19.0...v3.19.1
 [3.19.0]: https://github.com/dean0x/devflow/compare/v3.18.0...v3.19.0
