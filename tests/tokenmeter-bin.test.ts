@@ -5,6 +5,7 @@ import { join, relative } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installTokenmeterState, resolvePackageBin } from '../src/core/tokenmeter-bin.js';
 import { readTokenmeterBin } from '../src/hud/tokenmeter-bin.js';
+import { installScripts } from '../src/targets/claude-code/installer.js';
 
 vi.mock('node:module', async (importOriginal) => {
   const original = await importOriginal<typeof import('node:module')>();
@@ -38,6 +39,15 @@ async function setPackageBin(bin: unknown, from = dir, pkg = packageDir): Promis
   await fs.writeFile(join(pkg, 'package.json'), JSON.stringify({ name: PACKAGE_NAME, bin }));
   const fixtureRequire = createRequire(join(from, 'package.json'));
   vi.mocked(createRequire).mockReturnValueOnce(fixtureRequire);
+}
+
+async function setNpxPackageBin(): Promise<string> {
+  const cached = join(dir, '_npx', 'entry');
+  const cachedPkg = join(cached, 'node_modules', PACKAGE_NAME);
+  await fs.mkdir(cached, { recursive: true });
+  await fs.rename(join(dir, 'node_modules'), join(cached, 'node_modules'));
+  await setPackageBin({ tokenmeter: BIN_ENTRY }, cached, cachedPkg);
+  return join(cachedPkg, BIN_ENTRY);
 }
 
 async function setState(path = binPath): Promise<void> {
@@ -128,18 +138,24 @@ describe('installTokenmeterState', () => {
   });
 
   it('warns that a bin path in the npx cache can disappear', async () => {
-    const cached = join(dir, '_npx', 'entry');
-    const cachedPkg = join(cached, 'node_modules', PACKAGE_NAME);
-    await fs.mkdir(cached, { recursive: true });
-    await fs.rename(join(dir, 'node_modules'), join(cached, 'node_modules'));
-    await setPackageBin({ tokenmeter: BIN_ENTRY }, cached, cachedPkg);
+    const cachedBin = await setNpxPackageBin();
 
     expect(await installTokenmeterState(dir)).toEqual({
       ok: true,
       value: { warning: 'Codex usage can stop if the npx cache clears. Run devflow init again.' },
     });
-    expect(readTokenmeterBin(dir)).toBe(join(cachedPkg, BIN_ENTRY));
+    expect(readTokenmeterBin(dir)).toBe(cachedBin);
   });
+});
+
+it('reports the npx cache warning from the HUD script install', async () => {
+  const cachedBin = await setNpxPackageBin();
+  const warnings: string[] = [];
+
+  await installScripts({ devflowDir: dir, scriptsTarget: join(dir, 'scripts'), plugins: [], warn: m => warnings.push(m) });
+
+  expect(warnings).toEqual(['Codex usage can stop if the npx cache clears. Run devflow init again.']);
+  expect(readTokenmeterBin(dir)).toBe(cachedBin);
 });
 
 describe('readTokenmeterBin', () => {

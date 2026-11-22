@@ -1104,6 +1104,7 @@ export const initCommand = new Command('init')
       // (D-CHARTER-INSTALL-RENDER). A render failure is a warning.
       try {
         await installScripts({
+          devflowDir,
           scriptsTarget: path.join(devflowDir, 'scripts'),
           plugins: hudOnlyCharterPlugins(existingHudManifest),
           warn: (msg) => p.log.warn(msg),

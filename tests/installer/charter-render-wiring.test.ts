@@ -15,11 +15,11 @@
  * The renders themselves, over every plugin set, are held by tests/installer/charter-render.test.ts. The
  * built CLI end to end is held by tests/installer/charter-render-e2e.test.ts.
  *
- * HOME safety: every directory below is an mkdtemp; nothing reads or writes the real ~/.claude or
- * ~/.devflow, and no test runs the CLI.
+ * HOME safety: every install uses a temporary directory. The HUD-only command runs in the test process.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { readFileSync, promises as fs } from 'fs';
+import { readFileSync, realpathSync, promises as fs } from 'fs';
+import { createRequire } from 'node:module';
 import * as os from 'os';
 import * as path from 'path';
 import * as p from '@clack/prompts';
@@ -47,9 +47,10 @@ import {
   installRenderedCharter,
   renderCharter,
 } from '../../src/targets/claude-code/charter-render.js';
-import { hudOnlyCharterPlugins } from '../../src/cli/commands/init.js';
+import { hudOnlyCharterPlugins, initCommand } from '../../src/cli/commands/init.js';
 import { charterPluginsAfterRemoval, runSelectivePhaseForScope } from '../../src/cli/commands/uninstall.js';
 import { makeManifest, testBackups } from '../helpers.js';
+import { assertTempHome } from '../setup/home-isolation.js';
 
 const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
 
@@ -87,6 +88,11 @@ afterEach(async () => {
 });
 
 const exists = (file: string): Promise<boolean> => fs.access(file).then(() => true, () => false);
+
+function expectedCodexBin(): string {
+  const manifest = createRequire(import.meta.url).resolve('@dean0x/tokenmeter/package.json');
+  return realpathSync(path.join(path.dirname(manifest), 'bin', 'tokenmeter.js'));
+}
 
 async function snapshot(file: string): Promise<{ bytes: string; mtimeMs: number; mode: number }> {
   const stat = await fs.stat(file);
@@ -210,7 +216,7 @@ describe('installScripts: the script copy and the charter render are one step', 
 
   it('leaves a whole tree: the copied scripts and the rendered charter', async () => {
     const warnings: string[] = [];
-    await installScripts({ scriptsTarget: scripts, plugins: [CORE, AMBIENT, IMPLEMENT], warn: m => warnings.push(m) });
+    await installScripts({ devflowDir: root, scriptsTarget: scripts, plugins: [CORE, AMBIENT, IMPLEMENT], warn: m => warnings.push(m) });
 
     expect(await exists(path.join(scripts, 'hooks', 'run-hook'))).toBe(true);
     expect(await exists(path.join(scripts, 'hud.sh'))).toBe(true);
@@ -219,7 +225,7 @@ describe('installScripts: the script copy and the charter render are one step', 
   });
 
   it('renders for the plugins it is given: a set without implement gets no route to it', async () => {
-    await installScripts({ scriptsTarget: scripts, plugins: [CORE, AMBIENT, REVIEW], warn: () => {} });
+    await installScripts({ devflowDir: root, scriptsTarget: scripts, plugins: [CORE, AMBIENT, REVIEW], warn: () => {} });
 
     expect(await fs.readFile(charterAt(), 'utf-8')).toBe(rendered([CORE, AMBIENT, REVIEW]));
     expect(await fs.readFile(charterAt(), 'utf-8')).not.toContain('devflow:implement');
@@ -230,7 +236,7 @@ describe('installScripts: the script copy and the charter render are one step', 
     const warnings: string[] = [];
 
     await expect(
-      installScripts({ scriptsTarget: scripts, plugins: [CORE, AMBIENT, IMPLEMENT], warn: m => warnings.push(m) }),
+      installScripts({ devflowDir: root, scriptsTarget: scripts, plugins: [CORE, AMBIENT, IMPLEMENT], warn: m => warnings.push(m) }),
     ).resolves.toBeUndefined();
 
     expect(warnings.some(w => w.includes('charter render:'))).toBe(true);
@@ -297,6 +303,26 @@ describe('installViaFileCopy: the render is its own step after the script copy',
     expect(warnings).toEqual([]);
   });
 
+  it('a full install saves the Codex usage bin path with mode 0600', async () => {
+    const state = path.join(devflowDir, 'tokenmeter.json');
+
+    await install({ plugins: [CORE, AMBIENT, IMPLEMENT], isPartialInstall: false });
+
+    await expect(fs.readFile(state, 'utf8').then((text): unknown => JSON.parse(text)))
+      .resolves.toEqual({ version: 1, binPath: expectedCodexBin() });
+    expect((await fs.stat(state)).mode & 0o777).toBe(0o600);
+  });
+
+  it('warns when it cannot save the Codex usage tool path and completes the install', async () => {
+    await fs.mkdir(path.join(devflowDir, 'tokenmeter.json'));
+
+    await install({ plugins: [CORE, AMBIENT, IMPLEMENT], isPartialInstall: false });
+
+    expect(warnings).toEqual(['Could not save the Codex usage tool path. Run devflow init again.']);
+    expect(await exists(path.join(devflowDir, 'scripts', 'hud.sh'))).toBe(true);
+    expect(await fs.readFile(charterAt(), 'utf8')).toBe(rendered([CORE, AMBIENT, IMPLEMENT]));
+  });
+
   it('a selection without implement installs a charter with no route to it', async () => {
     await install({ plugins: [CORE, AMBIENT, PLAN], isPartialInstall: false });
 
@@ -340,6 +366,30 @@ describe('installViaFileCopy: the render is its own step after the script copy',
 // ---------------------------------------------------------------------------
 // init --hud-only: the plugin set it renders for
 // ---------------------------------------------------------------------------
+
+it('init --hud-only refreshes the saved Codex usage bin path', async () => {
+  const cwd = process.cwd();
+  const hudOnly: unknown = initCommand.getOptionValue('hudOnly');
+  const devflowDir = path.join(root, '.devflow');
+  const state = path.join(devflowDir, 'tokenmeter.json');
+  assertTempHome(root);
+  await fs.mkdir(devflowDir);
+  await fs.mkdir(path.join(root, '.claude'));
+  await fs.writeFile(state, '{"version":1,"binPath":"stale"}');
+  vi.stubEnv('HOME', root);
+  vi.stubEnv('USERPROFILE', root);
+  process.chdir(root);
+  try {
+    await initCommand.parseAsync(['--hud-only'], { from: 'user' });
+
+    await expect(fs.readFile(state, 'utf8').then((text): unknown => JSON.parse(text)))
+      .resolves.toEqual({ version: 1, binPath: expectedCodexBin() });
+  } finally {
+    process.chdir(cwd);
+    vi.unstubAllEnvs();
+    initCommand.setOptionValue('hudOnly', hudOnly);
+  }
+});
 
 describe('hudOnlyCharterPlugins: the record of the machine, or nothing', () => {
   it('no manifest, or one readManifest refused, is the empty set', () => {
