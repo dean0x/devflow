@@ -1342,6 +1342,24 @@ describe('refresh re-derives a recorded claim from current facts (D-VERIFY-RECOR
     expect(v.records.find(r => r.id === 1)).toMatchObject({ sha: null, outcome: null })
   })
 
+  it.each([
+    ['added', '', ' [expect-exit: 1]', 'FAILED'],
+    ['removed', ' [expect-exit: 1]', '', 'ATTESTED-LOCAL'],
+    ['changed', ' [expect-exit: 1]', ' [expect-exit: 2]', 'ATTESTED-LOCAL'],
+    ['unchanged', ' [expect-exit: 1]', ' [expect-exit: 1]', 'ATTESTED-LOCAL'],
+  ] as const)('refresh checks the record hash when the expected-exit clause is %s', (_label, before, after, state) => {
+    const line = LOCAL + before
+    const current = LOCAL + after
+    const v = verifyScn({ scn: {
+      body: `${blockOf([CI, current])}\n`,
+      comments: [viewer(recordComment(HEAD, [local({ state, line, exit: 1 })]))],
+    } })
+    expect(v.code, v.stderr).toBe(0)
+    expect(v.records.find(r => r.id === 2)).toMatchObject(before === after
+      ? { state: 'ATTESTED-LOCAL', sha: HEAD, outcome: 'PASS', exit: 1, hash: h12(current) }
+      : { state: 'UNVERIFIED', sha: null, outcome: null, exit: null, hash: h12(current) })
+  })
+
   it('a record line without `out:` is no record: it is never read as a PASS', () => {
     const outless = recordComment(HEAD, [ci()]).replace(' out:PASS', '')
     expect(outless).not.toContain('out:')
@@ -1424,6 +1442,18 @@ describe('the notes that name why a TP did not verify', () => {
     })
   }
 
+  it.each([
+    [1, 'ATTESTED-LOCAL', []],
+    [2, 'FAILED', []],
+    [undefined, 'UNVERIFIED', ['local-no-exit']],
+  ] as const)('a local TP that expects exit 1 gives %s → %s with these notes: %j', (exit, state, notes) => {
+    const line = `${LOCAL} [expect-exit: 1]`
+    const v = verifyScn({ scn: {}, evidence: evidenceFile([line], [claimLine(1, 'PASS', HEAD, exit)]) })
+    expect(v.code, v.stderr).toBe(0)
+    expect(v.states.get(1)).toBe(state)
+    expect(notesOf(v.stderr)).toEqual(notes)
+  })
+
   it('no local-no-exit note for a record whose TP text changed, though the state is UNVERIFIED', () => {
     const edited = `Intro.\n\n${blockOf([LOCAL.replace('a local check', 'an edited check')])}\n`
     const v = verifyScn({ scn: { body: edited, comments: [viewer(recordComment(HEAD, [record()]))] } })
@@ -1492,6 +1522,14 @@ describe('evidence mode merges the file over the record', () => {
     const changed = tpLine(2, 'a different local check', 'local')
     const v = verifyScn({ scn: { comments, runs }, evidence: evidenceFile([CI, changed]) })
     expect(v.states.get(2)).toBe('UNVERIFIED')
+  })
+
+  it('known limit: a file claim follows its TP number after an expected-exit edit', () => {
+    const claims = [claimLine(2, 'PASS', HEAD, 1)]
+    const verifyLine = (line: string): VerifyRun => verifyScn({ scn: {}, evidence: evidenceFile([line], claims) })
+    expect(verifyLine(LOCAL).states.get(2)).toBe('FAILED')
+    expect(verifyLine(`${LOCAL} [expect-exit: 1]`).states.get(2)).toBe('ATTESTED-LOCAL')
+    expect(verifyLine(`${LOCAL} [expect-exit: 2]`).states.get(2)).toBe('FAILED')
   })
 
   it('a file with claims but no plan takes the plan from the body block (hash-checked)', () => {
@@ -2763,9 +2801,9 @@ describe('claim — appends the claim lines of a report to the evidence file', (
     ]
     const RULE = 'with no exit code from 0 to 255; verify reads'
     const many = (ids: string): string =>
-      `verify-evidence: claim: ${ids} are method:local PASS claims ${RULE} them UNVERIFIED, and only exit 0 from the Test report counts\n`
+      `verify-evidence: claim: ${ids} are method:local PASS claims ${RULE} them UNVERIFIED, and only the exit code its TP line expects counts\n`
     const one = (id: string): string =>
-      `verify-evidence: claim: ${id} is a method:local PASS claim ${RULE} it UNVERIFIED, and only exit 0 from the Test report counts\n`
+      `verify-evidence: claim: ${id} is a method:local PASS claim ${RULE} it UNVERIFIED, and only the exit code its TP line expects counts\n`
 
     it('names each one on stderr in TP order, and writes the line without an exit part', () => {
       const file = fileWith(evidenceFile(MIXED))
@@ -3397,7 +3435,7 @@ describe('claim — appends the claim lines of a report to the evidence file', (
       VE.claimCause({ stderr: (t: string) => { out += t } }, text)
       return out
     }
-    const NO_EXIT = 'are method:local PASS claims with no exit code from 0 to 255; verify reads them UNVERIFIED, and only exit 0 from the Test report counts'
+    const NO_EXIT = 'are method:local PASS claims with no exit code from 0 to 255; verify reads them UNVERIFIED, and only the exit code its TP line expects counts'
     const list = (count: number, id: (i: number) => string): string => Array.from({ length: count }, (_, i) => `TP-${id(i + 1)}`).join(', ')
     const at = (c: string): string => `line 3${c} is not a TP line`
 

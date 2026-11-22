@@ -94,10 +94,11 @@
 //             the rule that line k of its Test Plan breaks, a section that does not parse,
 //             or claim lines that do not fit the Claims section. A line k of a file counts
 //             from 1 at the top of the file. A run that writes a method:local PASS with no
-//             exit code from 0 to 255 names those TPs: verify reads them UNVERIFIED, because
-//             a local PASS needs exit 0. The sink lets a cause through only when it is one
-//             of a closed list of fixed phrases with digits in their number slots; any other
-//             text becomes one fixed phrase. No byte of argv, a file, git or gh gets in.
+//             exit code from 0 to 255 names those TPs. Verify reads them UNVERIFIED.
+//             A local PASS needs the exit code its TP line expects: 0 without a clause,
+//             or the value of [expect-exit: <k>]. The sink accepts only a fixed phrase from
+//             a closed list, with digits in its number slots. Any other text becomes one
+//             fixed phrase. No byte of argv, a file, git or gh gets in.
 // A git-tracked file counts as absent, like a tracked `.devflow/config.json`
 // (D-TRACKED-RESULT). `verify`, `publish` and `readiness` ask git about an `--evidence`
 // file before they read it, and about `--block-out`, `--comment-out`, `--stale-out` and
@@ -111,9 +112,9 @@
 // boundary re-checks every stdout line against these shapes before writing it.
 // The stderr summary `verify-evidence: notes: <tokens>` lists closed tokens, sorted.
 // Two of them name why a TP did not verify, and neither changes a state:
-// `local-no-exit`, a local PASS with no exit code that reads UNVERIFIED (a local PASS
-// needs exit 0), and `run-failed`, a ci PASS that reads FAILED because a run at its
-// verifying commit failed (any failed run at that commit fails a ci TP).
+// `local-no-exit`: a local PASS with no exit code reads UNVERIFIED, since it needs
+// the exit code its TP line expects. `run-failed`: a ci PASS reads FAILED because
+// a run at its verifying commit failed (any failed run at that commit fails a ci TP).
 //
 // Exit codes:
 //   0  ok
@@ -312,8 +313,8 @@ const CLAIM_CAUSE_TEMPLATES = Object.freeze([
   'a section of the evidence file does not parse',
   'the claim lines do not fit the Claims section',
   // localNoExitCause
-  'TP-<n> is a method:local PASS claim with no exit code from 0 to 255; verify reads it UNVERIFIED, and only exit 0 from the Test report counts',
-  '<tps> are method:local PASS claims with no exit code from 0 to 255; verify reads them UNVERIFIED, and only exit 0 from the Test report counts',
+  'TP-<n> is a method:local PASS claim with no exit code from 0 to 255; verify reads it UNVERIFIED, and only the exit code its TP line expects counts',
+  '<tps> are method:local PASS claims with no exit code from 0 to 255; verify reads them UNVERIFIED, and only the exit code its TP line expects counts',
 ]);
 /** The most characters of a cause. The longest one holds CAPS.TPS ids (each at most `TP-200, `) and its phrase. */
 const CLAIM_CAUSE_MAX_CHARS = 2000;
@@ -1875,11 +1876,10 @@ function classifyTp(io, repo, memo, x) {
 }
 
 /**
- * Add the closed note that names why a TP's final verdict did not verify, where the ladder's
- * own result says so; the verdict itself never changes. `local-no-exit`: a local PASS in the
- * PR, with its TP text unchanged, that has no exit code, reads UNVERIFIED because only exit 0
- * attests a local TP. The note follows the final state, so a STALE, an INDETERMINATE and every
- * other UNVERIFIED cause get none. `run-failed`: a ci PASS reads FAILED because a run at its
+ * Add a closed note for the final verdict, without a change to that verdict.
+ * `local-no-exit`: a local PASS needs the exit code its TP line expects. Add the note only
+ * when a PASS with no exit reads UNVERIFIED, its commit is in the PR and its TP text matches.
+ * `run-failed`: a ci PASS reads FAILED because a run at its
  * verifying SHA failed (the claim's own runs, or the head's); any failed run fails a ci TP, since
  * no TP field names its own job. A FAIL claim gets no note. The note is a closed token, with no
  * byte of a run.
@@ -3606,8 +3606,8 @@ function claimPlanIds(args, evidence) {
 /**
  * The TPs of the written lines that verify reads UNVERIFIED for want of an exit code: the
  * plan lists them as method:local, and the claim parser reads each one's line as a PASS with
- * no exit (none was given, or the one given is not a number from 0 to 255). Only exit 0
- * attests a local TP (the ATTESTED-LOCAL arm of pr-evidence.cjs). In ascending order.
+ * no exit (none was given, or the one given is not a number from 0 to 255). A local PASS
+ * needs the exit code its TP line expects. Return the TP numbers in ascending order.
  *
  * @param {Map<number, string>} listed  TP number to method
  * @param {readonly string[]} lines  the claim lines this run writes
@@ -3623,7 +3623,8 @@ function localNoExitIds(listed, lines) {
 }
 
 /**
- * The stderr cause that names the TPs of localNoExitIds, as digits, at most CAPS.TPS of them.
+ * The stderr cause names at most CAPS.TPS ids from localNoExitIds. It states that only
+ * the expected exit counts, without copying the exit or any other TP text.
  *
  * @param {readonly number[]} ids  at least one
  * @returns {string}
@@ -3631,8 +3632,8 @@ function localNoExitIds(listed, lines) {
 function localNoExitCause(ids) {
   const named = ids.map(id => 'TP-' + Number(id)).join(', ');
   return ids.length === 1
-    ? named + ' is a method:local PASS claim with no exit code from 0 to 255; verify reads it UNVERIFIED, and only exit 0 from the Test report counts'
-    : named + ' are method:local PASS claims with no exit code from 0 to 255; verify reads them UNVERIFIED, and only exit 0 from the Test report counts';
+    ? named + ' is a method:local PASS claim with no exit code from 0 to 255; verify reads it UNVERIFIED, and only the exit code its TP line expects counts'
+    : named + ' are method:local PASS claims with no exit code from 0 to 255; verify reads them UNVERIFIED, and only the exit code its TP line expects counts';
 }
 
 /**

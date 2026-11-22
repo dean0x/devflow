@@ -5,7 +5,7 @@ description: "Use when editing verify-evidence.cjs claim or verify, pr-evidence.
 category: domain-knowledge
 directories: [src/assets/scripts/verify-evidence.cjs, src/assets/scripts/pr-evidence.cjs, tests/evidence]
 created: 2026-11-19
-updated: 2026-11-19
+updated: 2026-11-22
 ---
 
 # Evidence scripts (test-plan claim and verify)
@@ -14,7 +14,7 @@ updated: 2026-11-19
 
 - **KB-INV-1** Only `pr-evidence.cjs` and `verify-evidence.cjs verify` assign a TP state. A `claim` line is an input to `verify`, never a state.
 - **KB-INV-2** The state ladder is the frozen `ARMS` table in `pr-evidence.cjs`. First match wins. Every arm but the last is a positive match. The last arm is UNVERIFIED. `PRECEDENCE` is derived from `ARMS`.
-- **KB-INV-3** A local PASS verifies only with exit 0. A local PASS with no exit, or with an exit that is not a number from 0 to 255, reads UNVERIFIED.
+- **KB-INV-3** A local PASS verifies only with the expected exit: 0 by default, or the value of `[expect-exit: <k>]`. A local PASS with no usable exit code (an integer from 0 to 255) reads UNVERIFIED if no earlier arm applies.
 - **KB-INV-4** Any failed run at the claim commit fails a ci TP, so a ci PASS then reads FAILED. No run is matched to one TP.
 - **KB-INV-5** Stdout leaves the script only through `settleOutcome` and `settleShape`. A line that is not a closed shape prints nothing and exits 4.
 - **KB-INV-6** Every `verify-evidence: claim: <cause>` line goes through `claimCause`. It checks the cause against `CLAIM_CAUSE_RE` at the sink.
@@ -36,7 +36,7 @@ Two scripts share the work. `pr-evidence.cjs` is pure. It owns every grammar, ma
 
 ## The TP-line contract
 
-A TP line has this form: `- [ ] TP-<n> (AC-<m>) <scenario> — method:<ci|local|manual>`, with an optional ` [files: <glob>, ...]` tail. The pattern is `TP_LINE_RE` in `pr-evidence.cjs`.
+A TP line has this form: `- [ ] TP-<n> (AC-<m>) <scenario> — method:<ci|local|manual>`. It can end with ` [files: <glob>, ...]`, then ` [expect-exit: <k>]`. Each clause is optional. Use `expect-exit` only for a planned local failure, with an integer from 1 to 125 and no leading zeros. The pattern is `TP_LINE_RE` in `pr-evidence.cjs`.
 
 - The scenario reaches the PR body, so the pattern refuses `#`, `@`, `/`, `<`, `>`, a backtick, `[`, `]` and control, bidi and separator characters. Those are the characters an issue reference, a mention, a link, markup or a code span needs.
 - TP numbers ascend and are unique. A plan that breaks this gives a parse error code (`order` or `duplicate`).
@@ -53,9 +53,9 @@ A TP line has this form: `- [ ] TP-<n> (AC-<m>) <scenario> — method:<ci|local|
 | 1 | UNVERIFIED | no usable claim, a SKIP, a claim SHA outside the PR, or TP text that no longer matches the trusted record |
 | 2 | INDETERMINATE | the head is unresolved, the claim is not in the PR, a needed diff is missing, or (ci) the runs are missing, too many, at a wrong SHA or not settled |
 | 3 | STALE | the claim is at an older commit and the TP has no files or the diff overlaps them |
-| 4 | FAILED | a FAIL claim, a local claim with an exit other than 0, or (ci) any failed run |
+| 4 | FAILED | a FAIL claim, a local claim with an exit that differs from the expected exit, or (ci) any failed run |
 | 5 | VERIFIED-CI | a ci PASS, at least one run, every latest attempt passing at the verifying SHA, each linked under this repository, and at least one `success` |
-| 6 | ATTESTED-LOCAL | a local PASS with exit 0, a manual PASS, or a ci PASS whose SHA has no runs (run label `none`) |
+| 6 | ATTESTED-LOCAL | a local PASS with the expected exit, a manual PASS, or a ci PASS whose SHA has no runs (run label `none`) |
 | 7 | UNVERIFIED | the conservative default (always matches) |
 
 Order matters. INDETERMINATE comes before STALE, so a stale ci claim still needs its runs resolved first. UNVERIFIED comes first, so a missing claim or a SKIP reads UNVERIFIED even when the head is unresolved. Passing run conclusions are `success`, `skipped` and `neutral`. Failing ones are `failure`, `timed_out` and `startup_failure`. `cancelled`, `action_required` and `stale` are unsettled, so they give INDETERMINATE.
@@ -115,7 +115,7 @@ D-CLAIM-CAUSE: stdout names the closed reason. Stderr names the cause that the r
 
 ## Fail-closed rules
 
-- A local PASS needs exit 0. See KB-INV-3.
+- A local PASS needs the exit code its TP line expects. A different exit reads FAILED if no earlier arm applies. See KB-INV-3.
 - Any failed run at the claim commit fails a ci TP. There is no TP-to-job link, so one unrelated failed job fails every ci TP at that commit. This is deliberate.
 - A ci PASS verifies only when every run is settled, passing, at exactly the verifying SHA, and linked under this repository's own HTML URL.
 - An unlisted or malformed fact reads as unresolved. `classify` is total: a bad TP gives `NO_VERDICT` (UNVERIFIED), and a malformed claim becomes no claim.
@@ -133,6 +133,10 @@ D-CLAIM-CAUSE: stdout names the closed reason. Stderr names the cause that the r
 ## Gotchas
 
 **KB-INV-3 and `local-no-exit`.** A user who passes `TP-1=PASS` for a local TP gets exit 0 and `CLAIM appended:1 …`. The TP still reads UNVERIFIED later. The only warning is the stderr cause. Read stderr.
+
+**Local command output.** The script reads only the exit. It cannot detect a crash that returns the expected exit and prints plausible failure output. The Test agent checks the output.
+
+**File and refresh modes.** A file claim binds by TP number when the plan comes from the file. A clause edit can change the verdict without a new run. In refresh mode, a clause edit changes the PR body line's hash, so the claim does not apply.
 
 **KB-INV-4.** A CI run that fails for an unrelated reason still fails each ci TP. The `run-failed` note says so. Fix or re-run the job, then run `verify` again.
 
