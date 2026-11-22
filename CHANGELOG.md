@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Experimental Code Mode flag.** Use `devflow flags --enable code-mode` for direct Claude Code sessions. The flag is off by default. This change applies to new sessions only. Code Mode does not start while the Devflow proxy or `disable-nonessential-traffic` is on.
+- **Experimental Code Mode flag.** Use `devflow flags --enable code-mode` for direct Claude Code sessions. The flag is off by default. This change applies to new sessions only. Code Mode does not start while the Devflow proxy or `disable-nonessential-traffic` is on. `devflow flags` does not change a user `settings.json` that is over 1 MiB or is not valid UTF-8, and leaves the file as it is.
 - A local test plan can specify ` [expect-exit: <k>]` (1 to 125) for a planned failure. A local PASS needs the expected exit, which defaults to 0. A file claim applies only if its saved expected exit matches the test plan. Old claim lines without `expect-exit:` parse with expected exit 0 and apply only to TPs without clauses; with clauses, they give UNVERIFIED, not FAILED.
 
 ---
