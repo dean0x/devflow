@@ -152,6 +152,7 @@ function collectShapeTemplates(text: string) {
   const exit = all.find(s => s.startsWith(' [expect-exit:'))
   if (line === undefined || files === undefined) throw new Error('the Shape bullet lacks the line or the files template')
   if (exit === undefined) throw new Error('the Shape bullet lacks the expected-exit template')
+  if (all.indexOf(exit) < all.indexOf(files)) throw new Error('the expected-exit template must follow the files template')
   const scope = /on a `([a-z]+)` line only/.exec(shape)?.[1]
   return { line, files, exit, scope }
 }
@@ -486,6 +487,15 @@ describe('AC-2: the Shape template accepts and rejects exactly what TP_LINE_RE d
     const seeded = text.replace('` [expect-exit: <k>]`', '')
     expect(seeded, 'the seed must land').not.toBe(text)
     expect(() => collectShapeTemplates(seeded)).toThrow('the Shape bullet lacks the expected-exit template')
+  })
+
+  it('known-bad probe: the Shape bullet puts the expected exit before the files', () => {
+    const text = contractText()
+    const { files, exit } = collectShapeTemplates(text)
+    const seeded = text.replace(`\`${files}\` and, on a \`local\` line only, \`${exit}\``,
+      `\`${exit}\` on a \`local\` line only, then \`${files}\``)
+    expect(seeded).not.toBe(text)
+    expect(() => collectShapeTemplates(seeded)).toThrow('the expected-exit template must follow the files template')
   })
 
   it('known-bad probe: a files bound of 9 disagrees with TP_LINE_RE', () => {

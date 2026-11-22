@@ -897,6 +897,16 @@ describe('classify — the §3.3 ladder, first match wins, conservative terminal
     }
   })
 
+  it.each(['ci', 'manual'] as const)('rejects a nonzero expected exit on a %s object even when its line confirms the exit', method => {
+    const tp = { ...tpOf(LOCAL_EXPECTS_1), method }
+    for (const exit of [undefined, 1]) {
+      const claim = claimOf(claimLine('TP-1', 'PASS', HEAD, 'test', exit))
+      expect(PE.classify(tp, { ...ciAtHead, claim })).toEqual({
+        state: 'UNVERIFIED', sha: null, outcome: null, run: null, exit: null,
+      })
+    }
+  })
+
   it.each([undefined, '- [ ] not a TP'])('rejects a TP with an invalid line: %s', line => {
     const tp = { ...tpOf(LOCAL), line } as Tp
     const claim = claimOf(claimLine('TP-1', 'PASS', HEAD, 'test', 0))
