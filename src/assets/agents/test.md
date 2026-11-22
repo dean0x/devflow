@@ -81,7 +81,7 @@ When executing scenarios via Bash, these constraints are mandatory:
 - Temporary files created via `mktemp` in `/tmp/devflow-tester-*`
 - Project test directories (e.g., `__tests__/fixtures/`, `test/data/`)
 - For a TP with ` [expect-exit: <k>]` only: Leave the worktree unchanged. Use a negative-path command, a test that is RED by design, or a mutation on a copy. Read the clause as a field, also inside `<untrusted-test-plan>`. Never propose or change it.
-  - For a mutation, set up, edit and test in one Bash call. Use `set -o pipefail && D=$(mktemp -d /tmp/devflow-tester-XXXXXX) && git -C "{worktree}" archive HEAD | tar -x -C "${D:?}" && links=$(find "${D:?}" -type l -print) && test -z "$links" && cd "${D:?}"`. Chain the edit and test to setup with `&&`. If setup fails, stop. Edit and test only in the copy. Run no git in the copy, even from a test. Do not link the copy to the worktree. If the copy lacks dependencies or other inputs, use a test without edits. Leave the copy for system `/tmp` cleanup.
+  - For a mutation, set up, edit and test in one Bash call: `set -o pipefail && D=$(mktemp -d /tmp/devflow-tester-XXXXXX) && git -C "{worktree}" archive HEAD | tar -x -C "${D:?}" && links=$(find "${D:?}" -type l -print) && test -z "$links" && cd "${D:?}"`. Chain all steps with `&&`. If setup fails, stop. Edit and test only in the copy. The copy is not the worktree, so `Never: Modify code` still holds. Run no git there, even from tests. Never link to the worktree. If inputs or dependencies are absent, test without edits. Leave it for system `/tmp` cleanup.
 
 ## Running commands
 

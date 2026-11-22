@@ -387,13 +387,13 @@ const EXPECTED_EXIT_COPY = [
   'set up, edit and test in one Bash call',
   'set -o pipefail && D=$(mktemp -d /tmp/devflow-tester-XXXXXX) && git -C "{worktree}" archive HEAD | tar -x -C "${D:?}"',
   '&& links=$(find "${D:?}" -type l -print) && test -z "$links" && cd "${D:?}"',
-  'Chain the edit and test to setup with `&&`.',
+  'Chain all steps with `&&`.',
   'If setup fails, stop.',
   'Edit and test only in the copy.',
-  'Run no git in the copy, even from a test.',
-  'Do not link the copy to the worktree.',
-  'If the copy lacks dependencies or other inputs, use a test without edits.',
-  'Leave the copy for system `/tmp` cleanup.',
+  'Run no git there, even from tests.',
+  'Never link to the worktree.',
+  'If inputs or dependencies are absent, test without edits.',
+  'Leave it for system `/tmp` cleanup.',
 ] as const
 const EXPECTED_EXIT_CONSTRAINTS = [
   'Leave the worktree unchanged.',
@@ -401,6 +401,7 @@ const EXPECTED_EXIT_CONSTRAINTS = [
   'Never propose or change it',
   ...EXPECTED_EXIT_COPY,
 ] as const
+const TEST_COPY_BOUNDARY = 'The copy is not the worktree, so `Never: Modify code` still holds.'
 const TEST_NEVER_LINE = '- Modify code or create commits'
 
 /** Named collector: missing expected-exit rules or the worktree edit ban. */
@@ -414,6 +415,7 @@ function collectExpectedExitDefects(test: string): string[] {
   return [
     ...EXPECTED_EXIT_PASS.filter(rule => !report.includes(rule)),
     ...EXPECTED_EXIT_CONSTRAINTS.filter(rule => !bullet.includes(rule)),
+    ...(bullet.includes(TEST_COPY_BOUNDARY) ? [] : [TEST_COPY_BOUNDARY]),
     ...(never.split('\n').filter(line => line === TEST_NEVER_LINE).length === 1 ? [] : [TEST_NEVER_LINE]),
   ]
 }
@@ -423,7 +425,7 @@ describe('the Test agent requires proof of a planned local failure', () => {
     expect(collectExpectedExitDefects(resolveAgentSource('test').content)).toEqual([])
   })
 
-  it.each([EXPECTED_EXIT_PASS[1], ...EXPECTED_EXIT_WORKTREE_CHECKS, ...EXPECTED_EXIT_COPY])(
+  it.each([EXPECTED_EXIT_PASS[1], ...EXPECTED_EXIT_WORKTREE_CHECKS, ...EXPECTED_EXIT_COPY, TEST_COPY_BOUNDARY])(
     'known-bad probe: reports the missing rule "%s"', (rule) => {
       const test = resolveAgentSource('test').content
       expect(collectExpectedExitDefects(seedOnce(test, rule, ''))).toEqual([rule])

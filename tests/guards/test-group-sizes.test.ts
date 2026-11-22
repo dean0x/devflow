@@ -11,8 +11,8 @@ import { readFileSync } from 'fs'
 import * as path from 'path'
 import { ROOT, resolveAgentSource } from '../helpers.js'
 
-/** The Test agent body (test.md), in bytes. It is hand-authored, so every build key ships it unchanged. */
-const TEST_BODY_MAX_BYTES = 12_087
+/** Test agent body (test.md), in bytes. Old: 12,087. New: 12,094. The copy rule states that the worktree edit ban still applies. */
+const TEST_BODY_MAX_BYTES = 12_094
 /** src/assets/skills/qa/SKILL.md, in bytes. */
 const QA_SKILL_MAX_BYTES = 4_574
 /** src/assets/skills/qa/references/browser-testing.md, in bytes. */
