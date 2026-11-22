@@ -95,6 +95,19 @@ describe('readCache — TTL expiry', () => {
     expect(result).toBeNull();
   });
 
+  it('uses the supplied write timestamp up to, but not at, expiry', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_999);
+    const value = { value: 'ok' };
+    try {
+      await writeCache(cacheDir, 'key', value, 1_000, 1_000);
+      expect(readCache(cacheDir, 'key', validateTestData)).toEqual(value);
+      clock.mockReturnValue(2_000);
+      expect(readCache(cacheDir, 'key', validateTestData)).toBeNull();
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('returns value when still within TTL', async () => {
     await writeCache(cacheDir, 'fresh', { value: 'ok' }, 60_000);
     const result = readCache<TestData>(cacheDir, 'fresh', validateTestData);
@@ -161,7 +174,8 @@ describe('readCache — entry files', () => {
     read.mockClear();
     try {
       expect(readCache(cacheDir, 'pipe', validateTestData)).toBeNull();
-      expect(open.mock.calls.every(([, flags]) => (Number(flags) & O_NONBLOCK) !== 0)).toBe(true);
+      expect(open).toHaveBeenCalledTimes(1);
+      expect(Number(open.mock.calls[0]?.[1]) & O_NONBLOCK).not.toBe(0);
       expect(read).not.toHaveBeenCalled();
     } finally {
       open.mockRestore();

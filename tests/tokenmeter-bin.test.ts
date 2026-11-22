@@ -25,9 +25,9 @@ beforeEach(async () => {
   packageDir = join(dir, 'node_modules', PACKAGE_NAME);
   binPath = join(packageDir, BIN_ENTRY);
   statePath = join(dir, 'tokenmeter.json');
-  await fs.mkdir(join(packageDir, 'bin'), { recursive: true, mode: 0o755 });
-  await fs.mkdir(join(packageDir, 'dist'), { mode: 0o755 });
-  await fs.writeFile(binPath, '', { mode: 0o644 });
+  await fs.mkdir(join(packageDir, 'bin'), { recursive: true, mode: 0o700 });
+  await fs.mkdir(join(packageDir, 'dist'), { mode: 0o700 });
+  await fs.writeFile(binPath, '', { mode: 0o600 });
 });
 
 afterEach(async () => {
@@ -36,7 +36,7 @@ afterEach(async () => {
 });
 
 async function setPackageBin(bin: unknown, from = dir, pkg = packageDir): Promise<void> {
-  await fs.writeFile(join(pkg, 'package.json'), JSON.stringify({ name: PACKAGE_NAME, bin }));
+  await fs.writeFile(join(pkg, 'package.json'), JSON.stringify({ name: PACKAGE_NAME, bin }), { mode: 0o600 });
   const fixtureRequire = createRequire(join(from, 'package.json'));
   vi.mocked(createRequire).mockReturnValueOnce(fixtureRequire);
 }
@@ -44,7 +44,7 @@ async function setPackageBin(bin: unknown, from = dir, pkg = packageDir): Promis
 async function setNpxPackageBin(): Promise<string> {
   const cached = join(dir, '_npx', 'entry');
   const cachedPkg = join(cached, 'node_modules', PACKAGE_NAME);
-  await fs.mkdir(cached, { recursive: true });
+  await fs.mkdir(cached, { recursive: true, mode: 0o700 });
   await fs.rename(join(dir, 'node_modules'), join(cached, 'node_modules'));
   await setPackageBin({ tokenmeter: BIN_ENTRY }, cached, cachedPkg);
   return join(cachedPkg, BIN_ENTRY);
@@ -246,8 +246,8 @@ describe('readTokenmeterBin', () => {
   it('rejects a nested bin if an intermediate folder is world-writable', async () => {
     const intermediate = join(packageDir, 'bin', 'internal');
     const nestedBin = join(intermediate, 'tokenmeter.js');
-    await fs.mkdir(intermediate, { mode: 0o755 });
-    await fs.writeFile(nestedBin, '');
+    await fs.mkdir(intermediate, { mode: 0o700 });
+    await fs.writeFile(nestedBin, '', { mode: 0o600 });
     await setState(nestedBin);
     expect(readTokenmeterBin(dir)).toBe(nestedBin);
 

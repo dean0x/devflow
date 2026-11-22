@@ -15,6 +15,7 @@ import { composeScripts } from '../src/targets/claude-code/installer.js';
 import { stripAnsi } from '../src/hud/colors.js';
 import { probeTrackedArea, TRACKED_AREAS_SCRIPT_NAME } from '../src/core/tracked-areas.js';
 import type { StdinData } from '../src/hud/types.js';
+import { sandboxEnv } from './helpers.js';
 
 const ROW = JSON.stringify({
   id: 'obs_installed_layout',
@@ -48,13 +49,16 @@ function makeProject(name: string, track: boolean): string {
 function runInstalledHud(cwd: string, options: {
   home?: string;
   lookupPath?: string;
+  preload?: string;
   stdin?: StdinData;
 } = {}): string {
-  const result = spawnSync(process.execPath, [path.join(scripts, 'hud', 'index.js')], {
+  const args = options.preload === undefined ? [] : ['--require', options.preload];
+  const result = spawnSync(process.execPath, [...args, path.join(scripts, 'hud', 'index.js')], {
     cwd: scripts,
     input: JSON.stringify({ cwd, model: { display_name: 'Test' }, ...options.stdin }),
-    env: { PATH: options.lookupPath ?? process.env.PATH ?? '', HOME: options.home ?? home },
+    env: sandboxEnv(options.home ?? home, { PATH: options.lookupPath ?? process.env.PATH ?? '' }),
     encoding: 'utf-8',
+    // The cache-miss case took 64 ms with process startup. Allow for a 7 s Node start stall.
     timeout: 15_000,
   });
   expect(result.error).toBeUndefined();
@@ -120,32 +124,40 @@ describe('the HUD run from the installed scripts directory', { timeout: 30_000 }
     expect(line).not.toContain('Codex');
   });
 
-  it('renders within two seconds and reaps a slow tokenmeter child', () => {
-    const slowHome = path.join(tmp, 'slow-home');
-    const stateDir = path.join(slowHome, '.devflow');
-    const pkg = path.join(slowHome, 'node_modules', '@dean0x', 'tokenmeter');
-    const bin = path.join(pkg, 'bin', 'tokenmeter.cjs');
-    const marker = path.join(slowHome, 'child-pid');
-    fs.mkdirSync(stateDir, { recursive: true, mode: 0o700 });
-    fs.mkdirSync(path.dirname(bin), { recursive: true, mode: 0o700 });
-    fs.mkdirSync(path.join(pkg, 'dist'), { mode: 0o700 });
-    fs.writeFileSync(path.join(stateDir, 'tokenmeter.json'), JSON.stringify({ version: 1, binPath: bin }), { mode: 0o600 });
-    fs.writeFileSync(bin, `
-      require('node:fs').writeFileSync(${JSON.stringify(marker)}, String(process.pid));
-      setTimeout(() => {}, 2500);
-    `);
+  it('renders within its own two-second budget and saves a cache miss before exit', () => {
+    const cacheHome = path.join(tmp, 'cache-home');
+    const marker = path.join(cacheHome, 'render-ms');
+    const preload = path.join(cacheHome, 'measure-render.cjs');
+    fs.mkdirSync(cacheHome, { mode: 0o700 });
+    // The first timer starts the HUD budget in main. Stop the clock at stdout, not process exit.
+    fs.writeFileSync(preload, `
+      const { writeFileSync } = require('node:fs');
+      const setTimer = global.setTimeout;
+      let start;
+      global.setTimeout = (...args) => {
+        start = performance.now();
+        global.setTimeout = setTimer;
+        return setTimer(...args);
+      };
+      const write = process.stdout.write.bind(process.stdout);
+      process.stdout.write = (...args) => {
+        const result = write(...args);
+        writeFileSync(${JSON.stringify(marker)}, String(performance.now() - start), { mode: 0o600 });
+        return result;
+      };
+    `, { mode: 0o600 });
 
-    // The stub also exits on its own if the HUD does not kill it.
-    const start = performance.now();
-    const line = runInstalledHud(tmp, { home: slowHome, lookupPath: slowHome });
-    const elapsed = performance.now() - start;
+    const line = runInstalledHud(tmp, { home: cacheHome, lookupPath: cacheHome, preload });
 
     expect(line.split('\n')).toContain('Test');
     expect(line).not.toContain('Codex');
+    const elapsed = Number(fs.readFileSync(marker, 'utf-8'));
+    expect(elapsed).toBeGreaterThan(0);
     expect(elapsed).toBeLessThan(2000);
-    const pid = Number(fs.readFileSync(marker, 'utf-8'));
-    expect(pid).toBeGreaterThan(1);
-    expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }));
+    const cache = path.join(cacheHome, '.devflow', 'cache', 'tokenmeter-hud.json');
+    expect(fs.existsSync(cache), 'the cache entry must survive process exit').toBe(true);
+    const entry: unknown = JSON.parse(fs.readFileSync(cache, 'utf-8'));
+    expect(entry).toMatchObject({ data: { usage: null } });
   });
 });
 

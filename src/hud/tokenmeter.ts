@@ -123,7 +123,7 @@ function parseCached(value: unknown, now: number): CacheValue | null {
 }
 
 /** D-TOKENMETER-HUD: Read quota only through the verified local tool. Never pass HUD stdin. */
-async function fetchUsage(bin: string, now: number): Promise<CodexUsage | null> {
+async function fetchUsage(bin: string, now: number, deadlineMs: number): Promise<CodexUsage | null> {
   try {
     const stdout = await new Promise<Buffer | null>((resolve) => {
       const child = execFile(process.execPath, [bin, 'hud'], {
@@ -131,7 +131,7 @@ async function fetchUsage(bin: string, now: number): Promise<CodexUsage | null> 
         cwd: homedir(),
         env: childEnv(process.env),
         encoding: 'buffer',
-        timeout: DEADLINE_MS,
+        timeout: deadlineMs,
         killSignal: 'SIGKILL',
         maxBuffer: MAX_OUTPUT_BYTES,
       }, (error, output) => resolve(error ? null : output));
@@ -156,14 +156,14 @@ function cacheTtl(usage: CodexUsage | null, now: number): number {
 export async function gatherTokenmeterUsage(
   devflowDir: string,
   now = Date.now(),
-  options: { readonly waitForCache?: boolean } = {},
+  options: { readonly waitForCache?: boolean; readonly deadlineMs?: number } = {},
 ): Promise<CodexUsage | null> {
   const cacheDir = hudCacheDir(devflowDir);
   const cached = readCache(cacheDir, CACHE_KEY, (value) => parseCached(value, now));
   if (cached !== null) return cached.usage;
 
   const bin = readTokenmeterBin(devflowDir);
-  const usage = bin === null ? null : await fetchUsage(bin, now);
+  const usage = bin === null ? null : await fetchUsage(bin, now, options.deadlineMs ?? DEADLINE_MS);
   const cacheWrite = writeCache(cacheDir, CACHE_KEY, { usage }, cacheTtl(usage, now), now);
   if (options.waitForCache !== false) await cacheWrite;
   return usage;

@@ -1,13 +1,21 @@
+import { execFile } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
-import { performance } from 'node:perf_hooks';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { writeCache } from '../src/core/cache.js';
 import { stripAnsi } from '../src/hud/colors.js';
 import { render } from '../src/hud/render.js';
 import { gatherTokenmeterUsage } from '../src/hud/tokenmeter.js';
 
+vi.mock('node:child_process', { spy: true });
+vi.mock('../src/core/cache.js', { spy: true });
+
 const NOW = 1_800_000_000_000;
+// One child took about 33 ms in isolation. Allow for 7 s Node start stalls.
+const CHILD_DEADLINE_MS = 10_000;
+// Cache expiry tests can start two children in sequence.
+const TEST_TIMEOUT_MS = 25_000;
 const ROOT = await fs.realpath(tmpdir());
 let root: string;
 let bin: string;
@@ -18,8 +26,10 @@ beforeEach(async () => {
   root = await fs.mkdtemp(join(ROOT, 'hud-tokenmeter-'));
   bin = join(root, 'node_modules', '@dean0x', 'tokenmeter', 'bin', 'tokenmeter.cjs');
   cache = join(root, 'cache', 'tokenmeter-hud.json');
-  await fs.mkdir(dirname(bin), { recursive: true });
-  await fs.mkdir(join(dirname(dirname(bin)), 'dist'));
+  vi.clearAllMocks();
+  // The package fixture uses owner-only modes, independent of a permissive umask.
+  await fs.mkdir(dirname(bin), { recursive: true, mode: 0o700 });
+  await fs.mkdir(join(dirname(dirname(bin)), 'dist'), { mode: 0o700 });
   await fs.writeFile(join(root, 'tokenmeter.json'), JSON.stringify({ version: 1, binPath: bin }), { mode: 0o600 });
   const clock = vi.spyOn(Date, 'now').mockReturnValue(NOW);
   setClock = (now) => { clock.mockReturnValue(now); };
@@ -42,25 +52,33 @@ const window = { minutes: 300, usedPercent: 47.5, resetsAt: NOW / 1000 + 600 };
 const usage = { windows: [window], limitReached: 'reached', observedAt: NOW };
 const noCodex = { schema: 'tokenmeter.v1', ok: true, data: { hud: 1, codex: null } };
 
-async function stub(output: unknown, before = ''): Promise<void> {
+async function stub(output: unknown, before = ''): Promise<string> {
   const text = typeof output === 'string' ? output : JSON.stringify(output);
-  await fs.writeFile(bin, `${before}\nprocess.stdout.write(${JSON.stringify(text + '\n')});`);
+  await fs.writeFile(bin, `${before}\nprocess.stdout.write(${JSON.stringify(text)});`, { mode: 0o600 });
+  return text;
 }
 
-const gather = () => gatherTokenmeterUsage(root, Date.now());
+const gather = (waitForCache = true) =>
+  gatherTokenmeterUsage(root, Date.now(), { deadlineMs: CHILD_DEADLINE_MS, waitForCache });
 
-async function renderHud(): Promise<string> {
+async function renderHud(waitForCache = true): Promise<string> {
   return render({
     stdin: { model: { display_name: 'HUD test model' } },
-    git: null, transcript: null, usage: null, codexUsage: await gather(),
+    git: null, transcript: null, usage: null, codexUsage: await gather(waitForCache),
     configCounts: null, curationCounts: null, costHistory: null, sessionStartTime: null,
     config: { enabled: true, detail: false, components: ['model', 'codexQuota'] },
     devflowDir: root, terminalWidth: 120,
   });
 }
 
-// This fixture has owner-only directories, as the supported runtime requires.
-describe.skipIf(process.getuid === undefined)('tokenmeter HUD client', () => {
+describe.skipIf(process.getuid === undefined)('tokenmeter HUD client', { timeout: TEST_TIMEOUT_MS }, () => {
+  it('accepts a reading that arrives after the default 700 ms deadline', async () => {
+    await fs.writeFile(bin, `
+      setTimeout(() => process.stdout.write(${JSON.stringify(JSON.stringify(envelope()))}), 750);
+    `, { mode: 0o600 });
+    expect(await gather()).toEqual(usage);
+  });
+
   it('maps rollout windows to the HUD with the reading time and the reached flag', async () => {
     await stub(envelope(NOW, [windowOf(), windowOf(10080, NOW - 1000)]));
     expect(await gather()).toEqual({ ...usage, windows: [window, { ...window, minutes: 10080 }] });
@@ -114,18 +132,21 @@ describe.skipIf(process.getuid === undefined)('tokenmeter HUD client', () => {
       process.on('SIGTERM', () => undefined);
       require('node:fs').writeFileSync(${JSON.stringify(marker)}, String(process.pid));
       setTimeout(() => process.stdout.write(${JSON.stringify(JSON.stringify(envelope()))}), 3000);
-    `);
-    const started = performance.now();
-    expect(await gather()).toBeNull();
-    expect(performance.now() - started).toBeLessThan(2000);
-    const pid = Number(await fs.readFile(marker, 'utf8'));
-    expect(() => process.kill(pid, 0)).toThrow(/ESRCH/);
+    `, { mode: 0o600 });
+
+    expect(await gatherTokenmeterUsage(root)).toBeNull();
+    expect(execFile).toHaveBeenCalledWith(process.execPath, [bin, 'hud'],
+      expect.objectContaining({ timeout: 700 }), expect.any(Function));
+    const pidText = await fs.readFile(marker, 'utf8').catch(() => '');
+    expect(pidText, 'the child must start before the default deadline').toMatch(/^[1-9]\d+$/);
+    const pid = Number(pidText);
+    expect(pid).toBeGreaterThan(1);
+    expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }));
   });
 
   it.each([
     ['non-JSON', 'not JSON'],
     ['empty stdout', ''],
-    ['oversize stdout', JSON.stringify(envelope()) + ' '.repeat(16_384)],
     ['wrong schema', { ...envelope(), schema: 'tokenmeter.v2' }],
     ['ok false', { ...envelope(), ok: false }],
     ['hud version 2', { ...envelope(), data: { ...envelope().data, hud: 2 } }],
@@ -139,14 +160,30 @@ describe.skipIf(process.getuid === undefined)('tokenmeter HUD client', () => {
     ['duplicate length', envelope(NOW, [windowOf(), windowOf()])],
     ['no supported window', envelope(NOW, [windowOf(60)])],
   ])('treats %s as absence', async (_name, output) => {
-    await stub(output);
+    const text = await stub(output);
+    const parse = vi.spyOn(JSON, 'parse');
     expect(await gather()).toBeNull();
+    expect(parse).toHaveBeenCalledWith(text);
     expect(JSON.parse(await fs.readFile(cache, 'utf8')).data).toEqual({ usage: null });
+  });
+
+  it('rejects output above the byte cap before it parses JSON', async () => {
+    const text = await stub(JSON.stringify(envelope()) + ' '.repeat(16_384));
+    const parse = vi.spyOn(JSON, 'parse');
+    const result = gather();
+    const child = vi.mocked(execFile).mock.results[0]?.value;
+    let bytes = 0;
+    child?.stdout?.on('data', (chunk: Buffer) => { bytes += chunk.length; });
+
+    expect(await result).toBeNull();
+    expect(bytes).toBeGreaterThan(16_384);
+    expect(parse).not.toHaveBeenCalledWith(text);
   });
 
   it('treats a non-zero exit with otherwise valid stdout as absence', async () => {
     await stub(envelope(), 'process.exitCode = 1;');
     expect(await gather()).toBeNull();
+    expect(vi.mocked(execFile).mock.results[0]?.value?.exitCode).toBe(1);
   });
 
   it('drops unsupported windows and extra keys before it writes the cache', async () => {
@@ -210,12 +247,44 @@ describe.skipIf(process.getuid === undefined)('tokenmeter HUD client', () => {
     expect(await gather()).toEqual(usage);
   });
 
-  it('fetches again when a cached value would pass an untrusted limit label to the renderer', async () => {
-    await fs.mkdir(dirname(cache));
-    await fs.writeFile(cache, JSON.stringify({
-      timestamp: NOW, ttl: 30_000, data: { usage: { ...usage, limitReached: 'unexpected' } },
-    }));
+  const week = { ...window, minutes: 10080 };
+  it.each([
+    ['an invalid limit label', { limitReached: 'unexpected' }],
+    ['no windows', { windows: [] }],
+    ['too many windows', { windows: [window, week, week] }],
+    ['an unsupported length', { windows: [{ ...window, minutes: 60 }] }],
+    ['windows out of order', { windows: [week, window] }],
+    ['a negative percentage', { windows: [{ ...window, usedPercent: -1 }] }],
+    ['a percentage above 100', { windows: [{ ...window, usedPercent: 101 }] }],
+    ['a fractional reset time', { windows: [{ ...window, resetsAt: window.resetsAt + 0.5 }] }],
+    ['a negative reset time', { windows: [{ ...window, resetsAt: -1 }] }],
+    ['a reset time too large to convert to milliseconds', {
+      windows: [{ ...window, resetsAt: Math.floor(Number.MAX_SAFE_INTEGER / 1000) + 1 }],
+    }],
+    ['a future reading time', { observedAt: NOW + 300_001 }],
+  ])('fetches a new reading when fresh cache data has %s', async (_name, override) => {
+    await writeCache(dirname(cache), 'tokenmeter-hud', {
+      usage: { ...usage, observedAt: NOW - 1000, ...override },
+    }, 30_000, NOW);
+    expect(await fs.readFile(cache, 'utf8')).not.toBe('');
     await stub(envelope());
     expect(await gather()).toEqual(usage);
+  });
+
+  it('renders while the cache write stays pending when waitForCache is false', async () => {
+    // Use an absent bin so this test controls the only asynchronous boundary.
+    let releaseWrite: () => void = () => undefined;
+    const pending = new Promise<void>((resolve) => { releaseWrite = resolve; });
+    const write = vi.mocked(writeCache).mockReturnValueOnce(pending);
+    let output: string | undefined;
+    const rendered = renderHud(false).then((line) => { output = stripAnsi(line); });
+    try {
+      await new Promise<void>((resolve) => { setImmediate(resolve); });
+      expect(write).toHaveBeenCalledTimes(1);
+      expect(output).toBe('HUD test model');
+    } finally {
+      releaseWrite();
+      await rendered;
+    }
   });
 });

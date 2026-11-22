@@ -6,6 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installTokenmeterState } from '../src/core/tokenmeter-bin.js';
 import { gatherTokenmeterUsage } from '../src/hud/tokenmeter.js';
 
+// Both contract cases took 744 ms total in isolation. Allow a 7 s Node start stall per process.
+const CHILD_DEADLINE_MS = 10_000;
+// The app-server case starts the refresher and two fake Codex processes in sequence.
+const REFRESH_TIMEOUT_MS = 30_000;
+const TEST_TIMEOUT_MS = 45_000;
 let root: string;
 
 beforeEach(async () => {
@@ -33,7 +38,7 @@ async function installFakeCodex(binDir: string): Promise<string> {
       hasCodexHome: Object.hasOwn(process.env, 'CODEX_HOME'),
     }) + '\\n');
     if (arg === '--version') process.stdout.write('codex-cli 0.165.0\\n');
-  `);
+  `, { mode: 0o600 });
   return codex;
 }
 
@@ -43,7 +48,7 @@ async function waitForRefresh(dataDir: string): Promise<void> {
     // distinguish completion from a child that has not acquired the lock yet.
     expect(existsSync(join(dataDir, 'refresh-state.json'))).toBe(true);
     expect(existsSync(join(dataDir, 'refresh.lock'))).toBe(false);
-  }, { interval: 25, timeout: 5000 });
+  }, { interval: 25, timeout: REFRESH_TIMEOUT_MS });
 }
 
 async function runContract(setting: 'off' | 'on') {
@@ -69,19 +74,20 @@ async function runContract(setting: 'off' | 'on') {
     codex: { five_hour: { usedPercent: 47.5, resetsAt, at, src: 'rollouts', reached: true } },
   }), { mode: 0o600 });
 
-  const usage = await gatherTokenmeterUsage(devflowDir).finally(() => waitForRefresh(dataDir));
+  const usage = await gatherTokenmeterUsage(devflowDir, Date.now(), { deadlineMs: CHILD_DEADLINE_MS });
   expect(usage).toEqual({
     observedAt: at,
     limitReached: 'reached',
     windows: [{ minutes: 300, usedPercent: 47.5, resetsAt: Math.floor(resetsAt / 1000) }],
   });
 
+  await waitForRefresh(dataDir);
   const state: unknown = JSON.parse(await readFile(join(dataDir, 'refresh-state.json'), 'utf-8'));
   return { state, marker: join(binDir, 'invocations.jsonl'), codex, home, binDir };
 }
 
 // The real npm bin runs via the HUD client. Only Codex is a test double.
-describe.skipIf(process.platform === 'win32')('pinned tokenmeter HUD contract', { timeout: 10_000 }, () => {
+describe.skipIf(process.platform === 'win32')('pinned tokenmeter HUD contract', { timeout: TEST_TIMEOUT_MS }, () => {
   it('accepts the rollout reading and starts no Codex process with app_server off', async () => {
     const { state, marker } = await runContract('off');
     expect(state).toMatchObject({ codexFound: true, outcome: 'off' });
