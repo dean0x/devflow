@@ -1,5 +1,5 @@
 import { Command, Option } from 'commander';
-import { promises as fs } from 'fs';
+import { existsSync, promises as fs } from 'fs';
 import * as path from 'path';
 import { execSync } from 'child_process';
 import * as p from '@clack/prompts';
@@ -1073,6 +1073,7 @@ export const initCommand = new Command('init')
       process.exit(1);
     }
     const { homeDir, claudeDir, devflowDir } = resolvedPaths.value;
+    const retiredHudReader = path.join(devflowDir, 'scripts', 'hud', 'codex-usage.js');
 
     // --hud-only: install only HUD (skip plugins, hooks, extras)
     if (options.hudOnly) {
@@ -1109,6 +1110,7 @@ export const initCommand = new Command('init')
       // (D-CHARTER-INSTALL-RENDER). A render failure is a warning.
       try {
         await installScripts({
+          devflowDir,
           scriptsTarget: path.join(devflowDir, 'scripts'),
           plugins: hudOnlyCharterPlugins(existingHudManifest),
           warn: (msg) => p.log.warn(msg),
@@ -1139,6 +1141,17 @@ export const initCommand = new Command('init')
           kept: true,
           manifestWritten: hudManifestWritten,
         }));
+      }
+
+      if (existsSync(retiredHudReader)) {
+        const opened = await openBackupSession({ claudeDir, devflowDir });
+        if (opened.ok) {
+          backupReport.begin(opened.session);
+          await opened.session.removeExact(retiredHudReader);
+          backupReport.print();
+        } else {
+          p.log.warn('Could not remove the previous Codex quota reader.');
+        }
       }
 
       const hudOnlySkew = formatHudOnlySkew(existingHudManifest?.version ?? null, await readRunningVersion());
@@ -2391,6 +2404,7 @@ export const initCommand = new Command('init')
     for (const legacy of LEGACY_HOOK_FILES) {
       await backups.removeExact(path.join(hooksDir, legacy));
     }
+    await backups.removeExact(retiredHudReader);
 
     // Every step that moves or removes files in devflow's folders has run: name what the session
     // moved aside, ahead of the summary below. A throw before this point prints it on the way out.

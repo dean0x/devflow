@@ -12,6 +12,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Experimental Code Mode flag.** Use `devflow flags --enable code-mode` for direct Claude Code sessions. The flag is off by default. This change applies to new sessions only. Code Mode does not start while the Devflow proxy or `disable-nonessential-traffic` is on. `devflow flags` does not change a user `settings.json` that is over 1 MiB or is not valid UTF-8, and leaves the file as it is.
 - A local test plan can specify ` [expect-exit: <k>]` (1 to 125) for a planned failure. A local PASS needs the expected exit, which defaults to 0. A file claim applies only if its saved expected exit matches the test plan. Old claim lines without `expect-exit:` parse with expected exit 0 and apply only to TPs without clauses; with clauses, they give UNVERIFIED, not FAILED.
 
+### Changed
+
+- **The HUD uses tokenmeter for Codex quota.** tokenmeter checks recent session logs in the background. By default, tokenmeter can start `codex app-server` at most about once per minute per data folder. Codex can then use its stored sign-in to request the limits from OpenAI over HTTP. To stop the app server and keep the log source, run `npx @dean0x/tokenmeter@0.2.0 config app_server off`.
+
+  The HUD shows the data age from 10 minutes. If tokenmeter cannot find Codex, log data at least 10 minutes old does not show.
+
+### Removed
+
+- The Devflow proxy quota snapshot reader in the HUD.
+
+### Upgrade notes
+
+- After the upgrade, run `devflow init` again to install the HUD and save the tool path.
+
 ---
 
 ## [3.19.3] - 2026-11-20
