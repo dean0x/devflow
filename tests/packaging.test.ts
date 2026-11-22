@@ -8,6 +8,9 @@
  *   dependencies, and matches the lockfile. A range would let an npm install change
  *   the compiler that produces dist/agents/git.md.
  *
+ * Guard 3c (tokenmeter pin): the runtime dependency matches the approved release.
+ *   The lock entry must have no install script or runtime dependencies.
+ *
  * Guard 4 (commands source): every dist/commands/*.md is the output of a known
  *   source file in src/assets/commands/ — either a compiled .mds or a hand-authored .md.
  *   This prevents stale or orphaned compiled files from shipping when a command source
@@ -276,6 +279,33 @@ describe('Guard 3b (MDS pin): compiler pinned to an exact version in devDependen
   });
 });
 
+// ---------------------------------------------------------------------------
+// Guard 3c: tokenmeter pin integrity
+// ---------------------------------------------------------------------------
+
+const TOKENMETER_PACKAGE = '@dean0x/tokenmeter';
+const TOKENMETER_VERSION = '0.1.0';
+const TOKENMETER_INTEGRITY = 'sha512-rarVXVQhkJoBvGYowCu/7ZOwnkmWa9Zw3jJGZQZOTxWqZfXxQeyRfqYXB78tY/QWrvpFPfeAN/u+vEqabo/8mg==';
+
+describe('Guard 3c (tokenmeter pin): tokenmeter matches the approved release', () => {
+  it('declares tokenmeter at the exact version in dependencies', async () => {
+    const manifest: unknown = JSON.parse(await fs.readFile(path.join(ROOT, 'package.json'), 'utf-8'));
+    expect(manifest).toHaveProperty(['dependencies', TOKENMETER_PACKAGE], TOKENMETER_VERSION);
+  });
+
+  it('locks tokenmeter to the approved release without an install script or runtime dependencies', async () => {
+    const lock: unknown = JSON.parse(await fs.readFile(path.join(ROOT, 'package-lock.json'), 'utf-8'));
+    const entry = ['packages', `node_modules/${TOKENMETER_PACKAGE}`];
+    expect(lock).toHaveProperty(entry, expect.objectContaining({
+      version: TOKENMETER_VERSION,
+      integrity: TOKENMETER_INTEGRITY,
+    }));
+    expect(lock).not.toHaveProperty([...entry, 'hasInstallScript']);
+    expect(lock).not.toHaveProperty([...entry, 'dependencies']);
+    expect(lock).not.toHaveProperty([...entry, 'optionalDependencies']);
+    expect(lock).not.toHaveProperty([...entry, 'peerDependencies']);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Guard 4: Commands source guard
