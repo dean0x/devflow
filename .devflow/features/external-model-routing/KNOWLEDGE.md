@@ -36,7 +36,7 @@ updated: 2026-11-19
 - **KB-INV-10** The Codex JWT is decoded for display only: never signature-verified, no token material returned, the account id truncated.
 - **KB-INV-11** `proxy --enable` refuses (exit 1, nothing written) while Code Mode is on, and also when the Code Mode signals cannot be read (settings unparseable or unreadable); disable and every turn-off path are never blocked by Code Mode.
 - **KB-INV-12** `proxy --status` prints Code Mode blocker lines only while Code Mode is on, as warnings after the `ANTHROPIC_BASE_URL` line, from the shared predicates in `code-mode.ts`; it never prints settings values. It reads `settings.json` only through `readSettingsEnv` (bounded reader, never a bare `fs.readFile`): an unreadable or oversize file gives no env, so the URL shows as not set and no blocker line comes from that file.
-- **KB-INV-13** `readProxyState` returns the default disabled state only for an absent file; an unreadable, oversize, non-regular, non-directory-parent or unparseable file is an `Err` with fixed text, and the Code Mode signal reader counts that `Err` as the proxy being on.
+- **KB-INV-13** `readProxyState` accepts an absent file as disabled. A present file must pass the read limits and contain a JSON object. Missing or invalid fields in an object use defaults. The Code Mode signal reader counts an `Err` from `readProxyState` as proxy-on.
 
 ## Overview
 
@@ -57,7 +57,7 @@ The routing runtime is an internal package (`subswitch`, exact-pinned in `packag
 
 | File | Role |
 |------|------|
-| `~/.devflow/proxy.json` | Runtime authority, read by `readProxyState()` through the bounded `readFileBytes` (regular file only, size-capped by `MAX_PROXY_STATE_BYTES`; read failures return fixed error text, KB-AP-11), then field-tolerant parsed. Only an absent file yields the default disabled state (KB-AP-10, KB-INV-13). Fields: `enabled`, `port`, `binPath`, `configPath`, `resolvedAt`, `devflowVersion`. |
+| `~/.devflow/proxy.json` | Runtime authority. `readProxyState()` uses `readFileBytes` with `MAX_PROXY_STATE_BYTES`. A file that fails the read limits or does not contain a JSON object returns fixed error text (KB-AP-11, KB-INV-13). An absent file returns a default disabled state (KB-AP-10). Fields: `enabled`, `port`, `binPath`, `configPath`, `resolvedAt`, `devflowVersion`. |
 | `~/.devflow/proxy-routing.json` | Routing config from `buildRoutingConfigJson(port, existingContent?)`, written before preflight on enable (contract below). |
 | `manifest.features.proxy` | Init/uninstall authority. `resolveSeedFeatures` seeds it from `manifest?.features.proxy ?? FEATURE_DEFAULTS.proxy`; `--reset` seeds `false`. |
 | `proxy.pid`, `logs/proxy.log`, `.proxy-spawn.lock` | Relay pid record (best-effort), relay log, spawn lock. Handled in the hook knowledge base. |

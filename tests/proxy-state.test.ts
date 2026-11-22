@@ -109,6 +109,14 @@ describe('readProxyState — read and parse errors', () => {
     await arrange(devflowDir);
     expect(await readProxyState(devflowDir)).toStrictEqual({ ok: false, error });
   });
+
+  it.each(['[]', '5'])('returns a fixed parse error for JSON root %s', async (content) => {
+    await fs.writeFile(proxyJson(tmpDir), content);
+    expect(await readProxyState(tmpDir)).toStrictEqual({
+      ok: false,
+      error: 'Cannot parse the Devflow proxy state file.',
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

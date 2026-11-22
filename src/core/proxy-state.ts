@@ -66,9 +66,16 @@ export interface ProxyState {
 // Read / write
 // ---------------------------------------------------------------------------
 
+const PROXY_STATE_PARSE_ERROR = 'Cannot parse the Devflow proxy state file.';
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 /**
- * Read proxy state from ~/.devflow/proxy.json with tolerant parsing.
- * Returns a default disabled state when the file is missing.
+ * Read proxy state from ~/.devflow/proxy.json.
+ * Require a JSON object and use defaults for missing or invalid fields.
+ * Return a default disabled state when the file is missing.
  */
 export async function readProxyState(devflowDir: string): Promise<Result<ProxyState, string>> {
   const statePath = join(devflowDir, 'proxy.json');
@@ -80,7 +87,8 @@ export async function readProxyState(devflowDir: string): Promise<Result<ProxySt
   if (typeof bytes === 'string') return Err('Cannot read the Devflow proxy state file.');
   try {
     const content = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
-    const data = JSON.parse(content) as Record<string, unknown>;
+    const data: unknown = JSON.parse(content);
+    if (!isPlainObject(data)) return Err(PROXY_STATE_PARSE_ERROR);
 
     // Tolerant parse: provide safe defaults for missing/invalid fields.
     const state: ProxyState = {
@@ -94,7 +102,7 @@ export async function readProxyState(devflowDir: string): Promise<Result<ProxySt
     };
     return Ok(state);
   } catch {
-    return Err('Cannot parse the Devflow proxy state file.');
+    return Err(PROXY_STATE_PARSE_ERROR);
   }
 }
 
