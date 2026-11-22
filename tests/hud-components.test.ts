@@ -484,7 +484,7 @@ describe('codexQuota component', () => {
       codexUsage: {
         windows: [{ minutes: 10080, usedPercent: 2, resetsAt: sixDays21HoursFromNow() }],
         limitReached: null,
-        observedAt: nowSec(),
+        observedAt: Date.now(),
       },
     });
     const result = await codexQuota(ctx);
@@ -500,7 +500,7 @@ describe('codexQuota component', () => {
           { minutes: 10080, usedPercent: 12, resetsAt: nowSec() + 3 * 86400 + 4 * 3600 + 30 },
         ],
         limitReached: null,
-        observedAt: nowSec(),
+        observedAt: Date.now(),
       },
     });
     const result = await codexQuota(ctx);
@@ -518,7 +518,7 @@ describe('codexQuota component', () => {
           { minutes: 45, usedPercent: 30, resetsAt: nowSec() + 600 },
         ],
         limitReached: null,
-        observedAt: nowSec(),
+        observedAt: Date.now(),
       },
     });
     const result = await codexQuota(ctx);
@@ -532,7 +532,7 @@ describe('codexQuota component', () => {
       codexUsage: {
         windows: [{ minutes: 10080, usedPercent: 88, resetsAt: nowSec() - 60 }],
         limitReached: null,
-        observedAt: nowSec(),
+        observedAt: Date.now(),
       },
     });
     const result = await codexQuota(ctx);
@@ -546,7 +546,7 @@ describe('codexQuota component', () => {
       codexUsage: {
         windows: [{ minutes: 10080, usedPercent: 12, resetsAt: nowSec() + 86400 + 30 }],
         limitReached: null,
-        observedAt: nowSec() - 59 * 60,
+        observedAt: (nowSec() - 59 * 60) * 1000,
       },
     });
     expect((await codexQuota(ctx))!.raw).not.toContain('old');
@@ -558,7 +558,7 @@ describe('codexQuota component', () => {
         codexUsage: {
           windows: [{ minutes: 10080, usedPercent: 64, resetsAt: nowSec() - 60 }],
           limitReached: null,
-          observedAt,
+          observedAt: observedAt * 1000,
         },
       });
     const hours = await codexQuota(at(nowSec() - 3 * 3600 - 30));
@@ -573,7 +573,7 @@ describe('codexQuota component', () => {
         codexUsage: {
           windows: [{ minutes: 10080, usedPercent: 64, resetsAt: nowSec() - 60 }],
           limitReached: null,
-          observedAt,
+          observedAt: observedAt * 1000,
         },
       });
     expect((await codexQuota(at(nowSec() - 3600)))!.raw).toBe('Codex 7d reset · data 1h old');
@@ -586,7 +586,7 @@ describe('codexQuota component', () => {
       codexUsage: {
         windows: [{ minutes: 10080, usedPercent: 12, resetsAt: nowSec() + 86400 + 30 }],
         limitReached: null,
-        observedAt: nowSec() + 7200,
+        observedAt: (nowSec() + 7200) * 1000,
       },
     });
     const result = await codexQuota(ctx);
@@ -602,7 +602,7 @@ describe('codexQuota component', () => {
           { minutes: 10080, usedPercent: 12, resetsAt: nowSec() + 86400 + 30 },
         ],
         limitReached: null,
-        observedAt: nowSec(),
+        observedAt: Date.now(),
       },
     });
     const raw = (await codexQuota(ctx))!.raw;
@@ -615,7 +615,7 @@ describe('codexQuota component', () => {
       codexUsage: {
         windows: [{ minutes: 10080, usedPercent: 100, resetsAt: nowSec() + 86400 }],
         limitReached: 'rate_limit_reached',
-        observedAt: nowSec(),
+        observedAt: Date.now(),
       },
     });
     const result = await codexQuota(ctx);
@@ -628,7 +628,7 @@ describe('codexQuota component', () => {
       codexUsage: {
         windows: [{ minutes: 10080, usedPercent: 100, resetsAt: nowSec() - 60 }],
         limitReached: 'rate_limit_reached',
-        observedAt: nowSec(),
+        observedAt: Date.now(),
       },
     });
     const result = await codexQuota(ctx);
@@ -640,7 +640,7 @@ describe('codexQuota component', () => {
   });
 
   it('returns null when the data holds no window', async () => {
-    const ctx = makeCtx({ codexUsage: { windows: [], limitReached: null, observedAt: nowSec() } });
+    const ctx = makeCtx({ codexUsage: { windows: [], limitReached: null, observedAt: Date.now() } });
     expect(await codexQuota(ctx)).toBeNull();
   });
 });

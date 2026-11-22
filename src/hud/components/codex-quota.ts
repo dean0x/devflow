@@ -45,7 +45,7 @@ export default async function codexQuota(
   });
   const limited =
     usage.limitReached !== null && usage.windows.some((w) => !hasReset(w.resetsAt));
-  const ageSec = Math.floor(nowMs / 1000) - usage.observedAt;
+  const ageSec = Math.floor((nowMs - usage.observedAt) / 1000);
   const age = ageSec >= CODEX_STALE_AFTER_SEC ? ` · data ${formatAge(ageSec)} old` : '';
 
   return {

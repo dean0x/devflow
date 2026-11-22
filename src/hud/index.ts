@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { readStdin } from './stdin.js';
 import { loadConfig, resolveComponents } from './config.js';
 import { gatherGitStatus } from './git.js';
-import { codexSessionsDir, codexSnapshotFile, gatherCodexUsage } from './codex-usage.js';
+import { gatherTokenmeterUsage } from './tokenmeter.js';
 import { parseTranscript } from './transcript.js';
 import { persistSessionCost, aggregateCosts } from './cost-history.js';
 import { gatherConfigCounts } from './components/config-counts.js';
@@ -104,7 +104,7 @@ async function run(): Promise<string> {
       ? parseTranscript(stdin.transcript_path)
       : Promise.resolve(null),
     needsCurationCounts ? gatherLedgerCurationCounts(cwd) : Promise.resolve(null),
-    needsCodexUsage ? gatherCodexUsage(devflowDir, codexSessionsDir(home), codexSnapshotFile(home)) : Promise.resolve(null),
+    needsCodexUsage ? gatherTokenmeterUsage(devflowDir) : Promise.resolve(null),
   ]);
 
   // Extract usage quota from stdin rate_limits (replaces OAuth fetch)

@@ -200,12 +200,14 @@ export function parseRawEnvelope(
  * @param key - Cache key. Path-traversal components are silently rejected.
  * @param data - Value to cache.
  * @param ttlMs - Time-to-live in milliseconds.
+ * @param timestamp - Start of the TTL, when it must not include time spent on I/O.
  */
 export async function writeCache<T>(
   cacheDir: string,
   key: string,
   data: T,
   ttlMs: number,
+  timestamp?: number,
 ): Promise<void> {
   const filePath = safeEntryPath(cacheDir, key);
   if (filePath === null) return;
@@ -214,7 +216,7 @@ export async function writeCache<T>(
     await fsAsync.mkdir(cacheDir, { recursive: true, mode: 0o700 });
     const envelope: CacheEnvelope = {
       data,
-      timestamp: Date.now(),
+      timestamp: timestamp ?? Date.now(),
       ttl: Math.min(Math.abs(ttlMs), MAX_TTL_MS),
     };
     await writeFileAtomicExclusive(filePath, JSON.stringify(envelope));

@@ -98,7 +98,7 @@ describe('render', () => {
       codexUsage: {
         windows: [{ minutes: 10080, usedPercent: 12, resetsAt: Math.floor(Date.now() / 1000) + 86400 + 30 }],
         limitReached: null,
-        observedAt: Math.floor(Date.now() / 1000),
+        observedAt: Date.now(),
       },
       transcript: { tools: [], agents: [], todos: { completed: 1, total: 2 }, skills: [] },
     });
