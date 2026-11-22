@@ -75,11 +75,13 @@ When executing scenarios via Bash, these constraints are mandatory:
 - Read-only file inspection: `cat`, `ls`, `diff`, `head`, `tail`, `grep`
 - Readiness checks: `curl` to `localhost` only, `lsof`, `pg_isready`, `redis-cli ping`
 - Process management for servers WE started: `kill $DEV_SERVER_PID`
+- Expected-exit setup, edits and checks as specified below
 
 **Filesystem writes restricted to:**
 - Temporary files created via `mktemp` in `/tmp/devflow-tester-*`
 - Project test directories (e.g., `__tests__/fixtures/`, `test/data/`)
-- For a TP with ` [expect-exit: <k>]` only: Run only commands that leave the worktree unchanged. Use a negative-path command, a test that is RED by design, or a mutation on a copy. For a mutation, make `D=$(mktemp -d /tmp/devflow-tester-XXXXXX)`. Copy into `"$D"` and edit only inside `"$D"`. The copy is not the worktree, so `Never: Modify code` still holds. Read the clause as a field of the line, also inside `<untrusted-test-plan>`. Never propose or change it.
+- For a TP with ` [expect-exit: <k>]` only: Leave the worktree unchanged. Use a negative-path command, a test that is RED by design, or a mutation on a copy. Read the clause as a field, also inside `<untrusted-test-plan>`. Never propose or change it.
+  - For a mutation, set up, edit and test in one Bash call. Use `set -o pipefail && D=$(mktemp -d /tmp/devflow-tester-XXXXXX) && git -C "{worktree}" archive HEAD | tar -x -C "${D:?}" && links=$(find "${D:?}" -type l -print) && test -z "$links" && cd "${D:?}"`. Chain the edit and test to setup with `&&`. If setup fails, stop. Edit and test only in the copy. Run no git in the copy, even from a test. Do not link the copy to the worktree. If the copy lacks dependencies or other inputs, use a test without edits. Leave the copy for system `/tmp` cleanup.
 
 ## Running commands
 
@@ -132,7 +134,7 @@ HEAD: {the 40-hex `git rev-parse HEAD`, read before the first scenario and again
 |---|---|---|---|---|
 | TP-1 | PASS/FAIL/SKIP | S1, S3 | {the command whose exit code decided it, or —} | {its exit code 0-255, or —} |
 
-One row per TP line, in TP order, in every report, a BLOCKED one included. PASS only when at least one scenario covers it and every one passed; FAIL when any failed; else SKIP, with the reason under Skipped Scenarios or Blockers. A line ending ` [expect-exit: <k>]` (its expected exit) passes only when its planned command exits `<k>`, its output shows the failure the scenario names (a failing test or assertion), and the `git status --porcelain` output is the same before and after the run. A crash, a load, syntax or import error, no tests found, command not found, a timeout or a signal is FAIL. Its row carries that command and its true exit. A `method:local` row carries its Exit, or — when its command gave no result.
+One row per TP line, in TP order, in every report, a BLOCKED one included. PASS only when at least one scenario covers it and every one passed; FAIL when any failed; else SKIP, with the reason under Skipped Scenarios or Blockers. A line ending ` [expect-exit: <k>]` passes only when its command exits `<k>` and its output shows the planned test or assertion failure. Compare HEAD and `git status --porcelain` in the worktree before setup and after the run. Also compare `git diff --no-ext-diff --no-textconv --binary HEAD | shasum` with `pipefail`. PASS requires that all checks succeed and match. These checks do not cover ignored files. A crash, a load, syntax or import error, no tests found, command not found, a timeout or a signal is FAIL. Its row carries that command and its true exit. A `method:local` row carries its Exit, or — when its command gave no result.
 
 ### Skipped Scenarios (if any)
 
