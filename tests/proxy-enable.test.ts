@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { promises as fs } from 'node:fs';
+import { existsSync, promises as fs } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
@@ -58,12 +58,17 @@ describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('
 
   afterEach(async () => {
     process.exitCode = originalExitCode;
+    vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
     await fs.rm(home, { recursive: true, force: true });
   });
 
-  async function enableWithRelay(version: string, fail = false) {
+  async function enableWithRelay(
+    version: string,
+    mode: 'success' | 'detach_fails' | 'no_listener' | 'late' | 'doctor_fails' = 'success',
+    reportedPid?: string,
+  ) {
     home = await fs.mkdtemp(path.join(tmpdir(), 'proxy-enable-'));
     const machineDir = path.join(home, '.devflow');
     const configDir = path.join(home, 'client-config');
@@ -93,41 +98,61 @@ describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('
         });
       });
     });
+    const readyPath = path.join(home, 'ready');
+    const finishedPath = path.join(home, 'launcher-finished');
     await fs.writeFile(binPath, `
       const fs = require('node:fs');
       const args = process.argv.slice(2);
+      const mode = ${JSON.stringify(mode)};
+      const readyPath = ${JSON.stringify(readyPath)};
       if (args[0] === '--version') return console.log(${JSON.stringify(version)});
-      if (args[0] === 'doctor') return;
+      if (args[0] === 'doctor') { process.exitCode = mode === 'doctor_fails' ? 1 : 0; return; }
       if (args[0] === 'serve') {
         fs.writeFileSync(${JSON.stringify(callPath)}, JSON.stringify({ args, cwd: process.cwd(), pid: process.pid,
           config: process.env.SUBSWITCH_CONFIG, nodeOptions: process.env.NODE_OPTIONS ?? null }));
         if (!args.includes('--detach')) console.log('legacy start output');
-        else if (${fail}) {
-          console.error('not_ready');
-          process.exitCode = 1;
-          return;
-        } else {
+        else {
+          if (mode === 'detach_fails') { process.exitCode = 1; return; }
+          if (mode === 'no_listener') return;
+          if (mode === 'late') {
+            setTimeout(() => fs.writeFileSync(${JSON.stringify(finishedPath)}, ''), 2500);
+            return;
+          }
           const child = require('node:child_process').spawn(process.execPath, [__filename, 'listen'], {
-            detached: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+            detached: true, stdio: ['ignore', 'ignore', 'ignore'],
           });
-          child.once('message', () => { child.disconnect(); child.unref(); console.log(child.pid); });
+          child.unref();
+          let attempts = 0;
+          const wait = setInterval(() => {
+            const ready = fs.existsSync(readyPath);
+            if (!ready && ++attempts < 200) return;
+            clearInterval(wait);
+            if (!ready) { process.exitCode = 1; return; }
+            const printedPid = ${JSON.stringify(reportedPid)} ?? String(child.pid);
+            if (printedPid) console.log(printedPid);
+          }, 10);
           console.error('launch diagnostic');
           return;
         }
       }
       require('node:net').createServer((socket) => socket.end())
-        .listen(${port}, '127.0.0.1', () => process.send?.('ready'));
+        .listen(${port}, '127.0.0.1', () => fs.writeFileSync(readyPath, String(process.pid)));
       setTimeout(() => process.exit(), 10000);
     `);
-    await proxyCommand.parseAsync(['--enable', '--port', String(port)], { from: 'user' });
+    const enable = proxyCommand.parseAsync(['--enable', '--port', String(port)], { from: 'user' });
+    if (mode === 'late') {
+      await vi.waitFor(() => expect(existsSync(callPath)).toBe(true));
+      await vi.advanceTimersByTimeAsync(12_000);
+    }
+    await enable;
     const call = JSON.parse(await fs.readFile(callPath, 'utf-8'));
     const log = await fs.readFile(logPath, 'utf-8');
     const pid = await fs.readFile(path.join(machineDir, 'proxy.pid'), 'utf-8').catch(() => '');
-    return { machineDir, port, call, log, pid };
+    return { machineDir, port, call, log, pid, finishedPath };
   }
 
-  it('starts with detach and records the relay PID without appending relay output', async () => {
-    const { machineDir, port, call, log, pid } = await enableWithRelay('relay v0.9.0');
+  it.each(['relay v0.9.0', '0.10.0', '1.0.0'])('starts with detach for version %s and records the relay PID', async (version) => {
+    const { machineDir, port, call, log, pid } = await enableWithRelay(version);
     expect(call).toMatchObject({
       args: ['serve', '--detach', '--port', String(port)], cwd: await fs.realpath(machineDir),
       config: path.join(machineDir, 'proxy-routing.json'), nodeOptions: null,
@@ -138,7 +163,7 @@ describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('
     expect(process.exitCode).toBe(originalExitCode);
   });
 
-  it.each(['0.8.0', 'unparseable'])('keeps the legacy start for version %s', async (version) => {
+  it.each(['0.8.0', '0.8.9', 'unparseable', ''])('keeps the legacy start for version %j', async (version) => {
     const { machineDir, call, log, pid } = await enableWithRelay(version);
     expect(call.args).toEqual(['serve']);
     expect(call.cwd).not.toBe(machineDir);
@@ -148,11 +173,44 @@ describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('
   });
 
   it('fails enable and restores disabled state when detach fails', async () => {
-    const { machineDir, log, pid } = await enableWithRelay('1.0.0', true);
+    const { machineDir, log, pid } = await enableWithRelay('1.0.0', 'detach_fails');
     expect(process.exitCode).toBe(1);
     expect(await proxyState.readProxyState(machineDir)).toMatchObject({ ok: true, value: { enabled: false } });
     expect(pid).toBe('');
     expect(log).toBe('original log\n');
+  });
+
+  it.each([['nonnumeric PID', 'not-a-pid'], ['empty stdout', '']])(
+    'enables a ready relay without a PID file for %s', async (_label, reportedPid) => {
+      const { pid } = await enableWithRelay('0.9.0', 'success', reportedPid);
+      expect(process.exitCode).toBe(originalExitCode);
+      expect(pid).toBe('');
+    },
+  );
+
+  it('restores disabled state if detach exits 0 but the port stays down', async () => {
+    const { machineDir } = await enableWithRelay('0.9.0', 'no_listener');
+    expect(process.exitCode).toBe(1);
+    expect(await proxyState.readProxyState(machineDir)).toMatchObject({ ok: true, value: { enabled: false } });
+  });
+
+  it('stops the launcher at its deadline and restores disabled state', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const { machineDir, call, finishedPath } = await enableWithRelay('0.9.0', 'late');
+    expect(process.exitCode).toBe(1);
+    expect(await proxyState.readProxyState(machineDir)).toMatchObject({ ok: true, value: { enabled: false } });
+    await vi.waitFor(() => expect(() => process.kill(call.pid, 0)).toThrow(/ESRCH/));
+    expect(existsSync(finishedPath)).toBe(false);
+  });
+
+  it('does not stop the PID from detach if doctor fails', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const kill = vi.spyOn(process, 'kill').mockReturnValue(true);
+    const { machineDir, pid } = await enableWithRelay('0.9.0', 'doctor_fails');
+    expect(process.exitCode).toBe(1);
+    expect(await proxyState.readProxyState(machineDir)).toMatchObject({ ok: true, value: { enabled: false } });
+    expect(pid).toMatch(/^[1-9][0-9]*$/);
+    expect(kill).not.toHaveBeenCalledWith(Number(pid), 'SIGTERM');
   });
 });
 

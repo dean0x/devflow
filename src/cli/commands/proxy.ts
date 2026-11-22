@@ -116,6 +116,8 @@ const AUTH_MODE_MAX_LEN = 32;
 const BODY_CAP_BYTES = 64 * 1024;
 /** Bound the version probe without using a shell wrapper. */
 const RELAY_VERSION_TIMEOUT_MS = 1500;
+/** Deadline for the detach launcher to report readiness. */
+const RELAY_DETACH_DEADLINE_MS = 12_000;
 const execFileAsync = promisify(execFile);
 /** Timeout for the relay doctor subprocess (ms). */
 const DOCTOR_TIMEOUT_MS = 10_000;
@@ -747,7 +749,7 @@ export function buildRealPreflightDeps(opts: BuildRealPreflightDepsOptions): Pro
  */
 export interface SpawnAndWaitDeps {
   /** Ask the installed relay to detach. Undefined means it cannot detach. */
-  tryDetach?: (binPath: string, port: number, env: Record<string, string>) => Promise<SpawnRelayResult | undefined>;
+  tryDetach?: (binPath: string, port: number, env: Record<string, string>) => Promise<DetachedRelayResult | undefined>;
   /** Open logPath for appending. Returns fd + close function. */
   openLog: (logPath: string) => Promise<{ fd: number; close: () => Promise<void> }>;
   /**
@@ -776,10 +778,11 @@ export interface SpawnAndWaitDeps {
   tcpConnectable: (port: number, timeoutMs: number) => Promise<boolean>;
 }
 
-/** Result type for spawnRelayAndWaitForPort. */
-export type SpawnRelayResult =
-  | { ok: true; spawnedPid?: number } // spawnedPid present when self-spawned; absent on adopted path
-  | { ok: false; reason: string };
+type RelayStartFailure = { ok: false; reason: string };
+type DetachedRelayResult = { ok: true; reportedPid?: number } | RelayStartFailure;
+
+/** Only a relay started by Devflow itself can have a spawnedPid. */
+export type SpawnRelayResult = { ok: true; spawnedPid?: number } | RelayStartFailure;
 
 /**
  * Spawn the relay (unless adopted) and wait up to 50×100ms for TCP accept.
@@ -814,9 +817,10 @@ export async function spawnRelayAndWaitForPort(
   const detached = await deps.tryDetach?.(binPath, port, env);
   if (detached !== undefined) {
     if (!detached.ok) return detached;
-    if (detached.spawnedPid !== undefined) await deps.writePid(pidPath, detached.spawnedPid);
+    // The launcher can report a relay that already owns the port. Record its PID only for status.
+    if (detached.reportedPid !== undefined) await deps.writePid(pidPath, detached.reportedPid);
     return await deps.tcpConnectable(port, RELAY_SPAWN_PER_PROBE_TIMEOUT_MS)
-      ? detached
+      ? { ok: true }
       : { ok: false, reason: 'relay-not-started' };
   }
 
@@ -874,7 +878,7 @@ async function tryDetachedRelayStart(
   port: number,
   env: Record<string, string>,
   cwd: string,
-): Promise<SpawnRelayResult | undefined> {
+): Promise<DetachedRelayResult | undefined> {
   if (process.platform !== 'darwin' && process.platform !== 'linux') return undefined;
 
   const version = await execFileAsync(process.execPath, [binPath, '--version'], {
@@ -894,15 +898,25 @@ async function tryDetachedRelayStart(
         stdout = stdout.length + chunk.length <= 32 ? stdout + chunk.toString() : undefined;
       }
     });
-    const failed: SpawnRelayResult = { ok: false, reason: 'relay-not-started' };
-    proc.once('error', () => resolve(failed));
+    const failed: RelayStartFailure = { ok: false, reason: 'relay-not-started' };
+    const timer = setTimeout(() => {
+      try { proc.kill('SIGKILL'); } catch { /* best effort */ }
+      proc.stdout.destroy();
+      proc.unref();
+      resolve(failed);
+    }, RELAY_DETACH_DEADLINE_MS);
+    const finish = (result: DetachedRelayResult): void => {
+      clearTimeout(timer);
+      resolve(result);
+    };
+    proc.once('error', () => finish(failed));
     proc.once('close', (code) => {
       if (code !== 0) {
-        resolve(failed);
+        finish(failed);
         return;
       }
       const pid = stdout !== undefined && /^[0-9]+\n?$/.test(stdout) ? Number(stdout) : 0;
-      resolve({ ok: true, spawnedPid: pid > 0 && pid <= 0x7fffffff ? pid : undefined });
+      finish({ ok: true, reportedPid: pid > 0 && pid <= 0x7fffffff ? pid : undefined });
     });
   });
 }

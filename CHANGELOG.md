@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- The relay now starts in its own session when it supports this mode. It stays active if the process that starts it stops. Older relays use the previous start method.
+- On macOS and Linux, compatible relays start in a separate session and stay active after Devflow exits. Older relays use the previous start method. `devflow proxy --enable` reports a failure if the launcher does not respond within 12 seconds.
 
 ---
 
