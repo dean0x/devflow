@@ -125,7 +125,7 @@ describe('Code Mode refusals and warnings', () => {
   it.each([
     ['CODE_MODE_USER_VALUE_NOTE', 'your settings override the flag'],
     ['CODE_MODE_RECORD_FALSE_NOTE', 'the flag record is off'],
-    ['CODE_MODE_READ_FAILURE', 'could not check the Code Mode and proxy state'],
+    ['CODE_MODE_READ_FAILURE', 'could not check the Code Mode and proxy state. Check your Claude Code user settings.json.'],
   ] as const)('includes the reason in %s', (name, reason) => {
     expect(codeMode[name]).toContain(reason);
   });

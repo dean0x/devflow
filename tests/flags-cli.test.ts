@@ -51,7 +51,7 @@ import * as os from 'os';
 import { PassThrough } from 'stream';
 import { createFlagsCommand, applyTuiResult } from '../src/cli/commands/flags.js';
 import { makeManifest } from './helpers.js';
-import type { FlagsRecord } from '../src/core/flags.js';
+import { FLAG_REGISTRY, neutralValueOf, type FlagsRecord } from '../src/core/flags.js';
 import { readManifest } from '../src/core/manifest.js';
 import * as codeMode from '../src/core/code-mode.js';
 // Direct import from terminal.js (not index.js) so the REL-M3 mock of index.js
@@ -269,7 +269,70 @@ describe('flags CLI — createFlagsCommand factory', () => {
       await expectUnchanged(files);
     });
 
-    describe.each(['CLI enable', 'TUI save'])('%s', entry => {
+    it.each([
+      { name: '--disable code-mode', args: ['--disable', 'code-mode'], codeOn: false, lspOn: false },
+      { name: '--enable lsp', args: ['--enable', 'lsp'], codeOn: true, lspOn: true },
+      { name: 'an unrelated TUI save', args: [], codeOn: true, lspOn: true },
+    ])('persists $name when the Code Mode check cannot read its signals', async ({ args, codeOn, lspOn }) => {
+      const neutralFlags: FlagsRecord = Object.fromEntries(FLAG_REGISTRY.map(flag => [flag.id, neutralValueOf(flag)] as const));
+      const files = await seed({ ...neutralFlags, 'code-mode': true }, { [codeKey]: '1' });
+      const readSignals = vi.fn<typeof codeMode.readCodeModeSignals>().mockResolvedValue({
+        ok: true, value: { env: undefined, record: null, proxyOn: false },
+      });
+      vi.doMock('../src/core/code-mode.js', async importOriginal => ({
+        ...await importOriginal<typeof codeMode>(),
+        readCodeModeSignals: readSignals,
+      }));
+      vi.resetModules();
+      try {
+        if (args.length === 0) await runTui({ lsp: true });
+        else {
+          const { createFlagsCommand } = await import('../src/cli/commands/flags.js');
+          await createFlagsCommand().parseAsync(args, { from: 'user' });
+        }
+      } finally {
+        vi.doUnmock('../src/core/code-mode.js');
+        vi.resetModules();
+      }
+
+      expect(readSignals).toHaveBeenCalled();
+      expect(process.exitCode).toBe(0);
+      expect(p.log.error).not.toHaveBeenCalled();
+      expect(parseFlagsRecord(await fs.readFile(files.manifestPath, 'utf-8'))).toEqual({
+        ...neutralFlags, 'code-mode': codeOn, lsp: lspOn,
+      });
+      expect(parseSettings(await fs.readFile(files.settingsPath, 'utf-8'))).toEqual({
+        env: {
+          ANTHROPIC_AUTH_TOKEN: fixtureAuth,
+          ...(codeOn ? { [codeKey]: '1' } : {}),
+          ...(lspOn ? { ENABLE_LSP_TOOL: 'true' } : {}),
+        },
+        apiKeyHelper: fixtureHelper,
+      });
+    });
+
+    describe.each([
+      { name: 'CLI Code Mode enable', args: ['--enable', 'code-mode'], afterLaunch: false,
+        message: 'Cannot make this change because Devflow could not check the Code Mode and proxy state. Check your Claude Code user settings.json.' },
+      { name: 'CLI unrelated enable', args: ['--enable', 'lsp'], afterLaunch: false },
+      { name: 'TUI launch', args: [], afterLaunch: false },
+      { name: 'TUI save', args: [], afterLaunch: true },
+    ])('$name', ({ args, afterLaunch, message }) => {
+      const readError = 'Cannot read settings.json. Check access, file type, and size (1 MiB limit).';
+
+      async function tryWrite(replaceSettings: () => Promise<void>) {
+        if (!afterLaunch) await replaceSettings();
+        if (args.length > 0) {
+          await flagsCmd.parseAsync(args, { from: 'user' });
+        } else {
+          const beforeSave = vi.fn(async () => {
+            if (afterLaunch) await replaceSettings();
+          });
+          await runTui({ lsp: true }, beforeSave);
+          expect(beforeSave).toHaveBeenCalledTimes(afterLaunch ? 1 : 0);
+        }
+      }
+
       it.each([
         {
           name: 'a file over the read limit',
@@ -277,6 +340,7 @@ describe('flags CLI — createFlagsCommand factory', () => {
             env: { ANTHROPIC_BASE_URL: relayUrl },
             pad: 'x'.repeat(1024 * 1024),
           })),
+          error: readError,
         },
         {
           name: 'a file with invalid UTF-8',
@@ -285,17 +349,29 @@ describe('flags CLI — createFlagsCommand factory', () => {
             Buffer.from([0xff]),
             Buffer.from('"}'),
           ]),
+          error: 'settings.json is not valid UTF-8. Fix the file before you change flags.',
         },
-      ])('refuses $name without changes to either file', async ({ bytes }) => {
+      ])('refuses $name without changes to either file', async ({ bytes, error }) => {
         const files = await seed({}, {});
         const settingsBytes = bytes();
-        await fs.writeFile(files.settingsPath, settingsBytes);
 
-        if (entry === 'CLI enable') await flagsCmd.parseAsync(['--enable', 'code-mode'], { from: 'user' });
-        else await runTui({ 'code-mode': true });
+        await tryWrite(() => fs.writeFile(files.settingsPath, settingsBytes));
 
-        expectRefusal('Cannot make this change because Devflow could not check the Code Mode and proxy state.');
+        expectRefusal(message ?? error);
         expect(await fs.readFile(files.settingsPath)).toEqual(settingsBytes);
+        expect(await fs.readFile(files.manifestPath)).toEqual(Buffer.from(files.manifestBytes));
+      });
+
+      it('refuses a directory in place of settings.json without changes to either path', async () => {
+        const files = await seed({}, {});
+
+        await tryWrite(async () => {
+          await fs.unlink(files.settingsPath);
+          await fs.mkdir(files.settingsPath);
+        });
+
+        expectRefusal(message ?? readError);
+        expect(await fs.readdir(files.settingsPath)).toEqual([]);
         expect(await fs.readFile(files.manifestPath)).toEqual(Buffer.from(files.manifestBytes));
       });
     });

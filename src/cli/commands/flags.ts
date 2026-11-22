@@ -17,7 +17,6 @@
  */
 
 import { Command } from 'commander';
-import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
@@ -43,6 +42,7 @@ import {
 import {
   CODE_MODE_NEW_SESSIONS_SUFFIX,
   CODE_MODE_READ_FAILURE,
+  MAX_SETTINGS_BYTES,
   codeModeBlockers,
   codeModeRefusal,
   codeModeStatusNotes,
@@ -55,6 +55,7 @@ import {
 import type { CodeModeBlockerState, CodeModeSignals } from '../../core/code-mode.js';
 import { readManifest, writeManifest } from '../../core/manifest.js';
 import { writeSettingsFileAtomic } from '../../core/fs-atomic.js';
+import { readFileBytes } from '../../core/read-file-bytes.js';
 import { sanitizeCell } from '../tui/cells.js';
 // Static imports for pure view-state helpers — no TTY machinery.
 // runFlagsTui stays lazily imported in handleBare to keep TTY module out of
@@ -97,25 +98,21 @@ function logFlagSuccess(id: string, line: string): void {
   p.log.success(id === 'code-mode' ? `${line}. ${CODE_MODE_NEW_SESSIONS_SUFFIX}` : line);
 }
 
-/**
- * Read and parse settings.json.
- * ENOENT → returns `{ content: '{}', ok: true }`.
- * Malformed JSON → returns `{ ok: false, reason: string }`.
- *
- * NEVER silently falls back to '{}' on malformed JSON — that would clobber the
- * user's settings. The caller must abort with exit code 1 on !ok.
- */
+/** Initialize only when settings.json is absent. Refuse input the writer cannot preserve. */
 async function readSettingsSafe(
   settingsPath: string,
 ): Promise<{ ok: true; content: string } | { ok: false; reason: string }> {
+  const bytes = await readFileBytes(settingsPath, MAX_SETTINGS_BYTES);
+  if (bytes === 'absent') return { ok: true, content: '{}' };
+  if (typeof bytes === 'string') {
+    return { ok: false, reason: 'Cannot read settings.json. Check access, file type, and size (1 MiB limit).' };
+  }
+
   let raw: string;
   try {
-    raw = await fs.readFile(settingsPath, 'utf-8');
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      return { ok: true, content: '{}' };
-    }
-    return { ok: false, reason: `Cannot read settings.json: ${(err as Error).message}` };
+    raw = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    return { ok: false, reason: 'settings.json is not valid UTF-8. Fix the file before you change flags.' };
   }
 
   // REL-M2 + PERF-L4: single parse — validate root shape and return raw string.

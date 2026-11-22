@@ -7,7 +7,7 @@ import type { ProxyEnvState, Result } from './proxy-state.js';
 
 export const CODE_MODE_ENABLE_REFUSAL = 'Cannot enable Code Mode while the Devflow proxy is on. Run `devflow proxy --disable` first.';
 export const PROXY_ENABLE_REFUSAL = 'Cannot enable the Devflow proxy while Code Mode is on. Run `devflow flags --disable code-mode` first.';
-export const CODE_MODE_READ_FAILURE = 'Cannot make this change because Devflow could not check the Code Mode and proxy state.';
+export const CODE_MODE_READ_FAILURE = 'Cannot make this change because Devflow could not check the Code Mode and proxy state. Check your Claude Code user settings.json.';
 export const CODE_MODE_PROXY_BLOCKER = 'Code Mode does not start while the Devflow proxy is on. Run `devflow flags --disable code-mode` or `devflow proxy --disable`.';
 export const CODE_MODE_TRAFFIC_BLOCKER = 'Code Mode does not start while disable-nonessential-traffic is on. Run `devflow flags --disable code-mode`.';
 export const CODE_MODE_USER_VALUE_NOTE = 'Code Mode is off because your settings override the flag.';
@@ -16,7 +16,7 @@ export const CODE_MODE_NEW_SESSIONS_SUFFIX = 'This change applies to new session
 
 const codeModeFlag = findFlag('code-mode');
 const trafficFlag = findFlag('disable-nonessential-traffic');
-const MAX_SETTINGS_BYTES = 1024 * 1024;
+export const MAX_SETTINGS_BYTES = 1024 * 1024;
 
 type RawRecord = Readonly<Record<string, unknown>>;
 
