@@ -46,6 +46,7 @@ interface Tp {
   readonly scenario: string
   readonly method: Method
   readonly files: readonly string[]
+  readonly expectedExit: number
   readonly line: string
 }
 interface Plan { readonly tps: readonly Tp[] }
@@ -253,7 +254,7 @@ describe('module surface', () => {
 
   it('pins the bounds the design names', () => {
     expect(PE.LIMITS).toMatchObject({
-      TP_MAX: 200, AC_MAX: 999, SCENARIO_MAX: 200, GLOB_MAX: 120, GLOBS_PER_LINE: 10,
+      TP_MAX: 200, AC_MAX: 999, SCENARIO_MAX: 200, GLOB_MAX: 120, GLOBS_PER_LINE: 10, EXPECTED_EXIT_MAX: 125,
       CLAIM_LINES: 400, BODY_CHARS: 60000, FULL_COMMENT_CHARS: 55000, TRUST_LOOKUPS: 20, RUNS_PER_SHA: 20,
     })
   })
@@ -530,11 +531,45 @@ describe('TP_LINE_RE and parsePlan', () => {
   it('parses every field', () => {
     const tp = tpOf(tpLine(12, 34, 'the scenario', 'local', ['src/**', 'a.ts']))
     expect(tp).toEqual({
-      id: 12, ac: 34, scenario: 'the scenario', method: 'local', files: ['src/**', 'a.ts'],
+      id: 12, ac: 34, scenario: 'the scenario', method: 'local', files: ['src/**', 'a.ts'], expectedExit: 0,
       line: tpLine(12, 34, 'the scenario', 'local', ['src/**', 'a.ts']),
     })
     expect(Object.isFrozen(tp)).toBe(true)
     expect(Object.isFrozen(tp.files)).toBe(true)
+  })
+
+  it.each([1, 2, 99, 100, 119, 120, 125].flatMap(exit => [
+    [exit, ''] as const,
+    [exit, ' [files: src/**, a.ts]'] as const,
+  ]))('parses expected exit %i with files clause "%s"', (exit, files) => {
+    const line = `${tpLine(1, 1, 'scenario', 'local')}${files} [expect-exit: ${exit}]`
+    const parsed = PE.parsePlan(line)
+    expect(parsed.ok).toBe(true)
+    expect(unwrap(parsed).tps[0]).toMatchObject({ expectedExit: exit, line })
+  })
+
+  it.each([
+    ' [expect-exit: 1] [files: a.ts]',
+    ' [expect-exit: 1] [expect-exit: 2]',
+    ' [expect-exit: 1] trailing text',
+    ' [expect-exit: 01]',
+    ' [expect-exit: -1]',
+    ' [expect-exit: ]',
+    ' [expect-exit:1]',
+    ' [exit: 1]',
+  ])('refuses an invalid clause shape: %s', tail => {
+    expect(PE.parsePlan(`${tpLine(1, 1, 'scenario', 'local')}${tail}`)).toEqual({ ok: false, error: { code: 'malformed', line: 1 } })
+  })
+
+  it('refuses every exit outside 1–125 through 256', () => {
+    const line = tpLine(1, 1, 'scenario', 'local')
+    const refused = [0, ...Array.from({ length: 131 }, (_, i) => 126 + i)]
+    expect(refused.filter(exit => PE.TP_LINE_RE.test(`${line} [expect-exit: ${exit}]`))).toEqual([])
+  })
+
+  it.each(['ci', 'manual'] as const)('refuses an expected exit on method:%s with or without files', method => {
+    const lines = [tpLine(1, 1, 'scenario', method), tpLine(1, 1, 'scenario', method, ['a.ts'])]
+    expect(lines.map(line => PE.TP_LINE_RE.test(`${line} [expect-exit: 1]`))).toEqual([false, false])
   })
 
   it('accepts an optional `## Test Plan` heading, blank lines and CRLF', () => {
@@ -695,6 +730,7 @@ interface LadderRow {
 const CI = tpLine(1, 1, 'ci scenario', 'ci')
 const CI_FILES = tpLine(1, 1, 'ci scenario', 'ci', ['src/**'])
 const LOCAL = tpLine(1, 1, 'local scenario', 'local')
+const LOCAL_EXPECTS_1 = `${LOCAL} [expect-exit: 1]`
 const LOCAL_FILES = tpLine(1, 1, 'local scenario', 'local', ['src/**'])
 const MANUAL = tpLine(1, 1, 'manual scenario', 'manual')
 
@@ -711,8 +747,10 @@ const LADDER: readonly LadderRow[] = [
   { name: 'not in the PR beats an unresolved head', tp: CI, claim: claimLine('TP-1', 'PASS', SHA_A), facts: { head: null, inPr: false }, state: 'UNVERIFIED' },
   { name: 'refresh hash mismatch beats a FAIL claim', tp: LOCAL, claim: claimLine('TP-1', 'FAIL', HEAD, 'test', 1), facts: { ...atHead, textMatches: false }, state: 'UNVERIFIED' },
   { name: 'refresh hash mismatch beats a cancelled run', tp: CI, claim: claimLine('TP-1', 'PASS', HEAD), facts: { ...ciAtHead, textMatches: false, runs: [run({ conclusion: 'cancelled' })] }, state: 'UNVERIFIED' },
+  { name: 'refresh hash mismatch beats a matching exit', tp: LOCAL_EXPECTS_1, claim: claimLine('TP-1', 'PASS', HEAD, 'test', 1), facts: { ...atHead, textMatches: false }, state: 'UNVERIFIED' },
   // 2 — INDETERMINATE
   { name: 'head unresolved', tp: LOCAL, claim: claimLine('TP-1', 'PASS', HEAD, 'test', 0), facts: { head: null, inPr: true }, state: 'INDETERMINATE' },
+  { name: 'unresolved head beats a matching exit', tp: LOCAL_EXPECTS_1, claim: claimLine('TP-1', 'PASS', HEAD, 'test', 1), facts: { head: null, inPr: true }, state: 'INDETERMINATE' },
   { name: 'head not 40-hex', tp: LOCAL, claim: claimLine('TP-1', 'PASS', HEAD, 'test', 0), facts: { head: 'c'.repeat(7), inPr: true }, state: 'INDETERMINATE' },
   { name: 'ancestry unresolved', tp: LOCAL, claim: claimLine('TP-1', 'PASS', HEAD, 'test', 0), facts: { head: HEAD, inPr: null }, state: 'INDETERMINATE' },
   { name: 'diff unresolved', tp: LOCAL_FILES, claim: claimLine('TP-1', 'PASS', SHA_A, 'test', 0), facts: { ...atHead, diff: null }, state: 'INDETERMINATE' },
@@ -732,6 +770,7 @@ const LADDER: readonly LadderRow[] = [
   { name: 'INDETERMINATE beats STALE', tp: CI, claim: claimLine('TP-1', 'PASS', SHA_A), facts: { ...atHead, runs: null, htmlUrl: HTML }, state: 'INDETERMINATE' },
   // 3 — STALE
   { name: 'claim ≠ head, no files', tp: LOCAL, claim: claimLine('TP-1', 'PASS', SHA_A, 'test', 0), facts: atHead, state: 'STALE' },
+  { name: 'older matching exit is stale without files', tp: LOCAL_EXPECTS_1, claim: claimLine('TP-1', 'PASS', SHA_A, 'test', 1), facts: atHead, state: 'STALE' },
   { name: 'claim ≠ head, overlapping diff', tp: LOCAL_FILES, claim: claimLine('TP-1', 'PASS', SHA_A, 'test', 0), facts: { ...atHead, diff: ['README.md', 'src/x/y.ts'] }, state: 'STALE' },
   { name: 'STALE beats FAILED', tp: LOCAL, claim: claimLine('TP-1', 'FAIL', SHA_A, 'test', 1), facts: atHead, state: 'STALE' },
   { name: 'STALE for a ci TP whose runs resolved', tp: CI, claim: claimLine('TP-1', 'PASS', SHA_A), facts: { ...atHead, htmlUrl: HTML, runs: [run({ headSha: SHA_A })] }, state: 'STALE' },
@@ -739,6 +778,9 @@ const LADDER: readonly LadderRow[] = [
   // 4 — FAILED
   { name: 'FAIL claim at head', tp: LOCAL, claim: claimLine('TP-1', 'FAIL', HEAD, 'test', 1), facts: atHead, state: 'FAILED' },
   { name: 'local PASS with exit ≠ 0', tp: LOCAL, claim: claimLine('TP-1', 'PASS', HEAD, 'test', 3), facts: atHead, state: 'FAILED' },
+  { name: 'FAIL stays FAILED with the expected exit', tp: LOCAL_EXPECTS_1, claim: claimLine('TP-1', 'FAIL', HEAD, 'test', 1), facts: atHead, state: 'FAILED' },
+  { name: 'PASS exit 0 is FAILED when the TP expects 1', tp: LOCAL_EXPECTS_1, claim: claimLine('TP-1', 'PASS', HEAD, 'test', 0), facts: atHead, state: 'FAILED' },
+  { name: 'PASS exit 2 is FAILED when the TP expects 1', tp: LOCAL_EXPECTS_1, claim: claimLine('TP-1', 'PASS', HEAD, 'test', 2), facts: atHead, state: 'FAILED' },
   { name: 'ci run failure', tp: CI, claim: claimLine('TP-1', 'PASS', HEAD), facts: { ...ciAtHead, runs: [run(), run({ id: 102, conclusion: 'failure' })] }, state: 'FAILED', run: { id: 102, attempt: 1 } },
   { name: 'ci run timed_out', tp: CI, claim: claimLine('TP-1', 'PASS', HEAD), facts: { ...ciAtHead, runs: [run({ conclusion: 'timed_out' })] }, state: 'FAILED', run: { id: 101, attempt: 1 } },
   { name: 'ci run startup_failure', tp: CI, claim: claimLine('TP-1', 'PASS', HEAD), facts: { ...ciAtHead, runs: [run({ conclusion: 'startup_failure' })] }, state: 'FAILED', run: { id: 101, attempt: 1 } },
@@ -751,6 +793,7 @@ const LADDER: readonly LadderRow[] = [
   { name: 'run URL with /attempts/n', tp: CI, claim: claimLine('TP-1', 'PASS', HEAD), facts: { ...ciAtHead, runs: [run({ attempt: 2, url: `${HTML}/actions/runs/101/attempts/2` })] }, state: 'VERIFIED-CI', run: { id: 101, attempt: 2 } },
   // 6 — ATTESTED-LOCAL
   { name: 'local PASS exit 0', tp: LOCAL, claim: claimLine('TP-1', 'PASS', HEAD, 'test', 0), facts: atHead, state: 'ATTESTED-LOCAL' },
+  { name: 'local PASS with the expected exit', tp: LOCAL_EXPECTS_1, claim: claimLine('TP-1', 'PASS', HEAD, 'test', 1), facts: atHead, state: 'ATTESTED-LOCAL' },
   { name: 'local PASS exit 0, older SHA, disjoint diff', tp: LOCAL_FILES, claim: claimLine('TP-1', 'PASS', SHA_A, 'test', 0), facts: { ...atHead, diff: ['docs/a.md'] }, state: 'ATTESTED-LOCAL' },
   { name: 'manual PASS', tp: MANUAL, claim: claimLine('TP-1', 'PASS', HEAD), facts: atHead, state: 'ATTESTED-LOCAL' },
   { name: 'ci PASS with no runs at all is labelled and never VERIFIED-CI', tp: CI, claim: claimLine('TP-1', 'PASS', HEAD), facts: { ...ciAtHead, runs: [] }, state: 'ATTESTED-LOCAL', run: 'none' },
@@ -760,16 +803,20 @@ const LADDER: readonly LadderRow[] = [
   { name: 'ci PASS, foreign run URL', tp: CI, claim: claimLine('TP-1', 'PASS', HEAD), facts: { ...ciAtHead, runs: [run({ url: 'https://github.com/o/r-evil/actions/runs/101' })] }, state: 'UNVERIFIED' },
   { name: 'ci PASS, invalid html_url', tp: CI, claim: claimLine('TP-1', 'PASS', HEAD), facts: { ...ciAtHead, htmlUrl: 'http://github.com/o/r' }, state: 'UNVERIFIED' },
   { name: 'local PASS without an exit code', tp: LOCAL, claim: claimLine('TP-1', 'PASS', HEAD), facts: atHead, state: 'UNVERIFIED' },
+  { name: 'PASS without an exit is UNVERIFIED when the TP expects 1', tp: LOCAL_EXPECTS_1, claim: claimLine('TP-1', 'PASS', HEAD), facts: atHead, state: 'UNVERIFIED' },
 ]
 
 describe('classify — the §3.3 ladder, first match wins, conservative terminal arm', () => {
   it.each(LADDER.map(r => [r.name, r] as const))('%s', (_, row) => {
     const claim = row.claim === null ? null : claimOf(row.claim)
-    const verdict = PE.classify(tpOf(row.tp), { ...row.facts, claim })
+    const parsed = PE.parsePlan(row.tp)
+    expect(parsed.ok).toBe(true)
+    const verdict = PE.classify(unwrap(parsed).tps[0], { ...row.facts, claim })
     expect(verdict.state).toBe(row.state)
     if (row.run !== undefined) expect(verdict.run).toEqual(row.run)
-    // The verdict carries the claim's outcome exactly when it carries its SHA.
+    // The verdict carries the claim's outcome and exit exactly when it carries its SHA.
     expect(verdict.outcome).toBe(verdict.sha === null ? null : claim?.outcome)
+    expect(verdict.exit).toBe(verdict.sha === null ? null : claim?.exit)
     expect(Object.isFrozen(verdict)).toBe(true)
   })
 
@@ -802,12 +849,16 @@ describe('classify — the §3.3 ladder, first match wins, conservative terminal
   it('every verdict is a record the comment grammar admits, and round-trips through a STUB unchanged', () => {
     for (const row of LADDER) {
       const claim = row.claim === null ? null : claimOf(row.claim)
-      const verdict = PE.classify(tpOf(row.tp), { ...row.facts, claim })
-      const record: TpRecord = { id: 1, ...verdict, hash: 'e'.repeat(12) }
+      const parsed = PE.parsePlan(row.tp)
+      expect(parsed.ok, row.name).toBe(true)
+      const plan = unwrap(parsed)
+      const tp = plan.tps[0]
+      const verdict = PE.classify(tp, { ...row.facts, claim })
+      const record: TpRecord = { id: tp.id, ...verdict, hash: hashOf(tp) }
       const key = PE.dedupeKey({ records: [record], exceptions: [] }, sha256)
       expect(key.ok, `${row.name}: ${verdict.state}/${verdict.outcome}`).toBe(true)
       if (!key.ok) continue
-      const text = unwrap(PE.render(PLAN, { head: HEAD, key: key.value, htmlUrl: HTML, records: [record], exceptions: [] }, 'stub')).text
+      const text = unwrap(PE.render(plan, { head: HEAD, key: key.value, htmlUrl: HTML, records: [record], exceptions: [] }, 'stub')).text
       expect(unwrap(PE.parseEvidenceComment(text), row.name).records, row.name).toEqual([record])
     }
   })
@@ -820,6 +871,38 @@ describe('classify — the §3.3 ladder, first match wins, conservative terminal
       })
       expect(v.state).toBe('INDETERMINATE')
     }
+  })
+
+  it.each([
+    ['undefined', LOCAL, undefined],
+    ['null', LOCAL, null],
+    ['NaN', LOCAL, NaN],
+    ['fraction', LOCAL, 0.5],
+    ['string', LOCAL, '1'],
+    ['negative', LOCAL, -1],
+    ['126', LOCAL, 126],
+    ['256', LOCAL, 256],
+    ['different from the clause', LOCAL_EXPECTS_1, 2],
+    ['nonzero without a clause', LOCAL, 1],
+    ['nonzero on a manual TP', MANUAL, 1],
+  ] as const)('rejects a TP with an invalid expected exit: %s', (_, line, expectedExit) => {
+    const parsed = PE.parsePlan(line)
+    expect(parsed.ok).toBe(true)
+    const tp = { ...unwrap(parsed).tps[0], expectedExit } as Tp
+    const claim = claimOf(claimLine('TP-1', 'PASS', HEAD))
+    for (const exit of [null, 1, expectedExit]) {
+      expect(PE.classify(tp, { ...atHead, claim: { ...claim, exit } as Claim }), `claim exit: ${exit}`).toEqual({
+        state: 'UNVERIFIED', sha: null, outcome: null, run: null, exit: null,
+      })
+    }
+  })
+
+  it.each([undefined, '- [ ] not a TP'])('rejects a TP with an invalid line: %s', line => {
+    const tp = { ...tpOf(LOCAL), line } as Tp
+    const claim = claimOf(claimLine('TP-1', 'PASS', HEAD, 'test', 0))
+    expect(PE.classify(tp, { ...atHead, claim })).toEqual({
+      state: 'UNVERIFIED', sha: null, outcome: null, run: null, exit: null,
+    })
   })
 
   it('garbage facts fail closed and never throw', () => {
@@ -907,6 +990,22 @@ describe('render', () => {
       expect(parsed.ticked).toEqual([1, 3])
       expect(parsed.plan.tps.map(t => t.line)).toEqual(PLAN.tps.map(t => t.line))
     }
+  })
+
+  it('keeps expected exits on ticked and unticked lines through render and parseBlock', () => {
+    const unticked = `${tpLine(2, 2, 'local scenario with files', 'local', ['src/**'])} [expect-exit: 2]`
+    const parsed = PE.parsePlan(`${LOCAL_EXPECTS_1}\n${unticked}`)
+    expect(parsed.ok).toBe(true)
+    const plan = unwrap(parsed)
+    const records: readonly TpRecord[] = [
+      { ...RECORDS[2], id: 1, exit: 1, hash: hashOf(plan.tps[0]) },
+      { ...RECORDS[1], hash: hashOf(plan.tps[1]) },
+    ]
+    const block = unwrap(PE.render(plan, evidence({ records }), 'block')).text
+    expect(block.split('\n').slice(2, 4)).toEqual([LOCAL_EXPECTS_1.replace('- [ ]', '- [x]'), unticked])
+    expect(unwrap(PE.parseBlock(block))).toMatchObject({
+      kind: 'lines', ticked: [1], plan: { tps: [{ line: LOCAL_EXPECTS_1, expectedExit: 1 }, { line: unticked, expectedExit: 2 }] },
+    })
   })
 
   it('counts: one tally line between the markers', () => {
@@ -1160,6 +1259,10 @@ describe('record outcome — `out:PASS|FAIL|SKIP|none` (the claim, beside the ve
 describe('tpHash and dedupeKey', () => {
   it('tpHash is the first 12 hex of the injected sha256 over the canonical line', () => {
     expect(unwrap(PE.tpHash(PLAN.tps[0], sha256))).toBe(sha256(PLAN.tps[0].line).slice(0, 12))
+  })
+
+  it('keeps the main branch hash for the local line without a clause', () => {
+    expect(hashOf(tpOf(LOCAL))).toBe('a9b99e483960')
   })
 
   it('dedupeKey is stable, and changes with any record', () => {
