@@ -9,11 +9,12 @@ function windowLabel(minutes: number): string {
   return `${minutes}m`;
 }
 
-/** Data older than this shows its age. */
-export const CODEX_STALE_AFTER_SEC = 3600;
+/** Data at or above this age shows a suffix. */
+export const CODEX_STALE_AFTER_SEC = 600;
 
-/** "3h" or "2d": the age in whole hours under a day, else whole days. */
+/** Show whole minutes under an hour, hours under a day, else days. */
 function formatAge(seconds: number): string {
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
   const hours = Math.floor(seconds / 3600);
   return hours < 24 ? `${hours}h` : `${Math.floor(hours / 24)}d`;
 }
@@ -23,10 +24,9 @@ function formatAge(seconds: number): string {
  *
  * A window whose resets_at has passed has reset since Codex last reported it, and
  * its use since the reset is unknown, so it renders as "7d reset" with no bar and
- * no percent. A record older than CODEX_STALE_AFTER_SEC ends with its age, for
- * example "· data 3h old". The red "limited" marker shows while Codex reports a
- * reached limit and at least one window is still counting down; once every window
- * has reset the limit is lifted and the stale marker is dropped.
+ * no percent. A record at least CODEX_STALE_AFTER_SEC old ends with its age,
+ * for example "· data 10m old". The red "limited" marker shows when Codex
+ * reports a reached limit and at least one window has not reset.
  */
 export default async function codexQuota(
   ctx: GatherContext,
