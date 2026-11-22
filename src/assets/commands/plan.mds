@@ -326,7 +326,7 @@ Use AskUserQuestion to present:
 1. **Implementation Plan Summary**
    - Execution strategy
    - Key implementation steps with files, and the steps report's Size forecast line if it fits the Phase 10 shape, else its absence
-   - Test strategy — the test plan as TP lines, at least one per acceptance criterion (shape below)
+   - Test strategy — the test plan as TP lines (shape below)
 
 2. **Design Review Findings**
    - Each anti-pattern finding with severity and proposed mitigation
@@ -337,8 +337,6 @@ Use AskUserQuestion to present:
 4. **Risks**
    - Context risk level
    - Unresolved gaps carried forward
-
-**Test plan lines.** The TP-line contract:
 
 {{test_plan_line()}}
 
