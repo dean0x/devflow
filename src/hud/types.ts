@@ -100,27 +100,25 @@ export interface UsageData {
 }
 
 /**
- * One Codex rate-limit window, identified by its length (D-CODEX-WINDOW-BY-MINUTES).
+ * One Codex rate-limit window. See D-CODEX-WINDOW-BY-MINUTES in `parseUsage` in `tokenmeter.ts`.
  */
 export interface CodexWindow {
-  /** Window length in minutes: 300 is the 5h window, 10080 the weekly one. */
-  minutes: number;
-  /** Clamped to 0-100. */
+  /** Window length in minutes. */
+  minutes: 300 | 10080;
+  /** Used percent in the range 0 to 100. */
   usedPercent: number;
-  /** Epoch seconds. */
+  /** Window reset time in epoch seconds. */
   resetsAt: number;
 }
 
 /**
- * Codex usage limits from the newest rate-limit record: the proxy's snapshot or
- * Codex's session logs, whichever was observed last. Windows are ordered by
- * ascending length.
+ * Codex quota from the tokenmeter `hud` command. Windows are in ascending order by length.
  */
 export interface CodexUsage {
   windows: readonly CodexWindow[];
-  /** Codex's rate_limit_reached_type when a limit is hit, else null. */
-  limitReached: string | null;
-  /** Epoch seconds: when Codex reported these limits. */
+  /** 'reached' when tokenmeter reports a limit, else null. */
+  limitReached: 'reached' | null;
+  /** Time of the newest window reading in epoch milliseconds. */
   observedAt: number;
 }
 

@@ -35,12 +35,15 @@ export function atomicTempPath(filePath: string): string {
  *
  * @param filePath - Absolute path to the target file.
  * @param data - UTF-8 encoded content to write.
- * @param createMode - Permission bits the temp file is CREATED with (masked by the
- *   umask), so a file that must be owner-only is never readable by others, not even
- *   between the write and the rename. Omitted, the umask default applies. Either way
- *   an existing target's mode wins (below).
+ * @param mode - A number sets the temp file's initial mode, subject to umask.
+ *   An existing target's mode wins unless `{ exactMode }` sets the mode before rename.
  */
-export async function writeFileAtomicExclusive(filePath: string, data: string, createMode?: number): Promise<void> {
+export async function writeFileAtomicExclusive(
+  filePath: string,
+  data: string,
+  mode?: number | { readonly exactMode: number },
+): Promise<void> {
+  const createMode = typeof mode === 'object' ? mode.exactMode : mode;
   // PID-scope the tmp name so concurrent writers from different processes
   // (e.g., two Claude Code sessions) never collide on the same .tmp path.
   // mirrors proxy-log.ts rotation at src/core/proxy-log.ts which PID-scopes
@@ -58,25 +61,24 @@ export async function writeFileAtomicExclusive(filePath: string, data: string, c
     await fs.writeFile(tmp, data, options);
   }
 
-  // Preserve the target's permission mode across the atomic replace.
-  // A user who hardened the target (e.g. settings.json → 0600 to protect
-  // ANTHROPIC_API_KEY) must not have it silently widened to umask default
-  // (~0644) on every proxy enable/disable or post-install rewrite.
-  //
-  // Non-fatal path: if stat fails (ENOENT → fresh file, or any other I/O
-  // error), skip chmod and keep the umask default — the write must still
-  // complete correctly.
   try {
-    const { mode } = await fs.stat(filePath);
-    // mode includes file-type bits; mask to permission bits only for chmod.
-    await fs.chmod(tmp, mode & 0o777);
-  } catch {
-    // Fresh write (ENOENT) or stat/chmod failure — use umask default.
-    // Intentionally non-fatal: mode preservation is best-effort; the write
-    // itself must never be corrupted by a chmod error.
+    if (typeof mode === 'object') {
+      // Set the required mode before the new file becomes visible at filePath.
+      await fs.chmod(tmp, mode.exactMode);
+    } else {
+      // Preserve any restrictions the user put on the target file.
+      try {
+        const prior = await fs.stat(filePath);
+        await fs.chmod(tmp, prior.mode & 0o777);
+      } catch {
+        // Keep the temp file's initial mode if mode preservation fails.
+      }
+    }
+    await fs.rename(tmp, filePath);
+  } catch (err) {
+    try { await fs.unlink(tmp); } catch { /* Preserve the original error. */ }
+    throw err;
   }
-
-  await fs.rename(tmp, filePath);
 }
 
 /**

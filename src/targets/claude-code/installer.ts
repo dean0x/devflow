@@ -5,6 +5,7 @@ import type { PluginDefinition } from '../../core/plugins.js';
 import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, WORKFLOW_FOLDER_NAMES, buildAssetMaps, prefixSkillName, unprefixSkillName, getAllSkillNames, getAllAgentNames, getAllCommandNames, FEATURE_OWNED_SKILLS, resolveSkillInstallPlan, omitGatedSkills, selectedWorkflowFolders, workflowFolderNames } from '../../core/plugins.js';
 import { skillsDir, agentSourceDirs, rulesDir, commandSourceDirs, scriptsDir, compiledSkillRefsDir, skillRefsSourceDir, type AgentSourceDirs, type CommandSourceDirs } from '../../core/assets.js';
 import { getPackageRoot, isContainedIn } from '../../core/paths.js';
+import { installTokenmeterState } from '../../core/tokenmeter-bin.js';
 import {
   ALL_SWITCHES_ON,
   VARIANT_AXES,
@@ -1831,6 +1832,8 @@ export async function composeScripts(scriptsTarget: string): Promise<void> {
 }
 
 export interface InstallScriptsOptions {
+  /** The Devflow state directory. */
+  readonly devflowDir: string;
   /** The installed scripts directory (`~/.devflow/scripts`). */
   readonly scriptsTarget: string;
   /** The effective selection the charter is rendered for. */
@@ -1839,8 +1842,7 @@ export interface InstallScriptsOptions {
 }
 
 /**
- * Install the scripts directory whole: the verbatim copy of {@link composeScripts}, then the orchestrator
- * charter it skips.
+ * Copy the scripts, save the Codex usage tool path, and render the charter that the copy skips.
  *
  * D-CHARTER-INSTALL-RENDER: a tree from `composeScripts` alone has no charter, so every caller outside this
  * module goes through here and none pairs the two steps by hand. The render is its own step, outside the
@@ -1848,6 +1850,10 @@ export interface InstallScriptsOptions {
  */
 export async function installScripts(opts: InstallScriptsOptions): Promise<void> {
   await composeScripts(opts.scriptsTarget);
+  const state = await installTokenmeterState(opts.devflowDir);
+  const warning = state.ok ? state.value.warning : state.error;
+  if (warning !== undefined) opts.warn(warning);
+
   await installRenderedCharter({
     scriptsDir: opts.scriptsTarget,
     plugins: opts.plugins,
@@ -3061,6 +3067,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // The charter renders from the EFFECTIVE selection (a partial install
   // keeps what earlier runs installed).
   await installScripts({
+    devflowDir,
     scriptsTarget,
     plugins: options.effectivePlugins ?? plugins,
     warn,

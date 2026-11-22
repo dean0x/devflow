@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -484,7 +484,7 @@ describe('codexQuota component', () => {
       codexUsage: {
         windows: [{ minutes: 10080, usedPercent: 2, resetsAt: sixDays21HoursFromNow() }],
         limitReached: null,
-        observedAt: nowSec(),
+        observedAt: Date.now(),
       },
     });
     const result = await codexQuota(ctx);
@@ -500,7 +500,7 @@ describe('codexQuota component', () => {
           { minutes: 10080, usedPercent: 12, resetsAt: nowSec() + 3 * 86400 + 4 * 3600 + 30 },
         ],
         limitReached: null,
-        observedAt: nowSec(),
+        observedAt: Date.now(),
       },
     });
     const result = await codexQuota(ctx);
@@ -509,30 +509,12 @@ describe('codexQuota component', () => {
     expect(result!.raw).toMatch(/^Codex 5h .{8} 40% \(1h 2m\) \u00B7 7d .{8} 12% \(3d 4h\)$/);
   });
 
-  it('labels an unrecognised window length generically', async () => {
-    const ctx = makeCtx({
-      codexUsage: {
-        windows: [
-          { minutes: 180, usedPercent: 10, resetsAt: nowSec() + 600 },
-          { minutes: 43200, usedPercent: 20, resetsAt: nowSec() + 86400 },
-          { minutes: 45, usedPercent: 30, resetsAt: nowSec() + 600 },
-        ],
-        limitReached: null,
-        observedAt: nowSec(),
-      },
-    });
-    const result = await codexQuota(ctx);
-    expect(result!.raw).toContain('3h ');
-    expect(result!.raw).toContain('30d ');
-    expect(result!.raw).toContain('45m ');
-  });
-
   it('renders a window whose reset time has passed as "reset", with no percent, bar or countdown', async () => {
     const ctx = makeCtx({
       codexUsage: {
         windows: [{ minutes: 10080, usedPercent: 88, resetsAt: nowSec() - 60 }],
         limitReached: null,
-        observedAt: nowSec(),
+        observedAt: Date.now(),
       },
     });
     const result = await codexQuota(ctx);
@@ -541,15 +523,28 @@ describe('codexQuota component', () => {
     expect(stripAnsi(result!.text)).toBe(result!.raw);
   });
 
-  it('shows no data age while the record is under an hour old', async () => {
-    const ctx = makeCtx({
-      codexUsage: {
-        windows: [{ minutes: 10080, usedPercent: 12, resetsAt: nowSec() + 86400 + 30 }],
-        limitReached: null,
-        observedAt: nowSec() - 59 * 60,
-      },
-    });
-    expect((await codexQuota(ctx))!.raw).not.toContain('old');
+  it.each([
+    [599_000, ''],
+    [599_999, ''],
+    [600_000, ' · data 10m old'],
+    [3_599_999, ' · data 59m old'],
+  ])('formats a Codex reading %i ms old with suffix %j', async (ageMs, suffix) => {
+    const now = 1_800_000_000_000;
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+    try {
+      const result = await codexQuota(makeCtx({
+        codexUsage: {
+          windows: [{ minutes: 10080, usedPercent: 64, resetsAt: now / 1000 - 60 }],
+          limitReached: null,
+          observedAt: now - ageMs,
+        },
+      }));
+      expect(result?.raw).toBe(`Codex 7d reset${suffix}`);
+      expect(stripAnsi(result!.text)).toBe(result?.raw);
+      expect(result?.text.endsWith(`\x1b[2m7d reset\x1b[0m${suffix ? `\x1b[2m${suffix}\x1b[0m` : ''}`)).toBe(true);
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it('ends with the data age in hours, then days, once the record is an hour old', async () => {
@@ -558,7 +553,7 @@ describe('codexQuota component', () => {
         codexUsage: {
           windows: [{ minutes: 10080, usedPercent: 64, resetsAt: nowSec() - 60 }],
           limitReached: null,
-          observedAt,
+          observedAt: observedAt * 1000,
         },
       });
     const hours = await codexQuota(at(nowSec() - 3 * 3600 - 30));
@@ -573,7 +568,7 @@ describe('codexQuota component', () => {
         codexUsage: {
           windows: [{ minutes: 10080, usedPercent: 64, resetsAt: nowSec() - 60 }],
           limitReached: null,
-          observedAt,
+          observedAt: observedAt * 1000,
         },
       });
     expect((await codexQuota(at(nowSec() - 3600)))!.raw).toBe('Codex 7d reset · data 1h old');
@@ -586,7 +581,7 @@ describe('codexQuota component', () => {
       codexUsage: {
         windows: [{ minutes: 10080, usedPercent: 12, resetsAt: nowSec() + 86400 + 30 }],
         limitReached: null,
-        observedAt: nowSec() + 7200,
+        observedAt: (nowSec() + 7200) * 1000,
       },
     });
     const result = await codexQuota(ctx);
@@ -602,7 +597,7 @@ describe('codexQuota component', () => {
           { minutes: 10080, usedPercent: 12, resetsAt: nowSec() + 86400 + 30 },
         ],
         limitReached: null,
-        observedAt: nowSec(),
+        observedAt: Date.now(),
       },
     });
     const raw = (await codexQuota(ctx))!.raw;
@@ -614,8 +609,8 @@ describe('codexQuota component', () => {
     const ctx = makeCtx({
       codexUsage: {
         windows: [{ minutes: 10080, usedPercent: 100, resetsAt: nowSec() + 86400 }],
-        limitReached: 'rate_limit_reached',
-        observedAt: nowSec(),
+        limitReached: 'reached',
+        observedAt: Date.now(),
       },
     });
     const result = await codexQuota(ctx);
@@ -627,8 +622,8 @@ describe('codexQuota component', () => {
     const ctx = makeCtx({
       codexUsage: {
         windows: [{ minutes: 10080, usedPercent: 100, resetsAt: nowSec() - 60 }],
-        limitReached: 'rate_limit_reached',
-        observedAt: nowSec(),
+        limitReached: 'reached',
+        observedAt: Date.now(),
       },
     });
     const result = await codexQuota(ctx);
@@ -640,7 +635,7 @@ describe('codexQuota component', () => {
   });
 
   it('returns null when the data holds no window', async () => {
-    const ctx = makeCtx({ codexUsage: { windows: [], limitReached: null, observedAt: nowSec() } });
+    const ctx = makeCtx({ codexUsage: { windows: [], limitReached: null, observedAt: Date.now() } });
     expect(await codexQuota(ctx)).toBeNull();
   });
 });

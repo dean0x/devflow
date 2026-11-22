@@ -384,7 +384,21 @@ npx devflow-kit hud --detail         # Show tool/agent descriptions
 npx devflow-kit hud --no-detail      # Hide tool/agent descriptions
 ```
 
-The HUD also shows your OpenAI Codex usage limits (the weekly window, plus the 5-hour window when your plan has one) next to the Claude quota. It reads them from Codex's own session logs under `~/.codex/sessions`. It also reads the quota snapshot of the Devflow proxy when one exists, and it shows the newer of the two records. A later proxy release writes this snapshot. It makes no network call, and it shows nothing when you do not use Codex. A window past its reset time shows `reset`, because its use since the reset is not known. A record older than one hour ends with its age, for example `· data 3h old`.
+The HUD shows the weekly Codex quota next to the Claude quota. It also shows the 5-hour Codex quota if your plan has one. When the HUD cache expires, devflow runs `tokenmeter hud` from the path that `devflow init` saves. The cache usually lasts 30 seconds. For readings at least 60 seconds old but less than 10 minutes old, the cache lasts at most 5 seconds.
+
+The command returns the latest saved data. It does not wait for Codex. A refresh is due at 60 seconds. tokenmeter checks recent Codex session logs in the background. It uses the newest data from the logs or the app server.
+
+By default, tokenmeter can start `codex app-server` at most about once per minute per data folder. Codex can then use its stored sign-in to request the limits from OpenAI over HTTP.
+
+To stop the app server and keep the log source, run:
+
+```bash
+npx @dean0x/tokenmeter@0.2.0 config app_server off
+```
+
+A window past its reset time shows `reset`. A reading at least 10 minutes old shows its age, for example `· data 10m old`. If tokenmeter cannot find Codex on `PATH`, log data at least 10 minutes old does not show. If neither source has data, the HUD omits the Codex segment. The Claude quota stays visible when available.
+
+After an upgrade, run `devflow init` again to install the HUD and save the tool path. If the npx cache clears and the saved path is lost, run `devflow init` again.
 
 When the curation ledger (`.devflow/curation/decisions-ledger.jsonl`) exists and git tracks a file in a curation data folder, or does not answer, the HUD shows no curation counts and no skip line.
 

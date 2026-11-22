@@ -1713,6 +1713,7 @@ describe('removeDevFlowInstallArtifacts — proxy artifact removal (TEST-4)', ()
     await fs.writeFile(path.join(devflowDir, 'manifest.json'), '{}', 'utf-8');
     await fs.writeFile(path.join(devflowDir, 'migrations.json'), '{}', 'utf-8');
     await fs.writeFile(path.join(devflowDir, 'proxy.json'), '{}', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, 'tokenmeter.json'), '{"version":1}', { mode: 0o600 });
     await fs.mkdir(path.join(devflowDir, 'logs', 'project-slug'), { recursive: true });
     await fs.writeFile(path.join(devflowDir, 'logs', 'project-slug', '.hook-debug.log'), 'debug', 'utf-8');
     await fs.mkdir(path.join(devflowDir, 'cache', 'models'), { recursive: true });
@@ -2228,6 +2229,13 @@ describe('enumerateDryRunExtras (A5 regression)', () => {
       withoutSeed.some(e => e.includes('agent-models.json')),
       'agent-models.json must NOT appear when the file is absent (existence filter)',
     ).toBe(false);
+  });
+
+  it('lists the saved Codex usage tool path in the dry-run removal plan', async () => {
+    const state = path.join(devflowDir, 'tokenmeter.json');
+    await fs.writeFile(state, '{"version":1}', { mode: 0o600 });
+
+    expect(await enumerateDryRunExtras(claudeDir, devflowDir)).toContain(state);
   });
 
   it('(A5) names a bare legacy skill dir that devflow made and exists on disk', async () => {

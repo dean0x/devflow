@@ -15,11 +15,11 @@
  * The renders themselves, over every plugin set, are held by tests/installer/charter-render.test.ts. The
  * built CLI end to end is held by tests/installer/charter-render-e2e.test.ts.
  *
- * HOME safety: every directory below is an mkdtemp; nothing reads or writes the real ~/.claude or
- * ~/.devflow, and no test runs the CLI.
+ * HOME safety: every install uses a temporary directory. The HUD-only command runs in the test process.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { readFileSync, promises as fs } from 'fs';
+import { readFileSync, realpathSync, promises as fs } from 'fs';
+import { createRequire } from 'node:module';
 import * as os from 'os';
 import * as path from 'path';
 import * as p from '@clack/prompts';
@@ -34,6 +34,7 @@ import {
   type PluginDefinition,
 } from '../../src/core/plugins.js';
 import { readManifestPlugins, writeManifest } from '../../src/core/manifest.js';
+import * as claudePaths from '../../src/targets/claude-code/claude-paths.js';
 import {
   composeScripts,
   copyDirectory,
@@ -47,11 +48,20 @@ import {
   installRenderedCharter,
   renderCharter,
 } from '../../src/targets/claude-code/charter-render.js';
-import { hudOnlyCharterPlugins } from '../../src/cli/commands/init.js';
+import { hudOnlyCharterPlugins, initCommand } from '../../src/cli/commands/init.js';
 import { charterPluginsAfterRemoval, runSelectivePhaseForScope } from '../../src/cli/commands/uninstall.js';
 import { makeManifest, testBackups } from '../helpers.js';
+import { systemManagedSettingsAtRisk } from '../helpers/managed-settings.js';
+import { assertTempHome } from '../setup/home-isolation.js';
+
+vi.mock('node:module', async (importOriginal) => {
+  const original = await importOriginal<typeof import('node:module')>();
+  return { ...original, createRequire: vi.fn(original.createRequire) };
+});
 
 const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
+const CODEX_PATH_WARNING = 'The HUD cannot use the saved Codex usage tool path. ' +
+  'Reinstall devflow-kit with umask 022 or in a trusted location. Run devflow init again.';
 
 const SOURCE = readFileSync(path.join(packagedScriptsDir(), CHARTER_RELPATH), 'utf-8');
 
@@ -83,10 +93,16 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.mocked(createRequire).mockReset();
   await fs.rm(root, { recursive: true, force: true });
 });
 
 const exists = (file: string): Promise<boolean> => fs.access(file).then(() => true, () => false);
+
+function expectedCodexBin(): string {
+  const manifest = createRequire(import.meta.url).resolve('@dean0x/tokenmeter/package.json');
+  return realpathSync(path.join(path.dirname(manifest), 'bin', 'tokenmeter.js'));
+}
 
 async function snapshot(file: string): Promise<{ bytes: string; mtimeMs: number; mode: number }> {
   const stat = await fs.stat(file);
@@ -210,7 +226,7 @@ describe('installScripts: the script copy and the charter render are one step', 
 
   it('leaves a whole tree: the copied scripts and the rendered charter', async () => {
     const warnings: string[] = [];
-    await installScripts({ scriptsTarget: scripts, plugins: [CORE, AMBIENT, IMPLEMENT], warn: m => warnings.push(m) });
+    await installScripts({ devflowDir: root, scriptsTarget: scripts, plugins: [CORE, AMBIENT, IMPLEMENT], warn: m => warnings.push(m) });
 
     expect(await exists(path.join(scripts, 'hooks', 'run-hook'))).toBe(true);
     expect(await exists(path.join(scripts, 'hud.sh'))).toBe(true);
@@ -219,7 +235,7 @@ describe('installScripts: the script copy and the charter render are one step', 
   });
 
   it('renders for the plugins it is given: a set without implement gets no route to it', async () => {
-    await installScripts({ scriptsTarget: scripts, plugins: [CORE, AMBIENT, REVIEW], warn: () => {} });
+    await installScripts({ devflowDir: root, scriptsTarget: scripts, plugins: [CORE, AMBIENT, REVIEW], warn: () => {} });
 
     expect(await fs.readFile(charterAt(), 'utf-8')).toBe(rendered([CORE, AMBIENT, REVIEW]));
     expect(await fs.readFile(charterAt(), 'utf-8')).not.toContain('devflow:implement');
@@ -230,7 +246,7 @@ describe('installScripts: the script copy and the charter render are one step', 
     const warnings: string[] = [];
 
     await expect(
-      installScripts({ scriptsTarget: scripts, plugins: [CORE, AMBIENT, IMPLEMENT], warn: m => warnings.push(m) }),
+      installScripts({ devflowDir: root, scriptsTarget: scripts, plugins: [CORE, AMBIENT, IMPLEMENT], warn: m => warnings.push(m) }),
     ).resolves.toBeUndefined();
 
     expect(warnings.some(w => w.includes('charter render:'))).toBe(true);
@@ -297,6 +313,26 @@ describe('installViaFileCopy: the render is its own step after the script copy',
     expect(warnings).toEqual([]);
   });
 
+  it('a full install saves the Codex usage bin path with mode 0600', async () => {
+    const state = path.join(devflowDir, 'tokenmeter.json');
+
+    await install({ plugins: [CORE, AMBIENT, IMPLEMENT], isPartialInstall: false });
+
+    await expect(fs.readFile(state, 'utf8').then((text): unknown => JSON.parse(text)))
+      .resolves.toEqual({ version: 1, binPath: expectedCodexBin() });
+    expect((await fs.stat(state)).mode & 0o777).toBe(0o600);
+  });
+
+  it('warns when it cannot save the Codex usage tool path and completes the install', async () => {
+    await fs.mkdir(path.join(devflowDir, 'tokenmeter.json'));
+
+    await install({ plugins: [CORE, AMBIENT, IMPLEMENT], isPartialInstall: false });
+
+    expect(warnings).toEqual(['Could not save the Codex usage tool path. Run devflow init again.']);
+    expect(await exists(path.join(devflowDir, 'scripts', 'hud.sh'))).toBe(true);
+    expect(await fs.readFile(charterAt(), 'utf8')).toBe(rendered([CORE, AMBIENT, IMPLEMENT]));
+  });
+
   it('a selection without implement installs a charter with no route to it', async () => {
     await install({ plugins: [CORE, AMBIENT, PLAN], isPartialInstall: false });
 
@@ -340,6 +376,89 @@ describe('installViaFileCopy: the render is its own step after the script copy',
 // ---------------------------------------------------------------------------
 // init --hud-only: the plugin set it renders for
 // ---------------------------------------------------------------------------
+
+async function makeCodexPackage(mode: number): Promise<string> {
+  const fixture = await fs.realpath(root);
+  const pkg = path.join(fixture, 'node_modules', '@dean0x/tokenmeter');
+  const entry = 'bin/tokenmeter.js';
+  await fs.mkdir(path.join(pkg, 'bin'), { recursive: true, mode: 0o700 });
+  await fs.mkdir(path.join(pkg, 'dist'), { mode: 0o700 });
+  await fs.writeFile(path.join(pkg, entry), '', { mode: 0o600 });
+  await fs.writeFile(path.join(pkg, 'package.json'), JSON.stringify({ bin: { tokenmeter: entry } }));
+  await fs.chmod(pkg, mode);
+  vi.mocked(createRequire).mockReturnValueOnce(createRequire(path.join(fixture, 'package.json')));
+  return path.join(pkg, entry);
+}
+
+async function expectQuotaReaderReplacement(
+  args: string[],
+  expectedBin = expectedCodexBin(),
+): Promise<void> {
+  const cwd = process.cwd();
+  const savedOptions = initCommand.options.map(option => {
+    const key = option.attributeName();
+    const value: unknown = initCommand.getOptionValue(key);
+    return { key, value, source: initCommand.getOptionValueSource(key) };
+  });
+  const devflowDir = path.join(root, '.devflow');
+  const state = path.join(devflowDir, 'tokenmeter.json');
+  assertTempHome(root);
+  const hudDir = path.join(devflowDir, 'scripts', 'hud');
+  const retiredReader = path.join(hudDir, 'codex-usage.js');
+  await fs.mkdir(hudDir, { recursive: true });
+  await fs.writeFile(retiredReader, '');
+  await fs.mkdir(path.join(root, '.claude'));
+  await fs.writeFile(state, '{"version":1,"binPath":"stale"}');
+  vi.stubEnv('HOME', root);
+  vi.stubEnv('USERPROFILE', root);
+  process.chdir(root);
+  const exit = vi.spyOn(process, 'exit').mockImplementation(code => {
+    throw new Error(`init exited with code ${code}`);
+  });
+  try {
+    await initCommand.parseAsync(args, { from: 'user' });
+
+    await expect(fs.lstat(retiredReader)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(fs.readFile(state, 'utf8').then((text): unknown => JSON.parse(text)))
+      .resolves.toEqual({ version: 1, binPath: expectedBin });
+  } finally {
+    exit.mockRestore();
+    process.chdir(cwd);
+    vi.unstubAllEnvs();
+    for (const { key, value, source } of savedOptions) {
+      if (source === undefined) initCommand.setOptionValue(key, value);
+      else initCommand.setOptionValueWithSource(key, value, source);
+    }
+  }
+}
+
+it('init --hud-only replaces the old quota reader with the saved tool path', () =>
+  expectQuotaReaderReplacement(['--hud-only']),
+);
+
+it.skipIf(systemManagedSettingsAtRisk()).each([
+  { name: 'trusted', mode: 0o755, expectedWarnings: [] },
+  { name: 'group-writable', mode: 0o775, expectedWarnings: [CODEX_PATH_WARNING] },
+])('full init completes and reports Codex usage for a $name package', async ({ mode, expectedWarnings }) => {
+  const binPath = await makeCodexPackage(mode);
+  const managedPath = path.join(root, 'managed-settings.json');
+  await fs.writeFile(managedPath, JSON.stringify({ permissions: { deny: ['Bash(sudo *)'] } }));
+  const managedPathSpy = vi.spyOn(claudePaths, 'getManagedSettingsPath').mockReturnValue(managedPath);
+  const warnings: string[] = [];
+  const warn = vi.spyOn(p.log, 'warn').mockImplementation((message) => {
+    warnings.push(message);
+  });
+  try {
+    await expectQuotaReaderReplacement(['--recommended', '--security', 'none', '--no-proxy'], binPath);
+  } finally {
+    warn.mockRestore();
+    managedPathSpy.mockRestore();
+  }
+
+  expect(warnings.filter(message => message.includes('Codex usage'))).toEqual(expectedWarnings);
+  expect((await fs.stat(path.dirname(path.dirname(binPath)))).mode & 0o777).toBe(mode);
+  await expect(fs.lstat(managedPath)).rejects.toMatchObject({ code: 'ENOENT' });
+});
 
 describe('hudOnlyCharterPlugins: the record of the machine, or nothing', () => {
   it('no manifest, or one readManifest refused, is the empty set', () => {
