@@ -137,7 +137,7 @@ D-CLAIM-CAUSE: stdout names the closed reason. Stderr names the cause that the r
 
 **Local command output.** The script reads only the exit. It cannot detect a crash that returns the expected exit and prints plausible failure output. The Test agent checks the output.
 
-**File and refresh modes.** A file claim binds by TP number when the plan comes from the file. A clause edit can change the verdict without a new run. In refresh mode, a clause edit changes the PR body line's hash, so the claim does not apply.
+**File and refresh modes.** When the plan comes from the file, a claim binds to the TP number and expected exit. For a TP with a clause, the claim line stores the expected exit as `expect-exit:<k>`. If the saved expected exit differs from the TP's expected exit, the ladder gets no claim and the TP reads UNVERIFIED. In refresh mode, a clause edit changes the PR body line's hash, so the claim does not apply.
 
 **KB-INV-4.** A CI run that fails for an unrelated reason still fails each ci TP. The `run-failed` note says so. Fix or re-run the job, then run `verify` again.
 

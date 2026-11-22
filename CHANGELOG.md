@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- A local test plan can specify ` [expect-exit: <k>]` (1 to 125) for a planned failure. A local PASS needs the expected exit, which defaults to 0. A file claim applies only if its saved expected exit matches the test plan.
+- A local test plan can specify ` [expect-exit: <k>]` (1 to 125) for a planned failure. A local PASS needs the expected exit, which defaults to 0. A file claim applies only if its saved expected exit matches the test plan. Old claim lines without `expect-exit:` parse with expected exit 0 and apply only to TPs without clauses; with clauses, they give UNVERIFIED, not FAILED.
 
 ---
 
