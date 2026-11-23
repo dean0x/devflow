@@ -19,7 +19,7 @@
 #
 # Success:      removes .pending-turns.processing; touches .last-refresh-ok
 # Failure:      leaves .pending-turns.processing; this worker is the PRIMARY recovery owner —
-#               on its next spawn it merges leftover .processing back into the queue ("Claim queue atomically").
+#               on its next spawn it merges the queue into the leftover batch ("Claim queue atomically").
 #               session-start-memory's own cold-path recovery is the fallback for when this
 #               worker never re-spawns (e.g. memory disabled mid-flight, host offline); it applies a
 #               300s age gate before acting on .processing. No action needed here — the two paths
@@ -207,6 +207,8 @@ PROJECT_DEVFLOW_DIR="$PROJECT_ROOT/.devflow"
 MEMORY_DIR="$PROJECT_DEVFLOW_DIR/memory"
 QUEUE_FILE="$MEMORY_DIR/.pending-turns.jsonl"
 PROCESSING_FILE="$MEMORY_DIR/.pending-turns.processing"
+CLAIMED_FILE="$PROCESSING_FILE.claimed"
+MERGE_FILE="$PROCESSING_FILE.merge"
 MEMORY_FILE="$MEMORY_DIR/WORKING-MEMORY.md"
 STAGED_FILE="$MEMORY_FILE.new"  # staging path for CAS write (D-MEMORY-STAGED-CAS)
 LOCK_DIR="$MEMORY_DIR/.working-memory.lock"
@@ -252,10 +254,9 @@ if ! command -v cksum >/dev/null 2>&1; then
 fi
 
 # --- Never write through a symbolic link (D-HOOKS-NO-SYMLINK, git-marker) ---
-# The lock (`mkdir`), the batch merge (`>>`), the claim heartbeat and the success
-# stamp (`touch`) write these paths in place; the claim and the trim rename onto the
-# batch and the swap onto the working memory, and `mv` moves a file into the folder
-# a link at its target names. The trim's copy is created only where nothing stands.
+# The claim heartbeat and the success stamp (`touch`) write these paths in place.
+# The claim and trim rename onto the batch and the swap onto the note. Copies for
+# the merge and the trim are created only where nothing stands.
 # So the run is skipped, before it takes the lock or starts an LLM run, when any of
 # these paths or a folder above them is a link.
 SWAP_FILE="$MEMORY_DIR/.WORKING-MEMORY.md.swap"
@@ -519,7 +520,8 @@ fi
 # assistant row; deleting it then loses that turn's prompt. Leaving it costs
 # nothing: the run is still skipped, the next run takes the whole turn once the
 # assistant row lands, and queue-append caps the file (200 -> newest 100 lines).
-if [ ! -f "$PROCESSING_FILE" ] && [ -f "$QUEUE_FILE" ] && [ -s "$QUEUE_FILE" ]; then
+if ! path_occupied "$PROCESSING_FILE" && ! path_occupied "$CLAIMED_FILE" && ! path_occupied "$MERGE_FILE" \
+    && df_file_below "$PROJECT_ROOT" "$QUEUE_FILE" && [ -s "$QUEUE_FILE" ]; then
   # A parser that exits non-zero has not said that the queue holds no turn, so the status is
   # read from the parser itself (no pipe after it) and the queue is kept as it is.
   _PARSER_RC=0
@@ -554,6 +556,28 @@ ends_without_newline() {
   [ -s "$1" ] && [ -n "$(tail -c 1 "$1" 2>/dev/null)" ]
 }
 
+# Publish a complete merge, or keep both inputs for the next run. The old batch
+# stays in place until the copy is complete. Its removal commits the merge: if
+# the batch is absent, the copy already contains the claimed queue. Remove that
+# queue before the copy takes the batch name. A new live queue is separate.
+merge_recovery_batch() {
+  if [ -f "$PROCESSING_FILE" ]; then
+    if ! path_occupied "$CLAIMED_FILE"; then
+      [ -f "$QUEUE_FILE" ] || return 1
+      mv "$QUEUE_FILE" "$CLAIMED_FILE" || return 1
+    fi
+    rm -f "$MERGE_FILE" || return 1
+    if path_occupied "$MERGE_FILE" || ! (umask 077 && set -o noclobber && {
+      cat "$PROCESSING_FILE" && { ! ends_without_newline "$PROCESSING_FILE" || printf '\n'; } \
+        && cat "$CLAIMED_FILE"
+    } > "$MERGE_FILE"); then
+      return 1
+    fi
+    rm -f "$PROCESSING_FILE" || return 1
+  fi
+  [ -f "$MERGE_FILE" ] && rm -f "$CLAIMED_FILE" && mv "$MERGE_FILE" "$PROCESSING_FILE"
+}
+
 # --- Claim queue atomically (D56c contract: .pending-turns.processing recovered at SessionStart) ---
 # Use the same lock as the queue trim. Release it before work on the claimed batch.
 if ! curation_lock_acquire "$QUEUE_LOCK_DIR" 2; then
@@ -562,29 +586,39 @@ if ! curation_lock_acquire "$QUEUE_LOCK_DIR" 2; then
 fi
 QUEUE_LOCK_HELD="true"
 
+for CLAIM_PATH in "$QUEUE_FILE" "$PROCESSING_FILE" "$CLAIMED_FILE" "$MERGE_FILE"; do
+  if path_occupied "$CLAIM_PATH" && ! df_file_below "$PROJECT_ROOT" "$CLAIM_PATH"; then
+    log "SKIP: a queue or recovery path is not a regular file; no model run"
+    exit 0
+  fi
+done
+
 RECOVERY_BATCH="false"
 MERGE_LOG=""
-if [ -f "$PROCESSING_FILE" ]; then
+if [ -f "$PROCESSING_FILE" ] || [ -f "$CLAIMED_FILE" ] || [ -f "$MERGE_FILE" ]; then
   RECOVERY_BATCH="true"
-  if [ -f "$QUEUE_FILE" ]; then
-    # The queue is removed only after its rows are in the batch. A batch whose last row has
-    # no line break first gets one, so the first queue row does not run into that row and
-    # become one malformed line that the parser drops. A failed append leaves the queue for
-    # the next run; an append that stopped part-way may repeat rows then, and a line break
-    # added before a failed append only leaves a blank line, which the parser ignores.
-    if { ! ends_without_newline "$PROCESSING_FILE" || printf '\n' >> "$PROCESSING_FILE"; } 2>/dev/null && cat "$QUEUE_FILE" >> "$PROCESSING_FILE" 2>/dev/null; then
-      rm -f "$QUEUE_FILE" 2>/dev/null || true
-      MERGE_LOG="Merged new queue entries into recovery batch"
+  # Finish one interrupted merge first. Then claim any queue that arrived after it.
+  for MERGE_STEP in resume claim; do
+    if [ "$MERGE_STEP" = resume ]; then
+      [ -f "$CLAIMED_FILE" ] || [ -f "$MERGE_FILE" ] || continue
     else
-      MERGE_LOG="Could not append the queue to the recovery batch — the queue is kept for the next run"
+      [ -f "$QUEUE_FILE" ] || break
     fi
-  fi
+    if ! merge_recovery_batch 2>/dev/null; then
+      log "SKIP: recovery merge incomplete; rows kept for the next run"
+      exit 0
+    fi
+    MERGE_LOG="Merged new queue entries into recovery batch"
+  done
 elif [ -f "$QUEUE_FILE" ]; then
   mv "$QUEUE_FILE" "$PROCESSING_FILE" 2>/dev/null || { log "SKIP: failed to claim queue (race condition — another worker got it)"; exit 0; }
 else
   log "SKIP: no queue file to process"
   exit 0
 fi
+# The cold path uses this time to distinguish a batch in use from a stale batch.
+# A claim with mv preserves the source time, so refresh it before release.
+touch "$PROCESSING_FILE" 2>/dev/null || true
 curation_lock_release "$QUEUE_LOCK_DIR"
 QUEUE_LOCK_HELD="false"
 
@@ -615,11 +649,6 @@ if [ "$RECOVERY_BATCH" = "true" ]; then
     fi
   fi
 fi
-
-# Heartbeat so session-start-memory's 300s cold path measures worker liveness, not turn age.
-# mv preserves the source mtime; touch stamps the claim time so the cold path cannot reclaim
-# a batch the worker actively owns — even if CONFLICT makes this a recurring retry vehicle.
-touch "$PROCESSING_FILE" 2>/dev/null || true
 
 if ! _qar_count_lines "$PROCESSING_FILE"; then
   log "SKIP: batch line count unavailable; the batch is kept; no model run"
@@ -978,7 +1007,7 @@ When evidence is ambiguous, describe the last confirmed state rather than an opt
 Instructions:
 - Write ${STAGED_FILE} NOW using the Write tool
 - Line 1 MUST be: <!-- memory-head: (set by devflow) -->
-- Aim for at most ${MEMORY_NOTE_TARGET_CHARS} characters. Devflow refuses notes above ${MEMORY_NOTE_CAP_BYTES} bytes.
+- Keep the note under ${MEMORY_NOTE_TARGET_BYTES} bytes. A letter outside A-Z can use 2 to 4 bytes. Leave room for the stamp: Devflow refuses the final note above ${MEMORY_NOTE_CAP_BYTES} bytes.
 - Use only ## Now and ## Progress as level-two sections.
 - Synthesize from the queue turns — NEVER fabricate or invent context
 - Integrate new information with existing content; deduplicate overlapping information
@@ -1421,6 +1450,9 @@ verify_and_swap() {
       || ! (umask 077 && set -o noclobber && {
         printf '%s\n' "$_stamp" && tail -n +2 "$STAGED_FILE"
       } > "$SWAP_FILE") 2>/dev/null; then
+    if df_file_below "$PROJECT_ROOT" "$STAGED_FILE"; then
+      rm -f "$STAGED_FILE" 2>/dev/null || true
+    fi
     log "WARN: could not write the note swap copy"
     OUTCOME="failed"; return
   fi

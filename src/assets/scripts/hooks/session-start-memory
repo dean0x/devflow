@@ -104,40 +104,50 @@ if [ "${DF_TRACKED_AREA_MEMORY:-unknown}" != "untracked" ]; then
 fi
 
 # --- D56c cold-path recovery: orphaned .pending-turns.processing ---
-# Self-contained (not sourced from a shared helper): applies a 300s stale-age
-# gate to .pending-turns.processing. background-memory-update is the PRIMARY
-# recovery owner: it re-merges a leftover .processing under its own lock on
-# every spawn. This is the COLD-PATH fallback for when the worker never
-# re-spawns (memory disabled mid-flight, host offline, etc.): a SessionStart
-# arriving >300s after the crash with no intervening Stop hook.
-# Non-clobber: only recovers when .pending-turns.jsonl does NOT already exist,
-# so a concurrent session's fresh queue is never overwritten. Nor where a
-# symbolic link sits on the path to the batch or to the queue it is renamed onto
-# (D-HOOKS-NO-SYMLINK, git-marker): `mv` would move the batch into a folder a
-# linked memory folder or queue path names, and a linked batch would become a
-# linked queue.
+# The worker owns recovery. SessionStart moves a stale batch to an empty queue
+# under the same queue lock. A batch beside a claimed queue or merge copy still
+# needs the worker. If only the merge copy remains, it holds the complete batch.
 source "$SCRIPT_DIR/get-mtime" || { echo "session-start-memory: failed to source get-mtime" >&2; exit 1; }
 source "$SCRIPT_DIR/is-hex-sha" || { echo "session-start-memory: failed to source is-hex-sha" >&2; exit 1; }
+source "$SCRIPT_DIR/curation-lock" || { echo "session-start-memory: failed to source curation-lock" >&2; exit 1; }
 _SSM_PT_PROC="$MEMORY_DIR/.pending-turns.processing"
 _SSM_PT_JSONL="$MEMORY_DIR/.pending-turns.jsonl"
-if [ -f "$_SSM_PT_PROC" ]; then
-  _SSM_PT_MTIME=$(get_mtime "$_SSM_PT_PROC" 2>/dev/null || true)
-  _SSM_PT_MTIME="${_SSM_PT_MTIME:-0}"
-  _SSM_NOW_PT=$(date +%s)
-  _SSM_PT_AGE=$(( _SSM_NOW_PT - _SSM_PT_MTIME ))
-  if [ "$_SSM_PT_AGE" -gt 300 ]; then
-    if ! df_no_symlink_below "$PROJECT_ROOT" "$_SSM_PT_PROC" "$_SSM_PT_JSONL"; then
-      dbg "Stale .pending-turns.processing skipped — a symbolic link sits on its path or the queue's"
-      log "Stale .pending-turns.processing skipped (cold path): a symbolic link sits on the path to $_SSM_PT_PROC or $_SSM_PT_JSONL"
-    elif [ ! -f "$_SSM_PT_JSONL" ]; then
-      mv "$_SSM_PT_PROC" "$_SSM_PT_JSONL" 2>/dev/null || true
-      dbg "Recovered orphaned .pending-turns.processing (age ${_SSM_PT_AGE}s)"
-      log "Recovered orphaned .pending-turns.processing → .pending-turns.jsonl (cold path)"
-    else
-      dbg "Stale .pending-turns.processing skipped — .pending-turns.jsonl already exists"
-      log "Stale .pending-turns.processing skipped (cold path): .pending-turns.jsonl already exists"
-    fi
+_SSM_PT_CLAIMED="$_SSM_PT_PROC.claimed"
+_SSM_PT_MERGE="$_SSM_PT_PROC.merge"
+_SSM_PT_LOCK="$_SSM_PT_JSONL.lock"
+
+recover_stale_memory_batch() {
+  local _batch="$_SSM_PT_PROC" _mtime _age
+  if ! path_occupied "$_SSM_PT_PROC"; then _batch="$_SSM_PT_MERGE"; fi
+  df_file_below "$PROJECT_ROOT" "$_batch" || return 0
+  _mtime=$(get_mtime "$_batch" 2>/dev/null) || return 0
+  _age=$(( $(date +%s) - ${_mtime:-0} ))
+  [ "$_age" -gt 300 ] || return 0
+  if ! df_no_symlink_below "$PROJECT_ROOT" "$_SSM_PT_JSONL" "$_SSM_PT_CLAIMED" "$_SSM_PT_MERGE"; then
+    log "Stale .pending-turns.processing skipped (cold path): a symbolic link sits on a recovery path"
+    return 0
   fi
+  if path_occupied "$_SSM_PT_JSONL"; then
+    log "Stale .pending-turns.processing skipped (cold path): .pending-turns.jsonl already exists"
+    return 0
+  fi
+  if [ "$_batch" = "$_SSM_PT_PROC" ]; then
+    if path_occupied "$_SSM_PT_CLAIMED" || path_occupied "$_SSM_PT_MERGE"; then return 0; fi
+  else
+    rm -f "$_SSM_PT_CLAIMED" 2>/dev/null || return 0
+  fi
+  if mv -n "$_batch" "$_SSM_PT_JSONL" 2>/dev/null && ! path_occupied "$_batch"; then
+    dbg "Recovered orphaned .pending-turns.processing (age ${_age}s)"
+    log "Recovered orphaned .pending-turns.processing → .pending-turns.jsonl (cold path)"
+  fi
+  return 0
+}
+
+if { [ -f "$_SSM_PT_PROC" ] || [ -f "$_SSM_PT_MERGE" ]; } \
+    && df_no_symlink_below "$PROJECT_ROOT" "$_SSM_PT_LOCK" \
+    && curation_lock_acquire "$_SSM_PT_LOCK" 1; then
+  recover_stale_memory_batch
+  curation_lock_release "$_SSM_PT_LOCK"
 fi
 
 CONTEXT=""

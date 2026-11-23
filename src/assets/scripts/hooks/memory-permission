@@ -33,7 +33,7 @@
 # locale on bash 3.2.
 
 MEMORY_NOTE_CAP_BYTES=8192
-MEMORY_NOTE_TARGET_CHARS=6000
+MEMORY_NOTE_TARGET_BYTES=6000
 MEMORY_MULTI_SESSION_SECS=14400
 
 # A notice can name the project path, denied writes, or note format.

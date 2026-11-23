@@ -116,7 +116,7 @@ ${afterWrite}
     return { log, prompt: fs.existsSync(promptFile) ? fs.readFileSync(promptFile, 'utf8') : '' };
   }
 
-  function runQueue(rows: readonly string[]): { turns: string[]; prompt: string; log: string } {
+  function runQueue(rows?: readonly string[]): { turns: string[]; prompt: string; log: string } {
     const { prompt, log } = runWorker(rows);
     expect(prompt, log).not.toBe('');
     const turns = [...prompt.matchAll(/^Turn \d+:\n([^\n]+(?:\nAssistant:[^\n]*)?)/gm)].map((match) => match[1] ?? '');
@@ -167,7 +167,7 @@ exec /bin/mv "$@"
     const rows = Array.from({ length: 200 }, (_, index) => row('assistant', `Prior reply ${index}`, A));
     fs.writeFileSync(path.join(memoryDir, BATCH), rows.join('\n') + '\n', { mode: 0o600 });
     writeFakeExecutable(path.join(bin, 'cat'), `#!/bin/bash
-if [ "$1" = "$TEST_MEMORY/${QUEUE}" ] && [ ! -d "$TEST_MEMORY/${QUEUE_LOCK}" ]; then exit 1; fi
+if [ "$1" = "$TEST_MEMORY/${BATCH}.claimed" ] && [ ! -d "$TEST_MEMORY/${QUEUE_LOCK}" ]; then exit 1; fi
 exec /bin/cat "$@"
 `);
     writeFakeExecutable(path.join(bin, 'tail'), `#!/bin/bash
@@ -179,6 +179,49 @@ exec /usr/bin/tail "$@"
     expect(prompt).toMatch(/^Assistant: Reply$/m);
     expect(fs.existsSync(path.join(memoryDir, QUEUE))).toBe(false);
   }, budget);
+
+  it.each(['copy', 'cleanup', 'copy before session start', 'cleanup before session start'])('keeps each real turn once if recovery stops during %s', (step) => {
+    const repeat = row('assistant', 'Repeated reply', A);
+    const firstB = row('assistant', 'First B reply', B);
+    const duringCopy = step.startsWith('copy');
+    const batch = path.join(memoryDir, BATCH);
+    const queue = path.join(memoryDir, QUEUE);
+    fs.writeFileSync(batch, repeat + '\n', { mode: 0o600 });
+    writeFakeExecutable(path.join(bin, 'cat'), `#!/bin/bash
+case "$1" in
+  "$TEST_MEMORY/${QUEUE}"|"$TEST_MEMORY/${BATCH}.claimed")
+    if [ '${duringCopy}' = true ]; then /usr/bin/head -n 3 "$1"; exit 1; fi ;;
+esac
+exec /bin/cat "$@"
+`);
+    writeFakeExecutable(path.join(bin, 'rm'), `#!/bin/bash
+if [ "$1" = -f ] && [ '${duringCopy}' = false ]; then
+  case "$2" in "$TEST_MEMORY/${QUEUE}"|"$TEST_MEMORY/${BATCH}.claimed") exit 1 ;; esac
+fi
+exec /bin/rm "$@"
+`);
+    writeClaudeStub(`${PLACEHOLDER}\n${BODY}`, 'exit 1');
+    runWorker([repeat, repeat, firstB, row('assistant', 'Second B reply', B)]);
+
+    fs.unlinkSync(path.join(bin, 'cat'));
+    fs.unlinkSync(path.join(bin, 'rm'));
+    if (step.endsWith('session start')) {
+      const old = new Date(Date.now() - 310_000);
+      fs.utimesSync(duringCopy ? batch : `${batch}.merge`, old, old);
+      startContext();
+      expect(fs.existsSync(queue)).toBe(!duringCopy);
+    }
+    fs.appendFileSync(queue, row('assistant', 'New B reply', B) + '\n');
+    writeClaudeStub();
+    const { turns, log } = runQueue();
+    expect(log).not.toContain(INTERLEAVE_LOG);
+    expect(turns).toEqual([
+      ...Array<string>(3).fill('Assistant: Repeated reply'),
+      'Assistant: First B reply',
+      'Assistant: Second B reply',
+      'Assistant: New B reply',
+    ]);
+  }, 2 * HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS);
 
   it('leaves the queue in place when the lock path is a symbolic link', () => {
     const target = path.join(root, 'lock-target');
@@ -282,7 +325,8 @@ exec /usr/bin/tail "$@"
     expect(prompt).toContain('Branch: note-test');
     expect(prompt.replace(/<data-[^>]+>[\s\S]*?<\/data-[^>]+>/g, '')).not.toContain('note-test');
     expect(prompt).toMatch(/only (?:the )?## Now and ## Progress/i);
-    expect(prompt).toContain('6000 characters');
+    expect(prompt).toContain('Keep the note under 6000 bytes.');
+    expect(prompt).toContain('A letter outside A-Z can use 2 to 4 bytes.');
     expect(prompt).toContain('8192 bytes');
     expect(prompt).not.toMatch(/## (Decisions|Context|Session Log|Done)|120 lines/);
     expect(prompt).toContain('Never upgrade a status without evidence AND never restate a stale claim past contradicting evidence');
@@ -327,6 +371,16 @@ exec /usr/bin/tail "$@"
     expect(fs.existsSync(path.join(memoryDir, SWAP))).toBe(false);
     expect(fs.existsSync(path.join(memoryDir, ONCE))).toBe(true);
     expect(log).not.toMatch(/## Extra|Test note|memory-head:/);
+  }, budget);
+
+  it('accepts a note with two-byte letters within the prompt budget', () => {
+    const body = `${BODY}${'é'.repeat(2960)}\n`;
+    const staged = `${PLACEHOLDER}\n${body}`;
+    expect(Buffer.byteLength(staged)).toBeLessThan(6000);
+    writeClaudeStub(staged);
+    const { prompt } = runQueue(ONE_SESSION);
+    expect(prompt).toContain('Keep the note under 6000 bytes.');
+    expect(fs.readFileSync(note, 'utf8').split('\n').slice(1).join('\n')).toBe(body);
   }, budget);
 
   it('writes its own stamp, allows deeper headings, and accepts exactly 8192 bytes', () => {
@@ -385,6 +439,40 @@ exec /usr/bin/tail "$@"
     writeClaudeStub();
     runWorker();
     expect(fs.existsSync(path.join(memoryDir, ONCE))).toBe(false);
+  }, budget);
+
+  it.each(['link', 'folder'])('keeps the queue without a model run when a %s occupies the swap path', (kind) => {
+    const swap = path.join(memoryDir, SWAP);
+    if (kind === 'link') fs.symlinkSync(path.join(root, 'missing'), swap);
+    else fs.mkdirSync(swap);
+    const { prompt, log } = runWorker(ONE_SESSION);
+    expect(prompt).toBe('');
+    expect(fs.readFileSync(path.join(memoryDir, QUEUE), 'utf8')).toBe(ONE_SESSION.join('\n') + '\n');
+    expect(log).toMatch(/Run:.* result=failed/);
+    if (kind === 'folder') {
+      expect(fs.readFileSync(path.join(memoryDir, '.worker-notice-path'), 'utf8')).toBe('path\n');
+    }
+  }, budget);
+
+  it('updates the note after it removes a leftover swap copy', () => {
+    fs.writeFileSync(path.join(memoryDir, SWAP), 'stale', { mode: 0o600 });
+    runQueue(ONE_SESSION);
+    expect(fs.readFileSync(note, 'utf8')).toContain(BODY);
+    expect(fs.existsSync(path.join(memoryDir, SWAP))).toBe(false);
+  }, budget);
+
+  it('removes the staged note when the swap copy cannot be written', () => {
+    fs.writeFileSync(note, OLD_NOTE);
+    writeFakeExecutable(path.join(bin, 'tail'), `#!/bin/bash
+if [ "$1" = -n ] && [ "$2" = +2 ] && [ "$3" = "$TEST_MEMORY/WORKING-MEMORY.md.new" ]; then exit 1; fi
+exec /usr/bin/tail "$@"
+`);
+    const { log } = runWorker(ONE_SESSION);
+    expect(log).toMatch(/Run:.* result=failed/);
+    expect(fs.readFileSync(note, 'utf8')).toBe(OLD_NOTE);
+    expect(fs.existsSync(path.join(memoryDir, BATCH))).toBe(true);
+    expect(fs.existsSync(path.join(memoryDir, SWAP))).toBe(false);
+    expect(fs.existsSync(`${note}.new`)).toBe(false);
   }, budget);
 
   it.each([
