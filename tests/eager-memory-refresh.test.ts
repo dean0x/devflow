@@ -2287,10 +2287,7 @@ describe('S22: pre-compact bootstrap stamp and canonical sections (B2)', () => {
     runHook(PRE_COMPACT_HOOK, { cwd: projectDir }, homeDir);
 
     const content = fs.readFileSync(memFile, 'utf-8');
-    expect(content).toContain('## Now');
-    expect(content).toContain('## Progress');
-    expect(content).not.toMatch(/^## (Decisions|Context|Session Log)$/m);
-    expect(content).not.toContain('## Modified Files');
+    expect(content.match(/^## .*$/gm)).toEqual(['## Now', '## Progress']);
   });
 
   it('non-git directory: bootstrap is skipped, no WORKING-MEMORY.md created', () => {

@@ -18,6 +18,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { resolveOnPath } from './shell-hooks-helpers.js';
+import { isolatedEnv } from './setup/home-isolation.js';
 
 const WORKER = path.resolve(__dirname, '../src/assets/scripts/hooks/background-memory-update');
 const STRESS = process.env.DEVFLOW_RUN_LINE_STRESS === '1';
@@ -150,7 +151,8 @@ describe('the memory worker writes one Run line per run', () => {
    * One worker run in a fresh project, home and fake claude; resolves to the Run lines it
    * wrote, each without its timestamp and hook name.
    */
-  async function runOnce(withFolderAtStagedPath: boolean, heading = '## Now'): Promise<string[]> {
+  const priorNote = '## Now\nPrevious note\n## Progress\n';
+  async function runOnce(withFolderAtStagedPath: boolean, body = '## Now', failLineCount = false) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-runline-'));
     try {
       const project = path.join(root, 'project');
@@ -161,10 +163,17 @@ describe('the memory worker writes one Run line per run', () => {
       fs.mkdirSync(memory, { recursive: true });
       fs.mkdirSync(home);
       fs.mkdirSync(shim);
+      const note = path.join(memory, 'WORKING-MEMORY.md');
+      const fixture = path.join(root, 'model-note');
+      fs.writeFileSync(note, priorNote);
+      fs.writeFileSync(fixture, `<!-- memory-head: (set by devflow) -->\n${body}\n`);
+      if (failLineCount) {
+        fs.writeFileSync(path.join(shim, 'wc'), '#!/bin/bash\nif [ "$1" = -l ]; then exit 1; fi\nexec /usr/bin/wc "$@"\n', { mode: 0o755 });
+      }
       const ts = Math.floor(Date.now() / 1000);
       fs.writeFileSync(
         path.join(memory, '.pending-turns.jsonl'),
-        `${JSON.stringify({ role: 'user', content: 'a', ts })}\n${JSON.stringify({ role: 'assistant', content: 'b', ts: ts + 1 })}\n`,
+        JSON.stringify({ role: 'assistant', content: 'b', ts }),
       );
       if (withFolderAtStagedPath) {
         fs.mkdirSync(path.join(staged, 'a', 'b'), { recursive: true });
@@ -176,8 +185,7 @@ describe('the memory worker writes one Run line per run', () => {
           '#!/bin/bash',
           'if [ "${1:-}" = "--version" ]; then echo "2.1.293 (Claude Code)"; exit 0; fi',
           'cat >/dev/null',
-          `echo '<!-- memory-head: testsha branch: main -->' > '${staged}'`,
-          `echo '${heading}' >> '${staged}'`,
+          'cp "$MODEL_NOTE" "$STAGED_NOTE" || exit 1',
           'exit 0',
           '',
         ].join('\n'),
@@ -188,7 +196,7 @@ describe('the memory worker writes one Run line per run', () => {
 
       await new Promise<void>((resolve, reject) => {
         const child = spawn('bash', [WORKER, project], {
-          env: { ...process.env, HOME: home, PATH: runPath },
+          env: { ...isolatedEnv(process.env, home), PATH: runPath, MODEL_NOTE: fixture, STAGED_NOTE: staged },
           stdio: 'ignore',
         });
         child.on('error', reject);
@@ -196,19 +204,30 @@ describe('the memory worker writes one Run line per run', () => {
       });
 
       const logs = path.join(home, '.devflow', 'logs');
-      return fs.readdirSync(logs)
+      const lines = fs.readdirSync(logs)
         .flatMap(slug =>
           fs.readFileSync(path.join(logs, slug, '.background-memory-update.log'), 'utf-8').split('\n'))
         .flatMap(line => (/^\[[^\]]*\] \[[^\]]*\] (Run: .*)$/.exec(line) ?? []).slice(1));
+      return { lines, note: fs.readFileSync(note, 'utf8'), batchKept: fs.existsSync(path.join(memory, '.pending-turns.processing')) };
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
   }
 
-  it('writes one failed Run line when the note has an extra section', async () => {
-    expect(await runOnce(false, '## Extra')).toEqual([
-      'Run: cli=2.1.293 argv=lean result=failed denials=unknown removed=none',
-    ]);
+  it.each(['## Extra', '## Now\nText\0tail'])('keeps the readable note and batch for invalid note text', async (body) => {
+    expect(await runOnce(false, body)).toEqual({
+      lines: ['Run: cli=2.1.293 argv=lean result=failed denials=unknown removed=none'],
+      note: priorNote,
+      batchKept: true,
+    });
+  });
+
+  it('keeps the batch and skips the model when it cannot count the rows', async () => {
+    expect(await runOnce(false, '## Now', true)).toEqual({
+      lines: ['Run: cli=2.1.293 argv=none result=skip denials=n/a removed=none'],
+      note: priorNote,
+      batchKept: true,
+    });
   });
 
   it.skipIf(!STRESS)('writes the expected single Run line in each of many workers that run at once', async () => {
@@ -222,7 +241,7 @@ describe('the memory worker writes one Run line per run', () => {
         const i = next++;
         const withFolder = i % 2 === 0;
         try {
-          const lines = await runOnce(withFolder);
+          const { lines } = await runOnce(withFolder);
           const expected = `Run: cli=2.1.293 argv=lean result=updated denials=unknown removed=${withFolder ? 'dir' : 'none'}`;
           if (lines.length !== 1 || lines[0] !== expected) {
             wrong.push(`run ${i}: ${lines.length} Run lines, expected one "${expected}":\n${lines.join('\n')}`);

@@ -212,6 +212,15 @@ exec /usr/bin/tail "$@"
     }
   }, budget);
 
+  it('marks an interleave across the turn window but sends only the newest 20 rows', () => {
+    const rows = [row('user', 'Outside window', A), row('assistant', 'Outside window', B),
+      ...Array.from({ length: 20 }, (_, i) => row('assistant', `Recent reply ${i}`, A))];
+    const { turns, prompt } = runQueue(rows);
+    expect(turns).toHaveLength(20);
+    expect(prompt).not.toContain('Outside window');
+    expect(startContext()).toContain('more than one session');
+  }, budget);
+
   it('does not mark consecutive sessions or pair a legacy row with a tagged row', () => {
     const { turns, log } = runQueue([
       row('user', 'Legacy prompt'),
@@ -517,6 +526,9 @@ if [ "$1" = +%s ]; then echo "$TEST_EPOCH"; else exec /bin/date "$@"; fi
     env = { ...env, TEST_EPOCH: String(epoch) };
     runQueue([row('user', 'Prompt', A), row('assistant', 'Other reply', B), row('assistant', 'Reply', A)]);
     expect(fs.readFileSync(note, 'utf8').split('\n')[0]).toContain(` multi: ${epoch} -->`);
+    // A valid branch of fewer than 200 characters can make a stamp exceed 512 bytes.
+    const branch = `${'界'.repeat(80)}/${'界'.repeat(80)}`;
+    fs.writeFileSync(note, `<!-- memory-head: ${'a'.repeat(40)} branch: ${branch} multi: ${epoch} -->\n${BODY}`);
     env = { ...env, TEST_EPOCH: String(epoch + 14_399) };
     runQueue(ONE_SESSION);
     expect(fs.readFileSync(note, 'utf8').split('\n')[0]).toContain(` multi: ${epoch} -->`);

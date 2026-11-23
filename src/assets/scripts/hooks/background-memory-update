@@ -621,7 +621,11 @@ fi
 # a batch the worker actively owns — even if CONFLICT makes this a recurring retry vehicle.
 touch "$PROCESSING_FILE" 2>/dev/null || true
 
-TOTAL_LINES=$(wc -l < "$PROCESSING_FILE" | tr -d ' ')
+if ! _qar_count_lines "$PROCESSING_FILE"; then
+  log "SKIP: batch line count unavailable; the batch is kept; no model run"
+  exit 0
+fi
+TOTAL_LINES="$_QAR_LINES"
 # wc -l counts line breaks, so a last row with no break is not in its count. Count it, so a
 # batch of one such row is a batch with a row, and only a batch with no byte is empty.
 if ends_without_newline "$PROCESSING_FILE"; then
@@ -639,66 +643,81 @@ fi
 MAX_TURNS=10
 MAX_LINES=$(( MAX_TURNS * 2 ))
 TURNS_NOTE=""
+OLDER_ROWS=0
 if [ "$TOTAL_LINES" -gt "$MAX_LINES" ]; then
-  ENTRIES=$(tail -"$MAX_LINES" "$PROCESSING_FILE")
+  OLDER_ROWS=$(( TOTAL_LINES - MAX_LINES ))
   log "Capped to last $MAX_LINES entries (from $TOTAL_LINES)"
   TURNS_NOTE="(showing newest ${MAX_LINES} of ${TOTAL_LINES} turns — prefer git evidence over conversational claims)"
-else
-  ENTRIES=$(cat "$PROCESSING_FILE")
 fi
 
-# Single-pass extraction: role, session ID and content as TSV. Use a nonempty
-# placeholder for absent IDs because read collapses adjacent TAB separators.
-# A malformed JSON line drops only that line. A missing line break can join two
-# rows into one malformed line (#528). Only user, assistant and qa rows with
-# readable content pass. A non-zero parser exit keeps the batch and stops the run.
+# Older rows supply only their IDs for the batch mark. Only the newest window
+# supplies turn text and skipped-row counts. A parser failure keeps the batch.
 _PARSER_RC=0
 if [ "$_HAS_JQ" = "true" ]; then
-  EXTRACTED=$(printf '%s\n' "$ENTRIES" | jq -R -r '
+  EXTRACTED=$(jq -n -R -r --argjson older "$OLDER_ROWS" '
     def sid:
       if type != "string" then "."
       elif length < 1 or length > 64 then "."
       elif all(explode[]; . == 45 or . == 95 or (. >= 48 and . <= 57)
         or (. >= 65 and . <= 90) or (. >= 97 and . <= 122)) then .
       else "." end;
-    (fromjson | select(.role=="user" or .role=="assistant" or .role=="qa")
-      | .role + "\t" + (.session_id | sid) + "\t" + ((.content // "") | split("\n") | join(" ")))?
-  ' 2>/dev/null) || _PARSER_RC=$?
+    def turn($prior):
+      fromjson | select(.role=="user" or .role=="assistant" or .role=="qa")
+      | (.content // "") as $text | select($text | type == "string")
+      | (.session_id | sid) as $sid
+      | if $prior then "prior\t" + $sid
+        else .role + "\t" + $sid + "\t" + ($text | split("\n") | join(" ")) end;
+    foreach inputs as $line (0; . + 1;
+      (. <= $older) as $prior | $line |
+      (turn($prior)?) // (select(($prior | not) and test("[^[:space:]]")) | "skip"))
+  ' < "$PROCESSING_FILE" 2>/dev/null) || _PARSER_RC=$?
 else
-  EXTRACTED=$(printf '%s\n' "$ENTRIES" | node -e '
+  EXTRACTED=$(node -e '
     const validSid = (id) => typeof id === "string" && id.length > 0 && id.length <= 64
       && Array.from(id).every((char) => {
         const n = char.codePointAt(0);
         return n === 45 || n === 95 || (n >= 48 && n <= 57)
           || (n >= 65 && n <= 90) || (n >= 97 && n <= 122);
       });
-    const lines = require("fs").readFileSync("/dev/stdin","utf8").split("\n");
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const obj = JSON.parse(line);
-        const role = obj === null ? undefined : obj.role;
-        if (role !== "user" && role !== "assistant" && role !== "qa") continue;
-        const content = obj.content == null || obj.content === false ? "" : obj.content;
-        if (typeof content !== "string") continue;
-        const sid = validSid(obj.session_id) ? obj.session_id : ".";
-        process.stdout.write(role + "\t" + sid + "\t" + content.replace(/\n/g, " ") + "\n");
-      } catch {}
+    const older = Number(process.argv[1]);
+    function turn(line, prior) {
+      let obj;
+      try { obj = JSON.parse(line); } catch { return; }
+      const role = obj?.role;
+      if (role !== "user" && role !== "assistant" && role !== "qa") return;
+      const content = obj.content == null || obj.content === false ? "" : obj.content;
+      if (typeof content !== "string") return;
+      const sid = validSid(obj.session_id) ? obj.session_id : ".";
+      return prior ? "prior\t" + sid : role + "\t" + sid + "\t" + content.replace(/\n/g, " ");
     }
-  ' 2>/dev/null) || _PARSER_RC=$?
+    let index = 0;
+    function emit(line) {
+      const prior = ++index <= older;
+      const record = turn(line, prior);
+      if (record !== undefined) console.log(record);
+      else if (!prior && /[^\t\v\f\r ]/.test(line)) console.log("skip");
+    }
+    // JSONL uses LF. Keep only parts of the current row between chunks.
+    let parts = [];
+    require("node:fs").createReadStream("/dev/stdin", { encoding: "utf8" })
+      .on("data", chunk => {
+        const lines = chunk.split("\n");
+        parts.push(lines[0]);
+        if (lines.length === 1) return;
+        emit(parts.join(""));
+        for (let i = 1; i < lines.length - 1; i++) emit(lines[i]);
+        parts = [lines[lines.length - 1]];
+      })
+      .on("end", () => emit(parts.join("")))
+      .on("error", () => { process.exitCode = 1; });
+  ' "$OLDER_ROWS" < "$PROCESSING_FILE" 2>/dev/null) || _PARSER_RC=$?
 fi
 if [ "$_PARSER_RC" -ne 0 ]; then
   log "SKIP: the JSON parser exited $_PARSER_RC on the batch; the batch is kept for the next run; no LLM run"
   exit 0
 fi
 
-_IN_LINES=$(printf '%s\n' "$ENTRIES" | LC_ALL=C grep -c '[^[:space:]]' || true)
-_OUT_LINES=$(printf '%s\n' "$EXTRACTED" | LC_ALL=C grep -c . || true)
-_SKIPPED=$(( ${_IN_LINES:-0} - ${_OUT_LINES:-0} ))
-if [ "$_SKIPPED" -gt 0 ]; then
-  log "Skipped $_SKIPPED queue line(s) that hold no readable turn"
-fi
-
+_SKIPPED=0
 TURNS_TEXT=""
 TURN_COUNT=0
 CURRENT_USER=""
@@ -709,9 +728,13 @@ INTERLEAVED="false"
 
 # Flush the pending prompt on a new prompt, a reply with the same ID, or EOF.
 # An absent ID pairs only with another absent ID. It does not close a session.
-for (( ROW = 0; ROW < MAX_LINES; ROW++ )); do
+for (( ROW = 0; ROW < TOTAL_LINES; ROW++ )); do
   IFS=$'\t' read -r ROLE SID CONTENT || break
-  case "$ROLE" in user|assistant|qa) ;; *) continue ;; esac
+  case "$ROLE" in
+    skip) _SKIPPED=$(( _SKIPPED + 1 )); continue ;;
+    prior|user|assistant|qa) ;;
+    *) continue ;;
+  esac
   if ! queue_session_id_valid "$SID"; then SID="."; fi
   if [ "$SID" != "." ] && [ "$SID" != "$LAST_SID" ] && [ "$INTERLEAVED" = "false" ]; then
     case " $CLOSED_SIDS " in *" $SID "*) INTERLEAVED="true" ;; esac
@@ -766,19 +789,8 @@ User: ${CURRENT_USER}
 "
 fi
 
-MULTI_EPOCH=""
-if [ "$INTERLEAVED" = "true" ]; then
-  MULTI_EPOCH=$(date +%s) || MULTI_EPOCH=""
-  log "Queue rows interleave across sessions"
-elif df_file_below "$PROJECT_ROOT" "$MEMORY_FILE"; then
-  # A valid stamp fits well below this bound. Do not parse a partial line.
-  _STAMP_LIMIT=512
-  _MULTI_LINE=""
-  LC_ALL=C IFS= read -r -n "$_STAMP_LIMIT" _MULTI_LINE 2>/dev/null < "$MEMORY_FILE" || true
-  if [ "${#_MULTI_LINE}" -lt "$_STAMP_LIMIT" ]; then
-    MULTI_EPOCH=$(memory_multi_epoch_from_line "$_MULTI_LINE" "$(date +%s)")
-  fi
-  unset _MULTI_LINE
+if [ "$_SKIPPED" -gt 0 ]; then
+  log "Skipped $_SKIPPED queue line(s) that hold no readable turn"
 fi
 
 if [ "$TURN_COUNT" -eq 0 ]; then
@@ -828,6 +840,14 @@ if [ -n "$MEMORY_PRESENT" ]; then
   else
     EXISTING_MEMORY=""
   fi
+fi
+
+# Carry the mark from the same note snapshot as the checksum and prompt.
+if [ "$INTERLEAVED" = "true" ]; then
+  MULTI_EPOCH=$(date +%s) || MULTI_EPOCH=""
+  log "Queue rows interleave across sessions"
+else
+  MULTI_EPOCH=$(memory_multi_epoch_from_line "${EXISTING_MEMORY%%$'\n'*}" "$(date +%s)")
 fi
 
 # Sets COMMITS_SINCE_NOTE in caller scope.
@@ -1415,13 +1435,19 @@ verify_and_swap() {
     refuse_note "note byte limit refused (bytes=$MEMORY_NOTE_BYTES)"
     return
   fi
+  # SessionStart cannot load a note with a null byte. Keep the last readable note.
+  local _body=""
+  if LC_ALL=C IFS= read -r -d '' _body < "$SWAP_FILE"; then
+    refuse_note "note text format refused (bytes=$MEMORY_NOTE_BYTES)"
+    return
+  fi
   for ((_row = 0; _row < MEMORY_NOTE_CAP_BYTES; _row++)); do
     IFS= read -r _line || [ -n "$_line" ] || break
     case "$_line" in
       '## Now'|'## Progress') ;;
       '## '*) refuse_note "note has an extra section (bytes=$MEMORY_NOTE_BYTES)"; return ;;
     esac
-  done < "$SWAP_FILE"
+  done <<< "$_body"
 
   if ! df_no_symlink_below "$PROJECT_ROOT" "$MEMORY_FILE"; then
     log "CONFLICT: a symbolic link appeared on the path to $MEMORY_FILE during the run — not swapped, leaving .processing for retry"
