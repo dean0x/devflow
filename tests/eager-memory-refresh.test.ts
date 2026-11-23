@@ -2271,11 +2271,16 @@ describe('S22: pre-compact bootstrap stamp and canonical sections (B2)', () => {
   it('git repo + no existing WORKING-MEMORY.md: bootstrap has only Now and Progress', () => {
     initGitRepo(projectDir);
     const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
+    const stubDir = path.join(homeDir, 'stub-bin');
+    const claudeRan = path.join(homeDir, 'claude-ran');
+    fs.mkdirSync(stubDir);
+    writeFakeExecutable(path.join(stubDir, 'claude'), `#!/bin/bash\ntouch "${claudeRan}"\nexit 1\n`);
 
-    runHook(PRE_COMPACT_HOOK, { cwd: projectDir }, homeDir);
+    runHook(PRE_COMPACT_HOOK, { cwd: projectDir }, homeDir, { PATH: `${stubDir}:${process.env.PATH ?? '/usr/bin:/bin'}` });
 
     const content = fs.readFileSync(memFile, 'utf-8');
     expect(content.match(/^## .*$/gm)).toEqual(['## Now', '## Progress']);
+    expect(fs.existsSync(claudeRan)).toBe(false);
   });
 
   it('non-git directory: bootstrap is skipped, no WORKING-MEMORY.md created', () => {

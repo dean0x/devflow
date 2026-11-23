@@ -333,6 +333,17 @@ exec /bin/rm "$@"
     expect(startContext()).not.toContain('more than one session');
   }, budget);
 
+  it.each([['no session field', ''], ['a session field', ` session: ${A}`]])('shows the stamp commit and branch for a first line with %s and no mark', (_name, session) => {
+    git('-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '--allow-empty', '-qm', 'start');
+    const sha = git('rev-parse', 'HEAD');
+    fs.writeFileSync(note, `<!-- memory-head: ${sha} branch: note-test${session} -->\n${BODY}`);
+
+    const context = startContext();
+    expect(context.split('\n')[0]).toContain(`synced @ ${sha} on note-test`);
+    expect(context).not.toContain('more than one session');
+    expect(context).not.toContain(A);
+  }, budget);
+
   it('pairs a legacy row only with a legacy row', () => {
     const { turns } = runQueue([
       row('user', 'Legacy prompt'),
