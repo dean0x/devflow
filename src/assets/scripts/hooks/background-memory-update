@@ -610,18 +610,31 @@ else
   ENTRIES=$(cat "$PROCESSING_FILE")
 fi
 
-# Single-pass extraction: role + content as TSV (newlines collapsed)
-# Each line is parsed alone (jq -R with fromjson, node per line): a malformed line drops only that line.
-# A row cut off before its line break runs into the next row, so the two are one malformed line (#528).
-# Both parsers emit a row only when its role is user, assistant or qa and its content is a
-# string (or absent), so a line that is JSON but no turn is a skipped line on either backend.
-# A parser that exits non-zero has read nothing it can vouch for: the batch is kept, with the
-# queue merged into it, and no LLM runs. Exit 0 with no row still means "no readable turn".
+# Single-pass extraction: role, session ID and content as TSV. Use a nonempty
+# placeholder for absent IDs because read collapses adjacent TAB separators.
+# A malformed JSON line drops only that line. A missing line break can join two
+# rows into one malformed line (#528). Only user, assistant and qa rows with
+# readable content pass. A non-zero parser exit keeps the batch and stops the run.
 _PARSER_RC=0
 if [ "$_HAS_JQ" = "true" ]; then
-  EXTRACTED=$(printf '%s\n' "$ENTRIES" | jq -R -r '(fromjson | select(.role=="user" or .role=="assistant" or .role=="qa") | .role + "\t" + ((.content // "") | split("\n") | join(" ")))?' 2>/dev/null) || _PARSER_RC=$?
+  EXTRACTED=$(printf '%s\n' "$ENTRIES" | jq -R -r '
+    def sid:
+      if type != "string" then "."
+      elif length < 1 or length > 64 then "."
+      elif all(explode[]; . == 45 or . == 95 or (. >= 48 and . <= 57)
+        or (. >= 65 and . <= 90) or (. >= 97 and . <= 122)) then .
+      else "." end;
+    (fromjson | select(.role=="user" or .role=="assistant" or .role=="qa")
+      | .role + "\t" + (.session_id | sid) + "\t" + ((.content // "") | split("\n") | join(" ")))?
+  ' 2>/dev/null) || _PARSER_RC=$?
 else
   EXTRACTED=$(printf '%s\n' "$ENTRIES" | node -e '
+    const validSid = (id) => typeof id === "string" && id.length > 0 && id.length <= 64
+      && Array.from(id).every((char) => {
+        const n = char.codePointAt(0);
+        return n === 45 || n === 95 || (n >= 48 && n <= 57)
+          || (n >= 65 && n <= 90) || (n >= 97 && n <= 122);
+      });
     const lines = require("fs").readFileSync("/dev/stdin","utf8").split("\n");
     for (const line of lines) {
       if (!line.trim()) continue;
@@ -631,7 +644,8 @@ else
         if (role !== "user" && role !== "assistant" && role !== "qa") continue;
         const content = obj.content == null || obj.content === false ? "" : obj.content;
         if (typeof content !== "string") continue;
-        process.stdout.write(role + "\t" + content.replace(/\n/g, " ") + "\n");
+        const sid = validSid(obj.session_id) ? obj.session_id : ".";
+        process.stdout.write(role + "\t" + sid + "\t" + content.replace(/\n/g, " ") + "\n");
       } catch {}
     }
   ' 2>/dev/null) || _PARSER_RC=$?
@@ -651,12 +665,23 @@ fi
 TURNS_TEXT=""
 TURN_COUNT=0
 CURRENT_USER=""
+CURRENT_USER_SID="."
+LAST_SID=""
+CLOSED_SIDS=""
+INTERLEAVED="false"
 
-# FLUSH INVARIANT: a pending user turn (buffered in CURRENT_USER) is flushed in three cases:
-# (1) the next user row arrives — emit user-only stanza, replace buffer; (2) an assistant row
-# arrives — emit paired user+assistant stanza, clear buffer; (3) EOF — trailing flush block below.
-while IFS=$'\t' read -r ROLE CONTENT; do
-  [ -z "$ROLE" ] && continue
+# Flush the pending prompt on a new prompt, a reply with the same ID, or EOF.
+# An absent ID pairs only with another absent ID. It does not close a session.
+for (( ROW = 0; ROW < MAX_LINES; ROW++ )); do
+  IFS=$'\t' read -r ROLE SID CONTENT || break
+  case "$ROLE" in user|assistant|qa) ;; *) continue ;; esac
+  if ! queue_session_id_valid "$SID"; then SID="."; fi
+  if [ "$SID" != "." ] && [ "$SID" != "$LAST_SID" ] && [ "$INTERLEAVED" = "false" ]; then
+    case " $CLOSED_SIDS " in *" $SID "*) INTERLEAVED="true" ;; esac
+    if [ -n "$LAST_SID" ]; then CLOSED_SIDS="$CLOSED_SIDS $LAST_SID"; fi
+    LAST_SID="$SID"
+  fi
+
   if [ "$ROLE" = "user" ]; then
     if [ -n "$CURRENT_USER" ]; then
       TURN_COUNT=$(( TURN_COUNT + 1 ))
@@ -666,9 +691,10 @@ User: ${CURRENT_USER}
 "
     fi
     CURRENT_USER="$CONTENT"
+    CURRENT_USER_SID="$SID"
   elif [ "$ROLE" = "assistant" ]; then
     TURN_COUNT=$(( TURN_COUNT + 1 ))
-    if [ -n "$CURRENT_USER" ]; then
+    if [ -n "$CURRENT_USER" ] && [ "$SID" = "$CURRENT_USER_SID" ]; then
       TURNS_TEXT="${TURNS_TEXT}
 Turn ${TURN_COUNT}:
 User: ${CURRENT_USER}
@@ -701,6 +727,21 @@ if [ -n "$CURRENT_USER" ]; then
 Turn ${TURN_COUNT}:
 User: ${CURRENT_USER}
 "
+fi
+
+MULTI_EPOCH=""
+if [ "$INTERLEAVED" = "true" ]; then
+  MULTI_EPOCH=$(date +%s) || MULTI_EPOCH=""
+  log "Queue rows interleave across sessions"
+elif df_file_below "$PROJECT_ROOT" "$MEMORY_FILE"; then
+  # A valid stamp fits well below this bound. Do not parse a partial line.
+  _STAMP_LIMIT=512
+  _MULTI_LINE=""
+  LC_ALL=C IFS= read -r -n "$_STAMP_LIMIT" _MULTI_LINE 2>/dev/null < "$MEMORY_FILE" || true
+  if [ "${#_MULTI_LINE}" -lt "$_STAMP_LIMIT" ]; then
+    MULTI_EPOCH=$(memory_multi_epoch_from_line "$_MULTI_LINE" "$(date +%s)")
+  fi
+  unset _MULTI_LINE
 fi
 
 if [ "$TURN_COUNT" -eq 0 ]; then

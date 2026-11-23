@@ -369,28 +369,32 @@ describe('capture-question', () => {
       'InputValidationError: [\n  {\n    "expected": "array",\n    "code": "invalid_type",\n    "path": [\n      "questions"\n    ],\n    "message": "Invalid input: expected array, received undefined"\n  }\n]',
   };
 
-  it('AC-F3: one {role:"qa"} row PER QUESTION, to both queues', () => {
-    runHook(CAPTURE_QUESTION, { ...REAL_MULTI_QUESTION_PAYLOAD, cwd: projectDir }, homeDir);
+  it('adds the session ID to every PostToolUse question row only in memory', () => {
+    const session_id = 'A_q-1';
+    const jq = resolveOnPath('jq', process.env.PATH ?? '/usr/bin:/bin');
+    expect(jq, 'the process count uses the jq backend').toBeDefined();
+    const calls = path.join(homeDir, 'json-calls');
+    writeFakeExecutable(path.join(homeDir, 'jq'), '#!/bin/bash\necho jq >> "$TEST_CALLS"\nexec "$TEST_JQ" "$@"\n');
+    const env = { PATH: `${homeDir}:${process.env.PATH ?? '/usr/bin:/bin'}`, TEST_JQ: jq ?? '', TEST_CALLS: calls };
+
+    const result = runHook(CAPTURE_QUESTION, { ...REAL_MULTI_QUESTION_PAYLOAD, cwd: projectDir, session_id }, homeDir, env);
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    expect(fs.readFileSync(calls, 'utf8')).toBe('jq\n'.repeat(4));
+
     const mem = readJsonl(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'));
-    const curationRows = readJsonl(path.join(projectDir, '.devflow', 'curation', '.pending-turns.jsonl'));
-    expect(mem).toHaveLength(2);
-    expect(curationRows).toHaveLength(2);
-    expect(mem[0]).toMatchObject({
-      role: 'qa',
-      content: 'Q: How should I handle the Phase 5 Harden review?\nA: Re-run, inert probes only',
-    });
-    expect(mem[1]).toMatchObject({
-      role: 'qa',
-      content: 'Q: Going forward, how do you want me to handle subagents?\nA: Flag before running',
-    });
+    const curation = fs.readFileSync(path.join(projectDir, '.devflow', 'curation', '.pending-turns.jsonl'), 'utf8');
+    expect(mem).toEqual([
+      { role: 'qa', content: 'Q: How should I handle the Phase 5 Harden review?\nA: Re-run, inert probes only', ts: expect.any(Number), session_id },
+      { role: 'qa', content: 'Q: Going forward, how do you want me to handle subagents?\nA: Flag before running', ts: expect.any(Number), session_id },
+    ]);
+    expect(curation).toBe(mem.map(({ role, content, ts }) => JSON.stringify({ role, content, ts }) + '\n').join(''));
   });
 
-  it('non-AskUserQuestion tool_name -> zero appends (even with a matcher, defensively)', () => {
-    runHook(
-      CAPTURE_QUESTION,
-      { cwd: projectDir, tool_name: 'Read', tool_input: { file_path: '/tmp/x' }, tool_response: { type: 'text' } },
-      homeDir,
-    );
+  it('writes nothing for a different tool even when the payload holds answers', () => {
+    const result = runHook(CAPTURE_QUESTION, { ...REAL_MULTI_QUESTION_PAYLOAD, cwd: projectDir, tool_name: 'Read' }, homeDir);
+
+    expect(result.exitCode, result.stderr).toBe(0);
     expect(fs.existsSync(path.join(projectDir, '.devflow'))).toBe(false);
   });
 
