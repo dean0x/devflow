@@ -13,9 +13,13 @@ import {
   NODE_EXEC_STALL_MS,
   resolveOnPath,
   runGitForFarm,
+  spawnWithStdin,
 } from './shell-hooks-helpers.js';
 
 const WORKER = path.join(HOOKS_DIR, 'background-memory-update');
+const SESSION_START = path.join(HOOKS_DIR, 'session-start-memory');
+const PRE_COMPACT = path.join(HOOKS_DIR, 'pre-compact-memory');
+const CAP_LINE = 'Working memory not loaded: over the 8,192-byte cap; the next update rewrites it.';
 const FARM_TOOLS = [
   'bash', 'cat', 'chmod', 'cksum', 'cp', 'cut', 'date', 'dirname', 'echo', 'find',
   'git', 'grep', 'head', 'kill', 'ln', 'ls', 'mkdir', 'mkfifo', 'mktemp', 'mv', 'nohup', 'od',
@@ -383,6 +387,128 @@ exec /usr/bin/tail "$@"
     expect(log).toMatch(/Run:.* result=conflict/);
   }, budget);
 
+  function runMemoryHook(hook: string): string {
+    const run = spawnWithStdin('/bin/bash', [hook], {
+      env, input: JSON.stringify({ cwd: project, source: 'compact' }),
+    });
+    expect(run.kind, run.stderr).toBe('clean');
+    return run.stdout;
+  }
+
+  function startContext(): string {
+    const output: unknown = JSON.parse(runMemoryHook(SESSION_START) || '{}');
+    if (output === null || typeof output !== 'object' || !('hookSpecificOutput' in output)) return '';
+    const { hookSpecificOutput: context } = output;
+    if (context === null || typeof context !== 'object' || !('additionalContext' in context)) return '';
+    return typeof context.additionalContext === 'string' ? context.additionalContext : '';
+  }
+
+  function startLog(): string {
+    return fs.readFileSync(path.join(home, '.devflow', 'logs', project.slice(1).replaceAll('/', '-'), '.session-start-memory.log'), 'utf8');
+  }
+
+  it.each([
+    ['a 9 KiB note', `unloaded ${'x'.repeat(9207)}`],
+    ['multibyte text', `unloaded ${'é'.repeat(4093)}`],
+    ['trailing newlines', `unloaded ${'x'.repeat(8181)}\n\n\n`],
+  ])('does not load %s above the byte cap but keeps the refresh banner', (_name, text) => {
+    fs.writeFileSync(note, text);
+    fs.writeFileSync(path.join(memoryDir, QUEUE), `${ONE_SESSION[0]}\n`);
+
+    const context = startContext();
+    expect(context).toContain(CAP_LINE);
+    expect(context).toContain('MEMORY REFRESH MAY BE FAILING');
+    expect(context).not.toContain('unloaded');
+    expect(startLog().match(/Working memory not loaded \(bytes=8193\)/g)).toHaveLength(1);
+    expect(fs.readFileSync(note, 'utf8')).toBe(text);
+  }, budget);
+
+  it('loads all the text of a note exactly at the byte cap', () => {
+    const stamp = `<!-- memory-head: ${'a'.repeat(40)} branch: note-test -->\n`;
+    const prefix = BODY + 'é'.repeat(4000);
+    const body = prefix + 'x'.repeat(NOTE_CAP - Buffer.byteLength(stamp + prefix) - 2) + '\n\n';
+    expect(Buffer.byteLength(stamp + body)).toBe(NOTE_CAP);
+    fs.writeFileSync(note, stamp + body);
+
+    const context = startContext();
+    expect(context.slice(context.indexOf('\n') + 1)).toBe(body);
+  }, budget);
+
+  it('does not load a partial read that failed', () => {
+    fs.writeFileSync(note, BODY);
+    writeFakeExecutable(path.join(bin, 'head'), `#!/bin/bash
+if [ "\${3##*/}" = WORKING-MEMORY.md ]; then printf 'partial note'; exit 1; fi
+exec /usr/bin/head "$@"
+`);
+    fs.writeFileSync(path.join(memoryDir, QUEUE), `${ONE_SESSION[0]}\n`);
+
+    const context = startContext();
+    expect(context).toContain(CAP_LINE);
+    expect(context).toContain('MEMORY REFRESH MAY BE FAILING');
+    expect(context).not.toContain('partial note');
+    expect(startLog().match(/Working memory not loaded \(bytes=unknown\)/g)).toHaveLength(1);
+  }, budget);
+
+  it('does not open a FIFO at the note path on session start', () => {
+    makeFifo(note);
+    writeFakeExecutable(path.join(bin, 'head'), `#!/bin/bash
+if [ "\${3##*/}" = WORKING-MEMORY.md ]; then touch "$HOME/note-read"; exit 1; fi
+exec /usr/bin/head "$@"
+`);
+
+    expect(startContext()).toBe('');
+    expect(fs.existsSync(path.join(home, 'note-read'))).toBe(false);
+  }, budget);
+
+  it('does not load a note with a null byte', () => {
+    fs.writeFileSync(note, `${BODY}\0unloaded`);
+
+    const context = startContext();
+    expect(context).toContain(CAP_LINE);
+    expect(context).not.toContain('unloaded');
+  }, budget);
+
+  it.each([
+    ['a non-digit mark', 'note-test multi: invalid-mark'],
+    ['extra stamp text', 'note-test extra-stamp-text'],
+    ['a branch above the stamp limit', 'b'.repeat(201)],
+  ])('does not show header advice or stamp text for %s', (_name, branchAndMark) => {
+    fs.writeFileSync(note, `<!-- memory-head: ${'a'.repeat(40)} branch: ${branchAndMark} -->\n${BODY}`);
+
+    const context = startContext();
+    expect(context).toContain('Test note');
+    expect(context).not.toContain('more than one session');
+    expect(context).not.toContain(branchAndMark);
+  }, budget);
+
+  it('shows an unknown branch rather than a detached HEAD when the branch does not fit the stamp', () => {
+    git('checkout', '-qb', 'b'.repeat(201));
+    git('-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '--allow-empty', '-qm', 'start');
+    fs.writeFileSync(note, BODY);
+
+    expect(startContext().split('\n')[0]).toContain('on unknown');
+  }, budget);
+
+  it('bootstraps only a stamp and fixed text even with a long commit subject and branch', () => {
+    const branch = `branch-${'a'.repeat(180)}`;
+    git('checkout', '-qb', branch);
+    git('-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '--allow-empty', '-qm', 'c'.repeat(20_000));
+    fs.writeFileSync(path.join(project, 'file-not-in-note'), '');
+    env = { ...env, BASH_ENV: path.join(root, 'umask') };
+    fs.writeFileSync(path.join(root, 'umask'), 'umask 022\n');
+
+    runMemoryHook(PRE_COMPACT);
+
+    expect(fs.readFileSync(note, 'utf8')).toBe(
+      `<!-- memory-head: ${git('rev-parse', 'HEAD')} branch: ${branch} -->\n\n` +
+      '## Now\n- Session compacted before working memory was established\n\n## Progress\n- (no history yet)\n',
+    );
+    expect(fs.statSync(note).mode & 0o777).toBe(0o600);
+    const backup = fs.readFileSync(path.join(memoryDir, 'backup.json'), 'utf8');
+    expect(backup).toContain('c'.repeat(20_000));
+    expect(backup).toContain('file-not-in-note');
+  }, budget);
+
   it('keeps the original multi-session mark until its four-hour limit', () => {
     const epoch = 1_800_000_000;
     writeFakeExecutable(path.join(bin, 'date'), `#!/bin/bash
@@ -394,7 +520,14 @@ if [ "$1" = +%s ]; then echo "$TEST_EPOCH"; else exec /bin/date "$@"; fi
     env = { ...env, TEST_EPOCH: String(epoch + 14_399) };
     runQueue(ONE_SESSION);
     expect(fs.readFileSync(note, 'utf8').split('\n')[0]).toContain(` multi: ${epoch} -->`);
+    const context = startContext();
+    expect(context.split('\n')[0]).toContain('more than one session');
+    expect(context).toContain('Confirm the task with the user. Use one worktree for each parallel session.');
+    expect(context).not.toContain(String(epoch));
+    expect(context).not.toContain(A);
+    expect(context).not.toContain(B);
     env = { ...env, TEST_EPOCH: String(epoch + 14_400) };
+    expect(startContext()).not.toContain('more than one session');
     runQueue(ONE_SESSION);
     expect(fs.readFileSync(note, 'utf8').split('\n')[0]).not.toContain(' multi: ');
   }, budget);

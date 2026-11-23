@@ -2280,7 +2280,7 @@ describe('S22: pre-compact bootstrap stamp and canonical sections (B2)', () => {
     expect(ctx).not.toContain('synced @ unknown');
   });
 
-  it('git repo + no existing WORKING-MEMORY.md: bootstrap includes all 5 canonical sections', () => {
+  it('git repo + no existing WORKING-MEMORY.md: bootstrap has only Now and Progress', () => {
     initGitRepo(projectDir);
     const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
 
@@ -2289,10 +2289,7 @@ describe('S22: pre-compact bootstrap stamp and canonical sections (B2)', () => {
     const content = fs.readFileSync(memFile, 'utf-8');
     expect(content).toContain('## Now');
     expect(content).toContain('## Progress');
-    expect(content).toContain('## Decisions');
-    expect(content).toContain('## Context');
-    expect(content).toContain('## Session Log');
-    // The old ## Modified Files section must not appear
+    expect(content).not.toMatch(/^## (Decisions|Context|Session Log)$/m);
     expect(content).not.toContain('## Modified Files');
   });
 
