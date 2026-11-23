@@ -92,7 +92,8 @@ This area is large, so it is split into a hub (this file) and five focused KBs:
 | `.devflow/features/curation-capture-system-agent/KNOWLEDGE.md` | The Curate agent, the owned queue claim and heartbeat, the `session-start-context` directives (maintenance, tracker setup), the `devflow curation` CLI, the TS seam and HUD counts |
 | `.devflow/features/curation-capture-system-delivery/KNOWLEDGE.md` | How decisions reach agents (`DECISIONS_CONTEXT`, the defines, the pass rule), the curation-on and curation-off prompt variants and the converge |
 | `.devflow/features/curation-capture-system-links/KNOWLEDGE.md` | The rule that nothing writes, renames or reads through a symbolic link under a project's `.devflow/`, and the safe-create and mode rules |
-| `.devflow/features/curation-capture-system-memory-worker/KNOWLEDGE.md` | The memory worker, its model, effort and argv, the pre-compact backup and the jq-less JSON fallback |
+| `.devflow/features/curation-capture-system-memory-worker/KNOWLEDGE.md` | The memory worker, its model, effort and argv, the note cap and session pairing |
+| `.devflow/features/curation-capture-system-memory-backup-json/KNOWLEDGE.md` | The pre-compact backup and the jq-less JSON fallback |
 
 This hub holds what they share: the data files and the naming boundary, the machine feature switches, roots, the capture hooks and queues, hook ownership and logs, the bounds, and the table of D-series names with the KB that records each.
 
@@ -212,7 +213,7 @@ Every loop and read has a bound, each a named constant: in the store those its K
 | D-DECISIONS-LEARNING-GATE | a decisions load skips on `CURATION=off` before it locates or reads | `decisions_gate()` (`_decisions.mds`) | delivery |
 | D-DECISIONS-DECLARED-ONLY | the index goes only to agents whose contract declares it | `decisions_load()` step 2 (`_decisions.mds`), `tests/decisions/decisions-seam.test.ts` | delivery |
 | D-DECISIONS-CHARTER-HANDOFF | the pass rule lives in the session-start decisions block | `DECISIONS_PASS_RULE` (`session-start-context`) | delivery |
-| D-BACKUP-RENAME | the pre-compact backup is replaced by a rename, never rewritten in place | `pre-compact-memory` | memory-worker |
+| D-BACKUP-RENAME | the pre-compact backup is replaced by a rename, never rewritten in place | `pre-compact-memory` | memory-backup-json |
 | D-MEMORY-WORKER-LEAN, D-QUEUE-NO-ORPHAN-DELETE | the memory worker's argv and probe; an orphan queue is left in place | `background-memory-update` | memory-worker |
 | D-FEATURES-NARROW-ONLY, D-GATES-FAST-PATH, D-FEATURES-ABSENT-ON | machine switch, narrowing, fast paths | `isMachineFeatureOn`, `queue_read_gates`, `resolve-settings.cjs` | hub |
 

@@ -98,7 +98,8 @@ Three kinds of read do follow a link: the hooks' bounded pre-reads of `project.j
 
 - `.devflow/features/curation-capture-system/KNOWLEDGE.md`: the hub: the capture hooks that call these helpers and the table of D-series names.
 - `.devflow/features/curation-capture-system-store/KNOWLEDGE.md`: `withDecisionsLock`, `readJsonl` and the lock the writers share.
-- `.devflow/features/curation-capture-system-memory-worker/KNOWLEDGE.md`: the memory pipeline's own link refusals and the backup's safe create.
+- `.devflow/features/curation-capture-system-memory-worker/KNOWLEDGE.md`: the memory pipeline's own link refusals.
+- `.devflow/features/curation-capture-system-memory-backup-json/KNOWLEDGE.md`: the backup's safe create.
 - `.devflow/features/ambient-orchestrator/KNOWLEDGE.md`: the `git-marker` basics (`df_has_git_marker`, `df_is_project_root`); the link helpers beside them are recorded here.
 - `.devflow/features/installer-shadowing/KNOWLEDGE.md`: managed config writes, queue drains at init, and the carve-out block and its TS twin, whose root `.gitignore` link rule is recorded here.
 - `docs/reference/hooks.md`: the hooks' rule against writing through a symbolic link under `.devflow/` or reading through one into the session.
