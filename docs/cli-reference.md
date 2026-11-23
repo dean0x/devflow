@@ -388,7 +388,7 @@ npx devflow-kit hud --no-forecast    # Hide the Claude week forecast
 
 `--status` reports the forecast choice. It applies no changes, even with other flags. You can combine a detail flag and a forecast flag with `--enable` or `--disable`.
 
-**Claude week forecast.** The forecast is off by default. `devflow init` keeps your choice. When the HUD and the forecast are on, dim text after `7d` shows the estimated quota use at reset. If the rounded estimate exceeds 999%, the HUD shows `>999%`. If the quota will run out by reset, the HUD also shows how long it will last. At 100% used, the HUD omits the countdown.
+**Claude week forecast.** The forecast is off by default. Devflow saves your choice in the `forecast` field of `~/.devflow/hud.json`. `devflow init` keeps your choice. When the HUD and forecast are on, the `weekForecast` component shows estimated quota use at reset in dim text after `7d`. If the rounded estimate exceeds 999%, the HUD shows `>999%`. If the quota will run out by reset, the HUD also shows how long it will last. At 100% used, the HUD omits the countdown.
 
 The HUD uses the same formula as the tokenmeter forecast, but it needs no tokenmeter data. The forecast starts no process and reads no extra file. The HUD uses `rate_limits.seven_day` from the current Claude Code session's JSON on stdin. It treats the value as current at each update.
 

@@ -88,7 +88,7 @@ Context ████░░░░ 42% · 5h ████░░░░ 45% (2h 15m)
 Opus 4.6 (1M) · 3 MCPs 2 rules · $1.42 · $18.50/wk · $62.30/mo
 ```
 
-**Claude week forecast, opt-in.** The forecast is off by default. Run `devflow hud --forecast` to show the estimated quota use at reset next to `7d`. Run `devflow hud --no-forecast` to turn it off. Run `devflow hud --status` to see your choice. `devflow init` keeps that choice.
+**Claude week forecast, opt-in.** The forecast is off by default. Run `devflow hud --forecast` to show the estimated quota use at reset next to `7d`. Run `devflow hud --no-forecast` to turn it off. Run `devflow hud --status` to see your choice. Devflow saves your choice in the `forecast` field of `~/.devflow/hud.json`. `devflow init` keeps that choice. When the HUD and the forecast are on, the HUD adds the `weekForecast` component.
 
 The HUD uses the same formula as the tokenmeter forecast, but it needs no tokenmeter data. It uses the current session's `rate_limits.seven_day` from Claude Code on stdin. The HUD treats that value as current at each update. It omits the forecast if the week data is absent or invalid. It also omits the forecast for about the first five hours of the quota week.
 
