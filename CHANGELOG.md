@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [3.20.0] - 2026-11-23
+
 ### Added
 
 - A local test plan can specify ` [expect-exit: <k>]` (1 to 125) for a planned failure. A local PASS needs the expected exit, which defaults to 0. A file claim applies only if its saved expected exit matches the test plan. Old claim lines without `expect-exit:` parse with expected exit 0 and apply only to TPs without clauses; with clauses, they give UNVERIFIED, not FAILED.
@@ -2602,6 +2606,7 @@ devflow init
 ---
 
 [Unreleased]: https://github.com/dean0x/devflow/compare/v3.8.0...HEAD
+[3.20.0]: https://github.com/dean0x/devflow/compare/v3.19.3...v3.20.0
 [3.19.3]: https://github.com/dean0x/devflow/compare/v3.19.2...v3.19.3
 [3.19.2]: https://github.com/dean0x/devflow/compare/v3.19.1...v3.19.2
 [3.19.1]: https://github.com/dean0x/devflow/compare/v3.19.0...v3.19.1
