@@ -1,17 +1,19 @@
 # Release Process
 
-One-click releases via GitHub Actions. The developer chooses the version; CI handles everything else.
+A release PR sets the version and the CHANGELOG. After it merges, a `vX.Y.Z` tag push on the merged commit starts `.github/workflows/release.yml`. The workflow publishes to npm through npm trusted publishing, with provenance, and creates the GitHub release. No workflow uses a stored npm token or a personal GitHub token.
 
 ## Prerequisites (One-Time Setup)
 
-1. **Create npm access token** — npmjs.com → Access Tokens → Granular Access Token
-   - Package: `devflow-kit` only
-   - Permissions: Read and Write
-   - Expiration: No expiration (recommended for CI)
+1. **npm trusted publisher** — on npmjs.com, open `devflow-kit` → Settings → Trusted publishing, and set:
+   - Provider: GitHub Actions
+   - Organization or user: `dean0x`
+   - Repository: `devflow`
+   - Workflow filename: `release.yml`
+   - Environment: empty (the jobs use no GitHub environment)
 
-2. **Add GitHub secret** — Repo Settings → Secrets → Actions → `NPM_TOKEN`
+2. **npm publishing access** — after the first trusted publish, set the package publishing access to "Require two-factor authentication and disallow tokens". Revoke each old npm token that can publish `devflow-kit`.
 
-3. **Allow CI to push to main** — Repo Settings → Rules → Rulesets → add "GitHub Actions" to bypass actors
+The npm publish signs in with the workflow identity (OIDC). It needs npm 11.5.1 or newer, so the publish step runs a pinned npm 11 through `npx`. `tests/release-workflow.test.ts` keeps every workflow free of stored tokens and secrets, and keeps each action pinned to a full commit SHA.
 
 ## During Development
 
@@ -39,31 +41,44 @@ An install moves a file that devflow did not ship out of the devflow install fol
 
 ## Creating a Release
 
-1. Go to **GitHub Actions** → **Release** workflow
-2. Click **Run workflow**
-3. Enter version (e.g., `1.3.0`) — strict semver, no `v` prefix
-4. Click **Run workflow**
+1. On a branch from main, run `npm run version:bump -- 1.3.0` (strict semver, no `v` prefix). The script:
+   - sets the version in `package.json` and `package-lock.json`;
+   - renames `## [Unreleased]` to `## [1.3.0] - <date>` and adds the compare link;
+   - adds a new empty `## [Unreleased]` section above the new version;
+   - prints the release notes.
+2. Open a release PR with the title `chore(release): v1.3.0`, and merge it after CI passes.
+3. Tag the merged commit on main, and push the tag:
 
-Done. npm package, git tag, and GitHub release are all created automatically.
+   ```bash
+   git fetch origin main
+   git tag -a v1.3.0 -m "Version 1.3.0" origin/main
+   git push origin v1.3.0
+   ```
+
+The tag push starts the Release workflow. It publishes the npm package and creates the GitHub release.
 
 ## What CI Does
 
+The tag push starts three jobs. Each job sets only the permissions that it needs.
+
 ```
-validate version format
-  → check tag doesn't exist
-  → check [Unreleased] section exists
-  → bump version in package.json + CHANGELOG.md
-  → sync package-lock.json
-  → build
-  → test
-  → verify CLI --version output
-  → commit "chore: bump version to X.Y.Z"
-  → push to main
-  → create + push git tag vX.Y.Z
-  → npm publish --provenance
-  → create GitHub release with extracted notes
-  → restore [Unreleased] section + commit + push
+verify (contents: read)
+  → tag is vX.Y.Z or vX.Y.Z-pre.N
+  → tagged commit is on main
+  → tag version equals package.json
+  → package-lock.json version equals package.json
+  → CHANGELOG.md has the ## [X.Y.Z] - <date> section
+  → build, npm test, npm run test:integration
+  → node dist/cli.js --version equals the tag version
+publish (contents: read, id-token: write), after verify
+  → npm ci --ignore-scripts, no npm cache, no registry-url
+  → npx -y npm@11.x publish --provenance --access public --tag <dist-tag>
+github-release (contents: write), after publish
+  → extract the release notes from CHANGELOG.md (bump-version.ts on the set version changes no file)
+  → gh release create vX.Y.Z with the workflow token
 ```
+
+A release version publishes to the `latest` dist-tag. A pre-release version publishes to its first pre-release word: `2.0.0-beta.1` goes to `beta`. A pre-release word that is not a name, such as `2.0.0-1`, goes to `next`. A tag with a `-` makes a GitHub pre-release.
 
 ## Traceability Evidence (Evidence Policy)
 
@@ -95,7 +110,7 @@ The tag push and the release create are hard failures. The commit list, back-lin
 
 ## Out of Scope
 
-- **CI releases bypass `/release`.** The `workflow_dispatch` release above runs in GitHub Actions, not through `/release`, so it gathers no evidence, asks nothing about untraced commits, and posts no back-links or release markers. Run `/release --dry-run` first when a release needs its trace.
+- **CI releases bypass `/release`.** The tag-push release above runs in GitHub Actions, not through `/release`, so it gathers no evidence, asks nothing about untraced commits, and posts no back-links or release markers. Run `/release --dry-run` first when a release needs its trace.
 - **No server-side enforcement.** Every evidence gate runs inside the devflow commands on the machine running them. Nothing in CI or branch protection checks the evidence policy, a test plan or a trace map: a PR opened or a release cut without devflow meets no gate.
 - **No auto-merge.** Devflow never merges a PR. `check-merge-readiness` only reports READY or NOT_READY.
 
@@ -108,61 +123,35 @@ Documented, not closed:
 
 ## Manual Fallback
 
-If CI is unavailable, release manually:
+If the Release workflow is not available, publish from a maintainer machine. Use this only after the release PR merged and the tag is pushed. A manual publish has no provenance, and it needs an npm sign-in with two-factor authentication.
 
 ```bash
-# 1. Bump all version files
-npm run version:bump -- 1.3.0 > release-notes.md
-
-# 2. Build and test
-npm run build && npm test
-
-# 3. Commit and push
-git add -A
-git commit -m "chore: bump version to 1.3.0"
-git push origin main
-
-# 4. Tag
-git tag -a v1.3.0 -m "Version 1.3.0"
-git push origin v1.3.0
-
-# 5. Publish
-npm publish
-
-# 6. GitHub release
-gh release create v1.3.0 --title "v1.3.0" --notes-file release-notes.md
-
-# 7. Restore [Unreleased]
-# Add back the [Unreleased] section above the new version in CHANGELOG.md
-git add CHANGELOG.md
-git commit -m "chore: restore [Unreleased] section"
-git push origin main
+git fetch origin && git checkout v1.3.0
+npm ci && npm run build && npm test
+npm publish --tag latest
+npm run version:bump -- 1.3.0 > "$TMPDIR/release-notes.md"   # changes no file on the set version
+gh release create v1.3.0 --verify-tag --title "v1.3.0" --notes-file "$TMPDIR/release-notes.md"
 ```
 
 ## Troubleshooting
 
 | Issue | Fix |
 |-------|-----|
-| "Tag already exists" | Tag was created but release failed. Delete tag: `git push --delete origin v1.3.0 && git tag -d v1.3.0`, then re-run. |
-| "No [Unreleased] section" | CHANGELOG.md is missing the `## [Unreleased]` header. Add it manually above the latest version. |
-| npm publish fails (401) | `NPM_TOKEN` secret expired or missing. Generate a new token and update the secret. |
-| npm publish fails (403) | Token doesn't have write access to `devflow-kit`. Regenerate with correct package scope. |
-| CLI version mismatch | Build output doesn't match expected version. Check that `package.json` was updated correctly. |
-| Push to main rejected | GitHub Actions bot not in ruleset bypass list. Update branch protection rules. |
+| Tag does not match package.json | The tag is on a commit that has a different version. Delete the tag (`git push --delete origin v1.3.0 && git tag -d v1.3.0`), then tag the merged release commit. |
+| Tagged commit is not on main | Tag only a commit on main, after the release PR merged. |
+| package-lock.json does not match | Run `npm install --package-lock-only` in the release PR. |
+| No `## [X.Y.Z] - <date>` section | Run `npm run version:bump -- X.Y.Z` in the release PR. |
+| npm publish fails (404 or 403) | Check the trusted publisher on npmjs.com: user `dean0x`, repository `devflow`, workflow `release.yml`, no environment. |
+| npm publish fails: version exists | The version is on npm already. Re-run only the failed `github-release` job, or release a new version. |
+| CLI version mismatch | The build output does not match the tag version. Check `package.json` in the release PR. |
+| GitHub release step fails | Re-run the failed `github-release` job. It does not publish again. |
 
 ## Release Checklist
 
-Items marked with **[auto]** are handled by CI:
-
-- [ ] CHANGELOG.md `[Unreleased]` section has content
-- [x] **[auto]** Version bumped in package.json
-- [x] **[auto]** package-lock.json synced
-- [x] **[auto]** CHANGELOG.md dated and linked
-- [x] **[auto]** Build succeeds
-- [x] **[auto]** Tests pass
-- [x] **[auto]** CLI `--version` matches
-- [x] **[auto]** Committed and pushed to main
-- [x] **[auto]** Git tag created
-- [x] **[auto]** Published to npm with provenance
-- [x] **[auto]** GitHub release created
-- [x] **[auto]** `[Unreleased]` section restored
+- [ ] The release PR moves the `[Unreleased]` content to `## [X.Y.Z] - <date>`, with a new empty `[Unreleased]` above it
+- [ ] The release PR sets the version in `package.json` and `package-lock.json`
+- [ ] CI passes on the release PR, and the PR merges
+- [ ] The `vX.Y.Z` tag is on the merged commit on main, and is pushed
+- [x] **[auto]** The tag, the lock file, the CHANGELOG section, the build, the tests and the CLI `--version` pass
+- [x] **[auto]** npm publish with provenance, to the dist-tag of the version
+- [x] **[auto]** GitHub release with the CHANGELOG notes

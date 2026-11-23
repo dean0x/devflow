@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Routing runtime pinned to `0.9.0`** — before: `0.8.0`. With this runtime, the Devflow proxy uses the separate-session start on macOS and Linux. The Devflow proxy model catalog does not change.
 
+- **Releases publish from a version tag.** A release PR sets the version and the CHANGELOG. A `vX.Y.Z` tag push on main then publishes `devflow-kit` to npm through npm trusted publishing, with provenance, and creates the GitHub release. `scripts/bump-version.ts` now also adds a new empty `[Unreleased]` section.
+
 ### Removed
 
 - The Devflow proxy quota snapshot reader in the HUD.
