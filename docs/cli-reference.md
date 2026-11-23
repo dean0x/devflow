@@ -388,12 +388,12 @@ The HUD shows the weekly Codex quota next to the Claude quota. It also shows the
 
 The command returns the latest saved data. It does not wait for Codex. A refresh is due at 60 seconds. tokenmeter checks recent Codex session logs in the background. It uses the newest data from the logs or the app server.
 
-By default, tokenmeter can start `codex app-server` at most about once per minute per data folder. Codex can then use its stored sign-in to request the limits from OpenAI over HTTP.
+By default, tokenmeter can start `codex app-server` at most about once per minute per data folder. Codex can then use its stored sign-in to request the limits and the account token usage from OpenAI over HTTP.
 
-To stop the app server and keep the log source, run:
+To stop the app server and the account usage request, and keep the log source, run:
 
 ```bash
-npx @dean0x/tokenmeter@0.2.0 config app_server off
+npx @dean0x/tokenmeter@0.3.0 config app_server off
 ```
 
 A window past its reset time shows `reset`. A reading at least 10 minutes old shows its age, for example `· data 10m old`. If tokenmeter cannot find Codex on `PATH`, log data at least 10 minutes old does not show. If neither source has data, the HUD omits the Codex segment. The Claude quota stays visible when available.
