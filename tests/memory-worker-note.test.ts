@@ -772,7 +772,8 @@ if [ "$1" = +%s ]; then echo "$TEST_EPOCH"; else exec /bin/date "$@"; fi
     expect(fs.readFileSync(note, 'utf8').split('\n')[0]).toContain(` multi: ${epoch} -->`);
     const context = startContext();
     expect(context.split('\n')[0]).toContain('more than one session');
-    expect(context).toContain('Confirm the task with the user. Use one worktree for each parallel session.');
+    expect(context).toContain('This note holds work from more than one session. Check that it fits your task. Parallel sessions: use one worktree for each.');
+    expect(context).not.toContain('Confirm the task with the user');
     expect(context).not.toContain(String(epoch));
     expect(context).not.toContain(A);
     expect(context).not.toContain(B);

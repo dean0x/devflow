@@ -266,7 +266,7 @@ render_memory_context() {
   MULTI_ADVICE=""
   if [ -n "$STAMP_MULTI" ] && [ -n "$(memory_multi_epoch_from_line "$FIRST_LINE" "$NOW")" ]; then
     MULTI_LABEL="; more than one session"
-    MULTI_ADVICE='Confirm the task with the user. Use one worktree for each parallel session.
+    MULTI_ADVICE='This note holds work from more than one session. Check that it fits your task. Parallel sessions: use one worktree for each.
 '
   fi
 
