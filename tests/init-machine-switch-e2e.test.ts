@@ -329,8 +329,9 @@ describe('devflow memory|curation|knowledge --enable/--disable are machine-wide'
   }, MULTI_RUN_TIMEOUT_MS);
 
   it('a fresh recommended install records memory off and registers no memory hooks', async () => {
-    runInit(repoA, '--recommended');
+    const out = runInit(repoA, '--recommended');
 
+    expect(out).toMatch(/Working memory:\s+disabled \(turn on: devflow memory --enable\)/);
     expect(await readManifestFeatures()).toMatchObject({ memory: false });
     expect(countMemoryHooks(await readSettings())).toBe(0);
   }, MULTI_RUN_TIMEOUT_MS);

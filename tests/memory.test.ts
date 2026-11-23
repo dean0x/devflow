@@ -5,7 +5,15 @@ import * as os from 'os';
 import { exec, execFileSync } from 'child_process';
 import { addMemoryHooks, removeMemoryHooks, hasMemoryHooks, countMemoryHooks, convergeMemoryHooks, cleanQueueFiles, CLEAN_QUEUE_POOL_LIMIT, hasMemoryDir, filterProjectsWithMemory, MEMORY_MIN_PERMISSION_VERSION, workingMemoryNote } from '../src/cli/commands/memory.js';
 import { probeTrackedArea } from '../src/core/tracked-areas.js';
-import { createSandbox, removeSandbox, runCli } from './install-snapshot-helpers.js';
+import * as prompts from '@clack/prompts';
+import { initCommand } from '../src/cli/commands/init.js';
+
+vi.mock(import('@clack/prompts'), async (importOriginal) => ({
+  ...await importOriginal(),
+  confirm: vi.fn(),
+  intro: vi.fn(),
+  note: vi.fn(),
+}));
 
 // A pass-through spy: every test below runs the real probe unless it swaps one in.
 vi.mock('../src/core/tracked-areas.js', async (importOriginal) => {
@@ -994,24 +1002,24 @@ describe('the memory worker version floor', () => {
 });
 
 describe('the init copy for working memory', () => {
-  it('tells users how to turn memory on after a fresh install', () => {
-    const sandbox = createSandbox();
+  it('asks whether to enable memory without a recommendation', async () => {
+    const stop = new Error('Stop at the first confirmation');
+    const confirm = vi.mocked(prompts.confirm).mockRejectedValueOnce(stop);
+    const stdin = process.stdin;
+    const isTTY = Object.getOwnPropertyDescriptor(stdin, 'isTTY');
+    Object.defineProperty(stdin, 'isTTY', { value: true, configurable: true });
     try {
-      const result = runCli(sandbox, ['init', '--recommended']);
-      expect(result.status, result.output).toBe(0);
-      expect(result.output).toMatch(/Working memory:\s+disabled \(turn on: devflow memory --enable\)/);
+      await initCommand.parseAsync(['--advanced', '--plugin', 'devflow-implement', '--no-ambient'], { from: 'user' })
+        .catch((error: unknown) => { if (error !== stop) throw error; });
+      expect(confirm).toHaveBeenCalledWith({ message: 'Enable working memory?', initialValue: false });
     } finally {
-      removeSandbox(sandbox);
+      if (isTTY) Object.defineProperty(stdin, 'isTTY', isTTY);
+      else Reflect.deleteProperty(stdin, 'isTTY');
     }
   });
 
-  it('asks whether to enable memory without a recommendation', async () => {
-    const init = await fs.readFile(path.resolve(__dirname, '../src/cli/commands/init.ts'), 'utf-8');
-    expect(init.includes("message: 'Enable working memory?',"), 'the prompt asks only whether to enable memory').toBe(true);
-  });
-
-  it('states the note cap and gives advice for parallel sessions', () => {
-    expect(workingMemoryNote()).toContain('8 KB (8,192 bytes). Use one worktree for each parallel session.');
+  it('advises one worktree for each parallel session', () => {
+    expect(workingMemoryNote()).toContain('Use one worktree for each parallel session.');
   });
 
   it('states the same note cap as the shell helper (TP-50)', async () => {

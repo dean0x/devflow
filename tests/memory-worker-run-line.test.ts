@@ -17,11 +17,14 @@ import { spawn, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { resolveOnPath } from './shell-hooks-helpers.js';
+import { useWarmFakeExecutables } from './helpers/warm-fake-executable.js';
+import { HOOK_RUN_ALLOWANCE_MS, NODE_EXEC_STALL_MS, resolveOnPath } from './shell-hooks-helpers.js';
 import { isolatedEnv } from './setup/home-isolation.js';
 
 const WORKER = path.resolve(__dirname, '../src/assets/scripts/hooks/background-memory-update');
 const STRESS = process.env.DEVFLOW_RUN_LINE_STRESS === '1';
+const RUN_BUDGET = HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS;
+const writeFakeExecutable = useWarmFakeExecutables();
 
 /** Lines of the worker that run code: comment lines are dropped. */
 function workerCodeLines(): string[] {
@@ -168,7 +171,7 @@ describe('the memory worker writes one Run line per run', () => {
       fs.writeFileSync(note, priorNote);
       fs.writeFileSync(fixture, `<!-- memory-head: (set by devflow) -->\n${body}\n`);
       if (failLineCount) {
-        fs.writeFileSync(path.join(shim, 'wc'), '#!/bin/bash\nif [ "$1" = -l ]; then exit 1; fi\nexec /usr/bin/wc "$@"\n', { mode: 0o755 });
+        writeFakeExecutable(path.join(shim, 'wc'), '#!/bin/bash\nif [ "$1" = -l ]; then exit 1; fi\nexec /usr/bin/wc "$@"\n');
       }
       const ts = Math.floor(Date.now() / 1000);
       fs.writeFileSync(
@@ -179,7 +182,7 @@ describe('the memory worker writes one Run line per run', () => {
         fs.mkdirSync(path.join(staged, 'a', 'b'), { recursive: true });
         fs.writeFileSync(path.join(staged, 'inside'), 'x');
       }
-      fs.writeFileSync(
+      writeFakeExecutable(
         path.join(shim, 'claude'),
         [
           '#!/bin/bash',
@@ -189,7 +192,6 @@ describe('the memory worker writes one Run line per run', () => {
           'exit 0',
           '',
         ].join('\n'),
-        { mode: 0o755 },
       );
       const runPath = `${shim}:${process.env.PATH ?? '/usr/bin:/bin'}`;
       expect(resolveOnPath('claude', runPath), 'the fake claude resolves first on PATH').toBe(path.join(shim, 'claude'));
@@ -220,7 +222,7 @@ describe('the memory worker writes one Run line per run', () => {
       note: priorNote,
       batchKept: true,
     });
-  });
+  }, RUN_BUDGET);
 
   it('keeps the batch and skips the model when it cannot count the rows', async () => {
     expect(await runOnce(false, '## Now', true)).toEqual({
@@ -228,7 +230,7 @@ describe('the memory worker writes one Run line per run', () => {
       note: priorNote,
       batchKept: true,
     });
-  });
+  }, RUN_BUDGET);
 
   it.skipIf(!STRESS)('writes the expected single Run line in each of many workers that run at once', async () => {
     const total = 64;
