@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The HUD can show a Claude week quota forecast from the current session's data. The forecast is off by default and needs no tokenmeter data. Run `devflow hud --forecast` to turn it on. Run `devflow hud --no-forecast` to turn it off.
+
+### Fixed
+
+- The `hud` command applies detail and forecast changes if you also give `--enable` or `--disable`.
+
 ---
 
 ## [3.20.0] - 2026-11-23
