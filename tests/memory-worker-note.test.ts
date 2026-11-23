@@ -27,6 +27,8 @@ const NOTE_CAP = 8192;
 const PLACEHOLDER = '<!-- memory-head: (set by devflow) -->';
 const BODY = '## Now\nTest note\n## Progress\n';
 const OLD_NOTE = '## Now\nPrior note\n## Progress\n';
+const QUEUE = '.pending-turns.jsonl';
+const QUEUE_LOCK = `${QUEUE}.lock`;
 const BATCH = '.pending-turns.processing';
 const SWAP = '.WORKING-MEMORY.md.swap';
 const ONCE = '.worker-note-once';
@@ -98,7 +100,7 @@ ${afterWrite}
     expect(resolveOnPath('claude', PATH)).toBe(path.join(bin, 'claude'));
     if (backend === 'jq') expect(resolveOnPath('jq', PATH)).toBeDefined();
     else expect(resolveOnPath('jq', PATH)).toBeUndefined();
-    if (rows) fs.writeFileSync(path.join(memoryDir, '.pending-turns.jsonl'), rows.join('\n') + '\n');
+    if (rows) fs.writeFileSync(path.join(memoryDir, QUEUE), rows.join('\n') + '\n');
     fs.rmSync(promptFile, { force: true });
 
     execFileSync('/bin/bash', [WORKER, project], {
@@ -118,6 +120,71 @@ ${afterWrite}
   }
 
   const budget = HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS;
+
+  it('keeps a queue that a trim holds, then claims it once after the trim', () => {
+    const queue = path.join(memoryDir, QUEUE);
+    const lock = path.join(memoryDir, QUEUE_LOCK);
+    const trimCopy = `${queue}.tmp`;
+    const rows = Array.from({ length: 201 }, (_, index) => row('assistant', `Reply ${index}`, A));
+    const original = rows.join('\n') + '\n';
+    // Pause the trim after it prepares the copy and before it replaces the queue.
+    fs.mkdirSync(lock);
+    fs.writeFileSync(trimCopy, rows.slice(-100).join('\n') + '\n', { mode: 0o600 });
+    const { prompt, log } = runWorker(rows);
+    expect(prompt).toBe('');
+    expect(log.match(/SKIP: queue lock unavailable/g)).toHaveLength(1);
+    expect(log.match(/Run: .*/g)).toEqual([expect.stringContaining('argv=none result=skip')]);
+    expect(fs.existsSync(path.join(memoryDir, BATCH))).toBe(false);
+    expect(fs.existsSync(lock)).toBe(true);
+    expect(fs.existsSync(queue)).toBe(true);
+    expect(fs.readFileSync(queue, 'utf8')).toBe(original);
+
+    fs.renameSync(trimCopy, queue);
+    fs.rmdirSync(lock);
+    expect(runWorker().prompt).toContain('Assistant: Reply 200');
+    expect(fs.existsSync(queue)).toBe(false);
+    expect(fs.existsSync(lock)).toBe(false);
+  }, budget);
+
+  it('releases the queue lock when the claim move fails', () => {
+    writeFakeExecutable(path.join(bin, 'mv'), `#!/bin/bash
+if [ "$1" = "$TEST_MEMORY/${QUEUE}" ] && [ -d "$TEST_MEMORY/${QUEUE_LOCK}" ]; then exit 1; fi
+exec /bin/mv "$@"
+`);
+    const { prompt, log } = runWorker(ONE_SESSION);
+    expect(prompt).toBe('');
+    expect(log).toContain('SKIP: failed to claim queue');
+    expect(fs.existsSync(path.join(memoryDir, QUEUE))).toBe(true);
+    expect(fs.existsSync(path.join(memoryDir, BATCH))).toBe(false);
+    expect(fs.existsSync(path.join(memoryDir, QUEUE_LOCK))).toBe(false);
+  }, budget);
+
+  it('holds the queue lock for the merge and releases it before the batch trim', () => {
+    const rows = Array.from({ length: 200 }, (_, index) => row('assistant', `Prior reply ${index}`, A));
+    fs.writeFileSync(path.join(memoryDir, BATCH), rows.join('\n') + '\n', { mode: 0o600 });
+    writeFakeExecutable(path.join(bin, 'cat'), `#!/bin/bash
+if [ "$1" = "$TEST_MEMORY/${QUEUE}" ] && [ ! -d "$TEST_MEMORY/${QUEUE_LOCK}" ]; then exit 1; fi
+exec /bin/cat "$@"
+`);
+    writeFakeExecutable(path.join(bin, 'tail'), `#!/bin/bash
+if [ "$1" = -100 ] && [ -d "$TEST_MEMORY/${QUEUE_LOCK}" ]; then exit 1; fi
+exec /usr/bin/tail "$@"
+`);
+    const { prompt, log } = runWorker(ONE_SESSION);
+    expect(log).toContain('Processing overflow: truncated from 201 to 100 lines');
+    expect(prompt).toMatch(/^Assistant: Reply$/m);
+    expect(fs.existsSync(path.join(memoryDir, QUEUE))).toBe(false);
+  }, budget);
+
+  it('leaves the queue in place when the lock path is a symbolic link', () => {
+    const target = path.join(root, 'lock-target');
+    fs.mkdirSync(target);
+    fs.symlinkSync(target, path.join(memoryDir, QUEUE_LOCK));
+    const { prompt, log } = runWorker(ONE_SESSION);
+    expect(prompt).toBe('');
+    expect(log).toContain('a symbolic link sits on the path to the memory files');
+    expect(fs.existsSync(path.join(memoryDir, QUEUE))).toBe(true);
+  }, budget);
 
   it('pairs only matching sessions and keeps the current prompt across a different reply and a question', () => {
     const { turns, prompt, log } = runQueue([

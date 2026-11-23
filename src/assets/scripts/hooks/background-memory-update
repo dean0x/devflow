@@ -65,6 +65,7 @@ source "$SCRIPT_DIR/hook-log-init" "background-memory-update" \
 
 # Source get-mtime for mtime comparisons
 source "$SCRIPT_DIR/get-mtime" || { echo "background-memory-update: failed to source get-mtime" >&2; exit 1; }
+source "$SCRIPT_DIR/curation-lock" || { echo "background-memory-update: failed to source curation-lock" >&2; exit 1; }
 source "$SCRIPT_DIR/is-hex-sha" || { echo "background-memory-update: failed to source is-hex-sha" >&2; exit 1; }
 
 log "Starting (CWD=$CWD)"
@@ -74,8 +75,8 @@ log "Starting (CWD=$CWD)"
 # worker removed from the staged path. The exit trap writes it, so each way out of the
 # script has one. The fields start as "no CLI read, no run" and the steps below fill them
 # in; each is a keyword or digits, never text from the CLI, the queue or the prompt. The
-# trap also removes RESULT_FILE (the captured JSON result, set at the spawn below) and,
-# once this run holds it, the worker lock.
+# trap also removes RESULT_FILE (the captured JSON result, set at the spawn below) and
+# releases the locks this run holds.
 RUN_CLI="unknown"    # X.Y.Z once the version probe has read one
 RUN_ARGV="none"      # lean or legacy, set where the run is spawned
 RUN_RESULT="skip"    # updated, conflict, failed, skip or below-floor
@@ -84,6 +85,7 @@ RUN_REMOVED="none"   # dir or link when a folder or a link was removed from the 
 RUN_FLOOR=""         # the version floor, named on a below-floor line only
 RESULT_FILE=""
 LOCK_HELD="false"
+QUEUE_LOCK_HELD="false"
 # Sets OWN_PID to a value that is the worker's own PID in the worker's shell and differs in
 # every subshell. It is BASHPID when that is set (bash 4 and later, no fork). Otherwise it is
 # the PID that a child, which execs sh, reports as its parent: that parent is this shell, and
@@ -109,6 +111,7 @@ finish_run() {
   # and the PID check returns there: it writes no Run line and releases no lock.
   own_pid
   [ "$OWN_PID" = "$WORKER_PID" ] || return 0
+  if [ "$QUEUE_LOCK_HELD" = "true" ]; then curation_lock_release "$QUEUE_LOCK_DIR"; fi
   local _floor=""
   if [ -n "$RUN_FLOOR" ]; then _floor=" floor=${RUN_FLOOR}"; fi
   log "Run: cli=${RUN_CLI} argv=${RUN_ARGV} result=${RUN_RESULT} denials=${RUN_DENIALS} removed=${RUN_REMOVED}${_floor}"
@@ -257,7 +260,8 @@ fi
 # these paths or a folder above them is a link.
 SWAP_FILE="$MEMORY_DIR/.WORKING-MEMORY.md.swap"
 SWAP_CLEANUP="false"
-if ! df_no_symlink_below "$PROJECT_ROOT" "$LOCK_DIR" "$QUEUE_FILE" "$PROCESSING_FILE" "$OK_FILE" "$MEMORY_FILE"; then
+QUEUE_LOCK_DIR="${QUEUE_FILE}.lock"
+if ! df_no_symlink_below "$PROJECT_ROOT" "$LOCK_DIR" "$QUEUE_LOCK_DIR" "$QUEUE_FILE" "$PROCESSING_FILE" "$OK_FILE" "$MEMORY_FILE"; then
   log "SKIP: a symbolic link sits on the path to the memory files in $MEMORY_DIR; nothing written"
   exit 0
 fi
@@ -551,9 +555,17 @@ ends_without_newline() {
 }
 
 # --- Claim queue atomically (D56c contract: .pending-turns.processing recovered at SessionStart) ---
-# If a leftover .processing exists from a previous crash, merge new queue entries into it.
+# Use the same lock as the queue trim. Release it before work on the claimed batch.
+if ! curation_lock_acquire "$QUEUE_LOCK_DIR" 2; then
+  log "SKIP: queue lock unavailable; the queue is kept; no LLM run"
+  exit 0
+fi
+QUEUE_LOCK_HELD="true"
+
+RECOVERY_BATCH="false"
+MERGE_LOG=""
 if [ -f "$PROCESSING_FILE" ]; then
-  log "Found leftover .processing from previous crash — merging"
+  RECOVERY_BATCH="true"
   if [ -f "$QUEUE_FILE" ]; then
     # The queue is removed only after its rows are in the batch. A batch whose last row has
     # no line break first gets one, so the first queue row does not run into that row and
@@ -562,16 +574,30 @@ if [ -f "$PROCESSING_FILE" ]; then
     # added before a failed append only leaves a blank line, which the parser ignores.
     if { ! ends_without_newline "$PROCESSING_FILE" || printf '\n' >> "$PROCESSING_FILE"; } 2>/dev/null && cat "$QUEUE_FILE" >> "$PROCESSING_FILE" 2>/dev/null; then
       rm -f "$QUEUE_FILE" 2>/dev/null || true
-      log "Merged new queue entries into recovery batch"
+      MERGE_LOG="Merged new queue entries into recovery batch"
     else
-      log "Could not append the queue to the recovery batch — the queue is kept for the next run"
+      MERGE_LOG="Could not append the queue to the recovery batch — the queue is kept for the next run"
     fi
   fi
+elif [ -f "$QUEUE_FILE" ]; then
+  mv "$QUEUE_FILE" "$PROCESSING_FILE" 2>/dev/null || { log "SKIP: failed to claim queue (race condition — another worker got it)"; exit 0; }
+else
+  log "SKIP: no queue file to process"
+  exit 0
+fi
+curation_lock_release "$QUEUE_LOCK_DIR"
+QUEUE_LOCK_HELD="false"
+
+if [ "$RECOVERY_BATCH" = "true" ]; then
+  log "Found leftover .processing from previous crash — merging"
+  if [ -n "$MERGE_LOG" ]; then log "$MERGE_LOG"; fi
   # Cap to prevent unbounded growth
   PROC_OVERFLOW_CAP=200    # truncate when processing file exceeds this many lines
   PROC_OVERFLOW_TARGET=100 # keep only the newest N lines after truncation
-  _PROC_LINES=$(wc -l < "$PROCESSING_FILE" | tr -d ' ')
-  if [ "$_PROC_LINES" -gt "$PROC_OVERFLOW_CAP" ]; then
+  if _PROC_LINES=$(wc -l 2>/dev/null < "$PROCESSING_FILE") \
+      && [[ "$_PROC_LINES" =~ ^[[:blank:]]*[0123456789]+$ ]] \
+      && [ "$_PROC_LINES" -gt "$PROC_OVERFLOW_CAP" ]; then
+    _PROC_LINES=${_PROC_LINES#"${_PROC_LINES%%[![:blank:]]*}"}
     _PROC_TMP="$PROCESSING_FILE.tmp.$$"
     # SEC-2: the batch is the claimed queue, 0600 like the queue itself, and the
     # cold path at session start moves it back to the queue. mv gives it the
@@ -588,11 +614,6 @@ if [ -f "$PROCESSING_FILE" ]; then
       log "Processing overflow: not truncated, its copy could not be written ($_PROC_LINES lines)"
     fi
   fi
-elif [ -f "$QUEUE_FILE" ]; then
-  mv "$QUEUE_FILE" "$PROCESSING_FILE" 2>/dev/null || { log "SKIP: failed to claim queue (race condition — another worker got it)"; exit 0; }
-else
-  log "SKIP: no queue file to process"
-  exit 0
 fi
 
 # Heartbeat so session-start-memory's 300s cold path measures worker liveness, not turn age.

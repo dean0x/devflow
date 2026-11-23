@@ -66,11 +66,13 @@ describe('the memory worker writes one Run line per run', () => {
      * signal ends, each holding the exit trap. `prelude` and `transform` shape the harness;
      * the lines it prints say, per case, whether the lock is still held.
      */
-    function runHarness(prelude: string[], transform: (trap: string) => string): { status: number | null; stderr: string; lines: string[]; lockLeft: boolean } {
+    function runHarness(prelude: string[], transform: (trap: string) => string): { status: number | null; stderr: string; lines: string[]; locksLeft: string[] } {
       const root = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-trap-'));
       try {
         const lock = path.join(root, 'lock');
+        const queueLock = path.join(root, 'queue.lock');
         fs.mkdirSync(lock);
+        fs.mkdirSync(queueLock);
         const harness = path.join(root, 'harness.sh');
         // Each subshell sets the exit trap itself, as a forked subshell holds it before bash
         // resets it, then sends itself SIGTERM through a child (`sh -c 'kill -TERM $PPID'`).
@@ -85,10 +87,12 @@ describe('the memory worker writes one Run line per run', () => {
           'log() { echo "LOG $*"; }',
           'RUN_CLI="unknown"; RUN_ARGV="none"; RUN_RESULT="skip"; RUN_DENIALS="n/a"; RUN_REMOVED="none"; RUN_FLOOR=""',
           'RESULT_FILE=""',
+          'source "$1"',
           `LOCK_DIR='${lock}'`,
-          'LOCK_HELD="true"',
+          `QUEUE_LOCK_DIR='${queueLock}'`,
+          'LOCK_HELD="true"; QUEUE_LOCK_HELD="true"',
           transform(trapCode()),
-          'state() { if [ -d "$LOCK_DIR" ]; then echo "$1: lock held"; else echo "$1: lock released"; fi; }',
+          'state() { if [ -d "$LOCK_DIR" ] && [ -d "$QUEUE_LOCK_DIR" ]; then echo "$1: locks held"; else echo "$1: a lock released"; fi; }',
           '( trap finish_run EXIT; exit 0 )',
           'state "a plain subshell"',
           `( ${subshell} ) &`,
@@ -102,12 +106,12 @@ describe('the memory worker writes one Run line per run', () => {
           '',
         ].join('\n'));
 
-        const result = spawnSync('bash', [harness], { encoding: 'utf-8', timeout: 60000 });
+        const result = spawnSync('bash', [harness, path.join(path.dirname(WORKER), 'curation-lock')], { encoding: 'utf-8', timeout: 60000 });
         return {
           status: result.status,
           stderr: result.stderr,
           lines: result.stdout.trim().split('\n'),
-          lockLeft: fs.existsSync(lock),
+          locksLeft: [lock, queueLock].filter(file => fs.existsSync(file)),
         };
       } finally {
         fs.rmSync(root, { recursive: true, force: true });
@@ -115,17 +119,17 @@ describe('the memory worker writes one Run line per run', () => {
     }
 
     const EXPECTED = [
-      'a plain subshell: lock held',
-      'a background subshell that a signal ends: lock held',
-      'a background subshell in its own group that a signal ends: lock held',
+      'a plain subshell: locks held',
+      'a background subshell that a signal ends: locks held',
+      'a background subshell in its own group that a signal ends: locks held',
       'LOG Run: cli=unknown argv=none result=skip denials=n/a removed=none',
     ];
 
-    it('writes the Run line and releases the lock only in the worker, not in a subshell that a signal ends', () => {
+    it('writes the Run line and releases the locks only in the worker, not in a subshell that a signal ends', () => {
       const run = runHarness([], trap => trap);
       expect(run.status, `the harness ended cleanly: ${run.stderr}`).toBe(0);
       expect(run.lines).toEqual(EXPECTED);
-      expect(run.lockLeft, 'the worker itself released the lock when it ended').toBe(false);
+      expect(run.locksLeft, 'the worker itself released both locks when it ended').toEqual([]);
     });
 
     it('keeps that rule when the read of the real PID fails: a subshell writes no line, the worker writes one', () => {
@@ -138,7 +142,7 @@ describe('the memory worker writes one Run line per run', () => {
       });
       expect(run.status, `the harness ended cleanly: ${run.stderr}`).toBe(0);
       expect(run.lines).toEqual(EXPECTED);
-      expect(run.lockLeft, 'the worker itself released the lock when it ended').toBe(false);
+      expect(run.locksLeft, 'the worker itself released both locks when it ended').toEqual([]);
     });
   });
 
