@@ -284,7 +284,10 @@ exec /usr/bin/tail "$@"
     expect(prompt).toMatch(/only (?:the )?## Now and ## Progress/i);
     expect(prompt).toContain('6000 characters');
     expect(prompt).toContain('8192 bytes');
-    expect(prompt).not.toMatch(/## (Decisions|Context|Session Log)|120 lines/);
+    expect(prompt).not.toMatch(/## (Decisions|Context|Session Log|Done)|120 lines/);
+    expect(prompt).toContain('Never upgrade a status without evidence AND never restate a stale claim past contradicting evidence');
+    expect(prompt).toContain('Even a merged PR is NOT done until it is on main AND shipped to production.');
+    expect(prompt).toContain('testing, code review, resolving review feedback, release prep, and publishing are still Remaining work');
   }, budget);
 
   it.each([
@@ -335,6 +338,16 @@ exec /usr/bin/tail "$@"
     runQueue(ONE_SESSION);
     expect(fs.readFileSync(note, 'utf8')).toBe(stamp + exactBody);
     expect(fs.statSync(note).mode & 0o777).toBe(0o600);
+  }, budget);
+
+  it('swaps a valid note when the model also reports a denial', () => {
+    fs.writeFileSync(note, OLD_NOTE);
+    writeClaudeStub(`${PLACEHOLDER}\n${BODY}`, 'printf \'%s\\n\' \'{"permission_denials":[{}]}\'');
+    const { log } = runWorker(ONE_SESSION);
+    expect(fs.readFileSync(note, 'utf8')).toContain(BODY);
+    expect(fs.existsSync(path.join(memoryDir, BATCH))).toBe(false);
+    expect(fs.existsSync(path.join(memoryDir, '.worker-denied-once'))).toBe(false);
+    expect(log).toMatch(/Run:.* result=updated denials=1 /);
   }, budget);
 
   it('drops only the twice-refused batch and keeps the note notice', () => {
